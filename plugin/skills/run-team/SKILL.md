@@ -1536,8 +1536,8 @@ for a token on a ticket's line — never a hand edit.
 | Wake | Record, then tick |
 |---|---|
 | Implementer report | `verify-sha.sh`; `ledger.mjs settle impl-<N>=PR#<M>`, or `=bailed` and relabel by cause (**Implementer bails before implementing**, below) |
-| Review workflow notification / `review-pr-<n>` report | write `<scratch>/review-<pr>.json`; `reviewed=<head>:<survived>/<refuted>/<unverified>` on the PR's row (**Reviewers**) |
-| Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; for a fix-applier that answered a review — not one that cleared a conflict hold, which has no review file — `~/.fleet/bin/fleet-run dispositions-check.mjs --member <that member> --scratch <scratch>`, from the checkout root: it judges `<scratch>/dispositions-<M>.json` against `<scratch>/review-<M>.json`, writes `dispositions-ok=`, `dispositions-mismatch=`, `dispositions-escalate=` or `dispositions-unchecked=<member>:<head>` onto the PR's row itself, and exits 1 on a mismatch, an escalation or an unchecked, naming each violating or escalated entry's bucket and index, a violation its rule too, and each entry whose filed issue `gh` could not read — **Then dispatch a fix-applier** says what a mismatch asks of you, the gate paragraph below what an escalation or an unchecked does; copy the refutations it reversed — the record's `refuted` entries — to `ruled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
+| Review workflow notification / `review-pr-<n>` report | the result file is `<scratch>/pr<pr>/<run>/review.json`, `<run>` the review's own `run-XXXXXXXX` run root; `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` on the PR's row (**Reviewers**) |
+| Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; for a fix-applier that answered a review — not one that cleared a conflict hold, which has no review file — `~/.fleet/bin/fleet-run dispositions-check.mjs --member <that member> --scratch <scratch>`, from the checkout root: it judges that member's own record `<scratch>/dispositions-<member>.json` against the review file the PR's latest `reviewed=` names, `<scratch>/pr<M>/<run>/review.json`, writes `dispositions-ok=`, `dispositions-mismatch=`, `dispositions-escalate=` or `dispositions-unchecked=<member>:<run>` onto the PR's row itself, and exits 1 on a mismatch, an escalation or an unchecked, naming each violating or escalated entry's bucket and index, a violation its rule too, and each entry whose filed issue `gh` could not read — **Then dispatch a fix-applier** says what a mismatch asks of you, the gate paragraph below what an escalation or an unchecked does; copy the refutations it reversed — the record's `refuted` entries — to `ruled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled` as reported, even when its read-back lacks `ready-to-merge` — the tick's `DISPATCH finisher PR#<M>` catches that next. A **repair** finisher's (one sent on that line) read-back lacking it also gets `gh pr comment <M>` with both finishers' read-backs: the one-shot escalation, where halts comment. `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Finisher report (halted) | `ledger.mjs settle finisher-pr-<M>=halted:<cause>`; `gh pr comment <M>` with the finisher's halt report, cause and evidence; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line; then the per-cause rule (**Resolving a finisher halt**, below) |
 | Finisher report (failed / killed) | `ledger.mjs settle finisher-pr-<M>=failed` for a finisher that crashed or gave up, `=killed` for one that was killed; no label, and the tick prints no dispatch for it. The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, below) |
@@ -2109,7 +2109,7 @@ report recovery, never the exit code alone.
 The tick names every PR owed one — `DISPATCH review PR#<M>`, oldest first —
 and each gets one review, once per PR:
 
-a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the five args `pr`, `branch`, `worktree`, `testCmd` and `scratch` — it loads `review-eval.mjs` through the Resolver (`~/.fleet/bin/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file and reports; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call. **`scratch` is the scratch root itself, never the review side's `<scratch>/pr<N>` partition:** the review creates `pr<N>/` under it, so a `pr<N>` passed in nests every run root at `pr<N>/pr<N>/`, and the review refuses a `scratch` whose last component is `pr` plus digits before dispatching anything.
+a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the five args `pr`, `branch`, `worktree`, `testCmd` and `scratch` — it loads `review-eval.mjs` through the Resolver (`~/.fleet/bin/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file into the review's own run root and reports its path and `reviewed=` token; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call. **`scratch` is the scratch root itself, never the review side's `<scratch>/pr<N>` partition:** the review creates `pr<N>/` under it, so a `pr<N>` passed in nests every run root at `pr<N>/pr<N>/`, and the review refuses a `scratch` whose last component is `pr` plus digits before dispatching anything.
 
 Write the `review=` token with `ledger.mjs row`, which **replaces the whole
 line**, so carry every other field. The tick counts in-flight reviews off the
@@ -2169,13 +2169,19 @@ slots a review does not hold still serve fix-appliers.
 
 It returns `{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts, snapshot, survived, refuted, unverified}` —
 the **digest** first, then the snapshot and the findings — and it lands as
-one artefact, `<scratch>/review-<pr>.json`, holding that bare object: the
-`review-pr-<pr#>` runner writes it and reports the digest and the path.
+one artefact, `<scratch>/pr<pr>/<run>/review.json`, holding that bare object.
+`<run>` is the review's own `run-XXXXXXXX` run root, the one its snapshot sits
+in, so a second review of the PR — at the same head or another — writes a file
+of its own and never replaces the first. The `review-pr-<pr#>` runner writes it
+and reports the digest, the path and the `reviewed=` token naming that run.
 
 **You read the digest; the findings are the fix-applier's.**
-`jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/review-<pr>.json`
-is the whole of your read, and it is what you record: `reviewed=<head>:<survived>/<refuted>/<unverified>`,
-off `head` and `counts`, on the PR's row. Findings never enter your context —
+`jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/pr<pr>/<run>/review.json`
+is the whole of your read, and it is what you record: `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`,
+off `head`, `counts` and the run root's name — the runner's `ledger` field — on
+the PR's row. Every later path to the review is built from that token, before a
+restart or after one: `<scratch>/pr<pr>/<run>/review.json`, `<run>` off the PR's
+latest `reviewed=`. Findings never enter your context —
 a result runs 26-61 KB, 7-15k tokens that used to land in yours and then again,
 up to ~10k characters, in every fix-applier prompt you wrote. The fix-applier
 reads every one off the file and makes every ruling on them
@@ -2258,8 +2264,8 @@ named member per PR, `fix-pr-<pr#>` (the next suffix when that name is already
 on record), never the PR's
 implementer, recorded with `ledger.mjs dispatch <pr#> fix-pr-<pr#>` before the
 call. Its prompt carries the PR number, the worktree abs path, the PR's branch,
-the same `testCmd` you passed the review, and the **path** `<scratch>/review-<pr>.json`
-— never the findings. The fix-applier owns every per-PR ruling you once made
+the same `testCmd` you passed the review, and the **path** `<scratch>/pr<pr>/<run>/review.json`,
+`<run>` off the PR's latest `reviewed=` — never the findings. The fix-applier owns every per-PR ruling you once made
 before dispatch: both mutual-exclusion scans, the suggested-fix re-derivation,
 `refuted=false` ≠ apply, per-site measurement for a sibling-site extension, and
 `testEnvironment`/`cwdAudit` before any result of the shared test run. It
@@ -2293,17 +2299,17 @@ bot refuses it `head-moved-after-label-#<M>`: a fresh finisher, per **Failure
 handling**.
 
 **A `DISPATCH fix-pr PR#<M>` on a dispositions mismatch** — the PR's row carries
-`dispositions-mismatch=<member>:<head>` for its latest review, and no later
+`dispositions-mismatch=<member>:<run>` for its latest review's run, and no later
 fix-applier has landed — is one automatic retry, a review fix-applier named the
 next suffix (`fix-pr-<M>-b`) and dispatched like the first. Its prompt is the
-first one's, with two paths and a list copied in: the review file
-`<scratch>/review-<M>.json`, the disposition record `<scratch>/dispositions-<M>.json`
-it rewrites, and the check's violation list **verbatim** — the lines
+first one's, with three paths and a list copied in: the review file
+`<scratch>/pr<M>/<run>/review.json`, the mismatched member's record `<scratch>/dispositions-<member>.json`
+it starts from, its own record `<scratch>/dispositions-<its own name>.json` it writes, and the check's violation list **verbatim** — the lines
 `dispositions-check.mjs` printed, each naming a bucket, an index and a rule;
-re-run the check for the mismatched member to reprint them. It rewrites the
+re-run the check for the mismatched member to reprint them. It writes its own
 record, and when it reports you run the check for it exactly as for the first
 one. `ok` ends it. A second failure on the same review is written as
-`dispositions-escalate=fix-pr-<M>-b:<head>` in place of a mismatch: the tick
+`dispositions-escalate=fix-pr-<M>-b:<run>` in place of a mismatch: the tick
 prints no `DISPATCH fix-pr` for it, `dispatch` refuses the finisher naming
 `dispositions escalate`, and you post the check's output with `gh pr comment <M>`
 and flag the PR for a human. A new review of the PR counts again from none.
@@ -2378,7 +2384,7 @@ all.
 > review already ran — and steps 4 and 6: the controller owns the CI wait and
 > dispatches the finisher.
 >
-> **The review's result is `<scratch>/review-<pr>.json`** — the digest first
+> **The review's result is `<scratch>/pr<pr>/<run>/review.json`** — the digest first
 > (`jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}'`),
 > then every finding (`jq '.survived'`, `jq '.unverified'`, `jq '.refuted'`).
 > Read it through `review-and-fix.md`'s **The review result file**, which holds
@@ -2583,10 +2589,13 @@ all.
 > that was two commits stale, and a finisher dispatched on either would have
 > halted on a diverged head.
 >
-> **Before you report, write every ruling to `<scratch>/dispositions-<pr>.json`**,
-> beside the review file — the record the controller checks with
+> **Before you report, write every ruling to `<scratch>/dispositions-<your name>.json`**,
+> `<your name>` the `fix-pr-<pr>[-x]` you were dispatched as — the record the controller checks with
 > `dispositions-check.mjs` before it dispatches any finisher. It is
-> `{"head": "<the review file's head>", "entries": [ … ]}`: one entry per
+> `{"head": "<the review file's head>", "run": "<the run root's name in the review path>", "entries": [ … ]}`
+> — `run` the `<run>` of the review path above, which the check holds against the
+> review the PR's latest `reviewed=` names: a record written against an earlier
+> review, a same-head one included, is a mismatch. One entry per
 > `survived` finding and per `unverified` finding, plus one per `refuted`
 > finding you reverse. Each entry carries `bucket`
 > (`survived|unverified|refuted`), `index` (its position in that bucket of the
@@ -2658,14 +2667,15 @@ and will act on it. Relay everything — reversals too — then dispatch.
 
 **That `dispatch` refuses a finisher — exit 2, nothing written — on a PR whose
 latest `reviewed=` counts a survived or unverified finding, unless the
-dispositions verdict answering that review's head is `ok`**: among the
-`dispositions-*=fix-pr-<M>[-x]:<head>` tokens whose head matches it, the one
-from the highest-suffixed fix-applier. A PR whose latest review counts
+dispositions verdict answering that review's run is `ok`**: among the
+`dispositions-*=fix-pr-<M>[-x]:<run>` tokens naming its run, the one
+from the highest-suffixed fix-applier — so a second review at the same head is
+answered by none of the first one's verdicts. A PR whose latest review counts
 `0/<n>/0` is not gated. One counting `0/<n>/<u>` with `<u>` above zero is
 gated like survivors, and the tick prints `DISPATCH fix-pr PR#<M>` for it: that
 fix-applier's `no-op` and its `ok` verdict are what open the finisher. The
 refusal names its cause. `dispositions
-unchecked` — no verdict answers that head: run `dispositions-check.mjs` for
+unchecked` — no verdict answers that review: run `dispositions-check.mjs` for
 the fix-applier that answered the review, as the Fix-applier report edge
 states, then dispatch again. It names a `dispositions-unchecked=` verdict too —
 no rule broke, but the check could not read where a deferral was filed, `gh`
@@ -2681,15 +2691,14 @@ deferred `remedy-outside-diff`, or a second mismatch was drawn on one review, an
 only a human can rule on either. Post the check's output, which names each
 escalated finding or violating entry, with `gh pr comment <M>`, and flag the PR
 for a human; re-running the check reprints it. Dispatch no fix-applier and no
-finisher for that review's head, and expect no `fix-due` row for it; a new
+finisher for that review, and expect no `fix-due` row for it; a new
 review of the PR starts the check again. **On any PR with a
 returned review, `0/<n>/0` included, it refuses too while a fix-applier on the
 PR is still live, verdict or not** —
 `fix-pr-<M>[-x] still live`: settle it, run the check for it, then dispatch
-again. That is what keeps a re-review at the same head from being answered by
-the earlier round's verdict while the fix-applier answering the new round is
-still working; once its check has run, its verdict, from the higher suffix, is
-the current one.
+again. A re-review at the same head is a run of its own, so the earlier
+round's verdict never answers it; once the check has run for the fix-applier
+answering the new round, its verdict is the current one.
 
 **It refuses a finisher, too, while the PR sits on a conflict hold no
 fix-applier has cleared** — the same per-PR fold the tick prints `DISPATCH
@@ -3128,8 +3137,12 @@ guaranteed the way skill availability is. Tell it to check every added
 assertion against the tree, including comments in files the diff does not
 touch, and to read each corrected sentence literally, clause by clause. It then
 does the fix-applier's job too:
-apply, defer, file, push, report, exit. On its report, record
-`reviewed=<head>:0/<refuted>/<deferred>` against the head it pushed — it applied
+apply, defer, file, push, report, exit — and before it reports, it writes its
+findings as a review result file in a run root of its own, made with
+`mktemp -d "<scratch>/pr<pr>/run-XXXXXXXX"`, in the shape `review-and-fix.md`'s
+**The review result file** describes, and reports that file's path. On its
+report, record `reviewed=<head>:0/<refuted>/<deferred>:<run>`, `<run>` that run
+root's name, against the head it pushed — it applied
 its own survivors, so the zero is what tells the tick no fix-applier is owed for
 them; a nonzero `<deferred>` is still fix-due, as any review's unverified band is —
 and it reaches a finisher through the same gate as any other PR.
@@ -3874,8 +3887,9 @@ any other, never a section of its own.
 A PR's review is not a member, so it carries its own pair of row tokens,
 written with `row` (**Reviewers**): `review=wf:<runId>` |
 `review=member:review-pr-<n>` | `review=fallback:review-pr-<n>[-b]` at launch,
-settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>`
-when the result lands. A row with `review=` and no `reviewed=` is a review in
+settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`
+when the result lands, `<run>` the review's `run-XXXXXXXX` run root under
+`<scratch>/pr<n>/`, which holds its `review.json`. A row with `review=` and no `reviewed=` is a review in
 flight, and the tick counts it against the reviewer cap unless gh reports its PR
 MERGED or CLOSED. `ci=<run-id>:<attempt>:<conclusion>`
 and `held-behind:#<lower>` are row tokens the same way (Phase 3), and so is

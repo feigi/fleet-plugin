@@ -195,9 +195,12 @@ export function parseRow(row) {
       // The head that review actually read — the cockpit's own copy
       // of fleet-tick.mjs's `reviewedHead`, needed below to tell a past-pin
       // halt already answered by this review apart from one still owed a
-      // fresh one.
+      // fresh one. A token fleet-tick.mjs refuses — one that names no review
+      // run — earns the row the same `ledger-error` flag any malformed token
+      // does, rather than a row reviewed at no head.
       const m = REVIEWED.exec(tok);
       if (m) reviewedHead = m[1].toLowerCase();
+      else malformed = true;
       for (const r of runners) settled.add(r);
       runners = [];
     }

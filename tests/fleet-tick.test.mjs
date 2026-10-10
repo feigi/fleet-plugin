@@ -540,8 +540,8 @@ test("deriveRun: live reviewer units are in-flight reviews plus unsettled fix-ap
   const r = run({
     rows: [
       "#10 impl-10=PR#20 → PR#20 · review=wf:run1",
-      "#11 impl-11=PR#21 → PR#21 · review=wf:run2 reviewed=abc1234:2/1/0 · fix-pr-21",
-      "#12 impl-12=PR#22 → PR#22 · review=member:review-pr-22 reviewed=abc1234:0/0/0",
+      "#11 impl-11=PR#21 → PR#21 · review=wf:run2 reviewed=abc1234:2/1/0:run-abc1234r · fix-pr-21",
+      "#12 impl-12=PR#22 → PR#22 · review=member:review-pr-22 reviewed=abc1234:0/0/0:run-abc1234r",
       "#13 impl-13=PR#23 → PR#23 · review=wf:run3=failed",
       "#14 impl-14=PR#24 → PR#24 · review=wf:run4=failed review=fallback:review-pr-24",
     ],
@@ -555,7 +555,7 @@ test("deriveRun: live names every unsettled member and each in-flight review by 
   const r = run({
     rows: [
       "#10 impl-10=PR#20 → PR#20 · review=wf:run1",
-      "#11 impl-11=PR#21 → PR#21 · review=wf:run2 reviewed=abc1234:2/1/0 · fix-pr-21",
+      "#11 impl-11=PR#21 → PR#21 · review=wf:run2 reviewed=abc1234:2/1/0:run-abc1234r · fix-pr-21",
       "#13 impl-13=PR#23 → PR#23 · review=wf:run3=failed",
       "#15 impl-15",
     ],
@@ -596,7 +596,7 @@ test("deriveRun: a review in flight on an OPEN PR is live whatever the finished 
 });
 
 test("deriveRun: a finished PR's returned review and settled members read as before", () => {
-  const rows = [...ZOMBIE_ROWS, "#40 impl-40=PR#50 → PR#50 · review=member:review-pr-50 reviewed=abc1234:0/0/0"];
+  const rows = [...ZOMBIE_ROWS, "#40 impl-40=PR#50 → PR#50 · review=member:review-pr-50 reviewed=abc1234:0/0/0:run-abc1234r"];
   const r = run({ rows }, [], undefined, new Set([20, 21, 22, 50]));
   assert.deepEqual([r.reviewsLive, r.reviewsOffList, r.live], [0, [20, 21, 22], []]);
   assert.deepEqual(r.reviewed.map((x) => x.pr), [50], "the returned review is still on record");
@@ -605,15 +605,15 @@ test("deriveRun: a finished PR's returned review and settled members read as bef
 test("deriveRun: fix-pr is due on a returned review with survived or unverified findings and no fix-applier since", () => {
   const r = run({
     rows: [
-      "#10 impl-10=PR#20 → PR#20 · review=wf:a reviewed=abc1234:2/0/0",
-      "#11 impl-11=PR#21 → PR#21 · review=wf:b reviewed=abc1234:0/3/1",
-      "#12 impl-12=PR#22 → PR#22 · review=wf:c reviewed=abc1234:1/0/0 · fix-pr-22=applied:def5678",
+      "#10 impl-10=PR#20 → PR#20 · review=wf:a reviewed=abc1234:2/0/0:run-abc1234r",
+      "#11 impl-11=PR#21 → PR#21 · review=wf:b reviewed=abc1234:0/3/1:run-abc1234r",
+      "#12 impl-12=PR#22 → PR#22 · review=wf:c reviewed=abc1234:1/0/0:run-abc1234r · fix-pr-22=applied:def5678",
       // Re-reviewed after its fix, and the second review found more.
-      "#13 impl-13=PR#23 → PR#23 · review=wf:d reviewed=abc1234:1/0/0 · fix-pr-23=applied:def5678 review=wf:e reviewed=def5678:1/0/0",
+      "#13 impl-13=PR#23 → PR#23 · review=wf:d reviewed=abc1234:1/0/0:run-abc1234r · fix-pr-23=applied:def5678 review=wf:e reviewed=def5678:1/0/0:run-def5678r",
       // A closed PR is nobody's work.
-      "#14 impl-14=PR#24 → PR#24 · review=wf:f reviewed=abc1234:4/0/0",
+      "#14 impl-14=PR#24 → PR#24 · review=wf:f reviewed=abc1234:4/0/0:run-abc1234r",
       // Everything refuted: nothing for a fix-applier to rule on.
-      "#15 impl-15=PR#25 → PR#25 · review=wf:g reviewed=abc1234:0/3/0",
+      "#15 impl-15=PR#25 → PR#25 · review=wf:g reviewed=abc1234:0/3/0:run-abc1234r",
     ],
     dispatched: ["fix-pr-22=applied:def5678", "fix-pr-23=applied:def5678"],
   }, [pr(20), pr(21), pr(22), pr(23), pr(25)]);
@@ -625,12 +625,12 @@ test("deriveRun: fix-pr is due on a returned review with survived or unverified 
 // so a review counting only unverified findings must be fix-due, or its PR
 // strands with neither a fix-applier nor a finisher ever named.
 test("deriveRun: a review counting only unverified findings is fix-due until a review fix-applier lands", () => {
-  const at = (tail) => run({ rows: [`#20 impl-20=PR#21 → PR#21 · review=wf:a reviewed=abc1234:0/2/6${tail}`] }, [pr(21)]);
+  const at = (tail) => run({ rows: [`#20 impl-20=PR#21 → PR#21 · review=wf:a reviewed=abc1234:0/2/6:run-abc1234r${tail}`] }, [pr(21)]);
   const due = at("");
   assert.deepEqual(due.fixDue, [21]);
   assert.equal(row(state({ fixDue: due.fixDue }), "reviewers").action, "DISPATCH fix-pr PR#21");
   assert.deepEqual(at(" · fix-pr-21").fixDue, [], "a live fix-applier is not re-offered");
-  assert.deepEqual(at(" · fix-pr-21=no-op · dispositions-ok=fix-pr-21:abc1234").fixDue, [], "a landed no-op answers it");
+  assert.deepEqual(at(" · fix-pr-21=no-op · dispositions-ok=fix-pr-21:run-abc1234r").fixDue, [], "a landed no-op answers it");
   assert.deepEqual(at(" · fix-pr-21=failed").fixDue, [21], "a dead one leaves it due for a replacement");
 });
 
@@ -652,7 +652,7 @@ test("deriveRun: review is due on open PRs that close an issue and carry no revi
 test("deriveRun: a PR row keyed by the PR's own number is read as that PR's", () => {
   // A PR this run's implementers did not open: `dispatch 350 fix-pr-350` keys
   // its row `#350`, the same fallback ledger.mjs's memberRowIndex() takes.
-  const r = run({ rows: ["#350 review=wf:x reviewed=abc1234:1/0/0"] }, [pr(350)]);
+  const r = run({ rows: ["#350 review=wf:x reviewed=abc1234:1/0/0:run-abc1234r"] }, [pr(350)]);
   assert.deepEqual(r.fixDue, [350]);
   assert.deepEqual(r.reviewDue, []);
 });
@@ -662,11 +662,11 @@ test("deriveRun: a PR row keyed by the PR's own number is read as that PR's", ()
 // review-due for good, so marking the review failed cannot re-queue it —
 // the halt itself does, until a new review is running or has returned.
 test("deriveRun: a finisher halted past-pin re-queues the review while the head is past the reviewed one", () => {
-  const row = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0 · finisher-pr-40=halted:past-pin";
+  const row = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-40=halted:past-pin";
   assert.deepEqual(run({ rows: [row] }, [pr(40, [], [10], HEAD_B)]).reviewDue, [40]);
   // Settled only in `## Dispatched`, a bare copy on the row: settled anywhere is settled.
   assert.deepEqual(run({
-    rows: ["#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0 · finisher-pr-40"],
+    rows: ["#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-40"],
     dispatched: ["finisher-pr-40=halted:past-pin"],
   }, [pr(40, [], [10], HEAD_B)]).reviewDue, [40]);
   // A re-review that died before returning leaves it owed.
@@ -674,7 +674,7 @@ test("deriveRun: a finisher halted past-pin re-queues the review while the head 
 });
 
 test("deriveRun: a head past reviewed= with no past-pin halt stays not due — a fix-applier's push is finisher duty 2's", () => {
-  const base = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:1/0/0 · fix-pr-40=applied:def5678";
+  const base = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:1/0/0:run-abc1234r · fix-pr-40=applied:def5678";
   for (const row of [
     base,
     `${base} · finisher-pr-40=labelled`,
@@ -700,14 +700,14 @@ test("deriveRun: a head past reviewed= with no past-pin halt stays not due — a
 });
 
 test("deriveRun: a past-pin halt is answered once the head is the reviewed one, or a review is running or returned after it", () => {
-  const halted = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0 · finisher-pr-40=halted:past-pin";
+  const halted = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-40=halted:past-pin";
   const not = (row, head) => assert.deepEqual(run({ rows: [row] }, [pr(40, [], [10], head)]).reviewDue, [], `${row} @ ${head}`);
   not(halted, HEAD_A); // the reviewed head IS the PR head — nothing unread
   not(halted, HEAD_A.toUpperCase());
   not(`${halted} review=wf:b`, HEAD_B); // the re-review is in flight
-  not(`${halted} review=wf:b reviewed=def5678:0/0/0`, HEAD_B); // and returned
+  not(`${halted} review=wf:b reviewed=def5678:0/0/0:run-def5678r`, HEAD_B); // and returned
   // A fix-applier's push after that re-review is duty 2's again, not a second re-review.
-  not(`${halted} review=wf:b reviewed=def5678:1/0/0 · fix-pr-40=applied:0123456`, "0123456" + "0".repeat(33));
+  not(`${halted} review=wf:b reviewed=def5678:1/0/0:run-def5678r · fix-pr-40=applied:0123456`, "0123456" + "0".repeat(33));
   // Signed off, or closing no issue, is no review work whatever the halt says.
   assert.deepEqual(run({ rows: [halted] }, [pr(40, ["ready-to-merge"], [10], HEAD_B), pr(41, [], [], HEAD_B)]).reviewDue, []);
 });
@@ -723,7 +723,7 @@ test("deriveRun: a ticket row settled =PR#M shares PR M's state with M's own row
     assert.equal(r.reviewsLive, 1, `the live review is counted: ${rows}`);
     assert.deepEqual(r.reviewDue, [], `a reviewed PR is not re-offered: ${rows}`);
   }
-  for (const rows of [[ticket, "#724 review=member:review-pr-724 reviewed=abc1234:2/1/0"], ["#724 review=member:review-pr-724 reviewed=abc1234:2/1/0", ticket]]) {
+  for (const rows of [[ticket, "#724 review=member:review-pr-724 reviewed=abc1234:2/1/0:run-abc1234r"], ["#724 review=member:review-pr-724 reviewed=abc1234:2/1/0:run-abc1234r", ticket]]) {
     const r = run({ rows }, prs);
     assert.deepEqual([r.reviewsLive, r.fixDue, r.reviewDue], [0, [724], []], `${rows}`);
     assert.ok(r.claimed.has(658), "the ticket row still reads as claimed");
@@ -734,10 +734,10 @@ test("deriveRun: a ticket row settled =PR#M shares PR M's state with M's own row
 // row's PR — the settled `impl-<N>=PR#<M>` token is, wherever either sits.
 test("deriveRun: a ticket row's review state is its settled impl PR's, whatever PR# its prose mentions", () => {
   const prs = [pr(470, [], [480]), pr(481, [], [490])];
-  const other = "#481 review=wf:b reviewed=abc1234:0/0/0";
+  const other = "#481 review=wf:b reviewed=abc1234:0/0/0:run-abc1234r";
   for (const ticket of [
-    "#480 correction: PR#481 was wrong · impl-480=PR#470 · review=wf:a reviewed=abc1234:1/0/0",
-    "#480 impl-480=PR#470 · review=wf:a reviewed=abc1234:1/0/0 · note: the PR#481 guards",
+    "#480 correction: PR#481 was wrong · impl-480=PR#470 · review=wf:a reviewed=abc1234:1/0/0:run-abc1234r",
+    "#480 impl-480=PR#470 · review=wf:a reviewed=abc1234:1/0/0:run-abc1234r · note: the PR#481 guards",
   ]) {
     for (const rows of [[ticket, other], [other, ticket]]) {
       const r = run({ rows }, prs);
@@ -749,7 +749,7 @@ test("deriveRun: a ticket row's review state is its settled impl PR's, whatever 
 });
 
 test("deriveRun: a live implementer's row is keyed by its ticket, never by a PR# its prose mentions", () => {
-  const r = run({ rows: ["#480 impl-480 · PR#481 closed unmerged · review=wf:a reviewed=abc1234:1/0/0"] }, [pr(481, [], [490])]);
+  const r = run({ rows: ["#480 impl-480 · PR#481 closed unmerged · review=wf:a reviewed=abc1234:1/0/0:run-abc1234r"] }, [pr(481, [], [490])]);
   assert.deepEqual(r.reviewed.map((x) => x.pr), [480]);
   assert.deepEqual(r.fixDue, []);
   assert.deepEqual(r.reviewDue, [481], "PR 481 carries no review of its own");
@@ -758,7 +758,7 @@ test("deriveRun: a live implementer's row is keyed by its ticket, never by a PR#
 // #2331: a finisher can settle `labelled` without ever adding the label. The
 // open-PR list the tick already reads says so; a `label-off=<attempt>` token
 // marks the controller's own deliberate removals, so they never read as a miss.
-const LABELLED = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0 · finisher-pr-40=labelled";
+const LABELLED = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-40=labelled";
 
 test("deriveRun: a labelled finisher on a PR without ready-to-merge is unlabelled, and the tick dispatches a finisher", () => {
   const r = run({ rows: [LABELLED], dispatched: ["finisher-pr-40=labelled"] }, [pr(40, ["minor"], [10])]);
@@ -866,7 +866,7 @@ test("deriveRun: merge holds are held-behind rows whose premise PR is still open
 // #2064: merge-bot's `conflict-hold:#<pr>` — a conflict its local-rebase
 // fallback would not force — feeds the same fix-due list a review's
 // survivors do, and holds the merge until a fix-applier AFTER it settles.
-const HOLD_ROW = (n, tail) => `#${n - 30} impl-${n - 30}=PR#${n} → PR#${n} · reviewed=abc1234:0/2/0 · ${tail}`;
+const HOLD_ROW = (n, tail) => `#${n - 30} impl-${n - 30}=PR#${n} → PR#${n} · reviewed=abc1234:0/2/0:run-abc1234r · ${tail}`;
 
 test("deriveRun: a conflict hold is fix-due until a fix-applier after it lands, whatever settled before it", () => {
   const r = run({
@@ -881,7 +881,7 @@ test("deriveRun: a conflict hold is fix-due until a fix-applier after it lands, 
       // A fix-applier that died leaves the conflict where it was.
       HOLD_ROW(45, "conflict-hold:#45 · fix-pr-45=failed"),
       // A review after the cleared hold leaves the hold cleared.
-      HOLD_ROW(46, "conflict-hold:#46 · fix-pr-46=applied:def5678 · review=wf:x reviewed=def5678:0/1/0"),
+      HOLD_ROW(46, "conflict-hold:#46 · fix-pr-46=applied:def5678 · review=wf:x reviewed=def5678:0/1/0:run-def5678r"),
       // A closed PR is nobody's work.
       HOLD_ROW(47, "conflict-hold:#47"),
     ],
@@ -928,7 +928,7 @@ test("deriveRun: a redundant re-hold on an already-unresolved conflict does not 
 // it rebases and never reads the review file — so its landing clears the hold
 // and leaves a returned review's survivors exactly as unanswered as they were.
 test("deriveRun: a landed conflict fix-applier clears the hold but not the survivors — a review fix-applier follows", () => {
-  const R = (tail) => `#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · ${tail}`;
+  const R = (tail) => `#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0:run-abc1234r · ${tail}`;
   const at = (tail, dispatched = []) => run({ rows: [R(tail)], dispatched }, [pr(21, ["ready-to-merge"])]);
   const held = at("conflict-hold:#21");
   assert.deepEqual([held.fixDue, held.conflictHeld], [[21], [21]]);
@@ -937,7 +937,7 @@ test("deriveRun: a landed conflict fix-applier clears the hold but not the survi
   const landed = at("conflict-hold:#21 · fix-pr-21=applied:def5678");
   assert.deepEqual([landed.fixDue, landed.conflictHeld, landed.mergeHeld], [[21], [], 0], "the survivors are re-offered, the hold is gone");
   // The hold read before the review is the same conflict fix-applier.
-  assert.deepEqual(run({ rows: ["#20 impl-20=PR#21 → PR#21 · conflict-hold:#21 · reviewed=abc1234:2/0/0 · fix-pr-21=no-op"] }, [pr(21)]).fixDue, [21]);
+  assert.deepEqual(run({ rows: ["#20 impl-20=PR#21 → PR#21 · conflict-hold:#21 · reviewed=abc1234:2/0/0:run-abc1234r · fix-pr-21=no-op"] }, [pr(21)]).fixDue, [21]);
   // The review fix-applier that follows answers them.
   assert.deepEqual(at("conflict-hold:#21 · fix-pr-21=applied:def5678 · fix-pr-21-b=applied:0123abc").fixDue, []);
   assert.deepEqual(at("conflict-hold:#21 · fix-pr-21=applied:def5678 · fix-pr-21-b").fixDue, [], "…and is not re-offered while live");
@@ -945,13 +945,13 @@ test("deriveRun: a landed conflict fix-applier clears the hold but not the survi
 });
 
 test("deriveRun: survivors a review fix-applier already answered stay answered through a later hold and its fix", () => {
-  const R = (tail) => `#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · fix-pr-21=applied:def5678 · ${tail}`;
+  const R = (tail) => `#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0:run-abc1234r · fix-pr-21=applied:def5678 · ${tail}`;
   const held = run({ rows: [R("conflict-hold:#21")] }, [pr(21)]);
   assert.deepEqual([held.fixDue, held.conflictHeld], [[21], [21]], "the hold is due on its own");
   const cleared = run({ rows: [R("conflict-hold:#21 · fix-pr-21-b=applied:0123abc")] }, [pr(21)]);
   assert.deepEqual([cleared.fixDue, cleared.conflictHeld], [[], []], "nothing left: the survivors were answered before the hold");
   // A live review fix-applier when the hold lands is not joined by a conflict one.
-  const live = run({ rows: ["#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · fix-pr-21 · conflict-hold:#21"] }, [pr(21)]);
+  const live = run({ rows: ["#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0:run-abc1234r · fix-pr-21 · conflict-hold:#21"] }, [pr(21)]);
   assert.deepEqual([live.fixDue, live.conflictHeld], [[], [21]]);
 });
 
@@ -959,8 +959,8 @@ test("deriveRun: survivors a review fix-applier already answered stay answered t
 // to fix-due on the row that already dispatches fix-appliers, once, until the
 // retry has been checked. A second failure is escalate, and escalate is a hold
 // no fix-applier answers.
-const D = (fix, ...tokens) => `#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · ${[...fix, ...tokens].join(" · ")}`;
-const MISMATCH = "dispositions-mismatch=fix-pr-21:abc1234";
+const D = (fix, ...tokens) => `#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0:run-abc1234r · ${[...fix, ...tokens].join(" · ")}`;
+const MISMATCH = "dispositions-mismatch=fix-pr-21:run-abc1234r";
 const dueAt = (tail, prs = [pr(21)]) => run({ rows: [D(["fix-pr-21=applied:def5678"], ...tail)] }, prs).fixDue;
 
 test("deriveRun: a first dispositions mismatch puts the PR back in fixDue, and the reviewers row prints it", () => {
@@ -968,22 +968,22 @@ test("deriveRun: a first dispositions mismatch puts the PR back in fixDue, and t
   assert.deepEqual(r.fixDue, [21]);
   assert.equal(row(state({ fixDue: r.fixDue }), "reviewers").action, "DISPATCH fix-pr PR#21");
   // The survivors alone were answered: with an ok verdict the PR is not due.
-  assert.deepEqual(dueAt(["dispositions-ok=fix-pr-21:abc1234"]), []);
+  assert.deepEqual(dueAt(["dispositions-ok=fix-pr-21:run-abc1234r"]), []);
   // No other role's row moves on the mismatch.
   const others = (fixDue) => reconcile(state({ fixDue })).filter((x) => x.role !== "reviewers");
   assert.deepEqual(others(r.fixDue), others([]));
 });
 
 test("deriveRun: a mismatch is due whether the review counted survivors or only unverified findings", () => {
-  const unverifiedOnly = run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:0/0/2 · fix-pr-21=applied:def5678 · ${MISMATCH}`] }, [pr(21)]);
+  const unverifiedOnly = run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:0/0/2:run-abc1234r · fix-pr-21=applied:def5678 · ${MISMATCH}`] }, [pr(21)]);
   assert.deepEqual(unverifiedOnly.fixDue, [21]);
 });
 
 test("deriveRun: the retry is not re-offered while live, nor before its own check has run, nor after any verdict of its own", () => {
   assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b"]), [], "live");
   assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b=applied:0123abc"]), [], "settled, its check not yet run: the earlier mismatch is not the retry's answer");
-  assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b=applied:0123abc", "dispositions-ok=fix-pr-21-b:abc1234"]), [], "ok ends it");
-  assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b=applied:0123abc", "dispositions-escalate=fix-pr-21-b:abc1234"]), [], "escalate is never due");
+  assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b=applied:0123abc", "dispositions-ok=fix-pr-21-b:run-abc1234r"]), [], "ok ends it");
+  assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b=applied:0123abc", "dispositions-escalate=fix-pr-21-b:run-abc1234r"]), [], "escalate is never due");
   assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b=failed"]), [21], "a retry that died leaves the mismatch for a replacement");
 });
 
@@ -998,36 +998,60 @@ test("deriveRun: a dispositions verdict on a row that never recorded a review he
   assert.deepEqual(r.fixDue, []);
 });
 
-test("deriveRun: the verdict is read by review head and highest retry, never by position in the row", () => {
-  const escalated = ["dispositions-escalate=fix-pr-21-b:abc1234", MISMATCH];
+test("deriveRun: the verdict is read by review run and highest retry, never by position in the row", () => {
+  const escalated = ["dispositions-escalate=fix-pr-21-b:run-abc1234r", MISMATCH];
   assert.deepEqual(dueAt(["fix-pr-21-b=applied:0123abc", ...escalated]), [], "the -b escalate answers, wherever it sits");
   // A mismatch on an older review does not answer a newer one.
-  const newer = run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · fix-pr-21=applied:def5678 · ${MISMATCH} · review=wf:x reviewed=fedcba9:0/1/0`] }, [pr(21)]);
+  const newer = run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0:run-abc1234r · fix-pr-21=applied:def5678 · ${MISMATCH} · review=wf:x reviewed=fedcba9:0/1/0:run-fedcba9r`] }, [pr(21)]);
   assert.deepEqual(newer.fixDue, [], "the new review has no verdict and no survivors");
-  const rev = run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · fix-pr-21=applied:def5678 · ${MISMATCH} · review=wf:x`] }, [pr(21)]);
+  const rev = run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0:run-abc1234r · fix-pr-21=applied:def5678 · ${MISMATCH} · review=wf:x`] }, [pr(21)]);
   assert.deepEqual(rev.fixDue, [], "a review running on the PR holds it off");
   assert.deepEqual(dueAt([MISMATCH], []), [], "a PR no longer open is nobody's work");
 });
 
+// #2886: two reviews at one head are two runs. Round 1's verdict answered round
+// 1's findings only, so round 2's survivors are owed a fix-applier and its
+// gate reads no verdict yet.
+test("deriveRun: a second review at the same head is answered by none of the first review's verdicts", () => {
+  const round1 = "reviewed=abc1234:2/0/0:run-Round1aa · fix-pr-21=applied:def5678 · dispositions-ok=fix-pr-21:run-Round1aa";
+  const r = run({ rows: [`#20 impl-20=PR#21 → PR#21 · ${round1} · review=wf:x reviewed=abc1234:1/0/0:run-Round2bb`] }, [pr(21)]);
+  assert.deepEqual(r.reviewed, [{ pr: 21, head: "abc1234", run: "run-Round2bb", survived: 1, unverified: 0, dispositions: null, fixLive: [] }]);
+  assert.deepEqual(r.fixDue, [21]);
+  // Control: the same verdict answers the review whose run it names.
+  const once = run({ rows: [`#20 impl-20=PR#21 → PR#21 · ${round1}`] }, [pr(21)]);
+  assert.deepEqual(once.reviewed[0].dispositions, { verdict: "ok", member: "fix-pr-21" });
+  assert.deepEqual(once.fixDue, []);
+});
+
+// A verdict naming a run that is not the eight characters `mktemp` chose is no
+// verdict token at all, not one that merely answers another review: at the
+// gate the two read alike, so only the token's own shape tells them apart.
+test("dispositionsToken: a run that is not run- and eight characters, whole, is not a verdict", () => {
+  assert.deepEqual(dispositionsToken("dispositions-ok=fix-pr-21:run-abc1234r")?.run, "run-abc1234r");
+  for (const bad of ["run-abc1234", "run-abc1234rs", "run-abc1234r:x", "abc1234r", "run-abc1234!"]) {
+    assert.equal(dispositionsToken(`dispositions-ok=fix-pr-21:${bad}`), null, bad);
+  }
+});
+
 test("currentDispositions: escalate parses, and outranks mismatch which outranks ok at one retry suffix", () => {
-  assert.deepEqual(dispositionsToken("dispositions-escalate=fix-pr-21-b:abc1234")?.verdict, "escalate");
-  assert.equal(dispositionsToken("dispositions-escalate=finisher-pr-21:abc1234"), null);
-  const heads = (...s) => currentDispositions(s.map(dispositionsToken), "abc1234");
-  assert.deepEqual(heads("dispositions-ok=fix-pr-21:abc1234", "dispositions-escalate=fix-pr-21:abc1234"), { verdict: "escalate", member: "fix-pr-21" });
-  assert.deepEqual(heads("dispositions-escalate=fix-pr-21:abc1234", "dispositions-mismatch=fix-pr-21:abc1234"), { verdict: "escalate", member: "fix-pr-21" });
-  assert.deepEqual(heads("dispositions-escalate=fix-pr-21:abc1234", "dispositions-ok=fix-pr-21-b:abc1234"), { verdict: "ok", member: "fix-pr-21-b" });
+  assert.deepEqual(dispositionsToken("dispositions-escalate=fix-pr-21-b:run-abc1234r")?.verdict, "escalate");
+  assert.equal(dispositionsToken("dispositions-escalate=finisher-pr-21:run-abc1234r"), null);
+  const heads = (...s) => currentDispositions(s.map(dispositionsToken), "run-abc1234r");
+  assert.deepEqual(heads("dispositions-ok=fix-pr-21:run-abc1234r", "dispositions-escalate=fix-pr-21:run-abc1234r"), { verdict: "escalate", member: "fix-pr-21" });
+  assert.deepEqual(heads("dispositions-escalate=fix-pr-21:run-abc1234r", "dispositions-mismatch=fix-pr-21:run-abc1234r"), { verdict: "escalate", member: "fix-pr-21" });
+  assert.deepEqual(heads("dispositions-escalate=fix-pr-21:run-abc1234r", "dispositions-ok=fix-pr-21-b:run-abc1234r"), { verdict: "ok", member: "fix-pr-21-b" });
 });
 
 test("currentDispositions: unchecked parses, outranks ok and is outranked by mismatch at one retry suffix, and is never fix-due", () => {
-  assert.deepEqual(dispositionsToken("dispositions-unchecked=fix-pr-21-b:abc1234")?.verdict, "unchecked");
-  assert.equal(dispositionsToken("dispositions-unchecked=finisher-pr-21:abc1234"), null);
-  const heads = (...s) => currentDispositions(s.map(dispositionsToken), "abc1234");
-  assert.deepEqual(heads("dispositions-ok=fix-pr-21:abc1234", "dispositions-unchecked=fix-pr-21:abc1234"), { verdict: "unchecked", member: "fix-pr-21" });
-  assert.deepEqual(heads("dispositions-unchecked=fix-pr-21:abc1234", "dispositions-mismatch=fix-pr-21:abc1234"), { verdict: "mismatch", member: "fix-pr-21" });
-  assert.deepEqual(heads("dispositions-unchecked=fix-pr-21:abc1234", "dispositions-ok=fix-pr-21-b:abc1234"), { verdict: "ok", member: "fix-pr-21-b" });
+  assert.deepEqual(dispositionsToken("dispositions-unchecked=fix-pr-21-b:run-abc1234r")?.verdict, "unchecked");
+  assert.equal(dispositionsToken("dispositions-unchecked=finisher-pr-21:run-abc1234r"), null);
+  const heads = (...s) => currentDispositions(s.map(dispositionsToken), "run-abc1234r");
+  assert.deepEqual(heads("dispositions-ok=fix-pr-21:run-abc1234r", "dispositions-unchecked=fix-pr-21:run-abc1234r"), { verdict: "unchecked", member: "fix-pr-21" });
+  assert.deepEqual(heads("dispositions-unchecked=fix-pr-21:run-abc1234r", "dispositions-mismatch=fix-pr-21:run-abc1234r"), { verdict: "mismatch", member: "fix-pr-21" });
+  assert.deepEqual(heads("dispositions-unchecked=fix-pr-21:run-abc1234r", "dispositions-ok=fix-pr-21-b:run-abc1234r"), { verdict: "ok", member: "fix-pr-21-b" });
   // A landed fix-applier whose check could not read the tracker is answered
   // by running the check again, never by another fix-applier.
-  const due = (verdict) => run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · fix-pr-21=applied:abc1234 · dispositions-${verdict}=fix-pr-21:abc1234`] }, [pr(21)]).fixDue;
+  const due = (verdict) => run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0:run-abc1234r · fix-pr-21=applied:abc1234 · dispositions-${verdict}=fix-pr-21:run-abc1234r`] }, [pr(21)]).fixDue;
   assert.deepEqual(due("mismatch"), [21], "control: a mismatch on the same row is fix-due");
   assert.deepEqual(due("unchecked"), []);
 });
@@ -1035,7 +1059,7 @@ test("currentDispositions: unchecked parses, outranks ok and is outranked by mis
 test("deriveRun: a newer review's survivors are not offered beside a live fix-applier, and are due once it settles", () => {
   // `dispatch` would refuse a second live one. Settled, it was dispatched
   // before that review, so it never answered the newer survivors.
-  const rereviewed = (fix) => run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · ${fix} · review=wf:x reviewed=def5678:1/0/0`] }, [pr(21)]).fixDue;
+  const rereviewed = (fix) => run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0:run-abc1234r · ${fix} · review=wf:x reviewed=def5678:1/0/0:run-def5678r`] }, [pr(21)]).fixDue;
   assert.deepEqual(rereviewed("fix-pr-21"), []);
   assert.deepEqual(rereviewed("fix-pr-21=applied:def5678"), [21]);
   assert.deepEqual(rereviewed("fix-pr-21=failed"), [21]);
@@ -1046,7 +1070,7 @@ test("deriveRun: a newer review's survivors are not offered beside a live fix-ap
 // copies wherever it chose, and the in-place settled copy is the one that says
 // where it was dispatched.
 test("deriveRun: duplicate copies of one fix-applier's token land it once — a conflict fix-applier never also answers the survivors", () => {
-  const R = "#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0";
+  const R = "#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0:run-abc1234r";
   const F = "fix-pr-21=applied:def5678";
   const D = [F];
   const due = (rows, dispatched = []) => {
@@ -1112,7 +1136,7 @@ test("deriveRun: a fix-pr token for another PR leaves this PR's hold and survivo
   assert.deepEqual(due([`${K} · fix-pr-21=applied:def5678`, `${H} · fix-pr-21`], ["fix-pr-21=applied:def5678"], [pr(21), pr(22)]),
     [[22], [22]], "…nor keep PR #21's bare copy from landing");
   // Nor does a foreign one answer a returned review's survivors.
-  assert.deepEqual(due(["#20 impl-20=PR#21 · reviewed=abc1234:2/0/0 · fix-pr-99=applied:def5678"]), [[21], []]);
+  assert.deepEqual(due(["#20 impl-20=PR#21 · reviewed=abc1234:2/0/0:run-abc1234r · fix-pr-99=applied:def5678"]), [[21], []]);
   // Must accept: the PR's own fix-applier, live and landed.
   assert.deepEqual(due([`${H} · fix-pr-21`]), [[], [21]], "own live: not re-offered, still held");
   assert.deepEqual(due([`${H} · fix-pr-21=applied:def5678`]), [[], []], "own landed: the hold is cleared");
@@ -1122,7 +1146,7 @@ test("deriveRun: a fix-pr token for another PR leaves this PR's hold and survivo
   // whose PR is its `PR#` mention, is the PR's own: it still says where its
   // member landed, so a stale bare copy read first does not land it instead.
   assert.deepEqual(
-    due(["#21 fix-pr-21", "#20 impl-20=PR#21 · reviewed=abc1234:2/0/0 · conflict-hold:#21 · fix-pr-21=applied:def5678"],
+    due(["#21 fix-pr-21", "#20 impl-20=PR#21 · reviewed=abc1234:2/0/0:run-abc1234r · conflict-hold:#21 · fix-pr-21=applied:def5678"],
       ["fix-pr-21=applied:def5678"]),
     [[21], []], "own in-place copy on the ticket row: it cleared the hold and answered no survivor");
 });
@@ -1143,7 +1167,7 @@ test("deriveRun: a settled stray of a PR-bound member on another PR's row does n
     assert.deepEqual([due, n], [[], 1], `fix-pr-21 is still working #21: ${JSON.stringify(rows)}`);
   }
   // The same reading through `reviewed.fixLive`, which gates the finisher.
-  const reviewed = "#20 impl-20=PR#21 · reviewed=abc1234:0/0/0 · fix-pr-21";
+  const reviewed = "#20 impl-20=PR#21 · reviewed=abc1234:0/0/0:run-abc1234r · fix-pr-21";
   assert.deepEqual(seen([stray, reviewed])[2], ["fix-pr-21"]);
   // Must accept: the member's real settle — in `## Dispatched` or on its own
   // PR's row — still settles it, and a stray's own PR is unaffected.
@@ -1155,19 +1179,19 @@ test("deriveRun: a settled stray of a PR-bound member on another PR's row does n
   // A finisher's `halted:past-pin` read follows the same rule: a settled stray
   // on PR #99's row must not read PR #21's live finisher as halted past-pin,
   // wherever the rows sit.
-  const fin = "#20 impl-20=PR#21 · reviewed=abc1234:0/0/0 · finisher-pr-21";
+  const fin = "#20 impl-20=PR#21 · reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-21";
   const finStray = "#98 impl-98=PR#99 · finisher-pr-21=halted:past-pin";
   for (const rows of [[fin, finStray], [finStray, fin], [fin]]) {
     assert.deepEqual(run({ rows }, [pr(21), pr(99)]).reviewDue, [99], `live finisher, no halt: ${JSON.stringify(rows)}`);
   }
   assert.deepEqual(
-    run({ rows: ["#20 impl-20=PR#21 · reviewed=abc1234:0/0/0 · finisher-pr-21=halted:past-pin"] }, [pr(21)]).reviewDue,
+    run({ rows: ["#20 impl-20=PR#21 · reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-21=halted:past-pin"] }, [pr(21)]).reviewDue,
     [21], "own-row halted:past-pin still re-offers the review");
 });
 
 test("deriveRun: a conflict hold is read in either spelling and on a PR-keyed row", () => {
   assert.deepEqual(run({ rows: [HOLD_ROW(40, "conflict-hold-#40")] }, [pr(40)]).fixDue, [40]);
-  assert.deepEqual(run({ rows: ["#350 review=wf:x reviewed=abc1234:0/1/0 · conflict-hold:#350"] }, [pr(350)]).fixDue, [350]);
+  assert.deepEqual(run({ rows: ["#350 review=wf:x reviewed=abc1234:0/1/0:run-abc1234r · conflict-hold:#350"] }, [pr(350)]).fixDue, [350]);
   // `held-behind` rows and prose that merely mentions a conflict are not holds.
   const prose = run({ rows: [HOLD_ROW(40, "(conflict vs #38, resolved by rebase-pr-40) merge-conflict-resolved:ef82065a")] }, [pr(40, ["ready-to-merge"])]);
   assert.deepEqual([prose.fixDue, prose.mergeHeld], [[], 0]);
@@ -1183,7 +1207,7 @@ test("deriveRun: a conflict hold's hash is optional and the token is read whole,
 // reads CONFLICTING, with no hold yet and nobody working it, is a hold the
 // controller records.
 const conflicting = (n, labels = []) => pr(n, labels, [n + 1000], HEAD_B, "CONFLICTING");
-const TRACKED = (n, tail = "") => `#${n - 30} impl-${n - 30}=PR#${n} → PR#${n} · reviewed=abc1234:0/0/0${tail ? ` · ${tail}` : ""}`;
+const TRACKED = (n, tail = "") => `#${n - 30} impl-${n - 30}=PR#${n} → PR#${n} · reviewed=abc1234:0/0/0:run-abc1234r${tail ? ` · ${tail}` : ""}`;
 const conflictsOf = (rows, prs, dispatched = []) => {
   const r = run({ rows, dispatched }, prs);
   return [r.conflicts, r.conflictEscalate];
@@ -1251,7 +1275,7 @@ test("deriveRun: CONFLICTING again after two landed conflict fix-appliers escala
   assert.deepEqual(conflictsOf([TRACKED(40, `${twice} · fix-pr-40-c`)], [conflicting(40)], ["fix-pr-40-c"]), [[], []]);
   assert.deepEqual(conflictsOf([TRACKED(40, `${twice} · conflict-hold:#40`)], [conflicting(40)]), [[], []]);
   // A review fix-applier's landing is no conflict fix-applier's.
-  const reviewFix = run({ rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:2/0/0 · fix-pr-40=applied:def5678 · conflict-hold:#40 · fix-pr-40-b=no-op`] }, [conflicting(40)]);
+  const reviewFix = run({ rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:2/0/0:run-abc1234r · fix-pr-40=applied:def5678 · conflict-hold:#40 · fix-pr-40-b=no-op`] }, [conflicting(40)]);
   assert.deepEqual([reviewFix.conflicts, reviewFix.conflictEscalate], [[40], []]);
 });
 
@@ -1395,6 +1419,11 @@ test("deriveRun: a token it cannot read refuses by naming it, never counts it li
     ["an outcome outside the vocabulary", { rows: ["#9 impl-9=merged"] }, /impl-9.*'merged' is not an outcome/],
     ["a malformed ## Dispatched entry", { dispatched: ["impl-9 oops"] }, /## Dispatched entry 'impl-9 oops'/],
     ["a reviewed= with no counts", { rows: ["#9 review=wf:a reviewed=abc1234"] }, /reviewed=abc1234/],
+    ["a reviewed= in the format before it named a run", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0"] }, /'reviewed=abc1234:1\/0\/0' names no review run/],
+    ["a reviewed= whose run is not a run-XXXXXXXX name", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0:/tmp/pr9/run-abc1234r"] }, /is not reviewed=<head>:<survived>\/<refuted>\/<unverified>:<run>/],
+    ["a reviewed= whose run is longer than the eight characters mktemp chose", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0:run-abc1234rs"] }, /is not reviewed=<head>:<survived>\/<refuted>\/<unverified>:<run>/],
+    ["a reviewed= whose run is shorter than the eight characters mktemp chose", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0:run-abc1234"] }, /is not reviewed=<head>:<survived>\/<refuted>\/<unverified>:<run>/],
+    ["a reviewed= whose run is followed by more text", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0:run-abc1234r:x"] }, /is not reviewed=<head>:<survived>\/<refuted>\/<unverified>:<run>/],
     ["a review= of no known kind", { rows: ["#9 review=bogus"] }, /review=bogus/],
     ["a conflict hold naming another PR", { rows: ["#10 impl-10=PR#40 → PR#40 · conflict-hold:#38"] }, /conflict-hold:#38.*PR #40/],
     ["a conflict hold on a row with no PR mention or PR-keyed impl token at all", { rows: ["conflict-hold:#40"] }, /no PR's/],
@@ -1749,7 +1778,7 @@ test("CLI: reviewer rows are named per PR, fix-appliers first, reviews oldest fi
   const r = runCli([], {
     ledger: {
       rows: [
-        "#10 impl-10=PR#346 → PR#346 · review=wf:a reviewed=abc1234:2/0/0",
+        "#10 impl-10=PR#346 → PR#346 · review=wf:a reviewed=abc1234:2/0/0:run-abc1234r",
         "#11 impl-11=PR#350 → PR#350",
         "#12 impl-12=PR#349 → PR#349",
       ],
@@ -1833,7 +1862,7 @@ test("CLI: a merge hold accepts both the held-behind:#M and held-behind-#M spell
 
 test("CLI: a conflict hold prints DISPATCH fix-pr and holds the merge bot until the fix-applier settles", () => {
   const tick = (tail, dispatched) => runCli([], {
-    ledger: { rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:0/2/0 · ${tail}`], dispatched: ["merge-bot-1=done", ...dispatched] },
+    ledger: { rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:0/2/0:run-abc1234r · ${tail}`], dispatched: ["merge-bot-1=done", ...dispatched] },
     shortlist: shortlistText([]), prs: [pr(40, ["ready-to-merge"])],
   }).stdout;
   const held = tick("conflict-hold:#40", []);
@@ -2083,7 +2112,7 @@ test("CLI: a tracked PR GitHub reads CONFLICTING prints CONFLICT on the reviewer
   t.after(() => rmSync(logDir, { recursive: true, force: true }));
   const log = join(logDir, "pr-list.log");
   const r = runCli([], {
-    ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:0/0/0"] },
+    ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:0/0/0:run-abc1234r"] },
     shortlist: shortlistText([]), prs: [pr(40, [], [10], HEAD_B, "CONFLICTING"), pr(41, [], [], HEAD_B, "UNKNOWN")],
     env: { PR_LIST_LOG: log },
   });
@@ -2097,7 +2126,7 @@ test("CLI: a tracked PR GitHub reads CONFLICTING prints CONFLICT on the reviewer
 
 test("CLI: a past-pin halt prints DISPATCH review for its PR (#2083)", () => {
   const r = runCli([], {
-    ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0 · finisher-pr-40=halted:past-pin"] },
+    ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-40=halted:past-pin"] },
     shortlist: shortlistText([]), prs: [pr(40, [], [10], HEAD_B)],
   });
   assert.equal(r.status, 0, r.stderr);

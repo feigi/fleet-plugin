@@ -95,7 +95,10 @@ function fixture(t) {
     assert.equal(r.status, 0, `ledger ${args.join(" ")}: exit ${r.status}\n${r.stderr}`);
     return JSON.parse(r.stdout);
   };
-  okLedger("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${head}:2/1/1`);
+  // The review's own run root, as review-core.mjs's snapshot step makes it
+  // and the latest `reviewed=` names it.
+  const run = "run-Rv40Aa01";
+  okLedger("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${head}:2/1/1:${run}`);
   okLedger("dispatch", "40", "fix-pr-40");
   okLedger("settle", "fix-pr-40", `applied:${head.slice(0, 7)}`);
 
@@ -108,14 +111,18 @@ function fixture(t) {
     refuted: [finding("src/b.js", 3)],
     unverified: [finding("src/a.js", 15, "suggestion")],
   };
-  const writeReview = (r = review) => writeFileSync(join(scratch, "review-40.json"), JSON.stringify(r));
+  const reviewPath = join(scratch, "pr40", run, "review.json");
+  mkdirSync(join(scratch, "pr40", run), { recursive: true });
+  const writeReview = (r = review) => writeFileSync(reviewPath, JSON.stringify(r));
   writeReview();
   const entry = (bucket, index, more = {}) => ({ bucket, index, scope: "in", claimKind: "behavior", disposition: "apply", ...more });
   // Every finding answered, every in-scope survivor applied, the out-of-scope
   // suggestion filed open `needs-triage` (row 6): an ok record.
   const baseEntries = () => [entry("survived", 0), entry("survived", 1), entry("unverified", 0, { scope: "out", disposition: "defer", issue: 77 })];
-  const writeRecord = (entries, recHead = head) =>
-    writeFileSync(join(scratch, "dispositions-40.json"), JSON.stringify({ head: recHead, entries }));
+  // One record per fix-applier, named by the member that wrote it.
+  const recordPath = (member = "fix-pr-40") => join(scratch, `dispositions-${member}.json`);
+  const writeRecord = (entries, recHead = head, member = "fix-pr-40", recRun = run) =>
+    writeFileSync(recordPath(member), JSON.stringify({ head: recHead, run: recRun, entries }));
 
   // The tracker the `gh` stub answers from, issue number → {state, title, labels}.
   const bin = join(dir, "bin");
@@ -148,7 +155,7 @@ function fixture(t) {
   };
   const row = () => okLedger("read").rows.find((r) => r.startsWith("#10 "));
   return {
-    dir, repo, head, scratch, review, writeReview, entry, baseEntries, writeRecord, check, row, ledgerCli, okLedger,
+    dir, repo, head, run, scratch, review, reviewPath, writeReview, entry, baseEntries, recordPath, writeRecord, check, row, ledgerCli, okLedger,
     env, setIssues, writeVerdict,
   };
 }
@@ -171,7 +178,7 @@ test("an in-scope survivor deferred with no reason is a mismatch, and the finish
   const r = f.check();
   mismatch(r, /fix-pr-40: survived\[0\]: an in-scope survived finding deferred with no reason — src\/a\.js:5 is a line the PR's diff touched/);
   assert.deepEqual(r.json.violations.map((v) => [v.bucket, v.index]), [["survived", 0]]);
-  assert.ok(f.row().includes(`dispositions-mismatch=fix-pr-40:${f.head}`), f.row());
+  assert.ok(f.row().includes(`dispositions-mismatch=fix-pr-40:${f.run}`), f.row());
 
   const before = readFileSync(join(f.dir, "ledger.md"), "utf8");
   const d = f.ledgerCli("dispatch", "40", "finisher-pr-40");
@@ -199,7 +206,7 @@ test("each allowed reason passes an in-scope survivor's deferral, writes disposi
     entries[0] = f.entry("survived", 0, { disposition: "defer", reason, issue: 81 });
     f.writeRecord(entries);
     okVerdict(f.check());
-    assert.ok(f.row().includes(`dispositions-ok=fix-pr-40:${f.head}`), `${reason}: ${f.row()}`);
+    assert.ok(f.row().includes(`dispositions-ok=fix-pr-40:${f.run}`), `${reason}: ${f.row()}`);
     assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher", reason);
   }
 });
@@ -293,8 +300,8 @@ test("a malformed, duplicate, out-of-range, stale or missing record is a mismatc
   }
   f.writeRecord(f.baseEntries(), "deadbeef");
   mismatch(f.check(), /record: the record answers head "deadbeef", not the review's/);
-  rmSync(join(f.scratch, "dispositions-40.json"));
-  mismatch(f.check(), /record: no disposition record at .*dispositions-40\.json/);
+  rmSync(f.recordPath());
+  mismatch(f.check(), /record: no disposition record at .*dispositions-fix-pr-40\.json/);
 });
 
 test("a re-check replaces the member's own verdict for the same head and never duplicates it", (t) => {
@@ -307,10 +314,10 @@ test("a re-check replaces the member's own verdict for the same head and never d
   okVerdict(f.check());
   const again = f.check();
   okVerdict(again);
-  assert.match(again.stderr, /row #10 already carries dispositions-ok=fix-pr-40:[0-9a-f]+ — not written again/);
+  assert.match(again.stderr, /row #10 already carries dispositions-ok=fix-pr-40:run-Rv40Aa01 — not written again/);
   const row = f.row();
   assert.equal(row.match(/dispositions-/g).length, 1, row);
-  assert.ok(row.endsWith(` · dispositions-ok=fix-pr-40:${f.head}`), row);
+  assert.ok(row.endsWith(` · dispositions-ok=fix-pr-40:${f.run}`), row);
   assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
 });
 
@@ -332,13 +339,14 @@ test("a second mismatch on the same review writes dispositions-escalate, and the
   f.writeRecord(badRecord(f));
   mismatch(f.check());
   retry(f);
+  f.writeRecord(badRecord(f), f.head, "fix-pr-40-b");
   const r = f.check("fix-pr-40-b");
   assert.equal(r.status, 1, r.stderr);
   assert.equal(r.json.verdict, "escalate");
-  assert.equal(r.json.token, `dispositions-escalate=fix-pr-40-b:${f.head}`);
+  assert.equal(r.json.token, `dispositions-escalate=fix-pr-40-b:${f.run}`);
   assert.match(r.stderr, /^fix-pr-40-b: survived\[0\]: an in-scope survived finding deferred with no reason/m, "the violations are still printed");
   const row = f.row();
-  assert.ok(row.includes(`dispositions-mismatch=fix-pr-40:${f.head}`) && row.includes(`dispositions-escalate=fix-pr-40-b:${f.head}`), row);
+  assert.ok(row.includes(`dispositions-mismatch=fix-pr-40:${f.run}`) && row.includes(`dispositions-escalate=fix-pr-40-b:${f.run}`), row);
   const d = f.ledgerCli("dispatch", "40", "finisher-pr-40");
   assert.equal(d.status, 2);
   assert.match(d.stderr, /finisher-pr-40: dispositions escalate — fix-pr-40-b deferred .*second mismatch/);
@@ -353,9 +361,9 @@ test("the retry that passes the check ends the refusal, and the first mismatch s
   f.writeRecord(badRecord(f));
   mismatch(f.check());
   retry(f);
-  f.writeRecord(f.baseEntries());
+  f.writeRecord(f.baseEntries(), f.head, "fix-pr-40-b");
   okVerdict(f.check("fix-pr-40-b"));
-  assert.ok(f.row().includes(`dispositions-mismatch=fix-pr-40:${f.head}`), "the first fix-applier's verdict is kept");
+  assert.ok(f.row().includes(`dispositions-mismatch=fix-pr-40:${f.run}`), "the first fix-applier's verdict is kept");
   assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
 });
 
@@ -364,17 +372,68 @@ test("the first mismatch is a plain mismatch, and a mismatch on an earlier revie
   f.writeRecord(badRecord(f));
   const first = f.check();
   assert.equal(first.json.verdict, "mismatch");
-  assert.equal(first.json.token, `dispositions-mismatch=fix-pr-40:${f.head}`);
-  // The earlier fix-applier's mismatch answered another review's head.
+  assert.equal(first.json.token, `dispositions-mismatch=fix-pr-40:${f.run}`);
+  // The earlier fix-applier's mismatch answered another review.
   retry(f);
-  f.okLedger("row", "10", f.row().slice(4).replace(`dispositions-mismatch=fix-pr-40:${f.head}`, "dispositions-mismatch=fix-pr-40:deadbee1"));
+  f.writeRecord(badRecord(f), f.head, "fix-pr-40-b");
+  f.okLedger("row", "10", f.row().slice(4).replace(`dispositions-mismatch=fix-pr-40:${f.run}`, "dispositions-mismatch=fix-pr-40:run-deadbeer"));
   const second = f.check("fix-pr-40-b");
   assert.equal(second.json.verdict, "mismatch", second.stderr);
 });
 
+// #2886: a re-review at the same head leaves round 1's file in its own run
+// root. The check reads the one the PR's latest `reviewed=` names, and the
+// retry's record sits beside round 1's rather than over it.
+test("with two review files present, a fix-applier is judged against the one the latest reviewed= names", (t) => {
+  const f = fixture(t);
+  f.writeRecord(f.baseEntries());
+  okVerdict(f.check());
+  const round2 = "run-Rv40Bb02";
+  const review2 = { ...f.review, counts: { survived: 1, refuted: 0, unverified: 0, crashed: 0 }, survived: [f.review.survived[0]], refuted: [], unverified: [] };
+  mkdirSync(join(f.scratch, "pr40", round2));
+  writeFileSync(join(f.scratch, "pr40", round2, "review.json"), JSON.stringify(review2));
+  f.okLedger("row", "10", `${f.row().slice(4)} · review=member:review-pr-40 · reviewed=${f.head}:1/0/0:${round2}`);
+  retry(f);
+  // The round-1 record, copied to the retry: it answers round 1's findings,
+  // which round 2 does not hold.
+  f.writeRecord(f.baseEntries(), f.head, "fix-pr-40-b");
+  const stale = f.check("fix-pr-40-b");
+  mismatch(stale, /names no finding/);
+  assert.equal(stale.json.token, `dispositions-mismatch=fix-pr-40-b:${round2}`);
+  f.writeRecord([f.entry("survived", 0)], f.head, "fix-pr-40-b", round2);
+  const r = f.check("fix-pr-40-b");
+  okVerdict(r);
+  assert.equal(r.json.token, `dispositions-ok=fix-pr-40-b:${round2}`);
+  assert.ok(f.row().includes(`dispositions-ok=fix-pr-40:${f.run}`), "round 1's verdict is kept");
+  assert.deepEqual(JSON.parse(readFileSync(f.reviewPath, "utf8")), f.review, "round 1's review file was touched");
+  assert.equal(JSON.parse(readFileSync(f.recordPath(), "utf8")).entries.length, 3, "the retry's record replaced round 1's");
+  assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+});
+
+// A fix-applier that ruled on round 1 and is checked again after a same-head
+// round 2 landed: the head matches and so do the findings, but the record was
+// written against another run, so it answers nothing of round 2's.
+test("a record written against an earlier review run is a mismatch even at the same head and over the same findings", (t) => {
+  const f = fixture(t);
+  f.writeRecord(f.baseEntries());
+  okVerdict(f.check());
+  const round2 = "run-Rv40Bb02";
+  mkdirSync(join(f.scratch, "pr40", round2));
+  writeFileSync(join(f.scratch, "pr40", round2, "review.json"), JSON.stringify(f.review));
+  f.okLedger("row", "10", `${f.row().slice(4)} · review=member:review-pr-40 · reviewed=${f.head}:2/1/1:${round2}`);
+  const stale = f.check();
+  mismatch(stale, /the record answers run "run-Rv40Aa01", not the review's run-Rv40Bb02/);
+  assert.equal(stale.json.token, `dispositions-mismatch=fix-pr-40:${round2}`);
+  f.writeRecord(f.baseEntries(), f.head, "fix-pr-40", round2);
+  okVerdict(f.check());
+  // A record with no run answers no review a ledger names.
+  writeFileSync(f.recordPath(), JSON.stringify({ head: f.head, entries: f.baseEntries() }));
+  mismatch(f.check(), /the record answers run null, not the review's run-Rv40Bb02/);
+});
+
 test("a mismatch from a later suffix, an ok, or another PR's fix-applier is not an earlier failure", () => {
-  const H = "abc1234";
-  const row = (...tokens) => `#10 impl-10=PR#40 → PR#40 · reviewed=${H}:1/0/0 · ${tokens.join(" · ")}`;
+  const H = "run-abc1234r";
+  const row = (...tokens) => `#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:1/0/0:${H} · ${tokens.join(" · ")}`;
   const b = { retry: "b" };
   assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40:${H}`)], 40, b, H), true);
   assert.equal(failedBefore([row(`dispositions-escalate=fix-pr-40:${H}`)], 40, b, H), true);
@@ -382,23 +441,21 @@ test("a mismatch from a later suffix, an ok, or another PR's fix-applier is not 
   assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40-c:${H}`)], 40, b, H), false, "a later suffix is not earlier");
   assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40-b:${H}`)], 40, b, H), false, "the member itself is not earlier");
   assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40:${H}`)], 40, { retry: null }, H), false, "nor is the first fix-applier's own re-run");
-  assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40:fedcba9`)], 40, b, H), false, "another review's head");
+  assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40:run-fedcba9r`)], 40, b, H), false, "another review's run");
   assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-41:${H}`)], 40, b, H), false, "another PR's fix-applier");
   // A split row: the earlier verdict sits on another row that resolves to PR 40.
-  assert.equal(failedBefore(["#11 impl-11=PR#40 → PR#40 · dispositions-mismatch=fix-pr-40:abc1234", "#12 impl-12=PR#41 → PR#41"], 40, b, H), true);
+  assert.equal(failedBefore(["#11 impl-11=PR#40 → PR#40 · dispositions-mismatch=fix-pr-40:run-abc1234r", "#12 impl-12=PR#41 → PR#41"], 40, b, H), true);
   // A copy of PR 40's verdict on PR 41's row is a stray: that row does not resolve to PR 40.
-  assert.equal(failedBefore(["#12 impl-12=PR#41 → PR#41 · dispositions-mismatch=fix-pr-40:abc1234"], 40, b, H), false);
-  // The same review named by a short head on one side and a full SHA on the other.
-  const full = `${H}${"0".repeat(33)}`;
-  assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40:${H}`)], 40, b, full), true, "an earlier token's short head matches a full check head");
-  assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40:${full}`)], 40, b, H), true, "an earlier token's full head matches a short check head");
+  assert.equal(failedBefore(["#12 impl-12=PR#41 → PR#41 · dispositions-mismatch=fix-pr-40:run-abc1234r"], 40, b, H), false);
+  // A verdict in the shape before it named a run answers no review.
+  assert.equal(failedBefore([row("dispositions-mismatch=fix-pr-40:abc1234")], 40, b, H), false);
 });
 
 test("nothing is judged or written when the review file or the git history cannot be read", (t) => {
   const f = fixture(t);
   f.writeRecord(f.baseEntries());
   const before = f.row();
-  rmSync(join(f.scratch, "review-40.json"));
+  rmSync(f.reviewPath);
   let r = f.check();
   assert.equal(r.status, 2);
   assert.match(r.stderr, /could not read the review file/);
@@ -431,7 +488,7 @@ test("with no ledger the exit status is the verdict, and nothing is written to a
   const ledgerBefore = readFileSync(join(f.dir, "ledger.md"), "utf8");
 
   f.writeRecord(f.baseEntries());
-  let r = standalone(f);
+  let r = standalone(f, "--review", f.reviewPath);
   okVerdict(r);
   assert.equal(r.json.token, null);
   assert.deepEqual(r.json.violations, []);
@@ -440,13 +497,13 @@ test("with no ledger the exit status is the verdict, and nothing is written to a
   const bad = f.baseEntries();
   bad[0] = f.entry("survived", 0, { disposition: "defer" });
   f.writeRecord(bad);
-  r = standalone(f);
+  r = standalone(f, "--review", f.reviewPath);
   mismatch(r, /^fix-pr-40: survived\[0\]: an in-scope survived finding deferred with no reason/m);
   assert.equal(r.json.token, null);
   assert.deepEqual(r.json.violations.map((v) => [v.bucket, v.index]), [["survived", 0]]);
 
-  rmSync(join(f.scratch, "dispositions-40.json"));
-  mismatch(standalone(f), /record: no disposition record at .*dispositions-40\.json/);
+  rmSync(f.recordPath());
+  mismatch(standalone(f, "--review", f.reviewPath), /record: no disposition record at .*dispositions-fix-pr-40\.json/);
 
   assert.equal(existsSync(join(f.repo, ".fleet")), false, "no .fleet/ was created");
   assert.equal(readFileSync(join(f.dir, "ledger.md"), "utf8"), ledgerBefore, "a ledger elsewhere is not this run's and is not touched");
@@ -458,7 +515,7 @@ test("an explicit --ledger naming no file is no ledger either: the default ledge
   const ownBefore = readFileSync(own, "utf8");
   const absent = join(f.dir, "absent", "ledger.md");
   f.writeRecord(f.baseEntries());
-  const r = standalone(f, "--repo", f.repo, "--ledger", absent);
+  const r = standalone(f, "--review", f.reviewPath, "--repo", f.repo, "--ledger", absent);
   okVerdict(r);
   assert.equal(r.json.token, null);
   assert.equal(readFileSync(own, "utf8"), ownBefore);
@@ -471,7 +528,7 @@ test("an explicit --ledger naming no file is no ledger either: the default ledge
   // A --ledger that exists is used, and draws no such note.
   const present = standalone(f, "--repo", f.repo, "--ledger", own);
   okVerdict(present);
-  assert.equal(present.json.token, `dispositions-ok=fix-pr-40:${f.head}`);
+  assert.equal(present.json.token, `dispositions-ok=fix-pr-40:${f.run}`);
   assert.doesNotMatch(present.stderr, /no ledger at/);
 });
 
@@ -483,7 +540,7 @@ function seedOwnLedger(f) {
     const r = spawnSync(process.execPath, [LEDGER, "--file", ledger, ...args], { encoding: "utf8", env: cleanEnv() });
     assert.equal(r.status, 0, r.stderr);
   };
-  run("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${f.head}:2/1/1`);
+  run("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${f.head}:2/1/1:${f.run}`);
   run("dispatch", "40", "fix-pr-40");
   run("settle", "fix-pr-40", `applied:${f.head.slice(0, 7)}`);
   return ledger;
@@ -495,8 +552,8 @@ test("the run's own .fleet/ledger.md is found without --ledger, and the verdict 
   f.writeRecord(f.baseEntries());
   const r = standalone(f);
   okVerdict(r);
-  assert.equal(r.json.token, `dispositions-ok=fix-pr-40:${f.head}`);
-  assert.match(readFileSync(ledger, "utf8"), new RegExp(`dispositions-ok=fix-pr-40:${f.head}`));
+  assert.equal(r.json.token, `dispositions-ok=fix-pr-40:${f.run}`);
+  assert.match(readFileSync(ledger, "utf8"), new RegExp(`dispositions-ok=fix-pr-40:${f.run}`));
 });
 
 test("a ledger that exists is never skipped: one with no row for the member is a fault, not a standalone run", (t) => {
@@ -527,8 +584,8 @@ test("from a linked worktree the default ledger is the main checkout's, found th
   f.writeRecord(f.baseEntries());
   const r = standalone(f, "--repo", wt);
   okVerdict(r);
-  assert.equal(r.json.token, `dispositions-ok=fix-pr-40:${f.head}`);
-  assert.match(readFileSync(ledger, "utf8"), new RegExp(`dispositions-ok=fix-pr-40:${f.head}`));
+  assert.equal(r.json.token, `dispositions-ok=fix-pr-40:${f.run}`);
+  assert.match(readFileSync(ledger, "utf8"), new RegExp(`dispositions-ok=fix-pr-40:${f.run}`));
   assert.equal(existsSync(join(wt, ".fleet")), false, "the worktree holds no ledger of its own");
 });
 
@@ -546,7 +603,7 @@ test("--no-ledger is a standalone run whatever ledger the repository holds: a st
   assert.equal(fault.status, 2, fault.stderr);
   assert.match(fault.stderr, /fix-pr-40 is on no row of PR #40.*--no-ledger/);
 
-  const r = standalone(f, "--repo", wt, "--no-ledger");
+  const r = standalone(f, "--repo", wt, "--no-ledger", "--review", f.reviewPath);
   okVerdict(r);
   assert.equal(r.json.token, null);
   assert.equal(r.stderr, "", "--no-ledger is a chosen standalone run and prints nothing");
@@ -555,7 +612,7 @@ test("--no-ledger is a standalone run whatever ledger the repository holds: a st
   const bad = f.baseEntries();
   bad[0] = f.entry("survived", 0, { disposition: "defer" });
   f.writeRecord(bad);
-  mismatch(standalone(f, "--repo", wt, "--no-ledger"), /^fix-pr-40: survived\[0\]/m);
+  mismatch(standalone(f, "--repo", wt, "--no-ledger", "--review", f.reviewPath), /^fix-pr-40: survived\[0\]/m);
 });
 
 test("--no-ledger leaves a ledger that holds the member's row unwritten, and contradicts --ledger", (t) => {
@@ -563,7 +620,7 @@ test("--no-ledger leaves a ledger that holds the member's row unwritten, and con
   const ledger = seedOwnLedger(f);
   const before = readFileSync(ledger, "utf8");
   f.writeRecord(f.baseEntries());
-  const r = standalone(f, "--no-ledger");
+  const r = standalone(f, "--no-ledger", "--review", f.reviewPath);
   okVerdict(r);
   assert.equal(r.json.token, null);
   assert.equal(r.stderr, "");
@@ -572,6 +629,26 @@ test("--no-ledger leaves a ledger that holds the member's row unwritten, and con
   const both = standalone(f, "--no-ledger", "--ledger", ledger);
   assert.equal(both.status, 2, both.stderr);
   assert.match(both.stderr, /--no-ledger and --ledger contradict/);
+});
+
+// #2886: without a ledger nothing names the review the record answers, so
+// `--review` must; with one, the latest `reviewed=` already does.
+test("with no ledger --review is required, and with a ledger it is refused", (t) => {
+  const f = fixture(t);
+  f.writeRecord(f.baseEntries());
+  for (const extra of [["--no-ledger"], []]) {
+    const r = standalone(f, ...extra);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /no ledger names PR #40's review — pass --review <path>/, extra.join(" "));
+  }
+  const ledger = seedOwnLedger(f);
+  const before = readFileSync(ledger, "utf8");
+  const r = standalone(f, "--review", f.reviewPath);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--review and a ledger contradict/);
+  assert.equal(readFileSync(ledger, "utf8"), before);
+  // Control: the same ledger, no --review, judges the review it names.
+  okVerdict(standalone(f));
 });
 
 test("a ledger path that cannot be looked up is a fault, never a standalone run", (t) => {
@@ -634,8 +711,8 @@ test("an ambient GIT_DIR naming another repository does not change which ledger 
   const r = spawnSync(process.execPath, [SCRIPT, "--member", "fix-pr-40", "--scratch", f.scratch, "--repo", f.repo],
     { encoding: "utf8", env: f.env({ ...cleanEnv(), GIT_DIR: join(other, ".git"), GIT_WORK_TREE: other }), cwd: f.dir });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(JSON.parse(r.stdout).token, `dispositions-ok=fix-pr-40:${f.head}`);
-  assert.match(readFileSync(ledger, "utf8"), new RegExp(`dispositions-ok=fix-pr-40:${f.head}`));
+  assert.equal(JSON.parse(r.stdout).token, `dispositions-ok=fix-pr-40:${f.run}`);
+  assert.match(readFileSync(ledger, "utf8"), new RegExp(`dispositions-ok=fix-pr-40:${f.run}`));
 });
 
 test("touchedLines reads new-side lines; pure deletions and deleted files touch none", () => {
@@ -667,12 +744,12 @@ test("checkDispositions reads an absolute snapshot path onto the diff's touched 
   assert.equal(checkDispositions({ review, record, touched: new Map(), roots: ["/snap"], filing }).violations.length, 0);
 });
 
-test("withVerdict replaces only the same member's verdict for the same head", () => {
-  const H = "abc1234abc1234abc1234abc1234abc1234abcde";
+test("withVerdict replaces only the same member's verdict for the same review run", () => {
+  const H = "run-Rv40Aa01";
   const ok = `dispositions-ok=fix-pr-40:${H}`;
   const bad = `dispositions-mismatch=fix-pr-40:${H}`;
   const other = `dispositions-ok=fix-pr-40-b:${H}`;
-  const older = "dispositions-mismatch=fix-pr-40:def5678";
+  const older = "dispositions-mismatch=fix-pr-40:run-def5678r";
   assert.equal(withVerdict(`impl-10=PR#40 · ${bad}`, ok), `impl-10=PR#40 · ${ok}`);
   assert.equal(withVerdict(`impl-10=PR#40 · ${ok}`, ok), `impl-10=PR#40 · ${ok}`);
   assert.equal(withVerdict(`${bad} · impl-10=PR#40`, ok), `impl-10=PR#40 · ${ok}`);
@@ -741,7 +818,7 @@ test("run through a symlinked path, the check still judges and writes its verdic
   symlinkSync(SCRIPT, link);
   f.writeRecord(f.baseEntries());
   okVerdict(f.check("fix-pr-40", cleanEnv(), link));
-  assert.ok(f.row().includes(`dispositions-ok=fix-pr-40:${f.head}`), f.row());
+  assert.ok(f.row().includes(`dispositions-ok=fix-pr-40:${f.run}`), f.row());
   const bare = spawnSync(process.execPath, [link], { encoding: "utf8", env: cleanEnv() });
   assert.equal(bare.status, 2);
   assert.match(bare.stderr, /usage: dispositions-check\.mjs/);
@@ -754,16 +831,16 @@ test("nothing is judged or written for a review finding that is no object, an un
   f.writeReview({ ...f.review, survived: [f.review.survived[0], null] });
   let r = f.check();
   assert.equal(r.status, 2, r.stderr);
-  assert.match(r.stderr, /review-40\.json has a survived\[1\] that is not a finding object/);
+  assert.match(r.stderr, /pr40\/run-Rv40Aa01\/review\.json has a survived\[1\] that is not a finding object/);
   f.writeReview();
   // A record path that exists and cannot be read is the environment's fault,
   // not a ruling the fix-applier wrote: no mismatch is blamed on it.
-  rmSync(join(f.scratch, "dispositions-40.json"));
-  mkdirSync(join(f.scratch, "dispositions-40.json"));
+  rmSync(f.recordPath());
+  mkdirSync(f.recordPath());
   r = f.check();
   assert.equal(r.status, 2, r.stderr);
-  assert.match(r.stderr, /could not read the disposition record .*dispositions-40\.json: EISDIR/);
-  rmSync(join(f.scratch, "dispositions-40.json"), { recursive: true });
+  assert.match(r.stderr, /could not read the disposition record .*dispositions-fix-pr-40\.json: EISDIR/);
+  rmSync(f.recordPath(), { recursive: true });
   f.writeRecord(f.baseEntries());
   r = f.check("fix-pr-40", cleanEnv(), SCRIPT, ["stray"]);
   assert.equal(r.status, 2, r.stderr);
@@ -865,12 +942,12 @@ test("touchedLines reads an added `++ ` line as content and unquotes git's heade
 });
 
 test("withVerdict leaves a row already carrying only the token unchanged, folds an emptied row, and refuses a non-verdict token", () => {
-  const ok = `dispositions-ok=fix-pr-40:${H40}`;
+  const ok = "dispositions-ok=fix-pr-40:run-Rv40Aa01";
   assert.equal(withVerdict(ok, ok), ok);
-  // Already the row's only verdict for that member and head: left where it sits.
+  // Already the row's only verdict for that member and run: left where it sits.
   assert.equal(withVerdict(`${ok} · impl-10=PR#40`, ok), `${ok} · impl-10=PR#40`);
-  assert.equal(withVerdict(`dispositions-mismatch=fix-pr-40:${H40}`, ok), ok);
-  assert.equal(withVerdict(`· dispositions-mismatch=fix-pr-40:${H40} ·`, ok), ok);
+  assert.equal(withVerdict("dispositions-mismatch=fix-pr-40:run-Rv40Aa01", ok), ok);
+  assert.equal(withVerdict("· dispositions-mismatch=fix-pr-40:run-Rv40Aa01 ·", ok), ok);
   assert.throws(() => withVerdict(`impl-10=PR#40 · ${ok}`, "garbage"), /'garbage' is not a dispositions-ok=\/dispositions-mismatch=\/dispositions-escalate=\/dispositions-unchecked= token/);
 });
 
@@ -893,7 +970,7 @@ const deferOutside = (f, remedyFiles, recHead) => {
 const withSeverity = (f, severity) => f.writeReview({ ...f.review, survived: [{ ...f.review.survived[0], severity }, f.review.survived[1]] });
 // The same review row with no fix-applier landed on it is fix-due: the control
 // that shows fixDueFor can see a PR become fix-due at all.
-const dueUntilFixed = (f) => deriveRun({ rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=${f.head}:2/1/1`], dispatched: [], drain: null },
+const dueUntilFixed = (f) => deriveRun({ rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=${f.head}:2/1/1:${f.run}`], dispatched: [], drain: null },
   [{ number: 40, labels: [], closingIssuesReferences: [{ number: 10 }] }]).fixDue;
 const fixDueFor = (f) => {
   const l = f.okLedger("read");
@@ -907,7 +984,7 @@ test("a suggestion deferred remedy-outside-diff, its remedy in a file the diff l
   const r = f.check();
   okVerdict(r);
   assert.deepEqual(r.json.escalations, []);
-  assert.ok(f.row().includes(`dispositions-ok=fix-pr-40:${f.head}`), f.row());
+  assert.ok(f.row().includes(`dispositions-ok=fix-pr-40:${f.run}`), f.row());
   assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
 });
 
@@ -920,9 +997,9 @@ test("a critical or important finding deferred remedy-outside-diff writes dispos
     escalated(r);
     assert.deepEqual(r.json.violations, []);
     assert.deepEqual(r.json.escalations, [{ bucket: "survived", index: 0, severity, files: ["src/b.js"] }]);
-    assert.equal(r.json.token, `dispositions-escalate=fix-pr-40:${f.head}`);
+    assert.equal(r.json.token, `dispositions-escalate=fix-pr-40:${f.run}`);
     assert.match(r.stderr, new RegExp(`^fix-pr-40: survived\\[0\\]: a ${severity} finding deferred remedy-outside-diff, its remedy in src/b\\.js — a human rules$`, "m"));
-    assert.ok(f.row().includes(`dispositions-escalate=fix-pr-40:${f.head}`), f.row());
+    assert.ok(f.row().includes(`dispositions-escalate=fix-pr-40:${f.run}`), f.row());
 
     const before = readFileSync(join(f.dir, "ledger.md"), "utf8");
     const d = f.ledgerCli("dispatch", "40", "finisher-pr-40");
@@ -943,7 +1020,7 @@ test("remedy-outside-diff whose remedy files are all in the PR's diff, or none, 
       const r = f.check();
       mismatch(r, /^fix-pr-40: survived\[0\]: reason remedy-outside-diff needs a remedy file absent from the PR's diff — /m);
       assert.deepEqual(r.json.escalations, [], `${severity} ${JSON.stringify(remedyFiles)}`);
-      assert.ok(f.row().includes(`dispositions-mismatch=fix-pr-40:${f.head}`), f.row());
+      assert.ok(f.row().includes(`dispositions-mismatch=fix-pr-40:${f.run}`), f.row());
     }
   }
   deferOutside(f, ["src/a.js"]);
@@ -973,24 +1050,24 @@ test("a record that breaks a rule is a mismatch even when it also escalates, and
   const f = fixture(t);
   withSeverity(f, "critical");
   deferOutside(f, ["src/b.js"]);
-  const rec = JSON.parse(readFileSync(join(f.scratch, "dispositions-40.json"), "utf8"));
+  const rec = JSON.parse(readFileSync(f.recordPath(), "utf8"));
   f.writeRecord(rec.entries.filter((e) => !(e.bucket === "survived" && e.index === 1)));
   const r = f.check();
   mismatch(r, /^fix-pr-40: survived\[1\]: no entry/m);
   assert.match(r.stderr, /^fix-pr-40: survived\[0\]: a critical finding deferred remedy-outside-diff/m);
-  assert.equal(r.json.token, `dispositions-mismatch=fix-pr-40:${f.head}`);
+  assert.equal(r.json.token, `dispositions-mismatch=fix-pr-40:${f.run}`);
 });
 
 test("an escalation outranks an issue gh cannot read: the verdict is escalate, a human rules, and the unread issue is still reported", (t) => {
   const f = fixture(t);
   withSeverity(f, "critical");
   deferOutside(f, ["src/b.js"]);
-  const entries = JSON.parse(readFileSync(join(f.scratch, "dispositions-40.json"), "utf8")).entries;
+  const entries = JSON.parse(readFileSync(f.recordPath(), "utf8")).entries;
   entries[2] = f.entry("unverified", 0, { scope: "out", disposition: "defer", issue: 404 });
   f.writeRecord(entries);
   const r = f.check();
   escalated(r);
-  assert.equal(r.json.token, `dispositions-escalate=fix-pr-40:${f.head}`);
+  assert.equal(r.json.token, `dispositions-escalate=fix-pr-40:${f.run}`);
   assert.match(r.stderr, /^fix-pr-40: survived\[0\]: a critical finding deferred remedy-outside-diff/m);
   assert.match(r.stderr, /unverified\[0\]: where it was filed is unchecked — #404 could not be read through gh/);
 });
@@ -1032,9 +1109,9 @@ test("checkDispositions: escalation is every severity but suggestion, a missing 
   assert.deepEqual(coreRun([{ ...entry, reason: "remedy-worse" }], { diffFiles: null }).violations, []);
 });
 
-test("withVerdict replaces an escalation with the same member's later verdict for the head, and an escalation for an ok", () => {
-  const esc = `dispositions-escalate=fix-pr-40:${H40}`;
-  const ok = `dispositions-ok=fix-pr-40:${H40}`;
+test("withVerdict replaces an escalation with the same member's later verdict for the review, and an escalation for an ok", () => {
+  const esc = "dispositions-escalate=fix-pr-40:run-Rv40Aa01";
+  const ok = "dispositions-ok=fix-pr-40:run-Rv40Aa01";
   assert.equal(withVerdict(`impl-10=PR#40 · ${esc}`, ok), `impl-10=PR#40 · ${ok}`);
   assert.equal(withVerdict(`impl-10=PR#40 · ${ok}`, esc), `impl-10=PR#40 · ${esc}`);
 });
@@ -1264,7 +1341,7 @@ test("a critical out-of-scope survivor filed open ready-for-agent is ok, never e
   const r = f.check();
   okVerdict(r);
   assert.deepEqual(r.json.escalations, []);
-  assert.ok(f.row().includes(`dispositions-ok=fix-pr-40:${f.head}`), f.row());
+  assert.ok(f.row().includes(`dispositions-ok=fix-pr-40:${f.run}`), f.row());
   for (const [issue, is] of [[77, "open, titled \"a deferred finding\", labelled needs-triage"], [13, "closed, titled \"PR #40 review: the suggestion band, checked\", labelled wontfix"]]) {
     for (const reason of ["remedy-outside-diff", "false-rationale"]) {
       entries[1] = f.entry("survived", 1, { scope: "out", disposition: "defer", reason, issue });
@@ -1315,13 +1392,13 @@ test("gh unreachable writes dispositions-unchecked, the finisher is refused nami
   assert.equal(r.status, 1, r.stderr);
   assert.equal(r.json.verdict, "unchecked");
   assert.deepEqual(r.json.violations, []);
-  assert.equal(r.json.token, `dispositions-unchecked=fix-pr-40:${f.head}`);
+  assert.equal(r.json.token, `dispositions-unchecked=fix-pr-40:${f.run}`);
   assert.match(r.stderr, /^fix-pr-40: unverified\[0\]: where it was filed is unchecked — #77 could not be read through gh: error connecting to api\.github\.com$/m);
-  assert.ok(f.row().includes(`dispositions-unchecked=fix-pr-40:${f.head}`), f.row());
+  assert.ok(f.row().includes(`dispositions-unchecked=fix-pr-40:${f.run}`), f.row());
   const before = readFileSync(join(f.dir, "ledger.md"), "utf8");
   const d = f.ledgerCli("dispatch", "40", "finisher-pr-40");
   assert.equal(d.status, 2);
-  assert.match(d.stderr, /finisher-pr-40: dispositions unchecked — fix-pr-40's check of review [0-9a-f]+ could not read where a deferral was filed/);
+  assert.match(d.stderr, /finisher-pr-40: dispositions unchecked — fix-pr-40's check of review run-Rv40Aa01 could not read where a deferral was filed/);
   assert.equal(readFileSync(join(f.dir, "ledger.md"), "utf8"), before, "a refused dispatch writes nothing");
   assert.deepEqual(dueUntilFixed(f), [40], "control");
   assert.deepEqual(fixDueFor(f), [], "an unchecked verdict is answered by re-running the check, never by a fix-applier");
@@ -1348,7 +1425,7 @@ test("an issue gh cannot read is unchecked too, a broken rule outranks it, and w
   assert.match(broken.stderr, /unverified\[0\]: where it was filed is unchecked/);
 
   f.writeRecord(f.baseEntries());
-  const alone = spawnSync(process.execPath, [SCRIPT, "--member", "fix-pr-40", "--scratch", f.scratch, "--no-ledger"],
+  const alone = spawnSync(process.execPath, [SCRIPT, "--member", "fix-pr-40", "--scratch", f.scratch, "--no-ledger", "--review", f.reviewPath],
     { encoding: "utf8", env: f.env(cleanEnv(), { FAKE_GH_DOWN: "1" }), cwd: f.repo });
   assert.equal(alone.status, 1, alone.stderr);
   assert.deepEqual([JSON.parse(alone.stdout).verdict, JSON.parse(alone.stdout).token], ["unchecked", null]);

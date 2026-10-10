@@ -30,7 +30,8 @@ PR, off the controller's own turn.
    running something concrete, defaulting to "refuted" only when
    uncertain. `suggestion`-severity findings get a hard 0-refuter
    budget.
-4. **Fix.** The full result is written to `<scratch>/review-<pr>.json`;
+4. **Fix.** The full result is written to `<scratch>/pr<pr>/<run>/review.json`,
+   in the review's own run root, which the ledger's `reviewed=` token names;
    the controller reads only a digest and dispatches a **fix-applier**
    (`fix-pr-<pr#>`, never the implementer) that applies survived
    in-scope findings, defers and files the rest, commits, and pushes.
@@ -60,7 +61,7 @@ flowchart TD
         SNAP --> TESTRUN --> SPEC --> VERI
     end
 
-    VERI -->|"full result to<br/>scratch/review-N.json"| CTRL["controller reads<br/>the digest only"]
+    VERI -->|"full result to<br/>scratch/pr&lt;N&gt;/&lt;run&gt;/review.json"| CTRL["controller reads<br/>the digest only"]
     CTRL -->|"tick: DISPATCH fix-pr PR#N"| FIX
 
     subgraph FIXSUB["fix-applier — fix-pr-&lt;pr#&gt;, a plain task member"]

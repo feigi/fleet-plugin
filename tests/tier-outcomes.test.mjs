@@ -603,9 +603,9 @@ test("check --live: warns on each reviewed PR with no row, and the warning alone
     tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" })],
     ledger: {
       rows: [
-        "#10 impl-10=PR#20 · reviewed=abcdef1:0/0/0",
-        "#13 impl-13=PR#23 · reviewed=abcdef2:1/0/0",
-        "#30 review=member:review-pr-30 · reviewed=abcdef3:0/1/0",
+        "#10 impl-10=PR#20 · reviewed=abcdef1:0/0/0:run-abcdef1r",
+        "#13 impl-13=PR#23 · reviewed=abcdef2:1/0/0:run-abcdef2r",
+        "#30 review=member:review-pr-30 · reviewed=abcdef3:0/1/0:run-abcdef3r",
         "#14 impl-14=PR#24 · review=member:review-pr-24",
       ],
       dispatched: ["impl-10=PR#20", "impl-13=PR#23", "impl-14=PR#24"],

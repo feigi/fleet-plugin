@@ -30,8 +30,8 @@
 // runReview's own snapshot/verifier dispatch, unmodified — omp's `agent()`
 // resolves a bare frontmatter `name:` exactly, which is already what those
 // strings are.
-import { mkdir, writeFile } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, normalize } from "node:path";
 import { digestOf, runReview, runnerPrRefusal, runnerScratchRefusal } from "./review-core.mjs";
 
 // eval's `agent()` returns a HANDLE, not data: `agent(prompt,
@@ -139,10 +139,17 @@ export async function runReviewOnOmp(args) {
 
 // The whole of the omp review runner's job, so the agent's own cell is three
 // lines and this contract can be run by a test: the full result
-// object goes to `<scratch>/review-<pr>.json` — the one artefact handed to
+// object goes to `<run root>/review.json` — the one artefact handed to
 // the fix-applier — and only the digest comes back, because the digest is
 // all the controller reads and a 26–61 KB result is what the file exists to
-// keep out of its context.
+// keep out of its context. The run root is the review's own
+// `<scratch>/pr<pr>/run-XXXXXXXX`, the directory review-core.mjs's snapshot
+// step made with `mktemp` and the snapshot it returns sits in, so two reviews
+// of one PR — at one head or two — never write one file, and the ledger token
+// names the run whose file it is. No file is ever replaced. The file leaves
+// with its run root: the snapshot step of a later review of the same PR
+// removes that PR's run roots not touched for seven days, so a token older
+// than that names a file that is gone.
 //
 // Failure is a throw or an empty return. The holder of the review call retries
 // once; a second failure returns `failed` with both errors and the fallback
@@ -151,8 +158,9 @@ export async function runReviewOnOmp(args) {
 // scratch that is not absolute (eval's cwd is the MAIN CHECKOUT, so a relative
 // one would put the file there), a scratch that already ends in `pr<N>`
 // — throws before any run: it is not a review failure, and retrying or falling
-// back would only repeat it. `run` is the seam the test injects; nothing else
-// passes it.
+// back would only repeat it. So does a write fault other than a file already
+// at the path: the review ran, the environment could not keep it. `run` is the
+// seam the test injects; nothing else passes it.
 export async function runReviewToFile(args, run = runReviewOnOmp) {
   const pr = args?.pr;
   const scratch = args?.scratch;
@@ -177,7 +185,7 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
     // the file on disk — so a `run` that resolves to a truthy, object-shaped
     // result missing `.counts` would otherwise throw on the destructure below
     // OUTSIDE this function's own retry try/catch (which wraps only the
-    // `run(args)` call), leaving a half-written `review-<pr>.json` on disk
+    // `run(args)` call), leaving a half-written review file on disk
     // that a fix-applier reading it would mistake for a completed review that
     // never actually finished. Treated the same as an empty return: retried,
     // then reported `failed`, and no file is written for it.
@@ -185,19 +193,59 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
       errors.push(`attempt ${attempt}: empty return (${String(result)})`);
       continue;
     }
-    const path = join(scratch, `review-${pr}.json`);
-    await mkdir(scratch, { recursive: true });
-    await writeFile(path, `${JSON.stringify(result, null, 2)}\n`);
+    // The run root is read off the result, never rebuilt: only the snapshot
+    // step's shell knew the `mktemp` name. A result whose snapshot is not in
+    // a run root of this PR under this scratch names no run the ledger token
+    // could point a reader back to, so it is a failed attempt like the one
+    // above.
+    const runRoot = runRootOf(result.snapshot, scratch, pr);
+    if (runRoot === null) {
+      errors.push(`attempt ${attempt}: the result's snapshot ${JSON.stringify(result.snapshot)} is not in a run root `
+        + `${join(scratch, `pr${pr}`, "run-XXXXXXXX")} — no run the review file could be kept in`);
+      continue;
+    }
+    const path = join(runRoot, "review.json");
+    try {
+      await mkdir(runRoot, { recursive: true });
+      // `wx`: an existing file at this path is another review's result, and
+      // stays.
+      await writeFile(path, `${JSON.stringify(result, null, 2)}\n`, { flag: "wx" });
+    } catch (e) {
+      // Only that collision is a failed attempt: a second review run lands in
+      // a root of its own. Any other fault — permissions, a full disk — is
+      // the environment's, so it throws rather than re-run a full review that
+      // would hit it again and report it as a review failure. A write that
+      // fails partway has left its truncated bytes at the path: removed
+      // before the throw, never on a collision, where the file is another
+      // review's.
+      if (e?.code !== "EEXIST") {
+        await unlink(path).catch(() => {});
+        throw e;
+      }
+      errors.push(`attempt ${attempt}: could not write ${path}: ${e?.message ?? String(e)}`);
+      continue;
+    }
     const { survived, refuted, unverified } = result.counts;
     return {
       status: "completed",
       path,
       // The review's result token, ready for `ledger.mjs row`.
-      ledger: `reviewed=${result.head}:${survived}/${refuted}/${unverified}`,
+      ledger: `reviewed=${result.head}:${survived}/${refuted}/${unverified}:${basename(runRoot)}`,
       attempts: attempt,
       errors,
       digest: digestOf(result),
     };
   }
   return { status: "failed", errors, fallback: `review-pr-${pr}-b` };
+}
+
+// The run root a result's `snapshot` sits in — `<scratch>/pr<pr>/run-` and
+// the eight characters `mktemp` put in place of `XXXXXXXX` — or null when it
+// sits anywhere else. A `..` segment is refused before normalising, which
+// would otherwise resolve it into a root the path never named.
+function runRootOf(snapshot, scratch, pr) {
+  if (typeof snapshot !== "string" || !isAbsolute(snapshot) || snapshot.split("/").includes("..")) return null;
+  const runRoot = dirname(normalize(snapshot));
+  if (dirname(runRoot) !== join(scratch, `pr${pr}`) || !/^run-[A-Za-z0-9]{8}$/.test(basename(runRoot))) return null;
+  return runRoot;
 }

@@ -1,6 +1,6 @@
 ---
 name: fleet-review-runner
-description: A `/skill:run-team` review runner on omp — dispatched by the controller as review-pr-<pr#> with pr, branch, worktree, testCmd and scratch (the scratch root); runs runReviewOnOmp to completion in its own eval cell, writes <scratch>/review-<pr>.json, and reports the digest and the path. Never invoked directly.
+description: A `/skill:run-team` review runner on omp — dispatched by the controller as review-pr-<pr#> with pr, branch, worktree, testCmd and scratch (the scratch root); runs runReviewOnOmp to completion in its own eval cell, writes <scratch>/pr<pr>/<run>/review.json in the review's own run root, and reports the digest, the path and the reviewed= token naming that run. Never invoked directly.
 model: "@smol:low"
 spawns: fleet-review-snapshot, fleet-review-test-run, fleet-review-correctness, fleet-review-silent-failure, fleet-review-tests, fleet-review-comments, fleet-review-types, fleet-review-simplify, fleet-review-verifier
 ---

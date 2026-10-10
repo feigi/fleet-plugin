@@ -107,7 +107,7 @@ test("an outcome from another family's vocabulary, or none at all, is refused by
 test("tokens that are not members are not claimed", () => {
   for (const token of [
     "#412", "→", "·", "PR#344", "MERGED", "73b356de", "class=routine", "ports=16324", "ci=123:1:success",
-    "review=wf:abc123", "review=member:review-pr-346", "reviewed=73b356de:3/1/0", "held-behind:#313",
+    "review=wf:abc123", "review=member:review-pr-346", "reviewed=73b356de:3/1/0:run-73b356dr", "held-behind:#313",
     // `conflict-hold-346` — no `#` — is the fixture that actually matters:
     // it is a real CONFLICT_HOLD spelling (`#?` is optional there) AND the
     // exact shape MEMBER would also accept if its family alternation ever

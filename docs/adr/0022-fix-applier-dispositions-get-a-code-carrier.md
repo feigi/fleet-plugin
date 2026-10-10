@@ -15,7 +15,12 @@ so a gap in the table surfaces as a retry and then an escalation (Decision
 `needs-triage` row; a weaker label never answers a `ready-for-agent` row. The
 body below stands as ruled: read Decision 5's table with that row added, and
 the gap the Consequences section records for #2404 as closed by this
-amendment.
+amendment. Amended by #2886: a verdict token names the review run, not the
+review head — `dispositions-<verdict>=fix-pr-<M>[-x]:<run>`, `<run>` being the
+`run-XXXXXXXX` the latest `reviewed=<head>:<s>/<r>/<u>:<run>` names — so a
+verdict answers only the review run it names, a re-review at the same head
+included; read Decision 8's `<head>` and the Consequences entry for #2405's
+`dispositions-*=fix-pr-<M>:<head>` as `<run>`.
 
 ## Context
 

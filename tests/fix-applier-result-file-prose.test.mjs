@@ -1,5 +1,5 @@
 // #1802 (spec docs/specs/2026-09-24-slot-based-fleet-loop-design.md § 3 §4,
-// §8). The fix-applier now reads the review off `<scratch>/review-<pr>.json`
+// §8). The fix-applier now reads the review off `<scratch>/pr<pr>/<run>/review.json`
 // and owns every per-PR ruling the controller used to make before dispatch —
 // both mutual-exclusion scans, the suggested-fix re-derivation, `refuted=false`
 // ≠ apply, per-site measurement for a sibling-site extension, and reading
@@ -38,7 +38,7 @@ const ruling = (lead) => {
 };
 
 test("the fix-applier reads the review off the result file, at the path the runner and the controller write", () => {
-  assert.match(section(), phrase("`<scratch>/review-<pr>.json`"));
+  assert.match(section(), phrase("`<scratch>/pr<pr>/<run>/review.json`"));
   // Step 1's fix-applier branch is what sends a fix-applier here at all.
   const step1 = between(DOC, "1. Run the review yourself.", "\n2. Plan the actions.", "review-and-fix.md step 1");
   assert.match(step1, phrase("see **The review result file**"), "step 1 no longer points a fix-applier at the result file");

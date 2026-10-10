@@ -79,7 +79,7 @@ test("the record-before-tick table names every wake, each with what it records",
   const rows = table.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Wake"));
   const WAKES = [
     ["Implementer report", ["verify-sha.sh", "settle impl-<N>=PR#<M>", "=bailed"]],
-    ["Review workflow notification / `review-pr-<n>` report", ["<scratch>/review-<pr>.json", "reviewed=<head>:"]],
+    ["Review workflow notification / `review-pr-<n>` report", ["<scratch>/pr<pr>/<run>/review.json", "reviewed=<head>:<survived>/<refuted>/<unverified>:<run>"]],
     ["Fix-applier report", ["settle fix-pr-<M>=", "ruled"]],
     ["Finisher report", ["settle finisher-pr-<M>=labelled"]],
     // #2083: a halt is its own outcome, escalated on the PR itself, then resolved by cause.
