@@ -28,6 +28,7 @@ const REPO = join(import.meta.dirname, "..");
 const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
 const RUN_TEAM = read("plugin", "skills", "run-team", "SKILL.md");
 const CONTEXT = read("CONTEXT.md");
+const REVIEW_AND_FIX = read("plugin", "commands", "review-and-fix.md");
 
 const VALID_RED =
   "**Valid red:** a run that completed — the command returned on its own, with no signal and no timeout, deadline or kill having fired — in which the test the claim names is reported failing. An exit ≠ 0 with no failing test is not red, and a different test failing is not red for this claim. A red in the full suite only triggers a narrowed run; it is never evidence on its own.";
@@ -43,6 +44,8 @@ const RULES = { "Valid red": VALID_RED, "Narrowed run": NARROWED, Kill: KILL, "E
 // JS template carry the same words wrapped three ways.
 const flat = (s) => unemphasized(stripQuoteGutter(s)).replace(/\s+/g, " ");
 const holds = (site, paragraph) => phrase(unemphasized(paragraph)).test(flat(site));
+// One whole paragraph of the site — a blank line (gutter or not) either side.
+const isolates = (site, paragraph) => stripQuoteGutter(site).split(/\n[ \t]*\n/).some((p) => flat(p).trim() === flat(paragraph).trim());
 
 // --- the sites, read where their instructions live ------------------------
 
@@ -70,16 +73,27 @@ const fixApplier = () =>
 const finisher = () => quoteBlock(RUN_TEAM, "**A test run is a verdict only if it ran to completion", "the finisher's test-run verdict block");
 const agent = (name) => read("plugin", "agents", `${name}.agent.md`).split("---").slice(2).join("---");
 
-// Every kill site: its text, plus the clause its own inconclusive path takes.
+// The in-scope suggestion refuter has no abstain — its verdict is `{refuted,
+// reason}` and dispositions-check refuses one that abstains — so its inconclusive
+// path leaves `refuted` true: the suggestion defers instead of applying unchecked.
+const SUGGESTION_ABSTAIN = "leave `refuted` true, so the suggestion defers on the record instead of applying on a check that decided nothing";
+// A quote nested in the fix-applier's quote carries `> > ` — every level goes.
+const suggestionRefuter = (text, what, end) =>
+  between(text, "Try to REFUTE this finding", end, what).split("\n").map((l) => l.replace(/^(?:\s*>)+ ?/, "")).join("\n");
+
+// Every kill site: its text, the clause its own inconclusive path takes, and
+// whether it lays the rules out as paragraphs of their own.
 const KILL_SITES = async () => {
   const { tests, refuter } = await renderedPrompts();
   return [
-    ["the `tests` dimension's dispatched prompt", tests, "file no finding above `suggestion` on it, and name the gap — both runs — in `scope_searched`"],
-    ["agents/fleet-review-tests.agent.md", agent("fleet-review-tests"), "file no finding above `suggestion` on it, and name the gap — both runs — in `scope_searched`"],
-    ["the refuter's dispatched prompt", refuter, "set `inconclusive` to true and name the runs in `reason`"],
-    ["agents/fleet-review-verifier.agent.md", agent("fleet-review-verifier"), "set `inconclusive` to true and name the runs in `reason`"],
-    ["run-team's fix-applier prompt", fixApplier(), "do not report the test as proven, and measure again in a clean state"],
-    ["run-team's finisher test-run verdict block", finisher(), "halt with cause `other`, with both runs — the mutant's and the unmutated tree's — as evidence"],
+    ["the `tests` dimension's dispatched prompt", tests, "file no finding above `suggestion` on it, and name the gap — both runs — in `scope_searched`", true],
+    ["agents/fleet-review-tests.agent.md", agent("fleet-review-tests"), "file no finding above `suggestion` on it, and name the gap — both runs — in `scope_searched`", true],
+    ["the refuter's dispatched prompt", refuter, "set `inconclusive` to true and name the runs in `reason`", true],
+    ["agents/fleet-review-verifier.agent.md", agent("fleet-review-verifier"), "set `inconclusive` to true and name the runs in `reason`", true],
+    ["run-team's fix-applier prompt", fixApplier(), "do not report the test as proven, and measure again in a clean state", true],
+    ["run-team's in-scope suggestion refuter brief", suggestionRefuter(RUN_TEAM, "run-team/SKILL.md", "Survives → apply it, with one hold"), SUGGESTION_ABSTAIN, true],
+    ["review-and-fix.md step 2's in-scope suggestion refuter brief", suggestionRefuter(REVIEW_AND_FIX, "review-and-fix.md", "That last clause is the whole mechanism"), SUGGESTION_ABSTAIN, false],
+    ["run-team's finisher test-run verdict block", finisher(), "halt with cause `other`, with both runs — the mutant's and the unmutated tree's — as evidence", true],
   ];
 };
 
@@ -90,6 +104,30 @@ test("every kill site quotes Valid red, Narrowed run, Kill and the Evidence line
     }
     assert.ok(holds(text, inconclusive), `${where} lost its inconclusive path: "${inconclusive}"`);
   }
+});
+
+// A sentence appended INSIDE a rule paragraph still contains it, so `holds`
+// stays green: "Exit 1 alone is a kill." glued to the end of Valid red
+// contradicts the rule and passed every pin. A site that lays each rule out as
+// its own paragraph (a blank line either side, gutter or not) is held to the
+// paragraph, whole. review-and-fix.md's brief is one source line, so it has no
+// paragraph to hold and is left to `holds` alone.
+test("every kill site that lays the rules out as paragraphs carries each one whole, with nothing glued onto it", async () => {
+  for (const [where, text, , paragraphs] of await KILL_SITES()) {
+    if (!paragraphs) continue;
+    for (const [name, paragraph] of Object.entries(RULES)) {
+      assert.ok(isolates(text, paragraph), `${where} no longer carries the ${name} paragraph as a paragraph of its own — a sentence glued onto it contradicts the rule and still passes a containment pin`);
+    }
+  }
+});
+
+test("the pin reds on a sentence appended inside a rule paragraph, and stays green on the same text reflowed", async () => {
+  const [, text] = (await KILL_SITES())[2];
+  const glued = text.replace(VALID_RED.slice(-30), (m) => `${m} Exit 1 alone is a kill.`);
+  assert.notEqual(glued, text, "the control's mutation did not land");
+  assert.ok(holds(glued, VALID_RED), "the containment pin no longer holds on a glued sentence — this control then proves nothing about isolates()");
+  assert.ok(!isolates(glued, VALID_RED), "a sentence glued inside the Valid red paragraph passed");
+  assert.ok(isolates(text.replace(/ /g, "  "), VALID_RED), "isolates() reds on a respaced paragraph");
 });
 
 test("the owner dimension's failing-test note carries Valid red, Narrowed run and the Evidence line, and no Kill", () => {
@@ -118,10 +156,11 @@ test("the narrowed-run paragraph names no runner-specific command", () => {
 });
 
 // The pin's own controls: it must REFUSE a site that drops the clause a kill
-// turns on, and ACCEPT the same words rewrapped.
+// turns on — at every copy, since the fix-applier prompt carries the rules twice
+// — and ACCEPT the same words rewrapped.
 test("the pin reds on a dropped baseline clause and stays green on a reflow", () => {
   const text = fixApplier();
-  const gutted = text.replace(/,\s*(?:>\s*)*and\s+(?:>\s*)*no\s+(?:>\s*)*kill\s+(?:>\s*)*stands\s+(?:>\s*)*without\s+(?:>\s*)*that\s+(?:>\s*)*green\s+(?:>\s*)*run\s+(?:>\s*)*on\s+(?:>\s*)*the\s+(?:>\s*)*unmutated\s+(?:>\s*)*tree/, "");
+  const gutted = text.replace(/,\s*(?:>\s*)*and\s+(?:>\s*)*no\s+(?:>\s*)*kill\s+(?:>\s*)*stands\s+(?:>\s*)*without\s+(?:>\s*)*that\s+(?:>\s*)*green\s+(?:>\s*)*run\s+(?:>\s*)*on\s+(?:>\s*)*the\s+(?:>\s*)*unmutated\s+(?:>\s*)*tree/g, "");
   assert.notEqual(gutted, text, "the control's mutation did not land — the clause is no longer spelled this way");
   assert.ok(!holds(gutted, KILL), "the pin passed a Kill paragraph with its baseline clause deleted");
   const rewrapped = text.replace(/ /g, "\n> ");

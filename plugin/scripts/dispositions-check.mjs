@@ -226,6 +226,8 @@ function describeIssue({ state, title, labels }) {
   return `${state.toLowerCase()}, titled ${JSON.stringify(title)}, labelled ${labels.length === 0 ? "nothing" : labels.join(", ")}`;
 }
 
+const ABSTAINED = "is inconclusive — its refuter abstained, so it decided nothing about the finding";
+
 // Why `value` is not a refuter verdict, or null when it is: the shape
 // VERDICT_SCHEMA declares, checked key by key. An abstaining verdict
 // (`inconclusive: true`) is refused on top: the in-scope suggestion refuter
@@ -241,7 +243,7 @@ export function verdictProblem(value) {
     if (declared === undefined) return `carries ${key}, which a refuter verdict does not`;
     if (typeof v !== declared.type) return `has a ${key} that is not a ${declared.type}`;
   }
-  if (value.inconclusive === true) return "is inconclusive — its refuter abstained, so it decided nothing about the finding";
+  if (value.inconclusive === true) return ABSTAINED;
   return null;
 }
 
@@ -678,7 +680,9 @@ function verdictReader(scratch, pr) {
       return { problem: `cannot be read as JSON — ${e.message}` };
     }
     const why = verdictProblem(value);
-    return why === null ? { refuted: value.refuted } : { problem: `fails the refuter verdict schema — it ${why}` };
+    if (why === null) return { refuted: value.refuted };
+    // An abstention validates against the schema; it is refused as evidence, not as a malformed file.
+    return { problem: why === ABSTAINED ? why : `fails the refuter verdict schema — it ${why}` };
   };
 }
 

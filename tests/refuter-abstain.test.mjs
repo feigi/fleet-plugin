@@ -74,6 +74,34 @@ test("a review whose refuter pair all abstained is unverified but not crashed, a
   assert.equal(result.resume, null);
 });
 
+// A pair holding an abstention and a dead refuter lost a refuter to a crash and
+// nothing decided it, so it is re-dispatched once like any crashed pair —
+// `resume`'s "re-dispatched once and died again" is true of it. A pair that all
+// abstained is not re-dispatched (above), and a pair with one deciding vote is
+// ruled on that vote.
+test("a refuter pair of one abstention and one crash is re-dispatched once and then counted crashed", async () => {
+  const { host, calls } = scriptedHost({
+    snapshot: [SNAP],
+    "review:correctness": [review([finding("critical")])],
+    "verify:correctness": [abstain(), null, abstain(), null],
+  });
+  const result = await run(host);
+  assert.equal(calls["verify:correctness"], 4, "a pair holding a crash beside an abstention was not re-dispatched");
+  assert.equal(result.unverified[0].refutersInconclusive, 1);
+  assert.deepEqual(result.counts, { survived: 0, refuted: 0, unverified: 1, crashed: 1 });
+  assert.notEqual(result.resume, null);
+});
+
+test("a refuter pair with one deciding vote beside a crash is not re-dispatched", async () => {
+  const { host, calls } = scriptedHost({
+    snapshot: [SNAP],
+    "review:correctness": [review([finding("critical")])],
+    "verify:correctness": [vote(false), null],
+  });
+  await run(host);
+  assert.equal(calls["verify:correctness"], 2);
+});
+
 test("a review whose refuter pair all crashed is still counted crashed", async () => {
   const { host } = scriptedHost({
     snapshot: [SNAP],

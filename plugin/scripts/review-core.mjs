@@ -551,8 +551,8 @@ export function sharedRunNote(run, owner, key) {
     `Tests: this review ran its test command ONCE, from the snapshot's root, before
 dispatching you. Do NOT run that full command yourself — every dimension reads
 this one run. Targeted probes and mutations in your own copy of the snapshot are
-still yours to run, and so is the full command against your own mutant when no
-narrowed run can be proven.
+still yours to run, and so is the full command in your own copy of the snapshot,
+against your own mutant or to reproduce a failure, when no narrowed run can be proven.
   command: ${run.command}
   counts:  ${countsOf(run) || "none — the run produced no counts"}
   exit:    ${run.exitCode ?? "(not reported)"}
@@ -1096,9 +1096,11 @@ to name.`,
         (review && review.findings ? review.findings : []).map((f, fi) => () => {
           const n = verifiersForRun(f.severity);
           if (n === 0) return Promise.resolve({ ...f, dimension: d.key, ...verdictFor(0, []) });
-          // A pair whose EVERY vote died (or whose dispatch threw) is
-          // re-dispatched once, as a pair, before `verdictFor` reads it — one
-          // live vote means the pair did not crash and is ruled on that vote.
+          // A pair in which no refuter decided and at least one died (or whose
+          // dispatch threw) is re-dispatched once, as a pair, before
+          // `verdictFor` reads it — one deciding vote means the pair did not
+          // crash and is ruled on that vote, and a pair that ALL abstained ran
+          // and could not decide, so a second dispatch would only repeat it.
           return retryCrashed(
             () =>
               parallel(
@@ -1189,7 +1191,11 @@ how three reviews from one cell left four files modified in that checkout.`,
                   ),
                 ),
               ),
-            (votes) => !(votes && votes.some(Boolean)),
+            // Retry unless a refuter decided or every one abstained.
+            (votes) =>
+              !votes ||
+              !votes.length ||
+              (!votes.some((v) => v && v.inconclusive !== true) && !votes.every((v) => v && v.inconclusive === true)),
           ).then(
             (votes) => ({ ...f, dimension: d.key, ...verdictFor(n, votes) }),
             // A rejection here means retryCrashed's OWN final attempt
@@ -1239,8 +1245,9 @@ how three reviews from one cell left four files modified in that checkout.`,
   // Refuted findings are RETURNED, not dropped. A refutation is itself a claim,
   // and the controller has reversed a refutation on new evidence before.
   // `unverified` are findings the adversarial pass did not settle — a suggestion
-  // that skipped it by policy, or one whose refuters all crashed — surfaced
-  // separately so the caller never mistakes "not checked" for "survived".
+  // that skipped it by policy, or one whose refuters crashed or abstained and
+  // decided nothing — surfaced separately so the caller never mistakes "not
+  // checked" for "survived".
   // `dimensionsRun` names what was DISPATCHED after the size trim: a trimmed
   // fan-out must say so, never read as full coverage. It is not a coverage claim
   // on its own and never was — a specialist can be dispatched and die, or the

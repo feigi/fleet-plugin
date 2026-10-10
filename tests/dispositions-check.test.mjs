@@ -1468,6 +1468,7 @@ test("an in-scope suggestion with no verdictPath, a missing file, one outside th
     [f.writeVerdict("{not json", "3"), /cannot be read as JSON/],
     [f.writeVerdict({ refuted: "yes", reason: "r" }, "4"), /fails the refuter verdict schema — it has a refuted that is not a boolean/],
     [f.writeVerdict({ refuted: true }, "5"), /fails the refuter verdict schema — it has no reason/],
+    [f.writeVerdict({ refuted: true, reason: "r", inconclusive: true }, "7"), /verdictPath "[^"]*" is inconclusive — its refuter abstained/],
   ]) {
     const r = deferWith(path);
     mismatch(r, noEvidence);
