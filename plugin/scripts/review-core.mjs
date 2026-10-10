@@ -79,6 +79,11 @@ export const VERDICT_SCHEMA = {
     refuted: { type: "boolean" },
     reason: { type: "string" },
     counter_evidence: { type: "string", description: "Command + output, if any." },
+    inconclusive: {
+      type: "boolean",
+      description:
+        "True only when your own check could produce neither a valid red nor a valid green: you abstain, and `reason` names the runs. Left out of the tally, never counted as a crash.",
+    },
   },
 };
 
@@ -570,13 +575,19 @@ export function cwdAuditFrom(text) {
   return m ? { state: m[1], line: m[0].trim() } : { state: "missing", line: null };
 }
 
+// An abstaining vote (`inconclusive: true`) is left out of the tally exactly
+// as a crashed (`null`) one is, so a run that could not decide never breaks a
+// tie toward `refuted`. It stays in `votes`, since its `reason` names the runs
+// the fix-applier cites, and `refutersInconclusive` counts it — the one field
+// that tells an all-abstained finding from an all-crashed one.
 export function verdictFor(dispatched, votes) {
   const live = votes.filter(Boolean);
-  const refuted = live.filter((v) => v.refuted).length;
+  const decided = live.filter((v) => v.inconclusive !== true);
+  const refuted = decided.filter((v) => v.refuted).length;
   let verdict;
-  if (live.length === 0) verdict = "unverified";
-  else verdict = refuted * 2 >= live.length ? "refuted" : "survived";
-  return { verdict, votes: live, refutersDispatched: dispatched };
+  if (decided.length === 0) verdict = "unverified";
+  else verdict = refuted * 2 >= decided.length ? "refuted" : "survived";
+  return { verdict, votes: live, refutersDispatched: dispatched, refutersInconclusive: live.length - decided.length };
 }
 
 // One in-run re-dispatch for a crashed dispatch, before the result is
@@ -597,12 +608,14 @@ export function retryCrashed(dispatch, crashed) {
 // omp has no cached-replay mechanism: a fresh
 // review re-dispatches every agent() live rather than only the crashed
 // legs, and the one re-dispatch this run gets was already spent in-run
-// — a crashed finding is reported and deferred, never resumed.
+// — a crashed finding is reported and deferred, never resumed. Crashed
+// means a `null` refuter: an `unverified` finding whose dispatched refuters
+// all abstained is no crash, and stays out of this bucket.
 export function resumeFor(unverified) {
-  const crashed = unverified.filter((f) => f.refutersDispatched > 0);
+  const crashed = unverified.filter((f) => f.refutersDispatched > (f.refutersInconclusive ?? 0));
   if (!crashed.length) return { crashed, resume: null };
   const claim =
-    "Findings in `unverified` with `refutersDispatched` above zero and no surviving vote had every refuter die, and die again on the in-run retry — nothing looked at them. ";
+    "Findings in `unverified` with `refutersDispatched` above `refutersInconclusive` lost a refuter to a crash — a pair whose every vote died was re-dispatched once in-run and died again — and no refuter that ran decided them. ";
   const verb =
     "Defer them as crashed — reported, not acted on: omp's eval has no cached-replay mechanism, so a fresh review re-dispatches every agent() live rather than only the crashed legs, and the in-run retry was this review's one re-dispatch. Re-run nothing for them.";
   return { crashed, resume: claim + verb };
