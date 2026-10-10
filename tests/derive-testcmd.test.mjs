@@ -858,6 +858,7 @@ test("a mktemp that runs and fails on its second call is exit 3, never the cache
 for (const [what, body, status, reason] of [
   ["is killed", "kill -9 $$", 3, /^derive-testcmd: node did not finish reading the Recipe cache \(exit 137\)/m],
   ["can no longer be run", "exit 127", 3, /^derive-testcmd: node did not finish reading the Recipe cache \(exit 127\)/m],
+  ["exits 126", "exit 126", 3, /^derive-testcmd: node did not finish reading the Recipe cache \(exit 126\)/m],
   ["refuses the cache itself", "echo 'it does not parse: boom' >&2; exit 2", 1, /is unusable: it does not parse: boom/],
   ["faults on its own", "echo 'TypeError: boom' >&2; exit 1", 1, /is unusable: TypeError: boom/],
   ["refuses with a multi-line reason", "echo 'first line' >&2; echo 'second line' >&2; exit 2", 1, /is unusable: first line\nsecond line — run the Recipe/],
