@@ -29,10 +29,12 @@
 //            keeps firing on every completion, and without this key that
 //            healthy busy run reads as a dead one the moment the OLD beat
 //            ages past the interval it recorded before the stretch started.
-//   controller  ledger.mjs rotate only. {pid, lstart, prior}: the omp process
-//            that owns this run, its start time, and the verdict rotate
-//            judged on the record it replaced (dead, ancestor or none).
-//            Removed, not left stale, by a rotate that finds no omp ancestor.
+//   controller  ledger.mjs rotate only. {pid, lstart, prior, at}: the omp
+//            process that owns this run, its start time, the verdict rotate
+//            judged on the record it replaced (dead, ancestor or none), and
+//            when rotate wrote it — a mark older than `at` is the previous
+//            run's. Removed, not left stale, by a rotate that finds no omp
+//            ancestor.
 //
 // One writer per key. A key two scripts wrote would need locking to be
 // correct, and none of them is in a position to hold one. That holds per key,
@@ -180,12 +182,19 @@ export function readState(path, name) {
   // pid outside the range a process id can take is no record either, since
   // no process could ever answer for it. `prior` degrades like `stopped`
   // does: a junk verdict proves nothing, so it reads as "none", and the
-  // record around it still names a controller to judge.
+  // record around it still names a controller to judge. `at` degrades the
+  // same way, to null: the record still names a controller, and only when it
+  // was written is unknown.
   const ctl = (v) => {
     if (!isRecord(v)) return null;
     if (!Number.isInteger(v.pid) || v.pid < 1 || v.pid > 0x7fffffff) return null;
     if (typeof v.lstart !== "string" || v.lstart === "") return null;
-    return { pid: v.pid, lstart: v.lstart, prior: PRIORS.includes(v.prior) ? v.prior : "none" };
+    return {
+      pid: v.pid,
+      lstart: v.lstart,
+      prior: PRIORS.includes(v.prior) ? v.prior : "none",
+      at: Number.isInteger(v.at) && v.at > 0 ? v.at : null,
+    };
   };
   const { quiet, elapsed, digest, beat, ticked, controller, ...rest } = parsed;
   return {

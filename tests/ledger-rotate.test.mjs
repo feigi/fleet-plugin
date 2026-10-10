@@ -61,7 +61,15 @@ function fixture(t, { ledger = LEDGER, mark = null, controller = null, table = O
   const archives = () => readdirSync(dir).filter((n) => STAMPED.test(n)).sort();
   const state = () => JSON.parse(readFileSync(beatFile, "utf8"));
   const raw = () => (existsSync(beatFile) ? readFileSync(beatFile, "utf8") : null);
-  return { dir, file, cli, archives, state, raw };
+  // The record rotate wrote, less its `at`, which is checked here once: the
+  // instant of this call's write, so a reader can tell a mark written since
+  // from one the previous run left.
+  const ctl = () => {
+    const { at, ...rest } = state().controller;
+    assert.ok(Number.isInteger(at) && at <= Date.now() && at > Date.now() - 60_000, `controller.at ${at} is not this call's write time`);
+    return rest;
+  };
+  return { dir, file, cli, archives, state, raw, ctl };
 }
 
 // A live process that is no ancestor of the script: the foreign controller.
@@ -201,7 +209,7 @@ test("rotate rotates when the recorded controller is dead, and records this run'
   assert.equal(r.status, 0, r.stderr);
   assert.equal(f.archives().length, 1);
   assert.equal(existsSync(f.file), false);
-  assert.deepEqual(f.state().controller, { ...OURS, prior: "dead" });
+  assert.deepEqual(f.ctl(), { ...OURS, prior: "dead" });
 });
 
 test("rotate reads a live pid whose start time differs as a reused pid: dead, rotated, prior dead", (t) => {
@@ -211,7 +219,7 @@ test("rotate reads a live pid whose start time differs as a reused pid: dead, ro
   const r = f.cli(["rotate"]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(f.archives().length, 1);
-  assert.deepEqual(f.state().controller, { ...OURS, prior: "dead" });
+  assert.deepEqual(f.ctl(), { ...OURS, prior: "dead" });
 });
 
 test("rotate reads a recorded controller that is a live process the table cannot date as dead", (t) => {
@@ -221,7 +229,7 @@ test("rotate reads a recorded controller that is a live process the table cannot
   const f = fixture(t, { mark: FRESH, controller: { pid, lstart: "foreign-start", prior: "none" } });
   const r = f.cli(["rotate"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(f.state().controller, { ...OURS, prior: "dead" });
+  assert.deepEqual(f.ctl(), { ...OURS, prior: "dead" });
 });
 
 test("rotate rotates under its own ancestor, at any depth, even while the mark is beating, with prior ancestor", (t) => {
@@ -240,7 +248,7 @@ test("rotate rotates under its own ancestor, at any depth, even while the mark i
     assert.equal(r.status, 0, `${ancestor}: ${r.stderr}`);
     assert.equal(f.archives().length, 1);
     assert.equal(existsSync(f.file), false);
-    assert.deepEqual(f.state().controller, { ...OURS, prior: "ancestor" });
+    assert.deepEqual(f.ctl(), { ...OURS, prior: "ancestor" });
   }
 });
 
@@ -258,12 +266,12 @@ test("rotate with no record keeps the mark check — refused while beating, noth
     const ok = f.cli(["rotate"]);
     assert.equal(ok.status, 0, ok.stderr);
     assert.equal(f.archives().length, 1);
-    assert.deepEqual(f.state().controller, { ...OURS, prior: "none" });
+    assert.deepEqual(f.ctl(), { ...OURS, prior: "none" });
   }
   const none = fixture(t);
   assert.equal(none.raw(), null, "the fixture must start with no state file");
   assert.equal(none.cli(["rotate"]).status, 0);
-  assert.deepEqual(none.state().controller, { ...OURS, prior: "none" });
+  assert.deepEqual(none.ctl(), { ...OURS, prior: "none" });
 });
 
 test("rotate reads a malformed record as no record", (t) => {
@@ -271,7 +279,7 @@ test("rotate reads a malformed record as no record", (t) => {
     const f = fixture(t, { mark: STALE, controller });
     const r = f.cli(["rotate"]);
     assert.equal(r.status, 0, `${JSON.stringify(controller)}: ${r.stderr}`);
-    assert.deepEqual(f.state().controller, { ...OURS, prior: "none" });
+    assert.deepEqual(f.ctl(), { ...OURS, prior: "none" });
   }
 });
 
@@ -280,7 +288,7 @@ test("rotate records the controller also when there was no ledger to rotate", (t
   const r = f.cli(["rotate"]);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout), { rotated: false, archive: null });
-  assert.deepEqual(f.state().controller, { ...OURS, prior: "dead" });
+  assert.deepEqual(f.ctl(), { ...OURS, prior: "dead" });
 });
 
 test("rotate with no ledger and no record exits 0 under a beating mark, as before, and still records the controller", (t) => {
@@ -288,7 +296,7 @@ test("rotate with no ledger and no record exits 0 under a beating mark, as befor
   const r = f.cli(["rotate"]);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout), { rotated: false, archive: null });
-  assert.deepEqual(f.state().controller, { ...OURS, prior: "none" });
+  assert.deepEqual(f.ctl(), { ...OURS, prior: "none" });
 });
 
 test("rotate with no ledger still refuses to replace a live foreign controller's record", (t) => {
@@ -312,7 +320,7 @@ test("rotate records the NEAREST omp ancestor — argv[0] or argv[1] named exact
   };
   const f = fixture(t, { table });
   assert.equal(f.cli(["rotate"]).status, 0);
-  assert.deepEqual(f.state().controller, { pid: near, lstart: "near-start", prior: "none" });
+  assert.deepEqual(f.ctl(), { pid: near, lstart: "near-start", prior: "none" });
 
   // A file name that merely contains `omp`, and `omp` in a later argument, are not omp.
   const lookalikes = {
@@ -338,7 +346,9 @@ test("rotate with no omp ancestor removes an older record, and every other key i
 
   const g = fixture(t, { mark, extra, controller: { pid: deadPid(), lstart: "x", prior: "none" } });
   assert.equal(g.cli(["rotate"]).status, 0);
-  assert.deepEqual(g.state(), { ...extra, ...mark, controller: { ...OURS, prior: "dead" } });
+  const { controller: _record, ...others } = g.state();
+  assert.deepEqual(others, { ...extra, ...mark });
+  assert.deepEqual(g.ctl(), { ...OURS, prior: "dead" });
 });
 
 test("rotate refuses, moving nothing, when the process table cannot be read", (t) => {

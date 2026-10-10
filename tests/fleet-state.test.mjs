@@ -201,7 +201,7 @@ test("writeState: `controller` survives a tick write and a heartbeat write, and 
   // of them dropped would leave the next run judging no record at all.
   const dir = mkdtempSync(join(tmpdir(), "fleet-state-controller-"));
   const path = join(dir, "heartbeat.json");
-  const controller = { pid: 29405, lstart: "Fri Oct  9 14:26:16 2026", prior: "dead" };
+  const controller = { pid: 29405, lstart: "Fri Oct  9 14:26:16 2026", prior: "dead", at: 1_700_000_000_000 };
   writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller, note: "not ours" }));
   const prev = readState(path, "fleet-state-test");
   assert.deepEqual(prev.controller, controller);
@@ -229,8 +229,14 @@ test("readState: `controller` is a record only with a pid and a start time; a ju
   for (const bad of [null, "29405", [29405], {}, { pid: 29405 }, { lstart: "x" }, { pid: "29405", lstart: "x" }, { pid: 0, lstart: "x" }, { pid: -1, lstart: "x" }, { pid: 1.5, lstart: "x" }, { pid: 2 ** 31, lstart: "x" }, { pid: 29405, lstart: "" }, { pid: 29405, lstart: 7 }]) {
     assert.equal(read(bad), null, JSON.stringify(bad));
   }
-  for (const prior of ["dead", "ancestor", "none"]) assert.deepEqual(read({ pid: 7, lstart: "x", prior }), { pid: 7, lstart: "x", prior });
-  for (const prior of [undefined, "alive", 3]) assert.deepEqual(read({ pid: 7, lstart: "x", prior }), { pid: 7, lstart: "x", prior: "none" });
+  for (const prior of ["dead", "ancestor", "none"]) assert.deepEqual(read({ pid: 7, lstart: "x", prior }), { pid: 7, lstart: "x", prior, at: null });
+  for (const prior of [undefined, "alive", 3]) assert.deepEqual(read({ pid: 7, lstart: "x", prior }), { pid: 7, lstart: "x", prior: "none", at: null });
+  // `at` degrades like `prior`: a record without a usable write time still
+  // names a controller to judge, and only the time is unknown.
+  assert.deepEqual(read({ pid: 7, lstart: "x", prior: "dead", at: 1_700_000_000_000 }), { pid: 7, lstart: "x", prior: "dead", at: 1_700_000_000_000 });
+  for (const at of [0, -5, 1.5, "1700000000000", null]) {
+    assert.deepEqual(read({ pid: 7, lstart: "x", prior: "dead", at }), { pid: 7, lstart: "x", prior: "dead", at: null }, JSON.stringify(at));
+  }
   rmSync(dir, { recursive: true, force: true });
 });
 
