@@ -609,7 +609,7 @@ test("the fix-applier lead-in hands over the result file's path, never the findi
   // in one run). The path is the whole of the handover.
   assert.match(
     leadIn,
-    phrase("the **path** `<scratch>/review-<pr>.json`"),
+    phrase("the **path** `<scratch>/pr<pr>/<run>/review.json`"),
     "the lead-in no longer hands the fix-applier the result file's path",
   );
   assert.match(leadIn, phrase("never the findings"), "the lead-in no longer says the findings stay out of the prompt");

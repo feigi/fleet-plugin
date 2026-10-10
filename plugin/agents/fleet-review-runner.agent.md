@@ -1,6 +1,6 @@
 ---
 name: fleet-review-runner
-description: A `/skill:run-team` review runner on omp — dispatched by the controller as review-pr-<pr#> with pr, branch, worktree, testCmd and scratch (the scratch root); runs runReviewOnOmp to completion in its own eval cell, writes <scratch>/review-<pr>.json, and reports the digest and the path. Never invoked directly.
+description: A `/skill:run-team` review runner on omp — dispatched by the controller as review-pr-<pr#> with pr, branch, worktree, testCmd and scratch (the scratch root); runs runReviewOnOmp to completion in its own eval cell, writes <scratch>/pr<pr>/<run>/review.json in the review's own run root, and reports the digest, the path and the reviewed= token naming that run. Never invoked directly.
 model: "@smol:low"
 spawns: fleet-review-snapshot, fleet-review-test-run, fleet-review-correctness, fleet-review-silent-failure, fleet-review-tests, fleet-review-comments, fleet-review-types, fleet-review-simplify, fleet-review-verifier
 ---
@@ -72,6 +72,6 @@ redid the whole snapshot/fan-out sequence from scratch.
      controller gives the hand-dispatched fallback reviewer. Do not run the
      cell again — the one retry already happened inside it.
    - **The cell threw** (an argument refused before any review ran, the
-     Resolver failing, the result file failing to write) → first line
+     Resolver failing) → first line
      `review-pr-<pr>: failed`, then the error text verbatim. Do not run the
      cell again.
