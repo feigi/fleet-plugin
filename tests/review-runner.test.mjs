@@ -9,8 +9,8 @@
 //     return carries only the digest, the path and the ledger token, which
 //     names that run;
 //   - a throw or an empty return is retried ONCE; a second failure reports
-//     `failed` with both errors and names the fallback reviewer
-//     `review-pr-<pr>-b`, writing no file;
+//     `failed` with both errors, naming no fallback (the controller takes the
+//     next free reviewer name off the PR's rows), writing no file;
 //   - a dispatch mistake (no absolute scratch, a non-numeric pr) is refused
 //     before the review runs at all — it is not a review failure, so it must
 //     neither burn two 20-minute runs nor send the controller to the fallback.

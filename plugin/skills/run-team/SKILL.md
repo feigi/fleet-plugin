@@ -4038,8 +4038,9 @@ it your own removal reads as one. `row` refuses a `label-off=` naming no
 `row` holds a PR's review record to these rules, read across every row that
 maps to the PR — its settled `impl-<N>=PR#<M>` token, else its first `PR#`
 mention, else its key — in ledger order. Every `reviewed=` answers the nearest
-earlier launch that is neither answered nor `=failed`. A launch identity (the
-kind with its runId or name, `=failed` aside) appears once. No launch appears
+earlier launch that is neither answered nor `=failed`. A launch identity (a
+workflow's runId, or a runner's name whichever of member or fallback launched
+it, `=failed` aside) appears once. No launch appears
 while an earlier one is open — unanswered and not `=failed`. A launch open
 before the write is still on one of the PR's rows after it, `=failed` allowed.
 A member name appears once on the line, whatever its outcome. Every

@@ -183,7 +183,7 @@ export function parseRow(row) {
     }
     if (tok.startsWith("review=")) {
       review = true;
-      const [, kind, name, failed] = REVIEW.exec(tok) ?? [];
+      const { kind, name, failed } = REVIEW.exec(tok)?.groups ?? {};
       if (!failed) reviewLive = true;
       if (kind === "member" || kind === "fallback") {
         if (failed) settled.add(name);

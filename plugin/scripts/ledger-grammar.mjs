@@ -126,15 +126,17 @@ export function rowNums(text) {
 // A PR's review is not a member, so it carries its own pair of row tokens.
 // The launch is `review=wf:<runId>` | `review=member:<name>` |
 // `review=fallback:<name>`, settled dead as `…=failed`; the capture groups are
-// the kind, the runId or runner name, and the `=failed` suffix, so the
-// launch's identity — kind and runId or name, `=failed` aside — comes out of
-// this one regex. The first runner on PR <n> is `review-pr-<n>`, every later
-// one the next letter the PR's rows do not carry yet (`-b`, `-c`, …). The
+// the kind, the runId or runner name, and the `=failed` suffix. A launch's
+// identity comes out of this one regex, `=failed` aside: a workflow's is its
+// runId, a runner's is its name whichever of member or fallback launched it,
+// since both are the one hub member of that name. The first runner on PR <n>
+// is `review-pr-<n>`, every later one the next letter the PR's rows do not
+// carry yet (`-b`, `-c`, …). The
 // result is `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, `<run>`
 // the name of the review's own run root under `<scratch>/pr<n>/` (`run-` and
 // the eight characters `mktemp` chose), where its result file `review.json`
 // sits.
-export const REVIEW = /^review=(wf|member|fallback):([^=\s]+?)(=failed)?$/;
+export const REVIEW = /^review=(?<kind>wf|member|fallback):(?<name>[^=\s]+)(?<failed>=failed)?$/;
 export const REVIEWED = /^reviewed=([0-9a-fA-F]{7,40}):(\d+)\/(\d+)\/(\d+):(run-[A-Za-z0-9]{8})$/;
 
 // Every PR's token stream: every row that maps to it under rowNums(), in
@@ -150,6 +152,8 @@ function streams(rows) {
   }
   return out;
 }
+
+const isOpen = (launch) => !launch.failed && !launch.answered;
 
 // One stream's review record, read in order. A `reviewed=` answers the
 // nearest earlier launch that is neither answered yet nor settled `=failed`;
@@ -168,9 +172,11 @@ function readReviews(tokens) {
         out.unparseable.push(tok);
         continue;
       }
-      const launch = { id: `review=${m[1]}:${m[2]}`, kind: m[1], name: m[2], failed: m[3] !== undefined, answered: false };
-      if (launches.some((l) => l.id === launch.id)) out.repeated.push(launch.id);
-      const open = launches.find((l) => !l.failed && !l.answered);
+      const { kind, name, failed } = m.groups;
+      const launch = { id: `review=${kind}:${name}`, kind, name, failed: failed !== undefined, answered: false };
+      launch.key = kind === "wf" ? launch.id : `runner:${name}`;
+      if (launches.some((l) => l.key === launch.key)) out.repeated.push(launch.id);
+      const open = launches.find(isOpen);
       if (open) out.crowded.push({ id: launch.id, open: open.id });
       launches.push(launch);
     } else if (tok.startsWith("reviewed=")) {
@@ -178,13 +184,13 @@ function readReviews(tokens) {
         out.unparseable.push(tok);
         continue;
       }
-      const answers = launches.findLast((l) => !l.failed && !l.answered);
+      const answers = launches.findLast(isOpen);
       if (answers) answers.answered = true;
       else out.unpaired.push(tok);
     }
   }
   out.launches = launches;
-  out.open = launches.filter((l) => !l.failed && !l.answered).map((l) => l.id);
+  out.open = launches.filter(isOpen).map((l) => l.id);
   return out;
 }
 
@@ -202,8 +208,9 @@ function added(before, after) {
 }
 
 // The runner name a new launch on PR <pr> takes: `review-pr-<pr>`, else the
-// first letter from `b` its rows carry on no runner launch. null for a stream
-// keyed by no PR number, or with every letter taken.
+// first letter from `b` that no runner launch on the PR's rows already uses —
+// member or fallback, `=failed` or not. null for a stream keyed by no PR
+// number, or with every letter taken.
 function nextReviewer(launches, pr) {
   if (typeof pr !== "number") return null;
   const used = new Set(launches.filter((l) => l.kind !== "wf").map((l) => l.name));
@@ -232,7 +239,8 @@ const OPEN_WAYS_OUT = "wait for its reviewed=, or, once Member-killed confirms i
  *   its outcome;
  * - unparseable review tokens: a `review=`/`reviewed=` matches REVIEW/REVIEWED;
  * - paired results: every `reviewed=` answers a launch (readReviews above);
- * - unique launches: a launch identity appears at most once in its PR's stream;
+ * - unique launches: a launch identity — a workflow's runId, a runner's name
+ *   whatever its kind — appears at most once in its PR's stream;
  * - one open launch per PR: no launch appears while an earlier one is open;
  * - an open launch is never removed: every launch open before the write is in
  *   its PR's stream after it, `=failed` allowed, on any of the PR's rows.
@@ -270,7 +278,12 @@ export function rowWriteRefusal(before, after, oldLine, line) {
     const crowded = added(b.crowded.map((c) => c.id), a.crowded.map((c) => c.id))[0];
     if (crowded !== undefined) {
       const { open } = a.crowded.find((c) => c.id === crowded);
-      return `launch '${crowded}' on ${where(id)} while launch '${open}' is open — one open launch per PR: ${OPEN_WAYS_OUT}`;
+      // The stream names the later launch as the crowded one, but the write may
+      // have added the earlier one — then the new launch is the offender and
+      // the open one is the launch the ledger already held.
+      const fresh = added(b.launches.map((l) => l.id), a.launches.map((l) => l.id));
+      const [offender, holder] = fresh.includes(open) && !fresh.includes(crowded) ? [open, crowded] : [crowded, open];
+      return `launch '${offender}' on ${where(id)} while launch '${holder}' is open — one open launch per PR: ${OPEN_WAYS_OUT}`;
     }
   }
   for (const [id, tokens] of was) {

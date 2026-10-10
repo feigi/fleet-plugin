@@ -666,8 +666,8 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
       if (tok.startsWith("review=")) {
         const m = REVIEW.exec(tok);
         if (!m) throw new LedgerError(`${where}: '${tok}' is not review=wf:<runId> | member:review-pr-<n> | fallback:review-pr-<n>, optionally =failed`);
-        st.inFlight = !m[3];
-        if (!m[3]) st.reviewedAny = true;
+        st.inFlight = !m.groups.failed;
+        if (!m.groups.failed) st.reviewedAny = true;
       } else if (tok.startsWith("reviewed=")) {
         const m = REVIEWED.exec(tok);
         if (!m && REVIEWED_RUNLESS.test(tok)) {

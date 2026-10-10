@@ -55,6 +55,7 @@ function fixture(t, rows = null) {
 const A = "review=member:review-pr-482";
 const B = "review=fallback:review-pr-482-b";
 const C = "review=member:review-pr-482-c";
+const WHILE_A_OPEN = /launch 'review=fallback:review-pr-482-b' on PR #482 while launch 'review=member:review-pr-482' is open/;
 const r1 = "reviewed=aaaaaaa:4/5/14:run-aaaaaaa1";
 const r2 = "reviewed=b7adf86:4/5/14:run-bbbbbbb2";
 const r3 = "reviewed=c0ffee1:0/1/2:run-ccccccc3";
@@ -128,6 +129,12 @@ test("the next free name skips every letter the PR's rows already carry, whateve
   refused("1", `${IMPL} · ${A}=failed ${B} ${r1} ${HALT} ${B}`, /'review=fallback:review-pr-482-b'/, /review-pr-482-c\b/);
 });
 
+test("a runner name a launch of the other kind already used is refused as a repeated launch", (t) => {
+  const { ok, refused } = fixture(t);
+  ok("1", `${IMPL} · review=fallback:review-pr-482 ${r1}`);
+  refused("1", `${IMPL} · review=fallback:review-pr-482 ${r1} ${A}`, /'review=member:review-pr-482'/, /PR #482/, /unique launches/, /review-pr-482-b\b/);
+});
+
 test("a repeated workflow runId is refused as a repeated launch", (t) => {
   const { ok, refused } = fixture(t);
   ok("1", `${IMPL} · review=wf:r1 ${r1}`);
@@ -184,19 +191,24 @@ test("a repeated launch already on the PR is carried, and settling its repeat =f
 test("a second launch while one is open is refused on the same row, naming the PR, the open launch and both ways out", (t) => {
   const { ok, refused } = fixture(t);
   ok("1", `${IMPL} · ${A}`);
-  refused("1", `${IMPL} · ${A} ${B}`, /PR #482/, /'review=member:review-pr-482'/, /one open launch/, /reviewed=/, /Member-killed/, /=failed in the same rewrite/);
+  refused("1", `${IMPL} · ${A} ${B}`, /PR #482/, WHILE_A_OPEN, /one open launch/, /reviewed=/, /Member-killed/, /=failed in the same rewrite/);
 });
 
 test("a second launch while one is open is refused on another row that maps to the PR", (t) => {
   const { ok, refused } = fixture(t);
   ok("1", `${IMPL} · ${A}`);
-  refused("482", `PR#482 · ${B}`, /PR #482/, /'review=member:review-pr-482'/);
+  refused("482", `PR#482 · ${B}`, /PR #482/, WHILE_A_OPEN);
+});
+
+test("a new launch written on a row BEFORE the open launch's row is still the offender, and the open launch the one the ledger held", (t) => {
+  const { refused } = fixture(t, ["#482 PR#482 · ci=1:1:success", `#1 ${IMPL} · ${A}`]);
+  refused("482", `PR#482 · ci=1:1:success ${B}`, WHILE_A_OPEN);
 });
 
 test("adding an already-failed launch after an open one is refused", (t) => {
   const { ok, refused } = fixture(t);
   ok("1", `${IMPL} · ${A}`);
-  refused("1", `${IMPL} · ${A} ${B}=failed`, /'review=member:review-pr-482'/, /one open launch/);
+  refused("1", `${IMPL} · ${A} ${B}=failed`, WHILE_A_OPEN, /one open launch/);
 });
 
 test("settling an open launch =failed in place is accepted, alone and with a new launch in the same rewrite", (t) => {
@@ -253,6 +265,34 @@ test("an added unparseable review= or reviewed= is refused; one carried forward 
   refused("1", `${IMPL} · review=garbage reviewed=nothead review=wf:`, /'review=wf:'/, /PR #482/);
   refused("1", `${IMPL} · review=garbage reviewed=nothead review=garbage`, /'review=garbage'/);
   refused("1", `${IMPL} · review=garbage reviewed=nothead reviewed=aaaaaaa:1/0/0`, /'reviewed=aaaaaaa:1\/0\/0'/);
+});
+
+// ---- every PR's stream is judged, not just the first in ledger order ----
+
+const OTHER = "impl-4=PR#4 → PR#4 · review=member:review-pr-4 reviewed=bbbbbbb:1/0/0:run-bbbbbbb4";
+
+test("a violation on a PR whose stream is not first in ledger order is refused", (t) => {
+  const { ok, refused } = fixture(t, [`#4 ${OTHER}`, `#1 ${IMPL} · ${A}`]);
+  // Added to the later stream: an unpaired result, a crowded launch, a dropped open launch.
+  refused("1", `${IMPL} · ${A} ${r1} ${r2}`, /PR #482/, /paired results/);
+  refused("1", `${IMPL} · ${A} ${B}`, /PR #482/, /one open launch/);
+  refused("1", `${IMPL}`, /PR #482/, /removes open launch/);
+  // A write on that stream that adds nothing wrong is still accepted.
+  ok("1", `${IMPL} · ${A} ${r1}`);
+});
+
+test("a reviewed= whose head is under seven hex digits is refused as unparseable", (t) => {
+  const { ok, refused } = fixture(t);
+  ok("1", `${IMPL} · ${A}`);
+  refused("1", `${IMPL} · ${A} reviewed=abc:1/0/0:run-xxxxxxxx`, /'reviewed=abc:1\/0\/0:run-xxxxxxxx'/, /PR #482/);
+});
+
+test("rows that map to no PR and carry no key are streams of their own, not one shared stream", () => {
+  const first = "alpha · review=member:review-pr-1";
+  const second = "beta · review=member:review-pr-2";
+  assert.equal(rowWriteRefusal([first], [first, second], null, second), null);
+  const answer = "beta · reviewed=aaaaaaa:1/0/0:run-aaaaaaa1";
+  assert.match(rowWriteRefusal([first], [first, answer], null, answer), /answers no open launch/);
 });
 
 // ---- rows that carry no review record are untouched ----
