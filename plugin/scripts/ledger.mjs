@@ -37,7 +37,8 @@ import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition, CELL, tierValues, rowPr, ROWS, DISPATCHED, FILED, RULED, DRAIN, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
-import { stateFileIn, readState, assessBeat, stallsAt } from "./fleet-state.mjs";
+import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
+import { isDead, processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
 
 const NAME = "ledger";
 // The plugin's own agent definitions — the directory tier-check.mjs reads
@@ -586,17 +587,6 @@ function readLock() {
   } catch (e) {
     if (e.code === "ENOENT") return null;
     die(`cannot read ${LOCK}: ${e.message}`);
-  }
-}
-
-// ESRCH alone is dead. EPERM is a live process we may not signal, and any
-// other error is not evidence of death either.
-function isDead(pid) {
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (e) {
-    return e.code === "ESRCH";
   }
 }
 
@@ -1510,38 +1500,86 @@ function runCheck() {
 // writer either lands before the move (in the archive, whole) or after it (in
 // the fresh skeleton) — never half in each.
 //
-// The liveness guard reads the heartbeat mark beside the ledger, through
-// fleet-state.mjs's own reader and verdict: a controller whose mark is still
-// beating owns this file, and rotating under it would split its run across
-// two ledgers. A stalled mark, a recorded stop, or no mark at all allows the
-// rotation. The guard proves "not beating", never "dead": a controller alive
-// but busy outside its heartbeat hold for longer than its recorded interval
-// reads as stalled, and is rotated under.
+// The liveness guard reads `controller` in the heartbeat file beside the
+// ledger, the record the previous run's rotate left: the omp process that
+// owned that run and its start time. It is judged once, before anything is
+// written. A recorded controller that is alive, still the process it was
+// (same start time), and not an ancestor of this call owns this file —
+// whatever its heartbeat mark says, because a controller can stop beating
+// and keep dispatching — and rotating under it would split its run across
+// two ledgers. A dead one, a reused pid, or this session's own earlier run
+// allows the rotation. With no record the guard falls back to the mark, read
+// through fleet-state.mjs's own reader and verdict: still beating refuses; a
+// stalled mark, a recorded stop, or no mark at all allows the rotation, and
+// that fallback proves "not beating", never "dead".
+//
+// A heartbeat file that exists but cannot be read or parsed gets neither
+// verdict: a record it may hold cannot be known, so rotate refuses rather
+// than read the fault as "no record".
+//
+// Its last act, whether or not there was a ledger to move, replaces the
+// record with this run's own, carrying the verdict as `prior` — the next
+// step reads `prior`, because the new record always names this run's own
+// live ancestor. No omp ancestor removes the key: an older run's record left
+// in place would be judged again, as dead, by a run that cannot know whether
+// the run after it is still live. This run's own record is computed before
+// anything moves too, so a process table that cannot be read refuses with
+// nothing moved rather than after the move.
 function runRotate() {
-  if (!existsSync(file)) {
-    console.error(`    nothing to rotate: ${file} does not exist`);
-    console.log(JSON.stringify({ rotated: false, archive: null }));
-    return;
-  }
   const beatFile = stateFileIn(dirname(file));
-  const { beat, ticked } = readState(beatFile, NAME);
-  if (assessBeat({ beat, ticked, now: Date.now() }).kind === "beating") {
+  const state = readState(beatFile, NAME);
+  const { beat, ticked, controller } = state;
+  // A file that exists and could not be used holds no record we can know of:
+  // reading it as "no record" would let a live controller's ledger be moved
+  // by exactly the fault that hid its record.
+  if (state.degraded) {
+    die(`refusing to rotate ${file}: ${beatFile} exists but cannot be read or parsed, so a controller record in it cannot be judged — repair or remove it`);
+  }
+  let prior, ours;
+  try {
+    const source = processSource();
+    const chain = ancestry(source);
+    prior = judgeController(controller, source, chain);
+    ours = controllerOf(source, chain);
+  } catch (e) {
+    if (!(e instanceof ProcUnreadable)) throw e;
+    die(`refusing to rotate ${file}: ${e.message} — ${controller === null ? "this run's own controller cannot be determined" : `the controller recorded in ${beatFile} cannot be judged`}`);
+  }
+  if (prior === "alive") {
+    die(`refusing to rotate ${file}: the controller that owns it is alive — controller pid ${controller.pid} (started ${controller.lstart}) recorded in ${beatFile} is alive and not an ancestor of this run, whatever its heartbeat mark says; one controller per checkout — end that omp session, or start the run from inside it`);
+  }
+  // The fallback guards a ledger, as it always has: with none to move there
+  // is nothing for a beating mark to protect.
+  const exists = existsSync(file);
+  if (prior === "none" && exists && assessBeat({ beat, ticked, now: Date.now() }).kind === "beating") {
     die(`refusing to rotate ${file}: the controller that owns it is still beating — last beat ${new Date(beat.at).toISOString()} in ${beatFile}; it counts as stalled after ${new Date(stallsAt({ beat, ticked })).toISOString()}`);
   }
-  const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "");
-  const archive = join(dirname(file), `${basename(file, ".md")}.${stamp}.md`);
-  try {
-    linkSync(file, archive);
-  } catch (e) {
-    die(e.code === "EEXIST" ? `refusing to rotate ${file}: ${archive} already exists` : `cannot rotate ${file} to ${archive}: ${e.message}`);
+  let archive = null;
+  if (exists) {
+    const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "");
+    archive = join(dirname(file), `${basename(file, ".md")}.${stamp}.md`);
+    try {
+      linkSync(file, archive);
+    } catch (e) {
+      die(e.code === "EEXIST" ? `refusing to rotate ${file}: ${archive} already exists` : `cannot rotate ${file} to ${archive}: ${e.message}`);
+    }
+    try {
+      unlinkSync(file);
+    } catch (e) {
+      die(`archived ${file} as ${archive} but could not remove it: ${e.message} — remove it by hand before the next write`);
+    }
+    console.error(`    rotated ${file} -> ${archive}`);
+  } else {
+    console.error(`    nothing to rotate: ${file} does not exist`);
   }
-  try {
-    unlinkSync(file);
-  } catch (e) {
-    die(`archived ${file} as ${archive} but could not remove it: ${e.message} — remove it by hand before the next write`);
+  // Re-read rather than reuse the read above: the heartbeat file has other
+  // writers, and a patch built from an older view would undo what they wrote
+  // since.
+  const record = ours === null ? undefined : { ...ours, prior };
+  if (!writeState(beatFile, NAME, readState(beatFile, NAME), { controller: record })) {
+    die(`${archive === null ? "found no ledger" : `rotated ${file} -> ${archive}`} but could not record this run's controller in ${beatFile} — the next run judges whatever record that file still holds, and none if it cannot be read`);
   }
-  console.error(`    rotated ${file} -> ${archive}`);
-  console.log(JSON.stringify({ rotated: true, archive }));
+  console.log(JSON.stringify({ rotated: archive !== null, archive }));
 }
 
 // ── dispatch / settle ────────────────────────────────────────────────────────

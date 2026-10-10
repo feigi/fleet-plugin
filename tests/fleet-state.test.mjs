@@ -195,6 +195,45 @@ test("writeState: `ticked` survives a heartbeat write the same way `beat` surviv
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("writeState: `controller` survives a tick write and a heartbeat write, and a patch of undefined removes it", () => {
+  // #2966. ledger.mjs rotate is the key's one writer; fleet-tick and
+  // fleet-heartbeat rewrite the file on every tick and hold, and a key either
+  // of them dropped would leave the next run judging no record at all.
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-controller-"));
+  const path = join(dir, "heartbeat.json");
+  const controller = { pid: 29405, lstart: "Fri Oct  9 14:26:16 2026", prior: "dead" };
+  writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller, note: "not ours" }));
+  const prev = readState(path, "fleet-state-test");
+  assert.deepEqual(prev.controller, controller);
+  assert.deepEqual(prev.rest, { note: "not ours" }, "`controller` must be destructured out, not left in `rest`");
+  assert.equal(writeState(path, "fleet-state-test", prev, { quiet: 1, digest: "d" }), true);
+  assert.deepEqual(readState(path, "fleet-state-test").controller, controller, "a tick write erased the controller record");
+  const beat = { at: 1_700_000_000_000, interval: 300, stopped: "" };
+  assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { elapsed: 5, beat }), true);
+  assert.deepEqual(readState(path, "fleet-state-test").controller, controller, "a heartbeat write erased the controller record");
+
+  assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { controller: undefined }), true);
+  const raw = JSON.parse(readFileSync(path, "utf8"));
+  assert.equal("controller" in raw, false);
+  assert.deepEqual(raw, { note: "not ours", quiet: 1, elapsed: 5, digest: "d", beat });
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("readState: `controller` is a record only with a pid and a start time; a junk prior reads as none", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-controller-shape-"));
+  const path = join(dir, "heartbeat.json");
+  const read = (controller) => {
+    writeFileSync(path, JSON.stringify({ quiet: 0, controller }));
+    return readState(path, "fleet-state-test").controller;
+  };
+  for (const bad of [null, "29405", [29405], {}, { pid: 29405 }, { lstart: "x" }, { pid: "29405", lstart: "x" }, { pid: 0, lstart: "x" }, { pid: -1, lstart: "x" }, { pid: 1.5, lstart: "x" }, { pid: 2 ** 31, lstart: "x" }, { pid: 29405, lstart: "" }, { pid: 29405, lstart: 7 }]) {
+    assert.equal(read(bad), null, JSON.stringify(bad));
+  }
+  for (const prior of ["dead", "ancestor", "none"]) assert.deepEqual(read({ pid: 7, lstart: "x", prior }), { pid: 7, lstart: "x", prior });
+  for (const prior of [undefined, "alive", 3]) assert.deepEqual(read({ pid: 7, lstart: "x", prior }), { pid: 7, lstart: "x", prior: "none" });
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("writeState: the file a reader already opened is replaced whole, never rewritten in place", () => {
   // #2349. readState maps an empty or half-written file to the no-mark state
   // on purpose, so a write that truncated heartbeat.json and then filled it

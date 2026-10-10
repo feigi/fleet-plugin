@@ -1,9 +1,10 @@
-// The heartbeat's shared state file, owned jointly by fleet-tick.mjs and
-// fleet-heartbeat.mjs — so the path and the file's shape live here rather than
-// in two spellings that drift. Same rule arg.mjs states for the digits guard:
-// what travels between scripts is the rule, never a copy of it.
+// The heartbeat's shared state file, owned jointly by fleet-tick.mjs,
+// fleet-heartbeat.mjs and ledger.mjs rotate — so the path and the file's shape
+// live here rather than in spellings that drift. Same rule arg.mjs states for
+// the digits guard: what travels between scripts is the rule, never a copy of
+// it.
 //
-// KEY OWNERSHIP, which is the whole reason two scripts can share one file
+// KEY OWNERSHIP, which is the whole reason several scripts can share one file
 // without a lock:
 //
 //   quiet    fleet-tick only. Consecutive ticks that asked the controller for
@@ -28,9 +29,18 @@
 //            keeps firing on every completion, and without this key that
 //            healthy busy run reads as a dead one the moment the OLD beat
 //            ages past the interval it recorded before the stretch started.
+//   controller  ledger.mjs rotate only. {pid, lstart, prior}: the omp process
+//            that owns this run, its start time, and the verdict rotate
+//            judged on the record it replaced (dead, ancestor or none).
+//            Removed, not left stale, by a rotate that finds no omp ancestor.
 //
-// One writer per key. A key both scripts wrote would need locking to be
-// correct, and neither script is in a position to hold one.
+// One writer per key. A key two scripts wrote would need locking to be
+// correct, and none of them is in a position to hold one. That holds per key,
+// not per write: a writer carries every key it does not own from the view it
+// read, so a read that lands before another script's write and a write that
+// lands after it put the older value back. The windows are the gap between a
+// script's own read and its own write, and the next write of that key
+// corrects it, but until then a stale `controller` can be judged by a rotate.
 
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -69,6 +79,12 @@ export function statePath(name) {
   }
 }
 
+// A plain JSON object: not null, not an array, not a scalar.
+const isRecord = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+// A recorded `prior` is one of these; anything else degrades to "none".
+const PRIORS = ["dead", "ancestor", "none"];
+
 // An unreadable or corrupt state file is NOT fatal, and the direction of the
 // failure is the argument: a missing streak reads as quiet=0, which is the BASE
 // interval — more frequent level checks, never fewer. Dying instead would stop
@@ -77,14 +93,20 @@ export function statePath(name) {
 // Absent is the ONLY silent case, because it is the only one that is not a
 // fault: a fresh run legitimately has no file yet. An unreadable file and a
 // corrupt one are both announced — each discards real state, and silence about
-// a degraded read is the failure class this whole ticket exists to close.
+// a degraded read is the failure class this whole ticket exists to close. Both
+// come back flagged `degraded`, for the one caller that must not read them as
+// a file with nothing in it.
 export function readState(path, name) {
   // `beat: null` is the absent MARK, and it is not the same value as a mark
   // whose fields are zero: nothing has been seen beating, so there is nothing
   // to judge and nothing to report. A zeroed mark would date the beat to the
   // epoch and read as decades overdue on a run that has simply not started
   // one — the cry-wolf direction this key must never fail in.
-  const fresh = { quiet: 0, elapsed: 0, digest: "", beat: null, ticked: null, rest: {} };
+  const fresh = { quiet: 0, elapsed: 0, digest: "", beat: null, ticked: null, controller: null, rest: {} };
+  // The same state, flagged: the file EXISTS and could not be used. A caller
+  // that acts on the absence of a record — ledger.mjs rotate — must tell this
+  // from `fresh`, which is a run that has simply not written one yet.
+  const degraded = { ...fresh, degraded: true };
   let raw;
   try {
     raw = readFileSync(path, "utf8");
@@ -99,6 +121,7 @@ export function readState(path, name) {
     // whole ticket exists to close.
     if (e.code !== "ENOENT") {
       console.error(`${name}: WARNING could not read ${path} (${e.message}) — restarting at the base interval`);
+      return degraded;
     }
     return fresh;
   }
@@ -107,11 +130,11 @@ export function readState(path, name) {
     parsed = JSON.parse(raw);
   } catch (e) {
     console.error(`${name}: WARNING ${path} is not JSON (${e.message}) — restarting at the base interval`);
-    return fresh;
+    return degraded;
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (!isRecord(parsed)) {
     console.error(`${name}: WARNING ${path} is not an object — restarting at the base interval`);
-    return fresh;
+    return degraded;
   }
   // Per-field validation, not all-or-nothing: a file carrying a good `quiet`
   // and a junk `elapsed` keeps the streak instead of losing both to one key.
@@ -139,7 +162,7 @@ export function readState(path, name) {
   // a stop AT ALL while the mark is still fresh; it is announced, correctly,
   // once the silence itself earns a verdict.
   const mark = (v) => {
-    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    if (!isRecord(v)) return null;
     const at = num(v.at), interval = num(v.interval);
     if (at === 0 || interval === 0) return null;
     return { at, interval, stopped: typeof v.stopped === "string" ? v.stopped : "" };
@@ -148,17 +171,30 @@ export function readState(path, name) {
   // occurrence — so it is a mark of one field, valid or absent, same "never
   // zero" rule as `mark` above for the same cry-wolf reason.
   const tick = (v) => {
-    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    if (!isRecord(v)) return null;
     const at = num(v.at);
     return at === 0 ? null : { at };
   };
-  const { quiet, elapsed, digest, beat, ticked, ...rest } = parsed;
+  // `controller` is validated as a unit for the mark's reason: a pid without
+  // the start time it was recorded with cannot be told from a reused pid. A
+  // pid outside the range a process id can take is no record either, since
+  // no process could ever answer for it. `prior` degrades like `stopped`
+  // does: a junk verdict proves nothing, so it reads as "none", and the
+  // record around it still names a controller to judge.
+  const ctl = (v) => {
+    if (!isRecord(v)) return null;
+    if (!Number.isInteger(v.pid) || v.pid < 1 || v.pid > 0x7fffffff) return null;
+    if (typeof v.lstart !== "string" || v.lstart === "") return null;
+    return { pid: v.pid, lstart: v.lstart, prior: PRIORS.includes(v.prior) ? v.prior : "none" };
+  };
+  const { quiet, elapsed, digest, beat, ticked, controller, ...rest } = parsed;
   return {
     quiet: num(quiet),
     elapsed: num(elapsed),
     digest: typeof digest === "string" ? digest : "",
     beat: mark(beat),
     ticked: tick(ticked),
+    controller: ctl(controller),
     rest,
   };
 }
@@ -182,13 +218,13 @@ export function readState(path, name) {
 // writeFileSync truncates and then writes, and readState() maps the empty or
 // half-written file a reader can land on to the fresh, no-mark state on
 // purpose — so a reader racing a live beat read "no mark", and ledger.mjs
-// rotate, which refuses only while a mark is beating, moved a live
-// controller's ledger. rename is atomic on POSIX: a reader sees the whole old
-// file or the whole new one. The temp name carries the pid for the reason
-// ledger.mjs gives: two scripts write this file, and a shared temp name
-// lets one rename the other's out from under it. A temp that never made it
-// into place is removed rather than left to accumulate, one per failed
-// invocation, beside the file it failed to replace.
+// rotate, which with no controller record refuses only while a mark is
+// beating, moved a live controller's ledger. rename is atomic on POSIX: a
+// reader sees the whole old file or the whole new one. The temp name carries
+// the pid for the reason ledger.mjs gives: several scripts write this file,
+// and a shared temp name lets one rename another's out from under it. A temp
+// that never made it into place is removed rather than left to accumulate,
+// one per failed invocation, beside the file it failed to replace.
 export function writeState(path, name, prev, patch) {
   // Built from the VALIDATED view plus the fields outside the schema, never
   // from the raw parse: see `rest` in readState above.
@@ -206,6 +242,11 @@ export function writeState(path, name, prev, patch) {
     // every hold and would otherwise erase fleet-tick's `ticked` the first
     // time a heartbeat lands after a busy stretch.
     ...(prev.ticked ? { ticked: prev.ticked } : {}),
+    // And again for ledger.mjs rotate's `controller`, which both scripts
+    // above would otherwise erase on their next write. A patch REMOVES a key
+    // by naming it with the value `undefined`, which JSON.stringify drops —
+    // the way rotate retires a record no omp ancestor replaces.
+    ...(prev.controller ? { controller: prev.controller } : {}),
     ...patch,
   };
   const tmp = `${path}.${process.pid}.tmp`;
