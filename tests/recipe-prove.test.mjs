@@ -235,6 +235,40 @@ for (const [summary, countLine, claim] of [
   });
 }
 
+// A literal starting or ending on a digit is found in the log only where no
+// digit stands beside it: `3 passed` inside `13 passed` is a run of 13, and
+// `Tests: 3` inside `Tests: 31 passed` a run of 31.
+for (const [summary, countLine, claim] of [
+  ["Tests: 13 passed", "3 passed", "3"],
+  ["Tests: 31 passed", "Tests: 3", "3"],
+]) {
+  test(`a count line '${countLine}' is not found inside the longer number of '${summary}'`, () => {
+    const { dir } = repo(MAVEN_FILES);
+    const r = prove(dir, ["--install", "true", "--test", `echo '${summary}'`, "--count-line", countLine, "--test-count", claim]);
+    assert.equal(r.status, 1, r.err);
+    assert.match(r.err, new RegExp(`NOT PROVEN — vacuous: the Test entrypoint's output does not contain the count line '${countLine}'`));
+    assert.equal(existsSync(cachePath(dir)), false);
+  });
+}
+
+// The boundary is the number's, not the literal's: a literal standing whole in
+// the log is proven, and one whose edge is a non-digit is proven with a digit
+// beside that edge — the next count on a summary line, a duration before it.
+for (const [summary, countLine, claim] of [
+  ["Tests: 3 passed", "3 passed", 3],
+  ["Tests:       1 skipped, 3 passed, 4 total", ", 3 passed, ", 3],
+  ["Time: 12s, 3 passed", "s, 3 passed", 3],
+  ["Tests: 3 passed (0.2s)", "3 passed (", 3],
+  ["Tests: 31 passed", "Tests: 31", 31],
+]) {
+  test(`a count line '${countLine}' standing whole in '${summary}' is proven`, () => {
+    const { dir } = repo(MAVEN_FILES);
+    const r = prove(dir, ["--install", "true", "--test", `echo '${summary}'`, "--count-line", countLine, "--test-count", String(claim)]);
+    assert.equal(r.status, 0, r.err);
+    assert.equal(JSON.parse(readFileSync(cachePath(dir), "utf8")).testCount, claim);
+  });
+}
+
 test("an Install step that changes a tracked file is not proven", () => {
   const { dir } = repo(MAVEN_FILES);
   const r = prove(dir, ["--install", "echo '<!-- -->' >> pom.xml", ...MAVEN_PROOF.slice(2)]);
