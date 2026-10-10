@@ -854,7 +854,9 @@ test("a mktemp that runs and fails on its second call is exit 3, never the cache
 // pin what the read-back must still do as cat did; the exit 2 rows whose
 // stderr is empty, newline-only or blank-only (spaces, a tab, a CR) pin the
 // "(node gave no reason, exit 2)" placeholder that stands in for it, and the
-// exit 1 and exit 5 rows with an empty or blank-only stderr pin exit 3.
+// exit 1 and exit 5 rows with an empty or blank-only stderr pin exit 3. The
+// exit 125 row is the same shape one status below the 126 cut-off, so it pins
+// that a status under it is still read as node's own and never as the shell's.
 for (const [what, body, status, reason] of [
   ["is killed", "kill -9 $$", 3, /^derive-testcmd: node did not finish reading the Recipe cache \(exit 137\)/m],
   ["can no longer be run", "exit 127", 3, /^derive-testcmd: node did not finish reading the Recipe cache \(exit 127\)/m],
@@ -868,6 +870,7 @@ for (const [what, body, status, reason] of [
   ["exits 1 with nothing on stderr", "exit 1", 3, /^derive-testcmd: node exited 1 without a reason, so its usability is unknown — an environment fault, not a verdict on the cache$/m],
   ["exits 1 with only blanks on stderr", "printf '  \\n\\t\\r\\n' >&2; exit 1", 3, /^derive-testcmd: node exited 1 without a reason, so its usability is unknown/m],
   ["exits 5 with nothing on stderr", "exit 5", 3, /^derive-testcmd: node exited 5 without a reason, so its usability is unknown/m],
+  ["exits 125 with nothing on stderr", "exit 125", 3, /^derive-testcmd: node exited 125 without a reason, so its usability is unknown/m],
   ["exits 2 with nothing on stderr", "exit 2", 1, /is unusable: \(node gave no reason, exit 2\) — run the Recipe/],
   ["exits 2 with only blank lines on stderr", "printf '\\n\\n' >&2; exit 2", 1, /is unusable: \(node gave no reason, exit 2\) — run the Recipe/],
   ["exits 2 with only spaces and a tab on stderr", "printf '   \\t\\n' >&2; exit 2", 1, /is unusable: \(node gave no reason, exit 2\) — run the Recipe/],
