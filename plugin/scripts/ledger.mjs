@@ -1641,30 +1641,30 @@ function refuseMalformedDispatched() {
 function dispositionsRefusal(pr, review) {
   if (review === undefined) return null;
   if (review.fixLive.length > 0) {
-    return `${review.fixLive.join(", ")} still live on PR #${pr} — a fix-applier answering review ${review.head} has not settled, `
+    return `${review.fixLive.join(", ")} still live on PR #${pr} — a fix-applier answering review ${review.run} has not settled, `
       + "so no dispositions verdict answers its work yet; settle it, run dispositions-check.mjs for it, then dispatch the finisher again";
   }
   if (review.survived === 0 && review.unverified === 0) return null;
   const v = review.dispositions;
   if (v === null) {
     return `dispositions unchecked — no dispositions-ok=/dispositions-mismatch=/dispositions-escalate=/dispositions-unchecked= token answers PR #${pr}'s latest review, `
-      + `reviewed=${review.head}; run dispositions-check.mjs --member fix-pr-${pr}[-<x>] --scratch <scratch> for the fix-applier `
+      + `${review.run} at ${review.head}; run dispositions-check.mjs --member fix-pr-${pr}[-<x>] --scratch <scratch> for the fix-applier `
       + "that answered that review, then dispatch the finisher again";
   }
   if (v.verdict === "unchecked") {
-    return `dispositions unchecked — ${v.member}'s check of review ${review.head} could not read where a deferral was filed (gh unreachable, `
+    return `dispositions unchecked — ${v.member}'s check of review ${review.run} could not read where a deferral was filed (gh unreachable, `
       + "or an issue unreadable — an issue that does not exist is unreadable too, and no re-run answers that one: the check's stderr names "
       + `it, and the record's issue number needs correcting); run dispositions-check.mjs --member ${v.member} --scratch <scratch> again once gh answers, `
       + "then dispatch the finisher again";
   }
   if (v.verdict === "mismatch") {
-    return `dispositions mismatch — ${v.member}'s disposition record fails the check against review ${review.head}; `
+    return `dispositions mismatch — ${v.member}'s disposition record fails the check against review ${review.run}; `
       + `dispositions-check.mjs --member ${v.member} --scratch <scratch> names each violating entry by bucket, index and rule`;
   }
   if (v.verdict === "escalate") {
     return `dispositions escalate — ${v.member} deferred a finding above suggestion severity because its remedy lies outside the PR's diff, `
       + "or its record drew a second mismatch on this review; either needs a human's ruling: "
-      + `review ${review.head} gets no finisher and no retry; dispositions-check.mjs --member ${v.member} `
+      + `review ${review.run} gets no finisher and no retry; dispositions-check.mjs --member ${v.member} `
       + "--scratch <scratch> names each escalated finding or violating entry by bucket and index, for the PR comment that hands it to a human";
   }
   return null;
@@ -1775,7 +1775,7 @@ function runDispatch() {
   // known to conflict cannot merge, and a finisher would race the fix-applier
   // rebasing it — and once its current dispositions verdict is ok — both read
   // off the tick's own per-PR fold, the verdict at the same latest `reviewed=`
-  // head the tick reads — and no fix-applier on the PR is still live. A PR
+  // run the tick reads — and no fix-applier on the PR is still live. A PR
   // whose latest review counts no survived and no unverified finding had
   // nothing for a fix-applier to rule on, and one never reviewed has no
   // review file: neither is gated on a verdict. Refused here, before anything

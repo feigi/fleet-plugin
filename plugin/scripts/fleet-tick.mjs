@@ -371,9 +371,15 @@ export class LedgerError extends Error {}
 
 // `review=wf:<runId>` | `review=member:review-pr-<n>` |
 // `review=fallback:review-pr-<n>[-b]`, settled dead as `…=failed`; the result
-// is `reviewed=<head>:<survived>/<refuted>/<unverified>`.
+// is `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, `<run>` the
+// name of the review's own run root under `<scratch>/pr<n>/` (`run-` and the
+// eight characters `mktemp` chose), where its result file `review.json` sits.
 const REVIEW = /^review=(?:wf|member|fallback):[^=\s]+(=failed)?$/;
-export const REVIEWED = /^reviewed=([0-9a-f]{7,40}):(\d+)\/(\d+)\/(\d+)$/i;
+export const REVIEWED = /^reviewed=([0-9a-fA-F]{7,40}):(\d+)\/(\d+)\/(\d+):(run-[A-Za-z0-9]{8})$/;
+// The `reviewed=` shape before it named a run: it names no result file, so
+// nothing can tell which review a dispositions verdict answered. Only a ledger
+// written before the plugin update and read after it can hold one.
+const REVIEWED_RUNLESS = /^reviewed=[0-9a-fA-F]{7,40}:\d+\/\d+\/\d+$/;
 const HELD = /^held-behind[:-]#?(\d+)$/;
 // The durable record that a PR conflicts — written onto the held PR's own
 // row by the merge bot, when its local-rebase fallback hits a conflict it would
@@ -386,23 +392,24 @@ const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
 // for a settled member whose transcript was never written.
 const TIER_VERDICT = /^tier-(ok|mismatch|unverifiable)=([^:\s]+):\S+$/;
 // dispositions-check.mjs's verdict on a review fix-applier's disposition
-// record: `dispositions-ok=fix-pr-<M>[-x]:<head>`,
+// record: `dispositions-ok=fix-pr-<M>[-x]:<run>`,
 // `dispositions-mismatch=…`, `dispositions-escalate=…` (a critical or
 // important deferral, or a second mismatch on one review, that a human rules
 // on) or `dispositions-unchecked=…` (no rule broke, but where a deferral was
-// filed could not be read), `<head>` the head of the review the record
-// answers. `ledger.mjs dispatch` refuses a finisher on anything but an ok. A
+// filed could not be read), `<run>` the run of the review the record
+// answers, as its `reviewed=` names it. `ledger.mjs dispatch` refuses a
+// finisher on anything but an ok. A
 // mismatch returns the PR to fixDue for one retry; an escalate is a hold only
 // a human answers, so the tick never re-offers the PR for it; an unchecked is
 // answered by running the check again, so the tick never offers a
 // fix-applier for it either. A token outside this shape is no verdict at all,
 // which the gate reads as unchecked: fail closed.
 export function dispositionsToken(tok) {
-  const m = /^dispositions-(ok|mismatch|escalate|unchecked)=([^:\s]+):([0-9a-f]{7,40})$/i.exec(tok);
+  const m = /^dispositions-(ok|mismatch|escalate|unchecked)=([^:\s]+):(run-[A-Za-z0-9]{8})$/i.exec(tok);
   if (!m) return null;
   const member = parseMember(m[2]);
   if (member === null || member.family !== "fix-pr") return null;
-  return { verdict: m[1].toLowerCase(), member, head: m[3].toLowerCase() };
+  return { verdict: m[1].toLowerCase(), member, run: m[3] };
 }
 
 // Two spellings of one commit: either head a prefix of the other, the way a
@@ -410,19 +417,21 @@ export function dispositionsToken(tok) {
 export const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
 
 // Which verdict outranks which when one fix-applier carries more than one for
-// a head: the stricter reading wins.
+// a review: the stricter reading wins.
 const VERDICT_RANK = { ok: 0, unchecked: 1, mismatch: 2, escalate: 3 };
 
-// A PR's current dispositions verdict against its latest review head: among
-// the tokens answering that head, the one from the fix-applier with the
+// A PR's current dispositions verdict against its latest review run: among
+// the tokens answering that run, the one from the fix-applier with the
 // highest retry suffix ("" < "b" < "c" …) — never row-text position, which a
 // `row` rewrite can reorder. One fix-applier carrying two verdicts for one
-// head reads as the stricter one. null when no token answers the head.
+// review reads as the stricter one. null when no token answers the run — so a
+// second review at the same head is answered by none of the first one's
+// verdicts.
 /** @returns {{verdict: "ok"|"unchecked"|"mismatch"|"escalate", member: string}|null} */
-export function currentDispositions(tokens, head) {
+export function currentDispositions(tokens, run) {
   let best = null;
   for (const t of tokens) {
-    if (!sameHead(t.head, head)) continue;
+    if (t.run !== run) continue;
     const retry = t.member.retry ?? "";
     const bestRetry = best?.member.retry ?? "";
     if (best === null || retry > bestRetry
@@ -604,20 +613,21 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     // `fixMembers`: every fix-applier on this PR, wherever its token sits —
     // one still unsettled anywhere holds the PR off fixDue, since `dispatch`
     // refuses a second live one on the PR.
-    // `reviewedHead`: the latest `reviewed=<head>`. `pastPinHalt`: the latest
+    // `reviewedHead`/`reviewedRun`: the latest `reviewed=<head>:…:<run>`.
+    // `pastPinHalt`: the latest
     // finisher since that review settled `halted:past-pin` — any
     // later finisher attempt, live or settled, replaces it, and a later
     // returned review answers it. `unverified`: the latest `reviewed=`'s
     // unverified count. `dispositions`: every dispositions verdict a fix-pr
-    // member of this PR carries, whatever head it answers — the gate picks
-    // by head and retry suffix, never by where a token sits.
+    // member of this PR carries, whatever review it answers — the gate picks
+    // by run and retry suffix, never by where a token sits.
     // `workers`: every fix-applier and finisher bound to this PR, and every
     // implementer on a row resolving to it — one still unsettled holds the
     // CONFLICT line off, since it may be pushing to the branch right now.
     const st = (pr !== null && byPr.get(pr)) || {
       inFlight: false, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
       fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(), held: [],
-      conflictOpen: false, reviewedHead: null, pastPinHalt: false, dispositions: [], workers: new Set(),
+      conflictOpen: false, reviewedHead: null, reviewedRun: null, pastPinHalt: false, dispositions: [], workers: new Set(),
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
     // retry suffix ("" < "b" < "c" …) the same way compute-board.mjs's
@@ -689,11 +699,15 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
         if (!m[1]) st.reviewedAny = true;
       } else if (tok.startsWith("reviewed=")) {
         const m = REVIEWED.exec(tok);
-        if (!m) throw new LedgerError(`${where}: '${tok}' is not reviewed=<head>:<survived>/<refuted>/<unverified>`);
+        if (!m && REVIEWED_RUNLESS.test(tok)) {
+          throw new LedgerError(`${where}: '${tok}' names no review run — reviewed= is now <head>:<survived>/<refuted>/<unverified>:<run>, `
+            + "<run> the run-XXXXXXXX directory holding that review's review.json; rewrite the token with `ledger.mjs row`");
+        }
+        if (!m) throw new LedgerError(`${where}: '${tok}' is not reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`);
         latestFinisher = null;
         Object.assign(st, {
           inFlight: false, reviewedAny: true, survived: Number(m[2]), unverified: Number(m[4]), reviewFixed: false,
-          reviewedHead: m[1].toLowerCase(), pastPinHalt: false,
+          reviewedHead: m[1].toLowerCase(), reviewedRun: m[5], pastPinHalt: false,
         });
       } else if (labelOffMember(tok) === null) {
         throw new LedgerError(`${where}: '${tok}' is not label-off=<finisher-pr member> — fix the row with \`ledger.mjs row\``);
@@ -789,7 +803,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
   // escalate is a different verdict and is never due.
   const mismatchDue = (st) => {
     if (st.reviewedHead === null) return false;
-    const cur = currentDispositions(st.dispositions, st.reviewedHead);
+    const cur = currentDispositions(st.dispositions, st.reviewedRun);
     if (cur === null || cur.verdict !== "mismatch") return false;
     const retry = parseMember(cur.member).retry ?? "";
     return ![...st.fixLanded].some((n) => !st.conflictLanded.has(n) && (parseMember(n).retry ?? "") > retry);
@@ -863,16 +877,17 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     conflicts: conflicting.filter((p) => !treadmill(p)).map((p) => p.number).sort(asc),
     conflictEscalate: conflicting.filter(treadmill).map((p) => p.number).sort(asc),
     // Every PR, open or not, with a returned review: its latest `reviewed=`
-    // head and counts, the dispositions verdict currently answering that
-    // head, and every fix-applier on the PR still unsettled (`fixLive`) — a
-    // re-review at the same head would otherwise read the earlier
+    // head, run and counts, the dispositions verdict currently answering that
+    // run, and every fix-applier on the PR still unsettled (`fixLive`) — a
+    // re-review would otherwise read the earlier
     // fix-applier's verdict while the one answering it is still working.
     // `ledger.mjs dispatch` gates a finisher off this, read from the same
-    // per-PR fold as everything above. Nothing in this tick acts on it.
+    // per-PR fold as everything above, and dispositions-check.mjs reads the
+    // review file it judges against off `run`. Nothing in this tick acts on it.
     reviewed: [...byPr.entries()].filter(([, st]) => st.reviewedHead !== null)
       .map(([n, st]) => ({
-        pr: n, head: st.reviewedHead, survived: st.survived, unverified: st.unverified,
-        dispositions: currentDispositions(st.dispositions, st.reviewedHead),
+        pr: n, head: st.reviewedHead, run: st.reviewedRun, survived: st.survived, unverified: st.unverified,
+        dispositions: currentDispositions(st.dispositions, st.reviewedRun),
         fixLive: [...st.fixMembers].filter((name) => members.get(name).outcome === null).sort(),
       }))
       .sort((a, b) => a.pr - b.pr),

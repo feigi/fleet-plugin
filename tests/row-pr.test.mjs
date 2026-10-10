@@ -60,7 +60,7 @@ for (const { row, own, keyed, board } of FIXTURES) {
   test(`every reader names one PR for: ${row}`, (t) => {
     assert.equal(rowPr(row), own, "ledger-grammar rowPr");
     assert.deepEqual(rowNums(row), { keyNum: Number(row.split(" ")[0].slice(1)), pr: keyed }, "fleet-tick rowNums");
-    assert.deepEqual(unrecordedReviewedPrs({ rows: [`${row} reviewed=abc1234:0/0/0`] }, []), [keyed], "tier-outcomes");
+    assert.deepEqual(unrecordedReviewedPrs({ rows: [`${row} reviewed=abc1234:0/0/0:run-abc1234r`] }, []), [keyed], "tier-outcomes");
     assert.equal(parseRow(row).pr, board, "compute-board parseRow");
     // `ledger.mjs dispatch <pr> fix-pr-<pr>` lands on the row the tick folds
     // that PR's state from: this row when it is the PR's, else a row keyed

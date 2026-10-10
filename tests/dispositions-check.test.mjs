@@ -367,7 +367,7 @@ test("the first mismatch is a plain mismatch, and a mismatch on an earlier revie
   assert.equal(first.json.token, `dispositions-mismatch=fix-pr-40:${f.head}`);
   // The earlier fix-applier's mismatch answered another review's head.
   retry(f);
-  f.okLedger("row", "10", f.row().slice(4).replace(`dispositions-mismatch=fix-pr-40:${f.head}`, "dispositions-mismatch=fix-pr-40:deadbee1"));
+  f.okLedger("row", "10", f.row().slice(4).replace(`dispositions-mismatch=fix-pr-40:${f.head}`, "dispositions-mismatch=fix-pr-40:run-deadbeer"));
   const second = f.check("fix-pr-40-b");
   assert.equal(second.json.verdict, "mismatch", second.stderr);
 });
@@ -382,12 +382,12 @@ test("a mismatch from a later suffix, an ok, or another PR's fix-applier is not 
   assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40-c:${H}`)], 40, b, H), false, "a later suffix is not earlier");
   assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40-b:${H}`)], 40, b, H), false, "the member itself is not earlier");
   assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40:${H}`)], 40, { retry: null }, H), false, "nor is the first fix-applier's own re-run");
-  assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40:fedcba9`)], 40, b, H), false, "another review's head");
+  assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40:run-fedcba9r`)], 40, b, H), false, "another review's head");
   assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-41:${H}`)], 40, b, H), false, "another PR's fix-applier");
   // A split row: the earlier verdict sits on another row that resolves to PR 40.
-  assert.equal(failedBefore(["#11 impl-11=PR#40 → PR#40 · dispositions-mismatch=fix-pr-40:abc1234", "#12 impl-12=PR#41 → PR#41"], 40, b, H), true);
+  assert.equal(failedBefore(["#11 impl-11=PR#40 → PR#40 · dispositions-mismatch=fix-pr-40:run-abc1234r", "#12 impl-12=PR#41 → PR#41"], 40, b, H), true);
   // A copy of PR 40's verdict on PR 41's row is a stray: that row does not resolve to PR 40.
-  assert.equal(failedBefore(["#12 impl-12=PR#41 → PR#41 · dispositions-mismatch=fix-pr-40:abc1234"], 40, b, H), false);
+  assert.equal(failedBefore(["#12 impl-12=PR#41 → PR#41 · dispositions-mismatch=fix-pr-40:run-abc1234r"], 40, b, H), false);
   // The same review named by a short head on one side and a full SHA on the other.
   const full = `${H}${"0".repeat(33)}`;
   assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40:${H}`)], 40, b, full), true, "an earlier token's short head matches a full check head");
@@ -672,7 +672,7 @@ test("withVerdict replaces only the same member's verdict for the same head", ()
   const ok = `dispositions-ok=fix-pr-40:${H}`;
   const bad = `dispositions-mismatch=fix-pr-40:${H}`;
   const other = `dispositions-ok=fix-pr-40-b:${H}`;
-  const older = "dispositions-mismatch=fix-pr-40:def5678";
+  const older = "dispositions-mismatch=fix-pr-40:run-def5678r";
   assert.equal(withVerdict(`impl-10=PR#40 · ${bad}`, ok), `impl-10=PR#40 · ${ok}`);
   assert.equal(withVerdict(`impl-10=PR#40 · ${ok}`, ok), `impl-10=PR#40 · ${ok}`);
   assert.equal(withVerdict(`${bad} · impl-10=PR#40`, ok), `impl-10=PR#40 · ${ok}`);

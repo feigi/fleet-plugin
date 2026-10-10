@@ -588,7 +588,7 @@ test("review-1912-b: a foreign ticket's impl token never outranks this row's own
 // #2083: a finisher halt is the finisher working correctly — it refused to
 // label — so the PR parks in REVIEW with no `ready-to-merge`. The cockpit's
 // severity-4 flag is what puts it in front of a human.
-const HALTED = "#941 impl-941=PR#931 · reviewed=abc1234:0/0/0 · finisher-pr-931=halted:unreadable";
+const HALTED = "#941 impl-941=PR#931 · reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-931=halted:unreadable";
 
 test("#2083: a PR whose latest finisher halted carries the cause as a flag, ranked exactly at severity 4", () => {
   // Two killed (severity 4) rows around the halted one: attention sorts by
@@ -683,8 +683,8 @@ test("#2331: the cockpit reads `## Dispatched` as the tick does — a settled fi
   const dispatched = ["impl-941=PR#931", "finisher-pr-931=labelled"];
   const open = [{ number: 931, labels: [], closingIssuesReferences: [{ number: 941 }], headRefOid: "abc1234abc1234abc1234abc1234abc1234abcd" }];
   for (const [rows, flags] of [
-    [["#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0"], ["unlabelled"]],
-    [["#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0 label-off=finisher-pr-931"], []],
+    [["#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0:run-abc1234r"], ["unlabelled"]],
+    [["#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0:run-abc1234r label-off=finisher-pr-931"], []],
   ]) {
     const tick = deriveRun({ rows, dispatched, drain: null }, open).unlabelled;
     assert.deepEqual(tick.map((u) => u.pr), flags.length ? [931] : [], rows[0]);
@@ -768,14 +768,14 @@ test("a failed or killed finisher token on another PR's row is a stray; one sett
   const masked = ["#941 impl-941=PR#931 · finisher-pr-931=failed", "#942 impl-942=PR#932 · finisher-pr-931-b"];
   const m = computeBoard(reproInputs({ rows: masked, prev: { tickets: [] } }));
   assert.deepEqual(card(m, 941).flags, ["finisher:failed"]);
-  const rows = ["#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0"];
+  const rows = ["#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0:run-abc1234r"];
   const d = computeBoard(reproInputs({ rows, ledger: { rows, dispatched: ["impl-941=PR#931", "finisher-pr-931=killed"], filed: [], ruled: [] }, prev: { tickets: [] } }));
   assert.deepEqual(card(d, 941).flags, ["finisher:killed"]);
 });
 
 test("the latest finisher attempt decides the halt flag too, whichever of the row and `## Dispatched` holds it", () => {
   const flagsFor = (rowToken, dispatchedToken) => {
-    const rows = [`#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0 · ${rowToken}`];
+    const rows = [`#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0:run-abc1234r · ${rowToken}`];
     const b = computeBoard(reproInputs({ rows, ledger: { rows, dispatched: ["impl-941=PR#931", dispatchedToken], filed: [], ruled: [] }, prev: { tickets: [] } }));
     return card(b, 941).flags;
   };
@@ -975,9 +975,9 @@ test("#1820: review=wf/member, or a live fix-pr/finisher-pr, is under review; ag
   const live = computeBoard(reproInputs({
     rows: [
       "#920 impl-920=PR#931 · fix-pr-931",
-      "#921 impl-921=PR#932 · review=member:review-pr-932 reviewed=abc1234:1/0/0 · finisher-pr-932",
+      "#921 impl-921=PR#932 · review=member:review-pr-932 reviewed=abc1234:1/0/0:run-abc1234r · finisher-pr-932",
       "#922 impl-922=PR#920 · review=wf:r1=failed review=fallback:review-pr-920-b",
-      "#923 impl-923=PR#931 · review=member:review-pr-931 reviewed=abc1234:0/0/0",
+      "#923 impl-923=PR#931 · review=member:review-pr-931 reviewed=abc1234:0/0/0:run-abc1234r",
     ],
   }));
   assert.equal(card(live, 920).agent, "fix-pr-931");
@@ -990,7 +990,7 @@ test("#1820: review=wf/member, or a live fix-pr/finisher-pr, is under review; ag
 test("#1820: live-ledger PR rows — settled finisher, fallback runner", () => {
   const b = computeBoard(reproInputs({
     rows: [
-      "#1715 impl-1715=PR#1824 · class=correction · reviewed=41901d4c:0/1/0 · finisher-pr-1824=labelled",
+      "#1715 impl-1715=PR#1824 · class=correction · reviewed=41901d4c:0/1/0:run-41901d4r · finisher-pr-1824=labelled",
       "#1721 impl-1721=PR#1825 · class=correction · review=fallback:review-pr-1825-b",
       "#1755 impl-1755=PR#1830 · class=routine",
     ],
@@ -1062,9 +1062,9 @@ test("#1820 amendment 5a: `=failed` then a live redispatch is under review; any 
   for (const row of [
     "#962 impl-962=PR#931 · review=wf:r1=failed review=fallback:review-pr-931-b",
     "#962 impl-962=PR#931 · review=member:review-pr-931=failed review=wf:r2",
-    "#962 impl-962=PR#931 · review=member:review-pr-931=failed reviewed=abc1234:0/0/0",
-    "#962 impl-962=PR#931 · reviewed=abc1234:1/0/0 review=wf:r2=failed",
-    "#962 impl-962=PR#931 · review=wf:r1=failed review=fallback:review-pr-931-b=failed reviewed=abc1234:0/1/0",
+    "#962 impl-962=PR#931 · review=member:review-pr-931=failed reviewed=abc1234:0/0/0:run-abc1234r",
+    "#962 impl-962=PR#931 · reviewed=abc1234:1/0/0:run-abc1234r review=wf:r2=failed",
+    "#962 impl-962=PR#931 · review=wf:r1=failed review=fallback:review-pr-931-b=failed reviewed=abc1234:0/1/0:run-abc1234r",
     // A live fix-applier or finisher is reviewing it too, as before (#1820).
     "#962 impl-962=PR#931 · review=member:review-pr-931=failed · fix-pr-931",
     "#962 impl-962=PR#931 · review=member:review-pr-931=failed · finisher-pr-931",
@@ -1088,8 +1088,8 @@ test("#1820 amendment 5a: on the same ledger and PR list, the cockpit's backlog 
     ["#966 impl-966=PR#966", 966, true],
     ["#967 impl-967=PR#967 · review=wf:r1=failed review=fallback:review-pr-967-b", 967, false],
     ["#968 impl-968=PR#968 · review=wf:r3", 968, false],
-    ["#969 impl-969=PR#969 · review=member:review-pr-969=failed reviewed=abc1234:0/0/0", 969, false],
-    ["#970 impl-970=PR#970 · reviewed=abc1234:1/0/0 review=wf:r2=failed", 970, false],
+    ["#969 impl-969=PR#969 · review=member:review-pr-969=failed reviewed=abc1234:0/0/0:run-abc1234r", 969, false],
+    ["#970 impl-970=PR#970 · reviewed=abc1234:1/0/0:run-abc1234r review=wf:r2=failed", 970, false],
     // A live copy left beside its settled one by a whole-line rewrite: the
     // tick's `reviewedAny` counts any live review= token on the row, so the
     // row is not owed one — the ruling's "neither a live review= nor a
@@ -1116,7 +1116,7 @@ test("#2083: a returned review whose finisher halted past-pin against a head it 
   // reviewed= first, then a fresher finisher discovers the head moved past
   // it and halts — the same chronology the fleet-tick.test.mjs fixture
   // above uses, so the halt is the row's freshest event.
-  const row = "#972 impl-972=PR#972 · reviewed=abc1234:0/0/0 · finisher-pr-972=halted:past-pin";
+  const row = "#972 impl-972=PR#972 · reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-972=halted:past-pin";
   const staleHead = "def5678def5678def5678def5678def5678def";
   const b = computeBoard(reproInputs({ rows: [row], prs: [openPr(972, [], staleHead)] }));
   assert.equal(card(b, 972).column, "REVIEW");
@@ -1125,7 +1125,7 @@ test("#2083: a returned review whose finisher halted past-pin against a head it 
 });
 
 test("#2083: once the head matches the reviewed= that answered a past-pin halt, neither counts it owed", () => {
-  const row = "#973 impl-973=PR#973 · finisher-pr-973=halted:past-pin · reviewed=abc1234:0/0/0";
+  const row = "#973 impl-973=PR#973 · finisher-pr-973=halted:past-pin · reviewed=abc1234:0/0/0:run-abc1234r";
   const b = computeBoard(reproInputs({ rows: [row], prs: [openPr(973, [], "ABC1234")] }));
   assert.equal(b.queue.reviewBacklog, 0, "the automatic re-review already answered the halt");
   assert.deepEqual(tickReviewDue([row], [973], "ABC1234"), [], "the tick agrees");
@@ -1178,7 +1178,7 @@ test("#1820 amendment 2a: the same row is MERGED once gh reports its PR merged",
 });
 
 test("#1820 amendment 2a: with no PR#M mention, a PR-bound member or review token keys the PR to the row key; a mention wins over the key", () => {
-  for (const row of ["#1237 fix-pr-1237", "#1237 finisher-pr-1237=labelled", "#1237 review=wf:r9", "#1237 reviewed=abc1234:0/0/0"]) {
+  for (const row of ["#1237 fix-pr-1237", "#1237 finisher-pr-1237=labelled", "#1237 review=wf:r9", "#1237 reviewed=abc1234:0/0/0:run-abc1234r"]) {
     assert.equal(parseRow(row).pr, 1237, row);
   }
   assert.equal(parseRow("#1300 PR#1301 · fix-pr-1301").pr, 1301);
@@ -1214,7 +1214,7 @@ const tickKeysTo = (row, n) => deriveRun({ rows: [`${row} held-behind:#1`], disp
 ]).mergeHeld === 1;
 
 test("#1820 amendment 2a: on the same PR-signaled row text, the cockpit's PR is fleet-tick.mjs's", () => {
-  const rows = [INHERITED, "#1237 fix-pr-1237", "#1237 finisher-pr-1237=labelled", "#1237 reviewed=abc1234:1/0/0", "#1300 PR#1301 · fix-pr-1301"];
+  const rows = [INHERITED, "#1237 fix-pr-1237", "#1237 finisher-pr-1237=labelled", "#1237 reviewed=abc1234:1/0/0:run-abc1234r", "#1300 PR#1301 · fix-pr-1301"];
   for (const row of rows) {
     const pr = parseRow(row).pr;
     assert.ok(pr != null && tickKeysTo(row, pr), `${row}: cockpit ${pr}, tick disagrees`);
