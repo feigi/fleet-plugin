@@ -3,6 +3,11 @@
 **Status:** Accepted. Ruled 2026-10-09 by the maintainer in a grilling session on
 #1724 (stage 2b of #357), against the measurements below. Amends ADR 0008
 (Failure mode, which left restart open, and §8, which gains a key owner).
+Amended by #2967: the record Decision 3 names also carries `at`, the time
+rotate wrote it. Decision 5's "a run's first tick" has no other marker in the
+state file, so a reader takes a mark older than `at` as the previous run's and
+reads `prior`, and a mark written since as the recorded controller's own and
+judges the record.
 
 ## Context
 
