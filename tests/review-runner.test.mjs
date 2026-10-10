@@ -93,6 +93,16 @@ test("two reviews of one PR at one head leave two files, two paths and two ledge
   assert.deepEqual(JSON.parse(readFileSync(b.path, "utf8")), second);
 });
 
+test("a scratch passed with a trailing slash still finds the run root the review built from it", async () => {
+  const dir = scratch();
+  // review-core.mjs builds the run root by string, `${scratch}/pr<N>/run-…`.
+  const result = { ...resultIn(dir), snapshot: `${dir}//pr7/run-Ab12Cd34/snapshot-abc123` };
+  const out = await runReviewToFile({ pr: 7, scratch: `${dir}/`, worktree: "/wt" }, scriptedRun([result]).run);
+  assert.equal(out.status, "completed", out.errors.join("\n"));
+  assert.equal(out.path, join(dir, "pr7", "run-Ab12Cd34", "review.json"));
+  assert.equal(out.ledger, "reviewed=abc123:1/2/3:run-Ab12Cd34");
+});
+
 test("a review file already at the run root is never replaced: the attempt fails and is retried", async () => {
   const dir = scratch();
   const taken = join(dir, "pr7", "run-Ab12Cd34");

@@ -130,9 +130,12 @@ test("step 6 halts a non-zero dispositions exit before the label and has the mem
   ));
 });
 
-test("step 6 has a standalone member pass --no-ledger: no token is written and the exit status is the verdict", () => {
+test("step 6 has a standalone member pass --no-ledger and --review: no token is written and the exit status is the verdict", () => {
   assert.match(labelStep(), phrase(
-    "standalone you pass `--no-ledger`, so it writes no token and the exit status is the verdict",
+    "`--review <path>` names the review file, which you write yourself from the findings step 1 collected",
+  ));
+  assert.match(labelStep(), phrase(
+    "standalone you pass `--no-ledger` with it, so it writes no token and the exit status is the verdict",
   ));
   assert.match(labelStep(), phrase(
     "without the flag it exits 2 for a ledger with no row for you",
