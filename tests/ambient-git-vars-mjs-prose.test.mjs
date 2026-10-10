@@ -226,6 +226,16 @@ const COVERED_MJS = {
   // main-gain.test.mjs, "an ambient GIT_DIR naming another repository cannot
   // move the check there".
   "main-gain.mjs": 1,
+  // TWO scrubbed envs. `worktrees()`'s `worktree list` names which claims have
+  // a worktree in this checkout; an ambient GIT_DIR would list another
+  // repository's, and a claim to resume would read as one to report. Measured
+  // in stranded.test.mjs, "an ambient GIT_DIR naming another repository does
+  // not change the answer". `ghList()` scrubs the two `gh … list` children,
+  // GH_REPO too: either ambient would list another repository's tracker.
+  // Measured in stranded.test.mjs, "gh is run with no ambient GIT_DIR or
+  // GH_REPO…". Its third git call is `fleetFile()`'s, counted under
+  // fleet-dir.mjs.
+  "stranded.mjs": 2,
 };
 
 // The exemption list #1599's second design question answers with — two names

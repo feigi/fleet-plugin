@@ -27,8 +27,8 @@
 // linked to the issue that is still open, a linked PR in another repository
 // (whose state this repository's list cannot show, so it counts), or an open
 // PR whose branch names the number as a whole segment. A worktree is the
-// issue's when its directory name names the number the same way, so
-// `.worktrees/129-…` is never #12's.
+// issue's when its directory name names the number the same way, so a
+// worktree named for issue 129 is never issue 12's.
 //
 // Prints `{prior, claims: [{n, t, action, worktree, branch, why}]}` on stdout.
 // Exit 0 answered; 2 a list that did not answer — a gh or git failure, or a
@@ -63,9 +63,11 @@ function how(r) {
   return said ? `exit ${r.status}: ${said}` : `exit ${r.status}`;
 }
 
+// gh resolves its repository from GH_REPO, then the cwd's git remotes: either
+// one ambient would list another repository's tracker.
 function ghList(what, args) {
   const r = spawnSync("gh", [...args, "--limit", String(LIMIT)], {
-    encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS, env: gitEnv(),
+    encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }),
   });
   if (r.error || r.status !== 0) die(`gh ${args.slice(0, 2).join(" ")} failed (${how(r)}) — the ${what} is unknown, so nothing is classified`);
   let rows;

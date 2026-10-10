@@ -31,6 +31,7 @@ const RECORD = (prior) => ({ pid: process.pid, lstart: "runner-start", prior, at
 
 const GH_STUB = `#!/bin/sh
 printf '%s\\n' "$*" >> "$GH_LOG"
+[ -z "$GH_ENV_LOG" ] || printf 'GIT_DIR=%s GH_REPO=%s\\n' "\${GIT_DIR-}" "\${GH_REPO-}" >> "$GH_ENV_LOG"
 case "$1 $2" in
   "issue list") [ -z "$GH_ISSUE_FAIL" ] || { echo "issue list boom" >&2; exit 1; }; cat "$FIXTURE_ISSUES" ;;
   "pr list") [ -z "$GH_PR_FAIL" ] || { echo "pr list boom" >&2; exit 1; }; cat "$FIXTURE_PRS" ;;
@@ -206,4 +207,24 @@ test("stranded.mjs takes no stray argument", (t) => {
   const r = spawnSync(process.execPath, [SCRIPT, "--resume"], { cwd: f.repo, encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.equal(r.stdout, "");
+});
+
+test("an ambient GIT_DIR naming another repository does not change the answer", (t) => {
+  // The worktree listing is what this pins: with GIT_DIR reaching it, git
+  // lists the other repository's worktrees, which hold none of this claim's.
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  const other = join(f.dir, "other");
+  mkdirSync(other);
+  git(other, "init", "-q");
+  const r = f.run({ issues: [issue(12)], env: { GIT_DIR: join(other, ".git"), GIT_WORK_TREE: other } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.worktree]), [[12, "resume", wt(f, "12-impl-12")]]);
+});
+
+test("gh is run with no ambient GIT_DIR or GH_REPO, which would answer for another repository's tracker", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  const envLog = join(f.dir, "gh-env.log");
+  const r = f.run({ issues: [issue(12)], env: { GIT_DIR: join(f.dir, "nowhere", ".git"), GH_REPO: "other/repo", GH_ENV_LOG: envLog } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readFileSync(envLog, "utf8").trim().split("\n"), ["GIT_DIR= GH_REPO=", "GIT_DIR= GH_REPO="]);
 });
