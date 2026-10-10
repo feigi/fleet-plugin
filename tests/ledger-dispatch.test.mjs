@@ -277,9 +277,10 @@ test("dispatch refuses a fix-applier on a ledger the tick refuses, before markin
   ok("row", "40", "impl-40=PR#41 · conflict-hold:#42");
   refused(["dispatch", "41", "fix-pr-41"], /'conflict-hold:#42' names PR #42, but this row is PR #41's .* — fleet-tick\.mjs refuses this ledger, so fix-pr-41's definition cannot be read off it/);
   assert.deepEqual(read().dispatched, []);
-  // A finisher's dispositions gate reads the same fold, so it is refused too,
-  // naming the ledger as the cause rather than reading an unreadable verdict.
-  refused(["dispatch", "41", "finisher-pr-41"], /— fleet-tick\.mjs refuses this ledger, so finisher-pr-41's dispositions verdict cannot be read off it/);
+  // A finisher's conflict-hold and dispositions gates read the same fold, so it
+  // is refused too, naming the ledger as the cause rather than reading an
+  // unreadable hold or verdict.
+  refused(["dispatch", "41", "finisher-pr-41"], /— fleet-tick\.mjs refuses this ledger, so finisher-pr-41's conflict hold and dispositions verdict cannot be read off it/);
   assert.deepEqual(read().dispatched, []);
 });
 
@@ -869,6 +870,30 @@ test("a later fix-applier that writes no verdict neither satisfies nor resets th
   ok("row", "11", ["impl-11=PR#41 → PR#41", `reviewed=${GATE_HEAD}:1/0/0`, "fix-pr-41=applied:def5678",
     `dispositions-mismatch=fix-pr-41:${GATE_HEAD}`, "conflict-hold:#41", "fix-pr-41-b=no-op"].join(" · "));
   refused(["dispatch", "41", "finisher-pr-41"], /finisher-pr-41: dispositions mismatch — fix-pr-41's/);
+});
+
+// A finisher labels its PR; one known to conflict would be labelled for a merge
+// that cannot happen, or race the fix-applier rebasing it.
+test("a finisher is refused while its PR sits on a conflict hold no fix-applier has cleared, and accepted on the same PR without one", (t) => {
+  const { ok, read, refused } = fixture(t);
+  const held = "impl-10=PR#40 → PR#40 · conflict-hold:#40 (conflict: mergeable=CONFLICTING)";
+  ok("row", "10", held);
+  refused(["dispatch", "40", "finisher-pr-40"],
+    /finisher-pr-40: PR #40 is on a conflict hold no fix-applier has cleared — .*fix-pr-40.* — not dispatching finisher-pr-40/);
+  // Ahead of the dispositions verdict, which an ok does not lift.
+  ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_HEAD}`, "conflict-hold:#40"));
+  refused(["dispatch", "40", "finisher-pr-40"], /finisher-pr-40: PR #40 is on a conflict hold/);
+  // A live fix-applier is still working it.
+  ok("row", "10", `${held} · fix-pr-40`);
+  refused(["dispatch", "40", "finisher-pr-40"], /finisher-pr-40: PR #40 is on a conflict hold/);
+  assert.deepEqual(read().dispatched, []);
+  // The same PR with no hold, and with the hold cleared by a landed fix-applier.
+  ok("row", "10", "impl-10=PR#40 → PR#40");
+  assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+  ok("settle", "finisher-pr-40", "failed");
+  ok("row", "10", `${held} · fix-pr-40=no-op`);
+  assert.equal(ok("dispatch", "40", "finisher-pr-40-b").agent, "fleet-finisher");
+  assert.deepEqual(read().dispatched, ["finisher-pr-40=failed", "finisher-pr-40-b"]);
 });
 
 test("a finisher is refused on a dispositions escalate, naming it, and nothing retries it", (t) => {

@@ -22,7 +22,9 @@ lifetime is one **Pass**.
 4. **Rebase** an unrelated PR server-side (`gh pr update-branch
    --rebase`). A genuine conflict is recorded as `conflict-hold:#<pr>`
    instead — distinct from `held-behind` — and cleared only once a
-   fix-applier dispatched against it settles as landed.
+   fix-applier dispatched against it settles as landed. The controller
+   records the same token when the tick prints `CONFLICT PR#<M>` for a PR
+   no live merge bot owns.
 5. **Gate twice:** [`merge-gate.mjs`](../../plugin/scripts/merge-gate.mjs)
    (a read-only conjunction of [Instruments](instruments.md), `gh pr
    view`, the main-gain check

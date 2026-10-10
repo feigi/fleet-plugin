@@ -1543,7 +1543,7 @@ for a token on a ticket's line — never a hand edit.
 | Finisher report (failed / killed) | `ledger.mjs settle finisher-pr-<M>=failed` for a finisher that crashed or gave up, `=killed` for one that was killed; no label, and the tick prints no dispatch for it. The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, below) |
 | Label seen (persistent Monitor) | nothing to record |
 | CI run terminal | `ci=<run-id>:<attempt>:<conclusion>` on the row; then the finisher gate (below) |
-| Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `reap.sh --apply`. (The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in this same pass, before reporting — that token is the bot's, never `reap.sh`'s.) |
+| Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `reap.sh --apply`. (The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in this same pass, before reporting — a token the bot wrote in this pass, never one `reap.sh` writes.) |
 | Drain | `ledger.mjs drain "<reason>"`; release the claims (below); `settle impl-<N>=released` |
 | Heartbeat | nothing to record |
 
@@ -1708,7 +1708,7 @@ depth** guard table applied in code. Act on each line as it reads:
 - `SUGGEST /triage, hold idle` — nothing is admissible after the refresh.
   Suggest, never run (**Queue depth**).
 - `DISPATCH fix-pr PR#<M> …` — a fix-applier per PR, for a review's survived or unverified findings,
-  a dispositions mismatch no retry has answered, or a merge bot's `conflict-hold:#<M>` (**Reviewers**). Printed
+  a dispositions mismatch no retry has answered, or a `conflict-hold:#<M>` — the merge bot's, or one you recorded off a `CONFLICT` line (**Reviewers**). Printed
   ahead of reviews on purpose: finishing what is started beats starting more.
 - `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn
   (**Reviewers**).
@@ -1727,6 +1727,25 @@ depth** guard table applied in code. Act on each line as it reads:
   third. Not actionable; the maintainer's, through the cockpit's `unlabelled`
   flag and the comment the repair finisher's report left (**Finisher report**
   row above).
+- `CONFLICT PR#<M> …` — GitHub reads PR M `mergeable=CONFLICTING`, the ledger
+  tracks it, no conflict hold stands on it, no fix-applier, finisher or
+  implementer on it is live, and, if it carries `ready-to-merge`, no merge bot
+  is live: a queued PR is the bot's while one runs, and its own fallback records
+  the hold. Record the hold the merge bot's way (`run-merge-bot.md` step 1): run
+  `ledger.mjs read`, then rewrite the row naming PR M with `ledger.mjs row <key>
+  "<text> · conflict-hold:#<M> (conflict: mergeable=CONFLICTING)"` — `<text>` is
+  everything after the key, verbatim. The row's detail prints that step for
+  each PR it names. Then run the tick: the hold reads as `DISPATCH fix-pr
+  PR#<M>`, a conflict fix-applier (**A `DISPATCH fix-pr PR#<M>` on a conflict
+  hold**), and that row obeys every hold. A review in flight does not stop the
+  line: `fix-due` waits for the review to return. It prints under a
+  main-checkout hold and a drain too, since it writes a record and dispatches
+  nothing.
+- `ESCALATE conflict PR#<M> …` — PR M reads CONFLICTING again after two
+  conflict fix-appliers landed on it: a rebase treadmill. Comment on the PR
+  and flag it for a human; write no hold and dispatch no fix-applier. Not
+  actionable; it repeats while the PR reads CONFLICTING and clears once it
+  stops, closes or merges.
 - `HOLD (…)` — the row is held and says why: draining, a tier mismatch, an
   unchecked tier, a saturated review side, `--max-reviews` in flight, or every
   queued merge candidate held behind a lower PR or on a conflict hold no
@@ -2248,8 +2267,9 @@ holds every finding and you hold none, so there is nothing for you to rank,
 relay or pre-rule — and a report from a refuter it spawns that surfaces to you
 is its to retrieve, never yours to scan or pass on.
 
-**A `DISPATCH fix-pr PR#<M>` on a conflict hold** — the row carries the merge
-bot's unresolved `conflict-hold:#<M>` (`run-merge-bot.md` step 1's fallback) —
+**A `DISPATCH fix-pr PR#<M>` on a conflict hold** — the row carries an
+unresolved `conflict-hold:#<M>`, the merge bot's (`run-merge-bot.md` step 1's
+fallback) or one you recorded off the tick's `CONFLICT` line —
 is the same slot with a different job, and no review file to hand
 over. Name it `fix-pr-<M>`, or the next suffix (`-b`, `-c` …) when that name is
 already on record — `dispatch` refuses a reused one — and dispatch it with the
@@ -2267,9 +2287,10 @@ what lifts the tick's merge hold; a dispatched-but-live one does not, and
 hold and nothing else: survived or unverified findings of a returned review the row also carries
 stay unanswered through its settle, so the tick prints `DISPATCH fix-pr
 PR#<M>` again once it lands, and that one — `dispatch` now prints `null` —
-is a review fix-applier, dispatched as above. The push moves the
-head after `ready-to-merge`, so the next merge bot refuses it
-`head-moved-after-label-#<M>`: a fresh finisher, per **Failure handling**.
+is a review fix-applier, dispatched as above. On a PR carrying
+`ready-to-merge`, the push moves the head after the label, so the next merge
+bot refuses it `head-moved-after-label-#<M>`: a fresh finisher, per **Failure
+handling**.
 
 **A `DISPATCH fix-pr PR#<M>` on a dispositions mismatch** — the PR's row carries
 `dispositions-mismatch=<member>:<head>` for its latest review, and no later
@@ -2669,6 +2690,13 @@ again. That is what keeps a re-review at the same head from being answered by
 the earlier round's verdict while the fix-applier answering the new round is
 still working; once its check has run, its verdict, from the higher suffix, is
 the current one.
+
+**It refuses a finisher, too, while the PR sits on a conflict hold no
+fix-applier has cleared** — the same per-PR fold the tick prints `DISPATCH
+fix-pr` off, ahead of the dispositions verdict. A PR known to conflict cannot
+merge, and a finisher on it would race the conflict fix-applier rebasing it.
+Dispatch that fix-applier, let it settle `applied:`/`no-op`, then dispatch the
+finisher again.
 
 **An unanswered question from the member is an outbox item, and it blocks
 dispatch with the same weight as a ruling you have already made.** It does not
@@ -3714,7 +3742,7 @@ Plan it as a PR the run's own merge queue lands, never as an edit-and-continue.
 | Merge bot finds the head moved after `ready-to-merge` was applied | The label binds to the head's net change, not to one SHA: a proven rebase-carry keeps the label — the bot proceeds and reports `rebase-carry-#<pr>` with the labelled and accepted SHAs, and nothing is dispatched. Any other move is `head-moved-after-label-#<pr>`, PR stays queued, label untouched. Dispatch a **fresh** finisher against the new head — the first audit verified a different tree |
 | Merge bot's gate finds the merge would remove lines `main` gained after the PR's work began (`main-gain-removed:<path>`, exit 1) | Relay `main-gain-removed:<path>-#<pr>` to a human with the hit list and the acknowledgement keys the bot printed. PR stays queued, label untouched, nothing written to the ledger, and no member is dispatched to restore the lines — the removal may be deliberate. It clears when the PR stops removing them or its body carries `main-gain-removal: <path> <key> - <why>` for each hit |
 | Merge bot's gate cannot answer the main-gain check (`main-gain-unanswerable`, exit 2) | Report `main-gain-unanswerable-#<pr>` with what it printed, PR stays queued, label untouched |
-| Merge bot cannot resolve a rebase safely | Stop that PR, report, continue. On a conflict the bot has already appended `conflict-hold:#<pr>` to the PR's row; the tick prints `DISPATCH fix-pr PR#<pr>` and holds the merge until that fix-applier settles |
+| Merge bot cannot resolve a rebase safely | Stop that PR, report, continue. On a conflict the bot has already appended `conflict-hold:#<pr>` to the PR's row; the tick prints `DISPATCH fix-pr PR#<pr>` and holds the merge until that fix-applier settles. A PR that conflicts before any bot reaches it is the tick's `CONFLICT PR#<pr>` line, whose hold you record |
 | Merge bot's gate refuses on its instrument re-check (`instrument-set-changed` or `instruments-unanswerable`, exit 2) | Report `<reason>-#<pr>` with what it printed, PR stays queued, label untouched. Do not re-run the gate |
 | Member silent or truncated | Send to ping or resume — same unit of work; see the state machine below |
 | Member idle with work outstanding | Read the PR first, *then* ping. Idle ≠ done |
@@ -3851,9 +3879,9 @@ when the result lands. A row with `review=` and no `reviewed=` is a review in
 flight, and the tick counts it against the reviewer cap unless gh reports its PR
 MERGED or CLOSED. `ci=<run-id>:<attempt>:<conclusion>`
 and `held-behind:#<lower>` are row tokens the same way (Phase 3), and so is
-`conflict-hold:#<pr>` — the one row token the merge bot writes itself, naming
-the row's own PR (`run-merge-bot.md` step 1). It is not an Exclusion: that
-gates a ticket's claim, this a reviewed PR's merge. `label-off=<finisher-pr-M[-x]>`
+`conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md`
+step 1), or by you off the tick's `CONFLICT` line, naming the row's own PR. It
+is not an Exclusion: that gates a ticket's claim, this a PR's merge. `label-off=<finisher-pr-M[-x]>`
 is yours, written before you take `ready-to-merge` off PR M on purpose (taking
 it off before you approve a push, or clearing one left on a moved head),
 naming that PR's latest finisher attempt: the tick reads a missing label as a

@@ -102,7 +102,7 @@ test("an outcome from another family's vocabulary, or none at all, is refused by
 
 // The other `=`-tokens a real row carries (`class=`, `ports=`, `ci=`, and
 // #1773's `review=`/`reviewed=` pair) are not members, and neither are the
-// merge bot's holds nor anything that only resembles one. Claiming any of
+// merge holds nor anything that only resembles one. Claiming any of
 // them would count a phantom member live.
 test("tokens that are not members are not claimed", () => {
   for (const token of [

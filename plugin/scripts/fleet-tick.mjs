@@ -25,8 +25,9 @@
 //             it once recorded only that someone was dispatched. Live
 //             implementers, live reviewer units (in-flight `review=` plus
 //             unsettled `fix-pr-`), the merge bot (`## Dispatched`), merge
-//             holds (`held-behind:#M`, and merge-bot's own
-//             `conflict-hold:#<pr>`), tier mismatches and the drain marker
+//             holds (`held-behind:#M`, and `conflict-hold:#<pr>`, written by
+//             the merge bot or by the controller off a `CONFLICT` line),
+//             tier mismatches and the drain marker
 //             all come off it. A missing ledger is a fresh run: zero rows.
 //   shortlist `.fleet/shortlist.json`, shortlist.mjs's output, resolved against
 //             the git common dir as ledger.mjs resolves the ledger. Its
@@ -35,8 +36,9 @@
 //             `scanned` is the supply. Missing or unparsable is depth 0 and a
 //             refresh, never a refusal: the depth only ever bounds PULLs
 //             downward.
-//   gh        The open PRs, by label and by whether they close an issue — the
-//             merge queue, and which PRs are owed a review. Also, for each ticket
+//   gh        The open PRs, by label, by whether they close an issue and by
+//             GitHub's `mergeable` — the merge queue, which PRs are owed a
+//             review, and which conflict. Also, for each ticket
 //             holding the implementer row on a tier mismatch, whether its issue
 //             is CLOSED (`gh issue view`): a closed ticket's mismatch
 //             holds nothing. And, for each in-flight `review=` token whose PR
@@ -70,7 +72,16 @@ import { parseMember, parseToken, rowPr, premisesOf } from "./ledger-grammar.mjs
 // reads what they leave: the slots this tick's own dispatches fill.
 export function reconcile(s) {
   const rev = reviewers(s);
-  return [...mainCheckoutHold(s, [implementers(s, rev.left), ...rev.rows, mergeBot(s)]), ...shortlistRows(s), ...routerRows(s)];
+  // The conflict rows only ask the controller to write a record — never to
+  // dispatch — so they stand outside the main-checkout hold: the fix-applier a
+  // conflict hold leads to obeys the hold through its own role's row.
+  return [
+    ...mainCheckoutHold(s, [implementers(s, rev.left), ...rev.rows]),
+    ...rev.conflictRows,
+    ...mainCheckoutHold(s, [mergeBot(s)]),
+    ...shortlistRows(s),
+    ...routerRows(s),
+  ];
 }
 
 // A main checkout changed since the run's baseline — or one the tick
@@ -220,6 +231,24 @@ function reviewers(s) {
     unlabelledRows.push(row(`ESCALATE unlabelled ${prs(stuck.map((u) => u.pr))}`,
       { extra: `${names(stuck)} settled labelled since the last label-off; still no ready-to-merge` }));
   }
+  // An open PR the run tracks that GitHub reads CONFLICTING, with no hold on
+  // record and nobody working it: the controller writes the hold the merge
+  // bot would, and the tick turns it into `DISPATCH fix-pr` from then on.
+  // Past two landed conflict fix-appliers it is a treadmill, handed to a human
+  // instead — no hold, no fix-applier. Neither row takes a reviewer slot, and
+  // neither stands aside for IDLE OK: that row is the one a hold replaces. They
+  // are returned beside `rows`, not among them, so a main-checkout hold never
+  // turns a record-only line into a HOLD.
+  const conflictRows = [];
+  if (s.conflicts.length) {
+    const record = s.conflicts.map((n) => `~/.fleet/bin/fleet-run ledger.mjs row <key> "<text> · conflict-hold:#${n} (conflict: mergeable=CONFLICTING)" on the row naming PR#${n}`);
+    conflictRows.push(row(`CONFLICT ${prs(s.conflicts)}`,
+      { acts: true, extra: `GitHub reads CONFLICTING; ~/.fleet/bin/fleet-run ledger.mjs read, then ${record.join("; ")}` }));
+  }
+  if (s.conflictEscalate.length) {
+    conflictRows.push(row(`ESCALATE conflict ${prs(s.conflictEscalate)}`,
+      { extra: "GitHub reads CONFLICTING again after two conflict fix-appliers landed; comment on the PR and flag it for a human — no hold, no fix-applier" }));
+  }
   if (!rows.length) {
     const owed = s.fixDue.length + s.reviewDue.length;
     if (owed && free <= 0) rows.push(row("AT CAP"));
@@ -227,7 +256,7 @@ function reviewers(s) {
     else if (!unlabelledRows.length) rows.push(row("IDLE OK"));
   }
   rows.push(...unlabelledRows);
-  return { rows, left: { unreviewed: s.reviewDue.length - reviews.length, free } };
+  return { rows, conflictRows, left: { unreviewed: s.reviewDue.length - reviews.length, free } };
 }
 
 function mergeBot(s) {
@@ -346,11 +375,11 @@ export class LedgerError extends Error {}
 const REVIEW = /^review=(?:wf|member|fallback):[^=\s]+(=failed)?$/;
 export const REVIEWED = /^reviewed=([0-9a-f]{7,40}):(\d+)\/(\d+)\/(\d+)$/i;
 const HELD = /^held-behind[:-]#?(\d+)$/;
-// Merge-bot's durable record that its local-rebase fallback hit a
-// conflict it would not force — written onto the held PR's own row at the
-// point run-merge-bot.md says to report and halt, and spelled like
-// `held-behind` so the two read alike. Distinct from an Exclusion, which
-// gates a ticket's claim; this gates a reviewed PR's merge.
+// The durable record that a PR conflicts — written onto the held PR's own
+// row by the merge bot, when its local-rebase fallback hits a conflict it would
+// not force, or by the controller off this tick's `CONFLICT` line — and
+// spelled like `held-behind` so the two read alike. Distinct from an
+// Exclusion, which gates a ticket's claim; this gates a PR's merge.
 const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
 // tier-check.mjs's verdict on an implementer, `tier-ok=<member>:<def>`
 // or `tier-mismatch=<member>:<def>` — or `tier-unverifiable=<member>:no-transcript`
@@ -582,10 +611,13 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     // unverified count. `dispositions`: every dispositions verdict a fix-pr
     // member of this PR carries, whatever head it answers — the gate picks
     // by head and retry suffix, never by where a token sits.
+    // `workers`: every fix-applier and finisher bound to this PR, and every
+    // implementer on a row resolving to it — one still unsettled holds the
+    // CONFLICT line off, since it may be pushing to the branch right now.
     const st = (pr !== null && byPr.get(pr)) || {
       inFlight: false, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
       fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(), held: [],
-      conflictOpen: false, reviewedHead: null, pastPinHalt: false, dispositions: [],
+      conflictOpen: false, reviewedHead: null, pastPinHalt: false, dispositions: [], workers: new Set(),
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
     // retry suffix ("" < "b" < "c" …) the same way compute-board.mjs's
@@ -599,6 +631,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
       const t = parseToken(tok);
       if (t) {
         note(t, where, pr);
+        if ((t.bound === "pr" && t.number === pr) || t.family === "impl") st.workers.add(t.name);
         // A settled `failed`/`killed` fix-applier leaves review findings or a
         // conflict unfixed and no successor dispatched — the PR stays fix-due
         // for a `-b` replacement. Only a live attempt, or one that actually
@@ -733,7 +766,21 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
   const state = (n) => byPr.get(n);
   const heldBehind = (st) => (st?.held ?? []).some((n) => open.has(n));
   const conflictHeld = (st) => st !== undefined && st.conflictOpen;
-  const fixRunning = (st) => [...st.fixMembers].some((n) => members.get(n).outcome === null);
+  const anyLive = (names) => [...names].some((n) => members.get(n).outcome === null);
+  const fixRunning = (st) => anyLive(st.fixMembers);
+  // An open PR the ledger tracks that GitHub reads CONFLICTING — no other
+  // `mergeable` value: UNKNOWN is read again next tick, and a PR merely behind
+  // is the merge bot's server-side update — with no hold on record yet and
+  // nobody on it who may be pushing. A queued one is the merge bot's while one
+  // is live: its own rebase fallback records the hold. A review in flight is no
+  // reason to wait, since fixDue already waits for it to return.
+  const working = (st) => anyLive(st.workers);
+  const mergeBotLive = live("merge-bot");
+  const conflicting = prs.filter((p) => p.mergeable === "CONFLICTING" && byPr.has(p.number)
+    && !conflictHeld(state(p.number)) && !working(state(p.number)) && !(isQueued(p) && mergeBotLive > 0));
+  // Two conflict fix-appliers landed on it, ever, and it conflicts again: a
+  // treadmill.
+  const treadmill = (p) => state(p.number).conflictLanded.size >= 2;
   // The latest review's dispositions verdict is a mismatch no later fix-applier
   // has answered: the verdict is the highest-suffixed one, and no fix-applier
   // with a higher suffix has landed. A landed one is awaiting its own check, so
@@ -764,7 +811,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
   return {
     implLive: live("impl"),
     fixLive: live("fix-pr"),
-    mergeBotLive: live("merge-bot"),
+    mergeBotLive,
     reviewsLive: liveReviews.length,
     // The in-flight reviews of PRs the open list does not carry: the ones
     // `finished` could retire, so the caller asks gh about these and no others.
@@ -806,10 +853,15 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
       new Set(prs.filter((p) => !isQueued(p)).map((p) => p.number))),
     // Every PR, open or not, on a conflict hold no fix-applier has cleared —
     // the one reading of a hold: `ledger.mjs dispatch` names a
-    // fix-applier's definition off this list, so it answers the same per-PR
-    // fold this tick holds the merge on, split rows and a settle made
-    // anywhere included, rather than re-deriving it from one row's text.
+    // fix-applier's definition and refuses a finisher off this list, so it
+    // answers the same per-PR fold this tick holds the merge on, split rows
+    // and a settle made anywhere included, rather than re-deriving it from
+    // one row's text.
     conflictHeld: [...byPr.entries()].filter(([, st]) => conflictHeld(st)).map(([n]) => n).sort(asc),
+    // Each `conflicting` PR: a hold for the controller to record, or — past
+    // two landed conflict fix-appliers — a PR for a human.
+    conflicts: conflicting.filter((p) => !treadmill(p)).map((p) => p.number).sort(asc),
+    conflictEscalate: conflicting.filter(treadmill).map((p) => p.number).sort(asc),
     // Every PR, open or not, with a returned review: its latest `reviewed=`
     // head and counts, the dispositions verdict currently answering that
     // head, and every fix-applier on the PR still unsettled (`fixLive`) — a
@@ -904,6 +956,9 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 // nothing in the result says so, so it refuses — "no silent caps", same rule
 // candidates.mjs enforces on its own query.
 const PR_LIMIT = 200;
+// GitHub's `mergeable` values. One outside them is a drifted enum, refused
+// rather than read as not conflicting.
+const MERGEABLE_STATES = ["MERGEABLE", "CONFLICTING", "UNKNOWN"];
 // Claimed tickets read per stall report. Same "no silent caps" rule as
 // PR_LIMIT above, resolved the other way: the read below cannot REFUSE at the
 // cap, because refusing would suppress the one announcement a dead run leaves
@@ -993,7 +1048,7 @@ function openPrs() {
   let out;
   try {
     out = execFileSync("gh", ["pr", "list", "--state", "open", "--limit", String(PR_LIMIT),
-      "--json", "number,labels,closingIssuesReferences,headRefOid"], { encoding: "utf8", timeout: GH_TIMEOUT_MS });
+      "--json", "number,labels,closingIssuesReferences,headRefOid,mergeable"], { encoding: "utf8", timeout: GH_TIMEOUT_MS });
   } catch (e) {
     // Never interpolates e.stderr or e.message: execFileSync already forwarded
     // the child's stderr to ours, and Node builds e.message out of it, so
@@ -1008,11 +1063,13 @@ function openPrs() {
   }
   // closingIssuesReferences is checked, not defaulted: absent, it would read as
   // an empty list and drop every open PR from review work. headRefOid likewise
-  // — absent, a `halted:past-pin` PR would read as moved forever.
+  // — absent, a `halted:past-pin` PR would read as moved forever — and
+  // mergeable: absent or outside GitHub's MergeableState enum, no PR would ever
+  // read CONFLICTING.
   if (!Array.isArray(prs) || prs.some((p) => !p || typeof p.number !== "number"
     || !Array.isArray(p.labels) || !Array.isArray(p.closingIssuesReferences)
-    || typeof p.headRefOid !== "string")) {
-    die("gh pr list did not return {number,labels,closingIssuesReferences,headRefOid} rows");
+    || typeof p.headRefOid !== "string" || !MERGEABLE_STATES.includes(p.mergeable))) {
+    die("gh pr list did not return {number,labels,closingIssuesReferences,headRefOid,mergeable} rows, mergeable one of MERGEABLE, CONFLICTING, UNKNOWN");
   }
   if (prs.length === PR_LIMIT) {
     die(`exactly ${PR_LIMIT} open PRs — the list is capped and may be truncated. Raise PR_LIMIT; a backlog that silently drops PRs is not a reconcile.`);
