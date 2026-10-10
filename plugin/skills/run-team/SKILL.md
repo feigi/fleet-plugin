@@ -288,6 +288,21 @@ phase, or in any later one, asks the maintainer which tickets to take.
    read that fails. `main-checkout.mjs --check` prints the same answer
    without a tick.
 
+   **Run the pre-flight, once the pin and the baseline are recorded.**
+   `~/.fleet/bin/fleet-run preflight.mjs` checks what this machine and this
+   repository must give the fleet — the binaries, `gh` auth, `origin/main`,
+   `.worktrees/` and `.fleet/` ignored, the three labels, merge commits on, a
+   ruleset, the Resolver — and prints one `ok`, `WARN` or `FAIL` line per
+   check, each naming its check. **Exit 1 stops the run:** no shortlist, no
+   dispatch. Report every `FAIL` line to the maintainer by its check's name;
+   the run starts again once they are fixed. Exit 2 means it could not run
+   at all, and stops the run the same way. `WARN ci-workflow` stops nothing:
+   a repo with no workflow named CI still runs, its workflow named per call
+   with `--workflow` or declared absent with `--declare-no-ci`. A pass writes
+   `.fleet/preflight.json`, keyed to a hash of the check set, and every later
+   run prints `PREFLIGHT SKIPPED` without a single `gh` call until a check is
+   added or changed.
+
    **Check the merge gate against its spec, once the fast-forward has put the
    ratified spec in front of you.** Where the workspace checks a ruleset spec
    in, `.github/scripts/apply-ruleset.sh --check` compares it to the live gate

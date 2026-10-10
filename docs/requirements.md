@@ -179,22 +179,33 @@ Admitted: open, labelled `ready-for-agent`, no excluded labels (§2.4), unassign
 
 ## 4. Pre-flight checklist
 
-Run from repo root:
+run-team runs these checks itself at the start of phase 0:
+`~/.fleet/bin/fleet-run preflight.mjs`. Each check prints one line naming it,
+`ok <name>`, `WARN <name>: <why>` or `FAIL <name>: <why>`, and every check runs,
+so one pass names every failure.
 
-```sh
-set -e
-node -v; git --version; gh --version | head -1; jq --version; python3 --version; command -v shasum
-gh auth status
-git remote get-url origin; git rev-parse --verify -q origin/main >/dev/null
-git check-ignore -q .worktrees/probe
-git check-ignore -q .fleet/probe
-for l in ready-for-agent in-progress ready-to-merge; do gh label list --search "$l" --json name --jq '.[].name' | grep -qx "$l"; done
-gh api "repos/{owner}/{repo}" --jq '.allow_merge_commit'
-gh api "repos/{owner}/{repo}/rulesets" --jq '.[].name'
-grep -l '^name: *CI *$' .github/workflows/*.y*ml 2>/dev/null || echo "no CI workflow named CI"
-~/.fleet/bin/fleet-run --root
-echo PREFLIGHT OK
-```
+| Check | Probe (run from the main checkout) | Passes when |
+|---|---|---|
+| `binary:node`, `binary:git`, `binary:gh`, `binary:jq`, `binary:python3`, `binary:shasum` | `node -v`, `<binary> --version` (§1.1) | exit 0 |
+| `gh-auth` | `gh auth status` (§1.2) | exit 0 |
+| `origin-remote` | `git remote get-url origin` (§2.2) | exit 0 |
+| `origin-main` | `git rev-parse --verify -q origin/main` (§2.2) | exit 0 |
+| `worktrees-ignored` | `git check-ignore -q .worktrees/probe` (§2.5) | exit 0 |
+| `fleet-ignored` | `git check-ignore -q .fleet/probe` (§2.5) | exit 0 |
+| `label:ready-for-agent`, `label:in-progress`, `label:ready-to-merge` | `gh label list --search <label> --json name --jq '.[].name'` (§2.4) | a line equal to the label |
+| `allow-merge-commit` | `gh api "repos/{owner}/{repo}" --jq '.allow_merge_commit'` (§2.6) | prints `true` |
+| `ruleset` | `gh api "repos/{owner}/{repo}/rulesets" --jq '.[].name'` (§2.6) | prints a ruleset name |
+| `ci-workflow` | `grep -l '^name: *CI *$' .github/workflows/*.y*ml` (§2.7) | exit 0; a miss is a WARN and passes |
+| `resolver` | `~/.fleet/bin/fleet-run --root` (§1.3) | exit 0 |
+
+Exit 0: passed, warnings included. Exit 1: a check failed; the last line is
+`PREFLIGHT FAILED: <names>`, and the run stops before the shortlist. Exit 2:
+the script could not run (no repository, `.fleet/` not writable).
+
+A pass writes `.fleet/preflight.json`, keyed to a hash of the check set. A
+later run with the same check set prints `PREFLIGHT SKIPPED` and makes no `gh`
+call; a check added or changed runs the whole set again. Delete the file to
+make the next run check again.
 
 Then: `/skill:run-team 1 1` with one `ready-for-agent` ticket, watch a full cycle.
 

@@ -9,8 +9,9 @@
 // row says `want`, its stdout carries a line equal to that string — or, for
 // `want: NONEMPTY`, any non-blank line. A row marked `warn` reports a miss as a
 // WARN and passes: the CI-workflow row, because a repo without a workflow
-// named CI still runs, with the merge bot told so per call. Every other miss
-// is a FAIL. Every row runs, so one run names every failure, not the first.
+// named CI still runs, its workflow named per call (`ci-state.mjs
+// --workflow`) or declared absent (`--declare-no-ci`). Every other miss is a
+// FAIL. Every row runs, so one run names every failure, not the first.
 //
 // No row names a manifest, a lockfile or a test runner: the consumer's Install
 // step and Test entrypoint come from its Recipe, and the fleet keeps no table
