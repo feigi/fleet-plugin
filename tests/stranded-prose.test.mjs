@@ -23,7 +23,7 @@ test("the stranded-claim step runs stranded.mjs after the rotation and reads pri
 
 test("a resume dispatches a new member under a new name on the same ticket and worktree, through the ordinary ledger path", () => {
   const s = step();
-  assert.match(s, phrase("a new member under a new name — `impl-<N>-b`, or one letter past the highest `impl-<N>-<x>` the archive rotate printed holds — on the same ticket, in the printed worktree and branch"));
+  assert.match(s, phrase("a new member under a new name — `impl-<N>-b`, or one letter past the highest `impl-<N>-<x>` in the archive that rotate printed the path of — on the same ticket, in the printed worktree and branch"));
   assert.match(s, phrase("Record it the ordinary way — `ledger.mjs row <N> \"impl-<N>-b\"`, then `ledger.mjs dispatch <N> impl-<N>-b`, then the `task` call naming the `agent` it printed, then the tier check — and never `claim-ticket.sh`: the claim already stands."));
 });
 
@@ -32,5 +32,5 @@ test("a report goes to the maintainer and nothing else, and ancestor and none re
   assert.match(s, phrase("A `report` goes to the maintainer as `#<N> — <why>` and nothing else: no dispatch, no label change, no release."));
   assert.match(s, phrase("`prior: ancestor` — this session's own earlier run: nothing is listed."));
   assert.match(s, phrase("every claim is `report`, and nothing is resumed."));
-  assert.match(s, phrase("Exit 2 is a list that did not answer"));
+  assert.match(s, phrase("Exit 2 is a list that did not answer — a `gh` or `git` failure, a list at its cap, or a worktree whose presence cannot be told — and is never nothing stranded."));
 });

@@ -471,17 +471,19 @@ phase, or in any later one, asks the maintainer which tickets to take.
 
    A `resume` follows the Member-killed row across the run boundary: a new
    member under a new name — `impl-<N>-b`, or one letter past the highest
-   `impl-<N>-<x>` the archive rotate printed holds — on the same ticket, in
-   the printed worktree and branch, its prompt the phase 2 prompt off a fresh
-   read of the issue plus what it inherits (`git -C <worktree> log --oneline
-   origin/main..HEAD`, `git -C <worktree> status --short`, and the files under
-   `<scratch>/impl-<N>/`). Record it the ordinary way — `ledger.mjs row <N>
+   `impl-<N>-<x>` in the archive that rotate printed the path of — on the same
+   ticket, in the printed worktree and branch, its prompt the phase 2 prompt
+   off a fresh read of the issue plus what it inherits (`git -C <worktree> log
+   --oneline origin/main..HEAD`, `git -C <worktree> status --short`, and the
+   files under `<scratch>/impl-<N>/`). Record it the ordinary way —
+   `ledger.mjs row <N>
    "impl-<N>-b"`, then `ledger.mjs dispatch <N> impl-<N>-b`, then the `task`
    call naming the `agent` it printed, then the tier check — and never
    `claim-ticket.sh`: the claim already stands. A `report` goes to the
    maintainer as `#<N> — <why>` and nothing else: no dispatch, no label change,
    no release. Exit 2 is a list that did not answer — a `gh` or `git`
-   failure, or a list at its cap — and is never nothing stranded.
+   failure, a list at its cap, or a worktree whose presence cannot be told —
+   and is never nothing stranded.
 
 1. **Build the Shortlist** — `~/.fleet/bin/fleet-run shortlist.mjs`, then read
    `.fleet/shortlist.json`. The script runs the cheap filters and nothing else

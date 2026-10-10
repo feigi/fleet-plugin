@@ -32,7 +32,10 @@ itself is still alive when nothing else is left to report.
    was last seen and the interval then in effect — to the heartbeat
    state file; a reader comparing that age against its own interval
    produces a **Stall report**: how many tickets are claimed and in
-   flight, and whether the pool still has supply. Detection only.
+   flight, and whether the pool still has supply, led by whose stall it
+   is — controller alive, gone, or unknown — off the **Controller
+   record** (`controller` in the same state file, written by the ledger
+   rotation at phase 0). Detection only.
 
 ## Opinionated choices
 

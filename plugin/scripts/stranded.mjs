@@ -23,20 +23,23 @@
 //             still be live, and the in-run liveness check covers them
 //   none      nothing proves the previous run dead: every claim `report`
 //
-// "An open PR about the issue" is the in-flight check's own reading: a PR
-// linked to the issue that is still open, a linked PR in another repository
-// (whose state this repository's list cannot show, so it counts), or an open
-// PR whose branch names the number as a whole segment. A worktree is the
-// issue's when its directory name names the number the same way, so a
-// worktree named for issue 129 is never issue 12's.
+// "An open PR about the issue" is the in-flight check's reading, its branch rule
+// narrowed: a PR linked to the issue that is still open, a linked PR in another
+// repository (whose state this repository's list cannot show, so it counts), or
+// an open PR whose branch opens with the number — `<type>/<n>-<slug>`,
+// claim-ticket.sh's shape. A PR that carries the number elsewhere in its branch
+// is not taken for the claim's: the claim is listed `report`, never resumed,
+// with that PR named. A worktree is the issue's when its directory name names
+// the number as a whole segment, so a worktree named for issue 129 is never
+// issue 12's.
 //
 // Prints `{prior, claims: [{n, t, action, worktree, branch, why}]}` on stdout.
-// Exit 0 answered; 2 a list that did not answer — a gh or git failure, or a
-// list at its cap, which may hold more than it showed. Never read 2 as nothing
-// stranded.
+// Exit 0 answered; 2 a list that did not answer — a gh or git failure, a
+// list at its cap, which may hold more than it showed, or a worktree path
+// whose presence cannot be told. Never read 2 as nothing stranded.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { makeDie, writeAll } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
@@ -107,11 +110,26 @@ function worktrees(cwd) {
   return out;
 }
 
+// Whether `p` is on disk. Only ENOENT is gone: any other failure (EACCES on a
+// parent of a worktree git still lists, a locked one whose directory is gone)
+// leaves it unknown, and unknown is never read as gone — that would report the
+// claim as one with no worktree and say nothing of why.
+function present(p) {
+  try {
+    statSync(p);
+    return true;
+  } catch (e) {
+    if (e.code === "ENOENT") return false;
+    return die(`cannot tell whether ${p} exists (${e.code ?? e.message}) — which claims have a worktree is unknown, so nothing is classified`);
+  }
+}
+
 const real = (p) => {
   try {
     return realpathSync(p);
-  } catch {
-    return p;
+  } catch (e) {
+    if (e.code === "ENOENT") return p;
+    return die(`cannot resolve ${p} (${e.code ?? e.message}) — which worktrees are in this checkout is unknown, so nothing is classified`);
   }
 };
 
@@ -142,30 +160,37 @@ function main() {
   const prs = ghList("list of open PRs", ["pr", "list", "--state", "open", "--json", "number,headRefName,url"]);
   const openByUrl = new Map(prs.map((p) => [p.url, p]));
 
-  // The PRs that make an issue someone else's business, or none.
-  const prsFor = (issue) => {
+  // The PRs that make an issue someone else's business, or none — and, apart,
+  // the open PRs whose branch carries the number somewhere other than as the
+  // ticket's own: `<type>/<n>-<slug>` is claim-ticket.sh's shape, so
+  // `implementer/1799-bump-node-20` names issue 1799 and merely ends in 20.
+  const prsFor = (issue, seg) => {
     const here = repoOf(issue.url);
     const linked = (issue.closedByPullRequestsReferences ?? []).flatMap((ref) => {
       if (openByUrl.has(ref.url)) return [`open PR #${openByUrl.get(ref.url).number}`];
       const repo = repoOf(ref.url);
       return repo !== here ? [`linked PR ${repo}#${ref.url.split("/").at(-1)}, whose state this repository's list cannot show`] : [];
     });
-    const seg = segment(issue.number);
-    const named = prs.filter((p) => seg.test(p.headRefName ?? "")).map((p) => `open PR #${p.number} (branch ${p.headRefName})`);
-    return [...linked, ...named];
+    const own = new RegExp(`^([^/]*/)?${issue.number}([-/]|$)`);
+    const named = prs.filter((p) => seg.test(p.headRefName ?? ""));
+    const describe = (p) => `open PR #${p.number} (branch ${p.headRefName})`;
+    return {
+      held: [...linked, ...named.filter((p) => own.test(p.headRefName)).map(describe)],
+      mentioned: named.filter((p) => !own.test(p.headRefName)).map(describe),
+    };
   };
 
   const home = real(join(checkout, ".worktrees"));
   const all = worktrees(checkout);
   const claims = [];
   for (const issue of issues) {
-    const held = prsFor(issue);
+    const seg = segment(issue.number);
+    const { held, mentioned } = prsFor(issue, seg);
     if (held.length > 0) {
       log(`    #${issue.number} has ${held.join(", ")} — the fold-in owns it`);
       continue;
     }
-    const seg = segment(issue.number);
-    const mine = all.filter((w) => !w.prunable && seg.test(basename(w.path)) && existsSync(w.path));
+    const mine = all.filter((w) => !w.prunable && seg.test(basename(w.path)) && present(w.path));
     const inside = mine.filter((w) => real(dirname(w.path)) === home);
     const outside = mine.filter((w) => !inside.includes(w));
     const one = inside.length === 1 ? inside[0] : null;
@@ -175,7 +200,9 @@ function main() {
     else if (inside.length > 1) why = `several worktrees for it in this checkout: ${inside.map((w) => w.path).join(", ")}`;
     else if (outside.length > 0) why = `its worktree is outside this checkout's .worktrees/: ${outside.map((w) => w.path).join(", ")}`;
     else why = "no worktree for it in this checkout";
-    const action = prior === "dead" && one ? "resume" : "report";
+    const action = prior === "dead" && one && mentioned.length === 0 ? "resume" : "report";
+    // Not taken for its PR — but never resumed past one that might be.
+    if (mentioned.length > 0) why += `; ${mentioned.join(", ")} carries the number outside the ticket position, so check whether it is this claim's`;
     claims.push({ n: issue.number, t: issue.title, action, worktree: one?.path ?? null, branch: one?.branch ?? null, why });
     log(`    #${issue.number} ${action} — ${why}`);
   }

@@ -19,7 +19,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { readState, writeState, assessBeat, isStalled, stallReport, stallsAt, BEAT_GRACE, DEFAULT_CEILING_S } from "../plugin/scripts/fleet-state.mjs";
+import { readState, writeState, assessBeat, isStalled, stallOwner, stallReport, stallsAt, BEAT_GRACE, DEFAULT_CEILING_S } from "../plugin/scripts/fleet-state.mjs";
+import { ProcUnreadable } from "../plugin/scripts/proc.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-state.mjs", import.meta.url));
 
@@ -519,4 +520,54 @@ test("stallReport: age always reconciles to overdue+interval, across every unit 
       );
     }
   }
+});
+
+// ── stallOwner: whose stall a mark is ───────────────────────────────────────
+//
+// The mark is judged against the record's `at`: one older than it is the
+// previous run's and the verdict rotate reached, `prior`, words the stall; one
+// at or after it is the recorded controller's own and the record is judged.
+// `judge` is injected so no reader finds the omp session running this suite.
+const RECORD_AT = 1_000_000;
+const recordWith = (prior) => ({ pid: 4242, lstart: "x", prior, at: RECORD_AT });
+const noJudge = () => assert.fail("the record was judged where only `prior` should read");
+
+test("stallOwner: a stall whose every mark predates the record reads `prior`, and the record is never judged", () => {
+  const beat = { at: RECORD_AT - 60_000 };
+  assert.deepEqual(stallOwner({ controller: recordWith("dead"), beat, ticked: null }, "t", noJudge), { kind: "gone", resumes: "this run" });
+  assert.deepEqual(stallOwner({ controller: recordWith("ancestor"), beat, ticked: beat }, "t", noJudge), { kind: "alive", pid: null });
+  assert.deepEqual(stallOwner({ controller: recordWith("none"), beat, ticked: beat }, "t", noJudge), { kind: "none" });
+});
+
+test("stallOwner: a mark at or after the record is the recorded controller's own — the record is judged, whatever `prior` says", () => {
+  const old = { at: RECORD_AT - 60_000 };
+  const marks = {
+    "a tick after the record, the beat still the previous run's": { beat: old, ticked: { at: RECORD_AT + 60_000 } },
+    "a beat exactly at the record": { beat: { at: RECORD_AT }, ticked: old },
+    "a tick exactly at the record": { beat: old, ticked: { at: RECORD_AT } },
+    "a beat after the record": { beat: { at: RECORD_AT + 60_000 }, ticked: null },
+  };
+  for (const [what, { beat, ticked }] of Object.entries(marks)) {
+    for (const prior of ["dead", "ancestor", "none"]) {
+      const controller = recordWith(prior);
+      assert.deepEqual(stallOwner({ controller, beat, ticked }, "t", () => "alive"), { kind: "alive", pid: 4242 }, `${what}, prior ${prior}`);
+      assert.deepEqual(stallOwner({ controller, beat, ticked }, "t", () => "dead"), { kind: "gone", resumes: "the next run" }, `${what}, prior ${prior}`);
+    }
+  }
+});
+
+test("stallOwner: a judge failure that is not an unreadable process table propagates", () => {
+  const controller = { pid: 1, lstart: "x", prior: "none", at: 1 };
+  const marks = { beat: { at: 5 }, ticked: { at: 5 } };
+  const bug = new TypeError("a programming error");
+  assert.throws(() => stallOwner({ controller, ...marks }, "t", () => { throw bug; }), (e) => e === bug);
+  const err = console.error;
+  const lines = [];
+  console.error = (m) => lines.push(m);
+  try {
+    assert.deepEqual(stallOwner({ controller, ...marks }, "t", () => { throw new ProcUnreadable("table gone"); }), { kind: "none" });
+  } finally {
+    console.error = err;
+  }
+  assert.match(lines[0], /cannot be judged/);
 });

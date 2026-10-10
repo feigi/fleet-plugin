@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -137,8 +137,65 @@ test("prior dead + no worktree for the claim in this checkout → report; nothin
   assert.equal(by[16].action, "report");
   assert.match(by[16].why, /several worktrees/);
   assert.ok(r.out.claims.every((c) => c.action === "report"));
-  // Listing is all it does: two reads, no write.
-  assert.deepEqual(r.gh.map((l) => l.split(" ").slice(0, 2).join(" ")), ["issue list", "pr list"]);
+  // Listing is all it does: two reads, no write — and the whole argv is the
+  // query, so a widened --state, another --label, a trimmed --json field list
+  // or a smaller --limit each changes which claims are classified.
+  assert.deepEqual(r.gh, [
+    "issue list --label in-progress --state open --json number,title,url,closedByPullRequestsReferences --limit 1000",
+    "pr list --state open --json number,headRefName,url --limit 1000",
+  ]);
+});
+
+test("a number is a whole segment on both sides, whichever separator bounds it — in a worktree name and in a PR branch", (t) => {
+  // `12` is not in `112-impl-112` (the leading boundary), and each branch below
+  // holds its own issue through a different separator: `/`-then-`-`, `/`-then-`/`,
+  // and the name's own start. A boundary dropped on either side fails here.
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["112-impl-112", "16-x"] });
+  const r = f.run({
+    issues: [issue(12), issue(13), issue(14), issue(15), issue(16)],
+    prs: [pr(91, "implementer/13/x"), pr(92, "implementer/14-x"), pr(93, "15-x")],
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.worktree]), [[12, "report", null], [16, "resume", wt(f, "16-x")]]);
+  assert.match(r.stderr, /#13 .*open PR #91/);
+  assert.match(r.stderr, /#14 .*open PR #92/);
+  assert.match(r.stderr, /#15 .*open PR #93/);
+});
+
+test("a worktree git calls prunable and one whose directory is gone are each left out, whichever way the other check would answer", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["17-impl-17", "18-impl-18", "19-impl-19"] });
+  // #17: the directory is there but its `.git` link is not — git lists it
+  // `prunable` though the path exists, so only `prunable` leaves it out.
+  rmSync(join(wt(f, "17-impl-17"), ".git"));
+  // #18: the directory is gone but the worktree is locked — git withholds
+  // `prunable` from a locked one, so only the directory check leaves it out.
+  git(f.repo, "worktree", "lock", wt(f, "18-impl-18"));
+  rmSync(wt(f, "18-impl-18"), { recursive: true, force: true });
+  // #19: whole, the control: the same fixture still finds a worktree.
+  const r = f.run({ issues: [issue(17), issue(18), issue(19)] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.worktree]), [
+    [17, "report", null], [18, "report", null], [19, "resume", wt(f, "19-impl-19")],
+  ]);
+});
+
+test("a locked worktree whose path cannot be stat'd is a refusal — exit 2 — never a claim with no worktree", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads past a directory it has no permission on");
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  // Locked, so git does not call it prunable once it cannot reach it, and
+  // lists it as live: the one path to the directory check's non-ENOENT case.
+  git(f.repo, "worktree", "lock", wt(f, "12-impl-12"));
+  const home = join(f.repo, ".worktrees");
+  chmodSync(home, 0o000);
+  let r;
+  try {
+    r = f.run({ issues: [issue(12)] });
+  } finally {
+    chmodSync(home, 0o755);
+  }
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /cannot tell whether .*12-impl-12 exists \(EACCES\)/);
 });
 
 test("prior ancestor → nothing listed, nothing asked of gh", (t) => {
@@ -183,6 +240,14 @@ test("an in-progress issue with an open PR is never listed — linked, branch-na
   assert.match(r.stderr, /#20 .*open PR #90/);
   assert.match(r.stderr, /#21 .*open PR #91/);
   assert.match(r.stderr, /#22 .*other\/fork#5/);
+});
+
+test("a PR branch that merely ends in an issue's number does not own it: the claim is reported with that PR named, never dropped or resumed", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["20-impl-20"] });
+  const r = f.run({ issues: [issue(20)], prs: [pr(901, "implementer/1799-bump-node-20")] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.worktree]), [[20, "report", wt(f, "20-impl-20")]]);
+  assert.match(r.out.claims[0].why, /open PR #901 \(branch implementer\/1799-bump-node-20\)/);
 });
 
 test("a list that did not answer, or came back at its cap, is a refusal — exit 2 — never nothing stranded", (t) => {

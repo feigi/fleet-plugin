@@ -154,3 +154,24 @@ test("the real board names whether a stalled run's recorded controller is alive 
   assert.match(build({ pid: gone, lstart: "whatever", prior: "ancestor" }),
     /^heartbeat STALLED, controller gone: .*; the next run resumes its claims without a PR, and its open PRs return through the fold-in$/);
 });
+
+// A healthy beat never reads the process table: the controller is judged only
+// once the mark is stalled. The table points at a file that is not there, so a
+// judge call would warn on stderr.
+test("the real board does not judge the controller of a healthy run", () => {
+  const repo = tempDir("board-liveness-healthy-");
+  assert.equal(spawnSync("git", ["init", "-q", repo], { encoding: "utf8" }).status, 0);
+  const bin = tempDir("board-liveness-healthy-bin-");
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, FLEET_PROC_TABLE: join(bin, "no-such-proc-table.json") };
+  mkdirSync(join(repo, ".fleet"), { recursive: true });
+  const now = Date.now();
+  writeFileSync(join(repo, ".fleet", "heartbeat.json"), JSON.stringify({
+    quiet: 0, elapsed: 0, digest: "", beat: { at: now, interval: 1200, stopped: "" },
+    controller: { pid: process.pid, lstart: "x", prior: "dead", at: now - 60_000 },
+  }));
+  const r = spawnSync(process.execPath, [BOARD, "build"], { cwd: repo, encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /WARNING/);
+  assert.equal(JSON.parse(r.stdout).liveness, null);
+});

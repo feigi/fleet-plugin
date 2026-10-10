@@ -162,6 +162,7 @@ export function judgeController(record, source, chain) {
 
 // judgeController() for a reader that only names a record: the process
 // source and the caller's own chain read here, once. Throws ProcUnreadable.
-export function judgeRecord(record, source = processSource()) {
+export function judgeRecord(record) {
+  const source = processSource();
   return judgeController(record, source, ancestry(source));
 }
