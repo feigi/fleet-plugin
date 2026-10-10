@@ -26,6 +26,7 @@
 // The record:
 //
 //   { "head": "<the review file's head>",
+//     "run": "<the review's run root, as the review path names it>",
 //     "entries": [ { "bucket": "survived" | "unverified" | "refuted",
 //                    "index": <position in that bucket of the review file>,
 //                    "scope": "in" | "out",
@@ -45,6 +46,11 @@
 // never changes.
 //
 // Rules — each broken one is reported as `<bucket>[<index>]: <rule>`:
+//   - Run: with a ledger, `run` is the run the PR's latest `reviewed=` names. A
+//     record naming another run, or none, answers a review that is not this
+//     one — a fix-applier that ruled on an earlier review at the same head
+//     included — and is a mismatch. Without a ledger nothing names the run,
+//     and `run` is not read.
 //   - Coverage: a `survived` or `unverified` finding with no entry was
 //     dropped. An entry naming no finding, or a second entry for one finding,
 //     answers nothing.
@@ -149,12 +155,16 @@ import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { parseMember, memberTokens } from "./ledger-grammar.mjs";
-import { deriveRun, dispositionsToken, LedgerError, rowNums, sameHead } from "./fleet-tick.mjs";
+import { deriveRun, dispositionsToken, LedgerError, rowNums } from "./fleet-tick.mjs";
 import { VERDICT_SCHEMA } from "./review-core.mjs";
 
 const NAME = "dispositions-check";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
+
+// Two spellings of one commit: either head a prefix of the other, the way a
+// record's head (7-40 hex) is matched against its review's full head.
+const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
 
 // ---------------------------------------------------------------------------
 // pure core — no filesystem or process access until main()
@@ -377,7 +387,9 @@ function shapeErrors(e) {
  * record, or null when there is none to read (`recordProblem` then says why).
  * `touched` is touchedLines() for the review's head; `diffFiles` every file
  * name `git diff <merge-base>...<head>` lists, required only when an entry
- * defers `remedy-outside-diff`; `roots` the directories an absolute finding
+ * defers `remedy-outside-diff`; `run` the review's run root name, or null when
+ * no ledger names it — a record answers it only by carrying the same `run`;
+ * `roots` the directories an absolute finding
  * or remedy path is read relative to. `filing` is `{pr, issue(n), verdict(path)}`,
  * required only when an entry defers or is an in-scope suggestion: `issue`
  * answers `{state, title, labels}` — `state` upper-case, `labels` names — or
@@ -386,7 +398,7 @@ function shapeErrors(e) {
  * `review` must pass reviewProblem() — a bucket missing or holding a
  * non-object is a TypeError here, not a violation.
  */
-export function checkDispositions({ review, record, recordProblem = null, touched, diffFiles = null, roots = [], filing = null }) {
+export function checkDispositions({ review, record, recordProblem = null, run = null, touched, diffFiles = null, roots = [], filing = null }) {
   const violations = [];
   const escalations = [];
   const unchecked = [];
@@ -407,6 +419,9 @@ export function checkDispositions({ review, record, recordProblem = null, touche
     const reviewHead = String(review.head).toLowerCase();
     if (!/^[0-9a-f]{7,40}$/.test(head) || !sameHead(head, reviewHead)) {
       at(null, null, `the record answers head ${JSON.stringify(record.head ?? null)}, not the review's ${review.head}`);
+    }
+    if (run !== null && record.run !== run) {
+      at(null, null, `the record answers run ${JSON.stringify(record.run ?? null)}, not the review's ${run}`);
     }
   }
 
@@ -785,7 +800,7 @@ function main() {
     `list the files of ${base}..${head}`).split("\0").filter(Boolean);
 
   const { violations, escalations, unchecked } = checkDispositions({
-    review, record, recordProblem, touched: touchedLines(diff), diffFiles, roots: [review.snapshot, top],
+    review, record, recordProblem, run, touched: touchedLines(diff), diffFiles, roots: [review.snapshot, top],
     filing: { pr, issue: issueReader(repo), verdict: verdictReader(scratch, pr) },
   });
   // No ledger, no row: the exit status below is the verdict, and with no

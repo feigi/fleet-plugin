@@ -61,7 +61,7 @@ flowchart TD
         SNAP --> TESTRUN --> SPEC --> VERI
     end
 
-    VERI -->|"full result to<br/>scratch/review-N.json"| CTRL["controller reads<br/>the digest only"]
+    VERI -->|"full result to<br/>scratch/pr&lt;N&gt;/&lt;run&gt;/review.json"| CTRL["controller reads<br/>the digest only"]
     CTRL -->|"tick: DISPATCH fix-pr PR#N"| FIX
 
     subgraph FIXSUB["fix-applier — fix-pr-&lt;pr#&gt;, a plain task member"]

@@ -121,8 +121,8 @@ function fixture(t) {
   const baseEntries = () => [entry("survived", 0), entry("survived", 1), entry("unverified", 0, { scope: "out", disposition: "defer", issue: 77 })];
   // One record per fix-applier, named by the member that wrote it.
   const recordPath = (member = "fix-pr-40") => join(scratch, `dispositions-${member}.json`);
-  const writeRecord = (entries, recHead = head, member = "fix-pr-40") =>
-    writeFileSync(recordPath(member), JSON.stringify({ head: recHead, entries }));
+  const writeRecord = (entries, recHead = head, member = "fix-pr-40", recRun = run) =>
+    writeFileSync(recordPath(member), JSON.stringify({ head: recHead, run: recRun, entries }));
 
   // The tracker the `gh` stub answers from, issue number → {state, title, labels}.
   const bin = join(dir, "bin");
@@ -400,7 +400,7 @@ test("with two review files present, a fix-applier is judged against the one the
   const stale = f.check("fix-pr-40-b");
   mismatch(stale, /names no finding/);
   assert.equal(stale.json.token, `dispositions-mismatch=fix-pr-40-b:${round2}`);
-  f.writeRecord([f.entry("survived", 0)], f.head, "fix-pr-40-b");
+  f.writeRecord([f.entry("survived", 0)], f.head, "fix-pr-40-b", round2);
   const r = f.check("fix-pr-40-b");
   okVerdict(r);
   assert.equal(r.json.token, `dispositions-ok=fix-pr-40-b:${round2}`);
@@ -408,6 +408,27 @@ test("with two review files present, a fix-applier is judged against the one the
   assert.deepEqual(JSON.parse(readFileSync(f.reviewPath, "utf8")), f.review, "round 1's review file was touched");
   assert.equal(JSON.parse(readFileSync(f.recordPath(), "utf8")).entries.length, 3, "the retry's record replaced round 1's");
   assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+});
+
+// A fix-applier that ruled on round 1 and is checked again after a same-head
+// round 2 landed: the head matches and so do the findings, but the record was
+// written against another run, so it answers nothing of round 2's.
+test("a record written against an earlier review run is a mismatch even at the same head and over the same findings", (t) => {
+  const f = fixture(t);
+  f.writeRecord(f.baseEntries());
+  okVerdict(f.check());
+  const round2 = "run-Rv40Bb02";
+  mkdirSync(join(f.scratch, "pr40", round2));
+  writeFileSync(join(f.scratch, "pr40", round2, "review.json"), JSON.stringify(f.review));
+  f.okLedger("row", "10", `${f.row().slice(4)} · review=member:review-pr-40 · reviewed=${f.head}:2/1/1:${round2}`);
+  const stale = f.check();
+  mismatch(stale, /the record answers run "run-Rv40Aa01", not the review's run-Rv40Bb02/);
+  assert.equal(stale.json.token, `dispositions-mismatch=fix-pr-40:${round2}`);
+  f.writeRecord(f.baseEntries(), f.head, "fix-pr-40", round2);
+  okVerdict(f.check());
+  // A record with no run answers no review a ledger names.
+  writeFileSync(f.recordPath(), JSON.stringify({ head: f.head, entries: f.baseEntries() }));
+  mismatch(f.check(), /the record answers run null, not the review's run-Rv40Bb02/);
 });
 
 test("a mismatch from a later suffix, an ok, or another PR's fix-applier is not an earlier failure", () => {

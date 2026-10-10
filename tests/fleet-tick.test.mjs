@@ -1023,6 +1023,16 @@ test("deriveRun: a second review at the same head is answered by none of the fir
   assert.deepEqual(once.fixDue, []);
 });
 
+// A verdict naming a run that is not the eight characters `mktemp` chose is no
+// verdict token at all, not one that merely answers another review: at the
+// gate the two read alike, so only the token's own shape tells them apart.
+test("dispositionsToken: a run that is not run- and eight characters, whole, is not a verdict", () => {
+  assert.deepEqual(dispositionsToken("dispositions-ok=fix-pr-21:run-abc1234r")?.run, "run-abc1234r");
+  for (const bad of ["run-abc1234", "run-abc1234rs", "run-abc1234r:x", "abc1234r", "run-abc1234!"]) {
+    assert.equal(dispositionsToken(`dispositions-ok=fix-pr-21:${bad}`), null, bad);
+  }
+});
+
 test("currentDispositions: escalate parses, and outranks mismatch which outranks ok at one retry suffix", () => {
   assert.deepEqual(dispositionsToken("dispositions-escalate=fix-pr-21-b:run-abc1234r")?.verdict, "escalate");
   assert.equal(dispositionsToken("dispositions-escalate=finisher-pr-21:run-abc1234r"), null);
@@ -1197,7 +1207,7 @@ test("deriveRun: a conflict hold's hash is optional and the token is read whole,
 // reads CONFLICTING, with no hold yet and nobody working it, is a hold the
 // controller records.
 const conflicting = (n, labels = []) => pr(n, labels, [n + 1000], HEAD_B, "CONFLICTING");
-const TRACKED = (n, tail = "") => `#${n - 30} impl-${n - 30}=PR#${n} → PR#${n} · reviewed=abc1234:0/0/0${tail ? ` · ${tail}` : ""}`;
+const TRACKED = (n, tail = "") => `#${n - 30} impl-${n - 30}=PR#${n} → PR#${n} · reviewed=abc1234:0/0/0:run-abc1234r${tail ? ` · ${tail}` : ""}`;
 const conflictsOf = (rows, prs, dispatched = []) => {
   const r = run({ rows, dispatched }, prs);
   return [r.conflicts, r.conflictEscalate];
@@ -1265,7 +1275,7 @@ test("deriveRun: CONFLICTING again after two landed conflict fix-appliers escala
   assert.deepEqual(conflictsOf([TRACKED(40, `${twice} · fix-pr-40-c`)], [conflicting(40)], ["fix-pr-40-c"]), [[], []]);
   assert.deepEqual(conflictsOf([TRACKED(40, `${twice} · conflict-hold:#40`)], [conflicting(40)]), [[], []]);
   // A review fix-applier's landing is no conflict fix-applier's.
-  const reviewFix = run({ rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:2/0/0 · fix-pr-40=applied:def5678 · conflict-hold:#40 · fix-pr-40-b=no-op`] }, [conflicting(40)]);
+  const reviewFix = run({ rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:2/0/0:run-abc1234r · fix-pr-40=applied:def5678 · conflict-hold:#40 · fix-pr-40-b=no-op`] }, [conflicting(40)]);
   assert.deepEqual([reviewFix.conflicts, reviewFix.conflictEscalate], [[40], []]);
 });
 
@@ -1411,6 +1421,9 @@ test("deriveRun: a token it cannot read refuses by naming it, never counts it li
     ["a reviewed= with no counts", { rows: ["#9 review=wf:a reviewed=abc1234"] }, /reviewed=abc1234/],
     ["a reviewed= in the format before it named a run", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0"] }, /'reviewed=abc1234:1\/0\/0' names no review run/],
     ["a reviewed= whose run is not a run-XXXXXXXX name", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0:/tmp/pr9/run-abc1234r"] }, /is not reviewed=<head>:<survived>\/<refuted>\/<unverified>:<run>/],
+    ["a reviewed= whose run is longer than the eight characters mktemp chose", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0:run-abc1234rs"] }, /is not reviewed=<head>:<survived>\/<refuted>\/<unverified>:<run>/],
+    ["a reviewed= whose run is shorter than the eight characters mktemp chose", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0:run-abc1234"] }, /is not reviewed=<head>:<survived>\/<refuted>\/<unverified>:<run>/],
+    ["a reviewed= whose run is followed by more text", { rows: ["#9 review=wf:a reviewed=abc1234:1/0/0:run-abc1234r:x"] }, /is not reviewed=<head>:<survived>\/<refuted>\/<unverified>:<run>/],
     ["a review= of no known kind", { rows: ["#9 review=bogus"] }, /review=bogus/],
     ["a conflict hold naming another PR", { rows: ["#10 impl-10=PR#40 → PR#40 · conflict-hold:#38"] }, /conflict-hold:#38.*PR #40/],
     ["a conflict hold on a row with no PR mention or PR-keyed impl token at all", { rows: ["conflict-hold:#40"] }, /no PR's/],
@@ -2099,7 +2112,7 @@ test("CLI: a tracked PR GitHub reads CONFLICTING prints CONFLICT on the reviewer
   t.after(() => rmSync(logDir, { recursive: true, force: true }));
   const log = join(logDir, "pr-list.log");
   const r = runCli([], {
-    ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:0/0/0"] },
+    ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:0/0/0:run-abc1234r"] },
     shortlist: shortlistText([]), prs: [pr(40, [], [10], HEAD_B, "CONFLICTING"), pr(41, [], [], HEAD_B, "UNKNOWN")],
     env: { PR_LIST_LOG: log },
   });

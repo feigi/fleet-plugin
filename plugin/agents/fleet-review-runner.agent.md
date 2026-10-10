@@ -72,6 +72,6 @@ redid the whole snapshot/fan-out sequence from scratch.
      controller gives the hand-dispatched fallback reviewer. Do not run the
      cell again — the one retry already happened inside it.
    - **The cell threw** (an argument refused before any review ran, the
-     Resolver failing) → first line
+     Resolver failing, the result file failing to write) → first line
      `review-pr-<pr>: failed`, then the error text verbatim. Do not run the
      cell again.

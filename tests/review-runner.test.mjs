@@ -20,10 +20,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { runReviewToFile } from "../plugin/scripts/review-eval.mjs";
 import { DIGEST_KEYS } from "../plugin/scripts/review-core.mjs";
+const REVIEW_EVAL = new URL("../plugin/scripts/review-eval.mjs", import.meta.url).href;
 
 // The result a review of PR 7 returns when its run root is
 // `<dir>/pr7/<run>` — the snapshot sits in that root, as review-core.mjs
@@ -117,6 +119,63 @@ test("a review file already at the run root is never replaced: the attempt fails
   assert.equal(out.path, join(dir, "pr7", "run-Qq11Ww22", "review.json"));
 });
 
+// A write fault that is not the run root's file being taken is the
+// environment's, not the review's: the review is not run again for it and no
+// fallback reviewer is named. Here `pr7` is a regular file, so no run root can
+// be made under it.
+test("a write fault other than a taken file throws and does not re-run the review", async () => {
+  const dir = scratch();
+  writeFileSync(join(dir, "pr7"), "not a directory\n");
+  const { run, calls } = scriptedRun([resultIn(dir), resultIn(dir)]);
+  await assert.rejects(runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run), (e) => e.code !== "EEXIST" && typeof e.code === "string");
+  assert.equal(calls.length, 1, "a second full review was bought for a fault it would hit again");
+});
+
+// A write that fails partway — here a file-size limit on the child — has
+// already created the file, and what it left is half a review. The same child
+// with no limit is the control: it writes the whole file, so the limit is what
+// made the second one fail.
+test("a write that fails partway throws and removes the truncated file", { skip: process.platform === "win32" }, () => {
+  const script = `
+    import { runReviewToFile } from ${JSON.stringify(REVIEW_EVAL)};
+    import { join } from "node:path";
+    const dir = process.argv[1];
+    const result = {
+      pr: 7, head: "abc123", resume: null, testEnvironment: "t", dimensionsRun: [], dimensionsUnrun: [], cwdAudit: [],
+      counts: { survived: 1, refuted: 0, unverified: 0, crashed: 0 },
+      snapshot: join(dir, "pr7", "run-Ab12Cd34", "snapshot-abc123"),
+      survived: [{ claim: "x".repeat(200000) }], refuted: [], unverified: [],
+    };
+    try {
+      const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, async () => result);
+      console.log(JSON.stringify({ status: out.status }));
+    } catch (e) {
+      console.log(JSON.stringify({ threw: e.code }));
+    }`;
+  const run = (dir, limit) => {
+    const r = spawnSync("sh", ["-c", `${limit ? "ulimit -f 40 && " : ""}exec "$0" "$@"`, process.execPath, "--input-type=module", "-e", script, dir],
+      { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout);
+  };
+  const control = scratch();
+  assert.deepEqual(run(control, false), { status: "completed" });
+  assert.equal(filesUnder(control).length, 1, "the unlimited control did not write its file");
+  const limited = scratch();
+  assert.deepEqual(run(limited, true), { threw: "EFBIG" });
+  assert.deepEqual(filesUnder(limited), [], "a half-written review.json was left in the run root");
+});
+
+test("a review run for another PR number lands in that PR's run root", async () => {
+  const dir = scratch();
+  const result = { ...resultIn(dir), pr: 42, snapshot: join(dir, "pr42", "run-Ab12Cd34", "snapshot-abc123") };
+  const { run, calls } = scriptedRun([result]);
+  const out = await runReviewToFile({ pr: 42, scratch: dir, worktree: "/wt" }, run);
+  assert.equal(calls.length, 1);
+  assert.equal(out.status, "completed", out.errors.join("\n"));
+  assert.equal(out.path, join(dir, "pr42", "run-Ab12Cd34", "review.json"));
+});
+
 test("a result whose snapshot is not in a run root of this PR under this scratch is a failed attempt, retried, and writes nothing there", async () => {
   const outside = [
     (dir) => ({ ...resultIn(dir), snapshot: undefined }),
@@ -126,6 +185,10 @@ test("a result whose snapshot is not in a run root of this PR under this scratch
     (dir) => ({ ...resultIn(dir), snapshot: join(dir, "pr7", "snapshot-abc123") }),
     (dir) => ({ ...resultIn(dir), snapshot: join(dir, "pr7", "run-short", "snapshot-abc123") }),
     (dir) => ({ ...resultIn(dir), snapshot: `${dir}/pr7/run-Ab12Cd34/../run-Zz98Yy76/snapshot-abc123` }),
+    // The basename is anchored at both ends: a prefix or a ninth character is
+    // no run root.
+    (dir) => ({ ...resultIn(dir), snapshot: join(dir, "pr7", "xrun-Ab12Cd34", "snapshot-abc123") }),
+    (dir) => ({ ...resultIn(dir), snapshot: join(dir, "pr7", "run-Ab12Cd34Z", "snapshot-abc123") }),
   ];
   for (const make of outside) {
     const dir = scratch();

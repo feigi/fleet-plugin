@@ -412,10 +412,6 @@ export function dispositionsToken(tok) {
   return { verdict: m[1].toLowerCase(), member, run: m[3] };
 }
 
-// Two spellings of one commit: either head a prefix of the other, the way a
-// `reviewed=` head (7-40 hex) is matched against gh's full headRefOid.
-export const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
-
 // Which verdict outranks which when one fix-applier carries more than one for
 // a review: the stricter reading wins.
 const VERDICT_RANK = { ok: 0, unchecked: 1, mismatch: 2, escalate: 3 };
@@ -802,7 +798,6 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
   // nothing, and so did a conflict fix-applier, which is never checked. An
   // escalate is a different verdict and is never due.
   const mismatchDue = (st) => {
-    if (st.reviewedHead === null) return false;
     const cur = currentDispositions(st.dispositions, st.reviewedRun);
     if (cur === null || cur.verdict !== "mismatch") return false;
     const retry = parseMember(cur.member).retry ?? "";

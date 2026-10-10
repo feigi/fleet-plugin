@@ -30,7 +30,7 @@
 // runReview's own snapshot/verifier dispatch, unmodified — omp's `agent()`
 // resolves a bare frontmatter `name:` exactly, which is already what those
 // strings are.
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, normalize } from "node:path";
 import { digestOf, runReview, runnerPrRefusal, runnerScratchRefusal } from "./review-core.mjs";
 
@@ -146,7 +146,10 @@ export async function runReviewOnOmp(args) {
 // `<scratch>/pr<pr>/run-XXXXXXXX`, the directory review-core.mjs's snapshot
 // step made with `mktemp` and the snapshot it returns sits in, so two reviews
 // of one PR — at one head or two — never write one file, and the ledger token
-// names the run whose file it is. No file is ever replaced.
+// names the run whose file it is. No file is ever replaced. The file leaves
+// with its run root: the snapshot step of a later review of the same PR
+// removes that PR's run roots not touched for seven days, so a token older
+// than that names a file that is gone.
 //
 // Failure is a throw or an empty return. The holder of the review call retries
 // once; a second failure returns `failed` with both errors and the fallback
@@ -155,8 +158,9 @@ export async function runReviewOnOmp(args) {
 // scratch that is not absolute (eval's cwd is the MAIN CHECKOUT, so a relative
 // one would put the file there), a scratch that already ends in `pr<N>`
 // — throws before any run: it is not a review failure, and retrying or falling
-// back would only repeat it. `run` is the seam the test injects; nothing else
-// passes it.
+// back would only repeat it. So does a write fault other than a file already
+// at the path: the review ran, the environment could not keep it. `run` is the
+// seam the test injects; nothing else passes it.
 export async function runReviewToFile(args, run = runReviewOnOmp) {
   const pr = args?.pr;
   const scratch = args?.scratch;
@@ -207,6 +211,17 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
       // stays.
       await writeFile(path, `${JSON.stringify(result, null, 2)}\n`, { flag: "wx" });
     } catch (e) {
+      // Only that collision is a failed attempt: a second review run lands in
+      // a root of its own. Any other fault — permissions, a full disk — is
+      // the environment's, so it throws rather than re-run a full review that
+      // would hit it again and report it as a review failure. A write that
+      // fails partway has left its truncated bytes at the path: removed
+      // before the throw, never on a collision, where the file is another
+      // review's.
+      if (e?.code !== "EEXIST") {
+        await unlink(path).catch(() => {});
+        throw e;
+      }
       errors.push(`attempt ${attempt}: could not write ${path}: ${e?.message ?? String(e)}`);
       continue;
     }

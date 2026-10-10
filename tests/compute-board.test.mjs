@@ -1027,6 +1027,14 @@ test("#1820: a malformed member outcome is never fatal and never counted live, a
   assert.ok(card(b, 924).flags.includes("ledger-error"), "a malformed outcome must be visible, not indistinguishable from a healthy row");
 });
 
+// fleet-tick.mjs refuses a `reviewed=` token that names no review run, so the
+// cockpit does not show that row as reviewed at no head with nothing wrong.
+test("a reviewed= token that names no review run earns a `ledger-error` flag, and a run-named one does not", () => {
+  const flags = (token) => card(computeBoard(reproInputs({ rows: [`#924 impl-924=PR#931 · ${token}`] })), 924).flags;
+  assert.ok(flags("reviewed=abc1234:1/0/0").includes("ledger-error"));
+  assert.ok(!flags("reviewed=abc1234:1/0/0:run-Ab12Cd34").includes("ledger-error"));
+});
+
 test("#1820: a bare `review-pr-<n>` token (no `review=` prefix) names nobody — only ledger-grammar.mjs member families and `review=` tokens are read", () => {
   const b = computeBoard(reproInputs({ rows: ["#960 impl-960=PR#931 review-pr-960"] }));
   assert.equal(card(b, 960).agent, null, "review-pr-960 is neither a ledger-grammar.mjs member family nor a review= token");

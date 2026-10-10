@@ -2592,7 +2592,10 @@ all.
 > **Before you report, write every ruling to `<scratch>/dispositions-<your name>.json`**,
 > `<your name>` the `fix-pr-<pr>[-x]` you were dispatched as — the record the controller checks with
 > `dispositions-check.mjs` before it dispatches any finisher. It is
-> `{"head": "<the review file's head>", "entries": [ … ]}`: one entry per
+> `{"head": "<the review file's head>", "run": "<the run root's name in the review path>", "entries": [ … ]}`
+> — `run` the `<run>` of the review path above, which the check holds against the
+> review the PR's latest `reviewed=` names: a record written against an earlier
+> review, a same-head one included, is a mismatch. One entry per
 > `survived` finding and per `unverified` finding, plus one per `refuted`
 > finding you reverse. Each entry carries `bucket`
 > (`survived|unverified|refuted`), `index` (its position in that bucket of the

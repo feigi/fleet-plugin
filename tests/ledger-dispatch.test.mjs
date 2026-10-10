@@ -758,7 +758,7 @@ test("a finisher is refused on a dispositions mismatch and recorded on a disposi
   const { ok, read, refused } = fixture(t);
   ok("row", "10", gateRow("1/0/0", `dispositions-mismatch=fix-pr-40:${GATE_RUN}`));
   refused(["dispatch", "40", "finisher-pr-40"],
-    /finisher-pr-40: dispositions mismatch — fix-pr-40's disposition record .*dispositions-check\.mjs/);
+    /finisher-pr-40: dispositions mismatch — fix-pr-40's disposition record fails the check against review run-Gate0001; .*dispositions-check\.mjs/);
   assert.deepEqual(read().dispatched, []);
 
   ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`));
@@ -903,7 +903,7 @@ test("a finisher is refused on a dispositions escalate, naming it, and nothing r
   const { ok, read, refused } = fixture(t);
   ok("row", "10", gateRow("1/0/0", `dispositions-escalate=fix-pr-40:${GATE_RUN}`));
   refused(["dispatch", "40", "finisher-pr-40"],
-    /finisher-pr-40: dispositions escalate — fix-pr-40 deferred .*dispositions-check\.mjs --member fix-pr-40/);
+    /finisher-pr-40: dispositions escalate — fix-pr-40 deferred .*review run-Gate0001 gets no finisher and no retry; dispositions-check\.mjs --member fix-pr-40/);
   assert.deepEqual(read().dispatched, []);
   const l = read();
   const run = deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null },
@@ -973,7 +973,7 @@ test("a finisher is refused while a fix-applier on the PR is live, even with an 
   // A re-review at the same head: fix-pr-40 answered the first round, and
   // fix-pr-40-b, answering the second, is still working.
   ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`, `reviewed=${GATE_HEAD.slice(0, 7)}:3/0/2:${ROUND2_RUN}`, "fix-pr-40-b"));
-  refused(["dispatch", "40", "finisher-pr-40"], /finisher-pr-40: fix-pr-40-b still live on PR #40 — .*settle it, run dispositions-check\.mjs for it/);
+  refused(["dispatch", "40", "finisher-pr-40"], /finisher-pr-40: fix-pr-40-b still live on PR #40 — a fix-applier answering review run-Round2bb has not settled, .*settle it, run dispositions-check\.mjs for it/);
   // A PR outside the verdict gate is still held while its fix-applier works.
   ok("row", "11", `impl-11=PR#41 → PR#41 · reviewed=${GATE_HEAD}:0/1/0:${GATE_RUN} · fix-pr-41`);
   refused(["dispatch", "41", "finisher-pr-41"], /finisher-pr-41: fix-pr-41 still live on PR #41/);
