@@ -1,24 +1,27 @@
 #!/usr/bin/env node
 // The disposition check: a review fix-applier's rulings on a review's
 // findings, checked as code rather than read back from its report. The
-// fix-applier writes its record to `<scratch>/dispositions-<pr>.json` beside
-// the review result file `<scratch>/review-<pr>.json`; this script reads the
-// two together, judges the record, and writes its verdict onto the PR's
-// ledger row as a token `ledger.mjs dispatch` gates the PR's finisher on:
+// fix-applier writes its record to `<scratch>/dispositions-fix-pr-<M>[-x].json`,
+// one file per fix-applier; the review result file it answers is
+// `<scratch>/pr<M>/<run>/review.json`, `<run>` the run root the PR's latest
+// `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` names. This
+// script reads the two together, judges the record, and writes its verdict
+// onto the PR's ledger row as a token `ledger.mjs dispatch` gates the PR's
+// finisher on:
 //
-//   dispositions-ok=fix-pr-<M>[-x]:<head>        every rule below held
-//   dispositions-mismatch=fix-pr-<M>[-x]:<head>  at least one entry broke one
-//   dispositions-escalate=fix-pr-<M>[-x]:<head>  a human rules: either every rule held
-//                                                but a critical or important finding
-//                                                was deferred `remedy-outside-diff`,
-//                                                or a rule broke and an earlier
-//                                                fix-applier's record on the same
-//                                                review already had
-//   dispositions-unchecked=fix-pr-<M>[-x]:<head> no rule broke, but where a deferral was
-//                                                filed could not be read
+//   dispositions-ok=fix-pr-<M>[-x]:<run>        every rule below held
+//   dispositions-mismatch=fix-pr-<M>[-x]:<run>  at least one entry broke one
+//   dispositions-escalate=fix-pr-<M>[-x]:<run>  a human rules: either every rule held
+//                                               but a critical or important finding
+//                                               was deferred `remedy-outside-diff`,
+//                                               or a rule broke and an earlier
+//                                               fix-applier's record on the same
+//                                               review already had
+//   dispositions-unchecked=fix-pr-<M>[-x]:<run> no rule broke, but where a deferral was
+//                                               filed could not be read
 //
-// `<head>` is the review file's `head` — the review the record answers — so a
-// verdict on one review never answers a later one.
+// `<run>` is the review's own run, so a verdict on one review never answers
+// a later one — a second review at the same head included.
 //
 // The record:
 //
@@ -124,7 +127,9 @@
 // the whole verdict: no token is written, no row is read, and `token` in the
 // stdout payload is null. That is the shape of a standalone `/review-and-fix`
 // with no controller, chosen by `--no-ledger` or by a ledger path that does
-// not exist.
+// not exist. With no `reviewed=` to name the review, `--review <path>` names
+// its file, and is required; with a ledger it is refused, since the ledger
+// already names one.
 // A repository's `.fleet/ledger.md` outlives the fleet run that wrote it, so a
 // standalone member in a worktree of such a repository would otherwise find
 // the previous run's ledger, and a ledger that exists is never skipped: one
@@ -144,7 +149,7 @@ import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { parseMember, memberTokens } from "./ledger-grammar.mjs";
-import { dispositionsToken, rowNums, sameHead } from "./fleet-tick.mjs";
+import { deriveRun, dispositionsToken, LedgerError, rowNums, sameHead } from "./fleet-tick.mjs";
 import { VERDICT_SCHEMA } from "./review-core.mjs";
 
 const NAME = "dispositions-check";
@@ -527,7 +532,7 @@ export function formatEscalation({ bucket, index, severity, files }) {
 }
 
 // The row text with `token` in place of every verdict the same member wrote
-// for the same review head — a re-run replaces its own earlier verdict rather
+// for the same review run — a re-run replaces its own earlier verdict rather
 // than leaving two to disagree. Unchanged when the token is already the only
 // one. Separators a removal leaves doubled are folded.
 export function withVerdict(rowText, token) {
@@ -536,7 +541,7 @@ export function withVerdict(rowText, token) {
   const words = String(rowText).trim().split(/\s+/).filter(Boolean);
   const kept = words.filter((w) => {
     const d = dispositionsToken(w);
-    return d === null || d.member.name !== mine.member.name || !sameHead(d.head, mine.head);
+    return d === null || d.member.name !== mine.member.name || d.run !== mine.run;
   });
   if (kept.length === words.length - 1 && words.includes(token)) return words.join(" ");
   const folded = kept.join(" ").replace(/·(?:\s+·)+/g, "·").replace(/^·\s*|\s*·$/g, "").trim();
@@ -544,16 +549,16 @@ export function withVerdict(rowText, token) {
 }
 
 // Whether a fix-applier on PR `pr` with a lower retry suffix than `member`
-// already has a mismatch or escalate on the ledger for `head` — on any row
-// that resolves to the PR, since a row can be split. An unchecked verdict is
-// no failure of a record, and a verdict on another review head counts for
+// already has a mismatch or escalate on the ledger for review `run` — on any
+// row that resolves to the PR, since a row can be split. An unchecked verdict
+// is no failure of a record, and a verdict on another review counts for
 // nothing, so a new review starts the count again.
-export function failedBefore(rows, pr, member, head) {
+export function failedBefore(rows, pr, member, run) {
   const mine = member.retry ?? "";
   return rows.some((r) => rowNums(r).pr === pr && r.split(/\s+/).some((w) => {
     const d = dispositionsToken(w);
     return d !== null && (d.verdict === "mismatch" || d.verdict === "escalate") && d.member.number === pr
-      && (d.member.retry ?? "") < mine && sameHead(d.head, head);
+      && (d.member.retry ?? "") < mine && d.run === run;
   }));
 }
 
@@ -563,7 +568,7 @@ export function failedBefore(rows, pr, member, head) {
 
 const die = makeDie(NAME);
 const { arg, has, sweep, stray } = defineFlags(die, {
-  flags: { member: "value", scratch: "value", repo: "value", ledger: "value", "no-ledger": "bool" },
+  flags: { member: "value", scratch: "value", repo: "value", ledger: "value", "no-ledger": "bool", review: "value" },
 });
 
 // The one git primitive. An ambient GIT_DIR or GIT_WORK_TREE — a hook, a
@@ -694,7 +699,7 @@ function readJson(path) {
 }
 
 function main() {
-  const usage = "usage: dispositions-check.mjs --member fix-pr-<M>[-x] --scratch <dir> [--repo <path>] [--ledger <path> | --no-ledger]";
+  const usage = "usage: dispositions-check.mjs --member fix-pr-<M>[-x] --scratch <dir> [--repo <path>] [--ledger <path> | --no-ledger --review <path>]";
   const name = arg("member");
   const scratch = arg("scratch");
   if (!name || !scratch) die(usage);
@@ -706,8 +711,36 @@ function main() {
   const repo = arg("repo") ?? process.cwd();
   const standalone = has("no-ledger");
   if (standalone && arg("ledger") !== null) die("--no-ledger and --ledger contradict: name one");
+  const ledgerFile = standalone ? null : ledgerInUse(arg("ledger"), repo);
 
-  const reviewPath = join(scratch, `review-${pr}.json`);
+  // The review the record answers. With a ledger it is the one PR M's latest
+  // `reviewed=` names — `<scratch>/pr<M>/<run>/review.json`, read off the
+  // same per-PR fold `ledger.mjs dispatch` gates the finisher by, so the check
+  // and the gate never judge two different reviews. Without one nothing names
+  // it, so `--review` must.
+  let data = null, row = null, run = null, reviewPath;
+  if (ledgerFile === null) {
+    reviewPath = arg("review");
+    if (reviewPath === null) die(`no ledger names PR #${pr}'s review — pass --review <path> for the review file ${member.name}'s record answers`);
+  } else {
+    if (arg("review") !== null) die(`--review and a ledger contradict: with a ledger the review is the one PR #${pr}'s latest reviewed= names`);
+    data = JSON.parse(runLedger(ledgerFile, ["read"], "read the ledger"));
+    // The verdict lands on the row carrying the member on its own PR's row —
+    // where `ledger.mjs dispatch` wrote it, and where the gate reads PR M's
+    // tokens from.
+    row = data.rows.find((r) => rowNums(r).pr === pr && memberTokens(r).some((t) => t.name === member.name));
+    if (row === undefined) die(`${member.name} is on no row of PR #${pr} — \`ledger.mjs dispatch\` records a fix-applier before its record can be checked; with no controller, pass --no-ledger`);
+    let latest;
+    try {
+      latest = deriveRun({ rows: data.rows, dispatched: data.dispatched, drain: data.drain }, []).reviewed.find((r) => r.pr === pr);
+    } catch (e) {
+      if (!(e instanceof LedgerError)) throw e;
+      die(`${e.message} — fleet-tick.mjs refuses this ledger, so PR #${pr}'s latest review cannot be read off it`);
+    }
+    if (latest === undefined) die(`PR #${pr} has no reviewed= on the ledger — no review for ${member.name}'s record to answer`);
+    run = latest.run;
+    reviewPath = join(scratch, `pr${pr}`, run, "review.json");
+  }
   let review;
   try {
     review = readJson(reviewPath);
@@ -718,7 +751,9 @@ function main() {
   if (problem !== null) die(`${reviewPath} ${problem}`);
   const head = String(review.head).toLowerCase();
 
-  const recordPath = join(scratch, `dispositions-${pr}.json`);
+  // One record per fix-applier: a retry, or a fix-applier answering a later
+  // review, writes its own and never replaces an earlier one's.
+  const recordPath = join(scratch, `dispositions-${member.name}.json`);
   let record = null, recordProblem = null;
   if (!existsSync(recordPath)) {
     recordProblem = `no disposition record at ${recordPath}`;
@@ -748,30 +783,24 @@ function main() {
   // file the PR moved away or removed is a file the PR's diff names.
   const diffFiles = git(repo, ["diff", "--no-color", "--no-ext-diff", "--no-renames", "--name-only", "-z", base, head],
     `list the files of ${base}..${head}`).split("\0").filter(Boolean);
-  const ledgerFile = standalone ? null : ledgerInUse(arg("ledger"), repo);
 
   const { violations, escalations, unchecked } = checkDispositions({
     review, record, recordProblem, touched: touchedLines(diff), diffFiles, roots: [review.snapshot, top],
     filing: { pr, issue: issueReader(repo), verdict: verdictReader(scratch, pr) },
   });
-  // The verdict lands on the row carrying the member on its own PR's row —
-  // where `ledger.mjs dispatch` wrote it, and where the gate reads PR M's
-  // tokens from. No ledger, no row: the exit status below is the verdict, and
-  // with no earlier fix-applier's verdict to count, a broken rule is always a
+  // No ledger, no row: the exit status below is the verdict, and with no
+  // earlier fix-applier's verdict to count, a broken rule is always a
   // mismatch.
-  const data = ledgerFile === null ? null : JSON.parse(runLedger(ledgerFile, ["read"], "read the ledger"));
   // A mismatch an earlier fix-applier already drew on this review makes this
   // one the second: it is written as an escalate, which no fix-applier answers.
   // A broken rule outranks an escalation, and an escalation a filing the
   // tracker could not answer.
-  const secondMismatch = violations.length > 0 && data !== null && failedBefore(data.rows, pr, member, head);
+  const secondMismatch = violations.length > 0 && data !== null && failedBefore(data.rows, pr, member, run);
   const verdict = violations.length > 0 ? (secondMismatch ? "escalate" : "mismatch")
     : escalations.length > 0 ? "escalate" : unchecked.length > 0 ? "unchecked" : "ok";
-  const token = `dispositions-${verdict}=${member.name}:${head}`;
+  const token = data === null ? null : `dispositions-${verdict}=${member.name}:${run}`;
 
   if (data !== null) {
-    const row = data.rows.find((r) => rowNums(r).pr === pr && memberTokens(r).some((t) => t.name === member.name));
-    if (row === undefined) die(`${member.name} is on no row of PR #${pr} — \`ledger.mjs dispatch\` records a fix-applier before its record can be checked; with no controller, pass --no-ledger`);
     const key = row.split(/\s/)[0];
     if (!/^#[0-9]+$/.test(key)) die(`the row carrying ${member.name} has no #<n> key for \`ledger.mjs row\` to rewrite it by: ${row}`);
     const text = row.slice(key.length).trim();
@@ -786,9 +815,9 @@ function main() {
     console.error(`${member.name}: ${u.bucket}[${u.index}]: where it was filed is unchecked — #${u.issue} could not be read through gh: ${u.problem}`);
   }
   if (secondMismatch) {
-    console.error(`${member.name}: escalate — an earlier fix-applier's record on review ${head} already failed this check; no further fix-applier answers PR #${pr}, a human does`);
+    console.error(`${member.name}: escalate — an earlier fix-applier's record on review ${run} already failed this check; no further fix-applier answers PR #${pr}, a human does`);
   }
-  console.log(JSON.stringify({ member: member.name, pr, head, verdict, token: ledgerFile === null ? null : token, violations, escalations, unchecked }));
+  console.log(JSON.stringify({ member: member.name, pr, head, verdict, token, violations, escalations, unchecked }));
   // exitCode, not exit(): stdout to a pipe is written asynchronously, and an
   // exit() here could cut the payload off.
   process.exitCode = verdict === "ok" ? 0 : 1;
