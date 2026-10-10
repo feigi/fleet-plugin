@@ -47,6 +47,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
+import { judgeRecord, ProcUnreadable } from "./proc.mjs";
 
 // The filename, in one place, because the liveness mark gave this file a SECOND resolver.
 // board.mjs already resolves the run's workspace for itself — it has to, since
@@ -412,6 +413,49 @@ function mins(ms) {
   return `${m}m${s}s`;
 }
 
+// Whose stall a reader sees, off the controller record — the mark says only
+// that the beat stopped, never whether the run did. No record: unknown, and
+// the report keeps the wording it had before there was one.
+//
+// A mark older than the record's `at` was left by the run BEFORE the one
+// that wrote the record: rotate replaced the record after that run's last
+// beat and tick. That is a run's first tick, and by then the record names
+// this run's own live controller, so judging it would call every previous
+// run alive. That stall reads the verdict rotate reached on the record it
+// replaced, `prior`: dead is a controller gone whose claims this run resumes,
+// ancestor is this same session's earlier run and so alive, none is unknown.
+// A mark written since the record — any later tick — is the recorded
+// controller's own, so the record itself is judged, through proc.mjs: dead or
+// a reused pid is gone and the NEXT run resumes; alive, or an ancestor of the
+// reader, is alive. A record with no `at` cannot place the mark and is
+// judged too.
+//
+// `judge` is replaceable for the same reason proc.mjs's process source is: a
+// reader under a live omp session would otherwise find that session. A
+// process table that cannot be read leaves the stall unattributed, said on
+// stderr, rather than calling a controller nobody could judge dead or alive.
+export const NO_OWNER = Object.freeze({ kind: "none" });
+export function stallOwner({ controller, beat, ticked }, name, judge = judgeRecord) {
+  if (!controller) return NO_OWNER;
+  const before = (mark) => mark === null || mark.at < controller.at;
+  if (controller.at !== null && before(beat) && before(ticked)) {
+    if (controller.prior === "dead") return { kind: "gone", resumes: "this run" };
+    if (controller.prior === "ancestor") return { kind: "alive", pid: null };
+    return NO_OWNER;
+  }
+  let verdict;
+  try {
+    verdict = judge(controller);
+  } catch (e) {
+    if (!(e instanceof ProcUnreadable)) throw e;
+    console.error(`${name}: WARNING ${e.message} — the recorded controller pid ${controller.pid} cannot be judged, so the stall report names no controller`);
+    return NO_OWNER;
+  }
+  if (verdict === "dead") return { kind: "gone", resumes: "the next run" };
+  if (verdict === "alive" || verdict === "ancestor") return { kind: "alive", pid: controller.pid };
+  return NO_OWNER;
+}
+
 // The report. Returns null for anything isStalled() rejects, so a caller that
 // skipped the predicate cannot print a stall for a healthy run by accident.
 //
@@ -423,12 +467,18 @@ function mins(ms) {
 // candidate scan excludes that label, so those tickets are invisible to the
 // next run's scans and to the maintainer's both.
 //
+// `owner` is stallOwner()'s answer and leads the line, because it is what
+// the maintainer acts on: a controller alive is a run that stopped beating
+// and kept going, never one to restart; a controller gone is a run whose
+// claims without a PR the next phase 0 resumes and whose open PRs its fold-in
+// queues. No owner keeps the wording the report had before the record existed.
+//
 // `claimed` and `supply` are `null` for UNKNOWN, never 0. The two readers
 // count them from different sources (a gh query on the claim label; the
 // cockpit's own cards) and either source can fail, and "0 claimed" off a
 // failed read is the same lie as "supply 0" off one — it says the night cost
 // nothing when it may have stranded the whole pool.
-export function stallReport(verdict, { claimed, supply }) {
+export function stallReport(verdict, { claimed, supply, owner = NO_OWNER }) {
   if (!isStalled(verdict)) return null;
   const n = (v) => (v == null ? "unknown" : String(v));
   // Present tense for the deliberate stop and past for the abrupt one, because
@@ -437,7 +487,13 @@ export function stallReport(verdict, { claimed, supply }) {
   const why = verdict.kind === "stopped"
     ? `stopped deliberately — recorded reason: ${verdict.reason}`
     : "the beat stopped without a recorded reason";
-  return `heartbeat STALLED: last beat ${new Date(verdict.at).toISOString()}`
+  const head = owner.kind === "alive"
+    ? `heartbeat not beating, controller alive (${owner.pid === null ? "this session's earlier run" : `pid ${owner.pid}`})`
+    : owner.kind === "gone" ? "heartbeat STALLED, controller gone" : "heartbeat STALLED";
+  const tail = owner.kind === "gone"
+    ? `; ${owner.resumes} resumes its claims without a PR, and its open PRs return through the fold-in`
+    : "";
+  return `${head}: last beat ${new Date(verdict.at).toISOString()}`
     + ` (${mins(verdict.ageMs)} ago, ${mins(verdict.overdueMs)} past the ${mins(verdict.intervalMs)} interval it promised)`
-    + ` — ${why}; ${n(claimed)} ticket(s) claimed and in flight, pool supply ${n(supply)}`;
+    + ` — ${why}; ${n(claimed)} ticket(s) claimed and in flight, pool supply ${n(supply)}${tail}`;
 }

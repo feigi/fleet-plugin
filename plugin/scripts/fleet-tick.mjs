@@ -895,7 +895,7 @@ import { parseArgs } from "node:util";
 import { makeDie, isDigits } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { statePath, readState, writeState, assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
+import { statePath, readState, writeState, assessBeat, isStalled, stallReport, stallOwner } from "./fleet-state.mjs";
 import { checkMainCheckout, describe } from "./main-checkout.mjs";
 
 const NAME = "fleet-tick";
@@ -1216,9 +1216,13 @@ function main() {
   // read and the ledger read below both exit 2 on failure, and a stall
   // announced after them is a stall a gh outage can silence. The supply it
   // reports is the local shortlist file's, which no outage can take away.
+  // Whose stall it is comes off the controller record, judged only once
+  // there is a stall to name, so a healthy tick reads no process table.
   const priorState = readState(path, NAME);
   const verdict = assessBeat({ beat: priorState.beat, ticked: priorState.ticked, now: Date.now() });
-  if (isStalled(verdict)) console.log(stallReport(verdict, { claimed: claimed(), supply: current.scanned }));
+  if (isStalled(verdict)) {
+    console.log(stallReport(verdict, { claimed: claimed(), supply: current.scanned, owner: stallOwner(priorState, NAME) }));
+  }
 
   // Every read happens before anything prints: a partial tick is worse than no
   // tick, because half a reconcile still reads like a reconcile.

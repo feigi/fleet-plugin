@@ -159,3 +159,9 @@ export function judgeController(record, source, chain) {
   if (chain.some((e) => e.pid === record.pid)) return "ancestor";
   return "alive";
 }
+
+// judgeController() for a reader that only names a record: the process
+// source and the caller's own chain read here, once. Throws ProcUnreadable.
+export function judgeRecord(record, source = processSource()) {
+  return judgeController(record, source, ancestry(source));
+}

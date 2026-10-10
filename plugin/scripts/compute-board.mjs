@@ -24,7 +24,7 @@
 // it to its ticket number regardless; see the same paragraph below.
 // fleet-tick.mjs's I/O and main() never run here, main() being guarded on
 // argv[1].
-import { assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
+import { assessBeat, isStalled, stallReport, NO_OWNER } from "./fleet-state.mjs";
 import { parseToken, rowPr, premisesOf, HALT_CAUSES } from "./ledger-grammar.mjs";
 import { REVIEWED, latestFinisherAttempts } from "./fleet-tick.mjs";
 
@@ -376,12 +376,16 @@ function splitNumbered(line) {
 // this itself would be a second wording of the same verdict, free to drift
 // from fleet-tick's the moment either is edited. The page renders; the rule
 // and its words stay here.
-function stall(beat, ticked, tickets, pool, { ledgerOk, poolOk }, now) {
+//
+// `owner` is whose stall it is, fleet-state.mjs's stallOwner() answer: it
+// reads the process table, which is I/O, so gather() judges it and this
+// function only words it. Absent is no controller named.
+function stall(beat, ticked, tickets, pool, { ledgerOk, poolOk, owner }, now) {
   const verdict = assessBeat({ beat, ticked, now });
   if (!isStalled(verdict)) return null;
   const claimed = ledgerOk ? tickets.filter((t) => t.column !== "POOL" && t.column !== "MERGED").length : null;
   const supply = poolOk ? pool : null;
-  return { ...verdict, claimed, supply, text: stallReport(verdict, { claimed, supply }) };
+  return { ...verdict, claimed, supply, owner, text: stallReport(verdict, { claimed, supply, owner }) };
 }
 
 // Which of gather()'s `gh ... list` reads came back exactly as long as
@@ -591,6 +595,7 @@ export function computeBoard(inputs) {
     liveness: stall(inputs.beat, inputs.ticked, tickets, pool, {
       ledgerOk: (ledger.state ?? "read") === "read",
       poolOk: inputs.poolOk ?? true,
+      owner: inputs.stallOwner ?? NO_OWNER,
     }, now),
     attention,
   };

@@ -2413,6 +2413,107 @@ test("CLI: a busy, fully-staffed fleet is not reported STALLED just because the 
   assert.match(r.stdout, /^implementers 2\/2 → AT CAP/m);
 });
 
+// The Stall report names which kind of stall it sees, off the controller
+// record rotate leaves in the same file. The process tree comes from a
+// FLEET_PROC_TABLE fixture, never `ps`: this suite runs under live omp
+// sessions, whose omp a real walk would find. The tick's parent is this
+// runner, so the table's walk starts at process.pid.
+import { spawn } from "node:child_process";
+
+const TABLE_OMP = 2_000_000_001;
+const procTable = (dir, extra = {}) => {
+  const path = join(dir, "proc-table.json");
+  writeFileSync(path, JSON.stringify({
+    [process.pid]: { ppid: TABLE_OMP, argv: [process.execPath, "--test"], lstart: "runner-start" },
+    [TABLE_OMP]: { ppid: 1, argv: ["bun", "/home/u/.bun/bin/omp"], lstart: "omp-start" },
+    ...extra,
+  }));
+  return path;
+};
+// A live process that is no ancestor of the tick, and a pid whose process has
+// exited and been reaped.
+const liveForeign = (t) => {
+  const child = spawn("sleep", ["300"], { stdio: "ignore" });
+  t.after(() => child.kill("SIGKILL"));
+  return child.pid;
+};
+const deadPid = () => spawnBounded(process.execPath, ["-e", ""]).pid;
+// A beat 90 minutes old against a 20-minute promise, and a record written
+// `recordAgoMs` ago: older than the beat is a record this run's own beat
+// followed (a later tick), newer is a record rotate wrote after the previous
+// run's last beat (the run's first tick).
+const STALL_AGO = 90 * 60_000;
+const stalledState = (controller) => JSON.stringify({
+  quiet: 0, elapsed: 0, digest: "",
+  beat: { at: Date.now() - STALL_AGO, interval: 1200, stopped: "" },
+  ...(controller ? { controller } : {}),
+});
+const LATER = () => Date.now() - STALL_AGO - 60_000;
+const FIRST = () => Date.now() - 1_000;
+const stallLine = (t, controller, table = {}) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-owner-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "heartbeat.json");
+  writeFileSync(path, stalledState(controller));
+  const tableFile = table === null ? join(dir, "no-such-table.json") : procTable(dir, table);
+  const r = runCli(["--state", path], { ...IDLE, claimed: [{ number: 41 }], env: { FLEET_PROC_TABLE: tableFile } });
+  assert.equal(r.status, 0, r.stderr);
+  return { line: r.stdout.split("\n")[0], stderr: r.stderr };
+};
+const TAIL = /; 1 ticket\(s\) claimed and in flight, pool supply \S+/;
+
+test("CLI: Stall report, recorded controller alive with a matching start time — not beating, controller alive (pid N); a later tick reads the record, never prior", (t) => {
+  const foreign = liveForeign(t);
+  const table = { [foreign]: { ppid: 1, argv: ["sleep", "300"], lstart: "foreign-start" } };
+  // `prior: dead` on both: a later tick that read prior would say gone.
+  for (const [pid, lstart] of [[foreign, "foreign-start"], [process.pid, "runner-start"]]) {
+    const { line } = stallLine(t, { pid, lstart, prior: "dead", at: LATER() }, table);
+    assert.match(line, new RegExp(`^heartbeat not beating, controller alive \\(pid ${pid}\\): last beat `));
+    assert.match(line, TAIL);
+    assert.doesNotMatch(line, /STALLED|resumes/);
+  }
+});
+
+test("CLI: Stall report, recorded controller dead or its start time mismatched — stalled, controller gone, and the next run resumes its claims", (t) => {
+  const foreign = liveForeign(t);
+  const table = { [foreign]: { ppid: 1, argv: ["sleep", "300"], lstart: "foreign-start" } };
+  for (const [pid, lstart] of [[deadPid(), "whatever"], [foreign, "an earlier process"]]) {
+    // `prior: ancestor`: a later tick that read prior would say alive.
+    const { line } = stallLine(t, { pid, lstart, prior: "ancestor", at: LATER() }, table);
+    assert.match(line, /^heartbeat STALLED, controller gone: last beat /);
+    assert.match(line, /; the next run resumes its claims without a PR, and its open PRs return through the fold-in$/);
+    assert.match(line, TAIL);
+  }
+});
+
+test("CLI: Stall report with no controller record keeps today's wording", (t) => {
+  const { line } = stallLine(t, null);
+  assert.match(line, /^heartbeat STALLED: last beat .* — the beat stopped without a recorded reason; 1 ticket\(s\) claimed and in flight, pool supply \S+$/);
+  assert.doesNotMatch(line, /controller|resumes/);
+});
+
+test("CLI: a run's first tick reports the previous run's stall off the record's prior — dead, ancestor, none — never off the record itself", (t) => {
+  // The record names this runner, a live ancestor of the tick: judged, it
+  // would read alive every time.
+  const ours = (prior) => ({ pid: process.pid, lstart: "runner-start", prior, at: FIRST() });
+  const dead = stallLine(t, ours("dead")).line;
+  assert.match(dead, /^heartbeat STALLED, controller gone: last beat /);
+  assert.match(dead, /; this run resumes its claims without a PR, and its open PRs return through the fold-in$/);
+  const ancestor = stallLine(t, ours("ancestor")).line;
+  assert.match(ancestor, /^heartbeat not beating, controller alive \(this session's earlier run\): last beat /);
+  assert.doesNotMatch(ancestor, /resumes/);
+  const none = stallLine(t, ours("none")).line;
+  assert.match(none, /^heartbeat STALLED: last beat /);
+  assert.doesNotMatch(none, /controller|resumes/);
+});
+
+test("CLI: a record whose controller cannot be judged keeps today's wording and says why on stderr", (t) => {
+  const { line, stderr } = stallLine(t, { pid: process.pid, lstart: "runner-start", prior: "dead", at: LATER() }, null);
+  assert.match(line, /^heartbeat STALLED: last beat /);
+  assert.doesNotMatch(line, /controller/);
+  assert.match(stderr, /cannot be judged/);
+});
+
 // Every gh spawn in the tick carries a bound: a gh that never answers is a
 // failed read on that call's own failure path, never a tick that hangs. Each
 // case stalls one gh call for 30s under a 1s override, so a spawn that lost its

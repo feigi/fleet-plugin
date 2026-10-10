@@ -304,6 +304,17 @@ test("computeBoard: a stalled beat populates `liveness` with what is stranded", 
   assert.match(b.liveness.text, /70m past the 20m interval it promised/);
 });
 
+test("computeBoard: the cockpit's stall line names the controller gather() judged, in fleet-tick's words", () => {
+  const stale = { at: NOW - 90 * 60_000, interval: 1200, stopped: "" };
+  const text = (stallOwner) => computeBoard({ ...livenessInputs(stale), stallOwner }).liveness.text;
+  assert.match(text({ kind: "alive", pid: 4242 }), /^heartbeat not beating, controller alive \(pid 4242\): /);
+  assert.match(text({ kind: "gone", resumes: "the next run" }), /^heartbeat STALLED, controller gone: .*; the next run resumes its claims without a PR, and its open PRs return through the fold-in$/);
+  for (const none of [undefined, null, { kind: "none" }]) {
+    assert.match(text(none), /^heartbeat STALLED: /);
+    assert.doesNotMatch(text(none), /controller/);
+  }
+});
+
 test("computeBoard: a failed ledger or pool read reports `unknown`, never a false zero", () => {
   // #1597 follow-up. `claimed`/`supply` derive from `ledger.rows`/`issues`,
   // which both collapse to the SAME empty array on a genuinely-drained read
