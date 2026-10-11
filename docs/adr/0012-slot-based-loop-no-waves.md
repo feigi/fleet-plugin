@@ -1,6 +1,7 @@
 # 0012 — The fleet loop is slot-based: no waves, reviews off the controller's turn, one merge pass per label
 
 **Status:** Accepted. Ruled 2026-09-24 on #1773, #1774, #1776, #1777, #1778 (map #1768), against the measurements below. Amends ADR 0003 (point 9), ADR 0005 (floor placement), ADR 0007 (guard 1 trigger), ADR 0008 (§1). (ADR 0021 later retires the `enabledProviders` precondition this ADR's Consequences kept.) Amended by ADR 0023: Decision 3's gate also reads the PR body and runs the main-gain check — `main-gain-removed:<path>` (exit 1) and `main-gain-unanswerable` (exit 2) — and its JSON line gains `mainGain`. Amended by ADR 0024: Decision 3's gate also accepts a head outside `{pre, post}` whose net change it proves identical to `pre`'s, and its JSON line gains `rebaseCarry`. Amended by #2886: Decision 1's result lands at `<scratch>/pr<pr>/<run>/review.json`, in the review's own run root, and never replaces an earlier review's file; the fix-applier is dispatched with that path, which the latest `reviewed=` token's `:<run>` names.
+Amended by ADR 0028: Decision 4's "`read proc://` is reserved for the Member-killed confirmation, not the tick" stands — the tick still reads no registry or transcript — but it now prints a `CHECK-LIVENESS` pointer from its own `seen` key for a live token past its family's threshold; the registry census that pointer asks for is the controller's.
 
 ## Context
 

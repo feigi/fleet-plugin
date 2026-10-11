@@ -2905,3 +2905,254 @@ test("CLI: a carried reviewer recorded dead with =failed frees its PR, and the n
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^reviewers +0\/6 → DISPATCH review PR#5/m);
 });
+
+// ---------------------------------------------------------------------------
+// CHECK-LIVENESS: a live token that has stayed live past its family's
+// threshold. Advisory only — the tick prints a pointer, and settles, kills
+// and frees nothing.
+import { stampSeen, livenessLines, LIVENESS_DEFAULTS } from "../plugin/scripts/fleet-tick.mjs";
+
+const MIN = 60_000;
+// A live fix-applier on PR 5 and a live `review=` launch on PR 6: two tokens
+// of two families, one of them a launch that carries no member token.
+const AGED = {
+  shortlist: shortlistText([]), refresh: shortlistText([]), prs: [pr(5), pr(6)],
+  ledger: {
+    rows: [
+      "#3 impl-3=PR#5 → PR#5 · tier-ok=impl-3:fleet-implementer-slow-high · reviewed=abc1234:1/0/0:run-abcdefgh · fix-pr-5",
+      "#4 impl-4=PR#6 → PR#6 · tier-ok=impl-4:fleet-implementer-slow-high · review=wf:r2",
+    ],
+    dispatched: ["impl-3=PR#5", "impl-4=PR#6", "fix-pr-5"],
+  },
+};
+// The state file the fixture's tick reads, written before it runs: `seen`
+// stamps `agoMin` minutes old, and whatever else the case needs.
+const seedState = (extra) => (repo) => writeFileSync(join(repo, "..", "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", ...extra }));
+const seenAgo = (ages) => ({ seen: Object.fromEntries(Object.entries(ages).map(([name, min]) => [name, Date.now() - min * MIN])) });
+const withoutLiveness = (stdout) => stdout.split("\n").filter((l) => !l.startsWith("CHECK-LIVENESS")).join("\n");
+const stateOf = (r) => JSON.parse(readFileSync(join(r.dir, "heartbeat.json"), "utf8"));
+
+test("CLI: a live fix-pr and a live review= launch past their threshold print CHECK-LIVENESS; fresh ones print none; rows and quiet are the same either way", () => {
+  const stale = runCli([], { ...AGED, keep: true, beforeRun: seedState(seenAgo({ "fix-pr-5": 60, "review:PR#6": 90 })) });
+  const fresh = runCli([], { ...AGED, keep: true, beforeRun: seedState(seenAgo({ "fix-pr-5": 5, "review:PR#6": 5 })) });
+  try {
+    assert.equal(stale.status, 0, stale.stderr);
+    assert.equal(fresh.status, 0, fresh.stderr);
+    assert.deepEqual(stale.stdout.split("\n").filter((l) => l.startsWith("CHECK-LIVENESS")), [
+      "CHECK-LIVENESS fix-pr-5 (fix-pr > p99 56m)",
+      "CHECK-LIVENESS review:PR#6 (review > p99 78m)",
+    ]);
+    assert.doesNotMatch(fresh.stdout, /CHECK-LIVENESS/);
+    // The rows — actual, target, action — and the quiet streak are the same
+    // either way: the line is advice, never a row.
+    assert.equal(withoutLiveness(stale.stdout), withoutLiveness(fresh.stdout));
+    assert.match(stale.stdout, /^reviewers +\d+\/6 /m);
+    assert.equal(stateOf(stale).quiet, stateOf(fresh).quiet);
+  } finally {
+    rmSync(stale.dir, { recursive: true, force: true });
+    rmSync(fresh.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: the tick stamps a token it sees first, keeps the stamp it already has, and prunes every name no longer live", () => {
+  const old = Date.now() - 90 * MIN;
+  const r = runCli([], {
+    ...AGED, keep: true,
+    beforeRun: seedState({ seen: { "fix-pr-5": old, "impl-99": old, "merge-bot-7": old, "review:PR#99": old } }),
+  });
+  try {
+    const before = Date.now();
+    const { seen } = stateOf(r);
+    assert.equal(seen["fix-pr-5"], old, "a stamp already held is the token's age and must survive the tick");
+    assert.ok(seen["review:PR#6"] > before - 60_000 && seen["review:PR#6"] <= before, "a token first seen now is stamped now");
+    assert.deepEqual(Object.keys(seen).sort(), ["fix-pr-5", "review:PR#6"], "stamps of names that are not live are pruned");
+    assert.match(r.stdout, /^CHECK-LIVENESS fix-pr-5 \(fix-pr > p99 56m\)$/m);
+  } finally {
+    rmSync(r.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: a settled member is never flagged, however old its stamp, and a ledger with no live token leaves no `seen` key", () => {
+  const ledger = { rows: ["#3 impl-3=PR#5 → PR#5 · tier-ok=impl-3:fleet-implementer-slow-high · fix-pr-5=applied:def5678"], dispatched: ["impl-3=PR#5", "fix-pr-5=applied:def5678"] };
+  const r = runCli([], { ...IDLE, prs: [pr(5)], ledger, keep: true, beforeRun: seedState(seenAgo({ "fix-pr-5": 600 })) });
+  try {
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stdout, /CHECK-LIVENESS/);
+    assert.equal("seen" in stateOf(r), false);
+  } finally {
+    rmSync(r.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: the tick never writes the ledger, whatever it flags", () => {
+  const r = runCli([], { ...AGED, keep: true, beforeRun: seedState(seenAgo({ "fix-pr-5": 600, "review:PR#6": 600 })) });
+  try {
+    assert.match(r.stdout, /CHECK-LIVENESS/);
+    assert.equal(readFileSync(join(r.repo, ".fleet", "ledger.md"), "utf8"), ledgerText(AGED.ledger));
+  } finally {
+    rmSync(r.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: --liveness-<family> sets that family's threshold, and the line shows the age only as a multiple of it", () => {
+  const impl = { shortlist: shortlistText([]), refresh: shortlistText([]), ledger: { rows: ["#12 impl-12 · tier-ok=impl-12:fleet-implementer-slow-high"], dispatched: ["impl-12"] } };
+  const line = (flag, minutes, ago) => {
+    const r = runCli(flag === null ? [] : [flag, String(minutes)], { ...impl, beforeRun: seedState(seenAgo({ "impl-12": ago })) });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.split("\n").filter((l) => l.startsWith("CHECK-LIVENESS"));
+  };
+  assert.deepEqual(line("--liveness-impl", 5, 12), ["CHECK-LIVENESS impl-12 (impl > 2×p99 10m)"]);
+  // The same age is nothing under the default, and one threshold in is the
+  // first bucket — no multiple shown.
+  assert.deepEqual(line(null, 0, 12), []);
+  assert.deepEqual(line(null, 0, 79), ["CHECK-LIVENESS impl-12 (impl > p99 78m)"]);
+  assert.deepEqual(line("--liveness-impl", 5, 4), []);
+});
+
+for (const flag of ["--liveness-impl", "--liveness-fix-pr", "--liveness-finisher", "--liveness-merge-bot", "--liveness-review"]) {
+  test(`CLI: ${flag} refuses 0 and a non-integer, and accepts a positive whole number`, () => {
+    for (const bad of ["0", "-3", "1.5", "abc", ""]) {
+      const r = runCli([flag, bad], IDLE);
+      assert.equal(r.status, 2, `${flag} ${JSON.stringify(bad)}`);
+      assert.equal(r.stdout.trim(), "");
+    }
+    const ok = runCli([flag, "30"], IDLE);
+    assert.equal(ok.status, 0, ok.stderr);
+  });
+}
+
+// One tick, then more over the same kept fixture and state file.
+const ticksOver = (args, fixture, again = 1) => {
+  const first = runCli(args, { ...fixture, keep: true });
+  try {
+    const state = join(first.dir, "heartbeat.json");
+    const out = [{ stdout: first.stdout, status: first.status, stderr: first.stderr, state: stateOf(first) }];
+    for (let i = 0; i < again; i++) {
+      const t = spawnBounded(process.execPath, [join(first.dir, "bin", "fleet-tick.mjs"), ...args, "--state", state], {
+        cwd: first.repo,
+        env: {
+          ...process.env, PATH: `${join(first.dir, "bin")}:${process.env.PATH}`,
+          FIXTURE_PRS: join(first.dir, "prs.json"), FIXTURE_CLAIMED: join(first.dir, "claimed.json"),
+          FIXTURE_ISSUE_STATES: join(first.dir, "issue-states.json"), FIXTURE_PR_STATES: join(first.dir, "pr-states.json"),
+          FIXTURE_REFRESH: join(first.dir, "refresh.json"),
+          REFRESH_LOG: join(first.dir, "refresh.log"), ISSUE_VIEW_LOG: join(first.dir, "issue-view.log"), PR_VIEW_LOG: join(first.dir, "pr-view.log"),
+        },
+      });
+      out.push({ stdout: t.stdout, status: t.status, stderr: t.stderr, state: stateOf(first) });
+    }
+    return out;
+  } finally {
+    rmSync(first.dir, { recursive: true, force: true });
+  }
+};
+
+test("CLI: --fold-unchanged with a stale member and nothing else changed folds to one line carrying `CHECK-LIVENESS <member> persists`, without resetting quiet", () => {
+  const ticks = ticksOver(["--fold-unchanged"], { ...AGED, beforeRun: seedState(seenAgo({ "fix-pr-5": 60, "review:PR#6": 5 })) }, 2);
+  for (const t of ticks) assert.equal(t.status, 0, t.stderr);
+  // The tick that finds it stale is a change, so it prints in full.
+  assert.match(ticks[0].stdout, /^CHECK-LIVENESS fix-pr-5 \(fix-pr > p99 56m\)$/m);
+  for (const t of ticks.slice(1)) {
+    assert.deepEqual(t.stdout.trim().split("\n"), [
+      `fleet-tick: unchanged, nothing to act on (quiet=${ticks.indexOf(t) + 1}); CHECK-LIVENESS fix-pr-5 persists — full rows on the next change`,
+    ]);
+  }
+});
+
+test("CLI: a folded tick names every stale member, beside a main-checkout hold", () => {
+  const ticks = ticksOver(["--fold-unchanged"], {
+    ...AGED, beforeRun: seedState(seenAgo({ "fix-pr-5": 60, "review:PR#6": 90 })),
+    afterBaseline: (repo) => writeFileSync(join(repo, "stray.mjs"), "x\n"),
+  }, 1);
+  assert.equal(ticks[1].stdout.trim(),
+    "fleet-tick: unchanged, nothing to act on (quiet=2); HOLD (main checkout dirty) persists; CHECK-LIVENESS fix-pr-5 persists; CHECK-LIVENESS review:PR#6 persists — full rows on the next change");
+});
+
+test("CLI: the digest is the same anywhere in one threshold bucket and differs in the next, so a fold holds inside a bucket and unfolds across one", () => {
+  // fix-pr threshold 56 min: 60 and 100 min old are both the first bucket,
+  // 115 min old is the second.
+  const digestAt = (ago) => ticksOver([], { ...AGED, beforeRun: seedState(seenAgo({ "fix-pr-5": ago, "review:PR#6": 5 })) }, 0)[0].state.digest;
+  assert.equal(digestAt(60), digestAt(100));
+  assert.notEqual(digestAt(60), digestAt(115));
+});
+
+// The controller guard, through the state file the tick reads. A stamp is the
+// token's age, so it survives only where the token it stamps is this run's.
+const guarded = (controller, ago = 120) => {
+  const r = runCli([], {
+    shortlist: shortlistText([]), refresh: shortlistText([]),
+    ledger: { rows: ["#9 impl-9 · tier-ok=impl-9:fleet-implementer-slow-high"], dispatched: ["merge-bot-1"] },
+    keep: true,
+    beforeRun: seedState({ ...seenAgo({ "merge-bot-1": ago }), controller }),
+  });
+  try {
+    assert.equal(r.status, 0, r.stderr);
+    return { flagged: /CHECK-LIVENESS merge-bot-1/.test(r.stdout), stamp: stateOf(r).seen["merge-bot-1"] };
+  } finally {
+    rmSync(r.dir, { recursive: true, force: true });
+  }
+};
+
+test("CLI: an ancestor rotation keeps the stamp of a carried token; dead and none discard a stamp older than the record, and keep one written since", () => {
+  const record = (prior, atAgoMin) => ({ pid: process.pid, lstart: "runner-start", prior, at: Date.now() - atAgoMin * MIN });
+  // The merge bot is stamped 120 min ago, past its 101-minute threshold; the
+  // record was written 10 min ago, so the stamp predates it.
+  assert.equal(guarded(record("ancestor", 10)).flagged, true, "ancestor: a carried token is old and its age must survive");
+  for (const prior of ["dead", "none"]) {
+    const g = guarded(record(prior, 10));
+    assert.equal(g.flagged, false, `${prior}: a stamp from before the record is the previous run's token`);
+    assert.ok(g.stamp > Date.now() - 60_000, `${prior}: a same-name token of the new run starts at zero age`);
+  }
+  // The record is older than the stamp, so the stamp is this run's own and
+  // stands, whatever `prior` says.
+  for (const prior of ["dead", "none"]) assert.equal(guarded(record(prior, 150)).flagged, true, prior);
+  // No record to compare against: the stamp stands.
+  assert.equal(guarded(undefined).flagged, true);
+});
+
+test("stampSeen: stamps live names, carries what it can trust, and drops names no longer live", () => {
+  const now = 1_000_000_000_000;
+  const live = ["impl-1", "fix-pr-2", "review:PR#3"];
+  const prev = { "impl-1": now - 50 * MIN, "fix-pr-2": now - 5 * MIN, "gone-4": now - 9 * MIN };
+  assert.deepEqual(stampSeen({ live, prev, controller: null, now }), { "impl-1": now - 50 * MIN, "fix-pr-2": now - 5 * MIN, "review:PR#3": now });
+  const at = now - 20 * MIN;
+  const ctl = (prior, over = {}) => ({ pid: 1, lstart: "x", prior, at, ...over });
+  assert.deepEqual(stampSeen({ live, prev, controller: ctl("ancestor"), now }), { "impl-1": now - 50 * MIN, "fix-pr-2": now - 5 * MIN, "review:PR#3": now });
+  for (const prior of ["dead", "none"]) {
+    assert.deepEqual(stampSeen({ live, prev, controller: ctl(prior), now }), { "impl-1": now, "fix-pr-2": now - 5 * MIN, "review:PR#3": now }, prior);
+  }
+  assert.deepEqual(stampSeen({ live, prev, controller: ctl("dead", { at: null }), now }), { "impl-1": now - 50 * MIN, "fix-pr-2": now - 5 * MIN, "review:PR#3": now });
+});
+
+test("livenessLines: one line per live name past its family's threshold, age bucketed to multiples, a name with no stamp or no family silent", () => {
+  const now = 1_000_000_000_000;
+  const t = { ...LIVENESS_DEFAULTS };
+  const lines = (seen, live) => livenessLines({ live, seen, thresholds: t, now }).map((x) => x.line);
+  assert.deepEqual(lines({ "finisher-pr-4": now - 57 * MIN }, ["finisher-pr-4"]), ["CHECK-LIVENESS finisher-pr-4 (finisher > p99 57m)"]);
+  assert.deepEqual(lines({ "finisher-pr-4": now - 57 * MIN + 1 }, ["finisher-pr-4"]), [], "one millisecond short of the threshold");
+  assert.deepEqual(lines({ "merge-bot-2": now - 3 * 101 * MIN - 1 }, ["merge-bot-2"]), ["CHECK-LIVENESS merge-bot-2 (merge-bot > 3×p99 303m)"]);
+  assert.deepEqual(lines({ "merge-bot-2": now - 101 * MIN }, ["merge-bot-2", "impl-7"]), ["CHECK-LIVENESS merge-bot-2 (merge-bot > p99 101m)"]);
+  assert.deepEqual(lines({ "impl-7": now + 5 * MIN }, ["impl-7"]), [], "a stamp from the future is age zero, never negative");
+  assert.deepEqual(lines({ "not-a-member": 1 }, ["not-a-member"]), []);
+});
+
+test("CLI: a real ancestor rotation carries the heartbeat's `seen` through, so a carried live token keeps its age; a dead controller's rotation carries no token and no stamp", () => {
+  const ages = seenAgo({ "fix-pr-5": 60, "review:PR#6": 90 });
+  const seedThen = (rotate) => (repo) => { seedState(ages)(repo); rotate(repo); };
+  const carried = runCli([], { ...AGED, keep: true, beforeRun: seedThen(rotateAs(ANCESTOR_RECORD)) });
+  try {
+    assert.equal(carried.status, 0, carried.stderr);
+    assert.match(carried.stdout, /^CHECK-LIVENESS fix-pr-5 \(fix-pr > p99 56m\)$/m);
+    assert.match(carried.stdout, /^CHECK-LIVENESS review:PR#6 \(review > p99 78m\)$/m);
+    assert.equal(stateOf(carried).seen["fix-pr-5"], ages.seen["fix-pr-5"]);
+  } finally {
+    rmSync(carried.dir, { recursive: true, force: true });
+  }
+  const dead = runCli([], { ...AGED, keep: true, beforeRun: seedThen(rotateAs({ pid: deadPid(), lstart: "x", prior: "ancestor" })) });
+  try {
+    assert.equal(dead.status, 0, dead.stderr);
+    assert.doesNotMatch(dead.stdout, /CHECK-LIVENESS/);
+    assert.equal("seen" in stateOf(dead), false, "nothing was carried, so nothing is live and no stamp survives");
+  } finally {
+    rmSync(dead.dir, { recursive: true, force: true });
+  }
+});

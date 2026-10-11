@@ -35,6 +35,12 @@
 //            when rotate wrote it — a mark older than `at` is the previous
 //            run's. Removed, not left stale, by a rotate that finds no omp
 //            ancestor.
+//   seen     fleet-tick only. {member: firstSeenAtMs}: the first tick that saw
+//            each live ledger token, so a later tick can say how long a token
+//            has stayed live — the ledger records that a member was dispatched,
+//            never when. Pruned to the live set on every tick, so a settled
+//            member's stamp does not outlive it. Carried, never written, by
+//            the heartbeat and by rotate.
 //
 // One writer per key. A key two scripts wrote would need locking to be
 // correct, and none of them is in a position to hold one. That holds per key,
@@ -105,7 +111,7 @@ export function readState(path, name) {
   // to judge and nothing to report. A zeroed mark would date the beat to the
   // epoch and read as decades overdue on a run that has simply not started
   // one — the cry-wolf direction this key must never fail in.
-  const fresh = { quiet: 0, elapsed: 0, digest: "", beat: null, ticked: null, controller: null, rest: {} };
+  const fresh = { quiet: 0, elapsed: 0, digest: "", beat: null, ticked: null, controller: null, seen: {}, rest: {} };
   // The same state, flagged: the file EXISTS and could not be used. A caller
   // that acts on the absence of a record — ledger.mjs rotate — must tell this
   // from `fresh`, which is a run that has simply not written one yet.
@@ -197,7 +203,17 @@ export function readState(path, name) {
       at: Number.isInteger(v.at) && v.at > 0 ? v.at : null,
     };
   };
-  const { quiet, elapsed, digest, beat, ticked, controller, ...rest } = parsed;
+  // `seen` is validated per entry, not as a unit: each stamp is a separate
+  // member's age, so one junk entry costs only that member its age. A stamp
+  // that cannot be read restarts that member's clock, which is the late
+  // direction — never the early one, where a healthy member reads as stuck.
+  const stamps = (v) => {
+    if (!isRecord(v)) return {};
+    const out = {};
+    for (const [member, at] of Object.entries(v)) if (Number.isInteger(at) && at > 0) out[member] = at;
+    return out;
+  };
+  const { quiet, elapsed, digest, beat, ticked, controller, seen, ...rest } = parsed;
   return {
     quiet: num(quiet),
     elapsed: num(elapsed),
@@ -205,6 +221,7 @@ export function readState(path, name) {
     beat: mark(beat),
     ticked: tick(ticked),
     controller: ctl(controller),
+    seen: stamps(seen),
     rest,
   };
 }
@@ -257,6 +274,9 @@ export function writeState(path, name, prev, patch) {
     // by naming it with the value `undefined`, which JSON.stringify drops —
     // the way rotate retires a record no omp ancestor replaces.
     ...(prev.controller ? { controller: prev.controller } : {}),
+    // `seen` is fleet-tick's, and the heartbeat and rotate write this file
+    // too: carried the same way, so neither erases the ages the tick keeps.
+    ...(prev.seen && Object.keys(prev.seen).length > 0 ? { seen: prev.seen } : {}),
     ...patch,
   };
   const tmp = `${path}.${process.pid}.tmp`;

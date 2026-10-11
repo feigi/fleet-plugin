@@ -76,8 +76,8 @@ moved: **mtimes that moved between the two mean BLOCKED, a live member
 still holding its claim and its worktree, so the killed row above does not
 apply to it; mtimes unchanged at both are the dead signature.** Only the first
 of those two verdicts is conclusive — a member wedged on a call that writes
-nothing freezes its scratch dir too — so settle the dead one on the liveness
-read below, never on the two listings alone. Measured once: a refuter
+nothing freezes its scratch dir too — so settle the dead one on the Member
+unaccounted row above, never on the two listings alone. Measured once: a refuter
 wedged forever on \`until grep -q\` for a marker \`node --test\` never writes, its
 transcript's record counts unchanged across two polls while its own scratch
 files carried fresh mtimes throughout — alive the entire time it read as dead.`;
@@ -216,4 +216,39 @@ test("nothing in the failure table beside the killed row's own gate mentions the
     CARVEOUT_TABLE_VOCABULARY,
     `${SKILL}'s failure table mentions the transcript in a row OTHER than the killed row's own gate. A row claiming a frozen transcript settles death on its own is the carve-out this clause exists to prevent — fold it into the killed row's gate, or delete it.`,
   );
+});
+
+// The row that restores the terminal step the Member-killed paragraph points
+// at: the registry census FIRST, the mtime discriminator only for a member the
+// census says is `running`, and a kill only when every alive-signal is silent.
+// The order is the rule — a controller that polls mtimes before it reads the
+// registry spends two polls on a parked member that the census names in one
+// read, and one that kills on the first silent signal discards work a blocked
+// member still holds.
+const UNACCOUNTED_ROW = [
+  "| Member **unaccounted** (a live token the tick flags `CHECK-LIVENESS`, or any live token nothing has reported on) |",
+  "Registry census first: `read history://` once.",
+  "A row other than `running` → `read agent://<member>` and the artifacts (PR head, worktree, labels), settle the real outcome with the existing vocabulary, and resume a `parked` member with `write agent://<member>` when its work is worth continuing.",
+  "A `running` row → the mtime discriminator below, two polls: moved means BLOCKED and alive; frozen at both polls **and** no artifact movement → `write proc://<member>/kill`, `ledger.mjs settle <member> killed`, fresh name.",
+  "Three independent alive-signals — the first poll, the second poll, the artifacts — must all be silent before a kill; the tick settles and kills nothing |",
+].join(" ");
+
+test("the unaccounted row sits after the killed row and carries the census-first ordering and the all-silent kill precondition", () => {
+  const table = failureTable();
+  assert.match(table, phrase(UNACCOUNTED_ROW), `${SKILL}'s Member unaccounted row lost a half or was reordered: the registry census comes first, then the mtime discriminator for a \`running\` row, and a kill needs every alive-signal silent.`);
+  const killed = table.indexOf("| Member **killed**");
+  assert.ok(killed !== -1 && table.indexOf("| Member **unaccounted**") > killed, `${SKILL}'s Member unaccounted row must follow the Member killed row.`);
+  // The dangling exit this row exists to fill: the paragraph sends the dead
+  // verdict here, and the harness line it once named no longer exists.
+  assert.doesNotMatch(read(), /on the liveness\s+read below/, `${SKILL} still sends the dead verdict to a liveness read that has no terminal step.`);
+});
+
+// The asymmetry sentence is the reason the kill needs every signal silent. It
+// sits in the clause's own paragraph, past the span INSTRUCTION pins, so the
+// span pin cannot see it go.
+const ASYMMETRY =
+  "the cost of the wrong call is asymmetric — a live member written off gets killed and re-dispatched, which discards the work in flight and, where it holds a claim or a worktree, collides the fleet with itself, while one poll spent on a member that had in fact stopped costs only the poll.";
+
+test("the clause keeps the asymmetry that makes every alive-signal a precondition of the kill", () => {
+  assert.match(clause(), phrase(ASYMMETRY), `${SKILL}'s stalled-member clause lost its cost asymmetry — the reason a kill waits for every alive-signal to be silent.`);
 });
