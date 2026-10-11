@@ -20,7 +20,8 @@
 // dispatch and never loses or reorders one — settling annotates an entry in
 // place — which is what lets `merge-bot-<n>` be numbered from it; a rotate
 // that carries a run's live entries forward carries a settled one only for a
-// member a carried row names.
+// member a carried row names, and retires every other settled name into
+// `## Retired`, where `dispatch` and that numbering still read it.
 //
 // Writer policy: the controller owns run state
 // (`row`/`settle`/`dispatch`/`review`/`drain`/`ruled`/`rotate`); filers append
@@ -38,7 +39,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, liveOnLedger, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, premisesOf, ROWS, DISPATCHED, FILED, RULED, DRAIN, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, premisesOf, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { isDead, processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -452,7 +453,7 @@ function sectionOf(text, name) {
 }
 
 function load() {
-  if (!existsSync(file)) return { rows: [], filed: [], ruled: [], dispatched: [], drain: null };
+  if (!existsSync(file)) return { rows: [], filed: [], ruled: [], dispatched: [], drain: null, retired: [] };
   let text;
   try {
     text = readFileSync(file, "utf8");
@@ -479,12 +480,16 @@ function load() {
   return {
     rows: section(ROWS), filed: section(FILED), ruled: section(RULED),
     dispatched: section(DISPATCHED), drain: drainEntries[0] ?? null,
+    retired: section(RETIRED),
   };
 }
 
 // `## Drain` is written only once there is a marker to hold: an empty section
 // under that name would read, to anyone scanning the file by eye, as a run
-// that is draining.
+// that is draining. `## Retired` likewise: only an `ancestor` rotate writes
+// it (runRotate()), as the bare names of the members this omp session has
+// already run and the new ledger does not carry, so a ledger without it is
+// a session's first run.
 function save(d) {
   const list = (entries) => entries.map((r) => `- ${escapeText(r)}`).join("\n");
   const out =
@@ -492,7 +497,8 @@ function save(d) {
     `\n\n${DISPATCHED}\n\n` + list(d.dispatched) +
     `\n\n${FILED}\n\n` + list(d.filed) +
     `\n\n${RULED}\n\n` + list(d.ruled) +
-    (d.drain === null ? "" : `\n\n${DRAIN}\n\n` + list([d.drain])) + "\n";
+    (d.drain === null ? "" : `\n\n${DRAIN}\n\n` + list([d.drain])) +
+    (d.retired.length === 0 ? "" : `\n\n${RETIRED}\n\n` + list(d.retired)) + "\n";
   try {
     mkdirSync(dirname(file), { recursive: true });
     // Write to a sibling temp file and rename over the target. rename is
@@ -1539,6 +1545,18 @@ function runCheck() {
 // against the session's job list; rotate cannot, since that list is the
 // controller's to read and no script's.
 //
+// An `ancestor` rotate also writes `## Retired`: the bare name of every
+// member the archive settled and the new ledger does not carry, of every
+// reviewer runner its rows launched and the new ledger does not carry, and
+// every name the archive's own `## Retired` held. The omp process those
+// members ran in is still this run's, and it answers a second task under a
+// name it has used with `<name>-2` while `hub send <name>` keeps reaching the
+// first — so a settled name stays taken for the session, not the run:
+// `dispatch` and `review` refuse it (a replacement takes its own suffix) and
+// `nextMergeBot` numbers past it. Measured before this: a session's second
+// run restarted at `merge-bot-1`. A `dead` or `none` rotate retires nothing,
+// since the process that held those names is gone.
+//
 // Under the write lock like every other write subcommand, so a concurrent
 // writer either lands before the move (in the archive, whole) or after it (in
 // the fresh skeleton) — never half in each.
@@ -1601,7 +1619,7 @@ function runRotate() {
   }
   // Read before anything moves: a ledger whose live tokens cannot be read is
   // refused with nothing moved, never archived with those tokens dropped.
-  let carry = { rows: [], dispatched: [], skipped: [] };
+  let carry = { rows: [], dispatched: [], retired: [], skipped: [] };
   if (prior === "ancestor" && exists) {
     let text;
     try {
@@ -1611,7 +1629,7 @@ function runRotate() {
     }
     carry = carryOf(text);
   }
-  const carrying = carry.rows.length > 0 || carry.dispatched.length > 0;
+  const carrying = carry.rows.length > 0 || carry.dispatched.length > 0 || carry.retired.length > 0;
   let archive = null;
   if (exists) {
     const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "");
@@ -1639,7 +1657,7 @@ function runRotate() {
   // Nothing to carry writes nothing, so the next write starts the skeleton
   // exactly as after any other verdict.
   if (carrying) {
-    save({ rows: carry.rows, dispatched: carry.dispatched, filed: [], ruled: [], drain: null });
+    save({ rows: carry.rows, dispatched: carry.dispatched, filed: [], ruled: [], drain: null, retired: carry.retired });
   }
   if (archive !== null) console.error(`    rotated ${file} -> ${archive}`);
   for (const { line, why } of carry.skipped) {
@@ -1647,6 +1665,7 @@ function runRotate() {
   }
   if (carrying) {
     console.error(`    carried ${carry.rows.length} row(s) and ${carry.dispatched.length} ## Dispatched entr${carry.dispatched.length === 1 ? "y" : "ies"} from ${archive}`);
+    console.error(`    retired ${carry.retired.length} name(s) from ${archive}`);
   }
   // Re-read rather than reuse the read above: the heartbeat file has other
   // writers, and a patch built from an older view would undo what they wrote
@@ -1658,6 +1677,7 @@ function runRotate() {
   console.log(JSON.stringify({
     rotated: archive !== null, archive,
     carried: { rows: carry.rows, dispatched: carry.dispatched },
+    retired: carry.retired,
     skipped: carry.skipped.map((s) => s.line),
   }));
 }
@@ -1675,9 +1695,14 @@ function runRotate() {
 // tokens, `reviewed=` and every other record on it come along, and its
 // siblings' with them, and the tick's per-PR reading of the PR is unchanged;
 // and the `## Dispatched` entries, settled ones among them, that keep a
-// carried member from reading live again.
+// carried member from reading live again. retiredOnLedger() names the rest:
+// every settled member neither travels, and every reviewer runner a row
+// launched, read off the parsed rows and the skipped ones alike — a row the
+// tick refuses still names members this session ran — and the archive's own
+// `## Retired`, each line of which must be a bare member or reviewer name.
 function carryOf(text) {
   const skipped = [];
+  const skippedRows = [];
   const rows = sectionOf(text, ROWS).filter((r) => {
     try {
       deriveRun({ rows: [r], dispatched: [], drain: null }, []);
@@ -1685,6 +1710,7 @@ function carryOf(text) {
     } catch (e) {
       if (!(e instanceof LedgerError)) throw e;
       skipped.push({ line: r, why: e.message });
+      skippedRows.push(r);
       return false;
     }
   });
@@ -1694,8 +1720,15 @@ function carryOf(text) {
     skipped.push({ line: e, why: t === null ? "not a member token" : `${t.name}: ${t.error}` });
     return false;
   });
+  const archivedRetired = sectionOf(text, RETIRED).filter((name) => {
+    if (isRetirable(name)) return true;
+    skipped.push({ line: name, why: "not a bare member or reviewer name" });
+    return false;
+  });
   const live = liveOnLedger(rows, dispatched);
-  return { rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched, skipped };
+  const carried = { rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched };
+  const retired = retiredOnLedger([...rows, ...skippedRows], dispatched, archivedRetired, carried);
+  return { ...carried, retired, skipped };
 }
 
 // ── dispatch / settle ────────────────────────────────────────────────────────
@@ -1799,15 +1832,17 @@ function runDispatch() {
   refuseMalformedDispatched();
 
   // `merge-bot` bare is the merge-bot case of this command: the ledger names
-  // the bot, 1 + the merge-bot entries already in `## Dispatched`, so the
-  // controller never counts. An explicit `merge-bot-<n>` is accepted only
-  // when it is that one.
-  const member = parseMember(name === "merge-bot" ? nextMergeBot(data.dispatched) : name);
+  // the bot, 1 + the highest merge-bot name this session holds — in
+  // `## Dispatched`, on a row or in `## Retired` — so the controller never
+  // counts. An explicit `merge-bot-<n>` is accepted only when it is that one.
+  // `sessionNames` is every name beyond `## Dispatched` the session has used.
+  const sessionNames = [...data.rows.flatMap(memberTokens).map((t) => t.name), ...data.retired];
+  const member = parseMember(name === "merge-bot" ? nextMergeBot(data.dispatched, sessionNames) : name);
   if (!member) die(unknownMember(name));
   if (member.bound === null) {
     if (key !== null) die(`merge bots work no ticket or PR — ${usage}`);
-    const next = nextMergeBot(data.dispatched);
-    if (member.name !== next) die(`${member.name} is not next — the next merge bot this run is ${next}; \`dispatch merge-bot\` names it`);
+    const next = nextMergeBot(data.dispatched, sessionNames);
+    if (member.name !== next) die(`${member.name} is not next — the next merge bot this session is ${next}; \`dispatch merge-bot\` names it`);
   } else if (key === null) {
     die(`${member.name} works a ticket or PR — ${usage}`);
   }
@@ -1822,14 +1857,24 @@ function runDispatch() {
     die(`the run is draining (${data.drain}) — no implementer dispatch; drain stops supply`);
   }
 
-  // One token per member for the whole run. A settled token on a row counts
-  // too — a `row`-written record the ledger never saw dispatched.
+  // One token per member for the whole omp session. A settled token on a row
+  // counts too — a `row`-written record the ledger never saw dispatched — and
+  // so does a name `## Retired` holds: an earlier run of this session ran it,
+  // and omp still holds that peer under the name (see runRotate()). The
+  // replacement's name is spelled out: one letter past the highest this
+  // session has used on the number, wherever that name sits.
   const settledOnRow = data.rows.flatMap(memberTokens).find((t) => t.name === member.name && t.outcome !== null);
   const prior =
     data.dispatched.find((e) => parseToken(e).name === member.name) ??
-    (settledOnRow && `${settledOnRow.name}=${settledOnRow.outcome}`);
+    (settledOnRow && `${settledOnRow.name}=${settledOnRow.outcome}`) ??
+    (data.retired.includes(member.name) ? "retired by rotate" : undefined);
   if (prior !== undefined) {
-    die(`${member.name} was already dispatched this run (${prior}) — a replacement takes a name of its own (a -b, -c … suffix)`);
+    // Never a merge bot: it is accepted only as the number past every name
+    // the session holds, so none of the three places above can name it.
+    const used = [...data.dispatched.map((e) => parseToken(e).name), ...sessionNames];
+    const next = nextRetry(member.name, used);
+    die(`${member.name} was already dispatched this session (${prior}) — a replacement takes a name of its own`
+      + (next === null ? `, and ${member.name} has no retry letter left` : ` (${next})`));
   }
 
   // A replacement (`-b`, `-c` …) works the same ticket or PR as its
@@ -2069,7 +2114,7 @@ function runReview() {
     : created ? `${head} ${appended.join(" · ")}`
     : `${head} · ${appended.join(" · ")}`;
   const after = created ? [...data.rows, line] : data.rows.with(i, line);
-  const refusal = rowWriteRefusal(data.rows, after, oldLine, line);
+  const refusal = rowWriteRefusal(data.rows, after, oldLine, line, data.retired);
   if (refusal !== null) die(`review #${prNum}: ${refusal}`);
   data.rows = after;
   save(data);

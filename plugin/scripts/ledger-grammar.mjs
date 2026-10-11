@@ -213,11 +213,12 @@ function added(before, after) {
 
 // The runner name a new launch on PR <pr> takes: `review-pr-<pr>`, else the
 // first letter from `b` that no runner launch on the PR's rows already uses —
-// member or fallback, `=failed` or not. null for a stream keyed by no PR
-// number, or with every letter taken.
-function nextReviewer(launches, pr) {
+// member or fallback, `=failed` or not — and no name in `retired` holds, the
+// names an earlier run of this omp session launched. null for a stream keyed
+// by no PR number, or with every letter taken.
+function nextReviewer(launches, pr, retired) {
   if (typeof pr !== "number") return null;
-  const used = new Set(launches.filter((l) => l.kind !== "wf").map((l) => l.name));
+  const used = new Set([...launches.filter((l) => l.kind !== "wf").map((l) => l.name), ...retired]);
   const base = `review-pr-${pr}`;
   if (!used.has(base)) return base;
   for (let c = "b".charCodeAt(0); c <= "z".charCodeAt(0); c++) {
@@ -275,7 +276,7 @@ export function newSplitRow(before, after) {
 /**
  * Why `ledger.mjs row` or `ledger.mjs review` must not write `line` over
  * `oldLine` (null for a new row), `before` and `after` the ledger's rows on
- * either side of the write —
+ * either side of the write, `retired` the ledger's `## Retired` names —
  * or null when it may. Only a violation the write ADDS is a reason: each
  * rule's offending entries are listed before the write and after it, and the
  * after list must hold nothing the before list lacks, duplicates counted. Where
@@ -289,11 +290,13 @@ export function newSplitRow(before, after) {
  * - paired results: every `reviewed=` answers a launch (readReviews above);
  * - unique launches: a launch identity — a workflow's runId, a runner's name
  *   whatever its kind — appears at most once in its PR's stream;
+ * - unretired runners: no launch takes a runner name `retired` holds, which an
+ *   earlier run of this omp session launched;
  * - one open launch per PR: no launch appears while an earlier one is open;
  * - an open launch is never removed: every launch open before the write is in
  *   its PR's stream after it, `=failed` allowed, on any of the PR's rows.
  */
-export function rowWriteRefusal(before, after, oldLine, line) {
+export function rowWriteRefusal(before, after, oldLine, line, retired = []) {
   const names = (text) => (text === null ? [] : memberTokens(text).map((t) => t.name));
   const dupes = (list) => list.filter((n, i) => list.indexOf(n) !== i);
   const member = added(dupes(names(oldLine)), dupes(names(line)))[0];
@@ -319,8 +322,14 @@ export function rowWriteRefusal(before, after, oldLine, line) {
     }
     const repeated = added(b.repeated, a.repeated)[0];
     if (repeated !== undefined) {
-      const next = nextReviewer(a.launches, id);
+      const next = nextReviewer(a.launches, id, retired);
       return `launch '${repeated}' is already on ${where(id)}'s rows — unique launches: every launch takes an identity the PR has not used`
+        + (next === null ? "" : `; the next free reviewer name is ${next}`);
+    }
+    const reused = a.launches.find((l) => l.kind !== "wf" && retired.includes(l.name) && !b.launches.some((o) => o.key === l.key));
+    if (reused !== undefined) {
+      const next = nextReviewer(a.launches, id, retired);
+      return `launch '${reused.id}' on ${where(id)} names a runner an earlier run of this session already used — unretired runners: omp would answer it with \`${reused.name}-2\``
         + (next === null ? "" : `; the next free reviewer name is ${next}`);
     }
     const crowded = added(b.crowded.map((c) => c.id), a.crowded.map((c) => c.id))[0];
@@ -421,6 +430,68 @@ export function liveOnLedger(rows, dispatched) {
   return out;
 }
 
+// A reviewer's runner name: `review-pr-<n>` for a PR's first, `-b`, `-c`, …
+// for each later one. The only runner names the grammar knows, so the only
+// ones a rotate retires; a launch under any other name retires nothing.
+const REVIEWER = /^review-pr-[1-9][0-9]*(-[b-z])?$/;
+
+/** Whether `name` is one a `## Retired` line may hold: a member's name or a
+ * reviewer's, bare. */
+export const isRetirable = (name) => parseMember(name) !== null || REVIEWER.test(name);
+
+// The reviewer runner names a row's `review=member:<name>` and
+// `review=fallback:<name>` launches took, `=failed` or answered or open. A
+// workflow launch is named by its runId, which no hub member holds.
+function launchedRunners(text) {
+  const out = [];
+  for (const word of text.split(/\s+/)) {
+    const m = REVIEW.exec(word);
+    if (m !== null && m.groups.kind !== "wf" && REVIEWER.test(m.groups.name)) out.push(m.groups.name);
+  }
+  return out;
+}
+
+/**
+ * The names an `ancestor` rotate retires: every member the archive settled —
+ * in `## Dispatched` or on any row, the same two places `ledger.mjs dispatch`
+ * refuses a repeat from within a run — and every reviewer runner a row
+ * launched, that `liveOnLedger` does not carry, plus every name the archive's
+ * own `## Retired` already held (`retired`, bare retirable names — the caller
+ * validates them), once each, in that order. A retired name stays taken for
+ * the rest of the omp session: the process that ran the member still holds a
+ * peer under it, and omp answers a second task of that name with `<name>-2`
+ * while `hub send <name>` keeps reaching the first. `carried` is
+ * `{rows, dispatched}`, the texts of the rows and the `## Dispatched` entries
+ * the new ledger carries (`liveOnLedger`'s picks); a name it carries, live or
+ * as a settled copy, is on the new ledger already and is not listed twice. A
+ * row is read whether or not it parsed, but an unsettled member token on it
+ * retires nothing: only a settled name is known gone.
+ */
+export function retiredOnLedger(rows, dispatched, retired, carried) {
+  const seen = new Set();
+  for (const e of carried.dispatched) seen.add(parseToken(e).name);
+  for (const text of carried.rows) {
+    for (const t of memberTokens(text)) if (t.error === null) seen.add(t.name);
+    for (const name of launchedRunners(text)) seen.add(name);
+  }
+  const out = [];
+  const add = (name) => {
+    if (seen.has(name)) return;
+    seen.add(name);
+    out.push(name);
+  };
+  for (const name of retired) add(name);
+  for (const e of dispatched) {
+    const t = parseToken(e);
+    if (t !== null && t.error === null && t.outcome !== null) add(t.name);
+  }
+  for (const text of rows) {
+    for (const t of memberTokens(text)) if (t.error === null && t.outcome !== null) add(t.name);
+    for (const name of launchedRunners(text)) add(name);
+  }
+  return out;
+}
+
 // A ticket row is `#N <text>`; it is an Exclusion when `excluded` is the
 // text's first word — `impl-N · … excluded …` is a row about something else.
 // `#N excluded · behind-pr:#M` / `behind-issue:#M`: `#M` is an issue or PR
@@ -441,6 +512,7 @@ export const DISPATCHED = "## Dispatched";
 export const FILED = "## Filed";
 export const RULED = "## Ruled";
 export const DRAIN = "## Drain";
+export const RETIRED = "## Retired";
 
 // What a section header looks like on disk, defined once because a second
 // copy drifts: ledger.mjs slices sections with it, and sets its readability
@@ -465,13 +537,29 @@ export function unescapeText(s) {
 }
 
 /** The name the next merge bot takes: 1 + the highest `merge-bot-<n>` in
- * `## Dispatched`, settled ones included — the highest, not the count, since
- * a rotate that carries a live bot forward carries a settled predecessor
- * only when a carried row names it. n restarts at 1 with every run that
- * carries no bot. */
-export function nextMergeBot(dispatched) {
-  const ns = dispatched.map(parseToken).filter((t) => t?.family === "merge-bot").map((t) => t.number);
+ * `## Dispatched`, settled ones included, or among `names` — the other names
+ * the session holds, a retired bot's and a settled token on a row — the
+ * highest, not the count, since a rotate that carries a live bot forward
+ * carries a settled predecessor only when a carried row names it, and
+ * retires the rest by name. n restarts at 1 with every run that carries and
+ * retires no bot: a `dead` or `none` rotate, whose bots ran in an omp
+ * process that is gone. */
+export function nextMergeBot(dispatched, names = []) {
+  const ns = [...dispatched.map(parseToken), ...names.map(parseMember)]
+    .filter((t) => t?.family === "merge-bot").map((t) => t.number);
   return `merge-bot-${Math.max(0, ...ns) + 1}`;
+}
+
+/** The replacement name a member of `name`'s family and number takes next:
+ * one retry letter past the HIGHEST any of `names` on that number has used,
+ * `name` itself included — not past `name`'s own, since a controller can
+ * dispatch `-c` before `-b`. No suffix is the `a` attempt; `-z` is the
+ * grammar's last, past which there is no legal name, so null. */
+export function nextRetry(name, names) {
+  const { family, number } = parseMember(name);
+  const top = [name, ...names].map(parseMember).filter((m) => m !== null && m.family === family && m.number === number)
+    .map((m) => m.retry ?? "a").sort().at(-1);
+  return top === "z" ? null : `${family}-${number}-${String.fromCharCode(top.charCodeAt(0) + 1)}`;
 }
 
 // An implementer cell is `<role>-<level>` — an omp role and a thinking

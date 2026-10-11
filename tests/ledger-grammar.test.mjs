@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, liveOnLedger, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -168,16 +168,82 @@ test("escapeText/unescapeText round-trip a literal backslash and a newline, and 
 // n = 1 + the highest `merge-bot-` entry — settled ones included, since a
 // dead bot's replacement "gets a new n", and other families never counted.
 // Within a run that is the count; across an ancestor rotate, which carries a
-// live bot without its settled predecessors, only the highest is free.
-test("nextMergeBot numbers past every merge-bot entry, live or settled, and nothing else", () => {
+// live bot without its settled predecessors and retires them by name, the
+// highest of either section is free.
+test("nextMergeBot numbers past every merge-bot entry, live, settled or in the other names given, and nothing else", () => {
   assert.equal(nextMergeBot([]), "merge-bot-1");
   assert.equal(nextMergeBot(["impl-412", "fix-pr-346=no-op", "finisher-pr-346"]), "merge-bot-1");
   assert.equal(nextMergeBot(["impl-412", "merge-bot-1=done", "fix-pr-346", "merge-bot-2=killed", "merge-bot-3"]), "merge-bot-4");
   assert.equal(nextMergeBot(["merge-bot-2"]), "merge-bot-3", "a carried merge-bot-2 alone must not hand out its own name");
+  assert.equal(nextMergeBot([], ["impl-9", "merge-bot-1"]), "merge-bot-2", "a retired bot's number is taken");
+  assert.equal(nextMergeBot(["merge-bot-4"], ["merge-bot-2"]), "merge-bot-5", "the highest of either list");
   // A malformed entry is not a merge-bot entry, however much it starts like
   // one: counting by prefix instead of by parseToken() inflated n past what
   // ## Dispatched's real entries justify (measured: merge-bot-3, not -2).
   assert.equal(nextMergeBot(["merge-bot-1=done", "merge-bot-2x-garbage"]), "merge-bot-2");
+  assert.equal(nextMergeBot([], ["merge-bot-2x-garbage", "merge-bot-1=done"]), "merge-bot-1", "a retired entry is a bare name");
+});
+
+// What the new ledger carries, as retiredOnLedger() takes it: the texts of the
+// rows liveOnLedger() picked, and its `## Dispatched` entries.
+const carriedBy = (rows, live) => ({ rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched });
+
+test("retiredOnLedger: every settled name liveOnLedger leaves behind, the prior ## Retired first, once each", () => {
+  const rows = [
+    "#3 impl-3=PR#5 → PR#5 · fix-pr-5",
+    "#9 impl-9=PR#10 → PR#10 · finisher-pr-10=labelled",
+    "#11 impl-11-b=bailed",
+  ];
+  const dispatched = ["impl-3=PR#5", "fix-pr-5", "impl-9=PR#10", "finisher-pr-10=labelled", "impl-11=killed", "merge-bot-1=done", "merge-bot-2x-garbage"];
+  const live = liveOnLedger(rows, dispatched);
+  assert.deepEqual(live.dispatched, ["impl-3=PR#5", "fix-pr-5"]);
+  assert.deepEqual(retiredOnLedger(rows, dispatched, ["impl-1", "impl-9"], carriedBy(rows, live)),
+    ["impl-1", "impl-9", "finisher-pr-10", "impl-11", "merge-bot-1", "impl-11-b"]);
+  // A carried row's settled tokens and a carried settled entry stay in
+  // their sections and are not retired alongside.
+  assert.ok(!retiredOnLedger(rows, dispatched, [], carriedBy(rows, live)).includes("impl-3"));
+});
+
+test("retiredOnLedger: a settled token on a carried row is on the new ledger already, whether or not ## Dispatched names it", () => {
+  const rows = ["#5 impl-5=killed · impl-6"];
+  const live = liveOnLedger(rows, []);
+  assert.deepEqual(live.rows, [0], "the live impl-6 carries its row");
+  assert.deepEqual(retiredOnLedger(rows, [], [], carriedBy(rows, live)), []);
+});
+
+test("retiredOnLedger: an unsettled token on a row nothing carried retires nothing, a settled one does", () => {
+  // A row the tick refuses is passed with the parsed ones and carried by
+  // nobody; only a settled name on it is known gone.
+  const none = { rows: [], dispatched: [] };
+  assert.deepEqual(retiredOnLedger(["#9 impl-9"], [], [], none), []);
+  assert.deepEqual(retiredOnLedger(["#9 impl-9 · impl-8=killed"], [], [], none), ["impl-8"]);
+});
+
+test("retiredOnLedger: a reviewer runner a row launched is retired, a workflow launch and another name are not", () => {
+  const done = "reviewed=abc1234:0/0/0:run-abcdefgh";
+  const rows = [
+    `#5 impl-5=PR#6 → PR#6 · review=member:review-pr-6 ${done} · review=fallback:review-pr-6-b=failed`,
+    `#7 impl-7=PR#8 → PR#8 · review=wf:review-pr-8 ${done} · review=member:some-runner ${done}`,
+    `#9 impl-9=PR#10 → PR#10 · review=member:review-pr-10 ${done} · impl-10`,
+  ];
+  const live = liveOnLedger(rows, []);
+  assert.deepEqual(live.rows, [2], "only #9 holds a live token");
+  assert.deepEqual(retiredOnLedger(rows, [], [], carriedBy(rows, live)), ["impl-5", "review-pr-6", "review-pr-6-b", "impl-7"],
+    "the carried row's own runner stays with the row");
+});
+
+test("isRetirable: a member's name or a reviewer's, bare", () => {
+  for (const ok of ["impl-4", "impl-4-b", "merge-bot-2", "review-pr-6", "review-pr-6-c"]) assert.ok(isRetirable(ok), ok);
+  for (const bad of ["impl-4=killed", "garbage-name", "merge-bot-2-b", "impl-5-zz", "review-pr-6-a", "review-pr-0", "review-pr-6=failed"]) {
+    assert.ok(!isRetirable(bad), bad);
+  }
+});
+
+test("nextRetry: one letter past the highest used on the number, across every name given, null past -z", () => {
+  assert.equal(nextRetry("impl-42", []), "impl-42-b");
+  assert.equal(nextRetry("impl-42", ["impl-42-c", "impl-43-d", "fix-pr-42-e"]), "impl-42-d", "same family and number only");
+  assert.equal(nextRetry("impl-42-b", ["impl-42"]), "impl-42-c");
+  assert.equal(nextRetry("finisher-pr-7", ["finisher-pr-7-z"]), null);
 });
 
 test("liveOnLedger: unsettled members and open launches, once each, with the first row carrying them", () => {

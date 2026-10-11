@@ -26,6 +26,12 @@ test("the rotate step says what an ancestor rotate carries, and that dead and no
   assert.match(s, phrase("it writes a new ledger holding every row of a stream (one PR's rows) in which a row carries an unsettled member token or an open `review=` launch, whole and with every other token on it, plus every unsettled `## Dispatched` entry and the settled entry of each member a carried row names"),
     "the ancestor carry must name what it carries");
   assert.match(s, phrase("A line it cannot parse is skipped with a warning naming it, and the rotation still succeeds."));
+  // #3082: a settled name the carry leaves behind is still the session's.
+  assert.match(s, phrase("Every other settled name — in `## Dispatched` or on any row — and every reviewer runner a row launched goes into the new ledger's `## Retired` as a bare name, with whatever the archive's own `## Retired` held"),
+    "the rotate step must say which names retire");
+  assert.match(s, phrase("`dispatch` refuses a retired name and names the replacement"), "and that dispatch reads them");
+  assert.match(s, phrase("`review` refuses a retired runner name and names the next free reviewer name"), "and that review does");
+  assert.match(s, phrase("The tick never reads `## Retired`"), "and the accepted non-goal: a retired ticket is not claimed");
   assert.doesNotMatch(s, /Nothing is carried forward/, "the unconditional no-carry claim must be gone");
   assert.doesNotMatch(s, /Member-killed row's check/, "the ancestor case is the carry's now, not the Member-killed check's");
 });

@@ -19,6 +19,20 @@ skipped with a warning and the rotation still succeeds. Decision 4's
 carried tokens, and the controller reconciles each against the session's job
 list rather than leaving them to the Member-killed check. `dead` and `none`
 still carry nothing.
+Amended by #3082: an `ancestor` rotate also retires names. omp answers a
+second task under a name the session has used with `<name>-2` while `hub
+send <name>` keeps reaching the first, so a name the new ledger does not
+carry is written, bare, to a `## Retired` section — every settled member
+in the archive's `## Dispatched` or on any of its rows that no carried entry
+or row names, every reviewer runner (`review-pr-<n>`, `-b`, `-c` …) a row
+launched that no carried row names, plus the archive's own `## Retired`.
+`dispatch` refuses a retired name for every member family, naming the
+replacement (one retry letter past the highest the session has used on the
+number), `review` refuses a retired runner name and names the next free
+reviewer name, and `merge-bot-<n>` numbers past retired bots. The tick
+never reads the section: a ticket an earlier run worked is not `claimed` by
+it and can be shortlisted again. `dead` and `none` still carry nothing, the
+names included — the process that held them is gone.
 
 ## Context
 
