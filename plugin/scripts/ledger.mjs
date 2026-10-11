@@ -1726,10 +1726,9 @@ function carryOf(text) {
     return false;
   });
   const live = liveOnLedger(rows, dispatched);
-  // Skipped rows go after the parsed ones, so `live.rows` still indexes the
-  // parsed rows it was computed over.
-  const retired = retiredOnLedger([...rows, ...skippedRows], dispatched, archivedRetired, live);
-  return { rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched, retired, skipped };
+  const carried = { rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched };
+  const retired = retiredOnLedger([...rows, ...skippedRows], dispatched, archivedRetired, carried);
+  return { ...carried, retired, skipped };
 }
 
 // ── dispatch / settle ────────────────────────────────────────────────────────

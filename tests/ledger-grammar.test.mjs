@@ -184,6 +184,10 @@ test("nextMergeBot numbers past every merge-bot entry, live, settled or in the o
   assert.equal(nextMergeBot([], ["merge-bot-2x-garbage", "merge-bot-1=done"]), "merge-bot-1", "a retired entry is a bare name");
 });
 
+// What the new ledger carries, as retiredOnLedger() takes it: the texts of the
+// rows liveOnLedger() picked, and its `## Dispatched` entries.
+const carriedBy = (rows, live) => ({ rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched });
+
 test("retiredOnLedger: every settled name liveOnLedger leaves behind, the prior ## Retired first, once each", () => {
   const rows = [
     "#3 impl-3=PR#5 → PR#5 · fix-pr-5",
@@ -193,18 +197,18 @@ test("retiredOnLedger: every settled name liveOnLedger leaves behind, the prior 
   const dispatched = ["impl-3=PR#5", "fix-pr-5", "impl-9=PR#10", "finisher-pr-10=labelled", "impl-11=killed", "merge-bot-1=done", "merge-bot-2x-garbage"];
   const live = liveOnLedger(rows, dispatched);
   assert.deepEqual(live.dispatched, ["impl-3=PR#5", "fix-pr-5"]);
-  assert.deepEqual(retiredOnLedger(rows, dispatched, ["impl-1", "impl-9"], live),
+  assert.deepEqual(retiredOnLedger(rows, dispatched, ["impl-1", "impl-9"], carriedBy(rows, live)),
     ["impl-1", "impl-9", "finisher-pr-10", "impl-11", "merge-bot-1", "impl-11-b"]);
   // A carried row's settled tokens and a carried settled entry stay in
   // their sections and are not retired alongside.
-  assert.ok(!retiredOnLedger(rows, dispatched, [], live).includes("impl-3"));
+  assert.ok(!retiredOnLedger(rows, dispatched, [], carriedBy(rows, live)).includes("impl-3"));
 });
 
 test("retiredOnLedger: a settled token on a carried row is on the new ledger already, whether or not ## Dispatched names it", () => {
   const rows = ["#5 impl-5=killed · impl-6"];
   const live = liveOnLedger(rows, []);
   assert.deepEqual(live.rows, [0], "the live impl-6 carries its row");
-  assert.deepEqual(retiredOnLedger(rows, [], [], live), []);
+  assert.deepEqual(retiredOnLedger(rows, [], [], carriedBy(rows, live)), []);
 });
 
 test("retiredOnLedger: an unsettled token on a row nothing carried retires nothing, a settled one does", () => {
@@ -224,7 +228,7 @@ test("retiredOnLedger: a reviewer runner a row launched is retired, a workflow l
   ];
   const live = liveOnLedger(rows, []);
   assert.deepEqual(live.rows, [2], "only #9 holds a live token");
-  assert.deepEqual(retiredOnLedger(rows, [], [], live), ["impl-5", "review-pr-6", "review-pr-6-b", "impl-7"],
+  assert.deepEqual(retiredOnLedger(rows, [], [], carriedBy(rows, live)), ["impl-5", "review-pr-6", "review-pr-6-b", "impl-7"],
     "the carried row's own runner stays with the row");
 });
 

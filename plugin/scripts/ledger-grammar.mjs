@@ -461,22 +461,22 @@ function launchedRunners(text) {
  * the rest of the omp session: the process that ran the member still holds a
  * peer under it, and omp answers a second task of that name with `<name>-2`
  * while `hub send <name>` keeps reaching the first. `carried` is
- * `liveOnLedger`'s result for the same input; a name it carries, live or as a
- * settled copy, is on the new ledger already and is not listed twice. A row
- * is read whether or not it parsed, but an unsettled member token on it
+ * `{rows, dispatched}`, the texts of the rows and the `## Dispatched` entries
+ * the new ledger carries (`liveOnLedger`'s picks); a name it carries, live or
+ * as a settled copy, is on the new ledger already and is not listed twice. A
+ * row is read whether or not it parsed, but an unsettled member token on it
  * retires nothing: only a settled name is known gone.
  */
 export function retiredOnLedger(rows, dispatched, retired, carried) {
-  const kept = new Set();
-  for (const e of carried.dispatched) kept.add(parseToken(e).name);
-  for (const i of carried.rows) {
-    for (const t of memberTokens(rows[i])) if (t.error === null) kept.add(t.name);
-    for (const name of launchedRunners(rows[i])) kept.add(name);
+  const seen = new Set();
+  for (const e of carried.dispatched) seen.add(parseToken(e).name);
+  for (const text of carried.rows) {
+    for (const t of memberTokens(text)) if (t.error === null) seen.add(t.name);
+    for (const name of launchedRunners(text)) seen.add(name);
   }
   const out = [];
-  const seen = new Set();
   const add = (name) => {
-    if (kept.has(name) || seen.has(name)) return;
+    if (seen.has(name)) return;
     seen.add(name);
     out.push(name);
   };
