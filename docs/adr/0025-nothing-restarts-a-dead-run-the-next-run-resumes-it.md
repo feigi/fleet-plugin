@@ -33,6 +33,22 @@ reviewer name, and `merge-bot-<n>` numbers past retired bots. The tick
 never reads the section: a ticket an earlier run worked is not `claimed` by
 it and can be shortlisted again. `dead` and `none` still carry nothing, the
 names included — the process that held them is gone.
+Amended by #2968: the Consequences line naming "a separate fix" is closed.
+`ledger.mjs` stamps `acted` on every ledger write, rotate included, and the
+Liveness mark's verdict counts it beside `beat` and `ticked`; `fleet-tick`
+writes `ticked` before the reads that can refuse it; and run-team's End of
+run records `--stop` last, after the metrics PR, with the tick printing
+`ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"` once a draining
+run has no open PR and no live implementer. The partition rule now reads
+beat, `ticked` and `acted` against the record's `at`, and a mark older than
+it is excluded from the verdict, not only from the attribution: a run is
+judged from its own marks, and one with a record and no beat of its own goes
+stale 40 minutes after its latest tick, ledger write or record. Decision
+5's first-tick wording changes accordingly: a run's first tick no longer
+reports the previous run's stall, only that run's recorded stop, once, as
+`previous run stopped deliberately at …`; and since rotate's `acted` shares
+the record's `at`, a stall read off `prior` remains only for a record
+written without one.
 
 ## Context
 

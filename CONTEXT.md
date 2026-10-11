@@ -372,11 +372,14 @@ otherwise. A Claim with an open PR is not stranded — the fold-in owns it.
 _Avoid_: orphan, abandoned ticket
 
 **Stall report**:
-What a reader says about a stale or stopped Liveness mark — when the beat was
-last seen, how overdue it is against the interval that mark recorded, how many
+What a reader says about a run gone quiet — a Liveness mark that recorded a
+stop, or went stale with no recent tick or ledger write beside it, or a run with a Controller
+record and no beat of its own whose latest tick, ledger write or record is past
+the window — when it was last seen, how overdue that is, how many
 tickets are still claimed and in flight, and whether the pool still has
 supply — led by whose stall it is off the Controller record: controller alive,
-controller gone, or unknown with no record. Naming a stall acts on nothing;
+controller gone, or unknown with no record. A mark older than the Controller
+record is the previous run's and counts for nothing. Naming a stall acts on nothing;
 Stranded claims come back through phase 0, never through the report.
 _Avoid_: dead-run warning, stale banner
 
