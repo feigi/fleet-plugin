@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,7 +39,10 @@ const FIXTURES = [
   { row: "#350 review=wf:x", own: null, keyed: 350, board: 350 },
 ];
 
-function ledger(t) {
+// A ledger CLI against a fresh file, holding `rows` when given: written
+// straight to disk, since a fixture row can carry review tokens `row` never
+// adds.
+function ledger(t, rows = null) {
   const dir = mkdtempSync(join(tmpdir(), "row-pr-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const bin = join(dir, "bin");
@@ -48,6 +51,7 @@ function ledger(t) {
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
   const file = join(dir, "ledger.md");
+  if (rows !== null) writeFileSync(file, `# Fleet run ledger\n\n## Rows\n\n${rows.map((r) => `- ${r}\n`).join("")}\n## Filed\n\n## Ruled\n\n`);
   return (...args) => {
     const r = spawnSync(process.execPath, [LEDGER, "--file", file, ...args], { encoding: "utf8", env, cwd: dir });
     assert.equal(r.status, 0, `${args.join(" ")}: got exit ${r.status}\n${r.stderr}`);
@@ -64,9 +68,8 @@ for (const { row, own, keyed, board } of FIXTURES) {
     // `ledger.mjs dispatch <pr> fix-pr-<pr>` lands on the row the tick folds
     // that PR's state from: this row when it is the PR's, else a row keyed
     // by the PR's own number.
-    const cli = ledger(t);
+    const cli = ledger(t, [row]);
     const key = row.split(" ")[0];
-    cli("row", key, row.slice(key.length + 1));
     assert.equal(cli("dispatch", String(keyed), `fix-pr-${keyed}`).ticket, key, "ledger.mjs memberRowIndex");
     for (const other of [481, 471].filter((n) => n !== own && row.includes(`PR#${n}`))) {
       assert.deepEqual(cli("dispatch", String(other), `fix-pr-${other}`), {

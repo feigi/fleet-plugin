@@ -16,7 +16,8 @@
 // `ports=`, `ci=`, `held-behind:#M`, `conflict-hold:#<pr>`, the
 // `review=`/`reviewed=` pair, the `→ PR#M` arrow) is not a member. The
 // review pair has a grammar of its own below, REVIEW and REVIEWED, which
-// `ledger.mjs row` checks a write against before it lands.
+// `ledger.mjs review` writes and `ledger.mjs row` checks a write against
+// before it lands.
 
 import { createHash } from "node:crypto";
 
@@ -226,11 +227,54 @@ function nextReviewer(launches, pr) {
   return null;
 }
 
-const OPEN_WAYS_OUT = "wait for its reviewed=, or, once Member-killed confirms its runner dead, settle it =failed in the same rewrite as the new launch";
+const OPEN_WAYS_OUT = "wait for its reviewed=, or, once Member-killed confirms its runner dead, settle it =failed in the same `ledger.mjs review` call as the new launch";
+
+/** Whether a word of a row is a review token — `review=…` or `reviewed=…`,
+ * parseable or not. `ledger.mjs review` writes these and nothing else. */
+export const isReviewToken = (word) => word.startsWith("review=") || word.startsWith("reviewed=");
 
 /**
- * Why `ledger.mjs row` must not write `line` over `oldLine` (null for a new
- * row), `before` and `after` the ledger's rows on either side of the write —
+ * The first review token `line` carries that `oldLine` (null for a new row)
+ * does not, duplicates counted, else undefined. `ledger.mjs row` writes none
+ * of its own — `ledger.mjs review` puts each on the PR's row, in write order —
+ * so a review token a row already holds is carried, never re-judged.
+ */
+export function addedReviewToken(oldLine, line) {
+  const words = (text) => (text === null ? [] : text.split(/\s+/).filter(isReviewToken));
+  return added(words(oldLine), words(line))[0];
+}
+
+// Every row key a ledger's rows map to each PR number under rowNums(), in
+// ledger order.
+function prRowKeys(rows) {
+  const out = new Map();
+  for (const text of rows) {
+    const { pr } = rowNums(text);
+    if (pr === null) continue;
+    if (!out.has(pr)) out.set(pr, []);
+    out.get(pr).push(text.split(/\s/)[0]);
+  }
+  return out;
+}
+
+/**
+ * `{pr, row}` for the first PR that maps to more than one row in `after` and
+ * did not in `before` — `row` the key of the PR's row as `before` holds it —
+ * else null. Added only: a split already on the ledger never blocks a write.
+ */
+export function newSplitRow(before, after) {
+  const was = prRowKeys(before);
+  for (const [pr, keys] of prRowKeys(after)) {
+    const held = was.get(pr) ?? [];
+    if (keys.length > 1 && held.length <= 1) return { pr, row: held[0] ?? keys[0] };
+  }
+  return null;
+}
+
+/**
+ * Why `ledger.mjs row` or `ledger.mjs review` must not write `line` over
+ * `oldLine` (null for a new row), `before` and `after` the ledger's rows on
+ * either side of the write —
  * or null when it may. Only a violation the write ADDS is a reason: each
  * rule's offending entries are listed before the write and after it, and the
  * after list must hold nothing the before list lacks, duplicates counted. Where

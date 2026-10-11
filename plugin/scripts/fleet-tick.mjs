@@ -672,7 +672,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
         const m = REVIEWED.exec(tok);
         if (!m && REVIEWED_RUNLESS.test(tok)) {
           throw new LedgerError(`${where}: '${tok}' names no review run — reviewed= is now <head>:<survived>/<refuted>/<unverified>:<run>, `
-            + "<run> the run-XXXXXXXX directory holding that review's review.json; rewrite the token with `ledger.mjs row`");
+            + "<run> the run-XXXXXXXX directory holding that review's review.json; drop the token with `ledger.mjs row` and record it again with `ledger.mjs review <pr>`");
         }
         if (!m) throw new LedgerError(`${where}: '${tok}' is not reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`);
         latestFinisher = null;

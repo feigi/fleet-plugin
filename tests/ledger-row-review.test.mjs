@@ -1,9 +1,16 @@
-// `ledger.mjs row` refuses a write that adds an inconsistent review record
-// to a PR's token stream (#2889, with #3047 folded in). The stream is every
-// row that maps to the PR — rowNums(), the tick's own mapping — in ledger
-// row order, read as it would be after the write. Only violations the write
-// ADDS are refused: a bad token already on the ledger and carried forward
-// never blocks a write.
+// A PR's review record lives on the PR's row (#2288): `ledger.mjs review`
+// is the only writer of `review=`/`reviewed=` tokens and appends them to the
+// PR's row — the ticket row once `settle impl-<N>=PR#M` has run, else `#M` —
+// so that row's token order is write order. It refuses a write that adds an
+// inconsistent review record to a PR's token stream (#2889, with #3047 folded
+// in). The stream is every row that maps to the PR — rowNums(), the tick's own
+// mapping — in ledger row order, read as it would be after the write. Only
+// violations the write ADDS are refused: a bad token already on the ledger and
+// carried forward never blocks a write.
+//
+// `ledger.mjs row` adds no review token (one the row holds is carried), never
+// drops an open launch, and refuses a write after which a PR maps to more than
+// one row when it did not before.
 //
 // Every call is its own process against one ledger file, as in
 // ledger-dispatch.test.mjs; a refusal is exit 2 with the ledger byte-identical.
@@ -16,6 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { rowWriteRefusal } from "../plugin/scripts/ledger-grammar.mjs";
+import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -26,7 +34,7 @@ function fixture(t, rows = null) {
   if (rows !== null) {
     writeFileSync(file, `# Fleet run ledger\n\n## Rows\n\n${rows.map((r) => `- ${r}\n`).join("")}\n## Filed\n\n## Ruled\n\n`);
   }
-  // PATH is an empty directory: `row` is local only and may reach no gh.
+  // PATH is an empty directory: `row` and `review` are local only and may reach no gh.
   const bin = join(dir, "bin");
   mkdirSync(bin);
   const env = { ...process.env, PATH: bin };
@@ -34,22 +42,26 @@ function fixture(t, rows = null) {
   delete env.GIT_WORK_TREE;
   const cli = (...args) => spawnSync(process.execPath, [SCRIPT, "--file", file, ...args], { encoding: "utf8", env, cwd: dir });
   const bytes = () => (existsSync(file) ? readFileSync(file, "utf8") : null);
-  const ok = (key, text) => {
-    const r = cli("row", key, text);
-    assert.equal(r.status, 0, `row ${key} ${text}: got exit ${r.status}\n${r.stderr}`);
+  const run = (...args) => {
+    const r = cli(...args);
+    assert.equal(r.status, 0, `${args.join(" ")}: got exit ${r.status}\n${r.stderr}`);
     return JSON.parse(r.stdout);
   };
-  const refused = (key, text, ...whys) => {
+  const refusedCall = (args, whys) => {
     const before = bytes();
-    const r = cli("row", key, text);
-    assert.equal(r.status, 2, `row ${key} ${text}: got exit ${r.status}\n${r.stderr}`);
-    for (const why of whys) assert.match(r.stderr, why, `row ${key} ${text}: stderr was ${r.stderr}`);
+    const r = cli(...args);
+    assert.equal(r.status, 2, `${args.join(" ")}: got exit ${r.status}\n${r.stderr}`);
+    for (const why of whys) assert.match(r.stderr, why, `${args.join(" ")}: stderr was ${r.stderr}`);
     assert.equal(r.stdout, "", "a refusal must not also emit a payload");
     assert.equal(bytes(), before, "a refusal must leave the ledger byte-identical");
     return r.stderr;
   };
-  const rows_ = () => JSON.parse(cli("read").stdout).rows;
-  return { ok, refused, rows: rows_ };
+  const ok = (key, text) => run("row", key, text);
+  const refused = (key, text, ...whys) => refusedCall(["row", key, text], whys);
+  const review = (pr, ...tokens) => run("review", pr, ...tokens);
+  const reviewRefused = (pr, tokens, ...whys) => refusedCall(["review", pr, ...tokens], whys);
+  const read = () => JSON.parse(cli("read").stdout);
+  return { run, ok, refused, review, reviewRefused, read, rows: () => read().rows };
 }
 
 const A = "review=member:review-pr-482";
@@ -62,89 +74,112 @@ const r3 = "reviewed=c0ffee1:0/1/2:run-ccccccc3";
 const IMPL = "impl-1=PR#482 → PR#482";
 const HALT = "finisher-pr-482=halted:past-pin";
 
+// ---- review: the PR's row ----
+
+test("review appends each token to the ticket row that maps the PR, in write order, and prints the row key", (t) => {
+  const { review, rows } = fixture(t, [`#1 ${IMPL}`]);
+  assert.deepEqual(review("482", A), { pr: 482, row: "#1", line: `#1 ${IMPL} · ${A}`, created: false });
+  assert.equal(review("#482", r1).row, "#1");
+  assert.deepEqual(rows(), [`#1 ${IMPL} · ${A} · ${r1}`]);
+});
+
+test("review on a PR no row maps creates its #M row, and the next call lands there", (t) => {
+  const { review, rows } = fixture(t);
+  assert.deepEqual(review("482", A, r1), { pr: 482, row: "#482", line: `#482 ${A} · ${r1}`, created: true });
+  review("482", "review=member:review-pr-482-b");
+  assert.deepEqual(rows(), [`#482 ${A} · ${r1} · review=member:review-pr-482-b`]);
+});
+
+test("review finds the PR's row by its PR before by its key: a ticket row settled to the PR wins over a later #M row", (t) => {
+  const { review, rows } = fixture(t, ["#1 impl-1", "#482 fix-pr-482", `#2 impl-2=PR#483`]);
+  assert.equal(review("482", A).row, "#482", "an implementer that has not settled to the PR does not map it");
+  assert.equal(review("483", "review=member:review-pr-483").row, "#2");
+  assert.deepEqual(rows(), ["#1 impl-1", `#482 fix-pr-482 · ${A}`, "#2 impl-2=PR#483 · review=member:review-pr-483"]);
+});
+
+test("review refuses any token that is not a review token, and a key that is not a PR number, writing nothing", (t) => {
+  const { reviewRefused, run } = fixture(t, [`#1 ${IMPL}`]);
+  reviewRefused("482", ["fix-pr-482=applied:b7adf86"], /'fix-pr-482=applied:b7adf86' is not a review token/);
+  reviewRefused("482", [A, "class=routine"], /'class=routine' is not a review token/);
+  reviewRefused("482", [`${A} · ${r1}`], /'·' is not a review token/);
+  reviewRefused("abc", [A], /'abc' is not a PR number/);
+  reviewRefused("--pr", [A], /unknown flag --pr/);
+  reviewRefused("482", [], /usage: ledger\.mjs review/);
+  // One token per argument or several in one argument, both accepted.
+  assert.equal(run("review", "482", `${A} ${r1}`).line, `#1 ${IMPL} · ${A} · ${r1}`);
+});
+
 // ---- rule: paired results ----
 
 test("the incident: a second reviewed= with no new launch is refused, naming the token and the PR", (t) => {
-  const { ok, refused } = fixture(t);
-  ok("1", `${IMPL} · ${A} ${r1}`);
-  refused("1", `${IMPL} · ${A} ${r1} fix-pr-482=applied:b7adf86 ${r2}`, /'reviewed=b7adf86:4\/5\/14:run-bbbbbbb2'/, /PR #482/, /paired results/);
+  const { reviewRefused } = fixture(t, [`#1 ${IMPL} · ${A} ${r1} fix-pr-482=applied:b7adf86`]);
+  reviewRefused("482", [r2], /'reviewed=b7adf86:4\/5\/14:run-bbbbbbb2'/, /PR #482/, /paired results/);
 });
 
 test("a reviewed= with no launch at all is refused", (t) => {
-  const { refused } = fixture(t);
-  refused("1", `${IMPL} · ${r1}`, /'reviewed=aaaaaaa/, /PR #482/);
+  const { reviewRefused } = fixture(t, [`#1 ${IMPL}`]);
+  reviewRefused("482", [r1], /'reviewed=aaaaaaa/, /PR #482/);
 });
 
 test("an ordinary launch, then its result, is accepted", (t) => {
-  const { ok } = fixture(t);
-  ok("1", `${IMPL} · ${A}`);
-  ok("1", `${IMPL} · ${A} ${r1}`);
+  const { review } = fixture(t, [`#1 ${IMPL}`]);
+  review("482", A);
+  review("482", r1);
 });
 
-test("reviewed= after a =failed launch with no later launch is refused; with a fallback launch in the same rewrite it is accepted", (t) => {
-  const { ok, refused } = fixture(t);
-  ok("1", `${IMPL} · ${A}`);
-  refused("1", `${IMPL} · ${A}=failed ${r1}`, /'reviewed=aaaaaaa/, /PR #482/);
-  ok("1", `${IMPL} · ${A}=failed ${B} ${r1}`);
+test("reviewed= after a =failed launch with no later launch is refused; with a fallback launch in the same call it is accepted", (t) => {
+  const { review, reviewRefused, rows } = fixture(t, [`#1 ${IMPL}`]);
+  review("482", A);
+  reviewRefused("482", [`${A}=failed`, r1], /'reviewed=aaaaaaa/, /PR #482/);
+  review("482", `${A}=failed`, B, r1);
+  assert.deepEqual(rows(), [`#1 ${IMPL} · ${A}=failed · ${B} · ${r1}`], "the open launch is settled where it stands");
 });
 
 test("a past-pin re-review under the next free letter is accepted", (t) => {
-  const { ok } = fixture(t);
-  ok("1", `${IMPL} · ${A} ${r1} fix-pr-482=applied:b7adf86 ${HALT}`);
-  ok("1", `${IMPL} · ${A} ${r1} fix-pr-482=applied:b7adf86 ${HALT} review=member:review-pr-482-b`);
-  ok("1", `${IMPL} · ${A} ${r1} fix-pr-482=applied:b7adf86 ${HALT} review=member:review-pr-482-b ${r2}`);
+  const { review } = fixture(t, [`#1 ${IMPL} · ${A} ${r1} fix-pr-482=applied:b7adf86 ${HALT}`]);
+  review("482", "review=member:review-pr-482-b");
+  review("482", r2);
 });
 
 test("the review-and-fix self-apply fallback, reviewed at the head it pushed, is accepted", (t) => {
-  const { ok } = fixture(t);
-  ok("1", `${IMPL} · ${A}`);
-  ok("1", `${IMPL} · ${A}=failed ${B}`);
-  ok("1", `${IMPL} · ${A}=failed ${B} reviewed=c0ffee1:0/1/2:run-ccccccc3`);
+  const { review } = fixture(t, [`#1 ${IMPL}`]);
+  review("482", A);
+  review("482", `${A}=failed`, B);
+  review("482", "reviewed=c0ffee1:0/1/2:run-ccccccc3");
 });
 
 test("a PR with a fallback and a past-pin re-review takes -b and then -c", (t) => {
-  const { ok } = fixture(t);
-  ok("1", `${IMPL} · ${A}=failed ${B} ${r1}`);
-  ok("1", `${IMPL} · ${A}=failed ${B} ${r1} ${HALT} ${C} ${r3}`);
-});
-
-test("launch and result on two rows of one PR: accepted when the launch's row comes first, refused when the result's does", (t) => {
-  const first = fixture(t, [`#482 PR#482 · ${A}`, "#1 impl-1=PR#482 → PR#482"]);
-  first.ok("1", `${IMPL} · ${r1}`);
-  const second = fixture(t, ["#1 impl-1=PR#482 → PR#482", `#482 PR#482 · ${A}`]);
-  second.refused("1", `${IMPL} · ${r1}`, /'reviewed=aaaaaaa/, /PR #482/);
+  const { review } = fixture(t, [`#1 ${IMPL} · ${A}=failed ${B} ${r1} ${HALT}`]);
+  review("482", C, r3);
 });
 
 // ---- rule: unique launches ----
 
 test("a past-pin re-review reusing the first reviewer's name is refused, naming the next free name", (t) => {
-  const { ok, refused } = fixture(t);
-  ok("1", `${IMPL} · ${A} ${r1} ${HALT}`);
-  refused("1", `${IMPL} · ${A} ${r1} ${HALT} ${A}`, /'review=member:review-pr-482'/, /PR #482/, /unique launches/, /review-pr-482-b\b/);
+  const { reviewRefused } = fixture(t, [`#1 ${IMPL} · ${A} ${r1} ${HALT}`]);
+  reviewRefused("482", [A], /'review=member:review-pr-482'/, /PR #482/, /unique launches/, /review-pr-482-b\b/);
 });
 
 test("the next free name skips every letter the PR's rows already carry, whatever the launch's kind", (t) => {
-  const { ok, refused } = fixture(t);
-  ok("1", `${IMPL} · ${A}=failed ${B} ${r1} ${HALT}`);
-  refused("1", `${IMPL} · ${A}=failed ${B} ${r1} ${HALT} ${B}`, /'review=fallback:review-pr-482-b'/, /review-pr-482-c\b/);
+  const { reviewRefused } = fixture(t, [`#1 ${IMPL} · ${A}=failed ${B} ${r1} ${HALT}`]);
+  reviewRefused("482", [B], /'review=fallback:review-pr-482-b'/, /review-pr-482-c\b/);
 });
 
 test("a runner name a launch of the other kind already used is refused as a repeated launch", (t) => {
-  const { ok, refused } = fixture(t);
-  ok("1", `${IMPL} · review=fallback:review-pr-482 ${r1}`);
-  refused("1", `${IMPL} · review=fallback:review-pr-482 ${r1} ${A}`, /'review=member:review-pr-482'/, /PR #482/, /unique launches/, /review-pr-482-b\b/);
+  const { reviewRefused } = fixture(t, [`#1 ${IMPL} · review=fallback:review-pr-482 ${r1}`]);
+  reviewRefused("482", [A], /'review=member:review-pr-482'/, /PR #482/, /unique launches/, /review-pr-482-b\b/);
 });
 
 test("a repeated workflow runId is refused as a repeated launch", (t) => {
-  const { ok, refused } = fixture(t);
-  ok("1", `${IMPL} · review=wf:r1 ${r1}`);
-  refused("1", `${IMPL} · review=wf:r1 ${r1} review=wf:r1`, /'review=wf:r1'/, /PR #482/);
+  const { reviewRefused } = fixture(t, [`#1 ${IMPL} · review=wf:r1 ${r1}`]);
+  reviewRefused("482", ["review=wf:r1"], /'review=wf:r1'/, /PR #482/);
 });
 
 test("a launch rewritten in place to =failed is not a repeat", (t) => {
-  const { ok } = fixture(t);
-  ok("1", `${IMPL} · ${A}`);
-  ok("1", `${IMPL} · ${A}=failed`);
+  const { review, rows } = fixture(t, [`#1 ${IMPL}`]);
+  review("482", A);
+  review("482", `${A}=failed`);
+  assert.deepEqual(rows(), [`#1 ${IMPL} · ${A}=failed`]);
 });
 
 // ---- rule: unique members per row ----
@@ -167,9 +202,10 @@ test("the same member twice on one line is refused, naming the member, whatever 
 // ---- rule: added only ----
 
 test("an already-invalid row carried forward is accepted, new tokens before its bad one included; a second copy is refused", (t) => {
-  const { ok, refused, rows } = fixture(t, [`#1 ${IMPL} · ${A} ${r1} ${r2}`]);
+  const { ok, refused, reviewRefused, rows } = fixture(t, [`#1 ${IMPL} · ${A} ${r1} ${r2}`]);
   ok("1", `${IMPL} · class=routine · ${A} ${r1} finisher-pr-482 ${r2}`);
   ok("1", `${r2} ${IMPL} · ${A} ${r1}`);
+  reviewRefused("482", [r2], /'reviewed=b7adf86/);
   refused("1", `${IMPL} · ${A} ${r1} ${r2} ${r2}`, /'reviewed=b7adf86/);
   assert.deepEqual(rows(), [`#1 ${r2} ${IMPL} · ${A} ${r1}`]);
 });
@@ -181,60 +217,54 @@ test("a repeated member already on the row is carried; a third copy is refused",
 });
 
 test("a repeated launch already on the PR is carried, and settling its repeat =failed in place is no new repeat", (t) => {
-  const { ok } = fixture(t, [`#1 ${IMPL} · ${A} ${r1} ${HALT} ${A}`]);
+  const { ok, review, rows } = fixture(t, [`#1 ${IMPL} · ${A} ${r1} ${HALT} ${A}`]);
   ok("1", `${IMPL} · class=routine · ${A} ${r1} ${HALT} ${A}`);
-  ok("1", `${IMPL} · ${A} ${r1} ${HALT} ${A}=failed`);
+  review("482", `${A}=failed`);
+  assert.deepEqual(rows(), [`#1 ${IMPL} · class=routine · ${A} ${r1} ${HALT} ${A}=failed`], "the open copy, the last one, is settled");
 });
 
 // ---- rule: one open launch per PR ----
 
-test("a second launch while one is open is refused on the same row, naming the PR, the open launch and both ways out", (t) => {
-  const { ok, refused } = fixture(t);
-  ok("1", `${IMPL} · ${A}`);
-  refused("1", `${IMPL} · ${A} ${B}`, /PR #482/, WHILE_A_OPEN, /one open launch/, /reviewed=/, /Member-killed/, /=failed in the same rewrite/);
+test("a second launch while one is open is refused, naming the PR, the open launch and both ways out", (t) => {
+  const { review, reviewRefused } = fixture(t, [`#1 ${IMPL}`]);
+  review("482", A);
+  reviewRefused("482", [B], /PR #482/, WHILE_A_OPEN, /one open launch/, /reviewed=/, /Member-killed/, /=failed in the same `ledger\.mjs review` call/);
 });
 
-test("a second launch while one is open is refused on another row that maps to the PR", (t) => {
-  const { ok, refused } = fixture(t);
-  ok("1", `${IMPL} · ${A}`);
-  refused("482", `PR#482 · ${B}`, /PR #482/, WHILE_A_OPEN);
-});
-
-test("a new launch written on a row BEFORE the open launch's row is still the offender, and the open launch the one the ledger held", (t) => {
-  const { refused } = fixture(t, ["#482 PR#482 · ci=1:1:success", `#1 ${IMPL} · ${A}`]);
-  refused("482", `PR#482 · ci=1:1:success ${B}`, WHILE_A_OPEN);
+test("a new launch landing on a row BEFORE the open launch's row is still the offender, and the open launch the one the ledger held", (t) => {
+  // A split already on disk: review finds the PR's row by its PR mention first.
+  const { reviewRefused } = fixture(t, ["#482 PR#482 · ci=1:1:success", `#1 ${IMPL} · ${A}`]);
+  reviewRefused("482", [B], WHILE_A_OPEN);
 });
 
 test("adding an already-failed launch after an open one is refused", (t) => {
-  const { ok, refused } = fixture(t);
-  ok("1", `${IMPL} · ${A}`);
-  refused("1", `${IMPL} · ${A} ${B}=failed`, WHILE_A_OPEN, /one open launch/);
+  const { review, reviewRefused } = fixture(t, [`#1 ${IMPL}`]);
+  review("482", A);
+  reviewRefused("482", [`${B}=failed`], WHILE_A_OPEN, /one open launch/);
 });
 
-test("settling an open launch =failed in place is accepted, alone and with a new launch in the same rewrite", (t) => {
-  const alone = fixture(t);
-  alone.ok("1", `${IMPL} · ${A}`);
-  alone.ok("1", `${IMPL} · ${A}=failed`);
-  const withNew = fixture(t);
-  withNew.ok("1", `${IMPL} · ${A}`);
-  withNew.ok("1", `${IMPL} · ${A}=failed ${B}`);
+test("settling an open launch =failed in place is accepted, alone and with a new launch in the same call", (t) => {
+  const alone = fixture(t, [`#1 ${IMPL} · ${A}`]);
+  assert.equal(alone.review("482", `${A}=failed`).line, `#1 ${IMPL} · ${A}=failed`);
+  const withNew = fixture(t, [`#1 ${IMPL} · ${A}`]);
+  assert.equal(withNew.review("482", `${A}=failed`, B).line, `#1 ${IMPL} · ${A}=failed · ${B}`);
 });
 
 test("a ledger already holding two open launches on one PR accepts a rewrite carrying them, and one settling either =failed", (t) => {
   const seed = [`#1 ${IMPL} · ${A} ${B}`];
   fixture(t, seed).ok("1", `${IMPL} · class=routine · ${A} ${B}`);
-  fixture(t, seed).ok("1", `${IMPL} · ${A}=failed ${B}`);
-  fixture(t, seed).ok("1", `${IMPL} · ${A} ${B}=failed`);
+  fixture(t, seed).review("482", `${A}=failed`);
+  fixture(t, seed).review("482", `${B}=failed`);
 });
 
 // ---- rule: an open launch is never removed ----
 
-test("dropping an open launch, or rewriting it to another identity, is refused", (t) => {
-  const { ok, refused } = fixture(t);
-  ok("1", `${IMPL} · ${A}`);
+test("row dropping an open launch is refused; review only appends or settles in place, so it never drops one", (t) => {
+  const { refused, review, rows } = fixture(t, [`#1 ${IMPL} · ${A}`]);
   refused("1", `${IMPL}`, /'review=member:review-pr-482'/, /PR #482/, /open launch/, /Member-killed/);
-  refused("1", `${IMPL} · ${B}`, /'review=member:review-pr-482'/, /PR #482/);
-  refused("1", `${IMPL} · review=wf:r9`, /'review=member:review-pr-482'/);
+  refused("1", `${IMPL} · class=routine`, /removes open launch 'review=member:review-pr-482'/);
+  review("482", r1);
+  assert.deepEqual(rows(), [`#1 ${IMPL} · ${A} · ${r1}`]);
 });
 
 test("an answered or failed launch may be dropped", (t) => {
@@ -260,11 +290,11 @@ test("a write through the CLI that leaves the open launch on another row of its 
 // ---- rule: unparseable review tokens ----
 
 test("an added unparseable review= or reviewed= is refused; one carried forward is accepted", (t) => {
-  const { ok, refused } = fixture(t, [`#1 ${IMPL} · review=garbage reviewed=nothead`]);
+  const { ok, reviewRefused } = fixture(t, [`#1 ${IMPL} · review=garbage reviewed=nothead`]);
   ok("1", `${IMPL} · class=routine · review=garbage reviewed=nothead`);
-  refused("1", `${IMPL} · review=garbage reviewed=nothead review=wf:`, /'review=wf:'/, /PR #482/);
-  refused("1", `${IMPL} · review=garbage reviewed=nothead review=garbage`, /'review=garbage'/);
-  refused("1", `${IMPL} · review=garbage reviewed=nothead reviewed=aaaaaaa:1/0/0`, /'reviewed=aaaaaaa:1\/0\/0'/);
+  reviewRefused("482", ["review=wf:"], /'review=wf:'/, /PR #482/, /unparseable review token/);
+  reviewRefused("482", ["review=garbage"], /'review=garbage'/);
+  reviewRefused("482", ["reviewed=aaaaaaa:1/0/0"], /'reviewed=aaaaaaa:1\/0\/0'/);
 });
 
 // ---- every PR's stream is judged, not just the first in ledger order ----
@@ -272,19 +302,18 @@ test("an added unparseable review= or reviewed= is refused; one carried forward 
 const OTHER = "impl-4=PR#4 → PR#4 · review=member:review-pr-4 reviewed=bbbbbbb:1/0/0:run-bbbbbbb4";
 
 test("a violation on a PR whose stream is not first in ledger order is refused", (t) => {
-  const { ok, refused } = fixture(t, [`#4 ${OTHER}`, `#1 ${IMPL} · ${A}`]);
+  const { refused, review, reviewRefused } = fixture(t, [`#4 ${OTHER}`, `#1 ${IMPL} · ${A}`]);
   // Added to the later stream: an unpaired result, a crowded launch, a dropped open launch.
-  refused("1", `${IMPL} · ${A} ${r1} ${r2}`, /PR #482/, /paired results/);
-  refused("1", `${IMPL} · ${A} ${B}`, /PR #482/, /one open launch/);
+  reviewRefused("482", [r1, r2], /PR #482/, /paired results/);
+  reviewRefused("482", [B], /PR #482/, /one open launch/);
   refused("1", `${IMPL}`, /PR #482/, /removes open launch/);
   // A write on that stream that adds nothing wrong is still accepted.
-  ok("1", `${IMPL} · ${A} ${r1}`);
+  review("482", r1);
 });
 
 test("a reviewed= whose head is under seven hex digits is refused as unparseable", (t) => {
-  const { ok, refused } = fixture(t);
-  ok("1", `${IMPL} · ${A}`);
-  refused("1", `${IMPL} · ${A} reviewed=abc:1/0/0:run-xxxxxxxx`, /'reviewed=abc:1\/0\/0:run-xxxxxxxx'/, /PR #482/);
+  const { reviewRefused } = fixture(t, [`#1 ${IMPL} · ${A}`]);
+  reviewRefused("482", ["reviewed=abc:1/0/0:run-xxxxxxxx"], /'reviewed=abc:1\/0\/0:run-xxxxxxxx'/, /PR #482/);
 });
 
 test("rows that map to no PR and carry no key are streams of their own, not one shared stream", () => {
@@ -295,11 +324,113 @@ test("rows that map to no PR and carry no key are streams of their own, not one 
   assert.match(rowWriteRefusal([first], [first, answer], null, answer), /answers no open launch/);
 });
 
+// ---- row: no review token of its own ----
+
+test("row refuses a write that adds a review token, naming it and review; one the row already holds is carried", (t) => {
+  const { ok, refused, rows } = fixture(t, [`#1 ${IMPL}`, `#2 impl-2=PR#483 → PR#483 · ${A} ${r1}`]);
+  refused("1", `${IMPL} · ${A}`, /row #1: adds review token 'review=member:review-pr-482'/, /ledger\.mjs review/);
+  refused("3", `impl-3 · ${r1}`, /adds review token 'reviewed=aaaaaaa/);
+  refused("1", `${IMPL} · review=garbage`, /adds review token 'review=garbage'/);
+  // Carried, with the rest of the line rewritten around them, never re-judged.
+  ok("2", `impl-2=PR#483 → PR#483 · class=routine · ${A} ${r1}`);
+  // Settling a launch =failed is a review write too, and a second copy is an addition.
+  refused("2", `impl-2=PR#483 → PR#483 · ${A}=failed ${r1}`, /adds review token 'review=member:review-pr-482=failed'/);
+  refused("2", `impl-2=PR#483 → PR#483 · ${A} ${r1} ${r1}`, /adds review token 'reviewed=aaaaaaa/);
+  assert.deepEqual(rows(), [`#1 ${IMPL}`, `#2 impl-2=PR#483 → PR#483 · class=routine · ${A} ${r1}`]);
+});
+
+// ---- row: one row per PR ----
+
+test("row refuses a write after which a PR maps to a second row, naming the PR's row", (t) => {
+  const { refused } = fixture(t, [`#1 ${IMPL}`, "#900 impl-900 · class=routine"]);
+  // `row <M>` creating `#M` for a PR a ticket row already maps.
+  refused("482", "PR#482 · ci=1:1:success", /row #482: PR #482 would map to more than one row/, /PR's row is #1\b/);
+  refused("482", "ci=1:1:success", /PR #482/, /#1\b/);
+  // A rewrite adding a `PR#M` mention to another row.
+  refused("900", "impl-900=PR#482 · class=routine", /row #900: PR #482/, /PR's row is #1\b/);
+  refused("900", "notes about PR#482", /PR #482/, /#1\b/);
+});
+
+test("row accepts the PR's own row, rows of other PRs, and a split already on disk", (t) => {
+  const { ok } = fixture(t, [`#1 ${IMPL}`, "#2 impl-2=PR#483 → PR#483", "#484 fix-pr-484", "#485 PR#485 · ci=1:1:success"]);
+  ok("1", `${IMPL} · class=routine`);
+  ok("486", "PR#486 · ci=1:1:success");
+  ok("3", "impl-3 · class=correction · tier=task-high");
+  // A row whose ticket settles to a PR keyed by its own `#M` row is settle's
+  // fold to converge, not `row`'s to refuse twice — and the ledger already
+  // splitting 485 carries.
+  const split = fixture(t, [`#5 impl-5=PR#485`, "#485 PR#485 · ci=1:1:success"]);
+  split.ok("485", "PR#485 · ci=2:1:success");
+  split.ok("5", "impl-5=PR#485 · class=routine");
+});
+
 // ---- rows that carry no review record are untouched ----
 
 test("rows with no review tokens, and rows of other PRs, are accepted as before", (t) => {
   const { ok } = fixture(t, [`#2 impl-2=PR#483 → PR#483 · ${A} ${r1} ${r2}`]);
   ok("1", `${IMPL} · class=routine`);
-  ok("1", `${IMPL} · ${A}`);
+  ok("1", `${IMPL} · fix-pr-482=applied:b7adf86`);
   ok("3", "impl-3 · class=correction · tier=task-high");
+});
+
+// ---- end to end: the writers in SKILL.md order leave PR M on one row ----
+
+const HEAD_REVIEWED = "abc1234";
+const HEAD_FIXED = "def5678";
+const PR = (head) => [{ number: 724, labels: [], closingIssuesReferences: [{ number: 658 }], headRefOid: `${head}${"0".repeat(33)}`, mergeable: "MERGEABLE" }];
+const tick = (read, head = HEAD_FIXED) => {
+  const l = read();
+  return deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null }, PR(head));
+};
+
+// dispatch → settle impl → review launch → review result with survivors →
+// dispatch fix-pr → settle fix-pr applied.
+function reviewedAndFixed(f) {
+  f.run("dispatch", "658", "impl-658");
+  f.run("settle", "impl-658", "PR#724");
+  assert.equal(f.review("724", "review=member:review-pr-724").row, "#658");
+  f.review("724", `reviewed=${HEAD_REVIEWED}:2/1/0:run-AAAAAAAA`);
+  f.run("dispatch", "724", "fix-pr-724");
+  f.run("settle", "fix-pr-724", `applied:${HEAD_FIXED}`);
+}
+
+test("#2288: a fix applied after the review it answers ends fixDue, and a newer review with survivors restores it", (t) => {
+  const f = fixture(t);
+  reviewedAndFixed(f);
+  assert.deepEqual(f.rows(), [
+    `#658 impl-658=PR#724 · review=member:review-pr-724 · reviewed=${HEAD_REVIEWED}:2/1/0:run-AAAAAAAA · fix-pr-724=applied:${HEAD_FIXED}`,
+  ], "PR 724 lives on one row, its tokens in write order");
+  assert.deepEqual(tick(f.read).fixDue, []);
+  f.review("724", "review=member:review-pr-724-b");
+  f.review("724", `reviewed=${HEAD_FIXED}:1/0/0:run-BBBBBBBB`);
+  assert.equal(f.rows().length, 1);
+  assert.deepEqual(tick(f.read).fixDue, [724]);
+});
+
+test("#2288: a finisher halted past-pin after the fix re-queues the review", (t) => {
+  const f = fixture(t);
+  reviewedAndFixed(f);
+  // The fix-applier's dispositions verdict, as dispositions-check.mjs records it.
+  const [row] = f.rows();
+  f.ok("658", `${row.slice("#658 ".length)} · dispositions-ok=fix-pr-724:run-AAAAAAAA`);
+  f.run("dispatch", "724", "finisher-pr-724");
+  f.run("settle", "finisher-pr-724", "halted:past-pin");
+  assert.equal(f.rows().length, 1);
+  assert.deepEqual(tick(f.read).reviewDue, [724]);
+  assert.deepEqual(tick(f.read, HEAD_REVIEWED).reviewDue, [], "a head the review read is not past the pin");
+});
+
+test("#2288: a review recorded before the implementer settles is folded into the ticket row, in write order", (t) => {
+  const f = fixture(t);
+  f.run("dispatch", "658", "impl-658");
+  assert.equal(f.review("724", "review=member:review-pr-724").row, "#724");
+  f.review("724", `reviewed=${HEAD_REVIEWED}:2/1/0:run-AAAAAAAA`);
+  f.run("settle", "impl-658", "PR#724");
+  assert.deepEqual(f.rows(), [
+    `#658 impl-658=PR#724 · review=member:review-pr-724 · reviewed=${HEAD_REVIEWED}:2/1/0:run-AAAAAAAA`,
+  ]);
+  f.run("dispatch", "724", "fix-pr-724");
+  f.run("settle", "fix-pr-724", `applied:${HEAD_FIXED}`);
+  assert.equal(f.rows().length, 1);
+  assert.deepEqual(tick(f.read).fixDue, []);
 });

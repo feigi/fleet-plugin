@@ -485,24 +485,25 @@ test("after an ancestor rotate a carried member's late result settles its own ca
     assert.equal(JSON.parse(s.stdout).changed, true, `${member}: the settle must land on the carried token`);
   }
   const reviewed = `${LIVE_ROWS[0]} · reviewed=abc1234:0/0/0:run-defghijk`;
-  const w = f.cli(["row", "3", reviewed.slice("#3 ".length)]);
+  const w = f.cli(["review", "5", "reviewed=abc1234:0/0/0:run-defghijk"]);
   assert.equal(w.status, 0, `the review result must answer the carried launch: ${w.stderr}`);
+  assert.equal(JSON.parse(w.stdout).row, "#3", "the result lands on the carried row, the PR's row");
   const after = read(f);
   assert.deepEqual(after.dispatched, [...SETTLED_DISPATCHED.slice(0, 3), "fix-pr-6=applied:abcdef1", "finisher-pr-8=labelled", "impl-12=PR#30", "merge-bot-1=done", "fix-pr-14=no-op"]);
   assert.equal(after.rows[0], reviewed);
 });
 
-test("after an ancestor rotate a carried reviewer is recorded dead with a row rewrite to =failed, and the next runner takes the next free name", (t) => {
+test("after an ancestor rotate a carried reviewer is recorded dead with review settling its launch =failed, and the next runner takes the next free name", (t) => {
   const f = fixture(t, { ledger: LIVE, controller: ANCESTOR });
   assert.equal(f.cli(["rotate"]).status, 0);
-  const failed = LIVE_ROWS[0].replace("review=member:review-pr-5", "review=member:review-pr-5=failed").slice("#3 ".length);
-  const w = f.cli(["row", "3", failed]);
+  const w = f.cli(["review", "5", "review=member:review-pr-5=failed"]);
   assert.equal(w.status, 0, w.stderr);
+  assert.equal(read(f).rows[0], LIVE_ROWS[0].replace("review=member:review-pr-5", "review=member:review-pr-5=failed"), "settled where it stands");
   assert.equal(f.cli(["settle", "review-pr-5", "killed"]).status, 2, "a reviewer is no member settle knows");
-  const reused = f.cli(["row", "3", `${failed} · review=member:review-pr-5`]);
+  const reused = f.cli(["review", "5", "review=member:review-pr-5"]);
   assert.equal(reused.status, 2, "the carried launch's name stays taken");
   assert.match(reused.stderr, /the next free reviewer name is review-pr-5-b/);
-  assert.equal(f.cli(["row", "3", `${failed} · review=member:review-pr-5-b`]).status, 0);
+  assert.equal(f.cli(["review", "5", "review=member:review-pr-5-b"]).status, 0);
 });
 
 test("after an ancestor rotate dispatch refuses a carried live member's name, and dispatch merge-bot names the next bot", (t) => {

@@ -551,8 +551,9 @@ phase, or in any later one, asks the maintainer which tickets to take.
      `impl-`, `fix-pr-`, `finisher-pr-` or `merge-bot-` member is settled:
      `ledger.mjs settle <name> killed`. A reviewer is no member `settle`
      takes — `settle review-pr-<n> killed` exits 2 — so its launch is
-     settled `=failed` where it stands: a `ledger.mjs row` rewrite of its row
-     that turns `review=member:<name>` into `review=member:<name>=failed`
+     settled `=failed` where it stands: a `ledger.mjs review <pr>
+     review=member:<name>=failed` call that turns `review=member:<name>` on
+     the PR's row into `review=member:<name>=failed`
      (`fallback:` and `wf:` launches alike), after which the tick owes the PR
      a review again under the next free reviewer name.
    - `prior: none` — no record proves the previous run dead (no record yet, or
@@ -1642,13 +1643,14 @@ one `fleet-tick.mjs` invocation, and you do what it prints. There are no hand-ru
 refill or dispatch edges left. Record first, because the tick reads the run off
 `.fleet/ledger.md` and nothing else of yours: a wake you have not written down is
 one it cannot see, and it names the same dispatch again. Every record goes
-through `ledger.mjs` (**Run ledger**) — `settle` for a member's outcome, `row`
-for a token on a ticket's line — never a hand edit.
+through `ledger.mjs` (**Run ledger**) — `settle` for a member's outcome,
+`review` for a review token on the PR's row, `row` for any other token on a
+ticket's line — never a hand edit.
 
 | Wake | Record, then tick |
 |---|---|
 | Implementer report | `verify-sha.sh`; `ledger.mjs settle impl-<N>=PR#<M>`, or `=bailed` and relabel by cause (**Implementer bails before implementing**, below) |
-| Review workflow notification / `review-pr-<n>` report | the result file is `<scratch>/pr<pr>/<run>/review.json`, `<run>` the review's own `run-XXXXXXXX` run root; `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` on the PR's row (**Reviewers**) |
+| Review workflow notification / `review-pr-<n>` report | the result file is `<scratch>/pr<pr>/<run>/review.json`, `<run>` the review's own `run-XXXXXXXX` run root; `ledger.mjs review <pr> reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` on the PR's row (**Reviewers**) |
 | Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; for a fix-applier that answered a review — not one that cleared a conflict hold, which has no review file — `~/.fleet/bin/fleet-run dispositions-check.mjs --member <that member> --scratch <scratch>`, from the checkout root: it judges that member's own record `<scratch>/dispositions-<member>.json` against the review file the PR's latest `reviewed=` names, `<scratch>/pr<M>/<run>/review.json`, writes `dispositions-ok=`, `dispositions-mismatch=`, `dispositions-escalate=` or `dispositions-unchecked=<member>:<run>` onto the PR's row itself, and exits 1 on a mismatch, an escalation or an unchecked, naming each violating or escalated entry's bucket and index, a violation its rule too, and each entry whose filed issue `gh` could not read — **Then dispatch a fix-applier** says what a mismatch asks of you, the gate paragraph below what an escalation or an unchecked does; copy the refutations it reversed — the record's `refuted` entries — to `ruled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled` as reported, even when its read-back lacks `ready-to-merge` — the tick's `DISPATCH finisher PR#<M>` catches that next. A **repair** finisher's (one sent on that line) read-back lacking it also gets `gh pr comment <M>` with both finishers' read-backs: the one-shot escalation, where halts comment. `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Finisher report (halted) | `ledger.mjs settle finisher-pr-<M>=halted:<cause>`; `gh pr comment <M>` with the finisher's halt report, cause and evidence; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line; then the per-cause rule (**Resolving a finisher halt**, below) |
@@ -1697,7 +1699,7 @@ owes beyond its row:
   whichever point the ticket fails them.
 - **A review result lands** → see the result file written (by you or by the
   runner — **Reviewers** says which, per harness) and record `reviewed=` off its
-  digest, then run the tick: a PR with survived or unverified findings prints as
+  digest with `ledger.mjs review <M>`, then run the tick: a PR with survived or unverified findings prints as
   `DISPATCH fix-pr PR#<M>`. No survived or unverified finding and nothing to file → skip the
   fix-applier and dispatch the **finisher** directly: no member will touch that
   PR, so no push is coming and nothing will wake you. A review that failed is
@@ -2223,15 +2225,20 @@ and each gets one review, once per PR:
 
 a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the five args `pr`, `branch`, `worktree`, `testCmd` and `scratch` — it loads `review-eval.mjs` through the Resolver (`~/.fleet/bin/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file into the review's own run root and reports its path and `reviewed=` token; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call. **`scratch` is the scratch root itself, the absolute path `scratch-root.mjs` prints, never the review side's `<scratch>/pr<N>` partition:** the review creates `pr<N>/` under it, so a `pr<N>` passed in nests every run root at `pr<N>/pr<N>/`, and the review refuses a `scratch` whose last component is `pr` plus digits before dispatching anything.
 
-Write the `review=` token with `ledger.mjs row`, which **replaces the whole
-line**, so carry every other field. The tick counts in-flight reviews off the
+Write the `review=` token with `ledger.mjs review <pr> <token>`, which appends
+it to the **PR's row** — the ticket row once `settle impl-<N>=PR#M` has run,
+else `#M`, created when neither exists — and prints that row's key. `review`
+is the only writer of `review=`/`reviewed=` tokens, so a PR's tokens sit on
+one row in the order you wrote them. The tick counts in-flight reviews off the
 ledger and nowhere else, so a review you launched and never recorded is one it
-names again. `row` reads the PR's review record across every row that maps to
-the PR, in ledger order, and refuses a write that adds a `reviewed=` with no
+names again. `review` reads the PR's review record across every row that maps
+to the PR, in ledger order, and refuses a write that adds a `reviewed=` with no
 open launch before it, a launch identity the PR already used, a second launch
-while one is open, the removal of an open launch, a member name twice on the
-line, or an unparseable `review=`/`reviewed=` (the ledger's token grammar,
-below). A bad token the ledger already holds is carried, never re-judged.
+while one is open, or an unparseable `review=`/`reviewed=` (the ledger's token
+grammar, below), or any token that is not a review token. `row` refuses a
+write that adds a review token (one the row holds is carried), drops an open
+launch, names a member twice on the line, or makes a PR map to a second row. A
+bad token the ledger already holds is carried, never re-judged.
 
 **It is the only path on which `selectDimensions` sizes the fan-out to the
 diff and the verify budget follows severity.** Hand-dispatched (the fallback
@@ -2296,7 +2303,7 @@ and reports the digest, the path and the `reviewed=` token naming that run.
 `jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/pr<pr>/<run>/review.json`
 is the whole of your read, and it is what you record: `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`,
 off `head`, `counts` and the run root's name — the runner's `ledger` field — on
-the PR's row. Every later path to the review is built from that token, before a
+the PR's row, with `ledger.mjs review <pr>`. Every later path to the review is built from that token, before a
 restart or after one: `<scratch>/pr<pr>/<run>/review.json`, `<run>` off the PR's
 latest `reviewed=`. Findings never enter your context —
 a result runs 26-61 KB, 7-15k tokens that used to land in yours and then again,
@@ -2370,9 +2377,11 @@ fall back — and whoever holds the review call is who retries:**
 The `review-pr-<pr#>` runner already retried once inside its cell and reports `failed` with both errors; hand-dispatch the fallback reviewer below under the next letter the PR's rows do not carry yet — `review-pr-<pr#>-b` after a first runner.
 Either way, settle the dead review by appending `=failed` to its `review=`
 token, then append `review=fallback:<that name>` after it, both in one
-`ledger.mjs row` rewrite — `row` refuses a new launch while the dead one still
-reads open, and the tick takes the last `review=` token on a row as the one in
-flight, so that order is what keeps the fallback counted against the cap. A
+`ledger.mjs review <pr> review=<dead launch>=failed review=fallback:<that name>`
+call — `review` settles the dead launch in place, and refuses a new launch
+while the dead one still reads open, and the tick takes the last `review=`
+token on a row as the one in flight, so that order is what keeps the fallback
+counted against the cap. A
 runner member that is killed rather than failed follows **Failure
 handling** (fresh name, inherited state stated).
 
@@ -3266,7 +3275,7 @@ decides the rest — two resolve automatically, every other one escalates:
 | Cause | Resolution |
 |---|---|
 | `live-editor` | **Automatic.** Ask the live member **by name** for its report, wait for it, then dispatch `finisher-pr-<M>-b` at the current head. If the head moved in the meantime, resolve it as `past-pin` instead. |
-| `past-pin` | **Automatic, through the tick: re-review.** The head carries commits no reviewer read. The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's tokens as any review's, its runner under the next letter the PR's rows do not carry yet (`review-pr-<M>-b`, or `-c` where a fallback already took `-b`) — `row` refuses a second `review-pr-<M>` and names the free one — and its result reaches a fresh finisher through the same gate. |
+| `past-pin` | **Automatic, through the tick: re-review.** The head carries commits no reviewer read. The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's tokens as any review's, with `ledger.mjs review <M>` onto the PR's row, its runner under the next letter the PR's rows do not carry yet (`review-pr-<M>-b`, or `-c` where a fallback already took `-b`) — `review` refuses a second `review-pr-<M>` and names the free one — and its result reaches a fresh finisher through the same gate. |
 | `rebase` | **Escalate** — comment and flag, nothing more. Read the report's `git cherry <pin> HEAD origin/main`: only `-` lines is a clean rebase, and a `+` line is a conflict resolution that changed content or a commit past the pin. No automatic rule until a live halt shows the case recurring. |
 | `unreadable`, `missing`, `absent`, `other` | **Escalate** — comment and flag, no automatic retry. |
 
@@ -3358,7 +3367,7 @@ is present and failing is not absent, and reading this line as absence-only
 leaves the likeliest failure with no sanctioned path at all. One named member
 per PR — `review-pr-<pr#>` while no reviewer on the PR has held that name,
 else the next letter its rows do not carry yet (`-b`, `-c`, …) — never its
-implementer, recorded as `review=fallback:<that name>` on the PR's row. It runs off your turn
+implementer, recorded as `review=fallback:<that name>` on the PR's row with `ledger.mjs review <pr>`. It runs off your turn
 like the review it replaces. Give it the PR number and tell it to read
 `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` — the resolved file
 path, not a slash invocation; command availability inside a member is not
@@ -3371,7 +3380,7 @@ findings as a review result file in a run root of its own, made with
 `mktemp -d "<scratch>/pr<pr>/run-XXXXXXXX"` (`<scratch>` the absolute path you
 named in its prompt), in the shape `review-and-fix.md`'s
 **The review result file** describes, and reports that file's path. On its
-report, record `reviewed=<head>:0/<refuted>/<deferred>:<run>`, `<run>` that run
+report, record `reviewed=<head>:0/<refuted>/<deferred>:<run>` with `ledger.mjs review <pr>`, `<run>` that run
 root's name, against the head it pushed — it applied
 its own survivors, so the zero is what tells the tick no fix-applier is owed for
 them; a nonzero `<deferred>` is still fix-due, as any review's unverified band is —
@@ -4045,7 +4054,7 @@ decides whether a replacement redoes or destroys work.
 
 One git-ignored `.fleet/ledger.md` per run, updated at **every** state change via
 `~/.fleet/bin/fleet-run ledger.mjs` subcommands (`row`, `filed`, `ruled`,
-`check`, `read`, `dispatch`, `settle`, `drain`, `rotate`). Your context is the least
+`check`, `read`, `dispatch`, `settle`, `review`, `drain`, `rotate`). Your context is the least
 durable thing in the run: it compacts, and a controller that loses the dispatch
 map or the filed list redoes finished work. Two duplicate tickets shipped in one
 run from exactly that.
@@ -4091,12 +4100,19 @@ live count from it, so nobody states one. Write neither by hand:
   halted:<cause>`, `<cause>` one of `live-editor | rebase | past-pin |
   unreadable | missing | absent | other` (**Resolving a finisher halt**);
   `merge-bot-n` = `done | killed`. A settled member stays settled. `settle
-  impl-N=PR#M` also folds a `#M` row a PR-bound dispatch made before the settle
-  into `#N`'s row, so one row names each PR from then on — but only when `#N`'s
-  row named no PR before this write (a second `PR#` on it would misattribute
-  the fold, or bury `#N`'s own fresher `review=` state under an older one) and
-  `#M`'s row is genuinely the fallback (a live or settled PR-bound token on it,
-  or nothing at all) rather than an unrelated row that merely shares the key.
+  impl-N=PR#M` also folds a `#M` row a PR-bound dispatch or a `review` made
+  before the settle into `#N`'s row, so the PR's row is the one row naming
+  each PR from then on — but only when `#N`'s row named no PR before this
+  write (a second `PR#` on it would misattribute the fold, or bury `#N`'s own
+  fresher `review=` state under an older one) and no implementer claims `#M`'s
+  row as its own.
+- **`ledger.mjs review <pr> <token>…`** — the only writer of `review=` and
+  `reviewed=` (below): appends each to the PR's row — the ticket row once
+  `settle impl-<N>=PR#M` has run, else `#M`, created when neither exists —
+  and prints `{pr, row, line, created}`, `row` the key written. A
+  `review=<launch>=failed` whose `review=<launch>` the row holds settles that
+  launch in place, alone or with the next launch in the same call. Any other
+  token is refused.
 - **`ledger.mjs drain "<reason>"`** — the one drain marker per run; supply
   stops, the review and merge sides keep going. It lives in this run's
   ledger, so the next run's rotation retires it with everything else.
@@ -4115,7 +4131,11 @@ live count from it, so nobody states one. Write neither by hand:
 `row` refuses a malformed member token anywhere in its text — one whose outcome
 is outside the vocabulary above, e.g. `merge-bot-1=dispatched` — at exit 2,
 naming the token and writing nothing, because every reader would take it as a
-permanent settle.
+permanent settle. It refuses a write that adds a `review=`/`reviewed=` token
+(one the row already holds is carried), and one after which a PR maps to more
+than one row when it did not before — `row <M>` creating `#M` for a PR a ticket
+row maps, or a rewrite adding a `PR#M` mention to another row — naming the
+PR's row.
 
 `→ PR#M` stays as the human-readable arrow; the tick reads only the `=`
 tokens. `tier=<cell>` marks an Exploration Pull's cell and `route=<REASON>` a router fallback (phase 2), and `excluded ·
@@ -4123,7 +4143,7 @@ behind-pr:#M | behind-issue:#M` is an Exclusion (phase 1) — a ticket row like
 any other, never a section of its own.
 
 A PR's review is not a member, so it carries its own pair of row tokens,
-written with `row` (**Reviewers**): `review=wf:<runId>` |
+written with `review` onto the PR's row (**Reviewers**): `review=wf:<runId>` |
 `review=member:<name>` | `review=fallback:<name>` at launch, `<name>` being
 `review-pr-<n>` for the PR's first runner and the next letter its rows do not
 carry yet (`review-pr-<n>-b`, `-c`, …) for every later one,
@@ -4143,20 +4163,20 @@ finisher's miss only after the last attempt a `label-off=` names, so without
 it your own removal reads as one. `row` refuses a `label-off=` naming no
 `finisher-pr` member that `## Dispatched` or some row already carries.
 
-`row` holds a PR's review record to these rules, read across every row that
+`review` holds a PR's review record to these rules, read across every row that
 maps to the PR — its settled `impl-<N>=PR#<M>` token, else its first `PR#`
 mention, else its key — in ledger order. Every `reviewed=` answers the nearest
 earlier launch that is neither answered nor `=failed`. A launch identity (a
 workflow's runId, or a runner's name whichever of member or fallback launched
 it, `=failed` aside) appears once. No launch appears
-while an earlier one is open — unanswered and not `=failed`. A launch open
-before the write is still on one of the PR's rows after it, `=failed` allowed.
-A member name appears once on the line, whatever its outcome. Every
-`review=`/`reviewed=` parses. A write that adds a violation is refused, exit 2,
-nothing written; one already on the ledger and carried forward is not. A
-second launch refused for an open one waits for that one's `reviewed=`, or —
-once the Member-killed row confirms its runner dead — settles it `=failed` in
-the same rewrite as the new launch.
+while an earlier one is open — unanswered and not `=failed`. Every
+`review=`/`reviewed=` parses. `row` holds the rest: a launch open before the
+write is still on one of the PR's rows after it, `=failed` allowed, and a
+member name appears once on the line, whatever its outcome. A write that adds
+a violation is refused, exit 2, nothing written; one already on the ledger and
+carried forward is not. A second launch refused for an open one waits for
+that one's `reviewed=`, or — once the Member-killed row confirms its runner
+dead — settles it `=failed` in the same `review` call as the new launch.
 
 Plus two append-only lists:
 
@@ -4171,7 +4191,7 @@ Plus two append-only lists:
 - **ruled** (`ledger.mjs ruled <pr> <decision>`) — PR + decision + one-line reason,
   so a replacement controller does not re-litigate a settled call.
 
-**Writer policy: the controller owns run state (`row`/`settle`/`dispatch`/`drain`/`ruled`);
+**Writer policy: the controller owns run state (`row`/`settle`/`dispatch`/`review`/`drain`/`ruled`);
 filers append filings with `filed`; all writes are serialized by `<file>.lock`.**
 Every write rewrites the whole file from what it read, so without the lock two
 concurrent writers are last-writer-wins — measured, 8 concurrent `filed` kept
