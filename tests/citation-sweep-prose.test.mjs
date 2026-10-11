@@ -61,17 +61,6 @@ import { stripComments } from "./support/strip-comments.mjs";
 // nothing while its needle stays satisfied by the comment's own words, so
 // runDispatchKeyNumFault reads comment-stripped ledger.mjs for both. Every
 // other construct needle is still never checked against its target.
-//
-// And two claims are held by what they say, not by how they were spelled:
-// ADR 0010's security release (#1928) and its count of releases in the 43
-// days the pin sat, which pin-drift.sh restates (#1970). Stale forms here once
-// guarded each by the wrong sentence's exact words. A false claim needs no
-// particular spelling to return, so securityReleaseFault reads which side of
-// the pin the ADR places v26.5.1 on, and windowReleaseCountFault how many
-// releases each file puts inside the 43 days. It is the table's stale-form
-// rule taken one step further, for a claim whose rewording is as likely as
-// its reversion — not a second convention to reach for when a spelling ban
-// would do.
 const REPO = join(import.meta.dirname, "..", "plugin");
 const read = (...segments) => readFileSync(join(REPO, ...segments), "utf8");
 
@@ -100,120 +89,14 @@ function adrFault(number, names) {
 const ADR_0010 = ["..", "docs", "adr", "0010-the-node-pin-stays-exact-and-a-bot-moves-it.md"];
 const PIN_DRIFT_SH = ["..", ".github", "scripts", "pin-drift.sh"];
 
-// #1928. ADR 0010's security evidence names its one security release past
-// `26.5.0`, v26.5.1, and #1874 corrected WHEN it landed: already out when #335
-// set the pin, not "since the pin". The spelling ban this replaced refused
-// only that sentence; "v26.5.1, which has since landed after the pin was set"
-// states the same false claim and passed every test here. So the claim is read
-// for what it says. Null when the evidence still says v26.5.1 predates the
-// pin, else the reason. Takes the text rather than reading the ADR itself, so
-// the tests below can hand it rewordings the ADR does not hold.
-//
-// The scope is each markdown block — list item or paragraph — naming
-// "security", never the document: the release-list bullet above it says
-// v26.5.1 was "already out when the pin was set" as well, and read file-wide
-// that sentence vouches for a security bullet claiming the opposite. Inside
-// the scope, each clause (cut at `, ; : ( ) — –` and sentence ends) is read
-// for what it places relative to the pin: the order word nearest before a
-// `pin…` mention decides — "already", "before", "predates", "prior to",
-// "earlier than", "ahead of" put the release before it; "since", "after",
-// "postdates", "later than" after it — and "in", "within", "inside" or
-// "during" the N days (or the window) places it after the pin too. A negation
-// in the same breath as that word flips the side, scanned back only to the
-// nearest `and`/`but`/`so`/`yet` or the clause start — so a `not` attached to
-// an earlier, unrelated verb ("does not affect us and landed after…") can't
-// reach across it, and `not…until` reads as naming the word after `until`,
-// not negating it ("didn't land until after" stays after). "none landed in
-// the 43 days after" is a before-the-pin claim; nearest, not first, is what
-// lets "since" be a conjunction — "since it predates the pin" is read at
-// "predates". Any after-the-pin clause reds, even beside a before-the-pin
-// one, and a scope with no before-the-pin clause reds.
-//
-// THE CEILING. It knows those words and nothing else. A true reword outside
-// them — "out by the time #335 pinned it", or the pin as the subject, "the pin
-// came after v26.5.1" — reds, the loud direction; a false claim outside them
-// passes only if the scope also keeps a clause that still reads before the
-// pin. It reads no date, so it holds the ADR to #1874's measurement, and it
-// cannot notice a double negation. Every block naming "security" is in scope,
-// so a later amendment that names it and places any release after the pin
-// reds too — a claim of the same shape, and worth the same re-read.
-const PIN_ORDER = new RegExp(
-  [
-    String.raw`\b(?<before>already|before|predat\w*|prior\s+to|earlier\s+than|ahead\s+of)\b`,
-    String.raw`\b(?<after>since|after|postdat\w*|later\s+than)\b`,
-    String.raw`\b(?<window>(?:in|within|inside|during)\s+(?:the|those|that|this|its)\s+(?:\d+[\s-]days?|(?:\d+[\s-]day\s+)?window))\b`,
-    // Only "pin", "pins", "pinned" or "pinning" — not every pin-prefixed
-    // word. A bare `pin\w*` also matched "pinpointed", letting an unrelated
-    // before-clause about "the pinpointed advisory" stand in for the pin.
-    String.raw`\b(?<pin>pin(?:s|ned|ning)?)\b`,
-  ].join("|"),
-  "gi",
-);
-// Bounds the negation scan below to the same breath as the order word: text
-// back to the nearest coordinating conjunction, not the whole clause.
-const CLAUSE_BREAK = /\b(?:and|but|so|yet)\b/gi;
-const NEGATION = /\b(?:not|no|none|never|nothing|neither|nor|cannot)\b|n['’]t\b/i;
-const OTHER_SIDE = { before: "after", after: "before" };
-
-// Where one clause places what it names relative to the pin, in order: the
-// reading the comment above spells out, one "before" or "after" per pin or
-// window mention. A pin mention no order word precedes places nothing.
-// windowReleaseCountFault, below, reads a release count's clause with it too.
-function* pinPlacements(clause) {
-  let side = null;
-  let last = 0;
-  for (const { groups, index, 0: token } of clause.matchAll(PIN_ORDER)) {
-    let window = clause.slice(last, index);
-    const breaks = [...window.matchAll(CLAUSE_BREAK)];
-    if (breaks.length) window = window.slice(breaks[breaks.length - 1].index + breaks[breaks.length - 1][0].length);
-    const negated = NEGATION.test(window) && !/\buntil\b/i.test(window);
-    last = index + token.length;
-    if (groups.before || groups.after) {
-      const said = groups.before ? "before" : "after";
-      side = negated ? OTHER_SIDE[said] : said;
-      continue;
-    }
-    // A pin mention takes the side of the order word nearest before it; a
-    // window is the 43 days after the pin, so landing in it is "after".
-    const placed = groups.pin ? side : negated ? "before" : "after";
-    side = null;
-    if (placed) yield placed;
-  }
-}
-
-function securityReleaseFault(adr) {
-  const scope = adr
-    .split(/\n(?=[ \t]*(?:[-*+]|\d+\.)[ \t])|\n[ \t]*\n/)
-    .map((block) => block.replace(/\s+/g, " "))
-    .filter((block) => /\bsecurity\b/i.test(block));
-  if (scope.length === 0) {
-    return "ADR 0010 no longer names a security release in its evidence — the claim #1874 corrected, that v26.5.1 predates the pin, is gone rather than kept current";
-  }
-  if (!scope.some((block) => /\bv?26\.5\.1\b/.test(block))) {
-    return "ADR 0010's security-release evidence no longer names v26.5.1, the one security release past `26.5.0` (#1874)";
-  }
-  let before = false;
-  for (const clause of scope.flatMap((block) => block.split(/[,;:()—–]|[.!?]\**\s/))) {
-    for (const placed of pinPlacements(clause)) {
-      if (placed === "after") {
-        return `ADR 0010's security-release evidence places it after the pin ("${clause.trim()}") — v26.5.1 was already out when #335 set the pin, so none landed in the 43 days after (#1874, #1928)`;
-      }
-      before = true;
-    }
-  }
-  return before
-    ? null
-    : "ADR 0010's security-release evidence no longer says v26.5.1 predates the pin — state it in that bullet's own words: already out when, before, predates, prior to, earlier than or ahead of the pin (#1874, #1928)";
-}
-
 // #1957. Where a sentence ends, for ADR 0010's drift-sentence row below: at
 // `.`, `!` or `?`, after any closing markup — `**`, `_`, a backtick, `)`, `]`,
-// a quote — then whitespace; or where a markdown block ends, as
-// securityReleaseFault splits them: a blank line, or the newline before a
-// `-`/`*`/`+` list item. The row's first cut, a bare `\.\s`, missed point 3's bold
-// heading ending `bumps.**`, so the heading's "minor and patch" read as the
-// next sentence's own scope, and an unscoped drift claim under a scoped
-// heading passed. A lone newline is no end: prose wraps mid-sentence. So a
+// a quote — then whitespace; or where a markdown block ends: a blank line,
+// or the newline before a `-`/`*`/`+` list item. The row's first cut, a bare
+// `\.\s`, missed point 3's bold heading ending `bumps.**`, so the heading's
+// "minor and patch" read as the next sentence's own scope, and an unscoped
+// drift claim under a scoped heading passed. A lone newline is no end: prose
+// wraps mid-sentence. So a
 // heading with no terminator and no blank line after it still lends the next
 // line its scope — telling that line end from a wrap takes parsing the
 // heading, which a sentence boundary cannot do.
@@ -235,10 +118,9 @@ function securityReleaseFault(adr) {
 // abbreviation, the silent direction above. The cost: a capitalized one
 // anywhere, a parenthetical "(Cf. …)" included, ends the sentence there. Keep
 // the group to literals: V8 (14.6) still folds a character class in any but
-// its first alternative. Every consumer below compiles it with `i`, as the
-// rows do: windowReleaseCountFault's split once carried no flag, so a capital
-// glued to an abbreviation and a tag name in capitals read there as they
-// read nowhere else (#2043).
+// its first alternative. Every consumer below compiles it with `i`: a
+// consumer that once split on it with no flag read a capital glued to an
+// abbreviation and a tag name in capitals as no other consumer did (#2043).
 //
 // #1981. The rest of the block ends and closing markup #1957 named only in
 // part. A blank line may be CRLF, or blank but for a gutter — a blockquote's
@@ -348,11 +230,10 @@ const UPDATE_TYPE = String.raw`(?<![a-z\d])(?:minors?|majors?|patch(?:es)?)(?![a
 // sentence's own words: "bounding drift" here, a merge verb in
 // UNSCOPED_MERGE_SENTENCE below. The same unscoped claim reworded — "keeping
 // drift bounded at about one month", "that caps drift at a month" — passes.
-// That ceiling is accepted, not missed: the table bans a stale FORM, and
-// reading a claim for what it says is kept, by the header's rule, for a claim
-// whose rewording is as likely as its reversion, as securityReleaseFault and
-// windowReleaseCountFault read theirs. A longer list of trigger words would
-// still be a spelling, only a longer one.
+// That ceiling is accepted, not missed: the table bans a stale FORM, and a
+// reader built to catch rewordings nobody has written is the paraphrase-proof
+// pin `.out-of-scope/paraphrase-proof-prose-pins.md` refuses. A longer list of
+// trigger words would still be a spelling, only a longer one.
 const UNSCOPED_DRIFT_SENTENCE = new RegExp(
   String.raw`(?:^|${SENTENCE_END})(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*\bbounding\s+drift\b(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*(?:${SENTENCE_END}|$)`,
   "i",
@@ -395,92 +276,6 @@ const UNSCOPED_MERGE_SENTENCE = new RegExp(
   String.raw`(?:^|${SENTENCE_END})(?=(?:(?!${SENTENCE_END})[^])*?\b(?:auto-?)?merg(?:e[sd]?|ing)\b)(?=(?:(?!${SENTENCE_END})[^])*?\b(?:checks?|CI|green)\b)(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*(?:${SENTENCE_END}|$)`,
   "i",
 );
-
-// #1970. How many releases landed in the 43 days the pin sat, which ADR 0010
-// and pin-drift.sh both state. #1874 corrected the count: 8 releases are past
-// `26.5.0`, three of them already out when #335 set the pin, so five landed
-// inside the 43 days. Until #1970 both files' rows banned only the old
-// spelling, "across 8 releases", and "43 days, with eight 26.x releases
-// landing inside them" states the same false count and passed. So the count
-// is read for what it says, as securityReleaseFault reads its claim. Null when
-// every count the 43 days owns is five, else the reason. Takes the text, so
-// the tests can hand it rewordings neither file holds.
-//
-// The scope is each sentence (SENTENCE_END, gutter stripped) naming the
-// window: "43 days", or since/after the pin or #335. A count there is a
-// number — digits, or "no" and "zero" through "twelve" — then "release(s)",
-// with only "more", "new", "further", "other", "Node" or a `26`/`26.x`
-// between; any other word between makes it a count of some kind of release —
-// "no security release" — not the window's total. The rest of the count's
-// clause, up to `, ; : ( ) — –` or a clause break (`and`, `but`, `so`,
-// `yet`), says which reference point it counts from: pinPlacements reading
-// it after the pin, or "in the 43 days", ties it to the window whatever
-// else the clause says; failing that, a before-the-pin reading, or "past"
-// (not the window's own "the past 43 days"), "behind", "beyond", or
-// since/after/from `26.5.0`, measures it from somewhere else — "Of those 8
-// releases past `26.5.0`", "ended the 43 days with 8 releases behind". A
-// count with none of those belongs to the window its sentence names. A bare
-// "not" (or "not all") directly before it denies the count rather than
-// claiming it.
-//
-// THE CEILING. It knows the window only as the words above, so "while the
-// pin sat unbumped, Node shipped 8 releases" names no window and passes; so
-// does a count spelled outside that vocabulary, "a dozen", or measured past
-// `26.5.0` in a clause that never says where it landed. A true reword that
-// counts from somewhere it does not know — "8 releases, three of them already
-// out" — reds, the loud direction. It checks the window's count alone: the 8
-// behind and the three before the pin are not held to their numbers. And,
-// unlike securityReleaseFault, a file stating no count at all passes: the
-// rows below carry no live needle for this count, for #1756's reason. It
-// also reads a count that never sits beside the word "release(s)" at all —
-// an anaphoric "eight of them", "eight of those", or "eight of Node's
-// releases" referring back to a "release(s)" named earlier in the same
-// sentence makes the identical false claim. The house style already reaches
-// for this shape: this function's own design note above reads "8 releases,
-// three of them already out", and ADR 0010, ADR 0002 and ADR 0008 each use
-// "of those"/"any of them" the same way (#2003).
-const COUNT_WORDS = { no: 0, zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
-const RELEASE_COUNT = new RegExp(
-  String.raw`(?<![\w.\x60-])(?<!\bnode\s+)(?<count>\d+|${Object.keys(COUNT_WORDS).join("|")})\s+(?:(?:more|new|further|other|node|of\s+(?:node['’]s|the|those|these)|\x60?v?26(?:\.x)?\x60?)\s+)*releases?\b`,
-  "gi",
-);
-// A count with no noun following it at all — "eight of them"/"eight of
-// those" — has no "release(s)" to match beside, so it needs its own shape:
-// the pronoun, plus RELEASE_NAMED reading back over the sentence so far for
-// the antecedent it stands in for. That scope is the sentence, not the
-// clause: #2003's own motivating example names "releases" ahead of an
-// em-dash and reads "8 of them" only after it, past the clause break the
-// window/pin scan elsewhere in this file stops at. The same width that lets
-// it catch that example lets an unrelated "N of them" later in a sentence
-// that also happens to name a release ride along — a false-alarm risk this
-// shape accepts rather than parses away.
-const ANAPHORIC_RELEASE_COUNT = new RegExp(
-  String.raw`(?<![\w.\x60-])(?<!\bnode\s+)(?<count>\d+|${Object.keys(COUNT_WORDS).join("|")})\s+of\s+(?:them|those)\b`,
-  "gi",
-);
-const RELEASE_NAMED = /\breleases?\b/i;
-const PIN_WINDOW = /\b43[\s-]days?\b|\b(?:since|after)\s+(?:#335\b|(?:the\s+|it\s+was\s+)?pin(?:s|ned|ning)?\b)/i;
-const MEASURED_ELSEWHERE = /\b(?:(?<!\bthe\s+)past|behind|beyond)\b|\b(?:since|after|from)\s+\x60?v?26\.5\.0\b/i;
-
-function windowReleaseCountFault(text) {
-  for (const sentence of text.split(new RegExp(SENTENCE_END, "i")).map(normalize)) {
-    if (!PIN_WINDOW.test(sentence)) continue;
-    const matches = [
-      ...sentence.matchAll(RELEASE_COUNT),
-      ...[...sentence.matchAll(ANAPHORIC_RELEASE_COUNT)].filter((match) => RELEASE_NAMED.test(sentence.slice(0, match.index))),
-    ].sort((a, b) => a.index - b.index);
-    for (const { groups, index, 0: phrase } of matches) {
-      if (/\bnot\s+(?:all\s+)?$/i.test(sentence.slice(0, index))) continue;
-      const rest = sentence.slice(index + phrase.length).split(new RegExp(String.raw`[,;:()—–]|${CLAUSE_BREAK.source}`, "i"))[0];
-      const placements = [...pinPlacements(rest)];
-      if (!placements.includes("after") && (placements.includes("before") || MEASURED_ELSEWHERE.test(rest))) continue;
-      const count = groups.count.toLowerCase();
-      if ((COUNT_WORDS[count] ?? Number(count)) === 5) continue;
-      return `counts ${phrase} in the 43 days the pin sat ("${sentence.trim()}") — five landed inside them, v26.8.0 through v26.10.0; the other three of the 8 past \`26.5.0\` were already out when #335 set the pin (#1874, #1970)`;
-    }
-  }
-  return null;
-}
 
 const FILES = [
   {
@@ -710,9 +505,9 @@ const FILES = [
   // what: 8 is the releases past `26.5.0`, three of them — the security
   // release among them — already out when the pin was set. Both were bans on
   // the old sentence's spelling, and the same false claim in other words
-  // passed each: securityReleaseFault reads the security release's for what it
-  // says since #1928, and windowReleaseCountFault the count's since #1970,
-  // both above the table and both tested below it.
+  // passed each. Neither claim is read for what it says: a reader built to
+  // catch rewordings nobody has written is the paraphrase-proof pin
+  // `.out-of-scope/paraphrase-proof-prose-pins.md` refuses.
   //
   // #1905. The release-age gate, stated in wall-clock days it does not give.
   // The Status line's #1753 amendment said a release "must be three days old"
@@ -781,8 +576,7 @@ const FILES = [
   },
   // #1874. pin-drift.sh restated ADR 0010's "43 days across 8 releases" as
   // the cost of a silent pin, where only five of the 8 landed inside the 43
-  // days. The count is corrected in both files, and windowReleaseCountFault
-  // keeps both from counting anything else in the 43 days (#1970).
+  // days. The count is corrected in both files.
   //
   // #1925. The bound's argument in pin-drift.sh, and the cadence note in
   // pin-drift.yml that leans on it, still described the Renovate schedule
@@ -937,219 +731,6 @@ test("an ADR pointer reds once its number stops naming exactly one file: renumbe
   assert.match(adrFault("0010", ["0009-supported-platforms-are-macos-linux-wsl.md", "0014-the-node-pin-stays-exact-and-a-bot-moves-it.md"]), /no docs\/adr\/0010-\*\.md/);
   assert.match(adrFault("0010", []), /no docs\/adr\/0010-\*\.md/);
   assert.match(adrFault("0010", ["0010-one-ruling.md", "0010-another-ruling.md"]), /2 files answer to ADR 0010/);
-});
-
-// #1928. The security bullet in a fixture ADR, between two neighbours that
-// stay fixed: the release-list bullet above names v26.5.1 as "already out when
-// the pin was set" too, so a claim the security bullet no longer makes has a
-// true one right beside it to lean on — the scope the fault reads is what the
-// last of these tests proves.
-const adrWith = (claim) =>
-  [
-    "- **The exact pin does not get bumped.** Three more past `26.5.0` — v26.5.1, v26.6.0",
-    "  and v26.7.0 — were already out when the pin was set.",
-    "- **Security was never the axis.** Of those 8 releases past `26.5.0`, exactly",
-    `  one was a security release — ${claim} — and node here runs \`node --check\` on`,
-    "  tracked files and this repo's own suite: no server, no untrusted input, no",
-    "  published artifact.",
-    "- **Reproducibility is the real axis.** This suite pins node's *own* behaviour.",
-  ].join("\n");
-
-test("ADR 0010's security evidence still says its lone security release predates the pin (#1928)", () => {
-  assert.equal(securityReleaseFault(read(...ADR_0010)), null);
-});
-
-test("a security-release claim reworded with v26.5.1 still before the pin is accepted (#1928)", () => {
-  for (const claim of [
-    "v26.5.1, already out when the pin was set, so none landed in the 43 days after",
-    "v26.5.1, which predates the pin",
-    "v26.5.1, shipped before #335 set the pin, and none has landed since",
-    "v26.5.1, and none has landed since the pin",
-    "v26.5.1, which did not land after the pin was set",
-    // "since" as the causal conjunction: the order word nearest the pin is
-    // "predates", so a first-word reading refuses the first of these. In the
-    // second, the "cannot" before "since" negates nothing about "predates".
-    "v26.5.1, which is harmless here since it predates the pin",
-    "v26.5.1, which cannot matter here since it predates the pin",
-  ]) {
-    assert.equal(securityReleaseFault(adrWith(claim)), null, claim);
-  }
-});
-
-test("the same false claim in other words — v26.5.1 landing after the pin — is refused (#1928)", () => {
-  for (const claim of [
-    // The rewording #1928 was filed on, which the spelling ban let through.
-    "v26.5.1, which has since landed after the pin was set",
-    "v26.5.1, which postdates the pin",
-    "v26.5.1, which landed in the 43 days after #335 pinned it",
-    "v26.5.1, which landed during the 43-day window",
-    "v26.5.1, which was not already out when the pin was set",
-  ]) {
-    assert.match(securityReleaseFault(adrWith(claim)), /places it after the pin/, claim);
-  }
-});
-
-test("a negation on an earlier, unrelated verb does not excuse an after-the-pin clause in the same breath (PR #1969 review)", () => {
-  // Caught in #1969's review: `NEGATION.test(clause.slice(last, index))` used
-  // to scan the WHOLE span back to the previous match, so a `not` attached to
-  // a different verb, on the other side of `and`, wrongly flipped "after" to
-  // "before" — accepting the exact false claim #1928 exists to refuse.
-  for (const claim of [
-    "v26.5.1, which does not affect us and landed after the pin was set",
-    "v26.5.1, which is not exploitable here and landed after the pin",
-  ]) {
-    assert.match(securityReleaseFault(adrWith(claim)), /places it after the pin/, claim);
-  }
-});
-
-test("`not … until` names the word after `until`, it does not negate it (PR #1969 review)", () => {
-  // "didn't land until after the pin" states the pin as when it DID land —
-  // the most natural English phrasing of the false claim, and the negation
-  // scan used to flip it to a before-the-pin claim regardless.
-  for (const claim of ["v26.5.1, which didn't land until after the pin was set", "v26.5.1, which wasn't out until after the pin"]) {
-    assert.match(securityReleaseFault(adrWith(claim)), /places it after the pin/, claim);
-  }
-});
-
-test("the pin token only matches \"pin\", \"pins\", \"pinned\" or \"pinning\" (PR #1969 review)", () => {
-  // A bare `pin\w*` also matched "pinpointed", so an unrelated before-clause
-  // about "the pinpointed advisory" stood in for the pin mention itself,
-  // leaving `before` true and excusing a same-clause "landed after #335" — a
-  // false claim in the function's own vocabulary — as accepted. Tightened,
-  // neither clause names the pin at all (the second names it only as
-  // "#335", outside vocabulary — the loud direction, per THE CEILING), so
-  // the claim is refused for naming no valid before-clause rather than
-  // silently accepted.
-  assert.match(
-    securityReleaseFault(adrWith("v26.5.1, which predates the pinpointed advisory, landed after #335")),
-    /no longer says v26\.5\.1 predates the pin/,
-  );
-});
-
-test("the sentence #1874 replaced is refused for what it says, not how it was spelled (#1928)", () => {
-  const before1874 = [
-    "- **Security was never the axis.** Exactly one security release (v26.5.1) landed",
-    "  in 26.x since the pin, and node here runs `node --check` on tracked files and",
-    "  this repo's own suite: no server, no untrusted input, no published artifact.",
-  ].join("\n");
-  assert.match(securityReleaseFault(before1874), /places it after the pin \("landed in 26\.x since the pin"\)/);
-});
-
-test("a before-the-pin clause does not excuse an after-the-pin one beside it (#1928)", () => {
-  // The negative half's own case: the positive half alone passes this.
-  assert.match(
-    securityReleaseFault(adrWith("v26.5.1, already out when the pin was set; it has since landed after the pin")),
-    /places it after the pin \("it has since landed after the pin"\)/,
-  );
-});
-
-test("the security bullet must place v26.5.1 before the pin itself — no neighbour vouches for it (#1928)", () => {
-  for (const claim of ["v26.5.1, which is outside this repo's threat model", "v26.5.1, not yet out when the pin was set"]) {
-    assert.match(securityReleaseFault(adrWith(claim)), /no longer says v26\.5\.1 predates the pin/, claim);
-  }
-  assert.match(securityReleaseFault(adrWith("v26.8.0, already out when the pin was set")), /no longer names v26\.5\.1/);
-  assert.match(securityReleaseFault(adrWith("v26.5.1").split("\n").slice(0, 2).join("\n")), /no longer names a security release/);
-});
-
-test("ADR 0010 and pin-drift.sh still count five releases in the 43 days the pin sat (#1970)", () => {
-  for (const path of [ADR_0010, PIN_DRIFT_SH]) {
-    assert.equal(windowReleaseCountFault(read(...path)), null, path.join("/"));
-  }
-});
-
-test("the sentences #1874 replaced are refused for what they count, not how they were spelled (#1970)", () => {
-  for (const text of [
-    "- **The exact pin does not get bumped.** `.nvmrc` sat at `26.5.0` for 43 days\n  across 8 releases (latest 26.x was v26.10.0, 2026-09-21). The cost #354\n",
-    "# removed the one passive heartbeat there was. The measured cost of that\n# silence is 43 days across 8 releases.\n#\n",
-  ]) {
-    assert.match(windowReleaseCountFault(text), /counts 8 releases in the 43 days/, text);
-  }
-});
-
-test("the same false count in other words — releases in the 43 days that are not five — is refused (#1970)", () => {
-  for (const text of [
-    "The measured cost of that silence is 43 days, with eight 26.x releases landing inside them.",
-    "`.nvmrc` sat at `26.5.0` for 43 days, while Node shipped 8 releases.",
-    "It sat for 43 days, during which Node shipped eight new releases.",
-    "It sat for 43 days and saw only one release.",
-    "Node shipped 8 releases since the pin was set.",
-    "Node shipped 8 releases after #335 pinned it.",
-    // "before" names the measurement here, not the pin: still inside the window.
-    "Eight releases landed in the 43 days before this measurement.",
-    "Of those 8 releases in the 43 days, exactly one was a security release.",
-    // A reference point beside the count does not excuse placing it in the window.
-    "Node shipped 8 releases past `26.5.0` in the 43 days.",
-    // A clause break (and/but/so/yet) after the count does not excuse it —
-    // the reference point has to sit in the count's own clause (#1970 review).
-    "`.nvmrc` sat at `26.5.0` for 43 days, from #335 setting it on 2026-08-11 to this measurement, while Node shipped eight 26.x releases and the pin fell behind.",
-    // "the past 43 days" is the window naming itself, not a reference point.
-    "Node shipped 8 releases in the past 43 days.",
-    // Wrapped across the `# ` gutter.
-    "# The measured cost of that silence is 43 days, with\n# eight releases landing inside them.\n",
-  ]) {
-    assert.match(windowReleaseCountFault(text), /releases? in the 43 days/, text);
-  }
-});
-
-test("a count measured from `26.5.0`, or placed before the pin, is not read as the 43 days' own (#1970)", () => {
-  for (const text of [
-    "It sat for 43 days, with five 26.x releases landing inside them.",
-    // "26" names the release line, not a count.
-    "It sat for 43 days while Node 26 releases kept shipping.",
-    "It sat for 43 days while Node shipped 5 releases.",
-    "Three more releases were already out when the pin was set, so it ended the 43 days eight releases behind.",
-    "Of those 8 releases past `26.5.0`, exactly one was a security release — v26.5.1, already out when the pin was set, so none landed in the 43 days after.",
-    "Of the 8 releases since `26.5.0`, five landed in the 43 days.",
-    "Not all 8 releases landed in the 43 days.",
-    // A sub-count of one kind of release is not the window's total.
-    "No security release landed in the 43 days.",
-    "Node shipped 8 releases past `26.5.0` and the pin never moved.",
-    // "the past 43 days" still names the window when the count is true.
-    "It sat for the past 43 days, with five 26.x releases landing inside them.",
-    // Naming no window, a count is not this claim.
-    "An unscheduled bot would mint roughly 8 releases a month.",
-  ]) {
-    assert.equal(windowReleaseCountFault(text), null, text);
-  }
-});
-
-test("an anaphoric release count is refused the same as one spelled beside the word (#2003)", () => {
-  for (const text of [
-    // #2003's own three motivating examples.
-    "It shipped releases inside the 43 days — 8 of them, all after the pin.",
-    "Node shipped releases in the 43 days; eight of them landed after the pin.",
-    "In the 43 days, eight of Node's releases landed after the pin.",
-    // "those" reaches the same pronoun shape as "them".
-    "Node shipped releases in the 43 days; eight of those landed after the pin.",
-  ]) {
-    assert.match(windowReleaseCountFault(text), /\bof (?:them|those)\b in the 43 days|releases? in the 43 days/, text);
-  }
-  // "of the releases" is the same literal noun as "releases" alone, with
-  // the anaphoric "the"/"those"/"these" sitting between the count and it.
-  for (const text of [
-    "In the 43 days, eight of the releases landed after the pin.",
-    "In the 43 days, eight of those releases landed after the pin.",
-    "In the 43 days, eight of these releases landed after the pin.",
-  ]) {
-    assert.match(windowReleaseCountFault(text), /releases? in the 43 days/, text);
-  }
-});
-
-test("a true anaphoric count stays green, and a count with no release to refer back to is not this claim (#2003)", () => {
-  for (const text of [
-    // The true count, anaphoric to "them" or to "Node's"/"the"/"those" releases.
-    "Node shipped releases in the 43 days, five of them landed after the pin.",
-    "In the 43 days, five of Node's releases landed after the pin.",
-    "Node shipped releases in the 43 days; five of those landed after the pin.",
-    "In the 43 days, five of those releases landed after the pin.",
-    // No "release(s)" is ever named for "them" to stand in for — an
-    // ordinary count of something else inside the window is not this claim.
-    // Eight, not five, so this case cannot pass merely because it shares the
-    // count the five-exemption above already treats as correct.
-    "Node shipped 8 issues in the 43 days; eight of them are still urgent.",
-  ]) {
-    assert.equal(windowReleaseCountFault(text), null, text);
-  }
 });
 
 test("an unscoped drift sentence is refused, whatever ends the sentence before it (#1957)", () => {
@@ -1509,36 +1090,6 @@ test("a capitalized abbreviation mid-sentence ends the sentence too — the cost
   assert.match("For minor bumps (Cf. the Status line) bounding drift at about one month.\n", UNSCOPED_DRIFT_SENTENCE);
 });
 
-// #2043: windowReleaseCountFault split on SENTENCE_END compiled with no flag,
-// unlike both rows, so every case-sensitive piece of it read differently
-// there: the letter-or-digit guard missed a capital, and a closing tag or
-// block tag spelled in capitals ended nothing. Each fixture below is two
-// sentences, the count in the first and the window in the second, so a
-// missed end joins them and the count reads as the window's own — the loud
-// direction.
-test("windowReleaseCountFault ends a sentence wherever both rows do, capitals included (#2043)", () => {
-  for (const text of [
-    // The cases #2043 was filed on: a capital glued to the abbreviation.
-    "Node shipped 8 releases for the Xvs. The pin sat 43 days.",
-    "Node shipped 8 releases for the Ee.g. The pin sat 43 days.",
-    "Node shipped 8 releases for the DEvs. The pin sat 43 days.",
-    // The same flag, on tag names: a closing tag and an HTML block in capitals.
-    "Node shipped **8 releases.</B> The pin sat 43 days.",
-    "Node shipped 8 releases\n<DIV>\nThe pin sat 43 days.",
-  ]) {
-    assert.equal(windowReleaseCountFault(text), null, text);
-  }
-  // The refuse side, in the same fixture shape: the abbreviation itself, and
-  // a tag that opens no block, join the two into one sentence.
-  for (const text of [
-    "Node shipped 8 releases for the vs. The pin sat 43 days.",
-    "Node shipped 8 releases for the e.g. The pin sat 43 days.",
-    "Node shipped 8 releases\n<SPAN>\nThe pin sat 43 days.",
-  ]) {
-    assert.match(windowReleaseCountFault(text), /counts 8 releases in the 43 days/, text);
-  }
-});
-
 test("SENTENCE_END's abbreviation guard reads a capital the same with or without `i` (#2043)", () => {
   // The guard names both cases itself, so no consumer's flag decides whether
   // "DEvs." is "vs.".
@@ -1639,7 +1190,7 @@ test("SENTENCE_END ends the same sentences behind a `][^…]` closer as before #
   }
 });
 
-test("both rows and the window count read a bare footnote marker as a sentence end (#2027)", () => {
+test("both rows read a bare footnote marker as a sentence end (#2027)", () => {
   // The next sentence's scope no longer reaches back across the marker.
   for (const text of [
     "Minor and patch bumps only.[1] Bounding drift at about one month.\n",
@@ -1649,11 +1200,11 @@ test("both rows and the window count read a bare footnote marker as a sentence e
     assert.match(text, UNSCOPED_DRIFT_SENTENCE, text);
   }
   // Only the simplest marker (`.[1]`, letter-preceded) reached
-  // UNSCOPED_MERGE_SENTENCE and windowReleaseCountFault below, once each —
-  // a consumer that quietly stopped splicing the current SENTENCE_END, or
-  // carried its own narrower guard, would still pass those two single rows
-  // and only red the direct-split test above. Every marker shape, and a
-  // backtick- or paren-preceded terminator, through both consumers here too.
+  // UNSCOPED_MERGE_SENTENCE below, once — a consumer that quietly stopped
+  // splicing the current SENTENCE_END, or carried its own narrower guard,
+  // would still pass that single row and only red the direct-split test
+  // above. Every marker shape, and a backtick-preceded terminator, through
+  // the merge row here too.
   for (const text of [
     "# Minor and patch bumps only.[1] The bump merges once CI goes green.\n",
     "# Minor and patch bumps only.[note] The bump merges once CI goes green.\n",
@@ -1661,15 +1212,6 @@ test("both rows and the window count read a bare footnote marker as a sentence e
     "# Minor and patch bumps `only`.[1] The bump merges once CI goes green.\n",
   ]) {
     assert.match(text, UNSCOPED_MERGE_SENTENCE, text);
-  }
-  // The count in the first sentence, the window in the second.
-  for (const text of [
-    "Node shipped 8 releases.[1] The pin sat 43 days.",
-    "Node shipped 8 releases.[note] The pin sat 43 days.",
-    "Node shipped 8 releases.[1][2] The pin sat 43 days.",
-    "Node shipped 8 releases (confirmed).[1] The pin sat 43 days.",
-  ]) {
-    assert.equal(windowReleaseCountFault(text), null, text);
   }
   // The accept side: a scoped sentence quoting a jq index wraps past it.
   assert.doesNotMatch("For minor and patch bumps, jq '.[] | .x' keeps bounding drift at about one month.\n", UNSCOPED_DRIFT_SENTENCE);
