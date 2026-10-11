@@ -189,8 +189,8 @@ test("liveOnLedger: unsettled members and open launches, once each, with the fir
     "#10 excluded · behind-pr:#6",
   ];
   const out = liveOnLedger(rows, ["impl-3=PR#5", "impl-4=PR#6", "fix-pr-6=no-op", "finisher-pr-6", "impl-9", "merge-bot-1=done", "merge-bot-2"]);
-  assert.deepEqual(out.rows, [0, 2, 3], "a launch, a live member beside a settled one, and a live impl beside a failed launch");
-  assert.deepEqual(out.dispatched, ["finisher-pr-6", "impl-9", "merge-bot-2"]);
+  assert.deepEqual(out.rows, [0, 1, 2, 3], "a launch, a live member beside a settled one, and a live impl beside a failed launch — and #4, which shares PR 6 with the live #6");
+  assert.deepEqual(out.dispatched, ["impl-3=PR#5", "impl-4=PR#6", "fix-pr-6=no-op", "finisher-pr-6", "impl-9", "merge-bot-2"]);
   assert.deepEqual(out.tokens, [
     { name: "review-pr-5", token: "review=member:review-pr-5", row: "#3" },
     { name: "finisher-pr-6", token: "finisher-pr-6", row: "#6" },
@@ -208,6 +208,29 @@ test("liveOnLedger: a PR-bound member's settled copy on another PR's row settles
 test("liveOnLedger: a launch answered on another of its PR's rows is not open", () => {
   const rows = ["#3 impl-3=PR#5 · review=member:review-pr-5", "#5 reviewed=abc1234:0/0/0:run-abcdefgh"];
   assert.deepEqual(liveOnLedger(rows, []), { rows: [], dispatched: [], tokens: [] });
+});
+
+test("liveOnLedger: a live row brings every other row of its PR's stream, and a carried ledger reads as live exactly what the whole one did", () => {
+  const rows = [
+    "#5 review=wf:r1 · reviewed=abc1234:2/0/0:run-abcdefgh",
+    "#3 impl-3=PR#5 → PR#5 · fix-pr-5",
+    "#20 impl-20=PR#21 → PR#21",
+  ];
+  const dispatched = ["impl-3=PR#5", "fix-pr-5", "impl-20=PR#21"];
+  const out = liveOnLedger(rows, dispatched);
+  assert.deepEqual(out.rows, [0, 1], "the PR's review record rides with its live row; another PR's settled row stays");
+  assert.deepEqual(out.dispatched, ["impl-3=PR#5", "fix-pr-5"]);
+  const kept = liveOnLedger(out.rows.map((i) => rows[i]), out.dispatched);
+  assert.deepEqual(kept.tokens, out.tokens);
+});
+
+test("liveOnLedger: a bare token beside its settled ## Dispatched copy carries that copy, so it does not read live again", () => {
+  const rows = ["#5 fix-pr-5 · review=member:review-pr-5"];
+  const out = liveOnLedger(rows, ["fix-pr-5=no-op", "merge-bot-1=done"]);
+  assert.deepEqual(out.tokens, [{ name: "review-pr-5", token: "review=member:review-pr-5", row: "#5" }]);
+  assert.deepEqual(out.dispatched, ["fix-pr-5=no-op"], "the settled entry of a member no carried row names stays behind");
+  const kept = liveOnLedger(out.rows.map((i) => rows[i]), out.dispatched);
+  assert.deepEqual(kept.tokens, out.tokens);
 });
 
 test("expectedDefinition refuses a tier= it cannot name one definition file by", () => {

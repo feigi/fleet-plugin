@@ -18,7 +18,8 @@
 // ledger-grammar.mjs's. Within a run `## Dispatched` gains an entry per
 // dispatch and never loses or reorders one — settling annotates an entry in
 // place — which is what lets `merge-bot-<n>` be numbered from it; a rotate
-// that carries a run's live entries forward carries no settled one.
+// that carries a run's live entries forward carries a settled one only for a
+// member a carried row names.
 //
 // Writer policy: the controller owns run
 // state (`row`/`settle`/`dispatch`/`drain`/`ruled`/`rotate`); filers append
@@ -1501,19 +1502,21 @@ function runCheck() {
 // One ledger per run. Phase 0 of every run moves the previous run's file aside
 // before anything reads it, so no exclusion, filing, ruling or drain marker
 // outlives the run that wrote it. The archive is the file itself —
-// hard-linked to its stamped name, then unlinked — so its bytes are
-// untouched, and the link refuses atomically when that name is already taken
-// rather than overwriting an older archive.
+// hard-linked to its stamped name, then unlinked or, when a successor is
+// carried, replaced by it — so its bytes are untouched, and the link refuses
+// atomically when that name is already taken rather than overwriting an older
+// archive.
 //
 // What follows depends on the verdict below. After a `dead` or `none` one
 // nothing is carried: the next write subcommand finds no file and starts the
 // empty skeleton, exactly as on a first run. After an `ancestor` one — this
 // session's own earlier run, whose members run inside the omp process that
 // is still this run's — rotate writes a new ledger holding what is still
-// live in the archive: every row carrying an unsettled member token or an
-// open review launch, whole, and every unsettled `## Dispatched` entry (see
-// carryOf()). The members those name may still be running, and dropping their
-// tokens would let the next tick dispatch onto their work and leave their
+// live in the archive: every row of a stream that holds an unsettled member
+// token or an open review launch, whole, and every unsettled `## Dispatched`
+// entry plus the settled ones naming a carried member (see carryOf()). The
+// members those name may still be running, and dropping their tokens would
+// let the next tick dispatch onto their work and leave their
 // results nothing to settle. Phase 0 then reconciles each carried token
 // against the session's job list; rotate cannot, since that list is the
 // controller's to read and no script's.
@@ -1590,6 +1593,7 @@ function runRotate() {
     }
     carry = carryOf(text);
   }
+  const carrying = carry.rows.length > 0 || carry.dispatched.length > 0;
   let archive = null;
   if (exists) {
     const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "");
@@ -1599,22 +1603,31 @@ function runRotate() {
     } catch (e) {
       die(e.code === "EEXIST" ? `refusing to rotate ${file}: ${archive} already exists` : `cannot rotate ${file} to ${archive}: ${e.message}`);
     }
-    try {
-      unlinkSync(file);
-    } catch (e) {
-      die(`archived ${file} as ${archive} but could not remove it: ${e.message} — remove it by hand before the next write`);
+    // Carrying, the new ledger is renamed over the old file by save(), so the
+    // file is never absent while its live tokens exist only in memory: a write
+    // that fails leaves the ledger where it was, the archive a second name for
+    // the same bytes, and a retry carries from the unmoved file. Carrying
+    // nothing, the file has no successor to wait for.
+    if (!carrying) {
+      try {
+        unlinkSync(file);
+      } catch (e) {
+        die(`archived ${file} as ${archive} but could not remove it: ${e.message} — remove it by hand before the next write`);
+      }
     }
-    console.error(`    rotated ${file} -> ${archive}`);
   } else {
     console.error(`    nothing to rotate: ${file} does not exist`);
   }
+  // Nothing to carry writes nothing, so the next write starts the skeleton
+  // exactly as after any other verdict.
+  if (carrying) {
+    save({ rows: carry.rows, dispatched: carry.dispatched, filed: [], ruled: [], drain: null });
+  }
+  if (archive !== null) console.error(`    rotated ${file} -> ${archive}`);
   for (const { line, why } of carry.skipped) {
     console.error(`    skipped unparseable line '${line}' — not carried: ${why}`);
   }
-  // Nothing to carry writes nothing, so the next write starts the skeleton
-  // exactly as after any other verdict.
-  if (carry.rows.length > 0 || carry.dispatched.length > 0) {
-    save({ rows: carry.rows, dispatched: carry.dispatched, filed: [], ruled: [], drain: null });
+  if (carrying) {
     console.error(`    carried ${carry.rows.length} row(s) and ${carry.dispatched.length} ## Dispatched entr${carry.dispatched.length === 1 ? "y" : "ies"} from ${archive}`);
   }
   // Re-read rather than reuse the read above: the heartbeat file has other
@@ -1639,10 +1652,12 @@ function runRotate() {
 // refuses whole — and a `## Dispatched` entry must be a well-formed member
 // token. Every skipped line is returned with its reason; a skipped row's
 // member can still be carried by its `## Dispatched` entry, which keeps its
-// name taken. Of what parses, liveOnLedger() picks what is still live; rows
-// keep their whole text, so a carried row's settled tokens, `reviewed=` and
-// every other record on it come along and the tick's per-PR reading of it is
-// unchanged.
+// name taken. Of what parses, liveOnLedger() picks what travels: every row
+// of a stream that holds a live token, whole, so a carried row's settled
+// tokens, `reviewed=` and every other record on it come along, and its
+// siblings' with them, and the tick's per-PR reading of the PR is unchanged;
+// and the `## Dispatched` entries, settled ones among them, that keep a
+// carried member from reading live again.
 function carryOf(text) {
   const skipped = [];
   const rows = sectionOf(text, ROWS).filter((r) => {

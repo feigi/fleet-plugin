@@ -298,12 +298,18 @@ export function rowWriteRefusal(before, after, oldLine, line) {
 }
 
 /**
- * What a ledger still holds live: `rows` the indices of every row carrying an
- * unsettled member token or an open review launch, `dispatched` every
- * `## Dispatched` entry whose member is unsettled, and `tokens` each of those
- * once, in ledger order, as `{name, token, row}` — the member or runner name
- * (a workflow launch's runId), the token as written, and the key of the first
- * row carrying it, null for a member `## Dispatched` alone names. A member is
+ * What a ledger still holds live, and what must travel with it. `tokens` is
+ * every unsettled member token and every open review launch, once each, in
+ * ledger order, as `{name, token, row}` — the member or runner name (a
+ * workflow launch's runId), the token as written, and the key of the first
+ * row carrying it, null for a member `## Dispatched` alone names. `rows` is
+ * the indices of every row of a stream — the rows one PR's record spans, or
+ * a row's own key when it names none — in which any row carries one of those
+ * tokens: a stream's rows are read together, so a live row carried without
+ * its siblings would lose the PR's review record and the settled copies that
+ * keep a bare token from reading live again. `dispatched` is every
+ * `## Dispatched` entry whose member is unsettled, plus every settled entry
+ * naming a member a kept row carries, for the same reason. A member is
  * settled by a settled copy in `## Dispatched` or on a row, except that a
  * PR-bound member's settled copy counts only on its own PR's row — the reading
  * fleet-tick.mjs folds liveness by, so nothing that fold calls live is left
@@ -336,21 +342,33 @@ export function liveOnLedger(rows, dispatched) {
     seen.add(token);
     out.tokens.push({ name, token, row });
   };
+  const streamOf = rows.map((text) => rowNums(text).pr ?? text.split(/\s/)[0]);
+  const liveStreams = new Set();
   rows.forEach((text, i) => {
     const key = text.split(/\s/)[0];
     const words = text.split(/\s+/).filter(Boolean);
     const members = memberTokens(text).filter(live);
-    const launches = (open.get(rowNums(text).pr ?? key) ?? []).filter((l) => words.includes(l.id));
+    const launches = (open.get(streamOf[i]) ?? []).filter((l) => words.includes(l.id));
     if (members.length === 0 && launches.length === 0) return;
-    out.rows.push(i);
+    liveStreams.add(streamOf[i]);
     for (const t of members) add(t.name, t.name, key);
     for (const l of launches) add(l.name, l.id, key);
   });
+  const carried = new Set();
+  rows.forEach((text, i) => {
+    if (!liveStreams.has(streamOf[i])) return;
+    out.rows.push(i);
+    for (const t of memberTokens(text)) if (t.error === null) carried.add(t.name);
+  });
   for (const e of dispatched) {
     const t = parseToken(e);
-    if (!live(t)) continue;
-    out.dispatched.push(e);
-    add(t.name, t.name, null);
+    if (t === null || t.error !== null) continue;
+    if (live(t)) {
+      out.dispatched.push(e);
+      add(t.name, t.name, null);
+    } else if (carried.has(t.name)) {
+      out.dispatched.push(e);
+    }
   }
   return out;
 }
@@ -400,8 +418,9 @@ export function unescapeText(s) {
 
 /** The name the next merge bot takes: 1 + the highest `merge-bot-<n>` in
  * `## Dispatched`, settled ones included — the highest, not the count, since
- * a rotate that carries a live bot forward carries none of its settled
- * predecessors. n restarts at 1 with every run that carries no bot. */
+ * a rotate that carries a live bot forward carries a settled predecessor
+ * only when a carried row names it. n restarts at 1 with every run that
+ * carries no bot. */
 export function nextMergeBot(dispatched) {
   const ns = dispatched.map(parseToken).filter((t) => t?.family === "merge-bot").map((t) => t.number);
   return `merge-bot-${Math.max(0, ...ns) + 1}`;

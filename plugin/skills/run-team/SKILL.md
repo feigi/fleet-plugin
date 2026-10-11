@@ -381,10 +381,12 @@ phase, or in any later one, asks the maintainer which tickets to take.
    a prior run left behind can no longer hold this run's tick: a dead
    controller took its in-process members with it. After `ancestor` — this
    session's own earlier run, whose members run inside the same omp process
-   and may still be live — it writes a new ledger holding every row that
-   carries an unsettled member token or an open `review=` launch, whole and
-   with every other token on it, plus every unsettled `## Dispatched` entry;
-   exclusions, `## Filed`, `## Ruled` and the drain marker are never carried.
+   and may still be live — it writes a new ledger holding every row of a
+   stream (one PR's rows) in which a row carries an unsettled member token
+   or an open `review=` launch, whole and with every other token on it, plus
+   every unsettled `## Dispatched` entry and the settled entry of each
+   member a carried row names; exclusions, `## Filed`, `## Ruled` and the
+   drain marker are never carried.
    A line it cannot parse is skipped with a warning naming it, and the
    rotation still succeeds. It prints `{rotated, archive, carried: {rows,
    dispatched}, skipped}`. The carried tokens keep the tick from dispatching

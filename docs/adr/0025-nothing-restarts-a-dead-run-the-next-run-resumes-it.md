@@ -10,14 +10,15 @@ reads `prior`, and a mark written since as the recorded controller's own and
 judges the record.
 Amended by #3053: on `ancestor`, rotation is no longer a clean slate. A
 same-session run's background members live inside the omp process that is
-still this run's, so rotation carries into the new ledger every row holding
-an unsettled member token or an open `review=` launch, whole, and every
-unsettled `## Dispatched` entry; a line it cannot parse is skipped with a
-warning and the rotation still succeeds. Decision 4's `ancestor` bullet
-changes accordingly: the stranded-claim step lists the carried tokens, and
-the controller reconciles each against the session's job list rather than
-leaving them to the Member-killed check. `dead` and `none` still carry
-nothing.
+still this run's, so rotation carries into the new ledger every row of a
+stream (one PR's rows) in which a row holds an unsettled member token or an
+open `review=` launch, whole, every unsettled `## Dispatched` entry, and the
+settled entry of each member a carried row names; a line it cannot parse is
+skipped with a warning and the rotation still succeeds. Decision 4's
+`ancestor` bullet changes accordingly: the stranded-claim step lists the
+carried tokens, and the controller reconciles each against the session's job
+list rather than leaving them to the Member-killed check. `dead` and `none`
+still carry nothing.
 
 ## Context
 

@@ -72,7 +72,10 @@ function fixture(t, { ledger = LEDGER, mark = null, controller = null, table = O
     assert.ok(Number.isInteger(at) && at <= Date.now() && at > Date.now() - 60_000, `controller.at ${at} is not this call's write time`);
     return rest;
   };
-  return { dir, file, cli, archives, state, raw, ctl };
+  // The same call under a file-size ceiling of `blocks` 512-byte blocks.
+  const cliCapped = (args, blocks) =>
+    spawnSync("/bin/sh", ["-c", `ulimit -f ${blocks}; exec "$0" "$@"`, process.execPath, SCRIPT, "--file", file, ...args], { encoding: "utf8", env, cwd: dir });
+  return { dir, file, cli, cliCapped, archives, state, raw, ctl };
 }
 
 // A live process that is no ancestor of the script: the foreign controller.
@@ -444,10 +447,12 @@ const LIVE = ledgerOf({
   rows: [SETTLED_ROWS[0], LIVE_ROWS[0], SETTLED_ROWS[1], LIVE_ROWS[1], LIVE_ROWS[2], SETTLED_ROWS[2], LIVE_ROWS[3], LIVE_ROWS[4], SETTLED_ROWS[3]],
   dispatched: [...SETTLED_DISPATCHED.slice(0, 3), "fix-pr-6", "finisher-pr-8", ...SETTLED_DISPATCHED.slice(3), "impl-12", "merge-bot-1", "fix-pr-14"],
 });
-const CARRIED = { rows: LIVE_ROWS, dispatched: LIVE_DISPATCHED };
+// The settled entries of the three implementers whose rows are carried ride
+// with them; the settled entries nothing carried names stay behind.
+const CARRIED = { rows: LIVE_ROWS, dispatched: [...SETTLED_DISPATCHED.slice(0, 3), ...LIVE_DISPATCHED] };
 const read = (f) => JSON.parse(f.cli(["read"]).stdout);
 
-test("an ancestor rotate archives the ledger as-is and carries every live row whole and every live ## Dispatched entry — nothing else", (t) => {
+test("an ancestor rotate archives the ledger as-is and carries every live row whole and every ## Dispatched entry a live member or a carried row names — nothing else", (t) => {
   const f = fixture(t, { ledger: LIVE, controller: ANCESTOR });
   const r = f.cli(["rotate"]);
   assert.equal(r.status, 0, r.stderr);
@@ -457,7 +462,7 @@ test("an ancestor rotate archives the ledger as-is and carries every live row wh
   assert.deepEqual(f.ctl(), { ...OURS, prior: "ancestor" });
   // The tokens riding on a carried row come with it: tier verdicts,
   // `reviewed=`, dispositions, conflict and merge holds.
-  assert.deepEqual(read(f), { rows: LIVE_ROWS, dispatched: LIVE_DISPATCHED, filed: [], ruled: [], drain: null });
+  assert.deepEqual(read(f), { rows: LIVE_ROWS, dispatched: CARRIED.dispatched, filed: [], ruled: [], drain: null });
 });
 
 test("dead and none carry nothing from the same ledger — unchanged", (t) => {
@@ -483,7 +488,7 @@ test("after an ancestor rotate a carried member's late result settles its own ca
   const w = f.cli(["row", "3", reviewed.slice("#3 ".length)]);
   assert.equal(w.status, 0, `the review result must answer the carried launch: ${w.stderr}`);
   const after = read(f);
-  assert.deepEqual(after.dispatched, ["fix-pr-6=applied:abcdef1", "finisher-pr-8=labelled", "impl-12=PR#30", "merge-bot-1=done", "fix-pr-14=no-op"]);
+  assert.deepEqual(after.dispatched, [...SETTLED_DISPATCHED.slice(0, 3), "fix-pr-6=applied:abcdef1", "finisher-pr-8=labelled", "impl-12=PR#30", "merge-bot-1=done", "fix-pr-14=no-op"]);
   assert.equal(after.rows[0], reviewed);
 });
 
@@ -561,7 +566,7 @@ test("two ancestor rotates in a row carry a still-live token twice", (t) => {
   const again = f.cli(["rotate"]);
   assert.equal(again.status, 0, again.stderr);
   assert.deepEqual(JSON.parse(again.stdout).carried, CARRIED);
-  assert.deepEqual(read(f), { rows: LIVE_ROWS, dispatched: LIVE_DISPATCHED, filed: [], ruled: [], drain: null });
+  assert.deepEqual(read(f), { rows: LIVE_ROWS, dispatched: CARRIED.dispatched, filed: [], ruled: [], drain: null });
 });
 
 test("an ancestor rotate of a ledger with nothing live leaves no ledger behind", (t) => {
@@ -571,4 +576,47 @@ test("an ancestor rotate of a ledger with nothing live leaves no ledger behind",
   assert.deepEqual(f.ctl(), { ...OURS, prior: "ancestor" });
   assert.deepEqual(JSON.parse(r.stdout), { rotated: true, archive: join(f.dir, f.archives()[0]), ...NOTHING_CARRIED });
   assert.equal(existsSync(f.file), false);
+});
+
+test("an ancestor rotate carries every row of a live PR's stream, and the settled entry of a carried member, so a bare token never reads live again", (t) => {
+  // The review record and the sibling rows of the PR ride with its live row;
+  // a carried bare `fix-pr-5` keeps the settled copy that held it settled.
+  const rows = [
+    "#5 review=wf:r1 · reviewed=abc1234:2/0/0:run-abcdefgh",
+    "#3 impl-3=PR#5 -> PR#5 · fix-pr-5 · review=member:review-pr-5",
+    "#20 impl-20=PR#21 -> PR#21",
+    "#22 impl-22 · fix-pr-22",
+  ];
+  const dispatched = ["impl-3=PR#5", "fix-pr-5=no-op", "impl-20=PR#21", "impl-22", "fix-pr-22"];
+  const f = fixture(t, { ledger: ledgerOf({ rows, dispatched }), controller: ANCESTOR });
+  const r = f.cli(["rotate"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).carried, {
+    rows: [rows[0], rows[1], rows[3]],
+    dispatched: ["impl-3=PR#5", "fix-pr-5=no-op", "impl-22", "fix-pr-22"],
+  });
+  assert.deepEqual(read(f).rows, [rows[0], rows[1], rows[3]]);
+  assert.deepEqual(read(f).dispatched, ["impl-3=PR#5", "fix-pr-5=no-op", "impl-22", "fix-pr-22"]);
+});
+
+test("an ancestor rotate whose write fails leaves the ledger where it was, and a retry carries the same live tokens", (t) => {
+  // A file-size ceiling the carried ledger exceeds but the archive link,
+  // which writes nothing, does not.
+  const live = Array.from({ length: 40 }, (_, i) => `#${100 + i} impl-${100 + i} · ${"padding ".repeat(8).trim()}`);
+  const dispatched = live.map((row) => row.split(" ")[1]);
+  const ledger = ledgerOf({ rows: live, dispatched });
+  const f = fixture(t, { ledger, controller: ANCESTOR });
+  const capped = f.cliCapped(["rotate"], 1);
+  assert.notEqual(capped.status, 0, "the ceiling must make the carried ledger's write fail");
+  assert.match(capped.stderr, /cannot write /);
+  assert.equal(readFileSync(f.file, "utf8"), ledger, "the ledger must still be there, whole");
+  assert.deepEqual(read(f).rows, live);
+  // The failed attempt's archive is moved off its stamped name so the retry,
+  // inside the same second, cannot collide with it.
+  const [first] = f.archives();
+  renameSync(join(f.dir, first), join(f.dir, "ledger.first.md"));
+  const again = f.cli(["rotate"]);
+  assert.equal(again.status, 0, again.stderr);
+  assert.deepEqual(JSON.parse(again.stdout).carried, { rows: live, dispatched });
+  assert.deepEqual(read(f).dispatched, dispatched);
 });

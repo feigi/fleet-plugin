@@ -23,7 +23,7 @@ test("the rotate step says what an ancestor rotate carries, and that dead and no
   const s = rotateStep();
   assert.match(s, phrase("After `dead` or `none` nothing is carried — no row, exclusion, `## Filed` or `## Ruled` entry"),
     "dead and none must still carry nothing");
-  assert.match(s, phrase("it writes a new ledger holding every row that carries an unsettled member token or an open `review=` launch, whole and with every other token on it, plus every unsettled `## Dispatched` entry"),
+  assert.match(s, phrase("it writes a new ledger holding every row of a stream (one PR's rows) in which a row carries an unsettled member token or an open `review=` launch, whole and with every other token on it, plus every unsettled `## Dispatched` entry and the settled entry of each member a carried row names"),
     "the ancestor carry must name what it carries");
   assert.match(s, phrase("A line it cannot parse is skipped with a warning naming it, and the rotation still succeeds."));
   assert.doesNotMatch(s, /Nothing is carried forward/, "the unconditional no-carry claim must be gone");
