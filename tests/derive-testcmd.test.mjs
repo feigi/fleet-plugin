@@ -299,6 +299,14 @@ test("a test command whose glob matches no tracked file refuses as a stale Recip
     // A quoted word between an option and the pattern is not that option's
     // value, so the pattern after it is probed like any other.
     ['node --test --grep "x" gone*', "gone*"],
+    // A glob glued to an operator is judged whether the word around it carries
+    // quoting or an expansion or not: the operator splits it, unless it sits
+    // inside the quoted region.
+    ["node --test gone/*.js&&$RUNNER", "gone/*.js"],
+    ['node --test gone/*.js;"x"', "gone/*.js"],
+    ["node --test gone/*.js||echo$X", "gone/*.js"],
+    ["node --test $X&&gone/*.js", "gone/*.js"],
+    ['node --test "x";gone/*.js', "gone/*.js"],
   ]) {
     cache(dir, recipe(head, { test: cmd }));
     const r = derive(dir);
@@ -309,7 +317,47 @@ test("a test command whose glob matches no tracked file refuses as a stale Recip
   }
 });
 
-// `set -f` keeps the scan from globbing the command against the CALLER's
+// The same refusal, after a word that is itself accepted: a pattern that does
+// match is no cover for the stale one beside it.
+test("a stale glob after a quoted or expansion-bearing word and an operator is refused", () => {
+  const { dir, head } = repo({ "tests/unit/a.test.mjs": "" });
+  for (const cmd of [
+    "node --test tests/unit/*.test.mjs 'x';gone/*.js",
+    "node --test tests/unit/*.test.mjs $X;gone/*.js",
+    "node --test tests/unit/*.test.mjs `x`;gone/*.js",
+    "node --test tests/unit/*.test.mjs {x};gone/*.js",
+    "node --test tests/unit/*.test.mjs ~;gone/*.js",
+  ]) {
+    cache(dir, recipe(head, { test: cmd }));
+    const r = derive(dir);
+    assert.equal(r.status, 1, `${cmd} must refuse: ${r.out}`);
+    assert.equal(r.out, "", `${cmd}: nothing may reach the caller`);
+    assert.ok(r.err.includes("its test command's pattern 'gone/*.js' matches no file tracked in"), `${cmd}: ${r.err}`);
+  }
+});
+
+// `sh -c` dies on a quote, a backtick or a `$(` that is never closed, so the
+// Recipe cannot run: stale, refused with its own words, not a pattern finding.
+test("a test command with an unbalanced quote, backtick or substitution refuses as a Recipe that cannot run", () => {
+  const { dir, head } = repo({ "tests/unit/a.test.mjs": "" });
+  for (const cmd of [
+    "node --test 'unbalanced gone/*.js",
+    'node --test "unbalanced tests/unit/*.test.mjs',
+    "node --test `unbalanced tests/unit/*.test.mjs",
+    "node --test $(unbalanced tests/unit/*.test.mjs",
+    "node --test ${unbalanced tests/unit/*.test.mjs",
+    "cd tests && node --test 'unbalanced",
+  ]) {
+    cache(dir, recipe(head, { test: cmd }));
+    const r = derive(dir);
+    assert.equal(r.status, 1, `${cmd} must refuse: ${r.out}`);
+    assert.equal(r.out, "", `${cmd}: nothing may reach the caller`);
+    assert.ok(r.err.includes("its test command leaves a quote, a backtick, a $( or a ${ open"), `${cmd}: ${r.err}`);
+    assert.match(r.err, NAMES_STEP, cmd);
+  }
+});
+
+// The scan reads the command as text and never globs it against the CALLER's
 // working directory: a file there that the stale pattern happens to match
 // would turn the pattern into its own name and slip past the check.
 test("a stale pattern is still refused when the caller's working directory holds a file it matches", () => {
@@ -398,17 +446,20 @@ test("a test command whose glob matches a tracked file, or that the tree cannot 
     "node --test tests/unit/*.test.mjs <gone/*.log",
     "node --test tests/unit/*.test.mjs >>gone/*.log",
     // The word before a redirection carries quoting or an expansion, so it is
-    // accepted whole; what follows it is still the redirection's target.
+    // opaque; what follows the redirection operator is still its target.
     "node --test tests/unit/*.test.mjs 'x'> gone/*.log",
     "node --test tests/unit/*.test.mjs $X> gone/*.log",
-    // A word carrying quoting or an expansion is not split at its operators,
-    // which may be quoted.
-    "node --test tests/unit/*.test.mjs 'x';gone/*.js",
-    "node --test tests/unit/*.test.mjs $X;gone/*.js",
-    "node --test tests/unit/*.test.mjs `x`;gone/*.js",
-    "node --test tests/unit/*.test.mjs {x};gone/*.js",
-    "node --test tests/unit/*.test.mjs ~;gone/*.js",
+    "node --test tests/unit/*.test.mjs >> gone/*.log 2>&1",
+    // A quoted region is opaque, operators and blanks in it included, so a
+    // glob inside it, or glued to it, is the program's to resolve.
+    "node --test tests/unit/*.test.mjs 'a;b'*.js",
+    "node --test tests/unit/*.test.mjs 'a b;gone/*.js'",
+    'node --test tests/unit/*.test.mjs "$@"',
     "node --test tests/unit/*.test.mjs x\\;gone/*.js",
+    // `cd` inside a quoted region is no `cd` piece of the command, and the
+    // glob after it in the same region is not probed from <repo> either.
+    "sh -c 'cd tests/unit && node --test *.test.mjs | cat'",
+    "sh -c 'cd tests/unit && node --test *.test.mjs | cat'; node --test tests/unit/*.test.mjs",
   ]) {
     cache(dir, recipe(head, { test: cmd }));
     const r = derive(dir);

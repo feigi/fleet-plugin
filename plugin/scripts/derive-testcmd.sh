@@ -368,16 +368,21 @@ esac
 # `tests 0` and exits 0. The suite moved and the Recipe did not, so it is
 # stale, refused like a binary that is gone. Tracked, not present on disk: a
 # fresh worktree holds only what is tracked. Only a word the shell globs as
-# written, from <repo>, can be settled without running the command. A word
-# carrying quoting or an expansion is accepted unprobed, whole, since an
-# operator in it may be quoted; any other word is split at each `;`, `&`, `|`,
-# `(` and `)`, operators to the shell whether or not whitespace surrounds
-# them, and each piece is judged as a word of its own. An option, an `=`
+# written, from <repo>, can be settled without running the command. The scan
+# reads the whole command one character at a time under one rule: a region
+# inside `'…'`, `"…"`, backticks, `$(…)` (nested parentheses counted) or
+# `${…}`, or a `\`-escaped byte, is opaque, and makes the piece it belongs to
+# quoted or expansion-bearing, accepted unprobed whole; so does a `{`, `}`, `~`
+# or bare `$`. An unquoted `;`, `&`, `|`, `(`, `)`, `<` or `>` is an operator
+# to the shell whether or not whitespace surrounds it, and an unquoted blank
+# ends a piece: each piece is judged as a word of its own. A quote, a backtick
+# or a `$(` or `${` still open at the end of the command is refused: `sh -c`
+# dies on it, so it is a Recipe that cannot run. An option, an `=`
 # assignment or value, a path outside <repo>, or the target of a `<` or `>`
 # redirection is the program's own to read, or selects no test, and is
-# accepted unprobed too. The scan stops at a `cd` or `pushd`, past which a
-# pattern no longer resolves from <repo>, and at a word that is not split but
-# ends in an operator then `cd` or `pushd`. A program's own directory option,
+# accepted unprobed too. The scan stops judging at a `cd` or `pushd` piece,
+# past which a pattern no longer resolves from <repo>.
+# A program's own directory option,
 # such as `git -C`, does not stop it: whether that option moves where the
 # program resolves a pattern is the program's to say, so a Recipe must quote a
 # pattern that a program resolves under its own directory option, as in
@@ -428,71 +433,129 @@ if [ "$field" = test ]; then
             esac
           done; exit 1; }
   }
-  set -f
-  prev=
-  # shellcheck disable=SC2086 # field splitting is the point: scanning every word
-  for word in $value; do
-    case $word in
-      *[\'\"\\\$\`\{\}\~]*)
-        case $word in *[\(\;\&\|]cd|*[\(\;\&\|]pushd) break ;; esac
-        prev=$word
-        continue ;;
+  # Judge one piece of the command: $1 is `P` (plain: the shell globs it as
+  # written) or `Q` (quoted or expansion-bearing: opaque), $2 the piece. Dies
+  # on a stale pattern; otherwise returns 0 having accepted the piece.
+  judge() {
+    [ -z "$stop" ] || return 0
+    piece=$2
+    was=$before
+    before=$piece
+    if [ -n "$redir" ]; then redir=; return 0; fi
+    [ "$1" = P ] || return 0
+    case $piece in
+      cd|pushd) stop=1; return 0 ;;
+      -*|*=*|/*|*..*) return 0 ;;
+      *'*'*|*'?'*|*'['*']'*) ;;
+      *) return 0 ;;
     esac
-    before=$prev
-    rest=$word
-    first=1
+    case $was in
+      -*=*) ;;
+      -*) case $piece in */*|*.*) ;; *) return 0 ;; esac ;;
+    esac
+    # The second pathspec is the directories the piece matches: the shell
+    # hands `tests/*` the directory `tests/unit`, which ls-files lists only as
+    # the prefix of the files beneath it.
+    tracked=$(git -C "$repo" ls-files -- ":(glob)$piece" ":(glob)${piece%/}/**" 2>"$errf") || {
+      listed=$?
+      die "cannot list the files tracked in $where to check its test command's pattern '$piece' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)"
+    }
+    [ -z "$tracked" ] || return 0
+    lead=${piece%%[*?[]*}
     while :; do
-      if [ -z "$first" ]; then
-        case $rest in
-          *[\;\&\|\(\)]*) rest=${rest#*[\;\&\|\(\)]} ;;
-          *) break ;;
-        esac
-        before=
-      fi
-      first=
-      piece=${rest%%[\;\&\|\(\)]*}
-      follows=$prev
-      prev=$piece
-      case $follows in *[\<\>]) continue ;; esac
-      case $piece in
-        cd|pushd) break 2 ;;
-        -*|*=*|/*|*..*|*[\<\>]*) continue ;;
-        *'*'*|*'?'*|*'['*']'*) ;;
-        *) continue ;;
-      esac
-      case $before in
-        -*=*) ;;
-        -*) case $piece in */*|*.*) ;; *) continue ;; esac ;;
-      esac
-      # The second pathspec is the directories the piece matches: the shell
-      # hands `tests/*` the directory `tests/unit`, which ls-files lists only as
-      # the prefix of the files beneath it.
-      tracked=$(git -C "$repo" ls-files -- ":(glob)$piece" ":(glob)${piece%/}/**" 2>"$errf") || {
-        listed=$?
-        die "cannot list the files tracked in $where to check its test command's pattern '$piece' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)"
-      }
-      [ -z "$tracked" ] || continue
-      lead=${piece%%[*?[]*}
-      while :; do
-        case $lead in */*) lead=${lead%/*} ;; *) break ;; esac
-        opq=0
-        opaque "$lead" || opq=$?
-        case $opq in
-          0) continue 2 ;;
-          1) ;;
-          *) die "cannot ask git whether '$lead' is a symlink or a submodule in $where, to check its test command's pattern '$piece' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)" ;;
-        esac
-      done
-      ignored=0
-      git -C "$repo" check-ignore -q --no-index -- "$piece" 2>"$errf" || ignored=$?
-      case $ignored in
-        0) ;;
-        1) die "the Recipe cache at $cache is invalid: its test command's pattern '$piece' matches no file tracked in $where — a Test entrypoint that selects no tests passes having run nothing, so the Recipe is stale, not a finding; a pattern that a program resolves under its own directory option, such as git -C, must be quoted; $derive" ;;
-        *) die "cannot ask git whether $repo ignores its test command's pattern '$piece' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
+      case $lead in */*) lead=${lead%/*} ;; *) break ;; esac
+      opq=0
+      opaque "$lead" || opq=$?
+      case $opq in
+        0) return 0 ;;
+        1) ;;
+        *) die "cannot ask git whether '$lead' is a symlink or a submodule in $where, to check its test command's pattern '$piece' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)" ;;
       esac
     done
+    ignored=0
+    git -C "$repo" check-ignore -q --no-index -- "$piece" 2>"$errf" || ignored=$?
+    case $ignored in
+      0) ;;
+      1) die "the Recipe cache at $cache is invalid: its test command's pattern '$piece' matches no file tracked in $where — a Test entrypoint that selects no tests passes having run nothing, so the Recipe is stale, not a finding; a pattern that a program resolves under its own directory option, such as git -C, must be quoted; $derive" ;;
+      *) die "cannot ask git whether $repo ignores its test command's pattern '$piece' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
+    esac
+  }
+  # End the piece being read, if there is one, and judge it.
+  flush() {
+    if [ -n "$scan_piece" ]; then judge "$scan_kind" "$scan_piece"; fi
+    scan_piece=
+    scan_kind=P
+  }
+  nl='
+'
+  before=
+  redir=
+  stop=
+  scan_rest=$value
+  scan_piece=
+  scan_kind=P
+  scan_sq=
+  scan_dq=
+  scan_bt=
+  scan_depth=0
+  scan_open=
+  scan_close=
+  while [ -n "$scan_rest" ]; do
+    scan_c=${scan_rest%"${scan_rest#?}"}
+    scan_rest=${scan_rest#?}
+    if [ -n "$scan_sq" ]; then
+      scan_piece=$scan_piece$scan_c
+      if [ "$scan_c" = "'" ]; then scan_sq=; fi
+      continue
+    fi
+    if [ "$scan_c" = '\' ]; then
+      scan_piece=$scan_piece$scan_c${scan_rest%"${scan_rest#?}"}
+      scan_rest=${scan_rest#?}
+      scan_kind=Q
+      continue
+    fi
+    if [ -n "$scan_dq" ]; then
+      scan_piece=$scan_piece$scan_c
+      if [ "$scan_c" = '"' ]; then scan_dq=; fi
+      continue
+    fi
+    if [ -n "$scan_bt" ]; then
+      scan_piece=$scan_piece$scan_c
+      if [ "$scan_c" = '`' ]; then scan_bt=; fi
+      continue
+    fi
+    if [ "$scan_depth" -gt 0 ]; then
+      scan_piece=$scan_piece$scan_c
+      case $scan_c in
+        "$scan_open") scan_depth=$((scan_depth + 1)) ;;
+        "$scan_close") scan_depth=$((scan_depth - 1)) ;;
+      esac
+      continue
+    fi
+    case $scan_c in
+      "'") scan_sq=1; scan_kind=Q; scan_piece=$scan_piece$scan_c ;;
+      '"') scan_dq=1; scan_kind=Q; scan_piece=$scan_piece$scan_c ;;
+      '`') scan_bt=1; scan_kind=Q; scan_piece=$scan_piece$scan_c ;;
+      '$')
+        scan_kind=Q
+        scan_piece=$scan_piece$scan_c
+        case $scan_rest in
+          '('*) scan_open='('; scan_close=')'; scan_depth=1; scan_piece="$scan_piece(" ; scan_rest=${scan_rest#?} ;;
+          '{'*) scan_open='{'; scan_close='}'; scan_depth=1; scan_piece="$scan_piece{" ; scan_rest=${scan_rest#?} ;;
+        esac ;;
+      '{'|'}'|'~') scan_kind=Q; scan_piece=$scan_piece$scan_c ;;
+      ' '|'	'|"$nl") flush ;;
+      ';'|'&'|'|'|'('|')'|'<'|'>')
+        flush
+        before=
+        case $scan_c in '<'|'>') redir=1 ;; esac ;;
+      *) scan_piece=$scan_piece$scan_c ;;
+    esac
   done
-  set +f
+  flush
+  if [ -n "$scan_sq$scan_dq$scan_bt" ] || [ "$scan_depth" -gt 0 ]; then
+    die "the Recipe cache at $cache is invalid: its test command leaves a quote, a backtick, a \$( or a \${ open, so sh cannot run it — a Recipe that cannot run is stale, not a finding; $derive"
+  fi
 fi
 
 printf '%s\n' "$value"
