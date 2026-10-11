@@ -283,23 +283,41 @@ test("the heartbeat block gives the command for a deliberate stop", () => {
 });
 
 test("the heartbeat block says whose stall a line is and names what is stranded", () => {
-  // Both halves are load-bearing and neither is obvious. Read as this run's
-  // own death, the first tick's line is a controller reporting itself dead —
-  // the shape that gets a healthy run abandoned. And a stall whose stranded
+  // Both halves are load-bearing and neither is obvious. A line judged off
+  // the previous run's marks is a controller reporting itself dead — the shape
+  // that gets a healthy run abandoned. And a stall whose stranded
   // tickets go unmentioned is read as an obituary rather than as work: those
   // tickets keep the claim label the candidate scan excludes, so nothing else
   // in the run will ever surface them again.
   const s = heartbeatBlock();
-  assert.match(s, phrase("Your first tick's line is the PREVIOUS run's stall, read off the `prior` rotate recorded; any later line is judged off the record itself"));
+  assert.match(s, phrase("A beat, tick or ledger write older than the controller record rotate wrote is the previous run's and counts for nothing."));
   assert.match(s, /in-progress/);
   assert.match(s, /EXCLUDES that label/);
   // One entry per wording fleet-state.mjs's stallReport() can lead with, each
   // saying what follows from it: a gone controller's claims come back, a live
   // one's do not, and no record decides nothing.
-  assert.match(s, phrase("`heartbeat STALLED, controller gone` — the run that stranded them is dead. Its claims without a PR come back through phase 0's stranded-claim step"));
+  assert.match(s, phrase("`heartbeat STALLED, controller gone` — the run that stranded them is dead. Its claims without a PR come back through the next run's phase 0 stranded-claim step"));
   assert.match(s, phrase("`heartbeat not beating, controller alive (pid N)`, or `(this session's earlier run)` — a controller that stopped beating and kept going. Nothing died, so nothing is resumed"));
   assert.match(s, phrase("`heartbeat STALLED` alone — no record says whether that controller lives. The line is detection only."));
+  // #2968: the previous run's recorded stop is its end, printed once.
+  assert.match(s, phrase("Your first tick may print `previous run stopped deliberately at <time> (<age> ago) — recorded reason: <reason>` instead: the stop the previous run recorded. It is that run's end, not a verdict on yours, and no later tick prints it."));
   // Nothing restarts a dead run — the next run's phase 0 resumes it. Prose
   // that left this open invites a controller to invent a restart.
   assert.match(s, /nothing restarts the run that stranded them/);
+});
+
+test("the --stop paragraph keeps the drain out of it and points at End of run (#2968)", () => {
+  // A stop recorded at the drain is read as the end of the run while the
+  // review and merge sides are still working it.
+  const p = paragraph(RUN_TEAM, "It holds nothing and returns at once.", "run-team --stop paragraph", "**A stall line names whose stall it is.**");
+  assert.doesNotMatch(p, /drain the run deliberately/);
+  assert.match(p, phrase("A drained run records it as the last step of **End of run** (above), never at the drain itself."));
+});
+
+test("End of run follows the drain bullet and ends with --stop (#2968)", () => {
+  const b = bullet(RUN_TEAM, "- **The run ends, or the maintainer says drain**", "- **Monitor: CI run completes**", "run-team drain bullet");
+  const steps = [...b.matchAll(/^\s+(\d+)\. /gm)].map((m) => Number(m[1]));
+  assert.deepEqual(steps, [1, 2, 3, 4, 5, 6], "End of run is one ordered list of six steps");
+  assert.match(b, phrase("3. Act on the review, fix-applier and merge rows until no PR is open. Once the run is draining with no open PR and no live implementer, the tick's last line is `ACTION: run over → fleet-heartbeat.mjs --stop \"<reason>\"`."));
+  assert.match(b, phrase("6. `~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop \"<reason>\"` — last, because every reader takes a recorded stop as the end of the run."));
 });

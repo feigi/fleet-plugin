@@ -441,9 +441,10 @@ phase, or in any later one, asks the maintainer which tickets to take.
    controller can stop beating and keep dispatching. A dead one, a pid
    reused by another process, or this session's own earlier run lets it
    rotate. With no record the heartbeat mark decides, as the only guard
-   there is: still beating refuses, naming the last beat and when it would
-   count as stalled; a stalled mark, a recorded `--stop`, or no mark at all
-   lets it rotate — and that fallback proves "not beating", never "dead", and
+   there is: still beating or acting refuses, naming the latest beat, tick or
+   ledger write and when it would count as stalled; a stalled mark, a
+   recorded `--stop`, or no beat at all lets it rotate — and that fallback
+   proves "not beating", never "dead", and
    guards a ledger only: with none to move the mark is not consulted. With no
    ledger the record is still judged, so a live recorded controller refuses
    even then. It also refuses, nothing moved, when the stamped archive name
@@ -454,7 +455,9 @@ phase, or in any later one, asks the maintainer which tickets to take.
    above it, its start time, as `prior` the verdict it reached on the
    record it found (`dead`, `ancestor` or `none`), and as `at` when it wrote
    it — or to remove the key when
-   no `omp` process is above it. That write can fail, and then exit 2 follows
+   no `omp` process is above it. The same write stamps `acted`, the time of
+   this run's latest ledger write, which every write subcommand stamps from
+   then on. That write can fail, and then exit 2 follows
    a move: `rotated <file> -> <archive>` on stderr, then the refusal that the
    record could not be written. Run the rotation before this run's own first
    tick or beat, either of which writes the mark the fallback reads. Older
@@ -1671,7 +1674,7 @@ ticket's line — never a hand edit.
 | Label seen (persistent Monitor) | nothing to record |
 | CI run terminal | `ci=<run-id>:<attempt>:<conclusion>` on the row; then the finisher gate (below) |
 | Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `reap.sh --apply`. (The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in this same pass, before reporting — a token the bot wrote in this pass, never one `reap.sh` writes.) |
-| Drain | `ledger.mjs drain "<reason>"`; release the claims (below); `settle impl-<N>=released` |
+| Drain | `ledger.mjs drain "<reason>"`; release the claims (below); `settle impl-<N>=released`; then the rest of **End of run** (below), `--stop` last |
 | Heartbeat | nothing to record |
 
 Then run the tick, act on every line it prints, and arm the beat. What a wake
@@ -1739,6 +1742,19 @@ owes beyond its row:
   claims. The marker is on disk, so the tick holds the implementer row at
   `HOLD (draining)` from then on — for a replacement controller too — and keeps
   the review, fix-applier and merge rows firing until the open PRs merge.
+  The drain starts the end of the run; it does not end it. **End of run**, in
+  this order:
+  1. `ledger.mjs drain "<reason>"`.
+  2. Release every claim that never became a PR, settling each
+     `impl-<N>=released`.
+  3. Act on the review, fix-applier and merge rows until no PR is open. Once
+     the run is draining with no open PR and no live implementer, the tick's
+     last line is `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`.
+  4. Scrape the run's member facts, append every `tier-outcomes.mjs` row, and
+     run `metrics-refresh.mjs` (above).
+  5. Commit the metrics files and open their PR (above).
+  6. `~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop "<reason>"` — last,
+     because every reader takes a recorded stop as the end of the run.
 - **Monitor: CI run completes** → bind it (`ci-state.mjs --pr <N>`) and **record
   it as `ci=<run-id>:<attempt>:<conclusion>`, not just "CI green"** — in the
   ticket's ledger row, which outlives your context. `row` **replaces the whole
@@ -1997,33 +2013,40 @@ than being detected, and nothing else can write the reason afterwards:
 ~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop "budget exhausted"
 ```
 
-It holds nothing and returns at once. Use it when the budget goes, when you
-can see the context ceiling coming, or when you drain the run deliberately.
+It holds nothing and returns at once. Use it when the budget goes, or when
+you can see the context ceiling coming. A drained run records it as the last
+step of **End of run** (above), never at the drain itself.
 Skipping it is not fatal — the next reader still reports the stop, it just
 reports that the beat stopped *without a recorded reason*, which is all it can
 honestly say about a death that named nothing.
 
 **A stall line names whose stall it is.** `fleet-tick`
-prints it before its own rows when the mark it finds is overdue against the
-interval that mark recorded, and the cockpit shows the same line while it is
-up. It names when the beat was last seen, how overdue that is, how many
+prints it before its own rows when this run has gone quiet: its beat overdue
+against the interval it recorded with no tick or ledger write inside the
+40-minute window either — or, with no beat yet, its latest tick, ledger write
+or controller record past that window. A beat, tick or ledger write older than
+the controller record rotate wrote is the previous run's and counts for
+nothing. The cockpit shows the same line while it is up. It names when this
+run was last seen, how overdue that is, how many
 tickets are still claimed and in flight, and how much supply the last read found
 — because the claimed ones keep the `in-progress` label, the candidate scan
 EXCLUDES that label, and those tickets are therefore invisible to your own
 shortlist and to the maintainer's. Its opening words come off the controller
-record. Your first tick's line is the PREVIOUS run's stall, read off the
-`prior` rotate recorded; any later line is judged off the record itself:
+record:
 
 - `heartbeat STALLED, controller gone` — the run that stranded them is dead.
-  Its claims without a PR come back through phase 0's stranded-claim step —
-  this run's on your first tick, the next run's otherwise — and its open PRs
-  through the fold-in.
+  Its claims without a PR come back through the next run's phase 0
+  stranded-claim step, and its open PRs through the fold-in.
 - `heartbeat not beating, controller alive (pid N)`, or `(this session's
   earlier run)` — a controller that stopped beating and kept going. Nothing
-  died, so nothing is resumed; on a later tick of your own, that controller
-  is you, and the fix is to beat.
+  died, so nothing is resumed; when that controller is you, the fix is to
+  tick on every wake and beat when there is nothing to do.
 - `heartbeat STALLED` alone — no record says whether that controller lives.
   The line is detection only.
+
+Your first tick may print `previous run stopped deliberately at <time> (<age>
+ago) — recorded reason: <reason>` instead: the stop the previous run recorded.
+It is that run's end, not a verdict on yours, and no later tick prints it.
 
 Read the line and carry on; nothing in the fleet releases, relabels or
 reaps the stranded tickets for you, and nothing restarts the run that stranded them.
