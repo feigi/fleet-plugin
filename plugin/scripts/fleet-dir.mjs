@@ -44,6 +44,10 @@ const DEFAULT_GIT_TIMEOUT_MS = 10_000;
 // keeping the END — the part of a child's stderr that says why it stopped.
 const CAUSE_MAX = 500;
 
+// What `git rev-parse --show-toplevel` says (exit 128, under LC_ALL=C) outside
+// a work tree: no repository at all, or one with no work tree to name.
+const NOT_A_WORK_TREE = /not a git repository|must be run in a work tree/;
+
 export class FleetDirUnresolvable extends Error {
   constructor(message) {
     super(message);
@@ -152,13 +156,20 @@ function nearestExisting(path) {
  */
 export function scratchRootRefusal(root, { timeoutMs } = {}) {
   const cwd = nearestExisting(root);
-  const opts = { cwd, encoding: "utf8", timeout: timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS, env: gitEnv() };
+  // LC_ALL=C: the not-a-work-tree answer below is read off git's own words, so
+  // they must not arrive translated.
+  const opts = { cwd, encoding: "utf8", timeout: timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS, env: gitEnv({ LC_ALL: "C" }) };
   const top = spawnSync("git", ["rev-parse", "--show-toplevel"], opts);
   // Not in a work tree — no repository, a bare one, the inside of a `.git` —
-  // so there is no tree for scratch to dirty. A git that never ran is not that
-  // answer, and is refused below rather than read as one.
-  if (top.status !== 0 && !top.error) return null;
-  if (top.error) return `could not ask git whether ${root} is inside a work tree: ${cause(top.error.message)}`;
+  // so there is no tree for scratch to dirty. That is git's own answer, read
+  // off its stderr: any other failure — a git that never ran, one killed by a
+  // signal, one that refused (`detected dubious ownership`) — says nothing
+  // about whether a work tree is there, and is refused below rather than read
+  // as that answer.
+  if (top.status !== 0 && !top.error && NOT_A_WORK_TREE.test(top.stderr)) return null;
+  if (top.error || top.status !== 0) {
+    return `could not ask git whether ${root} is inside a work tree: ${cause(top.error && top.error.message, top.stderr) || ended(top)}`;
+  }
   const tree = top.stdout.trim();
   const ignored = spawnSync("git", ["check-ignore", "-q", `${root}/`], opts);
   if (ignored.status === 0) return null;

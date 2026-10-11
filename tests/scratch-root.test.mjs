@@ -169,3 +169,63 @@ test("scratchRootRefusal() answers null outside any work tree and a reason insid
   writeFileSync(join(dir, ".gitignore"), "scratch/\n");
   assert.equal(scratchRootRefusal(bad), null);
 });
+
+test("scratchRootRefusal() asks git with the trailing slash: a directory-only ignore pattern covers a root that is not on disk yet", () => {
+  const dir = repo("dir-only-ignore");
+  const root = join(dir, "key");
+  writeFileSync(join(dir, ".gitignore"), "key/\n");
+  assert.equal(existsSync(root), false);
+  assert.equal(scratchRootRefusal(root), null);
+  // Control: the same pattern is not an answer for the path without the slash,
+  // so the pass above is the slash's doing and not the root's absence.
+  const bare = spawnSync("git", ["check-ignore", "-q", root], { cwd: dir, env: gitEnv() });
+  assert.equal(bare.status, 1);
+});
+
+// A fake `git` first on PATH: it answers `rev-parse --show-toplevel` with `body`
+// and hands every other invocation to the real git, so the rest of the
+// probe is untouched.
+function withFakeGit(body, fn) {
+  const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  assert.ok(real, "no real git on PATH to delegate to");
+  const bin = realpathSync(tempDir("scratch-fakegit-"));
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\nif [ "$1" = rev-parse ] && [ "$2" = --show-toplevel ]; then\n${body}\nfi\nexec "${real}" "$@"\n`,
+    { mode: 0o755 },
+  );
+  const was = process.env.PATH;
+  process.env.PATH = `${bin}:${was}`;
+  try {
+    return fn();
+  } finally {
+    process.env.PATH = was;
+  }
+}
+
+test("scratchRootRefusal() reads only git's own not-a-work-tree answer as one: any other failure is refused", () => {
+  const plain = realpathSync(tempDir("scratch-plain-"));
+  const root = join(plain, ".fleet", "scratch", "x");
+  // Control: git's real not-a-work-tree words, through the same fake, pass —
+  // so the refusals below are the failure's doing, not the fake's.
+  assert.equal(
+    withFakeGit(`echo "fatal: not a git repository (or any of the parent directories): .git" >&2\nexit 128`, () => scratchRootRefusal(root)),
+    null,
+  );
+  assert.equal(
+    withFakeGit(`echo "fatal: this operation must be run in a work tree" >&2\nexit 128`, () => scratchRootRefusal(root)),
+    null,
+  );
+  assert.match(
+    withFakeGit(`echo "fatal: detected dubious ownership in repository at '/x'" >&2\nexit 128`, () => scratchRootRefusal(root)),
+    /could not ask git whether .* is inside a work tree: .*dubious ownership/,
+  );
+  assert.match(
+    withFakeGit(`kill -9 $$`, () => scratchRootRefusal(root)),
+    /could not ask git whether .* is inside a work tree: killed by SIGKILL/,
+  );
+  assert.match(
+    withFakeGit(`exit 3`, () => scratchRootRefusal(root)),
+    /could not ask git whether .* is inside a work tree: exit 3/,
+  );
+});

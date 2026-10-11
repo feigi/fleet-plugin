@@ -31,6 +31,23 @@ function runWith(scratch) {
   return { run: runReview({ ...host, pipeline, parallel }, { ...ARGS, pr: PR, scratch }), calls, prompts, base };
 }
 
+// The omitted scratch is `~/.fleet/scratch/<key>/`, and whether that root is
+// accepted depends on the home it sits under — a developer whose HOME is a git
+// work tree that does not ignore `.fleet/` is refused. `os.homedir()` follows
+// HOME on POSIX, so each case that reads the default root pins HOME to a bare
+// temp directory instead of the machine's own.
+async function withBareHome(fn) {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "review-core-home-")));
+  const was = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    return await fn();
+  } finally {
+    if (was === undefined) delete process.env.HOME;
+    else process.env.HOME = was;
+  }
+}
+
 const PR_SUFFIX = /already ends in a pr<N> directory/;
 const DOTDOT = /has a "\.\." segment/;
 const refused = [
@@ -76,7 +93,7 @@ for (const scratch of [3, "42", ["a"], 0, false, "", null, Number.NaN, ["/tmp/x"
 // to its specialist, with the run root at `<scratch>/pr42/` — one level, as
 // before.
 for (const scratch of ["/x/review-pr-42", "/x/pr42x", "/x/apr42", "/x/pr", "/x/prx42", "/x/pr42/root", "/x/pr42/./root", "/x/.pr42", "/x/a..b", undefined]) {
-  test(`scratch ${scratch ?? "(omitted)"} is accepted and runs the review under <scratch>/pr42/`, async () => {
+  test(`scratch ${scratch ?? "(omitted)"} is accepted and runs the review under <scratch>/pr42/`, () => withBareHome(async () => {
     const { run, calls, prompts, base } = runWith(scratch);
     await run;
     assert.equal(calls["review:correctness"], 1, "an accepted scratch must reach its specialist");
@@ -84,7 +101,7 @@ for (const scratch of ["/x/review-pr-42", "/x/pr42x", "/x/apr42", "/x/pr", "/x/p
       prompts.snapshot[0].includes(`mkdir -p "${base}/pr${PR}"`),
       `the snapshot agent was not told to make the run root parent at ${base}/pr${PR}`,
     );
-  });
+  }));
 }
 
 // An omitted scratch is a review with no dispatcher: it takes the fleet's own
