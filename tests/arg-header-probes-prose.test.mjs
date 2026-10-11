@@ -317,8 +317,15 @@ test("the unanchored import grep matches arg.mjs's own comment; the anchored one
   );
 });
 
+// Roster rows with no command line: each binds makeDie for the script it maps
+// to, which delegates its flags to defineFlags. Spelled out, not derived, so a
+// NEW silent row still reds in the two roster tests below; the test after
+// them holds each entry to the shape the header names it for.
+const ROSTER_MODULES = { "scripts/board-common.mjs": "scripts/board.mjs" };
+const rosterScripts = () => scriptsOf(sh(ROSTER_GREP).stdout).filter((file) => !(file in ROSTER_MODULES));
+
 test("every script the roster grep returns refuses a stray flag in its own wording, not sweep()'s", () => {
-  const roster = scriptsOf(sh(ROSTER_GREP).stdout);
+  const roster = rosterScripts();
   assert.ok(roster.length >= 4, `the roster grep returned only ${roster.length} rows — it has stopped finding the edit sites`);
   for (const file of roster) {
     const { status, out } = probeStray(file);
@@ -418,12 +425,24 @@ test("no script the roster grep removes holds an unknown-flag refusal of its own
 // ever being named or answered. Re-pointed at the now-empty set instead of
 // deleted, so it keeps failing the moment a roster row goes silent again.
 test("no roster row is silent: every row the roster grep returns names the stray flag it was probed with", () => {
-  const silent = scriptsOf(sh(ROSTER_GREP).stdout).filter((file) => !probeStray(file).out.includes(STRAY));
+  const silent = rosterScripts().filter((file) => !probeStray(file).out.includes(STRAY));
   assert.deepEqual(
     silent,
     [],
     "a roster row exists that never names a stray flag it was probed with — a script gained an arg.mjs import without gaining a real unknown-flag refusal of its own, the #365 fail-open reached from a third side",
   );
+});
+
+test("every roster row with no command line is a silent module the header names, serving a defineFlags delegator", () => {
+  const roster = scriptsOf(sh(ROSTER_GREP).stdout);
+  for (const [module, script] of Object.entries(ROSTER_MODULES)) {
+    assert.ok(roster.includes(module), `${module} is no longer a roster row — drop it from ROSTER_MODULES`);
+    const { status, out } = probeStray(module);
+    assert.deepEqual({ status, out }, { status: 0, out: "" }, `${module} ${STRAY} did not exit 0 in silence — it has grown a command line`);
+    assert.ok(namesScript(FLAT, module), `the header does not name ${module}`);
+    assert.ok(binds(script, "defineFlags"), `${script} does not bind defineFlags`);
+    assert.ok(binds(script, "die", `./${module.replace(/^scripts\//, "")}`), `${script} does not take die from ${module}`);
+  }
 });
 
 // #2781. The roster grep's makeDie filter drops every importer that binds no
@@ -461,7 +480,9 @@ const DROPPED_GUARD_FIXTURE = {
 };
 
 test("every arg.mjs importer the makeDie filter drops is a module, or a script the header names", () => {
-  const dropped = scriptsOf(sh(IMPORT_GREP).stdout).filter((file) => file !== "scripts/arg.mjs" && !binds(file, "makeDie"));
+  // A defineFlags binder is a delegator wherever its die() comes from; the
+  // removed-rows test above probes those.
+  const dropped = scriptsOf(sh(IMPORT_GREP).stdout).filter((file) => file !== "scripts/arg.mjs" && !binds(file, "makeDie") && !binds(file, "defineFlags"));
   const unnamed = [];
   const guardFirst = [];
   for (const file of dropped) {

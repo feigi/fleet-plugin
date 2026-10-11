@@ -17,9 +17,7 @@
 // Driven through the exported `gather()` and through the real CLI: the value
 // half (carry-forward present or empty) is only observable at gather()'s
 // return, and the contract half (exit code unchanged, nothing on stdout) is
-// only observable at the process boundary. Out of process either way, for the
-// reason board.test.mjs's own gather drivers give — gather() reads process.argv
-// and would otherwise read the test runner's.
+// only observable at the process boundary.
 //
 // A separate file rather than more of board.test.mjs, the same reason
 // board-tryparse-null.test.mjs gives: the fleet runs several implementers at

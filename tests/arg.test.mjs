@@ -48,10 +48,13 @@ const ARG_MODULE = fileURLToPath(new URL("../plugin/scripts/arg.mjs", import.met
 // import, which is precisely the regression being pinned. A consumer added
 // later has to be added here deliberately.
 const CONSUMERS = ["board", "candidates", "ci-state", "diff-stats", "fleet-tick", "ledger", "pr-overlap"];
+// board.mjs takes NAME and die() from board-common.mjs, which its gather and
+// server halves share, so that is where board's wiring is read.
+const WIRED_IN = { board: "board-common" };
 
 test("every fleet script wires die() to arg.mjs's makeDie under its own NAME — the #367 migration, pinned", () => {
   for (const name of CONSUMERS) {
-    const src = stripComments(readFileSync(fileURLToPath(new URL(`../plugin/scripts/${name}.mjs`, import.meta.url)), "utf8"));
+    const src = stripComments(readFileSync(fileURLToPath(new URL(`../plugin/scripts/${WIRED_IN[name] ?? name}.mjs`, import.meta.url)), "utf8"));
     assert.match(
       src,
       /^import \{[^}]*\bmakeDie\b[^}]*\} from "\.\/arg\.mjs";/m,
@@ -59,7 +62,7 @@ test("every fleet script wires die() to arg.mjs's makeDie under its own NAME —
     );
     assert.match(
       src,
-      /^const die = makeDie\(NAME\);/m,
+      /^(?:export )?const die = makeDie\(NAME\);/m,
       `${name}.mjs must bind die to makeDie(NAME) at module scope`,
     );
     assert.match(
@@ -67,6 +70,13 @@ test("every fleet script wires die() to arg.mjs's makeDie under its own NAME —
       new RegExp(`const NAME = "${name}";`),
       `${name}.mjs's NAME must be its own script name, or its refusals misidentify themselves`,
     );
+    if (WIRED_IN[name]) {
+      assert.match(
+        stripComments(readFileSync(fileURLToPath(new URL(`../plugin/scripts/${name}.mjs`, import.meta.url)), "utf8")),
+        new RegExp(`^import \\{[^}]*\\bdie\\b[^}]*\\} from "\\./${WIRED_IN[name]}\\.mjs";`, "m"),
+        `${name}.mjs must take die from ./${WIRED_IN[name]}.mjs`,
+      );
+    }
   }
 });
 

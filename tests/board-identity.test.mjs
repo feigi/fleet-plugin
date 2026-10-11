@@ -8,9 +8,9 @@
 // after computeBoard() had already returned — so `board.mjs build` printed a
 // snapshot that could not say which of two workspaces it came from.
 //
-// Driven through the real CLI, out of process: gather() reads process.argv
-// directly and the workspace the cockpit resolves through fleetFile() is a
-// git spawn, so the join under test only exists in a child. The page half is
+// Driven through the real CLI, out of process: the workspace the cockpit
+// resolves through fleetFile() is a git spawn, so the join under test only
+// exists in a child. The page half is
 // lifted out of board.html's source text and called as a pure function — the
 // page is served as one self-contained file with no build step and no DOM
 // harness, the same seam spend-view.test.mjs and

@@ -16,9 +16,7 @@
 //
 // Driven through the exported `gather()` rather than against `tryParse`, which
 // is module-private: the guard is only observable where a caller consumes the
-// result, and that is the boundary a consumer actually sees. Out of process for
-// the reason board.test.mjs's own gather drivers are — gather() reads
-// process.argv and would otherwise read the test runner's.
+// result, and that is the boundary a consumer actually sees.
 //
 // A separate file rather than more of board.test.mjs, the same reason
 // ledger-read-require-file.test.mjs gives: the fleet runs several implementers

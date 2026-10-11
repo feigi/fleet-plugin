@@ -59,6 +59,10 @@
 // its command line must be named in this header. Read the grep's output, plus
 // the scripts named here, for the roster — the scripts this header names
 // exemplify a way of qualifying, and were never the whole of it.
+// board-common.mjs is the one row the grep returns with no command line
+// behind it: it binds makeDie for board.mjs, which binds defineFlags in an
+// import of its own, so the grep returns the module and not the script. A
+// test runs it too, and holds it to exiting in silence.
 //
 // fleet-tick.mjs and fleet-heartbeat.mjs sit outside arg()/has(), and
 // deliberately: each parses its flags with node:util's parseArgs, so its
