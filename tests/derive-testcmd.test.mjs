@@ -380,6 +380,7 @@ test("a quoted parenthesis or brace inside a substitution closes nothing, and an
     'node --test ${X:-"}"} tests/unit/*.test.mjs',
     'node --test "$(echo ")")" tests/unit/*.test.mjs',
     'node --test "${X:-"}"}" tests/unit/*.test.mjs',
+    `node --test "$(echo '"')" tests/unit/*.test.mjs`,
     'node --test $(echo `echo ")"`) tests/unit/*.test.mjs',
   ]) {
     const control = spawnSync("sh", ["-n", "-c", cmd], { encoding: "utf8" });
