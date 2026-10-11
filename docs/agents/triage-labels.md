@@ -60,8 +60,7 @@ have nothing to do with the pool column.
 
 `onhold` is **not** a spare label. It marks a ticket that triage has fully specified
 but that cannot be actioned in this repo right now — usually because the fix lives
-outside it (`skills/*` is gitignored bar `caveman-compress` and `fleet`, and
-`~/.agents/skills/` is not in this repo at all), sometimes because its acceptance
+outside it (`~/.agents/skills/` is not in this repo at all), sometimes because its acceptance
 criteria are an open blocker's output. It is the fleet's "real, decided, but out of
 reach" marker, which is why `plugin/scripts/candidates.mjs` excludes it too: an agent
 dispatched at one would find nothing it is allowed to edit. The fleet (`/run-team`)
