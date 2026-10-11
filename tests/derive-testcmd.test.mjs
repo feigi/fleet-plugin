@@ -307,6 +307,15 @@ test("a test command whose glob matches no tracked file refuses as a stale Recip
     ["node --test gone/*.js||echo$X", "gone/*.js"],
     ["node --test $X&&gone/*.js", "gone/*.js"],
     ['node --test "x";gone/*.js', "gone/*.js"],
+    // The substitution ends where the shell ends it: a quoted `)` or `}` in it
+    // closes nothing, so the pattern after it is a word of its own.
+    ['node --test $(echo ")") gone/*.js', "gone/*.js"],
+    ["node --test ${X:-'}'} gone/*.js", "gone/*.js"],
+    ['node --test "$(echo ")")" gone/*.js', "gone/*.js"],
+    // A backslash and a newline are removed before the shell splits words: the
+    // pattern after one is still a word of its own, and so is one it cuts in two.
+    ["node --test \\\ngone/*.js", "gone/*.js"],
+    ["node --test go\\\nne/*.js", "gone/*.js"],
   ]) {
     cache(dir, recipe(head, { test: cmd }));
     const r = derive(dir);
@@ -354,6 +363,45 @@ test("a test command with an unbalanced quote, backtick or substitution refuses 
     assert.equal(r.out, "", `${cmd}: nothing may reach the caller`);
     assert.ok(r.err.includes("its test command leaves a quote, a backtick, a $( or a ${ open"), `${cmd}: ${r.err}`);
     assert.match(r.err, NAMES_STEP, cmd);
+  }
+});
+
+// The shell reads quotes inside a substitution afresh, so what it holds is
+// balanced or not by its own quotes: `sh -n` is the oracle for each command
+// here, and a command it takes runs, so it is no Recipe that cannot.
+test("a quoted parenthesis or brace inside a substitution closes nothing, and an unclosed one still refuses", () => {
+  const { dir, head } = repo({ "tests/unit/a.test.mjs": "" });
+  for (const cmd of [
+    'node --test $(echo ")") tests/unit/*.test.mjs',
+    'node --test $(echo "(") tests/unit/*.test.mjs',
+    "node --test $(echo ')') tests/unit/*.test.mjs",
+    "node --test $(echo \\)) tests/unit/*.test.mjs",
+    "node --test ${X:-'}'} tests/unit/*.test.mjs",
+    'node --test ${X:-"}"} tests/unit/*.test.mjs',
+    'node --test "$(echo ")")" tests/unit/*.test.mjs',
+    'node --test "${X:-"}"}" tests/unit/*.test.mjs',
+    'node --test $(echo `echo ")"`) tests/unit/*.test.mjs',
+  ]) {
+    const control = spawnSync("sh", ["-n", "-c", cmd], { encoding: "utf8" });
+    assert.equal(control.status, 0, `fixture: sh takes ${cmd}: ${control.stderr}`);
+    cache(dir, recipe(head, { test: cmd }));
+    const r = derive(dir);
+    assert.equal(r.status, 0, `${cmd}: ${r.err}`);
+    assert.equal(r.out, cmd);
+    assert.equal(r.err, "", cmd);
+  }
+  for (const cmd of [
+    'node --test $(echo ")" tests/unit/*.test.mjs',
+    "node --test ${X:-'}' tests/unit/*.test.mjs",
+    'node --test "$(echo ")" tests/unit/*.test.mjs',
+  ]) {
+    const control = spawnSync("sh", ["-n", "-c", cmd], { encoding: "utf8" });
+    assert.notEqual(control.status, 0, `fixture: sh dies on ${cmd}`);
+    cache(dir, recipe(head, { test: cmd }));
+    const r = derive(dir);
+    assert.equal(r.status, 1, `${cmd} must refuse: ${r.out}`);
+    assert.equal(r.out, "", `${cmd}: nothing may reach the caller`);
+    assert.ok(r.err.includes("its test command leaves a quote, a backtick, a $( or a ${ open"), `${cmd}: ${r.err}`);
   }
 });
 

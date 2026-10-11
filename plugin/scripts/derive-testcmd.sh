@@ -370,14 +370,18 @@ esac
 # fresh worktree holds only what is tracked. Only a word the shell globs as
 # written, from <repo>, can be settled without running the command. The scan
 # reads the whole command one character at a time under one rule: a region
-# inside `'…'`, `"…"`, backticks, `$(…)` (nested parentheses counted) or
-# `${…}`, or a `\`-escaped byte, is opaque, and makes the piece it belongs to
-# quoted or expansion-bearing, accepted unprobed whole; so does a `{`, `}`, `~`
-# or bare `$`. An unquoted `;`, `&`, `|`, `(`, `)`, `<` or `>` is an operator
-# to the shell whether or not whitespace surrounds it, and an unquoted blank
-# ends a piece: each piece is judged as a word of its own. A quote, a backtick
-# or a `$(` or `${` still open at the end of the command is refused: `sh -c`
-# dies on it, so it is a Recipe that cannot run. An option, an `=`
+# inside `'…'`, `"…"`, backticks, `$(…)` or `${…}`, or a `\`-escaped byte, is
+# opaque, and makes the piece it belongs to quoted or expansion-bearing,
+# accepted unprobed whole; so does a `{`, `}`, `~` or bare `$`. Inside a `$(…)`
+# or a `${…}` the quotes and the substitutions are read as the shell reads
+# them, so a quoted `)` or `}` closes nothing, and a `"…"` holds substitutions
+# of its own. A backslash and a newline together are removed before the shell
+# splits words, so they quote nothing and end nothing. An unquoted `;`, `&`,
+# `|`, `(`, `)`, `<` or `>` is an operator to the shell whether or not
+# whitespace surrounds it, and an unquoted blank ends a piece: each piece is
+# judged as a word of its own. A quote, a backtick or a `$(` or `${` still open
+# at the end of the command is refused: `sh -c` dies on it, so it is a Recipe
+# that cannot run. An option, an `=`
 # assignment or value, a path outside <repo>, or the target of a `<` or `>`
 # redirection is the program's own to read, or selects no test, and is
 # accepted unprobed too. The scan stops judging at a `cd` or `pushd` piece,
@@ -495,11 +499,26 @@ if [ "$field" = test ]; then
   scan_piece=
   scan_kind=P
   scan_sq=
-  scan_dq=
-  scan_bt=
-  scan_depth=0
-  scan_open=
-  scan_close=
+  scan_ctx=
+  scan_top=
+  # The regions open around the scan point, innermost first: `"` a double
+  # quote, a backtick, `(` a `$(`, `{` a `${`. A single quote holds nothing
+  # inside it, so it is a flag, not a region.
+  scan_push() {
+    scan_ctx=$1$scan_ctx
+    scan_top=$1
+  }
+  scan_pop() {
+    scan_ctx=${scan_ctx#?}
+    scan_top=${scan_ctx%"${scan_ctx#?}"}
+  }
+  # After a `$` already read: a `(` or `{` right behind it opens a region.
+  scan_dollar() {
+    case $scan_rest in
+      '('*) scan_push '('; scan_piece=$scan_piece'('; scan_rest=${scan_rest#?} ;;
+      '{'*) scan_push '{'; scan_piece=$scan_piece'{'; scan_rest=${scan_rest#?} ;;
+    esac
+  }
   while [ -n "$scan_rest" ]; do
     scan_c=${scan_rest%"${scan_rest#?}"}
     scan_rest=${scan_rest#?}
@@ -509,40 +528,50 @@ if [ "$field" = test ]; then
       continue
     fi
     if [ "$scan_c" = '\' ]; then
-      scan_piece=$scan_piece$scan_c${scan_rest%"${scan_rest#?}"}
+      scan_next=${scan_rest%"${scan_rest#?}"}
       scan_rest=${scan_rest#?}
+      # A backslash and a newline are removed before the shell splits words:
+      # they quote nothing and end nothing.
+      if [ "$scan_next" = "$nl" ]; then continue; fi
+      scan_piece=$scan_piece$scan_c$scan_next
       scan_kind=Q
       continue
     fi
-    if [ -n "$scan_dq" ]; then
-      scan_piece=$scan_piece$scan_c
-      if [ "$scan_c" = '"' ]; then scan_dq=; fi
-      continue
-    fi
-    if [ -n "$scan_bt" ]; then
-      scan_piece=$scan_piece$scan_c
-      if [ "$scan_c" = '`' ]; then scan_bt=; fi
-      continue
-    fi
-    if [ "$scan_depth" -gt 0 ]; then
-      scan_piece=$scan_piece$scan_c
-      case $scan_c in
-        "$scan_open") scan_depth=$((scan_depth + 1)) ;;
-        "$scan_close") scan_depth=$((scan_depth - 1)) ;;
-      esac
-      continue
-    fi
+    case $scan_top in
+      '"')
+        scan_piece=$scan_piece$scan_c
+        case $scan_c in
+          '"') scan_pop ;;
+          '`') scan_push '`' ;;
+          '$') scan_dollar ;;
+        esac
+        continue ;;
+      '`')
+        scan_piece=$scan_piece$scan_c
+        if [ "$scan_c" = '`' ]; then scan_pop; fi
+        continue ;;
+      '('|'{')
+        scan_piece=$scan_piece$scan_c
+        case $scan_c in
+          "'") scan_sq=1 ;;
+          '"') scan_push '"' ;;
+          '`') scan_push '`' ;;
+          '$') scan_dollar ;;
+          '(') if [ "$scan_top" = '(' ]; then scan_push '('; fi ;;
+          ')') if [ "$scan_top" = '(' ]; then scan_pop; fi ;;
+          '{') if [ "$scan_top" = '{' ]; then scan_push '{'; fi ;;
+          '}') if [ "$scan_top" = '{' ]; then scan_pop; fi ;;
+        esac
+        continue ;;
+    esac
     case $scan_c in
       "'") scan_sq=1; scan_kind=Q; scan_piece=$scan_piece$scan_c ;;
-      '"') scan_dq=1; scan_kind=Q; scan_piece=$scan_piece$scan_c ;;
-      '`') scan_bt=1; scan_kind=Q; scan_piece=$scan_piece$scan_c ;;
+      '"') scan_push '"'; scan_kind=Q; scan_piece=$scan_piece$scan_c ;;
+      '`') scan_push '`'; scan_kind=Q; scan_piece=$scan_piece$scan_c ;;
       '$')
         scan_kind=Q
         scan_piece=$scan_piece$scan_c
-        case $scan_rest in
-          '('*) scan_open='('; scan_close=')'; scan_depth=1; scan_piece="$scan_piece(" ; scan_rest=${scan_rest#?} ;;
-          '{'*) scan_open='{'; scan_close='}'; scan_depth=1; scan_piece="$scan_piece{" ; scan_rest=${scan_rest#?} ;;
-        esac ;;
+        scan_dollar ;;
       '{'|'}'|'~') scan_kind=Q; scan_piece=$scan_piece$scan_c ;;
       ' '|'	'|"$nl") flush ;;
       ';'|'&'|'|'|'('|')'|'<'|'>')
@@ -553,7 +582,7 @@ if [ "$field" = test ]; then
     esac
   done
   flush
-  if [ -n "$scan_sq$scan_dq$scan_bt" ] || [ "$scan_depth" -gt 0 ]; then
+  if [ -n "$scan_sq" ] || [ -n "$scan_ctx" ]; then
     die "the Recipe cache at $cache is invalid: its test command leaves a quote, a backtick, a \$( or a \${ open, so sh cannot run it — a Recipe that cannot run is stale, not a finding; $derive"
   fi
 fi
