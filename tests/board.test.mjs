@@ -10,7 +10,8 @@ import { dirname, join } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { createServer, connect } from "node:net";
 import { fileURLToPath } from "node:url";
-import { createBoardServer, renderRefusedHost, mapCi, encodeProjectDir, findSubagentsDir, spendDirPin, gatherSpend, faultText, resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "../plugin/scripts/board.mjs";
+import { createBoardServer, renderRefusedHost, mapCi, encodeProjectDir, findSubagentsDir, spendDirPin, gatherSpend, faultText, resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace, gather } from "../plugin/scripts/board.mjs";
+import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { readOmpMember } from "../plugin/scripts/member-record.mjs";
 import { stripComments } from "./support/strip-comments.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
@@ -158,6 +159,32 @@ test("an unparseable payload warns ONCE per PR across ticks, and a second PR is 
   assert.equal(withStderr(() => mapCi("{ trunc", 6055)).length, 1, "another PR still gets its line");
 });
 
+// gather() takes every argv answer as a parameter, so the drivers below call it
+// in this process. `gh` and `node` resolve through PATH, which points at the
+// test's stub bin until the test ends, and gather()'s stderr — its own lines
+// and the ones it re-emits from its children — is read off this process's
+// stream while the gather runs. `spendDir: null` is the "no session yet"
+// answer, so no row reads this machine's transcript tree.
+async function gatherHere(t, bin, opts, ticks = 1) {
+  const savedPath = process.env.PATH;
+  t.after(() => { process.env.PATH = savedPath; });
+  process.env.PATH = `${bin}:${savedPath}`;
+  const chunks = [];
+  const write = process.stderr.write;
+  process.stderr.write = (chunk, ...rest) => {
+    chunks.push(String(chunk));
+    rest.find((a) => typeof a === "function")?.();
+    return true;
+  };
+  let r;
+  try {
+    for (let i = 0; i < ticks; i++) r = await gather({ interval: 15, spendDir: null, ...opts });
+  } finally {
+    process.stderr.write = write;
+  }
+  return { r, stderr: chunks.join("") };
+}
+
 // #262 put a payload on stdout at exit 2 for a quota refusal, and runCiState()
 // was reading "stdout is non-empty" as "a verdict was read". mapCi alone cannot
 // see that: it is handed a string and never learns which exit code produced it,
@@ -169,14 +196,17 @@ test("an unparseable payload warns ONCE per PR across ticks, and a second PR is 
 // scriptDir is injected, so both arms drive the REAL runCiState()/gather()
 // against a ci-state whose exit code and stdout are exactly what the arm needs;
 // the stub `gh` only has to feed the PR loop, since every other gh read in
-// gather() degrades through tryRun(). Out of process, because gather() reads
-// process.argv and would otherwise read the test runner's.
+// gather() degrades through tryRun().
 //
-// `prs` and `ticks` default to the single PR and the single gather() every arm
-// below needs; the warn-once row is the one that raises them, because a gate
+// `ticks` defaults to the single gather() every arm below needs; the warn-once
+// row is the one that raises it, and the one that names two PRs, because a gate
 // that spends one line per process and one that spends one per tick are
 // indistinguishable inside a single-tick, single-PR run.
-function gatherCi({ ciStateBody, prevCi, prs = [42], ticks = 1 }) {
+//
+// Every row names its own PR, and no two rows that assert a warn-once line share
+// one: the gate's state lives as long as this process, so a PR an earlier row
+// already warned about would print nothing here.
+async function gatherCi(t, { ciStateBody, prevCi, prs, ticks = 1 }) {
   const cwd = tempDir("board-gather-");
   const bin = tempDir("board-gather-bin-");
   const scriptDir = tempDir("board-gather-scripts-");
@@ -185,18 +215,12 @@ function gatherCi({ ciStateBody, prevCi, prs = [42], ticks = 1 }) {
   writeExecStub(join(bin, "gh"),
     `#!/bin/sh\ncase "$1 $2" in\n"pr list") echo '${rows}' ;;\n*) exit 1 ;;\nesac\n`);
   writeFileSync(join(cwd, "prev.json"), JSON.stringify({ tickets: prs.map((n) => ({ pr: n, ci: prevCi })) }));
-  // serve()'s shape, not a loop for its own sake: one process, gather() called
-  // again per tick, which is the only place a warn-once gate is observable.
-  const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
-    let r;
-    for (let i = 0; i < ${ticks}; i++) r = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
-                       prevFile: ${JSON.stringify(join(cwd, "prev.json"))},
-                       scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
-    console.log(JSON.stringify(r.ci));`;
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
-    cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-  });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
+  // The tick loop's shape, not a loop for its own sake: gather() called again
+  // per tick in one process, which is the only place a warn-once gate is
+  // observable.
+  const { r, stderr } = await gatherHere(t, bin, {
+    ledgerFile: join(cwd, "nope.md"), prevFile: join(cwd, "prev.json"), scriptDir,
+  }, ticks);
   // stderr comes back too: gather() reports through it. mapCi's own
   // PR-in-the-warn-text wiring is no longer observable from here, though:
   // since #1593 runCiState() only ever hands mapCi an already-parseable
@@ -206,8 +230,7 @@ function gatherCi({ ciStateBody, prevCi, prs = [42], ticks = 1 }) {
   // #605 test below); what IS observable here is runCiState()'s own two
   // salvage arms, each carrying the PR and exit disposition in its own
   // stderr line.
-  const ci = JSON.parse(r.stdout.trim().split("\n").pop());
-  return { ci: ci[42], ciAll: ci, stderr: r.stderr };
+  return { ci: r.ci[prs[0]], ciAll: r.ci, stderr };
 }
 
 // The regression itself. This payload is what ci-state.mjs emits on a quota
@@ -217,8 +240,8 @@ const RATE_LIMITED_EXIT_2 = `import { writeSync } from "node:fs";
 writeSync(1, JSON.stringify({ pr: 42, verdict: "rate-limited", reasons: ["quota"] }) + "\\n");
 process.exit(2);`;
 
-test("gather: a rate-limited ci-state — exit 2 WITH a payload — carries the previous board's CI value", () => {
-  assert.equal(gatherCi({ ciStateBody: RATE_LIMITED_EXIT_2, prevCi: "red" }).ci, "red");
+test("gather: a rate-limited ci-state — exit 2 WITH a payload — carries the previous board's CI value", async (t) => {
+  assert.equal((await gatherCi(t, { ciStateBody: RATE_LIMITED_EXIT_2, prevCi: "red", prs: [42] })).ci, "red");
 });
 
 // The other direction, and the reason this pair is not one test: a runCiState()
@@ -231,8 +254,8 @@ const NOT_GREEN_EXIT_1 = `import { writeSync } from "node:fs";
 writeSync(1, JSON.stringify({ pr: 42, status: "completed", verdict: "not-green", reasons: ["x"] }) + "\\n");
 process.exit(1);`;
 
-test("gather: exit 1 is a verdict, not a failed read — it still overrides the previous value", () => {
-  assert.equal(gatherCi({ ciStateBody: NOT_GREEN_EXIT_1, prevCi: "green" }).ci, "red");
+test("gather: exit 1 is a verdict, not a failed read — it still overrides the previous value", async (t) => {
+  assert.equal((await gatherCi(t, { ciStateBody: NOT_GREEN_EXIT_1, prevCi: "green", prs: [42] })).ci, "red");
 });
 
 // ── the salvage arm: an exit code alone never made a payload a verdict ───────
@@ -263,8 +286,8 @@ const NO_CI_EXIT_1 = `import { writeSync } from "node:fs";
 writeSync(1, JSON.stringify({ pr: 42, status: null, verdict: "no-ci", reasons: ["no workflows configured"] }) + "\\n");
 process.exit(1);`;
 
-test("gather: a complete no-ci verdict at exit 1 is an answer, not a failed read — it is not carried forward (#875)", () => {
-  assert.equal(gatherCi({ ciStateBody: NO_CI_EXIT_1, prevCi: "red" }).ci, "unknown");
+test("gather: a complete no-ci verdict at exit 1 is an answer, not a failed read — it is not carried forward (#875)", async (t) => {
+  assert.equal((await gatherCi(t, { ciStateBody: NO_CI_EXIT_1, prevCi: "red", prs: [42] })).ci, "unknown");
 });
 
 // The refuse side. One write, cut mid-JSON, under two dispositions: the bytes
@@ -285,8 +308,8 @@ process.exit(1);`;
 // payload was refused: "ci-state failed" alone cannot be told apart from the
 // read never having happened, and an operator looking at a carried-forward
 // value needs to know a payload arrived and was thrown away.
-test("gather: a payload cut mid-JSON at exit 1 is not a verdict — the previous CI value stands (#875)", () => {
-  const r = gatherCi({ ciStateBody: UNPARSEABLE_EXIT_1, prevCi: "red" });
+test("gather: a payload cut mid-JSON at exit 1 is not a verdict — the previous CI value stands (#875)", async (t) => {
+  const r = await gatherCi(t, { ciStateBody: UNPARSEABLE_EXIT_1, prevCi: "red", prs: [42] });
   assert.equal(r.ci, "red");
   assert.match(r.stderr, /--pr 42/);
   assert.match(r.stderr, /parse/);
@@ -302,8 +325,8 @@ const KILLED_MID_PAYLOAD = `import { writeSync } from "node:fs";
 writeSync(1, '{"pr": 42, "status": "comp');
 process.kill(process.pid, "SIGKILL");`;
 
-test("gather: a signal-killed ci-state that wrote half a payload carries the previous value forward (#875)", () => {
-  const r = gatherCi({ ciStateBody: KILLED_MID_PAYLOAD, prevCi: "red" });
+test("gather: a signal-killed ci-state that wrote half a payload carries the previous value forward (#875)", async (t) => {
+  const r = await gatherCi(t, { ciStateBody: KILLED_MID_PAYLOAD, prevCi: "red", prs: [44] });
   assert.equal(r.ci, "red");
   assert.match(r.stderr, /SIGKILL/);
 });
@@ -318,13 +341,13 @@ test("gather: a signal-killed ci-state that wrote half a payload carries the pre
 // for the rest of the run, which is the silence the sibling gate was written
 // against. Both PRs still carry their previous value forward — the gate is
 // about what is SAID, never about what is read.
-test("gather: a refused salvage payload warns ONCE per PR across ticks, and a second PR is not masked", () => {
-  const r = gatherCi({ ciStateBody: UNPARSEABLE_EXIT_1, prevCi: "red", prs: [42, 43], ticks: 3 });
-  assert.deepEqual(r.ciAll, { 42: "red", 43: "red" });
+test("gather: a refused salvage payload warns ONCE per PR across ticks, and a second PR is not masked", async (t) => {
+  const r = await gatherCi(t, { ciStateBody: UNPARSEABLE_EXIT_1, prevCi: "red", prs: [45, 46], ticks: 3 });
+  assert.deepEqual(r.ciAll, { 45: "red", 46: "red" });
   const refusals = r.stderr.split("\n").filter((l) => /will not parse/.test(l));
   assert.equal(refusals.length, 2, `expected one line per PR, got ${JSON.stringify(refusals)}`);
-  assert.ok(refusals.some((l) => /--pr 42/.test(l)), r.stderr);
-  assert.ok(refusals.some((l) => /--pr 43/.test(l)), r.stderr);
+  assert.ok(refusals.some((l) => /--pr 45/.test(l)), r.stderr);
+  assert.ok(refusals.some((l) => /--pr 46/.test(l)), r.stderr);
 });
 
 // #1593. Before this fix, exit 0 was the one arm #875 had deliberately left
@@ -345,10 +368,10 @@ test("gather: a refused salvage payload warns ONCE per PR across ticks, and a se
 const UNPARSEABLE_EXIT_0 = `${TRUNCATED_WRITE}
 process.exit(0);`;
 
-test("gather: a payload cut mid-JSON at exit 0 is not a verdict either — the previous CI value stands (#1593)", () => {
-  const r = gatherCi({ ciStateBody: UNPARSEABLE_EXIT_0, prevCi: "red" });
+test("gather: a payload cut mid-JSON at exit 0 is not a verdict either — the previous CI value stands (#1593)", async (t) => {
+  const r = await gatherCi(t, { ciStateBody: UNPARSEABLE_EXIT_0, prevCi: "red", prs: [47] });
   assert.equal(r.ci, "red");
-  assert.match(r.stderr, /--pr 42/);
+  assert.match(r.stderr, /--pr 47/);
   assert.match(r.stderr, /exit 0/);
   assert.match(r.stderr, /parse/);
 });
@@ -361,10 +384,10 @@ test("gather: a payload cut mid-JSON at exit 0 is not a verdict either — the p
 // bytes and got the same "left a payload that will not parse" wording, even
 // though nothing arrived to leave.
 const EMPTY_EXIT_0 = `process.exit(0);`;
-test("gather: an empty payload at exit 0 says the child never answered, not that it left unparseable bytes", () => {
-  const r = gatherCi({ ciStateBody: EMPTY_EXIT_0, prevCi: "red" });
+test("gather: an empty payload at exit 0 says the child never answered, not that it left unparseable bytes", async (t) => {
+  const r = await gatherCi(t, { ciStateBody: EMPTY_EXIT_0, prevCi: "red", prs: [48] });
   assert.equal(r.ci, "red");
-  assert.match(r.stderr, /--pr 42/);
+  assert.match(r.stderr, /--pr 48/);
   assert.match(r.stderr, /exit 0/);
   assert.match(r.stderr, /never answered/);
   assert.doesNotMatch(r.stderr, /will not parse/);
@@ -390,7 +413,7 @@ test("gather: the real call site still hands mapCi the PR number, not just the p
 // signal. Driven here with a stateful stub that answers exit-1-truncated on
 // its first invocation and exit-0-truncated on its second, for the SAME PR —
 // both warnings must print.
-test("gather: a PR that hits the exit-1 salvage then the exit-0 guard gets BOTH warnings, not just the first", () => {
+test("gather: a PR that hits the exit-1 salvage then the exit-0 guard gets BOTH warnings, not just the first", async (t) => {
   const markerDir = tempDir("board-dualarm-");
   const marker = join(markerDir, "tick");
   const DUAL_ARM = `import { writeSync, existsSync, writeFileSync } from "node:fs";
@@ -399,7 +422,7 @@ const first = !existsSync(marker);
 if (first) writeFileSync(marker, "1");
 writeSync(1, "warning: gh took the slow path\\n{\\"pr\\": 42, \\"status\\": \\"comp");
 process.exit(first ? 1 : 0);`;
-  const r = gatherCi({ ciStateBody: DUAL_ARM, prevCi: "red", ticks: 2 });
+  const r = await gatherCi(t, { ciStateBody: DUAL_ARM, prevCi: "red", prs: [49], ticks: 2 });
   assert.equal(r.ci, "red", "both arms are refusals; the carry-forward value must survive both ticks");
   assert.match(r.stderr, /\(exit 1\) left a payload that will not parse/, "tick 1's salvage warning must print");
   assert.match(r.stderr, /\(exit 0\) left a payload that will not parse/,
@@ -420,38 +443,30 @@ process.exit(first ? 1 : 0);`;
 // Stubs both `gh` reads directly rather than reusing gatherCi's fixed PR row,
 // and stubs ci-state.mjs to answer "unknown" unconditionally — the PR loop
 // only needs to complete without throwing, its verdict is not what these
-// tests pin. Out of process for the same reason as gatherCi: gather() reads
-// process.argv and would otherwise read the test runner's.
-function gatherRows({ issuesJson, prsJson }) {
+// tests pin.
+async function gatherRows(t, { issuesJson, prsJson }) {
   const cwd = tempDir("board-gather-rows-");
   const bin = tempDir("board-gather-rows-bin-");
   const scriptDir = tempDir("board-gather-rows-scripts-");
   writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
   writeExecStub(join(bin, "gh"),
     `#!/bin/sh\ncase "$1 $2" in\n"issue list") echo '${issuesJson}' ;;\n"pr list") echo '${prsJson}' ;;\n*) exit 1 ;;\nesac\n`);
-  const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
-    const r = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
-                       prevFile: null, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
-    console.log(JSON.stringify({ issues: r.issues, prs: r.prs }));`;
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
-    cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-  });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  return { ...JSON.parse(r.stdout.trim().split("\n").pop()), stderr: r.stderr };
+  const { r, stderr } = await gatherHere(t, bin, { ledgerFile: join(cwd, "nope.md"), prevFile: null, scriptDir });
+  return { ...JSON.parse(JSON.stringify({ issues: r.issues, prs: r.prs })), stderr };
 }
 
 // tryParse only checks that gh's stdout is valid JSON, not that it is an
 // array — a syntactically-valid object payload used to reach withNumber's
 // `for...of` and throw "rows is not iterable", contrary to this PR's own
 // premise that tryParse "establishes... that it is an array" (#786 review).
-test("gather: a non-array gh payload degrades to an empty list, not a crash", () => {
-  const r = gatherRows({ issuesJson: JSON.stringify({ not: "an array" }), prsJson: "[]" });
+test("gather: a non-array gh payload degrades to an empty list, not a crash", async (t) => {
+  const r = await gatherRows(t, { issuesJson: JSON.stringify({ not: "an array" }), prsJson: "[]" });
   assert.deepEqual(r.issues, []);
   assert.match(r.stderr, /gh issue list: expected an array of rows/);
 });
 
-test("gather: a well-formed issue/PR row passes through unchanged", () => {
-  const r = gatherRows({
+test("gather: a well-formed issue/PR row passes through unchanged", async (t) => {
+  const r = await gatherRows(t, {
     issuesJson: JSON.stringify([{ number: 9, title: "real title", labels: [] }]),
     prsJson: JSON.stringify([{ number: 10, state: "OPEN", title: "real pr title", labels: [] }]),
   });
@@ -459,21 +474,21 @@ test("gather: a well-formed issue/PR row passes through unchanged", () => {
   assert.deepEqual(r.prs, [{ number: 10, state: "OPEN", title: "real pr title", labels: [] }]);
 });
 
-test("gather: an issue row with no number is dropped, loudly, not placed as undefined", () => {
-  const r = gatherRows({ issuesJson: JSON.stringify([{ title: "orphan" }]), prsJson: "[]" });
+test("gather: an issue row with no number is dropped, loudly, not placed as undefined", async (t) => {
+  const r = await gatherRows(t, { issuesJson: JSON.stringify([{ title: "orphan" }]), prsJson: "[]" });
   assert.deepEqual(r.issues, []);
   assert.match(r.stderr, /gh issue list: dropping row with no usable number/);
 });
 
-test("gather: an issue row missing its title reads as its number, not undefined", () => {
-  const r = gatherRows({ issuesJson: JSON.stringify([{ number: 55 }]), prsJson: "[]" });
+test("gather: an issue row missing its title reads as its number, not undefined", async (t) => {
+  const r = await gatherRows(t, { issuesJson: JSON.stringify([{ number: 55 }]), prsJson: "[]" });
   assert.equal(r.issues.length, 1);
   assert.equal(r.issues[0].number, 55);
   assert.equal(r.issues[0].title, "#55");
 });
 
-test("gather: a PR row with no number is dropped, loudly, not placed as undefined", () => {
-  const r = gatherRows({ issuesJson: "[]", prsJson: JSON.stringify([{ title: "orphan pr", state: "OPEN" }]) });
+test("gather: a PR row with no number is dropped, loudly, not placed as undefined", async (t) => {
+  const r = await gatherRows(t, { issuesJson: "[]", prsJson: JSON.stringify([{ title: "orphan pr", state: "OPEN" }]) });
   assert.deepEqual(r.prs, []);
   assert.match(r.stderr, /gh pr list: dropping row with no usable number/);
 });
@@ -485,7 +500,7 @@ test("gather: a PR row with no number is dropped, loudly, not placed as undefine
 // here exactly as it would be against GitHub, and one that stopped checking
 // for a full page would render the cut list as the whole one. The driver runs
 // the real computeBoard() over gather()'s answer: the board is the subject.
-function gatherCapped({ issues, prs }) {
+async function gatherCapped(t, { issues, prs }) {
   const cwd = tempDir("board-gather-capped-");
   const bin = tempDir("board-gather-capped-bin-");
   const scriptDir = tempDir("board-gather-capped-scripts-");
@@ -501,22 +516,14 @@ if (a[0] === "issue" && a[1] === "list") process.stdout.write(JSON.stringify(row
 else if (a[0] === "pr" && a[1] === "list") process.stdout.write(JSON.stringify(rows(${prs}, (n) => ({ number: 1000 + n, state: "OPEN", title: "t", labels: [] }))));
 else process.exit(1);
 `);
-  const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
-    const { computeBoard } = await import(${JSON.stringify(fileURLToPath(new URL("../plugin/scripts/compute-board.mjs", import.meta.url)))});
-    const inputs = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "ledger.md"))},
-                       prevFile: null, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
-    const b = computeBoard(inputs);
-    console.log(JSON.stringify({ prs: inputs.prs.length, poolCards: b.tickets.filter((t) => t.column === "POOL").length,
-      queue: b.queue, capNotice: b.capNotice }));`;
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
-    cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-  });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  return JSON.parse(r.stdout.trim().split("\n").pop());
+  const { r: inputs } = await gatherHere(t, bin, { ledgerFile: join(cwd, "ledger.md"), prevFile: null, scriptDir });
+  const b = computeBoard(inputs);
+  return JSON.parse(JSON.stringify({ prs: inputs.prs.length, poolCards: b.tickets.filter((t) => t.column === "POOL").length,
+    queue: b.queue, capNotice: b.capNotice }));
 }
 
-test("#2108: a pool read that fills its --limit renders as a floor and says so, never as an exact count", () => {
-  const b = gatherCapped({ issues: 150, prs: 0 });
+test("#2108: a pool read that fills its --limit renders as a floor and says so, never as an exact count", async (t) => {
+  const b = await gatherCapped(t, { issues: 150, prs: 0 });
   assert.equal(b.poolCards, 100, "gather() no longer asks for 100 ready-for-agent tickets");
   assert.equal(b.queue.pool, "100+", "a full page of the pool read was rendered as the exact pool size");
   assert.equal(b.queue.supply, "100+");
@@ -524,25 +531,25 @@ test("#2108: a pool read that fills its --limit renders as a floor and says so, 
   assert.doesNotMatch(b.capNotice, /open-PR/, "a pool cap was reported as an open-PR cap too");
 });
 
-test("#2108: an open-PR read that fills its --limit is disclosed on the board", () => {
-  const b = gatherCapped({ issues: 0, prs: 150 });
+test("#2108: an open-PR read that fills its --limit is disclosed on the board", async (t) => {
+  const b = await gatherCapped(t, { issues: 0, prs: 150 });
   assert.equal(b.prs, 100, "gather() no longer asks for 100 open PRs");
   assert.match(b.capNotice ?? "", /open-PR read hit its --limit/);
   assert.doesNotMatch(b.capNotice, /ready-for-agent/, "an open-PR cap was reported as a pool cap too");
   assert.equal(b.queue.pool, 0, "an open-PR cap turned the pool count into a floor");
 });
 
-test("#2108: reads one short of their limit, and past gh's bare default of 30, are exact and silent", () => {
+test("#2108: reads one short of their limit, and past gh's bare default of 30, are exact and silent", async (t) => {
   // The input the guard must ACCEPT: 99 is a complete answer, not a capped
   // one, and 35 is more than gh returns when `--limit` goes missing.
-  const b = gatherCapped({ issues: 99, prs: 35 });
+  const b = await gatherCapped(t, { issues: 99, prs: 35 });
   assert.equal(b.queue.pool, 99);
   assert.equal(b.prs, 35, "the open-PR read fell back to gh's default of 30");
   assert.equal(b.capNotice, null, "a read under its limit raised the capped-read notice");
 });
 
-test("#2108: a pool read AND an open-PR read that both fill their --limit are both disclosed", () => {
-  const b = gatherCapped({ issues: 150, prs: 150 });
+test("#2108: a pool read AND an open-PR read that both fill their --limit are both disclosed", async (t) => {
+  const b = await gatherCapped(t, { issues: 150, prs: 150 });
   assert.equal(b.queue.pool, "100+", "a simultaneous pool cap was not rendered as a floor");
   assert.equal(b.prs, 100, "gather() no longer asks for 100 open PRs");
   assert.match(b.capNotice ?? "", /ready-for-agent read hit its --limit/, "a simultaneous pool cap was not disclosed");
@@ -573,7 +580,7 @@ test("#2108: a pool read AND an open-PR read that both fill their --limit are bo
 // missing the old PR rather than passing by accident. Every invocation's
 // argv is logged, so a test can count merged reads. The driver runs the real
 // computeBoard() over gather()'s answer: the card's column is the subject.
-function gatherMerged({ rows, prs = [], prev = null, states = {}, fail = false, emptyRepo = false }) {
+async function gatherMerged(t, { rows, prs = [], prev = null, states = {}, fail = false, emptyRepo = false }) {
   const cwd = tempDir("board-gather-merged-");
   const bin = tempDir("board-gather-merged-bin-");
   const scriptDir = tempDir("board-gather-merged-scripts-");
@@ -609,34 +616,26 @@ else process.exit(1);
 `);
   const prevFile = join(cwd, "prev.json");
   if (prev) writeFileSync(prevFile, JSON.stringify(prev));
-  const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
-    const { computeBoard } = await import(${JSON.stringify(fileURLToPath(new URL("../plugin/scripts/compute-board.mjs", import.meta.url)))});
-    const inputs = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "ledger.md"))},
-                       prevFile: ${JSON.stringify(prevFile)}, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
-    const b = computeBoard(inputs);
-    console.log(JSON.stringify({ merged: inputs.merged, columns: Object.fromEntries(b.tickets.map((t) => [t.pr, t.column])) }));`;
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
-    cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-  });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const { r: inputs, stderr } = await gatherHere(t, bin, { ledgerFile: join(cwd, "ledger.md"), prevFile, scriptDir });
+  const b = computeBoard(inputs);
   const calls = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l));
   // Any read that could answer "merged": the scoped query, or a fallback to
   // the old window. Both count, so a regression to the window cannot hide.
   const mergedReads = calls.filter((c) => c[0] === "api" || c.includes("merged"));
   const asked = (c) => [...c[c.indexOf("-f") + 1].matchAll(/pullRequest\s*\(\s*number\s*:\s*(\d+)\s*\)/g)].map((m) => Number(m[1]));
-  return { ...JSON.parse(r.stdout.trim().split("\n").pop()), mergedReads, asked, stderr: r.stderr };
+  return { ...JSON.parse(JSON.stringify({ merged: inputs.merged, columns: Object.fromEntries(b.tickets.map((t) => [t.pr, t.column])) })), mergedReads, asked, stderr };
 }
 
-test("#1840: a row PR merged outside the most-recent-100 window renders MERGED with no previous board", () => {
-  const r = gatherMerged({ rows: ["#907 impl-907=PR#930"], states: { 930: "MERGED" } });
+test("#1840: a row PR merged outside the most-recent-100 window renders MERGED with no previous board", async (t) => {
+  const r = await gatherMerged(t, { rows: ["#907 impl-907=PR#930"], states: { 930: "MERGED" } });
   assert.equal(r.columns[930], "MERGED", r.stderr);
   assert.deepEqual(r.merged, [930]);
   assert.equal(r.mergedReads.length, 1);
   assert.deepEqual(r.asked(r.mergedReads[0]), [930]);
 });
 
-test("#1840: a tick whose row PRs are all open, token-MERGED or carried forward makes no merged read", () => {
-  const r = gatherMerged({
+test("#1840: a tick whose row PRs are all open, token-MERGED or carried forward makes no merged read", async (t) => {
+  const r = await gatherMerged(t, {
     rows: [
       "#901 impl-901=PR#931",
       "#902 impl-902=PR#932 → MERGED 73b356de",
@@ -654,8 +653,8 @@ test("#1840: a tick whose row PRs are all open, token-MERGED or carried forward 
   assert.equal(r.columns[933], "MERGED");
 });
 
-test("#1840: the merged lookup is ONE gh invocation asking about exactly the row PRs that need it", () => {
-  const r = gatherMerged({
+test("#1840: the merged lookup is ONE gh invocation asking about exactly the row PRs that need it", async (t) => {
+  const r = await gatherMerged(t, {
     rows: [
       "#901 impl-901=PR#931",
       "#902 impl-902=PR#932 → MERGED 73b356de",
@@ -679,8 +678,8 @@ test("#1840: the merged lookup is ONE gh invocation asking about exactly the row
   assert.equal(r.columns[960], "REVIEW", "open but beyond the open list is not merged");
 });
 
-test("#1840: a failed merged lookup keeps #1841's rule — carried forward stays MERGED, the rest reads REVIEW", () => {
-  const r = gatherMerged({
+test("#1840: a failed merged lookup keeps #1841's rule — carried forward stays MERGED, the rest reads REVIEW", async (t) => {
+  const r = await gatherMerged(t, {
     rows: ["#903 impl-903=PR#933", "#907 impl-907=PR#930"],
     prev: { tickets: [{ issue: 903, pr: 933, column: "MERGED", sinceEnteredStage: 1 }] },
     states: { 930: "MERGED" },
@@ -697,8 +696,8 @@ test("#1840: a failed merged lookup keeps #1841's rule — carried forward stays
 // amendment-2a row keyed by an issue number — makes gh exit 1, but the body
 // still answers every other number. Refusing the whole answer would let one
 // bad row put every cold-start merged PR back in REVIEW on every tick.
-test("#1840: one unresolvable number does not poison the batch — the PRs gh did answer still count", () => {
-  const r = gatherMerged({
+test("#1840: one unresolvable number does not poison the batch — the PRs gh did answer still count", async (t) => {
+  const r = await gatherMerged(t, {
     rows: ["#907 impl-907=PR#930", "#908 impl-908=PR#1840"],
     states: { 930: "MERGED" },
   });
@@ -714,8 +713,8 @@ test("#1840: one unresolvable number does not poison the batch — the PRs gh di
 // corrupted/truncated one, and readMerged() must not read it as "checked,
 // nothing merged": it has to fail loudly (log + carry-forward/REVIEW) the
 // same as any other unusable answer, not silently.
-test("#1840: an object data.repository naming none of the requested PRs is a failed read, not a clean zero-merged answer", () => {
-  const r = gatherMerged({
+test("#1840: an object data.repository naming none of the requested PRs is a failed read, not a clean zero-merged answer", async (t) => {
+  const r = await gatherMerged(t, {
     rows: ["#907 impl-907=PR#930", "#908 impl-908=PR#931"],
     emptyRepo: true,
   });
@@ -736,8 +735,8 @@ test("#1840: an object data.repository naming none of the requested PRs is a fai
 // the column-placement pin this can't reach — `open`, the boolean `state`
 // feeds, is itself never read past that comparison). Raw passthrough, pinned
 // here as gather()'s actual output shape.
-test("gather: a PR row missing state/title passes through raw, not coerced to a sentinel", () => {
-  const r = gatherRows({ issuesJson: "[]", prsJson: JSON.stringify([{ number: 77 }]) });
+test("gather: a PR row missing state/title passes through raw, not coerced to a sentinel", async (t) => {
+  const r = await gatherRows(t, { issuesJson: "[]", prsJson: JSON.stringify([{ number: 77 }]) });
   assert.equal(r.prs.length, 1);
   // Round-tripped through JSON (gatherRows' driver), so an undefined value
   // survives as an absent key, not a key holding `undefined` — same as what
@@ -750,8 +749,8 @@ test("gather: a PR row missing state/title passes through raw, not coerced to a 
 // field... doesn't fail the tick") but was never actually guarded — a
 // non-array `labels` throws `TypeError: ... .map is not a function`, crashing
 // gather() entirely rather than degrading the row.
-test("gather: a non-array labels field degrades to [], not a TypeError crash", () => {
-  const r = gatherRows({
+test("gather: a non-array labels field degrades to [], not a TypeError crash", async (t) => {
+  const r = await gatherRows(t, {
     issuesJson: JSON.stringify([{ number: 1, title: "t", labels: "not-an-array" }]),
     prsJson: JSON.stringify([{ number: 2, title: "t", state: "OPEN", labels: "not-an-array" }]),
   });
@@ -761,8 +760,8 @@ test("gather: a non-array labels field degrades to [], not a TypeError crash", (
 
 // The second reproduced crash: a `labels` array whose elements are the right
 // TYPE (an array) but a WRONG-shaped or null element throws reading `.name`.
-test("gather: a malformed element inside labels is dropped, not the whole row", () => {
-  const r = gatherRows({
+test("gather: a malformed element inside labels is dropped, not the whole row", async (t) => {
+  const r = await gatherRows(t, {
     issuesJson: JSON.stringify([{ number: 1, title: "t", labels: [{ name: "keep" }, null, {}] }]),
     prsJson: "[]",
   });
@@ -2354,6 +2353,38 @@ test("CLI: serve --spend-dir reads the named directory's spend into every tick, 
   assert.equal(body.spend.ok, true, r.stderr);
   assert.equal(body.spend.totals.cacheWrite, 1000, "the served panel must come from the named directory, not the (absent) heuristic");
   assert.equal(body.spend.top[0].label, "named");
+});
+
+// main() resolves --spend-since, --interval and whether --spend-dir was named,
+// and hands them to the tick serve() runs; gather() reads none of them from
+// argv. A tick built without one of them still serves a board — with
+// `since` null, the default interval, or a heuristic panel in place of a
+// refusal — so each is pinned here by the value the served board.json carries.
+test("CLI: serve threads --spend-since, --interval and an explicit --spend-dir into every tick", () => {
+  const since = 1789300000000;
+  const opts = serveOpts();
+  const root = tempDir("spend-threaded-");
+  const dir = join(root, "2026-08-25T09-00-00-000Z_abcdef12-3456-7890-abcd-ef1234567890");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "named.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const r = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600", "--spend-since", String(since), "--spend-dir", dir]), { ...opts, timeout: 2000 });
+  assert.notEqual(r.status, 2, r.stderr);
+  const body = JSON.parse(readFileSync(join(opts.cwd, ".fleet", "board.json"), "utf8"));
+  assert.equal(body.spend.since, since, "the served panel must carry the --spend-since the operator passed");
+  assert.equal(body.interval, 3600, "the served board must carry the --interval the operator passed");
+
+  // Explicit means the operator NAMED the directory, so a mis-levelled name is
+  // refused rather than read: the same board.json carries `ok: false` here
+  // where a tick that dropped the flag would have read the directory anyway.
+  const wrongLevel = join(root, "not-a-session-dir");
+  mkdirSync(wrongLevel, { recursive: true });
+  writeFileSync(join(wrongLevel, "named.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const opts2 = serveOpts();
+  const r2 = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600", "--spend-dir", wrongLevel]), { ...opts2, timeout: 2000 });
+  assert.notEqual(r2.status, 2, r2.stderr);
+  const body2 = JSON.parse(readFileSync(join(opts2.cwd, ".fleet", "board.json"), "utf8"));
+  assert.equal(body2.spend.ok, false, r2.stderr);
+  assert.match(body2.spend.error, /is not an omp <ISO>_<uuid> session directory/);
 });
 
 test("CLI: serve refuses a non-numeric or non-positive --interval by name", () => {

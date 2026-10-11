@@ -30,8 +30,7 @@ const HTML = readFileSync(new URL("../plugin/scripts/board.html", import.meta.ur
 
 const EMPTY_LEDGER = "# Fleet run ledger\n\n## Rows\n\n\n## Filed\n\n\n## Ruled\n\n";
 
-// gather() is driven out of process because it reads process.argv and would
-// otherwise read the test runner's. `gh` is stubbed to fail for every read:
+// `gh` is stubbed to fail for every read:
 // those all degrade through tryRun to empty lists, they are not what this
 // measures, and an unstubbed `gh` would put this repo's live issue list and the
 // machine's network in the assertion path.

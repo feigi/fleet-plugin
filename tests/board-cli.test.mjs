@@ -13,9 +13,9 @@
 // payload, the #807/#363 pipe-race cases) still run gather() to completion
 // and need the stub either way.
 //
-// gather() reads process.argv directly and die()s with process.exit(2), so it
-// cannot be called in-process the way gatherSpend() is — which is why this
-// validation shipped with no coverage at all.
+// The validation under test lives in main(), which reads process.argv directly
+// and die()s with process.exit(2), so it is driven through the real CLI rather
+// than called in-process the way gatherSpend() is.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, spawn, execFileSync } from "node:child_process";
@@ -255,10 +255,8 @@ test("build: --spend-dir accepts a session directory over a heuristic that resol
 });
 
 
-// #366: the SECOND --interval read site. gather()'s own argInterval() fallback
-// — reached only through `build`, after the same gh reads as --spend-since
-// above — is distinct from serve()'s (pinned in board.test.mjs) and a fix
-// there alone would leave this one still silently defaulting.
+// #366: the --interval read on `build`, where the value reaches the payload
+// rather than a timer — distinct from serve()'s (pinned in board.test.mjs).
 test("build: --interval abc is refused, not silently read as the 15s default", () => {
   const r = runBoard(["--interval", "abc"]);
   assert.equal(r.status, 2, r.stderr);
@@ -554,7 +552,7 @@ test("build: a ledger read past node's default stdout cap arrives whole, not as 
 // `tryParse` checks the ledger read is JSON, never that it is the
 // `{rows,filed,ruled}` shape, because ledger.mjs is this repo's own tested
 // producer of it. That read is `tryRun("node", [ledger.mjs, ...])`, backed by
-// async `execFile` (see execRead in board.mjs), so a
+// async `execFile` (see execRead in board-common.mjs), so a
 // `node` earlier on PATH is the entire fixture, and a wrong-typed `rows`
 // reaches compute-board.mjs's `(ledger.rows || []).map` with nothing between
 // the TypeError and main()'s catch.

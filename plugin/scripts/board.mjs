@@ -31,13 +31,13 @@
 // <path>` is how an operator names the right one: it overrides the
 // heuristic outright.
 
-import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, existsSync, readdirSync, statSync, writeSync } from "node:fs";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
 import {
   encodeProjectDir, isOmpSessionDirName, ompSessionTranscripts, foldOmpTranscript, ompMemberRecord,
 } from "./member-record.mjs";
-import { makeDie, defineFlags } from "./arg.mjs";
+import { defineFlags } from "./arg.mjs";
+import { NAME, die, warnOnce, execRead } from "./board-common.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { mergedReadPrs } from "./compute-board.mjs";
 // The heartbeat's liveness mark, read here and never written. The
@@ -58,11 +58,9 @@ import { createServer, request as httpRequest } from "node:http";
 import { connect } from "node:net";
 import { inspect } from "node:util";
 
-const NAME = "board";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-// die()/arg()/has() shared with the other fleet scripts — see arg.mjs for
+// arg()/has() shared with the other fleet scripts — see arg.mjs for
 // the fail-open and pipe-safety rationale.
-const die = makeDie(NAME);
 const { arg, has, sweep, stray } = defineFlags(die, {
   flags: {
     ledger: "value",
@@ -85,8 +83,8 @@ const { arg, has, sweep, stray } = defineFlags(die, {
 // A guard used to fire only where the flag was actually READ, and that
 // was not every subcommand — `port` and `open` are USED in serve() alone, so
 // `build --port` (trailing), `build --port abc` and `build --open=1` were all
-// IGNORED at exit 0 rather than refused. main() now calls argPort()/
-// has("open") once, ahead of the build/serve dispatch, so both malformed
+// IGNORED at exit 0 rather than refused. main() now reads --port and
+// --open once, ahead of the build/serve dispatch, so both malformed
 // spellings refuse on EVERY subcommand — build just discards the (validated)
 // return value, since nothing on that path has a server to bind or a browser
 // to open. A WELL-FORMED --port/--open on build still does nothing there,
@@ -95,7 +93,7 @@ const { arg, has, sweep, stray } = defineFlags(die, {
 // were already read on the build path and already refused there.
 // That last claim held for `ledger`/`spend-since`/`interval`, not for
 // `prev` — `prev` was read on `build` alone, and serve() never read it at
-// all. Hoisted in main() below, next to argPort()/has("open").
+// all. Hoisted in main() below, next to the --port/--open reads.
 
 // The "is this a plain JSON object" predicate and its kind word, one
 // copy for the reads in this file that reject a parsed-but-wrong payload
@@ -125,11 +123,9 @@ function jsonKind(v) {
 // `Number(x) || default` treated a garbage --port/--interval exactly
 // like an absent one — "abc" is NaN, NaN is falsy, so it silently became the
 // default with no refusal. Same silent-fallback class as arg()'s own comment
-// above and the --spend-since guard. `interval` is read from argv in two
-// places (serve(), and gather()'s build payload); both call argInterval() so
-// the check lives once, not as two copies that can drift apart. Neither
-// guard runs on an already-typed value a caller passed in-process — arg()
-// only fires when the caller falls through to reading raw argv.
+// above and the --spend-since guard. main() is the only caller of either and
+// hands gather() and serve() the resolved value, so neither guard runs on an
+// already-typed value a caller passed in-process.
 function argPort() {
   const raw = arg("port");
   if (raw == null) return null;
@@ -174,9 +170,8 @@ function argInterval() {
 // this fix the read sat inline inside gather(), below every stray() call on
 // every path that reaches it, so a trailing `--spend-since` ahead of a stray
 // positional refused under stray()'s generic wording instead of this one.
-// gather() still calls this itself, in the same spot, so nothing about WHEN
-// it validates changes for a caller that skips main() (same reasoning as
-// for argPort()/has("open") staying in serve() too).
+// main() is now its only caller: gather() takes the resolved value as
+// `spendSince`.
 function argSpendSince() {
   const sinceRaw = arg("spend-since");
   if (sinceRaw === null) return null;
@@ -214,63 +209,6 @@ function argSpendSince() {
 // absence of an override must not read as one.
 function argSpendDir() {
   return arg("spend-dir") ?? undefined;
-}
-
-// Node's default stdout cap is 1 MiB and a capped child read FAILS past it
-// rather than truncating. Here that failure is indistinguishable from an
-// unreachable tool: the read degrades to the caller's empty default and the
-// cockpit is served a BLANK board at HTTP 200 with only a stderr line — the
-// same blank-board symptom the old pipe-buffer limit produced, which the raised
-// ceiling moved up rather than removed.
-// The ledger is append-mostly and shared by every fleet script, so the ceiling
-// arms itself over the life of a run and gives no second warning. Bounded, not
-// Infinity: a runaway child should still be stopped rather than allowed to
-// exhaust the box. Same headroom staleness.mjs takes, for the same reason.
-//
-// Both child reads in this file take it. `tryRun` is NOT the single funnel —
-// runCiState() spawns its own, because it needs the exit code that a plain
-// tryRun discards — so a fix applied only here would leave that one uncapped.
-const READ_OPTS = { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 };
-
-// Every child read in this file is ASYNCHRONOUS, and that is
-// load-bearing rather than stylistic. serve() ticks on a timer inside the same
-// process that answers HTTP, so a SYNCHRONOUS read holds the event loop for as
-// long as the child runs — measured at 4.72–4.91s for one board — and during
-// that window this cockpit answers nothing at all. A relaunch's identity probe
-// (PROBE_TIMEOUT_MS, one retry, ~2s in total) landing inside it therefore got
-// no answer, read the port as foreign, and started a SECOND cockpit on this
-// workspace's state directory: the duplicate the launch handshake and the identity stub exist to prevent,
-// reached through timing rather than through a missing handshake. The browser
-// page stalled for the same reason and the same duration, every tick.
-//
-// One thing execFileSync did that this has to keep doing by hand: given no
-// `stdio` of its own it re-emits the child's captured stderr onto this
-// process's stderr (node's own `process.stderr.write(ret.stderr)`) BEFORE it
-// throws. That single oversized write is the subject of a flood row in the CLI tests,
-// so it is spelled out below — and on both arms, because
-// the sync one wrote whether or not it went on to throw.
-//
-// This never throws; a failure is REPORTED in the record, in the field names
-// execFileSync's throw used — `status` for an exit code, `signal` for a kill,
-// `code` for a libuv/node fault. That translation is the whole reason this is
-// not a bare `promisify(execFile)`: the async error carries the EXIT CODE in
-// `err.code` (measured: `3`, a number), where the sync one carried `ENOENT` /
-// `ENOBUFS` there and the exit code in `status`, and runCiState() below reads
-// all three to tell those causes apart.
-function execRead(cmd, args) {
-  return new Promise((resolve) => {
-    execFile(cmd, args, READ_OPTS, (err, stdout, stderr) => {
-      if (stderr) process.stderr.write(stderr);
-      resolve(err
-        ? {
-          stdout, error: err,
-          status: typeof err.code === "number" ? err.code : null,
-          code: typeof err.code === "string" ? err.code : null,
-          signal: err.signal ?? null,
-        }
-        : { stdout, error: null, status: 0, code: null, signal: null });
-    });
-  });
 }
 
 // Every external read is wrapped: a failure returns null and the caller keeps a
@@ -353,7 +291,7 @@ function tryParse(json, fallback, what) {
 // input is valid JSON, not that it is an array, so a syntactically-valid
 // object or scalar from `gh` would otherwise reach the `for...of` below and
 // throw "rows is not iterable" — an uncaught throw that reaches main()'s
-// build path or serve()'s tick catch, exactly the crash-instead-of-degrade
+// build path or the serve tick's catch, exactly the crash-instead-of-degrade
 // failure this guard exists to prevent for individual rows.
 function withNumber(rows, what) {
   if (!Array.isArray(rows)) {
@@ -555,24 +493,6 @@ async function runCiState(scriptDir, pr) {
     return null;
   }
   return out;
-}
-
-// Every warn-once gate in this file routes through here. The stored key is the
-// CHANNEL joined to the caller's key, never the caller's key alone: the gates
-// below are keyed on paths, and two of them are keyed on the SAME transcript
-// path, so a bare-key Set would let one channel's warning consume the other's
-// line for that file — a behaviour change, not a refactor. NUL joins them
-// because no channel name or path can hold one, so no two distinct (channel,
-// key) pairs can collide. Every caller keys on a PR, a path, the fault's own
-// message, or a refused Host's rendering, so `key` is never empty. Returns
-// whether it wrote, for a caller that bounds how many keys it spends.
-const warnedOnce = new Set();
-function warnOnce(channel, key, msg) {
-  const k = `${channel}\0${key}`;
-  if (warnedOnce.has(k)) return false;
-  warnedOnce.add(k);
-  console.error(`${NAME}: ${msg}`);
-  return true;
 }
 
 // The `ci-parse` gate is keyed on the PR, not on the payload: `serve` rebuilds
@@ -1009,29 +929,26 @@ function readOmpSpend(dir, sinceMs) {
 // instance to name (every gather() test driver) says so rather than omitting
 // the fields.
 //
-// `spendDir` is the caller's PINNED transcript directory and is the one
-// parameter here whose ABSENCE is not a default to fill in: serve() hands the
-// same pin's answer to every tick, and its three shapes — a directory, `null`
+// `spendDir` is the caller's transcript directory and is the one
+// parameter here whose ABSENCE is not a default to fill in: the tick loop hands
+// the same pin's answer to every tick, and its three shapes — a directory, `null`
 // for "resolved, no session yet", `{ error }` for unresolvable — all have to
-// reach gatherSpend() as themselves. Only a caller that passed nothing at all
-// falls through to the default below, which reads the override flag directly:
-// `build` is one gather per process, so it needs the override but never a pin,
-// and that read sits here for the same reason argSpendSince()'s does — a
-// caller that skips main() still validates its own argv. With neither the pin
-// nor the flag, gatherSpend() resolves for itself exactly as it did before
-// this ticket, which is what keeps `build`'s output unchanged by it.
+// reach gatherSpend() as themselves. `build` is one gather per process, so it
+// needs the --spend-dir override but never a pin, and passes the override or
+// nothing; with neither the pin nor the flag, gatherSpend() resolves for itself.
 //
-// `spendDirExplicit` is read the same way, independently of
-// `spendDir` itself: serve() always passes a resolved `spendDir` (the pin's
-// answer), never leaving it to default, so `spendDir`'s own presence cannot
-// say whether an operator named it. Whether --spend-dir was given is a fact
-// about argv, unrelated to which of gatherSpend's three shapes the pin
-// currently holds.
+// `spendDirExplicit` is passed separately from `spendDir` itself: the tick
+// loop always passes a resolved `spendDir` (the pin's answer), never leaving it
+// to default, so `spendDir`'s own presence cannot say whether an operator named
+// it. Whether --spend-dir was given is a fact about argv, unrelated to which of
+// gatherSpend's three shapes the pin currently holds. It, `spendSince` and
+// `interval` are argv's answers, resolved by the caller: nothing in here reads
+// argv.
 // Async, because every child read below is. The event loop this frees
 // belongs to serve()'s HTTP server, which shares this process — see execRead's
-// note above for what the synchronous version cost. `build` awaits it and is
+// note in board-common.mjs for what the synchronous version cost. `build` awaits it and is
 // otherwise unchanged: one gather per process, nothing else waiting on it.
-export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null, spendDir = argSpendDir(), spendDirExplicit = argSpendDir() != null }) {
+export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null, spendDir, spendDirExplicit = false, spendSince = null }) {
   // The one read that must not crash the gather: a corrupt/partial board.json
   // (the fallback safety net itself) is ignored, not fatal. That holds for a
   // SHAPE fault as much as a parse fault — the guard below rejects the
@@ -1202,11 +1119,9 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   }
 
   // The guard's own rationale (fail loud, gate on presence and on range,
-  // not just finiteness) now lives at argSpendSince()'s definition above,
-  // alongside argPort()/argInterval() — this call is unchanged in when it
-  // runs, only in where the check itself is written.
-  const sinceMs = argSpendSince();
-  const spend = gatherSpend({ dir: spendDir, sinceMs, explicit: spendDirExplicit });
+  // not just finiteness) lives at the --spend-since reader's definition above;
+  // main() runs it and hands the answer in as `spendSince`.
+  const spend = gatherSpend({ dir: spendDir, sinceMs: spendSince, explicit: spendDirExplicit });
   // The heartbeat's mark, raw. readState() never throws — an absent
   // file is the ordinary state of a run whose heartbeat has not beaten yet,
   // and an unreadable or corrupt one announces itself on stderr and degrades
@@ -1233,7 +1148,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   const stallOwnerOf = isStalled(assessBeat({ beat, ticked, now })) ? stallOwner(priorState, NAME) : null;
   return { ledger, issues, prs, merged, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, stallOwner: stallOwnerOf, poolOk,
     poolCapped, prsCapped,
-    now, interval: interval ?? argInterval() ?? 15 };
+    now, interval };
 }
 
 async function main() {
@@ -1274,15 +1189,11 @@ async function main() {
   // falling through to the usage die below — the same precedence the
   // sweep note above claims for a stray, now true of these two guards as
   // well. Both orderings are pinned in the board tests; before this fix the
-  // no-subcommand shape printed the usage line (measured). The return values are
-  // deliberately discarded on the build path: build has no server to bind or
-  // browser to open, so a WELL-FORMED --port/--open still does nothing here,
-  // exactly like before this fix — only the malformed spellings now refuse.
-  // serve() below still calls its own argPort()/has("open"); re-evaluating a
-  // pure read of argv costs nothing and keeps the EXPORTED serve() validating
-  // its own argv for a caller that skips main(). Nothing in this repo is such
-  // a caller today — every serve() test drives the real CLI, which enters
-  // main() — but serve() is public surface, so the guard stays with it.
+  // no-subcommand shape printed the usage line (measured). The values reach
+  // serve() alone: build has no server to bind or browser to open, so a
+  // WELL-FORMED --port/--open still does nothing there, exactly like before
+  // this fix — only the malformed spellings now refuse. serve() reads no argv
+  // of its own; these reads are the only ones.
   // --prev: unlike --port/--open (never read on `build` before they were hoisted) or
   // --ledger/--spend-since/--interval (already read on `build`, per the
   // header comment above), --prev was read on exactly one subcommand and it
@@ -1300,8 +1211,8 @@ async function main() {
   // gather() exactly as before — discarded on serve, same as --port/--open
   // are discarded on build.
   const prevFile = arg("prev");
-  argPort();
-  has("open");
+  const port = argPort();
+  const open = has("open");
 
   // Same fail-open shape as --port/--open above — this closes
   // the two flags that hoisting left standing. `argInterval()`'s read had
@@ -1317,21 +1228,17 @@ async function main() {
   // --open x` / `build --spend-since --open x` likewise. Same fix, same
   // place: call both here, once, ahead of the build/serve dispatch and
   // ahead of both branches' own stray() call, exactly where
-  // argPort()/has("open") already sit — build discards both return values,
-  // same as it already discards argPort()'s. serve() below still calls its
-  // own argInterval() (via `interval ?? argInterval() ?? 15`) and gather()
-  // still calls its own argSpendSince() — re-evaluating a pure read of argv
-  // costs nothing, and keeps both validating their own argv for a caller
-  // that skips main(), same reasoning as for argPort()/has("open").
-  argInterval();
-  argSpendSince();
+  // argPort()/has("open") already sit. These are now the only reads:
+  // gather() and serve() take the resolved values, and the branch below that
+  // runs hands them on.
+  const interval = argInterval() ?? 15;
+  const spendSince = argSpendSince();
   // `--spend-dir` joins them for the same two reasons, from the day it
-  // ships rather than one ticket later — it is read on both subcommands (in
-  // gather()'s default, and through serve()'s pin), and a trailing
+  // ships rather than one ticket later — it reaches both subcommands (gather()
+  // on build, the tick loop's pin on serve), and a trailing
   // `--spend-dir` ahead of a stray positional has to name itself instead of
-  // the token behind it. build discards the value here exactly as it discards
-  // argPort()'s; gather() below does the read that reaches the panel.
-  argSpendDir();
+  // the token behind it.
+  const spendDir = argSpendDir();
 
   // sweep() above only refuses a `--`-prefixed token; a bare or
   // single-dash stray alongside a valid subcommand (`build --ledger x junk`)
@@ -1378,16 +1285,108 @@ async function main() {
       // there.
       stateFile: stateFileIn(instance.stateDir),
       workspace: instance.workspace, port: instance.port,
+      interval, spendDir, spendDirExplicit: spendDir != null, spendSince,
     }));
     console.log(JSON.stringify(model, null, 2));
     return;
   }
   if (cmd === "serve") {
     stray();
-    await serve({ ledgerFile });
+    await serve({ port, interval, open, tick: await boardTick({ ledgerFile, interval, spendDir, spendSince }) });
     return;
   }
   die("usage: board.mjs build|serve [--ledger <path>] [--port N] [--interval N] [--open] [--spend-since <epoch-ms>] [--spend-dir <path>]");
+}
+
+// The tick serve() runs on its timer — gather() → computeBoard() → board.json —
+// built by main() and handed to serve(), which calls it with the port it bound
+// and the state directory, board.json path and workspace it resolved. serve()
+// owns the socket, the timer and the identity handshake; what a tick reads and
+// writes is owned here.
+//
+// The pin is built HERE, once, and read by every tick. Outside the returned
+// tick for the obvious reason — a pin rebuilt per tick is a pin in name only —
+// and ahead of serve()'s port loop because it costs nothing to carry:
+// spendDirPin() touches no filesystem until its first call, so the reuse and
+// degrade arms that exit before ticking pay nothing for it.
+async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
+  const spendPin = spendDirPin(spendDir);
+  const { computeBoard } = await import("./compute-board.mjs");
+  // One tick at a time, and the flag is load-bearing rather than defensive.
+  // The timer's callback used to be synchronous, so node could not start
+  // a second tick while the first was still inside gather() — it just fired
+  // late. An async tick has no such floor: a gather that outruns `interval`
+  // (a `gh` outage riding out its own timeouts, an operator's `--interval 1`)
+  // would let the timer stack ticks on top of each other, and each of those
+  // reads `prevFile` at its start and renames over it at its end. Two in
+  // flight means double the `gh` and `ci-state.mjs` children — the very load
+  // that made the tick slow — and, worse, a LATER-started tick can finish
+  // first and be overwritten by the older one's payload, walking every
+  // ticket's dwell clock and carried-forward CI value backwards.
+  //
+  // SKIPPED, not queued: a tick recomputes the whole board from scratch, so
+  // the one that would have been queued has nothing in it the next one does
+  // not redo. Announced once per process through the same warn-once gate
+  // every other repeating condition in this file uses — a board falling
+  // behind its interval is worth saying, and worth saying only once.
+  let ticking = false;
+  // `served` is the port this process actually BOUND, handed in rather than
+  // closed over: it is not knowable until listen() returns (--port 0 is an
+  // ephemeral bind, and serve()'s port loop may also land past a
+  // candidate it could not take), and a tick that reached for the port asked
+  // for instead would stamp every board served on an ephemeral port with a
+  // `port: 0` no browser could ever reach. A parameter makes that
+  // unreachable rather than merely unlikely — there is no earlier value in
+  // scope for it to pick up.
+  return async ({ served, stateDir, jsonPath, workspace }) => {
+    if (ticking) {
+      warnOnce("tick-overlap", String(interval),
+        `a board tick is still running after ${interval}s; skipping this one — the board will be older than its interval until the reads it is waiting on return`);
+      return;
+    }
+    ticking = true;
+    try {
+      // The identity a second launch's handshake reads off this
+      // cockpit. It rides the board payload deliberately, rather than a
+      // lockfile or a second endpoint: a payload exists only while the
+      // process serving it does, so nothing written here can outlive this
+      // cockpit and send the next launch at a port nobody holds. It is null
+      // on the degrade arm — no workspace was established — which is exactly
+      // the value no launch may ever match on.
+      //
+      // Joined at gather(), not stamped onto the finished model. The
+      // assignment that used to sit below this line wrote a field the pure
+      // model did not declare, so `build` printed a board with no identity
+      // at all and only the served copy carried one.
+      const model = computeBoard(await gather({
+        // The ledger's own default (ledger.mjs's defaultLedgerPath()) is
+        // never reached here — board.mjs always passes an explicit --file — so an
+        // absent --ledger has to be defaulted against the SAME instance the state
+        // directory came from, not a cwd-relative literal. A worktree or a
+        // subdirectory cwd previously left this pointing at a ledger.md that does
+        // not exist there, while the state directory had already moved to
+        // the workspace: the board and the ledger could disagree about which run
+        // they belonged to, exactly what resolveCockpitInstance() exists to rule
+        // out.
+        ledgerFile: ledgerFile || join(stateDir, "ledger.md"), prevFile: jsonPath, interval,
+        // Beside the ledger and out of the same state directory, so
+        // the board, the ledger and the heartbeat cannot disagree about which
+        // run they belong to — the invariant resolveCockpitInstance() exists
+        // for. Re-derived per tick rather than closed over, exactly like
+        // the ledger default: a pure join on a directory settled at bind time.
+        stateFile: stateFileIn(stateDir),
+        workspace, port: served,
+        // The pinned transcript directory, not a fresh lookup: every tick after
+        // the first gets the SAME answer, which is what stops the panel
+        // alternating between two sessions under one project directory.
+        spendDir: spendPin(), spendDirExplicit: spendDir != null, spendSince,
+      }));
+      const tmp = `${jsonPath}.tmp`;
+      writeFileSync(tmp, JSON.stringify(model));   // atomic: write tmp, rename over target
+      renameSync(tmp, jsonPath);
+    } catch (e) { console.error(`${NAME}: build tick failed: ${e.message}`); }
+    finally { ticking = false; }
+  };
 }
 
 import { copyFileSync, mkdirSync } from "node:fs";
@@ -1778,17 +1777,16 @@ export function probeCockpitWorkspace(port, timeoutMs = PROBE_TIMEOUT_MS) {
   });
 }
 
-export async function serve({ ledgerFile, port, interval, open, spendDir } = {}) {
+export async function serve({ port: portGiven, interval, open, tick }) {
   // Both the served state directory and the port come from
   // resolveCockpitInstance() now, rather than a cwd-relative `.fleet` and a
   // constant 8123. That is what lets two workspaces run two boards at once
   // without either writing into the other's state directory, and it ties the
   // board to the same workspace the ledger resolves itself against.
   //
-  // A GIVEN-but-invalid --port is refused outright by argPort() and never
-  // reaches here; an ABSENT one leaves `portGiven` nullish, which is how the
-  // seam is told to derive rather than obey. `??` and not `||`:
-  // --port 0 is a legal ephemeral bind and `||` would discard it.
+  // A GIVEN-but-invalid --port is refused outright in main() and never
+  // reaches here; an ABSENT one arrives as `portGiven` null, which is how the
+  // seam is told to derive rather than obey.
   //
   // A bind failure no longer means one thing, so the two kinds of port part
   // company here. One this script DERIVED is negotiable: the loop below
@@ -1799,100 +1797,9 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // them apart is `instance.derived` and not truthiness on `portGiven`: an
   // explicit `--port 0` is falsy (a legal ephemeral bind), so the old
   // spelling gave it the derived port's treatment, and nothing pinned that.
-  const portGiven = port ?? argPort();
-  interval = interval ?? argInterval() ?? 15;
-  open = open ?? has("open");
-  // Built HERE, once, and read by every tick below. Beside the other
-  // argv reads rather than inside tick() for the obvious reason — a pin rebuilt
-  // per tick is a pin in name only — and above the port loop because it costs
-  // nothing to carry: spendDirPin() touches no filesystem until its first call,
-  // so the reuse and degrade arms that exit before ticking pay nothing for it.
-  // `spendDir ?? argSpendDir()`, matching the `port ?? argPort()`
-  // shape above: every other argv-read option here takes an in-process
-  // override, and this one hadn't, so the only way to drive --spend-dir
-  // through `serve` at all was the real CLI — no test exercised it.
-  const spendPin = spendDirPin(spendDir ?? argSpendDir());
-  const { computeBoard } = await import("./compute-board.mjs");
   const instance = resolveCockpitInstance({ cwd: process.cwd(), ...cockpitWorkspace(process.cwd()), port: portGiven });
   const stateDir = instance.stateDir;
   const jsonPath = join(stateDir, "board.json");
-  // The ledger's own default (ledger.mjs's defaultLedgerPath()) is
-  // never reached here — board.mjs always passes an explicit --file — so an
-  // absent --ledger has to be defaulted against the SAME instance the state
-  // directory came from, not a cwd-relative literal. A worktree or a
-  // subdirectory cwd previously left this pointing at a ledger.md that does
-  // not exist there, while the state directory (above) had already moved to
-  // the workspace: the board and the ledger could disagree about which run
-  // they belonged to, exactly what resolveCockpitInstance() exists to rule
-  // out.
-  ledgerFile = ledgerFile || join(stateDir, "ledger.md");
-  // `served` is the port this process actually BOUND, handed in rather than
-  // closed over: it is not knowable until listen() returns (--port 0 is an
-  // ephemeral bind, and the loop below may also land past a
-  // candidate it could not take), and a tick that reached for `portGiven`
-  // instead would stamp every board served on an ephemeral port with a
-  // `port: 0` no browser could ever reach. A parameter makes that
-  // unreachable rather than merely unlikely — there is no earlier value in
-  // scope for it to pick up.
-  // One tick at a time, and the flag is load-bearing rather than defensive.
-  // The timer's callback used to be synchronous, so node could not start
-  // a second tick while the first was still inside gather() — it just fired
-  // late. An async tick has no such floor: a gather that outruns `interval`
-  // (a `gh` outage riding out its own timeouts, an operator's `--interval 1`)
-  // would let the timer stack ticks on top of each other, and each of those
-  // reads `prevFile` at its start and renames over it at its end. Two in
-  // flight means double the `gh` and `ci-state.mjs` children — the very load
-  // that made the tick slow — and, worse, a LATER-started tick can finish
-  // first and be overwritten by the older one's payload, walking every
-  // ticket's dwell clock and carried-forward CI value backwards.
-  //
-  // SKIPPED, not queued: a tick recomputes the whole board from scratch, so
-  // the one that would have been queued has nothing in it the next one does
-  // not redo. Announced once per process through the same warn-once gate
-  // every other repeating condition in this file uses — a board falling
-  // behind its interval is worth saying, and worth saying only once.
-  let ticking = false;
-  const tick = async (served) => {
-    if (ticking) {
-      warnOnce("tick-overlap", String(interval),
-        `a board tick is still running after ${interval}s; skipping this one — the board will be older than its interval until the reads it is waiting on return`);
-      return;
-    }
-    ticking = true;
-    try {
-      // The identity a second launch's handshake reads off this
-      // cockpit. It rides the board payload deliberately, rather than a
-      // lockfile or a second endpoint: a payload exists only while the
-      // process serving it does, so nothing written here can outlive this
-      // cockpit and send the next launch at a port nobody holds. It is null
-      // on the degrade arm — no workspace was established — which is exactly
-      // the value no launch may ever match on.
-      //
-      // Joined at gather(), not stamped onto the finished model. The
-      // assignment that used to sit below this line wrote a field the pure
-      // model did not declare, so `build` printed a board with no identity
-      // at all and only the served copy carried one.
-      const model = computeBoard(await gather({
-        ledgerFile, prevFile: jsonPath, interval,
-        // Beside the ledger and out of the same state directory, so
-        // the board, the ledger and the heartbeat cannot disagree about which
-        // run they belong to — the invariant resolveCockpitInstance() exists
-        // for. Re-derived per tick rather than closed over, exactly like
-        // `ledgerFile`: it is a pure join on a directory settled at bind time.
-        stateFile: stateFileIn(stateDir),
-        workspace: instance.workspace, port: served,
-        // The pinned transcript directory, not a fresh lookup: every tick after
-        // the first gets the SAME answer, which is what stops the panel
-        // alternating between two sessions under one project directory.
-        spendDir: spendPin(),
-      }));
-      const tmp = `${jsonPath}.tmp`;
-      writeFileSync(tmp, JSON.stringify(model));   // atomic: write tmp, rename over target
-      renameSync(tmp, jsonPath);
-    } catch (e) { console.error(`${NAME}: build tick failed: ${e.message}`); }
-    finally { ticking = false; }
-  };
-
   // A held port used to mean three different things this loop could
   // only tell apart by binding first and probing whichever candidate
   // happened to refuse — so a live cockpit that landed past a squatter
@@ -1905,7 +1812,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // Bind stays ahead of any handshake per candidate — only heldFailure()'s
   // bare connect precedes it: that is what lets two launches racing at start
   // settle on one winner quickly, the winner's identity published (below)
-  // before it can block inside its own gather().
+  // before it can block inside its own first tick.
   // But a successful bind is not the end of the story — once this process
   // holds a candidate, the REST of the window still gets checked for a
   // live cockpit that landed further along, exactly the shape a departed
@@ -2001,14 +1908,14 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   console.error(`${NAME}: cockpit on http://${COCKPIT_HOST}:${bound}  (interval ${interval}s)`);
 
   // Publish identity the instant this port is ours — before the
-  // first tick, which is the one that can be slow (gather() shells out to
+  // first tick, which is the one that can be slow (its gather shells out to
   // gh and ledger.mjs). A sibling launch races this one by sending its
   // probe as soon as ITS bind attempt refuses, which can be well before
-  // this process's first gather() ever returns; the answer that probe needs
+  // this process's first tick ever returns; the answer that probe needs
   // has to already be on disk, not waiting on a compute this process has
   // not started yet.
   // `port` rides along. This stub is a board payload like any other
-  // for as long as the first gather() takes, and a reader that finds it —
+  // for as long as the first tick takes, and a reader that finds it —
   // the operator, a script, the page — gets the same two identity fields
   // from it that every later tick writes. The handshake above still reads
   // only `workspace`.
@@ -2016,7 +1923,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   renameSync(`${jsonPath}.tmp`, jsonPath);
   // Yield once so a connection already arriving — that same sibling's probe —
   // gets a chance to read the identity just written before this process starts
-  // the first tick. The tick no longer blocks the loop, but gather()
+  // the first tick. The tick no longer blocks the loop, but its gather
   // still opens with a synchronous prev-board read before its first await, and
   // a turn of the loop costs nothing.
   await new Promise((resolve) => setImmediate(resolve));
@@ -2025,9 +1932,10 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // below it — the timer, and the two signal handlers that are the only way
   // this process is ever asked to stop — must be in place before it returns,
   // not after. Nothing here rejects; tick() catches its own faults and the
-  // `ticking` flag it sets is cleared in a finally.
-  tick(bound);
-  const timer = setInterval(() => tick(bound), interval * 1000);
+  // `ticking` flag it sets is cleared in a finally (see boardTick()).
+  const tickArgs = { served: bound, stateDir, jsonPath, workspace: instance.workspace };
+  tick(tickArgs);
+  const timer = setInterval(() => tick(tickArgs), interval * 1000);
 
   const stop = () => {
     clearInterval(timer);
