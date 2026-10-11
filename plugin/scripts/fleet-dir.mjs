@@ -140,7 +140,8 @@ function nearestExisting(path) {
  * A root inside a git work tree is refused unless `git check-ignore` says that
  * work tree ignores it: scratch inside a tree that does not ignore it is the
  * write into a repository the scratch discipline exists to prevent (`git add
- * -A` there stages it). The rule is ADR 0020's for the main checkout. A root
+ * -A` there stages it). The main checkout is held to the same rule: a write
+ * into it is refused unless `git check-ignore` says the path is ignored. A root
  * under an OUTER repository whose ignore rules cover it passes — a dotfiles
  * `$HOME` that ignores `.fleet/` is an ordinary setup.
  *

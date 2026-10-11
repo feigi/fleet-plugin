@@ -157,14 +157,19 @@ const COVERED_MJS = {
   "staleness.mjs": 1,
   // ONE spawn primitive, `trackedBasenameCounts()`'s own `git ls-files -z`.
   "pr-overlap.mjs": 1,
-  // ONE git-invoking primitive, `fleetFile()`'s `rev-parse --git-common-dir`
-  // — the probe behind every `.fleet/`-rooted file a run keeps: the ledger,
+  // TWO git-invoking primitives. `fleetFile()`'s `rev-parse --git-common-dir`
+  // is the probe behind every `.fleet/`-rooted file a run keeps: the ledger,
   // the heartbeat's state, the shortlist, the cost guard and the cockpit's
   // state directory. An ambient GIT_DIR answers it for a DIFFERENT
   // repository, which would put the run's file in that repository's
   // workspace, silently, at exit 0. Measured in fleet-dir.test.mjs, "an
   // ambient GIT_DIR naming another repository does not move the answer".
-  "fleet-dir.mjs": 1,
+  // `scratchRootRefusal()`'s `rev-parse --show-toplevel` and `check-ignore`
+  // share ONE scrubbed options object: an ambient GIT_DIR would answer them for
+  // a different repository and turn the refusal of an unignored root into a
+  // pass. Measured in scratch-root.test.mjs, "an ambient GIT_DIR cannot turn
+  // the refusal of an enclosing, unignoring repository into a pass".
+  "fleet-dir.mjs": 2,
   // TWO git-invoking primitives. `readInstruments()`'s `rev-parse
   // --git-common-dir` names the checkout instruments.sh is sent to audit. An
   // ambient GIT_DIR answers it for a DIFFERENT repository, so the gate would

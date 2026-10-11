@@ -21,11 +21,14 @@
 // `null`, which every guard here — `if (snap) {...}`, `unrunCrashed`,
 // `verdictFor` — is written against).
 //
-// Two imports. arg.mjs's isDigits(): this file is an ordinary
+// Three imports. arg.mjs's isDigits(): this file is an ordinary
 // module, so it consumes the repo's digits rule directly rather than
 // declaring its own copy. node:path's `posix`, to normalise a
 // scratch path before `runnerScratchRefusal` reads its last component, and
 // its `isAbsolute`, to refuse a scratch that is not an absolute path.
+// fleet-dir.mjs's scratchRoot() and scratchRootRefusal(), for the one caller
+// that passes no `scratch` at all — a standalone review with no dispatcher —
+// which takes the fleet's own scratch root for this repository.
 //
 // `.mjs`, not `.js`: this file was once `review-core.js`, and
 // nothing that ships declares a `type`, so Node below 20.19.0/22.7.0 —
@@ -35,6 +38,7 @@
 
 import { isAbsolute, posix } from "node:path";
 import { isDigits } from "./arg.mjs";
+import { FleetDirUnresolvable, scratchRoot, scratchRootRefusal } from "./fleet-dir.mjs";
 
 // --- Schemas ----------------------------------------------------------
 export const FINDINGS_SCHEMA = {
@@ -739,6 +743,23 @@ async function defaultPipeline(items, stage1, stage2) {
   );
 }
 
+// A review dispatched by the controller is handed its scratch root; one run on
+// its own (`/review-and-fix` with no dispatcher) resolves it the way
+// scratch-root.mjs does, through the same functions, and is refused the same
+// way when that root would sit inside a work tree that does not ignore it.
+function standaloneScratchRoot() {
+  let root;
+  try {
+    root = scratchRoot();
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
+    throw new Error(`review-pr: no args.scratch, and the scratch root could not be resolved — ${e.message}`);
+  }
+  const refusal = scratchRootRefusal(root);
+  if (refusal !== null) throw new Error(`review-pr: no args.scratch, and ${refusal}`);
+  return root;
+}
+
 export async function runReview(host, args) {
   const { agent, phase, log } = host;
   const pipeline = host.pipeline ?? defaultPipeline;
@@ -748,7 +769,7 @@ export async function runReview(host, args) {
   const pr = A.pr;
   const branch = A.branch;
   const worktree = A.worktree;
-  const scratch = A.scratch === undefined ? `/tmp/review-pr-${pr}` : A.scratch;
+  const scratch = A.scratch === undefined ? standaloneScratchRoot() : A.scratch;
   const runRootParent = `${scratch}/pr${pr}`;
   const runRootPrefix = `${runRootParent}/run-`;
   // Every dispatch label ends in `:pr${pr}`: the member id the harness derives
@@ -1062,11 +1083,13 @@ Scratch files go in ${snap.runRoot}/${d.key}/ and nowhere else. Chain the
 directory change into the command, \`cd "$D" && git …\`, never
 \`cd "$D"; git …\`, so a failed \`cd\` cannot leave a \`git\` command running in the
 checkout — and bracket a fixture's own git with \`git rev-parse --show-toplevel\`:
-before \`git init\` it must NOT resolve to the repository, and a fresh scratch
-dir's \`fatal: not a git repository\` (exit 128) is the pass, not a failure;
-before any \`git commit\` it must resolve to your scratch path — compare
-resolved forms (\`realpath\`), since \`--show-toplevel\` can report
-\`/private/tmp/…\` for a \`/tmp\` scratch dir on macOS.
+before \`git init\` it must NOT resolve to the host repository, and
+\`fatal: not a git repository\` (exit 128) is the usual pass, not a failure — an
+outer repository whose ignore rules cover your scratch dir is a pass too;
+before any \`git commit\` it must resolve to your scratch path, which catches a
+forgotten \`git init\` under any enclosing repository — compare resolved forms
+(\`realpath\`), since \`--show-toplevel\` can report a symlinked parent such as
+\`/tmp\` or a symlinked \`$HOME\` under its resolved name.
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs
 in 'suggestion', not 'critical'. State your search scope for every negative
@@ -1143,11 +1166,13 @@ an abstaining vote — an undecided run never defaults to refuted=true.
 Chain the directory change into the command, \`cd "$D" && git …\`, never
 \`cd "$D"; git …\`, so a failed \`cd\` cannot leave a \`git\` command running in the
 checkout — and bracket a fixture's own git with \`git rev-parse --show-toplevel\`:
-before \`git init\` it must NOT resolve to the repository, and a fresh scratch
-dir's \`fatal: not a git repository\` (exit 128) is the pass, not a failure;
-before any \`git commit\` it must resolve to your scratch path — compare
-resolved forms (\`realpath\`), since \`--show-toplevel\` can report
-\`/private/tmp/…\` for a \`/tmp\` scratch dir on macOS.
+before \`git init\` it must NOT resolve to the host repository, and
+\`fatal: not a git repository\` (exit 128) is the usual pass, not a failure — an
+outer repository whose ignore rules cover your scratch dir is a pass too;
+before any \`git commit\` it must resolve to your scratch path, which catches a
+forgotten \`git init\` under any enclosing repository — compare resolved forms
+(\`realpath\`), since \`--show-toplevel\` can report a symlinked parent such as
+\`/tmp\` or a symlinked \`$HOME\` under its resolved name.
 
 A failure injection with no positive control has produced NO result, never a
 negative one. Before you read an injected fault — an env var, an argv word, a

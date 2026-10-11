@@ -148,6 +148,24 @@ the poll it was waiting on was structurally incapable of firing. Say it in
 every dispatch prompt — this file is yours, not theirs, so a member learns
 it only if you write it into the prompt.
 
+**The scratch root is computed, never invented and never recorded.** No harness
+supplies a scratch directory to a member, so a member left to name its own
+invents one — and the liveness read below, which looks at the files under the
+directory a member's own prompt assigned it, then watches a directory nobody
+else can find. You run `~/.fleet/bin/fleet-run scratch-root.mjs`: it prints one
+absolute path, `~/.fleet/scratch/<repo-key>/`, the same from the main checkout
+and from every linked worktree, and the same again when a compacted or
+re-invoked controller runs it, so nothing writes it down. It exits non-zero,
+with its reason, when the root would sit inside a git work tree that does not
+ignore it; that is an environment to fix, not a cue to pick another root.
+`<scratch>` in this file is that path, resolved before you send anything: every
+prompt below that carries one carries the absolute path you wrote — an
+implementer's `<scratch>/impl-<N>/`, the recipe deriver's
+`<scratch>/derive-recipe/`, a fix-applier's, a finisher's and a merge bot's
+`<scratch>/pr<N>/…`, and a review runner's `scratch` argument, which is the
+root itself. A member whose prompt names no path asks you by name and never
+makes one up.
+
 ## Shell traps
 
 Monitor and Bash commands run under **zsh**, and the shell in this file is
@@ -453,8 +471,9 @@ phase, or in any later one, asks the maintainer which tickets to take.
    > scratch directory is `<scratch>/derive-recipe/`; write nowhere else.
    > Follow your definition's procedure exactly, and end with its report line.
 
-   `<repo>` is this main checkout's absolute path and `<scratch>` is resolved
-   to an absolute path before you send it. The member reads the repository,
+   `<repo>` is this main checkout's absolute path and `<scratch>` is the
+   absolute path `scratch-root.mjs` prints (**The scratch root is computed**
+   above), written into the prompt before you send it. The member reads the repository,
    proposes both commands and proves them with `recipe-prove.mjs` in a
    throwaway worktree of `origin/main`: the Install step must leave the tree
    clean, and the Test entrypoint must be shown to run real tests — the
@@ -1100,7 +1119,8 @@ is the body of every `agents/fleet-implementer-<cell>.agent.md`, byte-identical
 across all of them, and each harness injects it as the
 member's system prompt. Never re-paste it. The prompt fills that body's
 placeholders — the ticket number, the worktree abs path and branch
-(`<abs-path>`, `<branch>`), the scratch path `<scratch>/impl-<N>/`, and the
+(`<abs-path>`, `<branch>`), the scratch path `<scratch>/impl-<N>/` — absolute,
+`<scratch>` as `scratch-root.mjs` printed it — and the
 distilled brief (`<distilled brief>`): the title plus the `## Agent Brief`
 comment or the issue body, whichever carries the brief, and its `Out of
 scope`, pasted verbatim from the Pull's own read. Beyond those it carries only
@@ -2201,7 +2221,7 @@ report recovery, never the exit code alone.
 The tick names every PR owed one — `DISPATCH review PR#<M>`, oldest first —
 and each gets one review, once per PR:
 
-a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the five args `pr`, `branch`, `worktree`, `testCmd` and `scratch` — it loads `review-eval.mjs` through the Resolver (`~/.fleet/bin/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file into the review's own run root and reports its path and `reviewed=` token; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call. **`scratch` is the scratch root itself, never the review side's `<scratch>/pr<N>` partition:** the review creates `pr<N>/` under it, so a `pr<N>` passed in nests every run root at `pr<N>/pr<N>/`, and the review refuses a `scratch` whose last component is `pr` plus digits before dispatching anything.
+a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the five args `pr`, `branch`, `worktree`, `testCmd` and `scratch` — it loads `review-eval.mjs` through the Resolver (`~/.fleet/bin/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file into the review's own run root and reports its path and `reviewed=` token; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call. **`scratch` is the scratch root itself, the absolute path `scratch-root.mjs` prints, never the review side's `<scratch>/pr<N>` partition:** the review creates `pr<N>/` under it, so a `pr<N>` passed in nests every run root at `pr<N>/pr<N>/`, and the review refuses a `scratch` whose last component is `pr` plus digits before dispatching anything.
 
 Write the `review=` token with `ledger.mjs row`, which **replaces the whole
 line**, so carry every other field. The tick counts in-flight reviews off the
@@ -2365,7 +2385,9 @@ on record), never the PR's
 implementer, recorded with `ledger.mjs dispatch <pr#> fix-pr-<pr#>` before the
 call. Its prompt carries the PR number, the worktree abs path, the PR's branch,
 the same `testCmd` you passed the review, and the **path** `<scratch>/pr<pr>/<run>/review.json`,
-`<run>` off the PR's latest `reviewed=` — never the findings. The fix-applier owns every per-PR ruling you once made
+`<run>` off the PR's latest `reviewed=` — never the findings. Every `<scratch>`
+in that prompt is the absolute path `scratch-root.mjs` printed, the
+`dispositions-<its name>.json` record's included. The fix-applier owns every per-PR ruling you once made
 before dispatch: both mutual-exclusion scans, the suggested-fix re-derivation,
 `refuted=false` ≠ apply, per-site measurement for a sibling-site extension, and
 `testEnvironment`/`cwdAudit` before any result of the shared test run. It
@@ -2610,11 +2632,13 @@ all.
 > > `cd "$D"; git …`, so a failed `cd` cannot leave a `git` command running in
 > > the checkout — and bracket a fixture's own git with
 > > `git rev-parse --show-toplevel`: before `git init` it must NOT resolve to
-> > the repository, and a fresh scratch dir's `fatal: not a git repository`
-> > (exit 128) is the pass, not a failure; before any `git commit` it must
-> > resolve to your scratch path — compare resolved forms (`realpath`), since
-> > `--show-toplevel` can report `/private/tmp/…` for a `/tmp` scratch dir on
-> > macOS.
+> > the host repository, and `fatal: not a git repository` (exit 128) is the
+> > usual pass, not a failure — an outer repository whose ignore rules cover
+> > your scratch dir is a pass too; before any `git commit` it must resolve to
+> > your scratch path, which catches a forgotten `git init` under any enclosing
+> > repository — compare resolved forms (`realpath`), since `--show-toplevel`
+> > can report a symlinked parent such as `/tmp` or a symlinked `$HOME` under
+> > its resolved name.
 >
 > Survives → apply it, with one hold: if its refuter reports a blast radius
 > touching lines another finding also changes, that is the mutual-exclusion
@@ -2981,7 +3005,7 @@ a minute apart showed *different* mutants, so a member's report and any single
    **At your dispatch pin, never at the fetched branch tip** — duty 1 just
    proved the owned worktree sits at that pin, and `PR headRefOid` may carry
    commits no reviewer read, the substitution the halt block's head-equality
-   check rejects for the same reason. The member name is in the path because
+   check rejects for the same reason. `<scratch>` is the absolute root your dispatch prompt names. The member name is in the path because
    the scratch root is shared with every sibling, so `<scratch>/pr<N>` alone
    collides whenever a PR gets a second finisher, and `worktree add` on an
    occupied path fails closed into a halt with a purely mechanical cause.
@@ -3344,7 +3368,8 @@ touch, and to read each corrected sentence literally, clause by clause. It then
 does the fix-applier's job too:
 apply, defer, file, push, report, exit — and before it reports, it writes its
 findings as a review result file in a run root of its own, made with
-`mktemp -d "<scratch>/pr<pr>/run-XXXXXXXX"`, in the shape `review-and-fix.md`'s
+`mktemp -d "<scratch>/pr<pr>/run-XXXXXXXX"` (`<scratch>` the absolute path you
+named in its prompt), in the shape `review-and-fix.md`'s
 **The review result file** describes, and reports that file's path. On its
 report, record `reviewed=<head>:0/<refuted>/<deferred>:<run>`, `<run>` that run
 root's name, against the head it pushed — it applied
@@ -3414,7 +3439,9 @@ enough, and it never waits for the finisher's report. Tell it to read
 `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md` and run **one**
 pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace
 for late labels, then report once and exit — and say that you dispatched it,
-which is what makes it hold that grace instead of arming its own watcher. **Dispatch
+which is what makes it hold that grace instead of arming its own watcher. Its
+prompt names the absolute `<scratch>` (`scratch-root.mjs`'s output): the bot
+writes only under `<scratch>/pr<N>/merge-bot-<n>/`. **Dispatch
 it with the `agent` that `ledger.mjs dispatch merge-bot` printed and omit
 `model` on the call** — the tier lives in that definition's frontmatter,
 `agents/fleet-merge-bot.agent.md`, as the `@smol:low` route, which resolves

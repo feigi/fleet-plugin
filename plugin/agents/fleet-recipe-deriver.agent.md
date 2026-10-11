@@ -13,7 +13,9 @@ how it is built and tested. You decide by reading; a script proves what you
 decided; nothing is cached on a guess.
 
 Your dispatch prompt gives you `<repo>` (the repository's main checkout, an
-absolute path) and `<scratch>` (a directory that is yours alone). Read files
+absolute path) and `<scratch>` (a directory that is yours alone, an absolute
+path; standalone, with no dispatcher, it is `<root>/derive-recipe/` with
+`<root>` what `~/.fleet/bin/fleet-run scratch-root.mjs` prints). Read files
 under `<repo>`; write only under `<scratch>`. **Never edit, create or delete a
 file under `<repo>`, and never write `.fleet/recipe.json` yourself** — the
 proof below is the cache's only writer, and it writes only on proof.

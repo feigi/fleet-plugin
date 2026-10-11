@@ -14,13 +14,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inspect } from "node:util";
+import { mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runReview } from "../plugin/scripts/review-core.mjs";
+import { scratchRoot } from "../plugin/scripts/fleet-dir.mjs";
 import { ARGS, SNAP, pipeline, parallel, review, scriptedHost } from "./support/review-host-fixture.mjs";
 
 const PR = 42;
 
 function runWith(scratch) {
-  const base = scratch === undefined ? `/tmp/review-pr-${PR}` : scratch.replace(/\/+$/, "");
+  const base = scratch === undefined ? scratchRoot() : scratch.replace(/\/+$/, "");
   const runRoot = `${base}/pr${PR}/run-ab12`;
   const snap = { ...SNAP, runRoot, path: `${runRoot}/snapshot-abc123` };
   const { host, calls, prompts } = scriptedHost({ snapshot: [snap], "review:correctness": [review([])] });
@@ -82,3 +86,24 @@ for (const scratch of ["/x/review-pr-42", "/x/pr42x", "/x/apr42", "/x/pr", "/x/p
     );
   });
 }
+
+// An omitted scratch is a review with no dispatcher: it takes the fleet's own
+// scratch root for this repository (scratch-root.mjs's answer), never a
+// `/tmp/review-pr-<N>` of its own. Where that root cannot be resolved — no
+// repository to key it on — the review is refused before any dispatch instead
+// of falling back to some other directory.
+test("an omitted scratch with no repository to key a root on is refused before any dispatch", async () => {
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), "review-core-norepo-")));
+  const here = process.cwd();
+  process.chdir(outside);
+  try {
+    const { host, calls } = scriptedHost({ snapshot: [SNAP], "review:correctness": [review([])] });
+    await assert.rejects(runReview({ ...host, pipeline, parallel }, { ...ARGS, pr: PR, scratch: undefined }), (err) => {
+      assert.match(err.message, /^review-pr: no args\.scratch, and the scratch root could not be resolved/, err.message);
+      return true;
+    });
+    assert.deepEqual(calls, {}, `an unresolvable scratch root still dispatched: ${JSON.stringify(calls)}`);
+  } finally {
+    process.chdir(here);
+  }
+});

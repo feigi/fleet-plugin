@@ -126,6 +126,19 @@ test("a root inside a git work tree that does not ignore it is refused: exit 1, 
   assert.equal(existsSync(join(home, ".fleet")), false, "a refused root still created a directory in the repository");
 });
 
+test("an ambient GIT_DIR cannot turn the refusal of an enclosing, unignoring repository into a pass", () => {
+  const dir = repo("enclosing-ambient");
+  // A bare repository has no work tree, so an unscrubbed probe would read the
+  // enclosing repository as "not in a work tree" and let the root through.
+  const decoy = join(realpathSync(tempDir("scratch-bare-")), "bare.git");
+  git(dir, "init", "-q", "--bare", decoy);
+  const home = join(dir, "home");
+  mkdirSync(home);
+  const r = run(dir, home, { GIT_DIR: decoy });
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /inside the git work tree .*enclosing-ambient/);
+});
+
 test("a root inside an outer repository whose ignore rules cover it is accepted: exit 0, root printed", () => {
   const dir = repo("dotfiles-home");
   writeFileSync(join(dir, ".gitignore"), ".fleet/\n");

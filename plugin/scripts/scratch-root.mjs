@@ -19,7 +19,7 @@
 // on stderr, and nothing created. Exit 2: usage, or no repository to key on.
 
 import { mkdirSync } from "node:fs";
-import { makeDie, defineFlags } from "./arg.mjs";
+import { makeDie } from "./arg.mjs";
 import { FleetDirUnresolvable, scratchRoot, scratchRootRefusal } from "./fleet-dir.mjs";
 import { isCLI } from "./is-cli.mjs";
 
@@ -27,9 +27,7 @@ const NAME = "scratch-root";
 
 function main() {
   const die = makeDie(NAME);
-  const F = defineFlags(die, { flags: {} });
-  F.sweep();
-  F.stray();
+  if (process.argv.length > 2) die(`takes no arguments, got: ${process.argv.slice(2).join(" ")}`);
   let root;
   try {
     root = scratchRoot();
