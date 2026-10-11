@@ -575,18 +575,19 @@ test("a carried live bot whose settled predecessors stayed behind still numbers 
 
 test("a reviewer runner no carried row names is retired, and review refuses its name, naming the next free one", (t) => {
   const done = "reviewed=abc1234:0/0/0:run-abcdefgh";
-  const rows = ["#12 impl-12", `#20 impl-20=PR#21 → PR#21 · review=member:review-pr-21 ${done}`];
+  const rows = ["#12 impl-12", `#20 impl-20=PR#21 → PR#21 · review=member:review-pr-21 ${done} · review=fallback:review-pr-21-b=failed`];
   const f = fixture(t, { ledger: ledgerOf({ rows, dispatched: ["impl-12", "impl-20=PR#21"] }), controller: ANCESTOR });
   assert.equal(f.cli(["rotate"]).status, 0);
-  assert.deepEqual(read(f).retired, ["impl-20", "review-pr-21"]);
-  for (const kind of ["member", "fallback"]) {
-    const r = f.cli(["review", "21", `review=${kind}:review-pr-21`]);
-    assert.equal(r.status, 2, `${kind}: launched a retired runner name again`);
-    assert.match(r.stderr, /names a runner an earlier run of this session already used/, kind);
-    assert.match(r.stderr, /the next free reviewer name is review-pr-21-b/, kind);
+  assert.deepEqual(read(f).retired, ["impl-20", "review-pr-21", "review-pr-21-b"]);
+  // The next free name skips every retired letter, not only the refused one.
+  for (const [kind, name] of [["member", "review-pr-21"], ["fallback", "review-pr-21"], ["member", "review-pr-21-b"]]) {
+    const r = f.cli(["review", "21", `review=${kind}:${name}`]);
+    assert.equal(r.status, 2, `${kind}:${name}: launched a retired runner name again`);
+    assert.match(r.stderr, /names a runner an earlier run of this session already used/, `${kind}:${name}`);
+    assert.match(r.stderr, /the next free reviewer name is review-pr-21-c/, `${kind}:${name}`);
   }
   assert.equal(f.cli(["review", "22", "review=member:review-pr-22"]).status, 0, "a name the session never used is free");
-  assert.equal(f.cli(["review", "21", "review=member:review-pr-21-b"]).status, 0);
+  assert.equal(f.cli(["review", "21", "review=member:review-pr-21-c"]).status, 0);
 });
 
 test("a settled token on a row the rotate skips retires too, an unsettled one does not", (t) => {

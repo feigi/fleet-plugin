@@ -219,7 +219,7 @@ test("retiredOnLedger: a reviewer runner a row launched is retired, a workflow l
   const done = "reviewed=abc1234:0/0/0:run-abcdefgh";
   const rows = [
     `#5 impl-5=PR#6 → PR#6 · review=member:review-pr-6 ${done} · review=fallback:review-pr-6-b=failed`,
-    `#7 impl-7=PR#8 → PR#8 · review=wf:run-xyz1 ${done} · review=member:some-runner ${done}`,
+    `#7 impl-7=PR#8 → PR#8 · review=wf:review-pr-8 ${done} · review=member:some-runner ${done}`,
     `#9 impl-9=PR#10 → PR#10 · review=member:review-pr-10 ${done} · impl-10`,
   ];
   const live = liveOnLedger(rows, []);
