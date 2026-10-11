@@ -1906,6 +1906,16 @@ depth** guard table applied in code. Act on each line as it reads:
   baseline was recorded. Yours to fix: run Phase 0's `--record`. A baseline
   that vanished mid-run is not a fresh run — report it to the maintainer
   before recording over whatever the tree now holds.
+- `CHECK-LIVENESS <member> (<family> > p99 <t>m)`, printed above the rows — a
+  live ledger token has stayed live past its family's p99 run time, counted
+  from the first tick that saw it (`> 2×p99 …` from the second multiple of the
+  threshold on; `review:PR#<n>` names an in-flight `review=` launch). Advice,
+  not an action: it is not actionable, resets no `quiet`, changes no row and
+  frees no slot, and the tick settles and kills nothing. Take the census the
+  **Member unaccounted** row of **Failure handling** gives before you touch the
+  token. It repeats every tick while the token stays live past the threshold.
+  `--liveness-impl`, `--liveness-fix-pr`, `--liveness-finisher`,
+  `--liveness-merge-bot` and `--liveness-review` set the thresholds, in minutes.
 
 **Tier guards under Pull.** The per-dispatch `tier-check.mjs --batch` is
 phase 2's own step: a mismatch it finds is the
@@ -1972,6 +1982,10 @@ ticket's own remedy. A dirty or unknown main checkout still folds — clearing i
 is the maintainer's, so it is nothing for you to act on — but the folded line
 names it (`…; HOLD (main checkout dirty) persists — …`) for as long as it holds
 dispatch.
+A live member past its family's threshold folds the same way — it is advice, so
+nothing for the heartbeat to act on by itself — and the folded line names each
+such member (`…; CHECK-LIVENESS fix-pr-5 persists — …`) for as long as it stays
+live past the threshold.
 
 **When you stop on purpose, say why — one command, and it is the last thing
 you owe the next run.** The beat leaves a dated mark on every hold, so a run
@@ -4016,6 +4030,7 @@ Plan it as a PR the run's own merge queue lands, never as an edit-and-continue.
 | Member silent or truncated | Send to ping or resume — same unit of work; see the state machine below |
 | Member idle with work outstanding | Read the PR first, *then* ping. Idle ≠ done |
 | Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then new member, new name, prompt carries inherited state |
+| Member **unaccounted** (a live token the tick flags `CHECK-LIVENESS`, or any live token nothing has reported on) | Registry census first: `read history://` once. A row other than `running` → `read agent://<member>` and the artifacts (PR head, worktree, labels), settle the real outcome with the existing vocabulary, and resume a `parked` member with `write agent://<member>` when its work is worth continuing. A `running` row → the mtime discriminator below, two polls: moved means BLOCKED and alive; frozen at both polls **and** no artifact movement → `write proc://<member>/kill`, `ledger.mjs settle <member> killed`, fresh name. Three independent alive-signals — the first poll, the second poll, the artifacts — must all be silent before a kill; the tick settles and kills nothing |
 
 A red PR never silently becomes `ready-to-merge`.
 
@@ -4035,8 +4050,8 @@ moved: **mtimes that moved between the two mean BLOCKED, a live member
 still holding its claim and its worktree, so the killed row above does not
 apply to it; mtimes unchanged at both are the dead signature.** Only the first
 of those two verdicts is conclusive — a member wedged on a call that writes
-nothing freezes its scratch dir too — so settle the dead one on the liveness
-read below, never on the two listings alone. Measured once: a refuter
+nothing freezes its scratch dir too — so settle the dead one on the Member
+unaccounted row above, never on the two listings alone. Measured once: a refuter
 wedged forever on `until grep -q` for a marker `node --test` never writes, its
 transcript's record counts unchanged across two polls while its own scratch
 files carried fresh mtimes throughout — alive the entire time it read as dead.
@@ -4073,6 +4088,9 @@ One git-ignored `.fleet/ledger.md` per run, updated at **every** state change vi
 durable thing in the run: it compacts, and a controller that loses the dispatch
 map or the filed list redoes finished work. Two duplicate tickets shipped in one
 run from exactly that.
+Compaction parks every in-flight member and nothing reports it, so on resume
+take the registry census first (**Member unaccounted**, in **Failure
+handling**) before you trust a live token.
 
 **The file lives one run.** Phase 0 rotates it before anything reads it, so
 no exclusion, filing, ruling or drain marker outlives the run that wrote it,

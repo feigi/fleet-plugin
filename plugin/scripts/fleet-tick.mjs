@@ -56,6 +56,14 @@
 //             file reads DEFAULT-ONLY, the way the router (not in the tree
 //             yet) is to read it. pr-cost.mjs writes the main
 //             workspace's file by default, the one read here.
+//   seen      `seen` in the heartbeat's state file, this script's own key:
+//             when it first saw each live token. The ledger records that a
+//             member was dispatched, never when, so the age of a live token
+//             exists nowhere else. A token live past its family's threshold
+//             prints one `CHECK-LIVENESS` line — advice to the controller to
+//             take the registry census, never an action: it resets no
+//             `quiet`, changes no row and frees no slot, and the tick never
+//             settles or kills anything.
 //
 // The pure half below is `reconcile()` over the counts `deriveRun()` reads off
 // the ledger; main() does the I/O. Split so the guard table and the reading are
@@ -912,6 +920,64 @@ export function refreshWhy({ draining, status, entries, unclaimed: k, implCap })
   return null;
 }
 
+// How long, in minutes, a live token of each family may run before the tick
+// asks the controller to look at it. Each default is that family's p99
+// run time: a token past it is rare among members that finished, so a line
+// is worth a look and not noise. Measured 2026-10-11. The four member
+// families are the maintainer's reading of the omp rows of
+// member-outcomes.tsv, one family each; `review` is
+// the nearest-rank p99 of (last - first entry timestamp) over every
+// review-pr-*.jsonl under ~/.omp/agent/sessions — 77.09 min over 4751
+// transcripts, rounded up. Re-derive by re-running that query; no script
+// carries it.
+export const LIVENESS_DEFAULTS = { impl: 78, "fix-pr": 56, "finisher-pr": 57, "merge-bot": 101, review: 78 };
+// One flag per family, so a controller can tune what the defaults get wrong.
+const LIVENESS_FLAGS = {
+  impl: "liveness-impl", "fix-pr": "liveness-fix-pr", "finisher-pr": "liveness-finisher",
+  "merge-bot": "liveness-merge-bot", review: "liveness-review",
+};
+
+// A live name's family: a member token's own, or `review` for the in-flight
+// `review:PR#<n>` a `review=` launch is named by (it carries no member token).
+const livenessFamily = (name) => (name.startsWith("review:") ? "review" : parseMember(name)?.family ?? null);
+
+// The `seen` map for this tick: one stamp per live name, carried when it can
+// be trusted and `now` when not. A stamp is the age of the token, so the rule
+// is which ones still describe THIS run's token:
+//   - an `ancestor` rotate carried this run's tokens across — they are old, and
+//     their age must survive it;
+//   - `dead` and `none` carry nothing, so a stamp older than the record's `at`
+//     belongs to a token of the previous run, even one that shares its name
+//     (`merge-bot-1` is reused), and restarts at zero;
+//   - no record, or one with no `at`, leaves nothing to compare, so the stamp
+//     stands.
+// A name that is no longer live is dropped: a settled member's stamp must not
+// age a later token of the same name.
+export function stampSeen({ live, prev, controller, now }) {
+  const thisRun = (at) => controller === null || controller.prior === "ancestor" || controller.at === null || at >= controller.at;
+  const next = {};
+  for (const name of live) next[name] = prev[name] !== undefined && thisRun(prev[name]) ? prev[name] : now;
+  return next;
+}
+
+// The CHECK-LIVENESS lines: one per live name past its family's threshold, as
+// `{member, line}`. The age shows only as a multiple of the threshold, so the
+// line — and the digest `--fold-unchanged` compares — changes when a member
+// crosses into the next bucket and never on the minute between.
+export function livenessLines({ live, seen, thresholds, now }) {
+  const out = [];
+  for (const member of live) {
+    const family = livenessFamily(member);
+    if (family === null || seen[member] === undefined) continue;
+    const minutes = thresholds[family];
+    const k = Math.floor(Math.max(0, now - seen[member]) / (minutes * 60_000));
+    if (k < 1) continue;
+    const label = family === "finisher-pr" ? "finisher" : family;
+    out.push({ member, line: `CHECK-LIVENESS ${member} (${label} > ${k === 1 ? "" : `${k}×`}p99 ${k * minutes}m)` });
+  }
+  return out;
+}
+
 // --------------------------------------------------------------------------
 // I/O. Everything below runs only as a CLI — importing this file must never
 // parse argv or touch the network, or the pure half stops being unit-testable.
@@ -987,6 +1053,8 @@ const OPTIONS = {
   // under parseArgs, and no path is legitimately empty, so empty resolves to
   // the default.
   state: { type: "string", default: "" },
+  // Minutes a live token of each family may run before CHECK-LIVENESS names it.
+  ...Object.fromEntries(Object.entries(LIVENESS_FLAGS).map(([family, flag]) => [flag, { type: "string", default: String(LIVENESS_DEFAULTS[family]) }])),
 };
 
 function options() {
@@ -1017,6 +1085,7 @@ function options() {
     implCap: positive("implementer-cap"), reviewerCap,
     maxReviews: values["max-reviews"] === undefined ? reviewerCap : positive("max-reviews"),
     fold: values["fold-unchanged"], state: values.state || statePath(NAME),
+    liveness: Object.fromEntries(Object.entries(LIVENESS_FLAGS).map(([family, flag]) => [family, positive(flag)])),
   };
 }
 
@@ -1242,7 +1311,7 @@ function claimed() {
 }
 
 function main() {
-  const { fold, state: path, ...caps } = options();
+  const { fold, state: path, liveness, ...caps } = options();
   const listPath = shortlistPath();
   const current = readShortlist(listPath);
   // Beside the shortlist, off the same git probe rather than a second one.
@@ -1310,20 +1379,33 @@ function main() {
     ...caps, ...run, heads, supply, shortlistStatus: current.status, refresh: fresh, mainCheckout, router,
   });
   const said = describe(mainCheckout, run.live);
-  const lines = [...(said === null ? [] : [said]), ...formatLines(rows)];
+  // Re-read rather than reusing priorState: this must be the freshest
+  // snapshot, or this tick reverts whatever the heartbeat wrote while the
+  // reads above were in flight. Read before the lines are built because the
+  // liveness lines need the stamps it holds, and nothing between here and the
+  // write below is I/O.
+  const prev = readState(path, NAME);
+  const now = Date.now();
+  // Advisory only: a stale token prints a line asking the controller for the
+  // registry census. It is not a row — it resets no `quiet`, moves no count
+  // and frees no slot — and nothing here settles, kills or writes the ledger.
+  const seen = stampSeen({ live: run.live, prev: prev.seen, controller: prev.controller, now });
+  const stale = livenessLines({ live: run.live, seen, thresholds: liveness, now });
+  const lines = [...(said === null ? [] : [said]), ...stale.map((s) => s.line), ...formatLines(rows)];
 
   // The back-off streak and the fold digest, written on EVERY tick: an edge
   // tick that dispatched is the clearest possible "there is work here". Digest,
-  // not the lines themselves, so the file stays readable. Re-read rather than
-  // reusing priorState: this must be the freshest snapshot, or this tick
-  // reverts whatever the heartbeat wrote while the reads above were in flight.
-  const prev = readState(path, NAME);
+  // not the lines themselves, so the file stays readable.
   const digest = createHash("sha256").update(lines.join("\n")).digest("hex");
   const acts = actionable(rows);
   // `ticked`, fleet-tick's own liveness key: written on every tick that gets
   // past its refusals — a refused tick (exit 2) writes none; this tick
-  // reaching here IS the occurrence.
-  writeState(path, NAME, prev, { quiet: acts ? 0 : prev.quiet + 1, digest, ticked: { at: Date.now() } });
+  // reaching here IS the occurrence. `seen` is pruned to the live set on the
+  // same write; an empty one removes the key.
+  writeState(path, NAME, prev, {
+    quiet: acts ? 0 : prev.quiet + 1, digest, ticked: { at: now },
+    seen: Object.keys(seen).length > 0 ? seen : undefined,
+  });
 
   // Fold only when BOTH hold: nothing to act on, and nothing new to say. A
   // main-checkout hold still holding dispatch stays named on the folded line
@@ -1333,7 +1415,11 @@ function main() {
   if (fold && !acts && digest === prev.digest) {
     const why = mainCheckoutHoldReason(mainCheckout);
     const held = why === null ? "" : `; HOLD (${why}) persists`;
-    console.log(`fleet-tick: unchanged, nothing to act on (quiet=${prev.quiet + 1})${held} — full rows on the next change`);
+    // A stale member persists the same way: advisory, so it never resets
+    // `quiet`, and named on the folded line for as long as it stays live
+    // past its threshold. The digest already moves when its bucket does.
+    const aged = stale.map((s) => `; CHECK-LIVENESS ${s.member} persists`).join("");
+    console.log(`fleet-tick: unchanged, nothing to act on (quiet=${prev.quiet + 1})${held}${aged} — full rows on the next change`);
     return;
   }
   for (const line of lines) console.log(line);

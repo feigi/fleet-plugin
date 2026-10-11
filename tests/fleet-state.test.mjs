@@ -220,6 +220,48 @@ test("writeState: `controller` survives a tick write and a heartbeat write, and 
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("writeState: `seen` survives a heartbeat write and a controller write, is read per entry, and a patch of undefined removes it", () => {
+  // fleet-tick is the key's one writer; fleet-heartbeat and ledger.mjs rotate
+  // rewrite the file on every hold and every rotation, and a key either of
+  // them dropped would restart every live token's age.
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-seen-"));
+  const path = join(dir, "heartbeat.json");
+  const seen = { "fix-pr-5": 1_700_000_000_000, "review:PR#6": 1_700_000_100_000 };
+  writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", seen, note: "not ours" }));
+  const prev = readState(path, "fleet-state-test");
+  assert.deepEqual(prev.seen, seen);
+  assert.deepEqual(prev.rest, { note: "not ours" }, "`seen` must be destructured out, not left in `rest`");
+  const beat = { at: 1_700_000_000_000, interval: 300, stopped: "" };
+  assert.equal(writeState(path, "fleet-state-test", prev, { elapsed: 5, beat }), true);
+  assert.deepEqual(readState(path, "fleet-state-test").seen, seen, "a heartbeat write erased `seen`");
+  const controller = { pid: 29405, lstart: "Fri Oct  9 14:26:16 2026", prior: "ancestor", at: 1_700_000_000_000 };
+  assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { controller }), true);
+  assert.deepEqual(readState(path, "fleet-state-test").seen, seen, "a rotate write erased `seen`");
+
+  // A tick write replaces the whole map: the pruned set is what it passes.
+  assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { seen: { "fix-pr-5": seen["fix-pr-5"] } }), true);
+  assert.deepEqual(readState(path, "fleet-state-test").seen, { "fix-pr-5": seen["fix-pr-5"] });
+
+  assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { seen: undefined }), true);
+  assert.equal("seen" in JSON.parse(readFileSync(path, "utf8")), false);
+  assert.deepEqual(readState(path, "fleet-state-test").seen, {});
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("readState: `seen` keeps each valid stamp and drops each junk one, never the whole map", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-seen-shape-"));
+  const path = join(dir, "heartbeat.json");
+  const read = (seen) => {
+    writeFileSync(path, JSON.stringify({ quiet: 3, seen }));
+    return readState(path, "fleet-state-test");
+  };
+  for (const bad of [undefined, null, "x", 7, [1_700_000_000_000]]) assert.deepEqual(read(bad).seen, {}, JSON.stringify(bad));
+  assert.deepEqual(read({ a: 1_700_000_000_000, b: 0, c: -5, d: 1.5, e: "1700000000000", f: null }).seen, { a: 1_700_000_000_000 });
+  // A junk `seen` costs ages, never the streak beside it.
+  assert.equal(read("junk").quiet, 3);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("readState: `controller` is a record only with a pid and a start time; a junk prior reads as none", () => {
   const dir = mkdtempSync(join(tmpdir(), "fleet-state-controller-shape-"));
   const path = join(dir, "heartbeat.json");
@@ -274,6 +316,26 @@ test("writeState: a write that cannot land leaves no temp file behind", () => {
   assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { quiet: 1 }), false);
   assert.deepEqual(readdirSync(dir), ["heartbeat.json"]);
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("writeState: a failed write names the liveness ages as well as the back-off progress it loses", (t) => {
+  // fleet-tick ignores the boolean, so the warning is the only place a failed
+  // write is seen. `seen` rides the same write as `quiet`: with the file
+  // unwritable the stamps never persist, every tick re-stamps live tokens at
+  // `now`, and no CHECK-LIVENESS line is ever printed. A warning naming only
+  // the back-off streak would leave that silence unexplained.
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-unlandable-"));
+  const path = join(dir, "heartbeat.json");
+  mkdirSync(path);
+  writeFileSync(join(path, "occupant"), "x");
+  const lines = [];
+  t.mock.method(console, "error", (line) => { lines.push(String(line)); });
+  assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { quiet: 1 }), false);
+  rmSync(dir, { recursive: true, force: true });
+  const warning = lines.find((l) => l.includes("WARNING could not write"));
+  assert.ok(warning, `no write warning among ${JSON.stringify(lines)}`);
+  assert.match(warning, /back-off progress/, "the warning keeps naming the back-off streak");
+  assert.match(warning, /liveness ages/, "the warning names the liveness ages the tick's seen key holds");
 });
 
 test("writeState: two scripts writing the file at once both land — neither takes the other's temp", async () => {
