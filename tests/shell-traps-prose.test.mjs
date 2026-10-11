@@ -26,15 +26,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
-import { paragraph } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { join } from "node:path";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
 const SKILLS = join(import.meta.dirname, "..", "plugin", "skills");
-const SKILL = readFileSync(join(SKILLS, "run-team", "SKILL.md"), "utf8");
-const MERGE_BOT = readFileSync(join(import.meta.dirname, "..", "plugin", "commands", "run-merge-bot.md"), "utf8");
+const SKILL = Pin.file(join(SKILLS, "run-team", "SKILL.md"));
+const MERGE_BOT = Pin.file(join(import.meta.dirname, "..", "plugin", "commands", "run-merge-bot.md")).text;
 
 const DIR = tempDir("shell-traps-");
 const BIN = join(DIR, "bin");
@@ -64,24 +64,10 @@ const sh = (shell, script, env = {}) => {
 
 // Slice to the section, so a sentence elsewhere in a 3000-line file can never
 // stand in for one here. Anchored on the heading text, never on an offset.
-const section = (doc, heading) => {
-  const start = doc.indexOf(`\n## ${heading}\n`);
-  assert.notEqual(start, -1, `run-team/SKILL.md no longer has a '## ${heading}' section — this ticket put it there`);
-  const rest = doc.slice(start + 1);
-  const end = rest.indexOf("\n## ", 1);
-  return end === -1 ? rest : rest.slice(0, end);
-};
-
-const TRAPS = section(SKILL, "Shell traps");
+const TRAPS = SKILL.section("## Shell traps", "run-team/SKILL.md").text;
 
 // The three-value list the section's own table is measured against.
 const LIST = "849\\n850\\n852\\n";
-
-// A literal phrase as a regex that tolerates re-wrapping: every run of
-// whitespace matches any run. The CLAIM is what these tests pin; where the
-// editor's line breaks fall is not, and a pin that reddens on a reflow is one
-// the next reader weakens instead of reading.
-const phrase = (s) => new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+"));
 
 test("the section exists and is the only place the zsh loop family is stated, in either document", () => {
   // The mechanism sentence lives once. The two seats that consume it cite the
@@ -90,10 +76,10 @@ test("the section exists and is the only place the zsh loop family is stated, in
   // that copy lands back in SKILL.md or in run-merge-bot.md, the document this
   // ticket edits most heavily and whose own brief bullet was replaced by a
   // pointer.
-  const mechanism = phrase("word-splits an unquoted command substitution's result; it does NOT split an unquoted parameter expansion");
+  const mechanism = Pin.phrase("word-splits an unquoted command substitution's result; it does NOT split an unquoted parameter expansion");
   assert.match(TRAPS, mechanism, "the Shell traps section dropped the mechanism sentence");
 
-  const elsewhere = SKILL.replace(TRAPS, "") + MERGE_BOT;
+  const elsewhere = SKILL.text.replace(TRAPS, "") + MERGE_BOT;
   assert.ok(
     !/zsh has no `PIPESTATUS`/.test(elsewhere),
     "a second copy of the PIPESTATUS trap is back outside Shell traps — #854 collapsed them into one seat",
@@ -108,7 +94,7 @@ test("both consumer seats reach the section instead of restating it", () => {
   // Phase 3 writes the CI watcher's loop; the merge-bot brief is where a bot
   // gets the same traps. The ticket's ruling is that neither carries its own
   // copy, so each has to name the section.
-  const watcherPara = paragraph(SKILL, "**Guard every probe, not just the ones with a verdict field.**", "phase 3's monitor paragraph", "**A readable list can still be a short one.**");
+  const watcherPara = SKILL.paragraph("**Guard every probe, not just the ones with a verdict field.**", "phase 3's monitor paragraph", "**A readable list can still be a short one.**").text;
   // The citation is the section NAME, in whatever emphasis the sentence wants.
   // Pinning `**Shell traps**` exactly would fail on a bold span that opens
   // earlier in the clause, which is a rewording rather than a lost pointer.
@@ -120,7 +106,7 @@ test("both consumer seats reach the section instead of restating it", () => {
 
   // The brief's one bullet since #1806 retired the gate traps into
   // merge-gate.mjs: sliced to that paragraph alone.
-  const briefPara = paragraph(SKILL, "**Put the shell traps in the bot's brief", "the merge bot's shell-traps brief paragraph", "**Its merge gate is one script, run twice.**");
+  const briefPara = SKILL.paragraph("**Put the shell traps in the bot's brief", "the merge bot's shell-traps brief paragraph", "**Its merge gate is one script, run twice.**").text;
   assert.match(
     briefPara,
     /\bShell traps\b/,
@@ -146,18 +132,18 @@ test("the section states the rule in the corrected direction", () => {
   // either one leaves a reader able to infer the wrong discriminator.
   assert.match(
     TRAPS,
-    phrase("hazard is the **assigned-variable** form, never `$(…)`"),
+    Pin.phrase("hazard is the **assigned-variable** form, never `$(…)`"),
     "Shell traps no longer names the assigned-variable form as the hazard — #854's whole correction is that direction",
   );
-  assert.match(TRAPS, phrase("`$(…)` splits. Leave it alone."), "Shell traps stopped blessing the command-substitution form");
+  assert.match(TRAPS, Pin.phrase("`$(…)` splits. Leave it alone."), "Shell traps stopped blessing the command-substitution form");
   assert.match(
     TRAPS,
-    phrase("Capture-then-loop needs `while IFS= read -r` fed by a heredoc"),
+    Pin.phrase("Capture-then-loop needs `while IFS= read -r` fed by a heredoc"),
     "Shell traps no longer prescribes the heredoc-fed `while IFS= read -r` remedy",
   );
   assert.match(
     TRAPS,
-    phrase("`</dev/null` every command inside a `while read` loop"),
+    Pin.phrase("`</dev/null` every command inside a `while read` loop"),
     "Shell traps dropped the `</dev/null` rule — the remedy it prescribes is unsafe without it",
   );
 });
@@ -229,7 +215,7 @@ test("the probe-could-not-look rule is stated as its own instruction", () => {
   // whether or not its loop iterates.
   assert.match(
     TRAPS,
-    phrase("**A probe that could not look emits an event; it never `continue`s.**"),
+    Pin.phrase("**A probe that could not look emits an event; it never `continue`s.**"),
     "Shell traps lost the probe-could-not-look instruction",
   );
   assert.match(
@@ -302,7 +288,7 @@ test("no prescriptive loop in either document iterates a bare parameter", () => 
   const blocks = [
     ["run-merge-bot.md's stay-armed monitor", MONITOR],
     ["run-team/SKILL.md's degraded-watcher block", (() => {
-      const b = [...SKILL.matchAll(/```sh\n([\s\S]*?)```/g)].map((m) => m[1]).filter((x) => x.includes("WATCHER DEGRADED"));
+      const b = [...SKILL.text.matchAll(/```sh\n([\s\S]*?)```/g)].map((m) => m[1]).filter((x) => x.includes("WATCHER DEGRADED"));
       assert.equal(b.length, 1, `expected exactly one sh block emitting WATCHER DEGRADED, found ${b.length} — update this test`);
       return b[0];
     })()],
@@ -496,7 +482,7 @@ test("run-merge-bot.md's bounded poll is left alone — it is not an instance", 
   // retracted version. Pin the form so that edit has to argue with a test.
   assert.match(
     MERGE_BOT,
-    phrase("for _ in $(seq 1 60); do"),
+    Pin.phrase("for _ in $(seq 1 60); do"),
     "step 1's bounded poll was rewritten — it is a command substitution, it splits correctly (60 iterations, measured), and #854's filer retracted the claim that it was broken",
   );
 });
