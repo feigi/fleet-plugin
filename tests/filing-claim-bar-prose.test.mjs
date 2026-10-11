@@ -41,6 +41,18 @@
 // Trigger A's 5 reddened only the older guard pin. Controls: the ADR's Trigger
 // A bullet reflowed onto one line and an unpinned step-5 sentence reworded both
 // stayed green.
+//
+// #2216 added the prose-guard stakes pins: a gap in a guard over prose nothing
+// acts on sits below the claim bar, and a gap below the bar is recorded
+// `claimKind: shape`. Measured on a copy of the tree with restore after each,
+// by the narrowed run of this file: the exception's `unless` inverted to `even
+// if`, the exception clause deleted, and its program-reads clause dropped each
+// reddened the stakes-bar pin and no other; `claimKind: shape` reworded to
+// `claimKind: behavior`, and the whole routing sentence deleted, each
+// reddened the routing pin and no other. Controls: the guard-code stakes
+// sentence deleted, and an aside added inside the routing sentence's opening
+// clause, both stayed green — the first is unpinned, the second is the
+// presence-and-adjacency ceiling above.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -73,7 +85,7 @@ test("step 5 states the claim bar: shaped-better findings never get their own op
 
 test("step 5 puts a prose-guard gap below the claim bar unless something acts on the guarded text", () => {
   // The bar and its exception as ONE span, for the reason the test above
-  // gives: pinned apart, a clause spliced between "below" and "unless"
+  // gives: pinned apart, a clause spliced between "Neither does" and "unless"
   // satisfies both halves and drops the exception.
   assert.match(
     step5(),
@@ -81,6 +93,16 @@ test("step 5 puts a prose-guard gap below the claim bar unless something acts on
       "**Neither does a gap in a prose guard — a test holding prose to its wording — unless something acts on the guarded text: an agent follows it as an instruction (a skill, a command, an agent definition, a script's header or usage text, `AGENTS.md`), or a program other than its own guard reads it.**",
     ),
     "step 5 lost the prose-guard stakes bar — a gap in a guard over prose nothing acts on files as its own open issue again",
+  );
+});
+
+test("step 5 records a prose-guard gap below the bar as claimKind shape", () => {
+  // The carrier of the routing: without it a below-bar gap has no stated way
+  // to the closed record, and every pin around it stays green.
+  assert.match(
+    step5(),
+    phrase("a gap below this bar is recorded `claimKind: shape`"),
+    "step 5 lost the claimKind routing — a below-bar prose-guard gap no longer reaches the closed record",
   );
 });
 
