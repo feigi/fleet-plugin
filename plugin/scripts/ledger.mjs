@@ -38,7 +38,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, liveOnLedger, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, ROWS, DISPATCHED, FILED, RULED, DRAIN, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, liveOnLedger, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, premisesOf, ROWS, DISPATCHED, FILED, RULED, DRAIN, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { isDead, processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -816,10 +816,11 @@ if (cmd === "read") {
   }
   const i = data.rows.findIndex((r) => r.split(/\s/)[0] === key);
   const created = i === -1;
+  const oldRow = created ? null : data.rows[i];
   const after = created ? [...data.rows, line] : data.rows.with(i, line);
   // Every review token is `review`'s to write, onto the PR's row in write
   // order, so `row` adds none; one the row already holds is carried.
-  const reviewToken = addedReviewToken(created ? null : data.rows[i], line);
+  const reviewToken = addedReviewToken(oldRow, line);
   if (reviewToken !== undefined) {
     die(`row ${key}: adds review token '${reviewToken}' — review tokens are written only with \`ledger.mjs review <pr> <token>…\`, which puts them on the PR's row`);
   }
@@ -836,7 +837,7 @@ if (cmd === "read") {
   // a review. Refused here, with a member named twice on one line, before
   // anything is written; what the ledger already held is carried, never
   // re-judged. Local only.
-  const refusal = rowWriteRefusal(data.rows, after, created ? null : data.rows[i], line);
+  const refusal = rowWriteRefusal(data.rows, after, oldRow, line);
   if (refusal !== null) die(`row ${key}: ${refusal}`);
   data.rows = after;
   // Logged only after save() returns — a failed write must not claim a row
@@ -2014,10 +2015,13 @@ function runSettle() {
   // reads only the LAST). Any row keyed to the PR that no implementer claims
   // as its own is folded, a review-only one included: no token about the PR
   // can sit on this row before it names `PR#M`, so the folded row's tail,
-  // appended after this row's tokens, keeps write order.
+  // appended after this row's tokens, keeps write order. An Exclusion row is
+  // never folded: it is keyed to a TICKET number, so one keyed `#M` here is
+  // an unrelated ticket's premise on a mistyped PR number, and folding it
+  // would delete state a settled member can never restore.
   const prNum = outcome.startsWith("PR#") ? Number(outcome.slice("PR#".length)) : null;
   const j = prNum === null || i === -1 || priorPr !== null ? -1
-    : data.rows.findIndex((r) => rowKey(r) === `#${prNum}` && !memberTokens(r).some((t) => t.family === "impl"));
+    : data.rows.findIndex((r) => rowKey(r) === `#${prNum}` && !memberTokens(r).some((t) => t.family === "impl") && premisesOf(r) === null);
   if (j !== -1) {
     const tail = data.rows[j].slice(`#${prNum}`.length).trim();
     if (tail !== "") data.rows[i] = `${data.rows[i]} · ${tail}`;

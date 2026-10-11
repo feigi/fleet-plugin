@@ -259,7 +259,8 @@ function prRowKeys(rows) {
 
 /**
  * `{pr, row}` for the first PR that maps to more than one row in `after` and
- * did not in `before` — `row` the key of the PR's row as `before` holds it —
+ * did not in `before` — `row` the key of the PR's row as `before` holds it,
+ * else (`before` held no row for that PR) the first key `after` maps it to —
  * else null. Added only: a split already on the ledger never blocks a write.
  */
 export function newSplitRow(before, after) {

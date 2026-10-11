@@ -664,6 +664,17 @@ test("settle folds a #M row no implementer claims, a review-only one included", 
   assert.deepEqual(read().rows, ["#351 impl-351=PR#358 · review=member:review-pr-358", "#360 impl-360=PR#361 · PR#361 · ci=1:1:success"]);
 });
 
+// An Exclusion row is keyed to a ticket, so one keyed `#M` is a premise on a
+// mistyped PR number, never a row for PR M: the fold leaves it alone, since
+// folding it would delete the premise a settled member can never restore.
+test("settle to a mistyped PR number does not fold an Exclusion row keyed #M", (t) => {
+  const { ok, read } = fixture(t);
+  ok("row", "358", "excluded · behind-pr:#346");
+  ok("dispatch", "351", "impl-351");
+  assert.equal(ok("settle", "impl-351", "PR#358").line, "#351 impl-351=PR#358");
+  assert.deepEqual(read().rows, ["#358 excluded · behind-pr:#346", "#351 impl-351=PR#358"]);
+});
+
 // Two genuinely separate PR-bound dispatches (a fix-pr and, after its own
 // settle, a finisher-pr replacement) can land on the same fallback row via
 // runDispatch()'s rowKey fallback — not just one `row` call's worth of
