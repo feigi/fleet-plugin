@@ -11,14 +11,13 @@ export const NAME = "board";
 export const die = makeDie(NAME);
 
 // Every warn-once gate in board.mjs routes through here. The stored key is the
-// CHANNEL joined to the caller's key, never the caller's key alone: the gates
-// are keyed on paths, and two of them are keyed on the SAME transcript
-// path, so a bare-key Set would let one channel's warning consume the other's
-// line for that file — a behaviour change, not a refactor. NUL joins them
-// because no channel name or path can hold one, so no two distinct (channel,
-// key) pairs can collide. Every caller keys on a PR, a path, the fault's own
-// message, or a refused Host's rendering, so `key` is never empty. Returns
-// whether it wrote, for a caller that bounds how many keys it spends.
+// CHANNEL joined to the caller's key, never the caller's key alone: gates share
+// key values — ci-salvage-nonzero, ci-salvage-exit0 and ci-parse are all keyed
+// on the same PR — so a bare-key Set would let one channel's warning consume
+// another's line for that PR, a behaviour change, not a refactor. NUL joins
+// them because no channel name holds one, so the joined string splits back to
+// exactly one (channel, key) pair whatever the key holds. Returns whether it
+// wrote, for a caller that bounds how many keys it spends.
 const warnedOnce = new Set();
 export function warnOnce(channel, key, msg) {
   const k = `${channel}\0${key}`;
@@ -58,9 +57,8 @@ export const READ_OPTS = { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 };
 // One thing execFileSync did that this has to keep doing by hand: given no
 // `stdio` of its own it re-emits the child's captured stderr onto this
 // process's stderr (node's own `process.stderr.write(ret.stderr)`) BEFORE it
-// throws. That single oversized write is the subject of a flood row in the CLI tests,
-// so it is spelled out below — and on both arms, because
-// the sync one wrote whether or not it went on to throw.
+// throws. That write is spelled out below, and on both arms, because the sync
+// one wrote whether or not it went on to throw.
 //
 // This never throws; a failure is REPORTED in the record, in the field names
 // execFileSync's throw used — `status` for an exit code, `signal` for a kill,

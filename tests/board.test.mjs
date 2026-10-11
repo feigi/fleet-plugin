@@ -2355,6 +2355,38 @@ test("CLI: serve --spend-dir reads the named directory's spend into every tick, 
   assert.equal(body.spend.top[0].label, "named");
 });
 
+// main() resolves --spend-since, --interval and whether --spend-dir was named,
+// and hands them to the tick serve() runs; gather() reads none of them from
+// argv. A tick built without one of them still serves a board — with
+// `since` null, the default interval, or a heuristic panel in place of a
+// refusal — so each is pinned here by the value the served board.json carries.
+test("CLI: serve threads --spend-since, --interval and an explicit --spend-dir into every tick", () => {
+  const since = 1789300000000;
+  const opts = serveOpts();
+  const root = tempDir("spend-threaded-");
+  const dir = join(root, "2026-08-25T09-00-00-000Z_abcdef12-3456-7890-abcd-ef1234567890");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "named.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const r = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600", "--spend-since", String(since), "--spend-dir", dir]), { ...opts, timeout: 2000 });
+  assert.notEqual(r.status, 2, r.stderr);
+  const body = JSON.parse(readFileSync(join(opts.cwd, ".fleet", "board.json"), "utf8"));
+  assert.equal(body.spend.since, since, "the served panel must carry the --spend-since the operator passed");
+  assert.equal(body.interval, 3600, "the served board must carry the --interval the operator passed");
+
+  // Explicit means the operator NAMED the directory, so a mis-levelled name is
+  // refused rather than read: the same board.json carries `ok: false` here
+  // where a tick that dropped the flag would have read the directory anyway.
+  const wrongLevel = join(root, "not-a-session-dir");
+  mkdirSync(wrongLevel, { recursive: true });
+  writeFileSync(join(wrongLevel, "named.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const opts2 = serveOpts();
+  const r2 = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600", "--spend-dir", wrongLevel]), { ...opts2, timeout: 2000 });
+  assert.notEqual(r2.status, 2, r2.stderr);
+  const body2 = JSON.parse(readFileSync(join(opts2.cwd, ".fleet", "board.json"), "utf8"));
+  assert.equal(body2.spend.ok, false, r2.stderr);
+  assert.match(body2.spend.error, /is not an omp <ISO>_<uuid> session directory/);
+});
+
 test("CLI: serve refuses a non-numeric or non-positive --interval by name", () => {
   for (const v of ["abc", "0", "-5"]) {
     const r = spawnSync(process.execPath, serveArgs(["--interval", v]), serveOpts());

@@ -1300,8 +1300,9 @@ async function main() {
 
 // The tick serve() runs on its timer — gather() → computeBoard() → board.json —
 // built by main() and handed to serve(), which calls it with the port it bound
-// and the instance it resolved. serve() owns the socket, the timer and the
-// identity handshake; what a tick reads and writes is owned here.
+// and the state directory, board.json path and workspace it resolved. serve()
+// owns the socket, the timer and the identity handshake; what a tick reads and
+// writes is owned here.
 //
 // The pin is built HERE, once, and read by every tick. Outside the returned
 // tick for the obvious reason — a pin rebuilt per tick is a pin in name only —
@@ -1337,7 +1338,7 @@ async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
   // `port: 0` no browser could ever reach. A parameter makes that
   // unreachable rather than merely unlikely — there is no earlier value in
   // scope for it to pick up.
-  return async (served, instance) => {
+  return async ({ served, stateDir, jsonPath, workspace }) => {
     if (ticking) {
       warnOnce("tick-overlap", String(interval),
         `a board tick is still running after ${interval}s; skipping this one — the board will be older than its interval until the reads it is waiting on return`);
@@ -1345,8 +1346,6 @@ async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
     }
     ticking = true;
     try {
-      const stateDir = instance.stateDir;
-      const jsonPath = join(stateDir, "board.json");
       // The identity a second launch's handshake reads off this
       // cockpit. It rides the board payload deliberately, rather than a
       // lockfile or a second endpoint: a payload exists only while the
@@ -1376,7 +1375,7 @@ async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
         // for. Re-derived per tick rather than closed over, exactly like
         // the ledger default: a pure join on a directory settled at bind time.
         stateFile: stateFileIn(stateDir),
-        workspace: instance.workspace, port: served,
+        workspace, port: served,
         // The pinned transcript directory, not a fresh lookup: every tick after
         // the first gets the SAME answer, which is what stops the panel
         // alternating between two sessions under one project directory.
@@ -1934,8 +1933,9 @@ export async function serve({ port: portGiven, interval, open, tick }) {
   // this process is ever asked to stop — must be in place before it returns,
   // not after. Nothing here rejects; tick() catches its own faults and the
   // `ticking` flag it sets is cleared in a finally (see boardTick()).
-  tick(bound, instance);
-  const timer = setInterval(() => tick(bound, instance), interval * 1000);
+  const tickArgs = { served: bound, stateDir, jsonPath, workspace: instance.workspace };
+  tick(tickArgs);
+  const timer = setInterval(() => tick(tickArgs), interval * 1000);
 
   const stop = () => {
     clearInterval(timer);
