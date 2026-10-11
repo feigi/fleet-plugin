@@ -460,6 +460,8 @@ test("a test command whose glob matches a tracked file, or that the tree cannot 
     "node --test 'gone/**/*.test.mjs'",
     `node --test "gone/*.test.mjs"`,
     "node --test $SUITE/*.test.mjs",
+    "node --test gone/{a,b}*.test.mjs",
+    "node --test ~/gone/*.test.mjs",
     "SKIP=gone/* node --test tests/unit/*.test.mjs",
     "node --test --test-name-pattern=* tests/unit/a.test.mjs",
     "node --test --test-name-pattern foo* tests/unit/a.test.mjs",
