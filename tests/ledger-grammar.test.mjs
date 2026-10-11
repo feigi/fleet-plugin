@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, liveOnLedger, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -168,16 +168,43 @@ test("escapeText/unescapeText round-trip a literal backslash and a newline, and 
 // n = 1 + the highest `merge-bot-` entry — settled ones included, since a
 // dead bot's replacement "gets a new n", and other families never counted.
 // Within a run that is the count; across an ancestor rotate, which carries a
-// live bot without its settled predecessors, only the highest is free.
-test("nextMergeBot numbers past every merge-bot entry, live or settled, and nothing else", () => {
+// live bot without its settled predecessors and retires them by name, the
+// highest of either section is free.
+test("nextMergeBot numbers past every merge-bot entry, live, settled or retired, and nothing else", () => {
   assert.equal(nextMergeBot([]), "merge-bot-1");
   assert.equal(nextMergeBot(["impl-412", "fix-pr-346=no-op", "finisher-pr-346"]), "merge-bot-1");
   assert.equal(nextMergeBot(["impl-412", "merge-bot-1=done", "fix-pr-346", "merge-bot-2=killed", "merge-bot-3"]), "merge-bot-4");
   assert.equal(nextMergeBot(["merge-bot-2"]), "merge-bot-3", "a carried merge-bot-2 alone must not hand out its own name");
+  assert.equal(nextMergeBot([], ["impl-9", "merge-bot-1"]), "merge-bot-2", "a retired bot's number is taken");
+  assert.equal(nextMergeBot(["merge-bot-4"], ["merge-bot-2"]), "merge-bot-5", "the highest of either section");
   // A malformed entry is not a merge-bot entry, however much it starts like
   // one: counting by prefix instead of by parseToken() inflated n past what
   // ## Dispatched's real entries justify (measured: merge-bot-3, not -2).
   assert.equal(nextMergeBot(["merge-bot-1=done", "merge-bot-2x-garbage"]), "merge-bot-2");
+  assert.equal(nextMergeBot([], ["merge-bot-2x-garbage", "merge-bot-1=done"]), "merge-bot-1", "a retired entry is a bare name");
+});
+
+test("retiredOnLedger: every settled name liveOnLedger leaves behind, the prior ## Retired first, once each", () => {
+  const rows = [
+    "#3 impl-3=PR#5 → PR#5 · fix-pr-5",
+    "#9 impl-9=PR#10 → PR#10 · finisher-pr-10=labelled",
+    "#11 impl-11-b=bailed",
+  ];
+  const dispatched = ["impl-3=PR#5", "fix-pr-5", "impl-9=PR#10", "finisher-pr-10=labelled", "impl-11=killed", "merge-bot-1=done", "merge-bot-2x-garbage"];
+  const live = liveOnLedger(rows, dispatched);
+  assert.deepEqual(live.dispatched, ["impl-3=PR#5", "fix-pr-5"]);
+  assert.deepEqual(retiredOnLedger(rows, dispatched, ["impl-1", "impl-9", "not a name"], live),
+    ["impl-1", "impl-9", "finisher-pr-10", "impl-11", "merge-bot-1", "impl-11-b"]);
+  // A carried row's settled tokens and a carried settled entry stay in
+  // their sections and are not retired alongside.
+  assert.ok(!retiredOnLedger(rows, dispatched, [], live).includes("impl-3"));
+});
+
+test("nextRetry: one letter past the highest used on the number, across every name given, null past -z", () => {
+  assert.equal(nextRetry("impl-42", []), "impl-42-b");
+  assert.equal(nextRetry("impl-42", ["impl-42-c", "impl-43-d", "fix-pr-42-e"]), "impl-42-d", "same family and number only");
+  assert.equal(nextRetry("impl-42-b", ["impl-42"]), "impl-42-c");
+  assert.equal(nextRetry("finisher-pr-7", ["finisher-pr-7-z"]), null);
 });
 
 test("liveOnLedger: unsettled members and open launches, once each, with the first row carrying them", () => {

@@ -61,7 +61,7 @@
 // the ledger; main() does the I/O. Split so the guard table and the reading are
 // both unit-testable without a network.
 
-import { parseMember, parseToken, premisesOf, rowNums, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, premisesOf, rowNums, nextRetry, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
 
 // Every role's TARGET is its configured cap. Availability of work belongs in
 // the ACTION, not the target: a reviewer target that shrank to the backlog
@@ -128,20 +128,14 @@ const tierCheckStep = (members) => "run ~/.fleet/bin/fleet-run tier-check.mjs --
   + JSON.stringify(members.map((member) => ({ member, session: "<session>" })));
 
 // A mismatch clears when the next attempt on the ticket is dispatched at its
-// row's tier: one retry letter past the HIGHEST any impl member of that ticket
-// has used, not past the held member's own — a controller can dispatch `-c`
-// before `-b`, ledger.mjs refuses a name already dispatched, and the highest
-// letter is what compute-board.mjs's laterAttempt reads as the latest attempt.
-// No suffix is the `a` attempt (ledger-grammar.mjs orders it first). `-z` is
-// the grammar's last, so past it there is no legal name to print.
+// row's tier: ledger-grammar.mjs's nextRetry(), one letter past the highest
+// any impl member of that ticket has used, null past `-z`.
 function replaceStep(held, implNames) {
   const named = [], stuck = [];
   for (const name of held) {
-    const { family, number } = parseMember(name);
-    const top = [name, ...implNames].map(parseMember).filter((m) => m.number === number)
-      .map((m) => m.retry ?? "a").sort().at(-1);
-    if (top === "z") stuck.push(name);
-    else named.push(`${family}-${number}-${String.fromCharCode(top.charCodeAt(0) + 1)}`);
+    const next = nextRetry(name, implNames);
+    if (next === null) stuck.push(name);
+    else named.push(next);
   }
   return [
     named.length ? `dispatch ${named.join(", ")} ${named.length > 1 ? "each " : ""}at its row's tier` : "",

@@ -140,9 +140,9 @@ test("dispatch refuses a call that would record the wrong member, and writes not
 test("a member is dispatched once; its replacement takes a name of its own", (t) => {
   const { ok, read, refused } = fixture(t);
   ok("dispatch", "412", "impl-412");
-  refused(["dispatch", "412", "impl-412"], /impl-412 was already dispatched this run/);
+  refused(["dispatch", "412", "impl-412"], /impl-412 was already dispatched this session \(impl-412\) — a replacement takes a name of its own \(impl-412-b\)/);
   ok("settle", "impl-412", "killed");
-  refused(["dispatch", "412", "impl-412"], /impl-412 was already dispatched this run \(impl-412=killed\)/);
+  refused(["dispatch", "412", "impl-412"], /impl-412 was already dispatched this session \(impl-412=killed\) — a replacement takes a name of its own \(impl-412-b\)/);
   assert.equal(ok("dispatch", "412", "impl-412-b").line, "#412 impl-412=killed · impl-412-b");
   assert.deepEqual(read().dispatched, ["impl-412=killed", "impl-412-b"]);
 });
@@ -156,8 +156,8 @@ test("merge-bot-<n> counts the ## Dispatched merge-bot entries, and a new ledger
   assert.equal(ok("dispatch", "merge-bot").member, "merge-bot-2");
   // The explicit name is accepted when it is the next one, and only then.
   assert.equal(ok("dispatch", "merge-bot-3").member, "merge-bot-3");
-  refused(["dispatch", "merge-bot-5"], /the next merge bot this run is merge-bot-4/);
-  refused(["dispatch", "merge-bot-2"], /the next merge bot this run is merge-bot-4/);
+  refused(["dispatch", "merge-bot-5"], /the next merge bot this session is merge-bot-4/);
+  refused(["dispatch", "merge-bot-2"], /the next merge bot this session is merge-bot-4/);
   const l = read();
   assert.deepEqual(l.dispatched, ["merge-bot-1=done", "impl-412", "merge-bot-2", "merge-bot-3"]);
   assert.deepEqual(l.rows, ["#412 impl-412"], "a merge bot works no ticket, so it writes no row");
@@ -722,12 +722,12 @@ test("drain needs a reason", (t) => {
   refused(["drain", "   "], /usage: ledger\.mjs drain "<reason>"/);
 });
 
-test("a ledger written before ## Dispatched existed reads as none dispatched and not draining, and survives a dispatch", (t) => {
+test("a ledger written before ## Dispatched existed reads as none dispatched, none retired and not draining, and survives a dispatch", (t) => {
   const { ok, read } = fixture(t, "# Fleet run ledger\n\n## Rows\n\n- #7 impl-7 · class=routine\n\n## Filed\n\n- #8 a filed subject\n\n## Ruled\n\n- #9 MERGE · green\n");
   const legacy = { rows: ["#7 impl-7 · class=routine"], filed: ["#8 a filed subject"], ruled: ["#9 MERGE · green"] };
-  assert.deepEqual(read(), { ...legacy, dispatched: [], drain: null });
+  assert.deepEqual(read(), { ...legacy, dispatched: [], drain: null, retired: [] });
   assert.equal(ok("dispatch", "merge-bot").member, "merge-bot-1");
-  assert.deepEqual(read(), { ...legacy, dispatched: ["merge-bot-1"], drain: null });
+  assert.deepEqual(read(), { ...legacy, dispatched: ["merge-bot-1"], drain: null, retired: [] });
 });
 
 // #1799 fix-applier follow-up: a `## Dispatched` entry this grammar cannot

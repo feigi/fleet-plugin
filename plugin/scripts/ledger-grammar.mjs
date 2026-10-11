@@ -421,6 +421,38 @@ export function liveOnLedger(rows, dispatched) {
   return out;
 }
 
+/**
+ * The names an `ancestor` rotate retires: every member the archive settled —
+ * in `## Dispatched` or on any row, the same two places `ledger.mjs dispatch`
+ * refuses a repeat from within a run — that `liveOnLedger` does not carry,
+ * plus every name the archive's own `## Retired` already held, once each, in
+ * that order. A retired name stays taken for the rest of the omp session:
+ * the process that ran the member still holds a peer under it, and omp
+ * answers a second task of that name with `<name>-2` while `hub send
+ * <name>` keeps reaching the first. `carried` is `liveOnLedger`'s result
+ * for the same input; a name it carries, live or as a settled copy, is on
+ * the new ledger already and is not listed twice.
+ */
+export function retiredOnLedger(rows, dispatched, retired, carried) {
+  const kept = new Set();
+  for (const e of carried.dispatched) kept.add(parseToken(e).name);
+  for (const i of carried.rows) for (const t of memberTokens(rows[i])) if (t.error === null) kept.add(t.name);
+  const out = [];
+  const seen = new Set();
+  const add = (name) => {
+    if (kept.has(name) || seen.has(name)) return;
+    seen.add(name);
+    out.push(name);
+  };
+  for (const name of retired) if (parseMember(name) !== null) add(name);
+  for (const e of dispatched) {
+    const t = parseToken(e);
+    if (t !== null && t.error === null && t.outcome !== null) add(t.name);
+  }
+  for (const text of rows) for (const t of memberTokens(text)) if (t.error === null && t.outcome !== null) add(t.name);
+  return out;
+}
+
 // A ticket row is `#N <text>`; it is an Exclusion when `excluded` is the
 // text's first word — `impl-N · … excluded …` is a row about something else.
 // `#N excluded · behind-pr:#M` / `behind-issue:#M`: `#M` is an issue or PR
@@ -441,6 +473,7 @@ export const DISPATCHED = "## Dispatched";
 export const FILED = "## Filed";
 export const RULED = "## Ruled";
 export const DRAIN = "## Drain";
+export const RETIRED = "## Retired";
 
 // What a section header looks like on disk, defined once because a second
 // copy drifts: ledger.mjs slices sections with it, and sets its readability
@@ -465,13 +498,28 @@ export function unescapeText(s) {
 }
 
 /** The name the next merge bot takes: 1 + the highest `merge-bot-<n>` in
- * `## Dispatched`, settled ones included — the highest, not the count, since
- * a rotate that carries a live bot forward carries a settled predecessor
- * only when a carried row names it. n restarts at 1 with every run that
- * carries no bot. */
-export function nextMergeBot(dispatched) {
-  const ns = dispatched.map(parseToken).filter((t) => t?.family === "merge-bot").map((t) => t.number);
+ * `## Dispatched`, settled ones included, or in `## Retired` — the highest,
+ * not the count, since a rotate that carries a live bot forward carries a
+ * settled predecessor only when a carried row names it, and retires the
+ * rest by name. n restarts at 1 with every run that carries and retires no
+ * bot: a `dead` or `none` rotate, whose bots ran in an omp process that is
+ * gone. */
+export function nextMergeBot(dispatched, retired = []) {
+  const ns = [...dispatched.map(parseToken), ...retired.map(parseMember)]
+    .filter((t) => t?.family === "merge-bot").map((t) => t.number);
   return `merge-bot-${Math.max(0, ...ns) + 1}`;
+}
+
+/** The replacement name a member of `name`'s family and number takes next:
+ * one retry letter past the HIGHEST any of `names` on that number has used,
+ * `name` itself included — not past `name`'s own, since a controller can
+ * dispatch `-c` before `-b`. No suffix is the `a` attempt; `-z` is the
+ * grammar's last, past which there is no legal name, so null. */
+export function nextRetry(name, names) {
+  const { family, number } = parseMember(name);
+  const top = [name, ...names].map(parseMember).filter((m) => m !== null && m.family === family && m.number === number)
+    .map((m) => m.retry ?? "a").sort().at(-1);
+  return top === "z" ? null : `${family}-${number}-${String.fromCharCode(top.charCodeAt(0) + 1)}`;
 }
 
 // An implementer cell is `<role>-<level>` — an omp role and a thinking
