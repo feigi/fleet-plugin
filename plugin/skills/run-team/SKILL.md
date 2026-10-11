@@ -327,6 +327,21 @@ phase, or in any later one, asks the maintainer which tickets to take.
    there unnoticed because the only thing that ever read the live gate was a
    person choosing to.
 
+   **Drain the pending ticket-features rows and refresh the cost guard, after
+   the fast-forward and before the first Pull is routed.**
+   `~/.fleet/bin/fleet-run metrics-refresh.mjs` moves
+   `.fleet/ticket-features.pending.tsv` into `docs/metrics/ticket-features.tsv`,
+   deduped on `session`+`agent` — this recovers the rows of a run that crashed
+   before its close-out — and then runs `pr-cost.mjs --guard`, rewriting
+   `.fleet/cost-guard.json`, which the router reads and fails closed without
+   (no file: the default cell only). The guard has to be fresh before the
+   first Pull is routed, so the verdict reflects any rows just recovered. Exit
+   0: both ran. The guard's own exit 3 (a cell tripped) and 4 (no verdict yet)
+   are verdicts the router and `fleet-tick.mjs` read, never failures; the
+   script absorbs them. Exit 1 or 2 stops the run before its first Pull: report
+   the line the script printed on stderr, fix the cause and run it again — each
+   duty is safe to repeat.
+
    **Launch the cockpit.** On every phase-0 pass, not just the first:
    `node ~/.fleet/bin/fleet-run board.mjs serve --open &` in the
    background. It is a read-only mirror of `.fleet/ledger.md` + `gh` — you never
@@ -453,15 +468,16 @@ phase, or in any later one, asks the maintainer which tickets to take.
    timed out. It is never a loop: no third derivation, and never a cache
    written by hand.
 
-   **Fold in every PR a prior run left open, before shortlisting.** A chore PR
-   carrying that run's own metrics, or ticket work whose review was deferred —
-   both are reviewable work no member otherwise picks up, because the Shortlist
-   holds ISSUES and nothing looks at inherited PRs. Queue each for review exactly as
-   ticket work: same review workflow, same fix-applier, same finisher. Measured
-   2026-09-03 — a prior run's ticket PR arrived this way and its review found a defect its own PR
-   body called unreviewed, and a chore PR's review then caught two metrics rows the
-   controller had missed in its own close-out, so a chore PR is not exempt from
-   being wrong. Reviewing them next run is also what stops one pinning
+   **Fold in every PR a prior run left open, before shortlisting.** However it
+   is named and whatever it carries — ticket work whose review was deferred, or
+   that run's own metrics — it is reviewable work no member otherwise picks up,
+   because the Shortlist holds ISSUES and nothing looks at inherited PRs. Queue
+   each for review exactly as ticket work: same review workflow, same
+   fix-applier, same finisher. Measured 2026-09-03 — a prior run's ticket PR
+   arrived this way and its review found a defect its own PR body called
+   unreviewed, and a metrics PR's review then caught two metrics rows the
+   controller had missed in its own close-out, so no PR is exempt from being
+   wrong. Reviewing them next run is also what stops one pinning
    `fleet-tick`'s backlog forever: unreviewable AND uncounted is the state
    that strands it.
 
@@ -1396,27 +1412,35 @@ why in `note`.
 Each WARNING names a PR this run's ledger marks `reviewed=` that has no row yet
 — append it before committing if it is an implementer PR.
 
-Both files are the run's own artifacts and neither commits itself. Carry them to
-main the same way the run carries any other controller-authored change; leaving a
-regenerated 5,000-row corpus uncommitted in the checkout is how it gets discarded by
-the next `git checkout` with nothing to show it ever ran.
+**Drain the pending ticket-features rows and refresh the cost guard, after
+the member-outcomes scrape and every `tier-outcomes.mjs append`, before the
+metrics files are committed.** `~/.fleet/bin/fleet-run metrics-refresh.mjs`
+moves `.fleet/ticket-features.pending.tsv` — the row the router script
+appended for each Pull at dispatch — into `docs/metrics/ticket-features.tsv`,
+deduped on `session`+`agent`, so this run's own rows are in the file that gets
+committed; that file is a run artifact too and is committed with the other
+two. It then runs `pr-cost.mjs --guard`, which rewrites
+`.fleet/cost-guard.json` from all three files. Exit 0: both ran. The guard's
+own exit 3 (a cell tripped) and 4 (no verdict yet, baseline too thin) are
+verdicts the router and `fleet-tick.mjs` read, never failures; the script
+absorbs them. Exit 1 names the duty that failed on stderr and the duty after it
+did not run; exit 2 is a usage error. At close-out a failure is reported to the
+maintainer and does not stop the commit — the pending file stays in `.fleet/`
+and the next run's phase-0 pass drains it — but never commit the metrics files
+with a drain that failed claiming the corpus is complete.
 
-**Commit both to `chore/run-artifacts-<date>` and open a PR — at end of run, and
-that branch name is the convention rather than a suggestion.** Phase 0's
-fast-forward step calls this the previous run's close-out PR and says the rules
-THIS run needs arrive in it, so the next controller goes looking for it by shape;
-a name of your own invention still merges and still cannot be found. Suffix a
-letter when the date already has one (`chore/run-artifacts-2026-08-23b`).
+The metrics files are the run's own artifacts and none commits itself. Carry
+them to main the same way the run carries any other controller-authored change;
+leaving a regenerated 5,000-row corpus uncommitted in the checkout is how it gets
+discarded by the next `git checkout` with nothing to show it ever ran.
 
-**Data rows and rule-doc prose never share a PR — one branch each, and when the
-rules here compete this is the one to keep.** The two halves have opposite cost
-profiles, and bundling makes the cheap-to-strand half gate the expensive one.
-Stranding a data row loses it: `member-outcomes.tsv` is regenerated from harness
-transcripts this repo does not own, so re-running the scrape later is worth only
-what the harness still holds. Stranding a rule change costs the status quo, which
-is where it already was. So `chore/run-artifacts-<date>` carries the two
-`docs/metrics/` files and nothing else, and prose that wants review goes on its
-own branch with its own PR.
+**Commit the metrics files and open a PR — at end of run.** The branch name is
+the repository's choice. A PR still open when the run ends is one phase 0's
+fold-in queues for review next run, however it is named, so the files reach
+`main` through the same review as ticket work rather than being lost. Stranding
+a data row loses it: `member-outcomes.tsv` is regenerated from harness
+transcripts the fleet does not own, so re-running the scrape later is worth
+only what the harness still holds.
 
 **Why not decide inside one run.** A run holds 2-3 implementer PRs, and ticket
 difficulty swamps the tier effect — a gojq parity harness and a two-statement
@@ -3578,20 +3602,20 @@ where the controller itself runs from.
   (**Resolving a finisher halt**) — and it
   prints them as `review-due=`. Exact, not a wider read: the ledger records
   which PRs are under review or reviewed, so nothing about it is guesswork. The
-  closing-issue test is what keeps it from widening: a chore PR you author
-  yourself closes nothing and is left unlabelled for the maintainer, so no
-  member of the fleet will ever review it, and counting it floors the backlog at
-  a depth nothing in the run can drain — the implementer gate then holds for the
-  rest of the run against a queue of nothing. GitHub's own linked-issue
-  set decides that, not a keyword regex over the body.
-  **That exemption is for the chore PR THIS run
-  authors, never one a PRIOR run left open** — step 0 folds those into this
-  run's review queue, so count one when you reason about backlog BY HAND. **The
-  `fleet-tick.mjs` number still excludes it**: nothing in its filter
-  distinguishes an inherited chore PR from this run's own, since a PR closing no
-  issue fails the closing-issue test either way — folding one in cannot reach
-  the count. So the by-hand judgement and the script's output differ here, and
-  such a PR's review is dispatched by hand.
+  closing-issue test is what keeps it from widening: a PR that closes no issue
+  — one you author yourself, for instance — is left unlabelled for the
+  maintainer, so no member of the fleet will ever review it, and counting it
+  floors the backlog at a depth nothing in the run can drain — the implementer
+  gate then holds for the rest of the run against a queue of nothing.
+  GitHub's own linked-issue set decides that, not a keyword regex over the body.
+  **That exemption is for a PR THIS run authors, never one a PRIOR run left
+  open** — step 0 folds those into this run's review queue, so count one when
+  you reason about backlog BY HAND. **The `fleet-tick.mjs` number still
+  excludes it**: nothing in its filter distinguishes an inherited PR from this
+  run's own, since a PR closing no issue fails the closing-issue test either
+  way — folding one in cannot reach the count. So the by-hand judgement and
+  the script's output differ here, and such a PR's review is dispatched by
+  hand.
 
 **Defaults: 2 implementers, 6 reviewers — no hard cap on either.** Reviewer
 slots in use ≈ I·(T_review + 0.94·T_fix)/T_impl ≈ 1.95·I (medians since
@@ -3667,12 +3691,12 @@ A starved implementer queue never stalls the review or merge side.
   **The run's own artifact PR is exempt, and it is exempt because this invariant
   does not reach it:** what the line forbids is a fleet member signing off its own
   ticket work, which presupposes an issue, an implementer, a `review-pr` run and a
-  finisher, and the data-only close-out PR you author has none of them. Label and
+  finisher, and the metrics PR you author has none of them. Label and
   merge that one yourself instead of re-deriving a blocker from this line and
   stranding the rows behind it. The exemption belongs to the run that authors the
   PR and does not outlive it: one still open when the run ends is a PR a prior run
   left open, which phase 0 folds into the next run's review queue as ticket work —
-  and a chore PR is not exempt from being wrong, only from waiting on a reviewer
+  and a PR is not exempt from being wrong, only from waiting on a reviewer
   no phase of this run will ever dispatch against it.
 - **Every member acts through the maintainer's `gh` credentials, so no write is
   attributable.** Any invariant about *who* did something is unenforceable after
