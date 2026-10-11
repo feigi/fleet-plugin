@@ -107,8 +107,8 @@ flowing forward; dashed arrows are wakes or feedback; an edge labelled
 `tick:` is the action `fleet-tick.mjs` prints after every wake, which the
 controller then executes. An edge labelled `controller:` is the
 controller's own direct decision off a gate condition — dispatching the
-finisher and splitting on the CI check job's result are both this kind,
-never a `tick:`-printed row.
+finisher, splitting on the CI check job's result, and reaping on the merge
+bot's Pass report are all this kind, never a `tick:`-printed row.
 
 ```mermaid
 flowchart TD
@@ -121,6 +121,7 @@ flowchart TD
     SL -->|"tick: PULL #N<br/>(implementer slot free)"| JUDGE{"Pull &amp; Claim<br/>judge one ticket"}
     JUDGE -->|"relabel: needs-triage /<br/>ready-for-human"| OUT(["leaves the loop,<br/>needs a human"])
     JUDGE -->|"exclude: behind-pr#N /<br/>behind-issue#N"| SL
+    JUDGE -->|"staleness.mjs: provably fixed<br/>(close, next entry)"| FIXED(["closed, citing<br/>the fixing commit"])
     JUDGE -->|"claim: worktree + branch +<br/>in-progress (claim-ticket.sh)"| IMPL
 
     subgraph IMPLSUB["Implementer — fleet-implementer-&lt;cell&gt;"]
@@ -158,7 +159,7 @@ flowchart TD
     end
     MERGE --> MERGED(["PR merged"])
 
-    MERGED -->|"reap.sh after<br/>each merge pass"| REAP["Reaping &amp; Liveness"]
+    MERGEBOTSUB -.->|"controller: reap.sh on the Pass report<br/>(even a Pass that merged nothing)"| REAP["Reaping &amp; Liveness"]
     REAP -.->|"worktree/branch freed"| SL
 
     HEART["Heartbeat<br/>fleet-heartbeat.mjs"] -.->|"no wake fires:<br/>level-check wakes the tick"| JUDGE

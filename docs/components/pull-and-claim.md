@@ -15,6 +15,8 @@ it — judged, then either claimed, relabelled by cause, or excluded.
 3. **Judge — decided?** Would two competent implementers reading only
    the ticket build materially different things (architecture, API
    shape, schema, UX, a new dependency or seam)?
+   - Provably fixed already (`staleness.mjs` exit 1, checked against
+     `origin/main`) → close citing the fixing commit, next entry.
    - Undecided → relabel `needs-triage`.
    - Genuine fork, options named, no ruling → relabel `ready-for-human`.
    - Sequenced behind an open ticket, or collides with a live
