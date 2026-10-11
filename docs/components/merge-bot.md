@@ -37,7 +37,8 @@ lifetime is one **Pass**.
    dispatches a fresh `merge-bot-<n+1>` immediately.
 7. **Delete the head branch, then reap.** After every merge the bot
    runs [`delete-merged-branch.sh`](../../plugin/scripts/delete-merged-branch.sh),
-   which removes the head branch from `origin` (so it reads `[gone]`).
+   which removes the head branch from `origin` (so it reads `[gone]`) and
+   drops `in-progress` from the issues the merged PR closes.
    The controller runs [`reap.sh`](../../plugin/scripts/reap.sh) on the
    Pass's one exit report — a Pass that merged nothing included — to
    delete the `[gone]` branches and worktrees; see
