@@ -1,0 +1,158 @@
+// Regression gate for scratch-root.mjs and fleet-dir.mjs's scratchRoot() /
+// scratchRootRefusal() (ADR 0027): the fleet's scratch root is ONE fixed path
+// per repository, `~/.fleet/scratch/<basename>-<8 hex>/`, computed and never
+// recorded.
+//
+// Real git throughout — the properties under test are what `rev-parse
+// --git-common-dir` and `check-ignore` answer, which a stub would only restate.
+// HOME is a temp directory per case, so nothing here touches the real
+// `~/.fleet`; `os.homedir()` follows HOME on POSIX, which is what the script
+// reads.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { scratchRoot, scratchRootRefusal } from "../plugin/scripts/fleet-dir.mjs";
+import { gitEnv } from "../plugin/scripts/git-env.mjs";
+import { tempDir } from "./support/temp-dir.mjs";
+
+const SCRIPT = fileURLToPath(new URL("../plugin/scripts/scratch-root.mjs", import.meta.url));
+
+function git(cwd, ...args) {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8", env: gitEnv() });
+  assert.equal(r.status, 0, `git ${args.join(" ")}: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+/** A repository named `name` under a fresh parent, with one commit. */
+function repo(name) {
+  const dir = join(realpathSync(tempDir("scratch-root-")), name);
+  mkdirSync(dir);
+  git(dir, "init", "-q", "-b", "main");
+  git(dir, "config", "user.email", "t@example.com");
+  git(dir, "config", "user.name", "t");
+  writeFileSync(join(dir, "f"), "x\n");
+  git(dir, "add", "f");
+  git(dir, "commit", "-q", "-m", "init");
+  return dir;
+}
+
+function run(cwd, home, env = {}) {
+  return spawnSync(process.execPath, [SCRIPT], { cwd, encoding: "utf8", env: { ...process.env, HOME: home, ...env } });
+}
+
+const keyOf = (dir) => `${dir.split("/").pop()}-${createHash("sha256").update(realpathSync(dir)).digest("hex").slice(0, 8)}`;
+
+test("prints ~/.fleet/scratch/<basename>-<8 hex of the sha256 of the workspace realpath>, creates it, and exits 0", () => {
+  const dir = repo("some-repo");
+  const home = realpathSync(tempDir("scratch-home-"));
+  const r = run(dir, home);
+  assert.equal(r.status, 0, r.stderr);
+  const want = join(home, ".fleet", "scratch", keyOf(dir));
+  assert.equal(r.stdout, `${want}\n`);
+  assert.ok(existsSync(want), "the root was printed but not created");
+  assert.equal(r.stderr, "");
+});
+
+test("a linked worktree prints the same path as its main checkout", () => {
+  const dir = repo("wt-repo");
+  const home = realpathSync(tempDir("scratch-home-"));
+  const linked = join(dir, ".worktrees", "1-slug");
+  git(dir, "worktree", "add", "-q", "-b", "feat", linked);
+  const fromMain = run(dir, home);
+  const fromLinked = run(linked, home);
+  assert.equal(fromLinked.status, 0, fromLinked.stderr);
+  assert.equal(fromLinked.stdout, fromMain.stdout);
+});
+
+test("a second clone with the same folder name gets a different root", () => {
+  const a = repo("same-name");
+  const b = repo("same-name");
+  assert.notEqual(a, b);
+  const home = realpathSync(tempDir("scratch-home-"));
+  const ra = run(a, home);
+  const rb = run(b, home);
+  assert.equal(ra.status, 0, ra.stderr);
+  assert.equal(rb.status, 0, rb.stderr);
+  assert.notEqual(ra.stdout, rb.stdout);
+  assert.ok(ra.stdout.includes("/same-name-") && rb.stdout.includes("/same-name-"));
+});
+
+test("a symlinked route to one workspace is not a second root", () => {
+  const dir = repo("linked-route");
+  const alias = join(realpathSync(tempDir("scratch-alias-")), "alias");
+  spawnSync("ln", ["-s", dir, alias]);
+  const home = realpathSync(tempDir("scratch-home-"));
+  assert.equal(run(alias, home).stdout, run(dir, home).stdout);
+});
+
+test("nothing is written into the repository, its `.fleet/` included", () => {
+  const dir = repo("clean-repo");
+  const home = realpathSync(tempDir("scratch-home-"));
+  assert.equal(run(dir, home).status, 0);
+  assert.equal(existsSync(join(dir, ".fleet")), false);
+  assert.equal(git(dir, "status", "--porcelain"), "");
+});
+
+test("an ambient GIT_DIR cannot retarget the key onto another repository", () => {
+  const dir = repo("target");
+  const decoy = repo("decoy");
+  const home = realpathSync(tempDir("scratch-home-"));
+  const r = run(dir, home, { GIT_DIR: join(decoy, ".git") });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, `${join(home, ".fleet", "scratch", keyOf(dir))}\n`);
+});
+
+test("outside any repository it exits 2, naming git's reason, and prints nothing", () => {
+  const plain = realpathSync(tempDir("scratch-plain-"));
+  const home = realpathSync(tempDir("scratch-home-"));
+  const r = run(plain, home);
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /scratch-root: could not resolve --git-common-dir/);
+});
+
+test("a root inside a git work tree that does not ignore it is refused: exit 1, the work tree named, nothing created", () => {
+  const dir = repo("enclosing");
+  const home = join(dir, "home");
+  mkdirSync(home);
+  const r = run(dir, home);
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /^scratch-root: scratch root .* is inside the git work tree .*enclosing/m);
+  assert.equal(existsSync(join(home, ".fleet")), false, "a refused root still created a directory in the repository");
+});
+
+test("a root inside an outer repository whose ignore rules cover it is accepted: exit 0, root printed", () => {
+  const dir = repo("dotfiles-home");
+  writeFileSync(join(dir, ".gitignore"), ".fleet/\n");
+  const home = dir;
+  const worker = repo("worker");
+  const r = run(worker, home);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, `${join(home, ".fleet", "scratch", keyOf(worker))}\n`);
+  assert.ok(existsSync(r.stdout.trim()));
+});
+
+test("scratchRoot() is pure: the same answer from any cwd of one repository, and nothing is created", () => {
+  const dir = repo("pure");
+  const home = realpathSync(tempDir("scratch-home-"));
+  mkdirSync(join(dir, "sub"));
+  const a = scratchRoot({ cwd: dir, home });
+  assert.equal(scratchRoot({ cwd: join(dir, "sub"), home }), a);
+  assert.equal(a, join(home, ".fleet", "scratch", keyOf(dir)));
+  assert.equal(existsSync(a), false);
+});
+
+test("scratchRootRefusal() answers null outside any work tree and a reason inside an unignoring one", () => {
+  const plain = realpathSync(tempDir("scratch-plain-"));
+  assert.equal(scratchRootRefusal(join(plain, ".fleet", "scratch", "x")), null);
+  const dir = repo("refusal");
+  const bad = join(dir, "scratch", "x");
+  assert.match(scratchRootRefusal(bad), /inside the git work tree/);
+  writeFileSync(join(dir, ".gitignore"), "scratch/\n");
+  assert.equal(scratchRootRefusal(bad), null);
+});

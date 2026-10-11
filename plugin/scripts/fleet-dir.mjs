@@ -20,10 +20,18 @@
 // on its base port — and each says so in its own words around this error's
 // message, which names what failed.
 //
+// The same workspace answer keys the run's scratch root, scratchRoot() below:
+// ONE fixed root per repository under the user's home, computed and never
+// recorded, so a re-invoked controller and every standalone entry point land
+// on the same path. scratch-root.mjs is its CLI.
+//
 // Zero deps: node builtins and sibling scripts only.
 
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 
 // A `rev-parse` answers in milliseconds; this bound exists so a git that
@@ -92,4 +100,67 @@ export function fleetFile(name, { cwd = process.cwd(), timeoutMs, canonicalise =
     throw new FleetDirUnresolvable(`could not resolve --git-common-dir${why ? `: ${why}` : ""}`);
   }
   return name === null ? join(workspace, ".fleet") : join(workspace, ".fleet", name);
+}
+
+/**
+ * The scratch root of this run's repository: `~/.fleet/scratch/<repo-key>/`,
+ * COMPUTED here and never recorded or injected, so a compacted or re-invoked
+ * controller derives the same path again and so does any standalone entry
+ * point that has no dispatcher to name one.
+ *
+ * `<repo-key>` is `<basename>-<8 hex>`. `<basename>` is the folder name of the
+ * workspace — the directory holding the COMMON git dir, the same lookup
+ * fleetFile() makes, so a linked worktree maps to its main checkout — and the
+ * hex is the first 8 characters of the sha256 of that directory's realpath,
+ * so two clones that share a name get different roots. Both come from the
+ * canonical form, so a symlinked route to one workspace is not a second root.
+ *
+ * `home` exists for tests; it defaults to the user's home directory. Throws
+ * FleetDirUnresolvable exactly as fleetFile() does.
+ */
+export function scratchRoot({ cwd = process.cwd(), timeoutMs, home = homedir() } = {}) {
+  const workspace = dirname(fleetFile(null, { cwd, timeoutMs, canonicalise: true }));
+  const hex = createHash("sha256").update(workspace).digest("hex").slice(0, 8);
+  return join(home, ".fleet", "scratch", `${basename(workspace)}-${hex}`);
+}
+
+function nearestExisting(path) {
+  let at = path;
+  while (!existsSync(at)) {
+    const up = dirname(at);
+    if (up === at) return at;
+    at = up;
+  }
+  return at;
+}
+
+/**
+ * Why `root` may not be used as a scratch root, or `null` when it may.
+ *
+ * A root inside a git work tree is refused unless `git check-ignore` says that
+ * work tree ignores it: scratch inside a tree that does not ignore it is the
+ * write into a repository the scratch discipline exists to prevent (`git add
+ * -A` there stages it). The rule is ADR 0020's for the main checkout. A root
+ * under an OUTER repository whose ignore rules cover it passes — a dotfiles
+ * `$HOME` that ignores `.fleet/` is an ordinary setup.
+ *
+ * Asked before the root exists, from its nearest existing ancestor: refusing
+ * must not create a directory inside the repository it refuses. The trailing
+ * slash makes a directory-only ignore pattern (`.fleet/`) match a path that is
+ * not on disk yet.
+ */
+export function scratchRootRefusal(root, { timeoutMs } = {}) {
+  const cwd = nearestExisting(root);
+  const opts = { cwd, encoding: "utf8", timeout: timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS, env: gitEnv() };
+  const top = spawnSync("git", ["rev-parse", "--show-toplevel"], opts);
+  // Not in a work tree — no repository, a bare one, the inside of a `.git` —
+  // so there is no tree for scratch to dirty. A git that never ran is not that
+  // answer, and is refused below rather than read as one.
+  if (top.status !== 0 && !top.error) return null;
+  if (top.error) return `could not ask git whether ${root} is inside a work tree: ${cause(top.error.message)}`;
+  const tree = top.stdout.trim();
+  const ignored = spawnSync("git", ["check-ignore", "-q", `${root}/`], opts);
+  if (ignored.status === 0) return null;
+  const why = ignored.status === 1 ? "which does not ignore it" : cause(ignored.error && ignored.error.message, ignored.stderr) || ended(ignored);
+  return `scratch root ${root} is inside the git work tree ${tree}, ${why} — scratch there would be staged by \`git add -A\``;
 }
