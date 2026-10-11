@@ -41,6 +41,9 @@
 // tolerating `\n\n<next>` anywhere after the blank line would reopen the hole
 // in two steps (insert a decoy paragraph, then delete the blank line before
 // it). Omitting `next` throws; there is no opt-out.
+//
+// `Pin`, below, is the chained form of these calls: its methods take their
+// arguments less the leading `text`, so the convention above holds through it.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -864,8 +867,10 @@ export function logicalLines(text) {
 const HEADING = /^( {0,3})(#{1,6})(?:[ \t]|$)/;
 // A fence opener, and the closer that matches it: the opener's own character,
 // at least as long, with nothing but whitespace after it — so a `~~~` line
-// inside a ``` fence, or a shorter run, is fence content and not its end.
-const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+// inside a ``` fence, or a shorter run, is fence content and not its end. A
+// backtick opener's info string holds no backtick: a line like ```x``` is
+// inline code, not a fence.
+const FENCE_OPEN = /^ {0,3}(`{3,}(?=[^`]*$)|~{3,})/;
 const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 const closesFence = (line, open) => {
   const m = line.match(FENCE_CLOSE);
@@ -877,6 +882,12 @@ const closesFence = (line, open) => {
 // whole heading line, matched exactly and exactly once, so `## Shell` does not
 // bind `## Shell traps`. Headings inside fenced blocks are skipped on both
 // ends: a `#` comment in a shell block is code, not a section boundary.
+//
+// The text is split on "\n" only and the heading line is compared byte for
+// byte, so on a CRLF document, or for a heading line with trailing whitespace,
+// `heading` must carry the same "\r" or whitespace or the call throws "moved".
+// A CRLF document also never closes a fence, since its closer ends in "\r":
+// normalize line endings before sectioning one.
 function section(text, heading, what) {
   assert.ok(
     typeof heading === "string" && !heading.includes("\n") && HEADING.test(heading),
@@ -921,11 +932,13 @@ const MARKER_BY_EXTENSION = new Map([
 const FILES = new Map();
 const MINT = Symbol("Pin");
 
-// The chained form of this module. A node holds immutable text; each method
-// runs the flat function of the same name on that text and returns a new node
-// (or a number, for `.anchorAt`), so every bound stays explicit and every slice
-// is byte-for-byte the one the flat call takes. Roots come from `Pin.file()`
-// or `Pin.of()`, never `new Pin`.
+// The chained form of this module. A node holds immutable text. Every method
+// but `.section` and `.stripGutter` runs the flat function of the same name on
+// that text, so every bound stays explicit and every slice is byte-for-byte
+// the one the flat call takes; `.anchorAt` returns a number, `.quoteBlocks` an
+// array of nodes and the rest a new node. `.section` and `.stripGutter` have
+// no exported flat function of that name. Roots come from `Pin.file()` or
+// `Pin.of()`, never `new Pin`.
 export class Pin {
   #text;
   #label;

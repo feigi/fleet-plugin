@@ -1273,6 +1273,15 @@ test(".section skips headings inside fenced blocks, at its start and at its end"
   assert.throws(() => Pin.of("```\n## A\n```\n", "the fixture").section("## A", "the fixture"), /section heading "## A" moved/);
 });
 
+test(".section: a backtick run whose info string holds a backtick is inline code, not a fence", () => {
+  // REFUSE as a fence: the heading after it still ends the slice.
+  assert.equal(Pin.of("## A\n```x``` is inline code\n## B\ny\n", "the fixture").section("## A", "the fixture").text, "## A\n```x``` is inline code\n");
+  // REFUSE as a fence: the heading after it is still found.
+  assert.equal(Pin.of("```x``` inline\n## A\nbody\n", "the fixture").section("## A", "the fixture").text, "## A\nbody\n");
+  // ACCEPT: a tilde fence may carry a backtick in its info string.
+  assert.equal(Pin.of("## A\n~~~x`y\n## in\n~~~\n## B\n", "the fixture").section("## A", "the fixture").text, "## A\n~~~x`y\n## in\n~~~\n");
+});
+
 test(".section's fence closes only on its opener's character, at least as long, with nothing after it", () => {
   const doc = [
     "## A",
