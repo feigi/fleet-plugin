@@ -2836,3 +2836,72 @@ test("ghBudget: the override only ever shortens, and anything but digits leaves 
   ];
   for (const [override, ms] of cases) assert.equal(ghBudget(20, override), ms, JSON.stringify(override));
 });
+
+// ---------------------------------------------------------------------------
+// The tick after phase 0's rotate. A same-session re-invoked run rotates with
+// prior `ancestor`, and its earlier members may still be running inside the
+// same omp process: the tick must keep counting them, or it dispatches onto
+// their work. Each case writes the earlier run's ledger, rotates it with the
+// real ledger.mjs under a FLEET_PROC_TABLE record — this runner, the rotate's
+// parent, for `ancestor`; a reaped pid for `dead` — and then ticks. The dead
+// case is the control: it shows the same ledger does dispatch once nothing
+// is carried.
+const ANCESTOR_RECORD = { pid: process.pid, lstart: "runner-start", prior: "dead" };
+const rotateAs = (controller, ...after) => (repo) => {
+  const fleet = join(repo, ".fleet");
+  const ledger = (...args) => spawnBounded(process.execPath, [join(repo, "..", "bin", "ledger.mjs"), "--file", join(fleet, "ledger.md"), ...args], {
+    cwd: repo, env: { ...process.env, FLEET_PROC_TABLE: procTable(join(repo, "..")) },
+  });
+  writeFileSync(join(fleet, "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller }));
+  const r = ledger("rotate");
+  assert.equal(r.status, 0, r.stderr);
+  for (const args of after) {
+    const w = ledger(...args);
+    assert.equal(w.status, 0, `${args.join(" ")}: ${w.stderr}`);
+  }
+};
+
+test("CLI: a live review=member:review-pr-5 carried across an ancestor rotate is not dispatched again", () => {
+  const ledger = { rows: ["#5 review=member:review-pr-5"] };
+  const carried = runCli([], { ...IDLE, prs: [pr(5)], ledger, beforeRun: rotateAs(ANCESTOR_RECORD) });
+  assert.equal(carried.status, 0, carried.stderr);
+  assert.match(carried.stdout, /^reviewers +1\/6 → IDLE OK/m);
+  assert.doesNotMatch(carried.stdout, /DISPATCH review PR#5/);
+
+  const dead = runCli([], { ...IDLE, prs: [pr(5)], ledger, beforeRun: rotateAs({ pid: deadPid(), lstart: "x", prior: "ancestor" }) });
+  assert.equal(dead.status, 0, dead.stderr);
+  assert.match(dead.stdout, /^reviewers +0\/6 → DISPATCH review PR#5/m);
+});
+
+test("CLI: live fix-pr, finisher-pr, merge-bot and impl members carried across an ancestor rotate cause no new dispatch", () => {
+  const ledger = {
+    rows: [
+      "#3 impl-3=PR#5 → PR#5 · tier-ok=impl-3:fleet-implementer-slow-high · review=wf:r1 · reviewed=abc1234:1/0/0:run-abcdefgh · fix-pr-5",
+      "#4 impl-4=PR#6 → PR#6 · tier-ok=impl-4:fleet-implementer-slow-high · review=wf:r2 · reviewed=abc1234:0/0/0:run-bcdefghi · finisher-pr-6",
+      "#12 impl-12 · tier-ok=impl-12:fleet-implementer-slow-high",
+      "#13 impl-13 · tier-ok=impl-13:fleet-implementer-slow-high",
+    ],
+    dispatched: ["impl-3=PR#5", "impl-4=PR#6", "fix-pr-5", "finisher-pr-6", "merge-bot-1", "impl-12", "impl-13"],
+  };
+  const fixture = { shortlist: shortlistText([20, 21]), refresh: shortlistText([20, 21]), prs: [pr(5), pr(6), pr(8, ["ready-to-merge"])], ledger };
+  const carried = runCli([], { ...fixture, beforeRun: rotateAs(ANCESTOR_RECORD) });
+  assert.equal(carried.status, 0, carried.stderr);
+  assert.match(carried.stdout, /^implementers 2\/2 → AT CAP/m);
+  assert.match(carried.stdout, /^merge-bot +1\/1 → AT CAP/m);
+  assert.doesNotMatch(carried.stdout, /DISPATCH|PULL/);
+
+  const dead = runCli([], { ...fixture, beforeRun: rotateAs({ pid: deadPid(), lstart: "x", prior: "ancestor" }) });
+  assert.equal(dead.status, 0, dead.stderr);
+  assert.match(dead.stdout, /^implementers 0\/2 → PULL #20 #21/m);
+  assert.match(dead.stdout, /DISPATCH review PR#5 PR#6/);
+  assert.match(dead.stdout, /^merge-bot +0\/1 → DISPATCH merge-bot/m);
+});
+
+test("CLI: a carried reviewer recorded dead with =failed frees its PR, and the next tick dispatches a review for it", () => {
+  const r = runCli([], {
+    ...IDLE, prs: [pr(5)], ledger: { rows: ["#5 review=member:review-pr-5"] },
+    beforeRun: rotateAs(ANCESTOR_RECORD, ["row", "5", "review=member:review-pr-5=failed"]),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^reviewers +0\/6 → DISPATCH review PR#5/m);
+});

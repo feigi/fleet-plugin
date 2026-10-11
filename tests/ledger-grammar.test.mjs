@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, liveOnLedger, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -165,16 +165,49 @@ test("escapeText/unescapeText round-trip a literal backslash and a newline, and 
   assert.equal(unescapeText("a\\\\nb"), "a\\nb", "an escaped backslash before n stays a backslash and an n");
 });
 
-// "n = 1 + the number of `merge-bot-` entries" — settled ones included, since
-// a dead bot's replacement "gets a new n", and other families never counted.
-test("nextMergeBot counts every merge-bot entry, live or settled, and nothing else", () => {
+// n = 1 + the highest `merge-bot-` entry — settled ones included, since a
+// dead bot's replacement "gets a new n", and other families never counted.
+// Within a run that is the count; across an ancestor rotate, which carries a
+// live bot without its settled predecessors, only the highest is free.
+test("nextMergeBot numbers past every merge-bot entry, live or settled, and nothing else", () => {
   assert.equal(nextMergeBot([]), "merge-bot-1");
   assert.equal(nextMergeBot(["impl-412", "fix-pr-346=no-op", "finisher-pr-346"]), "merge-bot-1");
   assert.equal(nextMergeBot(["impl-412", "merge-bot-1=done", "fix-pr-346", "merge-bot-2=killed", "merge-bot-3"]), "merge-bot-4");
+  assert.equal(nextMergeBot(["merge-bot-2"]), "merge-bot-3", "a carried merge-bot-2 alone must not hand out its own name");
   // A malformed entry is not a merge-bot entry, however much it starts like
   // one: counting by prefix instead of by parseToken() inflated n past what
   // ## Dispatched's real entries justify (measured: merge-bot-3, not -2).
   assert.equal(nextMergeBot(["merge-bot-1=done", "merge-bot-2x-garbage"]), "merge-bot-2");
+});
+
+test("liveOnLedger: unsettled members and open launches, once each, with the first row carrying them", () => {
+  const rows = [
+    "#3 impl-3=PR#5 → PR#5 · review=member:review-pr-5",
+    "#4 impl-4=PR#6 · review=wf:r1 · reviewed=abc1234:0/0/0:run-abcdefgh · fix-pr-6=no-op",
+    "#6 fix-pr-6 · finisher-pr-6",
+    "#9 impl-9 · review=fallback:review-pr-9=failed",
+    "#10 excluded · behind-pr:#6",
+  ];
+  const out = liveOnLedger(rows, ["impl-3=PR#5", "impl-4=PR#6", "fix-pr-6=no-op", "finisher-pr-6", "impl-9", "merge-bot-1=done", "merge-bot-2"]);
+  assert.deepEqual(out.rows, [0, 2, 3], "a launch, a live member beside a settled one, and a live impl beside a failed launch");
+  assert.deepEqual(out.dispatched, ["finisher-pr-6", "impl-9", "merge-bot-2"]);
+  assert.deepEqual(out.tokens, [
+    { name: "review-pr-5", token: "review=member:review-pr-5", row: "#3" },
+    { name: "finisher-pr-6", token: "finisher-pr-6", row: "#6" },
+    { name: "impl-9", token: "impl-9", row: "#9" },
+    { name: "merge-bot-2", token: "merge-bot-2", row: null },
+  ]);
+});
+
+test("liveOnLedger: a PR-bound member's settled copy on another PR's row settles nothing — the tick's own reading", () => {
+  const rows = ["#7 impl-7=PR#8 · fix-pr-5=no-op", "#5 fix-pr-5"];
+  assert.deepEqual(liveOnLedger(rows, []).tokens, [{ name: "fix-pr-5", token: "fix-pr-5", row: "#5" }]);
+  assert.deepEqual(liveOnLedger(rows, ["fix-pr-5=no-op"]).tokens, [], "## Dispatched settles it wherever its tokens sit");
+});
+
+test("liveOnLedger: a launch answered on another of its PR's rows is not open", () => {
+  const rows = ["#3 impl-3=PR#5 · review=member:review-pr-5", "#5 reviewed=abc1234:0/0/0:run-abcdefgh"];
+  assert.deepEqual(liveOnLedger(rows, []), { rows: [], dispatched: [], tokens: [] });
 });
 
 test("expectedDefinition refuses a tier= it cannot name one definition file by", () => {

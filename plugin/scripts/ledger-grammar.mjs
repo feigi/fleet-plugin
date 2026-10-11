@@ -297,6 +297,64 @@ export function rowWriteRefusal(before, after, oldLine, line) {
   return null;
 }
 
+/**
+ * What a ledger still holds live: `rows` the indices of every row carrying an
+ * unsettled member token or an open review launch, `dispatched` every
+ * `## Dispatched` entry whose member is unsettled, and `tokens` each of those
+ * once, in ledger order, as `{name, token, row}` — the member or runner name
+ * (a workflow launch's runId), the token as written, and the key of the first
+ * row carrying it, null for a member `## Dispatched` alone names. A member is
+ * settled by a settled copy in `## Dispatched` or on a row, except that a
+ * PR-bound member's settled copy counts only on its own PR's row — the reading
+ * fleet-tick.mjs folds liveness by, so nothing that fold calls live is left
+ * out. A launch is open while unanswered and not `=failed`, paired across its
+ * PR's rows as `rowWriteRefusal` pairs them. Malformed tokens are the caller's
+ * to have refused: one here is read as nothing.
+ */
+export function liveOnLedger(rows, dispatched) {
+  const settled = new Set();
+  for (const e of dispatched) {
+    const t = parseToken(e);
+    if (t !== null && t.error === null && t.outcome !== null) settled.add(t.name);
+  }
+  for (const text of rows) {
+    const { pr } = rowNums(text);
+    for (const t of memberTokens(text)) {
+      if (t.error === null && t.outcome !== null && (t.bound !== "pr" || t.number === pr)) settled.add(t.name);
+    }
+  }
+  const live = (t) => t !== null && t.error === null && t.outcome === null && !settled.has(t.name);
+  const open = new Map();
+  for (const [id, tokens] of streams(rows)) {
+    const r = readReviews(tokens);
+    open.set(id, r.launches.filter((l) => r.open.includes(l.id)));
+  }
+  const out = { rows: [], dispatched: [], tokens: [] };
+  const seen = new Set();
+  const add = (name, token, row) => {
+    if (seen.has(token)) return;
+    seen.add(token);
+    out.tokens.push({ name, token, row });
+  };
+  rows.forEach((text, i) => {
+    const key = text.split(/\s/)[0];
+    const words = text.split(/\s+/).filter(Boolean);
+    const members = memberTokens(text).filter(live);
+    const launches = (open.get(rowNums(text).pr ?? key) ?? []).filter((l) => words.includes(l.id));
+    if (members.length === 0 && launches.length === 0) return;
+    out.rows.push(i);
+    for (const t of members) add(t.name, t.name, key);
+    for (const l of launches) add(l.name, l.id, key);
+  });
+  for (const e of dispatched) {
+    const t = parseToken(e);
+    if (!live(t)) continue;
+    out.dispatched.push(e);
+    add(t.name, t.name, null);
+  }
+  return out;
+}
+
 // A ticket row is `#N <text>`; it is an Exclusion when `excluded` is the
 // text's first word — `impl-N · … excluded …` is a row about something else.
 // `#N excluded · behind-pr:#M` / `behind-issue:#M`: `#M` is an issue or PR
@@ -340,11 +398,13 @@ export function unescapeText(s) {
   return s.replace(/\\(\\|n)/g, (_, c) => (c === "n" ? "\n" : "\\"));
 }
 
-/** The name the next merge bot takes: 1 + the `merge-bot-` entries in
- * `## Dispatched`, settled ones included. One ledger per run, so n restarts
- * at 1 with every run. */
+/** The name the next merge bot takes: 1 + the highest `merge-bot-<n>` in
+ * `## Dispatched`, settled ones included — the highest, not the count, since
+ * a rotate that carries a live bot forward carries none of its settled
+ * predecessors. n restarts at 1 with every run that carries no bot. */
 export function nextMergeBot(dispatched) {
-  return `merge-bot-${dispatched.map(parseToken).filter((t) => t?.family === "merge-bot").length + 1}`;
+  const ns = dispatched.map(parseToken).filter((t) => t?.family === "merge-bot").map((t) => t.number);
+  return `merge-bot-${Math.max(0, ...ns) + 1}`;
 }
 
 // An implementer cell is `<role>-<level>` — an omp role and a thinking

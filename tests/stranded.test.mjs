@@ -102,6 +102,7 @@ test("prior dead + an in-progress issue with no PR + its worktree in this checko
   assert.deepEqual(r.out, {
     prior: "dead",
     claims: [{ n: 12, t: "ticket 12", action: "resume", worktree: wt(f, "12-impl-12"), branch: "implementer/12-impl-12", why: "its worktree is in this checkout" }],
+    carried: [],
   });
   // The same answer from inside a worktree: the checkout is the main one.
   const inside = f.run({ issues: [issue(12)], cwd: wt(f, "12-impl-12") });
@@ -202,8 +203,45 @@ test("prior ancestor → nothing listed, nothing asked of gh", (t) => {
   const f = fixture(t, { controller: RECORD("ancestor"), worktrees: ["12-impl-12"] });
   const r = f.run({ issues: [issue(12)] });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.out, { prior: "ancestor", claims: [] });
+  assert.deepEqual(r.out, { prior: "ancestor", claims: [], carried: [] });
   assert.deepEqual(r.gh, []);
+});
+
+test("prior ancestor → every live token the carried ledger holds, once each, with its row — and nothing settled", (t) => {
+  const f = fixture(t, { controller: RECORD("ancestor") });
+  writeFileSync(join(f.repo, ".fleet", "ledger.md"), [
+    "# Fleet run ledger", "", "## Rows", "",
+    "- #3 impl-3=PR#5 → PR#5 · review=member:review-pr-5",
+    "- #4 impl-4=PR#6 → PR#6 · review=wf:r1 · reviewed=abc1234:1/0/0:run-abcdefgh · fix-pr-6",
+    "- #7 impl-7=PR#8 → PR#8 · review=wf:r2 · reviewed=abc1234:0/0/0:run-bcdefghi · finisher-pr-8 · review=wf:r9",
+    "- #12 impl-12 · tier-ok=impl-12:fleet-implementer-slow-high",
+    "", "## Dispatched", "",
+    "- impl-3=PR#5", "- impl-4=PR#6", "- fix-pr-6", "- impl-7=PR#8", "- finisher-pr-8", "- impl-12", "- merge-bot-1",
+    "", "## Filed", "", "", "## Ruled", "", "",
+  ].join("\n"));
+  const r = f.run({ issues: [issue(12)] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out, {
+    prior: "ancestor", claims: [],
+    carried: [
+      { name: "review-pr-5", token: "review=member:review-pr-5", row: "#3" },
+      { name: "fix-pr-6", token: "fix-pr-6", row: "#4" },
+      { name: "finisher-pr-8", token: "finisher-pr-8", row: "#7" },
+      { name: "r9", token: "review=wf:r9", row: "#7" },
+      { name: "impl-12", token: "impl-12", row: "#12" },
+      { name: "merge-bot-1", token: "merge-bot-1", row: null },
+    ],
+  });
+  assert.deepEqual(r.gh, []);
+});
+
+test("prior ancestor with a ledger that cannot be read exits 2 — never nothing carried", (t) => {
+  const f = fixture(t, { controller: RECORD("ancestor") });
+  mkdirSync(join(f.repo, ".fleet", "ledger.md"));
+  const r = f.run();
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /ledger\.mjs read failed .* which tokens rotate carried is unknown/);
+  assert.equal(r.stdout, "");
 });
 
 test("prior none, no record, or a heartbeat file that cannot be read → every claim reported, none resumed", (t) => {

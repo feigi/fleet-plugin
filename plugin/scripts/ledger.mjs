@@ -15,9 +15,10 @@
 // `<member>=<outcome>` in both places (an implementer's settle to `PR#M` also
 // folds the PR's own `#M` row into its ticket's), and `drain` writes the
 // one marker that stops supply. The token grammar is
-// ledger-grammar.mjs's. `## Dispatched` gains an entry per dispatch and never
-// loses or reorders one — settling annotates an entry in place — which is what
-// lets `merge-bot-<n>` be counted from it.
+// ledger-grammar.mjs's. Within a run `## Dispatched` gains an entry per
+// dispatch and never loses or reorders one — settling annotates an entry in
+// place — which is what lets `merge-bot-<n>` be numbered from it; a rotate
+// that carries a run's live entries forward carries no settled one.
 //
 // Writer policy: the controller owns run
 // state (`row`/`settle`/`dispatch`/`drain`/`ruled`/`rotate`); filers append
@@ -35,7 +36,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, ROWS, DISPATCHED, FILED, RULED, DRAIN, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, liveOnLedger, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, ROWS, DISPATCHED, FILED, RULED, DRAIN, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { isDead, processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -434,6 +435,20 @@ function refuseStrayInId(value, what) {
 // report what the parse saw rather than what a later stat() guesses.
 let ledgerParsed = false;
 
+// A section's entries, unescaped, in file order — none when the header is
+// absent. Lenient by design: it refuses nothing, so rotate reads a ledger
+// load() refuses through the same slicing.
+function sectionOf(text, name) {
+  const m = headerRe(name).exec(text);
+  if (!m) return [];
+  const start = m.index + m[1].length + name.length;
+  const after = text.slice(start);
+  const end = after.search(/\n## /);
+  return (end === -1 ? after : after.slice(0, end))
+    .split("\n").map((l) => l.trim()).filter((l) => l.startsWith("- "))
+    .map((l) => unescapeText(l.slice(2)));
+}
+
 function load() {
   if (!existsSync(file)) return { rows: [], filed: [], ruled: [], dispatched: [], drain: null };
   let text;
@@ -442,16 +457,7 @@ function load() {
   } catch (e) {
     die(`cannot read ${file}: ${e.message}`);
   }
-  const section = (name) => {
-    const m = headerRe(name).exec(text);
-    if (!m) return [];
-    const start = m.index + m[1].length + name.length;
-    const after = text.slice(start);
-    const end = after.search(/\n## /);
-    return (end === -1 ? after : after.slice(0, end))
-      .split("\n").map((l) => l.trim()).filter((l) => l.startsWith("- "))
-      .map((l) => unescapeText(l.slice(2)));
-  };
+  const section = (name) => sectionOf(text, name);
   // Set here, past the read and the early return, so it can only be true of a
   // file this function actually opened and recognised as a ledger.
   ledgerParsed = headerRe(FILED).test(text);
@@ -734,9 +740,9 @@ if (requireFile && !existsSync(file)) die(`--require-file given but ledger file 
 
 const WRITE_COMMANDS = new Set(["row", "filed", "ruled", "dispatch", "settle", "drain", "rotate"]);
 if (WRITE_COMMANDS.has(cmd)) await acquireLock();
-// `rotate` moves the file whole and never parses it: a ledger load() would
-// refuse is still the previous run's record, and archiving it as-is is the
-// whole job.
+// `rotate` never load()s: a ledger load() would refuse is still the previous
+// run's record, and it is archived as-is — and read line by line when it
+// carries live members forward, see carryOf().
 const data = cmd === "rotate" ? null : load();
 
 // The payload subcommands end by falling out of this chain, never by calling
@@ -1493,12 +1499,24 @@ function runCheck() {
 // ── rotate ───────────────────────────────────────────────────────────────────
 //
 // One ledger per run. Phase 0 of every run moves the previous run's file aside
-// before anything reads it, so no row, exclusion, filing, ruling or drain
-// marker outlives the run that wrote it: the next write subcommand finds no
-// file and starts the empty skeleton, exactly as on a first run. The archive
-// is the file itself — hard-linked to its stamped name, then unlinked — so its
-// bytes are untouched, and the link refuses atomically when that name is
-// already taken rather than overwriting an older archive.
+// before anything reads it, so no exclusion, filing, ruling or drain marker
+// outlives the run that wrote it. The archive is the file itself —
+// hard-linked to its stamped name, then unlinked — so its bytes are
+// untouched, and the link refuses atomically when that name is already taken
+// rather than overwriting an older archive.
+//
+// What follows depends on the verdict below. After a `dead` or `none` one
+// nothing is carried: the next write subcommand finds no file and starts the
+// empty skeleton, exactly as on a first run. After an `ancestor` one — this
+// session's own earlier run, whose members run inside the omp process that
+// is still this run's — rotate writes a new ledger holding what is still
+// live in the archive: every row carrying an unsettled member token or an
+// open review launch, whole, and every unsettled `## Dispatched` entry (see
+// carryOf()). The members those name may still be running, and dropping their
+// tokens would let the next tick dispatch onto their work and leave their
+// results nothing to settle. Phase 0 then reconciles each carried token
+// against the session's job list; rotate cannot, since that list is the
+// controller's to read and no script's.
 //
 // Under the write lock like every other write subcommand, so a concurrent
 // writer either lands before the move (in the archive, whole) or after it (in
@@ -1560,6 +1578,18 @@ function runRotate() {
   if (prior === "none" && exists && assessBeat({ beat, ticked, now: Date.now() }).kind === "beating") {
     die(`refusing to rotate ${file}: the controller that owns it is still beating — last beat ${new Date(beat.at).toISOString()} in ${beatFile}; it counts as stalled after ${new Date(stallsAt({ beat, ticked })).toISOString()}`);
   }
+  // Read before anything moves: a ledger whose live tokens cannot be read is
+  // refused with nothing moved, never archived with those tokens dropped.
+  let carry = { rows: [], dispatched: [], skipped: [] };
+  if (prior === "ancestor" && exists) {
+    let text;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch (e) {
+      die(`refusing to rotate ${file}: cannot read it to carry this session's live members forward: ${e.message}`);
+    }
+    carry = carryOf(text);
+  }
   let archive = null;
   if (exists) {
     const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "");
@@ -1578,6 +1608,15 @@ function runRotate() {
   } else {
     console.error(`    nothing to rotate: ${file} does not exist`);
   }
+  for (const { line, why } of carry.skipped) {
+    console.error(`    skipped unparseable line '${line}' — not carried: ${why}`);
+  }
+  // Nothing to carry writes nothing, so the next write starts the skeleton
+  // exactly as after any other verdict.
+  if (carry.rows.length > 0 || carry.dispatched.length > 0) {
+    save({ rows: carry.rows, dispatched: carry.dispatched, filed: [], ruled: [], drain: null });
+    console.error(`    carried ${carry.rows.length} row(s) and ${carry.dispatched.length} ## Dispatched entr${carry.dispatched.length === 1 ? "y" : "ies"} from ${archive}`);
+  }
   // Re-read rather than reuse the read above: the heartbeat file has other
   // writers, and a patch built from an older view would undo what they wrote
   // since.
@@ -1585,7 +1624,45 @@ function runRotate() {
   if (!writeState(beatFile, NAME, readState(beatFile, NAME), { controller: record })) {
     die(`${archive === null ? "found no ledger" : `rotated ${file} -> ${archive}`} but could not record this run's controller in ${beatFile} — the next run judges whatever record that file still holds, and none if it cannot be read`);
   }
-  console.log(JSON.stringify({ rotated: archive !== null, archive }));
+  console.log(JSON.stringify({
+    rotated: archive !== null, archive,
+    carried: { rows: carry.rows, dispatched: carry.dispatched },
+    skipped: carry.skipped.map((s) => s.line),
+  }));
+}
+
+// What an `ancestor` rotate carries out of the archived text, read line by
+// line so one bad line costs only itself: the whole point is to keep live
+// members' tokens, and a ledger load() refuses (a second drain marker, say)
+// still holds them. A row is read the way the tick reads it — a row the tick
+// would refuse is skipped rather than carried into a ledger the next tick
+// refuses whole — and a `## Dispatched` entry must be a well-formed member
+// token. Every skipped line is returned with its reason; a skipped row's
+// member can still be carried by its `## Dispatched` entry, which keeps its
+// name taken. Of what parses, liveOnLedger() picks what is still live; rows
+// keep their whole text, so a carried row's settled tokens, `reviewed=` and
+// every other record on it come along and the tick's per-PR reading of it is
+// unchanged.
+function carryOf(text) {
+  const skipped = [];
+  const rows = sectionOf(text, ROWS).filter((r) => {
+    try {
+      deriveRun({ rows: [r], dispatched: [], drain: null }, []);
+      return true;
+    } catch (e) {
+      if (!(e instanceof LedgerError)) throw e;
+      skipped.push({ line: r, why: e.message });
+      return false;
+    }
+  });
+  const dispatched = sectionOf(text, DISPATCHED).filter((e) => {
+    const t = parseToken(e);
+    if (t !== null && t.error === null) return true;
+    skipped.push({ line: e, why: t === null ? "not a member token" : `${t.name}: ${t.error}` });
+    return false;
+  });
+  const live = liveOnLedger(rows, dispatched);
+  return { rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched, skipped };
 }
 
 // ── dispatch / settle ────────────────────────────────────────────────────────

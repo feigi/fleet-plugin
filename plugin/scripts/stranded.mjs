@@ -4,12 +4,12 @@
 // classifies; it acts on nothing — no dispatch, no label, no release. The
 // controller dispatches off its answer.
 //
-// A claim's label and worktree exist before its first push. Rotation carries
-// no ledger row forward, the candidate scan excludes `in-progress`, and the
-// in-flight check reads the worktree as taken — so a claim a dead run left
-// without a PR is held by nobody until this step names it. One with an open
-// PR is not stranded: phase 0's fold-in queues every open PR, so it is never
-// listed here.
+// A claim's label and worktree exist before its first push. Rotation after a
+// dead or unknown run carries no ledger row forward, the candidate scan
+// excludes `in-progress`, and the in-flight check reads the worktree as
+// taken — so a claim a dead run left without a PR is held by nobody until
+// this step names it. One with an open PR is not stranded: phase 0's fold-in
+// queues every open PR, so it is never listed here.
 //
 // THE VERDICT is `prior` in the controller record, the one `ledger.mjs
 // rotate` reached on the record it replaced — never a fresh judgement of the
@@ -19,8 +19,10 @@
 //   dead      every open in-progress issue with no open PR: `resume` when
 //             exactly one worktree for it sits under this checkout's
 //             `.worktrees/` and its directory is there, `report` otherwise
-//   ancestor  this session's earlier run: nothing listed — its members may
-//             still be live, and the in-run liveness check covers them
+//   ancestor  this session's earlier run: no claim listed — its members may
+//             still be live, and rotate carried their tokens forward;
+//             `carried` lists them instead, for the controller to reconcile
+//             against the session's job list
 //   none      nothing proves the previous run dead: every claim `report`
 //
 // "An open PR about the issue" is the in-flight check's reading, its branch rule
@@ -33,18 +35,27 @@
 // the number as a whole segment, so a worktree named for issue 129 is never
 // issue 12's.
 //
-// Prints `{prior, claims: [{n, t, action, worktree, branch, why}]}` on stdout.
+// Prints `{prior, claims: [{n, t, action, worktree, branch, why}], carried:
+// [{name, token, row}]}` on stdout. `carried` is empty unless prior is
+// `ancestor`; each entry is the member or runner name (a workflow launch's
+// runId), the token as the ledger holds it, and the key of the first row
+// carrying it — null for a member only `## Dispatched` names. It is every
+// live token on the ledger: at phase 0 this run has dispatched nothing yet,
+// so each is one rotate carried.
 // Exit 0 answered; 2 a list that did not answer — a gh or git failure, a
-// list at its cap, which may hold more than it showed, or a worktree path
-// whose presence cannot be told. Never read 2 as nothing stranded.
+// list at its cap, which may hold more than it showed, a worktree path
+// whose presence cannot be told, or a ledger that cannot be read. Never read
+// 2 as nothing stranded.
 
 import { spawnSync } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { makeDie, writeAll } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { readState, stateFileIn } from "./fleet-state.mjs";
+import { liveOnLedger } from "./ledger-grammar.mjs";
 
 const NAME = "stranded";
 const die = makeDie(NAME);
@@ -149,8 +160,8 @@ function main() {
   const { controller } = readState(stateFileIn(fleetDir), NAME);
   const prior = controller?.prior ?? "none";
   if (prior === "ancestor") {
-    log(`${NAME}: the previous run is this session's own earlier run — its claims are left alone`);
-    console.log(JSON.stringify({ prior, claims: [] }));
+    log(`${NAME}: the previous run is this session's own earlier run — its claims are left alone, and the live tokens rotate carried are listed`);
+    console.log(JSON.stringify({ prior, claims: [], carried: carriedTokens(join(fleetDir, "ledger.md")) }));
     return;
   }
 
@@ -206,7 +217,26 @@ function main() {
     claims.push({ n: issue.number, t: issue.title, action, worktree: one?.path ?? null, branch: one?.branch ?? null, why });
     log(`    #${issue.number} ${action} — ${why}`);
   }
-  console.log(JSON.stringify({ prior, claims }));
+  console.log(JSON.stringify({ prior, claims, carried: [] }));
+}
+
+// Every live token on the ledger, read through `ledger.mjs read` so the
+// ledger keeps one parser. A read that fails is a list that did not answer.
+function carriedTokens(file) {
+  const script = join(dirname(fileURLToPath(import.meta.url)), "ledger.mjs");
+  // `--file` names the ledger outright, so the read resolves no workspace
+  // and runs no git.
+  const r = spawnSync(process.execPath, [script, "--file", file, "read"], { encoding: "utf8", maxBuffer: MAX_BUFFER });
+  if (r.error || r.status !== 0) die(`ledger.mjs read failed (${how(r)}) — which tokens rotate carried is unknown`);
+  let d;
+  try {
+    d = JSON.parse(r.stdout);
+  } catch (e) {
+    die(`could not parse ledger.mjs read output: ${e.message}`);
+  }
+  const strings = (xs) => Array.isArray(xs) && xs.every((x) => typeof x === "string");
+  if (!d || !strings(d.rows) || !strings(d.dispatched)) die("ledger.mjs read returned no {rows, dispatched}");
+  return liveOnLedger(d.rows, d.dispatched).tokens;
 }
 
 main();

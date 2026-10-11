@@ -30,7 +30,7 @@ test("a resume dispatches a new member under a new name on the same ticket and w
 test("a report goes to the maintainer and nothing else, and ancestor and none resume nothing", () => {
   const s = step();
   assert.match(s, phrase("A `report` goes to the maintainer as `#<N> — <why>` and nothing else: no dispatch, no label change, no release."));
-  assert.match(s, phrase("`prior: ancestor` — this session's own earlier run: nothing is listed."));
+  assert.match(s, phrase("`prior: ancestor` — this session's own earlier run: no claim is listed."));
   assert.match(s, phrase("every claim is `report`, and nothing is resumed."));
-  assert.match(s, phrase("Exit 2 is a list that did not answer — a `gh` or `git` failure, a list at its cap, or a worktree whose presence cannot be told — and is never nothing stranded."));
+  assert.match(s, phrase("Exit 2 is a list that did not answer — a `gh` or `git` failure, a list at its cap, a worktree whose presence cannot be told, or, after `ancestor`, a ledger that cannot be read — and is never nothing stranded."));
 });
