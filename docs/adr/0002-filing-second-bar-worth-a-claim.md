@@ -1,6 +1,14 @@
 # 0002 — Filing gains a second bar: *is the finding worth a claim*
 
-**Status:** Accepted. Ruled 2026-08-31, on the measurement below.
+**Status:** Accepted. Ruled 2026-08-31, on the measurement below. Amended by #2216:
+a gap in a prose guard sits below the worth-a-claim bar unless something acts
+on the guarded text — an agent follows it as an instruction (skills, commands,
+agent definitions, a script's header or usage text, AGENTS.md), or a program
+other than its own guard reads it. A gap in a guard's own code takes the
+stakes of the prose it guards, and a helper shared by several guards takes the
+highest of those stakes. Such a finding is recorded as `claimKind: shape`.
+When the prose is corrected, an observed wording may be added to a literal
+ban, never to a semantic reader.
 
 ## Context
 
