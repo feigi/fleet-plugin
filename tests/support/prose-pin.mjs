@@ -858,10 +858,10 @@ export function logicalLines(text) {
   return { text: joined, lineAt };
 }
 
-// A heading line: one to six `#` at column 0, then a space, a tab or the end of
-// the line. Column 0 only, so a section ends exactly "just before the `#`" of
-// the next heading — at that line's start.
-const HEADING = /^(#{1,6})(?:[ \t]|$)/;
+// A heading line: up to three spaces, one to six `#`, then a space, a tab or
+// the end of the line. Group 1 is the indent, so a section can end exactly
+// "just before the `#`" of the next heading; group 2 is the depth.
+const HEADING = /^( {0,3})(#{1,6})(?:[ \t]|$)/;
 // A fence opener, and the closer that matches it: the opener's own character,
 // at least as long, with nothing but whitespace after it — so a `~~~` line
 // inside a ``` fence, or a shorter run, is fence content and not its end.
@@ -882,7 +882,7 @@ function section(text, heading, what) {
     typeof heading === "string" && !heading.includes("\n") && HEADING.test(heading),
     `${what}: section() takes one whole heading line ("## Name"), not ${JSON.stringify(heading)}`,
   );
-  const depth = heading.match(HEADING)[1].length;
+  const depth = heading.match(HEADING)[2].length;
   let fence = null;
   let offset = 0;
   let start = -1;
@@ -896,7 +896,7 @@ function section(text, heading, what) {
       if (open) fence = open[1];
       else {
         const h = line.match(HEADING);
-        if (h && start !== -1 && end === -1 && h[1].length <= depth) end = offset;
+        if (h && start !== -1 && end === -1 && h[2].length <= depth) end = offset + h[1].length;
         if (line === heading) {
           hits += 1;
           if (start === -1) start = offset;

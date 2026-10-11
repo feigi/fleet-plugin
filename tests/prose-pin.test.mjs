@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { END, anchorAt, between, betweenPhrases, bullet, paragraph, phrase, quoteBlock, quoteBlocks, runAbove, sentences, stripSlashGutter, logicalLines } from "./support/prose-pin.mjs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, relative } from "node:path";
+import { END, Pin, anchorAt, between, betweenPhrases, bullet, paragraph, phrase, quoteBlock, quoteBlocks, runAbove, sentences, stripSlashGutter, logicalLines, unemphasized } from "./support/prose-pin.mjs";
+import { tempDir } from "./support/temp-dir.mjs";
 
 // The 14 consumer files exercise only between()'s HAPPY path: every one of them
 // slices a document that still holds both anchors. Measured on this PR: deleting
@@ -1124,4 +1127,225 @@ test("logicalLines keeps a block-leading span at column 0 and takes a wrap-leadi
   // tightening `^` this way costs no real target.
   const real = "**A Real Block** whose own paragraph\nwraps onto a second line";
   assert.deepEqual([...logicalLines(real).text.matchAll(lead)].map((m) => m[1]), ["A Real Block"]);
+});
+
+// `Pin`, the chained form. One chain per test; every new piece of logic —
+// roots, marker inference, gutters, `.section` — gets the input it must
+// ACCEPT beside the input it must REFUSE.
+
+const PIN_DIR = tempDir("prose-pin-");
+const fixtureFile = (name, text) => {
+  const path = join(PIN_DIR, name);
+  writeFileSync(path, text);
+  return path;
+};
+
+test("Pin.of roots a string under a label, and the node's text is that string", () => {
+  assert.equal(Pin.of("some text", "the fixture").text, "some text");
+  assert.equal(Pin.of("", "an empty fixture").text, "");
+});
+
+test("Pin.of refuses a text that is not a string and a missing or blank label", () => {
+  assert.throws(() => Pin.of(undefined, "the fixture"), /Pin\.of\(\) roots a string, not undefined/);
+  assert.throws(() => Pin.of(Buffer.from("text"), "the fixture"), /Pin\.of\(\) roots a string, not object/);
+  assert.throws(() => Pin.of("text"), /Pin\.of\(\) needs a label/);
+  assert.throws(() => Pin.of("text", "  "), /Pin\.of\(\) needs a label/);
+});
+
+test("a Pin node is immutable, and only Pin.file or Pin.of mints one", () => {
+  const node = Pin.of("abc", "the fixture");
+  assert.throws(() => {
+    node.text = "changed";
+  }, TypeError);
+  assert.throws(() => {
+    node.extra = 1;
+  }, TypeError);
+  assert.equal(node.text, "abc");
+  assert.throws(() => new Pin(undefined, "abc", "the fixture"), /never `new Pin`/);
+});
+
+test("Pin.file reads a file once per resolved path, so two spellings of one file share its root", () => {
+  const dir = join(PIN_DIR, "cache");
+  mkdirSync(dir);
+  const path = join(dir, "doc.md");
+  writeFileSync(path, "first");
+  const root = Pin.file(path);
+  assert.equal(root.text, "first");
+  writeFileSync(path, "second");
+  assert.equal(Pin.file(relative(process.cwd(), path)), root);
+  assert.equal(Pin.file(join(dir, "..", basename(dir), "doc.md")).text, "first");
+  // ACCEPT: another file is another key, read on its own.
+  const other = join(dirname(path), "other.md");
+  writeFileSync(other, "other");
+  assert.equal(Pin.file(other).text, "other");
+});
+
+test("Pin.file throws Node's own ENOENT for a missing path", () => {
+  assert.throws(() => Pin.file(join(PIN_DIR, "missing.md")), { code: "ENOENT" });
+});
+
+test("Pin.file infers runAbove's marker from .sh, .mjs and .js, and a node sliced from the root keeps it", () => {
+  const sh = fixtureFile("probe.sh", "# says what probe does\n# over two lines\nprobe() {\n  :\n}\n");
+  assert.equal(Pin.file(sh).runAbove("probe() {", "the fixture").text, "# says what probe does\n# over two lines\n");
+  for (const ext of [".mjs", ".js"]) {
+    const js = fixtureFile(`mod${ext}`, "// says what X is\nexport const X = 1;\n");
+    assert.equal(Pin.file(js).runAbove("const X", "the fixture").text, "// says what X is\n", ext);
+  }
+  assert.equal(Pin.file(sh).between("# over", "}", "the fixture").runAbove("probe() {", "the fixture").text, "# over two lines\n");
+});
+
+test("runAbove takes an explicit marker over the inferred one, and on a Pin.of root", () => {
+  assert.equal(Pin.of("# a shell note\nprobe() {\n", "a shell fixture").runAbove("probe() {", "the fixture", "#").text, "# a shell note\n");
+  const sh = fixtureFile("explicit.sh", "// not a shell comment\nprobe() {\n");
+  assert.equal(Pin.file(sh).runAbove("probe() {", "the fixture", "//").text, "// not a shell comment\n");
+});
+
+test("runAbove refuses to run without a marker on a Pin.of root, or on a file root of any other extension", () => {
+  assert.throws(
+    () => Pin.of("# a note\nprobe() {\n", "a shell fixture").runAbove("probe() {", "the fixture"),
+    /the fixture: runAbove needs a marker — a shell fixture is not a \.sh, \.mjs or \.js file root/,
+  );
+  assert.throws(
+    () => Pin.of("x\n# a note\nprobe() {\n", "a shell fixture").between("# a note", "{", "the fixture").runAbove("probe()", "the fixture"),
+    /runAbove needs a marker — a shell fixture is not/,
+  );
+  const md = fixtureFile("notes.md", "# Heading\nprobe() {\n");
+  assert.throws(() => Pin.file(md).runAbove("probe() {", "the fixture"), /runAbove needs a marker — \S*notes\.md is not/);
+});
+
+test("stripGutter('#') strips each line's indent, `#` and one space, leaves a mid-line `#`, and joins with \\n", () => {
+  assert.equal(Pin.of("  # one\n#two\n#  three\ncode # trailing", "the fixture").stripGutter("#").text, "one\ntwo\n three\ncode # trailing");
+});
+
+test("stripGutter('//') strips each line's indent, `//` and one space, leaves a mid-line `//`, and joins with \\n", () => {
+  assert.equal(Pin.of("  // one\n//two\n//  three\ncode // trailing", "the fixture").stripGutter("//").text, "one\ntwo\n three\ncode // trailing");
+});
+
+test("stripGutter('>') strips each line's indent, a run of `>` and one space, leaves a mid-line `>`, and joins with \\n", () => {
+  assert.equal(
+    Pin.of("  > one\n>>two\n> > three\n>  four\ncode > trailing", "the fixture").stripGutter(">").text,
+    "one\ntwo\n> three\n four\ncode > trailing",
+  );
+});
+
+test("stripGutter refuses any marker but #, // and >", () => {
+  const node = Pin.of("# x", "the fixture");
+  for (const marker of ["", "*", "##", "/", undefined]) {
+    assert.throws(() => node.stripGutter(marker), /stripGutter\(\) takes "#", "\/\/" or ">"/, String(marker));
+  }
+});
+
+test(".section matches one whole heading line, so a heading that only starts the same way is not it", () => {
+  const doc = "# Top\n## Shell traps\nother\n## Shell\nbody\n## Shell \nnot it either\n";
+  assert.equal(Pin.of(doc, "the fixture").section("## Shell", "the fixture").text, "## Shell\nbody\n");
+});
+
+test(".section throws when no line is exactly the heading", () => {
+  assert.throws(
+    () => Pin.of("## Shell traps\nbody\n", "the fixture").section("## Shell", "the fixture"),
+    /the fixture: section heading "## Shell" moved — re-anchor this test, never widen it to the whole file/,
+  );
+});
+
+test(".section takes only one whole heading line as its heading", () => {
+  const node = Pin.of("Shell\n## Shell\n", "the fixture");
+  for (const heading of ["Shell", "####### Shell", "##Shell", "## Shell\nbody", "    ## Shell", undefined]) {
+    assert.throws(() => node.section(heading, "the fixture"), /the fixture: section\(\) takes one whole heading line/, String(heading));
+  }
+  // ACCEPT: six `#`, a bare `#`, and an indent of up to three spaces.
+  assert.equal(Pin.of("###### Deep\nx\n", "the fixture").section("###### Deep", "the fixture").text, "###### Deep\nx\n");
+  assert.equal(Pin.of("a\n#\nx\n", "the fixture").section("#", "the fixture").text, "#\nx\n");
+  assert.equal(Pin.of("a\n   ## A\nx\n", "the fixture").section("   ## A", "the fixture").text, "   ## A\nx\n");
+});
+
+test(".section throws when its heading occurs more than once outside fences", () => {
+  assert.throws(
+    () => Pin.of("## A\none\n## A\ntwo\n", "the fixture").section("## A", "the fixture"),
+    /the fixture: section heading "## A" occurs 2 times — a pin would bind the wrong copy; narrow the heading/,
+  );
+  // ACCEPT: the same words at another depth are another heading.
+  assert.equal(Pin.of("## A\none\n### A\ntwo\n", "the fixture").section("## A", "the fixture").text, "## A\none\n### A\ntwo\n");
+});
+
+test(".section skips headings inside fenced blocks, at its start and at its end", () => {
+  const doc = "```md\n## A\n```\n## A\nbody\n~~~sh\n# a shell comment\n## B\n~~~\nmore\n## C\n";
+  assert.equal(Pin.of(doc, "the fixture").section("## A", "the fixture").text, "## A\nbody\n~~~sh\n# a shell comment\n## B\n~~~\nmore\n");
+  assert.throws(() => Pin.of("```\n## A\n```\n", "the fixture").section("## A", "the fixture"), /section heading "## A" moved/);
+});
+
+test(".section's fence closes only on its opener's character, at least as long, with nothing after it", () => {
+  const doc = [
+    "## A",
+    "````md",
+    "```",
+    "## not an end: a shorter run is fence content",
+    "~~~~",
+    "## not an end: the other fence character is fence content",
+    "```` text",
+    "## not an end: a run with text after it is fence content",
+    "````",
+    "    ```",
+    "## B",
+  ].join("\n");
+  // The four-space line is indented code, not a fence, so `## B` ends the slice.
+  assert.equal(Pin.of(doc, "the fixture").section("## A", "the fixture").text, doc.slice(0, doc.indexOf("## B")));
+  // ACCEPT: a longer closer, indented three spaces, with trailing whitespace.
+  assert.equal(Pin.of("## A\n```\n## no end\n   ````  \n## B\n", "the fixture").section("## A", "the fixture").text, "## A\n```\n## no end\n   ````  \n");
+});
+
+test(".section runs through deeper headings and ends just before the `#` of the next same-or-shallower one", () => {
+  assert.equal(Pin.of("## A\nx\n### Sub\ny\n## B\nz\n## C\n", "the fixture").section("## A", "the fixture").text, "## A\nx\n### Sub\ny\n");
+  assert.equal(Pin.of("## A\nx\n# Top\nz\n", "the fixture").section("## A", "the fixture").text, "## A\nx\n");
+  assert.equal(Pin.of("## A\nx\n  ## B\n", "the fixture").section("## A", "the fixture").text, "## A\nx\n  ");
+  // A `#` run that opens no heading ends nothing.
+  assert.equal(Pin.of("## A\n#hashtag\n####### seven\n## B\n", "the fixture").section("## A", "the fixture").text, "## A\n#hashtag\n####### seven\n");
+});
+
+test(".section runs to the node's end when no later heading closes it", () => {
+  assert.equal(Pin.of("# Top\nintro\n## A\nx\n### Sub\ny", "the fixture").section("## A", "the fixture").text, "## A\nx\n### Sub\ny");
+});
+
+test("Pin's .between is the flat between on the node's text, options included", () => {
+  const doc = "a **START** b END c";
+  assert.equal(Pin.of(doc, "the fixture").between("START", "END", "the fixture", { emphasisTolerant: true }).text, "**START** b ");
+  assert.equal(Pin.of(doc, "the fixture").between("START", "END", "the fixture").text, between(doc, "START", "END", "the fixture"));
+});
+
+test("Pin's .paragraph is the flat paragraph on the node's text, Pin.END and options included", () => {
+  const doc = "intro\n\n**THE RULE** says X.\n\n**next** para.\n";
+  assert.equal(Pin.of(doc, "the fixture").paragraph("THE RULE", "the fixture", "next", { emphasisTolerant: true }).text, "**THE RULE** says X.");
+  assert.equal(Pin.of("intro\n\nTHE RULE says X.\n", "the fixture").paragraph("THE RULE", "the fixture", Pin.END).text, "THE RULE says X.\n");
+});
+
+test("Pin's .bullet is the flat bullet on the node's text", () => {
+  const doc = "- one\n  more\n- two\n";
+  assert.equal(Pin.of(doc, "the fixture").bullet("- one", "- two", "the fixture").text, bullet(doc, "- one", "- two", "the fixture"));
+});
+
+test("Pin's .betweenPhrases is the flat betweenPhrases on the node's text, bound included", () => {
+  assert.equal(Pin.of("start here then stop\n\nlater stop", "the fixture").betweenPhrases("start here", "stop", "the fixture", { bound: /\n\n/ }).text, "start here then ");
+  assert.throws(() => Pin.of("start here then\n\nlater stop", "the fixture").betweenPhrases("start here", "stop", "the fixture", { bound: /\n\n/ }), /lies past the end bound/);
+});
+
+test("Pin's .anchorAt is the flat anchorAt's offset into the node's text, options included", () => {
+  assert.equal(Pin.of("x **an anchor** y", "the fixture").anchorAt("an anchor", "the fixture", { emphasisTolerant: true }), 2);
+  assert.equal(Pin.of("x **an anchor** y", "the fixture").anchorAt("an anchor", "the fixture"), anchorAt("x **an anchor** y", "an anchor", "the fixture"));
+});
+
+test("Pin's .quoteBlock is the flat quoteBlock on the node's text, options included", () => {
+  assert.equal(Pin.of("> one block\n> here\n\n> **two** block\n", "the fixture").quoteBlock("two block", "the fixture", { emphasisTolerant: true }).text, "> **two** block");
+});
+
+test("Pin's .quoteBlocks returns each of the flat quoteBlocks' runs as a node", () => {
+  const nodes = Pin.of("> one block\n> here\n\ntext\n> two\n", "the fixture").quoteBlocks();
+  assert.ok(nodes.every((node) => node instanceof Pin));
+  assert.deepEqual(nodes.map((node) => node.text), ["> one block\n> here", "> two"]);
+});
+
+test("Pin's static members are the module's string functions and END", () => {
+  assert.equal(Pin.END, END);
+  assert.equal(Pin.phrase, phrase);
+  assert.equal(Pin.sentences, sentences);
+  assert.equal(Pin.unemphasized, unemphasized);
+  assert.equal(Pin.logicalLines, logicalLines);
 });
