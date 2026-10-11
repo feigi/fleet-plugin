@@ -56,17 +56,16 @@
 // both files.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { paragraph, unemphasized } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
+const read = (...p) => Pin.file(join(REPO, ...p)).text;
 // The body alone — everything after the frontmatter's closing `---`. Named
 // SKILL for the history above: this was run-team/SKILL.md's phase 2 until #1804.
 const SKILL = read("agents", "fleet-implementer-slow-high.agent.md").split("---").slice(2).join("---");
 const REPO_ROOT = join(import.meta.dirname, "..");
-const TRACKER = readFileSync(join(REPO_ROOT, "docs", "agents", "issue-tracker.md"), "utf8");
+const TRACKER = Pin.file(join(REPO_ROOT, "docs", "agents", "issue-tracker.md"));
 
 // Names the block by its opening clause. Semantic, and the one clause both
 // files must share for either to be the block at all.
@@ -135,12 +134,12 @@ function block(text, what, end) {
   // Exactly one, not the first: a second paragraph opening the same way is a
   // second copy, and `find` would compare one of them and leave the other free
   // to say anything.
-  const hits = paragraphs.filter((p) => unemphasized(p).startsWith(unemphasized(OPENER)));
+  const hits = paragraphs.filter((p) => Pin.unemphasized(p).startsWith(Pin.unemphasized(OPENER)));
   assert.equal(hits.length, 1, `${what}: expected exactly one paragraph opening "${OPENER}", found ${hits.length} — update this test`);
   const rest = paragraphs.slice(paragraphs.indexOf(hits[0]) + 1);
   // Guarded, or a stale end anchor runs the slice to EOF and swallows the whole
   // rest of the file: still red, but red about the wrong thing.
-  const stop = rest.findIndex((p) => end.test(unemphasized(p)));
+  const stop = rest.findIndex((p) => end.test(Pin.unemphasized(p)));
   assert.notEqual(stop, -1, `${what}: nothing after the block matches ${end} — the end anchor is stale, update this test`);
   const slice = [hits[0], ...rest.slice(0, stop)];
   // Positive control. Both slices coming back empty is how an equality pin
@@ -151,7 +150,7 @@ function block(text, what, end) {
 }
 
 const source = (text = SKILL) => block(text, "agents/fleet-implementer-slow-high.agent.md", SKILL_END);
-const copy = (text = TRACKER) => block(text, "docs/agents/issue-tracker.md", TRACKER_END);
+const copy = (text = TRACKER.text) => block(text, "docs/agents/issue-tracker.md", TRACKER_END);
 
 // Each side's own raw bytes, for the fixtures below to mutate. Both throw,
 // naming the block, if it is gone, doubled or re-anchored — which is the
@@ -174,11 +173,11 @@ const copy = (text = TRACKER) => block(text, "docs/agents/issue-tracker.md", TRA
 // message rather than the growth or reflow they are meant to catch).
 // The agent body carries the block as plain prose, like the tracker, so its
 // bound is the paragraph too — no `>` run to bound it since #1804.
-const skillBlock = () => paragraph(SKILL, OPENER, "the implementer body's issue-read block", "**Re-derive the ticket's claims against `origin/main`", { emphasisTolerant: true });
+const skillBlock = () => Pin.of(SKILL, "agents/fleet-implementer-slow-high.agent.md's body").paragraph(OPENER, "the implementer body's issue-read block", "**Re-derive the ticket's claims against `origin/main`", { emphasisTolerant: true }).text;
 // The tracker's copy is plain prose in a `##` section, not a quote run, so its
 // bound is the paragraph — `prose-pin.mjs`'s single definition of that bound,
 // blank-line-terminated and anchored exactly once.
-const trackerBlock = () => paragraph(TRACKER, OPENER, "the tracker's copy of the issue-read block", "## Wayfinding operations", { emphasisTolerant: true });
+const trackerBlock = () => TRACKER.paragraph(OPENER, "the tracker's copy of the issue-read block", "## Wayfinding operations", { emphasisTolerant: true }).text;
 
 // Gutter off, whitespace collapsed — the shape wrap width cannot change, used
 // below to prove a rewrap moved the breaks and nothing else.
@@ -268,7 +267,7 @@ test("a rewrapped copy still matches", () => {
   const narrowTracker = rewrap(tracker, 52, "");
   assert.equal(flat(narrowTracker), flat(tracker), "the copy rewrap changed the block's words, not just its breaks — the fixture is corrupt, not the docs");
   assert.notEqual(narrowTracker, tracker, "the copy rewrap no longer changes the tracker's wrapping — pick a width the file does not already use");
-  assert.equal(copy(TRACKER.replace(tracker, () => narrowTracker)), source());
+  assert.equal(copy(TRACKER.text.replace(tracker, () => narrowTracker)), source());
 });
 
 test("upstream growth arriving as a new paragraph beside the block reddens", () => {
