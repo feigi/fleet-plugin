@@ -1,6 +1,6 @@
 // `stranded.mjs`: phase 0's stranded-claim step. It lists the open issues
 // labelled in-progress with no open PR and classifies each off the `prior`
-// verdict `ledger.mjs rotate` recorded — resume, report, or nothing listed —
+// verdict `ledger.mjs rotate` recorded — resume, report, or no claim listed —
 // and acts on none of them.
 //
 // Every case runs the real script against a throwaway repository with real
@@ -8,14 +8,14 @@
 // FLEET_PROC_TABLE fixture in which the recorded controller is the test
 // runner itself — the script's parent, alive, with the recorded start time —
 // so a script that judged the record instead of reading `prior` would answer
-// `ancestor` and list nothing.
+// `ancestor` and list no claim.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
@@ -76,10 +76,10 @@ function fixture(t, { controller = null, heartbeat, worktrees = [] } = {}) {
   writeFileSync(tableFile, JSON.stringify(TABLE));
   const ghLog = join(dir, "gh.log");
   writeFileSync(ghLog, "");
-  const run = ({ issues = [], prs = [], env = {}, cwd = repo } = {}) => {
+  const run = ({ issues = [], prs = [], env = {}, cwd = repo, script = SCRIPT } = {}) => {
     writeFileSync(join(dir, "issues.json"), JSON.stringify(issues));
     writeFileSync(join(dir, "prs.json"), JSON.stringify(prs));
-    const r = spawnSync(process.execPath, [SCRIPT], {
+    const r = spawnSync(process.execPath, [script], {
       cwd, encoding: "utf8",
       env: {
         ...process.env, PATH: `${bin}:${process.env.PATH}`, FLEET_PROC_TABLE: tableFile, GH_LOG: ghLog,
@@ -102,6 +102,7 @@ test("prior dead + an in-progress issue with no PR + its worktree in this checko
   assert.deepEqual(r.out, {
     prior: "dead",
     claims: [{ n: 12, t: "ticket 12", action: "resume", worktree: wt(f, "12-impl-12"), branch: "implementer/12-impl-12", why: "its worktree is in this checkout" }],
+    carried: [],
   });
   // The same answer from inside a worktree: the checkout is the main one.
   const inside = f.run({ issues: [issue(12)], cwd: wt(f, "12-impl-12") });
@@ -111,7 +112,7 @@ test("prior dead + an in-progress issue with no PR + its worktree in this checko
 
 test("the classification reads prior, never the record: a record naming a live ancestor with prior dead still resumes", (t) => {
   // RECORD names this runner, the script's parent: judged through the
-  // FLEET_PROC_TABLE it would read `ancestor`, and `ancestor` lists nothing.
+  // FLEET_PROC_TABLE it would read `ancestor`, and `ancestor` lists no claim.
   const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
   const r = f.run({ issues: [issue(12)] });
   assert.equal(r.status, 0, r.stderr);
@@ -202,8 +203,45 @@ test("prior ancestor → nothing listed, nothing asked of gh", (t) => {
   const f = fixture(t, { controller: RECORD("ancestor"), worktrees: ["12-impl-12"] });
   const r = f.run({ issues: [issue(12)] });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.out, { prior: "ancestor", claims: [] });
+  assert.deepEqual(r.out, { prior: "ancestor", claims: [], carried: [] });
   assert.deepEqual(r.gh, []);
+});
+
+test("prior ancestor → every live token the carried ledger holds, once each, with its row — and nothing settled", (t) => {
+  const f = fixture(t, { controller: RECORD("ancestor") });
+  writeFileSync(join(f.repo, ".fleet", "ledger.md"), [
+    "# Fleet run ledger", "", "## Rows", "",
+    "- #3 impl-3=PR#5 → PR#5 · review=member:review-pr-5",
+    "- #4 impl-4=PR#6 → PR#6 · review=wf:r1 · reviewed=abc1234:1/0/0:run-abcdefgh · fix-pr-6",
+    "- #7 impl-7=PR#8 → PR#8 · review=wf:r2 · reviewed=abc1234:0/0/0:run-bcdefghi · finisher-pr-8 · review=wf:r9",
+    "- #12 impl-12 · tier-ok=impl-12:fleet-implementer-slow-high",
+    "", "## Dispatched", "",
+    "- impl-3=PR#5", "- impl-4=PR#6", "- fix-pr-6", "- impl-7=PR#8", "- finisher-pr-8", "- impl-12", "- merge-bot-1",
+    "", "## Filed", "", "", "## Ruled", "", "",
+  ].join("\n"));
+  const r = f.run({ issues: [issue(12)] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out, {
+    prior: "ancestor", claims: [],
+    carried: [
+      { name: "review-pr-5", token: "review=member:review-pr-5", row: "#3" },
+      { name: "fix-pr-6", token: "fix-pr-6", row: "#4" },
+      { name: "finisher-pr-8", token: "finisher-pr-8", row: "#7" },
+      { name: "r9", token: "review=wf:r9", row: "#7" },
+      { name: "impl-12", token: "impl-12", row: "#12" },
+      { name: "merge-bot-1", token: "merge-bot-1", row: null },
+    ],
+  });
+  assert.deepEqual(r.gh, []);
+});
+
+test("prior ancestor with a ledger that cannot be read exits 2 — never nothing carried", (t) => {
+  const f = fixture(t, { controller: RECORD("ancestor") });
+  mkdirSync(join(f.repo, ".fleet", "ledger.md"));
+  const r = f.run();
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /ledger\.mjs read failed .* which tokens rotate carried is unknown/);
+  assert.equal(r.stdout, "");
 });
 
 test("prior none, no record, or a heartbeat file that cannot be read → every claim reported, none resumed", (t) => {
@@ -293,3 +331,26 @@ test("gh is run with no ambient GIT_DIR or GH_REPO, which would answer for anoth
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(readFileSync(envLog, "utf8").trim().split("\n"), ["GIT_DIR= GH_REPO=", "GIT_DIR= GH_REPO="]);
 });
+
+// `ledger.mjs read` is the ledger's own parser, so its stdout is only wrong
+// when the two scripts drift apart. Run a copy of the scripts directory whose
+// ledger.mjs prints `stdout`, so the answer carriedTokens must refuse can be
+// fed to it.
+for (const [name, stdout] of [
+  ["output that is not JSON", "not json"],
+  ["JSON with no rows", JSON.stringify({ filed: [], ruled: [], dispatched: [] })],
+  ["rows that are not strings", JSON.stringify({ rows: [1], filed: [], ruled: [], dispatched: [] })],
+  ["no dispatched list", JSON.stringify({ rows: [] })],
+  ["null", "null"],
+]) {
+  test(`prior ancestor with a ledger read that answers ${name} exits 2 — never nothing carried`, (t) => {
+    const f = fixture(t, { controller: RECORD("ancestor") });
+    const scripts = join(f.dir, "scripts");
+    cpSync(dirname(SCRIPT), scripts, { recursive: true });
+    writeFileSync(join(scripts, "ledger.mjs"), `process.stdout.write(${JSON.stringify(stdout)});\n`);
+    const r = f.run({ script: join(scripts, "stranded.mjs") });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /could not parse ledger\.mjs read output|ledger\.mjs read returned no \{rows, dispatched\}/);
+    assert.equal(r.stdout, "");
+  });
+}

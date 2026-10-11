@@ -374,18 +374,31 @@ phase, or in any later one, asks the maintainer which tickets to take.
    every run, whatever way the previous one ended.** One ledger per run:
    `~/.fleet/bin/fleet-run ledger.mjs rotate` moves the previous run's
    `.fleet/ledger.md` byte-for-byte to `.fleet/ledger.<UTC
-   YYYY-MM-DDTHHMMSSZ>.md` and leaves none behind, so this run's first write
-   starts the empty skeleton. Nothing is carried forward — no row, exclusion,
-   `## Filed` or `## Ruled` entry — so an unchecked `impl-` row a prior run
-   left behind can no longer hold this run's tick. What an unclean end left in
+   YYYY-MM-DDTHHMMSSZ>.md` and leaves none behind. What it carries forward
+   turns on the verdict it reaches below. After `dead` or `none` nothing is
+   carried — no row, exclusion, `## Filed` or `## Ruled` entry — so this
+   run's first write starts the empty skeleton, and an unchecked `impl-` row
+   a prior run left behind can no longer hold this run's tick: a dead
+   controller took its in-process members with it. After `ancestor` — this
+   session's own earlier run, whose members run inside the same omp process
+   and may still be live — it writes a new ledger holding every row of a
+   stream (one PR's rows) in which a row carries an unsettled member token
+   or an open `review=` launch, whole and with every other token on it, plus
+   every unsettled `## Dispatched` entry and the settled entry of each
+   member a carried row names; exclusions, `## Filed`, `## Ruled` and the
+   drain marker are never carried.
+   A line it cannot parse is skipped with a warning naming it, and the
+   rotation still succeeds. It prints `{rotated, archive, carried: {rows,
+   dispatched}, skipped}`. The carried tokens keep the tick from dispatching
+   onto those members' work, keep their names taken, and give their late
+   results a token to settle; the stranded-claim step below reconciles them.
+   What an unclean end left in
    flight comes back through the ordinary per-run path: open PRs through the
    fold-in below, `behind-pr:`/`behind-issue:` exclusions through phase 1's
    collision and sequence checks, and a claim a dead run left without a PR
    through the stranded-claim step below — resumed by a new member under a
    new name when its worktree is in this checkout, reported to the
-   maintainer otherwise. A claim this session's own earlier run left stays
-   with it: its member may still be live, and the Member-killed row's check
-   covers it. An exclusion that expires with the run that wrote
+   maintainer otherwise. An exclusion that expires with the run that wrote
    it (`deferred-to-session-end` and its like) must be restated if it still
    holds. **The guard is the
    controller record**, `controller` in `.fleet/heartbeat.json`: the omp
@@ -476,8 +489,12 @@ phase, or in any later one, asks the maintainer which tickets to take.
    that run's own metrics — it is reviewable work no member otherwise picks up,
    because the Shortlist holds ISSUES and nothing looks at inherited PRs. Queue
    each for review exactly as ticket work: same review workflow, same
-   fix-applier, same finisher. Measured 2026-09-03 — a prior run's ticket PR
-   arrived this way and its review found a defect its own PR body called
+   fix-applier, same finisher. **Skip a PR a row rotate carried already
+   holds** — its `#<pr>` key, or the PR of its `impl-<N>=PR#<pr>` token: that
+   row already queues it, and a `ledger.mjs row` write replaces the whole
+   line, wiping the live tokens carried on it. Measured 2026-09-03 — a prior
+   run's ticket PR arrived this way and its review found a defect its own PR
+   body called
    unreviewed, and a metrics PR's review then caught two metrics rows the
    controller had missed in its own close-out, so no PR is exempt from being
    wrong. Reviewing them next run is also what stops one pinning
@@ -486,20 +503,39 @@ phase, or in any later one, asks the maintainer which tickets to take.
 
    **Resume the claims a dead run left without a PR — after the fold-in,
    before shortlisting.** A claim's label and worktree exist before its first
-   push, and rotation carries no row forward, the candidate scan excludes
-   `in-progress`, and the in-flight check reads the worktree as taken — so a
+   push, and rotation after a dead run carries no row forward, the candidate
+   scan excludes `in-progress`, and the in-flight check reads the worktree as
+   taken — so a
    claim the previous run left without a PR is held by nobody until this step
    names it. `~/.fleet/bin/fleet-run stranded.mjs` lists and classifies; you
    dispatch. It reads the `prior` rotate just recorded, never the record
    itself, which names this run's own live controller, and prints
-   `{prior, claims: [{n, t, action, worktree, branch, why}]}`:
+   `{prior, claims: [{n, t, action, worktree, branch, why}], carried: [{name,
+   token, row}]}`:
 
    - `prior: dead` — every open `in-progress` issue with no open PR (one with
      an open PR is the fold-in's): `resume` when exactly one worktree for it
      sits under this checkout's `.worktrees/`, `report` otherwise.
-   - `prior: ancestor` — this session's own earlier run: nothing is listed.
-     Its members may still be live, and the Member-killed row's check covers
-     them.
+   - `prior: ancestor` — this session's own earlier run: no claim is listed.
+     `carried` lists every live token rotate carried — its member or runner
+     `name` (a `review=wf:` launch's runId), the `token` as the ledger holds
+     it, and the `row` carrying it, null for a member only `## Dispatched`
+     names. Reconcile them before shortlisting: read `proc://` once, find
+     each `name` among this session's jobs, and act on its state.
+     `running` → keep the token. `completed` or `failed` → record its
+     result from `agent://<id>` as the **Record, then tick** table records
+     that member's report; an output you cannot read is a death the
+     Member-killed row confirms. `cancelled` → record it dead. Absent, or a
+     state you cannot read → keep the token live and let the Member-killed
+     row clear it: a token nothing confirms dead counts as live. Recording a
+     death has two forms, here and on the Member-killed row alike. An
+     `impl-`, `fix-pr-`, `finisher-pr-` or `merge-bot-` member is settled:
+     `ledger.mjs settle <name> killed`. A reviewer is no member `settle`
+     takes — `settle review-pr-<n> killed` exits 2 — so its launch is
+     settled `=failed` where it stands: a `ledger.mjs row` rewrite of its row
+     that turns `review=member:<name>` into `review=member:<name>=failed`
+     (`fallback:` and `wf:` launches alike), after which the tick owes the PR
+     a review again under the next free reviewer name.
    - `prior: none` — no record proves the previous run dead (no record yet, or
      no `omp` process found above the rotation): every claim is `report`, and
      nothing is resumed.
@@ -517,8 +553,9 @@ phase, or in any later one, asks the maintainer which tickets to take.
    `claim-ticket.sh`: the claim already stands. A `report` goes to the
    maintainer as `#<N> — <why>` and nothing else: no dispatch, no label change,
    no release. Exit 2 is a list that did not answer — a `gh` or `git`
-   failure, a list at its cap, or a worktree whose presence cannot be told —
-   and is never nothing stranded.
+   failure, a list at its cap, a worktree whose presence cannot be told, or,
+   after `ancestor`, a ledger that cannot be read — and is never nothing
+   stranded.
 
 1. **Build the Shortlist** — `~/.fleet/bin/fleet-run shortlist.mjs`, then read
    `.fleet/shortlist.json`. The script runs the cheap filters and nothing else
@@ -1155,6 +1192,18 @@ without one, the verdict is `tier-unverifiable` for a member settled `killed`
 or `released`, and exit 2 naming the wrong session for any other. Clear a
 mismatch by fixing the definition or the dispatch and dispatching the
 replacement at the right tier.
+
+**After `/resume`, a carried implementer can hold the whole tick.** A live
+implementer rotate carried forward with no verdict on its row is unchecked,
+and once this session has been reopened with `/resume` its transcript sits
+under the earlier session's directory: the check given this run's `session`
+finds no `<member>.jsonl` and exits 2, writing nothing. `HOLD (tier unchecked
+impl-<N>)` then stops the whole tick, not only that member's ticket. It
+clears once the member settles: one settled `killed` or `released` gets
+`tier-unverifiable=` from the same check, and one settled any other way ran,
+so pass the directory that dispatched it, as above. Until it settles,
+follow the carried token's reconciliation in phase 0: `proc://` reads
+`running` → wait; dead → the Member-killed row.
 
 **Run the check right after the dispatch, and never reinstall the plugin or
 change `modelRoles` while any member is unchecked.** The check reads the
@@ -3975,8 +4024,11 @@ map or the filed list redoes finished work. Two duplicate tickets shipped in one
 run from exactly that.
 
 **The file lives one run.** Phase 0 rotates it before anything reads it, so
-no row, exclusion, filing, ruling or drain marker outlives the run that
-wrote it. Never rotate mid-run: it is phase 0's step alone.
+no exclusion, filing, ruling or drain marker outlives the run that wrote it,
+and no row does either — except, when the previous run was this session's
+own, a row still carrying a live token, which rotate carries forward with
+its live `## Dispatched` entries (phase 0). Never rotate mid-run: it is
+phase 0's step alone.
 
 One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`):
 
@@ -4023,7 +4075,9 @@ live count from it, so nobody states one. Write neither by hand:
   ledger, so the next run's rotation retires it with everything else.
 - **`ledger.mjs rotate`** — phase 0's first ledger write, every run: moves
   the file as-is to `ledger.<UTC YYYY-MM-DDTHHMMSSZ>.md` beside it under the
-  same `<file>.lock`, and the next write starts the empty skeleton. Refused
+  same `<file>.lock`, and the next write starts the empty skeleton — unless
+  the previous run was this session's own, when it first writes the rows and
+  `## Dispatched` entries still live into a new ledger (phase 0 says which). Refused
   while the recorded controller is alive and not this run's ancestor, ledger
   or none — or, with no record and a ledger to move, while the heartbeat mark
   is still beating — or when the archive name already exists, the process
