@@ -139,6 +139,9 @@ export function rowNums(text) {
 export const REVIEW = /^review=(?<kind>wf|member|fallback):(?<name>[^=\s]+)(?<failed>=failed)?$/;
 export const REVIEWED = /^reviewed=([0-9a-fA-F]{7,40}):(\d+)\/(\d+)\/(\d+):(run-[A-Za-z0-9]{8})$/;
 
+// The stream a row belongs to: its PR, else its key.
+const streamId = (text) => rowNums(text).pr ?? text.split(/\s/)[0];
+
 // Every PR's token stream: every row that maps to it under rowNums(), in
 // ledger row order, its tokens run end to end — the order fleet-tick.mjs's
 // fold reads a PR's review record in. A row naming no PR and keyed by no
@@ -146,7 +149,7 @@ export const REVIEWED = /^reviewed=([0-9a-fA-F]{7,40}):(\d+)\/(\d+)\/(\d+):(run-
 function streams(rows) {
   const out = new Map();
   for (const text of rows) {
-    const id = rowNums(text).pr ?? text.split(/\s/)[0];
+    const id = streamId(text);
     if (!out.has(id)) out.set(id, []);
     out.get(id).push(...text.split(/\s+/).filter(Boolean));
   }
@@ -342,7 +345,7 @@ export function liveOnLedger(rows, dispatched) {
     seen.add(token);
     out.tokens.push({ name, token, row });
   };
-  const streamOf = rows.map((text) => rowNums(text).pr ?? text.split(/\s/)[0]);
+  const streamOf = rows.map(streamId);
   const liveStreams = new Set();
   rows.forEach((text, i) => {
     const key = text.split(/\s/)[0];

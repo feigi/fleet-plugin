@@ -233,6 +233,12 @@ test("liveOnLedger: a bare token beside its settled ## Dispatched copy carries t
   assert.deepEqual(kept.tokens, out.tokens);
 });
 
+test("liveOnLedger: an open launch is credited to the row that names it, not to every row of its PR", () => {
+  const rows = ["#3 impl-3=PR#5 → PR#5", "#5 review=member:review-pr-5"];
+  const out = liveOnLedger(rows, ["impl-3=PR#5"]);
+  assert.deepEqual(out.tokens, [{ name: "review-pr-5", token: "review=member:review-pr-5", row: "#5" }]);
+});
+
 test("expectedDefinition refuses a tier= it cannot name one definition file by", () => {
   assert.throws(() => expectedDefinition("impl-7 · tier=alt · tier=slow-high"), /conflicting tier= tokens \(tier=alt, tier=slow-high\)/);
   assert.throws(() => expectedDefinition("impl-7 · tier=../../etc"), /is not a definition suffix/);
