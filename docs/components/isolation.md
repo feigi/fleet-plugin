@@ -20,6 +20,9 @@ store.
    `<scratch>/pr<N>/...`, and every child a member dispatches
    partitions further under that (`<scratch>/pr<N>/fix-XXXXXXXX/`) —
    never the shared scratch root directly, never shared with a sibling.
+   `<scratch>` is `~/.fleet/scratch/<repo-key>/`, computed by
+   `scratch-root.mjs` and written, absolute, into every dispatch prompt —
+   no harness supplies it, and a member never builds its own (ADR 0027).
 3. **Read-only vs. mutating stay physically separate.** A specialist's
    own `.agent.md` declares no write tools, so it can never share a
    copy with a mutating refuter even by accident; a refuter gets its

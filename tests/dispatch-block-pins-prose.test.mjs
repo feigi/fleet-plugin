@@ -306,22 +306,27 @@ test("the scratch-discipline block names the shared injected root, the per-membe
     phrase("copy you create goes under `<scratch>/impl-<N>/`, never into the scratch root by itself"),
     "the per-member path is no longer bound to the prohibition on writing into the scratch root itself",
   );
-  // The root bound to it being shared and injected, not merely "use a subdir".
-  // #581: an implementer is TOLD to use that root by its own system prompt
-  // before SKILL.md ever reaches it, so the rule has to name the root and say
-  // it is shared, or it reads as tidiness advice competing with an instruction
-  // the member already received.
+  // The root bound to it being assigned by the dispatch prompt and shared, not
+  // merely "use a subdir": no harness supplies a root, so the member's path
+  // comes from the prompt, the root above it is shared with every sibling, and
+  // a member whose prompt names none asks rather than inventing one.
   assert.match(
     b,
-    phrase("The scratchpad root your own system prompt names is injected unprompted into every dispatched member and is shared with every sibling"),
-    "the block no longer names the injected scratch root as shared with every sibling member",
+    phrase("Your dispatch prompt names your partition with an absolute path, and no harness supplies one: the root above it is shared with every sibling running this session"),
+    "the block no longer says the dispatch prompt names the partition and the root is shared with every sibling member",
   );
+  assert.match(
+    b,
+    phrase("Never build a root of your own — if your prompt names no path, ask the controller by name and never invent one"),
+    "the block no longer forbids a member building its own scratch root",
+  );
+  assert.doesNotMatch(b, /injected/, "the block again claims a harness injects the scratch root");
   // The per-member path bound to the SAME derivation phase 1 already uses, not
   // a second scheme invented for this rule.
   assert.match(
     b,
-    phrase("Derive your own path the same way `claim-ticket.sh` already derives per-ticket ports from the issue number (`postgres=16<N>`, `ollama=22<N>`): `<scratch>/impl-<N>/`, not a second scheme"),
-    "the per-member scratch path is no longer derived the same way claim-ticket.sh derives per-ticket ports",
+    phrase("Your partition is `<scratch>/impl-<N>/`, shaped the same way `claim-ticket.sh` already derives per-ticket ports from the issue number (`postgres=16<N>`, `ollama=22<N>`), not a second scheme"),
+    "the per-member scratch path is no longer shaped the way claim-ticket.sh derives per-ticket ports",
   );
   // Absence handled: nothing else creates this directory, so a member that
   // never `mkdir -p`s it has no path to write into.

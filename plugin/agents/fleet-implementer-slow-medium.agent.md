@@ -95,13 +95,14 @@ repository, with no per-member address for it — so this prohibition is the
 whole of the protection, not a stopgap standing in for one.
 
 **Every scratch file, fixture or mutation copy you create goes under
-`<scratch>/impl-<N>/`, never into the scratch root by itself.** The scratchpad
-root your own system prompt names is injected unprompted into every dispatched
-member and is shared with every sibling running this session — `SKILL.md` does
-not choose that root and cannot keep it from being handed to you, so writing to
-it directly, not a subdir under it, is the defect. Derive your own path the
-same way `claim-ticket.sh` already derives per-ticket ports from the issue
-number (`postgres=16<N>`, `ollama=22<N>`): `<scratch>/impl-<N>/`, not a second
+`<scratch>/impl-<N>/`, never into the scratch root by itself.** Your dispatch
+prompt names your partition with an absolute path, and no harness supplies one:
+the root above it is shared with every sibling running this session, so writing
+to it directly, not into your own subdirectory, is the defect. Never build a
+root of your own — if your prompt names no path, ask the controller by name and
+never invent one. Your partition is `<scratch>/impl-<N>/`, shaped the same
+way `claim-ticket.sh` already derives per-ticket ports from the issue
+number (`postgres=16<N>`, `ollama=22<N>`), not a second
 scheme, and `mkdir -p` it yourself the first time — nothing creates it for you.
 The harm is a false measurement, not untidiness: a mutation harness writes a
 broken copy of a file, measures against it, then restores from `.orig`, and
@@ -122,8 +123,8 @@ which can carry spaces and `/` and would split or nest the path in an
 unquoted shell command — unique among your children and never one of your
 own entries (`probe`, `mutate`, or any other name you write under
 `<scratch>/impl-<N>/` yourself), so no child shares a directory with a
-sibling or with you. A child left to derive its own path has only the
-injected root above to derive it from, which is this block's collision one
+sibling or with you. A child left to derive its own path has no root to
+derive it from but a guess, which is this block's collision one
 level down — and its files under your partition are what show the controller
 you are alive while you wait on it.
 

@@ -21,11 +21,17 @@
 // `null`, which every guard here — `if (snap) {...}`, `unrunCrashed`,
 // `verdictFor` — is written against).
 //
-// Two imports. arg.mjs's isDigits(): this file is an ordinary
+// Three imports. arg.mjs's isDigits(): this file is an ordinary
 // module, so it consumes the repo's digits rule directly rather than
 // declaring its own copy. node:path's `posix`, to normalise a
 // scratch path before `runnerScratchRefusal` reads its last component, and
 // its `isAbsolute`, to refuse a scratch that is not an absolute path.
+// fleet-dir.mjs's scratchRoot(), scratchRootRefusal() and FleetDirUnresolvable.
+// scratchRoot() and FleetDirUnresolvable serve the one caller that passes no
+// `scratch` at all — a standalone review with no dispatcher — which takes the
+// fleet's own scratch root for this repository; scratchRootRefusal() vets every
+// scratch, given or defaulted, against landing in a work tree that does not
+// ignore it.
 //
 // `.mjs`, not `.js`: this file was once `review-core.js`, and
 // nothing that ships declares a `type`, so Node below 20.19.0/22.7.0 —
@@ -35,6 +41,7 @@
 
 import { isAbsolute, posix } from "node:path";
 import { isDigits } from "./arg.mjs";
+import { FleetDirUnresolvable, scratchRoot, scratchRootRefusal } from "./fleet-dir.mjs";
 
 // --- Schemas ----------------------------------------------------------
 export const FINDINGS_SCHEMA = {
@@ -739,6 +746,23 @@ async function defaultPipeline(items, stage1, stage2) {
   );
 }
 
+// A review dispatched by the controller is handed its scratch root; one run on
+// its own (`/review-and-fix` with no dispatcher) resolves it the way
+// scratch-root.mjs does, through the same functions, and is refused the same
+// way when that root would sit inside a work tree that does not ignore it.
+function standaloneScratchRoot() {
+  let root;
+  try {
+    root = scratchRoot();
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
+    throw new Error(`review-pr: no args.scratch, and the scratch root could not be resolved — ${e.message}`);
+  }
+  const refusal = scratchRootRefusal(root);
+  if (refusal !== null) throw new Error(`review-pr: no args.scratch, and ${refusal}`);
+  return root;
+}
+
 export async function runReview(host, args) {
   const { agent, phase, log } = host;
   const pipeline = host.pipeline ?? defaultPipeline;
@@ -748,9 +772,6 @@ export async function runReview(host, args) {
   const pr = A.pr;
   const branch = A.branch;
   const worktree = A.worktree;
-  const scratch = A.scratch === undefined ? `/tmp/review-pr-${pr}` : A.scratch;
-  const runRootParent = `${scratch}/pr${pr}`;
-  const runRootPrefix = `${runRootParent}/run-`;
   // Every dispatch label ends in `:pr${pr}`: the member id the harness derives
   // from a label is all a transcript keeps of it, and member-record.mjs's
   // parseMemberName reads the PR back out of that id to book its cost.
@@ -765,7 +786,7 @@ export async function runReview(host, args) {
   // passes all three — `gh` resolves a non-numeric ref as a BRANCH, so the
   // snapshot is a real diff belonging to whatever PR that branch heads while
   // every return value here still reports the string that was passed. It is
-  // also a PATH component by then (`scratch`, `runRootParent` above), so a
+  // also a PATH component by then (`scratch`, `runRootParent` below), so a
   // value like `../x` names a run root outside the scratch tree.
   //
   // REFUSED, never coerced. `Number(pr)` would make a bad value the string
@@ -781,6 +802,12 @@ export async function runReview(host, args) {
   // into it: an absent `pr` is owed "required", not a complaint about digits.
   if (!isDigits(pr)) throw new Error(`review-pr: args.pr must be a PR number, got ${JSON.stringify(pr)}`);
 
+  // Resolved only now: the default spawns git, so a missing or malformed `pr`
+  // is refused on its own terms before anything is resolved or spawned.
+  const scratch = A.scratch === undefined ? standaloneScratchRoot() : A.scratch;
+  const runRootParent = `${scratch}/pr${pr}`;
+  const runRootPrefix = `${runRootParent}/run-`;
+
   const scratchRefusal = runnerScratchRefusal(scratch);
   if (scratchRefusal) throw new Error(`review-pr: ${scratchRefusal}`);
 
@@ -792,6 +819,15 @@ export async function runReview(host, args) {
   // suffix check so a relative `pr<N>` still hears that it is partitioned.
   if (typeof scratch !== "string" || !isAbsolute(scratch)) {
     throw new Error(`review-pr: args.scratch must be an absolute path, got ${JSON.stringify(scratch)}`);
+  }
+
+  // A given scratch is held to the same rule as the default: the controller
+  // hands over the path scratch-root.mjs vetted, but nothing on this side can
+  // tell that from a path inside a tracked tree, and `git add -A` there stages
+  // the run root. The default was already asked in standaloneScratchRoot().
+  if (A.scratch !== undefined) {
+    const rootRefusal = scratchRootRefusal(scratch);
+    if (rootRefusal !== null) throw new Error(`review-pr: args.scratch: ${rootRefusal}`);
   }
 
   const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS);
@@ -1062,11 +1098,13 @@ Scratch files go in ${snap.runRoot}/${d.key}/ and nowhere else. Chain the
 directory change into the command, \`cd "$D" && git …\`, never
 \`cd "$D"; git …\`, so a failed \`cd\` cannot leave a \`git\` command running in the
 checkout — and bracket a fixture's own git with \`git rev-parse --show-toplevel\`:
-before \`git init\` it must NOT resolve to the repository, and a fresh scratch
-dir's \`fatal: not a git repository\` (exit 128) is the pass, not a failure;
-before any \`git commit\` it must resolve to your scratch path — compare
-resolved forms (\`realpath\`), since \`--show-toplevel\` can report
-\`/private/tmp/…\` for a \`/tmp\` scratch dir on macOS.
+before \`git init\` it must NOT resolve to the host repository, and
+\`fatal: not a git repository\` (exit 128) is the usual pass, not a failure — an
+outer repository whose ignore rules cover your scratch dir is a pass too;
+before any \`git commit\` it must resolve to your scratch path, which catches a
+forgotten \`git init\` under any enclosing repository — compare resolved forms
+(\`realpath\`), since \`--show-toplevel\` can report a symlinked parent such as
+\`/tmp\` or a symlinked \`$HOME\` under its resolved name.
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs
 in 'suggestion', not 'critical'. State your search scope for every negative
@@ -1143,11 +1181,13 @@ an abstaining vote — an undecided run never defaults to refuted=true.
 Chain the directory change into the command, \`cd "$D" && git …\`, never
 \`cd "$D"; git …\`, so a failed \`cd\` cannot leave a \`git\` command running in the
 checkout — and bracket a fixture's own git with \`git rev-parse --show-toplevel\`:
-before \`git init\` it must NOT resolve to the repository, and a fresh scratch
-dir's \`fatal: not a git repository\` (exit 128) is the pass, not a failure;
-before any \`git commit\` it must resolve to your scratch path — compare
-resolved forms (\`realpath\`), since \`--show-toplevel\` can report
-\`/private/tmp/…\` for a \`/tmp\` scratch dir on macOS.
+before \`git init\` it must NOT resolve to the host repository, and
+\`fatal: not a git repository\` (exit 128) is the usual pass, not a failure — an
+outer repository whose ignore rules cover your scratch dir is a pass too;
+before any \`git commit\` it must resolve to your scratch path, which catches a
+forgotten \`git init\` under any enclosing repository — compare resolved forms
+(\`realpath\`), since \`--show-toplevel\` can report a symlinked parent such as
+\`/tmp\` or a symlinked \`$HOME\` under its resolved name.
 
 A failure injection with no positive control has produced NO result, never a
 negative one. Before you read an injected fault — an env var, an argv word, a

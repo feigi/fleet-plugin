@@ -127,12 +127,12 @@ test("the rendered refuter prompt chains cd into the git command, never semicolo
 // cannot pass on the clean path gets ignored. Naming a path alone does not
 // catch the observed failure either, which was an agent BELIEVING it was
 // already in scratch and being wrong.
-test("the rendered refuter prompt requires a toplevel assertion around git init/commit, including the realpath remedy for macOS's /private/tmp symlink", () => {
+test("the rendered refuter prompt requires a toplevel assertion around git init/commit, including the realpath remedy for a symlinked parent (`/tmp`, a symlinked `$HOME`)", () => {
   assert.match(
     render(),
-    /`git\s+rev-parse\s+--show-toplevel`:\s+before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository,\s+and\s+a\s+fresh\s+scratch\s+dir's\s+`fatal:\s+not\s+a\s+git\s+repository`\s+\(exit\s+128\)\s+is\s+the\s+pass,\s+not\s+a\s+failure;\s+before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path\s+—\s+compare\s+resolved\s+forms\s+\(`realpath`\),\s+since\s+`--show-toplevel`\s+can\s+report\s+`\/private\/tmp\/…`\s+for\s+a\s+`\/tmp`\s+scratch\s+dir\s+on\s+macOS/s,
+    /`git\s+rev\-parse\s+\-\-show\-toplevel`:\s+before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+host\s+repository,\s+and\s+`fatal:\s+not\s+a\s+git\s+repository`\s+\(exit\s+128\)\s+is\s+the\s+usual\s+pass,\s+not\s+a\s+failure\s+—\s+an\s+outer\s+repository\s+whose\s+ignore\s+rules\s+cover\s+your\s+scratch\s+dir\s+is\s+a\s+pass\s+too;\s+before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path,\s+which\s+catches\s+a\s+forgotten\s+`git\s+init`\s+under\s+any\s+enclosing\s+repository\s+—\s+compare\s+resolved\s+forms\s+\(`realpath`\),\s+since\s+`\-\-show\-toplevel`\s+can\s+report\s+a\s+symlinked\s+parent\s+such\s+as\s+`\/tmp`\s+or\s+a\s+symlinked\s+`\$HOME`\s+under\s+its\s+resolved\s+name/s,
     "review-core.mjs's refuter prompt carries no toplevel assertion around a fixture's own git init/commit, or dropped the " +
-      "realpath remedy for macOS's /private vs /tmp symlink (#1561)",
+      "realpath remedy for a symlinked parent such as /tmp (#1561)",
   );
 });
 

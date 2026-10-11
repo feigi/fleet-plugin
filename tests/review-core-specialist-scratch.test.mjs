@@ -139,7 +139,7 @@ test("the rendered specialist prompt chains cd into the git command, never semic
 // left this file and its review-pr sibling at 6/6 and the four refuter/prose
 // pins at 41/41, all green. It is also the half that makes the rule
 // satisfiable in the OTHER direction — `--show-toplevel` answers
-// `/private/tmp/…` for a `/tmp` scratch dir on macOS, so a raw string compare
+// the RESOLVED path for a scratch dir under a symlinked parent (`/tmp`, a symlinked `$HOME`), so a raw string compare
 // reports a mismatch on the clean path, and a guard that cannot pass there
 // gets ignored exactly as a lone `git init` half would.
 //
@@ -149,14 +149,14 @@ test("the rendered specialist prompt chains cd into the git command, never semic
 // `ed9f2967^:plugin/scripts/review-pr-specialist-scratch.test.mjs` let it
 // through; rewrapping the clause to one line and to a narrower column stays
 // green, since every gap here is `\s+` (all measured).
-test("the rendered specialist prompt requires a toplevel assertion around git init/commit, including the realpath remedy for macOS's /private/tmp symlink", () => {
+test("the rendered specialist prompt requires a toplevel assertion around git init/commit, including the realpath remedy for a symlinked parent (`/tmp`, a symlinked `$HOME`)", () => {
   assert.match(
     render(),
-    /`git\s+rev-parse\s+--show-toplevel`:\s+before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository,\s+and\s+a\s+fresh\s+scratch\s+dir's\s+`fatal:\s+not\s+a\s+git\s+repository`\s+\(exit\s+128\)\s+is\s+the\s+pass,\s+not\s+a\s+failure;\s+before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path\s+—\s+compare\s+resolved\s+forms\s+\(`realpath`\),\s+since\s+`--show-toplevel`\s+can\s+report\s+`\/private\/tmp\/…`\s+for\s+a\s+`\/tmp`\s+scratch\s+dir\s+on\s+macOS/s,
+    /`git\s+rev\-parse\s+\-\-show\-toplevel`:\s+before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+host\s+repository,\s+and\s+`fatal:\s+not\s+a\s+git\s+repository`\s+\(exit\s+128\)\s+is\s+the\s+usual\s+pass,\s+not\s+a\s+failure\s+—\s+an\s+outer\s+repository\s+whose\s+ignore\s+rules\s+cover\s+your\s+scratch\s+dir\s+is\s+a\s+pass\s+too;\s+before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path,\s+which\s+catches\s+a\s+forgotten\s+`git\s+init`\s+under\s+any\s+enclosing\s+repository\s+—\s+compare\s+resolved\s+forms\s+\(`realpath`\),\s+since\s+`\-\-show\-toplevel`\s+can\s+report\s+a\s+symlinked\s+parent\s+such\s+as\s+`\/tmp`\s+or\s+a\s+symlinked\s+`\$HOME`\s+under\s+its\s+resolved\s+name/s,
     "review-core.mjs's specialist prompt carries no toplevel assertion around a fixture's own git init/commit, or " +
-      "dropped the realpath remedy for macOS's /private vs /tmp symlink — an agent that wrongly believes it is " +
+      "dropped the realpath remedy for a symlinked parent such as /tmp — an agent that wrongly believes it is " +
       "already in its scratch copy runs `git init`/`git commit` against the repository, and a raw compare against " +
-      "`--show-toplevel` reads a `/private/tmp` answer for a `/tmp` scratch dir as a mismatch on the clean path (#1550, #1570)",
+      "`--show-toplevel` reads a resolved answer for a symlinked parent as a mismatch on the clean path (#1550, #1570)",
   );
 });
 
