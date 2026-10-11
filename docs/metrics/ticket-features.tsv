@@ -1,1 +1,4 @@
 run_date	session	agent	ticket	policy_cell	chosen_cell	exploration_draw	sizing_src	sizing_pre	router_usd	brief_chars	criteria	comments	age_days	paths	test_paths	xrefs	kind
+2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-2194	2194	slow-high	task-high	3/3	rule			7030	0	2	12	29	0	5	
+2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-2288	2288	slow-high	slow-high	1/3	rule			4573	6	4	10	5	1	6	
+2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-3023	3023	slow-high	task-high	3/3	rule			6415	0	3	1	4	1	2	bug
