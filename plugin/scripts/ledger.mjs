@@ -39,7 +39,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, premisesOf, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, premisesOf, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { isDead, processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -1546,12 +1546,13 @@ function runCheck() {
 // controller's to read and no script's.
 //
 // An `ancestor` rotate also writes `## Retired`: the bare name of every
-// member the archive settled and the new ledger does not carry, and every
-// name the archive's own `## Retired` held. The omp process those members
-// ran in is still this run's, and it answers a second task under a name it
-// has used with `<name>-2` while `hub send <name>` keeps reaching the
+// member the archive settled and the new ledger does not carry, of every
+// reviewer runner its rows launched and the new ledger does not carry, and
+// every name the archive's own `## Retired` held. The omp process those
+// members ran in is still this run's, and it answers a second task under a
+// name it has used with `<name>-2` while `hub send <name>` keeps reaching the
 // first — so a settled name stays taken for the session, not the run:
-// `dispatch` refuses it (a replacement takes its own suffix) and
+// `dispatch` and `review` refuse it (a replacement takes its own suffix) and
 // `nextMergeBot` numbers past it. Measured before this: a session's second
 // run restarted at `merge-bot-1`. A `dead` or `none` rotate retires nothing,
 // since the process that held those names is gone.
@@ -1695,9 +1696,10 @@ function runRotate() {
 // siblings' with them, and the tick's per-PR reading of the PR is unchanged;
 // and the `## Dispatched` entries, settled ones among them, that keep a
 // carried member from reading live again. retiredOnLedger() names the rest:
-// every settled member neither travels, read off the parsed rows and the
-// skipped ones alike — a row the tick refuses still names members this
-// session ran — and the archive's own `## Retired`.
+// every settled member neither travels, and every reviewer runner a row
+// launched, read off the parsed rows and the skipped ones alike — a row the
+// tick refuses still names members this session ran — and the archive's own
+// `## Retired`, each line of which must be a bare member or reviewer name.
 function carryOf(text) {
   const skipped = [];
   const skippedRows = [];
@@ -1718,10 +1720,15 @@ function carryOf(text) {
     skipped.push({ line: e, why: t === null ? "not a member token" : `${t.name}: ${t.error}` });
     return false;
   });
+  const archivedRetired = sectionOf(text, RETIRED).filter((name) => {
+    if (isRetirable(name)) return true;
+    skipped.push({ line: name, why: "not a bare member or reviewer name" });
+    return false;
+  });
   const live = liveOnLedger(rows, dispatched);
   // Skipped rows go after the parsed ones, so `live.rows` still indexes the
   // parsed rows it was computed over.
-  const retired = retiredOnLedger([...rows, ...skippedRows], dispatched, sectionOf(text, RETIRED), live);
+  const retired = retiredOnLedger([...rows, ...skippedRows], dispatched, archivedRetired, live);
   return { rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched, retired, skipped };
 }
 
@@ -1826,14 +1833,16 @@ function runDispatch() {
   refuseMalformedDispatched();
 
   // `merge-bot` bare is the merge-bot case of this command: the ledger names
-  // the bot, 1 + the highest merge-bot entry in `## Dispatched` or
-  // `## Retired`, so the controller never counts. An explicit
-  // `merge-bot-<n>` is accepted only when it is that one.
-  const member = parseMember(name === "merge-bot" ? nextMergeBot(data.dispatched, data.retired) : name);
+  // the bot, 1 + the highest merge-bot name this session holds — in
+  // `## Dispatched`, on a row or in `## Retired` — so the controller never
+  // counts. An explicit `merge-bot-<n>` is accepted only when it is that one.
+  // `sessionNames` is every name beyond `## Dispatched` the session has used.
+  const sessionNames = [...data.rows.flatMap(memberTokens).map((t) => t.name), ...data.retired];
+  const member = parseMember(name === "merge-bot" ? nextMergeBot(data.dispatched, sessionNames) : name);
   if (!member) die(unknownMember(name));
   if (member.bound === null) {
     if (key !== null) die(`merge bots work no ticket or PR — ${usage}`);
-    const next = nextMergeBot(data.dispatched, data.retired);
+    const next = nextMergeBot(data.dispatched, sessionNames);
     if (member.name !== next) die(`${member.name} is not next — the next merge bot this session is ${next}; \`dispatch merge-bot\` names it`);
   } else if (key === null) {
     die(`${member.name} works a ticket or PR — ${usage}`);
@@ -1861,8 +1870,10 @@ function runDispatch() {
     (settledOnRow && `${settledOnRow.name}=${settledOnRow.outcome}`) ??
     (data.retired.includes(member.name) ? "retired by rotate" : undefined);
   if (prior !== undefined) {
-    const used = [...data.dispatched.map((e) => parseToken(e).name), ...data.rows.flatMap(memberTokens).map((t) => t.name), ...data.retired];
-    const next = member.bound === null ? nextMergeBot(data.dispatched, data.retired) : nextRetry(member.name, used);
+    // Never a merge bot: it is accepted only as the number past every name
+    // the session holds, so none of the three places above can name it.
+    const used = [...data.dispatched.map((e) => parseToken(e).name), ...sessionNames];
+    const next = nextRetry(member.name, used);
     die(`${member.name} was already dispatched this session (${prior}) — a replacement takes a name of its own`
       + (next === null ? `, and ${member.name} has no retry letter left` : ` (${next})`));
   }
@@ -2104,7 +2115,7 @@ function runReview() {
     : created ? `${head} ${appended.join(" · ")}`
     : `${head} · ${appended.join(" · ")}`;
   const after = created ? [...data.rows, line] : data.rows.with(i, line);
-  const refusal = rowWriteRefusal(data.rows, after, oldLine, line);
+  const refusal = rowWriteRefusal(data.rows, after, oldLine, line, data.retired);
   if (refusal !== null) die(`review #${prNum}: ${refusal}`);
   data.rows = after;
   save(data);

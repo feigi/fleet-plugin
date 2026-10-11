@@ -405,16 +405,18 @@ phase, or in any later one, asks the maintainer which tickets to take.
    every unsettled `## Dispatched` entry and the settled entry of each
    member a carried row names; exclusions, `## Filed`, `## Ruled` and the
    drain marker are never carried. Every other settled name — in
-   `## Dispatched` or on any row — goes into the new ledger's `## Retired`
-   as a bare name, with whatever the archive's own `## Retired` held: omp
-   answers a second `task` under a name this process has used with
-   `<name>-2` while `hub send <name>` keeps reaching the first, so a settled
-   name stays taken for the session, not the run. `dispatch` refuses a
-   retired name and names the replacement — one retry letter past the
-   highest the session has used on that number, `impl-42-b` for a ticket
-   this session's earlier run worked as `impl-42` — and `dispatch merge-bot`
-   numbers past retired bots. The tick never reads `## Retired`: a ticket an
-   earlier run worked is not claimed by it and can be shortlisted again.
+   `## Dispatched` or on any row — and every reviewer runner a row launched
+   goes into the new ledger's `## Retired` as a bare name, with whatever the
+   archive's own `## Retired` held: omp answers a second `task` under a name
+   this process has used with `<name>-2` while `hub send <name>` keeps
+   reaching the first, so a settled name stays taken for the session, not
+   the run. `dispatch` refuses a retired name and names the replacement — one
+   retry letter past the highest the session has used on that number,
+   `impl-42-b` for a ticket this session's earlier run worked as `impl-42` —
+   `review` refuses a retired runner name and names the next free reviewer
+   name, and `dispatch merge-bot` numbers past retired bots. The tick never
+   reads `## Retired`: a ticket an earlier run worked is not claimed by it
+   and can be shortlisted again.
    A line it cannot parse is skipped with a warning naming it, and the
    rotation still succeeds. It prints `{rotated, archive, carried: {rows,
    dispatched}, retired, skipped}`. The carried tokens keep the tick from
@@ -3451,9 +3453,11 @@ there.
 ### Merge bot
 
 Per pass, named `merge-bot-<n>`, never two at once. `ledger.mjs dispatch
-merge-bot` names it before the dispatch call — `n` is 1 + the `merge-bot-`
-entries already in the ledger's `## Dispatched` list, so it restarts at 1 every
-run, a replacement for a dead bot takes the next `n`, and nobody counts. Dispatch
+merge-bot` names it before the dispatch call — `n` is 1 + the highest
+`merge-bot-<n>` the session holds, in the ledger's `## Dispatched` list, on a
+row or in `## Retired`, so it restarts at 1 only when none was carried or
+retired (a `dead` or `none` rotate, or a fresh start), a replacement for a
+dead bot takes the next `n`, and nobody counts. Dispatch
 it on the tick's `DISPATCH merge-bot`: the first `ready-to-merge` label is
 enough, and it never waits for the finisher's report. Tell it to read
 `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md` and run **one**
@@ -4181,7 +4185,9 @@ maps to the PR — its settled `impl-<N>=PR#<M>` token, else its first `PR#`
 mention, else its key — in ledger order. Every `reviewed=` answers the nearest
 earlier launch that is neither answered nor `=failed`. A launch identity (a
 workflow's runId, or a runner's name whichever of member or fallback launched
-it, `=failed` aside) appears once. No launch appears
+it, `=failed` aside) appears once, and no launch takes a runner name the
+ledger's `## Retired` holds — an earlier run of this session launched it —
+naming the next free reviewer name instead. No launch appears
 while an earlier one is open — unanswered and not `=failed`. Every
 `review=`/`reviewed=` parses. `row` holds the rest: a launch open before the
 write is still on one of the PR's rows after it, `=failed` allowed, and a

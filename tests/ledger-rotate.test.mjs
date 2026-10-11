@@ -452,9 +452,10 @@ const LIVE = ledgerOf({
 });
 // The settled entries of the three implementers whose rows are carried ride
 // with them; the settled entries nothing carried names stay behind — as bare
-// names in `## Retired`, in `## Dispatched` order, the rows adding none.
+// names in `## Retired`, in `## Dispatched` order, then the reviewer runner
+// a row launched.
 const CARRIED = { rows: LIVE_ROWS, dispatched: [...SETTLED_DISPATCHED.slice(0, 3), ...LIVE_DISPATCHED] };
-const RETIRED = ["impl-9", "finisher-pr-10", "impl-11"];
+const RETIRED = ["impl-9", "finisher-pr-10", "impl-11", "review-pr-15"];
 const read = (f) => JSON.parse(f.cli(["read"]).stdout);
 
 test("an ancestor rotate archives the ledger as-is, carries every live row whole and every ## Dispatched entry a live member or a carried row names, and retires every other settled name", (t) => {
@@ -464,7 +465,7 @@ test("an ancestor rotate archives the ledger as-is, carries every live row whole
   const [archive] = f.archives();
   assert.equal(readFileSync(join(f.dir, archive), "utf8"), LIVE, "the archive must be the ledger's own bytes");
   assert.deepEqual(JSON.parse(r.stdout), { rotated: true, archive: join(f.dir, archive), carried: CARRIED, retired: RETIRED, skipped: [] });
-  assert.match(r.stderr, /retired 3 name\(s\) from /);
+  assert.match(r.stderr, /retired 4 name\(s\) from /);
   assert.deepEqual(f.ctl(), { ...OURS, prior: "ancestor" });
   // The tokens riding on a carried row come with it: tier verdicts,
   // `reviewed=`, dispositions, conflict and merge holds.
@@ -572,6 +573,45 @@ test("a carried live bot whose settled predecessors stayed behind still numbers 
   assert.equal(JSON.parse(next.stdout).member, "merge-bot-3");
 });
 
+test("a reviewer runner no carried row names is retired, and review refuses its name, naming the next free one", (t) => {
+  const done = "reviewed=abc1234:0/0/0:run-abcdefgh";
+  const rows = ["#12 impl-12", `#20 impl-20=PR#21 → PR#21 · review=member:review-pr-21 ${done}`];
+  const f = fixture(t, { ledger: ledgerOf({ rows, dispatched: ["impl-12", "impl-20=PR#21"] }), controller: ANCESTOR });
+  assert.equal(f.cli(["rotate"]).status, 0);
+  assert.deepEqual(read(f).retired, ["impl-20", "review-pr-21"]);
+  for (const kind of ["member", "fallback"]) {
+    const r = f.cli(["review", "21", `review=${kind}:review-pr-21`]);
+    assert.equal(r.status, 2, `${kind}: launched a retired runner name again`);
+    assert.match(r.stderr, /names a runner an earlier run of this session already used/, kind);
+    assert.match(r.stderr, /the next free reviewer name is review-pr-21-b/, kind);
+  }
+  assert.equal(f.cli(["review", "22", "review=member:review-pr-22"]).status, 0, "a name the session never used is free");
+  assert.equal(f.cli(["review", "21", "review=member:review-pr-21-b"]).status, 0);
+});
+
+test("a settled token on a row the rotate skips retires too, an unsettled one does not", (t) => {
+  const settled = "#18 impl-18=killed · review=member:";
+  const open = "#19 impl-19 · review=member:";
+  const f = fixture(t, { ledger: ledgerOf({ rows: ["#12 impl-12", settled, open], dispatched: ["impl-12"] }), controller: ANCESTOR });
+  const r = f.cli(["rotate"]);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(out.skipped, [settled, open]);
+  assert.deepEqual(out.retired, ["impl-18"]);
+});
+
+test("a ## Retired line that is no bare member or reviewer name is skipped with a warning naming it, and the rest is kept", (t) => {
+  const bad = ["impl-4=killed", "garbage-name", "merge-bot-2-b"];
+  const ledger = `${ledgerOf({ rows: ["#12 impl-12"], dispatched: ["impl-12"] })}\n## Retired\n\n- impl-1\n${bad.map((l) => `- ${l}\n`).join("")}- review-pr-6\n`;
+  const f = fixture(t, { ledger, controller: ANCESTOR });
+  const r = f.cli(["rotate"]);
+  assert.equal(r.status, 0, r.stderr);
+  for (const line of bad) assert.ok(r.stderr.includes(`skipped unparseable line '${line}'`), `stderr must name ${line}: ${r.stderr}`);
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(out.skipped, bad);
+  assert.deepEqual(out.retired, ["impl-1", "review-pr-6"]);
+});
+
 test("an ancestor rotate skips an unparseable line with a warning naming it, carries every parseable live line, and still rotates a ledger load() refuses", (t) => {
   const badRow = "#16 fix-pr-16=bogus";
   const badReview = "#17 fix-pr-17 · review=member:";
@@ -642,7 +682,7 @@ test("an ancestor rotate of a ledger with nothing live leaves only ## Retired be
   const r = f.cli(["rotate"]);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(f.ctl(), { ...OURS, prior: "ancestor" });
-  const retired = SETTLED_DISPATCHED.map((e) => e.split("=")[0]);
+  const retired = [...SETTLED_DISPATCHED.map((e) => e.split("=")[0]), "review-pr-15"];
   assert.deepEqual(JSON.parse(r.stdout), { rotated: true, archive: join(f.dir, f.archives()[0]), carried: { rows: [], dispatched: [] }, retired, skipped: [] });
   assert.deepEqual(read(f), { rows: [], dispatched: [], filed: [], ruled: [], drain: null, retired });
   assert.match(readFileSync(f.file, "utf8"), /\n## Retired\n\n- impl-3\n/);

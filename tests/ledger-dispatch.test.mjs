@@ -166,6 +166,26 @@ test("merge-bot-<n> counts the ## Dispatched merge-bot entries, and a new ledger
   assert.equal(fresh.ok("dispatch", "merge-bot").member, "merge-bot-1");
 });
 
+test("merge-bot-<n> numbers past a settled merge-bot token a row holds that ## Dispatched never saw", (t) => {
+  const { ok, put, refused } = fixture(t);
+  put("5", "merge-bot-1=done");
+  // Counting only ## Dispatched would hand out merge-bot-1 again, and the
+  // refusal of it would name merge-bot-1 as its own replacement.
+  refused(["dispatch", "merge-bot-1"], /merge-bot-1 is not next — the next merge bot this session is merge-bot-2/);
+  assert.equal(ok("dispatch", "merge-bot").member, "merge-bot-2");
+});
+
+test("a refused name's replacement climbs past every letter the session holds, wherever it sits, and runs out at -z", (t) => {
+  const { ok, put, refused } = fixture(t);
+  // `-b` is held only by a settled token on a row, not by ## Dispatched.
+  put("412", "impl-412=killed · impl-412-b=killed");
+  refused(["dispatch", "412", "impl-412"], /impl-412 was already dispatched this session \(impl-412=killed\) — a replacement takes a name of its own \(impl-412-c\)/);
+  const z = fixture(t);
+  z.ok("dispatch", "7", "impl-7-z");
+  z.ok("settle", "impl-7-z", "killed");
+  z.refused(["dispatch", "7", "impl-7-z"], /impl-7-z was already dispatched this session \(impl-7-z=killed\) — a replacement takes a name of its own, and impl-7-z has no retry letter left/);
+});
+
 // #2208: the controller names the `task` call's `agent` off this output, not
 // off prose a compaction drops — so every family's definition is printed, and
 // an implementer's follows its row's `tier=` the way tier-check.mjs reads it:
