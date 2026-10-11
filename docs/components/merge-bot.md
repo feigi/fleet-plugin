@@ -35,9 +35,13 @@ lifetime is one **Pass**.
 6. **Grace, then exit.** Once nothing is left to merge, hold a
    15-minute grace polling labels every 60s; a label landing after exit
    dispatches a fresh `merge-bot-<n+1>` immediately.
-7. **Reap.** After every merge,
-   [`reap.sh`](../../plugin/scripts/reap.sh) deletes the merged PR's
-   `[gone]` branch and worktree — see
+7. **Delete the head branch, then reap.** After every merge the bot
+   runs [`delete-merged-branch.sh`](../../plugin/scripts/delete-merged-branch.sh),
+   which removes the head branch from `origin` (so it reads `[gone]`) and
+   drops `in-progress` from the issues the merged PR closes.
+   The controller runs [`reap.sh`](../../plugin/scripts/reap.sh) on the
+   Pass's one exit report — a Pass that merged nothing included — to
+   delete the `[gone]` branches and worktrees; see
    [Reaping & Liveness](reaping-and-liveness.md).
 
 ```mermaid
@@ -55,12 +59,13 @@ flowchart TD
     GATE1 -->|"exit 0"| GATE2["merge-gate.mjs, 2nd run<br/>(immediately before merge)"]
     GATE2 -->|"exit 0"| MERGE["gh pr merge --merge (no-ff)"]
     GATE2 -->|"exit 1 or 2"| SKIP
-    MERGE --> REAP["reap.sh"]
-    REAP --> DRAIN
+    MERGE --> DELBR["delete-merged-branch.sh"]
+    DELBR --> DRAIN
     SKIP --> DRAIN
     DRAIN -->|"queue empty"| GRACE["15-minute grace,<br/>poll labels every 60s"]
     GRACE -->|"new label seen"| DRAIN
     GRACE -->|"grace elapsed"| REPORT(["one report, exit —<br/>a Pass ends"])
+    REPORT -.->|"controller, on the report"| REAP["reap.sh"]
 ```
 
 ## Opinionated choices
