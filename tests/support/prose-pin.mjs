@@ -41,8 +41,13 @@
 // tolerating `\n\n<next>` anywhere after the blank line would reopen the hole
 // in two steps (insert a decoy paragraph, then delete the blank line before
 // it). Omitting `next` throws; there is no opt-out.
+//
+// `Pin`, below, is the chained form of these calls: its methods take their
+// arguments less the leading `text`, so the convention above holds through it.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { extname, resolve } from "node:path";
 
 // How many times `needle` occurs in `haystack`, overlaps included — two
 // overlapping hits are two places a slice could start, which is exactly the
@@ -653,18 +658,26 @@ export function runAbove(text, anchor, what, marker) {
   return run ? run[1] : "";
 }
 
+// Each comment or quote gutter's own per-line regex: the flat strippers below
+// and `Pin`'s `.stripGutter(marker)` read the same one.
+const GUTTER = new Map([
+  ["#", /^\s*#\s?/],
+  ["//", /^\s*\/\/\s?/],
+  [">", /^\s*>+\s?/],
+]);
+
 // A shell comment block wraps at `#`, so a pinned phrase can break across lines
 // with the comment gutter, not whitespace, at the break — `\s+` does not span a
 // `#`. Strip the gutter and rejoin with the single inter-word space a wrap point
 // replaces.
-export const stripHashGutter = (text) => text.split("\n").map((l) => l.replace(/^\s*#\s?/, "")).join(" ");
+export const stripHashGutter = (text) => text.split("\n").map((l) => l.replace(GUTTER.get("#"), "")).join(" ");
 
 // A markdown blockquote wraps every line in a leading `>` gutter, so a
 // dispatch instruction embedded inside a quoted prompt (#1341's grandchild
 // recipe, nested under run-team's fix-applier prompt) does not begin with its
 // harness token until the gutter is stripped. Mirrors stripHashGutter's
 // reason for existing, one gutter shape later.
-export const stripQuoteGutter = (text) => text.split("\n").map((l) => l.replace(/^\s*>+\s?/, "")).join("\n");
+export const stripQuoteGutter = (text) => text.split("\n").map((l) => l.replace(GUTTER.get(">"), "")).join("\n");
 
 // One verbatim dispatch block, bounded by its OWN quote run rather than by the
 // next block's opening words, and returned with the gutter intact so the caller
@@ -746,7 +759,7 @@ export function quoteBlock(text, opener, what, { emphasisTolerant = false } = {}
 // line-based-on-purpose note) — a trailing `code; // a note` is not a
 // comment LINE, it is code with a trailing note, and stripping mid-line
 // would blur that distinction and corrupt the code beside it.
-export const stripSlashGutter = (text) => text.split("\n").map((l) => l.replace(/^\s*\/\/\s?/, "")).join("\n");
+export const stripSlashGutter = (text) => text.split("\n").map((l) => l.replace(GUTTER.get("//"), "")).join("\n");
 
 // A paragraph's physical line breaks, removed. `phrase()` holds this axis for
 // a pin that KNOWS the words it is looking for; this holds it for a pin that
@@ -846,4 +859,173 @@ export function logicalLines(text) {
     return lo + 1;
   };
   return { text: joined, lineAt };
+}
+
+// A heading line: up to three spaces, one to six `#`, then a space, a tab or
+// the end of the line. Group 1 is the indent, so a section can end exactly
+// "just before the `#`" of the next heading; group 2 is the depth.
+const HEADING = /^( {0,3})(#{1,6})(?:[ \t]|$)/;
+// A fence opener, and the closer that matches it: the opener's own character,
+// at least as long, with nothing but whitespace after it — so a `~~~` line
+// inside a ``` fence, or a shorter run, is fence content and not its end. A
+// backtick opener's info string holds no backtick: a line like ```x``` is
+// inline code, not a fence.
+const FENCE_OPEN = /^ {0,3}(`{3,}(?=[^`]*$)|~{3,})/;
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+const closesFence = (line, open) => {
+  const m = line.match(FENCE_CLOSE);
+  return m !== null && m[1][0] === open[0] && m[1].length >= open.length;
+};
+
+// The slice a heading owns: from its own line to just before the next heading
+// of the same or shallower depth, or to the end of the text. `heading` is one
+// whole heading line, matched exactly and exactly once, so `## Shell` does not
+// bind `## Shell traps`. Headings inside fenced blocks are skipped on both
+// ends: a `#` comment in a shell block is code, not a section boundary.
+//
+// The text is split on "\n" only and the heading line is compared byte for
+// byte, so on a CRLF document, or for a heading line with trailing whitespace,
+// `heading` must carry the same "\r" or whitespace or the call throws "moved".
+// A CRLF document also never closes a fence, since its closer ends in "\r":
+// normalize line endings before sectioning one.
+function section(text, heading, what) {
+  assert.ok(
+    typeof heading === "string" && !heading.includes("\n") && HEADING.test(heading),
+    `${what}: section() takes one whole heading line ("## Name"), not ${JSON.stringify(heading)}`,
+  );
+  const depth = heading.match(HEADING)[2].length;
+  let fence = null;
+  let offset = 0;
+  let start = -1;
+  let end = -1;
+  let hits = 0;
+  for (const line of text.split("\n")) {
+    if (fence !== null) {
+      if (closesFence(line, fence)) fence = null;
+    } else {
+      const open = line.match(FENCE_OPEN);
+      if (open) fence = open[1];
+      else {
+        const h = line.match(HEADING);
+        if (h && start !== -1 && end === -1 && h[2].length <= depth) end = offset + h[1].length;
+        if (line === heading) {
+          hits += 1;
+          start = offset;
+        }
+      }
+    }
+    offset += line.length + 1;
+  }
+  assert.notEqual(hits, 0, `${what}: section heading "${heading}" moved — re-anchor this test, never widen it to the whole file`);
+  assert.equal(hits, 1, `${what}: section heading "${heading}" occurs ${hits} times — a pin would bind the wrong copy; narrow the heading`);
+  return text.slice(start, end === -1 ? text.length : end);
+}
+
+// The comment marker a file's extension implies, for `.runAbove()` on a
+// `Pin.file()` root and every node sliced from it.
+const MARKER_BY_EXTENSION = new Map([
+  [".sh", "#"],
+  [".mjs", "//"],
+  [".js", "//"],
+]);
+
+const FILES = new Map();
+const MINT = Symbol("Pin");
+
+// The chained form of this module. A node holds immutable text. Every method
+// but `.section` and `.stripGutter` runs the flat function of the same name on
+// that text, so every bound stays explicit and every slice is byte-for-byte
+// the one the flat call takes; `.anchorAt` returns a number, `.quoteBlocks` an
+// array of nodes and the rest a new node. `.section` and `.stripGutter` have
+// no exported flat function of that name. Roots come from `Pin.file()` or
+// `Pin.of()`, never `new Pin`.
+export class Pin {
+  #text;
+  #label;
+  #marker;
+
+  constructor(mint, text, label, marker) {
+    assert.equal(mint, MINT, "a Pin node comes from Pin.file() or Pin.of(), never `new Pin`");
+    this.#text = text;
+    this.#label = label;
+    this.#marker = marker;
+    Object.freeze(this);
+  }
+
+  // Read once per process per resolved path, so two spellings of one file
+  // share a root. A missing file throws Node's own ENOENT.
+  static file(path) {
+    const key = resolve(path);
+    if (!FILES.has(key)) FILES.set(key, new Pin(MINT, readFileSync(path, "utf8"), key, MARKER_BY_EXTENSION.get(extname(key))));
+    return FILES.get(key);
+  }
+
+  // A string that is not a file: a mutation fixture, a derived string, a slice
+  // of a slice. `label` names it where a file root would name its path.
+  static of(text, label) {
+    assert.equal(typeof text, "string", `Pin.of() roots a string, not ${typeof text}`);
+    assert.ok(typeof label === "string" && label.trim() !== "", "Pin.of() needs a label naming its text, where a file root would name its path");
+    return new Pin(MINT, text, label, undefined);
+  }
+
+  static END = END;
+  static phrase = phrase;
+  static sentences = sentences;
+  static unemphasized = unemphasized;
+  static logicalLines = logicalLines;
+
+  get text() {
+    return this.#text;
+  }
+
+  #derive(text) {
+    return new Pin(MINT, text, this.#label, this.#marker);
+  }
+
+  between(from, to, what, options) {
+    return this.#derive(between(this.#text, from, to, what, options));
+  }
+
+  paragraph(anchor, what, next, options) {
+    return this.#derive(paragraph(this.#text, anchor, what, next, options));
+  }
+
+  bullet(from, to, what) {
+    return this.#derive(bullet(this.#text, from, to, what));
+  }
+
+  betweenPhrases(from, to, what, options) {
+    return this.#derive(betweenPhrases(this.#text, from, to, what, options));
+  }
+
+  anchorAt(anchor, what, options) {
+    return anchorAt(this.#text, anchor, what, options);
+  }
+
+  // `marker` defaults to the one a `Pin.file()` root's extension implies; any
+  // other root has to pass it.
+  runAbove(anchor, what, marker = this.#marker) {
+    assert.ok(marker !== undefined, `${what}: runAbove needs a marker — ${this.#label} is not a .sh, .mjs or .js file root, so none is inferred`);
+    return this.#derive(runAbove(this.#text, anchor, what, marker));
+  }
+
+  quoteBlock(opener, what, options) {
+    return this.#derive(quoteBlock(this.#text, opener, what, options));
+  }
+
+  quoteBlocks() {
+    return quoteBlocks(this.#text).map((run) => this.#derive(run));
+  }
+
+  // One method for the three gutters, each with its own per-line regex, and
+  // always joined with `\n`.
+  stripGutter(marker) {
+    const gutter = GUTTER.get(marker);
+    assert.ok(gutter, `stripGutter() takes "#", "//" or ">", not ${JSON.stringify(marker)}`);
+    return this.#derive(this.#text.split("\n").map((l) => l.replace(gutter, "")).join("\n"));
+  }
+
+  section(heading, what) {
+    return this.#derive(section(this.#text, heading, what));
+  }
 }

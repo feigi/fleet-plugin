@@ -71,15 +71,14 @@
 // one place outside every block, ahead of the first opener, is pinned empty.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase, quoteBlock, quoteBlocks } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 // The body alone — everything after the frontmatter's closing `---`.
-const AGENT_FILE = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8");
+const AGENT_FILE = Pin.file(join(REPO, "agents", "fleet-implementer-slow-high.agent.md")).text;
 const BODY = AGENT_FILE.split("---").slice(2).join("---");
 
 // The Reviewers section is sliced before any opener is looked for, for the
@@ -89,8 +88,8 @@ const BODY = AGENT_FILE.split("---").slice(2).join("---");
 // mutation controls below can re-run the whole extraction against a modified
 // copy instead of asserting against a hand-built imitation of it.
 const body = (text = BODY) => text;
-const reviewers = (text = RUN_TEAM) =>
-  between(text, "### Reviewers", "#### Fallback: hand-dispatched reviewer", "run-team's Reviewers section");
+const reviewers = (text = RUN_TEAM.text) =>
+  Pin.of(text, "run-team/SKILL.md").between("### Reviewers", "#### Fallback: hand-dispatched reviewer", "run-team's Reviewers section").text;
 
 // Wrapping is normalized away on both sides, and nothing else is.
 //
@@ -163,7 +162,7 @@ const paragraphSpans = (text) => {
   return spans.filter(([a, b]) => text.slice(a, b).trim() !== "");
 };
 const opensOn = (text, [a, b], opener) =>
-  new RegExp(`^${phrase(opener).source}`).test(text.slice(a, b).split(/\s+/).join(" ").trim());
+  new RegExp(`^${Pin.phrase(opener).source}`).test(text.slice(a, b).split(/\s+/).join(" ").trim());
 const heads = (text, spans) => spans.flatMap((sp, i) => (REGION_BLOCKS.some((b) => opensOn(text, sp, b.opener)) ? [i] : []));
 
 // Loud in both failure directions, for `quoteBlock`'s reason: an extractor that
@@ -1013,8 +1012,10 @@ const SURFACES = [
     extract: bodyBlock, all: (text) => bodyBlocks(text).blocks, blocks: REGION_BLOCKS, table: "REGION_BLOCKS",
   },
   {
-    label: "run-team's Reviewers section", file: "skills/run-team/SKILL.md", source: RUN_TEAM, slice: reviewers,
-    extract: quoteBlock, all: quoteBlocks, blocks: REVIEWER_BLOCKS, table: "REVIEWER_BLOCKS",
+    label: "run-team's Reviewers section", file: "skills/run-team/SKILL.md", source: RUN_TEAM.text, slice: reviewers,
+    extract: (text, opener, what) => Pin.of(text, "run-team's Reviewers section").quoteBlock(opener, what).text,
+    all: (text) => Pin.of(text, "run-team's Reviewers section").quoteBlocks().map((run) => run.text),
+    blocks: REVIEWER_BLOCKS, table: "REVIEWER_BLOCKS",
   },
 ];
 const ALL = SURFACES.flatMap(({ file, source, slice, extract, blocks, table }) =>
@@ -1073,8 +1074,8 @@ test("the implementer agent body opens on its first fixtured block, with nothing
 // a second source free to drift from the one members actually read).
 test("run-team/SKILL.md has no verbatim block outside the fixtured Reviewers section", () => {
   assert.equal(
-    quoteBlocks(RUN_TEAM).length,
-    quoteBlocks(reviewers()).length,
+    RUN_TEAM.quoteBlocks().length,
+    Pin.of(reviewers(), "run-team's Reviewers section").quoteBlocks().length,
     "run-team/SKILL.md holds a quote block outside the Reviewers section — a block added there is invisible to the coverage tests above, and an implementer block re-pasted into phase 2 is a second copy of what the agents/fleet-implementer-<cell>.agent.md body already carries",
   );
 });
@@ -1210,7 +1211,7 @@ test("a clause inserted mid-gap reds — the second shape the gap-bounded spans 
   // it declined against a 45-column rewrap of the region until this anchor
   // learned to span a wrap point.
   const midGap = "every member of that class (yes, even the boring ones) —";
-  const mutant = raw.replace(phrase("every member of that class —"), () => midGap);
+  const mutant = raw.replace(Pin.phrase("every member of that class —"), () => midGap);
   assert.notEqual(mutant, raw, "the mid-gap insertion point moved — the clause was never inserted, so what follows would measure nothing");
   assert.notEqual(
     norm(entry.extract(entry.slice(entry.source.replace(raw, () => mutant)), entry.opener, entry.what)),
