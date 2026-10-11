@@ -1184,6 +1184,11 @@ test("Pin.file throws Node's own ENOENT for a missing path", () => {
   assert.throws(() => Pin.file(join(PIN_DIR, "missing.md")), { code: "ENOENT" });
 });
 
+test("Pin.file throws Node's own ENOTDIR for a file path written with a trailing slash, rather than reading the file", () => {
+  const path = fixtureFile("slashed.md", "text\n");
+  assert.throws(() => Pin.file(`${path}/`), { code: "ENOTDIR" });
+});
+
 test("Pin.file infers runAbove's marker from .sh, .mjs and .js, and a node sliced from the root keeps it", () => {
   const sh = fixtureFile("probe.sh", "# says what probe does\n# over two lines\nprobe() {\n  :\n}\n");
   assert.equal(Pin.file(sh).runAbove("probe() {", "the fixture").text, "# says what probe does\n# over two lines\n");
@@ -1213,6 +1218,24 @@ test("runAbove refuses to run without a marker on a Pin.of root, or on a file ro
   assert.throws(() => Pin.file(md).runAbove("probe() {", "the fixture"), /runAbove needs a marker — \S*notes\.md is not/);
 });
 
+test("Pin.file infers no marker from any extension but .sh, .mjs and .js", () => {
+  for (const ext of [".ts", ".cjs", ".mts", ".bash", ".zsh", ".py", ".txt", ""]) {
+    const path = fixtureFile(`other${ext}`, "# a note\n// a note\nprobe() {\n");
+    assert.throws(() => Pin.file(path).runAbove("probe() {", "the fixture"), /runAbove needs a marker/, `extension "${ext}"`);
+  }
+});
+
+test("runAbove's refusal names a file root by its resolved path, on the root and on a node sliced from it", () => {
+  const path = fixtureFile("named.md", "# Heading\nprobe() {\n");
+  const root = Pin.file(relative(process.cwd(), path));
+  for (const node of [root, root.between("# Heading", "{", "the fixture")]) {
+    assert.throws(
+      () => node.runAbove("probe()", "the fixture"),
+      (error) => error.message.includes(`runAbove needs a marker — ${path} is not`),
+    );
+  }
+});
+
 test("stripGutter('#') strips each line's indent, `#` and one space, leaves a mid-line `#`, and joins with \\n", () => {
   assert.equal(Pin.of("  # one\n#two\n#  three\ncode # trailing", "the fixture").stripGutter("#").text, "one\ntwo\n three\ncode # trailing");
 });
@@ -1226,6 +1249,19 @@ test("stripGutter('>') strips each line's indent, a run of `>` and one space, le
     Pin.of("  > one\n>>two\n> > three\n>  four\ncode > trailing", "the fixture").stripGutter(">").text,
     "one\ntwo\n> three\n four\ncode > trailing",
   );
+});
+
+test("stripGutter takes a tab as indent or as the one space after the marker, and one `#` or `//`, but a run of `>`", () => {
+  assert.equal(Pin.of("\t# one\n#\ttwo\n## three", "the fixture").stripGutter("#").text, "one\ntwo\n# three");
+  assert.equal(Pin.of("\t// one\n//\ttwo\n/// three", "the fixture").stripGutter("//").text, "one\ntwo\n/ three");
+  assert.equal(Pin.of("\t> one\n>\ttwo\n>> three", "the fixture").stripGutter(">").text, "one\ntwo\nthree");
+});
+
+test("stripGutter leaves a line without its marker, a blank line, a \\r and trailing whitespace exactly as written", () => {
+  for (const marker of ["#", "//", ">"]) {
+    const text = `${marker} one  \r\n  no gutter here\r\n\n${marker} two\t`;
+    assert.equal(Pin.of(text, "the fixture").stripGutter(marker).text, "one  \r\n  no gutter here\r\n\ntwo\t", marker);
+  }
 });
 
 test("stripGutter refuses any marker but #, // and >", () => {
@@ -1303,6 +1339,17 @@ test(".section's fence closes only on its opener's character, at least as long, 
   assert.equal(Pin.of("## A\n  ```\n## no end\n   ````  \n## B\n", "the fixture").section("## A", "the fixture").text, "## A\n  ```\n## no end\n   ````  \n");
 });
 
+test(".section's fence opens on three or more backticks or tildes indented up to three spaces, and its closer is indented up to three with only spaces or tabs after it", () => {
+  // ACCEPT: an opener indented three spaces, and a closer followed by a tab.
+  assert.equal(Pin.of("## A\n   ```\n## in\n```\t\n## B\n", "the fixture").section("## A", "the fixture").text, "## A\n   ```\n## in\n```\t\n");
+  // REFUSE as an opener: a run of two.
+  assert.equal(Pin.of("## A\n``\n## B\n", "the fixture").section("## A", "the fixture").text, "## A\n``\n");
+  assert.equal(Pin.of("## A\n~~\n## B\n", "the fixture").section("## A", "the fixture").text, "## A\n~~\n");
+  // REFUSE as a closer: one indented four spaces, and one followed by a no-break space.
+  const doc = "## A\n```\n    ```\n## in\n```\u00a0\n## in\n```\n## B\n";
+  assert.equal(Pin.of(doc, "the fixture").section("## A", "the fixture").text, doc.slice(0, doc.indexOf("## B")));
+});
+
 test(".section runs through deeper headings and ends just before the `#` of the next same-or-shallower one", () => {
   assert.equal(Pin.of("## A\nx\n### Sub\ny\n## B\nz\n## C\n", "the fixture").section("## A", "the fixture").text, "## A\nx\n### Sub\ny\n");
   assert.equal(Pin.of("## A\nx\n# Top\nz\n", "the fixture").section("## A", "the fixture").text, "## A\nx\n");
@@ -1313,6 +1360,15 @@ test(".section runs through deeper headings and ends just before the `#` of the 
 
 test(".section runs to the node's end when no later heading closes it", () => {
   assert.equal(Pin.of("# Top\nintro\n## A\nx\n### Sub\ny", "the fixture").section("## A", "the fixture").text, "## A\nx\n### Sub\ny");
+});
+
+test(".section ends at a heading whose `#` run a tab follows, and not at one any other whitespace follows", () => {
+  assert.equal(Pin.of("## A\nx\n##\tB\n", "the fixture").section("## A", "the fixture").text, "## A\nx\n");
+  assert.equal(Pin.of("## A\n##\u00a0x\n", "the fixture").section("## A", "the fixture").text, "## A\n##\u00a0x\n");
+});
+
+test(".section on a CRLF text splits on \\n only, so its heading carries the line's \\r", () => {
+  assert.equal(Pin.of("## A\r\nx\r\n## B\r\n", "the fixture").section("## A\r", "the fixture").text, "## A\r\nx\r\n");
 });
 
 test("Pin's .between is the flat between on the node's text, options included", () => {
