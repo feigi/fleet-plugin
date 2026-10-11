@@ -28,13 +28,12 @@
 // what is pinned, not their layout.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
-const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+const REVIEW_AND_FIX = Pin.file(join(REPO, "commands", "review-and-fix.md"));
 
 // The run-team/SKILL.md copy sits inside a nested `> > ` blockquote, so a hard
 // wrap can land INSIDE a phrase with the quote gutter, not whitespace, at the
@@ -51,16 +50,15 @@ function stripQuoteGutter(text) {
 
 const runTeamPrompt = () =>
   stripQuoteGutter(
-    between(RUN_TEAM, "Try to REFUTE this finding", "Survives → apply it, with one hold", "run-team/SKILL.md"),
+    RUN_TEAM.between("Try to REFUTE this finding", "Survives → apply it, with one hold", "run-team/SKILL.md").text,
   );
 const reviewAndFixPrompt = () =>
   stripQuoteGutter(
-    between(
-      REVIEW_AND_FIX,
+    REVIEW_AND_FIX.between(
       "Try to REFUTE this finding",
       "That last clause is the whole mechanism",
       "review-and-fix.md",
-    ),
+    ).text,
   );
 
 for (const [name, getPrompt] of [
@@ -122,13 +120,13 @@ for (const [name, getPrompt] of [
 const SUBSTITUTION =
   "with one substitution: resolve `<scratch>/pr<N>/<finding>/` in it to an absolute path under your own run root — `mktemp -d` once per round for `<scratch>/pr<N>/fix-XXXXXXXX/`, never bare `pr<N>`, since finding ids restart at 1 each round too — and write that absolute path into the refuter's prompt in its place; a refuter never derives its own path";
 for (const [name, getLeadIn] of [
-  ["run-team/SKILL.md", () => stripQuoteGutter(between(RUN_TEAM, "In scope → dispatch ONE refuter", "Try to REFUTE this finding", "run-team/SKILL.md"))],
-  ["review-and-fix.md", () => between(REVIEW_AND_FIX, "In scope → dispatch one refuter", "Try to REFUTE this finding", "review-and-fix.md")],
+  ["run-team/SKILL.md", () => stripQuoteGutter(RUN_TEAM.between("In scope → dispatch ONE refuter", "Try to REFUTE this finding", "run-team/SKILL.md").text)],
+  ["review-and-fix.md", () => REVIEW_AND_FIX.between("In scope → dispatch one refuter", "Try to REFUTE this finding", "review-and-fix.md").text],
 ]) {
   test(`${name}: the fix-applier resolves the refuter's scratch path to an absolute one and writes it into the refuter's prompt`, () => {
     assert.match(
       getLeadIn(),
-      phrase(SUBSTITUTION),
+      Pin.phrase(SUBSTITUTION),
       "the fix-applier is no longer told to resolve `<scratch>/pr<N>/<finding>/` to an absolute path of its own and write it into the refuter's prompt — the refuter is back to deriving its own path from a placeholder",
     );
   });
