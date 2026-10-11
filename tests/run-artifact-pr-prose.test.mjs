@@ -1,5 +1,5 @@
 // run-team's end-of-run metrics duty. The phase-2 tier-guard step tells the
-// controller to produce files under `docs/metrics/` and says neither commits
+// controller to produce files under `docs/metrics/` and says none commits
 // itself; what it must also say is that the controller commits them and opens a
 // PR, because habit alone strands them — three measured strandings, one shape:
 // the artifacts ended up outside `main` behind a question nobody owned.
@@ -179,15 +179,14 @@ test("the invariant slice stops at its own bullet", () => {
 // a pin that does not bite is green — and this prose hard-wraps, so every search
 // here is a wrap-tolerant `phrase` rather than the line breaks the file happens
 // to have today.
-const COMMIT_TAIL = phrase("**Commit the metrics files and open a PR — at end of run.**");
 const EXEMPT_TAIL = phrase("is exempt, and it is exempt because this invariant does not reach it");
 const appendTo = (anchor, sentence) => (text) => text.replace(anchor, (m) => `${m} ${sentence}`);
 
 const mutants = [
   ["the commit duty is reduced to advice", ["commit"],
-    (text) => text.replace(COMMIT_TAIL, "**Consider keeping the metrics files.**")],
+    (text) => text.replace(COMMIT_DUTY, "**Consider keeping the metrics files.**")],
   ["the commit duty is negated while keeping the lead's capital", ["commit", "noCommit"],
-    (text) => text.replace(COMMIT_TAIL, "**Do not commit the metrics files and open a PR — at end of run.**")],
+    (text) => text.replace(COMMIT_DUTY, "**Do not commit the metrics files and open a PR — at end of run.**")],
   ["the stranding reason is deleted", ["reason"],
     (text) => text.replace(STRANDING_REASON, "A data row is cheap")],
   ["the branch is left to the repository no longer", ["branchChoice"],

@@ -67,7 +67,7 @@ function ruled(rows, { ticket, cell = "slow-high", fail = false, date = DAY }) {
   rows.tiers.push(tier({ ticket: String(ticket), pr: String(ticket + 5000), run_date: date, minted_false_claim: fail ? "yes" : "no" }));
 }
 
-const featuresTsv = (rows, cols = FEATURE_COLUMNS) => [cols.join("\t"), ...rows.map((r) => cols.map((c) => r[c] ?? "").join("\t"))].join("\n") + "\n";
+const featuresTsv = (rows) => [FEATURE_COLUMNS.join("\t"), ...rows.map((r) => FEATURE_COLUMNS.map((c) => r[c] ?? "").join("\t"))].join("\n") + "\n";
 const membersTsv = (rows) => `# ${MEMBER_COLUMNS.join("\t")}\n${rows.length ? formatTsv(rows) : ""}`;
 const tiersTsv = (rows) => `# ${TIER_COLUMNS.join("\t")}\n${rows.map((r) => `${formatRow(r)}\n`).join("")}`;
 const routerTable = (over = {}) => ({

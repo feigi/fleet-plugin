@@ -22,8 +22,9 @@ node .omp/skills/run-team-local/hook.mjs
 
 Every duty is `hook.mjs`, beside this file, and every duty is safe to run
 again, so a missed run strands nothing: the next one catches up. The stopping
-rule and the re-fit read the corpus committed on `origin/main`, so they judge
-what earlier runs' merged metrics PRs landed, not the working tree.
+rule reads this checkout's `docs/metrics/` files, so it judges the corpus as
+the run left it; the re-fit reads the corpus committed on `origin/main`, so it
+judges what earlier runs' merged metrics PRs landed, not the working tree.
 
 ## Duties
 

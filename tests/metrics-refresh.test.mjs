@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -142,6 +142,25 @@ test("with no --repo it works on the main checkout of the cwd's repository; a se
   assert.equal(readFileSync(join(f.repo, FEATURES), "utf8"), drained);
 });
 
+test("--repo from a cwd outside the repository runs the guard inside it", () => {
+  const f = fixture();
+  const r = f.run({ cwd: f.root });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /cost guard: verdict none, pr-cost\.mjs exit 4/);
+  assert.equal(existsSync(join(f.repo, GUARD)), true);
+});
+
+test("a corpus whose last row lacks a trailing newline gets the first drained row on its own line", () => {
+  const rows = corpus();
+  ruled(rows, { ticket: 1 });
+  const fresh = pull({ ticket: "2", agent: "impl-2" });
+  const f = fixture({ rows, pending: featuresTsv([fresh]) });
+  write(f.repo, FEATURES, featuresTsv(rows.features).trimEnd());
+  const r = f.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(join(f.repo, FEATURES), "utf8"), featuresTsv([rows.features[0], fresh]));
+});
+
 test("a tripped guard is a verdict and the script exits 0; a guard that cannot be computed fails it", () => {
   const rows = corpus();
   const prs = [];
@@ -161,6 +180,27 @@ test("a tripped guard is a verdict and the script exits 0; a guard that cannot b
   assert.match(b.stderr, /metrics-refresh: cost guard failed: pr-cost\.mjs --guard exited 2/);
 });
 
+test("a workspace with no metrics corpus yet skips the guard with a notice and exits 0, still draining what is pending", () => {
+  const f = fixture();
+  rmSync(join(f.repo, "docs"), { recursive: true });
+  const bare = f.run();
+  assert.equal(bare.status, 0, bare.stderr);
+  assert.match(bare.stdout, /metrics-refresh: drain: nothing pending/);
+  assert.match(bare.stdout, /metrics-refresh: cost guard: skipped, docs\/metrics\/member-outcomes\.tsv, docs\/metrics\/tier-outcomes\.tsv, docs\/metrics\/ticket-features\.tsv not found/);
+  assert.equal(existsSync(join(f.repo, GUARD)), false);
+  assert.deepEqual(f.ghCalls(), [], "no guard run, so no gh call");
+
+  // A first run's rows: the drain creates the features file, and the guard still
+  // waits on the two the controller writes later in the run.
+  write(f.repo, PENDING, featuresTsv([pull({ ticket: "2", agent: "impl-2" })]));
+  const fed = f.run();
+  assert.equal(fed.status, 0, fed.stderr);
+  assert.match(fed.stdout, /drain: 1 row from/);
+  assert.equal(readFileSync(join(f.repo, FEATURES), "utf8"), featuresTsv([pull({ ticket: "2", agent: "impl-2" })]));
+  assert.match(fed.stdout, /cost guard: skipped, docs\/metrics\/member-outcomes\.tsv, docs\/metrics\/tier-outcomes\.tsv not found/);
+  assert.deepEqual(f.ghCalls(), []);
+});
+
 test("a pending file with a column the corpus lacks fails the drain, leaves the pending file, and the guard does not run", () => {
   const f = fixture({ pending: featuresTsv([pull({ ticket: "2", agent: "impl-2" })], [...FEATURE_COLUMNS, "extra"]) });
   const r = f.run();
@@ -174,7 +214,7 @@ test("a pending file with a column the corpus lacks fails the drain, leaves the 
 test("usage: only the declared flag and no positional, else exit 2", () => {
   const f = fixture();
   for (const args of [["--bogus"], ["phase-0"], ["--repo"]]) {
-    const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", env: ENV, cwd: f.repo });
+    const r = f.run({ args });
     assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
   }
 });

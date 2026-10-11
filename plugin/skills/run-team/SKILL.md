@@ -276,9 +276,10 @@ phase, or in any later one, asks the maintainer which tickets to take.
    writes `member-write-guard` cannot see — an `eval` cell, a `bash` that
    `cd`s or `git -C`s into this checkout. `.fleet/`, `.worktrees/` and
    `.agent-brain/` are gitignored and never trip it. Nor does this run's own
-   bookkeeping: `docs/metrics/tier-outcomes.tsv` and
-   `docs/metrics/member-outcomes.tsv`, which you write mid-run, are left out
-   by name — anything else under `docs/metrics/` still trips it. **The same
+   bookkeeping: `docs/metrics/tier-outcomes.tsv`,
+   `docs/metrics/member-outcomes.tsv` and `docs/metrics/ticket-features.tsv`,
+   which you write mid-run, are left out by name — anything else under
+   `docs/metrics/` still trips it. **The same
    command is the clear, and it overwrites; it never compares.** On `MAIN-CHECKOUT-DIRTY`
    the maintainer resolves the stray paths FIRST — inspect, keep or remove
    them — and only then re-runs `--record`; re-recording over unresolved paths
@@ -338,9 +339,11 @@ phase, or in any later one, asks the maintainer which tickets to take.
    first Pull is routed, so the verdict reflects any rows just recovered. Exit
    0: both ran. The guard's own exit 3 (a cell tripped) and 4 (no verdict yet)
    are verdicts the router and `fleet-tick.mjs` read, never failures; the
-   script absorbs them. Exit 1 or 2 stops the run before its first Pull: report
-   the line the script printed on stderr, fix the cause and run it again — each
-   duty is safe to repeat.
+   script absorbs them. A workspace that lacks one of the three metrics TSVs
+   has no corpus to guard yet — its first run: the script prints a line naming
+   the missing file, skips the guard and exits 0. Exit 1 or 2 stops the run
+   before its first Pull: report the line the script printed on stderr, fix
+   the cause and run it again — each duty is safe to repeat.
 
    **Launch the cockpit.** On every phase-0 pass, not just the first:
    `node ~/.fleet/bin/fleet-run board.mjs serve --open &` in the
