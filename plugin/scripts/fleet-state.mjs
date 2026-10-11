@@ -289,7 +289,7 @@ export function writeState(path, name, prev, patch) {
     // Best-effort and never fatal: a cleanup that threw would turn a reported,
     // survived write failure into the crash the comment above rules out.
     try { rmSync(tmp, { force: true }); } catch {}
-    console.error(`${name}: WARNING could not write ${path} (${e.message}) — back-off progress will not persist`);
+    console.error(`${name}: WARNING could not write ${path} (${e.message}) — back-off progress and the liveness ages the tick stamps will not persist`);
     return false;
   }
 }

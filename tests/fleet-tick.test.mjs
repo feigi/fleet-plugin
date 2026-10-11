@@ -2847,12 +2847,14 @@ test("ghBudget: the override only ever shortens, and anything but digits leaves 
 // case is the control: it shows the same ledger does dispatch once nothing
 // is carried.
 const ANCESTOR_RECORD = { pid: process.pid, lstart: "runner-start", prior: "dead" };
-const rotateAs = (controller, ...after) => (repo) => {
+// `extra` is state written into the file rotate rewrites, before it runs: the
+// keys a real earlier run left there (the tick's `seen` stamps).
+const rotateWith = (extra, controller, ...after) => (repo) => {
   const fleet = join(repo, ".fleet");
   const ledger = (...args) => spawnBounded(process.execPath, [join(repo, "..", "bin", "ledger.mjs"), "--file", join(fleet, "ledger.md"), ...args], {
     cwd: repo, env: { ...process.env, FLEET_PROC_TABLE: procTable(join(repo, "..")) },
   });
-  writeFileSync(join(fleet, "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller }));
+  writeFileSync(join(fleet, "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", ...extra, controller }));
   const r = ledger("rotate");
   assert.equal(r.status, 0, r.stderr);
   for (const args of after) {
@@ -2860,6 +2862,7 @@ const rotateAs = (controller, ...after) => (repo) => {
     assert.equal(w.status, 0, `${args.join(" ")}: ${w.stderr}`);
   }
 };
+const rotateAs = (controller, ...after) => rotateWith({}, controller, ...after);
 
 test("CLI: a live review=member:review-pr-5 carried across an ancestor rotate is not dispatched again", () => {
   const ledger = { rows: ["#5 review=member:review-pr-5"] };
@@ -2911,6 +2914,7 @@ test("CLI: a carried reviewer recorded dead with =failed frees its PR, and the n
 // threshold. Advisory only — the tick prints a pointer, and settles, kills
 // and frees nothing.
 import { stampSeen, livenessLines, LIVENESS_DEFAULTS } from "../plugin/scripts/fleet-tick.mjs";
+import { MEMBER_FAMILIES } from "../plugin/scripts/ledger-grammar.mjs";
 
 const MIN = 60_000;
 // A live fix-applier on PR 5 and a live `review=` launch on PR 6: two tokens
@@ -3120,6 +3124,12 @@ test("stampSeen: stamps live names, carries what it can trust, and drops names n
   for (const prior of ["dead", "none"]) {
     assert.deepEqual(stampSeen({ live, prev, controller: ctl(prior), now }), { "impl-1": now, "fix-pr-2": now - 5 * MIN, "review:PR#3": now }, prior);
   }
+  // The boundary: a stamp written in the record's own millisecond is this
+  // run's — "older than the record" is strict — one millisecond earlier is not.
+  for (const prior of ["dead", "none"]) {
+    assert.deepEqual(stampSeen({ live: ["impl-1"], prev: { "impl-1": at }, controller: ctl(prior), now }), { "impl-1": at }, `${prior}: a stamp at the record's own instant stands`);
+    assert.deepEqual(stampSeen({ live: ["impl-1"], prev: { "impl-1": at - 1 }, controller: ctl(prior), now }), { "impl-1": now }, `${prior}: a stamp one millisecond before the record restarts`);
+  }
   assert.deepEqual(stampSeen({ live, prev, controller: ctl("dead", { at: null }), now }), { "impl-1": now - 50 * MIN, "fix-pr-2": now - 5 * MIN, "review:PR#3": now });
 });
 
@@ -3135,23 +3145,34 @@ test("livenessLines: one line per live name past its family's threshold, age buc
   assert.deepEqual(lines({ "not-a-member": 1 }, ["not-a-member"]), []);
 });
 
+test("LIVENESS_DEFAULTS: one threshold per member family the ledger grammar parses, plus review — a family without one would print a NaN line", () => {
+  // The two lists are written by hand in different modules. livenessLines
+  // divides by `thresholds[family]`, so a family parseMember yields that has no
+  // entry here reads `NaN` and prints a malformed advisory for every live
+  // token of it.
+  assert.deepEqual(Object.keys(LIVENESS_DEFAULTS).sort(), [...MEMBER_FAMILIES, "review"].sort());
+});
+
 test("CLI: a real ancestor rotation carries the heartbeat's `seen` through, so a carried live token keeps its age; a dead controller's rotation carries no token and no stamp", () => {
+  // The stamps are seeded INTO the file rotate rewrites, and the tick reads
+  // that same file (the default state path, not a --state of its own): a
+  // rotate that dropped `seen` would hand the tick a file without it.
   const ages = seenAgo({ "fix-pr-5": 60, "review:PR#6": 90 });
-  const seedThen = (rotate) => (repo) => { seedState(ages)(repo); rotate(repo); };
-  const carried = runCli([], { ...AGED, keep: true, beforeRun: seedThen(rotateAs(ANCESTOR_RECORD)) });
+  const stateIn = (r) => JSON.parse(readFileSync(join(r.repo, ".fleet", "heartbeat.json"), "utf8"));
+  const carried = runCli([], { ...AGED, keep: true, defaultState: true, beforeRun: rotateWith(ages, ANCESTOR_RECORD) });
   try {
     assert.equal(carried.status, 0, carried.stderr);
     assert.match(carried.stdout, /^CHECK-LIVENESS fix-pr-5 \(fix-pr > p99 56m\)$/m);
     assert.match(carried.stdout, /^CHECK-LIVENESS review:PR#6 \(review > p99 78m\)$/m);
-    assert.equal(stateOf(carried).seen["fix-pr-5"], ages.seen["fix-pr-5"]);
+    assert.equal(stateIn(carried).seen["fix-pr-5"], ages.seen["fix-pr-5"]);
   } finally {
     rmSync(carried.dir, { recursive: true, force: true });
   }
-  const dead = runCli([], { ...AGED, keep: true, beforeRun: seedThen(rotateAs({ pid: deadPid(), lstart: "x", prior: "ancestor" })) });
+  const dead = runCli([], { ...AGED, keep: true, defaultState: true, beforeRun: rotateWith(ages, { pid: deadPid(), lstart: "x", prior: "ancestor" }) });
   try {
     assert.equal(dead.status, 0, dead.stderr);
     assert.doesNotMatch(dead.stdout, /CHECK-LIVENESS/);
-    assert.equal("seen" in stateOf(dead), false, "nothing was carried, so nothing is live and no stamp survives");
+    assert.equal("seen" in stateIn(dead), false, "nothing was carried, so nothing is live and no stamp survives");
   } finally {
     rmSync(dead.dir, { recursive: true, force: true });
   }

@@ -128,12 +128,13 @@ session directory):
   and the census it points at is what decides.
 - `SKILL.md` gains a **Failure handling** row, *Member unaccounted*, after
   *Member killed* with the ordering in Decision 2; the Member-killed
-  paragraph's "settle the dead one on the liveness read below" points at it;
+  paragraph's "settle the dead one on the Member unaccounted row above" points
+  at it;
   **Run ledger** gains one sentence — compaction parks every in-flight member
   and nothing reports it, so take the census first on resume — and the
   heartbeat's `--fold-unchanged` prose names the folded suffix.
-  `kill-rule-prose.test.mjs` pins the ordering sentence and the asymmetry
-  sentence as the kill precondition.
+  `stalled-member-liveness-prose.test.mjs` pins the ordering sentence and the
+  asymmetry sentence as the kill precondition.
 - Left out: auto-settle, auto-kill and auto-redispatch; the scratch-mtime
   discriminator itself; heartbeat and run-level liveness (ADR 0025); the
   `review=` MERGED/CLOSED dangling rule.

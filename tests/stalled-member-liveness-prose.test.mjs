@@ -252,3 +252,23 @@ const ASYMMETRY =
 test("the clause keeps the asymmetry that makes every alive-signal a precondition of the kill", () => {
   assert.match(clause(), phrase(ASYMMETRY), `${SKILL}'s stalled-member clause lost its cost asymmetry — the reason a kill waits for every alive-signal to be silent.`);
 });
+
+// The two other sentences this change put in SKILL.md that the controller acts
+// on: the Run-ledger line that sends a resumed controller to the census before
+// it trusts a live token, and the fold paragraph's naming of the folded
+// CHECK-LIVENESS suffix. Each is read inside its own paragraph, so the same
+// words elsewhere in the file cannot satisfy it.
+const RESUME_CENSUS =
+  "Compaction parks every in-flight member and nothing reports it, so on resume take the registry census first (**Member unaccounted**, in **Failure handling**) before you trust a live token.";
+const FOLD_SUFFIX =
+  "A live member past its family's threshold folds the same way — it is advice, so nothing for the heartbeat to act on by itself — and the folded line names each such member (`…; CHECK-LIVENESS fix-pr-5 persists — …`) for as long as it stays live past the threshold.";
+
+test("the Run-ledger paragraph tells a resumed controller to take the registry census before trusting a live token", () => {
+  const block = paragraph(read(), "Compaction parks every in-flight member", `${SKILL}'s Run-ledger resume sentence`, "**The file lives one run.**");
+  assert.match(block, phrase(RESUME_CENSUS), `${SKILL}'s Run-ledger paragraph lost the census-first-on-resume sentence.`);
+});
+
+test("the fold paragraph names a folded CHECK-LIVENESS member", () => {
+  const block = paragraph(read(), "A live member past its family's threshold folds the same way", `${SKILL}'s fold sentence`, "**When you stop on purpose, say why");
+  assert.match(block, phrase(FOLD_SUFFIX), `${SKILL}'s fold prose lost the sentence naming a folded CHECK-LIVENESS member.`);
+});
