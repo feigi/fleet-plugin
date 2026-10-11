@@ -3195,6 +3195,7 @@ test("lock: every write subcommand takes the lock, before it validates anything 
     ["ruled", "5", "a decision"],
     ["dispatch", "5", "impl-5"],
     ["settle", "impl-5", "PR#6"],
+    ["review", "5", "review=member:review-pr-5"],
     ["drain", "a reason"],
   ]) {
     const r = cli(args, { LEDGER_LOCK_TIMEOUT_MS: "50" });

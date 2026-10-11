@@ -101,6 +101,7 @@ test("review refuses any token that is not a review token, and a key that is not
   const { reviewRefused, run } = fixture(t, [`#1 ${IMPL}`]);
   reviewRefused("482", ["fix-pr-482=applied:b7adf86"], /'fix-pr-482=applied:b7adf86' is not a review token/);
   reviewRefused("482", [A, "class=routine"], /'class=routine' is not a review token/);
+  reviewRefused("482", ["reviewedx"], /'reviewedx' is not a review token/);
   reviewRefused("482", [`${A} · ${r1}`], /'·' is not a review token/);
   reviewRefused("abc", [A], /'abc' is not a PR number/);
   reviewRefused("--pr", [A], /unknown flag --pr/);
@@ -133,6 +134,14 @@ test("reviewed= after a =failed launch with no later launch is refused; with a f
   reviewRefused("482", [`${A}=failed`, r1], /'reviewed=aaaaaaa/, /PR #482/);
   review("482", `${A}=failed`, B, r1);
   assert.deepEqual(rows(), [`#1 ${IMPL} · ${A}=failed · ${B} · ${r1}`], "the open launch is settled where it stands");
+});
+
+// Only a token ending `=failed` settles a launch; a runner whose name merely
+// ends `-failed` is a new launch beside the answered one, never a rewrite of it.
+test("a launch whose name ends -failed is a new launch, not a settle of the launch its name extends", (t) => {
+  const { review, rows } = fixture(t, [`#1 ${IMPL} · ${A} ${r1}`]);
+  review("482", `${A}-failed`);
+  assert.deepEqual(rows(), [`#1 ${IMPL} · ${A} ${r1} · ${A}-failed`]);
 });
 
 test("a past-pin re-review under the next free letter is accepted", (t) => {
@@ -336,6 +345,8 @@ test("row refuses a write that adds a review token, naming it and review; one th
   // Settling a launch =failed is a review write too, and a second copy is an addition.
   refused("2", `impl-2=PR#483 → PR#483 · ${A}=failed ${r1}`, /adds review token 'review=member:review-pr-482=failed'/);
   refused("2", `impl-2=PR#483 → PR#483 · ${A} ${r1} ${r1}`, /adds review token 'reviewed=aaaaaaa/);
+  // Several added: the first, in line order, is the one named.
+  refused("1", `${IMPL} · ${A} ${B}`, /adds review token 'review=member:review-pr-482'/);
   assert.deepEqual(rows(), [`#1 ${IMPL}`, `#2 impl-2=PR#483 → PR#483 · class=routine · ${A} ${r1}`]);
 });
 
@@ -349,6 +360,13 @@ test("row refuses a write after which a PR maps to a second row, naming the PR's
   // A rewrite adding a `PR#M` mention to another row.
   refused("900", "impl-900=PR#482 · class=routine", /row #900: PR #482/, /PR's row is #1\b/);
   refused("900", "notes about PR#482", /PR #482/, /#1\b/);
+});
+
+// The PR's row is the one `before` holds, wherever it sits in the rows: a
+// row ahead of it that a write newly maps to the PR is not the PR's row.
+test("row names the PR's row as the ledger held it when that row is not the first to map the PR", (t) => {
+  const { refused } = fixture(t, ["#900 impl-900 · class=routine", `#1 ${IMPL}`]);
+  refused("900", "impl-900=PR#482 · class=routine", /row #900: PR #482 would map to more than one row/, /PR's row is #1\b/);
 });
 
 test("row accepts the PR's own row, rows of other PRs, and a split already on disk", (t) => {
@@ -371,6 +389,8 @@ test("rows with no review tokens, and rows of other PRs, are accepted as before"
   ok("1", `${IMPL} · class=routine`);
   ok("1", `${IMPL} · fix-pr-482=applied:b7adf86`);
   ok("3", "impl-3 · class=correction · tier=task-high");
+  // A word that only begins `reviewed` is no review token, so it adds none.
+  ok("4", "impl-4 · reviewedx");
 });
 
 // ---- end to end: the writers in SKILL.md order leave PR M on one row ----
