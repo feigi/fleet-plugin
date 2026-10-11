@@ -489,3 +489,6 @@
 2026-10-11	3071	3067		slow-high	yes	no	run 2026-10-11				
 2026-10-11	3076	2216		slow-high	yes	no	run 2026-10-11				
 2026-10-11	3081	3053		slow-high	yes	no	run 2026-10-11				
+2026-10-11	3088	2194		task-high	yes	no	survived findings were code/test gaps plus one stale doc row; no minted false claim judged	heavy	production	988	28
+2026-10-11	3089	3023		task-high	yes	no	sizing run after implementing, before PR create	light	production	348	2
+2026-10-11	3090	2288		slow-high	yes	no	survived: settle fold deleted an Exclusion row; fixed by fix-applier	heavy	production	894	19
