@@ -570,8 +570,8 @@ re-dispatches, router $ included) ÷ merged rows, **iff** `usd_per_merged ≤
 guard's job.
 
 **Cadence and operator:** every **N = 50** merged PRs since
-`fitted_through`, **run by the repo-local hook (§ 5) at close-out** (it
-already drains the pending TSV and scrapes outcomes there):
+`fitted_through`, **run by the repo-local skill (§ 5) after a run** (the
+plugin's own `metrics-refresh.mjs` has already drained the pending TSV by then):
 `ticket-router.mjs fit` → chore PR through the review queue, never a direct
 merge. A no-change fit still lands (`estimates` moves; reviewers watch n
 climb). Never a maintainer-run obligation (`#1111`). The fit never moves
@@ -628,25 +628,28 @@ name).
 Per `#2089`'s ruling (maintainer, 2026-09-27), fleet-plugin's own run
 conventions — the metrics scrape, the chore/run-artifacts PR, and any
 repo-local doc cites — leave the plugin and move into a repo-local skill,
-`.omp/skills/run-team-local/SKILL.md`, called by `/fleet-ctl:run-team`
-through a named hook at fixed phases. That file did not exist when this spec
+`.omp/skills/run-team-local/SKILL.md`. That file did not exist when this spec
 was written (no `.omp/` directory at all on `main` then) — this map's
-tickets (§ 8, T5) create it, since this repo dogfoods its own plugin. Its
-duties, all drawn from this spec:
+tickets (§ 8, T5) create it, since this repo dogfoods its own plugin.
 
-- **Phase 0:** drain `.fleet/ticket-features.pending.tsv` into
-  `docs/metrics/ticket-features.tsv`; run `pr-cost.mjs --guard`, refreshing
-  `.fleet/cost-guard.json`; print the role-target drift notice (§ 2).
-- **Close-out:** drain the pending TSV again (a crashed run's rows are not
-  lost); re-run `pr-cost.mjs --guard`; run the per-cell stopping rule (§ 2)
-  and file a withdrawal issue on floor failure; run `ticket-router.mjs fit`
-  every 50 merged PRs since `fitted_through` (§ 4 R5), opening a chore PR.
+**Amended (the `#2089` re-ruling, 2026-10-10): the plugin never calls a
+repo-local skill.** The two usage-metrics duties — draining the pending TSV and
+refreshing the cost guard — stay in the plugin as
+`plugin/scripts/metrics-refresh.mjs`, which `/fleet-ctl:run-team` runs at
+phase 0 and at close-out. The repo-local skill keeps only this repository's
+self-maintenance and is run by a rule in `AGENTS.md`, not called by run-team.
+Its duties, all drawn from this spec:
 
-The plugin itself keeps only the repo-agnostic parts — the closing-issue
-filter in `fleet-tick.mjs`, the router script, the instrument script, the
-cell definitions, and the ledger grammar. Nothing in `plugin/skills/
-run-team/SKILL.md` reads or writes a consumer repo's TSV directly; it
-calls the hook.
+- Print the role-target drift notice (§ 2).
+- Run the per-cell stopping rule (§ 2) and file a withdrawal issue on floor
+  failure.
+- Run `ticket-router.mjs fit` every 50 merged PRs since `fitted_through`
+  (§ 4 R5), opening a chore PR.
+
+The plugin itself keeps the repo-agnostic parts — the closing-issue filter in
+`fleet-tick.mjs`, the router script, the instrument script, the cell
+definitions, the ledger grammar, and `metrics-refresh.mjs`. Nothing in
+`plugin/skills/run-team/SKILL.md` calls the repo-local skill.
 
 ## 6. Discrepancies found against current `main` (2026-09-28)
 
@@ -785,7 +788,7 @@ rewrites their pins in the same change).
 | T2 | Router mechanism: `ticket-router.mjs`, `router-table.json`, and the SKILL.md/ledger dispatch cutover | T1 | `route`/`fit`/`--check` per R1–R8; `/run-team` phase 2 dispatches the router's chosen cell; ledger carries `tier=<cell>` | 4, 7 |
 | T3 | Cost instrument: `pr-cost.mjs`, priced `member-outcomes.tsv` columns, specialist booking, and the `fleet-tick.mjs` guard row | T1 | `pr-cost.mjs --guard` exit contract; `.fleet/cost-guard.json`; review-fan-out rows booked to a PR; `router` tick row | 3, 7 |
 | T4 | Cell readout: `cell-readout.mjs`, the per-cell gate, and the `member-outcomes.tsv` header rewrite | T1, T2 | `cell-readout.mjs` prints the gate line per cell; `mixed` marker on role-target drift | 2, 7 |
-| T5 | Repo-local hook: TSV drain, stopping rule, drift notice, and router re-fit cadence | T2, T3, T4 | `.omp/skills/run-team-local/SKILL.md` runs every duty in § 5 at phase 0 and close-out | 5, 7 |
+| T5 | Repo-local hook: TSV drain, stopping rule, drift notice, and router re-fit cadence | T2, T3, T4 | `.omp/skills/run-team-local/SKILL.md` runs the drift notice, stopping rule and re-fit of § 5; the drain moved to `metrics-refresh.mjs` | 5, 7 |
 
 **Not filed here:** `#2127` ("Jev sizing backtest") is already filed as a
 research child of map #2030, blocked on this spec landing — it needs the

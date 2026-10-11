@@ -813,7 +813,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
         && !fixRunning(st) && !st.inFlight)
       .map(([n]) => n).sort(asc),
     // Open, not signed off, closing an issue (GitHub's own linked set — a
-    // chore PR closing nothing is review work nobody in the run will ever be
+    // PR closing nothing is review work nobody in the run will ever be
     // dispatched against), with no live or returned review on record —
     // or a returned review its finisher halted `past-pin` against: the
     // head carries commits no reviewer read, so it is owed a review again

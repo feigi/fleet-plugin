@@ -26,18 +26,20 @@
 // Explicit `-uall`, never bare `--porcelain`: `status.showUntrackedFiles=no`
 // silences untracked files otherwise.
 //
-// THE RUN'S OWN BOOKKEEPING IS NOT A STRAY WRITE. Two tracked files in the
+// THE RUN'S OWN BOOKKEEPING IS NOT A STRAY WRITE. Three tracked files in the
 // main checkout are written by the controller itself mid-run:
 // `docs/metrics/tier-outcomes.tsv`, appended each time it rules a PR's review
-// (run-team/SKILL.md, `tier-outcomes.mjs append`), and
-// `docs/metrics/member-outcomes.tsv`, rewritten by the member-facts scrape.
+// (run-team/SKILL.md, `tier-outcomes.mjs append`),
+// `docs/metrics/member-outcomes.tsv`, rewritten by the member-facts scrape, and
+// `docs/metrics/ticket-features.tsv`, which `metrics-refresh.mjs` drains the
+// pending Pull rows into at phase 0 and again at close-out.
 // Compared like any other path, the first append would hold every
 // dispatching row for the rest of the run, and clearing it with `--record`
 // after every ruling would certify whatever stray write landed beside it.
-// So `snapshot()` leaves exactly those two paths out, for the reason
-// instruments.sh leaves `docs/metrics/` out of its pin. Two named files, not
+// So `snapshot()` leaves exactly those three paths out, for the reason
+// instruments.sh leaves `docs/metrics/` out of its pin. Three named files, not
 // the directory: anything else under `docs/metrics/` is still a stray write.
-// The price: a member's leaked write to one of those two files goes unseen.
+// The price: a member's leaked write to one of those three files goes unseen.
 //
 // FOUR ANSWERS, worktree-audit.sh's three plus the baseline's own refusal:
 //   clean    — the porcelain entries and hashes equal the baseline's.
@@ -81,7 +83,7 @@ import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 
 export const BASELINE_FILE = "main-checkout.sha";
 export const RECORD_COMMAND = "~/.fleet/bin/fleet-run main-checkout.mjs --record";
-const RUN_BOOKKEEPING = new Set(["docs/metrics/tier-outcomes.tsv", "docs/metrics/member-outcomes.tsv"]);
+const RUN_BOOKKEEPING = new Set(["docs/metrics/tier-outcomes.tsv", "docs/metrics/member-outcomes.tsv", "docs/metrics/ticket-features.tsv"]);
 const HEADER = "fleet main-checkout baseline v1";
 const GIT_TIMEOUT_MS = 30_000;
 const MAX_BUFFER = 64 * 1024 * 1024;

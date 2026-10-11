@@ -242,17 +242,20 @@ test("the run's own bookkeeping is not a stray write: the controller's metrics a
   mkdirSync(join(dir, "docs", "metrics"), { recursive: true });
   writeFileSync(join(dir, "docs", "metrics", "tier-outcomes.tsv"), "# header\n");
   writeFileSync(join(dir, "docs", "metrics", "member-outcomes.tsv"), "# header\n");
+  writeFileSync(join(dir, "docs", "metrics", "ticket-features.tsv"), "# header\n");
   git(dir, "add", "-A");
   git(dir, "commit", "-qm", "metrics");
   record(dir);
   // What the controller does mid-run: `tier-outcomes.mjs append` per ruled
-  // PR, the member-facts scrape rewriting its file. Twice, as a run does.
+  // PR, the member-facts scrape rewriting its file, the pending-rows drain
+  // appending to the features file. Twice, as a run does.
   for (const row of ["2026-10-01\t2298\n", "2026-10-01\t2302\n"]) {
     appendFileSync(join(dir, "docs", "metrics", "tier-outcomes.tsv"), row);
     writeFileSync(join(dir, "docs", "metrics", "member-outcomes.tsv"), `# header\n${row}`);
+    appendFileSync(join(dir, "docs", "metrics", "ticket-features.tsv"), row);
     assert.equal(check(dir).state, "clean", "the controller's own append held the run");
   }
-  // Two named files, never the directory, and a stray beside them is named alone.
+  // Three named files, never the directory, and a stray beside them is named alone.
   writeFileSync(join(dir, "docs", "metrics", "stray.tsv"), "x\n");
   writeFileSync(join(dir, "tracked.txt"), "a member's\n");
   assert.deepEqual(check(dir).changed, ["docs/metrics/stray.tsv", "tracked.txt"]);

@@ -1,18 +1,18 @@
-// The repo-local run-team hook, .omp/skills/run-team-local/hook.mjs, run as
-// the CLI against a fixture workspace: a clone of a bare origin whose main
-// carries the metrics corpus, the router table and the cell definitions, and
-// a stub `gh` that answers from a fixture file and logs every call it gets.
+// The repo-local hook, .omp/skills/run-team-local/hook.mjs, run as the CLI
+// against a fixture workspace: a clone of a bare origin whose main carries the
+// metrics corpus, the router table and the cell definitions, and a stub `gh`
+// that answers from a fixture file and logs every call it gets.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { COLUMNS as MEMBER_COLUMNS, formatTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, formatRow } from "../plugin/scripts/tier-outcomes.mjs";
-import { FEATURE_COLUMNS, WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
+import { FEATURE_COLUMNS, WINDOW_START } from "../plugin/scripts/pr-cost.mjs";
 import { FIT_EVERY_MERGED } from "../plugin/scripts/ticket-router.mjs";
 import { STOP } from "../plugin/scripts/cell-readout.mjs";
 
@@ -20,7 +20,6 @@ const HOOK = fileURLToPath(new URL("../.omp/skills/run-team-local/hook.mjs", imp
 const DAY = WINDOW_START;
 const SESSION = "2026-10-03T10-00-00-000Z_01a00000-0000-7000-8000-000000000000";
 const STAGE1 = ["slow-high", "task-high", "smol-high"];
-const PENDING = join(".fleet", "ticket-features.pending.tsv");
 const FEATURES = join("docs", "metrics", "ticket-features.tsv");
 const GUARD = join(".fleet", "cost-guard.json");
 const TABLE = join("plugin", "scripts", "router-table.json");
@@ -68,7 +67,7 @@ function ruled(rows, { ticket, cell = "slow-high", fail = false, date = DAY }) {
   rows.tiers.push(tier({ ticket: String(ticket), pr: String(ticket + 5000), run_date: date, minted_false_claim: fail ? "yes" : "no" }));
 }
 
-const featuresTsv = (rows, cols = FEATURE_COLUMNS) => [cols.join("\t"), ...rows.map((r) => cols.map((c) => r[c] ?? "").join("\t"))].join("\n") + "\n";
+const featuresTsv = (rows) => [FEATURE_COLUMNS.join("\t"), ...rows.map((r) => FEATURE_COLUMNS.map((c) => r[c] ?? "").join("\t"))].join("\n") + "\n";
 const membersTsv = (rows) => `# ${MEMBER_COLUMNS.join("\t")}\n${rows.length ? formatTsv(rows) : ""}`;
 const tiersTsv = (rows) => `# ${TIER_COLUMNS.join("\t")}\n${rows.map((r) => `${formatRow(r)}\n`).join("")}`;
 const routerTable = (over = {}) => ({
@@ -106,7 +105,7 @@ function write(root, rel, text) {
 }
 
 // `readded`: cell → the date its definition is deleted and added back on main.
-function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, readded = {}, pending = null, guardBefore = null, gh = {} } = {}) {
+function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, readded = {}, gh = {} } = {}) {
   const root = tempDir("run-team-local-");
   const origin = join(root, "origin.git");
   const seed = join(root, "seed");
@@ -133,8 +132,8 @@ function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, readd
   git(seed, ["push", "--quiet", origin, "main"]);
   const repo = join(root, "repo");
   git(root, ["clone", "--quiet", origin, repo]);
-  if (pending !== null) write(repo, PENDING, pending);
-  if (guardBefore !== null) write(repo, GUARD, JSON.stringify(guardBefore));
+  // The file the run's own close-out leaves; the re-fit reads it as `--guard`.
+  write(repo, GUARD, JSON.stringify({ computed_at: "2026-10-03T12:00:00.000Z", verdict: "none", tripped: [], cells: [] }));
   mkdirSync(join(root, "bin"));
   writeExecStub(join(root, "bin", "gh"), GH_STUB);
   writeFileSync(join(root, "gh.json"), JSON.stringify({ prs: [], openPrs: [], issues: [], ...gh }));
@@ -143,8 +142,8 @@ function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, readd
   const log = join(root, "gh.log");
   return {
     root, origin, repo,
-    run(phase, extra = [], { cwd = repo, repoFlag = true } = {}) {
-      const args = [HOOK, phase, ...(repoFlag ? ["--repo", repo] : []),
+    run(extra = [], { cwd = repo, repoFlag = true } = {}) {
+      const args = [HOOK, ...(repoFlag ? ["--repo", repo] : []),
         "--model-roles", join(root, "model-roles.json"), "--catalog", join(root, "catalog.json"), ...extra];
       return spawnSync(process.execPath, args, {
         cwd, encoding: "utf8",
@@ -159,72 +158,9 @@ const worktrees = (repo) => git(repo, ["worktree", "list", "--porcelain"]).split
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 
 // ---------------------------------------------------------------------------
-// phase-0
+// the role-target drift notice
 
-test("phase-0: drains the pending TSV into ticket-features.tsv, deduped on session + agent, and writes a fresh cost-guard.json", () => {
-  const rows = corpus();
-  ruled(rows, { ticket: 1 });
-  const fresh = [pull({ ticket: "2", agent: "impl-2" }), pull({ ticket: "3", agent: "impl-3", chosen_cell: "task-high", exploration_draw: "2/3" })];
-  // Read by column name: a pending header in another order drains the same rows.
-  const pending = featuresTsv([rows.features[0], fresh[0], ...fresh], [...FEATURE_COLUMNS].reverse());
-  const f = fixture({ rows, pending, guardBefore: { computed_at: "2000-01-01T00:00:00.000Z", verdict: "ok", tripped: [], cells: [] } });
-  const started = Date.now();
-  const r = f.run("phase-0");
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(readFileSync(join(f.repo, FEATURES), "utf8"), featuresTsv([rows.features[0], ...fresh]));
-  assert.equal(existsSync(join(f.repo, PENDING)), false, "the drained pending file is gone");
-  assert.match(r.stdout, /drain: 2 rows from \.fleet\/ticket-features\.pending\.tsv into docs\/metrics\/ticket-features\.tsv \(2 already there\)/);
-  const guard = JSON.parse(readFileSync(join(f.repo, GUARD), "utf8"));
-  assert.ok(Date.parse(guard.computed_at) >= started - 1000, `a fresh guard, not the stale one: ${guard.computed_at}`);
-  assert.equal(guard.verdict, "none");
-  assert.match(r.stdout, /cost guard: verdict none, pr-cost\.mjs exit 4/, "no verdict yet is a verdict, not a failure");
-  assert.match(r.stdout, /drift notice: every cell's last admissible row ran its role's current target/);
-  assert.deepEqual(f.ghCalls().map((c) => c.slice(0, 2).join(" ")), ["pr list"], "phase 0 writes nothing to GitHub");
-});
-
-test("phase-0: with no --repo it works on the main checkout of the cwd's repository; a second run finds nothing pending and changes nothing", () => {
-  const rows = corpus();
-  ruled(rows, { ticket: 1 });
-  const fresh = pull({ ticket: "2", agent: "impl-2" });
-  const f = fixture({ rows, pending: featuresTsv([fresh]) });
-  const wt = join(f.root, "wt");
-  git(f.repo, ["worktree", "add", "--quiet", wt]);
-  const r = f.run("phase-0", [], { cwd: wt, repoFlag: false });
-  assert.equal(r.status, 0, r.stderr);
-  const drained = readFileSync(join(f.repo, FEATURES), "utf8");
-  assert.equal(drained, featuresTsv([rows.features[0], fresh]));
-  assert.equal(existsSync(join(f.repo, GUARD)), true);
-  assert.equal(existsSync(join(wt, ".fleet")), false, "nothing is written under the linked worktree");
-
-  const again = f.run("phase-0", [], { cwd: wt, repoFlag: false });
-  assert.equal(again.status, 0, again.stderr);
-  assert.match(again.stdout, /drain: nothing pending in \.fleet\/ticket-features\.pending\.tsv/);
-  assert.equal(readFileSync(join(f.repo, FEATURES), "utf8"), drained);
-});
-
-test("phase-0: a tripped guard is a verdict and the hook goes on; a guard that cannot be computed fails the hook there", () => {
-  const rows = corpus();
-  const prs = [];
-  for (let i = 0; i < MIN_N; i++) {
-    ruled(rows, { ticket: 1000 + i, cell: "slow-high", fail: i < 6 });
-    ruled(rows, { ticket: 2000 + i, cell: "task-high", fail: i < 9 });
-    prs.push({ number: 6000 + i, state: "MERGED", mergedAt: `${DAY}T12:00:00Z` }, { number: 7000 + i, state: "MERGED", mergedAt: `${DAY}T12:00:00Z` });
-  }
-  const tripped = fixture({ rows, gh: { prs } });
-  const t = tripped.run("phase-0");
-  assert.equal(t.status, 0, t.stderr);
-  assert.match(t.stdout, /cost guard: verdict tripped \(tripped: task-high\), pr-cost\.mjs exit 3/);
-  assert.match(t.stdout, /drift notice:/, "the duty after the guard ran");
-
-  const broken = fixture({ rows: corpus() });
-  writeFileSync(join(broken.repo, "docs", "metrics", "member-outcomes.tsv"), "short\trow\n");
-  const b = broken.run("phase-0");
-  assert.equal(b.status, 1);
-  assert.match(b.stderr, /run-team-local: cost guard failed: pr-cost\.mjs --guard exited 2/);
-  assert.doesNotMatch(b.stdout, /drift notice/, "the duties after a failed one do not run");
-});
-
-test("phase-0: the drift notice names a cell whose last admissible row ran another model than its role now resolves, and a cell whose level that target does not run", () => {
+test("drift notice: names a cell whose last admissible row ran another model than its role now resolves, and a cell whose level that target does not run", () => {
   const rows = corpus();
   rows.members.push(
     member({ agent: "impl-1", run_date: "2026-10-01", session: "s1", model: "claude-sonnet-5", effort: "high", subagentType: "fleet-implementer-task-high" }),
@@ -237,7 +173,7 @@ test("phase-0: the drift notice names a cell whose last admissible row ran anoth
     member({ agent: "impl-6", run_date: "2026-10-09", session: "s6", model: "claude-haiku-3", effort: "high", subagentType: "task" }),
   );
   const f = fixture({ rows, cells: [...STAGE1, "smol-max"] });
-  const r = f.run("phase-0");
+  const r = f.run(["--dry-run"]);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.split("\n").filter((l) => l.startsWith("tier-roles: notice: ")), [
     "tier-roles: notice: fleet-implementer-smol-max runs at max; modelRoles.smol now resolves anthropic/claude-haiku-4-5, which does not run at max (thinking: minimal, low, medium, high, xhigh)",
@@ -245,7 +181,7 @@ test("phase-0: the drift notice names a cell whose last admissible row ran anoth
   ]);
 });
 
-test("phase-0: a role with no target in modelRoles raises no notice for its cells, and the cells whose role resolves are still checked", () => {
+test("drift notice: a role with no target in modelRoles raises no notice for its cells, and the cells whose role resolves are still checked", () => {
   const rows = corpus();
   rows.members.push(
     member({ agent: "impl-1", run_date: "2026-10-01", session: "s1", model: "claude-haiku-3", effort: "high", subagentType: "fleet-implementer-smol-high" }),
@@ -254,14 +190,14 @@ test("phase-0: a role with no target in modelRoles raises no notice for its cell
   const f = fixture({ rows });
   const { smol, ...withoutSmol } = MODEL_ROLES;
   writeFileSync(join(f.root, "model-roles.json"), JSON.stringify(withoutSmol));
-  const r = f.run("phase-0");
+  const r = f.run(["--dry-run"]);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.stdout.split("\n").filter((l) => l.startsWith("tier-roles: notice: ")), [
     "tier-roles: notice: fleet-implementer-task-high last ran claude-sonnet-4-5; modelRoles.task now resolves anthropic/claude-sonnet-5 — cell history spans two models",
   ]);
 });
 
-test("phase-0: of the rows dated the same day the drift notice follows the higher session, in whichever order the rows come", () => {
+test("drift notice: of the rows dated the same day it follows the higher session, in whichever order the rows come", () => {
   const rows = corpus();
   const sameDay = (agent, session, model, cell) => member({ agent, run_date: "2026-10-02", session, model, effort: "high", subagentType: `fleet-implementer-${cell}` });
   rows.members.push(
@@ -272,14 +208,14 @@ test("phase-0: of the rows dated the same day the drift notice follows the highe
     sameDay("impl-3", "s4", "claude-sonnet-5", "task-high"),
     sameDay("impl-4", "s3", "claude-sonnet-4-5", "task-high"),
   );
-  const r = fixture({ rows }).run("phase-0");
+  const r = fixture({ rows }).run(["--dry-run"]);
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stdout, /tier-roles: notice:/);
   assert.match(r.stdout, /drift notice: every cell's last admissible row ran its role's current target/);
 });
 
 // ---------------------------------------------------------------------------
-// close-out: the stopping rule
+// the per-cell stopping rule
 
 // smol-high at ten verdicts, eight failing the floor; task-high at three, all failing.
 function floorFailing() {
@@ -292,9 +228,9 @@ const TITLE = "Withdraw exploration cell smol-high: 8/10 floor failures";
 const STALE = { number: 78, title: "Withdraw exploration cell smol-high: 7/9 floor failures" };
 const writes = (f) => ["issue create", "issue edit", "issue comment"].flatMap((cmd) => calls(f, cmd));
 
-test("close-out --dry-run: a cell at ten verdicts and eight floor failures would file its withdrawal issue; a cell under the rule continues", () => {
+test("stopping rule --dry-run: a cell at ten verdicts and eight floor failures would file its withdrawal issue; a cell under the rule continues", () => {
   const f = fixture({ rows: floorFailing() });
-  const r = f.run("close-out", ["--dry-run"]);
+  const r = f.run(["--dry-run"]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — would file "${escape(TITLE)}" \\(ready-for-human\\)`));
   assert.match(r.stdout, /stopping rule: task-high 3\/3 floor failures since 2026-09-01 — continues/);
@@ -304,18 +240,18 @@ test("close-out --dry-run: a cell at ten verdicts and eight floor failures would
   assert.deepEqual(writes(f), [], "a dry run writes nothing");
 });
 
-test("close-out: an open withdrawal issue with the same title is left as it is, even beside one of the cell's older tallies", () => {
+test("stopping rule: an open withdrawal issue with the same title is left as it is, even beside one of the cell's older tallies", () => {
   const open = { number: 77, title: TITLE };
   const f = fixture({ rows: floorFailing(), gh: { issues: [STALE, open] } });
-  const r = f.run("close-out");
+  const r = f.run();
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue already open, #${open.number}$`, "m"));
   assert.deepEqual(writes(f), []);
 });
 
-test("close-out: the cell's open withdrawal issue at another tally gets the verdict table as a comment, then the new title; no second issue is filed", () => {
+test("stopping rule: the cell's open withdrawal issue at another tally gets the verdict table as a comment, then the new title; no second issue is filed", () => {
   const f = fixture({ rows: floorFailing(), gh: { issues: [STALE] } });
-  const r = f.run("close-out");
+  const r = f.run();
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue #78 retitled from "${escape(STALE.title)}", verdict table commented$`, "m"));
   assert.deepEqual(calls(f, "issue create"), []);
@@ -327,11 +263,11 @@ test("close-out: the cell's open withdrawal issue at another tally gets the verd
   assert.deepEqual(f.ghCalls().map((c) => c.slice(0, 2).join(" ")).filter((c) => c === "issue comment" || c === "issue edit"), ["issue comment", "issue edit"]);
 });
 
-test("close-out: with several open withdrawal issues for the cell and none at the new tally, the lowest-numbered one is retitled and commented, however the list orders them, and the others are named", () => {
+test("stopping rule: with several open withdrawal issues for the cell and none at the new tally, the lowest-numbered one is retitled and commented, however the list orders them, and the others are named", () => {
   const older = { number: 90, title: "Withdraw exploration cell smol-high: 6/8 floor failures" };
   const newer = { number: 95, title: STALE.title };
   const f = fixture({ rows: floorFailing(), gh: { issues: [newer, older] } });
-  const r = f.run("close-out");
+  const r = f.run();
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue #90 retitled from "${escape(older.title)}", verdict table commented$`, "m"));
   assert.match(r.stdout, /stopping rule: smol-high 8\/10 floor failures since 2026-09-01 — more open withdrawal issues for the cell, left as they are: #95$/m);
@@ -340,40 +276,40 @@ test("close-out: with several open withdrawal issues for the cell and none at th
   assert.deepEqual(calls(f, "issue edit"), [["issue", "edit", "90", "--title", TITLE]]);
 });
 
-test("close-out: the cell's open issue already at the new tally is the one kept, though an older issue at another tally is also open, and that one is named", () => {
+test("stopping rule: the cell's open issue already at the new tally is the one kept, though an older issue at another tally is also open, and that one is named", () => {
   const older = { number: 70, title: "Withdraw exploration cell smol-high: 6/8 floor failures" };
   const exact = { number: 77, title: TITLE };
   const f = fixture({ rows: floorFailing(), gh: { issues: [exact, older] } });
-  const r = f.run("close-out");
+  const r = f.run();
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue already open, #${exact.number}$`, "m"));
   assert.match(r.stdout, /stopping rule: smol-high 8\/10 floor failures since 2026-09-01 — more open withdrawal issues for the cell, left as they are: #70$/m);
   assert.deepEqual(writes(f), []);
 });
 
-test("close-out: a withdrawal issue whose title differs from the prefix only in case is still the cell's, and is retitled", () => {
+test("stopping rule: a withdrawal issue whose title differs from the prefix only in case is still the cell's, and is retitled", () => {
   const lower = { number: 71, title: STALE.title.toLowerCase() };
   const f = fixture({ rows: floorFailing(), gh: { issues: [lower] } });
-  const r = f.run("close-out");
+  const r = f.run();
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(calls(f, "issue create"), []);
   assert.deepEqual(calls(f, "issue edit"), [["issue", "edit", "71", "--title", TITLE]]);
 });
 
-test("close-out --dry-run: the cell's open withdrawal issue at another tally would be retitled and commented, and nothing is written", () => {
+test("stopping rule --dry-run: the cell's open withdrawal issue at another tally would be retitled and commented, and nothing is written", () => {
   const f = fixture({ rows: floorFailing(), gh: { issues: [STALE] } });
-  const r = f.run("close-out", ["--dry-run"]);
+  const r = f.run(["--dry-run"]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — would retitle withdrawal issue #78 from "${escape(STALE.title)}" to "${escape(TITLE)}" and comment the verdict table$`, "m"));
   assert.deepEqual(writes(f), []);
 });
 
-test("close-out: another cell's withdrawal issue, or a title that only contains the cell's prefix, does not dedupe, and the issue is filed", () => {
+test("stopping rule: another cell's withdrawal issue, or a title that only contains the cell's prefix, does not dedupe, and the issue is filed", () => {
   const other = { number: 79, title: "Withdraw exploration cell task-high: 3/3 floor failures" };
   const quoted = { number: 80, title: "Re: Withdraw exploration cell smol-high: 7/9 floor failures" };
   const longer = { number: 81, title: "Withdraw exploration cell smol-high2: 7/9 floor failures" };
   const f = fixture({ rows: floorFailing(), gh: { issues: [other, quoted, longer] } });
-  const r = f.run("close-out");
+  const r = f.run();
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /stopping rule: smol-high 8\/10 floor failures since 2026-09-01 — filed https:\/\/github\.com\/o\/r\/issues\/901/);
   assert.deepEqual([...calls(f, "issue edit"), ...calls(f, "issue comment")], []);
@@ -390,44 +326,44 @@ test("close-out: another cell's withdrawal issue, or a title that only contains 
   assert.deepEqual(tickets, [100, 101, 102, 103, 104, 105, 106, 107, 108, 109], "rows run in ascending ticket order");
 });
 
-test("close-out: the count restarts on the day a cell's definition was most recently added", () => {
+test("stopping rule: the count restarts on the day a cell's definition was most recently added", () => {
   const f = fixture({ rows: floorFailing(), readded: { "smol-high": "2026-10-04T00:00:00Z" } });
-  const r = f.run("close-out", ["--dry-run"]);
+  const r = f.run(["--dry-run"]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /stopping rule: smol-high 0\/0 floor failures since 2026-10-04 — continues/);
   assert.deepEqual(calls(f, "issue list"), []);
 });
 
-test("close-out: a definition no commit adds fails the stopping rule naming it, after the cells that can be judged are reported, and the re-fit does not run", () => {
+test("stopping rule: a definition no commit adds fails the duty naming it, after the cells that can be judged are reported, and the re-fit does not run", () => {
   const f = fixture({ rows: floorFailing() });
   // On disk beside the committed definitions, never committed.
   writeFileSync(join(f.repo, "plugin", "agents", "fleet-implementer-smol-max.agent.md"), agentMd("smol-max"));
-  const r = f.run("close-out", ["--dry-run"]);
+  const r = f.run(["--dry-run"]);
   assert.equal(r.status, 1, r.stdout);
   assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — would file "${escape(TITLE)}"`));
   assert.match(r.stderr, /run-team-local: stopping rule failed: not judged — no commit adds fleet-implementer-smol-max\.agent\.md$/m);
   assert.doesNotMatch(r.stdout, /router fit/);
 });
 
-test("close-out: a gh that prints something other than JSON fails the duty naming the gh command and what it printed", () => {
+test("stopping rule: a gh that prints something other than JSON fails the duty naming the gh command and what it printed", () => {
   const f = fixture({ rows: floorFailing(), gh: { issuesRaw: "<html>rate limited</html>" } });
-  const r = f.run("close-out", ["--dry-run"]);
+  const r = f.run(["--dry-run"]);
   assert.equal(r.status, 1, r.stdout);
   assert.match(r.stderr, /stopping rule failed: gh issue list printed non-JSON \(.*\): "<html>rate limited<\/html>"$/m);
 });
 
-test("close-out --dry-run: a both-blank tier-outcomes row after a ticket's real ruling leaves the count as it was, and the router fit still runs", () => {
+test("stopping rule --dry-run: a both-blank tier-outcomes row after a ticket's real ruling leaves the count as it was, and the router fit still runs", () => {
   const rows = floorFailing();
   rows.tiers.push(tier({ ticket: "100", pr: "1392", closed_own_ticket: "", minted_false_claim: "" }));
   const f = fixture({ rows });
-  const r = f.run("close-out", ["--dry-run"]);
+  const r = f.run(["--dry-run"]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — would file "${escape(TITLE)}"`));
   assert.match(r.stdout, /^run-team-local: router fit: /m);
 });
 
 // ---------------------------------------------------------------------------
-// close-out: the router re-fit cadence
+// the router re-fit cadence
 
 // FIT_EVERY_MERGED Pulls on main dated after the table's fitted_through, `n` of them ruled.
 function merged(n) {
@@ -439,16 +375,16 @@ function merged(n) {
   return rows;
 }
 
-test("close-out --dry-run: fifty merged PRs since fitted_through run ticket-router.mjs fit in a throwaway checkout; forty-nine do not", () => {
+test("router fit --dry-run: fifty merged PRs since fitted_through run ticket-router.mjs fit in a throwaway checkout; forty-nine do not", () => {
   const below = fixture({ rows: merged(FIT_EVERY_MERGED - 1) });
-  const b = below.run("close-out", ["--dry-run"]);
+  const b = below.run(["--dry-run"]);
   assert.equal(b.status, 0, b.stderr);
   assert.match(b.stdout, /router fit: DUE=no MERGED=49\/50 — not due/);
   assert.doesNotMatch(b.stdout, /ticket-router: fitted/);
 
   const at = fixture({ rows: merged(FIT_EVERY_MERGED) });
   const before = readFileSync(join(at.repo, TABLE), "utf8");
-  const a = at.run("close-out", ["--dry-run"]);
+  const a = at.run(["--dry-run"]);
   assert.equal(a.status, 0, a.stderr);
   assert.match(a.stdout, /^run-team-local: router fit: DUE=yes MERGED=50\/50 — ticket-router: fitted \d+ tickets through 2026-10-05; .*; would open a chore PR from chore\/router-fit-\d{4}-\d{2}-\d{2}$/m);
   assert.equal(readFileSync(join(at.repo, TABLE), "utf8"), before, "the checkout's own table is untouched");
@@ -457,16 +393,24 @@ test("close-out --dry-run: fifty merged PRs since fitted_through run ticket-rout
   assert.deepEqual(calls(at, "pr create"), []);
 });
 
-test("close-out: a relative --repo reaches the re-fit as the absolute one does", () => {
+test("router fit: a relative --repo reaches the re-fit as the absolute one does", () => {
   const f = fixture({ rows: merged(FIT_EVERY_MERGED) });
-  const r = f.run("close-out", ["--repo", ".", "--dry-run"], { cwd: f.repo, repoFlag: false });
+  const r = f.run(["--repo", ".", "--dry-run"], { cwd: f.repo, repoFlag: false });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /router fit: DUE=yes MERGED=50\/50 — .*; would open a chore PR from chore\/router-fit-/);
 });
 
-test("close-out: a due re-fit is pushed to its own chore branch and opened as a PR labelled patch, never onto main — and not while an earlier re-fit PR is open", () => {
+test("router fit: without the cost guard the run's close-out leaves, the duty fails naming it and nothing is opened", () => {
   const f = fixture({ rows: merged(FIT_EVERY_MERGED) });
-  const r = f.run("close-out");
+  rmSync(join(f.repo, GUARD));
+  const r = f.run(["--dry-run"]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /run-team-local: router fit failed: .*cost-guard\.json/);
+});
+
+test("router fit: a due re-fit is pushed to its own chore branch and opened as a PR labelled patch, never onto main — and not while an earlier re-fit PR is open", () => {
+  const f = fixture({ rows: merged(FIT_EVERY_MERGED) });
+  const r = f.run();
   assert.equal(r.status, 0, r.stderr);
   const branch = /opened https:\/\/github\.com\/o\/r\/pull\/902 from (chore\/router-fit-\S+)$/m.exec(r.stdout)?.[1];
   assert.ok(branch, r.stdout);
@@ -483,7 +427,7 @@ test("close-out: a due re-fit is pushed to its own chore branch and opened as a 
 
   const earlier = { number: 55, headRefName: "chore/router-fit-2026-10-01" };
   const held = fixture({ rows: merged(FIT_EVERY_MERGED), gh: { openPrs: [earlier] } });
-  const h = held.run("close-out");
+  const h = held.run();
   assert.equal(h.status, 0, h.stderr);
   assert.match(h.stdout, new RegExp(`router fit: DUE=yes MERGED=50/50 — re-fit PR #${earlier.number} \\(${escape(earlier.headRefName)}\\) is still open$`, "m"));
   assert.deepEqual(calls(held, "pr create"), []);
@@ -493,14 +437,13 @@ test("close-out: a due re-fit is pushed to its own chore branch and opened as a 
 // ---------------------------------------------------------------------------
 // usage
 
-test("usage: exactly one phase, and only the declared flags, else exit 2", () => {
+test("usage: no positional, and only the declared flags, else exit 2", () => {
   const f = fixture();
-  for (const extra of [[], ["phase-0", "close-out"], ["phase-0", "--bogus"]]) {
+  for (const extra of [["phase-0"], ["close-out"], ["--bogus"], ["--repo"]]) {
     const r = spawnSync(process.execPath, [HOOK, ...extra, "--repo", f.repo], { encoding: "utf8", env: ENV });
     assert.equal(r.status, 2, `${extra.join(" ")}: ${r.stderr}`);
   }
-  // A flag's value that spells a phase is not the phase.
-  const value = spawnSync(process.execPath, [HOOK, "--repo", "phase-0", "--dry-run"], { encoding: "utf8", env: ENV, cwd: f.repo });
-  assert.equal(value.status, 2, value.stderr);
-  assert.match(value.stderr, /usage: hook\.mjs phase-0\|close-out/);
+  // A flag's value is not a positional.
+  const value = spawnSync(process.execPath, [HOOK, "--repo", f.repo, "--dry-run"], { encoding: "utf8", env: { ...ENV, PATH: `${join(f.root, "bin")}:${process.env.PATH}`, GH_FIXTURE: join(f.root, "gh.json"), GH_LOG: join(f.root, "gh.log") }, cwd: f.repo });
+  assert.notEqual(value.status, 2, value.stderr);
 });
