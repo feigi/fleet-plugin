@@ -71,6 +71,19 @@ test("step 5 states the claim bar: shaped-better findings never get their own op
   );
 });
 
+test("step 5 puts a prose-guard gap below the claim bar unless something acts on the guarded text", () => {
+  // The bar and its exception as ONE span, for the reason the test above
+  // gives: pinned apart, a clause spliced between "below" and "unless"
+  // satisfies both halves and drops the exception.
+  assert.match(
+    step5(),
+    phrase(
+      "**Neither does a gap in a prose guard — a test holding prose to its wording — unless something acts on the guarded text: an agent follows it as an instruction (a skill, a command, an agent definition, a script's header or usage text, `AGENTS.md`), or a program other than its own guard reads it.**",
+    ),
+    "step 5 lost the prose-guard stakes bar — a gap in a guard over prose nothing acts on files as its own open issue again",
+  );
+});
+
 test("step 5 routes below-bar findings into the closed record, with a promotion path out", () => {
   const s = step5();
   assert.match(
