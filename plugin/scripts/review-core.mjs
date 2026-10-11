@@ -26,9 +26,10 @@
 // declaring its own copy. node:path's `posix`, to normalise a
 // scratch path before `runnerScratchRefusal` reads its last component, and
 // its `isAbsolute`, to refuse a scratch that is not an absolute path.
-// fleet-dir.mjs's scratchRoot() and scratchRootRefusal(), for the one caller
-// that passes no `scratch` at all — a standalone review with no dispatcher —
-// which takes the fleet's own scratch root for this repository.
+// fleet-dir.mjs's scratchRoot(), scratchRootRefusal() and FleetDirUnresolvable,
+// for the one caller that passes no `scratch` at all — a standalone review
+// with no dispatcher — which takes the fleet's own scratch root for this
+// repository.
 //
 // `.mjs`, not `.js`: this file was once `review-core.js`, and
 // nothing that ships declares a `type`, so Node below 20.19.0/22.7.0 —
@@ -769,9 +770,6 @@ export async function runReview(host, args) {
   const pr = A.pr;
   const branch = A.branch;
   const worktree = A.worktree;
-  const scratch = A.scratch === undefined ? standaloneScratchRoot() : A.scratch;
-  const runRootParent = `${scratch}/pr${pr}`;
-  const runRootPrefix = `${runRootParent}/run-`;
   // Every dispatch label ends in `:pr${pr}`: the member id the harness derives
   // from a label is all a transcript keeps of it, and member-record.mjs's
   // parseMemberName reads the PR back out of that id to book its cost.
@@ -786,7 +784,7 @@ export async function runReview(host, args) {
   // passes all three — `gh` resolves a non-numeric ref as a BRANCH, so the
   // snapshot is a real diff belonging to whatever PR that branch heads while
   // every return value here still reports the string that was passed. It is
-  // also a PATH component by then (`scratch`, `runRootParent` above), so a
+  // also a PATH component by then (`scratch`, `runRootParent` below), so a
   // value like `../x` names a run root outside the scratch tree.
   //
   // REFUSED, never coerced. `Number(pr)` would make a bad value the string
@@ -801,6 +799,12 @@ export async function runReview(host, args) {
   // — which is why this sits BELOW the required-args throw and never merged
   // into it: an absent `pr` is owed "required", not a complaint about digits.
   if (!isDigits(pr)) throw new Error(`review-pr: args.pr must be a PR number, got ${JSON.stringify(pr)}`);
+
+  // Resolved only now: the default spawns git, so a missing or malformed `pr`
+  // is refused on its own terms before anything is resolved or spawned.
+  const scratch = A.scratch === undefined ? standaloneScratchRoot() : A.scratch;
+  const runRootParent = `${scratch}/pr${pr}`;
+  const runRootPrefix = `${runRootParent}/run-`;
 
   const scratchRefusal = runnerScratchRefusal(scratch);
   if (scratchRefusal) throw new Error(`review-pr: ${scratchRefusal}`);

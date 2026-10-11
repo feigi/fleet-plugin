@@ -16,7 +16,8 @@
 //
 // Exit 0: the path on stdout, nothing else. Exit 1: the root would sit inside
 // a git work tree that does not ignore it — the reason, naming the work tree,
-// on stderr, and nothing created. Exit 2: usage, or no repository to key on.
+// on stderr, and nothing created. Exit 2: usage, no repository to key on, or the
+// root could not be created (a filesystem fault, not a refusal).
 
 import { mkdirSync } from "node:fs";
 import { makeDie } from "./arg.mjs";
@@ -41,7 +42,11 @@ function main() {
     process.exitCode = 1;
     return;
   }
-  mkdirSync(root, { recursive: true });
+  try {
+    mkdirSync(root, { recursive: true });
+  } catch (e) {
+    die(`could not create ${root}: ${e.message}`);
+  }
   process.stdout.write(`${root}\n`);
 }
 

@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { scratchRoot, scratchRootRefusal } from "../plugin/scripts/fleet-dir.mjs";
@@ -124,6 +124,22 @@ test("a root inside a git work tree that does not ignore it is refused: exit 1, 
   assert.equal(r.stdout, "");
   assert.match(r.stderr, /^scratch-root: scratch root .* is inside the git work tree .*enclosing/m);
   assert.equal(existsSync(join(home, ".fleet")), false, "a refused root still created a directory in the repository");
+});
+
+// A directory mode does not bind root, so there is nothing to observe as uid 0.
+test("a root that cannot be created exits 2, not the refusal's exit 1, with no stack trace", { skip: process.getuid?.() === 0 }, () => {
+  const dir = repo("unwritable");
+  const home = realpathSync(tempDir("scratch-home-"));
+  chmodSync(home, 0o555);
+  try {
+    const r = run(dir, home);
+    assert.equal(r.status, 2, r.stderr);
+    assert.equal(r.stdout, "");
+    assert.match(r.stderr, /^scratch-root: could not create .*EACCES/m);
+    assert.doesNotMatch(r.stderr, /\n\s+at /);
+  } finally {
+    chmodSync(home, 0o755);
+  }
 });
 
 test("an ambient GIT_DIR cannot turn the refusal of an enclosing, unignoring repository into a pass", () => {

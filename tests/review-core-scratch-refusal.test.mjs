@@ -124,3 +124,27 @@ test("an omitted scratch with no repository to key a root on is refused before a
     process.chdir(here);
   }
 });
+
+// The default scratch is resolved by spawning git, so it comes AFTER the argument
+// guards: a missing or malformed `pr` is owed its own refusal even where no
+// repository exists to key a root on.
+for (const [what, args, expected] of [
+  ["a missing pr", { ...ARGS, pr: undefined, scratch: undefined }, /^review-pr: args\.pr and args\.worktree are required/],
+  ["a malformed pr", { ...ARGS, pr: "../x", scratch: undefined }, /^review-pr: args\.pr must be a PR number/],
+]) {
+  test(`${what} with an omitted scratch outside a repository is refused on the argument, not the scratch root`, async () => {
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "review-core-norepo-args-")));
+    const here = process.cwd();
+    process.chdir(outside);
+    try {
+      const { host, calls } = scriptedHost({ snapshot: [SNAP], "review:correctness": [review([])] });
+      await assert.rejects(runReview({ ...host, pipeline, parallel }, args), (err) => {
+        assert.match(err.message, expected, err.message);
+        return true;
+      });
+      assert.deepEqual(calls, {});
+    } finally {
+      process.chdir(here);
+    }
+  });
+}
