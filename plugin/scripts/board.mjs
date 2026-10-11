@@ -1134,19 +1134,22 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   // reading. Defaulted rather than resolved here for gather()'s own reason —
   // every caller in this file passes the instance's answer, and a second
   // resolution could name a different workspace's beat.
-  // `ticked` rides beside `beat`, same file same read, and under the same
-  // "no try/catch, no tryRun shape" rule just above — fleet-tick.mjs's own
-  // liveness key, for the busy-stretch case `beat` alone
-  // cannot see (fleet-state.mjs's assessBeat has the rule).
+  // `ticked`, `acted` and `controller` ride beside `beat`, same file same
+  // read, and under the same "no try/catch, no tryRun shape" rule just above:
+  // a run is judged from all of its own marks, and the record's `at` is what
+  // tells this run's marks from the previous run's (fleet-state.mjs's
+  // assessBeat has the rule).
   const priorState = stateFile ? readState(stateFile, NAME) : null;
   const beat = priorState?.beat ?? null;
   const ticked = priorState?.ticked ?? null;
+  const acted = priorState?.acted ?? null;
+  const controller = priorState?.controller ?? null;
   // Whose stall it is, off the controller record in the same file — judged
   // here because it reads the process table, and only when the mark is
   // stalled, so a healthy board reads none. computeBoard() words it.
   const now = Date.now();
-  const stallOwnerOf = isStalled(assessBeat({ beat, ticked, now })) ? stallOwner(priorState, NAME) : null;
-  return { ledger, issues, prs, merged, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, stallOwner: stallOwnerOf, poolOk,
+  const stallOwnerOf = isStalled(assessBeat({ beat, ticked, acted, controller, now })) ? stallOwner(priorState, NAME) : null;
+  return { ledger, issues, prs, merged, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
     poolCapped, prsCapped,
     now, interval };
 }

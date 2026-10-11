@@ -12,7 +12,9 @@
 // actual/target and a named ACTION per role — `PULL #<n> #<n>`, `DISPATCH
 // fix-pr PR#<pr>`, `DISPATCH review PR#<pr>`, `DISPATCH merge-bot`, `HOLD (…)`,
 // `REFRESHED shortlist: …` — with run-team's guards applied in code rather than
-// recalled from its table. You cannot forget what a script prints at you.
+// recalled from its table. You cannot forget what a script prints at you. A
+// drained run with nothing left in flight ends on one more: `ACTION: run over`,
+// naming the stop the controller records last.
 //
 // WHERE THE NUMBERS COME FROM — nobody states them:
 //
@@ -992,7 +994,7 @@ import { parseArgs } from "node:util";
 import { makeDie, isDigits } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { statePath, readState, writeState, assessBeat, isStalled, stallReport, stallOwner } from "./fleet-state.mjs";
+import { statePath, readState, writeState, assessBeat, isStalled, isReported, stallReport, stallOwner } from "./fleet-state.mjs";
 import { checkMainCheckout, describe } from "./main-checkout.mjs";
 
 const NAME = "fleet-tick";
@@ -1009,6 +1011,9 @@ const MERGEABLE_STATES = ["MERGEABLE", "CONFLICTING", "UNKNOWN"];
 // cap, because refusing would suppress the one announcement a dead run leaves
 // behind. So it discloses instead — the line says the count is a floor.
 const CLAIMED_LIMIT = 200;
+// The tick's last line once a draining run has nothing left in flight. The
+// tick cannot write the stop — `beat` is fleet-heartbeat's — so it names it.
+export const RUN_OVER = `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`;
 const MAX_BUFFER = 64 * 1024 * 1024;
 // Every gh spawn below is killed at this bound, so a gh that never answers is
 // a failed read on that call's own failure path — the open-PR read refuses the
@@ -1324,9 +1329,21 @@ function main() {
   // Whose stall it is comes off the controller record, judged only once
   // there is a stall to name, so a healthy tick reads no process table.
   const priorState = readState(path, NAME);
-  const verdict = assessBeat({ beat: priorState.beat, ticked: priorState.ticked, now: Date.now() });
-  if (isStalled(verdict)) {
-    console.log(stallReport(verdict, { claimed: claimed(), supply: current.scanned, owner: stallOwner(priorState, NAME) }));
+  const tickedAt = Date.now();
+  const { beat, ticked, acted, controller } = priorState;
+  const verdict = assessBeat({ beat, ticked, acted, controller, now: tickedAt });
+  // `ticked`, fleet-tick's own liveness key, written here and on its own,
+  // ahead of the gh and ledger reads that can refuse this tick: a refused
+  // tick was still invoked, and a run whose every tick refuses on a gh outage
+  // is a run working, not a dead one. Only the usage refusals above leave no
+  // mark — they never reached the state file. Judged before it is written, so
+  // the previous run's end prints on this run's first tick and on no later
+  // one.
+  writeState(path, NAME, priorState, { ticked: { at: tickedAt } });
+  if (isReported(verdict)) {
+    console.log(stallReport(verdict, isStalled(verdict)
+      ? { claimed: claimed(), supply: current.scanned, owner: stallOwner(priorState, NAME) }
+      : {}));
   }
 
   // Every read happens before anything prints: a partial tick is worse than no
@@ -1392,18 +1409,22 @@ function main() {
   const seen = stampSeen({ live: run.live, prev: prev.seen, controller: prev.controller, now });
   const stale = livenessLines({ live: run.live, seen, thresholds: liveness, now });
   const lines = [...(said === null ? [] : [said]), ...stale.map((s) => s.line), ...formatLines(rows)];
+  // The run is over once it is draining and nothing is left in flight: no
+  // open PR and no implementer still holding a claim. Printed last and read
+  // as actionable, so it never folds away: the stop it names is the run's
+  // last act, and only the controller can write it.
+  const over = run.draining !== null && prs.length === 0 && run.implLive === 0;
+  if (over) lines.push(RUN_OVER);
 
   // The back-off streak and the fold digest, written on EVERY tick: an edge
   // tick that dispatched is the clearest possible "there is work here". Digest,
   // not the lines themselves, so the file stays readable.
   const digest = createHash("sha256").update(lines.join("\n")).digest("hex");
-  const acts = actionable(rows);
-  // `ticked`, fleet-tick's own liveness key: written on every tick that gets
-  // past its refusals — a refused tick (exit 2) writes none; this tick
-  // reaching here IS the occurrence. `seen` is pruned to the live set on the
-  // same write; an empty one removes the key.
+  const acts = actionable(rows) || over;
+  // `seen` is pruned to the live set on the same write; an empty one removes
+  // the key. `ticked` was written at the top of the tick.
   writeState(path, NAME, prev, {
-    quiet: acts ? 0 : prev.quiet + 1, digest, ticked: { at: now },
+    quiet: acts ? 0 : prev.quiet + 1, digest,
     seen: Object.keys(seen).length > 0 ? seen : undefined,
   });
 

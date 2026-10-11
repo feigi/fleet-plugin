@@ -7,7 +7,7 @@
 // fleet-state.mjs owns the heartbeat's `beat` key, and the rule for reading
 // that key travels with it rather than being copied here. That module's own
 // I/O (its path probe, its file read) is never called from this file; only
-// assessBeat/isStalled/stallReport are, all of which are functions of their
+// assessBeat/isStalled/isReported/stallReport are, all of which are functions of their
 // arguments. Importing the rule is what keeps the cockpit's stall wording and
 // fleet-tick's identical — two spellings of "this run is dead" would be two
 // answers the operator has to reconcile at 3am.
@@ -24,7 +24,7 @@
 // it to its ticket number regardless; see the same paragraph below.
 // fleet-tick.mjs's I/O and main() never run here, main() being guarded on
 // argv[1].
-import { assessBeat, isStalled, stallReport, NO_OWNER } from "./fleet-state.mjs";
+import { assessBeat, isStalled, isReported, stallReport, NO_OWNER } from "./fleet-state.mjs";
 import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
 import { latestFinisherAttempts } from "./fleet-tick.mjs";
 
@@ -382,9 +382,14 @@ function splitNumbered(line) {
 // `owner` is whose stall it is, fleet-state.mjs's stallOwner() answer: it
 // reads the process table, which is I/O, so gather() judges it and this
 // function only words it. Absent is no controller named.
-function stall(beat, ticked, tickets, pool, { ledgerOk, poolOk, owner }, now) {
-  const verdict = assessBeat({ beat, ticked, now });
-  if (!isStalled(verdict)) return null;
+//
+// The previous run's recorded stop is shown too, until this run's first tick
+// lands: it is that run's end, worded as such, with nothing of this run's on
+// it.
+function stall(marks, tickets, pool, { ledgerOk, poolOk, owner }, now) {
+  const verdict = assessBeat({ ...marks, now });
+  if (!isReported(verdict)) return null;
+  if (!isStalled(verdict)) return { ...verdict, text: stallReport(verdict) };
   const claimed = ledgerOk ? tickets.filter((t) => t.column !== "POOL" && t.column !== "MERGED").length : null;
   const supply = poolOk ? pool : null;
   return { ...verdict, claimed, supply, owner, text: stallReport(verdict, { claimed, supply, owner }) };
@@ -584,9 +589,9 @@ export function computeBoard(inputs) {
     // beaten and one that is beating normally — the page hides the banner on
     // either, because a banner that fires on every healthy tick is a banner
     // the operator learns to read past.
-    // `beat`/`ticked` pass through bare, unlike `spend` two fields up: that
+    // The marks pass through bare, unlike `spend` two fields up: that
     // coalesce is load-bearing because the value is serialised into
-    // board.json as-is, while these two are only ever fed to assessBeat(),
+    // board.json as-is, while these are only ever fed to assessBeat(),
     // which already treats `undefined` and `null` identically — a `?? null`
     // here would cost a line to say nothing stall() does not already do.
     //
@@ -594,7 +599,7 @@ export function computeBoard(inputs) {
     // `ledgerState`'s own `?? "read"` default just above: every caller that
     // builds inputs by hand (every test in this suite) means a read that
     // succeeded, and only gather() — which now sets both — can say otherwise.
-    liveness: stall(inputs.beat, inputs.ticked, tickets, pool, {
+    liveness: stall({ beat: inputs.beat, ticked: inputs.ticked, acted: inputs.acted, controller: inputs.controller }, tickets, pool, {
       ledgerOk: (ledger.state ?? "read") === "read",
       poolOk: inputs.poolOk ?? true,
       owner: inputs.stallOwner ?? NO_OWNER,
