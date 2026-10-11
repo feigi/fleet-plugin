@@ -1289,8 +1289,9 @@ test(".section's fence closes only on its opener's character, at least as long, 
   ].join("\n");
   // The four-space line is indented code, not a fence, so `## B` ends the slice.
   assert.equal(Pin.of(doc, "the fixture").section("## A", "the fixture").text, doc.slice(0, doc.indexOf("## B")));
-  // ACCEPT: a longer closer, indented three spaces, with trailing whitespace.
-  assert.equal(Pin.of("## A\n```\n## no end\n   ````  \n## B\n", "the fixture").section("## A", "the fixture").text, "## A\n```\n## no end\n   ````  \n");
+  // ACCEPT: an opener indented two spaces, closed by a longer run indented
+  // three, with trailing whitespace.
+  assert.equal(Pin.of("## A\n  ```\n## no end\n   ````  \n## B\n", "the fixture").section("## A", "the fixture").text, "## A\n  ```\n## no end\n   ````  \n");
 });
 
 test(".section runs through deeper headings and ends just before the `#` of the next same-or-shallower one", () => {
@@ -1317,9 +1318,9 @@ test("Pin's .paragraph is the flat paragraph on the node's text, Pin.END and opt
   assert.equal(Pin.of("intro\n\nTHE RULE says X.\n", "the fixture").paragraph("THE RULE", "the fixture", Pin.END).text, "THE RULE says X.\n");
 });
 
-test("Pin's .bullet is the flat bullet on the node's text", () => {
-  const doc = "- one\n  more\n- two\n";
-  assert.equal(Pin.of(doc, "the fixture").bullet("- one", "- two", "the fixture").text, bullet(doc, "- one", "- two", "the fixture"));
+test("Pin's .bullet is the flat bullet on the node's text, ending the item at its next sibling", () => {
+  const doc = "- one\n- two\n- three\n";
+  assert.equal(Pin.of(doc, "the fixture").bullet("- one", "- three", "the fixture").text, "- one");
 });
 
 test("Pin's .betweenPhrases is the flat betweenPhrases on the node's text, bound included", () => {

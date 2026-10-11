@@ -899,7 +899,7 @@ function section(text, heading, what) {
         if (h && start !== -1 && end === -1 && h[2].length <= depth) end = offset + h[1].length;
         if (line === heading) {
           hits += 1;
-          if (start === -1) start = offset;
+          start = offset;
         }
       }
     }
