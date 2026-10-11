@@ -2900,7 +2900,7 @@ test("CLI: live fix-pr, finisher-pr, merge-bot and impl members carried across a
 test("CLI: a carried reviewer recorded dead with =failed frees its PR, and the next tick dispatches a review for it", () => {
   const r = runCli([], {
     ...IDLE, prs: [pr(5)], ledger: { rows: ["#5 review=member:review-pr-5"] },
-    beforeRun: rotateAs(ANCESTOR_RECORD, ["row", "5", "review=member:review-pr-5=failed"]),
+    beforeRun: rotateAs(ANCESTOR_RECORD, ["review", "5", "review=member:review-pr-5=failed"]),
   });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^reviewers +0\/6 → DISPATCH review PR#5/m);

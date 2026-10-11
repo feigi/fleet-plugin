@@ -409,6 +409,13 @@ labels, reports once and exits. A label seen after the exit starts a new Pass un
 fresh name.
 _Avoid_: wave, batch, cycle, round
 
+**PR's row**:
+The one ledger row that maps to PR M — the ticket row once `settle impl-<N>=PR#M`
+has run, else `#M`. Every token about M lives there, its `review=`/`reviewed=`
+record included (written only by `ledger.mjs review`), so the row's token order is
+write order.
+_Avoid_: `#M` row for a ticketed PR, review row
+
 **Conflict hold**:
 Any open PR the run tracks that GitHub reports CONFLICTING, or that a Pass would not
 merge because its rebase conflicted and the merge bot will not force a resolution —

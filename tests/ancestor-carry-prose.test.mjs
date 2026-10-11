@@ -43,7 +43,7 @@ test("the ancestor branch reconciles each carried token against proc://, and rec
   assert.match(s, phrase("Absent, or a state you cannot read → keep the token live and let the Member-killed row clear it: a token nothing confirms dead counts as live."));
   assert.match(s, phrase("An `impl-`, `fix-pr-`, `finisher-pr-` or `merge-bot-` member is settled: `ledger.mjs settle <name> killed`."),
     "the member form of recording a death");
-  assert.match(s, phrase("A reviewer is no member `settle` takes — `settle review-pr-<n> killed` exits 2 — so its launch is settled `=failed` where it stands: a `ledger.mjs row` rewrite of its row that turns `review=member:<name>` into `review=member:<name>=failed`"),
+  assert.match(s, phrase("A reviewer is no member `settle` takes — `settle review-pr-<n> killed` exits 2 — so its launch is settled `=failed` where it stands: a `ledger.mjs review <pr> review=member:<name>=failed` call that turns `review=member:<name>` on the PR's row into `review=member:<name>=failed`"),
     "the reviewer form of recording a death");
   assert.doesNotMatch(s, /Member-killed row's check covers/, "the ancestor branch no longer hands its members to the Member-killed check");
 });
