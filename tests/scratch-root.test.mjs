@@ -198,16 +198,16 @@ test("scratchRootRefusal() asks git with the trailing slash: a directory-only ig
   assert.equal(bare.status, 1);
 });
 
-// A fake `git` first on PATH: it answers `rev-parse --show-toplevel` with `body`
-// and hands every other invocation to the real git, so the rest of the
-// probe is untouched.
-function withFakeGit(body, fn) {
+// A fake `git` first on PATH: it answers the invocation `argv0 argv1` (by
+// default `rev-parse --show-toplevel`) with `body` and hands every other
+// invocation to the real git, so the rest of the probe is untouched.
+function withFakeGit(body, fn, [argv0, argv1] = ["rev-parse", "--show-toplevel"]) {
   const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
   assert.ok(real, "no real git on PATH to delegate to");
   const bin = realpathSync(tempDir("scratch-fakegit-"));
   writeFileSync(
     join(bin, "git"),
-    `#!/bin/sh\nif [ "$1" = rev-parse ] && [ "$2" = --show-toplevel ]; then\n${body}\nfi\nexec "${real}" "$@"\n`,
+    `#!/bin/sh\nif [ "$1" = ${argv0} ] && [ "$2" = ${argv1} ]; then\n${body}\nfi\nexec "${real}" "$@"\n`,
     { mode: 0o755 },
   );
   const was = process.env.PATH;
@@ -243,5 +243,31 @@ test("scratchRootRefusal() reads only git's own not-a-work-tree answer as one: a
   assert.match(
     withFakeGit(`exit 3`, () => scratchRootRefusal(root)),
     /could not ask git whether .* is inside a work tree: exit 3/,
+  );
+  // A timed-out git leaves status null, an error, and whatever it had already
+  // written: stderr that matches is no answer, so the error is read first.
+  assert.match(
+    withFakeGit(`echo "fatal: not a git repository" >&2\nexec sleep 5`, () => scratchRootRefusal(root, { timeoutMs: 300 })),
+    /could not ask git whether .* is inside a work tree: .*ETIMEDOUT/,
+  );
+});
+
+test("scratchRootRefusal() names why `git check-ignore` could not say the root is ignored: its own words, else how it ended", () => {
+  const dir = repo("ignore-fails");
+  const root = join(dir, "x");
+  const checkIgnore = ["check-ignore", "-q"];
+  // Control: the real answer for an unignored root, through no fake.
+  assert.match(scratchRootRefusal(root), /inside the git work tree .*ignore-fails, which does not ignore it — /);
+  assert.match(
+    withFakeGit(`echo "fatal: bad ignore file" >&2\nexit 128`, () => scratchRootRefusal(root), checkIgnore),
+    /inside the git work tree .*ignore-fails, fatal: bad ignore file — /,
+  );
+  assert.match(
+    withFakeGit(`exit 5`, () => scratchRootRefusal(root), checkIgnore),
+    /inside the git work tree .*ignore-fails, exit 5 — /,
+  );
+  assert.match(
+    withFakeGit(`kill -9 $$`, () => scratchRootRefusal(root), checkIgnore),
+    /inside the git work tree .*ignore-fails, killed by SIGKILL — /,
   );
 });

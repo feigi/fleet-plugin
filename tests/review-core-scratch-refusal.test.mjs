@@ -14,11 +14,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inspect } from "node:util";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runReview } from "../plugin/scripts/review-core.mjs";
 import { scratchRoot } from "../plugin/scripts/fleet-dir.mjs";
+import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { ARGS, SNAP, pipeline, parallel, review, scriptedHost } from "./support/review-host-fixture.mjs";
 
 const PR = 42;
@@ -148,3 +150,27 @@ for (const [what, args, expected] of [
     }
   });
 }
+
+// A given scratch is held to the omitted one's rule: inside a git work tree that
+// does not ignore it, it is refused before any dispatch; where the work tree
+// ignores it, it runs. The same scratch with nothing to ignore it is the control
+// that the second case is the ignore rule's doing.
+test("an explicit scratch inside a work tree that does not ignore it is refused before any dispatch", async () => {
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), "review-core-explicit-")));
+  assert.equal(spawnSync("git", ["init", "-q", repo], { env: gitEnv() }).status, 0);
+  const { run, calls } = runWith(join(repo, "scr"));
+  await assert.rejects(run, (err) => {
+    assert.match(err.message, /^review-pr: args\.scratch: scratch root .* is inside the git work tree .*, which does not ignore it/, err.message);
+    return true;
+  });
+  assert.deepEqual(calls, {}, `a refused scratch still dispatched: ${JSON.stringify(calls)}`);
+});
+
+test("an explicit scratch inside a work tree that ignores it runs the review", async () => {
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), "review-core-explicit-ignored-")));
+  assert.equal(spawnSync("git", ["init", "-q", repo], { env: gitEnv() }).status, 0);
+  writeFileSync(join(repo, ".gitignore"), "scr/\n");
+  const { run, calls } = runWith(join(repo, "scr"));
+  await run;
+  assert.equal(calls["review:correctness"], 1, "an ignored scratch must reach its specialist");
+});

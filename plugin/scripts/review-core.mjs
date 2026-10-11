@@ -26,10 +26,12 @@
 // declaring its own copy. node:path's `posix`, to normalise a
 // scratch path before `runnerScratchRefusal` reads its last component, and
 // its `isAbsolute`, to refuse a scratch that is not an absolute path.
-// fleet-dir.mjs's scratchRoot(), scratchRootRefusal() and FleetDirUnresolvable,
-// for the one caller that passes no `scratch` at all — a standalone review
-// with no dispatcher — which takes the fleet's own scratch root for this
-// repository.
+// fleet-dir.mjs's scratchRoot(), scratchRootRefusal() and FleetDirUnresolvable.
+// scratchRoot() and FleetDirUnresolvable serve the one caller that passes no
+// `scratch` at all — a standalone review with no dispatcher — which takes the
+// fleet's own scratch root for this repository; scratchRootRefusal() vets every
+// scratch, given or defaulted, against landing in a work tree that does not
+// ignore it.
 //
 // `.mjs`, not `.js`: this file was once `review-core.js`, and
 // nothing that ships declares a `type`, so Node below 20.19.0/22.7.0 —
@@ -817,6 +819,15 @@ export async function runReview(host, args) {
   // suffix check so a relative `pr<N>` still hears that it is partitioned.
   if (typeof scratch !== "string" || !isAbsolute(scratch)) {
     throw new Error(`review-pr: args.scratch must be an absolute path, got ${JSON.stringify(scratch)}`);
+  }
+
+  // A given scratch is held to the same rule as the default: the controller
+  // hands over the path scratch-root.mjs vetted, but nothing on this side can
+  // tell that from a path inside a tracked tree, and `git add -A` there stages
+  // the run root. The default was already asked in standaloneScratchRoot().
+  if (A.scratch !== undefined) {
+    const rootRefusal = scratchRootRefusal(scratch);
+    if (rootRefusal !== null) throw new Error(`review-pr: args.scratch: ${rootRefusal}`);
   }
 
   const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS);
