@@ -4161,8 +4161,9 @@ live count from it, so nobody states one. Write neither by hand:
   each PR from then on — but only when `#N`'s row named no PR before this
   write (a second `PR#` on it would misattribute the fold, or bury `#N`'s own
   fresher `review=` state under an older one) and no implementer claims `#M`'s
-  row as its own. `settle impl-N=PR#M` refuses a `PR#M` another row already
-  maps to, judged after the fold — a PR has one row, the PR's row.
+  row as its own. `settle impl-N=PR#M` refuses a settle after which a PR maps
+  to more than one row when it did not before, judged after the fold — a PR
+  has one row, the PR's row; a split already on disk is carried.
 - **`ledger.mjs review <pr> <token>…`** — the only writer of `review=` and
   `reviewed=` (below): appends each to the PR's row — the ticket row once
   `settle impl-<N>=PR#M` has run, else `#M`, created when neither exists —

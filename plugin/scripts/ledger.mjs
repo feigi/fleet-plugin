@@ -2048,14 +2048,9 @@ function runSettle() {
     return;
   }
 
-  // Capture whether the row this settle is about to write to already
-  // named a PR, before the rewrite below touches it. The fold further down
-  // must refuse to run once a row already has PR-specific content on it —
-  // see the fold's own comment for why.
-  const targetBefore = liveRows[0] ?? memberRowIndex(parsed);
-  const priorPr = targetBefore === -1 ? null : rowPr(data.rows[targetBefore]);
-  // The rows before any write below, for the one-row-per-PR check after the
-  // fold.
+  // The rows before any write below: the fold's guard reads the row this
+  // settle writes to as it stood, and the one-row-per-PR check after the
+  // fold compares against them.
   const before = [...data.rows];
   // A live token `row` wrote is settled like one `dispatch` wrote; `##
   // Dispatched` only records what `dispatch` did.
@@ -2093,7 +2088,7 @@ function runSettle() {
   // an unrelated ticket's premise on a mistyped PR number, and folding it
   // would delete state a settled member can never restore.
   const prNum = outcome.startsWith("PR#") ? Number(outcome.slice("PR#".length)) : null;
-  const j = prNum === null || i === -1 || priorPr !== null ? -1
+  const j = prNum === null || i === -1 || rowPr(before[i]) !== null ? -1
     : data.rows.findIndex((r) => rowKey(r) === `#${prNum}` && !memberTokens(r).some((t) => t.family === "impl") && premisesOf(r) === null);
   if (j !== -1) {
     const tail = data.rows[j].slice(`#${prNum}`.length).trim();
