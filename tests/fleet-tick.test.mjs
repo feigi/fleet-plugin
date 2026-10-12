@@ -15,7 +15,7 @@ import { reconcile, formatLines, actionable, deriveRun, parseShortlist, unclaime
 const state = (over = {}) => ({
   implCap: 2, reviewerCap: 6, maxReviews: 6,
   implLive: 0, draining: null, tierMismatch: [], tierUnchecked: [], implNames: [],
-  heads: [], supply: 0, shortlistStatus: "ok", refresh: null,
+  heads: [], supply: 0, shortlistStatus: "ok", refresh: null, dropped: [],
   reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [], unlabelled: [], conflicts: [], conflictEscalate: [],
   mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeConflictHeld: 0,
   mainCheckout: { state: "clean" },
@@ -155,6 +155,30 @@ test("implementers: the detail carries the numbers the branch turned on", () => 
   assert.match(r.detail, /supply=57/);
   assert.match(r.detail, /unreviewed=0/);
   assert.match(row(state({ supply: null, shortlistStatus: "missing" }), "implementers").detail, /supply=\? unreviewed=0 shortlist=missing$/);
+});
+
+// The rows candidates.mjs's to-spec filter removed never reach `supply`, so
+// without this an all-specs queue reads `supply=0` and `SUGGEST /triage` —
+// "no work" — while a ready-for-agent ticket sits there.
+const TO_SPEC = "to-spec: User Stories heading";
+test("implementers: every to-spec drop is named by number and reason, whatever the action, and never makes the row actionable", () => {
+  const all = row(state({ dropped: [{ n: 2151, reason: TO_SPEC }] }), "implementers");
+  assert.equal(all.action, "SUGGEST /triage, hold idle");
+  assert.equal(all.acts, false);
+  assert.equal(all.detail, `unclaimed=0 supply=0 unreviewed=0 specs-dropped=#2151 (${TO_SPEC})`);
+  // A partial drop: survivors are Pulled and the drops still named.
+  const partial = row(state({ heads: [7], supply: 1, dropped: [{ n: 6, reason: TO_SPEC }, { n: 9, reason: TO_SPEC }] }), "implementers");
+  assert.equal(partial.action, "PULL #7");
+  assert.match(partial.detail, new RegExp(`^unclaimed=1 supply=1 unreviewed=0 specs-dropped=#6 #9 \\(${TO_SPEC}\\)$`));
+  // One clause per reason, in the order the reasons first appear.
+  const mixed = row(state({ dropped: [{ n: 3, reason: "b" }, { n: 4, reason: "a" }, { n: 5, reason: "b" }] }), "implementers");
+  assert.match(mixed.detail, /specs-dropped=#3 #5 \(b\), #4 \(a\)$/);
+});
+
+test("implementers: a genuinely empty queue carries no specs-dropped text", () => {
+  const r = row(state(), "implementers");
+  assert.equal(r.action, "SUGGEST /triage, hold idle");
+  assert.equal(r.detail, "unclaimed=0 supply=0 unreviewed=0");
 });
 
 // ---------------------------------------------------------------------------
@@ -1458,11 +1482,16 @@ test("unclaimed: a still-open behind-pr exclusion blocks its ticket even if it a
 });
 
 test("parseShortlist: shortlist.mjs's payload reads; anything else is unparsable, never a refusal", () => {
+  assert.deepEqual(parseShortlist('{"scanned":3,"shortlist":[{"n":7,"t":"a"}],"dropped":[{"n":5,"reason":"to-spec: x"}]}'),
+    { status: "ok", scanned: 3, entries: [{ n: 7, t: "a" }], dropped: [{ n: 5, reason: "to-spec: x" }] });
+  // A file written before `dropped` existed reads as no drops, never as an error.
   assert.deepEqual(parseShortlist('{"scanned":3,"shortlist":[{"n":7,"t":"a"}]}'),
-    { status: "ok", scanned: 3, entries: [{ n: 7, t: "a" }] });
+    { status: "ok", scanned: 3, entries: [{ n: 7, t: "a" }], dropped: [] });
   for (const bad of ["", "{", "[]", '{"shortlist":[]}', '{"scanned":1,"shortlist":{}}', '{"scanned":1,"shortlist":[{"n":"7","t":"a"}]}',
-    '{"scanned":1,"shortlist":[{"n":0,"t":"a"}]}', '{"scanned":1,"shortlist":[{"n":-1,"t":"a"}]}']) {
-    assert.deepEqual(parseShortlist(bad), { status: "unparsable", scanned: null, entries: [] }, bad);
+    '{"scanned":1,"shortlist":[{"n":0,"t":"a"}]}', '{"scanned":1,"shortlist":[{"n":-1,"t":"a"}]}',
+    '{"scanned":1,"shortlist":[],"dropped":{}}', '{"scanned":1,"shortlist":[],"dropped":[{"n":0,"reason":"x"}]}',
+    '{"scanned":1,"shortlist":[],"dropped":[{"n":5}]}', '{"scanned":1,"shortlist":[],"dropped":[null]}']) {
+    assert.deepEqual(parseShortlist(bad), { status: "unparsable", scanned: null, entries: [], dropped: [] }, bad);
   }
 });
 
@@ -1540,7 +1569,8 @@ test("CLI: every synchronous spawn in this file goes through spawnBounded (#2320
 // `pr list` for the open PRs, `issue view` for a behind-issue premise's state,
 // `pr view` for the state of a PR an in-flight review names that is no longer
 // on the open list, `issue list --label in-progress` for the stall report's
-// claimed count. `GH_HANG` names one of those (`pr list`, `issue view`, …) to
+// claimed count, and `issue list --search` for candidates.mjs's query when a
+// case runs the real shortlist.mjs. `GH_HANG` names one of those (`pr list`, `issue view`, …) to
 // stall for `GH_HANG_S` seconds before answering as usual, so a tick that waits
 // a hang out still reads a normal reply. The sleep holds none of the stub's
 // pipes: killed at the tick's bound, the stub leaves no child keeping the
@@ -1570,11 +1600,12 @@ case "$1 $2" in
   "issue list")
     [ -n "$CLAIMED_FAIL" ] && { echo "boom" >&2; exit 1; }
     expr=""
+    fixture="$FIXTURE_CLAIMED"
     while [ $# -gt 0 ]; do
-      case "$1" in --jq) shift; expr="$1" ;; esac
+      case "$1" in --jq) shift; expr="$1" ;; --search) fixture="$FIXTURE_CANDIDATES" ;; esac
       shift
     done
-    exec jq -c "$expr" "$FIXTURE_CLAIMED" ;;
+    exec jq -c "$expr" "$fixture" ;;
   *) echo "unexpected gh $*" >&2; exit 1 ;;
 esac
 `;
@@ -1599,7 +1630,17 @@ const ledgerText = ({ rows = [], dispatched = [], drain = null } = {}) => {
   return `# Fleet run ledger\n\n## Rows\n\n${list(rows)}\n\n## Dispatched\n\n${list(dispatched)}\n\n## Filed\n\n\n\n## Ruled\n\n`
     + (drain === null ? "" : `\n\n## Drain\n\n- ${drain}`) + "\n";
 };
-const shortlistText = (ns, scanned = ns.length) => JSON.stringify({ scanned, shortlist: ns.map((n) => ({ n, t: `t${n}` })) });
+const shortlistText = (ns, scanned = ns.length, dropped) =>
+  JSON.stringify({ scanned, shortlist: ns.map((n) => ({ n, t: `t${n}` })), ...(dropped === undefined ? {} : { dropped }) });
+
+// For a case that runs the REAL shortlist.mjs (`candidates` given): the
+// scripts it spawns, and an in-flight check that answers every ticket free.
+const REAL_SHORTLIST = ["shortlist.mjs", "candidates.mjs"].map(
+  (m) => [m, fileURLToPath(new URL(`../plugin/scripts/${m}`, import.meta.url))],
+);
+const INFLIGHT_FREE = `#!/bin/sh
+printf '{"issue":%s,"taken":false,"hits":[],"unknown":[]}\\n' "$1"
+`;
 
 // `baseline` records the run's main-checkout baseline the way Phase 0 does,
 // after `beforeRun`; `afterBaseline` is a stray write landing mid-run. The
@@ -1607,7 +1648,7 @@ const shortlistText = (ns, scanned = ns.length) => JSON.stringify({ scanned, sho
 // through info/exclude so no tracked file says so.
 function runCli(args = [], {
   prs = [], ledger, shortlist, refresh = shortlistText([]), refreshFail = false,
-  issueStates = {}, prStates = {}, claimed = [], env: extraEnv = {}, defaultState = false, keep = false, beforeRun = () => {},
+  issueStates = {}, prStates = {}, claimed = [], candidates, env: extraEnv = {}, defaultState = false, keep = false, beforeRun = () => {},
   baseline = true, afterBaseline = () => {},
 } = {}) {
   // On macOS tmpdir() is /var -> /private/var; resolving it up front makes
@@ -1634,7 +1675,11 @@ function runCli(args = [], {
     const script = join(bin, "fleet-tick.mjs");
     writeFileSync(script, readFileSync(SCRIPT));
     for (const [name, path] of SIBLING_MODULES) writeFileSync(join(bin, name), readFileSync(path));
-    writeFileSync(join(bin, "shortlist.mjs"), SHORTLIST_STUB);
+    if (candidates === undefined) writeFileSync(join(bin, "shortlist.mjs"), SHORTLIST_STUB);
+    else {
+      for (const [name, path] of REAL_SHORTLIST) writeFileSync(join(bin, name), readFileSync(path));
+      writeFileSync(join(bin, "inflight.sh"), INFLIGHT_FREE);
+    }
     const fx = (name, content) => { const p = join(dir, name); writeFileSync(p, content); return p; };
     if (ledger !== undefined) writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText(ledger));
     if (shortlist !== undefined) writeFileSync(join(repo, ".fleet", "shortlist.json"), shortlist);
@@ -1658,6 +1703,7 @@ function runCli(args = [], {
         ...process.env, PATH: `${bin}:${process.env.PATH}`,
         FIXTURE_PRS: fx("prs.json", JSON.stringify(prs)),
         FIXTURE_CLAIMED: fx("claimed.json", JSON.stringify(claimed)),
+        FIXTURE_CANDIDATES: fx("candidates.json", JSON.stringify(candidates ?? [])),
         FIXTURE_ISSUE_STATES: fx("issue-states.json", JSON.stringify(issueStates)),
         FIXTURE_PR_STATES: fx("pr-states.json", JSON.stringify(prStates)),
         FIXTURE_REFRESH: fx("refresh.json", refresh),
@@ -1747,6 +1793,62 @@ test("CLI: an unparsable shortlist is depth 0 plus a refresh, never a refusal", 
   assert.equal(r.refreshed, 1);
   assert.match(r.stdout, /^implementers 0\/2 → SUGGEST \/triage, hold idle {3}\(unclaimed=0 supply=0 unreviewed=0 shortlist=unparsable\)/m);
   assert.match(r.stdout, /REFRESHED shortlist: 0 entries; 0 lifted {3}\(shortlist unparsable; unchanged\)/);
+});
+
+// candidates.mjs's to-spec drops, from the gh row to the printed tick. The
+// REAL shortlist.mjs and candidates.mjs run here against a gh that returns one
+// ready-for-agent row carrying to-spec's `## User Stories` heading: before the
+// drops were carried, this exact input printed `supply=0` and `SUGGEST
+// /triage` with nothing naming the ticket.
+const specIssue = (number) => ({ number, title: `t${number}`, labels: [{ name: "ready-for-agent" }], body: "## User Stories\n\n1. As a user, I want…\n" });
+const plainIssue = (number) => ({ number, title: `t${number}`, labels: [{ name: "ready-for-agent" }], body: "## What to build\n\nx\n" });
+
+test("CLI: one spec-shaped ready-for-agent row through the real shortlist.mjs is named on the tick with its number and reason", () => {
+  const r = runCli([], { candidates: [specIssue(2151)] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^implementers 0\/2 → SUGGEST \/triage, hold idle {3}\(unclaimed=0 supply=0 unreviewed=0 shortlist=missing specs-dropped=#2151 \(to-spec: User Stories heading\)\)$/m);
+  assert.match(r.stdout, /^shortlist {4}→ REFRESHED shortlist: 0 entries; 0 lifted/m);
+});
+
+test("CLI: a partial drop through the real shortlist.mjs is named beside the PULL it leaves", () => {
+  const r = runCli([], { candidates: [specIssue(2151), plainIssue(2160)] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^implementers 0\/2 → PULL #2160 {3}\(unclaimed=1 supply=1 unreviewed=0 shortlist=missing specs-dropped=#2151 \(to-spec: User Stories heading\)\)$/m);
+});
+
+test("CLI: a tick that does not refresh still names the drops, read back from shortlist.json", () => {
+  const dropped = [{ n: 2151, reason: "to-spec: User Stories heading" }];
+  // Two unclaimed at cap 2: nothing short, so no refresh runs this tick.
+  const r = runCli([], { shortlist: shortlistText([7, 8], 2, dropped) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 0);
+  assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 {3}\(unclaimed=2 supply=2 unreviewed=0 specs-dropped=#2151 \(to-spec: User Stories heading\)\)$/m);
+});
+
+test("CLI: a refresh's drops replace the ones the file held before it", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([], 0, [{ n: 1, reason: "to-spec: User Stories heading" }]),
+    refresh: shortlistText([], 0, [{ n: 2, reason: "to-spec: User Stories heading" }]),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 1);
+  assert.match(r.stdout, /specs-dropped=#2 \(to-spec: User Stories heading\)\)$/m);
+  assert.doesNotMatch(r.stdout, /#1 \(/);
+});
+
+test("CLI: a shortlist.json written before `dropped` existed still reads ok, with no drops named", () => {
+  const r = runCli([], { shortlist: shortlistText([7, 8]) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 0);
+  assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 {3}\(unclaimed=2 supply=2 unreviewed=0\)$/m);
+  assert.doesNotMatch(r.stdout, /specs-dropped|shortlist=/);
+});
+
+test("CLI: a genuinely empty queue prints no specs-dropped text", () => {
+  const r = runCli([], { shortlist: shortlistText([], 0, []), refresh: shortlistText([], 0, []) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^implementers 0\/2 → SUGGEST \/triage, hold idle {3}\(unclaimed=0 supply=0 unreviewed=0\)$/m);
+  assert.doesNotMatch(r.stdout, /specs-dropped/);
 });
 
 test("CLI: a permission-denied shortlist reads as unreadable, not unparsable — the fault is the filesystem's, not the JSON's", () => {
@@ -2470,6 +2572,24 @@ test("CLI: --fold-unchanged folds a repeated idle tick to one line", (t) => {
   assert.ok(first.stdout.trim().split("\n").length >= 3);
   const second = runCli(["--fold-unchanged", "--state", path], IDLE);
   assert.deepEqual(second.stdout.trim().split("\n"), ["fleet-tick: unchanged, nothing to act on (quiet=2) — full rows on the next change"]);
+});
+
+// The to-spec drops are advice, like a stale member: an idle tick that names
+// them still folds and still counts toward `quiet`, so the heartbeat backs off
+// as it would without them — and the folded line keeps naming them.
+test("CLI: --fold-unchanged folds an idle tick with to-spec drops and the folded line still names them", (t) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-fold-drop-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "heartbeat.json");
+  const text = shortlistText([], 0, [{ n: 2151, reason: "to-spec: User Stories heading" }]);
+  const fixture = { shortlist: text, refresh: text };
+  const first = runCli(["--fold-unchanged", "--state", path], fixture);
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, /specs-dropped=#2151 \(to-spec: User Stories heading\)\)$/m);
+  const second = runCli(["--fold-unchanged", "--state", path], fixture);
+  assert.deepEqual(second.stdout.trim().split("\n"), [
+    "fleet-tick: unchanged, nothing to act on (quiet=2); specs-dropped=#2151 (to-spec: User Stories heading) persists — full rows on the next change",
+  ]);
 });
 
 test("CLI: --fold-unchanged never folds an actionable tick, even an identical one", (t) => {
