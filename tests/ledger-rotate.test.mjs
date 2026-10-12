@@ -819,3 +819,48 @@ test("an ancestor rotate whose write fails leaves the ledger where it was, and a
   assert.deepEqual(JSON.parse(again.stdout).carried, { rows: live, dispatched });
   assert.deepEqual(read(f).dispatched, dispatched);
 });
+
+test("an ancestor rotate carries a bare live dispatched entry whose malformed twin would retire it", (t) => {
+  // carryOf filters out malformed entries (with errors) from the dispatched section.
+  // A live entry (impl-14) that doesn't have an outcome stays in carried.dispatched.
+  // It stays out of ## Retired only because the bare impl-14 entry is passed on in carried.dispatched.
+  const f = fixture(t, {
+    ledger: ledgerOf({
+      rows: ["#12 impl-12"],
+      dispatched: ["impl-12", "impl-14", "impl-14=bogus"],
+    }),
+    controller: ANCESTOR,
+  });
+  const r = f.cli(["rotate"]);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  // carried dispatched includes valid entries (malformed impl-14=bogus is filtered out)
+  assert.deepEqual(out.carried.dispatched, ["impl-12", "impl-14"]);
+  // retired does not include impl-14 because it's in the carried dispatched
+  assert(!out.retired.includes("impl-14"), "impl-14 is kept live by its entry in carried.dispatched");
+  assert.deepEqual(read(f).dispatched, ["impl-12", "impl-14"]);
+  assert(!read(f).retired.includes("impl-14"));
+});
+
+test("an ancestor rotate retires a name whose token has an empty outcome, in ## Dispatched and on a row alike, and reports both lines skipped", (t) => {
+  // `impl-5=` and `impl-6=` parse with outcome '' and an error, so their lines
+  // are skipped; the names were used this session, so each retires. Each name
+  // sits in one place only, so neither retire loop can mask the other.
+  const dispatchedLine = "impl-5=";
+  const rowLine = "#6 impl-6=";
+  const f = fixture(t, {
+    ledger: ledgerOf({
+      rows: [rowLine, "#7 impl-7"],
+      dispatched: [dispatchedLine, "impl-7"],
+    }),
+    controller: ANCESTOR,
+  });
+  const r = f.cli(["rotate"]);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(out.skipped, [rowLine, dispatchedLine]);
+  // impl-7 is live and bare, so it is carried and not retired.
+  assert.deepEqual(out.retired, ["impl-5", "impl-6"]);
+  assert.deepEqual(read(f).retired, ["impl-5", "impl-6"]);
+  assert.match(readFileSync(f.file, "utf8"), /\n## Retired\n\n- impl-5\n- impl-6\n/);
+});
