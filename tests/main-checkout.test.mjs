@@ -714,13 +714,17 @@ test("a baseline commit an amend and gc pruned is its own unknown: examine HEAD 
   git(dir, "commit", "-q", "--amend", "-m", "amended");
   git(dir, "reflog", "expire", "--expire=now", "--all");
   git(dir, "gc", "-q", "--prune=now");
+  // The check answers before it compares the tree, so this is never reported.
+  writeFileSync(join(dir, "STRAY.txt"), "mine\n");
   const c = check(dir);
   assert.equal(c.state, "unknown");
+  assert.equal(c.changed, undefined, "the stray path is not named");
   assert.equal(c.cause, "missing");
   assert.match(c.why, new RegExp(`^baseline commit ${recorded.slice(0, 7)} is missing from this repository; HEAD is refs/heads/main@[0-9a-f]{7}$`));
   const said = describe(c, []);
   assert.match(said, new RegExp(`^MAIN-CHECKOUT-UNKNOWN baseline commit ${recorded.slice(0, 7)} is missing from this repository`));
   assert.match(said, /examine HEAD against origin\/main FIRST/);
+  assert.match(said, /resolve any stray paths/);
   assert.match(said, /re-record with ~\/\.fleet\/bin\/fleet-run main-checkout\.mjs --record \(it overwrites, it does not compare\)/);
   assert.doesNotMatch(said, /NEVER re-baseline/);
   const cli = spawnSync(process.execPath, [SCRIPT, "--check"], { cwd: dir, encoding: "utf8" });
@@ -728,6 +732,34 @@ test("a baseline commit an amend and gc pruned is its own unknown: examine HEAD 
   assert.equal(cli.stdout, `${describe(c)}\n`);
   record(dir);
   assert.equal(check(dir).state, "clean");
+});
+
+test("a baseline commit whose cat-file read fails for another reason than absence stays could-not-look", (t) => {
+  const dir = repo(t);
+  writeFileSync(join(dir, "tracked.txt"), "local\n");
+  git(dir, "commit", "-qam", "local");
+  record(dir);
+  git(dir, "commit", "-q", "--amend", "-m", "amended");
+  git(dir, "reflog", "expire", "--expire=now", "--all");
+  git(dir, "gc", "-q", "--prune=now");
+  // Control: real git answers exit 1 for the absent commit.
+  assert.equal(check(dir).cause, "missing");
+  // A git first on PATH that fails `cat-file` with 128, as a broken one would,
+  // and runs everything else as the real git.
+  const shim = join(dir, ".fleet", "shim");
+  mkdirSync(shim, { recursive: true });
+  writeFileSync(join(shim, "git"), [
+    "#!/bin/sh",
+    'if [ "$1" = cat-file ]; then echo "fatal: injected" >&2; exit 128; fi',
+    'PATH="$REAL_PATH" exec git "$@"',
+    "",
+  ].join("\n"));
+  chmodSync(join(shim, "git"), 0o755);
+  const env = { ...process.env, PATH: `${shim}:${process.env.PATH}`, REAL_PATH: process.env.PATH };
+  const c = check(dir, env);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "read");
+  assert.match(c.why, /^git merge-base --is-ancestor exited 128/);
 });
 
 test("a baseline commit present but corrupt stays could-not-look: only an absent object is the missing cause", (t) => {

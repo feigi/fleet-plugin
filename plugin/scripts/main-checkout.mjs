@@ -89,8 +89,11 @@
 // What failed is the baseline, not the environment, so "fix the failure and
 // never re-baseline" would forbid the one remedy: the advice is to examine
 // HEAD against `origin/main` FIRST — the move off that commit is unexamined —
-// and only then re-record. It is still `unknown`, never `dirty` or `clean`:
-// the read that would have judged the move could not be made.
+// and only then re-record. The check returns before it compares paths, so the
+// advice also says to resolve any stray paths. On the baseline's own branch it
+// is still `unknown`, never `dirty` or `clean`: the read that would have
+// judged the move could not be made. A different branch reads `dirty` before
+// any ancestry read.
 //
 // ROOT. The main checkout is the parent of `git rev-parse --git-common-dir`
 // (git-env.mjs's `workspaceDirFromGitCommonDir`, as fleet-tick.mjs resolves
@@ -382,13 +385,13 @@ export function checkMainCheckout({ cwd = process.cwd(), env = process.env } = {
   const path = baselinePath(root);
   const base = readBaseline(path);
   if (base.status === "absent") return { state: "absent", root, baseline: path };
-  if (base.status === "unreadable") return { state: "unknown", cause: "baseline", root, baseline: path, why: base.why };
-  if (base.status === "outdated") return { state: "unknown", cause: "outdated", root, baseline: path, why: base.why };
-  const unknown = (why) => ({ state: "unknown", cause: "read", root, baseline: path, why });
+  const unknown = (why, cause = "read") => ({ state: "unknown", cause, root, baseline: path, why });
+  if (base.status === "unreadable") return unknown(base.why, "baseline");
+  if (base.status === "outdated") return unknown(base.why, "outdated");
   const now = readState(root, env);
   if (!now.ok) return unknown(now.why);
   const move = headMove(root, env, base.head, now.head);
-  if (!move.ok) return move.missing ? { ...unknown(move.why), cause: "missing" } : unknown(move.why);
+  if (!move.ok) return unknown(move.why, move.missing ? "missing" : "read");
   const changed = changedPaths(base.entries, now.entries);
   if (move.change !== null) changed.unshift(move.change);
   if (!changed.length) return { state: "clean", root, baseline: path };
@@ -425,7 +428,7 @@ export function describe(check, live = null) {
       }
       if (check.cause === "missing") {
         return `MAIN-CHECKOUT-UNKNOWN ${check.why}${members}`
-          + " — dispatch held: examine HEAD against origin/main FIRST, since a missing baseline commit means HEAD moved off it by an amend or reset nobody has looked at;"
+          + " — dispatch held: examine HEAD against origin/main FIRST, since a missing baseline commit means HEAD moved off it by an amend or reset nobody has looked at, and resolve any stray paths;"
           + ` then re-record with ${RECORD_COMMAND} (it overwrites, it does not compare)`;
       }
       return check.cause === "baseline"

@@ -1949,7 +1949,8 @@ depth** guard table applied in code. Act on each line as it reads:
   old-format baseline that says nothing of HEAD; and `baseline commit <oid> is
   missing from this repository`, which an amend or reset followed by gc
   leaves — examine HEAD against `origin/main` FIRST, since HEAD moved off
-  that commit and nobody has looked at the move, and only then re-record.
+  that commit and nobody has looked at the move, and resolve any stray paths,
+  which the line does not name; only then re-record.
 - `MAIN-CHECKOUT-NO-BASELINE …` with `HOLD (main checkout no baseline)` — no
   baseline was recorded. Yours to fix: run Phase 0's `--record`. A baseline
   that vanished mid-run is not a fresh run — report it to the maintainer
