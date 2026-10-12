@@ -384,6 +384,6 @@ test("no file outside prose-pin.mjs defines a second between()-shaped slicer", (
   assert.deepEqual(
     offenders,
     [],
-    `reintroduced a between()-shaped slicer outside prose-pin.mjs — import { between } instead:\n${offenders.join("\n")}`,
+    `reintroduced a between()-shaped slicer outside prose-pin.mjs — use Pin's .between() instead:\n${offenders.join("\n")}`,
   );
 });
