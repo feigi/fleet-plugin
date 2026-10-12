@@ -62,14 +62,15 @@ files strip a quote gutter with their own regex and join. These regexes are
 defined in:
 `refuter-scratch-prose.test.mjs` stripQuoteGutter function,
 `injection-control-prose.test.mjs` stripQuoteGutter const,
-`dispatch-block-golden-prose.test.mjs` norm function,
+`dispatch-block-golden-prose.test.mjs` unquoted const (the halt-cause block's
+mutant),
 `dispatch-block-pins-prose.test.mjs` flatten function,
 `immutable-body-claim-prose.test.mjs` flatten function,
-`tracker-block-copy-prose.test.mjs` flatten function (two sites),
+`tracker-block-copy-prose.test.mjs` block function and flat function,
 `reporter-output-rule-prose.test.mjs` norm function,
 `stash-prohibition-prose.test.mjs` flatten function,
 `fix-applier-correction-rules-prose.test.mjs` flatten function,
-`kill-rule-prose.test.mjs` flat function.
+`kill-rule-prose.test.mjs` suggestionRefuter function.
 None matches the module's `/^\s*>+\s?/` joined with `\n`. Swapping the module's version into
 the two named `stripQuoteGutter` copies turns 2 tests red in `refuter-scratch`
 and 3 in `injection-control`, because nested `> >` quotes strip differently.
