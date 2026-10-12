@@ -511,6 +511,9 @@ function refuseIfCapped(rows, description) {
   }
 }
 
+// The `reason` a `--with-dropped` caller receives for a to-spec drop.
+const SPEC_REASON = "to-spec: User Stories heading";
+
 // `## User Stories` is to-spec's signature — mandatory in its template, absent
 // from every ticket template. to-spec stamps a whole spec `ready-for-agent`
 // with "no need for additional triage", so it arrives looking admissible; it is
@@ -572,8 +575,6 @@ function refuseIfCapped(rows, description) {
 // pass 1 is dropped again in pass 2. Unattributed, that reads as the same spec
 // counted twice; named, a reader can tell "2 drops, 1 spec, seen both passes"
 // from "2 drops, 2 specs" at a glance. Deliberately not deduplicated.
-// The `reason` a `--with-dropped` caller receives for a to-spec drop.
-const SPEC_REASON = "to-spec: User Stories heading";
 function dropSpecs(rows, pass) {
   const kept = [];
   const dropped = [];

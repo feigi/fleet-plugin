@@ -386,6 +386,30 @@ test("a failed scan, an unreadable ledger or a stray argument refuses at exit 2 
   assert.equal(readFileSync(f.shortlistFile, "utf8"), before);
 });
 
+// candidates.mjs's `dropped` is carried into the file as the only record of
+// what the filter removed, so a malformed one is a scan that did not answer:
+// the refusal leaves the previous file whole rather than writing drops that
+// name nothing.
+test("a candidates.mjs answer whose dropped is not a list of {n, reason} refuses at exit 2 and leaves the file untouched", (t) => {
+  const f = fixture(t);
+  mkdirSync(join(f.repo, ".fleet"));
+  const before = JSON.stringify({ scanned: 1, shortlist: [{ n: 1701, t: "t1701" }], dropped: [] });
+  writeFileSync(f.shortlistFile, before);
+  const stub = join(f.root, "scripts", "candidates.mjs");
+  const cases = [
+    ["dropped is not an array", { rows: [], dropped: "x" }, /candidates\.mjs did not return \{rows, dropped\}/],
+    ["an entry's n is not an integer", { rows: [], dropped: [{ n: "1", reason: "r" }] }, /dropped entry 0 is not \{n, reason\}/],
+    ["an entry has no reason", { rows: [], dropped: [{ n: 1 }] }, /dropped entry 0 is not \{n, reason\}/],
+  ];
+  for (const [name, answer, message] of cases) {
+    writeFileSync(stub, `process.stdout.write(${JSON.stringify(JSON.stringify(answer))});\n`);
+    const r = f.run({ issues: [issue(1701)] });
+    assert.equal(r.status, 2, `${name}: ${r.stderr}`);
+    assert.match(r.stderr, message, name);
+    assert.equal(readFileSync(f.shortlistFile, "utf8"), before, name);
+  }
+});
+
 // The refusal names what failed: an operator watching a stalled run has to be
 // able to tell "outside a repository" from "no candidates yet", and the reason
 // is fleet-dir.mjs's message, which carries git's own.
