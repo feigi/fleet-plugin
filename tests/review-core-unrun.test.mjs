@@ -571,7 +571,7 @@ test("run-team claims a suite RAN from a key's absence from dimensionsUnrun, nev
 // commented-out text; here the comment IS the subject, and CODE has it stripped
 // to nothing, which would make this pin unsatisfiable rather than vacuous.
 //
-// `stripSlashGutter` first, and it buys BOTH halves: the clause wraps
+// `.stripGutter("//")` first, and it buys BOTH halves: the clause wraps
 // mid-sentence at a `// ` that `phrase`'s `\s+` cannot span, and the block's
 // bare `//` separator line becomes a real blank line — which is what lets the
 // SHARED `paragraph` bound apply here instead of a local copy of

@@ -77,9 +77,9 @@ import { promptRenderer } from "./support/prompt-renderer.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 
-// NOT prose-pin.mjs's exported `stripQuoteGutter`, for the reason
+// NOT `Pin`'s `.stripGutter(">")`, for the reason
 // refuter-scratch-prose.test.mjs duplicates it too: the refuter brief sits in a
-// NESTED `> > ` blockquote, and that export's `>+` matches only CONSECUTIVE
+// NESTED `> > ` blockquote, and that gutter's `>+` matches only CONSECUTIVE
 // markers, so `> > text` comes back as `> text` and a hard wrap inside a pinned
 // phrase leaves a `>` where `\s+` needs whitespace. `(>\s?)+` eats both levels,
 // and the join is a single space, which is exactly the inter-word space a

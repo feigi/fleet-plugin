@@ -138,7 +138,7 @@ test("the spec's preamble states the further-code property instead of naming one
 // an unguarded index here fails at IMPORT, taking the unrelated tests in this
 // file down with it and naming nothing as the thing to look at.
 //
-// #1619: `codesIn` runs the header through `stripSlashGutter` then
+// #1619: `codesIn` runs the header through `.stripGutter("//")` then
 // `logicalLines` before this regex ever sees it — same fix shape as #1609's
 // `pointer-target-prose.test.mjs`. `\b(\d) = ` is a single inter-word space
 // on each side, and a raw physical-line scan turns that space into a
@@ -278,12 +278,12 @@ for (const cols of [27, 33, 56]) {
   });
 }
 
-// #1619's OTHER half. The fix is TWO steps — stripSlashGutter THEN
+// #1619's OTHER half. The fix is TWO steps — `.stripGutter("//")` THEN
 // logicalLines — but the three pins above only ever exercise logicalLines:
 // this file's `reflow` helper never reprints a `// ` gutter on a line it
 // wraps, so at every width tested (27/33/56, and every width from 20 to 80,
 // measured) the header's own line breaks never land a continuation line's
-// leading `// ` between a digit and its `= `. Dropping stripSlashGutter
+// leading `// ` between a digit and its `= `. Dropping `.stripGutter("//")`
 // alone — `codesIn` calling `logicalLines(headerText).text` straight,
 // keeping logicalLines — passes every test above unchanged (measured: 12/12
 // green). A real rewrap of a `//` comment block DOES reprint the gutter on
