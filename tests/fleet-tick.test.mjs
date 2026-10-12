@@ -2062,6 +2062,42 @@ test("CLI: a behind-issue exclusion already reflected in the current file names 
   assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 #50 /m);
 });
 
+test("CLI: a behind-issue exclusion with open issue on a ticket in the shortlist triggers a refresh", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([1, 2, 50]), ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "OPEN" }, refresh: shortlistText([1, 2]),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 1, "open issue on shortlist ticket triggers refresh");
+  assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 /m);
+  assert.equal(r.stdout.includes("#50"), false, "refreshed list does not include #50");
+});
+
+test("CLI: a behind-issue exclusion with closed issue on a ticket in the shortlist does not trigger a refresh", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([1, 2, 50]), ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "CLOSED" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 0, "closed issue does not trigger refresh even when ticket is in file");
+  assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 #50 /m);
+});
+
+test("CLI: a behind-issue exclusion with failing refresh reports the failure", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([1, 2, 50]), ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "OPEN" }, refreshFail: true,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /fresh.ok:false/);
+});
+
+test("CLI: a behind-issue exclusion with unanswered issue probe requests a refresh", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([1, 2, 50]), ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: null }, refresh: shortlistText([1, 2]),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 1, "unanswered probe requests refresh");
+  assert.equal(r.stdout.includes("#50"), false, "refreshed list does not include #50");
+});
+
 // A branch-named `behind-pr` is the Exclusion the skill allows until its PR
 // exists. The current file predates the row, so the tick refreshes to let
 // shortlist.mjs's own probe drop the ticket, and takes its PULL from that.
