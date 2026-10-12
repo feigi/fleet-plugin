@@ -468,9 +468,14 @@ function launchedRunners(text) {
  * while `hub send <name>` keeps reaching the first. `carried` is
  * `{rows, dispatched}`, the texts of the rows and the `## Dispatched` entries
  * the new ledger carries (`liveOnLedger`'s picks); a name it carries, live or
- * as a settled copy, is on the new ledger already and is not listed twice. A
- * row is read whether or not it parsed, but an unsettled member token on it
- * retires nothing: only a settled name is known gone.
+ * as a settled copy, is on the new ledger already and is not listed twice.
+ * `dispatched` is every entry the archive held, well-formed or not, and a row
+ * is read whether or not it parsed. A token with an outcome is a name this
+ * session used, so it is retired whether or not its outcome is one of its
+ * family's: the name on `impl-5=bogus` is retired, though the line is not
+ * carried. An unsettled member token — a bare name, no outcome — retires
+ * nothing: only a name known gone is retired, and a line whose name does not
+ * parse names no member.
  */
 export function retiredOnLedger(rows, dispatched, retired, carried) {
   const seen = new Set();
@@ -488,10 +493,10 @@ export function retiredOnLedger(rows, dispatched, retired, carried) {
   for (const name of retired) add(name);
   for (const e of dispatched) {
     const t = parseToken(e);
-    if (t !== null && t.error === null && t.outcome !== null) add(t.name);
+    if (t !== null && t.outcome !== null) add(t.name);
   }
   for (const text of rows) {
-    for (const t of memberTokens(text)) if (t.error === null && t.outcome !== null) add(t.name);
+    for (const t of memberTokens(text)) if (t.outcome !== null) add(t.name);
     for (const name of launchedRunners(text)) add(name);
   }
   return out;

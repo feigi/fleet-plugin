@@ -410,9 +410,10 @@ phase, or in any later one, asks the maintainer which tickets to take.
    every unsettled `## Dispatched` entry and the settled entry of each
    member a carried row names; exclusions, `## Filed`, `## Ruled` and the
    drain marker are never carried. Every other settled name — in
-   `## Dispatched` or on any row — and every reviewer runner a row launched
-   goes into the new ledger's `## Retired` as a bare name, with whatever the
-   archive's own `## Retired` held: omp answers a second `task` under a name
+   `## Dispatched` or on any row, and including a name whose outcome is
+   outside its family's vocabulary, whose line is skipped below — and every
+   reviewer runner a row launched goes into the new ledger's `## Retired` as
+   a bare name, with whatever the archive's own `## Retired` held: omp answers a second `task` under a name
    this process has used with `<name>-2` while `hub send <name>` keeps
    reaching the first, so a settled name stays taken for the session, not
    the run. `dispatch` refuses a retired name and names the replacement — one
@@ -423,7 +424,9 @@ phase, or in any later one, asks the maintainer which tickets to take.
    reads `## Retired`: a ticket an earlier run worked is not claimed by it
    and can be shortlisted again.
    A line it cannot parse is skipped with a warning naming it, and the
-   rotation still succeeds. It prints `{rotated, archive, carried: {rows,
+   rotation still succeeds; a member name on a skipped line that carries an
+   outcome is retired all the same, and a bare member token on a skipped row
+   retires nothing. It prints `{rotated, archive, carried: {rows,
    dispatched}, retired, skipped}`. The carried tokens keep the tick from
    dispatching onto those members' work, keep their names taken, and give
    their late results a token to settle; the stranded-claim step below
@@ -4200,7 +4203,8 @@ live count from it, so nobody states one. Write neither by hand:
   same `<file>.lock`, and the next write starts the empty skeleton — unless
   the previous run was this session's own, when it first writes the rows and
   `## Dispatched` entries still live into a new ledger, and every other
-  settled name into its `## Retired` (phase 0 says which). Refused
+  settled name, or name given an out-of-vocabulary outcome, into its
+  `## Retired` (phase 0 says which). Refused
   while the recorded controller is alive and not this run's ancestor, ledger
   or none — or, with no record and a ledger to move, while the heartbeat mark
   is still beating — or when the archive name already exists, the process

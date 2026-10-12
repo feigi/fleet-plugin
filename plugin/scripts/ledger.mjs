@@ -20,7 +20,8 @@
 // dispatch and never loses or reorders one — settling annotates an entry in
 // place — which is what lets `merge-bot-<n>` be numbered from it; a rotate
 // that carries a run's live entries forward carries a settled one only for a
-// member a carried row names, and retires every other settled name into
+// member a carried row names, and retires every other settled name — and a
+// name whose outcome is outside its family's vocabulary — into
 // `## Retired`, where `dispatch` and that numbering still read it.
 //
 // Writer policy: the controller owns run state
@@ -1564,7 +1565,8 @@ function runCheck() {
 // controller's to read and no script's.
 //
 // An `ancestor` rotate also writes `## Retired`: the bare name of every
-// member the archive settled and the new ledger does not carry, of every
+// member the archive settled, or gave an outcome outside its family's
+// vocabulary, and the new ledger does not carry, of every
 // reviewer runner its rows launched and the new ledger does not carry, and
 // every name the archive's own `## Retired` held. The omp process those
 // members ran in is still this run's, and it answers a second task under a
@@ -1721,10 +1723,13 @@ function runRotate() {
 // siblings' with them, and the tick's per-PR reading of the PR is unchanged;
 // and the `## Dispatched` entries, settled ones among them, that keep a
 // carried member from reading live again. retiredOnLedger() names the rest:
-// every settled member neither travels, and every reviewer runner a row
-// launched, read off the parsed rows and the skipped ones alike — a row the
-// tick refuses still names members this session ran — and the archive's own
-// `## Retired`, each line of which must be a bare member or reviewer name.
+// every member neither travels that a line gives an outcome — a settled one,
+// or one whose outcome is outside its family's vocabulary, which skips the
+// line but not the name — and every reviewer runner a row launched, read off
+// the parsed rows, the skipped ones and every `## Dispatched` entry alike — a
+// line the tick refuses still names members this session ran — and the
+// archive's own `## Retired`, each line of which must be a bare member or
+// reviewer name.
 function carryOf(text) {
   const skipped = [];
   const skippedRows = [];
@@ -1739,7 +1744,8 @@ function carryOf(text) {
       return false;
     }
   });
-  const dispatched = sectionOf(text, DISPATCHED).filter((e) => {
+  const allDispatched = sectionOf(text, DISPATCHED);
+  const dispatched = allDispatched.filter((e) => {
     const t = parseToken(e);
     if (t !== null && t.error === null) return true;
     skipped.push({ line: e, why: t === null ? "not a member token" : `${t.name}: ${t.error}` });
@@ -1752,7 +1758,7 @@ function carryOf(text) {
   });
   const live = liveOnLedger(rows, dispatched);
   const carried = { rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched };
-  const retired = retiredOnLedger([...rows, ...skippedRows], dispatched, archivedRetired, carried);
+  const retired = retiredOnLedger([...rows, ...skippedRows], allDispatched, archivedRetired, carried);
   return { ...carried, retired, skipped };
 }
 
