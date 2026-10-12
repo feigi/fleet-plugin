@@ -669,25 +669,30 @@ test("the fold takes the PR row's settled tokens in order, under the two-argumen
 
 // The must-LEAVE half: only the row keyed to the settled PR, and only when it
 // carries no implementer, is folded. A settle to a PR with no row of its own
-// is today's token rewrite and nothing more.
+// is today's token rewrite and nothing more. A row keyed #M whose implementer
+// names no PR still maps to M by its key, so settling to M there would put a
+// second row on M and is refused, writing nothing.
 test("settle folds no row keyed to another PR, no row carrying an impl- token, and nothing when the PR has no row", (t) => {
-  const { ok, read, put } = fixture(t);
+  const { ok, read, put, refused } = fixture(t);
   ok("dispatch", "412", "impl-412");
   ok("dispatch", "777", "fix-pr-777");
   ok("dispatch", "420", "impl-420");
   put("421", "impl-421=killed · review=wf:r2");
+  put("422", "impl-422=PR#900 · review=wf:r3");
   ok("dispatch", "413", "impl-413");
   ok("dispatch", "414", "impl-414");
+  ok("dispatch", "415", "impl-415");
   const before = read().rows;
 
-  // #420 is keyed to the PR but is an implementer's own row (live or settled).
-  assert.equal(ok("settle", "impl-412", "PR#420").line, "#412 impl-412=PR#420");
-  assert.equal(ok("settle", "impl-413=PR#421").line, "#413 impl-413=PR#421");
+  // #420 and #421 are keyed to the PR but are implementers' own rows (live or
+  // settled) naming no PR; #422 is keyed to the PR but its implementer's PR is 900.
+  refused(["settle", "impl-412", "PR#420"], /PR #420 would map to more than one row — its PR's row is #420\b/);
+  refused(["settle", "impl-413=PR#421"], /PR #421 would map to more than one row — its PR's row is #421\b/);
+  assert.equal(ok("settle", "impl-415=PR#422").line, "#415 impl-415=PR#422");
   // No row keyed #500 at all; #777 belongs to a PR nobody here settles to.
   assert.equal(ok("settle", "impl-414", "PR#500").line, "#414 impl-414=PR#500");
   assert.deepEqual(read().rows, before.map((r) => r
-    .replace(/^#412 impl-412$/, "#412 impl-412=PR#420")
-    .replace(/^#413 impl-413$/, "#413 impl-413=PR#421")
+    .replace(/^#415 impl-415$/, "#415 impl-415=PR#422")
     .replace(/^#414 impl-414$/, "#414 impl-414=PR#500")));
   assert.ok(read().rows.includes("#777 fix-pr-777"));
 });
@@ -743,13 +748,15 @@ test("settle folds a #M row no implementer claims, a review-only one included", 
 
 // An Exclusion row is keyed to a ticket, so one keyed `#M` is a premise on a
 // mistyped PR number, never a row for PR M: the fold leaves it alone, since
-// folding it would delete the premise a settled member can never restore.
+// folding it would delete the premise a settled member can never restore. The
+// row's key still maps it to M, so the settle would put a second row on M and
+// is refused, writing nothing.
 test("settle to a mistyped PR number does not fold an Exclusion row keyed #M", (t) => {
-  const { ok, read } = fixture(t);
+  const { ok, read, refused } = fixture(t);
   ok("row", "358", "excluded · behind-pr:#346");
   ok("dispatch", "351", "impl-351");
-  assert.equal(ok("settle", "impl-351", "PR#358").line, "#351 impl-351=PR#358");
-  assert.deepEqual(read().rows, ["#358 excluded · behind-pr:#346", "#351 impl-351=PR#358"]);
+  refused(["settle", "impl-351", "PR#358"], /PR #358 would map to more than one row — its PR's row is #358\b/);
+  assert.deepEqual(read().rows, ["#358 excluded · behind-pr:#346", "#351 impl-351"]);
 });
 
 // Two genuinely separate PR-bound dispatches (a fix-pr and, after its own
