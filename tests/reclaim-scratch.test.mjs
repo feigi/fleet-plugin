@@ -21,17 +21,29 @@ const DAY = 24 * 60 * 60 * 1000;
 const DARWIN = process.platform === "darwin";
 
 // Answers every `n<N>:issueOrPullRequest` alias in the query from GH_STATES
-// (number -> node, or null for a number that names nothing), the way GitHub
-// does: every requested alias present.
+// (number -> node, null for a number that names nothing, or `{error}` for a
+// lookup GitHub failed), the way GitHub and gh do: every requested alias
+// present, a null alias carrying a NOT_FOUND error at its path, and gh
+// exiting 1 with the whole body whenever there is an error. GH_ERRORS adds
+// errors of its own, GH_RAW replaces the body outright.
 const GH_STUB = `#!${process.execPath}
 const fs = require("fs");
 fs.appendFileSync(process.env.GH_LOG, JSON.stringify(process.argv.slice(2)) + "\\n");
 if (process.env.GH_FAIL) { process.stderr.write("gh: could not reach api.github.com\\n"); process.exit(1); }
+if (process.env.GH_RAW) { process.stdout.write(process.env.GH_RAW); process.exit(0); }
 const q = process.argv.find((a) => a.startsWith("query="));
 const states = JSON.parse(fs.readFileSync(process.env.GH_STATES, "utf8"));
 const repo = {};
-for (const [, n] of q.matchAll(/n(\\d+):issueOrPullRequest/g)) repo["n" + n] = states[n] ?? null;
-process.stdout.write(JSON.stringify({ data: { repository: repo } }));
+const errors = [];
+for (const [, n] of q.matchAll(/n(\\d+):issueOrPullRequest/g)) {
+  const v = states[n] ?? null;
+  repo["n" + n] = v && v.error ? null : v;
+  if (v === null) errors.push({ type: "NOT_FOUND", path: ["repository", "n" + n], message: "Could not resolve to an issue or pull request with the number of " + n + "." });
+  else if (v.error) errors.push({ path: ["repository", "n" + n], ...v.error });
+}
+if (process.env.GH_ERRORS) errors.push(...JSON.parse(process.env.GH_ERRORS));
+process.stdout.write(JSON.stringify(errors.length ? { data: { repository: repo }, errors } : { data: { repository: repo } }));
+if (errors.length) { process.stderr.write("gh: " + errors[0].message + "\\n"); process.exit(1); }
 `;
 
 const GIT_ENV = { ...process.env };
@@ -296,6 +308,70 @@ test("(5) gh failing keeps every keyed entry with the reason; unkeyed entries ar
     assert.ok(existsSync(p), `${p} was removed with gh unreachable`);
   }
   assert.deepEqual(paths(r.out.removed), [loose]);
+});
+
+test("(5) a lookup GitHub failed for one number keeps that entry; its batch-mates are still judged", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 5: { error: { type: "FORBIDDEN", message: "Resource protected by organization SAML enforcement" } }, 6: PR("OPEN"), 7: PR("MERGED") });
+  const refused = f.dir("pr5", 10);
+  const open = f.dir("pr6", 10);
+  const merged = f.dir("pr7", 10);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(reasonOf(r.out.kept, refused) ?? "", /^gh api graphql gave no answer for #5 \(FORBIDDEN: Resource protected by organization SAML enforcement\)$/);
+  assert.ok(existsSync(refused), "a pr<N> GitHub errored on was removed on its age");
+  assert.ok(existsSync(open));
+  assert.deepEqual(paths(r.out.removed), [merged]);
+  assert.deepEqual(r.out.failed, []);
+});
+
+test("(5) an error naming no alias keeps every keyed entry in its batch; unkeyed entries are still swept", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 5: PR("MERGED"), 20: ISSUE("CLOSED") });
+  const keyed = [f.dir("pr5", 10), f.dir("impl-20", 10)];
+  const loose = f.dir("stray", 10);
+
+  const r = f.run(["--root", f.root, "--apply"], { env: { GH_ERRORS: JSON.stringify([{ type: "RATE_LIMITED", message: "API rate limit exceeded" }]) } });
+
+  assert.equal(r.status, 0, r.stderr);
+  for (const p of keyed) {
+    assert.match(reasonOf(r.out.kept, p) ?? "", /^gh api graphql gave no answer for #\d+ \(RATE_LIMITED: API rate limit exceeded\)$/);
+    assert.ok(existsSync(p), `${p} was removed under a batch-wide error`);
+  }
+  assert.deepEqual(paths(r.out.removed), [loose]);
+});
+
+test("(5) a null alias with no NOT_FOUND error is no answer, not 'names nothing'", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  const aged = f.dir("pr5", 10);
+
+  const r = f.run(["--root", f.root, "--apply"], { env: { GH_RAW: JSON.stringify({ data: { repository: { n5: null } } }) } });
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(reasonOf(r.out.kept, aged) ?? "", /^gh api graphql gave no answer for #5 \(null with no NOT_FOUND error\)$/);
+  assert.ok(existsSync(aged));
+  assert.deepEqual(r.out.removed, []);
+});
+
+test("(4) a directory that can be listed but not searched counts its own mtime and does not stop the sweep", { skip: process.getuid?.() === 0 && "root searches any directory" }, (t) => {
+  const f = fixture(t);
+  f.ledger();
+  const unsearchable = f.dir("stray/sub", 10);
+  writeFileSync(join(unsearchable, "file.txt"), "x");
+  f.age(join(f.root, "stray"), 10);
+  const other = f.dir("other-old", 10);
+  chmodSync(unsearchable, 0o600);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [other, join(f.root, "stray")].sort());
+  assert.ok(!existsSync(join(f.root, "stray")) && !existsSync(other));
 });
 
 test("(6) a chmod 000 directory and a flagged file inside a removable entry do not wedge its removal", (t) => {

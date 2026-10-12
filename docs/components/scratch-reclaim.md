@@ -22,8 +22,9 @@ work in flight rather than every run's history.
    PR's `pr<M>/` and `dispositions-fix-pr-<M>*.json` go unless a live
    `review-pr-<M>`, `fix-pr-<M>` or `finisher-pr-<M>` token names it; any live
    `merge-bot-<n>` holds every `pr<N>`. A closed issue's `impl-<N>/` goes; an
-   open one's goes only with no live `impl-<N>` token and 7 days idle. With
-   `gh` unreachable, every keyed entry is kept.
+   open one's goes only with no live `impl-<N>` token and 7 days idle. A
+   number `gh` gives no usable answer for — `gh` unreachable, or a partial
+   failure that errored on it — keeps every keyed entry that names it.
 3. **Everything else is judged on age.** An entry goes when nothing anywhere
    under it has changed in 7 days and no live token's name appears in its
    name. A keyed name whose number is the other type, or nothing, falls here.

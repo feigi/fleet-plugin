@@ -31,8 +31,8 @@
 //            appears in the entry's name.
 // "Idle past the retention" is the newest mtime ANYWHERE under the entry
 // older than 7 days — never the top-level mtime alone, which a write deep
-// inside does not move. A directory that cannot be listed counts its own
-// mtime and is not descended into.
+// inside does not move. A directory that cannot be listed or searched counts
+// its own mtime and is not descended into.
 //
 // The live tokens are `.fleet/ledger.md`'s, read through `ledger.mjs read`
 // and ledger-grammar.mjs's liveOnLedger(), the file resolved by
@@ -44,10 +44,11 @@
 // either; only ENOENT is absence, and any other failure to read it refuses.
 //
 // GitHub is asked once per ≤100 numbers (`gh api graphql`, one aliased
-// issueOrPullRequest per number, pr<N> and impl-<N> together). A batch with
-// no usable answer keeps every keyed entry in it, with that reason; the age
-// rule still runs on unkeyed entries. A keyed entry is never judged by the
-// ledger or by mtime alone in GitHub's place.
+// issueOrPullRequest per number, pr<N> and impl-<N> together). A number with
+// no usable answer — a failed lookup, a partial failure included — keeps every
+// keyed entry that names it, with that reason; the age rule still runs on
+// unkeyed entries. A keyed entry is never judged by the ledger or by mtime
+// alone in GitHub's place.
 //
 // `--pr <N>` MODE is the review snapshot's prune: every directory
 // `<root>/pr<N>/run-*` idle past the retention is removed, and nothing else
@@ -121,7 +122,9 @@ function how(r) {
 
 /** The path of something under `path` (itself included) modified at or after
  * `cutoff`, or null when everything is older. Symlinks are not followed. A
- * directory that cannot be listed counts its own mtime only. */
+ * directory that cannot be listed counts its own mtime only, and so does one
+ * that can be listed but not searched: an entry inside it whose lstat is
+ * refused is skipped, its parent's mtime already counted. */
 export function freshUnder(path, cutoff) {
   const stack = [path];
   while (stack.length) {
@@ -130,7 +133,7 @@ export function freshUnder(path, cutoff) {
     try {
       st = lstatSync(p);
     } catch (e) {
-      if (e.code === "ENOENT") continue;
+      if (e.code === "ENOENT" || e.code === "EACCES" || e.code === "EPERM") continue;
       throw e;
     }
     if (st.mtimeMs >= cutoff) return p;
@@ -193,9 +196,14 @@ function ledgerFile() {
 
 // `{type, state}` per number GitHub answered (type "Issue" or "PullRequest",
 // or null for a number that names nothing), or `{unreachable}` for a number
-// whose batch had no usable answer. A body carrying an object
-// `data.repository` is an answer even at a non-zero exit: GitHub resolves
-// every alias it can and nulls the rest, and gh exits 1 with the whole body.
+// that has no usable answer. GitHub resolves every alias it can and nulls the
+// rest, and gh exits 1 with the whole body, so a body carrying an object
+// `data.repository` is read alias by alias at any exit status. An alias is
+// answered by a node, or by null with a NOT_FOUND error naming it — GitHub's
+// own "this number names nothing". Any other error naming an alias, a null
+// no NOT_FOUND explains, and an error naming no alias (it may belong to any
+// of the batch) leave the number unreachable: a failed lookup is not an
+// answer.
 function githubStates(numbers) {
   const out = new Map();
   for (let i = 0; i < numbers.length; i += BATCH) {
@@ -205,21 +213,39 @@ function githubStates(numbers) {
       "-f", `query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${fields}}}`], {
       encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }),
     });
-    let repo;
+    let body;
     try {
-      repo = JSON.parse(r.stdout)?.data?.repository;
+      body = JSON.parse(r.stdout);
     } catch {
-      repo = undefined;
+      body = undefined;
     }
-    const usable = repo !== null && typeof repo === "object" && !Array.isArray(repo)
-      && batch.some((n) => Object.hasOwn(repo, `n${n}`));
-    for (const n of batch) {
-      if (!usable || !Object.hasOwn(repo, `n${n}`)) {
-        out.set(n, { unreachable: `gh api graphql gave no answer for #${n} (${how(r)})` });
-        continue;
+    const repo = body?.data?.repository;
+    const errors = body?.errors ?? [];
+    const answered = repo !== null && typeof repo === "object" && !Array.isArray(repo) && Array.isArray(errors);
+    const nothing = new Set();
+    const refused = new Map();
+    let batchWide;
+    if (answered) {
+      for (const e of errors) {
+        const path = e?.path;
+        const alias = Array.isArray(path) && path[0] === "repository" && typeof path[1] === "string" ? path[1] : null;
+        const said = `${e?.type ?? "error"}${e?.message ? `: ${e.message}` : ""}`;
+        if (alias === null) batchWide ??= said;
+        else if (e.type === "NOT_FOUND" && path.length === 2) nothing.add(alias);
+        else refused.set(alias, said);
       }
-      const node = repo[`n${n}`];
-      out.set(n, node === null ? { type: null } : { type: node.__typename, state: String(node.state).toUpperCase() });
+    }
+    for (const n of batch) {
+      const alias = `n${n}`;
+      const gone = (why) => out.set(n, { unreachable: `gh api graphql gave no answer for #${n} (${why})` });
+      if (!answered) gone(how(r));
+      else if (refused.has(alias)) gone(refused.get(alias));
+      else if (batchWide !== undefined) gone(batchWide);
+      else if (!Object.hasOwn(repo, alias)) gone(how(r));
+      else if (repo[alias] === null) {
+        if (nothing.has(alias)) out.set(n, { type: null });
+        else gone("null with no NOT_FOUND error");
+      } else out.set(n, { type: repo[alias].__typename, state: String(repo[alias].state).toUpperCase() });
     }
   }
   return out;

@@ -16,7 +16,9 @@ reclamation at all.
 
 ## Evidence
 
-Measured 2026-10-12, as recorded in the ruling comment on #2316.
+Measured 2026-10-12, as recorded in the ruling comment on #2316. Every
+`file:line` below is a line of that file at `main` `c54a597d`, before this
+change; in the files this change edits those numbers no longer hold.
 
 | Fact | Evidence |
 |---|---|
@@ -62,8 +64,12 @@ Measured 2026-10-12, as recorded in the ruling comment on #2316.
    `chmod -R u+rwx` → `chflags -R nouchg,nouappnd` → `rm -rf` sequence lives
    in the script as its single copy, and every removal goes through it.
 8. **`gh`:** one `gh api graphql` per ≤100 numbers. With `gh` unreachable every
-   keyed entry is kept with that reason; the age rule still runs on unkeyed
-   entries. No fallback to the ledger or to mtime for keyed entries.
+   keyed entry is kept with that reason, and so is one whose number the
+   answer errored on: a null alias reads as "names nothing" only with a
+   NOT_FOUND error naming it; any other error naming an alias, an error
+   naming none, and a null without NOT_FOUND each leave the number
+   unanswered. The age rule still runs on unkeyed entries. No fallback
+   to the ledger or to mtime for keyed entries.
 9. **Contract, mirroring `reap.sh`:** dry run by default, `--apply` mutates,
    `--root <abs>` required. The root sweep reads `.fleet/ledger.md` and
    refuses when it is absent, unless `--after-rotate` is given, under which
