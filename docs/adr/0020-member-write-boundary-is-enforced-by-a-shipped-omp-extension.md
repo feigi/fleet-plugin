@@ -6,6 +6,7 @@ loaded through `plugin/package.json#omp.extensions`. (ADR 0021: the load
 itself is measured fail-open on both install routes — `omp plugin doctor`
 never imports an extension module — which is why §7's silent-failure finding
 stands under the native route too.)
+Amended by #2305: the protected set includes the main checkout's HEAD — symbolic ref and commit
 
 ## Context
 

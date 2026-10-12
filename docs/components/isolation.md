@@ -36,14 +36,17 @@ store.
    [`member-write-guard.mjs`](../../plugin/scripts/member-write-guard.mjs)),
    and [`main-checkout.mjs`](../../plugin/scripts/main-checkout.mjs)
    catches what it cannot see (#2210): Phase 0 records a baseline of the
-   main checkout's porcelain entries and their content hashes, and every
+   main checkout's porcelain entries and their content hashes, plus its
+   HEAD — symbolic ref and commit — and every
    `fleet-tick.mjs` compares against it and holds all dispatch on any
    answer but clean. `MAIN-CHECKOUT-DIRTY` holds until the maintainer
-   resolves the stray paths and re-baselines; `MAIN-CHECKOUT-UNKNOWN`
+   resolves the stray paths and re-baselines — a HEAD move clears itself
+   once HEAD reads clean again; `MAIN-CHECKOUT-UNKNOWN`
    until whatever stopped the tick looking is fixed, never by
    re-baselining over it; `MAIN-CHECKOUT-NO-BASELINE` until the
-   controller records a baseline. The two `docs/metrics/` files the
-   controller itself writes mid-run are left out of the comparison.
+   controller records a baseline. The `docs/metrics/` tables the
+   controller itself writes mid-run (tier-outcomes, member-outcomes and
+   ticket-features) are left out of the comparison.
 
 ## Opinionated choices
 

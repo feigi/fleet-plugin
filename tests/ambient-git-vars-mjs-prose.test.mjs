@@ -190,11 +190,12 @@ const COVERED_MJS = {
   // member-write-guard.test.mjs, "an ambient GIT_DIR naming another repository
   // does not change the answer".
   "member-write-guard.mjs": 1,
-  // ONE spawn primitive, `git(what, args, cwd, env)`, behind both of the
-  // file's git calls — `resolveMainCheckout()`'s `rev-parse --git-common-dir`
-  // and `snapshot()`'s `status --porcelain -uall` (#2210). An ambient GIT_DIR
-  // would answer both for another repository, so the tick would compare —
-  // and `--record` would baseline — the wrong tree. Measured in
+  // ONE spawn primitive, `git(what, args, cwd, env)`, behind every one of the
+  // file's git calls — `resolveMainCheckout()`'s `rev-parse --git-common-dir`,
+  // `snapshot()`'s `status --porcelain -uall` and the HEAD reads (#2210). An
+  // ambient GIT_DIR would answer all of them for another repository, so the
+  // tick would compare — and `--record` would baseline — the wrong tree.
+  // Measured in
   // main-checkout.test.mjs, "an ambient GIT_DIR naming another repository
   // does not change the answer (#1599)".
   "main-checkout.mjs": 1,
