@@ -1006,7 +1006,7 @@ and add nothing relative to it.
 Run it as ONE blocking foreground command — never backgrounded, never polled —
 with a command deadline of 1800 seconds:
 
-    { cd "${snap.path}" && ${testCmd}; } > "${logPath}" 2>&1; echo "TEST_RUN_EXIT=$?"
+    { cd "${snap.path}" && node plugin/scripts/suite-slot.mjs '${testCmd}'; } > "${logPath}" 2>&1; echo "TEST_RUN_EXIT=$?"
 
 Run it exactly once: not again when it fails, and not again when it hits the
 deadline. A failing run is a result every specialist reads, and a second

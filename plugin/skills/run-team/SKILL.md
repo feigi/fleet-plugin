@@ -2587,6 +2587,14 @@ gate runs it too — so every gate runs one command. Omit it from the review arg
 and the review (`review-core.mjs`, in a runner) reads the same cache itself,
 refusing outright when there is none; the fix-applier has no such fallback, so
 substituting `<testCmd>` with nothing leaves it no gate at all.
+**Test suite slot semaphore:** `testCmd` is automatically wrapped with `plugin/scripts/suite-slot.mjs`, which bounds concurrent full test-suite runs to N=2 slots on the host (`~/.fleet/suite-slots/`). The wrapper:
+- **Takes one slot** before running `testCmd` with no arguments (full suite)
+- **Passes through** if `testCmd` is invoked with arguments (narrowed run, e.g., `testCmd file.test.mjs`)
+- **Re-enters** without acquiring another slot if `FLEET_SUITE_SLOT` is already set (nested test commands)
+- **Waits up to 1800s** (configurable via `SUITE_SLOT_WAIT_MS`) for a slot, then exits code 75 if none available
+
+Exit code 75 from a test run signals that the slot-wait timed out, not a test failure. When this happens, the test agent reports `slotWaitMs` in the result; inspect it to distinguish resource contention from test timeouts. A third run waiting on two occupied slots at N=2 will eventually get its turn when a holder finishes — the queue is FIFO. If a slot holder dies, the next waiter reaps its stale lock and acquires the freed slot.
+
 
 **Where `<branch>` comes from:** the PR's head branch —
 `gh pr view <N> --json headRefName -q .headRefName`, or the same branch you cut
