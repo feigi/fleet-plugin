@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
+import { rowPr } from "../plugin/scripts/ledger-grammar.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -544,6 +545,62 @@ test("settle impl-N=PR#M folds the PR-keyed row a pre-settle dispatch created in
   assert.equal(ok("settle", "fix-pr-1301", "no-op").ticket, "#1300");
   assert.equal(ok("dispatch", "1301", "finisher-pr-1301").ticket, "#1300");
   assert.equal(read().rows.length, 1);
+});
+
+// A PR has one row. `settle impl-N=PR#M` refuses a PR another row already
+// maps to, through the same added-only check `row` uses, judged on the folded
+// ledger; the refused member settles `=bailed`.
+test("settle impl-N=PR#M refuses a PR another row already maps to, writing nothing", (t) => {
+  const { ok, read, refused } = fixture(t);
+  ok("row", "658", "Pull · impl-658");
+  ok("row", "659", "Pull · impl-659");
+  ok("dispatch", "658", "impl-658");
+  ok("dispatch", "659", "impl-659");
+  ok("settle", "impl-658", "PR#724");
+  refused(["settle", "impl-659=PR#724"], /PR #724 would map to more than one row/);
+  refused(["settle", "impl-659=PR#724"], /PR's row is #658\b/);
+  refused(["settle", "impl-659", "PR#724"],
+    /^ledger: settle impl-659=PR#724: PR #724 would map to more than one row — its PR's row is #658; settle impl-659 =bailed or to a PR of its own$/m);
+
+  assert.equal(ok("settle", "impl-659=bailed").line, "#659 Pull · impl-659=bailed");
+  const l = read();
+  assert.deepEqual(l.rows.filter((r) => rowPr(r) === 724), ["#658 Pull · impl-658=PR#724"]);
+  const run = deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null },
+    [{ number: 724, labels: [], closingIssuesReferences: [{ number: 658 }, { number: 659 }] }]);
+  assert.equal(run.implLive, 0);
+});
+
+test("settle impl-N=PR#M still accepts every write that adds no second row for the PR", async (t) => {
+  await t.test("the same outcome again", (t) => {
+    const { ok, bytes } = fixture(t);
+    ok("dispatch", "658", "impl-658");
+    ok("settle", "impl-658=PR#724");
+    const before = bytes();
+    assert.equal(ok("settle", "impl-658=PR#724").changed, false);
+    assert.equal(bytes(), before);
+  });
+  await t.test("a replacement on the PR's own row", (t) => {
+    const { ok, read } = fixture(t);
+    ok("dispatch", "658", "impl-658");
+    ok("settle", "impl-658=PR#724");
+    ok("dispatch", "658", "impl-658-b");
+    assert.equal(ok("settle", "impl-658-b=PR#724").ticket, "#658");
+    assert.deepEqual(read().rows.filter((r) => rowPr(r) === 724), ["#658 impl-658=PR#724 · impl-658-b=PR#724"]);
+  });
+  await t.test("a #M fallback row the fold absorbs — the check runs after the fold", (t) => {
+    const { ok, read } = fixture(t);
+    ok("dispatch", "658", "impl-658");
+    assert.equal(ok("dispatch", "724", "fix-pr-724").line, "#724 fix-pr-724");
+    assert.equal(ok("settle", "impl-658=PR#724").line, "#658 impl-658=PR#724 · fix-pr-724");
+    assert.deepEqual(read().rows, ["#658 impl-658=PR#724 · fix-pr-724"]);
+  });
+  await t.test("a split already on disk", (t) => {
+    const { ok, read, put } = fixture(t);
+    put("658", "Pull · impl-658=PR#724 · impl-658-b");
+    put("659", "Pull · impl-659=PR#724");
+    assert.equal(ok("settle", "impl-658-b=PR#724").line, "#658 Pull · impl-658=PR#724 · impl-658-b=PR#724");
+    assert.equal(read().rows.filter((r) => rowPr(r) === 724).length, 2);
+  });
 });
 
 // #2064: merge-bot records a conflict its local-rebase fallback would not
