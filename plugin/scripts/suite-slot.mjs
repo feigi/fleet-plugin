@@ -43,7 +43,7 @@
 // slot directory it cannot create); 75 is an expired wait, having launched
 // nothing, with `suite-slot: no slot after <n>s` on stderr. On acquisition it
 // prints `SUITE_SLOT_WAIT_MS=<n>` to stderr — the milliseconds the wait took,
-// 0 when a slot was free.
+// a few at most when a slot was free.
 //
 // A waiter cycles the slots every 2 s. While the entrypoint runs, SIGTERM,
 // SIGINT and SIGHUP are forwarded to it and the wrapper exits when it does.

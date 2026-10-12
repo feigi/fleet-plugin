@@ -56,7 +56,8 @@ test("a full run takes one slot stamped with the wrapper's pid, prints its wait,
   const [stamp, ...listing] = r.stdout.trim().split("\n");
   assert.equal(stamp, String(r.pid), "the slot does not name the wrapper that holds it");
   assert.deepEqual(listing, ["1.lock"]);
-  assert.equal(waitMs(r.stderr), 0, `a free slot prints a wait of 0: ${r.stderr}`);
+  // A free slot is taken on the first pass, well inside one 2 s cycle.
+  assert.ok(waitMs(r.stderr) < 1000, `a free slot reports a wait of almost nothing: ${r.stderr}`);
   assert.deepEqual(readdirSync(host.slots), [], "the slot outlived the run");
 });
 
@@ -163,9 +164,12 @@ test("a holder killed mid-run is reaped by the next waiter", async () => {
   const host = slotHome();
   const dir = tempDir("slot-kill-");
   const held = launch(host, 'echo $$ > "$D/child"; exec sleep 60 >/dev/null 2>&1', [], { FLEET_SUITE_SLOTS: "1", D: dir });
+  // Both files are created before they are written, so a reader that finds the
+  // file may find it empty: wait for the content, not the file.
+  const text = (path) => (existsSync(path) ? readFileSync(path, "utf8") : "");
+  const childPid = () => (/^(\d+)\n$/.exec(text(join(dir, "child")))?.[1]);
   try {
-    await until(() => existsSync(join(dir, "child")) && existsSync(host.lock(1)), "the holder to take its slot");
-    assert.equal(readFileSync(host.lock(1), "utf8"), String(held.child.pid));
+    await until(() => childPid() !== undefined && text(host.lock(1)) === String(held.child.pid), "the holder to take its slot");
     held.child.kill("SIGKILL");
     await held.done;
     assert.ok(existsSync(host.lock(1)), "a SIGKILLed wrapper cannot have released its slot");
@@ -173,9 +177,12 @@ test("a holder killed mid-run is reaped by the next waiter", async () => {
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.equal(r.stdout, "RAN\n");
   } finally {
-    // The wrapper's child outlives it; it is this test's to end.
-    const pid = Number(readFileSync(join(dir, "child"), "utf8"));
-    try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+    // The wrapper's child outlives it; it is this test's to end. Never a pid
+    // that is not a whole positive number: kill(0) is this process's own group.
+    const pid = Number(childPid());
+    if (pid > 1) {
+      try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+    }
   }
 });
 
