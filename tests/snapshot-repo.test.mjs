@@ -609,6 +609,11 @@ for (const [name, path] of SOURCES) {
       /SNAPSHOT_PRUNE_FAILED/,
       `the prune named a failure on a parent it could read and write: ${r.stderr}`,
     );
+    assert.equal(
+      r.stdout ?? "",
+      "",
+      `a healthy prune printed to the snapshot step's stdout (a \`grep -c\` count or the receipt itself instead of a quiet \`grep -q\`) — the agent running this block reads that output: ${r.stdout}`,
+    );
 
     assert.ok(
       !existsSync(stale),

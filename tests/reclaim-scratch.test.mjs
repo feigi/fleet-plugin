@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { freshUnder } from "../plugin/scripts/reclaim-scratch.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/reclaim-scratch.mjs", import.meta.url));
 const DAY = 24 * 60 * 60 * 1000;
@@ -29,6 +30,7 @@ const DARWIN = process.platform === "darwin";
 const GH_STUB = `#!${process.execPath}
 const fs = require("fs");
 fs.appendFileSync(process.env.GH_LOG, JSON.stringify(process.argv.slice(2)) + "\\n");
+if (process.env.GH_ENV_LOG) fs.appendFileSync(process.env.GH_ENV_LOG, "GH_REPO=" + (process.env.GH_REPO ?? "<unset>") + "\\n");
 if (process.env.GH_FAIL) { process.stderr.write("gh: could not reach api.github.com\\n"); process.exit(1); }
 if (process.env.GH_RAW) { process.stdout.write(process.env.GH_RAW); process.exit(0); }
 const q = process.argv.find((a) => a.startsWith("query="));
@@ -156,6 +158,26 @@ test("(1) MERGED pr<M> and its dispositions files are removed, OPEN kept, CLOSED
   assert.equal(reasonOf(r.out.kept, join(f.root, "pr6")), "PR #6 is OPEN");
   assert.deepEqual(r.out.failed, []);
   assert.equal(r.gh.length, 1, `expected one gh call for every number, got ${r.gh.length}`);
+});
+
+test("(1) more than 100 keyed numbers are asked of GitHub in batches of at most 100", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  const states = {};
+  for (let n = 1; n <= 101; n++) {
+    states[n] = PR("MERGED");
+    f.dir(`pr${n}`);
+  }
+  f.states(states);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.removed.length, 101, "a number in the second batch was left unanswered");
+  assert.deepEqual(r.out.failed, []);
+  assert.equal(r.gh.length, 2, `101 numbers are two gh calls, got ${r.gh.length}`);
+  const sizes = r.gh.map((line) => JSON.parse(line).find((a) => a.startsWith("query=")).match(/issueOrPullRequest\(/g).length);
+  assert.deepEqual(sizes, [100, 1]);
 });
 
 test("(1) an OPEN PR keeps pr<M>/ whole except run-* roots idle past 7 days", (t) => {
@@ -293,6 +315,23 @@ test("(4) a keyed name of the wrong type, or naming nothing, is judged by age wi
   assert.ok(existsSync(issueAsPr) && existsSync(prAsImpl));
 });
 
+test("(4) a PR whose state GitHub did not give as MERGED or CLOSED is kept, never removed", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 5: { __typename: "PullRequest" }, 7: PR("OPENISH"), 9: PR("MERGED") });
+  const noState = f.dir("pr5", 8);
+  const odd = f.dir("pr7", 8);
+  const merged = f.dir("pr9", 8);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(existsSync(noState) && existsSync(odd), "a PR with an unrecognised state was removed");
+  assert.match(reasonOf(r.out.kept, noState), /unrecognised state/);
+  assert.match(reasonOf(r.out.kept, odd), /unrecognised state/);
+  assert.deepEqual(paths(r.out.removed), [merged]);
+});
+
 test("(5) gh failing keeps every keyed entry with the reason; unkeyed entries are still swept", (t) => {
   const f = fixture(t);
   f.ledger();
@@ -308,6 +347,28 @@ test("(5) gh failing keeps every keyed entry with the reason; unkeyed entries ar
     assert.ok(existsSync(p), `${p} was removed with gh unreachable`);
   }
   assert.deepEqual(paths(r.out.removed), [loose]);
+});
+
+test("(5) gh is asked with GH_REPO empty however the parent's environment names a repository", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 5: PR("OPEN") });
+  f.dir("pr5", 8);
+  const envLog = join(f.base, "gh-env.log");
+
+  const r = f.run(["--root", f.root], { env: { GH_REPO: "someone/else", GH_ENV_LOG: envLog } });
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readFileSync(envLog, "utf8").split("\n").filter(Boolean), ["GH_REPO="], "gh inherited the parent's GH_REPO, which outranks the repository the cwd is bound to");
+});
+
+test("freshUnder: an entry modified exactly at the cutoff is fresh, one a millisecond older is not", (t) => {
+  const f = fixture(t);
+  const p = f.file("edge.txt", 8);
+  const mtime = lstatSync(p).mtimeMs;
+
+  assert.equal(freshUnder(p, mtime), p, "an mtime equal to the cutoff counted as idle");
+  assert.equal(freshUnder(p, mtime + 1), null);
 });
 
 test("(5) a lookup GitHub failed for one number keeps that entry; its batch-mates are still judged", (t) => {
@@ -345,15 +406,33 @@ test("(5) an error naming no alias keeps every keyed entry in its batch; unkeyed
   assert.deepEqual(paths(r.out.removed), [loose]);
 });
 
-test("(5) a null alias with no NOT_FOUND error is no answer, not 'names nothing'", (t) => {
+for (const [shape, body] of [
+  ["no error at all", { data: { repository: { n5: null } } }],
+  ["a NOT_FOUND error naming a field inside the alias, not the alias", { data: { repository: { n5: null } }, errors: [{ type: "NOT_FOUND", path: ["repository", "n5", "state"], message: "no such field" }] }],
+]) {
+  test(`(5) a null alias with ${shape} is no answer, not 'names nothing'`, (t) => {
+    const f = fixture(t);
+    f.ledger();
+    const aged = f.dir("pr5", 10);
+
+    const r = f.run(["--root", f.root, "--apply"], { env: { GH_RAW: JSON.stringify(body) } });
+
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(reasonOf(r.out.kept, aged) ?? "", /^gh api graphql gave no answer for #5 \((null with no NOT_FOUND error|NOT_FOUND: no such field)\)$/);
+    assert.ok(existsSync(aged));
+    assert.deepEqual(r.out.removed, []);
+  });
+}
+
+test("(5) a body gh exited 0 with that is not JSON keeps the entry, and the reason says the body was unparseable", (t) => {
   const f = fixture(t);
   f.ledger();
   const aged = f.dir("pr5", 10);
 
-  const r = f.run(["--root", f.root, "--apply"], { env: { GH_RAW: JSON.stringify({ data: { repository: { n5: null } } }) } });
+  const r = f.run(["--root", f.root, "--apply"], { env: { GH_RAW: "<html>proxy login</html>" } });
 
   assert.equal(r.status, 0, r.stderr);
-  assert.match(reasonOf(r.out.kept, aged) ?? "", /^gh api graphql gave no answer for #5 \(null with no NOT_FOUND error\)$/);
+  assert.match(reasonOf(r.out.kept, aged) ?? "", /^gh api graphql gave no answer for #5 \(exit 0: unparseable body: .+\)$/);
   assert.ok(existsSync(aged));
   assert.deepEqual(r.out.removed, []);
 });
@@ -431,6 +510,31 @@ test("(6) a symlink entry is unlinked and its target left alone", (t) => {
   assert.deepEqual(paths(r.out.removed), [link]);
   assert.ok(!existsSync(link) && existsSync(target), "the symlink's target was removed");
   assert.equal(spawnSync("stat", DARWIN ? ["-f", "%Lp", target] : ["-c", "%a", target], { encoding: "utf8" }).stdout.trim(), "500", "the removal changed the target's mode through the link");
+});
+
+test("(6) a fresh target behind a symlink inside an idle entry does not keep it", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  const freshFile = join(f.base, "outside-file");
+  writeFileSync(freshFile, "x");
+  const freshDir = join(f.base, "outside-dir");
+  mkdirSync(freshDir);
+  writeFileSync(join(freshDir, "inner"), "x");
+  const entry = join(f.root, "derive-linked");
+  mkdirSync(entry);
+  const toFile = join(entry, "to-file");
+  const toDir = join(entry, "to-dir");
+  symlinkSync(freshFile, toFile);
+  symlinkSync(freshDir, toDir);
+  for (const l of [toFile, toDir]) spawnSync("touch", ["-h", "-t", "200001010000", l]);
+  f.age(entry, 8);
+  for (const l of [toFile, toDir]) spawnSync("touch", ["-h", "-t", "200001010000", l]);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [entry], "a symlink's fresh target kept the entry — freshUnder followed the link");
+  assert.ok(!existsSync(entry) && existsSync(freshFile) && existsSync(join(freshDir, "inner")), "the removal reached a link's target");
 });
 
 test("(7) a dry run touches nothing and prints the receipt --apply then acts on, with \"applied\":false", (t) => {

@@ -110,7 +110,7 @@ const REMOVE = [
 
 const PR_ENTRY = /^pr([1-9][0-9]*)$/;
 const IMPL_ENTRY = /^impl-([1-9][0-9]*)$/;
-const DISPOSITIONS_ENTRY = /^dispositions-(fix-pr-[1-9][0-9]*(?:-[a-z])?)\.json$/;
+const DISPOSITIONS_ENTRY = /^dispositions-fix-pr-([1-9][0-9]*)(?:-[a-z])?\.json$/;
 const RUN_ROOT = /^run-/;
 
 function how(r) {
@@ -214,10 +214,12 @@ function githubStates(numbers) {
       encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }),
     });
     let body;
+    let unparseable;
     try {
       body = JSON.parse(r.stdout);
-    } catch {
+    } catch (e) {
       body = undefined;
+      if (r.status === 0) unparseable = e.message;
     }
     const repo = body?.data?.repository;
     const errors = body?.errors ?? [];
@@ -238,7 +240,7 @@ function githubStates(numbers) {
     for (const n of batch) {
       const alias = `n${n}`;
       const gone = (why) => out.set(n, { unreachable: `gh api graphql gave no answer for #${n} (${why})` });
-      if (!answered) gone(how(r));
+      if (!answered) gone(unparseable === undefined ? how(r) : `${how(r)}: unparseable body: ${unparseable}`);
       else if (refused.has(alias)) gone(refused.get(alias));
       else if (batchWide !== undefined) gone(batchWide);
       else if (!Object.hasOwn(repo, alias)) gone(how(r));
@@ -281,7 +283,7 @@ function judgeRoot(root, names, live, now) {
     let m;
     if ((m = PR_ENTRY.exec(name))) keyed.push({ path, name, kind: "pr", n: Number(m[1]) });
     else if ((m = IMPL_ENTRY.exec(name))) keyed.push({ path, name, kind: "impl", n: Number(m[1]) });
-    else if ((m = DISPOSITIONS_ENTRY.exec(name)) && parseMember(m[1]) !== null) keyed.push({ path, name, kind: "pr", n: parseMember(m[1]).number });
+    else if ((m = DISPOSITIONS_ENTRY.exec(name))) keyed.push({ path, name, kind: "pr", n: Number(m[1]) });
     else {
       byAge(path, name, null);
       continue;
@@ -315,6 +317,10 @@ function judgeRoot(root, names, live, now) {
             kept.push({ path, reason: `its run-* roots cannot be listed: ${e.message}` });
           }
         }
+        continue;
+      }
+      if (s.state !== "MERGED" && s.state !== "CLOSED") {
+        kept.push({ path, reason: `PR #${n} has an unrecognised state ${s.state}` });
         continue;
       }
       const holder = prHolder(n);
