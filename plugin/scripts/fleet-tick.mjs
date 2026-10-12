@@ -1226,9 +1226,29 @@ function liftedPremise(excluded, entries, prs) {
   for (const { n, premises } of excluded) {
     if (inFile.has(n)) continue;
     for (const { kind, target } of premises) {
-      if (!isDigits(target)) continue;
-      if (kind === "pr" && !open.has(Number(target))) return `behind-pr:#${target} no longer open`;
-      if (kind === "issue") {
+      if (kind === "pr") {
+        if (isDigits(target)) {
+          // For numeric PR targets, check against the open set (fast path, no probe)
+          if (!open.has(Number(target))) return `behind-pr:#${target} no longer open`;
+        } else {
+          // For branch-named PR targets, probe with gh pr view to check current state
+          // Scrubbed as shortlist.mjs's probeState() is: gh's remote resolution
+          // follows GIT_DIR/GIT_WORK_TREE, and GH_REPO outranks both.
+          const r = spawnSync("gh", ["pr", "view", target, "--json", "state"], { encoding: "utf8", timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }) });
+          if (r.error || r.status !== 0) {
+            // Disclosed, not dropped: every other gh call in this file either
+            // dies or logs its failure — a bare empty catch here would be the
+            // one silent exception in a file whose whole design goal is "no
+            // silent stall".
+            console.error(`${NAME}: ${failure(r, `gh pr view ${target}`)} — behind-pr:#${target} premise unconfirmed, exclusion stands`);
+            continue;
+          }
+          let st = null;
+          try { st = JSON.parse(r.stdout).state; } catch { /* unanswered: the exclusion stands */ }
+          if (st === "CLOSED" || st === "MERGED") return `behind-pr:#${target} ${st}`;
+        }
+      } else if (kind === "issue") {
+        if (!isDigits(target)) continue;
         // Scrubbed as shortlist.mjs's probeState() is: gh's remote resolution
         // follows GIT_DIR/GIT_WORK_TREE, and GH_REPO outranks both.
         const r = spawnSync("gh", ["issue", "view", target, "--json", "state"], { encoding: "utf8", timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }) });
@@ -1400,7 +1420,7 @@ function main() {
     const r = refresh();
     if (r.ok) {
       const excludedSet = new Set(run.excluded.map((x) => x.n));
-      heads = [...new Set([...heads, ...unclaimed(r.entries, run)])];
+      heads = unclaimed(r.entries, run);
       supply = r.scanned;
       dropped = r.dropped;
       fresh = {
