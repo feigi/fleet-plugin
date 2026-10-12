@@ -156,6 +156,15 @@ test("the queue-depth table's empty row suggests /triage and asks nobody to tick
   assert.doesNotMatch(s, /ask the maintainer to tick/, "the queue-depth table asks the maintainer to tick — phase 0's multi-select is retired (ADR 0013)");
 });
 
+test("the queue-depth table says a specs-dropped tail on the row is not \"no work\"", () => {
+  // The tick names candidates.mjs's to-spec drops on the implementer row
+  // whatever its ACTION; an empty shortlist carrying one read as no work is
+  // the stall the tail exists to end.
+  const s = queueDepthTable();
+  assert.match(s, Pin.phrase("a `specs-dropped=#<N> (…)` at the end of its counts names the tickets the to-spec filter kept out of the shortlist"));
+  assert.match(s, Pin.phrase("an empty shortlist carrying one is not \"no work\""));
+});
+
 test("the review-backlog definition states what the script actually counts", () => {
   // The gate's input. Left as the narrow definition alone, a controller reading
   // a HOLD cannot tell an over-count from a real review-bound pipeline.

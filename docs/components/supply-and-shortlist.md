@@ -10,15 +10,16 @@ human curates this list — admission is fully automatic
 ## How it works
 1. **Scan.** [`shortlist.mjs`](../../plugin/scripts/shortlist.mjs)
    scans every open `ready-for-agent` issue oldest-first via
-   `candidates.mjs --require-label ready-for-agent` — that scanned
-   count is **supply**.
+   `candidates.mjs --require-label ready-for-agent --with-dropped` — that
+   scanned count is **supply**. The rows its to-spec filter removes are
+   counted nowhere and kept as `dropped`.
 2. **Filter**, failing closed at every step: drop a ticket whose
    dependency is an open blocker, whose ledger row reads a live
    `excluded · behind-pr:#M`/`behind-issue:#M` (lifted only once that
    PR/issue is `MERGED`/`CLOSED`), or whose `inflight.sh` probe finds it
    already claimed.
 3. **Write.** Survivors are written atomically to `.fleet/shortlist.json`
-   as `{scanned, shortlist: [{n, t}]}`. Exit 0 = written (an empty
+   as `{scanned, shortlist: [{n, t}], dropped: [{n, reason}]}`. Exit 0 = written (an empty
    Shortlist included); exit 2 = refused, previous file untouched —
    never read a refusal as "empty."
 4. **Refresh.** The controller builds the Shortlist once by hand at run
@@ -30,7 +31,9 @@ human curates this list — admission is fully automatic
    never refill-on-empty.
 
 **Shortlist** entries (no live `impl-` row, no live `excluded` row) are
-what the tick prints as `unclaimed=`. A ticket
+what the tick prints as `unclaimed=`; its `dropped` is what the tick prints
+as `specs-dropped=#<N> (to-spec: User Stories heading)` on every tick, so a
+shortlist the to-spec filter emptied never reads as no work. A ticket
 [Pull & Claim](pull-and-claim.md) can't admit is relabelled by cause and
 leaves the Shortlist without ever being deleted from GitHub's own queue.
 

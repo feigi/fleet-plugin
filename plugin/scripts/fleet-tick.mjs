@@ -156,7 +156,7 @@ function replaceStep(held, implNames) {
   ].filter(Boolean).join("; ");
 }
 
-// `specs-dropped=#2151 #2160 (to-spec: User Stories heading)`, one clause per
+// `specs-dropped=#<n> #<n> (to-spec: User Stories heading)`, one clause per
 // reason, or "" when nothing was dropped. A dropped ticket never reaches
 // `supply`, so without this an all-specs queue reads as no work at all.
 function specsDropped(dropped) {
