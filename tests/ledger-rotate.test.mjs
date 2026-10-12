@@ -176,6 +176,20 @@ test("rotate stamps `acted` in the same write as its controller record, and ever
   assert.equal(f.raw(), stamped);
 });
 
+test("a write subcommand leaves a heartbeat file it cannot read as it is — the record rotate refuses on is not replaced by a stamp", (t) => {
+  const f = fixture(t);
+  const corrupt = '{ "controller": {"pid": 1, "lstart"';
+  writeFileSync(join(f.dir, "heartbeat.json"), corrupt);
+  const w = f.cli(["row", "12", "impl-12"]);
+  assert.equal(w.status, 0, w.stderr);
+  assert.match(w.stderr, /WARNING/);
+  assert.equal(f.raw(), corrupt, "the stamp must not overwrite a file readState could not parse");
+  assert.ok(JSON.parse(f.cli(["read"]).stdout).rows.includes("#12 impl-12"), "the write itself still lands");
+  const r = f.cli(["rotate"]);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /cannot be read or parsed/);
+});
+
 test("rotate refuses when the archive name already exists, moving nothing", (t) => {
   const f = fixture(t);
   // Every second this call can plausibly land on is taken.

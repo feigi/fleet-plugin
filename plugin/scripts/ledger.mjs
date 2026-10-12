@@ -34,9 +34,10 @@
 // acquireLock() below.
 //
 // Every write subcommand also stamps `acted` in the heartbeat file beside the
-// ledger once its write has landed — rotate in the same write as its
-// controller record. A run's ledger writes are its densest sign of life, so
-// the stall readers judge a busy run by them (fleet-state.mjs has the rule).
+// ledger whenever its call ends without a refusal — rotate in the same write
+// as its controller record. A run's ledger writes are its densest sign of
+// life, so the stall readers judge a busy run by them (fleet-state.mjs has
+// the rule).
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, openSync, writeSync, closeSync, unlinkSync, linkSync } from "node:fs";
 import { dirname, resolve, join, basename } from "node:path";
@@ -934,10 +935,12 @@ if (cmd === "read") {
   die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check, read, dispatch, settle, review, drain or rotate`);
 }
 
-// Reached only by an arm that did not die, so only a write that landed is
-// stamped. Still under the write lock, so two ledger calls never race on the
-// key. A heartbeat file that exists and cannot be read is left as it is for
-// the readers that refuse on it; readState() has already said why.
+// Reached only by an arm that did not die, so every write subcommand that did
+// not refuse is stamped — one that found nothing to change (a repeat `drain`,
+// a duplicate `filed`) is still the controller acting. Still under the write
+// lock, so two ledger calls never race on the key. A heartbeat file that
+// exists and cannot be read is left as it is for the readers that refuse on
+// it; readState() has already said why.
 if (WRITE_COMMANDS.has(cmd) && cmd !== "rotate") {
   const beatFile = stateFileIn(dirname(file));
   const state = readState(beatFile, NAME);

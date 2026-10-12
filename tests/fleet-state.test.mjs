@@ -712,6 +712,16 @@ test("assessBeat: a run with a controller record and no beat of its own goes sta
   assert.equal(assessBeat({ beat: null, ticked: { at: now - 3 * WINDOW }, now }).kind, "none");
 });
 
+test("assessBeat: a controller record that cannot place a mark, beside no mark at all, judges no run — and one beside a mark still does", () => {
+  const now = 2_000_000_000_000;
+  const controller = { pid: 1, lstart: "x", prior: "none", at: null };
+  assert.deepEqual(assessBeat({ beat: null, controller, now }), { kind: "none" });
+  assert.equal(stallsAt({ beat: null, controller }), null);
+  // With a mark the record cannot partition it away, so it is judged.
+  assert.equal(assessBeat({ beat: null, ticked: { at: now - 5 * MIN }, controller, now }).kind, "beating");
+  assert.equal(assessBeat({ beat: null, ticked: { at: now - WINDOW - 1 }, controller, now }).kind, "stale");
+});
+
 test("stallOwner: a ledger write at or after the record is the recorded controller's own", () => {
   const old = { at: RECORD_AT - 60_000 };
   for (const prior of ["dead", "ancestor", "none"]) {

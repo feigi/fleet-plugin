@@ -2772,6 +2772,25 @@ test("CLI: a tick refused by the gh or the ledger read still records `ticked`, a
   assert.equal(readFileSync(path, "utf8"), untouched);
 });
 
+test("CLI: a tick refused over a heartbeat file it cannot read leaves the file as it was; one that completes replaces it and still records `ticked`", (t) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-degraded-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "heartbeat.json");
+  // A record fragment a later rotate must still be able to refuse on.
+  const corrupt = '{ "controller": {"pid": 1, "lstart"';
+  writeFileSync(path, corrupt);
+  const refused = runCli(["--state", path], { ...IDLE, env: { PR_FAIL: "1" } });
+  assert.equal(refused.status, 2, refused.stderr);
+  assert.match(refused.stderr, /gh pr list/);
+  assert.equal(readFileSync(path, "utf8"), corrupt, "a refused tick must not replace a file it could not read");
+
+  const before = Date.now();
+  const done = runCli(["--state", path], IDLE);
+  assert.equal(done.status, 0, done.stderr);
+  const after = JSON.parse(readFileSync(path, "utf8"));
+  assert.ok(after.ticked.at >= before && after.ticked.at <= Date.now(), `ticked.at ${after.ticked.at} is not this tick`);
+});
+
 test("CLI: a draining run with no open PR and no live implementer ends on the run-over ACTION, folded or not", (t) => {
   const settled = { rows: ["#5 impl-5=PR#9 · tier-ok=impl-5:fleet-implementer"], dispatched: ["impl-5=PR#9"] };
   const last = (r) => r.stdout.trimEnd().split("\n").at(-1);

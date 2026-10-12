@@ -460,7 +460,7 @@ phase, or in any later one, asks the maintainer which tickets to take.
    then on. That write can fail, and then exit 2 follows
    a move: `rotated <file> -> <archive>` on stderr, then the refusal that the
    record could not be written. Run the rotation before this run's own first
-   tick or beat, either of which writes the mark the fallback reads. Older
+   tick, beat or ledger write, each of which writes a mark the fallback reads. Older
    archives, hand-named ones included, are left alone.
 
    **Derive the Recipe — the Recipe derivation step — before the fold-in below

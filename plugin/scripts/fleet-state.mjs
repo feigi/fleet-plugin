@@ -427,10 +427,11 @@ function since(at, intervalMs, now) {
 // run has no mark at all. Exported for the readers that must say WHEN a
 // beating run would stop counting, not only whether it has.
 export function stallsAt({ beat = null, ticked = null, acted = null, controller = null }) {
-  const ends = [ticked, acted, controller?.at == null ? null : { at: controller.at }]
+  const ends = [ticked, acted]
     .map((m) => thisRun(m, controller))
     .filter((m) => m !== null)
     .map((m) => m.at + WINDOW_MS);
+  if (controller?.at != null) ends.push(controller.at + WINDOW_MS);
   const ours = thisRun(beat, controller);
   if (ours) ends.push(ours.at + ours.interval * 1000 * BEAT_GRACE);
   return ends.length > 0 ? Math.max(...ends) : null;
@@ -519,7 +520,7 @@ function mins(ms) {
 export const NO_OWNER = Object.freeze({ kind: "none" });
 export function stallOwner({ controller, beat = null, ticked = null, acted = null }, name, judge = judgeRecord) {
   if (!controller) return NO_OWNER;
-  const before = (mark) => mark === null || mark.at < controller.at;
+  const before = (mark) => thisRun(mark, controller) === null;
   if (controller.at !== null && before(beat) && before(ticked) && before(acted)) {
     if (controller.prior === "dead") return { kind: "gone", resumes: "this run" };
     if (controller.prior === "ancestor") return { kind: "alive", pid: null };

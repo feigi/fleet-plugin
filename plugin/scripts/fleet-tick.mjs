@@ -1336,10 +1336,13 @@ function main() {
   // ahead of the gh and ledger reads that can refuse this tick: a refused
   // tick was still invoked, and a run whose every tick refuses on a gh outage
   // is a run working, not a dead one. Only the usage refusals above leave no
-  // mark — they never reached the state file. Judged before it is written, so
-  // the previous run's end prints on this run's first tick and on no later
-  // one.
-  writeState(path, NAME, priorState, { ticked: { at: tickedAt } });
+  // mark — they never reached the state file — and a file that exists but
+  // could not be read is left as it is, as ledger.mjs's `acted` stamp leaves
+  // it: rotate refuses on such a file because a record it may hold cannot be
+  // known, and a write here would replace that record with a fresh one.
+  // Judged before it is written, so the previous run's end prints on this
+  // run's first tick and on no later one.
+  if (!priorState.degraded) writeState(path, NAME, priorState, { ticked: { at: tickedAt } });
   if (isReported(verdict)) {
     console.log(stallReport(verdict, isStalled(verdict)
       ? { claimed: claimed(), supply: current.scanned, owner: stallOwner(priorState, NAME) }
@@ -1422,10 +1425,13 @@ function main() {
   const digest = createHash("sha256").update(lines.join("\n")).digest("hex");
   const acts = actionable(rows) || over;
   // `seen` is pruned to the live set on the same write; an empty one removes
-  // the key. `ticked` was written at the top of the tick.
+  // the key. `ticked` was written at the top of the tick, unless the file
+  // could not be read then: this write replaces such a file, so it carries
+  // the stamp the top of the tick left out.
   writeState(path, NAME, prev, {
     quiet: acts ? 0 : prev.quiet + 1, digest,
     seen: Object.keys(seen).length > 0 ? seen : undefined,
+    ...(priorState.degraded ? { ticked: { at: tickedAt } } : {}),
   });
 
   // Fold only when BOTH hold: nothing to act on, and nothing new to say. A
