@@ -233,6 +233,24 @@ test("a nested repository whose HEAD git cannot resolve is unknown, never clean"
   const r = recordBaseline({ cwd: dir });
   assert.equal(r.ok, false);
 });
+test("a nested repository whose HEAD points to an existing ref but the commit is missing is unknown", (t) => {
+  const dir = repo(t);
+  const sub = nested(dir);
+  record(dir);
+  // HEAD points to a ref (refs/heads/main exists as a symbolic ref), but the
+  // commit it points to does not exist in the object store. This is different
+  // from the unborn case where the ref itself doesn't exist.
+  // First, get the current HEAD commit SHA.
+  const currentHead = git(sub, "rev-parse", "HEAD").trim();
+  // Then, delete the commit object so rev-parse HEAD^{commit} will fail, but
+  // the ref itself (refs/heads/main) will still exist.
+  const objPath = join(sub, ".git", "objects", currentHead.slice(0, 2), currentHead.slice(2));
+  rmSync(objPath);
+  const c = check(dir);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "read");
+});
+
 
 test("a write under a gitignored directory is clean — run state, agent-brain's cache", (t) => {
   const dir = repo(t);
