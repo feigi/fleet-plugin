@@ -822,8 +822,8 @@ function logicalLines(text) {
   let offset = 0;
   for (let i = 0; i < src.length; i++) {
     // A wrap point is one inter-word space, so the indent the wrap introduced
-    // comes off and exactly one space goes back — `stripHashGutter`'s rejoin,
-    // one gutter shape fewer. The trailing trim is why that space is never two.
+    // comes off and exactly one space goes back. The trailing trim is why that
+    // space is never two.
     let line = joins[i] ? src[i].replace(/^[ \t]+/, "") : src[i];
     if (joins[i + 1]) line = line.replace(/[ \t]+$/, "");
     if (i > 0) {
@@ -930,11 +930,11 @@ const FILES = new Map();
 const MINT = Symbol("Pin");
 
 // The module's only export. A node holds immutable text. Every method but
-// `.section` and `.stripGutter` runs the private function of the same name on
-// that text, so every bound stays explicit; `.anchorAt` returns a number,
-// `.quoteBlocks` an array of nodes and the rest a new node. `.section` and
-// `.stripGutter` have no private function of that name. Roots come from
-// `Pin.file()` or `Pin.of()`, never `new Pin`.
+// `.stripGutter` runs the private function of the same name on that text, so
+// every bound stays explicit; `.anchorAt` returns a number, `.quoteBlocks` an
+// array of nodes and the rest a new node. `.stripGutter` has no private
+// function of that name. Roots come from `Pin.file()` or `Pin.of()`, never
+// `new Pin`.
 export class Pin {
   #text;
   #label;

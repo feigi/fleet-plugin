@@ -41,12 +41,12 @@
 //   slice. Its own caller needs the flattening; a shared `between()` does not
 //   do it and could not without changing every other caller's output too.
 //
-//   cross-repo-citation-prose.test.mjs's `slice(text, startAnchor,
-//   endAnchor, what, { endsFile })` threads an `if (end === -1 && endsFile)
-//   return text.slice(at);` branch between the second `indexOf` and the
-//   second `assert.notEqual` — the five statements are no longer adjacent,
-//   and the function does something (`endsFile`'s EOF tolerance) `between()`
-//   cannot.
+//   cross-repo-citation-prose.test.mjs's local `slice(text, startAnchor,
+//   endAnchor, what, { endsFile })` was one until #3063 deleted it: it
+//   threaded an `if (end === -1 && endsFile) return text.slice(at);` branch
+//   between the second `indexOf` and the second `assert.notEqual` — the five
+//   statements were not adjacent, and the function did something (`endsFile`'s
+//   EOF tolerance) `between()` could not.
 //
 // finisher-pin-race-prose.test.mjs's `fallbackSection()` and the `specialists()`
 // in `ed9f2967^:plugin/scripts/review-pr-citation-prose.test.mjs` looked like
@@ -116,7 +116,8 @@ const PROSE_PIN = join(import.meta.dirname, "support", "prose-pin.mjs");
 // Comments are stripped before matching (`strip-comments.mjs`, the same
 // helper candidates.test.mjs and the review-pr-*.test.mjs pins already
 // share): this repo's own style routinely puts a `//` line between two of
-// the five statements (cross-repo-citation-prose.test.mjs), and the `\s*`
+// the five statements (cross-repo-citation-prose.test.mjs's `slice()`, before
+// #3063 deleted it), and the `\s*`
 // separators above do not span a real comment's text — measured directly,
 // an un-stripped scan misses a reintroduced twin written that way.
 // `strip-comments.mjs` only blanks WHOLE-LINE comments by design (its own
@@ -212,7 +213,8 @@ const clone = (text, from, to, what) => {
 
   // A `//` comment between two of the five statements, and `let` instead of
   // `const` for both inner declarations — this repo's own style
-  // (cross-repo-citation-prose.test.mjs) and a measured miss: an earlier
+  // (cross-repo-citation-prose.test.mjs's `slice()`, before #3063 deleted it)
+  // and a measured miss: an earlier
   // revision of TWIN_SHAPE matched none of this against the unstripped
   // source.
   const commented = `

@@ -1129,7 +1129,7 @@ test("logicalLines keeps a block-leading span at column 0 and takes a wrap-leadi
   assert.deepEqual([...Pin.logicalLines(real).text.matchAll(lead)].map((m) => m[1]), ["A Real Block"]);
 });
 
-// `Pin`, the chained form. One chain per test; every new piece of logic —
+// `Pin`. One chain per test; every new piece of logic —
 // roots, marker inference, gutters, `.section` — gets the input it must
 // ACCEPT beside the input it must REFUSE.
 
@@ -1197,6 +1197,26 @@ test("Pin.file infers runAbove's marker from .sh, .mjs and .js, and a node slice
     assert.equal(Pin.file(js).runAbove("const X", "the fixture").text, "// says what X is\n", ext);
   }
   assert.equal(Pin.file(sh).between("# over", "}", "the fixture").runAbove("probe() {", "the fixture").text, "# over two lines\n");
+  // Every method that returns a node hands it the root's marker, not just
+  // `.between`. `runAbove` on each result needs one, and refuses without it.
+  // The comment line carries no space after `#` so `.section`'s heading scan
+  // does not end the section there.
+  const derive = fixtureFile("derive.sh", "## Sec\n\n#says a\nprobe_a() {\n  :\n}\n\n- # item b\n  probe_b() {\n\n> # c quoted\n> probe_c() {\n\ntail\n");
+  const root = Pin.file(derive);
+  const derived = [
+    ["between", root.between("## Sec", "tail", "the fixture"), "probe_a() {"],
+    ["paragraph", root.paragraph("#says a", "the fixture", "- # item b"), "probe_a() {"],
+    ["bullet", root.bullet("- # item b", "> # c quoted", "the fixture"), "probe_b() {"],
+    ["betweenPhrases", root.betweenPhrases("## Sec", "tail", "the fixture"), "probe_a() {"],
+    ["quoteBlock", root.quoteBlock("# c quoted", "the fixture"), "probe_c() {"],
+    ["quoteBlocks", root.quoteBlocks()[0], "probe_c() {"],
+    ["section", root.section("## Sec", "the fixture"), "probe_a() {"],
+    ["stripGutter", root.stripGutter(">"), "probe_a() {"],
+    ["runAbove", root.runAbove("probe_a() {", "the fixture"), "#says a"],
+  ];
+  for (const [method, node, anchor] of derived) {
+    assert.doesNotThrow(() => node.runAbove(anchor, "the fixture"), `${method} keeps the root's marker`);
+  }
 });
 
 test("runAbove takes an explicit marker over the inferred one, and on a Pin.of root", () => {

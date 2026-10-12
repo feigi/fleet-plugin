@@ -41,13 +41,16 @@ const httpRationale = () =>
 // fleet slot" into the ssh paragraph left both of them green. A negative pin
 // scoped narrower than the prose it forbids forbids nothing. The positive pins
 // stay on the narrow slice, where a bound at both ends is what stops an
-// unrelated block from satisfying them.
+// unrelated block from satisfying them. The lines come back joined with one
+// space, not `\n`: the `can still hold a fleet slot` pin below spells its
+// sentence with literal spaces, so a sentence hard-wrapped across a `#` line
+// only matches it when the wrap point is a space.
 const transportRationale = () =>
   NET.between(
     "# ssh: BatchMode=yes refuses any interactive prompt",
     "net_base_ssh=$(git config --get core.sshCommand",
     "net.sh",
-  ).stripGutter("#").text;
+  ).stripGutter("#").text.replace(/\n/g, " ");
 
 test("net_git's comment states that the per-transport knobs are kept, and why", () => {
   const text = httpRationale();
