@@ -50,8 +50,16 @@ _Avoid_: unclaim, close, clean up
 **Reap**:
 Deleting branches whose upstream is gone, and their worktrees, after each merge pass.
 Distinct from Release: a reap follows a merged PR, a release follows a claim that never
-became one.
+became one. Scratch is not reaped; see **Reclaim**.
 _Avoid_: prune, cleanup
+
+**Reclaim**:
+Removing what a run left under its scratch root once nothing can still want it: a
+merged or closed PR's `pr<M>/` and disposition records, a closed ticket's `impl-<N>/`,
+and anything else idle past 7 days with no live member's name on it. Authorized on
+GitHub state and age, by `reclaim-scratch.mjs` (ADR 0029) — never on git evidence,
+which is Reap's.
+_Avoid_: reap, prune, cleanup
 
 **Upstream**:
 The remote-tracking ref a claim's branch tracks. There is none at claim time

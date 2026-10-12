@@ -437,8 +437,9 @@ export function liveOnLedger(rows, dispatched) {
 
 // A reviewer's runner name: `review-pr-<n>` for a PR's first, `-b`, `-c`, …
 // for each later one. The only runner names the grammar knows, so the only
-// ones a rotate retires; a launch under any other name retires nothing.
-const REVIEWER = /^review-pr-[1-9][0-9]*(-[b-z])?$/;
+// ones a rotate retires; a launch under any other name retires nothing. The
+// first group is the PR number the name is bound to.
+export const REVIEWER = /^review-pr-([1-9][0-9]*)(-[b-z])?$/;
 
 /** Whether `name` is one a `## Retired` line may hold: a member's name or a
  * reviewer's, bare. */

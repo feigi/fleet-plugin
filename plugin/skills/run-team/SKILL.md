@@ -473,6 +473,17 @@ phase, or in any later one, asks the maintainer which tickets to take.
    tick, beat or ledger write, each of which writes a mark the fallback reads. Older
    archives, hand-named ones included, are left alone.
 
+   **Reclaim scratch straight after the rotation — every run.**
+   `~/.fleet/bin/fleet-run reclaim-scratch.mjs --root <scratch>
+   --after-rotate --apply`, `<scratch>` the path `scratch-root.mjs` prints,
+   so a run that merges nothing still reclaims the previous run's leftovers
+   (**Reclaim scratch after each merge pass** says what it removes).
+   `--after-rotate` goes on this call always and on no other: rotate leaves
+   no ledger behind when it carried nothing, and the flag reads that absence
+   as "no live token" — rotate's own verdict — where without it the script
+   refuses. A ledger rotate did write is read as usual. Record nothing on the
+   ledger and act on nothing in its receipt.
+
    **Derive the Recipe — the Recipe derivation step — before the fold-in below
    and before the first claim.** Every claim runs this repository's Install
    step and bakes its Test entrypoint into the member's runner, and every
@@ -1693,7 +1704,7 @@ ticket's line — never a hand edit.
 | Finisher report (failed / killed) | `ledger.mjs settle finisher-pr-<M>=failed` for a finisher that crashed or gave up, `=killed` for one that was killed; no label, and the tick prints no dispatch for it. The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, below) |
 | Label seen (persistent Monitor) | nothing to record |
 | CI run terminal | `ci=<run-id>:<attempt>:<conclusion>` on the row; then the finisher gate (below) |
-| Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `reap.sh --apply`. (The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in this same pass, before reporting — a token the bot wrote in this pass, never one `reap.sh` writes.) |
+| Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `reap.sh --apply`; `reclaim-scratch.mjs --root <scratch> --apply`. (The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in this same pass, before reporting — a token the bot wrote in this pass, never one `reap.sh` writes.) |
 | Drain | `ledger.mjs drain "<reason>"`; release the claims (below); `settle impl-<N>=released`; then the rest of **End of run** (below), `--stop` last |
 | Heartbeat | nothing to record |
 
@@ -1750,8 +1761,9 @@ owes beyond its row:
   into that ticket's row as `held-behind:#<lower>` — the verdict moves no label
   and leaves nothing in the repo, so the row is the only place the tick can read
   it from — settle `merge-bot-<n>=done`, reap merged branches and worktrees with
-  `reap.sh --apply` (below) — always, even when the pass merged nothing — and
-  then run the tick. A label that landed at the last moment reads `DISPATCH
+  `reap.sh --apply` (below) — always, even when the pass merged nothing — then
+  reclaim their scratch with `reclaim-scratch.mjs --root <scratch> --apply`
+  (below), and then run the tick. A label that landed at the last moment reads `DISPATCH
   merge-bot` again: dispatch the next bot straight away. A `rebase-fallback-#<pr>`
   on a conflict needs no record from you — the bot already appended
   `conflict-hold:#<pr>` to that PR's row, and the tick turns it into `DISPATCH
@@ -3623,6 +3635,33 @@ See references/reaping.md.
 a row without a terminal state means someone may still be in that worktree, and
 the dirty check does not see a member that committed but has not pushed.
 See references/reaping.md.
+
+### Reclaim scratch after each merge pass
+
+Right after `reap.sh --apply`, every pass:
+`~/.fleet/bin/fleet-run reclaim-scratch.mjs --root <scratch> --apply`,
+`<scratch>` the path `scratch-root.mjs` prints. Reap authorizes on git's
+evidence and never removes scratch; Reclaim authorizes on GitHub state and
+age, reading which members are live off `.fleet/ledger.md`:
+
+- **`pr<M>/` and `dispositions-fix-pr-<M>*.json`** go once PR #M is MERGED
+  or CLOSED and no live `review-pr-<M>`, `fix-pr-<M>` or `finisher-pr-<M>`
+  token names it. A live `merge-bot-<n>` holds every one of them for that
+  sweep — its token names no PR. An OPEN PR's `pr<M>/` stays, all but its
+  `run-*` roots idle past 7 days.
+- **`impl-<N>/`** goes once issue #N is CLOSED, or when it is OPEN, no live
+  `impl-<N>` token names it and nothing under it has changed in 7 days.
+- **Anything else at the root** — your own ad-hoc files included — goes
+  once nothing under it has changed in 7 days and no live token's name
+  appears in its name.
+
+No ledger refuses this call (exit 2, nothing removed): mid-run there is
+always one, so its absence is a fault to look at, never permission. A `gh`
+that cannot answer keeps every PR- and ticket-keyed entry. It prints one
+JSON receipt — `removed`, `kept` and `failed`, each entry with its reason —
+and exits 0 even when a removal failed; record nothing on the ledger. The
+review snapshot runs the same script as `--pr <N>` on its own PR's stale
+`run-*` roots.
 
 ### Release the claims that never became PRs — at end of run, and on drain
 
