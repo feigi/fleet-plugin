@@ -1916,10 +1916,14 @@ depth** guard table applied in code. Act on each line as it reads:
   attributes nothing, because concurrent members make that a guess. Dispatch
   nothing new and tell the maintainer: they resolve the stray paths FIRST,
   then re-baseline with `~/.fleet/bin/fleet-run main-checkout.mjs --record`.
-  The hold lasts until that re-baseline, tick after tick. Never revert the
+  A path entry holds until that re-baseline, tick after tick; a `HEAD …` entry
+  clears itself once HEAD reads clean again, and is never re-baselined while
+  HEAD is off the run's branch. Never revert the
   paths yourself, and never re-baseline over paths nobody has resolved. The
-  one change of yours that trips it is a mid-run tooling fix edited in this
-  checkout; **Fix the tooling mid-run** says how that one is cleared.
+  changes of yours that trip it are a mid-run tooling fix edited in this
+  checkout and the close-out commit's round trip through a branch; **Fix the
+  tooling mid-run** and **Commit the metrics files and open a PR — at end of
+  run** say how each is cleared.
 - `MAIN-CHECKOUT-UNKNOWN …` with `HOLD (main checkout unknown)` — the tick
   could not look: a git or hash read failed (`could not look:`), or the
   baseline exists but cannot be read (`baseline unreadable:`). Never clean,
@@ -4026,14 +4030,19 @@ the step. Cut before you append.
 --pin`. You just changed the instrument set under your own check, and this is the
 only edit that legitimately does; skip it and the next gate refuses on your own
 fix, which teaches you to ignore the refusal. Then the ledger line, save the
-rationale, one line to the maintainer. **Then re-baseline the main checkout,
-if the fix was edited in it** — the next tick reads `MAIN-CHECKOUT-DIRTY`
-naming your own paths. Run `~/.fleet/bin/fleet-run main-checkout.mjs --check`
-first, and only when the paths it names are exactly the ones you just edited,
-run `--record`. Any other path on that line is a stray write — leave the hold for
-the maintainer, because `--record` would certify it with yours. A `HEAD …`
-entry is none of your paths: commit the fix on a branch, switch back to `main`
-before the next tick, and never `--record` while on that branch. Live members
+rationale, one line to the maintainer. **Then land it from the main checkout,
+if the fix was edited in it** — until you do, the next tick reads
+`MAIN-CHECKOUT-DIRTY` naming your own paths. Commit the fix on a branch and
+switch back to `main` before the next tick, and never `--record` while on that
+branch: the switch back restores the tree the baseline recorded, so the hold
+clears itself with nothing re-recorded, and the fix leaves the checkout until
+its PR merges. A `HEAD …` entry is none of your paths and clears the same way.
+Re-baseline only a fix you leave edited in the checkout: run
+`~/.fleet/bin/fleet-run main-checkout.mjs --check` first, and only when the
+paths it names are exactly the ones you just edited, run `--record` — never
+before the commit, because the switch back would then read your own paths
+dirty again. Any other path on that line is a stray write — leave the hold for
+the maintainer, because `--record` would certify it with yours. Live members
 hold the old text — re-brief only if it changes what they do *now*.
 
 **Landing it.** The file being right is not the end of it. `main` carries a

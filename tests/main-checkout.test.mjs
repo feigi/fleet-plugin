@@ -502,7 +502,6 @@ test("a stray commit, a branch switch, a detach, a reset and an amend each move 
     const c = check(dir);
     assert.equal(c.state, "dirty", `${name} read ${c.state}`);
     assert.equal(c.changed.length, 1, `${name}: ${JSON.stringify(c.changed)}`);
-    assert.match(c.changed[0], /^HEAD /, name);
     assert.equal(c.headMove, c.changed[0], name);
     assert.match(describe(c, []), /^MAIN-CHECKOUT-DIRTY HEAD refs\/heads\/main@[0-9a-f]{7} → \S+@[0-9a-f]{7} — changed since the run's baseline/, name);
     assert.ok(c.changed[0].startsWith(`HEAD refs/heads/main@${was} → `), `${name}: ${c.changed[0]}`);
@@ -642,6 +641,15 @@ test("an unborn HEAD is unknown, never clean, and --record refuses it", (t) => {
   const r = recordBaseline({ cwd: dir });
   assert.equal(r.ok, false);
   assert.match(r.why, /could not look, so there is nothing to record/);
+});
+
+test("--record refuses a checkout with no origin/main and writes no baseline, since the check could only answer unknown to it", (t) => {
+  const dir = repo(t);
+  git(dir, "update-ref", "-d", "refs/remotes/origin/main");
+  const r = recordBaseline({ cwd: dir });
+  assert.equal(r.ok, false);
+  assert.match(r.why, /origin\/main is missing or unreadable .* — could not look, so there is nothing to record/);
+  assert.throws(() => lstatSync(baselinePath(dir)), { code: "ENOENT" });
 });
 
 test("a baseline commit git cannot find is unknown, never dirty: a failed ancestry read is not 'no'", (t) => {

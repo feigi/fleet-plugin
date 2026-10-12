@@ -33,7 +33,7 @@
 //     ignored in a fleet repo, so worktrees, run state and agent-brain's cache
 //     stay writable, and what is protected is exactly what the main
 //     checkout's `git status` would show dirty (main-checkout.mjs watches the
-//     same set).
+//     same set, and the checkout's HEAD besides).
 //   - `bash` cwd, for every `fleet-implementer-<cell>` (ledger-grammar.mjs's
 //     `CELL_DEF`), and for a fix-applier's own id (`fix-pr-<n>`) directly,
 //     since a review fix-applier is a generic `task`: refuse when

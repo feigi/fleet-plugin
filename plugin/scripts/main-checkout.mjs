@@ -172,9 +172,10 @@ const sha = (buf) => createHash("sha256").update(buf).digest("hex");
 // every path they name, so a further edit to a file already dirty in it moves
 // the hash where its status line would not — folded with its HEAD, so a
 // commit in it moves the hash too. A commitless repository's HEAD is the
-// branch it names. Nothing is left out: the run's bookkeeping is the main
-// checkout's two paths, not a nested repository's. Any git that fails
-// throws: `unknown`, never a hash that reads clean.
+// branch it names. Nothing is left out: the run's bookkeeping is
+// `RUN_BOOKKEEPING`, the main checkout's named paths, not a nested
+// repository's. Any git that fails throws: `unknown`, never a hash that reads
+// clean.
 function nestedHash(abs, env) {
   const now = entriesAt(abs, env, new Set());
   if (!now.ok) throw new Error(now.why);
@@ -250,6 +251,14 @@ function readState(root, env) {
 
 const headLabel = ({ ref, oid }) => `${ref ?? "(detached)"}@${oid.slice(0, 7)}`;
 
+// The `origin/main` read the clean rule rests on: `{ok: true, …}` or
+// `{ok: false, why}`. The check and `--record` both make it, so a baseline is
+// never written that the check could only answer `unknown` to.
+function originMain(root, env) {
+  const r = git("git rev-parse --verify refs/remotes/origin/main", ["rev-parse", "-q", "--verify", "refs/remotes/origin/main^{commit}"], root, env);
+  return r.ok ? r : { ok: false, why: `origin/main is missing or unreadable (${r.why})` };
+}
+
 /**
  * Did HEAD move off the baseline's? `{ok, change}`: `change` is null, or the
  * `HEAD <was> → <now>` entry; `{ok: false, why}` when a read failed.
@@ -261,8 +270,8 @@ const headLabel = ({ ref, oid }) => `${ref ?? "(detached)"}@${oid.slice(0, 7)}`;
  * is one this cannot vouch for.
  */
 function headMove(root, env, was, now) {
-  const origin = git("git rev-parse --verify refs/remotes/origin/main", ["rev-parse", "-q", "--verify", "refs/remotes/origin/main^{commit}"], root, env);
-  if (!origin.ok) return { ok: false, why: `origin/main is missing or unreadable (${origin.why})` };
+  const origin = originMain(root, env);
+  if (!origin.ok) return origin;
   const moved = { ok: true, change: `HEAD ${headLabel(was)} → ${headLabel(now)}` };
   if (now.ref !== was.ref) return moved;
   if (now.oid === was.oid) return { ok: true, change: null };
@@ -391,9 +400,9 @@ export function describe(check, live = null) {
 /**
  * Write the baseline: `{ok, path, entries, head}` or `{ok: false, why}`.
  * Refuses over a baseline that exists but cannot be read — overwriting it
- * blind discards evidence nobody read — and on any failed read of the tree or
- * of HEAD, and on a detached HEAD, which has no symbolic ref to record. A v1
- * baseline is not unreadable: it is the one this overwrites.
+ * blind discards evidence nobody read — and on any failed read of the tree, of
+ * HEAD or of `origin/main`, and on a detached HEAD, which has no symbolic ref
+ * to record. A v1 baseline is not unreadable: it is the one this overwrites.
  * Written to a temporary name and renamed, so a reader never sees half of it.
  */
 export function recordBaseline({ cwd = process.cwd(), env = process.env } = {}) {
@@ -409,6 +418,8 @@ export function recordBaseline({ cwd = process.cwd(), env = process.env } = {}) 
   if (now.head.ref === null) {
     return { ok: false, why: "HEAD is detached, so there is no symbolic ref to record — switch to the run's branch first" };
   }
+  const origin = originMain(where.root, env);
+  if (!origin.ok) return { ok: false, why: `${origin.why} — could not look, so there is nothing to record` };
   try {
     mkdirSync(join(where.root, ".fleet"), { recursive: true });
     const tmp = `${path}.${process.pid}.tmp`;
