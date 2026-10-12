@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync, symlinkSync, copyFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync, symlinkSync, copyFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join, dirname } from "node:path";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { slotHome, holdSlots } from "./support/suite-slot-home.mjs";
 
 const SCRIPT = join(import.meta.dirname, "..", "plugin", "scripts", "claim-ticket.sh");
 
@@ -88,12 +89,16 @@ function apply(files, script = SCRIPT, recipe = {}) {
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const wt = join(dir, ".worktrees", "42-slug");
+  // The runner reaches the suite slots by `$HOME/.fleet/bin/fleet-run`: it runs
+  // under the fixture's own Resolver and HOME, never the real ones.
+  const host = slotHome();
   return {
     dir,
     wt,
+    host,
     receipt: JSON.parse(r.stdout),
     text: readFileSync(join(wt, "agent-test"), "utf8"),
-    run: (...args) => spawnSync(join(wt, "agent-test"), args, { cwd: wt, encoding: "utf8" }),
+    run: (...args) => spawnSync(join(wt, "agent-test"), args, { cwd: wt, encoding: "utf8", env: host.env(), timeout: 30_000 }),
   };
 }
 
@@ -168,7 +173,7 @@ test("runner: the Test entrypoint's own exit status is the runner's", () => {
 // arguments appended to its last simple command.
 test("runner: a quoted or compound Test entrypoint runs exactly as written", () => {
   const quoted = apply({}, SCRIPT, { test: `echo "it's \\$HOME's"` });
-  assert.match(quoted.text, /^exec sh -c '/m);
+  assert.match(quoted.text, /^exec "\$HOME\/\.fleet\/bin\/fleet-run" suite-slot\.mjs '/m);
   const q = quoted.run("x");
   assert.equal(q.status, 0, q.stderr);
   assert.equal(q.stdout, "it's $HOME's x\n");
@@ -177,6 +182,30 @@ test("runner: a quoted or compound Test entrypoint runs exactly as written", () 
   const c = compound.run("y");
   assert.equal(c.status, 0, c.stderr);
   assert.match(c.stdout, /^arg:y\n/);
+});
+
+// The runner is how every claimed member reaches the host's suite bound: a run
+// with no arguments is the full suite and waits for a slot, a run with arguments
+// is narrowed and takes none. Both go through the real Resolver of a host of
+// their own (`slotHome()`), never the real `~/.fleet`.
+test("runner: a run with no arguments takes a suite slot, and one with arguments takes none", () => {
+  const a = apply({ "run-tests.sh": ECHO_TESTS }, SCRIPT, { test: "sh ./run-tests.sh" });
+  holdSlots(a.host, 2);
+  const env = a.host.env({ FLEET_SUITE_WAIT_S: "1" });
+  const go = (...args) => spawnSync(join(a.wt, "agent-test"), args, { cwd: a.wt, encoding: "utf8", env, timeout: 30_000 });
+  const full = go();
+  assert.equal(full.status, 75, full.stdout + full.stderr);
+  assert.match(full.stderr, /^suite-slot: no slot after 1s$/m);
+  assert.equal(full.stdout, "", "the suite ran without a slot");
+  const narrowed = go("x");
+  assert.equal(narrowed.status, 0, narrowed.stdout + narrowed.stderr);
+  assert.equal(narrowed.stdout, "arg:x\nenv:ab-42 16042 22042\n");
+  // Both slots freed: the same bare run now goes through.
+  rmSync(a.host.lock(1));
+  rmSync(a.host.lock(2));
+  const freed = go();
+  assert.equal(freed.status, 0, freed.stdout + freed.stderr);
+  assert.equal(freed.stdout, "env:ab-42 16042 22042\n");
 });
 
 // A repository that tracks its own `agent-test` keeps it — the repo-local

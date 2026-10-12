@@ -142,6 +142,7 @@ export const TEST_RUN_SCHEMA = {
     cancelled: { type: "integer" },
     skipped: { type: "integer" },
     error: { type: "string", description: "Only when no summary was printed: what happened instead." },
+    slotWaitMs: { type: "integer", description: "Milliseconds the command waited for a suite slot, copied from the `SUITE_SLOT_WAIT_MS=<n>` line it printed; absent when the log holds no such line." },
   },
 };
 
@@ -321,6 +322,17 @@ export function resolveTestCmd(explicit, snap) {
   );
 }
 
+// The review's one run goes through the suite-slot wrapper, by the Resolver,
+// so it counts against the host-wide bound on concurrent full runs. The
+// command is one word to the wrapper — it hands the string to `sh -c` itself —
+// so it is single-quoted here, each embedded `'` closed, escaped and reopened.
+function slotted(cmd) {
+  return `~/.fleet/bin/fleet-run suite-slot.mjs '${cmd.replaceAll("'", "'\\''")}'`;
+}
+
+// The status suite-slot.mjs exits with when its wait for a slot expired.
+const NO_SLOT_EXIT = 75;
+
 export function decodeArgs(a) {
   if (typeof a !== "string") return a || {};
   try {
@@ -486,6 +498,14 @@ cannot be told apart from a regression.`;
 // TEST_RUN_EXIT line would otherwise read as green.
 function testRunReason(run) {
   if (!run) return "the review's shared test run returned nothing — no counts exist, so no dimension's tests ran";
+  // The wrapper's wait cap expired: it launched nothing, so there are no
+  // counts to judge and the exit status is the wrapper's, not the suite's. A
+  // run that printed counts and happened to exit 75 is the suite's own answer
+  // and judged below like any other.
+  if (run.exitCode === NO_SLOT_EXIT && typeof run.tests !== "number") {
+    const waited = /no slot after (\d+)s/.exec(run.error ?? "")?.[1];
+    return `no suite slot within ${waited === undefined ? "the wait cap" : `${waited} s`} — the host is at its suite bound; not a test failure`;
+  }
   const cmd = run.command || "the test command";
   if (typeof run.tests !== "number")
     return `\`${cmd}\` produced no counts — the shared test run crashed, hit its deadline, or printed no summary${run.error ? ` (${run.error})` : ""} — a failed run, not a pass`;
@@ -1003,13 +1023,24 @@ block below is absolute and cd-chained on purpose — run it exactly as written,
 and add nothing relative to it.
 
 Run it as ONE blocking foreground command — never backgrounded, never polled —
-with a command deadline of 1800 seconds:
+with a command deadline of 3600 seconds:
 
-    { cd "${snap.path}" && ${testCmd}; } > "${logPath}" 2>&1; echo "TEST_RUN_EXIT=$?"
+    { cd "${snap.path}" && ${slotted(testCmd)}; } > "${logPath}" 2>&1; echo "TEST_RUN_EXIT=$?"
 
 Run it exactly once: not again when it fails, and not again when it hits the
 deadline. A failing run is a result every specialist reads, and a second
 launch is the load this step exists to remove.
+
+The command first waits for a free suite slot — the host bounds how many full
+suites run at once — and that wait is not part of the run: it can take up to
+1800 seconds before the suite starts, which is why the deadline above is longer
+than a run's own budget. When it gets a slot it prints a
+\`SUITE_SLOT_WAIT_MS=<n>\` line to the log; report \`slotWaitMs\` = that number,
+copied as printed, and omit it when the log has no such line. If no slot came
+free it launched nothing: TEST_RUN_EXIT is 75 and the log holds
+\`suite-slot: no slot after <n>s\`. That is not a test result — report
+\`exitCode\` 75, omit every count, copy that line into \`error\`, and do not run
+the command again.
 
 Do not substitute a command of your own. In a repo that has a shared test stack,
 a bare runner picks up a default config whose setup can tear a sibling's

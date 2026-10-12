@@ -199,7 +199,8 @@ testcmd=$("$script_dir/derive-testcmd.sh" . test --at origin/main 2>&1) || die "
 echo "    test entrypoint → $testcmd" >&2
 
 # The Test entrypoint is a shell COMMAND, not an argv: the runner hands it to
-# `sh -c`, so a compound one (`cd sub && make test`) keeps its meaning, with the
+# the suite-slot wrapper, which hands it to `sh -c`, so a compound one
+# (`cd sub && make test`) keeps its meaning, with the
 # runner's own arguments appended as "$@". It reaches the runner's source
 # single-quoted — each embedded `'` closed, escaped and reopened — so nothing
 # in it expands at write time. `LC_ALL=C` so sed reads the command as bytes.
@@ -385,12 +386,16 @@ else
   # times in one run — including by an agent whose parent was briefed but did
   # not pass them down. Anyone who finds the worktree finds the runner. The
   # isolation triple is per claim and language-neutral; everything else is the
-  # Test entrypoint's own business, so the runner is a thin exec of it.
+  # Test entrypoint's own business, so the runner is a thin exec of it — through
+  # the suite-slot wrapper, which bounds how many full runs the host executes
+  # at once: a run with no arguments takes a slot, a narrowed one passes
+  # through. By the Resolver's own door, never a path frozen into a runner
+  # that is written once and never rewritten.
   cat > "$runner" <<SH
 #!/bin/sh
 # agent-test template: $tmpl_stamp
 export TEST_COMPOSE_PROJECT=ab-$issue TEST_POSTGRES_PORT=$pg TEST_OLLAMA_PORT=$ollama
-exec sh -c '$quoted "\$@"' agent-test "\$@"
+exec "\$HOME/.fleet/bin/fleet-run" suite-slot.mjs '$quoted' "\$@"
 SH
   chmod +x "$runner"
   excl="$(git rev-parse --git-common-dir)/info/exclude"

@@ -18,8 +18,9 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runReview, DEFAULT_DIMENSIONS, CRASHED_REASON } from "../plugin/scripts/review-core.mjs";
+import { runReview, DEFAULT_DIMENSIONS, CRASHED_REASON, TEST_RUN_SCHEMA } from "../plugin/scripts/review-core.mjs";
 import { pipeline, parallel, ARGS, SNAP, review, finding, vote, scriptedHost } from "./support/review-host-fixture.mjs";
+import { slotHome, holdSlots } from "./support/suite-slot-home.mjs";
 
 const ALL = DEFAULT_DIMENSIONS.map((d) => d.key);
 const ALL_ARGS = { ...ARGS, dimensions: ALL };
@@ -34,14 +35,19 @@ const script = (extra) => ({
 
 // The one command line the test-run prompt hands its agent, run the way that
 // agent is told to: once, in the foreground, through a POSIX shell. The counts
-// come from the log the block wrote, as the agent is told to read them.
-function obeyTestRun(prompt) {
+// come from the log the block wrote, as the agent is told to read them. The
+// block reaches the suite-slot wrapper through `~/.fleet/bin/fleet-run`, so it
+// runs under a host of its own (`slotHome()`), never the real `~/.fleet`.
+function runBlock(prompt, env) {
   const block = prompt.split("\n").find((l) => /^ {4}\{ cd /.test(l));
   assert.ok(block, "the test-run prompt carries no `{ cd … }` command block");
-  const out = execFileSync("/bin/sh", ["-c", block.trim()], { encoding: "utf8" });
+  const out = execFileSync("/bin/sh", ["-c", block.trim()], { encoding: "utf8", env });
   const exit = Number(/TEST_RUN_EXIT=(\d+)/.exec(out)?.[1]);
   const logPath = /> "([^"]+)" 2>&1/.exec(block)[1];
-  const log = readFileSync(logPath, "utf8");
+  return { exit, log: readFileSync(logPath, "utf8") };
+}
+function obeyTestRun(prompt, env) {
+  const { exit, log } = runBlock(prompt, env);
   const count = (k) => Number(new RegExp(`^# ${k} (\\d+)$`, "m").exec(log)?.[1]);
   return { exitCode: exit, tests: count("tests"), pass: count("pass"), fail: count("fail") };
 }
@@ -61,7 +67,7 @@ test("one review with all six dimensions launches the test command exactly once,
     host.agent = async (prompt, opts) => {
       if (opts.label !== `test-run:pr${ARGS.pr}`) return scripted(prompt, opts);
       calls["test-run"] = (calls["test-run"] ?? 0) + 1;
-      return obeyTestRun(prompt);
+      return obeyTestRun(prompt, slotHome().env());
     };
     const result = await run(host, { ...ALL_ARGS, scratch: tmp, testCmd });
 
@@ -103,8 +109,72 @@ test("the shared run runs the caller's override, and the snapshot's derived comm
   ]) {
     const { host, prompts } = scriptedHost(script({}));
     await run(host, args);
-    assert.ok(prompts["test-run"][0].includes(`&& ${expected}; }`), `the test-run prompt does not run ${expected}`);
+    assert.ok(prompts["test-run"][0].includes(`suite-slot.mjs '${expected}'; }`), `the test-run prompt does not run ${expected} through the suite-slot wrapper`);
   }
+});
+
+// A review's one run goes through the wrapper, so the block must hand it a
+// command that survives a shell: the command is single-quoted into the block,
+// and a quote inside it has to be closed, escaped and reopened.
+test("a test command holding single quotes runs as written through the slot wrapper", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "shared-test-run-quote-"));
+  try {
+    const runRoot = join(tmp, "pr7", "run-ab12");
+    const snap = { ...SNAP, runRoot, path: join(runRoot, "snapshot-abc123") };
+    mkdirSync(snap.path, { recursive: true });
+    const testCmd = `echo "it's a 'quoted' run"; echo "# tests 1"; echo "# pass 1"; echo "# fail 0"`;
+    const { host, prompts } = scriptedHost(script({ snapshot: [snap] }));
+    await run(host, { ...ALL_ARGS, scratch: tmp, testCmd });
+    const { exit, log } = runBlock(prompts["test-run"][0], slotHome().env());
+    assert.equal(exit, 0, log);
+    assert.match(log, /^it's a 'quoted' run$/m);
+    assert.match(log, /^SUITE_SLOT_WAIT_MS=\d+$/m, "the run never took a slot");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// The two ends of an expired wait, joined: the block run against a host whose
+// slots are all held exits 75 and says so in its log, and a test-run agent that
+// reports that exit makes every dimension unrun for the bound — not for a crash.
+test("a wait for a suite slot that expires leaves every dimension unrun for the bound, not a failure", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "shared-test-run-nosl-"));
+  try {
+    const runRoot = join(tmp, "pr7", "run-ab12");
+    const snap = { ...SNAP, runRoot, path: join(runRoot, "snapshot-abc123") };
+    mkdirSync(snap.path, { recursive: true });
+    const host = slotHome();
+    holdSlots(host, 2);
+    const first = scriptedHost(script({ snapshot: [snap] }));
+    await run(first.host, { ...ALL_ARGS, scratch: tmp, testCmd: "echo SHOULD-NOT-RUN" });
+    const { exit, log } = runBlock(first.prompts["test-run"][0], host.env({ FLEET_SUITE_WAIT_S: "1" }));
+    assert.equal(exit, 75, log);
+    assert.doesNotMatch(log, /SHOULD-NOT-RUN/, "the command ran without a slot");
+    const line = /^suite-slot: no slot after \d+s$/m.exec(log)?.[0];
+    assert.ok(line, log);
+    const { host: h2, calls } = scriptedHost(script({ snapshot: [snap], "test-run": [{ exitCode: 75, error: line }] }));
+    const result = await run(h2, { ...ALL_ARGS, scratch: tmp, testCmd: "echo SHOULD-NOT-RUN" });
+    assert.deepEqual(result.dimensionsUnrun.map((u) => u.dimension), ALL);
+    for (const u of result.dimensionsUnrun) {
+      assert.equal(u.reason, "no suite slot within 1 s — the host is at its suite bound; not a test failure");
+    }
+    assert.equal(calls["test-run"], 1, "an expired wait was run a second time");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 75 is only the wrapper's word when it printed no counts: a suite that ran
+// and happened to exit 75 is judged like any other run.
+test("a run that printed counts and exited 75 is judged as a run, not as an expired wait", async () => {
+  const { host } = scriptedHost(script({ "test-run": [{ exitCode: 75, tests: 4, pass: 3, fail: 1 }] }));
+  const result = await run(host);
+  for (const u of result.dimensionsUnrun) assert.doesNotMatch(u.reason, /no suite slot/);
+});
+
+test("the test-run schema carries the wait the wrapper printed, as an optional integer", () => {
+  assert.equal(TEST_RUN_SCHEMA.properties.slotWaitMs?.type, "integer");
+  assert.equal(TEST_RUN_SCHEMA.required, undefined, "a required wait would force a 0 the log never stated");
 });
 
 test("a shared run reporting tests 0 makes every selected dimension unrun", async () => {

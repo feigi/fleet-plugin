@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, symlinkSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, chmodSync, symlinkSync, realpathSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join, dirname, relative } from "node:path";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { slotHome, holdSlots, installWrapper } from "./support/suite-slot-home.mjs";
 
 // This repository's own test runner, `./agent-test` at the repo root: the
 // `node --test` argument shim that left claim-ticket.sh's emitter for a
@@ -25,8 +26,11 @@ const RUNNER_BODY = readFileSync(RUNNER, "utf8");
 // (`\x1b[34mℹ pass 3\x1b[39m`), breaking every `run`/`runFrom` assertion
 // that reads that summary literally. A developer with FORCE_COLOR set is
 // exactly what these assertions have to survive, not exercise.
-function runnerEnv() {
-  const env = { ...process.env };
+// A bare run takes a suite slot, so every fixture runs under a host of its own:
+// the slots are HOME-relative, and the real ones are a live fleet run's.
+const SHARED_HOST = slotHome();
+function runnerEnv(host = SHARED_HOST) {
+  const env = host.env();
   delete env.NODE_TEST_CONTEXT;
   delete env.NODE_TEST_WORKER_ID;
   delete env.FORCE_COLOR;
@@ -53,14 +57,21 @@ function apply(files, parent = null) {
   }
   writeExecStub(join(wt, "agent-test"), RUNNER_BODY);
   const env = runnerEnv();
+  // A bare run looks for the wrapper beside the runner, as it does in a checkout.
+  const wrapped = (args) => args.length === 0 && installWrapper(wt);
   return {
     wt,
     env,
-    run: (...args) => spawnSync(join(wt, "agent-test"), args, { cwd: wt, encoding: "utf8", env }),
+    run: (...args) => {
+      wrapped(args);
+      return spawnSync(join(wt, "agent-test"), args, { cwd: wt, encoding: "utf8", env });
+    },
     // The same runner invoked from a subdirectory. Node resolves argv against
     // the cwd, so where a member stands is part of what an argument means.
-    runFrom: (sub, ...args) =>
-      spawnSync(join(wt, "agent-test"), args, { cwd: join(wt, sub), encoding: "utf8", env }),
+    runFrom: (sub, ...args) => {
+      wrapped(args);
+      return spawnSync(join(wt, "agent-test"), args, { cwd: join(wt, sub), encoding: "utf8", env });
+    },
   };
 }
 
@@ -493,6 +504,7 @@ test("runner: the divergence walk ends on an argument that resolves TO the share
   const home = join(tempDir("nm-"), "node_modules");
   mkdirSync(home, { recursive: true });
   writeExecStub(join(home, "agent-test"), RUNNER_BODY);
+  installWrapper(home);
   writeFileSync(join(home, "a.test.mjs"), PASSES);
   // Vendored content one level in, where the exemption is at its widest: the
   // runner's own directory name IS the excluded word, and the guard still has
@@ -1637,4 +1649,58 @@ test("runner: a bare invocation excludes vendored tests under node_modules", () 
   const r = a.run();
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /^(?:ℹ|#) pass 7$/m);
+});
+
+// --- The suite slot bound ----------------------------------------------------
+// A bare `./agent-test` is the full suite and takes one of the host's suite
+// slots; any argument makes it a narrowed run, which takes none. Every case
+// builds its own host (`slotHome()`), never the real `~/.fleet`.
+const bareRun = (a, env) => {
+  installWrapper(a.wt);
+  return spawnSync(join(a.wt, "agent-test"), [], { cwd: a.wt, encoding: "utf8", env, timeout: 30_000 });
+};
+
+test("runner: a bare invocation waits for a suite slot, and a narrowed one does not", () => {
+  const host = slotHome();
+  holdSlots(host, 1);
+  const env = runnerEnv(host);
+  Object.assign(env, { FLEET_SUITE_SLOTS: "1", FLEET_SUITE_WAIT_S: "1" });
+  const a = apply(SUITE);
+  const bare = bareRun(a, env);
+  assert.equal(bare.status, 75, bare.stdout + bare.stderr);
+  assert.match(bare.stderr, /^suite-slot: no slot after 1s$/m);
+  assert.doesNotMatch(bare.stdout, /(?:ℹ|#) pass/, "the suite ran without a slot");
+  const narrowed = spawnSync(join(a.wt, "agent-test"), ["t"], { cwd: a.wt, encoding: "utf8", env, timeout: 30_000 });
+  assert.equal(narrowed.status, 0, narrowed.stdout + narrowed.stderr);
+  assert.match(narrowed.stdout, /(?:ℹ|#) pass 3(?!\d)/);
+  assert.doesNotMatch(narrowed.stderr, /SUITE_SLOT_WAIT_MS/, "a narrowed run took a slot");
+});
+
+test("runner: a bare invocation with a free slot runs the whole suite and gives the slot back", () => {
+  const host = slotHome();
+  const a = apply(SUITE);
+  const r = bareRun(a, runnerEnv(host));
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /(?:ℹ|#) pass 6(?!\d)/);
+  assert.match(r.stderr, /^SUITE_SLOT_WAIT_MS=\d+$/m, "a bare run never took a slot");
+  assert.deepEqual(readdirSync(host.slots), [], "the slot outlived the run");
+});
+
+test("runner: a bare invocation inside a held slot takes no second one", () => {
+  const host = slotHome();
+  holdSlots(host, 1);
+  const env = runnerEnv(host);
+  Object.assign(env, { FLEET_SUITE_SLOTS: "1", FLEET_SUITE_WAIT_S: "1", FLEET_SUITE_SLOT: host.lock(1) });
+  const r = bareRun(apply(SUITE), env);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /(?:ℹ|#) pass 6(?!\d)/);
+});
+
+test("runner: a bare invocation from a checkout whose path holds a quote still reaches the wrapper", () => {
+  const parent = join(tempDir("quote-"), "it's here");
+  mkdirSync(parent, { recursive: true });
+  const host = slotHome();
+  const r = bareRun(apply(SUITE, parent), runnerEnv(host));
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /(?:ℹ|#) pass 6(?!\d)/);
 });
