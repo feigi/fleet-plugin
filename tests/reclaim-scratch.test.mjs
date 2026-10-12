@@ -48,6 +48,20 @@ process.stdout.write(JSON.stringify(errors.length ? { data: { repository: repo }
 if (errors.length) { process.stderr.write("gh: " + errors[0].message + "\\n"); process.exit(1); }
 `;
 
+// A `chmod` with GNU's reach: a symlink given as an operand is dereferenced
+// even under -R, as coreutils does and darwin's does not. Put ahead of the
+// real one on PATH, it lets a darwin run see what a Linux run would.
+const GNU_CHMOD = `#!/bin/sh
+mode=
+for a in "$@"; do
+  case $a in
+    -*) ;;
+    *) if [ -z "$mode" ]; then mode=$a; elif [ -L "$a" ]; then /bin/chmod "$mode" "$a"; fi ;;
+  esac
+done
+exec /bin/chmod "$@"
+`;
+
 const GIT_ENV = { ...process.env };
 delete GIT_ENV.GIT_DIR;
 delete GIT_ENV.GIT_WORK_TREE;
@@ -502,6 +516,7 @@ test("(6) a symlink entry is unlinked and its target left alone", (t) => {
   const link = join(f.root, "linked");
   symlinkSync(target, link);
   f.age(target, 8);
+  writeExecStub(join(f.base, "bin", "chmod"), GNU_CHMOD);
   spawnSync("touch", ["-h", "-t", "200001010000", link]);
 
   const r = f.run(["--root", f.root, "--apply"]);
