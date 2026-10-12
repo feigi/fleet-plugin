@@ -92,14 +92,17 @@ const GH_TIMEOUT_MS = 30_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
 
 // The one removal sequence. `$1` is the entry. A symlink entry is unlinked
-// with its target untouched: `chmod -R` does not follow it and exits 0 over
-// it (measured on darwin's /bin/chmod), so the recovery step — whose plain
-// `chmod` on the entry would follow it — never runs for one. `chmod -R` fails
+// before anything else runs, so no chmod or chflags ever sees it: whether a
+// recursive chmod dereferences a link given as its operand differs between
+// BSD and GNU, and either would change the mode or flags of a target outside
+// the entry being removed. Links met inside a directory are left to `rm`,
+// which unlinks them without following. `chmod -R` fails
 // on a flagged directory, and `chflags -R` cannot read a mode-000 directory it
 // has just unflagged, so when the first pass fails each directory's flag and
 // mode come off together, top-down, before anything inside it is read.
 const REMOVE = [
   'd=$1',
+  'if [ -L "$d" ]; then rm -f "$d"; exit $?; fi',
   'chmod -R u+rwx "$d" 2>/dev/null; m=$?',
   'if command -v chflags >/dev/null 2>&1; then',
   '  [ $m -eq 0 ] || { chflags nouchg,nouappnd "$d"; chmod u+rwx "$d"; find "$d" -type d -exec chflags nouchg,nouappnd {} ";" -exec chmod u+rwx {} ";"; } 2>/dev/null',
