@@ -502,6 +502,7 @@ test("(6) a symlink entry is unlinked and its target left alone", (t) => {
   const link = join(f.root, "linked");
   symlinkSync(target, link);
   f.age(target, 8);
+  if (DARWIN) spawnSync("chflags", ["uchg", target]);
   spawnSync("touch", ["-h", "-t", "200001010000", link]);
 
   const r = f.run(["--root", f.root, "--apply"]);
@@ -510,6 +511,7 @@ test("(6) a symlink entry is unlinked and its target left alone", (t) => {
   assert.deepEqual(paths(r.out.removed), [link]);
   assert.ok(!existsSync(link) && existsSync(target), "the symlink's target was removed");
   assert.equal(spawnSync("stat", DARWIN ? ["-f", "%Lp", target] : ["-c", "%a", target], { encoding: "utf8" }).stdout.trim(), "500", "the removal changed the target's mode through the link");
+  if (DARWIN) assert.equal(spawnSync("stat", ["-f", "%Sf", target], { encoding: "utf8" }).stdout.trim(), "uchg", "the removal cleared the target's flags through the link");
 });
 
 test("(6) a fresh target behind a symlink inside an idle entry does not keep it", (t) => {
