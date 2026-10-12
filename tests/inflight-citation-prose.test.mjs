@@ -71,7 +71,7 @@ test("probe 3 cites the guard by construct, never by line (#800)", () => {
 // entry loop's `-d` skip below the guard. Both bounds are CODE: this pin's
 // subject is code, and bounding it on a neighbouring COMMENT would make that
 // prose load-bearing for this assertion. Read RAW, never through
-// `stripHashGutter`: the `#` gutter is what stops a WRAPPED comment restating
+// `.stripGutter("#")`: the `#` gutter is what stops a WRAPPED comment restating
 // the guard from satisfying a `\s+`-joined phrase.
 const registryGuard = () =>
   WORKTREE.between(

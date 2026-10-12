@@ -125,7 +125,7 @@ test("the header names WHICH diff `minted_false_claim` scores, and settles the c
   // most rows, and stating only "as submitted" leaves it inferable.
   //
   // Sliced to the definition itself, so a stray "as submitted" elsewhere in the
-  // header cannot buy the pass with this one gutted. `stripHashGutter` because
+  // header cannot buy the pass with this one gutted. `.stripGutter("#")` because
   // `\s+` does not span the `#` a wrapped comment line begins with.
   const def = mfcDef();
   assert.match(

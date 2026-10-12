@@ -50,7 +50,7 @@
 // this still reds, and so does that separator deleted outright — the paragraphs
 // would merge and the slice take both, which `paragraph`'s `next` refuses.
 //
-// `stripQuoteGutter` before `paragraph`, which is what makes the shared
+// `.stripGutter(">")` before `.paragraph`, which is what makes the shared
 // paragraph bound reach into a blockquote at all: the `>`-only lines that fence
 // this note become genuinely blank, so `paragraph`'s `\n[ \t]*\n` search finds
 // them. It is also the reflow guard. `phrase()` joins on `\s+` and `\s+` does
