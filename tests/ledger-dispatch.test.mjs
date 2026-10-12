@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
+import { rowPr } from "../plugin/scripts/ledger-grammar.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -546,6 +547,62 @@ test("settle impl-N=PR#M folds the PR-keyed row a pre-settle dispatch created in
   assert.equal(read().rows.length, 1);
 });
 
+// A PR has one row. `settle impl-N=PR#M` refuses a PR another row already
+// maps to, through the same added-only check `row` uses, judged on the folded
+// ledger; the refused member settles `=bailed`.
+test("settle impl-N=PR#M refuses a PR another row already maps to, writing nothing", (t) => {
+  const { ok, read, refused } = fixture(t);
+  ok("row", "658", "Pull · impl-658");
+  ok("row", "659", "Pull · impl-659");
+  ok("dispatch", "658", "impl-658");
+  ok("dispatch", "659", "impl-659");
+  ok("settle", "impl-658", "PR#724");
+  refused(["settle", "impl-659=PR#724"], /PR #724 would map to more than one row/);
+  refused(["settle", "impl-659=PR#724"], /PR's row is #658\b/);
+  refused(["settle", "impl-659", "PR#724"],
+    /^ledger: settle impl-659=PR#724: PR #724 would map to more than one row — its PR's row is #658; settle impl-659 =bailed or to a PR of its own$/m);
+
+  assert.equal(ok("settle", "impl-659=bailed").line, "#659 Pull · impl-659=bailed");
+  const l = read();
+  assert.deepEqual(l.rows.filter((r) => rowPr(r) === 724), ["#658 Pull · impl-658=PR#724"]);
+  const run = deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null },
+    [{ number: 724, labels: [], closingIssuesReferences: [{ number: 658 }, { number: 659 }] }]);
+  assert.equal(run.implLive, 0);
+});
+
+test("settle impl-N=PR#M still accepts every write that adds no second row for the PR", async (t) => {
+  await t.test("the same outcome again", (t) => {
+    const { ok, bytes } = fixture(t);
+    ok("dispatch", "658", "impl-658");
+    ok("settle", "impl-658=PR#724");
+    const before = bytes();
+    assert.equal(ok("settle", "impl-658=PR#724").changed, false);
+    assert.equal(bytes(), before);
+  });
+  await t.test("a replacement on the PR's own row", (t) => {
+    const { ok, read } = fixture(t);
+    ok("dispatch", "658", "impl-658");
+    ok("settle", "impl-658=PR#724");
+    ok("dispatch", "658", "impl-658-b");
+    assert.equal(ok("settle", "impl-658-b=PR#724").ticket, "#658");
+    assert.deepEqual(read().rows.filter((r) => rowPr(r) === 724), ["#658 impl-658=PR#724 · impl-658-b=PR#724"]);
+  });
+  await t.test("a #M fallback row the fold absorbs — the check runs after the fold", (t) => {
+    const { ok, read } = fixture(t);
+    ok("dispatch", "658", "impl-658");
+    assert.equal(ok("dispatch", "724", "fix-pr-724").line, "#724 fix-pr-724");
+    assert.equal(ok("settle", "impl-658=PR#724").line, "#658 impl-658=PR#724 · fix-pr-724");
+    assert.deepEqual(read().rows, ["#658 impl-658=PR#724 · fix-pr-724"]);
+  });
+  await t.test("a split already on disk", (t) => {
+    const { ok, read, put } = fixture(t);
+    put("658", "Pull · impl-658=PR#724 · impl-658-b");
+    put("659", "Pull · impl-659=PR#724");
+    assert.equal(ok("settle", "impl-658-b=PR#724").line, "#658 Pull · impl-658=PR#724 · impl-658-b=PR#724");
+    assert.equal(read().rows.filter((r) => rowPr(r) === 724).length, 2);
+  });
+});
+
 // #2064: merge-bot records a conflict its local-rebase fallback would not
 // force with `row`, and the fix-applier is recorded with the ordinary
 // `dispatch`/`settle`. The tick clears the hold only on a settle positioned
@@ -612,25 +669,30 @@ test("the fold takes the PR row's settled tokens in order, under the two-argumen
 
 // The must-LEAVE half: only the row keyed to the settled PR, and only when it
 // carries no implementer, is folded. A settle to a PR with no row of its own
-// is today's token rewrite and nothing more.
+// is today's token rewrite and nothing more. A row keyed #M whose implementer
+// names no PR still maps to M by its key, so settling to M there would put a
+// second row on M and is refused, writing nothing.
 test("settle folds no row keyed to another PR, no row carrying an impl- token, and nothing when the PR has no row", (t) => {
-  const { ok, read, put } = fixture(t);
+  const { ok, read, put, refused } = fixture(t);
   ok("dispatch", "412", "impl-412");
   ok("dispatch", "777", "fix-pr-777");
   ok("dispatch", "420", "impl-420");
   put("421", "impl-421=killed · review=wf:r2");
+  put("422", "impl-422=PR#900 · review=wf:r3");
   ok("dispatch", "413", "impl-413");
   ok("dispatch", "414", "impl-414");
+  ok("dispatch", "415", "impl-415");
   const before = read().rows;
 
-  // #420 is keyed to the PR but is an implementer's own row (live or settled).
-  assert.equal(ok("settle", "impl-412", "PR#420").line, "#412 impl-412=PR#420");
-  assert.equal(ok("settle", "impl-413=PR#421").line, "#413 impl-413=PR#421");
+  // #420 and #421 are keyed to the PR but are implementers' own rows (live or
+  // settled) naming no PR; #422 is keyed to the PR but its implementer's PR is 900.
+  refused(["settle", "impl-412", "PR#420"], /PR #420 would map to more than one row — its PR's row is #420\b/);
+  refused(["settle", "impl-413=PR#421"], /PR #421 would map to more than one row — its PR's row is #421\b/);
+  assert.equal(ok("settle", "impl-415=PR#422").line, "#415 impl-415=PR#422");
   // No row keyed #500 at all; #777 belongs to a PR nobody here settles to.
   assert.equal(ok("settle", "impl-414", "PR#500").line, "#414 impl-414=PR#500");
   assert.deepEqual(read().rows, before.map((r) => r
-    .replace(/^#412 impl-412$/, "#412 impl-412=PR#420")
-    .replace(/^#413 impl-413$/, "#413 impl-413=PR#421")
+    .replace(/^#415 impl-415$/, "#415 impl-415=PR#422")
     .replace(/^#414 impl-414$/, "#414 impl-414=PR#500")));
   assert.ok(read().rows.includes("#777 fix-pr-777"));
 });
@@ -686,13 +748,15 @@ test("settle folds a #M row no implementer claims, a review-only one included", 
 
 // An Exclusion row is keyed to a ticket, so one keyed `#M` is a premise on a
 // mistyped PR number, never a row for PR M: the fold leaves it alone, since
-// folding it would delete the premise a settled member can never restore.
+// folding it would delete the premise a settled member can never restore. The
+// row's key still maps it to M, so the settle would put a second row on M and
+// is refused, writing nothing.
 test("settle to a mistyped PR number does not fold an Exclusion row keyed #M", (t) => {
-  const { ok, read } = fixture(t);
+  const { ok, read, refused } = fixture(t);
   ok("row", "358", "excluded · behind-pr:#346");
   ok("dispatch", "351", "impl-351");
-  assert.equal(ok("settle", "impl-351", "PR#358").line, "#351 impl-351=PR#358");
-  assert.deepEqual(read().rows, ["#358 excluded · behind-pr:#346", "#351 impl-351=PR#358"]);
+  refused(["settle", "impl-351", "PR#358"], /PR #358 would map to more than one row — its PR's row is #358\b/);
+  assert.deepEqual(read().rows, ["#358 excluded · behind-pr:#346", "#351 impl-351"]);
 });
 
 // Two genuinely separate PR-bound dispatches (a fix-pr and, after its own

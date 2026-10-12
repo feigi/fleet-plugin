@@ -45,7 +45,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, premisesOf, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, premisesOf, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { isDead, processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -842,7 +842,7 @@ if (cmd === "read") {
   // carried.
   const split = newSplitRow(data.rows, after);
   if (split !== null) {
-    die(`row ${key}: PR #${split.pr} would map to more than one row — its PR's row is ${split.row}; rewrite that row instead`);
+    die(`row ${key}: ${splitRowClause(split)}; rewrite that row instead`);
   }
   // A PR's review record is read off its rows — every row mapping to it, in
   // ledger order — so a write that drops an open launch makes the tick lose
@@ -2048,12 +2048,10 @@ function runSettle() {
     return;
   }
 
-  // Capture whether the row this settle is about to write to already
-  // named a PR, before the rewrite below touches it. The fold further down
-  // must refuse to run once a row already has PR-specific content on it —
-  // see the fold's own comment for why.
-  const targetBefore = liveRows[0] ?? memberRowIndex(parsed);
-  const priorPr = targetBefore === -1 ? null : rowPr(data.rows[targetBefore]);
+  // The rows before any write below: the fold's guard reads the row this
+  // settle writes to as it stood, and the one-row-per-PR check after the
+  // fold compares against them.
+  const before = [...data.rows];
   // A live token `row` wrote is settled like one `dispatch` wrote; `##
   // Dispatched` only records what `dispatch` did.
   if (liveEntry) data.dispatched[di] = token;
@@ -2090,7 +2088,7 @@ function runSettle() {
   // an unrelated ticket's premise on a mistyped PR number, and folding it
   // would delete state a settled member can never restore.
   const prNum = outcome.startsWith("PR#") ? Number(outcome.slice("PR#".length)) : null;
-  const j = prNum === null || i === -1 || priorPr !== null ? -1
+  const j = prNum === null || i === -1 || rowPr(before[i]) !== null ? -1
     : data.rows.findIndex((r) => rowKey(r) === `#${prNum}` && !memberTokens(r).some((t) => t.family === "impl") && premisesOf(r) === null);
   if (j !== -1) {
     const tail = data.rows[j].slice(`#${prNum}`.length).trim();
@@ -2098,6 +2096,12 @@ function runSettle() {
     data.rows.splice(j, 1);
     if (j < i) i -= 1;
   }
+  // A PR has one row, so a settle that makes a PR map to a second row is
+  // refused, as `row` refuses one: judged on the folded ledger, so the fold's
+  // own row is no split, and added only, so a split already on disk is
+  // carried. The refused member settles `=bailed` or to a PR of its own.
+  const split = newSplitRow(before, data.rows);
+  if (split !== null) die(`settle ${token}: ${splitRowClause(split)}; settle ${name} =bailed or to a PR of its own`);
   save(data);
   console.error(`    settled ${token}`);
   console.log(JSON.stringify(payload(i, true)));

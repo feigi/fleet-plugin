@@ -273,6 +273,11 @@ export function newSplitRow(before, after) {
   return null;
 }
 
+/** The refusal clause for a `newSplitRow` result, shared by every writer that refuses one. */
+export function splitRowClause({ pr, row }) {
+  return `PR #${pr} would map to more than one row — its PR's row is ${row}`;
+}
+
 /**
  * Why `ledger.mjs row` or `ledger.mjs review` must not write `line` over
  * `oldLine` (null for a new row), `before` and `after` the ledger's rows on
