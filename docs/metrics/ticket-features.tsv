@@ -7,3 +7,15 @@ run_date	session	agent	ticket	policy_cell	chosen_cell	exploration_draw	sizing_sr
 2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-3063	3063	slow-high	task-high	3/3	rule			7649	0	0	0	18	10	6	
 2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-3107	3107	slow-high	task-high	3/3	rule			1674	0	0	0	8	6	2	
 2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-3108	3108	slow-high	smol-high	2/3	rule			1169	0	0	0	1	0	2	
+2026-10-11	2026-10-11T10-19-42-307Z_01a12a79-b763-710a-b3ec-37611b54dbee	impl-2151	2151	slow-high	task-high	3/3	rule			14782	0	3	13	43	21	8	
+2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-2305	2305	slow-high	task-high	3/3	rule			1467	0	3	10	1	0	2	
+2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-3072	3072	slow-high	slow-high	1/3	rule			6033	4	3	0	8	2	11	bug
+2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-3099	3099	slow-high	task-high	3/3	rule			3714	0	1	0	7	3	3	bug
+2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-3122	3122	slow-high	smol-high	2/3	rule			1715	0	1	0	1	1	1	bug
+2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-2316	2316	slow-high	slow-high	1/3	rule			9974	0	4	10	42	5	4	enhancement
+2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-3125	3125	slow-high	slow-high	1/3	rule			3384	6	1	0	7	3	1	enhancement
+2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-3121	3121	slow-high	slow-high	1/3	rule			5186	5	1	0	2	0	2	bug
+2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-3126	3126	slow-high	smol-high	2/3	rule			2960	4	1	0	6	0	2	bug
+2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-3133	3133	slow-high	smol-high	2/3	rule			3158	0	1	0	3	0	2	enhancement
+2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-3143	3143	slow-high	smol-high	2/3	rule			3741	5	1	0	6	0	1	bug
+2026-10-11	2026-10-11T10-52-47-055Z_01a12a98-004f-77e2-b4fa-9393bbbee2b2	impl-2321	2321	slow-high	smol-high	2/3	rule			6572	4	3	10	22	0	3	enhancement
