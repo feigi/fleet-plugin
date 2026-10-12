@@ -142,6 +142,7 @@ export const TEST_RUN_SCHEMA = {
     cancelled: { type: "integer" },
     skipped: { type: "integer" },
     error: { type: "string", description: "Only when no summary was printed: what happened instead." },
+    slotWaitMs: { type: "integer", description: "Milliseconds spent waiting for a test-suite slot if one was not immediately available (exit 75 on timeout)." },
   },
 };
 

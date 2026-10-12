@@ -674,4 +674,8 @@ done
 # states above, and closing it would mean running node rather than `exec`ing
 # it, so that it could read the summary back. Separate change.
 [ -n "$operand" ] || { printf "agent-test: no test file or directory in the arguments — refusing rather than falling through to node's own discovery\n" >&2; exit 1; }
-exec node --test "$@"
+# Invoke suite-slot to acquire a test slot before running the suite.
+# Pass the node --test command as the first argument to suite-slot.mjs.
+# suite-slot will handle re-entry, arity-based gating, and slot management.
+SUITE_SLOT_SCRIPT="$(cd "$(dirname "${0}")" && pwd)/plugin/scripts/suite-slot.mjs"
+exec node "${SUITE_SLOT_SCRIPT}" "node --test" "$@"
