@@ -35,7 +35,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../.github/scripts/check-tracked.sh", import.meta.url));
 const CI_YML = fileURLToPath(new URL("../.github/workflows/ci.yml", import.meta.url));
@@ -144,7 +144,7 @@ test("every ls-files check in ci.yml goes through check-tracked.sh", () => {
   for (const glob of ["*.mjs", "*.json", "*.sh"]) {
     // ok(), not match(): a failed match dumps the whole flattened workflow into
     // the log and buries the one line saying which check lost its guard.
-    assert.ok(phrase(`check-tracked.sh '${glob}'`).test(ci), `the ${glob} check no longer routes through check-tracked.sh`);
+    assert.ok(Pin.phrase(`check-tracked.sh '${glob}'`).test(ci), `the ${glob} check no longer routes through check-tracked.sh`);
   }
   assert.ok(!/xargs\s+-r\b/.test(ci), "`xargs -r` is back — that is the vacuous-green form #161 removed");
 });
@@ -218,7 +218,7 @@ test("ci.yml provisions gojq for the engine gates, at a pinned version", () => {
   const ci = flat(ciRaw);
 
   assert.ok(
-    phrase("go install github.com/itchyny/gojq/cmd/gojq@v0.12.19").test(ci),
+    Pin.phrase("go install github.com/itchyny/gojq/cmd/gojq@v0.12.19").test(ci),
     "the Install gojq step no longer installs the gojq the engine gates resolve — they are back to skipping",
   );
   // `@latest` installs a gojq that satisfies the gate while changing what the
@@ -237,13 +237,13 @@ test("ci.yml provisions gojq for the engine gates, at a pinned version", () => {
   // value with an extra path segment tacked on (`.../gojq/bin`, which still
   // starts with the pinned value) cannot slide through as a prefix match —
   // `go install` would drop the binary somewhere GOJQ_BIN does not point at.
-  const installStep = flat(between(ciRaw, "- name: Install gojq", "- name: Tests", "ci.yml Install gojq step"));
+  const installStep = flat(Pin.of(ciRaw, "ciRaw").between("- name: Install gojq", "- name: Tests", "ci.yml Install gojq step").text);
   assert.ok(
-    new RegExp(phrase("GOBIN: ${{ runner.temp }}/gojq").source + String.raw`(?!\S)`).test(installStep),
+    new RegExp(Pin.phrase("GOBIN: ${{ runner.temp }}/gojq").source + String.raw`(?!\S)`).test(installStep),
     "the Install gojq step lost its GOBIN, or GOBIN no longer points at exactly ${{ runner.temp }}/gojq — restore it, whatever the job's own failure says about GOJQ_BIN",
   );
   assert.ok(
-    phrase("GOJQ_BIN: ${{ runner.temp }}/gojq/gojq").test(ci),
+    Pin.phrase("GOJQ_BIN: ${{ runner.temp }}/gojq/gojq").test(ci),
     "the Tests step no longer names the binary, so a failed provision skips quietly instead of failing the job",
   );
 });
@@ -355,12 +355,11 @@ test("candidates.*'s gojq install instructions name the version ci.yml installs"
   // for it. Presence is deliberately NOT asserted for those two — whether
   // `candidates.mjs`'s comment should carry a version at all is an open
   // question on #956, and a presence pin here would settle it by force.
-  const skip = between(
-    readFileSync(CANDIDATES_TEST, "utf8"),
+  const skip = Pin.file(CANDIDATES_TEST).between(
     "const SKIP_WITHOUT_GOJQ",
     "\n",
     "tests/candidates.test.mjs",
-  );
+  ).text;
   assert.ok(
     installRefs(skip).includes(want),
     `tests/candidates.test.mjs's SKIP_WITHOUT_GOJQ message no longer tells a developer to install gojq ${want}, the version .github/workflows/ci.yml installs — the skip message now names no version at all, or names it in a form this assertion cannot read`,

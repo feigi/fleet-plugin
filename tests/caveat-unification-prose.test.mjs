@@ -29,7 +29,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const skill = (name) =>
@@ -48,7 +48,7 @@ const SIZING = skill("sizing-a-ticket");
 // of normalizing the slice can help. Scoped to this file rather than pushed
 // into `between`, whose other callers pass anchors chosen against raw layout.
 const clause = (text, from, to, what) =>
-  between(text.split(/\s+/).join(" "), from, to, what);
+  Pin.of(text.split(/\s+/).join(" "), "the fixture").between(from, to, what).text;
 
 // Bounded at both ends: `between` asserts each anchor is present in each file,
 // so a clause deleted from one side reddens on the missing anchor rather than

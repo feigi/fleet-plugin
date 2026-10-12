@@ -58,19 +58,18 @@
 // with stub launchers recording what each launch opened.
 //
 // Zero deps: `node --test tests/cockpit-launch-idempotent-prose.test.mjs`.
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
-import { paragraph, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 // The whole bullet, bounded by its own blank line — the bound the two
 // sibling bullets above it already use in `instrument-check-prose.test.mjs`.
-const LAUNCH_STEP = () => paragraph(RUN_TEAM, "**Launch the cockpit.**", "run-team phase 0 cockpit-launch bullet", "The spend panel reads this workspace's");
+const LAUNCH_STEP = () => RUN_TEAM.paragraph("**Launch the cockpit.**", "run-team phase 0 cockpit-launch bullet", "The spend panel reads this workspace's").text;
 
 test("phase 0 runs the cockpit launch on every pass, not just the first", () => {
   const step = LAUNCH_STEP();
@@ -78,7 +77,7 @@ test("phase 0 runs the cockpit launch on every pass, not just the first", () => 
   // instruction #1586 removes. Pinning the positive alone would stay green if
   // a later edit restored a first-pass-only gate elsewhere in the sentence
   // under different wording, so the negative below carries the real weight.
-  assert.match(step, phrase("On every phase-0 pass, not just the first"));
+  assert.match(step, Pin.phrase("On every phase-0 pass, not just the first"));
 });
 
 test("phase 0 states the cockpit launch is idempotent per workspace, conditioned on the handshake answering", () => {
@@ -86,7 +85,7 @@ test("phase 0 states the cockpit launch is idempotent per workspace, conditioned
   // The doctrine statement itself — not a symptom description ("a second
   // launch is harmless"), a stated design property ("idempotent"), scoped to
   // the unit #39's multi-instance cockpit cares about ("per workspace").
-  assert.match(step, phrase("The launch is idempotent per workspace"));
+  assert.match(step, Pin.phrase("The launch is idempotent per workspace"));
   // PR #1664 review (finding 1): unconditional idempotence overclaims — the
   // reuse path exists only as far as the held port ANSWERS, so the doctrine
   // states the condition rather than leaving it implicit. #1713 removed the
@@ -94,12 +93,12 @@ test("phase 0 states the cockpit launch is idempotent per workspace, conditioned
   // blocking its own server), which is why the caveat that followed this
   // sentence is gone; the condition itself still holds — a cockpit stopped
   // or wedged for any other reason answers nothing either.
-  assert.match(step, phrase("when the running cockpit answers the identity"));
+  assert.match(step, Pin.phrase("when the running cockpit answers the identity"));
   // The mechanism the doctrine rests on, named rather than left implicit: an
   // already-served workspace's launch finds the running server and exits 0
   // instead of starting a second one.
-  assert.match(step, phrase("an already-served workspace's launch finds the"));
-  assert.match(step, phrase("exits 0 without starting a second one"));
+  assert.match(step, Pin.phrase("an already-served workspace's launch finds the"));
+  assert.match(step, Pin.phrase("exits 0 without starting a second one"));
 });
 
 test("the superseded mid-gather() duplication caveat is gone, not left beside the fixed behaviour", () => {
@@ -118,7 +117,7 @@ test("the superseded mid-gather() duplication caveat is gone, not left beside th
     "starts a second server sharing this workspace's",
     "relaunching mid-gather is not the free no-op",
   ]) {
-    assert.doesNotMatch(step, phrase(gone),
+    assert.doesNotMatch(step, Pin.phrase(gone),
       `phase 0 warns about a mid-gather() duplicate again; #1713 made the cockpit answer throughout its tick, so the warning is false: ${gone}`);
   }
 });
@@ -130,15 +129,15 @@ test("phase 0 states a second workspace's launch derives its own port, falling b
   // "unaffected" — it gets a board of its own. Pinning "collides with none of
   // that" alone would be vacuous to a rewrite that dropped the affirmative
   // claim and left only the negative, so both are asserted.
-  assert.match(step, phrase("A second fleet on another workspace collides with none of that"));
-  assert.match(step, phrase("its own launch derives that"));
-  assert.match(step, phrase("workspace's own port and binds it when free"));
+  assert.match(step, Pin.phrase("A second fleet on another workspace collides with none of that"));
+  assert.match(step, Pin.phrase("its own launch derives that"));
+  assert.match(step, Pin.phrase("workspace's own port and binds it when free"));
   // PR #1664 review (finding D): derived ports collide across workspaces at
   // a real, non-negligible probability (#1657, filed and deferred
   // separately) — the doctrine must not promise the derived port
   // specifically, only that a board gets served either way.
-  assert.match(step, phrase("scans to the next free port in its range when the derived one is already held"));
-  assert.match(step, phrase("it gets its own board, just not always on the port its hash predicts"));
+  assert.match(step, Pin.phrase("scans to the next free port in its range when the derived one is already held"));
+  assert.match(step, Pin.phrase("it gets its own board, just not always on the port its hash predicts"));
 });
 
 test("the old skip-on-re-shortlist framing is gone, not left beside its replacement", () => {
@@ -149,17 +148,17 @@ test("the old skip-on-re-shortlist framing is gone, not left beside its replacem
   // (in full or copy-pasted back in beside the new doctrine) reds here.
   assert.doesNotMatch(
     step,
-    phrase("On the first phase-0 pass only"),
+    Pin.phrase("On the first phase-0 pass only"),
     "the cockpit launch is gated to the first phase-0 pass again — #1586's per-workspace doctrine has been reverted",
   );
   assert.doesNotMatch(
     step,
-    phrase("Skip on later re-shortlists"),
+    Pin.phrase("Skip on later re-shortlists"),
     "phase 0 tells the controller to skip the cockpit launch on a later re-shortlist again — that is the exact defect #1586 closed",
   );
   assert.doesNotMatch(
     step,
-    phrase("Doing it anyway is harmless rather than a collision"),
+    Pin.phrase("Doing it anyway is harmless rather than a collision"),
     "the cockpit launch is framed as an accidentally-harmless collision again, rather than a per-workspace-idempotent design",
   );
 });

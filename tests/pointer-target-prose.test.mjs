@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { logicalLines } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 // #197. `review-and-fix.md` points at its own blocks by name — "see **X**" —
 // and the emphasised block it names carried trailing content INSIDE the
@@ -44,7 +44,7 @@ const BOLD = /\*\*([^*\n]+)\*\*/g;
 // rewrapped copy, and a second local copy of the scan would pin only itself
 // while the real one reverted to physical lines.
 function scan(doc) {
-  const { text: SCAN, lineAt } = logicalLines(doc);
+  const { text: SCAN, lineAt } = Pin.logicalLines(doc);
   const pointers = [];
   for (const clause of SCAN.matchAll(CLAUSE)) {
     const base = clause.index + clause[0].indexOf(clause[1]);

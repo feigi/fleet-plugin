@@ -33,45 +33,44 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 // The third site: the member-facing command that names the same gate. Its own
 // suite doesn't guard it, so the falsified premise closing here while staying
 // open there is exactly the loophole #1053 found.
 const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
 // Every negative pin below wants the WIDEST scope, both sites combined — a
 // copy of the false premise surviving in either file is the whole defect back.
-const ALL_PROSE = `${RUN_TEAM}\n${REVIEW_AND_FIX}`;
+const ALL_PROSE = `${RUN_TEAM.text}\n${REVIEW_AND_FIX}`;
 
 // One bullet each. The phase-3 loop is a flat list of `- **...**` items and
 // `finisher`, `dispatch`, `push` and `report` all recur through every one of
 // them, so a slice spanning two bullets is satisfied by either — which is
 // exactly the false green the pair-coherence test below has to deny.
 const ciEdge = () =>
-  between(RUN_TEAM, "- **Monitor: CI run completes**", "- **A fix-applier reports", "run-team CI-completes edge");
+  RUN_TEAM.between("- **Monitor: CI run completes**", "- **A fix-applier reports", "run-team CI-completes edge").text;
 
 const noOpEdge = () =>
-  between(RUN_TEAM, "- **A fix-applier reports", '- **`ci-state.mjs --pr <N>` reads', "run-team no-op edge");
+  RUN_TEAM.between("- **A fix-applier reports", '- **`ci-state.mjs --pr <N>` reads', "run-team no-op edge").text;
 
 // The nothing-survived route to a finisher, which bypasses the fix-applier
 // entirely. Bounded by the next bullet: unbounded it runs into the CI edge
 // below and the accept-side assertion passes off the very text it is meant to
 // be independent of.
 const reviewSlotEdge = () =>
-  between(RUN_TEAM, "- **A review result lands**", "- **Monitor: `ready-to-merge` appears**", "run-team review-result wake");
+  RUN_TEAM.between("- **A review result lands**", "- **Monitor: `ready-to-merge` appears**", "run-team review-result wake").text;
 
 // The second site stating the same gate, in the narrative rather than the
 // loop. Its start anchor is the paragraph opener; its end anchor is the
 // following paragraph, so the slice cannot widen into the duty list.
 const narrativeGate = () =>
-  between(
-    RUN_TEAM,
+  RUN_TEAM.between(
     "**The fix-applier pushes and exits",
     "**An unanswered question from the member",
     "run-team narrative finisher gate",
-  );
+  ).text;
 
 test("no sentence anywhere claims the edge fires on the pushing member, or that green alone licenses a dispatch", () => {
   // Deliberately file-wide across both sites naming this gate (SKILL.md's
@@ -107,16 +106,16 @@ test("the premise names every firing, with the implementer's stated as the ordin
   const s = ciEdge();
   assert.match(
     s,
-    phrase("This edge fires for every CI run the PR produces, and the implementer's own firing comes first for every PR"),
+    Pin.phrase("This edge fires for every CI run the PR produces, and the implementer's own firing comes first for every PR"),
     "the edge's premise no longer covers the implementer's push, which is the firing every PR produces first",
   );
   // The mechanism, or the corrected premise reads as an assertion to take on
   // trust and the next editor narrows it back to the fix-applier.
-  assert.match(s, phrase("`ci.yml` triggers on `pull_request`"));
+  assert.match(s, Pin.phrase("`ci.yml` triggers on `pull_request`"));
   // The consequence is what makes it a defect rather than a detail.
   assert.match(
     s,
-    phrase("no review has run at all when it arrives"),
+    Pin.phrase("no review has run at all when it arrives"),
     "the bullet no longer says what is true at the first firing — that nothing has reviewed the PR",
   );
 });
@@ -125,29 +124,29 @@ test("the finisher gate names both conditions and distinguishes pushed from repo
   const s = ciEdge();
   assert.match(
     s,
-    phrase("dispatch a finisher only once the PR's review has returned AND its fix-applier, if one was dispatched, has sent its report"),
+    Pin.phrase("dispatch a finisher only once the PR's review has returned AND its fix-applier, if one was dispatched, has sent its report"),
     "the finisher gate no longer names both conditions — green alone is back to being sufficient",
   );
   // The mid-work firing is the shape an empty outbox cannot see, and a gate
   // saying only "the fix-applier has finished" reads as satisfied by a push.
   assert.match(
     s,
-    phrase("pushed is not reported"),
+    Pin.phrase("pushed is not reported"),
     "the gate no longer separates a member that pushed from one that reported — the mid-work SHA passes again",
   );
-  assert.match(s, phrase("mid-work on a SHA the member may still move"));
+  assert.match(s, Pin.phrase("mid-work on a SHA the member may still move"));
   // Both failure shapes, and WHY the outbox is blind to each: without them the
   // two-condition gate reads as a belt-and-braces restatement of the outbox
   // rule and gets cut as duplication.
-  assert.match(s, phrase("vacuously"));
-  assert.match(s, phrase("genuinely"));
+  assert.match(s, Pin.phrase("vacuously"));
+  assert.match(s, Pin.phrase("genuinely"));
 });
 
 test("the first actionable clause in the loop bullet is already conditioned, not an unconditional dispatch", () => {
   const s = ciEdge();
   assert.match(
     s,
-    phrase("a finisher CANDIDATE (gated below)"),
+    Pin.phrase("a finisher CANDIDATE (gated below)"),
     "the arrow clause is back to an unconditional dispatch instruction, so a top-to-bottom reader hits it before reaching the two-condition gate 9 lines later",
   );
   const candidateIndex = s.indexOf("a finisher CANDIDATE");
@@ -164,33 +163,33 @@ test("the outbox rule survives, as the last test rather than the only one", () =
   const s = ciEdge();
   assert.match(
     s,
-    phrase("The outbox is the last test, not the only one, and it stands wherever a fix-applier exists"),
+    Pin.phrase("The outbox is the last test, not the only one, and it stands wherever a fix-applier exists"),
     "the outbox rule was demoted or dropped — it is correct wherever a fix-applier exists and this ticket does not weaken it",
   );
   assert.match(
     s,
-    phrase("never dispatch off it while you do"),
+    Pin.phrase("never dispatch off it while you do"),
     "the CI-completes edge lost the outstanding-ruling gate itself, not just its premise",
   );
-  assert.match(s, phrase("including any ruling you have withdrawn or reversed"));
-  assert.match(s, phrase("a final report is not proof it stopped"));
+  assert.match(s, Pin.phrase("including any ruling you have withdrawn or reversed"));
+  assert.match(s, Pin.phrase("a final report is not proof it stopped"));
 });
 
 test("the controller records the bound run identifier under a named field, not just that CI was green", () => {
   const s = ciEdge();
   assert.match(
     s,
-    phrase('record it as `ci=<run-id>:<attempt>:<conclusion>`, not just "CI green"'),
+    Pin.phrase('record it as `ci=<run-id>:<attempt>:<conclusion>`, not just "CI green"'),
     "the bullet no longer tells the controller to record the bound run identifier under a named field",
   );
   assert.match(
     s,
-    phrase("`row` **replaces the whole line** (above), so repeat `ports=` and `→ PR#`"),
+    Pin.phrase("`row` **replaces the whole line** (above), so repeat `ports=` and `→ PR#`"),
     "the instruction no longer cross-references the replace-whole-line warning, so a controller following it will silently destroy the row's other tokens",
   );
   assert.match(
     s,
-    phrase("That key cannot be reconstructed once the head is superseded"),
+    Pin.phrase("That key cannot be reconstructed once the head is superseded"),
     "the reason the whole key has to be recorded is gone, which is what stops it being cut as bookkeeping",
   );
 });
@@ -201,24 +200,24 @@ test("the pair stays coherent — a PR needing no fixes still reaches a finisher
   // bullet is that PR's only remaining route.
   assert.match(
     ciEdge(),
-    phrase("A PR that needs nothing fixed reaches a finisher through the **fix-applier reports `no-op`** bullet below"),
+    Pin.phrase("A PR that needs nothing fixed reaches a finisher through the **fix-applier reports `no-op`** bullet below"),
     "the CI edge no longer points at its sibling, so a clean PR reads as gated on an event that will never fire",
   );
   const sibling = noOpEdge();
   assert.match(
     sibling,
-    phrase("a `no-op` report satisfies the gate above by itself"),
+    Pin.phrase("a `no-op` report satisfies the gate above by itself"),
     "the sibling no longer says a no-op report meets the new gate — the clean PR is stranded behind a condition it has already met",
   );
   assert.match(
     sibling,
-    phrase("dispatch the finisher **now**"),
+    Pin.phrase("dispatch the finisher **now**"),
     "the sibling's dispatch-now instruction was weakened while the gate above was tightened",
   );
   // The gate must not reach the route that never had a fix-applier at all.
   assert.match(
     reviewSlotEdge(),
-    phrase("skip the fix-applier and dispatch the **finisher** directly"),
+    Pin.phrase("skip the fix-applier and dispatch the **finisher** directly"),
     "the nothing-survived route to a finisher was gated on a fix-applier report it will never get",
   );
 });
@@ -232,7 +231,7 @@ test("the narrative dispatch site states the same gate as the bullet", () => {
   const s = narrativeGate();
   assert.match(
     s,
-    phrase("once the PR's review has returned and its fix-applier, if one was dispatched, has sent its report"),
+    Pin.phrase("once the PR's review has returned and its fix-applier, if one was dispatched, has sent its report"),
     "the narrative finisher dispatch is back to `check`-green alone, contradicting the corrected bullet",
   );
   // Without this, the OUTBOX sentence below reads as denying that the member's
@@ -240,7 +239,7 @@ test("the narrative dispatch site states the same gate as the bullet", () => {
   // contradicts.
   assert.match(
     s,
-    phrase("That is the test of THIS condition only"),
+    Pin.phrase("That is the test of THIS condition only"),
     "the outbox test is unscoped again, so it reads as ruling the member's report out of the gate",
   );
   assert.match(s, /Never dispatch\s*\n?one while you still owe the fix-applier a ruling/);

@@ -34,10 +34,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 // Starts inside this paragraph's own lead, not at the reused-runner paragraph
 // above it: the two are siblings and a slice spanning both lets the runner
@@ -46,7 +46,7 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 // sentence, because `between()` throws "update this test" when its anchor moves
 // — a rename of the anchor reds every test in this file at once, which is loud
 // but says nothing about which claim was lost. A shorter anchor is less of that.
-const slice = () => between(RUN_TEAM, "on the wrong COMMIT", "## Phase 2", "run-team/SKILL.md phase 1");
+const slice = () => RUN_TEAM.between("on the wrong COMMIT", "## Phase 2", "run-team/SKILL.md phase 1").text;
 
 // Narrower than `slice()`: just the verify + empty-read bullet, ending before
 // the headRefOid-read bullet starts. A presence-only pin on the compare
@@ -55,24 +55,23 @@ const slice = () => between(RUN_TEAM, "on the wrong COMMIT", "## Phase 2", "run-
 // bound is what lets a bare `doesNotMatch(/headRefOid/)` mean "nowhere in
 // this bullet, under any phrasing" instead of "not this one exact string."
 const compareBulletSlice = () =>
-  between(
-    RUN_TEAM,
+  RUN_TEAM.between(
     "Then verify against the branch REF",
     "- **Read `gh pr view",
     "run-team/SKILL.md phase 1 ref-compare + empty-read bullet",
-  );
+  ).text;
 
 // The cause, not the symptom. A controller told only "the worktree may be stale"
 // has no reason to prefer one `worktree add` form over another.
 test("phase 1 names why a reused worktree lands on the wrong commit", () => {
-  assert.match(slice(), phrase("checks out the existing LOCAL branch and never consults the remote"));
+  assert.match(slice(), Pin.phrase("checks out the existing LOCAL branch and never consults the remote"));
 });
 
 // Why reading the `git worktree add` output is not a check: it quotes the
 // subject, and a rebase preserves the subject. Without this the controller
 // reasonably believes it already verified the commit.
 test("phase 1 says the printed subject survives the rebase and settles nothing", () => {
-  assert.match(slice(), phrase("the same subject the PR head carries, because a rebase preserves it"));
+  assert.match(slice(), Pin.phrase("the same subject the PR head carries, because a rebase preserves it"));
 });
 
 // Prevention (#532's option 2). The bare branch name is the defect; the
@@ -90,7 +89,7 @@ test("phase 1 says the printed subject survives the rebase and settles nothing",
 test("phase 1 gives the creation form that cannot inherit a stale local ref", () => {
   assert.match(
     slice(),
-    phrase(
+    Pin.phrase(
       "git worktree add --detach <path> origin/<branch>`. Same scratch repo, same moment: this landed on the remote's commit",
     ),
   );
@@ -111,13 +110,13 @@ test("phase 1 gives the creation form that cannot inherit a stale local ref", ()
 test("phase 1 compares the worktree head against the branch ref, and refuses on mismatch", () => {
   assert.match(
     slice(),
-    phrase("Compare `git -C <path> rev-parse HEAD` against `git ls-remote origin refs/heads/<branch> | cut -f1`"),
+    Pin.phrase("Compare `git -C <path> rev-parse HEAD` against `git ls-remote origin refs/heads/<branch> | cut -f1`"),
   );
-  assert.match(slice(), phrase("dispatch nothing into that worktree"));
-  assert.match(slice(), phrase("naming BOTH commits"));
+  assert.match(slice(), Pin.phrase("dispatch nothing into that worktree"));
+  assert.match(slice(), Pin.phrase("naming BOTH commits"));
   assert.doesNotMatch(
     slice(),
-    phrase("against `gh pr view <N> --json headRefOid -q .headRefOid`"),
+    Pin.phrase("against `gh pr view <N> --json headRefOid -q .headRefOid`"),
     "the refusal is back to comparing against the PR object — the field that lags the ref, in both directions",
   );
   // The cheaper local read is the false fix waiting beside the real one: the
@@ -125,8 +124,8 @@ test("phase 1 compares the worktree head against the branch ref, and refuses on 
   // `git rev-parse origin/<branch>` agrees with the worktree by construction and
   // passes every stale tree it was added to catch. The prohibition is pinned
   // because a reader who only knows "not the PR object" reaches for it.
-  assert.match(slice(), phrase("never `git rev-parse origin/<branch>`"));
-  assert.match(slice(), phrase("agrees with it by construction"));
+  assert.match(slice(), Pin.phrase("never `git rev-parse origin/<branch>`"));
+  assert.match(slice(), Pin.phrase("agrees with it by construction"));
 });
 
 // MAPPING guard, ceiling on the pin above: three mutants re-admit headRefOid
@@ -157,15 +156,14 @@ test("phase 1 never names headRefOid inside the ref-compare bullet itself", () =
 // occurring exactly once in this bullet is what actually holds the demotion;
 // a second occurrence, in any wording, is itself the re-promotion.
 test("phase 1 keeps the headRefOid read but says it is not the gate", () => {
-  assert.match(slice(), phrase("gh pr view <N> --json headRefOid -q .headRefOid"));
-  assert.match(slice(), phrase("it is NOT the gate"));
-  assert.match(slice(), phrase("never the operand this refusal turns on"));
-  const gateBullet = between(
-    RUN_TEAM,
+  assert.match(slice(), Pin.phrase("gh pr view <N> --json headRefOid -q .headRefOid"));
+  assert.match(slice(), Pin.phrase("it is NOT the gate"));
+  assert.match(slice(), Pin.phrase("never the operand this refusal turns on"));
+  const gateBullet = RUN_TEAM.between(
     "- **Read `gh pr view",
     "**Why the ref and not",
     "run-team/SKILL.md phase 1 headRefOid-read bullet",
-  );
+  ).text;
   const gateMentions = gateBullet.match(/gate/gi) ?? [];
   assert.equal(gateMentions.length, 1, 'a second "gate" mention re-admits headRefOid as a gate, under any wording');
 });
@@ -176,8 +174,8 @@ test("phase 1 keeps the headRefOid read but says it is not the gate", () => {
 // costs the dispatch the operand change exists to save. Same hole `[ -n "$pre" ]`
 // closes in run-merge-bot.md's step-1 poll, one site later.
 test("phase 1 refuses to read an empty ref as a verdict", () => {
-  assert.match(slice(), phrase("An empty read is neither equal nor a mismatch"));
-  assert.match(slice(), phrase("report the ref as unreadable"));
+  assert.match(slice(), Pin.phrase("An empty read is neither equal nor a mismatch"));
+  assert.match(slice(), Pin.phrase("report the ref as unreadable"));
 });
 
 // The fail-open half — #1168's own ticket assumed this site could only fail
@@ -191,11 +189,11 @@ test("phase 1 refuses to read an empty ref as a verdict", () => {
 // unpinned — the two shas and the two re-poll attempt numbers are one run's
 // readings, and re-measuring must not turn a test red.
 test("phase 1 says the PR-object compare fails open too, and that a re-read cannot fix it", () => {
-  assert.match(slice(), phrase("both operands go stale in the SAME direction"));
-  assert.match(slice(), phrase("fails OPEN as readily as it fails closed"));
+  assert.match(slice(), Pin.phrase("both operands go stale in the SAME direction"));
+  assert.match(slice(), Pin.phrase("fails OPEN as readily as it fails closed"));
   assert.match(
     slice(),
-    phrase("Re-reading `headRefOid` on a settle window does not reach that half at all"),
+    Pin.phrase("Re-reading `headRefOid` on a settle window does not reach that half at all"),
   );
 });
 
@@ -213,9 +211,9 @@ test("phase 1 says the PR-object compare fails open too, and that a re-read cann
 // scratch repo (git 2.50.1). That removal is pinned by name, the same form
 // phase 5's own scratch-worktree duty already uses.
 test("phase 1 retries a mismatch once through a fetch, and says it is once", () => {
-  assert.match(slice(), phrase("git worktree remove --force <path>"));
-  assert.match(slice(), phrase("fetch and re-create once before reporting it"));
-  assert.match(slice(), phrase("Bounded at one retry"));
+  assert.match(slice(), Pin.phrase("git worktree remove --force <path>"));
+  assert.match(slice(), Pin.phrase("fetch and re-create once before reporting it"));
+  assert.match(slice(), Pin.phrase("Bounded at one retry"));
 });
 
 // The asymmetry, pinned as a MAPPING rather than as two presences. Both words
@@ -247,10 +245,10 @@ test("phase 1 keeps the workflow backstop from reading as full coverage", () => 
   // file 11/11 green. The bolded `That backstop now compares…` sentence then
   // contradicts it, and a reader takes the operand from whichever they hit
   // first.
-  assert.match(slice(), phrase("refuses a snapshot whose head is not the branch ref's"));
-  assert.match(slice(), phrase("A worktree you hand to an agent directly is not"));
-  assert.match(slice(), phrase("That backstop now compares against the same ref this bullet does"));
-  assert.match(slice(), phrase("never a reason to skip the ref compare"));
+  assert.match(slice(), Pin.phrase("refuses a snapshot whose head is not the branch ref's"));
+  assert.match(slice(), Pin.phrase("A worktree you hand to an agent directly is not"));
+  assert.match(slice(), Pin.phrase("That backstop now compares against the same ref this bullet does"));
+  assert.match(slice(), Pin.phrase("never a reason to skip the ref compare"));
   assert.doesNotMatch(
     slice(),
     /backstop compares against `headRefOid`/,
@@ -264,7 +262,7 @@ test("phase 1 keeps the workflow backstop from reading as full coverage", () => 
 // and a controller then hunts a run log for a line it will never find. Compared
 // against the source, so either side moving reds.
 test("phase 1's quoted run-log marker is the one review-core.mjs actually prints", () => {
-  assert.match(slice(), phrase("head ref (absent): head check SKIPPED"));
+  assert.match(slice(), Pin.phrase("head ref (absent): head check SKIPPED"));
   const line = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8")
     .split("\n")
     .find((l) => l.includes("log(`snapshot "));

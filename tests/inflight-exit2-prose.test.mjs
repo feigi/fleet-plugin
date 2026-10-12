@@ -36,46 +36,45 @@
 // A reflow (line wraps, `**bold**` moved) stays green by design.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
+const read = (...p) => Pin.file(join(REPO, ...p));
 const RUN_TEAM = read("skills", "run-team", "SKILL.md");
 const NEXT_TICKET = read("skills", "next-ticket", "SKILL.md");
 
 const step = () =>
-  between(RUN_TEAM, "**In-flight check, again**", "**Read the ticket in full, once**", "run-team/SKILL.md phase 1 Pull step 2");
+  RUN_TEAM.between("**In-flight check, again**", "**Read the ticket in full, once**", "run-team/SKILL.md phase 1 Pull step 2").text;
 
 test("the in-flight step names exit 2 and refuses to read it as free", () => {
-  assert.match(step(), phrase("Exit 2 is not free"));
-  assert.match(step(), phrase("treat it as taken"));
+  assert.match(step(), Pin.phrase("Exit 2 is not free"));
+  assert.match(step(), Pin.phrase("treat it as taken"));
 });
 
 test("the in-flight step tells the reader to read `unknown`, not `taken` alone", () => {
-  assert.match(step(), phrase("read `unknown`, never `taken` alone"));
+  assert.match(step(), Pin.phrase("read `unknown`, never `taken` alone"));
   // The trap the payload sets: exit 2 says taken:false, which is a summary of
   // `hits` and not a claim about the ticket.
-  assert.match(step(), phrase('exit 2 says `"taken": false`'));
-  assert.match(step(), phrase("not a claim the ticket is free"));
+  assert.match(step(), Pin.phrase('exit 2 says `"taken": false`'));
+  assert.match(step(), Pin.phrase("not a claim the ticket is free"));
 });
 
 test("the in-flight step ranks a hit above an unknown", () => {
-  assert.match(step(), phrase("A hit outranks an unknown"));
+  assert.match(step(), Pin.phrase("A hit outranks an unknown"));
   // Both arrays non-empty at exit 1 is the case the rule exists for.
-  assert.match(step(), phrase("non-empty `hits[]` and a non-empty `unknown[]` at exit 1"));
+  assert.match(step(), Pin.phrase("non-empty `hits[]` and a non-empty `unknown[]` at exit 1"));
 });
 
 test("the in-flight step denies that exit 2 always parses", () => {
-  assert.match(step(), phrase("Four causes print nothing at all"));
-  assert.match(step(), phrase("a bad argument, not inside a git repository, no such issue, a verdict that could not be written"));
-  assert.match(step(), phrase("never assume exit 2 parses"));
+  assert.match(step(), Pin.phrase("Four causes print nothing at all"));
+  assert.match(step(), Pin.phrase("a bad argument, not inside a git repository, no such issue, a verdict that could not be written"));
+  assert.match(step(), Pin.phrase("never assume exit 2 parses"));
 });
 
 test("next-ticket/SKILL.md still carries the wording run-team was made to match", () => {
-  const s = between(NEXT_TICKET, "## 3. In-flight check", "## 4. Suggest", "next-ticket/SKILL.md");
-  assert.match(s, phrase("0 free, 1 taken, 2 unanswerable"));
-  assert.match(s, phrase("Exit 2 is not free"));
-  assert.match(s, phrase("treat it as taken until you know"));
+  const s = NEXT_TICKET.section("## 3. In-flight check (all three, per candidate) — then fetch", "next-ticket/SKILL.md").text;
+  assert.match(s, Pin.phrase("0 free, 1 taken, 2 unanswerable"));
+  assert.match(s, Pin.phrase("Exit 2 is not free"));
+  assert.match(s, Pin.phrase("treat it as taken until you know"));
 });

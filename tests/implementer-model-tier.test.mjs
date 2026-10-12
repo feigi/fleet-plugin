@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { between as section } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { CELL_DEF } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Implementers dispatch at the tier their DEFINITION declares, never one the
@@ -16,21 +16,21 @@ import { CELL_DEF } from "../plugin/scripts/ledger-grammar.mjs";
 // does the work. One slice per paragraph, never per phase: widen a slice to its
 // phase and a neighbouring paragraph satisfies the pin on its own.
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 // The first two slices each run from a named paragraph to the next anchor named
 // here, several paragraphs on, so a neighbouring paragraph can satisfy a pin
 // read over them. A failure here means the text was deleted OR relocated —
 // check the rest of the file before assuming deletion.
 const dispatch = () =>
-  section(RUN_TEAM, "**Dispatch every implementer", "**Guard: accumulate per PR", "run-team phase 2 dispatch rule");
+  RUN_TEAM.between("**Dispatch every implementer", "**Guard: accumulate per PR", "run-team phase 2 dispatch rule").text;
 const guard = () =>
-  section(RUN_TEAM, "**Guard: accumulate per PR", "Why the agent body carries what it does", "run-team phase 2 tier guard");
+  RUN_TEAM.between("**Guard: accumulate per PR", "Why the agent body carries what it does", "run-team phase 2 tier guard").text;
 // Paragraph-tight: the dispatch rule alone, ending where the tier check opens.
 // The paragraphs past it recount historical rows by vendor model name, so an
 // absence pin read over `dispatch()` would refuse the file as it stands.
 const dispatchRule = () =>
-  section(RUN_TEAM, "**Dispatch every implementer", "**After every Pull's dispatch", "run-team phase 2 dispatch rule paragraph");
+  RUN_TEAM.between("**Dispatch every implementer", "**After every Pull's dispatch", "run-team phase 2 dispatch rule paragraph").text;
 
 test("phase 2 dispatches every implementer at its definition's tier, and says so with a mechanism", () => {
   const slice = dispatch();

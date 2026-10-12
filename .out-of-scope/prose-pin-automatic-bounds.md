@@ -1,6 +1,6 @@
 # Automatic Bounds, Gutters and Locality in `Pin`
 
-`tests/support/prose-pin.mjs` is moving from 16 flat exports to one `Pin`
+`tests/support/prose-pin.mjs` moved from 16 flat exports to one `Pin`
 interface (#2149, then #3063): a node per located slice, with methods named
 after the flat functions they replace. The interface leaves every bound and
 every gutter to the caller. Proposals to make `Pin` infer them — a section

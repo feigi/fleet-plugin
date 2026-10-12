@@ -36,7 +36,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { environmentNote } from "../plugin/scripts/review-core.mjs";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { stripComments } from "./support/strip-comments.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
@@ -484,8 +484,8 @@ for (const [name, path] of SOURCES) {
   // half a fix: the specialist is the one deciding whether a red is a finding.
   test(`${name}: both suite-running prompts and the payload carry what the run is evidence about`, () => {
     const code = stripComments(readFileSync(path, "utf8"));
-    const specialist = between(code, "READ ONLY FROM THE SNAPSHOT", "Report only what you RAN", "the specialist prompt");
-    const refuter = between(code, "Try to REFUTE this finding", "{ label: `verify:", "the refuter prompt");
+    const specialist = Pin.of(code, "code").between("READ ONLY FROM THE SNAPSHOT", "Report only what you RAN", "the specialist prompt").text;
+    const refuter = Pin.of(code, "code").between("Try to REFUTE this finding", "{ label: `verify:", "the refuter prompt").text;
     assert.match(specialist, /\$\{environmentNote\(snap\)\}/, "the specialist prompt no longer says what its own suite run is evidence about — a dimension then reads a skip or a red as a fact about the tree");
     assert.match(refuter, /\$\{environmentNote\(snap\)\}/, "the refuter prompt no longer carries it — a refuter that runs the suite to check a finding draws the same wrong conclusion");
     assert.match(code, /testEnvironment: environmentNote\(snap\)/, "the returned payload no longer carries the measurement environment — the controller is back to reading a count with nothing saying where it was taken");
@@ -916,12 +916,12 @@ test("environmentNote says a verified snapshot measures the tree, and an unverif
   // `phrase()`, not a literal: this prose is hard-wrapped at ~78 columns, so
   // every inter-word gap in it may be a newline, and a pin that reds on a
   // rewrap is one the next reader edits around.
-  assert.match(verified, phrase("what a checkout at that commit does"), "the verified branch no longer says the suite measures what a checkout does, which is the whole claim the tree-hash compare buys");
+  assert.match(verified, Pin.phrase("what a checkout at that commit does"), "the verified branch no longer says the suite measures what a checkout does, which is the whole claim the tree-hash compare buys");
 
   const failed = environmentNote({ repoVerified: false, repoError: "SNAPSHOT_INIT_FAILED" });
   assert.match(failed, /UNVERIFIED/, "a degraded environment is not announced");
   assert.match(failed, /SNAPSHOT_INIT_FAILED/, "the reason is dropped — the payload says the environment differs without saying why, which is what a reader needs to tell an artifact from a regression");
-  assert.match(failed, phrase("NOT a validation of the tree"), "the consequence is dropped — a reader is left to infer that the counts mean less than they look like");
+  assert.match(failed, Pin.phrase("NOT a validation of the tree"), "the consequence is dropped — a reader is left to infer that the counts mean less than they look like");
 
   // Absent, not false: an agent that omitted the field must not read as a
   // verified environment. The schema's `required` is what should prevent it;
@@ -943,10 +943,10 @@ test("environmentNote says a verified snapshot measures the tree, and an unverif
   const mismatched = environmentNote({ repoVerified: false, repoError: "SNAPSHOT_TREE_MISMATCH=snapshot aaa vs commit bbb" });
   assert.match(mismatched, /UNVERIFIED/, "a mismatched tree is not announced as degraded");
   assert.match(mismatched, /SNAPSHOT_TREE_MISMATCH=snapshot aaa vs commit bbb/, "the mismatch reason is dropped — a reader cannot tell which tree was measured");
-  assert.match(mismatched, phrase("the snapshot IS a git repository"), "the mismatch case no longer says the init succeeded — it reads as no repository at all, which is the wrong cause");
+  assert.match(mismatched, Pin.phrase("the snapshot IS a git repository"), "the mismatch case no longer says the init succeeded — it reads as no repository at all, which is the wrong cause");
   assert.doesNotMatch(
     mismatched,
-    phrase("NOT a validation of the tree"),
+    Pin.phrase("NOT a validation of the tree"),
     "the mismatch case still carries the init-failed consequence, which claims repo-gated tests skip or fail there when they actually RUN against the wrong tree",
   );
 });

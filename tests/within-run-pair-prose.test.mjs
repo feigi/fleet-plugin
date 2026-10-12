@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between as section } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 // #864's finding is that tier is entangled with calendar date and therefore
 // with prompt evolution — 8 of 9 sonnet rows in one week, 23 of 24 opus rows in
@@ -16,13 +15,13 @@ import { between as section } from "./support/prose-pin.mjs";
 // is also the part a compression pass is likeliest to quietly drop. These pins
 // are what notices.
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 // Paragraph-tight, and deliberately NARROWER than the dispatch slice in
 // implementer-model-tier.test.mjs: widened to the phase, the tier-guard
 // paragraphs below would satisfy half of these pins on their own.
 const dispatch = () =>
-  section(RUN_TEAM, "**Dispatch every implementer", "The raw split still favours the top tier", "run-team phase 2 dispatch rule");
+  RUN_TEAM.between("**Dispatch every implementer", "The raw split still favours the top tier", "run-team phase 2 dispatch rule").text;
 
 test("phase 2 dispatches an exploration cell's implementer on every 5th Pull", () => {
   const slice = dispatch();
@@ -149,7 +148,7 @@ test("phase 2 counts the rate off the ledger's impl- rows, and a replacement doe
 // the draw's record — on a row exactly when the router drew. Written for a
 // row the router did not draw for, `ledger.mjs dispatch` would print a cell
 // nothing chose.
-const pullStep7 = () => section(RUN_TEAM, "7. **Route, row, then dispatch**", "**The Pull table**", "run-team Pull step 7");
+const pullStep7 = () => RUN_TEAM.between("7. **Route, row, then dispatch**", "**The Pull table**", "run-team Pull step 7").text;
 
 test("Pull step 7 routes through ticket-router.mjs and writes tier= exactly when it drew", () => {
   const slice = pullStep7();
@@ -163,12 +162,12 @@ test("Pull step 7 routes through ticket-router.mjs and writes tier= exactly when
   assert.match(slice, /release\s+the\s+claim\s+\(`release-ticket\.sh`/, "step 7 no longer releases the claim on a router exit 2");
   // The Pull's one read is what the router reads: a second fetch would be a
   // second network call per Pull.
-  const step3 = section(RUN_TEAM, "3. **Read the ticket in full, once**", "Record the ticket's real", "run-team Pull step 3");
+  const step3 = RUN_TEAM.between("3. **Read the ticket in full, once**", "Record the ticket's real", "run-team Pull step 3").text;
   assert.match(step3, /--json\s+title,body,comments,labels,createdAt`\s+written\s+to\s+`<scratch>\/impl-<N>\/issue\.json`/, "step 3 no longer writes the file the router reads");
 });
 
 const routerArgs = () =>
-  section(RUN_TEAM, "**The router's arguments, and nothing past its line.**", "**Count the rate against the ledger", "run-team router's arguments");
+  RUN_TEAM.between("**The router's arguments, and nothing past its line.**", "**Count the rate against the ledger", "run-team router's arguments").text;
 
 test("the router's arguments paragraph pins the roll, the arm parity and the single source of CELL", () => {
   const slice = routerArgs();
@@ -183,7 +182,7 @@ test("the router's arguments paragraph pins the roll, the arm parity and the sin
 // The difficulty caveat lives in the counter-evidence section, past this file's
 // dispatch slice, so it needs its own anchor pair.
 const counterEvidence = () =>
-  section(RUN_TEAM, "within-run pairing above**", "`minted_false_claim`", "run-team tier-guard counter-evidence");
+  RUN_TEAM.between("within-run pairing above**", "`minted_false_claim`", "run-team tier-guard counter-evidence").text;
 
 test("the orthogonality claim is scoped — date only, not difficulty", () => {
   // The claim itself is literally true and narrowly scoped, so this is not a

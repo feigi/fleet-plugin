@@ -28,13 +28,12 @@
 // an exception. A reflow of the same words stays green by design.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
-const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+const REVIEW_AND_FIX = Pin.file(join(REPO, "commands", "review-and-fix.md"));
 
 // run-team's finisher duties are an indented ordered list, so a hard wrap puts
 // leading spaces mid-phrase. Collapse whitespace so `\s+` spans a wrap.
@@ -47,9 +46,9 @@ const flat = (s) => s.replace(/\s+/g, " ");
 // that never changed. Measured at width 100: `never a dropped finding` split and
 // reddened test 4 while 80/120/140 stayed green, i.e. the class is present in
 // all five step-5 pins and line width merely samples which one fires.
-const step5 = () => flat(between(REVIEW_AND_FIX, "5. File each deferred finding", "\n6. Diff-check green", "review-and-fix step 5"));
+const step5 = () => flat(REVIEW_AND_FIX.between("5. File each deferred finding", "\n6. Diff-check green", "review-and-fix step 5").text);
 const finisherDeferrals = () =>
-  flat(between(RUN_TEAM, "**Confirm every deferral — and every claimed APPLY —", "Add `ready-to-merge`", "run-team finisher duty 2"));
+  flat(RUN_TEAM.between("**Confirm every deferral — and every claimed APPLY —", "Add `ready-to-merge`", "run-team finisher duty 2").text);
 
 test("step 5 files through ledger.mjs check, not its own gh search", () => {
   const s = step5();
@@ -103,12 +102,12 @@ test("step 5 cites a Run ledger section that exists in run-team", () => {
   // restating them — a cross-file citation that rots silently if the section
   // is renamed, since neither file's prose fails on its own.
   assert.match(step5(), /\*\*Run ledger\*\*/, "step 5 no longer defers the exit-code semantics to run-team's Run ledger section");
-  assert.match(RUN_TEAM, /^## Run ledger$/m, "run-team no longer has a `## Run ledger` section for step 5 to cite");
+  assert.match(RUN_TEAM.text, /^## Run ledger$/m, "run-team no longer has a `## Run ledger` section for step 5 to cite");
   // And that section has to still carry what step 5 sends a reader there for.
   // Flattened like the sibling below: the slice is hard-wrapped Markdown, so an
   // un-flattened match reds on a pure reflow — the one thing the header at the
   // top of this file promises stays green.
-  const runLedger = flat(between(RUN_TEAM, "## Run ledger", "\n## Report", "run-team Run ledger section"));
+  const runLedger = flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
   assert.match(runLedger, /`verdict` is `already-filed`, `tracker-hit`, `clean`, `soft-hit` or `unverified`/, "the cited section no longer enumerates the verdict values");
 });
 
@@ -124,7 +123,7 @@ test("step 5's exit-code readings agree with the section it cites", () => {
   // the step-5 side is pinned by "step 5 tells exit 1 from exit 3" above.
   // Measured: `exit **3**` → `exit **4**` in review-and-fix.md alone reds that
   // test and leaves this one green; the same edit in run-team alone inverts it.
-  const runLedger = flat(between(RUN_TEAM, "## Run ledger", "\n## Report", "run-team Run ledger section"));
+  const runLedger = flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
   assert.match(runLedger, /\*\*1\*\* already in this run's filed list/, "run-team no longer reads exit 1 as already filed this run — step 5 still does");
   assert.match(runLedger, /\*\*2\*\* usage\s+error/, "run-team no longer reads exit 2 as a usage error — step 5 still does");
   assert.match(runLedger, /\*\*3\*\* the ledger is clean but open or closed tracker issues match/, "run-team no longer reads exit 3 as a tracker hit — step 5 still does");
@@ -140,7 +139,7 @@ test("both filing sites read soft-hit as rows to read rather than as permission"
   // verdict it replaced (#388), and there are two callers because two different
   // agents file issues and each reads only its own instructions.
   assert.match(step5(), /`soft-hit`[\s\S]{0,400}?read the rows/i, "step 5 names soft-hit without telling its reader to read the rows it printed");
-  const runLedger = flat(between(RUN_TEAM, "## Run ledger", "\n## Report", "run-team Run ledger section"));
+  const runLedger = flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
   assert.match(runLedger, /`soft-hit`[\s\S]{0,400}?read\s+them before filing/i, "the cited section names soft-hit without saying what to do about it");
 });
 
@@ -177,11 +176,11 @@ test("the finisher files its own deferrals through the same guard", () => {
 // which owned every ledger write, never files. So the arm had never held a row.
 // The fix is the filer recording its own filing, under a ledger lock that lets
 // a second kind of writer exist; these pin the instruction half of it.
-const runLedger = () => flat(between(RUN_TEAM, "## Run ledger", "\n## Report", "run-team Run ledger section"));
+const runLedger = () => flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
 const finisherReport = () =>
-  flat(between(RUN_TEAM, "4. Report you the label", "**Give the finisher the instrument", "run-team finisher duty 4"));
+  flat(RUN_TEAM.between("4. Report you the label", "**Give the finisher the instrument", "run-team finisher duty 4").text);
 const fixApplierReport = () =>
-  flat(between(RUN_TEAM, "> Then report to the controller the pushed SHA", "**Deferring everything", "fix-applier report line"));
+  flat(RUN_TEAM.between("> Then report to the controller the pushed SHA", "**Deferring everything", "fix-applier report line").text);
 
 test("both filing sites run `ledger.mjs filed` right after `gh issue create`, under the subject they checked", () => {
   // The subject is half of it: `check` matches the filed list by the words in
@@ -219,7 +218,7 @@ test("the controller records every filing a filer reported unrecorded", () => {
   // The fallback is only a fallback if someone acts on it: an `unrecorded:`
   // line nobody turns into a `filed` row leaves the arm exactly as blind as
   // before, one filing at a time.
-  const table = paragraph(RUN_TEAM, "| Wake | Record, then tick |", "record-before-tick table", "Then run the tick, act on every line it prints,");
+  const table = RUN_TEAM.paragraph("| Wake | Record, then tick |", "record-before-tick table", "Then run the tick, act on every line it prints,").text;
   for (const wake of ["Fix-applier report", "Finisher report", "Finisher report (halted)"]) {
     const row = table.split("\n").find((r) => r.startsWith(`| ${wake} |`)) ?? "";
     assert.match(row, /`ledger\.mjs filed <N> "<subject>"` for each `unrecorded:` line/, `the "${wake}" wake no longer records unrecorded filings`);

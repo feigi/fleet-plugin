@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase, stripHashGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 // #350. The ssh-hardening comment said its options "land on top of"
 // whatever the user's own ssh command already says. That reads as override, and
@@ -36,26 +35,23 @@ import { between, phrase, stripHashGutter } from "./support/prose-pin.mjs";
 // commit, not in the script. Measured too, and deliberately not refused: "on top
 // of" without "land" stays green, so the comment keeps the phrase for the
 // non-precedence claims it already makes.
-const NET = readFileSync(join(import.meta.dirname, "..", "plugin", "scripts", "net.sh"), "utf8");
+const NET = Pin.file(join(import.meta.dirname, "..", "plugin", "scripts", "net.sh"));
 
 // Bounded at both ends, by net_git's own heading and by the first construct the
 // comment documents. net.sh discusses ssh options in that one comment alone, but
 // the bounds are what keep a later block elsewhere from satisfying these pins
 // with the clause gutted.
 const netGit = () =>
-  stripHashGutter(
-    between(
-      NET,
-      "# net_git <wdfile> <budget> <git arg>... — run one `git` network call",
-      "net_base_ssh=$(git config --get core.sshCommand",
-      "net.sh",
-    ),
-  );
+  NET.between(
+    "# net_git <wdfile> <budget> <git arg>... — run one `git` network call",
+    "net_base_ssh=$(git config --get core.sshCommand",
+    "net.sh",
+  ).stripGutter("#").text;
 
 test("net_git states ssh's first-wins rule for a repeated -o (#350)", () => {
   assert.match(
     netGit(),
-    phrase("ssh takes the FIRST value of a repeated -o"),
+    Pin.phrase("ssh takes the FIRST value of a repeated -o"),
     "net.sh no longer states which of two repeated -o values ssh uses, so nothing in the comment tells a reader whether the options it appends bound the run or are discarded",
   );
 });
@@ -63,7 +59,7 @@ test("net_git states ssh's first-wins rule for a repeated -o (#350)", () => {
 test("net_git names the consequence: the user's own bound is the one that applies (#350)", () => {
   assert.match(
     netGit(),
-    phrase("the bound degrades to whatever bound the user asked for"),
+    Pin.phrase("the bound degrades to whatever bound the user asked for"),
     "net.sh states the first-wins rule without its consequence — a reader can still believe the ConnectTimeout this probe sets is what bounds a run where the user set their own",
   );
 });
@@ -72,12 +68,12 @@ test("net_git documents the BatchMode=no opt-out and what GIT_TERMINAL_PROMPT=0 
   const text = netGit();
   assert.match(
     text,
-    phrase("`-o BatchMode=no`"),
+    Pin.phrase("`-o BatchMode=no`"),
     "net.sh no longer documents that a user's own BatchMode=no survives, which is the setting that re-opens the prompt #92 exists to stop",
   );
   assert.match(
     text,
-    phrase("GIT_TERMINAL_PROMPT=0 does not reach"),
+    Pin.phrase("GIT_TERMINAL_PROMPT=0 does not reach"),
     "net.sh no longer says that GIT_TERMINAL_PROMPT=0 leaves ssh's own host-key and passphrase prompts alone, so a reader takes the unconditional GIT_TERMINAL_PROMPT=0 as covering them",
   );
 });

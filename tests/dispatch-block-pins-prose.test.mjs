@@ -70,7 +70,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 // The body alone — everything after the frontmatter's closing `---` — so a
@@ -115,7 +115,7 @@ const flatten = (s) =>
 // block deleted outright reds on its own anchor and names itself. A closing
 // phrase would anchor on today's last sentence instead, leaving anything
 // appended after it outside the slice entirely.
-const block = (from, to, what) => flatten(between(region(), from, to, what));
+const block = (from, to, what) => flatten(Pin.of(region(), "region()").between(from, to, what).text);
 
 const worktreeBlock = () => block("You are ALREADY in worktree", "**`edit` and `read` resolve", "phase 2's worktree block");
 const editReadBlock = () => block("**`edit` and `read` resolve", "Read the issue with", "phase 2's edit/read session-root block");
@@ -142,12 +142,12 @@ test("the worktree block forbids a second worktree and carries the check that se
   // is the pair of `rev-parse` calls that tell it where it already is.
   assert.match(
     b,
-    phrase("Do NOT create another worktree. Verify with `git rev-parse --git-dir` and `git rev-parse --git-common-dir`"),
+    Pin.phrase("Do NOT create another worktree. Verify with `git rev-parse --git-dir` and `git rev-parse --git-common-dir`"),
     "the no-second-worktree rule is no longer carried with the rev-parse check that settles it",
   );
   assert.match(
     b,
-    phrase("Skip the using-git-worktrees skill's Step 1"),
+    Pin.phrase("Skip the using-git-worktrees skill's Step 1"),
     "the block no longer names which step of using-git-worktrees the member skips",
   );
 });
@@ -168,7 +168,7 @@ test("the edit/read block binds the session-root mechanism to the discipline tha
   // roots a member wrongly assumes.
   assert.match(
     b,
-    phrase(
+    Pin.phrase(
       "`edit` and `read` resolve a bare relative path against the SESSION ROOT — the controller's own main checkout — not against your worktree and not against your `bash` cwd",
     ),
     "the session-root resolution fact no longer names the two roots it is NOT — the worktree and the bash cwd — so the rule reads as advice a careful member already believes it follows",
@@ -189,7 +189,7 @@ test("the edit/read block binds the session-root mechanism to the discipline tha
   // with the bash case between them.
   assert.match(
     b,
-    phrase(
+    Pin.phrase(
       "A `member-write-guard` refusal means the path hit the main checkout — for `bash`, a missing or main-checkout `cwd` — so re-issue it absolute, under your worktree",
     ),
     "the block no longer tells the member what a member-write-guard refusal means and that the remedy is to re-issue the path absolute under its worktree",
@@ -197,7 +197,7 @@ test("the edit/read block binds the session-root mechanism to the discipline tha
   // The rule bound to the shape it excludes.
   assert.match(
     b,
-    phrase(
+    Pin.phrase(
       "prefix every `edit` and `read` path with an absolute path — the worktree `<abs-path>` for repo files, `<scratch>/impl-<N>/` for scratch — never a bare relative one, and never `plugin/scripts/foo.mjs` on its own",
     ),
     "the absolute-path rule no longer shows the bare relative path it excludes, so it states a preference rather than a prohibition",
@@ -210,7 +210,7 @@ test("the issue-read block carries the command, the caveat that motivates it, an
   // on its own is satisfied by the very invocation the next sentence forbids.
   assert.match(
     b,
-    phrase("Read the issue with `gh issue view <N> --json title,body,comments"),
+    Pin.phrase("Read the issue with `gh issue view <N> --json title,body,comments"),
     "the issue-read command no longer requests title, body and comments together",
   );
   // The caveat bound to its consequence. The defect is silent — exit 0 — so the
@@ -225,7 +225,7 @@ test("the issue-read block carries the command, the caveat that motivates it, an
   // separately would pass with the precedence reversed.
   assert.match(
     b,
-    phrase("The `## Agent Brief` comment is authoritative over the issue body"),
+    Pin.phrase("The `## Agent Brief` comment is authoritative over the issue body"),
     "the block no longer says the Agent Brief outranks the issue body, or now says the reverse",
   );
   // The bail rule, bound to BOTH its timing and its trigger. This is the case
@@ -253,12 +253,12 @@ test("the re-derive block names origin/main as the reference, and says a contrad
   // sentence has been rewritten to send the member at its own working tree.
   assert.match(
     b,
-    phrase("against `origin/main` before implementing — not the working tree, and not the ticket's line numbers"),
+    Pin.phrase("against `origin/main` before implementing — not the working tree, and not the ticket's line numbers"),
     "re-derivation is no longer pinned to origin/main against the working tree and the ticket's line numbers",
   );
   assert.match(
     b,
-    phrase("Already fixed → report that with the commit and do NOT invent work"),
+    Pin.phrase("Already fixed → report that with the commit and do NOT invent work"),
     "the already-fixed exit no longer tells the member to report the commit instead of inventing work",
   );
   // Bail bound to its trigger, and to the thing it is NOT. Swapping the two
@@ -266,7 +266,7 @@ test("the re-derive block names origin/main as the reference, and says a contrad
   // a stale ticket into a shipped regression, and it reds here.
   assert.match(
     b,
-    phrase("is a bail, not a thing to implement"),
+    Pin.phrase("is a bail, not a thing to implement"),
     "a criterion the tree contradicts no longer reads as a bail, or now reads as a thing to implement",
   );
 });
@@ -275,7 +275,7 @@ test("the commit-incrementally block carries the instruction with the loss that 
   const b = commitBlock();
   assert.match(
     b,
-    phrase("Commit incrementally as you go. Do not accumulate a large uncommitted diff"),
+    Pin.phrase("Commit incrementally as you go. Do not accumulate a large uncommitted diff"),
     "the commit-incrementally instruction is no longer carried verbatim to the member",
   );
   // The reason, bound to the instruction by the slice being this one paragraph.
@@ -284,7 +284,7 @@ test("the commit-incrementally block carries the instruction with the loss that 
   // commit often, with no reason, treats it as style.
   assert.match(
     b,
-    phrase("uncommitted work is invisible to the controller and effectively unrecoverable"),
+    Pin.phrase("uncommitted work is invisible to the controller and effectively unrecoverable"),
     "the block no longer says why incremental commits are not optional — the stall consequence is gone",
   );
 });
@@ -303,7 +303,7 @@ test("the scratch-discipline block names the shared injected root, the per-membe
   // edit that keeps `<scratch>/impl-<N>/` and drops the "never" cannot pass.
   assert.match(
     b,
-    phrase("copy you create goes under `<scratch>/impl-<N>/`, never into the scratch root by itself"),
+    Pin.phrase("copy you create goes under `<scratch>/impl-<N>/`, never into the scratch root by itself"),
     "the per-member path is no longer bound to the prohibition on writing into the scratch root itself",
   );
   // The root bound to it being assigned by the dispatch prompt and shared, not
@@ -312,12 +312,12 @@ test("the scratch-discipline block names the shared injected root, the per-membe
   // a member whose prompt names none asks rather than inventing one.
   assert.match(
     b,
-    phrase("Your dispatch prompt names your partition with an absolute path, and no harness supplies one: the root above it is shared with every sibling running this session"),
+    Pin.phrase("Your dispatch prompt names your partition with an absolute path, and no harness supplies one: the root above it is shared with every sibling running this session"),
     "the block no longer says the dispatch prompt names the partition and the root is shared with every sibling member",
   );
   assert.match(
     b,
-    phrase("Never build a root of your own — if your prompt names no path, ask the controller by name and never invent one"),
+    Pin.phrase("Never build a root of your own — if your prompt names no path, ask the controller by name and never invent one"),
     "the block no longer forbids a member building its own scratch root",
   );
   assert.doesNotMatch(b, /injected/, "the block again claims a harness injects the scratch root");
@@ -325,14 +325,14 @@ test("the scratch-discipline block names the shared injected root, the per-membe
   // a second scheme invented for this rule.
   assert.match(
     b,
-    phrase("Your partition is `<scratch>/impl-<N>/`, shaped the same way `claim-ticket.sh` already derives per-ticket ports from the issue number (`postgres=16<N>`, `ollama=22<N>`), not a second scheme"),
+    Pin.phrase("Your partition is `<scratch>/impl-<N>/`, shaped the same way `claim-ticket.sh` already derives per-ticket ports from the issue number (`postgres=16<N>`, `ollama=22<N>`), not a second scheme"),
     "the per-member scratch path is no longer shaped the way claim-ticket.sh derives per-ticket ports",
   );
   // Absence handled: nothing else creates this directory, so a member that
   // never `mkdir -p`s it has no path to write into.
   assert.match(
     b,
-    phrase("`mkdir -p` it yourself the first time — nothing creates it for you"),
+    Pin.phrase("`mkdir -p` it yourself the first time — nothing creates it for you"),
     "the block no longer tells the member to create its own scratch dir when absent",
   );
   // The harm bound to the mechanism, and stated as a false measurement, not
@@ -349,19 +349,19 @@ test("the scratch-discipline block names the shared injected root, the per-membe
   // the cliff; a contiguous span has no character budget to approach.
   assert.match(
     b,
-    phrase("The harm is a false measurement, not untidiness: a mutation harness writes a broken copy of a file, measures against it, then restores from `.orig`"),
+    Pin.phrase("The harm is a false measurement, not untidiness: a mutation harness writes a broken copy of a file, measures against it, then restores from `.orig`"),
     "the harm is no longer stated as a false measurement bound to the mutation harness that produces it",
   );
   assert.match(
     b,
-    phrase("one filename collision away from restoring a sibling's `.orig` over their own file, or measuring a \"clean baseline\" that is actually a sibling's mutant — silently, indistinguishable from a real result"),
+    Pin.phrase("one filename collision away from restoring a sibling's `.orig` over their own file, or measuring a \"clean baseline\" that is actually a sibling's mutant — silently, indistinguishable from a real result"),
     "the filename collision is no longer bound to the false result it produces, or to that result being indistinguishable from a real one",
   );
   // Explicitly NOT the worktree isolation rule — folding the two together is
   // the thing #581's brief rules out.
   assert.match(
     b,
-    phrase("This is not the worktree isolation rule: `claim-ticket.sh` already gives you your own worktree"),
+    Pin.phrase("This is not the worktree isolation rule: `claim-ticket.sh` already gives you your own worktree"),
     "the scratch-discipline block no longer distinguishes itself from worktree isolation",
   );
   // #1150. The child rule, pinned with the path it names — rule 2 of this
@@ -372,13 +372,13 @@ test("the scratch-discipline block names the shared injected root, the per-membe
   // `<scratch>/impl-<N>/<childName>/`") breaks the span and reds here.
   assert.match(
     b,
-    phrase("A subagent you dispatch gets its own directory under yours, `<scratch>/impl-<N>/<childName>/`, and you write that path, absolute, into its prompt — it writes nowhere else, and never derives a path of its own"),
+    Pin.phrase("A subagent you dispatch gets its own directory under yours, `<scratch>/impl-<N>/<childName>/`, and you write that path, absolute, into its prompt — it writes nowhere else, and never derives a path of its own"),
     "the child rule no longer binds a dispatched subagent's `<scratch>/impl-<N>/<childName>/` to the parent writing it, absolute, into the child's prompt — a child left to derive its own path collides in the shared root",
   );
   // The name the path is keyed on, bound to what makes it collision-free.
   assert.match(
     b,
-    phrase("`<childName>` is a slug of the name you dispatch it under (omp's task `name`) — `[a-z0-9-]` only, never the raw field itself, which can carry spaces and `/` and would split or nest the path in an unquoted shell command — unique among your children and never one of your own entries (`probe`, `mutate`, or any other name you write under `<scratch>/impl-<N>/` yourself), so no child shares a directory with a sibling or with you"),
+    Pin.phrase("`<childName>` is a slug of the name you dispatch it under (omp's task `name`) — `[a-z0-9-]` only, never the raw field itself, which can carry spaces and `/` and would split or nest the path in an unquoted shell command — unique among your children and never one of your own entries (`probe`, `mutate`, or any other name you write under `<scratch>/impl-<N>/` yourself), so no child shares a directory with a sibling or with you"),
     "`<childName>` is no longer defined as a slugged, own-entry-safe dispatch name unique among the parent's children",
   );
 });
@@ -399,7 +399,7 @@ test("the eval-kernel block binds the sharing fact to all three of its rules, an
   // the two duties it implies are one span deliberately.
   assert.match(
     b,
-    phrase("The `eval` kernel is shared with every sibling member and with the controller that dispatched you — namespace every binding you make in it, and never hand it a relative path"),
+    Pin.phrase("The `eval` kernel is shared with every sibling member and with the controller that dispatched you — namespace every binding you make in it, and never hand it a relative path"),
     "the shared-kernel premise is no longer bound to the namespacing duty and the no-relative-path duty it implies",
   );
   // The naming rule bound to the counter-example. `WT` is not decoration: it is
@@ -409,12 +409,12 @@ test("the eval-kernel block binds the sharing fact to all three of its rules, an
   // sharing the same ticket does not also share the same prefix.
   assert.match(
     b,
-    phrase("prefix what you bind with your own member NAME, not its bare ticket number"),
+    Pin.phrase("prefix what you bind with your own member NAME, not its bare ticket number"),
     "the member-prefixed binding rule no longer keys the prefix on the member's name",
   );
   assert.match(
     b,
-    phrase("`WT_impl_1447`, never a bare `WT` and never a prefix a recovery member for the same ticket (`impl-1447-b`) would also produce"),
+    Pin.phrase("`WT_impl_1447`, never a bare `WT` and never a prefix a recovery member for the same ticket (`impl-1447-b`) would also produce"),
     "the member-prefixed binding rule no longer shows the bare name it excludes, or the recovery-collision case the name-keyed prefix avoids",
   );
   // The cwd fact bound to WHY it cannot be fixed the way `bash` calls are. A
@@ -441,7 +441,7 @@ test("the eval-kernel block binds the sharing fact to all three of its rules, an
   // sibling damage stated beside it.
   assert.match(
     b,
-    phrase("never call `eval` with `reset: true`, which is destructive to every other member sharing that backend session"),
+    Pin.phrase("never call `eval` with `reset: true`, which is destructive to every other member sharing that backend session"),
     "the reset prohibition no longer names the sibling damage that is its whole reason",
   );
   // The citation, bound to the keying it is evidence for. Quoted from
@@ -459,7 +459,7 @@ test("the eval-kernel block binds the sharing fact to all three of its rules, an
   // pin is what keeps the permission in the block alongside the prohibitions.
   assert.match(
     b,
-    phrase("Using the kernel is not the defect, and this is not the `isolated` question — the bare name, the relative path and the reset are"),
+    Pin.phrase("Using the kernel is not the defect, and this is not the `isolated` question — the bare name, the relative path and the reset are"),
     "the block no longer states what it permits, so its prohibitions read as a ban on using the eval kernel at all",
   );
 });
@@ -479,7 +479,7 @@ test("the enumerate-the-class block carries all three of its halves, each with i
   // enumeration order that missed a case its own ticket named in passing.
   assert.match(
     b,
-    phrase("Build that list from the ticket's own prose first, then from the mechanism"),
+    Pin.phrase("Build that list from the ticket's own prose first, then from the mechanism"),
     "the enumeration order no longer runs from the ticket's prose to the mechanism",
   );
   // Half two: the false-positive question bound to the test it demands. The
@@ -494,12 +494,12 @@ test("the enumerate-the-class block carries all three of its halves, each with i
   // it actionable, or it degenerates into advice.
   assert.match(
     b,
-    phrase("The third is about YOUR EDIT: enumerate what your change newly does"),
+    Pin.phrase("The third is about YOUR EDIT: enumerate what your change newly does"),
     "the third half no longer distinguishes the edit's own effects from the bug class",
   );
   assert.match(
     b,
-    phrase("Ask which of the ticket's own acceptance criteria your restructuring could newly violate, and test that path"),
+    Pin.phrase("Ask which of the ticket's own acceptance criteria your restructuring could newly violate, and test that path"),
     "the third half no longer names the acceptance criteria a restructuring can newly violate",
   );
   // The closing rule, bound to what a green suite does and does not prove.
@@ -534,7 +534,7 @@ test("the sizing block makes the verdict checkable — signal beside it, and the
   // has to contradict rather than merely sit beside.
   assert.match(
     b,
-    phrase("A verdict with nothing beside it is indistinguishable from a guess, and is recorded as one"),
+    Pin.phrase("A verdict with nothing beside it is indistinguishable from a guess, and is recorded as one"),
     "a bare verdict no longer costs the member anything, so the signal is advisory",
   );
   // The form the signal takes, bound to its reason. Without the reason this
@@ -543,7 +543,7 @@ test("the sizing block makes the verdict checkable — signal beside it, and the
   // `sizing-a-ticket` output change.
   assert.match(
     b,
-    phrase("never paste the skill's output, because that format will change and this line has to outlive it"),
+    Pin.phrase("never paste the skill's output, because that format will change and this line has to outlive it"),
     "the signal's form is no longer held independent of the sizing skill's own output layout",
   );
 
@@ -552,19 +552,19 @@ test("the sizing block makes the verdict checkable — signal beside it, and the
   // a wall-clock time nobody can compare the PR against.
   assert.match(
     b,
-    phrase("the head SHA, and WHEN you ran `sizing-a-ticket` relative to opening the PR"),
+    Pin.phrase("the head SHA, and WHEN you ran `sizing-a-ticket` relative to opening the PR"),
     "the report no longer has to date the sizing run against the PR being opened",
   );
   // The direction, as one span. `before` and `after` are a one-word splice, and
   // a pin that matched either would pass on the exact defect this ticket is.
   assert.match(
     b,
-    phrase('"ran sizing-a-ticket at step 6, before `gh pr create`"'),
+    Pin.phrase('"ran sizing-a-ticket at step 6, before `gh pr create`"'),
     "the worked example no longer shows the sizing run preceding the PR, so the clause no longer has a direction",
   );
   assert.match(
     b,
-    phrase("an unreported ordering costs the covariate"),
+    Pin.phrase("an unreported ordering costs the covariate"),
     "omitting the ordering clause no longer costs the member anything, so the clause is optional in practice",
   );
 });
@@ -589,7 +589,7 @@ test("a rewrapped block still matches — these pins refuse drift, not reflow", 
   // the first draft quoted one, and then any reword of that line reddened this
   // test on the fixture guard rather than on the pin — an accept control that
   // reddens on the edits it exists to accept is worse than none.
-  const raw = between(region(), "Commit incrementally", "**Every scratch file", "phase 2's commit-incrementally block");
+  const raw = Pin.of(region(), "region()").between("Commit incrementally", "**Every scratch file", "phase 2's commit-incrementally block").text;
   // Trimmed back to the BLOCK: `between`'s `to` anchor is the next block's
   // opening words, so `raw` runs past this block's last line through the blank
   // line that separates the two. The separator is re-appended explicitly below,
@@ -614,7 +614,7 @@ test("a rewrapped block still matches — these pins refuse drift, not reflow", 
   // Replacer function, not a replacement string: `$&`, `$'` and `` $` `` are
   // interpreted in the latter. The commit block carries no `$` today, which is
   // exactly the kind of thing that stops being true without anyone noticing.
-  const flat = flatten(between(region(BODY.replace(raw, () => narrow)), "Commit incrementally", "**Every scratch file", "rewrapped commit block"));
-  assert.match(flat, phrase("Commit incrementally as you go. Do not accumulate a large uncommitted diff"));
-  assert.match(flat, phrase("uncommitted work is invisible to the controller and effectively unrecoverable"));
+  const flat = flatten(Pin.of(region(BODY.replace(raw, () => narrow)), "region()").between("Commit incrementally", "**Every scratch file", "rewrapped commit block").text);
+  assert.match(flat, Pin.phrase("Commit incrementally as you go. Do not accumulate a large uncommitted diff"));
+  assert.match(flat, Pin.phrase("uncommitted work is invisible to the controller and effectively unrecoverable"));
 });

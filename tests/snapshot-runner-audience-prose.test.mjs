@@ -38,38 +38,36 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
+const read = (...p) => Pin.file(join(REPO, ...p));
 const RUN_TEAM = read("skills", "run-team", "SKILL.md");
 const ISOLATION = read("skills", "run-team", "references", "isolation.md");
 const REVIEW_AND_FIX = read("commands", "review-and-fix.md");
 
-// Each row carries its label once: the row name is also `between()`'s `what`,
+// Each row carries its label once: the row name is also the slice's `what`,
 // so the test name and the doc named in a drift failure cannot disagree.
 const slices = [
-  ["run-team/SKILL.md", RUN_TEAM, "Filesystem isolation is not stack isolation", "Scratchpad paths need two levels"],
-  ["references/isolation.md", ISOLATION, "## Filesystem isolation is not stack isolation", "## Scratchpad paths need two levels"],
+  ["run-team/SKILL.md", () => RUN_TEAM.between("Filesystem isolation is not stack isolation", "Scratchpad paths need two levels", "run-team/SKILL.md").text],
+  ["references/isolation.md", () => ISOLATION.section("## Filesystem isolation is not stack isolation", "references/isolation.md").text],
 ];
 
-for (const [name, text, from, to] of slices) {
-  const slice = () => between(text, from, to, name);
-
+for (const [name, slice] of slices) {
   test(`${name} sends the specialist on a snapshot to review-and-fix.md for the command`, () => {
-    assert.match(slice(), phrase("`review-and-fix.md`"));
+    assert.match(slice(), Pin.phrase("`review-and-fix.md`"));
   });
 
   test(`${name} keeps \`./agent-test\` as the worktree audience's command`, () => {
-    assert.match(slice(), phrase("worktree uses `./agent-test`"));
+    assert.match(slice(), Pin.phrase("worktree uses `./agent-test`"));
   });
 
   test(`${name} says a snapshot never carries the runner a claim writes`, () => {
-    assert.match(slice(), phrase("runner a claim writes is untracked, so a `git archive` snapshot never carries it"));
+    assert.match(slice(), Pin.phrase("runner a claim writes is untracked, so a `git archive` snapshot never carries it"));
   });
 
   test(`${name} says a tracked runner rides along with its own repository's isolation`, () => {
-    assert.match(slice(), phrase("no claim exported ports into it — its isolation is whatever that repository built"));
+    assert.match(slice(), Pin.phrase("no claim exported ports into it — its isolation is whatever that repository built"));
   });
 }
 
@@ -80,9 +78,9 @@ for (const [name, text, from, to] of slices) {
 // Bounded to the bullet so that a copy of the phrase anywhere else in the file
 // cannot keep the pin satisfied with this bullet deleted.
 test("review-and-fix.md still hands specialists the command both guards point at", () => {
-  const bullet = between(REVIEW_AND_FIX, "Give specialists a stack-free test command", "\n- **", "review-and-fix.md");
-  assert.match(bullet, phrase("the Test entrypoint, read off the Recipe cache"));
-  assert.match(bullet, phrase("`derive-testcmd.sh <worktree or main checkout> test` prints it"));
+  const bullet = REVIEW_AND_FIX.between("Give specialists a stack-free test command", "\n- **", "review-and-fix.md").text;
+  assert.match(bullet, Pin.phrase("the Test entrypoint, read off the Recipe cache"));
+  assert.match(bullet, Pin.phrase("`derive-testcmd.sh <worktree or main checkout> test` prints it"));
 });
 
 // #1150: any member that dispatches a child writes the child's absolute scratch
@@ -91,10 +89,10 @@ test("review-and-fix.md still hands specialists the command both guards point at
 // review could not run — so "their own scratch dir" has to name the directory
 // and who resolves it, pinned with its path. Same bullet slice as above.
 test("review-and-fix.md's fallback specialist dispatch assigns each specialist an absolute scratch path", () => {
-  const bullet = between(REVIEW_AND_FIX, "Give specialists a stack-free test command", "\n- **", "review-and-fix.md");
+  const bullet = REVIEW_AND_FIX.between("Give specialists a stack-free test command", "\n- **", "review-and-fix.md").text;
   assert.match(
     bullet,
-    phrase("`<scratch>/pr<N>/fleet-review-<key>/`, resolved to an absolute path that you write into that specialist's prompt; a specialist never derives its own"),
+    Pin.phrase("`<scratch>/pr<N>/fleet-review-<key>/`, resolved to an absolute path that you write into that specialist's prompt; a specialist never derives its own"),
     "the fallback specialist dispatch no longer names the directory each specialist gets, or no longer has the dispatcher write it, absolute, into the specialist's prompt",
   );
 });

@@ -15,11 +15,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { paragraph, phrase, unemphasized } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
-const RUN_MERGE_BOT = readFileSync(join(REPO, "commands", "run-merge-bot.md"), "utf8");
+const REVIEW_AND_FIX = Pin.file(join(REPO, "commands", "review-and-fix.md"));
+const RUN_MERGE_BOT = Pin.file(join(REPO, "commands", "run-merge-bot.md"));
 
 // The reason string belongs to ci-state.mjs, so read it from ci-state.mjs: renaming
 // it there reddens these pins too, instead of leaving both documents quoting a
@@ -46,10 +46,10 @@ const ABSENT_REASON = (CI_STATE.match(/reasons\.push\(`([^`$]+)\$\{missing\./) ?
 // than once, which binds the pin to whichever copy of the anchored block comes
 // first, and, through `next`, a blank line deleted outright.
 const reviewAndFix = () =>
-  paragraph(REVIEW_AND_FIX, "Its job-presence check is what catches the case above", "review-and-fix job-presence sentence", "**A repo with no workflow files");
+  REVIEW_AND_FIX.paragraph("Its job-presence check is what catches the case above", "review-and-fix job-presence sentence", "**A repo with no workflow files").text;
 
 const runMergeBot = () =>
-  paragraph(RUN_MERGE_BOT, "That presence requirement is what catches the case above", "run-merge-bot presence-requirement sentence", "**Why twice: a conclusion can invert");
+  RUN_MERGE_BOT.paragraph("That presence requirement is what catches the case above", "run-merge-bot presence-requirement sentence", "**Why twice: a conclusion can invert").text;
 
 // Both documents carry both claims, but each words the aftermath its own way,
 // so the force-push span is per-document and the `pending` span is shared.
@@ -64,8 +64,8 @@ const DOCS = [
 test("both documents name the force-push that cancels the run whose finished jobs keep reporting", () => {
   for (const [label, slice, span] of DOCS) {
     assert.match(
-      unemphasized(slice()),
-      phrase(span),
+      Pin.unemphasized(slice()),
+      Pin.phrase(span),
       `${label}: lost or reworded the span "${span}" — the claim that a force-push cancels the run and its finished jobs go on reporting. If the claim still stands in new words, re-pin this span deliberately`,
     );
   }
@@ -76,8 +76,8 @@ test("both documents scope `pending` to the aggregating view, never to ci-state.
   const span = `reads as \`pending\` in an aggregating checks summary, never here: \`ci-state.mjs\` names it in the reason \`${ABSENT_REASON}…\` and refuses green`;
   for (const [label, slice] of DOCS) {
     assert.match(
-      unemphasized(slice()),
-      phrase(span),
+      Pin.unemphasized(slice()),
+      Pin.phrase(span),
       `${label}: lost or reworded the span "${span}" — the claim that \`pending\` belongs to an aggregating checks summary while ci-state.mjs names the absent job in its actual reason string and withholds green. If the claim still stands in new words, re-pin this span deliberately`,
     );
   }

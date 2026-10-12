@@ -49,7 +49,7 @@
 // the schema can carry back — never where a specialist actually writes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { promptRenderer } from "./support/prompt-renderer.mjs";
 import { AUDIT_COMMAND, AUDIT_STATES, CWD_AUDIT_MARKER, EVERY_RUN, PWD_FIRST, REFUTER_CWD, REPORT_FIELD, SCRATCH_NAMED_REFUTER, SCRATCH_NAMED_SPECIALIST, SPECIALIST_CWD, auditLine } from "./support/cwd-isolation-pins.mjs";
 import { FINDINGS_SCHEMA, VERDICT_SCHEMA, cwdAuditFrom, runReview } from "../plugin/scripts/review-core.mjs";
@@ -96,7 +96,7 @@ const snapshot = promptRenderer({
 test("the rendered specialist prompt names the cwd it inherits and says a relative path lands there", () => {
   assert.match(
     specialist,
-    phrase(SPECIALIST_CWD),
+    Pin.phrase(SPECIALIST_CWD),
     "review-core.mjs's specialist prompt no longer names the directory it is dispatched INTO — a specialist that does not know its cwd is the controller's checkout has no reason to leave it, " +
       "which is how three reviews left four files modified there (#1433)",
   );
@@ -105,7 +105,7 @@ test("the rendered specialist prompt names the cwd it inherits and says a relati
 test("the rendered refuter prompt names the cwd it inherits and says a relative path lands there", () => {
   assert.match(
     refuter,
-    phrase(`your shell does not start there: ${REFUTER_CWD}`),
+    Pin.phrase(`your shell does not start there: ${REFUTER_CWD}`),
     "review-core.mjs's refuter prompt no longer names the directory it is dispatched INTO — a refuter applying a mutation is the likeliest writer of the four files #1433 measured",
   );
 });
@@ -156,7 +156,7 @@ for (const [name, prompt, span] of [
 test("the rendered specialist prompt audits the directory it started in, with the explicit untracked mode", () => {
   assert.match(
     specialist,
-    phrase(AUDIT_COMMAND),
+    Pin.phrase(AUDIT_COMMAND),
     "review-core.mjs's specialist prompt dropped the stray-write audit, or asks for bare `--porcelain` — which a `status.showUntrackedFiles=no` config silences into a false clean, the same false-clean class worktree-audit.sh's own `-uall` exists to deny (#1433)",
   );
 });
@@ -164,7 +164,7 @@ test("the rendered specialist prompt audits the directory it started in, with th
 test("the rendered refuter prompt audits the directory it started in, with the explicit untracked mode", () => {
   assert.match(
     refuter,
-    phrase(AUDIT_COMMAND),
+    Pin.phrase(AUDIT_COMMAND),
     "review-core.mjs's refuter prompt dropped the stray-write audit, or asks for bare `--porcelain` (#1433)",
   );
 });
@@ -243,7 +243,7 @@ for (const [name, prompt] of [
 test("the rendered snapshot prompt says its own block is absolute by construction and forbids adding a relative path", () => {
   assert.match(
     snapshot,
-    phrase(
+    Pin.phrase(
       "Every path in the block above is absolute or `-C`-anchored on purpose: this dispatch carries no working directory of its own either, so you start in the controller's own checkout, and a relative path — a `tar -x` with no `-C`, a bare `git` — reads or writes THERE",
     ),
     "review-core.mjs's snapshot prompt no longer says why its paths are absolute — the agent that mints the scratch tree is the one dispatch with no scratch dir to cd into, so the rule it gets is the only one it can follow (#1433)",

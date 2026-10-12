@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between } from "./prose-pin.mjs";
+import { Pin } from "./prose-pin.mjs";
 import { stripComments } from "./strip-comments.mjs";
 
 // #1552. The extract-then-compile idiom — read a workflow's source, strip its
@@ -35,6 +35,6 @@ export function workflowCode(file) {
 // throws here or silently interpolates away the very spelling the rule
 // exists to teach.
 export function promptRenderer({ file, start, end, scope, what }) {
-  const slice = between(workflowCode(file), start, end, what);
+  const slice = Pin.of(workflowCode(file), "workflowCode()").between(start, end, what).text;
   return new Function(...scope, "return `" + slice.slice(1, slice.lastIndexOf("`")) + "`");
 }

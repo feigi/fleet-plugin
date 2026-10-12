@@ -30,20 +30,19 @@
 // `phrase()` matches across the line-wrap whitespace by design.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 const step = () =>
-  between(RUN_TEAM, "**In-flight check, again**", "**Read the ticket in full, once**", "run-team/SKILL.md phase 1 Pull step 2");
+  RUN_TEAM.between("**In-flight check, again**", "**Read the ticket in full, once**", "run-team/SKILL.md phase 1 Pull step 2").text;
 
 test("the in-flight step names the four branch-shaped claims the scan's probes look for", () => {
   assert.match(
     step(),
-    phrase("a PR, a remote head, a local branch, or a worktree"),
+    Pin.phrase("a PR, a remote head, a local branch, or a worktree"),
     "the in-flight step no longer names what the three probes actually detect, so a reader has no way to know the ceiling on a free verdict",
   );
 });
@@ -51,7 +50,7 @@ test("the in-flight step names the four branch-shaped claims the scan's probes l
 test("the in-flight step states, as one exact span, that a free verdict is not evidence nobody is editing the ticket's files", () => {
   assert.match(
     step(),
-    phrase("A free verdict is not evidence that nobody is editing the ticket's target files."),
+    Pin.phrase("A free verdict is not evidence that nobody is editing the ticket's target files."),
     "the scope claim is gone, reworded past recognition, or split into two halves — which would let a splice inserted between them go undetected",
   );
 });

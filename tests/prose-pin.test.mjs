@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
-import { END, Pin, anchorAt, between, betweenPhrases, bullet, paragraph, phrase, quoteBlock, quoteBlocks, runAbove, sentences, stripSlashGutter, logicalLines, unemphasized } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { tempDir } from "./support/temp-dir.mjs";
 
 // The 14 consumer files exercise only between()'s HAPPY path: every one of them
@@ -17,15 +17,15 @@ import { tempDir } from "./support/temp-dir.mjs";
 // this repo exist to avoid.
 
 test("between returns the slice bounded by both anchors, start inclusive, end exclusive", () => {
-  assert.equal(between("xxSTARTmiddleENDyy", "START", "END", "the fixture"), "STARTmiddle");
+  assert.equal(Pin.of("xxSTARTmiddleENDyy", "the fixture").between("START", "END", "the fixture").text, "STARTmiddle");
   // The start anchor is KEPT, the end anchor dropped — callers that need it
   // stripped do their own `.slice(from.length)`.
-  assert.equal(between("aXbXc", "X", "c", "the fixture"), "XbX");
+  assert.equal(Pin.of("aXbXc", "the fixture").between("X", "c", "the fixture").text, "XbX");
 });
 
 test("between throws when the text no longer contains the start anchor", () => {
   assert.throws(
-    () => between("no anchors here", "START", "END", "the fixture"),
+    () => Pin.of("no anchors here", "the fixture").between("START", "END", "the fixture").text,
     /the fixture no longer contains "START" — update this test/,
   );
 });
@@ -38,11 +38,11 @@ test("between throws when the text no longer contains the start anchor", () => {
 // deleted; this one ALSO reds if the end search loses its offset.
 test("between throws when the end anchor exists only BEFORE the start anchor", () => {
   assert.throws(
-    () => between("ENDzzSTARTzz", "START", "END", "the fixture"),
+    () => Pin.of("ENDzzSTARTzz", "the fixture").between("START", "END", "the fixture").text,
     /the fixture no longer contains "END" after "START" — update this test/,
   );
   // And the same when the end anchor is absent outright.
-  assert.throws(() => between("zzSTARTzz", "START", "END", "the fixture"), /no longer contains "END" after "START"/);
+  assert.throws(() => Pin.of("zzSTARTzz", "the fixture").between("START", "END", "the fixture").text, /no longer contains "END" after "START"/);
 });
 
 // #1492. The anchor-pair primitive's emphasis-tolerant mode, mirroring the one
@@ -103,7 +103,7 @@ const MOVES = [
 
 for (const [move, doc, expected] of MOVES) {
   test(`between with emphasisTolerant still finds its anchor when ${move}`, () => {
-    assert.equal(between(doc, "**start here**", "END", "the fixture", { emphasisTolerant: true }), expected);
+    assert.equal(Pin.of(doc, "doc").between("**start here**", "END", "the fixture", { emphasisTolerant: true }).text, expected);
   });
 }
 
@@ -125,12 +125,12 @@ const TWO_STATES = "decoy: the RULE — and then it drifts.\n\n**never slice me*
 
 test("between throws on an ambiguous tolerant start anchor rather than slicing from the wrong occurrence", () => {
   assert.throws(
-    () => between(TWO_STATES, "the **RULE** —", "END", "the fixture", { emphasisTolerant: true }),
+    () => Pin.of(TWO_STATES, "TWO_STATES").between("the **RULE** —", "END", "the fixture", { emphasisTolerant: true }).text,
     /the fixture: emphasis-tolerant slice anchor "the \*\*RULE\*\* —" occurs 2 times once `\*\*` is ignored/,
   );
   // Exact-match, same fixture, same anchors: one hit, and the slice the
   // tolerant mode declined to widen past.
-  assert.equal(between(TWO_STATES, "the **RULE** —", "END", "the fixture"), "the **RULE** — and then it holds.\n\n");
+  assert.equal(Pin.of(TWO_STATES, "TWO_STATES").between("the **RULE** —", "END", "the fixture").text, "the **RULE** — and then it holds.\n\n");
 });
 
 // The END anchor now gets the SAME guard, symmetric with the START — added
@@ -149,10 +149,10 @@ const REPEATED_END = "HEAD one\n\nthe STOP mark, plain.\n\nmiddle\n\nthe **STOP*
 
 test("between throws on an ambiguous tolerant end anchor rather than stopping at the first occurrence", () => {
   assert.throws(
-    () => between(REPEATED_END, "HEAD one", "the **STOP** mark", "the fixture", { emphasisTolerant: true }),
+    () => Pin.of(REPEATED_END, "REPEATED_END").between("HEAD one", "the **STOP** mark", "the fixture", { emphasisTolerant: true }).text,
     /the fixture: emphasis-tolerant slice end anchor "the \*\*STOP\*\* mark" occurs 2 times after the start once `\*\*` is ignored/,
   );
-  assert.equal(between(REPEATED_END, "HEAD one", "the **STOP** mark", "the fixture"), "HEAD one\n\nthe STOP mark, plain.\n\nmiddle\n\n");
+  assert.equal(Pin.of(REPEATED_END, "REPEATED_END").between("HEAD one", "the **STOP** mark", "the fixture").text, "HEAD one\n\nthe STOP mark, plain.\n\nmiddle\n\n");
 });
 
 // `occurrenceCount`'s own contract, unverified until now: cursor-bounded
@@ -164,7 +164,7 @@ test("between throws on an ambiguous tolerant end anchor rather than stopping at
 // `needle.length` is 0 and the cursor never advances.
 test("between throws rather than hanging when a tolerant anchor strips to empty", () => {
   assert.throws(
-    () => between("pad\n\n**start here**\n\nEND", "**", "END", "the fixture", { emphasisTolerant: true }),
+    () => Pin.of("pad\n\n**start here**\n\nEND", "the fixture").between("**", "END", "the fixture", { emphasisTolerant: true }).text,
     /the fixture: emphasis-tolerant slice anchor "\*\*" occurs \d+ times once `\*\*` is ignored/,
   );
 });
@@ -178,11 +178,11 @@ test("between throws rather than hanging when a tolerant anchor strips to empty"
 // be grepped for.
 test("between's tolerant END anchor is still searched only after the start anchor", () => {
   assert.equal(
-    between("**EDGE** early\n\nHEAD\n\nbody here\n\nEDGE late", "HEAD", "**EDGE**", "the fixture", { emphasisTolerant: true }),
+    Pin.of("**EDGE** early\n\nHEAD\n\nbody here\n\nEDGE late", "the fixture").between("HEAD", "**EDGE**", "the fixture", { emphasisTolerant: true }).text,
     "HEAD\n\nbody here\n\n",
   );
   assert.throws(
-    () => between("**EDGE** early\n\nHEAD\n\nbody here", "HEAD", "**EDGE**", "the fixture", { emphasisTolerant: true }),
+    () => Pin.of("**EDGE** early\n\nHEAD\n\nbody here", "the fixture").between("HEAD", "**EDGE**", "the fixture", { emphasisTolerant: true }).text,
     /the fixture no longer contains "\*\*EDGE\*\*" after "HEAD" — update this test/,
   );
 });
@@ -204,8 +204,8 @@ test("between's tolerant END anchor is still searched only after the start ancho
 // Both anchors are pinned because either one alone leaves the other free to
 // pick up `phrase()` on the next edit.
 test("between's tolerant mode leaves whitespace literal at both anchors, so a leading newline still bounds the slice", () => {
-  assert.equal(between("HEAD one **Put** two\n**Put the rest", "HEAD", "\n**Put", "the fixture", { emphasisTolerant: true }), "HEAD one **Put** two");
-  assert.equal(between("pad **HEAD** inline\nHEAD at line start\n\nEND", "\n**HEAD**", "END", "the fixture", { emphasisTolerant: true }), "\nHEAD at line start\n\n");
+  assert.equal(Pin.of("HEAD one **Put** two\n**Put the rest", "the fixture").between("HEAD", "\n**Put", "the fixture", { emphasisTolerant: true }).text, "HEAD one **Put** two");
+  assert.equal(Pin.of("pad **HEAD** inline\nHEAD at line start\n\nEND", "the fixture").between("\n**HEAD**", "END", "the fixture", { emphasisTolerant: true }).text, "\nHEAD at line start\n\n");
 });
 
 // #491: a sibling item inserted between the anchors is the hole `bullet`
@@ -214,10 +214,10 @@ test("between's tolerant mode leaves whitespace literal at both anchors, so a le
 test("bullet ends the item at the next sibling, whatever its marker, and never past the end anchor", () => {
   const list = (sibling) => `intro\n- **Edge A** first line\n  wraps here.\n${sibling} carries the words\n- **Edge B** more\n\nEND`;
   for (const sibling of ["- **Inserted**", "- inserted", "* inserted", "+ inserted", "3. inserted", "3) inserted"]) {
-    assert.equal(bullet(list(sibling), "- **Edge A**", "END", "the fixture"), "- **Edge A** first line\n  wraps here.", sibling);
+    assert.equal(Pin.of(list(sibling), "list()").bullet("- **Edge A**", "END", "the fixture").text, "- **Edge A** first line\n  wraps here.", sibling);
   }
   // No sibling before the end anchor: the end anchor bounds it, exclusive.
-  assert.equal(bullet("- **Edge A** only item\nEND tail", "- **Edge A**", "END", "the fixture"), "- **Edge A** only item\n");
+  assert.equal(Pin.of("- **Edge A** only item\nEND tail", "the fixture").bullet("- **Edge A**", "END", "the fixture").text, "- **Edge A** only item\n");
 });
 
 // The half a clamp can wrongly REFUSE: an item's own nested list, and its own
@@ -226,19 +226,19 @@ test("bullet ends the item at the next sibling, whatever its marker, and never p
 test("bullet keeps the item's own deeper-indented children and continuation lines", () => {
   const text = "- **Edge A** lead\n  continues\n  - child one\n    - grandchild\n  1. numbered child\n  tail line\n- **Edge B**\nEND";
   assert.equal(
-    bullet(text, "- **Edge A**", "END", "the fixture"),
+    Pin.of(text, "text").bullet("- **Edge A**", "END", "the fixture").text,
     "- **Edge A** lead\n  continues\n  - child one\n    - grandchild\n  1. numbered child\n  tail line",
   );
   // An indented item's siblings are at ITS indent: a shallower marker ends it
   // too, a same-indent one ends it, a deeper one is its child.
   const nested = "1. step\n   - **Item** body\n     - child\n   - sibling\n2. next step\nEND";
-  assert.equal(bullet(nested, "- **Item**", "END", "the fixture"), "- **Item** body\n     - child");
-  assert.equal(bullet("1. step\n   - **Item** body\n2. next\nEND", "- **Item**", "END", "the fixture"), "- **Item** body");
+  assert.equal(Pin.of(nested, "nested").bullet("- **Item**", "END", "the fixture").text, "- **Item** body\n     - child");
+  assert.equal(Pin.of("1. step\n   - **Item** body\n2. next\nEND", "the fixture").bullet("- **Item**", "END", "the fixture").text, "- **Item** body");
 });
 
 test("bullet throws rather than widening when either anchor is gone", () => {
-  assert.throws(() => bullet("- a\n- b\nEND", "- **Edge A**", "END", "the fixture"), /the fixture no longer contains "- \*\*Edge A\*\*" — update this test/);
-  assert.throws(() => bullet("- **Edge A**\n- b\n", "- **Edge A**", "END", "the fixture"), /no longer contains "END" after "- \*\*Edge A\*\*"/);
+  assert.throws(() => Pin.of("- a\n- b\nEND", "the fixture").bullet("- **Edge A**", "END", "the fixture").text, /the fixture no longer contains "- \*\*Edge A\*\*" — update this test/);
+  assert.throws(() => Pin.of("- **Edge A**\n- b\n", "the fixture").bullet("- **Edge A**", "END", "the fixture").text, /no longer contains "END" after "- \*\*Edge A\*\*"/);
 });
 
 // The item's content column is read off the anchor's own line, so an anchor
@@ -246,7 +246,7 @@ test("bullet throws rather than widening when either anchor is gone", () => {
 // item, or a plain paragraph.
 test("bullet throws when the anchor is not on a list-item line", () => {
   for (const text of ["- a\n  **A** wrapped\n- b\nEND", "intro\n\n**A** paragraph\nEND"]) {
-    assert.throws(() => bullet(text, "**A**", "END", "the fixture"), /the fixture: anchor is not on a list-item line: "\*\*A\*\*" — update this test/, text);
+    assert.throws(() => Pin.of(text, "text").bullet("**A**", "END", "the fixture").text, /the fixture: anchor is not on a list-item line: "\*\*A\*\*" — update this test/, text);
   }
 });
 
@@ -254,15 +254,15 @@ test("bullet throws when the anchor is not on a list-item line", () => {
 // content starts on the next line, one column past the marker, so the indented
 // line under it is the item's own and the next sibling marker ends it.
 test("bullet takes a bare-marker anchor as a list-item line", () => {
-  assert.equal(bullet("-\n  **A** body\n- b\nEND", "-\n  **A**", "END", "the fixture"), "-\n  **A** body");
-  assert.equal(bullet("1.\n   **A** body\n2. b\nEND", "1.\n   **A**", "END", "the fixture"), "1.\n   **A** body");
-  assert.equal(bullet("-  \n  **A** body\n\n  - deep child\n- b\nEND", "-  \n  **A**", "END", "the fixture"), "-  \n  **A** body\n\n  - deep child");
+  assert.equal(Pin.of("-\n  **A** body\n- b\nEND", "the fixture").bullet("-\n  **A**", "END", "the fixture").text, "-\n  **A** body");
+  assert.equal(Pin.of("1.\n   **A** body\n2. b\nEND", "the fixture").bullet("1.\n   **A**", "END", "the fixture").text, "1.\n   **A** body");
+  assert.equal(Pin.of("-  \n  **A** body\n\n  - deep child\n- b\nEND", "the fixture").bullet("-  \n  **A**", "END", "the fixture").text, "-  \n  **A** body\n\n  - deep child");
 });
 
 // Every marker character reads as a list-item line, not only `-` and `1.`.
 test("bullet takes a `*` or `+` anchor as a list-item line", () => {
-  assert.equal(bullet("* **A** body\n* b\nEND", "* **A**", "END", "the fixture"), "* **A** body");
-  assert.equal(bullet("+ **A** body\n+ b\nEND", "+ **A**", "END", "the fixture"), "+ **A** body");
+  assert.equal(Pin.of("* **A** body\n* b\nEND", "the fixture").bullet("* **A**", "END", "the fixture").text, "* **A** body");
+  assert.equal(Pin.of("+ **A** body\n+ b\nEND", "the fixture").bullet("+ **A**", "END", "the fixture").text, "+ **A** body");
 });
 
 // #2077: a restatement need not be a list item to escape the item. A paragraph
@@ -272,13 +272,13 @@ test("bullet takes a `*` or `+` anchor as a list-item line", () => {
 test("bullet ends the item at a shallower non-list block, not only at a sibling marker", () => {
   const after = (block) => `intro\n- **Edge A** first line\n  wraps here.\n${block}\nrestates the words\n\nEND`;
   for (const block of ["\nPlain paragraph", "\n### Some other section", "### Some other section", "> quoted", "```", "~~~", "---", "***", " ## one-space heading"]) {
-    assert.equal(bullet(after(block), "- **Edge A**", "END", "the fixture"), "- **Edge A** first line\n  wraps here.", block);
+    assert.equal(Pin.of(after(block), "after()").bullet("- **Edge A**", "END", "the fixture").text, "- **Edge A** first line\n  wraps here.", block);
   }
   // Shallower than the CONTENT column is outside the item, even when deeper
   // than its marker: one space under a `- ` item is not its paragraph.
-  assert.equal(bullet("- **Edge A** body\n\n Para at column one\nEND", "- **Edge A**", "END", "the fixture"), "- **Edge A** body");
+  assert.equal(Pin.of("- **Edge A** body\n\n Para at column one\nEND", "the fixture").bullet("- **Edge A**", "END", "the fixture").text, "- **Edge A** body");
   // A nested item's paragraph-level peer belongs to the PARENT item.
-  assert.equal(bullet("1. step\n   - **Item** body\n\n   parent's paragraph\nEND", "- **Item**", "END", "the fixture"), "- **Item** body");
+  assert.equal(Pin.of("1. step\n   - **Item** body\n\n   parent's paragraph\nEND", "the fixture").bullet("- **Item**", "END", "the fixture").text, "- **Item** body");
 });
 
 // The half the new bound can wrongly REFUSE: blocks written at the item's
@@ -288,19 +288,19 @@ test("bullet ends the item at a shallower non-list block, not only at a sibling 
 test("bullet keeps the item's own paragraphs, blocks and lazy continuation lines", () => {
   const own = "- **Edge A** body\nlazy continuation\n\n  second paragraph\nlazy again\n\n  > own quote\n  ### own heading\n  ```\n  code\n\n  more code\n  ```\n- sibling\nEND";
   assert.equal(
-    bullet(own, "- **Edge A**", "END", "the fixture"),
+    Pin.of(own, "own").bullet("- **Edge A**", "END", "the fixture").text,
     "- **Edge A** body\nlazy continuation\n\n  second paragraph\nlazy again\n\n  > own quote\n  ### own heading\n  ```\n  code\n\n  more code\n  ```",
   );
   // The content column follows the marker's width and the gap after it — and
   // a gap over 4 counts as 1, the rest being an indented code block.
-  assert.equal(bullet("10.  **Item** body\n\n     own paragraph\n11. next\nEND", "**Item**", "END", "the fixture"), "**Item** body\n\n     own paragraph");
-  assert.equal(bullet("-     **Item** code\n\n  own paragraph\n- next\nEND", "**Item**", "END", "the fixture"), "**Item** code\n\n  own paragraph");
+  assert.equal(Pin.of("10.  **Item** body\n\n     own paragraph\n11. next\nEND", "the fixture").bullet("**Item**", "END", "the fixture").text, "**Item** body\n\n     own paragraph");
+  assert.equal(Pin.of("-     **Item** code\n\n  own paragraph\n- next\nEND", "the fixture").bullet("**Item**", "END", "the fixture").text, "**Item** code\n\n  own paragraph");
   // A tab-indented child of a space-indented item is still its child.
-  assert.equal(bullet("- **Edge A** body\n\t- tab child\n- sibling\nEND", "- **Edge A**", "END", "the fixture"), "- **Edge A** body\n\t- tab child");
+  assert.equal(Pin.of("- **Edge A** body\n\t- tab child\n- sibling\nEND", "the fixture").bullet("- **Edge A**", "END", "the fixture").text, "- **Edge A** body\n\t- tab child");
   // A blank line, then a nested item at or past the content column: the
   // item's own child, not the end of it.
-  assert.equal(bullet("- **A** body\n\n  - deep child\nEND", "- **A**", "END", "fixture"), "- **A** body\n\n  - deep child\n");
-  assert.equal(bullet("- **A** body\n\n   - deeper child\nEND", "- **A**", "END", "fixture"), "- **A** body\n\n   - deeper child\n");
+  assert.equal(Pin.of("- **A** body\n\n  - deep child\nEND", "the fixture").bullet("- **A**", "END", "fixture").text, "- **A** body\n\n  - deep child\n");
+  assert.equal(Pin.of("- **A** body\n\n   - deeper child\nEND", "the fixture").bullet("- **A**", "END", "fixture").text, "- **A** body\n\n   - deeper child\n");
 });
 
 // #2077: the item line is the one `from`'s first non-whitespace character sits
@@ -309,9 +309,9 @@ test("bullet keeps the item's own paragraphs, blocks and lazy continuation lines
 // `from.length`, a trailing-`\n` anchor has already eaten the newline the next
 // line's check needs. Each probe widened or narrowed the slice silently.
 test("bullet measures the item from the anchor's text, not its surrounding newlines", () => {
-  assert.equal(bullet("- parent\n  - **A** body\n  - sibling\n- next\nEND", "\n  - **A**", "END", "the fixture"), "\n  - **A** body");
-  assert.equal(bullet("intro\n  indented prose\n- **A** body\n  - child\n- sib\nEND", "\n- **A**", "END", "the fixture"), "\n- **A** body\n  - child");
-  assert.equal(bullet("- **A** body\n- sib\nEND", "- **A** body\n", "END", "the fixture"), "- **A** body\n");
+  assert.equal(Pin.of("- parent\n  - **A** body\n  - sibling\n- next\nEND", "the fixture").bullet("\n  - **A**", "END", "the fixture").text, "\n  - **A** body");
+  assert.equal(Pin.of("intro\n  indented prose\n- **A** body\n  - child\n- sib\nEND", "the fixture").bullet("\n- **A**", "END", "the fixture").text, "\n- **A** body\n  - child");
+  assert.equal(Pin.of("- **A** body\n- sib\nEND", "the fixture").bullet("- **A** body\n", "END", "the fixture").text, "- **A** body\n");
 });
 
 // #2077: indent is compared in visual columns, a tab advancing to the next
@@ -321,10 +321,10 @@ test("bullet measures the item from the anchor's text, not its surrounding newli
 // line the tab item is continuation text of that paragraph, and after a blank
 // line it is indented code.
 test("bullet compares tab and space indentation by column, not by character count", () => {
-  assert.equal(bullet("- parent\n\t- **A** body\n  - two-space sibling\n\t- **B**\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+  assert.equal(Pin.of("- parent\n\t- **A** body\n  - two-space sibling\n\t- **B**\nEND", "the fixture").bullet("- **A**", "END", "the fixture").text, "- **A** body");
   // The tab puts this item's text at column 6; four spaces is 3 characters
   // deeper than the tab by count, and still a sibling by column.
-  assert.equal(bullet("- parent\n\t- **A** body\n    - four-space sibling\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+  assert.equal(Pin.of("- parent\n\t- **A** body\n    - four-space sibling\nEND", "the fixture").bullet("- **A**", "END", "the fixture").text, "- **A** body");
 });
 
 // #2091 (hand-dispatched review, correctness): a marker with nothing after
@@ -333,16 +333,16 @@ test("bullet compares tab and space indentation by column, not by character coun
 // above it. `[ \t]` alone missed this shape; `(?:[ \t]|$)` catches the
 // marker whether or not anything follows it on the same line.
 test("bullet ends the item at a bare-marker sibling, with nothing after the marker on its own line", () => {
-  assert.equal(bullet("- **A** body\n-\n  restated claim\nEND", "- **A**", "END", "the fixture"), "- **A** body");
-  assert.equal(bullet("- **A** body\n2.\n   restated claim\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+  assert.equal(Pin.of("- **A** body\n-\n  restated claim\nEND", "the fixture").bullet("- **A**", "END", "the fixture").text, "- **A** body");
+  assert.equal(Pin.of("- **A** body\n2.\n   restated claim\nEND", "the fixture").bullet("- **A**", "END", "the fixture").text, "- **A** body");
 });
 
 // #2091 (hand-dispatched review, correctness): a thematic break may space its
 // repeated character out (CommonMark), not only run it together. `-`-spaced
 // forms already end the item via ITEM_MARKER; `_`/`*` have no such fallback.
 test("bullet ends the item at a spaced thematic break, not only a run-together one", () => {
-  assert.equal(bullet("- **A** body\n_ _ _\nafter\nEND", "- **A**", "END", "the fixture"), "- **A** body");
-  assert.equal(bullet("- **A** body\n* * *\nafter\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+  assert.equal(Pin.of("- **A** body\n_ _ _\nafter\nEND", "the fixture").bullet("- **A**", "END", "the fixture").text, "- **A** body");
+  assert.equal(Pin.of("- **A** body\n* * *\nafter\nEND", "the fixture").bullet("- **A**", "END", "the fixture").text, "- **A** body");
 });
 
 // #2100: a line 4+ columns past the item's marker, with no blank line before
@@ -361,7 +361,7 @@ test("bullet keeps a marker or interrupt line 4+ columns past the item's marker 
     ["100. **Item** body\n    - x\nEND", "**Item** body\n    - x\n"],
     ["100. **Item** body\n\t# x\nEND", "**Item** body\n\t# x\n"],
   ]) {
-    assert.equal(bullet(text, "**Item**", "END", "the fixture"), expected, text);
+    assert.equal(Pin.of(text, "text").bullet("**Item**", "END", "the fixture").text, expected, text);
   }
 });
 
@@ -375,14 +375,14 @@ test("bullet still ends the item at a marker or interrupt line short of its mark
     "1. a\n\n   100. **Item** body\n      # x\nEND",
     "100. **Item** body\n\n    # x\nEND",
   ]) {
-    assert.equal(bullet(text, "**Item**", "END", "the fixture"), "**Item** body", text);
+    assert.equal(Pin.of(text, "text").bullet("**Item**", "END", "the fixture").text, "**Item** body", text);
   }
 });
 
 // A list-item anchor is a start anchor, never a "nearest" bound, so a second
 // copy means the item would be read off whichever comes first.
 test("bullet throws when the item anchor occurs more than once", () => {
-  assert.throws(() => bullet("- **A** one\n- **A** two\nEND", "- **A**", "END", "the fixture"), /the fixture: list-item anchor "- \*\*A\*\*" occurs 2 times/);
+  assert.throws(() => Pin.of("- **A** one\n- **A** two\nEND", "the fixture").bullet("- **A**", "END", "the fixture").text, /the fixture: list-item anchor "- \*\*A\*\*" occurs 2 times/);
 });
 
 // `\s+` between words, never a literal space: the prose these match against is
@@ -390,8 +390,8 @@ test("bullet throws when the item anchor occurs more than once", () => {
 // indent. Replacing the join with " " passes a single-line fixture and fails
 // this one.
 test("phrase matches a hard-wrapped phrase across a newline and indent", () => {
-  assert.match("a paragraph that refuses\n  rather than passing, wrapped", phrase("refuses rather than passing"));
-  assert.match("tab-indented:\trefuses\n\t\trather than\n\tpassing", phrase(" refuses rather than passing "));
+  assert.match("a paragraph that refuses\n  rather than passing, wrapped", Pin.phrase("refuses rather than passing"));
+  assert.match("tab-indented:\trefuses\n\t\trather than\n\tpassing", Pin.phrase(" refuses rather than passing "));
 });
 
 // Escaping is what keeps an anchor a LITERAL. Each negative assertion below is
@@ -400,20 +400,20 @@ test("phrase matches a hard-wrapped phrase across a newline and indent", () => {
 // nothing after it. Drop the escape and the regex silently matches text the
 // anchor does not appear in — a pin that passes against the wrong prose.
 test("phrase escapes regex metacharacters taken from its input", () => {
-  assert.match("call exit (2) now", phrase("exit (2)"));
-  assert.doesNotMatch("call exit 2 now", phrase("exit (2)"));
+  assert.match("call exit (2) now", Pin.phrase("exit (2)"));
+  assert.doesNotMatch("call exit 2 now", Pin.phrase("exit (2)"));
 
-  assert.match("pinned at v1.2 today", phrase("v1.2"));
-  assert.doesNotMatch("pinned at v1x2 today", phrase("v1.2"));
+  assert.match("pinned at v1.2 today", Pin.phrase("v1.2"));
+  assert.doesNotMatch("pinned at v1x2 today", Pin.phrase("v1.2"));
 
-  assert.match("costs $5 per run", phrase("costs $5"));
-  assert.doesNotMatch("costs 5 per run", phrase("costs $5"));
+  assert.match("costs $5 per run", Pin.phrase("costs $5"));
+  assert.doesNotMatch("costs 5 per run", Pin.phrase("costs $5"));
 
   // `*` and `+` are quantifiers, and a leading one is a SyntaxError rather than
   // a wrong match — so an unescaped anchor starting with either throws at
   // construction instead of failing an assertion.
-  assert.doesNotThrow(() => phrase("*.mjs"));
-  assert.match("run node --test *.mjs here", phrase("*.mjs"));
+  assert.doesNotThrow(() => Pin.phrase("*.mjs"));
+  assert.match("run node --test *.mjs here", Pin.phrase("*.mjs"));
 });
 
 // #1940: the shared sentence bound, at both of the ends the first-period
@@ -423,13 +423,13 @@ test("phrase escapes regex metacharacters taken from its input", () => {
 // `[.!?]\s` split does not: a bold lead-in sentence, a shape run-team's
 // SKILL.md uses throughout, would otherwise join the sentence after it.
 test("sentences ends a sentence at `?` and `!`, and at a terminator behind closing marks", () => {
-  assert.deepEqual(sentences("Why pin now? It is late! Pin it."), ["Why pin now?", "It is late!", "Pin it."]);
+  assert.deepEqual(Pin.sentences("Why pin now? It is late! Pin it."), ["Why pin now?", "It is late!", "Pin it."]);
   assert.deepEqual(
-    sentences('**Pin first.** Then read. (Both run.) Next. "Say it." After. _Done._ End'),
+    Pin.sentences('**Pin first.** Then read. (Both run.) Next. "Say it." After. _Done._ End'),
     ["**Pin first.**", "Then read.", "(Both run.)", "Next.", '"Say it."', "After.", "_Done._", "End"],
   );
   // A hard wrap is whitespace like any other, so a rewrap moves no end.
-  assert.deepEqual(sentences("Pin it.\n   Then\n   read."), ["Pin it.", "Then\n   read."]);
+  assert.deepEqual(Pin.sentences("Pin it.\n   Then\n   read."), ["Pin it.", "Then\n   read."]);
 });
 
 test("sentences does not end one at an abbreviation, closing marks or not, nor at a period inside a word", () => {
@@ -439,10 +439,10 @@ test("sentences does not end one at an abbreviation, closing marks or not, nor a
     "Pin it, i.e. first, cf. the rule, viz. step 0, vs. later.",
     "Run instruments.sh at v1.2 first.",
   ]) {
-    assert.deepEqual(sentences(s), [s]);
+    assert.deepEqual(Pin.sentences(s), [s]);
   }
   // "etc." is deliberately off the list: it ends a sentence as often as not.
-  assert.deepEqual(sentences("Pin, read, etc. Then go."), ["Pin, read, etc.", "Then go."]);
+  assert.deepEqual(Pin.sentences("Pin, read, etc. Then go."), ["Pin, read, etc.", "Then go."]);
 });
 
 // #1899: the abbreviations are matched lowercase only. Folded case, a sentence
@@ -450,12 +450,12 @@ test("sentences does not end one at an abbreviation, closing marks or not, nor a
 // was read as the abbreviation and joined to the next, two real sentences one.
 test("sentences ends one at a capitalized abbreviation lookalike, and still skips the lowercase abbreviation", () => {
   for (const word of ["Vs.", "VS.", "E.g.", "E.G.", "I.e.", "Cf.", "CF.", "Viz.", "VIZ."]) {
-    assert.deepEqual(sentences(`Pin it for the ${word} Then read.`), [`Pin it for the ${word}`, "Then read."], word);
+    assert.deepEqual(Pin.sentences(`Pin it for the ${word} Then read.`), [`Pin it for the ${word}`, "Then read."], word);
   }
   // The accept side, in the same fixture shape: lowercase stays one sentence.
   for (const abbr of ["vs.", "e.g.", "i.e.", "cf.", "viz."]) {
     const s = `Pin it for the ${abbr} Then read.`;
-    assert.deepEqual(sentences(s), [s], abbr);
+    assert.deepEqual(Pin.sentences(s), [s], abbr);
   }
 });
 
@@ -466,10 +466,10 @@ test("sentences ends one at a capitalized abbreviation lookalike, and still skip
 test("sentences does not end one at an italic abbreviation, and still ends one at a word merely ending in its letters", () => {
   for (const abbr of ["e.g.", "i.e.", "cf.", "viz.", "vs."]) {
     const s = `Pin it, _${abbr}_ now, then read.`;
-    assert.deepEqual(sentences(s), [s], abbr);
+    assert.deepEqual(Pin.sentences(s), [s], abbr);
   }
   for (const word of ["Xvs.", "26vs.", "gcf.", "Xe.g."]) {
-    assert.deepEqual(sentences(`Pin it for the ${word} Then read.`), [`Pin it for the ${word}`, "Then read."], word);
+    assert.deepEqual(Pin.sentences(`Pin it for the ${word} Then read.`), [`Pin it for the ${word}`, "Then read."], word);
   }
   // The disclosed cost, in the same fixture shape as #1899's own accepted
   // one above: a bare snake_case word ending in the abbreviation's letters —
@@ -478,7 +478,7 @@ test("sentences does not end one at an italic abbreviation, and still ends one a
   // cost silently.
   for (const abbr of ["e.g.", "i.e.", "cf.", "viz.", "vs."]) {
     const s = `Pin it for the snake_${abbr} Then read.`;
-    assert.deepEqual(sentences(s), [s], abbr);
+    assert.deepEqual(Pin.sentences(s), [s], abbr);
   }
 });
 
@@ -494,7 +494,7 @@ test("sentences does not end one at an italic abbreviation, and still ends one a
 // letter, and before the fix both merged.
 test("sentences ends a sentence behind a footnote-style bracket marker", () => {
   assert.deepEqual(
-    sentences("Pass `--quiet`; ci-state.mjs drops `jobs`.[1] Elsewhere, `missing` is unaffected."),
+    Pin.sentences("Pass `--quiet`; ci-state.mjs drops `jobs`.[1] Elsewhere, `missing` is unaffected."),
     ["Pass `--quiet`; ci-state.mjs drops `jobs`.[1]", "Elsewhere, `missing` is unaffected."],
   );
   for (const end of [
@@ -515,12 +515,12 @@ test("sentences ends a sentence behind a footnote-style bracket marker", () => {
     "ve\u0323\u0302.[1]",
     "at 1\u20e3.[1]",
   ]) {
-    assert.deepEqual(sentences(`Pin it ${end}\nThen read.`), [`Pin it ${end}`, "Then read."], end);
+    assert.deepEqual(Pin.sentences(`Pin it ${end}\nThen read.`), [`Pin it ${end}`, "Then read."], end);
   }
   // #2041's own repros, verbatim.
-  assert.deepEqual(sentences("At the cafe\u0301.[1] Then read."), ["At the cafe\u0301.[1]", "Then read."]);
+  assert.deepEqual(Pin.sentences("At the cafe\u0301.[1] Then read."), ["At the cafe\u0301.[1]", "Then read."]);
   assert.deepEqual(
-    sentences("\u092f\u0939 \u0939\u093f\u0902\u0926\u0940.[1] Then read."),
+    Pin.sentences("\u092f\u0939 \u0939\u093f\u0902\u0926\u0940.[1] Then read."),
     ["\u092f\u0939 \u0939\u093f\u0902\u0926\u0940.[1]", "Then read."],
   );
 });
@@ -550,7 +550,7 @@ test("sentences does not end one at a bracket that is code, a link or an index, 
     "Read it \u0301.[1] first, then stop.",
     "Read it,\u0301\u0302.[1] first, then stop.",
   ]) {
-    assert.deepEqual(sentences(s), [s], s);
+    assert.deepEqual(Pin.sentences(s), [s], s);
   }
 });
 
@@ -559,12 +559,12 @@ test("sentences does not end one at a bracket that is code, a link or an index, 
 // real header, but pinned here as its own dedicated guard: a guard with no
 // dedicated test is a guard nobody is pinning.
 test("stripSlashGutter strips a leading `// ` and leaves everything else untouched", () => {
-  assert.equal(stripSlashGutter("// dispatch it"), "dispatch it");
-  assert.equal(stripSlashGutter("  //no space after slash"), "no space after slash");
+  assert.equal(Pin.of("// dispatch it", "the fixture").stripGutter("//").text, "dispatch it");
+  assert.equal(Pin.of("  //no space after slash", "the fixture").stripGutter("//").text, "no space after slash");
   // A trailing comment is not a whole-line gutter — stripping mid-line
   // would turn code-with-a-note into a false comment line.
-  assert.equal(stripSlashGutter('const x = 1; // not a comment line'), 'const x = 1; // not a comment line');
-  assert.equal(stripSlashGutter("plain code\nmore code"), "plain code\nmore code");
+  assert.equal(Pin.of('const x = 1; // not a comment line', "the fixture").stripGutter("//").text, 'const x = 1; // not a comment line');
+  assert.equal(Pin.of("plain code\nmore code", "the fixture").stripGutter("//").text, "plain code\nmore code");
 });
 
 // `paragraph`'s halves are its bound, its anchor and the block it says follows,
@@ -578,9 +578,9 @@ test("stripSlashGutter strips a leading `// ` and leaves everything else untouch
 // The next block: see the tests on `next` below.
 test("paragraph cuts at the blank line, so a decoy below the rule cannot satisfy a pin", () => {
   const doc = "intro\n\nTHE RULE says do X.\nstill the rule.\n\nlater prose.\n\na stray copy says do X.\n";
-  assert.equal(paragraph(doc, "THE RULE", "the fixture", "later prose."), "THE RULE says do X.\nstill the rule.");
+  assert.equal(Pin.of(doc, "doc").paragraph("THE RULE", "the fixture", "later prose.").text, "THE RULE says do X.\nstill the rule.");
   // The decoy is real: unbounded, the whole document contains the wording twice.
-  assert.doesNotMatch(paragraph("THE RULE says do Y.\n\na stray copy says do X.\n", "THE RULE", "the fixture", "a stray copy"), phrase("do X"));
+  assert.doesNotMatch(Pin.of("THE RULE says do Y.\n\na stray copy says do X.\n", "the fixture").paragraph("THE RULE", "the fixture", "a stray copy").text, Pin.phrase("do X"));
 });
 
 // The decoy above sits below a CLEAN blank line, so it passes both before and
@@ -589,7 +589,7 @@ test("paragraph cuts at the blank line, so a decoy below the rule cannot satisfy
 // blank line carrying whitespace, which `indexOf("\n\n")` does not find, and
 // the slice then runs past the paragraph onto the decoy.
 test("paragraph cuts at a blank line that carries whitespace", () => {
-  assert.doesNotMatch(paragraph("THE RULE says do Y.\n   \na stray copy says do X.\n", "THE RULE", "the fixture", "a stray copy"), phrase("do X"));
+  assert.doesNotMatch(Pin.of("THE RULE says do Y.\n   \na stray copy says do X.\n", "the fixture").paragraph("THE RULE", "the fixture", "a stray copy").text, Pin.phrase("do X"));
 });
 
 // The bound's mirror image: an anchor matching twice binds the pin to
@@ -597,19 +597,19 @@ test("paragraph cuts at a blank line that carries whitespace", () => {
 // suite green.
 test("paragraph throws when its anchor matches twice, rather than binding the wrong copy", () => {
   assert.throws(
-    () => paragraph("THE RULE says do X.\n\nprose.\n\nTHE RULE says do X.\n", "THE RULE", "the fixture", "prose."),
+    () => Pin.of("THE RULE says do X.\n\nprose.\n\nTHE RULE says do X.\n", "the fixture").paragraph("THE RULE", "the fixture", "prose.").text,
     /the fixture: slice anchor "THE RULE" occurs 2 times — a pin would bind the wrong copy; narrow the anchor/,
   );
 });
 
 test("paragraph anchors reflow-safely — a hard-wrapped anchor still matches", () => {
   const doc = "**a long anchor\n   spanning a wrap** and the rule.\n\nnext.\n";
-  assert.match(paragraph(doc, "**a long anchor spanning a wrap**", "the fixture", "next."), phrase("and the rule"));
+  assert.match(Pin.of(doc, "doc").paragraph("**a long anchor spanning a wrap**", "the fixture", "next.").text, Pin.phrase("and the rule"));
 });
 
 test("paragraph throws when its anchor moved, rather than widening to the whole file", () => {
   assert.throws(
-    () => paragraph("no anchor here\n\nGONE\n", "MISSING ANCHOR", "the fixture", "GONE"),
+    () => Pin.of("no anchor here\n\nGONE\n", "the fixture").paragraph("MISSING ANCHOR", "the fixture", "GONE").text,
     /the fixture: slice anchor "MISSING ANCHOR" moved — re-anchor this test, never widen it to the whole file/,
   );
 });
@@ -620,15 +620,15 @@ test("paragraph throws when its anchor moved, rather than widening to the whole 
 // intact document is the control — the copy in the next block is outside the
 // slice there.
 test("paragraph throws when a deleted blank line merged the next block into the slice", () => {
-  assert.doesNotMatch(paragraph("THE RULE says do Y.\n\nlater prose. To be clear, do X.\n", "THE RULE", "the fixture", "later prose."), phrase("do X"));
+  assert.doesNotMatch(Pin.of("THE RULE says do Y.\n\nlater prose. To be clear, do X.\n", "the fixture").paragraph("THE RULE", "the fixture", "later prose.").text, Pin.phrase("do X"));
   // No blank line left anywhere after the anchor: the slice would run to the end.
   assert.throws(
-    () => paragraph("THE RULE says do Y.\nlater prose. To be clear, do X.\n", "THE RULE", "the fixture", "later prose."),
+    () => Pin.of("THE RULE says do Y.\nlater prose. To be clear, do X.\n", "the fixture").paragraph("THE RULE", "the fixture", "later prose.").text,
     /the fixture: no blank line follows "THE RULE" — the slice would run to the end of the document; name END if this is the last block/,
   );
   // A blank line further down: the slice ends there, but not before `next`.
   assert.throws(
-    () => paragraph("THE RULE says do Y.\nlater prose. To be clear, do X.\n\nother block.\n", "THE RULE", "the fixture", "later prose."),
+    () => Pin.of("THE RULE says do Y.\nlater prose. To be clear, do X.\n\nother block.\n", "the fixture").paragraph("THE RULE", "the fixture", "later prose.").text,
     /the fixture: the text after the blank line following "THE RULE" no longer opens with "later prose\."/,
   );
 });
@@ -636,12 +636,12 @@ test("paragraph throws when a deleted blank line merged the next block into the 
 // A blank line carrying whitespace is a blank line, so the next block opening
 // right after it, indented or not, is the expected shape and not a refusal.
 test("paragraph accepts the next block after a blank line that carries whitespace, and an indented opening", () => {
-  assert.equal(paragraph("THE RULE says do Y.\n  \n  later prose.\n", "THE RULE", "the fixture", "later prose."), "THE RULE says do Y.");
+  assert.equal(Pin.of("THE RULE says do Y.\n  \n  later prose.\n", "the fixture").paragraph("THE RULE", "the fixture", "later prose.").text, "THE RULE says do Y.");
 });
 
 // A reflow of `next` is not a moved block: `phrase()` joins its words on `\s+`.
 test("paragraph matches next reflow-safely", () => {
-  assert.equal(paragraph("THE RULE says do Y.\n\nlater\n   prose here.\n", "THE RULE", "the fixture", "later prose here."), "THE RULE says do Y.");
+  assert.equal(Pin.of("THE RULE says do Y.\n\nlater\n   prose here.\n", "the fixture").paragraph("THE RULE", "the fixture", "later prose here.").text, "THE RULE says do Y.");
 });
 
 // Stricter than "the next block starts somewhere after the blank line": a
@@ -650,35 +650,35 @@ test("paragraph matches next reflow-safely", () => {
 // decoy, then delete the blank line before it).
 test("paragraph throws when a paragraph was inserted between the block and its next", () => {
   assert.throws(
-    () => paragraph("THE RULE says do Y.\n\ndecoy paragraph.\n\nlater prose. do X.\n", "THE RULE", "the fixture", "later prose."),
+    () => Pin.of("THE RULE says do Y.\n\ndecoy paragraph.\n\nlater prose. do X.\n", "the fixture").paragraph("THE RULE", "the fixture", "later prose.").text,
     /the fixture: the text after the blank line following "THE RULE" no longer opens with "later prose\."/,
   );
 });
 
 test("paragraph throws when next is omitted, or is an options object from an unmigrated caller", () => {
   const doc = "THE RULE says do Y.\n\nlater prose.\n";
-  assert.throws(() => paragraph(doc, "THE RULE", "the fixture"), /the fixture: paragraph\(\) needs `next`/);
-  assert.throws(() => paragraph(doc, "THE RULE", "the fixture", { emphasisTolerant: true }), /the fixture: paragraph\(\) needs `next`/);
-  assert.throws(() => paragraph(doc, "THE RULE", "the fixture", ""), /the fixture: paragraph\(\) needs `next`/);
+  assert.throws(() => Pin.of(doc, "doc").paragraph("THE RULE", "the fixture").text, /the fixture: paragraph\(\) needs `next`/);
+  assert.throws(() => Pin.of(doc, "doc").paragraph("THE RULE", "the fixture", { emphasisTolerant: true }).text, /the fixture: paragraph\(\) needs `next`/);
+  assert.throws(() => Pin.of(doc, "doc").paragraph("THE RULE", "the fixture", "").text, /the fixture: paragraph\(\) needs `next`/);
 });
 
 // A tolerant caller's anchor survives a `**` move; its `next` must too, or a
 // document that merely loses the emphasis in the next block's opening reds.
 test("paragraph with emphasisTolerant reads next through the same emphasis stripping as the anchor", () => {
   const doc = "**THE RULE** says do Y.\n\n**Later** prose.\n";
-  assert.equal(paragraph(doc, "THE RULE", "the fixture", "Later prose.", { emphasisTolerant: true }), "**THE RULE** says do Y.");
-  assert.throws(() => paragraph(doc, "THE RULE", "the fixture", "Later prose."), /no longer opens with "Later prose\."/);
+  assert.equal(Pin.of(doc, "doc").paragraph("THE RULE", "the fixture", "Later prose.", { emphasisTolerant: true }).text, "**THE RULE** says do Y.");
+  assert.throws(() => Pin.of(doc, "doc").paragraph("THE RULE", "the fixture", "Later prose.").text, /no longer opens with "Later prose\."/);
 });
 
 // `END` names the last block: nothing but whitespace may follow its slice, so a
 // block appended after it is an accepted loud red, while a document ending with
 // no blank line, or with trailing blank lines, is the last block as written.
 test("paragraph with END returns the last block, and throws when a block follows it", () => {
-  assert.equal(paragraph("x\n\nTHE RULE ends here.", "THE RULE", "the fixture", END), "THE RULE ends here.");
-  assert.equal(paragraph("x\n\nTHE RULE ends here.\n", "THE RULE", "the fixture", END), "THE RULE ends here.\n");
-  assert.equal(paragraph("THE RULE ends here.\n\n\n", "THE RULE", "the fixture", END), "THE RULE ends here.");
+  assert.equal(Pin.of("x\n\nTHE RULE ends here.", "the fixture").paragraph("THE RULE", "the fixture", Pin.END).text, "THE RULE ends here.");
+  assert.equal(Pin.of("x\n\nTHE RULE ends here.\n", "the fixture").paragraph("THE RULE", "the fixture", Pin.END).text, "THE RULE ends here.\n");
+  assert.equal(Pin.of("THE RULE ends here.\n\n\n", "the fixture").paragraph("THE RULE", "the fixture", Pin.END).text, "THE RULE ends here.");
   assert.throws(
-    () => paragraph("THE RULE ends here.\n\nan appended paragraph.\n", "THE RULE", "the fixture", END),
+    () => Pin.of("THE RULE ends here.\n\nan appended paragraph.\n", "the fixture").paragraph("THE RULE", "the fixture", Pin.END).text,
     /the fixture: slice anchor "THE RULE" is declared the last block \(END\), but text follows its blank line/,
   );
 });
@@ -692,26 +692,26 @@ test("paragraph with END returns the last block, and throws when a block follows
 // .test.mjs`'s hand-rolled `dispatchPremise`.
 test("betweenPhrases returns the slice bounded by a phrase start and a phrase end, from inclusive, to exclusive", () => {
   const doc = "intro\nSTART here.\nmiddle text spans\n   two lines.\nCUT it here.\nmore after.\n";
-  assert.equal(betweenPhrases(doc, "START here", "CUT it", "the fixture"), "START here.\nmiddle text spans\n   two lines.\n");
+  assert.equal(Pin.of(doc, "doc").betweenPhrases("START here", "CUT it", "the fixture").text, "START here.\nmiddle text spans\n   two lines.\n");
 });
 
 test("betweenPhrases throws when the from anchor moved, rather than widening to the whole file", () => {
   assert.throws(
-    () => betweenPhrases("no anchors here", "START here", "CUT it", "the fixture"),
+    () => Pin.of("no anchors here", "the fixture").betweenPhrases("START here", "CUT it", "the fixture").text,
     /the fixture: slice anchor "START here" moved — re-anchor this test, never widen it to the whole file/,
   );
 });
 
 test("betweenPhrases throws when the to phrase no longer occurs after the from anchor", () => {
   assert.throws(
-    () => betweenPhrases("START here.\nno closing phrase follows.\n", "START here", "CUT it", "the fixture"),
+    () => Pin.of("START here.\nno closing phrase follows.\n", "the fixture").betweenPhrases("START here", "CUT it", "the fixture").text,
     /the fixture: slice end anchor "CUT it" moved — re-anchor this test, never widen it to the whole file/,
   );
 });
 
 test("betweenPhrases throws when the to phrase occurs more than once, rather than binding the wrong copy", () => {
   assert.throws(
-    () => betweenPhrases("START here.\nCUT it once.\nCUT it twice.\n", "START here", "CUT it", "the fixture"),
+    () => Pin.of("START here.\nCUT it once.\nCUT it twice.\n", "the fixture").betweenPhrases("START here", "CUT it", "the fixture").text,
     /the fixture: slice end anchor "CUT it" occurs 2 times — a pin would bind the wrong copy; narrow the anchor/,
   );
 });
@@ -722,7 +722,7 @@ test("betweenPhrases throws when the to phrase occurs more than once, rather tha
 test("betweenPhrases throws when the to phrase occurs more than once inside the bound, naming the bound in the message", () => {
   const doc = "START here.\nCUT it once.\nCUT it twice.\n---\nafter the bound.\n";
   assert.throws(
-    () => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound: /\n---\n/ }),
+    () => Pin.of(doc, "doc").betweenPhrases("START here", "CUT it", "the fixture", { bound: /\n---\n/ }).text,
     /the fixture: slice end anchor "CUT it" occurs 2 times inside the bound — a pin would bind the wrong copy; narrow the anchor/,
   );
 });
@@ -735,11 +735,11 @@ test("betweenPhrases throws when the to phrase occurs more than once inside the 
 test("betweenPhrases: a bound stops the search there, rather than reaching a later copy of `to`", () => {
   const doc = "START here.\nreal middle before bound.\n---\nCUT it after the bound.\n";
   assert.throws(
-    () => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound: /\n---\n/ }),
+    () => Pin.of(doc, "doc").betweenPhrases("START here", "CUT it", "the fixture", { bound: /\n---\n/ }).text,
     /the fixture: slice end anchor "CUT it" lies past the end bound, which first matched at line 3 \("---"\)/,
   );
   assert.equal(
-    betweenPhrases(doc, "START here", "CUT it", "the fixture"),
+    Pin.of(doc, "doc").betweenPhrases("START here", "CUT it", "the fixture").text,
     "START here.\nreal middle before bound.\n---\n",
   );
 });
@@ -755,10 +755,10 @@ test("betweenPhrases names the bound's line, not a moved anchor, when the bound 
   const doc = "1. START here, fix it and repeat from\n3. then CUT it here.\n4. the next item.\n";
   const bound = /\n\d+\.\s/;
   const pastBound = /the fixture: slice end anchor "(CUT it|from 3\. then)" lies past the end bound, which first matched at line 2 \("3\. then CUT it here\."\)/;
-  assert.throws(() => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound }), pastBound);
-  assert.throws(() => betweenPhrases(doc, "START here", "from 3. then", "the fixture", { bound }), pastBound);
+  assert.throws(() => Pin.of(doc, "doc").betweenPhrases("START here", "CUT it", "the fixture", { bound }).text, pastBound);
+  assert.throws(() => Pin.of(doc, "doc").betweenPhrases("START here", "from 3. then", "the fixture", { bound }).text, pastBound);
   assert.throws(
-    () => betweenPhrases(doc.replace("CUT it", "SNIP it"), "START here", "CUT it", "the fixture", { bound }),
+    () => Pin.of(doc.replace("CUT it", "SNIP it"), "the fixture").betweenPhrases("START here", "CUT it", "the fixture", { bound }).text,
     /the fixture: slice end anchor "CUT it" moved — re-anchor this test, never widen it to the whole file/,
   );
 });
@@ -773,7 +773,7 @@ test("betweenPhrases truncates a long bound-matched line in its excerpt", () => 
     "3. then CUT it here, followed by enough filler words to push this line well past seventy two characters total.";
   const doc = `1. START here, fix it and repeat from\n${line2}\n4. the next item.\n`;
   assert.throws(
-    () => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound: /\n\d+\.\s/ }),
+    () => Pin.of(doc, "doc").betweenPhrases("START here", "CUT it", "the fixture", { bound: /\n\d+\.\s/ }).text,
     /the fixture: slice end anchor "CUT it" lies past the end bound, which first matched at line 2 \("3\. then CUT it here, followed by enough filler words to push this line w…"\)/,
   );
 });
@@ -789,7 +789,7 @@ test("betweenPhrases truncates a long bound-matched line in its excerpt", () => 
 test("betweenPhrases names the blank line a line-break bound matched, not the next paragraph's text", () => {
   const pastBound = (line, excerpt) =>
     new RegExp(`the fixture: slice end anchor "CUT it" lies past the end bound, which first matched at line ${line} \\("${excerpt}"\\)`);
-  const run = (doc, bound) => () => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound });
+  const run = (doc, bound) => () => Pin.of(doc, "doc").betweenPhrases("START here", "CUT it", "the fixture", { bound }).text;
   assert.throws(run("START here.\nmiddle.\n\n\n\nnext para, CUT it here.\n", /\n\n/), pastBound(3, ""));
   assert.throws(run("START here.\nmiddle.\n   \nnext para, CUT it here.\n", /\n\s*\n/), pastBound(3, "   "));
   assert.throws(run("START here.\nmiddle.\n\nnext para, CUT it here.\n", /^$/m), pastBound(3, ""));
@@ -805,7 +805,7 @@ test("betweenPhrases names the blank line a line-break bound matched, not the ne
 test("betweenPhrases throws when the bound never matches, rather than silently searching the whole document", () => {
   const doc = "START here.\nCUT it once.\n";
   assert.throws(
-    () => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound: /\n---\n/ }),
+    () => Pin.of(doc, "doc").betweenPhrases("START here", "CUT it", "the fixture", { bound: /\n---\n/ }).text,
     /the fixture: end bound no longer matches after "START here" — re-anchor this test, never widen it to the whole document/,
   );
 });
@@ -818,7 +818,7 @@ test("betweenPhrases throws when the bound never matches, rather than silently s
 test("betweenPhrases does not count a `to` phrase restated past the bound as a duplicate", () => {
   const doc = "START here.\nCUT it once.\n---\nCUT it again, but after the bound.\n";
   assert.equal(
-    betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound: /\n---\n/ }),
+    Pin.of(doc, "doc").betweenPhrases("START here", "CUT it", "the fixture", { bound: /\n---\n/ }).text,
     "START here.\n",
   );
 });
@@ -833,7 +833,7 @@ test("betweenPhrases does not count a `to` phrase restated past the bound as a d
 // own header: a guard with no dedicated test is a guard nobody is pinning, and
 // a consumer can stop needing the contract it happens to pin today.
 test("anchorAt returns the offset where the anchor starts, not where it ends", () => {
-  assert.equal(anchorAt("pad\n\nTHE RULE says X.", "THE RULE", "the fixture"), 5);
+  assert.equal(Pin.of("pad\n\nTHE RULE says X.", "the fixture").anchorAt("THE RULE", "the fixture"), 5);
 });
 
 // `runAbove` is the backward bound, for source files where `paragraph`'s blank
@@ -848,7 +848,7 @@ test("anchorAt returns the offset where the anchor starts, not where it ends", (
 // is a parameter and both dialects are exercised here.
 test("runAbove takes the run immediately above the anchor, not an earlier one", () => {
   const src = "// a decoy block\nconst other = 1;\n// the real block\n// still it\nconst TARGET = 2;\n";
-  assert.equal(runAbove(src, "const TARGET", "the fixture", "//"), "// the real block\n// still it\n");
+  assert.equal(Pin.of(src, "src").runAbove("const TARGET", "the fixture", "//").text, "// the real block\n// still it\n");
 });
 
 // The ACCEPT side: a run this bound must not refuse. Shell gutter, indented
@@ -861,7 +861,7 @@ test("runAbove takes the run immediately above the anchor, not an earlier one", 
 // fix: the indent is tolerated, never returned as part of the run.
 test("runAbove accepts an indented `#` run below an indented anchor", () => {
   const sh = "setup() {\n  # the note\n  # and its second line\n  gp_sep=$(printf '\\002')\n}\n";
-  assert.equal(runAbove(sh, "gp_sep=$(printf '\\002')", "the fixture", "#"), "  # the note\n  # and its second line\n");
+  assert.equal(Pin.of(sh, "sh").runAbove("gp_sep=$(printf '\\002')", "the fixture", "#").text, "  # the note\n  # and its second line\n");
 });
 
 // #1622: the mirror of the indented-anchor case above, but on the SAME line
@@ -873,7 +873,7 @@ test("runAbove accepts an indented `#` run below an indented anchor", () => {
 // part of the run.
 test("runAbove accepts a same-line keyword prefix before the anchor", () => {
   const src = "// doc\n// still\nexport const TARGET = 2;\n";
-  assert.equal(runAbove(src, "const TARGET", "the fixture", "//"), "// doc\n// still\n");
+  assert.equal(Pin.of(src, "src").runAbove("const TARGET", "the fixture", "//").text, "// doc\n// still\n");
 });
 
 // #1622: the tail bound's keyword-chain tolerance is `)*$`, not `)?$` — the
@@ -884,7 +884,7 @@ test("runAbove accepts a same-line keyword prefix before the anchor", () => {
 // this one.
 test("runAbove accepts a same-line chain of multiple keyword prefixes", () => {
   const src = "// doc\n// still\nexport default async function TARGET() {}\n";
-  assert.equal(runAbove(src, "TARGET", "the fixture", "//"), "// doc\n// still\n");
+  assert.equal(Pin.of(src, "src").runAbove("TARGET", "the fixture", "//").text, "// doc\n// still\n");
 });
 
 // #1622: `DECLARATION_PREFIX_KEYWORDS` is a closed, bounded list, not
@@ -894,7 +894,7 @@ test("runAbove accepts a same-line chain of multiple keyword prefixes", () => {
 // through.
 test("runAbove refuses a same-line prefix that is not a declaration keyword", () => {
   const src = "// doc\n// still\nsomeCode TARGET = 2;\n";
-  assert.equal(runAbove(src, "TARGET", "the fixture", "//"), "");
+  assert.equal(Pin.of(src, "src").runAbove("TARGET", "the fixture", "//").text, "");
 });
 
 // Empty, never a throw: `gp-sep-invariant-prose.test.mjs` slices at module load
@@ -906,23 +906,23 @@ test("runAbove refuses a same-line prefix that is not a declaration keyword", ()
 // bound is `[ \t]*$`, not `\s*$`, so a blank line between the block and the
 // declaration is not adjacency and the block is not adopted.
 test('runAbove returns "" when nothing but code sits above the anchor', () => {
-  assert.equal(runAbove("const other = 1;\nconst TARGET = 2;\n", "const TARGET", "the fixture", "//"), "");
-  assert.equal(runAbove('// a decoy\nconst u = "http://x";\nconst TARGET = 2;\n', "const TARGET", "the fixture", "//"), "");
-  assert.equal(runAbove("// the doc block\n\nconst TARGET = 2;\n", "const TARGET", "the fixture", "//"), "");
+  assert.equal(Pin.of("const other = 1;\nconst TARGET = 2;\n", "the fixture").runAbove("const TARGET", "the fixture", "//").text, "");
+  assert.equal(Pin.of('// a decoy\nconst u = "http://x";\nconst TARGET = 2;\n', "the fixture").runAbove("const TARGET", "the fixture", "//").text, "");
+  assert.equal(Pin.of("// the doc block\n\nconst TARGET = 2;\n", "the fixture").runAbove("const TARGET", "the fixture", "//").text, "");
 });
 
 // The other half of the run's start bound: `(?:^|\n)` also matches at the
 // absolute start of the sliced text, for a comment block with nothing above
 // it — not just mid-document, preceded by a newline.
 test("runAbove takes a comment block that starts at the beginning of the text", () => {
-  assert.equal(runAbove("// only comment\nconst TARGET = 2;\n", "const TARGET", "the fixture", "//"), "// only comment\n");
+  assert.equal(Pin.of("// only comment\nconst TARGET = 2;\n", "the fixture").runAbove("const TARGET", "the fixture", "//").text, "// only comment\n");
 });
 
 // The half `anchorAt` owns, asserted through this caller because a slicer that
 // took the FIRST hit would look right on every fixture above.
 test("runAbove throws when the anchor matches twice, rather than taking the comment above the wrong copy", () => {
   assert.throws(
-    () => runAbove("// the real block\nconst TARGET = 2;\n\n// a restatement\nconst TARGET = 3;\n", "const TARGET", "the fixture", "//"),
+    () => Pin.of("// the real block\nconst TARGET = 2;\n\n// a restatement\nconst TARGET = 3;\n", "the fixture").runAbove("const TARGET", "the fixture", "//").text,
     /the fixture: slice anchor "const TARGET" occurs 2 times — a pin would bind the wrong copy; narrow the anchor/,
   );
 });
@@ -934,7 +934,7 @@ test("runAbove throws when the anchor matches twice, rather than taking the comm
 // this repo is `#` or `//`.
 test("runAbove escapes the marker, so a gutter carrying a regex metacharacter still matches literally", () => {
   const src = "const other = 1;\n+ the block\n+ still it\nconst TARGET = 2;\n";
-  assert.equal(runAbove(src, "const TARGET", "the fixture", "+"), "+ the block\n+ still it\n");
+  assert.equal(Pin.of(src, "src").runAbove("const TARGET", "the fixture", "+").text, "+ the block\n+ still it\n");
 });
 
 // An empty marker is not a narrower gutter — it is no gutter at all, and the
@@ -942,7 +942,7 @@ test("runAbove escapes the marker, so a gutter carrying a regex metacharacter st
 // silent total widening is worse than a throw, so runAbove refuses it up front.
 test("runAbove throws on an empty marker, rather than silently matching every line above the anchor", () => {
   assert.throws(
-    () => runAbove("some prose line\nanother arbitrary line\nconst TARGET = 2;\n", "const TARGET", "the fixture", ""),
+    () => Pin.of("some prose line\nanother arbitrary line\nconst TARGET = 2;\n", "the fixture").runAbove("const TARGET", "the fixture", "").text,
     /the fixture: runAbove needs a non-empty marker/,
   );
 });
@@ -960,7 +960,7 @@ const QUOTED = "intro\n\n> first block, line one\n> line two\n>\n> second paragr
 // one fixture or two, and the second is the whole reason a block spliced in
 // after this one cannot be absorbed into its slice.
 test("quoteBlocks returns each maximal quote run, and a bare `>` line does not split one", () => {
-  assert.deepEqual(quoteBlocks(QUOTED), [
+  assert.deepEqual(Pin.of(QUOTED, "QUOTED").quoteBlocks().map((run) => run.text), [
     "> first block, line one\n> line two\n>\n> second paragraph, same block",
     "> second block",
   ]);
@@ -970,8 +970,8 @@ test("quoteBlocks returns each maximal quote run, and a bare `>` line does not s
 // unquoted line inside the slice is text the controller does not carry, so a
 // fixture holding one would be blessing prose the member never sees.
 test("quoteBlocks returns no unquoted line, including at a run that ends the text", () => {
-  assert.deepEqual(quoteBlocks("> only\nprose"), ["> only"]);
-  assert.deepEqual(quoteBlocks("prose\n> last"), ["> last"]);
+  assert.deepEqual(Pin.of("> only\nprose", "the fixture").quoteBlocks().map((run) => run.text), ["> only"]);
+  assert.deepEqual(Pin.of("prose\n> last", "the fixture").quoteBlocks().map((run) => run.text), ["> last"]);
 });
 
 // The identifier names the block by what it BEGINS with. A later block that
@@ -980,14 +980,14 @@ test("quoteBlocks returns no unquoted line, including at a run that ends the tex
 // that bound with extra steps.
 test("quoteBlock returns the run that BEGINS with the opener, never one that merely contains it", () => {
   const text = "> a rule about stashing\n\n> never stash: a rule about stashing is above";
-  assert.equal(quoteBlock(text, "never stash", "the fixture"), "> never stash: a rule about stashing is above");
+  assert.equal(Pin.of(text, "text").quoteBlock("never stash", "the fixture").text, "> never stash: a rule about stashing is above");
   // The case above never exercises the `^` anchor: "never stash" is not a
   // substring of the non-matching block at all, so an unanchored
   // `new RegExp(phrase(opener).source)` would pass it exactly as the anchored
   // form does. This puts the opener MID-block instead, where only the `^`
   // anchor tells the two regexes apart.
   assert.throws(
-    () => quoteBlock("> intro sentence never stash mid-block words", "never stash", "the fixture"),
+    () => Pin.of("> intro sentence never stash mid-block words", "the fixture").quoteBlock("never stash", "the fixture").text,
     /no quote block opens/,
   );
 });
@@ -996,7 +996,7 @@ test("quoteBlock returns the run that BEGINS with the opener, never one that mer
 // source has wrapped is still that block's opener, and a literal `indexOf`
 // would throw "block deleted" on a reflow the block survived intact.
 test("quoteBlock finds a block whose opener is hard-wrapped across two lines", () => {
-  assert.equal(quoteBlock("> Read the\n> issue first\n> and only then", "Read the issue first", "the fixture"), "> Read the\n> issue first\n> and only then");
+  assert.equal(Pin.of("> Read the\n> issue first\n> and only then", "the fixture").quoteBlock("Read the issue first", "the fixture").text, "> Read the\n> issue first\n> and only then");
 });
 
 // The two throws, and the false green each one denies. A golden mechanism whose
@@ -1005,14 +1005,14 @@ test("quoteBlock finds a block whose opener is hard-wrapped across two lines", (
 // the decoy and lets the real block be gutted.
 test("quoteBlock throws when no block opens on the identifier, rather than returning nothing", () => {
   assert.throws(
-    () => quoteBlock("> some other rule\n\nRead the issue first — unquoted now", "Read the issue first", "the fixture"),
+    () => Pin.of("> some other rule\n\nRead the issue first — unquoted now", "the fixture").quoteBlock("Read the issue first", "the fixture").text,
     /the fixture: no quote block opens on "Read the issue first"/,
   );
 });
 
 test("quoteBlock throws when two blocks open on the identifier, rather than binding the first", () => {
   assert.throws(
-    () => quoteBlock("> Read the issue first\n\n> Read the issue first, again", "Read the issue first", "the fixture"),
+    () => Pin.of("> Read the issue first\n\n> Read the issue first, again", "the fixture").quoteBlock("Read the issue first", "the fixture").text,
     /the fixture: 2 quote blocks open on "Read the issue first"/,
   );
 });
@@ -1027,11 +1027,11 @@ const names = (s) => [...s.matchAll(SEE)].map((m) => m[1]);
 
 test("logicalLines joins a paragraph's wrapped lines and stops at the paragraph bound", () => {
   assert.deepEqual(names("see\n**Target**"), []);
-  assert.deepEqual(names(logicalLines("see\n**Target**").text), ["Target"]);
+  assert.deepEqual(names(Pin.logicalLines("see\n**Target**").text), ["Target"]);
   // The bound, and the false green losing it buys: a `see` ending one
   // paragraph would bind the `**Bold**` opening the NEXT one, and the scan
   // would report a pointer clause the document does not contain.
-  assert.equal(logicalLines("tail see\n\n**Other**").text, "tail see\n\n**Other**");
+  assert.equal(Pin.logicalLines("tail see\n\n**Other**").text, "tail see\n\n**Other**");
 });
 
 test("logicalLines rejoins on exactly one space, whatever indent and trailing space the wrap left", () => {
@@ -1039,18 +1039,18 @@ test("logicalLines rejoins on exactly one space, whatever indent and trailing sp
   // rendered document: the continuation's indent on one side, the trailing
   // whitespace an editor leaves behind on the other. Either one surviving
   // puts two spaces after `see` and the clause stops matching.
-  assert.equal(logicalLines("see\n      **Target**").text, "see **Target**");
-  assert.equal(logicalLines("see \n**Target**").text, "see **Target**");
+  assert.equal(Pin.logicalLines("see\n      **Target**").text, "see **Target**");
+  assert.equal(Pin.logicalLines("see \n**Target**").text, "see **Target**");
   // A tab is whitespace an editor leaves, not markdown's hard break, so this
   // joins — `HARD_BREAK` is two SPACES, and the test above it holds that half.
-  assert.equal(logicalLines("see \t\n\t **Target**").text, "see **Target**");
+  assert.equal(Pin.logicalLines("see \t\n\t **Target**").text, "see **Target**");
 });
 
 test("lineAt answers the PHYSICAL line a hit in the joined view came from", () => {
   // The whole reason the joined text is returned with a mapper rather than
   // alone: a pin that reports an offset into the joined copy names a line
   // number no reader can open. One-based, like an editor and like `grep -n`.
-  const { text, lineAt } = logicalLines("# Heading\n\nfirst para\nwrapped on\nthree lines\n\nsee\n**Target**");
+  const { text, lineAt } = Pin.logicalLines("# Heading\n\nfirst para\nwrapped on\nthree lines\n\nsee\n**Target**");
   assert.equal(lineAt(text.indexOf("# Heading")), 1);
   assert.equal(lineAt(text.indexOf("first para")), 3);
   assert.equal(lineAt(text.indexOf("wrapped on")), 4);
@@ -1069,7 +1069,7 @@ test("lineAt throws on an offset outside the joined view, rather than clamping i
   // guessing. `lineAt` only ever receives an offset a match on `text`
   // actually produced, so anything outside `[0, text.length)` is a defect
   // at the call site, not a document to open.
-  const { lineAt } = logicalLines("a\nb\nc");
+  const { lineAt } = Pin.logicalLines("a\nb\nc");
   assert.throws(() => lineAt(-5), /out of range/);
   assert.throws(() => lineAt(9999), /out of range/);
 });
@@ -1080,7 +1080,7 @@ test("logicalLines never joins a line the reader sees as a new block", () => {
   // item, a blockquote, a table row and a thematic break each terminate their
   // predecessor on the page, so each must terminate it here.
   for (const next of ["## Heading", "- item", "* item", "+ item", "3. item", "> quoted", "| cell |", "---", "```js"]) {
-    assert.equal(logicalLines(`see\n${next}`).text, `see\n${next}`, `joined a new block: ${next}`);
+    assert.equal(Pin.logicalLines(`see\n${next}`).text, `see\n${next}`, `joined a new block: ${next}`);
   }
 });
 
@@ -1091,11 +1091,11 @@ test("logicalLines continues a list item but never a heading or a thematic break
   // a heading and a thematic break are complete on their own line. Collapsing
   // the two sets either loses every list-item wrap or swallows the paragraph
   // under a heading into the heading itself.
-  assert.equal(logicalLines("1. step see\n   **Target**").text, "1. step see **Target**");
-  assert.equal(logicalLines("- step see\n  **Target**").text, "- step see **Target**");
-  assert.equal(logicalLines("> quoted see\n> more").text, "> quoted see\n> more");
-  assert.equal(logicalLines("# Heading\nbody").text, "# Heading\nbody");
-  assert.equal(logicalLines("---\ndescription: x").text, "---\ndescription: x");
+  assert.equal(Pin.logicalLines("1. step see\n   **Target**").text, "1. step see **Target**");
+  assert.equal(Pin.logicalLines("- step see\n  **Target**").text, "- step see **Target**");
+  assert.equal(Pin.logicalLines("> quoted see\n> more").text, "> quoted see\n> more");
+  assert.equal(Pin.logicalLines("# Heading\nbody").text, "# Heading\nbody");
+  assert.equal(Pin.logicalLines("---\ndescription: x").text, "---\ndescription: x");
 });
 
 test("logicalLines leaves fenced code exactly as written", () => {
@@ -1103,14 +1103,14 @@ test("logicalLines leaves fenced code exactly as written", () => {
   // a fenced block would hand any pin scanning code through this view a single
   // line that no shell, and no reader, would recognise.
   const fence = "prose see\n\n```sh\nfirst --flag\nsecond --flag\n```\n\nmore prose";
-  assert.equal(logicalLines(fence).text, fence);
+  assert.equal(Pin.logicalLines(fence).text, fence);
 });
 
 test("logicalLines keeps an authored hard line break", () => {
   // Two trailing spaces and a trailing backslash are markdown's line break —
   // the author asked for it, so it is not a wrap point to undo.
-  assert.equal(logicalLines("see  \n**Target**").text, "see  \n**Target**");
-  assert.equal(logicalLines("see\\\n**Target**").text, "see\\\n**Target**");
+  assert.equal(Pin.logicalLines("see  \n**Target**").text, "see  \n**Target**");
+  assert.equal(Pin.logicalLines("see\\\n**Target**").text, "see\\\n**Target**");
 });
 
 test("logicalLines keeps a block-leading span at column 0 and takes a wrap-leading one off it", () => {
@@ -1121,15 +1121,15 @@ test("logicalLines keeps a block-leading span at column 0 and takes a wrap-leadi
   const lead = /^\*\*([^*\n]+)\*\*/gm;
   const wrapped = "a sentence ending here\n**Not A Block** but mid-paragraph prose";
   assert.deepEqual([...wrapped.matchAll(lead)].map((m) => m[1]), ["Not A Block"]);
-  assert.deepEqual([...logicalLines(wrapped).text.matchAll(lead)].map((m) => m[1]), []);
+  assert.deepEqual([...Pin.logicalLines(wrapped).text.matchAll(lead)].map((m) => m[1]), []);
   // And the half that must still be ACCEPTED: a span that genuinely opens its
   // block stays at column 0 even when the rest of that block is wrapped, so
   // tightening `^` this way costs no real target.
   const real = "**A Real Block** whose own paragraph\nwraps onto a second line";
-  assert.deepEqual([...logicalLines(real).text.matchAll(lead)].map((m) => m[1]), ["A Real Block"]);
+  assert.deepEqual([...Pin.logicalLines(real).text.matchAll(lead)].map((m) => m[1]), ["A Real Block"]);
 });
 
-// `Pin`, the chained form. One chain per test; every new piece of logic —
+// `Pin`. One chain per test; every new piece of logic —
 // roots, marker inference, gutters, `.section` — gets the input it must
 // ACCEPT beside the input it must REFUSE.
 
@@ -1197,6 +1197,26 @@ test("Pin.file infers runAbove's marker from .sh, .mjs and .js, and a node slice
     assert.equal(Pin.file(js).runAbove("const X", "the fixture").text, "// says what X is\n", ext);
   }
   assert.equal(Pin.file(sh).between("# over", "}", "the fixture").runAbove("probe() {", "the fixture").text, "# over two lines\n");
+  // Every method that returns a node hands it the root's marker, not just
+  // `.between`. `runAbove` on each result needs one, and refuses without it.
+  // The comment line carries no space after `#` so `.section`'s heading scan
+  // does not end the section there.
+  const derive = fixtureFile("derive.sh", "## Sec\n\n#says a\nprobe_a() {\n  :\n}\n\n- # item b\n  probe_b() {\n\n> # c quoted\n> probe_c() {\n\ntail\n");
+  const root = Pin.file(derive);
+  const derived = [
+    ["between", root.between("## Sec", "tail", "the fixture"), "probe_a() {"],
+    ["paragraph", root.paragraph("#says a", "the fixture", "- # item b"), "probe_a() {"],
+    ["bullet", root.bullet("- # item b", "> # c quoted", "the fixture"), "probe_b() {"],
+    ["betweenPhrases", root.betweenPhrases("## Sec", "tail", "the fixture"), "probe_a() {"],
+    ["quoteBlock", root.quoteBlock("# c quoted", "the fixture"), "probe_c() {"],
+    ["quoteBlocks", root.quoteBlocks()[0], "probe_c() {"],
+    ["section", root.section("## Sec", "the fixture"), "probe_a() {"],
+    ["stripGutter", root.stripGutter(">"), "probe_a() {"],
+    ["runAbove", root.runAbove("probe_a() {", "the fixture"), "#says a"],
+  ];
+  for (const [method, node, anchor] of derived) {
+    assert.doesNotThrow(() => node.runAbove(anchor, "the fixture"), `${method} keeps the root's marker`);
+  }
 });
 
 test("runAbove takes an explicit marker over the inferred one, and on a Pin.of root", () => {
@@ -1371,47 +1391,235 @@ test(".section on a CRLF text splits on \\n only, so its heading carries the lin
   assert.equal(Pin.of("## A\r\nx\r\n## B\r\n", "the fixture").section("## A\r", "the fixture").text, "## A\r\nx\r\n");
 });
 
-test("Pin's .between is the flat between on the node's text, options included", () => {
+test("Pin's .between slices the node's text, emphasis tolerance off unless asked", () => {
   const doc = "a **START** b END c";
   assert.equal(Pin.of(doc, "the fixture").between("START", "END", "the fixture", { emphasisTolerant: true }).text, "**START** b ");
-  assert.equal(Pin.of(doc, "the fixture").between("START", "END", "the fixture").text, between(doc, "START", "END", "the fixture"));
+  assert.equal(Pin.of(doc, "the fixture").between("START", "END", "the fixture").text, "START** b ");
 });
 
-test("Pin's .paragraph is the flat paragraph on the node's text, Pin.END and options included", () => {
+test("Pin's .paragraph slices the node's text, Pin.END and emphasis tolerance included", () => {
   const doc = "intro\n\n**THE RULE** says X.\n\n**next** para.\n";
   assert.equal(Pin.of(doc, "the fixture").paragraph("THE RULE", "the fixture", "next", { emphasisTolerant: true }).text, "**THE RULE** says X.");
+  assert.throws(() => Pin.of(doc, "the fixture").paragraph("THE RULE", "the fixture", "next"), /no longer opens with "next"/);
   assert.equal(Pin.of("intro\n\nTHE RULE says X.\n", "the fixture").paragraph("THE RULE", "the fixture", Pin.END).text, "THE RULE says X.\n");
 });
 
-test("Pin's .bullet is the flat bullet on the node's text, ending the item at its next sibling", () => {
+test("Pin's .bullet slices the node's text, ending the item at its next sibling", () => {
   const doc = "- one\n- two\n- three\n";
   assert.equal(Pin.of(doc, "the fixture").bullet("- one", "- three", "the fixture").text, "- one");
 });
 
-test("Pin's .betweenPhrases is the flat betweenPhrases on the node's text, bound included", () => {
+test("Pin's .betweenPhrases slices the node's text, bound included", () => {
   assert.equal(Pin.of("start here then stop\n\nlater stop", "the fixture").betweenPhrases("start here", "stop", "the fixture", { bound: /\n\n/ }).text, "start here then ");
   assert.throws(() => Pin.of("start here then\n\nlater stop", "the fixture").betweenPhrases("start here", "stop", "the fixture", { bound: /\n\n/ }), /lies past the end bound/);
 });
 
-test("Pin's .anchorAt is the flat anchorAt's offset into the node's text, options included", () => {
+test("Pin's .anchorAt returns an offset into the node's text, emphasis tolerance off unless asked", () => {
   assert.equal(Pin.of("x **an anchor** y", "the fixture").anchorAt("an anchor", "the fixture", { emphasisTolerant: true }), 2);
-  assert.equal(Pin.of("x **an anchor** y", "the fixture").anchorAt("an anchor", "the fixture"), anchorAt("x **an anchor** y", "an anchor", "the fixture"));
+  assert.equal(Pin.of("x **an anchor** y", "the fixture").anchorAt("an anchor", "the fixture"), 4);
 });
 
-test("Pin's .quoteBlock is the flat quoteBlock on the node's text, options included", () => {
-  assert.equal(Pin.of("> one block\n> here\n\n> **two** block\n", "the fixture").quoteBlock("two block", "the fixture", { emphasisTolerant: true }).text, "> **two** block");
+test("Pin's .quoteBlock slices the node's text, emphasis tolerance off unless asked", () => {
+  const quoted = Pin.of("> one block\n> here\n\n> **two** block\n", "the fixture");
+  assert.equal(quoted.quoteBlock("two block", "the fixture", { emphasisTolerant: true }).text, "> **two** block");
+  assert.throws(() => quoted.quoteBlock("two block", "the fixture"), /no quote block opens on "two block"/);
 });
 
-test("Pin's .quoteBlocks returns each of the flat quoteBlocks' runs as a node", () => {
+test("Pin's .quoteBlocks returns each run of the node's text as a node", () => {
   const nodes = Pin.of("> one block\n> here\n\ntext\n> two\n", "the fixture").quoteBlocks();
   assert.ok(nodes.every((node) => node instanceof Pin));
   assert.deepEqual(nodes.map((node) => node.text), ["> one block\n> here", "> two"]);
 });
 
-test("Pin's static members are the module's string functions and END", () => {
-  assert.equal(Pin.END, END);
-  assert.equal(Pin.phrase, phrase);
-  assert.equal(Pin.sentences, sentences);
-  assert.equal(Pin.unemphasized, unemphasized);
-  assert.equal(Pin.logicalLines, logicalLines);
+test("Pin is the module's only export, and its static members work on plain strings", async () => {
+  assert.deepEqual(Object.keys(await import("./support/prose-pin.mjs")), ["Pin"]);
+  assert.equal(typeof Pin.END, "symbol");
+  assert.ok(Pin.phrase("a b").test("a\n   b"));
+  assert.equal(Pin.unemphasized("**a** b"), "a b");
+  assert.deepEqual(Pin.sentences("One. Two."), ["One.", "Two."]);
+  assert.equal(Pin.logicalLines("a\nb\n\nc").text, "a b\n\nc");
+});
+
+// Fixtures below close the survivors a mutation pass over a scratch copy of the
+// module found once this suite stopped calling the module's functions directly.
+// Each one is an input on which the mutated line and the real one disagree, and
+// each states the direction the real line takes.
+
+test("an emphasis-tolerant anchor that overlaps itself counts as more than one", () => {
+  // `aa` sits at offsets 1 and 2 of `xaaax`: counting past each hit by one
+  // finds both, counting past it by two finds one and slices from the first.
+  assert.throws(() => Pin.of("xaaax", "the fixture").between("aa", "x", "the fixture", { emphasisTolerant: true }), /occurs 2 times/);
+});
+
+test("an emphasis-tolerant anchor that strips to empty counts one hit per offset, the end of the text included", () => {
+  // The stripped text is `a`, one character, so the empty anchor sits at
+  // offsets 0 and 1. Stopping short of the end counts one and slices.
+  assert.throws(() => Pin.of("**a", "the fixture").between("**", "a", "the fixture", { emphasisTolerant: true }), /occurs 2 times/);
+});
+
+test("a literal between takes the first end anchor after the start even when it occurs again", () => {
+  // ACCEPT: the exactly-once rule on the end anchor is the tolerant path's price only.
+  assert.equal(Pin.of("S a E b E", "the fixture").between("S", "E", "the fixture").text, "S a ");
+});
+
+test("paragraph reads `next` literally unless emphasis tolerance is on, and through the strip when it is", () => {
+  const doc = "RULE a.\n\n**next** b";
+  assert.equal(Pin.of(doc, "the fixture").paragraph("RULE", "the fixture", "**next**").text, "RULE a.");
+  assert.equal(Pin.of(doc, "the fixture").paragraph("RULE", "the fixture", "**next**", { emphasisTolerant: true }).text, "RULE a.");
+  assert.throws(() => Pin.of(doc, "the fixture").paragraph("RULE", "the fixture", "next"), /no longer opens with "next"/);
+  assert.equal(Pin.of(doc, "the fixture").paragraph("RULE", "the fixture", "next", { emphasisTolerant: true }).text, "RULE a.");
+});
+
+test("paragraph refuses a `next` that is only whitespace", () => {
+  assert.throws(() => Pin.of("RULE a.\n\nnext", "the fixture").paragraph("RULE", "the fixture", " "), /needs `next`/);
+});
+
+test("phrase escapes `?`, `^` and `|` taken from its input", () => {
+  assert.equal(Pin.phrase("a?b").test("b"), false);
+  assert.equal(Pin.phrase("a?b").test("a?b"), true);
+  assert.equal(Pin.phrase("^a").test("a"), false);
+  assert.equal(Pin.phrase("^a").test("x ^a"), true);
+  assert.equal(Pin.phrase("a|b").test("a"), false);
+  assert.equal(Pin.phrase("a|b").test("a|b"), true);
+});
+
+test("Pin.END names itself", () => {
+  assert.equal(Pin.END.description, "END");
+});
+
+test("bullet reads a bare `.` or `)` as no marker, whether it opens the item or follows it", () => {
+  assert.throws(() => Pin.of(". a\nEND", "the fixture").bullet(". a", "END", "the fixture"), /not on a list-item line/);
+  // A `. x` line is lazy continuation text, so it stays inside the item.
+  assert.equal(Pin.of("- a\n. x\nEND", "the fixture").bullet("- a", "END", "the fixture").text, "- a\n. x\n");
+});
+
+test("bullet reads the anchor's own line whole when it is the last line of the text", () => {
+  // `-b` is no list item: a marker needs a space after it. Reading the line one
+  // character short would see a bare `-` and accept it.
+  assert.throws(() => Pin.of("-b", "the fixture").bullet("-", "b", "the fixture"), /not on a list-item line/);
+});
+
+test("bullet sees a bare-marker sibling on the last line of the slice", () => {
+  assert.equal(Pin.of("- a\n-END", "the fixture").bullet("- a", "END", "the fixture").text, "- a");
+});
+
+test("bullet measures a tab against its own column, so a tab-indented line is a child only from the content column", () => {
+  // `10. ` puts the content at column 4, exactly where one tab lands.
+  assert.equal(Pin.of("10. a\n\t- x\nEND", "the fixture").bullet("10. a", "END", "the fixture").text, "10. a\n\t- x\n");
+  // `1.   ` puts it at column 5: after a blank line, a tab (column 4) and a
+  // space-then-tab (also column 4) are both shallower than the item's text.
+  assert.equal(Pin.of("1.   a\n\n\t- x\nEND", "the fixture").bullet("1.   a", "END", "the fixture").text, "1.   a");
+  assert.equal(Pin.of("1.   a\n\n \t- x\nEND", "the fixture").bullet("1.   a", "END", "the fixture").text, "1.   a");
+  // A tab advances to the next multiple of 4 from wherever it starts: three
+  // spaces then a tab is column 4, four spaces then a tab is column 8.
+  assert.equal(Pin.of("1.   a\n\n   \t- x\nEND", "the fixture").bullet("1.   a", "END", "the fixture").text, "1.   a");
+  assert.equal(Pin.of("1.   a\n\n    \t- x\nEND", "the fixture").bullet("1.   a", "END", "the fixture").text, "1.   a\n\n    \t- x\n");
+});
+
+test("an emphasis-tolerant anchorAt maps its offset back past every earlier `**`, and stops before a marker at the anchor", () => {
+  assert.equal(Pin.of("**a** x **an anchor** y", "the fixture").anchorAt("an anchor", "the fixture", { emphasisTolerant: true }), 8);
+  assert.equal(Pin.of("**a** b END", "the fixture").between("b", "END", "the fixture", { emphasisTolerant: true }).text, "b ");
+});
+
+test("bullet puts the content column at the marker's gap, a gap of 4 included, and one past the marker for a bare marker or a gap past 4", () => {
+  // Gap 4: content at column 4, so a paragraph at column 3 after a blank line is not the item's.
+  assert.equal(Pin.of("-    x\n\n   z\nEND", "the fixture").bullet("-    x", "END", "the fixture").text, "-    x");
+  // Gap 5: the rest is an indented code block and the content is one past the marker, so a paragraph at column 2 is the item's.
+  assert.equal(Pin.of("-     x\n\n  z\nEND", "the fixture").bullet("-     x", "END", "the fixture").text, "-     x\n\n  z\n");
+  // A bare marker: content one past the marker, so a paragraph at column 1 after a blank line is not the item's.
+  assert.equal(Pin.of("-\n\n z\nEND", "the fixture").bullet("-", "END", "the fixture").text, "-");
+  // An ordinary gap of 1: content at column 2, so a paragraph at column 1 is not the item's.
+  assert.equal(Pin.of("- a\n\n y\nEND", "the fixture").bullet("- a", "END", "the fixture").text, "- a");
+});
+
+test("betweenPhrases takes a global bound regex, and names the bound's line whole up to 72 characters and cut beyond", () => {
+  assert.equal(Pin.of("start a late\n\nz", "the fixture").betweenPhrases("start", "late", "the fixture", { bound: /\n\n/g }).text, "start a ");
+  const lineOf = (length) => `## late ${"y".repeat(length - "## late ".length)}`;
+  const named = (text) => {
+    try {
+      Pin.of(text, "the fixture").betweenPhrases("start", "late", "the fixture", { bound: /\n##/ });
+    } catch (error) {
+      return error.message;
+    }
+    return "";
+  };
+  // The text ends on the named line with no trailing newline, so a line read
+  // one character short shows.
+  assert.match(named(`start a\n${lineOf(72)}`), new RegExp(`line 2 \\("${lineOf(72)}"\\)`));
+  assert.match(named(`start a\n${lineOf(73)}`), new RegExp(`line 2 \\("${lineOf(73).slice(0, 72)}…"\\)`));
+  // A leading blank line moves the count, and the first character is not the one the count drops.
+  assert.match(named(`\nstart a\n${lineOf(10)}`), /line 3 \("## late yy"\)/);
+});
+
+test("quoteBlock opens on a run whose first line carries no space after `>`, or several", () => {
+  assert.equal(Pin.of(">one two\n> three", "the fixture").quoteBlock("one two", "the fixture").text, ">one two\n> three");
+  assert.equal(Pin.of(">    indented opener words\n> x", "the fixture").quoteBlock("indented opener words", "the fixture").text, ">    indented opener words\n> x");
+});
+
+// `logicalLines` joins a physical line to the one before it unless one of them
+// is a block of its own. These tables pin each shape the two block regexes
+// name, at the width and indent where it starts and the one where it stops.
+const joins = (previous, next) => !Pin.logicalLines(`${previous}\n${next}`).text.includes("\n");
+
+test("logicalLines starts a block at each shape BLOCK_START names, and joins every near-miss", () => {
+  for (const line of ["# h", "###### h", "   # h", "- x", "* x", "+ x", "-", "1. x", "10) x", ">", "> q", "| t |", "```", "~~~", "---", "***", "___", "--- ", "   ---"]) {
+    assert.equal(joins("para", line), false, `${JSON.stringify(line)} starts a block`);
+  }
+  for (const line of ["####### h", "#h", "    # h", "-x", "1.x", ". x", "1 x", "--", "**", "__", "---x", "***x", "___x", "a # h", "a - b", "a > b", "a | b", "x ```", "    ```"]) {
+    assert.equal(joins("para", line), true, `${JSON.stringify(line)} continues the paragraph`);
+  }
+});
+
+test("logicalLines lets nothing continue a line BLOCK_END names, and lets a near-miss continue", () => {
+  for (const line of ["# h", "###### h", "   # h", "| t |", "---", "***", "___", "--- ", "   ***"]) {
+    assert.equal(joins(line, "para"), false, `${JSON.stringify(line)} is complete in itself`);
+  }
+  for (const line of ["####### h", "#h", "    # h", "a # h", "--", "**", "__", "---x", "***x", "___x", "- x", "> q", "word"]) {
+    assert.equal(joins(line, "para"), true, `${JSON.stringify(line)} takes a continuation`);
+  }
+  // A closing fence ends a block too, so the text after it is not joined onto it.
+  assert.equal(Pin.logicalLines("```\nx\n```\ntext").text, "```\nx\n```\ntext");
+  assert.equal(Pin.logicalLines("~~~\nx\n~~~\ntext").text, "~~~\nx\n~~~\ntext");
+});
+
+test("logicalLines opens a fence at up to three spaces of indent, on a line that starts with the run", () => {
+  assert.equal(Pin.logicalLines("a\n   ```\nb\nc\n   ```\nd").text, "a\n   ```\nb\nc\n   ```\nd");
+  assert.equal(Pin.logicalLines("```\nb\nc\n```").text, "```\nb\nc\n```");
+  // Four spaces is indented code, and a run mid-line is not a fence: both leave the lines to join.
+  assert.equal(Pin.logicalLines("    ```\nb\nc").text, "    ``` b c");
+  assert.equal(Pin.logicalLines("x ```\nb\nc").text, "x ``` b c");
+});
+
+test("logicalLines keeps the indent of a line it does not join, and the first and last lines' own whitespace", () => {
+  assert.equal(Pin.logicalLines("  a\nb").text, "  a b");
+  assert.equal(Pin.logicalLines("a\nb ").text, "a b ");
+  assert.equal(Pin.logicalLines("a\n\n   b").text, "a\n\n   b");
+  assert.equal(Pin.logicalLines("a\nb c").text, "a b c");
+  assert.equal(Pin.logicalLines("a b\nc").text, "a b c");
+});
+
+test("logicalLines.lineAt refuses an offset at the end of the view and before its start", () => {
+  const view = Pin.logicalLines("a\nb");
+  assert.equal(view.lineAt(0), 1);
+  assert.equal(view.lineAt(view.text.length - 1), 2);
+  assert.throws(() => view.lineAt(view.text.length), /out of range/);
+  assert.throws(() => view.lineAt(-1), /out of range/);
+});
+
+test(".section's fence closes on a run as long as its opener, indented up to three spaces, and not on a shorter one", () => {
+  const sectionOf = (doc) => Pin.of(doc, "the fixture").section("## A", "the fixture").text;
+  assert.equal(sectionOf("## A\n```\n## in\n``\n## still in\n```\n## B\n"), "## A\n```\n## in\n``\n## still in\n```\n");
+  assert.equal(sectionOf("## A\n~~~\n## in\n~~\n## still in\n~~~\n## B\n"), "## A\n~~~\n## in\n~~\n## still in\n~~~\n");
+  assert.equal(sectionOf("## A\n```\n## in\n   ```\n## B\n"), "## A\n```\n## in\n   ```\n");
+  assert.equal(sectionOf("## A\n````\n## in\n   ```\n## still in\n````\n## B\n"), "## A\n````\n## in\n   ```\n## still in\n````\n");
+});
+
+test("a bullet stops at a thematic break of any marker and a heading of any depth up to 6, and not at a near-miss", () => {
+  const item = (next) => Pin.of(`- a\n${next}\nEND`, "the fixture").bullet("- a", "END", "the fixture").text;
+  for (const next of ["---", "***", "___", "- - -", "* * *", "_ _ _", "# h", "###### h", "```", "~~~", "> q"]) {
+    assert.equal(item(next), "- a", `${JSON.stringify(next)} ends the item`);
+  }
+  for (const next of ["--", "**", "__", "_ _", "---x", "***x", "_ _ _x", "####### h", "#h"]) {
+    assert.equal(item(next), `- a\n${next}\n`, `${JSON.stringify(next)} is lazy continuation text`);
+  }
 });

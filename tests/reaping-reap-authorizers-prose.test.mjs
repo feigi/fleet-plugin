@@ -12,34 +12,25 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, bullet, phrase, unemphasized } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const REAPING = readFileSync(
-  join(REPO, "skills", "run-team", "references", "reaping.md"),
-  "utf8",
-);
+const REAPING = Pin.file(join(REPO, "skills", "run-team", "references", "reaping.md"));
 const SCRIPT = readFileSync(join(REPO, "scripts", "reap.sh"), "utf8");
 
 const reapSection = () =>
-  between(
-    REAPING,
-    "## Why the reap is shaped the way it is",
-    "## Why a second sweep, over worktrees rather than branches",
-    "reaping.md",
-  );
+  REAPING.section("## Why the reap is shaped the way it is", "reaping.md").text;
 
 // The bullet that names the delete, bounded to its own list item: it ends at
 // the next list marker, so a sibling bullet (the holder-check bullet sits
 // right after it) cannot supply the words, and rewording that sibling does
 // not move the bound.
 const deleteBullet = () =>
-  bullet(
-    reapSection(),
+  Pin.of(reapSection(), "reapSection()").bullet(
     "- **The delete is `git update-ref -d`'s compare-and-swap",
     "\n- ",
     "reaping.md's reap section",
-  );
+  ).text;
 
 // The clause that lists the authorizers: from "authorized by" to the
 // sentence after the bold lead, which explains the compare-and-swap. Sliced
@@ -47,13 +38,12 @@ const deleteBullet = () =>
 // `unemphasized()`, so a `**` moved onto or into the clause stays green: the
 // slice only locates the clause, and `phrase()` is matched against raw text.
 const authorizers = () =>
-  between(
-    deleteBullet(),
+  Pin.of(deleteBullet(), "deleteBullet()").between(
     "authorized by that cherry check",
     "Tip read before the cherry",
     "reaping.md's reap delete bullet",
     { emphasisTolerant: true },
-  );
+  ).text;
 
 test("reaping.md: the reap delete's authorizer clause names the fresh worktree-holds-branch check", () => {
   // ONE contiguous span, not keywords: "fresh" and the negation each
@@ -62,8 +52,8 @@ test("reaping.md: the reap delete's authorizer clause names the fresh worktree-h
   // check ... that a worktree holds the branch" has the opposite meaning).
   // Only a span binds the two to each other.
   assert.match(
-    unemphasized(authorizers()),
-    phrase("a fresh check, re-read immediately before the delete, that no worktree holds the branch"),
+    Pin.unemphasized(authorizers()),
+    Pin.phrase("a fresh check, re-read immediately before the delete, that no worktree holds the branch"),
     "reaping.md's reap section names what authorizes the `update-ref` delete but not the fresh worktree check — reap.sh keeps a branch the cherry check cleared whenever a worktree holds it",
   );
 });
@@ -75,7 +65,7 @@ test("reaping.md: the reap delete's authorizer clause does not make any one chec
   // above stays green with any of them restored. A word list, so a spelling
   // outside it goes unseen; `\s+` keeps a reflow between its words green.
   assert.doesNotMatch(
-    unemphasized(authorizers()),
+    Pin.unemphasized(authorizers()),
     /\bonly\s+by\b|\bnothing\s+else\b|\bsolely\b|\balone\b/,
     "reaping.md's reap section says one check alone authorizes the `update-ref` delete — reap.sh's worktree check stops that delete too",
   );
@@ -84,7 +74,7 @@ test("reaping.md: the reap delete's authorizer clause does not make any one chec
 test("reaping.md: the reap delete's authorizer clause still names the cherry check", () => {
   // Input the new assertions must ACCEPT: naming the worktree check must not
   // cost the clause the check it already had.
-  assert.match(unemphasized(deleteBullet()), phrase("authorized by that cherry check"));
+  assert.match(Pin.unemphasized(deleteBullet()), Pin.phrase("authorized by that cherry check"));
 });
 
 // reap.sh's executable lines, comments and `echo` diagnostics dropped. The

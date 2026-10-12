@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./support/strip-comments.mjs";
-import { between, paragraph, phrase, stripSlashGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { unrunReason, unrunEntries, unrunCrashed, sharedRunNote, FINDINGS_SCHEMA, CRASHED_REASON } from "../plugin/scripts/review-core.mjs";
 
 // A dimension that crashed and a dimension that ran clean returned BYTE-
@@ -25,8 +25,8 @@ import { unrunReason, unrunEntries, unrunCrashed, sharedRunNote, FINDINGS_SCHEMA
 // and a schema pin written against raw source passes with the field dead under
 // `additionalProperties: false`.
 const REPO = join(import.meta.dirname, "..", "plugin");
-const SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
-const CODE = stripComments(SOURCE);
+const SOURCE = Pin.file(join(REPO, "scripts", "review-core.mjs"));
+const CODE = stripComments(SOURCE.text);
 
 // #2315's no-counts case, from its two causes: the test-run dispatch returned
 // nothing at all, or it returned without a count (crash, deadline, no
@@ -546,10 +546,10 @@ test("run-team's Reviewers section documents dimensionsUnrun, not only dimension
 // reword, and a correctly negated coverage sentence in the paragraph stay green.
 test("run-team claims a suite RAN from a key's absence from dimensionsUnrun, never that it is covered", () => {
   const doc = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
-  const para = between(doc, "**`dimensionsRun` is the dispatch", "The rule this replaces", "run-team/SKILL.md");
+  const para = Pin.of(doc, "doc").between("**`dimensionsRun` is the dispatch", "The rule this replaces", "run-team/SKILL.md").text;
   assert.match(
     para,
-    phrase("and NOT in `dimensionsUnrun` ran a suite;"),
+    Pin.phrase("and NOT in `dimensionsUnrun` ran a suite;"),
     "run-team/SKILL.md no longer says a key absent from dimensionsUnrun ran a suite, full stop",
   );
   assert.doesNotMatch(
@@ -589,11 +589,11 @@ test("run-team claims a suite RAN from a key's absence from dimensionsUnrun, nev
 // thing that means covered` rather than `covered` alone so the paragraph's own
 // correct denials — which must keep saying the word — stay green.
 test("review-core.mjs's own comment claims a suite RAN from a key's absence from dimensionsUnrun, never that it is covered", () => {
-  const prose = stripSlashGutter(SOURCE);
-  const para = paragraph(prose, "`dimensionsRun` names what was DISPATCHED", "review-core.mjs", "The two are siblings rather than");
+  const prose = SOURCE.stripGutter("//").text;
+  const para = Pin.of(prose, "prose").paragraph("`dimensionsRun` names what was DISPATCHED", "review-core.mjs", "The two are siblings rather than").text;
   assert.match(
     para,
-    phrase("A key in the first and NOT in the second ran a suite — not that it is covered."),
+    Pin.phrase("A key in the first and NOT in the second ran a suite — not that it is covered."),
     "review-core.mjs's dimensionsRun/dimensionsUnrun comment no longer says a key absent from dimensionsUnrun ran a suite, full stop",
   );
   assert.doesNotMatch(

@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 // The Recipe derivation step's prose: where it lives in run-team's phase 0,
 // what reuses a cache instead of deriving, when a run re-derives and when it
@@ -11,52 +10,52 @@ import { between, paragraph, phrase } from "./support/prose-pin.mjs";
 // runbook routes to it, and that every refusal naming "the Recipe derivation
 // step" names a step that exists.
 const PLUGIN = join(import.meta.dirname, "..", "plugin");
-const read = (rel) => readFileSync(join(PLUGIN, rel), "utf8");
+const read = (rel) => Pin.file(join(PLUGIN, rel));
 const RUN_TEAM = read("skills/run-team/SKILL.md");
-const DERIVER = read("agents/fleet-recipe-deriver.agent.md");
-const PROVER = read("scripts/recipe-prove.mjs");
+const DERIVER = read("agents/fleet-recipe-deriver.agent.md").text;
+const PROVER = read("scripts/recipe-prove.mjs").text;
 
-const phase0 = () => between(RUN_TEAM, "## Phase 0 — shortlist", "## Phase 1 — Pull", "run-team/SKILL.md phase 0");
+const phase0 = () => RUN_TEAM.section("## Phase 0 — shortlist", "run-team/SKILL.md phase 0").text;
 // The step spans its quoted dispatch prompt, so it is bounded by the next
 // rule's opener rather than by a blank line.
-const step = () => between(phase0(), "**Derive the Recipe — the Recipe derivation step — before the fold-in below", "**Mid-run, a cache that stops running", "the phase-0 Recipe derivation step");
-const stall = () => paragraph(phase0(), "**Mid-run, a cache that stops running is re-derived once", "the re-derive-once and stall rule", "**Fold in every PR a prior");
+const step = () => Pin.of(phase0(), "phase0()").between("**Derive the Recipe — the Recipe derivation step — before the fold-in below", "**Mid-run, a cache that stops running", "the phase-0 Recipe derivation step").text;
+const stall = () => Pin.of(phase0(), "phase0()").paragraph("**Mid-run, a cache that stops running is re-derived once", "the re-derive-once and stall rule", "**Fold in every PR a prior").text;
 
 test("phase 0 derives the Recipe before the fold-in and before the first claim", () => {
   const p0 = phase0();
   const at = p0.indexOf("**Derive the Recipe");
   assert.ok(at !== -1 && at < p0.indexOf("**Fold in every PR a prior run left open"),
     "the Recipe derivation step must come before the fold-in: folded-in PRs are reviewed, and a review reads the Test entrypoint from the cache");
-  assert.match(step(), phrase("before the first claim."));
+  assert.match(step(), Pin.phrase("before the first claim."));
 });
 
 test("a present, valid cache is used as it stands — derivation is the controller's, once per run start", () => {
   const s = step();
-  assert.match(s, phrase("Both exit 0 → the cache is present and valid: use it as it stands and derive nothing."));
-  assert.match(s, phrase("one derivation per run start at most, never one per member, and a member never derives."));
-  assert.match(s, phrase("agent `fleet-recipe-deriver`"));
+  assert.match(s, Pin.phrase("Both exit 0 → the cache is present and valid: use it as it stands and derive nothing."));
+  assert.match(s, Pin.phrase("one derivation per run start at most, never one per member, and a member never derives."));
+  assert.match(s, Pin.phrase("agent `fleet-recipe-deriver`"));
 });
 
 test("the dispatch names the proof: a clean install, and a non-zero count or a mutation turning the run red", () => {
   const s = step();
-  assert.match(s, phrase("the Install step must leave the tree clean"));
-  assert.match(s, phrase("the runner's own non-zero count, or a deliberate mutation of one test that turns the run red."));
-  assert.match(s, phrase("Only a proof writes the cache"));
+  assert.match(s, Pin.phrase("the Install step must leave the tree clean"));
+  assert.match(s, Pin.phrase("the runner's own non-zero count, or a deliberate mutation of one test that turns the run red."));
+  assert.match(s, Pin.phrase("Only a proof writes the cache"));
 });
 
 test("an invalid cache is re-derived once; a failed derivation stalls the run instead of looping", () => {
   const s = stall();
-  assert.match(s, phrase("dispatch `derive-recipe` again exactly as above, then retry what refused."));
-  assert.match(s, phrase("A red suite never triggers it: a failing test is a finding, not a stale Recipe."));
-  assert.match(s, phrase("`RECIPE NOT PROVEN` from any derivation, or a second invalid-cache refusal after this run's one re-derivation, halts the run"));
-  assert.match(s, phrase("It is never a loop: no third derivation, and never a cache written by hand."));
-  assert.match(s, phrase("an Install step, Test entrypoint or mutation that hangs until the proof's own bound refuses it as timed out."));
+  assert.match(s, Pin.phrase("dispatch `derive-recipe` again exactly as above, then retry what refused."));
+  assert.match(s, Pin.phrase("A red suite never triggers it: a failing test is a finding, not a stale Recipe."));
+  assert.match(s, Pin.phrase("`RECIPE NOT PROVEN` from any derivation, or a second invalid-cache refusal after this run's one re-derivation, halts the run"));
+  assert.match(s, Pin.phrase("It is never a loop: no third derivation, and never a cache written by hand."));
+  assert.match(s, Pin.phrase("an Install step, Test entrypoint or mutation that hangs until the proof's own bound refuses it as timed out."));
 });
 
 test("the claim paragraph sends an absent or invalid cache to the derivation step, and infers no Install step", () => {
-  const p = paragraph(RUN_TEAM, "**The Install step comes from the Recipe cache", "run-team/SKILL.md claim Install paragraph", "**Materialize the isolation envelope as a");
-  assert.match(p, phrase("never pass or infer one."));
-  assert.match(p, phrase("No cache is phase 0's Recipe derivation step not having run"));
+  const p = RUN_TEAM.paragraph("**The Install step comes from the Recipe cache", "run-team/SKILL.md claim Install paragraph", "**Materialize the isolation envelope as a").text;
+  assert.match(p, Pin.phrase("never pass or infer one."));
+  assert.match(p, Pin.phrase("No cache is phase 0's Recipe derivation step not having run"));
 });
 
 // Every refusal that sends its reader to re-derive names the step by the same
@@ -64,9 +63,9 @@ test("the claim paragraph sends an absent or invalid cache to the derivation ste
 // point at nothing.
 test("every refusal naming the Recipe derivation step names one that phase 0 carries", () => {
   const sources = {
-    "derive-testcmd.sh": read("scripts/derive-testcmd.sh").match(/^derive="([^"]*)"/m),
-    "claim-ticket.sh": read("scripts/claim-ticket.sh").match(/^rederive="([^"]*)"/m),
-    "review-core.mjs": read("scripts/review-core.mjs").match(/DERIVATION_STEP =\s*"([^"]*)"/),
+    "derive-testcmd.sh": read("scripts/derive-testcmd.sh").text.match(/^derive="([^"]*)"/m),
+    "claim-ticket.sh": read("scripts/claim-ticket.sh").text.match(/^rederive="([^"]*)"/m),
+    "review-core.mjs": read("scripts/review-core.mjs").text.match(/DERIVATION_STEP =\s*"([^"]*)"/),
   };
   for (const [file, m] of Object.entries(sources)) {
     assert.ok(m, `${file}: could not find its derivation-step message — update this test`);
@@ -76,10 +75,10 @@ test("every refusal naming the Recipe derivation step names one that phase 0 car
 });
 
 test("the deriver is told never to write the cache itself, and to prove through recipe-prove.mjs", () => {
-  assert.match(DERIVER, phrase("never write `.fleet/recipe.json` yourself"));
-  assert.match(DERIVER, phrase("~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>'"));
-  assert.match(DERIVER, phrase("A count of 0 is a failed proof, never a pass."));
-  assert.match(DERIVER, phrase("requires the suite to go red"));
+  assert.match(DERIVER, Pin.phrase("never write `.fleet/recipe.json` yourself"));
+  assert.match(DERIVER, Pin.phrase("~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>'"));
+  assert.match(DERIVER, Pin.phrase("A count of 0 is a failed proof, never a pass."));
+  assert.match(DERIVER, Pin.phrase("requires the suite to go red"));
 });
 
 // recipe-prove.mjs refuses a count line carrying any number but the claim; the
@@ -87,17 +86,17 @@ test("the deriver is told never to write the cache itself, and to prove through 
 // to trim to it — and that a runner whose count includes its skips has no such
 // number, so its example must not be one and it goes to the mutation proof.
 test("the deriver is told the count is the tests that ran, and to trim the count line to that one number", () => {
-  assert.match(DERIVER, phrase("The number is the tests that ran — never the skipped, the failed, or a total that includes skips."));
-  assert.match(DERIVER, phrase("A runner whose count includes its skipped tests (Maven Surefire's `Tests run:`, node's `# tests`) prints no number that is the tests that ran: prove it with the mutation proof instead."));
-  assert.match(DERIVER, phrase("Trim the literal to the text around that one number, so it carries no other: `5 passed` off pytest's `5 passed, 2 skipped in 0.31s`."));
-  assert.match(DERIVER, phrase("A literal carrying any other number is refused."));
+  assert.match(DERIVER, Pin.phrase("The number is the tests that ran — never the skipped, the failed, or a total that includes skips."));
+  assert.match(DERIVER, Pin.phrase("A runner whose count includes its skipped tests (Maven Surefire's `Tests run:`, node's `# tests`) prints no number that is the tests that ran: prove it with the mutation proof instead."));
+  assert.match(DERIVER, Pin.phrase("Trim the literal to the text around that one number, so it carries no other: `5 passed` off pytest's `5 passed, 2 skipped in 0.31s`."));
+  assert.match(DERIVER, Pin.phrase("A literal carrying any other number is refused."));
   assert.match(PROVER, /as its one number/, "recipe-prove.mjs no longer refuses a count line the way the deriver is told it does");
 });
 
 // The cache reader probes an unquoted pattern from the repository root; a
 // program that resolves it under its own directory option needs it quoted.
 test("the deriver is told to quote a pattern a program resolves under its own directory option", () => {
-  assert.match(DERIVER, phrase("Quote a pattern that a program resolves under its own directory option, e.g. `git -C web ls-files -- '*.test.ts'`: the reader accepts a quoted pattern unchecked."));
+  assert.match(DERIVER, Pin.phrase("Quote a pattern that a program resolves under its own directory option, e.g. `git -C web ls-files -- '*.test.ts'`: the reader accepts a quoted pattern unchecked."));
 });
 
 test("every flag the deriver's procedure passes is one recipe-prove.mjs accepts", () => {
@@ -116,15 +115,15 @@ test("the deriver reports one of two lines, naming vacuity and a timeout as caus
   assert.match(DERIVER, /`RECIPE NOT PROVEN` followed by the last run's `NOT PROVEN` reason/);
   assert.match(DERIVER, /\*\*vacuous\*\*/);
   assert.match(DERIVER, /\*\*timed out\*\*/);
-  assert.match(DERIVER, phrase("the Install step, the Test entrypoint or the mutation — hung until the script's own bound stopped it"));
+  assert.match(DERIVER, Pin.phrase("the Install step, the Test entrypoint or the mutation — hung until the script's own bound stopped it"));
 });
 
 // recipe-prove.mjs bounds its own commands and refuses one that overruns; an
 // outside kill would end the run with no refusal for the deriver to report.
 test("the deriver is told the script bounds its own commands, and never to wrap the call in a timeout", () => {
-  assert.match(DERIVER, phrase("The script bounds each command it runs itself"));
-  assert.match(DERIVER, phrase("**Never wrap the `recipe-prove.mjs` call in a timeout of your own**"));
-  assert.match(DERIVER, phrase("refuses one still running at that bound as `timed out`"));
-  assert.match(DERIVER, phrase("so give that call `timeout: 0` and wait for the script"));
+  assert.match(DERIVER, Pin.phrase("The script bounds each command it runs itself"));
+  assert.match(DERIVER, Pin.phrase("**Never wrap the `recipe-prove.mjs` call in a timeout of your own**"));
+  assert.match(DERIVER, Pin.phrase("refuses one still running at that bound as `timed out`"));
+  assert.match(DERIVER, Pin.phrase("so give that call `timeout: 0` and wait for the script"));
   assert.match(PROVER, /timed out: still running after/, "recipe-prove.mjs no longer names a timeout the way the deriver's cause reads it");
 });

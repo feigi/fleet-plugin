@@ -12,32 +12,23 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const REAPING = readFileSync(
-  join(REPO, "skills", "run-team", "references", "reaping.md"),
-  "utf8",
-);
+const REAPING = Pin.file(join(REPO, "skills", "run-team", "references", "reaping.md"));
 const SCRIPT = readFileSync(join(REPO, "scripts", "release-ticket.sh"), "utf8");
 
 const releaseSection = () =>
-  between(
-    REAPING,
-    "## Why reap declines a claim that was never dispatched",
-    "## Never reap a branch a live member is on",
-    "reaping.md",
-  );
+  REAPING.section("## Why reap declines a claim that was never dispatched", "reaping.md").text;
 
 // The sentence that lists the authorizers: from "authorized by" to the
 // "and by nothing else" that closes it.
 const authorizers = () =>
-  between(
-    releaseSection(),
+  Pin.of(releaseSection(), "releaseSection()").between(
     "authorized by the `ahead` and `git cherry` checks above",
     "and by nothing else",
     "reaping.md's release section",
-  );
+  ).text;
 
 test("reaping.md: the release delete's authorizer list names the fresh worktree-holds-branch check", () => {
   // ONE contiguous span, not keywords: "fresh" and the negation each
@@ -47,7 +38,7 @@ test("reaping.md: the release delete's authorizer list names the fresh worktree-
   // Only a span binds the two to each other.
   assert.match(
     authorizers(),
-    phrase("a fresh check, re-read immediately before the delete, that no worktree holds the branch"),
+    Pin.phrase("a fresh check, re-read immediately before the delete, that no worktree holds the branch"),
     "reaping.md's release section closes its list of what authorizes the `update-ref` delete with \"and by nothing else\" but no longer names the fresh worktree check — release-ticket.sh halts the delete when any worktree holds the branch, and that check alone stopped a delete in the race window",
   );
 });
@@ -56,8 +47,8 @@ test("reaping.md: the authorizer list still carries the three checks it always n
   // Input the new assertion must ACCEPT: naming the worktree check must not
   // cost the list the checks it already had.
   const list = authorizers();
-  assert.match(list, phrase("`ahead` and `git cherry` checks above"));
-  assert.match(list, phrase("`ahead` recount re-run against `origin/main`"));
+  assert.match(list, Pin.phrase("`ahead` and `git cherry` checks above"));
+  assert.match(list, Pin.phrase("`ahead` recount re-run against `origin/main`"));
 });
 
 // release-ticket.sh's executable lines, comments and `echo` diagnostics

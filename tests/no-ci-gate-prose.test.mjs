@@ -33,10 +33,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { bullet } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
 
 // Reflow-safety: these documents hard-wrap, so a pinned phrase spans a newline
@@ -69,13 +69,13 @@ function paragraphSaying(text, anchor, label) {
 const SITES = [
   [
     "run-team Phase 3 no-ci edge",
-    () => flat(bullet(RUN_TEAM, '- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**Every wake ends in the tick.**", "run-team no-ci edge")),
+    () => flat(RUN_TEAM.bullet('- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**Every wake ends in the tick.**", "run-team no-ci edge").text),
     /label off the reviewer's (own )?verified suite run/i,
     /without it, do not label/i,
   ],
   [
     "run-team finisher gate",
-    () => paragraphSaying(RUN_TEAM, "no verified suite run on record", "run-team finisher gate"),
+    () => paragraphSaying(RUN_TEAM.text, "no verified suite run on record", "run-team finisher gate"),
     /rests on the reviewer's (own )?suite run, not on CI/i,
     /add no label/i,
   ],

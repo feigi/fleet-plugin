@@ -29,30 +29,21 @@
 // every pinned word but reorders which paragraph they sit in.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
-const section = () =>
-  between(
-    RUN_TEAM,
-    "## Worktree and claim model",
-    "## Queue depth",
-    "run-team/SKILL.md",
-  );
-
-// Nested inside `section()` (never `RUN_TEAM` directly), so a sibling
+// Nested inside the section (never `RUN_TEAM` directly), so a sibling
 // ticket's own prose elsewhere in the file cannot satisfy or break these
 // anchors.
 const cwdRecipe = () =>
-  paragraph(section(), "**A member's tree is the claimed worktree", "run-team/SKILL.md cwd recipe", "**The one open gap");
+  RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").paragraph("**A member's tree is the claimed worktree", "run-team/SKILL.md cwd recipe", "**The one open gap").text;
 
 test("run-team/SKILL.md: claim, release and reap are named unchanged on omp, with no dialect branch", () => {
   assert.match(
-    section(),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
     /Claim,\s+release\s+and\s+reap\s+are\s+unchanged\s+on\s+omp[\s\S]{0,400}none\s+of\s+the\s+four\s+scripts\s+carries\s+a\s+dialect\s+branch/,
     "the four scripts (claim/release/reap/inflight) are no longer named as unchanged and dialect-branch-free on omp",
   );
@@ -67,21 +58,21 @@ test("run-team/SKILL.md: isolated is never used, with the calling-session-cwd sp
   // "unless X" exception clause (~140 chars) to survive inside it; these do
   // not.
   assert.match(
-    section(),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
     /`isolated:\s+true`[\s\S]{0,80}~\/\.omp\/wt\/<hash>\/m[\s\S]{0,160}patch-applied\s+into\s+the[\s\S]{0,20}calling\s+session's\s+own\s+cwd[\s\S]{0,120}probe-isolated\.txt/,
     "the isolated-never-used rule or its measured evidence (workspace path, patch-apply-into-calling-session's-cwd, the probe file) is gone, or an exception clause was spliced into one of the tightened gaps",
   );
   assert.match(
-    section(),
-    phrase("`isolated` stays unused for every member and `task.isolation.enabled` stays off"),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    Pin.phrase("`isolated` stays unused for every member and `task.isolation.enabled` stays off"),
   );
   // The measured/inferred split the review demanded: the probe measured its
   // own session's cwd, not "the controller's main checkout" directly — the
   // controller case is stated as the explicit inference it is, not folded
   // into the measurement.
   assert.match(
-    section(),
-    phrase("in the probe session's own cwd — which for an actual fleet run is the controller's main checkout"),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    Pin.phrase("in the probe session's own cwd — which for an actual fleet run is the controller's main checkout"),
     "the probe-cwd sentence no longer distinguishes what was measured from the controller case it infers",
   );
 });
@@ -100,21 +91,21 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
   // probe clone, and a reader who assumes the same of this one would discount
   // it as not reproducing the real dispatch path.
   assert.match(
-    section(),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
     /`task`-dispatched\s+members\s+share\s+one\s+`eval`\s+kernel[\s\S]{0,80}live\s+run\s+rather\s+than\s+a\s+probe\s+clone[\s\S]{0,170}same\s+Python\s+kernel\s+pid[\s\S]{0,90}each\s+read\s+the\s+others'\s+top-level\s+bindings/,
     "the shared-kernel claim, its live-run provenance, or the pid/cross-read evidence behind it is gone",
   );
   assert.match(
-    section(),
-    phrase("a bare `WT` bound by one member was read back by a sibling and by the controller"),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    Pin.phrase("a bare `WT` bound by one member was read back by a sibling and by the controller"),
     "the reproduced collision no longer names the bare variable the original report was filed on",
   );
   // WHY the sharing follows from the documented keying. Without this, the
   // keying reads as a partition and the conclusion looks unsupported — the
   // point is that both key components are constant across one run's members.
   assert.match(
-    section(),
-    phrase("the session id is inherited from the controller, and the cwd is the main checkout for all of them"),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    Pin.phrase("the session id is inherited from the controller, and the cwd is the main checkout for all of them"),
     "the section no longer explains why the documented kernel key fails to separate two members of one run",
   );
   // THE EXCEPTION, quoted from upstream. This is the boundary that stops the
@@ -122,14 +113,14 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
   // own `agent()` children are isolated by construction, and a future editor
   // deciding how to fix this needs to know which spawns already are.
   assert.match(
-    section(),
-    phrase("children created by eval's own `agent()` explicitly do not"),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    Pin.phrase("children created by eval's own `agent()` explicitly do not"),
     "the isolated-by-construction exception for eval's own agent() children is gone, so the finding reads as covering every spawn",
   );
   // The corollary bound to its blast radius — `reset` is the destructive half
   // of the same mechanism, and it is the one a member reaches for innocently.
   assert.match(
-    section(),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
     /corollary\s+is\s+`reset`[\s\S]{0,140}resetting\s+its\s+own\s+kernel\s+resets\s+every[\s\S]{0,20}concurrent\s+sibling's/,
     "the reset corollary or the sibling damage it causes is gone from the section",
   );
@@ -140,22 +131,22 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
   // field. Bound to the lever that does exist, so "no knob" cannot be read as
   // "nobody checked".
   assert.match(
-    section(),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
     /No\s+per-dispatch\s+knob\s+turns\s+any\s+of\s+this\s+off[\s\S]{0,50}no\s+kernel,\s+executor\s+or\s+cwd\s+field[\s\S]{0,180}session\s+setting\s+a\s+child\s+inherits,\s+not\s+something\s+one\s+dispatch\s+can[\s\S]{0,30}set\s+for\s+one\s+member/,
     "the section no longer records that no per-dispatch knob isolates a member's kernel, or drops the inherited-session-setting reason behind it",
   );
   // The measurement is only worth recording if it reaches members. Phase 2 is
   // where the rules are carried verbatim, so the pointer is pinned with it.
   assert.match(
-    section(),
-    phrase("**Phase 2** carries all three rules to every member"),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    Pin.phrase("**Phase 2** carries all three rules to every member"),
     "the section no longer points at the phase that actually delivers these rules to a member",
   );
 });
 
 test("run-team/SKILL.md: absolute-path addressing is stated as the shared contract", () => {
   assert.match(
-    section(),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
     /member's\s+tree\s+is\s+the\s+claimed\s+worktree,\s+addressed\s+by\s+absolute\s+path/,
     "the absolute-path rule is no longer stated",
   );
@@ -171,18 +162,18 @@ test("run-team/SKILL.md: the cwd recipe names the task tool's missing cwd field,
   // recipe must say so rather than presenting a fixed field list.
   assert.match(
     cwdRecipe(),
-    phrase("`effort`/`isolated` only when their own settings enable them"),
+    Pin.phrase("`effort`/`isolated` only when their own settings enable them"),
     "the cwd recipe presents effort/isolated as always-present schema fields rather than conditional ones",
   );
   assert.match(
     cwdRecipe(),
-    phrase("`bash`'s own `cwd` parameter set to it on every call and absolute paths for `write`/`edit`"),
+    Pin.phrase("`bash`'s own `cwd` parameter set to it on every call and absolute paths for `write`/`edit`"),
   );
 });
 
 test("run-team/SKILL.md: the measured gap states task has no per-dispatch cwd, quoting the doc", () => {
   assert.match(
-    section(),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
     /`task`\s+does\s+not\s+accept\s+a[\s\S]{0,30}per-dispatch\s+working\s+directory[\s\S]{0,200}directly\s+with\s+parent\s+cwd[\s\S]{0,200}no\s+`cwd`\s+field\s+appears\s+anywhere\s+in\s+the\s+item\s+schema/,
     "the gap verdict, or the omp://tools/task.md quote it rests on, is gone",
   );
@@ -190,18 +181,18 @@ test("run-team/SKILL.md: the measured gap states task has no per-dispatch cwd, q
 
 test("run-team/SKILL.md: release-ticket.sh is not a no-op on omp and inflight.sh's probes are unaffected", () => {
   assert.match(
-    section(),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
     /`release-ticket\.sh`\s+is\s+not\s+a\s+no-op\s+on\s+omp,\s+and\s+`inflight\.sh`'s\s+probes\s+are\s+unaffected\s+by\s+a\s+running\s+member/,
     "the release/inflight headline claim is gone",
   );
   assert.match(
-    section(),
-    phrase("`~/.omp/wt/` was empty after every isolated run: omp's own teardown touches only omp's own workspace, never the claim"),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    Pin.phrase("`~/.omp/wt/` was empty after every isolated run: omp's own teardown touches only omp's own workspace, never the claim"),
     "the measured teardown-scope evidence behind 'not a no-op' is gone",
   );
   assert.match(
-    section(),
-    phrase("`inflight.sh` hides nothing from omp"),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    Pin.phrase("`inflight.sh` hides nothing from omp"),
   );
 });
 
@@ -209,8 +200,8 @@ test("run-team/SKILL.md: the controller's own cwd staying the main checkout gets
   // Ruling 4 on its own, not folded as a trailing clause onto the
   // release/inflight paragraph above it.
   assert.match(
-    section(),
-    phrase("The controller's own cwd stays the main checkout, unchanged"),
+    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    Pin.phrase("The controller's own cwd stays the main checkout, unchanged"),
     "ruling 4 (the controller's own cwd is unchanged) no longer has its own stated sentence",
   );
 });

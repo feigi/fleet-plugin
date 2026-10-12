@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between as section, bullet, phrase, stripQuoteGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 // The board's real parser, imported rather than re-described: the doc example
 // below is fed through it, so a widened/narrowed regex and a reverted example
 // both surface here instead of only in compute-board.test.mjs's own fixtures.
@@ -35,8 +34,8 @@ import { pipeline, parallel, ARGS, SNAP, review, finding, vote, scriptedHost } f
 // (an absolute `unverified` rule sitting above the `suggestion` exception that
 // contradicted it) was exactly that, and was invisible to all of them.
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
-const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+const REVIEW_AND_FIX = Pin.file(join(REPO, "commands", "review-and-fix.md"));
 
 // Slice by named anchors, and fail loudly when one moves. SLICE SIZE is what
 // does the work: a regex over a whole section is satisfied by incidental prose
@@ -128,20 +127,20 @@ const FALLBACK_ANCHOR = "#### Fallback: hand-dispatched reviewer";
 const PROMPT_ANCHOR = "> You are ALREADY in worktree";
 const PROMPT_END = "\n**Put the standing CI facts";
 
-const reviewersSection = () => section(RUN_TEAM, "### Reviewers", FALLBACK_ANCHOR, "run-team Reviewers");
+const reviewersSection = () => RUN_TEAM.between("### Reviewers", FALLBACK_ANCHOR, "run-team Reviewers").text;
 // Sliced out of the Reviewers section, never out of the whole file: `section()`
 // takes the FIRST hit, and the implementer dispatch in Phase 2 opens with the
 // same sentence. Anchored file-wide this silently returns the implementer's
 // prompt, and every assertion below then reports on the wrong agent.
 const fixApplierPrompt = () =>
-  section(reviewersSection(), PROMPT_ANCHOR, PROMPT_END, "run-team fix-applier prompt");
+  Pin.of(reviewersSection(), "reviewersSection()").between(PROMPT_ANCHOR, PROMPT_END, "run-team fix-applier prompt").text;
 // The lead-in is what SUBSTITUTES the prompt's `<testCmd>` placeholder, so it
 // gets its own slice ending where the prompt begins — deliberately tighter than
 // the Reviewers section. Section-wide, the phrase is satisfied by any mention
 // inside the prompt itself, so the substitution duty could be deleted with the
 // pin still green; that is the whole failure mode being pinned.
 const fixApplierLeadIn = () =>
-  section(reviewersSection(), "**Then dispatch a fix-applier**", PROMPT_ANCHOR, "run-team fix-applier lead-in");
+  Pin.of(reviewersSection(), "reviewersSection()").between("**Then dispatch a fix-applier**", PROMPT_ANCHOR, "run-team fix-applier lead-in").text;
 
 // Review1816: both `doesNotMatch` guards below were closed enumerations of
 // specific historical bad-phrasings — a syntactically different restatement
@@ -269,7 +268,7 @@ test("the controller keeps the rules the workflow's return shape needs", () => {
 });
 
 test("relay and reconciliation live under the fallback, not in the Phase 3 event loop", () => {
-  const loop = section(RUN_TEAM, "## Phase 3", "### Reviewers", "run-team Phase 3");
+  const loop = RUN_TEAM.between("## Phase 3", "### Reviewers", "run-team Phase 3").text;
   // This slice's only other assertion is a doesNotMatch, which a slice that has
   // degenerated to its own heading satisfies trivially. Prove it reached the
   // bullet list first.
@@ -285,7 +284,7 @@ test("relay and reconciliation live under the fallback, not in the Phase 3 event
     "the Phase 3 event loop still carries a relay obligation — on the default path `agent()` returns into the script and no relay ever occurs",
   );
 
-  const fallback = section(RUN_TEAM, FALLBACK_ANCHOR, "\n### ", "run-team fallback");
+  const fallback = RUN_TEAM.section("#### Fallback: hand-dispatched reviewer member", "run-team fallback").text;
   // The obligation, not the word: `/relay/i` alone has eight hits in this slice,
   // and stays green with the relay bullet deleted entirely.
   assert.match(
@@ -318,7 +317,7 @@ test("the Phase 3 finisher edges gate on a ruling the controller still owes", ()
   // newline plus indent and an exact-adjacency regex reports a rule that is
   // right there as missing.
   const flat = (s) => s.replace(/\s+/g, " ");
-  const ciEdge = flat(section(RUN_TEAM, "- **Monitor: CI run completes**", "- **A fix-applier reports", "run-team CI-completes edge"));
+  const ciEdge = flat(RUN_TEAM.between("- **Monitor: CI run completes**", "- **A fix-applier reports", "run-team CI-completes edge").text);
   assert.match(
     ciEdge,
     /never dispatch off it while you do/i,
@@ -327,7 +326,7 @@ test("the Phase 3 finisher edges gate on a ruling the controller still owes", ()
   // One list item, not anchor to anchor: on the fixed end anchor alone, the
   // clause gutted here and restated in an inserted sibling bullet stayed green
   // (#491, measured). `bullet` clamps the slice at that sibling.
-  const noCiEdge = flat(bullet(RUN_TEAM, '- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**Every wake ends in the tick.**", "run-team no-ci edge"));
+  const noCiEdge = flat(RUN_TEAM.bullet('- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**Every wake ends in the tick.**", "run-team no-ci edge").text);
   assert.match(
     noCiEdge,
     /never while you still owe it a ruling/i,
@@ -336,7 +335,7 @@ test("the Phase 3 finisher edges gate on a ruling the controller still owes", ()
 });
 
 test("review-and-fix agrees the workflow is the controller's default, not its preference", () => {
-  const specialists = section(REVIEW_AND_FIX, "## Specialists", "\n## Judging findings", "review-and-fix Specialists");
+  const specialists = REVIEW_AND_FIX.section("## Specialists", "review-and-fix Specialists").text;
   // Allow an adverb: /should prefer/ is exact-adjacency and "should generally
   // prefer" walks through it.
   assert.doesNotMatch(
@@ -382,7 +381,7 @@ test("the fix-applier's step citations match review-and-fix.md's actual numberin
   // boundary. One inserted step renumbers everything and the fix-applier
   // silently runs the wrong ones — no error, both files individually coherent.
   const steps = Object.fromEntries(
-    [...REVIEW_AND_FIX.matchAll(/^(\d)\. (.*)$/gm)].map((m) => [m[1], m[2]]),
+    [...REVIEW_AND_FIX.text.matchAll(/^(\d)\. (.*)$/gm)].map((m) => [m[1], m[2]]),
   );
   assert.match(steps["1"] ?? "", /fleet-review-\*/, "step 1 is no longer the review step the prompt skips");
   assert.match(steps["2"] ?? "", /\*\*apply now\*\*/, "step 2 is no longer the apply/defer split");
@@ -421,7 +420,7 @@ test("the in-scope-suggestion refuter carries its anti-rubber-stamp clause, in b
   // so the RUNNING clause is the whole mechanism, not decoration. Both files
   // carry it because different agents read each: the fix-applier gets run-team's
   // prompt, a standalone reviewer gets review-and-fix's step 2 and nothing else.
-  const step2 = section(REVIEW_AND_FIX, "2. Plan the actions", "\n3. **Run `testCmd`", "review-and-fix step 2");
+  const step2 = REVIEW_AND_FIX.between("2. Plan the actions", "\n3. **Run `testCmd`", "review-and-fix step 2").text;
   for (const [label, slice] of [["review-and-fix step 2", step2], ["the fix-applier prompt", fixApplierPrompt()]]) {
     // The instruction text alone does not pin that a refuter is DISPATCHED.
     // Measured GREEN on review-and-fix step 2 under "In scope → apply it
@@ -457,7 +456,7 @@ test("the fix commit is gated on a test run, in both files", () => {
   // own rule gutted. Proven, not assumed: neutering step 3's testCmd clause
   // while planting an unrelated comment mentioning the same phrase at EOF left
   // the file-wide version at `pass 7 / fail 0` — green with the gate removed.
-  const step3 = section(REVIEW_AND_FIX, "3. **Run `testCmd`", "\n4. **Under the fleet", "review-and-fix step 3");
+  const step3 = REVIEW_AND_FIX.between("3. **Run `testCmd`", "\n4. **Under the fleet", "review-and-fix step 3").text;
   // A proximity gap (`testCmd ⟨gap⟩ before committing`) is blind to a negation
   // prepended before `testCmd` — the gap survives untouched and the loose match
   // still fires. Pin the literal contiguous phrase instead.
@@ -551,20 +550,20 @@ test("the fix commit is gated on a test run, in both files", () => {
 // Nothing covered review-and-fix.md's copy at all. So the assertions here are
 // semantic, and they are what a revert has to get past.
 test("the fix commit pushes by refspec, in both files, to a branch the prompt binds", () => {
-  const step3 = section(REVIEW_AND_FIX, "3. **Run `testCmd`", "\n4. **Under the fleet", "review-and-fix step 3");
+  const step3 = REVIEW_AND_FIX.between("3. **Run `testCmd`", "\n4. **Under the fleet", "review-and-fix step 3").text;
   // The prompt's gutter is stripped before matching, never the command doc's:
   // `phrase`'s `\s+` joins do not span a `>`, so every pinned span below would
   // red on the prompt's wrap points rather than on its meaning — a false red on
   // a pure reflow, which is how a pin gets deleted by the next editor.
   // `review-and-fix.md` carries no gutter and needs no stripping.
-  const prompt = () => stripQuoteGutter(fixApplierPrompt());
+  const prompt = () => Pin.of(fixApplierPrompt(), "fixApplierPrompt()").stripGutter(">").text;
   // Per file, and each against its own narrow slice: a file-wide match is
   // satisfied by the sibling copy of this command elsewhere in the same
   // document, which is the failure mode every pin above is sliced against.
   for (const [label, slice] of [["review-and-fix step 3", step3], ["the fix-applier prompt", prompt()]]) {
     assert.match(
       slice,
-      phrase("git push origin HEAD:<branch>"),
+      Pin.phrase("git push origin HEAD:<branch>"),
       `${label} no longer names the refspec push — a bare push exits 128 in the detached worktree this path runs from, so the member is left with no command that works`,
     );
   }
@@ -574,7 +573,7 @@ test("the fix commit pushes by refspec, in both files, to a branch the prompt bi
   // dropping `-u` were the fix.
   assert.match(
     step3,
-    phrase("destination is `HEAD` rather than a full or branch refname"),
+    Pin.phrase("destination is `HEAD` rather than a full or branch refname"),
     "review-and-fix step 3 blames a flag for the detached-push failure again — the cause is the unqualified `HEAD` destination, and every spelling of it fails the same way",
   );
   // The operand has to be BOUND in the block that spends it, or the member is
@@ -586,7 +585,7 @@ test("the fix commit pushes by refspec, in both files, to a branch the prompt bi
   // spends the operand, once in the lead-in that carries it.
   assert.match(
     prompt(),
-    phrase("whose PR branch is `<branch>`"),
+    Pin.phrase("whose PR branch is `<branch>`"),
     "the fix-applier prompt no longer binds `<branch>` yet still pushes to it — the operand it spends is introduced nowhere in the block, and a detached worktree cannot supply one",
   );
   // Pinned to the carry list itself, not to a bare mention of the branch: the
@@ -594,7 +593,7 @@ test("the fix commit pushes by refspec, in both files, to a branch the prompt bi
   // looser phrase would be satisfied with the controller's duty deleted.
   assert.match(
     fixApplierLeadIn(),
-    phrase("the worktree abs path, the PR's branch"),
+    Pin.phrase("the worktree abs path, the PR's branch"),
     "the controller no longer carries the PR's branch into the fix-applier's prompt — `<branch>` reaches the member unsubstituted",
   );
 });
@@ -609,10 +608,10 @@ test("the fix-applier lead-in hands over the result file's path, never the findi
   // in one run). The path is the whole of the handover.
   assert.match(
     leadIn,
-    phrase("the **path** `<scratch>/pr<pr>/<run>/review.json`"),
+    Pin.phrase("the **path** `<scratch>/pr<pr>/<run>/review.json`"),
     "the lead-in no longer hands the fix-applier the result file's path",
   );
-  assert.match(leadIn, phrase("never the findings"), "the lead-in no longer says the findings stay out of the prompt");
+  assert.match(leadIn, Pin.phrase("never the findings"), "the lead-in no longer says the findings stay out of the prompt");
   // Its reason clause once shipped FALSE on this branch, in a PR about not
   // shipping false claims. The review specialists' transcripts DO exist on
   // disk — measured at 101 `subagents/workflows/wf_*/agent-*.jsonl` in one
@@ -692,7 +691,7 @@ test("run-team's documented return shape is exactly review-core.mjs's actual ret
   const result = await runReview({ ...host, pipeline, parallel }, ARGS);
   const returned = Object.keys(result);
   assert.ok(returned.length, "runReview's returned object is empty — update this test");
-  const documented = section(RUN_TEAM, "It returns `{", "}`", "run-team return shape")
+  const documented = RUN_TEAM.between("It returns `{", "}`", "run-team return shape").text
     .replace("It returns `{", "")
     .split(",")
     .map((f) => f.trim());
@@ -713,7 +712,7 @@ test("the member-naming rule still names the fix-applier", () => {
   // green. The name is the ledger token and the hub address, so a controller
   // reading only this list names the member something else and the ledger
   // cannot match it.
-  const naming = section(RUN_TEAM, "**Name every member.**", "**A depth-2 member cannot dispatch further", "run-team member naming");
+  const naming = RUN_TEAM.between("**Name every member.**", "**A depth-2 member cannot dispatch further", "run-team member naming").text;
   assert.match(
     naming,
     /fix-pr-<pr#>/,
@@ -732,7 +731,7 @@ test("the per-PR member is the fix-applier, in the Report example and through th
   // table rows reverted to `review-pr-<M>`, a file-wide /fix-pr-<M>/ still
   // matches — the refill section's `fix-pr-<M>-b` satisfies it — so the
   // file-wide form is green with the example fully wrong.
-  const report = section(RUN_TEAM, "## Report", "\n## Red flags", "run-team Report");
+  const report = RUN_TEAM.section("## Report", "run-team Report").text;
   // Both rows, not just one. A half-revert — one row back to `review-pr-<M>` —
   // and a row deleted outright both leave one surviving row, so a bare
   // `assert.match` walks straight through either.
@@ -754,7 +753,7 @@ test("the per-PR member is the fix-applier, in the Report example and through th
   // both directions: revert the example to a fallback runner and the extracted
   // name is the fallback's; stop reading `fix-pr-<M>` as a member and nothing
   // is extracted at all.
-  const ledger = section(RUN_TEAM, "One line per ticket, rewritten in place", "\nPlus two append-only lists", "run-team ledger example");
+  const ledger = RUN_TEAM.between("One line per ticket, rewritten in place", "\nPlus two append-only lists", "run-team ledger example").text;
   // The doc's example rows carry placeholders (`#<t1>`, `PR#<p1>`) rather than
   // real tracker numbers, so give each a concrete number before the parser sees
   // it — the shape under test is the member token, not the digits.
@@ -788,8 +787,8 @@ test("the two relay red flags stay qualified to the fallback path", () => {
   // the Red flags list at width 55 or 60, words byte-identical, reds this pin.
   // Flatten the RESULT and keep the slicing raw; the anchors need real text.
   const flat = (s) => s.replace(/\s+/g, " ");
-  const ping = flat(section(RUN_TEAM, '- "Tell the reviewer to ping its specialists"', '- "I relayed it', "run-team ping red flag"));
-  const relayed = flat(section(RUN_TEAM, '- "I relayed it', '- "It reported the SHA', "run-team relay red flag"));
+  const ping = flat(RUN_TEAM.between('- "Tell the reviewer to ping its specialists"', '- "I relayed it', "run-team ping red flag").text);
+  const relayed = flat(RUN_TEAM.between('- "I relayed it', '- "It reported the SHA', "run-team relay red flag").text);
   for (const [label, bullet] of [["the ping-your-specialists", ping], ["the I-relayed-it", relayed]]) {
     assert.match(
       bullet,

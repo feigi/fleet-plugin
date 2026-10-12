@@ -10,20 +10,19 @@
 // is not markdown and not a test — markdown is that sweep's, and a
 // test quotes the retired form to refuse it. The positive pin holds the
 // remedy the stamp comment names to the one a claim actually provides.
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase, stripHashGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const PLUGIN = join(import.meta.dirname, "..", "plugin");
-const read = (rel) => readFileSync(join(PLUGIN, rel), "utf8");
+const read = (rel) => Pin.file(join(PLUGIN, rel));
 
 const REMATERIALIZE = /re-?materiali[sz]/i;
 
 const stampComment = () =>
-  stripHashGutter(between(read("scripts/claim-ticket.sh"), "# The stamp the runner carries.", "\n#\n", "claim-ticket.sh runner-stamp comment"));
+  read("scripts/claim-ticket.sh").between("# The stamp the runner carries.", "\n#\n", "claim-ticket.sh runner-stamp comment").stripGutter("#").text;
 
 test("the retired-verb pattern matches each form it exists to catch", () => {
   for (const form of [
@@ -40,10 +39,10 @@ test("no shipped script tells a reader to re-materialize a runner", () => {
     (rel) => !rel.endsWith(".md") && !rel.endsWith(".test.mjs") && !rel.split("/").includes("node_modules") && statSync(join(PLUGIN, rel)).isFile(),
   );
   assert.ok(files.includes(join("scripts", "claim-ticket.sh")), "the sweep no longer reaches claim-ticket.sh");
-  const hits = files.filter((rel) => REMATERIALIZE.test(read(rel)));
+  const hits = files.filter((rel) => REMATERIALIZE.test(read(rel).text));
   assert.deepEqual(hits, [], "a shipped script still names re-materializing a runner, an action no command performs");
 });
 
 test("the stamp comment names a fresh claim as the only source of the current runner", () => {
-  assert.match(stampComment(), phrase("only a fresh claim writes the current runner"));
+  assert.match(stampComment(), Pin.phrase("only a fresh claim writes the current runner"));
 });

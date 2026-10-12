@@ -69,20 +69,19 @@
 // this document.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { paragraph, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const SKILL = "skills/run-team/SKILL.md";
 const ANCHOR = "**Grep for the ticket's ASKED-FOR CHANGE, not only its subject construct**";
-const text = () => readFileSync(join(import.meta.dirname, "..", "plugin", ...SKILL.split("/")), "utf8");
+const text = () => Pin.file(join(import.meta.dirname, "..", "plugin", ...SKILL.split("/")));
 
 // `**` stripped, nothing else: every pinned span below opens on a bolded lead
 // clause, and where the emphasis sits is not what this file is about — dropping
 // or moving the asterisks must not red a pin that holds the words. Whitespace
 // is left to `phrase()`, which joins on `\s+` and so already absorbs the
 // hard-wrap.
-const recipe = () => paragraph(text(), ANCHOR, SKILL, "**Both halves of that command are").replace(/\*\*/g, "");
+const recipe = () => text().paragraph(ANCHOR, SKILL, "**Both halves of that command are").text.replace(/\*\*/g, "");
 
 // ONE contiguous span, never three presence checks: the rule is the JOIN of the
 // instruction (no ancestry check here), its reason (reachable by construction,
@@ -112,7 +111,7 @@ const REVERTED =
 test("the phase-0 recipe states the walk's own output needs no ancestry check, and why", () => {
   assert.match(
     recipe(),
-    phrase(NO_CHECK_HERE),
+    Pin.phrase(NO_CHECK_HERE),
     `${SKILL}'s "${ANCHOR}" paragraph no longer says "${NO_CHECK_HERE}". Without the reason bound to the instruction, the next reader restores the check — it looks like evidence, and nothing on the page says the walk already answers it. #814.`,
   );
 });
@@ -120,7 +119,7 @@ test("the phase-0 recipe states the walk's own output needs no ancestry check, a
 test("the phase-0 recipe keeps the ancestry check on the input where it can answer no", () => {
   assert.match(
     recipe(),
-    phrase(BELONGS_TO_TICKET_SHA),
+    Pin.phrase(BELONGS_TO_TICKET_SHA),
     `${SKILL}'s "${ANCHOR}" paragraph no longer says "${BELONGS_TO_TICKET_SHA}". The check is not wrong, it was in the wrong position — dropping the ticket-quoted-sha case loses the one input it is evidence for, and a sha a ticket quotes is where a stale premise hides. #814.`,
   );
 });
@@ -128,7 +127,7 @@ test("the phase-0 recipe keeps the ancestry check on the input where it can answ
 test("the phase-0 recipe does not re-attach the proof claim to the sha the walk printed", () => {
   assert.doesNotMatch(
     recipe(),
-    phrase(REVERTED),
+    Pin.phrase(REVERTED),
     `${SKILL}'s "${ANCHOR}" paragraph says "${REVERTED}" again — that is the #814 defect verbatim: the sha came from a walk starting at \`origin/main\`, so the check cannot answer no about it and proves nothing. Run it on a sha the ticket quotes instead.`,
   );
 });
@@ -145,11 +144,11 @@ test("naming the relocated check a pre-rebase-orphan test is ACCEPTED, not refus
   const reworded = `${live} Run \`git merge-base --is-ancestor <sha> origin/main\` on the sha the ticket quotes: exit 0 proves it is not a pre-rebase orphan, exit 1 says it is one and the premise is stale.`;
   assert.doesNotMatch(
     reworded,
-    phrase(REVERTED),
+    Pin.phrase(REVERTED),
     "the negative pin fires on a LEGITIMATE use of the orphan wording on the ticket-quoted sha — narrow it to the walk-output adjacency",
   );
-  assert.match(reworded, phrase(NO_CHECK_HERE));
-  assert.match(reworded, phrase(BELONGS_TO_TICKET_SHA));
+  assert.match(reworded, Pin.phrase(NO_CHECK_HERE));
+  assert.match(reworded, Pin.phrase(BELONGS_TO_TICKET_SHA));
 });
 
 // ACCEPT SIDE 2 — reflow. Derived from the live paragraph, never a quoted copy
@@ -169,7 +168,7 @@ test("a rewrapped recipe paragraph still matches every pin above", () => {
     }, [])
     .join("\n   ");
   assert.notEqual(narrow, live, "the rewrap fixture no longer changes the paragraph's wrapping — update it");
-  assert.match(narrow, phrase(NO_CHECK_HERE));
-  assert.match(narrow, phrase(BELONGS_TO_TICKET_SHA));
-  assert.doesNotMatch(narrow, phrase(REVERTED));
+  assert.match(narrow, Pin.phrase(NO_CHECK_HERE));
+  assert.match(narrow, Pin.phrase(BELONGS_TO_TICKET_SHA));
+  assert.doesNotMatch(narrow, Pin.phrase(REVERTED));
 });

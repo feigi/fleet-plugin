@@ -42,19 +42,18 @@
 // exception, does not. A reflow (line wraps, `**bold**` moved) stays green.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
+const read = (...p) => Pin.file(join(REPO, ...p));
 const RUN_TEAM = read("skills", "run-team", "SKILL.md");
-const SCRIPT = read("scripts", "verify-sha.sh");
+const SCRIPT = read("scripts", "verify-sha.sh").text;
 
 // Bounded at both ends and small: the guard, not the `## Guards` section. A
 // slice wide enough to reach its neighbours is satisfied by their vocabulary.
 const guard = () =>
-  between(RUN_TEAM, "**Verify every reported SHA.**", "**Never `--delete-branch`", "run-team/SKILL.md");
+  RUN_TEAM.between("**Verify every reported SHA.**", "**Never `--delete-branch`", "run-team/SKILL.md").text;
 
 // Bold moves, and these pins must not care. `**` is allowed at ANY word
 // boundary inside a pinned phrase: markdown emphasis slides around a sentence
@@ -130,7 +129,7 @@ const TALLY = new RegExp(
 );
 
 test("the guard names the script's exit codes where it names the command", () => {
-  assert.match(guard(), phrase(ANNOTATION));
+  assert.match(guard(), Pin.phrase(ANNOTATION));
 });
 
 test("exit 1 keeps the verdict — the flag, the held enqueue and the maintainer's ruling", () => {
@@ -159,14 +158,14 @@ test("exit 2 is not a verdict and carries its own remedy", () => {
     new RegExp(EXIT2_VERDICT + String.raw`(?:(?!${B}[Ee]xit${S}1)[\s\S]){0,400}?re-run`),
     "the exit-2 branch no longer tells the controller to re-run, or exit 1 has drifted into its gap",
   );
-  assert.match(guard(), phrase("never record it as a stray commit"));
+  assert.match(guard(), Pin.phrase("never record it as a stray commit"));
 });
 
 test("the exit-2 branch is stated as a property of the code, never as a tally of causes", () => {
   // The property that makes one rule cover every cause: the caller cannot tell
   // them apart, so it must key on the code.
-  assert.match(guard(), phrase("no JSON on stdout"));
-  assert.match(guard(), phrase("the cause on stderr"));
+  assert.match(guard(), Pin.phrase("no JSON on stdout"));
+  assert.match(guard(), Pin.phrase("the cause on stderr"));
 
   // Whether the PIN works is settled before the guard is judged by it, because
   // an assertion that fails masks every one after it and the messages are not
@@ -247,7 +246,7 @@ test("verify-sha.sh still declares the exit codes the guard quotes", () => {
   // Cross-file coupling, otherwise invisible: the guard's annotation is a copy
   // of the script's contract. If the script's codes change, the doc lies and
   // nothing else says so.
-  assert.match(SCRIPT, phrase("Exit 0 reachable, 1 not reachable, 2 the question could not be answered"));
+  assert.match(SCRIPT, Pin.phrase("Exit 0 reachable, 1 not reachable, 2 the question could not be answered"));
   // Every exit-2 path is the same `die`, which is what lets one rule cover all
   // of them. A second exit-2 spelling would need the guard revisited.
   assert.match(SCRIPT, /^die\(\)\s*\{[^}]*exit 2;?\s*\}/m);

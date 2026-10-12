@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { sentences } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 // #389. The runbook calls the finisher an auditor, but its gate MUTATES: the
 // controller has it independently re-run the ticket's acceptance mutation, run
@@ -176,7 +176,7 @@ test("independent re-verification survives — the gate still mutates and runs t
   // an "e.g." or a filename between the two, and ran on past a `?` or `!` —
   // the latter nearly inert here, since both phrases must be verbatim anyway.
   assert.ok(
-    sentences(duty1Text()).some((s) => /Give it `<testCmd>` too.*duty 2's mutation gate runs it/.test(s)),
+    Pin.sentences(duty1Text()).some((s) => /Give it `<testCmd>` too.*duty 2's mutation gate runs it/.test(s)),
     "the controller is no longer told to hand the finisher a `<testCmd>` — duty 2's placeholders reach it unsubstituted and the gate has no command to run",
   );
 });
@@ -213,7 +213,7 @@ test("duty 1 says worktree-audit.sh takes no argument and audits every worktree"
 // deleted from inside the duty reds its own pin rather than being satisfied by
 // a neighbour.
 test("duty 1 names the instrument for each check, and halts on a row that cannot answer", () => {
-  const said = (re) => sentences(duty1Text()).some((s) => re.test(s));
+  const said = (re) => Pin.sentences(duty1Text()).some((s) => re.test(s));
   assert.ok(
     said(/\*\*Dirty:\*\* the row's `dirty` field, or `git status --porcelain -unormal` inside the worktree/),
     "duty 1 no longer names the dirty check's two instruments — the row's `dirty` field and `git status --porcelain -unormal`",

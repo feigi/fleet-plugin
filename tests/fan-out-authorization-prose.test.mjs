@@ -17,12 +17,11 @@
 // same words — a pin that reds on a reflow discriminates nothing.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
+const read = (...p) => Pin.file(join(REPO, ...p));
 
 const SKILL = read("skills", "run-team", "SKILL.md");
 const LIFECYCLE = read("skills", "run-team", "references", "member-lifecycle.md");
@@ -33,13 +32,13 @@ const LIFECYCLE = read("skills", "run-team", "references", "member-lifecycle.md"
 const PASSAGES = [
   [
     "run-team/SKILL.md's 'Authorize the fan-out explicitly' paragraph",
-    paragraph(SKILL, "Authorize the fan-out explicitly.", "run-team/SKILL.md", "**Delivering specialist reports is your duty"),
+    SKILL.paragraph("Authorize the fan-out explicitly.", "run-team/SKILL.md", "**Delivering specialist reports is your duty").text,
     "holding the dispatch tool is not authorization to use it",
     "State that the full specialist set IS the requested work",
   ],
   [
     "member-lifecycle.md's 'Capability is not permission' section",
-    between(LIFECYCLE, "## Capability is not permission", "\n## ", "references/member-lifecycle.md"),
+    LIFECYCLE.section("## Capability is not permission", "references/member-lifecycle.md").text,
     "Holding the dispatch tool does not authorize using it",
     "reviewer prompt must state full specialist set IS requested work",
   ],
@@ -49,7 +48,7 @@ test("both fan-out passages say holding the dispatch tool is not authorization t
   for (const [label, passage, notAuthorization] of PASSAGES) {
     assert.match(
       passage,
-      phrase(notAuthorization),
+      Pin.phrase(notAuthorization),
       `${label} no longer says "${notAuthorization}" — without it a reviewer that holds the dispatch tool reads the fan-out as optional and silently downgrades to a thinner solo review`,
     );
   }
@@ -59,7 +58,7 @@ test("both fan-out passages tell the controller to state the full specialist set
   for (const [label, passage, , mustState] of PASSAGES) {
     assert.match(
       passage,
-      phrase(mustState),
+      Pin.phrase(mustState),
       `${label} no longer says "${mustState}" — the controller is no longer told what the reviewer prompt must carry`,
     );
   }

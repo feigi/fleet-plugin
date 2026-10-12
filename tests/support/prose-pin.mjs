@@ -1,7 +1,7 @@
 // THE PIN CONVENTION (#491), for every new prose pin in this directory.
 // Existing pins move onto it only where a hole in them is measured.
 //
-// A pin holding a claim asserts ONE contiguous `phrase()` span: the smallest
+// A pin holding a claim asserts ONE contiguous `Pin.phrase()` span: the smallest
 // clause that makes the claim, never independent keywords. Keywords each
 // satisfied somewhere in the slice stay green when the sentence carrying them
 // is gutted and its words restated beside it with the meaning inverted: the
@@ -42,8 +42,9 @@
 // in two steps (insert a decoy paragraph, then delete the blank line before
 // it). Omitting `next` throws; there is no opt-out.
 //
-// `Pin`, below, is the chained form of these calls: its methods take their
-// arguments less the leading `text`, so the convention above holds through it.
+// `Pin`, below, is this module's only export: its methods take the arguments
+// the functions named above take, less the leading `text`, so the convention
+// above holds through it.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -123,7 +124,7 @@ function occurrenceCount(haystack, needle) {
 // The returned slice is raw bytes with `**` intact — `rawOffset` maps each
 // endpoint back and stops BEFORE the marker, so a tolerant slice keeps the
 // emphasis its caller goes on to compare.
-export function between(text, from, to, what, { emphasisTolerant = false } = {}) {
+function between(text, from, to, what, { emphasisTolerant = false } = {}) {
   const haystack = emphasisTolerant ? unemphasized(text) : text;
   const start = emphasisTolerant ? unemphasized(from) : from;
   const stop = emphasisTolerant ? unemphasized(to) : to;
@@ -159,7 +160,7 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // `\s+` between every word, never a literal space — prose this matches against
 // is often hard-wrapped, so any inter-word space in the source may be a
 // newline plus indent. Regex metacharacters in the phrase are escaped first.
-export const phrase = (s) => new RegExp(s.trim().split(/\s+/).map(escapeRe).join("\\s+"));
+const phrase = (s) => new RegExp(s.trim().split(/\s+/).map(escapeRe).join("\\s+"));
 
 // The paragraph carrying a rule, and no more of the document than that. A
 // positive regex matched over a whole file is satisfiable from OUTSIDE the
@@ -193,9 +194,9 @@ export const phrase = (s) => new RegExp(s.trim().split(/\s+/).map(escapeRe).join
 // `emphasisTolerant` reads `next` and the text after the blank line through
 // `unemphasized`, the same direction the option takes for the anchor: a
 // document that loses a `**` in the next block's opening is not a moved block.
-export const END = Symbol("END");
+const END = Symbol("END");
 
-export function paragraph(text, anchor, what, next, options) {
+function paragraph(text, anchor, what, next, options) {
   assert.ok(
     next === END || (typeof next === "string" && next.trim() !== ""),
     `${what}: paragraph() needs \`next\` — the opening of the block after "${anchor}", or END when it is the last block; without it a deleted blank line merges two paragraphs into the slice`,
@@ -275,7 +276,7 @@ export function paragraph(text, anchor, what, next, options) {
 //
 // The single definition of a list-item bound in this directory (#491), moved
 // out of no-ci-gate-prose.test.mjs, where #747 had clamped a local copy.
-export function bullet(text, from, to, what) {
+function bullet(text, from, to, what) {
   const slice = between(text, from, to, what);
   const hits = occurrenceCount(text, from);
   assert.equal(hits, 1, `${what}: list-item anchor "${from}" occurs ${hits} times — the item would be read off the first copy; narrow the anchor`);
@@ -435,7 +436,7 @@ const PARAGRAPH_INTERRUPT = /^[ \t]*(?:#{1,6}(?:[ \t]|$)|>|```|~~~|(?:-[ \t]*){3
 // straight behind a word (`.jobs.[0] | …`) is the same shape as a real
 // marker at the regex level, so it still splits — wrongly, the direction
 // this rule exists to avoid.
-export const sentences = (block) =>
+const sentences = (block) =>
   block.split(/(?<=(?:[!?]|(?<!(?<![A-Za-z\d])(?:e\.g|i\.e|cf|viz|vs))\.)(?:(?<=[\p{L}\p{N}`)\u201d\u2019]\p{M}*[.!?])(?:\[[^\]\s]+\])+)?[*_)"'\u201d\u2019]*)\s+/u);
 
 // A phrase-bounded slice — `paragraph`'s shape, with the end bound a second
@@ -480,7 +481,7 @@ export const sentences = (block) =>
 // `dispatchPremise`, which hand-rolled this exact shape locally — `paragraph`'s
 // own header above names the class: a local copy is the defect, not a style
 // choice.
-export function betweenPhrases(text, from, to, what, { bound } = {}) {
+function betweenPhrases(text, from, to, what, { bound } = {}) {
   const at = anchorAt(text, from, what);
   const rest = text.slice(at);
   const toPhrase = phrase(to);
@@ -534,7 +535,7 @@ export function betweenPhrases(text, from, to, what, { bound } = {}) {
 // on still returns raw bytes with emphasis intact. Exported so a pin comparing
 // two files' copies of the same block (`**` moving on one side is real drift)
 // does not hand-roll a second definition to locate the block it is comparing.
-export const unemphasized = (s) => s.replace(/\*\*/g, "");
+const unemphasized = (s) => s.replace(/\*\*/g, "");
 
 // Maps an offset found in `unemphasized(text)` back to `text`, stopping before
 // any `**` at that point rather than after it — so a slice starting there
@@ -573,7 +574,7 @@ function rawOffset(text, unemphasizedOffset) {
 // typed WITHOUT `**` still find its target after a meaning-preserving
 // emphasis move on the matched words — measured need in
 // `tracker-block-copy-prose.test.mjs`, where the opener anchor has none.
-export function anchorAt(text, anchor, what, { emphasisTolerant = false } = {}) {
+function anchorAt(text, anchor, what, { emphasisTolerant = false } = {}) {
   const haystack = emphasisTolerant ? unemphasized(text) : text;
   const hits = [...haystack.matchAll(new RegExp(phrase(anchor).source, "g"))];
   assert.notEqual(hits.length, 0, `${what}: slice anchor "${anchor}" moved — re-anchor this test, never widen it to the whole file`);
@@ -649,7 +650,7 @@ export function anchorAt(text, anchor, what, { emphasisTolerant = false } = {}) 
 const DECLARATION_PREFIX_KEYWORDS =
   "export|default|async|function|class|const|let|var|public|private|protected|static|readonly|abstract|declare|override|get|set";
 
-export function runAbove(text, anchor, what, marker) {
+function runAbove(text, anchor, what, marker) {
   assert.ok(marker, `${what}: runAbove needs a non-empty marker — empty matches every line above the anchor instead of just the comment block`);
   const above = text.slice(0, anchorAt(text, anchor, what));
   const run = above.match(
@@ -658,26 +659,31 @@ export function runAbove(text, anchor, what, marker) {
   return run ? run[1] : "";
 }
 
-// Each comment or quote gutter's own per-line regex: the flat strippers below
-// and `Pin`'s `.stripGutter(marker)` read the same one.
+// Each comment or quote gutter's own per-line regex, read by `Pin`'s
+// `.stripGutter(marker)`.
+//
+// `#`: a shell comment block wraps at `#`, so a pinned phrase can break across
+// lines with the comment gutter, not whitespace, at the break — `\s+` does not
+// span a `#`. Stripping the gutter leaves the inter-word space a wrap point
+// replaces.
+//
+// `//`: a `.mjs` header comment's prose is wrapped at `// `, one gutter per
+// physical line, so a scan that wants the prose as CONTINUOUS text — not
+// broken by a comment marker on every line — has to strip it first. Only
+// whole-line `//` comments are stripped (mirrors `stripComments.mjs`'s own
+// line-based-on-purpose note) — a trailing `code; // a note` is not a
+// comment LINE, it is code with a trailing note, and stripping mid-line
+// would blur that distinction and corrupt the code beside it.
+//
+// `>`: a markdown blockquote wraps every line in a leading `>` gutter, so a
+// dispatch instruction embedded inside a quoted prompt (#1341's grandchild
+// recipe, nested under run-team's fix-applier prompt) does not begin with its
+// harness token until the gutter is stripped.
 const GUTTER = new Map([
   ["#", /^\s*#\s?/],
   ["//", /^\s*\/\/\s?/],
   [">", /^\s*>+\s?/],
 ]);
-
-// A shell comment block wraps at `#`, so a pinned phrase can break across lines
-// with the comment gutter, not whitespace, at the break — `\s+` does not span a
-// `#`. Strip the gutter and rejoin with the single inter-word space a wrap point
-// replaces.
-export const stripHashGutter = (text) => text.split("\n").map((l) => l.replace(GUTTER.get("#"), "")).join(" ");
-
-// A markdown blockquote wraps every line in a leading `>` gutter, so a
-// dispatch instruction embedded inside a quoted prompt (#1341's grandchild
-// recipe, nested under run-team's fix-applier prompt) does not begin with its
-// harness token until the gutter is stripped. Mirrors stripHashGutter's
-// reason for existing, one gutter shape later.
-export const stripQuoteGutter = (text) => text.split("\n").map((l) => l.replace(GUTTER.get(">"), "")).join("\n");
 
 // One verbatim dispatch block, bounded by its OWN quote run rather than by the
 // next block's opening words, and returned with the gutter intact so the caller
@@ -702,7 +708,7 @@ export const stripQuoteGutter = (text) => text.split("\n").map((l) => l.replace(
 // member-facing line carries one. An indented gutter is not silently absorbed
 // here: it ends the run, so the block reds against its fixture instead of
 // passing under a changed markdown context.
-export function quoteBlocks(text) {
+function quoteBlocks(text) {
   const runs = [];
   let open = null;
   for (const line of text.split("\n")) {
@@ -733,7 +739,7 @@ export function quoteBlocks(text) {
 // apply only to the match, never to `hits[0]` itself — the returned run keeps
 // its `**` intact, since that is the raw byte content callers go on to
 // compare or rewrap.
-export function quoteBlock(text, opener, what, { emphasisTolerant = false } = {}) {
+function quoteBlock(text, opener, what, { emphasisTolerant = false } = {}) {
   const head = new RegExp(`^${phrase(opener).source}`);
   const view = emphasisTolerant ? unemphasized : (s) => s;
   const hits = quoteBlocks(text).filter((run) =>
@@ -751,15 +757,6 @@ export function quoteBlock(text, opener, what, { emphasisTolerant = false } = {}
   );
   return hits[0];
 }
-
-// A `.mjs` header comment's prose is wrapped at `// `, one gutter per
-// physical line, so a scan that wants the prose as CONTINUOUS text — not
-// broken by a comment marker on every line — has to strip it first. Only
-// whole-line `//` comments are stripped (mirrors `stripComments.mjs`'s own
-// line-based-on-purpose note) — a trailing `code; // a note` is not a
-// comment LINE, it is code with a trailing note, and stripping mid-line
-// would blur that distinction and corrupt the code beside it.
-export const stripSlashGutter = (text) => text.split("\n").map((l) => l.replace(GUTTER.get("//"), "")).join("\n");
 
 // A paragraph's physical line breaks, removed. `phrase()` holds this axis for
 // a pin that KNOWS the words it is looking for; this holds it for a pin that
@@ -802,7 +799,7 @@ const BLOCK_END = /^ {0,3}(?:#{1,6}\s|\||```|~~~|(?:-{3,}|\*{3,}|_{3,})\s*$)/;
 // space and a tab, which is the same false red one layer down.
 const HARD_BREAK = /(?: {2}|\\)$/;
 
-export function logicalLines(text) {
+function logicalLines(text) {
   const src = text.split("\n");
   const joins = new Array(src.length).fill(false);
   let fenced = false;
@@ -825,8 +822,8 @@ export function logicalLines(text) {
   let offset = 0;
   for (let i = 0; i < src.length; i++) {
     // A wrap point is one inter-word space, so the indent the wrap introduced
-    // comes off and exactly one space goes back — `stripHashGutter`'s rejoin,
-    // one gutter shape fewer. The trailing trim is why that space is never two.
+    // comes off and exactly one space goes back. The trailing trim is why that
+    // space is never two.
     let line = joins[i] ? src[i].replace(/^[ \t]+/, "") : src[i];
     if (joins[i + 1]) line = line.replace(/[ \t]+$/, "");
     if (i > 0) {
@@ -932,13 +929,12 @@ const MARKER_BY_EXTENSION = new Map([
 const FILES = new Map();
 const MINT = Symbol("Pin");
 
-// The chained form of this module. A node holds immutable text. Every method
-// but `.section` and `.stripGutter` runs the flat function of the same name on
-// that text, so every bound stays explicit and every slice is byte-for-byte
-// the one the flat call takes; `.anchorAt` returns a number, `.quoteBlocks` an
-// array of nodes and the rest a new node. `.section` and `.stripGutter` have
-// no exported flat function of that name. Roots come from `Pin.file()` or
-// `Pin.of()`, never `new Pin`.
+// The module's only export. A node holds immutable text. Every method but
+// `.stripGutter` runs the private function of the same name on that text, so
+// every bound stays explicit; `.anchorAt` returns a number, `.quoteBlocks` an
+// array of nodes and the rest a new node. `.stripGutter` has no private
+// function of that name. Roots come from `Pin.file()` or `Pin.of()`, never
+// `new Pin`.
 export class Pin {
   #text;
   #label;

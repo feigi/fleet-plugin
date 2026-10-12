@@ -38,22 +38,21 @@
 // column all stayed green.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
-const TABLE = readFileSync(join(REPO, "docs", "agents", "triage-labels.md"), "utf8");
+const TABLE = Pin.file(join(REPO, "docs", "agents", "triage-labels.md"));
 
 // One table row per slice. The claim is a single cell, so anything wider lets
 // a neighbouring row satisfy the assertion with the cell rewritten.
-const row = (label) => between(TABLE, `| \`${label}\``, "\n|", `the ${label} row`);
+const row = (label) => TABLE.between(`| \`${label}\``, "\n|", `the ${label} row`).text;
 
 test("the ready-for-agent row maps the role and states no filing criterion", () => {
   const r = row("ready-for-agent");
   assert.match(
     r,
-    phrase("| `ready-for-agent` | `ready-for-agent` |"),
+    Pin.phrase("| `ready-for-agent` | `ready-for-agent` |"),
     "the ready-for-agent row no longer maps the role to its label string — that mapping is what scripts read",
   );
   // The gloss itself, which the mapping companion above does not cover: it pins
@@ -79,7 +78,7 @@ test("the ready-for-human row does not narrow the role to implementation", () =>
   const r = row("ready-for-human");
   assert.match(
     r,
-    phrase("| `ready-for-human` | `ready-for-human` |"),
+    Pin.phrase("| `ready-for-human` | `ready-for-human` |"),
     "the ready-for-human row no longer maps the role to its label string — that mapping is what scripts read",
   );
   assert.match(

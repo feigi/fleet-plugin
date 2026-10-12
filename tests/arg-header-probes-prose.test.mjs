@@ -55,14 +55,14 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { anchorAt, stripSlashGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { makeArg, defineFlags } from "../plugin/scripts/arg.mjs";
 
 // The header's commands are written against the plugin root (`scripts/*.mjs`),
 // so that is where they run. Running them from anywhere else would test a
 // different command than the one a reader would type.
 const ROOT = join(import.meta.dirname, "..", "plugin");
-const ARG = readFileSync(join(import.meta.dirname, "..", "plugin", "scripts", "arg.mjs"), "utf8");
+const ARG = Pin.file(join(import.meta.dirname, "..", "plugin", "scripts", "arg.mjs"));
 
 // The header block, bounded by CODE at both ends: the start of the file and the
 // first import. `runAbove` is the shared bound for a comment run above a
@@ -70,7 +70,7 @@ const ARG = readFileSync(join(import.meta.dirname, "..", "plugin", "scripts", "a
 // anchor, and a blank line separates this header from that import. The bound is
 // asserted rather than assumed, in `HEADER IS THE WHOLE LEADING COMMENT RUN`
 // below, so a code line landing inside it cannot pass unnoticed.
-const HEADER = ARG.slice(0, anchorAt(ARG, 'import { writeSync } from "node:fs"', "arg.mjs header"));
+const HEADER = ARG.text.slice(0, ARG.anchorAt('import { writeSync } from "node:fs"', "arg.mjs header"));
 
 // A command quoted in a comment block wraps twice: at the `//` gutter, and at a
 // shell continuation backslash the header uses to keep a long grep readable.
@@ -78,7 +78,7 @@ const HEADER = ARG.slice(0, anchorAt(ARG, 'import { writeSync } from "node:fs"',
 // remaining whitespace — so a REWRAP of the header, which changes every one of
 // those break points and nothing else, leaves the extracted command identical.
 // That is the change this pin must not catch.
-const FLAT = stripSlashGutter(HEADER).replace(/\\\n/g, " ").replace(/\s+/g, " ").trim();
+const FLAT = Pin.of(HEADER, "HEADER").stripGutter("//").text.replace(/\\\n/g, " ").replace(/\s+/g, " ").trim();
 
 // Code spans that are commands, not the other things this header code-quotes
 // (symbol names, flag names, message fragments, `gh pr diff`). A command here
@@ -287,7 +287,7 @@ test("arg.mjs has no module-scope die() declaration under any spelling, not only
   // or return something named `die` as a LOCAL — `makeDie`'s own returned
   // `function die(msg)` is indented and does not match.
   const dieDecl = /^(export\s+)?(default\s+)?(async\s+)?(function\*?\s+die\s*\(|const\s+die\s*=|let\s+die\s*=|var\s+die\s*=)/;
-  const found = ARG.split("\n").filter((line) => dieDecl.test(line));
+  const found = ARG.text.split("\n").filter((line) => dieDecl.test(line));
   assert.deepEqual(
     found,
     [],
@@ -569,7 +569,7 @@ test("every script parsing with node:util's parseArgs outside arg()/has() is nam
   assert.ok(binds("scripts/candidates.mjs", "parseArgs", "node:util"), "candidates.mjs no longer binds node:util's parseArgs — the accept case below proves nothing");
   assert.ok(!outside.includes("scripts/candidates.mjs"), "candidates.mjs binds makeArg/makeHas, so arg()'s refusals reach it — it is not outside arg()/has()");
   assert.ok(outside.length > 0, "no script parses with node:util's parseArgs outside arg()/has() — the derivation found nothing to check");
-  const paragraphs = stripSlashGutter(HEADER).split(/\n\s*\n/);
+  const paragraphs = Pin.of(HEADER, "HEADER").stripGutter("//").text.split(/\n\s*\n/);
   const here = paragraphs.filter((p) => p.includes("outside arg()/has()"));
   assert.equal(here.length, 1, "arg.mjs's header should carry exactly one paragraph about the scripts outside arg()/has()");
   const unnamed = outside.filter((file) => !namesScript(here[0], file));

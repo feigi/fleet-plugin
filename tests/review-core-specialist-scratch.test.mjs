@@ -53,7 +53,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./support/strip-comments.mjs";
-import { between } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
@@ -71,12 +71,11 @@ const SCOPE = ["pr", "branch", "d", "snap", "worktree", "stats", "sharedRunNote"
 // `between` owns the bounded-slice extraction (and both failure messages);
 // only the backtick trim below is specific to a template literal and stays
 // here.
-const SLICE = between(
-  CODE,
+const SLICE = Pin.of(CODE, "CODE").between(
   TEMPLATE_START,
   TEMPLATE_END,
   "review-core.mjs's specialist prompt (opening `Review PR #${pr} (branch ${branch}) for: `, labelled `review:`)",
-);
+).text;
 
 const RENDER = new Function(...SCOPE, "return `" + SLICE.slice(1, SLICE.lastIndexOf("`")) + "`");
 

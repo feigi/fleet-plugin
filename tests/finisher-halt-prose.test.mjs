@@ -10,20 +10,19 @@
 // The cause vocabulary itself is read from ledger-grammar.mjs, the one parser
 // that accepts or refuses a settle — the prose and the grammar naming
 // different causes is exactly a halt the ledger refuses to record.
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
-import { between, bullet, paragraph, phrase, sentences } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { HALT_CAUSES } from "../plugin/scripts/ledger-grammar.mjs";
 
-const RUN_TEAM = readFileSync(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"));
 const flat = (s) => s.replace(/\s+/g, " ");
 
 const RESOLVING = "**Resolving a finisher halt.**";
 const resolutionRows = () => {
-  const table = paragraph(RUN_TEAM, "| Cause | Resolution |", "halt resolution table", "`past-pin` needs the tick because");
+  const table = RUN_TEAM.paragraph("| Cause | Resolution |", "halt resolution table", "`past-pin` needs the tick because").text;
   return table.split("\n").filter((l) => l.startsWith("| `"));
 };
 // A row's first-cell backticked causes, in order — shared by rowFor's
@@ -73,8 +72,8 @@ test("unreadable, missing, absent and other escalate with no automatic retry", (
 });
 
 test("every halt escalates on the PR itself — a comment that outlives the run — and never by label", () => {
-  const para = flat(paragraph(RUN_TEAM, RESOLVING, "halt resolution lead-in", "| Cause | Resolution |"));
-  const s = sentences(para);
+  const para = flat(RUN_TEAM.paragraph(RESOLVING, "halt resolution lead-in", "| Cause | Resolution |").text);
+  const s = Pin.sentences(para);
   const settle = s.find((x) => x.includes("Record it"));
   assert.match(settle ?? "", /Record it `ledger\.mjs settle finisher-pr-<M>=halted:<cause>`/);
   assert.match(para, /so it is never `failed`, which stays for a finisher that crashed or gave up\./);
@@ -86,21 +85,21 @@ test("every halt escalates on the PR itself — a comment that outlives the run 
 });
 
 test("the tick paragraph says why past-pin cannot use the dead-review path, and that a fix-applier push stays not due", () => {
-  const para = flat(paragraph(RUN_TEAM, "`past-pin` needs the tick because", "past-pin tick rationale", "**Resolving a finisher that died.** A"));
+  const para = flat(RUN_TEAM.paragraph("`past-pin` needs the tick because", "past-pin tick rationale", "**Resolving a finisher that died.** A").text);
   assert.match(para, /settling that review `=failed` re-queues nothing — that path covers only a review that died before returning\./);
   assert.match(para, /A head that moved past `reviewed=` with no such halt — a fix-applier's push — stays not due: duty 2 verifies what it applied\./);
 });
 
 test("finisher duty 4 names the cause in the ledger's vocabulary, and a rebase report carries git cherry", () => {
-  const duty = flat(bullet(RUN_TEAM, "4. Report you the label", "**Give the finisher the instrument re-check verbatim too.**", "finisher duty 4"));
-  const vocab = sentences(duty).find((x) => x.includes("vocabulary")) ?? "";
+  const duty = flat(RUN_TEAM.bullet("4. Report you the label", "**Give the finisher the instrument re-check verbatim too.**", "finisher duty 4").text);
+  const vocab = Pin.sentences(duty).find((x) => x.includes("vocabulary")) ?? "";
   for (const c of HALT_CAUSES) assert.match(vocab, new RegExp(`\`${c}\``), `duty 4 no longer names \`${c}\``);
   assert.match(vocab, /`other` for every other halt/);
   assert.match(duty, /A `rebase` halt's report carries the output of `git cherry <pin> HEAD origin\/main`, run in the worktree\./);
 });
 
 test("the settle grammar summary lists halted:<cause> with the grammar's own causes", () => {
-  const bulletText = flat(between(RUN_TEAM, "- **`ledger.mjs settle <member> <outcome>`**", "\n- **", "settle summary"));
-  assert.match(bulletText, phrase("`finisher-pr-M` = `labelled | failed | killed | halted:<cause>`"));
-  assert.match(bulletText, phrase(`\`<cause>\` one of \`${HALT_CAUSES.join(" | ")}\``));
+  const bulletText = flat(RUN_TEAM.between("- **`ledger.mjs settle <member> <outcome>`**", "\n- **", "settle summary").text);
+  assert.match(bulletText, Pin.phrase("`finisher-pr-M` = `labelled | failed | killed | halted:<cause>`"));
+  assert.match(bulletText, Pin.phrase(`\`<cause>\` one of \`${HALT_CAUSES.join(" | ")}\``));
 });
