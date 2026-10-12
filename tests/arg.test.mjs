@@ -688,10 +688,11 @@ test("writeAll() delivers the full payload across more confirmed EAGAIN stalls t
 // (candidates.test.mjs, at the JQ_OVERRIDE that motivated the fix); ledger
 // CAPTURES gh's stderr (`stdio: ["ignore", "pipe", "pipe"]` on ledger.mjs's gh
 // search call) instead of forwarding it, so fd 2 is never the fd under
-// pressure; board LOGS a failed gh and returns null (board.mjs's `tryRun`) rather than refusing, so
-// it has no exit 2 to invert in the first place. fleet-tick is here because it
-// does forward and does refuse (fleet-tick.mjs's `openPrs`) — measured at 65,613 B
-// forwarded and exit 2 — and since #1803 it reaches gh with no argv at all,
+// pressure; board LOGS a failed gh and returns null (board-gather.mjs's `tryRun`)
+// rather than refusing, so it has no exit 2 to invert in the first place.
+// fleet-tick is here because it does forward and does refuse (fleet-tick.mjs's
+// `openPrs`) — measured at 65,613 B forwarded and exit 2 — and since #1803 it
+// reaches gh with no argv at all,
 // the gh read being the first thing it does that can refuse.
 // A consumer added later belongs here deliberately.
 const GH_FLOOD = [

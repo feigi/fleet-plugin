@@ -38,12 +38,12 @@ export function warnOnce(channel, key, msg) {
 // Infinity: a runaway child should still be stopped rather than allowed to
 // exhaust the box. Same headroom staleness.mjs takes, for the same reason.
 //
-// Both child reads in board.mjs take it. `tryRun` is NOT the single funnel —
+// Both child reads in board-gather.mjs take it. `tryRun` is NOT the single funnel —
 // runCiState() spawns its own, because it needs the exit code that a plain
 // tryRun discards — so a fix applied only there would leave that one uncapped.
 export const READ_OPTS = { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 };
 
-// Every child read in board.mjs is ASYNCHRONOUS, and that is
+// Every child read in board-gather.mjs is ASYNCHRONOUS, and that is
 // load-bearing rather than stylistic. serve() ticks on a timer inside the same
 // process that answers HTTP, so a SYNCHRONOUS read holds the event loop for as
 // long as the child runs — measured at 4.72–4.91s for one board — and during
@@ -65,7 +65,7 @@ export const READ_OPTS = { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 };
 // `code` for a libuv/node fault. That translation is the whole reason this is
 // not a bare `promisify(execFile)`: the async error carries the EXIT CODE in
 // `err.code` (measured: `3`, a number), where the sync one carried `ENOENT` /
-// `ENOBUFS` there and the exit code in `status`, and board.mjs's runCiState()
+// `ENOBUFS` there and the exit code in `status`, and board-gather.mjs's runCiState()
 // reads all three to tell those causes apart.
 export function execRead(cmd, args) {
   return new Promise((resolve) => {

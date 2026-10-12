@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
-const BOARD = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
+const GATHER = fileURLToPath(new URL("../plugin/scripts/board-gather.mjs", import.meta.url));
 const REAL_SCRIPTS = fileURLToPath(new URL("../plugin/scripts/", import.meta.url));
 const HTML = readFileSync(new URL("../plugin/scripts/board.html", import.meta.url), "utf8");
 
@@ -46,7 +46,7 @@ function gatherLedger({ ledgerBody = null, scriptDir = REAL_SCRIPTS } = {}) {
   const ledgerFile = join(cwd, "ledger.md");
   if (ledgerBody !== null) writeFileSync(ledgerFile, ledgerBody);
 
-  const driver = `const { gather } = await import(${JSON.stringify(BOARD)});
+  const driver = `const { gather } = await import(${JSON.stringify(GATHER)});
     const r = await gather({ ledgerFile: ${JSON.stringify(ledgerFile)},
                        scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
     console.log(JSON.stringify(r.ledger));`;

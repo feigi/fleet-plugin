@@ -1,4 +1,4 @@
-// #1181: board.mjs's `tryParse` guarded its INPUT string against nullish and
+// #1181: board-gather.mjs's `tryParse` guarded its INPUT string against nullish and
 // not its PARSED VALUE. `JSON.parse("null")` succeeded and yielded null, so a
 // bare `null` payload skipped the fallback and reached the caller as its
 // answer — the shape #1170 fixed one function over, in `mapCi`.
@@ -23,7 +23,7 @@
 // at once and two PRs appending to one test file conflict, which costs the PR
 // its CI entirely.
 //
-// The accept side of a well-formed payload is board.test.mjs's "a well-formed
+// The accept side of a well-formed payload is board-gather.test.mjs's "a well-formed
 // issue/PR row passes through unchanged", at this same seam; what is pinned
 // here is the accept side this guard could newly break — a parsed answer that
 // is FALSY but readable.
@@ -37,14 +37,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
-const BOARD = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
+const GATHER = fileURLToPath(new URL("../plugin/scripts/board-gather.mjs", import.meta.url));
 
 // `repo view` answers a real object so nothing but the read under test can put
 // the string "parse failed" on stderr; the assertions below are scoped to their
 // own read besides, so neither guard rests on the other.
 const REPO_JSON = '{"nameWithOwner":"o/r","url":"https://example.invalid/o/r"}';
 
-// `ledgerBody` is the body of a stub `ledger.mjs`. board.mjs spawns
+// `ledgerBody` is the body of a stub `ledger.mjs`. gather() spawns
 // `node <scriptDir>/ledger.mjs`, and only a stub can hand it stdout that
 // arrives at exit 0 and parses to something no real ledger.mjs emits.
 function gatherWith({ issuesJson = "[]", prsJson = "[]", ledgerBody = null } = {}) {
@@ -62,7 +62,7 @@ function gatherWith({ issuesJson = "[]", prsJson = "[]", ledgerBody = null } = {
     `"repo view") echo '${REPO_JSON}' ;;\n` +
     `*) exit 1 ;;\nesac\n`);
 
-  const driver = `const { gather } = await import(${JSON.stringify(BOARD)});
+  const driver = `const { gather } = await import(${JSON.stringify(GATHER)});
     const r = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "ledger.md"))},
                        prevFile: null, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
     console.log(JSON.stringify({ issues: r.issues, prs: r.prs, ledger: r.ledger }));`;

@@ -1,6 +1,6 @@
 # Spend-Dir Pin Seed Collapse
 
-`spendDirPin()` in `plugin/scripts/board.mjs` builds a latching closure over the
+`spendDirPin()` in `plugin/scripts/board-gather.mjs` builds a latching closure over the
 cockpit's spend directory. Its current shape opens with a guard and two
 declarations:
 
@@ -34,11 +34,13 @@ heuristic: seeding `pinned` makes the closure return on its first line, leaving
 the `typeof answer !== "string"` and `newestTranscriptMs` checks unreached —
 which is correct, because they guard only the heuristic. All five tests that
 drive `spendDirPin` directly pass under the collapsed form unmodified, as does
-the whole of `plugin/scripts/board.test.mjs` — including both live-`serve`
-rows: the `--spend-dir` row (`board.test.mjs:1737`), the only one able to fail
-on the explicit value being dropped between resolution and tick, and the
-wrote-first-on-its-watch row (`board.test.mjs:795`), the only one able to fail
-on the latch being rebuilt per tick.
+the whole of the board test files (`tests/board.test.mjs`,
+`tests/board-gather.test.mjs` and `tests/board-server.test.mjs`) — including both
+live-`serve` rows, both in `tests/board.test.mjs`: the *"serve --spend-dir reads the
+named directory's spend into every tick"* row, the only one able to fail on the
+explicit value being dropped between resolution and tick, and the *"a live serve
+keeps the panel on the session that wrote first on its watch"* row, the only one able
+to fail on the latch being rebuilt per tick.
 
 So this is not a refusal on feasibility. It is the same refusal on churn that
 [arg-factory-collapse.md](arg-factory-collapse.md),

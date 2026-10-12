@@ -30,7 +30,7 @@ import { createServer } from "node:net";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "../plugin/scripts/board.mjs";
+import { resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "../plugin/scripts/board-server.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 

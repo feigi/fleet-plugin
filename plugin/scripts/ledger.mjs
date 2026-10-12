@@ -148,7 +148,7 @@ const GIT_TIMEOUT_MS = gitBudget(10, process.env.LEDGER_GIT_TIMEOUT);
 // worktree) instead, with GIT_DIR/GIT_WORK_TREE scrubbed so an ambient one
 // cannot put the run's ledger under another repository; only the bound, the
 // warning and the fallback below are this caller's own. No canonicalisation
-// is asked for: that is board.mjs's opt-in, and taking it here would change
+// is asked for: that is board-server.mjs's opt-in, and taking it here would change
 // the path `check` prints without changing which file it names.
 function defaultLedgerPath() {
   try {
@@ -764,7 +764,7 @@ const data = cmd === "rotate" ? null : load();
 // discards whatever is still queued, so a payload past the buffer arrives cut
 // — at exit 0, which types a corrupt read as a successful one.
 // candidates.mjs states the same reason at its own exit line; this was the
-// second script on that shape. The consumer that made it visible is board.mjs,
+// second script on that shape. The consumer that made it visible is board-gather.mjs,
 // which reads `read` through execFileSync — a pipe — and accepts its ledger
 // only as a path, so nothing on the caller's side could work around it: a
 // grown ledger served a cockpit whose board was empty at HTTP 200.

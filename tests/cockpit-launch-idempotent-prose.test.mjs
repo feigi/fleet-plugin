@@ -54,7 +54,7 @@
 // longer opens anything, `--open` or not — only the launch that binds a port
 // and starts the server opens a tab — so a re-shortlist no longer reopens
 // the board tab. The sentence saying it did is rewritten in the runbook, and
-// the test that pinned it is deleted; board.test.mjs holds the behaviour,
+// the test that pinned it is deleted; board-server.test.mjs holds the behaviour,
 // with stub launchers recording what each launch opened.
 //
 // Zero deps: `node --test tests/cockpit-launch-idempotent-prose.test.mjs`.

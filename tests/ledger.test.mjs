@@ -1459,12 +1459,12 @@ test("an inherited GIT_DIR cannot relocate defaultLedgerPath() into another repo
 });
 
 test("defaultLedgerPath(): an ambient GIT_COMMON_DIR is not canonicalised — this caller does not opt in (#1658)", () => {
-  // git-env.mjs's own docstring: `canonicalise` is board.mjs's opt-in alone
+  // git-env.mjs's own docstring: `canonicalise` is board-server.mjs's opt-in alone
   // (#1582, a symlinked cockpit route deriving a second port); ledger.mjs
   // stays on the default because `check` PRINTS the path it resolves — the
   // "ledger file not found" warning below — and realpath would change that
-  // output without changing which file it names. board.test.mjs pins
-  // board.mjs's OPPOSITE choice; git-env.test.mjs pins the HELPER's own
+  // output without changing which file it names. board-server.test.mjs pins
+  // board-server.mjs's OPPOSITE choice; git-env.test.mjs pins the HELPER's own
   // default, which cannot see whether THIS caller opted in — nothing before
   // this test pinned that fact, so an accidental `{ canonicalise: true }`
   // added to defaultLedgerPath() would break no test in this file.
@@ -1480,7 +1480,7 @@ test("defaultLedgerPath(): an ambient GIT_COMMON_DIR is not canonicalised — th
     });
     const expected = `ledger file not found: ${join(link, ".fleet", "ledger.md")}`;
     assert.ok(r.stderr.includes(expected),
-      `defaultLedgerPath() must keep the symlinked spelling — canonicalising here is board.mjs's opt-in alone. stderr: ${r.stderr}`);
+      `defaultLedgerPath() must keep the symlinked spelling — canonicalising here is board-server.mjs's opt-in alone. stderr: ${r.stderr}`);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
