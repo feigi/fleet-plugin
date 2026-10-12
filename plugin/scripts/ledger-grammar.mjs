@@ -462,13 +462,16 @@ function launchedRunners(text) {
  * refuses a repeat from within a run — and every reviewer runner a row
  * launched, that `liveOnLedger` does not carry, plus every name the archive's
  * own `## Retired` already held (`retired`, bare retirable names — the caller
- * validates them), once each, in that order. A retired name stays taken for
- * the rest of the omp session: the process that ran the member still holds a
- * peer under it, and omp answers a second task of that name with `<name>-2`
- * while `hub send <name>` keeps reaching the first. `carried` is
- * `{rows, dispatched}`, the texts of the rows and the `## Dispatched` entries
- * the new ledger carries (`liveOnLedger`'s picks); a name it carries, live or
- * as a settled copy, is on the new ledger already and is not listed twice.
+ * validates them), once each: the `## Retired` names first, then the
+ * `## Dispatched` entries' in order, then the rows' in the order given, a
+ * row's member tokens before the reviewer runners it launched. A retired
+ * name stays taken for the rest of the omp session: the process that ran
+ * the member still holds a peer under it, and omp answers a second task of
+ * that name with `<name>-2` while `hub send <name>` keeps reaching the
+ * first. `carried` is `{rows, dispatched}`, the texts of the rows and the
+ * `## Dispatched` entries the new ledger carries (`liveOnLedger`'s picks); a
+ * name it carries, live or as a settled copy, is on the new ledger already
+ * and is not listed twice.
  * `dispatched` is every entry the archive held, well-formed or not, and a row
  * is read whether or not it parsed. A token with an outcome is a name this
  * session used, so it is retired whether or not its outcome is one of its
