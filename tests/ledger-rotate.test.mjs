@@ -842,21 +842,25 @@ test("an ancestor rotate carries a bare live dispatched entry whose malformed tw
   assert(!read(f).retired.includes("impl-14"));
 });
 
-test("an ancestor rotate retires entries with empty outcomes in ## Dispatched and on rows", (t) => {
-  // A token with an empty outcome (e.g., impl-5=) parses with outcome '' and an error.
-  // Rotate retires its name, like any other out-of-vocabulary outcome.
+test("an ancestor rotate retires a name whose token has an empty outcome, in ## Dispatched and on a row alike, and reports both lines skipped", (t) => {
+  // `impl-5=` and `impl-6=` parse with outcome '' and an error, so their lines
+  // are skipped; the names were used this session, so each retires. Each name
+  // sits in one place only, so neither retire loop can mask the other.
+  const dispatchedLine = "impl-5=";
+  const rowLine = "#6 impl-6=";
   const f = fixture(t, {
     ledger: ledgerOf({
-      rows: ["#5 impl-5=", "#6 impl-6"],
-      dispatched: ["impl-5=", "impl-6"],
+      rows: [rowLine, "#7 impl-7"],
+      dispatched: [dispatchedLine, "impl-7"],
     }),
     controller: ANCESTOR,
   });
   const r = f.cli(["rotate"]);
   assert.equal(r.status, 0, r.stderr);
   const out = JSON.parse(r.stdout);
-  // impl-5 is retired from ## Dispatched with empty outcome (outcome '' is out-of-vocabulary)
-  // impl-6 is not retired (dispatched entry has no outcome, no outcome token on the row)
-  assert.deepEqual(out.retired, ["impl-5"], "empty outcome retires the name");
-  assert.deepEqual(read(f).retired, ["impl-5"]);
+  assert.deepEqual(out.skipped, [rowLine, dispatchedLine]);
+  // impl-7 is live and bare, so it is carried and not retired.
+  assert.deepEqual(out.retired, ["impl-5", "impl-6"]);
+  assert.deepEqual(read(f).retired, ["impl-5", "impl-6"]);
+  assert.match(readFileSync(f.file, "utf8"), /\n## Retired\n\n- impl-5\n- impl-6\n/);
 });

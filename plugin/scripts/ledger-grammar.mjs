@@ -477,9 +477,10 @@ function launchedRunners(text) {
  * is read whether or not it parsed. A token with an outcome is a name this
  * session used, so it is retired whether or not its outcome is one of its
  * family's: the name on `impl-5=bogus` is retired, though the line is not
- * carried. An unsettled member token — a bare name, no outcome — retires
- * nothing: only a name known gone is retired, and a line whose name does not
- * parse names no member.
+ * carried, and so is the name on `impl-5=`, whose outcome is empty — an empty
+ * outcome is an outcome, not the absence of one. An unsettled member token —
+ * a bare name, no outcome — retires nothing: only a name known gone is
+ * retired, and a line whose name does not parse names no member.
  */
 export function retiredOnLedger(rows, dispatched, retired, carried) {
   const seen = new Set();
