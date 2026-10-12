@@ -658,9 +658,11 @@ phase, or in any later one, asks the maintainer which tickets to take.
    drop, survivors and specs together, is named the same way.
 2. **Refresh is the tick's from here on.** `fleet-tick.mjs` runs
    `shortlist.mjs` itself when unclaimed entries fall below the implementer
-   cap, when the file is missing or empty, and when an `excluded` premise has
-   lifted, and prints `REFRESHED shortlist: <n> entries; <k> lifted`. Phase 0
-   runs it by hand once because a dead run's shortlist is stale by definition.
+   cap, when the file is missing or empty, when an `excluded` premise has
+   lifted, and when a branch-named `behind-pr` exclusion whose PR is not yet
+   MERGED or CLOSED names a ticket the file still carries, and prints
+   `REFRESHED shortlist: <n> entries; <k> lifted`. Phase 0 runs it by hand
+   once because a dead run's shortlist is stale by definition.
 
 **No multi-select, no maintainer tick.** Selection and ordering are batched —
 one scan, oldest first; admission never is. The invariant this replaces — one

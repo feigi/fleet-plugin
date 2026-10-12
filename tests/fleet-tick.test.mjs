@@ -2062,6 +2062,84 @@ test("CLI: a behind-issue exclusion already reflected in the current file names 
   assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 #50 /m);
 });
 
+// A branch-named `behind-pr` is the Exclusion the skill allows until its PR
+// exists. The current file predates the row, so the tick refreshes to let
+// shortlist.mjs's own probe drop the ticket, and takes its PULL from that.
+const BRANCH = "implementer/2151-impl-2151";
+const branchExcluded = { rows: [`#2305 excluded · behind-pr:#${BRANCH}`] };
+
+test("CLI: a branch-named behind-pr exclusion holds its ticket out of the PULL row once the refresh drops it", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([2305, 10, 11]), refresh: shortlistText([10, 11]), ledger: branchExcluded, prStates: {},
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 1, "the file still carries #2305 and no PR exists yet: only a refresh can drop it");
+  assert.match(r.stdout, /^implementers 0\/2 → PULL #10 #11 .*unclaimed=2 supply=2/m);
+  assert.doesNotMatch(r.stdout, /PULL[^\n]*#2305/);
+});
+
+test("CLI: a branch-named behind-pr exclusion whose refresh fails leaves the PULL as it was and reports the failure", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([2305, 10, 11]), ledger: branchExcluded, prStates: {}, refreshFail: true,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 1);
+  assert.match(r.stdout, /^implementers 0\/2 → PULL #2305 #10 +\(unclaimed=3 supply=3 /m);
+  assert.match(r.stdout, /REFRESH FAILED/);
+});
+
+test("CLI: a branch-named behind-pr exclusion lifts, with a refresh, once its PR is MERGED or CLOSED", () => {
+  const full = { shortlist: shortlistText([10, 11, 12]), refresh: shortlistText([10, 11, 12, 2305]), ledger: branchExcluded };
+  for (const state of ["MERGED", "CLOSED"]) {
+    const r = runCli([], { ...full, prStates: { [BRANCH]: state } });
+    assert.equal(r.refreshed, 1, state);
+    assert.deepEqual(r.prViews, [BRANCH]);
+    assert.match(r.stdout, new RegExp(`REFRESHED shortlist: 4 entries; 1 lifted {3}\\(behind-pr:#${BRANCH} ${state}\\)`));
+  }
+  for (const [name, prStates] of [["open", { [BRANCH]: "OPEN" }], ["not yet created", {}]]) {
+    const r = runCli([], { ...full, prStates });
+    assert.equal(r.refreshed, 0, `${name}: the exclusion stands, nothing to refresh`);
+    assert.deepEqual(r.prViews, [BRANCH], `${name}: probed once`);
+  }
+});
+
+test("CLI: a branch-named behind-pr exclusion already reflected in the current file triggers no refresh", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([2305, 10, 11]), ledger: branchExcluded, prStates: { [BRANCH]: "MERGED" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 0, "the file already carries the lifted ticket — nothing to refresh");
+  assert.match(r.stdout, /^implementers 0\/2 → PULL #2305 #10 /m);
+});
+
+test("CLI: a branch-named behind-pr probe that cannot answer never lifts the exclusion, and on a ticket in the file it refreshes", () => {
+  const away = { shortlist: shortlistText([10, 11, 12]), refresh: shortlistText([10, 11, 12, 2305]), ledger: branchExcluded };
+  const down = runCli([], { ...away, prStates: { [BRANCH]: "MERGED" }, env: { PR_VIEW_FAIL: "1" } });
+  assert.equal(down.status, 0, down.stderr);
+  assert.equal(down.refreshed, 0);
+  assert.match(down.stderr, new RegExp(`fleet-tick: gh pr view ${BRANCH} exited 1: gh: pr view failed — behind-pr:#${BRANCH} premise unconfirmed, exclusion stands`));
+  for (const body of ["<html>proxy error</html>", "{}", "null"]) {
+    const r = runCli([], { ...away, prStates: { [BRANCH]: "MERGED" }, env: { PR_VIEW_BODY: body } });
+    assert.equal(r.refreshed, 0, body);
+    assert.match(r.stderr, new RegExp(`fleet-tick: gh pr view ${BRANCH} printed no state — behind-pr:#${BRANCH} premise unconfirmed, exclusion stands`), body);
+  }
+  const inFile = runCli([], {
+    shortlist: shortlistText([2305, 10, 11]), refresh: shortlistText([10, 11]), ledger: branchExcluded, env: { PR_VIEW_FAIL: "1" },
+  });
+  assert.equal(inFile.refreshed, 1, "an unanswered probe is not a lift: the refresh's own probe decides");
+  assert.match(inFile.stdout, /^implementers 0\/2 → PULL #10 #11 /m);
+});
+
+test("CLI: a behind-issue probe answering exit 0 with no state is disclosed and the exclusion stands", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([1, 2, 3]), refresh: shortlistText([1, 2, 3, 50]), ledger: { rows: ["#50 excluded · behind-issue:#9"] },
+    issueStates: { 9: "CLOSED" }, env: { ISSUE_VIEW_BODY: "<html>rate limited</html>" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 0);
+  assert.match(r.stderr, /fleet-tick: gh issue view 9 printed no state — behind-issue:#9 premise unconfirmed, exclusion stands/);
+});
+
 // #2485: the mismatch hold is lifted by the mismatched ticket's own issue
 // being CLOSED, probed live; an open one, or a probe that cannot answer, holds.
 test("CLI: a tier mismatch on a CLOSED ticket no longer holds the implementer row", () => {

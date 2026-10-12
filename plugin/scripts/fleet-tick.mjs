@@ -1214,34 +1214,56 @@ function readShortlist(path) {
   return parseShortlist(text);
 }
 
-// An Exclusion whose premise has lifted, for a ticket the current file does
-// not already carry (if it does, the refresh that lifted it has run). A
-// `behind-pr:#M` reads off the open list already in hand; a `behind-issue:#M`
-// costs one `gh issue view`. A branch-named `behind-pr` is left to the
-// refresh itself: before its PR exists, "no open PR" is not "merged". Any
-// probe that cannot answer leaves the exclusion standing.
+// A gh state read of one Exclusion premise, scrubbed as shortlist.mjs's
+// probeState() is: gh's remote resolution follows GIT_DIR/GIT_WORK_TREE, and
+// GH_REPO outranks both. The state it printed, or null when it could not
+// answer — a nonzero exit, or exit 0 with a body carrying no state (an HTML
+// error page, JSON with no state). Either way the unanswered probe is
+// disclosed, not dropped: every other gh call in this file either dies or
+// logs its failure, so a bare empty catch here would be the one silent
+// exception in a file whose whole design goal is "no silent stall".
+function premiseState(noun, target, label) {
+  const r = spawnSync("gh", [noun, "view", target, "--json", "state"], { encoding: "utf8", timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }) });
+  if (r.error || r.status !== 0) {
+    console.error(`${NAME}: ${failure(r, `gh ${noun} view ${target}`)} — ${label} premise unconfirmed, exclusion stands`);
+    return null;
+  }
+  let st = null;
+  try { st = JSON.parse(r.stdout).state; } catch { /* no state: disclosed below */ }
+  if (typeof st !== "string") {
+    console.error(`${NAME}: gh ${noun} view ${target} printed no state — ${label} premise unconfirmed, exclusion stands`);
+    return null;
+  }
+  return st;
+}
+
+// An Exclusion whose premise sends the tick to a refresh. Lifted, for a
+// ticket the current file does not already carry (if it does, the refresh
+// that lifted it has run): a `behind-pr:#M` reads off the open list already
+// in hand; a `behind-issue:#M` costs one `gh issue view`; a branch-named
+// `behind-pr` costs one `gh pr view`, whose MERGED or CLOSED lifts it —
+// before its PR exists, "no open PR" is not "merged". Standing, for a
+// branch-named `behind-pr` whose ticket the current file still carries: the
+// file may predate the exclusion, and only the refresh's own probe can drop
+// the ticket from it, so any answer short of MERGED or CLOSED, an
+// unanswered probe included, asks for that refresh. An unanswered probe
+// never lifts an exclusion.
 function liftedPremise(excluded, entries, prs) {
   const inFile = new Set(entries.map((e) => e.n));
   const open = new Set(prs.map((p) => p.number));
   for (const { n, premises } of excluded) {
-    if (inFile.has(n)) continue;
     for (const { kind, target } of premises) {
-      if (!isDigits(target)) continue;
+      if (kind === "pr" && !isDigits(target)) {
+        const st = premiseState("pr", target, `behind-pr:#${target}`);
+        const lifted = st === "CLOSED" || st === "MERGED";
+        if (lifted && !inFile.has(n)) return `behind-pr:#${target} ${st}`;
+        if (!lifted && inFile.has(n)) return `behind-pr:#${target} not merged, #${n} still on the shortlist`;
+        continue;
+      }
+      if (inFile.has(n) || !isDigits(target)) continue;
       if (kind === "pr" && !open.has(Number(target))) return `behind-pr:#${target} no longer open`;
       if (kind === "issue") {
-        // Scrubbed as shortlist.mjs's probeState() is: gh's remote resolution
-        // follows GIT_DIR/GIT_WORK_TREE, and GH_REPO outranks both.
-        const r = spawnSync("gh", ["issue", "view", target, "--json", "state"], { encoding: "utf8", timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }) });
-        if (r.error || r.status !== 0) {
-          // Disclosed, not dropped: every other gh call in this file either
-          // dies or logs its failure — a bare empty catch here would be the
-          // one silent exception in a file whose whole design goal is "no
-          // silent stall".
-          console.error(`${NAME}: ${failure(r, `gh issue view ${target}`)} — behind-issue:#${target} premise unconfirmed, exclusion stands`);
-          continue;
-        }
-        let st = null;
-        try { st = JSON.parse(r.stdout).state; } catch { /* unanswered: the exclusion stands */ }
+        const st = premiseState("issue", target, `behind-issue:#${target}`);
         if (st === "CLOSED" || st === "MERGED") return `behind-issue:#${target} ${st}`;
       }
     }
@@ -1386,9 +1408,11 @@ function main() {
     throw e;
   }
 
-  // Pull from the current file first; refresh when it is short, absent, or an
-  // exclusion has lifted — and top the PULL up from what the refresh found,
-  // so a slot the current file could not fill does not wait a tick for it.
+  // Pull from the current file first; refresh when it is short, absent, an
+  // exclusion has lifted, or a branch-named one still names a ticket on it.
+  // A refresh that succeeds replaces the heads outright: the PULL is read off
+  // what shortlist.mjs just probed, never merged with the file's own heads,
+  // or a ticket the refresh dropped would be pulled anyway.
   let heads = unclaimed(current.entries, run);
   let supply = current.scanned;
   let dropped = current.dropped;
@@ -1400,7 +1424,7 @@ function main() {
     const r = refresh();
     if (r.ok) {
       const excludedSet = new Set(run.excluded.map((x) => x.n));
-      heads = [...new Set([...heads, ...unclaimed(r.entries, run)])];
+      heads = unclaimed(r.entries, run);
       supply = r.scanned;
       dropped = r.dropped;
       fresh = {
