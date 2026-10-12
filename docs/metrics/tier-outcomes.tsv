@@ -496,3 +496,15 @@
 2026-10-12	3103	2968		slow-high	yes	no	survived: degraded heartbeat file overwritten by early ticked write; three departures flagged in PR body	heavy	production	793	15
 2026-10-12	3106	3063		task-high	yes	no	mechanical 92-file migration; survived: comment inaccuracies and a rejoin hole in net-watchdog-prose	heavy	tests-only	3660	97
 2026-10-12	3110	3107		task-high	yes	no	comment-only; sizing run after implementing, before PR create; review 0 survived	heavy	tests-only	18	6
+2026-10-12	3115	2151		task-high	yes	no	pure move; review found prose pointers stale, fixed; implementer corrected its Sizing line (file count) after opening	heavy	production	9312	25
+2026-10-12	3118	2305		task-high	yes	no	review survived finding: tooling-fix flow in SKILL did not end clean; fixed by fix-applier	heavy	production	524	8
+2026-10-12	3119	3072		slow-high	yes	no	changed two pre-existing tests to expect refusal; follows row's behaviour	heavy	production	119	4
+2026-10-12	3130	3122		smol-high	yes	no	fix-applier rewrote nestedHash fallback to show-ref status 1; implementer reported no mutant run	light	production	58	2
+2026-10-12	3124	3099		task-high	yes	yes	implementer claimed five mutants each killed; a refuter found two surviving mutants in its tests (deferred to a follow-up)	heavy	production	143	7
+2026-10-12	3135	3125		slow-high	yes	no	implementer ran 19 mutants, all killed; reviewed survivors were test/prose gaps	heavy	production	443	13
+2026-10-12	3136	3121		slow-high	yes	no	one survived important finding (unreachable-but-present commit reads missing) deferred as remedy-worse; sizing run after code, before PR	heavy	production	161	5
+2026-10-12	3141	3126		smol-high	yes	no	implementer PR shipped with no test and the critical scenario unfixed; fix-applier rewrote the core and added six tests	light	production	160	3
+2026-10-12	3144	2316		slow-high	yes	no	real Linux CI failure (symlink chmod through link) caught by CI after review; fixed by second fix-applier round	heavy	production	1554	13
+2026-10-12	3146	3133		smol-high	yes	no	tests-only PR; sizing reported as conceptual		production	52	2
+2026-10-12	3147	3143		smol-high	yes	yes	implementer reported tests added; all four failed on its own head; fix-applier reworked the change		production	116	4
+2026-10-12	3151	2321		smol-high	yes	yes	implementer shipped no tests, reported a 4289-test full run on a partial base and called mutants not applicable; fix-applier reworked the whole design (26 survived findings)	heavy	production	1430	20
