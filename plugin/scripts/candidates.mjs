@@ -24,6 +24,14 @@
 // `--allow-fallback`, a labeled all-specs pass that falls back to a
 // genuinely empty unfiltered pass is exit 1, not 3; the drop count is never
 // carried across the two attempts.
+//
+// `--with-dropped` changes stdout and nothing else: `{rows, dropped}`, where
+// `rows` is the survivor array the flagless run prints and `dropped` names
+// every row the to-spec filter removed as `{n, reason}`, oldest first. It
+// describes the same final attempt `rows` and exit 3 do. The exit codes are
+// the same with and without it. It exists for a caller that reads no stderr —
+// shortlist.mjs — so an empty or short shortlist can still name what the
+// filter took.
 
 import { execFileSync } from "node:child_process";
 import { parseArgs } from "node:util";
@@ -44,6 +52,7 @@ const has = makeHas(die);
 
 const requireLabel = arg("require-label");
 const allowFallback = has("allow-fallback");
+const withDropped = has("with-dropped");
 
 // Default well above the proving ground's real volume. Measured 2026-07-23:
 // 106 issues survive the exclusions, so the previous hardcoded 100 dropped six
@@ -82,6 +91,7 @@ if (!Number.isInteger(limit) || limit < 1) die(`--limit must be a positive integ
 const OPTIONS = {
   "require-label": { type: "string" },
   "allow-fallback": { type: "boolean" },
+  "with-dropped": { type: "boolean" },
   "limit": { type: "string" },
 };
 // No `strict: true`: strict IS parseArgs' default, and stays the default when
@@ -562,18 +572,22 @@ function refuseIfCapped(rows, description) {
 // pass 1 is dropped again in pass 2. Unattributed, that reads as the same spec
 // counted twice; named, a reader can tell "2 drops, 1 spec, seen both passes"
 // from "2 drops, 2 specs" at a glance. Deliberately not deduplicated.
+// The `reason` a `--with-dropped` caller receives for a to-spec drop.
+const SPEC_REASON = "to-spec: User Stories heading";
 function dropSpecs(rows, pass) {
   const kept = [];
+  const dropped = [];
   for (const { spec, ...rest } of rows) {
     if (spec) {
       // "no silent caps" covers drops too — a filtered list that does not say
       // what it filtered is indistinguishable from a complete one.
       console.error(`    dropped #${rest.n} — to-spec spec, not a ticket (User Stories heading) [${pass}]`);
+      dropped.push({ n: rest.n, reason: SPEC_REASON });
     } else {
       kept.push(rest);
     }
   }
-  return kept;
+  return { kept, dropped };
 }
 
 let rows = query(requireLabel);
@@ -592,7 +606,8 @@ refuseIfCapped(rows, requireLabel ? ` with label:${requireLabel}` : "");
 // all-filtered (raw>0) whose fallback pass is genuinely empty (raw=0), which
 // must read as the fallback's own facts (exit 1), not a merge of the two.
 const rawCount1 = rows.length;
-rows = dropSpecs(rows, requireLabel ? `label:${requireLabel}` : "unfiltered");
+let dropped;
+({ kept: rows, dropped } = dropSpecs(rows, requireLabel ? `label:${requireLabel}` : "unfiltered"));
 let allFilteredOut = rawCount1 > 0 && rows.length === 0;
 
 if (rows.length === 0 && allowFallback && requireLabel) {
@@ -604,7 +619,7 @@ if (rows.length === 0 && allowFallback && requireLabel) {
   // not transfer, as no gate follows this one. The call must exist because the
   // fallback's rows arrive raw and nothing downstream drops a spec.
   const rawCount2 = rows.length;
-  rows = dropSpecs(rows, "unfiltered (fallback)");
+  ({ kept: rows, dropped } = dropSpecs(rows, "unfiltered (fallback)"));
   allFilteredOut = rawCount2 > 0 && rows.length === 0;
 }
 
@@ -619,6 +634,7 @@ if (rows.length === 0 && allowFallback && requireLabel) {
 // Native sub-issue links are still not read: parent/child is hierarchy, not
 // blocking, so a blocker recorded only as one reaches it with none.
 rows.sort((a, b) => a.n - b.n);
+dropped.sort((a, b) => a.n - b.n);
 
 for (const r of rows) {
   console.error(`    #${r.n} [${r.l.join(",")}] ${r.t}${r.d.length ? `  deps:${r.d.join(";")}` : ""}`);
@@ -658,7 +674,8 @@ for (const r of rows) {
 // without copying up to `--limit` rows to do it. Add a field to the
 // reduction that stdout SHOULD carry and it needs naming here, or it
 // silently never ships.
-console.log(JSON.stringify(rows, (k, v) => (k === "dh" ? undefined : v)));
+const replacer = (k, v) => (k === "dh" ? undefined : v);
+console.log(withDropped ? JSON.stringify({ rows, dropped }, replacer) : JSON.stringify(rows, replacer));
 
 // Exit 1 for a successful query with no survivors, exit 3 when those zero
 // survivors are the filter's doing rather than the query's — see the
