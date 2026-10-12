@@ -43,10 +43,14 @@ store.
    resolves the stray paths and re-baselines — a HEAD move clears itself
    once HEAD reads clean again; `MAIN-CHECKOUT-UNKNOWN`
    until whatever stopped the tick looking is fixed, never by
-   re-baselining over it; `MAIN-CHECKOUT-NO-BASELINE` until the
-   controller records a baseline. The `docs/metrics/` tables the
-   controller itself writes mid-run (tier-outcomes, member-outcomes and
-   ticket-features) are left out of the comparison.
+   re-baselining over it — except a v1 baseline and a baseline whose
+   commit is missing from the repository (an amend or reset, then gc),
+   which are re-recorded, the latter only after HEAD has been examined
+   against `origin/main` and any stray paths resolved;
+   `MAIN-CHECKOUT-NO-BASELINE` until the controller records a baseline.
+   The `docs/metrics/` tables the controller itself writes mid-run
+   (tier-outcomes, member-outcomes and ticket-features) are left out of the
+   comparison.
 
 ## Opinionated choices
 

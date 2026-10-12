@@ -66,8 +66,10 @@
 //   unknown  — some read failed: git, a hash, HEAD, `origin/main`, or a baseline
 //              that EXISTS but cannot be read (unreadable file, unsearchable
 //              `.fleet/`, dangling symlink, not written by --record) — or is a
-//              v1 baseline, which says nothing of HEAD: re-record it. "A failure
-//              is an unknown answer, never a 'no'" — never `clean`.
+//              v1 baseline, which says nothing of HEAD: re-record it — or names
+//              a commit absent from the repository: examine HEAD, then
+//              re-record it. "A failure is an unknown answer, never a 'no'" —
+//              never `clean`.
 //   absent   — no baseline at all: the run never recorded one. A refusal
 //              ("record at run start"), never `clean`.
 //
@@ -78,7 +80,20 @@
 // so it refuses on every unknown cause it can see: a baseline that exists but
 // cannot be read, and any failed git or hash read (no snapshot, nothing to
 // write). A detached HEAD has no symbolic ref to record, so it refuses that
-// too. A v1 baseline is the one thing it overwrites without a word.
+// too. A v1 baseline, and one whose commit is gone (it never reads the
+// recorded commit), it overwrites without a word.
+//
+// A BASELINE COMMIT GONE FROM THE REPOSITORY is its own unknown. An amend or
+// reset leaves the baseline's commit unreachable, and once reflog expiry and
+// gc prune it the ancestry read fails where it would have answered `dirty`.
+// What failed is the baseline, not the environment, so "fix the failure and
+// never re-baseline" would forbid the one remedy: the advice is to examine
+// HEAD against `origin/main` FIRST — the move off that commit is unexamined —
+// and only then re-record. The check returns before it compares paths, so the
+// advice also says to resolve any stray paths. On the baseline's own branch it
+// is still `unknown`, never `dirty` or `clean`: the read that would have
+// judged the move could not be made. A different branch reads `dirty` before
+// any ancestry read.
 //
 // ROOT. The main checkout is the parent of `git rev-parse --git-common-dir`
 // (git-env.mjs's `workspaceDirFromGitCommonDir`, as fleet-tick.mjs resolves
@@ -272,13 +287,18 @@ function originMain(root, env) {
 
 /**
  * Did HEAD move off the baseline's? `{ok, change}`: `change` is null, or the
- * `HEAD <was> → <now>` entry; `{ok: false, why}` when a read failed.
+ * `HEAD <was> → <now>` entry; `{ok: false, why}` when a read failed, with
+ * `missing: true` when the failure is the baseline's commit being absent.
  * Clean is all of: the same symbolic ref; the baseline's commit an ancestor of
  * HEAD or equal to it; no commit in `B..HEAD` that `origin/main` lacks. So a
  * fast-forward to `origin/main` and a commit already unpushed at the baseline
  * read clean, while a stray commit, a reset or an amend do not. `origin/main`
  * is read even when HEAD equals the baseline: a checkout that cannot name it
  * is one this cannot vouch for.
+ * A failed ancestry read is followed by `git cat-file -e B`, which exits 1
+ * for an absent object and 0 for a present one, even a corrupt one;
+ * `-e B^{commit}` exits 128 for both, so it cannot tell them apart. Only
+ * exit 1 is the missing answer; anything else keeps the ancestry failure.
  */
 function headMove(root, env, was, now) {
   const origin = originMain(root, env);
@@ -287,7 +307,12 @@ function headMove(root, env, was, now) {
   if (now.ref !== was.ref) return moved;
   if (now.oid === was.oid) return { ok: true, change: null };
   const ancestor = git("git merge-base --is-ancestor", ["merge-base", "--is-ancestor", was.oid, now.oid], root, env);
-  if (!ancestor.ok) return ancestor.status === 1 ? moved : ancestor;
+  if (!ancestor.ok) {
+    if (ancestor.status === 1) return moved;
+    const present = git("git cat-file -e", ["cat-file", "-e", was.oid], root, env);
+    if (present.ok || present.status !== 1) return ancestor;
+    return { ok: false, missing: true, why: `baseline commit ${was.oid.slice(0, 7)} is missing from this repository; HEAD is ${headLabel(now)}` };
+  }
   const stray = git("git rev-list", ["rev-list", "--max-count=1", `${was.oid}..${now.oid}`, "^refs/remotes/origin/main"], root, env);
   if (!stray.ok) return stray;
   return stray.stdout.trim() === "" ? { ok: true, change: null } : moved;
@@ -345,9 +370,10 @@ export function changedPaths(baseline, current) {
 
 /**
  * The tick's question: `{state, root?, baseline?, changed?, headMove?, why?, cause?}`.
- * `cause` tells the three unknowns apart — `"baseline"` (it exists but cannot
+ * `cause` tells the four unknowns apart — `"baseline"` (it exists but cannot
  * be read), `"outdated"` (a v1 baseline: it says nothing of HEAD, so it can
- * answer nothing) and `"read"` (git or a hash failed) — since each has its own
+ * answer nothing), `"missing"` (the baseline's commit is absent from the
+ * repository) and `"read"` (git or a hash failed) — since each has its own
  * message. The baseline is read before the tree, because without one there
  * is nothing to compare against and no reason to look.
  * A HEAD move is the first entry of `changed`, also named in `headMove`.
@@ -359,13 +385,13 @@ export function checkMainCheckout({ cwd = process.cwd(), env = process.env } = {
   const path = baselinePath(root);
   const base = readBaseline(path);
   if (base.status === "absent") return { state: "absent", root, baseline: path };
-  if (base.status === "unreadable") return { state: "unknown", cause: "baseline", root, baseline: path, why: base.why };
-  if (base.status === "outdated") return { state: "unknown", cause: "outdated", root, baseline: path, why: base.why };
-  const unknown = (why) => ({ state: "unknown", cause: "read", root, baseline: path, why });
+  const unknown = (why, cause = "read") => ({ state: "unknown", cause, root, baseline: path, why });
+  if (base.status === "unreadable") return unknown(base.why, "baseline");
+  if (base.status === "outdated") return unknown(base.why, "outdated");
   const now = readState(root, env);
   if (!now.ok) return unknown(now.why);
   const move = headMove(root, env, base.head, now.head);
-  if (!move.ok) return unknown(move.why);
+  if (!move.ok) return unknown(move.why, move.missing ? "missing" : "read");
   const changed = changedPaths(base.entries, now.entries);
   if (move.change !== null) changed.unshift(move.change);
   if (!changed.length) return { state: "clean", root, baseline: path };
@@ -399,6 +425,11 @@ export function describe(check, live = null) {
       if (check.cause === "outdated") {
         return `MAIN-CHECKOUT-UNKNOWN ${check.why}${members}`
           + ` — dispatch held: resolve any stray paths FIRST, then re-record with ${RECORD_COMMAND} (it overwrites, it does not compare)`;
+      }
+      if (check.cause === "missing") {
+        return `MAIN-CHECKOUT-UNKNOWN ${check.why}${members}`
+          + " — dispatch held: examine HEAD against origin/main FIRST, since a missing baseline commit means HEAD moved off it by an amend or reset nobody has looked at, and resolve any stray paths;"
+          + ` then re-record with ${RECORD_COMMAND} (it overwrites, it does not compare)`;
       }
       return check.cause === "baseline"
         ? `MAIN-CHECKOUT-UNKNOWN baseline unreadable: ${check.why}${members}`

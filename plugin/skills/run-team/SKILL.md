@@ -309,7 +309,9 @@ phase, or in any later one, asks the maintainer which tickets to take.
    certifies them. **Never re-record over `MAIN-CHECKOUT-UNKNOWN`**: that
    walks the run from "could not look" to "certified clean" in one step, so
    `--record` itself refuses over a baseline it cannot read and on any git
-   read that fails. `main-checkout.mjs --check` prints the same answer
+   read that fails. The exceptions are a v1 baseline and a baseline whose
+   commit is missing from the repository; Phase 3's tick lines say how each
+   is cleared. `main-checkout.mjs --check` prints the same answer
    without a tick.
 
    **Run the pre-flight, once the pin and the baseline are recorded.**
@@ -1942,9 +1944,13 @@ depth** guard table applied in code. Act on each line as it reads:
   could not look: a git or hash read failed (`could not look:`), or the
   baseline exists but cannot be read (`baseline unreadable:`). Never clean,
   and **never re-baseline over it** — `--record` overwrites, so that certifies
-  a tree nobody read. Fix what the line names and tick again. The one
-  exception is `baseline v1 — re-record`: an old-format baseline says nothing
-  of HEAD, and `--record` is its remedy.
+  a tree nobody read. Fix what the line names and tick again. The exceptions
+  are the two whose remedy is `--record`: `baseline v1 — re-record`, an
+  old-format baseline that says nothing of HEAD; and `baseline commit <oid> is
+  missing from this repository`, which an amend or reset followed by gc
+  leaves — examine HEAD against `origin/main` FIRST, since HEAD moved off
+  that commit and nobody has looked at the move, and resolve any stray paths,
+  which the line does not name; only then re-record.
 - `MAIN-CHECKOUT-NO-BASELINE …` with `HOLD (main checkout no baseline)` — no
   baseline was recorded. Yours to fix: run Phase 0's `--record`. A baseline
   that vanished mid-run is not a fresh run — report it to the maintainer
