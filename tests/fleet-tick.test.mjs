@@ -2029,6 +2029,8 @@ test("CLI: a lifted exclusion premise triggers a refresh even with the shortlist
   const issue = runCli([], { ...full, ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "CLOSED" } });
   assert.equal(issue.refreshed, 1);
   assert.deepEqual(issue.issueViews, ["9"]);
+  // `full` omits #50: an open issue on a ticket the file does not carry
+  // stands, and asks for no refresh.
   const openIssue = runCli([], { ...full, ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "OPEN" } });
   assert.equal(openIssue.refreshed, 0);
   // Already back on the current file: the refresh that lifted it has run.
