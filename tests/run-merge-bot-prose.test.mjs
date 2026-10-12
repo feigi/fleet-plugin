@@ -1338,7 +1338,7 @@ test("step 3 keys the gate's reading on both the PR and the bot's own name", () 
 // #1806 (spec § 4 items 4, 6, 11). The dispatched bot's pass ends in a grace
 // and ONE report; the top-level invocation keeps its Monitor. Sliced to the
 // grace section, which ends where **Then stay armed** begins.
-const grace = () => DOC.between("## Grace, then one report", "## Then stay armed", "run-merge-bot.md grace section").text;
+const grace = () => DOC.section("## Grace, then one report", "run-merge-bot.md grace section").text;
 
 test("a dispatched bot holds a 15-minute grace, polling every 60s, before its one report", () => {
   const s = grace();

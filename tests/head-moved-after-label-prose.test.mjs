@@ -42,7 +42,7 @@ try {
 // The end anchor is the NEXT heading — `## Per-PR sequence` again since #1806
 // retired the gate-proof section #966 had put between them.
 const labelledHead = () =>
-  DOC.between("## The labelled head", "## Per-PR sequence", "run-merge-bot.md").text;
+  DOC.section("## The labelled head", "run-merge-bot.md").text;
 
 // Step 3 is the merge gate, run twice, so the head leg has to be IN it — not
 // in a later paragraph a reader reaches the merge without having read.
@@ -420,7 +420,7 @@ test("the report vocabulary includes head-moved-after-label and rebase-carry", (
 // requirement still binding the label to one SHA would contradict the gate.
 test("requirements §3.4 binds the label to the net change and names the carry", () => {
   const REQ = Pin.file(join(import.meta.dirname, "..", "docs", "requirements.md"));
-  const s = REQ.between("### 3.4 `ready-to-merge` — HARD", "### 3.5", "requirements.md").text;
+  const s = REQ.section("### 3.4 `ready-to-merge` — HARD", "requirements.md").text;
   assert.match(s, Pin.phrase("Binds to the head's net change at application time, not to one SHA"));
   assert.match(s, Pin.phrase("a proven rebase-carry"));
   assert.match(s, Pin.phrase("Any other push after (a review fix, a conflict resolution, an edited commit) makes bot halt with `head-moved-after-label-#<pr>`"));

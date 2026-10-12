@@ -284,7 +284,7 @@ test("relay and reconciliation live under the fallback, not in the Phase 3 event
     "the Phase 3 event loop still carries a relay obligation — on the default path `agent()` returns into the script and no relay ever occurs",
   );
 
-  const fallback = RUN_TEAM.between(FALLBACK_ANCHOR, "\n### ", "run-team fallback").text;
+  const fallback = RUN_TEAM.section("#### Fallback: hand-dispatched reviewer member", "run-team fallback").text;
   // The obligation, not the word: `/relay/i` alone has eight hits in this slice,
   // and stays green with the relay bullet deleted entirely.
   assert.match(
@@ -335,7 +335,7 @@ test("the Phase 3 finisher edges gate on a ruling the controller still owes", ()
 });
 
 test("review-and-fix agrees the workflow is the controller's default, not its preference", () => {
-  const specialists = REVIEW_AND_FIX.between("## Specialists", "\n## Judging findings", "review-and-fix Specialists").text;
+  const specialists = REVIEW_AND_FIX.section("## Specialists", "review-and-fix Specialists").text;
   // Allow an adverb: /should prefer/ is exact-adjacency and "should generally
   // prefer" walks through it.
   assert.doesNotMatch(
@@ -731,7 +731,7 @@ test("the per-PR member is the fix-applier, in the Report example and through th
   // table rows reverted to `review-pr-<M>`, a file-wide /fix-pr-<M>/ still
   // matches — the refill section's `fix-pr-<M>-b` satisfies it — so the
   // file-wide form is green with the example fully wrong.
-  const report = RUN_TEAM.between("## Report", "\n## Red flags", "run-team Report").text;
+  const report = RUN_TEAM.section("## Report", "run-team Report").text;
   // Both rows, not just one. A half-revert — one row back to `review-pr-<M>` —
   // and a row deleted outright both leave one surviving row, so a bare
   // `assert.match` walks straight through either.

@@ -25,7 +25,7 @@ const RUN_TEAM = read("skills", "run-team", "SKILL.md");
 const REVIEW_AND_FIX = read("commands", "review-and-fix.md");
 
 const step7 = () =>
-  NEXT_TICKET.between("## 7. When the sizing-a-ticket path reports done", "## Red flags", "next-ticket/SKILL.md step 7").text;
+  NEXT_TICKET.section("## 7. When the sizing-a-ticket path reports done — open the PR", "next-ticket/SKILL.md step 7").text;
 
 // The member reads the implementer agent body verbatim — its system prompt
 // since #1804 moved the blocks there out of run-team's phase 2

@@ -38,7 +38,7 @@ const PASSAGES = [
   ],
   [
     "member-lifecycle.md's 'Capability is not permission' section",
-    LIFECYCLE.between("## Capability is not permission", "\n## ", "references/member-lifecycle.md").text,
+    LIFECYCLE.section("## Capability is not permission", "references/member-lifecycle.md").text,
     "Holding the dispatch tool does not authorize using it",
     "reviewer prompt must state full specialist set IS requested work",
   ],

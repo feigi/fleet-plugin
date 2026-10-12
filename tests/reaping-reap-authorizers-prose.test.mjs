@@ -19,11 +19,7 @@ const REAPING = Pin.file(join(REPO, "skills", "run-team", "references", "reaping
 const SCRIPT = readFileSync(join(REPO, "scripts", "reap.sh"), "utf8");
 
 const reapSection = () =>
-  REAPING.between(
-    "## Why the reap is shaped the way it is",
-    "## Why a second sweep, over worktrees rather than branches",
-    "reaping.md",
-  ).text;
+  REAPING.section("## Why the reap is shaped the way it is", "reaping.md").text;
 
 // The bullet that names the delete, bounded to its own list item: it ends at
 // the next list marker, so a sibling bullet (the holder-check bullet sits

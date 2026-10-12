@@ -42,20 +42,18 @@ import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const read = (...p) => Pin.file(join(REPO, ...p));
-const RUN_TEAM = read("skills", "run-team", "SKILL.md").text;
-const ISOLATION = read("skills", "run-team", "references", "isolation.md").text;
+const RUN_TEAM = read("skills", "run-team", "SKILL.md");
+const ISOLATION = read("skills", "run-team", "references", "isolation.md");
 const REVIEW_AND_FIX = read("commands", "review-and-fix.md");
 
-// Each row carries its label once: the row name is also `between()`'s `what`,
+// Each row carries its label once: the row name is also the slice's `what`,
 // so the test name and the doc named in a drift failure cannot disagree.
 const slices = [
-  ["run-team/SKILL.md", RUN_TEAM, "Filesystem isolation is not stack isolation", "Scratchpad paths need two levels"],
-  ["references/isolation.md", ISOLATION, "## Filesystem isolation is not stack isolation", "## Scratchpad paths need two levels"],
+  ["run-team/SKILL.md", () => RUN_TEAM.between("Filesystem isolation is not stack isolation", "Scratchpad paths need two levels", "run-team/SKILL.md").text],
+  ["references/isolation.md", () => ISOLATION.section("## Filesystem isolation is not stack isolation", "references/isolation.md").text],
 ];
 
-for (const [name, text, from, to] of slices) {
-  const slice = () => Pin.of(text, "text").between(from, to, name).text;
-
+for (const [name, slice] of slices) {
   test(`${name} sends the specialist on a snapshot to review-and-fix.md for the command`, () => {
     assert.match(slice(), Pin.phrase("`review-and-fix.md`"));
   });

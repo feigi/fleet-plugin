@@ -28,7 +28,7 @@ const REPO = join(import.meta.dirname, "..", "plugin");
 const NEXT_TICKET = Pin.file(join(REPO, "skills", "next-ticket", "SKILL.md"));
 
 const step7 = () =>
-  NEXT_TICKET.between("## 7. When the sizing-a-ticket path reports done", "## Red flags", "next-ticket/SKILL.md step 7").text;
+  NEXT_TICKET.section("## 7. When the sizing-a-ticket path reports done — open the PR", "next-ticket/SKILL.md step 7").text;
 
 // Narrow to the note itself before pinning anything, the way
 // candidates-exit3-prose.test.mjs narrows to one table row. A positive

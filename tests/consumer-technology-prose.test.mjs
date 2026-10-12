@@ -69,7 +69,7 @@ test("the claim step runs the Recipe's Install step in the worktree, read from t
 });
 
 test("requirements 2.3 describes the Recipe derivation: any technology, what it reads, what proves it, what it caches", () => {
-  const section = REQUIREMENTS.between("### 2.3 Installable and testable — HARD", "### 2.4", "requirements.md section 2.3").text;
+  const section = REQUIREMENTS.section("### 2.3 Installable and testable — HARD", "requirements.md section 2.3").text;
   assert.match(section, Pin.phrase("Any technology. Fleet derives your repo's Recipe (Install step + Test entrypoint) by agent reasoning"));
   const reads = Pin.of(section, "section").bullet("- **What the derivation reads:**", "- **What the proof requires:**", "requirements.md 2.3 derivation bullet").text;
   assert.match(reads, Pin.phrase("nothing checks for a particular manifest or lockfile."));

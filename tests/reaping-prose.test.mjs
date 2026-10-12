@@ -56,11 +56,7 @@ const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 const SCRIPT = Pin.file(join(REPO, "scripts", "release-ticket.sh"));
 
 const releaseSection = () =>
-  REAPING.between(
-    "## Why reap declines a claim that was never dispatched",
-    "## Never reap a branch a live member is on",
-    "reaping.md",
-  ).text;
+  REAPING.section("## Why reap declines a claim that was never dispatched", "reaping.md").text;
 
 test("reaping.md: the dirty check is named as the conditional precondition", () => {
   // Without this, "four preconditions, recomputed inside same invocation as

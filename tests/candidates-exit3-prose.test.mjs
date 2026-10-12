@@ -33,7 +33,7 @@ const REPO_ROOT = join(import.meta.dirname, "..");
 const SPEC = Pin.file(join(REPO_ROOT, "docs", "specs", "2026-07-23-fleet-plugin-design.md"));
 
 const candidatesStep = () =>
-  NEXT_TICKET.between("## 1. Candidates", "## 2. Dependencies", "next-ticket/SKILL.md").text;
+  NEXT_TICKET.section("## 1. Candidates", "next-ticket/SKILL.md").text;
 
 test("next-ticket's exit-code line tells exit 3 from the empty queue and from the broken query", () => {
   const s = candidatesStep();

@@ -70,7 +70,7 @@ const GATES = () =>
   ).text;
 
 const TOOLING_FIX = () =>
-  RUN_TEAM.between("## Fix the tooling mid-run", "\n## Failure handling", "run-team tooling fix").text;
+  RUN_TEAM.section("## Fix the tooling mid-run", "run-team tooling fix").text;
 
 test("the rule states that BOTH non-zero codes refuse, not just the changed one", () => {
   const rule = RULE();

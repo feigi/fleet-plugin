@@ -38,17 +38,15 @@ import { Pin } from "./support/prose-pin.mjs";
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
-const phase = (from, to) => RUN_TEAM.between(from, to, `run-team/SKILL.md ${from.trim()}`).text;
-
 const outcomeParagraph = () =>
-  Pin.of(phase("## Phase 2", "## Phase 3"), "phase()").paragraph(
+  RUN_TEAM.section("## Phase 2 — dispatch the Pull's implementer", "run-team/SKILL.md ## Phase 2").paragraph(
     "A member settling with nothing is not, by itself, a bail.",
     "run-team/SKILL.md member outcome-classification paragraph",
     "**Dispatch every implementer with the `agent`",
   ).text;
 
 const relabelParagraph = () =>
-  Pin.of(phase("## Phase 1", "## Phase 2"), "phase()").paragraph(
+  RUN_TEAM.section("## Phase 1 — Pull: judge, then claim or relabel", "run-team/SKILL.md ## Phase 1").paragraph(
     "A Pull never re-admits a ticket already relabelled.",
     "run-team/SKILL.md Pull relabel-safety paragraph",
     "**Relabel by cause.** An unclaimed ticket",

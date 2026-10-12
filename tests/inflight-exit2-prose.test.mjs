@@ -73,7 +73,7 @@ test("the in-flight step denies that exit 2 always parses", () => {
 });
 
 test("next-ticket/SKILL.md still carries the wording run-team was made to match", () => {
-  const s = NEXT_TICKET.between("## 3. In-flight check", "## 4. Suggest", "next-ticket/SKILL.md").text;
+  const s = NEXT_TICKET.section("## 3. In-flight check (all three, per candidate) — then fetch", "next-ticket/SKILL.md").text;
   assert.match(s, Pin.phrase("0 free, 1 taken, 2 unanswerable"));
   assert.match(s, Pin.phrase("Exit 2 is not free"));
   assert.match(s, Pin.phrase("treat it as taken until you know"));

@@ -48,7 +48,7 @@ const slices = [
   ["run-team/SKILL.md", () =>
     RUN_TEAM.between("Materialize the isolation envelope as a file", "A reused worktree may lack the runner", "run-team/SKILL.md").text],
   ["references/isolation.md", () =>
-    ISOLATION.between("## Materialize the isolation envelope as a file", "## Filesystem isolation is not stack isolation", "references/isolation.md").text],
+    ISOLATION.section("## Materialize the isolation envelope as a file, not a briefing", "references/isolation.md").text],
 ];
 
 test("the absence patterns match each retired form they exist to catch", () => {

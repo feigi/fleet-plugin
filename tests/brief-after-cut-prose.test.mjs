@@ -19,11 +19,7 @@ const REPO = join(import.meta.dirname, "..", "plugin");
 const NEXT_TICKET = Pin.file(join(REPO, "skills", "next-ticket", "SKILL.md"));
 
 const dependenciesStep = () =>
-  NEXT_TICKET.between(
-    "## 2. Dependencies",
-    "## 3. In-flight check",
-    "next-ticket/SKILL.md",
-  ).text;
+  NEXT_TICKET.section("## 2. Dependencies", "next-ticket/SKILL.md").text;
 
 test("the dependencies step says the cut runs on step 1 data alone, never the Agent Brief", () => {
   const s = dependenciesStep();

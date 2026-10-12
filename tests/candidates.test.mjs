@@ -2049,7 +2049,7 @@ function assertScanRunsDeclaredFlag(text, where) {
   // with a live second reason: step 7 of this same skill says "Never fold
   // `--label` into the create", where `--label` is `gh pr edit`'s own flag and
   // correct (#375). A file-wide negative would fail on that sentence.
-  const step = Pin.of(text, "text").between("## 1. Candidates", "## 2. Dependencies", where).text;
+  const step = Pin.of(text, "text").section("## 1. Candidates", where).text;
   assert.ok(
     step.includes(`--${flag} ready-for-agent`),
     `${where}'s candidate scan no longer runs the label flag candidates.mjs' OPTIONS declares`,

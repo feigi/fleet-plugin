@@ -15,7 +15,7 @@ const RUN_TEAM = read("skills/run-team/SKILL.md");
 const DERIVER = read("agents/fleet-recipe-deriver.agent.md").text;
 const PROVER = read("scripts/recipe-prove.mjs").text;
 
-const phase0 = () => RUN_TEAM.between("## Phase 0 — shortlist", "## Phase 1 — Pull", "run-team/SKILL.md phase 0").text;
+const phase0 = () => RUN_TEAM.section("## Phase 0 — shortlist", "run-team/SKILL.md phase 0").text;
 // The step spans its quoted dispatch prompt, so it is bounded by the next
 // rule's opener rather than by a blank line.
 const step = () => Pin.of(phase0(), "phase0()").between("**Derive the Recipe — the Recipe derivation step — before the fold-in below", "**Mid-run, a cache that stops running", "the phase-0 Recipe derivation step").text;

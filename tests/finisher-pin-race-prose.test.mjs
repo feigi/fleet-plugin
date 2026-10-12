@@ -23,12 +23,8 @@ const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 const FALLBACK_START = "#### Fallback: hand-dispatched reviewer member";
-const FALLBACK_END = "### Merge bot";
 
-// #753: proven output-identical to `between()` on the real SKILL.md text —
-// FALLBACK_END never occurs inside FALLBACK_START's own text, so searching
-// from `at` instead of `at + FALLBACK_START.length` never changes the match.
-const fallbackSection = () => RUN_TEAM.between(FALLBACK_START, FALLBACK_END, "run-team fallback section").text;
+const fallbackSection = () => RUN_TEAM.section(FALLBACK_START, "run-team fallback section").text;
 
 const CAUSE_BLOCK_START = "instead of asking anyone:";
 // The controller-facing resolution table (#2083) follows the block directly;

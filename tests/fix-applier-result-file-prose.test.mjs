@@ -27,24 +27,23 @@ const DOC = Pin.file(join(REPO, "commands", "review-and-fix.md"));
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 const RESULT_KEYS = new Set([...DIGEST_KEYS, "snapshot", "survived", "refuted", "unverified"]);
 
-const section = () => DOC.between("\n## The review result file\n", "\n## Specialists\n", "review-and-fix.md's result-file section").text;
 const ruling = (lead) => {
   // One paragraph per ruling: the document writes one line per paragraph, so
   // the paragraph is the line the bold lead-in opens.
-  const line = section().split("\n").find((l) => l.startsWith(lead));
+  const line = DOC.section("## The review result file", "review-and-fix.md's result-file section").text.split("\n").find((l) => l.startsWith(lead));
   assert.ok(line, `review-and-fix.md's result-file section no longer opens a paragraph with ${JSON.stringify(lead)}`);
   return line;
 };
 
 test("the fix-applier reads the review off the result file, at the path the runner and the controller write", () => {
-  assert.match(section(), Pin.phrase("`<scratch>/pr<pr>/<run>/review.json`"));
+  assert.match(DOC.section("## The review result file", "review-and-fix.md's result-file section").text, Pin.phrase("`<scratch>/pr<pr>/<run>/review.json`"));
   // Step 1's fix-applier branch is what sends a fix-applier here at all.
   const step1 = DOC.between("1. Run the review yourself.", "\n2. Plan the actions.", "review-and-fix.md step 1").text;
   assert.match(step1, Pin.phrase("see **The review result file**"), "step 1 no longer points a fix-applier at the result file");
 });
 
 test("every top-level field the jq recipes read is a field the review returns", () => {
-  const recipes = section().match(/^jq .*$/gm) ?? [];
+  const recipes = DOC.section("## The review result file", "review-and-fix.md's result-file section").text.match(/^jq .*$/gm) ?? [];
   assert.ok(recipes.length >= 5, `found ${recipes.length} jq recipes — the section lost its reading recipes`);
   const read = new Set();
   for (const line of recipes) {
@@ -66,7 +65,7 @@ test("every top-level field the jq recipes read is a field the review returns", 
 });
 
 test("the crash populations are told apart off refutersDispatched in the recipes, never off severity", () => {
-  const recipes = (section().match(/^jq .*$/gm) ?? []).join("\n");
+  const recipes = (DOC.section("## The review result file", "review-and-fix.md's result-file section").text.match(/^jq .*$/gm) ?? []).join("\n");
   assert.match(recipes, /select\(\.refutersDispatched > \(\.refutersInconclusive \/\/ 0\)\)/);
   assert.match(recipes, /select\(\.refutersDispatched > 0 and \.refutersDispatched == \.refutersInconclusive\)/);
   assert.match(recipes, /select\(\.refutersDispatched == 0\)/);
@@ -77,13 +76,13 @@ test("the crash populations are told apart off refutersDispatched in the recipes
 // review's one shared test run, which no specialist returns a copy of, so no
 // recipe comment names a specialist `test_run` field that no longer exists.
 test("the testEnvironment recipe calls it evidence about the shared test run, and no recipe comment names a test_run field", () => {
-  const recipes = section().match(/^jq .*$/gm) ?? [];
+  const recipes = DOC.section("## The review result file", "review-and-fix.md's result-file section").text.match(/^jq .*$/gm) ?? [];
   const line = recipes.find((l) => l.startsWith("jq -r '.testEnvironment' "));
   assert.ok(line, "the result-file section no longer has a `jq -r '.testEnvironment'` recipe");
   assert.match(line, Pin.phrase("# what the shared test run is evidence about"), "the testEnvironment recipe's comment no longer names the shared test run");
   // Every line of every fenced recipe block, not only the `jq ` ones: the `R=`
   // line and any other line the block grows carry comments too.
-  const fenced = [...section().matchAll(/^```bash\n([\s\S]*?)^```$/gm)].flatMap((m) => m[1].split("\n"));
+  const fenced = [...DOC.section("## The review result file", "review-and-fix.md's result-file section").text.matchAll(/^```bash\n([\s\S]*?)^```$/gm)].flatMap((m) => m[1].split("\n"));
   assert.ok(fenced.length > 0, "the result-file section lost its fenced recipe block");
   for (const l of fenced) assert.doesNotMatch(l, /test_run/i, `a recipe line names the retired test_run field: ${l}`);
 });

@@ -156,8 +156,6 @@ test("the ADR keeps its pre-chosen guard and its #211 relationship", () => {
 // CEILING: presence and contiguity over one bounded section. This proves the
 // clause is stated and that its reason travels with it; it cannot prove a
 // sentence elsewhere in the ADR does not carve out an exception.
-const guardSection = (text) =>
-  flat(Pin.of(text, "text").between("## The guard — floor and trigger, chosen before any data", "\n## Relationship to #211", "ADR 0001 guard section").text);
 
 // The ruling and its reason as ONE phrase, wrap-tolerant. Reworded on purpose →
 // update this string. Do not delete the pin to clear the red.
@@ -193,7 +191,7 @@ const guardPins = {
 const guardFiring = (s) => Object.keys(guardPins).filter((n) => guardPins[n](s));
 
 test("the guard names the population its trigger measures, and why", () => {
-  const s = guardSection(readRoot("docs", "adr", "0001-filing-label-bar-is-defect-confirmed.md"));
+  const s = flat(Pin.of(readRoot("docs", "adr", "0001-filing-label-bar-is-defect-confirmed.md"), "ADR 0001").section("## The guard — floor and trigger, chosen before any data", "ADR 0001 guard section").text);
   // Positive control against a vacuous slice: a stale anchor matching almost
   // nothing would still satisfy a doesNotMatch and assert nothing.
   assert.ok(s.length > 200, "the guard slice is shorter than its own heading and bullets — the extractor is broken, not the ADR wrong");
@@ -221,7 +219,7 @@ for (const [what, expected, mutate] of guardMutants) {
     const adr = readRoot("docs", "adr", "0001-filing-label-bar-is-defect-confirmed.md");
     const mutated = mutate(adr);
     assert.notEqual(mutated, adr, `the "${what}" fixture no longer matches the guard section and applied nothing — update the fixture, do not delete it`);
-    assert.deepEqual(guardFiring(guardSection(mutated)), expected, `the "${what}" fixture did not fire exactly the pins it is here to exercise`);
+    assert.deepEqual(guardFiring(flat(Pin.of(mutated, "mutated").section("## The guard — floor and trigger, chosen before any data", "ADR 0001 guard section").text)), expected, `the "${what}" fixture did not fire exactly the pins it is here to exercise`);
   });
 }
 
@@ -235,5 +233,5 @@ test("rewrapping the guard section and editing it elsewhere stays green", () => 
       .replace(/\n(?! *[-*] )(?! *```)/g, " ")
       .replace("When the guard fires, its verdict lands on `main`.", "When the guard fires, its verdict lands on `main` before the next run starts."));
   assert.notEqual(benign, adr, "the benign-edit fixture no longer matches the guard section — update it");
-  assert.deepEqual(guardFiring(guardSection(benign)), [], "a reflow plus an unrelated edit reddened a guard pin — the pins are over-tight, not the ADR wrong");
+  assert.deepEqual(guardFiring(flat(Pin.of(benign, "benign").between("## The guard — floor and trigger, chosen before any data", "\n## Relationship to #211", "ADR 0001 guard section").text)), [], "a reflow plus an unrelated edit reddened a guard pin — the pins are over-tight, not the ADR wrong");
 });

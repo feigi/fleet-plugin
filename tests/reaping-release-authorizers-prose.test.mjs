@@ -19,11 +19,7 @@ const REAPING = Pin.file(join(REPO, "skills", "run-team", "references", "reaping
 const SCRIPT = readFileSync(join(REPO, "scripts", "release-ticket.sh"), "utf8");
 
 const releaseSection = () =>
-  REAPING.between(
-    "## Why reap declines a claim that was never dispatched",
-    "## Never reap a branch a live member is on",
-    "reaping.md",
-  ).text;
+  REAPING.section("## Why reap declines a claim that was never dispatched", "reaping.md").text;
 
 // The sentence that lists the authorizers: from "authorized by" to the
 // "and by nothing else" that closes it.

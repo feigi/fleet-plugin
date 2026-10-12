@@ -107,7 +107,7 @@ test("step 5 cites a Run ledger section that exists in run-team", () => {
   // Flattened like the sibling below: the slice is hard-wrapped Markdown, so an
   // un-flattened match reds on a pure reflow — the one thing the header at the
   // top of this file promises stays green.
-  const runLedger = flat(RUN_TEAM.between("## Run ledger", "\n## Report", "run-team Run ledger section").text);
+  const runLedger = flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
   assert.match(runLedger, /`verdict` is `already-filed`, `tracker-hit`, `clean`, `soft-hit` or `unverified`/, "the cited section no longer enumerates the verdict values");
 });
 
@@ -123,7 +123,7 @@ test("step 5's exit-code readings agree with the section it cites", () => {
   // the step-5 side is pinned by "step 5 tells exit 1 from exit 3" above.
   // Measured: `exit **3**` → `exit **4**` in review-and-fix.md alone reds that
   // test and leaves this one green; the same edit in run-team alone inverts it.
-  const runLedger = flat(RUN_TEAM.between("## Run ledger", "\n## Report", "run-team Run ledger section").text);
+  const runLedger = flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
   assert.match(runLedger, /\*\*1\*\* already in this run's filed list/, "run-team no longer reads exit 1 as already filed this run — step 5 still does");
   assert.match(runLedger, /\*\*2\*\* usage\s+error/, "run-team no longer reads exit 2 as a usage error — step 5 still does");
   assert.match(runLedger, /\*\*3\*\* the ledger is clean but open or closed tracker issues match/, "run-team no longer reads exit 3 as a tracker hit — step 5 still does");
@@ -139,7 +139,7 @@ test("both filing sites read soft-hit as rows to read rather than as permission"
   // verdict it replaced (#388), and there are two callers because two different
   // agents file issues and each reads only its own instructions.
   assert.match(step5(), /`soft-hit`[\s\S]{0,400}?read the rows/i, "step 5 names soft-hit without telling its reader to read the rows it printed");
-  const runLedger = flat(RUN_TEAM.between("## Run ledger", "\n## Report", "run-team Run ledger section").text);
+  const runLedger = flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
   assert.match(runLedger, /`soft-hit`[\s\S]{0,400}?read\s+them before filing/i, "the cited section names soft-hit without saying what to do about it");
 });
 
@@ -176,7 +176,7 @@ test("the finisher files its own deferrals through the same guard", () => {
 // which owned every ledger write, never files. So the arm had never held a row.
 // The fix is the filer recording its own filing, under a ledger lock that lets
 // a second kind of writer exist; these pin the instruction half of it.
-const runLedger = () => flat(RUN_TEAM.between("## Run ledger", "\n## Report", "run-team Run ledger section").text);
+const runLedger = () => flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
 const finisherReport = () =>
   flat(RUN_TEAM.between("4. Report you the label", "**Give the finisher the instrument", "run-team finisher duty 4").text);
 const fixApplierReport = () =>

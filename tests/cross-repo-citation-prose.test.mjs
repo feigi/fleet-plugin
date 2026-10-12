@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { Pin } from "./support/prose-pin.mjs";
 
 // #35. A fleet reference doc cited its whole evidence base as "PR #574" while
 // this repo's PRs stop in the thirties, so the number reads as local — to a
@@ -12,51 +12,32 @@ import { join } from "node:path";
 // implementer agent body carries, and the applied instance where the foreign
 // evidence sits.
 const REPO = join(import.meta.dirname, "..", "plugin");
-const AGENT = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8");
-const CORRECTIONS = readFileSync(
-  join(REPO, "skills", "run-team", "references", "correction-tickets.md"),
-  "utf8",
-);
+const AGENT = Pin.file(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"));
+const CORRECTIONS = Pin.file(join(REPO, "skills", "run-team", "references", "correction-tickets.md"));
+
+// Markdown hard-wraps at ~80 columns, so a phrase splits across lines. Phrase
+// matches need the wrap invisible.
+const flat = (s) => s.replace(/\s+/g, " ");
 
 // Slice-scoped, not whole-file: a bare presence check anywhere in a long file
 // stays green when the text lands somewhere its reader never reaches (measured
 // before in this repo — member-prompt-prose.test.mjs #172). The claim-discipline
 // block is what the harness injects into every implementer, so the rule has to
 // sit inside it.
-function slice(text, startAnchor, endAnchor, what, { endsFile = false } = {}) {
-  const at = text.indexOf(startAnchor);
-  assert.notEqual(at, -1, `${what} start anchor ('${startAnchor}') moved — update this test`);
-  const end = text.indexOf(endAnchor, at);
-  // `endsFile` sections run to EOF until someone appends a section after them,
-  // so a missing end anchor is the normal state there, not a moved anchor.
-  if (end === -1 && endsFile) return text.slice(at);
-  assert.notEqual(end, -1, `${what} end anchor ('${endAnchor}') moved — update this test`);
-  return text.slice(at, end);
-}
-
-// Markdown hard-wraps at ~80 columns, so a phrase splits across lines. Phrase
-// matches need the wrap invisible.
-const flat = (s) => s.replace(/\s+/g, " ");
-
 const disciplineBlock = () =>
   flat(
-    slice(
-      AGENT,
+    AGENT.between(
       "**Claim discipline, on every ticket:**",
       "Commit incrementally as you go",
       "the agent body's claim-discipline block",
-    ),
+    ).text,
   );
 
 const conventionSection = () =>
-  flat(
-    slice(CORRECTIONS, "## Citing evidence from another repo's run", "\n## ", "the citation convention", {
-      endsFile: true,
-    }),
-  );
+  flat(CORRECTIONS.section("## Citing evidence from another repo's run", "the citation convention").text);
 
 const secondRunSection = () =>
-  flat(slice(CORRECTIONS, "## Second mechanism", "## The clause-by-clause duty", "the second-run evidence"));
+  flat(CORRECTIONS.section("## Second mechanism: minted, not inherited — scope creep in the prose", "the second-run evidence").text);
 
 test("the cross-repo citation rule reaches every implementer, in the agent body's claim-discipline block", () => {
   const block = disciplineBlock();
@@ -147,7 +128,7 @@ test("the file names no tracker number, foreign or local, and its examples stay 
   // `owner/repo#NN`, nor a `PR NN` / `PR#NN` may creep back in; the
   // placeholder form `owner/repo#N` must not trip the ban.
   assert.doesNotMatch(
-    CORRECTIONS,
+    CORRECTIONS.text,
     /(?<![\w/&$-])#\d+(?![0-9a-fA-F])|\b[\w.-]+\/[\w.-]+#\d+|\bPR ?#?\d+\b/,
     "a concrete tracker number is back in correction-tickets.md — the convention is taught with placeholders, not with a number from either repo",
   );
