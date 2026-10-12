@@ -819,3 +819,44 @@ test("an ancestor rotate whose write fails leaves the ledger where it was, and a
   assert.deepEqual(JSON.parse(again.stdout).carried, { rows: live, dispatched });
   assert.deepEqual(read(f).dispatched, dispatched);
 });
+
+test("an ancestor rotate carries a bare live dispatched entry whose malformed twin would retire it", (t) => {
+  // carryOf filters out malformed entries (with errors) from the dispatched section.
+  // A live entry (impl-14) that doesn't have an outcome stays in carried.dispatched.
+  // It stays out of ## Retired only because the bare impl-14 entry is passed on in carried.dispatched.
+  const f = fixture(t, {
+    ledger: ledgerOf({
+      rows: ["#12 impl-12"],
+      dispatched: ["impl-12", "impl-14", "impl-14=bogus"],
+    }),
+    controller: ANCESTOR,
+  });
+  const r = f.cli(["rotate"]);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  // carried dispatched includes valid entries (malformed impl-14=bogus is filtered out)
+  assert.deepEqual(out.carried.dispatched, ["impl-12", "impl-14"]);
+  // retired does not include impl-14 because it's in the carried dispatched
+  assert(!out.retired.includes("impl-14"), "impl-14 is kept live by its entry in carried.dispatched");
+  assert.deepEqual(read(f).dispatched, ["impl-12", "impl-14"]);
+  assert(!read(f).retired.includes("impl-14"));
+});
+
+test("an ancestor rotate retires entries with empty outcomes in ## Dispatched and on rows", (t) => {
+  // A token with an empty outcome (e.g., impl-5=) parses with outcome '' and an error.
+  // Rotate retires its name, like any other out-of-vocabulary outcome.
+  const f = fixture(t, {
+    ledger: ledgerOf({
+      rows: ["#5 impl-5=", "#6 impl-6"],
+      dispatched: ["impl-5=", "impl-6"],
+    }),
+    controller: ANCESTOR,
+  });
+  const r = f.cli(["rotate"]);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  // impl-5 is retired from ## Dispatched with empty outcome (outcome '' is out-of-vocabulary)
+  // impl-6 is not retired (dispatched entry has no outcome, no outcome token on the row)
+  assert.deepEqual(out.retired, ["impl-5"], "empty outcome retires the name");
+  assert.deepEqual(read(f).retired, ["impl-5"]);
+});
