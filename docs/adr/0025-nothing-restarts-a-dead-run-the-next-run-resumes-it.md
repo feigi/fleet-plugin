@@ -24,8 +24,11 @@ second task under a name the session has used with `<name>-2` while `hub
 send <name>` keeps reaching the first, so a name the new ledger does not
 carry is written, bare, to a `## Retired` section — every settled member
 in the archive's `## Dispatched` or on any of its rows that no carried entry
-or row names, every reviewer runner (`review-pr-<n>`, `-b`, `-c` …) a row
-launched that no carried row names, plus the archive's own `## Retired`.
+or row names (and, amended by #3099, every member given an outcome outside
+its family's vocabulary on one of those entries or rows: the line is skipped
+and not carried, but the name it holds is a name the session used), every
+reviewer runner (`review-pr-<n>`, `-b`, `-c` …) a row launched that no
+carried row names, plus the archive's own `## Retired`.
 `dispatch` refuses a retired name for every member family, naming the
 replacement (one retry letter past the highest the session has used on the
 number), `review` refuses a retired runner name and names the next free

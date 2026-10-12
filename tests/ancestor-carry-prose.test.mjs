@@ -24,9 +24,9 @@ test("the rotate step says what an ancestor rotate carries, and that dead and no
     "dead and none must still carry nothing");
   assert.match(s, Pin.phrase("it writes a new ledger holding every row of a stream (one PR's rows) in which a row carries an unsettled member token or an open `review=` launch, whole and with every other token on it, plus every unsettled `## Dispatched` entry and the settled entry of each member a carried row names"),
     "the ancestor carry must name what it carries");
-  assert.match(s, Pin.phrase("A line it cannot parse is skipped with a warning naming it, and the rotation still succeeds."));
-  // #3082: a settled name the carry leaves behind is still the session's.
-  assert.match(s, Pin.phrase("Every other settled name — in `## Dispatched` or on any row — and every reviewer runner a row launched goes into the new ledger's `## Retired` as a bare name, with whatever the archive's own `## Retired` held"),
+  assert.match(s, Pin.phrase("A line it cannot parse is skipped with a warning naming it, and the rotation still succeeds; a member name on a skipped line that carries an outcome is retired all the same, and a bare member token on a skipped row retires nothing."));
+  // A settled name the carry leaves behind is still the session's.
+  assert.match(s, Pin.phrase("Every other settled name — in `## Dispatched` or on any row, and including a name whose outcome is outside its family's vocabulary, whose line is skipped below — and every reviewer runner a row launched goes into the new ledger's `## Retired` as a bare name, with whatever the archive's own `## Retired` held"),
     "the rotate step must say which names retire");
   assert.match(s, Pin.phrase("`dispatch` refuses a retired name and names the replacement"), "and that dispatch reads them");
   assert.match(s, Pin.phrase("`review` refuses a retired runner name and names the next free reviewer name"), "and that review does");

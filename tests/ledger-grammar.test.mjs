@@ -188,6 +188,9 @@ test("nextMergeBot numbers past every merge-bot entry, live, settled or in the o
 // rows liveOnLedger() picked, and its `## Dispatched` entries.
 const carriedBy = (rows, live) => ({ rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched });
 
+// What a ledger that carries nothing passes as `carried`.
+const none = { rows: [], dispatched: [] };
+
 test("retiredOnLedger: every settled name liveOnLedger leaves behind, the prior ## Retired first, once each", () => {
   const rows = [
     "#3 impl-3=PR#5 → PR#5 · fix-pr-5",
@@ -214,9 +217,27 @@ test("retiredOnLedger: a settled token on a carried row is on the new ledger alr
 test("retiredOnLedger: an unsettled token on a row nothing carried retires nothing, a settled one does", () => {
   // A row the tick refuses is passed with the parsed ones and carried by
   // nobody; only a settled name on it is known gone.
-  const none = { rows: [], dispatched: [] };
   assert.deepEqual(retiredOnLedger(["#9 impl-9"], [], [], none), []);
   assert.deepEqual(retiredOnLedger(["#9 impl-9 · impl-8=killed"], [], [], none), ["impl-8"]);
+});
+
+test("retiredOnLedger: a name whose outcome is outside its family's vocabulary retires, in dispatched and on a row, once", () => {
+  assert.notEqual(parseToken("impl-5=bogus").error, null, "the fixture token is malformed");
+  assert.deepEqual(retiredOnLedger([], ["impl-5=bogus"], [], none), ["impl-5"]);
+  assert.deepEqual(retiredOnLedger(["#6 impl-6=bogus"], [], [], none), ["impl-6"]);
+  assert.deepEqual(retiredOnLedger(["#6 impl-6=bogus · impl-6=bogus"], ["impl-6=bogus", "impl-5=bogus"], [], none), ["impl-6", "impl-5"],
+    "in dispatched order, each name once");
+  assert.deepEqual(retiredOnLedger([], ["impl-5=bogus"], ["impl-5"], none), ["impl-5"], "the archive's own retired name is not repeated");
+  // What must still retire nothing: a bare token, and a name that does not parse.
+  assert.deepEqual(retiredOnLedger(["#6 impl-6 · nope=bogus"], ["impl-7", "nope=bogus", "=bogus"], [], none), []);
+});
+
+test("retiredOnLedger: a name the new ledger carries is not listed for its own out-of-vocabulary entry", () => {
+  const rows = ["#12 impl-12"];
+  const dispatched = ["impl-12", "impl-12=bogus", "impl-14=bogus", "impl-13=bogus"];
+  const carried = { rows: ["#12 impl-12"], dispatched: ["impl-13=killed"] };
+  assert.deepEqual(retiredOnLedger(rows, dispatched, [], carried), ["impl-14"],
+    "impl-12 rides on a carried row and impl-13 on a carried entry; only impl-14 is unaccounted for");
 });
 
 test("retiredOnLedger: a reviewer runner a row launched is retired, a workflow launch and another name are not", () => {

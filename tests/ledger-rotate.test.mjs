@@ -648,6 +648,47 @@ test("a settled token on a row the rotate skips retires too, an unsettled one do
   assert.deepEqual(out.retired, ["impl-18"]);
 });
 
+test("a ## Dispatched entry whose outcome is outside its family's vocabulary is skipped but its name retires, and dispatch refuses it", (t) => {
+  const bad = "impl-5=bogus";
+  const f = fixture(t, { ledger: ledgerOf({ rows: ["#12 impl-12"], dispatched: ["impl-12", bad] }), controller: ANCESTOR });
+  assert.equal(f.cli(["dispatch", "5", "impl-5"]).status, 2, "the name already counts as used inside the run");
+  const r = f.cli(["rotate"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stderr.includes(`skipped unparseable line '${bad}'`), r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(out.skipped, [bad]);
+  assert.deepEqual(out.carried.dispatched, ["impl-12"], "the malformed entry is still not carried");
+  assert.deepEqual(out.retired, ["impl-5"]);
+  assert.deepEqual(read(f).retired, ["impl-5"]);
+  assert.match(readFileSync(f.file, "utf8"), /\n## Retired\n\n- impl-5\n/);
+  const d = f.cli(["dispatch", "5", "impl-5"]);
+  assert.notEqual(d.status, 0);
+  assert.match(d.stderr, /impl-5 was already dispatched this session \(retired by rotate\) — a replacement takes a name of its own \(impl-5-b\)/);
+});
+
+test("a row token whose outcome is outside its family's vocabulary retires its name whether or not the row parsed, and a bare token beside it retires nothing", (t) => {
+  const badRow = "#5 impl-5=bogus";
+  const f = fixture(t, { ledger: ledgerOf({ rows: ["#12 impl-12", badRow, "#6 impl-6 · impl-7=bogus · review=member:"], dispatched: ["impl-12"] }), controller: ANCESTOR });
+  const r = f.cli(["rotate"]);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(out.skipped, [badRow, "#6 impl-6 · impl-7=bogus · review=member:"]);
+  assert.deepEqual(out.retired, ["impl-5", "impl-7"], "impl-6 is bare on a skipped row: retired nothing");
+  assert.deepEqual(read(f).retired, ["impl-5", "impl-7"]);
+  const d = f.cli(["dispatch", "5", "impl-5"]);
+  assert.notEqual(d.status, 0);
+  assert.match(d.stderr, /impl-5 was already dispatched this session \(retired by rotate\) — a replacement takes a name of its own \(impl-5-b\)/);
+  assert.equal(f.cli(["dispatch", "6", "impl-6"]).status, 0, "a bare token on a skipped row stays free");
+});
+
+test("an out-of-vocabulary outcome on a name a carried row already names is not listed twice, and a name outside the grammar retires nothing", (t) => {
+  // `impl-12` is live on its carried row, so its malformed entry adds nothing.
+  const f = fixture(t, { ledger: ledgerOf({ rows: ["#12 impl-12"], dispatched: ["impl-12", "impl-12=bogus", "impl-5=bogus", "impl-5=bogus", "nope=bogus"] }), controller: ANCESTOR });
+  const r = f.cli(["rotate"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).retired, ["impl-5"]);
+});
+
 test("a ## Retired line that is no bare member or reviewer name is skipped with a warning naming it, and the rest is kept", (t) => {
   const bad = ["impl-4=killed", "garbage-name", "merge-bot-2-b"];
   const ledger = `${ledgerOf({ rows: ["#12 impl-12"], dispatched: ["impl-12"] })}\n## Retired\n\n- impl-1\n${bad.map((l) => `- ${l}\n`).join("")}- review-pr-6\n`;
