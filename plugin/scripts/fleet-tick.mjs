@@ -1240,14 +1240,14 @@ function premiseState(noun, target, label) {
 // An Exclusion whose premise sends the tick to a refresh. Lifted, for a
 // ticket the current file does not already carry (if it does, the refresh
 // that lifted it has run): a `behind-pr:#M` reads off the open list already
-// in hand; a `behind-issue:#M` costs one `gh issue view`; a branch-named
-// `behind-pr` costs one `gh pr view`, whose MERGED or CLOSED lifts it —
-// before its PR exists, "no open PR" is not "merged". Standing, for a
-// branch-named `behind-pr` whose ticket the current file still carries: the
-// file may predate the exclusion, and only the refresh's own probe can drop
-// the ticket from it, so any answer short of MERGED or CLOSED, an
-// unanswered probe included, asks for that refresh. An unanswered probe
-// never lifts an exclusion.
+// in hand; a numeric `behind-issue:#M` costs one `gh issue view`; a
+// branch-named `behind-pr` costs one `gh pr view`, whose MERGED or CLOSED
+// lifts it — before its PR exists, "no open PR" is not "merged". Standing,
+// for a branch-named `behind-pr` or a numeric `behind-issue:#M` whose ticket
+// the current file still carries: the file may predate the exclusion, and
+// only the refresh's own probe can drop the ticket from it, so any answer
+// short of MERGED or CLOSED, an unanswered probe included, asks for that
+// refresh. An unanswered probe never lifts an exclusion.
 function liftedPremise(excluded, entries, prs) {
   const inFile = new Set(entries.map((e) => e.n));
   const open = new Set(prs.map((p) => p.number));
@@ -1260,12 +1260,15 @@ function liftedPremise(excluded, entries, prs) {
         if (!lifted && inFile.has(n)) return `behind-pr:#${target} not merged, #${n} still on the shortlist`;
         continue;
       }
+      if (kind === "issue" && isDigits(target)) {
+        const st = premiseState("issue", target, `behind-issue:#${target}`);
+        const lifted = st === "CLOSED" || st === "MERGED";
+        if (lifted && !inFile.has(n)) return `behind-issue:#${target} ${st}`;
+        if (!lifted && inFile.has(n)) return `behind-issue:#${target} not closed, #${n} still on the shortlist`;
+        continue;
+      }
       if (inFile.has(n) || !isDigits(target)) continue;
       if (kind === "pr" && !open.has(Number(target))) return `behind-pr:#${target} no longer open`;
-      if (kind === "issue") {
-        const st = premiseState("issue", target, `behind-issue:#${target}`);
-        if (st === "CLOSED" || st === "MERGED") return `behind-issue:#${target} ${st}`;
-      }
     }
   }
   return null;
@@ -1409,7 +1412,7 @@ function main() {
   }
 
   // Pull from the current file first; refresh when it is short, absent, an
-  // exclusion has lifted, or a branch-named one still names a ticket on it.
+  // exclusion has lifted, or a branch-named or issue one still names a ticket on it.
   // A refresh that succeeds replaces the heads outright: the PULL is read off
   // what shortlist.mjs just probed, never merged with the file's own heads,
   // or a ticket the refresh dropped would be pulled anyway.

@@ -2029,6 +2029,8 @@ test("CLI: a lifted exclusion premise triggers a refresh even with the shortlist
   const issue = runCli([], { ...full, ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "CLOSED" } });
   assert.equal(issue.refreshed, 1);
   assert.deepEqual(issue.issueViews, ["9"]);
+  // `full` omits #50: an open issue on a ticket the file does not carry
+  // stands, and asks for no refresh.
   const openIssue = runCli([], { ...full, ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "OPEN" } });
   assert.equal(openIssue.refreshed, 0);
   // Already back on the current file: the refresh that lifted it has run.
@@ -2036,7 +2038,7 @@ test("CLI: a lifted exclusion premise triggers a refresh even with the shortlist
     shortlist: shortlistText([1, 2, 50]), ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "CLOSED" },
   });
   assert.equal(reflected.refreshed, 0);
-  assert.deepEqual(reflected.issueViews, [], "no probe for a premise the file already reflects");
+  assert.deepEqual(reflected.issueViews, ["9"], "the file already carries the ticket: one probe, to learn the premise has lifted");
 });
 
 test("CLI: a lifted behind-pr exclusion names its ticket in the PULL row, with no refresh needed", () => {
@@ -2060,6 +2062,75 @@ test("CLI: a behind-issue exclusion already reflected in the current file names 
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 0, "already reflected — no refresh needed to admit it");
   assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 #50 /m);
+});
+
+// A behind-issue exclusion on a ticket the current file still carries: the
+// file may predate the row, so the tick probes the issue once, and any answer
+// short of CLOSED or MERGED asks for the refresh whose own probe decides. The
+// cap of 3 leaves #50 a head of the file, so only that refresh can hold it out.
+const ISSUE_HELD = { rows: ["#50 excluded · behind-issue:#9"] };
+
+test("CLI: a behind-issue exclusion with an open issue on a ticket in the shortlist refreshes and holds the ticket out of the PULL", () => {
+  const r = runCli(["--implementer-cap", "3"], {
+    shortlist: shortlistText([1, 2, 50]), refresh: shortlistText([1, 2]), ledger: ISSUE_HELD, issueStates: { 9: "OPEN" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 1, "an open issue does not lift the exclusion: the refresh's own probe decides");
+  assert.deepEqual(r.issueViews, ["9"]);
+  assert.match(r.stdout, /REFRESHED shortlist: 2 entries; 0 lifted {3}\(behind-issue:#9 not closed, #50 still on the shortlist\)/);
+  assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 +\(unclaimed=2 supply=2 /m);
+  assert.doesNotMatch(r.stdout, /PULL[^\n]*#50/);
+});
+
+test("CLI: a behind-issue exclusion whose refresh fails leaves the PULL as it was and reports the failure", () => {
+  const r = runCli(["--implementer-cap", "3"], {
+    shortlist: shortlistText([1, 2, 50]), ledger: ISSUE_HELD, issueStates: { 9: "OPEN" }, refreshFail: true,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 1);
+  assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 #50 +\(unclaimed=3 supply=3 /m);
+  assert.match(r.stdout, /REFRESH FAILED/);
+});
+
+test("CLI: a behind-issue probe that cannot answer never lifts the exclusion, and on a ticket in the file it refreshes", () => {
+  const down = runCli(["--implementer-cap", "3"], {
+    shortlist: shortlistText([1, 2, 50]), refresh: shortlistText([1, 2]), ledger: ISSUE_HELD, env: { ISSUE_VIEW_FAIL: "1" },
+  });
+  assert.equal(down.status, 0, down.stderr);
+  assert.equal(down.refreshed, 1, "an unanswered probe is not a lift: the refresh's own probe decides");
+  assert.match(down.stderr, /fleet-tick: gh issue view 9 exited 1: gh: issue view failed — behind-issue:#9 premise unconfirmed, exclusion stands/);
+  assert.match(down.stdout, /^implementers 0\/3 → PULL #1 #2 +\(unclaimed=2 supply=2 /m);
+  const noState = runCli(["--implementer-cap", "3"], {
+    shortlist: shortlistText([1, 2, 50]), refresh: shortlistText([1, 2]), ledger: ISSUE_HELD,
+    issueStates: { 9: "CLOSED" }, env: { ISSUE_VIEW_BODY: "<html>rate limited</html>" },
+  });
+  assert.equal(noState.status, 0, noState.stderr);
+  assert.equal(noState.refreshed, 1, "a body with no state is no lift either");
+  assert.match(noState.stderr, /fleet-tick: gh issue view 9 printed no state — behind-issue:#9 premise unconfirmed, exclusion stands/);
+  assert.match(noState.stdout, /^implementers 0\/3 → PULL #1 #2 +\(unclaimed=2 supply=2 /m);
+});
+
+test("CLI: a behind-issue exclusion whose issue is MERGED on a ticket in the shortlist asks for no refresh", () => {
+  const r = runCli(["--implementer-cap", "3"], {
+    shortlist: shortlistText([1, 2, 50]), ledger: ISSUE_HELD, issueStates: { 9: "MERGED" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 0, "MERGED lifts the premise, as CLOSED does");
+  assert.deepEqual(r.issueViews, ["9"]);
+  assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 #50 /m);
+});
+
+test("CLI: a behind-issue exclusion with a non-numeric target is never handed to gh, on a ticket in the shortlist or not", () => {
+  for (const target of ["feature-x", "--web"]) {
+    const ledger = { rows: [`#50 excluded · behind-issue:${target}`] };
+    const inFile = runCli(["--implementer-cap", "3"], { shortlist: shortlistText([1, 2, 50]), ledger });
+    assert.equal(inFile.status, 0, inFile.stderr);
+    assert.deepEqual(inFile.issueViews, [], target);
+    assert.equal(inFile.refreshed, 0, target);
+    assert.doesNotMatch(inFile.stderr, /premise unconfirmed/, target);
+    const absent = runCli(["--implementer-cap", "2"], { shortlist: shortlistText([1, 2, 3]), ledger });
+    assert.deepEqual(absent.issueViews, [], target);
+  }
 });
 
 // A branch-named `behind-pr` is the Exclusion the skill allows until its PR

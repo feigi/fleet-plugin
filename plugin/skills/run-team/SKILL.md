@@ -671,7 +671,8 @@ phase, or in any later one, asks the maintainer which tickets to take.
    `shortlist.mjs` itself when unclaimed entries fall below the implementer
    cap, when the file is missing or empty, when an `excluded` premise has
    lifted, and when a branch-named `behind-pr` exclusion whose PR is not yet
-   MERGED or CLOSED names a ticket the file still carries, and prints
+   MERGED or CLOSED, or a `behind-issue` exclusion whose issue is not yet
+   closed, names a ticket the file still carries, and prints
    `REFRESHED shortlist: <n> entries; <k> lifted`. Phase 0 runs it by hand
    once because a dead run's shortlist is stale by definition.
 
@@ -1862,8 +1863,10 @@ review units (in-flight `review=` tokens plus unsettled `fix-pr-` ones), the
 merge bot, merge holds, tier mismatches and the drain marker come off
 `.fleet/ledger.md`; the unclaimed heads and the supply come off
 `.fleet/shortlist.json`, which it refreshes itself when the unclaimed count is
-below the implementer cap, when the file is missing or empty, or when an
-Exclusion's premise has lifted; the open PRs come off `gh`. A ledger token it
+below the implementer cap, when the file is missing or empty, when an
+Exclusion's premise has lifted, or when a branch-named `behind-pr` or a
+`behind-issue` Exclusion still not lifted names a ticket the file carries; the
+open PRs come off `gh`. A ledger token it
 cannot read, it refuses rather than guessing — a member counted live or gone on
 a guess is the over- or under-dispatch it exists to prevent — so correct that
 row with `ledger.mjs row` and tick again. The caps default to 2 implementers
