@@ -4374,7 +4374,7 @@ Plus a queue-depth line: shortlist, supply, whether triage was suggested.
 - "This member finished, send it the next ticket" → resumes its transcript.
 - "The name is cosmetic" → the name is the ledger token and the hub address.
 - "Name the specialists too" → a depth-2 member cannot dispatch further.
-- "ready-for-agent came back empty, widen to ready-for-human" → empty means no work.
+- "ready-for-agent came back empty, widen to ready-for-human" → empty with no `specs-dropped=` means no work; empty with drops means specs awaiting to-tickets, and is still never a reason to widen.
 - "The reap at the end will pick up the claim I never dispatched" → it declines:
   not `[gone]`, no unique commits. Release it, or it reads as taken next run.
 - "Touches eight files, too big for the fleet" → size is not the axis. Decided is.

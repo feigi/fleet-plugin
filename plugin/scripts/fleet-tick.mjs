@@ -926,7 +926,7 @@ export function parseShortlist(text) {
   }
   if (!d || typeof d !== "object" || !Number.isInteger(d.scanned) || d.scanned < 0 || !Array.isArray(d.shortlist)
     || !d.shortlist.every((e) => e && Number.isInteger(e.n) && e.n > 0 && typeof e.t === "string")) return none;
-  const dropped = d.dropped ?? [];
+  const dropped = d.dropped === undefined ? [] : d.dropped;
   if (!Array.isArray(dropped) || !dropped.every((e) => e && Number.isInteger(e.n) && e.n > 0 && typeof e.reason === "string")) return none;
   return {
     status: "ok", scanned: d.scanned, entries: d.shortlist.map(({ n, t }) => ({ n, t })),

@@ -14,8 +14,9 @@
 // unattended fleet has no channel to one.
 //
 // Exit-code contract — the whole interface for a caller that reads no
-// stderr: 0 = survivors, JSON array on stdout. 1 = the query succeeded and
-// returned no rows at all. 2 = the query broke (bad args, gh failure, a
+// stderr: 0 = survivors, JSON array on stdout (under `--with-dropped`, the
+// envelope described below). 1 = the query succeeded and returned no rows at
+// all. 2 = the query broke (bad args, gh failure, a
 // reduction that did not apply, a capped result). 3 = the query succeeded,
 // returned at least one row, and every row was removed by the to-spec
 // filter — distinct from 1 so a caller such as run-team's phase 0 can say

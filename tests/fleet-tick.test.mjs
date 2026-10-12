@@ -1489,7 +1489,8 @@ test("parseShortlist: shortlist.mjs's payload reads; anything else is unparsable
     { status: "ok", scanned: 3, entries: [{ n: 7, t: "a" }], dropped: [] });
   for (const bad of ["", "{", "[]", '{"shortlist":[]}', '{"scanned":1,"shortlist":{}}', '{"scanned":1,"shortlist":[{"n":"7","t":"a"}]}',
     '{"scanned":1,"shortlist":[{"n":0,"t":"a"}]}', '{"scanned":1,"shortlist":[{"n":-1,"t":"a"}]}',
-    '{"scanned":1,"shortlist":[],"dropped":{}}', '{"scanned":1,"shortlist":[],"dropped":[{"n":0,"reason":"x"}]}',
+    '{"scanned":1,"shortlist":[],"dropped":{}}', '{"scanned":1,"shortlist":[],"dropped":null}',
+    '{"scanned":1,"shortlist":[],"dropped":[{"n":0,"reason":"x"}]}',
     '{"scanned":1,"shortlist":[],"dropped":[{"n":5}]}', '{"scanned":1,"shortlist":[],"dropped":[null]}']) {
     assert.deepEqual(parseShortlist(bad), { status: "unparsable", scanned: null, entries: [], dropped: [] }, bad);
   }
