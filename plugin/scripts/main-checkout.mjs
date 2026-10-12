@@ -181,27 +181,18 @@ function nestedHash(abs, env) {
   if (!now.ok) throw new Error(now.why);
   let head = git("git rev-parse HEAD", ["rev-parse", "-q", "--verify", "HEAD^{commit}"], abs, env);
   if (!head.ok) {
-    // rev-parse failed. Check if this is an unborn branch (HEAD points to a
-    // non-existent ref) or an unreadable commit (HEAD points to an existing ref
-    // whose commit cannot be resolved).
+    // No readable commit. Only a branch whose ref does not exist yet (show-ref
+    // exit 1) is unborn and hashes as the name HEAD holds; a ref that exists,
+    // or a show-ref that failed any other way, is a failed read.
     const symbolic = git("git symbolic-ref HEAD", ["symbolic-ref", "-q", "HEAD"], abs, env);
-    if (!symbolic.ok) {
-      // symbolic-ref also failed — HEAD is detached or otherwise invalid.
-      throw new Error(symbolic.why);
-    }
-    // symbolic-ref succeeded. Get the ref it names.
-    const refName = symbolic.stdout.trim();
-    // Check if the ref exists. Unborn refs don't; healthy refs do.
-    const refExists = git("check ref", ["show-ref", "-q", "--verify", "--", refName], abs, env);
-    if (refExists.ok) {
-      // The ref exists but the commit cannot be read — this is an error, not a
-      // fallback. Return a failure by throwing rather than using the fallback.
-      throw new Error(`HEAD points to ${refName} but the commit cannot be resolved`);
-    }
-    // The ref does not exist: unborn branch case. Use symbolic-ref as fallback.
+    // HEAD is detached or otherwise invalid.
+    if (!symbolic.ok) throw new Error(symbolic.why);
+    const ref = symbolic.stdout.trim();
+    const probe = git("git show-ref --verify", ["show-ref", "-q", "--verify", "--", ref], abs, env);
+    if (probe.ok) throw new Error(`HEAD points to ${ref} but the commit cannot be resolved`);
+    if (probe.status !== 1) throw new Error(probe.why);
     head = symbolic;
   }
-  if (!head.ok) throw new Error(head.why);
   return `repo:${sha(`${head.stdout}${formatEntries(now.entries)}`)}`;
 }
 
