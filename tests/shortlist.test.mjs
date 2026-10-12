@@ -113,6 +113,10 @@ const issue = (number, blockedBy = []) => ({
   labels: [{ name: "ready-for-agent" }],
   body: blockedBy.length ? `## Blocked by\n\n${blockedBy.map((b) => `- #${b}`).join("\n")}\n` : "",
 });
+// to-spec's signature heading: candidates.mjs drops this row before `scanned`
+// is counted.
+const spec = (number) => ({ ...issue(number), body: "## User Stories\n\n1. As a user, I want…\n" });
+const TO_SPEC = "to-spec: User Stories heading";
 
 // One throwaway workspace: a git repository (the run's workspace), a
 // directory of scripts (shortlist.mjs and what it reaches), and a bin/ holding
@@ -181,6 +185,7 @@ test("writes the oldest-first survivors and the scanned count to .fleet/shortlis
   assert.deepEqual(f.written(), {
     scanned: 4,
     shortlist: [{ n: 1701, t: "t1701" }, { n: 1710, t: "t1710" }, { n: 1720, t: "t1720" }],
+    dropped: [],
   });
   // stdout is the same payload, plus where it was written.
   assert.deepEqual(JSON.parse(r.stdout), { file: f.shortlistFile, ...f.written() });
@@ -251,6 +256,7 @@ test("dependency scan: an open blocker drops the ticket; a closed or merged one 
   assert.deepEqual(f.written(), {
     scanned: 7,
     shortlist: [1702, 1703, 1706, 1707].map((n) => ({ n, t: `t${n}` })),
+    dropped: [],
   });
   assert.match(r.stderr, /#1701 dropped — open blocker #50\b/);
   assert.match(r.stderr, /#1704 dropped — blocker #53's state could not be read/);
@@ -326,7 +332,29 @@ test("an empty queue is an answer: exit 0, and the file says so", (t) => {
   writeFileSync(f.shortlistFile, JSON.stringify({ scanned: 1, shortlist: [{ n: 1, t: "stale" }] }));
   const r = f.run({ issues: [] });
   ok(r);
-  assert.deepEqual(f.written(), { scanned: 0, shortlist: [] });
+  assert.deepEqual(f.written(), { scanned: 0, shortlist: [], dropped: [] });
+});
+
+// candidates.mjs's exit 3: every row was a to-spec spec. The queue reads empty,
+// so the file is the only place a reader that never sees stderr can learn the
+// ticket is there at all.
+test("a queue the to-spec filter emptied is written empty and names every drop by number and reason", (t) => {
+  const f = fixture(t);
+  const r = f.run({ issues: [spec(2151)] });
+  ok(r);
+  assert.deepEqual(f.written(), { scanned: 0, shortlist: [], dropped: [{ n: 2151, reason: TO_SPEC }] });
+  assert.deepEqual(JSON.parse(r.stdout), { file: f.shortlistFile, ...f.written() });
+  assert.match(r.stderr, /dropped #2151 — to-spec spec/);
+});
+
+test("a partial drop keeps the survivors and names the drops beside them", (t) => {
+  const f = fixture(t);
+  const r = f.run({ issues: [spec(1702), issue(1701), spec(1700)] });
+  ok(r);
+  assert.deepEqual(f.written(), {
+    scanned: 1, shortlist: [{ n: 1701, t: "t1701" }],
+    dropped: [{ n: 1700, reason: TO_SPEC }, { n: 1702, reason: TO_SPEC }],
+  });
 });
 
 // Every refusal leaves the previous file exactly as it was: an empty
@@ -356,6 +384,30 @@ test("a failed scan, an unreadable ledger or a stray argument refuses at exit 2 
   assert.equal(unread.status, 2, unread.stderr);
   assert.match(unread.stderr, /shortlist: ledger\.mjs read exited 2/);
   assert.equal(readFileSync(f.shortlistFile, "utf8"), before);
+});
+
+// candidates.mjs's `dropped` is carried into the file as the only record of
+// what the filter removed, so a malformed one is a scan that did not answer:
+// the refusal leaves the previous file whole rather than writing drops that
+// name nothing.
+test("a candidates.mjs answer whose dropped is not a list of {n, reason} refuses at exit 2 and leaves the file untouched", (t) => {
+  const f = fixture(t);
+  mkdirSync(join(f.repo, ".fleet"));
+  const before = JSON.stringify({ scanned: 1, shortlist: [{ n: 1701, t: "t1701" }], dropped: [] });
+  writeFileSync(f.shortlistFile, before);
+  const stub = join(f.root, "scripts", "candidates.mjs");
+  const cases = [
+    ["dropped is not an array", { rows: [], dropped: "x" }, /candidates\.mjs did not return \{rows, dropped\}/],
+    ["an entry's n is not an integer", { rows: [], dropped: [{ n: "1", reason: "r" }] }, /dropped entry 0 is not \{n, reason\}/],
+    ["an entry has no reason", { rows: [], dropped: [{ n: 1 }] }, /dropped entry 0 is not \{n, reason\}/],
+  ];
+  for (const [name, answer, message] of cases) {
+    writeFileSync(stub, `process.stdout.write(${JSON.stringify(JSON.stringify(answer))});\n`);
+    const r = f.run({ issues: [issue(1701)] });
+    assert.equal(r.status, 2, `${name}: ${r.stderr}`);
+    assert.match(r.stderr, message, name);
+    assert.equal(readFileSync(f.shortlistFile, "utf8"), before, name);
+  }
 });
 
 // The refusal names what failed: an operator watching a stalled run has to be

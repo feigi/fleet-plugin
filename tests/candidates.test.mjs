@@ -1757,6 +1757,54 @@ test("a labeled all-specs query that falls back to a genuinely empty unfiltered 
   assert.equal(status, 1);
 });
 
+// `--with-dropped` is how the to-spec drops leave this process for a caller
+// that reads no stderr: shortlist.mjs passes it, so an empty or short
+// shortlist can name what the filter took. Without the flag stdout stays the
+// bare survivor array every other caller parses, so the flagless run below is
+// compared byte for byte against the envelope's own `rows`.
+test("--with-dropped wraps the survivors and names every to-spec drop by number and reason; the flagless stdout and every exit code are unchanged", () => {
+  const LABELED = ["--require-label", "ready-for-agent"];
+  const reason = "to-spec: User Stories heading";
+  const cases = [
+    // A partial drop: survivors and drops together, exit 0.
+    { issues: [ticket(42, "## User Stories\n\n1. As a user…\n"), ticket(19, "## What to build\n\nb\n"),
+      ticket(7, "## Problem Statement\n\ny\n\n## User Stories\n\n2. As a user…\n")],
+      status: 0, kept: [19], dropped: [7, 42] },
+    // Every row a spec: exit 3, nothing kept, every number named.
+    { issues: [ticket(2151, "## User Stories\n\n1. As a user…\n")], status: 3, kept: [], dropped: [2151] },
+    // A genuinely empty queue: exit 1 and nothing dropped.
+    { issues: [], status: 1, kept: [], dropped: [] },
+  ];
+  for (const c of cases) {
+    const plain = run(c.issues, LABELED);
+    const wrapped = run(c.issues, [...LABELED, "--with-dropped"]);
+    assert.equal(plain.status, c.status, plain.stderr);
+    assert.equal(wrapped.status, c.status, wrapped.stderr);
+    const env = JSON.parse(wrapped.stdout);
+    assert.deepEqual(Object.keys(env), ["rows", "dropped"]);
+    assert.deepEqual(env.rows.map((r) => r.n), c.kept);
+    assert.deepEqual(env.dropped, c.dropped.map((n) => ({ n, reason })));
+    assert.equal(plain.stdout, `${JSON.stringify(env.rows)}\n`, "the flagless stdout is the bare survivor array");
+    // The stderr drop line is the same with and without the flag.
+    for (const n of c.dropped) assert.match(wrapped.stderr, new RegExp(`dropped #${n} — to-spec spec, not a ticket \\(User Stories heading\\)`));
+  }
+});
+
+test("--with-dropped under --allow-fallback names the final pass's drops alone, the pass exit 3 and the rows describe", () => {
+  // Pass 1 (labeled) is all specs and falls back; the unfiltered pass drops
+  // #11 and keeps #12. #10 was dropped in pass 1, which the rows on stdout do
+  // not describe either, so it is not in `dropped`.
+  const r = run(
+    [ticket(10, "## User Stories\n\n1. As a user…\n")],
+    ["--require-label", "ready-for-agent", "--allow-fallback", "--with-dropped"],
+    [ticket(11, "## User Stories\n\n1. …\n", ["ready-for-human"]), ticket(12, "## What to build\n\nx\n", ["ready-for-human"])],
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const env = JSON.parse(r.stdout);
+  assert.deepEqual(env.rows.map((row) => row.n), [12]);
+  assert.deepEqual(env.dropped, [{ n: 11, reason: "to-spec: User Stories heading" }]);
+});
+
 test("candidates come back oldest first, whatever order gh returned them in", () => {
   // gh defaults to created-desc, so newest-first is the realistic input.
   const { rows } = run([

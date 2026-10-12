@@ -606,8 +606,10 @@ phase, or in any later one, asks the maintainer which tickets to take.
    — no ticket body is read here, because a Pull reads one ticket in full at
    the moment it admits it:
 
-   - **Candidate scan** — `candidates.mjs --require-label ready-for-agent`,
-     oldest-first, never re-ranked. Its row count is `scanned`, the supply.
+   - **Candidate scan** — `candidates.mjs --require-label ready-for-agent
+     --with-dropped`, oldest-first, never re-ranked. Its row count is
+     `scanned`, the supply; the rows its to-spec filter removed are
+     `dropped`, counted nowhere.
    - **Dependency scan**, `next-ticket` step 2, on each row's `d` array. Open
      blocker → drop.
    - **Live Exclusions** — a ticket whose ledger row reads `excluded ·
@@ -618,7 +620,7 @@ phase, or in any later one, asks the maintainer which tickets to take.
      free. Both drop the ticket, logged by number.
 
    It writes the survivors, in order, to `.fleet/shortlist.json` —
-   `{scanned, shortlist: [{n, t}]}` — resolved against the git common dir by
+   `{scanned, shortlist: [{n, t}], dropped: [{n, reason}]}` — resolved against the git common dir by
    `fleet-dir.mjs`, the one locator `ledger.mjs` resolves `.fleet/ledger.md`
    with too, so you, the tick and a member in its own worktree all name one
    file. **Exit 0 is the file written,
@@ -638,15 +640,20 @@ phase, or in any later one, asks the maintainer which tickets to take.
    widen the list: `ready-for-human` needs a human to brainstorm first and you
    have no channel to one mid-flight.
 
-   `candidates.mjs`'s exit 3 reaches you as an empty shortlist with its to-spec
-   notice on stderr. **Exit 3 is not that empty queue, and never a reason to
+   `candidates.mjs`'s exit 3 reaches you as an empty shortlist whose `dropped`
+   names every ticket the to-spec filter took, by number and reason — and the
+   tick prints the same list on every tick, `specs-dropped=#<N> (to-spec: User
+   Stories heading)` on the implementer row. **Exit 3 is not that empty queue, and never a reason to
    widen the net.** It says the labeled query returned rows and the to-spec
    filter took every one: what is queued is to-tickets' input rather than
    claimable tickets, and a member handed one implements an entire spec as a
    single ticket. Log it as
-   specs awaiting to-tickets, not as no work — and still do not pass
+   specs awaiting to-tickets, not as no work — read the numbers off
+   `dropped` or `specs-dropped=`, not off stderr, which the tick's own
+   refresh discards — and still do not pass
    `--allow-fallback`, whose second pass is unfiltered and so reaches the
-   `ready-for-human` and untriaged work you have no channel for.
+   `ready-for-human` and untriaged work you have no channel for. A partial
+   drop, survivors and specs together, is named the same way.
 2. **Refresh is the tick's from here on.** `fleet-tick.mjs` runs
    `shortlist.mjs` itself when unclaimed entries fall below the implementer
    cap, when the file is missing or empty, and when an `excluded` premise has
@@ -1859,6 +1866,10 @@ depth** guard table applied in code. Act on each line as it reads:
   blind until it can.
 - `SUGGEST /triage, hold idle` — nothing is admissible after the refresh.
   Suggest, never run (**Queue depth**).
+- `specs-dropped=#<N> … (to-spec: User Stories heading)` at the end of the
+  implementer row's counts, whatever its ACTION — the tickets the to-spec
+  filter kept out of `supply`, read off the shortlist's `dropped`. Never
+  actionable. Log them as specs awaiting to-tickets (phase 0), not as no work.
 - `DISPATCH fix-pr PR#<M> …` — a fix-applier per PR, for a review's survived or unverified findings,
   a dispositions mismatch no retry has answered, or a `conflict-hold:#<M>` — the merge bot's, or one you recorded off a `CONFLICT` line (**Reviewers**). Printed
   ahead of reviews on purpose: finishing what is started beats starting more.
@@ -2018,6 +2029,9 @@ A live member past its family's threshold folds the same way — it is advice, s
 nothing for the heartbeat to act on by itself — and the folded line names each
 such member (`…; CHECK-LIVENESS fix-pr-5 persists — …`) for as long as it stays
 live past the threshold.
+To-spec drops fold the same way, and the folded line names them
+(`…; specs-dropped=#<N> (to-spec: User Stories heading) persists — …`) for as
+long as the shortlist carries them.
 
 **When you stop on purpose, say why — one command, and it is the last thing
 you owe the next run.** The beat leaves a dated mark on every hold, so a run
@@ -3814,6 +3828,10 @@ never as a second, hand-run copy of it.
 | below the cap, missing or empty | the tick refreshes first — `REFRESHED shortlist: n entries; k lifted` — and Pulls from what it found |
 | 0 after that refresh | `SUGGEST /triage, hold idle` |
 
+Whatever the row prints, a `specs-dropped=#<N> (…)` at the end of its counts
+names the tickets the to-spec filter kept out of the shortlist — specs
+awaiting to-tickets, so an empty shortlist carrying one is not "no work".
+
 Four holds outrank every row: `HOLD (draining)` once `ledger.mjs drain` has
 recorded the drain, `HOLD (tier mismatch impl-<N>)` until a replacement is
 dispatched at the right tier, `HOLD (tier unchecked impl-<N>)` until
@@ -4356,7 +4374,7 @@ Plus a queue-depth line: shortlist, supply, whether triage was suggested.
 - "This member finished, send it the next ticket" → resumes its transcript.
 - "The name is cosmetic" → the name is the ledger token and the hub address.
 - "Name the specialists too" → a depth-2 member cannot dispatch further.
-- "ready-for-agent came back empty, widen to ready-for-human" → empty means no work.
+- "ready-for-agent came back empty, widen to ready-for-human" → empty with no `specs-dropped=` means no work; empty with drops means specs awaiting to-tickets, and is still never a reason to widen.
 - "The reap at the end will pick up the claim I never dispatched" → it declines:
   not `[gone]`, no unique commits. Release it, or it reads as taken next run.
 - "Touches eight files, too big for the fleet" → size is not the axis. Decided is.

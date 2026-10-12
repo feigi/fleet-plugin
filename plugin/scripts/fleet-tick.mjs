@@ -35,9 +35,12 @@
 //             the git common dir as ledger.mjs resolves the ledger. Its
 //             entries minus every ticket with an `impl-` row, or an `excluded`
 //             row whose premise still holds, are the heads a PULL names; its
-//             `scanned` is the supply. Missing or unparsable is depth 0 and a
+//             `scanned` is the supply. Its `dropped`, the rows candidates.mjs's
+//             to-spec filter removed before `scanned` was counted, is named on
+//             the implementer row as `specs-dropped=` and counts toward
+//             nothing. Missing or unparsable is depth 0 and a
 //             refresh, never a refusal: the depth only ever bounds PULLs
-//             downward.
+//             downward. A file with no `dropped` names no drops.
 //   gh        The open PRs, by label, by whether they close an issue and by
 //             GitHub's `mergeable` — the merge queue, which PRs are owed a
 //             review, and which conflict. Also, for each ticket
@@ -153,10 +156,22 @@ function replaceStep(held, implNames) {
   ].filter(Boolean).join("; ");
 }
 
+// `specs-dropped=#<n> #<n> (to-spec: User Stories heading)`, one clause per
+// reason, or "" when nothing was dropped. A dropped ticket never reaches
+// `supply`, so without this an all-specs queue reads as no work at all.
+function specsDropped(dropped) {
+  if (!dropped.length) return "";
+  const by = new Map();
+  for (const { n, reason } of dropped) by.set(reason, [...(by.get(reason) ?? []), `#${n}`]);
+  return `specs-dropped=${[...by].map(([reason, ns]) => `${ns.join(" ")} (${reason})`).join(", ")}`;
+}
+
 function implementers(s, left) {
+  const dropped = specsDropped(s.dropped);
   const row = mkRow("implementers", s.implLive, s.implCap,
     `unclaimed=${s.heads.length} supply=${s.supply ?? "?"} unreviewed=${left.unreviewed}`
-    + (s.shortlistStatus === "ok" ? "" : ` shortlist=${s.shortlistStatus}`));
+    + (s.shortlistStatus === "ok" ? "" : ` shortlist=${s.shortlistStatus}`)
+    + (dropped ? ` ${dropped}` : ""));
 
   // Drain stops supply and nothing else. Read from the file, so
   // a replacement controller that never saw the drain is held by it too.
@@ -898,9 +913,11 @@ export function unclaimed(entries, run) {
   return entries.map((e) => e.n).filter((n) => !run.claimed.has(n) || unverifiable.has(n));
 }
 
-// shortlist.mjs's payload, `{scanned, shortlist: [{n, t}]}`, or unparsable.
+// shortlist.mjs's payload, `{scanned, shortlist: [{n, t}], dropped: [{n,
+// reason}]}`, or unparsable. A payload with no `dropped` predates the field
+// and reads as no drops.
 export function parseShortlist(text) {
-  const none = { status: "unparsable", scanned: null, entries: [] };
+  const none = { status: "unparsable", scanned: null, entries: [], dropped: [] };
   let d;
   try {
     d = JSON.parse(text);
@@ -909,7 +926,12 @@ export function parseShortlist(text) {
   }
   if (!d || typeof d !== "object" || !Number.isInteger(d.scanned) || d.scanned < 0 || !Array.isArray(d.shortlist)
     || !d.shortlist.every((e) => e && Number.isInteger(e.n) && e.n > 0 && typeof e.t === "string")) return none;
-  return { status: "ok", scanned: d.scanned, entries: d.shortlist.map(({ n, t }) => ({ n, t })) };
+  const dropped = d.dropped === undefined ? [] : d.dropped;
+  if (!Array.isArray(dropped) || !dropped.every((e) => e && Number.isInteger(e.n) && e.n > 0 && typeof e.reason === "string")) return none;
+  return {
+    status: "ok", scanned: d.scanned, entries: d.shortlist.map(({ n, t }) => ({ n, t })),
+    dropped: dropped.map(({ n, reason }) => ({ n, reason })),
+  };
 }
 
 // Why this tick refreshes the shortlist, or null. The premise-lifted
@@ -1178,16 +1200,16 @@ function shortlistPath() {
 }
 
 function readShortlist(path) {
-  if (path === null) return { status: "missing", scanned: null, entries: [] };
+  if (path === null) return { status: "missing", scanned: null, entries: [], dropped: [] };
   let text;
   try {
     text = readFileSync(path, "utf8");
   } catch (e) {
-    if (e.code === "ENOENT") return { status: "missing", scanned: null, entries: [] };
+    if (e.code === "ENOENT") return { status: "missing", scanned: null, entries: [], dropped: [] };
     // Distinct from `unparsable`: that label's only other producer is
     // genuinely malformed JSON, and a permissions/filesystem fault reported
     // as a JSON-content fault sends the operator chasing the wrong repair.
-    return { status: "unreadable", scanned: null, entries: [], code: e.code ?? null, message: e.message };
+    return { status: "unreadable", scanned: null, entries: [], dropped: [], code: e.code ?? null, message: e.message };
   }
   return parseShortlist(text);
 }
@@ -1369,6 +1391,7 @@ function main() {
   // so a slot the current file could not fill does not wait a tick for it.
   let heads = unclaimed(current.entries, run);
   let supply = current.scanned;
+  let dropped = current.dropped;
   let fresh = null;
   const trigger = refreshWhy({ draining: run.draining, status: current.status, entries: current.entries.length,
     unclaimed: heads.length, implCap: caps.implCap })
@@ -1379,6 +1402,7 @@ function main() {
       const excludedSet = new Set(run.excluded.map((x) => x.n));
       heads = [...new Set([...heads, ...unclaimed(r.entries, run)])];
       supply = r.scanned;
+      dropped = r.dropped;
       fresh = {
         ok: true, trigger, entries: r.entries.length,
         lifted: r.entries.filter((e) => excludedSet.has(e.n)).length,
@@ -1396,7 +1420,7 @@ function main() {
   const mainCheckout = checkMainCheckout();
 
   const rows = reconcile({
-    ...caps, ...run, heads, supply, shortlistStatus: current.status, refresh: fresh, mainCheckout, router,
+    ...caps, ...run, heads, supply, dropped, shortlistStatus: current.status, refresh: fresh, mainCheckout, router,
   });
   const said = describe(mainCheckout, run.live);
   // Re-read rather than reusing priorState: this must be the freshest
@@ -1446,7 +1470,11 @@ function main() {
     // `quiet`, and named on the folded line for as long as it stays live
     // past its threshold. The digest already moves when its bucket does.
     const aged = stale.map((s) => `; CHECK-LIVENESS ${s.member} persists`).join("");
-    console.log(`fleet-tick: unchanged, nothing to act on (quiet=${prev.quiet + 1})${held}${aged} — full rows on the next change`);
+    // The to-spec drops the same way: advice, and the one reason an empty
+    // shortlist is not "no work".
+    const specs = specsDropped(dropped);
+    const drops = specs ? `; ${specs} persists` : "";
+    console.log(`fleet-tick: unchanged, nothing to act on (quiet=${prev.quiet + 1})${held}${aged}${drops} — full rows on the next change`);
     return;
   }
   for (const line of lines) console.log(line);

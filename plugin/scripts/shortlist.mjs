@@ -6,8 +6,11 @@
 //
 // The filters, in the order they run:
 //
-//   1. `candidates.mjs --require-label ready-for-agent`, oldest-first and never
-//      re-ranked. Its row count is `scanned`, the supply the tick reports.
+//   1. `candidates.mjs --require-label ready-for-agent --with-dropped`,
+//      oldest-first and never re-ranked. Its row count is `scanned`, the
+//      supply the tick reports; the rows its to-spec filter removed are
+//      `dropped`, which counts toward nothing and is carried so an empty or
+//      short shortlist still names them.
 //   2. The dependency scan on each row's `d`: an open blocker drops the ticket
 //      (next-ticket step 2). A blocker that is itself a candidate is open by
 //      construction — candidates.mjs queries `--state open` — so only the rest
@@ -50,9 +53,9 @@
 // Unlike the ledger there
 // is no cwd-relative degrade: outside a repository inflight.sh cannot answer
 // for a single ticket either, so there is nothing honest to write. The payload
-// is `{scanned, shortlist: [{n, t}]}`, written to a sibling temp file and
-// renamed over the target so a reader never sees half of it; stdout carries
-// the same object plus `file`.
+// is `{scanned, shortlist: [{n, t}], dropped: [{n, reason}]}`, written to a
+// sibling temp file and renamed over the target so a reader never sees half
+// of it; stdout carries the same object plus `file`.
 //
 // The ledger is read through `ledger.mjs read`, never parsed here, so the
 // ledger keeps one parser. candidates.mjs's stderr passes straight through —
@@ -150,31 +153,36 @@ function shortlistPath() {
 }
 
 function scan() {
-  const r = spawnSync(process.execPath, [join(SCRIPT_DIR, "candidates.mjs"), "--require-label", LABEL], {
+  const r = spawnSync(process.execPath, [join(SCRIPT_DIR, "candidates.mjs"), "--require-label", LABEL, "--with-dropped"], {
     encoding: "utf8", maxBuffer: MAX_BUFFER, stdio: ["ignore", "pipe", "inherit"],
   });
   if (r.error) die(`candidates.mjs did not run: ${how(r)}`);
-  const out = (r.stdout ?? "").trim();
   // Exit 1 (an empty queue) and exit 3 (every row a to-spec spec) are both the
   // empty answer. Exit 1 is also Node's own code for a crash, so the payload
-  // decides.
-  if ((r.status === 1 || r.status === 3) && out === "[]") return [];
-  if (r.status !== 0) {
+  // decides: it must parse, with no rows.
+  if (r.status !== 0 && r.status !== 1 && r.status !== 3) {
     die(`candidates.mjs ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`} — the scan did not answer, so there is no shortlist to write`);
   }
-  let rows;
+  let out;
   try {
-    rows = JSON.parse(out);
+    out = JSON.parse(r.stdout ?? "");
   } catch (e) {
+    if (r.status !== 0) die(`candidates.mjs exited ${r.status} — the scan did not answer, so there is no shortlist to write`);
     die(`could not parse candidates.mjs output: ${e.message}`);
   }
-  if (!Array.isArray(rows)) die("candidates.mjs did not return an array");
+  if (!out || typeof out !== "object" || !Array.isArray(out.rows) || !Array.isArray(out.dropped)) {
+    die("candidates.mjs did not return {rows, dropped}");
+  }
+  const { rows, dropped } = out;
+  if (r.status !== 0 && rows.length) die(`candidates.mjs exited ${r.status} with rows — the scan did not answer, so there is no shortlist to write`);
   const bad = rows.findIndex(
     (row) => !row || !Number.isInteger(row.n) || typeof row.t !== "string" ||
       !Array.isArray(row.d) || !row.d.every(Number.isInteger),
   );
   if (bad !== -1) die(`candidates.mjs row ${bad} is not {n, t, d} with integer refs`);
-  return rows;
+  const badDrop = dropped.findIndex((e) => !e || !Number.isInteger(e.n) || typeof e.reason !== "string");
+  if (badDrop !== -1) die(`candidates.mjs dropped entry ${badDrop} is not {n, reason}`);
+  return { rows, dropped: dropped.map(({ n, reason }) => ({ n, reason })) };
 }
 
 function ledgerRows() {
@@ -236,7 +244,7 @@ async function main() {
   const extra = process.argv.slice(2);
   if (extra.length) die(`takes no arguments, got ${extra.join(" ")}`);
   const file = shortlistPath();
-  const rows = scan();
+  const { rows, dropped } = scan();
   const ledger = ledgerRows();
 
   // Dependency scan.
@@ -316,7 +324,7 @@ async function main() {
     return false;
   });
 
-  const payload = { scanned: rows.length, shortlist: survivors.map(({ n, t }) => ({ n, t })) };
+  const payload = { scanned: rows.length, shortlist: survivors.map(({ n, t }) => ({ n, t })), dropped };
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     mkdirSync(dirname(file), { recursive: true });

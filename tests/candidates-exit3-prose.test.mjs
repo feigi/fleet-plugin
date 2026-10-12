@@ -89,6 +89,18 @@ test("phase 0 names what exit 3's queue actually holds, so the run reports it ra
   assert.match(s, Pin.phrase("Log it as specs awaiting to-tickets"));
 });
 
+test("phase 0 says where exit 3's specs are read now: the shortlist's `dropped` and the tick's `specs-dropped=`, not stderr", () => {
+  // Before the drops were carried, the rule pointed at a stderr notice the
+  // tick's own refresh discards, so "log it as specs awaiting to-tickets" had
+  // nothing to log from.
+  const s = scanStep();
+  assert.match(s, Pin.phrase("an empty shortlist whose `dropped` names every ticket the to-spec filter took, by number and reason"));
+  assert.match(s, Pin.phrase("`specs-dropped=#<N> (to-spec: User Stories heading)` on the implementer row"));
+  assert.match(s, Pin.phrase("read the numbers off `dropped` or `specs-dropped=`, not off stderr"));
+  assert.doesNotMatch(s, Pin.phrase("with its to-spec notice on stderr"));
+  assert.match(s, Pin.phrase("`{scanned, shortlist: [{n, t}], dropped: [{n, reason}]}`"));
+});
+
 // --- The script-surface contract table, and the preamble that scopes it.
 const scriptSurface = () =>
   SPEC.between("## Script surface", "| Script | In | Out |", "the fleet-plugin design spec").text;
@@ -108,6 +120,13 @@ test("the spec's candidates row stops reading an all-specs queue as exit 1", () 
   assert.doesNotMatch(row, Pin.phrase("no candidate survived"));
   assert.match(row, Pin.phrase("no row came back at all"));
   assert.match(row, Pin.phrase("the to-spec filter removed every one"));
+});
+
+test("the spec's candidates row names --with-dropped and where its drops surface", () => {
+  const row = candidatesRow();
+  assert.match(row, Pin.phrase("`[--require-label L] [--allow-fallback] [--limit N] [--with-dropped]`"));
+  assert.match(row, Pin.phrase("`{rows: [{n,t,l,d}], dropped: [{n, reason}]}`"));
+  assert.match(row, Pin.phrase("prints it as `specs-dropped=#<N> (to-spec: User Stories heading)` on every tick"));
 });
 
 test("the spec's preamble states the further-code property instead of naming one carrier", () => {
