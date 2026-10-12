@@ -1,6 +1,6 @@
 # Carrying the Spend Directory's Harness as a Tag
 
-`findSubagentsDir()` in `plugin/scripts/board.mjs` answers the cockpit spend panel's
+`findSubagentsDir()` in `plugin/scripts/board-gather.mjs` answers the cockpit spend panel's
 "which session directory?" with a bare path. `gatherSpend()` then picks a reader for
 that path by its name:
 

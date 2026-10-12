@@ -34,9 +34,10 @@ import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
 const BOARD = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
+const GATHER = fileURLToPath(new URL("../plugin/scripts/board-gather.mjs", import.meta.url));
 
 // What ci-state.mjs emits on a quota refusal: a payload at exit 2, which
-// runCiState reads as "no answer" (board.test.mjs's RATE_LIMITED_EXIT_2 pins
+// runCiState reads as "no answer" (board-gather.test.mjs's RATE_LIMITED_EXIT_2 pins
 // that reading). Some route into the carry-forward arm is what these tests
 // need, not this one in particular — since #875 a salvaged payload that will
 // not parse reaches it too — and a payload at exit 2 is the route with the
@@ -71,7 +72,7 @@ function gathered(prevBody) {
   const prevFile = join(cwd, "prev.json");
   writeFileSync(prevFile, prevBody);
 
-  const driver = `const { gather } = await import(${JSON.stringify(BOARD)});
+  const driver = `const { gather } = await import(${JSON.stringify(GATHER)});
     const r = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
                        prevFile: ${JSON.stringify(prevFile)},
                        scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });

@@ -47,7 +47,7 @@ test("statePath: an ambient GIT_COMMON_DIR is not canonicalised — this caller 
   // (#1582, a symlinked cockpit route deriving a second port); ledger.mjs and
   // fleet-state.mjs stay on the default because both PRINT the path they
   // resolve, and realpath would change that output without changing which
-  // file either reaches. board.test.mjs pins board.mjs's OPPOSITE choice;
+  // file either reaches. board-server.test.mjs pins board.mjs's OPPOSITE choice;
   // git-env.test.mjs pins the HELPER's own default, which cannot see whether
   // THIS caller opted in — nothing before this test pinned that fact, so an
   // accidental `{ canonicalise: true }` added here would break no test.

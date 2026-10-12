@@ -1463,7 +1463,7 @@ test("defaultLedgerPath(): an ambient GIT_COMMON_DIR is not canonicalised — th
   // (#1582, a symlinked cockpit route deriving a second port); ledger.mjs
   // stays on the default because `check` PRINTS the path it resolves — the
   // "ledger file not found" warning below — and realpath would change that
-  // output without changing which file it names. board.test.mjs pins
+  // output without changing which file it names. board-server.test.mjs pins
   // board.mjs's OPPOSITE choice; git-env.test.mjs pins the HELPER's own
   // default, which cannot see whether THIS caller opted in — nothing before
   // this test pinned that fact, so an accidental `{ canonicalise: true }`

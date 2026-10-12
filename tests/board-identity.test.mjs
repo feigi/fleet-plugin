@@ -28,7 +28,7 @@ import { rmSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveCockpitInstance } from "../plugin/scripts/board.mjs";
+import { resolveCockpitInstance } from "../plugin/scripts/board-server.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
@@ -37,8 +37,8 @@ const HTML = readFileSync(new URL("../plugin/scripts/board.html", import.meta.ur
 
 // The port this file hardcoded before instance resolution existed, and the one
 // the degrade arm still answers with. Spelled out rather than imported because
-// board.mjs does not export it — the same copy board.test.mjs's window rows
-// keep, and a drift would fail the degrade row below loudly.
+// board-server.mjs does not export it — the same copy board-server.test.mjs's
+// window rows keep, and a drift would fail the degrade row below loudly.
 const PORT_BASE = 8123;
 
 // A PATH carrying git, a gh stub, and nothing else: every board built here

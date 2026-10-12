@@ -1,6 +1,6 @@
 # Spend-Dir Pin Seed Collapse
 
-`spendDirPin()` in `plugin/scripts/board.mjs` builds a latching closure over the
+`spendDirPin()` in `plugin/scripts/board-gather.mjs` builds a latching closure over the
 cockpit's spend directory. Its current shape opens with a guard and two
 declarations:
 

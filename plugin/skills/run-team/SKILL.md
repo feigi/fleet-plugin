@@ -1451,15 +1451,14 @@ four for that row alone.
 directory for this cwd, not one:
 
 ```bash
-PROJECT_DIR="$(node -e 'import("./scripts/board.mjs").then(m => console.log(m.encodeProjectDir(process.cwd())))')"
+PROJECT_DIR="$(node -e 'import("./scripts/member-record.mjs").then(m => console.log(m.encodeProjectDir(process.cwd())))')"
 for d in "$HOME/.omp/agent/sessions/$PROJECT_DIR"/*/; do
   node scripts/member-outcomes.mjs "$d"
 done
 ```
 
-`encodeProjectDir` (defined in `scripts/member-record.mjs`, re-exported by
-`scripts/board.mjs`) encodes the cwd exactly as omp names its session
-directories — see its comment for the rule — and hand-guessing that path is why
+`encodeProjectDir` (defined in `scripts/member-record.mjs`) encodes the cwd
+exactly as omp names its session directories — see its comment for the rule — and hand-guessing that path is why
 the fleet's own panel once rendered nothing here. The trailing `/` on the glob matters:
 the same encoded-cwd directory also holds this cwd's own top-level session
 transcripts as loose FILES sibling to the per-session directories, and a
