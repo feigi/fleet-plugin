@@ -10,9 +10,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { phrase, runAbove, stripHashGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
-const RELEASE = readFileSync(join(import.meta.dirname, "..", "plugin", "scripts", "release-ticket.sh"), "utf8");
+const RELEASE = Pin.file(join(import.meta.dirname, "..", "plugin", "scripts", "release-ticket.sh"));
 // reap.sh's code lines only: a whole-line `#` comment that mentions a command
 // is neither a call nor a guard, so it must satisfy no check below and fail none.
 const REAP = readFileSync(join(import.meta.dirname, "..", "plugin", "scripts", "reap.sh"), "utf8")
@@ -21,9 +21,7 @@ const REAP = readFileSync(join(import.meta.dirname, "..", "plugin", "scripts", "
   .join("\n");
 
 const deleteComment = () => {
-  const comment = stripHashGutter(
-    runAbove(RELEASE, 'echo "\\$ git update-ref -d refs/heads/$branch $tip" >&2', "release-ticket.sh branch delete", "#"),
-  );
+  const comment = RELEASE.runAbove('echo "\\$ git update-ref -d refs/heads/$branch $tip" >&2', "release-ticket.sh branch delete", "#").stripGutter("#").text;
   // runAbove returns "" rather than throwing when no comment run sits directly
   // above the anchor; without this the negative pin would pass on nothing.
   assert.notEqual(comment, "", "no comment run sits directly above release-ticket.sh's branch delete — the pins have nothing to read");
@@ -33,7 +31,7 @@ const deleteComment = () => {
 test("release-ticket.sh: the delete comment does not say reap.sh deletes on `git cherry` alone", () => {
   assert.doesNotMatch(
     deleteComment(),
-    new RegExp(phrase("deletes with `git cherry` alone").source, "i"),
+    new RegExp(Pin.phrase("deletes with `git cherry` alone").source, "i"),
     "release-ticket.sh's delete comment says reap.sh authorizes its [gone] deletes with `git cherry` alone — reap.sh also re-checks the worktree with `wt_holding` before its delete",
   );
 });
@@ -43,8 +41,8 @@ test("release-ticket.sh: the delete comment still says how reap.sh's pairing dif
   // reap.sh has no `ahead` count and no recount — survives, beside the
   // worktree check reap.sh shares with the release.
   const comment = deleteComment();
-  assert.match(comment, phrase("with `git cherry` alone — no `ahead` count, no recount"));
-  assert.match(comment, phrase("re-checks the worktree with `wt_holding`"));
+  assert.match(comment, Pin.phrase("with `git cherry` alone — no `ahead` count, no recount"));
+  assert.match(comment, Pin.phrase("re-checks the worktree with `wt_holding`"));
 });
 
 test("reap.sh: the branch delete still follows a `wt_holding` check and has no `ahead` recount", () => {

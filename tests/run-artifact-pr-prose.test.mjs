@@ -51,7 +51,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { anchorAt, betweenPhrases, phrase, sentences } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -68,7 +68,7 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 // both are proven single-hit by `betweenPhrases`' exactly-once guard.
 const ARTIFACT_FROM = "The metrics files are the run's own artifacts and none commits itself";
 const ARTIFACT_TO = "**Why not decide inside one run.**";
-const artifactRules = (text = RUN_TEAM) => betweenPhrases(text, ARTIFACT_FROM, ARTIFACT_TO, "run-team metrics-PR rules");
+const artifactRules = (text = RUN_TEAM) => Pin.of(text, "text").betweenPhrases(ARTIFACT_FROM, ARTIFACT_TO, "run-team metrics-PR rules").text;
 
 // Rule 3's bullet under `## Invariants`, bounded at the next top-level list
 // item. Not `paragraph`: the bullets are adjacent, so a blank-line bound would
@@ -77,7 +77,7 @@ const artifactRules = (text = RUN_TEAM) => betweenPhrases(text, ARTIFACT_FROM, A
 // item boundary and cannot match inside the item itself.
 const invariant = (text = RUN_TEAM) => {
   const what = "run-team ready-to-merge invariant";
-  const rest = text.slice(anchorAt(text, "`ready-to-merge` is added by a reviewer only", what));
+  const rest = text.slice(Pin.of(text, "text").anchorAt("`ready-to-merge` is added by a reviewer only", what));
   const end = rest.search(/\n- /);
   return end === -1 ? rest : rest.slice(0, end);
 };
@@ -85,7 +85,7 @@ const invariant = (text = RUN_TEAM) => {
 // Each duty as a wrap-tolerant PHRASE, never as the words it is built from.
 // `phrase` puts `\s+` at every word gap, so a hard wrap landing anywhere inside
 // is fine while a negation, a rescoping or a restatement is not.
-const COMMIT_DUTY = phrase("**Commit the metrics files and open a PR — at end of run.**");
+const COMMIT_DUTY = Pin.phrase("**Commit the metrics files and open a PR — at end of run.**");
 // The belt for a negation that keeps the capital and so slips past COMMIT_DUTY's
 // leading `Commit`. Scoped to this paragraph's own verbs. KNOWN GAP: the
 // negation must sit immediately before the verb (`\s+`, nothing between) — one
@@ -96,17 +96,17 @@ const COMMIT_DUTY = phrase("**Commit the metrics files and open a PR — at end 
 const NO_COMMIT = /(?:\bnot|\bnever|n't)\s+(?:commit|open|push)\b/i;
 // Why the duty exists: without it the duty reads as ceremony and the next
 // editor deletes it as such.
-const STRANDING_REASON = phrase("Stranding a data row loses it");
+const STRANDING_REASON = Pin.phrase("Stranding a data row loses it");
 // Rule 2: the plugin leaves the branch to the repository.
-const BRANCH_CHOICE = phrase("The branch name is the repository's choice");
+const BRANCH_CHOICE = Pin.phrase("The branch name is the repository's choice");
 // Rule 2's ban: this repository's own branch convention, mandated or even
 // mentioned, anywhere in shipped prose.
 const BRANCH_MANDATE = /chore\/run-artifacts/;
 
-const EXEMPT_DUTY = phrase("The run's own artifact PR is exempt, and it is exempt because this invariant does not reach it");
+const EXEMPT_DUTY = Pin.phrase("The run's own artifact PR is exempt, and it is exempt because this invariant does not reach it");
 // The positive duty the exemption exists to license. A slice that states the
 // exemption and then withholds the action is a rule nobody can act on.
-const LABEL_DUTY = phrase("Label and merge that one yourself");
+const LABEL_DUTY = Pin.phrase("Label and merge that one yourself");
 // A reviewer requirement re-imposed on the controller's own metrics PR. Must
 // not collide with the bullet's true tail, which sends a LEFTOVER metrics PR
 // into the next run's review queue on purpose: that clause says "review queue",
@@ -124,7 +124,7 @@ const NEEDS_REVIEW =
 // and the SENTENCE, from `sentences()`, is what bounds it: widened over the raw
 // slice instead, the gap would pair a modal in one sentence with a verb in the
 // next.
-const faults = (pattern, slice) => sentences(slice).filter((s) => pattern.test(s));
+const faults = (pattern, slice) => Pin.sentences(slice).filter((s) => pattern.test(s));
 
 // Every pin in one place, so a fixture asserts WHICH pins fire rather than that
 // something somewhere went red — a pin that reddens on the wrong mutant has
@@ -179,7 +179,7 @@ test("the invariant slice stops at its own bullet", () => {
 // a pin that does not bite is green — and this prose hard-wraps, so every search
 // here is a wrap-tolerant `phrase` rather than the line breaks the file happens
 // to have today.
-const EXEMPT_TAIL = phrase("is exempt, and it is exempt because this invariant does not reach it");
+const EXEMPT_TAIL = Pin.phrase("is exempt, and it is exempt because this invariant does not reach it");
 const appendTo = (anchor, sentence) => (text) => text.replace(anchor, (m) => `${m} ${sentence}`);
 
 const mutants = [
@@ -226,7 +226,7 @@ for (const [what, expected, mutate] of mutants) {
 // review word in the next. The fixture is benign and reds the moment the scan
 // reads the raw slice instead of `sentences()`.
 test("a need word in one sentence does not pair with the next sentence's review word", () => {
-  const mutated = appendTo(phrase("stranding the rows behind it."), "Nothing here needs one. A reviewer is for ticket work.")(RUN_TEAM);
+  const mutated = appendTo(Pin.phrase("stranding the rows behind it."), "Nothing here needs one. A reviewer is for ticket work.")(RUN_TEAM);
   assert.notEqual(mutated, RUN_TEAM, "an accept fixture no longer matches the prose and applied nothing — update it");
   assert.deepEqual(firing(mutated), [], "a need word paired with a word in the NEXT sentence");
 });
@@ -259,9 +259,9 @@ test("reflowing both slices and rewording unpinned sentences inside them stays g
   // invariant slice — the sentence that explains the rule, never the sentence
   // that states it.
   benign = benign
-    .replace(phrase("is how it gets discarded by the next `git checkout` with nothing to show it ever ran"),
+    .replace(Pin.phrase("is how it gets discarded by the next `git checkout` with nothing to show it ever ran"),
       "is how it gets lost at the next `git checkout`")
-    .replace(phrase("stranding the rows behind it"), "rather than leaving the rows stranded behind a question nobody owns");
+    .replace(Pin.phrase("stranding the rows behind it"), "rather than leaving the rows stranded behind a question nobody owns");
   assert.notEqual(benign, RUN_TEAM, "the benign-edit fixture applied nothing — update it");
   assert.deepEqual(firing(benign), [], "a reflow plus unrelated rewords reddened a pin — the pins are over-tight, not the docs wrong");
 });

@@ -48,12 +48,11 @@
 // the words are pinned, not their layout.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
+const read = (...p) => Pin.file(join(REPO, ...p));
 
 // Two source shapes reach these regexes. run-team/SKILL.md's copy sits in a
 // nested `> > ` blockquote, so a hard wrap lands with the quote gutter — not
@@ -73,36 +72,33 @@ const SITES = [
     "run-team/SKILL.md",
     () =>
       norm(
-        between(
-          read("skills", "run-team", "SKILL.md"),
+        read("skills", "run-team", "SKILL.md").between(
           "Try to REFUTE this finding",
           "Survives → apply it, with one hold",
           "run-team/SKILL.md",
-        ),
+        ).text,
       ),
   ],
   [
     "review-and-fix.md",
     () =>
       norm(
-        between(
-          read("commands", "review-and-fix.md"),
+        read("commands", "review-and-fix.md").between(
           "Try to REFUTE this finding",
           "That last clause is the whole mechanism",
           "review-and-fix.md",
-        ),
+        ).text,
       ),
   ],
   [
     "review-core.mjs",
     () =>
       norm(
-        between(
-          read("scripts", "review-core.mjs"),
+        read("scripts", "review-core.mjs").between(
           "Try to REFUTE this finding",
           "Scratch: ",
           "review-core.mjs",
-        ),
+        ).text,
       ),
   ],
 ];
@@ -200,7 +196,7 @@ for (const [name, ...p] of [
 ]) {
   test(`${name}: the refuter-prompt slice anchor occurs exactly once`, () => {
     assert.equal(
-      read(...p).split("Try to REFUTE this finding").length - 1,
+      read(...p).text.split("Try to REFUTE this finding").length - 1,
       1,
       `${name} contains "Try to REFUTE this finding" more than once — every pin over this file slices from the FIRST occurrence, so a second copy silently moves what they check away from the live prompt`,
     );

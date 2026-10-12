@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase, stripHashGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 // #346 asked for one thing that no behaviour test can hold: that the fate of
 // the per-transport knobs be DECIDED rather than left implicit. The watchdog
@@ -21,21 +20,18 @@ import { between, phrase, stripHashGutter } from "./support/prose-pin.mjs";
 // THE CEILING: presence pins over a bounded slice. Text spliced INSIDE a pinned
 // clause reddens them; a new sentence appended beside one does not. Reflow stays
 // green by design — the words are pinned, not their layout.
-const NET = readFileSync(join(import.meta.dirname, "..", "plugin", "scripts", "net.sh"), "utf8");
+const NET = Pin.file(join(import.meta.dirname, "..", "plugin", "scripts", "net.sh"));
 
 // Bounded by the http paragraph's own opening and by the first construct that
 // follows the comment block. net_git's is the only comment in net.sh that
 // discusses http transport options, but the bounds are what stop a later block
 // elsewhere from satisfying these pins with this clause gutted.
 const httpRationale = () =>
-  stripHashGutter(
-    between(
-      NET,
-      "# http: lowSpeedLimit/lowSpeedTime is git's (curl's) own bound",
-      "net_base_ssh=$(git config --get core.sshCommand",
-      "net.sh",
-    ),
-  );
+  NET.between(
+    "# http: lowSpeedLimit/lowSpeedTime is git's (curl's) own bound",
+    "net_base_ssh=$(git config --get core.sshCommand",
+    "net.sh",
+  ).stripGutter("#").text;
 
 // The negative pins get a WIDER slice than the positive ones, and that is the
 // whole point of separating them. The stale sentence this PR deleted lived in
@@ -47,22 +43,19 @@ const httpRationale = () =>
 // stay on the narrow slice, where a bound at both ends is what stops an
 // unrelated block from satisfying them.
 const transportRationale = () =>
-  stripHashGutter(
-    between(
-      NET,
-      "# ssh: BatchMode=yes refuses any interactive prompt",
-      "net_base_ssh=$(git config --get core.sshCommand",
-      "net.sh",
-    ),
-  );
+  NET.between(
+    "# ssh: BatchMode=yes refuses any interactive prompt",
+    "net_base_ssh=$(git config --get core.sshCommand",
+    "net.sh",
+  ).stripGutter("#").text;
 
 test("net_git's comment states that the per-transport knobs are kept, and why", () => {
   const text = httpRationale();
-  assert.match(text, phrase("stay anyway, and that is a decision rather than an oversight"),
+  assert.match(text, Pin.phrase("stay anyway, and that is a decision rather than an oversight"),
     "#346 required the knobs' fate to be stated outright — a reader must not have to infer it from the fact that the lines are still there");
-  assert.match(text, phrase("fails earlier than the watchdog and in git's own words"),
+  assert.match(text, Pin.phrase("fails earlier than the watchdog and in git's own words"),
     "the first ground for keeping them: git's own diagnostic is the more useful thing to read, and the watchdog can only report that a budget elapsed");
-  assert.match(text, phrase("would make every ssh stall wait out the full budget"),
+  assert.match(text, Pin.phrase("would make every ssh stall wait out the full budget"),
     "the second ground, and the one that makes removal an actual regression rather than a wash");
 });
 
@@ -72,7 +65,7 @@ test("net_git's comment states that the per-transport knobs are kept, and why", 
 // reader off to implement the watchdog that the same comment block introduces.
 test("net_git's comment no longer defers the bound to a ticket net.sh now carries", () => {
   const text = transportRationale();
-  assert.doesNotMatch(text, phrase("Closing that needs a bound outside git"),
+  assert.doesNotMatch(text, Pin.phrase("Closing that needs a bound outside git"),
     "the bound is no longer needed, it is present — this wording describes the tree as it stood before the watchdog");
   assert.doesNotMatch(text, /can still hold a fleet slot/,
     "an https origin cannot: the watchdog bounds it whatever the transport does, which is what inflight.test.mjs measures against a silent listener");

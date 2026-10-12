@@ -21,15 +21,14 @@
 // plain push on the re-push too, where the force is load-bearing.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const NEXT_TICKET = readFileSync(join(REPO, "skills", "next-ticket", "SKILL.md"), "utf8");
+const NEXT_TICKET = Pin.file(join(REPO, "skills", "next-ticket", "SKILL.md"));
 
 const step7 = () =>
-  between(NEXT_TICKET, "## 7. When the sizing-a-ticket path reports done", "## Red flags", "next-ticket/SKILL.md step 7");
+  NEXT_TICKET.between("## 7. When the sizing-a-ticket path reports done", "## Red flags", "next-ticket/SKILL.md step 7").text;
 
 // Narrow to the note itself before pinning anything, the way
 // candidates-exit3-prose.test.mjs narrows to one table row. A positive
@@ -38,7 +37,7 @@ const step7 = () =>
 // spliced in beside it, phrases intact. Both halves below were measured passing
 // 3/3 against a section-wide slice while asserting the opposite of the truth.
 const note = () =>
-  between(step7(), "`--force-with-lease` matters only on a re-push", "`Closes #N` closes issue on merge", "step 7's lease note");
+  Pin.of(step7(), "step7()").between("`--force-with-lease` matters only on a re-push", "`Closes #N` closes issue on merge", "step 7's lease note").text;
 
 // The note's own `;` splits it into the two claims that must not leak into each
 // other: the force is required on a re-push, the plain push is safe only on a
@@ -64,12 +63,12 @@ test("step 7 says the lease matters only on a re-push, and why", () => {
   const s = reasonHalf();
   assert.match(
     s,
-    phrase("rebases immediately before pushing"),
+    Pin.phrase("rebases immediately before pushing"),
     "step 7 lost the mechanism the reason rests on — without it a reader can't tell why a re-push needs the force",
   );
   assert.match(
     s,
-    phrase("re-entering step 7 after an earlier push"),
+    Pin.phrase("re-entering step 7 after an earlier push"),
     "step 7 no longer ties the force to the re-push case — the reason is now floating, unattached to when it applies",
   );
   // Both pins above are subject-side, so a reversal that rewrites only the
@@ -78,7 +77,7 @@ test("step 7 says the lease matters only on a re-push, and why", () => {
   // useless" claim with every pinned phrase still in place.
   assert.match(
     s,
-    phrase("needs the force to land the rebased commits"),
+    Pin.phrase("needs the force to land the rebased commits"),
     "step 7 no longer says what the force is FOR on a re-push — the claim's predicate is what a reversal rewrites first",
   );
   assert.doesNotMatch(
@@ -94,12 +93,12 @@ test("step 7 scopes the plain-push fallback to a branch that has never been push
   // plain-push on a re-push, where a denial means the force is load-bearing.
   assert.match(
     s,
-    phrase("a branch that has never been pushed"),
+    Pin.phrase("a branch that has never been pushed"),
     "step 7 no longer scopes the plain-push fallback to a first push — a reader could now use it on a denied re-push, where the force is load-bearing",
   );
   assert.match(
     s,
-    phrase("git push -u origin HEAD"),
+    Pin.phrase("git push -u origin HEAD"),
     "step 7 no longer names the plain-push fallback command itself",
   );
   // Scoping the fallback IN to the first push does not scope it OUT of the
@@ -133,12 +132,12 @@ test("step 7 routes a denied re-push to stop-and-report, never to a plain force"
   const s = reasonHalf();
   assert.match(
     s,
-    phrase("stop and report the denial"),
+    Pin.phrase("stop and report the denial"),
     "step 7 no longer says what to do when the force is denied on a re-push — the gap #1049 was filed for",
   );
   assert.match(
     s,
-    phrase("never retry with a plain `--force`"),
+    Pin.phrase("never retry with a plain `--force`"),
     "step 7 no longer bans the plain-force retry — the move a member makes when a denial reads as 'use more force', and the one that drops the lease",
   );
   // Both pins above are deletion-only: they red when the clause goes, and on a

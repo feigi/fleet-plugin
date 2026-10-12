@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { classifyRole } from "../plugin/scripts/compute-spend.mjs";
 import { parseMemberName } from "../plugin/scripts/member-outcomes.mjs";
-import { paragraph } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
@@ -43,7 +43,7 @@ const MEMBER_NAMES = ["impl-<issue#>", "fix-pr-<pr#>", "review-pr-<pr#>", "finis
 // the shared paragraph bound the rest of this directory already uses, and it
 // carries the "update this test" guard for the anchor moving and, through
 // `next`, for the blank line being deleted.
-const namingSentence = (doc, label, next) => flat(paragraph(doc, "Names follow", label, next));
+const namingSentence = (doc, label, next) => flat(Pin.of(doc, "doc").paragraph("Names follow", label, next).text);
 
 const NEXT_AFTER_NAMES = {
   "run-team/SKILL.md": "**A depth-2 member cannot dispatch further**",

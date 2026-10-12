@@ -82,7 +82,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { betweenPhrases, phrase, unemphasized } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const DOC = "commands/review-and-fix.md";
@@ -133,7 +133,7 @@ const WHAT = `${DOC} step 4 finisher-dispatch premise`;
 // on a later step, is the false green this bound exists to deny, and the
 // bound-integrity test at the bottom holds every half of that claim.
 const dispatchPremise = (text = reviewAndFix()) =>
-  betweenPhrases(text, STEP4_FROM, STEP4_TO, WHAT, { bound: /\n\d+\.\s/ });
+  Pin.of(text, "text").betweenPhrases(STEP4_FROM, STEP4_TO, WHAT, { bound: /\n\d+\.\s/ }).text;
 
 // The gate, as ONE span: the dispatch, the report having arrived, and CI being
 // green, in the order and with the conjunction the corrected prose uses.
@@ -158,7 +158,7 @@ const REVERTED = "dispatches a finisher on green";
 test("review-and-fix.md step 4 gates the finisher on the member's report AND CI, never on green alone", () => {
   assert.match(
     dispatchPremise(),
-    phrase(GATE),
+    Pin.phrase(GATE),
     `${DOC} step 4 no longer says "${GATE}". This is the sentence every fix-applier reads before pushing: with either half dropped it licenses a dispatch onto a SHA the member may still move, or onto a PR whose report has not arrived — the falsified premise #1053 corrected at two other sites.`,
   );
 });
@@ -180,11 +180,11 @@ test("review-and-fix.md step 4 gates the finisher on the member's report AND CI,
 // This test owns exactly one claim: the pre-#1053 wording is not back, under
 // any emphasis.
 test("no sentence anywhere in review-and-fix.md licenses a finisher on green alone", () => {
-  const live = unemphasized(reviewAndFix());
-  assert.match(live, phrase("dispatches a finisher"), `${DOC} no longer says "dispatches a finisher" at all — the negative below would pass on a document that had lost the sentence entirely`);
+  const live = Pin.unemphasized(reviewAndFix());
+  assert.match(live, Pin.phrase("dispatches a finisher"), `${DOC} no longer says "dispatches a finisher" at all — the negative below would pass on a document that had lost the sentence entirely`);
   assert.doesNotMatch(
     live,
-    phrase(REVERTED),
+    Pin.phrase(REVERTED),
     `${DOC} says "${REVERTED}" again — that is the #1053 defect verbatim, whether or not it is typed with emphasis. The implementer's own push fires the CI edge first for every PR, so green arrives before any review has returned and this wording dispatches a finisher into it.`,
   );
 });
@@ -199,8 +199,8 @@ test("no sentence anywhere in review-and-fix.md licenses a finisher on green alo
 // never the guard the two below actually are.)
 test("the pinned span is bounded to step 4 — neither neighbouring step is inside it", () => {
   const slice = dispatchPremise();
-  assert.doesNotMatch(slice, phrase("File each deferred finding"), `${WHAT}: the slice runs forward into step 5`);
-  assert.doesNotMatch(slice, phrase("Diff-check green"), `${WHAT}: the slice runs forward into step 6`);
+  assert.doesNotMatch(slice, Pin.phrase("File each deferred finding"), `${WHAT}: the slice runs forward into step 5`);
+  assert.doesNotMatch(slice, Pin.phrase("Diff-check green"), `${WHAT}: the slice runs forward into step 6`);
 });
 
 // ACCEPT SIDE — reflow. Derived from the LIVE slice, never a quoted copy of
@@ -223,8 +223,8 @@ test("a rewrapped step 4 is ACCEPTED — the gate pin refuses drift, not line br
     }, [])
     .join("\n   ");
   assert.notEqual(rewrapped, live, "the rewrap fixture no longer changes the wrapping — update it");
-  assert.match(rewrapped, phrase(GATE), "the gate pin reds on a pure reflow — it is over-tight, not strict");
-  assert.doesNotMatch(rewrapped, phrase(REVERTED));
+  assert.match(rewrapped, Pin.phrase(GATE), "the gate pin reds on a pure reflow — it is over-tight, not strict");
+  assert.doesNotMatch(rewrapped, Pin.phrase(REVERTED));
 });
 
 // The bound's failure mode, asserted rather than assumed. #1499's own acceptance
@@ -247,7 +247,7 @@ test("a rewrapped step 4 is ACCEPTED — the gate pin refuses drift, not line br
 // is broken when only the fixture was. A no-op fixture that reports as a
 // finding is worse than one that reds honestly.
 const cut = (text, target, replacement, label) => {
-  const mutant = text.replace(phrase(target), replacement);
+  const mutant = text.replace(Pin.phrase(target), replacement);
   assert.notEqual(mutant, text, `the ${label} fixture no longer changes the document — update it, do not trust a result measured against it`);
   return mutant;
 };

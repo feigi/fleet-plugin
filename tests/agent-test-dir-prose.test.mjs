@@ -26,12 +26,12 @@
 // A reflow stays green by design — the words are pinned, not their layout.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
+const read = (...p) => Pin.file(join(REPO, ...p));
 const RUN_TEAM = read("skills", "run-team", "SKILL.md");
 const ISOLATION = read("skills", "run-team", "references", "isolation.md");
 
@@ -46,9 +46,9 @@ const BOOTSTRAP_RUNNER = /--write-runner|\.agent-test\.sh|re-?materiali[sz]|#55\
 
 const slices = [
   ["run-team/SKILL.md", () =>
-    between(RUN_TEAM, "Materialize the isolation envelope as a file", "A reused worktree may lack the runner", "run-team/SKILL.md")],
+    RUN_TEAM.between("Materialize the isolation envelope as a file", "A reused worktree may lack the runner", "run-team/SKILL.md").text],
   ["references/isolation.md", () =>
-    between(ISOLATION, "## Materialize the isolation envelope as a file", "## Filesystem isolation is not stack isolation", "references/isolation.md")],
+    ISOLATION.between("## Materialize the isolation envelope as a file", "## Filesystem isolation is not stack isolation", "references/isolation.md").text],
 ];
 
 test("the absence patterns match each retired form they exist to catch", () => {
@@ -68,15 +68,15 @@ test("the absence patterns match each retired form they exist to catch", () => {
 
 for (const [name, slice] of slices) {
   test(`${name} briefs members with the runner and nothing else`, () => {
-    assert.match(slice(), phrase("Brief members with `./agent-test` and nothing else"));
+    assert.match(slice(), Pin.phrase("Brief members with `./agent-test` and nothing else"));
   });
 
   test(`${name} says a member's arguments land after the Test entrypoint`, () => {
-    assert.match(slice(), phrase("Its arguments land after the Test entrypoint, so what one may name — a test file, a test name — is that entrypoint's to say"));
+    assert.match(slice(), Pin.phrase("Its arguments land after the Test entrypoint, so what one may name — a test file, a test name — is that entrypoint's to say"));
   });
 
   test(`${name} says a run of zero tests is a failed run`, () => {
-    assert.match(slice(), phrase("nothing in the runner refuses one that selects no test: a run of zero tests is a failed run, not a pass"));
+    assert.match(slice(), Pin.phrase("nothing in the runner refuses one that selects no test: a run of zero tests is a failed run, not a pass"));
   });
 
   test(`${name} promises no directory expansion`, () => {
@@ -85,14 +85,14 @@ for (const [name, slice] of slices) {
 }
 
 test("run-team/SKILL.md says only a fresh claim writes the runner", () => {
-  const p = paragraph(RUN_TEAM, "**A reused worktree may lack the runner.**", "run-team/SKILL.md reused-worktree runner paragraph", "**A reused worktree may also be");
-  assert.match(p, phrase("`claim-ticket.sh` writes `agent-test` only into the fresh worktree it claims"));
+  const p = RUN_TEAM.paragraph("**A reused worktree may lack the runner.**", "run-team/SKILL.md reused-worktree runner paragraph", "**A reused worktree may also be").text;
+  assert.match(p, Pin.phrase("`claim-ticket.sh` writes `agent-test` only into the fresh worktree it claims"));
 });
 
 test("no shipped markdown file describes the runner as a bootstrap the emitter re-materializes", () => {
   const files = readdirSync(REPO, { recursive: true })
     .filter((rel) => rel.endsWith(".md") && !rel.split("/").includes("node_modules"));
   assert.ok(files.includes(join("skills", "run-team", "references", "isolation.md")), "the sweep no longer reaches isolation.md");
-  const hits = files.filter((rel) => BOOTSTRAP_RUNNER.test(read(rel)));
+  const hits = files.filter((rel) => BOOTSTRAP_RUNNER.test(read(rel).text));
   assert.deepEqual(hits, [], "a shipped document still describes the retired runner bootstrap");
 });

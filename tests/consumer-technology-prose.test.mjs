@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { END, between, bullet, paragraph, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 // The prose that describes the consumer repo as "whatever the Recipe says"
 // rather than as a Node project: every shipped runbook and the requirement
@@ -12,8 +12,8 @@ import { END, between, bullet, paragraph, phrase } from "./support/prose-pin.mjs
 // of that vocabulary inside the bounded slice that carries it.
 const PLUGIN = join(import.meta.dirname, "..", "plugin");
 const ROOT = join(PLUGIN, "..");
-const readPlugin = (rel) => readFileSync(join(PLUGIN, rel), "utf8");
-const readRoot = (rel) => readFileSync(join(ROOT, rel), "utf8");
+const readPlugin = (rel) => Pin.file(join(PLUGIN, rel));
+const readRoot = (rel) => Pin.file(join(ROOT, rel));
 const RUN_TEAM = readPlugin("skills/run-team/SKILL.md");
 const REAPING = readPlugin("skills/run-team/references/reaping.md");
 const ISOLATION = readPlugin("skills/run-team/references/isolation.md");
@@ -64,74 +64,74 @@ test("no runbook, command, agent definition or requirement doc names a Node-cons
 });
 
 test("the claim step runs the Recipe's Install step in the worktree, read from the cache", () => {
-  const step = bullet(PULL_AND_CLAIM, "4. **Claim.**", "5. **Dispatch**", "pull-and-claim.md step 4");
-  assert.match(step, phrase("runs the [Recipe](recipe.md)'s Install step there — read from the Recipe cache, refusing if it changed the tree"));
+  const step = PULL_AND_CLAIM.bullet("4. **Claim.**", "5. **Dispatch**", "pull-and-claim.md step 4").text;
+  assert.match(step, Pin.phrase("runs the [Recipe](recipe.md)'s Install step there — read from the Recipe cache, refusing if it changed the tree"));
 });
 
 test("requirements 2.3 describes the Recipe derivation: any technology, what it reads, what proves it, what it caches", () => {
-  const section = between(REQUIREMENTS, "### 2.3 Installable and testable — HARD", "### 2.4", "requirements.md section 2.3");
-  assert.match(section, phrase("Any technology. Fleet derives your repo's Recipe (Install step + Test entrypoint) by agent reasoning"));
-  const reads = bullet(section, "- **What the derivation reads:**", "- **What the proof requires:**", "requirements.md 2.3 derivation bullet");
-  assert.match(reads, phrase("nothing checks for a particular manifest or lockfile."));
-  const proof = bullet(section, "- **What the proof requires:**", "- **The cache:**", "requirements.md 2.3 proof bullet");
-  assert.match(proof, phrase("`RECIPE NOT PROVEN` writes no cache and halts the run."));
-  const cache = bullet(section, "- **The cache:**", "Hard rules for any technology:", "requirements.md 2.3 cache bullet");
-  assert.match(cache, phrase("Every claim reads both commands from it and every review its Test entrypoint; a missing or unproven cache is a refusal naming the derivation step, never a guess."));
-  assert.match(section, phrase("~/.fleet/bin/fleet-run derive-testcmd.sh . install && ~/.fleet/bin/fleet-run derive-testcmd.sh . test"));
+  const section = REQUIREMENTS.between("### 2.3 Installable and testable — HARD", "### 2.4", "requirements.md section 2.3").text;
+  assert.match(section, Pin.phrase("Any technology. Fleet derives your repo's Recipe (Install step + Test entrypoint) by agent reasoning"));
+  const reads = Pin.of(section, "section").bullet("- **What the derivation reads:**", "- **What the proof requires:**", "requirements.md 2.3 derivation bullet").text;
+  assert.match(reads, Pin.phrase("nothing checks for a particular manifest or lockfile."));
+  const proof = Pin.of(section, "section").bullet("- **What the proof requires:**", "- **The cache:**", "requirements.md 2.3 proof bullet").text;
+  assert.match(proof, Pin.phrase("`RECIPE NOT PROVEN` writes no cache and halts the run."));
+  const cache = Pin.of(section, "section").bullet("- **The cache:**", "Hard rules for any technology:", "requirements.md 2.3 cache bullet").text;
+  assert.match(cache, Pin.phrase("Every claim reads both commands from it and every review its Test entrypoint; a missing or unproven cache is a refusal naming the derivation step, never a guess."));
+  assert.match(section, Pin.phrase("~/.fleet/bin/fleet-run derive-testcmd.sh . install && ~/.fleet/bin/fleet-run derive-testcmd.sh . test"));
 });
 
 test("requirements 1.1 adds whatever the Recipe runs to the tool floor", () => {
   assert.match(
-    between(REQUIREMENTS, "| `shasum` | any |", "### 1.2", "requirements.md section 1.1 table tail"),
-    phrase("Plus whatever your Recipe runs (§2.3): `mvn`, `go`, `cargo`, …"),
+    REQUIREMENTS.between("| `shasum` | any |", "### 1.2", "requirements.md section 1.1 table tail").text,
+    Pin.phrase("Plus whatever your Recipe runs (§2.3): `mvn`, `go`, `cargo`, …"),
   );
 });
 
 test("the research note marks the Node-only consumer rows superseded by the Recipe ruling", () => {
-  const row = bullet(EXTERNAL, "- ~~Contains `package.json`", "\n- `node` on PATH", "external-assumptions.md consumer-repo row");
-  assert.match(row, phrase("Superseded by ADR 0015: the claim reads the Install step and Test entrypoint from the Recipe cache, and nothing checks for a manifest, a test-file name or a lockfile."));
-  const implied = bullet(EXTERNAL, "- Consumer must be a Node project", "\n- `python3` and `shasum` on PATH", "external-assumptions.md implied-only row");
-  assert.match(implied, phrase("Ruled 2026-09-28: ADR 0015 — any technology, Recipe by agent reasoning"));
+  const row = EXTERNAL.bullet("- ~~Contains `package.json`", "\n- `node` on PATH", "external-assumptions.md consumer-repo row").text;
+  assert.match(row, Pin.phrase("Superseded by ADR 0015: the claim reads the Install step and Test entrypoint from the Recipe cache, and nothing checks for a manifest, a test-file name or a lockfile."));
+  const implied = EXTERNAL.bullet("- Consumer must be a Node project", "\n- `python3` and `shasum` on PATH", "external-assumptions.md implied-only row").text;
+  assert.match(implied, Pin.phrase("Ruled 2026-09-28: ADR 0015 — any technology, Recipe by agent reasoning"));
 });
 
 test("review-and-fix step 3 reads the standalone testCmd off the Recipe cache and derives when there is none", () => {
-  const step = bullet(REVIEW_AND_FIX, "3. **Run `testCmd` before you commit**", "\n4. **", "review-and-fix.md step 3");
-  assert.match(step, phrase("the Test entrypoint in the repo's Recipe cache (`derive-testcmd.sh <repo> test` prints it)"));
-  assert.match(step, phrase("run the Recipe derivation step first"));
+  const step = REVIEW_AND_FIX.bullet("3. **Run `testCmd` before you commit**", "\n4. **", "review-and-fix.md step 3").text;
+  assert.match(step, Pin.phrase("the Test entrypoint in the repo's Recipe cache (`derive-testcmd.sh <repo> test` prints it)"));
+  assert.match(step, Pin.phrase("run the Recipe derivation step first"));
   assert.doesNotMatch(step, /node --test/, "step 3 names this repository's own test command again");
 });
 
 test("review-and-fix's git archive bullet runs the Install step in the copy, read from a tree that holds the cache", () => {
-  const archive = bullet(REVIEW_AND_FIX, "- **`git archive` carries tracked files only.**", "\n- **Initialize the copy", "review-and-fix.md git archive bullet");
-  assert.match(archive, phrase("run the Install step in the copy (read it off the worktree or main checkout, `derive-testcmd.sh <worktree or main checkout> install`; pointed at the copy it refuses, since a copy holds no Recipe cache)"));
+  const archive = REVIEW_AND_FIX.bullet("- **`git archive` carries tracked files only.**", "\n- **Initialize the copy", "review-and-fix.md git archive bullet").text;
+  assert.match(archive, Pin.phrase("run the Install step in the copy (read it off the worktree or main checkout, `derive-testcmd.sh <worktree or main checkout> install`; pointed at the copy it refuses, since a copy holds no Recipe cache)"));
 });
 
 test("run-team: a tree with no runner gets the Recipe's Test entrypoint only when it brings up no shared stack", () => {
-  const p = paragraph(RUN_TEAM, "**A reused worktree may lack the runner.**", "run-team/SKILL.md reused-worktree runner paragraph", "**A reused worktree may also be");
-  assert.match(p, phrase("the Recipe's Test entrypoint (`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test --at origin/main` prints it) only when it brings up no shared stack to collide on, else that repo's own stack-free command."));
+  const p = RUN_TEAM.paragraph("**A reused worktree may lack the runner.**", "run-team/SKILL.md reused-worktree runner paragraph", "**A reused worktree may also be").text;
+  assert.match(p, Pin.phrase("the Recipe's Test entrypoint (`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test --at origin/main` prints it) only when it brings up no shared stack to collide on, else that repo's own stack-free command."));
 });
 
 test("run-team: testCmd comes from the Recipe cache and names no repository's own command", () => {
-  const p = paragraph(RUN_TEAM, "**Where `testCmd` comes from:**", "run-team/SKILL.md testCmd source paragraph", "**Where `<branch>` comes from:** the PR's");
-  assert.match(p, phrase("the repository's Test entrypoint, out of the Recipe cache phase 0's Recipe derivation step proved — `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main` prints it — and the one you hand specialists"));
+  const p = RUN_TEAM.paragraph("**Where `testCmd` comes from:**", "run-team/SKILL.md testCmd source paragraph", "**Where `<branch>` comes from:** the PR's").text;
+  assert.match(p, Pin.phrase("the repository's Test entrypoint, out of the Recipe cache phase 0's Recipe derivation step proved — `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main` prints it — and the one you hand specialists"));
   assert.doesNotMatch(p, /node --test/, "the testCmd source paragraph names this repository's own test command again");
 });
 
 test("run-team: the quick-install red flag points at the Recipe's Install step, not at an install command", () => {
-  const flag = bullet(RUN_TEAM, "- \"A quick install to set up the worktree\"", "- \"I'm on my own copy, so I'm isolated\"", "run-team/SKILL.md quick-install red flag");
-  assert.match(flag, phrase("the claim already ran the Recipe's Install step; any other install can rewrite the lockfile for the whole repo."));
+  const flag = RUN_TEAM.bullet("- \"A quick install to set up the worktree\"", "- \"I'm on my own copy, so I'm isolated\"", "run-team/SKILL.md quick-install red flag").text;
+  assert.match(flag, Pin.phrase("the claim already ran the Recipe's Install step; any other install can rewrite the lockfile for the whole repo."));
 });
 
 test("a merged branch's stale worktree is said to keep its installed dependencies, in SKILL.md and in reaping.md", () => {
-  const skill = paragraph(RUN_TEAM, "The merge bot deletes the remote branch after each merge", "run-team/SKILL.md reap paragraph", "`~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition");
-  assert.match(skill, phrase("with its worktree — and its installed dependencies — still on disk."));
-  const evidence = paragraph(REAPING, "Merge deletes remote branch, leaves local branch", "reaping.md reap-after-each-merge paragraph", "## Why `commit-commands:clean_gone` is disqualified");
-  assert.match(evidence, phrase("with worktree — and its installed dependencies — still on disk."));
+  const skill = RUN_TEAM.paragraph("The merge bot deletes the remote branch after each merge", "run-team/SKILL.md reap paragraph", "`~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition").text;
+  assert.match(skill, Pin.phrase("with its worktree — and its installed dependencies — still on disk."));
+  const evidence = REAPING.paragraph("Merge deletes remote branch, leaves local branch", "reaping.md reap-after-each-merge paragraph", "## Why `commit-commands:clean_gone` is disqualified").text;
+  assert.match(evidence, Pin.phrase("with worktree — and its installed dependencies — still on disk."));
 });
 
 test("the isolation reference says symlinking installed dependencies in does not isolate the stack, and reproduces a diagnostic by re-running the check", () => {
-  const stack = paragraph(ISOLATION, "Private copy and test command solve different problems", "isolation.md stack-isolation paragraph", "## Scratchpad paths need two levels");
-  assert.match(stack, phrase("Symlinking installed dependencies in does not help."));
-  const diag = paragraph(ISOLATION, "Probe copies carry same filenames as real tree", "isolation.md diagnostics paragraph", END);
-  assert.match(diag, phrase("(re-run the check that raised it — the typechecker, the linter — from there)"));
+  const stack = ISOLATION.paragraph("Private copy and test command solve different problems", "isolation.md stack-isolation paragraph", "## Scratchpad paths need two levels").text;
+  assert.match(stack, Pin.phrase("Symlinking installed dependencies in does not help."));
+  const diag = ISOLATION.paragraph("Probe copies carry same filenames as real tree", "isolation.md diagnostics paragraph", Pin.END).text;
+  assert.match(diag, Pin.phrase("(re-run the check that raised it — the typechecker, the linter — from there)"));
 });

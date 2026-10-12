@@ -30,12 +30,11 @@
 // step 6's own paragraph, not that no later edit could dilute it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
+const REVIEW_AND_FIX = Pin.file(join(REPO, "commands", "review-and-fix.md"));
 
 // Bounded to step 6's own paragraph — starts at the step's own opening
 // clause, ends at the `ready-to-merge` label command that closes its first
@@ -43,29 +42,28 @@ const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"),
 // section is out of this slice's reach in either direction, wherever it
 // currently sits.
 const step6ReleaseLabelClause = () =>
-  between(
-    REVIEW_AND_FIX,
+  REVIEW_AND_FIX.between(
     "the PR carrying exactly one release label",
     "gh pr edit <pr> --add-label ready-to-merge",
     "review-and-fix.md step 6",
-  );
+  ).text;
 
 test("review-and-fix.md step 6 states the release-label gate as required, not conditional on the repo defining one", () => {
   const slice = step6ReleaseLabelClause();
-  assert.match(slice, phrase("required on every PR"));
-  assert.match(slice, phrase("release-label.yml"));
-  assert.match(slice, phrase("auto-adds `patch` when none is present and hard-fails on more than one"));
+  assert.match(slice, Pin.phrase("required on every PR"));
+  assert.match(slice, Pin.phrase("release-label.yml"));
+  assert.match(slice, Pin.phrase("auto-adds `patch` when none is present and hard-fails on more than one"));
 });
 
 test("review-and-fix.md step 6 no longer states the old conditional wording", () => {
   const slice = step6ReleaseLabelClause();
-  assert.doesNotMatch(slice, phrase("a repo defining none of them does not gate on one"));
+  assert.doesNotMatch(slice, Pin.phrase("a repo defining none of them does not gate on one"));
 });
 
 test("review-and-fix.md step 6 still names the exact three release labels, unchanged by the flip", () => {
   const slice = step6ReleaseLabelClause();
-  assert.match(slice, phrase("patch"));
-  assert.match(slice, phrase("minor"));
-  assert.match(slice, phrase("major"));
-  assert.match(slice, phrase("counting only those three"));
+  assert.match(slice, Pin.phrase("patch"));
+  assert.match(slice, Pin.phrase("minor"));
+  assert.match(slice, Pin.phrase("major"));
+  assert.match(slice, Pin.phrase("counting only those three"));
 });

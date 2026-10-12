@@ -29,26 +29,24 @@
 // every pinned word but reorders which paragraph they sit in.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 const section = () =>
-  between(
-    RUN_TEAM,
+  RUN_TEAM.between(
     "## Worktree and claim model",
     "## Queue depth",
     "run-team/SKILL.md",
-  );
+  ).text;
 
 // Nested inside `section()` (never `RUN_TEAM` directly), so a sibling
 // ticket's own prose elsewhere in the file cannot satisfy or break these
 // anchors.
 const cwdRecipe = () =>
-  paragraph(section(), "**A member's tree is the claimed worktree", "run-team/SKILL.md cwd recipe", "**The one open gap");
+  Pin.of(section(), "section()").paragraph("**A member's tree is the claimed worktree", "run-team/SKILL.md cwd recipe", "**The one open gap").text;
 
 test("run-team/SKILL.md: claim, release and reap are named unchanged on omp, with no dialect branch", () => {
   assert.match(
@@ -73,7 +71,7 @@ test("run-team/SKILL.md: isolated is never used, with the calling-session-cwd sp
   );
   assert.match(
     section(),
-    phrase("`isolated` stays unused for every member and `task.isolation.enabled` stays off"),
+    Pin.phrase("`isolated` stays unused for every member and `task.isolation.enabled` stays off"),
   );
   // The measured/inferred split the review demanded: the probe measured its
   // own session's cwd, not "the controller's main checkout" directly — the
@@ -81,7 +79,7 @@ test("run-team/SKILL.md: isolated is never used, with the calling-session-cwd sp
   // into the measurement.
   assert.match(
     section(),
-    phrase("in the probe session's own cwd — which for an actual fleet run is the controller's main checkout"),
+    Pin.phrase("in the probe session's own cwd — which for an actual fleet run is the controller's main checkout"),
     "the probe-cwd sentence no longer distinguishes what was measured from the controller case it infers",
   );
 });
@@ -106,7 +104,7 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
   );
   assert.match(
     section(),
-    phrase("a bare `WT` bound by one member was read back by a sibling and by the controller"),
+    Pin.phrase("a bare `WT` bound by one member was read back by a sibling and by the controller"),
     "the reproduced collision no longer names the bare variable the original report was filed on",
   );
   // WHY the sharing follows from the documented keying. Without this, the
@@ -114,7 +112,7 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
   // point is that both key components are constant across one run's members.
   assert.match(
     section(),
-    phrase("the session id is inherited from the controller, and the cwd is the main checkout for all of them"),
+    Pin.phrase("the session id is inherited from the controller, and the cwd is the main checkout for all of them"),
     "the section no longer explains why the documented kernel key fails to separate two members of one run",
   );
   // THE EXCEPTION, quoted from upstream. This is the boundary that stops the
@@ -123,7 +121,7 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
   // deciding how to fix this needs to know which spawns already are.
   assert.match(
     section(),
-    phrase("children created by eval's own `agent()` explicitly do not"),
+    Pin.phrase("children created by eval's own `agent()` explicitly do not"),
     "the isolated-by-construction exception for eval's own agent() children is gone, so the finding reads as covering every spawn",
   );
   // The corollary bound to its blast radius — `reset` is the destructive half
@@ -148,7 +146,7 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
   // where the rules are carried verbatim, so the pointer is pinned with it.
   assert.match(
     section(),
-    phrase("**Phase 2** carries all three rules to every member"),
+    Pin.phrase("**Phase 2** carries all three rules to every member"),
     "the section no longer points at the phase that actually delivers these rules to a member",
   );
 });
@@ -171,12 +169,12 @@ test("run-team/SKILL.md: the cwd recipe names the task tool's missing cwd field,
   // recipe must say so rather than presenting a fixed field list.
   assert.match(
     cwdRecipe(),
-    phrase("`effort`/`isolated` only when their own settings enable them"),
+    Pin.phrase("`effort`/`isolated` only when their own settings enable them"),
     "the cwd recipe presents effort/isolated as always-present schema fields rather than conditional ones",
   );
   assert.match(
     cwdRecipe(),
-    phrase("`bash`'s own `cwd` parameter set to it on every call and absolute paths for `write`/`edit`"),
+    Pin.phrase("`bash`'s own `cwd` parameter set to it on every call and absolute paths for `write`/`edit`"),
   );
 });
 
@@ -196,12 +194,12 @@ test("run-team/SKILL.md: release-ticket.sh is not a no-op on omp and inflight.sh
   );
   assert.match(
     section(),
-    phrase("`~/.omp/wt/` was empty after every isolated run: omp's own teardown touches only omp's own workspace, never the claim"),
+    Pin.phrase("`~/.omp/wt/` was empty after every isolated run: omp's own teardown touches only omp's own workspace, never the claim"),
     "the measured teardown-scope evidence behind 'not a no-op' is gone",
   );
   assert.match(
     section(),
-    phrase("`inflight.sh` hides nothing from omp"),
+    Pin.phrase("`inflight.sh` hides nothing from omp"),
   );
 });
 
@@ -210,7 +208,7 @@ test("run-team/SKILL.md: the controller's own cwd staying the main checkout gets
   // release/inflight paragraph above it.
   assert.match(
     section(),
-    phrase("The controller's own cwd stays the main checkout, unchanged"),
+    Pin.phrase("The controller's own cwd stays the main checkout, unchanged"),
     "ruling 4 (the controller's own cwd is unchanged) no longer has its own stated sentence",
   );
 });

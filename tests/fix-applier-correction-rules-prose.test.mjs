@@ -63,37 +63,35 @@
 // ticket to fix or to pin.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 // Scoped to the Reviewers section first, so an `indexOf`-based anchor search
 // starts inside the fix-applier's own prompt rather than risking a match
 // against equivalent wording elsewhere in the file, present or future.
 const reviewersSection = () =>
-  between(RUN_TEAM, "### Reviewers", "#### Fallback: hand-dispatched reviewer", "run-team Reviewers section");
+  RUN_TEAM.between("### Reviewers", "#### Fallback: hand-dispatched reviewer", "run-team Reviewers section").text;
 
 const PROMPT_ANCHOR = "> You are ALREADY in worktree";
 const PROMPT_END = "\n**Put the standing CI facts";
 const fixApplierPrompt = () =>
-  between(reviewersSection(), PROMPT_ANCHOR, PROMPT_END, "run-team fix-applier prompt");
+  Pin.of(reviewersSection(), "reviewersSection()").between(PROMPT_ANCHOR, PROMPT_END, "run-team fix-applier prompt").text;
 
 // The implementer's own copy of the count rule, the OTHER seat #859 requires
 // the qualification to reach. It lives in the claim-discipline block of the
 // implementer agent body, which the harness injects as every implementer's
 // system prompt; bounded to that block so a rewording anywhere else in the
 // body cannot satisfy this slice by accident.
-const AGENT = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8");
+const AGENT = Pin.file(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"));
 const implementerCountRule = () =>
-  between(
-    AGENT,
+  AGENT.between(
     "**Claim discipline, on every ticket:**",
     "Commit incrementally as you go",
     "the implementer agent body's claim-discipline block",
-  );
+  ).text;
 
 // `**` emphasis and the `>` blockquote gutter are stripped and whitespace
 // collapsed before matching, so a pin survives a bold move or a rewrap.
@@ -149,7 +147,7 @@ test("the fix-applier prompt's settling grep takes -F over literal text and trus
   // control alone leaves the pattern-reading of literal prose as the default.
   assert.match(
     flatten(fixApplierPrompt()),
-    phrase("A settling grep over literal text takes `grep -F`, and its zero counts only after the same command finds a line known to match"),
+    Pin.phrase("A settling grep over literal text takes `grep -F`, and its zero counts only after the same command finds a line known to match"),
     "the fix-applier prompt no longer tells a settling grep over literal text to take -F, or dropped the positive control that has to pass before its zero is trusted",
   );
 });
@@ -171,12 +169,11 @@ test("a rewrapped fix-applier prompt still matches every pinned rule — these p
   // line, so a meaning-preserving reword of the surrounding prompt is not
   // what this test measures — only that re-wrapping the pinned paragraph at
   // a column width nothing here assumes leaves every ordered span intact.
-  const raw = between(
-    fixApplierPrompt(),
+  const raw = Pin.of(fixApplierPrompt(), "fixApplierPrompt()").between(
     "Every factual claim your diff restates",
     "\n>\n> **Apply",
     "the fix-applier's new prose-discipline paragraph",
-  );
+  ).text;
   const body = flatten(raw);
   const words = body.split(/\s+/).filter(Boolean);
   const lines = words.reduce((acc, w) => {
@@ -187,16 +184,15 @@ test("a rewrapped fix-applier prompt still matches every pinned rule — these p
   }, []);
   const narrow = lines.map((l) => `> ${l}`).join("\n");
   assert.notEqual(narrow, raw, "the rewrap fixture no longer changes the paragraph's wrapping — update it");
-  const rewrappedFile = RUN_TEAM.replace(raw, () => narrow);
-  const rewrappedReviewers = between(
-    rewrappedFile,
+  const rewrappedFile = RUN_TEAM.text.replace(raw, () => narrow);
+  const rewrappedReviewers = Pin.of(rewrappedFile, "rewrappedFile").between(
     "### Reviewers",
     "#### Fallback: hand-dispatched reviewer",
     "rewrapped run-team Reviewers section",
-  );
-  const prompt = flatten(between(rewrappedReviewers, PROMPT_ANCHOR, PROMPT_END, "rewrapped fix-applier prompt"));
-  assert.match(prompt, phrase("Every factual claim your diff restates needs a settling command run against the tree first"));
-  assert.match(prompt, phrase("No positional references"));
-  assert.match(prompt, phrase("unless it is a past-tense record of a measurement you performed"));
-  assert.match(prompt, phrase("its zero counts only after the same command finds a line known to match"));
+  ).text;
+  const prompt = flatten(Pin.of(rewrappedReviewers, "rewrappedReviewers").between(PROMPT_ANCHOR, PROMPT_END, "rewrapped fix-applier prompt").text);
+  assert.match(prompt, Pin.phrase("Every factual claim your diff restates needs a settling command run against the tree first"));
+  assert.match(prompt, Pin.phrase("No positional references"));
+  assert.match(prompt, Pin.phrase("unless it is a past-tense record of a measurement you performed"));
+  assert.match(prompt, Pin.phrase("its zero counts only after the same command finds a line known to match"));
 });

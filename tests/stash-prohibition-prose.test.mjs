@@ -93,10 +93,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 // The implementer's copy lives in the implementer agent body since #1804 (spec
 // 2026-09-24 § 2 Decision 2): the body is what each harness injects as the
 // member's system prompt, and SKILL.md's phase 2 no longer re-pastes it. The
@@ -126,29 +126,27 @@ const flatten = (s) =>
 // satisfy an assertion with this block's real text gone.
 const implementerStashBlock = () =>
   flatten(
-    between(
-      IMPLEMENTER_BODY,
+    Pin.of(IMPLEMENTER_BODY, "IMPLEMENTER_BODY").between(
       "**Never `git stash` or `git stash pop` to shelve",
       "**Every scratch file",
       "the implementer body's stash-prohibition block",
-    ),
+    ).text,
   );
 
 const fixApplierStashBlock = () =>
   flatten(
-    between(
-      RUN_TEAM,
+    RUN_TEAM.between(
       "**Never `git stash` or `git stash pop` here either",
       "**Report LAST",
       "the fix-applier's stash-prohibition block",
-    ),
+    ).text,
   );
 
 test("the implementer's stash rule forbids a bare stash/pop and names a WIP commit as the substitute", () => {
   const b = implementerStashBlock();
   assert.match(
     b,
-    phrase(
+    Pin.phrase(
       "Never `git stash` or `git stash pop` to shelve your own progress — take a WIP commit instead: `git commit -m wip`, then amend it or `git reset --soft HEAD^` once you have something real to commit.",
     ),
     "the implementer block no longer forbids a bare stash/pop with the WIP-commit substitute bound to it",
@@ -159,7 +157,7 @@ test("the implementer's stash rule states the stack is repo-global, shared by ev
   const b = implementerStashBlock();
   assert.match(
     b,
-    phrase(
+    Pin.phrase(
       "The stash stack is repo-global, not per-worktree or per-session — the same `refs/stash` is shared by every worktree, the main checkout, and every concurrent member.",
     ),
     "the implementer block no longer states the stash stack is repo-global and shared by every worktree/session",
@@ -173,7 +171,7 @@ test("the implementer's stash rule binds the pop's silence on a clean tree to it
   const b = implementerStashBlock();
   assert.match(
     b,
-    phrase(
+    Pin.phrase(
       "A bare pop takes whichever entry is on top, from any worktree, and it is silent about it — rc 0, no error — exactly when the tree receiving it is clean on the affected paths, which is the moment you would assume it is safe; it refuses loudly only when that tree is already dirty on them.",
     ),
     "the implementer block no longer binds the pop's clean-tree silence to its dirty-tree refusal in one span",
@@ -184,7 +182,7 @@ test("the implementer's stash rule states a bare push does not reach into a sibl
   const b = implementerStashBlock();
   assert.match(
     b,
-    phrase(
+    Pin.phrase(
       "A bare `git stash` (push) does not reach into a sibling worktree's uncommitted work — that half is unfounded, it acts on your own tree only — so the hazard is entirely on the pop side",
     ),
     "the implementer block no longer states that a bare stash push does not reach a sibling's tree",
@@ -195,7 +193,7 @@ test("the implementer's stash rule says nothing partitions the stack, so the pro
   const b = implementerStashBlock();
   assert.match(
     b,
-    phrase(
+    Pin.phrase(
       "Nothing partitions the stack the way the scratch root below is partitioned — one `refs/stash` per repository, with no per-member address for it — so this prohibition is the whole of the protection, not a stopgap standing in for one.",
     ),
     "the implementer block no longer says nothing partitions the stack or drops the whole-protection close",
@@ -206,7 +204,7 @@ test("the fix-applier's stash rule forbids a bare stash/pop and names a WIP comm
   const b = fixApplierStashBlock();
   assert.match(
     b,
-    phrase(
+    Pin.phrase(
       "Never `git stash` or `git stash pop` here either — a WIP commit is the substitute, not a second scratch mechanism: `git commit -m wip`, then restore or amend once you're back to real work.",
     ),
     "the fix-applier block no longer forbids a bare stash/pop with the WIP-commit substitute bound to it",
@@ -217,7 +215,7 @@ test("the fix-applier's stash rule states the stack is repo-global, shared by ev
   const b = fixApplierStashBlock();
   assert.match(
     b,
-    phrase(
+    Pin.phrase(
       "The stash stack is repo-global too, not per-worktree or per-session — the same `refs/stash` every concurrent member and the main checkout share, not partitioned the way `<scratch>/pr<N>/mutate/` above is.",
     ),
     "the fix-applier block no longer states the stash stack is repo-global and shared by every worktree/session",
@@ -228,7 +226,7 @@ test("the fix-applier's stash rule binds the pop's silence on a clean tree to it
   const b = fixApplierStashBlock();
   assert.match(
     b,
-    phrase(
+    Pin.phrase(
       "A bare pop takes whichever entry is on top, from any worktree, silently — rc 0, no error — when the tree receiving it is clean on the affected paths, and refuses only when that tree is already dirty there.",
     ),
     "the fix-applier block no longer binds the pop's clean-tree silence to its dirty-tree refusal in one span",
@@ -239,7 +237,7 @@ test("the fix-applier's stash rule states a bare push does not reach into a sibl
   const b = fixApplierStashBlock();
   assert.match(
     b,
-    phrase(
+    Pin.phrase(
       "A bare `git stash` (push) does not reach into a sibling's tree, so that half is not the risk — the pop is.",
     ),
     "the fix-applier block no longer states that a bare stash push does not reach a sibling's tree",
@@ -250,7 +248,7 @@ test("the fix-applier's stash rule says nothing partitions the stack, so the pro
   const b = fixApplierStashBlock();
   assert.match(
     b,
-    phrase("Nothing partitions the stack; this prohibition is the whole of the protection."),
+    Pin.phrase("Nothing partitions the stack; this prohibition is the whole of the protection."),
     "the fix-applier block no longer says nothing partitions the stack or drops the whole-protection close",
   );
 });
@@ -267,7 +265,7 @@ test("the fix-applier's stash rule says nothing partitions the stack, so the pro
 // the very line break the rewrap introduced. `narrow` already IS the
 // rewrapped block; there is nothing left to re-locate.
 function assertSurvivesRewrap(source, startAnchor, endAnchor, what, assertions) {
-  const raw = between(source, startAnchor, endAnchor, what);
+  const raw = Pin.of(source, "source").between(startAnchor, endAnchor, what).text;
   const body = raw.replace(/\n*>?\s*$/, "");
   const words = body.replace(/\n>\s?/g, " ").split(/\s+/).filter(Boolean);
   const lines = words.reduce((acc, w) => {
@@ -289,25 +287,25 @@ test("a rewrapped implementer stash block still matches every pin above — thes
     "**Every scratch file",
     "the implementer body's stash-prohibition block",
     [
-      phrase("Never `git stash` or `git stash pop` to shelve your own progress — take a WIP commit instead"),
-      phrase("The stash stack is repo-global, not per-worktree or per-session"),
-      phrase("it refuses loudly only when that tree is already dirty on them"),
-      phrase("Nothing partitions the stack the way the scratch root below is partitioned"),
+      Pin.phrase("Never `git stash` or `git stash pop` to shelve your own progress — take a WIP commit instead"),
+      Pin.phrase("The stash stack is repo-global, not per-worktree or per-session"),
+      Pin.phrase("it refuses loudly only when that tree is already dirty on them"),
+      Pin.phrase("Nothing partitions the stack the way the scratch root below is partitioned"),
     ],
   );
 });
 
 test("a rewrapped fix-applier stash block still matches every pin above — these pins refuse drift, not reflow", () => {
   assertSurvivesRewrap(
-    RUN_TEAM,
+    RUN_TEAM.text,
     "**Never `git stash` or `git stash pop` here either",
     "**Report LAST",
     "the fix-applier's stash-prohibition block",
     [
-      phrase("Never `git stash` or `git stash pop` here either — a WIP commit is the substitute"),
-      phrase("The stash stack is repo-global too, not per-worktree or per-session"),
-      phrase("refuses only when that tree is already dirty there"),
-      phrase("Nothing partitions the stack; this prohibition is the whole of the protection"),
+      Pin.phrase("Never `git stash` or `git stash pop` here either — a WIP commit is the substitute"),
+      Pin.phrase("The stash stack is repo-global too, not per-worktree or per-session"),
+      Pin.phrase("refuses only when that tree is already dirty there"),
+      Pin.phrase("Nothing partitions the stack; this prohibition is the whole of the protection"),
     ],
   );
 });

@@ -37,12 +37,11 @@
 // literally, because moving them moves which half a reader sees as the rule.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const SKILL = "skills/run-team/SKILL.md";
-const read = () => readFileSync(join(import.meta.dirname, "..", "plugin", ...SKILL.split("/")), "utf8");
+const read = () => Pin.file(join(import.meta.dirname, "..", "plugin", ...SKILL.split("/")));
 
 // The paragraph carrying the rule, and no more of the file than that — the
 // shared bound, which also asserts the anchor occurs exactly once. This
@@ -51,7 +50,7 @@ const read = () => readFileSync(join(import.meta.dirname, "..", "plugin", ...SKI
 // prompts' own scratch-partition rule is), so an unbounded match is
 // satisfiable from outside the clause it guards.
 const ANCHOR = "**A frozen transcript does not establish that a member is dead";
-const clause = () => paragraph(read(), ANCHOR, `${SKILL}'s stalled-member liveness clause`, "Settle outcome and liveness are different");
+const clause = () => read().paragraph(ANCHOR, `${SKILL}'s stalled-member liveness clause`, "Settle outcome and liveness are different").text;
 
 // One span: the epistemic rule, the discriminator, BOTH verdicts, the
 // carve-out that keeps the second verdict from licensing a false kill, and the
@@ -85,7 +84,7 @@ files carried fresh mtimes throughout — alive the entire time it read as dead.
 test("the stalled-member guidance says a frozen transcript does not establish death, and names the mtime discriminator with both its verdicts", () => {
   assert.match(
     clause(),
-    phrase(INSTRUCTION),
+    Pin.phrase(INSTRUCTION),
     `${SKILL}'s stalled-member clause no longer carries the whole instruction. One of these went, or a sentence was spliced between them: (1) a frozen transcript does not establish death; (2) the signature it shares with a blocked tool call; (3) the discriminator — the mtimes of the files anywhere under the member's own scratch directory, subdirectories included, read at TWO observations a poll apart with the command that reads them recursively; (4) moved mtimes mean BLOCKED, unchanged mtimes are the dead signature; (5) only the blocked verdict is conclusive, because a call that writes nothing freezes the scratch dir too; (6) the #503 measurement it was derived from. Without (3) and (4) the controller is back to judging death off the transcript, which is #503's own residue; a (3) that stops at the directory's direct children reads a member waiting on its own child as dead; without (5) the clause licenses killing a live member wedged on a network read. Re-anchor this span against the reworded paragraph rather than dropping a half.`,
   );
 });
@@ -142,16 +141,15 @@ const SUBJECT_VOCABULARY = /\b(?:transcripts?|mtimes?|record\s+counts?|scratch|f
 // `between`'s own reason (prose-pin.mjs) — an unbounded scan is satisfiable
 // from outside the clause it guards.
 const NEIGHBOURHOOD = () =>
-  between(
-    read(),
+  read().between(
     "A red PR never silently becomes",
     "Settle outcome and liveness are different facts",
     `${SKILL}'s stalled-member clause neighbourhood`,
-  );
+  ).text;
 
 test("nothing beside the clause carves an exception out of it", () => {
   const whole = NEIGHBOURHOOD();
-  const span = whole.match(phrase(INSTRUCTION));
+  const span = whole.match(Pin.phrase(INSTRUCTION));
   assert.ok(
     span,
     `${SKILL}'s stalled-member instruction does not match inside its neighbourhood (between "A red PR never silently becomes" and "Settle outcome and liveness are different facts") — read the presence pin above first: if it is green, the instruction is intact but the whole clause moved out of this neighbourhood, which this pin also treats as a failure.`,
@@ -176,12 +174,12 @@ test("nothing beside the clause carves an exception out of it", () => {
 // this clause could wrongly REFUSE in, and the one a suite that only ever
 // feeds it a live member never tests.
 const failureTable = () =>
-  between(read(), "## Failure handling", "A red PR never silently becomes", `${SKILL}'s failure table`);
+  read().between("## Failure handling", "A red PR never silently becomes", `${SKILL}'s failure table`).text;
 
 test("the killed row gates on confirming death, not on a frozen transcript", () => {
   assert.match(
     failureTable(),
-    phrase("| Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then new member, new name, prompt carries inherited state |"),
+    Pin.phrase("| Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then new member, new name, prompt carries inherited state |"),
     `${SKILL}'s killed row lost a half. The GATE half — confirm it is dead first, a frozen transcript does not establish that — is what keeps the row from answering a frozen transcript, where the controller replaces a member it never established was gone, discarding work in flight and colliding with its own claim and worktree. The RESPONSE half — new member, new name, prompt carries inherited state — is what a CONFIRMED death must still reach; a gate with no response behind it strands the case this clause exists to let through.`,
   );
 });
@@ -202,7 +200,7 @@ const CARVEOUT_TABLE_VOCABULARY = /transcript/i;
 test("nothing in the failure table beside the killed row's own gate mentions the transcript", () => {
   const table = failureTable();
   const killedRow = table.match(
-    phrase(
+    Pin.phrase(
       "| Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then new member, new name, prompt carries inherited state |",
     ),
   );
@@ -235,12 +233,12 @@ const UNACCOUNTED_ROW = [
 
 test("the unaccounted row sits after the killed row and carries the census-first ordering and the all-silent kill precondition", () => {
   const table = failureTable();
-  assert.match(table, phrase(UNACCOUNTED_ROW), `${SKILL}'s Member unaccounted row lost a half or was reordered: the registry census comes first, then the mtime discriminator for a \`running\` row, and a kill needs every alive-signal silent.`);
+  assert.match(table, Pin.phrase(UNACCOUNTED_ROW), `${SKILL}'s Member unaccounted row lost a half or was reordered: the registry census comes first, then the mtime discriminator for a \`running\` row, and a kill needs every alive-signal silent.`);
   const killed = table.indexOf("| Member **killed**");
   assert.ok(killed !== -1 && table.indexOf("| Member **unaccounted**") > killed, `${SKILL}'s Member unaccounted row must follow the Member killed row.`);
   // The dangling exit this row exists to fill: the paragraph sends the dead
   // verdict here, and the harness line it once named no longer exists.
-  assert.doesNotMatch(read(), /on the liveness\s+read below/, `${SKILL} still sends the dead verdict to a liveness read that has no terminal step.`);
+  assert.doesNotMatch(read().text, /on the liveness\s+read below/, `${SKILL} still sends the dead verdict to a liveness read that has no terminal step.`);
 });
 
 // The asymmetry sentence is the reason the kill needs every signal silent. It
@@ -250,7 +248,7 @@ const ASYMMETRY =
   "the cost of the wrong call is asymmetric — a live member written off gets killed and re-dispatched, which discards the work in flight and, where it holds a claim or a worktree, collides the fleet with itself, while one poll spent on a member that had in fact stopped costs only the poll.";
 
 test("the clause keeps the asymmetry that makes every alive-signal a precondition of the kill", () => {
-  assert.match(clause(), phrase(ASYMMETRY), `${SKILL}'s stalled-member clause lost its cost asymmetry — the reason a kill waits for every alive-signal to be silent.`);
+  assert.match(clause(), Pin.phrase(ASYMMETRY), `${SKILL}'s stalled-member clause lost its cost asymmetry — the reason a kill waits for every alive-signal to be silent.`);
 });
 
 // The two other sentences this change put in SKILL.md that the controller acts
@@ -264,11 +262,11 @@ const FOLD_SUFFIX =
   "A live member past its family's threshold folds the same way — it is advice, so nothing for the heartbeat to act on by itself — and the folded line names each such member (`…; CHECK-LIVENESS fix-pr-5 persists — …`) for as long as it stays live past the threshold.";
 
 test("the Run-ledger paragraph tells a resumed controller to take the registry census before trusting a live token", () => {
-  const block = paragraph(read(), "Compaction parks every in-flight member", `${SKILL}'s Run-ledger resume sentence`, "**The file lives one run.**");
-  assert.match(block, phrase(RESUME_CENSUS), `${SKILL}'s Run-ledger paragraph lost the census-first-on-resume sentence.`);
+  const block = read().paragraph("Compaction parks every in-flight member", `${SKILL}'s Run-ledger resume sentence`, "**The file lives one run.**").text;
+  assert.match(block, Pin.phrase(RESUME_CENSUS), `${SKILL}'s Run-ledger paragraph lost the census-first-on-resume sentence.`);
 });
 
 test("the fold paragraph names a folded CHECK-LIVENESS member", () => {
-  const block = paragraph(read(), "A live member past its family's threshold folds the same way", `${SKILL}'s fold sentence`, "**When you stop on purpose, say why");
-  assert.match(block, phrase(FOLD_SUFFIX), `${SKILL}'s fold prose lost the sentence naming a folded CHECK-LIVENESS member.`);
+  const block = read().paragraph("A live member past its family's threshold folds the same way", `${SKILL}'s fold sentence`, "**When you stop on purpose, say why").text;
+  assert.match(block, Pin.phrase(FOLD_SUFFIX), `${SKILL}'s fold prose lost the sentence naming a folded CHECK-LIVENESS member.`);
 });

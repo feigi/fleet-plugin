@@ -23,7 +23,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { sentences } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 
@@ -121,7 +121,7 @@ export function citationFault(citing, cited) {
   // SEPARATE (non-nested) parenthetical asides, so real prose sitting
   // between them is not swept in with them.
   const opaque = blankParens(blankQuotes(from));
-  const sentence = from.slice(0, sentences(opaque)[0].length);
+  const sentence = from.slice(0, Pin.sentences(opaque)[0].length);
   // Straight quotes pair by position alone — opener and closer are the same
   // character — so an empty `""` (never a span to either regex), a stray
   // unpaired `"`, or a backslash "escape" (none exists in a YAML `#`
@@ -522,7 +522,7 @@ export function windowClaimFault(block) {
   if (!/\b(schedule|window)\b/i.test(block)) {
     return "the pin's comment no longer says the bot moves .nvmrc on a schedule — the pointer to how it moves is gone";
   }
-  const bounded = sentences(block).some((s) => {
+  const bounded = Pin.sentences(block).some((s) => {
     if (!/\b(schedule|window)\b/i.test(s)) return false;
     if (!/\b(open|opens|opened|opening|create|creates|created|creating|creation|raise|raises|raised|raising)\b/i.test(s)) return false;
     if (!/\b(PRs?|pull requests?)\b/i.test(s)) return false;
@@ -876,7 +876,7 @@ test("windowClaimFault still refuses a negation spelled with the opening curly q
 // update-type list: which types automerge is renovate.json's to say, and
 // renovate-release-contract.test.mjs already reds a major that automerges.
 export function majorMergeFault(block) {
-  const unscoped = sentences(block).find(
+  const unscoped = Pin.sentences(block).find(
     (s) =>
       /\b(?:auto-?)?merg/i.test(s) &&
       /\b(checks?|CI|green)\b/i.test(s) &&
@@ -970,7 +970,7 @@ test("a one-line pointer citing ADR 0010 is never taken for the owner (#1756)", 
 export function pointerFault({ block, lines }) {
   if (lines === 0) return "carries no comment directly above its opener — no pointer to ADR 0010 or the do-not-hand-edit rule, and a comment with a blank line under it is not the step's";
   if (!block.includes("ADR 0010")) return "no longer points at ADR 0010";
-  const rule = sentences(block).some((s) => {
+  const rule = Pin.sentences(block).some((s) => {
     const m = /hand-?edit\w*/i.exec(s);
     if (!m) return false;
     const tokens = s.split(/\s+/);
@@ -1634,7 +1634,7 @@ export function jsonCountFault(block) {
   // what this function ever sees. The real coverage sentence leads the
   // paragraph in the current wording, and every accepted paraphrase below
   // does too — measured against `sentences()`, not a raw substring search.
-  const sents = sentences(block);
+  const sents = Pin.sentences(block);
   const lead = sents[0] ?? "";
   if (!/\btracked\b|git ls-files/.test(lead)) {
     return "the Validate JSON comment no longer says which files the step parses — the slice this pin reads has lost its coverage paragraph";

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { stripComments } from "./support/strip-comments.mjs";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { snapshotMissing as snapshotMissingRaw, runReview } from "../plugin/scripts/review-core.mjs";
 import { scriptedHost, SNAP as HOST_SNAP, ARGS, pipeline, parallel, review } from "./support/review-host-fixture.mjs";
 
@@ -411,7 +411,7 @@ test("the snapshot log line says when the head check was skipped", () => {
 // shipped. Same two anchors `review-core-reads.test.mjs`'s `slice()` and
 // `review-core-testcmd.test.mjs` already use.
 function snapshotBlock() {
-  return between(CODE, "const snap = await agent(", "if (snap) {", "the snapshot agent dispatch");
+  return Pin.of(CODE, "CODE").between("const snap = await agent(", "if (snap) {", "the snapshot agent dispatch").text;
 }
 
 // Every test above runs against the lifted `snapshotMissing`, which decides what
@@ -471,7 +471,7 @@ test("the snapshot prompt tells the agent to copy both printed values verbatim, 
       // phrase(), not a literal: the sentence wraps in the source, so a plain
       // space between "the" and "block" matches nothing and the pin reds on
       // prose that is present and correct.
-      phrase("do not reconstruct it, and do not report a path the block did not print"),
+      Pin.phrase("do not reconstruct it, and do not report a path the block did not print"),
       "the prohibition on reconstructing the destination is gone — both values end in components the shell substituted, so an agent invited to guess produces a path that reads plausible and belongs to no run",
     ],
   ]) {

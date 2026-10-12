@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase, sentences, stripHashGutter, unemphasized } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { GATE, readout } from "../plugin/scripts/cell-readout.mjs";
 import { COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
 
@@ -18,7 +18,7 @@ import { COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
 // writer, the way member-outcomes.tsv's is against its scraper.
 const REPO = join(import.meta.dirname, "..");
 const TSV = readFileSync(join(REPO, "docs", "metrics", "tier-outcomes.tsv"), "utf8");
-const RUN_TEAM = readFileSync(join(REPO, "plugin", "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "plugin", "skills", "run-team", "SKILL.md"));
 
 // The header is the LEADING comment block. Slicing it — rather than grepping
 // `#` lines from anywhere — is what stops a stray comment among the data rows
@@ -36,7 +36,7 @@ const HEADER = headerLines.join("\n");
 // satisfiable from outside the paragraph it guards, and this file is 2700 lines
 // of prose about exactly these words. One definition, because three hand-rolled
 // copies of one slice is how two of them end up bounded differently.
-const rulingStep = () => between(RUN_TEAM, "**Guard: accumulate per PR", "**Then record the run's member facts", "phase 3's ruling step");
+const rulingStep = () => RUN_TEAM.between("**Guard: accumulate per PR", "**Then record the run's member facts", "phase 3's ruling step").text;
 
 // The first sentence of the ruling step that names `sizing` — the sentence the
 // phase-0 negative below reads. `sentences()`, never a first-period `[^.]`
@@ -51,11 +51,11 @@ const rulingStep = () => between(RUN_TEAM, "**Guard: accumulate per PR", "**Then
 // today. `.**` itself IS in this slice (3 bold-lead sentence ends), but each
 // is a genuine boundary between two unrelated sentences, not one straddling
 // the `sizing`/`phase 0` attribution this pin reads.
-const sizingSentence = (slice) => sentences(slice).find((s) => /`sizing`/i.test(s)) ?? "";
+const sizingSentence = (slice) => Pin.sentences(slice).find((s) => /`sizing`/i.test(s)) ?? "";
 
 // Same reason as `rulingStep` above: one definition of the `minted_false_claim`
 // slice, so two hand-rolled copies do not drift to different bounds.
-const mfcDef = () => stripHashGutter(between(HEADER, "minted_false_claim", "# sizing", "the header"));
+const mfcDef = () => Pin.of(HEADER, "HEADER").between("minted_false_claim", "# sizing", "the header").stripGutter("#").text;
 
 test("the header's column line names every column, in order", () => {
   // Drift here is silent and total: the header's own awk one-liners and every
@@ -130,12 +130,12 @@ test("the header names WHICH diff `minted_false_claim` scores, and settles the c
   const def = mfcDef();
   assert.match(
     def,
-    phrase("the work AS SUBMITTED asserted a factual claim"),
+    Pin.phrase("the work AS SUBMITTED asserted a factual claim"),
     "the header no longer says `minted_false_claim` scores the work AS SUBMITTED",
   );
   assert.match(
     def,
-    phrase("a claim review caught and the fix pass corrected before merge still counts yes"),
+    Pin.phrase("a claim review caught and the fix pass corrected before merge still counts yes"),
     "the header no longer settles the caught-before-merge case, the half a scorer would otherwise infer",
   );
 });
@@ -155,22 +155,22 @@ test("the header rules `minted_false_claim` by REFERENT, not by surface, and nam
   const def = mfcDef();
   assert.match(
     def,
-    phrase("a diff comment, a doc, a test name, a PR body, a commit body"),
+    Pin.phrase("a diff comment, a doc, a test name, a PR body, a commit body"),
     "the header no longer lists a PR body and a commit body among the surfaces a claim can be written on",
   );
   assert.match(
     def,
-    phrase("A PR body and a commit body are IN SCOPE on the same terms as a diff comment"),
+    Pin.phrase("A PR body and a commit body are IN SCOPE on the same terms as a diff comment"),
     "the header no longer states that a PR/commit body claim scores on the same terms as a diff comment",
   );
   assert.match(
     def,
-    phrase("A claim about code the change does not touch is OUT of scope even when the implementer wrote it"),
+    Pin.phrase("A claim about code the change does not touch is OUT of scope even when the implementer wrote it"),
     "the header no longer excludes a claim about code the change does not touch, regardless of who wrote it or where",
   );
   assert.match(
     def,
-    phrase(
+    Pin.phrase(
       "Tiebreak: would reading the change itself — its diff, its evidence, " +
         "its behaviour — falsify this claim? If yes, it scores.",
     ),
@@ -183,7 +183,7 @@ test("SKILL.md's guard still delegates the column meanings to this header", () =
   // meanings. If that sentence is ever replaced by an inline column list, the
   // two go out of sync silently and this whole file stops being the contract.
   assert.match(
-    RUN_TEAM,
+    RUN_TEAM.text,
     /header carries the column meanings/,
     "SKILL.md no longer delegates the column meanings to the TSV header",
   );
@@ -291,7 +291,7 @@ test("a period in the gap does not hide a phase-0 attribution, and the next sent
   // window is the sentence, so a "phase 0" in the NEXT sentence is not an
   // attribution — widening past the real end would red a true statement.
   const slice = rulingStep();
-  const opening = phrase("`sizing` is the");
+  const opening = Pin.phrase("`sizing` is the");
   const misattributed = slice.replace(opening, "`sizing` is the member's verdict, e.g. the one phase 0 records. `sizing` is the");
   assert.notEqual(misattributed, slice, "the fixture's anchor no longer matches the ruling step — update it, do not delete it");
   assert.match(sizingSentence(misattributed), /phase 0/i, "a phase-0 attribution with an abbreviation before it read as clean");
@@ -349,7 +349,7 @@ test("the ruling step refuses to record a sizing verdict it cannot date", () => 
   // half it is looking at and records it, which is the whole defect.
   assert.match(
     slice,
-    phrase("Record `sizing` only when the report places that run before the PR AND the line carries its signal"),
+    Pin.phrase("Record `sizing` only when the report places that run before the PR AND the line carries its signal"),
     "recording `sizing` is no longer conditioned on the report's ordering together with the line's signal",
   );
   // The else-branch, bound to the action it demands. A rule with no stated
@@ -358,7 +358,7 @@ test("the ruling step refuses to record a sizing verdict it cannot date", () => 
   // dangerous.
   assert.match(
     slice,
-    phrase("leave the field BLANK and say which in `note`"),
+    Pin.phrase("leave the field BLANK and say which in `note`"),
     "the ruling step no longer says what to do when the verdict cannot be dated",
   );
   // The three failure cases, as the one sentence that enumerates them: a
@@ -366,7 +366,7 @@ test("the ruling step refuses to record a sizing verdict it cannot date", () => 
   // the member reported writing the line early.
   assert.match(
     slice,
-    phrase("Ordering clause missing, verdict authored before the run with no corrected value reported, or body and report naming different verdicts"),
+    Pin.phrase("Ordering clause missing, verdict authored before the run with no corrected value reported, or body and report naming different verdicts"),
     "the ruling step no longer enumerates which failures blank the covariate",
   );
   // The rejected alternative, kept explicit: deriving the verdict from the diff
@@ -375,7 +375,7 @@ test("the ruling step refuses to record a sizing verdict it cannot date", () => 
   // it — producing a value that reads as measured, which is the defect again.
   assert.match(
     slice,
-    phrase("Do not re-derive the verdict from the diff to fill the gap"),
+    Pin.phrase("Do not re-derive the verdict from the diff to fill the gap"),
     "the ruling step no longer forbids substituting a diff-derived proxy for the member's verdict",
   );
 });
@@ -393,14 +393,14 @@ test("the ruling step refuses to record a sizing verdict it cannot date", () => 
 // the floor's numbers. So the pins below DERIVE each claim from its real
 // source — the same reason the `profile` pin above derives the enum instead of
 // restating it.
-const MEMBER_SRC = readFileSync(join(REPO, "plugin", "scripts", "member-outcomes.mjs"), "utf8");
+const MEMBER_SRC = Pin.file(join(REPO, "plugin", "scripts", "member-outcomes.mjs"));
 
 // Bounded at both ends, for `between`'s own stated reason: this header is 140
 // lines about exactly these words, so an unbounded match is satisfiable from
 // the provenance block above the paragraph or the column legend below it. The
 // end bound is the column line's tab-separated shape, which no prose line has.
 const runDateSources = () =>
-  stripHashGutter(between(HEADER, "WHICH FILE'S `run_date` SUPPLIES", "# run_date\t", "the header"));
+  Pin.of(HEADER, "HEADER").between("WHICH FILE'S `run_date` SUPPLIES", "# run_date\t", "the header").stripGutter("#").text;
 
 test("the header says which file each distinct-`run_date` count is read from, and that the two columns differ", () => {
   const block = runDateSources();
@@ -411,7 +411,7 @@ test("the header says which file each distinct-`run_date` count is read from, an
   // the defect, not a wording preference.
   assert.match(
     block,
-    phrase(
+    Pin.phrase(
       "at least ten comparisons across five or more distinct `run_date`s, the floor that forbids reading a cell early — is NOT read here at all. It comes from `plugin/scripts/cell-readout.mjs`, which dates each comparison by its session's `run_date` in `docs/metrics/member-outcomes.tsv`",
     ),
     "the header no longer says the per-cell gate's distinct-date count is read from member-outcomes.tsv through cell-readout.mjs, not here",
@@ -421,14 +421,14 @@ test("the header says which file each distinct-`run_date` count is read from, an
   // reader told only that the two are "different" still has to guess which way.
   assert.match(
     block,
-    phrase(
+    Pin.phrase(
       "Here it is STAMPED AT RULING — `tier-outcomes.mjs append` reads the clock when the controller rules a PR's review, where before 2026-09-29 the controller typed it at that same moment — so it records WHICH RUN THE PR BELONGS TO",
     ),
     "the header no longer says this file's `run_date` is stamped at ruling and records which run the PR belongs to, as one contiguous claim",
   );
   assert.match(
     block,
-    phrase(
+    Pin.phrase(
       "In `member-outcomes.tsv` it is DERIVED in code: `member-outcomes.mjs` stamps every row of a session from the NEWEST TRANSCRIPT MTIME in that session directory rather than a clock read, so it records WHEN THE SESSION LAST WROTE",
     ),
     "the header no longer says member-outcomes.tsv's `run_date` is derived from a transcript mtime",
@@ -441,12 +441,12 @@ test("the header says which file each distinct-`run_date` count is read from, an
   // the false claim into a header other prose cites.
   assert.match(
     block,
-    phrase("It moves only when the session WRITES AGAIN"),
+    Pin.phrase("It moves only when the session WRITES AGAIN"),
     "the header no longer says the derived date moves on a re-write, not on a re-scrape",
   );
   assert.match(
     block,
-    phrase("never because the file was merely re-scraped"),
+    Pin.phrase("never because the file was merely re-scraped"),
     "the header no longer rules out a bare re-scrape as a cause of date drift",
   );
 });
@@ -480,12 +480,11 @@ test("the header's `run_date` source claims still hold against the readout, the 
   // scanning the whole file — a regression outside this slice could
   // otherwise satisfy `assert.match` over MEMBER_SRC as a whole through
   // unrelated text elsewhere.
-  const rowsForSessionSrc = between(
-    MEMBER_SRC,
+  const rowsForSessionSrc = MEMBER_SRC.between(
     "export function rowsForSession(sessionDir, stats = {}) {",
     "export const COLUMNS",
     "member-outcomes.mjs's rowsForSession",
-  );
+  ).text;
   assert.match(
     rowsForSessionSrc,
     /newest = Math\.max\(newest, statSync\(.+\)\.mtimeMs\)/,
@@ -505,14 +504,14 @@ test("the header's `run_date` source claims still hold against the readout, the 
   // does not own; a threshold changed in SKILL.md or in the readout alone
   // leaves this header quietly citing the old one.
   assert.match(
-    unemphasized(RUN_TEAM),
-    phrase("there are at least ten of them across five or more distinct `run_date`s"),
+    Pin.unemphasized(RUN_TEAM.text),
+    Pin.phrase("there are at least ten of them across five or more distinct `run_date`s"),
     "SKILL.md's per-cell floor is no longer ten comparisons across five dates — the header quotes those numbers",
   );
   assert.deepEqual({ ...GATE }, { comparisons: 10, runDates: 5 }, "cell-readout.mjs's gate is no longer ten across five — the header quotes those numbers");
   assert.match(
     block,
-    phrase("at least ten comparisons across five or more"),
+    Pin.phrase("at least ten comparisons across five or more"),
     "the header no longer states the per-cell floor it attributes to the other file",
   );
 });

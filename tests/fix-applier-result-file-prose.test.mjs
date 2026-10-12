@@ -18,17 +18,16 @@
 // review-in-run-retry.test.mjs holds both review bodies to by running them).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { DIGEST_KEYS } from "../plugin/scripts/review-core.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const DOC = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const DOC = Pin.file(join(REPO, "commands", "review-and-fix.md"));
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 const RESULT_KEYS = new Set([...DIGEST_KEYS, "snapshot", "survived", "refuted", "unverified"]);
 
-const section = () => between(DOC, "\n## The review result file\n", "\n## Specialists\n", "review-and-fix.md's result-file section");
+const section = () => DOC.between("\n## The review result file\n", "\n## Specialists\n", "review-and-fix.md's result-file section").text;
 const ruling = (lead) => {
   // One paragraph per ruling: the document writes one line per paragraph, so
   // the paragraph is the line the bold lead-in opens.
@@ -38,10 +37,10 @@ const ruling = (lead) => {
 };
 
 test("the fix-applier reads the review off the result file, at the path the runner and the controller write", () => {
-  assert.match(section(), phrase("`<scratch>/pr<pr>/<run>/review.json`"));
+  assert.match(section(), Pin.phrase("`<scratch>/pr<pr>/<run>/review.json`"));
   // Step 1's fix-applier branch is what sends a fix-applier here at all.
-  const step1 = between(DOC, "1. Run the review yourself.", "\n2. Plan the actions.", "review-and-fix.md step 1");
-  assert.match(step1, phrase("see **The review result file**"), "step 1 no longer points a fix-applier at the result file");
+  const step1 = DOC.between("1. Run the review yourself.", "\n2. Plan the actions.", "review-and-fix.md step 1").text;
+  assert.match(step1, Pin.phrase("see **The review result file**"), "step 1 no longer points a fix-applier at the result file");
 });
 
 test("every top-level field the jq recipes read is a field the review returns", () => {
@@ -81,7 +80,7 @@ test("the testEnvironment recipe calls it evidence about the shared test run, an
   const recipes = section().match(/^jq .*$/gm) ?? [];
   const line = recipes.find((l) => l.startsWith("jq -r '.testEnvironment' "));
   assert.ok(line, "the result-file section no longer has a `jq -r '.testEnvironment'` recipe");
-  assert.match(line, phrase("# what the shared test run is evidence about"), "the testEnvironment recipe's comment no longer names the shared test run");
+  assert.match(line, Pin.phrase("# what the shared test run is evidence about"), "the testEnvironment recipe's comment no longer names the shared test run");
   // Every line of every fenced recipe block, not only the `jq ` ones: the `R=`
   // line and any other line the block grows carry comments too.
   const fenced = [...section().matchAll(/^```bash\n([\s\S]*?)^```$/gm)].flatMap((m) => m[1].split("\n"));
@@ -91,61 +90,59 @@ test("the testEnvironment recipe calls it evidence about the shared test run, an
 
 test("the fix-applier owns the mutual-exclusion scan, run twice, with a single refuter for a conflicting pair", () => {
   const p = ruling("**Scan the findings against each other for MUTUAL EXCLUSION");
-  assert.match(p, phrase("run it twice"));
-  assert.match(p, phrase("**Before you apply anything**"));
-  assert.match(p, phrase("**Then as each refuter you dispatch reports**"));
-  assert.match(p, phrase("**A conflicting pair goes to a SINGLE refuter, briefed with both claims**"));
+  assert.match(p, Pin.phrase("run it twice"));
+  assert.match(p, Pin.phrase("**Before you apply anything**"));
+  assert.match(p, Pin.phrase("**Then as each refuter you dispatch reports**"));
+  assert.match(p, Pin.phrase("**A conflicting pair goes to a SINGLE refuter, briefed with both claims**"));
 });
 
 test("the fix-applier owns the suggested-fix re-derivation, ordered so the tree to derive from exists", () => {
   const p = ruling("**A finding whose suggested fix quotes text another applied finding deletes");
-  assert.match(p, phrase("**Re-derive, never copy:**"));
-  assert.match(p, phrase("apply the finding that changes the text first"));
+  assert.match(p, Pin.phrase("**Re-derive, never copy:**"));
+  assert.match(p, Pin.phrase("apply the finding that changes the text first"));
 });
 
 test("the fix-applier owns refuted=false ≠ apply, and per-site measurement for a sibling-site extension", () => {
-  assert.match(ruling("**A `refuted=false` verdict is not an instruction to apply.**"), phrase("is a defer"));
+  assert.match(ruling("**A `refuted=false` verdict is not an instruction to apply.**"), Pin.phrase("is a defer"));
   assert.match(
     ruling("**Extending a finding to sibling sites is a new claim at every added site"),
-    phrase("never on a copied one"),
+    Pin.phrase("never on a copied one"),
   );
 });
 
 test("the fix-applier reads testEnvironment and cwdAudit before acting on any result of the shared test run, and re-runs nothing", () => {
   const p = ruling("**Read `testEnvironment` and `cwdAudit` before you act on any result of the shared test run.**");
-  assert.match(p, phrase("status --porcelain -uall"), "the cwdAudit check lost its explicit untracked mode");
-  assert.match(p, phrase("never revert content you did not write"));
-  assert.match(p, phrase("re-run nothing"), "a dimensionsUnrun entry now reads as an instruction to re-run the review");
+  assert.match(p, Pin.phrase("status --porcelain -uall"), "the cwdAudit check lost its explicit untracked mode");
+  assert.match(p, Pin.phrase("never revert content you did not write"));
+  assert.match(p, Pin.phrase("re-run nothing"), "a dimensionsUnrun entry now reads as an instruction to re-run the review");
 });
 
 // The two run-team/SKILL.md sentences that hand the fix-applier the same ruling
 // were reworded off the specialists' retired `test_run` field (#2374), and
 // nothing read either one. They go with the rest of the SKILL.md copies (§ 8).
 test("run-team's digest paragraph tells the controller the fix-applier reads testEnvironment before acting on any count from the shared test run", () => {
-  const p = paragraph(
-    RUN_TEAM,
+  const p = RUN_TEAM.paragraph(
     "`testEnvironment` says what the review's shared test run is evidence about",
     "run-team/SKILL.md's testEnvironment digest paragraph",
     "**`dimensionsRun` is the dispatch; `dimensionsUnrun` is",
     { emphasisTolerant: true },
-  );
+  ).text;
   assert.match(
     p,
-    phrase("fix-applier reads it before acting on any count from the shared test run"),
+    Pin.phrase("fix-applier reads it before acting on any count from the shared test run"),
     "the digest paragraph no longer says the fix-applier reads testEnvironment before acting on a count from the shared test run",
   );
 });
 
 test("run-team's fix-applier dispatch hands it testEnvironment and cwdAudit before any result of the shared test run", () => {
-  const p = between(
-    RUN_TEAM,
+  const p = RUN_TEAM.between(
     "\n**Then dispatch a fix-applier** — on `DISPATCH fix-pr PR#<M>`",
     "\n**A `DISPATCH fix-pr PR#<M>` on a conflict hold**",
     "run-team/SKILL.md's fix-applier dispatch paragraph",
-  );
+  ).text;
   assert.match(
     p,
-    phrase("`testEnvironment`/`cwdAudit` before any result of the shared test run."),
+    Pin.phrase("`testEnvironment`/`cwdAudit` before any result of the shared test run."),
     "the fix-applier dispatch paragraph no longer says to read testEnvironment/cwdAudit before a result of the shared test run",
   );
 });

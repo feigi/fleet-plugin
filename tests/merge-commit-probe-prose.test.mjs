@@ -82,12 +82,11 @@
 // this document), not the server-side-rebase consequence. A deliberate reword of
 // the command reds this; re-anchor PROBE here rather than deleting the
 // assertion, and keep whichever form replaces it honest about both halves.
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
-import { paragraph, phrase, stripQuoteGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const SKILL = "skills/run-team/SKILL.md";
@@ -96,12 +95,11 @@ const SKILL = "skills/run-team/SKILL.md";
 // than widening the slice back to the file, which is the false green the bound
 // exists to prevent.
 const note = () =>
-  paragraph(
-    stripQuoteGutter(readFileSync(join(REPO, ...SKILL.split("/")), "utf8")),
+  Pin.file(join(REPO, ...SKILL.split("/"))).stripGutter(">").paragraph(
     "The CI facts in that file apply to you",
     SKILL,
     "**Run `<testCmd>` from the worktree before",
-  );
+  ).text;
 
 // Backticks included: they are what keeps this a code span the reader can run,
 // rather than a sentence describing one.
@@ -110,7 +108,7 @@ const PROBE = '`git fetch origin && git rev-list --merges --count "origin/<base>
 test("the five-condition note measures merge commits with a fetched, origin-relative range", () => {
   assert.match(
     note(),
-    phrase(PROBE),
+    Pin.phrase(PROBE),
     `${SKILL}'s five-condition note no longer spells the merge-commit probe ${PROBE}.
 
 Both halves are load-bearing, and dropping either is silent:

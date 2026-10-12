@@ -35,10 +35,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
+const read = (...p) => Pin.file(join(REPO, ...p));
 const RUN_TEAM = read("skills", "run-team", "SKILL.md");
 const REVIEW_AND_FIX = read("commands", "review-and-fix.md");
 const ROOT = join(import.meta.dirname, "..");
@@ -46,11 +46,11 @@ const readRoot = (...p) => readFileSync(join(ROOT, ...p), "utf8");
 
 const flat = (s) => s.replace(/\s+/g, " ");
 
-const step5 = () => flat(between(REVIEW_AND_FIX, "5. File each deferred finding", "\n6. Diff-check green", "review-and-fix step 5"));
+const step5 = () => flat(REVIEW_AND_FIX.between("5. File each deferred finding", "\n6. Diff-check green", "review-and-fix step 5").text);
 // Bounded by the two phase-0 markers that bracket the note, never by the note
 // itself: anchoring on the sentence under test turns its deletion into a
 // slicing error rather than a failed assertion.
-const decidedNote = () => flat(between(RUN_TEAM, "**Torn → surface, never guess**", "4. **Collision scan", "run-team phase 0 decided? note"));
+const decidedNote = () => flat(RUN_TEAM.between("**Torn → surface, never guess**", "4. **Collision scan", "run-team phase 0 decided? note").text);
 
 test("step 5 routes a confirmed defect with an open remedy to ready-for-agent", () => {
   const s = step5();
@@ -70,7 +70,7 @@ test("step 5 routes a confirmed defect with an open remedy to ready-for-agent", 
   // rule and satisfies both.
   assert.match(
     s,
-    phrase("Torn → `needs-triage`, narrowed: torn means **unsure anything is broken**, not unsure how to fix it."),
+    Pin.phrase("Torn → `needs-triage`, narrowed: torn means **unsure anything is broken**, not unsure how to fix it."),
     "step 5 lost the narrowed torn tie-break, so `needs-triage` is back to meaning `unsure how to fix it`",
   );
 });
@@ -82,14 +82,14 @@ test("step 5 states its own bar instead of delegating to phase 0's criterion", (
   // out — so what is pinned is the sentence that rules it out.
   assert.match(
     s,
-    phrase("Do **not** reach for phase 0's **decided?** test here."),
+    Pin.phrase("Do **not** reach for phase 0's **decided?** test here."),
     "step 5 no longer tells the filer to leave phase 0's `decided?` test alone",
   );
   // The superseded delegation, verbatim from the text 6d0c1f6 replaced.
   // Verified zero occurrences in the current file.
   assert.doesNotMatch(
     s,
-    phrase("read the criterion there rather than re-deriving it here"),
+    Pin.phrase("read the criterion there rather than re-deriving it here"),
     "step 5 delegates the label choice back to phase 0 — the two seats have re-collided",
   );
 });
@@ -101,7 +101,7 @@ test("phase 0 marks decided? as a consumption gate and states the filing-time ba
   // the seat it is priced for and to the counterpart that is priced differently.
   assert.match(
     s,
-    phrase(
+    Pin.phrase(
       "**This is a consumption gate**, priced for the seat where implementer divergence costs a claim, a worktree and a dispatch; the filing-time counterpart was repriced to *is the defect confirmed* and states its own bar inline",
     ),
     "phase 0's `decided?` note no longer marks it a consumption gate with a repriced filing-time counterpart",
@@ -119,7 +119,7 @@ test("the ADR keeps its pre-chosen guard and its #211 relationship", () => {
   // alone.
   assert.match(
     adr,
-    phrase(
+    Pin.phrase(
       "**Floor:** 20 deferrals filed across at least 3 distinct run dates after this decision lands. - **Trigger:** `needs-triage` still taking more than half of them.",
     ),
     "the ADR's guard floor or trigger moved — a pre-chosen guard that is retuned later is not a guard",
@@ -129,12 +129,12 @@ test("the ADR keeps its pre-chosen guard and its #211 relationship", () => {
   // reds the second while the first stays green, so both are asserted.
   assert.match(
     adr,
-    phrase("This decision **complements #211 and does not supersede it.**"),
+    Pin.phrase("This decision **complements #211 and does not supersede it.**"),
     "the ADR no longer states that it complements #211 rather than superseding it",
   );
   assert.match(
     adr,
-    phrase("#211 governs what gets **applied**; this governs what gets **labelled**"),
+    Pin.phrase("#211 governs what gets **applied**; this governs what gets **labelled**"),
     "the ADR no longer separates #211's apply policy from this decision's label policy",
   );
 });
@@ -157,20 +157,20 @@ test("the ADR keeps its pre-chosen guard and its #211 relationship", () => {
 // clause is stated and that its reason travels with it; it cannot prove a
 // sentence elsewhere in the ADR does not carve out an exception.
 const guardSection = (text) =>
-  flat(between(text, "## The guard — floor and trigger, chosen before any data", "\n## Relationship to #211", "ADR 0001 guard section"));
+  flat(Pin.of(text, "text").between("## The guard — floor and trigger, chosen before any data", "\n## Relationship to #211", "ADR 0001 guard section").text);
 
 // The ruling and its reason as ONE phrase, wrap-tolerant. Reworded on purpose →
 // update this string. Do not delete the pin to clear the red.
-const POPULATION = phrase(
+const POPULATION = Pin.phrase(
   "**Population:** open **and** closed issues together, never open alone. The trigger measures filing behaviour, and a refuted deferral filed as `needs-triage` and later closed counts under one reading and vanishes under the other — so under open-only any triage pass that reads the backlog improves the ratio without one filing having changed. A guard on the filing bar must not be satisfiable by triaging the queue.",
 );
 // The population made operational. A prose ruling the evaluator's own command
 // contradicts is not a ruling, and `--state all` is the single token that
 // carries it.
-const STATE_ALL = phrase("--state all");
+const STATE_ALL = Pin.phrase("--state all");
 // The as-of duty. Per this ADR's own rule, a count off an append-only tracker
 // rots on the next filing, so the date the count was taken is part of the count.
-const AS_OF = phrase("record the date taken with the verdict");
+const AS_OF = Pin.phrase("record the date taken with the verdict");
 
 // Presence alone doesn't defend a pin: a mutant can wrap the matched span in
 // markdown strikethrough or drop a negating sentence right after it, and a
@@ -205,13 +205,13 @@ test("the guard names the population its trigger measures, and why", () => {
 // a pin that does not bite is green.
 const guardMutants = [
   ["the population is flipped to open-only", ["population"],
-    (t) => t.replace(phrase("open **and** closed issues together, never open alone"), "open issues only, never the closed ones")],
+    (t) => t.replace(Pin.phrase("open **and** closed issues together, never open alone"), "open issues only, never the closed ones")],
   ["the ruling survives but its reason is stripped", ["population"],
-    (t) => t.replace(phrase("The trigger measures filing behaviour, and a refuted deferral filed as `needs-triage` and later closed counts under one reading and vanishes under the other — so under open-only any triage pass that reads the backlog improves the ratio without one filing having changed. A guard on the filing bar must not be satisfiable by triaging the queue."), "Count them all.")],
+    (t) => t.replace(Pin.phrase("The trigger measures filing behaviour, and a refuted deferral filed as `needs-triage` and later closed counts under one reading and vanishes under the other — so under open-only any triage pass that reads the backlog improves the ratio without one filing having changed. A guard on the filing bar must not be satisfiable by triaging the queue."), "Count them all.")],
   ["the count command is narrowed to open issues", ["stateAll"],
-    (t) => t.replace(phrase("--state all"), "--state open")],
+    (t) => t.replace(Pin.phrase("--state all"), "--state open")],
   ["the as-of duty is dropped", ["asOf"],
-    (t) => t.replace(phrase("and record the date taken with the verdict"), "and read it off the tracker")],
+    (t) => t.replace(Pin.phrase("and record the date taken with the verdict"), "and read it off the tracker")],
   ["the population clause is struck through and marked superseded", ["notNeutralized"],
     (t) => t.replace(POPULATION, (m) => `~~${m}~~ Superseded: use open issues only, it is simpler to compute.`)],
 ];
@@ -229,7 +229,7 @@ test("rewrapping the guard section and editing it elsewhere stays green", () => 
   // The accept direction. A pin that reds on any edit to the section has
   // discriminated nothing and gets deleted by whoever next reflows this file.
   const adr = readRoot("docs", "adr", "0001-filing-label-bar-is-defect-confirmed.md");
-  const section = between(adr, "## The guard — floor and trigger, chosen before any data", "\n## Relationship to #211", "ADR 0001 guard section");
+  const section = Pin.of(adr, "adr").between("## The guard — floor and trigger, chosen before any data", "\n## Relationship to #211", "ADR 0001 guard section").text;
   const benign = adr.replace(section, () =>
     section
       .replace(/\n(?! *[-*] )(?! *```)/g, " ")

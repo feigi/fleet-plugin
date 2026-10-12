@@ -39,7 +39,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripComments } from "./support/strip-comments.mjs";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/candidates.mjs", import.meta.url));
@@ -1884,14 +1884,14 @@ test("a label ending in a backslash refuses too — it eats the closing quote th
 // The other half of #173, and the half that produced the refused invocation
 // above: the rule a controller reads lives in another file and was pinned by
 // nothing, so it named a flag the script has never accepted.
-const RUN_TEAM = readFileSync(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"));
 
 test("run-team's phase 0 rule names the flag candidates.mjs accepts", () => {
   // The step-1 bullet alone. A slice any wider is vacuous for this claim: the
   // `candidates.mjs` invocation in the same bullet already spells
   // `--require-label` correctly, so a positive match anywhere in phase 0 stays
   // green with the rule naming anything at all.
-  const step1 = between(RUN_TEAM, "1. **Build the Shortlist**", "\n2. ", "run-team/SKILL.md");
+  const step1 = RUN_TEAM.between("1. **Build the Shortlist**", "\n2. ", "run-team/SKILL.md").text;
   // Leading backtick, so this can only be satisfied by the RULE: in the command
   // above it, `--require-label` is preceded by a line break, not a backtick.
   // The gap is loose enough that rewording around `mandatory` stays green and
@@ -2001,12 +2001,11 @@ test("the run-team design spec's candidate-scan step names the flag this script 
   // the supersession note at the head cites `--label` deliberately, as the
   // spelling this script refuses, so a file-wide negative would fail on the
   // correction's own prose.
-  const step = between(
-    readFileSync(SPEC_RUN_TEAM_DESIGN, "utf8"),
+  const step = Pin.file(SPEC_RUN_TEAM_DESIGN).between(
     "1. Candidate scan",
     "\n2. ",
     "the run-team design spec",
-  );
+  ).text;
 
   assert.ok(
     step.includes(`\`--${DECLARED_LABEL_FLAG} ready-for-agent\``),
@@ -2050,7 +2049,7 @@ function assertScanRunsDeclaredFlag(text, where) {
   // with a live second reason: step 7 of this same skill says "Never fold
   // `--label` into the create", where `--label` is `gh pr edit`'s own flag and
   // correct (#375). A file-wide negative would fail on that sentence.
-  const step = between(text, "## 1. Candidates", "## 2. Dependencies", where);
+  const step = Pin.of(text, "text").between("## 1. Candidates", "## 2. Dependencies", where).text;
   assert.ok(
     step.includes(`--${flag} ready-for-agent`),
     `${where}'s candidate scan no longer runs the label flag candidates.mjs' OPTIONS declares`,
@@ -2225,10 +2224,10 @@ const COMPONENT_SCANS = [
 
 function assertComponentScanNamesDeclaredFlag({ text, from, to }, where) {
   const flag = declaredLabelFlag();
-  const item = between(text, from, to, where);
+  const item = Pin.of(text, "text").between(from, to, where).text;
   assert.match(
     item,
-    phrase(`candidates.mjs --${flag} ready-for-agent`),
+    Pin.phrase(`candidates.mjs --${flag} ready-for-agent`),
     `${where}'s candidate-scan item no longer runs the label flag candidates.mjs' OPTIONS declares`,
   );
   assert.doesNotMatch(
@@ -2261,14 +2260,14 @@ for (const doc of COMPONENT_SCANS) {
 // value — and is pinned all the same: live, shipped, read as current. The
 // negative names `candidates.mjs` rather than `/--label\b/`, because this same
 // step correctly runs `gh issue create --label`, `gh`'s own flag.
-const REVIEW_AND_FIX = readFileSync(join(import.meta.dirname, "..", "plugin", "commands", "review-and-fix.md"), "utf8");
+const REVIEW_AND_FIX = Pin.file(join(import.meta.dirname, "..", "plugin", "commands", "review-and-fix.md"));
 
 function assertDeferralStepNamesDeclaredFlag(text, where) {
   const flag = declaredLabelFlag();
-  const step5 = between(text, "5. File each deferred finding", "\n6. Diff-check green", `${where} step 5`);
+  const step5 = Pin.of(text, "text").between("5. File each deferred finding", "\n6. Diff-check green", `${where} step 5`).text;
   assert.match(
     step5,
-    new RegExp(`${phrase(`candidates.mjs --${flag}`).source}(?![\\w-])`),
+    new RegExp(`${Pin.phrase(`candidates.mjs --${flag}`).source}(?![\\w-])`),
     `${where}'s step 5 no longer names the label flag candidates.mjs' OPTIONS declares`,
   );
   assert.doesNotMatch(
@@ -2279,24 +2278,24 @@ function assertDeferralStepNamesDeclaredFlag(text, where) {
 }
 
 test("review-and-fix's deferral step names the flag this script declares", () => {
-  assertDeferralStepNamesDeclaredFlag(REVIEW_AND_FIX, "review-and-fix.md");
+  assertDeferralStepNamesDeclaredFlag(REVIEW_AND_FIX.text, "review-and-fix.md");
 });
 
 test("the review-and-fix pin reds on the refused spelling and stays green beside gh's own --label", () => {
   assert.throws(
     () =>
-      assertDeferralStepNamesDeclaredFlag(REVIEW_AND_FIX.replaceAll(`--${declaredLabelFlag()}`, "--label"), "the mutant"),
+      assertDeferralStepNamesDeclaredFlag(REVIEW_AND_FIX.text.replaceAll(`--${declaredLabelFlag()}`, "--label"), "the mutant"),
     /the mutant's step 5/,
     "the pin does not red when step 5 is given the spelling this script refuses",
   );
   // GREEN on the real step, which carries a legitimate `--label` — the input
   // a looser negative would wrongly refuse.
   assert.match(
-    between(REVIEW_AND_FIX, "5. File each deferred finding", "\n6. Diff-check green", "review-and-fix.md step 5"),
+    REVIEW_AND_FIX.between("5. File each deferred finding", "\n6. Diff-check green", "review-and-fix.md step 5").text,
     /gh issue create --label/,
     "review-and-fix step 5 no longer carries gh's own `--label` — this control now proves nothing",
   );
-  assertDeferralStepNamesDeclaredFlag(REVIEW_AND_FIX, "review-and-fix.md");
+  assertDeferralStepNamesDeclaredFlag(REVIEW_AND_FIX.text, "review-and-fix.md");
 });
 
 test("the cockpit spec's gh invocation keeps the flag gh accepts", () => {

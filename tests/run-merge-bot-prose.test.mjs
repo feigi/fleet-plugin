@@ -12,19 +12,19 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
-import { between, bullet, paragraph, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const DOC = readFileSync(join(REPO, "commands", "run-merge-bot.md"), "utf8");
+const DOC = Pin.file(join(REPO, "commands", "run-merge-bot.md"));
 
 // Bounded to step 4 alone: unbounded to EOF the slice runs through staleness,
 // the no-undo audit and the watcher loop, and a mention of `in-progress`
 // anywhere in those would satisfy the assertions with step 4 itself untouched.
 function step4() {
   const start = "4. `gh pr merge <pr> --merge`";
-  const at = DOC.indexOf(start);
+  const at = DOC.text.indexOf(start);
   assert.notEqual(at, -1, `'${start}' moved — update this test`);
-  const rest = DOC.slice(at + start.length);
+  const rest = DOC.text.slice(at + start.length);
   const end = rest.indexOf("**Staleness fires");
   assert.notEqual(end, -1, "step 4's end marker moved — update this test");
   return start + rest.slice(0, end);
@@ -76,9 +76,9 @@ test("the drop runs only after the merge is confirmed, never before", () => {
 // somewhere else in the doc can never stand in for this one.
 function noUndoAudit() {
   const start = "## No-undo audit (before every rebase)";
-  const at = DOC.indexOf(start);
+  const at = DOC.text.indexOf(start);
   assert.notEqual(at, -1, `'${start}' moved — update this test`);
-  const rest = DOC.slice(at + start.length);
+  const rest = DOC.text.slice(at + start.length);
   const end = rest.indexOf("**4. Take `main`'s side wholesale");
   assert.notEqual(end, -1, "the audit section's end marker moved — update this test");
   return rest.slice(0, end);
@@ -296,9 +296,9 @@ test("the fourth cause — an absent refs/stash beside a live reflog — is name
 // that the fallback runs the way it's written.
 function step1() {
   const start = "1. If the PR is behind";
-  const at = DOC.indexOf(start);
+  const at = DOC.text.indexOf(start);
   assert.notEqual(at, -1, `'${start}' moved — update this test`);
-  const rest = DOC.slice(at + start.length);
+  const rest = DOC.text.slice(at + start.length);
   const end = rest.indexOf("2. Watch checks settle");
   assert.notEqual(end, -1, "step 1's end marker moved — update this test");
   return start + rest.slice(0, end);
@@ -387,9 +387,9 @@ test("step 1 defines the probe's clean answer by the absence of `+`, not by sile
 // gutted (measured by mutation, 2026-08-29).
 function fallbackBlock() {
   const start = "**Fallback (server-side rebase unavailable).**";
-  const at = DOC.indexOf(start);
+  const at = DOC.text.indexOf(start);
   assert.notEqual(at, -1, `'${start}' moved — update this test`);
-  const rest = DOC.slice(at + start.length);
+  const rest = DOC.text.slice(at + start.length);
   const end = rest.indexOf("2. Watch checks settle");
   assert.notEqual(end, -1, "the fallback block's end marker moved — update this test");
   return start + rest.slice(0, end);
@@ -403,12 +403,12 @@ test("the fallback's diverged-worktree STOP survives the primary path's `+` answ
 // bot to compare the two heads at all — "the rebase would carry an unreviewed
 // local commit into the merge". Pinned positively in its own paragraph.
 const headCheck = () =>
-  paragraph(DOC, "**Confirm the worktree head", "run-merge-bot.md's fallback head check", "```bash git -C <worktree> rev-parse HEAD");
+  DOC.paragraph("**Confirm the worktree head", "run-merge-bot.md's fallback head check", "```bash git -C <worktree> rev-parse HEAD").text;
 
 test("the fallback's head check states the mismatch as a corrupted verification, not a push into the merge", () => {
   assert.match(
     headCheck(),
-    phrase("the rebase would fold an unreviewed local commit into the tree you verify, while the merge takes the remote head without it"),
+    Pin.phrase("the rebase would fold an unreviewed local commit into the tree you verify, while the merge takes the remote head without it"),
   );
 });
 
@@ -475,20 +475,19 @@ test("the fallback's head check states the mismatch as a corrupted verification,
 // to the block: `git ls-remote` recurs through step 1 above and `headRefOid`
 // recurs through the whole file.
 const headBlock = () =>
-  between(
-    DOC,
+  DOC.between(
     "git -C <worktree> rev-parse HEAD",
     "**Compare the worktree head",
     "run-merge-bot.md's fallback head-check command block",
-  );
+  ).text;
 
 test("the fallback reads the branch ref, and marks the PR-object read as not the gate", () => {
-  assert.match(headBlock(), phrase("git ls-remote origin refs/heads/<branch> | cut -f1"));
+  assert.match(headBlock(), Pin.phrase("git ls-remote origin refs/heads/<branch> | cut -f1"));
   // The demotion travels with the command, not only in prose three paragraphs
   // down: a reader who runs the block and stops reading must still not take
   // `headRefOid` for the verdict.
-  assert.match(headBlock(), phrase("gh pr view <pr> --json headRefOid -q .headRefOid"));
-  assert.match(headBlock(), phrase("NOT the gate"));
+  assert.match(headBlock(), Pin.phrase("gh pr view <pr> --json headRefOid -q .headRefOid"));
+  assert.match(headBlock(), Pin.phrase("NOT the gate"));
 });
 
 // The operand as a MAPPING — which source the worktree head is compared
@@ -503,17 +502,17 @@ test("the fallback reads the branch ref, and marks the PR-object read as not the
 // every tree the check exists to catch. #1168 pinned the same prohibition at
 // the sibling site for the same reason.
 const compareRule = () =>
-  paragraph(DOC, "**Compare the worktree head", "run-merge-bot.md's fallback compare rule", "**Why the ref and not `headRefOid`:");
+  DOC.paragraph("**Compare the worktree head", "run-merge-bot.md's fallback compare rule", "**Why the ref and not `headRefOid`:").text;
 
 test("the fallback compares against the branch ref, and forbids both cheaper operands", () => {
-  assert.match(compareRule(), phrase("Compare the worktree head against the branch REF"));
+  assert.match(compareRule(), Pin.phrase("Compare the worktree head against the branch REF"));
   assert.match(
     compareRule(),
-    phrase("never against `gh pr view <pr> --json headRefOid -q .headRefOid`"),
+    Pin.phrase("never against `gh pr view <pr> --json headRefOid -q .headRefOid`"),
   );
-  assert.match(compareRule(), phrase("Never `git rev-parse origin/<branch>` either"));
-  assert.match(compareRule(), phrase("agrees with it by construction"));
-  assert.match(compareRule(), phrase("never the operand this check turns on"));
+  assert.match(compareRule(), Pin.phrase("Never `git rev-parse origin/<branch>` either"));
+  assert.match(compareRule(), Pin.phrase("agrees with it by construction"));
+  assert.match(compareRule(), Pin.phrase("never the operand this check turns on"));
 });
 
 // COUNT guard, and the ceiling on the presences above. Every assertion in
@@ -562,15 +561,14 @@ test("no second operand is admitted beside the branch ref", () => {
 // and is exactly the mutant that escaped at the sibling site. This slice is
 // that clause alone, where the PR object has no legitimate business at all.
 const emptyReadClause = () =>
-  between(
-    DOC,
+  DOC.between(
     "**An empty ref read is neither equal nor a mismatch**",
     "**Why the ref and not",
     "run-merge-bot.md's fallback empty-ref-read clause",
-  );
+  ).text;
 
 test("an unreadable ref refuses, and never falls back to the PR object", () => {
-  assert.match(emptyReadClause(), phrase("report the ref as unreadable and stop, `blocked`"));
+  assert.match(emptyReadClause(), Pin.phrase("report the ref as unreadable and stop, `blocked`"));
   assert.doesNotMatch(
     emptyReadClause(),
     /headRefOid/,
@@ -584,7 +582,7 @@ test("an unreadable ref refuses, and never falls back to the PR object", () => {
 // negative above covers. The arms name no source today and need none: the
 // paragraphs above resolve the operand before the reader reaches them.
 const arms = () =>
-  between(DOC, "- **Equal** → proceed.", "**Plain `git fetch origin` only", "run-merge-bot.md's fallback arms");
+  DOC.between("- **Equal** → proceed.", "**Plain `git fetch origin` only", "run-merge-bot.md's fallback arms").text;
 
 test("no arm of the fallback names the PR object as a thing to compare against", () => {
   assert.doesNotMatch(
@@ -594,9 +592,9 @@ test("no arm of the fallback names the PR object as a thing to compare against",
   );
   // Runs with the positives that make the negative mean something: a
   // `doesNotMatch` alone is satisfied by arms that were deleted.
-  assert.match(arms(), phrase("**Equal** → proceed."));
-  assert.match(arms(), phrase("**Worktree ahead** → STOP"));
-  assert.match(arms(), phrase("**Worktree behind, or no worktree at all** → not a divergence"));
+  assert.match(arms(), Pin.phrase("**Equal** → proceed."));
+  assert.match(arms(), Pin.phrase("**Worktree ahead** → STOP"));
+  assert.match(arms(), Pin.phrase("**Worktree behind, or no worktree at all** → not a divergence"));
 });
 
 // The fail-open half, and the whole reason the OPERAND moved rather than the
@@ -609,15 +607,15 @@ test("no arm of the fallback names the PR object as a thing to compare against",
 // THE CEILING: the measurement sentence beside these clauses is deliberately
 // unpinned — it is one run's reading at a sibling site, and re-measuring must
 // not turn a test red.
-const whyRef = () => paragraph(DOC, "**Why the ref and not", "run-merge-bot.md's fallback fail-open rationale", "**Unequal → `git fetch origin` and");
+const whyRef = () => DOC.paragraph("**Why the ref and not", "run-merge-bot.md's fallback fail-open rationale", "**Unequal → `git fetch origin` and").text;
 
 test("the fallback says the PR-object compare fails open too, and that a re-read cannot fix it", () => {
-  assert.match(whyRef(), phrase("both operands go stale in the SAME direction"));
-  assert.match(whyRef(), phrase("fails OPEN as readily as it fails closed"));
-  assert.match(whyRef(), phrase("the check reads **Equal**"));
+  assert.match(whyRef(), Pin.phrase("both operands go stale in the SAME direction"));
+  assert.match(whyRef(), Pin.phrase("fails OPEN as readily as it fails closed"));
+  assert.match(whyRef(), Pin.phrase("the check reads **Equal**"));
   assert.match(
     whyRef(),
-    phrase("Re-reading `headRefOid` on a settle window does not reach that half at all"),
+    Pin.phrase("Re-reading `headRefOid` on a settle window does not reach that half at all"),
   );
 });
 
@@ -634,16 +632,16 @@ test("the fallback says the PR-object compare fails open too, and that a re-read
 //   - no `Equal`-is-unreachable clause, and the surviving mismatch can still
 //     be let through as equal, which is #1512's own defect restored one
 //     paragraph later than where it was removed.
-const reRead = () => paragraph(DOC, "**Unequal → `git fetch origin`", "run-merge-bot.md's fallback bounded re-read", "**Ahead or behind is `git cherry");
+const reRead = () => DOC.paragraph("**Unequal → `git fetch origin`", "run-merge-bot.md's fallback bounded re-read", "**Ahead or behind is `git cherry").text;
 
 test("a mismatch is re-read exactly once, then refused rather than waited out", () => {
-  assert.match(reRead(), phrase("`git fetch origin` and read the ref once more"));
-  assert.match(reRead(), phrase("Bounded at one re-read, never a third"));
-  assert.match(reRead(), phrase("refuse: report `head-moved-after-label-#<pr>` and stop"));
-  assert.match(reRead(), phrase("Do not read a third time"));
+  assert.match(reRead(), Pin.phrase("`git fetch origin` and read the ref once more"));
+  assert.match(reRead(), Pin.phrase("Bounded at one re-read, never a third"));
+  assert.match(reRead(), Pin.phrase("refuse: report `head-moved-after-label-#<pr>` and stop"));
+  assert.match(reRead(), Pin.phrase("Do not read a third time"));
   assert.match(
     reRead(),
-    phrase("**`Equal` is not among the outcomes a surviving mismatch can reach**"),
+    Pin.phrase("**`Equal` is not among the outcomes a surviving mismatch can reach**"),
   );
 });
 
@@ -658,12 +656,12 @@ test("a mismatch is re-read exactly once, then refused rather than waited out", 
 // removed from the operand. The discriminator is `git cherry`, which this
 // step already established two paragraphs up, and pinning it is what keeps
 // the arms' unchanged behaviour actually reachable.
-const armRouting = () => paragraph(DOC, "**Ahead or behind is", "run-merge-bot.md's fallback arm discriminator", "- **Equal** → proceed.");
+const armRouting = () => DOC.paragraph("**Ahead or behind is", "run-merge-bot.md's fallback arm discriminator", "- **Equal** → proceed.").text;
 
 test("which arm a surviving mismatch takes is decided by patch equivalence, not by the sha compare", () => {
-  assert.match(armRouting(), phrase("`git cherry origin/<branch> HEAD` from the worktree"));
-  assert.match(armRouting(), phrase("not the sha compare"));
-  assert.match(armRouting(), phrase("a `+` → ahead; no `+` → behind"));
+  assert.match(armRouting(), Pin.phrase("`git cherry origin/<branch> HEAD` from the worktree"));
+  assert.match(armRouting(), Pin.phrase("not the sha compare"));
+  assert.match(armRouting(), Pin.phrase("a `+` → ahead; no `+` → behind"));
 });
 
 // #1038's AC-4 is a property of the whole block, not of the two sentences that
@@ -676,7 +674,7 @@ test("which arm a surviving mismatch takes is decided by patch equivalence, not 
 test("no sentence in the fallback claims the local rebase can carry a commit into the merge", () => {
   assert.match(
     fallbackBlock(),
-    phrase("Rebase locally, for verification only — this rebase never needs to reach the remote"),
+    Pin.phrase("Rebase locally, for verification only — this rebase never needs to reach the remote"),
   );
   assert.doesNotMatch(fallbackBlock(), /carry[\s\S]{0,60}into the merge/);
 });
@@ -732,19 +730,19 @@ test("no sentence in the fallback claims the local rebase can carry a commit int
 // reworded — the pins refuse drift, not layout, and they do not reach the
 // arm the ticket put out of scope.
 const stopArm = () =>
-  between(DOC, "- **Worktree ahead**", "- **Worktree behind", "run-merge-bot.md's fallback arms");
+  DOC.between("- **Worktree ahead**", "- **Worktree behind", "run-merge-bot.md's fallback arms").text;
 
 test("the STOP halts on verification against the wrong tree, not on a commit carried into the merge", () => {
   // the premise the old assertion carried on its true half: WHAT produces the
   // divergence. Retained here, or correcting the reason would quietly drop it.
-  assert.match(stopArm(), phrase("leaves an unpushed, unreviewed commit that a clean-tree audit passes"));
+  assert.match(stopArm(), Pin.phrase("leaves an unpushed, unreviewed commit that a clean-tree audit passes"));
   assert.match(
     stopArm(),
-    phrase("Nothing on this path pushes, so that commit cannot enter the merge — what it corrupts is the verification"),
+    Pin.phrase("Nothing on this path pushes, so that commit cannot enter the merge — what it corrupts is the verification"),
   );
   assert.match(
     stopArm(),
-    phrase("both the `origin/main...HEAD` diff and the suite run against a tree that is not the reviewed head"),
+    Pin.phrase("both the `origin/main...HEAD` diff and the suite run against a tree that is not the reviewed head"),
   );
 });
 
@@ -757,13 +755,13 @@ test("the STOP halts on verification against the wrong tree, not on a commit car
 // that now disagrees with it. Pinned inside the paragraph that carries the
 // cross-reference, so the two sites cannot drift apart again in silence.
 const plusOutcome = () =>
-  paragraph(DOC, "**Neither result halts this path", "run-merge-bot.md's `+` outcome paragraph", "**Two, and only two, reasons this");
+  DOC.paragraph("**Neither result halts this path", "run-merge-bot.md's `+` outcome paragraph", "**Two, and only two, reasons this").text;
 
 test("the server-side paragraph routes no carry-into-the-merge rationale to the fallback", () => {
-  assert.match(plusOutcome(), phrase("neither path can carry a local commit to the remote, because neither pushes"));
+  assert.match(plusOutcome(), Pin.phrase("neither path can carry a local commit to the remote, because neither pushes"));
   assert.match(
     plusOutcome(),
-    phrase("so a commit only the worktree holds makes the verified tree something other than the reviewed head"),
+    Pin.phrase("so a commit only the worktree holds makes the verified tree something other than the reviewed head"),
   );
   assert.doesNotMatch(plusOutcome(), /carry[\s\S]{0,60}into the merge/);
 });
@@ -772,15 +770,15 @@ test("the server-side paragraph routes no carry-into-the-merge rationale to the 
 // table promised `worktree-diverged-#<pr>` for "the worktree ahead of the PR
 // head" with no path qualifier, while the halt itself lives only in the
 // fallback. Whichever file is edited alone, the other goes back to lying.
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 // Sliced to the failure table alone. Unbounded, `worktree` and `fallback` both
 // occur freely elsewhere in a file thousands of lines long.
 function failureTable() {
   const start = "## Failure handling";
-  const at = RUN_TEAM.indexOf(start);
+  const at = RUN_TEAM.text.indexOf(start);
   assert.notEqual(at, -1, `'${start}' moved — update this test`);
-  const rest = RUN_TEAM.slice(at + start.length);
+  const rest = RUN_TEAM.text.slice(at + start.length);
   const end = rest.indexOf("A red PR never silently becomes");
   assert.notEqual(end, -1, "the failure table's end marker moved — update this test");
   return rest.slice(0, end);
@@ -798,10 +796,10 @@ test("run-team scopes the diverged-worktree row to the fallback, not to every me
 // without this the skill's own statement of it can be deleted with the suite
 // green. Sliced to that one paragraph, and the span is one contiguous clause.
 test("run-team's never-`--delete-branch` paragraph says the branch-delete step also releases the claim label", () => {
-  const para = paragraph(RUN_TEAM, "Never `--delete-branch` — the merge bot deletes the head branch itself.", "run-team/SKILL.md's never-`--delete-branch` paragraph", "**Never force a rebase to start.**", {
+  const para = RUN_TEAM.paragraph("Never `--delete-branch` — the merge bot deletes the head branch itself.", "run-team/SKILL.md's never-`--delete-branch` paragraph", "**Never force a rebase to start.**", {
     emphasisTolerant: true,
-  });
-  assert.match(para, phrase("The branch-delete step also releases the claim label: it drops `in-progress` from every issue the PR closes."));
+  }).text;
+  assert.match(para, Pin.phrase("The branch-delete step also releases the claim label: it drops `in-progress` from every issue the PR closes."));
 });
 
 // #903: the poll read `gh pr view <pr> --json headRefOid` — the one field that
@@ -903,18 +901,18 @@ test("step 1 re-polls before calling a desync, and that mandate is pinned", () =
 // proves the LAST read failed — is deliberately unpinned; it can be reworded
 // freely.
 const emptyPrHead = () =>
-  paragraph(DOC, "**`pr_head` still empty once the re-poll cap runs out", "run-merge-bot.md step 1 empty pr_head", "**A desync that DOES survive the");
+  DOC.paragraph("**`pr_head` still empty once the re-poll cap runs out", "run-merge-bot.md step 1 empty pr_head", "**A desync that DOES survive the").text;
 
 test("step 1 reports a pr_head still empty after the cap as unreadable, never as a desync or a landed rebase", () => {
-  assert.match(emptyPrHead(), phrase("Report the PR-object read as unreadable"));
+  assert.match(emptyPrHead(), Pin.phrase("Report the PR-object read as unreadable"));
   assert.match(
     emptyPrHead(),
-    phrase("unreadable rather than folding it into either the desync above or the landed row"),
+    Pin.phrase("unreadable rather than folding it into either the desync above or the landed row"),
   );
 });
 
 test("step 1 never feeds an empty pr_head into the close-and-reopen ancestry check", () => {
-  assert.match(emptyPrHead(), phrase("do not feed an empty `pr_head` into the close-and-reopen check"));
+  assert.match(emptyPrHead(), Pin.phrase("do not feed an empty `pr_head` into the close-and-reopen check"));
 });
 
 // The verdict the settle window exists to delay, unpinned until #1948 though
@@ -923,14 +921,14 @@ test("step 1 never feeds an empty pr_head into the close-and-reopen ancestry che
 // reason the local rebase is forbidden is pinned apart from the prohibition, so
 // "because" → "since" leaves both green while dropping either reds.
 const survivingDesync = () =>
-  paragraph(DOC, "**A desync that DOES survive the cap", "run-merge-bot.md step 1 surviving desync", "**The controller's remedy is close-and-reopen, and");
+  DOC.paragraph("**A desync that DOES survive the cap", "run-merge-bot.md step 1 surviving desync", "**The controller's remedy is close-and-reopen, and").text;
 
 test("step 1 hands a desync that survives the cap to the controller and repairs nothing itself", () => {
-  assert.match(survivingDesync(), phrase("is the one state that needs a controller"));
-  assert.match(survivingDesync(), phrase("do not retry the rebase"));
-  assert.match(survivingDesync(), phrase("do not rebase locally"));
-  assert.match(survivingDesync(), phrase("the remote is already correct"));
-  assert.match(survivingDesync(), phrase("Report it and stop"));
+  assert.match(survivingDesync(), Pin.phrase("is the one state that needs a controller"));
+  assert.match(survivingDesync(), Pin.phrase("do not retry the rebase"));
+  assert.match(survivingDesync(), Pin.phrase("do not rebase locally"));
+  assert.match(survivingDesync(), Pin.phrase("the remote is already correct"));
+  assert.match(survivingDesync(), Pin.phrase("Report it and stop"));
 });
 
 // #903's expensive half. Close-and-reopen is the usual remedy for a desynced PR
@@ -976,7 +974,7 @@ test("step 1 requires an ancestry check before closing a desynced PR", () => {
 // fire block PRINTED — the hand-off a bot makes — so a fire-to-poll value the
 // report line drops
 // reds here instead of being carried in by the test.
-const BASH_BLOCKS = [...DOC.matchAll(/```bash\n([\s\S]*?)```/g)].map((m) => m[1]);
+const BASH_BLOCKS = [...DOC.text.matchAll(/```bash\n([\s\S]*?)```/g)].map((m) => m[1]);
 const STEP1_FIRE = BASH_BLOCKS.filter((b) => b.includes("gh pr update-branch <pr> --rebase"));
 assert.equal(
   STEP1_FIRE.length,
@@ -1205,10 +1203,10 @@ test("step 1's poll, cut off mid-re-poll and re-issued with the fire block's pre
 // The deadline half of #1895, the way step 2's CI wait and the grace wait
 // carry theirs.
 test("step 1's poll runs in one eval cell, never bash plus wait", () => {
-  const pair = between(DOC, "The poll:", "**Poll `git ls-remote`, not", "run-merge-bot.md step 1 poll rule");
-  assert.match(pair, phrase("one Python `eval` cell"));
-  assert.match(pair, phrase("its cell `timeout` at 900s or more"));
-  assert.match(pair, phrase("never `bash` plus `wait`"), "the rule no longer forbids the bash+wait form that backgrounds past ~60s");
+  const pair = DOC.between("The poll:", "**Poll `git ls-remote`, not", "run-merge-bot.md step 1 poll rule").text;
+  assert.match(pair, Pin.phrase("one Python `eval` cell"));
+  assert.match(pair, Pin.phrase("its cell `timeout` at 900s or more"));
+  assert.match(pair, Pin.phrase("never `bash` plus `wait`"), "the rule no longer forbids the bash+wait form that backgrounds past ~60s");
 });
 
 // #908: a controller brief predicted the merge would be "a fast-forward". True
@@ -1246,13 +1244,13 @@ test("step 4 expects the fallback path to disprove, not to silently count as pro
 // vacuous pin this file's header forbids: the token surviving anywhere else in
 // the doc would mask its removal from the vocabulary list.
 test("the report vocabulary includes rebase-fallback", () => {
-  assert.match(DOC, /^Report merged [^\n]*rebase-fallback-#X/m);
+  assert.match(DOC.text, /^Report merged [^\n]*rebase-fallback-#X/m);
 });
 
 // #2295: step 4 tells the bot to report each kept branch, so the token has to
 // be in the vocabulary the bot reports from. Bounded to the Report line, as above.
 test("the report vocabulary includes branch-kept", () => {
-  assert.match(DOC, /^Report merged [^\n]*branch-kept-#X/m);
+  assert.match(DOC.text, /^Report merged [^\n]*branch-kept-#X/m);
 });
 
 // #1806 (spec 2026-09-24 § 5, ADR 0012 Decision 3). Step 3 is ONE script run
@@ -1263,14 +1261,14 @@ test("the report vocabulary includes branch-kept", () => {
 // These replace the retired `gateProof()` block: that section's synthetic
 // fixtures and plain-`mkdir` claim moved into `merge-gate.test.mjs` as cases.
 const step3 = () =>
-  between(DOC, "3. **Gate the merge with `merge-gate.mjs`", "4. `gh pr merge <pr> --merge`", "run-merge-bot.md step 3");
+  DOC.between("3. **Gate the merge with `merge-gate.mjs`", "4. `gh pr merge <pr> --merge`", "run-merge-bot.md step 3").text;
 
 test("step 3 runs the merge gate twice and merges only on the second exit 0", () => {
   const s = step3();
   assert.match(s, /~\/\.fleet\/bin\/fleet-run merge-gate\.mjs --pr <pr> --pre <pre> --post <post>/);
   assert.match(
     s,
-    phrase("**Run it again immediately before `gh pr merge`, and merge only on that second exit 0.**"),
+    Pin.phrase("**Run it again immediately before `gh pr merge`, and merge only on that second exit 0.**"),
     "step 3 no longer re-runs the gate at the merge instant — a conclusion that inverted under the same run id, or a label pulled during the CI wait, merges on the first reading",
   );
 });
@@ -1281,7 +1279,7 @@ test("step 3 waits on an unfinished run instead of skipping the PR, and only the
   // on the first reading.
   assert.match(
     step3(),
-    phrase("Exit 1 with a `ci:…` `reason`, `ci.runId` set and `ci.status` not `completed` → the run has started but not finished: wait on `ci.runId` (step 2), then run it again."),
+    Pin.phrase("Exit 1 with a `ci:…` `reason`, `ci.runId` set and `ci.status` not `completed` → the run has started but not finished: wait on `ci.runId` (step 2), then run it again."),
     "step 3 no longer separates the not-yet-finished run from a real refusal",
   );
 });
@@ -1296,17 +1294,17 @@ test("step 3 waits and re-gates on a null ci.runId instead of routing it into st
   const s = step3();
   assert.match(
     s,
-    phrase("Exit 1 with `ci.runId` **null** (`reason` starts `no CI run whose headSha equals`) → GitHub has not yet registered a run for this head at all"),
+    Pin.phrase("Exit 1 with `ci.runId` **null** (`reason` starts `no CI run whose headSha equals`) → GitHub has not yet registered a run for this head at all"),
     "step 3 no longer carves the no-run-yet case out of the unfinished-run wait",
   );
   assert.match(
     s,
-    phrase("never route this into step 2's `gh run view <run-id>` poll with a null id"),
+    Pin.phrase("never route this into step 2's `gh run view <run-id>` poll with a null id"),
     "step 3 no longer warns against waiting on step 2's blocking call with a null run id",
   );
   assert.match(
     s,
-    phrase("Wait 15s and run the gate again instead, capped at 20 attempts (~5 minutes); no run within that cap → skip the PR and report `<reason>-#<pr>`"),
+    Pin.phrase("Wait 15s and run the gate again instead, capped at 20 attempts (~5 minutes); no run within that cap → skip the PR and report `<reason>-#<pr>`"),
     "step 3 no longer bounds the no-run-yet wait, or no longer reports when the cap is exhausted",
   );
 });
@@ -1314,17 +1312,17 @@ test("step 3 waits and re-gates on a null ci.runId instead of routing it into st
 test("step 3 still skips a real refusal that is neither the unfinished-run wait nor the no-run-yet wait", () => {
   assert.match(
     step3(),
-    phrase("the same as any other exit 1. Any other exit 1 → skip the PR"),
+    Pin.phrase("the same as any other exit 1. Any other exit 1 → skip the PR"),
     "step 3 no longer distinguishes the two waits above from every other exit 1",
   );
 });
 
 test("step 3 reads exit 2 as could-not-evaluate, never as a verdict about the PR", () => {
   const s = step3();
-  assert.match(s, phrase("Exit 2 → stop on that PR and report `<reason>-#<pr>`: the gate could not evaluate"));
+  assert.match(s, Pin.phrase("Exit 2 → stop on that PR and report `<reason>-#<pr>`: the gate could not evaluate"));
   assert.match(
     s,
-    phrase("Re-run once only for `rate-limited`"),
+    Pin.phrase("Re-run once only for `rate-limited`"),
     "step 3 no longer bounds the exit-2 retry to the one reason that clears by itself",
   );
 });
@@ -1334,39 +1332,39 @@ test("step 3 keys the gate's reading on both the PR and the bot's own name", () 
   // `## Dispatched` list, so no two bots in one run share it; `pr<N>` binds
   // the reading to the merge it licenses. Either key dropped puts two readings
   // at one path.
-  assert.match(step3(), phrase("--out <scratch>/pr<N>/merge-bot-<n>/ci.json"));
+  assert.match(step3(), Pin.phrase("--out <scratch>/pr<N>/merge-bot-<n>/ci.json"));
 });
 
 // #1806 (spec § 4 items 4, 6, 11). The dispatched bot's pass ends in a grace
 // and ONE report; the top-level invocation keeps its Monitor. Sliced to the
 // grace section, which ends where **Then stay armed** begins.
-const grace = () => between(DOC, "## Grace, then one report", "## Then stay armed", "run-merge-bot.md grace section");
+const grace = () => DOC.between("## Grace, then one report", "## Then stay armed", "run-merge-bot.md grace section").text;
 
 test("a dispatched bot holds a 15-minute grace, polling every 60s, before its one report", () => {
   const s = grace();
-  assert.match(s, phrase("**Only a bot a controller dispatched holds a grace**"));
-  assert.match(s, phrase("then waits **15 minutes** for late labels, then reports once"));
-  assert.match(s, phrase("Every 60s, poll `gh pr list --state open --label ready-to-merge --limit 200 --json number`"),
+  assert.match(s, Pin.phrase("**Only a bot a controller dispatched holds a grace**"));
+  assert.match(s, Pin.phrase("then waits **15 minutes** for late labels, then reports once"));
+  assert.match(s, Pin.phrase("Every 60s, poll `gh pr list --state open --label ready-to-merge --limit 200 --json number`"),
     "the grace poll lost its --limit, so it reads gh's bare default of 30 as the whole labelled queue (#2108)");
   assert.match(
     s,
-    phrase("**re-run selection from the top**, hold rule included, drain what it makes actionable, and restart the grace after that drain"),
+    Pin.phrase("**re-run selection from the top**, hold rule included, drain what it makes actionable, and restart the grace after that drain"),
     "a label arriving in grace no longer re-enters selection with the hold rule, or no longer restarts the grace",
   );
-  assert.match(s, phrase("**One report, at exit, and none before it**"));
+  assert.match(s, Pin.phrase("**One report, at exit, and none before it**"));
 });
 
 test("the grace wait holds in one eval cell, never bash plus wait", () => {
-  const pair = between(DOC, "The wait:", "**One report, at exit", "run-merge-bot.md grace wait rule");
-  assert.match(pair, phrase("hold the whole grace in one Python `eval` cell"));
-  assert.match(pair, phrase("its cell `timeout` at 1000s or more"));
-  assert.match(pair, phrase("never `bash` plus `wait`"), "the rule no longer forbids the bash+wait form that backgrounds past ~60s");
+  const pair = DOC.between("The wait:", "**One report, at exit", "run-merge-bot.md grace wait rule").text;
+  assert.match(pair, Pin.phrase("hold the whole grace in one Python `eval` cell"));
+  assert.match(pair, Pin.phrase("its cell `timeout` at 1000s or more"));
+  assert.match(pair, Pin.phrase("never `bash` plus `wait`"), "the rule no longer forbids the bash+wait form that backgrounds past ~60s");
 });
 
 test("the top-level invocation still arms its Monitor, and a dispatched bot still skips it", () => {
   assert.match(
-    DOC,
-    phrase("**Skip this whole section if a controller dispatched you** (`/skill:run-team`, or any caller that says it owns the watcher) — hold the grace above instead."),
+    DOC.text,
+    Pin.phrase("**Skip this whole section if a controller dispatched you** (`/skill:run-team`, or any caller that says it owns the watcher) — hold the grace above instead."),
   );
 });
 
@@ -1378,18 +1376,18 @@ test("the top-level invocation still arms its Monitor, and a dispatched bot stil
 // and the verdict-strength line tells it how hard to hold. Sliced to the hold
 // rule alone — unbounded, "four signals" anywhere later in a 300-line
 // document would satisfy these with the rule itself reverted to three.
-const holdRule = () => between(DOC, "Before touching labeled PR `N`", "## The labelled head", "the hold rule");
+const holdRule = () => DOC.between("Before touching labeled PR `N`", "## The labelled head", "the hold rule").text;
 
 test("the hold rule names all four signals, prose included", () => {
   const s = holdRule();
   assert.match(
     s,
-    phrase("**Any** of its four signals (`files`, `modules`, `dirs`, `prose`) firing means related"),
+    Pin.phrase("**Any** of its four signals (`files`, `modules`, `dirs`, `prose`) firing means related"),
     "the hold rule no longer names four signals — pr-overlap.mjs computes `prose` and a bot reading three ignores it",
   );
   assert.match(
     s,
-    phrase("Directory-only and prose-only hits prompt investigation"),
+    Pin.phrase("Directory-only and prose-only hits prompt investigation"),
     "the hold rule no longer rates a prose hit as weak evidence beside a directory one",
   );
 });
@@ -1402,7 +1400,7 @@ test("the hold rule names all four signals, prose included", () => {
 test("the hold rule says prose=0 clears only when proseUnrun is null", () => {
   assert.match(
     holdRule(),
-    phrase("**`prose=0` is a clear only when `proseUnrun` is `null`.**"),
+    Pin.phrase("**`prose=0` is a clear only when `proseUnrun` is `null`.**"),
     "the hold rule no longer gates an empty prose result on the scan having run",
   );
 });
@@ -1416,15 +1414,15 @@ test("the hold rule says prose=0 clears only when proseUnrun is null", () => {
 // provably unrelated) that says mechanising a bare symbol name would cost
 // more than it buys.
 test("the same-docs-section bullet points at signal 4 and keeps symbols human", () => {
-  const s = paragraph(DOC, "they change the same exported symbol", "the same-section bullet", "Genuinely unclear → **hold**. Waiting costs");
+  const s = DOC.paragraph("they change the same exported symbol", "the same-section bullet", "Genuinely unclear → **hold**. Waiting costs").text;
   assert.match(
     s,
-    phrase("signal 4 mechanises the half of this where the section is a **data file** cited by name"),
+    Pin.phrase("signal 4 mechanises the half of this where the section is a **data file** cited by name"),
     "the same-section bullet no longer names the signal that mechanises its data-file half",
   );
   assert.match(
     s,
-    phrase("a bare symbol or key name is still yours to read"),
+    Pin.phrase("a bare symbol or key name is still yours to read"),
     "the same-section bullet no longer keeps bare symbol and config-key matching a human read",
   );
 });
@@ -1434,35 +1432,35 @@ test("the same-docs-section bullet points at signal 4 and keeps symbols human", 
 // four checks and the no-undo audit can all pass it. The fallback's verdict is
 // "verified" only on a clean main-gain result against the local rebased head.
 const mainGainFallback = () =>
-  paragraph(DOC, "**The fallback's \"verified\" needs a clean main-gain check", "run-merge-bot.md's fallback main-gain paragraph", "2. Watch checks settle");
+  DOC.paragraph("**The fallback's \"verified\" needs a clean main-gain check", "run-merge-bot.md's fallback main-gain paragraph", "2. Watch checks settle").text;
 
 test("AC4: the fallback's verified verdict requires a clean main-gain result on the local rebased head", () => {
   const s = mainGainFallback();
-  assert.match(s, phrase("needs a clean main-gain check on the local rebased head"), "the paragraph no longer ties the verdict to the local rebased head");
-  assert.match(s, phrase("Exit 0 is the only clean result"), "the paragraph no longer requires exit 0");
+  assert.match(s, Pin.phrase("needs a clean main-gain check on the local rebased head"), "the paragraph no longer ties the verdict to the local rebased head");
+  assert.match(s, Pin.phrase("Exit 0 is the only clean result"), "the paragraph no longer requires exit 0");
   assert.match(
     s,
-    phrase("Exit 1 (a line `main` gained after the PR began would be removed) or exit 2 (it could not answer)"),
+    Pin.phrase("Exit 1 (a line `main` gained after the PR began would be removed) or exit 2 (it could not answer)"),
     "the paragraph no longer says what exit 1 and exit 2 each mean",
   );
   assert.match(
     s,
-    phrase("is reported inside `rebase-fallback-#<pr>` — the hits and each one's `ack` line to copy, or the `reason` it could not answer — and the fallback is never reported verified"),
+    Pin.phrase("is reported inside `rebase-fallback-#<pr>` — the hits and each one's `ack` line to copy, or the `reason` it could not answer — and the fallback is never reported verified"),
     "a hit or an unknown result is no longer kept out of the verified verdict",
   );
   assert.ok(fallbackBlock().includes(s), "the main-gain paragraph left the fallback block");
 });
 
 test("step 3's reasons list carries main-gain-removed with its skip-and-report arm", () => {
-  const s = bullet(DOC, "- **`main-gain-removed:<path>`**", "- **`main-gain-unanswerable`**", "step 3's main-gain-removed reason");
+  const s = DOC.bullet("- **`main-gain-removed:<path>`**", "- **`main-gain-unanswerable`**", "step 3's main-gain-removed reason").text;
   assert.match(
     s,
-    phrase("Skip the PR, leave the label alone, and report `main-gain-removed:<path>-#<pr>` with the hit list and the keys"),
+    Pin.phrase("Skip the PR, leave the label alone, and report `main-gain-removed:<path>-#<pr>` with the hit list and the keys"),
     "the reason no longer says skip, leave the label, and report",
   );
 });
 
 // Bounded to the Report line, as the other vocabulary pins above are.
 test("the report vocabulary includes main-gain-removed", () => {
-  assert.match(DOC, /^Report merged [^\n]*main-gain-removed:<path>-#X/m);
+  assert.match(DOC.text, /^Report merged [^\n]*main-gain-removed:<path>-#X/m);
 });

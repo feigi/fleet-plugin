@@ -32,33 +32,30 @@
 // the enumeration and the collapse sentence are each pinned by their own words.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph, phrase, sentences } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
-const phase = (from, to) => between(RUN_TEAM, from, to, `run-team/SKILL.md ${from.trim()}`);
+const phase = (from, to) => RUN_TEAM.between(from, to, `run-team/SKILL.md ${from.trim()}`).text;
 
 const outcomeParagraph = () =>
-  paragraph(
-    phase("## Phase 2", "## Phase 3"),
+  Pin.of(phase("## Phase 2", "## Phase 3"), "phase()").paragraph(
     "A member settling with nothing is not, by itself, a bail.",
     "run-team/SKILL.md member outcome-classification paragraph",
     "**Dispatch every implementer with the `agent`",
-  );
+  ).text;
 
 const relabelParagraph = () =>
-  paragraph(
-    phase("## Phase 1", "## Phase 2"),
+  Pin.of(phase("## Phase 1", "## Phase 2"), "phase()").paragraph(
     "A Pull never re-admits a ticket already relabelled.",
     "run-team/SKILL.md Pull relabel-safety paragraph",
     "**Relabel by cause.** An unclaimed ticket",
-  );
+  ).text;
 
 test("run-team/SKILL.md: a member's outcome arrives as its own job status", () => {
-  assert.match(outcomeParagraph(), phrase("Each member's outcome arrives as its own job status"));
+  assert.match(outcomeParagraph(), Pin.phrase("Each member's outcome arrives as its own job status"));
 });
 
 // Settle (CONTEXT.md § Coordination) is three states on omp, and the paragraph
@@ -71,23 +68,23 @@ for (const state of ["completed", "failed", "cancelled"]) {
 }
 
 test("run-team/SKILL.md: the outcome paragraph enumerates all three omp settle states together, in one list", () => {
-  assert.match(outcomeParagraph(), phrase("Settle (CONTEXT.md § Coordination) is three states on omp — `completed`, `failed`, `cancelled` —"));
+  assert.match(outcomeParagraph(), Pin.phrase("Settle (CONTEXT.md § Coordination) is three states on omp — `completed`, `failed`, `cancelled` —"));
 });
 
 test("run-team/SKILL.md: the outcome paragraph names the failed/cancelled-vs-completed collapse as the exact failure it blocks", () => {
-  assert.match(outcomeParagraph(), phrase("and reading `failed`/`cancelled` the same as a `completed` turn that had nothing"));
-  assert.match(outcomeParagraph(), phrase("is the exact collapse this line blocks"));
+  assert.match(outcomeParagraph(), Pin.phrase("and reading `failed`/`cancelled` the same as a `completed` turn that had nothing"));
+  assert.match(outcomeParagraph(), Pin.phrase("is the exact collapse this line blocks"));
 });
 
 // #1591's core acceptance, table-driven: each of the three outcome shapes gets
 // its OWN reading, distinct text a reader cannot satisfy by pointing at either
 // of the other two rows.
 const OUTCOME_SHAPES = [
-  { name: "died (failed/cancelled settle)", pin: phrase("a member that died never chose to bail") },
-  { name: "completed with nothing (alive, merely quiet)", pin: phrase("a died or merely-quiet member's silence never does") },
+  { name: "died (failed/cancelled settle)", pin: Pin.phrase("a member that died never chose to bail") },
+  { name: "completed with nothing (alive, merely quiet)", pin: Pin.phrase("a died or merely-quiet member's silence never does") },
   {
     name: "explicit bail report",
-    pin: phrase("Only an explicit bail report — the member itself naming the cause — reaches Implementer bails before implementing"),
+    pin: Pin.phrase("Only an explicit bail report — the member itself naming the cause — reaches Implementer bails before implementing"),
   },
 ];
 for (const shape of OUTCOME_SHAPES) {
@@ -97,10 +94,10 @@ for (const shape of OUTCOME_SHAPES) {
 }
 
 test("run-team/SKILL.md: a dead member recovers exactly as the Member-killed row does, never as a demotion", () => {
-  assert.match(outcomeParagraph(), phrase("Confirm death first, exactly as the Member-killed row does"));
+  assert.match(outcomeParagraph(), Pin.phrase("Confirm death first, exactly as the Member-killed row does"));
   assert.match(
     outcomeParagraph(),
-    phrase("A confirmed-dead member recovers exactly as the Member-killed row says — new member, new name, the SAME ticket — never a demotion"),
+    Pin.phrase("A confirmed-dead member recovers exactly as the Member-killed row says — new member, new name, the SAME ticket — never a demotion"),
   );
 });
 
@@ -130,7 +127,7 @@ test("run-team/SKILL.md: a dead member recovers exactly as the Member-killed row
 // here, also absent today). `.**` itself IS in this paragraph once (its own
 // opening bold lead), but that boundary is a genuine sentence end, not one
 // straddling the silence/bail co-location this pin reads.
-const silenceBails = (p) => sentences(p).filter((s) => /\bsilence\b[\s\S]{0,30}\bbail\b/i.test(s));
+const silenceBails = (p) => Pin.sentences(p).filter((s) => /\bsilence\b[\s\S]{0,30}\bbail\b/i.test(s));
 
 test("run-team/SKILL.md: no text in the outcome paragraph lets silence alone stand in for a bail or a confirmed death", () => {
   const p = outcomeParagraph();
@@ -155,15 +152,15 @@ test("a period between silence and bail does not hide the co-location", () => {
 // and the failure it blocks are pinned — dropping either leaves a stale-list
 // admission unguarded.
 test("run-team/SKILL.md: a Pull reads the ticket's labels and drops one that lost `ready-for-agent`", () => {
-  assert.match(relabelParagraph(), phrase("The shortlist file can be older than a relabel"));
+  assert.match(relabelParagraph(), Pin.phrase("The shortlist file can be older than a relabel"));
   assert.match(relabelParagraph(), /`--json\s+title,body,comments,labels`\)\s+and\s+drop\s+it\s+when\s+`ready-for-agent`\s+is\s+gone/);
-  assert.match(relabelParagraph(), phrase("A Pull that trusted a list built before the relabel landed would hand a ticket the fleet has already judged unimplementable straight to the next member"));
+  assert.match(relabelParagraph(), Pin.phrase("A Pull that trusted a list built before the relabel landed would hand a ticket the fleet has already judged unimplementable straight to the next member"));
 });
 
 // The label the paragraph reads has to be one the Pull's full read actually
 // fetches — cross-checked against step 3's own invocation, the way #1591 once
 // cross-checked the pool's borrowed `candidates.mjs` call against phase 0's.
 test("run-team/SKILL.md: the Pull's full read fetches the labels the relabel check reads", () => {
-  const step3 = between(RUN_TEAM, "3. **Read the ticket in full, once**", "One read answers every question", "run-team/SKILL.md Pull step 3");
+  const step3 = RUN_TEAM.between("3. **Read the ticket in full, once**", "One read answers every question", "run-team/SKILL.md Pull step 3").text;
   assert.match(step3, /gh\s+issue\s+view\s+<N>\s+--json\s+title,body,comments,labels/, "the Pull's full read no longer fetches `labels`, so the relabel check has nothing to read");
 });

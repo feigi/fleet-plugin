@@ -18,17 +18,16 @@
 // blocks; nothing does for the agent definitions.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase, quoteBlock, stripQuoteGutter, unemphasized } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { runReview, sharedRunNote, DEFAULT_DIMENSIONS } from "../plugin/scripts/review-core.mjs";
 import { pipeline, parallel, ARGS, SNAP, review, finding, vote, scriptedHost } from "./support/review-host-fixture.mjs";
 
 const REPO = join(import.meta.dirname, "..");
-const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
+const read = (...p) => Pin.file(join(REPO, ...p));
 const RUN_TEAM = read("plugin", "skills", "run-team", "SKILL.md");
 const CONTEXT = read("CONTEXT.md");
-const REVIEW_AND_FIX = read("plugin", "commands", "review-and-fix.md");
+const REVIEW_AND_FIX = read("plugin", "commands", "review-and-fix.md").text;
 
 const VALID_RED =
   "**Valid red:** a run that completed — the command returned on its own, with no signal and no timeout, deadline or kill having fired — in which the test the claim names is reported failing. An exit ≠ 0 with no failing test is not red, and a different test failing is not red for this claim. A red in the full suite only triggers a narrowed run; it is never evidence on its own.";
@@ -42,10 +41,10 @@ const RULES = { "Valid red": VALID_RED, "Narrowed run": NARROWED, Kill: KILL, "E
 
 // Gutters and `**` are layout, not text: a `>` brief, a `.agent.md` body and a
 // JS template carry the same words wrapped three ways.
-const flat = (s) => unemphasized(stripQuoteGutter(s)).replace(/\s+/g, " ");
-const holds = (site, paragraph) => phrase(unemphasized(paragraph)).test(flat(site));
+const flat = (s) => Pin.unemphasized(Pin.of(s, "s").stripGutter(">").text).replace(/\s+/g, " ");
+const holds = (site, paragraph) => Pin.phrase(Pin.unemphasized(paragraph)).test(flat(site));
 // One whole paragraph of the site — a blank line (gutter or not) either side.
-const isolates = (site, paragraph) => stripQuoteGutter(site).split(/\n[ \t]*\n/).some((p) => flat(p).trim() === flat(paragraph).trim());
+const isolates = (site, paragraph) => Pin.of(site, "site").stripGutter(">").text.split(/\n[ \t]*\n/).some((p) => flat(p).trim() === flat(paragraph).trim());
 
 // --- the sites, read where their instructions live ------------------------
 
@@ -65,13 +64,12 @@ async function renderedPrompts() {
 }
 
 const fixApplier = () =>
-  quoteBlock(
-    between(RUN_TEAM, "### Reviewers", "#### Fallback: hand-dispatched reviewer", "run-team's Reviewers section"),
+  RUN_TEAM.between("### Reviewers", "#### Fallback: hand-dispatched reviewer", "run-team's Reviewers section").quoteBlock(
     "You are ALREADY in worktree `<abs-path>`, whose PR branch is",
     "the fix-applier prompt",
-  );
-const finisher = () => quoteBlock(RUN_TEAM, "**A test run is a verdict only if it ran to completion", "the finisher's test-run verdict block");
-const agent = (name) => read("plugin", "agents", `${name}.agent.md`).split("---").slice(2).join("---");
+  ).text;
+const finisher = () => RUN_TEAM.quoteBlock("**A test run is a verdict only if it ran to completion", "the finisher's test-run verdict block").text;
+const agent = (name) => read("plugin", "agents", `${name}.agent.md`).text.split("---").slice(2).join("---");
 
 // The in-scope suggestion refuter has no abstain — its verdict is `{refuted,
 // reason}` and dispositions-check refuses one that abstains — so its inconclusive
@@ -79,7 +77,7 @@ const agent = (name) => read("plugin", "agents", `${name}.agent.md`).split("---"
 const SUGGESTION_ABSTAIN = "leave `refuted` true, so the suggestion defers on the record instead of applying on a check that decided nothing";
 // A quote nested in the fix-applier's quote carries `> > ` — every level goes.
 const suggestionRefuter = (text, what, end) =>
-  between(text, "Try to REFUTE this finding", end, what).split("\n").map((l) => l.replace(/^(?:\s*>)+ ?/, "")).join("\n");
+  Pin.of(text, "text").between("Try to REFUTE this finding", end, what).text.split("\n").map((l) => l.replace(/^(?:\s*>)+ ?/, "")).join("\n");
 
 // Every kill site: its text, the clause its own inconclusive path takes, and
 // whether it lays the rules out as paragraphs of their own.
@@ -91,7 +89,7 @@ const KILL_SITES = async () => {
     ["the refuter's dispatched prompt", refuter, "set `inconclusive` to true and name the runs in `reason`", true],
     ["agents/fleet-review-verifier.agent.md", agent("fleet-review-verifier"), "set `inconclusive` to true and name the runs in `reason`", true],
     ["run-team's fix-applier prompt", fixApplier(), "do not report the test as proven, and measure again in a clean state", true],
-    ["run-team's in-scope suggestion refuter brief", suggestionRefuter(RUN_TEAM, "run-team/SKILL.md", "Survives → apply it, with one hold"), SUGGESTION_ABSTAIN, true],
+    ["run-team's in-scope suggestion refuter brief", suggestionRefuter(RUN_TEAM.text, "run-team/SKILL.md", "Survives → apply it, with one hold"), SUGGESTION_ABSTAIN, true],
     ["review-and-fix.md step 2's in-scope suggestion refuter brief", suggestionRefuter(REVIEW_AND_FIX, "review-and-fix.md", "That last clause is the whole mechanism"), SUGGESTION_ABSTAIN, false],
     ["run-team's finisher test-run verdict block", finisher(), "halt with cause `other`, with both runs — the mutant's and the unmutated tree's — as evidence", true],
   ];
@@ -168,7 +166,7 @@ test("the pin reds on a dropped baseline clause and stays green on a reflow", ()
 });
 
 test("CONTEXT.md defines Valid green, Valid red and Kill", () => {
-  const entry = (term) => flat(between(CONTEXT, `**${term}**:`, "_Avoid_:", `CONTEXT.md's ${term} entry`));
+  const entry = (term) => flat(CONTEXT.between(`**${term}**:`, "_Avoid_:", `CONTEXT.md's ${term} entry`).text);
   assert.match(entry("Valid green"), /exit 0, `tests` above 0 and `cancelled` 0/);
   assert.match(entry("Valid red"), /the test the claim names is reported failing/);
   assert.match(entry("Valid red"), /An exit ≠ 0 with no failing test is not red/);

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./support/strip-comments.mjs";
-import { between } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { usableDiff, readRules, SNAPSHOT_SCHEMA } from "../plugin/scripts/review-core.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
@@ -277,7 +277,7 @@ test("every branch carries the bounding rule", () => {
 // EOF where the specialist and refuter prompts satisfy it, the defect
 // `review-core-testcmd.test.mjs`'s "the test-run prompt hands the command over
 // verbatim and rules 'tests 0' a failure" records.
-const slice = (from, to) => between(CODE, from, to, "review-core.mjs");
+const slice = (from, to) => Pin.of(CODE, "CODE").between(from, to, "review-core.mjs").text;
 
 // The snapshot schema's `additionalProperties: false` REJECTS an undeclared
 // field, so a prompt that asks for these four while the schema omits them

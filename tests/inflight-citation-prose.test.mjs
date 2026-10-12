@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase, stripHashGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 // #800. Probe 3's comment borrows its establish-absence rule from a
 // worktree-registry guard in another file and cited that check by LINE. The
@@ -40,8 +39,8 @@ import { between, phrase, stripHashGutter } from "./support/prose-pin.mjs";
 // sentence appended after one, carving out an exception, does not. Reflow stays
 // green by design — the words are pinned, not their layout — on BOTH sides:
 // the target-side pin goes through `phrase()` too.
-const INFLIGHT = readFileSync(join(import.meta.dirname, "..", "plugin", "scripts", "inflight.sh"), "utf8");
-const WORKTREE = readFileSync(join(import.meta.dirname, "..", "plugin", "scripts", "worktree.sh"), "utf8");
+const INFLIGHT = Pin.file(join(import.meta.dirname, "..", "plugin", "scripts", "inflight.sh"));
+const WORKTREE = Pin.file(join(import.meta.dirname, "..", "plugin", "scripts", "worktree.sh"));
 
 // The one literal spelling of the identifier the guard below protects.
 const WTROOT = "$wt_root";
@@ -50,14 +49,12 @@ const WTROOT = "$wt_root";
 // comment documents, so a citation elsewhere in inflight.sh can neither satisfy
 // the positive pin nor trip the negative one with probe 3's clause untouched.
 const probe3 = () =>
-  stripHashGutter(
-    between(INFLIGHT, "# Probe 3 — a local worktree or branch.", "probe_local() {", "inflight.sh"),
-  );
+  INFLIGHT.between("# Probe 3 — a local worktree or branch.", "probe_local() {", "inflight.sh").stripGutter("#").text;
 
 test("probe 3 names worktree.sh's worktree-registry guard by construct (#800)", () => {
   assert.match(
     probe3(),
-    phrase(`worktree.sh's \`wt_count_registry\` applies with its \`-d\`/\`-r\`/\`-x\` guard on \`${WTROOT}\``),
+    Pin.phrase(`worktree.sh's \`wt_count_registry\` applies with its \`-d\`/\`-r\`/\`-x\` guard on \`${WTROOT}\``),
     "probe 3 no longer names the check it borrows the establish-absence rule from, so a reader has nothing to follow to it",
   );
 });
@@ -77,17 +74,16 @@ test("probe 3 cites the guard by construct, never by line (#800)", () => {
 // `stripHashGutter`: the `#` gutter is what stops a WRAPPED comment restating
 // the guard from satisfying a `\s+`-joined phrase.
 const registryGuard = () =>
-  between(
-    WORKTREE,
+  WORKTREE.between(
     "wt_count_registry() {",
     '[ -d "$wt_cr_entry" ] || continue',
     "worktree.sh",
-  );
+  ).text;
 
 test("worktree.sh still spells the guard probe 3 cites the way probe 3 cites it (#870)", () => {
   assert.match(
     registryGuard(),
-    phrase(`[ -d "${WTROOT}" ] && [ -r "${WTROOT}" ] && [ -x "${WTROOT}" ]`),
+    Pin.phrase(`[ -d "${WTROOT}" ] && [ -r "${WTROOT}" ] && [ -x "${WTROOT}" ]`),
     "worktree.sh's wt_count_registry no longer guards `$wt_root` with the `-d`/`-r`/`-x` triple probe 3's comment names, so inflight.sh now cites a spelling that file does not have",
   );
 });

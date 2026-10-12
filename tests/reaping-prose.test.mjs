@@ -48,23 +48,19 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph, phrase, stripHashGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const REAPING = readFileSync(
-  join(REPO, "skills", "run-team", "references", "reaping.md"),
-  "utf8",
-);
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
-const SCRIPT = readFileSync(join(REPO, "scripts", "release-ticket.sh"), "utf8");
+const REAPING = Pin.file(join(REPO, "skills", "run-team", "references", "reaping.md"));
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+const SCRIPT = Pin.file(join(REPO, "scripts", "release-ticket.sh"));
 
 const releaseSection = () =>
-  between(
-    REAPING,
+  REAPING.between(
     "## Why reap declines a claim that was never dispatched",
     "## Never reap a branch a live member is on",
     "reaping.md",
-  );
+  ).text;
 
 test("reaping.md: the dirty check is named as the conditional precondition", () => {
   // Without this, "four preconditions, recomputed inside same invocation as
@@ -99,13 +95,12 @@ test("reaping.md: the rc-0 deregistration of an unstattable worktree is measured
 test("run-team/SKILL.md: the release-claims section carries the same limitation", () => {
   // The assertion doc is where a controller actually reads this. Corrected in
   // reaping.md alone, it is corrected in the document nobody opens mid-run.
-  const section = between(
-    RUN_TEAM,
+  const section = RUN_TEAM.between(
     "### Release the claims that never became PRs",
     // Short of a wrap point: SKILL.md hard-wraps this sentence mid-phrase.
     "**That refusal is the",
     "run-team/SKILL.md",
-  );
+  ).text;
   assert.match(
     section,
     /whenever\s+the\s+worktree\s+directory\s+is\s+there\s+to\s+read.{0,200}established\s+absent.{0,120}no\s+backstop.{0,200}sole\s+arbiter/s,
@@ -118,20 +113,19 @@ test("run-team/SKILL.md: the release deletes the branch with update-ref's compar
   // on a tip read once, which refuses if the ref moved off that tip. SKILL.md
   // kept saying `-D` after the script stopped using it, so a controller read
   // the release as a force-delete of whatever the ref held at that moment.
-  const section = between(
-    RUN_TEAM,
+  const section = RUN_TEAM.between(
     "### Release the claims that never became PRs",
     "**That refusal is the",
     "run-team/SKILL.md",
-  );
+  ).text;
   assert.match(
     section,
-    phrase("deletes the branch with `git update-ref -d` on the tip it read once"),
+    Pin.phrase("deletes the branch with `git update-ref -d` on the tip it read once"),
     "SKILL.md's release section no longer names `git update-ref -d` on a tip read once as the branch delete",
   );
   assert.match(
     section,
-    phrase("compare-and-swap that refuses if the branch has moved off that tip"),
+    Pin.phrase("compare-and-swap that refuses if the branch has moved off that tip"),
     "SKILL.md's release section no longer says the update-ref delete is a compare-and-swap that refuses if the branch has moved off the tip",
   );
   assert.doesNotMatch(
@@ -147,18 +141,18 @@ test("run-team/SKILL.md: the release deletes the branch with update-ref's compar
 // worktree check finds it held — so naming `-D`, or the cherry check as the
 // delete's only authorizer, is false as written.
 const reapParagraph = () =>
-  paragraph(RUN_TEAM, "`~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition", "run-team/SKILL.md's reap paragraph", "**It sweeps detached worktrees too —");
+  RUN_TEAM.paragraph("`~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition", "run-team/SKILL.md's reap paragraph", "**It sweeps detached worktrees too —").text;
 
 test("run-team/SKILL.md: reap's cherry check authorizes the update-ref delete, with the fresh worktree check beside it", () => {
   const p = reapParagraph();
   assert.match(
     p,
-    phrase("`git cherry origin/main` to authorize the `git update-ref -d` delete"),
+    Pin.phrase("`git cherry origin/main` to authorize the `git update-ref -d` delete"),
     "SKILL.md's reap paragraph no longer names the cherry check as authorizing the `git update-ref -d` delete",
   );
   assert.match(
     p,
-    phrase("a fresh check that no worktree holds the branch"),
+    Pin.phrase("a fresh check that no worktree holds the branch"),
     "SKILL.md's reap paragraph no longer names the fresh worktree check — reap.sh keeps a branch the cherry check cleared whenever a worktree holds it",
   );
   assert.doesNotMatch(p, /(?:^|[\s`])(?:git\s+branch\s+)?-D\b/, "SKILL.md's reap paragraph names `-D` — reap.sh deletes with `git update-ref -d`");
@@ -173,8 +167,8 @@ test("run-team/SKILL.md: the reap paragraph keeps the preconditions it already n
   // Input the assertions above must ACCEPT: the corrected clause sits in a
   // list whose other entries stay as they were.
   const p = reapParagraph();
-  assert.match(p, phrase("`for-each-ref` for `[gone]`"));
-  assert.match(p, phrase("worktree removal without `--force`"));
+  assert.match(p, Pin.phrase("`for-each-ref` for `[gone]`"));
+  assert.match(p, Pin.phrase("worktree removal without `--force`"));
 });
 
 test("reap.sh: the worktree check the reap paragraph names runs before the delete", () => {
@@ -203,18 +197,17 @@ test("run-team/SKILL.md: the by-hand fallback names worktree-audit.sh's no-argum
   //
   // Slice starts at the wrap point the section-scoped test above ENDS on, so
   // the two spans abut rather than overlap and neither can satisfy the other.
-  const fallback = between(
-    RUN_TEAM,
+  const fallback = RUN_TEAM.between(
     "**That refusal is the",
     "Run it over every claimed ticket",
     "run-team/SKILL.md",
-  );
+  ).text;
   // ONE contiguous phrase: the no-argument half and the row-lookup half are
   // the same instruction. Pinned separately, dropping the lookup leaves a
   // reader taking the first row — the main checkout — as this claim's.
   assert.match(
     fallback,
-    phrase("run `worktree-audit.sh` (it audits every worktree; find this claim's row in the output)"),
+    Pin.phrase("run `worktree-audit.sh` (it audits every worktree; find this claim's row in the output)"),
     "the by-hand fallback no longer says `worktree-audit.sh` audits every worktree and needs a row lookup — a reader passing it this claim's path gets exit 2, and one reading the first row reads the main checkout",
   );
 });
@@ -223,14 +216,11 @@ test("release-ticket.sh: the comment at the dirty check does not contradict the 
   // The header (release-ticket.sh) states the limitation; this comment
   // said git recomputes this same check at the delete, full stop. Whichever a
   // reader reaches first is the one they act on.
-  const comment = stripHashGutter(
-    between(
-      SCRIPT,
-      "  # Ignored files are deliberately not a blocker",
-      "  n=$(printf",
-      "release-ticket.sh",
-    ),
-  );
+  const comment = SCRIPT.between(
+    "  # Ignored files are deliberately not a blocker",
+    "  n=$(printf",
+    "release-ticket.sh",
+  ).stripGutter("#").text;
   assert.match(
     comment,
     /recomputed\s+by\s+git\s+at\s+the\s+moment\s+of\s+the\s+delete.{0,120}only\s+while\s+the\s+directory\s+is\s+there/s,

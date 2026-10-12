@@ -7,7 +7,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
-import { paragraph, phrase, unemphasized } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { COLUMNS, formatTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { FEATURE_COLUMNS } from "../plugin/scripts/pr-cost.mjs";
 import { readout, stoppingRule, GATE, STOP } from "../plugin/scripts/cell-readout.mjs";
@@ -323,16 +323,16 @@ test("equal per-model counts in a mixed cell list models alphabetically", () => 
 // above green. Each slice starts at an anchor that must occur exactly once and
 // ends at the paragraph's blank line, so a restatement elsewhere in the file
 // cannot satisfy a pin on the paragraph that carries the rule.
-const RUN_TEAM = readFileSync(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"));
 
 test("SKILL.md's floor names the script that prints a cell's count, and that script exists", () => {
-  const floor = unemphasized(paragraph(RUN_TEAM, "**Report the count the per-cell readout prints", "run-team's per-cell floor", "Why the agent body carries what"));
+  const floor = Pin.unemphasized(RUN_TEAM.paragraph("**Report the count the per-cell readout prints", "run-team's per-cell floor", "Why the agent body carries what").text);
   const named = /`~\/\.fleet\/bin\/fleet-run (\S+\.mjs)`/.exec(floor)?.[1];
   assert.ok(named, "the floor no longer tells the controller which script to run");
   assert.equal(named, "cell-readout.mjs");
   assert.ok(existsSync(join(dirname(SCRIPT), named)), `${named} is not a script beside cell-readout.mjs`);
-  assert.match(floor, phrase("prints `<cell> <comparisons> <run_dates> <resolved models>` for each cell past that floor"));
-  assert.match(floor, phrase("a cell below it only as a count on stderr"));
+  assert.match(floor, Pin.phrase("prints `<cell> <comparisons> <run_dates> <resolved models>` for each cell past that floor"));
+  assert.match(floor, Pin.phrase("a cell below it only as a count on stderr"));
 });
 
 test("the line SKILL.md says the readout prints is the line it prints: four fields, a cell below the floor on stderr only", () => {
@@ -347,8 +347,8 @@ test("the line SKILL.md says the readout prints is the line it prints: four fiel
 });
 
 test("SKILL.md says the readout counts a pair only when the two rows ran a different model or effort, as the readout does", () => {
-  const deliberate = unemphasized(paragraph(RUN_TEAM, "**The readout counts DELIBERATE comparisons.**", "run-team's DELIBERATE paragraph", "**Why one in five within the"));
-  assert.match(deliberate, phrase("the two rows must actually have RUN a different model or effort"));
+  const deliberate = Pin.unemphasized(RUN_TEAM.paragraph("**The readout counts DELIBERATE comparisons.**", "run-team's DELIBERATE paragraph", "**Why one in five within the").text);
+  assert.match(deliberate, Pin.phrase("the two rows must actually have RUN a different model or effort"));
   // Run, not read: the same model at the same level is no comparison, the same
   // model at a different level is one, a different model at the same level is one.
   const w = world();

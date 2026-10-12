@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { anchorAt, phrase, stripQuoteGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 // #172. A fleet member learns what it is, and what to run, only from the blocks
 // run-team phase 2 carries VERBATIM. Everything else in that section is
@@ -52,7 +52,7 @@ import { anchorAt, phrase, stripQuoteGutter } from "./support/prose-pin.mjs";
 // with the gutter stripped. `memberBlocks()` keeps the raw bytes for the first
 // test, the one place the gutter is the subject rather than an obstacle.
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 const SIZING = readFileSync(join(REPO, "skills", "sizing-a-ticket", "SKILL.md"), "utf8");
 
 // #1804: the member-facing text is the BODY of the implementer agent
@@ -62,8 +62,8 @@ const SIZING = readFileSync(join(REPO, "skills", "sizing-a-ticket", "SKILL.md"),
 // (implementer-model-tier.test.mjs pins that), so one file stands for all.
 const AGENT_FILE = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8");
 const memberBlocks = () => AGENT_FILE.split("---").slice(2).join("---");
-const memberProse = () => stripQuoteGutter(memberBlocks());
-const phase2 = () => RUN_TEAM.slice(anchorAt(RUN_TEAM, "## Phase 2", "run-team phase 2"), anchorAt(RUN_TEAM, "## Phase 3", "run-team phase 3"));
+const memberProse = () => Pin.of(memberBlocks(), "memberBlocks()").stripGutter(">").text;
+const phase2 = () => RUN_TEAM.text.slice(RUN_TEAM.anchorAt("## Phase 2", "run-team phase 2"), RUN_TEAM.anchorAt("## Phase 3", "run-team phase 3"));
 
 test("every member-facing rule sits in the agent body the harness injects, not in the controller's phase 2", () => {
   assert.ok(memberBlocks().trim().length > 0, "the implementer agent body is empty — the member receives no rules at all");
@@ -72,8 +72,8 @@ test("every member-facing rule sits in the agent body the harness injects, not i
   // and a controller that drops it emits no error. A copy left there as well
   // is the other half: two sources free to drift, one of which no member reads.
   for (const opener of ["**You are an unattended fleet member.**", "Run `sizing-a-ticket`", "`next-ticket` **step 7**"]) {
-    assert.match(memberProse(), phrase(opener), `the implementer agent body no longer carries "${opener}"`);
-    assert.doesNotMatch(phase2(), phrase(opener), `run-team/SKILL.md's phase 2 carries "${opener}" again — the member reads the agent body, so this copy is either dead or a second source to drift`);
+    assert.match(memberProse(), Pin.phrase(opener), `the implementer agent body no longer carries "${opener}"`);
+    assert.doesNotMatch(phase2(), Pin.phrase(opener), `run-team/SKILL.md's phase 2 carries "${opener}" again — the member reads the agent body, so this copy is either dead or a second source to drift`);
   }
 });
 
@@ -84,22 +84,22 @@ test("the member is told it is unattended, in text it receives verbatim", () => 
   // cannot fire. The only prior signal was the incidental word "controller".
   assert.match(
     prose,
-    phrase("**You are an unattended fleet member.**"),
+    Pin.phrase("**You are an unattended fleet member.**"),
     "no block tells the member it is an unattended fleet member — the sizing skill's fleet branch cannot fire",
   );
   assert.match(
     prose,
-    phrase("No maintainer is reachable"),
+    Pin.phrase("No maintainer is reachable"),
     "the member is not told a maintainer is unreachable, so it can still read a gated skill as worth waiting on",
   );
 });
 
 test("the sizing instruction reaches the member verbatim, on either row", () => {
   const prose = memberProse();
-  assert.match(prose, phrase("Run `sizing-a-ticket`"), "the sizing instruction is no longer in a verbatim block");
+  assert.match(prose, Pin.phrase("Run `sizing-a-ticket`"), "the sizing instruction is no longer in a verbatim block");
   assert.match(
     prose,
-    phrase("**either row**"),
+    Pin.phrase("**either row**"),
     "the member is not told both rows are workable, so a heavy row reads as a reason to bail",
   );
 });
@@ -115,7 +115,7 @@ test("the handoff names its destination, and a light-row member cannot read it a
   // runs the PR steps at the sizing checkpoint and vice versa.
   assert.match(
     prose,
-    phrase("`next-ticket` **step 6**, which is that sizing run"),
+    Pin.phrase("`next-ticket` **step 6**, which is that sizing run"),
     "step 6 is no longer bound to the sizing run — its destination is a pronoun again, or the number now names another step",
   );
   // The wrong binding, and the one that bites: the nearest place-like phrase was
@@ -123,7 +123,7 @@ test("the handoff names its destination, and a light-row member cannot read it a
   // So the member prompt must not carry the heavy row's own first action.
   assert.doesNotMatch(
     prose,
-    phrase("write the plan under your own scratch path"),
+    Pin.phrase("write the plan under your own scratch path"),
     "the member prompt names the heavy-row entry point, which a light-row member would follow",
   );
 });
@@ -132,13 +132,13 @@ test("the PR handoff reaches the member verbatim, including what it must never d
   const prose = memberProse();
   assert.match(
     prose,
-    phrase("`next-ticket` **step 7**: rebase, re-run tests, push"),
+    Pin.phrase("`next-ticket` **step 7**: rebase, re-run tests, push"),
     "step 7 is no longer bound to the rebase/push/PR action — the PR step is not carried verbatim, or the number now names another step",
   );
-  assert.match(prose, phrase("`Closes #N`"), "the member is not told to close its issue from the PR body");
+  assert.match(prose, Pin.phrase("`Closes #N`"), "the member is not told to close its issue from the PR body");
   assert.match(
     prose,
-    phrase("Never apply `ready-to-merge`, never merge"),
+    Pin.phrase("Never apply `ready-to-merge`, never merge"),
     "the two prohibitions the member must never learn by paraphrase are no longer in the block",
   );
 });
@@ -149,17 +149,17 @@ test("the sizing skill stays conditioned — a solo session still runs the inter
   // because it correctly serves solo sessions, which do have a user to approve.
   assert.match(
     SIZING,
-    phrase("**Fleet member on heavy: write the plan under your own scratch path"),
+    Pin.phrase("**Fleet member on heavy: write the plan under your own scratch path"),
     "the fleet heavy-row branch is gone — sizing no longer tells a member from a solo session",
   );
   assert.match(
     SIZING,
-    phrase("Heavy is never a reason to give up"),
+    Pin.phrase("Heavy is never a reason to give up"),
     "the fleet heavy-row branch no longer says heavy is never a reason to give up",
   );
   assert.match(
     SIZING,
-    phrase("Solo session has a user: settle the open design choices with them before planning"),
+    Pin.phrase("Solo session has a user: settle the open design choices with them before planning"),
     "a solo session no longer settles design with its user before planning",
   );
 });

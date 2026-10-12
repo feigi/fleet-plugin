@@ -75,7 +75,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { phrase, runAbove, stripHashGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const REAP = "scripts/reap.sh";
@@ -94,7 +94,7 @@ const ANCHOR = "gp_sep=$(printf '\\002')";
 // blank line that would run past the comment into the script. Only the gutter
 // strip is this file's: the `//` consumers of the same bound compare raw bytes
 // and must not have it.
-const separatorComment = (text) => stripHashGutter(runAbove(text, ANCHOR, REAP, "#"));
+const separatorComment = (text) => Pin.of(text, "text").runAbove(ANCHOR, REAP, "#").stripGutter("#").text;
 
 const COMMENT = separatorComment(SOURCE);
 
@@ -160,7 +160,7 @@ for (const [what, text, why] of PINS) {
   test(`the git_probe separator comment ${what}`, () => {
     assert.match(
       COMMENT,
-      phrase(text),
+      Pin.phrase(text),
       `${REAP}: the comment above \`${ANCHOR}\` no longer says "${text}". ${why} (#1212)`,
     );
   });
@@ -181,7 +181,7 @@ for (const [what, text, why] of PINS) {
 test("the git_probe separator comment no longer claims 0x02 is absent from porcelain output", () => {
   assert.doesNotMatch(
     COMMENT,
-    new RegExp(phrase("a byte no porcelain line or ordinary warning contains").source, "i"),
+    new RegExp(Pin.phrase("a byte no porcelain line or ordinary warning contains").source, "i"),
     `${REAP}: the comment above \`${ANCHOR}\` is back to describing \`gp_sep\` as a byte git's output cannot contain. That states a property of the BYTE and carries no scope, so a caller pointed at `
       + "`status --porcelain -uall -z` (which does emit the raw byte, measured) inherits an assumption nothing checks. State what git does to a control byte in a path, and where that stops holding. (#1212)",
   );

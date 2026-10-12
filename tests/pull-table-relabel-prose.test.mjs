@@ -23,36 +23,34 @@
 // first assertion and no other; verified live before writing this file.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 const pullTable = () =>
-  between(
-    RUN_TEAM,
+  RUN_TEAM.between(
     "**The Pull table**",
     "**The shortlist runs out",
     "run-team/SKILL.md Pull table",
-  );
+  ).text;
 
 test("run-team/SKILL.md: the Pull table ties each relabel cause to its own label", () => {
   const table = pullTable();
   assert.match(
     table,
-    phrase("| brief names no *what* | relabel `needs-triage`, next entry |"),
+    Pin.phrase("| brief names no *what* | relabel `needs-triage`, next entry |"),
     "a brief that names no *what* no longer relabels to `needs-triage` in the Pull table",
   );
   assert.match(
     table,
-    phrase("| genuine fork — options named, none ruled | relabel `ready-for-human`, next entry |"),
+    Pin.phrase("| genuine fork — options named, none ruled | relabel `ready-for-human`, next entry |"),
     "a genuine fork no longer relabels to `ready-for-human` in the Pull table",
   );
   assert.match(
     table,
-    phrase(
+    Pin.phrase(
       "| needs human hands — external access, manual testing, judgment during the work | relabel `ready-for-human`, next entry |",
     ),
     "needing human hands no longer relabels to `ready-for-human` in the Pull table",

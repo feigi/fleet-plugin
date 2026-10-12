@@ -22,31 +22,30 @@
 // comment above `scriptHeader` and implemented at `codesIn`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, logicalLines, phrase, stripSlashGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
+const read = (...p) => Pin.file(join(REPO, ...p));
 const NEXT_TICKET = read("skills", "next-ticket", "SKILL.md");
 const RUN_TEAM = read("skills", "run-team", "SKILL.md");
 const REPO_ROOT = join(import.meta.dirname, "..");
-const SPEC = readFileSync(join(REPO_ROOT, "docs", "specs", "2026-07-23-fleet-plugin-design.md"), "utf8");
+const SPEC = Pin.file(join(REPO_ROOT, "docs", "specs", "2026-07-23-fleet-plugin-design.md"));
 
 const candidatesStep = () =>
-  between(NEXT_TICKET, "## 1. Candidates", "## 2. Dependencies", "next-ticket/SKILL.md");
+  NEXT_TICKET.between("## 1. Candidates", "## 2. Dependencies", "next-ticket/SKILL.md").text;
 
 test("next-ticket's exit-code line tells exit 3 from the empty queue and from the broken query", () => {
   const s = candidatesStep();
-  assert.match(s, phrase("Exit 1 = query fine, queue empty"));
-  assert.match(s, phrase("Exit 3 = query fine, rows came back and the to-spec filter took every one"));
-  assert.match(s, phrase("Exit 2 = query broke"));
+  assert.match(s, Pin.phrase("Exit 1 = query fine, queue empty"));
+  assert.match(s, Pin.phrase("Exit 3 = query fine, rows came back and the to-spec filter took every one"));
+  assert.match(s, Pin.phrase("Exit 2 = query broke"));
 });
 
 test("next-ticket sends exit 3 to to-tickets rather than reading it as no work", () => {
   // The distinction the code exists to make: this caller's own invocation
   // reaches exit 3, so "empty" here would send it to the wrong conclusion.
-  assert.match(candidatesStep(), phrase("run to-tickets rather than reading it as no work"));
+  assert.match(candidatesStep(), Pin.phrase("run to-tickets rather than reading it as no work"));
 });
 
 test("next-ticket scopes exit 3 to the final pass, so it agrees with the fallback trigger", () => {
@@ -55,8 +54,8 @@ test("next-ticket scopes exit 3 to the final pass, so it agrees with the fallbac
   // exit 1 comes back, and a reader who misses it connects exit 3 to the
   // "counts as empty" sentence above and concludes the two disagree.
   const s = candidatesStep();
-  assert.match(s, phrase("Exit 3 judges the LAST pass alone"));
-  assert.match(s, phrase("falls back to a genuinely empty one is exit 1"));
+  assert.match(s, Pin.phrase("Exit 3 judges the LAST pass alone"));
+  assert.match(s, Pin.phrase("falls back to a genuinely empty one is exit 1"));
 });
 
 // The same slice candidates.test.mjs bounds for the `--require-label` rule —
@@ -65,12 +64,12 @@ test("next-ticket scopes exit 3 to the final pass, so it agrees with the fallbac
 // so a file-wide search for "exit" finds another script's contract and reports
 // this one as documented.
 const scanStep = () =>
-  between(RUN_TEAM, "1. **Build the Shortlist**", "\n2. ", "run-team/SKILL.md");
+  RUN_TEAM.between("1. **Build the Shortlist**", "\n2. ", "run-team/SKILL.md").text;
 
 test("phase 0 denies that exit 3 is the empty queue", () => {
   const s = scanStep();
-  assert.match(s, phrase("Exit 3 is not that empty queue"));
-  assert.match(s, phrase("the to-spec filter took every one"));
+  assert.match(s, Pin.phrase("Exit 3 is not that empty queue"));
+  assert.match(s, Pin.phrase("the to-spec filter took every one"));
 });
 
 test("phase 0 forbids answering exit 3 by widening the net", () => {
@@ -80,22 +79,22 @@ test("phase 0 forbids answering exit 3 by widening the net", () => {
   // pass is unfiltered, so widening reaches `ready-for-human` and untriaged
   // work an unattended run still has no channel to a human for.
   const s = scanStep();
-  assert.match(s, phrase("never a reason to widen the net"));
-  assert.match(s, phrase("still do not pass `--allow-fallback`"));
+  assert.match(s, Pin.phrase("never a reason to widen the net"));
+  assert.match(s, Pin.phrase("still do not pass `--allow-fallback`"));
 });
 
 test("phase 0 names what exit 3's queue actually holds, so the run reports it rather than claiming no work", () => {
   const s = scanStep();
-  assert.match(s, phrase("to-tickets' input rather than claimable tickets"));
-  assert.match(s, phrase("Log it as specs awaiting to-tickets"));
+  assert.match(s, Pin.phrase("to-tickets' input rather than claimable tickets"));
+  assert.match(s, Pin.phrase("Log it as specs awaiting to-tickets"));
 });
 
 // --- The script-surface contract table, and the preamble that scopes it.
 const scriptSurface = () =>
-  between(SPEC, "## Script surface", "| Script | In | Out |", "the fleet-plugin design spec");
+  SPEC.between("## Script surface", "| Script | In | Out |", "the fleet-plugin design spec").text;
 
 const candidatesRow = () => {
-  const line = SPEC.split("\n").find((l) => l.startsWith("| `candidates.mjs` |"));
+  const line = SPEC.text.split("\n").find((l) => l.startsWith("| `candidates.mjs` |"));
   assert.ok(line, "the design spec's script-surface table no longer has a `candidates.mjs` row — update this test");
   return line;
 };
@@ -106,9 +105,9 @@ test("the spec's candidates row stops reading an all-specs queue as exit 1", () 
   // is true of a queue the filter emptied, which is exit 3. Narrowing it is
   // the correction — appending exit 3 while leaving this would ship two
   // clauses in one cell that contradict each other.
-  assert.doesNotMatch(row, phrase("no candidate survived"));
-  assert.match(row, phrase("no row came back at all"));
-  assert.match(row, phrase("the to-spec filter removed every one"));
+  assert.doesNotMatch(row, Pin.phrase("no candidate survived"));
+  assert.match(row, Pin.phrase("no row came back at all"));
+  assert.match(row, Pin.phrase("the to-spec filter removed every one"));
 });
 
 test("the spec's preamble states the further-code property instead of naming one carrier", () => {
@@ -116,8 +115,8 @@ test("the spec's preamble states the further-code property instead of naming one
   // preamble false by omission the moment a second script minted one. A
   // property carries no carrier list to go stale and no tally to rot.
   const s = scriptSurface();
-  assert.doesNotMatch(s, phrase("`ledger.mjs check` mints one further code"));
-  assert.match(s, phrase("Where a script needs a verdict those meanings cannot carry, it mints a further code and states it in its own row"));
+  assert.doesNotMatch(s, Pin.phrase("`ledger.mjs check` mints one further code"));
+  assert.match(s, Pin.phrase("Where a script needs a verdict those meanings cannot carry, it mints a further code and states it in its own row"));
 });
 
 // Derived from the script's own contract rather than restating it: this is the
@@ -152,7 +151,7 @@ test("the spec's preamble states the further-code property instead of naming one
 // code that loop never checks. Worse than #1609's own symptom: that one
 // reddened loudly; this one stays green over a real coverage gap.
 function scriptHeader() {
-  const src = read("scripts", "candidates.mjs");
+  const src = read("scripts", "candidates.mjs").text;
   return src.slice(0, src.indexOf("\nimport "));
 }
 
@@ -165,7 +164,7 @@ function scriptHeader() {
 // only `declaredNonZeroCodes` — the one caller reading the real file — turns
 // a bad scan into an "update this test" guard.
 function scanCodes(headerText) {
-  const prose = logicalLines(stripSlashGutter(headerText)).text;
+  const prose = Pin.logicalLines(Pin.of(headerText, "headerText").stripGutter("//").text).text;
   const at = prose.indexOf("Exit-code contract");
   const codes = at === -1 ? [] : [...prose.slice(at).matchAll(/\b(\d) = /g)].map((m) => m[1]);
   const nonZero = [...new Set(codes)].filter((c) => c !== "0");

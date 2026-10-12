@@ -97,15 +97,14 @@
 // anchors on a one-line declaration instead: measured, the header rewrapped at
 // 36 cols is green on the code anchor and reported a moved anchor on #690's
 // phrase anchor, in the same run where all three document sites stayed green.
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
-import { paragraph, runAbove, sentences } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const read = (p) => readFileSync(join(REPO, ...p.split("/")), "utf8");
+const read = (p) => Pin.file(join(REPO, ...p.split("/")));
 
 const CI_STATE_PATH = "scripts/ci-state.mjs";
 const SKILL = "skills/run-team/SKILL.md";
@@ -121,7 +120,7 @@ const REVIEW_AND_FIX = "commands/review-and-fix.md";
 // on zero assertions — so the guard is where a broken derivation is
 // diagnosed, and the sites are left saying nothing rather than each
 // repeating it.
-const CI_STATE = read(CI_STATE_PATH);
+const CI_STATE = read(CI_STATE_PATH).text;
 const FIELDS = ((CI_STATE.match(/if \(!quiet && !noCi\) Object\.assign\(payload, \{([^}]*)\}\)/) ?? [])[1] ?? "")
   .split(",").map((f) => f.trim()).filter(Boolean);
 
@@ -153,8 +152,8 @@ test("the dropped-field list is still readable out of ci-state.mjs", () => {
 // being copied for the sake of an end bound that differs.
 function siteSlice(name, anchor, next) {
   const text = read(name);
-  if (!name.endsWith(".mjs")) return paragraph(text, anchor, name, next);
-  return runAbove(text, anchor, name, "//");
+  if (!name.endsWith(".mjs")) return text.paragraph(anchor, name, next).text;
+  return text.runAbove(anchor, name, "//").text;
 }
 
 // The `--quiet` sentence, from its `drops` to the end of that sentence. The
@@ -172,7 +171,7 @@ function siteSlice(name, anchor, next) {
 // ends on (`ci-state.mjs`, "e.g."), reddening a complete one. Returns null when
 // no sentence in the slice has a `--quiet` followed by `drops`.
 export function quietClause(slice) {
-  for (const sentence of sentences(slice)) {
+  for (const sentence of Pin.sentences(slice)) {
     const clause = /`--quiet`[\s\S]*?(drops[\s\S]*)/.exec(sentence);
     if (clause) return clause[1];
   }

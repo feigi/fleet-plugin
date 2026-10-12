@@ -39,12 +39,11 @@
 // dropping the attribution a second time. Reflow-safe by construction:
 // `phrase()` joins words on `\s+`, so a rewrap of the hard-wrapped paragraph is
 // a no-op.
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
-import { paragraph, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const SKILL = "skills/run-team/SKILL.md";
 const ANCHOR = "**Both halves of that command are load-bearing.**";
@@ -59,7 +58,7 @@ const ANCHOR = "**Both halves of that command are load-bearing.**";
 // than once, which binds the pin to whichever copy of the anchored block comes
 // first, and, through `next`, a blank line deleted outright.
 const rule = () =>
-  paragraph(readFileSync(join(import.meta.dirname, "..", "plugin", ...SKILL.split("/")), "utf8"), ANCHOR, SKILL, "Measured, one run: one ticket's one-line");
+  Pin.file(join(import.meta.dirname, "..", "plugin", ...SKILL.split("/"))).paragraph(ANCHOR, SKILL, "Measured, one run: one ticket's one-line").text;
 
 const OLD_HALF = "the prescribed **old**-string search names a *wrong* commit at exit 0";
 const NEW_HALF = "the **new**-string search the paragraph above forbids that prints nothing at exit 0";
@@ -67,7 +66,7 @@ const NEW_HALF = "the **new**-string search the paragraph above forbids that pri
 test("the liveness paragraph attributes the WRONG-COMMIT symptom to the prescribed old-string search", () => {
   assert.match(
     rule(),
-    phrase(OLD_HALF),
+    Pin.phrase(OLD_HALF),
     `${SKILL}'s "${ANCHOR}" paragraph no longer says "${OLD_HALF}". Unpinned, the search the recipe PRESCRIBES answers with a plausible wrong commit on a checkout behind the fix — measured, \`4fd2f73\` at \`0dc39ef^\` — and \`--is-ancestor\` clears it. Reading that failure as empty output is #659.`,
   );
 });
@@ -75,7 +74,7 @@ test("the liveness paragraph attributes the WRONG-COMMIT symptom to the prescrib
 test("the liveness paragraph attributes the EMPTY-OUTPUT symptom to the forbidden new-string search", () => {
   assert.match(
     rule(),
-    phrase(NEW_HALF),
+    Pin.phrase(NEW_HALF),
     `${SKILL}'s "${ANCHOR}" paragraph no longer says "${NEW_HALF}". "Prints nothing at exit 0" is the symptom of the new-string search the paragraph above forbids, never the consequence of dropping \`origin/main\` from the prescribed one — that swap is exactly #659.`,
   );
 });

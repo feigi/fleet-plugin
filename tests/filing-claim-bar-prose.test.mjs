@@ -57,10 +57,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
+const read = (...p) => Pin.file(join(REPO, ...p));
 const REVIEW_AND_FIX = read("commands", "review-and-fix.md");
 const ROOT = join(import.meta.dirname, "..");
 // Step 5 ships and names no ADR, so the ADR is read by its own path here.
@@ -68,7 +68,7 @@ const ADR_PATH = join(ROOT, "docs", "adr", "0002-filing-second-bar-worth-a-claim
 
 const flat = (s) => s.replace(/\s+/g, " ");
 
-const step5 = () => flat(between(REVIEW_AND_FIX, "5. File each deferred finding", "\n6. Diff-check green", "review-and-fix step 5"));
+const step5 = () => flat(REVIEW_AND_FIX.between("5. File each deferred finding", "\n6. Diff-check green", "review-and-fix step 5").text);
 
 test("step 5 states the claim bar: shaped-better findings never get their own open issue", () => {
   // The bar and its verdict as ONE span. Pinning "Worth a claim" apart from
@@ -76,7 +76,7 @@ test("step 5 states the claim bar: shaped-better findings never get their own op
   // between them reverses the rule and satisfies both.
   assert.match(
     step5(),
-    phrase(
+    Pin.phrase(
       "**Worth a claim: a finding whose own claim is that correct code could be shaped better — style, naming, layout, redundancy, a micro-simplification — never gets its own open issue.**",
     ),
     "step 5 lost the worth-a-claim bar — shaped-better findings are back to one open issue each",
@@ -89,7 +89,7 @@ test("step 5 puts a prose-guard gap below the claim bar unless something acts on
   // satisfies both halves and drops the exception.
   assert.match(
     step5(),
-    phrase(
+    Pin.phrase(
       "**Neither does a gap in a prose guard — a test holding prose to its wording — unless something acts on the guarded text: an agent follows it as an instruction (a skill, a command, an agent definition, a script's header or usage text, `AGENTS.md`), or a program other than its own guard reads it.**",
     ),
     "step 5 lost the prose-guard stakes bar — a gap in a guard over prose nothing acts on files as its own open issue again",
@@ -101,7 +101,7 @@ test("step 5 records a prose-guard gap below the bar as claimKind shape", () => 
   // to the closed record, and every pin around it stays green.
   assert.match(
     step5(),
-    phrase("a gap below this bar is recorded `claimKind: shape`"),
+    Pin.phrase("a gap below this bar is recorded `claimKind: shape`"),
     "step 5 lost the claimKind routing — a below-bar prose-guard gap no longer reaches the closed record",
   );
 });
@@ -110,12 +110,12 @@ test("step 5 routes below-bar findings into the closed record, with a promotion 
   const s = step5();
   assert.match(
     s,
-    phrase("Append it to the same closed record issue under a `Below the claim bar` heading"),
+    Pin.phrase("Append it to the same closed record issue under a `Below the claim bar` heading"),
     "step 5 no longer routes a below-bar finding into the per-review closed record issue",
   );
   assert.match(
     s,
-    phrase("is the promotion signal: file it open then, citing the record"),
+    Pin.phrase("is the promotion signal: file it open then, citing the record"),
     "step 5 lost the promotion path — a below-bar finding rediscovered as real has no way back to its own issue",
   );
 });
@@ -125,7 +125,7 @@ test("step 5 keys the bar on the finding's claim, never its review band", () => 
   // meaningful bound to where an above-bar finding goes instead.
   assert.match(
     step5(),
-    phrase(
+    Pin.phrase(
       "**The bar reads the finding's claim, never its review band** — a finding that alleges wrong behavior, whatever band it sat in, `unverified`-with-crashed-refuters included, is above this bar and files open under the confirmed/torn split",
     ),
     "step 5 no longer excludes wrong-behavior findings from the claim bar — a band-keyed reading drops crashed-refuter criticals (#591)",
@@ -138,14 +138,14 @@ test("ADR 0002 keeps its pre-chosen guard", () => {
   // data, and separate pins would let any one be retuned alone.
   assert.match(
     adr,
-    phrase(
+    Pin.phrase(
       "**Floor:** 20 below-bar entries across at least 3 distinct run dates. - **Trigger A — bar too wide:** 5 or more of those entries promoted",
     ),
     "the ADR's guard floor or promotion trigger moved — a pre-chosen guard that is retuned later is not a guard",
   );
   assert.match(
     adr,
-    phrase("**Trigger B — bar missed the load:** non-record `wontfix` closes still above half of all closes"),
+    Pin.phrase("**Trigger B — bar missed the load:** non-record `wontfix` closes still above half of all closes"),
     "the ADR lost trigger B — nothing detects the clause missing the volume it was priced against",
   );
 });
@@ -158,7 +158,7 @@ test("the applied promotion path is stated in step 5 and read by the ADR's guard
   // filed issue behind, so nothing lands on the record by itself.
   assert.match(
     s,
-    phrase("**An in-scope rediscovery step 2 applied is that same promotion signal, and it files nothing**"),
+    Pin.phrase("**An in-scope rediscovery step 2 applied is that same promotion signal, and it files nothing**"),
     "step 5 no longer treats an applied below-bar rediscovery as a promotion — the entry re-derived, checked and worth fixing goes unrecorded",
   );
   // Read the comment's fixed opening out of each file's own prose and compare
@@ -177,7 +177,7 @@ test("the applied promotion path is stated in step 5 and read by the ADR's guard
   // sentence still carries the old string stays green. `between` throws if
   // the bullet's own bounds go missing, for the same reason a missing
   // anchor elsewhere in this file throws rather than widening.
-  const triggerA = between(adr, "- **Trigger A — bar too wide:**", "- **Trigger B", "ADR 0002 Trigger A");
+  const triggerA = Pin.of(adr, "adr").between("- **Trigger A — bar too wide:**", "- **Trigger B", "ADR 0002 Trigger A").text;
   const [, adrMarker] = triggerA.match(/`([^`]+)` comment on it/) ?? [];
   assert.equal(
     adrMarker,
@@ -190,7 +190,7 @@ test("the applied promotion path is stated in step 5 and read by the ADR's guard
   // for the same scoping reason as the marker above.
   assert.match(
     triggerA,
-    phrase("**Promotion signal — two marks, both on the record issue:** an open issue citing the record, and a"),
+    Pin.phrase("**Promotion signal — two marks, both on the record issue:** an open issue citing the record, and a"),
     "ADR 0002's Trigger A no longer defines what counts as a promotion, so the filed path is the only one an evaluator can see",
   );
 });

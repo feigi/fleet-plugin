@@ -70,9 +70,8 @@
 // matrix's ACCEPT row measures rather than asserts by construction.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { stripComments } from "./support/strip-comments.mjs";
 import { promptRenderer } from "./support/prompt-renderer.mjs";
 
@@ -86,14 +85,14 @@ const REPO = join(import.meta.dirname, "..", "plugin");
 // and the join is a single space, which is exactly the inter-word space a
 // markdown wrap point replaces.
 const stripQuoteGutter = (text) => text.split("\n").map((l) => l.replace(/^(>\s?)+/, "")).join(" ");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
-const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+const REVIEW_AND_FIX = Pin.file(join(REPO, "commands", "review-and-fix.md"));
 
 // One rule, one regex. `phrase()` already tolerates a rewrap between words; the
 // numeric joins are what let a bounded amount of unpinned prose sit between two
 // pinned clauses without letting a whole sentence be spliced in unnoticed.
 const span = (...parts) =>
-  new RegExp(parts.map((p) => (typeof p === "number" ? `[\\s\\S]{0,${p}}?` : phrase(p).source)).join(""));
+  new RegExp(parts.map((p) => (typeof p === "number" ? `[\\s\\S]{0,${p}}?` : Pin.phrase(p).source)).join(""));
 
 // --- the invocation-form rule, word-identical in every one of the six seats ---
 // AC-3: the safe form stated, with the unquoted-scalar form named as the thing
@@ -142,11 +141,11 @@ const REFUTER_CONTROL = span(
 const SEATS = [
   [
     "run-team/SKILL.md's nested refuter brief",
-    () => stripQuoteGutter(between(RUN_TEAM, "Try to REFUTE this finding", "Survives → apply it, with one hold", "run-team/SKILL.md")),
+    () => stripQuoteGutter(RUN_TEAM.between("Try to REFUTE this finding", "Survives → apply it, with one hold", "run-team/SKILL.md").text),
   ],
   [
     "review-and-fix.md step 2's refuter brief",
-    () => between(REVIEW_AND_FIX, "Try to REFUTE this finding", "That last clause is the whole mechanism", "review-and-fix.md"),
+    () => REVIEW_AND_FIX.between("Try to REFUTE this finding", "That last clause is the whole mechanism", "review-and-fix.md").text,
   ],
   ["scripts/review-core.mjs's rendered refuter prompt", () => renderTemplate("scripts", "review-core.mjs")],
 ];
@@ -209,12 +208,11 @@ for (const [name, getSeat] of SEATS) {
 // (spec 2026-09-24 § 3 §4), the reader it justifies the rule to is the one
 // admitting a refutation — the fix-applier, whose prompt carries the rule.
 const justification = () =>
-  between(
-    RUN_TEAM,
+  RUN_TEAM.between(
     "A refutation resting on an injection nothing proved landed is not a refutation",
     "**Where `testCmd` comes from:**",
     "run-team/SKILL.md Reviewers prose",
-  );
+  ).text;
 
 test("a negative result is admitted only with its positive control", () => {
   assert.match(
@@ -273,7 +271,7 @@ test("the rule names both failure directions, not only the injection that never 
 // --- the sixth seat: the fix-applier's own mutation paragraph ----------------
 const fixApplierMutationRule = () =>
   stripQuoteGutter(
-    between(RUN_TEAM, "A mutation that never landed is not a green", "**Commit BEFORE you mutate", "run-team/SKILL.md fix-applier prompt"),
+    RUN_TEAM.between("A mutation that never landed is not a green", "**Commit BEFORE you mutate", "run-team/SKILL.md fix-applier prompt").text,
   );
 
 test("the fix-applier prompt refuses a mutation nothing proved landed, and carries the same invocation form", () => {
@@ -320,36 +318,36 @@ const REJECTS = [
   [
     "the control requirement is deleted",
     REFUTER_CONTROL,
-    (t) => t.replace(phrase("A failure injection with no positive control has produced NO result, never a negative one."), ""),
+    (t) => t.replace(Pin.phrase("A failure injection with no positive control has produced NO result, never a negative one."), ""),
   ],
   [
     "the control stays but what it IS is deleted",
     REFUTER_CONTROL,
     (t) =>
       t.replace(
-        phrase("prove the injection reached the child: one run whose output differs with it present versus absent, or the child echoing the injected value back"),
+        Pin.phrase("prove the injection reached the child: one run whose output differs with it present versus absent, or the child echoing the injected value back"),
         "be careful",
       ),
   ],
   [
     "the unquoted-scalar prohibition is deleted",
     SAFE_FORM,
-    (t) => t.replace(phrase('NEVER from an unquoted scalar — `cfg="SETB=1 BADJ=1"; env $cfg sh ./probe.sh`'), ""),
+    (t) => t.replace(Pin.phrase('NEVER from an unquoted scalar — `cfg="SETB=1 BADJ=1"; env $cfg sh ./probe.sh`'), ""),
   ],
   [
     "the prescribed array expansion loses its braces",
     SAFE_FORM,
-    (t) => t.replace(phrase('env "${cfg[@]}" sh ./probe.sh`'), "env $cfg[@] sh ./probe.sh`"),
+    (t) => t.replace(Pin.phrase('env "${cfg[@]}" sh ./probe.sh`'), "env $cfg[@] sh ./probe.sh`"),
   ],
   [
     "the zsh-only-array note is deleted",
     PORTABILITY,
-    (t) => t.replace(phrase("`env $cfg[@]` is not the portable spelling either: measured, bash word-splits it into `SETB=1` and `BADJ=1[@]`, so the injection variable is set to a corrupted value, while zsh behaves exactly as with the bare `$cfg` — `BADJ` never set, exit 0"), ""),
+    (t) => t.replace(Pin.phrase("`env $cfg[@]` is not the portable spelling either: measured, bash word-splits it into `SETB=1` and `BADJ=1[@]`, so the injection variable is set to a corrupted value, while zsh behaves exactly as with the bare `$cfg` — `BADJ` never set, exit 0"), ""),
   ],
   [
     "a sentence is spliced INSIDE the prescription",
     SAFE_FORM,
-    (t) => t.replace(phrase("or inline the assignments literally"), "or, where the harness is short enough to read at a glance and nobody is watching, inline the assignments literally"),
+    (t) => t.replace(Pin.phrase("or inline the assignments literally"), "or, where the harness is short enough to read at a glance and nobody is watching, inline the assignments literally"),
   ],
 ];
 
@@ -385,7 +383,7 @@ test("the controller's justification pins refuse a stripped reproduction and acc
     4,
     `bash -c 'cfg="SETB=1 BADJ=1"; env $cfg sh ./probe.sh'   # BADJ=[1]     SETB=[1]`,
   );
-  const controlLineDeleted = live.replace(phrase(`bash -c 'cfg="SETB=1 BADJ=1"; env $cfg sh ./probe.sh'   # BADJ=[1]     SETB=[1]`), "");
+  const controlLineDeleted = live.replace(Pin.phrase(`bash -c 'cfg="SETB=1 BADJ=1"; env $cfg sh ./probe.sh'   # BADJ=[1]     SETB=[1]`), "");
   assert.notEqual(controlLineDeleted, live, "the reproduction's bash line is no longer where this mutation looks for it");
   assert.doesNotMatch(controlLineDeleted, repro, "the reproduction still matches with its control line deleted — a one-shell transcript proves nothing about word-splitting");
   const gate = span(
@@ -396,7 +394,7 @@ test("the controller's justification pins refuse a stripped reproduction and acc
     "No control → the cell is unrun: re-run it, and never record it as a negative",
   );
   assert.doesNotMatch(
-    live.replace(phrase("No control → the cell is unrun: re-run it, and never record it as a negative"), "Prefer a control."),
+    live.replace(Pin.phrase("No control → the cell is unrun: re-run it, and never record it as a negative"), "Prefer a control."),
     gate,
     "the admission gate still matches once the refusal is softened to a preference — a gate that only recommends is not the gate #990 asked for",
   );

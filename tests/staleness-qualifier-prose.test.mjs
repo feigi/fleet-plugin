@@ -173,15 +173,14 @@
 // than by luck, and a hyphen-breaking rewrap reds this pin through the clause
 // (a plain comparison failure) instead of through `slice anchor "…" moved`,
 // which is the message that misattributes the cause.
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
-import { betweenPhrases, paragraph, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const read = (p) => readFileSync(join(REPO, ...p.split("/")), "utf8");
+const read = (p) => Pin.file(join(REPO, ...p.split("/")));
 
 // The paragraph carrying the rule, and no more of the file than that. A missing
 // anchor is a failure rather than a wider slice: silently falling back to the
@@ -192,7 +191,7 @@ const read = (p) => readFileSync(join(REPO, ...p.split("/")), "utf8");
 // search runs straight past into the next paragraph, an anchor occurring more
 // than once, which binds the pin to whichever copy of the anchored block comes
 // first, and, through `next`, a blank line deleted outright.
-const rule = (name, anchor, next) => paragraph(read(name), anchor, name, next);
+const rule = (name, anchor, next) => read(name).paragraph(anchor, name, next).text;
 
 const CLAUSE =
   "a `skipped` heavy job is behind-count staleness and fine — **solely** off that count, which is a condition to establish rather than infer";
@@ -212,7 +211,7 @@ for (const [name, anchor, next] of DOCS) {
   test(`${name} qualifies the benign \`skipped\` heavy job as behind-count staleness`, () => {
     assert.match(
       rule(name, anchor, next),
-      phrase(CLAUSE),
+      Pin.phrase(CLAUSE),
       `${name} no longer says "${CLAUSE}". Bare "staleness" names no cause, and its twin document still names one — that one-sided drop is exactly #196. Restore the qualifier; if the clause was reworded on purpose, re-anchor CLAUSE in this file to the new wording in BOTH documents at once.`,
     );
   });
@@ -221,7 +220,7 @@ for (const [name, anchor, next] of DOCS) {
 test(`${REVIEW_AND_FIX} step 6 keeps the mechanism behind "a behind PR never reaches" exit-0 green`, () => {
   assert.match(
     rule(REVIEW_AND_FIX, STEP_6, STEP_6_NEXT),
-    phrase(MECHANISM),
+    Pin.phrase(MECHANISM),
     `${REVIEW_AND_FIX} step 6 no longer says "${MECHANISM}". Stripped of it the line asserts only the consequence — that a behind PR never reaches exit-0 green — and leaves the reader to reconstruct WHY from separated sentences elsewhere. #182 dropped this clause alongside the behind-count qualifier and #196 restored both. Restore it, or re-anchor MECHANISM in this file to the new wording. Unlike CLAUSE this has no twin: SKILL.md's copy of the same gate carries the consequence only.`,
   );
 });
@@ -232,8 +231,8 @@ const STEP_4_FROM = "**Staleness is not a failure:**";
 const STEP_4_TO = "below for what it looks like and why";
 const STEP_4_WHAT = `${REVIEW_AND_FIX} step 4 staleness qualifier`;
 
-const step4Staleness = (text = read(REVIEW_AND_FIX)) =>
-  betweenPhrases(text, STEP_4_FROM, STEP_4_TO, STEP_4_WHAT, { bound: /\n\d+\.\s/ });
+const step4Staleness = (text = read(REVIEW_AND_FIX).text) =>
+  Pin.of(text, "text").betweenPhrases(STEP_4_FROM, STEP_4_TO, STEP_4_WHAT, { bound: /\n\d+\.\s/ }).text;
 
 // The qualifier as ONE span, cause through consequence. Never the bare word:
 // `solely` occurs twice in this document, so a keyword pin would be answered by
@@ -245,7 +244,7 @@ const QUALIFIER =
 test(`${REVIEW_AND_FIX} step 4 qualifies the never-clearing staleness as solely a non-zero behind-count`, () => {
   assert.match(
     step4Staleness(),
-    phrase(QUALIFIER),
+    Pin.phrase(QUALIFIER),
     `${STEP_4_WHAT}: step 4 no longer says "${QUALIFIER}". This is the sentence telling a standalone reviewer WHICH red to stop watching rather than fix: only the behind-count cause is benign, so dropping or weakening \`solely\` turns "this staleness is not a failure" into "staleness is not a failure" and licenses stopping the watch on a genuine red. That is #182/#196's drift at a third site (#1218), and step 6 and SKILL.md carrying their copies is exactly what makes a one-sided drop here silent. Restore the qualifier, or re-anchor QUALIFIER in this file to the new wording.`,
   );
 });

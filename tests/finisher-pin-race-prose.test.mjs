@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 // #144. The finisher is dispatched pinned to a SHA the reviewer already left
 // behind: the reviewer composes a verdict once it has enough, then keeps
@@ -21,7 +20,7 @@ import { between, paragraph } from "./support/prose-pin.mjs";
 // cause-block evidence is finisher-facing and must sit inside a `>` block the
 // controller carries verbatim.
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 const FALLBACK_START = "#### Fallback: hand-dispatched reviewer member";
 const FALLBACK_END = "### Merge bot";
@@ -29,7 +28,7 @@ const FALLBACK_END = "### Merge bot";
 // #753: proven output-identical to `between()` on the real SKILL.md text —
 // FALLBACK_END never occurs inside FALLBACK_START's own text, so searching
 // from `at` instead of `at + FALLBACK_START.length` never changes the match.
-const fallbackSection = () => between(RUN_TEAM, FALLBACK_START, FALLBACK_END, "run-team fallback section");
+const fallbackSection = () => RUN_TEAM.between(FALLBACK_START, FALLBACK_END, "run-team fallback section").text;
 
 const CAUSE_BLOCK_START = "instead of asking anyone:";
 // The controller-facing resolution table (#2083) follows the block directly;
@@ -39,11 +38,11 @@ const CAUSE_BLOCK_END = "**Resolving a finisher halt.**";
 // Raw slice: keeps the `>` prefixes, needed by the structural (every-line-quoted)
 // test below.
 function causeBlock() {
-  const at = RUN_TEAM.indexOf(CAUSE_BLOCK_START);
+  const at = RUN_TEAM.text.indexOf(CAUSE_BLOCK_START);
   assert.notEqual(at, -1, `cause-block anchor ('${CAUSE_BLOCK_START}') moved — update this test`);
-  const end = RUN_TEAM.indexOf(CAUSE_BLOCK_END, at);
+  const end = RUN_TEAM.text.indexOf(CAUSE_BLOCK_END, at);
   assert.notEqual(end, -1, `the resolution paragraph that follows ('${CAUSE_BLOCK_END}') moved — update this test`);
-  return RUN_TEAM.slice(at + CAUSE_BLOCK_START.length, end);
+  return RUN_TEAM.text.slice(at + CAUSE_BLOCK_START.length, end);
 }
 
 // Flattened: markdown hard-wraps a `>` block at ~80 columns, so a phrase can
@@ -61,7 +60,7 @@ function causeText() {
 // anchor rather than widening to the whole file, which is the only way a
 // "no closed count anywhere" assertion could pass by looking at nothing.
 const LEAD_ANCHOR = "A halt at step 1 reads identical from a bare SHA mismatch";
-const leadIn = () => paragraph(RUN_TEAM, LEAD_ANCHOR, "run-team halt-cause lead-in", "> Worktree differs from your pin,");
+const leadIn = () => RUN_TEAM.paragraph(LEAD_ANCHOR, "run-team halt-cause lead-in", "> Worktree differs from your pin,").text;
 
 test("finisher dispatch is gated on outstanding specialist relays, in the section that owns relay receipts", () => {
   const section = fallbackSection();
@@ -332,7 +331,7 @@ test("the pre-existing ruling-owed gate for the fix-applier is untouched", () =>
   // paragraph. This pins that the older, unrelated rule wasn't clipped or
   // reworded by mistake while adding the new one beside it.
   assert.match(
-    RUN_TEAM,
+    RUN_TEAM.text,
     /Never dispatch\s*\n?one while you still owe the fix-applier a ruling/,
     "the fix-applier ruling-owed gate no longer reads as before — check it wasn't altered while adding the specialist-relay gate nearby",
   );

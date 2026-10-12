@@ -30,7 +30,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { between, phrase, stripHashGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/no-undo-audit.sh", import.meta.url));
@@ -1100,15 +1100,14 @@ test("no-undo-audit.sh's own comment names the rc the fixture above measures", (
   // against an unbounded match and reds here. The gutter comes off before
   // `phrase`'s wrap-tolerant `\s+`, because the clause is hard-wrapped and it is
   // the `#`, not whitespace, that sits at the break.
-  const paragraph = between(
-    stripHashGutter(readFileSync(SCRIPT, "utf8")),
+  const paragraph = Pin.file(SCRIPT).stripGutter("#").between(
     "A stash object that is CORRUPT",
     "`printf`, not `echo`",
     "no-undo-audit.sh",
-  );
+  ).text;
   assert.match(
     paragraph,
-    phrase("list empty at rc 1"),
+    Pin.phrase("list empty at rc 1"),
     "no-undo-audit.sh states this same rc in its own comment; the two must not drift apart again",
   );
 });

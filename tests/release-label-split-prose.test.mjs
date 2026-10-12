@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, bullet, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 // #375. A `gh pr create --label patch` that exceeds the caller's tool timeout is
 // backgrounded with the PR ALREADY OPEN and the label unapplied, and a timeout
@@ -19,30 +18,30 @@ import { between, bullet, phrase } from "./support/prose-pin.mjs";
 // wording and its location, not the absence of a later carve-out — the same
 // ceiling `member-prompt-prose.test.mjs` records for its own slice.
 const REPO = join(import.meta.dirname, "..", "plugin");
-const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
+const read = (...p) => Pin.file(join(REPO, ...p));
 
 const NEXT_TICKET = read("skills", "next-ticket", "SKILL.md");
 const RUN_TEAM = read("skills", "run-team", "SKILL.md");
 const REVIEW_AND_FIX = read("commands", "review-and-fix.md");
 
 const step7 = () =>
-  between(NEXT_TICKET, "## 7. When the sizing-a-ticket path reports done", "## Red flags", "next-ticket/SKILL.md step 7");
+  NEXT_TICKET.between("## 7. When the sizing-a-ticket path reports done", "## Red flags", "next-ticket/SKILL.md step 7").text;
 
 // The member reads the implementer agent body verbatim — its system prompt
 // since #1804 moved the blocks there out of run-team's phase 2
 // (spec 2026-09-24 § 2 Decision 2); the same slice `member-prompt-prose.test.mjs`
 // takes, for the same reason.
-const memberBlocks = () => read("agents", "fleet-implementer-slow-high.agent.md").split("---").slice(2).join("---");
+const memberBlocks = () => read("agents", "fleet-implementer-slow-high.agent.md").text.split("---").slice(2).join("---");
 
 const finisherLabelDuty = () =>
-  between(RUN_TEAM, "Add `ready-to-merge`", "A halt at step 1 reads identical from a bare SHA mismatch", "run-team finisher duty 3");
+  RUN_TEAM.between("Add `ready-to-merge`", "A halt at step 1 reads identical from a bare SHA mismatch", "run-team finisher duty 3").text;
 
 test("next-ticket's step 7 writes the label with a command of its own, not a flag on the create", () => {
   const s = step7();
   // The whole command, not its first physical line: the create's body string
   // spans lines, so a line-anchored match never sees `--label` folded onto the
   // body-closing continuation — the very fold this asserts against.
-  const create = between(s, "gh pr create", "\ngh pr edit", "step 7 create command");
+  const create = Pin.of(s, "s").between("gh pr create", "\ngh pr edit", "step 7 create command").text;
 
   // The defect in one assertion: a flag on the create shares the create's fate,
   // and that fate is a timeout with no exit status.
@@ -62,7 +61,7 @@ test("next-ticket says why the label write stands alone, so it is not folded bac
   const s = step7();
   assert.match(
     s,
-    phrase("Never fold `--label` into the create"),
+    Pin.phrase("Never fold `--label` into the create"),
     "step 7 lost the instruction against folding the label into the create",
   );
   // Not a `/timeout|backgrounded/` keyword search: that is polarity-blind and
@@ -70,7 +69,7 @@ test("next-ticket says why the label write stands alone, so it is not folded bac
   // NEGATING it, satisfied by the word "timeout" in the paragraph's tail clause.
   assert.match(
     s,
-    phrase("outruns the caller's tool timeout is backgrounded with the PR already open"),
+    Pin.phrase("outruns the caller's tool timeout is backgrounded with the PR already open"),
     "step 7 no longer names the timeout the split exists for, so the split reads as an arbitrary extra call",
   );
   // Not a bare `own exit status`: the command block's own trailing comment
@@ -78,7 +77,7 @@ test("next-ticket says why the label write stands alone, so it is not folded bac
   // rewritten to "a tidier shape" — measured. Pin the sentence, not the words.
   assert.match(
     s,
-    phrase("it has its own exit status and fails loudly"),
+    Pin.phrase("it has its own exit status and fails loudly"),
     "step 7 no longer says the separate command carries its own exit status — the whole reason it is separate",
   );
 });
@@ -96,7 +95,7 @@ test("the split reaches the fleet member verbatim, inside the agent body it is d
   );
   assert.match(
     blocks,
-    phrase("Never fold `--label` into the create"),
+    Pin.phrase("Never fold `--label` into the create"),
     "the member block lost the prohibition, leaving the split as an example a member may collapse back into one call",
   );
 });
@@ -105,7 +104,7 @@ test("the finisher refuses a PR with zero or more than one release label, and sa
   const duty = finisherLabelDuty();
   assert.match(
     duty,
-    phrase("exactly one"),
+    Pin.phrase("exactly one"),
     "the finisher no longer asserts a release-label count before labelling",
   );
   assert.match(
@@ -133,12 +132,12 @@ test("the finisher's assertion accepts a normally-labelled PR — it counts rele
   // "exactly one label" halts every correctly-created PR in the fleet.
   assert.match(
     duty,
-    phrase("Count only those three"),
+    Pin.phrase("Count only those three"),
     "the finisher's assertion is no longer scoped to the release labels — any other label on the PR now trips it",
   );
   assert.match(
     duty,
-    phrase("passes unchanged"),
+    Pin.phrase("passes unchanged"),
     "the finisher no longer states that a PR carrying one release label beside its other labels passes",
   );
 });
@@ -148,13 +147,13 @@ test("the finisher's assertion accepts a normally-labelled PR — it counts rele
 // its own sub-step, after the check, and carries the command itself — sliced
 // to each sub-step, so a command left elsewhere in duty 3 does not satisfy it.
 test("duty 3 is two sub-steps — the release-label check, then the add-label command", () => {
-  const a = between(RUN_TEAM, "- **(a) Exactly one release label.**", "- **(b) Add the label:**", "finisher duty 3(a)");
-  const b = between(RUN_TEAM, "- **(b) Add the label:**", "4. Report you the label", "finisher duty 3(b)");
-  assert.match(a, phrase("exactly one"), "3(a) no longer holds the release-label count");
+  const a = RUN_TEAM.between("- **(a) Exactly one release label.**", "- **(b) Add the label:**", "finisher duty 3(a)").text;
+  const b = RUN_TEAM.between("- **(b) Add the label:**", "4. Report you the label", "finisher duty 3(b)").text;
+  assert.match(a, Pin.phrase("exactly one"), "3(a) no longer holds the release-label count");
   assert.doesNotMatch(a, /--add-label/, "3(a) adds a label — the precondition and the action are one step again");
   assert.match(b, /`gh pr edit <pr> --add-label ready-to-merge`/, "3(b) no longer spells out the add-label command");
-  assert.ok(RUN_TEAM.indexOf("- **(a) Exactly one release label.**") < RUN_TEAM.indexOf("- **(b) Add the label:**"), "the add precedes its precondition");
-  assert.match(bullet(RUN_TEAM, "4. Report you the label", "**Give the finisher the instrument re-check verbatim too.**", "finisher duty 4"), phrase("post-add read-back: `gh pr view <pr> --json labels`"),
+  assert.ok(RUN_TEAM.text.indexOf("- **(a) Exactly one release label.**") < RUN_TEAM.text.indexOf("- **(b) Add the label:**"), "the add precedes its precondition");
+  assert.match(RUN_TEAM.bullet("4. Report you the label", "**Give the finisher the instrument re-check verbatim too.**", "finisher duty 4").text, Pin.phrase("post-add read-back: `gh pr view <pr> --json labels`"),
     "duty 4 no longer reports the label read back after the add");
 });
 
@@ -162,10 +161,10 @@ test("the solo labelling step gates on the release label too — the fleet finis
   // `review-and-fix.md` step 6 is the other writer of `ready-to-merge`. A guard
   // on the fleet path alone leaves the standalone path labelling PRs with no
   // release label at all.
-  const step6 = between(REVIEW_AND_FIX, "6. Diff-check green", "**Bind green to the *run*", "review-and-fix.md step 6");
+  const step6 = REVIEW_AND_FIX.between("6. Diff-check green", "**Bind green to the *run*", "review-and-fix.md step 6").text;
   assert.match(
     step6,
-    phrase("exactly one release label"),
+    Pin.phrase("exactly one release label"),
     "step 6 labels `ready-to-merge` without asserting a release label, so the standalone path still ships PRs with none",
   );
   // The same two halves test 4 pins on the fleet path. A count with no halt

@@ -26,7 +26,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const TRACKER = readFileSync(join(REPO, "docs", "agents", "issue-tracker.md"), "utf8");
@@ -40,7 +40,7 @@ const TRACKER = readFileSync(join(REPO, "docs", "agents", "issue-tracker.md"), "
 // across lines at a width nobody should have to preserve. Every assertion below
 // runs against the flattened text and is therefore reflow-safe.
 const section = (text = TRACKER) =>
-  between(text, '## When a skill says "compose a PR body"', "\n## When a skill says", "docs/agents/issue-tracker.md")
+  Pin.of(text, "text").between('## When a skill says "compose a PR body"', "\n## When a skill says", "docs/agents/issue-tracker.md").text
     .split(/\s+/)
     .join(" ");
 
@@ -59,7 +59,7 @@ test("the adjacency rule names its fix in the same breath", () => {
   // closed") reddens rather than sliding between two matches.
   assert.match(
     section(),
-    phrase("immediately before an issue reference creates a closing link, and the fix is to insert a word: write `closed issue #219`, or name the issue without the `#`"),
+    Pin.phrase("immediately before an issue reference creates a closing link, and the fix is to insert a word: write `closed issue #219`, or name the issue without the `#`"),
   );
 });
 
@@ -70,7 +70,7 @@ test("the keyword list stays whole and stays bound to the mechanism", () => {
   // qualifies, so a list orphaned from its rule reddens too.
   assert.match(
     section(),
-    phrase("A closing keyword — `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved` — immediately before an issue reference"),
+    Pin.phrase("A closing keyword — `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved` — immediately before an issue reference"),
   );
 });
 
@@ -81,7 +81,7 @@ test("the preventive rule names what to do with every OTHER mention", () => {
   // deliberate keyword and the treatment of the rest are asserted as one span.
   assert.match(
     section(),
-    phrase("Write one deliberate `Closes #N` and give every other issue mention a word in front of it"),
+    Pin.phrase("Write one deliberate `Closes #N` and give every other issue mention a word in front of it"),
   );
 });
 
@@ -89,7 +89,7 @@ test("the section records that one keyword does not chain across a list", () => 
   // Without it, an author who fixes the reference they noticed leaves the rest
   // of the list linked and reads the partial result as arbitrary rather than as
   // the documented behaviour.
-  assert.match(section(), phrase("One keyword before a list links exactly the first reference, never the rest"));
+  assert.match(section(), Pin.phrase("One keyword before a list links exactly the first reference, never the rest"));
 });
 
 test("the section says to re-query the closing references and act on a mismatch", () => {
@@ -99,7 +99,7 @@ test("the section says to re-query the closing references and act on a mismatch"
   // is pinned as one span.
   assert.match(
     section(),
-    phrase("re-query its closing references and compare them against what you meant to close, surfacing a mismatch rather than accepting it silently"),
+    Pin.phrase("re-query its closing references and compare them against what you meant to close, surfacing a mismatch rather than accepting it silently"),
   );
 });
 
@@ -108,7 +108,7 @@ test("the lazy-recompute caveat sits with the check it qualifies", () => {
   // check: it converts "unverified" into "verified fine".
   assert.match(
     section(),
-    phrase("recomputes closing references lazily, so a query issued immediately after the create can read falsely clean — re-query after a pause"),
+    Pin.phrase("recomputes closing references lazily, so a query issued immediately after the create can read falsely clean — re-query after a pause"),
   );
 });
 
@@ -118,7 +118,7 @@ test("the section refuses a keyword regex as evidence on its own", () => {
   // on a body whose keyword sits in a code span.
   assert.match(
     section(),
-    phrase("Compare a regex hit against the linked set before calling it a defect"),
+    Pin.phrase("Compare a regex hit against the linked set before calling it a defect"),
   );
 });
 
@@ -129,7 +129,7 @@ test("the section binds the rule to PR bodies and commit messages and excludes i
   // sentence that carries the mapping is asserted whole.
   assert.match(
     section(),
-    phrase("Closing keywords bind in PR bodies and commit messages only. An issue comment may write the adjacency freely — it creates no link"),
+    Pin.phrase("Closing keywords bind in PR bodies and commit messages only. An issue comment may write the adjacency freely — it creates no link"),
   );
 });
 
@@ -140,7 +140,7 @@ test("a reflowed section still matches", () => {
   // loosened span pin is the vacuous keyword pin this shape exists to avoid.
   const rewrapped = TRACKER.replace("creates a closing link, and the fix", "creates a closing link,\nand the fix");
   assert.notEqual(rewrapped, TRACKER, "the rewrap fixture no longer matches the section — update it");
-  assert.match(section(rewrapped), phrase("creates a closing link, and the fix is to insert a word"));
+  assert.match(section(rewrapped), Pin.phrase("creates a closing link, and the fix is to insert a word"));
 });
 
 // #1118. The section above is reached only by a skill that says "compose a PR
@@ -150,7 +150,7 @@ test("a reflowed section still matches", () => {
 // anchors as force-with-lease-reason-prose.test.mjs's step-7 slice.
 const NEXT_TICKET = readFileSync(join(REPO, "plugin", "skills", "next-ticket", "SKILL.md"), "utf8");
 const step7 = (text = NEXT_TICKET) =>
-  between(text, "## 7. When the sizing-a-ticket path reports done", "## Red flags", "next-ticket/SKILL.md step 7");
+  Pin.of(text, "text").between("## 7. When the sizing-a-ticket path reports done", "## Red flags", "next-ticket/SKILL.md step 7").text;
 
 test("next-ticket step 7 says one keyword per intended close, and that several such closes are fine", () => {
   // The per-issue half and the multi-close example are one span: a rewrite to
@@ -158,7 +158,7 @@ test("next-ticket step 7 says one keyword per intended close, and that several s
   // it forbids the deliberate `Closes #A, closes #B` this sentence allows.
   assert.match(
     step7(),
-    phrase("Write one `Closes #M` per issue you mean to close, so `Closes #A, closes #B` closes both"),
+    Pin.phrase("Write one `Closes #M` per issue you mean to close, so `Closes #A, closes #B` closes both"),
     "step 7 lost the one-keyword-per-intended-close rule, or narrowed it so a deliberate multi-issue close reads as wrong",
   );
 });
@@ -166,7 +166,7 @@ test("next-ticket step 7 says one keyword per intended close, and that several s
 test("next-ticket step 7 says what to do with every OTHER issue mention", () => {
   assert.match(
     step7(),
-    phrase("give every other issue mention a word in front of it — `closed issue #M`, or the issue named without the `#`"),
+    Pin.phrase("give every other issue mention a word in front of it — `closed issue #M`, or the issue named without the `#`"),
     "step 7 no longer tells the author to put a word in front of issue mentions it does not mean to close",
   );
 });
@@ -174,7 +174,7 @@ test("next-ticket step 7 says what to do with every OTHER issue mention", () => 
 test("next-ticket step 7 says a keyword before a list links only its first reference", () => {
   assert.match(
     step7(),
-    phrase("A keyword before a list links only the first reference in that list, never the rest"),
+    Pin.phrase("A keyword before a list links only the first reference in that list, never the rest"),
     "step 7 no longer says one keyword does not chain across a list",
   );
 });
@@ -188,6 +188,6 @@ test("the step-7 pins survive a reflow of the rule", () => {
   );
   assert.notEqual(rewrapped, NEXT_TICKET, "the rewrap fixture no longer matches step 7 — update it");
   const s = step7(rewrapped);
-  assert.match(s, phrase("Write one `Closes #M` per issue you mean to close, so `Closes #A, closes #B` closes both"));
-  assert.match(s, phrase("A keyword before a list links only the first reference in that list, never the rest"));
+  assert.match(s, Pin.phrase("Write one `Closes #M` per issue you mean to close, so `Closes #A, closes #B` closes both"));
+  assert.match(s, Pin.phrase("A keyword before a list links only the first reference in that list, never the rest"));
 });

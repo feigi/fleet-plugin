@@ -10,12 +10,11 @@
 // be subverted".
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between as section, bullet, paragraph, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 // SLICE SIZE is what does the anchoring. A regex over a whole section is
 // satisfied by incidental prose elsewhere in it, and an unbounded slice runs to
@@ -25,7 +24,7 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 // begins. Widened to the whole Phase 3 loop it would be satisfied by the wake
 // bullets' own mentions of the tick, which say nothing about the script.
 const tickBlock = () =>
-  section(RUN_TEAM, "**Every wake ends in the tick.**", "**Own the CI waits.**", "run-team tick block");
+  RUN_TEAM.between("**Every wake ends in the tick.**", "**Own the CI waits.**", "run-team tick block").text;
 
 // The six counts a caller used to state (#1803 deleted them, spec 2026-09-24
 // § 6 §1). Any one of them back in the block is a controller told to supply a
@@ -53,21 +52,21 @@ test("the tick block says the tick reads the run itself, and nobody states a cou
   // row to make the tick see what it wants. The ledger is the input, written
   // through ledger.mjs, and a token the tick cannot read is a refusal.
   const s = tickBlock();
-  assert.match(s, phrase("nobody states a count"));
+  assert.match(s, Pin.phrase("nobody states a count"));
   assert.match(s, /`\.fleet\/ledger\.md`/);
   assert.match(s, /`\.fleet\/shortlist\.json`/);
-  assert.match(s, phrase("refuses rather than guessing"));
+  assert.match(s, Pin.phrase("refuses rather than guessing"));
   assert.doesNotMatch(s, /refuses rather than\s+defaulting them/, "the block still says the live counts are the controller's to state");
 });
 
 // The rule itself, bounded to its own paragraph.
 const maxReviewsPair = () =>
-  paragraph(RUN_TEAM, "**`--max-reviews <n>`", "run-team --max-reviews rule", "**Why every wake.** A merge cascade is a firehose");
+  RUN_TEAM.paragraph("**`--max-reviews <n>`", "run-team --max-reviews rule", "**Why every wake.** A merge cascade is a firehose").text;
 
 test("--max-reviews defaults to the reviewer cap, and omp leaves it there", () => {
   const region = maxReviewsPair();
-  assert.match(region, phrase("Leave it at its default"));
-  assert.match(region, phrase("task.maxConcurrency"));
+  assert.match(region, Pin.phrase("Leave it at its default"));
+  assert.match(region, Pin.phrase("task.maxConcurrency"));
   assert.doesNotMatch(region, /--max-reviews \d/, "the rule now hard-codes a numeric bound — the point of leaving it at its default is that no caller passes one");
 });
 
@@ -75,7 +74,7 @@ test("the record-before-tick table names every wake, each with what it records",
   // Spec 2026-09-24 § 6 §7. The table IS the edge list now: a wake missing from
   // it is a wake that records nothing and so is invisible to the tick, which
   // reads only the ledger. Row by row, each by its wake and its record.
-  const table = paragraph(RUN_TEAM, "| Wake | Record, then tick |", "record-before-tick table", "Then run the tick, act on every line it prints,");
+  const table = RUN_TEAM.paragraph("| Wake | Record, then tick |", "record-before-tick table", "Then run the tick, act on every line it prints,").text;
   const rows = table.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Wake"));
   const WAKES = [
     ["Implementer report", ["verify-sha.sh", "settle impl-<N>=PR#<M>", "=bailed"]],
@@ -98,7 +97,7 @@ test("the record-before-tick table names every wake, each with what it records",
     for (const rec of records) assert.ok(row.includes(rec), `the "${wake}" row no longer records ${rec}`);
   }
   // What follows the table: the tick, every printed line acted on, the beat.
-  assert.match(section(RUN_TEAM, "| Heartbeat |", "\n- **", "after the table"), phrase("act on every line it prints, and arm the beat"));
+  assert.match(RUN_TEAM.between("| Heartbeat |", "\n- **", "after the table").text, Pin.phrase("act on every line it prints, and arm the beat"));
 });
 
 test("the tick block admits no wake covers a drained queue, and says whose case that is", () => {
@@ -113,13 +112,13 @@ test("the tick block admits no wake covers a drained queue, and says whose case 
 // Both merge-side wakes, each sliced to its own bullet — the shared vocabulary
 // makes a section-wide match worthless here.
 test("the merge-bot-pass-done wake records, reaps, then ticks", () => {
-  const bullet = section(RUN_TEAM, "- **Merge-bot pass reports done**", "\n- **The run ends", "merge-bot-done wake");
+  const bullet = RUN_TEAM.between("- **Merge-bot pass reports done**", "\n- **The run ends", "merge-bot-done wake").text;
   assert.match(bullet, /reap\.sh --apply/);
   assert.match(bullet, /run the tick/);
 });
 
 test("the CI-terminal wake runs the tick", () => {
-  const bullet = section(RUN_TEAM, "- **Monitor: CI run completes**", "\n- **A fix-applier reports", "CI-terminal wake");
+  const bullet = RUN_TEAM.between("- **Monitor: CI run completes**", "\n- **A fix-applier reports", "CI-terminal wake").text;
   assert.match(bullet, /run the tick/);
 });
 
@@ -127,7 +126,7 @@ test("the CI-terminal wake runs the tick", () => {
 // it. Anchored to the section heading instead, the pointer would be satisfied
 // by the Phase 3 block above, which lives in the same file.
 const queueDepthTable = () =>
-  section(RUN_TEAM, "**Do not re-derive this by hand", "`/triage` is user-invoked only", "queue-depth table");
+  RUN_TEAM.between("**Do not re-derive this by hand", "`/triage` is user-invoked only", "queue-depth table").text;
 
 test("the queue-depth table points at the executable reconcile", () => {
   const s = queueDepthTable();
@@ -160,7 +159,7 @@ test("the queue-depth table's empty row suggests /triage and asks nobody to tick
 test("the review-backlog definition states what the script actually counts", () => {
   // The gate's input. Left as the narrow definition alone, a controller reading
   // a HOLD cannot tell an over-count from a real review-bound pipeline.
-  const def = bullet(RUN_TEAM, "- **review backlog**", "**Defaults: 2 implementers, 6 reviewers", "review-backlog definition");
+  const def = RUN_TEAM.bullet("- **review backlog**", "**Defaults: 2 implementers, 6 reviewers", "review-backlog definition").text;
   assert.match(def, /open PR without `ready-to-merge`/);
   // The review state now lives on the ledger (spec 2026-09-24 § 3 §7), so the
   // count is exact rather than a wider read held "earlier, never later": a PR
@@ -200,12 +199,11 @@ test("the review-backlog definition states what the script actually counts", () 
 // candidate-scan and in-flight bullets, which talk about queueing and review
 // without saying inherited PRs are in scope at all.
 const foldInBlock = () =>
-  section(
-    RUN_TEAM,
+  RUN_TEAM.between(
     "**Fold in every PR a prior run left open, before shortlisting.**",
     "1. **Build the Shortlist**",
     "run-team step-0 fold-in block",
-  );
+  ).text;
 
 test("the fold-in block says inherited PRs are queued before shortlisting, as ordinary review work", () => {
   // #1237's own review found this bullet unpinned while its sibling addition in
@@ -231,13 +229,13 @@ test("the fold-in block says inherited PRs are queued before shortlisting, as or
 // invokes it. The slice is the standing instruction, ending where the CI-wait
 // instruction begins.
 const heartbeatBlock = () =>
-  section(RUN_TEAM, "**Beat when there is nothing to do", "**Own the CI waits.**", "run-team heartbeat block");
+  RUN_TEAM.between("**Beat when there is nothing to do", "**Own the CI waits.**", "run-team heartbeat block").text;
 
 test("the event loop tells the controller to arm the beat instead of ending its turn", () => {
   // The entry point. Every word of the block below is unreachable if the loop
   // never says to run it, which is exactly how item 2 of #3 went missing.
-  const bullet = section(RUN_TEAM, "- **Nothing to do right now**", "- **Implementer report**",
-    "nothing-to-do event");
+  const bullet = RUN_TEAM.between("- **Nothing to do right now**", "- **Implementer report**",
+    "nothing-to-do event").text;
   assert.match(bullet, /do not end your turn/);
 });
 
@@ -290,17 +288,17 @@ test("the heartbeat block says whose stall a line is and names what is stranded"
   // tickets keep the claim label the candidate scan excludes, so nothing else
   // in the run will ever surface them again.
   const s = heartbeatBlock();
-  assert.match(s, phrase("A beat, tick or ledger write older than the controller record rotate wrote is the previous run's and counts for nothing."));
+  assert.match(s, Pin.phrase("A beat, tick or ledger write older than the controller record rotate wrote is the previous run's and counts for nothing."));
   assert.match(s, /in-progress/);
   assert.match(s, /EXCLUDES that label/);
   // One entry per wording fleet-state.mjs's stallReport() can lead with, each
   // saying what follows from it: a gone controller's claims come back, a live
   // one's do not, and no record decides nothing.
-  assert.match(s, phrase("`heartbeat STALLED, controller gone` — the run that stranded them is dead. Its claims without a PR come back through the next run's phase 0 stranded-claim step"));
-  assert.match(s, phrase("`heartbeat not beating, controller alive (pid N)`, or `(this session's earlier run)` — a controller that stopped beating and kept going. Nothing died, so nothing is resumed"));
-  assert.match(s, phrase("`heartbeat STALLED` alone — no record says whether that controller lives. The line is detection only."));
+  assert.match(s, Pin.phrase("`heartbeat STALLED, controller gone` — the run that stranded them is dead. Its claims without a PR come back through the next run's phase 0 stranded-claim step"));
+  assert.match(s, Pin.phrase("`heartbeat not beating, controller alive (pid N)`, or `(this session's earlier run)` — a controller that stopped beating and kept going. Nothing died, so nothing is resumed"));
+  assert.match(s, Pin.phrase("`heartbeat STALLED` alone — no record says whether that controller lives. The line is detection only."));
   // #2968: the previous run's recorded stop is its end, printed once.
-  assert.match(s, phrase("Your first tick may print `previous run stopped deliberately at <time> (<age> ago) — recorded reason: <reason>` instead: the stop the previous run recorded. It is that run's end, not a verdict on yours, and no later tick prints it."));
+  assert.match(s, Pin.phrase("Your first tick may print `previous run stopped deliberately at <time> (<age> ago) — recorded reason: <reason>` instead: the stop the previous run recorded. It is that run's end, not a verdict on yours, and no later tick prints it."));
   // Nothing restarts a dead run — the next run's phase 0 resumes it. Prose
   // that left this open invites a controller to invent a restart.
   assert.match(s, /nothing restarts the run that stranded them/);
@@ -309,15 +307,15 @@ test("the heartbeat block says whose stall a line is and names what is stranded"
 test("the --stop paragraph keeps the drain out of it and points at End of run (#2968)", () => {
   // A stop recorded at the drain is read as the end of the run while the
   // review and merge sides are still working it.
-  const p = paragraph(RUN_TEAM, "It holds nothing and returns at once.", "run-team --stop paragraph", "**A stall line names whose stall it is.**");
+  const p = RUN_TEAM.paragraph("It holds nothing and returns at once.", "run-team --stop paragraph", "**A stall line names whose stall it is.**").text;
   assert.doesNotMatch(p, /drain the run deliberately/);
-  assert.match(p, phrase("A drained run records it as the last step of **End of run** (above), never at the drain itself."));
+  assert.match(p, Pin.phrase("A drained run records it as the last step of **End of run** (above), never at the drain itself."));
 });
 
 test("End of run follows the drain bullet and ends with --stop (#2968)", () => {
-  const b = bullet(RUN_TEAM, "- **The run ends, or the maintainer says drain**", "- **Monitor: CI run completes**", "run-team drain bullet");
+  const b = RUN_TEAM.bullet("- **The run ends, or the maintainer says drain**", "- **Monitor: CI run completes**", "run-team drain bullet").text;
   const steps = [...b.matchAll(/^\s+(\d+)\. /gm)].map((m) => Number(m[1]));
   assert.deepEqual(steps, [1, 2, 3, 4, 5, 6], "End of run is one ordered list of six steps");
-  assert.match(b, phrase("3. Act on the review, fix-applier and merge rows until no PR is open. Once the run is draining with no open PR and no live implementer, the tick's last line is `ACTION: run over → fleet-heartbeat.mjs --stop \"<reason>\"`."));
-  assert.match(b, phrase("6. `~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop \"<reason>\"` — last, because every reader takes a recorded stop as the end of the run."));
+  assert.match(b, Pin.phrase("3. Act on the review, fix-applier and merge rows until no PR is open. Once the run is draining with no open PR and no live implementer, the tick's last line is `ACTION: run over → fleet-heartbeat.mjs --stop \"<reason>\"`."));
+  assert.match(b, Pin.phrase("6. `~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop \"<reason>\"` — last, because every reader takes a recorded stop as the end of the run."));
 });

@@ -26,22 +26,20 @@
 // the shape #1150 measured.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
+const read = (...p) => Pin.file(join(REPO, ...p));
 const RUN_TEAM = read("skills", "run-team", "SKILL.md");
 const ISOLATION = read("skills", "run-team", "references", "isolation.md");
 
 const SKILL_BULLET = () =>
-  between(
-    RUN_TEAM,
+  RUN_TEAM.between(
     "**Scratchpad paths need two levels",
     "**IDE/harness diagnostics attribute",
     "run-team/SKILL.md's scratchpad-paths bullet",
-  );
+  ).text;
 
 const SKILL_CLAUSE =
   "any member that dispatches a child writes an absolute directory under its own partition into that child's prompt, one per child and never shared, and a child never derives its own";
@@ -49,18 +47,17 @@ const SKILL_CLAUSE =
 test("run-team/SKILL.md's scratchpad-paths bullet pins the parent-writes, child-never-derives rule", () => {
   assert.match(
     SKILL_BULLET(),
-    phrase(SKILL_CLAUSE),
+    Pin.phrase(SKILL_CLAUSE),
     "the bullet no longer states that any member dispatching a child writes an absolute directory into that child's prompt, one per child and never shared, with the child never deriving its own — the exact rule #1150 exists to establish, and inverting it left the diff-touched suite green before this pin existed",
   );
 });
 
 const ISOLATION_PARAGRAPH = () =>
-  between(
-    ISOLATION,
+  ISOLATION.between(
     "The axis is two-sided",
     "## IDE/harness diagnostics attribute",
     "references/isolation.md's two-sided-axis paragraph",
-  );
+  ).text;
 
 const ISOLATION_CLAUSE =
   "every agent it dispatches gets a directory under that one, unique to that child and never shared, written into the child's prompt as an absolute path; a child never derives its own";
@@ -68,7 +65,7 @@ const ISOLATION_CLAUSE =
 test("references/isolation.md's two-sided-axis paragraph pins the same parent-writes, child-never-derives rule", () => {
   assert.match(
     ISOLATION_PARAGRAPH(),
-    phrase(ISOLATION_CLAUSE),
+    Pin.phrase(ISOLATION_CLAUSE),
     "the paragraph no longer states that every dispatched agent gets a directory under its parent's own, unique and never shared, written in as an absolute path with the child never deriving its own — isolation.md's statement of the same #1150 rule SKILL.md's bullet carries",
   );
 });

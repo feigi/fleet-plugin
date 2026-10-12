@@ -12,21 +12,20 @@
 // the block reds its own pin rather than being satisfied by a neighbour. The
 // lead-in paragraph above the block is what tells the controller to hand it
 // over, and is pinned on its own.
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { join } from "node:path";
-import { paragraph, quoteBlock, sentences, stripQuoteGutter } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { HALT_CAUSES } from "../plugin/scripts/ledger-grammar.mjs";
 
-const RUN_TEAM = readFileSync(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"), "utf8");
+const RUN_TEAM = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"));
 
 const OPENER = "**A test run is a verdict only if it ran to completion";
 const block = () =>
-  stripQuoteGutter(quoteBlock(RUN_TEAM, OPENER, "the finisher's test-run verdict block")).replace(/\s+/g, " ");
+  RUN_TEAM.quoteBlock(OPENER, "the finisher's test-run verdict block").stripGutter(">").text.replace(/\s+/g, " ");
 const sentenceWith = (re, what) => {
-  const hits = sentences(block()).filter((s) => re.test(s));
+  const hits = Pin.sentences(block()).filter((s) => re.test(s));
   assert.equal(hits.length, 1, `${what}: ${hits.length} sentences match ${re} in the verdict block`);
   return hits[0];
 };
@@ -98,6 +97,6 @@ test("a completed run that exits 1 and a zero-test run keep their own verdicts",
 // The block reaches a finisher only because the controller is told to hand it
 // over, and the same sentence says what duty 2 uses `<testCmd>` for.
 test("the lead-in tells the controller to hand the verdict rule over, and says duty 2 runs testCmd for the acceptance mutation", () => {
-  const p = paragraph(RUN_TEAM, "Give the finisher the test-run verdict rule verbatim too.", "the verdict block's lead-in", "> **A test run is a").replace(/\s+/g, " ");
+  const p = RUN_TEAM.paragraph("Give the finisher the test-run verdict rule verbatim too.", "the verdict block's lead-in", "> **A test run is a").text.replace(/\s+/g, " ");
   assert.match(p, /^Give the finisher the test-run verdict rule verbatim too\.\*\* Duty 2 runs `<testCmd>` for the acceptance mutation,/);
 });

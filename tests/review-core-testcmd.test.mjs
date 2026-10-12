@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./support/strip-comments.mjs";
-import { between } from "./support/prose-pin.mjs";
+import { Pin } from "./support/prose-pin.mjs";
 import { resolveTestCmd, SNAPSHOT_SCHEMA, TEST_RUN_SCHEMA } from "../plugin/scripts/review-core.mjs";
 
 // The review host used to default `testCmd` to a literal string naming THIS
@@ -118,7 +118,7 @@ test("no hardcoded testCmd default remains", () => {
 // the diff facts AND declares them in its schema" records happening to the
 // diff facts.
 test("the snapshot agent is told to derive testCmd AND the schema declares it", () => {
-  const snapshot = between(CODE, "const snap = await agent(", "if (snap) {", "the snapshot agent dispatch");
+  const snapshot = Pin.of(CODE, "CODE").between("const snap = await agent(", "if (snap) {", "the snapshot agent dispatch").text;
 
   assert.match(
     snapshot,
@@ -203,7 +203,7 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
 // derivation step, so the prompt must not tell the snapshot agent that every
 // refusal does.
 test("the snapshot agent is told a cache refusal names the derivation step and an exit-3 refusal names an environment fault", () => {
-  const snapshot = between(CODE, "const snap = await agent(", "if (snap) {", "the snapshot agent dispatch");
+  const snapshot = Pin.of(CODE, "CODE").between("const snap = await agent(", "if (snap) {", "the snapshot agent dispatch").text;
   assert.match(snapshot, /a\s+refusal\s+about\s+the\s+cache\s+names\s+the\s+step\s+that\s+derives\s+it/);
   assert.match(snapshot, /an\s+exit-3\s+refusal\s+names\s+an\s+environment\s+fault,\s+and\s+the\s+caller\s+fixes\s+that\s+instead\s+of\s+deriving/);
   // The two clauses above are the only places the prompt may speak of a
@@ -220,7 +220,7 @@ test("the snapshot agent is told a cache refusal names the derivation step and a
 // Bounded at both ends: an unbounded slice runs to EOF, where the specialist
 // and refuter prompts could satisfy the assertions below instead.
 function testRunPrompt() {
-  return between(CODE, "`Run this repository's test command ONCE", "{ label: `test-run${forPr}`", "the shared test-run prompt");
+  return Pin.of(CODE, "CODE").between("`Run this repository's test command ONCE", "{ label: `test-run${forPr}`", "the shared test-run prompt").text;
 }
 
 // The prompt is what the test-run agent actually obeys, so the reading rule has
@@ -341,7 +341,7 @@ test("the test-run prompt rules a no-work run too: zero passes, and a count belo
 // never the command to run. A specialist prompt that interpolates `testCmd`
 // again is six full sweeps per review again.
 test("the specialist prompt carries the shared run's note, and never the command to run", () => {
-  const prompt = between(CODE, "READ ONLY FROM THE SNAPSHOT", "Scratch files go in", "the specialist prompt");
+  const prompt = Pin.of(CODE, "CODE").between("READ ONLY FROM THE SNAPSHOT", "Scratch files go in", "the specialist prompt").text;
   assert.doesNotMatch(prompt, /\$\{testCmd\}/, "the specialist prompt hands out testCmd to run again — one full sweep per dimension");
   assert.match(
     prompt,
