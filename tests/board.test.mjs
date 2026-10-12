@@ -14,16 +14,16 @@ import { faultText } from "../plugin/scripts/board.mjs";
 import { encodeProjectDir } from "../plugin/scripts/member-record.mjs";
 import { stripComments } from "./support/strip-comments.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
-import { TURN, fixture, serveArgs, serveOpts, withTimeout } from "./support/board-rig.mjs";
+import { TURN, serveArgs, serveOpts, withTimeout } from "./support/board-rig.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
 
 // The acceptance criterion end to end, and the only row here that can fail on
 // serve() dropping the pin between the resolution and the tick: every
-// assertion in board-gather.test.mjs is reachable with `spendDir:` never threaded into gather()
-// at all. A REAL server, two sessions under one project directory, and the
-// second one writing between two ticks — the exact shape the panel used to
-// alternate on, at the interval it used to alternate at.
+// assertion in board-gather.test.mjs is reachable with `spendDir:` never
+// threaded into gather() at all. A REAL server, two sessions under one project
+// directory, and the second one writing between two ticks — the exact shape the
+// panel used to alternate on, at the interval it used to alternate at.
 //
 // #1679: both fixture sessions predate the server's own launch (ancient
 // synthetic mtimes), the same shape as a workspace that already had

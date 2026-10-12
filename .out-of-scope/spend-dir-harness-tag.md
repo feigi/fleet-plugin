@@ -17,8 +17,8 @@ are refused. The name stays the one place a session directory's harness comes fr
 **A tag cannot replace the name rule; it can only sit beside it.** `gatherSpend()`
 is handed bare paths that no tag can reach. The operator's `--spend-dir` arrives
 through `spendDirPin()`'s explicit arm under `serve` and through `gather()`'s
-`spendDir = argSpendDir()` default under `build`. `board.test.mjs` also hands
-`gatherSpend()` its `dir` directly, in 46 `gatherSpend({ dir … })` calls. Every path
+`spendDir = argSpendDir()` default under `build`. `board-gather.test.mjs` also hands
+`gatherSpend()` its `dir` directly, in `gatherSpend({ dir … })` calls. Every path
 that arrives that way still has to be classified by name, so tagging the heuristic's
 answer adds a second route to the harness without removing the first. Two routes can
 disagree: the same directory could be read by one reader when the heuristic found it
@@ -43,7 +43,7 @@ and `basename(join(root, name))` is `name`: the same predicate on the same strin
 `claudeSessionDirs()` yields `join(root, s, "subagents")`, whose basename is the
 literal `subagents`, and the pattern is anchored on four leading digits. Drift in
 the admission filter is also caught by the suite. With the filter weakened to
-`e.isDirectory()`, `board.test.mjs`'s *"findSubagentsDir on omp picks this
+`e.isDirectory()`, `board-gather.test.mjs`'s *"findSubagentsDir on omp picks this
 workspace's newest session DIRECTORY — never the main-session file beside it, never
 a stray dir"* fails: it resolves the fixture's `notes/` directory instead of the
 real session (measured 2026-09-26). `board-cli.test.mjs`'s *"build: on an omp-only
@@ -60,9 +60,10 @@ sound. A latch gate left as it is would read every tagged answer as untrustworth
 never latch, which brings back #1583's alternating panel; nothing throws or warns
 when it does. Those guards are #1583's and #1679's, and `gatherSpend()`'s own header
 records #959, the bug that came from routing on a field's truthiness instead of an
-explicit tag. On top of that, 28 assertions in `board.test.mjs` compare
-`findSubagentsDir()`'s or a pin's answer against a bare path. That is a wide, risky
-change with no defect behind it, which is the same refusal
+explicit tag. On top of that, every assertion in `board-gather.test.mjs` that
+compares `findSubagentsDir()`'s or a pin's answer against a bare path would
+change. That is a wide, risky change with no defect behind it, which is the same
+refusal
 [spend-dir-pin-seed-collapse.md](spend-dir-pin-seed-collapse.md) records for this
 same function family.
 

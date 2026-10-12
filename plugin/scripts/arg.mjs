@@ -297,7 +297,7 @@ export function makeHas(die) {
 // reaches `gh` as a ref that is not the PR the caller meant. It forfeits the
 // branch and URL spellings `gh pr view` itself takes — the same trade the
 // `--`-prefixed value rule above makes — and nothing in this repo passes one:
-// board.mjs's runCiState() sends `String(pr)` off a numeric record, and every
+// board-gather.mjs's runCiState() sends `String(pr)` off a numeric record, and every
 // documented invocation is `--pr <N>`.
 //
 // RegExp.test coerces, which is load-bearing in both directions. It is what

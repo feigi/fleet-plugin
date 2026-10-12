@@ -10,7 +10,7 @@
 // stderr is read off this process's stream while it runs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, utimesSync, statSync, chmodSync, readFileSync, existsSync, symlinkSync } from "node:fs";
+import { mkdirSync, writeFileSync, utimesSync, statSync, chmodSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { tempDir } from "./support/temp-dir.mjs";
 import { dirname, join } from "node:path";

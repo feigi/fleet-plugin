@@ -43,11 +43,11 @@ test("readState: `rest` is what lies outside the schema, never a second copy of 
 });
 
 test("statePath: an ambient GIT_COMMON_DIR is not canonicalised — this caller does not opt in (#1658)", () => {
-  // git-env.mjs's own docstring: `canonicalise` is board.mjs's opt-in alone
+  // git-env.mjs's own docstring: `canonicalise` is board-server.mjs's opt-in alone
   // (#1582, a symlinked cockpit route deriving a second port); ledger.mjs and
   // fleet-state.mjs stay on the default because both PRINT the path they
   // resolve, and realpath would change that output without changing which
-  // file either reaches. board-server.test.mjs pins board.mjs's OPPOSITE choice;
+  // file either reaches. board-server.test.mjs pins board-server.mjs's OPPOSITE choice;
   // git-env.test.mjs pins the HELPER's own default, which cannot see whether
   // THIS caller opted in — nothing before this test pinned that fact, so an
   // accidental `{ canonicalise: true }` added here would break no test.
@@ -77,7 +77,7 @@ test("statePath: an ambient GIT_COMMON_DIR is not canonicalised — this caller 
       { cwd: cwdRepo, encoding: "utf8", env: { ...process.env, GIT_COMMON_DIR: join(link, ".git") } });
     assert.equal(r.status, 0, r.stderr);
     assert.equal(r.stdout, join(link, ".fleet", "heartbeat.json"),
-      "statePath() must keep the symlinked spelling — canonicalising here is board.mjs's opt-in alone");
+      "statePath() must keep the symlinked spelling — canonicalising here is board-server.mjs's opt-in alone");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -100,7 +100,7 @@ test("statePath: outside any repository it warns with git's reason and falls bac
 
 // --------------------------------------------------------------------------
 // The liveness mark — #1597. `beat` is fleet-heartbeat's key and fleet-tick
-// and board.mjs are its readers, so the contract that matters is what a
+// and board-gather.mjs are its readers, so the contract that matters is what a
 // READER is handed for a file it did not write, and what a NON-OWNER's write
 // leaves behind. Both are invisible to either CLI's own output.
 

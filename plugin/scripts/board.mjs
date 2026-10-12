@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // The cockpit's entry point, and only its composition. `build` has gather()
 // (board-gather.mjs) read the raw inputs, hands them to the pure computeBoard()
-// and prints board.json. `serve` has serve() (board-server.mjs) own the
-// listener and the cockpit's identity, and runs the tick loop that this file
-// hands it: gather() -> computeBoard() -> an atomic write of .fleet/board.json.
+// and prints the board model as JSON to stdout. `serve` has serve()
+// (board-server.mjs) own the listener and the cockpit's identity, and runs the
+// tick loop that this file hands it: gather() -> computeBoard() -> an atomic
+// write of .fleet/board.json.
 // The board never depends on the controller feeding it.
 //
 // What stays here is what neither half owns: argv parsing, the build/serve
@@ -125,8 +126,8 @@ function argSpendSince() {
   return sinceMs;
 }
 
-// The operator's override for the session heuristic (findSubagentsDir()
-// below). A PATH, so there is no range or magnitude to check the way
+// The operator's override for the session heuristic (findSubagentsDir() in
+// board-gather.mjs). A PATH, so there is no range or magnitude to check the way
 // --spend-since and --interval have one — every malformed SHAPE this flag can
 // take is already arg()'s: a trailing `--spend-dir`, an empty or whitespace
 // value, a following flag eaten as the value, and the `--spend-dir=` form.
@@ -147,8 +148,8 @@ function argSpendSince() {
 // renders zeroes and never dies.
 //
 // `undefined` for an absent flag, not the `null` argPort()/argInterval()/
-// argSpendSince() return: `null` is a transcript-directory RESOLUTION in this
-// file ("resolved, no session yet" — findSubagentsDir() below), and the
+// argSpendSince() return: `null` is a transcript-directory RESOLUTION
+// ("resolved, no session yet" — findSubagentsDir() in board-gather.mjs), and the
 // absence of an override must not read as one.
 function argSpendDir() {
   return arg("spend-dir") ?? undefined;

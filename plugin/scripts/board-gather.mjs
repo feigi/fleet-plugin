@@ -961,8 +961,8 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   }
 
   // The guard's own rationale (fail loud, gate on presence and on range,
-  // not just finiteness) lives at the --spend-since reader's definition above;
-  // main() runs it and hands the answer in as `spendSince`.
+  // not just finiteness) lives at argSpendSince()'s definition in board.mjs,
+  // whose main() runs it and hands the answer in as `spendSince`.
   const spend = gatherSpend({ dir: spendDir, sinceMs: spendSince, explicit: spendDirExplicit });
   // The heartbeat's mark, raw. readState() never throws — an absent
   // file is the ordinary state of a run whose heartbeat has not beaten yet,

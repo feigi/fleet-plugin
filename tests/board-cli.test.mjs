@@ -284,7 +284,7 @@ test("build: a valid --interval survives the guard and reaches the payload", () 
 // ── #363: the pipe-race that motivated this file's --spend-since rig ──────────
 //
 // Same reason this file exists at all (see header): the --spend-since guard
-// fires only AFTER gather()'s gh reads, and tryRun() (board.mjs) runs each
+// fires only AFTER gather()'s gh reads, and tryRun() (board-gather.mjs) runs each
 // one through execRead's async `execFile`, passing no `stdio` option. That
 // CAPTURES the child's stderr rather than inheriting it, and re-emits it
 // through board.mjs's OWN process.stderr — the child never touches an

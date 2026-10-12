@@ -82,7 +82,7 @@ const RATE_LIMITED = /rate limit|abuse detection/i;
 // on this payload's own fields — `verdict`, `behind`, `missing`, the per-job
 // conclusions, and `prHead == runHeadSha` — and an absent `missing` refuses
 // that gate where an empty array would have told it nothing was missing.
-// board.mjs is not that reader — it takes exit 2 as a failed read whatever
+// board-gather.mjs is not that reader — it takes exit 2 as a failed read whatever
 // was printed on the way out, and carries its previous CI value for the PR
 // forward instead.
 //
@@ -925,7 +925,7 @@ if (behind === null) {
 }
 
 // no-ci is its own verdict, distinguishable from both green and not-green —
-// board.mjs's mapCi() and any other caller that reads `verdict` by string
+// board-gather.mjs's mapCi() and any other caller that reads `verdict` by string
 // value sees "no-ci" rather than either, so it cannot be silently folded into
 // a pass or a red. reasons.length is never 0 here: the no-ci branch above
 // always pushes exactly one, whichever way --declare-no-ci went.

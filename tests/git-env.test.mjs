@@ -123,7 +123,7 @@ test("by default the answer is NOT canonicalised — a symlinked route keeps the
 });
 
 test("canonicalise: true collapses a symlinked route onto the one real workspace", () => {
-  // board.mjs's opt-in, and the reason it has one: a second spelling of one
+  // board-server.mjs's opt-in, and the reason it has one: a second spelling of one
   // workspace derives a second port and a second state directory for a
   // cockpit already being served (#1582).
   const root = realpathSync(mkdtempSync(join(tmpdir(), "git-env-ws-link-")));
