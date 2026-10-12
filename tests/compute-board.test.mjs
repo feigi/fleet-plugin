@@ -387,6 +387,23 @@ test("computeBoard: a deliberate stop reaches the page with its reason", () => {
   assert.match(b.liveness.text, /recorded reason: budget exhausted/);
 });
 
+test("computeBoard: on a partitioned record the banner shows the previous run's stop until this run ticks, and a busy run's ledger writes keep it clear", () => {
+  const controller = { pid: 4242, lstart: "x", prior: "dead", at: NOW - 5 * 60 * 60_000 };
+  const beat = { at: controller.at - 20 * 60 * 60_000, interval: 1200, stopped: "run drained" };
+  const acted = { at: NOW - 5 * 60_000 };
+  const first = computeBoard({ ...livenessInputs(beat), controller, acted });
+  assert.equal(first.liveness.kind, "ended");
+  assert.match(first.liveness.text, /^previous run stopped deliberately at \S+Z \(\S+ ago\) — recorded reason: run drained$/);
+  assert.equal(first.liveness.claimed, undefined, "the previous run's end carries nothing of this run's");
+  const ticked = { at: NOW - 50 * 60_000 };
+  assert.equal(computeBoard({ ...livenessInputs(beat), controller, acted, ticked }).liveness, null);
+  // The same run gone quiet past the window: this run's own stall, not the stop.
+  const quiet = computeBoard({ ...livenessInputs(beat), controller, acted: { at: NOW - 41 * 60_000 }, ticked });
+  assert.equal(quiet.liveness.kind, "stale");
+  assert.match(quiet.liveness.text, /^heartbeat STALLED: no beat this run, last ledger write /);
+  assert.doesNotMatch(quiet.liveness.text, /run drained/);
+});
+
 test("computeBoard: a liveness input can never change a ticket's stage", () => {
   // The constraint the ticket states in its own words, and the one a
   // populate/omit assertion alone would not catch: a stall must not flag,

@@ -32,6 +32,12 @@
 // `filed` kept 2-5 of 8 rows — and the lock is what lets a second kind of
 // writer exist at all. The reasoning for each part of the lock lives at
 // acquireLock() below.
+//
+// Every write subcommand also stamps `acted` in the heartbeat file beside the
+// ledger whenever its call ends without a refusal — rotate in the same write
+// as its controller record. A run's ledger writes are its densest sign of
+// life, so the stall readers judge a busy run by them (fleet-state.mjs has
+// the rule).
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, openSync, writeSync, closeSync, unlinkSync, linkSync } from "node:fs";
 import { dirname, resolve, join, basename } from "node:path";
@@ -929,6 +935,18 @@ if (cmd === "read") {
   die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check, read, dispatch, settle, review, drain or rotate`);
 }
 
+// Reached only by an arm that did not die, so every write subcommand that did
+// not refuse is stamped — one that found nothing to change (a repeat `drain`,
+// a duplicate `filed`) is still the controller acting. Still under the write
+// lock, so two ledger calls never race on the key. A heartbeat file that
+// exists and cannot be read is left as it is for the readers that refuse on
+// it; readState() has already said why.
+if (WRITE_COMMANDS.has(cmd) && cmd !== "rotate") {
+  const beatFile = stateFileIn(dirname(file));
+  const state = readState(beatFile, NAME);
+  if (!state.degraded) writeState(beatFile, NAME, state, { acted: { at: Date.now() } });
+}
+
 // `check` alone of the subcommands leaves its arm early: the already-filed
 // answer is complete before the near-miss ranking and the tracker query below
 // it, whose results that answer would only discard. A function is what makes
@@ -1570,9 +1588,10 @@ function runCheck() {
 // and keep dispatching — and rotating under it would split its run across
 // two ledgers. A dead one, a reused pid, or this session's own earlier run
 // allows the rotation. With no record the guard falls back to the mark, read
-// through fleet-state.mjs's own reader and verdict: still beating refuses; a
-// stalled mark, a recorded stop, or no mark at all allows the rotation, and
-// that fallback proves "not beating", never "dead".
+// through fleet-state.mjs's own reader and verdict: still beating — a beat
+// inside its window, or past it with a tick or ledger write inside
+// theirs — refuses; a stalled mark, a recorded stop, or no beat at all allows
+// the rotation, and that fallback proves "not beating", never "dead".
 //
 // A heartbeat file that exists but cannot be read or parsed gets neither
 // verdict: a record it may hold cannot be known, so rotate refuses rather
@@ -1582,7 +1601,8 @@ function runCheck() {
 // record with this run's own, carrying the verdict as `prior` — the next
 // step reads `prior`, because the new record always names this run's own
 // live ancestor — and the time of this write as `at`, so a reader can tell a
-// mark the previous run left from one written since. No omp ancestor removes
+// mark the previous run left from one written since. The same write stamps
+// `acted` at that time, as every ledger write does. No omp ancestor removes
 // the key: an older run's record left in place would be judged again, as
 // dead, by a run that cannot know whether the run after it is still live.
 // This run's own record is computed before anything moves too, so a process
@@ -1591,7 +1611,7 @@ function runCheck() {
 function runRotate() {
   const beatFile = stateFileIn(dirname(file));
   const state = readState(beatFile, NAME);
-  const { beat, ticked, controller } = state;
+  const { beat, ticked, acted, controller } = state;
   // A file that exists and could not be used holds no record we can know of:
   // reading it as "no record" would let a live controller's ledger be moved
   // by exactly the fault that hid its record.
@@ -1612,10 +1632,14 @@ function runRotate() {
     die(`refusing to rotate ${file}: the controller that owns it is alive — controller pid ${controller.pid} (started ${controller.lstart}) recorded in ${beatFile} is alive and not an ancestor of this run, whatever its heartbeat mark says; one controller per checkout — end that omp session, or start the run from inside it`);
   }
   // The fallback guards a ledger, as it always has: with none to move there
-  // is nothing for a beating mark to protect.
+  // is nothing for a beating mark to protect. A ledger write is the
+  // controller acting, and counts the way a beat does.
   const exists = existsSync(file);
-  if (prior === "none" && exists && assessBeat({ beat, ticked, now: Date.now() }).kind === "beating") {
-    die(`refusing to rotate ${file}: the controller that owns it is still beating — last beat ${new Date(beat.at).toISOString()} in ${beatFile}; it counts as stalled after ${new Date(stallsAt({ beat, ticked })).toISOString()}`);
+  if (prior === "none" && exists && assessBeat({ beat, ticked, acted, now: Date.now() }).kind === "beating") {
+    const [what, mark] = [["beat", beat], ["tick", ticked], ["ledger write", acted]]
+      .filter(([, m]) => m !== null)
+      .reduce((a, b) => (b[1].at > a[1].at ? b : a));
+    die(`refusing to rotate ${file}: the controller that owns it is still beating or acting — last ${what} ${new Date(mark.at).toISOString()} in ${beatFile}; it counts as stalled after ${new Date(stallsAt({ beat, ticked, acted })).toISOString()}`);
   }
   // Read before anything moves: a ledger whose live tokens cannot be read is
   // refused with nothing moved, never archived with those tokens dropped.
@@ -1670,8 +1694,9 @@ function runRotate() {
   // Re-read rather than reuse the read above: the heartbeat file has other
   // writers, and a patch built from an older view would undo what they wrote
   // since.
-  const record = ours === null ? undefined : { ...ours, prior, at: Date.now() };
-  if (!writeState(beatFile, NAME, readState(beatFile, NAME), { controller: record })) {
+  const now = Date.now();
+  const record = ours === null ? undefined : { ...ours, prior, at: now };
+  if (!writeState(beatFile, NAME, readState(beatFile, NAME), { controller: record, acted: { at: now } })) {
     die(`${archive === null ? "found no ledger" : `rotated ${file} -> ${archive}`} but could not record this run's controller in ${beatFile} — the next run judges whatever record that file still holds, and none if it cannot be read`);
   }
   console.log(JSON.stringify({

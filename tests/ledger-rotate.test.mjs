@@ -128,20 +128,66 @@ test("rotate proceeds under a stalled mark and under a recorded stop", (t) => {
   }
 });
 
-test("rotate refuses while the previous controller is beating, naming the last beat and when it would count as stalled", (t) => {
-  // A fresh beat, and a stale beat covered by a fresh tick — both read as
-  // beating to fleet-state.mjs's assessBeat.
-  for (const mark of [beat(10_000), { ...beat(11 * 60_000), ticked: { at: Date.now() - 5_000 } }]) {
+test("rotate refuses while the previous controller is beating or acting, naming its latest mark and when it would count as stalled", (t) => {
+  // A fresh beat, a stale beat covered by a fresh tick, and one covered by a
+  // fresh ledger write — all read as beating to fleet-state.mjs's assessBeat.
+  const cases = [
+    [beat(10_000), "beat", (m) => m.beat.at],
+    [{ ...beat(11 * 60_000), ticked: { at: Date.now() - 5_000 } }, "tick", (m) => m.ticked.at],
+    [{ ...beat(11 * 60_000), ticked: { at: Date.now() - 50 * 60_000 }, acted: { at: Date.now() - 5_000 } }, "ledger write", (m) => m.acted.at],
+  ];
+  for (const [mark, what, latest] of cases) {
     const f = fixture(t, { mark });
     const r = f.cli(["rotate"]);
     assert.notEqual(r.status, 0, `${JSON.stringify(mark)}: rotated under a live controller`);
     assert.equal(r.stdout, "");
-    assert.match(r.stderr, new RegExp(`last beat ${new Date(mark.beat.at).toISOString()}`));
-    const stalls = new Date(stallsAt({ beat: mark.beat, ticked: mark.ticked ?? null })).toISOString();
+    assert.match(r.stderr, /still beating or acting/);
+    assert.match(r.stderr, new RegExp(`last ${what} ${new Date(latest(mark)).toISOString().replaceAll(".", "\\.")}`));
+    const stalls = new Date(stallsAt({ beat: mark.beat, ticked: mark.ticked ?? null, acted: mark.acted ?? null })).toISOString();
     assert.match(r.stderr, new RegExp(`stalled after ${stalls.replaceAll(".", "\\.")}`));
     assert.equal(readFileSync(f.file, "utf8"), LEDGER, "a refusal must not touch the ledger");
     assert.deepEqual(f.archives(), []);
   }
+});
+
+test("rotate stamps `acted` in the same write as its controller record, and every other write subcommand stamps it too", (t) => {
+  const f = fixture(t);
+  assert.equal(f.cli(["rotate"]).status, 0);
+  const { controller, acted } = f.state();
+  assert.deepEqual(acted, { at: controller.at });
+  const writes = [
+    ["row", "12", "impl-12"], ["filed", "40", "a subject"], ["ruled", "41", "merge as is"],
+    ["dispatch", "merge-bot"], ["settle", "merge-bot-1=done"],
+    ["review", "41", "review=member:review-pr-41"], ["drain", "budget"],
+  ];
+  for (const args of writes) {
+    const before = Date.now();
+    const r = f.cli(args);
+    assert.equal(r.status, 0, `${args.join(" ")}: ${r.stderr}`);
+    const at = f.state().acted.at;
+    assert.ok(at >= before && at <= Date.now(), `${args[0]}: acted.at ${at} is not inside the call`);
+    assert.deepEqual(f.state().controller, controller, `${args[0]} must carry the record`);
+  }
+  // A read writes nothing, and neither does a refused write.
+  const stamped = f.raw();
+  assert.equal(f.cli(["read"]).status, 0);
+  assert.equal(f.cli(["check", "a subject"]).status, 1);
+  assert.equal(f.cli(["row", "--bogus", "x"]).status, 2);
+  assert.equal(f.raw(), stamped);
+});
+
+test("a write subcommand leaves a heartbeat file it cannot read as it is — the record rotate refuses on is not replaced by a stamp", (t) => {
+  const f = fixture(t);
+  const corrupt = '{ "controller": {"pid": 1, "lstart"';
+  writeFileSync(join(f.dir, "heartbeat.json"), corrupt);
+  const w = f.cli(["row", "12", "impl-12"]);
+  assert.equal(w.status, 0, w.stderr);
+  assert.match(w.stderr, /WARNING/);
+  assert.equal(f.raw(), corrupt, "the stamp must not overwrite a file readState could not parse");
+  assert.ok(JSON.parse(f.cli(["read"]).stdout).rows.includes("#12 impl-12"), "the write itself still lands");
+  const r = f.cli(["rotate"]);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /cannot be read or parsed/);
 });
 
 test("rotate refuses when the archive name already exists, moving nothing", (t) => {
@@ -349,13 +395,14 @@ test("rotate with no omp ancestor removes an older record, and every other key i
   const f = fixture(t, { table: NO_OMP, mark, extra, controller: { pid: deadPid(), lstart: "x", prior: "none" } });
   const r = f.cli(["rotate"]);
   assert.equal(r.status, 0, r.stderr);
-  const after = f.state();
+  const { acted, ...after } = f.state();
   assert.equal("controller" in after, false, "an older run's record must not outlive the run that should have replaced it");
   assert.deepEqual(after, { ...extra, ...mark });
+  assert.ok(acted.at <= Date.now() && acted.at > Date.now() - 60_000, "a rotate with no record to write still stamps its ledger write");
 
   const g = fixture(t, { mark, extra, controller: { pid: deadPid(), lstart: "x", prior: "none" } });
   assert.equal(g.cli(["rotate"]).status, 0);
-  const { controller: _record, ...others } = g.state();
+  const { controller: _record, acted: _acted, ...others } = g.state();
   assert.deepEqual(others, { ...extra, ...mark });
   assert.deepEqual(g.ctl(), { ...OURS, prior: "dead" });
 });

@@ -175,3 +175,34 @@ test("the real board does not judge the controller of a healthy run", () => {
   assert.doesNotMatch(r.stderr, /WARNING/);
   assert.equal(JSON.parse(r.stdout).liveness, null);
 });
+
+// `acted` is the ledger's stamp, read off the state file beside `beat` and
+// handed to the verdict: a beatless run whose record is hours old is stale
+// until a ledger write lands, and the board must see that write.
+test("the real board reads the ledger's `acted` stamp off the state file", () => {
+  const repo = tempDir("board-liveness-acted-");
+  assert.equal(spawnSync("git", ["init", "-q", repo], { encoding: "utf8" }).status, 0);
+  const bin = tempDir("board-liveness-acted-bin-");
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  const table = join(bin, "proc-table.json");
+  writeFileSync(table, JSON.stringify({
+    [process.pid]: { ppid: 2_000_000_001, argv: [process.execPath, "--test"], lstart: "runner-start" },
+    2_000_000_001: { ppid: 1, argv: ["bun", "/home/u/.bun/bin/omp"], lstart: "omp-start" },
+  }));
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, FLEET_PROC_TABLE: table };
+  mkdirSync(join(repo, ".fleet"), { recursive: true });
+  const now = Date.now();
+  const liveness = (extra) => {
+    writeFileSync(join(repo, ".fleet", "heartbeat.json"), JSON.stringify({
+      quiet: 0, elapsed: 0, digest: "",
+      controller: { pid: process.pid, lstart: "runner-start", prior: "dead", at: now - 3 * 60 * 60_000 },
+      ...extra,
+    }));
+    const r = spawnSync(process.execPath, [BOARD, "build"], { cwd: repo, encoding: "utf8", env });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout).liveness;
+  };
+  const stale = liveness({});
+  assert.equal(stale?.kind, "stale", "a beatless record hours old is the premise of this test");
+  assert.equal(liveness({ acted: { at: now - 5 * 60_000 } }), null, "a ledger write 5 minutes ago keeps the run beating");
+});

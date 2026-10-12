@@ -2707,19 +2707,117 @@ test("CLI: Stall report with no controller record keeps today's wording", (t) =>
   assert.doesNotMatch(line, /controller|resumes/);
 });
 
-test("CLI: a run's first tick reports the previous run's stall off the record's prior — dead, ancestor, none — never off the record itself", (t) => {
-  // The record names this runner, a live ancestor of the tick: judged, it
-  // would read alive every time.
-  const ours = (prior) => ({ pid: process.pid, lstart: "runner-start", prior, at: FIRST() });
-  const dead = stallLine(t, ours("dead")).line;
-  assert.match(dead, /^heartbeat STALLED, controller gone: last beat /);
-  assert.match(dead, /; this run resumes its claims without a PR, and its open PRs return through the fold-in$/);
-  const ancestor = stallLine(t, ours("ancestor")).line;
-  assert.match(ancestor, /^heartbeat not beating, controller alive \(this session's earlier run\): last beat /);
-  assert.doesNotMatch(ancestor, /resumes/);
-  const none = stallLine(t, ours("none")).line;
-  assert.match(none, /^heartbeat STALLED: last beat /);
-  assert.doesNotMatch(none, /controller|resumes/);
+test("CLI: a run's first tick does not report the previous run's unstopped beat — this run is judged from its own marks", (t) => {
+  // The record names this runner and was written a second ago, after the
+  // previous run's last beat: that beat is the previous run's, whatever `prior`.
+  for (const prior of ["dead", "ancestor", "none"]) {
+    const { line } = stallLine(t, { pid: process.pid, lstart: "runner-start", prior, at: FIRST() });
+    assert.doesNotMatch(line, /heartbeat|previous run/, `prior ${prior}`);
+  }
+});
+
+test("CLI: the previous run's recorded stop prints once, on this run's first tick, as that run's end — never as this run's stall", (t) => {
+  // The shape measured on a live run: the previous run drained and stopped,
+  // this run's rotate wrote a later record, and this run is busy writing its
+  // ledger without ever beating.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-prior-stop-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "heartbeat.json");
+  const now = Date.now();
+  writeFileSync(path, JSON.stringify({
+    quiet: 0, elapsed: 0, digest: "",
+    beat: { at: now - 20 * 60 * 60_000, interval: 1200, stopped: "run drained, all PRs merged" },
+    controller: { pid: process.pid, lstart: "runner-start", prior: "dead", at: now - 5 * 60 * 60_000 },
+    acted: { at: now - 5 * 60_000 },
+  }));
+  const opts = { ...IDLE, env: { FLEET_PROC_TABLE: procTable(dir) } };
+  const first = runCli(["--state", path], opts);
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout.split("\n")[0], /^previous run stopped deliberately at \S+Z \(\S+ ago\) — recorded reason: run drained, all PRs merged$/);
+  assert.doesNotMatch(first.stdout, /STALLED|not beating/);
+  for (let i = 0; i < 2; i++) {
+    const later = runCli(["--state", path], opts);
+    assert.equal(later.status, 0, later.stderr);
+    assert.doesNotMatch(later.stdout, /previous run|STALLED|not beating|stopped deliberately/);
+  }
+});
+
+test("CLI: a tick refused by the gh or the ledger read still records `ticked`, and leaves `quiet` and `digest` as they were", (t) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-refused-ticked-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "heartbeat.json");
+  const refusals = {
+    "gh pr list": { ...IDLE, env: { PR_FAIL: "1" } },
+    "ledger.mjs read": {
+      ...IDLE,
+      beforeRun: (repo) => writeFileSync(join(repo, ".fleet", "ledger.md"), `${ledgerText({ drain: "budget" })}- a second marker\n`),
+    },
+  };
+  for (const [what, opts] of Object.entries(refusals)) {
+    writeFileSync(path, JSON.stringify({ quiet: 3, elapsed: 0, digest: "old", ticked: { at: 1_000 } }));
+    const before = Date.now();
+    const r = runCli(["--state", path], opts);
+    assert.equal(r.status, 2, `${what}: ${r.stderr}`);
+    assert.match(r.stderr, new RegExp(what.replace(".", "\\.")));
+    const after = JSON.parse(readFileSync(path, "utf8"));
+    assert.ok(after.ticked.at >= before && after.ticked.at <= Date.now(), `${what}: ticked.at ${after.ticked.at} is not this tick`);
+    assert.equal(after.quiet, 3, what);
+    assert.equal(after.digest, "old", what);
+  }
+  // A usage refusal never reached the state file.
+  const untouched = JSON.stringify({ quiet: 3, elapsed: 0, digest: "old", ticked: { at: 1_000 } });
+  writeFileSync(path, untouched);
+  const r = runCli(["--state", path, "--implementer-cap", "0"], IDLE);
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(readFileSync(path, "utf8"), untouched);
+});
+
+test("CLI: a tick refused over a heartbeat file it cannot read leaves the file as it was; one that completes replaces it and still records `ticked`", (t) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-degraded-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "heartbeat.json");
+  // A record fragment a later rotate must still be able to refuse on.
+  const corrupt = '{ "controller": {"pid": 1, "lstart"';
+  writeFileSync(path, corrupt);
+  const refused = runCli(["--state", path], { ...IDLE, env: { PR_FAIL: "1" } });
+  assert.equal(refused.status, 2, refused.stderr);
+  assert.match(refused.stderr, /gh pr list/);
+  assert.equal(readFileSync(path, "utf8"), corrupt, "a refused tick must not replace a file it could not read");
+
+  const before = Date.now();
+  const done = runCli(["--state", path], IDLE);
+  assert.equal(done.status, 0, done.stderr);
+  const after = JSON.parse(readFileSync(path, "utf8"));
+  assert.ok(after.ticked.at >= before && after.ticked.at <= Date.now(), `ticked.at ${after.ticked.at} is not this tick`);
+});
+
+test("CLI: a draining run with no open PR and no live implementer ends on the run-over ACTION, folded or not", (t) => {
+  const settled = { rows: ["#5 impl-5=PR#9 · tier-ok=impl-5:fleet-implementer"], dispatched: ["impl-5=PR#9"] };
+  const last = (r) => r.stdout.trimEnd().split("\n").at(-1);
+  const over = runCli([], { ...IDLE, ledger: { ...settled, drain: "budget" } });
+  assert.equal(over.status, 0, over.stderr);
+  assert.equal(last(over), `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`);
+  // An open PR, a live implementer, or no drain marker: the run is not over.
+  const notOver = {
+    "an open PR": { ...IDLE, ledger: { ...settled, drain: "budget" }, prs: [pr(9)] },
+    "a live implementer": { ...IDLE, ledger: { rows: ["#5 impl-5 · tier-ok=impl-5:fleet-implementer"], dispatched: ["impl-5"], drain: "budget" } },
+    "no drain marker": { ...IDLE, ledger: settled },
+  };
+  for (const [what, opts] of Object.entries(notOver)) {
+    const r = runCli([], opts);
+    assert.equal(r.status, 0, `${what}: ${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /run over/, what);
+  }
+  // Actionable, so an unchanged heartbeat tick never folds it away.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-run-over-fold-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "heartbeat.json");
+  for (let i = 0; i < 2; i++) {
+    const r = runCli(["--state", path, "--fold-unchanged"], { ...IDLE, ledger: { ...settled, drain: "budget" } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(last(r), `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`);
+  }
+  assert.equal(JSON.parse(readFileSync(path, "utf8")).quiet, 0);
 });
 
 test("CLI: a record whose controller cannot be judged keeps today's wording and says why on stderr", (t) => {

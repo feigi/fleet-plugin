@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { readState, writeState, assessBeat, isStalled, stallOwner, stallReport, stallsAt, BEAT_GRACE, DEFAULT_CEILING_S } from "../plugin/scripts/fleet-state.mjs";
+import { readState, writeState, assessBeat, isStalled, isReported, stallOwner, stallReport, stallsAt, BEAT_GRACE, DEFAULT_CEILING_S } from "../plugin/scripts/fleet-state.mjs";
 import { ProcUnreadable } from "../plugin/scripts/proc.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-state.mjs", import.meta.url));
@@ -632,4 +632,104 @@ test("stallOwner: a judge failure that is not an unreadable process table propag
     console.error = err;
   }
   assert.match(lines[0], /cannot be judged/);
+});
+
+// ── #2968: a run judged from its own marks ──────────────────────────────────
+const WINDOW = DEFAULT_CEILING_S * 1000 * BEAT_GRACE;
+const MIN = 60_000;
+
+test("readState/writeState: `acted` is read as a one-field mark and carried by every other writer's patch", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-acted-"));
+  const path = join(dir, "heartbeat.json");
+  writeFileSync(path, JSON.stringify({ quiet: 1, acted: { at: 1_700_000_000_000, junk: 1 } }));
+  const prev = readState(path, "t");
+  assert.deepEqual(prev.acted, { at: 1_700_000_000_000 });
+  assert.equal("acted" in prev.rest, false, "`acted` is schema, never a raw copy riding in `rest`");
+  writeState(path, "t", prev, { quiet: 2, ticked: { at: 5 } });
+  assert.deepEqual(JSON.parse(readFileSync(path, "utf8")).acted, { at: 1_700_000_000_000 });
+  for (const junk of [0, -1, "x", null, { at: "1" }]) {
+    writeFileSync(path, JSON.stringify({ acted: junk }));
+    assert.equal(readState(path, "t").acted, null, JSON.stringify(junk));
+  }
+});
+
+test("assessBeat: a ledger write within the window keeps a busy run beating, past `beat` and `ticked` both", () => {
+  const now = 2_000_000_000_000;
+  const controller = { pid: 1, lstart: "x", prior: "dead", at: now - 300 * MIN };
+  const beat = { at: now - 120 * MIN, interval: 300, stopped: "" };
+  const ticked = { at: now - 50 * MIN };
+  assert.equal(assessBeat({ beat, ticked, controller, now }).kind, "stale", "no ledger write: the beat and the tick alone are past their windows");
+  assert.equal(assessBeat({ beat, ticked, acted: { at: now - 5 * MIN }, controller, now }).kind, "beating");
+  assert.equal(stallsAt({ beat, ticked, acted: { at: now - 5 * MIN }, controller }), now - 5 * MIN + WINDOW);
+  assert.equal(assessBeat({ beat, ticked, acted: { at: now - WINDOW }, controller, now }).kind, "beating");
+  assert.equal(assessBeat({ beat, ticked, acted: { at: now - WINDOW - 1 }, controller, now }).kind, "stale");
+  // No record to partition by: `acted` still extends the beat.
+  assert.equal(assessBeat({ beat, acted: { at: now - 5 * MIN }, now }).kind, "beating");
+});
+
+test("assessBeat: the previous run's recorded stop is that run's end, reported only until this run first ticks", () => {
+  const now = 2_000_000_000_000;
+  const controller = { pid: 1, lstart: "x", prior: "dead", at: now - 5 * 60 * MIN };
+  const beat = { at: controller.at - 20 * 60 * MIN, interval: 1200, stopped: "run drained" };
+  const acted = { at: now - 10 * MIN };
+  // This run has ticked: the prior stop says nothing about it.
+  const later = assessBeat({ beat, ticked: { at: now - 30 * MIN }, acted, controller, now });
+  assert.equal(later.kind, "beating");
+  assert.equal(isReported(later), false);
+  // This run has not ticked yet: the stop is reported once, as the previous run's.
+  const first = assessBeat({ beat, ticked: null, acted, controller, now });
+  assert.equal(first.kind, "ended");
+  assert.equal(isStalled(first), false, "the previous run's end is not this run's stall");
+  assert.equal(isReported(first), true);
+  const line = stallReport(first, { claimed: 3, supply: 4 });
+  assert.match(line, /^previous run stopped deliberately at \S+Z \(\S+ ago\) — recorded reason: run drained$/);
+  assert.doesNotMatch(line, /STALLED|claimed|this run's/);
+  // A tick left by the previous run is not this run's first tick.
+  assert.equal(assessBeat({ beat, ticked: { at: controller.at - MIN }, acted, controller, now }).kind, "ended");
+  // The previous run's unstopped beat is never reported by this run.
+  assert.equal(assessBeat({ beat: { ...beat, stopped: "" }, ticked: null, acted, controller, now }).kind, "beating");
+  // This run's own stop is this run's verdict, as before.
+  assert.equal(assessBeat({ beat: { ...beat, at: now - MIN }, ticked: null, acted, controller, now }).kind, "stopped");
+});
+
+test("assessBeat: a run with a controller record and no beat of its own goes stale off its latest mark, the record the floor", () => {
+  const now = 2_000_000_000_000;
+  const controller = (at) => ({ pid: 1, lstart: "x", prior: "none", at });
+  assert.equal(assessBeat({ beat: null, controller: controller(now - WINDOW), now }).kind, "beating");
+  const stale = assessBeat({ beat: null, controller: controller(now - WINDOW - 1), now });
+  assert.equal(stale.kind, "stale");
+  assert.equal(isStalled(stale), true);
+  // A newer tick or ledger write pushes the stall out.
+  const old = controller(now - 3 * WINDOW);
+  assert.equal(assessBeat({ beat: null, ticked: { at: now - 10 * MIN }, controller: old, now }).kind, "beating");
+  assert.equal(assessBeat({ beat: null, acted: { at: now - 10 * MIN }, controller: old, now }).kind, "beating");
+  // A beat older than the record is the previous run's, so it cannot.
+  assert.equal(assessBeat({ beat: { at: old.at - MIN, interval: 1200, stopped: "" }, controller: old, now }).kind, "stale");
+  // The line names the latest mark and the window it was judged against.
+  const line = stallReport(assessBeat({ beat: null, ticked: { at: now - 50 * MIN }, controller: old, now }), { claimed: 1, supply: 2 });
+  assert.match(line, /^heartbeat STALLED: no beat this run, last tick \S+Z \(50m ago, 10m past the 40m window\) — no beat, tick or ledger write since, and no recorded reason; 1 ticket\(s\) claimed and in flight, pool supply 2$/);
+  // No record and no beat stays `none`: there is no run to judge.
+  assert.equal(assessBeat({ beat: null, ticked: { at: now - 3 * WINDOW }, now }).kind, "none");
+});
+
+test("assessBeat: a controller record that cannot place a mark, beside no mark at all, judges no run — and one beside a mark still does", () => {
+  const now = 2_000_000_000_000;
+  const controller = { pid: 1, lstart: "x", prior: "none", at: null };
+  assert.deepEqual(assessBeat({ beat: null, controller, now }), { kind: "none" });
+  assert.equal(stallsAt({ beat: null, controller }), null);
+  // With a mark the record cannot partition it away, so it is judged.
+  assert.equal(assessBeat({ beat: null, ticked: { at: now - 5 * MIN }, controller, now }).kind, "beating");
+  assert.equal(assessBeat({ beat: null, ticked: { at: now - WINDOW - 1 }, controller, now }).kind, "stale");
+});
+
+test("stallOwner: a ledger write at or after the record is the recorded controller's own", () => {
+  const old = { at: RECORD_AT - 60_000 };
+  for (const prior of ["dead", "ancestor", "none"]) {
+    const controller = recordWith(prior);
+    for (const acted of [{ at: RECORD_AT }, { at: RECORD_AT + 60_000 }]) {
+      assert.deepEqual(stallOwner({ controller, beat: old, ticked: old, acted }, "t", () => "dead"), { kind: "gone", resumes: "the next run" }, `prior ${prior}`);
+    }
+    // One older than the record leaves the reading on `prior`.
+    assert.notDeepEqual(stallOwner({ controller, beat: old, ticked: null, acted: old }, "t", noJudge), { kind: "gone", resumes: "the next run" });
+  }
 });

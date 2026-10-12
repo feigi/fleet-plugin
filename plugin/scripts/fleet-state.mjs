@@ -1,5 +1,5 @@
 // The heartbeat's shared state file, owned jointly by fleet-tick.mjs,
-// fleet-heartbeat.mjs and ledger.mjs rotate — so the path and the file's shape
+// fleet-heartbeat.mjs and ledger.mjs — so the path and the file's shape
 // live here rather than in spellings that drift. Same rule arg.mjs states for
 // the digits guard: what travels between scripts is the rule, never a copy of
 // it.
@@ -35,12 +35,18 @@
 //            when rotate wrote it — a mark older than `at` is the previous
 //            run's. Removed, not left stale, by a rotate that finds no omp
 //            ancestor.
+//   acted    ledger.mjs only. When a ledger write last landed: every
+//            subcommand that writes the ledger stamps it, rotate in the same
+//            write as `controller`. A busy run writes its ledger on every
+//            dispatch and settle, far more often than it ticks, and never
+//            beats while there is work, so this is the mark that tells a busy
+//            run from a dead one.
 //   seen     fleet-tick only. {member: firstSeenAtMs}: the first tick that saw
 //            each live ledger token, so a later tick can say how long a token
 //            has stayed live — the ledger records that a member was dispatched,
 //            never when. Pruned to the live set on every tick, so a settled
 //            member's stamp does not outlive it. Carried, never written, by
-//            the heartbeat and by rotate.
+//            the heartbeat and by ledger.mjs.
 //
 // One writer per key. A key two scripts wrote would need locking to be
 // correct, and none of them is in a position to hold one. That holds per key,
@@ -111,7 +117,7 @@ export function readState(path, name) {
   // to judge and nothing to report. A zeroed mark would date the beat to the
   // epoch and read as decades overdue on a run that has simply not started
   // one — the cry-wolf direction this key must never fail in.
-  const fresh = { quiet: 0, elapsed: 0, digest: "", beat: null, ticked: null, controller: null, seen: {}, rest: {} };
+  const fresh = { quiet: 0, elapsed: 0, digest: "", beat: null, ticked: null, acted: null, controller: null, seen: {}, rest: {} };
   // The same state, flagged: the file EXISTS and could not be used. A caller
   // that acts on the absence of a record — ledger.mjs rotate — must tell this
   // from `fresh`, which is a run that has simply not written one yet.
@@ -178,7 +184,8 @@ export function readState(path, name) {
   };
   // `ticked` carries no interval — fleet-tick has no promise to fail, only an
   // occurrence — so it is a mark of one field, valid or absent, same "never
-  // zero" rule as `mark` above for the same cry-wolf reason.
+  // zero" rule as `mark` above for the same cry-wolf reason. `acted` is the
+  // same shape for the same reason.
   const tick = (v) => {
     if (!isRecord(v)) return null;
     const at = num(v.at);
@@ -213,13 +220,14 @@ export function readState(path, name) {
     for (const [member, at] of Object.entries(v)) if (Number.isInteger(at) && at > 0) out[member] = at;
     return out;
   };
-  const { quiet, elapsed, digest, beat, ticked, controller, seen, ...rest } = parsed;
+  const { quiet, elapsed, digest, beat, ticked, acted, controller, seen, ...rest } = parsed;
   return {
     quiet: num(quiet),
     elapsed: num(elapsed),
     digest: typeof digest === "string" ? digest : "",
     beat: mark(beat),
     ticked: tick(ticked),
+    acted: tick(acted),
     controller: ctl(controller),
     seen: stamps(seen),
     rest,
@@ -269,12 +277,13 @@ export function writeState(path, name, prev, patch) {
     // every hold and would otherwise erase fleet-tick's `ticked` the first
     // time a heartbeat lands after a busy stretch.
     ...(prev.ticked ? { ticked: prev.ticked } : {}),
-    // And again for ledger.mjs rotate's `controller`, which both scripts
+    // And again for ledger.mjs's `controller` and `acted`, which both scripts
     // above would otherwise erase on their next write. A patch REMOVES a key
     // by naming it with the value `undefined`, which JSON.stringify drops —
     // the way rotate retires a record no omp ancestor replaces.
     ...(prev.controller ? { controller: prev.controller } : {}),
-    // `seen` is fleet-tick's, and the heartbeat and rotate write this file
+    ...(prev.acted ? { acted: prev.acted } : {}),
+    // `seen` is fleet-tick's, and the heartbeat and ledger.mjs write this file
     // too: carried the same way, so neither erases the ages the tick keeps.
     ...(prev.seen && Object.keys(prev.seen).length > 0 ? { seen: prev.seen } : {}),
     ...patch,
@@ -330,55 +339,102 @@ export const BEAT_GRACE = 2;
 // here and imported there: every script that reads or writes the heartbeat
 // file already imports this module, and a magic "1200" typed twice is exactly
 // the drift the module header's "never a copy of it" rule exists to close.
-// It doubles as the freshness window for `ticked` below: fleet-tick's own
-// invocations carry no promised interval, so they are judged against the
-// worst-case gap this design ever tolerates when only the heartbeat is
-// beating, times the same grace multiplier as `beat`.
+// It doubles as the freshness window for `ticked`, `acted` and the controller
+// record below: none of them carries a promised interval, so each is judged
+// against the worst-case gap this design ever tolerates when only the
+// heartbeat is beating, times the same grace multiplier as `beat`.
 export const DEFAULT_CEILING_S = 1200;
 
-// What the mark says, as a value. `now` is a parameter so every caller's
-// verdict is deterministic and testable — the same reason compute-board.mjs
-// takes one.
-//
-//   none      no mark. A fresh run, or one whose heartbeat never ran. NOT a
-//             stall: there is no beat to have stopped, and reporting one here
-//             would fire on every first tick and train the reader to ignore
-//             the line.
-//   beating   seen within the interval it promised, plus grace — OR a recent
-//             `ticked` covers for it. `beat` is only refreshed when the queue
-//             drains (SKILL.md: "beat when there is nothing to do"), so a
-//             busy stretch that outlasts `beat`'s own grace window is not a dead
-//             run; fleet-tick's own edge-triggered invocations are the other
-//             liveness signal for exactly that case.
-//   stopped   a reason was recorded. Reported whatever the age, because a
-//             recorded stop IS the end of the run and waiting for it to go
-//             stale first would sit on the one report that knows its cause.
-//   stale     overdue with no reason recorded AND no recent tick either. The
-//             abrupt death: a crashed harness, a closed terminal, an OOM
-//             kill. Readers say exactly that rather than naming a cause they
-//             cannot know.
-export function assessBeat({ beat, ticked, now }) {
-  if (!beat) return { kind: "none" };
-  // Clamped at zero rather than left signed: a mark from the future is a
-  // clock that moved, not a beat that is minus-five-minutes overdue, and a
-  // negative age formatted into the line reads as a defect in this code.
-  const ageMs = Math.max(0, now - beat.at);
-  const intervalMs = beat.interval * 1000;
-  const seen = { at: beat.at, ageMs, intervalMs, overdueMs: Math.max(0, ageMs - intervalMs) };
-  if (beat.stopped) return { ...seen, kind: "stopped", reason: beat.stopped };
-  return { ...seen, kind: now > stallsAt({ beat, ticked }) ? "stale" : "beating", reason: null };
+const WINDOW_MS = DEFAULT_CEILING_S * 1000 * BEAT_GRACE;
+
+// A mark older than the controller record's `at` was left by the run before
+// the one that wrote the record — rotate replaced the record after that run's
+// last beat, tick and ledger write — so it says nothing about this run. With
+// no record, or a record with no `at`, nothing can be placed and every mark
+// counts as this run's.
+function thisRun(mark, controller) {
+  if (mark == null) return null;
+  return controller == null || controller.at === null || mark.at >= controller.at ? mark : null;
 }
 
-// The instant an unstopped mark turns `stale`: past `beat`'s own interval
-// plus grace AND past a tick's ceiling window plus grace, whichever ends
-// later. An absent `ticked` — a state file fleet-tick has not yet written to
-// — contributes nothing, which is `beat` alone deciding it. A present one
-// only ever postpones the stall; it can never manufacture a stale verdict
-// `beat` alone would not have reached. Exported for the readers that must
-// say WHEN a beating mark would stop counting, not only whether it has.
-export function stallsAt({ beat, ticked }) {
-  const beatEnds = beat.at + beat.interval * 1000 * BEAT_GRACE;
-  return ticked ? Math.max(beatEnds, ticked.at + DEFAULT_CEILING_S * 1000 * BEAT_GRACE) : beatEnds;
+// What the marks say, as a value. `now` is a parameter so every caller's
+// verdict is deterministic and testable — the same reason compute-board.mjs
+// takes one. Only this run's marks decide it.
+//
+//   none      no mark of this run and no controller record. A fresh run, or
+//             one whose heartbeat never ran. NOT a stall: there is no run to
+//             judge, and reporting one here would fire on every first tick
+//             and train the reader to ignore the line.
+//   beating   seen within the interval it promised, plus grace — OR a recent
+//             tick, ledger write or controller record covers for it. `beat`
+//             is only refreshed when the queue drains (SKILL.md: "beat when
+//             there is nothing to do"), so a busy run can go its whole length
+//             without one; its ticks and ledger writes are the liveness
+//             signal for exactly that case.
+//   stopped   this run recorded a reason. Reported whatever the age, because
+//             a recorded stop IS the end of the run and waiting for it to go
+//             stale first would sit on the one report that knows its cause.
+//   stale     overdue with no reason recorded AND no recent tick or ledger
+//             write either. The abrupt death: a crashed harness, a closed
+//             terminal, an OOM kill — or a live controller that stopped
+//             acting. Readers say exactly that rather than naming a cause
+//             they cannot know. A run with a controller record and no beat of
+//             its own is judged off its latest tick, ledger write or the
+//             record itself, so one that dies before it ever beats still goes
+//             stale; `beatless` marks that verdict, and `mark` names which.
+//   ended     the PREVIOUS run's recorded stop, while this run has not
+//             ticked yet. It is that run's end, never this run's verdict:
+//             reported until this run's first tick, and never after.
+export function assessBeat({ beat = null, ticked = null, acted = null, controller = null, now }) {
+  const ours = thisRun(beat, controller);
+  if (ours) {
+    const seen = since(ours.at, ours.interval * 1000, now);
+    if (ours.stopped) return { ...seen, kind: "stopped", reason: ours.stopped };
+    return { ...seen, kind: now > stallsAt({ beat, ticked, acted, controller }) ? "stale" : "beating", reason: null };
+  }
+  const marks = [
+    ["controller", controller?.at ?? null],
+    ["ticked", thisRun(ticked, controller)?.at ?? null],
+    ["acted", thisRun(acted, controller)?.at ?? null],
+  ].filter(([, at]) => at !== null);
+  // Without a record a mark-less beat is no run at all, whatever ticks or
+  // ledger writes some earlier run left beside it.
+  const judged = controller !== null && marks.length > 0;
+  if (judged && now > stallsAt({ beat, ticked, acted, controller })) {
+    const [mark, at] = marks.reduce((a, b) => (b[1] >= a[1] ? b : a));
+    return { ...since(at, WINDOW_MS, now), kind: "stale", reason: null, beatless: true, mark };
+  }
+  if (beat?.stopped && thisRun(ticked, controller) === null) {
+    return { ...since(beat.at, beat.interval * 1000, now), kind: "ended", reason: beat.stopped };
+  }
+  return judged ? { kind: "beating" } : { kind: "none" };
+}
+
+// A mark's age against the window it is judged by. Clamped at zero rather
+// than left signed: a mark from the future is a clock that moved, not a beat
+// that is minus-five-minutes overdue, and a negative age formatted into the
+// line reads as a defect in this code.
+function since(at, intervalMs, now) {
+  const ageMs = Math.max(0, now - at);
+  return { at, ageMs, intervalMs, overdueMs: Math.max(0, ageMs - intervalMs) };
+}
+
+// The instant this run turns `stale`: past `beat`'s own interval plus grace
+// AND past the ceiling window plus grace of every tick, ledger write and
+// controller record, whichever ends latest. Only this run's marks count — the
+// previous run's are partitioned off by the record's `at` exactly as
+// assessBeat() does. An absent mark contributes nothing, and null means this
+// run has no mark at all. Exported for the readers that must say WHEN a
+// beating run would stop counting, not only whether it has.
+export function stallsAt({ beat = null, ticked = null, acted = null, controller = null }) {
+  const ends = [ticked, acted]
+    .map((m) => thisRun(m, controller))
+    .filter((m) => m !== null)
+    .map((m) => m.at + WINDOW_MS);
+  if (controller?.at != null) ends.push(controller.at + WINDOW_MS);
+  const ours = thisRun(beat, controller);
+  if (ours) ends.push(ours.at + ours.interval * 1000 * BEAT_GRACE);
+  return ends.length > 0 ? Math.max(...ends) : null;
 }
 
 // Whether this verdict is something to report. Exported because both readers
@@ -387,6 +443,13 @@ export function stallsAt({ beat, ticked }) {
 // pay for that on a healthy run.
 export function isStalled(verdict) {
   return verdict.kind === "stopped" || verdict.kind === "stale";
+}
+
+// Whether this verdict prints at all: a stall, or the previous run's end. The
+// second never reaches isStalled(), whose readers go on to count claims and
+// judge the controller — both this run's, and neither the previous run's.
+export function isReported(verdict) {
+  return isStalled(verdict) || verdict.kind === "ended";
 }
 
 // Whole minutes, floored, because the numbers here are tens of minutes to
@@ -439,26 +502,26 @@ function mins(ms) {
 //
 // A mark older than the record's `at` was left by the run BEFORE the one
 // that wrote the record: rotate replaced the record after that run's last
-// beat and tick. That is a run's first tick, and by then the record names
-// this run's own live controller, so judging it would call every previous
-// run alive. That stall reads the verdict rotate reached on the record it
-// replaced, `prior`: dead is a controller gone whose claims this run resumes,
-// ancestor is this same session's earlier run and so alive, none is unknown.
-// A mark written since the record — any later tick — is the recorded
-// controller's own, so the record itself is judged, through proc.mjs: dead or
-// a reused pid is gone and the NEXT run resumes; alive, or an ancestor of the
-// reader, is alive. A record with no `at` cannot place the mark and is
-// judged too.
+// beat, tick and ledger write. When every mark is that old, the record names
+// a controller that has left no mark yet, so judging it would call every
+// previous run alive. That stall reads the verdict rotate reached on the
+// record it replaced, `prior`: dead is a controller gone whose claims this run
+// resumes, ancestor is this same session's earlier run and so alive, none is
+// unknown. A mark written since the record — any later beat, tick or ledger
+// write — is the recorded controller's own, so the record itself is judged,
+// through proc.mjs: dead or a reused pid is gone and the NEXT run resumes;
+// alive, or an ancestor of the reader, is alive. A record with no `at` cannot
+// place the mark and is judged too.
 //
 // `judge` is replaceable for the same reason proc.mjs's process source is: a
 // reader under a live omp session would otherwise find that session. A
 // process table that cannot be read leaves the stall unattributed, said on
 // stderr, rather than calling a controller nobody could judge dead or alive.
 export const NO_OWNER = Object.freeze({ kind: "none" });
-export function stallOwner({ controller, beat, ticked }, name, judge = judgeRecord) {
+export function stallOwner({ controller, beat = null, ticked = null, acted = null }, name, judge = judgeRecord) {
   if (!controller) return NO_OWNER;
-  const before = (mark) => mark === null || mark.at < controller.at;
-  if (controller.at !== null && before(beat) && before(ticked)) {
+  const before = (mark) => thisRun(mark, controller) === null;
+  if (controller.at !== null && before(beat) && before(ticked) && before(acted)) {
     if (controller.prior === "dead") return { kind: "gone", resumes: "this run" };
     if (controller.prior === "ancestor") return { kind: "alive", pid: null };
     return NO_OWNER;
@@ -476,8 +539,12 @@ export function stallOwner({ controller, beat, ticked }, name, judge = judgeReco
   return NO_OWNER;
 }
 
-// The report. Returns null for anything isStalled() rejects, so a caller that
+// The report. Returns null for anything isReported() rejects, so a caller that
 // skipped the predicate cannot print a stall for a healthy run by accident.
+//
+// The previous run's end is one line of its own and carries nothing of this
+// run's: no claims, no supply, no owner. It names when that run stopped and
+// the reason it recorded, and nothing more.
 //
 // What it names is the acceptance criterion itself: a bare "stale" tells the
 // maintainer nothing they can act on, so the line carries when the beat was
@@ -498,22 +565,32 @@ export function stallOwner({ controller, beat, ticked }, name, judge = judgeReco
 // cockpit's own cards) and either source can fail, and "0 claimed" off a
 // failed read is the same lie as "supply 0" off one — it says the night cost
 // nothing when it may have stranded the whole pool.
-export function stallReport(verdict, { claimed, supply, owner = NO_OWNER }) {
-  if (!isStalled(verdict)) return null;
+export function stallReport(verdict, { claimed, supply, owner = NO_OWNER } = {}) {
+  if (!isReported(verdict)) return null;
+  const when = (at) => new Date(at).toISOString();
+  if (verdict.kind === "ended") {
+    return `previous run stopped deliberately at ${when(verdict.at)} (${mins(verdict.ageMs)} ago) — recorded reason: ${verdict.reason}`;
+  }
   const n = (v) => (v == null ? "unknown" : String(v));
   // Present tense for the deliberate stop and past for the abrupt one, because
   // that is the actual difference: one run said why it was going, the other
   // was cut off mid-beat and left nothing behind to ask.
   const why = verdict.kind === "stopped"
     ? `stopped deliberately — recorded reason: ${verdict.reason}`
-    : "the beat stopped without a recorded reason";
+    : verdict.beatless ? "no beat, tick or ledger write since, and no recorded reason" : "the beat stopped without a recorded reason";
   const head = owner.kind === "alive"
     ? `heartbeat not beating, controller alive (${owner.pid === null ? "this session's earlier run" : `pid ${owner.pid}`})`
     : owner.kind === "gone" ? "heartbeat STALLED, controller gone" : "heartbeat STALLED";
   const tail = owner.kind === "gone"
     ? `; ${owner.resumes} resumes its claims without a PR, and its open PRs return through the fold-in`
     : "";
-  return `${head}: last beat ${new Date(verdict.at).toISOString()}`
-    + ` (${mins(verdict.ageMs)} ago, ${mins(verdict.overdueMs)} past the ${mins(verdict.intervalMs)} interval it promised)`
-    + ` — ${why}; ${n(claimed)} ticket(s) claimed and in flight, pool supply ${n(supply)}${tail}`;
+  const seen = verdict.beatless
+    ? `no beat this run, last ${MARK_NAMES[verdict.mark]} ${when(verdict.at)}`
+      + ` (${mins(verdict.ageMs)} ago, ${mins(verdict.overdueMs)} past the ${mins(verdict.intervalMs)} window)`
+    : `last beat ${when(verdict.at)}`
+      + ` (${mins(verdict.ageMs)} ago, ${mins(verdict.overdueMs)} past the ${mins(verdict.intervalMs)} interval it promised)`;
+  return `${head}: ${seen} — ${why}; ${n(claimed)} ticket(s) claimed and in flight, pool supply ${n(supply)}${tail}`;
 }
+
+// What a beatless stall names as this run's last sign of life.
+const MARK_NAMES = { controller: "controller record", ticked: "tick", acted: "ledger write" };
