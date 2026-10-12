@@ -180,8 +180,19 @@ function nestedHash(abs, env) {
   const now = entriesAt(abs, env, new Set());
   if (!now.ok) throw new Error(now.why);
   let head = git("git rev-parse HEAD", ["rev-parse", "-q", "--verify", "HEAD^{commit}"], abs, env);
-  if (!head.ok) head = git("git symbolic-ref HEAD", ["symbolic-ref", "-q", "HEAD"], abs, env);
-  if (!head.ok) throw new Error(head.why);
+  if (!head.ok) {
+    // No readable commit. Only a branch whose ref does not exist yet (show-ref
+    // exit 1) is unborn and hashes as the name HEAD holds; a ref that exists,
+    // or a show-ref that failed any other way, is a failed read.
+    const symbolic = git("git symbolic-ref HEAD", ["symbolic-ref", "-q", "HEAD"], abs, env);
+    // HEAD is detached or otherwise invalid.
+    if (!symbolic.ok) throw new Error(symbolic.why);
+    const ref = symbolic.stdout.trim();
+    const probe = git("git show-ref --verify", ["show-ref", "-q", "--verify", "--", ref], abs, env);
+    if (probe.ok) throw new Error(`HEAD points to ${ref} but the commit cannot be resolved`);
+    if (probe.status !== 1) throw new Error(probe.why);
+    head = symbolic;
+  }
   return `repo:${sha(`${head.stdout}${formatEntries(now.entries)}`)}`;
 }
 

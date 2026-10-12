@@ -234,6 +234,49 @@ test("a nested repository whose HEAD git cannot resolve is unknown, never clean"
   assert.equal(r.ok, false);
 });
 
+test("a nested repository whose branch ref exists but names no readable commit is unknown, never unborn", (t) => {
+  const dir = repo(t);
+  const sub = nested(dir);
+  record(dir);
+  // `git status` still answers with the ref pointing at a tree, while
+  // `rev-parse HEAD^{commit}` fails; the ref exists, so this is not the unborn
+  // case.
+  const ref = git(sub, "symbolic-ref", "HEAD").trim();
+  const tree = git(sub, "rev-parse", "HEAD^{tree}").trim();
+  writeFileSync(join(sub, ".git", ...ref.split("/")), `${tree}\n`);
+  const c = check(dir);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "read");
+  assert.equal(c.why, `cannot hash nested/: HEAD points to ${ref} but the commit cannot be resolved`);
+  const r = recordBaseline({ cwd: dir });
+  assert.equal(r.ok, false);
+});
+
+test("a nested repository whose unborn probe fails is unknown, never unborn", (t) => {
+  const dir = repo(t);
+  const fresh = join(dir, "fresh");
+  mkdirSync(fresh);
+  git(fresh, "init", "-q");
+  record(dir);
+  assert.equal(check(dir).state, "clean");
+  // A git first on PATH that fails `show-ref` as a killed or broken one would
+  // and runs everything else as the real git.
+  const shim = join(dir, ".fleet", "shim");
+  mkdirSync(shim, { recursive: true });
+  writeFileSync(join(shim, "git"), [
+    "#!/bin/sh",
+    'if [ "$1" = show-ref ]; then echo "fatal: injected" >&2; exit 128; fi',
+    'PATH="$REAL_PATH" exec git "$@"',
+    "",
+  ].join("\n"));
+  chmodSync(join(shim, "git"), 0o755);
+  const env = { ...process.env, PATH: `${shim}:${process.env.PATH}`, REAL_PATH: process.env.PATH };
+  const c = check(dir, env);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "read");
+  assert.equal(c.why, "cannot hash fresh/: git show-ref --verify exited 128: fatal: injected");
+});
+
 test("a write under a gitignored directory is clean — run state, agent-brain's cache", (t) => {
   const dir = repo(t);
   record(dir);
