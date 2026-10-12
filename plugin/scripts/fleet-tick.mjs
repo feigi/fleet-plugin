@@ -1243,9 +1243,9 @@ function premiseState(noun, target, label) {
 // in hand; a `behind-issue:#M` costs one `gh issue view`; a branch-named
 // `behind-pr` costs one `gh pr view`, whose MERGED or CLOSED lifts it —
 // before its PR exists, "no open PR" is not "merged". Standing, for a
-// branch-named `behind-pr` whose ticket the current file still carries: that
-// file was written before the exclusion, and only the refresh's own probe
-// can drop the ticket from it, so any answer short of MERGED or CLOSED, an
+// branch-named `behind-pr` whose ticket the current file still carries: the
+// file may predate the exclusion, and only the refresh's own probe can drop
+// the ticket from it, so any answer short of MERGED or CLOSED, an
 // unanswered probe included, asks for that refresh. An unanswered probe
 // never lifts an exclusion.
 function liftedPremise(excluded, entries, prs) {
@@ -1409,7 +1409,7 @@ function main() {
   }
 
   // Pull from the current file first; refresh when it is short, absent, an
-  // exclusion has lifted, or one the file predates still names a ticket on it.
+  // exclusion has lifted, or a branch-named one still names a ticket on it.
   // A refresh that succeeds replaces the heads outright: the PULL is read off
   // what shortlist.mjs just probed, never merged with the file's own heads,
   // or a ticket the refresh dropped would be pulled anyway.
