@@ -1260,12 +1260,15 @@ function liftedPremise(excluded, entries, prs) {
         if (!lifted && inFile.has(n)) return `behind-pr:#${target} not merged, #${n} still on the shortlist`;
         continue;
       }
-      if (inFile.has(n) || !isDigits(target)) continue;
-      if (kind === "pr" && !open.has(Number(target))) return `behind-pr:#${target} no longer open`;
       if (kind === "issue") {
         const st = premiseState("issue", target, `behind-issue:#${target}`);
-        if (st === "CLOSED" || st === "MERGED") return `behind-issue:#${target} ${st}`;
+        const lifted = st === "CLOSED" || st === "MERGED";
+        if (lifted && !inFile.has(n)) return `behind-issue:#${target} ${st}`;
+        if (!lifted && inFile.has(n)) return `behind-issue:#${target} not closed, #${n} still on the shortlist`;
+        continue;
       }
+      if (inFile.has(n) || !isDigits(target)) continue;
+      if (kind === "pr" && !open.has(Number(target))) return `behind-pr:#${target} no longer open`;
     }
   }
   return null;
