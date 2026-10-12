@@ -492,3 +492,7 @@
 2026-10-11	3088	2194		task-high	yes	no	survived findings were code/test gaps plus one stale doc row; no minted false claim judged	heavy	production	988	28
 2026-10-11	3089	3023		task-high	yes	no	sizing run after implementing, before PR create	light	production	348	2
 2026-10-11	3090	2288		slow-high	yes	no	survived: settle fold deleted an Exclusion row; fixed by fix-applier	heavy	production	894	19
+2026-10-12	3101	2890		task-high	yes	no	survived: test seed gap, write-failure warning, ADR quote; sizing judged before edits, Sizing line written at PR create	heavy	production	691	9
+2026-10-12	3103	2968		slow-high	yes	no	survived: degraded heartbeat file overwritten by early ticked write; three departures flagged in PR body	heavy	production	793	15
+2026-10-12	3106	3063		task-high	yes	no	mechanical 92-file migration; survived: comment inaccuracies and a rejoin hole in net-watchdog-prose	heavy	tests-only	3660	97
+2026-10-12	3110	3107		task-high	yes	no	comment-only; sizing run after implementing, before PR create; review 0 survived	heavy	tests-only	18	6
