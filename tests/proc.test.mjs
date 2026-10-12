@@ -22,12 +22,19 @@ test("isDead: only a process that is gone is dead", () => {
   assert.equal(isDead(1), false);
 });
 
-test("the ledger lock and the controller record share proc.mjs's isDead, never a copy", () => {
-  const ledger = readFileSync(fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url)), "utf8");
-  assert.match(ledger, /^import \{[^}]*\bisDead\b[^}]*\} from "\.\/proc\.mjs";$/m);
-  assert.doesNotMatch(ledger, /function isDead\b/);
+test("the ledger lock, the suite slots and the controller record share proc.mjs's isDead, never a copy", () => {
+  const script = (name) => readFileSync(fileURLToPath(new URL(`../plugin/scripts/${name}`, import.meta.url)), "utf8");
+  // The ledger and the slot wrapper take their locks through pid-lock.mjs, which
+  // is the one place that asks whether a holder is dead — through proc.mjs.
+  assert.match(script("pid-lock.mjs"), /^import \{[^}]*\bisDead\b[^}]*\} from "\.\/proc\.mjs";$/m);
+  for (const name of ["pid-lock.mjs", "ledger.mjs", "suite-slot.mjs"]) {
+    assert.doesNotMatch(script(name), /function isDead\b|function isProcessDead\b/, `${name} carries its own liveness predicate`);
+  }
+  for (const name of ["ledger.mjs", "suite-slot.mjs"]) {
+    assert.match(script(name), /^import \{[^}]*\} from "\.\/pid-lock\.mjs";$/m, `${name} takes its lock by a copy, not through pid-lock.mjs`);
+  }
   // Positive control: the pattern finds a definition where one exists.
-  assert.match(readFileSync(fileURLToPath(new URL("../plugin/scripts/proc.mjs", import.meta.url)), "utf8"), /function isDead\b/);
+  assert.match(script("proc.mjs"), /function isDead\b/);
 });
 
 test("ps: a live process's start time is a non-empty string, the same on every read and under every caller's TZ and locale", () => {

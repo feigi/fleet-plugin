@@ -1007,10 +1007,12 @@ its re-derive-once rule.
 
 **Materialize the isolation envelope as a file, not a briefing.** The claim
 writes the runner, `agent-test`, into the fresh worktree it creates: an exec of
-the Recipe's Test entrypoint that exports one port triple derived from `<N>`
+the Recipe's Test entrypoint, through the suite-slot wrapper (see **The suite
+slot bound**), that exports one port triple derived from `<N>`
 (so collisions stay impossible), kept out of `git status` through the
 repository's exclude file. A repository that tracks its own `agent-test` keeps
-it byte-identical, with whatever isolation that repository built. Brief members
+it byte-identical, with whatever isolation that repository built, and takes the
+suite slot bound for its own full runs itself: nothing else will. Brief members
 with `./agent-test` and nothing else — anyone who finds the worktree finds the
 runner, including grandchildren you never dispatched. Its arguments land after
 the Test entrypoint, so what one may name — a test file, a test name — is that
@@ -2577,24 +2579,59 @@ The fix-applier prompt and every refuter brief carry the rule and the safe
 invocation form; the merge bot's brief is the wrong seat, because a bot
 reads gates and never injects a fault.
 
+**The suite slot bound.** At most `FLEET_SUITE_SLOTS` full suite runs execute on
+a host at once — 2 by default, whatever the member caps count — because each run
+already spreads over most of the host's cores. The bound is a wrapper,
+`suite-slot.mjs`, reached through the Resolver:
+`~/.fleet/bin/fleet-run suite-slot.mjs '<entrypoint>' [args…]` runs the
+entrypoint under `sh -c` with the arguments after it. It decides by arity. No
+appended arguments is a full run, and waits for a free slot. Appended arguments
+are a narrowed run, which takes none, so a verifier's `<testCmd> <args>` never
+queues behind a full run — only its fall-back to the full command does. A
+wrapper that finds `FLEET_SUITE_SLOT` set, which a slot holder exports to its
+child, is nested inside a held slot and runs straight through, so a wrapped
+command inside a wrapped command is one run, not a deadlock. A slot is a
+pid-stamped lock file in `~/.fleet/suite-slots/` — under the host's `~/.fleet/`
+and not a workspace's, because the bound is host-wide and a review's snapshot is
+no repository.
+
+Each seat that runs the full suite is wrapped where its command is written. A
+claim's runner execs the Test entrypoint through the wrapper. A repository that
+tracks its own runner wraps it itself, as this repository's `agent-test` does
+for a bare run. The review wraps its own one run, so its args carry the bare
+command; a wrapped string handed to it anyway is harmless, the inner wrapper
+being the nested case. The fix-applier and the finisher run what you hand them,
+so hand them the wrapped string as `<testCmd>` —
+`~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command
+written `'\''` — and it is still one command for every gate.
+
+The wait is capped and never counts against the run: `FLEET_SUITE_WAIT_S`
+seconds, 1800 by default, then exit **75** with `suite-slot: no slot after <n>s`
+on stderr, having launched nothing. On getting a slot the wrapper prints
+`SUITE_SLOT_WAIT_MS=<n>` — the wait in milliseconds — to stderr, which the
+review's test-run block captures into its log and the test-run agent reports as
+`slotWaitMs`. **Exit 75 is not a test result.** In a review it leaves every
+dimension unrun, for the reason "no suite slot within <n> s — the host is at its
+suite bound; not a test failure", with no retry inside the run: re-review it
+under the next runner letter (`review-pr-<pr#>-b` after a first runner), as for
+a runner that reported `failed`. Tell every implementer, fix-applier and
+finisher, in its brief, in one line: exit 75 is not a test result; run the
+command again.
+
+A slot holder killed without releasing is taken over by the next waiter under
+the same `.reap` discipline as the ledger's lock; the wedges that discipline
+cannot clear are in the runbook under **Writer policy**.
+
 **Where `testCmd` comes from:** the repository's Test entrypoint, out of the
 Recipe cache phase 0's Recipe derivation step proved —
 `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main` prints it — and the one you
 hand specialists per **Give specialists a stack-free test command** above. Pass
-the same string to the review, to the fix-applier, and to the finisher — whose
+the same command to the review, to the fix-applier, and to the finisher — whose
 duty-2 mutation
 gate runs it too — so every gate runs one command. Omit it from the review args
 and the review (`review-core.mjs`, in a runner) reads the same cache itself,
 refusing outright when there is none; the fix-applier has no such fallback, so
 substituting `<testCmd>` with nothing leaves it no gate at all.
-**Test suite slot semaphore:** `testCmd` is automatically wrapped with `plugin/scripts/suite-slot.mjs`, which bounds concurrent full test-suite runs to N=2 slots on the host (`~/.fleet/suite-slots/`). The wrapper:
-- **Takes one slot** before running `testCmd` with no arguments (full suite)
-- **Passes through** if `testCmd` is invoked with arguments (narrowed run, e.g., `testCmd file.test.mjs`)
-- **Re-enters** without acquiring another slot if `FLEET_SUITE_SLOT` is already set (nested test commands)
-- **Waits up to 1800s** (configurable via `SUITE_SLOT_WAIT_MS`) for a slot, then exits code 75 if none available
-
-Exit code 75 from a test run signals that the slot-wait timed out, not a test failure. When this happens, the test agent reports `slotWaitMs` in the result; inspect it to distinguish resource contention from test timeouts. A third run waiting on two occupied slots at N=2 will eventually get its turn when a holder finishes — the queue is FIFO. If a slot holder dies, the next waiter reaps its stale lock and acquires the freed slot.
-
 
 **Where `<branch>` comes from:** the PR's head branch —
 `gh pr view <N> --json headRefName -q .headRefName`, or the same branch you cut
@@ -4373,6 +4410,13 @@ dead and takes the lock over the same as any other dead holder — no hand
 removal needed. The other two shapes do not clear on their own — remove
 `<file>.lock` or `<file>.lock.reap` by hand once nothing is writing. Reads
 (`check`, `read`) take no lock.
+
+**The suite slots wedge the same ways, and clear the same way.**
+`~/.fleet/suite-slots/<i>.lock` is built on the ledger's lock primitive, so an empty or
+unparseable `<i>.lock` and a leftover `<i>.lock.reap` are permanent, a zombie
+holder is transient, and a dead holder is taken over. A wait that expired with
+exit 75 names each wedged file — remove it by hand once no suite run is
+running, the way `<file>.lock` is removed above.
 
 **The gap the lock does not close:** `check` → `gh issue create` → `filed` is
 three commands, and the lock covers each one alone, so two filers can both read

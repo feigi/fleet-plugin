@@ -232,11 +232,12 @@ test("the test-run prompt hands the command over verbatim and rules 'tests 0' a 
   // copy drifts from the resolved value the moment either one changes, and a
   // caller passing args.testCmd (or the derivation) would be handed the wrong
   // command. Run from the snapshot's root, its output captured to the log
-  // every specialist is pointed at.
+  // every specialist is pointed at, and through the suite-slot wrapper — the
+  // only thing between the command and the host-wide bound.
   assert.match(
     prompt,
-    /\{ cd "\$\{snap\.path\}" && \$\{testCmd\}; \} > "\$\{logPath\}" 2>&1; echo "TEST_RUN_EXIT=\$\?"/,
-    "the prompt no longer runs the interpolated command verbatim from the snapshot's root into the log",
+    /\{ cd "\$\{snap\.path\}" && \$\{slotted\(testCmd\)\}; \} > "\$\{logPath\}" 2>&1; echo "TEST_RUN_EXIT=\$\?"/,
+    "the prompt no longer runs the interpolated, slot-wrapped command from the snapshot's root into the log",
   );
   // Match the ruling itself, not the phrase `tests 0` — that appears in the
   // surrounding explanation too, so a looser assertion passes with the rule
@@ -271,13 +272,24 @@ test("the test-run prompt hands the command over verbatim and rules 'tests 0' a 
 test("the test-run prompt holds the run in the foreground under a deadline, and never invents a count", () => {
   const prompt = testRunPrompt();
   assert.match(prompt, /ONE blocking foreground command — never backgrounded, never polled —/, "the prompt no longer forbids a backgrounded or polled run");
-  assert.match(prompt, /with a command deadline of 1800 seconds:/, "the prompt's command deadline changed — size it against a full suite under fleet load");
+  assert.match(prompt, /with a command deadline of 3600 seconds:/, "the prompt's command deadline changed — it must cover the slot wait cap and the run's own budget");
   assert.match(prompt, /\\`tail -n 40 "\$\{logPath\}"\\`/, "the prompt no longer reads enough of the log's tail to hold a runner's summary");
   assert.match(
     prompt,
     /omit every count and say what happened in \\`error\\`\. Never\s+write 0 for a count the log does not state/,
     "the prompt no longer forbids writing 0 for a count the log does not state",
   );
+});
+
+// The wrapper's wait and its two outputs reach the test-run agent only through
+// this prompt, and nothing downstream re-reads them: an agent not told to copy
+// `SUITE_SLOT_WAIT_MS` leaves `slotWaitMs` with no source, and one not told that
+// exit 75 launched nothing reports a held slot as a crashed suite.
+test("the test-run prompt tells the agent where slotWaitMs comes from and what exit 75 is", () => {
+  const prompt = testRunPrompt();
+  assert.match(prompt, /\\`SUITE_SLOT_WAIT_MS=<n>\\` line to the log; report \\`slotWaitMs\\` = that number,\s+copied as printed/, "the prompt no longer sources slotWaitMs from the wrapper's own line");
+  assert.match(prompt, /TEST_RUN_EXIT is 75 and the log holds\s+\\`suite-slot: no slot after <n>s\\`\. That is not a test result/, "the prompt no longer says what exit 75 is");
+  assert.match(prompt, /copy that line into \\`error\\`, and do not run\s+the command again/, "the prompt no longer carries the line testRunReason reads the wait cap from, or no longer forbids a re-run");
 });
 
 // #2879: with no field of its own, vitest's `N expected fail` token could only

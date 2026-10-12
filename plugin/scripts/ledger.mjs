@@ -40,7 +40,7 @@
 // life, so the stall readers judge a busy run by them (fleet-state.mjs has
 // the rule).
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, openSync, writeSync, closeSync, unlinkSync, linkSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync, linkSync } from "node:fs";
 import { dirname, resolve, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
@@ -49,7 +49,8 @@ import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, premisesOf, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
-import { isDead, processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
+import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
+import { attemptLock, releaseLockFile, reapPathOf } from "./pid-lock.mjs";
 
 const NAME = "ledger";
 // The plugin's own agent definitions — the directory tier-check.mjs reads
@@ -530,55 +531,15 @@ function save(d) {
 // discards the other's row. Reads (`check`, `read`) take no lock — the rename
 // already hands them either the old file or the new one, never a torn one.
 //
-// `<file>.lock` is created O_EXCL and holds its owner's pid. Creating it and
-// writing the pid are two steps, so a waiter can read an empty or partial
-// lock in between: anything that is not a canonical positive integer counts
-// as a LIVE holder — keep waiting, and never hand it to process.kill, where
-// NaN is a TypeError crash rather than a wait. That empty or partial lock
-// never clears on its own, either: nothing revisits and finishes writing it
-// — the writer that would have finished died before the second step. Same
-// permanent wedge as a leftover reap lock below, same fix: the operator
-// removes it by hand once nothing is writing.
-//
-// A holder that died without releasing — SIGKILL always, and so does any
-// signal this file leaves unhandled (SIGQUIT, SIGABRT, a segfault: only a
-// normal exit and the three catchable signals below run the `exit` event
-// that releases it) — is taken over, but only under a second O_EXCL lock,
-// `<file>.lock.reap`, and only after RE-READING the lock under it, finding
-// the same dead pid, and RE-CHECKING that pid is still dead. Unlink-then-
-// create, or a bare rename, lets two waiters that both saw the dead pid each
-// remove the other's FRESH lock and write at once; the re-read is what makes
-// the takeover safe. The re-check narrows the one window the re-read leaves,
-// and the order the two run in is what narrows it: isDead(deadPid)
-// runs before the re-read, not after, so a live writer that takes the lock in
-// the gap between them is caught by the read that follows, not hidden behind
-// one taken before it arrived. Read first, and a recycled pid that came back
-// to life in that same gap would still read back as itself and still check
-// dead — the order this replaces would delete that live holder's fresh lock. A
-// recycled pid that became a new writer this same way — dead holder's lock
-// reaped by someone else, then re-created by the new owner of that very pid —
-// still writes the same content and would still pass the re-read alone, but
-// the isDead() ahead of it now catches that writer live, before the read ever
-// runs. Only that exact pid reused a second time, inside this narrower gap,
-// can still slip through. Under the reap lock no other waiter can replace the
-// lock's content outside that gap, so a pid still dead immediately before the
-// read that follows it is the dead holder, and a live one is left alone to be
-// waited on like any live holder. A reap lock is held for one liveness check,
-// one read and one unlink, and one left behind by any of those same abrupt
-// deaths in that window is deliberately NOT reclaimed: waiters time out naming
-// the holder, and the operator removes it. Fail closed.
-//
-// A dead holder whose pid was recycled reads as live until the timeout.
-// Accepted: an mtime/age heuristic instead would take over a live writer on a
-// slow disk, which is the row loss this lock exists to prevent.
-//
-// A live-looking holder can also be a zombie: a pid whose process exited but
-// whose parent never `wait()`-ed on it. The OS keeps that pid reserved until
-// reaped, so `process.kill(pid, 0)` still succeeds and isDead() reads it as
-// alive — but unlike the two wedges above, that clears on its own once the
-// pid is reaped (the parent's own exit is normally enough to trigger this),
-// and the next writer's death check then takes the lock over like any other
-// dead holder. No hand removal needed.
+// `<file>.lock` is a pid-stamped lock and `<file>.lock.reap` its takeover
+// lock; pid-lock.mjs owns the protocol — the O_EXCL create, what an empty or
+// partial lock and a leftover reap lock mean, the dead-holder takeover and
+// why it is ordered the way it is, the zombie case. What stays here is the
+// ledger's own policy: how long to wait, and what to say on expiry. A holder
+// that died without releasing is taken over, and only a normal exit and the
+// three catchable signals below run the `exit` event that releases the lock —
+// SIGKILL always, and any signal this file leaves unhandled (SIGQUIT,
+// SIGABRT, a segfault), leave it for the takeover.
 //
 // The wait is bounded — 10 s by default — and the timeout is die(), exit 2,
 // having written nothing. `LEDGER_LOCK_TIMEOUT_MS` overrides it and, like
@@ -590,7 +551,7 @@ function save(d) {
 // same-run accidental duplicate was filed minutes apart, and a
 // claim/reserve subcommand closing that window was ruled out.
 const LOCK = `${file}.lock`;
-const REAP = `${LOCK}.reap`;
+const REAP = reapPathOf(LOCK);
 const LOCK_WAIT_MS = (() => {
   const v = process.env.LEDGER_LOCK_TIMEOUT_MS;
   const ms = isDigits(String(v)) ? Number(v) : 0;
@@ -598,62 +559,10 @@ const LOCK_WAIT_MS = (() => {
 })();
 let lockHeld = false;
 
-const parsePid = (text) => (/^[1-9][0-9]*$/.test(text) ? Number(text) : null);
-
-// null when there is no lock to read — it was released between our failed
-// create and this read, and the next create attempt is the right response.
-function readLock() {
-  try {
-    return readFileSync(LOCK, "utf8");
-  } catch (e) {
-    if (e.code === "ENOENT") return null;
-    die(`cannot read ${LOCK}: ${e.message}`);
-  }
-}
-
-// true when the takeover ran (whatever it found under the reap lock), so the
-// caller retries the create at once; false when another waiter holds the
-// reap lock, so the caller waits like any other contended lock.
-function reapDeadHolder(deadPid) {
-  let fd;
-  try {
-    fd = openSync(REAP, "wx");
-  } catch (e) {
-    if (e.code === "EEXIST") return false;
-    die(`cannot create ${REAP}: ${e.message}`);
-  }
-  try {
-    closeSync(fd);
-    // Dead again, not just when the caller looked: that pid may have been
-    // reused since, so isDead runs first, fresh, right here — before the
-    // exact-match re-read, not after it. Exact match only: a waiter that
-    // got here first may already have reaped the dead lock and taken a
-    // fresh one of its own.
-    if (isDead(deadPid) && readLock() === String(deadPid)) {
-      // Already gone is already the outcome this call wants: an operator
-      // clearing a wedged lock by hand between the read above and here must
-      // not turn our own cleanup into an uncaught crash.
-      try {
-        unlinkSync(LOCK);
-      } catch (e) {
-        if (e.code !== "ENOENT") throw e;
-      }
-    }
-  } finally {
-    unlinkSync(REAP);
-  }
-  return true;
-}
-
 function releaseLock() {
   if (!lockHeld) return;
   lockHeld = false;
-  try {
-    if (readFileSync(LOCK, "utf8") === String(process.pid)) unlinkSync(LOCK);
-  } catch {
-    // Nothing to release, or nothing this process can do about it on its way
-    // out: exit handlers cannot fail usefully.
-  }
+  releaseLockFile(LOCK);
 }
 
 async function acquireLock() {
@@ -666,28 +575,12 @@ async function acquireLock() {
   for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => process.exit(2));
   const deadline = Date.now() + LOCK_WAIT_MS;
   for (;;) {
-    let fd = null;
-    try {
-      fd = openSync(LOCK, "wx");
-    } catch (e) {
-      if (e.code !== "EEXIST") die(`cannot create ${LOCK}: ${e.message}`);
-    }
-    if (fd !== null) {
-      try {
-        writeSync(fd, String(process.pid));
-      } catch (e) {
-        // Ours, and empty or partial: every waiter reads it as live, and
-        // releaseLock() will not match it, so it goes now or never.
-        closeSync(fd);
-        unlinkSync(LOCK);
-        die(`cannot write ${LOCK}: ${e.message}`);
-      }
-      closeSync(fd);
+    const attempt = attemptLock(LOCK, die);
+    if (attempt.state === "taken") {
       lockHeld = true;
       return;
     }
-    const holder = readLock();
-    if (holder === null) {
+    if (attempt.state === "vanished") {
       // Ordinarily transient — released between our failed create above and
       // this read — so retrying the create at once beats sleeping first.
       // But that same shape recurs FOREVER if reading it fails for a reason
@@ -699,14 +592,13 @@ async function acquireLock() {
       if (Date.now() >= deadline) die(`cannot lock ${file} — ${LOCK} exists but cannot be read`);
       continue;
     }
-    const pid = parsePid(holder);
-    const dead = pid !== null && isDead(pid);
-    if (dead && reapDeadHolder(pid)) continue;
+    if (attempt.state === "reaped") continue;
+    const { holder, pid, dead } = attempt;
     if (Date.now() >= deadline) {
       // `dead` here but still not taken over means this call's own reap
       // attempt found `${REAP}` already there right now — the same instant a
       // reaper SIGKILLed between its own create and unlink leaves behind
-      // forever (see the write-lock header comment above `LOCK`/`REAP`), and
+      // forever (see pid-lock.mjs's header comment), and
       // indistinguishable at this instant from a live reaper mid-takeover.
       // Naming the pid alone points an operator at a process that no longer
       // exists; naming `${REAP}` is what lets them find the file
@@ -715,7 +607,7 @@ async function acquireLock() {
       if (dead) {
         die(`cannot lock ${file} — held by pid ${pid}, which is dead; ${REAP} is blocking its takeover — if nothing is currently writing, remove it by hand`);
       }
-      // No pid at all is the other permanent wedge the header describes: an
+      // No pid at all is the other permanent wedge pid-lock.mjs's header describes: an
       // empty or partial `${LOCK}` whose writer died before writing its pid,
       // read as live forever by design. There is no process to point at, so
       // name `${LOCK}` itself — the file the same runbook says to remove.

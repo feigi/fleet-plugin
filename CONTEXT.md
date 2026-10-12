@@ -341,13 +341,14 @@ the controller writes an absolute path under it into every Dispatch, and a
 member never builds a root of its own.
 _Avoid_: scratchpad, `/tmp` dir, `.fleet/scratch`
 
-**Test suite slot**:
-One of N exclusive locks on the host that bounds concurrent full test-suite runs.
-Stored as a pid-stamped lockfile under `~/.fleet/suite-slots/` (N=2 by default).
-A full-suite run acquires one slot before starting and releases it upon exit.
-Narrowed runs (with arguments) bypass the slot. A waiter reaps a dead holder's lock
-and acquires the freed slot. Timeout waiting for a slot (1800s default) exits code 75,
-reported as `slotWaitMs` in the test result, distinct from a test failure.
+**Suite slot**:
+One of N exclusive pid-stamped lock files, `~/.fleet/suite-slots/<i>.lock`, that
+bound how many full test-suite runs the host executes at once (N is 2 unless
+`FLEET_SUITE_SLOTS` says otherwise). Taken by `suite-slot.mjs` for a run with no
+arguments and held until it ends; a narrowed run (arguments appended) takes none,
+and a wrapper inside a held slot (`FLEET_SUITE_SLOT` set) takes no second. A
+waiter takes over a dead holder's slot. A wait that outlasts `FLEET_SUITE_WAIT_S`
+exits 75 having launched nothing — not a test result.
 _Avoid_: test lock, test slot, semaphore (bare), CPU slot
 
 **Settle**:

@@ -17,6 +17,22 @@
 # checkout; anything that would pass vacuously — a directory holding no tests,
 # a typo'd path, a test under a vendored node_modules — refuses instead.
 # agent-test.test.mjs is its suite.
+#
+# A bare `./agent-test` is the full suite, and the full suite takes one of the
+# host's suite slots (plugin/scripts/suite-slot.mjs says what a slot is). This
+# runner runs itself, still bare, under that wrapper, which holds the slot for
+# as long as the run lasts and exports FLEET_SUITE_SLOT; the inner run sees it
+# and carries on rather than taking a second. A run with any argument is a
+# narrowed run and takes none. The wrapper is the one in this checkout, not an
+# installed copy: this runner belongs to its checkout.
+if [ $# -eq 0 ] && [ -z "${FLEET_SUITE_SLOT+x}" ]; then
+  here=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P) || exit 1
+  # Single-quoted into the entrypoint string the wrapper hands to `sh -c`, each
+  # embedded `'` closed, escaped and reopened, so a path with a space or a
+  # quote in it stays one word.
+  self=$(printf '%s' "$here/$(basename "$0")" | sed "s/'/'\\\\''/g")
+  exec node "$here/plugin/scripts/suite-slot.mjs" "'$self'"
+fi
 # A directory is the ergonomic way to say "run this suite", but node resolves
 # it as a module specifier and dies with MODULE_NOT_FOUND before a test runs.
 # Expand it to the test files underneath instead. IFS and -f settle only how
@@ -674,8 +690,4 @@ done
 # states above, and closing it would mean running node rather than `exec`ing
 # it, so that it could read the summary back. Separate change.
 [ -n "$operand" ] || { printf "agent-test: no test file or directory in the arguments — refusing rather than falling through to node's own discovery\n" >&2; exit 1; }
-# Invoke suite-slot to acquire a test slot before running the suite.
-# Pass the node --test command as the first argument to suite-slot.mjs.
-# suite-slot will handle re-entry, arity-based gating, and slot management.
-SUITE_SLOT_SCRIPT="$(cd "$(dirname "${0}")" && pwd)/plugin/scripts/suite-slot.mjs"
-exec node "${SUITE_SLOT_SCRIPT}" "node --test" "$@"
+exec node --test "$@"
