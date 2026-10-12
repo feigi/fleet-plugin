@@ -258,7 +258,11 @@ phase, or in any later one, asks the maintainer which tickets to take.
 0. **Once per run, before anything else.**
 
    **Fast-forward the checkout before you trust these rules — you are reading
-   them from it.** `git fetch origin && git rev-list --count main..origin/main`;
+   them from it.** First, `git symbolic-ref -q HEAD` must print
+   `refs/heads/main`; anything else, stop and tell the maintainer — a checkout
+   left on a branch whose PR has merged would fast-forward that branch, and the
+   baseline below would record it as the run's ref. Then
+   `git fetch origin && git rev-list --count main..origin/main`;
    non-zero means the SKILL.md you are executing is superseded, so
    `git merge --ff-only origin/main` and re-read what changed under
    `commands/`, `scripts/` and `skills/`. The usual cause is the PREVIOUS run's own close-out PR: it
@@ -287,7 +291,8 @@ phase, or in any later one, asks the maintainer which tickets to take.
    **Record the main-checkout baseline in the same step, right after the
    pin.** `~/.fleet/bin/fleet-run main-checkout.mjs --record` writes
    `.fleet/main-checkout.sha`: the main checkout's `git status --porcelain
-   -uall` entries plus a content hash of every path they name. Your own
+   -uall` entries plus a content hash of every path they name, and its HEAD —
+   symbolic ref and commit. Your own
    uncommitted work is fine — it is in the baseline and holds nothing. From
    then on every `fleet-tick.mjs` compares the main checkout against it and
    holds dispatch on any change: the backstop for the stray member
@@ -1523,7 +1528,9 @@ leaving a regenerated 5,000-row corpus uncommitted in the checkout is how it get
 discarded by the next `git checkout` with nothing to show it ever ran.
 
 **Commit the metrics files and open a PR — at end of run.** The branch name is
-the repository's choice. A PR still open when the run ends is one phase 0's
+the repository's choice. Make the commit on a branch in the main checkout,
+switch back to `main` before the next tick, and never `--record` while on that
+branch; the round trip reads clean. A PR still open when the run ends is one phase 0's
 fold-in queues for review next run, however it is named, so the files reach
 `main` through the same review as ticket work rather than being lost. Stranding
 a data row loses it: `member-outcomes.tsv` is regenerated from harness
@@ -1904,7 +1911,8 @@ depth** guard table applied in code. Act on each line as it reads:
 - `MAIN-CHECKOUT-DIRTY <paths> …`, printed above the rows, with every
   dispatching row (implementers, reviewers, merge-bot) reading
   `HOLD (main checkout dirty)` — the main checkout changed since the Phase 0
-  baseline. The line names the changed paths and every live member; it
+  baseline. The line names the changed paths, or a `HEAD <was> → <now>` entry
+  when HEAD moved, and every live member; it
   attributes nothing, because concurrent members make that a guess. Dispatch
   nothing new and tell the maintainer: they resolve the stray paths FIRST,
   then re-baseline with `~/.fleet/bin/fleet-run main-checkout.mjs --record`.
@@ -1916,7 +1924,9 @@ depth** guard table applied in code. Act on each line as it reads:
   could not look: a git or hash read failed (`could not look:`), or the
   baseline exists but cannot be read (`baseline unreadable:`). Never clean,
   and **never re-baseline over it** — `--record` overwrites, so that certifies
-  a tree nobody read. Fix what the line names and tick again.
+  a tree nobody read. Fix what the line names and tick again. The one
+  exception is `baseline v1 — re-record`: an old-format baseline says nothing
+  of HEAD, and `--record` is its remedy.
 - `MAIN-CHECKOUT-NO-BASELINE …` with `HOLD (main checkout no baseline)` — no
   baseline was recorded. Yours to fix: run Phase 0's `--record`. A baseline
   that vanished mid-run is not a fresh run — report it to the maintainer
@@ -4021,7 +4031,9 @@ if the fix was edited in it** — the next tick reads `MAIN-CHECKOUT-DIRTY`
 naming your own paths. Run `~/.fleet/bin/fleet-run main-checkout.mjs --check`
 first, and only when the paths it names are exactly the ones you just edited,
 run `--record`. Any other path on that line is a stray write — leave the hold for
-the maintainer, because `--record` would certify it with yours. Live members
+the maintainer, because `--record` would certify it with yours. A `HEAD …`
+entry is none of your paths: commit the fix on a branch, switch back to `main`
+before the next tick, and never `--record` while on that branch. Live members
 hold the old text — re-brief only if it changes what they do *now*.
 
 **Landing it.** The file being right is not the end of it. `main` carries a

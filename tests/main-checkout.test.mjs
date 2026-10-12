@@ -26,20 +26,26 @@ const git = (cwd, ...args) => {
   return r.stdout;
 };
 
-// A fleet-shaped main checkout: one tracked file, `.fleet/` and `.worktrees/`
-// ignored the way a fleet repo's .gitignore ignores them.
+// A fleet-shaped main checkout on `main`: one tracked file, `.fleet/` and
+// `.worktrees/` ignored the way a fleet repo's .gitignore ignores them, and a
+// bare origin holding `main` — `origin/main` is what HEAD is judged against.
 function repo(t) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "main-checkout-")));
+  const origin = realpathSync(mkdtempSync(join(tmpdir(), "main-checkout-origin-")));
   t.after(() => {
     // Restore what a case took away, or rmSync cannot clear it.
     for (const p of [join(dir, ".fleet"), join(dir, "locked.txt")]) try { chmodSync(p, 0o755); } catch {}
     rmSync(dir, { recursive: true, force: true });
+    rmSync(origin, { recursive: true, force: true });
   });
-  git(dir, "init", "-q");
+  git(origin, "init", "-q", "--bare", "-b", "main");
+  git(dir, "init", "-q", "-b", "main");
   writeFileSync(join(dir, ".gitignore"), ".fleet/\n.worktrees/\n.agent-brain/\n");
   writeFileSync(join(dir, "tracked.txt"), "one\n");
   git(dir, "add", "-A");
   git(dir, "commit", "-qm", "init");
+  git(dir, "remote", "add", "origin", origin);
+  git(dir, "push", "-q", "-u", "origin", "main");
   return dir;
 }
 
@@ -442,4 +448,220 @@ test("CLI: --record then --check, with the exit codes the header names", (t) => 
   r = run("--recrod");
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--recrod/, "a misspelt flag must be refused by name, never run as a check");
+});
+
+// ---------------------------------------------------------------------------
+// HEAD is part of the protected set: the symbolic ref and the commit.
+// ---------------------------------------------------------------------------
+
+const head = (dir) => git(dir, "rev-parse", "--short=7", "HEAD").trim();
+const originOf = (dir) => git(dir, "remote", "get-url", "origin").trim();
+
+// A second commit, pushed: gives `reset --hard HEAD~1` somewhere to land.
+function secondCommit(dir) {
+  writeFileSync(join(dir, "second.txt"), "two\n");
+  git(dir, "add", "second.txt");
+  git(dir, "commit", "-qm", "second");
+  git(dir, "push", "-q", "origin", "main");
+}
+
+// What lands on origin/main while a run is going: another clone pushes, then
+// the main checkout fetches — which moves `origin/main` and nothing else.
+function advanceOrigin(t, dir) {
+  const other = realpathSync(mkdtempSync(join(tmpdir(), "main-checkout-clone-")));
+  t.after(() => rmSync(other, { recursive: true, force: true }));
+  git(other, "clone", "-q", originOf(dir), ".");
+  writeFileSync(join(other, "landed.txt"), "landed\n");
+  git(other, "add", "landed.txt");
+  git(other, "commit", "-qm", "landed");
+  git(other, "push", "-q", "origin", "main");
+  git(dir, "fetch", "-q", "origin");
+}
+
+const headEntry = (was, ref, now) => `HEAD refs/heads/main@${was} → ${ref}@${now}`;
+
+test("a stray commit, a branch switch, a detach, a reset and an amend each move HEAD: dirty, and the entry names HEAD", (t) => {
+  const moves = {
+    "git commit": (dir) => {
+      writeFileSync(join(dir, "stray.txt"), "s\n");
+      git(dir, "add", "stray.txt");
+      git(dir, "commit", "-qm", "stray");
+    },
+    "git checkout -b": (dir) => git(dir, "checkout", "-q", "-b", "other"),
+    "git switch --detach": (dir) => git(dir, "switch", "-q", "--detach"),
+    "git reset --hard HEAD~1": (dir) => git(dir, "reset", "-q", "--hard", "HEAD~1"),
+    // A changed message, so the oid moves even within the same second.
+    "git commit --amend": (dir) => git(dir, "commit", "-q", "--amend", "-m", "a different message"),
+  };
+  for (const [name, move] of Object.entries(moves)) {
+    const dir = repo(t);
+    secondCommit(dir);
+    record(dir);
+    const was = head(dir);
+    move(dir);
+    const c = check(dir);
+    assert.equal(c.state, "dirty", `${name} read ${c.state}`);
+    assert.equal(c.changed.length, 1, `${name}: ${JSON.stringify(c.changed)}`);
+    assert.match(c.changed[0], /^HEAD /, name);
+    assert.equal(c.headMove, c.changed[0], name);
+    assert.match(describe(c, []), /^MAIN-CHECKOUT-DIRTY HEAD refs\/heads\/main@[0-9a-f]{7} → \S+@[0-9a-f]{7} — changed since the run's baseline/, name);
+    assert.ok(c.changed[0].startsWith(`HEAD refs/heads/main@${was} → `), `${name}: ${c.changed[0]}`);
+  }
+});
+
+test("the HEAD entry shows both ends, and sits beside the paths that changed", (t) => {
+  const dir = repo(t);
+  record(dir);
+  const was = head(dir);
+  git(dir, "checkout", "-q", "-b", "other");
+  writeFileSync(join(dir, "stray.txt"), "x\n");
+  const c = check(dir);
+  assert.deepEqual(c.changed, [headEntry(was, "refs/heads/other", was), "stray.txt"]);
+  assert.match(describe(c, []), new RegExp(`^MAIN-CHECKOUT-DIRTY HEAD refs/heads/main@${was} → refs/heads/other@${was} stray\\.txt — `));
+  git(dir, "switch", "-q", "--detach");
+  assert.equal(check(dir).changed[0], headEntry(was, "(detached)", was));
+});
+
+test("origin/main advancing and a fast-forward to it reads clean, before the merge and after", (t) => {
+  const dir = repo(t);
+  record(dir);
+  advanceOrigin(t, dir);
+  assert.equal(check(dir).state, "clean", "the fetch alone moved something");
+  git(dir, "merge", "-q", "--ff-only", "origin/main");
+  assert.equal(check(dir).state, "clean", "a fast-forward to origin/main held the run");
+  writeFileSync(join(dir, "stray.txt"), "x\n");
+  assert.deepEqual(check(dir).changed, ["stray.txt"]);
+});
+
+test("a commit already unpushed at --record is allowed; one beyond it is not", (t) => {
+  const dir = repo(t);
+  writeFileSync(join(dir, "mine.txt"), "the maintainer's, committed, unpushed\n");
+  git(dir, "add", "mine.txt");
+  git(dir, "commit", "-qm", "mine");
+  record(dir);
+  assert.equal(check(dir).state, "clean");
+  writeFileSync(join(dir, "stray.txt"), "s\n");
+  git(dir, "add", "stray.txt");
+  git(dir, "commit", "-qm", "stray");
+  const c = check(dir);
+  assert.equal(c.state, "dirty");
+  assert.match(c.changed[0], /^HEAD /);
+});
+
+test("the controller's close-out round trip — branch, commit, back to main — holds only while it is on the branch", (t) => {
+  const dir = repo(t);
+  record(dir);
+  git(dir, "checkout", "-q", "-b", "chore/run-artifacts-1");
+  writeFileSync(join(dir, "run.md"), "artifacts\n");
+  git(dir, "add", "run.md");
+  git(dir, "commit", "-qm", "close-out");
+  assert.equal(check(dir).state, "dirty");
+  git(dir, "checkout", "-q", "main");
+  assert.equal(check(dir).state, "clean", "back on main, the hold did not clear itself");
+});
+
+test("HEAD equal to the baseline's commit skips the ancestry calls; any other commit makes them", (t) => {
+  const dir = repo(t);
+  record(dir);
+  const trace = join(dir, ".fleet", "trace.log");
+  const traced = { ...process.env, GIT_TRACE: trace };
+  assert.equal(check(dir, traced).state, "clean");
+  const first = readFileSync(trace, "utf8");
+  assert.doesNotMatch(first, /merge-base|rev-list/, "the fast path ran an ancestry call");
+  advanceOrigin(t, dir);
+  git(dir, "merge", "-q", "--ff-only", "origin/main");
+  assert.equal(check(dir, traced).state, "clean");
+  const second = readFileSync(trace, "utf8").slice(first.length);
+  assert.match(second, /merge-base/);
+  assert.match(second, /rev-list/);
+});
+
+test("--record writes the symbolic ref and the commit, and overwrites on another branch without comparing", (t) => {
+  const dir = repo(t);
+  git(dir, "checkout", "-q", "-b", "other");
+  record(dir);
+  const text = readFileSync(baselinePath(dir), "utf8");
+  assert.match(text, /^fleet main-checkout baseline v2\nref refs\/heads\/other\noid [0-9a-f]{40,64}\n/);
+  assert.equal(check(dir).state, "clean");
+  git(dir, "checkout", "-q", "main");
+  assert.equal(check(dir).state, "dirty");
+  record(dir);
+  assert.equal(check(dir).state, "clean");
+});
+
+test("--record refuses a detached HEAD, which names no symbolic ref, and writes nothing", (t) => {
+  const dir = repo(t);
+  git(dir, "switch", "-q", "--detach");
+  const r = recordBaseline({ cwd: dir });
+  assert.equal(r.ok, false);
+  assert.match(r.why, /detached/);
+  assert.equal(check(dir).state, "absent");
+});
+
+test("a v1 baseline is unknown — re-record — and --record overwrites it", (t) => {
+  const dir = repo(t);
+  mkdirSync(join(dir, ".fleet"));
+  writeFileSync(baselinePath(dir), "fleet main-checkout baseline v1\n");
+  const c = check(dir);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "outdated");
+  assert.match(c.why, /baseline v1 — re-record/);
+  const said = describe(c, []);
+  assert.match(said, /^MAIN-CHECKOUT-UNKNOWN baseline v1 — re-record.*re-record with .*main-checkout\.mjs --record/);
+  assert.doesNotMatch(said, /NEVER re-baseline/, "the one unknown whose remedy is --record");
+  record(dir);
+  assert.match(readFileSync(baselinePath(dir), "utf8"), /^fleet main-checkout baseline v2\n/);
+  assert.equal(check(dir).state, "clean");
+});
+
+test("a missing origin/main is unknown, never clean — with HEAD where it was and with HEAD moved", (t) => {
+  const dir = repo(t);
+  record(dir);
+  git(dir, "update-ref", "-d", "refs/remotes/origin/main");
+  let c = check(dir);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "read");
+  assert.match(c.why, /origin\/main/);
+  assert.match(describe(c, []), /^MAIN-CHECKOUT-UNKNOWN could not look: origin\/main/);
+  writeFileSync(join(dir, "stray.txt"), "s\n");
+  git(dir, "add", "stray.txt");
+  git(dir, "commit", "-qm", "stray");
+  c = check(dir);
+  assert.equal(c.state, "unknown");
+  assert.match(c.why, /origin\/main/);
+});
+
+test("an unborn HEAD is unknown, never clean, and --record refuses it", (t) => {
+  const dir = repo(t);
+  record(dir);
+  git(dir, "symbolic-ref", "HEAD", "refs/heads/unborn");
+  const c = check(dir);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "read");
+  assert.match(c.why, /unborn/);
+  const r = recordBaseline({ cwd: dir });
+  assert.equal(r.ok, false);
+  assert.match(r.why, /could not look, so there is nothing to record/);
+});
+
+test("a baseline commit git cannot find is unknown, never dirty: a failed ancestry read is not 'no'", (t) => {
+  const dir = repo(t);
+  record(dir);
+  const base = baselinePath(dir);
+  writeFileSync(base, readFileSync(base, "utf8").replace(/^oid .*$/m, `oid ${"1".repeat(40)}`));
+  const c = check(dir);
+  assert.equal(c.state, "unknown");
+  assert.match(c.why, /git merge-base --is-ancestor exited \d+/);
+});
+
+test("CLI: a HEAD move prints MAIN-CHECKOUT-DIRTY naming HEAD, exit 1, and the same --record clears it", (t) => {
+  const dir = repo(t);
+  const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: "utf8" });
+  assert.equal(run("--record").status, 0);
+  git(dir, "checkout", "-q", "-b", "other");
+  const r = run("--check");
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /^MAIN-CHECKOUT-DIRTY HEAD refs\/heads\/main@[0-9a-f]{7} → refs\/heads\/other@[0-9a-f]{7} — /);
+  assert.equal(run("--record").status, 0);
+  assert.equal(run("--check").status, 0);
 });

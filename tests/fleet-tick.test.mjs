@@ -1625,6 +1625,10 @@ function runCli(args = [], {
     mkdirSync(bin);
     mkdirSync(join(repo, ".fleet"), { recursive: true });
     assert.equal(spawnBounded("git", ["init", "-q", repo]).status, 0);
+    // The baseline records HEAD and judges it against `origin/main`: both must exist.
+    const sh = (...a) => assert.equal(spawnBounded("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...a], { cwd: repo }).status, 0, a.join(" "));
+    sh("commit", "-q", "--allow-empty", "-m", "init");
+    sh("update-ref", "refs/remotes/origin/main", "HEAD");
     writeFileSync(join(repo, ".git", "info", "exclude"), ".fleet/\n.worktrees/\n");
     writeExecStub(join(bin, "gh"), GH_STUB);
     const script = join(bin, "fleet-tick.mjs");
@@ -2302,6 +2306,22 @@ test("CLI: a stray write after the baseline prints MAIN-CHECKOUT-DIRTY first, na
   assert.equal(rec.status, 0, rec.stderr);
   const after = tickAgain(r);
   assert.equal(after.status, 0, after.stderr);
+  assert.doesNotMatch(after.stdout, /MAIN-CHECKOUT|main checkout/);
+  assert.match(after.stdout, /^implementers 1\/2 → PULL #420 /m);
+});
+
+test("CLI: a branch switch in the main checkout after the baseline holds the run, naming HEAD, and clears itself on the switch back", (t) => {
+  const r = runCli([], {
+    ...LIVE, prs: [pr(350)], keep: true,
+    afterBaseline: (repo) => assert.equal(spawnBounded("git", ["checkout", "-q", "-b", "other"], { cwd: repo }).status, 0),
+  });
+  t.after(() => rmSync(r.dir, { recursive: true, force: true }));
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout.trim().split("\n")[0], /^MAIN-CHECKOUT-DIRTY HEAD refs\/heads\/\S+@[0-9a-f]{7} → refs\/heads\/other@[0-9a-f]{7} — changed since the run's baseline; live members: impl-412 — dispatch held/);
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(main checkout dirty\)/m);
+  const back = spawnBounded("git", ["switch", "-q", "-"], { cwd: r.repo });
+  assert.equal(back.status, 0, back.stderr);
+  const after = tickAgain(r);
   assert.doesNotMatch(after.stdout, /MAIN-CHECKOUT|main checkout/);
   assert.match(after.stdout, /^implementers 1\/2 → PULL #420 /m);
 });
