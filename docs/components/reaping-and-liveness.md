@@ -53,3 +53,6 @@ itself is still alive when nothing else is left to report.
   *specific claim's* preconditions at a different trigger (drain, abort) —
   conflating them was measured to let one silently borrow the other's
   authorization.
+- **Scratch is reclaimed, not reaped.** The scratch a merged PR's members
+  left is removed on GitHub state and age by a third script — see
+  [Scratch Reclaim](scratch-reclaim.md).

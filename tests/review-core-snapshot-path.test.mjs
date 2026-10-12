@@ -487,17 +487,13 @@ test("the snapshot prompt tells the agent to copy both printed values verbatim, 
 //   probe AFTER the `git init` -> the same thing one directory entry later, and
 //     in EVERY repo rather than only the ones with node_modules: `.git` alone
 //     makes `ls -A` non-empty (#1056).
-//   guard MISSING -> the `find` deletes, so an empty `scratch` sends it at
-//     '/pr<N>' — the directory this block's own `mkdir -p "${runRootParent}"`
-//     creates — so what the guard buys is a NAMED refusal, not containment.
+//   guard MISSING -> an empty `scratch` reaches `mkdir -p "${runRootParent}"`
+//     as '/pr<N>' and the prune as `--root ""` — so what the guard buys is a
+//     NAMED refusal, not containment.
 //   prune MISSING -> nothing ever removes a run root and the scratch tree grows
 //     without bound (#1083). No probe here can see it: the growth is in SIBLING
 //     roots and this run's own snapshot is perfectly good, which is why
 //     `snapshot-repo.test.mjs` executes the prune against fixtures instead.
-//   prune ABOVE the `mkdir -p` -> on a PR's first review the parent does not
-//     exist yet, so `find` fails and a healthy run prints SNAPSHOT_PRUNE_FAILED,
-//     training a reader to ignore the marker. That is POSITION, not presence, so
-//     this pin is the one that catches it and the executed one cannot.
 // The two probe reorderings end the same way: the agent honestly reports
 // `pathVerified: true`, because that is what it was told to report. Hence a
 // sequence pin, not a presence pin — every one of these lines is in the right
@@ -544,8 +540,8 @@ test("the snapshot block mints a per-run destination, then extracts, probes, and
       "the run root is never printed — the agent cannot report a `runRoot` it can no longer read off this prompt, and the caller's containment check has nothing to check",
     ],
     [
-      /find "?\$\{runRootParent\}"?[^\n]*\|\| echo SNAPSHOT_PRUNE_FAILED/,
-      "the stale-run-root prune is gone or no longer refuses by name — every review leaves a tree nothing removes (#1083), and `snapshot-repo.test.mjs`'s executed prune test is where its behaviour is measured",
+      /~\/\.fleet\/bin\/fleet-run reclaim-scratch\.mjs --pr \$\{pr\} --root "?\$\{scratch\}"? --apply \| grep -qF '"failed":\[\]' \|\| echo SNAPSHOT_PRUNE_FAILED/,
+      "the stale-run-root prune is gone, no longer runs `reclaim-scratch.mjs --pr` on this PR under this scratch root, or no longer maps a receipt with a failed removal (or no receipt at all) to SNAPSHOT_PRUNE_FAILED — every review leaves a tree nothing removes (#1083), and `snapshot-repo.test.mjs`'s executed prune tests are where its behaviour is measured",
     ],
     [
       /SHA=\$\(git -C \$\{worktree\} rev-parse --short HEAD\)/,

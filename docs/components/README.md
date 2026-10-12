@@ -37,6 +37,8 @@ these pages use.
 - [Reaping & Liveness](reaping-and-liveness.md) — cleaning up claims after
   they end, and the heartbeat that keeps a drained queue from stalling
   silently.
+- [Scratch Reclaim](scratch-reclaim.md) — removing what members left under
+  the scratch root once its PR or ticket is done, or it has sat idle.
 - [Isolation](isolation.md) — worktrees, scratch partitions, and the write
   guard that keep members from colliding.
 - [Ledger & Cockpit](ledger-and-cockpit.md) — the durable run-state record

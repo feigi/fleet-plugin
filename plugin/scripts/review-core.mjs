@@ -692,8 +692,9 @@ export function runnerPrRefusal(pr) {
 // `/pr${pr}` to the scratch it is given — so a scratch whose last component
 // is already `pr` plus digits is a caller that partitioned too, and its run
 // roots would nest at `<root>/pr<N>/pr<N>/run-*`, below the snapshot prompt's
-// `find <root>/pr<N> -maxdepth 1` prune. Refused whatever the digits, never
-// coerced: stripping the suffix would guess which directory the caller meant.
+// prune, which looks only at the run-* directories directly under `pr<N>/`.
+// Refused whatever the digits, never coerced: stripping the suffix would
+// guess which directory the caller meant.
 //
 // "Last component" is the one the filesystem resolves, not the last text in
 // the string: `.` segments and repeated or trailing slashes are collapsed
@@ -841,7 +842,7 @@ export async function runReview(host, args) {
     mkdir -p "${runRootParent}" || { echo SNAPSHOT_RUNROOT_FAILED; exit 1; }
     RUN=$(mktemp -d "${runRootPrefix}XXXXXXXX") || { echo SNAPSHOT_RUNROOT_FAILED; exit 1; }
     echo SNAPSHOT_RUN_ROOT="$RUN"
-    find "${runRootParent}" -maxdepth 1 -type d -name 'run-*' -mtime +7 -exec sh -c 'rc=0; ph="{""}"; for d; do chmod -R u+rwx "$d" 2>/dev/null; m=$?; if command -v chflags >/dev/null 2>&1; then [ $m -eq 0 ] || { chflags nouchg,nouappnd "$d"; chmod u+rwx "$d"; find "$d" -type d -exec chflags nouchg,nouappnd "$ph" ";" -exec chmod u+rwx "$ph" ";"; }; chflags -R nouchg,nouappnd "$d" 2>/dev/null; fi; rm -rf "$d" || rc=1; done; exit $rc' sh {} + || echo SNAPSHOT_PRUNE_FAILED
+    ~/.fleet/bin/fleet-run reclaim-scratch.mjs --pr ${pr} --root "${scratch}" --apply | grep -qF '"failed":[]' || echo SNAPSHOT_PRUNE_FAILED
     SHA=$(git -C ${worktree} rev-parse --short HEAD) || { echo SNAPSHOT_REVPARSE_FAILED; exit 1; }
     SNAP="$RUN/snapshot-$SHA"
     echo SNAPSHOT_DEST="$SNAP"

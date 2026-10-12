@@ -1,0 +1,401 @@
+#!/usr/bin/env node
+// Reclaim: remove what a run left under its scratch root once nothing can
+// still want it. Distinct from Reap, which authorizes on git's evidence, and
+// from Release, which undoes a claim that never became a PR: Reclaim
+// authorizes on GitHub state and on age.
+//
+//   reclaim-scratch.mjs --root <abs> [--after-rotate] [--apply]
+//   reclaim-scratch.mjs --pr <N> --root <abs> [--apply]
+//
+// Dry run by default; `--apply` removes. `--root` is required, an absolute
+// path to an existing directory: the controller passes the path
+// scratch-root.mjs prints.
+//
+// THE ROOT SWEEP judges every entry directly under `--root`:
+//   pr<M>/, dispositions-fix-pr-<M>[-x].json
+//            removed when PR #M is MERGED or CLOSED on GitHub and no live
+//            ledger token names it — review-pr-<M>[-x], fix-pr-<M>[-x],
+//            finisher-pr-<M>[-x]. A live merge-bot-<n> token holds every one
+//            of them: a bot's token names no PR, and GitHub reads MERGED
+//            while the bot is still writing under pr<M>/merge-bot-<n>/. An
+//            OPEN PR's pr<M>/ is kept whole except its run-* roots, which
+//            follow the --pr rule below.
+//   impl-<N>/
+//            removed when issue #N is CLOSED, or OPEN with no live
+//            impl-<N>[-x] token and idle past the retention, so a bailed or
+//            released ticket's partition is not inherited by its next claim.
+//   anything else, and a keyed name whose number GitHub resolves to the
+//   other type (a pr<N> that is an issue, an impl-<N> that is a PR) or to
+//   nothing
+//            removed when idle past the retention and no live token's name
+//            appears in the entry's name.
+// "Idle past the retention" is the newest mtime ANYWHERE under the entry
+// older than 7 days — never the top-level mtime alone, which a write deep
+// inside does not move. A directory that cannot be listed counts its own
+// mtime and is not descended into.
+//
+// The live tokens are `.fleet/ledger.md`'s, read through `ledger.mjs read`
+// and ledger-grammar.mjs's liveOnLedger(), the file resolved by
+// fleet-dir.mjs's fleetFile() from the cwd. An absent ledger REFUSES the root
+// sweep, because nothing could then hold a live member's entry — unless
+// `--after-rotate` is given: phase 0's rotate leaves no ledger behind when it
+// carried nothing, so there an absent file is read as "no live token", which
+// is rotate's own verdict. A ledger that is present is read as usual under
+// either; only ENOENT is absence, and any other failure to read it refuses.
+//
+// GitHub is asked once per ≤100 numbers (`gh api graphql`, one aliased
+// issueOrPullRequest per number, pr<N> and impl-<N> together). A batch with
+// no usable answer keeps every keyed entry in it, with that reason; the age
+// rule still runs on unkeyed entries. A keyed entry is never judged by the
+// ledger or by mtime alone in GitHub's place.
+//
+// `--pr <N>` MODE is the review snapshot's prune: every directory
+// `<root>/pr<N>/run-*` idle past the retention is removed, and nothing else
+// is looked at — no ledger, no gh (a live review's own run root is seconds
+// old), no sibling under pr<N>/.
+//
+// EVERY REMOVAL, in either mode, goes through REMOVE below: owner rwx
+// restored, darwin's user-immutable and append-only flags cleared where
+// `chflags` exists, then `rm -rf` — so a fixture that dropped its own read bit
+// or flagged a file cannot wedge it. Removal is best-effort per entry: a
+// failure lands in `failed[]` and the sweep continues.
+//
+// Prints ONE JSON line on stdout once the sweep is done:
+//   {"applied":<bool>,"ledger":<abs path|null>,"removed":[{"path","reason"}],
+//    "kept":[{"path","reason"}],"failed":[{"path","error"}]}
+// `ledger` is the file read, or null when none was (`--pr` mode, or
+// `--after-rotate` with no file) — so "never read" stays distinct from "read
+// and found empty". A dry run prints the same receipt with "applied":false,
+// `removed` naming what --apply would remove.
+// Exit 0 whenever the receipt is printed, failures included; 2 for a refused
+// invocation — bad arguments, no --root, a root that is not a directory, a
+// root sweep with no ledger and no --after-rotate, a ledger that cannot be
+// read for any reason other than ENOENT. Nothing is removed before a refusal.
+
+import { spawnSync } from "node:child_process";
+import { lstatSync, readdirSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { defineFlags, isDigits, makeDie, writeAll } from "./arg.mjs";
+import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
+import { gitEnv } from "./git-env.mjs";
+import { isCLI } from "./is-cli.mjs";
+import { liveOnLedger, parseMember, REVIEWER } from "./ledger-grammar.mjs";
+
+const NAME = "reclaim-scratch";
+const die = makeDie(NAME);
+const DAY_MS = 24 * 60 * 60 * 1000;
+export const RETENTION_MS = 7 * DAY_MS;
+const BATCH = 100;
+const GH_TIMEOUT_MS = 30_000;
+const MAX_BUFFER = 64 * 1024 * 1024;
+
+// The one removal sequence. `$1` is the entry. A symlink entry is unlinked
+// with its target untouched: `chmod -R` does not follow it and exits 0 over
+// it (measured on darwin's /bin/chmod), so the recovery step — whose plain
+// `chmod` on the entry would follow it — never runs for one. `chmod -R` fails
+// on a flagged directory, and `chflags -R` cannot read a mode-000 directory it
+// has just unflagged, so when the first pass fails each directory's flag and
+// mode come off together, top-down, before anything inside it is read.
+const REMOVE = [
+  'd=$1',
+  'chmod -R u+rwx "$d" 2>/dev/null; m=$?',
+  'if command -v chflags >/dev/null 2>&1; then',
+  '  [ $m -eq 0 ] || { chflags nouchg,nouappnd "$d"; chmod u+rwx "$d"; find "$d" -type d -exec chflags nouchg,nouappnd {} ";" -exec chmod u+rwx {} ";"; } 2>/dev/null',
+  '  chflags -R nouchg,nouappnd "$d" 2>/dev/null',
+  'fi',
+  'rm -rf "$d"',
+].join("\n");
+
+const PR_ENTRY = /^pr([1-9][0-9]*)$/;
+const IMPL_ENTRY = /^impl-([1-9][0-9]*)$/;
+const DISPOSITIONS_ENTRY = /^dispositions-(fix-pr-[1-9][0-9]*(?:-[a-z])?)\.json$/;
+const RUN_ROOT = /^run-/;
+
+function how(r) {
+  if (r.error) return r.error.code ?? r.error.message;
+  if (r.signal) return `killed by ${r.signal}`;
+  const said = String(r.stderr ?? "").trim().split("\n").at(-1);
+  return said ? `exit ${r.status}: ${said}` : `exit ${r.status}`;
+}
+
+/** The path of something under `path` (itself included) modified at or after
+ * `cutoff`, or null when everything is older. Symlinks are not followed. A
+ * directory that cannot be listed counts its own mtime only. */
+export function freshUnder(path, cutoff) {
+  const stack = [path];
+  while (stack.length) {
+    const p = stack.pop();
+    let st;
+    try {
+      st = lstatSync(p);
+    } catch (e) {
+      if (e.code === "ENOENT") continue;
+      throw e;
+    }
+    if (st.mtimeMs >= cutoff) return p;
+    if (!st.isDirectory()) continue;
+    let names;
+    try {
+      names = readdirSync(p);
+    } catch (e) {
+      if (e.code === "EACCES" || e.code === "EPERM" || e.code === "ENOENT") continue;
+      throw e;
+    }
+    for (const n of names) stack.push(join(p, n));
+  }
+  return null;
+}
+
+/** Remove `path` through REMOVE; null on success, else the reason. */
+export function removeEntry(path) {
+  const r = spawnSync("sh", ["-c", REMOVE, "sh", path], { encoding: "utf8" });
+  return r.error || r.status !== 0 ? how(r) : null;
+}
+
+// The live tokens the ledger holds, by name, read through `ledger.mjs read`
+// so the ledger keeps one parser. `--file` names it outright, so the read
+// resolves no workspace and runs no git.
+function liveNames(file) {
+  const script = join(dirname(fileURLToPath(import.meta.url)), "ledger.mjs");
+  const r = spawnSync(process.execPath, [script, "--file", file, "read"], { encoding: "utf8", maxBuffer: MAX_BUFFER });
+  if (r.error || r.status !== 0) die(`ledger.mjs read ${file} failed (${how(r)}) — which members are live is unknown, so nothing is reclaimed`);
+  let d;
+  try {
+    d = JSON.parse(r.stdout);
+  } catch (e) {
+    die(`could not parse ledger.mjs read output: ${e.message}`);
+  }
+  const strings = (xs) => Array.isArray(xs) && xs.every((x) => typeof x === "string");
+  if (!d || !strings(d.rows) || !strings(d.dispatched)) die("ledger.mjs read returned no {rows, dispatched}");
+  return liveOnLedger(d.rows, d.dispatched).tokens.map((t) => t.name);
+}
+
+// The ledger file, or null when it is absent. Only ENOENT is absence; a
+// workspace that cannot be resolved, or a path that cannot be looked up,
+// refuses. `lstat`, so a dangling symlink is a ledger that cannot be read.
+function ledgerFile() {
+  let file;
+  try {
+    file = fleetFile("ledger.md");
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
+    die(`${e.message} — the ledger cannot be found, so which members are live is unknown`);
+  }
+  try {
+    lstatSync(file);
+    return file;
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    die(`could not look for the ledger ${file}: ${e.message}`);
+  }
+}
+
+// `{type, state}` per number GitHub answered (type "Issue" or "PullRequest",
+// or null for a number that names nothing), or `{unreachable}` for a number
+// whose batch had no usable answer. A body carrying an object
+// `data.repository` is an answer even at a non-zero exit: GitHub resolves
+// every alias it can and nulls the rest, and gh exits 1 with the whole body.
+function githubStates(numbers) {
+  const out = new Map();
+  for (let i = 0; i < numbers.length; i += BATCH) {
+    const batch = numbers.slice(i, i + BATCH);
+    const fields = batch.map((n) => `n${n}:issueOrPullRequest(number:${n}){__typename ... on Issue{state} ... on PullRequest{state}}`).join(" ");
+    const r = spawnSync("gh", ["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}",
+      "-f", `query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${fields}}}`], {
+      encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }),
+    });
+    let repo;
+    try {
+      repo = JSON.parse(r.stdout)?.data?.repository;
+    } catch {
+      repo = undefined;
+    }
+    const usable = repo !== null && typeof repo === "object" && !Array.isArray(repo)
+      && batch.some((n) => Object.hasOwn(repo, `n${n}`));
+    for (const n of batch) {
+      if (!usable || !Object.hasOwn(repo, `n${n}`)) {
+        out.set(n, { unreachable: `gh api graphql gave no answer for #${n} (${how(r)})` });
+        continue;
+      }
+      const node = repo[`n${n}`];
+      out.set(n, node === null ? { type: null } : { type: node.__typename, state: String(node.state).toUpperCase() });
+    }
+  }
+  return out;
+}
+
+// The root sweep's verdicts: `{remove: [{path, reason}], kept: [{path, reason}]}`.
+function judgeRoot(root, names, live, now) {
+  const cutoff = now - RETENTION_MS;
+  const remove = [];
+  const kept = [];
+  const liveMembers = live.map(parseMember).filter((m) => m !== null);
+  const bot = liveMembers.find((m) => m.family === "merge-bot");
+  const prHolder = (n) => live.find((name) => {
+    const m = parseMember(name);
+    if (m !== null) return (m.family === "fix-pr" || m.family === "finisher-pr") && m.number === n;
+    const r = REVIEWER.exec(name);
+    return r !== null && Number(r[1]) === n;
+  });
+  const implHolder = (n) => liveMembers.find((m) => m.family === "impl" && m.number === n)?.name;
+
+  const byAge = (path, name, young) => {
+    const holder = live.find((t) => name.includes(t));
+    if (holder !== undefined) return kept.push({ path, reason: `live token ${holder} appears in its name` });
+    const fresh = freshUnder(path, cutoff);
+    if (fresh === null) return remove.push({ path, reason: "idle past 7 days" });
+    kept.push({ path, reason: young ? `${young}; modified within 7 days` : "modified within 7 days" });
+  };
+
+  const keyed = [];
+  const numbers = new Set();
+  for (const name of names) {
+    const path = join(root, name);
+    let m;
+    if ((m = PR_ENTRY.exec(name))) keyed.push({ path, name, kind: "pr", n: Number(m[1]) });
+    else if ((m = IMPL_ENTRY.exec(name))) keyed.push({ path, name, kind: "impl", n: Number(m[1]) });
+    else if ((m = DISPOSITIONS_ENTRY.exec(name)) && parseMember(m[1]) !== null) keyed.push({ path, name, kind: "pr", n: parseMember(m[1]).number });
+    else {
+      byAge(path, name, null);
+      continue;
+    }
+    numbers.add(keyed.at(-1).n);
+  }
+  const states = githubStates([...numbers].sort((a, b) => a - b));
+
+  for (const { path, name, kind, n } of keyed) {
+    const s = states.get(n);
+    if (s.unreachable) {
+      kept.push({ path, reason: s.unreachable });
+      continue;
+    }
+    const want = kind === "pr" ? "PullRequest" : "Issue";
+    if (s.type !== want) {
+      byAge(path, name, s.type === null ? `#${n} names nothing on GitHub` : `#${n} is a ${s.type}, not ${kind === "pr" ? "a pull request" : "an issue"}`);
+      continue;
+    }
+    if (kind === "pr") {
+      if (bot !== undefined) {
+        kept.push({ path, reason: `live ${bot.name} holds every pr<N>` });
+        continue;
+      }
+      if (s.state === "OPEN") {
+        kept.push({ path, reason: `PR #${n} is OPEN` });
+        if (name === `pr${n}`) {
+          try {
+            remove.push(...staleRunRoots(path, cutoff, kept));
+          } catch (e) {
+            kept.push({ path, reason: `its run-* roots cannot be listed: ${e.message}` });
+          }
+        }
+        continue;
+      }
+      const holder = prHolder(n);
+      if (holder !== undefined) kept.push({ path, reason: `PR #${n} is ${s.state}, but live ${holder} names it` });
+      else remove.push({ path, reason: `PR #${n} is ${s.state}` });
+      continue;
+    }
+    if (s.state === "CLOSED") {
+      remove.push({ path, reason: `issue #${n} is CLOSED` });
+      continue;
+    }
+    const holder = implHolder(n);
+    if (holder !== undefined) {
+      kept.push({ path, reason: `issue #${n} is OPEN and live ${holder} names it` });
+      continue;
+    }
+    if (freshUnder(path, cutoff) === null) remove.push({ path, reason: `issue #${n} is OPEN, no live impl-${n} token, idle past 7 days` });
+    else kept.push({ path, reason: `issue #${n} is OPEN; modified within 7 days` });
+  }
+  return { remove, kept };
+}
+
+// The run-* directories directly under `parent` idle past the retention, as
+// removals; young ones are pushed onto `kept`. An absent parent holds none; one
+// that cannot be listed throws.
+function staleRunRoots(parent, cutoff, kept) {
+  let entries;
+  try {
+    entries = readdirSync(parent, { withFileTypes: true });
+  } catch (e) {
+    if (e.code === "ENOENT" || e.code === "ENOTDIR") return [];
+    throw e;
+  }
+  const remove = [];
+  for (const e of entries) {
+    if (!e.isDirectory() || !RUN_ROOT.test(e.name)) continue;
+    const path = join(parent, e.name);
+    if (freshUnder(path, cutoff) === null) remove.push({ path, reason: "run root idle past 7 days" });
+    else kept.push({ path, reason: "run root modified within 7 days" });
+  }
+  return remove;
+}
+
+function main() {
+  const { arg, has, sweep, stray } = defineFlags(die, {
+    flags: { root: "value", pr: "value", "after-rotate": "bool", apply: "bool" },
+  });
+  sweep();
+  stray();
+  const rootArg = arg("root");
+  const pr = arg("pr");
+  const afterRotate = has("after-rotate");
+  const apply = has("apply");
+  const usage = "usage: reclaim-scratch.mjs --root <abs> [--after-rotate] [--apply] | --pr <N> --root <abs> [--apply]";
+  if (rootArg === null) die(`--root is required — ${usage}`);
+  if (!isAbsolute(rootArg)) die(`--root must be an absolute path, got ${JSON.stringify(rootArg)}`);
+  if (pr !== null && !isDigits(pr)) die(`--pr must be a PR number, got ${JSON.stringify(pr)}`);
+  if (pr !== null && afterRotate) die("--after-rotate is the root sweep's; --pr reads no ledger");
+  const root = resolve(rootArg);
+  try {
+    if (!statSync(root).isDirectory()) die(`--root ${root} is not a directory`);
+  } catch (e) {
+    die(`--root ${root} is not a directory: ${e.message}`);
+  }
+
+  const now = Date.now();
+  let ledger = null;
+  let remove;
+  let kept = [];
+  const failed = [];
+  if (pr !== null) {
+    const parent = join(root, `pr${Number(pr)}`);
+    try {
+      remove = staleRunRoots(parent, now - RETENTION_MS, kept);
+    } catch (e) {
+      remove = [];
+      failed.push({ path: parent, error: e.message });
+    }
+  } else {
+    ledger = ledgerFile();
+    if (ledger === null && !afterRotate) die("no .fleet/ledger.md — without it no live member can hold its scratch, so nothing is reclaimed; pass --after-rotate only straight after `ledger.mjs rotate`");
+    const live = ledger === null ? [] : liveNames(ledger);
+    let names;
+    try {
+      names = readdirSync(root).sort();
+    } catch (e) {
+      die(`could not list --root ${root}: ${e.message}`);
+    }
+    ({ remove, kept } = judgeRoot(root, names, live, now));
+  }
+
+  const removed = [];
+  for (const entry of remove) {
+    if (!apply) {
+      removed.push(entry);
+      continue;
+    }
+    let error;
+    try {
+      error = removeEntry(entry.path);
+    } catch (e) {
+      error = e.message;
+    }
+    if (error === null) removed.push(entry);
+    else failed.push({ path: entry.path, error });
+  }
+  writeAll(1, `${JSON.stringify({ applied: apply, ledger, removed, kept, failed })}\n`);
+}
+
+if (isCLI(import.meta.url)) main();
