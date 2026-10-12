@@ -479,7 +479,7 @@ test("main checkout: dirty holds every dispatching row once per role, never acti
 });
 
 test("main checkout: unknown holds too, never clean; so does a check that gave no answer at all", () => {
-  for (const mainCheckout of [{ state: "unknown", cause: "read", why: "boom" }, { state: "unknown", cause: "baseline", why: "x" }, undefined]) {
+  for (const mainCheckout of [{ state: "unknown", cause: "read", why: "boom" }, { state: "unknown", cause: "baseline", why: "x" }, { state: "unknown", cause: "missing", why: "y" }, undefined]) {
     assert.deepEqual(summary(state({ ...BUSY, refresh: null, mainCheckout })), [
       ["implementers", "HOLD (main checkout unknown)", false],
       ["reviewers", "HOLD (main checkout unknown)", false],

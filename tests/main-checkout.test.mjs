@@ -650,7 +650,7 @@ test("a v1 baseline is unknown — re-record — and --record overwrites it", (t
   assert.match(c.why, /baseline v1 — re-record/);
   const said = describe(c, []);
   assert.match(said, /^MAIN-CHECKOUT-UNKNOWN baseline v1 — re-record.*re-record with .*main-checkout\.mjs --record/);
-  assert.doesNotMatch(said, /NEVER re-baseline/, "the one unknown whose remedy is --record");
+  assert.doesNotMatch(said, /NEVER re-baseline/, "an unknown whose remedy is --record");
   record(dir);
   assert.match(readFileSync(baselinePath(dir), "utf8"), /^fleet main-checkout baseline v2\n/);
   assert.equal(check(dir).state, "clean");
@@ -702,7 +702,51 @@ test("a baseline commit git cannot find is unknown, never dirty: a failed ancest
   writeFileSync(base, readFileSync(base, "utf8").replace(/^oid .*$/m, `oid ${"1".repeat(40)}`));
   const c = check(dir);
   assert.equal(c.state, "unknown");
-  assert.match(c.why, /git merge-base --is-ancestor exited \d+/);
+  assert.match(c.why, /^baseline commit 1111111 is missing from this repository/);
+});
+
+test("a baseline commit an amend and gc pruned is its own unknown: examine HEAD first, then --record clears it", (t) => {
+  const dir = repo(t);
+  // Unpushed, so once amended nothing but the reflog reaches it.
+  writeFileSync(join(dir, "tracked.txt"), "local\n");
+  git(dir, "commit", "-qam", "local");
+  const recorded = record(dir).head.oid;
+  git(dir, "commit", "-q", "--amend", "-m", "amended");
+  git(dir, "reflog", "expire", "--expire=now", "--all");
+  git(dir, "gc", "-q", "--prune=now");
+  const c = check(dir);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "missing");
+  assert.match(c.why, new RegExp(`^baseline commit ${recorded.slice(0, 7)} is missing from this repository; HEAD is refs/heads/main@[0-9a-f]{7}$`));
+  const said = describe(c, []);
+  assert.match(said, new RegExp(`^MAIN-CHECKOUT-UNKNOWN baseline commit ${recorded.slice(0, 7)} is missing from this repository`));
+  assert.match(said, /examine HEAD against origin\/main FIRST/);
+  assert.match(said, /re-record with ~\/\.fleet\/bin\/fleet-run main-checkout\.mjs --record \(it overwrites, it does not compare\)/);
+  assert.doesNotMatch(said, /NEVER re-baseline/);
+  const cli = spawnSync(process.execPath, [SCRIPT, "--check"], { cwd: dir, encoding: "utf8" });
+  assert.equal(cli.status, 2, "exit 2, like every other unknown");
+  assert.equal(cli.stdout, `${describe(c)}\n`);
+  record(dir);
+  assert.equal(check(dir).state, "clean");
+});
+
+test("a baseline commit present but corrupt stays could-not-look: only an absent object is the missing cause", (t) => {
+  const dir = repo(t);
+  // Unpushed, so `origin/main` never reads it: only the ancestry read does.
+  writeFileSync(join(dir, "tracked.txt"), "local\n");
+  git(dir, "commit", "-qam", "local");
+  const recorded = record(dir).head.oid;
+  writeFileSync(join(dir, "tracked.txt"), "two\n");
+  git(dir, "commit", "-qam", "next");
+  // Loose and read-only as git wrote it: garbage where the commit was.
+  const object = join(dir, ".git", "objects", recorded.slice(0, 2), recorded.slice(2));
+  chmodSync(object, 0o644);
+  writeFileSync(object, "garbage");
+  const c = check(dir);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "read");
+  assert.match(c.why, /^git merge-base --is-ancestor exited 128/);
+  assert.match(describe(c, []), /^MAIN-CHECKOUT-UNKNOWN could not look: .* — dispatch held: fix the failure and tick again; NEVER re-baseline over it/);
 });
 
 test("CLI: a HEAD move prints MAIN-CHECKOUT-DIRTY naming HEAD, exit 1, and the same --record clears it", (t) => {
