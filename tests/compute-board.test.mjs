@@ -1157,12 +1157,14 @@ test("#2083: once the head matches the reviewed= that answered a past-pin halt, 
 });
 
 // #1926: a `review=` token outside the wf/member grammar is still
-// read as live (compute-board.mjs's note above REVIEW). fleet-tick.mjs
-// refuses such a ledger outright; the cockpit renders it instead, and reads
+// read as live (fleet-tick.mjs foldLedger's lenient mode, which the cockpit's
+// reviewBacklog reads). deriveRun's strict fold refuses such a ledger outright;
+// the cockpit renders it instead, and reads
 // the review as in flight — `=failed` settles only an in-grammar token.
 test("#1926: a `review=` token outside the grammar reads as a live review that names nobody", () => {
   const base = "#972 impl-972=PR#972";
-  assert.equal(parseRow(base).underReview, false, "control: the row's other tokens put it under no review");
+  const owed = (row) => computeBoard(reproInputs({ rows: [row], prs: [openPr(972)] })).queue.reviewBacklog;
+  assert.equal(owed(base), 1, "control: the row's other tokens put it under no review");
   for (const tok of [
     "review=bogus:x",
     "review=member",
@@ -1172,10 +1174,18 @@ test("#1926: a `review=` token outside the grammar reads as a live review that n
     "review=member:a=b",
     "review=bogus:x=failed",
   ]) {
-    const r = parseRow(`${base} · ${tok}`);
-    assert.equal(r.underReview, true, tok);
+    const row = `${base} · ${tok}`;
+    assert.equal(owed(row), 0, tok);
+    const r = parseRow(row);
     assert.equal(r.agent, null, `${tok}: no kind to name a runner by`);
   }
+});
+
+test("#1926: a malformed `review=` after a past-pin halt reads as a live review — the re-review is not owed again", () => {
+  const base = "#972 impl-972=PR#972 · reviewed=abc1234:0/0/0:run-abc1234r · finisher-pr-972=halted:past-pin";
+  const owed = (row) => computeBoard(reproInputs({ rows: [row], prs: [openPr(972, [], "def5678def5678def5678def5678def5678def")] })).queue.reviewBacklog;
+  assert.equal(owed(base), 1, "control: the halt's head is past what was reviewed, so the re-review is owed");
+  assert.equal(owed(`${base} · review=bogus:x`), 0);
 });
 
 // --------------------------------------------------------------------------

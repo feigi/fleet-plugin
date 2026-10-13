@@ -22,11 +22,19 @@
 // an unsignaled row (no mention, no PR-bound member, no review=/reviewed=)
 // still gets pr: null here while fleet-tick.mjs's own row-key fallback keys
 // it to its ticket number regardless; see the same paragraph below.
+// A card's review, finisher and fix-applier state is its PR's, read off
+// fleet-tick.mjs's own per-PR fold (foldLedger, in its lenient mode: a token
+// it cannot read is skipped and flags the row `ledger-error`, never thrown),
+// not off the card's own row — a ticket retried under a new PR has that PR's
+// tokens on another row. A fallback `#M` row for a PR a ticket row's latest
+// attempt claims is that card's other half and renders no card of its own:
+// its row-level signals (`ledger-error`, held-behind, the cause words, a live
+// member) are the claiming card's.
 // fleet-tick.mjs's I/O and main() never run here, main() being guarded on
 // argv[1].
 import { assessBeat, isStalled, isReported, stallReport, NO_OWNER } from "./fleet-state.mjs";
-import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
-import { latestFinisherAttempts } from "./fleet-tick.mjs";
+import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW } from "./ledger-grammar.mjs";
+import { latestFinisherAttempts, foldLedger, pastPinDue } from "./fleet-tick.mjs";
 
 // A ledger row is freeform, controller-authored text. Two example shapes:
 //   #<n> impl-<n>=PR#<m> → PR#<m> → MERGED 73b356de
@@ -85,14 +93,14 @@ import { latestFinisherAttempts } from "./fleet-tick.mjs";
 // live until the token is settled `=failed` or a later `reviewed=` records
 // its result.
 //
-// A `review=` token puts the PR under review only while
-// it is live. A settled `review=…=failed` is a dead review and the PR is owed
-// one again, as run-team SKILL.md defines review-due and as fleet-tick.mjs's
-// `reviewedAny` reads the token: the PR is owed none while the row carries
-// ANY live `review=` — wherever it sits, not only as the last one — or any
-// `reviewed=`. A `review=` token outside the grammar is still read as live
-// here; fleet-tick.mjs refuses that ledger outright, so there is no reading of
-// it to agree with.
+// A `review=` token puts the PR under review only while it is live. A settled
+// `review=…=failed` is a dead review and the PR is owed one again, as run-team
+// SKILL.md defines review-due and as fleet-tick.mjs's `reviewedAny` reads the
+// token: the PR is owed none while any row naming it carries ANY live
+// `review=` — wherever it sits, not only as the last one — or any `reviewed=`.
+// A `review=` token outside the grammar is read as live by foldLedger's
+// lenient mode, which the board reads the PR's state through; the strict tick
+// refuses that ledger outright instead, and the board flags the row.
 //
 // `#N excluded · behind-pr:#M` / `behind-issue:#M` is an Exclusion — pool
 // supply, not a claim — read through ledger-grammar.mjs's premisesOf(), the
@@ -149,16 +157,12 @@ export function parseRow(row) {
   // exists for.
   const live = [];
   const implOutcomes = new Map();
-  const finisherOutcomes = new Map();
   const settled = new Set();
   let lastImpl = null; // the latest well-formed impl token (laterAttempt)
-  const finishers = []; // well-formed finisher tokens, for the row's PR below
   let anyImpl = false;
   let prMember = false;
   let review = false; // any review= token: a PR-bound signal on a row with no impl token
-  let reviewLive = false; // one not settled `=failed`: a live review
   let reviewed = false;
-  let reviewedHead = null;
   let runners = [];
   let malformed = false;
   for (const tok of row.split(/\s+/).filter(Boolean)) {
@@ -174,32 +178,18 @@ export function parseRow(row) {
           if (!lastImpl || laterAttempt(t, lastImpl, ticket)) lastImpl = t;
         }
       }
-      if (t.family === "finisher-pr" && !t.error) {
-        if (t.outcome !== null) finisherOutcomes.set(t.name, t.outcome);
-        finishers.push(t);
-      }
       if (t.bound === "pr") prMember = true;
       continue;
     }
     if (tok.startsWith("review=")) {
       review = true;
       const { kind, name, failed } = REVIEW.exec(tok)?.groups ?? {};
-      if (!failed) reviewLive = true;
       if (kind === "member") {
         if (failed) settled.add(name);
         else { live.push({ kind: "runner", name }); runners.push(name); }
       }
     } else if (tok.startsWith("reviewed=")) {
       reviewed = true;
-      // The head that review actually read — the cockpit's own copy
-      // of fleet-tick.mjs's `reviewedHead`, needed below to tell a past-pin
-      // halt already answered by this review apart from one still owed a
-      // fresh one. A token fleet-tick.mjs refuses — one that names no review
-      // run — earns the row the same `ledger-error` flag any malformed token
-      // does, rather than a row reviewed at no head.
-      const m = REVIEWED.exec(tok);
-      if (m) reviewedHead = m[1].toLowerCase();
-      else malformed = true;
       for (const r of runners) settled.add(r);
       runners = [];
     }
@@ -222,16 +212,11 @@ export function parseRow(row) {
     if (own !== null) pr = own;
     else if ((prMember || review || reviewed) && row.split(/\s/)[0] === issueM[0]) pr = Number(issueM[1]);
   }
-  let lastFinisher = null;
-  for (const t of finishers) {
-    if (t.number === pr && (!lastFinisher || laterAttempt(t, lastFinisher, pr))) lastFinisher = t;
-  }
   return {
     issue: Number(issueM[1]),
     excluded,
     impl: lastImpl?.name ?? null,
     implOutcome,
-    finisherOutcome: lastFinisher ? (finisherOutcomes.get(lastFinisher.name) ?? null) : null,
     agent: alive.length ? alive[alive.length - 1].name : null,
     pr,
     merged: !!mergedM,
@@ -239,9 +224,6 @@ export function parseRow(row) {
     heldBehind: heldM ? Number(heldM[1]) : null,
     causes,
     malformed,
-    reviewed,
-    reviewedHead,
-    underReview: reviewLive || alive.some((e) => e.kind === "member" && (e.token.family === "fix-pr" || e.token.family === "finisher-pr")),
   };
 }
 
@@ -470,13 +452,45 @@ export function computeBoard(inputs) {
     if (s.issue != null) ruledByPr.set(s.issue, s.subject);
   }
 
-  const parsed = (ledger.rows || []).map(parseRow).filter(Boolean);
+  const rows = ledger.rows || [];
+  const fold = foldLedger({ rows, dispatched: ledger.dispatched || [] }, new Set(prs.map((p) => p.number)), { lenient: true });
+  const parsed = [];
+  for (const [i, row] of rows.entries()) {
+    const p = parseRow(row);
+    if (p) parsed.push({ ...p, malformed: p.malformed || fold.malformed.has(i) });
+  }
+  // The ticket row each PR's latest attempt settled to, first row wins.
+  const claimedBy = new Map();
+  for (const p of parsed) if (p.impl !== null && p.pr != null && !claimedBy.has(p.pr)) claimedBy.set(p.pr, p);
+  // A fallback `#M` row — no impl token of its own, keyed to its own ticket
+  // number — for a PR a ticket row's latest attempt claims is that card's other
+  // half, not a second card: what the row says about the PR goes onto the
+  // claiming card, and a live member on it is the card's agent.
+  const cards = [];
+  for (const p of parsed) {
+    const claimer = p.impl === null && p.pr === p.issue ? claimedBy.get(p.pr) : undefined;
+    if (claimer === undefined) { cards.push(p); continue; }
+    claimer.malformed ||= p.malformed;
+    claimer.heldBehind ??= p.heldBehind;
+    for (const c of p.causes) if (!claimer.causes.includes(c)) claimer.causes.push(c);
+    claimer.agent = p.agent ?? claimer.agent;
+    claimer.merged ||= p.merged;
+  }
   const unqueued = new Set(prs.filter((p) => p.state === "OPEN" && !(p.labels || []).includes("ready-to-merge")).map((p) => p.number));
-  const latestFinishers = new Map(latestFinisherAttempts({ rows: ledger.rows || [], dispatched: ledger.dispatched || [] }, unqueued).map((u) => [u.pr, u.outcome]));
+  const latestFinishers = new Map(latestFinisherAttempts({ rows, dispatched: ledger.dispatched || [] }, unqueued).map((u) => [u.pr, u.outcome]));
+  // Review state is the PR's, read off the tick's own fold — a card's
+  // PR is its row's latest attempt, whichever row carries that PR's tokens.
+  const liveMember = (names) => [...names].some((n) => fold.members.get(n).outcome === null);
+  const reviewOwed = (prNum) => {
+    const st = fold.byPr.get(prNum);
+    if (st === undefined) return true;
+    if (st.inFlight || liveMember(st.fixMembers) || liveMember(st.finishers)) return false;
+    return !st.reviewedAny || pastPinDue(st, prByNum.get(prNum)?.headRefOid);
+  };
   const rowIssues = new Set();
   const tickets = [];
 
-  for (const p of parsed) {
+  for (const p of cards) {
     const pr = p.pr != null ? prByNum.get(p.pr) : undefined;
     const prevTicket = prevByIssue.get(p.issue);
     const prState = p.pr == null ? null
@@ -525,19 +539,14 @@ export function computeBoard(inputs) {
 
   // Backlog is a PR nobody has reviewed and nobody is reviewing: no live
   // `review=` (a settled `=failed` one is no review), no
-  // `reviewed=`, and no live fix-applier or finisher on the row — or
+  // `reviewed=`, and no live fix-applier or finisher on the PR — or
   // a returned review whose finisher halted `past-pin` against a head it
   // never read: owed again until the head catches up to what `reviewed=`
   // recorded, the same rule fleet-tick.mjs's reviewDue reads off headRefOid
   // (pastPinDue). A PR absent from the open list (closed, not yet MERGED)
   // reads as an unmatched head, never as answered — silence is not review.
-  const parsedByIssue = new Map(parsed.map((p) => [p.issue, p]));
-  const pastPinBacklog = (p) => p.finisherOutcome === "halted:past-pin" && p.reviewedHead !== null
-    && !String(prByNum.get(p.pr)?.headRefOid ?? "").toLowerCase().startsWith(p.reviewedHead);
-  const reviewBacklog = tickets.filter((t) => {
-    const p = parsedByIssue.get(t.issue);
-    return t.column === "REVIEW" && !p.underReview && (!p.reviewed || pastPinBacklog(p));
-  }).length;
+  // Counted once per PR, off the per-PR fold, however many cards name it.
+  const reviewBacklog = new Set(tickets.filter((t) => t.column === "REVIEW" && reviewOwed(t.pr)).map((t) => t.pr)).size;
   const cardsInPool = tickets.filter((t) => t.column === "POOL").length;
   // A capped pool read makes this count a floor, and it says so the way
   // fleet-tick.mjs's claimed count does — `"100+"`, never a bare 100 that

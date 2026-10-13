@@ -525,7 +525,20 @@ export function unlabelledFinishers(ledger, unqueued) {
     .map((u) => ({ pr: u.pr, labelled: u.attempts.filter((a) => a.outcome === "labelled").map((a) => a.name) }));
 }
 
-export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), finished = new Set()) {
+// The per-PR fold: every row and `## Dispatched` entry read once into one
+// state per PR, shared by every row that resolves to it. deriveRun reads its
+// counts off this, and compute-board.mjs reads each card's PR state off the
+// same one — a second row→PR join in the cockpit is a second answer to which
+// PR a token speaks for. Returns `{members, byPr, verdicts, claimed, excluded,
+// malformed}`: `members` the merged record per member name, `byPr` the state
+// per PR, `malformed` the indexes of the `rows` a token was skipped on.
+//
+// Strict by default: a token it cannot read throws LedgerError. `lenient` is
+// the cockpit's mode — its contract is that unknown text is flagged, never
+// fatal — and skips that token instead, recording its row in `malformed`. A
+// skipped `review=` still reads as a live review and a skipped `reviewed=` as
+// a returned one at no head, the readings the cockpit has always given them.
+export function foldLedger({ rows, dispatched }, open, { lenient = false } = {}) {
   // One entry per member name across `## Dispatched` and every row. A member
   // settled ANYWHERE is settled: `settle` is the only writer of an outcome, and
   // a bare copy beside it is what a whole-line `row` rewrite leaves behind.
@@ -538,19 +551,26 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
   // row naming no PR, which settles no PR-bound member); a stray's token
   // still creates the member, live, as before.
   const members = new Map();
+  const malformed = new Set();
   const note = (t, where, rowPr) => {
-    if (t.error) throw new LedgerError(`${where}: ${t.name}: ${t.error}`);
+    if (t.error) {
+      if (lenient) return false;
+      throw new LedgerError(`${where}: ${t.name}: ${t.error}`);
+    }
     const m = members.get(t.name) ?? { name: t.name, family: t.family, number: t.number, outcome: null };
     if (t.outcome !== null && (t.bound !== "pr" || rowPr === undefined || t.number === rowPr)) m.outcome = t.outcome;
     members.set(t.name, m);
+    return true;
   };
   for (const e of dispatched) {
     const t = parseToken(e);
-    if (!t) throw new LedgerError(`## Dispatched entry '${e}' is not a member token — fix the ledger by hand before the tick can count from it`);
+    if (!t) {
+      if (lenient) continue;
+      throw new LedgerError(`## Dispatched entry '${e}' is not a member token — fix the ledger by hand before the tick can count from it`);
+    }
     note(t, `## Dispatched entry '${e}'`);
   }
 
-  const open = new Set(prs.map((p) => p.number));
   const claimed = new Set();
   const excluded = [];
   const byPr = new Map();
@@ -581,7 +601,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
       if (t && !t.error && t.family === "fix-pr" && t.number === pr && t.outcome !== null) settledInRow.add(t.name);
     }
   }
-  for (const text of rows) {
+  for (const [i, text] of rows.entries()) {
     const { keyNum, pr } = rowNums(text);
     const where = `row '${text}'`;
     // One state per PR, shared by every row that resolves to it: a
@@ -618,10 +638,10 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
       inFlight: false, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
       fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(), held: [],
       conflictOpen: false, reviewedHead: null, reviewedRun: null, pastPinHalt: false, dispositions: [], workers: new Set(),
+      finishers: new Set(),
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
-    // retry suffix ("" < "b" < "c" …) the same way compute-board.mjs's
-    // laterAttempt does — never by row-text position. A
+    // retry suffix ("" < "b" < "c" …) — never by row-text position. A
     // `-b` retry can sit before an older `halted:past-pin` token after a row
     // rewrite, and text order must not read the stale one as the live
     // finisher's replacement. Reset at each `reviewed=`, since `pastPinHalt`
@@ -630,7 +650,10 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     for (const tok of text.split(/\s+/).filter(Boolean)) {
       const t = parseToken(tok);
       if (t) {
-        note(t, where, pr);
+        if (!note(t, where, pr)) {
+          malformed.add(i);
+          continue;
+        }
         if ((t.bound === "pr" && t.number === pr) || t.family === "impl") st.workers.add(t.name);
         // A settled `failed`/`killed` fix-applier leaves review findings or a
         // conflict unfixed and no successor dispatched — the PR stays fix-due
@@ -675,6 +698,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
             } else st.reviewFixed = true;
           }
         }
+        if (t.family === "finisher-pr" && t.number === pr) st.finishers.add(t.name);
         if (t.family === "finisher-pr" && t.number === pr
           && (!latestFinisher || (t.retry ?? "") > (latestFinisher.retry ?? ""))) {
           latestFinisher = t;
@@ -684,11 +708,23 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
       }
       if (tok.startsWith("review=")) {
         const m = REVIEW.exec(tok);
+        if (!m && lenient) {
+          malformed.add(i);
+          st.inFlight = true;
+          st.reviewedAny = true;
+          continue;
+        }
         if (!m) throw new LedgerError(`${where}: '${tok}' is not review=wf:<runId> | member:review-pr-<n>, optionally =failed`);
         st.inFlight = !m.groups.failed;
         if (!m.groups.failed) st.reviewedAny = true;
       } else if (tok.startsWith("reviewed=")) {
         const m = REVIEWED.exec(tok);
+        if (!m && lenient) {
+          malformed.add(i);
+          latestFinisher = null;
+          Object.assign(st, { inFlight: false, reviewedAny: true, reviewFixed: false, pastPinHalt: false });
+          continue;
+        }
         if (!m && REVIEWED_RUNLESS.test(tok)) {
           throw new LedgerError(`${where}: '${tok}' names no review run — reviewed= is now <head>:<survived>/<refuted>/<unverified>:<run>, `
             + "<run> the run-XXXXXXXX directory holding that review's review.json; drop the token with `ledger.mjs row` and record it again with `ledger.mjs review <pr>`");
@@ -700,7 +736,8 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
           reviewedHead: m[1].toLowerCase(), reviewedRun: m[5], pastPinHalt: false,
         });
       } else if (labelOffMember(tok) === null) {
-        throw new LedgerError(`${where}: '${tok}' is not label-off=<finisher-pr member> — fix the row with \`ledger.mjs row\``);
+        if (!lenient) throw new LedgerError(`${where}: '${tok}' is not label-off=<finisher-pr member> — fix the row with \`ledger.mjs row\``);
+        malformed.add(i);
       } else {
         const h = HELD.exec(tok);
         if (h) st.held.push(Number(h[1]));
@@ -710,14 +747,18 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
           // misrecorded one, and read on a guess it would either hold the
           // wrong PR or leave this one silently stalled.
           if (Number(c[1]) !== pr) {
-            throw new LedgerError(`${where}: '${tok}' names PR #${c[1]}, but this row is ${pr === null ? "no PR's" : `PR #${pr}'s`} — a conflict hold goes on the held PR's own row`);
+            if (!lenient) {
+              throw new LedgerError(`${where}: '${tok}' names PR #${c[1]}, but this row is ${pr === null ? "no PR's" : `PR #${pr}'s`} — a conflict hold goes on the held PR's own row`);
+            }
+            malformed.add(i);
+          } else {
+            // A fresh hold is unresolved whatever settled before it, the way a
+            // fresh `reviewed=` resets `reviewFixed` above. A redundant re-hold
+            // (merge-bot retrying a PR it has already held) changes
+            // nothing a live fix-applier holds off: liveness is not read off
+            // token order.
+            st.conflictOpen = true;
           }
-          // A fresh hold is unresolved whatever settled before it, the way a
-          // fresh `reviewed=` resets `reviewFixed` above. A redundant re-hold
-          // (merge-bot retrying a PR it has already held) changes
-          // nothing a live fix-applier holds off: liveness is not read off
-          // token order.
-          st.conflictOpen = true;
         }
         const v = TIER_VERDICT.exec(tok);
         if (v) verdicts[v[1]].add(v[2]);
@@ -741,6 +782,20 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     }
     if (pr !== null) byPr.set(pr, st);
   }
+  return { members, byPr, verdicts, claimed, excluded, malformed };
+}
+
+// A PR whose latest finisher halted `past-pin` against a returned review owes
+// a fresh one while its head is still past what that review read: a
+// `reviewed=` head (7-40 hex) prefix-matching gh's full headRefOid is the head
+// that review read, and there is nothing more to review. `st` is a `byPr`
+// state, `undefined` for a PR no row names.
+export const pastPinDue = (st, head) => st !== undefined && st.pastPinHalt && !st.inFlight && st.reviewedHead !== null
+  && !String(head).toLowerCase().startsWith(st.reviewedHead);
+
+export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), finished = new Set()) {
+  const open = new Set(prs.map((p) => p.number));
+  const { members, byPr, verdicts, claimed, excluded } = foldLedger({ rows, dispatched }, open);
 
   const all = [...members.values()];
   const live = (family) => all.filter((m) => m.family === family && m.outcome === null).length;
@@ -797,11 +852,6 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     const retry = parseMember(cur.member).retry ?? "";
     return ![...st.fixLanded].some((n) => !st.conflictLanded.has(n) && (parseMember(n).retry ?? "") > retry);
   };
-  // The halt holds only while the head is still past what was reviewed: a
-  // `reviewed=` head (7-40 hex) prefix-matching gh's full headRefOid is the
-  // head that review read, and there is nothing more to review.
-  const pastPinDue = (st, head) => st !== undefined && st.pastPinHalt && !st.inFlight && st.reviewedHead !== null
-    && !String(head).toLowerCase().startsWith(st.reviewedHead);
   // A `review=` token with no `reviewed=` after it reads as in flight, and the
   // ledger alone never says otherwise: a review whose own `reviewed=` write
   // never landed stays in flight after its PR merges, holding a reviewer slot
