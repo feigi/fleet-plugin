@@ -485,3 +485,4 @@ Neither may be assumed. Both are cheap to measure.
 - Editing `pr-review-toolkit` agent frontmatter. Vendored third-party, and clobbered on plugin update.
 - Re-reviewing the fix commit. Change 4 gates it with tests; a second review pass is a separate decision, and the cost case against it is the point of this ticket.
 - Whether `suggestion` should auto-file at all when out of scope. Change 3 keeps the current behaviour for the out-of-scope branch; if the backlog stays large after attribution lands (Change 3, step 5), revisit with data.
+  **Revisited by #2878:** an out-of-scope `suggestion` above ADR 0002's claim bar now gets the fix-applier's single refuter before it is filed, while the review budget stays 0; see ADR 0022's amendment for #2878.

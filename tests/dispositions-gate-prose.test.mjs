@@ -145,11 +145,36 @@ test("step 6 has a standalone member pass --no-ledger and --review: no token is 
 const filingStep = () =>
   REVIEW_AND_FIX.between("**Name where each deferral went, in the disposition record.**", "\n6. Diff-check green", "review-and-fix.md").text;
 
-test("step 5 has every deferred entry name in issue where it went, and an in-scope suggestion's entry its refuter verdict file", () => {
+test("step 5 has every deferred entry name in issue where it went, and a suggestion's entry its refuter verdict file in either scope", () => {
   const s = filingStep();
   assert.match(s, Pin.phrase("Every entry you defer carries `issue`: the number of the issue you filed it to, commented it onto, or appended it to"));
   assert.match(s, Pin.phrase(
-    "An in-scope `suggestion`'s entry — an `unverified` finding with `refutersDispatched` of zero — also carries `verdictPath`, applied or deferred: the absolute path of a file holding its refuter's verdict as JSON, `{\"refuted\": <boolean>, \"reason\": \"<string>\"}`, under your own `<scratch>/pr<N>/fix-XXXXXXXX/<finding>/` run root.",
+    "A `suggestion`'s entry — an `unverified` finding with `refutersDispatched` of zero — also carries `verdictPath`, applied or deferred, in scope and, above the claim bar, out of scope: the absolute path of a file holding its refuter's verdict as JSON, `{\"refuted\": <boolean>, \"reason\": \"<string>\"}`, under your own `<scratch>/pr<N>/fix-XXXXXXXX/<finding>/` run root.",
+  ));
+  assert.match(s, Pin.phrase(
+    "out of scope, that file missing or holding no decision files the finding open `needs-triage`, while in scope it is a mismatch.",
+  ));
+});
+
+// Step 2's plan paragraph: one line, bounded by the record paragraph's opener.
+const planStep = () =>
+  REVIEW_AND_FIX.between("2. Plan the actions.", "\n   **Write every ruling to", "review-and-fix.md").text;
+
+test("step 2 runs the claim bar first out of scope, then checks every other suggestion with one refuter, in scope or out", () => {
+  const s = planStep();
+  assert.match(s, Pin.phrase(
+    "a suggestion whose claim is about shape — step 5's worth-a-claim bar, recorded `claimKind: shape` — gets no refuter and goes to the closed `PR #<pr> review: the suggestion band, checked` record, and every other out-of-scope suggestion gets the same refuter an in-scope one does, dispatched the same way, before it is filed.",
+  ));
+  assert.match(s, Pin.phrase("In scope → dispatch one refuter against it, biased to refuse"));
+});
+
+test("step 2 files a refuted out-of-scope suggestion on the closed record and any other open needs-triage, and step 4 reports the dispatch count", () => {
+  const s = planStep();
+  assert.match(s, Pin.phrase(
+    "Refuted → the closed `PR #<pr> review: the suggestion band, checked` record, never an open issue. Survived, or its refuter crashed or abstained → its own open issue labelled `needs-triage`, citing the verdict, or the run that crashed, in the body.",
+  ));
+  assert.match(REVIEW_AND_FIX.text, Pin.phrase(
+    "your apply/defer adjudication + how many refuters you dispatched against out-of-scope suggestions + the pushed SHA",
   ));
 });
 

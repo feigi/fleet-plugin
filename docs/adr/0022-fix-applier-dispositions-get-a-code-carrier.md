@@ -28,6 +28,27 @@ in-scope suggestion's verdict file that abstains is a mismatch, like one
 failing the schema.
 Amended by #2405: the fallback reviewer path is removed; every review is a
 runner's, so Decision 8's token always has a fix-applier to name.
+Amended by #2878 (ruled 2026-10-13 by the maintainer, from a grilling
+session): the review's `verifiersBySeverity.suggestion` budget stays 0, and
+the fix-applier's single refuter, biased to refuse, extends to out-of-scope
+suggestions, with the same dispatch, sandbox and `verdictPath` evidence as an
+in-scope one. ADR 0002's claim bar runs first: an out-of-scope suggestion
+below it (`claimKind: shape`) goes to the closed record with no refuter.
+Above it `verdictPath` is required in either scope, and Decision 5's
+out-of-scope `suggestion` row splits: refuted → the closed suggestion-band
+record, never dropped and never opened; survived, crashed or abstained →
+open, `needs-triage`, citing the verdict or the run in the body. Out of
+scope, a verdict path under the fix-applier's run directory holding no
+decision — no file, a malformed one, or an abstention — is a refuter that
+crashed or abstained, not a mismatch. There is no cap on refuter count; the
+fix-applier's final verdict reports how many it dispatched against
+out-of-scope suggestions. Guard, read once 15 PRs, each with at least one
+out-of-scope suggestion above the claim bar, have run under this rule across
+at least 3 run dates. Trigger A, the filter does nothing: more than half of
+the open out-of-scope suggestion issues filed in that window close
+`wontfix` — then remove the refuter or tighten its prompt. Trigger B, the
+filter buries real work: 3 or more refuted entries promoted later, counted
+with ADR 0002's promotion marks.
 
 ## Context
 
