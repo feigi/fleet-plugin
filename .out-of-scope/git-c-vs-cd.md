@@ -34,7 +34,7 @@ harness had verified as behavior-equivalent. It was not a failure report. By the
 it was triaged, the review pass that produced it had already consolidated
 `pin-drift.sh` from six `$root`-dependent lines to four `git -C "$root"` calls, and
 shellcheck is clean on the file. The same reasoning `review-pr-micro-refactors.md`
-applies to `workflows/review-pr.js` holds here: changing a file for tidiness alone, on
+applies to `plugin/scripts/review-core.mjs` holds here: changing a file for tidiness alone, on
 code a review just touched, is not accepted.
 
 ## What would reopen this
