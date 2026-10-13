@@ -41,10 +41,25 @@ export const isTestDir = (p) => /(^|\/)(__tests__|tests?|e2e|__mocks__)\//i.test
 // suffix is a naming heuristic: it also claims a production component named like
 // `ABTest.tsx`, which is the accepted cost of recognising `FooTest.java` without
 // naming a language.
-export const isTestName = (p) =>
-  /[._](test|spec)\.[^/.]+$/i.test(p) ||
-  /(^|\/)test_[^/]*$/i.test(p) ||
-  /[A-Za-z0-9]Tests?\.[^/.]+$/.test(p);
+//
+// Each shape captures the basename with its affix and extension removed, so
+// `testSubject` names what the test is about from the same patterns this
+// predicate judges by: `foo.test.ts`, `foo_test.go`, `test_foo.py` and
+// `foo.spec.rb` give `foo`, and `FooTest.java` gives `Foo`. The first shape
+// that matches decides. `null` means no test name.
+const TEST_NAME_SHAPES = [
+  /(?:^|\/)([^/]*)[._](?:test|spec)\.[^/.]+$/i,
+  /(?:^|\/)test_([^/]*?)(?:\.[^/.]+)?$/i,
+  /(?:^|\/)([^/]*[A-Za-z0-9])Tests?\.[^/.]+$/,
+];
+export const testSubject = (p) => {
+  for (const shape of TEST_NAME_SHAPES) {
+    const m = shape.exec(p);
+    if (m) return m[1];
+  }
+  return null;
+};
+export const isTestName = (p) => testSubject(p) !== null;
 
 // Only a prose or config extension, or a conventional name, makes a file docs or
 // config — which those already do anywhere, so neither `docs/` nor `.github/` has

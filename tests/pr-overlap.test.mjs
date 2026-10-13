@@ -74,7 +74,8 @@ test("CLI: well-formed --a/--b values are accepted and the CLI reports a verdict
     a: 1,
     b: 2,
     files: ["src/shared.ts"],
-    modules: ["shared"],
+    // A plain source file has no test-shaped name, so it is no module.
+    modules: [],
     dirs: ["src"],
     prose: [],
     proseUnrun: null,
@@ -85,6 +86,84 @@ test("CLI: well-formed --a/--b values are accepted and the CLI reports a verdict
   // this tool's `gh` traffic and hand its ENOBUFS cliff to every caller, so
   // the two `--name-only` calls are the whole bill here.
   assert.deepEqual(calls, ["pr diff 1 --name-only", "pr diff 2 --name-only"]);
+});
+
+// ---------------------------------------------------------------------------
+// #3184: the `modules` signal, language-neutral. Only a test-shaped name
+// takes part, and its module is the name with the test affix and extension
+// removed, so a test that moved directories still matches itself.
+function overlap(namesA, namesB) {
+  const r = run({ prs: { 1: { names: namesA, diff: "" }, 2: { names: namesB, diff: "" } } }, 1, 2);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  return JSON.parse(r.stdout);
+}
+
+test("modules: the same test file in two directories is one module, in any language", () => {
+  for (const [a, b, want] of [
+    ["src/a/foo_test.go", "pkg/b/foo_test.go", "foo"],
+    ["test_foo.py", "tests/test_foo.py", "foo"],
+    ["src/foo.test.ts", "tests/unit/foo.test.ts", "foo"],
+    ["lib/foo.spec.rb", "spec/foo_spec.rb", "foo"],
+    ["src/main/java/FooTest.java", "src/test/kotlin/FooTest.kt", "Foo"],
+  ]) {
+    const payload = overlap([a], [b]);
+    assert.deepEqual(payload.files, [], `${a} vs ${b}`);
+    assert.deepEqual(payload.modules, [want], `${a} vs ${b}`);
+    assert.equal(payload.signal, "modules", `${a} vs ${b}`);
+  }
+});
+
+// Pinned choice: modules compare case-sensitively, the same way `files`
+// compares paths. `FooTest.java` is module `Foo` and `foo_test.go` is `foo`.
+test("modules: names compare case-sensitively", () => {
+  const payload = overlap(["src/FooTest.java"], ["pkg/foo_test.go"]);
+  assert.deepEqual(payload.modules, []);
+  assert.equal(payload.signal, "none");
+});
+
+// A source basename recurs across unrelated directories in every language,
+// `.ts` included, so a file without a test-shaped name never takes part.
+test("modules: a non-test source file with a shared basename is no module", () => {
+  for (const [a, b] of [
+    ["src/a/index.ts", "src/b/index.ts"],
+    ["cmd/a/main.go", "internal/b/main.go"],
+    ["pkg/a/__init__.py", "pkg/b/__init__.py"],
+  ]) {
+    const payload = overlap([a], [b]);
+    assert.deepEqual(payload.modules, [], `${a} vs ${b}`);
+    assert.equal(payload.signal, "none", `${a} vs ${b}`);
+  }
+});
+
+// A test-shaped name with nothing in front of its affix (`.test.ts`,
+// `_test.go`, `test_`) has an empty subject, which names no module: two PRs
+// that each touch one would otherwise share the module "".
+test("modules: a test-shaped name with an empty subject is no module", () => {
+  for (const [a, b] of [
+    ["a/.test.ts", "b/.test.ts"],
+    ["a/_test.go", "b/_test.go"],
+    ["a/test_", "b/test_"],
+  ]) {
+    const payload = overlap([a], [b]);
+    assert.deepEqual(payload.modules, [], `${a} vs ${b}`);
+    assert.equal(payload.signal, "none", `${a} vs ${b}`);
+  }
+});
+
+// Docs and config never take part, a test-shaped name included: isTestName
+// alone claims `docs/test_plan.md` and `docker-compose.test.yml`.
+test("modules: docs and config files with a shared basename are no module", () => {
+  for (const [a, b] of [
+    ["docs/a/README.md", "plugin/b/README.md"],
+    ["skills/a/SKILL.md", "skills/b/SKILL.md"],
+    ["hooks/a/hooks.json", "hooks/b/hooks.json"],
+    ["docs/test_plan.md", "notes/test_plan.md"],
+    ["deploy/a/docker-compose.test.yml", "deploy/b/docker-compose.test.yml"],
+  ]) {
+    const payload = overlap([a], [b]);
+    assert.deepEqual(payload.modules, [], `${a} vs ${b}`);
+    assert.notEqual(payload.signal, "modules", `${a} vs ${b}`);
+  }
 });
 
 // ---------------------------------------------------------------------------

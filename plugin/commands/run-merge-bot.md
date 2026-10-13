@@ -18,7 +18,7 @@ Before touching labeled PR `N`, list every open PR below `N` lacking the label. 
 ~/.fleet/bin/fleet-run pr-overlap.mjs --a <lower-pr> --b <N>
 ```
 
-**Any** of its four signals (`files`, `modules`, `dirs`, `prose`) firing means related. Path equality alone is too weak: a repo mid-migration has `src/…/foo.test.ts` in one PR and `tests/unit/…/foo.test.ts` in the other — same module, zero shared paths.
+**Any** of its four signals (`files`, `modules`, `dirs`, `prose`) firing means related. Path equality alone is too weak: a repo mid-migration has `src/…/test_foo.py` in one PR and `tests/unit/…/test_foo.py` in the other — same module, zero shared paths. A module is a test file's name with its test affix and extension removed, in any language (`foo.test.ts`, `foo_test.go` and `test_foo.py` are all `foo`); other files are not modules.
 
 Two false positives in signal 3:
 

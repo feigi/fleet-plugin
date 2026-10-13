@@ -16,8 +16,8 @@ lifetime is one **Pass**.
    after every merge (a merge invalidates every other open PR's CI
    currency).
 3. **Per PR**, [`pr-overlap.mjs`](../../plugin/scripts/pr-overlap.mjs)
-   checks every lower-numbered open PR for shared files, module
-   basenames, top-level directories, or diff-prose citing a shared data
+   checks every lower-numbered open PR for shared files, test-file module
+   names, top-level directories, or diff-prose citing a shared data
    file — any signal holds this PR as `held-behind:#<lower>`.
 4. **Rebase** an unrelated PR server-side (`gh pr update-branch
    --rebase`). A genuine conflict is recorded as `conflict-hold:#<pr>`
