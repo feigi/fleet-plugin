@@ -25,6 +25,20 @@ close it:
 5. #3181 `2026-10-13-pull-as-driver.md`: `pull.mjs` with oracle questions.
 6. #3182, this one. The external-wake probe is #3183.
 
+Ticketed 2026-10-13, blocker-first, each ticket carrying a `## Blocked by`
+list:
+
+| spec | tickets |
+|---|---|
+| #3177 briefs | #3185 renderer · #3194 bodies · #3195 dispatch brief gate · #3186 finisher-label · #3187 finisher-audit · #3202 SKILL.md blocks out, golden retarget, #2884 |
+| #3178 boundaries | #3189 phase0.mjs · #3196 tick gate + session reader · #3190 closeout.mjs · #3203 SKILL.md phase 0 / end of run |
+| #3179 reports | #3191 report-schema · #3197 settle --from-report · #3198 tick SETTLE · #3199 readers + reclaim |
+| #3180 wake | #3192 ledger token · #3200 tick --apply · #3201 transcript reconcile · #3204 fleet-event report kinds · #3206 fleet-event other kinds + table |
+| #3181 pull | #3205 pull.mjs + Q1/Q2 · #3207 collision scan + Q3 · #3208 tick PULL pending + Phase 1/2 |
+| #3182 diet | #3193 incident policy (no blockers) · #3209 war stories out · #3210 shape rewrite · #3211 budget test |
+
+Unblocked at filing: #3185, #3186, #3187, #3189, #3190, #3191, #3192, #3193.
+
 Order: 1 and 3 first, in parallel; 2 beside them; 4 after 2 and 3; 5 after
 1; 6 after all. Specs 1, 4, 5 and 6 edit SKILL.md heavily, so the fleet's
 own collision scan serializes their tickets as `behind-pr`; carve those
