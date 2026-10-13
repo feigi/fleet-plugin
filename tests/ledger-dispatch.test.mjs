@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
-import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
+import { deriveRun, LedgerError } from "../plugin/scripts/fleet-tick.mjs";
 import { rowPr } from "../plugin/scripts/ledger-grammar.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
@@ -727,6 +727,82 @@ test("settle does not fold when its own row already names a PR", (t) => {
     "#100 impl-100=PR#150 · impl-100-b=PR#160",
     "#160 fix-pr-160 · review=member:review-pr-160",
   ]);
+});
+
+// A ticket row whose first attempt settled to one PR and whose replacement
+// settled to another: the ledger keeps both on the row (above) and the tick
+// keys the row's tokens to the first. The board reads each PR's state off the
+// tick's own fold, so the PR the latest attempt opened is one card, with that
+// PR's state and none of the first PR's.
+const REPLACED_HEAD = "abc1234";
+const boardOf = (ledger, prs) => computeBoard({
+  ledger: { rows: ledger.rows, dispatched: ledger.dispatched, filed: [], ruled: [] },
+  issues: [], merged: [], ci: {}, prev: { tickets: [] }, now: 0, prs,
+});
+
+test("a ticket row retried under a second PR is one board card on the latest PR, with that PR's own state", (t) => {
+  const { ok, read } = fixture(t);
+  ok("dispatch", "659", "impl-659");
+  ok("settle", "impl-659", "PR#800");
+  ok("dispatch", "659", "impl-659-b");
+  ok("dispatch", "724", "fix-pr-724");
+  ok("settle", "impl-659-b", "PR#724");
+  ok("dispatch", "724", "finisher-pr-724");
+  ok("review", "800", "review=member:review-pr-800");
+  ok("review", "800", `reviewed=${REPLACED_HEAD}:0/0/0:run-abcd1234`);
+  ok("settle", "fix-pr-724", "no-op");
+  ok("settle", "finisher-pr-724", "failed");
+  const ledger = read();
+  assert.deepEqual(ledger.rows, [
+    `#659 impl-659=PR#800 · impl-659-b=PR#724 · review=member:review-pr-800 · reviewed=${REPLACED_HEAD}:0/0/0:run-abcd1234`,
+    "#724 fix-pr-724=no-op · finisher-pr-724=failed",
+  ], "the fold was skipped, as designed");
+  const board = boardOf(ledger, [{ number: 724, state: "OPEN", labels: [], title: "pr 724", headRefOid: "def5678def5678def5678def5678def5678def" }]);
+  const cards = board.tickets.filter((c) => c.pr !== null);
+  assert.deepEqual(cards.map((c) => [c.issue, c.pr]), [[659, 724]], "one card per PR: no #724 card, none for PR 800");
+  assert.equal(board.queue.reviewBacklog, 1, "PR 724 has no review of its own, and PR 800's reviewed= is not it");
+  assert.equal(cards.filter((c) => c.flags.includes("finisher:failed")).length, 1);
+  const run = deriveRun({ rows: ledger.rows, dispatched: ledger.dispatched, drain: null },
+    [{ number: 724, labels: [], closingIssuesReferences: [{ number: 659 }], headRefOid: "def5678" }]);
+  assert.deepEqual(run.reviewDue, [724], "the tick agrees");
+});
+
+test("a ticket row and an unrelated fallback row each keep their own card", (t) => {
+  const { ok } = fixture(t);
+  ok("dispatch", "900", "impl-900");
+  ok("settle", "impl-900", "PR#901");
+  ok("dispatch", "950", "fix-pr-950");
+  const board = boardOf(ok("read"), [
+    { number: 901, state: "OPEN", labels: [], title: "pr 901" },
+    { number: 950, state: "OPEN", labels: [], title: "pr 950" },
+  ]);
+  assert.deepEqual(board.tickets.map((c) => [c.issue, c.pr]).sort((a, b) => a[0] - b[0]), [[900, 901], [950, 950]]);
+  assert.equal(board.queue.reviewBacklog, 1, "PR 901 is owed a review; PR 950's fix-applier is working it");
+});
+
+test("a malformed reviewed= token on a PR's row still yields a board, flags that card ledger-error, and the tick still refuses", (t) => {
+  const { put, read } = fixture(t);
+  put("910", "impl-910=PR#911 · reviewed=abc1234:0/0/0");
+  put("920", "impl-920=PR#921 · review=member:review-pr-921 · reviewed=abc1234:0/0/0:run-abcd1234");
+  const ledger = read();
+  const prs = [911, 921].map((number) => ({ number, state: "OPEN", labels: [], title: `pr ${number}` }));
+  const board = boardOf(ledger, prs);
+  assert.ok(board.tickets.find((c) => c.issue === 910).flags.includes("ledger-error"));
+  assert.ok(!board.tickets.find((c) => c.issue === 920).flags.includes("ledger-error"), "a well-formed row is not flagged");
+  assert.throws(() => deriveRun({ rows: ledger.rows, dispatched: ledger.dispatched, drain: null },
+    prs.map((p) => ({ ...p, labels: [], closingIssuesReferences: [] }))), LedgerError);
+});
+
+test("every token the tick refuses is skipped and flagged by the board, none thrown", (t) => {
+  const { put, read } = fixture(t);
+  const bad = ["review=bogus:x", "reviewed=zzz", "label-off=impl-1", "conflict-hold:#99", "impl-5=exploded", "reviewed=abc1234:0/0/0"];
+  bad.forEach((tok, i) => put(String(930 + i), `impl-${930 + i}=PR#${940 + i} · ${tok}`));
+  const ledger = { ...read(), dispatched: ["not a member token"] };
+  const prs = bad.map((_, i) => ({ number: 940 + i, state: "OPEN", labels: [], title: "pr" }));
+  const board = boardOf(ledger, prs);
+  bad.forEach((tok, i) => assert.ok(board.tickets.find((c) => c.issue === 930 + i).flags.includes("ledger-error"), tok));
+  bad.forEach((tok, i) => assert.throws(() => deriveRun({ rows: [ledger.rows[i]], dispatched: [], drain: null },
+    prs.map((p) => ({ ...p, closingIssuesReferences: [] }))), LedgerError, tok));
 });
 
 // #2288: a row keyed `#M` that no implementer claims is folded whatever it
