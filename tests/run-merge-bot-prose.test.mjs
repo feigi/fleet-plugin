@@ -1476,13 +1476,26 @@ test("step 2's opening paragraph bounds the CI wait per PR and names the outcome
   const s = step2Opening();
   assert.match(
     s,
-    Pin.phrase("The wait is bounded: 20 minutes of wall-clock per PR, summed across every poll cell you issue for it."),
+    Pin.phrase("The wait is bounded: 20 minutes of wall-clock per PR, measured from your first poll for it across every poll cell you issue for it."),
     "step 2's opening paragraph no longer states the per-PR total bound across poll cells",
   );
   assert.match(
     s,
-    Pin.phrase("A run still `queued` or `in_progress` at that bound is an outcome, not a reason to poll on — skip the PR and report `ci-wait-timeout-#<pr>` with the run id and its `status`, leave the label alone, and move to the next candidate"),
+    Pin.phrase("A run whose `status` is still not `completed` at that bound is an outcome, not a reason to poll on — skip the PR and report `ci-wait-timeout-#<pr>` with the run id and its `status`, leave the label alone, and move to the next candidate; handled the same way as step 3.1's null-runId cap"),
     "step 2's opening paragraph no longer says what the bot does at the bound",
+  );
+});
+
+test("step 2's bound belongs to one selection: a behind-skipped PR re-selected from step 1 gets a fresh bound", () => {
+  assert.match(
+    step2Opening(),
+    Pin.phrase("The bound belongs to one selection of the PR: a PR re-selected fresh from step 1 after a `behind:<n>` skip is rebased again, runs a new CI run, and gets a fresh bound, whatever the earlier wait spent."),
+    "step 2's opening paragraph no longer scopes the bound to one selection of the PR",
+  );
+  assert.match(
+    DOC.paragraph("`bash` backgrounds any call past about 60s even with `timeout` set, so hold the wait", "run-merge-bot.md's step 2 poll-cell paragraph", "A CI cycle here runs").text,
+    Pin.phrase("since your first poll for this PR in this selection"),
+    "the poll cell no longer measures the bound from the first poll of this selection",
   );
 });
 

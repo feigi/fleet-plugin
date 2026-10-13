@@ -4186,7 +4186,7 @@ Plan it as a PR the run's own merge queue lands, never as an edit-and-continue.
 | Merge bot's gate cannot answer the main-gain check (`main-gain-unanswerable`, exit 2) | Report `main-gain-unanswerable-#<pr>` with what it printed, PR stays queued, label untouched |
 | Merge bot cannot resolve a rebase safely | Stop that PR, report, continue. On a conflict the bot has already appended `conflict-hold:#<pr>` to the PR's row; the tick prints `DISPATCH fix-pr PR#<pr>` and holds the merge until that fix-applier settles. A PR that conflicts before any bot reaches it is the tick's `CONFLICT PR#<pr>` line, whose hold you record |
 | Merge bot's gate refuses on its instrument re-check (`instrument-set-changed` or `instruments-unanswerable`, exit 2) | Report `<reason>-#<pr>` with what it printed, PR stays queued, label untouched. Do not re-run the gate |
-| Merge bot's CI wait reaches its per-PR time bound with the run still `queued` or `in_progress` | The bot skips that PR and reports `ci-wait-timeout-#<pr>` with the run id and its status. PR stays queued, label untouched |
+| Merge bot's CI wait reaches its per-PR time bound with the run's `status` still not `completed` | The bot skips that PR and reports `ci-wait-timeout-#<pr>` with the run id and its status. PR stays queued, label untouched |
 | Member silent or truncated | Send to ping or resume — same unit of work; see the state machine below |
 | Member idle with work outstanding | Read the PR first, *then* ping. Idle ≠ done |
 | Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then new member, new name, prompt carries inherited state |
