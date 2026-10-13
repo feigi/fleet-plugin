@@ -128,6 +128,10 @@ export const SNAPSHOT_SCHEMA = {
     installCmd: { type: "string" },
     installExit: { type: "integer" },
     installError: { type: "string" },
+    // What `git status --porcelain --untracked-files=all` printed in the
+    // snapshot after the Install step, one entry per line. The repository's
+    // own ignore rules decide it, so it is reported, never excluded.
+    untracked: { type: "array", items: { type: "string" } },
   },
 };
 
@@ -466,7 +470,17 @@ export function snapshotMissing(snap, runRootPrefix) {
 // commit, no ancestry, no remotes, so `git log`/`git diff` now return
 // plausible output about the snapshot in place of the `fatal:` that used to
 // stop that question being asked.
+//
+// What the snapshot reads untracked after the Install step rides on the end
+// as one line: the repository's own ignore rules left it, so it is a fact
+// about the repository, and the review names it rather than hiding it.
 export function environmentNote(snap) {
+  const untracked = snap && Array.isArray(snap.untracked) ? snap.untracked.filter((l) => typeof l === "string" && l.trim()) : [];
+  const note = repoNote(snap);
+  return untracked.length ? `${note}\nAfter the Install step the snapshot reads untracked under the repository's own ignore rules: ${untracked.join(", ")}.` : note;
+}
+
+function repoNote(snap) {
   if (snap && snap.repoVerified === true)
     return `Test environment: the snapshot is a git repository whose single commit holds
 the reviewed tree — its tree hash was compared against the commit under review
@@ -883,6 +897,7 @@ export async function runReview(host, args) {
     { [ -d "$SNAP/.git" ] && [ -n "$SNAPTREE" ] && [ "$SNAPTREE" = "$SRCTREE" ]; } && echo SNAPSHOT_TREE_MATCH || echo SNAPSHOT_TREE_MISMATCH="snapshot $SNAPTREE vs commit $SRCTREE"
     INSTALL=$(~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} install) && echo SNAPSHOT_INSTALL_STEP="$INSTALL" || { INSTALL=; echo SNAPSHOT_INSTALL_UNREAD; }
     [ -z "$INSTALL" ] || { ( cd "$SNAP" && sh -c "$INSTALL" ) >"$RUN/install.log" 2>&1; echo SNAPSHOT_INSTALL_EXIT=$?; }
+    if [ -d "$SNAP/.git" ]; then git -C "$SNAP" status --porcelain --untracked-files=all | sed 's/^/SNAPSHOT_UNTRACKED=/'; fi
 
 The Install step can take minutes: run the block as ONE blocking foreground
 command with a command deadline of 3600 seconds, never backgrounded and never
@@ -896,10 +911,15 @@ snapshot, from its root: never rerun it, never repair a failure, and never run
 it anywhere else. A non-zero exit is reported as printed, and the caller files
 it as a finding on the PR.
 
+Report \`untracked\` = every SNAPSHOT_UNTRACKED= value, copied as printed, in
+order, and omit it when the block printed none. The repository's own ignore
+rules decide what reads untracked after the Install step: list it, and add
+nothing to the snapshot's \`.git/info/exclude\` or anywhere else to hide it.
+
 Report \`pathVerified\` = true ONLY if the 'ls -A' line printed SNAPSHOT_NONEMPTY,
-run in that order — BEFORE the 'git init' and BEFORE the symlink, never after
-either. Both create an entry of their own, so a probe below them prints
-SNAPSHOT_NONEMPTY on a 'git archive' that extracted nothing at all.
+run in that order — BEFORE the 'git init', never after it. The init creates an
+entry of its own, so a probe below it prints SNAPSHOT_NONEMPTY on a
+'git archive' that extracted nothing at all.
 
 Report \`repoVerified\` = true ONLY if the tree-compare line above printed
 SNAPSHOT_TREE_MATCH; otherwise report it false and put the line it printed
@@ -911,8 +931,9 @@ extraction than in a checkout at the same commit, with nothing in the payload
 saying the measurement happened somewhere else. The tree-hash compare is
 the verification: two commits whose trees hash the same hold byte-identical
 content, so a match settles that the snapshot IS the reviewed tree — a stronger
-check than reading a few files, and the reason the commit comes BEFORE the
-node_modules symlink, which would otherwise enter the index and change the hash.
+check than reading a few files, and the reason the commit and the compare come
+BEFORE the Install step: 'git add -A -f' stages ignored files too, so whatever
+the Install step writes would enter the index and change the hash.
 
 Report \`head\` = the full sha 'git -C ${worktree} rev-parse HEAD' prints — the
 destination path carries only the short form. The byte-identity spot check this
