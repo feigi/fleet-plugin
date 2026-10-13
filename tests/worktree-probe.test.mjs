@@ -755,6 +755,31 @@ test("wt_counts refuses an unlisted .worktrees pointer whose admin id another wo
   const moved = fleetLinked(r, "1-held");
   writeFileSync(join(pointed(moved), "gitdir"), `${r.root}/gone/1-held/.git\n`);
   assert.equal(probe(r.w, COUNTS).out, "rc=0\nregistered=1 linked=1\nwhy=\n");
+
+  // A registration whose back-link spells this very directory through a symlink is the worktree itself, not a reissue: git still holds its branch.
+  const a = repo(t);
+  const aliased = fleetLinked(a, "1-held");
+  const alias = join(a.root, "alias");
+  symlinkSync(a.w, alias);
+  writeFileSync(join(pointed(aliased), "gitdir"), `${alias}/.worktrees/1-held/.git\n`);
+  assert.equal(probe(a.w, COUNTS).out, "rc=0\nregistered=1 linked=1\nwhy=\n", "fixture: git lists the worktree under the alias, so the pointer is unlisted");
+});
+
+test("wt_counts refuses an unlisted .worktrees pointer whose registration's back-link target cannot be stat'ed, never reads it as a moved repo", (t) => {
+  if (isRoot) return t.skip("root searches every directory");
+  const r = repo(t);
+  const wt = fleetLinked(r, "1-held");
+  const admin = pointed(wt);
+  const hidden = join(r.root, "hidden");
+  mkdirSync(hidden);
+  writeFileSync(join(admin, "gitdir"), `${hidden}/1-held/.git\n`);
+  chmodSync(hidden, 0o000);
+  const p = probe(r.w, COUNTS);
+  chmodSync(hidden, 0o755);
+  assert.match(p.out, /^rc=1$/m, p.out);
+  assert.ok(p.out.includes(`why=could not look up the worktree ${hidden}/1-held that admin dir ${admin} is registered for (${hidden} cannot be searched)`), p.out);
+  // The same back-link once `hidden` can be searched and holds nothing: a repo moved without repair, held through its HEAD.
+  assert.equal(probe(r.w, COUNTS).out, "rc=0\nregistered=1 linked=1\nwhy=\n");
 });
 
 // --- wt_outcome

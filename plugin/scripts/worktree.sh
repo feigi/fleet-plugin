@@ -922,8 +922,19 @@ worktree $wt_cp_wt
       return 1
     fi
     # A back-link to nothing is a repo moved without `git worktree repair`:
-    # git still holds the branch through that registration's HEAD.
-    [ -e "$wt_bl_back" ] || continue
+    # git still holds the branch through that registration's HEAD. A target
+    # that cannot be stat'ed is not a target that is absent: if the nearest
+    # ancestor that exists is a directory that cannot be searched, what
+    # the back-link names is unknown, and unknown is never "moved".
+    if ! [ -e "$wt_bl_back" ]; then
+      wt_cp_up=${wt_bl_back%/*}
+      while [ -n "$wt_cp_up" ] && ! [ -e "$wt_cp_up" ]; do
+        wt_cp_up=${wt_cp_up%/*}
+      done
+      if ! [ -d "${wt_cp_up:-/}" ] || [ -x "${wt_cp_up:-/}" ]; then continue; fi
+      wt_why="could not look up the worktree $wt_bl_back that admin dir $wt_cp_admin is registered for (${wt_cp_up:-/} cannot be searched), so whether its registration is reissued is unknown"
+      return 1
+    fi
     # shellcheck disable=SC3013,SC2319 # -ef as above; the else's $? is the `[ -ef ]` test's own rc
     if [ "$wt_bl_back" -ef "$wt_cp_wt" ]; then continue; else wt_cp_rc=$?; fi
     if [ "$wt_cp_rc" -ge 2 ]; then
