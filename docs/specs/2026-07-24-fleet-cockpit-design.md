@@ -138,15 +138,15 @@ position).)
 |---|---|
 | **POOL** | open `ready-for-agent` issue with **no** ledger row, or whose row's latest `impl` token settled `=released`/`=bailed` (no card at all once the issue leaves `ready-for-agent`). An Exclusion row (`#N excluded · behind-pr:#M` / `behind-issue:#M`) is a POOL card with an `excluded:#M` badge (`excluded:<branch>` when `#M` is a branch name): supply, never `stale`, never in `attention`, never in the stall report's `claimed` |
 | **IMPLEMENTING** | the row's **latest** `impl` token (greatest retry suffix, not last by position) is live `impl-N`, or settled `=killed`/`=tier-mismatch` — the latter two carry that outcome as a flag in `attention` |
-| **REVIEW** | the row's PR (below) is open (or closed unmerged), not `ready-to-merge`. Counts toward `reviewBacklog` (surfaced in the page footer as `review-backlog N`) when the row has neither a live `review=` nor a `reviewed=`, and no live `fix-pr-M`/`finisher-pr-M`. Amendment 5a (#1820, implemented by #1842): a settled `review=…=failed` is a dead review, and the PR is owed one again — run-team `SKILL.md`'s review-due and `fleet-tick.mjs`'s `reviewedAny` read the token the same way. A `=failed` followed by a live redispatch (`review=wf:a=failed review=fallback:review-pr-M-b`) is under review; any live `review=` on the row counts, not only the last one, as `reviewedAny` counts it |
+| **REVIEW** | the row's PR (below) is open (or closed unmerged), not `ready-to-merge`. Counts toward `reviewBacklog` (surfaced in the page footer as `review-backlog N`) when the row has neither a live `review=` nor a `reviewed=`, and no live `fix-pr-M`/`finisher-pr-M`. Amendment 5a (#1820, implemented by #1842): a settled `review=…=failed` is a dead review, and the PR is owed one again — run-team `SKILL.md`'s review-due and `fleet-tick.mjs`'s `reviewedAny` read the token the same way. A `=failed` followed by a live redispatch (`review=wf:a=failed review=member:review-pr-M-b`) is under review; any live `review=` on the row counts, not only the last one, as `reviewedAny` counts it |
 | **READY** | PR carries the `ready-to-merge` label |
 | **MERGED** | ledger row contains `MERGED <sha>`, or — the token being written by no rule — `gh` reports the row's PR merged, or (#1841) the previous board already showed that same PR MERGED on this ticket, since MERGED is terminal. The token wins when present. `gh` is asked (#1840) about exactly the row PRs none of the rest places — absent from the open list, no token, not carried forward — in one batched `gh api graphql` query per build, whatever their merge age; no such PR, no query. A failed query reads them as not merged (REVIEW) |
 
 The card's `agent` is the latest live member on the row: an unsettled
-`ledger-grammar.mjs` member token, or the runner a `review=member:<name>` /
-`review=fallback:<name>` names until it is settled `=failed` or a later
-`reviewed=` records its result. `review=wf:<runId>` is a Workflow and names
-nobody. The uppercase `KILLED`/`BLOCKED`/`SHA-OFF-BRANCH` cause tokens
+`ledger-grammar.mjs` member token, or the runner a `review=member:<name>`
+names until it is settled `=failed` or a later `reviewed=` records its result
+(amended by #2405: the `review=fallback:` kind is removed). `review=wf:<runId>`
+is a Workflow and names nobody. The uppercase `KILLED`/`BLOCKED`/`SHA-OFF-BRANCH` cause tokens
 (Enrichment tier, below) still apply.
 
 **The row's PR.** On a row with an `impl` token it is the latest `impl` token's
@@ -236,7 +236,7 @@ source, and it can never move a ticket.
       "issue": 332,
       "title": "…",
       "column": "MERGED",            // POOL|IMPLEMENTING|REVIEW|READY|MERGED (amended by #1820: an Exclusion is POOL; a released/bailed row is POOL or no card)
-      "agent": null,                 // latest live member on the row — impl-N, fix-pr-M, finisher-pr-M, or a review=member:/fallback: runner; null when none is live (amended by #1820)
+      "agent": null,                 // latest live member on the row — impl-N, fix-pr-M, finisher-pr-M, or a review=member: runner; null when none is live (amended by #1820)
       "pr": 344,
       "ci": "green",                 // green|red|unknown|null  (null = no PR)
       "sinceEnteredStage": 1690…,    // epoch ms, for dwell / stale

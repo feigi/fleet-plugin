@@ -177,8 +177,7 @@ function readReviews(tokens) {
       }
       const { kind, name, failed } = m.groups;
       const launch = { id: `review=${kind}:${name}`, kind, name, failed: failed !== undefined, answered: false };
-      launch.key = kind === "wf" ? launch.id : `runner:${name}`;
-      if (launches.some((l) => l.key === launch.key)) out.repeated.push(launch.id);
+      if (launches.some((l) => l.id === launch.id)) out.repeated.push(launch.id);
       const open = launches.find(isOpen);
       if (open) out.crowded.push({ id: launch.id, open: open.id });
       launches.push(launch);
@@ -330,7 +329,7 @@ export function rowWriteRefusal(before, after, oldLine, line, retired = []) {
       return `launch '${repeated}' is already on ${where(id)}'s rows — unique launches: every launch takes an identity the PR has not used`
         + (next === null ? "" : `; the next free reviewer name is ${next}`);
     }
-    const reused = a.launches.find((l) => l.kind !== "wf" && retired.includes(l.name) && !b.launches.some((o) => o.key === l.key));
+    const reused = a.launches.find((l) => l.kind !== "wf" && retired.includes(l.name) && !b.launches.some((o) => o.id === l.id));
     if (reused !== undefined) {
       const next = nextReviewer(a.launches, id, retired);
       return `launch '${reused.id}' on ${where(id)} names a runner an earlier run of this session already used — unretired runners: omp would answer it with \`${reused.name}-2\``

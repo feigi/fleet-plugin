@@ -253,11 +253,12 @@ test("retiredOnLedger: a reviewer runner a row launched is retired, a workflow l
     "the carried row's own runner stays with the row");
 });
 
-test("REVIEW reads a workflow or a runner launch, settled or not, and refuses any other kind", () => {
+test("REVIEW reads a workflow or a runner launch, settled or not, and refuses a launch of the removed kind", () => {
   for (const ok of ["review=wf:r1", "review=member:review-pr-1", "review=member:review-pr-1-b", "review=member:review-pr-1-b=failed"]) {
     assert.ok(REVIEW.test(ok), ok);
   }
-  for (const bad of ["review=fallback:review-pr-1-b", "review=fallback:review-pr-1-b=failed"]) assert.ok(!REVIEW.test(bad), bad);
+  const removed = "fallback";
+  for (const bad of [`review=${removed}:review-pr-1-b`, `review=${removed}:review-pr-1-b=failed`]) assert.ok(!REVIEW.test(bad), bad);
 });
 
 test("isRetirable: a member's name or a reviewer's, bare", () => {
