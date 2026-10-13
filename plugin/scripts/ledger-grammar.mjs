@@ -292,8 +292,8 @@ export function splitRowClause({ pr, row }) {
  *   its outcome;
  * - unparseable review tokens: a `review=`/`reviewed=` matches REVIEW/REVIEWED;
  * - paired results: every `reviewed=` answers a launch (readReviews above);
- * - unique launches: a launch identity — a workflow's runId, a runner's name
- *   whatever its kind — appears at most once in its PR's stream;
+ * - unique launches: a launch identity — a workflow's runId, a runner's name —
+ *   appears at most once in its PR's stream;
  * - unretired runners: no launch takes a runner name `retired` holds, which an
  *   earlier run of this omp session launched;
  * - one open launch per PR: no launch appears while an earlier one is open;
