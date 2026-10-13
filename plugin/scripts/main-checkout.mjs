@@ -65,11 +65,12 @@
 //              never a path.
 //   unknown  — some read failed: git, a hash, HEAD, `origin/main`, or a baseline
 //              that EXISTS but cannot be read (unreadable file, unsearchable
-//              `.fleet/`, dangling symlink, not written by --record) — or is a
-//              v1 baseline, which says nothing of HEAD: re-record it — or names
-//              a commit absent from the repository: examine HEAD, then
-//              re-record it. "A failure is an unknown answer, never a 'no'" —
-//              never `clean`.
+//              `.fleet/`, dangling symlink, not written by --record) — or is
+//              an older version's baseline, which this code cannot compare:
+//              re-record it — or is a newer version's, written by a newer
+//              plugin: run that plugin — or names a commit absent from the
+//              repository: examine HEAD, then re-record it. "A failure is an
+//              unknown answer, never a 'no'" — never `clean`.
 //   absent   — no baseline at all: the run never recorded one. A refusal
 //              ("record at run start"), never `clean`.
 //
@@ -78,10 +79,11 @@
 // the maintainer's clear only AFTER the stray paths are resolved. Over `unknown`
 // it would walk the run from "could not look" to "certified clean" in one step,
 // so it refuses on every unknown cause it can see: a baseline that exists but
-// cannot be read, and any failed git or hash read (no snapshot, nothing to
-// write). A detached HEAD has no symbolic ref to record, so it refuses that
-// too. A v1 baseline, and one whose commit is gone (it never reads the
-// recorded commit), it overwrites without a word.
+// cannot be read, one a newer plugin wrote (overwriting it would discard a
+// baseline nobody read), and any failed git or hash read (no snapshot, nothing
+// to write). A detached HEAD has no symbolic ref to record, so it refuses that
+// too. An older version's baseline, and one whose commit is gone (it never
+// reads the recorded commit), it overwrites without a word.
 //
 // A BASELINE COMMIT GONE FROM THE REPOSITORY is its own unknown. An amend or
 // reset leaves the baseline's commit unreachable, and once reflog expiry and
@@ -121,8 +123,12 @@ import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 export const BASELINE_FILE = "main-checkout.sha";
 export const RECORD_COMMAND = "~/.fleet/bin/fleet-run main-checkout.mjs --record";
 const RUN_BOOKKEEPING = new Set(["docs/metrics/tier-outcomes.tsv", "docs/metrics/member-outcomes.tsv", "docs/metrics/ticket-features.tsv"]);
-const HEADER_V1 = "fleet main-checkout baseline v1";
-const HEADER = "fleet main-checkout baseline v2";
+// Any change to an entry's hash or to a line's format bumps VERSION: a
+// baseline an older plugin wrote then reads `outdated` (re-record) and one a
+// newer plugin wrote reads `newer`, never as a baseline this code wrote.
+const VERSION = 2;
+const HEADER = `fleet main-checkout baseline v${VERSION}`;
+const HEADER_RE = /^fleet main-checkout baseline v(\d+)$/;
 const GIT_TIMEOUT_MS = 30_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
 const NAME = "main-checkout";
@@ -320,7 +326,8 @@ function headMove(root, env, was, now) {
 
 /**
  * The run's baseline: `{status: "ok", entries, head}`, `{status: "absent"}`,
- * `{status: "outdated", why}` (a v1 file) or `{status: "unreadable", why}`.
+ * `{status: "outdated", why}` (an older VERSION's file), `{status: "newer",
+ * why}` (a newer VERSION's) or `{status: "unreadable", why}`.
  * ABSENT is only "nothing at that name": a
  * dangling symlink is present-but-broken, and an unsearchable `.fleet/`
  * answers EACCES rather than ENOENT, so neither can fall through to
@@ -343,7 +350,9 @@ export function readBaseline(path) {
     return { status: "unreadable", why: `${path} exists but cannot be read: ${e?.code ?? e?.message}` };
   }
   const lines = text.split("\n");
-  if (lines[0] === HEADER_V1) return { status: "outdated", why: "baseline v1 — re-record" };
+  const version = HEADER_RE.exec(lines[0]);
+  if (version && Number(version[1]) < VERSION) return { status: "outdated", why: `baseline v${version[1]} — re-record` };
+  if (version && Number(version[1]) > VERSION) return { status: "newer", why: `baseline v${version[1]} written by a newer plugin` };
   const ref = lines[1]?.startsWith("ref ") ? lines[1].slice(4) : "";
   const oid = lines[2]?.startsWith("oid ") ? lines[2].slice(4) : "";
   if (lines[0] !== HEADER || lines.at(-1) !== "" || !ref || !/^[0-9a-f]{40,64}$/.test(oid)) {
@@ -370,10 +379,11 @@ export function changedPaths(baseline, current) {
 
 /**
  * The tick's question: `{state, root?, baseline?, changed?, headMove?, why?, cause?}`.
- * `cause` tells the four unknowns apart — `"baseline"` (it exists but cannot
- * be read), `"outdated"` (a v1 baseline: it says nothing of HEAD, so it can
- * answer nothing), `"missing"` (the baseline's commit is absent from the
- * repository) and `"read"` (git or a hash failed) — since each has its own
+ * `cause` tells the unknowns apart — `"baseline"` (it exists but cannot
+ * be read), `"outdated"` (an older version's baseline: this code cannot
+ * compare it, so it can answer nothing), `"newer"` (a newer plugin wrote it),
+ * `"missing"` (the baseline's commit is absent from the repository) and
+ * `"read"` (git or a hash failed) — since each has its own
  * message. The baseline is read before the tree, because without one there
  * is nothing to compare against and no reason to look.
  * A HEAD move is the first entry of `changed`, also named in `headMove`.
@@ -388,6 +398,7 @@ export function checkMainCheckout({ cwd = process.cwd(), env = process.env } = {
   const unknown = (why, cause = "read") => ({ state: "unknown", cause, root, baseline: path, why });
   if (base.status === "unreadable") return unknown(base.why, "baseline");
   if (base.status === "outdated") return unknown(base.why, "outdated");
+  if (base.status === "newer") return unknown(base.why, "newer");
   const now = readState(root, env);
   if (!now.ok) return unknown(now.why);
   const move = headMove(root, env, base.head, now.head);
@@ -426,6 +437,7 @@ export function describe(check, live = null) {
         return `MAIN-CHECKOUT-UNKNOWN ${check.why}${members}`
           + ` — dispatch held: resolve any stray paths FIRST, then re-record with ${RECORD_COMMAND} (it overwrites, it does not compare)`;
       }
+      if (check.cause === "newer") return `MAIN-CHECKOUT-UNKNOWN ${check.why}${members} — dispatch held: run the plugin that wrote it`;
       if (check.cause === "missing") {
         return `MAIN-CHECKOUT-UNKNOWN ${check.why}${members}`
           + " — dispatch held: examine HEAD against origin/main FIRST, since a missing baseline commit means HEAD moved off it by an amend or reset nobody has looked at, and resolve any stray paths;"
@@ -441,10 +453,11 @@ export function describe(check, live = null) {
 
 /**
  * Write the baseline: `{ok, path, entries, head}` or `{ok: false, why}`.
- * Refuses over a baseline that exists but cannot be read — overwriting it
- * blind discards evidence nobody read — and on any failed read of the tree, of
- * HEAD or of `origin/main`, and on a detached HEAD, which has no symbolic ref
- * to record. A v1 baseline is not unreadable: it is the one this overwrites.
+ * Refuses over a baseline that exists but cannot be read, and over one a
+ * newer plugin wrote — overwriting either blind discards evidence nobody
+ * read — and on any failed read of the tree, of HEAD or of `origin/main`, and
+ * on a detached HEAD, which has no symbolic ref to record. An older version's
+ * baseline is not unreadable: it is the one this overwrites.
  * Written to a temporary name and renamed, so a reader never sees half of it.
  */
 export function recordBaseline({ cwd = process.cwd(), env = process.env } = {}) {
@@ -454,6 +467,9 @@ export function recordBaseline({ cwd = process.cwd(), env = process.env } = {}) 
   const prior = readBaseline(path);
   if (prior.status === "unreadable") {
     return { ok: false, why: `${prior.why} — fix it first; do NOT --record over it, --record overwrites rather than compares` };
+  }
+  if (prior.status === "newer") {
+    return { ok: false, why: `${prior.why} — run the plugin that wrote it; do NOT --record over it, --record overwrites rather than compares` };
   }
   const now = readState(where.root, env);
   if (!now.ok) return { ok: false, why: `${now.why} — could not look, so there is nothing to record` };

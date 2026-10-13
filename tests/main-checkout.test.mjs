@@ -656,6 +656,73 @@ test("a v1 baseline is unknown — re-record — and --record overwrites it", (t
   assert.equal(check(dir).state, "clean");
 });
 
+// The version --record writes now, read off the file rather than pinned, so
+// these rows survive the next bump.
+const HEADER_RE = /^fleet main-checkout baseline v(\d+)\n/;
+const recordedVersion = (dir) => Number(HEADER_RE.exec(readFileSync(baselinePath(dir), "utf8"))[1]);
+
+test("an older baseline other than v1 is outdated by its number — re-record — and --record overwrites it", (t) => {
+  const dir = repo(t);
+  record(dir);
+  const current = recordedVersion(dir);
+  writeFileSync(baselinePath(dir), "fleet main-checkout baseline v0\n");
+  const c = check(dir);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "outdated");
+  assert.equal(c.why, "baseline v0 — re-record");
+  const said = describe(c, []);
+  assert.match(said, /^MAIN-CHECKOUT-UNKNOWN baseline v0 — re-record; live members: none — .*re-record with .*main-checkout\.mjs --record/);
+  record(dir);
+  assert.equal(recordedVersion(dir), current);
+  assert.equal(check(dir).state, "clean");
+});
+
+test("a baseline a newer plugin wrote is unknown — run that plugin — and --record refuses it, leaving the file unchanged", (t) => {
+  const dir = repo(t);
+  record(dir);
+  const base = baselinePath(dir);
+  const newer = recordedVersion(dir) + 1;
+  const text = readFileSync(base, "utf8").replace(HEADER_RE, `fleet main-checkout baseline v${newer}\n`);
+  writeFileSync(base, text);
+  const c = check(dir);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "newer");
+  assert.equal(c.why, `baseline v${newer} written by a newer plugin`);
+  assert.equal(describe(c, ["impl-1"]), `MAIN-CHECKOUT-UNKNOWN baseline v${newer} written by a newer plugin; live members: impl-1 — dispatch held: run the plugin that wrote it`);
+  assert.equal(describe(c), `MAIN-CHECKOUT-UNKNOWN baseline v${newer} written by a newer plugin — dispatch held: run the plugin that wrote it`);
+  const r = recordBaseline({ cwd: dir });
+  assert.equal(r.ok, false);
+  assert.match(r.why, new RegExp(`^baseline v${newer} written by a newer plugin — .*do NOT --record over it`));
+  assert.equal(readFileSync(base, "utf8"), text);
+});
+
+test("a first line that is no baseline header stays unreadable, even over a well-formed body, and --record refuses it", (t) => {
+  const dir = repo(t);
+  record(dir);
+  const base = baselinePath(dir);
+  const current = recordedVersion(dir);
+  const body = readFileSync(base, "utf8").replace(HEADER_RE, "");
+  for (const header of [
+    "fleet main-checkout baseline v",
+    "fleet main-checkout baseline vX",
+    "fleet main-checkout baseline v-1",
+    `fleet main-checkout baseline v${current + 1} `,
+    `fleet main-checkout baseline v0${current}`,
+    `Fleet main-checkout baseline v${current}`,
+  ]) {
+    const text = `${header}\n${body}`;
+    writeFileSync(base, text);
+    const c = check(dir);
+    assert.equal(c.state, "unknown", header);
+    assert.equal(c.cause, "baseline", header);
+    assert.match(c.why, /not a baseline main-checkout\.mjs --record wrote/, header);
+    assert.equal(recordBaseline({ cwd: dir }).ok, false, header);
+    assert.equal(readFileSync(base, "utf8"), text, header);
+  }
+  writeFileSync(base, `fleet main-checkout baseline v${current}\n${body}`);
+  assert.equal(check(dir).state, "clean", "the current header over the same body");
+});
+
 test("a missing origin/main is unknown, never clean — with HEAD where it was and with HEAD moved", (t) => {
   const dir = repo(t);
   record(dir);

@@ -1972,13 +1972,15 @@ depth** guard table applied in code. Act on each line as it reads:
   could not look: a git or hash read failed (`could not look:`), or the
   baseline exists but cannot be read (`baseline unreadable:`). Never clean,
   and **never re-baseline over it** — `--record` overwrites, so that certifies
-  a tree nobody read. Fix what the line names and tick again. The exceptions
-  are the two whose remedy is `--record`: `baseline v1 — re-record`, an
-  old-format baseline that says nothing of HEAD; and `baseline commit <oid> is
-  missing from this repository`, which an amend or reset followed by gc
-  leaves — examine HEAD against `origin/main` FIRST, since HEAD moved off
-  that commit and nobody has looked at the move, and resolve any stray paths,
-  which the line does not name; only then re-record.
+  a tree nobody read. Fix what the line names and tick again. `baseline v<n>
+  written by a newer plugin` is a baseline a newer plugin version wrote:
+  `--record` refuses over it too — run the plugin that wrote it. The
+  exceptions are the two whose remedy is `--record`: `baseline v<n> —
+  re-record`, an older-format baseline this plugin cannot compare; and
+  `baseline commit <oid> is missing from this repository`, which an amend or
+  reset followed by gc leaves — examine HEAD against `origin/main` FIRST,
+  since HEAD moved off that commit and nobody has looked at the move, and
+  resolve any stray paths, which the line does not name; only then re-record.
 - `MAIN-CHECKOUT-NO-BASELINE …` with `HOLD (main checkout no baseline)` — no
   baseline was recorded. Yours to fix: run Phase 0's `--record`. A baseline
   that vanished mid-run is not a fresh run — report it to the maintainer
