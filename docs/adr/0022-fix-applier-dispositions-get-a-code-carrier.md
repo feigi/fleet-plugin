@@ -25,8 +25,7 @@ Amended by #2881: a refuter may abstain (`inconclusive: true`),
 so Decision 5's `refutersDispatched > 0` row holds a finding whose refuters
 crashed or abstained, and its "(refuters crashed)" reads that way; an
 in-scope suggestion's verdict file that abstains is a mismatch, like one
-Amended by #2405: deleted the fallback hand-dispatched reviewer path
-(clean cutover).
+failing the schema.
 
 ## Context
 

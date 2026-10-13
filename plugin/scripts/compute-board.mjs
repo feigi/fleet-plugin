@@ -81,7 +81,8 @@ import { latestFinisherAttempts } from "./fleet-tick.mjs";
 // human. The names are not the bare `killed` flag, which is the implementer's.
 //
 // A PR's review is not a member: `review=wf:<runId>` is a Workflow
-// with nobody to name, while `review=member:<name>` and
+// with nobody to name, while `review=member:<name>` names a runner member,
+// live until the token is
 // settled `=failed` or a later `reviewed=` records its result.
 //
 // A `review=` token puts the PR under review only while
@@ -135,6 +136,7 @@ export function parseRow(row) {
 
   // `live` holds live entries in row order, each one of two kinds: a
   // ledger-grammar member (`kind: "member"`, its parsed token as `token`) or
+  // a review runner a `review=member:` token names
   // (`kind: "runner"`, a name and nothing else — it is no ledger-grammar
   // member, so it has none of a parsed token's fields). A runner carries no
   // `token`, so reading a member field off one through `.token` throws
@@ -183,7 +185,7 @@ export function parseRow(row) {
       review = true;
       const { kind, name, failed } = REVIEW.exec(tok)?.groups ?? {};
       if (!failed) reviewLive = true;
-      if (kind === "member" || kind === "fallback") {
+      if (kind === "member") {
         if (failed) settled.add(name);
         else { live.push({ kind: "runner", name }); runners.push(name); }
       }

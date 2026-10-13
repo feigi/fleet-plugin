@@ -22,6 +22,7 @@ import { Pin } from "./support/prose-pin.mjs";
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
+const FALLBACK_START = "#### Fallback: hand-dispatched reviewer member";
 
 const fallbackSection = () => RUN_TEAM.section(FALLBACK_START, "run-team fallback section").text;
 

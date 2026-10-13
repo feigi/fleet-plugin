@@ -695,10 +695,12 @@ test("no sentence in the fallback claims the local rebase can carry a commit int
 // correctly conclude the stated hazard does not apply and proceed — the wrong
 // action, reached from the page's own text. So the premise, the polarity
 // clause and the wrong-tree clause are each pinned positively here, and the
+// old reason's SHAPE is swept for one test above, over the whole fallback:
 // a restore that replaces the corrected sentences reds these pins, while one
 // that leaves both wordings standing — the two-sites-disagreeing shape this
 // ticket exists to end — reds the sweep alone.
 //
+// Sliced to the arm itself, not to the whole fallback: `worktree-diverged`,
 // the remote head and what gets verified all recur through the block's later
 // paragraphs, and the sibling `Worktree behind` arm is the end bound, so a
 // rationale lifted out of the bullet into prose below it reds here.

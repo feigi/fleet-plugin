@@ -307,6 +307,7 @@ test("CLI: with no --state, and with an empty one, it resolves the run's shared 
     const r = spawnSync(process.execPath,
       [SCRIPT, "--base", "2", "--ceiling", "8", "--hold", "1", ...extra], { cwd: dir, encoding: "utf8" });
     assert.equal(r.status, 0, r.stderr);
+    // Never through the announced cwd-relative fallback: that path is the
     // degraded one, and a case that resolved through it would be pinning the
     // degradation while looking like it pinned the resolution.
     assert.doesNotMatch(r.stderr, /WARNING/, `--state ${JSON.stringify(extra[1] ?? "(absent)")} degraded`);

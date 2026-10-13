@@ -567,6 +567,7 @@ test("deriveRun: live reviewer units are in-flight reviews plus unsettled fix-ap
       "#11 impl-11=PR#21 → PR#21 · review=wf:run2 reviewed=abc1234:2/1/0:run-abc1234r · fix-pr-21",
       "#12 impl-12=PR#22 → PR#22 · review=member:review-pr-22 reviewed=abc1234:0/0/0:run-abc1234r",
       "#13 impl-13=PR#23 → PR#23 · review=wf:run3=failed",
+      "#14 impl-14=PR#24 → PR#24 · review=wf:run4=failed review=fallback:review-pr-24",
     ],
     dispatched: ["fix-pr-21"],
   }, [pr(20), pr(21), pr(22), pr(23), pr(24)]);

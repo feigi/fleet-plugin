@@ -1485,6 +1485,7 @@ test("defaultLedgerPath(): an ambient GIT_COMMON_DIR is not canonicalised — th
 });
 
 test("a working directory that is not a repository at all still degrades exactly as before (no --file)", () => {
+  // defaultLedgerPath()'s own pre-existing fallback: --git-common-dir fails,
   // so it warns and returns a cwd-relative path — which #155 leaves alone
   // (out of scope: changing ledger path resolution). The tracker query then
   // finds no repository either, for the same underlying reason, and degrades

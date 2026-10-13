@@ -75,7 +75,7 @@ references/member-lifecycle.md.
 
 **A depth-2 member cannot dispatch further** (`task.maxRecursionDepth: 2`):
 if `task` is absent at your depth, ask the controller to dispatch the
-or it silently downgrades to a solo review. See references/member-lifecycle.md.
+specialists and relay their reports. See references/member-lifecycle.md.
 
 **Fresh context per member.** One member, one unit of work, gone. Never
 re-task a finished member — waking it drags the old ticket back in. Refill =
@@ -590,6 +590,7 @@ phase, or in any later one, asks the maintainer which tickets to take.
      settled `=failed` where it stands: a `ledger.mjs review <pr>
      review=member:<name>=failed` call that turns `review=member:<name>` on
      the PR's row into `review=member:<name>=failed`
+     (`wf:` launches alike), after which the tick owes the PR
      a review again under the next free reviewer name.
    - `prior: none` — no record proves the previous run dead (no record yet, or
      no `omp` process found above the rotation): every claim is `report`, and
@@ -2343,10 +2344,8 @@ write that adds a review token (one the row holds is carried), drops an open
 launch, names a member twice on the line, or makes a PR map to a second row. A
 bad token the ledger already holds is carried, never re-judged.
 
-**It is the only path on which `selectDimensions` sizes the fan-out to the
-diff and the verify budget follows severity.** Hand-dispatched (the fallback
-below), neither executes at all: sizing falls back to a reviewer's own
-judgement and nothing budgets the adversarial pass. It cuts one immutable
+**`selectDimensions` sizes the fan-out to the diff and the verify budget
+follows severity.** It cuts one immutable
 snapshot, verifies every critical/important finding adversarially,
 re-dispatches each crashed specialist and each crashed refuter pair once before
 it assembles the result, and has `agent()` return **into the script**, so no
@@ -2453,8 +2452,7 @@ in `dimensionsRun` and NOT in `dimensionsUnrun` ran a suite; every
 `dimensionsUnrun` entry is `{dimension, reason}` naming which failure it was.
 The review already re-dispatched each crashed specialist once, so what
 `dimensionsUnrun` still names is residue: the fix-applier names it unrun in its
-report and re-runs nothing — an absence of findings is not coverage. Same rule
-the fallback below states for a killed specialist, for the same reason.
+report and re-runs nothing — an absence of findings is not coverage.
 
 The rule this replaces — treat any dimension with nothing in
 `survived`/`refuted`/`unverified` as unrun — was the workaround for having no
@@ -2475,12 +2473,16 @@ treat as a live scratch write until you have checked it.
 is a failure event, not a clean review.** The review throws on missing
 `args.pr`/`args.worktree` and on a snapshot agent that returned no tree, and a
 failure surfaces mid-loop, where "react, never block" makes it easy to log and
-carry on — leaving a PR that *reads* as reviewed and is not. **Retry once, then
-fall back — and whoever holds the review call is who retries:**
-Either way, settle the dead review by appending `=failed` to its `review=`
+carry on — leaving a PR that *reads* as reviewed and is not. **Retry once
+under the next runner letter, then stop — and whoever holds the review call is
+who retries:**
+The `review-pr-<pr#>` runner already retried once inside its cell and reports `failed` with both errors. The retry is a second runner under the next letter the PR's rows do not carry yet — `review-pr-<pr#>-b` after a first runner — recorded as `review=member:<that name>`. A second failure is reported, and the PR stays at review-due.
+Settle the dead review by appending `=failed` to its `review=`
+token, then append `review=member:<that name>` after it, both in one
+`ledger.mjs review <pr> review=<dead launch>=failed review=member:<that name>`
 call — `review` settles the dead launch in place, and refuses a new launch
 while the dead one still reads open, and the tick takes the last `review=`
-token on a row as the one in flight, so that order is what keeps the fallback
+token on a row as the one in flight, so that order is what keeps the retry
 counted against the cap. A
 runner member that is killed rather than failed follows **Failure
 handling** (fresh name, inherited state stated).
@@ -3418,7 +3420,7 @@ decides the rest — two resolve automatically, every other one escalates:
 | Cause | Resolution |
 |---|---|
 | `live-editor` | **Automatic.** Ask the live member **by name** for its report, wait for it, then dispatch `finisher-pr-<M>-b` at the current head. If the head moved in the meantime, resolve it as `past-pin` instead. |
-| `past-pin` | **Automatic, through the tick: re-review.** The head carries commits no reviewer read. The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's tokens as any review's, with `ledger.mjs review <M>` onto the PR's row, its runner under the next letter the PR's rows do not carry yet (`review-pr-<M>-b`, or `-c` where a fallback already took `-b`) — `review` refuses a second `review-pr-<M>` and names the free one — and its result reaches a fresh finisher through the same gate. |
+| `past-pin` | **Automatic, through the tick: re-review.** The head carries commits no reviewer read. The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's tokens as any review's, with `ledger.mjs review <M>` onto the PR's row, its runner under the next letter the PR's rows do not carry yet (`review-pr-<M>-b`, or `-c` where a retry already took `-b`) — `review` refuses a second `review-pr-<M>` and names the free one — and its result reaches a fresh finisher through the same gate. |
 | `rebase` | **Escalate** — comment and flag, nothing more. Read the report's `git cherry <pin> HEAD origin/main`: only `-` lines is a clean rebase, and a `+` line is a conflict resolution that changed content or a commit past the pin. No automatic rule until a live halt shows the case recurring. |
 | `unreadable`, `missing`, `absent`, `other` | **Escalate** — comment and flag, no automatic retry. |
 
@@ -4093,6 +4095,7 @@ Plan it as a PR the run's own merge queue lands, never as an edit-and-continue.
 | SHA not on expected branch | Flag, do not enqueue, report |
 | Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands or leaves a fork open; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |
 | Implementer blocked or ambiguous *mid-implementation* | Free the slot, leave `in-progress`, report — the row above is the pre-code bail, not this one |
+| `review-pr` workflow throws or returns no tree | Retry once under the next letter (`review-pr-<pr#>-b`); still failing, report and leave the PR at review-due. Never enqueue the PR as reviewed — the workflow is not a member, so no other row here covers it |
 | Reviewer or fix-applier cannot reach green | Report, leave the PR unlabeled, free the slot |
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
 | Merge bot finds the worktree ahead of the PR head **on the local-rebase fallback** | `worktree-diverged-#<pr>`, PR stays queued. Read the stray commit; push-or-discard is yours, and the maintainer's if the evidence cannot settle it |
@@ -4257,6 +4260,7 @@ any other, never a section of its own.
 
 A PR's review is not a member, so it carries its own pair of row tokens,
 written with `review` onto the PR's row (**Reviewers**): `review=wf:<runId>` |
+`review=member:<name>` at launch, `<name>` being
 `review-pr-<n>` for the PR's first runner and the next letter its rows do not
 carry yet (`review-pr-<n>-b`, `-c`, …) for every later one,
 settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`
@@ -4279,8 +4283,7 @@ it your own removal reads as one. `row` refuses a `label-off=` naming no
 maps to the PR — its settled `impl-<N>=PR#<M>` token, else its first `PR#`
 mention, else its key — in ledger order. Every `reviewed=` answers the nearest
 earlier launch that is neither answered nor `=failed`. A launch identity (a
-workflow's runId, or a runner's name whichever of member or fallback launched
-it, `=failed` aside) appears once, and no launch takes a runner name the
+workflow's runId, or a runner's name, `=failed` aside) appears once, and no launch takes a runner name the
 ledger's `## Retired` holds — an earlier run of this session launched it —
 naming the next free reviewer name instead. No launch appears
 while an earlier one is open — unanswered and not `=failed`. Every
@@ -4399,13 +4402,6 @@ Plus a queue-depth line: shortlist, supply, whether triage was suggested.
 - "The brief is thorough, so it's decided" → thorough ≠ decided. Read it for the
   choice it leaves open.
 - "I'd have to pick an approach myself" → that IS undecided.
-- "The reviewer can dispatch, it'll fan out" → not unless authorized.
-  cannot dispatch further, so the ping goes nowhere. Tell it to
-  read the specialist's output file instead; your relay is the backup, not the
-  only path.
-  after the verdict is composed. Two reviewers ruled relayed dimensions
-  undelivered, one of them shipping a headline claim the report it disclaimed
-  refuted. Reconcile verdicts against your receipts.
 - "It reported the SHA, so it's on the branch" → verify.
 - "Let the merge bot arm its own monitor" → it dies, the queue stops.
 - "The member died, message it the state" → dead agents do not read mail.

@@ -125,11 +125,12 @@ export function rowNums(text) {
 }
 
 // A PR's review is not a member, so it carries its own pair of row tokens.
-// The launch is `review=wf:<runId>` | `review=member:<name>` |
+// The launch is `review=wf:<runId>` | `review=member:<name>`, settled dead as
+// `…=failed`; the capture groups are
 // the kind, the runId or runner name, and the `=failed` suffix. A launch's
 // identity comes out of this one regex, `=failed` aside: a workflow's is its
-// runId, a runner's is its name whichever of member launched it,
-// since both are the one hub member of that name. The first runner on PR <n>
+// runId, a runner's is its name, the one hub member of that name.
+// The first runner on PR <n>
 // is `review-pr-<n>`, every later one the next letter the PR's rows do not
 // carry yet (`-b`, `-c`, …). The
 // result is `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, `<run>`
@@ -212,7 +213,7 @@ function added(before, after) {
 
 // The runner name a new launch on PR <pr> takes: `review-pr-<pr>`, else the
 // first letter from `b` that no runner launch on the PR's rows already uses —
-// member, `=failed` or not — and no name in `retired` holds, the
+// `=failed` or not — and no name in `retired` holds, the
 // names an earlier run of this omp session launched. null for a stream keyed
 // by no PR number, or with every letter taken.
 function nextReviewer(launches, pr, retired) {
@@ -316,6 +317,7 @@ export function rowWriteRefusal(before, after, oldLine, line, retired = []) {
     const b = read(was, id);
     const bad = added(b.unparseable, a.unparseable)[0];
     if (bad !== undefined) {
+      return `'${bad}' on ${where(id)} is not review=wf:<runId> | member:<name> (optionally =failed) `
         + "or reviewed=<head>:<survived>/<refuted>/<unverified>:<run> — unparseable review token";
     }
     const unpaired = added(b.unpaired, a.unpaired)[0];
@@ -443,7 +445,8 @@ export const REVIEWER = /^review-pr-([1-9][0-9]*)(-[b-z])?$/;
  * reviewer's, bare. */
 export const isRetirable = (name) => parseMember(name) !== null || REVIEWER.test(name);
 
-// The reviewer runner names a row's `review=member:<name>` and
+// The reviewer runner names a row's `review=member:<name>` launches took,
+// `=failed` or answered or open. A
 // workflow launch is named by its runId, which no hub member holds.
 function launchedRunners(text) {
   const out = [];

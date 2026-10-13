@@ -70,6 +70,7 @@ function changedFiles(pr) {
     // Names the cause, never gh's stderr — execFileSync forwarded it already
     // (no `stdio` above), so interpolating it emits every byte twice, and this
     // is the biggest payload of the fleet scripts. `e.message` is the same
+    // string, not a fallback: Node builds it as `Command failed:\n<stderr>`.
     // Three disjoint shapes — Node-aborted (ENOENT/ENOBUFS), signal, exit.
     die(
       `gh pr diff ${pr} failed: ${

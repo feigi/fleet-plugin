@@ -151,13 +151,15 @@ export function classifyRole(signals) {
 }
 
 // The four name-driven branches, shared by both the name-alone pass above and
+// the description-inclusive fallback: same patterns, same fixed order
 // (implementer -> reviewer -> finisher -> merge-bot), just a different
 // haystack. Returns `null`, never "other", so the caller can fall through to
 // the next haystack instead of committing to "other" the moment the name
 // alone resolves nothing.
 function roleFromNamePatterns(hay) {
   if (/^impl-|implement ticket/.test(hay)) return "implementer";
-  // Both per-PR member names book as review spend: `fix-pr-<n>` is the default
+  // Both per-PR member names book as review spend: `fix-pr-<n>` is the
+  // fix-applier, `review-pr-<n>` the reviewer runner. Miss
   // one and its cache writes fall through to "other", moving the review-side
   // headline — the one number anyone acts on — by several points.
   //

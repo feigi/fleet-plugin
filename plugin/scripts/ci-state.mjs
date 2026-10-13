@@ -154,6 +154,7 @@ function run(cmd, args, { maxBuffer, recover, why } = {}) {
     // Names the cause, never the child's stderr — execFileSync forwarded it
     // already, so interpolating it emits every byte twice. A recoverable read
     // captured it instead, so that one is forwarded here, once, now that the
+    // failure stands. `e.message` is the same string, not a fallback: Node
     // builds it as `Command failed: <cmd>\n<stderr>`.
     if (recover && e.stderr) writeAll(2, e.stderr);
     // A quota refusal names itself first; every other cause reports

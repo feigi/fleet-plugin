@@ -65,7 +65,9 @@ function fixture(t, rows = null) {
 }
 
 const A = "review=member:review-pr-482";
+const B = "review=fallback:review-pr-482-b";
 const C = "review=member:review-pr-482-c";
+const WHILE_A_OPEN = /launch 'review=fallback:review-pr-482-b' on PR #482 while launch 'review=member:review-pr-482' is open/;
 const r1 = "reviewed=aaaaaaa:4/5/14:run-aaaaaaa1";
 const r2 = "reviewed=b7adf86:4/5/14:run-bbbbbbb2";
 const r3 = "reviewed=c0ffee1:0/1/2:run-ccccccc3";
@@ -169,9 +171,11 @@ test("a past-pin re-review reusing the first reviewer's name is refused, naming 
 
 test("the next free name skips every letter the PR's rows already carry, whatever the launch's kind", (t) => {
   const { reviewRefused } = fixture(t, [`#1 ${IMPL} · ${A}=failed ${B} ${r1} ${HALT}`]);
+  reviewRefused("482", [B], /'review=fallback:review-pr-482-b'/, /review-pr-482-c\b/);
 });
 
 test("a runner name a launch of the other kind already used is refused as a repeated launch", (t) => {
+  const { reviewRefused } = fixture(t, [`#1 ${IMPL} · review=fallback:review-pr-482 ${r1}`]);
   reviewRefused("482", [A], /'review=member:review-pr-482'/, /PR #482/, /unique launches/, /review-pr-482-b\b/);
 });
 
