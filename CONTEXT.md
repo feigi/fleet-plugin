@@ -423,6 +423,17 @@ open PR it collides with or the open issue it sequences after — and skipped un
 premise closes, when it re-enters the Shortlist in its own order.
 _Avoid_: demotion, deferral, skip, hold
 
+**In flight**:
+A ticket between its Claim and its PR's merge — an implementer live or owed a
+replacement on it, or an open PR closing it. A PR closing nothing is never in flight.
+_Avoid_: WIP, open work, backlog
+
+**In-flight bound**:
+The most tickets a run lets be In flight at once — fixed for the run, set by
+`/run-team`'s one argument. Reaching it holds every Pull until a merge brings the
+count below it; reviewers, finishers and the merge bot never slow for it.
+_Avoid_: WIP limit, PR cap, throttle, backpressure, implementer cap, reviewer cap
+
 **Pass**:
 One merge bot's lifetime: dispatched on the first `ready-to-merge` label, it merges
 every labelled PR one at a time, re-evaluating after each, waits a short grace for late
