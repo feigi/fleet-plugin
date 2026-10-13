@@ -117,7 +117,12 @@ export function declaredPairFor(frontmatter) {
 // assistant turn's own `model`: the identity exists before the member's
 // first turn, where the per-turn model does not, so preferring it is what
 // makes this check usable immediately after a background dispatch rather
-// than only once a member has already produced output.
+// than only once a member has already produced output. A mid-run retry
+// fallback (omp's `retry.fallbackChains` substituting a model after
+// dispatch) is outside this check by design: `session_init` is never
+// rewritten, so the identity stays the dispatched route, and the model that
+// actually served the member is member-outcomes.mjs's per-turn `model`
+// (last turn wins), not a tier verdict.
 export function resolveActual({ transcriptText, resolvedModel, resolvedThinkingLevel }) {
   if (resolvedModel && resolvedThinkingLevel) {
     return { model: resolvedModel, level: resolvedThinkingLevel, viaJobRecord: true };
