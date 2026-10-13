@@ -2187,7 +2187,8 @@ while :; do                                   # one tick
       # gh pr list is GraphQL, so $rl still holds. The pass is budgeted at 4 core
       # REST units per listed PR on top of the 200 floor. The 4 is the measured
       # ceiling of one ci-state.mjs call on the counter `gh api rate_limit`
-      # reports: 2 on the common path, 4 for a PR whose head dropped required jobs.
+      # reports, for single-page reads: 2 on the common path, 4 for a PR whose
+      # head dropped required jobs.
       # The workflow and run lookups bill a second core bucket that `rate_limit`
       # does not report and this gate does not guard. A shortfall pauses this
       # tick's pass.
@@ -2291,16 +2292,16 @@ on top of the floor, so the reserve grows with the list instead of staying a
 flat 200 that a long list drains mid-pass. The 4 is the measured ceiling of one
 `ci-state.mjs` call's cost on the counter `gh api rate_limit` reports (measured
 2026-10-13): 2 on the common path, 4 when the head dropped required jobs, for up
-to 100 jobs and 30 rules — more pages cost more. That counter is not the only
+to 100 jobs and 100 rules — more pages cost more. That counter is not the only
 core bucket one call bills. The lookups `actions/workflows`,
 `actions/workflows/<id>`, `actions/workflows/<id>/runs` and `actions/runs/<id>`
 bill a second one that `rate_limit` does not report and the gate does not
 guard; the boundary is per route, so `actions/runs/<id>/jobs` is on the gated
 counter. Every response says `X-Ratelimit-Resource: core`, so only the reset
-epoch tells the two apart. An exhausted unreported bucket shows up only as
-per-PR `rate-limited` verdicts, which the blind-PR path already latches. A
-shortfall at either gate pauses the **whole** pass through the one budget latch
-and never polls a prefix of the list: a prefix runs
+epoch and the used sequence tell the two apart. An exhausted unreported bucket
+shows up only as per-PR `rate-limited` verdicts, which the blind-PR path
+already latches. A shortfall at either gate pauses the **whole** pass through
+the one budget latch and never polls a prefix of the list: a prefix runs
 in list order, so the same tail PRs would go unread every tick with no line at
 all (never polled, so nothing marks them blind), while the PRs that were polled
 would run dry mid-pass and each emit a blind line. The DEGRADED line from the
