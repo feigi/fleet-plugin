@@ -131,9 +131,14 @@ export const SNAPSHOT_SCHEMA = {
     installExit: { type: "integer" },
     installError: { type: "string" },
     // What `git status --porcelain --untracked-files=all` printed in the
-    // snapshot after the Install step, one entry per line. The repository's
-    // own ignore rules decide it, so it is reported, never excluded.
+    // snapshot after the Install step, one entry per line, the first twenty
+    // at most; `untrackedCount` is how many it printed in all. The
+    // repository's own ignore rules decide it, so it is reported, never
+    // excluded. `statusError` says the read itself failed, which is not an
+    // empty answer.
     untracked: { type: "array", items: { type: "string" } },
+    untrackedCount: { type: "integer" },
+    statusError: { type: "string" },
   },
 };
 
@@ -475,11 +480,26 @@ export function snapshotMissing(snap, runRootPrefix) {
 //
 // What the snapshot reads untracked after the Install step rides on the end
 // as one line: the repository's own ignore rules left it, so it is a fact
-// about the repository, and the review names it rather than hiding it.
+// about the repository, and the review names it rather than hiding it. The
+// line is interpolated into every specialist and refuter prompt and the
+// payload, so it carries the first `LISTED_UNTRACKED` entries and a count of
+// the rest — a PR that drops its dependency directory from `.gitignore` would
+// otherwise put one entry per installed file in each of them; the whole
+// status is in the run root's `status.txt`. A status the block could not read
+// is said so, never left to read as an empty one.
+const LISTED_UNTRACKED = 20;
+
 export function environmentNote(snap) {
   const untracked = snap && Array.isArray(snap.untracked) ? snap.untracked.filter((l) => typeof l === "string" && l.trim()) : [];
-  const note = repoNote(snap);
-  return untracked.length ? `${note}\nAfter the Install step the snapshot reads untracked under the repository's own ignore rules: ${untracked.join(", ")}.` : note;
+  const total = Math.max(untracked.length, snap && Number.isInteger(snap.untrackedCount) ? snap.untrackedCount : 0);
+  const shown = untracked.slice(0, LISTED_UNTRACKED);
+  const more = total - shown.length;
+  let note = repoNote(snap);
+  if (snap && typeof snap.statusError === "string" && snap.statusError.trim())
+    note += `\nAfter the Install step the snapshot's status could not be read (${snap.statusError.trim()}), so what it left untracked is not known.`;
+  if (shown.length)
+    note += `\nAfter the Install step the snapshot reads untracked under the repository's own ignore rules: ${shown.join(", ")}${more > 0 ? `, and ${more} more (the whole status is in ${snap.runRoot ?? "the run root"}/status.txt)` : ""}.`;
+  return note;
 }
 
 function repoNote(snap) {
@@ -521,17 +541,23 @@ export function installReason(snap) {
 }
 
 // The one finding an Install step that exits non-zero in the snapshot files
-// on the PR: the PR's own tree fails its own install, which is the PR's
-// defect, and the Recipe cache — proven on the base — stays as it is. It
-// carries no refuter vote because it is the review's own measurement, an exit
-// status, not a specialist's claim. An Install step that could not be READ
-// files nothing: that is the Recipe's state, not the PR's.
+// on the PR, when the snapshot is the reviewed tree. It is the review's own
+// measurement, an exit status, not a specialist's claim, so it carries no
+// refuter vote — and it claims only what was measured: which tree the step
+// ran on and how it exited. Why it exited is not known here, and the same
+// status can come from the PR (a script it deleted exits 127) or from the host
+// (a kill, a timeout), so the claim says the cause is not established rather
+// than naming the PR's defect. The Recipe cache, proven on the base, stays as
+// it is. A snapshot that is NOT the reviewed tree (`repoVerified` not true)
+// files nothing: an exit there is a fact about a different tree, which
+// `environmentNote` already says. An Install step that could not be READ files
+// nothing either: that is the Recipe's state, not the PR's.
 export function installFinding(snap) {
-  if (!snap || !Number.isInteger(snap.installExit) || snap.installExit === 0) return null;
+  if (!snap || snap.repoVerified !== true || !Number.isInteger(snap.installExit) || snap.installExit === 0) return null;
   const cmd = snap.installCmd ? `\`${snap.installCmd}\`` : "the Recipe's Install step";
   return {
     severity: "critical",
-    claim: `The Install step fails on this PR's tree: ${cmd}, run from the root of a snapshot of ${snap.head}, exited ${snap.installExit}, so no test of this review ran.`,
+    claim: `The Install step exited ${snap.installExit} on this PR's tree: ${cmd}, run from the root of a snapshot of ${snap.head}, so no test of this review ran. The review did not establish why it exited — the PR's tree or this host.`,
     evidence: `The review ran ${cmd} once from the root of ${snap.path} and it exited ${snap.installExit}; its output is in ${snap.runRoot}/install.log.`,
     dimension: "install",
     verdict: "survived",
@@ -965,7 +991,7 @@ export async function runReview(host, args) {
     { [ -d "$SNAP/.git" ] && [ -n "$SNAPTREE" ] && [ "$SNAPTREE" = "$SRCTREE" ]; } && echo SNAPSHOT_TREE_MATCH || echo SNAPSHOT_TREE_MISMATCH="snapshot $SNAPTREE vs commit $SRCTREE"
     INSTALL=$(~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} install) && echo SNAPSHOT_INSTALL_STEP="$INSTALL" || { INSTALL=; echo SNAPSHOT_INSTALL_UNREAD; }
     [ -z "$INSTALL" ] || { ( cd "$SNAP" && sh -c "$INSTALL" ) >"$RUN/install.log" 2>&1; echo SNAPSHOT_INSTALL_EXIT=$?; }
-    if [ -d "$SNAP/.git" ]; then git -C "$SNAP" status --porcelain --untracked-files=all | sed 's/^/SNAPSHOT_UNTRACKED=/'; fi
+    if [ -d "$SNAP/.git" ] && git -C "$SNAP" status --porcelain --untracked-files=all >"$RUN/status.txt"; then head -n 20 "$RUN/status.txt" | sed 's/^/SNAPSHOT_UNTRACKED=/'; echo SNAPSHOT_UNTRACKED_COUNT=$(wc -l <"$RUN/status.txt" | tr -d ' '); else echo SNAPSHOT_STATUS_FAILED; fi
 
 The Install step can take minutes: run the block as ONE blocking foreground
 command with a command deadline of 3600 seconds, never backgrounded and never
@@ -980,9 +1006,13 @@ it anywhere else. A non-zero exit is reported as printed, and the caller files
 it as a finding on the PR.
 
 Report \`untracked\` = every SNAPSHOT_UNTRACKED= value, copied as printed, in
-order, and omit it when the block printed none. The repository's own ignore
-rules decide what reads untracked after the Install step: list it, and add
-nothing to the snapshot's \`.git/info/exclude\` or anywhere else to hide it.
+order, and omit it when the block printed none; the block prints twenty at most,
+so report \`untrackedCount\` = the SNAPSHOT_UNTRACKED_COUNT value, copied as
+printed. If the block printed SNAPSHOT_STATUS_FAILED, report \`statusError\` =
+SNAPSHOT_STATUS_FAILED: the status could not be read, which is not an empty
+status. The repository's own ignore rules decide what reads untracked after the
+Install step: list it, and add nothing to the snapshot's \`.git/info/exclude\` or
+anywhere else to hide it.
 
 Report \`pathVerified\` = true ONLY if the 'ls -A' line printed SNAPSHOT_NONEMPTY,
 run in that order — BEFORE the 'git init', never after it. The init creates an

@@ -171,12 +171,22 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
     new RegExp(`Report\\s+${B}untracked${B}\\s+=\\s+every\\s+SNAPSHOT_UNTRACKED=\\s+value`),
     "untracked is not bound to the status lines the block prints after the Install step",
   );
+  assert.match(
+    snapshot,
+    new RegExp(`report\\s+${B}untrackedCount${B}\\s+=\\s+the\\s+SNAPSHOT_UNTRACKED_COUNT\\s+value`),
+    "untrackedCount is not bound to the count the block prints — a status past the printed twenty reads as only those twenty",
+  );
+  assert.match(
+    snapshot,
+    new RegExp(`SNAPSHOT_STATUS_FAILED,\\s+report\\s+${B}statusError${B}`),
+    "statusError is not bound to the line the block prints when it cannot read the status — an unreadable status reads as an empty one",
+  );
 
   // Scoped to `SNAPSHOT_SCHEMA.properties` directly — a real import now,
   // never a second copy of its JSON re-parsed from source text. A field
   // declared ANYWHERE else is undeclared as far as
   // `additionalProperties: false` is concerned.
-  for (const field of ["testCmd", "testCmdError", "installCmd", "installExit", "installError", "untracked"]) {
+  for (const field of ["testCmd", "testCmdError", "installCmd", "installExit", "installError", "untracked", "untrackedCount", "statusError"]) {
     assert.ok(
       Object.prototype.hasOwnProperty.call(SNAPSHOT_SCHEMA.properties, field),
       `${field} is not declared in SNAPSHOT_SCHEMA.properties — additionalProperties:false drops it`,

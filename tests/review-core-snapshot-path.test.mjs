@@ -587,8 +587,12 @@ test("the snapshot block mints a per-run destination, then extracts, probes, com
       "the Install step no longer runs in the snapshot from its root with its exit printed — the shared test run measures a tree with none of its dependencies, and every review of a repo that has any reads red",
     ],
     [
-      /git -C "\$SNAP" status --porcelain --untracked-files=all \| sed 's\/\^\/SNAPSHOT_UNTRACKED=\/'/,
-      "the snapshot's status is no longer read after the Install step — what the repository's own ignore rules leave untracked goes unreported",
+      /if \[ -d "\$SNAP\/\.git" \] && git -C "\$SNAP" status --porcelain --untracked-files=all >"\$RUN\/status\.txt"; then head -n 20 "\$RUN\/status\.txt" \| sed 's\/\^\/SNAPSHOT_UNTRACKED=\/'; echo SNAPSHOT_UNTRACKED_COUNT=/,
+      "the snapshot's status is no longer read after the Install step, in full to the run root and capped on the way out — what the repository's own ignore rules leave untracked goes unreported, or fills every prompt",
+    ],
+    [
+      /else echo SNAPSHOT_STATUS_FAILED; fi/,
+      "a status read that fails, or a snapshot with no .git, prints nothing and reads as an empty status",
     ],
   ]) {
     const at = snapshot.search(needle);

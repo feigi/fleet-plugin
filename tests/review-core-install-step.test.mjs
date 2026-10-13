@@ -52,10 +52,34 @@ test("installFinding files one critical finding for a non-zero exit, and nothing
   assert.equal(f.severity, "critical");
   assert.equal(f.verdict, "survived", "the install finding is not an apply candidate — a fix-applier reads `survived` for those");
   assert.equal(f.dimension, "install");
-  assert.match(f.claim, /`sh \.\/install\.sh`.*exited 3/, "the finding does not name the failing command and its exit");
+  assert.match(f.claim, /exited 3 .*`sh \.\/install\.sh`/, "the finding does not name the failing command and its exit");
   assert.match(f.evidence, /\/scr\/pr7\/run-ab12\/install\.log/, "the finding's evidence does not name the install log");
   assert.equal(installFinding(UNREAD), null, "an Install step the Recipe cache could not supply is filed on the PR");
   assert.equal(installFinding(SNAP), null, "a passing Install step is filed on the PR");
+});
+
+// The finding claims what was measured — the tree it ran on and the exit — and
+// says the cause is not established: a deleted script exits 127 and a kill
+// exits 137, so a status alone never names the PR as the cause. It is still
+// filed for every non-zero exit: exempting 127 would drop a PR that deleted
+// its own install script.
+test("installFinding claims the exit it measured and says why it exited is not established, for every non-zero exit", () => {
+  for (const exit of [1, 124, 127, 137]) {
+    const f = installFinding({ ...FAILED, installExit: exit });
+    assert.ok(f, `an install that exited ${exit} files nothing`);
+    assert.match(f.claim, new RegExp(`exited ${exit} on this PR's tree`), `exit ${exit}: the finding does not name the exit`);
+    assert.match(f.claim, /did not establish why it exited/, `exit ${exit}: the finding names the PR's tree as the cause of a status that may be the host's`);
+  }
+});
+
+test("installFinding files nothing for a snapshot that is not the reviewed tree, though its Install step exited non-zero", async () => {
+  const mismatch = { ...FAILED, repoVerified: false, repoError: "SNAPSHOT_TREE_MISMATCH=snapshot aaa vs commit bbb" };
+  assert.equal(installFinding(mismatch), null, "an exit measured on a different tree is filed on the PR");
+  assert.equal(installFinding({ ...FAILED, repoVerified: undefined }), null, "an omitted repoVerified reads as a verified tree");
+  const { calls, result } = await reviewOf(mismatch);
+  assert.equal(calls["test-run"], undefined, "the shared test run was dispatched into a snapshot the Install step failed in");
+  assert.equal(result.dimensionsUnrun.length, 2, "not every dimension is reported unrun");
+  assert.equal(result.survived.filter((f) => f.dimension === "install").length, 0, "the review filed an install finding off a snapshot it says is not the reviewed tree");
 });
 
 test("an Install step that fails in the snapshot skips the shared run, reports every dimension unrun naming it, and files one finding", async () => {

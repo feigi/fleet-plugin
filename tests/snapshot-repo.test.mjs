@@ -159,7 +159,7 @@ function cutLines(path) {
 }
 
 /** The block's last line: the snapshot's status, read after the Install step. */
-const UNTRACKED_LINE = /^ *if \[ -d "\$SNAP\/\.git" \]; then git -C "\$SNAP" status --porcelain --untracked-files=all/m;
+const UNTRACKED_LINE = /^ *if \[ -d "\$SNAP\/\.git" \] && git -C "\$SNAP" status --porcelain --untracked-files=all/m;
 
 /** `cutLines`, rendered for one worktree. */
 const render = (path, worktree) => new Function("worktree", "return `" + cutLines(path) + "`")(worktree);
@@ -1046,6 +1046,58 @@ test("an Install step that leaves an un-ignored file gets it named, and nothing 
     "the payload's testEnvironment no longer names what the snapshot reads untracked after the Install step",
   );
   assert.doesNotMatch(environmentNote({ repoVerified: true }), /After the Install step/, "a snapshot that reads clean is reported as carrying untracked paths");
+});
+
+// A PR that drops its dependency directory from `.gitignore` leaves one
+// status entry per installed file. The block prints the first twenty and the
+// count, and keeps the whole status in the run root, so no prompt carries the
+// lot.
+test("an Install step that leaves many un-ignored files gets twenty of them named, the count, and the whole status kept in the run root", (t) => {
+  const worktree = installedRepo(t, { install: `${DEPS_INSTALL} && for i in $(seq 1 30); do echo x > extra$i.txt; done` });
+  const { runRoot, out } = cut(t, render(SOURCES[0][1], worktree));
+
+  assert.match(out, /^SNAPSHOT_INSTALL_EXIT=0$/m, `the Install step did not run to exit 0 in the snapshot: ${out}`);
+  assert.equal(out.match(/^SNAPSHOT_UNTRACKED=/gm)?.length, 20, `the block did not name exactly twenty of the thirty files the Install step left: ${out}`);
+  assert.match(out, /^SNAPSHOT_UNTRACKED_COUNT=30$/m, `the block did not count the whole status: ${out}`);
+  assert.equal(readFileSync(join(runRoot, "status.txt"), "utf8").split("\n").filter(Boolean).length, 30, "the run root does not hold the whole status");
+
+  const entries = Array.from({ length: 30 }, (_, i) => `?? extra${i + 1}.txt`);
+  const note = environmentNote({ repoVerified: true, runRoot: "/scr/run", untracked: entries.slice(0, 20), untrackedCount: 30 });
+  assert.match(note, /\?\? extra20\.txt, and 10 more \(the whole status is in \/scr\/run\/status\.txt\)\./, "the note does not carry the count of what it left out");
+  assert.doesNotMatch(note, /extra21\.txt/, "the note carries more than twenty entries");
+  // A snapshot agent that transcribes more than it was told to is capped here too.
+  assert.doesNotMatch(environmentNote({ repoVerified: true, runRoot: "/scr/run", untracked: entries }), /extra21\.txt/, "the note trusts the agent to have stopped at twenty");
+});
+
+// A status the block cannot read is not an empty status: an Install step that
+// removes or corrupts the snapshot's `.git` must reach the payload as a status
+// failure, where the old line printed nothing and read as nothing untracked.
+for (const [what, install] of [
+  ["removes the snapshot's .git", `${DEPS_INSTALL} && rm -rf .git`],
+  ["corrupts the snapshot's .git/HEAD", `${DEPS_INSTALL} && echo garbage > .git/HEAD`],
+]) {
+  test(`an Install step that ${what} gets the status read reported as failed, not as empty`, (t) => {
+    const worktree = installedRepo(t, { install });
+    const { out, status } = cut(t, render(SOURCES[0][1], worktree));
+
+    assert.equal(status, 0, `the block exited non-zero — a snapshot agent reads that as a failed cut: ${out}`);
+    assert.match(out, /^SNAPSHOT_INSTALL_EXIT=0$/m, `the Install step did not run to exit 0 in the snapshot: ${out}`);
+    assert.match(out, /^SNAPSHOT_STATUS_FAILED$/m, `the block read a vanished or broken repository as an empty status: ${out}`);
+    assert.doesNotMatch(out, /SNAPSHOT_UNTRACKED/, `the block printed a status for a repository it could not read: ${out}`);
+  });
+}
+
+test("a status that reads cleanly never reports a failed read, and a failed one is said in the note", (t) => {
+  const worktree = installedRepo(t);
+  const { out } = cut(t, render(SOURCES[0][1], worktree));
+  assert.doesNotMatch(out, /SNAPSHOT_STATUS_FAILED/, `a repository that reads clean is reported as unreadable — the failure cases above would pass for any block: ${out}`);
+  assert.match(out, /^SNAPSHOT_UNTRACKED_COUNT=0$/m, `the block did not count an empty status: ${out}`);
+  assert.match(
+    environmentNote({ repoVerified: true, statusError: "SNAPSHOT_STATUS_FAILED" }),
+    /the snapshot's status could not be read \(SNAPSHOT_STATUS_FAILED\), so what it left untracked is not known\./,
+    "the payload's testEnvironment does not say the status could not be read",
+  );
+  assert.doesNotMatch(environmentNote({ repoVerified: true }), /could not be read/, "a snapshot whose status read fine is reported as unreadable");
 });
 
 // A PR that breaks its own install is the PR's defect: the block reports the
