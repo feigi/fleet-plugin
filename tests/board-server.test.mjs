@@ -15,6 +15,7 @@ import { createBoardServer, renderRefusedHost, resolveCockpitInstance, cockpitPo
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { withStderr, serveArgs, serveOpts, withTimeout } from "./support/board-rig.mjs";
+import { heldOutside, watchWindow } from "./support/cockpit-port.mjs";
 
 test("createBoardServer serves board.json and the page", async () => {
   const dir = tempDir("board-");
@@ -688,13 +689,6 @@ async function holderOn(dir, port = 0) {
   return { server, port: bound };
 }
 
-// The skip reason for a row that could not bind its fixed port itself
-// (#2522): the outside process holding it can let go before the launch
-// binds, and the launch then takes the port the row needed held.
-function heldOutside(port) {
-  return `port ${port} is held by a process outside this test, which can release it before the launch binds`;
-}
-
 const boardDir = (payload) => {
   const dir = tempDir("board-holder-");
   if (payload !== undefined) writeFileSync(join(dir, "board.json"), payload);
@@ -835,6 +829,55 @@ async function untilLaunched(rig, count) {
   }
 }
 
+// watchWindow's two answers, on ephemeral ports rather than cockpit-range
+// ones, so no cockpit this suite runs alongside lands on them. The holder
+// arrives after the watch's first round and is gone before the landing is
+// read — the shape a probe before the spawn and another after the announce
+// both miss — and it still excuses a landing past it.
+test("watchWindow: a candidate held and released while the watch is up excuses a landing past it", async (t) => {
+  const [held, landed] = [await unheldPort(), await unheldPort()];
+  const watch = await watchWindow([held, landed]);
+  try {
+    const holder = createServer();
+    const failure = await new Promise((res) => { holder.once("error", res); holder.listen(held, "127.0.0.1", () => res(null)); });
+    if (failure?.code === "EADDRINUSE") return t.skip(heldOutside(held));
+    if (failure) throw failure;
+    await new Promise((res) => setTimeout(res, 100));
+    await new Promise((res) => holder.close(res));
+    assert.equal(await watch.blockerBefore(landed), held);
+  } finally { await watch.stop(); }
+});
+
+// The half that must refuse to excuse: with nothing held, a landing past the
+// first candidate is the scan's own doing and the rows have to fail on it,
+// and a landing on the first candidate needs no excuse at all.
+test("watchWindow: with nothing held, no landing is excused", async () => {
+  const window = [await unheldPort(), await unheldPort()];
+  const first = await watchWindow(window);
+  assert.equal(await first.blockerBefore(window[1]), null, "a landing past a free candidate was excused");
+  const second = await watchWindow(window);
+  assert.equal(await second.blockerBefore(window[0]), null);
+});
+
+// A held candidate excuses only a landing every candidate ahead of it can
+// account for: here the first is held for the whole watch and the second is
+// free throughout, so a landing past both is the scan's own doing and the
+// rows have to fail on it, held first candidate or not.
+test("watchWindow: a landing past a candidate nothing held is not excused by an earlier one that was held", async (t) => {
+  const [held, free, landed] = [await unheldPort(), await unheldPort(), await unheldPort()];
+  const holder = createServer();
+  const failure = await new Promise((res) => { holder.once("error", res); holder.listen(held, "127.0.0.1", () => res(null)); });
+  if (failure?.code === "EADDRINUSE") return t.skip(heldOutside(held));
+  if (failure) throw failure;
+  const watch = await watchWindow([held, free, landed]);
+  try {
+    assert.equal(await watch.blockerBefore(landed), null, "a landing past a free candidate was excused by an earlier held one");
+  } finally {
+    await watch.stop();
+    await new Promise((res) => holder.close(res));
+  }
+});
+
 // The reuse path end to end, and the claim no unit row can make: a second
 // launch against a LIVE cockpit for the same workspace starts no server,
 // says where the board already is, and exits 0. The exit code is the whole
@@ -846,21 +889,30 @@ async function untilLaunched(rig, count) {
 // workspace DERIVES. Every other row here only asserts where a launch did
 // not land, so a scan that skipped the derived port entirely — or probed
 // before it tried to bind — would pass all of them and move every
-// bookmarked URL by one.
+// bookmarked URL by one. The window is watched while the launch picks its
+// port (watchWindow): a landing past a candidate something outside this
+// test was seen holding is that holder's doing, not the scan's, and skips.
 //
 // #1714: both launches pass --open, the way run-team's phase 0 relaunches on
 // every re-shortlist, with every launcher stubbed on PATH. The first bound
 // the port, so it opens exactly one tab; the second found that cockpit
 // already running (the held-port arm), so it opens none — before #1714 it
 // opened the existing board again, one more tab per pass.
-test("CLI: a second launch for the same workspace reuses the live cockpit, opens nothing, and exits 0", async () => {
+test("CLI: a second launch for the same workspace reuses the live cockpit, opens nothing, and exits 0", async (t) => {
   const rig = launcherBin(ALL_LAUNCHERS), repo = gitRepo("board-ws-reuse-");
   const instance = resolveCockpitInstance({ cwd: repo, workspace: realpathSync(repo) });
-  const expected = await firstFreePort(cockpitPorts(instance));
+  const ports = cockpitPorts(instance);
+  const watch = await watchWindow(ports);
   const first = serveProcess(repo, rig.bin, ["--interval", "3600", "--open"]);
+  const exited = new Promise((res) => first.p.once("exit", res));
   try {
     const url = await withTimeout(first.url, 20000, "the first cockpit to announce");
-    assert.equal(url, `http://127.0.0.1:${expected}`,
+    const blocker = await watch.blockerBefore(Number(new URL(url).port));
+    // The launch that bound still opens its tab, and the stub doing it writes
+    // into rig.bin; a skip that removed rig.bin under that write would fail
+    // the row on its cleanup instead.
+    if (blocker !== null) { await untilLaunched(rig, 1); return t.skip(heldOutside(blocker)); }
+    assert.equal(url, `http://127.0.0.1:${ports[0]}`,
       "a launch with nothing in its way must take the port its workspace derives — that URL is the bookmarkable one");
     // The handshake reads the payload, so the first tick has to have landed.
     await untilBoardJson(url);
@@ -878,7 +930,12 @@ test("CLI: a second launch for the same workspace reuses the live cockpit, opens
     assert.equal(launched.length, 1, `the launch that bound opens one tab and the reuse opens none: ${JSON.stringify(launched)}`);
     assert.ok(launched[0].endsWith(` ${url}/`), `the one tab is not the served board: ${launched[0]}`);
     assert.doesNotMatch(second.stderr, /could not open a browser/, second.stderr);
-  } finally { first.p.kill("SIGKILL"); for (const d of [rig.bin, repo]) rmSync(d, { recursive: true, force: true }); }
+  } finally {
+    await watch.stop();
+    first.p.kill("SIGKILL");
+    await exited;
+    for (const d of [rig.bin, repo]) rmSync(d, { recursive: true, force: true });
+  }
 });
 
 // #1714: the reuse arm the row above cannot reach. That one's cockpit holds

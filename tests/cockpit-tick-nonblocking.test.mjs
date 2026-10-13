@@ -26,13 +26,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { symlinkSync, rmSync, realpathSync, existsSync } from "node:fs";
-import { createServer } from "node:net";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "../plugin/scripts/board-server.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { heldOutside, watchWindow } from "./support/cockpit-port.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
 
@@ -108,20 +108,6 @@ function serveProcess(cwd, bin, home) {
   return { p, port, stderr: () => buf };
 }
 
-// The first candidate this machine can actually bind — the derived port itself
-// unless something outside this suite is sitting on it.
-async function firstFreePort(ports) {
-  for (const p of ports) {
-    const free = await new Promise((res) => {
-      const probe = createServer();
-      probe.once("error", () => res(false));
-      probe.listen(p, () => probe.close(() => res(true)));
-    });
-    if (free) return p;
-  }
-  throw new Error(`test setup: no free port among ${ports.join(", ")}`);
-}
-
 async function until(what, ms, pred) {
   const deadline = Date.now() + ms;
   for (;;) {
@@ -146,20 +132,28 @@ const boardJson = async (port) => {
 // after ~2s rather than the workspace in milliseconds, and the second launch
 // reads the port as foreign, announces a cockpit of its own on the next
 // candidate and never exits, so spawnSync reports the timeout instead of 0.
-test("CLI: a relaunch that lands mid-gather() is answered within 1s and reuses the live cockpit", async () => {
+test("CLI: a relaunch that lands mid-gather() is answered within 1s and reuses the live cockpit", async (t) => {
   const repo = gitRepo("tick-block-");
   const mark = join(tempDir("tick-mark-"), "gathering");
   const bin = shimPath(mark);
   const home = tempDir("tick-home-");
   const instance = resolveCockpitInstance({ cwd: repo, workspace: repo });
-  const expected = await firstFreePort(cockpitPorts(instance));
+  const ports = cockpitPorts(instance);
+  const watch = await watchWindow(ports);
   const first = serveProcess(repo, bin, home);
+  const exited = new Promise((res) => first.p.once("exit", res));
   try {
     const port = await withTimeout(first.port, 20000, "the cockpit to announce");
+    // A landing past a candidate something outside this test was seen
+    // holding is that holder's doing, and leaves nothing below to measure.
+    // The cockpit is still writing its identity into repo when this skips,
+    // so the finally waits for it to die before removing repo.
+    const blocker = await watch.blockerBefore(port);
+    if (blocker !== null) return t.skip(heldOutside(blocker));
     // Not decoration: the second launch below scans this workspace's window in
     // order, so a first launch that landed somewhere else would leave the
     // reuse assertion passing for a reason this test does not name.
-    assert.equal(port, expected, "a launch with nothing in its way must take the port its workspace derives");
+    assert.equal(port, ports[0], "a launch with nothing in its way must take the port its workspace derives");
 
     // The tick is now INSIDE `gh issue list`, which will not answer for
     // GH_SLEEP_S. On the pre-#1713 build this is precisely the window in which
@@ -169,7 +163,7 @@ test("CLI: a relaunch that lands mid-gather() is answered within 1s and reuses t
     // The launcher's own code path, not a hand-rolled fetch: what #1585's
     // handshake asks is exactly what has to be answered here.
     const started = Date.now();
-    const who = await probeCockpitWorkspace(expected);
+    const who = await probeCockpitWorkspace(port);
     const waited = Date.now() - started;
     assert.equal(who, repo,
       `a cockpit that cannot name its workspace mid-tick is read as foreign, which is how the duplicate starts (waited ${waited}ms)`);
@@ -181,14 +175,14 @@ test("CLI: a relaunch that lands mid-gather() is answered within 1s and reuses t
       { cwd: repo, encoding: "utf8", env: childEnv(bin, home), timeout: 30000 });
     assert.equal(second.status, 0,
       `the reuse path must exit 0 — a backgrounded launch reports nothing else: ${second.stderr}`);
-    assert.match(second.stderr, new RegExp(`already running for this workspace on http://127\\.0\\.0\\.1:${expected}/`), second.stderr);
+    assert.match(second.stderr, new RegExp(`already running for this workspace on http://127\\.0\\.0\\.1:${port}/`), second.stderr);
     assert.doesNotMatch(second.stderr, /cockpit on http/,
       `a second cockpit was started for one workspace: ${second.stderr}`);
 
     // …and all of the above really did happen inside the first tick. Without
     // this the two assertions above would also pass on a build whose tick had
     // simply finished first, which is the ordinary case and not this ticket's.
-    const midTick = await boardJson(expected);
+    const midTick = await boardJson(port);
     assert.equal(midTick?.generatedAt, undefined,
       "the first tick finished before the assertions above ran — they proved nothing about a mid-tick relaunch");
     assert.equal(midTick?.workspace, repo, "the payload answered mid-tick is #1660's identity stub");
@@ -196,15 +190,17 @@ test("CLI: a relaunch that lands mid-gather() is answered within 1s and reuses t
     // The other half, and the one a merely-unblocked server could fail: the
     // tick still LANDS, whole and atomically, once its reads return.
     const built = await until("the first tick to publish a board", 30000, async () => {
-      const body = await boardJson(expected);
+      const body = await boardJson(port);
       return typeof body?.generatedAt === "number" ? body : null;
     });
     assert.ok(Array.isArray(built.tickets), "the tick published something that is not a board");
     assert.equal(built.workspace, repo);
-    assert.equal(built.port, expected);
+    assert.equal(built.port, port);
     assert.equal(first.p.exitCode, null, `the cockpit died during its own tick: ${first.stderr()}`);
   } finally {
+    await watch.stop();
     first.p.kill("SIGKILL");
+    await exited;
     for (const d of [bin, repo, home]) rmSync(d, { recursive: true, force: true });
   }
 });
