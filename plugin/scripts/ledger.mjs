@@ -1512,14 +1512,7 @@ function runRotate() {
   // reading it as "no record" would let a live controller's ledger be moved
   // by exactly the fault that hid its record.
   if (state.degraded) {
-    const causeMap = {
-      unreadable: "exists but cannot be read",
-      "not JSON": "is not JSON",
-      "not an object": "is not a JSON object",
-      "invalid controller": "holds a controller record that cannot be judged",
-    };
-    const cause = causeMap[state.degraded] || state.degraded;
-    die(`refusing to rotate ${file}: ${beatFile} ${cause} — repair it so its controller record is intact. Removing it makes this rotate judge none: if the previous run was this omp session's, its live members and retired names are not carried forward, so this run can dispatch onto their work and reuse their names.`);
+    die(`refusing to rotate ${file}: ${beatFile} ${state.degraded} — repair it so its controller record is intact. Removing it makes this rotate judge none: if the previous run was this omp session's, its live members and retired names are not carried forward, so this run can dispatch onto their work and reuse their names.`);
   }
   let prior, ours;
   try {

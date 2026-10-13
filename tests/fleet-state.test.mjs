@@ -152,20 +152,20 @@ test("readState: a file it cannot use is flagged with its cause, a `controller` 
     return readState(path, "fleet-state-test").degraded;
   };
   assert.equal(readState(join(dir, "absent.json"), "fleet-state-test").degraded, undefined, "an absent file is a fresh run");
-  assert.equal(flag("{ \"controller\": {"), "not JSON");
-  assert.equal(flag("[1,2,3]"), "not an object");
+  assert.equal(flag("{ \"controller\": {"), "is not JSON");
+  assert.equal(flag("[1,2,3]"), "is not a JSON object");
   // A parseable file is degraded for a `controller` key that fails the record's
   // validation, whatever the key holds — `null` and a scalar included — because
   // the next write would drop the key and the record with it.
   const junk = [{ pid: "29405", lstart: "x" }, { pid: 0, lstart: "x" }, { pid: 2 ** 31, lstart: "x" }, { pid: 1, lstart: "" }, { lstart: "x" }, null, "29405", []];
   for (const controller of junk) {
-    assert.equal(flag(JSON.stringify({ quiet: 2, controller })), "invalid controller", JSON.stringify(controller));
+    assert.equal(flag(JSON.stringify({ quiet: 2, controller })), "holds a controller record that cannot be judged", JSON.stringify(controller));
   }
   assert.equal(flag(JSON.stringify({ quiet: 2, controller: { pid: 1, lstart: "x" } })), undefined, "a record it can judge is no fault");
   assert.equal(flag(JSON.stringify({ quiet: 2 })), undefined, "no `controller` key is no record, not a fault");
   rmSync(path);
   mkdirSync(path);
-  assert.equal(readState(path, "fleet-state-test").degraded, "unreadable");
+  assert.equal(readState(path, "fleet-state-test").degraded, "exists but cannot be read");
   rmSync(dir, { recursive: true, force: true });
 });
 

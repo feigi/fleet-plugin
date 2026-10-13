@@ -230,6 +230,17 @@ test("CLI: a hold over a file whose controller record cannot be judged warns, fi
   }
 });
 
+test("CLI: a hold whose write was skipped over a degraded file fires before the interval has elapsed, rather than reporting a remainder nothing keeps", () => {
+  // `--base 5 --hold 1`: one hold cannot reach the interval, so only the
+  // skipped write can make this a fire.
+  const state = JSON.stringify({ quiet: 0, elapsed: 0, controller: null });
+  const r = runBytes(["--base", "5", "--hold", "1"], state);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /interval elapsed/);
+  assert.doesNotMatch(r.stdout, /remain/);
+  assert.equal(r.bytes, state);
+});
+
 test("CLI: a state file it cannot READ is announced, never silently discarded", (t) => {
   if (process.getuid?.() === 0) return t.skip("root reads every file");
   // The absent file is silent because a fresh run legitimately has none. An

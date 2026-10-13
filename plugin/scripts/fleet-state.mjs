@@ -123,7 +123,8 @@ export function readState(path, name) {
   // The same state, flagged: the file EXISTS and could not be used. A caller
   // that acts on the absence of a record — ledger.mjs rotate — must tell this
   // from `fresh`, which is a run that has simply not written one yet. The
-  // `degraded` field is absent on a fresh read, else the cause string.
+  // `degraded` field is absent on a fresh read, else a phrase for the cause
+  // that completes "<file> …" in rotate's refusal.
   const makeDegraded = (cause) => ({ ...fresh, degraded: cause });
   let raw;
   try {
@@ -139,7 +140,7 @@ export function readState(path, name) {
     // whole ticket exists to close.
     if (e.code !== "ENOENT") {
       console.error(`${name}: WARNING could not read ${path} (${e.message}) — restarting at the base interval`);
-      return makeDegraded("unreadable");
+      return makeDegraded("exists but cannot be read");
     }
     return fresh;
   }
@@ -148,11 +149,11 @@ export function readState(path, name) {
     parsed = JSON.parse(raw);
   } catch (e) {
     console.error(`${name}: WARNING ${path} is not JSON (${e.message}) — restarting at the base interval`);
-    return makeDegraded("not JSON");
+    return makeDegraded("is not JSON");
   }
   if (!isRecord(parsed)) {
     console.error(`${name}: WARNING ${path} is not an object — restarting at the base interval`);
-    return makeDegraded("not an object");
+    return makeDegraded("is not a JSON object");
   }
   // Per-field validation, not all-or-nothing: a file carrying a good `quiet`
   // and a junk `elapsed` keeps the streak instead of losing both to one key.
@@ -230,9 +231,10 @@ export function readState(path, name) {
   // A controller key that ctl() rejects is a record someone wrote and nobody
   // can judge, not the absence of one — announced like the other degraded
   // causes, and flagged.
-  if ("controller" in parsed && ctl(controller) === null) {
+  const record = ctl(controller);
+  if ("controller" in parsed && record === null) {
     console.error(`${name}: WARNING ${path} holds a controller record that cannot be judged — restarting at the base interval`);
-    return makeDegraded("invalid controller");
+    return makeDegraded("holds a controller record that cannot be judged");
   }
   return {
     quiet: num(quiet),
@@ -241,7 +243,7 @@ export function readState(path, name) {
     beat: mark(beat),
     ticked: tick(ticked),
     acted: tick(acted),
-    controller: ctl(controller),
+    controller: record,
     seen: stamps(seen),
     rest,
   };
