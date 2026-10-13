@@ -2210,7 +2210,7 @@ while :; do                                   # one tick
       # ceiling of one ci-state.mjs call on the counter `gh api rate_limit`
       # reports, for single-page reads: 2 on the common path, 4 for a PR whose
       # head dropped required jobs.
-      # A shortfall pauses this tick's pass.
+      # A shortfall here, or at the Actions-bucket gate below, pauses this tick's pass.
       if [ "$rl" -lt $((200 + 4 * count)) ]; then
         if [ -z "$budget_out" ]; then
           echo "WATCHER DEGRADED: core REST budget=$rl < $((200 + 4 * count)) needed for $count PRs — CI polling paused, silence is NOT green"
@@ -2227,7 +2227,8 @@ while :; do                                   # one tick
         case "$hrl" in ''|*[!0-9]*) hrl=ERR;; esac # a missing header is an outage, not a budget
         if [ "$hrl" = ERR ] || [ "$hrl" -lt $((200 + 4 * count)) ]; then
           if [ -z "$hidden_out" ]; then
-            echo "WATCHER DEGRADED: unreported Actions core REST bucket=$hrl < $((200 + 4 * count)) needed for $count PRs — CI polling paused, silence is NOT green"
+            need=; [ "$hrl" = ERR ] || need=" < $((200 + 4 * count)) needed for $count PRs" # an unreadable header has no amount to compare
+            echo "WATCHER DEGRADED: unreported Actions core REST bucket=$hrl$need — CI polling paused, silence is NOT green"
             hidden_out=1
           fi
         else
@@ -2323,8 +2324,9 @@ enforce. It latches globally like the list failure but does not pause polling:
 the PRs it did return are real, so the pass still watches them, and the
 DEGRADED line names the rest as unwatched until a pass comes back under the cap.
 
-**The budget is gated twice, and only the second gate announces recovery.** The
-tick-top floor (`200`) covers the probes themselves. Once the open-PR list is
+**The budget is gated at the floor and again at the pass, and only the pass
+gates announce recovery.** The tick-top floor (`200`) covers the `rate_limit`
+and `gh pr list` reads. Once the open-PR list is
 read, the pass gate reserves `200 + 4 × count` core REST units — 4 per listed PR
 on top of the floor, so the reserve grows with the list instead of staying a
 flat 200 that a long list drains mid-pass. The 4 is the measured ceiling of one
@@ -2337,7 +2339,7 @@ bill a second one that `rate_limit` does not report; the boundary is per route,
 so `actions/runs/<id>/jobs` is on the reported counter. Every response says
 `X-Ratelimit-Resource: core`, so only the reset epoch and the used sequence tell
 the two apart, and the unreported bucket's remaining count is readable only from
-the `X-Ratelimit-Remaining` header of a call that bills it. **The pass gate
+the `X-Ratelimit-Remaining` header of a call that bills it. **A second pass gate
 therefore probes it too**: one `gh api -i` read of
 `actions/workflows?per_page=1` per tick, 1 unit of that bucket (measured
 2026-10-13: its remaining count fell by 1 per call while `rate_limit` stood
@@ -2356,8 +2358,9 @@ these gates pauses the **whole** pass and never polls a prefix of the list: a pr
 in list order, so the same tail PRs would go unread every tick with no line at
 all (never polled, so nothing marks them blind), while the PRs that were polled
 would run dry mid-pass and each emit a blind line. The DEGRADED line from each
-pass gate names the amount it needed and the count it needed it for, so a
-healthy-looking `budget=999` is not read as an outage with no cause. Only the
+pass gate names the amount it needed and the count it needed it for — except an
+unreadable header, which has no amount to compare and prints `bucket=ERR` alone
+— so a healthy-looking `budget=999` is not read as an outage with no cause. Only the
 pass gates emit RECOVERED lines, and both only once the pass will actually run:
 announcing recovery at the floor, or for one bucket while the other still pauses
 the pass, would report resumption on a tick whose other gate then pauses it

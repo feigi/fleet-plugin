@@ -8,7 +8,7 @@
 // whatever went wrong, an ordinary not-green left alone, and the per-PR loop
 // splitting per PR under zsh as well as sh.
 //
-// THE CEILING: the stubs cover only the three probes the block makes, and
+// THE CEILING: the stubs cover only the four probes the block makes, and
 // `sleep` is counted rather than taken, so this measures the block's control
 // flow and nothing about real GitHub, real timing, or the "your normal handling
 // of $st" line the block leaves as a placeholder. It also assumes the block
@@ -476,15 +476,25 @@ test("the unreported-bucket latch recovers once, on the tick that bucket covers 
 });
 
 test("a probe with no rate-limit header is an outage, and recovers when the header returns", () => {
-  const seq = join(DIR, "seq-hrl-nohdr");
-  writeFileSync(seq, "nohdr\nnohdr\n5000\n");
-  const out = run({ HRLSEQ: seq, MODE: "normal", PRS: "7" }, 3, "sh", { strict: true });
-  assert.deepEqual(
-    hiddenLines(out).map((l) => l.split(" ").slice(0, 2).join(" ")),
-    ["WATCHER DEGRADED:", "WATCHER RECOVERED:"],
-    `an unreadable probe was silent or repeated:\n${out}`,
-  );
-  assert.equal(count(out, "SLEEP"), 3, `set -eu: an unreadable probe died before the tail sleep:\n${out}`);
+  for (const shell of ["sh", "bash", "zsh"]) {
+    if (!hasShell(shell)) continue;
+    // A fresh file per shell: the stub counts consumption in `<file>.n`.
+    const seq = join(DIR, `seq-hrl-nohdr-${shell}`);
+    writeFileSync(seq, "nohdr\nnohdr\n5000\n");
+    const out = run({ HRLSEQ: seq, MODE: "normal", PRS: "7" }, 3, shell, { strict: true });
+    assert.deepEqual(
+      hiddenLines(out).map((l) => l.split(" ").slice(0, 2).join(" ")),
+      ["WATCHER DEGRADED:", "WATCHER RECOVERED:"],
+      `${shell}: an unreadable probe was silent or repeated:\n${out}`,
+    );
+    // The value and the absent comparison: an unreadable header is ERR with no
+    // "< N needed" clause, never a number the gate then compares.
+    assert.ok(
+      out.includes(`WATCHER DEGRADED: ${HIDDEN}ERR — CI polling paused`),
+      `${shell}: the line does not read the header as ERR with no comparison:\n${out}`,
+    );
+    assert.equal(count(out, "SLEEP"), 3, `${shell}: set -eu: an unreadable probe died before the tail sleep:\n${out}`);
+  }
 });
 
 test("no probe is spent while the reported bucket already pauses the pass", () => {
