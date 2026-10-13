@@ -4281,7 +4281,7 @@ live count from it, so nobody states one. Write neither by hand:
   is still beating — or when the archive name already exists, the process
   table or `.fleet/heartbeat.json` cannot be read; with no ledger and no such
   refusal it moves nothing and exits 0. Then it records this run's controller
-  in `.fleet/heartbeat.json`. Phase 0 states the guard.
+  On this refusal, phase 0 stops and the refusal message goes to the maintainer verbatim. The controller never edits or removes `.fleet/heartbeat.json`; a member removing it inside a live omp session forfeits the carry-forward of live member tokens and settled names (`## Retired`), so a next run can dispatch onto their work and reuse their names.
 
 `row` refuses a malformed member token anywhere in its text — one whose outcome
 is outside the vocabulary above, e.g. `merge-bot-1=dispatched` — at exit 2,

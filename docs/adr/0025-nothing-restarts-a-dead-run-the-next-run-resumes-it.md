@@ -51,7 +51,7 @@ stale 40 minutes after its latest tick, ledger write or record. Decision
 reports the previous run's stall, only that run's recorded stop, once, as
 `previous run stopped deliberately at …`; and since rotate's `acted` shares
 the record's `at`, a stall read off `prior` remains only for a record
-written without one.
+Amended by #3117: writers leave a degraded heartbeat file byte-identical, a junk `controller` key counts as degraded, and rotate's no-record fallback refuses a fresh tick or ledger write regardless of whether a beat exists (Decision 2–4).
 
 ## Context
 
