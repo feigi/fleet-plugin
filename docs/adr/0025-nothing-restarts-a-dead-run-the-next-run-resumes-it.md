@@ -51,7 +51,14 @@ stale 40 minutes after its latest tick, ledger write or record. Decision
 reports the previous run's stall, only that run's recorded stop, once, as
 `previous run stopped deliberately at …`; and since rotate's `acted` shares
 the record's `at`, a stall read off `prior` remains only for a record
-Amended by #3117: writers leave a degraded heartbeat file byte-identical, a junk `controller` key counts as degraded, and rotate's no-record fallback refuses a fresh tick or ledger write regardless of whether a beat exists (Decision 2–4).
+written without one.
+Amended by #3117: a `controller` key that fails the record's validation makes
+the heartbeat file degraded, as an unreadable or unparseable one is; every
+writer — `fleet-tick`, `fleet-heartbeat` (hold and `--stop`) and the ledger's
+write subcommands — leaves a degraded file byte-identical, so rotate keeps
+refusing on it; and Decision 6's mark-based check refuses a tick or ledger
+write still inside its window whether or not a beat exists, a recorded stop
+still letting rotation through.
 
 ## Context
 
