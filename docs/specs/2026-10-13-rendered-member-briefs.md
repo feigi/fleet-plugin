@@ -13,8 +13,9 @@ hand. `fleet-finisher.agent.md` and `fleet-merge-bot.agent.md` are one line
 each ("Follow the dispatch brief you were given"). The review fix-applier has
 no agent definition at all: `ledger.mjs dispatch` prints `agent: null` for it.
 Everything those members know arrives as text the controller pastes from
-`run-team/SKILL.md`, where it sits as 453 `>`-quoted lines spread over the
-Reviewers section: the fix-applier prompt (17.6 KB), the finisher duty list,
+`run-team/SKILL.md`, where it sits as 453 non-blank `>`-quoted lines (33.0 KB
+counting the blank `>` separators) spread over the Reviewers section: the
+fix-applier prompt (22.8 KB), the finisher duty list,
 the instrument re-check block, the test-verdict block, the duty-3 two-step
 block, the halt-cause block. Beside those, fourteen separate rules say "say it
 in every dispatch prompt", "give it verbatim", "tell every implementer,
@@ -50,7 +51,8 @@ fact about a duty has one owner file.
 - As the controller, I want `dispatch-prompt.mjs render finisher --pr 2285
   --pin <sha> …` to print the whole brief, so that I pass one argument list
   and never decide which blocks a finisher needs.
-- As the controller, I want `ledger.mjs dispatch` to refuse a member with no
+- As the controller, I want `ledger.mjs dispatch` to refuse a member of a
+  ledger family (implementer, fix-applier, finisher, merge-bot) with no
   rendered brief, so that a dispatch I half-prepared cannot leave the ledger
   looking complete.
 - As a finisher, I want duty 3 to be `finisher-label.mjs --pr <M> --pin
@@ -62,7 +64,7 @@ fact about a duty has one owner file.
 - As a maintainer, I want the golden tests to compare rendered briefs, so
   that a block missing from what a member received is red, not only a block
   missing from SKILL.md.
-- As a maintainer, I want SKILL.md to lose its 26.6 KB of member text, so
+- As a maintainer, I want SKILL.md to lose its 33 KB of member text, so
   that the controller's always-on context stops carrying prompts it never
   reads for itself.
 
@@ -110,8 +112,13 @@ the Reviewers and finisher sections is deleted in the same change.
 <member>` reads the sidecar, refuses (exit 2, nothing written) when it is
 missing or its `role` does not match the member's family, and appends
 `brief=<sha256 first 8>` to the `## Dispatched` entry. The controller passes
-the file's content as the `task` prompt. `ledger.mjs rotate` archives the
-`briefs/` directory beside the ledger.
+the file's content as the `task` prompt. The gate covers the four ledger
+families (`impl`, `fix-pr`, `finisher-pr`, `merge-bot`), that is the
+implementer, fix-applier, finisher and merge-bot roles. `review-runner` and
+`recipe-deriver` are not ledger-dispatch families (`ledger.mjs review`
+records a review runner; the recipe-deriver has no family), so their briefs
+are rendered by D1 but not gated, and D6's golden tests are their only check.
+`ledger.mjs rotate` archives the `briefs/` directory beside the ledger.
 
 **D4. Duty scripts.** Member duties that are a fixed command sequence become
 scripts under `plugin/scripts/`, each printing one JSON receipt and using
