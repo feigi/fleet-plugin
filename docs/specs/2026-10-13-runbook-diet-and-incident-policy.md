@@ -9,8 +9,9 @@ Base tree: `main` at `bd4afac` (2026-10-13).
 ## Series
 
 The 2026-10-13 determinism review found that fleet-ctl computes every
-transition in scripts and executes them from a 302 KB runbook (about 93k
-tokens, measured the way #2929 measured) read by a model, and that the
+transition in scripts and executes them from a 302 KB runbook (about 109k
+tokens at the 2.76 B/token #2929 measured; #2929's own 93.2k was for the
+257 KB file the runbook was then) read by a model, and that the
 "forgets to do things" class of incident lives in that gap. Six specs
 close it:
 
@@ -48,14 +49,15 @@ spec, until it is measured.
 
 ## Problem Statement
 
-`run-team/SKILL.md` is 302 KB and always on. It carries 68 inline
-"Measured:" war stories although its own third paragraph says the war story
-behind a rule lives in `references/`; 328 must/never clauses; and, until
+`run-team/SKILL.md` is 302 KB and always on. It carries 30 inline
+`Measured` war stories (68 counting any case of the word) although its
+own third paragraph says the war story behind a rule lives in
+`references/`; 342 `must`/`never` words; and, until
 spec 1 lands, 453 lines of member-facing prompt text the controller never
 reads for itself. It grew 173 → 222 → 257 → 302 KB over six weeks, one
 paragraph per incident. The repair pattern is the growth: each forgotten
 duty earns a sentence placed "where it is read last", the next incident
-earns the next sentence, and 94 of the 219 test files pin that a sentence
+earns the next sentence, and 94 of the 218 test files pin that a sentence
 exists, not that anything follows it.
 
 Context is the least durable thing in the run; the runbook says so, and
@@ -107,15 +109,15 @@ section's first paragraph is its exit condition. Shell traps move whole to
 `references/shell-traps.md`, cited from the merge-bot brief template (spec
 1), which is the seat that pastes them.
 
-**D3. War stories out.** Every "Measured:" paragraph moves to the
+**D3. War stories out.** Every `Measured` paragraph moves to the
 `references/` file for its topic, keyed by the rule it justifies, in the
 style `references/member-lifecycle.md` already uses; the rule keeps one
 clause and `See references/<file>`. The `.out-of-scope/
 fleet-prompt-doc-duplication.md` argument (duplication defends against a
 skimmed file read) is honoured by spec 1's mechanism, not by copies: the
 member's text is in its body and its brief, both rendered, so nothing is
-left for a skimmed read to miss, and the record's "when to reconsider" is
-met.
+left for a skimmed read to miss, and the record's reason for keeping the
+duplication is addressed.
 
 **D4. The incident policy.** `docs/agents/incident-policy.md`, one page: a
 member-reliability incident (a duty skipped, a report lost, a step run out
