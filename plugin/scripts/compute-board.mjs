@@ -82,8 +82,8 @@ import { latestFinisherAttempts } from "./fleet-tick.mjs";
 //
 // A PR's review is not a member: `review=wf:<runId>` is a Workflow
 // with nobody to name, while `review=member:<name>` names a runner member,
-// live until the token is
-// settled `=failed` or a later `reviewed=` records its result.
+// live until the token is settled `=failed` or a later `reviewed=` records
+// its result.
 //
 // A `review=` token puts the PR under review only while
 // it is live. A settled `review=…=failed` is a dead review and the PR is owed
@@ -136,9 +136,9 @@ export function parseRow(row) {
 
   // `live` holds live entries in row order, each one of two kinds: a
   // ledger-grammar member (`kind: "member"`, its parsed token as `token`) or
-  // a review runner a `review=member:` token names
-  // (`kind: "runner"`, a name and nothing else — it is no ledger-grammar
-  // member, so it has none of a parsed token's fields). A runner carries no
+  // a review runner a `review=member:` token names (`kind: "runner"`, a name
+  // and nothing else — it is no ledger-grammar member, so it has none of a
+  // parsed token's fields). A runner carries no
   // `token`, so reading a member field off one through `.token` throws
   // rather than reading `undefined`. `implOutcomes` holds each impl name's
   // latest well-formed outcome: only an impl outcome decides a card. A

@@ -44,10 +44,10 @@ PR, off the controller's own turn.
    reporting `no-op` satisfies that gate immediately, against the
    existing head, with no new CI run to wait for.
 
-Where the review unit is unavailable or has failed its one retry, the
-controller falls back to hand-dispatching the snapshot and specialists
-itself — a measured omp spawn restriction on some installs, not a
-preference.
+A review that fails its one retry inside the runner is reported `failed`; the
+controller retries it once under the next free reviewer name
+(`review-pr-<pr#>-b`), and a second failure is reported and leaves the PR at
+review-due.
 
 ```mermaid
 flowchart TD

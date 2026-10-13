@@ -120,9 +120,8 @@ test("a review file already at the run root is never replaced: the attempt fails
 });
 
 // A write fault that is not the run root's file being taken is the
-// environment's, not the review's: the review is not run again for it and no
-// fallback reviewer is named. Here `pr7` is a regular file, so no run root can
-// be made under it.
+// environment's, not the review's: the review is not run again for it. Here
+// `pr7` is a regular file, so no run root can be made under it.
 test("a write fault other than a taken file throws and does not re-run the review", async () => {
   const dir = scratch();
   writeFileSync(join(dir, "pr7"), "not a directory\n");
@@ -255,11 +254,10 @@ test("two malformed results in a row report failed and write no file", async () 
   const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run);
   assert.equal(calls.length, 2);
   assert.equal(out.status, "failed");
-  assert.equal("fallback" in out, false, "the result names no fallback reviewer: the controller takes the next free name off the PR's rows");
   assert.deepEqual(filesUnder(dir), [], "a malformed result left a partial file behind");
 });
 
-test("a second failure reports failed with BOTH errors, names no fallback, and writes no file", async () => {
+test("a second failure reports failed with BOTH errors and writes no file", async () => {
   const dir = scratch();
   const { run, calls } = scriptedRun([new Error("first: spend limit"), null]);
   const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run);
@@ -268,7 +266,6 @@ test("a second failure reports failed with BOTH errors, names no fallback, and w
   assert.equal(out.errors.length, 2);
   assert.match(out.errors[0], /first: spend limit/);
   assert.match(out.errors[1], /empty/);
-  assert.equal("fallback" in out, false, "the result names no fallback reviewer: the controller takes the next free name off the PR's rows");
   assert.deepEqual(filesUnder(dir), [], "a failed review left a result file a controller would read as a review");
 });
 
@@ -283,7 +280,7 @@ test("a scratch that is missing or relative is refused before any review runs", 
 
 // #2323. A scratch the controller already partitioned is a dispatch mistake,
 // not a review failure: runReview would throw it, and without this the runner
-// would retry it and name a fallback reviewer for a review that never ran.
+// would retry it for a review that never ran.
 test("a scratch already ending in pr<N> is refused before any review runs, not retried", async () => {
   for (const bad of ["/x/pr7", "/x/pr7/", "/x/pr42"]) {
     const { run, calls } = scriptedRun([RESULT]);

@@ -2474,10 +2474,12 @@ is a failure event, not a clean review.** The review throws on missing
 `args.pr`/`args.worktree` and on a snapshot agent that returned no tree, and a
 failure surfaces mid-loop, where "react, never block" makes it easy to log and
 carry on — leaving a PR that *reads* as reviewed and is not. **Retry once
-under the next runner letter, then stop — and whoever holds the review call is
-who retries:**
-The `review-pr-<pr#>` runner already retried once inside its cell and reports `failed` with both errors. The retry is a second runner under the next letter the PR's rows do not carry yet — `review-pr-<pr#>-b` after a first runner — recorded as `review=member:<that name>`. A second failure is reported, and the PR stays at review-due.
-Settle the dead review by appending `=failed` to its `review=`
+under the next runner letter, then stop:** the `review-pr-<pr#>` runner
+already retried once inside its cell and reports `failed` with both errors, so
+the retry is a second runner under the next letter the PR's rows do not carry
+yet — `review-pr-<pr#>-b` after a first runner — recorded as
+`review=member:<that name>`. A second failure is reported, and the PR stays at
+review-due. Settle the dead review by appending `=failed` to its `review=`
 token, then append `review=member:<that name>` after it, both in one
 `ledger.mjs review <pr> review=<dead launch>=failed review=member:<that name>`
 call — `review` settles the dead launch in place, and refuses a new launch

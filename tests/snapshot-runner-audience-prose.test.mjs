@@ -85,15 +85,16 @@ test("review-and-fix.md still hands specialists the command both guards point at
 
 // #1150: any member that dispatches a child writes the child's absolute scratch
 // path into its prompt, and the child never derives its own. This bullet is the
-// fallback dispatch site — a member hand-dispatching the specialists because the
-// review could not run — so "their own scratch dir" has to name the directory
-// and who resolves it, pinned with its path. Same bullet slice as above.
-test("review-and-fix.md's fallback specialist dispatch assigns each specialist an absolute scratch path", () => {
+// hand-dispatch site — a member dispatching the specialists itself, with no
+// controller to run the review — so "their own scratch dir" has to name the
+// directory and who resolves it, pinned with its path. Same bullet slice as
+// above.
+test("review-and-fix.md's specialist dispatch assigns each specialist an absolute scratch path", () => {
   const bullet = REVIEW_AND_FIX.between("Give specialists a stack-free test command", "\n- **", "review-and-fix.md").text;
   assert.match(
     bullet,
     Pin.phrase("`<scratch>/pr<N>/fleet-review-<key>/`, resolved to an absolute path that you write into that specialist's prompt; a specialist never derives its own"),
-    "the fallback specialist dispatch no longer names the directory each specialist gets, or no longer has the dispatcher write it, absolute, into the specialist's prompt",
+    "the specialist dispatch no longer names the directory each specialist gets, or no longer has the dispatcher write it, absolute, into the specialist's prompt",
   );
 });
 

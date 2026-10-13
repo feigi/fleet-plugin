@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -243,7 +243,7 @@ test("retiredOnLedger: a name the new ledger carries is not listed for its own o
 test("retiredOnLedger: a reviewer runner a row launched is retired, a workflow launch and another name are not", () => {
   const done = "reviewed=abc1234:0/0/0:run-abcdefgh";
   const rows = [
-    `#5 impl-5=PR#6 → PR#6 · review=member:review-pr-6 ${done} · review=fallback:review-pr-6-b=failed`,
+    `#5 impl-5=PR#6 → PR#6 · review=member:review-pr-6 ${done} · review=member:review-pr-6-b=failed`,
     `#7 impl-7=PR#8 → PR#8 · review=wf:review-pr-8 ${done} · review=member:some-runner ${done}`,
     `#9 impl-9=PR#10 → PR#10 · review=member:review-pr-10 ${done} · impl-10`,
   ];
@@ -251,6 +251,13 @@ test("retiredOnLedger: a reviewer runner a row launched is retired, a workflow l
   assert.deepEqual(live.rows, [2], "only #9 holds a live token");
   assert.deepEqual(retiredOnLedger(rows, [], [], carriedBy(rows, live)), ["impl-5", "review-pr-6", "review-pr-6-b", "impl-7"],
     "the carried row's own runner stays with the row");
+});
+
+test("REVIEW reads a workflow or a runner launch, settled or not, and refuses any other kind", () => {
+  for (const ok of ["review=wf:r1", "review=member:review-pr-1", "review=member:review-pr-1-b", "review=member:review-pr-1-b=failed"]) {
+    assert.ok(REVIEW.test(ok), ok);
+  }
+  for (const bad of ["review=fallback:review-pr-1-b", "review=fallback:review-pr-1-b=failed"]) assert.ok(!REVIEW.test(bad), bad);
 });
 
 test("isRetirable: a member's name or a reviewer's, bare", () => {
@@ -272,7 +279,7 @@ test("liveOnLedger: unsettled members and open launches, once each, with the fir
     "#3 impl-3=PR#5 → PR#5 · review=member:review-pr-5",
     "#4 impl-4=PR#6 · review=wf:r1 · reviewed=abc1234:0/0/0:run-abcdefgh · fix-pr-6=no-op",
     "#6 fix-pr-6 · finisher-pr-6",
-    "#9 impl-9 · review=fallback:review-pr-9=failed",
+    "#9 impl-9 · review=member:review-pr-9=failed",
     "#10 excluded · behind-pr:#6",
   ];
   const out = liveOnLedger(rows, ["impl-3=PR#5", "impl-4=PR#6", "fix-pr-6=no-op", "finisher-pr-6", "impl-9", "merge-bot-1=done", "merge-bot-2"]);

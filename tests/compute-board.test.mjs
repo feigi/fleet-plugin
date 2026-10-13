@@ -993,7 +993,7 @@ test("#1820: review=wf/member, or a live fix-pr/finisher-pr, is under review; ag
     rows: [
       "#920 impl-920=PR#931 · fix-pr-931",
       "#921 impl-921=PR#932 · review=member:review-pr-932 reviewed=abc1234:1/0/0:run-abc1234r · finisher-pr-932",
-      "#922 impl-922=PR#920 · review=wf:r1=failed review=fallback:review-pr-920-b",
+      "#922 impl-922=PR#920 · review=wf:r1=failed review=member:review-pr-920-b",
       "#923 impl-923=PR#931 · review=member:review-pr-931 reviewed=abc1234:0/0/0:run-abc1234r",
     ],
   }));
@@ -1004,11 +1004,11 @@ test("#1820: review=wf/member, or a live fix-pr/finisher-pr, is under review; ag
   assert.equal(live.queue.reviewBacklog, 0);
 });
 
-test("#1820: live-ledger PR rows — settled finisher, fallback runner", () => {
+test("#1820: live-ledger PR rows — settled finisher, retry runner", () => {
   const b = computeBoard(reproInputs({
     rows: [
       "#1715 impl-1715=PR#1824 · class=correction · reviewed=41901d4c:0/1/0:run-41901d4r · finisher-pr-1824=labelled",
-      "#1721 impl-1721=PR#1825 · class=correction · review=fallback:review-pr-1825-b",
+      "#1721 impl-1721=PR#1825 · class=correction · review=member:review-pr-1825-b",
       "#1755 impl-1755=PR#1830 · class=routine",
     ],
     prs: [openPr(1824, ["ready-to-merge"]), openPr(1825), openPr(1830)],
@@ -1085,11 +1085,11 @@ test("#1820 amendment 5a: a settled `review=...=failed` with no redispatch is ow
 
 test("#1820 amendment 5a: `=failed` then a live redispatch is under review; any `reviewed=` stays out of the backlog whatever review= tokens it carries", () => {
   for (const row of [
-    "#962 impl-962=PR#931 · review=wf:r1=failed review=fallback:review-pr-931-b",
+    "#962 impl-962=PR#931 · review=wf:r1=failed review=member:review-pr-931-b",
     "#962 impl-962=PR#931 · review=member:review-pr-931=failed review=wf:r2",
     "#962 impl-962=PR#931 · review=member:review-pr-931=failed reviewed=abc1234:0/0/0:run-abc1234r",
     "#962 impl-962=PR#931 · reviewed=abc1234:1/0/0:run-abc1234r review=wf:r2=failed",
-    "#962 impl-962=PR#931 · review=wf:r1=failed review=fallback:review-pr-931-b=failed reviewed=abc1234:0/1/0:run-abc1234r",
+    "#962 impl-962=PR#931 · review=wf:r1=failed review=member:review-pr-931-b=failed reviewed=abc1234:0/1/0:run-abc1234r",
     // A live fix-applier or finisher is reviewing it too, as before (#1820).
     "#962 impl-962=PR#931 · review=member:review-pr-931=failed · fix-pr-931",
     "#962 impl-962=PR#931 · review=member:review-pr-931=failed · finisher-pr-931",
@@ -1106,12 +1106,12 @@ test("#1820 amendment 5a: on the same ledger and PR list, the cockpit's backlog 
   // review-due does not read.
   const cases = [
     ["#961 impl-961=PR#961 · review=member:review-pr-961=failed", 961, true],
-    ["#962 impl-962=PR#962 · review=fallback:review-pr-962-b=failed", 962, true],
+    ["#962 impl-962=PR#962 · review=member:review-pr-962-b=failed", 962, true],
     ["#963 impl-963=PR#963 · review=wf:r1=failed", 963, true],
-    ["#964 impl-964=PR#964 · review=wf:r1=failed review=fallback:review-pr-964-b=failed", 964, true],
+    ["#964 impl-964=PR#964 · review=wf:r1=failed review=member:review-pr-964-b=failed", 964, true],
     ["#965 impl-965=PR#965 · review=member:review-pr-965=failed · fix-pr-965=failed", 965, true],
     ["#966 impl-966=PR#966", 966, true],
-    ["#967 impl-967=PR#967 · review=wf:r1=failed review=fallback:review-pr-967-b", 967, false],
+    ["#967 impl-967=PR#967 · review=wf:r1=failed review=member:review-pr-967-b", 967, false],
     ["#968 impl-968=PR#968 · review=wf:r3", 968, false],
     ["#969 impl-969=PR#969 · review=member:review-pr-969=failed reviewed=abc1234:0/0/0:run-abc1234r", 969, false],
     ["#970 impl-970=PR#970 · reviewed=abc1234:1/0/0:run-abc1234r review=wf:r2=failed", 970, false],
@@ -1122,7 +1122,7 @@ test("#1820 amendment 5a: on the same ledger and PR list, the cockpit's backlog 
     ["#971 impl-971=PR#971 · review=member:review-pr-971 review=member:review-pr-971=failed", 971, false],
     // Amendment 2a rows — no impl token, PR from the mention or the row key.
     ["#1237 review=wf:r9=failed", 1237, true],
-    ["#1238 -> PR#1238 · review=member:review-pr-1238=failed review=fallback:review-pr-1238-b", 1238, false],
+    ["#1238 -> PR#1238 · review=member:review-pr-1238=failed review=member:review-pr-1238-b", 1238, false],
   ];
   for (const [row, pr, owed] of cases) {
     const b = computeBoard(reproInputs({ rows: [row], prs: [openPr(pr)] }));
@@ -1156,7 +1156,7 @@ test("#2083: once the head matches the reviewed= that answered a past-pin halt, 
   assert.deepEqual(tickReviewDue([row], [973], "ABC1234"), [], "the tick agrees");
 });
 
-// #1926: a `review=` token outside the wf/member/fallback grammar is still
+// #1926: a `review=` token outside the wf/member grammar is still
 // read as live (compute-board.mjs's note above REVIEW). fleet-tick.mjs
 // refuses such a ledger outright; the cockpit renders it instead, and reads
 // the review as in flight — `=failed` settles only an in-grammar token.
