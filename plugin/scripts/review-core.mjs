@@ -3,7 +3,8 @@
 // This file holds every host-independent declaration PR review needs: the
 // JSON schemas, `usableDiff`, `readRules`, `resolveTestCmd`,
 // `decodeArgs`, `selectDimensions`, `resolveDimensions`, `snapshotMissing`,
-// `unrunReason`/`unrunEntries`/`unrunCrashed`, `sharedRunNote`, `copyRule`,
+// `installReason`/`installFinding`, `unrunReason`/`unrunEntries`/`unrunCrashed`,
+// `sharedRunNote`, `copyRule`,
 // `verdictFor`, `resumeFor`, and `runReview(host, args)` — the orchestration
 // function itself.
 //
@@ -505,10 +506,46 @@ validation of the tree: its counts are snapshot-measured, and a failure in it
 cannot be told apart from a regression.`;
 }
 
+// The Install step's verdict on the snapshot: null when it ran there and
+// exited 0, otherwise why no test of this review can run in it. An absent
+// `installExit` is never a success — the step was unreadable (`installError`
+// says why) or the snapshot agent dropped the line — because a snapshot
+// nothing was installed into measures its own missing dependencies, not the
+// tree.
+export function installReason(snap) {
+  if (snap && snap.installExit === 0) return null;
+  if (snap && Number.isInteger(snap.installExit))
+    return `the Install step${snap.installCmd ? ` \`${snap.installCmd}\`` : ""} exited ${snap.installExit} in the snapshot (log ${snap.runRoot}/install.log) — nothing it installs is there, so the shared test run was skipped`;
+  const why = (snap && typeof snap.installError === "string" && snap.installError.trim()) || "the snapshot agent reported no exit status for it";
+  return `the Install step did not run in the snapshot — ${why} — so the shared test run was skipped`;
+}
+
+// The one finding an Install step that exits non-zero in the snapshot files
+// on the PR: the PR's own tree fails its own install, which is the PR's
+// defect, and the Recipe cache — proven on the base — stays as it is. It
+// carries no refuter vote because it is the review's own measurement, an exit
+// status, not a specialist's claim. An Install step that could not be READ
+// files nothing: that is the Recipe's state, not the PR's.
+export function installFinding(snap) {
+  if (!snap || !Number.isInteger(snap.installExit) || snap.installExit === 0) return null;
+  const cmd = snap.installCmd ? `\`${snap.installCmd}\`` : "the Recipe's Install step";
+  return {
+    severity: "critical",
+    claim: `The Install step fails on this PR's tree: ${cmd}, run from the root of a snapshot of ${snap.head}, exited ${snap.installExit}, so no test of this review ran.`,
+    evidence: `The review ran ${cmd} once from the root of ${snap.path} and it exited ${snap.installExit}; its output is in ${snap.runRoot}/install.log.`,
+    dimension: "install",
+    verdict: "survived",
+    votes: [],
+    refutersDispatched: 0,
+    refutersInconclusive: 0,
+  };
+}
+
 // Every run-quality verdict below reads the review's ONE shared test
 // run — `{command, logPath, exitCode?, tests?, pass?, fail?, expectedFail?,
 // cancelled?, skipped?, error?}`, `command`/`logPath` the caller's own and the
-// rest the test-run agent's report — never a specialist's own run: no
+// rest the test-run agent's report, or `{command, logPath, unprovisioned}`
+// when `installReason` skipped the run — never a specialist's own run: no
 // specialist runs the full suite any more, so a verdict on one would judge a
 // copy of this.
 // `run` null is a caller holding no run at all — runReview always hands one
@@ -521,6 +558,7 @@ cannot be told apart from a regression.`;
 // TEST_RUN_EXIT line would otherwise read as green.
 function testRunReason(run) {
   if (!run) return "the review's shared test run returned nothing — no counts exist, so no dimension's tests ran";
+  if (run.unprovisioned) return run.unprovisioned;
   // The wrapper's wait cap expired: it launched nothing, so there are no
   // counts to judge and the exit status is the wrapper's, not the suite's. A
   // run that printed counts and happened to exit 75 is the suite's own answer
@@ -616,8 +654,16 @@ mutation in the copy never runs.`;
 // run the full suite that each specialist used to follow — one review was up
 // to six full sweeps of one immutable snapshot. `owner` is the one dimension
 // told to file the finding about failing tests, so the others are told not
-// to duplicate it rather than left to race each other to it.
+// to duplicate it rather than left to race each other to it. A run the
+// Install step skipped has no counts and no log to describe, so it gets a
+// paragraph of its own.
 export function sharedRunNote(run, owner, key) {
+  if (run.unprovisioned)
+    return `Tests: this review did NOT run its test command: ${run.unprovisioned}.
+Every dimension of this review is reported unrun for it — do not run the full
+command yourself to replace it, and file nothing about the install: the review
+reports it itself.
+  command: ${run.command}`;
   const lines = [
     `Tests: this review ran its test command ONCE, from the snapshot's root, before
 dispatching you. Do NOT run that full command yourself — every dimension reads
@@ -1042,6 +1088,11 @@ a false repoVerified, and installError only replaces installCmd and installExit.
 
   const testCmd = resolveTestCmd(A.testCmd, snap);
   log(`testCmd ${A.testCmd ? "(caller override)" : "(derived)"} ${testCmd}`);
+  // An Install step that failed or never ran leaves a snapshot that cannot
+  // measure the tree: the shared run is skipped, every dimension is reported
+  // unrun through `testRunReason`, and a non-zero exit is filed as a finding.
+  const notInstalled = installReason(snap);
+  log(notInstalled ? `install: ${notInstalled}` : `install: ${snap.installCmd ?? "the Install step"} exited 0 in the snapshot`);
 
   const usable = usableDiff(snap);
   log(
@@ -1075,7 +1126,7 @@ a false repoVerified, and installError only replaces installCmd and installExit.
   // every dimension, never a pass.
   const logPath = `${snap.runRoot}/test-run.log`;
   phase("Test run");
-  const ran = await agent(
+  const ran = notInstalled ? null : await agent(
     `Run this repository's test command ONCE, for the review of PR #${pr}, and
 report what it printed. Every review specialist reads your counts instead of
 running the suite itself, so this is the review's only full run.
@@ -1131,8 +1182,10 @@ write 0 for a count the log does not state: an absent count is how the caller
 learns the run produced none.`,
     { label: `test-run${forPr}`, phase: "Test run", agentType: TEST_RUN_AGENT_TYPE, schema: TEST_RUN_SCHEMA },
   ).catch((e) => ({ error: `the test-run dispatch threw: ${e?.message ?? e}` }));
-  const sharedRun = { ...(ran || { error: "the test-run agent returned nothing" }), command: testCmd, logPath };
-  log(`shared test run: ${countsOf(sharedRun) || "no counts"} — exit ${sharedRun.exitCode ?? "(absent)"} — log ${logPath}`);
+  const sharedRun = notInstalled
+    ? { command: testCmd, logPath, unprovisioned: notInstalled }
+    : { ...(ran || { error: "the test-run agent returned nothing" }), command: testCmd, logPath };
+  log(notInstalled ? `shared test run: skipped — ${notInstalled}` : `shared test run: ${countsOf(sharedRun) || "no counts"} — exit ${sharedRun.exitCode ?? "(absent)"} — log ${logPath}`);
   // Failing tests are the review's to report, not each dimension's: the first
   // selected dimension is told to file them, and every other one not to.
   const failureOwner = dimensions[0].key;
@@ -1357,7 +1410,8 @@ how three reviews from one cell left four files modified in that checkout.`,
     },
   );
 
-  const all = reviewed.flat().filter(Boolean);
+  const installed = installFinding(snap);
+  const all = [...(installed ? [installed] : []), ...reviewed.flat().filter(Boolean)];
   const survived = all.filter((f) => f.verdict === "survived");
   const refuted = all.filter((f) => f.verdict === "refuted");
   const unverified = all.filter((f) => f.verdict === "unverified");

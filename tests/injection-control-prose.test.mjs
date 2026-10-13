@@ -151,7 +151,7 @@ const SEATS = [
 ];
 
 // The free names the template interpolates, in the order `render` binds them.
-const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote", "testCmd", "KILL_RULES"];
+const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote", "testCmd", "KILL_RULES", "copyRule"];
 const TEMPLATE_START = "`Try to REFUTE this finding from PR #";
 const TEMPLATE_END = "{ label: `verify:";
 
@@ -181,6 +181,7 @@ function renderTemplate(dir, file) {
     () => "TEST ENVIRONMENT",
     "node --test",
     "KILL RULES",
+    () => "COPY RULE",
   );
 }
 

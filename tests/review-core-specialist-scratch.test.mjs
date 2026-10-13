@@ -63,10 +63,11 @@ const TEMPLATE_START = "`Review PR #${pr} (branch ${branch}) for: ";
 const TEMPLATE_END = "label: `review:";
 
 // The template's free names, in the order `render` binds them. `sharedRunNote`,
-// `readRules`, `usableDiff` and `environmentNote` are stubs: what they return
-// is not under test here, and binding them keeps a render that stops passing
-// one from dropping a paragraph silently — it throws a ReferenceError instead.
-const SCOPE = ["pr", "branch", "d", "snap", "worktree", "stats", "sharedRunNote", "sharedRun", "failureOwner", "readRules", "usableDiff", "environmentNote"];
+// `readRules`, `usableDiff`, `environmentNote` and `copyRule` are stubs: what
+// they return is not under test here, and binding them keeps a render that
+// stops passing one from dropping a paragraph silently — it throws a
+// ReferenceError instead.
+const SCOPE = ["pr", "branch", "d", "snap", "worktree", "stats", "sharedRunNote", "sharedRun", "failureOwner", "readRules", "usableDiff", "environmentNote", "copyRule"];
 
 // `between` owns the bounded-slice extraction (and both failure messages);
 // only the backtick trim below is specific to a template literal and stays
@@ -95,6 +96,7 @@ const render = () =>
     () => "READ RULES",
     () => null,
     () => "TEST ENVIRONMENT",
+    () => "COPY RULE",
   );
 
 // The first of the two rules, in the prompt that was missing it. ONE
@@ -174,11 +176,14 @@ test("the rendered specialist prompt requires a toplevel assertion around git in
 // passing.
 test("the added rules still sit on a prompt that names a write area and orders work in its own copy", () => {
   const prompt = render();
+  // The own-copy order and the rule saying how to make that copy, as one
+  // span: the copy rule is the line straight after it, so an order to work
+  // in a copy never reaches a specialist without the procedure.
   assert.match(
     prompt,
-    /Run any mutation or probe work inside your own copy of the snapshot\./,
-    "review-core.mjs's specialist is no longer told to do mutation or probe work in a copy of its own — the two " +
-      "directory rules now guard work the prompt never scopes to a copy at all",
+    /Run any mutation or probe work inside your own copy of the snapshot\.\nCOPY RULE\n/,
+    "review-core.mjs's specialist is no longer told to do mutation or probe work in a copy of its own, or no longer " +
+      "told how to make that copy right after the order — the copy rule is gone or moved away from it",
   );
   assert.match(
     prompt,
