@@ -1464,3 +1464,59 @@ test("step 3's reasons list carries main-gain-removed with its skip-and-report a
 test("the report vocabulary includes main-gain-removed", () => {
   assert.match(DOC.text, /^Report merged [^\n]*main-gain-removed:<path>-#X/m);
 });
+
+// A run that GitHub queues behind machine load can stay `queued` past any one
+// eval cell's cap, and an `until status == completed` wait on it never exits.
+// The bound lives in step 2's first paragraph — the exit condition of the wait,
+// not an appendix to it — and names the outcome the bot reports at the bound.
+const step2Opening = () =>
+  DOC.paragraph("2. Watch checks settle", "run-merge-bot.md's step 2 opening paragraph", "**Hold the wait inside one blocking call").text;
+
+test("step 2's opening paragraph bounds the CI wait per PR and names the outcome at the bound", () => {
+  const s = step2Opening();
+  assert.match(
+    s,
+    Pin.phrase("The wait is bounded: 20 minutes of wall-clock per PR, summed across every poll cell you issue for it."),
+    "step 2's opening paragraph no longer states the per-PR total bound across poll cells",
+  );
+  assert.match(
+    s,
+    Pin.phrase("A run still `queued` or `in_progress` at that bound is an outcome, not a reason to poll on — skip the PR and report `ci-wait-timeout-#<pr>` with the run id and its `status`, leave the label alone, and move to the next candidate"),
+    "step 2's opening paragraph no longer says what the bot does at the bound",
+  );
+});
+
+test("step 2's poll cell exits at the bound as well as at completed, and re-issues only under it", () => {
+  const s = DOC.paragraph("`bash` backgrounds any call past about 60s even with `timeout` set, so hold the wait", "run-merge-bot.md's step 2 poll-cell paragraph", "A CI cycle here runs").text;
+  assert.match(
+    s,
+    Pin.phrase("until `status` reads `completed` or the 20-minute bound above runs out"),
+    "the poll cell no longer exits at the bound",
+  );
+  assert.match(
+    s,
+    Pin.phrase("re-issue the poll only while that is under the bound"),
+    "a capped cell is no longer re-issued only under the bound",
+  );
+});
+
+test("the report vocabulary includes ci-wait-timeout", () => {
+  assert.match(DOC.text, /^Report merged [^\n]*ci-wait-timeout-#X \(with the run id and its `status`\)/m);
+});
+
+test("step 3.1's null-runId arm still skips and reports <reason>-#<pr> within its own 20-attempt cap", () => {
+  assert.match(
+    DOC.text,
+    Pin.phrase("Wait 15s and run the gate again instead, capped at 20 attempts (~5 minutes); no run within that cap → skip the PR and report `<reason>-#<pr>`, the same as any other exit 1."),
+    "step 3.1's null-runId handling changed",
+  );
+});
+
+test("the run-team failure table indexes ci-wait-timeout with its response", () => {
+  const table = Pin.file(join(REPO, "skills", "run-team", "SKILL.md")).between("## Failure handling", "A red PR never silently becomes", "run-team/SKILL.md").text;
+  assert.match(
+    table,
+    Pin.phrase("The bot skips that PR and reports `ci-wait-timeout-#<pr>` with the run id and its status. PR stays queued, label untouched"),
+    "the failure table no longer places the ci-wait-timeout outcome",
+  );
+});
