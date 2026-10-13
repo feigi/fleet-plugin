@@ -686,7 +686,7 @@ test("the member-naming rule still names the fix-applier", () => {
   // green. The name is the ledger token and the hub address, so a controller
   // reading only this list names the member something else and the ledger
   // cannot match it.
-  const naming = RUN_TEAM.between("**Name every member.**", "**A depth-2 member cannot dispatch further", "run-team member naming").text;
+  const naming = RUN_TEAM.paragraph("**Name every member.**", "run-team member naming", "**Fresh context per member.**").text;
   assert.match(
     naming,
     /fix-pr-<pr#>/,

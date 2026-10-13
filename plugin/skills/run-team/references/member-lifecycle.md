@@ -6,10 +6,6 @@ Why member name load-bearing, why every member single-use, how a member's job ou
 
 The name is the ledger token and the hub address (`hub send <name>`, `agent://<name>`); omit it and the ledger cannot match the member. Names follow unit of work: `impl-<issue#>`, `fix-pr-<pr#>` (default path's applier), `review-pr-<pr#>` (the PR's first reviewer; every later one on the PR — failed-runner retry, past-pin re-review — takes the next letter the PR's row does not carry yet, `review-pr-<pr#>-b`, `-c`, …; a reviewer's launch and result are recorded on the PR's row with `ledger.mjs review <pr#>`), `finisher-pr-<pr#>` (Phase 3's finisher), `merge-bot-<n>` (one merge pass; `ledger.mjs dispatch merge-bot` numbers it from the ledger's `## Dispatched` list — a per-run counter, never a PR).
 
-## A depth-2 member cannot dispatch further
-
-`task` is absent at a depth-2 member's depth (`task.maxRecursionDepth: 2`).
-
 ## The coordination contract
 
 Stated once, in this fixed vocabulary — *dispatch* (start a member),
@@ -19,8 +15,8 @@ outcome), *consume* (the controller deliberately taking a settled result):
 
 - A refill is a **new** member under a **new** name, never a wake back into the old one — waking a finished member drags its old ticket in.
 - Liveness is not settlement. A member that is not currently executing is not thereby done (Settle and liveness, below).
-- A settled result is consumed deliberately, never assumed — the discipline holds even where the *hazard* it guards against does not.
-- Every send is reconciled against its receipt; whoever holds the receipt is the only party that can detect a discrepancy.
+- A settled result is consumed deliberately, never assumed — the discipline holds even where the *hazard* it guards against does not (Grandchildren, below).
+- Every send is reconciled against its receipt; whoever holds the receipt is the only party that can detect a discrepancy (Grandchildren, below).
 
 `hub send` is the omp messaging mechanism. It appears in the recipes below, never in this contract's own vocabulary.
 
@@ -32,7 +28,7 @@ One member, one unit of work, gone. Never re-task a finished member — waking i
 
 ## Grandchildren surface to you, not to the member that spawned them
 
-A specialist's report routes to *you*, the controller.
+A specialist's or refuter's report routes to *you*, the controller, not to the member that spawned it.
 
 A depth-2 helper cannot dispatch further (`task.maxRecursionDepth: 2`); measured 2026-09-09 from an actual controller session: a `hub send` to a depth-2 helper's full dotted id (`<member>.<helper>`) delivered, woke it, and got a reply — the controller reaches a member's helper directly, no transcript workaround needed.
 

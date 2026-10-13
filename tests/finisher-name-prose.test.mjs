@@ -46,8 +46,8 @@ const MEMBER_NAMES = ["impl-<issue#>", "fix-pr-<pr#>", "review-pr-<pr#>", "finis
 const namingSentence = (doc, label, next) => flat(Pin.of(doc, "doc").paragraph("Names follow", label, next).text);
 
 const NEXT_AFTER_NAMES = {
-  "run-team/SKILL.md": "**A depth-2 member cannot dispatch further**",
-  "references/member-lifecycle.md": "## A depth-2 member cannot dispatch further",
+  "run-team/SKILL.md": "**Fresh context per member.**",
+  "references/member-lifecycle.md": "## The coordination contract",
 };
 
 test("both member-naming lists name every member, the finisher included", () => {
