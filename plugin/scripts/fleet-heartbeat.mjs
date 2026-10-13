@@ -271,8 +271,13 @@ function main() {
   // `quiet=` is the pre-hold streak, the one the interval was DERIVED from: a
   // fresh streak printed beside a target computed from the old one would be two
   // numbers that do not explain each other.
+  //
+  // A skipped write says so, on the fire it reports: the interval did not
+  // elapse, the file could not keep its progress, and this call fires again
+  // on every hold until the file is repaired.
+  const skippedNote = now.degraded ? " — the heartbeat file is degraded and was left as it is, so interval progress is not kept and every hold fires" : "";
   console.log(done
-    ? `heartbeat: held ${held}s, ${target}s interval elapsed (quiet=${state.quiet}) → run fleet-tick`
+    ? `heartbeat: held ${held}s, ${target}s interval elapsed (quiet=${state.quiet}) → run fleet-tick${skippedNote}`
     : `heartbeat: held ${held}s, ${target - elapsed}s of ${target}s remain (quiet=${state.quiet}) → re-issue this command now, do not end your turn`);
 }
 

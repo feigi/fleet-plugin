@@ -189,11 +189,45 @@ test("CLI: a JSON array state file is announced, and the file is not replaced â€
   const r = run(["--base", "1", "--hold", "1"], { state: corrupt });
   assert.equal(r.status, 0);
   assert.match(r.stderr, /WARNING .* is not an object/);
-  // A fire for the skipped write during the hold
   assert.match(r.stdout, /heartbeat: held .* interval elapsed/);
-  // The degraded file is left byte-identical, not replaced â€” the array `[1,2,3]`
-  // stays unparseable as JSON object, so state is the array itself
   assert.deepEqual(r.state, [1, 2, 3], "degraded file should not be written, so [1,2,3] is preserved");
+});
+
+// The bytes the file holds after the call, which `run` cannot give: it parses,
+// and a file that is not JSON parses to null.
+function runBytes(args, state) {
+  const dir = mkdtempSync(join(tmpdir(), "fleet-heartbeat-bytes-"));
+  const path = join(dir, "heartbeat.json");
+  writeFileSync(path, state);
+  const r = spawnSync(process.execPath, [SCRIPT, ...args, "--state", path], { encoding: "utf8" });
+  const bytes = readFileSync(path, "utf8");
+  rmSync(dir, { recursive: true, force: true });
+  return { ...r, bytes };
+}
+
+test("CLI: --stop over a degraded file leaves it byte-identical and says the stop was not recorded", () => {
+  for (const [label, state] of [
+    ["not JSON", "not json"],
+    ["a JSON array", "[1,2,3]"],
+    ["a controller that cannot be judged", JSON.stringify({ quiet: 3, controller: { pid: 0, lstart: "x" } })],
+  ]) {
+    const r = runBytes(["--stop", "budget exhausted"], state);
+    assert.equal(r.status, 0, `${label}: ${r.stderr}`);
+    assert.match(r.stdout, /stop NOT recorded .* degraded/, label);
+    assert.equal(r.bytes, state, `${label}: a degraded file is not replaced by a stop`);
+  }
+});
+
+test("CLI: a hold over a file whose controller record cannot be judged warns, fires, and leaves the file byte-identical", () => {
+  for (const controller of [{ pid: "29405", lstart: "x" }, null]) {
+    const state = JSON.stringify({ quiet: 3, elapsed: 0, controller });
+    const r = runBytes(["--base", "1", "--hold", "1"], state);
+    const label = JSON.stringify(controller);
+    assert.equal(r.status, 0, `${label}: ${r.stderr}`);
+    assert.match(r.stderr, /WARNING .* holds a controller record that cannot be judged/, label);
+    assert.match(r.stdout, /interval elapsed .*degraded/, `${label}: a skipped write is a fire that says why`);
+    assert.equal(r.bytes, state, `${label}: the hold must not replace the record`);
+  }
 });
 
 test("CLI: a state file it cannot READ is announced, never silently discarded", (t) => {
