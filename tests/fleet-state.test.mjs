@@ -144,6 +144,31 @@ test("readState: a junk mark does not ride back to disk through `rest`", () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("readState: a file it cannot use is flagged with its cause, a `controller` key it cannot judge among them, and a usable file carries no flag", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-degraded-"));
+  const path = join(dir, "heartbeat.json");
+  const flag = (text) => {
+    writeFileSync(path, text);
+    return readState(path, "fleet-state-test").degraded;
+  };
+  assert.equal(readState(join(dir, "absent.json"), "fleet-state-test").degraded, undefined, "an absent file is a fresh run");
+  assert.equal(flag("{ \"controller\": {"), "not JSON");
+  assert.equal(flag("[1,2,3]"), "not an object");
+  // A parseable file is degraded for a `controller` key that fails the record's
+  // validation, whatever the key holds — `null` and a scalar included — because
+  // the next write would drop the key and the record with it.
+  const junk = [{ pid: "29405", lstart: "x" }, { pid: 0, lstart: "x" }, { pid: 2 ** 31, lstart: "x" }, { pid: 1, lstart: "" }, { lstart: "x" }, null, "29405", []];
+  for (const controller of junk) {
+    assert.equal(flag(JSON.stringify({ quiet: 2, controller })), "invalid controller", JSON.stringify(controller));
+  }
+  assert.equal(flag(JSON.stringify({ quiet: 2, controller: { pid: 1, lstart: "x" } })), undefined, "a record it can judge is no fault");
+  assert.equal(flag(JSON.stringify({ quiet: 2 })), undefined, "no `controller` key is no record, not a fault");
+  rmSync(path);
+  mkdirSync(path);
+  assert.equal(readState(path, "fleet-state-test").degraded, "unreadable");
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("writeState: a non-owner's patch carries the mark instead of erasing it", () => {
   // One writer per key is only true if the OTHER writers preserve it.
   // fleet-tick patches quiet/digest on every tick — every five minutes on a
@@ -710,6 +735,11 @@ test("assessBeat: a run with a controller record and no beat of its own goes sta
   assert.match(line, /^heartbeat STALLED: no beat this run, last tick \S+Z \(50m ago, 10m past the 40m window\) — no beat, tick or ledger write since, and no recorded reason; 1 ticket\(s\) claimed and in flight, pool supply 2$/);
   // No record and no beat stays `none`: there is no run to judge.
   assert.equal(assessBeat({ beat: null, ticked: { at: now - 3 * WINDOW }, now }).kind, "none");
+  // And a fresh tick or ledger write beside no record and no beat is still
+  // `none`: the board shows no panel without a record, and rotate's own
+  // no-record gate reads the marks itself rather than moving this verdict.
+  assert.equal(assessBeat({ beat: null, ticked: { at: now - MIN }, now }).kind, "none");
+  assert.equal(assessBeat({ beat: null, acted: { at: now - MIN }, now }).kind, "none");
 });
 
 test("assessBeat: a controller record that cannot place a mark, beside no mark at all, judges no run — and one beside a mark still does", () => {

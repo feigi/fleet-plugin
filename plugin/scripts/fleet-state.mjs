@@ -108,9 +108,11 @@ const PRIORS = ["dead", "ancestor", "none"];
 // Absent is the ONLY silent case, because it is the only one that is not a
 // fault: a fresh run legitimately has no file yet. An unreadable file and a
 // corrupt one are both announced — each discards real state, and silence about
-// a degraded read is the failure class this whole ticket exists to close. Both
-// come back flagged `degraded`, for the one caller that must not read them as
-// a file with nothing in it.
+// a degraded read is the failure class this whole ticket exists to close. So
+// is a file that parses but whose `controller` key holds no record `ctl`
+// below accepts: it reads as no record, and the next write would drop the
+// key. All of them come back flagged `degraded`, for the one caller that
+// must not read them as a file with nothing in it.
 export function readState(path, name) {
   // `beat: null` is the absent MARK, and it is not the same value as a mark
   // whose fields are zero: nothing has been seen beating, so there is nothing
@@ -121,7 +123,7 @@ export function readState(path, name) {
   // The same state, flagged: the file EXISTS and could not be used. A caller
   // that acts on the absence of a record — ledger.mjs rotate — must tell this
   // from `fresh`, which is a run that has simply not written one yet. The
-  // `degraded` field is either false (fresh file) or a cause string.
+  // `degraded` field is absent on a fresh read, else the cause string.
   const makeDegraded = (cause) => ({ ...fresh, degraded: cause });
   let raw;
   try {
@@ -154,6 +156,8 @@ export function readState(path, name) {
   }
   // Per-field validation, not all-or-nothing: a file carrying a good `quiet`
   // and a junk `elapsed` keeps the streak instead of losing both to one key.
+  // The exception is `controller`, below: a record that cannot be judged
+  // flags the whole file, because a write that dropped it is the loss.
   const num = (v) => (typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : 0);
   // `rest` is strictly what lies OUTSIDE the schema, which is what makes the
   // patch write below a patch rather than a laundering step. A raw copy of
@@ -194,12 +198,13 @@ export function readState(path, name) {
   };
   // `controller` is validated as a unit for the mark's reason: a pid without
   // the start time it was recorded with cannot be told from a reused pid. A
-  // pid outside the range a process id can take is no record either, since
-  // no process could ever answer for it. `prior` degrades like `stopped`
-  // does: a junk verdict proves nothing, so it reads as "none", and the
-  // record around it still names a controller to judge. `at` degrades the
-  // same way, to null: the record still names a controller, and only when it
-  // was written is unknown.
+  // pid outside the range a process id can take is not a record either, since
+  // no process could ever answer for it. A `controller` key that fails this
+  // is not read as no record: it degrades the whole file, below. `prior`
+  // degrades like `stopped` does: a junk verdict proves nothing, so it reads
+  // as "none", and the record around it still names a controller to judge.
+  // `at` degrades the same way, to null: the record still names a
+  // controller, and only when it was written is unknown.
   const ctl = (v) => {
     if (!isRecord(v)) return null;
     if (!Number.isInteger(v.pid) || v.pid < 1 || v.pid > 0x7fffffff) return null;
@@ -222,8 +227,11 @@ export function readState(path, name) {
     return out;
   };
   const { quiet, elapsed, digest, beat, ticked, acted, controller, seen, ...rest } = parsed;
-  // If the parsed object has a controller key but ctl() rejects it, it's a degraded file
+  // A controller key that ctl() rejects is a record someone wrote and nobody
+  // can judge, not the absence of one — announced like the other degraded
+  // causes, and flagged.
   if ("controller" in parsed && ctl(controller) === null) {
+    console.error(`${name}: WARNING ${path} holds a controller record that cannot be judged — restarting at the base interval`);
     return makeDegraded("invalid controller");
   }
   return {
