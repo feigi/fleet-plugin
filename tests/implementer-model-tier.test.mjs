@@ -77,12 +77,17 @@ test("phase 2 dispatches every implementer at its definition's tier, and says so
     "phase 2 no longer keeps the impl-<N> name alongside the dispatched agent",
   );
   // `row` REPLACES the line (ledger.mjs's `data.rows[i] = line`). Replaying a
-  // two-token literal over a row carrying KILLED or → PR# drops those tokens with
-  // only `rewrote row #N` on stderr.
+  // two-token literal over a row carrying KILLED or → PR# drops those tokens, so
+  // the paragraph says so and points a token addition at `token`.
   assert.match(
     slice,
     /replaces the whole line/,
     "phase 2 shows a ledger literal without saying `row` replaces rather than appends",
+  );
+  assert.match(
+    slice,
+    Pin.phrase("run `ledger.mjs token <key> <token>…`, which keeps every token already on the row"),
+    "phase 2 no longer sends a token addition to `token`, so a controller re-types the row with `row` and drops its tokens",
   );
 });
 

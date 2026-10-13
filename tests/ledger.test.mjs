@@ -3442,3 +3442,143 @@ test("LEDGER_LOCK_TIMEOUT_MS cannot lengthen the bound past 10 s, only shorten i
   assert.ok(elapsed < 11_000, `a 99999 ms override became the bound: waited ${elapsed} ms`);
   assert.ok(elapsed >= 9_500, `exited before the untouched 10 s default could have fired: waited ${elapsed} ms`);
 });
+
+// ---- token: append to a row, never rewrite it ----
+//
+// Every call is its own process against one ledger file; a refusal is exit 2
+// with the file byte-identical. PATH holds no `gh`: `token` is local only.
+function tokenFixture(t, initial = []) {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, `# Fleet run ledger\n\n## Rows\n\n${initial.map((r) => `- ${r}\n`).join("")}\n## Filed\n\n## Ruled\n\n`);
+  const call = (...args) => cli(["--file", file, ...args]);
+  const run = (...args) => {
+    const r = call(...args);
+    assert.equal(r.status, 0, `${args.join(" ")}: got exit ${r.status}\n${r.stderr}`);
+    return { ...r, payload: r.stdout === "" ? null : JSON.parse(r.stdout) };
+  };
+  const refused = (args, why) => {
+    const before = readFileSync(file, "utf8");
+    const r = call(...args);
+    assert.equal(r.status, 2, `${args.join(" ")}: got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, why, `${args.join(" ")}: stderr was ${r.stderr}`);
+    assert.equal(r.stdout, "", "a refusal must not also emit a payload");
+    assert.equal(readFileSync(file, "utf8"), before, `${args.join(" ")}: a refusal must leave the ledger byte-identical`);
+  };
+  const rows = () => JSON.parse(call("read").stdout).rows;
+  return { run, refused, rows, bytes: () => readFileSync(file, "utf8") };
+}
+
+const SETTLED_ROW = "#5 impl-5=PR#9 → PR#9 · ports=16324 · ci=1:1:success";
+
+test("token appends to the row and keeps every token already there, in order", (t) => {
+  const { run, rows } = tokenFixture(t, [SETTLED_ROW, "#6 impl-6 · class=routine"]);
+  const r = run("token", "5", "held-behind:#3");
+  assert.deepEqual(r.payload, { key: "#5", line: `${SETTLED_ROW} · held-behind:#3`, added: ["held-behind:#3"] });
+  assert.deepEqual(rows(), [`${SETTLED_ROW} · held-behind:#3`, "#6 impl-6 · class=routine"]);
+  run("token", "#5", "conflict-hold:#9");
+  assert.deepEqual(rows()[0], `${SETTLED_ROW} · held-behind:#3 · conflict-hold:#9`, "a second call lands after the first");
+});
+
+test("token takes several tokens in one call and appends them in the order given", (t) => {
+  const { run, rows } = tokenFixture(t, [SETTLED_ROW]);
+  const r = run("token", "5", "ci=2:1:failure", "held-behind:#3");
+  assert.deepEqual(r.payload.added, ["ci=2:1:failure", "held-behind:#3"]);
+  assert.deepEqual(rows(), [`${SETTLED_ROW} · ci=2:1:failure · held-behind:#3`]);
+});
+
+test("token on a PR key lands on the ticket row once settle impl-N=PR#M has run, else on #M, created when absent", (t) => {
+  const { run, rows } = tokenFixture(t, ["#5 impl-5 · ports=16324", "#9 fix-pr-9"]);
+  assert.equal(run("token", "9", "ci=1:1:success").payload.key, "#9", "impl-5 has not settled to PR 9, so it does not map the PR");
+  run("settle", "impl-5=PR#9");
+  const r = run("token", "9", "held-behind:#3");
+  assert.equal(r.payload.key, "#5", "once impl-5 settled to PR#9, the ticket row is the PR's row");
+  assert.deepEqual(rows(), ["#5 impl-5=PR#9 · ports=16324 · fix-pr-9 · ci=1:1:success · held-behind:#3"], "settle folded the #9 row into #5, and the token follows its tokens");
+  const fresh = run("token", "77", "ci=1:1:success");
+  assert.deepEqual(fresh.payload, { key: "#77", line: "#77 ci=1:1:success", added: ["ci=1:1:success"] });
+  assert.equal(rows().at(-1), "#77 ci=1:1:success");
+  run("token", "77", "held-behind:#3");
+  assert.equal(rows().at(-1), "#77 ci=1:1:success · held-behind:#3", "the next call finds the row it created");
+});
+
+test("token refuses a member token of any family, a review token, a word the grammar cannot parse, a bad tier= and a label-off= naming no known finisher, writing nothing", (t) => {
+  const { refused } = tokenFixture(t, ["#5 impl-5=PR#9 → PR#9 · finisher-pr-3=labelled"]);
+  const member = /is a member token — members are written only with `ledger\.mjs dispatch` and `ledger\.mjs settle`/;
+  for (const tok of ["impl-5", "impl-5=bailed", "fix-pr-9", "fix-pr-9=applied:abcdef1", "finisher-pr-9=halted:other", "merge-bot-1", "merge-bot-1=done"]) {
+    refused(["token", "5", tok], member);
+  }
+  const review = /is a review token — review tokens are written only with `ledger\.mjs review/;
+  for (const tok of ["review=wf:abc123", "review=member:review-pr-9", "reviewed=73b356de:3/1/0:run-73b356dr", "review=nonsense"]) {
+    refused(["token", "5", tok], review);
+  }
+  for (const tok of ["impl-5=nonsense", "impl-0412", "fix-pr-", "finisher-pr-x=labelled"]) {
+    refused(["token", "5", tok], /member token|cannot parse|outcome/);
+  }
+  refused(["token", "5", "tier=opus"], /'tier=opus' is not tier=<cell>/);
+  refused(["token", "5", "tier="], /is not tier=<cell>/);
+  refused(["token", "5", "label-off=finisher-pr-9"], /names no finisher-pr member this run has dispatched or recorded/);
+  refused(["token", "5", "label-off=impl-5"], /names no finisher-pr member/);
+  refused(["token", "5", "label-off=nonsense"], /names no finisher-pr member/);
+  refused(["token", "5", "label-off="], /names no finisher-pr member/);
+  // One refused token refuses the call: the clean token before it is not written.
+  refused(["token", "5", "ci=2:1:failure", "impl-5"], member);
+  // Argument shape.
+  refused(["token", "5"], /usage: ledger\.mjs token/);
+  refused(["token", "x5", "ci=1"], /is not a ticket or PR number/);
+  refused(["token", "--force", "ci=1"], /unknown flag --force/);
+});
+
+test("token accepts a label-off= naming a finisher the ledger knows, whether on a row or in ## Dispatched", (t) => {
+  const { run, rows } = tokenFixture(t, ["#5 impl-5=PR#9 → PR#9 · finisher-pr-9=labelled"]);
+  run("token", "9", "label-off=finisher-pr-9");
+  assert.equal(rows()[0], "#5 impl-5=PR#9 → PR#9 · finisher-pr-9=labelled · label-off=finisher-pr-9");
+  const d = tokenFixture(t, ["#9 fix-pr-9"]);
+  d.run("dispatch", "9", "finisher-pr-9");
+  d.run("token", "9", "label-off=finisher-pr-9");
+  assert.match(d.rows()[0], /label-off=finisher-pr-9$/);
+});
+
+test("token with a token the row already carries is a no-op at exit 0 and says `already present`", (t) => {
+  const { run, bytes, rows } = tokenFixture(t, [SETTLED_ROW]);
+  const before = bytes();
+  const r = run("token", "5", "ports=16324");
+  assert.match(r.stderr, /already present/);
+  assert.equal(bytes(), before, "a duplicate writes nothing");
+  assert.deepEqual(r.payload, { key: "#5", line: SETTLED_ROW, added: [] });
+  const mixed = run("token", "5", "ports=16324", "held-behind:#3", "held-behind:#3");
+  assert.match(mixed.stderr, /already present/);
+  assert.deepEqual(mixed.payload.added, ["held-behind:#3"], "the new token lands once, the duplicates are skipped");
+  assert.deepEqual(rows(), [`${SETTLED_ROW} · held-behind:#3`]);
+});
+
+test("token takes the write lock: a held lock refuses it, as for every other write", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, "# Fleet run ledger\n\n## Rows\n\n- #5 impl-5\n\n## Filed\n\n## Ruled\n\n");
+  writeFileSync(`${file}.lock`, String(process.pid));
+  const before = readFileSync(file, "utf8");
+  const r = spawnSync(process.execPath, [SCRIPT, "--file", file, "token", "5", "ci=1:1:success"], {
+    encoding: "utf8", env: { ...process.env, LEDGER_LOCK_TIMEOUT_MS: "300" },
+  });
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(readFileSync(file, "utf8"), before);
+});
+
+test("row names every token a rewrite dropped on stderr, and nothing when it dropped none", (t) => {
+  const { run } = tokenFixture(t, [SETTLED_ROW]);
+  const dropped = run("row", "5", "impl-5=PR#9 → PR#9 · ports=16324");
+  assert.match(dropped.stderr, /rewrote row #5; dropped: ci=1:1:success\n$/);
+  const several = run("row", "5", "ports=16324");
+  assert.match(several.stderr, /rewrote row #5; dropped: impl-5=PR#9 → PR#9\n$/, "member tokens and the arrow are named too, the separators are not");
+  const none = run("row", "5", "ports=16324 · extra");
+  assert.match(none.stderr, /    rewrote row #5\n$/);
+  assert.doesNotMatch(none.stderr, /dropped/, "a rewrite that lost nothing says no `dropped`");
+  const reordered = run("row", "5", "extra ports=16324");
+  assert.match(reordered.stderr, /    rewrote row #5\n$/);
+  assert.doesNotMatch(reordered.stderr, /dropped/, "moving tokens drops none");
+  const dup = tokenFixture(t, ["#7 a · b · b"]);
+  assert.match(dup.run("row", "7", "a · b").stderr, /rewrote row #7; dropped: b\n$/, "a duplicate counts once per copy lost");
+  const fresh = dup.run("row", "9", "fresh").stderr;
+  assert.match(fresh, /    new row #9\n$/);
+  assert.doesNotMatch(fresh, /dropped/, "a new row drops nothing");
+});
