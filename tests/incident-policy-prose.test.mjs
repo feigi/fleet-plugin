@@ -39,6 +39,7 @@ const ORDER = [
 // numerals in sequence.
 function checkOrder(page) {
   const text = Pin.unemphasized(page.section("## How an incident closes", "the closing-order section").text);
+  assert.match(text, Pin.phrase("In order of preference:"), "the closing order no longer says it is an order of preference");
   let last = -1;
   for (const item of ORDER) {
     const hit = text.match(Pin.phrase(item));
@@ -71,17 +72,18 @@ test("the policy page has its four sections", () => {
 });
 
 test("the incident definition carries the four shapes, each with its tracker example", () => {
-  const s = PAGE.section("## What a member-reliability incident is", "the definition section").text;
-  for (const [shape, example] of [
+  const def = PAGE.section("## What a member-reliability incident is", "the definition section");
+  const shapes = [
     ["**A duty skipped.**", "#2331"],
     ["**A report lost.**", "**Rules that fail silently**"],
     ["**A step run out of order or twice.**", "#3047"],
     ["**A brief missing, or contradicting, a line.**", "#2884"],
-  ]) {
-    const bullet = s.slice(s.indexOf(shape)).split(/\n- /)[0];
-    assert.ok(s.includes(shape), `the definition lost the shape ${shape}`);
+  ];
+  shapes.forEach(([shape, example], i) => {
+    const next = shapes[i + 1];
+    const bullet = def.bullet(`- ${shape}`, next ? `\n- ${next[0]}` : "\n\n", `the ${shape} bullet`).text;
     assert.ok(bullet.includes(example), `the ${shape} bullet no longer cites ${example}`);
-  }
+  });
 });
 
 test("the closing order names the four mechanisms in order", () => {
@@ -150,7 +152,8 @@ test("MUTANT: dropping the AGENTS.md link goes red", () => {
 });
 
 test("harmless changes stay green: a reflow and an appended sentence", () => {
-  const reflowed = PAGE.text.replace("a schema field a settle checks", "a schema\n   field a settle\n   checks").replace("**A schema field a settle checks.**", "**A schema field a\n   settle checks.**");
+  const reflowed = PAGE.text.replace("**A schema field a settle checks.**", "**A schema field a\n   settle checks.**");
+  assert.notEqual(reflowed, PAGE.text, "mutation anchor moved");
   checkOrder(Pin.of(reflowed, "reflowed page"));
   checkOrder(Pin.of(`${PAGE.text}\nA sentence appended after the last section.\n`, "page with an appended sentence"));
   checkLink(Pin.of(`${AGENTS.text}\n## Another section\n\nUnrelated prose.\n`, "AGENTS.md with another section"));

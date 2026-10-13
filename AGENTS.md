@@ -17,9 +17,8 @@ file — state the claim instead; provenance lives in git history. See ADR
 
 ## Incident policy
 
-A member-reliability incident closes with a script, a schema field, a tick row
-or a brief template line, in that order of preference; prose only for a judgement.
-See `docs/agents/incident-policy.md`.
+A member-reliability incident closes with a mechanism, not a paragraph in the runbook.
+What counts as one, and the order of preference, is in `docs/agents/incident-policy.md`.
 
 ## Runs on this repo
 
