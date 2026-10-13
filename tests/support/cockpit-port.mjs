@@ -22,11 +22,13 @@ export function heldOutside(port) {
   return `port ${port} is held by a process outside this test, which can release it before the launch binds`;
 }
 
-// The launch's own pre-bind check, from outside: a connect to 127.0.0.1 that
-// is refused means nothing holds the port; one that connects or hangs means
-// something does. Any other failure cannot say the port was free, so it
-// counts as held. A connect, never a bind: a bind would itself be a holder
-// that pushes the launch off the port.
+// Modelled on the launch's pre-bind check (heldFailure in board-server.mjs),
+// from outside: a connect to 127.0.0.1 that is refused means nothing holds
+// the port; one that connects or hangs means something does. It differs from
+// the launch's check in two ways: its timeout is shorter (200 ms, where the
+// launch waits 1000 ms), and any other failure counts as held here, where the
+// launch treats it as a fault and exits. A connect, never a bind: a bind
+// would itself be a holder that pushes the launch off the port.
 function answers(port, ms = 200) {
   return new Promise((res) => {
     const socket = connect({ host: "127.0.0.1", port });
@@ -40,9 +42,10 @@ function answers(port, ms = 200) {
 // Watches `ports` — one launch's candidates, in its scan order — from the
 // first round, which has finished by the time this resolves, until stop().
 // blockerBefore() stops it and takes the port the launch announced: it
-// returns the first candidate ahead of the landing that anything answered on
-// while the watch was up, or null when nothing did — a launch that landed
-// past candidates nobody held scanned wrong, and the row has to fail on it. A
+// returns the first candidate ahead of the landing when anything answered on
+// every candidate ahead of it while the watch was up, or null otherwise — a
+// launch that landed past a candidate nobody was seen holding scanned wrong,
+// even if an earlier candidate was held, and the row has to fail on it. A
 // landing on the first candidate, or outside the window altogether, has no
 // candidate ahead of it to excuse it, so it returns null too. The launch's
 // own listener answers once it binds; it is at the landing, never ahead of it.
@@ -69,7 +72,9 @@ export async function watchWindow(ports, everyMs = 5) {
     async blockerBefore(landed) {
       await stop();
       const at = ports.indexOf(landed);
-      return at > 0 ? ports.slice(0, at).find((p) => seen.has(p)) ?? null : null;
+      if (at <= 0) return null;
+      const ahead = ports.slice(0, at);
+      return ahead.every((p) => seen.has(p)) ? ahead[0] : null;
     },
   };
 }

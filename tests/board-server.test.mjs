@@ -859,6 +859,25 @@ test("watchWindow: with nothing held, no landing is excused", async () => {
   assert.equal(await second.blockerBefore(window[0]), null);
 });
 
+// A held candidate excuses only a landing every candidate ahead of it can
+// account for: here the first is held for the whole watch and the second is
+// free throughout, so a landing past both is the scan's own doing and the
+// rows have to fail on it, held first candidate or not.
+test("watchWindow: a landing past a candidate nothing held is not excused by an earlier one that was held", async (t) => {
+  const [held, free, landed] = [await unheldPort(), await unheldPort(), await unheldPort()];
+  const holder = createServer();
+  const failure = await new Promise((res) => { holder.once("error", res); holder.listen(held, "127.0.0.1", () => res(null)); });
+  if (failure?.code === "EADDRINUSE") return t.skip(heldOutside(held));
+  if (failure) throw failure;
+  const watch = await watchWindow([held, free, landed]);
+  try {
+    assert.equal(await watch.blockerBefore(landed), null, "a landing past a free candidate was excused by an earlier held one");
+  } finally {
+    await watch.stop();
+    await new Promise((res) => holder.close(res));
+  }
+});
+
 // The reuse path end to end, and the claim no unit row can make: a second
 // launch against a LIVE cockpit for the same workspace starts no server,
 // says where the board already is, and exits 0. The exit code is the whole
