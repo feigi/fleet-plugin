@@ -3,8 +3,9 @@
 // This file holds every host-independent declaration PR review needs: the
 // JSON schemas, `usableDiff`, `readRules`, `resolveTestCmd`,
 // `decodeArgs`, `selectDimensions`, `resolveDimensions`, `snapshotMissing`,
-// `unrunReason`/`unrunEntries`/`unrunCrashed`, `sharedRunNote`, `verdictFor`,
-// `resumeFor`, and `runReview(host, args)` — the orchestration function itself.
+// `unrunReason`/`unrunEntries`/`unrunCrashed`, `sharedRunNote`, `copyRule`,
+// `verdictFor`, `resumeFor`, and `runReview(host, args)` — the orchestration
+// function itself.
 //
 // review-eval.mjs imports this file directly, a RELATIVE specifier: both
 // ship together under the same Install root, so the Resolver is only needed
@@ -589,6 +590,27 @@ function countsOf(run) {
     .join(", ");
 }
 
+// How a specialist or refuter makes "your own copy of the snapshot", in
+// every prompt that sends one to work there. Tracked files only, then the
+// Install step in the copy: what an install writes can record absolute paths
+// back into the tree it ran in, so a copy that shares the snapshot's
+// installed output imports the snapshot's source, and a mutation made in the
+// copy never runs.
+export function copyRule(snap) {
+  const step = snap && snap.installCmd
+    ? `the Install step, \`${snap.installCmd}\`,`
+    : "the Install step (this review read none, so a copy has nothing installed and a suite run in it does not measure the tree)";
+  return `Make your own copy of the snapshot from its tracked files only —
+\`git -C ${snap && snap.path} archive HEAD | tar -x -C <copy>\`, or a \`git clone\`
+of the snapshot repository — then make it a repository with \`git init\`,
+\`git add -A -f\` and a commit (a clone already is one), then run
+${step} from the copy's root before you measure anything in it.
+Never \`cp -R\` the snapshot, and never symlink or clone its ignored paths: an
+install can record absolute paths back into the tree it ran in, so a copy
+sharing the snapshot's installed output runs the snapshot's source, and a
+mutation in the copy never runs.`;
+}
+
 // The Tests paragraph of every specialist prompt: the shared run's
 // command, counts, exit status and log path, in place of the instruction to
 // run the full suite that each specialist used to follow — one review was up
@@ -1151,6 +1173,7 @@ READ ONLY FROM THE SNAPSHOT: ${snap.path} (HEAD ${snap.head}) — plus the diff
 file named below, if one is given.
 Never read or write ${worktree} — other agents are using it.
 Run any mutation or probe work inside your own copy of the snapshot.
+${copyRule(snap)}
 
 Your shell starts in NEITHER of those directories, and what it does start in is
 a tree you must not write to: this dispatch carries no working directory of its
@@ -1246,6 +1269,8 @@ When your check scores a mutant killed or a test red, \`<testCmd>\` is
 decide it and nothing else:
 
 ${KILL_RULES}
+
+${copyRule(snap)}
 
 Abstain when your own check could produce neither a valid red nor a valid
 green: set \`inconclusive\` to true and name the runs in \`reason\`, each with
