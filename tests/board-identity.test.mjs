@@ -460,6 +460,29 @@ test("poll banners a render throw for an unknown column, naming the column and t
   assert.equal(timers.length, 1, "poll must keep polling after a render throw");
 });
 
+// The banner element is one slot reused across ticks. A stall paints it
+// `dead` (red); a render failure that follows must show amber like every other
+// warn(), not inherit the stall's colour.
+test("poll's render-failure banner drops the dead class a stall tick left on the slot", async () => {
+  const document = fakeDocument();
+  const bodies = [
+    { ...baseModel(), liveness: { text: "run stalled" } },
+    { ...baseModel(), tickets: [{ issue: 99, column: "BOGUS" }] },
+  ];
+  let call = 0;
+  const poll = new Function("document", "fetch", "setTimeout",
+    `${SCRIPT_SRC}\nreturn poll;`)(
+    document,
+    async () => ({ ok: true, json: async () => bodies[call++] }),
+    () => {});
+  await poll();
+  const banner = document.getElementById("stale-banner");
+  assert.equal(banner.className, "dead", "precondition: the stalled tick must paint the banner dead");
+  await poll();
+  assert.equal(banner.className, "", "a render failure must show amber, not the stall's red");
+  assert.match(banner.textContent, /board render failed/);
+});
+
 // #1584 adds a second reader of the model's repo IDENTITY (`acme/one`) beside
 // the long-standing reader of its repo URL. A card's PR link must keep
 // resolving against the URL — the field that carries the host, so links work

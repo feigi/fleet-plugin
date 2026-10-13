@@ -360,26 +360,19 @@ function render(m) {
   // only says it may be short at one edge. The footer append above is what
   // actually guarantees this notice reaches the operator on a tick where a
   // higher-priority arm wins the slot instead.
-  // className reset on EVERY arm, never only on the arm that sets it: this
-  // element is reused across ticks, so a `dead` class left behind by an
-  // earlier render paints the next tick's ledger or stale message red. One
-  // assignment per arm is what makes that unreachable rather than unlikely.
+  // Every banner writer goes through showBanner, which assigns the class as
+  // well as the text: this element is reused across ticks, so a `dead` class
+  // left behind by an earlier write would paint the next message red. Routing
+  // every writer through the one setter, rather than one assignment per arm,
+  // is what makes that unreachable rather than unlikely.
   if (built && Date.now() - m.generatedAt > interval * 1000 * 2) {
-    banner.style.display = "block";
-    banner.className = "";
-    banner.textContent = "⚠ data stale — server/controller stopped?";
+    showBanner("⚠ data stale — server/controller stopped?");
   } else if (stallMsg) {
-    banner.style.display = "block";
-    banner.className = "dead";
-    banner.textContent = stallMsg;
+    showBanner(stallMsg, "dead");
   } else if (ledgerMsg) {
-    banner.style.display = "block";
-    banner.className = "";
-    banner.textContent = ledgerMsg;
+    showBanner(ledgerMsg);
   } else if (capMsg) {
-    banner.style.display = "block";
-    banner.className = "";
-    banner.textContent = capMsg;
+    showBanner(capMsg);
   } else { banner.style.display = "none"; banner.className = ""; }
 }
 
@@ -448,10 +441,17 @@ function card(t) {
   return c;
 }
 
-function warn(msg) {
+// The one writer of a shown banner: display, class and text move together, so
+// no caller can show a message while a previous caller's class is still set.
+function showBanner(text, cls = "") {
   const banner = document.getElementById("stale-banner");
   banner.style.display = "block";
-  banner.textContent = msg;
+  banner.className = cls;
+  banner.textContent = text;
+}
+
+function warn(msg) {
+  showBanner(msg);
 }
 
 async function poll() {
