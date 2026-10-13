@@ -120,6 +120,14 @@ export const SNAPSHOT_SCHEMA = {
     prHead: { type: "string" },
     testCmd: { type: "string" },
     testCmdError: { type: "string" },
+    // The Recipe's Install step as the snapshot agent read it, and its exit
+    // status in the snapshot. Optional, so an absent `installExit` is read
+    // as an install that did not succeed, never as one that did:
+    // `installError` carries derive-testcmd.sh's refusal when the step could
+    // not be read at all.
+    installCmd: { type: "string" },
+    installExit: { type: "integer" },
+    installError: { type: "string" },
   },
 };
 
@@ -873,15 +881,27 @@ export async function runReview(host, args) {
     ( cd "$SNAP" && git init -q && git add -A -f && git -c user.name=fleet -c user.email=fleet@invalid commit -q --no-verify -m "review snapshot of $SHA" ) || echo SNAPSHOT_INIT_FAILED
     SNAPTREE=$(git -C "$SNAP" rev-parse 'HEAD^{tree}' 2>/dev/null); SRCTREE=$(git -C ${worktree} rev-parse 'HEAD^{tree}')
     { [ -d "$SNAP/.git" ] && [ -n "$SNAPTREE" ] && [ "$SNAPTREE" = "$SRCTREE" ]; } && echo SNAPSHOT_TREE_MATCH || echo SNAPSHOT_TREE_MISMATCH="snapshot $SNAPTREE vs commit $SRCTREE"
-    ~/.fleet/bin/fleet-run derive-testcmd.sh "$SNAP" install >"$RUN/snapshot-install.log" 2>&1; SNAP_INSTALL_EXIT=$?
-    [ $SNAP_INSTALL_EXIT -eq 0 ] && echo SNAPSHOT_INSTALL_SUCCESS || echo "SNAPSHOT_INSTALL_FAILED=$SNAP_INSTALL_EXIT"
+    INSTALL=$(~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} install) && echo SNAPSHOT_INSTALL_STEP="$INSTALL" || { INSTALL=; echo SNAPSHOT_INSTALL_UNREAD; }
+    [ -z "$INSTALL" ] || { ( cd "$SNAP" && sh -c "$INSTALL" ) >"$RUN/install.log" 2>&1; echo SNAPSHOT_INSTALL_EXIT=$?; }
+
+The Install step can take minutes: run the block as ONE blocking foreground
+command with a command deadline of 3600 seconds, never backgrounded and never
+polled. The Install step takes no suite slot.
+
+Report \`installCmd\` = the SNAPSHOT_INSTALL_STEP value and \`installExit\` = the
+SNAPSHOT_INSTALL_EXIT value, both copied as printed. If the block printed
+SNAPSHOT_INSTALL_UNREAD instead, omit both and report \`installError\` = what
+derive-testcmd.sh printed on stderr. The Install step runs once, in the
+snapshot, from its root: never rerun it, never repair a failure, and never run
+it anywhere else. A non-zero exit is reported as printed, and the caller files
+it as a finding on the PR.
 
 Report \`pathVerified\` = true ONLY if the 'ls -A' line printed SNAPSHOT_NONEMPTY,
 run in that order — BEFORE the 'git init' and BEFORE the symlink, never after
 either. Both create an entry of their own, so a probe below them prints
 SNAPSHOT_NONEMPTY on a 'git archive' that extracted nothing at all.
 
-Report \`repoVerified\` = true ONLY if the last line above printed
+Report \`repoVerified\` = true ONLY if the tree-compare line above printed
 SNAPSHOT_TREE_MATCH; otherwise report it false and put the line it printed
 instead — SNAPSHOT_INIT_FAILED, or the whole SNAPSHOT_TREE_MISMATCH= value with
 both hashes — in \`repoError\`. The init is what makes the snapshot MEASURABLE:
@@ -960,8 +980,8 @@ specialists into another run's tree. Report the HEAD sha, and — in
 \`diffStats\` — the SINGLE-LINE JSON object diff-stats.mjs prints to
 STDOUT, copied verbatim. Only runRoot, path, head, pathVerified and repoVerified
 are ever required — diffStats, diffPath, diffLines, refHead and prHead are each
-omitted independently when their command failed, and repoError only accompanies
-a false repoVerified.`,
+omitted independently when their command failed, repoError only accompanies
+a false repoVerified, and installError only replaces installCmd and installExit.`,
     { label: `snapshot${forPr}`, phase: "Snapshot", agentType: SNAPSHOT_AGENT_TYPE, schema: SNAPSHOT_SCHEMA },
   );
 
