@@ -123,7 +123,6 @@ test("objectKeys reads fields by depth, not by line, and ignores brackets/commas
   assert.deepEqual(objectKeys('label: "a, {b}", next: 1,'), ["label", "next"]);
 });
 
-const FALLBACK_ANCHOR = "#### Fallback: hand-dispatched reviewer";
 const PROMPT_ANCHOR = "> You are ALREADY in worktree";
 const PROMPT_END = "\n**Put the standing CI facts";
 
@@ -284,7 +283,6 @@ test("relay and reconciliation live under the fallback, not in the Phase 3 event
     "the Phase 3 event loop still carries a relay obligation — on the default path `agent()` returns into the script and no relay ever occurs",
   );
 
-  const fallback = RUN_TEAM.section("#### Fallback: hand-dispatched reviewer member", "run-team fallback").text;
   // The obligation, not the word: `/relay/i` alone has eight hits in this slice,
   // and stays green with the relay bullet deleted entirely.
   assert.match(
@@ -738,7 +736,6 @@ test("the per-PR member is the fix-applier, in the Report example and through th
   //
   // A FLOOR, and neither a ban on the fallback name nor an equality. `## Report`
   // is a top-level section, not the default path's own, and the fallback member
-  // is sanctioned at `#### Fallback: hand-dispatched reviewer` — so a row (or a
   // sentence) naming `review-pr-<M>` is a legitimate document state, and
   // measured, banning the name reds on both. `=== 2` reds on a fourth
   // DEFAULT-path row, which the table's three outcome shapes plainly invite.

@@ -18,7 +18,6 @@
 // which lives in `plugin/agents/fleet-implementer-<cell>.agent.md`, not in this
 // section of SKILL.md. `grep -n '### Reviewers\|You are ALREADY in
 // worktree\|Put the standing CI facts\|Two of the rules above are what
-// caught both\|Fallback: hand-dispatched' skills/run-team/SKILL.md` against
 // this tree finds `You are ALREADY in worktree` exactly ONCE, opening the
 // fix-applier's own prompt this file pins below — it does not recur
 // anywhere else in SKILL.md.
@@ -73,7 +72,6 @@ const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 // starts inside the fix-applier's own prompt rather than risking a match
 // against equivalent wording elsewhere in the file, present or future.
 const reviewersSection = () =>
-  RUN_TEAM.between("### Reviewers", "#### Fallback: hand-dispatched reviewer", "run-team Reviewers section").text;
 
 const PROMPT_ANCHOR = "> You are ALREADY in worktree";
 const PROMPT_END = "\n**Put the standing CI facts";
@@ -187,7 +185,6 @@ test("a rewrapped fix-applier prompt still matches every pinned rule — these p
   const rewrappedFile = RUN_TEAM.text.replace(raw, () => narrow);
   const rewrappedReviewers = Pin.of(rewrappedFile, "rewrappedFile").between(
     "### Reviewers",
-    "#### Fallback: hand-dispatched reviewer",
     "rewrapped run-team Reviewers section",
   ).text;
   const prompt = flatten(Pin.of(rewrappedReviewers, "rewrappedReviewers").between(PROMPT_ANCHOR, PROMPT_END, "rewrapped fix-applier prompt").text);

@@ -64,7 +64,6 @@ async function renderedPrompts() {
 }
 
 const fixApplier = () =>
-  RUN_TEAM.between("### Reviewers", "#### Fallback: hand-dispatched reviewer", "run-team's Reviewers section").quoteBlock(
     "You are ALREADY in worktree `<abs-path>`, whose PR branch is",
     "the fix-applier prompt",
   ).text;
