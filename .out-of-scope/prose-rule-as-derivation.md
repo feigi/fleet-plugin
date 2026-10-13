@@ -1,5 +1,14 @@
 # Deriving a Prose Rule Into a Test
 
+> **Dated record (2026-10-13).** The body below records the state when this
+> request was rejected. `workflows/review-pr.js` is gone: the code now lives in
+> `plugin/scripts/review-core.mjs`, where the comment above `DEFAULT_DIMENSIONS`
+> no longer states the recoverable-miss model rule and the comment above
+> `SIZE_TIER_DIMS` no longer carries the quoted negation. No dimension carries a
+> `model` field any more, so the pinned model list is retired, and the test file
+> now lives at `tests/select-dimensions.test.mjs`. Quotations and paths below are
+> not repointed. The rejection stands.
+
 `workflows/review-pr.js` states a rule in a comment above `DEFAULT_DIMENSIONS`
 — *downgrade a dimension's model only where a MISS by the cheaper finder is
 RECOVERABLE* — and `scripts/select-dimensions.test.mjs` pins the
