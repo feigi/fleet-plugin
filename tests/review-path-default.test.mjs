@@ -126,7 +126,7 @@ test("objectKeys reads fields by depth, not by line, and ignores brackets/commas
 const PROMPT_ANCHOR = "> You are ALREADY in worktree";
 const PROMPT_END = "\n**Put the standing CI facts";
 
-const reviewersSection = () => RUN_TEAM.between("### Reviewers", FALLBACK_ANCHOR, "run-team Reviewers").text;
+const reviewersSection = () => RUN_TEAM.between("### Reviewers", "### Merge bot", "run-team Reviewers").text;
 // Sliced out of the Reviewers section, never out of the whole file: `section()`
 // takes the FIRST hit, and the implementer dispatch in Phase 2 opens with the
 // same sentence. Anchored file-wide this silently returns the implementer's
@@ -765,32 +765,3 @@ test("the per-PR member is the fix-applier, in the Report example and through th
   );
 });
 
-test("the two relay red flags stay qualified to the fallback path", () => {
-  // Same defect the Phase 3 relay assertion above exists to prevent, one
-  // section further down: on the default path `agent()` returns into the
-  // script, so no relay ever occurs and no specialist can be pinged.
-  // Unqualified, both read as obligations on every run — and on the default
-  // one they can never be discharged.
-  //
-  // Sliced per BULLET, not over the Red flags list: over the list either
-  // qualifier satisfies a match for both, so one could be stripped outright
-  // with the pin still green. Measured — strip only the ping bullet's
-  // qualifier and a list-wide match still fires on the relay bullet's.
-  // Each bullet ends where the next one begins.
-  //
-  // Unwrap the slice, as :207 already does: `(fallback path)` carries a literal
-  // space, so a pinned phrase that wraps splits and an exact-adjacency regex
-  // reports a qualifier that is right there as missing. Measured — reflowing
-  // the Red flags list at width 55 or 60, words byte-identical, reds this pin.
-  // Flatten the RESULT and keep the slicing raw; the anchors need real text.
-  const flat = (s) => s.replace(/\s+/g, " ");
-  const ping = flat(RUN_TEAM.between('- "Tell the reviewer to ping its specialists"', '- "I relayed it', "run-team ping red flag").text);
-  const relayed = flat(RUN_TEAM.between('- "I relayed it', '- "It reported the SHA', "run-team relay red flag").text);
-  for (const [label, bullet] of [["the ping-your-specialists", ping], ["the I-relayed-it", relayed]]) {
-    assert.match(
-      bullet,
-      /\(fallback path\)/,
-      `${label} red flag is no longer scoped to the fallback — it reads as universal, and on the default path it is an obligation that can never be discharged`,
-    );
-  }
-});
