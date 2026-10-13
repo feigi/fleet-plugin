@@ -37,6 +37,10 @@ export const SNAP = {
   pathVerified: true,
   repoVerified: true,
   testCmd: "node --test",
+  // The Install step ran in the snapshot and exited 0, so the shared test run
+  // goes ahead; a case about a failed or unread install names its own.
+  installCmd: "sh ./install.sh",
+  installExit: 0,
 };
 // #2315. The shared test run's agent report — the `test-run` dispatch every
 // review makes once, before any specialist. Clean, so a script that is about

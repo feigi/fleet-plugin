@@ -479,14 +479,14 @@ test("the snapshot prompt tells the agent to copy both printed values verbatim, 
   }
 });
 
-// The ORDER is the guard, not the probe, and two different reorderings each
-// defeat it. Measured, both:
-//   probe AFTER the symlink -> `ls -A` counts the symlink, so a `git archive`
-//     that extracted NOTHING still prints SNAPSHOT_NONEMPTY, in every repo that
-//     has node_modules (which is every repo the symlink exists for).
-//   probe AFTER the `git init` -> the same thing one directory entry later, and
-//     in EVERY repo rather than only the ones with node_modules: `.git` alone
-//     makes `ls -A` non-empty (#1056).
+// The ORDER is the guard, not the probe, and every reordering below defeats it:
+//   probe AFTER the `git init` -> `.git` alone makes `ls -A` non-empty, so a
+//     `git archive` that extracted NOTHING still prints SNAPSHOT_NONEMPTY, in
+//     every repo (#1056) — and the Install step, later still, writes entries
+//     of its own.
+//   Install step BEFORE the commit -> `git add -A -f` stages ignored files
+//     too, so what it installs enters the snapshot's tree and the tree-hash
+//     compare can never match.
 //   guard MISSING -> an empty `scratch` reaches `mkdir -p "${runRootParent}"`
 //     as '/pr<N>' and the prune as `--root ""` — so what the guard buys is a
 //     NAMED refusal, not containment.
@@ -515,7 +515,7 @@ test("the snapshot prompt tells the agent to copy both printed values verbatim, 
 // red this test with a message claiming a #1129 collision regression that had
 // not happened. A pin that reds on correct changes gets weakened by the next
 // reader, so these match the shape that decides behaviour and nothing else.
-test("the snapshot block mints a per-run destination, then extracts, probes, and symlinks — in that order", () => {
+test("the snapshot block mints a per-run destination, then extracts, probes, commits, compares, installs and reads its status — in that order", () => {
   const snapshot = snapshotBlock();
   let prev = -1;
   for (const [needle, gone] of [
@@ -578,16 +578,57 @@ test("the snapshot block mints a per-run destination, then extracts, probes, and
       /echo SNAPSHOT_TREE_MATCH \|\| echo SNAPSHOT_TREE_MISMATCH/,
       "the tree compare no longer names its two outcomes — a failed init or a snapshot that is not the reviewed tree goes back to being reported as a verified environment",
     ],
-    [/ln -s \$\{worktree\}\/node_modules/, "the node_modules symlink is gone — a derived `npm test --` cannot run"],
+    [
+      /INSTALL=\$\(~\/\.fleet\/bin\/fleet-run derive-testcmd\.sh \$\{worktree\} install\)/,
+      "the Install step is no longer read off the Recipe cache through derive-testcmd.sh — pointed at the snapshot it refuses, since the snapshot holds no cache, and nothing else may guess the command",
+    ],
+    [
+      /\( cd "\$SNAP" && sh -c "\$INSTALL" \) >"\$RUN\/install\.log" 2>&1; echo SNAPSHOT_INSTALL_EXIT=\$\?/,
+      "the Install step no longer runs in the snapshot from its root with its exit printed — the shared test run measures a tree with none of its dependencies, and every review of a repo that has any reads red",
+    ],
+    [
+      /if \[ -d "\$SNAP\/\.git" \] && git -C "\$SNAP" status --porcelain --untracked-files=all >"\$RUN\/status\.txt"; then head -n 20 "\$RUN\/status\.txt" \| sed 's\/\^\/SNAPSHOT_UNTRACKED=\/'; echo SNAPSHOT_UNTRACKED_COUNT=/,
+      "the snapshot's status is no longer read after the Install step, in full to the run root and capped on the way out — what the repository's own ignore rules leave untracked goes unreported, or fills every prompt",
+    ],
+    [
+      /else echo SNAPSHOT_STATUS_FAILED; fi/,
+      "a status read that fails, or a snapshot with no .git, prints nothing and reads as an empty status",
+    ],
   ]) {
     const at = snapshot.search(needle);
     assert.notEqual(at, -1, gone);
     assert.ok(
       at > prev,
-      `${needle} is out of sequence — the block must mint the run root, derive the destination, then extract, then probe, then symlink`,
+      `${needle} is out of sequence — the block must mint the run root, derive the destination, extract, probe, commit, compare, then install, then read its status`,
     );
     prev = at;
   }
+});
+
+// The dependencies the snapshot gets are the ones the Recipe's Install step
+// writes, in every layout, so nothing in the block names one layout or hides
+// what the install leaves behind. Read over the whole SOURCE, comments
+// included, for the layout name: a comment still naming it is the old special
+// case's explanation outliving it. The exclude and the slot are read over the
+// shell lines alone — the prose names the exclude to forbid adding to it.
+test("the snapshot block provisions through the Install step alone: no dependency layout named, nothing excluded, no suite slot", () => {
+  assert.ok(!SOURCE.includes("node_modules"), "review-core.mjs names node_modules again — the snapshot provisions one layout by hand instead of running the Install step");
+  const shell = snapshotBlock()
+    .split("\n")
+    .filter((l) => /^ {4}\S/.test(l))
+    .join("\n");
+  assert.match(shell, /SNAPSHOT_INSTALL_EXIT/, "the shell-line filter lifted none of the install lines — this test reads nothing");
+  assert.doesNotMatch(shell, /info\/exclude/, "the snapshot block writes to its repository's exclude file again — a PR that breaks its own .gitignore is hidden instead of reported");
+  assert.doesNotMatch(
+    shell.split("\n").filter((l) => l.includes("$INSTALL")).join("\n"),
+    /suite-slot/,
+    "the Install step now takes a suite slot — the slot bounds full test runs, not installs",
+  );
+  assert.match(
+    snapshotBlock(),
+    Pin.phrase("run in that order — BEFORE the 'git init', never after it."),
+    "pathVerified's ordering sentence no longer names the `git init` as the line the probe must precede",
+  );
 });
 
 // Both failure clauses, pinned where they are decided. Neither 'mktemp' nor

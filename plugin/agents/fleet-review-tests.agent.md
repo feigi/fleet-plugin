@@ -28,8 +28,15 @@ and confirm the named test stays green. Vary the syntactic form of the
 mutation — a guard written to catch `// whole-line` comments may let `code; //
 trailing` through, and a test that only exercises one form is not proven to
 discriminate the class. `<testCmd>` is the `command` your dispatch prompt's
-Tests paragraph names, run only in your own copy of the snapshot. A kill is
-scored by these rules and nothing else:
+Tests paragraph names, run only in your own copy of the snapshot. Make that
+copy from the snapshot's tracked files only —
+`git -C <snapshot> archive HEAD | tar -x -C <copy>`, or a `git clone` of the
+snapshot repository — then `git init`, `git add -A -f` and commit in it, then
+run the Install step your dispatch prompt names from the copy's root before
+you measure anything there. Never `cp -R` the snapshot, and never symlink or
+clone its ignored paths: a copy sharing the snapshot's installed output can
+run the snapshot's source, and your mutation never runs. A kill is scored by
+these rules and nothing else:
 
 **Valid red:** a run that completed — the command returned on its own, with
 no signal and no timeout, deadline or kill having fired — in which the test

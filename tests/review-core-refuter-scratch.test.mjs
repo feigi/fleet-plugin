@@ -65,12 +65,12 @@ const CODE = stripComments(SOURCE);
 const TEMPLATE_START = "`Try to REFUTE this finding from PR #";
 const TEMPLATE_END = "{ label: `verify:";
 
-// The template's free names, in the order `render` binds them. `readRules`
-// and `usableDiff` are stubs: what they return is not under test here.
-// `environmentNote` is bound for the same reason as the workflow's copy: a
-// render that stops binding it throws a ReferenceError rather than dropping a
-// paragraph silently.
-const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote", "testCmd", "KILL_RULES"];
+// The template's free names, in the order `render` binds them. `readRules`,
+// `usableDiff` and `copyRule` are stubs: what they return is not under test
+// here. `environmentNote` is bound for the same reason as the workflow's copy:
+// a render that stops binding it throws a ReferenceError rather than dropping
+// a paragraph silently.
+const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote", "testCmd", "KILL_RULES", "copyRule"];
 
 function refuterTemplate() {
   const start = CODE.indexOf(TEMPLATE_START);
@@ -104,6 +104,7 @@ const render = () =>
     () => "TEST ENVIRONMENT",
     "node --test",
     "KILL RULES",
+    () => "COPY RULE",
   );
 
 // The first rule. ONE contiguous regex rather than two assertions. Both gaps
@@ -146,5 +147,18 @@ test("the rendered refuter prompt still orders a real run against the snapshot",
     /Verify against the snapshot .* by RUNNING something/s,
     "review-core.mjs's refuter prompt no longer orders a real run against the snapshot — adding the two directory-safety " +
       "rules must not displace the instruction they exist to make safe",
+  );
+});
+
+// The refuter is sent to score a kill "only in your own copy of the snapshot",
+// so the rule saying how to make that copy follows the kill rules it scores
+// by, as a paragraph of its own: an order to work in a copy never reaches a
+// refuter without the procedure.
+test("the rendered refuter prompt says how to make its own copy right where it orders work there", () => {
+  assert.match(
+    render(),
+    /run only in your own copy of the snapshot, and these rules\ndecide it and nothing else:\n\nKILL RULES\n\nCOPY RULE\n\n/,
+    "review-core.mjs's refuter prompt orders a kill scored in its own copy of the snapshot without saying how to make " +
+      "that copy — the copy rule is gone, or moved away from the order",
   );
 });

@@ -127,32 +127,20 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
   );
   // Deriving the command is half the job — it also has to RUN where the
   // specialists are told to run it. `git archive` carries tracked files only,
-  // so `npm test --` (the derivation's first branch, for any repo whose
-  // scripts.test invokes a node_modules binary) exits 127 in the snapshot
-  // while passing in the worktree the derivation was run against. Measured on
-  // a synthetic repo during the #142 review: worktree exit 0, archive exit 127.
+  // so a tree whose suite needs an installed dependency exits non-zero in a
+  // bare snapshot while passing in the worktree its Recipe was proven in. The
+  // Install step is read through the same reader, off the review worktree
+  // (the snapshot holds no Recipe cache), and run in `$SNAP` — THIS run's
+  // destination — from its root.
   assert.match(
     snapshot,
-    // `"$SNAP/node_modules"` since #1129: the destination is a per-run shell
-    // variable now, and the symlink has to land in the tree this run actually
-    // extracted — a link left at the old bare `${scratch}/snapshot` would
-    // provision node_modules for a directory no specialist is pointed at.
-    // Quote-tolerant on purpose. The needle's job is that the symlink lands in
-    // THIS run's destination — `$SNAP`, never the old bare `${scratch}/snapshot`
-    // — and `"$SNAP/node_modules"` and `"$SNAP"/node_modules` are the same word
-    // to any POSIX shell, `/node_modules` carrying no metacharacters. Pinning
-    // one of the two rejected a behaviour-identical rewrite as a #1129
-    // regression, which is how a pin teaches its next reader to weaken it.
-    //
-    // The `[ -n "$SNAP" ]` half is not decoration either: this is the only
-    // command in the block whose target no earlier line created, so it is the
-    // only one that would still act on an empty `$SNAP` — writing a symlink at
-    // `/node_modules`, outside the run root entirely.
-    // Order-agnostic between the two `[ ]` tests, for the same reason the
-    // quotes are optional: swapping them is behaviour-identical, so pinning
-    // one arrangement would red a correct change.
-    /if [^\n]*\[ -n "\$SNAP" \][^\n]*; then ln -s \$\{worktree\}\/node_modules "?\$SNAP"?\/node_modules"?/,
-    "the snapshot no longer provisions node_modules — a derived `npm test --` cannot run in it",
+    /INSTALL=\$\(~\/\.fleet\/bin\/fleet-run derive-testcmd\.sh \$\{worktree\} install\)/,
+    "the snapshot agent no longer reads the Install step through derive-testcmd.sh via the Resolver, off the worktree that holds the cache",
+  );
+  assert.match(
+    snapshot,
+    /\( cd "\$SNAP" && sh -c "\$INSTALL" \)/,
+    "the Install step no longer runs from the snapshot's own root — a suite needing an installed dependency cannot run in it",
   );
   // These names live inside a template literal, so each backtick is a
   // BACKSLASH-backtick in the source text — `\\?` matches it either way, the
@@ -168,12 +156,37 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
     new RegExp(`report\\s+${B}testCmdError${B}\\s*=\\s*its\\s+stderr`),
     "testCmdError is not bound to the script's stderr on refusal",
   );
+  assert.match(
+    snapshot,
+    new RegExp(`Report\\s+${B}installCmd${B}\\s+=\\s+the\\s+SNAPSHOT_INSTALL_STEP\\s+value\\s+and\\s+${B}installExit${B}\\s+=\\s+the\\s+SNAPSHOT_INSTALL_EXIT\\s+value`),
+    "installCmd/installExit are not bound to the lines the block prints — the caller cannot tell a failed install from a skipped one",
+  );
+  assert.match(
+    snapshot,
+    new RegExp(`SNAPSHOT_INSTALL_UNREAD\\s+instead,\\s+omit\\s+both\\s+and\\s+report\\s+${B}installError${B}`),
+    "installError is not bound to an unreadable Install step",
+  );
+  assert.match(
+    snapshot,
+    new RegExp(`Report\\s+${B}untracked${B}\\s+=\\s+every\\s+SNAPSHOT_UNTRACKED=\\s+value`),
+    "untracked is not bound to the status lines the block prints after the Install step",
+  );
+  assert.match(
+    snapshot,
+    new RegExp(`report\\s+${B}untrackedCount${B}\\s+=\\s+the\\s+SNAPSHOT_UNTRACKED_COUNT\\s+value`),
+    "untrackedCount is not bound to the count the block prints — a status past the printed twenty reads as only those twenty",
+  );
+  assert.match(
+    snapshot,
+    new RegExp(`SNAPSHOT_STATUS_FAILED,\\s+report\\s+${B}statusError${B}`),
+    "statusError is not bound to the line the block prints when it cannot read the status — an unreadable status reads as an empty one",
+  );
 
   // Scoped to `SNAPSHOT_SCHEMA.properties` directly — a real import now,
   // never a second copy of its JSON re-parsed from source text. A field
   // declared ANYWHERE else is undeclared as far as
   // `additionalProperties: false` is concerned.
-  for (const field of ["testCmd", "testCmdError"]) {
+  for (const field of ["testCmd", "testCmdError", "installCmd", "installExit", "installError", "untracked", "untrackedCount", "statusError"]) {
     assert.ok(
       Object.prototype.hasOwnProperty.call(SNAPSHOT_SCHEMA.properties, field),
       `${field} is not declared in SNAPSHOT_SCHEMA.properties — additionalProperties:false drops it`,
@@ -299,12 +312,19 @@ test("the test-run prompt tells the agent where slotWaitMs comes from and what e
 test("the test-run prompt routes an expected fail into its own optional field, never into fail", () => {
   const prompt = testRunPrompt();
   assert.match(prompt, /\\`fail\\`,\s+\\`expectedFail\\`, \\`cancelled\\`/, "the prompt no longer asks for the expected-fail count");
+  // The example names two ecosystems' tokens, side by side: one runner named
+  // alone reads as the runner the fleet assumes a consumer uses.
   assert.match(
     prompt,
-    /\(vitest's \\`expected fail\\`\) goes in \\`expectedFail\\`, never in\s+\\`fail\\`/,
-    "the prompt no longer keeps an expected fail out of `fail`",
+    /\(vitest \\`expected fail\\`, pytest \\`xfailed\\`\) goes in \\`expectedFail\\`, never in\s+\\`fail\\`/,
+    "the prompt no longer keeps an expected fail out of `fail`, or no longer names it from two ecosystems",
   );
   assert.equal(TEST_RUN_SCHEMA.properties.expectedFail?.type, "integer", "the test-run schema has no integer `expectedFail` field");
+  assert.match(
+    TEST_RUN_SCHEMA.properties.expectedFail.description,
+    /\(vitest `expected fail`, pytest `xfailed`\)/,
+    "the schema's expectedFail description no longer names an expected fail from two ecosystems",
+  );
   assert.equal(TEST_RUN_SCHEMA.required, undefined, "a required count would force a 0 the log never stated");
 });
 

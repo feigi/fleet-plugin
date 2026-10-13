@@ -3,8 +3,10 @@
 // This file holds every host-independent declaration PR review needs: the
 // JSON schemas, `usableDiff`, `readRules`, `resolveTestCmd`,
 // `decodeArgs`, `selectDimensions`, `resolveDimensions`, `snapshotMissing`,
-// `unrunReason`/`unrunEntries`/`unrunCrashed`, `sharedRunNote`, `verdictFor`,
-// `resumeFor`, and `runReview(host, args)` — the orchestration function itself.
+// `installReason`/`installFinding`, `unrunReason`/`unrunEntries`/`unrunCrashed`,
+// `sharedRunNote`, `copyRule`,
+// `verdictFor`, `resumeFor`, and `runReview(host, args)` — the orchestration
+// function itself.
 //
 // review-eval.mjs imports this file directly, a RELATIVE specifier: both
 // ship together under the same Install root, so the Resolver is only needed
@@ -120,6 +122,23 @@ export const SNAPSHOT_SCHEMA = {
     prHead: { type: "string" },
     testCmd: { type: "string" },
     testCmdError: { type: "string" },
+    // The Recipe's Install step as the snapshot agent read it, and its exit
+    // status in the snapshot. Optional, so an absent `installExit` is read
+    // as an install that did not succeed, never as one that did:
+    // `installError` carries derive-testcmd.sh's refusal when the step could
+    // not be read at all.
+    installCmd: { type: "string" },
+    installExit: { type: "integer" },
+    installError: { type: "string" },
+    // What `git status --porcelain --untracked-files=all` printed in the
+    // snapshot after the Install step, one entry per line, the first twenty
+    // at most; `untrackedCount` is how many it printed in all. The
+    // repository's own ignore rules decide it, so it is reported, never
+    // excluded. `statusError` says the read itself failed, which is not an
+    // empty answer.
+    untracked: { type: "array", items: { type: "string" } },
+    untrackedCount: { type: "integer" },
+    statusError: { type: "string" },
   },
 };
 
@@ -138,7 +157,7 @@ export const TEST_RUN_SCHEMA = {
     tests: { type: "integer" },
     pass: { type: "integer" },
     fail: { type: "integer" },
-    expectedFail: { type: "integer", description: "Tests the runner reports as failing by design (vitest's `expected fail`), never folded into `fail`." },
+    expectedFail: { type: "integer", description: "Tests the runner reports as failing by design (vitest `expected fail`, pytest `xfailed`), never folded into `fail`." },
     cancelled: { type: "integer" },
     skipped: { type: "integer" },
     error: { type: "string", description: "Only when no summary was printed: what happened instead." },
@@ -458,7 +477,32 @@ export function snapshotMissing(snap, runRootPrefix) {
 // commit, no ancestry, no remotes, so `git log`/`git diff` now return
 // plausible output about the snapshot in place of the `fatal:` that used to
 // stop that question being asked.
+//
+// What the snapshot reads untracked after the Install step rides on the end
+// as one line: the repository's own ignore rules left it, so it is a fact
+// about the repository, and the review names it rather than hiding it. The
+// line is interpolated into every specialist and refuter prompt and the
+// payload, so it carries the first `LISTED_UNTRACKED` entries and a count of
+// the rest — a PR that drops its dependency directory from `.gitignore` would
+// otherwise put one entry per installed file in each of them; the whole
+// status is in the run root's `status.txt`. A status the block could not read
+// is said so, never left to read as an empty one.
+const LISTED_UNTRACKED = 20;
+
 export function environmentNote(snap) {
+  const untracked = snap && Array.isArray(snap.untracked) ? snap.untracked.filter((l) => typeof l === "string" && l.trim()) : [];
+  const total = Math.max(untracked.length, snap && Number.isInteger(snap.untrackedCount) ? snap.untrackedCount : 0);
+  const shown = untracked.slice(0, LISTED_UNTRACKED);
+  const more = total - shown.length;
+  let note = repoNote(snap);
+  if (snap && typeof snap.statusError === "string" && snap.statusError.trim())
+    note += `\nAfter the Install step the snapshot's status could not be read (${snap.statusError.trim()}), so what it left untracked is not known.`;
+  if (shown.length)
+    note += `\nAfter the Install step the snapshot reads untracked under the repository's own ignore rules: ${shown.join(", ")}${more > 0 ? `, and ${more} more (the whole status is in ${snap.runRoot ?? "the run root"}/status.txt)` : ""}.`;
+  return note;
+}
+
+function repoNote(snap) {
   if (snap && snap.repoVerified === true)
     return `Test environment: the snapshot is a git repository whose single commit holds
 the reviewed tree — its tree hash was compared against the commit under review
@@ -482,10 +526,52 @@ validation of the tree: its counts are snapshot-measured, and a failure in it
 cannot be told apart from a regression.`;
 }
 
+// The Install step's verdict on the snapshot: null when it ran there and
+// exited 0, otherwise why no test of this review can run in it. An absent
+// `installExit` is never a success — the step was unreadable (`installError`
+// says why) or the snapshot agent dropped the line — because a snapshot
+// nothing was installed into measures its own missing dependencies, not the
+// tree.
+export function installReason(snap) {
+  if (snap && snap.installExit === 0) return null;
+  if (snap && Number.isInteger(snap.installExit))
+    return `the Install step${snap.installCmd ? ` \`${snap.installCmd}\`` : ""} exited ${snap.installExit} in the snapshot (log ${snap.runRoot}/install.log) — nothing it installs is there, so the shared test run was skipped`;
+  const why = (snap && typeof snap.installError === "string" && snap.installError.trim()) || "the snapshot agent reported no exit status for it";
+  return `the Install step did not run in the snapshot — ${why} — so the shared test run was skipped`;
+}
+
+// The one finding an Install step that exits non-zero in the snapshot files
+// on the PR, when the snapshot is the reviewed tree. It is the review's own
+// measurement, an exit status, not a specialist's claim, so it carries no
+// refuter vote — and it claims only what was measured: which tree the step
+// ran on and how it exited. Why it exited is not known here, and the same
+// status can come from the PR (a script it deleted exits 127) or from the host
+// (a kill, a timeout), so the claim says the cause is not established rather
+// than naming the PR's defect. The Recipe cache, proven on the base, stays as
+// it is. A snapshot that is NOT the reviewed tree (`repoVerified` not true)
+// files nothing: an exit there is a fact about a different tree, which
+// `environmentNote` already says. An Install step that could not be READ files
+// nothing either: that is the Recipe's state, not the PR's.
+export function installFinding(snap) {
+  if (!snap || snap.repoVerified !== true || !Number.isInteger(snap.installExit) || snap.installExit === 0) return null;
+  const cmd = snap.installCmd ? `\`${snap.installCmd}\`` : "the Recipe's Install step";
+  return {
+    severity: "critical",
+    claim: `The Install step exited ${snap.installExit} on this PR's tree: ${cmd}, run from the root of a snapshot of ${snap.head}, so no test of this review ran. The review did not establish why it exited — the PR's tree or this host.`,
+    evidence: `The review ran ${cmd} once from the root of ${snap.path} and it exited ${snap.installExit}; its output is in ${snap.runRoot}/install.log.`,
+    dimension: "install",
+    verdict: "survived",
+    votes: [],
+    refutersDispatched: 0,
+    refutersInconclusive: 0,
+  };
+}
+
 // Every run-quality verdict below reads the review's ONE shared test
 // run — `{command, logPath, exitCode?, tests?, pass?, fail?, expectedFail?,
 // cancelled?, skipped?, error?}`, `command`/`logPath` the caller's own and the
-// rest the test-run agent's report — never a specialist's own run: no
+// rest the test-run agent's report, or `{command, logPath, unprovisioned}`
+// when `installReason` skipped the run — never a specialist's own run: no
 // specialist runs the full suite any more, so a verdict on one would judge a
 // copy of this.
 // `run` null is a caller holding no run at all — runReview always hands one
@@ -498,6 +584,7 @@ cannot be told apart from a regression.`;
 // TEST_RUN_EXIT line would otherwise read as green.
 function testRunReason(run) {
   if (!run) return "the review's shared test run returned nothing — no counts exist, so no dimension's tests ran";
+  if (run.unprovisioned) return run.unprovisioned;
   // The wrapper's wait cap expired: it launched nothing, so there are no
   // counts to judge and the exit status is the wrapper's, not the suite's. A
   // run that printed counts and happened to exit 75 is the suite's own answer
@@ -567,13 +654,42 @@ function countsOf(run) {
     .join(", ");
 }
 
+// How a specialist or refuter makes "your own copy of the snapshot", in
+// every prompt that sends one to work there. Tracked files only, then the
+// Install step in the copy: what an install writes can record absolute paths
+// back into the tree it ran in, so a copy that shares the snapshot's
+// installed output imports the snapshot's source, and a mutation made in the
+// copy never runs.
+export function copyRule(snap) {
+  const step = snap && snap.installCmd
+    ? `the Install step, \`${snap.installCmd}\`,`
+    : "the Install step (this review read none, so a copy has nothing installed and a suite run in it does not measure the tree)";
+  return `Make your own copy of the snapshot from its tracked files only —
+\`git -C ${snap && snap.path} archive HEAD | tar -x -C <copy>\`, or a \`git clone\`
+of the snapshot repository — then make it a repository with \`git init\`,
+\`git add -A -f\` and a commit (a clone already is one), then run
+${step} from the copy's root before you measure anything in it.
+Never \`cp -R\` the snapshot, and never symlink or clone its ignored paths: an
+install can record absolute paths back into the tree it ran in, so a copy
+sharing the snapshot's installed output runs the snapshot's source, and a
+mutation in the copy never runs.`;
+}
+
 // The Tests paragraph of every specialist prompt: the shared run's
 // command, counts, exit status and log path, in place of the instruction to
 // run the full suite that each specialist used to follow — one review was up
 // to six full sweeps of one immutable snapshot. `owner` is the one dimension
 // told to file the finding about failing tests, so the others are told not
-// to duplicate it rather than left to race each other to it.
+// to duplicate it rather than left to race each other to it. A run the
+// Install step skipped has no counts and no log to describe, so it gets a
+// paragraph of its own.
 export function sharedRunNote(run, owner, key) {
+  if (run.unprovisioned)
+    return `Tests: this review did NOT run its test command: ${run.unprovisioned}.
+Every dimension of this review is reported unrun for it — do not run the full
+command yourself to replace it, and file nothing about the install: the review
+reports it itself.
+  command: ${run.command}`;
   const lines = [
     `Tests: this review ran its test command ONCE, from the snapshot's root, before
 dispatching you. Do NOT run that full command yourself — every dimension reads
@@ -873,15 +989,37 @@ export async function runReview(host, args) {
     ( cd "$SNAP" && git init -q && git add -A -f && git -c user.name=fleet -c user.email=fleet@invalid commit -q --no-verify -m "review snapshot of $SHA" ) || echo SNAPSHOT_INIT_FAILED
     SNAPTREE=$(git -C "$SNAP" rev-parse 'HEAD^{tree}' 2>/dev/null); SRCTREE=$(git -C ${worktree} rev-parse 'HEAD^{tree}')
     { [ -d "$SNAP/.git" ] && [ -n "$SNAPTREE" ] && [ "$SNAPTREE" = "$SRCTREE" ]; } && echo SNAPSHOT_TREE_MATCH || echo SNAPSHOT_TREE_MISMATCH="snapshot $SNAPTREE vs commit $SRCTREE"
-    [ -d "$SNAP/.git" ] && printf 'node_modules\\n' >> "$SNAP/.git/info/exclude"
-    if [ -n "$SNAP" ] && [ -d ${worktree}/node_modules ]; then ln -s ${worktree}/node_modules "$SNAP/node_modules"; fi
+    INSTALL=$(~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} install) && echo SNAPSHOT_INSTALL_STEP="$INSTALL" || { INSTALL=; echo SNAPSHOT_INSTALL_UNREAD; }
+    [ -z "$INSTALL" ] || { ( cd "$SNAP" && sh -c "$INSTALL" ) >"$RUN/install.log" 2>&1; echo SNAPSHOT_INSTALL_EXIT=$?; }
+    if [ -d "$SNAP/.git" ] && git -C "$SNAP" status --porcelain --untracked-files=all >"$RUN/status.txt"; then head -n 20 "$RUN/status.txt" | sed 's/^/SNAPSHOT_UNTRACKED=/'; echo SNAPSHOT_UNTRACKED_COUNT=$(wc -l <"$RUN/status.txt" | tr -d ' '); else echo SNAPSHOT_STATUS_FAILED; fi
+
+The Install step can take minutes: run the block as ONE blocking foreground
+command with a command deadline of 3600 seconds, never backgrounded and never
+polled. The Install step takes no suite slot.
+
+Report \`installCmd\` = the SNAPSHOT_INSTALL_STEP value and \`installExit\` = the
+SNAPSHOT_INSTALL_EXIT value, both copied as printed. If the block printed
+SNAPSHOT_INSTALL_UNREAD instead, omit both and report \`installError\` = what
+derive-testcmd.sh printed on stderr. The Install step runs once, in the
+snapshot, from its root: never rerun it, never repair a failure, and never run
+it anywhere else. A non-zero exit is reported as printed, and the caller files
+it as a finding on the PR.
+
+Report \`untracked\` = every SNAPSHOT_UNTRACKED= value, copied as printed, in
+order, and omit it when the block printed none; the block prints twenty at most,
+so report \`untrackedCount\` = the SNAPSHOT_UNTRACKED_COUNT value, copied as
+printed. If the block printed SNAPSHOT_STATUS_FAILED, report \`statusError\` =
+SNAPSHOT_STATUS_FAILED: the status could not be read, which is not an empty
+status. The repository's own ignore rules decide what reads untracked after the
+Install step: list it, and add nothing to the snapshot's \`.git/info/exclude\` or
+anywhere else to hide it.
 
 Report \`pathVerified\` = true ONLY if the 'ls -A' line printed SNAPSHOT_NONEMPTY,
-run in that order — BEFORE the 'git init' and BEFORE the symlink, never after
-either. Both create an entry of their own, so a probe below them prints
-SNAPSHOT_NONEMPTY on a 'git archive' that extracted nothing at all.
+run in that order — BEFORE the 'git init', never after it. The init creates an
+entry of its own, so a probe below it prints SNAPSHOT_NONEMPTY on a
+'git archive' that extracted nothing at all.
 
-Report \`repoVerified\` = true ONLY if the last line above printed
+Report \`repoVerified\` = true ONLY if the tree-compare line above printed
 SNAPSHOT_TREE_MATCH; otherwise report it false and put the line it printed
 instead — SNAPSHOT_INIT_FAILED, or the whole SNAPSHOT_TREE_MISMATCH= value with
 both hashes — in \`repoError\`. The init is what makes the snapshot MEASURABLE:
@@ -891,8 +1029,9 @@ extraction than in a checkout at the same commit, with nothing in the payload
 saying the measurement happened somewhere else. The tree-hash compare is
 the verification: two commits whose trees hash the same hold byte-identical
 content, so a match settles that the snapshot IS the reviewed tree — a stronger
-check than reading a few files, and the reason the commit comes BEFORE the
-node_modules symlink, which would otherwise enter the index and change the hash.
+check than reading a few files, and the reason the commit and the compare come
+BEFORE the Install step: 'git add -A -f' stages ignored files too, so whatever
+the Install step writes would enter the index and change the hash.
 
 Report \`head\` = the full sha 'git -C ${worktree} rev-parse HEAD' prints — the
 destination path carries only the short form. The byte-identity spot check this
@@ -960,8 +1099,8 @@ specialists into another run's tree. Report the HEAD sha, and — in
 \`diffStats\` — the SINGLE-LINE JSON object diff-stats.mjs prints to
 STDOUT, copied verbatim. Only runRoot, path, head, pathVerified and repoVerified
 are ever required — diffStats, diffPath, diffLines, refHead and prHead are each
-omitted independently when their command failed, and repoError only accompanies
-a false repoVerified.`,
+omitted independently when their command failed, repoError only accompanies
+a false repoVerified, and installError only replaces installCmd and installExit.`,
     { label: `snapshot${forPr}`, phase: "Snapshot", agentType: SNAPSHOT_AGENT_TYPE, schema: SNAPSHOT_SCHEMA },
   );
 
@@ -979,6 +1118,11 @@ a false repoVerified.`,
 
   const testCmd = resolveTestCmd(A.testCmd, snap);
   log(`testCmd ${A.testCmd ? "(caller override)" : "(derived)"} ${testCmd}`);
+  // An Install step that failed or never ran leaves a snapshot that cannot
+  // measure the tree: the shared run is skipped, every dimension is reported
+  // unrun through `testRunReason`, and a non-zero exit is filed as a finding.
+  const notInstalled = installReason(snap);
+  log(notInstalled ? `install: ${notInstalled}` : `install: ${snap.installCmd ?? "the Install step"} exited 0 in the snapshot`);
 
   const usable = usableDiff(snap);
   log(
@@ -1012,7 +1156,7 @@ a false repoVerified.`,
   // every dimension, never a pass.
   const logPath = `${snap.runRoot}/test-run.log`;
   phase("Test run");
-  const ran = await agent(
+  const ran = notInstalled ? null : await agent(
     `Run this repository's test command ONCE, for the review of PR #${pr}, and
 report what it printed. Every review specialist reads your counts instead of
 running the suite itself, so this is the review's only full run.
@@ -1057,7 +1201,7 @@ Then read the summary the runner printed at the end of the log —
 \`exitCode\` = the TEST_RUN_EXIT value, and \`tests\`, \`pass\`, \`fail\`,
 \`expectedFail\`, \`cancelled\`, \`skipped\` = the counts that summary states, each
 copied as printed; omit any the runner does not print. A test the runner reports
-as failing by design (vitest's \`expected fail\`) goes in \`expectedFail\`, never in
+as failing by design (vitest \`expected fail\`, pytest \`xfailed\`) goes in \`expectedFail\`, never in
 \`fail\`. Copy the counts, never judge them: 'tests 0' is a FAILED run, not a
 pass, and 0 passes with no failures is everything skipped — report both
 exactly as printed, and the caller reports every dimension unrun for them.
@@ -1068,8 +1212,10 @@ write 0 for a count the log does not state: an absent count is how the caller
 learns the run produced none.`,
     { label: `test-run${forPr}`, phase: "Test run", agentType: TEST_RUN_AGENT_TYPE, schema: TEST_RUN_SCHEMA },
   ).catch((e) => ({ error: `the test-run dispatch threw: ${e?.message ?? e}` }));
-  const sharedRun = { ...(ran || { error: "the test-run agent returned nothing" }), command: testCmd, logPath };
-  log(`shared test run: ${countsOf(sharedRun) || "no counts"} — exit ${sharedRun.exitCode ?? "(absent)"} — log ${logPath}`);
+  const sharedRun = notInstalled
+    ? { command: testCmd, logPath, unprovisioned: notInstalled }
+    : { ...(ran || { error: "the test-run agent returned nothing" }), command: testCmd, logPath };
+  log(notInstalled ? `shared test run: skipped — ${notInstalled}` : `shared test run: ${countsOf(sharedRun) || "no counts"} — exit ${sharedRun.exitCode ?? "(absent)"} — log ${logPath}`);
   // Failing tests are the review's to report, not each dimension's: the first
   // selected dimension is told to file them, and every other one not to.
   const failureOwner = dimensions[0].key;
@@ -1110,6 +1256,7 @@ READ ONLY FROM THE SNAPSHOT: ${snap.path} (HEAD ${snap.head}) — plus the diff
 file named below, if one is given.
 Never read or write ${worktree} — other agents are using it.
 Run any mutation or probe work inside your own copy of the snapshot.
+${copyRule(snap)}
 
 Your shell starts in NEITHER of those directories, and what it does start in is
 a tree you must not write to: this dispatch carries no working directory of its
@@ -1206,6 +1353,8 @@ decide it and nothing else:
 
 ${KILL_RULES}
 
+${copyRule(snap)}
+
 Abstain when your own check could produce neither a valid red nor a valid
 green: set \`inconclusive\` to true and name the runs in \`reason\`, each with
 its evidence line. \`refuted\` is still required, and the tally ignores it on
@@ -1291,7 +1440,8 @@ how three reviews from one cell left four files modified in that checkout.`,
     },
   );
 
-  const all = reviewed.flat().filter(Boolean);
+  const installed = installFinding(snap);
+  const all = [...(installed ? [installed] : []), ...reviewed.flat().filter(Boolean)];
   const survived = all.filter((f) => f.verdict === "survived");
   const refuted = all.filter((f) => f.verdict === "refuted");
   const unverified = all.filter((f) => f.verdict === "unverified");
