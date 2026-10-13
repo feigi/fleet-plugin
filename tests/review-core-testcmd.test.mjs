@@ -302,12 +302,19 @@ test("the test-run prompt tells the agent where slotWaitMs comes from and what e
 test("the test-run prompt routes an expected fail into its own optional field, never into fail", () => {
   const prompt = testRunPrompt();
   assert.match(prompt, /\\`fail\\`,\s+\\`expectedFail\\`, \\`cancelled\\`/, "the prompt no longer asks for the expected-fail count");
+  // The example names two ecosystems' tokens, side by side: one runner named
+  // alone reads as the runner the fleet assumes a consumer uses.
   assert.match(
     prompt,
-    /\(vitest's \\`expected fail\\`\) goes in \\`expectedFail\\`, never in\s+\\`fail\\`/,
-    "the prompt no longer keeps an expected fail out of `fail`",
+    /\(vitest \\`expected fail\\`, pytest \\`xfailed\\`\) goes in \\`expectedFail\\`, never in\s+\\`fail\\`/,
+    "the prompt no longer keeps an expected fail out of `fail`, or no longer names it from two ecosystems",
   );
   assert.equal(TEST_RUN_SCHEMA.properties.expectedFail?.type, "integer", "the test-run schema has no integer `expectedFail` field");
+  assert.match(
+    TEST_RUN_SCHEMA.properties.expectedFail.description,
+    /\(vitest `expected fail`, pytest `xfailed`\)/,
+    "the schema's expectedFail description no longer names an expected fail from two ecosystems",
+  );
   assert.equal(TEST_RUN_SCHEMA.required, undefined, "a required count would force a 0 the log never stated");
 });
 

@@ -152,7 +152,7 @@ export const TEST_RUN_SCHEMA = {
     tests: { type: "integer" },
     pass: { type: "integer" },
     fail: { type: "integer" },
-    expectedFail: { type: "integer", description: "Tests the runner reports as failing by design (vitest's `expected fail`, pytest's `xfail`), never folded into `fail`." },
+    expectedFail: { type: "integer", description: "Tests the runner reports as failing by design (vitest `expected fail`, pytest `xfailed`), never folded into `fail`." },
     cancelled: { type: "integer" },
     skipped: { type: "integer" },
     error: { type: "string", description: "Only when no summary was printed: what happened instead." },
@@ -1171,7 +1171,7 @@ Then read the summary the runner printed at the end of the log —
 \`exitCode\` = the TEST_RUN_EXIT value, and \`tests\`, \`pass\`, \`fail\`,
 \`expectedFail\`, \`cancelled\`, \`skipped\` = the counts that summary states, each
 copied as printed; omit any the runner does not print. A test the runner reports
-as failing by design (vitest's \`expected fail\`, pytest's \`xfail\`) goes in \`expectedFail\`, never in
+as failing by design (vitest \`expected fail\`, pytest \`xfailed\`) goes in \`expectedFail\`, never in
 \`fail\`. Copy the counts, never judge them: 'tests 0' is a FAILED run, not a
 pass, and 0 passes with no failures is everything skipped — report both
 exactly as printed, and the caller reports every dimension unrun for them.
