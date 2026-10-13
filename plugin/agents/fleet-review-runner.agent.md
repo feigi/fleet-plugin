@@ -31,7 +31,6 @@ set either,
 the backward-compat `spawns` default (`omp://task-agent-discovery.md:38-39`
 — missing `spawns` defaults to `*` only when `tools` includes `task`) never
 fired: every spawn from this agent's cell was refused, 110+ times in one
-session, always falling through to a hand-dispatched fallback reviewer that
 redid the whole snapshot/fan-out sequence from scratch.
 
 1. **Run exactly ONE `eval` cell, language `js`, with `timeout: 0`.** A review

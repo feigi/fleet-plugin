@@ -128,7 +128,7 @@ export function rowNums(text) {
 // The launch is `review=wf:<runId>` | `review=member:<name>` |
 // the kind, the runId or runner name, and the `=failed` suffix. A launch's
 // identity comes out of this one regex, `=failed` aside: a workflow's is its
-// runId, a runner's is its name whichever of member or fallback launched it,
+// runId, a runner's is its name whichever of member launched it,
 // since both are the one hub member of that name. The first runner on PR <n>
 // is `review-pr-<n>`, every later one the next letter the PR's rows do not
 // carry yet (`-b`, `-c`, …). The
@@ -212,7 +212,7 @@ function added(before, after) {
 
 // The runner name a new launch on PR <pr> takes: `review-pr-<pr>`, else the
 // first letter from `b` that no runner launch on the PR's rows already uses —
-// member or fallback, `=failed` or not — and no name in `retired` holds, the
+// member, `=failed` or not — and no name in `retired` holds, the
 // names an earlier run of this omp session launched. null for a stream keyed
 // by no PR number, or with every letter taken.
 function nextReviewer(launches, pr, retired) {
