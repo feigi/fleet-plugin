@@ -135,6 +135,21 @@ test("modules: a non-test source file with a shared basename is no module", () =
   }
 });
 
+// A test-shaped name with nothing in front of its affix (`.test.ts`,
+// `_test.go`, `test_`) has an empty subject, which names no module: two PRs
+// that each touch one would otherwise share the module "".
+test("modules: a test-shaped name with an empty subject is no module", () => {
+  for (const [a, b] of [
+    ["a/.test.ts", "b/.test.ts"],
+    ["a/_test.go", "b/_test.go"],
+    ["a/test_", "b/test_"],
+  ]) {
+    const payload = overlap([a], [b]);
+    assert.deepEqual(payload.modules, [], `${a} vs ${b}`);
+    assert.equal(payload.signal, "none", `${a} vs ${b}`);
+  }
+});
+
 // Docs and config never take part, a test-shaped name included: isTestName
 // alone claims `docs/test_plan.md` and `docker-compose.test.yml`.
 test("modules: docs and config files with a shared basename are no module", () => {
