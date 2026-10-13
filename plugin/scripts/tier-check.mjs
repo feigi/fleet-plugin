@@ -121,8 +121,9 @@ export function declaredPairFor(frontmatter) {
 // fallback (omp's `retry.fallbackChains` substituting a model after
 // dispatch) is outside this check by design: `session_init` is never
 // rewritten, so the identity stays the dispatched route, and the model that
-// actually served the member is member-outcomes.mjs's per-turn `model`
-// (last turn wins), not a tier verdict.
+// served the member's last turn is member-outcomes.mjs's per-turn `model`
+// (last turn wins, so a fallback that reverts within the run never shows in
+// it), not a tier verdict.
 export function resolveActual({ transcriptText, resolvedModel, resolvedThinkingLevel }) {
   if (resolvedModel && resolvedThinkingLevel) {
     return { model: resolvedModel, level: resolvedThinkingLevel, viaJobRecord: true };
