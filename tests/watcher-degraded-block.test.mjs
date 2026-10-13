@@ -77,6 +77,15 @@ case "$2" in
       i=$((i+1)); [ "$i" -le "$limit" ] || break
       echo "$p"
     done ;;
+  -i)
+    # The unreported-bucket probe: gh api -i <actions route>. Headers first, then
+    # a body, the way gh prints them; HRL/HRLSEQ is the remaining count it reads,
+    # and "nohdr" is a response with no rate-limit header at all. HLOG, when set,
+    # records one line per call so a scenario can count probes.
+    [ -n "$HLOG" ] && echo "$3" >> "$HLOG"
+    h=$(next "$HRLSEQ" "\${HRL-5000}")
+    if [ "$h" = nohdr ]; then echo '{"message":"Server Error"}'; exit 1; fi
+    printf 'HTTP/2.0 200 OK\\r\\nX-Ratelimit-Limit: 5000\\r\\nX-Ratelimit-Remaining: %s\\r\\nX-Ratelimit-Resource: core\\r\\n\\r\\n{"total_count":1,"workflows":[]}\\n' "$h" ;;
   *) next "$RLSEQ" "\${RL-5000}" ;;
 esac
 `);
@@ -419,4 +428,98 @@ test("a recovered PR leaves the blind latch under zsh too", () => {
     const out = run({ SEQ: seq, PRS: "42" }, 3, shell);
     assert.equal(count(out, "WATCHER RECOVERED"), 1, `${shell}: the PR never left the blind list, so RECOVERED repeats:\n${out}`);
   }
+});
+
+// The second core bucket. `ci-state` bills it on the workflow and run lookups,
+// and `gh api rate_limit` never lists it, so its remaining count is read from
+// the X-Ratelimit-Remaining header of one probe per tick. The stub's `-i` case
+// is that probe; HRL/HRLSEQ is the count it returns.
+const HIDDEN = "unreported Actions core REST bucket=";
+const hiddenLines = (out) => out.split("\n").filter((l) => l.includes(HIDDEN));
+
+test("the unreported bucket under 200 + 4 per listed PR pauses the pass once, names itself, and costs one probe per tick", () => {
+  const log = join(DIR, "probe-log-pause");
+  writeFileSync(log, "");
+  for (const shell of ["sh", "bash", "zsh"]) {
+    if (!hasShell(shell)) continue;
+    writeFileSync(log, "");
+    const out = run({ HRL: "219", MODE: "empty", PRS: openPrs(5), HLOG: log }, 3, shell);
+    assert.equal(count(out, "WATCHER DEGRADED"), 1, `${shell}: expected one DEGRADED across three ticks, got:\n${out}`);
+    assert.ok(
+      out.includes(`WATCHER DEGRADED: ${HIDDEN}219 < 220 needed for 5 PRs`),
+      `${shell}: the line does not name the bucket or what the pass needed:\n${out}`,
+    );
+    assert.equal(count(out, "WATCHER RECOVERED"), 0, `${shell}: a sustained shortfall flapped the latch:\n${out}`);
+    assert.equal(count(out, BLIND), 0, `${shell}: the per-PR pass ran on a bucket that cannot pay for it:\n${out}`);
+    assert.equal(count(out, "SLEEP"), 3, `${shell}: every tick must reach the tail sleep, got:\n${out}`);
+    assert.equal(readFileSync(log, "utf8").split("\n").filter(Boolean).length, 3, `${shell}: expected exactly one probe per tick`);
+  }
+});
+
+test("an unreported bucket that covers the pass says nothing and the pass runs, at every list size", () => {
+  // The input the gate must ACCEPT, at both sides of each boundary: the same
+  // 4-per-PR slope and 200 floor as the reported bucket.
+  for (const [n, hrl, paused] of [[1, 203, true], [1, 204, false], [20, 279, true], [20, 280, false], [60, 439, true], [60, 440, false]]) {
+    const out = run({ HRL: String(hrl), MODE: "empty", PRS: openPrs(n) }, 1);
+    assert.equal(count(out, HIDDEN), paused ? 1 : 0, `n=${n} hrl=${hrl}:\n${out}`);
+    assert.equal(count(out, BLIND), paused ? 0 : n, `n=${n} hrl=${hrl}:\n${out}`);
+  }
+});
+
+test("the unreported-bucket latch recovers once, on the tick that bucket covers the pass again", () => {
+  const seq = join(DIR, "seq-hrl-recover");
+  writeFileSync(seq, "219\n219\n220\n220\n");
+  const out = run({ HRLSEQ: seq, MODE: "empty", PRS: openPrs(5) }, 4);
+  assert.equal(count(out, "WATCHER DEGRADED: " + HIDDEN), 1, `expected one DEGRADED, got:\n${out}`);
+  assert.equal(count(out, "WATCHER RECOVERED: " + HIDDEN + "220"), 1, `expected exactly one RECOVERED naming the bucket, got:\n${out}`);
+  assert.equal(count(out, BLIND), 5, `expected the pass to resume on recovery and each PR to latch once, got:\n${out}`);
+});
+
+test("a probe with no rate-limit header is an outage, and recovers when the header returns", () => {
+  const seq = join(DIR, "seq-hrl-nohdr");
+  writeFileSync(seq, "nohdr\nnohdr\n5000\n");
+  const out = run({ HRLSEQ: seq, MODE: "normal", PRS: "7" }, 3, "sh", { strict: true });
+  assert.deepEqual(
+    hiddenLines(out).map((l) => l.split(" ").slice(0, 2).join(" ")),
+    ["WATCHER DEGRADED:", "WATCHER RECOVERED:"],
+    `an unreadable probe was silent or repeated:\n${out}`,
+  );
+  assert.equal(count(out, "SLEEP"), 3, `set -eu: an unreadable probe died before the tail sleep:\n${out}`);
+});
+
+test("no probe is spent while the reported bucket already pauses the pass", () => {
+  const log = join(DIR, "probe-log-reported");
+  writeFileSync(log, "");
+  const out = run({ RL: "5", HRL: "5", PRS: "7", HLOG: log }, 3);
+  assert.equal(count(out, HIDDEN), 0, `the unreported bucket was reported while the floor already paused polling:\n${out}`);
+  assert.equal(readFileSync(log, "utf8"), "", "the floor paused the tick and the probe was still spent");
+});
+
+test("neither bucket announces recovery while the other still pauses the pass", () => {
+  // Tick 1: reported bucket low. Tick 2: it recovers but the unreported one is
+  // low. Tick 3: both cover the pass. A RECOVERED for the reported bucket on
+  // tick 2 would claim polling resumed on a tick the other gate then pauses.
+  const rl = join(DIR, "seq-both-rl");
+  const hrl = join(DIR, "seq-both-hrl");
+  writeFileSync(rl, "5\n5000\n5000\n");
+  writeFileSync(hrl, "5\n5000\n");
+  const out = run({ RLSEQ: rl, HRLSEQ: hrl, MODE: "normal", PRS: "7" }, 3);
+  const lines = out.split("\n").filter((l) => l.startsWith("WATCHER"));
+  assert.deepEqual(
+    lines.map((l) => l.replace(/ — .*/, "").replace(/=\d+.*/, "=")),
+    ["WATCHER DEGRADED: core REST budget=", `WATCHER DEGRADED: ${HIDDEN}`, "WATCHER RECOVERED: core budget=", `WATCHER RECOVERED: ${HIDDEN}`],
+    `wrong lines, or in the wrong order:\n${out}`,
+  );
+});
+
+test("a PR already blind is reported by its own latch alone across an unreported-bucket pause", () => {
+  // #42 is blind on tick 1. Tick 2 is paused by the unreported bucket, so no
+  // per-PR line may appear for it (it is not polled). Tick 3 resumes and the
+  // PR reads fine: the bucket recovers, then #42 recovers through its own latch.
+  const seq = join(DIR, "seq-hrl-blind");
+  writeFileSync(`${seq}.42`, "empty\nnormal\n");
+  const hrl = join(DIR, "seq-hrl-blind-hrl");
+  writeFileSync(hrl, "5000\n5\n5000\n");
+  const out = run({ SEQ: seq, HRLSEQ: hrl, PRS: "42" }, 3);
+  assert.deepEqual(events(out), ["D42", "D*", "R*", "R42"], `wrong events, or in the wrong order:\n${out}`);
 });
