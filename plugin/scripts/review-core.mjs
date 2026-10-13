@@ -138,7 +138,7 @@ export const TEST_RUN_SCHEMA = {
     tests: { type: "integer" },
     pass: { type: "integer" },
     fail: { type: "integer" },
-    expectedFail: { type: "integer", description: "Tests the runner reports as failing by design (vitest's `expected fail`), never folded into `fail`." },
+    expectedFail: { type: "integer", description: "Tests the runner reports as failing by design (vitest's `expected fail`, pytest's `xfail`), never folded into `fail`." },
     cancelled: { type: "integer" },
     skipped: { type: "integer" },
     error: { type: "string", description: "Only when no summary was printed: what happened instead." },
@@ -873,8 +873,8 @@ export async function runReview(host, args) {
     ( cd "$SNAP" && git init -q && git add -A -f && git -c user.name=fleet -c user.email=fleet@invalid commit -q --no-verify -m "review snapshot of $SHA" ) || echo SNAPSHOT_INIT_FAILED
     SNAPTREE=$(git -C "$SNAP" rev-parse 'HEAD^{tree}' 2>/dev/null); SRCTREE=$(git -C ${worktree} rev-parse 'HEAD^{tree}')
     { [ -d "$SNAP/.git" ] && [ -n "$SNAPTREE" ] && [ "$SNAPTREE" = "$SRCTREE" ]; } && echo SNAPSHOT_TREE_MATCH || echo SNAPSHOT_TREE_MISMATCH="snapshot $SNAPTREE vs commit $SRCTREE"
-    [ -d "$SNAP/.git" ] && printf 'node_modules\\n' >> "$SNAP/.git/info/exclude"
-    if [ -n "$SNAP" ] && [ -d ${worktree}/node_modules ]; then ln -s ${worktree}/node_modules "$SNAP/node_modules"; fi
+    ~/.fleet/bin/fleet-run derive-testcmd.sh "$SNAP" install >"$RUN/snapshot-install.log" 2>&1; SNAP_INSTALL_EXIT=$?
+    [ $SNAP_INSTALL_EXIT -eq 0 ] && echo SNAPSHOT_INSTALL_SUCCESS || echo "SNAPSHOT_INSTALL_FAILED=$SNAP_INSTALL_EXIT"
 
 Report \`pathVerified\` = true ONLY if the 'ls -A' line printed SNAPSHOT_NONEMPTY,
 run in that order — BEFORE the 'git init' and BEFORE the symlink, never after
@@ -1057,7 +1057,7 @@ Then read the summary the runner printed at the end of the log —
 \`exitCode\` = the TEST_RUN_EXIT value, and \`tests\`, \`pass\`, \`fail\`,
 \`expectedFail\`, \`cancelled\`, \`skipped\` = the counts that summary states, each
 copied as printed; omit any the runner does not print. A test the runner reports
-as failing by design (vitest's \`expected fail\`) goes in \`expectedFail\`, never in
+as failing by design (vitest's \`expected fail\`, pytest's \`xfail\`) goes in \`expectedFail\`, never in
 \`fail\`. Copy the counts, never judge them: 'tests 0' is a FAILED run, not a
 pass, and 0 passes with no failures is everything skipped — report both
 exactly as printed, and the caller reports every dimension unrun for them.
