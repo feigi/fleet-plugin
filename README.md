@@ -164,7 +164,7 @@ flowchart TD
 
     HEART["Heartbeat<br/>fleet-heartbeat.mjs"] -.->|"no wake fires:<br/>level-check wakes the tick"| JUDGE
 
-    CORR(["reviewer/finisher files a<br/>correction ticket"]) -.->|"ready-for-agent"| ISSUE
+    CORR(["reviewer/finisher files a<br/>correction ticket"]) -.->|"needs-triage,<br/>then triage promotes"| ISSUE
 ```
 
 No batching and no maintainer queue: the controller keeps an ordered

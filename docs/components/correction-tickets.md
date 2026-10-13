@@ -28,12 +28,13 @@ becomes one at all.
 
 ## Opinionated choices
 
-- **Two separate bars at filing time, not one.** Confirming a defect
-  exists and judging whether it's worth its own ticket are different
-  questions; collapsing them was measured routing real, confirmed-but-
-  easy findings into a `needs-triage` queue no fleet member could ever
-  consume.
-- **Both bars carry a pre-chosen, pre-data guard** (a floor of filings
-  across multiple run dates, a trigger ratio) rather than a
-  discretionary retune, so a guard that never fires is evidence the bar
-  is right, not evidence nobody's watching.
+- **A label rule and a claim bar, kept apart.** Confirming a defect exists
+  does not settle how it should be fixed, so a confirmed defect files
+  `needs-triage` like every other issue — the label never turns on
+  confirmation. Whether a finding earns its own issue at all is the
+  separate worth-a-claim bar; collapsing the two was measured routing
+  confirmed findings into the fleet's pool with their remedy still open.
+- **The claim bar and the label rule each carry a pre-chosen, pre-data
+  guard** (a floor of filings across multiple run dates, a trigger ratio
+  or count) rather than a discretionary retune, so a guard that never
+  fires is evidence the rule is right, not evidence nobody's watching.

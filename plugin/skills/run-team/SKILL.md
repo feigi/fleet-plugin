@@ -2030,10 +2030,10 @@ It blocks, then prints one line. Which line it is, is the whole protocol:
 
 The interval doubles while the fleet asks for nothing and stops at `--ceiling`,
 so a quiet night costs ~26 wakes instead of ~96. **The ceiling is a real bound,
-not a formality**: supply grows from OUTSIDE the fleet — a ticket you triage, a
-correction ticket a reviewer files — and that arrival emits no event either, so
-the ceiling is your worst-case latency for noticing it. Do not raise it past 30
-minutes.
+not a formality**: supply grows from OUTSIDE the fleet — a ticket you triage,
+one a reviewer filed `needs-triage` included — and that arrival emits no
+event either, so the ceiling is your worst-case latency for noticing it.
+Do not raise it past 30 minutes.
 
 **The beat does not stop on idleness.** An empty shortlist and an empty supply are
 not a reason to end the run; they are the state a newly triaged ticket arrives
