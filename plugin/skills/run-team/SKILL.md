@@ -1761,7 +1761,9 @@ owes beyond its row:
   runner — **Reviewers** says which, per harness) and record `reviewed=` off its
   digest with `ledger.mjs review <M>`, then run the tick: a PR with survived or unverified findings prints as
   `DISPATCH fix-pr PR#<M>`. No survived or unverified finding and nothing to file → skip the
-  fix-applier and dispatch the **finisher** directly: no member will touch that
+  fix-applier and dispatch the **finisher** directly — or, when that head's
+  bound conclusion is red and not solely staleness, the red-check fixer
+  instead (**Then dispatch a red-check fixer**, below): no member will touch that
   PR, so no push is coming and nothing will wake you. A review that failed is
   not a result — **Reviewers** says who retries it and what takes over.
 - **Monitor: `ready-to-merge` appears** → nothing to record; run the tick, and
@@ -1839,7 +1841,8 @@ owes beyond its row:
   reaches a finisher through the **fix-applier reports `no-op`** bullet below,
   never by waiting for a second CI event this head will never produce. The
   same goes for a red one: a red that fired before the review never fires
-  again, so that bullet is also the only route to the red-check fixer there.
+  again, so the **fix-applier reports `no-op`** and **review result lands**
+  bullets are also the only routes to the red-check fixer there.
   Then run the tick.
 - **A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch
   the finisher **now**, against the existing head — when that head's bound
@@ -2577,15 +2580,16 @@ review evidence and not a blocker. While a review or a review fix-applier on
 the PR is live or still owes its report — a dispositions mismatch awaiting its
 retry and a conflict hold awaiting its fix-applier included — the red-check
 fixer does not fire: their push starts a new run, and a fixer racing them
-would work on a SHA that is still moving. Two edges dispatch it, a pair like
-the finisher bullets: **Monitor: CI run completes** binding a red on a head
-whose review has returned and whose fix-applier, if any, has reported, and
+would work on a SHA that is still moving. Three edges dispatch it, each paired
+with the finisher's: **Monitor: CI run completes** binding a red on a head
+whose review has returned and whose fix-applier, if any, has reported;
 **A fix-applier reports `no-op`**, or a SHA you have already bound, when that
-head's bound conclusion is red. The Monitor is edge-keyed on
-`<run-id>:<attempt>:<conclusion>`, so a red that fired before the review never
-fires again, and with no push there is no new run — the second edge is the only
-route there, so do not wait for an event. Edit either bullet without the other
-and what strands is exactly the red-only PR.
+head's bound conclusion is red; and **A review result lands** with no finding
+and nothing to file, when that head's bound conclusion is red. The Monitor is
+edge-keyed on `<run-id>:<attempt>:<conclusion>`, so a red that fired before the
+review never fires again, and with no push there is no new run — the other two
+edges are the only route there, so do not wait for an event. Edit one of the
+three bullets without the others and what strands is exactly the red-only PR.
 
 Name it `fix-pr-<M>`, or the next free suffix (`-b`, `-c` …) — `dispatch`
 refuses a reused name — record it with `ledger.mjs dispatch <pr#> <name>`
