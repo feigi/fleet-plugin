@@ -717,6 +717,46 @@ test("wt_counts agrees over .worktrees entries that are not this registry's lost
   assert.equal(p.out, "rc=0\nregistered=2 linked=2\nwhy=\n");
 });
 
+test("wt_counts refuses an unlisted .worktrees pointer whose admin id another worktree now holds, and skips one whose registration names nothing", (t) => {
+  // The orphan's registration is removed and a worktree of the same basename elsewhere is added: git reuses the id, so the counts agree and the pointer names a held admin dir.
+  const reissue = (flags) => {
+    const r = repo(t);
+    const wt = fleetLinked(r, "1-held");
+    const admin = pointed(wt);
+    rmSync(admin, { recursive: true, force: true });
+    const elsewhere = join(r.root, "elsewhere", "1-held");
+    mkdirSync(join(r.root, "elsewhere"));
+    git(r.w, "worktree", "add", "-q", ...flags, "-b", "other", elsewhere, "main");
+    return { r, wt, admin };
+  };
+  const refused = ({ r, wt, admin }) => {
+    assert.equal(pointed(wt), admin, "fixture: the pointer still names the reissued id");
+    const p = probe(r.w, COUNTS);
+    assert.match(p.out, /^rc=1$/m, p.out);
+    assert.match(p.out, /^registered=1 linked=1$/m, "the counts agree — the pointer is what refuses");
+    // The back-link is spelled as the registration holds it: a relative one is resolved against the admin dir, unnormalised.
+    assert.ok(
+      p.out.includes(`why=worktree pointer ${wt}/.git names admin dir ${admin}, whose registration is now another worktree's (`) &&
+        p.out.includes(`elsewhere/1-held) — git lists no worktree at ${wt}, so its branch is held by nothing`),
+      p.out,
+    );
+  };
+  refused(reissue([]));
+  let relative;
+  try {
+    relative = reissue(["--relative-paths"]);
+  } catch {
+    relative = reissue([]);
+  }
+  refused(relative);
+
+  // A registration whose back-link names a path that does not exist, a repo moved without repair: git still holds the branch through it.
+  const r = repo(t);
+  const moved = fleetLinked(r, "1-held");
+  writeFileSync(join(pointed(moved), "gitdir"), `${r.root}/gone/1-held/.git\n`);
+  assert.equal(probe(r.w, COUNTS).out, "rc=0\nregistered=1 linked=1\nwhy=\n");
+});
+
 // --- wt_outcome
 
 test("wt_outcome measures each landing shape of a refused `git worktree remove`, and restores $wt_list", (t) => {
