@@ -782,6 +782,28 @@ test("wt_counts refuses an unlisted .worktrees pointer whose registration's back
   assert.equal(probe(r.w, COUNTS).out, "rc=0\nregistered=1 linked=1\nwhy=\n");
 });
 
+test("wt_counts fails closed when `[` cannot evaluate -ef (rc 2 or more) on a reissued registration's back-link, and names that fault", (t) => {
+  // As for the pointer's repo above: no input makes a real `[` answer 2 for `-ef`, so an alias names a stand-in before the library is read. It faults only the back-link's compare, the one whose left side is the elsewhere worktree.
+  const r = repo(t);
+  const wt = fleetLinked(r, "1-held");
+  const admin = pointed(wt);
+  rmSync(admin, { recursive: true, force: true });
+  mkdirSync(join(r.root, "elsewhere"));
+  git(r.w, "worktree", "add", "-q", "-b", "other", join(r.root, "elsewhere", "1-held"), "main");
+  const run = (stub) =>
+    spawnSync("/bin/sh", ["-c", `${stub ? `wt_stub() { case "$2" in -ef) case "$1" in */elsewhere/1-held) return 2 ;; esac ;; esac; command [ "$@"; }\nalias [=wt_stub\n` : ""}. "$0" || exit 99
+${stub ? "unalias [\n" : ""}${COUNTS}`, LIB], { cwd: r.w, env: ENV, encoding: "utf8", timeout: 30_000 });
+  const control = run(false);
+  assert.match(control.stdout, /^rc=1$/m, control.stdout);
+  assert.ok(control.stdout.includes("whose registration is now another worktree's"), `control: without the stand-in the pointer is refused as reissued: ${control.stdout}`);
+  const p = run(true);
+  assert.match(p.stdout, /^rc=1$/m, p.stdout);
+  assert.ok(
+    p.stdout.includes(`why=could not compare the worktree ${r.root}/elsewhere/1-held that admin dir ${admin} is registered for with ${wt} (test -ef exited 2), so whether its registration is reissued is unknown`),
+    `refused with the compare named in place of a refusal as reissued: ${p.stdout}${p.stderr}`,
+  );
+});
+
 // --- wt_outcome
 
 test("wt_outcome measures each landing shape of a refused `git worktree remove`, and restores $wt_list", (t) => {

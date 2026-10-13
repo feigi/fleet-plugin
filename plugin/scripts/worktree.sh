@@ -771,9 +771,10 @@ wt_read_backlink() {
 
 # Is any fleet worktree standing with its registration removed under it? 0
 # when none is; 1 with `$wt_why` naming the first `.worktrees/*` pointer git
-# does not list that names an admin dir the registry does not hold, or that
-# could not be read. Reads `$wt_list` for the main checkout and the listed
-# paths, and `$wt_root` for the registry, both as `wt_count_pair` left them.
+# does not list that names an admin dir the registry does not hold, that
+# names one whose registration is now another worktree's, or that could not
+# be read. Reads `$wt_list` for the main checkout and the listed paths, and
+# `$wt_root` for the registry, both as `wt_count_pair` left them.
 #
 # The counts cannot see this: git lists a linked worktree only from its admin
 # dir, so a registry `rm -rf`'d whole, or one entry removed, drops the entry
@@ -808,7 +809,9 @@ wt_read_backlink() {
 # the admin dir answers for a live worktree elsewhere. The admin dir's `gitdir`
 # back-link says whose it is now: a target that exists and is not this
 # directory is a refusal; one that does not exist is a repo moved without `git
-# worktree repair`, which git still holds through the registration's HEAD, and
+# worktree repair`, which git still holds through the registration's HEAD, but
+# only where its nearest existing ancestor can be searched, since a target
+# that cannot be stat'ed is unknown, not absent, and is a refusal too; and
 # one that is this directory spelled another way (`-ef`) is the registration
 # itself. A directory whose name is not its admin dir's id is a copy, skipped
 # unanswered: a copy and a reissued id read the same through the back-link
@@ -961,7 +964,8 @@ worktree $wt_cp_wt
 # 1: refused — `$wt_why` names the cause: the common directory or the
 #    registry could not be read, the listing could not be counted, the
 #    counts still disagree, or a `.worktrees/*` pointer names an admin dir the
-#    registry does not hold (`wt_count_pointers`). A standing disagreement is
+#    registry does not hold or whose registration is now another worktree's
+#    (`wt_count_pointers`). A standing disagreement is
 #    named by the DIRECTION observed. FEWER listed than registered is git
 #    dropping an entry it could not read — the fault this check exists to
 #    catch. MORE listed than registered is the reverse, the registry read
