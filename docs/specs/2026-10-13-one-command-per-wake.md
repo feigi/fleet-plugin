@@ -89,6 +89,11 @@ own state, and prints one `APPLIED <duty>: <receipt summary>` line each:
 - `reap.sh --apply` and `reclaim-scratch.mjs --root <scratch> --apply` when
   a `merge-bot-<n>=done` token exists that `applied.reapAfter` in the
   heartbeat state does not yet name; the state is updated after both ran.
+  `applied` is stored as `{run: <controller record at>, reapAfter: […]}`.
+  The heartbeat state survives rotation, and merge-bot numbering restarts at
+  1 with every run that carries no bot forward, so a name alone would match
+  the previous run's `merge-bot-1`: an `applied` whose `run` is not the
+  current record's `at` counts as empty.
 - `tier-check.mjs --batch` for every implementer the tick would otherwise
   print `HOLD (tier unchecked …)` for, with `session` from the phase-0
   receipt (exit 2 cases stay a hold and print the check's line).
@@ -103,8 +108,10 @@ rows like `CHECK-LIVENESS`, from one `readdir` of the phase-0 receipt's
 `session` directory, never a transcript read:
 
 - `UNRECORDED <stem>`: a `<stem>.jsonl` whose stem parses as a member name
-  of this run's families and no ledger token or `## Dispatched` entry
-  names it.
+  of this run's families and no ledger token, `## Dispatched` entry or
+  `## Retired` name names it. An `ancestor` rotate moves every settled
+  member of the earlier run into `## Retired` as a bare name while its
+  transcript stays in the same session directory.
 - `NO-TRANSCRIPT <member> (live <age>)`: a live token whose `<member>.jsonl`
   does not exist after `--no-transcript-after` minutes (default 5).
 
@@ -122,8 +129,9 @@ is owed) stay.
 and asserts the second run writes nothing new; `ledger-token.test.mjs`
 proves `token` keeps every existing token and refuses the three families;
 a tick test proves `--apply` reaps exactly once per `merge-bot-<n>=done`,
-and that without `--apply` nothing is executed; a reconcile test with a
-fixture session directory for both D4 lines.
+and again for a same-numbered bot in a later run, and that without `--apply`
+nothing is executed; a reconcile test with a fixture session directory for
+both D4 lines, including a retired member's transcript, which is not flagged.
 
 ## Out of Scope
 
