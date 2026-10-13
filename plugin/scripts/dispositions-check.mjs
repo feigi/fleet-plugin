@@ -89,7 +89,7 @@
 //     `{refuted, reason}`. No `verdictPath`, or a path outside that root, is
 //     a mismatch in either scope. In scope a file missing, or one failing
 //     the schema — or abstaining, `inconclusive: true` — is a mismatch too.
-//     Out of scope, under a run directory that exists, it is a refuter that
+//     Out of scope, under a finding directory that exists, it is a refuter that
 //     crashed or abstained and decided nothing. `refuted: true` puts the
 //     finding on filing row 4 in scope and 6a out of scope, where applying
 //     it is a mismatch too; `refuted: false` on row 5 in scope and 6b out of
@@ -674,10 +674,11 @@ function issueReader(repo) {
 // absolute path to a file under `<scratch>/pr<pr>/fix-XXXXXXXX/<finding>/`,
 // both sides resolved through symlinks, holding JSON in the refuter verdict
 // schema. Anything else is `{problem}` — no evidence a refuter ran. A path
-// that is a refuter's own location — under that root, the `fix-XXXXXXXX`
-// run directory present — holding no decision is `{problem, undecided:
-// true}`: no file, one that is no JSON or off the schema, or an abstention,
-// which is what a refuter that crashed or abstained leaves.
+// that is a refuter's own location — under that root, its `<finding>`
+// directory present — holding no decision is `{problem, undecided: true}`:
+// no file, one that is no JSON or off the schema, or an abstention, which is
+// what a refuter that crashed or abstained leaves. A finding directory that
+// was never made is a refuter that never ran, and stays a plain `{problem}`.
 function verdictReader(scratch, pr) {
   const runs = join(scratch, `pr${pr}`);
   const notUnder = `is not under a fix-applier run root, ${runs}/fix-XXXXXXXX/<finding>/`;
@@ -688,17 +689,12 @@ function verdictReader(scratch, pr) {
     try {
       file = realpathSync(path);
     } catch {
-      // No file there: its finding directory, or failing that the run
-      // directory above it, decides whether it is a refuter's location.
-      const finding = dirname(path);
+      // No file there: its finding directory decides whether it is a
+      // refuter's location.
       try {
-        file = join(realpathSync(finding), basename(path));
+        file = join(realpathSync(dirname(path)), basename(path));
       } catch {
-        try {
-          file = join(realpathSync(dirname(finding)), basename(finding), basename(path));
-        } catch {
-          return { problem: "names no file that exists" };
-        }
+        return { problem: "names no file that exists" };
       }
       missing = true;
     }

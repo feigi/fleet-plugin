@@ -1574,23 +1574,24 @@ test("an out-of-scope suggestion above the claim bar with no verdictPath, or one
   };
   const noEvidence = /^fix-pr-40: unverified\[0\]: an out-of-scope suggestion alleging wrong behavior carries no refuter evidence — /m;
   mismatch(deferWith(undefined), /unverified\[0\]: an out-of-scope suggestion alleging wrong behavior carries no refuter evidence — its entry names no verdictPath; claimKind behavior puts it above the claim bar/);
+  mkdirSync(join(f.scratch, "pr40", "fix-Ab12Cd34", "2"), { recursive: true });
   for (const [path, why] of [
     ["pr40/fix-Ab12Cd34/1/verdict.json", /is not an absolute path/],
     [f.writeVerdict({ refuted: false, reason: "r" }, "1", join(f.scratch, "pr40", "elsewhere")), /is not under a fix-applier run root/],
     [f.writeVerdict({ refuted: false, reason: "r" }, "1", join(f.dir, "pr40", "fix-Ab12Cd34")), /is not under a fix-applier run root/],
     // No run directory either: no fix-applier round ever made a refuter's location there.
     [join(f.scratch, "pr40", "fix-Zz99Zz99", "2", "verdict.json"), /names no file that exists/],
+    // The run directory exists but its finding directory was never made: no refuter ever ran.
+    [join(f.scratch, "pr40", "fix-Ab12Cd34", "9", "verdict.json"), /names no file that exists/],
   ]) {
     const r = deferWith(path);
     mismatch(r, noEvidence);
     assert.match(r.stderr, why, path);
   }
-  // A refuter that crashed before writing its verdict — its finding directory made or not —
-  // wrote a broken one, or abstained decided nothing.
-  mkdirSync(join(f.scratch, "pr40", "fix-Ab12Cd34", "2"), { recursive: true });
+  // A refuter that crashed before writing its verdict, wrote a broken one,
+  // or abstained decided nothing.
   for (const path of [
     join(f.scratch, "pr40", "fix-Ab12Cd34", "2", "verdict.json"),
-    join(f.scratch, "pr40", "fix-Ab12Cd34", "9", "verdict.json"),
     f.writeVerdict("{not json", "3"),
     f.writeVerdict({ refuted: "yes", reason: "r" }, "4"),
     f.writeVerdict({ refuted: true, reason: "r", inconclusive: true }, "5"),

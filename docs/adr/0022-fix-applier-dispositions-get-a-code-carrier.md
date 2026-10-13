@@ -38,9 +38,10 @@ Above it `verdictPath` is required in either scope, and Decision 5's
 out-of-scope `suggestion` row splits: refuted → the closed suggestion-band
 record, never dropped and never opened; survived, crashed or abstained →
 open, `needs-triage`, citing the verdict or the run in the body. Out of
-scope, a verdict path under the fix-applier's run directory holding no
-decision — no file, a malformed one, or an abstention — is a refuter that
-crashed or abstained, not a mismatch. There is no cap on refuter count; the
+scope, a verdict path under the fix-applier's run directory, in a finding
+directory that exists, holding no decision — no file, a malformed one, or an
+abstention — is a refuter that crashed or abstained, not a mismatch; a
+finding directory never made is a refuter that never ran, a mismatch. There is no cap on refuter count; the
 fix-applier's final verdict reports how many it dispatched against
 out-of-scope suggestions. Guard, read once 15 PRs, each with at least one
 out-of-scope suggestion above the claim bar, have run under this rule across
