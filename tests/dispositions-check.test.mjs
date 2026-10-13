@@ -1122,7 +1122,7 @@ test("withVerdict replaces an escalation with the same member's later verdict fo
 
 // ---------------------------------------------------------------------------
 // The filing table: where each deferral was filed, read back from the
-// tracker, and the refuter verdict an in-scope suggestion carries.
+// tracker, and the refuter verdict a suggestion carries.
 // ---------------------------------------------------------------------------
 
 // The core's review for the table: survived[0] on touched src/a.js:5;
@@ -1364,7 +1364,7 @@ test("verdictProblem holds a refuter verdict to its schema", () => {
 });
 
 // #2881 gave the review's refuter an abstain flag in the shared schema. The
-// fix-applier's in-scope suggestion refuter has no abstain channel in the
+// fix-applier's suggestion refuter has no abstain channel in the
 // disposition record, so a verdict file that abstains is no evidence a
 // refuter decided the finding — refused, as an unknown key was before the flag
 // existed — while one that says `inconclusive: false` decided it as usual.

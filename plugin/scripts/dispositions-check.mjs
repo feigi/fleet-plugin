@@ -499,9 +499,9 @@ export function checkDispositions({ review, record, recordProblem = null, run = 
         at(bucket, index, `${what} carries no refuter evidence — ${problem}`);
         return;
       }
-      refuted = v.problem === undefined ? v.refuted : null;
+      refuted = v.refuted ?? null;
       if (e.disposition === "apply" && (refuted === true || (refuted === null && !inScope))) {
-        const rowNo = inScope ? 4 : refuted ? "6a" : "6b";
+        const rowNo = filingRow({ bucket, inScope, crashed, refuted, shape });
         const though = refuted ? "its verdict is refuted: true —" : `its refuter decided nothing — ${problem};`;
         at(bucket, index, `filing row ${rowNo} (${FILING_ROWS[rowNo].finding}): applied, though ${though} it belongs in ${homeText(FILING_ROWS[rowNo], filing.pr)}`);
         return;

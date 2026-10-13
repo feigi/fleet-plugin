@@ -49,7 +49,9 @@ at least 3 run dates. Trigger A, the filter does nothing: more than half of
 the open out-of-scope suggestion issues filed in that window close
 `wontfix` — then remove the refuter or tighten its prompt. Trigger B, the
 filter buries real work: 3 or more refuted entries promoted later, counted
-with ADR 0002's promotion marks.
+with ADR 0002's promotion marks. Read Decision 7's "in-scope" as "in-scope, or
+out of scope above the claim bar", and the #2881 amendment's abstaining
+verdict, a mismatch, as in scope only: out of scope it is row 6b.
 
 ## Context
 
