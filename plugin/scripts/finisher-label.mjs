@@ -17,7 +17,9 @@
 //      and nothing is written. A repo whose label list defines none of the
 //      three has nothing to count: the count is skipped and the receipt says
 //      `releaseLabels: "undefined-in-repo"`. That list is read only when the
-//      PR carries none of them — one on the PR proves it is defined.
+//      PR carries none of them — one on the PR proves it is defined — and a
+//      list that fills the limit it was read with proves nothing, so it is
+//      exit 2 rather than a skipped count.
 //   2  comment `ready-to-merge-head: <pin>`, the record the merge bot reads as
 //      the head the label was applied to — skipped when the newest such
 //      comment already names this pin.
@@ -31,8 +33,8 @@
 //
 // Stdout is always one JSON line, the receipt:
 //
-//   {pr, pin, releaseLabels, commented, added, readBack, exit, firstRead,
-//    step, error}
+//   {pr, pin, releaseLabels, commented, added, readBack, exit, firstRead
+//    [, step, error]}
 //
 //   releaseLabels  the release labels the PR carried, or "undefined-in-repo",
 //                  or null when step 1 never got an answer
@@ -40,7 +42,8 @@
 //   added          this run wrote the label
 //   readBack       every label name the step 4 read carried, null if it never ran
 //   firstRead      every label name step 1 read carried, null if it never ran
-//   step           on exit 2 only, the step whose `gh` call failed
+//   step           on exit 2 only, the step that failed: `pin`, `repo`, or the
+//                  step whose `gh` call failed
 //   error          on exit 2 only, what `gh` (or the invocation) said
 //
 // A usage error that never reaches `gh` — a missing or unknown flag — is a
@@ -55,12 +58,14 @@
 //   4  every write returned 0 and the read-back does not carry the label
 
 import { spawnSync } from "node:child_process";
+import { statSync } from "node:fs";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
 
 const NAME = "finisher-label";
 const LABEL = "ready-to-merge";
 const RELEASE = ["patch", "minor", "major"];
+const LIST_LIMIT = 1000;
 
 const die = makeDie(NAME);
 const { arg, numArg, sweep, stray } = defineFlags(die, {
@@ -109,6 +114,12 @@ if (!/^[0-9a-f]{40}$/.test(pin)) {
 }
 receipt.pin = pin;
 
+// A missing directory makes spawn report ENOENT for `gh` itself, which would
+// blame the binary for a bad --repo.
+if (repo !== null && !statSync(repo, { throwIfNoEntry: false })?.isDirectory()) {
+  fail("repo", `--repo is not a directory: ${repo}`);
+}
+
 // `gh` resolves its repository from the cwd's git remotes, so an ambient
 // GIT_DIR would retarget every call at another repository.
 const GH_ENV = gitEnv();
@@ -142,15 +153,20 @@ const labelNames = (v) => v.labels.map((l) => l.name);
 
 // --- 1: the release-label count -------------------------------------------
 const first = ghJson("read-labels", ["pr", "view", String(pr), "--json", "labels,comments"], (v) =>
-  isObject(v) && namedList(v.labels) && Array.isArray(v.comments) && v.comments.every((c) => isObject(c) && typeof c.body === "string"));
+  isObject(v) && namedList(v.labels) && Array.isArray(v.comments) && v.comments.every((c) => isObject(c) && typeof c.body === "string" && typeof c.createdAt === "string"));
 const firstLabels = labelNames(first);
 receipt.firstRead = firstLabels;
 const found = RELEASE.filter((r) => firstLabels.includes(r));
 
 if (found.length === 0) {
-  const defined = ghJson("list-labels", ["label", "list", "--json", "name", "--limit", "1000"], namedList).map((l) => l.name);
+  const defined = ghJson("list-labels", ["label", "list", "--json", "name", "--limit", String(LIST_LIMIT)], namedList).map((l) => l.name);
   if (RELEASE.some((r) => defined.includes(r))) {
     finish(3, { releaseLabels: found }, "the PR carries no release label (patch, minor or major); nothing was written");
+  }
+  // A list that fills the limit may be cut off before the release labels, so
+  // their absence from it proves nothing.
+  if (defined.length >= LIST_LIMIT) {
+    fail("list-labels", `the repository has ${LIST_LIMIT} or more labels, so the list may be cut off before patch, minor or major`);
   }
   receipt.releaseLabels = "undefined-in-repo";
 } else if (found.length > 1) {
@@ -164,7 +180,7 @@ if (found.length === 0) {
 // older than one naming another head is not the record the bot will act on.
 const RECORD = /^ready-to-merge-head: ([0-9a-f]{40})\s*$/;
 const records = first.comments
-  .map((c, i) => ({ i, at: typeof c.createdAt === "string" ? c.createdAt : "", m: RECORD.exec(c.body) }))
+  .map((c, i) => ({ i, at: c.createdAt, m: RECORD.exec(c.body) }))
   .filter((c) => c.m !== null)
   .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.i - b.i));
 const recorded = records.length > 0 && records[records.length - 1].m[1] === pin;

@@ -50,8 +50,8 @@ const record = (sha, createdAt) => ({ body: `ready-to-merge-head: ${sha}`, creat
 // read-back that carries the label.
 function rig({ outs = {}, fails = {} } = {}) {
   const dir = tempDir("finisher-label-");
-  mkdirSync(join(dir, "bin"));
   const bin = join(dir, "bin");
+  mkdirSync(bin);
   writeExecStub(join(bin, "gh"), STUB);
   const all = {
     "pr-view-1": view(["patch", "bug"]),
@@ -61,12 +61,11 @@ function rig({ outs = {}, fails = {} } = {}) {
   };
   for (const [k, v] of Object.entries(all)) writeFileSync(join(bin, `${k}.out`), v);
   for (const [k, v] of Object.entries(fails)) writeFileSync(join(bin, `${k}.fail`), v);
-  const calls = () => (existsSync(join(bin, "calls.log")) ? readFileSync(join(bin, "calls.log"), "utf8").trim().split("\n") : []);
   const log = (name) => (existsSync(join(bin, name)) ? readFileSync(join(bin, name), "utf8") : "");
-  const run = (args = ["--pr", "42", "--pin", PIN], { env = {}, cwd } = {}) => {
+  const calls = () => log("calls.log").trim().split("\n").filter(Boolean);
+  const run = (args = ["--pr", "42", "--pin", PIN], { env = {} } = {}) => {
     const r = spawnSync(process.execPath, [SCRIPT, ...args], {
       encoding: "utf8",
-      cwd,
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env },
     });
     let out = null;
@@ -75,15 +74,16 @@ function rig({ outs = {}, fails = {} } = {}) {
     } catch {
       // a refusal before any gh call prints no receipt
     }
-    return { status: r.status, stdout: r.stdout, stderr: r.stderr, out };
+    return { status: r.status, stderr: r.stderr, out };
   };
-  return { dir, bin, calls, log, run };
+  return { dir, calls, log, run };
 }
 
 const VIEW = "pr view 42 --json labels,comments";
 const BACK = "pr view 42 --json labels";
 const COMMENT = `pr comment 42 --body ready-to-merge-head: ${PIN}`;
 const EDIT = "pr edit 42 --add-label ready-to-merge";
+const LIST = "label list --json name --limit 1000";
 
 test("exit 0: one release label, the head recorded, the label added and read back", () => {
   const t = rig();
@@ -122,7 +122,7 @@ test("exit 3: a PR with no release label is refused and nothing is written", () 
   const t = rig({ outs: { "pr-view-1": view(["bug"]) } });
   const r = t.run();
   assert.equal(r.status, 3, r.stderr);
-  assert.deepEqual(t.calls(), [VIEW, "label list --json name --limit 1000"]);
+  assert.deepEqual(t.calls(), [VIEW, LIST]);
   assert.deepEqual(r.out.releaseLabels, []);
   assert.deepEqual(r.out.firstRead, ["bug"]);
   assert.equal(r.out.commented, false);
@@ -145,7 +145,7 @@ test("exit 3: a repo that defines only some of the release labels still gates on
   const t = rig({ outs: { "pr-view-1": view(["bug"]), "label-list": JSON.stringify(names("patch", "bug")) } });
   const r = t.run();
   assert.equal(r.status, 3, r.stderr);
-  assert.deepEqual(t.calls(), [VIEW, "label list --json name --limit 1000"]);
+  assert.deepEqual(t.calls(), [VIEW, LIST]);
 });
 
 test("a repo whose label list defines none of the release labels skips the count", () => {
@@ -159,7 +159,34 @@ test("a repo whose label list defines none of the release labels skips the count
   const r = t.run();
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.out.releaseLabels, "undefined-in-repo");
-  assert.deepEqual(t.calls(), [VIEW, "label list --json name --limit 1000", COMMENT, EDIT, BACK]);
+  assert.deepEqual(t.calls(), [VIEW, LIST, COMMENT, EDIT, BACK]);
+});
+
+const fill = (n, ...tail) => names(...Array.from({ length: n - tail.length }, (_, i) => `label-${i}`), ...tail);
+
+test("exit 2: a label list that fills the limit cannot prove the release labels undefined", () => {
+  const t = rig({ outs: { "pr-view-1": view(["bug"]), "label-list": JSON.stringify(fill(1000)) } });
+  const r = t.run();
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.step, "list-labels");
+  assert.deepEqual(t.calls(), [VIEW, LIST]);
+  assert.equal(r.out.commented, false);
+  assert.equal(r.out.added, false);
+});
+
+test("a list one short of the limit with no release label still skips the count", () => {
+  const t = rig({
+    outs: { "pr-view-1": view(["bug"]), "pr-view-2": view(["bug", "ready-to-merge"]), "label-list": JSON.stringify(fill(999)) },
+  });
+  const r = t.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.releaseLabels, "undefined-in-repo");
+});
+
+test("exit 3: a list one short of the limit that defines a release label still gates", () => {
+  const t = rig({ outs: { "pr-view-1": view(["bug"]), "label-list": JSON.stringify(fill(999, "patch")) } });
+  const r = t.run();
+  assert.equal(r.status, 3, r.stderr);
 });
 
 test("exit 4: a read-back without the label fails even though gh pr edit returned 0", () => {
@@ -177,7 +204,7 @@ test("exit 4: a read-back without the label fails even though gh pr edit returne
 // Exit 2, once per gh call: the step that failed is the last call in the log.
 const STEPS = [
   { key: "pr-view-1", step: "read-labels", calls: [VIEW], baseline: {} },
-  { key: "label-list", step: "list-labels", calls: [VIEW, "label list --json name --limit 1000"], baseline: { "pr-view-1": view(["bug"]) } },
+  { key: "label-list", step: "list-labels", calls: [VIEW, LIST], baseline: { "pr-view-1": view(["bug"]) } },
   { key: "pr-comment", step: "comment", calls: [VIEW, COMMENT], baseline: {} },
   { key: "pr-edit", step: "add-label", calls: [VIEW, COMMENT, EDIT], baseline: {} },
   { key: "pr-view-2", step: "read-back", calls: [VIEW, COMMENT, EDIT, BACK], baseline: {} },
@@ -263,6 +290,35 @@ test("idempotent: a record is not another comment's body quoted — only a whole
   assert.ok(t.calls().includes(COMMENT), t.calls().join("\n"));
 });
 
+test("idempotent: a record with a leading prefix only is not a record", () => {
+  const t = rig({
+    outs: { "pr-view-1": view(["patch", "ready-to-merge"], [{ body: `x ready-to-merge-head: ${PIN}`, createdAt: "2026-01-02T00:00:00Z" }]) },
+  });
+  const r = t.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(t.calls().includes(COMMENT), t.calls().join("\n"));
+});
+
+test("idempotent: a record with a trailing suffix only is not a record", () => {
+  const t = rig({
+    outs: { "pr-view-1": view(["patch", "ready-to-merge"], [{ body: `ready-to-merge-head: ${PIN} (stale)`, createdAt: "2026-01-02T00:00:00Z" }]) },
+  });
+  const r = t.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(t.calls().includes(COMMENT), t.calls().join("\n"));
+});
+
+test("idempotent: two records with the same createdAt resolve to the later one in list order", () => {
+  const t = rig({
+    outs: {
+      "pr-view-1": view(["patch", "ready-to-merge"], [record(OTHER, "2026-01-02T00:00:00Z"), record(PIN, "2026-01-02T00:00:00Z")]),
+    },
+  });
+  const r = t.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(t.calls(), [VIEW, BACK]);
+});
+
 test("not idempotent: a label with no record for this pin gets the record and the label write", () => {
   const t = rig({ outs: { "pr-view-1": view(["patch", "ready-to-merge"], [record(OTHER, "2026-01-02T00:00:00Z")]) } });
   const r = t.run();
@@ -306,7 +362,7 @@ test("an already-labelled PR with no release label is still refused", () => {
   const t = rig({ outs: { "pr-view-1": view(["ready-to-merge"], [record(PIN, "2026-01-02T00:00:00Z")]) } });
   const r = t.run();
   assert.equal(r.status, 3, r.stderr);
-  assert.deepEqual(t.calls(), [VIEW, "label list --json name --limit 1000"]);
+  assert.deepEqual(t.calls(), [VIEW, LIST]);
 });
 
 test("--repo is the directory gh runs in", () => {
@@ -320,9 +376,44 @@ test("--repo is the directory gh runs in", () => {
   for (const c of cwds) assert.equal(realpathSync(c), realpathSync(repo));
 });
 
+test("exit 2: a --repo that is not a directory is named as such, not blamed on gh, and no gh call is made", () => {
+  const t = rig();
+  const file = join(t.dir, "not-a-dir");
+  writeFileSync(file, "");
+  for (const repo of [join(t.dir, "missing"), file]) {
+    const r = t.run(["--pr", "42", "--pin", PIN, "--repo", repo]);
+    assert.equal(r.status, 2, r.stderr);
+    assert.equal(r.out.step, "repo");
+    assert.match(r.out.error, /--repo is not a directory/);
+    assert.deepEqual(t.calls(), []);
+  }
+});
+
 test("an ambient GIT_DIR or GIT_WORK_TREE does not reach gh", () => {
   const t = rig();
   const r = t.run(undefined, { env: { GIT_DIR: join(t.dir, "elsewhere"), GIT_WORK_TREE: t.dir } });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(t.log("env.log"), "");
+});
+
+test("exit 2: a comment with no createdAt is a malformed read, not a record that sorts oldest", () => {
+  const t = rig({
+    outs: {
+      "pr-view-1": view(["patch", "ready-to-merge"], [record(PIN, "2026-01-01T00:00:00Z"), { body: `ready-to-merge-head: ${OTHER}` }]),
+    },
+  });
+  const r = t.run();
+  assert.equal(r.status, 2, r.stderr);
+  assert.deepEqual(t.calls(), [VIEW]);
+});
+
+test("positive control: with createdAt present the newer record for another head wins and the comment is posted", () => {
+  const t = rig({
+    outs: {
+      "pr-view-1": view(["patch", "ready-to-merge"], [record(PIN, "2026-01-01T00:00:00Z"), record(OTHER, "2026-01-02T00:00:00Z")]),
+    },
+  });
+  const r = t.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(t.calls().includes(COMMENT), t.calls().join("\n"));
 });
