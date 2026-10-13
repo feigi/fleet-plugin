@@ -187,7 +187,7 @@ test("a write subcommand leaves a heartbeat file it cannot read as it is — the
   assert.ok(JSON.parse(f.cli(["read"]).stdout).rows.includes("#12 impl-12"), "the write itself still lands");
   const r = f.cli(["rotate"]);
   assert.notEqual(r.status, 0);
-  assert.match(r.stderr, /cannot be read or parsed/);
+  assert.match(r.stderr, /refusing to rotate .* (exists but cannot be read|is not JSON|is not a JSON object|holds a controller record that cannot be judged)/);
 });
 
 test("rotate refuses when the archive name already exists, moving nothing", (t) => {
@@ -329,12 +329,12 @@ test("rotate with no record keeps the mark check — refused while beating, noth
   assert.deepEqual(none.ctl(), { ...OURS, prior: "none" });
 });
 
-test("rotate reads a malformed record as no record", (t) => {
+test("rotate reads a malformed record as a degraded file and refuses", (t) => {
   for (const controller of [{ pid: "29405", lstart: "x" }, { pid: 0, lstart: "x" }, { pid: process.pid, lstart: "" }, { lstart: "x" }, "29405"]) {
     const f = fixture(t, { mark: STALE, controller });
     const r = f.cli(["rotate"]);
-    assert.equal(r.status, 0, `${JSON.stringify(controller)}: ${r.stderr}`);
-    assert.deepEqual(f.ctl(), { ...OURS, prior: "none" });
+    assert.equal(r.status, 2, `${JSON.stringify(controller)}: expected refusal but got: ${r.stderr}`);
+    assert.match(r.stderr, /refusing to rotate .* holds a controller record that cannot be judged/);
   }
 });
 
@@ -454,7 +454,7 @@ test("rotate refuses, moving nothing, when the heartbeat file exists but cannot 
     damage(beatFile);
     const r = f.cli(["rotate"]);
     assert.equal(r.status, 2, `${label}: rotated under a record it could not read: ${r.stderr}`);
-    assert.match(r.stderr, /refusing to rotate .*cannot be read or parsed/);
+    assert.match(r.stderr, /refusing to rotate .* (exists but cannot be read|is not JSON|is not a JSON object|holds a controller record that cannot be judged)/);
     assert.equal(readFileSync(f.file, "utf8"), LEDGER, `${label}: a refusal must not touch the ledger`);
     assert.deepEqual(f.archives(), []);
   }
