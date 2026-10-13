@@ -457,9 +457,9 @@ and are quoted only as a direction.
 - **Closed-unmerged PRs were in flight until closed, and the script
   excludes them from the sweep.** Zero fell in this window, so nothing is
   lost here; a later window with closed-unmerged PRs would understate depth
-  by their open intervals. The script reports their count and numbers; adding
-  them to the sweep (created→closed) is a one-line change the Reproduction
-  section names.
+  by their open intervals. The script reports their count and numbers;
+  adding them to the sweep (created→closed) takes several edits to the
+  script, which the Reproduction section lists — it is not a one-line change.
 - **Pass boundaries are not on GitHub.** ADR 0007 guard 1's second trigger
   ("a single Pass in which the last PR waits more than 3 h") needs to know
   which PR was the last of its Pass; the merge bot's name and lifetime live
@@ -564,8 +564,19 @@ merge).
 
 Other knobs: `--bound B` recomputes § 3 for a different In-flight bound;
 `--repo owner/name` points at a consumer repo; `--transport curl --no-token`
-forces the unauthenticated path. To include closed-unmerged PRs in the
-depth sweep (not done here; none occurred), change `mergedSoFar()`'s filter
-from `p.merged_at` to `p.merged_at || p.closed_at` and use `closed_at` as the
-interval end for those PRs — the per-PR list block then marks them, and the
-cycle-time tables must keep excluding them.
+forces the unauthenticated path. Including closed-unmerged PRs in the depth
+sweep (not done here; none occurred) is not a flag and not a one-line change;
+the script needs these edits, none of them made here:
+
+- widen `mergedSoFar()`'s filter from `p.merged_at` to
+  `p.merged_at || p.closed_at` — which also makes them count toward `--n`, so
+  decide whether they should;
+- relax the `lacks created_at/merged_at` guard, which dies on any population
+  PR without `merged_at`;
+- use `closed_at` as the interval end in `popIntervals` and in `winEnd`
+  (both read `merged_at` only);
+- keep them out of the cycle-time tables, the throughput measures and the
+  label-events pass, which all read `rows`' `merged` and `cycle` fields,
+  themselves taken from `merged_at`;
+- redefine `closedUnmergedInWindow` and `mergedOutsideN`, whose tests are
+  `merged_at` presence and would otherwise mis-sort them.

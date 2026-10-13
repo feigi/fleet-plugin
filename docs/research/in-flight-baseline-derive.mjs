@@ -101,6 +101,8 @@ if (flags.n === "all" && !flags.after) die(`--n all needs --after`);
 if (flags.after && Number.isNaN(Date.parse(flags.after))) die(`--after must be an ISO-8601 instant`);
 if (!(flags.bound >= 0)) die(`--bound must be a non-negative number`);
 if (!["auto", "gh", "curl"].includes(flags.transport)) die(`--transport must be auto, gh or curl`);
+if (!(Number.isInteger(flags.min) && flags.min >= 0)) die(`--min must be a non-negative integer`);
+if (flags.events !== null && !(Number.isInteger(flags.events) && flags.events >= 0)) die(`--events must be a non-negative integer (0 skips Query E)`);
 const PER_PAGE = 100;
 const RTM = "ready-to-merge";
 const H = 3600_000, MIN = 60_000;
@@ -121,8 +123,9 @@ function pickTransport() {
   if (flags.transport === "gh" || flags.transport === "auto") {
     const r = spawnSync("gh", ["auth", "status"], { encoding: "utf8" });
     if (r.status === 0) return { kind: "gh" };
-    if (flags.transport === "gh") die(`--transport gh but \`gh auth status\` failed:\n${(r.stderr || r.stdout || "").trim()}`);
-    log(`gh auth status failed (${(r.stderr || r.stdout || "").trim().split("\n")[0] || "no gh"}); falling back to curl`);
+    const why = r.error ? r.error.message : (r.stderr || r.stdout || "").trim();
+    if (flags.transport === "gh") die(`--transport gh but \`gh auth status\` failed:\n${why}`);
+    log(`gh auth status failed (${why.split("\n")[0] || "no gh"}); falling back to curl`);
   }
   let token = flags.noToken ? null : (process.env.GITHUB_TOKEN || null);
   if (token) {
@@ -142,6 +145,7 @@ function curlRaw(url, token) {
   args.push(url);
   for (let attempt = 0; ; attempt++) {
     const r = spawnSync("curl", args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+    if (r.error) die(`curl could not be run: ${r.error.message}`);
     if (r.status === 0 && typeof r.stdout === "string") {
       const cut = r.stdout.lastIndexOf("\n");
       const status = Number(r.stdout.slice(cut + 1).trim());
@@ -355,9 +359,11 @@ const depths = sortedNum(rows.map((r) => r.depth));
 const cycles = sortedNum(rows.map((r) => r.cycle));
 const hist = [];
 for (let d = 0; d <= depths[depths.length - 1]; d++) hist.push({ depth: d, n: depths.filter((x) => x === d).length });
-const buckets = [["0–2", 0, 2], ["3–5", 3, 5], ["6–9", 6, 9], ["10+", 10, Infinity]].map(([label, lo, hi]) => {
-  const c = sortedNum(rows.filter((r) => r.depth >= lo && r.depth <= hi).map((r) => r.cycle));
-  return { label, n: c.length, median: median(c), p90: pct(c, 0.9) };
+const BUCKETS = [["0–2", 0, 2], ["3–5", 3, 5], ["6–9", 6, 9], ["10+", 10, Infinity]];
+const inBucket = (r, [, lo, hi]) => r.depth >= lo && r.depth <= hi;
+const buckets = BUCKETS.map((b) => {
+  const c = sortedNum(rows.filter((r) => inBucket(r, b)).map((r) => r.cycle));
+  return { label: b[0], n: c.length, median: median(c), p90: pct(c, 0.9) };
 });
 const held = rows.filter((r) => r.depth >= flags.bound), rest = rows.filter((r) => r.depth < flags.bound);
 const stat = (list) => { const c = sortedNum(list.map((r) => r.cycle)); return { n: c.length, median: median(c), p75: pct(c, 0.75), p90: pct(c, 0.9), max: c[c.length - 1] ?? NaN }; };
@@ -436,8 +442,6 @@ for (const e of withLabel) { const k = day(e.merged); (l2mByDay.get(k) || l2mByD
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const dow = (t) => DOW[new Date(t).getUTCDay()];
 const isWeekend = (t) => { const w = new Date(t).getUTCDay(); return w === 0 || w === 6; };
-const BUCKETS = [["0–2", 0, 2], ["3–5", 3, 5], ["6–9", 6, 9], ["10+", 10, Infinity]];
-const inBucket = (r, [, lo, hi]) => r.depth >= lo && r.depth <= hi;
 const medOf = (xs) => median(sortedNum(xs));
 const fmtSignedMin = (ms) => `${ms < 0 ? "−" : "+"}${Math.round(Math.abs(ms) / MIN)} min`;
 function spearman(xs, ys) {            // rank correlation, ties averaged

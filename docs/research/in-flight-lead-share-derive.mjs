@@ -3,8 +3,9 @@
 // ticket's in-flight interval to [created − L, merged] and tabulates the share of
 // Pulls a bound B would hold, plus the merge gate's pace and Little's-law level.
 // usage: node in-flight-lead-share-derive.mjs BASE_JSON [--cache DIR] [--out FILE.json]
-// Reads the baseline derive script's --json rows (number, created, merged, depth, cycleH) and the
-// cached issue-events pages (for ready-to-merge label timing). No network.
+// Reads the baseline derive script's --json: rows (number, created, merged, depth) and
+// population (first, last, createdFrom, createdTo), plus the cached issue-events pages
+// (for ready-to-merge label timing). No network.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -98,6 +99,10 @@ P(`# lead-time analysis — source ${baseJson}; population #${base.population.fi
   const m0 = model(0);
   const byN = new Map(m0.iv.map((r) => [r.n, r.inflight]));
   const bad = prs.filter((p) => byN.get(p.n) !== p.depth0);
+  if (bad.length) {
+    console.error(`in-flight-lead-share: L=0 depth-at-arrival does not reproduce the baseline --json for ${bad.length}/${prs.length} PRs (first: #${bad[0].n}); refusing to report`);
+    process.exit(1);
+  }
   P(`L=0 depth-at-arrival reproduction vs baseline --json: ${prs.length - bad.length}/${prs.length} identical`);
   results.l0Reproduction = { identical: prs.length - bad.length, total: prs.length };
 }
@@ -198,7 +203,7 @@ const defs = {
   allGaps: { label: "all inter-merge gaps", s: statGaps(gAll) },
 };
 P(`## Step 3 — merge-gate capacity`);
-P(`PRs with no ready-to-merge label event in cache: ${noEvents}; PRs with no label before merge: ${prs.filter((p) => p.label1 === null).length}. Merges ${byMerge.length}; gaps ${gaps.length}.`);
+P(`PRs with an empty events list in cache: ${noEvents}; PRs with no label before merge: ${prs.filter((p) => p.label1 === null).length}. Merges ${byMerge.length}; gaps ${gaps.length}.`);
 P();
 P(`| gap definition | n gaps | median gap min | μ = 60/median (merges/h) | mean gap min | μ=60/mean | p25–p75 min |`);
 P(`|---|---|---|---|---|---|---|`);

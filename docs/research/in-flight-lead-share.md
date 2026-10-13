@@ -94,7 +94,7 @@ In-flight at Pull (others): median 6 / p75 9 / p90 12 / max 16, mean 6.81. Time-
 | 12 | 0.0 | 0 | 0.0 / 0 / 0 (0) | — / — | 1.29 / 5.87 (236) | 0.0 / 0.0 |
 
 ## Step 3 — merge-gate capacity
-PRs with no ready-to-merge label event in cache: 0; PRs with no label before merge: 2. Merges 400; gaps 399.
+PRs with an empty events list in cache: 0; PRs with no label before merge: 2. Merges 400; gaps 399.
 
 | gap definition | n gaps | median gap min | μ = 60/median (merges/h) | mean gap min | μ=60/mean | p25–p75 min |
 |---|---|---|---|---|---|---|
