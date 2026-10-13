@@ -394,7 +394,7 @@ What a reader says about a run gone quiet — a Liveness mark that recorded a
 stop, or went stale with no recent tick or ledger write beside it, or a run with a Controller
 record and no beat of its own whose latest tick, ledger write or record is past
 the window — when it was last seen, how overdue that is, how many
-tickets are still claimed and in flight, and whether the pool still has
+tickets are still claimed, and whether the pool still has
 supply — led by whose stall it is off the Controller record: controller alive,
 controller gone, or unknown with no record. A mark older than the Controller
 record is the previous run's and counts for nothing. Naming a stall acts on nothing;
@@ -422,6 +422,17 @@ A ticket the controller has ruled inadmissible for now, recorded with its premis
 open PR it collides with or the open issue it sequences after — and skipped until that
 premise closes, when it re-enters the Shortlist in its own order.
 _Avoid_: demotion, deferral, skip, hold
+
+**In flight**:
+A ticket between its Claim and its PR's merge — an implementer live or owed a
+replacement on it, or an open PR closing it. A PR closing nothing is never in flight.
+_Avoid_: WIP, open work, backlog
+
+**In-flight bound**:
+The most tickets a run lets be In flight at once — fixed for the run, set by
+`/run-team`'s one argument. Reaching it holds every Pull until a merge brings the
+count below it; reviewers, finishers and the merge bot never slow for it.
+_Avoid_: WIP limit, PR cap, throttle, backpressure, implementer cap, reviewer cap
 
 **Pass**:
 One merge bot's lifetime: dispatched on the first `ready-to-merge` label, it merges
