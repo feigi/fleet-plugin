@@ -307,10 +307,11 @@ phase, or in any later one, asks the maintainer which tickets to take.
    them — and only then re-runs `--record`; re-recording over unresolved paths
    certifies them. **Never re-record over `MAIN-CHECKOUT-UNKNOWN`**: that
    walks the run from "could not look" to "certified clean" in one step, so
-   `--record` itself refuses over a baseline it cannot read and on any git
-   read that fails. The exceptions are a v1 baseline and a baseline whose
-   commit is missing from the repository; Phase 3's tick lines say how each
-   is cleared. `main-checkout.mjs --check` prints the same answer
+   `--record` itself refuses over a baseline it cannot read, over one a newer
+   plugin wrote, and on any git read that fails. The exceptions are an
+   older-version baseline and a baseline whose commit is missing from the
+   repository; Phase 3's tick lines say how each is cleared.
+   `main-checkout.mjs --check` prints the same answer
    without a tick.
 
    **Run the pre-flight, once the pin and the baseline are recorded.**

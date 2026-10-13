@@ -709,6 +709,7 @@ test("a first line that is no baseline header stays unreadable, even over a well
     `fleet main-checkout baseline v${current + 1} `,
     `fleet main-checkout baseline v0${current}`,
     `Fleet main-checkout baseline v${current}`,
+    `x fleet main-checkout baseline v${current + 1}`,
   ]) {
     const text = `${header}\n${body}`;
     writeFileSync(base, text);
