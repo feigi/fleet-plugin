@@ -20,9 +20,11 @@
 //   GET /repos/<repo>/pulls?state=closed&sort=created&direction=desc
 // order (the most recently CREATED merged PRs), pages of 100 until enough
 // merged PRs are in hand. Closed-but-unmerged PRs are dropped and counted. A
-// page that is not a JSON array, or an HTTP status other than 200, exits 2 —
-// a truncated page is never counted as a short (final) one. --buffer-pages
-// older pages are fetched too, used only for the depth sensitivity line.
+// page that is not a JSON array exits 2; so does an HTTP status other than 200
+// once five attempts fail (a 4xx other than 402 is not retried) —
+// a truncated page is never counted as a short (final) one. The merged PRs the
+// population pages held beyond the population, and --buffer-pages older pages
+// fetched on top, are used only for the depth sensitivity line.
 //
 // Per PR, five more reads (and one per linked issue):
 //   GET /issues/<n>/events      labeled/unlabeled (label name), head_ref_force_pushed, merged
@@ -70,23 +72,31 @@ const has = (name) => argv.includes(`--${name}`);
 function die(msg, code = 2) { console.error(`in-flight-cycle-time-stages: ${msg}`); process.exit(code); }
 
 const REPO = flag("repo", "feigi/fleet-plugin");
-const N = Number(flag("population", "200"));
-const BUFFER_PAGES = Number(flag("buffer-pages", "1"));
-const CONCURRENCY = Number(flag("concurrency", "6"));
+const intFlag = (name, dflt, min) => {
+  const v = Number(flag(name, dflt));
+  if (!Number.isInteger(v) || v < min) die(`--${name} must be an integer of at least ${min}`);
+  return v;
+};
+const N = intFlag("population", "200", 1);
+const BUFFER_PAGES = intFlag("buffer-pages", "1", 0);
+const CONCURRENCY = intFlag("concurrency", "6", 1);
 const REFRESH = has("refresh");
 // Optional window on created_at: keep PRs created at/after --since and before
 // --until (ISO 8601). The population is then the first --population merged
 // PRs inside the window, newest first.
-const SINCE = flag("since", null) ? T(flag("since")) : -Infinity;
-const UNTIL = flag("until", null) ? T(flag("until")) : Infinity;
+const sinceArg = flag("since", null), untilArg = flag("until", null);
+const SINCE = sinceArg ? T(sinceArg) : -Infinity;
+const UNTIL = untilArg ? T(untilArg) : Infinity;
 if (Number.isNaN(SINCE) || Number.isNaN(UNTIL)) die("--since/--until must be ISO 8601 timestamps");
 const CACHE = flag("cache", path.join(os.tmpdir(), "in-flight-cycle-time-stages-cache", REPO.replace("/", "__")));
 if (!/^[\w.-]+\/[\w.-]+$/.test(REPO)) die(`--repo must be owner/name, got ${REPO}`);
-if (!Number.isInteger(N) || N < 1) die(`--population must be a positive integer`);
 // Refuse a cache inside the repository from whatever directory the script runs:
-// walk up from cwd to the nearest `.git` (a directory, or a worktree's file).
-const repoRoot = (() => { for (let d = process.cwd(); ; d = path.dirname(d)) { if (fs.existsSync(path.join(d, ".git"))) return d; if (path.dirname(d) === d) return null; } })();
-if (repoRoot !== null && (path.resolve(CACHE) + path.sep).startsWith(repoRoot + path.sep)) die(`--cache ${CACHE} is inside the repository at ${repoRoot}; keep raw JSON out of the tree`);
+// walk up from cwd to the nearest `.git` (a directory, or a worktree's file),
+// and compare real paths — a symlink into the repository must not hide it.
+const repoRoot = (() => { for (let d = process.cwd(); ; d = path.dirname(d)) { if (fs.existsSync(path.join(d, ".git"))) return fs.realpathSync(d); if (path.dirname(d) === d) return null; } })();
+// realpath of the deepest ancestor that exists, then the not-yet-created tail.
+const realish = (p) => { let d = path.resolve(p); const rest = []; while (!fs.existsSync(d)) { rest.unshift(path.basename(d)); d = path.dirname(d); } return path.join(fs.realpathSync(d), ...rest); };
+if (repoRoot !== null && (realish(CACHE) + path.sep).startsWith(repoRoot + path.sep)) die(`--cache ${CACHE} is inside the repository at ${repoRoot}; keep raw JSON out of the tree`);
 fs.mkdirSync(CACHE, { recursive: true });
 
 // ------------------------------------------------------------ transport ----
@@ -94,11 +104,14 @@ const PER_PAGE = 100;
 const ghAuthed = spawnSync("gh", ["auth", "status"], { stdio: "ignore" }).status === 0;
 console.error(`transport: ${ghAuthed ? "gh api" : `curl${process.env.GITHUB_TOKEN ? " + GITHUB_TOKEN" : " (unauthenticated)"}`}; cache: ${CACHE}`);
 
-const cacheFile = (p) => path.join(CACHE, p.replace(/[^A-Za-z0-9._-]/g, "_") + ".json");
+const cacheFile = (p) => path.join(CACHE, REPO.replace("/", "__") + "__" + p.replace(/[^A-Za-z0-9._-]/g, "_") + ".json");
 
 async function api(p) {
   const f = cacheFile(p);
-  if (!REFRESH && fs.existsSync(f)) return JSON.parse(fs.readFileSync(f, "utf8"));
+  if (!REFRESH && fs.existsSync(f)) {
+    try { return JSON.parse(fs.readFileSync(f, "utf8")); }
+    catch { die(`cache file ${f} is not JSON (a run killed mid-write?); delete it or pass --refresh`); }
+  }
   let body;
   for (let attempt = 0; ; attempt++) {
     try {
@@ -121,22 +134,23 @@ async function api(p) {
   }
   let json;
   try { json = JSON.parse(body); } catch { die(`${p}: response is not JSON (truncated?)`); }
-  fs.writeFileSync(f, JSON.stringify(json));
+  const tmp = `${f}.${process.pid}.tmp`;   // write-then-rename: a killed run leaves no half-written cache file
+  fs.writeFileSync(tmp, JSON.stringify(json));
+  fs.renameSync(tmp, f);
   return json;
 }
 
 // Every page must be an array; a page of PER_PAGE items means another page
 // follows; a shorter one is the last. Anything else is a refusal, never a
 // short list.
-async function pagedList(p, { maxPages = Infinity } = {}) {
+async function pagedList(p) {
   const all = [];
-  for (let page = 1; page <= maxPages; page++) {
+  for (let page = 1; ; page++) {
     const d = await api(`${p}${p.includes("?") ? "&" : "?"}per_page=${PER_PAGE}&page=${page}`);
     if (!Array.isArray(d)) die(`${p} page ${page}: not an array (${JSON.stringify(d).slice(0, 120)})`);
     all.push(...d);
-    if (d.length < PER_PAGE) return { items: all, pages: page, exhausted: true };
+    if (d.length < PER_PAGE) return all;
   }
-  return { items: all, pages: maxPages, exhausted: false };
 }
 
 async function pool(items, k, fn) {
@@ -160,33 +174,42 @@ const fmtPct = (num, den) => den ? `${(100 * num / den).toFixed(0)} % (${num}/${
 const bucketOf = (d) => (d <= 2 ? "0-2" : d <= 5 ? "3-5" : d <= 9 ? "6-9" : "10+");
 const BUCKETS = ["0-2", "3-5", "6-9", "10+"];
 const day = (ms) => new Date(ms).toISOString().slice(0, 10);
-const CLOSES = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
+const CLOSES = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
 const REVIEW_COMMENT = /^\s*(?:review\b|fix-applier\b|deferred from\b)/i;
 const RTM = "ready-to-merge";
 const table = (head, rows) => [`| ${head.join(" | ")} |`, `|${head.map(() => "---").join("|")}|`, ...rows.map((r) => `| ${r.join(" | ")} |`)].join("\n");
 
 // ------------------------------------------------------------ population ----
 const closed = [];
-let pages = 0, exhausted = false;
+let pages = 0, exhausted = false;   // exhausted: the listing has no older page left
 for (;;) {
   pages++;
   const d = await api(`pulls?state=closed&sort=created&direction=desc&per_page=${PER_PAGE}&page=${pages}`);
   if (!Array.isArray(d)) die(`pulls page ${pages}: not an array`);
   closed.push(...d.filter((x) => T(x.created_at) < UNTIL));
   if (d.length < PER_PAGE) { exhausted = true; break; }
-  if (T(d[d.length - 1].created_at) < SINCE) { exhausted = true; break; }   // older than the window from here on
+  if (T(d[d.length - 1].created_at) < SINCE) break;   // the window is covered; older pages still exist, for the buffer
   if (closed.filter((x) => x.merged_at && T(x.created_at) >= SINCE).length >= N) break;
 }
 const inWindow = closed.filter((x) => T(x.created_at) >= SINCE);
 const mergedAll = inWindow.filter((x) => x.merged_at);
 if (mergedAll.length < N) die(`only ${mergedAll.length} merged PRs exist among ${inWindow.length} closed in the window; cannot build a population of ${N}`, 1);
-const pop = mergedAll.slice(0, N).map((p) => ({ n: p.number, created: T(p.created_at), merged: T(p.merged_at), body: p.body || "", title: p.title, raw: p }));
+const pop = mergedAll.slice(0, N).map((p) => ({ n: p.number, created: T(p.created_at), merged: T(p.merged_at), body: p.body || "" }));
 const droppedUnmerged = inWindow.length - mergedAll.length;
-const buffer = [];
+// Buffer (depth sensitivity only): merged PRs older than the population. The
+// pages read for the population already hold some — what is left past the
+// first --population in the window, and any created before --since — then
+// --buffer-pages older pages on top.
+const asBuf = (p) => ({ n: p.number, created: T(p.created_at), merged: T(p.merged_at) });
+const inPop = new Set(pop.map((p) => p.n));
+const buffer = closed.filter((x) => x.merged_at && !inPop.has(x.number)).map(asBuf);
+const leftover = buffer.length;
+let bufferPagesRead = 0;
 for (let b = 1; b <= BUFFER_PAGES && !exhausted; b++) {
   const d = await api(`pulls?state=closed&sort=created&direction=desc&per_page=${PER_PAGE}&page=${pages + b}`);
   if (!Array.isArray(d)) die(`pulls buffer page ${pages + b}: not an array`);
-  buffer.push(...d.filter((x) => x.merged_at).map((p) => ({ n: p.number, created: T(p.created_at), merged: T(p.merged_at) })));
+  bufferPagesRead++;
+  buffer.push(...d.filter((x) => x.merged_at).map(asBuf));
   if (d.length < PER_PAGE) break;
 }
 const openNow = await pagedList("pulls?state=open");
@@ -196,20 +219,20 @@ const first = pop[0], last = pop[pop.length - 1];
 // ----------------------------------------------------------- per-PR reads ----
 let done = 0;
 await pool(pop, CONCURRENCY, async (pr) => {
-  pr.events = (await pagedList(`issues/${pr.n}/events`)).items;
-  pr.commits = (await pagedList(`pulls/${pr.n}/commits`)).items;
-  pr.reviews = (await pagedList(`pulls/${pr.n}/reviews`)).items;
-  pr.reviewComments = (await pagedList(`pulls/${pr.n}/comments`)).items;
-  pr.comments = (await pagedList(`issues/${pr.n}/comments`)).items;
+  pr.events = await pagedList(`issues/${pr.n}/events`);
+  pr.commits = await pagedList(`pulls/${pr.n}/commits`);
+  pr.reviews = await pagedList(`pulls/${pr.n}/reviews`);
+  pr.reviewComments = await pagedList(`pulls/${pr.n}/comments`);
+  pr.comments = await pagedList(`issues/${pr.n}/comments`);
   pr.linked = [...new Set([...pr.body.matchAll(CLOSES)].map((m) => Number(m[1])))];
   pr.linkedEvents = {};
-  for (const m of pr.linked) pr.linkedEvents[m] = (await pagedList(`issues/${m}/events`)).items;
+  for (const m of pr.linked) pr.linkedEvents[m] = await pagedList(`issues/${m}/events`);
   if (++done % 50 === 0) console.error(`  ${done}/${pop.length} PRs read`);
 });
 
 // ------------------------------------------------------------- derive ----
 for (const pr of pop) {
-  const ev = pr.events.map((e) => ({ t: T(e.created_at), kind: e.event, label: e.label?.name ?? null, sha: e.commit_id ?? null })).sort((a, b) => a.t - b.t);
+  const ev = pr.events.map((e) => ({ t: T(e.created_at), kind: e.event, label: e.label?.name ?? null })).sort((a, b) => a.t - b.t);
   const rtm = ev.filter((e) => e.label === RTM && e.t <= pr.merged);
   const labels = rtm.filter((e) => e.kind === "labeled").map((e) => e.t);
   const unlabels = rtm.filter((e) => e.kind === "unlabeled").map((e) => e.t);
@@ -251,7 +274,7 @@ for (const pr of pop) {
     const pushInside = pushes.some(inside) || postOpenCommits.some(inside);
     const commentInside = pr.comments.some((c) => inside(T(c.created_at)));
     const pushBefore = pushes.some((t) => t > prevLabel && t <= u) || postOpenCommits.some((t) => t > prevLabel && t <= u);
-    const rec = { unlabel: u, relabel, gap, pushBefore, pushInside, rebaseBefore: rebasePushIn(prevLabel, u), halt: haltComments.some((t) => t > prevLabel && t <= (relabel ?? pr.merged)) };
+    const rec = { relabel, gap, pushBefore, pushInside, rebaseBefore: rebasePushIn(prevLabel, u), halt: haltComments.some((t) => t > prevLabel && t <= (relabel ?? pr.merged)) };
     if (relabel === null) { rec.shape = "merged-unlabelled"; pr.churns.push(rec); }
     else if (gap <= 60e3 && !pushInside && !commentInside) pr.flips.push(rec);
     else { rec.shape = classifyChurn(rec); pr.churns.push(rec); }
@@ -351,22 +374,24 @@ function spearman(xs, ys) {
   for (let i = 0; i < n; i++) { num += (rx[i] - mx) * (ry[i] - mx); dx += (rx[i] - mx) ** 2; dy += (ry[i] - mx) ** 2; }
   return num / Math.sqrt(dx * dy);
 }
-const zscore = (v) => { const m = v.reduce((s, x) => s + x, 0) / v.length, sd = Math.sqrt(v.reduce((s, x) => s + (x - m) ** 2, 0) / (v.length - 1)); return v.map((x) => (x - m) / sd); };
+const sd = (v) => { const m = v.reduce((s, x) => s + x, 0) / v.length; return Math.sqrt(v.reduce((s, x) => s + (x - m) ** 2, 0) / (v.length - 1)); };
+const zscore = (v) => { const m = v.reduce((s, x) => s + x, 0) / v.length, s = sd(v); return v.map((x) => (x - m) / s); };
 
 // --------------------------------------------------------------- report ----
 const out = [];
 const P = (s = "") => out.push(s);
 const byBucket = (b) => pop.filter((p) => p.bucket === b);
 const stat = (xs, f = fmtH) => xs.length ? `${f(median(xs))} / ${f(pct(xs, 0.9))}` : "—";
+const rangeLabel = (lo, hi) => (hi === Infinity ? `${lo}+` : lo === hi ? `${lo}` : `${lo}-${hi}`);
+const meanMin = (xs, f) => { const v = xs.map(f).filter((x) => x !== null); return v.reduce((s, x) => s + x, 0) / v.length / MIN; };
 
 P(`## Population (as read)`);
 P();
-P(`- Query: \`GET /repos/${REPO}/pulls?state=closed&sort=created&direction=desc&per_page=${PER_PAGE}&page=1..${pages}\` → ${closed.length} closed PRs, ${mergedAll.length} merged, ${droppedUnmerged} closed-unmerged dropped; population = the first ${pop.length} merged.`);
+P(`- Query: \`GET /repos/${REPO}/pulls?state=closed&sort=created&direction=desc&per_page=${PER_PAGE}&page=1..${pages}\` → ${closed.length} closed PRs${closed.length > inWindow.length ? ` (${closed.length - inWindow.length} created before --since, not counted below)` : ""}, ${mergedAll.length} merged, ${droppedUnmerged} closed-unmerged dropped; population = the first ${pop.length} merged.`);
 P(`- PRs #${first.n}–#${last.n} (numbers are not contiguous: issues interleave), created ${new Date(first.created).toISOString()} → ${new Date(last.created).toISOString()}, merged ${new Date(Math.min(...pop.map((p) => p.merged))).toISOString()} → ${new Date(Math.max(...pop.map((p) => p.merged))).toISOString()}.`);
-P(`- Open PRs at read time (\`GET /pulls?state=open\`): ${openNow.items.length}${openNow.items.length ? ` (#${openNow.items.map((p) => p.number).join(", #")})` : " — no still-open PR from the window is missing from the depth count"}.`);
-P(`- Buffer (${BUFFER_PAGES} older page${BUFFER_PAGES === 1 ? "" : "s"}, ${buffer.length} merged PRs, #${Math.min(...buffer.map((b) => b.n))}–#${Math.max(...buffer.map((b) => b.n))}): ${buffer.filter((b) => b.merged > first.created).length} of them were still open when the population's first PR arrived; counting them moves ${pop.filter((p) => bucketOf(p.depthBuf) !== p.bucket).length} PRs to a deeper bucket (sensitivity only; every table below uses the ticket's definition).`);
+P(`- Open PRs at read time (\`GET /pulls?state=open\`): ${openNow.length}${openNow.length ? ` (#${openNow.map((p) => p.number).join(", #")})` : " — no still-open PR from the window is missing from the depth count"}.`);
+P(`- Buffer (${buffer.length} merged PRs older than the population${buffer.length ? `, #${Math.min(...buffer.map((b) => b.n))}–#${Math.max(...buffer.map((b) => b.n))}` : ""}: ${leftover} left over past the population on its last listing page, ${bufferPagesRead} older page${bufferPagesRead === 1 ? "" : "s"} read): ${buffer.filter((b) => b.merged > first.created).length} of them were still open when the population's first PR arrived; counting them moves ${pop.filter((p) => bucketOf(p.depthBuf) !== p.bucket).length} PRs to a deeper bucket (sensitivity only; every table below uses the ticket's definition).`);
 P(`- Arrivals per UTC day: ${[...new Set(pop.map((p) => p.day))].sort().map((d) => `${d}: ${pop.filter((p) => p.day === d).length}`).join(", ")}.`);
-const sd = (v) => { const m = v.reduce((s, x) => s + x, 0) / v.length; return Math.sqrt(v.reduce((s, x) => s + (x - m) ** 2, 0) / (v.length - 1)); };
 P(`- Depth at arrival (population PRs open at each PR's creation): median ${median(pop.map((p) => p.depth))}, p75 ${pct(pop.map((p) => p.depth), 0.75)}, p90 ${pct(pop.map((p) => p.depth), 0.9)}, max ${Math.max(...pop.map((p) => p.depth))}, SD ${sd(pop.map((p) => p.depth)).toFixed(2)}; buckets ${BUCKETS.map((b) => `${b}: ${byBucket(b).length}`).join(", ")}. Same-day arrivals SD ${sd(pop.map((p) => p.sameDay)).toFixed(1)}; arrivals within ±1 h median ${median(pop.map((p) => p.nearby))}, SD ${sd(pop.map((p) => p.nearby)).toFixed(2)}.`);
 P(`- Linked issues: ${pop.filter((p) => p.linked.length).length} PRs name \`Closes #m\` (${pop.filter((p) => p.linked.length > 1).length} name more than one); ${pop.filter((p) => !p.linked.length).length} name none. Claim (\`labeled in-progress\` on the linked issue before the PR opened) found for ${pop.filter((p) => p.claim !== null).length}.`);
 P(`- Review-side writes: \`/pulls/<n>/reviews\` ${pop.reduce((s, p) => s + p.reviews.length, 0)} across the population, \`/pulls/<n>/comments\` ${pop.reduce((s, p) => s + p.reviewComments.length, 0)}; \`/issues/<n>/comments\` ${pop.reduce((s, p) => s + p.comments.length, 0)}, of which ${pop.reduce((s, p) => s + p.comments.filter((c) => REVIEW_COMMENT.test(c.body) && T(c.created_at) < p.merged).length, 0)} are pre-merge review-side reports (${pop.filter((p) => p.hasReviewComment).length} PRs) and ${pop.reduce((s, p) => s + p.comments.filter((c) => /^Release workflow failed/.test(c.body)).length, 0)} are post-merge \`Release workflow failed\` notices.`);
@@ -396,7 +421,7 @@ P(table(["bucket", "n", "cycle created→merged", "(0) Claim→open", "(a) open�
 P();
 P(`Stage shares of the median cycle, all PRs: (a) ${fmtPct(Math.round(median(pop.filter((p) => p.a !== null).map((p) => p.a)) / MIN), Math.round(median(pop.map((p) => p.cycle)) / MIN))}, (b) ${fmtPct(Math.round(median(pop.filter((p) => p.b !== null).map((p) => p.b)) / MIN), Math.round(median(pop.map((p) => p.cycle)) / MIN))}, (c) ${fmtPct(Math.round(median(pop.filter((p) => p.c !== null).map((p) => p.c)) / MIN), Math.round(median(pop.map((p) => p.cycle)) / MIN))} (medians in minutes; they need not sum to the cycle median).`);
 P();
-P(`Mean stage minutes per bucket (means do sum): ${BUCKETS.map((b) => { const xs = byBucket(b); const mean = (f) => { const v = xs.map(f).filter((x) => x !== null); return v.reduce((s, x) => s + x, 0) / v.length / MIN; }; return `${b}: cycle ${mean((p) => p.cycle).toFixed(0)} = (a) ${mean((p) => p.a).toFixed(0)} + (b) ${mean((p) => p.b).toFixed(0)} + (c) ${mean((p) => p.c).toFixed(0)}`; }).join("; ")}.`);
+P(`Mean stage minutes per bucket (means do sum): ${BUCKETS.map((b) => { const xs = byBucket(b); return `${b}: cycle ${meanMin(xs, (p) => p.cycle).toFixed(0)} = (a) ${meanMin(xs, (p) => p.a).toFixed(0)} + (b) ${meanMin(xs, (p) => p.b).toFixed(0)} + (c) ${meanMin(xs, (p) => p.c).toFixed(0)}`; }).join("; ")}.`);
 P();
 P(`### (d) Label churn per bucket`);
 P();
@@ -417,10 +442,12 @@ P();
 P(`### (c) against the queue ahead`);
 P();
 const qa = (lo, hi) => pop.filter((p) => p.c !== null && p.lowerOpenAtLabel >= lo && p.lowerOpenAtLabel <= hi);
+const hasC = pop.filter((p) => p.c !== null);
+const sp = (xs, f, g) => spearman(xs.map(f), xs.map(g)).toFixed(2);
 P(table(["lower-numbered population PRs still open at first label", "n", "(c) first label→merged median / p90", "(c'') last non-flip label→merged median / p90", "churned", "depth-at-arrival median"],
-  [[0, 0], [1, 2], [3, 5], [6, Infinity]].map(([lo, hi]) => { const xs = qa(lo, hi); return [hi === Infinity ? `${lo}+` : lo === hi ? `${lo}` : `${lo}-${hi}`, xs.length, stat(xs.map((p) => p.c)), stat(xs.map((p) => p.cSubst)), fmtPct(xs.filter((p) => p.churned).length, xs.length), median(xs.map((p) => p.depth))]; })));
+  [[0, 0], [1, 2], [3, 5], [6, Infinity]].map(([lo, hi]) => { const xs = qa(lo, hi); return [rangeLabel(lo, hi), xs.length, stat(xs.map((p) => p.c)), stat(xs.map((p) => p.cSubst)), fmtPct(xs.filter((p) => p.churned).length, xs.length), median(xs.map((p) => p.depth))]; })));
 P();
-P(`Spearman(lower open at first label, (c)): ${spearman(pop.filter((p) => p.c !== null).map((p) => p.lowerOpenAtLabel), pop.filter((p) => p.c !== null).map((p) => p.c)).toFixed(2)}; Spearman(depth at arrival, (c)): ${spearman(pop.filter((p) => p.c !== null).map((p) => p.depth), pop.filter((p) => p.c !== null).map((p) => p.c)).toFixed(2)}; Spearman(depth at arrival, lower open at first label): ${spearman(pop.filter((p) => p.c !== null).map((p) => p.depth), pop.filter((p) => p.c !== null).map((p) => p.lowerOpenAtLabel)).toFixed(2)}.`);
+P(`Spearman(lower open at first label, (c)): ${sp(hasC, (p) => p.lowerOpenAtLabel, (p) => p.c)}; Spearman(depth at arrival, (c)): ${sp(hasC, (p) => p.depth, (p) => p.c)}; Spearman(depth at arrival, lower open at first label): ${sp(hasC, (p) => p.depth, (p) => p.lowerOpenAtLabel)}.`);
 P();
 P(`### Depth or busy day?`);
 P();
@@ -456,16 +483,15 @@ P();
 P(table(["bucket", "n", "live cycle", "live (a)", "live (b)", "live (c)", "wall cycle (for reference)"],
   [...BUCKETS, "all"].map((b) => { const xs = b === "all" ? pop : byBucket(b); return [b, xs.length, stat(xs.map((p) => p.cycleLive)), stat(xs.filter((p) => p.aLive !== null).map((p) => p.aLive)), stat(xs.filter((p) => p.bLive !== null).map((p) => p.bLive)), stat(xs.filter((p) => p.cLive !== null).map((p) => p.cLive)), stat(xs.map((p) => p.cycle))]; })));
 P();
-P(`Mean live stage minutes per bucket (means do sum): ${BUCKETS.map((b) => { const xs = byBucket(b); const mean = (f) => { const v = xs.map(f).filter((x) => x !== null); return v.reduce((s, x) => s + x, 0) / v.length / MIN; }; return `${b}: live cycle ${mean((p) => p.cycleLive).toFixed(0)} = (a) ${mean((p) => p.aLive).toFixed(0)} + (b) ${mean((p) => p.bLive).toFixed(0)} + (c) ${mean((p) => p.cLive).toFixed(0)}`; }).join("; ")}.`);
+P(`Mean live stage minutes per bucket (means do sum): ${BUCKETS.map((b) => { const xs = byBucket(b); return `${b}: live cycle ${meanMin(xs, (p) => p.cycleLive).toFixed(0)} = (a) ${meanMin(xs, (p) => p.aLive).toFixed(0)} + (b) ${meanMin(xs, (p) => p.bLive).toFixed(0)} + (c) ${meanMin(xs, (p) => p.cLive).toFixed(0)}`; }).join("; ")}.`);
 P();
 const yl = pop.map((p) => Math.log(Math.max(hours(p.cycleLive), 1 / 60)));
 const l1 = ols(yl, zDepth.map((v) => [v])), l2 = ols(yl, zSame.map((v) => [v])), l3 = ols(yl, pop.map((_, i) => [zDepth[i], zSame[i]])), l4 = ols(yl, pop.map((_, i) => [zDepth[i], zNear[i]]));
 P(`OLS of log(live cycle hours): depth alone ${fm(l1, ["depth"])}; same-day alone ${fm(l2, ["same-day"])}; both ${fm(l3, ["depth", "same-day"])}; depth + ±1 h arrivals ${fm(l4, ["depth", "±1 h"])}. Spearman(depth, live cycle) all PRs: ${spearman(pop.map((p) => p.depth), pop.map((p) => p.cycleLive)).toFixed(2)}; within day: ${days.map((d) => { const xs = pop.filter((p) => p.day === d); return `${d} ${xs.length > 3 ? spearman(xs.map((p) => p.depth), xs.map((p) => p.cycleLive)).toFixed(2) : "—"}`; }).join(", ")}.`);
 P();
-const stageRegLive = (name, f) => { const xs = pop.filter((p) => f(p) !== null && f(p) > 0); const yy = xs.map((p) => Math.log(hours(f(p)))); const m = ols(yy, xs.map((p) => [zDepth[pop.indexOf(p)], zSame[pop.indexOf(p)]])); return `${name}: ${fm(m, ["depth", "same-day"])} (n=${xs.length})`; };
-P(`Per stage in live time, log-hours on depth + same-day arrivals: ${[stageRegLive("(a)", (p) => p.aLive), stageRegLive("(b)", (p) => p.bLive), stageRegLive("(c)", (p) => p.cLive)].join("; ")}.`);
+P(`Per stage in live time, log-hours on depth + same-day arrivals: ${[stageReg("(a)", (p) => p.aLive), stageReg("(b)", (p) => p.bLive), stageReg("(c)", (p) => p.cLive)].join("; ")}.`);
 P();
-P(`Live (c) against the queue ahead: ${[[0, 0], [1, 2], [3, 5], [6, Infinity]].map(([lo, hi]) => { const xs = qa(lo, hi); return `${hi === Infinity ? `${lo}+` : lo === hi ? `${lo}` : `${lo}-${hi}`} lower open → ${stat(xs.map((p) => p.cLive))} (n=${xs.length})`; }).join("; ")}.`);
+P(`Live (c) against the queue ahead: ${[[0, 0], [1, 2], [3, 5], [6, Infinity]].map(([lo, hi]) => { const xs = qa(lo, hi); return `${rangeLabel(lo, hi)} lower open → ${stat(xs.map((p) => p.cLive))} (n=${xs.length})`; }).join("; ")}.`);
 P();
 
 // ------------------------------------------------ alternative reading ----
@@ -480,19 +506,17 @@ P();
 const LOOKBACK = 2 * H;
 for (const pr of pop) {
   pr.mergesBefore = pop.filter((q) => q.merged >= pr.created - LOOKBACK && q.merged < pr.created).length;
-  pr.preLive = liveSpan(pr.created - LOOKBACK, pr.created) === LOOKBACK;
+  pr.preLive = pr.created - LOOKBACK >= first.created && liveSpan(pr.created - LOOKBACK, pr.created) === LOOKBACK;   // before the population's first PR nothing was read, so liveness is unknown, not live
   pr.served = pr.label1 === null ? null : pop.filter((q) => q !== pr && q.merged > pr.label1 && q.merged < pr.merged).length;
   pr.pace = pr.c === null ? null : pr.c / (pr.served + 1);
   pr.paceLive = pr.cLive === null ? null : pr.cLive / (pr.served + 1);
   pr.labelledAhead = pr.label1 === null ? null : pop.filter((q) => q.n < pr.n && q.label1 !== null && q.label1 <= pr.label1 && q.merged > pr.label1).length;
   pr.unlabelledAhead = pr.label1 === null ? null : pr.lowerOpenAtLabel - pr.labelledAhead;
 }
-const hasC = pop.filter((p) => p.c !== null);
 const preLive = pop.filter((p) => p.preLive);
-const sp = (xs, f, g) => spearman(xs.map(f), xs.map(g)).toFixed(2);
 P(`### Alternative reading tested: depth as a symptom of a slow merge side`);
 P();
-P(`Little's law: with arrivals steady, PRs pile up exactly when merges have been slow, so depth at arrival could be a symptom of a slow Pass rather than a cause of a long wait — and a slow Pass would lengthen the arriving PR's own (c) too. (i) The Pass's recent throughput: population PRs with \`merged_at\` in [created − ${LOOKBACK / H} h, created); the regression runs on PRs whose preceding ${LOOKBACK / H} h were fully fleet-live (no dormant stretch inside), so a sleeping fleet cannot pose as a slow bot. (ii) (c) split into PRs served ahead (population \`merged_at\` inside (first label, merged)) and per-merge pace ((c) ÷ (served + 1)). (iii) The queue ahead split into lower-numbered PRs already carrying \`ready-to-merge\` and unmerged at this PR's first label (the Pass's own queue, lowest number first) and lower PRs merely open at that moment (in the Pass's way only when related — \`held-behind\`).`);
+P(`Little's law: with arrivals steady, PRs pile up exactly when merges have been slow, so depth at arrival could be a symptom of a slow Pass rather than a cause of a long wait — and a slow Pass would lengthen the arriving PR's own (c) too. (i) The Pass's recent throughput: population PRs with \`merged_at\` in [created − ${LOOKBACK / H} h, created); the regression runs on PRs whose preceding ${LOOKBACK / H} h began no earlier than the population's first PR and were fully fleet-live (no dormant stretch inside), so a sleeping fleet cannot pose as a slow bot. (ii) (c) split into PRs served ahead (population \`merged_at\` inside (first label, merged)) and per-merge pace ((c) ÷ (served + 1)). (iii) The queue ahead split into lower-numbered PRs already carrying \`ready-to-merge\` and unmerged at this PR's first label (the Pass's own queue, lowest number first) and lower PRs merely open at that moment (in the Pass's way only when related — \`held-behind\`).`);
 P();
 P(`- (i) Spearman(depth, merges in prior ${LOOKBACK / H} h): ${sp(pop, (p) => p.depth, (p) => p.mergesBefore)} (all ${pop.length}), ${sp(preLive, (p) => p.depth, (p) => p.mergesBefore)} (fully-live preceding window, n=${preLive.length}); Spearman(merges in prior ${LOOKBACK / H} h, cycle): ${sp(pop, (p) => p.mergesBefore, (p) => p.cycle)} (all), ${sp(preLive, (p) => p.mergesBefore, (p) => p.cycle)} (fully-live).`);
 {
@@ -508,7 +532,7 @@ P(`- (ii) Spearman(depth, served ahead): ${sp(hasC, (p) => p.depth, (p) => p.ser
 P();
 const la = (lo, hi) => hasC.filter((p) => p.labelledAhead >= lo && p.labelledAhead <= hi);
 P(table(["lower PRs already labelled and unmerged at first label", "n", "(c) median / p90", "live (c) median / p90", "served ahead (median)", "lower PRs open but unlabelled at first label (median)", "depth-at-arrival median"],
-  [[0, 0], [1, 1], [2, 3], [4, Infinity]].map(([lo, hi]) => { const xs = la(lo, hi); return [hi === Infinity ? `${lo}+` : lo === hi ? `${lo}` : `${lo}-${hi}`, xs.length, stat(xs.map((p) => p.c)), stat(xs.map((p) => p.cLive)), xs.length ? median(xs.map((p) => p.served)) : "—", xs.length ? median(xs.map((p) => p.unlabelledAhead)) : "—", xs.length ? median(xs.map((p) => p.depth)) : "—"]; })));
+  [[0, 0], [1, 1], [2, 3], [4, Infinity]].map(([lo, hi]) => { const xs = la(lo, hi); return [rangeLabel(lo, hi), xs.length, stat(xs.map((p) => p.c)), stat(xs.map((p) => p.cLive)), xs.length ? median(xs.map((p) => p.served)) : "—", xs.length ? median(xs.map((p) => p.unlabelledAhead)) : "—", xs.length ? median(xs.map((p) => p.depth)) : "—"]; })));
 P();
 {
   const yC = hasC.map((p) => Math.log(Math.max(hours(p.c), 1 / 60)));

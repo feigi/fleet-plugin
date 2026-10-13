@@ -84,7 +84,7 @@ or with a push inside the gap, is 8 PRs.
 | (b) first review evidence → first `ready-to-merge` | as above | first `labeled ready-to-merge` | the fix-applier's remaining work, its push, CI on the new head, the finisher's dispatch and audit |
 | (c) first `ready-to-merge` → merged | first `labeled ready-to-merge` | `pull.merged_at` | the wait for a Pass: numeric-order discipline, `held-behind` and Conflict holds, rebase → CI → merge gate per PR, and any churn. Also (c′) from the **last** label (the charting read's definition, which the re-pin flip shortens to the bot's final minutes) and (c″) from the last label that is not a re-pin flip's relabel |
 | (d) churn | each `unlabeled ready-to-merge` | the next `labeled ready-to-merge` (or the merge, when none follows) | a gap ≤ 60 s with no push or comment inside is a re-pin flip, not churn. Otherwise churn, in the shape the record allows: **push-then-label-off** (a push landed after the previous label and before the unlabel: the head moved under the label, the label was cleared, a fresh audit relabelled), **push-then-label-off+push** (the same, with a further push before the relabel), **label-off-then-push** (nothing pushed since the previous label; a push lands inside the gap: the label was pulled ahead of an approved push — a fix-applier on a Conflict hold or a review retry — and a fresh finisher relabelled after it), **label-off-no-push**, **finisher-halt-comment**, **merged-unlabelled**. Time lost = the gap |
-| depth at arrival | — | — | population PRs with `created_at` < this PR's `created_at` and `merged_at` > it (the ticket's definition); the one older page fetched as a buffer is used only for a sensitivity line |
+| depth at arrival | — | — | population PRs with `created_at` < this PR's `created_at` and `merged_at` > it (the ticket's definition); merged PRs older than the population — those left over on its last listing page, plus the older page fetched as a buffer — are used only for a sensitivity line |
 | same-day arrivals | — | — | population PRs created on the same UTC calendar day; also arrivals within ±1 h of this PR's creation, a finer busyness measure |
 | fleet-live time | — | — | every tracker write on a population PR (open, label on/off, force push, pre-merge comment, merge) marks the fleet live; a gap of more than 30 min between consecutive writes (the p99 of the inter-write gap) is dormant from its 30th minute to the next write. A PR's live interval is its wall interval minus dormant stretches. Reported beside wall time because nights and breaks sit inside cycle time |
 
@@ -95,10 +95,10 @@ Percentiles interpolate linearly, as in `baseline-efficiency-derive.py`.
 - Query: `GET /repos/feigi/fleet-plugin/pulls?state=closed&sort=created&direction=desc&per_page=100&page=1..2` → 200 closed PRs, 200 merged, 0 closed-unmerged dropped; population = the first 200 merged.
 - PRs #2302–#2865 (numbers are not contiguous: issues interleave), created 2026-10-01T10:10:06.000Z → 2026-10-04T20:55:15.000Z, merged 2026-10-01T11:43:22.000Z → 2026-10-04T21:43:18.000Z.
 - Open PRs at read time (`GET /pulls?state=open`): 0 — no still-open PR from the window is missing from the depth count.
-- Buffer (1 older page, 100 merged PRs, #2028–#2298): 6 of them were still open when the population's first PR arrived; counting them moves 8 PRs to a deeper bucket (sensitivity only; every table below uses the ticket's definition).
+- Buffer (100 merged PRs older than the population, #2028–#2298: 0 left over past the population on its last listing page, 1 older page read): 6 of them were still open when the population's first PR arrived; counting them moves 8 PRs to a deeper bucket (sensitivity only; every table below uses the ticket's definition).
 - Arrivals per UTC day: 2026-10-01: 8, 2026-10-02: 35, 2026-10-03: 65, 2026-10-04: 92.
 - Depth at arrival (population PRs open at each PR's creation): median 6, p75 9, p90 10, max 14, SD 3.33; buckets 0-2: 30, 3-5: 54, 6-9: 80, 10+: 36. Same-day arrivals SD 24.7; arrivals within ±1 h median 7, SD 4.18.
-- Linked issues: 192 PRs name `Closes #m` (5 name more than one); 8 name none. Claim (`labeled in-progress` on the linked issue before the PR opened) found for 190.
+- Linked issues: 192 PRs name `Closes #m` (4 name more than one); 8 name none. Claim (`labeled in-progress` on the linked issue before the PR opened) found for 190.
 - Review-side writes: `/pulls/<n>/reviews` 0 across the population, `/pulls/<n>/comments` 0; `/issues/<n>/comments` 163, of which 99 are pre-merge review-side reports (99 PRs) and 52 are post-merge `Release workflow failed` notices.
 - `head_ref_force_pushed` events: 375 (196 PRs); commits authored after PR open: 200 (149 PRs), of which 2 PRs have their first one under 5 min after open (#2491, #2585 — plausibly the implementer's own follow-up rather than a fix-applier's). Where a PR has both a post-open commit and a review-side comment, the comment follows the commit by median 7 min (p90 25 min, n=79).
 - Comments carrying the ledger's hold/refusal vocabulary (`held-behind`, `conflict-hold`, `past-pin`, `head-moved-after-label`, `label-pulled`, `rebase-fallback`): 0; comments reporting a finisher halt (`finisher-pr-<n> halted`): 1 (#2555). Event actors: feigi.
@@ -212,10 +212,10 @@ Live (c) against the queue ahead: 0 lower open → 13 min / 50 min (n=30); 1-2 l
 
 ### Alternative reading tested: depth as a symptom of a slow merge side
 
-Little's law: with arrivals steady, PRs pile up exactly when merges have been slow, so depth at arrival could be a symptom of a slow Pass rather than a cause of a long wait — and a slow Pass would lengthen the arriving PR's own (c) too. (i) The Pass's recent throughput: population PRs with `merged_at` in [created − 2 h, created); the regression runs on PRs whose preceding 2 h were fully fleet-live (no dormant stretch inside), so a sleeping fleet cannot pose as a slow bot. (ii) (c) split into PRs served ahead (population `merged_at` inside (first label, merged)) and per-merge pace ((c) ÷ (served + 1)). (iii) The queue ahead split into lower-numbered PRs already carrying `ready-to-merge` and unmerged at this PR's first label (the Pass's own queue, lowest number first) and lower PRs merely open at that moment (in the Pass's way only when related — `held-behind`).
+Little's law: with arrivals steady, PRs pile up exactly when merges have been slow, so depth at arrival could be a symptom of a slow Pass rather than a cause of a long wait — and a slow Pass would lengthen the arriving PR's own (c) too. (i) The Pass's recent throughput: population PRs with `merged_at` in [created − 2 h, created); the regression runs on PRs whose preceding 2 h began no earlier than the population's first PR and were fully fleet-live (no dormant stretch inside), so a sleeping fleet cannot pose as a slow bot. (ii) (c) split into PRs served ahead (population `merged_at` inside (first label, merged)) and per-merge pace ((c) ÷ (served + 1)). (iii) The queue ahead split into lower-numbered PRs already carrying `ready-to-merge` and unmerged at this PR's first label (the Pass's own queue, lowest number first) and lower PRs merely open at that moment (in the Pass's way only when related — `held-behind`).
 
-- (i) Spearman(depth, merges in prior 2 h): 0.32 (all 200), 0.30 (fully-live preceding window, n=138); Spearman(merges in prior 2 h, cycle): -0.16 (all), -0.02 (fully-live).
-- (i) OLS on the fully-live subset (n=138; predictors re-standardised within it): log(cycle) on depth alone depth β=0.114 (t=2.0); R²=0.029; on depth + prior merges depth β=0.129 (t=2.2), prior merges β=-0.049 (t=-0.8); R²=0.034. log(live cycle): depth alone depth β=0.154 (t=3.1); R²=0.065; depth + prior merges depth β=0.171 (t=3.2), prior merges β=-0.054 (t=-1.0); R²=0.073.
+- (i) Spearman(depth, merges in prior 2 h): 0.32 (all 200), 0.29 (fully-live preceding window, n=137); Spearman(merges in prior 2 h, cycle): -0.16 (all), -0.02 (fully-live).
+- (i) OLS on the fully-live subset (n=137; predictors re-standardised within it): log(cycle) on depth alone depth β=0.117 (t=2.0); R²=0.030; on depth + prior merges depth β=0.130 (t=2.2), prior merges β=-0.046 (t=-0.8); R²=0.034. log(live cycle): depth alone depth β=0.153 (t=3.0); R²=0.064; depth + prior merges depth β=0.168 (t=3.2), prior merges β=-0.054 (t=-1.0); R²=0.071.
 
 | bucket | n (with a label) | merges in prior 2 h (median) | served ahead during (c) (median / p90) | pace (c)/(served+1) (median / p90) | live pace (median / p90) | (c) (median / p90) |
 |---|---|---|---|---|---|---|
@@ -494,10 +494,10 @@ Per stage in live time, log-hours on depth + same-day arrivals: (a): depth β=-0
 
 #### 400-PR window — Alternative reading tested: depth as a symptom of a slow merge side
 
-Little's law: with arrivals steady, PRs pile up exactly when merges have been slow, so depth at arrival could be a symptom of a slow Pass rather than a cause of a long wait — and a slow Pass would lengthen the arriving PR's own (c) too. (i) The Pass's recent throughput: population PRs with `merged_at` in [created − 2 h, created); the regression runs on PRs whose preceding 2 h were fully fleet-live (no dormant stretch inside), so a sleeping fleet cannot pose as a slow bot. (ii) (c) split into PRs served ahead (population `merged_at` inside (first label, merged)) and per-merge pace ((c) ÷ (served + 1)). (iii) The queue ahead split into lower-numbered PRs already carrying `ready-to-merge` and unmerged at this PR's first label (the Pass's own queue, lowest number first) and lower PRs merely open at that moment (in the Pass's way only when related — `held-behind`).
+Little's law: with arrivals steady, PRs pile up exactly when merges have been slow, so depth at arrival could be a symptom of a slow Pass rather than a cause of a long wait — and a slow Pass would lengthen the arriving PR's own (c) too. (i) The Pass's recent throughput: population PRs with `merged_at` in [created − 2 h, created); the regression runs on PRs whose preceding 2 h began no earlier than the population's first PR and were fully fleet-live (no dormant stretch inside), so a sleeping fleet cannot pose as a slow bot. (ii) (c) split into PRs served ahead (population `merged_at` inside (first label, merged)) and per-merge pace ((c) ÷ (served + 1)). (iii) The queue ahead split into lower-numbered PRs already carrying `ready-to-merge` and unmerged at this PR's first label (the Pass's own queue, lowest number first) and lower PRs merely open at that moment (in the Pass's way only when related — `held-behind`).
 
-- (i) Spearman(depth, merges in prior 2 h): 0.18 (all 400), 0.18 (fully-live preceding window, n=246); Spearman(merges in prior 2 h, cycle): -0.28 (all), -0.12 (fully-live).
-- (i) OLS on the fully-live subset (n=246; predictors re-standardised within it): log(cycle) on depth alone depth β=0.189 (t=4.3); R²=0.070; on depth + prior merges depth β=0.209 (t=4.7), prior merges β=-0.104 (t=-2.3); R²=0.090. log(live cycle): depth alone depth β=0.203 (t=5.2); R²=0.101; depth + prior merges depth β=0.223 (t=5.7), prior merges β=-0.099 (t=-2.5); R²=0.124.
+- (i) Spearman(depth, merges in prior 2 h): 0.18 (all 400), 0.16 (fully-live preceding window, n=236); Spearman(merges in prior 2 h, cycle): -0.28 (all), -0.08 (fully-live).
+- (i) OLS on the fully-live subset (n=236; predictors re-standardised within it): log(cycle) on depth alone depth β=0.197 (t=4.3); R²=0.075; on depth + prior merges depth β=0.208 (t=4.5), prior merges β=-0.067 (t=-1.5); R²=0.083. log(live cycle): depth alone depth β=0.214 (t=5.4); R²=0.110; depth + prior merges depth β=0.223 (t=5.5), prior merges β=-0.055 (t=-1.4); R²=0.117.
 
 | bucket | n (with a label) | merges in prior 2 h (median) | served ahead during (c) (median / p90) | pace (c)/(served+1) (median / p90) | live pace (median / p90) | (c) (median / p90) |
 |---|---|---|---|---|---|---|
@@ -542,9 +542,9 @@ that arrived then saw high depth, and the same slowness lengthened their (c).
 window) puts that to the data three ways. (i) The Pass's throughput in the
 two hours before arrival is *higher*, not lower, at depth (Spearman +0.32 on
 200 PRs, +0.18 on 400), and once depth is in the model it explains nothing of
-cycle time (β −0.05, t = −0.8, on the 138 PRs whose preceding two hours were
-fully fleet-live; −0.10, t = −2.3, on 246 of 400) while depth's coefficient
-holds (+0.13, t = 2.2; +0.21, t = 4.7). (ii) The per-merge pace a PR meets in
+cycle time (β −0.05, t = −0.8, on the 137 PRs whose preceding two hours were
+fully fleet-live; −0.07, t = −1.5, on 236 of 400) while depth's coefficient
+holds (+0.13, t = 2.2; +0.21, t = 4.5). (ii) The per-merge pace a PR meets in
 (c) — (c) ÷ (PRs served ahead + 1) — is 8–9 min median in every bucket from
 3–5 up, on both windows (Spearman with depth −0.17 and +0.01); what rises with
 depth is the count of PRs served ahead, 0 → 1 → 2 → 3 median (Spearman 0.42,
@@ -660,11 +660,15 @@ This run used curl through the session's HTTPS proxy, whose core limit read
 15,000/h; a personal token's is 5,000/h, and one run of 200 PRs is about 1,200
 reads (one listing page per 100 PRs, five per PR, one per linked issue), 400
 PRs about 2,400. Raw JSON is cached under `--cache <dir>` (default
-`$TMPDIR/in-flight-cycle-time-stages-cache/<owner>__<repo>`), never in the
-repository; `--refresh` ignores the cache. Any non-200 status, non-JSON body
-or non-array page exits 2 rather than counting a short list, and a population
-the repo cannot fill exits 1. Output is the markdown of **Population (as
-read)**, **Results** and the per-PR appendix, to stdout; progress to stderr.
+`$TMPDIR/in-flight-cycle-time-stages-cache/<owner>__<repo>`), one file per
+repo and request, never in the repository (a `--cache` that resolves into it,
+symlinks followed, is refused); `--refresh` ignores the cache, and a cache file
+that is not JSON (a run killed mid-write) exits 2 naming the file. A non-200
+status is retried up to five attempts (a 4xx other than 402 at once) and then
+exits 2; a non-JSON body or non-array page exits 2 rather than counting a
+short list, and a population the repo cannot fill exits 1. Output is the
+markdown of **Population (as read)**, **Results** and the per-PR appendix, to
+stdout; progress to stderr.
 
 To re-run on a later window — the first ≥ 20 merged PRs after the In-flight
 bound's cutover — pass the cutover as `--since <ISO 8601>` and the population
@@ -672,9 +676,11 @@ as the number merged since it (`--population 20` at the earliest), or bound
 both ends with `--since`/`--until`; the population is always the newest
 `--population` merged PRs created inside the window, so without `--since` a
 re-run simply picks up the newest PRs. To compare against this note, keep the
-stage definitions and the 30-minute dormancy threshold (`DORMANT_AFTER`) as
-they are; both are constants at the top of the script. `--buffer-pages`
-(default 1) sets how many older pages feed the depth sensitivity line only.
+stage definitions (the derive loop; the script header lists them) and the
+30-minute dormancy threshold (`DORMANT_AFTER`, a named constant in the script) as
+they are. `--buffer-pages`
+(default 1) sets how many older pages join the merged PRs left over on the
+population's last listing page in the depth sensitivity line only.
 
 ## Appendix — per-PR rows (200-PR population)
 
