@@ -717,6 +717,93 @@ test("wt_counts agrees over .worktrees entries that are not this registry's lost
   assert.equal(p.out, "rc=0\nregistered=2 linked=2\nwhy=\n");
 });
 
+test("wt_counts refuses an unlisted .worktrees pointer whose admin id another worktree now holds, and skips one whose registration names nothing", (t) => {
+  // The orphan's registration is removed and a worktree of the same basename elsewhere is added: git reuses the id, so the counts agree and the pointer names a held admin dir.
+  const reissue = (flags) => {
+    const r = repo(t);
+    const wt = fleetLinked(r, "1-held");
+    const admin = pointed(wt);
+    rmSync(admin, { recursive: true, force: true });
+    const elsewhere = join(r.root, "elsewhere", "1-held");
+    mkdirSync(join(r.root, "elsewhere"));
+    git(r.w, "worktree", "add", "-q", ...flags, "-b", "other", elsewhere, "main");
+    return { r, wt, admin };
+  };
+  const refused = ({ r, wt, admin }) => {
+    assert.equal(pointed(wt), admin, "fixture: the pointer still names the reissued id");
+    const p = probe(r.w, COUNTS);
+    assert.match(p.out, /^rc=1$/m, p.out);
+    assert.match(p.out, /^registered=1 linked=1$/m, "the counts agree — the pointer is what refuses");
+    // The back-link is spelled as the registration holds it: a relative one is resolved against the admin dir, unnormalised.
+    assert.ok(
+      p.out.includes(`why=worktree pointer ${wt}/.git names admin dir ${admin}, whose registration is now another worktree's (`) &&
+        p.out.includes(`elsewhere/1-held) — git lists no worktree at ${wt}, so its branch is held by nothing`),
+      p.out,
+    );
+  };
+  refused(reissue([]));
+  let relative;
+  try {
+    relative = reissue(["--relative-paths"]);
+  } catch {
+    relative = reissue([]);
+  }
+  refused(relative);
+
+  // A registration whose back-link names a path that does not exist, a repo moved without repair: git still holds the branch through it.
+  const r = repo(t);
+  const moved = fleetLinked(r, "1-held");
+  writeFileSync(join(pointed(moved), "gitdir"), `${r.root}/gone/1-held/.git\n`);
+  assert.equal(probe(r.w, COUNTS).out, "rc=0\nregistered=1 linked=1\nwhy=\n");
+
+  // A registration whose back-link spells this very directory through a symlink is the worktree itself, not a reissue: git still holds its branch.
+  const a = repo(t);
+  const aliased = fleetLinked(a, "1-held");
+  const alias = join(a.root, "alias");
+  symlinkSync(a.w, alias);
+  writeFileSync(join(pointed(aliased), "gitdir"), `${alias}/.worktrees/1-held/.git\n`);
+  assert.equal(probe(a.w, COUNTS).out, "rc=0\nregistered=1 linked=1\nwhy=\n", "fixture: git lists the worktree under the alias, so the pointer is unlisted");
+});
+
+test("wt_counts refuses an unlisted .worktrees pointer whose registration's back-link target cannot be stat'ed, never reads it as a moved repo", (t) => {
+  if (isRoot) return t.skip("root searches every directory");
+  const r = repo(t);
+  const wt = fleetLinked(r, "1-held");
+  const admin = pointed(wt);
+  const hidden = join(r.root, "hidden");
+  mkdirSync(hidden);
+  writeFileSync(join(admin, "gitdir"), `${hidden}/1-held/.git\n`);
+  chmodSync(hidden, 0o000);
+  const p = probe(r.w, COUNTS);
+  chmodSync(hidden, 0o755);
+  assert.match(p.out, /^rc=1$/m, p.out);
+  assert.ok(p.out.includes(`why=could not look up the worktree ${hidden}/1-held that admin dir ${admin} is registered for (${hidden} cannot be searched)`), p.out);
+  // The same back-link once `hidden` can be searched and holds nothing: a repo moved without repair, held through its HEAD.
+  assert.equal(probe(r.w, COUNTS).out, "rc=0\nregistered=1 linked=1\nwhy=\n");
+});
+
+test("wt_counts fails closed when `[` cannot evaluate -ef (rc 2 or more) on a reissued registration's back-link, and names that fault", (t) => {
+  // As for the pointer's repo above: no input makes a real `[` answer 2 for `-ef`, so an alias names a stand-in before the library is read. It faults only the back-link's compare, the one whose left side is the elsewhere worktree.
+  const r = repo(t);
+  const wt = fleetLinked(r, "1-held");
+  const admin = pointed(wt);
+  rmSync(admin, { recursive: true, force: true });
+  mkdirSync(join(r.root, "elsewhere"));
+  git(r.w, "worktree", "add", "-q", "-b", "other", join(r.root, "elsewhere", "1-held"), "main");
+  const run = (stub) =>
+    spawnSync("/bin/sh", ["-c", `${stub ? `wt_stub() { case "$2" in -ef) case "$1" in */elsewhere/1-held) return 2 ;; esac ;; esac; command [ "$@"; }\nalias [=wt_stub\n` : ""}. "$0" || exit 99
+${stub ? "unalias [\n" : ""}${COUNTS}`, LIB], { cwd: r.w, env: ENV, encoding: "utf8", timeout: 30_000 });
+  const control = run(false);
+  assert.match(control.stdout, /^rc=1$/m, control.stdout);
+  assert.ok(control.stdout.includes("whose registration is now another worktree's"), `control: without the stand-in the pointer is refused as reissued: ${control.stdout}`);
+  const p = run(true);
+  assert.match(p.stdout, /^rc=1$/m, p.stdout);
+  assert.ok(
+    p.stdout.includes(`why=could not compare the worktree ${r.root}/elsewhere/1-held that admin dir ${admin} is registered for with ${wt} (test -ef exited 2), so whether its registration is reissued is unknown`),
+    `refused with the compare named in place of a refusal as reissued: ${p.stdout}${p.stderr}`,
+  );
+});
+
 // --- wt_outcome
 
 test("wt_outcome measures each landing shape of a refused `git worktree remove`, and restores $wt_list", (t) => {

@@ -748,11 +748,33 @@ wt_count_pair() {
   wt_count_linked || return 1
 }
 
+# Read the `gitdir` back-link of the admin dir $1 into `$wt_bl_back`: the
+# worktree directory it names, made absolute against $1 when it is relative.
+# 0 read; 1 the file could not be read. `$wt_bl_rel` holds the path as
+# written, so a caller can tell an empty file from a path.
+wt_read_backlink() {
+  if ! wt_bl_back=$(cat "$1/gitdir" 2>/dev/null && echo x); then
+    return 1
+  fi
+  # `cat` adds no newline of its own, so the sentinel alone comes off, then
+  # the one newline git writes after the path, if it is there.
+  wt_bl_back=${wt_bl_back%x}
+  wt_bl_back=${wt_bl_back%"
+"}
+  wt_bl_back=${wt_bl_back%/.git}
+  wt_bl_rel=$wt_bl_back
+  case $wt_bl_back in
+    /*) ;;
+    *) wt_bl_back=$1/$wt_bl_back ;;
+  esac
+}
+
 # Is any fleet worktree standing with its registration removed under it? 0
 # when none is; 1 with `$wt_why` naming the first `.worktrees/*` pointer git
-# does not list that names an admin dir the registry does not hold, or that
-# could not be read. Reads `$wt_list` for the main checkout and the listed
-# paths, and `$wt_root` for the registry, both as `wt_count_pair` left them.
+# does not list that names an admin dir the registry does not hold, that
+# names one whose registration is now another worktree's, or that could not
+# be read. Reads `$wt_list` for the main checkout and the listed paths, and
+# `$wt_root` for the registry, both as `wt_count_pair` left them.
 #
 # The counts cannot see this: git lists a linked worktree only from its admin
 # dir, so a registry `rm -rf`'d whole, or one entry removed, drops the entry
@@ -780,10 +802,30 @@ wt_count_pair() {
 # directory, pointer or named admin dir that cannot be read is a refusal: what
 # it names is unknown, and unknown is never "registered".
 #
+# An unlisted directory whose pointer names a held admin dir of its own name is
+# asked one more question, because that registration may have been reissued: the
+# worktree was orphaned, and a later `git worktree add` of another worktree of
+# the same basename took the id. Its branch then reads as held by nothing, and
+# the admin dir answers for a live worktree elsewhere. The admin dir's `gitdir`
+# back-link says whose it is now: a target that exists and is not this
+# directory is a refusal; one that does not exist is a repo moved without `git
+# worktree repair`, which git still holds through the registration's HEAD, but
+# only where its nearest existing ancestor can be searched, since a target
+# that cannot be stat'ed is unknown, not absent, and is a refusal too; and
+# one that is this directory spelled another way (`-ef`) is the registration
+# itself. A directory whose name is not its admin dir's id is a copy, skipped
+# unanswered: a copy and a reissued id read the same through the back-link
+# (another worktree's, that git lists), so the names are the only signal, git
+# taking an id from the basename it was given.
+#
 # Ceilings, left open on purpose. A `.worktrees` directory that cannot be
 # listed is skipped, not refused: every worktree in it that git still lists is
 # answered by the caller's own guards, each with its own remedy, and an
 # unlisted one behind it needs that fault and a removed registry entry at once.
+# An orphan whose original id carried a number, `1-held1` for a worktree named
+# `1-held`, is not caught: reissuing that id needs a new worktree with the
+# literal basename `1-held1`, so the directory's own name and the registration's
+# differ, and it reads as a copy.
 # And only `.worktrees/*` itself is read, the depth claim-ticket.sh creates
 # worktrees at: one nested deeper (`.worktrees/feature/x`) is not, since
 # reaching it means walking every directory under `.worktrees/` that holds no
@@ -866,6 +908,44 @@ worktree $wt_cp_wt
       wt_why="worktree pointer $wt_cp_ptr names admin dir $wt_cp_admin, an empty directory git does not list — git lists no worktree there, so no absence it reports can be trusted; inspect the directory and, once its work is saved, remove it by hand"
       return 1
     fi
+    # Past here the pointer names a registration that is held. A COPY of a
+    # worktree directory carries a pointer naming an admin dir git still
+    # lists for the ORIGINAL, and so does a directory whose registration was
+    # reissued: the admin dir's back-link is another worktree's in both. Only
+    # the names tell them apart. Git takes an id from the basename passed to
+    # `git worktree add`, so an id can be reissued only to a worktree of that
+    # same basename; a directory whose own name is not its admin dir's id is a
+    # copy and is skipped.
+    [ "${wt_cp_admin##*/}" = "${wt_cp_wt##*/}" ] || continue
+    # Git drops an admin dir with no readable back-link from its listing, and
+    # the counts refuse on that; this refusal covers only a fault landing
+    # between the listing and this read.
+    if ! wt_read_backlink "$wt_cp_admin" || [ -z "$wt_bl_rel" ]; then
+      wt_why="worktree pointer $wt_cp_ptr names admin dir $wt_cp_admin, whose gitdir back-link could not be read, so which worktree it is registered for is unknown; inspect the directory and, once its work is saved, remove it by hand"
+      return 1
+    fi
+    # A back-link to nothing is a repo moved without `git worktree repair`:
+    # git still holds the branch through that registration's HEAD. A target
+    # that cannot be stat'ed is not a target that is absent: if the nearest
+    # ancestor that exists is a directory that cannot be searched, what
+    # the back-link names is unknown, and unknown is never "moved".
+    if ! [ -e "$wt_bl_back" ]; then
+      wt_cp_up=${wt_bl_back%/*}
+      while [ -n "$wt_cp_up" ] && ! [ -e "$wt_cp_up" ]; do
+        wt_cp_up=${wt_cp_up%/*}
+      done
+      if ! [ -d "${wt_cp_up:-/}" ] || [ -x "${wt_cp_up:-/}" ]; then continue; fi
+      wt_why="could not look up the worktree $wt_bl_back that admin dir $wt_cp_admin is registered for (${wt_cp_up:-/} cannot be searched), so whether its registration is reissued is unknown"
+      return 1
+    fi
+    # shellcheck disable=SC3013,SC2319 # -ef as above; the else's $? is the `[ -ef ]` test's own rc
+    if [ "$wt_bl_back" -ef "$wt_cp_wt" ]; then continue; else wt_cp_rc=$?; fi
+    if [ "$wt_cp_rc" -ge 2 ]; then
+      wt_why="could not compare the worktree $wt_bl_back that admin dir $wt_cp_admin is registered for with $wt_cp_wt (test -ef exited $wt_cp_rc), so whether its registration is reissued is unknown"
+      return 1
+    fi
+    wt_why="worktree pointer $wt_cp_ptr names admin dir $wt_cp_admin, whose registration is now another worktree's ($wt_bl_back) — git lists no worktree at $wt_cp_wt, so its branch is held by nothing; inspect the directory and, once its work is saved, remove it by hand"
+    return 1
   done
   return 0
 }
@@ -884,7 +964,8 @@ worktree $wt_cp_wt
 # 1: refused — `$wt_why` names the cause: the common directory or the
 #    registry could not be read, the listing could not be counted, the
 #    counts still disagree, or a `.worktrees/*` pointer names an admin dir the
-#    registry does not hold (`wt_count_pointers`). A standing disagreement is
+#    registry does not hold or whose registration is now another worktree's
+#    (`wt_count_pointers`). A standing disagreement is
 #    named by the DIRECTION observed. FEWER listed than registered is git
 #    dropping an entry it could not read — the fault this check exists to
 #    catch. MORE listed than registered is the reverse, the registry read
@@ -1072,20 +1153,11 @@ EOF
       wt_why="$1 is a symbolic link through which git could not report its admin dir, so which worktree it stands for is unknown${wt_lk_err:+: $wt_lk_err}"
       return 1
     fi
-    if ! wt_lk_back=$(cat "${wt_lk_admin%?x}/gitdir" 2>/dev/null && echo x); then
+    if ! wt_read_backlink "${wt_lk_admin%?x}"; then
       wt_why="$1 is a symbolic link whose admin dir's gitdir back-pointer could not be read, so which worktree it stands for is unknown"
       return 1
     fi
-    # `cat` adds no newline of its own, so the sentinel alone comes off, then
-    # the one newline git writes after the path, if it is there.
-    wt_lk_back=${wt_lk_back%x}
-    wt_lk_back=${wt_lk_back%"
-"}
-    wt_lk_back=${wt_lk_back%/.git}
-    case $wt_lk_back in
-      /*) ;;
-      *) wt_lk_back=${wt_lk_admin%?x}/$wt_lk_back ;;
-    esac
+    wt_lk_back=$wt_bl_back
     case $1 in
       */*) wt_lk_up=${1%/*} ;;
       *) wt_lk_up=. ;;
