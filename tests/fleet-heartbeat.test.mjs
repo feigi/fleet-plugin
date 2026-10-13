@@ -191,9 +191,9 @@ test("CLI: a JSON array state file is announced, and the file is not replaced �
   assert.match(r.stderr, /WARNING .* is not an object/);
   // A fire for the skipped write during the hold
   assert.match(r.stdout, /heartbeat: held .* interval elapsed/);
-  // The degraded file is left byte-identical, not replaced — returns null since
-  // the unparseable file was not overwritten
-  assert.equal(r.state, null, "degraded file should not be written, so it remains [1,2,3]");
+  // The degraded file is left byte-identical, not replaced — the array `[1,2,3]`
+  // stays unparseable as JSON object, so state is the array itself
+  assert.deepEqual(r.state, [1, 2, 3], "degraded file should not be written, so [1,2,3] is preserved");
 });
 
 test("CLI: a state file it cannot READ is announced, never silently discarded", (t) => {
