@@ -74,8 +74,7 @@ Names follow the unit of work: `impl-<issue#>`, `fix-pr-<pr#>`,
 references/member-lifecycle.md.
 
 **A depth-2 member cannot dispatch further** (`task.maxRecursionDepth: 2`):
-if `task` is absent at your depth, ask the controller to dispatch the
-specialists and relay their reports. See references/member-lifecycle.md.
+`task` is absent at your depth. See references/member-lifecycle.md.
 
 **Fresh context per member.** One member, one unit of work, gone. Never
 re-task a finished member — waking it drags the old ticket back in. Refill =
