@@ -641,8 +641,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
       finishers: new Set(),
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
-    // retry suffix ("" < "b" < "c" …) the same way compute-board.mjs's
-    // laterAttempt does — never by row-text position. A
+    // retry suffix ("" < "b" < "c" …) — never by row-text position. A
     // `-b` retry can sit before an older `halted:past-pin` token after a row
     // rewrite, and text order must not read the stale one as the live
     // finisher's replacement. Reset at each `reviewed=`, since `pastPinHalt`
