@@ -94,15 +94,16 @@ relabelled, excluded) with the reason, next head; 2 could not look, named;
    `--impl-row` count read off the ledger, `--chain-head` from Q3's
    `behind-issue` history; exit 2 → `release-ticket.sh --apply`, exit 2
    named.
-8. `ledger.mjs row`, `ledger.mjs dispatch`, `dispatch-prompt.mjs render
-   implementer --member impl-<N> …` (spec 1). Prints `DISPATCH {name,
-   agent, brief: <path>}` and exits 0. The controller makes the `task`
-   call; the tier check runs under spec 4's `--apply`.
+8. `ledger.mjs row`, `dispatch-prompt.mjs render implementer --member
+   impl-<N> …` (spec 1), then `ledger.mjs dispatch`, which reads the
+   rendered brief's sidecar and refuses without it (spec 1 D3). Prints
+   `DISPATCH {name, agent, brief: <path>}` and exits 0. The controller makes
+   the `task` call; the tier check runs under spec 4's `--apply`.
 
 **D3. Answers are the record.** `pull.json` holds every question, answer,
 free text and timestamp, plus every command the script ran with its exit
 and a bounded stdout. The relabel comment carries nothing the answer did
-not supply; the templates are the script's, copied from ADR 0013 § 6 and
+not supply; the templates are the script's, copied from ADR 0013 § 4 and
 pinned by the existing prose tests, retargeted to the script's output.
 
 **D4. The tick names the driver.** `PULL #N …` rows read `PULL #N — pull.mjs
