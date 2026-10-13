@@ -3062,7 +3062,7 @@ test("CLI: a tick refused by the gh or the ledger read still records `ticked`, a
   assert.equal(readFileSync(path, "utf8"), untouched);
 });
 
-test("CLI: a tick refused over a heartbeat file it cannot read leaves the file as it was; one that completes replaces it and still records `ticked`", (t) => {
+test("CLI: a tick refused over a heartbeat file it cannot read leaves the file as it was; one that completes also leaves it unchanged to let rotate still refuse", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-degraded-")));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
@@ -3074,11 +3074,10 @@ test("CLI: a tick refused over a heartbeat file it cannot read leaves the file a
   assert.match(refused.stderr, /gh pr list/);
   assert.equal(readFileSync(path, "utf8"), corrupt, "a refused tick must not replace a file it could not read");
 
-  const before = Date.now();
+  // A completed tick also leaves degraded files unchanged, so a later rotate still refuses
   const done = runCli(["--state", path], IDLE);
   assert.equal(done.status, 0, done.stderr);
-  const after = JSON.parse(readFileSync(path, "utf8"));
-  assert.ok(after.ticked.at >= before && after.ticked.at <= Date.now(), `ticked.at ${after.ticked.at} is not this tick`);
+  assert.equal(readFileSync(path, "utf8"), corrupt, "a completed tick must not replace a degraded heartbeat file, so rotate can still refuse");
 });
 
 test("CLI: a draining run with no open PR and no live implementer ends on the run-over ACTION, folded or not", (t) => {

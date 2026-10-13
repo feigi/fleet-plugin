@@ -184,19 +184,16 @@ test("CLI: the value it writes back is the SANITIZED one, not the junk it read",
   assert.deepEqual(withoutMark(r.state), { note: "not ours", quiet: 0, elapsed: 6, digest: "abc123" });
 });
 
-test("CLI: a JSON array state file is announced and beats at the base interval", () => {
-  // `[1,2,3]` is JSON, and `typeof [] === "object"`, so the array guard is the
-  // only thing between it and reading `parsed.quiet` off an array — which is
-  // `undefined`, sanitizes to 0, and would have this run silently agree that
-  // the file was fine.
-  const r = run(["--base", "1", "--hold", "1"], { state: "[1,2,3]" });
+test("CLI: a JSON array state file is announced, and the file is not replaced — a fire is reported for the skipped write", () => {
+  const corrupt = "[1,2,3]";
+  const r = run(["--base", "1", "--hold", "1"], { state: corrupt });
   assert.equal(r.status, 0);
   assert.match(r.stderr, /WARNING .* is not an object/);
-  assert.match(r.stdout, /interval elapsed/);
-  // Replaced by a real object, not patched as one: an array `rest` spread into
-  // the write would persist `{"0":1,"1":2,"2":3,…}` and the next read would
-  // announce the same fault forever.
-  assert.deepEqual(withoutMark(r.state), { quiet: 0, elapsed: 0, digest: "" });
+  // A fire for the skipped write during the hold
+  assert.match(r.stdout, /heartbeat: held .* interval elapsed/);
+  // The degraded file is left byte-identical, not replaced — returns null since
+  // the unparseable file was not overwritten
+  assert.equal(r.state, null, "degraded file should not be written, so it remains [1,2,3]");
 });
 
 test("CLI: a state file it cannot READ is announced, never silently discarded", (t) => {
