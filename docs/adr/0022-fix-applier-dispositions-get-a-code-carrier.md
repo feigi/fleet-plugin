@@ -52,6 +52,17 @@ filter buries real work: 3 or more refuted entries promoted later, counted
 with ADR 0002's promotion marks. Read Decision 7's "in-scope" as "in-scope, or
 out of scope above the claim bar", and the #2881 amendment's abstaining
 verdict, a mismatch, as in scope only: out of scope it is row 6b.
+Amended by ADR 0032 (#3171, ruled 2026-10-13 by the maintainer, from a
+grilling session on #2878): every issue the plugin creates is filed
+`needs-triage`, and only triage sets `ready-for-agent`. Read Decision 5's
+first row (and the in-scope `suggestion` its refuter let survive, which
+files as that row) and the #2404 amendment's out-of-scope `survived` row as
+open, `needs-triage`; the #2404 amendment's "filing it `ready-for-agent`"
+as filing it `needs-triage`; and Context's ADR 0001 bar, "filed
+`ready-for-agent`", as superseded. Decision 5's table now applies ADR 0032's
+label rule in place of ADR 0001's bar. An open issue labelled
+`ready-for-agent` still answers a `needs-triage` row, since triage already
+promoted it.
 
 ## Context
 

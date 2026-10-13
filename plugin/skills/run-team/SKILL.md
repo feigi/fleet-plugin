@@ -888,8 +888,9 @@ terminating in exactly one dispatch or an empty shortlist:
    `sizing-a-ticket`'s *torn → take the heavier row*, deliberately — see that skill.
 
    **This is a consumption gate**, priced for the seat where implementer
-   divergence costs a claim, a worktree and a dispatch; the filing-time
-   counterpart was repriced to *is the defect confirmed* and states its own bar inline.
+   divergence costs a claim, a worktree and a dispatch; at filing time every
+   issue the plugin creates is filed `needs-triage`, and only triage sets
+   `ready-for-agent`.
 
    No sizing agent here. `sizing-a-ticket` picks the *process path*, and that is
    phase 2's call, after the ticket is claimed.
@@ -2029,10 +2030,10 @@ It blocks, then prints one line. Which line it is, is the whole protocol:
 
 The interval doubles while the fleet asks for nothing and stops at `--ceiling`,
 so a quiet night costs ~26 wakes instead of ~96. **The ceiling is a real bound,
-not a formality**: supply grows from OUTSIDE the fleet — a ticket you triage, a
-correction ticket a reviewer files — and that arrival emits no event either, so
-the ceiling is your worst-case latency for noticing it. Do not raise it past 30
-minutes.
+not a formality**: supply grows from OUTSIDE the fleet — a ticket you triage,
+one a reviewer filed `needs-triage` included — and that arrival emits no
+event either, so the ceiling is your worst-case latency for noticing it.
+Do not raise it past 30 minutes.
 
 **The beat does not stop on idleness.** An empty shortlist and an empty supply are
 not a reason to end the run; they are the state a newly triaged ticket arrives
@@ -3135,7 +3136,15 @@ a minute apart showed *different* mutants, so a member's report and any single
    comment on an existing *follow-up* issue is filed: that is
    `review-and-fix.md` step 5, not a violation. Not filed → file it or halt,
    never label over it — and file it the way step 5 does, through
-   `ledger.mjs check "<subject>"`, never a bare search. The finisher files last,
+   `ledger.mjs check "<subject>"`, never a bare search, labelled `needs-triage`
+   as every issue the plugin creates is, its body carrying the refuter's
+   verdict or the review's votes and the candidate remedy. A duplicate is a
+   comment citing that verdict on the existing issue, never a relabel: an open
+   `ready-for-agent` issue triage already promoted holds the deferral as it
+   stands. Only triage sets `ready-for-agent`, and step 5's guard on this rule —
+   open `needs-triage` issues citing `Deferred from PR` above 40 on 3
+   consecutive run dates send it back to the maintainer — counts these
+   filings too. The finisher files last,
    off its own read of what the reviewer left behind, so a deferral it reads as
    unfiled may already be on the tracker under someone else's wording. Then
    record it the way step 5 does: `ledger.mjs filed <N> "<subject>"`

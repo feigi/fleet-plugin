@@ -2,14 +2,18 @@
 // tracker's own label descriptions — three of the five cells were byte-identical
 // to `gh api repos/feigi/claude-config/labels/<name> --jq .description` when this
 // was written. A transcript has no owner, so it drifts against whichever side
-// moves. ADR 0001 repriced the filing bar to "is the defect confirmed"; the
-// `ready-for-agent` cell kept saying "Fully specified", which a remedy-open
-// ticket is by construction not.
+// moves. ADR 0001 repriced the filing bar to "is the defect confirmed", and the
+// `ready-for-agent` cell's "Fully specified" contradicted it; #836 stripped the
+// criterion out of the cell.
 //
-// The fix was to strip the criterion rather than restate it, so what needs
-// guarding is a RE-ADDITION, and its vector is named and still live: the
-// `ready-for-agent` description on the tracker still carries the old wording,
-// and anyone re-syncing this column from it puts the contradiction back.
+// #3171 (ADR 0032) supersedes that bar: every issue the plugin creates is filed
+// `needs-triage`, and only triage sets `ready-for-agent`. The contradiction
+// #836 guarded is gone with the bar, so the `ready-for-agent` pin is inverted:
+// what it holds now is that the cell names triage as the only seat that sets
+// the label, and the file's filing-time gloss states the rule itself. The
+// vector is the old one in reverse — anyone restating ADR 0001's bar here puts
+// a filing path to `ready-for-agent` back into the file the skills read their
+// label vocabulary from.
 //
 // #836 raises the `ready-for-agent` cell alone. The `ready-for-human` pin below
 // is an ADDITION, made under the ticket's own acceptance criterion that "the
@@ -19,23 +23,10 @@
 // `ready-for-human` description does not narrow to implementation — so what is
 // pinned there is the narrowing itself.
 //
-// CEILING: each test pins one row slice, on three things — the role-to-label-
-// string mapping, that the gloss still turns on whether an AFK agent can take
-// the work, and the absence of the restated criterion. The middle one is what
-// stops the negative passing on an emptied cell; the label-string companion
-// alone does not, because it pins columns the gloss is not in. None of this
-// proves the column carries no OTHER restated criterion — no assertion can. The
-// bound is the file's own stated job at `:3`, which "maps those roles to the
-// actual label strings": a mapping, not a criteria source.
-//
-// Measured as of this commit, on a copy of the tree with `cp` restore after
-// each: seven mutations — the old description re-synced verbatim, the criterion
-// re-added with two words wedged into the adjacency, `ready-for-human` narrowed
-// back to implementation, that same narrowing with the noun gone, the
-// label-string mapping broken, and each gloss cell emptied out entirely — each
-// reddened its own pin and no other. Controls: a benign reword of either pinned
-// cell, an unpinned row's cell rewritten, and the table re-padded to a wider
-// column all stayed green.
+// CEILING: each row test pins one row slice — the role-to-label-string mapping,
+// that the gloss still says who the label routes work to, and one cell claim.
+// The gloss test pins one paragraph. None of this proves the file carries no
+// OTHER restated criterion — no assertion can.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -48,29 +39,44 @@ const TABLE = Pin.file(join(REPO, "docs", "agents", "triage-labels.md"));
 // a neighbouring row satisfy the assertion with the cell rewritten.
 const row = (label) => TABLE.between(`| \`${label}\``, "\n|", `the ${label} row`).text;
 
-test("the ready-for-agent row maps the role and states no filing criterion", () => {
+test("the ready-for-agent row maps the role and names triage as the only seat that sets it", () => {
   const r = row("ready-for-agent");
   assert.match(
     r,
     Pin.phrase("| `ready-for-agent` | `ready-for-agent` |"),
     "the ready-for-agent row no longer maps the role to its label string — that mapping is what scripts read",
   );
-  // The gloss itself, which the mapping companion above does not cover: it pins
-  // columns 1 and 2, so emptying column 3 leaves it green and the negative
-  // below then passes on nothing at all.
   assert.match(
     r,
     /AFK agent/,
-    "the ready-for-agent gloss no longer says who the label routes work to, so the negative below is passing on an empty cell",
+    "the ready-for-agent gloss no longer says who the label routes work to",
   );
-  // The stem, not the phrase. A negative pinned to the adjacency is trivially
-  // evaded — measured: `/[Ff]ully\s+\w*\s*specified/` stayed green against
-  // "Ready for a fully and precisely specified AFK agent", because a one-word
-  // gap does not span two. A one-row gloss cell has no innocent use of the stem.
-  assert.doesNotMatch(
+  assert.match(
     r,
-    /specifi/i,
-    "the ready-for-agent gloss is back to promising a fully specified ticket, which the filing bar in `commands/review-and-fix.md` step 5 contradicts — a confirmed defect files here with its remedy still open",
+    Pin.phrase("only triage sets it"),
+    "the ready-for-agent gloss no longer says only triage sets the label — a filer reading the cell may file straight to `ready-for-agent` again",
+  );
+});
+
+// The filing-time gloss, one paragraph: bounded by its own bold lead and the
+// blank line that closes it.
+const filingGloss = () => TABLE.between("**Filing time.**", "\n\n", "the filing-time gloss").text;
+
+test("the filing-time gloss files every plugin-created issue needs-triage, a confirmed defect included", () => {
+  const g = filingGloss();
+  // The rule and the case ADR 0001 sent elsewhere as ONE span: a confirmed
+  // defect is exactly the finding the superseded bar filed `ready-for-agent`.
+  assert.match(
+    g,
+    Pin.phrase("Every issue the plugin creates is filed `needs-triage` — a confirmed defect included, because confirming a defect does not settle its remedy."),
+    "the filing-time gloss no longer files every plugin-created issue `needs-triage`, a confirmed defect included",
+  );
+  assert.match(g, Pin.phrase("Only triage sets `ready-for-agent`."), "the filing-time gloss no longer reserves `ready-for-agent` to triage");
+  // Duplicates never relabel: a pin on the comment-only rule.
+  assert.match(
+    g,
+    Pin.phrase("comments there and changes no label, so an issue triage already promoted stays `ready-for-agent`."),
+    "the filing-time gloss no longer says a duplicate finding changes no label",
   );
 });
 

@@ -44,12 +44,12 @@
 // noticing work that arrives with no event to announce it.
 //
 // That case is real and is the reason the ceiling is not simply "long": supply
-// grows from OUTSIDE the fleet. A maintainer triages a ticket, or a reviewer
-// files a correction ticket carrying `ready-for-agent`, and neither emits
-// anything the controller can observe. An unbounded back-off would therefore
-// reintroduce #3's own defect in a form that reads like a feature — asleep at a
-// level check, just slower. Twenty minutes bounds it while still cutting a
-// quiet eight hours from ~96 wakes to ~26.
+// grows from OUTSIDE the fleet. A maintainer triages a ticket — including one a
+// reviewer filed `needs-triage`, since only triage sets `ready-for-agent` —
+// and that emits nothing the controller can observe. An unbounded back-off
+// would therefore reintroduce #3's own defect in a form that reads like a
+// feature — asleep at a level check, just slower. Twenty minutes bounds it
+// while still cutting a quiet eight hours from ~96 wakes to ~26.
 export function interval({ quiet, base, ceiling, multiplier }) {
   // Math.min, never a conditional chain: `base * multiplier ** quiet` overflows
   // to Infinity after ~1000 quiet ticks and every comparison against Infinity

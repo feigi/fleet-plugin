@@ -1173,14 +1173,14 @@ const deferred = (bucket, index, more = {}) => ({ bucket, index, scope: "in", cl
 // Each row: its entry, its home, and homes that break it — the wrong label and
 // the wrong state among them.
 const ROWS = [
-  [1, deferred("survived", 0, { reason: "mutual-exclusion" }), OPEN_RFA,
-    [["labelled needs-triage", OPEN_NT], ["closed", closed(OPEN_RFA)], ["carrying both triage labels", BOTH]]],
+  [1, deferred("survived", 0, { reason: "mutual-exclusion" }), OPEN_NT,
+    [["labelled nothing", { ...OPEN_NT, labels: [] }], ["closed", closed(OPEN_NT)], ["carrying both triage labels", BOTH]]],
   [2, deferred("survived", 0, { reason: "false-rationale" }), RECORD,
     [["labelled needs-triage, not wontfix", { ...RECORD, labels: ["needs-triage"] }], ["open", reopened(RECORD)],
       ["another PR's record", { ...RECORD, title: "PR #41 review: the suggestion band, checked" }]]],
   [3, deferred("unverified", 0), OPEN_NT, [["labelled nothing", { ...OPEN_NT, labels: [] }], ["closed", closed(OPEN_NT)], ["carrying both triage labels", BOTH]]],
   [4, deferred("unverified", 1, { verdictPath: REFUTED_V }), RECORD, [["labelled needs-triage, not wontfix", { ...RECORD, labels: ["needs-triage"] }], ["open", OPEN_NT]]],
-  [5, deferred("unverified", 1, { verdictPath: STOOD_V, reason: "remedy-worse" }), OPEN_RFA, [["labelled needs-triage", OPEN_NT], ["closed", closed(OPEN_RFA)]]],
+  [5, deferred("unverified", 1, { verdictPath: STOOD_V, reason: "remedy-worse" }), OPEN_NT, [["labelled nothing", { ...OPEN_NT, labels: [] }], ["closed", closed(OPEN_NT)]]],
   // An out-of-scope suggestion refuted and filed open is the shape row 6a exists to catch.
   ["6a", deferred("unverified", 2, { scope: "out", verdictPath: OUT_REFUTED_V }), RECORD,
     [["open, labelled needs-triage", OPEN_NT], ["labelled needs-triage, not wontfix", { ...RECORD, labels: ["needs-triage"] }], ["open", reopened(RECORD)]]],
@@ -1192,8 +1192,8 @@ const ROWS = [
   [7, deferred("survived", 0, { claimKind: "shape", reason: "remedy-worse" }), RECORD,
     [["labelled needs-triage, not wontfix", { ...RECORD, labels: ["needs-triage"] }], ["open", reopened(RECORD)]]],
   // false-rationale is row 2's reason only in scope: out of scope it is row 8.
-  [8, deferred("survived", 1, { scope: "out", reason: "false-rationale" }), OPEN_RFA,
-    [["labelled needs-triage", OPEN_NT], ["closed", closed(OPEN_RFA)], ["the closed suggestion-band record", RECORD], ["carrying both triage labels", BOTH]]],
+  [8, deferred("survived", 1, { scope: "out", reason: "false-rationale" }), OPEN_NT,
+    [["labelled nothing", { ...OPEN_NT, labels: [] }], ["closed", closed(OPEN_NT)], ["the closed suggestion-band record", RECORD], ["carrying both triage labels", BOTH]]],
 ];
 for (const [n, entry, home, wrong, note] of ROWS) {
   test(`filing row ${n}${note ? `, ${note}` : ""}: its home passes, and the wrong label or the wrong state is a mismatch naming the row`, () => {
@@ -1229,27 +1229,29 @@ test("filing row 3 outranks row 6b: a crashed unverified finding is named row 3 
   assert.match(tableCore(entry, { 9: RECORD })[0], /^unverified\[0\]: filing row 3 \(/);
 });
 
-test("an out-of-scope survivor is filed open ready-for-agent whatever its reason, and escalates nothing at any severity", () => {
+test("an out-of-scope survivor is filed open needs-triage whatever its reason, and escalates nothing at any severity", () => {
   for (const reason of [undefined, "", "false-rationale", "mutual-exclusion", "remedy-worse", "remedy-outside-diff", "outside-ticket-files"]) {
-    const r = tableRun(deferred("survived", 1, { scope: "out", reason }), { 9: OPEN_RFA });
+    const r = tableRun(deferred("survived", 1, { scope: "out", reason }), { 9: OPEN_NT });
     assert.deepEqual([r.violations, r.escalations, r.unchecked], [[], [], []], String(reason));
   }
   // survived[1] is critical, and its remedy sits outside the diff: still no escalation.
-  const r = tableRun(deferred("survived", 1, { scope: "out", reason: "remedy-outside-diff", remedyFiles: ["src/b.js"] }), { 9: OPEN_RFA });
+  const r = tableRun(deferred("survived", 1, { scope: "out", reason: "remedy-outside-diff", remedyFiles: ["src/b.js"] }), { 9: OPEN_NT });
   assert.deepEqual([r.violations, r.escalations], [[], []]);
   // Declared out on a touched line it is in scope, so false-rationale is row 2's, not row 8's.
-  assert.match(tableCore(deferred("survived", 0, { scope: "out", reason: "false-rationale" }), { 9: OPEN_RFA })[0], /^survived\[0\]: filing row 2 \(/);
+  assert.match(tableCore(deferred("survived", 0, { scope: "out", reason: "false-rationale" }), { 9: OPEN_NT })[0], /^survived\[0\]: filing row 2 \(/);
 });
 
-test("an open ready-for-agent issue answers a needs-triage row; an open needs-triage one never answers a ready-for-agent row", () => {
-  for (const entry of [deferred("unverified", 0), deferred("unverified", 2, { scope: "out", verdictPath: OUT_STOOD_V }),
-    deferred("unverified", 2, { scope: "out", verdictPath: OUT_UNDECIDED_V })]) {
+test("every open filing row is a needs-triage row: needs-triage or a triage-promoted ready-for-agent answers it, no triage label never does", () => {
+  // No open row requires ready-for-agent: only triage sets it.
+  assert.deepEqual(Object.keys(FILING_ROWS).filter((n) => FILING_ROWS[n].open && FILING_ROWS[n].open !== "needs-triage"), []);
+  for (const entry of [deferred("survived", 0, { reason: "mutual-exclusion" }), deferred("unverified", 0),
+    deferred("unverified", 1, { verdictPath: STOOD_V, reason: "remedy-worse" }),
+    deferred("unverified", 2, { scope: "out", verdictPath: OUT_STOOD_V }),
+    deferred("unverified", 2, { scope: "out", verdictPath: OUT_UNDECIDED_V }), deferred("survived", 1, { scope: "out" })]) {
+    assert.deepEqual(tableCore(entry, { 9: OPEN_NT }), [], JSON.stringify(entry));
     assert.deepEqual(tableCore(entry, { 9: OPEN_RFA }), [], JSON.stringify(entry));
-  }
-  for (const entry of [deferred("survived", 0, { reason: "mutual-exclusion" }), deferred("unverified", 1, { verdictPath: STOOD_V, reason: "remedy-worse" }),
-    deferred("survived", 1, { scope: "out" })]) {
-    assert.match(tableCore(entry, { 9: OPEN_NT })[0] ?? "",
-      /: filing row [158] \(.*\): it belongs in an open issue labelled ready-for-agent, and #9 is open, titled "a deferred finding", labelled needs-triage$/, JSON.stringify(entry));
+    assert.match(tableCore(entry, { 9: { ...OPEN_NT, labels: [] } })[0] ?? "",
+      /: filing row (?:[1358]|6b) \(.*\): it belongs in an open issue labelled needs-triage or ready-for-agent, and #9 is open, titled "a deferred finding", labelled nothing$/, JSON.stringify(entry));
   }
 });
 
@@ -1379,37 +1381,39 @@ test("a suggestion's verdict file that abstains is no refuter evidence; one that
 
 // The CLI against the stubbed tracker.
 
-test("a confirmed defect deferred for an allowed reason and filed needs-triage is a mismatch naming row 1; relabelled ready-for-agent it is ok", (t) => {
+test("a confirmed defect deferred for an allowed reason is ok filed needs-triage or promoted ready-for-agent, and a mismatch naming row 1 filed with no triage label", (t) => {
   const f = fixture(t);
-  f.setIssues({ 81: openIssue("needs-triage") });
+  f.setIssues({ 81: { ...openIssue("needs-triage"), labels: [] } });
   const entries = f.baseEntries();
   entries[0] = f.entry("survived", 0, { disposition: "defer", reason: "mutual-exclusion", issue: 81 });
   f.writeRecord(entries);
   const r = f.check();
-  mismatch(r, /^fix-pr-40: survived\[0\]: filing row 1 \(an in-scope survived finding deferred for an allowed reason other than false-rationale\): it belongs in an open issue labelled ready-for-agent, and #81 is open, titled "a deferred finding", labelled needs-triage$/m);
+  mismatch(r, /^fix-pr-40: survived\[0\]: filing row 1 \(an in-scope survived finding deferred for an allowed reason other than false-rationale\): it belongs in an open issue labelled needs-triage or ready-for-agent, and #81 is open, titled "a deferred finding", labelled nothing$/m);
   assert.equal(r.json.violations.length, 1);
   assert.match(f.ledgerCli("dispatch", "40", "finisher-pr-40").stderr, /dispositions mismatch/);
+  f.setIssues({ 81: openIssue("needs-triage") });
+  okVerdict(f.check());
   f.setIssues({ 81: openIssue("ready-for-agent") });
   okVerdict(f.check());
   assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
 });
 
-test("a critical out-of-scope survivor filed open ready-for-agent is ok, never escalate; filed needs-triage or to the record it is a mismatch naming row 8", (t) => {
+test("a critical out-of-scope survivor filed open needs-triage is ok, never escalate; filed with no triage label or to the record it is a mismatch naming row 8", (t) => {
   const f = fixture(t);
   f.writeReview({ ...f.review, survived: [f.review.survived[0], { ...f.review.survived[1], severity: "critical" }] });
-  f.setIssues({ 13: bandRecord() });
+  f.setIssues({ 13: bandRecord(), 82: { ...openIssue("needs-triage"), labels: [] } });
   const entries = f.baseEntries();
-  entries[1] = f.entry("survived", 1, { scope: "out", disposition: "defer", reason: "remedy-outside-diff", remedyFiles: ["src/b.js"], issue: 81 });
+  entries[1] = f.entry("survived", 1, { scope: "out", disposition: "defer", reason: "remedy-outside-diff", remedyFiles: ["src/b.js"], issue: 77 });
   f.writeRecord(entries);
   const r = f.check();
   okVerdict(r);
   assert.deepEqual(r.json.escalations, []);
   assert.ok(f.row().includes(`dispositions-ok=fix-pr-40:${f.run}`), f.row());
-  for (const [issue, is] of [[77, "open, titled \"a deferred finding\", labelled needs-triage"], [13, "closed, titled \"PR #40 review: the suggestion band, checked\", labelled wontfix"]]) {
+  for (const [issue, is] of [[82, "open, titled \"a deferred finding\", labelled nothing"], [13, "closed, titled \"PR #40 review: the suggestion band, checked\", labelled wontfix"]]) {
     for (const reason of ["remedy-outside-diff", "false-rationale"]) {
       entries[1] = f.entry("survived", 1, { scope: "out", disposition: "defer", reason, issue });
       f.writeRecord(entries);
-      mismatch(f.check(), new RegExp(`^fix-pr-40: survived\\[1\\]: filing row 8 \\(an out-of-scope survived finding, whatever its reason\\): it belongs in an open issue labelled ready-for-agent, and #${issue} is ${is.replace(/[()]/g, "\\$&")}$`, "m"));
+      mismatch(f.check(), new RegExp(`^fix-pr-40: survived\\[1\\]: filing row 8 \\(an out-of-scope survived finding, whatever its reason\\): it belongs in an open issue labelled needs-triage or ready-for-agent, and #${issue} is ${is.replace(/[()]/g, "\\$&")}$`, "m"));
     }
   }
 });
