@@ -1761,7 +1761,9 @@ owes beyond its row:
   runner — **Reviewers** says which, per harness) and record `reviewed=` off its
   digest with `ledger.mjs review <M>`, then run the tick: a PR with survived or unverified findings prints as
   `DISPATCH fix-pr PR#<M>`. No survived or unverified finding and nothing to file → skip the
-  fix-applier and dispatch the **finisher** directly: no member will touch that
+  fix-applier and dispatch the **finisher** directly — or, when that head's
+  bound conclusion is red and not solely staleness, the red-check fixer
+  instead (**Then dispatch a red-check fixer**, below): no member will touch that
   PR, so no push is coming and nothing will wake you. A review that failed is
   not a result — **Reviewers** says who retries it and what takes over.
 - **Monitor: `ready-to-merge` appears** → nothing to record; run the tick, and
@@ -1812,7 +1814,9 @@ owes beyond its row:
   place. The diff-validating `check` job green with no heavy job (the
   diff-validating suites, not the `rebase-check` currency gate) in `failure`
   → a finisher CANDIDATE (gated below), a `check`
-  **failure** → a fixer. A `check`-green board whose heavy jobs are merely
+  **failure** that is not solely staleness → the **red-check fixer** (**Then
+  dispatch a red-check fixer**, below), behind the same review-returned and
+  fix-applier-reported gate as a finisher. A `check`-green board whose heavy jobs are merely
   `skipped` (behind-count staleness, the normal case after a merge) still labels — do NOT
   gate on `ci-state --quiet` exit 0, which a behind PR never reaches. **This
   edge fires for every CI run the PR produces, and the implementer's own
@@ -1835,10 +1839,15 @@ owes beyond its row:
   first — including any ruling you have withdrawn or reversed — then dispatch
   (below); a final report is not proof it stopped. A PR that needs nothing fixed
   reaches a finisher through the **fix-applier reports `no-op`** bullet below,
-  never by waiting for a second CI event this head will never produce.
+  never by waiting for a second CI event this head will never produce. The
+  same goes for a red one: a red that fired before the review never fires
+  again, so the **fix-applier reports `no-op`** and **review result lands**
+  bullets are also the only routes to the red-check fixer there.
   Then run the tick.
 - **A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch
-  the finisher **now**, against the existing head. No push means no new run, and
+  the finisher **now**, against the existing head — when that head's bound
+  conclusion is red, the red-check fixer instead (**Then dispatch a red-check
+  fixer**, below), never a finisher and never a wait. No push means no new run, and
   the Monitor above is edge-keyed on `<run-id>:<attempt>:<conclusion>` — that
   head's terminal state already fired once and will never fire again, so waiting
   for the CI event waits forever. This stays a common outcome on a clean PR:
@@ -2558,6 +2567,46 @@ is a review fix-applier, dispatched as above. On a PR carrying
 `ready-to-merge`, the push moves the head after the label, so the next merge
 bot refuses it `head-moved-after-label-#<M>`: a fresh finisher, per **Failure
 handling**.
+
+**Then dispatch a red-check fixer** — on a `check`-job `failure` bound to the
+PR's current head that is not **solely** staleness: a `rebase-check` red, or
+heavy jobs `skipped`, that comes only off the behind-count gets no fixer (the
+five-condition note in the fix-applier block below states how to establish
+that). The tick prints no `DISPATCH` for it, so you reconcile it yourself, and
+it always goes after the review, never before. Take the common case, the
+implementer's own first CI firing turning red before any review exists: the
+review is still dispatched against that head as normal, because a red suite is
+review evidence and not a blocker. While a review or a review fix-applier on
+the PR is live or still owes its report — a dispositions mismatch awaiting its
+retry and a conflict hold awaiting its fix-applier included — the red-check
+fixer does not fire: their push starts a new run, and a fixer racing them
+would work on a SHA that is still moving. These edges dispatch it, each the
+finisher's own: **Monitor: CI run completes** binding a red on a head
+whose review has returned and whose fix-applier, if any, has reported;
+**A fix-applier reports `no-op`**, or a SHA you have already bound, when that
+head's bound conclusion is red; and **A review result lands** with no finding
+and nothing to file, when that head's bound conclusion is red. The Monitor is
+edge-keyed on `<run-id>:<attempt>:<conclusion>`, so a red that fired before the
+review never fires again, and with no push there is no new run — the other
+edges are the only route there, so do not wait for an event. Edit one of these
+bullets without the others and what strands is exactly the red-only PR.
+
+Name it `fix-pr-<M>`, or the next free suffix (`-b`, `-c` …) — `dispatch`
+refuses a reused name — record it with `ledger.mjs dispatch <pr#> <name>`
+before the call, and dispatch it with the `agent` that command printed (`null`
+while no conflict hold stands, as for a review fix-applier), in the PR's
+existing worktree. Its prompt takes the prompt below's worktree, branch and
+path discipline, but in place of its review paragraphs: read the failing job's
+log, fix the cause, run `<testCmd>`, push, report the new head, and **stop**.
+It is told outright not to watch, poll or wait for CI: your persistent Monitor
+owns the next run on the pushed head, and the finisher gate — review returned
+AND fix-applier report sent — applies to this member the same way. Settle it
+`applied:<head>` once a fix is pushed. Settle it `no-op` only when the red
+turns out not to be this member's to fix — a flake that passes on rerun, or
+staleness — with nothing pushed; `no-op` counts as landed, so it never stands
+for "could not fix". Settle it `failed` when it cannot reach green, which the
+**Failure handling** row "Reviewer, fix-applier or red-check fixer cannot
+reach green" covers.
 
 **A `DISPATCH fix-pr PR#<M>` on a dispositions mismatch** — the PR's row carries
 `dispositions-mismatch=<member>:<run>` for its latest review's run, and no later
@@ -4147,7 +4196,7 @@ Plan it as a PR the run's own merge queue lands, never as an edit-and-continue.
 | Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands or leaves a fork open; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |
 | Implementer blocked or ambiguous *mid-implementation* | Free the slot, leave `in-progress`, report — the row above is the pre-code bail, not this one |
 | `review-pr` workflow throws or returns no tree | Retry once under the next letter (`review-pr-<pr#>-b`); still failing, report and leave the PR at review-due. Never enqueue the PR as reviewed — the workflow is not a member, so no other row here covers it |
-| Reviewer or fix-applier cannot reach green | Report, leave the PR unlabeled, free the slot |
+| Reviewer, fix-applier or red-check fixer cannot reach green | Report, leave the PR unlabeled, free the slot — a fix-applier or red-check fixer settles `failed` |
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
 | Merge bot finds the worktree ahead of the PR head **on the local-rebase fallback** | `worktree-diverged-#<pr>`, PR stays queued. Read the stray commit; push-or-discard is yours, and the maintainer's if the evidence cannot settle it |
 | Merge bot finds the head moved after `ready-to-merge` was applied | The label binds to the head's net change, not to one SHA: a proven rebase-carry keeps the label — the bot proceeds and reports `rebase-carry-#<pr>` with the labelled and accepted SHAs, and nothing is dispatched. Any other move is `head-moved-after-label-#<pr>`, PR stays queued, label untouched. Dispatch a **fresh** finisher against the new head — the first audit verified a different tree |

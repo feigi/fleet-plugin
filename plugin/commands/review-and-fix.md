@@ -1,5 +1,5 @@
 ---
-description: review a PR, apply recommended actions, push, watch checks until green
+description: review a PR, apply recommended actions, push — standalone, then watch checks until green; under the fleet, report and stop (the controller owns the CI wait)
 argument-hint: [pr-number]
 ---
 

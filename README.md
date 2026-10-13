@@ -68,12 +68,12 @@ non-configurable merge bot:
 directly.
 
 This runs `next-ticket` (claim and size a ticket), `review-and-fix` (review a
-PR, apply recommended actions, push, watch checks), and `run-merge-bot`
+PR, apply recommended actions, push, report), and `run-merge-bot`
 (rebase, wait green, merge) as one coordinated fleet. Each is also invocable
 on its own:
 
 - `/review-and-fix [pr-number]` — review a PR, apply recommended
-  actions, push, watch checks until green.
+  actions, push; standalone it then watches checks until green.
 - `/run-merge-bot` — merge every `ready-to-merge` open PR in
   numeric order.
 - `next-ticket` skill — pick a ready ticket by intent rather than number,
