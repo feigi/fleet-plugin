@@ -32,7 +32,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { environmentNote } from "../plugin/scripts/review-core.mjs";
@@ -59,11 +59,9 @@ const SOURCES = [["scripts/review-core.mjs", join(REPO, "scripts", "review-core.
 // reason: inherited, `git init` exits 0 and creates nothing in the target, so a
 // fixture built under an ambient GIT_DIR would be no repository at all while
 // every status check passed (repo-root.test.mjs's own measurement).
-// `GIT_TEMPLATE_DIR` joins them (#1056): an ambient template directory with no
-// `info/` subdirectory makes `git init` produce no `.git/info`, so the block's
-// `.git/info/exclude` append silently fails and every fixture below would be
-// measuring the ambient host's template instead of the hazard this file
-// exists to catch.
+// `GIT_TEMPLATE_DIR` joins them (#1056): an ambient template directory is the
+// host's, not the fixture's, so every fixture below would be measuring the
+// ambient host's template instead of the hazard this file exists to catch.
 const ENV = {
   ...process.env,
   GIT_DIR: undefined,
@@ -112,25 +110,56 @@ function reviewedRepo(t, { exportIgnore = false } = {}) {
   return dir;
 }
 
+/** The Install step every `installedRepo` writes unless a case names its own. */
+const DEPS_INSTALL = "mkdir -p .deps && echo ok > .deps/marker";
+
+/**
+ * `reviewedRepo`, plus a proven Recipe cache at the repository's workspace
+ * root, where derive-testcmd.sh reads it. Its Install step runs `install.sh`,
+ * whose body is `install` — by default it writes an in-tree dependency
+ * directory that is NOT `node_modules`, `.deps/`, which the repository's own
+ * `.gitignore` covers — and its Test entrypoint runs `check.sh`, which passes
+ * only when `.deps/marker` is there. So the suite is green exactly where the
+ * Install step ran, in whatever layout it installs.
+ */
+function installedRepo(t, { install = DEPS_INSTALL } = {}) {
+  const dir = reviewedRepo(t);
+  writeFileSync(join(dir, ".gitignore"), "ignored.txt\n.deps/\n");
+  writeFileSync(join(dir, "install.sh"), `${install}\n`);
+  writeFileSync(join(dir, "check.sh"), "test -f .deps/marker\n");
+  git(dir, "add", "-A");
+  git(dir, "-c", "user.name=fixture", "-c", "user.email=fixture@invalid", "commit", "-q", "-m", "recipe");
+  mkdirSync(join(dir, ".fleet"), { recursive: true });
+  const recipe = { install: "sh ./install.sh", test: "sh ./check.sh", derivedAt: git(dir, "rev-parse", "HEAD"), installClean: true, testCount: 1 };
+  writeFileSync(join(dir, ".fleet", "recipe.json"), `${JSON.stringify(recipe)}\n`);
+  return dir;
+}
+
+/** The Test entrypoint `installedRepo` proves, run from `snap`'s root as the shared test run runs it. */
+const runSuite = (snap) => spawnSync("sh", ["-c", "sh ./check.sh"], { cwd: snap, env: ENV, encoding: "utf8" }).status;
+
 /**
  * The lines under test, lifted from review-core.mjs's snapshot prompt and rendered
  * with the same `${worktree}` interpolation the script performs: the archive,
- * the emptiness probe, the init/commit, the tree compare, the exclude and the
- * symlink. `$SNAP` and `$SHA` are the shell's, supplied by `cut` below — the
- * lines that mint them are pinned by `review-core-snapshot-path.test.mjs`'s own
- * executed mint test, and repeating that here would test its subject twice
- * while testing this one no better.
+ * the emptiness probe, the init/commit, the tree compare, the Install step and
+ * the status read after it. `$SNAP`, `$SHA` and `$RUN` are the shell's,
+ * supplied by `cut` below — the lines that mint them are pinned by
+ * `review-core-snapshot-path.test.mjs`'s own executed mint test, and repeating
+ * that here would test its subject twice while testing this one no better.
  */
 function cutLines(path) {
   const code = stripComments(readFileSync(path, "utf8"));
   const from = code.search(/^ *git -C \$\{worktree\} archive HEAD/m);
-  const to = code.search(/^ *if \[ -n "\$SNAP" \] && \[ -d \$\{worktree\}\/node_modules \]/m);
+  const to = code.search(UNTRACKED_LINE);
   assert.ok(
     from !== -1 && to > from,
-    `${path} no longer runs from a \`git archive\` down to the node_modules symlink — the block was reshaped past what this test lifts; update it or restore the block`,
+    `${path} no longer runs from a \`git archive\` down to the status read after the Install step — the block was reshaped past what this test lifts; update it or restore the block`,
   );
   return code.slice(from, code.indexOf("\n", to));
 }
+
+/** The block's last line: the snapshot's status, read after the Install step. */
+const UNTRACKED_LINE = /^ *if \[ -d "\$SNAP\/\.git" \]; then git -C "\$SNAP" status --porcelain --untracked-files=all/m;
 
 /** `cutLines`, rendered for one worktree. */
 const render = (path, worktree) => new Function("worktree", "return `" + cutLines(path) + "`")(worktree);
@@ -165,13 +194,20 @@ const renderPrune = (path, scratchRoot, pr) =>
 
 /**
  * A HOME whose `~/.fleet/bin/fleet-run` runs this checkout's own plugin
- * scripts, so the prune line's `fleet-run reclaim-scratch.mjs` reaches the
- * script under test and never an installed plugin or a real scratch root.
+ * scripts, so the prune line's `fleet-run reclaim-scratch.mjs` and the Install
+ * step's `fleet-run derive-testcmd.sh` reach the scripts under test and never
+ * an installed plugin, a real scratch root or a real Recipe cache. A `.sh`
+ * runs under `sh`, with this node first on PATH for the `node -e` it reads
+ * the cache with.
  */
 function fleetHome(t) {
   const home = scratch(t, "snapshot-repo-home-");
   mkdirSync(join(home, ".fleet", "bin"), { recursive: true });
-  writeExecStub(join(home, ".fleet", "bin", "fleet-run"), `#!/bin/sh\ns=$1; shift\nexec "${process.execPath}" "${join(REPO, "scripts")}/$s" "$@"\n`);
+  const scripts = join(REPO, "scripts");
+  writeExecStub(
+    join(home, ".fleet", "bin", "fleet-run"),
+    `#!/bin/sh\ns=$1; shift\ncase $s in *.sh) PATH="${dirname(process.execPath)}:$PATH" exec sh "${scripts}/$s" "$@" ;; esac\nexec "${process.execPath}" "${scripts}/$s" "$@"\n`,
+  );
   return home;
 }
 
@@ -227,7 +263,8 @@ function unlock(parent) {
 
 /**
  * The snapshot block's whole first shell block — from the ambient-var clearing
- * line down to the node_modules symlink, the prune and everything around it —
+ * line down to the status read after the Install step, the prune and
+ * everything around it —
  * rendered with the script's own `${runRootParent}`/`${runRootPrefix}`
  * derivation lifted from the source, so a stray mutation anywhere in it runs
  * here rather than only one on the lines `pruneLine` lifts.
@@ -238,8 +275,8 @@ function snapshotBlock(path, scratchRoot, pr, worktree) {
   assert.ok(derive, `${path} no longer derives \`runRootParent\` and \`runRootPrefix\` as adjacent statements — reshaped past what this test lifts`);
   const { runRootParent, runRootPrefix } = new Function("scratch", "pr", `${derive[0]}\nreturn { runRootParent, runRootPrefix };`)(scratchRoot, pr);
   const from = code.search(/^ *unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_TEMPLATE_DIR *$/m);
-  const to = code.search(/^ *if \[ -n "\$SNAP" \] && \[ -d \$\{worktree\}\/node_modules \]/m);
-  assert.ok(from !== -1 && to > from, `${path} no longer runs from the ambient-var clearing line down to the node_modules symlink — the block was reshaped past what this test lifts`);
+  const to = code.search(UNTRACKED_LINE);
+  assert.ok(from !== -1 && to > from, `${path} no longer runs from the ambient-var clearing line down to the status read after the Install step — the block was reshaped past what this test lifts`);
   const script = new Function("scratch", "pr", "runRootParent", "runRootPrefix", "worktree", "return `" + code.slice(from, code.indexOf("\n", to)) + "`")(
     scratchRoot,
     pr,
@@ -362,17 +399,20 @@ function readRef(script, bin, branch = BRANCH, crossRepo = "false") {
 /**
  * Runs a rendered block and returns what it printed plus where it wrote. The
  * status is returned rather than asserted: two tests below are about a block
- * whose `git archive` FAILS, and that is a scenario, not a test failure.
+ * whose `git archive` FAILS, and that is a scenario, not a test failure. The
+ * block runs with `$RUN` at the run root holding the snapshot, as the real
+ * block mints it, and HOME at a `fleetHome`, so its Install step reads the
+ * fixture's own Recipe cache through this checkout's derive-testcmd.sh.
  */
 function cut(t, script, { snapName = "snapshot-deadbee", env = ENV } = {}) {
   const runRoot = scratch(t, "snapshot-repo-run-");
   const snap = join(runRoot, snapName);
   const r = spawnSync(
     "sh",
-    ["-c", ["SHA=deadbee", `SNAP=${JSON.stringify(snap)}`, 'mkdir -p "$SNAP"', script].join("\n")],
-    { env, encoding: "utf8" },
+    ["-c", ["SHA=deadbee", `RUN=${JSON.stringify(runRoot)}`, `SNAP=${JSON.stringify(snap)}`, 'mkdir -p "$SNAP"', script].join("\n")],
+    { env: { ...env, HOME: fleetHome(t) }, encoding: "utf8" },
   );
-  return { snap, out: r.stdout ?? "", err: r.stderr ?? "", status: r.status };
+  return { runRoot, snap, out: r.stdout ?? "", err: r.stderr ?? "", status: r.status };
 }
 
 for (const [name, path] of SOURCES) {
@@ -452,7 +492,7 @@ for (const [name, path] of SOURCES) {
   // probe sits above the init as TEXT; this is why that order is load-bearing.
   // A `git archive` that produced nothing — no auth, a dead HEAD — leaves the
   // directory `mkdir -p` made, and `.git` is enough to make it look populated,
-  // in every repo rather than only the ones with node_modules.
+  // in every repo.
   test(`${name}: the emptiness probe still sees an empty extraction, and would not above the init`, (t) => {
     const notARepo = scratch(t, "snapshot-repo-norepo-");
     const lines = render(path, notARepo).split("\n");
@@ -532,26 +572,22 @@ for (const [name, path] of SOURCES) {
   });
 
   // #1056 Finding 4: an ambient GIT_TEMPLATE_DIR with no `info/` subdirectory
-  // makes `git init` skip populating `.git/info`, so the block's own
-  // `.git/info/exclude` append has nowhere to land and node_modules goes back
-  // to being untracked but NOT excluded — the exact dirty-status regression
-  // the symlink tests above guard against, reachable through the host's
-  // environment instead of through the diff.
-  test(`${name}: an ambient GIT_TEMPLATE_DIR with no info/ still leaves the snapshot clean`, (t) => {
-    const worktree = reviewedRepo(t);
-    mkdirSync(join(worktree, "node_modules"), { recursive: true });
+  // makes `git init` skip populating `.git/info`. Nothing in the block writes
+  // there: what the Install step leaves behind reads clean by the repository's
+  // own `.gitignore`, which the archive carries, so a snapshot cut under such
+  // a template still settles the tree and still reads clean after the install.
+  test(`${name}: an ambient GIT_TEMPLATE_DIR with no info/ still leaves the snapshot clean after the Install step`, (t) => {
+    const worktree = installedRepo(t);
     const emptyTemplate = scratch(t, "snapshot-repo-template-");
     const { snap, out } = cut(t, renderWithUnset(path, worktree), { env: { ...ENV, GIT_TEMPLATE_DIR: emptyTemplate } });
 
     assert.match(out, /SNAPSHOT_TREE_MATCH/, `an ambient GIT_TEMPLATE_DIR must not stop the init from settling the tree: ${out}`);
-    assert.ok(
-      existsSync(join(snap, ".git", "info", "exclude")),
-      "an ambient GIT_TEMPLATE_DIR without info/ leaves the exclude file missing — node_modules is untracked but not excluded",
-    );
+    assert.match(out, /^SNAPSHOT_INSTALL_EXIT=0$/m, `the Install step did not run to exit 0 under the ambient template: ${out}`);
+    assert.ok(existsSync(join(snap, ".deps", "marker")), "the Install step wrote nothing, so the clean status below proves nothing about what it installs");
     assert.equal(
       git(snap, "status", "--porcelain", "--untracked-files=all"),
       "",
-      "an ambient GIT_TEMPLATE_DIR left the snapshot reading dirty",
+      "an ambient GIT_TEMPLATE_DIR left the snapshot reading dirty after the Install step",
     );
   });
 
@@ -957,56 +993,86 @@ test("environmentNote says a verified snapshot measures the tree, and an unverif
   );
 });
 
-// The snapshot is handed a node_modules symlink AFTER its commit, so it is
-// untracked by construction — and an untracked entry makes every `git status`
-// in the snapshot read dirty, which is the one signal that would otherwise say
-// "this tree is exactly the reviewed commit". Excluded rather than committed:
-// in the index it would change the tree hash the verification rests on.
-test("a snapshot carrying the node_modules symlink still reads clean", (t) => {
-  const worktree = reviewedRepo(t);
-  const modules = join(worktree, "node_modules");
-  mkdirSync(modules, { recursive: true });
-  writeFileSync(join(modules, "marker"), "");
-  const { snap, out } = cut(t, render(SOURCES[0][1], worktree));
+// The snapshot's dependencies are whatever the Recipe's Install step writes,
+// run in the snapshot from its root, after the commit and the tree compare.
+// The fixture installs into `.deps/` — not `node_modules`, the one layout the
+// block used to provision by hand — and its suite passes only where that
+// directory exists, so a green run here is a snapshot the Install step
+// provisioned and nothing else. The control cuts the same fixture with the
+// block's Install step lines taken out, which is the block before the Install
+// step existed for any layout but `node_modules`: the same suite is red there.
+test("an Install step that writes an ignored dependency directory other than node_modules gives a snapshot whose suite passes, and reads clean", (t) => {
+  const worktree = installedRepo(t);
+  const lines = render(SOURCES[0][1], worktree).split("\n");
+  const { snap, out, status } = cut(t, lines.join("\n"));
 
+  assert.equal(status, 0, `the block exited non-zero — a snapshot agent reads that as a failed cut: ${out}`);
   assert.match(out, /SNAPSHOT_TREE_MATCH/, `the fixture's own cut failed: ${out}`);
-  assert.ok(existsSync(join(snap, "node_modules", "marker")), "the symlink is missing — a derived `npm test --` cannot run in there");
-  assert.equal(
-    git(snap, "status", "--porcelain", "--untracked-files=all"),
-    "",
-    "the snapshot reads dirty — the symlink is neither excluded nor committed, so `git status` there no longer says the tree is the reviewed commit",
-  );
-  // And it is NOT tracked: committed instead of excluded, the tree hash would
-  // stop matching the reviewed commit's and every review would report a
-  // mismatch it cannot act on.
-  assert.equal(
-    spawnSync("git", ["-C", snap, "ls-files", "--error-unmatch", "node_modules"], { env: ENV, encoding: "utf8" }).status !== 0,
-    true,
-    "node_modules is tracked in the snapshot — the tree hash cannot match the reviewed commit's",
-  );
+  assert.match(out, /^SNAPSHOT_INSTALL_STEP=sh \.\/install\.sh$/m, `the block did not read the fixture's Install step off its Recipe cache: ${out}`);
+  assert.match(out, /^SNAPSHOT_INSTALL_EXIT=0$/m, `the Install step did not run to exit 0 in the snapshot: ${out}`);
+  assert.ok(existsSync(join(snap, ".deps", "marker")), "the Install step did not run from the snapshot's root — nothing it installs is there");
+  assert.equal(runSuite(snap), 0, "the Test entrypoint fails in the snapshot the Install step provisioned");
+  // The repository's own `.gitignore` covers what the install wrote, so the
+  // snapshot reads clean and the block reports nothing untracked — and the
+  // commit, taken before the install, still holds the reviewed tree.
+  assert.doesNotMatch(out, /SNAPSHOT_UNTRACKED=/, `the block reported an untracked path the repository's own ignore rules cover: ${out}`);
+  assert.equal(git(snap, "status", "--porcelain", "--untracked-files=all"), "", "the snapshot reads dirty after the Install step");
+  assert.equal(git(snap, "rev-parse", "HEAD^{tree}"), git(worktree, "rev-parse", "HEAD^{tree}"), "the snapshot's commit no longer holds the reviewed tree after the Install step");
+
+  const control = cut(t, lines.filter((l) => !l.includes("$INSTALL")).join("\n"));
+  assert.match(control.out, /SNAPSHOT_TREE_MATCH/, `the control's own cut failed, so it controls nothing: ${control.out}`);
+  assert.notEqual(runSuite(control.snap), 0, "the suite passes in a snapshot no Install step ran in — the fixture does not need its install, so the case above proves nothing");
 });
 
-// The symlink the test above needs is created by the block's last line, whose
-// own guard is pinned as text elsewhere. This asserts the fixture actually
-// exercised that line rather than passing because nothing made a symlink.
-test("the block only symlinks node_modules where the reviewed tree has one", (t) => {
-  const worktree = reviewedRepo(t);
-  const { snap } = cut(t, render(SOURCES[0][1], worktree));
-  // `existsSync` resolves through a symlink, so a mutation that bypasses the
-  // `-d ${worktree}/node_modules` guard by producing a DANGLING symlink at
-  // this path would still read as "nothing here" and pass silently.
-  // `lstatSync` inspects the entry itself, dangling or not.
-  let entry = true;
-  try {
-    lstatSync(join(snap, "node_modules"));
-  } catch {
-    entry = false;
-  }
-  assert.ok(!entry, "a snapshot of a repo with no node_modules carries one anyway — the guard on the symlink is gone");
-  assert.ok(existsSync(join(snap, ".git", "info", "exclude")), "the exclude file is missing, so the clean-status property above rests on nothing");
+// What the repository's own ignore rules leave untracked after the Install
+// step is a fact about the repository: the block names it on a line of its
+// own, which the snapshot agent reports as `untracked` and the payload carries
+// in `testEnvironment`, and it adds nothing to the snapshot's exclude file to
+// hide it.
+test("an Install step that leaves an un-ignored file gets it named, and nothing excluded", (t) => {
+  const worktree = installedRepo(t, { install: `${DEPS_INSTALL} && echo stray > stray.txt` });
+  const { snap, out } = cut(t, render(SOURCES[0][1], worktree));
+  const fresh = scratch(t, "snapshot-repo-fresh-");
+  git(fresh, "init", "-q");
+  const exclude = (dir) => (existsSync(join(dir, ".git", "info", "exclude")) ? readFileSync(join(dir, ".git", "info", "exclude"), "utf8") : null);
+
+  assert.match(out, /^SNAPSHOT_INSTALL_EXIT=0$/m, `the Install step did not run to exit 0 in the snapshot: ${out}`);
+  assert.match(out, /^SNAPSHOT_UNTRACKED=\?\? stray\.txt$/m, `the block did not name the file the Install step left un-ignored: ${out}`);
+  assert.doesNotMatch(out, /SNAPSHOT_UNTRACKED=.*\.deps/, `the block named a path the repository's own .gitignore covers: ${out}`);
+  assert.equal(exclude(snap), exclude(fresh), "the block changed the snapshot's exclude file from what `git init` writes — an untracked path is hidden instead of reported");
   assert.match(
-    readFileSync(join(snap, ".git", "info", "exclude"), "utf8"),
-    /^node_modules$/m,
-    "node_modules is no longer excluded in the snapshot's own repository",
+    environmentNote({ repoVerified: true, untracked: ["?? stray.txt"] }),
+    /After the Install step the snapshot reads untracked under the repository's own ignore rules: \?\? stray\.txt\./,
+    "the payload's testEnvironment no longer names what the snapshot reads untracked after the Install step",
   );
+  assert.doesNotMatch(environmentNote({ repoVerified: true }), /After the Install step/, "a snapshot that reads clean is reported as carrying untracked paths");
+});
+
+// A PR that breaks its own install is the PR's defect: the block reports the
+// exit and runs on to its end — the caller turns the exit into a finding and
+// every dimension unrun — and the Recipe cache, proven on the base, is left
+// exactly as it was.
+test("an Install step that exits non-zero is reported with its exit, the block runs on, and the Recipe cache is untouched", (t) => {
+  const worktree = installedRepo(t, { install: "echo install-broke; exit 3" });
+  const cache = join(worktree, ".fleet", "recipe.json");
+  const before = readFileSync(cache, "utf8");
+  const { runRoot, out, status } = cut(t, render(SOURCES[0][1], worktree));
+
+  assert.equal(status, 0, `the block exited non-zero on a failed install — a snapshot agent reads that as a failed cut: ${out}`);
+  assert.match(out, /SNAPSHOT_TREE_MATCH/, `the fixture's own cut failed: ${out}`);
+  assert.match(out, /^SNAPSHOT_INSTALL_EXIT=3$/m, `the Install step's own exit status is not what the block printed: ${out}`);
+  assert.match(readFileSync(join(runRoot, "install.log"), "utf8"), /install-broke/, "the Install step's output did not reach the log the finding names");
+  assert.equal(readFileSync(cache, "utf8"), before, "a failed Install step in the snapshot changed the Recipe cache");
+});
+
+// No Recipe cache: derive-testcmd.sh refuses, the block says so by name, and
+// nothing is run in the snapshot — the Install step is never guessed.
+test("an Install step the Recipe cache cannot supply is reported unread, and nothing runs", (t) => {
+  const worktree = reviewedRepo(t);
+  const { runRoot, out, status } = cut(t, render(SOURCES[0][1], worktree));
+
+  assert.equal(status, 0, `the block exited non-zero with no Recipe cache: ${out}`);
+  assert.match(out, /^SNAPSHOT_INSTALL_UNREAD$/m, `the block did not report an unreadable Install step: ${out}`);
+  assert.doesNotMatch(out, /SNAPSHOT_INSTALL_EXIT=/, `the block ran something as the Install step with no Recipe cache to read it from: ${out}`);
+  assert.ok(!existsSync(join(runRoot, "install.log")), "an install log exists, so something ran as the Install step");
 });
