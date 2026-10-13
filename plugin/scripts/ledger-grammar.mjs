@@ -137,7 +137,7 @@ export function rowNums(text) {
 // the name of the review's own run root under `<scratch>/pr<n>/` (`run-` and
 // the eight characters `mktemp` chose), where its result file `review.json`
 // sits.
-export const REVIEW = /^review=(?<kind>wf|member|fallback):(?<name>[^=\s]+)(?<failed>=failed)?$/;
+export const REVIEW = /^review=(?<kind>wf|member):(?<name>[^=\s]+)(?<failed>=failed)?$/;
 export const REVIEWED = /^reviewed=([0-9a-fA-F]{7,40}):(\d+)\/(\d+)\/(\d+):(run-[A-Za-z0-9]{8})$/;
 
 // The stream a row belongs to: its PR, else its key.
