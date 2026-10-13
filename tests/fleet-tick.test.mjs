@@ -3062,7 +3062,7 @@ test("CLI: a tick refused by the gh or the ledger read still records `ticked`, a
   assert.equal(readFileSync(path, "utf8"), untouched);
 });
 
-test("CLI: a tick refused over a heartbeat file it cannot read leaves the file as it was; one that completes replaces it and still records `ticked`", (t) => {
+test("CLI: a tick refused over a heartbeat file it cannot read leaves the file as it was; one that completes also leaves it unchanged to let rotate still refuse", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-degraded-")));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
@@ -3074,11 +3074,30 @@ test("CLI: a tick refused over a heartbeat file it cannot read leaves the file a
   assert.match(refused.stderr, /gh pr list/);
   assert.equal(readFileSync(path, "utf8"), corrupt, "a refused tick must not replace a file it could not read");
 
-  const before = Date.now();
+  // A completed tick also leaves degraded files unchanged, so a later rotate still refuses
   const done = runCli(["--state", path], IDLE);
   assert.equal(done.status, 0, done.stderr);
-  const after = JSON.parse(readFileSync(path, "utf8"));
-  assert.ok(after.ticked.at >= before && after.ticked.at <= Date.now(), `ticked.at ${after.ticked.at} is not this tick`);
+  assert.equal(readFileSync(path, "utf8"), corrupt, "a completed tick must not replace a degraded heartbeat file, so rotate can still refuse");
+});
+
+test("CLI: a tick over a heartbeat file whose controller cannot be judged warns and leaves it byte-identical, refused or completed", (t) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-junk-controller-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "heartbeat.json");
+  // A parseable file, so the fault is the record and not the JSON: dropping the
+  // key on a write would be a lost record that nothing announced.
+  for (const controller of [{ pid: "29405", lstart: "x" }, null]) {
+    const junk = JSON.stringify({ quiet: 3, elapsed: 0, digest: "old", ticked: { at: 1_000 }, controller });
+    const label = JSON.stringify(controller);
+    writeFileSync(path, junk);
+    const refused = runCli(["--state", path], { ...IDLE, env: { PR_FAIL: "1" } });
+    assert.equal(refused.status, 2, `${label}: ${refused.stderr}`);
+    assert.match(refused.stderr, /WARNING .* holds a controller record that cannot be judged/, label);
+    assert.equal(readFileSync(path, "utf8"), junk, `${label}: a refused tick must not replace the record`);
+    const done = runCli(["--state", path], IDLE);
+    assert.equal(done.status, 0, `${label}: ${done.stderr}`);
+    assert.equal(readFileSync(path, "utf8"), junk, `${label}: a completed tick must not replace the record`);
+  }
 });
 
 test("CLI: a draining run with no open PR and no live implementer ends on the run-over ACTION, folded or not", (t) => {

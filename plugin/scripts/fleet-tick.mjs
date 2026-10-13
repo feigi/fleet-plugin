@@ -1526,14 +1526,18 @@ function main() {
   const digest = createHash("sha256").update(lines.join("\n")).digest("hex");
   const acts = actionable(rows) || over;
   // `seen` is pruned to the live set on the same write; an empty one removes
-  // the key. `ticked` was written at the top of the tick, unless the file
-  // could not be read then: this write replaces such a file, so it carries
-  // the stamp the top of the tick left out.
-  writeState(path, NAME, prev, {
-    quiet: acts ? 0 : prev.quiet + 1, digest,
-    seen: Object.keys(seen).length > 0 ? seen : undefined,
-    ...(priorState.degraded ? { ticked: { at: tickedAt } } : {}),
-  });
+  // the key. A file that was degraded at this read is left byte-identical, so
+  // a same-session rotate still refuses rather than judges none. `ticked` was
+  // written at the top of the tick unless the file was degraded then; one
+  // repaired since reaches this write without it, so this write carries the
+  // stamp the top of the tick left out.
+  if (!prev.degraded) {
+    writeState(path, NAME, prev, {
+      quiet: acts ? 0 : prev.quiet + 1, digest,
+      seen: Object.keys(seen).length > 0 ? seen : undefined,
+      ...(priorState.degraded ? { ticked: { at: tickedAt } } : {}),
+    });
+  }
 
   // Fold only when BOTH hold: nothing to act on, and nothing new to say. A
   // main-checkout hold still holding dispatch stays named on the folded line

@@ -90,6 +90,12 @@ const deadPid = () => spawnSync(process.execPath, ["-e", ""]).pid;
 
 const beat = (agoMs, interval = 300, stopped = "") => ({ beat: { at: Date.now() - agoMs, interval, stopped } });
 
+// The refusal over a heartbeat file rotate cannot judge, whole: the cause that
+// fired, and what removing the file costs. It never prints this run's own omp
+// pid or start time — a value to copy into a hand-written record.
+const REFUSAL_TAIL = " — repair it so its controller record is intact. Removing it makes this rotate judge none: if the previous run was this omp session's, its live members and retired names are not carried forward, so this run can dispatch onto their work and reuse their names.";
+const refusal = (f, cause) => `refusing to rotate ${f.file}: ${join(f.dir, "heartbeat.json")} ${cause}${REFUSAL_TAIL}`;
+
 test("rotate with no heartbeat mark moves the ledger byte-identical to ledger.<UTC stamp>.md, and the next write starts the empty skeleton", (t) => {
   const f = fixture(t);
   const before = Date.now();
@@ -187,7 +193,26 @@ test("a write subcommand leaves a heartbeat file it cannot read as it is — the
   assert.ok(JSON.parse(f.cli(["read"]).stdout).rows.includes("#12 impl-12"), "the write itself still lands");
   const r = f.cli(["rotate"]);
   assert.notEqual(r.status, 0);
-  assert.match(r.stderr, /cannot be read or parsed/);
+  assert.ok(r.stderr.includes(refusal(f, "is not JSON")), r.stderr);
+});
+
+test("every writer leaves a heartbeat file whose controller cannot be judged byte-identical, and a same-session rotate afterwards still refuses", (t) => {
+  // The state rotate sees after any of them must still be the lost-record state
+  // it refuses on, never `none`: a write that replaced the file would drop the
+  // key, and the next rotate would carry nothing.
+  for (const controller of [{ pid: "29405", lstart: "x" }, null]) {
+    const f = fixture(t, { mark: FRESH, extra: { controller } });
+    const before = f.raw();
+    const w = f.cli(["row", "12", "impl-12"]);
+    assert.equal(w.status, 0, w.stderr);
+    assert.match(w.stderr, /WARNING .* holds a controller record that cannot be judged/);
+    assert.equal(f.raw(), before, `${JSON.stringify(controller)}: the ledger stamp must not replace the file`);
+    const r = f.cli(["rotate"]);
+    assert.equal(r.status, 2, r.stderr);
+    assert.ok(r.stderr.includes(refusal(f, "holds a controller record that cannot be judged")), r.stderr);
+    assert.equal(f.raw(), before, "a refusal must not write a record");
+    assert.deepEqual(f.archives(), []);
+  }
 });
 
 test("rotate refuses when the archive name already exists, moving nothing", (t) => {
@@ -329,12 +354,51 @@ test("rotate with no record keeps the mark check — refused while beating, noth
   assert.deepEqual(none.ctl(), { ...OURS, prior: "none" });
 });
 
-test("rotate reads a malformed record as no record", (t) => {
-  for (const controller of [{ pid: "29405", lstart: "x" }, { pid: 0, lstart: "x" }, { pid: process.pid, lstart: "" }, { lstart: "x" }, "29405"]) {
-    const f = fixture(t, { mark: STALE, controller });
+test("rotate with no record counts a tick or ledger write inside its window with no beat, and lets a recorded stop or all-stale marks through", (t) => {
+  const tick = (agoMs) => ({ ticked: { at: Date.now() - agoMs } });
+  const act = (agoMs) => ({ acted: { at: Date.now() - agoMs } });
+  const refused = [
+    ["no beat, fresh tick", tick(5_000), "tick"],
+    ["no beat, fresh ledger write", act(5_000), "ledger write"],
+    ["stale beat, fresh tick", { ...beat(4 * 24 * 60 * 60_000), ...tick(5_000) }, "tick"],
+  ];
+  for (const [label, mark, what] of refused) {
+    const f = fixture(t, { mark });
+    const before = f.raw();
     const r = f.cli(["rotate"]);
-    assert.equal(r.status, 0, `${JSON.stringify(controller)}: ${r.stderr}`);
-    assert.deepEqual(f.ctl(), { ...OURS, prior: "none" });
+    assert.equal(r.status, 2, `${label}: rotated under a controller that is still acting: ${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`still beating or acting — last ${what} `), label);
+    const stalls = new Date(stallsAt({ beat: mark.beat ?? null, ticked: mark.ticked ?? null, acted: mark.acted ?? null })).toISOString();
+    assert.match(r.stderr, new RegExp(`stalled after ${stalls.replaceAll(".", "\\.")}`), `${label}: the stall time named is the one still to come`);
+    assert.equal(readFileSync(f.file, "utf8"), LEDGER, `${label}: a refusal must not touch the ledger`);
+    assert.equal(f.raw(), before, `${label}: a refusal must not write a record`);
+    assert.deepEqual(f.archives(), []);
+  }
+  const proceeds = [
+    ["stopped beat, fresh tick", { ...beat(10_000, 300, "budget exhausted"), ...tick(5_000) }],
+    ["no beat, stale tick", tick(16 * 60 * 60_000)],
+    ["no beat, stale ledger write", act(16 * 60 * 60_000)],
+    ["no beat, stale tick and ledger write", { ...tick(16 * 60 * 60_000), ...act(20 * 60 * 60_000) }],
+  ];
+  for (const [label, mark] of proceeds) {
+    const f = fixture(t, { mark });
+    const r = f.cli(["rotate"]);
+    assert.equal(r.status, 0, `${label}: ${r.stderr}`);
+    assert.equal(f.archives().length, 1, label);
+    assert.deepEqual(f.ctl(), { ...OURS, prior: "none" }, label);
+  }
+});
+
+test("rotate reads a controller key it cannot judge as a degraded file and refuses, whatever the key holds", (t) => {
+  for (const controller of [{ pid: "29405", lstart: "x" }, { pid: 0, lstart: "x" }, { pid: process.pid, lstart: "" }, { lstart: "x" }, "29405", null]) {
+    const f = fixture(t, { mark: STALE, extra: { controller } });
+    const before = f.raw();
+    const r = f.cli(["rotate"]);
+    assert.equal(r.status, 2, `${JSON.stringify(controller)}: expected refusal but got: ${r.stderr}`);
+    assert.ok(r.stderr.includes(refusal(f, "holds a controller record that cannot be judged")), r.stderr);
+    assert.doesNotMatch(r.stderr, /omp-start|2000000001/, "the refusal must not print this run's own pid or start time");
+    assert.equal(f.raw(), before, "a refusal must not write a record");
+    assert.equal(readFileSync(f.file, "utf8"), LEDGER);
   }
 });
 
@@ -444,17 +508,17 @@ test("rotate refuses, moving nothing, on a process table of the wrong shape rath
 test("rotate refuses, moving nothing, when the heartbeat file exists but cannot be read — a live controller's record is not 'no record'", (t) => {
   const pid = liveForeign(t);
   const table = { ...OMP_CHAIN, [pid]: { ppid: 1, argv: ["sleep", "300"], lstart: "foreign-start" } };
-  for (const [label, damage] of [
-    ["truncated JSON", (path) => writeFileSync(path, '{"quiet":0,"controller":{"pid":1')],
-    ["not an object", (path) => writeFileSync(path, "[]")],
-    ["a directory", (path) => { rmSync(path); mkdirSync(path); }],
+  for (const [label, cause, damage] of [
+    ["truncated JSON", "is not JSON", (path) => writeFileSync(path, '{"quiet":0,"controller":{"pid":1')],
+    ["not an object", "is not a JSON object", (path) => writeFileSync(path, "[]")],
+    ["a directory", "exists but cannot be read", (path) => { rmSync(path); mkdirSync(path); }],
   ]) {
     const f = fixture(t, { mark: STALE, table, controller: { pid, lstart: "foreign-start", prior: "none" } });
     const beatFile = join(f.dir, "heartbeat.json");
     damage(beatFile);
     const r = f.cli(["rotate"]);
     assert.equal(r.status, 2, `${label}: rotated under a record it could not read: ${r.stderr}`);
-    assert.match(r.stderr, /refusing to rotate .*cannot be read or parsed/);
+    assert.ok(r.stderr.includes(refusal(f, cause)), `${label}: ${r.stderr}`);
     assert.equal(readFileSync(f.file, "utf8"), LEDGER, `${label}: a refusal must not touch the ledger`);
     assert.deepEqual(f.archives(), []);
   }

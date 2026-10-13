@@ -450,16 +450,25 @@ phase, or in any later one, asks the maintainer which tickets to take.
    controller can stop beating and keep dispatching. A dead one, a pid
    reused by another process, or this session's own earlier run lets it
    rotate. With no record the heartbeat mark decides, as the only guard
-   there is: still beating or acting refuses, naming the latest beat, tick or
-   ledger write and when it would count as stalled; a stalled mark, a
-   recorded `--stop`, or no beat at all lets it rotate — and that fallback
-   proves "not beating", never "dead", and
+   there is: still beating or acting — a beat inside its window, or with no
+   beat at all a tick or ledger write inside its window — refuses, naming
+   the latest beat, tick or ledger write and when it would count as stalled;
+   a stalled mark, a recorded `--stop`, or no mark at all lets it rotate —
+   and that fallback proves "not beating", never "dead", and
    guards a ledger only: with none to move the mark is not consulted. With no
    ledger the record is still judged, so a live recorded controller refuses
    even then. It also refuses, nothing moved, when the stamped archive name
    already exists, when the process table cannot be read, or when
-   `.fleet/heartbeat.json` exists but cannot be read or parsed — a record
-   nobody could judge is never taken for no record. Its last act, ledger or none, is
+   `.fleet/heartbeat.json` exists but cannot be used — unreadable, not JSON,
+   not a JSON object, or holding a `controller` that cannot be judged — a
+   record nobody could judge is never taken for no record. On that refusal
+   phase 0 stops and the refusal goes to the maintainer verbatim: the
+   controller never edits or removes `.fleet/heartbeat.json`, because
+   removing it inside a live omp session makes this rotate judge `none` and
+   forfeits the carry — the live members and the retired names — so this
+   run could dispatch onto their work and reuse their names. Every writer
+   (`fleet-tick.mjs`, `fleet-heartbeat.mjs`, the ledger's write subcommands)
+   leaves such a file as it is. Its last act, ledger or none, is
    to replace the record with this run's own — the nearest `omp` process
    above it, its start time, as `prior` the verdict it reached on the
    record it found (`dead`, `ancestor` or `none`), and as `at` when it wrote
@@ -4278,10 +4287,13 @@ live count from it, so nobody states one. Write neither by hand:
   `## Retired` (phase 0 says which). Refused
   while the recorded controller is alive and not this run's ancestor, ledger
   or none — or, with no record and a ledger to move, while the heartbeat mark
-  is still beating — or when the archive name already exists, the process
-  table or `.fleet/heartbeat.json` cannot be read; with no ledger and no such
-  refusal it moves nothing and exits 0. Then it records this run's controller
-  in `.fleet/heartbeat.json`. Phase 0 states the guard.
+  is still beating, or a tick or ledger write is inside its window with no
+  beat — or when the archive name already exists, the process
+  table cannot be read, or `.fleet/heartbeat.json` exists but cannot be used
+  (unreadable, not JSON, not an object, or a `controller` it cannot judge);
+  with no ledger and no such refusal it moves nothing and exits 0. Then it
+  records this run's controller in `.fleet/heartbeat.json`. Phase 0 states
+  the guard.
 
 `row` refuses a malformed member token anywhere in its text — one whose outcome
 is outside the vocabulary above, e.g. `merge-bot-1=dispatched` — at exit 2,

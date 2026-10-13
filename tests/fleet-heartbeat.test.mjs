@@ -184,19 +184,61 @@ test("CLI: the value it writes back is the SANITIZED one, not the junk it read",
   assert.deepEqual(withoutMark(r.state), { note: "not ours", quiet: 0, elapsed: 6, digest: "abc123" });
 });
 
-test("CLI: a JSON array state file is announced and beats at the base interval", () => {
-  // `[1,2,3]` is JSON, and `typeof [] === "object"`, so the array guard is the
-  // only thing between it and reading `parsed.quiet` off an array — which is
-  // `undefined`, sanitizes to 0, and would have this run silently agree that
-  // the file was fine.
-  const r = run(["--base", "1", "--hold", "1"], { state: "[1,2,3]" });
+test("CLI: a JSON array state file is announced, and the file is not replaced — a fire is reported for the skipped write", () => {
+  const corrupt = "[1,2,3]";
+  const r = run(["--base", "1", "--hold", "1"], { state: corrupt });
   assert.equal(r.status, 0);
   assert.match(r.stderr, /WARNING .* is not an object/);
+  assert.match(r.stdout, /heartbeat: held .* interval elapsed/);
+  assert.deepEqual(r.state, [1, 2, 3], "degraded file should not be written, so [1,2,3] is preserved");
+});
+
+// The bytes the file holds after the call, which `run` cannot give: it parses,
+// and a file that is not JSON parses to null.
+function runBytes(args, state) {
+  const dir = mkdtempSync(join(tmpdir(), "fleet-heartbeat-bytes-"));
+  const path = join(dir, "heartbeat.json");
+  writeFileSync(path, state);
+  const r = spawnSync(process.execPath, [SCRIPT, ...args, "--state", path], { encoding: "utf8" });
+  const bytes = readFileSync(path, "utf8");
+  rmSync(dir, { recursive: true, force: true });
+  return { ...r, bytes };
+}
+
+test("CLI: --stop over a degraded file leaves it byte-identical and says the stop was not recorded", () => {
+  for (const [label, state] of [
+    ["not JSON", "not json"],
+    ["a JSON array", "[1,2,3]"],
+    ["a controller that cannot be judged", JSON.stringify({ quiet: 3, controller: { pid: 0, lstart: "x" } })],
+  ]) {
+    const r = runBytes(["--stop", "budget exhausted"], state);
+    assert.equal(r.status, 0, `${label}: ${r.stderr}`);
+    assert.match(r.stdout, /stop NOT recorded .* degraded/, label);
+    assert.equal(r.bytes, state, `${label}: a degraded file is not replaced by a stop`);
+  }
+});
+
+test("CLI: a hold over a file whose controller record cannot be judged warns, fires, and leaves the file byte-identical", () => {
+  for (const controller of [{ pid: "29405", lstart: "x" }, null]) {
+    const state = JSON.stringify({ quiet: 3, elapsed: 0, controller });
+    const r = runBytes(["--base", "1", "--hold", "1"], state);
+    const label = JSON.stringify(controller);
+    assert.equal(r.status, 0, `${label}: ${r.stderr}`);
+    assert.match(r.stderr, /WARNING .* holds a controller record that cannot be judged/, label);
+    assert.match(r.stdout, /interval elapsed .*degraded/, `${label}: a skipped write is a fire that says why`);
+    assert.equal(r.bytes, state, `${label}: the hold must not replace the record`);
+  }
+});
+
+test("CLI: a hold whose write was skipped over a degraded file fires before the interval has elapsed, rather than reporting a remainder nothing keeps", () => {
+  // `--base 5 --hold 1`: one hold cannot reach the interval, so only the
+  // skipped write can make this a fire.
+  const state = JSON.stringify({ quiet: 0, elapsed: 0, controller: null });
+  const r = runBytes(["--base", "5", "--hold", "1"], state);
+  assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /interval elapsed/);
-  // Replaced by a real object, not patched as one: an array `rest` spread into
-  // the write would persist `{"0":1,"1":2,"2":3,…}` and the next read would
-  // announce the same fault forever.
-  assert.deepEqual(withoutMark(r.state), { quiet: 0, elapsed: 0, digest: "" });
+  assert.doesNotMatch(r.stdout, /remain/);
+  assert.equal(r.bytes, state);
 });
 
 test("CLI: a state file it cannot READ is announced, never silently discarded", (t) => {

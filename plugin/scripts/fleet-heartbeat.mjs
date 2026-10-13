@@ -193,7 +193,13 @@ function main() {
     // No hold, and `elapsed` untouched: this invocation is not a beat, it is
     // the run saying why there will not be another one. Leaving the partial
     // interval where it is costs nothing — the next run reads a stopped mark
-    // and knows the streak behind it is a dead run's.
+    // and knows the streak behind it is a dead run's. Leave degraded files
+    // byte-identical, so a same-session rotate still refuses rather than
+    // judges none.
+    if (state.degraded) {
+      console.log(`heartbeat: stop NOT recorded (${stop}) — the heartbeat file is degraded and was left as it is, so a same-session rotate refuses on it until it is repaired`);
+      return;
+    }
     const persisted = writeState(path, NAME, state, { beat: mark(target, stop) });
     // Announced on stdout as well as through writeState's own stderr warning,
     // and still exit 0. An unrecorded stop is a real degradation — the next
@@ -231,13 +237,15 @@ function main() {
   // taking one of its own. One write per invocation means a mark can never
   // land while the progress it was taken beside did not, and the two can
   // never disagree about which invocation they came from. It also keeps the
-  // failure story single: the warning below covers both keys at once.
+  // failure story single: the warning below covers both keys at once. Leave
+  // degraded files byte-identical, so a same-session rotate still refuses
+  // rather than judges none — a skipped write reports a fire like a failed one.
   //
   // `stopped: ""` on every ordinary beat, never carried forward: a run that
   // recorded a stop and then kept beating is a run that did not stop, and a
   // stale reason surviving into a live beat would have the next reader
   // announcing a death that already un-happened.
-  const persisted = writeState(path, NAME, now, { elapsed: reached ? 0 : elapsed, beat: mark(target, "") });
+  const persisted = !now.degraded && writeState(path, NAME, now, { elapsed: reached ? 0 : elapsed, beat: mark(target, "") });
   // A failed write is itself a fire. With nothing persisting the remainder,
   // every invocation reads the same elapsed total, holds the same seconds and
   // prints the same remainder: the interval can never complete, so fleet-tick
@@ -263,8 +271,13 @@ function main() {
   // `quiet=` is the pre-hold streak, the one the interval was DERIVED from: a
   // fresh streak printed beside a target computed from the old one would be two
   // numbers that do not explain each other.
+  //
+  // A skipped write says so, on the fire it reports: the interval did not
+  // elapse, the file could not keep its progress, and this call fires again
+  // on every hold until the file is repaired.
+  const skippedNote = now.degraded ? " — the heartbeat file is degraded and was left as it is, so interval progress is not kept and every hold fires" : "";
   console.log(done
-    ? `heartbeat: held ${held}s, ${target}s interval elapsed (quiet=${state.quiet}) → run fleet-tick`
+    ? `heartbeat: held ${held}s, ${target}s interval elapsed (quiet=${state.quiet}) → run fleet-tick${skippedNote}`
     : `heartbeat: held ${held}s, ${target - elapsed}s of ${target}s remain (quiet=${state.quiet}) → re-issue this command now, do not end your turn`);
 }
 
