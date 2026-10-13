@@ -5,6 +5,7 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
+  An issue reporting a member-reliability incident carries a `Mechanism:` line in its body, naming which of `script`, `schema field`, `tick row` or `brief line` it proposes, or `judgement` followed by the question the controller must answer (`docs/agents/incident-policy.md`).
 - **Read an issue**: `gh issue view <number> --json title,body,labels,comments --jq '.title, (.labels[].name), .body, (.comments[]|.author.login + ": " + .body)'`. `--jq` requires `--json` (`--jq` with `--comments` errors: `cannot use --jq without specifying --json`), and `labels` is a valid `--json` field, so one call covers title, body, labels and comments.
 - **List issues**: `gh issue list --state open --limit 500 --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters.
 - **Comment on an issue**: `gh issue comment <number> --body "..."`
