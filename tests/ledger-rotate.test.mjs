@@ -622,7 +622,6 @@ test("a carried live bot whose settled predecessors stayed behind still numbers 
 
 test("a reviewer runner no carried row names is retired, and review refuses its name, naming the next free one", (t) => {
   const done = "reviewed=abc1234:0/0/0:run-abcdefgh";
-  const rows = ["#12 impl-12", `#20 impl-20=PR#21 → PR#21 · review=member:review-pr-21 ${done} · review=fallback:review-pr-21-b=failed`];
   const f = fixture(t, { ledger: ledgerOf({ rows, dispatched: ["impl-12", "impl-20=PR#21"] }), controller: ANCESTOR });
   assert.equal(f.cli(["rotate"]).status, 0);
   assert.deepEqual(read(f).retired, ["impl-20", "review-pr-21", "review-pr-21-b"]);

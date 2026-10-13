@@ -151,7 +151,6 @@ export function classifyRole(signals) {
 }
 
 // The four name-driven branches, shared by both the name-alone pass above and
-// the description-inclusive fallback: same patterns, same fixed order
 // (implementer -> reviewer -> finisher -> merge-bot), just a different
 // haystack. Returns `null`, never "other", so the caller can fall through to
 // the next haystack instead of committing to "other" the moment the name

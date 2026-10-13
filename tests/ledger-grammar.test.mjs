@@ -243,7 +243,6 @@ test("retiredOnLedger: a name the new ledger carries is not listed for its own o
 test("retiredOnLedger: a reviewer runner a row launched is retired, a workflow launch and another name are not", () => {
   const done = "reviewed=abc1234:0/0/0:run-abcdefgh";
   const rows = [
-    `#5 impl-5=PR#6 → PR#6 · review=member:review-pr-6 ${done} · review=fallback:review-pr-6-b=failed`,
     `#7 impl-7=PR#8 → PR#8 · review=wf:review-pr-8 ${done} · review=member:some-runner ${done}`,
     `#9 impl-9=PR#10 → PR#10 · review=member:review-pr-10 ${done} · impl-10`,
   ];
@@ -272,7 +271,6 @@ test("liveOnLedger: unsettled members and open launches, once each, with the fir
     "#3 impl-3=PR#5 → PR#5 · review=member:review-pr-5",
     "#4 impl-4=PR#6 · review=wf:r1 · reviewed=abc1234:0/0/0:run-abcdefgh · fix-pr-6=no-op",
     "#6 fix-pr-6 · finisher-pr-6",
-    "#9 impl-9 · review=fallback:review-pr-9=failed",
     "#10 excluded · behind-pr:#6",
   ];
   const out = liveOnLedger(rows, ["impl-3=PR#5", "impl-4=PR#6", "fix-pr-6=no-op", "finisher-pr-6", "impl-9", "merge-bot-1=done", "merge-bot-2"]);

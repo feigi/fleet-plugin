@@ -126,7 +126,6 @@ export function rowNums(text) {
 
 // A PR's review is not a member, so it carries its own pair of row tokens.
 // The launch is `review=wf:<runId>` | `review=member:<name>` |
-// `review=fallback:<name>`, settled dead as `…=failed`; the capture groups are
 // the kind, the runId or runner name, and the `=failed` suffix. A launch's
 // identity comes out of this one regex, `=failed` aside: a workflow's is its
 // runId, a runner's is its name whichever of member or fallback launched it,
@@ -317,7 +316,6 @@ export function rowWriteRefusal(before, after, oldLine, line, retired = []) {
     const b = read(was, id);
     const bad = added(b.unparseable, a.unparseable)[0];
     if (bad !== undefined) {
-      return `'${bad}' on ${where(id)} is not review=wf:<runId> | member:<name> | fallback:<name> (optionally =failed) `
         + "or reviewed=<head>:<survived>/<refuted>/<unverified>:<run> — unparseable review token";
     }
     const unpaired = added(b.unpaired, a.unpaired)[0];
@@ -446,7 +444,6 @@ export const REVIEWER = /^review-pr-([1-9][0-9]*)(-[b-z])?$/;
 export const isRetirable = (name) => parseMember(name) !== null || REVIEWER.test(name);
 
 // The reviewer runner names a row's `review=member:<name>` and
-// `review=fallback:<name>` launches took, `=failed` or answered or open. A
 // workflow launch is named by its runId, which no hub member holds.
 function launchedRunners(text) {
   const out = [];

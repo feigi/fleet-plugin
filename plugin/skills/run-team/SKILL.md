@@ -75,7 +75,6 @@ references/member-lifecycle.md.
 
 **A depth-2 member cannot dispatch further** (`task.maxRecursionDepth: 2`):
 if `task` is absent at your depth, ask the controller to dispatch the
-specialists and relay their reports. Say so in a fallback reviewer's prompt,
 or it silently downgrades to a solo review. See references/member-lifecycle.md.
 
 **Fresh context per member.** One member, one unit of work, gone. Never
@@ -591,7 +590,6 @@ phase, or in any later one, asks the maintainer which tickets to take.
      settled `=failed` where it stands: a `ledger.mjs review <pr>
      review=member:<name>=failed` call that turns `review=member:<name>` on
      the PR's row into `review=member:<name>=failed`
-     (`fallback:` and `wf:` launches alike), after which the tick owes the PR
      a review again under the next free reviewer name.
    - `prior: none` — no record proves the previous run dead (no record yet, or
      no `omp` process found above the rotation): every claim is `report`, and
@@ -2479,10 +2477,7 @@ is a failure event, not a clean review.** The review throws on missing
 failure surfaces mid-loop, where "react, never block" makes it easy to log and
 carry on — leaving a PR that *reads* as reviewed and is not. **Retry once, then
 fall back — and whoever holds the review call is who retries:**
-The `review-pr-<pr#>` runner already retried once inside its cell and reports `failed` with both errors; hand-dispatch the fallback reviewer below under the next letter the PR's rows do not carry yet — `review-pr-<pr#>-b` after a first runner.
 Either way, settle the dead review by appending `=failed` to its `review=`
-token, then append `review=fallback:<that name>` after it, both in one
-`ledger.mjs review <pr> review=<dead launch>=failed review=fallback:<that name>`
 call — `review` settles the dead launch in place, and refuses a new launch
 while the dead one still reads open, and the tick takes the last `review=`
 token on a row as the one in flight, so that order is what keeps the fallback
@@ -4098,7 +4093,6 @@ Plan it as a PR the run's own merge queue lands, never as an edit-and-continue.
 | SHA not on expected branch | Flag, do not enqueue, report |
 | Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands or leaves a fork open; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |
 | Implementer blocked or ambiguous *mid-implementation* | Free the slot, leave `in-progress`, report — the row above is the pre-code bail, not this one |
-| `review-pr` workflow throws or returns no tree | Retry once, then hand-dispatch the fallback reviewer. Never enqueue the PR as reviewed — the workflow is not a member, so no other row here covers it |
 | Reviewer or fix-applier cannot reach green | Report, leave the PR unlabeled, free the slot |
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
 | Merge bot finds the worktree ahead of the PR head **on the local-rebase fallback** | `worktree-diverged-#<pr>`, PR stays queued. Read the stray commit; push-or-discard is yours, and the maintainer's if the evidence cannot settle it |
@@ -4263,7 +4257,6 @@ any other, never a section of its own.
 
 A PR's review is not a member, so it carries its own pair of row tokens,
 written with `review` onto the PR's row (**Reviewers**): `review=wf:<runId>` |
-`review=member:<name>` | `review=fallback:<name>` at launch, `<name>` being
 `review-pr-<n>` for the PR's first runner and the next letter its rows do not
 carry yet (`review-pr-<n>-b`, `-c`, …) for every later one,
 settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`
@@ -4407,11 +4400,9 @@ Plus a queue-depth line: shortlist, supply, whether triage was suggested.
   choice it leaves open.
 - "I'd have to pick an approach myself" → that IS undecided.
 - "The reviewer can dispatch, it'll fan out" → not unless authorized.
-- "Tell the reviewer to ping its specialists" (fallback path) → a depth-2 member
   cannot dispatch further, so the ping goes nowhere. Tell it to
   read the specialist's output file instead; your relay is the backup, not the
   only path.
-- "I relayed it, so the reviewer has it" (fallback path) → sent is not read, and a relay can land
   after the verdict is composed. Two reviewers ruled relayed dimensions
   undelivered, one of them shipping a headline claim the report it disclaimed
   refuted. Reconcile verdicts against your receipts.

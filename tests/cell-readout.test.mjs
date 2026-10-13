@@ -668,7 +668,6 @@ test("stopping rule: a ruling dated between a Pull at one cell and a re-Pull at 
   assert.deepEqual(tally(w, added), [["smol-high", 1, 1], ["task-high", 0, 0]]);
 });
 
-// No fallback: an uncountable carrier charges nobody, even with an earlier
 // admissible Pull of the ticket at a live cell.
 test("stopping rule: a carrier that is not admissible, or predates its cell's definition, charges no cell, not an earlier admissible Pull's", () => {
   const added = { "smol-high": "2026-09-01", "task-high": "2026-09-01" };

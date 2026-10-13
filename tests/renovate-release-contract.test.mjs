@@ -115,7 +115,6 @@ function readGate(text, problems) {
   return {
     counted,
     guard: guard ? new Set(guard[1].split("|")) : null,
-    fallback: fallbacks.length === 1 ? fallbacks[0] : null,
   };
 }
 
