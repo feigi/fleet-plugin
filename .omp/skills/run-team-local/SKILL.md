@@ -50,10 +50,11 @@ In this order:
    A definition no commit adds (a shallow clone, an uncommitted or renamed
    file) cannot be judged: the duty reports the cells it could judge, then
    fails naming the definition, so the router re-fit does not run.
-3. **Router re-fit:** once 50 PRs have merged since `router-table.json`'s
-   `fitted_through`, `ticket-router.mjs fit` runs in a throwaway checkout of
-   `origin/main` — against the committed corpus, because CI's
-   `ticket-router.mjs --check` re-fits from that — and the new table goes out
+3. **Router re-fit:** once 50 merged PRs have features rows that are not in
+   `router-table.json`'s `fitted_commit`, `ticket-router.mjs fit` runs in a
+   throwaway checkout of `origin/main` and reads the committed corpus at
+   that commit — CI's `ticket-router.mjs --check` re-fits from the commit the
+   table records — and the new table goes out
    as a chore PR from `chore/router-fit-<date>`, labelled `patch`. Skipped
    while an earlier `chore/router-fit-*` PR is still open. The fit reads
    `.fleet/cost-guard.json`, which the run's own close-out leaves; where it is

@@ -71,7 +71,7 @@ const featuresTsv = (rows) => [FEATURE_COLUMNS.join("\t"), ...rows.map((r) => FE
 const membersTsv = (rows) => `# ${MEMBER_COLUMNS.join("\t")}\n${rows.length ? formatTsv(rows) : ""}`;
 const tiersTsv = (rows) => `# ${TIER_COLUMNS.join("\t")}\n${rows.map((r) => `${formatRow(r)}\n`).join("")}`;
 const routerTable = (over = {}) => ({
-  window_start: null, fitted_through: "2026-10-01", n_rows: 0, stage: 1, cells: [...STAGE1], burn_in: true,
+  window_start: null, fitted_commit: null, n_rows: 0, stage: 1, cells: [...STAGE1], burn_in: true,
   rows: { "*": "slow-high" }, classifier: { b: null, tau: null }, estimates: {}, guard: { tripped: [], n: {} }, ...over,
 });
 const agentMd = (cell) => {
@@ -104,8 +104,9 @@ function write(root, rel, text) {
   writeFileSync(join(root, rel), text);
 }
 
-// `readded`: cell → the date its definition is deleted and added back on main.
-function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, readded = {}, gh = {} } = {}) {
+// `readded`: cell → the date its definition is deleted and added back on main. `fitted`: the rows an
+// earlier commit of main holds, the commit the table records as `fitted_commit`.
+function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, readded = {}, fitted = null, gh = {} } = {}) {
   const root = tempDir("run-team-local-");
   const origin = join(root, "origin.git");
   const seed = join(root, "seed");
@@ -122,6 +123,14 @@ function fixture({ rows = corpus(), table = routerTable(), cells = STAGE1, readd
     write(seed, `plugin/agents/fleet-implementer-${cell}.agent.md`, agentMd(cell));
     git(seed, ["add", "-A"]);
     commit(`reinstate ${cell}`, at);
+  }
+  if (fitted !== null) {
+    write(seed, FEATURES, featuresTsv(fitted.features));
+    write(seed, "docs/metrics/member-outcomes.tsv", membersTsv(fitted.members));
+    write(seed, "docs/metrics/tier-outcomes.tsv", tiersTsv(fitted.tiers));
+    git(seed, ["add", "-A"]);
+    commit("fitted corpus", "2026-10-02T12:00:00Z");
+    table = { ...table, fitted_commit: git(seed, ["rev-parse", "HEAD"]) };
   }
   write(seed, FEATURES, featuresTsv(rows.features));
   write(seed, "docs/metrics/member-outcomes.tsv", membersTsv(rows.members));
@@ -365,7 +374,7 @@ test("stopping rule --dry-run: a both-blank tier-outcomes row after a ticket's r
 // ---------------------------------------------------------------------------
 // the router re-fit cadence
 
-// FIT_EVERY_MERGED Pulls on main dated after the table's fitted_through, `n` of them ruled.
+// FIT_EVERY_MERGED Pulls on main that no fitted commit holds, `n` of them ruled.
 function merged(n) {
   const rows = corpus();
   for (let i = 1; i <= FIT_EVERY_MERGED; i++) {
@@ -375,7 +384,7 @@ function merged(n) {
   return rows;
 }
 
-test("router fit --dry-run: fifty merged PRs since fitted_through run ticket-router.mjs fit in a throwaway checkout; forty-nine do not", () => {
+test("router fit --dry-run: fifty merged PRs not in fitted_commit run ticket-router.mjs fit in a throwaway checkout; forty-nine do not", () => {
   const below = fixture({ rows: merged(FIT_EVERY_MERGED - 1) });
   const b = below.run(["--dry-run"]);
   assert.equal(b.status, 0, b.stderr);
@@ -386,11 +395,27 @@ test("router fit --dry-run: fifty merged PRs since fitted_through run ticket-rou
   const before = readFileSync(join(at.repo, TABLE), "utf8");
   const a = at.run(["--dry-run"]);
   assert.equal(a.status, 0, a.stderr);
-  assert.match(a.stdout, /^run-team-local: router fit: DUE=yes MERGED=50\/50 — ticket-router: fitted \d+ tickets through 2026-10-05; .*; would open a chore PR from chore\/router-fit-\d{4}-\d{2}-\d{2}$/m);
+  assert.match(a.stdout, /^run-team-local: router fit: DUE=yes MERGED=50\/50 — ticket-router: fitted \d+ tickets at [0-9a-f]{8}; .*; would open a chore PR from chore\/router-fit-\d{4}-\d{2}-\d{2}$/m);
   assert.equal(readFileSync(join(at.repo, TABLE), "utf8"), before, "the checkout's own table is untouched");
   assert.equal(worktrees(at.repo), 1, "the throwaway checkout is gone");
   assert.equal(git(at.origin, ["branch", "--list", "chore/*"]), "", "a dry run pushes nothing");
   assert.deepEqual(calls(at, "pr create"), []);
+});
+
+test("router fit --dry-run: rows the fitted commit holds are not counted, whatever their date or verdict", () => {
+  const fitted = corpus();
+  for (let i = 101; i <= 110; i++) ruled(fitted, { ticket: i, date: "2026-10-09" });
+  const count = (n) => {
+    const rows = merged(n);
+    for (let i = 101; i <= 110; i++) ruled(rows, { ticket: i, date: "2026-10-09" });
+    return fixture({ rows, fitted }).run(["--dry-run"]);
+  };
+  const below = count(FIT_EVERY_MERGED - 1);
+  assert.equal(below.status, 0, below.stderr);
+  assert.match(below.stdout, /router fit: DUE=no MERGED=49\/50 — not due/, "the ten fitted PRs are ruled and in the window, yet not counted");
+  const at = count(FIT_EVERY_MERGED);
+  assert.equal(at.status, 0, at.stderr);
+  assert.match(at.stdout, /router fit: DUE=yes MERGED=50\/50 — /);
 });
 
 test("router fit: a relative --repo reaches the re-fit as the absolute one does", () => {
@@ -414,9 +439,13 @@ test("router fit: a due re-fit is pushed to its own chore branch and opened as a
   assert.equal(r.status, 0, r.stderr);
   const branch = /opened https:\/\/github\.com\/o\/r\/pull\/902 from (chore\/router-fit-\S+)$/m.exec(r.stdout)?.[1];
   assert.ok(branch, r.stdout);
-  assert.equal(JSON.parse(git(f.origin, ["show", `${branch}:${TABLE}`])).fitted_through, "2026-10-05");
-  assert.equal(JSON.parse(git(f.origin, ["show", `main:${TABLE}`])).fitted_through, "2026-10-01", "main itself is untouched");
+  const mainSha = git(f.origin, ["rev-parse", "main"]);
+  assert.equal(JSON.parse(git(f.origin, ["show", `${branch}:${TABLE}`])).fitted_commit, mainSha, "the re-fit records the commit of main it read");
+  assert.equal(JSON.parse(git(f.origin, ["show", `main:${TABLE}`])).fitted_commit, null, "main itself is untouched");
   const [create] = calls(f, "pr create");
+  const subject = `chore: re-fit router-table.json at ${mainSha.slice(0, 8)}`;
+  assert.equal(create[create.indexOf("--title") + 1], subject, "the PR title names the short sha");
+  assert.equal(git(f.origin, ["log", "-1", "--format=%s", branch]), subject);
   assert.equal(create[create.indexOf("--base") + 1], "main");
   assert.equal(create[create.indexOf("--head") + 1], branch);
   assert.equal(create[create.indexOf("--label") + 1], "patch", "labelled by the create itself, not by an edit that can fail after it");
@@ -432,6 +461,23 @@ test("router fit: a due re-fit is pushed to its own chore branch and opened as a
   assert.match(h.stdout, new RegExp(`router fit: DUE=yes MERGED=50/50 — re-fit PR #${earlier.number} \\(${escape(earlier.headRefName)}\\) is still open$`, "m"));
   assert.deepEqual(calls(held, "pr create"), []);
   assert.equal(git(held.origin, ["branch", "--list", "chore/*"]), "");
+});
+
+test("router fit: reads origin/main, not the checkout's own HEAD, when the two differ", () => {
+  const f = fixture({ rows: merged(FIT_EVERY_MERGED) });
+  // A local commit no remote holds, whose features file has no rows (the hook's own stopping rule still
+  // reads the file, so it must exist): a fit from this HEAD would count no merged pull and not be due.
+  write(f.repo, FEATURES, featuresTsv([]));
+  git(f.repo, ["commit", "--quiet", "-am", "local only"]);
+  const localSha = git(f.repo, ["rev-parse", "HEAD"]);
+  const mainSha = git(f.origin, ["rev-parse", "main"]);
+  assert.notEqual(localSha, mainSha);
+  const r = f.run();
+  assert.equal(r.status, 0, r.stderr);
+  const branch = /opened https:\/\/github\.com\/o\/r\/pull\/902 from (chore\/router-fit-\S+)$/m.exec(r.stdout)?.[1];
+  assert.ok(branch, r.stdout);
+  assert.match(r.stdout, /router fit: DUE=yes MERGED=50\/50 — /);
+  assert.equal(JSON.parse(git(f.origin, ["show", `${branch}:${TABLE}`])).fitted_commit, mainSha, "the re-fit records origin/main, not the local HEAD");
 });
 
 // ---------------------------------------------------------------------------

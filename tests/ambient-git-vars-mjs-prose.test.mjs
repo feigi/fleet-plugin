@@ -242,6 +242,15 @@ const COVERED_MJS = {
   // with no ambient GIT_DIR or GH_REPO…". Its second git call is
   // `fleetFile()`'s, counted under fleet-dir.mjs.
   "stranded.mjs": 2,
+  // ONE spawn primitive, `gitBeside(path, args)`, behind both of the fit's git
+  // reads — `rev-parse --verify` of the commit and `show <sha>:./<file>`. An
+  // ambient GIT_DIR would answer both for another repository, and an ambient
+  // GIT_WORK_TREE would resolve the `./` path against another work tree, so
+  // the fit and `--check` would read the wrong rows or refuse the right
+  // commit. Measured in ticket-router.test.mjs, "an ambient GIT_DIR or
+  // GIT_WORK_TREE naming another repository does not change what fit and
+  // --check read".
+  "ticket-router.mjs": 1,
 };
 
 // The exemption list #1599's second design question answers with — two names

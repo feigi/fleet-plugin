@@ -15,24 +15,32 @@
 //     file degrades the line, never the exit. Exit 2 only on a usage error or
 //     an unreadable/invalid table: the caller does not dispatch then.
 //   fit --table <json> --features <tsv> --members <tsv> --verdicts <tsv>
-//       --guard <cost-guard.json> [--due]
-//     Re-fits the table from the three TSVs and the guard and rewrites
-//     `--table`. With `--due`, writes nothing and prints `DUE=yes|no
-//     MERGED=<n>/<N>`: whether N merged PRs have landed since
-//     `fitted_through`.
+//       --guard <cost-guard.json> --commit <rev> [--due]
+//     Re-fits the table from the three TSVs as committed at `--commit` (read
+//     with `git show`, never from the working tree) and the guard, and
+//     rewrites `--table`, recording the commit's sha as `fitted_commit`. The
+//     TSV flags name paths inside the repository that holds them. With
+//     `--due`, writes nothing and prints `DUE=yes|no MERGED=<n>/<N>`: whether
+//     N merged PRs have landed since `fitted_commit`, counting the features
+//     rows at `--commit` that the fitted commit's features file does not hold.
 //   --check --table <json> --features <tsv> --members <tsv> --verdicts <tsv>
-//     Re-fits from the rows the table was fitted through, against the guard
-//     snapshot the table itself records, and exits 1 when the result is not
-//     the table: the table is a code carrier, never hand-edited.
+//     Re-fits from the commit the table records as `fitted_commit` (an empty
+//     corpus while it is null), against the guard snapshot the table itself
+//     records, and exits 1 when the result is not the table: the table is a
+//     code carrier, never hand-edited. A `fitted_commit` this repository does
+//     not hold exits 2 naming the `git fetch` that brings it.
 //
 // The script never touches the network: the issue, the sizing verdict and
-// the guard are files the caller wrote.
+// the guard are files the caller wrote, and a fitted commit is fetched by the
+// caller.
 
 import { readFileSync, writeFileSync, renameSync, existsSync, appendFileSync, mkdirSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { isCLI } from "./is-cli.mjs";
+import { gitEnv } from "./git-env.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { CELL, POLICY_CELL, drawCell, parseMember } from "./ledger-grammar.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
@@ -306,40 +314,33 @@ function datedRows(features) {
 }
 
 /**
- * Per-ticket input rows: the ticket's features rows inside [window, cutoff],
+ * Per-ticket input rows: the ticket's features rows inside the window,
  * attributed to its LAST row's (in file order) cell and stratum, restricted to rows the
  * free classifier routed plus exploration rows — a row a live B classifier
  * routed is the A/B's test set, not the fit's. Its verdict rules its last
  * input row. A row with a blank `run_date` (route writes one for a session id
- * with no date) is no input row: it cannot be placed against the window, the
- * cut or its ruling, and a window bound drops it anyway. A `run_date` that is
+ * with no date) is no input row: it cannot be placed against the window or
+ * its ruling, and a window bound drops it anyway. A `run_date` that is
  * neither blank nor YYYY-MM-DD is refused (see `datedRows`).
- * A fit over everything cuts at its latest features row's date;
- * the verdict and member rows are cut at that same date, so `--check`'s
- * re-fit at the recorded `fitted_through` reads the rows the fit read and a
- * verdict or member row that lands later waits for the next fit instead of
- * failing CI.
+ * A fit reads everything in the commit it is given: no row is cut by date,
+ * because `--check` re-reads that same commit rather than re-cutting the
+ * working tree's files.
  */
-function fitTickets({ features, members, verdicts, window, cutoff }) {
-  const inRange = datedRows(features).filter((r) => (!window || r.run_date >= window)
-    && (cutoff === undefined || (cutoff !== null && r.run_date <= cutoff)));
-  const through = cutoff === undefined ? inRange.map((r) => r.run_date).sort().at(-1) ?? null : cutoff;
-  const upToThrough = (r) => through === null || !r.run_date || r.run_date <= through;
-  members = members.filter(upToThrough);
+function fitTickets({ features, members, verdicts, window }) {
+  const inRange = datedRows(features).filter((r) => !window || r.run_date >= window);
   const byTicket = new Map();
   for (const r of inRange) {
     if (!byTicket.has(r.ticket)) byTicket.set(r.ticket, []);
     byTicket.get(r.ticket).push(r);
   }
-  // A ruling whose date is not YYYY-MM-DD cannot be placed against the cut, and
-  // a string `<=` would drop 'abc' or '2027' unseen: it is left in, so `rulingFor`
-  // refuses it when its ticket is an input ticket. An input ticket is one the
-  // fit reads — its last in-range row is an exploration row or has `sizing_src`
-  // `rule`, which the skip below keeps — not every ticket with an in-range
-  // features row. `fit --due` also refuses for a ticket the skip drops:
-  // `mergedSince` calls `verdictOf` on every ticket with an in-window row dated
-  // after `fitted_through`, with no such skip.
-  const rulings = rulingsByTicket(verdicts.filter((r) => !DATE.test(r.run_date) || upToThrough(r)));
+  // `rulingFor` refuses a ruling whose date is not YYYY-MM-DD when its ticket
+  // is an input ticket. An input ticket is one the fit reads — its last
+  // in-window row is an exploration row or has `sizing_src` `rule`, which the
+  // skip below keeps — not every ticket with an in-window features row.
+  // `fit --due` also refuses for a ticket the skip drops: `mergedSince` calls
+  // `verdictOf` on every ticket with an in-window row the fitted commit does
+  // not hold, with no such skip.
+  const rulings = rulingsByTicket(verdicts);
   const lastPulls = lastPullByTicket(inRange);
   const out = [];
   for (const [ticket, rows] of byTicket) {
@@ -367,7 +368,7 @@ function fitTickets({ features, members, verdicts, window, cutoff }) {
     for (const r of rows) if (r.router_usd !== "") cost += Number(r.router_usd) || 0;
     out.push({ ticket, cell: last.chosen_cell, stratum: ruleStratum(last), verdict, cost, costKnown, fixRounds });
   }
-  return { tickets: out, used: inRange };
+  return out;
 }
 
 function estimate(tickets) {
@@ -423,13 +424,12 @@ function adopt(est, cells, tripped) {
 
 /**
  * The re-fit table. `guard` is `{ tripped, n, window_start }` (readGuard's
- * shape); `cutoff` limits every input to rows with `run_date <= cutoff`
- * (--check), or is undefined for a fit over everything, which cuts at its
- * latest features row's date.
+ * shape); `commit` is the sha of the commit the inputs were read from, or null
+ * for the empty corpus before any fit.
  */
-export function fitTable({ prior, features, members, verdicts, guard, cutoff }) {
+export function fitTable({ prior, features, members, verdicts, guard, commit = null }) {
   const window = guard.window_start ?? prior.window_start ?? null;
-  const { tickets, used } = fitTickets({ features, members, verdicts, window, cutoff });
+  const tickets = fitTickets({ features, members, verdicts, window });
   const estimates = estimate(tickets);
   const tripped = new Set(guard.tripped);
 
@@ -447,10 +447,9 @@ export function fitTable({ prior, features, members, verdicts, guard, cutoff }) 
       if (!cells.includes(cell) && cells.includes(survives) && !tripped.has(survives)) cells.push(cell);
     }
   }
-  const dates = used.map((r) => r.run_date).sort();
   return {
     window_start: window,
-    fitted_through: dates.length ? dates[dates.length - 1] : prior.fitted_through ?? null,
+    fitted_commit: commit,
     n_rows: tickets.length,
     stage,
     cells,
@@ -462,11 +461,51 @@ export function fitTable({ prior, features, members, verdicts, guard, cutoff }) 
   };
 }
 
-/** Merged PRs (tickets with a verdict on their last such row in file order) among the YYYY-MM-DD-dated features rows dated after `fitted_through`. */
-export function mergedSince({ table, features, verdicts }) {
+/**
+ * Merged PRs (tickets with a verdict on their last such row in file order)
+ * among the YYYY-MM-DD-dated features rows on or after `window_start` that the
+ * fitted commit's features file (`fitted`, parsed rows; empty before any fit)
+ * does not hold, matched by `session` and `agent`.
+ */
+export function mergedSince({ table, features, verdicts, fitted }) {
   const rulings = rulingsByTicket(verdicts);
-  const after = datedRows(features).filter((r) => (!table.window_start || r.run_date >= table.window_start) && (!table.fitted_through || r.run_date > table.fitted_through));
+  const read = new Set(fitted.map((r) => `${r.session}\0${r.agent}`));
+  const after = datedRows(features).filter((r) => (!table.window_start || r.run_date >= table.window_start) && !read.has(`${r.session}\0${r.agent}`));
   return [...lastPullByTicket(after)].filter(([ticket, p]) => verdictOf(rulings, ticket, p.run_date)).length;
+}
+
+// ---------------------------------------------------------------------------
+// the commit a fit reads
+// ---------------------------------------------------------------------------
+
+const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
+// `git` run in the directory holding `path`, so `path` names a file of the
+// repository around it whichever directory the caller is in.
+function gitBeside(path, args) {
+  const r = spawnSync("git", ["-C", dirname(resolve(path)), ...args], { encoding: "utf8", env: gitEnv(), maxBuffer: 1 << 30 });
+  if (r.error) throw r.error;
+  return r;
+}
+
+/**
+ * The full sha `rev` names as a commit in the repository holding `path`, or null when it names none there.
+ * Throws when git itself fails (not a repository, unreadable config, no git): that is not an answer about `rev`.
+ */
+export function resolveCommit(path, rev) {
+  if (rev.startsWith("-")) return null;
+  const r = gitBeside(path, ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`]);
+  if (r.status === 0) return r.stdout.trim();
+  // `--verify --quiet` exits 1, silently, for a rev that names no commit; any other status is git failing.
+  if (r.status === 1) return null;
+  throw new Error(r.stderr.trim() || `git rev-parse exited ${r.status}`);
+}
+
+/** `path` as committed at `sha`; throws when the commit does not hold it. */
+export function showAt(sha, path) {
+  const r = gitBeside(path, ["show", `${sha}:./${basename(path)}`]);
+  if (r.status !== 0) throw new Error(r.stderr.trim() || `git show exited ${r.status}`);
+  return r.stdout;
 }
 
 // ---------------------------------------------------------------------------
@@ -479,7 +518,7 @@ function main() {
     flags: {
       session: "value", ticket: "value", arm: "value", "impl-row": "value", issue: "value",
       sizing: "value", guard: "value", table: "value", pending: "value", "chain-head": "bool",
-      features: "value", members: "value", verdicts: "value", check: "bool", due: "bool",
+      features: "value", members: "value", verdicts: "value", commit: "value", check: "bool", due: "bool",
     },
     positionals: ["route", "fit"],
   });
@@ -492,7 +531,7 @@ function main() {
   }
   const allowed = {
     route: ["session", "ticket", "arm", "impl-row", "issue", "sizing", "guard", "table", "pending", "chain-head"],
-    fit: ["table", "features", "members", "verdicts", "guard", "due"],
+    fit: ["table", "features", "members", "verdicts", "guard", "commit", "due"],
     check: ["check", "table", "features", "members", "verdicts"],
   }[mode];
   const given = argv.filter((a) => a.startsWith("--")).map((a) => a.slice(2).split("=")[0]);
@@ -533,24 +572,45 @@ function main() {
     return;
   }
 
-  const read = (flag, parse) => {
+  const short = (sha) => (sha === null ? "no commit" : sha.slice(0, 8));
+  const fileAt = (sha, flag, parse) => {
     const p = need(flag);
-    try { return parse(readFileSync(p, "utf8")); } catch (e) { die(`cannot read --${flag} ${p}: ${e.message}`); }
+    try { return parse(showAt(sha, p)); } catch (e) { die(`cannot read --${flag} ${p} at commit ${short(sha)}: ${e.message}`); }
   };
-  const features = read("features", parseFeatures);
-  const members = read("members", parseMemberTsv);
-  const verdicts = read("verdicts", parseTierOutcomes);
+  // The three TSVs as committed at `sha`, never the working tree's copies.
+  const corpusAt = (sha) => ({
+    features: fileAt(sha, "features", parseFeatures),
+    members: fileAt(sha, "members", parseMemberTsv),
+    verdicts: fileAt(sha, "verdicts", parseTierOutcomes),
+  });
+  // The commit `rev` names in the repository holding --features, or null; git itself failing is a die, not "no such commit".
+  const commitOf = (rev) => {
+    try { return resolveCommit(need("features"), rev); } catch (e) { die(`cannot resolve ${rev} in the repository holding --features ${need("features")}: ${e.message}`); }
+  };
+  // The commit the table records: null before any fit, else a sha this repository holds.
+  const fittedCommit = () => {
+    const sha = table.fitted_commit;
+    if (sha === null) return null;
+    if (typeof sha !== "string" || !SHA.test(sha)) die(`${tablePath}: \`fitted_commit\` is not null or a full commit sha`);
+    if (commitOf(sha) === null) {
+      die(`${tablePath} was fitted from commit ${sha}, which this repository does not hold — run \`git fetch --depth=1 origin ${sha}\``);
+    }
+    return sha;
+  };
   // The join throws on a features row it cannot place and on a ruling of an input ticket it cannot place.
-  // For `fit` and `--check` an input ticket is one `fitTickets` reads (its last in-range row is an
-  // exploration row or has `sizing_src` `rule`), not every ticket with an in-range features row. `fit --due` also
+  // For `fit` and `--check` an input ticket is one `fitTickets` reads (its last in-window row is an
+  // exploration row or has `sizing_src` `rule`), not every ticket with an in-window features row. `fit --due` also
   // covers a ticket `fitTickets` skips, because `mergedSince` calls `verdictOf` on every ticket with an in-window
-  // row dated after `fitted_through`, with no such skip.
+  // row the fitted commit does not hold, with no such skip.
   const joined = (fit) => {
     try { return fit(); } catch (e) { die(`cannot join --features ${need("features")} with --verdicts ${need("verdicts")}: ${e.message}`); }
   };
 
   if (mode === "check") {
-    const refit = joined(() => fitTable({ prior: table, features, members, verdicts, guard: { ...table.guard, window_start: table.window_start }, cutoff: table.fitted_through }));
+    for (const flag of ["features", "members", "verdicts"]) need(flag);
+    const fitted = fittedCommit();
+    const { features, members, verdicts } = fitted === null ? { features: [], members: [], verdicts: [] } : corpusAt(fitted);
+    const refit = joined(() => fitTable({ prior: table, features, members, verdicts, guard: { ...table.guard, window_start: table.window_start }, commit: fitted }));
     const differ = Object.keys({ ...refit, ...table }).filter((k) => !isDeepStrictEqual(refit[k], table[k]));
     if (differ.length) {
       process.stderr.write(`${NAME}: ${tablePath} is not a re-fit of its own rows — differs in ${differ.map((k) => `\`${k}\``).join(", ")}; re-fitted:\n${JSON.stringify(refit, null, 2)}\n`);
@@ -558,22 +618,28 @@ function main() {
       process.exitCode = 1;
       return;
     }
-    process.stdout.write(`${NAME}: ${tablePath} matches a re-fit of ${refit.n_rows} tickets through ${refit.fitted_through ?? "no rows"}\n`);
+    process.stdout.write(`${NAME}: ${tablePath} matches a re-fit of ${refit.n_rows} tickets at ${short(fitted)}\n`);
     return;
   }
 
+  const commitArg = need("commit");
+  const sha = commitOf(commitArg);
+  if (sha === null) die(`--commit ${commitArg} is not a commit of the repository holding --features ${need("features")}`);
+  const { features, members, verdicts } = corpusAt(sha);
   const guardPath = need("guard");
   const guard = readGuard(readJson(guardPath));
   if (guard === null) die(`cannot read --guard ${guardPath} as a cost guard — the fit needs its tripped cells and per-cell n`);
   if (F.has("due")) {
-    const n = joined(() => mergedSince({ table, features, verdicts }));
+    const fitted = fittedCommit();
+    const read = fitted === null ? [] : fileAt(fitted, "features", parseFeatures);
+    const n = joined(() => mergedSince({ table, features, verdicts, fitted: read }));
     process.stdout.write(`DUE=${n >= FIT_EVERY_MERGED ? "yes" : "no"} MERGED=${n}/${FIT_EVERY_MERGED}\n`);
     return;
   }
-  const next = joined(() => fitTable({ prior: table, features, members, verdicts, guard }));
+  const next = joined(() => fitTable({ prior: table, features, members, verdicts, guard, commit: sha }));
   writeFileSync(`${tablePath}.tmp`, `${JSON.stringify(next, null, 2)}\n`);
   renameSync(`${tablePath}.tmp`, tablePath);
-  process.stdout.write(`${NAME}: fitted ${next.n_rows} tickets through ${next.fitted_through ?? "no rows"}; rows ${JSON.stringify(next.rows)}; burn_in ${next.burn_in}; stage ${next.stage}\n`);
+  process.stdout.write(`${NAME}: fitted ${next.n_rows} tickets at ${short(sha)}; rows ${JSON.stringify(next.rows)}; burn_in ${next.burn_in}; stage ${next.stage}\n`);
 }
 
 if (isCLI(import.meta.url)) main();
