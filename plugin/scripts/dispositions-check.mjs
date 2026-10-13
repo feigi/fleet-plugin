@@ -34,7 +34,7 @@
 //                    "disposition": "apply" | "defer",
 //                    "reason": "<string>",          required, non-empty, on a `refuted` entry; else optional
 //                    "issue": <number>,             optional: filed or commented to
-//                    "verdictPath": "<path>",       optional: an in-scope suggestion's refuter verdict
+//                    "verdictPath": "<path>",       optional: a suggestion's refuter verdict
 //                    "remedyFiles": ["<path>", …]   optional: files the remedy names
 //                  }, … ] }
 //
@@ -78,17 +78,23 @@
 //     is escalated rather than passed: the verdict is `escalate`, and the
 //     output names each such finding. A `suggestion` passes as `ok`. A record
 //     that also breaks a rule is a `mismatch`, its escalations printed too.
-//   - Refuter evidence: an in-scope suggestion — an `unverified` finding no
-//     refuter was dispatched against (`refutersDispatched` zero or absent),
-//     in scope by the presumption above or by its entry — needs
-//     `verdictPath`: an absolute path to a file under the fix-applier's own
+//   - Refuter evidence: a suggestion — an `unverified` finding no refuter
+//     was dispatched against (`refutersDispatched` zero or absent) — needs
+//     `verdictPath` when it is in scope, by the presumption above or by its
+//     entry, and when it is out of scope with `claimKind` `behavior`, above
+//     the claim bar; out of scope below it, its `verdictPath` is never read.
+//     `verdictPath` is an absolute path to a file under the fix-applier's own
 //     run root, `<scratch>/pr<N>/fix-XXXXXXXX/<finding>/`, holding a JSON
 //     object that validates against the refuter verdict schema
-//     `{refuted, reason}`. No `verdictPath`, a path outside that root, a file
-//     missing, or one failing the schema — or abstaining, `inconclusive:
-//     true` — is a mismatch. `refuted: true` puts
-//     the finding on filing row 4, where applying it is a mismatch too;
-//     `refuted: false` on row 5.
+//     `{refuted, reason}`. No `verdictPath`, or a path outside that root, is
+//     a mismatch in either scope. In scope a file missing, or one failing
+//     the schema — or abstaining, `inconclusive: true` — is a mismatch too.
+//     Out of scope, under a finding directory that exists, it is a refuter that
+//     crashed or abstained and decided nothing. `refuted: true` puts the
+//     finding on filing row 4 in scope and 6a out of scope, where applying
+//     it is a mismatch too; `refuted: false` on row 5 in scope and 6b out of
+//     scope. Out of scope, a refuter that decided nothing puts it on row 6b,
+//     where applying it is a mismatch.
 //   - Filing: every deferral names in `issue` the issue it was filed to, and
 //     that issue — read back through `gh issue view --json
 //     labels,state,title` — must be its finding's home in this table. A
@@ -102,15 +108,18 @@
 //            or abstained
 //       4    in-scope suggestion, its refuter refuted it         closed suggestion-band record
 //       5    in-scope suggestion, its refuter let it survive     applied, or deferred as row 1
-//       6    out-of-scope suggestion alleging wrong behavior     open, needs-triage
+//       6a   out-of-scope suggestion alleging wrong behavior,    closed suggestion-band record
+//            its refuter refuted it
+//       6b   out-of-scope suggestion alleging wrong behavior,    open, needs-triage
+//            its refuter let it survive, crashed or abstained
 //       7    claimKind shape, below the claim bar                closed suggestion-band record
 //       8    survived, out of scope, whatever its reason         open, ready-for-agent
 //
 //     Row 4 outranks row 7, and row 7 every other row. A row-5 deferral is
 //     held to row 1's reasons: one of ALLOWED_DEFER other than
-//     false-rationale, `remedy-outside-diff` under the rule above. A row-8
-//     deferral is held to no reason and escalates nothing, whatever its
-//     severity. An open home carries exactly one triage label, its row's or
+//     false-rationale, `remedy-outside-diff` under the rule above. A row-6b
+//     or row-8 deferral is held to no reason and escalates nothing, whatever
+//     its severity. An open home carries exactly one triage label, its row's or
 //     a stronger one: `ready-for-agent` answers a `needs-triage` row, and
 //     `needs-triage` never answers a `ready-for-agent` one. The closed
 //     suggestion-band record is the closed issue titled `PR #<pr> review:
@@ -150,7 +159,7 @@
 
 import { readFileSync, existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join, dirname, isAbsolute, relative, posix, sep } from "node:path";
+import { join, dirname, basename, isAbsolute, relative, posix, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
@@ -186,7 +195,8 @@ export const FILING_ROWS = Object.freeze({
   3: { finding: "an unverified finding whose refuters crashed or abstained", open: "needs-triage" },
   4: { finding: "an in-scope suggestion its refuter refuted", record: true },
   5: { finding: "an in-scope suggestion its refuter let survive", open: "ready-for-agent" },
-  6: { finding: "an out-of-scope suggestion alleging wrong behavior", open: "needs-triage" },
+  "6a": { finding: "an out-of-scope suggestion alleging wrong behavior, its refuter refuted it", record: true },
+  "6b": { finding: "an out-of-scope suggestion alleging wrong behavior, its refuter let it survive, crashed or abstained", open: "needs-triage" },
   7: { finding: "a finding whose claim is about shape, below the claim bar", record: true },
   8: { finding: "an out-of-scope survived finding, whatever its reason", open: "ready-for-agent" },
 });
@@ -210,14 +220,15 @@ function homeHolds(row, { state, title, labels }, pr) {
 
 // The row a deferral's finding state puts it on, by precedence, or null when
 // no row holds it: only a reversed refutation (the refuted bucket) whose claim
-// is not about shape. `refuted` is an in-scope suggestion's refuter verdict,
-// null for any other finding.
+// is not about shape. `refuted` is a suggestion's refuter verdict — `true`,
+// `false`, or null for any other finding and for an out-of-scope suggestion
+// whose refuter decided nothing.
 function filingRow({ bucket, inScope, crashed, refuted, shape, reason }) {
-  if (refuted === true) return 4;
+  if (refuted === true) return inScope ? 4 : "6a";
   if (shape) return 7;
   if (bucket === "refuted") return null;
   if (crashed) return 3;
-  if (!inScope) return bucket === "survived" ? 8 : 6;
+  if (!inScope) return bucket === "survived" ? 8 : "6b";
   if (bucket === "unverified") return 5;
   return reason === "false-rationale" ? 2 : 1;
 }
@@ -230,9 +241,9 @@ const ABSTAINED = "is inconclusive — its refuter abstained, so it decided noth
 
 // Why `value` is not a refuter verdict, or null when it is: the shape
 // VERDICT_SCHEMA declares, checked key by key. An abstaining verdict
-// (`inconclusive: true`) is refused on top: the in-scope suggestion refuter
-// this reads is never offered an abstain, and one that abstained anyway
-// decided nothing a filing row can be keyed on.
+// (`inconclusive: true`) is refused on top: the suggestion refuter this
+// reads is never offered an abstain, and one that abstained anyway decided
+// nothing a filing row can be keyed on.
 export function verdictProblem(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return "is not a JSON object";
   for (const key of VERDICT_SCHEMA.required) {
@@ -399,10 +410,11 @@ function shapeErrors(e) {
  * no ledger names it — a record answers it only by carrying the same `run`;
  * `roots` the directories an absolute finding
  * or remedy path is read relative to. `filing` is `{pr, issue(n), verdict(path)}`,
- * required only when an entry defers or is an in-scope suggestion: `issue`
+ * required only when an entry defers or is a suggestion whose verdict is read: `issue`
  * answers `{state, title, labels}` — `state` upper-case, `labels` names — or
  * `{problem}` when the tracker cannot say; `verdict` answers `{refuted}` for
- * a refuter verdict path or `{problem}` when it is no usable evidence.
+ * a refuter verdict path or `{problem}` when it is no usable evidence, with
+ * `undecided: true` when the path is a refuter's own location holding no decision.
  * `review` must pass reviewProblem() — a bucket missing or holding a
  * non-object is a TypeError here, not a violation.
  */
@@ -469,31 +481,38 @@ export function checkDispositions({ review, record, recordProblem = null, run = 
     const inScope = presumed !== null || e.scope === "in";
     const why = presumed === null ? "its entry declares scope in" : `${presumed}, so it is in scope whatever its entry declares`;
     const crashed = bucket === "unverified" && finding.refutersDispatched > 0;
-    // An in-scope suggestion's refuter verdict is the evidence a refuter ran.
+    const shape = e.claimKind === "shape";
+    // A suggestion's refuter verdict is the evidence a refuter ran: every
+    // in-scope one's, and an out-of-scope one's above the claim bar.
     let refuted = null;
-    if (bucket === "unverified" && !crashed && inScope) {
+    if (bucket === "unverified" && !crashed && (inScope || !shape)) {
+      const what = inScope ? "an in-scope suggestion" : "an out-of-scope suggestion alleging wrong behavior";
       if (e.verdictPath === undefined) {
-        at(bucket, index, `an in-scope suggestion carries no refuter evidence — its entry names no verdictPath; ${why}`);
+        at(bucket, index, `${what} carries no refuter evidence — its entry names no verdictPath; ${inScope ? why : "claimKind behavior puts it above the claim bar"}`);
         return;
       }
       const v = filingOf().verdict(e.verdictPath);
-      if (v.problem !== undefined) {
-        at(bucket, index, `an in-scope suggestion carries no refuter evidence — verdictPath ${JSON.stringify(e.verdictPath)} ${v.problem}`);
+      const problem = `verdictPath ${JSON.stringify(e.verdictPath)} ${v.problem}`;
+      // Out of scope, a refuter's own location holding no decision is a
+      // refuter that crashed or abstained: the finding defers open, row 6b.
+      if (v.problem !== undefined && (inScope || v.undecided !== true)) {
+        at(bucket, index, `${what} carries no refuter evidence — ${problem}`);
         return;
       }
-      refuted = v.refuted;
-      if (refuted && e.disposition === "apply") {
-        at(bucket, index, `filing row 4 (${FILING_ROWS[4].finding}): applied, though its verdict is refuted: true — it belongs in ${homeText(FILING_ROWS[4], filing.pr)}`);
+      refuted = v.refuted ?? null;
+      if (e.disposition === "apply" && (refuted === true || (refuted === null && !inScope))) {
+        const rowNo = filingRow({ bucket, inScope, crashed, refuted, shape });
+        const though = refuted ? "its verdict is refuted: true —" : `its refuter decided nothing — ${problem};`;
+        at(bucket, index, `filing row ${rowNo} (${FILING_ROWS[rowNo].finding}): applied, though ${though} it belongs in ${homeText(FILING_ROWS[rowNo], filing.pr)}`);
         return;
       }
     }
     if (e.disposition !== "defer") return;
-    const shape = e.claimKind === "shape";
     // A finding that stands defers only for a reason: an in-scope survivor
-    // for one of ALLOWED_DEFER, a suggestion its refuter let through for one
-    // of row 1's — unless row 7 takes it. An out-of-scope survivor defers for
-    // any reason, and escalates nothing.
-    if ((bucket === "survived" && inScope) || (refuted === false && !shape)) {
+    // for one of ALLOWED_DEFER, an in-scope suggestion its refuter let
+    // through for one of row 1's — unless row 7 takes it. An out-of-scope
+    // survivor, or suggestion, defers for any reason, and escalates nothing.
+    if (inScope && (bucket === "survived" || (refuted === false && !shape))) {
       const allowed = bucket === "survived" ? ALLOWED_DEFER : ROW_1_DEFER;
       if (!allowed.includes(e.reason)) {
         const reason = e.reason === undefined || e.reason === "" ? "no reason" : `reason ${JSON.stringify(e.reason)}`;
@@ -654,17 +673,30 @@ function issueReader(repo) {
 // A refuter verdict, as checkDispositions' `filing.verdict` reads it: an
 // absolute path to a file under `<scratch>/pr<pr>/fix-XXXXXXXX/<finding>/`,
 // both sides resolved through symlinks, holding JSON in the refuter verdict
-// schema. Anything else is `{problem}` — no evidence a refuter ran.
+// schema. Anything else is `{problem}` — no evidence a refuter ran. A path
+// that is a refuter's own location — under that root, its `<finding>`
+// directory present — holding no decision is `{problem, undecided: true}`:
+// no file, one that is no JSON or off the schema, or an abstention, which is
+// what a refuter that crashed or abstained leaves. A finding directory that
+// was never made is a refuter that never ran, and stays a plain `{problem}`.
 function verdictReader(scratch, pr) {
   const runs = join(scratch, `pr${pr}`);
   const notUnder = `is not under a fix-applier run root, ${runs}/fix-XXXXXXXX/<finding>/`;
   return (path) => {
     if (!isAbsolute(path)) return { problem: "is not an absolute path" };
     let file, root;
+    let missing = false;
     try {
       file = realpathSync(path);
     } catch {
-      return { problem: "names no file that exists" };
+      // No file there: its finding directory decides whether it is a
+      // refuter's location.
+      try {
+        file = join(realpathSync(dirname(path)), basename(path));
+      } catch {
+        return { problem: "names no file that exists" };
+      }
+      missing = true;
     }
     try {
       root = realpathSync(runs);
@@ -672,17 +704,18 @@ function verdictReader(scratch, pr) {
       return { problem: notUnder };
     }
     if (!/^fix-[^/]+\/[^/]+\/./.test(relative(root, file).split(sep).join("/"))) return { problem: notUnder };
+    if (missing) return { problem: "names no file that exists", undecided: true };
     let value;
     try {
-      if (!statSync(file).isFile()) return { problem: "names something that is not a file" };
+      if (!statSync(file).isFile()) return { problem: "names something that is not a file", undecided: true };
       value = JSON.parse(readFileSync(file, "utf8"));
     } catch (e) {
-      return { problem: `cannot be read as JSON — ${e.message}` };
+      return { problem: `cannot be read as JSON — ${e.message}`, undecided: true };
     }
     const why = verdictProblem(value);
     if (why === null) return { refuted: value.refuted };
     // An abstention validates against the schema; it is refused as evidence, not as a malformed file.
-    return { problem: why === ABSTAINED ? why : `fails the refuter verdict schema — it ${why}` };
+    return { problem: why === ABSTAINED ? why : `fails the refuter verdict schema — it ${why}`, undecided: true };
   };
 }
 

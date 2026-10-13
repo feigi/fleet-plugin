@@ -264,6 +264,16 @@ test("the refuter budget is keyed on severity alone, never on a dimension", () =
   assert.equal(forSeverity("suggestion"), 0);
 });
 
+// The review budgets the suggestion band 0 refuters, and a caller that passes
+// that 0 explicitly keeps it: a falsy count is not "unset", so it never falls
+// back to `verifiers`. The fix-applier, not the review, checks the band.
+test("an explicit verifiersBySeverity suggestion: 0 stays 0", () => {
+  const forSeverity = verifiersFor({ verifiers: 3, verifiersBySeverity: { critical: 3, important: 3, suggestion: 0 } });
+  assert.equal(forSeverity("suggestion"), 0);
+  assert.equal(forSeverity("critical"), 3);
+  assert.equal(forSeverity("important"), 3);
+});
+
 // --- args.dimensions normalization (#113). The "Specialists" section of
 // `commands/review-and-fix.md` documents the override as
 // accepting "keys or dimension objects"; before this, only objects worked and
