@@ -232,7 +232,7 @@ for (const pin of ["a".repeat(39), "a".repeat(41), "g".repeat(40), "abc1234", "m
 
 test("a missing flag, an unknown flag and a non-numeric --pr are refused before any gh call", () => {
   const t = rig();
-  for (const args of [["--pin", PIN], ["--pr", "42"], ["--pr", "abc", "--pin", PIN], ["--pr", "42", "--pin", PIN, "--bogus", "x"]]) {
+  for (const args of [["--pin", PIN], ["--pr", "42"], ["--pr", "abc", "--pin", PIN], ["--pr", "42", "--pin", PIN, "--bogus"], ["--pr", "42", "--pin", PIN, "--repo"]]) {
     const r = t.run(args);
     assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
     assert.deepEqual(t.calls(), []);
