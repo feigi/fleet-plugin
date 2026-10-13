@@ -14,6 +14,7 @@
 import { execFileSync } from "node:child_process";
 import { gitEnv } from "./git-env.mjs";
 import { basename, dirname, extname } from "node:path";
+import { isConfig, isDocs, testSubject } from "./diff-stats.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
 
 const NAME = "pr-overlap";
@@ -96,20 +97,24 @@ const intersect = (xs, ys) => {
 
 // A repo mid-migration has src/…/foo.test.ts in one PR and
 // tests/unit/…/foo.test.ts in the other: same module, zero shared paths. That
-// migration case is what this signal exists for, and it is a TypeScript-module
-// notion — so only files whose extension is actually stripped participate.
+// migration case is what this signal exists for, and it is a test-file notion
+// in any language — so only a file whose name has a test shape participates,
+// judged by diff-stats.mjs's own patterns, and its module is that name with
+// the test affix and extension removed: `foo_test.go`, `test_foo.py` and
+// `foo.test.ts` all give `foo`, `FooTest.java` gives `Foo`. Modules compare
+// case-sensitively, as `files` compares paths.
 //
-// Matching on bare basenames instead produces confident nonsense: two PRs each
-// touching their own README.md, or their own hooks.json, reported as sharing a
-// "module". Measured in the proving ground: README.md ×8, SKILL.md ×6,
-// mcp-snippet.json ×9, hooks.json ×5 across unrelated directories. Returning
-// null for those drops them from the signal entirely rather than caveating them.
-const moduleOf = (f) => {
-  const b = basename(f);
-  if (b.endsWith(".test.ts")) return b.slice(0, -".test.ts".length);
-  if (b.endsWith(".ts")) return b.slice(0, -".ts".length);
-  return null;
-};
+// A non-test source file never participates, `.ts` included: `types.ts` ×13
+// and `index.ts` ×10 live in unrelated subtrees of the proving ground, and
+// telling a shared module from a shared stock name would need a list of names.
+// Docs and config never participate either, a test-shaped name included
+// (`docs/test_plan.md`): matching their basenames produces confident nonsense,
+// two PRs each touching their own README.md, or their own hooks.json, reported
+// as sharing a "module". Measured in the proving ground: README.md ×8,
+// SKILL.md ×6, mcp-snippet.json ×9, hooks.json ×5 across unrelated
+// directories. Returning null for those drops them from the signal entirely
+// rather than caveating them.
+const moduleOf = (f) => (isDocs(f) || isConfig(f) ? null : testSubject(f) || null);
 const modulesOf = (fs) => fs.map(moduleOf).filter((m) => m !== null);
 
 // Repo root is excluded: every top-level file shares it, so it fires on PRs
@@ -143,7 +148,7 @@ const dirsOf = (fs) => fs.map(dirname).filter((d) => d !== ".");
 // with the verdict. An extension on neither list does not participate at all.
 //
 // Data side — an artifact whose meaning lives in prose somewhere else. A
-// `.ts` module's consumers are already found by `files`/`modules` above. `.md`
+// `.ts` module's consumers are already found by `files` above. `.md`
 // is deliberately absent: a doc citing a doc is what `dirs` fires on, and
 // `SKILL.md` recurs 3× in this repo's 251 tracked files (measured), so it is
 // the ambiguous-basename shape `moduleOf` above already refuses to guess at.
@@ -386,13 +391,13 @@ if (signal === "dirs") {
 }
 if (signal === "modules") {
   // The hold rule this mechanises calls a module match a verdict, on a par with
-  // a shared file. It is not one: `types.ts` ×13 and `index.ts` ×10 live in
-  // unrelated subtrees of the proving ground, so two PRs can share a "module"
-  // name and nothing else. Say so, because the caller's rule will not.
+  // a shared file. It is not one: two unrelated test files can share a name
+  // (a `test_utils.py` in each of two packages), so two PRs can share a
+  // "module" name and nothing else. Say so, because the caller's rule will not.
   console.error(
-    `${NAME}: module-only hit — confirm before treating as a verdict. Common\n` +
-      `  TypeScript basenames (types.ts, index.ts) recur across unrelated\n` +
-      `  subtrees, so a shared name is not yet a shared module: ${modules.join(", ")}`,
+    `${NAME}: module-only hit — confirm before treating as a verdict. Unrelated\n` +
+      `  test files can share a name (test_utils.py in two packages), so a\n` +
+      `  shared name is not yet a shared module: ${modules.join(", ")}`,
   );
 }
 // Keyed on the count, not on `signal`, unlike the two notes above: a prose
