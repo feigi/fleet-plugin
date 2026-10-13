@@ -2,7 +2,7 @@
 
 Date: 2026-10-13
 Status: spec, input to `/to-tickets`. Spec 2 of 6 from the 2026-10-13 determinism review.
-Relates to: #2331 (a `labelled` settle with no label on the PR), the lost-report and lost-ruling measurements in `run-team/SKILL.md` § Rules that fail silently, the `Sizing:` covariate rules in § Phase 2, ADR 0012 § 2 (the review result lands as one file).
+Relates to: #2331 (a `labelled` settle with no label on the PR), the lost-report and lost-ruling measurements in `run-team/SKILL.md` § Rules that fail silently, the `Sizing:` covariate rules in § Phase 2, ADR 0012 Decision 1 as amended by #2886 (the review result lands as one file).
 Depends on: nothing. Spec 1 (rendered briefs) is where the report path is stated to the member; until it lands the brief template line is prose.
 Base tree: `main` at `bd4afac` (2026-10-13).
 
@@ -76,13 +76,21 @@ Every schema has `member` (the name dispatched as) and `confirmation`.
 `schemaMode` on the `task` call is `strict`: an invalid result is a failed
 job, not a nulled field.
 
-**D2. The file.** `<scratch>/reports/<member>.json`, flat, one per member
-name; member names are unique for the omp session, so the directory needs
-no nesting. The brief states the path absolute. The member writes the file
-before its final message, and its final message is one line: `<member>:
-<outcome> <path>`. The review runner keeps its own path and its own line.
-`reclaim-scratch.mjs` removes `reports/<member>.json` once the member's PR
-or ticket is reclaimed, by the existing rules.
+**D2. The file.** `<scratch>/reports/<run>/<member>.json`, one per member
+name within a run. `<run>` is the controller record's `at`, the epoch
+milliseconds `ledger.mjs rotate` writes into the heartbeat state. The
+scratch root is per workspace and outlives omp sessions, and a member name
+restarts with every run that carries nothing forward (`merge-bot-1` again
+after a `dead` or `none` rotate), so the run is part of the key: a previous
+run's report is never in this run's directory. The brief states the path
+absolute. The member writes the file before its final message, and its
+final message is one line: `<member>: <outcome> <path>`. The review runner
+keeps its own path and its own line. `reclaim-scratch.mjs --after-rotate`
+removes every `reports/<run>/` directory whose `<run>` is not the current
+record's `at`, which is also what clears a merge-bot's report, since a
+merge-bot names no PR or ticket; within the current run,
+`reports/<run>/<member>.json` is removed once its member's PR or ticket is
+reclaimed, by the existing rules.
 
 **D3. The settle reads and verifies.** `ledger.mjs settle <member>
 --from-report [--reports <dir>]` reads the file, validates it against the
@@ -113,10 +121,12 @@ and for a fix-applier copies `deferred` entries whose bucket is `refuted` to
 tick.
 
 **D5. The tick reads the reports directory.** For every live token, if
-`<scratch>/reports/<member>.json` exists, the tick prints `SETTLE <member>
-(report on disk since <age>)` above the rows. Advisory, like
-`CHECK-LIVENESS`: it settles nothing. The `--scratch` the tick needs is read
-off the heartbeat state file, written once at phase 0 (spec 3 D2).
+`<scratch>/reports/<run>/<member>.json` exists for the current run, the tick
+prints `SETTLE <member> (report on disk since <age>)` above the rows.
+Advisory, like `CHECK-LIVENESS`: it settles nothing. The tick computes
+`<scratch>` itself with `scratchRoot()` (`fleet-dir.mjs`), a pure function of
+the workspace path, so it needs no flag and no state file; `<run>` it reads
+off the controller record it already reads.
 
 **D6. Downstream readers.** `tier-outcomes.mjs append` reads `sizing` from
 the implementer's report (the `--sizing` flag stays for a member with no
