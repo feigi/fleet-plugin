@@ -1510,7 +1510,14 @@ function runRotate() {
   // reading it as "no record" would let a live controller's ledger be moved
   // by exactly the fault that hid its record.
   if (state.degraded) {
-    die(`refusing to rotate ${file}: ${beatFile} exists but cannot be read or parsed, so a controller record in it cannot be judged — repair or remove it`);
+    const causeMap = {
+      unreadable: "exists but cannot be read",
+      "not JSON": "is not JSON",
+      "not an object": "is not a JSON object",
+      "invalid controller": "holds a controller record that cannot be judged",
+    };
+    const cause = causeMap[state.degraded] || state.degraded;
+    die(`refusing to rotate ${file}: ${beatFile} ${cause} — repair it so its controller record is intact. Removing it makes this rotate judge none: if the previous run was this omp session's, its live members and retired names are not carried forward, so this run can dispatch onto their work and reuse their names.`);
   }
   let prior, ours;
   try {
@@ -1527,9 +1534,14 @@ function runRotate() {
   }
   // The fallback guards a ledger, as it always has: with none to move there
   // is nothing for a beating mark to protect. A ledger write is the
-  // controller acting, and counts the way a beat does.
+  // controller acting, and counts the way a beat does. Refuse if the beat is
+  // beating, or if there are fresh ticked/acted marks with no recorded stop.
   const exists = existsSync(file);
-  if (prior === "none" && exists && assessBeat({ beat, ticked, acted, now: Date.now() }).kind === "beating") {
+  const beatVerdict = assessBeat({ beat, ticked, acted, now: Date.now() });
+  const isBeatBeating = beatVerdict.kind === "beating";
+  const hasRecordedStop = beat?.stopped != null;
+  const hasFreshMarks = ticked !== null || acted !== null;
+  if (prior === "none" && exists && (isBeatBeating || (hasFreshMarks && !hasRecordedStop))) {
     const [what, mark] = [["beat", beat], ["tick", ticked], ["ledger write", acted]]
       .filter(([, m]) => m !== null)
       .reduce((a, b) => (b[1].at > a[1].at ? b : a));

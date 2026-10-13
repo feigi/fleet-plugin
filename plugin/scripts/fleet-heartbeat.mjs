@@ -193,17 +193,23 @@ function main() {
     // No hold, and `elapsed` untouched: this invocation is not a beat, it is
     // the run saying why there will not be another one. Leaving the partial
     // interval where it is costs nothing — the next run reads a stopped mark
-    // and knows the streak behind it is a dead run's.
-    const persisted = writeState(path, NAME, state, { beat: mark(target, stop) });
-    // Announced on stdout as well as through writeState's own stderr warning,
-    // and still exit 0. An unrecorded stop is a real degradation — the next
-    // run will report a beat that stopped without a reason, which is the
-    // abrupt-death wording for a death that named itself — but it is not
-    // grounds to fail the command: the controller is stopping either way and
-    // a non-zero exit here only adds noise to a run that is already ending.
-    console.log(persisted
-      ? `heartbeat: stop recorded (${stop}) — the next run's start and the cockpit will report it`
-      : `heartbeat: WARNING stop NOT recorded (${stop}) — the next reader will see a beat that stopped with no reason`);
+    // and knows the streak behind it is a dead run's. Leave degraded files
+    // byte-identical, so a same-session rotate still refuses rather than
+    // judges none.
+    if (!state.degraded) {
+      const persisted = writeState(path, NAME, state, { beat: mark(target, stop) });
+      // Announced on stdout as well as through writeState's own stderr warning,
+      // and still exit 0. An unrecorded stop is a real degradation — the next
+      // run will report a beat that stopped without a reason, which is the
+      // abrupt-death wording for a death that named itself — but it is not
+      // grounds to fail the command: the controller is stopping either way and
+      // a non-zero exit here only adds noise to a run that is already ending.
+      console.log(persisted
+        ? `heartbeat: stop recorded (${stop}) — the next run's start and the cockpit will report it`
+        : `heartbeat: WARNING stop NOT recorded (${stop}) — the next reader will see a beat that stopped with no reason`);
+    } else {
+      console.log(`heartbeat: stop NOT recorded (${stop}) — the heartbeat file is degraded and cannot be repaired`);
+    }
     return;
   }
 
@@ -231,13 +237,15 @@ function main() {
   // taking one of its own. One write per invocation means a mark can never
   // land while the progress it was taken beside did not, and the two can
   // never disagree about which invocation they came from. It also keeps the
-  // failure story single: the warning below covers both keys at once.
+  // failure story single: the warning below covers both keys at once. Leave
+  // degraded files byte-identical, so a same-session rotate still refuses
+  // rather than judges none — a skipped write reports a fire like a failed one.
   //
   // `stopped: ""` on every ordinary beat, never carried forward: a run that
   // recorded a stop and then kept beating is a run that did not stop, and a
   // stale reason surviving into a live beat would have the next reader
   // announcing a death that already un-happened.
-  const persisted = writeState(path, NAME, now, { elapsed: reached ? 0 : elapsed, beat: mark(target, "") });
+  const persisted = !now.degraded && writeState(path, NAME, now, { elapsed: reached ? 0 : elapsed, beat: mark(target, "") });
   // A failed write is itself a fire. With nothing persisting the remainder,
   // every invocation reads the same elapsed total, holds the same seconds and
   // prints the same remainder: the interval can never complete, so fleet-tick

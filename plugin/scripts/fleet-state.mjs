@@ -120,8 +120,9 @@ export function readState(path, name) {
   const fresh = { quiet: 0, elapsed: 0, digest: "", beat: null, ticked: null, acted: null, controller: null, seen: {}, rest: {} };
   // The same state, flagged: the file EXISTS and could not be used. A caller
   // that acts on the absence of a record — ledger.mjs rotate — must tell this
-  // from `fresh`, which is a run that has simply not written one yet.
-  const degraded = { ...fresh, degraded: true };
+  // from `fresh`, which is a run that has simply not written one yet. The
+  // `degraded` field is either false (fresh file) or a cause string.
+  const makeDegraded = (cause) => ({ ...fresh, degraded: cause });
   let raw;
   try {
     raw = readFileSync(path, "utf8");
@@ -136,7 +137,7 @@ export function readState(path, name) {
     // whole ticket exists to close.
     if (e.code !== "ENOENT") {
       console.error(`${name}: WARNING could not read ${path} (${e.message}) — restarting at the base interval`);
-      return degraded;
+      return makeDegraded("unreadable");
     }
     return fresh;
   }
@@ -145,11 +146,11 @@ export function readState(path, name) {
     parsed = JSON.parse(raw);
   } catch (e) {
     console.error(`${name}: WARNING ${path} is not JSON (${e.message}) — restarting at the base interval`);
-    return degraded;
+    return makeDegraded("not JSON");
   }
   if (!isRecord(parsed)) {
     console.error(`${name}: WARNING ${path} is not an object — restarting at the base interval`);
-    return degraded;
+    return makeDegraded("not an object");
   }
   // Per-field validation, not all-or-nothing: a file carrying a good `quiet`
   // and a junk `elapsed` keeps the streak instead of losing both to one key.
@@ -221,6 +222,10 @@ export function readState(path, name) {
     return out;
   };
   const { quiet, elapsed, digest, beat, ticked, acted, controller, seen, ...rest } = parsed;
+  // If the parsed object has a controller key but ctl() rejects it, it's a degraded file
+  if ("controller" in parsed && ctl(controller) === null) {
+    return makeDegraded("invalid controller");
+  }
   return {
     quiet: num(quiet),
     elapsed: num(elapsed),
