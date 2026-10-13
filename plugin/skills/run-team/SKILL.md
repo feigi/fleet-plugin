@@ -2580,16 +2580,16 @@ review evidence and not a blocker. While a review or a review fix-applier on
 the PR is live or still owes its report — a dispositions mismatch awaiting its
 retry and a conflict hold awaiting its fix-applier included — the red-check
 fixer does not fire: their push starts a new run, and a fixer racing them
-would work on a SHA that is still moving. Three edges dispatch it, each paired
-with the finisher's: **Monitor: CI run completes** binding a red on a head
+would work on a SHA that is still moving. These edges dispatch it, each the
+finisher's own: **Monitor: CI run completes** binding a red on a head
 whose review has returned and whose fix-applier, if any, has reported;
 **A fix-applier reports `no-op`**, or a SHA you have already bound, when that
 head's bound conclusion is red; and **A review result lands** with no finding
 and nothing to file, when that head's bound conclusion is red. The Monitor is
 edge-keyed on `<run-id>:<attempt>:<conclusion>`, so a red that fired before the
-review never fires again, and with no push there is no new run — the other two
-edges are the only route there, so do not wait for an event. Edit one of the
-three bullets without the others and what strands is exactly the red-only PR.
+review never fires again, and with no push there is no new run — the other
+edges are the only route there, so do not wait for an event. Edit one of these
+bullets without the others and what strands is exactly the red-only PR.
 
 Name it `fix-pr-<M>`, or the next free suffix (`-b`, `-c` …) — `dispatch`
 refuses a reused name — record it with `ledger.mjs dispatch <pr#> <name>`
