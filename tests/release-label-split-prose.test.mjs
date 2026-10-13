@@ -132,7 +132,7 @@ test("the finisher's assertion accepts a normally-labelled PR — it counts rele
   // "exactly one label" halts every correctly-created PR in the fleet.
   assert.match(
     duty,
-    Pin.phrase("Count only those three"),
+    Pin.phrase("counts only those three"),
     "the finisher's assertion is no longer scoped to the release labels — any other label on the PR now trips it",
   );
   assert.match(
@@ -143,18 +143,24 @@ test("the finisher's assertion accepts a normally-labelled PR — it counts rele
 });
 
 // #2331: duty 3 read as one item let two finishers stop at the release-label
-// check and report `labelled` with no `ready-to-merge` on the PR. The add is
-// its own sub-step, after the check, and carries the command itself — sliced
-// to each sub-step, so a command left elsewhere in duty 3 does not satisfy it.
-test("duty 3 is two sub-steps — the release-label check, then the add-label command", () => {
-  const a = RUN_TEAM.between("- **(a) Exactly one release label.**", "- **(b) Add the label:**", "finisher duty 3(a)").text;
-  const b = RUN_TEAM.between("- **(b) Add the label:**", "4. Report you the label", "finisher duty 3(b)").text;
-  assert.match(a, Pin.phrase("exactly one"), "3(a) no longer holds the release-label count");
-  assert.doesNotMatch(a, /--add-label/, "3(a) adds a label — the precondition and the action are one step again");
-  assert.match(b, /`gh pr edit <pr> --add-label ready-to-merge`/, "3(b) no longer spells out the add-label command");
-  assert.ok(RUN_TEAM.text.indexOf("- **(a) Exactly one release label.**") < RUN_TEAM.text.indexOf("- **(b) Add the label:**"), "the add precedes its precondition");
-  assert.match(RUN_TEAM.bullet("4. Report you the label", "**Give the finisher the instrument re-check verbatim too.**", "finisher duty 4").text, Pin.phrase("post-add read-back: `gh pr view <pr> --json labels`"),
-    "duty 4 no longer reports the label read back after the add");
+// check and report `labelled` with no `ready-to-merge` on the PR. The check and
+// the add are now one script the finisher runs, whose exit code is its
+// verdict, so neither can be run alone — and the finisher's prose no longer
+// spells the commands that were each read as the whole duty.
+test("duty 3 is one script — named in the duty list and the verbatim block, with no gh commands spelled", () => {
+  const item = RUN_TEAM.between("3. Add `ready-to-merge` by running one script", "4. Report you the label", "finisher duty 3").text;
+  const block = RUN_TEAM.between("**Duty 3 is one script, and its exit code is your verdict.**", "**Once the label is on, take it off", "finisher duty-3 verbatim block").text;
+  for (const [text, where] of [[item, "the duty list"], [block, "the verbatim block"]]) {
+    assert.match(text, Pin.phrase("finisher-label.mjs --pr"), `${where} no longer runs the script`);
+    assert.match(text, Pin.phrase("fleet-run finisher-label.mjs"), `${where} reaches the script by something other than the Resolver`);
+    assert.doesNotMatch(text, /gh pr (view|comment|edit)/, `${where} spells a gh command again — the steps are separable by hand once more`);
+    assert.match(text, Pin.phrase("exit code"), `${where} does not say the exit code is the verdict`);
+  }
+  assert.match(block, Pin.phrase("Exit 0 is the only code that means the label is on"), "the block no longer says only exit 0 is a label");
+  assert.match(block, Pin.phrase("Every non-zero exit halts you"), "the block lets a non-zero exit go on");
+  assert.match(block, Pin.phrase("its steps by hand to get past it"), "the block no longer forbids replaying the steps by hand");
+  assert.match(RUN_TEAM.bullet("4. Report you the label", "**Give the finisher the instrument re-check verbatim too.**", "finisher duty 4").text, Pin.phrase("the script's receipt, the JSON line it printed, as printed"),
+    "duty 4 no longer reports the script's receipt");
 });
 
 test("the solo labelling step gates on the release label too — the fleet finisher is not its only writer", () => {

@@ -3317,30 +3317,32 @@ a minute apart showed *different* mutants, so a member's report and any single
    silent-destruction ordering above — report it back, do not run it. One
    finisher refused exactly that instruction live, on the grounds it could not
    prove the diff was its own; that was judgement, and this is the rule.
-3. Add `ready-to-merge` — two steps, each checked on its own, in this order:
-   - **(a) Exactly one release label.** Read the PR's labels back
-     (`gh pr view <pr> --json labels`) and find **exactly one** release label,
-     `patch`/`minor`/`major`. Zero or more than one halts the finisher before
-     the label, naming which it found. This is the backstop for a label lost
-     wherever it was lost, a hand-created PR included: a `gh pr create` that
-     outran its caller's tool timeout leaves the PR open with the flag
-     unapplied and no exit status anywhere to notice, and nothing downstream
-     re-derives the release label. Count only those three — the PR carries
-     other labels, `ready-to-merge` itself among them once you add it, so a PR
-     wearing one release label beside them passes unchanged. A repo that
-     defines none of the three does not gate on one — `gh label list` settles
-     that, and it is no licence to skip the read where they exist.
-   - **(b) Add the label:** record the head you audited first —
-     `gh pr comment <pr> --body "ready-to-merge-head: <your dispatch pin>"`,
-     the full SHA, which the merge bot reads as the head the label was applied
-     to — then `gh pr edit <pr> --add-label ready-to-merge`. (a)
-     passing labels nothing — it is the precondition, and these commands are
-     the duty. Two finishers in one run stopped at (a) and reported
-     `labelled` on PRs that sat out of the merge queue.
-4. Report you the label (its post-add read-back: `gh pr view <pr> --json labels`
-   run after 3(b), output as printed), the deferral issue numbers — a
-   `filed: #N <subject>` line for every issue duty 2 created, and
-   `unrecorded: #N <subject>` for one whose `filed` failed twice — and anything
+3. Add `ready-to-merge` by running one script, `finisher-label.mjs` — the
+   release-label check and the label write are one command, because the check
+   reads like the whole duty. Its exit code is the finisher's verdict:
+   `~/.fleet/bin/fleet-run finisher-label.mjs --pr <pr> --pin <your dispatch pin>`,
+   the pin the full SHA. In order, it finds **exactly one** release label,
+   `patch`/`minor`/`major` — zero or more than one is exit 3 before anything is
+   written, naming which it found; then it records the head you audited as a PR
+   comment, which the merge bot reads as the head the label was applied to;
+   then it adds the label and reads the labels back, and exits 0 only when that
+   read-back carries `ready-to-merge`. A failed call is exit 2 and the read-back
+   without the label is exit 4; no step after a failed one runs. The count is
+   the backstop for a label lost wherever it was lost, a hand-created PR
+   included: a `gh pr create` that outran its caller's tool timeout leaves the
+   PR open with the flag unapplied and no exit status anywhere to notice, and
+   nothing downstream re-derives the release label. It counts only those three
+   — the PR carries other labels, `ready-to-merge` itself among them once the
+   script adds it, so a PR wearing one release label beside them passes
+   unchanged. A repo that defines none of the three does not gate on one — the
+   script settles that from the repo's own label list and says
+   `undefined-in-repo` in its receipt. Two finishers in one run stopped at the
+   release-label check and reported `labelled` on PRs that sat out of the merge
+   queue.
+4. Report you the label (the script's receipt, the JSON line it printed, as
+   printed), the deferral issue numbers — a `filed: #N <subject>` line for
+   every issue duty 2 created, and `unrecorded: #N <subject>` for one whose
+   `filed` failed twice — and anything
    it halted on — cause and evidence, below, never a bare "head moved". The
    cause is one word of the ledger's `halted:<cause>` vocabulary:
    `live-editor`, `rebase` or `past-pin` from the cause block below,
@@ -3445,21 +3447,26 @@ it reached, so reading that summary alone reads a partial suite as a whole one:
 > cause `other`, with both runs — the mutant's and the unmutated tree's — as
 > evidence; label nothing. A kill's evidence line goes in your report.
 
-**Give the finisher duty 3 verbatim as well, as its two steps.** The finisher's
+**Give the finisher duty 3 verbatim as well, as one script.** The finisher's
 agent definition carries no duty text, so this brief is the whole of duty 3 it
-sees. Two finishers in one run read the release-label check as the
-whole duty and reported `labelled` on a PR that never got the label:
+sees. Two finishers in one run read the release-label check as the whole duty
+and reported `labelled` on a PR that never got the label, so the check and the
+label write are one command and the finisher never runs either alone:
 
-> **Duty 3 is two steps, and only the second one labels.**
-> (a) `gh pr view <M> --json labels` — confirm exactly one of
-> `patch`/`minor`/`major`. Zero or more than one halts you before the label:
-> name which you found. A repo whose `gh label list` defines none of the three
-> does not gate on one.
-> (b) `gh pr comment <M> --body "ready-to-merge-head: <your dispatch pin>"`
-> (the full SHA), then `gh pr edit <M> --add-label ready-to-merge`. Step (a)
-> passing labels nothing; these commands are the duty.
-> Then run `gh pr view <M> --json labels` once more and put its output in your
-> report: that read-back is what tells the controller the label is on.
+> **Duty 3 is one script, and its exit code is your verdict.**
+> `~/.fleet/bin/fleet-run finisher-label.mjs --pr <M> --pin <your dispatch pin>`
+> (the full SHA). It confirms exactly one of `patch`/`minor`/`major` is on the
+> PR, records the head you audited, adds `ready-to-merge`, and reads the labels
+> back. Exit 0 is the only code that means the label is on. Exit 3 means the PR
+> carries zero or more than one release label: you are halted before the label,
+> and the receipt names which it found. Exit 4 means the label was written and
+> the read-back does not carry it. Exit 2 means a `gh` call or the invocation
+> itself failed: report the stderr it printed. Every non-zero exit halts you
+> with cause `other`, with the receipt as evidence, and you do not run any of
+> its steps by hand to get past it. A repo whose label list defines none of the
+> three does not gate on one, and the script says so in its receipt. Put the
+> receipt, the JSON line it printed, in your report as printed: it is what tells
+> the controller the label is on.
 
 **Once the label is on, take it off before you approve any push.** The label is a
 verdict on the tree the finisher read, and a GitHub label does not follow the
