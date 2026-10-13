@@ -121,12 +121,13 @@ test("step 5 routes below-bar findings into the closed record, with a promotion 
 });
 
 test("step 5 keys the bar on the finding's claim, never its review band", () => {
-  // Contiguous through the confirmed/torn hand-off: the exclusion is only
-  // meaningful bound to where an above-bar finding goes instead.
+  // Contiguous through the hand-off to an open `needs-triage` issue: the
+  // exclusion is only meaningful bound to where an above-bar finding goes
+  // instead.
   assert.match(
     step5(),
     Pin.phrase(
-      "**The bar reads the finding's claim, never its review band** — a finding that alleges wrong behavior, whatever band it sat in, `unverified`-with-crashed-refuters included, is above this bar and files open under the confirmed/torn split",
+      "**The bar reads the finding's claim, never its review band** — a finding that alleges wrong behavior, whatever band it sat in, `unverified`-with-crashed-refuters included, is above this bar and files open, `needs-triage`, which is why a band cannot carry this decision.",
     ),
     "step 5 no longer excludes wrong-behavior findings from the claim bar — a band-keyed reading drops crashed-refuter criticals (#591)",
   );

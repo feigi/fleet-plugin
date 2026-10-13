@@ -184,15 +184,17 @@ test("step 5 says a mismatch names the filing row, and that an unreadable tracke
   assert.match(s, Pin.phrase("with nothing else broken the verdict is `unchecked` — never `ok`, and it exits 1 — so run the check again once `gh` answers."));
 });
 
-// Step 5's relabel duty: one line, bounded by the record duties' opener.
-const relabelStep = () =>
-  REVIEW_AND_FIX.between("**A duplicate that should hold an open deferral is relabelled up, never down.**", "\n   **Name where each deferral went", "review-and-fix.md").text;
+// Step 5's duplicate duty: one line, bounded by the record duties' opener.
+const duplicateStep = () =>
+  REVIEW_AND_FIX.between("**A duplicate that should hold an open deferral is a comment, never a relabel.**", "\n   **Name where each deferral went", "review-and-fix.md").text;
 
-test("step 5 relabels a needs-triage duplicate up to ready-for-agent citing the refuters, never down, and refiles a closed one", () => {
-  const s = relabelStep();
-  assert.match(s, Pin.phrase("relabel it with `gh issue edit <N> --remove-label needs-triage --add-label ready-for-agent`, and cite the refuters' verdict in the comment you leave there."));
+test("step 5 lands a duplicate as a comment citing the refuters and changing no label, never relabels down, and refiles a closed one", () => {
+  const s = duplicateStep();
+  assert.match(s, Pin.phrase("cite the refuters' verdict — or the review's votes — in the comment you leave there, and change no label."));
   assert.match(s, Pin.phrase("Never relabel `ready-for-agent` down to `needs-triage`"));
   assert.match(s, Pin.phrase("A closed one cannot hold it: file a new open issue citing it"));
+  // The relabel-up rule this duty replaced: no filing path sets ready-for-agent.
+  assert.doesNotMatch(s, /--add-label ready-for-agent/, "step 5's duplicate duty relabels up to `ready-for-agent` again — only triage sets that label");
 });
 
 test("the gate refuses a finisher on an unchecked verdict, which re-running the check answers", () => {

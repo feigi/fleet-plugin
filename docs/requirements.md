@@ -146,7 +146,7 @@ Admitted: open, labelled `ready-for-agent`, no excluded labels (§2.4), unassign
 - **One PR per ticket.** Multi-story specs (detected by `## User Stories` heading) are dropped; split first. (`## Acceptance Criteria` alone is not detected as multi-story.)
 - **`Part of #<map>` and sub-issue parent/child relations are hierarchy, not blocking.**
 - **Sizing & tier** not on issue; member writes into PR body; tier from agent definition ([ADR 0005](adr/0005-tier-declared-per-harness-verified-at-dispatch.md)).
-- **Filing bar:** issue reaches `ready-for-agent` only once defect is confirmed and worth a claim ([ADR 0001](adr/0001-filing-label-bar-is-defect-confirmed.md), [ADR 0002](adr/0002-filing-second-bar-worth-a-claim.md)).
+- **Filing label:** every issue the plugin files is `needs-triage`; only triage sets `ready-for-agent` ([ADR 0032](adr/0032-every-issue-files-needs-triage.md)). A finding gets its own open issue only once worth a claim ([ADR 0002](adr/0002-filing-second-bar-worth-a-claim.md)).
 - **Triage is a human job:** the fleet never promotes `needs-triage` → `ready-for-agent`.
 
 ### 3.2 Claims and branches — HARD

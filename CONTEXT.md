@@ -248,8 +248,9 @@ before triage.
 _Avoid_: deferred finding, follow-up
 
 **Remedy-open**:
-A defect whose existence is verified and whose fix is not yet chosen. The state
-the filing-time label bar turns on.
+A defect whose existence is verified and whose fix is not yet chosen. Filed
+`needs-triage`, like every issue the plugin creates; triage, not the filer,
+decides when its remedy is settled enough for `ready-for-agent`.
 _Avoid_: undecided, unclear
 
 ### Install

@@ -5,6 +5,13 @@
 // one PR review the maintainer already runs. Same test, two seats, opposite
 // correct answers. The ruling and its reasoning are ADR 0001.
 //
+// #3171 (ADR 0032) superseded ADR 0001's filing bar: every issue the plugin
+// creates is filed `needs-triage`, and only triage sets `ready-for-agent`. The
+// seat split stands — step 5 still never applies phase 0's `decided?` test —
+// but the filing-time side of it is now that rule, not "is the defect
+// confirmed", and the step-5 and phase-0 pins below hold the new rule. ADR
+// 0001's own guard pins further down hold the record as ruled.
+//
 // What this pins is the SPLIT, which lives in the join between two documents
 // read by two different agents. Neither file is wrong on its own after a
 // revert: step 5 can go back to delegating and phase 0 will still be a
@@ -52,27 +59,47 @@ const step5 = () => flat(REVIEW_AND_FIX.between("5. File each deferred finding",
 // slicing error rather than a failed assertion.
 const decidedNote = () => flat(RUN_TEAM.between("**Torn → surface, never guess**", "4. **Collision scan", "run-team phase 0 decided? note").text);
 
-test("step 5 routes a confirmed defect with an open remedy to ready-for-agent", () => {
+test("step 5 files every issue needs-triage, a confirmed defect with an open remedy included, with the evidence triage needs", () => {
   const s = step5();
-  // The MAPPING, not the two labels. Both label strings occur in this slice
-  // whichever way the rule points, so a pin on either alone stays green with
-  // the branches swapped. `needs-triage` is excluded from the gap and `[^.]`
+  assert.match(s, Pin.phrase("`gh issue create --label needs-triage`"), "step 5's filing command no longer files `needs-triage`");
+  assert.match(
+    s,
+    Pin.phrase("**Every issue you create is labelled `needs-triage`; only triage sets `ready-for-agent`**"),
+    "step 5 no longer states that every issue it creates is `needs-triage` and only triage sets `ready-for-agent`",
+  );
+  // The MAPPING, not the label. Both label strings occur in this slice, so a
+  // pin on `needs-triage` alone stays green with the branch pointed back at
+  // `ready-for-agent`. `ready-for-agent` is excluded from the gap and `[^.]`
   // keeps the match inside one sentence.
   assert.match(
     s,
-    /Confirmed defect with the remedy still open(?:(?!needs-triage)[^.])*?ready-for-agent/,
-    "step 5 no longer sends a confirmed defect with an open remedy to `ready-for-agent`",
+    /a confirmed defect with the remedy still open(?:(?!ready-for-agent)[^.])*?files `needs-triage`/,
+    "step 5 no longer files a confirmed defect with an open remedy `needs-triage`",
   );
-  // The tie-break and its narrowed meaning are ONE claim: `torn → needs-triage`
-  // survived the reprice only because torn was redefined to "unsure anything is
-  // broken". Pinned as a contiguous span, because two separate matches would
-  // leave the join open — an exception clause spliced between them reverses the
-  // rule and satisfies both.
+  // The superseded mapping, ADR 0001's bar, and any relabel up to it.
+  assert.doesNotMatch(s, /confirmed defect with the remedy still open(?:(?!needs-triage)[^.])*?ready-for-agent/i, "step 5 sends a confirmed defect with an open remedy to `ready-for-agent` again");
+  assert.doesNotMatch(s, /--label <?ready-for-agent|--add-label ready-for-agent/, "step 5 files or relabels an issue to `ready-for-agent` again");
+  // What triage reads to decide, required in the body.
   assert.match(
     s,
-    Pin.phrase("Torn → `needs-triage`, narrowed: torn means **unsure anything is broken**, not unsure how to fix it."),
-    "step 5 lost the narrowed torn tie-break, so `needs-triage` is back to meaning `unsure how to fix it`",
+    Pin.phrase("**The body also carries the evidence triage needs: the refuter's verdict — the `verdictPath` reason, or the review's votes — and the candidate remedy.**"),
+    "step 5 no longer requires the refuter's verdict and the candidate remedy in the filed issue's body",
   );
+  // The rule's pre-chosen guard: floor and trigger as one span, so neither is
+  // retuned alone.
+  assert.match(
+    s,
+    Pin.phrase("open `needs-triage` issues citing `Deferred from PR` above 40 on 3 consecutive run dates send the filing rule back to the maintainer"),
+    "step 5 lost the guard on its filing rule, or its floor or trigger moved",
+  );
+});
+
+test("finisher duty 2 files the way step 5 does, needs-triage, and lands a duplicate as a comment", () => {
+  const d = flat(RUN_TEAM.between("2. **Confirm every deferral", "**A fix-applier's \"applied\" is a claim like any other**", "run-team finisher duty 2").text);
+  assert.match(d, Pin.phrase("labelled `needs-triage` as every issue the plugin creates is"), "finisher duty 2 no longer files `needs-triage`");
+  assert.match(d, Pin.phrase("A duplicate is a comment citing that verdict on the existing issue, never a relabel"), "finisher duty 2 no longer lands a duplicate as a comment");
+  assert.match(d, Pin.phrase("Only triage sets `ready-for-agent`"), "finisher duty 2 no longer reserves `ready-for-agent` to triage");
+  assert.doesNotMatch(d, /--add-label ready-for-agent|--label ready-for-agent/, "finisher duty 2 files or relabels an issue to `ready-for-agent`");
 });
 
 test("step 5 states its own bar instead of delegating to phase 0's criterion", () => {
@@ -94,17 +121,17 @@ test("step 5 states its own bar instead of delegating to phase 0's criterion", (
   );
 });
 
-test("phase 0 marks decided? as a consumption gate and states the filing-time bar inline", () => {
+test("phase 0 marks decided? as a consumption gate and states the filing-time rule inline", () => {
   const s = decidedNote();
-  // Contiguous span again: "consumption gate" and "the filing-time counterpart
-  // was repriced" pin nothing apart. The gate label is only meaningful bound to
+  // Contiguous span again: "consumption gate" and the filing-time rule pin
+  // nothing apart. The gate label is only meaningful bound to
   // the seat it is priced for and to the counterpart that is priced differently.
   assert.match(
     s,
     Pin.phrase(
-      "**This is a consumption gate**, priced for the seat where implementer divergence costs a claim, a worktree and a dispatch; the filing-time counterpart was repriced to *is the defect confirmed* and states its own bar inline",
+      "**This is a consumption gate**, priced for the seat where implementer divergence costs a claim, a worktree and a dispatch; at filing time every issue the plugin creates is filed `needs-triage`, and only triage sets `ready-for-agent`.",
     ),
-    "phase 0's `decided?` note no longer marks it a consumption gate with a repriced filing-time counterpart",
+    "phase 0's `decided?` note no longer marks it a consumption gate whose filing-time counterpart files every issue `needs-triage`",
   );
   // The shipped skill states the bar inline and does not point into `docs/adr/`,
   // which is not shipped to the plugin's consumers (ADR 0019).
@@ -137,6 +164,21 @@ test("the ADR keeps its pre-chosen guard and its #211 relationship", () => {
     Pin.phrase("#211 governs what gets **applied**; this governs what gets **labelled**"),
     "the ADR no longer separates #211's apply policy from this decision's label policy",
   );
+});
+
+test("ADR 0032 supersedes ADR 0001 and keeps its pre-chosen guard", () => {
+  const adr = flat(readRoot("docs", "adr", "0032-every-issue-files-needs-triage.md"));
+  assert.match(adr, Pin.phrase("Supersedes ADR 0001."), "ADR 0032 no longer records that it supersedes ADR 0001");
+  assert.match(adr, Pin.phrase("**Every issue the plugin creates is filed `needs-triage`. Only triage sets `ready-for-agent`.**"), "ADR 0032 lost its decision");
+  // Floor and trigger as one span, chosen before any data: separate pins would
+  // let either be retuned alone.
+  assert.match(
+    adr,
+    Pin.phrase("- **Floor:** more than **40** open `needs-triage` issues citing `Deferred from PR` in the body. - **Trigger:** above the floor on **3 consecutive** run dates."),
+    "ADR 0032's guard floor or trigger moved — a pre-chosen guard that is retuned later is not a guard",
+  );
+  const adr1 = flat(readRoot("docs", "adr", "0001-filing-label-bar-is-defect-confirmed.md"));
+  assert.match(adr1.slice(0, adr1.indexOf("## Context")), Pin.phrase("Superseded by ADR 0032"), "ADR 0001's Status line no longer names ADR 0032 as superseding it");
 });
 
 // #839. ADR 0001's guard pre-chose a floor and a trigger but never said WHICH

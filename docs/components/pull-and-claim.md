@@ -41,11 +41,10 @@ and an excluded one re-enters the Shortlist once its premise closes.
   "one human decision per batch" into "zero human decisions per
   admission, every non-admission legible"
   ([ADR 0013](../adr/0013-automatic-supply-relabel-by-cause.md)).
-- **A heavier bar than filing-time.** The **decided?** test here is
-  stricter than the bar a reviewer applies when deferring a finding —
-  a wrong claim costs a worktree and a dispatch, a wrong filing costs
-  one PR review the maintainer already runs
-  ([ADR 0001](../adr/0001-filing-label-bar-is-defect-confirmed.md)).
+- **A consumption-time bar.** The **decided?** test runs here, never
+  at filing time: every issue the plugin files is `needs-triage`, and
+  only triage sets `ready-for-agent`
+  ([ADR 0032](../adr/0032-every-issue-files-needs-triage.md)).
 - **A claim is exactly three artefacts** — branch, worktree,
   `in-progress` label — taken together, independent of whether the
   worktree directory still exists on disk (see

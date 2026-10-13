@@ -1,7 +1,10 @@
 # 0001 — The filing-time label bar is *is the defect confirmed*
 
 **Status:** Accepted. Ruled 2026-08-18 on #239; the filing-step half landed in
-`6d0c1f6`, which is in `origin/main`'s history.
+`6d0c1f6`, which is in `origin/main`'s history. Superseded by ADR 0032 (#3171,
+ruled 2026-10-13 by the maintainer, from a grilling session on #2878): every
+issue the plugin creates is filed `needs-triage`, and only triage sets
+`ready-for-agent`.
 
 ## Context
 

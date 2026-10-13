@@ -101,7 +101,7 @@
 //     mismatch names the row the entry broke:
 //
 //       row  finding                                             home
-//       1    survived, in scope, deferred for an allowed         open, ready-for-agent
+//       1    survived, in scope, deferred for an allowed         open, needs-triage
 //            reason other than false-rationale
 //       2    survived, in scope, deferred false-rationale        closed suggestion-band record
 //       3    unverified, its refuters dispatched and crashed     open, needs-triage
@@ -113,15 +113,15 @@
 //       6b   out-of-scope suggestion alleging wrong behavior,    open, needs-triage
 //            its refuter let it survive, crashed or abstained
 //       7    claimKind shape, below the claim bar                closed suggestion-band record
-//       8    survived, out of scope, whatever its reason         open, ready-for-agent
+//       8    survived, out of scope, whatever its reason         open, needs-triage
 //
 //     Row 4 outranks row 7, and row 7 every other row. A row-5 deferral is
 //     held to row 1's reasons: one of ALLOWED_DEFER other than
 //     false-rationale, `remedy-outside-diff` under the rule above. A row-6b
 //     or row-8 deferral is held to no reason and escalates nothing, whatever
 //     its severity. An open home carries exactly one triage label, its row's or
-//     a stronger one: `ready-for-agent` answers a `needs-triage` row, and
-//     `needs-triage` never answers a `ready-for-agent` one. The closed
+//     a stronger one: every open row is filed `needs-triage`, and
+//     `ready-for-agent`, which only triage sets, answers one too. The closed
 //     suggestion-band record is the closed issue titled `PR #<pr> review:
 //     the suggestion band, checked`, labelled `wontfix`. `claimKind` is
 //     trusted: the script never judges whether a claim is about shape. A
@@ -190,15 +190,15 @@ const ENUMS = { scope: ["in", "out"], claimKind: ["behavior", "shape"], disposit
 // The filing table: a deferral's home by its finding's state. `record` is the
 // closed suggestion-band record; `open` the weakest triage label an open home may carry.
 export const FILING_ROWS = Object.freeze({
-  1: { finding: "an in-scope survived finding deferred for an allowed reason other than false-rationale", open: "ready-for-agent" },
+  1: { finding: "an in-scope survived finding deferred for an allowed reason other than false-rationale", open: "needs-triage" },
   2: { finding: "an in-scope survived finding deferred false-rationale", record: true },
   3: { finding: "an unverified finding whose refuters crashed or abstained", open: "needs-triage" },
   4: { finding: "an in-scope suggestion its refuter refuted", record: true },
-  5: { finding: "an in-scope suggestion its refuter let survive", open: "ready-for-agent" },
+  5: { finding: "an in-scope suggestion its refuter let survive", open: "needs-triage" },
   "6a": { finding: "an out-of-scope suggestion alleging wrong behavior, its refuter refuted it", record: true },
   "6b": { finding: "an out-of-scope suggestion alleging wrong behavior, its refuter let it survive, crashed or abstained", open: "needs-triage" },
   7: { finding: "a finding whose claim is about shape, below the claim bar", record: true },
-  8: { finding: "an out-of-scope survived finding, whatever its reason", open: "ready-for-agent" },
+  8: { finding: "an out-of-scope survived finding, whatever its reason", open: "needs-triage" },
 });
 // Strongest first: an open home may carry a label above its row's, never below.
 const TRIAGE_LABELS = ["ready-for-agent", "needs-triage"];

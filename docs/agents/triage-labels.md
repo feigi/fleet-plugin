@@ -2,13 +2,19 @@
 
 The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker.
 
-| Label in mattpocock/skills | Label in our tracker | Meaning                                  |
-| -------------------------- | -------------------- | ---------------------------------------- |
-| `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue  |
-| `needs-info`               | `needs-info`         | Waiting on reporter for more information |
-| `ready-for-agent`          | `ready-for-agent`    | Ready for an AFK agent                   |
-| `ready-for-human`          | `ready-for-human`    | Needs a maintainer, not an AFK agent     |
-| `wontfix`                  | `wontfix`            | Will not be actioned                     |
+| Label in mattpocock/skills | Label in our tracker | Meaning                                     |
+| -------------------------- | -------------------- | ------------------------------------------- |
+| `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue     |
+| `needs-info`               | `needs-info`         | Waiting on reporter for more information    |
+| `ready-for-agent`          | `ready-for-agent`    | Ready for an AFK agent; only triage sets it |
+| `ready-for-human`          | `ready-for-human`    | Needs a maintainer, not an AFK agent        |
+| `wontfix`                  | `wontfix`            | Will not be actioned                        |
+
+**Filing time.** Every issue the plugin creates is filed `needs-triage` — a
+confirmed defect included, because confirming a defect does not settle its
+remedy. Only triage sets `ready-for-agent`. A later review landing the same
+finding on an open issue comments there and changes no label, so an issue triage
+already promoted stays `ready-for-agent`. See ADR 0032.
 
 All five roles resolve — label string equals role name. Verified against
 `gh api repos/feigi/fleet-plugin/labels` on 2026-09-08 (re-run after the repo was

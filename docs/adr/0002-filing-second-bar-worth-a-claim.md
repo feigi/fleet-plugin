@@ -8,7 +8,10 @@ other than its own guard reads it. A gap in a guard's own code takes the
 stakes of the prose it guards, and a helper shared by several guards takes the
 highest of those stakes. Such a finding is recorded as `claimKind: shape`.
 When the prose is corrected, an observed wording may be added to a literal
-ban, never to a semantic reader.
+ban, never to a semantic reader. Amended by ADR 0032 (#3171): anything
+alleging wrong behavior that files open files `needs-triage` — read the
+Decision's "under 0001's confirmed/torn split" as under ADR 0032's rule that
+every issue the plugin creates is filed `needs-triage`.
 
 ## Context
 
