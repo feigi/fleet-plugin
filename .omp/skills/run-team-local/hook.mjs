@@ -199,8 +199,8 @@ function freeBranch(repo) {
   throw new Error(`every ${base}<letter> branch is taken`);
 }
 
-// CI's `ticket-router.mjs --check` re-fits from the committed corpus, so the
-// fit reads origin/main's own TSVs, in a throwaway checkout — never the
+// CI's `ticket-router.mjs --check` re-fits from the commit the table records,
+// so the fit reads origin/main's own TSVs, in a throwaway checkout — never the
 // working tree's freshly drained rows, which reach main through the run's
 // artifacts PR and count at the next close-out.
 function routerFit(repo, dryRun) {
@@ -211,7 +211,7 @@ function routerFit(repo, dryRun) {
     const table = join(tmp, TABLE);
     const corpus = (f) => join(tmp, "docs", "metrics", f);
     const args = ["--table", table, "--features", corpus("ticket-features.tsv"), "--members", corpus("member-outcomes.tsv"),
-      "--verdicts", corpus("tier-outcomes.tsv"), "--guard", join(repo, GUARD)];
+      "--verdicts", corpus("tier-outcomes.tsv"), "--guard", join(repo, GUARD), "--commit", "origin/main"];
     const due = script("ticket-router.mjs", ["fit", ...args, "--due"], tmp).trim();
     if (!due.startsWith("DUE=yes ")) return say(`router fit: ${due} — not due`);
     const open = ghJson(repo, ["pr", "list", "--state", "open", "--json", "number,headRefName", "--limit", "1000"])
@@ -223,7 +223,7 @@ function routerFit(repo, dryRun) {
     }
     const branch = freeBranch(repo);
     if (dryRun) return say(`router fit: ${due} — ${fitted}; would open a chore PR from ${branch}`);
-    const subject = `chore: re-fit router-table.json through ${JSON.parse(readFileSync(table, "utf8")).fitted_through}`;
+    const subject = `chore: re-fit router-table.json at ${JSON.parse(readFileSync(table, "utf8")).fitted_commit.slice(0, 8)}`;
     git(tmp, ["commit", "--quiet", "-m", subject, "--", TABLE]);
     // Pushed from the detached checkout, so the repository the hook runs in
     // keeps no local branch and no upstream config of this PR's.

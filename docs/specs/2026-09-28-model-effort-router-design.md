@@ -521,6 +521,16 @@ pooled n. `estimates` exists so a re-fit PR diff explains itself;
 `fix_rounds` and `review_findings` are report-only quality proxies — no
 rule reads them.
 
+**Amended (#2573, 2026-10-13): the table records the commit its fit read,
+not a date.** `fitted_through` is replaced by `fitted_commit`: the sha of the
+commit whose `ticket-features.tsv`, `member-outcomes.tsv` and
+`tier-outcomes.tsv` the fit read, or `null` before any fit. No date field
+stays beside it. A date cut cannot reproduce a fit: a run's own rows reach
+`main` through its artifacts PR after the fit has run, a crashed run's rows
+are drained later with an older date, `member-outcomes.tsv` is re-sorted and
+rewritten on every scrape, and `tier-outcomes.tsv` rows are re-judged in
+place.
+
 ### R4. Allocation — burn-in, then 5k
 
 - **Burn-in** (`burn_in: true`): every Pull draws uniformly over `cells`
@@ -580,6 +590,20 @@ climb). Never a maintainer-run obligation (`#1111`). The fit never moves
 **Check — `ticket-router.mjs --check`** (CI, alongside `tier-roles.mjs
 --check`): re-fits from rows with `run_date ≤ fitted_through` and fails if
 the result ≠ the checked-in table. The table is a code carrier.
+
+**Amended (#2573, 2026-10-13): fit, check and cadence read a commit, not
+the working tree.** `fit` takes `--commit <rev>` and reads the three TSVs
+there with `git show <sha>:<path>`, then records the sha as `fitted_commit`;
+it reads everything in that commit, and no row is cut by date. `--check`
+re-fits from `fitted_commit` (an empty corpus while it is `null`) against the
+guard snapshot the table records, replacing the `run_date ≤ fitted_through`
+re-fit above; when that commit is not present locally it exits non-zero and
+names `git fetch --depth=1 origin <sha>`, which CI runs first, skipped while
+`fitted_commit` is `null`. `--guard` stays a working-tree file for `fit`
+(`.fleet/` is gitignored). The cadence counts merged tickets among the
+features rows at `--commit`, on or after `window_start`, that are not in the
+fitted commit's features file, matched by `session` + `agent`, replacing
+"since `fitted_through`".
 
 ### R6. Route — `ticket-router.mjs route`
 
@@ -643,8 +667,8 @@ Its duties, all drawn from this spec:
 - Print the role-target drift notice (§ 2).
 - Run the per-cell stopping rule (§ 2) and file a withdrawal issue on floor
   failure.
-- Run `ticket-router.mjs fit` every 50 merged PRs since `fitted_through`
-  (§ 4 R5), opening a chore PR.
+- Run `ticket-router.mjs fit` every 50 merged PRs whose features rows are
+  not in `fitted_commit` (§ 4 R5), opening a chore PR.
 
 The plugin itself keeps the repo-agnostic parts — the closing-issue filter in
 `fleet-tick.mjs`, the router script, the instrument script, the cell

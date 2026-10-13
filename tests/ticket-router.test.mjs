@@ -1,23 +1,27 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import {
-  COLUMNS, DEFAULT_TABLE, issueMetrics, ruleStratum, route, fitTable, readGuard, validateTable, parseFeatures, formatFeatureRow, mergedSince,
+  COLUMNS, DEFAULT_TABLE, issueMetrics, ruleStratum, route, fitTable, readGuard, validateTable, parseFeatures, formatFeatureRow, mergedSince, resolveCommit,
 } from "../plugin/scripts/ticket-router.mjs";
 import { drawCell, CELL } from "../plugin/scripts/ledger-grammar.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as VERDICT_COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
+import { tempDir } from "./support/temp-dir.mjs";
+import { writeExecStub } from "./support/exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ticket-router.mjs", import.meta.url));
 const SESSION = "2026-10-01T10-00-00-000Z_01a0b344-33f6-7640-96a8-05f45bf847a9";
+const SESSION2 = "2026-10-01T11-00-00-000Z_01a0b344-33f6-7640-96a8-05f45bf847b0";
 const STAGE1 = ["slow-high", "task-high", "smol-high"];
 
 const baseTable = (over = {}) => ({
-  window_start: null, fitted_through: null, n_rows: 0, stage: 1, cells: [...STAGE1], burn_in: false,
+  window_start: null, fitted_commit: null, n_rows: 0, stage: 1, cells: [...STAGE1], burn_in: false,
   rows: { "*": "slow-high" }, classifier: { b: null, tau: null }, estimates: {}, guard: { tripped: [], n: {} }, ...over,
 });
 const guardFile = (over = {}) => ({
@@ -386,7 +390,7 @@ test("route: a tripped token that is not a cell makes the guard unreadable — d
   assert.notEqual(out.CELL, "smol-high");
   // The fit refuses the same guard rather than fitting around it.
   const fp = fitWorld(t, { features: [], members: [], verdicts: [], guard: guardFile({ tripped: ["task-hgih"] }) });
-  const fit = cli(["fit", ...fp.fitArgs, "--guard", fp.guard]);
+  const fit = cli(["fit", ...fp.fitArgs, "--guard", fp.guard, "--commit", "HEAD"]);
   assert.equal(fit.status, 2);
   assert.match(fit.stderr, /cannot read --guard/);
 });
@@ -504,7 +508,7 @@ test("route and fit: a router table that fails validation exits 2 naming the tab
   assert.ok(r.stderr.includes(`${p.table}: router table: \`cells\` repeats a cell`), r.stderr);
   assert.equal(existsSync(p.pending), false);
   const fp = fitWorld(t, { features: [], members: [], verdicts: [], table: dup });
-  const fit = cli(["fit", ...fp.fitArgs, "--guard", fp.guard]);
+  const fit = cli(["fit", ...fp.fitArgs, "--guard", fp.guard, "--commit", "HEAD"]);
   assert.equal(fit.status, 2, fit.stderr);
   assert.match(fit.stderr, /router table: `cells` repeats a cell/);
   assert.equal(cli(["--check", ...fp.fitArgs]).status, 2);
@@ -594,8 +598,24 @@ function fitWorld(t, { features, members, verdicts, table = baseTable({ burn_in:
   writeFileSync(p.members, tsv(MEMBER_COLUMNS, members.map(memberRow)));
   writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, verdicts.map(verdictRow)));
   p.fitArgs = ["--table", p.table, "--features", p.features, "--members", p.members, "--verdicts", p.verdicts];
+  // The fit reads the three TSVs as committed, so the fixture is a repository, and a test that
+  // changes a file commits it with `p.commit()`, which answers the new commit's sha.
+  p.git = (...args) => {
+    const r = spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd: p.dir, encoding: "utf8", env: gitEnv() });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  p.commit = () => {
+    p.git("add", "ticket-features.tsv", "member-outcomes.tsv", "tier-outcomes.tsv");
+    p.git("commit", "-q", "--allow-empty", "-m", "rows");
+    return p.git("rev-parse", "HEAD");
+  };
+  p.git("init", "-q");
+  p.commit();
   return p;
 }
+
+const fitCli = (p, extra = [], commit = "HEAD") => cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", commit, ...extra]);
 
 test("fit: a day-one three-TSV fixture writes an estimates-only table, and --check accepts it", (t) => {
   const features = [
@@ -610,14 +630,17 @@ test("fit: a day-one three-TSV fixture writes an estimates-only table, and --che
   ];
   const verdicts = [{ pr: "11", ticket: "1" }, { pr: "12", ticket: "2+9", minted_false_claim: "yes" }];
   const p = fitWorld(t, { features, members, verdicts });
-  const r = cli(["fit", ...p.fitArgs, "--guard", p.guard]);
+  const r = fitCli(p);
   assert.equal(r.status, 0, r.stderr);
+  const sha = p.git("rev-parse", "HEAD");
+  assert.match(r.stdout, new RegExp(`fitted 3 tickets at ${sha.slice(0, 8)};`));
   const table = JSON.parse(readFileSync(p.table, "utf8"));
   assert.deepEqual(table.rows, { "*": "slow-high" }, "no cell has n>=20 yet, so no row is adopted");
   assert.equal(table.burn_in, true);
   assert.equal(table.stage, 1);
   assert.equal(table.n_rows, 3);
-  assert.equal(table.fitted_through, "2026-10-02");
+  assert.equal(table.fitted_commit, sha, "the table records the commit the fit read, in full");
+  assert.equal("fitted_through" in table, false, "no date field stays beside the commit");
   assert.equal(table.window_start, "2026-09-01", "the window comes from the guard; the fit never moves it");
   assert.deepEqual(table.estimates["*"]["task-high"], { n: 1, merged: 1, usd_per_merged: null, fail_rate: 0, fix_rounds: 1, review_findings: null });
   assert.deepEqual(table.estimates.heavy["slow-high"], { n: 1, merged: 1, usd_per_merged: null, fail_rate: 1, fix_rounds: 0, review_findings: null });
@@ -626,18 +649,19 @@ test("fit: a day-one three-TSV fixture writes an estimates-only table, and --che
 
   const check = cli(["--check", ...p.fitArgs]);
   assert.equal(check.status, 0, check.stderr);
-  assert.match(check.stdout, /matches a re-fit of 3 tickets through 2026-10-02/);
+  assert.match(check.stdout, new RegExp(`matches a re-fit of 3 tickets at ${sha.slice(0, 8)}\n`));
 });
 
 test("--check fails when the checked-in table is not a re-fit of its rows", (t) => {
   const features = [featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3" })];
   const p = fitWorld(t, { features, members: [], verdicts: [{ pr: "11", ticket: "1" }] });
-  assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard]).status, 0);
+  assert.equal(fitCli(p).status, 0);
   const good = JSON.parse(readFileSync(p.table, "utf8"));
   for (const [what, edit] of [
     ["a hand-adopted row", (x) => { x.rows["*"] = "task-high"; }],
     ["burn-in switched off by hand", (x) => { x.burn_in = false; }],
     ["an edited estimate", (x) => { x.estimates["*"]["task-high"].n = 30; }],
+    ["a fitted_commit reset to null", (x) => { x.fitted_commit = null; }],
   ]) {
     const bad = structuredClone(good);
     edit(bad);
@@ -646,38 +670,196 @@ test("--check fails when the checked-in table is not a re-fit of its rows", (t) 
     assert.equal(r.status, 1, `${what}: ${r.stderr}`);
     assert.match(r.stderr, /is not a re-fit of its own rows/);
   }
-  // Rows dated after fitted_through are the next fit's, not a mismatch.
   writeFileSync(p.table, JSON.stringify(good));
-  writeFileSync(p.features, tsv(COLUMNS, [...features, featureRow({ ticket: "2", run_date: "2026-10-09" })], true));
+  assert.equal(cli(["--check", ...p.fitArgs]).status, 0, "the table as fitted is accepted");
+});
+
+test("--check and --due after a fit: a features row with the fitted row's own date from another session is the next fit's, not a mismatch", (t) => {
+  const p = fitWorld(t, {
+    features: [featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3" })],
+    members: [], verdicts: [{ pr: "11", ticket: "1" }],
+  });
+  assert.equal(fitCli(p).status, 0);
+  const fitted = readFileSync(p.table, "utf8");
+  assert.equal(fitCli(p, ["--due"]).stdout, "DUE=no MERGED=0/50\n", "the rows the fit read are not new");
+  writeFileSync(p.features, tsv(COLUMNS, [
+    featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3" }),
+    featureRow({ ticket: "2", session: SESSION2, run_date: "2026-10-01" }),
+  ], true));
+  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [verdictRow({ pr: "11", ticket: "1" }), verdictRow({ pr: "22", ticket: "2" })]));
+  p.commit();
+  const check = cli(["--check", ...p.fitArgs]);
+  assert.equal(check.status, 0, check.stderr);
+  assert.equal(readFileSync(p.table, "utf8"), fitted, "--check never rewrites the table");
+  assert.equal(fitCli(p, ["--due"]).stdout, "DUE=no MERGED=1/50\n", "the same-day row counts");
+});
+
+test("--check and --due after a fit: a crashed run's row drained later, dated before the fitted date, is the next fit's, not a mismatch", (t) => {
+  const p = fitWorld(t, {
+    features: [featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3", run_date: "2026-10-05" })],
+    members: [], verdicts: [{ pr: "11", ticket: "1", run_date: "2026-10-05" }],
+  });
+  assert.equal(fitCli(p).status, 0);
+  writeFileSync(p.features, tsv(COLUMNS, [
+    featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3", run_date: "2026-10-05" }),
+    featureRow({ ticket: "2", session: SESSION2, run_date: "2026-10-02" }),
+  ], true));
+  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [verdictRow({ pr: "11", ticket: "1", run_date: "2026-10-05" }), verdictRow({ pr: "22", ticket: "2", run_date: "2026-10-03" })]));
+  p.commit();
+  const check = cli(["--check", ...p.fitArgs]);
+  assert.equal(check.status, 0, check.stderr);
+  assert.equal(fitCli(p, ["--due"]).stdout, "DUE=no MERGED=1/50\n", "the older-dated row counts");
+});
+
+test("--check stays green when a fitted ticket's verdict is re-judged in place, and the next fit reads the new verdict", (t) => {
+  const features = [featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3" })];
+  const p = fitWorld(t, { features, members: [], verdicts: [{ pr: "11", ticket: "1" }] });
+  assert.equal(fitCli(p).status, 0);
+  const fitted = readFileSync(p.table, "utf8");
+  assert.equal(JSON.parse(fitted).estimates["*"]["task-high"].fail_rate, 0);
+  // The same row, the same date, the same row count: only its content changes.
+  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [verdictRow({ pr: "11", ticket: "1", minted_false_claim: "yes" })]));
+  const rejudged = p.commit();
+  const check = cli(["--check", ...p.fitArgs]);
+  assert.equal(check.status, 0, check.stderr);
+  assert.equal(readFileSync(p.table, "utf8"), fitted, "--check never rewrites the table");
+  assert.equal(fitCli(p).status, 0);
+  const next = JSON.parse(readFileSync(p.table, "utf8"));
+  assert.equal(next.fitted_commit, rejudged);
+  assert.equal(next.estimates["*"]["task-high"].fail_rate, 1, "the next fit reads the new verdict");
+  assert.equal(cli(["--check", ...p.fitArgs]).status, 0, "and the table it wrote checks green");
+});
+
+test("--check stays green when a member scrape re-sorts or rewrites rows after the fit", (t) => {
+  const features = [featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3" })];
+  const members = [
+    { agent: "impl-1", member: "impl-1", ticket: "1", pr: "11" },
+    { agent: "fix-pr-11", member: "fix-pr-11", ticket: "1", pr: "11" },
+  ];
+  const p = fitWorld(t, { features, members, verdicts: [{ pr: "11", ticket: "1" }] });
+  assert.equal(fitCli(p).status, 0);
+  const fitted = readFileSync(p.table, "utf8");
+  assert.equal(JSON.parse(fitted).estimates["*"]["task-high"].fix_rounds, 1);
+  // The scrape replaces rows by key and re-sorts the whole file: a newer row comes first, the
+  // fitted rows follow in the other order, and one of them is rewritten with a later date.
+  const scraped = [
+    { run_date: "2026-10-09", agent: "fix-pr-12", member: "fix-pr-12", ticket: "1", pr: "11" },
+    { run_date: "2026-10-09", agent: "fix-pr-11", member: "fix-pr-11", ticket: "1", pr: "11" },
+    members[0],
+  ];
+  writeFileSync(p.members, tsv(MEMBER_COLUMNS, scraped.map(memberRow)));
+  p.commit();
+  const check = cli(["--check", ...p.fitArgs]);
+  assert.equal(check.status, 0, check.stderr);
+  assert.equal(readFileSync(p.table, "utf8"), fitted, "--check never rewrites the table");
+});
+
+test("fit and --check read the commit, not the working tree", (t) => {
+  const features = [featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3" })];
+  const p = fitWorld(t, { features, members: [], verdicts: [{ pr: "11", ticket: "1" }] });
+  const first = p.git("rev-parse", "HEAD");
+  // An uncommitted edit of every file, and a deleted one, change nothing either reads.
+  writeFileSync(p.features, tsv(COLUMNS, [featureRow({ ticket: "7", chosen_cell: "slow-high", exploration_draw: "1/3" })], true));
+  writeFileSync(p.verdicts, "not\ta\tverdict\n");
+  rmSync(p.members);
+  assert.equal(fitCli(p).status, 0);
+  assert.equal(JSON.parse(readFileSync(p.table, "utf8")).estimates["*"]["task-high"].merged, 1);
+  assert.equal(cli(["--check", ...p.fitArgs]).status, 0);
+  // `--commit` names any commit, not only HEAD.
+  p.commit();
+  const r = fitCli(p, [], first);
+  assert.equal(r.status, 0, r.stderr);
+  const table = JSON.parse(readFileSync(p.table, "utf8"));
+  assert.equal(table.fitted_commit, first);
+  assert.equal(table.estimates["*"]["task-high"].merged, 1);
   assert.equal(cli(["--check", ...p.fitArgs]).status, 0);
 });
 
-test("--check stays green when a verdict or member row lands after the fit, for a ticket the fit already read", (t) => {
+test("an ambient GIT_DIR or GIT_WORK_TREE naming another repository does not change what fit and --check read", (t) => {
   const features = [featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3" })];
-  const members = [{ agent: "impl-1", member: "impl-1", ticket: "1", pr: "11" }];
-  const p = fitWorld(t, { features, members, verdicts: [{ pr: "11", ticket: "1" }] });
-  assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard]).status, 0);
-  const fitted = readFileSync(p.table, "utf8");
-  assert.equal(JSON.parse(fitted).fitted_through, "2026-10-01");
-  // The ruling lands later and flips the ticket to a failure, and a fix round books against it.
-  writeFileSync(p.verdicts, `# ${tsv(VERDICT_COLUMNS, [verdictRow({ pr: "11", ticket: "1" }), verdictRow({ run_date: "2026-10-09", pr: "11", ticket: "1", minted_false_claim: "yes" })], true)}`);
-  writeFileSync(p.members, tsv(MEMBER_COLUMNS, [...members, { run_date: "2026-10-09", agent: "fix-pr-11", member: "fix-pr-11", ticket: "1", pr: "11" }].map(memberRow), true));
+  const p = fitWorld(t, { features, members: [], verdicts: [{ pr: "11", ticket: "1" }] });
+  const other = tempDir("router-other-");
+  assert.equal(spawnSync("git", ["init", "-q", other], { encoding: "utf8", env: gitEnv() }).status, 0);
+  for (const ambient of [{ GIT_DIR: join(other, ".git") }, { GIT_WORK_TREE: other }]) {
+    const run = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", env: { ...process.env, ...ambient } });
+    const fit = run(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD"]);
+    assert.equal(fit.status, 0, `${Object.keys(ambient)}: ${fit.stderr}`);
+    assert.equal(JSON.parse(readFileSync(p.table, "utf8")).estimates["*"]["task-high"].merged, 1, Object.keys(ambient).join());
+    const check = run(["--check", ...p.fitArgs]);
+    assert.equal(check.status, 0, `${Object.keys(ambient)}: ${check.stderr}`);
+  }
+});
+
+test("--check exits 2 naming `git fetch --depth=1 origin <sha>` when fitted_commit is not in this repository, and fit refuses a --commit that is not one", (t) => {
+  const p = fitWorld(t, { features: [], members: [], verdicts: [] });
+  const absent = "0123456789abcdef0123456789abcdef01234567";
+  writeFileSync(p.table, JSON.stringify(baseTable({ burn_in: true, fitted_commit: absent })));
   const r = cli(["--check", ...p.fitArgs]);
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(readFileSync(p.table, "utf8"), fitted, "--check never rewrites the table");
-  // The next fit, once a later features row exists, reads both.
-  writeFileSync(p.features, tsv(COLUMNS, [...features, featureRow({ ticket: "2", run_date: "2026-10-09" })], true));
-  assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard]).status, 0);
-  const next = JSON.parse(readFileSync(p.table, "utf8"));
-  assert.equal(next.fitted_through, "2026-10-09");
-  assert.equal(next.estimates["*"]["task-high"].fail_rate, 1, "the later ruling is read once the fit reaches its date");
-  assert.equal(next.estimates["*"]["task-high"].fix_rounds, 1);
+  assert.equal(r.status, 2, r.stderr);
+  assert.ok(r.stderr.includes(`git fetch --depth=1 origin ${absent}`), r.stderr);
+  const due = fitCli(p, ["--due"]);
+  assert.equal(due.status, 2, due.stderr);
+  assert.ok(due.stderr.includes(`git fetch --depth=1 origin ${absent}`), due.stderr);
+  for (const bad of ["not-a-sha", "ABCDEF", 7, "--output=x"]) {
+    writeFileSync(p.table, JSON.stringify(baseTable({ burn_in: true, fitted_commit: bad })));
+    const c = cli(["--check", ...p.fitArgs]);
+    assert.equal(c.status, 2, `${JSON.stringify(bad)}: ${c.stderr}`);
+    assert.match(c.stderr, /`fitted_commit` is not null or a full commit sha/);
+  }
+  writeFileSync(p.table, JSON.stringify(baseTable({ burn_in: true })));
+  const before = readFileSync(p.table, "utf8");
+  const f = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "no-such-ref"]);
+  assert.equal(f.status, 2, f.stderr);
+  assert.match(f.stderr, /is not a commit of the repository holding --features/);
+  assert.equal(resolveCommit(p.features, "-x"), null, "a rev that reads as an option names no commit");
+  assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard]).status, 2, "fit needs --commit");
+  assert.equal(readFileSync(p.table, "utf8"), before);
 });
 
 test("--check passes on a day-one table over a header-only features file", (t) => {
   const p = fitWorld(t, { features: [], members: [], verdicts: [], table: JSON.parse(readFileSync(DEFAULT_TABLE, "utf8")) });
   const r = cli(["--check", ...p.fitArgs]);
   assert.equal(r.status, 0, r.stderr);
+});
+
+// The CI step's own shell, run against stubs: `git` only logs, and the step's `node` is the real one.
+function ciRouterCheck(table) {
+  const dir = tempDir("router-ci-");
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  const log = join(dir, "git.log");
+  // `git fetch` succeeds and brings nothing; every other call finds no repository.
+  writeExecStub(join(bin, "git"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\ncase "$1" in fetch) exit 0 ;; *) exit 1 ;; esac\n`);
+  const scripts = join(dir, "plugin", "scripts");
+  mkdirSync(scripts, { recursive: true });
+  const real = dirname(SCRIPT);
+  for (const f of readdirSync(real)) if (f !== "router-table.json") symlinkSync(join(real, f), join(scripts, f));
+  writeFileSync(join(scripts, "router-table.json"), JSON.stringify(table));
+  mkdirSync(join(dir, "docs", "metrics"), { recursive: true });
+  const [header, empty] = [`${COLUMNS.join("\t")}\n`, ""];
+  writeFileSync(join(dir, "docs", "metrics", "ticket-features.tsv"), header);
+  writeFileSync(join(dir, "docs", "metrics", "member-outcomes.tsv"), empty);
+  writeFileSync(join(dir, "docs", "metrics", "tier-outcomes.tsv"), empty);
+  const yml = readFileSync(fileURLToPath(new URL("../.github/workflows/ci.yml", import.meta.url)), "utf8");
+  const step = /- name: Router table check\n {8}run: \|\n((?: {10}.*\n)+)/.exec(yml);
+  assert.ok(step, "ci.yml has a multi-line `Router table check` step");
+  const r = spawnSync("bash", ["-c", step[1].replace(/^ {10}/gm, "")], { cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  return { r, calls: existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [] };
+}
+
+test("CI's router check: with fitted_commit null it fetches nothing and --check exits 0 on the committed table", () => {
+  const { r, calls } = ciRouterCheck(baseTable({ burn_in: true }));
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(calls, [], "no git call at all");
+  assert.match(r.stdout, /matches a re-fit of 0 tickets at no commit/);
+});
+
+test("CI's router check: with a fitted_commit it runs `git fetch --depth=1 origin <sha>` before --check", (t) => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const { r, calls } = ciRouterCheck(baseTable({ burn_in: true, fitted_commit: sha }));
+  assert.deepEqual(calls[0], `fetch --depth=1 origin ${sha}`);
+  assert.equal(r.status, 2, "the stubbed fetch brought nothing, so --check refuses naming the commit");
+  assert.ok(r.stderr.includes(`git fetch --depth=1 origin ${sha}`), r.stderr);
 });
 
 // Twenty-plus tickets a side, so the adoption rule can decide.
@@ -741,35 +923,49 @@ test("fit: a non-exploration row a live B classifier routed is the A/B's test se
   assert.equal(next.estimates["*"]["task-high"].n, 1);
 });
 
-test("fit --due counts merged PRs since fitted_through against the cadence", (t) => {
-  const features = Array.from({ length: 50 }, (_, i) => featureRow({ ticket: String(i + 1), run_date: "2026-10-05" }));
-  const verdicts = features.map((f) => ({ ticket: f.ticket, pr: String(Number(f.ticket) + 500), run_date: f.run_date }));
-  const p = fitWorld(t, { features, members: [], verdicts: verdicts.slice(0, 49), table: baseTable({ fitted_through: "2026-10-01" }) });
+test("fit --due counts merged PRs whose features rows are not in the fitted commit, against the cadence", (t) => {
+  const old = Array.from({ length: 10 }, (_, i) => featureRow({ ticket: String(i + 1), run_date: "2026-10-05" }));
+  const fresh = Array.from({ length: 50 }, (_, i) => featureRow({ ticket: String(i + 11), run_date: "2026-10-05" }));
+  const ruledAll = (rows) => rows.map((f) => ({ ticket: f.ticket, pr: String(Number(f.ticket) + 500), run_date: f.run_date }));
+  const p = fitWorld(t, { features: old, members: [], verdicts: ruledAll(old) });
+  assert.equal(fitCli(p).status, 0);
+  writeFileSync(p.features, tsv(COLUMNS, [...old, ...fresh], true));
+  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, ruledAll([...old, ...fresh.slice(0, 39)]).map(verdictRow)));
+  p.commit();
   const before = readFileSync(p.table, "utf8");
-  const no = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--due"]);
-  assert.equal(no.stdout, "DUE=no MERGED=49/50\n");
+  assert.equal(fitCli(p, ["--due"]).stdout, "DUE=no MERGED=39/50\n", "the ten fitted tickets, ruled, are not counted");
   assert.equal(readFileSync(p.table, "utf8"), before, "--due writes nothing");
-  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, verdicts.map(verdictRow)));
-  assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard, "--due"]).stdout, "DUE=yes MERGED=50/50\n");
+  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, ruledAll([...old, ...fresh]).map(verdictRow)));
+  p.commit();
+  assert.equal(fitCli(p, ["--due"]).stdout, "DUE=yes MERGED=50/50\n");
 });
 
-test("mergedSince: strictly after fitted_through, on or after window_start, each bound only when set, the window bounding what fitted_through admits", () => {
+test("fit --due before any fit counts every merged PR in the window", (t) => {
+  const features = Array.from({ length: 3 }, (_, i) => featureRow({ ticket: String(i + 1) }));
+  const p = fitWorld(t, { features, members: [], verdicts: features.map((f) => ({ ticket: f.ticket, pr: String(Number(f.ticket) + 500) })) });
+  assert.equal(fitCli(p, ["--due"]).stdout, "DUE=no MERGED=3/50\n");
+});
+
+test("mergedSince: counts the rows the fitted commit's features file does not hold, matched by session and agent, on or after window_start", () => {
   const features = ["2026-09-30", "2026-10-01", "2026-10-02"].map((d, i) => featureRow({ ticket: String(i + 1), run_date: d }));
   const verdicts = features.map((f) => verdictRow({ ticket: f.ticket, pr: String(Number(f.ticket) + 500), run_date: "2026-10-03" }));
-  const count = (over) => mergedSince({ table: baseTable(over), features, verdicts });
-  assert.equal(count({ fitted_through: null, window_start: null }), 3, "neither bound set: every ruled ticket counts");
-  assert.equal(count({ fitted_through: "2026-10-01" }), 1, "the fitted_through day itself is already fitted");
+  const count = (over, fitted = []) => mergedSince({ table: baseTable(over), features, verdicts, fitted });
+  assert.equal(count({}), 3, "nothing fitted, no window: every ruled ticket counts");
+  assert.equal(count({}, [features[0]]), 2, "a row the fitted commit holds is already fitted");
+  assert.equal(count({}, [{ ...features[1], run_date: "2026-01-01", ticket: "99" }]), 2, "matched by session and agent, whatever the row's date or ticket");
+  assert.equal(count({}, [{ ...features[1], session: SESSION2 }]), 3, "another session's row is not this one");
+  assert.equal(count({}, [{ ...features[1], agent: "impl-99" }]), 3, "another agent's row is not this one");
+  assert.equal(count({}, features), 0, "every row fitted");
   assert.equal(count({ window_start: "2026-10-01" }), 2, "the window_start day itself is inside the window");
-  assert.equal(count({ window_start: "2026-09-30", fitted_through: "2026-09-30" }), 2);
-  assert.equal(count({ window_start: "2026-10-02", fitted_through: "2026-09-30" }), 1, "the window still bounds what fitted_through admits");
-  assert.equal(mergedSince({ table: baseTable(), features, verdicts: verdicts.slice(1) }), 2, "a ticket with no verdict is not a merged PR");
+  assert.equal(count({ window_start: "2026-10-02" }, [features[0]]), 1, "the window bounds what the fitted commit does not hold");
+  assert.equal(mergedSince({ table: baseTable(), features, verdicts: verdicts.slice(1), fitted: [] }), 2, "a ticket with no verdict is not a merged PR");
   const twice = [...features, featureRow({ ticket: "3", run_date: "2026-10-03" })];
-  assert.equal(mergedSince({ table: baseTable(), features: twice, verdicts }), 3, "a ticket with two features rows is one merged PR");
+  assert.equal(mergedSince({ table: baseTable(), features: twice, verdicts, fitted: [] }), 3, "a ticket with two features rows is one merged PR");
 });
 
 test("mergedSince: a ticket is merged only on a ruling dated on or after its last features row, a row with both verdict columns blank skipped", () => {
   const features = [featureRow({ ticket: "1", run_date: "2026-10-01" }), featureRow({ ticket: "1", run_date: "2026-10-03" })];
-  const count = (verdicts) => mergedSince({ table: baseTable(), features, verdicts });
+  const count = (verdicts) => mergedSince({ table: baseTable(), features, verdicts, fitted: [] });
   assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-02" })]), 0, "a ruling dated before the last features row predates that Pull");
   assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-03", closed_own_ticket: "", minted_false_claim: "" })]), 0, "a both-blank row was never ruled");
   assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-03" })]), 1, "a ruling dated the day of the last features row rules it");
@@ -777,7 +973,7 @@ test("mergedSince: a ticket is merged only on a ruling dated on or after its las
 
 test("mergedSince: a ticket's last Pull is its last features row in file order, not its latest-dated one", () => {
   const features = [featureRow({ ticket: "1", run_date: "2026-10-03" }), featureRow({ ticket: "1", run_date: "2026-10-01" })];
-  const count = (verdicts) => mergedSince({ table: baseTable(), features, verdicts });
+  const count = (verdicts) => mergedSince({ table: baseTable(), features, verdicts, fitted: [] });
   assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-02" })]), 1, "the later row in file order is older-dated, and its date is the floor the ruling clears");
   assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-09-30" })]), 0, "a ruling dated before even that floor rules nothing");
 });
@@ -785,20 +981,20 @@ test("mergedSince: a ticket's last Pull is its last features row in file order, 
 test("mergedSince: a features row whose run_date is blank is no Pull, with neither bound set as with one set", () => {
   // route() writes a blank run_date for a session id with no date prefix.
   const features = [featureRow({ ticket: "2", run_date: "2026-10-03" }), featureRow({ ticket: "2", run_date: "" })];
-  const count = (verdicts, over = {}) => mergedSince({ table: baseTable(over), features, verdicts });
+  const count = (verdicts, over = {}) => mergedSince({ table: baseTable(over), features, verdicts, fitted: [] });
   const early = verdictRow({ ticket: "2", pr: "22", run_date: "2026-01-01", minted_false_claim: "yes" });
   assert.equal(count([early]), 0, "a ruling dated before the last dated row predates that Pull");
   assert.equal(count([early], { window_start: "2026-01-01" }), 0, "the same with window_start set");
   assert.equal(count([verdictRow({ ticket: "2", pr: "22", run_date: "2026-10-03" })]), 1, "a ruling on or after the last dated row still rules the ticket");
-  assert.equal(mergedSince({ table: baseTable(), features: [featureRow({ ticket: "3", run_date: "" })], verdicts: [verdictRow({ ticket: "3", pr: "33" })] }), 0, "a ticket whose only row is blank-dated has no Pull to rule");
+  assert.equal(mergedSince({ table: baseTable(), features: [featureRow({ ticket: "3", run_date: "" })], verdicts: [verdictRow({ ticket: "3", pr: "33" })], fitted: [] }), 0, "a ticket whose only row is blank-dated has no Pull to rule");
 });
 
-test("mergedSince refuses a features row whose run_date is neither blank nor YYYY-MM-DD, with either bound set or neither, rather than dropping it", () => {
+test("mergedSince refuses a features row whose run_date is neither blank nor YYYY-MM-DD, with window_start set or not, rather than dropping it", () => {
   const dated = featureRow({ ticket: "2", run_date: "2026-10-03" });
   for (const bad of ["10/01/2026", "2026-10-1", "2026", "abc"]) {
-    for (const over of [{}, { window_start: "2026-01-01" }, { fitted_through: "2026-01-01" }]) {
+    for (const over of [{}, { window_start: "2026-01-01" }]) {
       assert.throws(
-        () => mergedSince({ table: baseTable(over), features: [dated, featureRow({ ticket: "5", run_date: bad })], verdicts: [] }),
+        () => mergedSince({ table: baseTable(over), features: [dated, featureRow({ ticket: "5", run_date: bad })], verdicts: [], fitted: [] }),
         (e) => e.message.includes("ticket #5") && e.message.includes(`run_date is '${bad}', expected YYYY-MM-DD or blank`),
         `${JSON.stringify(over)}, run_date ${bad}`,
       );
@@ -808,15 +1004,19 @@ test("mergedSince refuses a features row whose run_date is neither blank nor YYY
 
 test("fit refuses an unreadable guard or input file at exit 2 and leaves the table alone", (t) => {
   const p = fitWorld(t, { features: [], members: [], verdicts: [], guard: null });
-  const before = readFileSync(p.table, "utf8");
-  const r = cli(["fit", ...p.fitArgs, "--guard", p.guard]);
+  const r = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD"]);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /cannot read --guard/);
   writeFileSync(p.features, "not\tthe\theader\n");
-  const r2 = cli(["--check", ...p.fitArgs]);
+  const bad = p.commit();
+  const r2 = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", bad]);
   assert.equal(r2.status, 2);
   assert.match(r2.stderr, /cannot read --features/);
-  assert.equal(readFileSync(p.table, "utf8"), before);
+  writeFileSync(p.table, JSON.stringify(baseTable({ burn_in: true, fitted_commit: bad })));
+  const r3 = cli(["--check", ...p.fitArgs]);
+  assert.equal(r3.status, 2);
+  assert.match(r3.stderr, /cannot read --features/);
+  assert.equal(readFileSync(p.table, "utf8"), JSON.stringify(baseTable({ burn_in: true, fitted_commit: bad })));
 });
 
 // A direct fitTable call: the `cost` column is not in member-outcomes COLUMNS, so cost-bearing fixtures skip the TSV round trip.
@@ -825,7 +1025,7 @@ const exploring = (over) => featureRow({ exploration_draw: "1/3", ...over });
 const ruled = (ticket, pr, over) => verdictRow({ ticket: String(ticket), pr: String(pr), ...over });
 
 test("fit: a ticket's verdict is its last ruling dated on or after its last input row, a row with both verdict columns blank skipped", () => {
-  // Ticket 2, in another cell, carries the fit's cutoff past ticket 1's last input row.
+  // Ticket 2, in another cell, has a later row than ticket 1's last input row; it moves nothing for ticket 1.
   const features = [
     exploring({ ticket: "1", run_date: "2026-10-01" }),
     exploring({ ticket: "1", run_date: "2026-10-03" }),
@@ -843,7 +1043,7 @@ test("fit: a ticket's verdict is its last ruling dated on or after its last inpu
 });
 
 test("fit: a ticket's cell is its last input row in file order, not its latest-dated one, and that row's date is the ruling's floor", () => {
-  // Ticket 1's rows are in reverse date order; ticket 2, in another cell, carries the fit's cutoff past both.
+  // Ticket 1's rows are in reverse date order; ticket 2, in another cell, has a later row than both.
   const features = [
     exploring({ ticket: "1", run_date: "2026-10-03", chosen_cell: "slow-high" }),
     exploring({ ticket: "1", run_date: "2026-10-01", chosen_cell: "smol-high" }),
@@ -854,7 +1054,7 @@ test("fit: a ticket's cell is its last input row in file order, not its latest-d
   assert.equal(estimates["slow-high"], undefined, "the latest-dated row does not set the ticket's cell");
 });
 
-test("fit: a features row whose run_date is blank is no input row, for the fit and for --check's re-fit at fitted_through", () => {
+test("fit: a features row whose run_date is blank is no input row", () => {
   // route() writes a blank run_date for a session id with no date prefix; ticket 9's blank row sits in another cell.
   const features = [
     exploring({ ticket: "2", run_date: "2026-10-03" }),
@@ -862,34 +1062,31 @@ test("fit: a features row whose run_date is blank is no input row, for the fit a
     exploring({ ticket: "9", run_date: "", chosen_cell: "task-high" }),
   ];
   const early = ruled(2, 22, { run_date: "2026-01-01", minted_false_claim: "yes" });
-  for (const cutoff of [undefined, "2026-10-03"]) {
-    const fit = (verdicts) => fitDirect({ features, members: [], verdicts, cutoff });
-    const t = fit([early, ruled(9, 99)]);
-    assert.deepEqual(Object.keys(t.estimates["*"]), ["slow-high"], `cutoff ${cutoff}: neither blank row sets a cell or adds a ticket`);
-    assert.equal(t.n_rows, 1, `cutoff ${cutoff}`);
-    assert.equal(t.estimates["*"]["slow-high"].merged, 0, `cutoff ${cutoff}: a ruling dated before the last dated row predates that Pull`);
-    assert.equal(fit([ruled(2, 22, { run_date: "2026-10-03" })]).estimates["*"]["slow-high"].merged, 1, `cutoff ${cutoff}: a ruling on or after the last dated row rules the ticket`);
-    assert.equal(t.fitted_through, "2026-10-03", `cutoff ${cutoff}`);
-  }
+  const fit = (verdicts) => fitDirect({ features, members: [], verdicts });
+  const t = fit([early, ruled(9, 99)]);
+  assert.deepEqual(Object.keys(t.estimates["*"]), ["slow-high"], "neither blank row sets a cell or adds a ticket");
+  assert.equal(t.n_rows, 1);
+  assert.equal(t.estimates["*"]["slow-high"].merged, 0, "a ruling dated before the last dated row predates that Pull");
+  assert.equal(fit([ruled(2, 22, { run_date: "2026-10-03" })]).estimates["*"]["slow-high"].merged, 1, "a ruling on or after the last dated row rules the ticket");
 });
 
-test("fit refuses a features row whose run_date is neither blank nor YYYY-MM-DD, for the fit and for --check's re-fit, rather than dropping it", () => {
+test("fit refuses a features row whose run_date is neither blank nor YYYY-MM-DD rather than dropping it", () => {
   const dated = exploring({ ticket: "1", run_date: "2026-10-03" });
   for (const bad of ["10/01/2026", "2026-10-1", "2026", "abc"]) {
-    for (const cutoff of [undefined, "2026-10-03"]) {
-      assert.throws(
-        () => fitDirect({ features: [dated, exploring({ ticket: "7", run_date: bad })], members: [], verdicts: [], cutoff }),
-        (e) => e.message.includes("ticket #7") && e.message.includes(`run_date is '${bad}', expected YYYY-MM-DD or blank`),
-        `cutoff ${cutoff}, run_date ${bad}`,
-      );
-    }
+    assert.throws(
+      () => fitDirect({ features: [dated, exploring({ ticket: "7", run_date: bad })], members: [], verdicts: [] }),
+      (e) => e.message.includes("ticket #7") && e.message.includes(`run_date is '${bad}', expected YYYY-MM-DD or blank`),
+      `run_date ${bad}`,
+    );
   }
 });
 
 test("fit, fit --due and --check refuse at exit 2 a features row whose run_date is neither blank nor YYYY-MM-DD, and leave the table alone; a blank one is not refused", (t) => {
   const p = fitWorld(t, { features: [exploring({ ticket: "1" }), exploring({ ticket: "7", run_date: "10/01/2026" })], members: [], verdicts: [ruled(1, 11)] });
+  // --check re-fits the commit the table records, so the table records the one holding the row.
+  writeFileSync(p.table, JSON.stringify(baseTable({ burn_in: true, fitted_commit: p.git("rev-parse", "HEAD") })));
   const before = readFileSync(p.table, "utf8");
-  const fitArgs = ["fit", ...p.fitArgs, "--guard", p.guard];
+  const fitArgs = ["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD"];
   for (const args of [fitArgs, [...fitArgs, "--due"], ["--check", ...p.fitArgs]]) {
     const r = cli(args);
     assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
@@ -898,6 +1095,7 @@ test("fit, fit --due and --check refuse at exit 2 a features row whose run_date 
   }
   assert.equal(readFileSync(p.table, "utf8"), before);
   writeFileSync(p.features, tsv(COLUMNS, [exploring({ ticket: "1" }), exploring({ ticket: "7", run_date: "" })], true));
+  p.commit();
   for (const args of [[...fitArgs, "--due"], fitArgs]) {
     const r = cli(args);
     assert.equal(r.status, 0, `${args.join(" ")}: ${r.stderr}`);
@@ -909,13 +1107,14 @@ test("fit refuses at exit 2 a ruling of an input ticket whose run_date is not YY
   const p = fitWorld(t, { features, members: [], verdicts: [ruled(1, 11), ruled(2, 12, { run_date: "10/01/2026" })] });
   const before = readFileSync(p.table, "utf8");
   for (const mode of [["--due"], []]) {
-    const ok = cli(["fit", ...p.fitArgs, "--guard", p.guard, ...mode]);
+    const ok = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD", ...mode]);
     assert.equal(ok.status, 0, `fit ${mode.join(" ")}: ${ok.stderr}`);
   }
   writeFileSync(p.table, before);
   writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [ruled(1, 11, { run_date: "10/01/2026" })].map(verdictRow)));
+  p.commit();
   for (const mode of [[], ["--due"]]) {
-    const r = cli(["fit", ...p.fitArgs, "--guard", p.guard, ...mode]);
+    const r = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD", ...mode]);
     assert.equal(r.status, 2, `fit ${mode.join(" ")}: ${r.stderr}`);
     assert.match(r.stderr, /ticket #1 \(PR #11\): run_date is '10\/01\/2026', expected YYYY-MM-DD/);
     assert.equal(r.stdout, "");
@@ -923,15 +1122,16 @@ test("fit refuses at exit 2 a ruling of an input ticket whose run_date is not YY
   assert.equal(readFileSync(p.table, "utf8"), before);
 });
 
-test("fit refuses at exit 2 a ruling of an input ticket whose run_date is not YYYY-MM-DD even when it sorts after the fit's cut, as fit --due does", (t) => {
+test("fit refuses at exit 2 a ruling of an input ticket whose run_date is not YYYY-MM-DD, whatever the string, as fit --due does", (t) => {
   const features = [exploring({ ticket: "1" })];
   const p = fitWorld(t, { features, members: [], verdicts: [ruled(1, 11)] });
   const before = readFileSync(p.table, "utf8");
-  // Each of these is `>` the cut ("2026-10-01"), so a string `<=` would drop it before `rulingFor` saw it.
+  // Each of these sorts after "2026-10-01", so a string comparison against a date would misplace it.
   for (const bad of ["abc", "zzz", "2027", "2026-13-45x"]) {
     writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [ruled(1, 11, { run_date: bad })].map(verdictRow)));
+    p.commit();
     for (const mode of [[], ["--due"]]) {
-      const r = cli(["fit", ...p.fitArgs, "--guard", p.guard, ...mode]);
+      const r = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD", ...mode]);
       assert.equal(r.status, 2, `run_date ${bad}, fit ${mode.join(" ")}: ${r.stderr}`);
       assert.match(r.stderr, new RegExp(`ticket #1 \\(PR #11\\): run_date is '${bad}', expected YYYY-MM-DD`));
       assert.equal(r.stdout, "");
@@ -940,16 +1140,17 @@ test("fit refuses at exit 2 a ruling of an input ticket whose run_date is not YY
   assert.equal(readFileSync(p.table, "utf8"), before);
   // The same junk on a ticket outside the input is still not refused.
   writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [ruled(1, 11), ruled(2, 12, { run_date: "zzz" })].map(verdictRow)));
-  assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard]).status, 0);
+  p.commit();
+  assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD"]).status, 0);
 });
 
-test("fit does not refuse a ruling whose run_date is not YYYY-MM-DD on a ticket whose last in-range row is neither an exploration row nor a rule row, though fit --due does", (t) => {
+test("fit does not refuse a ruling whose run_date is not YYYY-MM-DD on a ticket whose last in-window row is neither an exploration row nor a rule row, though fit --due does", (t) => {
   const features = [exploring({ ticket: "1" }), featureRow({ ticket: "3", exploration_draw: "", sizing_src: "" })];
   const p = fitWorld(t, { features, members: [], verdicts: [ruled(1, 11), ruled(3, 13, { run_date: "10/01/2026" })] });
-  const due = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--due"]);
+  const due = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD", "--due"]);
   assert.equal(due.status, 2, due.stderr);
   assert.match(due.stderr, /ticket #3 \(PR #13\): run_date is '10\/01\/2026', expected YYYY-MM-DD/);
-  const r = cli(["fit", ...p.fitArgs, "--guard", p.guard]);
+  const r = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD"]);
   assert.equal(r.status, 0, r.stderr);
 });
 
@@ -972,9 +1173,12 @@ test("fit: a ruling with closed_own_ticket no and no minted false claim still fa
 test("--check refuses at exit 2 a ruling of an input ticket whose run_date is not YYYY-MM-DD, not as a mismatch with the table", (t) => {
   const features = [exploring({ ticket: "1" })];
   const p = fitWorld(t, { features, members: [], verdicts: [ruled(1, 11)] });
-  assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard]).status, 0);
+  assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD"]).status, 0);
   assert.equal(cli(["--check", ...p.fitArgs]).status, 0);
   writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [ruled(1, 11, { run_date: "10/01/2026" })].map(verdictRow)));
+  const bad = p.commit();
+  assert.equal(cli(["--check", ...p.fitArgs]).status, 0, "the table's own commit is unaffected by a later one");
+  writeFileSync(p.table, JSON.stringify({ ...JSON.parse(readFileSync(p.table, "utf8")), fitted_commit: bad }));
   const r = cli(["--check", ...p.fitArgs]);
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /ticket #1 \(PR #11\): run_date is '10\/01\/2026', expected YYYY-MM-DD/);

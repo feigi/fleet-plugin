@@ -174,10 +174,19 @@ jobs:
 
       # The router table is a code carrier: it changes only by a re-fit of the
       # committed rows, never by hand, so CI re-fits it from those rows and
-      # fails on any difference. Offline — the table records the guard
-      # snapshot its fit read.
+      # fails on any difference. The rows are the ones the table's
+      # `fitted_commit` holds, which this shallow checkout may not, so that
+      # commit is fetched first — skipped while the table is null, which
+      # re-fits an empty corpus. The table records the guard snapshot its fit
+      # read, so nothing else is fetched.
       - name: Router table check
-        run: node plugin/scripts/ticket-router.mjs --check --table plugin/scripts/router-table.json --features docs/metrics/ticket-features.tsv --members docs/metrics/member-outcomes.tsv --verdicts docs/metrics/tier-outcomes.tsv
+        run: |
+          set -euo pipefail
+          fitted=$(node -p 'JSON.parse(require("fs").readFileSync("plugin/scripts/router-table.json", "utf8")).fitted_commit ?? ""')
+          if [ -n "$fitted" ]; then
+            git fetch --depth=1 origin "$fitted"
+          fi
+          node plugin/scripts/ticket-router.mjs --check --table plugin/scripts/router-table.json --features docs/metrics/ticket-features.tsv --members docs/metrics/member-outcomes.tsv --verdicts docs/metrics/tier-outcomes.tsv
 
       # -S warning, not the default: the default adds info-level hits that are
       # noise here — SC2016 where a single-quoted `python3 -c` script is meant
