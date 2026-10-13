@@ -1484,12 +1484,14 @@ function runCheck() {
 // allows the rotation. With no record the guard falls back to the mark, read
 // through fleet-state.mjs's own reader and verdict: still beating — a beat
 // inside its window, or past it with a tick or ledger write inside
-// theirs — refuses; a stalled mark, a recorded stop, or no beat at all allows
-// the rotation, and that fallback proves "not beating", never "dead".
+// theirs — refuses, and so does a tick or ledger write inside its window
+// with no beat at all; a stalled mark, a recorded stop, or no mark at all
+// allows the rotation, and that fallback proves "not beating", never "dead".
 //
-// A heartbeat file that exists but cannot be read or parsed gets neither
-// verdict: a record it may hold cannot be known, so rotate refuses rather
-// than read the fault as "no record".
+// A heartbeat file that exists but cannot be used — unreadable, not JSON, not
+// a JSON object, or holding a `controller` key that cannot be judged — gets
+// neither verdict: a record it may hold cannot be known, so rotate refuses
+// rather than read the fault as "no record".
 //
 // Its last act, whether or not there was a ledger to move, replaces the
 // record with this run's own, carrying the verdict as `prior` — the next
@@ -1534,14 +1536,17 @@ function runRotate() {
   }
   // The fallback guards a ledger, as it always has: with none to move there
   // is nothing for a beating mark to protect. A ledger write is the
-  // controller acting, and counts the way a beat does. Refuse if the beat is
-  // beating, or if there are fresh ticked/acted marks with no recorded stop.
+  // controller acting, and counts the way a beat does. Refuse when the beat
+  // is beating, and also — the one state assessBeat reads as `none`, because
+  // the cockpit shows no panel without a record — when there is no beat at
+  // all and a tick or ledger write is still inside its window: a record lost
+  // to a removed file leaves exactly that. A recorded stop reads `stopped`
+  // through assessBeat, so it lets the rotation through.
   const exists = existsSync(file);
-  const beatVerdict = assessBeat({ beat, ticked, acted, now: Date.now() });
-  const isBeatBeating = beatVerdict.kind === "beating";
-  const hasRecordedStop = beat?.stopped != null;
-  const hasFreshMarks = ticked !== null || acted !== null;
-  if (prior === "none" && exists && (isBeatBeating || (hasFreshMarks && !hasRecordedStop))) {
+  const judgedAt = Date.now();
+  const markWindowEnd = beat === null ? stallsAt({ ticked, acted }) : null;
+  const actingWithoutBeat = markWindowEnd !== null && judgedAt <= markWindowEnd;
+  if (prior === "none" && exists && (actingWithoutBeat || assessBeat({ beat, ticked, acted, now: judgedAt }).kind === "beating")) {
     const [what, mark] = [["beat", beat], ["tick", ticked], ["ledger write", acted]]
       .filter(([, m]) => m !== null)
       .reduce((a, b) => (b[1].at > a[1].at ? b : a));
