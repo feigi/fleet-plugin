@@ -14,16 +14,16 @@ tokens, measured the way #2929 measured) read by a model, and that the
 "forgets to do things" class of incident lives in that gap. Six specs
 close it:
 
-1. `2026-10-13-rendered-member-briefs.md`: a script renders every brief;
+1. #3177 `2026-10-13-rendered-member-briefs.md`: a script renders every brief;
    duties live in agent bodies.
-2. `2026-10-13-structured-member-reports.md`: a report is a JSON file the
+2. #3179 `2026-10-13-structured-member-reports.md`: a report is a JSON file the
    settle reads and verifies.
-3. `2026-10-13-run-boundaries-as-drivers.md`: phase 0 and close-out are
+3. #3178 `2026-10-13-run-boundaries-as-drivers.md`: phase 0 and close-out are
    one command each, with a receipt the tick gates on.
-4. `2026-10-13-one-command-per-wake.md`: `fleet-event.mjs`, `tick --apply`,
+4. #3180 `2026-10-13-one-command-per-wake.md`: `fleet-event.mjs`, `tick --apply`,
    and a ledger-to-transcript reconcile.
-5. `2026-10-13-pull-as-driver.md`: `pull.mjs` with oracle questions.
-6. This one.
+5. #3181 `2026-10-13-pull-as-driver.md`: `pull.mjs` with oracle questions.
+6. #3182, this one. The external-wake probe is #3183.
 
 Order: 1 and 3 first, in parallel; 2 beside them; 4 after 2 and 3; 5 after
 1; 6 after all. Specs 1, 4, 5 and 6 edit SKILL.md heavily, so the fleet's
