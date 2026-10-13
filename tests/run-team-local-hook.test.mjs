@@ -463,6 +463,23 @@ test("router fit: a due re-fit is pushed to its own chore branch and opened as a
   assert.equal(git(held.origin, ["branch", "--list", "chore/*"]), "");
 });
 
+test("router fit: reads origin/main, not the checkout's own HEAD, when the two differ", () => {
+  const f = fixture({ rows: merged(FIT_EVERY_MERGED) });
+  // A local commit no remote holds, whose features file has no rows (the hook's own stopping rule still
+  // reads the file, so it must exist): a fit from this HEAD would count no merged pull and not be due.
+  write(f.repo, FEATURES, featuresTsv([]));
+  git(f.repo, ["commit", "--quiet", "-am", "local only"]);
+  const localSha = git(f.repo, ["rev-parse", "HEAD"]);
+  const mainSha = git(f.origin, ["rev-parse", "main"]);
+  assert.notEqual(localSha, mainSha);
+  const r = f.run();
+  assert.equal(r.status, 0, r.stderr);
+  const branch = /opened https:\/\/github\.com\/o\/r\/pull\/902 from (chore\/router-fit-\S+)$/m.exec(r.stdout)?.[1];
+  assert.ok(branch, r.stdout);
+  assert.match(r.stdout, /router fit: DUE=yes MERGED=50\/50 — /);
+  assert.equal(JSON.parse(git(f.origin, ["show", `${branch}:${TABLE}`])).fitted_commit, mainSha, "the re-fit records origin/main, not the local HEAD");
+});
+
 // ---------------------------------------------------------------------------
 // usage
 

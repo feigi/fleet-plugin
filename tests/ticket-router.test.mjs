@@ -816,6 +816,25 @@ test("--check exits 2 naming `git fetch --depth=1 origin <sha>` when fitted_comm
   assert.equal(readFileSync(p.table, "utf8"), before);
 });
 
+test("a features file outside any repository, or a git that fails, is reported as git failing, not as a commit this repository lacks", (t) => {
+  const p = fitWorld(t, { features: [], members: [], verdicts: [] });
+  const sha = p.git("rev-parse", "HEAD");
+  writeFileSync(p.table, JSON.stringify(baseTable({ burn_in: true, fitted_commit: sha })));
+  const plain = tempDir("router-plain-");
+  const features = join(plain, "ticket-features.tsv");
+  writeFileSync(features, readFileSync(p.features));
+  const tail = ["--members", p.members, "--verdicts", p.verdicts];
+  const check = cli(["--check", "--table", p.table, "--features", features, ...tail]);
+  assert.equal(check.status, 2, check.stderr);
+  assert.match(check.stderr, /cannot resolve [0-9a-f]{40} in the repository holding --features .*not a git repository/s);
+  assert.doesNotMatch(check.stderr, /does not hold|git fetch/);
+  const fit = cli(["fit", "--table", p.table, "--features", features, ...tail, "--guard", p.guard, "--commit", "HEAD"]);
+  assert.equal(fit.status, 2, fit.stderr);
+  assert.match(fit.stderr, /cannot resolve HEAD in the repository holding --features .*not a git repository/s);
+  assert.doesNotMatch(fit.stderr, /is not a commit of the repository/);
+  assert.throws(() => resolveCommit(features, "HEAD"), /not a git repository/);
+});
+
 test("--check passes on a day-one table over a header-only features file", (t) => {
   const p = fitWorld(t, { features: [], members: [], verdicts: [], table: JSON.parse(readFileSync(DEFAULT_TABLE, "utf8")) });
   const r = cli(["--check", ...p.fitArgs]);

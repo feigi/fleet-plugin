@@ -218,9 +218,6 @@ function routerFit(repo, dryRun) {
       .find((p) => String(p.headRefName).startsWith(FIT_BRANCH));
     if (open) return say(`router fit: ${due} — re-fit PR #${open.number} (${open.headRefName}) is still open`);
     const fitted = script("ticket-router.mjs", ["fit", ...args], tmp).trim();
-    if (spawnSync("git", ["-C", tmp, "diff", "--quiet", "--", TABLE], { env: gitEnv() }).status === 0) {
-      return say(`router fit: ${due} — ${fitted}; the table is unchanged, so there is nothing to open`);
-    }
     const branch = freeBranch(repo);
     if (dryRun) return say(`router fit: ${due} — ${fitted}; would open a chore PR from ${branch}`);
     const subject = `chore: re-fit router-table.json at ${JSON.parse(readFileSync(table, "utf8")).fitted_commit.slice(0, 8)}`;

@@ -488,11 +488,17 @@ function gitBeside(path, args) {
   return r;
 }
 
-/** The full sha `rev` names as a commit in the repository holding `path`, or null when it names none there. */
+/**
+ * The full sha `rev` names as a commit in the repository holding `path`, or null when it names none there.
+ * Throws when git itself fails (not a repository, unreadable config, no git): that is not an answer about `rev`.
+ */
 export function resolveCommit(path, rev) {
   if (rev.startsWith("-")) return null;
   const r = gitBeside(path, ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`]);
-  return r.status === 0 ? r.stdout.trim() : null;
+  if (r.status === 0) return r.stdout.trim();
+  // `--verify --quiet` exits 1, silently, for a rev that names no commit; any other status is git failing.
+  if (r.status === 1) return null;
+  throw new Error(r.stderr.trim() || `git rev-parse exited ${r.status}`);
 }
 
 /** `path` as committed at `sha`; throws when the commit does not hold it. */
@@ -577,12 +583,16 @@ function main() {
     members: fileAt(sha, "members", parseMemberTsv),
     verdicts: fileAt(sha, "verdicts", parseTierOutcomes),
   });
+  // The commit `rev` names in the repository holding --features, or null; git itself failing is a die, not "no such commit".
+  const commitOf = (rev) => {
+    try { return resolveCommit(need("features"), rev); } catch (e) { die(`cannot resolve ${rev} in the repository holding --features ${need("features")}: ${e.message}`); }
+  };
   // The commit the table records: null before any fit, else a sha this repository holds.
   const fittedCommit = () => {
     const sha = table.fitted_commit;
     if (sha === null) return null;
     if (typeof sha !== "string" || !SHA.test(sha)) die(`${tablePath}: \`fitted_commit\` is not null or a full commit sha`);
-    if (resolveCommit(need("features"), sha) === null) {
+    if (commitOf(sha) === null) {
       die(`${tablePath} was fitted from commit ${sha}, which this repository does not hold — run \`git fetch --depth=1 origin ${sha}\``);
     }
     return sha;
@@ -613,7 +623,7 @@ function main() {
   }
 
   const commitArg = need("commit");
-  const sha = resolveCommit(need("features"), commitArg);
+  const sha = commitOf(commitArg);
   if (sha === null) die(`--commit ${commitArg} is not a commit of the repository holding --features ${need("features")}`);
   const { features, members, verdicts } = corpusAt(sha);
   const guardPath = need("guard");
