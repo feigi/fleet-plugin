@@ -1,8 +1,7 @@
 // A reviewer that holds the dispatch tool still has to be TOLD the fan-out is
 // requested work, or it declines to dispatch the specialists and the run
-// silently downgrades to a thinner solo review. Two documents say so: run-team's
-// "Authorize the fan-out explicitly" paragraph, and member-lifecycle.md's
-// "Capability is not permission" section.
+// silently downgrades to a thinner solo review. member-lifecycle.md's
+// "Capability is not permission" section says so.
 //
 // What the rule rests on is the distinction itself — holding the tool is not
 // authorization to use it — and not on any standing instruction an omp member
@@ -23,19 +22,11 @@ import { Pin } from "./support/prose-pin.mjs";
 const REPO = join(import.meta.dirname, "..", "plugin");
 const read = (...p) => Pin.file(join(REPO, ...p));
 
-const SKILL = read("skills", "run-team", "SKILL.md");
 const LIFECYCLE = read("skills", "run-team", "references", "member-lifecycle.md");
 
 // [label, passage, the sentence stating "holding the tool is not authorization",
-//  the sentence stating what the reviewer must be told]. The two documents word
-// the same rule differently, so each carries its own spelling.
+//  the sentence stating what the reviewer must be told].
 const PASSAGES = [
-  [
-    "run-team/SKILL.md's 'Authorize the fan-out explicitly' paragraph",
-    SKILL.paragraph("Authorize the fan-out explicitly.", "run-team/SKILL.md", "**Delivering specialist reports is your duty").text,
-    "holding the dispatch tool is not authorization to use it",
-    "State that the full specialist set IS the requested work",
-  ],
   [
     "member-lifecycle.md's 'Capability is not permission' section",
     LIFECYCLE.section("## Capability is not permission", "references/member-lifecycle.md").text,
@@ -44,7 +35,7 @@ const PASSAGES = [
   ],
 ];
 
-test("both fan-out passages say holding the dispatch tool is not authorization to use it", () => {
+test("the fan-out passage says holding the dispatch tool is not authorization to use it", () => {
   for (const [label, passage, notAuthorization] of PASSAGES) {
     assert.match(
       passage,
@@ -54,7 +45,7 @@ test("both fan-out passages say holding the dispatch tool is not authorization t
   }
 });
 
-test("both fan-out passages tell the controller to state the full specialist set IS the requested work", () => {
+test("the fan-out passage tells the controller to state the full specialist set IS the requested work", () => {
   for (const [label, passage, , mustState] of PASSAGES) {
     assert.match(
       passage,
@@ -64,7 +55,7 @@ test("both fan-out passages tell the controller to state the full specialist set
   }
 });
 
-test("neither fan-out passage rests the rule on a standing instruction the member inherits", () => {
+test("the fan-out passage does not rest the rule on a standing instruction the member inherits", () => {
   // The retired premise, not a spelling of it: any restatement that grounds the
   // rule in an inherited do-not-dispatch instruction is the claim this ticket
   // removed, whichever tool name it uses. `AgentTool` and the verb `inherits`

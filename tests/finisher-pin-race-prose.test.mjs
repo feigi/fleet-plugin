@@ -3,28 +3,19 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 
-// #144. The finisher is dispatched pinned to a SHA the reviewer already left
-// behind: the reviewer composes a verdict once it has enough, then keeps
-// applying late-arriving specialist relays and pushes again. The pin going
-// stale isn't the defect — the halt-on-moved-head rule already catches it,
-// correctly, every time. The defect is that (a) the controller dispatches
-// before every specialist report is relayed, when it holds the receipts to
-// know better, and (b) a halt reads only "SHA differs from pin" and gives
-// the controller nothing to act on without a fresh audit.
+// #144. The finisher is dispatched pinned to a SHA, and a head that moves
+// after the pin is a halt: the halt-on-moved-head rule catches it, correctly,
+// every time. The defect was that a halt read only "SHA differs from pin" and
+// gave the controller nothing to act on without a fresh audit.
 //
 // Slice-scoped, not whole-file: a bare presence check anywhere in this
 // 1200+ line SKILL.md would stay green even if the text moved somewhere
 // that never reaches its reader (measured before, in this same file —
-// member-prompt-prose.test.mjs #172). Two different readers here: the
-// dispatch gate is controller-facing and lives in the Fallback section, the
-// cause-block evidence is finisher-facing and must sit inside a `>` block the
-// controller carries verbatim.
+// member-prompt-prose.test.mjs #172). The cause-block evidence is
+// finisher-facing and must sit inside a `>` block the controller carries
+// verbatim.
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
-
-const FALLBACK_START = "#### Fallback: hand-dispatched reviewer member";
-
-const fallbackSection = () => RUN_TEAM.section(FALLBACK_START, "run-team fallback section").text;
 
 const CAUSE_BLOCK_START = "instead of asking anyone:";
 // The controller-facing resolution table (#2083) follows the block directly;
@@ -57,29 +48,6 @@ function causeText() {
 // "no closed count anywhere" assertion could pass by looking at nothing.
 const LEAD_ANCHOR = "A halt at step 1 reads identical from a bare SHA mismatch";
 const leadIn = () => RUN_TEAM.paragraph(LEAD_ANCHOR, "run-team halt-cause lead-in", "> Worktree differs from your pin,").text;
-
-test("finisher dispatch is gated on outstanding specialist relays, in the section that owns relay receipts", () => {
-  const section = fallbackSection();
-  assert.match(
-    section,
-    /receipts gate the finisher dispatch/i,
-    "the fallback section no longer gates finisher dispatch on relay receipts — a late relay can again land after dispatch with nothing checking for it",
-  );
-  assert.match(
-    section,
-    /unrelayed/,
-    "the gate no longer names an unrelayed report as the blocking condition",
-  );
-  // The scope boundary matters as much as the rule: the workflow path has no
-  // async relay at all (`agent()` returns synchronously), so a gate that reads
-  // as universal would strand controllers into believing a wait is needed
-  // where none exists.
-  assert.match(
-    section,
-    /workflow path/i,
-    "the gate doesn't say it's a no-op on the workflow path — a controller reading only this rule may wait on a relay that can never arrive there",
-  );
-});
 
 test("the cause evidence sits inside a quote block, not only in controller narrative", () => {
   const block = causeBlock();
@@ -322,13 +290,13 @@ test("the head-equality short-circuit compares against the dispatch pin, on a cl
   );
 });
 
-test("the pre-existing ruling-owed gate for the fix-applier is untouched", () => {
-  // ACCEPT side: this run's edit sits right next to the fix-applier dispatch
-  // paragraph. This pins that the older, unrelated rule wasn't clipped or
-  // reworded by mistake while adding the new one beside it.
+test("the ruling-owed gate for the fix-applier is still in the dispatch rules", () => {
+  // The rule that the controller never dispatches a finisher while it still
+  // owes the fix-applier a ruling is its own sentence, independent of the
+  // halt-cause block above; this pins that it wasn't clipped or reworded.
   assert.match(
     RUN_TEAM.text,
     /Never dispatch\s*\n?one while you still owe the fix-applier a ruling/,
-    "the fix-applier ruling-owed gate no longer reads as before — check it wasn't altered while adding the specialist-relay gate nearby",
+    "the fix-applier ruling-owed gate no longer reads as before — check it wasn't altered",
   );
 });

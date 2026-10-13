@@ -48,7 +48,8 @@
 //   statements were not adjacent, and the function did something (`endsFile`'s
 //   EOF tolerance) `between()` could not.
 //
-// finisher-pin-race-prose.test.mjs's `fallbackSection()` and the `specialists()`
+// finisher-pin-race-prose.test.mjs's `fallbackSection()` (deleted with the
+// section it sliced) and the `specialists()`
 // in `ed9f2967^:plugin/scripts/review-pr-citation-prose.test.mjs` looked like
 // two more —
 // a search from `at` instead of `at + start.length`, and a literal-anchor

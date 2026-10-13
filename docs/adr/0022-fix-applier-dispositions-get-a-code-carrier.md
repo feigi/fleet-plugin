@@ -26,6 +26,8 @@ so Decision 5's `refutersDispatched > 0` row holds a finding whose refuters
 crashed or abstained, and its "(refuters crashed)" reads that way; an
 in-scope suggestion's verdict file that abstains is a mismatch, like one
 failing the schema.
+Amended by #2405: the fallback reviewer path is removed; every review is a
+runner's, so Decision 8's token always has a fix-applier to name.
 
 ## Context
 

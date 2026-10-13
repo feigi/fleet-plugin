@@ -89,7 +89,7 @@ const BODY = AGENT_FILE.split("---").slice(2).join("---");
 // copy instead of asserting against a hand-built imitation of it.
 const body = (text = BODY) => text;
 const reviewers = (text = RUN_TEAM.text) =>
-  Pin.of(text, "run-team/SKILL.md").between("### Reviewers", "#### Fallback: hand-dispatched reviewer", "run-team's Reviewers section").text;
+  Pin.of(text, "run-team/SKILL.md").between("### Reviewers", "### Merge bot", "run-team's Reviewers section").text;
 
 // Wrapping is normalized away on both sides, and nothing else is.
 //

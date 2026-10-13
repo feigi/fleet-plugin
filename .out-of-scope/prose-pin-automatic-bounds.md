@@ -22,8 +22,10 @@ suites against patched copies of the module, never the real one.
 **A section that ends itself.** A `.section(heading)` bounded at the next
 heading of the same or shallower depth, for every caller, turns 2–3 of 444
 markdown tests red, and 9 once the shell sites are included. Six heading-start
-slices stop at a deeper child heading on purpose — four `### Reviewers` slices
-whose suites assert the `#### Fallback` subsection is absent, and one that
+slices stopped at a deeper child heading on purpose — four `### Reviewers`
+slices whose suites asserted the `#### Fallback` subsection was absent (the
+subsection is since removed, and those slices now end at the next same-depth
+heading), and one that
 would grow by 91,611 bytes. Five more end on a non-heading anchor on purpose;
 `instrument-check-prose.test.mjs` records a pin that moved off a heading end
 because renaming the neighbouring heading reddened it. `Pin` keeps

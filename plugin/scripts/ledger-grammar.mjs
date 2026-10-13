@@ -125,19 +125,18 @@ export function rowNums(text) {
 }
 
 // A PR's review is not a member, so it carries its own pair of row tokens.
-// The launch is `review=wf:<runId>` | `review=member:<name>` |
-// `review=fallback:<name>`, settled dead as `…=failed`; the capture groups are
-// the kind, the runId or runner name, and the `=failed` suffix. A launch's
-// identity comes out of this one regex, `=failed` aside: a workflow's is its
-// runId, a runner's is its name whichever of member or fallback launched it,
-// since both are the one hub member of that name. The first runner on PR <n>
-// is `review-pr-<n>`, every later one the next letter the PR's rows do not
-// carry yet (`-b`, `-c`, …). The
+// The launch is `review=wf:<runId>` | `review=member:<name>`, settled dead as
+// `…=failed`; the capture groups are the kind, the runId or runner name, and
+// the `=failed` suffix. A launch's identity comes out of this one regex,
+// `=failed` aside: a workflow's is its runId, a runner's is its name, the one
+// hub member of that name. The first runner on PR <n> is `review-pr-<n>`,
+// every later one the next letter the PR's rows do not carry yet (`-b`, `-c`,
+// …). The
 // result is `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, `<run>`
 // the name of the review's own run root under `<scratch>/pr<n>/` (`run-` and
 // the eight characters `mktemp` chose), where its result file `review.json`
 // sits.
-export const REVIEW = /^review=(?<kind>wf|member|fallback):(?<name>[^=\s]+)(?<failed>=failed)?$/;
+export const REVIEW = /^review=(?<kind>wf|member):(?<name>[^=\s]+)(?<failed>=failed)?$/;
 export const REVIEWED = /^reviewed=([0-9a-fA-F]{7,40}):(\d+)\/(\d+)\/(\d+):(run-[A-Za-z0-9]{8})$/;
 
 // The stream a row belongs to: its PR, else its key.
@@ -178,8 +177,7 @@ function readReviews(tokens) {
       }
       const { kind, name, failed } = m.groups;
       const launch = { id: `review=${kind}:${name}`, kind, name, failed: failed !== undefined, answered: false };
-      launch.key = kind === "wf" ? launch.id : `runner:${name}`;
-      if (launches.some((l) => l.key === launch.key)) out.repeated.push(launch.id);
+      if (launches.some((l) => l.id === launch.id)) out.repeated.push(launch.id);
       const open = launches.find(isOpen);
       if (open) out.crowded.push({ id: launch.id, open: open.id });
       launches.push(launch);
@@ -213,9 +211,9 @@ function added(before, after) {
 
 // The runner name a new launch on PR <pr> takes: `review-pr-<pr>`, else the
 // first letter from `b` that no runner launch on the PR's rows already uses —
-// member or fallback, `=failed` or not — and no name in `retired` holds, the
-// names an earlier run of this omp session launched. null for a stream keyed
-// by no PR number, or with every letter taken.
+// `=failed` or not — and no name in `retired` holds, the names an earlier run
+// of this omp session launched. null for a stream keyed by no PR number, or
+// with every letter taken.
 function nextReviewer(launches, pr, retired) {
   if (typeof pr !== "number") return null;
   const used = new Set([...launches.filter((l) => l.kind !== "wf").map((l) => l.name), ...retired]);
@@ -293,8 +291,8 @@ export function splitRowClause({ pr, row }) {
  *   its outcome;
  * - unparseable review tokens: a `review=`/`reviewed=` matches REVIEW/REVIEWED;
  * - paired results: every `reviewed=` answers a launch (readReviews above);
- * - unique launches: a launch identity — a workflow's runId, a runner's name
- *   whatever its kind — appears at most once in its PR's stream;
+ * - unique launches: a launch identity — a workflow's runId, a runner's name —
+ *   appears at most once in its PR's stream;
  * - unretired runners: no launch takes a runner name `retired` holds, which an
  *   earlier run of this omp session launched;
  * - one open launch per PR: no launch appears while an earlier one is open;
@@ -317,7 +315,7 @@ export function rowWriteRefusal(before, after, oldLine, line, retired = []) {
     const b = read(was, id);
     const bad = added(b.unparseable, a.unparseable)[0];
     if (bad !== undefined) {
-      return `'${bad}' on ${where(id)} is not review=wf:<runId> | member:<name> | fallback:<name> (optionally =failed) `
+      return `'${bad}' on ${where(id)} is not review=wf:<runId> | member:<name> (optionally =failed) `
         + "or reviewed=<head>:<survived>/<refuted>/<unverified>:<run> — unparseable review token";
     }
     const unpaired = added(b.unpaired, a.unpaired)[0];
@@ -331,7 +329,7 @@ export function rowWriteRefusal(before, after, oldLine, line, retired = []) {
       return `launch '${repeated}' is already on ${where(id)}'s rows — unique launches: every launch takes an identity the PR has not used`
         + (next === null ? "" : `; the next free reviewer name is ${next}`);
     }
-    const reused = a.launches.find((l) => l.kind !== "wf" && retired.includes(l.name) && !b.launches.some((o) => o.key === l.key));
+    const reused = a.launches.find((l) => l.kind !== "wf" && retired.includes(l.name) && !b.launches.some((o) => o.id === l.id));
     if (reused !== undefined) {
       const next = nextReviewer(a.launches, id, retired);
       return `launch '${reused.id}' on ${where(id)} names a runner an earlier run of this session already used — unretired runners: omp would answer it with \`${reused.name}-2\``
@@ -445,9 +443,9 @@ export const REVIEWER = /^review-pr-([1-9][0-9]*)(-[b-z])?$/;
  * reviewer's, bare. */
 export const isRetirable = (name) => parseMember(name) !== null || REVIEWER.test(name);
 
-// The reviewer runner names a row's `review=member:<name>` and
-// `review=fallback:<name>` launches took, `=failed` or answered or open. A
-// workflow launch is named by its runId, which no hub member holds.
+// The reviewer runner names a row's `review=member:<name>` launches took,
+// `=failed` or answered or open. A workflow launch is named by its runId,
+// which no hub member holds.
 function launchedRunners(text) {
   const out = [];
   for (const word of text.split(/\s+/)) {

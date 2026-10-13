@@ -9,20 +9,14 @@ import { parseRow } from "../plugin/scripts/compute-board.mjs";
 import { runReview } from "../plugin/scripts/review-core.mjs";
 import { pipeline, parallel, ARGS, SNAP, review, finding, vote, scriptedHost } from "./support/review-host-fixture.mjs";
 
-// The fleet's default review path is the controller running `review-eval.mjs`
-// itself, via `eval`. Only the controller can: subagents have no `eval`
-// access, so on the hand-dispatch path neither `selectDimensions` nor the
-// severity-budgeted verify pass runs at all — sizing falls back to the
-// reviewer's own judgement and nothing budgets the adversarial refuters.
-// Hand-dispatch also carries no delivery guarantee: a specialist's report
-// surfaces to the CONTROLLER, so the reviewer has to retrieve it from the
-// specialist's output file or be relayed it, and reports have gone missing
-// both ways. On the `eval` path `agent()` returns into the script, so
-// neither problem exists.
+// The fleet's review path is a `review-pr-<pr#>` runner whose `eval` cell runs
+// `review-eval.mjs`. On it `agent()` returns into the script, so
+// `selectDimensions` sizes the fan-out, the severity-budgeted verify pass
+// runs, and no specialist's report ever has to be relayed or retrieved by hand.
 //
 // All of that rots silently. A default demoted back to a preference still reads
 // as documented; relay prose left in the Phase 3 event loop reads as an
-// obligation on every run, including the path where no relay can ever occur.
+// obligation on every run, on a path where no relay can ever occur.
 // Neither shows up as an error.
 // THE CEILING EVERY PIN IN THIS FILE SHARES. These prove a phrase is PRESENT.
 // None can prove it is not NEGATED — a sentence inserted inside the slice
@@ -40,9 +34,8 @@ const REVIEW_AND_FIX = Pin.file(join(REPO, "commands", "review-and-fix.md"));
 // Slice by named anchors, and fail loudly when one moves. SLICE SIZE is what
 // does the work: a regex over a whole section is satisfied by incidental prose
 // somewhere else in it, so each claim gets the smallest slice that can contain
-// it. An unbounded slice is worst of all — it runs to EOF, where the red-flag
-// list restates `relay` and `reconcile`, enough to keep the fallback assertions
-// below green with the fallback section deleted outright.
+// it. An unbounded slice is worst of all — it runs to EOF, where incidental
+// prose from anywhere in the file satisfies the match.
 // Keys at an object literal's OWN depth, whatever the line layout. A per-line
 // regex (`/^ {2}(\w+)[,:]/gm`) read one field per line and so could not see a
 // field added on a line it SHARES with an existing one — measured in #667: the
@@ -123,11 +116,11 @@ test("objectKeys reads fields by depth, not by line, and ignores brackets/commas
   assert.deepEqual(objectKeys('label: "a, {b}", next: 1,'), ["label", "next"]);
 });
 
-const FALLBACK_ANCHOR = "#### Fallback: hand-dispatched reviewer";
+const REVIEWERS_END = "### Merge bot";
 const PROMPT_ANCHOR = "> You are ALREADY in worktree";
 const PROMPT_END = "\n**Put the standing CI facts";
 
-const reviewersSection = () => RUN_TEAM.between("### Reviewers", FALLBACK_ANCHOR, "run-team Reviewers").text;
+const reviewersSection = () => RUN_TEAM.between("### Reviewers", REVIEWERS_END, "run-team Reviewers").text;
 // Sliced out of the Reviewers section, never out of the whole file: `section()`
 // takes the FIRST hit, and the implementer dispatch in Phase 2 opens with the
 // same sentence. Anchored file-wide this silently returns the implementer's
@@ -170,7 +163,7 @@ const TRANSCRIPT_NONEXISTENCE_CLAIM = new RegExp(
   "i",
 );
 
-test("the Reviewers section names the task-member dispatch as the default, ahead of the fallback", () => {
+test("the Reviewers section names the task-member dispatch as the default", () => {
   const dflt = reviewersSection();
   // Loose on the example's punctuation — reordering the args or wrapping
   // after the paren changes no instruction — tight on the dispatch being present.
@@ -180,8 +173,8 @@ test("the Reviewers section names the task-member dispatch as the default, ahead
     "run-team no longer names the review-pr task-member dispatch on the default path",
   );
   // Pin the SENTENCE, not the word `default`. A bare /default/i over this slice
-  // stays green through "that is one option; the fallback below is the default
-  // path" — the exact demotion this test exists to catch.
+  // stays green through "that is one option, not the default path" — the
+  // exact demotion this test exists to catch.
   assert.match(
     dflt,
     /That is the default path/,
@@ -267,7 +260,7 @@ test("the controller keeps the rules the workflow's return shape needs", () => {
   );
 });
 
-test("relay and reconciliation live under the fallback, not in the Phase 3 event loop", () => {
+test("the Phase 3 event loop carries no relay obligation", () => {
   const loop = RUN_TEAM.between("## Phase 3", "### Reviewers", "run-team Phase 3").text;
   // This slice's only other assertion is a doesNotMatch, which a slice that has
   // degenerated to its own heading satisfies trivially. Prove it reached the
@@ -281,26 +274,7 @@ test("relay and reconciliation live under the fallback, not in the Phase 3 event
   assert.doesNotMatch(
     loop,
     /relay/i,
-    "the Phase 3 event loop still carries a relay obligation — on the default path `agent()` returns into the script and no relay ever occurs",
-  );
-
-  const fallback = RUN_TEAM.section("#### Fallback: hand-dispatched reviewer member", "run-team fallback").text;
-  // The obligation, not the word: `/relay/i` alone has eight hits in this slice,
-  // and stays green with the relay bullet deleted entirely.
-  assert.match(
-    fallback,
-    /relay it to the reviewer that owns the PR/,
-    "the fallback lost the relay duty",
-  );
-  assert.match(
-    fallback,
-    /reconcile/i,
-    "the fallback lost the verdict-vs-receipts reconciliation rule",
-  );
-  assert.match(
-    fallback,
-    /or has failed/,
-    "the fallback is gated on the workflow's absence alone — a workflow that is present and throwing then has no sanctioned path",
+    "the Phase 3 event loop still carries a relay obligation — the review's `agent()` returns into the script, so no relay ever occurs",
   );
 });
 
@@ -736,22 +710,18 @@ test("the per-PR member is the fix-applier, in the Report example and through th
   // and a row deleted outright both leave one surviving row, so a bare
   // `assert.match` walks straight through either.
   //
-  // A FLOOR, and neither a ban on the fallback name nor an equality. `## Report`
-  // is a top-level section, not the default path's own, and the fallback member
-  // is sanctioned at `#### Fallback: hand-dispatched reviewer` — so a row (or a
-  // sentence) naming `review-pr-<M>` is a legitimate document state, and
-  // measured, banning the name reds on both. `=== 2` reds on a fourth
-  // DEFAULT-path row, which the table's three outcome shapes plainly invite.
+  // A FLOOR, not an equality: `=== 2` reds on a third row naming the
+  // fix-applier, which the table's three outcome shapes plainly invite.
   assert.ok(
     [...report.matchAll(/fix-pr-<M>/g)].length >= 2,
-    "the Report table no longer shows BOTH default-path rows naming the fix-applier",
+    "the Report table no longer shows BOTH rows naming the fix-applier",
   );
 
   // The ledger rows are the ones a machine actually reads, so pin them by
   // RUNNING the parser over the doc's own example rather than re-asserting its
   // grammar here. A PR row's card shows its latest live member (#1820). Red in
-  // both directions: revert the example to a fallback runner and the extracted
-  // name is the fallback's; stop reading `fix-pr-<M>` as a member and nothing
+  // both directions: revert the example to a reviewer runner and the extracted
+  // name is the runner's; stop reading `fix-pr-<M>` as a member and nothing
   // is extracted at all.
   const ledger = RUN_TEAM.between("One line per ticket, rewritten in place", "\nPlus two append-only lists", "run-team ledger example").text;
   // The doc's example rows carry placeholders (`#<t1>`, `PR#<p1>`) rather than
@@ -766,34 +736,4 @@ test("the per-PR member is the fix-applier, in the Report example and through th
     [],
     "a ledger example names a per-PR member `compute-board.mjs` does not read as the default path's fix-applier",
   );
-});
-
-test("the two relay red flags stay qualified to the fallback path", () => {
-  // Same defect the Phase 3 relay assertion above exists to prevent, one
-  // section further down: on the default path `agent()` returns into the
-  // script, so no relay ever occurs and no specialist can be pinged.
-  // Unqualified, both read as obligations on every run — and on the default
-  // one they can never be discharged.
-  //
-  // Sliced per BULLET, not over the Red flags list: over the list either
-  // qualifier satisfies a match for both, so one could be stripped outright
-  // with the pin still green. Measured — strip only the ping bullet's
-  // qualifier and a list-wide match still fires on the relay bullet's.
-  // Each bullet ends where the next one begins.
-  //
-  // Unwrap the slice, as :207 already does: `(fallback path)` carries a literal
-  // space, so a pinned phrase that wraps splits and an exact-adjacency regex
-  // reports a qualifier that is right there as missing. Measured — reflowing
-  // the Red flags list at width 55 or 60, words byte-identical, reds this pin.
-  // Flatten the RESULT and keep the slicing raw; the anchors need real text.
-  const flat = (s) => s.replace(/\s+/g, " ");
-  const ping = flat(RUN_TEAM.between('- "Tell the reviewer to ping its specialists"', '- "I relayed it', "run-team ping red flag").text);
-  const relayed = flat(RUN_TEAM.between('- "I relayed it', '- "It reported the SHA', "run-team relay red flag").text);
-  for (const [label, bullet] of [["the ping-your-specialists", ping], ["the I-relayed-it", relayed]]) {
-    assert.match(
-      bullet,
-      /\(fallback path\)/,
-      `${label} red flag is no longer scoped to the fallback — it reads as universal, and on the default path it is an obligation that can never be discharged`,
-    );
-  }
 });

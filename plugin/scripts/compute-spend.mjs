@@ -158,10 +158,10 @@ export function classifyRole(signals) {
 // alone resolves nothing.
 function roleFromNamePatterns(hay) {
   if (/^impl-|implement ticket/.test(hay)) return "implementer";
-  // Both per-PR member names book as review spend: `fix-pr-<n>` is the default
-  // path's applier, `review-pr-<n>` the hand-dispatch fallback's reviewer. Miss
-  // one and its cache writes fall through to "other", moving the review-side
-  // headline — the one number anyone acts on — by several points.
+  // Both per-PR member names book as review spend: `fix-pr-<n>` is the
+  // fix-applier, `review-pr-<n>` the reviewer runner. Miss one and its cache
+  // writes fall through to "other", moving the review-side headline — the one
+  // number anyone acts on — by several points.
   //
   // `resolve-pr-<n>` joins the same bucket: it is a controller
   // dispatch against an ALREADY-OPEN PR, not new ticket work — measured

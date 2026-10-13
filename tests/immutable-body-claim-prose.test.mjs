@@ -12,7 +12,7 @@
 // deleted with the suite green.
 //
 // SHAPE. The SKILL.md slice runs from the rationale paragraph to the
-// `#### Fallback` heading that follows the settling-command paragraphs —
+// `### Merge bot` heading that follows the settling-command paragraphs —
 // bounded at both ends, so a presence check inside it says something about
 // these paragraphs and not about the rest of the Reviewers section. The agent
 // body's block is sliced from its own lead to the commit-incrementally block
@@ -59,7 +59,7 @@ const flatten = (s) =>
     .trim();
 
 const FROM = "Every implementer body carries the";
-const TO = "#### Fallback: hand-dispatched reviewer member";
+const TO = "### Merge bot";
 const rule = () => flatten(RUN_TEAM.between(FROM, TO, "the claim-discipline rationale and settling-command rules").text);
 
 // The claim-discipline block of the implementer agent body — the hand-over
@@ -132,7 +132,7 @@ test("a settling command over literal text takes -F, and its zero counts only af
   // boundary between "ree" and "BSD"), and this repo's own dev grep reports
   // itself as "2.6.0-FreeBSD" (measured), so that miss is not hypothetical.
   assert.doesNotMatch(
-    RUN_TEAM.paragraph("**A settling command over literal text uses `grep -F`", "the literal-text grep rule", "#### Fallback: hand-dispatched reviewer member").text,
+    RUN_TEAM.paragraph("**A settling command over literal text uses `grep -F`", "the literal-text grep rule", "### Merge bot").text,
     /ugrep|ripgrep|claude code|bsd|gnu/i,
     "the literal-text grep rule now names a grep implementation or harness — #1087 ruled it harness-independent",
   );
