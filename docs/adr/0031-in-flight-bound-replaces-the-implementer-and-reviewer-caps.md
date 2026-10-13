@@ -9,7 +9,8 @@ Code line numbers below are as read at ruling time (origin/main `bd4afac8`,
 are `docs/research/in-flight-baseline.md`,
 `docs/research/in-flight-lead-share.md` and
 `docs/research/in-flight-cycle-time-stages.md`, each reproduced by its
-`-derive.mjs` script beside it.
+`-derive.mjs` script beside it. PR #3160 carries the first two notes with
+their scripts and PR #3161 the third; none is on `main` until those merge.
 
 - Today the fleet is throttled by two caps and one hold. `fleet-tick.mjs`
   takes `--implementer-cap` (default 2), `--reviewer-cap` (default 6) and
@@ -70,8 +71,10 @@ are `docs/research/in-flight-baseline.md`,
   **B=5 68.3 %, B=6 54.5 %, B=8 28.8 %** (98 of 115 on 10-03/10-04),
   **B=10 17.3 %**; held vs not held cycle median at B=8 is 1.56 vs 1.30 h. The
   mean in flight with the implementer phase counted is **5.6** (5.56).
-- **Ceilings.** Little's law at B=5: 5 ÷ (1.27 h + 0.32 h) ≈ **3.1** merges/h
-  against 2.7 measured per active hour. The merge gate saturates near 10–11
+- **Ceilings.** Little's law at B=5, on the means (cycle 2.65 h plus the
+  0.32 h implementer phase): 5 ÷ 2.97 h ≈ **1.7** merges per open-time hour
+  against 1.89 measured, which needs ≈ 5.6 in flight, the measured mean. The
+  merge gate saturates near 10–11
   in flight: μ 7.12 merges/h × (T_impl 19.3 min + W₀ 1.16 h) ≈ **10.5**, so a
   bound past that buys nothing. The review side is about **84 %** of
   cache-write tokens, fanning out to 1 snapshot + up to 6 specialists + 2
@@ -108,8 +111,11 @@ are `docs/research/in-flight-baseline.md`,
      worst-case review concurrency below the old reviewer cap (6) and the
      start-of-run burst at 5 implementers. It sits near the measured mean in
      flight (5.6) and the operator's hand-held 2026-10-08 run. By Little's
-     law B=5 allows ≈ 3.1 merges/h against 2.7 measured, and the merge gate
-     saturates near 10–11, so raising B past that buys nothing. 8 was rejected:
+     law, on the means (cycle 2.65 h plus the 0.32 h implementer phase), B=5
+     allows ≈ 1.7 merges per open-time hour against 1.89 measured, so the
+     default does not rest on throughput headroom and the guard's throughput
+     test (3b) may trip on it; the merge gate saturates near 10–11, so raising
+     B past that buys nothing. 8 was rejected:
      peak review concurrency above today's, for a throughput gain the backlog
      does not show it needs.
    - **Fixed for the run**, overridable by the argument, never adapted live in
@@ -132,12 +138,14 @@ are `docs/research/in-flight-baseline.md`,
    - The tick's `parseArgs({ options: OPTIONS })` is strict (`:1090`), so an
      unknown `--implementer-cap` throws: the old flags are removed, not
      tolerated. Detail: spec § 1.
-3. **What is In flight (#2874).** n = the number of tickets with an open PR
-   that closes an issue, plus claimed tickets with a live implementer (or one
-   owed a replacement) that no open PR closes yet, deduped by ticket. A PR
-   counts once and a ticket counts once, which covers the moment an
-   implementer has opened its PR but not yet reported, and a PR that closes
-   two issues. The edge cases:
+3. **What is In flight (#2874).** n = the number of open PRs that close an
+   issue, plus claimed tickets with a live implementer (or one owed a
+   replacement) that no open PR closes yet. The unit is the PR for a PR and
+   the ticket for a ticket no PR has absorbed: a PR counts once however many
+   issues it closes, and a ticket counts once, which covers the moment an
+   implementer has opened its PR but not yet reported. Two open PRs closing
+   one issue count two (spec § 2; #2874 did not rule that case). The edge
+   cases:
 
    | Case | Counts? | Why |
    |---|---|---|
@@ -304,10 +312,17 @@ signal 2, signal 4's median (4a) and p90 (4b).
   direction" would trip on almost every reading.
 - **False-trip arithmetic.** On today's data the band is **×2.23** for cycle
   (trips above) and **×0.68** for throughput (trips below). A one-sided p90
-  gives about **10 % false trips per test**, and about **35–47 % for any of
-  the six** (47 % = 1 − 0.9⁶ were they independent; less, since the tests are
-  correlated). A trip means revisiting the owning decision with the
-  measurement in hand, never a rollback, so a false trip costs one look.
+  of *disjoint* windows would give about **10 % false trips per test**. The
+  band here comes from windows that overlap (N − K = 15 of 20 PRs shared),
+  and their ratios spread less than a pre and a post window that share no PR,
+  so the rate is higher: an iid lognormal null model fitted to the baseline's
+  median 1.38 h and p90 5.23 h gives **24.9 %** false trips for the cycle
+  test with the overlapping band against 10.2 % with a disjoint-pair band
+  (4000 trials; a model figure, not a measurement — the model's band is
+  ×1.29 against the real ×2.23). With all six at that rate and independent,
+  any of the six trips about **82 %** of the time (1 − 0.75⁶); less, since
+  the tests are correlated. A trip means revisiting the owning decision with
+  the measurement in hand, never a rollback, so a false trip costs one look.
 - **Limit.** At N = 20 the guard catches only harm of roughly 1.5–2× or more.
 
 **Script.** `docs/research/in-flight-guard-derive.mjs`, extending
@@ -370,12 +385,15 @@ Re-run recipe: spec § 8.
   is not atomic.
 - **`docs/metrics` is unaffected:** no column names a cap or the bound, and no
   held-time record exists.
-- **Cockpit unchanged in v1.** `compute-board.mjs`'s `claimed` is the ledger
-  half of In flight and stays as is; standing decision 8 is met by the tick's
-  `HOLD (in-flight n/B)` row and the Stall report's owner line. `CONTEXT.md`'s
-  **Stall report** entry drops "and in flight". A board/stall `in-flight n/B`
-  (the tick writing `inFlight`/`bound` into `heartbeat.json`) is a carry-over,
-  after the cutover.
+- **Cockpit: one flag line in v1.** `compute-board.mjs`'s `claimed` is the
+  ledger half of In flight and stays as is; `deriveFlags` gains `blocked` for
+  a settled `impl-<N>=blocked` row (spec § 7); standing decision 8 is met by
+  the tick's `HOLD (in-flight n/B)` row and the Stall report's owner line. The
+  Stall report still prints "N ticket(s) claimed and in flight" (that is the
+  ledger half, not the In-flight count) and `CONTEXT.md`'s **Stall report**
+  entry keeps matching it; rewording both, with a board/stall `in-flight n/B`
+  (the tick writing `inFlight`/`bound` into `heartbeat.json`), is a
+  carry-over, after the cutover.
 - `CONTEXT.md` § Loop gains **In flight** and **In-flight bound**.
 - ADR 0012's and ADR 0013's `**Status:**` lines carry the amendment; their
   bodies are unchanged. ADR 0012 decision 2's "there is no minimum queue
@@ -405,8 +423,9 @@ Re-run recipe: spec § 8.
   tickets; it queues rather than refuses, so a Pull meeting it would leave a
   claim with no running implementer; and it is session-wide (decision 7).
 - **Default 8** — peak review concurrency above today's, for a throughput gain
-  the backlog does not show it needs; the merge gate saturates near 10.5 and
-  Little's ceiling at B = 5 (3.1/h) already covers the measured 2.7/h (#2873).
+  the backlog does not show it needs; the merge gate saturates near 10.5, and
+  Little's law on the means puts B = 5 at ≈ 1.7 merges per open-time hour
+  against 1.89 measured, a gap the guard's throughput test (3b) reads (#2873).
 - **An adaptive bound** — v1 never adapts live; the bound limits how far ahead
   the fleet implements, not how fast, and a derivation re-run under the ≥ 20
   PR rule is a check, not a formula in code (#2873).

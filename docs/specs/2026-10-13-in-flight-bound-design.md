@@ -5,7 +5,7 @@ Status: decided on map #2870 (grilling 2026-10-05 and 2026-10-09; closing grilli
 Map: feigi/fleet-plugin#2870. Decision tickets: #2873, #2874, #2875; research: #2871, #2872; closing: #2876.
 ADRs: `docs/adr/0031-in-flight-bound-replaces-the-implementer-and-reviewer-caps.md`; amends `docs/adr/0012-slot-based-loop-no-waves.md` and `docs/adr/0013-automatic-supply-relabel-by-cause.md` (Status lines only, § 9).
 Supersedes in part: `docs/specs/2026-09-24-slot-based-fleet-loop-design.md` § 3 (the reviewer cap, `--max-reviews`) and § 6 §4 (the implementer row's `AT CAP` and the review-backlog gate); the dated spec is left as written.
-Relates to: `docs/research/in-flight-baseline.md`, `docs/research/in-flight-lead-share.md`, `docs/research/in-flight-cycle-time-stages.md` (each reproduced by the `-derive.mjs` script beside it), `docs/research/baseline-efficiency.md`, `docs/research/omp-review-offturn.md` § (d).
+Relates to: `docs/research/in-flight-baseline.md`, `docs/research/in-flight-lead-share.md`, `docs/research/in-flight-cycle-time-stages.md` (each reproduced by the `-derive.mjs` script beside it; PR #3160 carries the first two notes and PR #3161 the third, so none is on `main` until those merge), `docs/research/baseline-efficiency.md`, `docs/research/omp-review-offturn.md` § (d).
 Line numbers below are against `origin/main` `bd4afac8` (2026-10-13) and drift; re-grep the anchor phrase before editing. Tests live in `tests/`, not beside the scripts.
 
 `ADR 0031 § N` below names that ADR's `## Decision` point N; `ADR 0031 § Guard` is its `## Guard — chosen before any further data`.
@@ -66,8 +66,10 @@ At B=8 98 of the 115 held Pulls fall on 10-03/10-04; held vs not-held cycle
 median at B=8 is 1.56 vs 1.30 h. With 10-03/10-04 Pulls removed (n = 246) B=5
 holds 52.4 % (129). The baseline's 22.5 % at B=8 (90 of 400) undercounted
 because it measured open-PR depth only. Mean In flight with the implementer
-phase counted is **5.6** (5.56). Ceilings: Little's law at B=5 gives
-5 ÷ (1.27 h + 0.32 h) ≈ **3.1** merges/h against 2.7 measured per active hour;
+phase counted is **5.6** (5.56). Ceilings: Little's law at B=5, on the means
+(cycle 2.65 h plus the 0.32 h implementer phase), gives 5 ÷ 2.97 h ≈ **1.7**
+merges per open-time hour against 1.89 measured, which needs ≈ 5.6 In flight,
+the measured mean;
 the merge gate saturates near 10–11 In flight (μ 7.12 merges/h × (T_impl 19.3
 min + W₀ 1.16 h) ≈ **10.5**), so a bound past that buys nothing. The review
 side is about **84 %** of cache-write tokens, fanning out to 1 snapshot + up to
@@ -174,8 +176,11 @@ snapshot + up to 6 specialists + 2 refuters per finding. 5 keeps worst-case
 review concurrency below the old reviewer cap (6) and the start-of-run burst
 at 5 implementers; it sits near the measured mean In flight (5.6) and the
 operator's hand-held 2026-10-08 run (open PRs ≤ 4 + implementers). By Little's
-law B=5 allows ≈ 3.1 merges/h against 2.7 measured; the merge gate saturates
-near 10.5, so raising B past that buys nothing. **8 was rejected**: peak review
+law, on the means (cycle 2.65 h plus the 0.32 h implementer phase), B=5 allows
+≈ 1.7 merges per open-time hour against 1.89 measured, so the default does not
+rest on throughput headroom and the guard's throughput test (3b) may trip on
+it; the merge gate saturates near 10.5, so raising B past that buys nothing.
+**8 was rejected**: peak review
 concurrency above today's, for a throughput gain the backlog does not show it
 needs. At B=5 68.3 % of past Pulls would have been held: the bound will bind
 often, and that is the operating level, not a fault.
@@ -521,19 +526,21 @@ because the claim stays, and `failed` is not an `impl` outcome.
 
   and the settle-outcomes list (`:4290-4291`) gains `blocked` after
   `tier-mismatch`.
-- **The cockpit needs no change.** `compute-board.mjs` already flags a row
-  carrying the word `blocked` (`parseRow`, `:132`, severity 4) and keeps the
-  card in IMPLEMENTING (`deriveColumn`, `:267` returns null only for `released`
-  and `bailed`): a settled-`blocked` ticket stays on the board, flagged, and
-  stays in `claimed` — the claim is still outstanding, which is what the Stall
-  report counts.
+- **The cockpit gets one flag line.** `parseRow` (`:132`) flags only the
+  uppercase word `BLOCKED` (`\bBLOCKED\b`, case-sensitive), and `deriveFlags`
+  (`:294`) adds a settled outcome to the flags only for `killed` and
+  `tier-mismatch`: a settled lowercase `impl-<N>=blocked` renders IMPLEMENTING
+  with no flag. T1 adds `|| o === "blocked"` to that `:294` condition. The
+  card stays in IMPLEMENTING (`deriveColumn`, `:267` returns null only for
+  `released` and `bailed`) and stays in `claimed` — the claim is still
+  outstanding, which is what the Stall report counts.
 
 Tests (T1): `tests/ledger-grammar.test.mjs:16` gains `blocked`;
 `tests/ledger-dispatch.test.mjs` settles `impl-<N>=blocked` (the one-token and
 two-token spellings) and updates the refusal regex at `:378`;
 `tests/fleet-tick.test.mjs` ADD 4 and 25 (§ 10); `tests/compute-board.test.mjs`
 one case pinning that a settled-`blocked` ticket renders IMPLEMENTING with
-the `blocked` flag (existing behaviour, now load-bearing).
+the `blocked` flag (the `:294` change above).
 
 ## 8. Guard
 
@@ -613,11 +620,18 @@ pre window ends.
   direction" would trip on almost every reading.
 - **False-trip arithmetic.** On today's data (2026-10-09) the band is
   **×2.23** for cycle (trips above) and **×0.68** for throughput (trips
-  below). A one-sided p90 gives about **10 % false trips per test** and about
-  **35–47 % for any of the six** (47 % = 1 − 0.9⁶ were they independent; less,
-  since the tests are correlated). A trip means revisiting the owning decision
-  with the measurement in hand, never a rollback, so a false trip costs one
-  look.
+  below). A one-sided p90 of *disjoint* windows would give about **10 % false
+  trips per test**. The band here comes from windows that overlap (N − K = 15
+  of 20 PRs shared), and their ratios spread less than a pre and a post window
+  that share no PR, so the rate is higher: an iid lognormal null model fitted
+  to the baseline's median 1.38 h and p90 5.23 h gives **24.9 %** false trips
+  for the cycle test with the overlapping band against 10.2 % with a
+  disjoint-pair band (4000 trials; a model figure, not a measurement — the
+  model's band is ×1.29 against the real ×2.23). With all six at that rate and
+  independent, any of the six trips about **82 %** of the time (1 − 0.75⁶);
+  less, since the tests are correlated. A trip means revisiting the owning
+  decision with the measurement in hand, never a rollback, so a false trip
+  costs one look.
 - **Limit.** At N = 20 the guard catches only harm of roughly 1.5–2× or more.
 
 **Then — what each trip revisits first**, with the measurement in hand:
@@ -824,12 +838,15 @@ numbers are `bd4afac8`; each row's anchor phrase was re-grepped there.
 | `export function refreshWhy({ …, implCap })` (`:939`); `unclaimed ${k} < cap ${implCap}` (`:943`) | § 5 |
 | `const OPTIONS = {` (`:1065`); `"implementer-cap": …` (`:1069`), `"reviewer-cap"` (`:1070`), `"max-reviews"` (`:1073`) and their comments (`:1066-1068`, `:1071-1072`) | `"in-flight": { type: "string", default: "5" }` first, one comment (§ 1); the three entries deleted |
 | `options()` (`:1087`): `const reviewerCap = positive("reviewer-cap")` (`:1110`) and the returned `implCap`, `reviewerCap`, `maxReviews` (`:1112-1113`) | `bound: positive("in-flight")` |
+| the comment in `options()`'s `int` helper, ``// Number(): `Number("")` is 0, so `--max-reviews ""` — the shape an unset …`` (`:1099-1101`) | reworded to name `--in-flight` in place of `--max-reviews`; the example is the same unset-shell-variable shape |
 | `closedTickets(mismatched)` (`:1283`) and its call `closedTickets(run.tierMismatch)` (`:1406`) | probes the union of `run.tierMismatch` and `run.owedReplacement` (§ 2); the second `deriveRun` pass condition is unchanged |
 | `const trigger = refreshWhy({ … implCap: caps.implCap })` (`:1423-1424`) and `liftedPremise` guard (`:1425`) | `bound: caps.bound`, `held: run.inFlight >= caps.bound` (§ 5) |
 | `const rows = reconcile({ ...caps, ...run, … })` (`:1449`) | unchanged — `caps` is now `{ bound }` |
 | header comment `WHERE THE NUMBERS COME FROM` (`:19-71`) | the `ledger` and `gh` paragraphs name the In-flight count |
 
 `plugin/scripts/ledger-grammar.mjs:27` (T1): `blocked` appended (§ 7).
+`plugin/scripts/compute-board.mjs` (T1): `deriveFlags` (`:294`) — `o ===
+"killed" || o === "tier-mismatch"` gains `|| o === "blocked"` (§ 7).
 `plugin/scripts/ledger.mjs` (T1): none beyond the grammar — `settle` validates
 through it (`:1914` usage string names no outcomes).
 
@@ -949,7 +966,7 @@ box's own omp; the cases of § 6.
 | ``**`--max-reviews <n>`** bounds how many reviews are in flight at once, inside the reviewer cap. …`` (`:1993-1998`) | A paragraph opening ``**`--in-flight <B>`**``: the run's In-flight bound; leave it at its default unless `$ARGUMENTS` set it; omp's `task.maxConcurrency` is not the bound (it counts live members, not tickets, queues at its ceiling rather than refusing, and is session-wide); phase 0 reports it below 2·B+2 as a notice, never a hold, and the fleet never writes it. It ends before `**Why every wake.**` (`:2000`) |
 | `**The reviewer cap counts live review units.** A review in flight — …` (`:2385-2397`) | opens `**Review units are counted, never capped.**`; keeps the unit definition, the `review=` and no `reviewed=` derivation and the probe (a probe that cannot answer keeps the unit counted); drops `The defaults are 2 implementers and 6 reviewers, and neither is a hard cap`, the `--max-reviews` sentence and `The slots a review does not hold still serve fix-appliers.` |
 | `` floors the backlog at a depth nothing in the run can drain — the implementer gate then holds for the rest of the run against a queue of nothing `` (`:3873-3874`) | `… nothing in the run can drain` kept; the gate clause becomes `the reviewer row would then report a review owed for the rest of the run` |
-| `**Defaults: 2 implementers, 6 reviewers — no hard cap on either.** Reviewer slots in use ≈ I·(…)/T_impl ≈ 1.95·I … Re-derive it from the map's guard once 20 or more PRs have merged under it, never from one run's rows.` (`:3885-3890`) | One paragraph opening `**Default: In-flight bound 5, fixed for the run.**`, carrying § 1's *Why 5* (load not throughput; live review units ≤ open PRs ≤ B; ~84 % of cache-write tokens; 1 snapshot + up to 6 specialists + 2 refuters per finding; below the old reviewer count of 6; near the measured mean In flight of 5.6; ≈ 3.1 merges/h against 2.7 measured; the merge gate saturates near 10.5; 8 rejected) and the sentence "Re-derive it once 20 or more PRs have merged under it, never from one run's rows." The `1.95` note is gone |
+| `**Defaults: 2 implementers, 6 reviewers — no hard cap on either.** Reviewer slots in use ≈ I·(…)/T_impl ≈ 1.95·I … Re-derive it from the map's guard once 20 or more PRs have merged under it, never from one run's rows.` (`:3885-3890`) | One paragraph opening `**Default: In-flight bound 5, fixed for the run.**`, carrying § 1's *Why 5* (load not throughput; live review units ≤ open PRs ≤ B; ~84 % of cache-write tokens; 1 snapshot + up to 6 specialists + 2 refuters per finding; below the old reviewer count of 6; near the measured mean In flight of 5.6; on the means ≈ 1.7 merges per open-time hour against 1.89 measured, so the guard's throughput test may trip on it; the merge gate saturates near 10.5; 8 rejected) and the sentence "Re-derive it once 20 or more PRs have merged under it, never from one run's rows." The `1.95` note is gone |
 | `**The review-backlog gate is narrowed, and the merge-queue depth never gates.** …` (`:3892-3900`) | `**The review backlog never gates, and the merge-queue depth is still no signal.**` — the only gate on a Pull is the In-flight count; a deep `ready-to-merge` queue adds no rebases per PR, and those PRs count as In flight because they sit between Claim and merge, not because the queue is deep |
 | the table row `below the cap, missing or empty` (`:3923`) | `below the In-flight bound, missing or empty` |
 | ``Four holds outrank every row: … `HOLD (review side saturated)` when a PR is still owed its review and no reviewer slot is left for it — refreshing to enable a Pull you are holding buys nothing.`` (`:3930-3937`) | The same four-hold sentence with ``HOLD (in-flight <n>/<B>)`` — n tickets between Claim and merge, n ≥ B — in place of the saturated-side hold; the closing clause (`refreshing to enable a Pull you are holding buys nothing`) stays |
@@ -992,14 +1009,17 @@ Prose pins (T3):
 
 `plugin/scripts/compute-board.mjs`: `claimed` (`:393`, ledger rows past POOL
 short of MERGED) is the ledger half of In flight and stays as it is — a
-settled-`blocked` or Exclusion-free claimed ticket is still claimed.
+settled-`blocked` or Exclusion-free claimed ticket is still claimed; only the
+one `deriveFlags` line under Code changes.
 `plugin/scripts/fleet-heartbeat.mjs`, `fleet-state.mjs` (no heartbeat rule, no
 new key). `docs/metrics/*.tsv` (no column names a cap or the bound, and no
 held-time record exists). `plugin/scripts/inflight.sh` and `shortlist.mjs`'s
 "in-flight check" (the claim-time probe for an open PR or worktree on a
 ticket — a different thing from the In-flight count, kept as is).
-`CONTEXT.md`'s **Stall report** entry drops "and in flight" (the closing
-ticket #2876, not T1–T4); the **Pull** entry's "free implementer slot" stays.
+`CONTEXT.md`'s **Stall report** entry keeps "claimed and in flight": the
+report line (`fleet-state.mjs:592`) and SKILL.md's Stall report paragraph
+still print it, and it is the ledger half, not the In-flight count (see "Not
+yet specified"); the **Pull** entry's "free implementer slot" stays.
 ADR 0030, ADR 0007 and the dated specs stay as written.
 
 ## 11. Cutover
@@ -1035,26 +1055,31 @@ a code ticket's merge and T3's, `plugin/` is internally inconsistent:
 
 ## 12. Tickets (input to /to-tickets)
 
-Tickets are written to `.scratch/` and posted to GitHub once the docs PR
-merges, so every citation here resolves on `main`. Blockers first; every
+Tickets are written to `.scratch/` and posted to GitHub once the docs PR and
+the two research PRs it cites (#3160 and #3161, which carry the
+`docs/research/in-flight-*` notes and their `-derive.mjs` scripts) have
+merged, so every citation here resolves on `main`. Blockers first; every
 ticket is admissible by `candidates.mjs` (body carries no `User Stories`
 heading; blockers named under `## Blocked by` as a list).
 
 | # | Title | Blocked by | Delivers | Spec § |
 |---|---|---|---|---|
-| T1 | `fleet-tick.mjs`: the In-flight bound — `--in-flight <B>` (default 5) replaces `--implementer-cap`, `--reviewer-cap`, `--max-reviews`; the In-flight count; `HOLD (in-flight <n>/<B>)`; the uncapped reviewer row; refresh at unclaimed < B and none while held; the `blocked` settle outcome | — | `node plugin/scripts/fleet-tick.mjs` reads `--in-flight` through `positive()` (0, `x`, empty refused, exit 2); derives `n = i + p` from the ledger and the open issue-closing PR list by § 2's rules; prints `implementers n/B` with `HOLD (in-flight <n>/<B>)` at n ≥ B (`acts: false`, detail `implementers=<i> prs=<p> unclaimed=… supply=…`) ranked below the main-checkout overlay, `HOLD (draining)`, the tier holds; `PULL` takes `B − n` heads; `reviewers <units>/<B>` dispatches every due fix and review; `HOLD (review side saturated)`, `HOLD (max-reviews …)` and the reviewer `AT CAP` appear nowhere in `plugin/scripts/fleet-tick.mjs`; `--implementer-cap`, `--reviewer-cap`, `--max-reviews` exit 2 as unknown options; `refreshWhy` reads `unclaimed <k> < in-flight bound <B>` and `main()` runs no refresh at n ≥ B; `ledger-grammar.mjs` and `ledger.mjs settle` accept `impl-<N>=blocked` and the tick counts nothing for it; `node --test tests/fleet-tick.test.mjs tests/ledger-grammar.test.mjs tests/ledger-dispatch.test.mjs tests/compute-board.test.mjs` green with § 10's DELETE, REWRITE and ADD lists applied | 1, 2, 3, 4, 5, 7, 10 |
+| T1 | `fleet-tick.mjs`: the In-flight bound — `--in-flight <B>` (default 5) replaces `--implementer-cap`, `--reviewer-cap`, `--max-reviews`; the In-flight count; `HOLD (in-flight <n>/<B>)`; the uncapped reviewer row; refresh at unclaimed < B and none while held; the `blocked` settle outcome | — | `node plugin/scripts/fleet-tick.mjs` reads `--in-flight` through `positive()` (0, `x`, empty refused, exit 2); derives `n = i + p` from the ledger and the open issue-closing PR list by § 2's rules; prints `implementers n/B` with `HOLD (in-flight <n>/<B>)` at n ≥ B (`acts: false`, detail `implementers=<i> prs=<p> unclaimed=… supply=…`) ranked below the main-checkout overlay, `HOLD (draining)`, the tier holds; `PULL` takes `B − n` heads; `reviewers <units>/<B>` dispatches every due fix and review; `HOLD (review side saturated)`, `HOLD (max-reviews …)` and the reviewer `AT CAP` appear nowhere in `plugin/scripts/fleet-tick.mjs`; `--implementer-cap`, `--reviewer-cap`, `--max-reviews` exit 2 as unknown options; `refreshWhy` reads `unclaimed <k> < in-flight bound <B>` and `main()` runs no refresh at n ≥ B; `ledger-grammar.mjs` and `ledger.mjs settle` accept `impl-<N>=blocked` and the tick counts nothing for it; `compute-board.mjs` renders a settled `impl-<N>=blocked` row in IMPLEMENTING with the `blocked` flag; `node --test tests/fleet-tick.test.mjs tests/ledger-grammar.test.mjs tests/ledger-dispatch.test.mjs tests/compute-board.test.mjs` green with § 10's DELETE, REWRITE and ADD lists applied | 1, 2, 3, 4, 5, 7, 10 |
 | T2 | `tier-roles.mjs --check --in-flight <B>`: the semaphore notice | — | `--check` without `--in-flight` exits 2 with a usage error; with a `--max-concurrency` file `8` and `--in-flight 5` stdout carries `tier-roles: notice: task.maxConcurrency is 8, below 2·5+2 = 12 for In-flight bound 5 — omp queues members past it, so a Pulled implementer may sit unstarted; raise it in omp config (the fleet never writes it)` and the exit is 0; `0` and `12` print no notice line; an unreadable value prints `tier-roles: notice: task.maxConcurrency unreadable — <why>; In-flight bound 5 is unchecked against it`; with violations the notice goes to stderr and the exit stays 1; `node --test tests/tier-roles.test.mjs` green | 6, 10 |
 | T3 | Prose cutover: `/run-team [in-flight]` — SKILL.md, README, `docs/components`, and the pins | T1, T2 | `grep -n -E 'implementer-cap\|reviewer-cap\|max-reviews\|implementers\] \[reviewers\]\|default 2 and 6\|2 implementers\|6 reviewers\|1\.95' plugin README.md docs/components` prints nothing; SKILL.md's `argument-hint`, `$ARGUMENTS` paragraph, tick invocation, caps paragraph, `--max-reviews` paragraph, § Queue depth, Defaults paragraph, description, `tier-roles.mjs --check --in-flight <B>` step, failure row and settle-outcomes list read as § 10's Prose table says; `node --test tests/fleet-tick-prose.test.mjs tests/review-path-default.test.mjs` green with the moved pins | 1, 5, 6, 7, 10 |
 | T4 | The guard script `docs/research/in-flight-guard-derive.mjs` | — | `node docs/research/in-flight-guard-derive.mjs --merge <ISO> --cutover <ISO>` prints both 20-PR windows, the six values per window, post ÷ pre, the per-test band (p90 / p10 of consecutive same-size history-window ratios, stride 5, from 2026-09-25T18:58:33Z to the merge) and the six verdicts, with exit 0 / 3 / 4 / 2 as § 8.2 says; `node --test tests/in-flight-guard-derive.test.mjs` green on synthetic windows; not a cutover blocker | 8 |
 
 ## Not yet specified (for the map)
 
-- **Cockpit and Stall report: `in-flight n/B`.** v1 ships nothing new on the
+- **Cockpit and Stall report: `in-flight n/B`.** v1 ships no new count on the
   board: `compute-board.mjs`'s `claimed` stays, and standing decision 8 is met by
   the tick's `HOLD (in-flight n/B)` row and the Stall report's owner line. A
   board/stall `in-flight n/B` — the tick writing `inFlight` and `bound` into
   `heartbeat.json` and the board reading them — is a carry-over, after the
-  cutover.
+  cutover. So is rewording the Stall report's "N ticket(s) claimed and in
+  flight" (`fleet-state.mjs:592`, SKILL.md's Stall report paragraph and the
+  tests that assert it): that N is `claimed`, the ledger half, and
+  `CONTEXT.md`'s **Stall report** entry changes with it.
 - **The guard's reading after the cutover**, and acting on a trip, are past the
   map's destination: the guard in ADR 0031 governs, and the first reading
   waits for ≥ 20 post-cutover merged PRs over ≥ 2 invocations (≈ 7.4 active
