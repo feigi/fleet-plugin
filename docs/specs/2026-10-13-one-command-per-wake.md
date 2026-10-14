@@ -70,7 +70,7 @@ second run finds its writes already made and re-ticks.
 | `ci` | `<pr>` | `ci-state.mjs --pr` (never `--quiet`), `ledger.mjs token <row> ci=<run>:<attempt>:<conclusion>` |
 | `merge-bot-report` | `<member>` | `token` per `held-behind:#<lower>`, `settle --from-report`; the reap and reclaim run under D3 |
 | `label` | `<pr>` | no write; the tick |
-| `conflict` | `<pr>` | the `CONFLICT` row's hold write (`token … conflict-hold:#M (conflict: mergeable=CONFLICTING)`) |
+| `conflict` | `<pr>` | the `CONFLICT` row's hold write (`token <key> conflict-hold:#M`; the tick's `row` form carries the `(conflict: mergeable=CONFLICTING)` note, `token` cannot: it refuses any `conflict-hold` word that is not `conflict-hold:#<number>`) |
 | `heartbeat` | — | the tick with `--fold-unchanged` |
 | `drain` | `--reason` | `closeout.mjs begin` (spec 3) |
 
