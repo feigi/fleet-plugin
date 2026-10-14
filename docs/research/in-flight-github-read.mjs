@@ -20,10 +20,13 @@ export const PER_PAGE = 100;
 /** The cache both scripts default to, so a page read by one serves the other. */
 export const DEFAULT_CACHE = path.join(os.tmpdir(), "in-flight-baseline-cache");
 
+/** How the read was transported, as both scripts print it: `transport gh`, `transport curl + GITHUB_TOKEN`. */
+export const describeTransport = (t) => `transport ${t.kind}${t.kind === "curl" ? (t.token ? " + GITHUB_TOKEN" : ", unauthenticated") : ""}`;
+
 /**
  * @param {{repo: string, cache: string, refresh: boolean, transport: "auto"|"gh"|"curl",
  *          noToken: boolean, die: (msg: string, code?: number) => never, log: (msg: string) => void}} o
- * @returns {{apiGet: (apiPath: string) => any, listPage: (basePath: string, page: number) => any[],
+ * @returns {{listPage: (basePath: string, page: number) => any[],
  *            fetchedAt: Map<string, string>, repoCacheDir: string, transport: {kind: string, token?: string|null}}}
  */
 export function openGithubRead({ repo, cache, refresh, transport: wanted, noToken, die, log }) {
@@ -114,5 +117,5 @@ export function openGithubRead({ repo, cache, refresh, transport: wanted, noToke
     return data;
   }
 
-  return { apiGet, listPage, fetchedAt, repoCacheDir, transport };
+  return { listPage, fetchedAt, repoCacheDir, transport };
 }

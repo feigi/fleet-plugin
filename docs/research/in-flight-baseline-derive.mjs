@@ -49,7 +49,7 @@
 // docs/research/in-flight-baseline.md can be regenerated from the output.
 
 import fs from "node:fs";
-import { DEFAULT_CACHE, PER_PAGE, openGithubRead } from "./in-flight-github-read.mjs";
+import { DEFAULT_CACHE, PER_PAGE, describeTransport, openGithubRead } from "./in-flight-github-read.mjs";
 
 // ---------------------------------------------------------------- flags ----
 const argv = process.argv.slice(2);
@@ -410,7 +410,7 @@ const absent = nums[nums.length - 1] - nums[0] + 1 - nums.length; // issues shar
 
 P(`# In-flight baseline — derived ${new Date().toISOString().slice(0, 16)}Z`);
 P();
-P(`Repo \`${flags.repo}\`; transport ${transport.kind}${transport.kind === "curl" ? (transport.token ? " + GITHUB_TOKEN" : ", unauthenticated") : ""}; cache \`${repoCacheDir}\`.`);
+P(`Repo \`${flags.repo}\`; ${describeTransport(transport)}; cache \`${repoCacheDir}\`.`);
 P();
 P(`## Population`);
 P();

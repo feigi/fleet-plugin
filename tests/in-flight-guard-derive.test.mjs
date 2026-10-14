@@ -146,8 +146,8 @@ test("window values: signal 1 divides by N, not by booked rows; signal 4 is the 
   assert.equal(some.diag.no_review_prs.length, 6);
 });
 
-test("a ratio series skips a pair with no reading and keeps a real zero ratio out only when the early side is zero", () => {
-  assert.deepEqual(G.ratioSeries([[2, 4], [NaN, 3], [0, 1], [4, 2], [3, NaN]]), [2, 0.5]);
+test("a ratio series skips a pair with no reading or a zero early side, and keeps a real zero ratio", () => {
+  assert.deepEqual(G.ratioSeries([[2, 4], [NaN, 3], [0, 1], [4, 2], [3, NaN], [2, 0]]), [2, 0.5, 0]);
 });
 
 test("closing keywords in a PR body name the issues it closes", () => {
@@ -165,6 +165,16 @@ test("merged PRs: unmerged rows are dropped, order is created then number, a bad
   assert.deepEqual(G.mergedPrs(rows).map((p) => p.number), [1, 3]);
   assert.deepEqual(G.mergedPrs(rows)[1].closes, ["9"]);
   assert.throws(() => G.mergedPrs([{ number: 4, created_at: "nope", merged_at: iso(T0) }]), G.InputError);
+});
+
+test("merged PRs: a PR the listing returns on two pages counts once, as its last-read copy", () => {
+  const a = { number: 7, created_at: iso(T0), merged_at: iso(T0 + H), body: "" };
+  const aAgain = { ...a, body: "Closes #5" };
+  const b = { number: 8, created_at: iso(T0 + H), merged_at: iso(T0 + 2 * H), body: "" };
+  const out = G.mergedPrs([a, b, aAgain]);
+  assert.deepEqual(out.map((p) => p.number), [7, 8]);
+  assert.deepEqual(out[0].closes, ["5"], "the later-read copy wins");
+  assert.deepEqual(G.mergedPrs([a, { ...a, merged_at: null }]), [], "a later copy that is not merged drops the PR");
 });
 
 test("ISO input: an instant is accepted, a date or a word is an input error", () => {
@@ -240,6 +250,14 @@ test("scanSession: first and last timestamp, the /run-team marker, and assistant
   assert.equal(G.scanSession(mention + "\n").runTeam, false, "a user turn must BEGIN with the command");
 });
 
+test("scanSession counts the lines that are not JSON in `bad` and keeps reading past them", () => {
+  assert.equal(G.scanSession(sessionText([[T0 + H, 7]])).bad, 0);
+  const s = G.scanSession(sessionText([[T0 + H, 7]]) + "{not json\n\ngarbage\n");
+  assert.equal(s.bad, 2, "a blank line is skipped, not counted");
+  assert.equal(s.runTeam, true);
+  assert.deepEqual(s.turns, [[T0 + H, 7]]);
+});
+
 test("readSessions reads the files directly under the directory, never a subagent directory's", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "guard-sessions-"));
   const stem = "2026-10-01T00-00-00-000Z_01a0aaaa-0000";
@@ -300,6 +318,20 @@ test("readPulls keeps paging a full last page and ends only on a short one", () 
   const r = G.readPulls(listPage, "q", { after: T0 - 1000 * H, merge: T0 + 999 * H, n: 20 });
   assert.deepEqual(calls, [1, 2, 3], "page 2 is exactly per_page long, so page 3 is asked for; it is empty and ends the listing");
   assert.equal(r.ended, true);
+});
+
+test("listingReads: the earliest and latest read of the query's pages; staleWarning: a page read before the cutover or over a day ago", () => {
+  const q = "repos/o/r/pulls?state=closed";
+  const reads = new Map([[`${q}&per_page=100&page=2`, "2026-10-02T00:00:00.000Z"], [`${q}&per_page=100&page=1`, "2026-10-01T00:00:00.000Z"], ["repos/o/r/other", "2020-01-01T00:00:00.000Z"]]);
+  assert.deepEqual(G.listingReads(reads, q), { first: "2026-10-01T00:00:00.000Z", last: "2026-10-02T00:00:00.000Z" });
+  assert.equal(G.listingReads(new Map(), q), null);
+  const r = { first: "2026-10-01T00:00:00.000Z", last: "2026-10-02T00:00:00.000Z" };
+  const at = Date.parse(r.first);
+  assert.equal(G.staleWarning(null, { now: at, cutover: at }), null);
+  assert.match(G.staleWarning(r, { now: at + H, cutover: at + 1 }), /before --cutover 2026-10-01T00:00:00\.001Z/);
+  assert.equal(G.staleWarning(r, { now: at + H, cutover: at }), null, "a page read at the cutover instant is not before it");
+  assert.equal(G.staleWarning(r, { now: at + 24 * H }), null, "exactly a day is not over a day");
+  assert.match(G.staleWarning(r, { now: at + 24 * H + 1 }), /a cached listing page was read at 2026-10-01T00:00:00\.000Z/);
 });
 
 // ------------------------------------------------------------------ CLI ----
@@ -402,6 +434,43 @@ test("CLI: a flat series exits 0, prints both windows, six ratios and six `ok` v
   assert.equal((r.stdout.match(/\bok$/gm) ?? []).length, 6);
   const calls = fs.readFileSync(w.gh.log, "utf8").trim().split("\n");
   assert.ok(calls.every((c) => c === "auth status" || c.startsWith("api repos/feigi/fleet-plugin/pulls?state=closed")), calls.join("\n"));
+});
+
+test("CLI: the report names when the listing was read, and warns on stderr when a cached page predates --cutover or is a day old", () => {
+  const w = world();
+  const fresh = run(w, ["--merge", MERGE, "--cutover", CUTOVER]);
+  assert.equal(fresh.status, 0, fresh.stderr + fresh.stdout);
+  assert.match(fresh.stdout, /read from GitHub 20\d\d-\d\d-\d\dT[\d:.]+Z/);
+  assert.doesNotMatch(fresh.stderr, /WARNING/);
+  const cacheDir = path.join(w.dir, "cache", "feigi__fleet-plugin");
+  const files = fs.readdirSync(cacheDir);
+  assert.ok(files.length > 0, "the first run cached its pages");
+  for (const f of files) {
+    const file = path.join(cacheDir, f);
+    fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, "utf8")), fetchedAt: "2026-09-01T00:00:00.000Z" }));
+  }
+  const beforeCutover = run(w, ["--merge", MERGE, "--cutover", CUTOVER]);
+  assert.equal(beforeCutover.status, 0, beforeCutover.stderr + beforeCutover.stdout);
+  assert.match(beforeCutover.stderr, /WARNING: a listing page was read at 2026-09-01T00:00:00\.000Z, before --cutover/);
+  assert.match(beforeCutover.stdout, /read from GitHub 2026-09-01T00:00:00\.000Z/);
+  const dayOld = run(w, ["--merge", MERGE]);
+  assert.equal(dayOld.status, 0, dayOld.stderr + dayOld.stdout);
+  assert.match(dayOld.stderr, /WARNING: a cached listing page was read at 2026-09-01T00:00:00\.000Z/);
+});
+
+test("CLI: the Source line counts the transcript lines that did not parse", () => {
+  const w = world();
+  assert.match(run(w, ["--merge", MERGE, "--cutover", CUTOVER]).stdout, /\b0 unparseable transcript line\(s\) skipped/);
+  fs.appendFileSync(path.join(w.sessions, "2026-10-01T00-00-00-000Z_01a0aaaa-0000.jsonl"), "{not json\ngarbage\n");
+  assert.match(run(w, ["--merge", MERGE, "--cutover", CUTOVER]).stdout, /\b2 unparseable transcript line\(s\) skipped/);
+});
+
+test("CLI: a page longer than per_page is an input error, exit 2, never read as a list", () => {
+  const w = world();
+  fs.writeFileSync(path.join(w.dir, "pages.json"), JSON.stringify([Array.from({ length: 101 }, (_, i) => ({ number: i + 1, created_at: iso(T0 + i * H), merged_at: iso(T0 + i * H + 30 * MIN), body: "" }))]));
+  const r = run(w, ["--merge", MERGE]);
+  assert.equal(r.status, 2, r.stderr + r.stdout);
+  assert.match(r.stderr, /101 items on a per_page=100 page/);
 });
 
 test("CLI: PRs created between the merge and the cutover are in neither window, whatever they look like", () => {

@@ -29,7 +29,12 @@
 //                     the N merged PRs at positions s … s+N-1 of the history and
 //                     the N at s+N … s+2N-1, for s = 0, K, 2K, …: disjoint,
 //                     adjoining windows, the shape of the pre and post
-//                     windows. Successive pairs start K PRs apart.
+//                     windows. Successive pairs start K PRs apart. Spec § 8.2
+//                     and ADR 0031 § Guard word the history's windows as
+//                     overlapping (window k+1 starts K PRs after window k);
+//                     this script does not build those. The disjoint pairs are
+//                     what gives the ticket's 79 pairs and its published
+//                     ×2.23 cycle / ×0.68 throughput band.
 //   --member-outcomes the signal 1 / 4 input (default docs/metrics/
 //                     member-outcomes.tsv beside this script's repo root).
 //                     Step 0 of every reading: re-scrape it first with
@@ -91,8 +96,8 @@
 //   4b  the same, p90.                                                   rise
 //
 // Exit codes (pr-cost's guard vocabulary): 0 no test tripped; 3 at least one
-// tripped (`tripped[]` names each); 4 no verdict — a post window shorter than
-// N, fewer than two `/run-team` sessions among its PRs, or a test with no
+// tripped (`tripped[]` names each); 4 no verdict — a pre or post window shorter
+// than N, fewer than two `/run-team` sessions among the post window's PRs, or a test with no
 // reading because member-outcomes.tsv or the session files lack rows for the
 // window or the history (step 0 undone). A trip that was read is still printed
 // under exit 4, but the verdict is withheld. 2 input error (a bad ISO, a
@@ -131,7 +136,7 @@ import { isCLI } from "../../plugin/scripts/is-cli.mjs";
 import { parseMemberName } from "../../plugin/scripts/member-record.mjs";
 import { parseTsv as parseMemberTsv } from "../../plugin/scripts/member-outcomes.mjs";
 import { EXCLUDED_MEMBER, lastSegment } from "../../plugin/scripts/pr-cost.mjs";
-import { DEFAULT_CACHE, PER_PAGE, openGithubRead } from "./in-flight-github-read.mjs";
+import { DEFAULT_CACHE, PER_PAGE, describeTransport, openGithubRead } from "./in-flight-github-read.mjs";
 
 const NAME = "in-flight-guard";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -143,6 +148,8 @@ export const DEFAULTS = {
   sessions: path.join(os.homedir(), ".omp", "agent", "sessions", "-dev-fleet-plugin"),
 };
 
+const REVIEW_THEN = "the reviewer row's uncapped dispatch first (decision 5), then the operator's task.maxConcurrency, which the phase-0 notice already reports (decision 7)";
+
 /** The six tests, in the ADR's order. `dir` is the direction the band trips on. */
 export const TESTS = [
   { id: "1", label: "fleet cache_creation per merged PR", dir: "rise",
@@ -153,10 +160,8 @@ export const TESTS = [
     then: "re-run docs/research/in-flight-cycle-time-stages-derive.mjs on both windows; a rise in first ready-to-merge → merged belongs to ADR 0007 guard 1 (the merge side, outside ADR 0031); a rise in Claim → open, open → review evidence, or evidence → label revisits the default bound" },
   { id: "3b", label: "merged PRs per active clock hour", dir: "fall",
     then: "the default bound first (at B = 5, 68 % of past Pulls would have been held), then the definition of In flight (held and halted PRs taking slots, decision 3); never the hold's rank" },
-  { id: "4a", label: "review start latency, median", dir: "rise",
-    then: "the reviewer row's uncapped dispatch first (decision 5), then the operator's task.maxConcurrency, which the phase-0 notice already reports (decision 7)" },
-  { id: "4b", label: "review start latency, p90", dir: "rise",
-    then: "the reviewer row's uncapped dispatch first (decision 5), then the operator's task.maxConcurrency, which the phase-0 notice already reports (decision 7)" },
+  { id: "4a", label: "review start latency, median", dir: "rise", then: REVIEW_THEN },
+  { id: "4b", label: "review start latency, p90", dir: "rise", then: REVIEW_THEN },
 ];
 const NO_LICENCE = "Do not read a trip as licence to reintroduce staging or the implementer and reviewer caps: automatic supply is ADR 0013's own decision, and ADR 0031's bound is the cap's replacement.";
 
@@ -188,10 +193,15 @@ export function closingIssues(body) {
   return [...new Set([...String(body ?? "").matchAll(CLOSING_RE)].map((m) => m[1]))];
 }
 
-/** Merged PRs out of a REST pulls list, oldest created first (ties by number). */
+/**
+ * Merged PRs out of a REST pulls list, oldest created first (ties by number).
+ * A PR the listing returns on two pages counts once, as its last-read copy.
+ */
 export function mergedPrs(pulls) {
+  const latest = new Map();
+  for (const p of pulls) latest.set(p.number, p);
   const out = [];
-  for (const p of pulls) {
+  for (const p of latest.values()) {
     if (!p.merged_at) continue;
     const created = Date.parse(p.created_at), merged = Date.parse(p.merged_at);
     if (Number.isNaN(created) || Number.isNaN(merged)) throw new InputError(`PR #${p.number} lacks a parseable created_at/merged_at`);
@@ -333,14 +343,12 @@ export function windowValues(win, ctx) {
   };
 }
 
+/** Late ÷ early, NaN unless both are finite and the earlier one is above zero. */
+const ratioOf = (early, late) => (Number.isFinite(early) && Number.isFinite(late) && early > 0 ? late / early : NaN);
+
 /** Late ÷ early over pairs of values, skipping a pair with no reading. */
 export function ratioSeries(pairs) {
-  const out = [];
-  for (const [early, late] of pairs) {
-    const r = late / early;
-    if (Number.isFinite(early) && Number.isFinite(late) && early > 0 && Number.isFinite(r)) out.push(r);
-  }
-  return out;
+  return pairs.map(([early, late]) => ratioOf(early, late)).filter(Number.isFinite);
 }
 
 /** The one-sided band: p90 for a "must not rise" test, p10 for "must not fall". NaN with no ratios. */
@@ -354,7 +362,7 @@ export function band(ratios, dir) {
  */
 export function verdicts(pre, post, bands) {
   return TESTS.map((t) => {
-    const ratio = Number.isFinite(post[t.id]) && Number.isFinite(pre[t.id]) && pre[t.id] > 0 ? post[t.id] / pre[t.id] : NaN;
+    const ratio = ratioOf(pre[t.id], post[t.id]);
     const b = bands[t.id];
     let verdict = "none";
     if (Number.isFinite(ratio) && Number.isFinite(b)) verdict = (t.dir === "fall" ? ratio < b : ratio > b) ? "TRIP" : "ok";
@@ -440,6 +448,29 @@ export function readPulls(listPage, query, { after, merge, n }) {
   return { seen, pages, ended };
 }
 
+/**
+ * When the listing was read from GitHub: the earliest and the latest read
+ * instant among the cached envelopes of `query`'s pages, or null with none.
+ * `fetchedAt` is the shared read's apiPath → ISO instant map.
+ */
+export function listingReads(fetchedAt, query) {
+  const reads = [...fetchedAt].filter(([k]) => k.startsWith(query)).map(([, v]) => v).sort();
+  return reads.length ? { first: reads[0], last: reads[reads.length - 1] } : null;
+}
+
+/**
+ * The warning a cached listing earns, or null: some page was read more than a
+ * day before `now`, or before `cutover` (such a page cannot hold a PR created
+ * after the cutover). The baseline script's own 24 h rule.
+ */
+export function staleWarning(reads, { now, cutover = null }) {
+  if (reads === null) return null;
+  const first = Date.parse(reads.first);
+  if (cutover !== null && first < cutover) return `a listing page was read at ${reads.first}, before --cutover ${iso(cutover)}; pass --refresh (or a fresh --cache dir) to read today's pages`;
+  if (now - first > 24 * H) return `a cached listing page was read at ${reads.first}; pass --refresh (or a fresh --cache dir) to read today's pages`;
+  return null;
+}
+
 // ------------------------------------------------------- file-system read ----
 const SESSION_FILE_RE = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z_[0-9a-f-]+\.jsonl$/i;
 /** Scan every `/run-team`-candidate session file directly under `dir` that began by `until`. */
@@ -513,7 +544,7 @@ export function formatReport(r, meta) {
   P(`# In-flight guard — derived ${meta.derivedAt}`);
   P();
   P(`Repo \`${meta.repo}\`; ${meta.transport}; N = ${r.n}, offset = ${r.offset}. --merge ${r.merge}${r.cutover ? `, --cutover ${r.cutover}` : " (no --cutover: bands only)"}.`);
-  P(`Query P: \`GET /${meta.query}&per_page=${PER_PAGE}&page=N\`, pages 1–${meta.pages} read (${meta.seen} closed PRs seen${meta.ended ? ", listing ended" : ""}).`);
+  P(`Query P: \`GET /${meta.query}&per_page=${PER_PAGE}&page=N\`, pages 1–${meta.pages} read (${meta.seen} closed PRs seen${meta.ended ? ", listing ended" : ""}${meta.listingReads ? `; read from GitHub ${meta.listingReads.first}${meta.listingReads.last !== meta.listingReads.first ? ` → ${meta.listingReads.last}` : ""}` : ""}).`);
   P();
   const h = r.history;
   P(`## History — merged PRs created in [${r.after}, ${r.merge}) (Query P)`);
@@ -528,7 +559,7 @@ export function formatReport(r, meta) {
     P(row([t.id, t.label, r.pairs[t.id], t.dir === "fall" ? "below" : "above", `${t.dir === "fall" ? "p10" : "p90"} ${times(r.bands[t.id])}`], w));
   }
   P();
-  P(`Source per test — 3a, 3b: Query P. 1, 4a, 4b: \`${meta.memberOutcomes}\` (${meta.rowCount} rows), 4a/4b's start read from the member transcript under \`${meta.sessions}\`. 2: the \`/run-team\` session files under \`${meta.sessions}\` (${meta.sessionCount} session files read, ${meta.runTeamCount} of them \`/run-team\`).`);
+  P(`Source per test — 3a, 3b: Query P. 1, 4a, 4b: \`${meta.memberOutcomes}\` (${meta.rowCount} rows), 4a/4b's start read from the member transcript under \`${meta.sessions}\`. 2: the \`/run-team\` session files under \`${meta.sessions}\` (${meta.sessionCount} session files read, ${meta.runTeamCount} of them \`/run-team\`, ${meta.badLines} unparseable transcript line(s) skipped).`);
   if (r.verdicts) {
     P();
     P("## Windows");
@@ -603,21 +634,26 @@ function main() {
 
     const gh = openGithubRead({
       repo, cache: arg("cache") ?? DEFAULT_CACHE, refresh: has("refresh"), transport: transportArg,
-      noToken: has("no-token"), die: (msg) => die(msg), log: (msg) => process.stderr.write(`${msg}\n`),
+      noToken: has("no-token"), die, log: (msg) => process.stderr.write(`${msg}\n`),
     });
     const query = `repos/${repo}/pulls?state=closed&sort=created&direction=desc`;
     const { seen, pages, ended } = readPulls(gh.listPage, query, { after, merge, n });
     const prs = mergedPrs(seen);
+    const reads = listingReads(gh.fetchedAt, query);
+    const stale = staleWarning(reads, { now: Date.now(), cutover });
+    if (stale !== null) process.stderr.write(`WARNING: ${stale}\n`);
 
-    const sessions = fs.existsSync(sessionsDir) ? readSessions(sessionsDir) : [];
+    const haveSessions = fs.existsSync(sessionsDir);
+    const sessions = haveSessions ? readSessions(sessionsDir) : [];
     const wanted = new Set(prs.map((p) => p.number));
-    const reviewStarts = fs.existsSync(sessionsDir) ? readReviewStarts(rows, sessionsDir, wanted) : new Map();
+    const reviewStarts = haveSessions ? readReviewStarts(rows, sessionsDir, wanted) : new Map();
     const report = analyze({ prs, merge, cutover, after, n, offset, rows, sessions, reviewStarts });
     const meta = {
       derivedAt: new Date().toISOString().slice(0, 16) + "Z", repo,
-      transport: `transport ${gh.transport.kind}${gh.transport.kind === "curl" ? (gh.transport.token ? " + GITHUB_TOKEN" : ", unauthenticated") : ""}; cache \`${gh.repoCacheDir}\``,
-      query, pages, seen: seen.length, ended, memberOutcomes: membersPath, rowCount: rows.length,
+      transport: `${describeTransport(gh.transport)}; cache \`${gh.repoCacheDir}\``,
+      query, pages, seen: seen.length, ended, listingReads: reads, memberOutcomes: membersPath, rowCount: rows.length,
       sessions: sessionsDir, sessionCount: sessions.length, runTeamCount: sessions.filter((s) => s.runTeam).length,
+      badLines: sessions.reduce((sum, s) => sum + s.bad, 0),
     };
     process.stdout.write(formatReport(report, meta));
     const jsonPath = arg("json");
