@@ -47,7 +47,7 @@ const ARG_MODULE = fileURLToPath(new URL("../plugin/scripts/arg.mjs", import.met
 // import arg.mjs: a discovered set silently SHRINKS when a consumer drops the
 // import, which is precisely the regression being pinned. A consumer added
 // later has to be added here deliberately.
-const CONSUMERS = ["board", "candidates", "ci-state", "diff-stats", "fleet-tick", "ledger", "pr-overlap"];
+const CONSUMERS = ["board", "candidates", "ci-state", "diff-stats", "fleet-tick", "ledger", "pr-overlap", "report-schema"];
 // board.mjs takes NAME and die() from board-common.mjs, which its gather and
 // server halves share, so that is where board's wiring is read.
 const WIRED_IN = { board: "board-common" };
