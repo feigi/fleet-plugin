@@ -216,8 +216,9 @@ their scripts and PR #3161 the third; none is on `main` until those merge.
    `task.maxConcurrency` with the merged `omp config get <key> --json`
    (measured: unset returns the default 32), runs once per run before the
    first dispatch, and never changes the exit code. Notices use the existing
-   channel (stdout on a pass, stderr after violations,
-   `plugin/scripts/tier-roles.mjs:361`, `:366`). Lines, for B=5 and c =
+   channel (stdout on a pass, stderr after violations: the two
+   `for (const n of notices)` loops in `main()` of
+   `plugin/scripts/tier-roles.mjs`). Lines, for B=5 and c =
    `task.maxConcurrency`:
    - c ≥ 2·B+2, or c = 0 (unbounded): no notice line. At B = 5 the notice
      fires below 12.
