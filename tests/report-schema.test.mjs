@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { SCHEMAS, validate } from "../plugin/scripts/report-schema.mjs";
+import { HALT_CAUSES } from "../plugin/scripts/ledger-grammar.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/report-schema.mjs", import.meta.url));
 const SHA = "a".repeat(40);
@@ -149,8 +150,18 @@ test("validate fails a bad enum value in each family that has an enum, naming it
   assertInvalid(check("fix-pr", variant("fix-pr", { outcome: "done" })), '$.outcome: "done" is not one of "applied", "no-op", "failed"');
   assertInvalid(
     check("finisher", variant("finisher", { cause: "flaky" })),
-    '$.cause: "flaky" is not one of "live-editor", "rebase", "past-pin", "unreadable", "missing", "absent", "other", null',
+    `$.cause: "flaky" is not one of ${[...HALT_CAUSES, null].map((c) => JSON.stringify(c)).join(", ")}`,
   );
+});
+
+// The finisher's `cause` is the ledger's `halted:<cause>` vocabulary, so a
+// cause the ledger grammar accepts is one a finisher's report may name.
+test("validate passes every halt cause the ledger grammar accepts", () => {
+  assert.ok(HALT_CAUSES.length > 0, "the ledger exports no halt cause — the loop below would pass vacuously");
+  for (const cause of HALT_CAUSES) {
+    const r = check("finisher", variant("finisher", { outcome: "halted", cause }));
+    assert.equal(r.status, 0, `cause ${cause}: ${r.stdout}${r.stderr}`);
+  }
 });
 
 // merge-bot's fields carry no enum, so it has no bad-enum variant. Asserted

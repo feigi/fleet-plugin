@@ -76,6 +76,7 @@
 import { readFileSync } from "node:fs";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
+import { HALT_CAUSES } from "./ledger-grammar.mjs";
 
 const NAME = "report-schema";
 const die = makeDie(NAME);
@@ -128,10 +129,8 @@ export const SCHEMAS = {
   finisher: report({
     member: str,
     outcome: { type: "string", enum: ["labelled", "halted", "failed"] },
-    cause: {
-      type: ["string", "null"],
-      enum: ["live-editor", "rebase", "past-pin", "unreadable", "missing", "absent", "other", null],
-    },
+    // The ledger's own `halted:<cause>` vocabulary, so a cause added there is accepted here.
+    cause: { type: ["string", "null"], enum: [...HALT_CAUSES, null] },
     evidence: { type: ["string", "null"] },
     pin: sha,
     labelsReadBack: strings,
