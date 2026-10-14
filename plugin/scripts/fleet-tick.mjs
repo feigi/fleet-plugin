@@ -392,13 +392,13 @@ export class LedgerError extends Error {}
 // nothing can tell which review a dispositions verdict answered. Only a ledger
 // written before the plugin update and read after it can hold one.
 const REVIEWED_RUNLESS = /^reviewed=[0-9a-fA-F]{7,40}:\d+\/\d+\/\d+$/;
-const HELD = /^held-behind[:-]#?(\d+)$/;
+export const HELD = /^held-behind[:-]#?(\d+)$/;
 // The durable record that a PR conflicts — written onto the held PR's own
 // row by the merge bot, when its local-rebase fallback hits a conflict it would
 // not force, or by the controller off this tick's `CONFLICT` line — and
 // spelled like `held-behind` so the two read alike. Distinct from an
 // Exclusion, which gates a ticket's claim; this gates a PR's merge.
-const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
+export const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
 // tier-check.mjs's verdict on an implementer, `tier-ok=<member>:<def>`
 // or `tier-mismatch=<member>:<def>` — or `tier-unverifiable=<member>:no-transcript`
 // for a settled member whose transcript was never written.

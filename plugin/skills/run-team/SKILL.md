@@ -1414,9 +1414,12 @@ honest summary is unchanged and is the reason this paragraph exists: the guard
 fired on the criterion the maintainer chose in advance, not on a demonstration
 that the cheaper tier is worse.
 
-`row` **replaces the whole line**, it does not append. Re-dispatching over a row
-that already carries `KILLED`, `ports=` or `→ PR#` must repeat those tokens or
-they are gone, with only `rewrote row #N` on stderr to say so.
+`row` **replaces the whole line**, it does not append. To add a token to a row
+that exists — `ci=`, `held-behind:#M`, `conflict-hold:#M`, `label-off=`, `ports=`
+— run `ledger.mjs token <key> <token>…`, which keeps every token already on the
+row and takes a PR's number as the key. A `row` over a row that already carries
+`KILLED`, `ports=` or `→ PR#` must repeat those tokens or they are gone, and its
+stderr, `rewrote row #N; dropped: <token>…`, names each token it lost.
 
 `ledger.mjs read` is safe on a pipe as well as a redirect: its payload used to
 be abandoned at the pipe buffer and still exit 0, which is what left `board.mjs`
@@ -1804,8 +1807,9 @@ owes beyond its row:
      because every reader takes a recorded stop as the end of the run.
 - **Monitor: CI run completes** → bind it (`ci-state.mjs --pr <N>`) and **record
   it as `ci=<run-id>:<attempt>:<conclusion>`, not just "CI green"** — in the
-  ticket's ledger row, which outlives your context. `row` **replaces the whole
-  line** (above), so repeat `ports=` and `→ PR#` or they are gone.
+  ticket's ledger row, which outlives your context: `ledger.mjs token <key>
+  ci=<run-id>:<attempt>:<conclusion>` appends it and keeps every token already on
+  the row, where `row` would replace the whole line (above).
   That key cannot be reconstructed once the head is superseded, so a
   controller holding only the colour cannot later tell an edge it has already
   spent from one that never fired, and that is the distinction the sibling
@@ -1934,11 +1938,11 @@ depth** guard table applied in code. Act on each line as it reads:
   tracks it, no conflict hold stands on it, no fix-applier, finisher or
   implementer on it is live, and, if it carries `ready-to-merge`, no merge bot
   is live: a queued PR is the bot's while one runs, and its own fallback records
-  the hold. Record the hold the merge bot's way (`run-merge-bot.md` step 1): run
-  `ledger.mjs read`, then rewrite the row naming PR M with `ledger.mjs row <key>
-  "<text> · conflict-hold:#<M> (conflict: mergeable=CONFLICTING)"` — `<text>` is
-  everything after the key, verbatim. The row's detail prints that step for
-  each PR it names. Then run the tick: the hold reads as `DISPATCH fix-pr
+  the hold. Record it with `ledger.mjs token <key> conflict-hold:#<M>`, `<key>`
+  the row naming PR M, or M itself: it appends the token and keeps every token
+  the row already carries. The row's detail prints the `row` form of that
+  write for each PR it names; the `token` form is the one that keeps the row's
+  tokens. Then run the tick: the hold reads as `DISPATCH fix-pr
   PR#<M>`, a conflict fix-applier (**A `DISPATCH fix-pr PR#<M>` on a conflict
   hold**), and that row obeys every hold. A review in flight does not stop the
   line: `fix-due` waits for the review to return. It prints under a
@@ -3472,7 +3476,8 @@ label write are one command and the finisher never runs either alone:
 verdict on the tree the finisher read, and a GitHub label does not follow the
 branch — on one PR it survived a push and came to sit on a commit nobody had
 audited. Write `label-off=<latest finisher attempt>` onto the PR's row first
-(`ledger.mjs row`, the row's whole text plus the token — **Run ledger**), then
+(`ledger.mjs token <PR number> label-off=<latest finisher attempt>`, which keeps
+every token the row already has — **Run ledger**), then
 remove `ready-to-merge`, then approve. The token is how the tick tells your
 removal from a finisher that never labelled — a tick run between a removal and
 its token re-dispatches a finisher into your take-off window. The label goes
@@ -4420,7 +4425,7 @@ is yours, written before you take `ready-to-merge` off PR M on purpose (taking
 it off before you approve a push, or clearing one left on a moved head),
 naming that PR's latest finisher attempt: the tick reads a missing label as a
 finisher's miss only after the last attempt a `label-off=` names, so without
-it your own removal reads as one. `row` refuses a `label-off=` naming no
+it your own removal reads as one. `row` and `token` refuse a `label-off=` naming no
 `finisher-pr` member that `## Dispatched` or some row already carries.
 
 `review` holds a PR's review record to these rules, read across every row that
@@ -4452,7 +4457,7 @@ Plus two append-only lists:
 - **ruled** (`ledger.mjs ruled <pr> <decision>`) — PR + decision + one-line reason,
   so a replacement controller does not re-litigate a settled call.
 
-**Writer policy: the controller owns run state (`row`/`settle`/`dispatch`/`review`/`drain`/`ruled`);
+**Writer policy: the controller owns run state (`row`/`token`/`settle`/`dispatch`/`review`/`drain`/`ruled`);
 filers append filings with `filed`; all writes are serialized by `<file>.lock`.**
 Every write rewrites the whole file from what it read, so without the lock two
 concurrent writers are last-writer-wins — measured, 8 concurrent `filed` kept

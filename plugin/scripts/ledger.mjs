@@ -4,7 +4,8 @@
 // redoes finished work. Two duplicate tickets shipped in one run from exactly
 // that.
 //
-// Rows are rewritten in place, one per ticket. `filed` and `ruled` are
+// Rows are rewritten in place, one per ticket: `row` replaces a whole line
+// and `token` appends tokens to one. `filed` and `ruled` are
 // append-only, because their whole purpose is to outlive the reasoning that
 // produced them; `filed` appends at most one row per issue.
 //
@@ -25,7 +26,7 @@
 // `## Retired`, where `dispatch` and that numbering still read it.
 //
 // Writer policy: the controller owns run state
-// (`row`/`settle`/`dispatch`/`review`/`drain`/`ruled`/`rotate`); filers append
+// (`row`/`token`/`settle`/`dispatch`/`review`/`drain`/`ruled`/`rotate`); filers append
 // filings with `filed`; all writes are serialized by `<file>.lock`. Every
 // write subcommand except `rotate` — which moves the file whole and never
 // loads it, see runRotate() — rewrites the WHOLE file from what it loaded,
@@ -46,8 +47,8 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, premisesOf, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
-import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
+import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
 import { attemptLock, releaseLockFile, reapPathOf } from "./pid-lock.mjs";
@@ -168,6 +169,9 @@ function defaultLedgerPath() {
   }
 }
 
+// What `row` and `token` say of a `label-off=` naming no finisher this run has.
+const LABEL_OFF_UNKNOWN = "names no finisher-pr member this run has dispatched or recorded — label-off=<finisher-pr-M[-x]>, the latest finisher attempt, before taking ready-to-merge off PR M";
+
 const argv = process.argv.slice(2);
 // Both flags are read by EXACT token below (`indexOf`), so the `--flag=value`
 // spelling matches neither — and an unmatched token is not refused, it lands
@@ -236,7 +240,7 @@ const requireFile = requireFileIdx !== -1;
 if (requireFileIdx !== -1) argv.splice(requireFileIdx, 1);
 
 const [cmd, ...rest] = argv;
-if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|filed|ruled|check|read|dispatch|settle|review|drain|rotate [args]");
+if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|token|filed|ruled|check|read|dispatch|settle|review|drain|rotate [args]");
 
 // A `--`-prefixed token in `check`'s free-text tail used to fold
 // straight into the duplicate-filing subject, so a misspelled flag searched
@@ -645,7 +649,7 @@ async function acquireLock() {
 // so a caller gating on the exit code reads the same failure either way.
 if (requireFile && !existsSync(file)) die(`--require-file given but ledger file does not exist: ${file}`);
 
-const WRITE_COMMANDS = new Set(["row", "filed", "ruled", "dispatch", "settle", "review", "drain", "rotate"]);
+const WRITE_COMMANDS = new Set(["row", "token", "filed", "ruled", "dispatch", "settle", "review", "drain", "rotate"]);
 if (WRITE_COMMANDS.has(cmd)) await acquireLock();
 // `rotate` never load()s: a ledger load() would refuse is still the previous
 // run's record, and it is archived as-is — and read line by line when it
@@ -706,18 +710,10 @@ if (cmd === "read") {
   // `label-off=<attempt>` tells the tick a missing `ready-to-merge` is
   // the controller's own removal, not a finisher's miss — so one naming no
   // finisher-pr member this run has would mask a real miss behind a record of
-  // nothing. Known means in `## Dispatched` or among a row's member tokens as
-  // they stand before this write, the two places dispatch's live-sibling check
-  // reads: a token `row` wrote never enters `## Dispatched`, and this line's
-  // own copy of a name vouches for nothing. Local only — never `gh`.
-  const known = new Set([...data.dispatched.map(parseToken), ...data.rows.flatMap(memberTokens)]
-    .filter((t) => t && t.family === "finisher-pr").map((t) => t.name));
-  const badOff = line.split(/\s+/).find((tok) => {
-    const m = labelOffMember(tok);
-    return m === null || (m !== undefined && !known.has(m.name));
-  });
+  // nothing; see badLabelOff().
+  const badOff = badLabelOff(line.split(/\s+/));
   if (badOff !== undefined) {
-    die(`row ${key}: '${badOff}' names no finisher-pr member this run has dispatched or recorded — label-off=<finisher-pr-M[-x]>, the latest finisher attempt, before taking ready-to-merge off PR M`);
+    die(`row ${key}: '${badOff}' ${LABEL_OFF_UNKNOWN}`);
   }
   const i = data.rows.findIndex((r) => r.split(/\s/)[0] === key);
   const created = i === -1;
@@ -748,7 +744,15 @@ if (cmd === "read") {
   // Logged only after save() returns — a failed write must not claim a row
   // was recorded when it never made it to disk.
   save(data);
-  console.error(created ? `    new row ${key}` : `    rewrote row ${key}`);
+  // A rewrite loses every token the new text does not repeat, so the ones it
+  // lost are named: the controller learns of a dropped `ports=` or `→ PR#`
+  // here and not from a later reader that finds it missing.
+  if (created) {
+    console.error(`    new row ${key}`);
+  } else {
+    const dropped = droppedTokens(oldRow, line);
+    console.error(`    rewrote row ${key}${dropped.length === 0 ? "" : `; dropped: ${dropped.join(" ")}`}`);
+  }
   console.log(JSON.stringify({ ticket: key, line, created }));
 } else if (cmd === "filed") {
   const [issue, ...subjectParts] = rest;
@@ -802,6 +806,8 @@ if (cmd === "read") {
   runDispatch();
 } else if (cmd === "settle") {
   runSettle();
+} else if (cmd === "token") {
+  runToken();
 } else if (cmd === "review") {
   runReview();
 } else if (cmd === "drain") {
@@ -825,7 +831,7 @@ if (cmd === "read") {
   if (rest.length) die("usage: ledger.mjs rotate");
   runRotate();
 } else {
-  die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check, read, dispatch, settle, review, drain or rotate`);
+  die(`unknown subcommand '${cmd}' — expected row, token, filed, ruled, check, read, dispatch, settle, review, drain or rotate`);
 }
 
 // Reached only by an arm that did not die, so every write subcommand that did
@@ -2015,6 +2021,15 @@ function runSettle() {
   console.log(JSON.stringify(payload(i, true)));
 }
 
+// A ticket or PR number argument as a number: a leading `#` is allowed, a
+// stray flag or anything but digits refused, saying `what` was expected.
+function numberArg(arg, what, usage) {
+  refuseStrayInId(arg, what);
+  const digits = arg.replace(/^#/, "");
+  if (!isDigits(digits)) die(`'${arg}' is not ${what} — ${usage}`);
+  return Number(digits);
+}
+
 // `review <pr> <token>…`: the only writer of a PR's `review=`/`reviewed=`
 // tokens. Each lands on the PR's row — the ticket row once `settle
 // impl-<N>=PR#M` has run, else `#M`, created when neither exists — so the
@@ -2027,10 +2042,7 @@ function runReview() {
   const usage = "usage: ledger.mjs review <pr> <review=…|reviewed=…>…";
   const [pr, ...parts] = rest;
   if (!pr || parts.length === 0) die(usage);
-  refuseStrayInId(pr, "a PR number");
-  const digits = pr.replace(/^#/, "");
-  if (!isDigits(digits)) die(`'${pr}' is not a PR number — ${usage}`);
-  const prNum = Number(digits);
+  const prNum = numberArg(pr, "a PR number", usage);
   const tokens = parts.join(" ").split(/\s+/).filter(Boolean);
   const other = tokens.find((tok) => !isReviewToken(tok));
   if (other !== undefined) {
@@ -2058,4 +2070,123 @@ function runReview() {
   const key = rowKey(line);
   console.error(`    review on row ${key}`);
   console.log(JSON.stringify({ pr: prNum, row: key, line, created }));
+}
+
+// A row's tokens: its words after the key, bar the ` · ` separators between
+// them.
+function rowTokens(text) {
+  return text.split(/\s+/).filter((w) => w !== "" && w !== "·").slice(1);
+}
+
+// Every token `oldRow` had that `line` lacks, duplicates counted, in the old
+// row's order: what a `row` rewrite lost.
+function droppedTokens(oldRow, line) {
+  return added(rowTokens(line), rowTokens(oldRow));
+}
+
+// The first of `words` that is a `label-off=` naming no finisher-pr member
+// this run has, else undefined. Known means in `## Dispatched` or among a
+// row's member tokens as they stand before this write, the two places
+// dispatch's live-sibling check reads: a token `row` or `token` wrote never
+// enters `## Dispatched`, and the line being written vouches for nothing.
+// Local only — never `gh`.
+function badLabelOff(words) {
+  const known = new Set([...data.dispatched.map(parseToken), ...data.rows.flatMap(memberTokens)]
+    .filter((t) => t && t.family === "finisher-pr").map((t) => t.name));
+  return words.find((tok) => {
+    const m = labelOffMember(tok);
+    return m === null || (m !== undefined && !known.has(m.name));
+  });
+}
+
+// Why `token` may not write `tok` onto a row whose text is `rowText` (the row
+// as it stands plus the call's earlier tokens), or null when it may. A token
+// is one word: an empty argument, one with a space in it (prose, which would
+// split into words the row's own words then dedupe against), and the row's
+// ` · ` separator are no token. A member token is `dispatch`'s or `settle`'s,
+// a review token `review`'s. A word shaped like a member that the grammar
+// cannot parse, a `tier=` that is not a cell, a `tier=` naming a second tier
+// on a row that already has one, a `held-behind` or `conflict-hold` token the
+// tick cannot read, and a lone `→` — an arrow with no PR beside it points at
+// nothing — are refused. Every other word is a freeform token.
+function tokenRefusal(tok, rowText) {
+  if (tok === "" || /\s/.test(tok)) {
+    return "is not one token — pass each token as its own argument, with no space in it";
+  }
+  if (tok === "·") return "is the row's ` · ` separator, which `token` writes between tokens itself";
+  if (parseToken(tok) !== null) {
+    return "is a member token — members are written only with `ledger.mjs dispatch` and `ledger.mjs settle`";
+  }
+  if (isReviewToken(tok)) {
+    return "is a review token — review tokens are written only with `ledger.mjs review <pr> <token>…`, which puts them on the PR's row";
+  }
+  const name = tok.split("=")[0];
+  if (MEMBER_FAMILIES.some((family) => name.startsWith(`${family}-`))) {
+    return "is shaped like a member token this grammar cannot parse — a member is impl-<N>, fix-pr-<M>, finisher-pr-<M> or merge-bot-<n>, a retry suffix allowed";
+  }
+  for (const [prefix, shape] of [["held-behind", HELD], ["conflict-hold", CONFLICT_HOLD]]) {
+    if (tok.startsWith(prefix) && !shape.test(tok)) {
+      return `is not ${prefix}:#<M> — the tick reads only ${prefix}:#<number> and would ignore this one`;
+    }
+  }
+  const [tier] = tierValues(tok);
+  if (tier !== undefined) {
+    if (!CELL.test(tier)) return "is not tier=<cell> — a cell is <slow|task|smol>-<level>";
+    const other = tierValues(rowText).find((v) => v !== tier);
+    if (other !== undefined) {
+      return `names a second tier — the row already carries tier=${other}, and a row names one; replacing it takes ledger.mjs row, which rewrites the whole line`;
+    }
+  }
+  if (tok === "→") return "is the row's arrow, which is written with the PR it points at — ledger.mjs row writes the whole line";
+  if (badLabelOff([tok]) !== undefined) return LABEL_OFF_UNKNOWN;
+  return null;
+}
+
+// `token <ticket|pr> <token>…`: appends each token to the row the key maps to
+// — the PR's row for a PR key, the ticket row once `settle impl-<N>=PR#M` has
+// run, else `#M`, created when neither exists: `review`'s lookup — keeping
+// every token already there, in order, as ` · <token>`. A token the row
+// already carries is a no-op. Every refusal is judged before anything is
+// written, whole call alike, under the lock.
+function runToken() {
+  const usage = "usage: ledger.mjs token <ticket|pr> <token>…";
+  const [keyArg, ...tokens] = rest;
+  if (!keyArg || tokens.length === 0) die(usage);
+  const num = numberArg(keyArg, "a ticket or PR number", usage);
+  const i = prRowIndex(num);
+  const created = i === -1;
+  const oldLine = created ? null : data.rows[i];
+  let carried = oldLine ?? "";
+  for (const tok of tokens) {
+    const why = tokenRefusal(tok, carried);
+    if (why !== null) die(`token #${num}: '${tok}' ${why}`);
+    carried += ` ${tok}`;
+  }
+  const key = created ? `#${num}` : rowKey(oldLine);
+  const have = new Set(created ? [] : rowTokens(oldLine));
+  const appended = [];
+  for (const tok of tokens) {
+    if (have.has(tok)) {
+      console.error(`    already present on row ${key}: ${tok}`);
+    } else {
+      have.add(tok);
+      appended.push(tok);
+    }
+  }
+  if (appended.length === 0) {
+    console.log(JSON.stringify({ key, line: oldLine, added: appended }));
+    return;
+  }
+  const line = created ? `${key} ${appended.join(" · ")}` : `${oldLine} · ${appended.join(" · ")}`;
+  const after = created ? [...data.rows, line] : data.rows.with(i, line);
+  // A freeform token can still move the PR a row maps to (a `PR#<n>` mention
+  // on a row with no implementer), or split one PR across two rows.
+  const split = newSplitRow(data.rows, after);
+  if (split !== null) die(`token ${key}: ${splitRowClause(split)}`);
+  const refusal = rowWriteRefusal(data.rows, after, oldLine, line, data.retired);
+  if (refusal !== null) die(`token ${key}: ${refusal}`);
+  data.rows = after;
+  save(data);
+  console.error(`    appended ${appended.join(" ")} to row ${key}`);
+  console.log(JSON.stringify({ key, line, added: appended }));
 }

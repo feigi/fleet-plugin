@@ -198,7 +198,7 @@ function readReviews(tokens) {
 
 // The entries of `after` that `before` does not account for, counting
 // duplicates: what a write added.
-function added(before, after) {
+export function added(before, after) {
   const left = new Map();
   for (const x of before) left.set(x, (left.get(x) ?? 0) + 1);
   return after.filter((x) => {

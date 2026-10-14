@@ -184,8 +184,8 @@ test("the controller records the bound run identifier under a named field, not j
   );
   assert.match(
     s,
-    Pin.phrase("`row` **replaces the whole line** (above), so repeat `ports=` and `→ PR#`"),
-    "the instruction no longer cross-references the replace-whole-line warning, so a controller following it will silently destroy the row's other tokens",
+    Pin.phrase("`ledger.mjs token <key> ci=<run-id>:<attempt>:<conclusion>` appends it and keeps every token already on the row, where `row` would replace the whole line"),
+    "the instruction no longer records the key with `token`, so a controller following it will silently destroy the row's other tokens",
   );
   assert.match(
     s,

@@ -230,7 +230,7 @@ test("the Run ledger section states the writer policy and the check→create gap
   const r = runLedger();
   assert.match(
     r,
-    /the controller owns run state \(`row`\/`settle`\/`dispatch`\/`review`\/`drain`\/`ruled`\); filers append filings with `filed`; all writes are serialized by `<file>\.lock`/,
+    /the controller owns run state \(`row`\/`token`\/`settle`\/`dispatch`\/`review`\/`drain`\/`ruled`\); filers append filings with `filed`; all writes are serialized by `<file>\.lock`/,
     "the Run ledger section no longer states who writes what, and that the lock serializes it",
   );
   // The lock covers each command alone. Stated at the section and at the

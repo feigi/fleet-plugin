@@ -6,9 +6,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW } from "../plugin/scripts/ledger-grammar.mjs";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -415,4 +418,49 @@ test("drawCell never draws the policy cell, reaches every other one, and with no
     burnIn.add(cell);
   }
   assert.deepEqual([...burnIn].sort(), [...GRID].sort());
+});
+
+// `ledger.mjs token` writes every row token that is neither a member's nor
+// the review pair's. The grammar claims those two kinds and no other, so the
+// must-ACCEPT half is every other family a real row carries: a `token` that
+// refused one would leave the controller to re-type the whole row with `row`.
+const FREEFORM_FAMILIES = [
+  "ci=123:1:success",
+  "held-behind:#313",
+  "conflict-hold:#346",
+  "label-off=finisher-pr-346",
+  "tier=slow-high",
+  "route=exploration",
+  "tier-ok=impl-324:fleet-implementer-slow-high",
+  "tier-mismatch=impl-324:fleet-implementer-task-low",
+  "tier-unverifiable=impl-324:no-transcript",
+  "dispositions-ok=fix-pr-346:run-abcd1234",
+  "dispositions-mismatch=fix-pr-346:run-abcd1234",
+  "dispositions-escalate=fix-pr-346:run-abcd1234",
+  "dispositions-unchecked=fix-pr-346:run-abcd1234",
+  "ports=16324",
+];
+
+test("token accepts every non-member, non-review token family a row carries, each appended after what the row held", (t) => {
+  for (const tok of FREEFORM_FAMILIES) {
+    assert.equal(parseToken(tok), null, `${tok}: a member token is dispatch's or settle's, not token's`);
+    assert.equal(isReviewToken(tok), false, `${tok}: a review token is review's, not token's`);
+  }
+  const dir = mkdtempSync(join(tmpdir(), "ledger-token-families-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "ledger.md");
+  const row = "#346 impl-324=PR#346 → PR#346 · finisher-pr-346=labelled";
+  writeFileSync(file, `# Fleet run ledger\n\n## Rows\n\n- ${row}\n\n## Filed\n\n## Ruled\n\n`);
+  const script = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
+  const env = { ...process.env, PATH: dir };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  for (const tok of FREEFORM_FAMILIES) {
+    const r = spawnSync(process.execPath, [script, "--file", file, "token", "346", tok], { encoding: "utf8", env, cwd: dir });
+    assert.equal(r.status, 0, `${tok}: got exit ${r.status}\n${r.stderr}`);
+    assert.deepEqual(JSON.parse(r.stdout).added, [tok]);
+  }
+  const written = JSON.parse(spawnSync(process.execPath, [script, "--file", file, "read"], { encoding: "utf8", env, cwd: dir }).stdout);
+  assert.deepEqual(written.rows, [`${row} · ${FREEFORM_FAMILIES.join(" · ")}`]);
+  assert.ok(readFileSync(file, "utf8").includes(FREEFORM_FAMILIES.at(-1)));
 });
