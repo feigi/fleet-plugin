@@ -1,5 +1,7 @@
 // Scraper for per-member model/effort facts. Pure over omp's own subagent
-// transcripts: no clock, no network, no gh.
+// transcripts: no clock, no network, no gh. The one column that looks beside
+// them is `report`, which asks whether the member's report file is in the
+// scratch root (`--scratch <dir>`, default the root scratch-root.mjs prints).
 //
 // The transcript parsing (fold, model/effort extraction, ticket/pr naming,
 // and the `gh pr create` result an implementer's `pr` comes from)
@@ -11,6 +13,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 
 import { readOmpSession, normalizeModel, parseMemberName, isOmpSessionDirName } from "./member-record.mjs";
+import { reportFamily, reportStatus, defaultScratch } from "./report-files.mjs";
+import { FleetDirUnresolvable } from "./fleet-dir.mjs";
 
 export { normalizeModel, parseMemberName };
 
@@ -84,18 +88,33 @@ export function rowsForSession(sessionDir, stats = {}) {
   }));
 }
 
-// APPENDED TO, never inserted into: every read-out in the file's header and
-// in the design specs indexes by position, so a column added anywhere but the
-// end silently repoints every `$n` a reader already wrote down.
-// `subagent_type` therefore follows `harness`, and the four priced columns
-// follow it. `cost` is the provider's own per-turn `usage.cost.total`, summed
-// to the micro-dollar — the $ of record; `tokens_cache_write_1h` and `cost`
-// are blank where the transcript recorded no figure, never 0.
+// A column is APPENDED, never inserted, as a rule: a read-out that indexes by
+// position (`$5`, in the file's header) silently repoints when one is added
+// ahead of it. `report` is placed after `subagent_type` regardless, which
+// moves the four priced columns one place right; every reader in this
+// repository takes those four by name through parseTsv, and the header's
+// position-indexed read-outs name columns ahead of them. `subagent_type`
+// follows `harness`. `cost` is the provider's own per-turn `usage.cost.total`,
+// summed to the micro-dollar — the $ of record; `tokens_cache_write_1h` and
+// `cost` are blank where the transcript recorded no figure, never 0.
 export const COLUMNS = [
   "session", "run_date", "role", "member", "model", "effort", "ticket", "pr",
   "tokens_cache_create", "tokens_out", "wall_s", "turns", "agent", "harness",
-  "subagent_type", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost",
+  "subagent_type", "report", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost",
 ];
+
+// `report`: what reportStatus() says of the row's member under `scratch` — a
+// pure function of the member name and the file system, never of the
+// transcript, so it is stamped here on the rows rowsForSession() returned.
+// With no `scratch` (null: none could be resolved) a member a schema covers
+// reads blank — unknown, the file's own spelling of it — and one none covers
+// still reads `-`, which needs no file to look at.
+export function withReports(rows, scratch) {
+  return rows.map((r) => ({
+    ...r,
+    report: scratch === null && reportFamily(r.member) !== null ? "" : reportStatus(scratch, r.member),
+  }));
+}
 
 // Row objects use camelCase; the file uses snake_case. One map, one direction
 // each, so a rename cannot silently drop a column.
@@ -164,21 +183,27 @@ if (isCLI(import.meta.url)) {
   const argv = process.argv.slice(2);
   const fileIdx = argv.indexOf("--file");
   const file = fileIdx >= 0 ? argv[fileIdx + 1] : "docs/metrics/member-outcomes.tsv";
+  const scratchIdx = argv.indexOf("--scratch");
+  const scratchArg = scratchIdx >= 0 ? argv[scratchIdx + 1] : null;
   // An unrecognised `--flag` is silently dropped by the dirs filter below
   // rather than refused — worst case `--file=/tmp/x.tsv` (no such flag;
   // --file wants a SPACE, not `=`) never sets fileIdx, so this would silently
   // write the production metrics file instead of the path the operator asked
   // for.
-  const bad = argv.find((a) => a.startsWith("--") && a !== "--file");
-  if (bad) die(`unknown option ${bad} (did you mean --file <path>?)`);
+  const bad = argv.find((a) => a.startsWith("--") && a !== "--file" && a !== "--scratch");
+  if (bad) die(`unknown option ${bad} (did you mean --file <path> or --scratch <dir>?)`);
 
   // fileIdx is -1 when --file is absent, which makes fileIdx + 1 equal 0 — the
   // FIRST positional argument, not a real index into argv. Without the
   // fileIdx < 0 guard this filters out the session dir itself, and the bare
   // form (the one the spec, the backfill loop and run-team's phase-3
-  // instruction all use) always exits 2.
-  const dirs = argv.filter((a, i) => !a.startsWith("--") && (fileIdx < 0 || i !== fileIdx + 1));
-  if (dirs.length !== 1) die("usage: member-outcomes.mjs <session-dir> [--file <tsv>]");
+  // instruction all use) always exits 2. `--scratch`'s value is skipped the
+  // same way.
+  const valueOf = (idx) => (i) => idx >= 0 && i === idx + 1;
+  const isFileValue = valueOf(fileIdx);
+  const isScratchValue = valueOf(scratchIdx);
+  const dirs = argv.filter((a, i) => !a.startsWith("--") && !isFileValue(i) && !isScratchValue(i));
+  if (dirs.length !== 1) die("usage: member-outcomes.mjs <session-dir> [--file <tsv>] [--scratch <dir>]");
   // arg.mjs's rule, consumed rather than copied. This line used to
   // hand-write `!file || file.startsWith("--")`, which was that rule with the
   // blank spelling missing — so `--file "   "` was accepted here and wrote the
@@ -187,6 +212,7 @@ if (isCLI(import.meta.url)) {
   // is imported. The refusal WORDING stays this script's own: `--file` is the
   // flag the operator typed.
   if (isFlagLike(file)) die("--file needs a path");
+  if (scratchIdx >= 0 && isFlagLike(scratchArg)) die("--scratch needs a path");
 
   const sessionDir = dirs[0].replace(/\/+$/, "");
   // A wrong guess used to exit 0 having scraped and written nothing, because
@@ -223,8 +249,17 @@ if (isCLI(import.meta.url)) {
   try { existing = parseTsv(prev); }
   catch (e) { die(`${file} is not readable as this schema: ${e.message}`); }
 
+  let scratch = scratchArg;
+  if (scratch === null) {
+    try { scratch = defaultScratch(); }
+    catch (e) {
+      if (!(e instanceof FleetDirUnresolvable)) throw e;
+      process.stderr.write(`${NAME}: WARNING no scratch root to look for report files in (${e.message}) — \`report\` is left blank where a schema covers the member; pass --scratch <dir>\n`);
+    }
+  }
+
   const stats = {};
-  const merged = mergeRows(existing, rowsForSession(sessionDir, stats));
+  const merged = mergeRows(existing, withReports(rowsForSession(sessionDir, stats), scratch));
   // Write-then-rename: writeFileSync truncates before it writes, so an interrupt
   // over the committed corpus left a torn file that the NEXT scrape read, merged
   // and rewrote — losing every other session's rows for good.

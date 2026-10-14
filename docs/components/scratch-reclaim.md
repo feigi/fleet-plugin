@@ -24,10 +24,16 @@ work in flight rather than every run's history.
    `merge-bot-<n>` holds every `pr<N>`. A closed issue's `impl-<N>/` goes; an
    open one's goes only with no live `impl-<N>` token and 7 days idle. A
    number `gh` gives no usable answer for — `gh` unreachable, or a partial
-   failure that errored on it — keeps every keyed entry that names it.
+   failure that errored on it — keeps every keyed entry that names it. A
+   member's report file, `reports/<member>.json`, goes with the entry its
+   member belongs to: a `fix-pr-<M>`, `finisher-pr-<M>` or `review-pr-<M>`
+   report with `pr<M>/` (whether or not that directory exists), an
+   `impl-<N>` report with `impl-<N>/`. `reports/` itself is never removed;
+   each file in it is judged on its own.
 3. **Everything else is judged on age.** An entry goes when nothing anywhere
    under it has changed in 7 days and no live token's name appears in its
-   name. A keyed name whose number is the other type, or nothing, falls here.
+   name. A keyed name whose number is the other type, or nothing, falls here,
+   and so does a `merge-bot-<n>` report, which names no PR and no ticket.
 4. **The review snapshot prunes its own PR.** `review-core.mjs` runs
    `reclaim-scratch.mjs --pr <N>`, which removes only `pr<N>/run-*` roots idle
    past 7 days — no ledger, no `gh` — and prints `SNAPSHOT_PRUNE_FAILED` when

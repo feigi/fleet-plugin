@@ -335,13 +335,16 @@ test("the dispatch brief tells the member to emit the Sizing line the ruling ste
   );
 });
 
-test("the ruling step refuses to record a sizing verdict it cannot date", () => {
+test("the ruling step records a sizing verdict only from a report that dates it, and the script, not the controller, applies that", () => {
   // #1070. The channel pinned above says WHERE the verdict is read from; it says
   // nothing about whether the line was produced by the run it claims. A
   // `Sizing:` line typed in before `sizing-a-ticket` ever ran is byte-identical
   // to one the skill produced, so the body is not a second source for itself —
   // measured on a member that wrote the verdict first and caught itself
-  // afterwards, which is the only reason anyone knows this can happen.
+  // afterwards, which is the only reason anyone knows this can happen. The
+  // second source is the report FILE's `sizing.ranBeforePr` and
+  // `sizing.signal`, which `tier-outcomes.mjs append` reads and applies; the
+  // controller is no longer told to read an ordering clause off report prose.
   const slice = rulingStep();
 
   // The rule as ONE span, both conditions joined. Split into two presence
@@ -349,8 +352,8 @@ test("the ruling step refuses to record a sizing verdict it cannot date", () => 
   // half it is looking at and records it, which is the whole defect.
   assert.match(
     slice,
-    Pin.phrase("Record `sizing` only when the report places that run before the PR AND the line carries its signal"),
-    "recording `sizing` is no longer conditioned on the report's ordering together with the line's signal",
+    Pin.phrase("it records `sizing` only when `ranBeforePr` is true AND `signal` is non-empty"),
+    "recording `sizing` is no longer conditioned on the report's `ranBeforePr` together with its `signal`",
   );
   // The else-branch, bound to the action it demands. A rule with no stated
   // failure action is read as advice, and the adjacent BLANK rule is about a
@@ -358,16 +361,24 @@ test("the ruling step refuses to record a sizing verdict it cannot date", () => 
   // dangerous.
   assert.match(
     slice,
-    Pin.phrase("leave the field BLANK and say which in `note`"),
-    "the ruling step no longer says what to do when the verdict cannot be dated",
+    Pin.phrase("leaves the field BLANK with a WARNING naming which, and you say which in `note`"),
+    "the ruling step no longer says what happens when the verdict cannot be dated",
   );
-  // The three failure cases, as the one sentence that enumerates them: a
-  // controller told only about a missing clause still records the case where
-  // the member reported writing the line early.
+  // The failing states, as the one list that enumerates them: a controller
+  // told only about a missing file still records the case where the member
+  // reported running the skill after the PR.
   assert.match(
     slice,
-    Pin.phrase("Ordering clause missing, verdict authored before the run with no corrected value reported, or body and report naming different verdicts"),
-    "the ruling step no longer enumerates which failures blank the covariate",
+    Pin.phrase("no report file, one that fails its schema, `sizing` null, `ranBeforePr` not true, an empty `signal`"),
+    "the ruling step no longer enumerates which report states blank the covariate",
+  );
+  // The channel is the file: the path `append` reads, so a controller can find
+  // it, and the old instruction is gone.
+  assert.match(slice, Pin.phrase("`<scratch>/reports/impl-<ticket>[-x].json`"), "the ruling step no longer names the report file `append` reads");
+  assert.doesNotMatch(
+    slice,
+    /Ordering clause missing|places that run before the PR|the member's report\s+carries the second source/,
+    "the ruling step again tells the controller to read the ordering clause off the member's report prose",
   );
   // The rejected alternative, kept explicit: deriving the verdict from the diff
   // was ruled premature on #1070, and a controller staring at a blank column
@@ -375,7 +386,7 @@ test("the ruling step refuses to record a sizing verdict it cannot date", () => 
   // it — producing a value that reads as measured, which is the defect again.
   assert.match(
     slice,
-    Pin.phrase("Do not re-derive the verdict from the diff to fill the gap"),
+    Pin.phrase("do not re-derive the verdict from the diff to fill it"),
     "the ruling step no longer forbids substituting a diff-derived proxy for the member's verdict",
   );
 });

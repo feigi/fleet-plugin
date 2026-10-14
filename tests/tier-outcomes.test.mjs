@@ -51,6 +51,7 @@ function fixture(t, { members = [], tierRows = [], ledger = null, closes = [10],
     members: join(dir, "member-outcomes.tsv"),
     ledger: join(dir, "ledger.md"),
     ghLog: join(dir, "gh.log"),
+    scratch: join(dir, "scratch"),
   };
   writeFileSync(f.tier, HEADER + tierRows.map((r) => `${r}\n`).join(""));
   writeFileSync(f.members, `# member facts\n${members.map((m) => `${memberRow(m)}\n`).join("")}`);
@@ -80,8 +81,8 @@ globalThis.Date = class extends Real {
     });
     return { code: r.status, stdout: r.stdout, stderr: r.stderr };
   };
-  f.append = (pr = "20", { note = "a note with spaces" } = {}) =>
-    f.run("append", pr, "--closed-own-ticket", "yes", "--minted-false-claim", "no", "--note", note);
+  f.append = (pr = "20", { note = "a note with spaces", extra = [] } = {}) =>
+    f.run("append", pr, "--closed-own-ticket", "yes", "--minted-false-claim", "no", "--note", note, "--scratch", f.scratch, ...extra);
   f.dataRows = () => readFileSync(f.tier, "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#")).map((l) => l.split("\t"));
   f.ghCalls = () => (existsSync(f.ghLog) ? readFileSync(f.ghLog, "utf8").trim().split("\n").filter(Boolean) : []);
   return f;
@@ -188,7 +189,7 @@ test("append: with no ledger verdict, the ticket's single fleet-implementer* row
   const r = f.append();
   assert.equal(r.code, 0, r.stderr);
   assert.equal(f.dataRows()[0][col("tier")], "default");
-  assert.doesNotMatch(r.stderr, /WARNING/);
+  assert.doesNotMatch(r.stderr, /WARNING tier/);
 });
 
 test("append: a per-cell definition's short name is its suffix, not refused", (t) => {
@@ -674,4 +675,151 @@ test("lastPullByTicket: of two Pulls in reverse date order, the later row in fil
   assert.equal(pulls.get("11").agent, "impl-11", "a ticket with one Pull was dropped");
   const rulings = rulingsByTicket(parseTierOutcomes(HEADER + tierRow({ date: "2026-10-03", pr: 20, ticket: 10, tier: "default" })));
   assert.equal(rulingFor(rulings, "10", pulls.get("10").run_date)?.pr, "20", "the later-dated Pull set the floor");
+});
+
+// ---------------------------------------------------------------------------
+// append: `sizing` from the implementer's report file
+// ---------------------------------------------------------------------------
+
+const SHA = "a".repeat(40);
+// A report that checks against report-schema.mjs's `impl` family.
+const implReport = (member, sizing) => ({
+  member, outcome: "pr", pr: 20, head: SHA, branch: `implementer/${member}`,
+  sizing, bailCause: null, bailDetail: null, confirmation: [],
+});
+const MEASURED = (verdict, extra = {}) => ({ verdict, signal: "two implementation files, one consumer", ranBeforePr: true, ...extra });
+const writeReport = (f, member, body) => {
+  mkdirSync(join(f.scratch, "reports"), { recursive: true });
+  writeFileSync(join(f.scratch, "reports", `${member}.json`), typeof body === "string" ? body : JSON.stringify(body));
+};
+const sizingOf = (f) => f.dataRows()[0][col("sizing")];
+const IMPL = { members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }] };
+
+test("append: sizing is filled from a report whose sizing ran before the PR, and stderr names the file", (t) => {
+  const f = fixture(t, IMPL);
+  writeReport(f, "impl-10", implReport("impl-10", MEASURED("heavy")));
+  const r = f.append();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(sizingOf(f), "heavy");
+  assert.ok(r.stderr.includes(`sizing=heavy from ${join(f.scratch, "reports", "impl-10.json")}`), r.stderr);
+  assert.doesNotMatch(r.stderr, /WARNING sizing/);
+});
+
+test("append: a report whose sizing ran AFTER the PR leaves sizing blank and the WARNING names ranBeforePr", (t) => {
+  const f = fixture(t, IMPL);
+  writeReport(f, "impl-10", implReport("impl-10", MEASURED("light", { ranBeforePr: false })));
+  const r = f.append();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(sizingOf(f), "");
+  assert.match(r.stderr, /WARNING sizing left blank for PR #20 \(ticket #10\): .*impl-10\.json: sizing\.ranBeforePr is not true/);
+});
+
+test("append: a report whose sizing names no signal leaves sizing blank and the WARNING names signal", (t) => {
+  for (const signal of ["", "  \t "]) {
+    const f = fixture(t, IMPL);
+    writeReport(f, "impl-10", implReport("impl-10", MEASURED("light", { signal })));
+    const r = f.append();
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(sizingOf(f), "", `signal ${JSON.stringify(signal)} was accepted`);
+    assert.match(r.stderr, /WARNING sizing left blank .*sizing\.signal is empty/);
+    assert.doesNotMatch(r.stderr, /ranBeforePr/, "a condition that held was named as failed");
+  }
+});
+
+test("append: both failed conditions are named, not just the first", (t) => {
+  const f = fixture(t, IMPL);
+  writeReport(f, "impl-10", implReport("impl-10", MEASURED("light", { ranBeforePr: false, signal: "" })));
+  const r = f.append();
+  assert.match(r.stderr, /sizing\.ranBeforePr is not true and sizing\.signal is empty/);
+});
+
+test("append: no report file leaves sizing blank and the WARNING says there is none for the ticket", (t) => {
+  const f = fixture(t, IMPL);
+  const r = f.append();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(sizingOf(f), "");
+  assert.match(r.stderr, /WARNING sizing left blank for PR #20 \(ticket #10\): no implementer report for ticket #10 under /);
+});
+
+test("append: another ticket's report is not this ticket's, whatever its digits start with", (t) => {
+  const f = fixture(t, IMPL);
+  writeReport(f, "impl-100", implReport("impl-100", MEASURED("heavy")));
+  writeReport(f, "impl-1", implReport("impl-1", MEASURED("heavy")));
+  writeReport(f, "fix-pr-20", implReport("fix-pr-20", MEASURED("heavy")));
+  const r = f.append();
+  assert.equal(sizingOf(f), "");
+  assert.match(r.stderr, /no implementer report for ticket #10/);
+});
+
+test("append: the highest retry letter's report wins, the unlettered name ranking lowest", (t) => {
+  const f = fixture(t, IMPL);
+  writeReport(f, "impl-10", implReport("impl-10", MEASURED("light")));
+  writeReport(f, "impl-10-b", implReport("impl-10-b", MEASURED("heavy")));
+  writeReport(f, "impl-10-c", implReport("impl-10-c", MEASURED("light")));
+  const r = f.append();
+  assert.equal(sizingOf(f), "light");
+  assert.ok(r.stderr.includes("impl-10-c.json"), r.stderr);
+  // The later attempt is the one read even when it is the one that failed:
+  // falling back to an older attempt's verdict would record a measurement
+  // the winning attempt did not make.
+  const f2 = fixture(t, IMPL);
+  writeReport(f2, "impl-10", implReport("impl-10", MEASURED("light")));
+  writeReport(f2, "impl-10-d", implReport("impl-10-d", MEASURED("heavy", { ranBeforePr: false })));
+  const r2 = f2.append();
+  assert.equal(sizingOf(f2), "");
+  assert.match(r2.stderr, /impl-10-d\.json: sizing\.ranBeforePr is not true/);
+});
+
+test("append: a report that fails its schema, or is not JSON, or has no sizing, leaves sizing blank with that reason", (t) => {
+  const cases = [
+    [implReport("impl-10", MEASURED("light")), (r) => { r.head = "not-hex"; return r; }, /does not check against its schema: \$\.head/],
+    ["{ not json", null, /does not check against its schema: \$: not JSON/],
+    [implReport("impl-10", null), null, /carries no sizing \(sizing is null\)/],
+    [implReport("impl-10", MEASURED("medium")), null, /does not check against its schema: \$\.sizing\.verdict/],
+  ];
+  for (const [body, mutate, want] of cases) {
+    const f = fixture(t, IMPL);
+    writeReport(f, "impl-10", mutate ? mutate(body) : body);
+    const r = f.append();
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(sizingOf(f), "", `${want} was accepted`);
+    assert.match(r.stderr, want);
+  }
+});
+
+test("append: an explicit --sizing wins over the report, and stderr names the flag as the source", (t) => {
+  const f = fixture(t, IMPL);
+  writeReport(f, "impl-10", implReport("impl-10", MEASURED("heavy")));
+  const r = f.append("20", { extra: ["--sizing", "light"] });
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(sizingOf(f), "light");
+  assert.match(r.stderr, /sizing=light from --sizing/);
+  assert.doesNotMatch(r.stderr, /WARNING sizing/);
+  // Explicit with no report file at all: still the flag, no lookup warning.
+  const g = fixture(t, IMPL);
+  const r2 = g.append("20", { extra: ["--sizing", "heavy"] });
+  assert.equal(sizingOf(g), "heavy");
+  assert.doesNotMatch(r2.stderr, /WARNING sizing/);
+});
+
+test("append: a --sizing that is not light or heavy is still refused", (t) => {
+  const f = fixture(t, IMPL);
+  const r = f.append("20", { extra: ["--sizing", "medium"] });
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /--sizing must be light or heavy/);
+});
+
+test("append: with no --scratch and no repository to key a scratch root on, sizing is blank and says why", (t) => {
+  const f = fixture(t, IMPL);
+  const r = f.run("append", "20", "--closed-own-ticket", "yes", "--minted-false-claim", "no", "--note", "n");
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(sizingOf(f), "");
+  assert.match(r.stderr, /WARNING sizing left blank for PR #20 \(ticket #10\): no scratch root to look in/);
+});
+
+test("check: --scratch is an append flag and is refused by name", (t) => {
+  const f = fixture(t);
+  const r = f.run("check", "--scratch", f.scratch);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /--scratch is an append flag/);
 });

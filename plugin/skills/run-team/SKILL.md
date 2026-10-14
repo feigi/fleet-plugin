@@ -1462,32 +1462,37 @@ untouched, so re-running it is safe. That append is the whole duty.
 The row's last four fields are the ticket's difficulty, and they are what lets a
 tier comparison condition on the thing that swamps it. `sizing` is the
 **member's** own `light`/`heavy` verdict from its phase-2 `sizing-a-ticket`
-run, read back off the PR body's `Sizing:` line (`gh pr view <pr> --json body`),
-which names the signal the verdict turned on beside the verdict itself;
+run, which `append` reads itself off the member's report file
+(`<scratch>/reports/impl-<ticket>[-x].json`, its `sizing.verdict`, the highest
+retry letter's when there are several), so you pass no `--sizing`; the member
+also puts it in the PR body's `Sizing:` line, with the signal it turned on;
 `profile`, `loc` and `files` all come from `diff-stats.mjs` over the merged
 diff. **Phase 0 does not size anything** — it shortlists, a Pull claims, and
 the sizing run happens inside the member after both, which is why the verdict
-has to travel in the PR body rather than being something you already hold.
+has to travel in the member's report rather than being something you already hold.
 
 **A verdict is a measurement only if it post-dates the run that produced it.** A
 `Sizing:` line typed in before the skill ever ran is byte-identical to one the
-skill produced, so the body cannot settle this alone and the member's report
-carries the second source: when it ran `sizing-a-ticket` relative to opening the
-PR (measured on a member that wrote the line first, caught itself, and
-corrected it). **Record `sizing` only when the report places that run before the
-PR AND the line carries its signal.** Ordering clause missing, verdict authored
-before the run with no corrected value reported, or body and report naming
-different verdicts — leave the field BLANK and say which in `note`. Do not
-re-derive the verdict from the diff to fill the gap: `sizing-a-ticket` weighs
-more than file count, and a substituted proxy reads as measured too. **A value
-not in hand is left BLANK, never estimated** — blank reads as unknown and drops
-the row from a stratified comparison, while a guess reads as measured and
-poisons one. Blank still means the field is WRITTEN and empty: omit the flag
-(`--sizing`, `--profile`, `--loc`, `--files`) and the script writes that field
-empty at full width, because a row of some in-between width cannot be told
-apart from a shifted one. The `note` field is free text and sits before those
-four, so the script refuses a tab or newline in it: one tab would shift all
-four for that row alone.
+skill produced, so the body cannot settle this alone, and neither can the
+member's prose. The report file carries the second source: `sizing.ranBeforePr`,
+whether `sizing-a-ticket` ran before the PR was opened (measured on a member
+that wrote the line first, caught itself, and corrected it), and
+`sizing.signal`, what the verdict turned on. `append` applies the rule itself:
+it records `sizing` only when `ranBeforePr` is true AND `signal` is non-empty.
+Any other state — no report file, one that fails its schema, `sizing` null,
+`ranBeforePr` not true, an empty `signal` — leaves the field BLANK with a
+WARNING naming which, and you say which in `note`. A `--sizing` you do pass
+wins over the file, and stderr names the flag as the source: do not use it to
+fill that gap, and do not re-derive the verdict from the diff to fill it
+either — `sizing-a-ticket` weighs more than file count, and a substituted proxy
+reads as measured too. **A value not in hand is left BLANK, never estimated** —
+blank reads as unknown and drops the row from a stratified comparison, while a
+guess reads as measured and poisons one. Blank still means the field is
+WRITTEN and empty: omit the flag (`--sizing`, `--profile`, `--loc`, `--files`)
+and the script writes that field empty at full width, because a row of some
+in-between width cannot be told apart from a shifted one. The `note` field is
+free text and sits before those four, so the script refuses a tab or newline in
+it: one tab would shift all four for that row alone.
 
 **Then record the run's member facts — do not author them.** Scrape EVERY session
 directory for this cwd, not one:

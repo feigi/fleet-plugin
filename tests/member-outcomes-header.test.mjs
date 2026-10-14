@@ -127,3 +127,19 @@ test("the header names a producer script that exists", () => {
   assert.ok(existsSync(join(REPO, producer[1])), `the header names ${producer[1]} as its producer, which does not exist`);
   assert.equal(producer[1], "plugin/scripts/member-outcomes.mjs");
 });
+
+test("the header documents the `report` column: its four values, what it is read from, and when", () => {
+  // Derived from the member's name and the scratch root's files, not from the
+  // transcript, so nothing else in the header explains it and a reader taking
+  // `absent` for "the member failed to write one" is wrong for every row older
+  // than report files.
+  const paragraph = flat(HEADER.split("\n#\n").find((p) => p.includes("# `report`") || p.startsWith("`report`")) ?? "");
+  assert.ok(paragraph, "the header has no paragraph that opens on `report`");
+  for (const value of ["`ok`", "`invalid`", "`absent`", "`-`"]) {
+    assert.ok(paragraph.includes(value), `the \`report\` paragraph no longer defines ${value}`);
+  }
+  assert.match(paragraph, /DERIVED/);
+  assert.match(paragraph, /<scratch>\/reports\/<member>\.json/);
+  assert.match(paragraph, /WHEN THE ROW WAS LAST SCRAPED/);
+  assert.match(paragraph, /never that the member failed to write one/);
+});
