@@ -361,8 +361,10 @@ test("checkRoutes: every real plugin/agents definition routes cleanly, and the i
 
 // Every flag the check reads the live install through, pointed at a fixture:
 // a test that left one off would shell out to the box's own `omp`.
-function installFlags(d, { overrides = {}, modelRoles = MODEL_ROLES, catalog = CATALOG } = {}) {
+function installFlags(d, { overrides = {}, modelRoles = MODEL_ROLES, catalog = CATALOG, inFlight = "5", maxConcurrency = 32 } = {}) {
   return [
+    "--in-flight", inFlight,
+    "--max-concurrency", jsonFile(d, "max-concurrency.json", maxConcurrency),
     "--overrides", jsonFile(d, "overrides.json", overrides),
     "--model-roles", jsonFile(d, "model-roles.json", modelRoles),
     "--catalog", jsonFile(d, "catalog.json", catalog),
@@ -453,16 +455,23 @@ test("CLI: a --catalog file holding null refuses as null, not as object", () => 
   assert.match(r.stderr, /--catalog .*catalog\.json must be a JSON object, got null$/m);
 });
 
-test("CLI: --check without --check flag is required", () => {
+test("CLI: --check without --in-flight is a usage error", () => {
+  const d = dir();
+  const r = runCli(["--check"], d);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--in-flight is required with --check/);
+});
+
+test("CLI: --check and --in-flight are required", () => {
   const d = dir();
   const r = runCli([], d);
   assert.equal(r.status, 2);
-  assert.match(r.stderr, /--check is required/);
+  assert.match(r.stderr, /--check --in-flight/);
 });
 
 test("CLI: an unknown flag refuses by name", () => {
   const d = dir();
-  const r = runCli(["--check", "--bogus", "x"], d);
+  const r = runCli(["--check", "--in-flight", "5", "--bogus", "x"], d);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /unknown flag --bogus/);
 });
@@ -492,7 +501,7 @@ for (const [shape, printed] of NON_OBJECTS) {
   test(`CLI: live \`omp config get\` printing ${shape} refuses naming the command`, () => {
     const d = dir();
     const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-    const r = runCliWithFakeOmp(printed, ["--check", "--agents", agents, "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES), "--catalog", jsonFile(d, "c.json", CATALOG)], d);
+    const r = runCliWithFakeOmp(printed, ["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 32), "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES), "--catalog", jsonFile(d, "c.json", CATALOG)], d);
     assert.equal(r.status, 2, r.stderr);
     assert.match(r.stderr, new RegExp(`omp config get task\\.agentModelOverrides --json exited 0 but printed ${shape}, not a JSON object`));
   });
@@ -502,7 +511,7 @@ for (const [shape, printed] of NON_OBJECTS) {
   test(`CLI: live \`omp models\` printing ${shape} refuses naming the command`, () => {
     const d = dir();
     const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-    const r = runCliWithFakeOmp(printed, ["--check", "--agents", agents, "--overrides", jsonFile(d, "o.json", {}), "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES)], d);
+    const r = runCliWithFakeOmp(printed, ["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 32), "--overrides", jsonFile(d, "o.json", {}), "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES)], d);
     assert.equal(r.status, 2, r.stderr);
     assert.match(r.stderr, new RegExp(`omp models --json exited 0 but printed ${shape}, not a JSON object`));
   });
@@ -511,7 +520,7 @@ for (const [shape, printed] of NON_OBJECTS) {
 test("CLI: live `omp config get` envelope holding a null value refuses as null, not as object", () => {
   const d = dir();
   const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-  const r = runCliWithFakeOmp("{\"value\":null}", ["--check", "--agents", agents, "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES), "--catalog", jsonFile(d, "c.json", CATALOG)], d);
+  const r = runCliWithFakeOmp("{\"value\":null}", ["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 32), "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES), "--catalog", jsonFile(d, "c.json", CATALOG)], d);
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /omp config get task\.agentModelOverrides --json must be a JSON object, got null$/m);
 });
@@ -522,7 +531,7 @@ test("CLI: live `omp` reads printing well-formed objects are accepted", () => {
   // One fake serves all three reads: `{ value, models }` satisfies the config
   // envelope and the catalog at once; each config read then takes `value` as its record.
   const printed = JSON.stringify({ value: {}, models: CATALOG.models });
-  const r = runCliWithFakeOmp(printed, ["--check", "--agents", agents], d);
+  const r = runCliWithFakeOmp(printed, ["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 32)], d);
   assert.notEqual(r.status, 2, r.stderr);
   assert.doesNotMatch(r.stderr, /not a JSON object/);
 });
@@ -530,6 +539,80 @@ test("CLI: live `omp` reads printing well-formed objects are accepted", () => {
 test("CLI: live `omp` reads printing an empty object are not refused by the readOmpJson guard", () => {
   const d = dir();
   const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-  const r = runCliWithFakeOmp("{}", ["--check", "--agents", agents], d);
+  const r = runCliWithFakeOmp("{}", ["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 32)], d);
   assert.doesNotMatch(r.stderr, /exited 0 but printed/);
+});
+
+// Tests for the semaphore notice (in-flight bound check)
+test("CLI: semaphore notice when task.maxConcurrency is below 2·B+2", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  // B = 5, so 2·B+2 = 12. Test with maxConcurrency = 8, which is below the threshold.
+  const r = runCli(["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 8), ...installFlags(d, { maxConcurrency: 8 })], d);
+  // Should still exit 0 because the check itself passes, but should print the notice
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /task\.maxConcurrency is 8, below 2·5\+2 = 12/);
+});
+
+test("CLI: no semaphore notice when task.maxConcurrency is at threshold", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  // B = 5, so 2·B+2 = 12. Test with maxConcurrency = 12, which is exactly at the threshold.
+  const r = runCli(["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 12), ...installFlags(d, { maxConcurrency: 12 })], d);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /task\.maxConcurrency is 12, below/);
+});
+
+test("CLI: no semaphore notice when task.maxConcurrency is above threshold", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  // B = 5, so 2·B+2 = 12. Test with maxConcurrency = 32, which is above the threshold.
+  const r = runCli(["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 32), ...installFlags(d, { maxConcurrency: 32 })], d);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /task\.maxConcurrency is 32, below/);
+});
+
+test("CLI: no semaphore notice when task.maxConcurrency is 0 (unbounded)", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  // B = 5, but 0 means unbounded, so no notice should be printed.
+  const r = runCli(["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 0), ...installFlags(d, { maxConcurrency: 0 })], d);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /below/);
+});
+
+test("CLI: semaphore notice when task.maxConcurrency is unreadable", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  // Create an invalid JSON file to make the read fail
+  const badPath = jsonFile(d, "bad.json", "{invalid}");
+  const r = runCli(["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", badPath, ...installFlags(d)], d);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /task\.maxConcurrency unreadable/);
+  assert.match(r.stdout, /In-flight bound 5 is unchecked against it/);
+});
+
+test("CLI: semaphore notice with violations goes to stderr", () => {
+  const d = dir();
+  // Create an invalid agents directory to cause a violation
+  const agents = agentsDir({ "bad.md": "no agent here" });
+  // B = 5, so 2·B+2 = 12. Test with maxConcurrency = 8, which is below the threshold.
+  const r = runCli(["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 8), ...installFlags(d, { maxConcurrency: 8 })], d);
+  assert.equal(r.status, 1, r.stderr);
+  // With violations, the notice should go to stderr, not stdout
+  assert.match(r.stderr, /task\.maxConcurrency is 8, below 2·5\+2 = 12/);
+});
+
+test("CLI: --in-flight 0 exits with usage error", () => {
+  const d = dir();
+  const r = runCli(["--check", "--in-flight", "0", ...installFlags(d)], d);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--in-flight must be a positive integer/);
+});
+
+test("CLI: --in-flight x (non-integer) exits with usage error", () => {
+  const d = dir();
+  const r = runCli(["--check", "--in-flight", "abc", ...installFlags(d)], d);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--in-flight must be a positive integer/);
 });

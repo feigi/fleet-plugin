@@ -312,12 +312,57 @@ const die = makeDie(NAME);
 const { arg, has, sweep, stray } = defineFlags(die, {
   flags: {
     check: "bool",
+    "in-flight": "value",
     agents: "value",
     overrides: "value",
     "model-roles": "value",
     catalog: "value",
+    "max-concurrency": "value",
   },
 });
+
+// Read task.maxConcurrency and return a notice if it's below the required threshold
+// for the given in-flight bound. Returns null if no notice is needed.
+function semaphoreNotice({ inFlightBound, readMaxConcurrency, readMaxConcurrencyPath }) {
+  let read;
+  if (readMaxConcurrencyPath) {
+    try {
+      const content = readFileSync(readMaxConcurrencyPath, "utf8");
+      const value = JSON.parse(content);
+      read = { ok: true, value };
+    } catch (e) {
+      read = { ok: false, why: e.message };
+    }
+  } else {
+    try {
+      const value = readMaxConcurrency();
+      read = { ok: true, value };
+    } catch (e) {
+      read = { ok: false, why: e.message };
+    }
+  }
+
+  if (!read.ok) {
+    return `task.maxConcurrency unreadable — ${read.why}; In-flight bound ${inFlightBound} is unchecked against it`;
+  }
+
+  const c = read.value;
+  
+  // c = 0 means unbounded, so no notice
+  if (c === 0) return null;
+  
+  // Check if c is not a non-negative integer
+  if (!Number.isInteger(c) || c < 0) {
+    return `task.maxConcurrency unreadable — not a non-negative integer (got ${JSON.stringify(c)}); In-flight bound ${inFlightBound} is unchecked against it`;
+  }
+  
+  const threshold = 2 * inFlightBound + 2;
+  if (c < threshold) {
+    return `task.maxConcurrency is ${c}, below 2·${inFlightBound}+2 = ${threshold} for In-flight bound ${inFlightBound} — omp queues members past it, so a Pulled implementer may sit unstarted; raise it in omp config (the fleet never writes it)`;
+  }
+  
+  return null;
+}
 
 // `--<flagName> <path>` when given, else the live install read `readLive()`
 // performs (`source` names it in a refusal).
@@ -339,7 +384,16 @@ function main() {
   stray();
 
   const check = has("check");
-  if (!check) die("--check is required (usage: tier-roles.mjs --check [--agents <dir>] [--model-roles <path>] [--overrides <path>] [--catalog <path>])");
+  if (!check) die("--check --in-flight <B> is required (usage: tier-roles.mjs --check --in-flight <B> [--agents <dir>] [--model-roles <path>] [--overrides <path>] [--catalog <path>] [--max-concurrency <path>])");
+
+  const inFlightFlag = arg("in-flight");
+  if (!inFlightFlag) die("--in-flight is required with --check");
+
+  // Validate that in-flight is a positive integer (≥1)
+  const inFlightBound = Number(inFlightFlag);
+  if (!Number.isInteger(inFlightBound) || inFlightBound < 1) {
+    die(`--in-flight must be a positive integer, got ${inFlightFlag}`);
+  }
 
   const agentsFlag = arg("agents");
   const agentsDir = agentsFlag ?? join(SCRIPT_DIR, "..", "agents");
@@ -348,6 +402,15 @@ function main() {
   const modelRoles = loadJsonObject(arg("model-roles"), ...config("modelRoles"), "model-roles");
   const catalog = loadJsonObject(arg("catalog"), readOmpModelCatalog, "omp models --json", "catalog");
 
+  // Read task.maxConcurrency for the semaphore notice
+  const maxConcurrencyPath = arg("max-concurrency");
+  const readMaxConcurrency = () => readOmpConfigValue("task.maxConcurrency");
+  const semaphoreNoticeResult = semaphoreNotice({
+    inFlightBound,
+    readMaxConcurrency,
+    readMaxConcurrencyPath: maxConcurrencyPath,
+  });
+
   const { violations, notices } = checkRoutes({
     agentsDir,
     agentsSource: agentsFlag === null ? `the default agents directory ${agentsDir}` : undefined,
@@ -355,6 +418,11 @@ function main() {
     overrides,
     catalog,
   });
+
+  // Add semaphore notice to notices if applicable
+  if (semaphoreNoticeResult !== null) {
+    notices.push(semaphoreNoticeResult);
+  }
 
   if (violations.length === 0) {
     console.log("tier-roles: every definition routes to a resolvable model at a level it runs, no shadowing override");
