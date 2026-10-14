@@ -2173,7 +2173,7 @@ PRs**, because the two causes live at different levels — the budget is one
 account, the payload is one PR:
 
 ```sh
-budget_out= list_out= cap_out= blind=        # seed the latches: set -u reads each below before tick 1 ever assigns one
+budget_out= hidden_out= list_out= cap_out= blind= # seed the latches: set -u reads each below before tick 1 ever assigns one
 pr_cap=200                                   # the open-PR read's --limit; gh stops there with exit 0 and no warning
 while :; do                                   # one tick
   rl=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo ERR)
@@ -2210,34 +2210,52 @@ while :; do                                   # one tick
       # ceiling of one ci-state.mjs call on the counter `gh api rate_limit`
       # reports, for single-page reads: 2 on the common path, 4 for a PR whose
       # head dropped required jobs.
-      # The workflow and run lookups bill a second core bucket that `rate_limit`
-      # does not report and this gate does not guard. A shortfall pauses this
-      # tick's pass.
+      # A shortfall here, or at the Actions-bucket gate below, pauses this tick's pass.
       if [ "$rl" -lt $((200 + 4 * count)) ]; then
         if [ -z "$budget_out" ]; then
           echo "WATCHER DEGRADED: core REST budget=$rl < $((200 + 4 * count)) needed for $count PRs — CI polling paused, silence is NOT green"
           budget_out=1
         fi
       else
-        if [ -n "$budget_out" ]; then
-          echo "WATCHER RECOVERED: core budget=$rl — CI polling resumed"
-          budget_out=
-        fi
-        for pr in $(printf '%s\n' "$prs"); do # inline $(...): `for pr in $prs` is ONE iteration under zsh
-          st=$(~/.fleet/bin/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
-          if ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
-            case " $blind " in *" $pr "*) ;; *) # latch keyed BY PR: this cause is per-PR
-              echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
-              blind="$blind $pr" ;;
-            esac
-            continue                          # inner continue — still reaches the tick sleep
+        # The workflow and run lookups bill a second core bucket that
+        # `rate_limit` does not report. Its count is only in the response
+        # headers of a lookup that bills it: one 1-unit read per tick, 4 units
+        # per listed PR on the same 200 floor. Recovery for both buckets waits
+        # until this gate clears too, so no line says polling resumed while
+        # this one still pauses it.
+        hrl=$(gh api -i 'repos/{owner}/{repo}/actions/workflows?per_page=1' 2>/dev/null | awk 'tolower($1)=="x-ratelimit-remaining:" {sub(/\r$/, "", $2); print $2; exit}')
+        case "$hrl" in ''|*[!0-9]*) hrl=ERR;; esac # a missing header is an outage, not a budget
+        if [ "$hrl" = ERR ] || [ "$hrl" -lt $((200 + 4 * count)) ]; then
+          if [ -z "$hidden_out" ]; then
+            need=; [ "$hrl" = ERR ] || need=" < $((200 + 4 * count)) needed for $count PRs" # an unreadable header has no amount to compare
+            echo "WATCHER DEGRADED: unreported Actions core REST bucket=$hrl$need — CI polling paused, silence is NOT green"
+            hidden_out=1
           fi
-          case " $blind " in *" $pr "*)
-            echo "WATCHER RECOVERED: ci-state reading #$pr again — CI polling resumed"
-            keep=; for b in $(printf '%s\n' "$blind"); do [ "$b" = "$pr" ] || keep="$keep $b"; done; blind=$keep ;;
-          esac
-          : # your normal handling of $st for this PR
-        done
+        else
+          if [ -n "$budget_out" ]; then
+            echo "WATCHER RECOVERED: core budget=$rl — CI polling resumed"
+            budget_out=
+          fi
+          if [ -n "$hidden_out" ]; then
+            echo "WATCHER RECOVERED: unreported Actions core REST bucket=$hrl — CI polling resumed"
+            hidden_out=
+          fi
+          for pr in $(printf '%s\n' "$prs"); do # inline $(...): `for pr in $prs` is ONE iteration under zsh
+            st=$(~/.fleet/bin/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
+            if ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
+              case " $blind " in *" $pr "*) ;; *) # latch keyed BY PR: this cause is per-PR
+                echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
+                blind="$blind $pr" ;;
+              esac
+              continue                        # inner continue — still reaches the tick sleep
+            fi
+            case " $blind " in *" $pr "*)
+              echo "WATCHER RECOVERED: ci-state reading #$pr again — CI polling resumed"
+              keep=; for b in $(printf '%s\n' "$blind"); do [ "$b" = "$pr" ] || keep="$keep $b"; done; blind=$keep ;;
+            esac
+            : # your normal handling of $st for this PR
+          done
+        fi
       fi
     fi
   fi
@@ -2263,8 +2281,8 @@ as a CI reading. Require the field, then compare it.
 never one per tick. An unlatched line at a 120s poll gets the Monitor
 auto-stopped for volume during even a two-minute outage, reintroducing the same
 blindness by another route. **Latch each cause at the level its cause lives
-at**: the budget, the open-PR list and that list's cap are one global flag
-each — all three are account-level — but the payload latch is keyed by PR, and a
+at**: the budget, the unreported Actions bucket, the open-PR list and that
+list's cap are one global flag each — all account-level — but the payload latch is keyed by PR, and a
 shared scalar for those is an unlatched line wearing a latch's clothes — one
 persistently blind PR alongside one healthy PR re-clears the flag on every tick,
 emitting a DEGRADED and a false RECOVERED pair forever. The recovery line is
@@ -2280,7 +2298,7 @@ probe pairs during exactly the outage it is reporting. Every degraded
 branch above falls through to the same single sleep instead.
 
 **Guard every probe, not just the ones with a verdict field.** The block makes
-*three* API calls, and the third — `gh pr list` — is the one that looks like
+several API calls, and `gh pr list` is the one that looks like
 plumbing rather than a probe. A non-quota failure there (secondary/abuse limit,
 5xx, network blip, expired token) does not lower `.resources.core.remaining`, so
 the budget gate clears, and an unguarded `for pr in $(gh pr list …)` then
@@ -2306,8 +2324,9 @@ enforce. It latches globally like the list failure but does not pause polling:
 the PRs it did return are real, so the pass still watches them, and the
 DEGRADED line names the rest as unwatched until a pass comes back under the cap.
 
-**The budget is gated twice, and only the second gate announces recovery.** The
-tick-top floor (`200`) covers the probes themselves. Once the open-PR list is
+**The budget is gated at the floor and again at the pass, and only the pass
+gates announce recovery.** The tick-top floor (`200`) covers the `rate_limit`
+and `gh pr list` reads. Once the open-PR list is
 read, the pass gate reserves `200 + 4 × count` core REST units — 4 per listed PR
 on top of the floor, so the reserve grows with the list instead of staying a
 flat 200 that a long list drains mid-pass. The 4 is the measured ceiling of one
@@ -2316,21 +2335,36 @@ flat 200 that a long list drains mid-pass. The 4 is the measured ceiling of one
 to 100 jobs and 100 rules — more pages cost more. That counter is not the only
 core bucket one call bills. The lookups `actions/workflows`,
 `actions/workflows/<id>`, `actions/workflows/<id>/runs` and `actions/runs/<id>`
-bill a second one that `rate_limit` does not report and the gate does not
-guard; the boundary is per route, so `actions/runs/<id>/jobs` is on the gated
-counter. Every response says `X-Ratelimit-Resource: core`, so only the reset
-epoch and the used sequence tell the two apart. An exhausted unreported bucket
-shows up only as per-PR `rate-limited` verdicts, which the blind-PR path
-already latches. A shortfall at either gate pauses the **whole** pass through
-the one budget latch and never polls a prefix of the list: a prefix runs
+bill a second one that `rate_limit` does not report; the boundary is per route,
+so `actions/runs/<id>/jobs` is on the reported counter. Every response says
+`X-Ratelimit-Resource: core`, so only the reset epoch and the used sequence tell
+the two apart, and the unreported bucket's remaining count is readable only from
+the `X-Ratelimit-Remaining` header of a call that bills it. **A second pass gate
+therefore probes it too**: one `gh api -i` read of
+`actions/workflows?per_page=1` per tick, 1 unit of that bucket (measured
+2026-10-13: its remaining count fell by 1 per call while `rate_limit` stood
+still, and its reset epoch differed from `rate_limit`'s). A `ci-state` call
+spends 4 units of it on the common path — one `gh run list` and one `gh run view`
+cost 2 each (measured the same day) — so it is held to the same `200 + 4 × count`
+reserve. It has its own global latch (`hidden_out`) and its DEGRADED and
+RECOVERED lines name it, so a pause on this bucket is not misread as the
+reported budget running low. An unreadable header is an outage here exactly as a
+non-numeric `rate_limit` read is. The probe runs only when the reported-bucket
+gate has cleared, so a tick costs at most one probe call. The gate pauses before
+the per-PR pass, so it never touches the per-PR blind latch: a PR is either not
+polled — no per-PR line, and one already latched blind stays latched — or polled
+and reported through that latch alone, never by both. A shortfall at any of
+these gates pauses the **whole** pass and never polls a prefix of the list: a prefix runs
 in list order, so the same tail PRs would go unread every tick with no line at
 all (never polled, so nothing marks them blind), while the PRs that were polled
-would run dry mid-pass and each emit a blind line. The DEGRADED line from the
-pass gate names the amount it needed and the count it needed it for, so a
-healthy-looking `budget=999` is not read as an outage with no cause. Only the
-pass gate emits the budget RECOVERED line: announcing recovery at the floor
-would report resumption on a tick whose pass gate then pauses it again — a
-DEGRADED/RECOVERED pair every tick.
+would run dry mid-pass and each emit a blind line. The DEGRADED line from each
+pass gate names the amount it needed and the count it needed it for — except an
+unreadable header, which has no amount to compare and prints `bucket=ERR` alone
+— so a healthy-looking `budget=999` is not read as an outage with no cause. Only the
+pass gates emit RECOVERED lines, and both only once the pass will actually run:
+announcing recovery at the floor, or for one bucket while the other still pauses
+the pass, would report resumption on a tick whose other gate then pauses it
+again — a DEGRADED/RECOVERED pair every tick.
 
 **Judge `ci-state` on its payload, never its exit code** — the same rule as
 `merge-gate.mjs` applies on the merge path, applied to the watcher. `not-green` is an
