@@ -15,6 +15,12 @@ Follows [`plugin/skills/run-team/SKILL.md`](../../plugin/skills/run-team/SKILL.m
    live gate, launch the cockpit
    ([Ledger & Cockpit](ledger-and-cockpit.md)), build the
    [Shortlist](supply-and-shortlist.md).
+   `phase0.mjs` runs the start sequence in order and writes
+   `.fleet/phase0.json`, a receipt naming each step `ok`, `pending`,
+   `failed`, `drift` or `unanswered`. A step that needs the controller
+   (the Recipe derivation, a stranded claim to resume) stops it with a
+   `NEED` line and exit 4; a re-run in the same run skips every `ok`
+   step and continues from the pending one.
 2. **React to every wake** — a report, a label change, a CI run ending,
    or the [heartbeat](reaping-and-liveness.md)'s level-check — with one
    `fleet-tick.mjs` call: it reconciles `.fleet/ledger.md` and prints
