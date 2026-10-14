@@ -177,6 +177,23 @@ echo "    ${merge}^1 = $first  (${parents} parents)" >&2
 echo "    ${merge}^2 = $second" >&2
 echo "    claimed head = $post_full" >&2
 
+# To detect merge-commit path, we need to check if pre is a parent of post
+# Extract post's parents
+post_parent_line=$(git rev-list --parents -n 1 "$post_full" --) || die "cannot read the parents of $post_full"
+# Word-splitting is the point: "<post> <parent>..." -> positional params.
+# shellcheck disable=SC2086
+set -- $post_parent_line
+shift
+post_parents=$#
+post_first=""
+post_second=""
+if [ $post_parents -ge 1 ]; then
+  post_first=$1
+fi
+if [ $post_parents -ge 2 ]; then
+  post_second=$2
+fi
+
 echo "\$ git merge-base --is-ancestor $first $post_full" >&2
 head_current=$(is_ancestor "$first" "$post_full")
 
@@ -184,12 +201,12 @@ if [ "$pre_full" = "$post_full" ]; then
   proof_path=no-rebase
   teeth=true
   echo "    no rebase (pre == post) — leg 1 dropped, headWasCurrent carries it" >&2
-elif [ "$parents" -eq 2 ] && { [ "$first" = "$pre_full" ] || [ "$second" = "$pre_full" ]; }; then
+elif [ "$post_parents" -eq 2 ] && { [ "$post_first" = "$pre_full" ] || [ "$post_second" = "$pre_full" ]; }; then
   proof_path=merge-commit
-  if [ "$first" = "$pre_full" ]; then
-    echo "    merge-commit (pre != post, pre is first parent) — pre is a parent of post" >&2
+  if [ "$post_first" = "$pre_full" ]; then
+    echo "    merge-commit (pre != post, pre is first parent of post) — pre is a parent of post" >&2
   else
-    echo "    merge-commit (pre != post, pre is second parent) — pre is a parent of post" >&2
+    echo "    merge-commit (pre != post, pre is second parent of post) — pre is a parent of post" >&2
   fi
   teeth=true
 else
