@@ -2183,27 +2183,18 @@ while :; do                                   # one tick
       echo "WATCHER DEGRADED: core REST budget=$rl — CI polling paused, silence is NOT green"
       budget_out=1
     fi
-  else                                        # budget RECOVERED waits for the per-pass gate below
+  else                                        # every RECOVERED waits for the pass gates below
     prs=$(gh pr list --state open --limit "$pr_cap" --json number --jq '.[].number' 2>/dev/null) || prs=ERR
     if [ "$prs" = ERR ]; then
       if [ -z "$list_out" ]; then             # global latch: this cause is account-level too
         echo "WATCHER DEGRADED: cannot list open PRs — CI polling paused, silence is NOT green"
         list_out=1
       fi
-    else
-      if [ -n "$list_out" ]; then
-        echo "WATCHER RECOVERED: open-PR list readable again — CI polling resumed"
-        list_out=
-      fi
+    else                                      # a list or cap RECOVERED waits for the pass gates too
       count=$(printf '%s\n' "$prs" | grep -c .) || : # grep -c exits 1 on zero matches; set -e must not take it
-      if [ "$count" -ge "$pr_cap" ]; then
-        if [ -z "$cap_out" ]; then            # global latch: a full page may have been cut there
-          echo "WATCHER DEGRADED: open-PR list hit its --limit $pr_cap — PRs past it are NOT watched, silence on them is NOT green"
-          cap_out=1
-        fi
-      elif [ -n "$cap_out" ]; then
-        echo "WATCHER RECOVERED: open-PR list under its --limit $pr_cap — every open PR watched again"
-        cap_out=
+      if [ "$count" -ge "$pr_cap" ] && [ -z "$cap_out" ]; then # global latch: a full page may have been cut there
+        echo "WATCHER DEGRADED: open-PR list hit its --limit $pr_cap — PRs past it are NOT watched, silence on them is NOT green"
+        cap_out=1
       fi
       # gh pr list is GraphQL, so $rl still holds. The pass is budgeted at 4 core
       # REST units per listed PR on top of the 200 floor. The 4 is the measured
@@ -2220,9 +2211,9 @@ while :; do                                   # one tick
         # The workflow and run lookups bill a second core bucket that
         # `rate_limit` does not report. Its count is only in the response
         # headers of a lookup that bills it: one 1-unit read per tick, 4 units
-        # per listed PR on the same 200 floor. Recovery for both buckets waits
-        # until this gate clears too, so no line says polling resumed while
-        # this one still pauses it.
+        # per listed PR on the same 200 floor. Recovery for every global latch
+        # waits until this gate clears too, so no line says polling resumed
+        # while this one still pauses it.
         hrl=$(gh api -i 'repos/{owner}/{repo}/actions/workflows?per_page=1' 2>/dev/null | awk 'tolower($1)=="x-ratelimit-remaining:" {sub(/\r$/, "", $2); print $2; exit}')
         case "$hrl" in ''|*[!0-9]*) hrl=ERR;; esac # a missing header is an outage, not a budget
         if [ "$hrl" = ERR ] || [ "$hrl" -lt $((200 + 4 * count)) ]; then
@@ -2232,6 +2223,14 @@ while :; do                                   # one tick
             hidden_out=1
           fi
         else
+          if [ -n "$list_out" ]; then
+            echo "WATCHER RECOVERED: open-PR list readable again — CI polling resumed"
+            list_out=
+          fi
+          if [ -n "$cap_out" ] && [ "$count" -lt "$pr_cap" ]; then
+            echo "WATCHER RECOVERED: open-PR list under its --limit $pr_cap — every open PR watched again"
+            cap_out=
+          fi
           if [ -n "$budget_out" ]; then
             echo "WATCHER RECOVERED: core budget=$rl — CI polling resumed"
             budget_out=
@@ -2361,10 +2360,14 @@ would run dry mid-pass and each emit a blind line. The DEGRADED line from each
 pass gate names the amount it needed and the count it needed it for — except an
 unreadable header, which has no amount to compare and prints `bucket=ERR` alone
 — so a healthy-looking `budget=999` is not read as an outage with no cause. Only the
-pass gates emit RECOVERED lines, and both only once the pass will actually run:
-announcing recovery at the floor, or for one bucket while the other still pauses
-the pass, would report resumption on a tick whose other gate then pauses it
-again — a DEGRADED/RECOVERED pair every tick.
+pass gates emit RECOVERED lines — the budget's and the unreported bucket's, and the
+open-PR list's and its cap's with them — and all of them only once the pass will
+actually run: announcing recovery at the floor, or for one bucket while the other
+still pauses the pass, would report resumption on a tick whose other gate then
+pauses it again — a DEGRADED/RECOVERED pair every tick — and announcing the list or
+its cap on the tick that reads it back would say polling resumed on a tick that
+polls nothing. A list or cap latch held across a paused tick stays latched and says
+nothing more.
 
 **Judge `ci-state` on its payload, never its exit code** — the same rule as
 `merge-gate.mjs` applies on the merge path, applied to the watcher. `not-green` is an
