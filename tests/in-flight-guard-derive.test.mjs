@@ -141,7 +141,7 @@ test("window values: signal 1 divides by N, not by booked rows; signal 4 is the 
   assert.equal(lat.values["4a"], 5.5 * MIN);
   assert.ok(Math.abs(lat.values["4b"] - 9.1 * MIN) < 1e-6);
   assert.ok(Number.isNaN(lat.values["1"]) && Number.isNaN(lat.values["2"]), "no rows and no turns are a missing reading, not a zero");
-  const some = G.windowValues(ten, { bookings: new Map(), turns: [], reviewStarts: new Map(starts.entries().toArray().slice(0, 4)) });
+  const some = G.windowValues(ten, { bookings: new Map(), turns: [], reviewStarts: new Map([...starts].slice(0, 4)) });
   assert.equal(some.diag.review_prs, 4);
   assert.equal(some.diag.no_review_prs.length, 6);
 });
@@ -472,6 +472,7 @@ test("CLI: --merge alone prints the six bands, no windows and no verdict, and ex
 
 test("CLI: input errors exit 2 and print no verdict", () => {
   const w = world();
+  const refused = path.join(ROOT, `.guard-test-cache-${process.pid}`);
   const cases = [
     [["--merge", "yesterday"], /--merge must be an ISO-8601 instant/],
     [["--merge", MERGE, "--cutover", "2026-10-01"], /--cutover must be an ISO-8601 instant/],
@@ -480,17 +481,21 @@ test("CLI: input errors exit 2 and print no verdict", () => {
     [["--merge", MERGE, "--bogus"], /unknown flag --bogus/],
     [["--merge", MERGE, "--n", "0"], /--n must be a positive integer/],
     [["--merge", MERGE, "--offset", "21"], /--offset must be between 1 and --n/],
-    [["--merge", MERGE, "--cache", path.join(ROOT, "scratch-cache")], /inside the git checkout/],
+    [["--merge", MERGE, "--cache", refused], /inside the git checkout/],
   ];
-  for (const [args, re] of cases) {
-    const r = spawnSync(process.execPath, [SCRIPT, ...args, ...(args.includes("--cache") ? [] : ["--cache", path.join(w.dir, "cache")]), "--member-outcomes", w.tsv, "--sessions", w.sessions], {
-      encoding: "utf8", env: { ...process.env, PATH: `${w.gh.bin}${path.delimiter}${process.env.PATH}` },
-    });
-    assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}${r.stdout}`);
-    assert.match(r.stderr, re);
-    assert.doesNotMatch(r.stdout, /Verdicts/);
+  try {
+    for (const [args, re] of cases) {
+      const r = spawnSync(process.execPath, [SCRIPT, ...args, ...(args.includes("--cache") ? [] : ["--cache", path.join(w.dir, "cache")]), "--member-outcomes", w.tsv, "--sessions", w.sessions], {
+        encoding: "utf8", env: { ...process.env, PATH: `${w.gh.bin}${path.delimiter}${process.env.PATH}` },
+      });
+      assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}${r.stdout}`);
+      assert.match(r.stderr, re);
+      assert.doesNotMatch(r.stdout, /Verdicts/);
+    }
+    assert.ok(!fs.existsSync(refused), "a refused cache is not created");
+  } finally {
+    fs.rmSync(refused, { recursive: true, force: true });
   }
-  assert.ok(!fs.existsSync(path.join(ROOT, "scratch-cache")), "a refused cache is not created");
 });
 
 test("CLI: an untrusted GitHub page (not an array) is an input error, exit 2", () => {
