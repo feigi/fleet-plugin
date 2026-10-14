@@ -1,6 +1,6 @@
 # harness-node — external assumptions
 
-Scope: `plugin/scripts/{board.mjs,board.html,compute-board.mjs,compute-spend.mjs,ledger.mjs,ledger-grammar.mjs,member-record.mjs,member-outcomes.mjs,review-core.mjs,review-eval.mjs,prompt-renderer.mjs,strip-comments.mjs,frontmatter-check.mjs,frontmatter-allowlist.json,prose-pin.mjs,cwd-isolation-pins.mjs}`, `plugin/.claude-plugin/plugin.json`, `.omp-plugin/marketplace.json`, `package.json`, `.nvmrc`, `renovate.json`.
+Scope: `plugin/scripts/{board.mjs,board.html,compute-board.mjs,compute-spend.mjs,ledger.mjs,ledger-grammar.mjs,member-record.mjs,member-outcomes.mjs,review-core.mjs,review-eval.mjs,prompt-renderer.mjs,strip-comments.mjs,frontmatter-check.mjs,frontmatter-allowlist.json,prose-pin.mjs,cwd-isolation-pins.mjs,report-schema.mjs}`, `plugin/.claude-plugin/plugin.json`, `.omp-plugin/marketplace.json`, `package.json`, `.nvmrc`, `renovate.json`.
 
 ## Harness API surface (omp)
 
@@ -43,6 +43,7 @@ Scope: `plugin/scripts/{board.mjs,board.html,compute-board.mjs,compute-spend.mjs
 | 35 | **Retired (ADR 0014):** compared Claude's `SendMessage`-resumes-transcript behavior against omp's `hub send` fresh-peer-suffix behavior — moot now that no Claude-side `SendMessage` exists to compare against. | — (cited the deleted `plugin/scripts/marked-pairs.mjs`; tracked by #2164) | — |
 | 36 | **Retired (ADR 0014):** compared omp's `hub send` structured receipt against Claude's hand-rolled reconciliation — moot now that no Claude-side receipt handling exists to compare against. | — (cited the deleted `plugin/scripts/marked-pairs.mjs`; tracked by #2164) | — |
 | 37 | **Retired (ADR 0014):** compared omp's `hub cancel` outcome reporting against a Claude-side cancellation token — moot now that no Claude-side cancellation path exists to compare against. | — (cited the deleted `plugin/scripts/marked-pairs.mjs`; tracked by #2164) | — |
+| 117 | **Unverified — not measurable from a member session.** A `task` dispatched with `outputSchema` and `schemaMode: "strict"` whose result fails the schema ends as a failed job, not as an accepted result with the field nulled or overridden (the structured-member-reports spec assumes `failed`; row 5 is the `eval` `agent()` side) | `plugin/scripts/report-schema.mjs:42-55` "What omp does with a result that fails it was NOT measurable from a member session, so nothing here assumes an answer" ; measured 2026-10-14 under omp/18.10.3: the member session's `task` items take `{ agent, name, solutionSpace, task, tools }`, and one dispatch carrying `outputSchema` and `schemaMode: "strict"`, told to return `{}`, was refused at preflight — "Task SchemaProbe failed preflight: Cannot spawn 'task'. Allowed: none (spawns disabled for this agent)" — so no job existed and no job status was observed | A strict dispatch whose invalid result is accepted or nulled would hand the controller a report its schema never held; a reader that runs `report-schema.mjs validate` on the file still refuses it |
 
 ## GitHub tracker (`gh`, labels, PR/issue JSON fields)
 
