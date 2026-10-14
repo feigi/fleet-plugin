@@ -1,6 +1,6 @@
 # harness-node — external assumptions
 
-Scope: `plugin/scripts/{board.mjs,board.html,compute-board.mjs,compute-spend.mjs,ledger.mjs,ledger-grammar.mjs,member-record.mjs,member-outcomes.mjs,review-core.mjs,review-eval.mjs,prompt-renderer.mjs,strip-comments.mjs,frontmatter-check.mjs,frontmatter-allowlist.json,prose-pin.mjs,cwd-isolation-pins.mjs}`, `plugin/.claude-plugin/plugin.json`, `.omp-plugin/marketplace.json`, `package.json`, `.nvmrc`, `renovate.json`.
+Scope: `plugin/scripts/{board.mjs,board.html,compute-board.mjs,compute-spend.mjs,ledger.mjs,ledger-grammar.mjs,member-record.mjs,member-outcomes.mjs,review-core.mjs,review-eval.mjs,prompt-renderer.mjs,strip-comments.mjs,frontmatter-check.mjs,frontmatter-allowlist.json,prose-pin.mjs,cwd-isolation-pins.mjs,report-schema.mjs}`, `plugin/.claude-plugin/plugin.json`, `.omp-plugin/marketplace.json`, `package.json`, `.nvmrc`, `renovate.json`.
 
 ## Harness API surface (omp)
 
@@ -43,6 +43,7 @@ Scope: `plugin/scripts/{board.mjs,board.html,compute-board.mjs,compute-spend.mjs
 | 35 | **Retired (ADR 0014):** compared Claude's `SendMessage`-resumes-transcript behavior against omp's `hub send` fresh-peer-suffix behavior — moot now that no Claude-side `SendMessage` exists to compare against. | — (cited the deleted `plugin/scripts/marked-pairs.mjs`; tracked by #2164) | — |
 | 36 | **Retired (ADR 0014):** compared omp's `hub send` structured receipt against Claude's hand-rolled reconciliation — moot now that no Claude-side receipt handling exists to compare against. | — (cited the deleted `plugin/scripts/marked-pairs.mjs`; tracked by #2164) | — |
 | 37 | **Retired (ADR 0014):** compared omp's `hub cancel` outcome reporting against a Claude-side cancellation token — moot now that no Claude-side cancellation path exists to compare against. | — (cited the deleted `plugin/scripts/marked-pairs.mjs`; tracked by #2164) | — |
+| 117 | **Measured on `eval`'s `agent()` only, not on `task`.** A dispatch carrying a schema with `schemaMode: "strict"` whose result fails it ends as a `failed` job whose `wait()` rejects with `schema_violation`, not as an accepted result with the field nulled or overridden; the same dispatch in `"permissive"` ends `completed` with the invalid result. Whether a `task` item carrying `outputSchema` and `schemaMode` behaves the same is unmeasured: a member session's `task` tool does not take those fields (row 5 is the `agent()` default-mode half) | `plugin/scripts/report-schema.mjs:45-74` "Measured 2026-10-14 under omp/18.10.3, and only on" ; a child told to submit `{}` against a schema requiring `x` was answered by its `yield` tool "Output does not match schema: x: is required. Call yield again with the corrected shape — 2 retry attempt(s) remain before the schema constraint is dropped." then `1 retry attempt(s) remain`, `this is the final retry`, and "Result submitted (schema validation overridden after 4 failed attempt(s))."; strict → status `failed`, `wait()` rejected with "schema_violation: missing required fields: x", output text `{"error":"schema_violation","message":"x: is required","missingRequired":["x"],"data":"{}"}`; permissive → status `completed`, result `{}` | A strict dispatch whose invalid result is accepted or nulled would hand the controller a report its schema never held; a `task` item that behaves unlike `agent()` here would make a caller that reads the job status as the schema verdict wrong. A reader that runs `report-schema.mjs validate` on the file refuses either |
 
 ## GitHub tracker (`gh`, labels, PR/issue JSON fields)
 
@@ -183,6 +184,7 @@ Scanned in full or via targeted `grep` + follow-up `read` of every matched regio
 - `plugin/scripts/frontmatter-allowlist.json` (76 lines at `a7cb31d0`) — read in full
 - `plugin/scripts/prose-pin.mjs` (845 lines at `a7cb31d0`) — exports listed via grep, `DIALECT_TOKENS`/gutter-stripping functions read directly; remaining exports are internal prose-pinning machinery with no external-world assumptions beyond the dialect table already captured (row 34, retired — `ed9f2967` removed the `DIALECT_TOKENS` export)
 - `plugin/scripts/cwd-isolation-pins.mjs` (86 lines at `a7cb31d0`) — read in full
+- `plugin/scripts/report-schema.mjs` (241 lines at `f4c53dba`) — read in full (header measurement block, `SCHEMAS`, validator, CLI)
 - `plugin/.claude-plugin/plugin.json` (9 lines at `a7cb31d0`) — read in full
 - `.omp-plugin/marketplace.json` (21 lines at `ed9f2967`; deleted by `15c8b32b`) — read in full as `.claude-plugin/marketplace.json` (22 lines at `a7cb31d0`), which `ed9f2967` renamed to this path
 - `package.json` (5 lines at `a7cb31d0`) — read in full

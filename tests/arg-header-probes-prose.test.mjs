@@ -132,9 +132,14 @@ const sweepWordingFor = (known) => {
 
 // The wording minus the accepted-flag tail, which is per-script. The boundary
 // between them is DIFFED rather than cut at the literal " — accepted:" text:
-// two runs with accepted-lists that diverge at their first character share a
-// prefix exactly up to wherever `sweep()` starts writing the list, whatever
-// words carry it. Cutting at a hardcoded separator instead degrades silently
+// two runs with accepted-lists that diverge at their first name character
+// share a prefix up to that character, and a third run with an EMPTY table —
+// a script that takes no flags at all still delegates to `sweep()` — ends
+// where the list would start, so the prefix all three share stops exactly at
+// wherever `sweep()` starts writing the list, whatever words carry it.
+// Without the empty run the prefix would carry the list's own leading `--`,
+// and a delegator with no flags would read as answering in its own wording.
+// Cutting at a hardcoded separator instead degrades silently
 // on a reword — `indexOf` returns -1, `slice(0, -1)` keeps nearly the whole
 // message, and a delegator answering in ITS OWN wording (which still shares
 // that near-whole prefix by coincidence of the run-time only) reads as
@@ -142,8 +147,15 @@ const sweepWordingFor = (known) => {
 // that the pin needs to move.
 const sweepA = sweepWordingFor(["aaa-boundary-probe"]);
 const sweepB = sweepWordingFor(["zzz-boundary-probe"]);
+const sweepNone = sweepWordingFor([]);
 let sharedLength = 0;
-while (sharedLength < sweepA.length && sharedLength < sweepB.length && sweepA[sharedLength] === sweepB[sharedLength]) sharedLength++;
+while (
+  sharedLength < sweepA.length &&
+  sharedLength < sweepB.length &&
+  sharedLength < sweepNone.length &&
+  sweepA[sharedLength] === sweepB[sharedLength] &&
+  sweepA[sharedLength] === sweepNone[sharedLength]
+) sharedLength++;
 assert.ok(
   sharedLength > 0 && sharedLength < sweepA.length,
   "sweep()'s wording no longer varies with the accepted list the way this derivation needs — two different one-item lists produced identical (or entirely different) messages",
