@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   parseModelRoute, parseFrontmatter, stripLevel, resolveRole, expectedOmpModel,
-  modelsEqual, checkRoutes, catalogEntry,
+  modelsEqual, checkRoutes, catalogEntry, semaphoreNotice,
 } from "../plugin/scripts/tier-roles.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/tier-roles.mjs", import.meta.url));
@@ -360,9 +360,15 @@ test("checkRoutes: every real plugin/agents definition routes cleanly, and the i
 // ---------------------------------------------------------------------------
 
 // Every flag the check reads the live install through, pointed at a fixture:
-// a test that left one off would shell out to the box's own `omp`.
-function installFlags(d, { overrides = {}, modelRoles = MODEL_ROLES, catalog = CATALOG } = {}) {
+// a test that left one off would shell out to the box's own `omp`. Each flag
+// is given here once and a test never repeats one: arg() is first-wins, so a
+// second copy would be ignored without a sound. `maxConcurrencyPath` is a
+// path, not a value, so a test can hand over a file that is not JSON; null
+// leaves the flag off, so the notice reads the live `omp`.
+function installFlags(d, { overrides = {}, modelRoles = MODEL_ROLES, catalog = CATALOG, inFlight = "5", maxConcurrencyPath = jsonFile(d, "max-concurrency.json", 32) } = {}) {
   return [
+    "--in-flight", inFlight,
+    ...(maxConcurrencyPath === null ? [] : ["--max-concurrency", maxConcurrencyPath]),
     "--overrides", jsonFile(d, "overrides.json", overrides),
     "--model-roles", jsonFile(d, "model-roles.json", modelRoles),
     "--catalog", jsonFile(d, "catalog.json", catalog),
@@ -453,16 +459,24 @@ test("CLI: a --catalog file holding null refuses as null, not as object", () => 
   assert.match(r.stderr, /--catalog .*catalog\.json must be a JSON object, got null$/m);
 });
 
-test("CLI: --check without --check flag is required", () => {
+test("CLI: --check without --in-flight is a usage error", () => {
+  const d = dir();
+  const r = runCli(["--check"], d);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--in-flight is required with --check/);
+  assert.equal(r.stdout, "");
+});
+
+test("CLI: --check and --in-flight are required", () => {
   const d = dir();
   const r = runCli([], d);
   assert.equal(r.status, 2);
-  assert.match(r.stderr, /--check is required/);
+  assert.match(r.stderr, /--check --in-flight/);
 });
 
 test("CLI: an unknown flag refuses by name", () => {
   const d = dir();
-  const r = runCli(["--check", "--bogus", "x"], d);
+  const r = runCli(["--check", "--in-flight", "5", "--bogus", "x"], d);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /unknown flag --bogus/);
 });
@@ -473,15 +487,21 @@ test("CLI: --agents defaults to the plugin's own agents directory", () => {
   assert.equal(r.status, 0, r.stderr);
 });
 
-// A fake `omp` first on PATH whose every invocation prints `stdout` — the live
-// reads (`omp config get … --json`, `omp models --json`) have no flag-free
-// fixture path, so the binary itself is the fixture.
-function runCliWithFakeOmp(stdout, argv, cwd) {
+// A fake `omp` first on PATH running `script` — the live reads
+// (`omp config get … --json`, `omp models --json`) have no flag-free fixture
+// path, so the binary itself is the fixture. It is called `omp <subcommand>
+// <key> --json`, so a script can answer by `$3`.
+function runCliWithOmpScript(script, argv, cwd) {
   const bin = dir();
   const fake = join(bin, "omp");
-  writeFileSync(fake, `#!/bin/sh\ncat <<'FAKE_OMP_EOF'\n${stdout}\nFAKE_OMP_EOF\n`);
+  writeFileSync(fake, `#!/bin/sh\n${script}\n`);
   chmodSync(fake, 0o755);
   return runCli(argv, cwd, { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` });
+}
+
+// A fake `omp` whose every invocation prints `stdout`.
+function runCliWithFakeOmp(stdout, argv, cwd) {
+  return runCliWithOmpScript(`cat <<'FAKE_OMP_EOF'\n${stdout}\nFAKE_OMP_EOF`, argv, cwd);
 }
 
 // What an `omp` read may print that is JSON yet not an object, with the shape
@@ -492,7 +512,7 @@ for (const [shape, printed] of NON_OBJECTS) {
   test(`CLI: live \`omp config get\` printing ${shape} refuses naming the command`, () => {
     const d = dir();
     const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-    const r = runCliWithFakeOmp(printed, ["--check", "--agents", agents, "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES), "--catalog", jsonFile(d, "c.json", CATALOG)], d);
+    const r = runCliWithFakeOmp(printed, ["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 32), "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES), "--catalog", jsonFile(d, "c.json", CATALOG)], d);
     assert.equal(r.status, 2, r.stderr);
     assert.match(r.stderr, new RegExp(`omp config get task\\.agentModelOverrides --json exited 0 but printed ${shape}, not a JSON object`));
   });
@@ -502,7 +522,7 @@ for (const [shape, printed] of NON_OBJECTS) {
   test(`CLI: live \`omp models\` printing ${shape} refuses naming the command`, () => {
     const d = dir();
     const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-    const r = runCliWithFakeOmp(printed, ["--check", "--agents", agents, "--overrides", jsonFile(d, "o.json", {}), "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES)], d);
+    const r = runCliWithFakeOmp(printed, ["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 32), "--overrides", jsonFile(d, "o.json", {}), "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES)], d);
     assert.equal(r.status, 2, r.stderr);
     assert.match(r.stderr, new RegExp(`omp models --json exited 0 but printed ${shape}, not a JSON object`));
   });
@@ -511,7 +531,7 @@ for (const [shape, printed] of NON_OBJECTS) {
 test("CLI: live `omp config get` envelope holding a null value refuses as null, not as object", () => {
   const d = dir();
   const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-  const r = runCliWithFakeOmp("{\"value\":null}", ["--check", "--agents", agents, "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES), "--catalog", jsonFile(d, "c.json", CATALOG)], d);
+  const r = runCliWithFakeOmp("{\"value\":null}", ["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 32), "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES), "--catalog", jsonFile(d, "c.json", CATALOG)], d);
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /omp config get task\.agentModelOverrides --json must be a JSON object, got null$/m);
 });
@@ -522,7 +542,7 @@ test("CLI: live `omp` reads printing well-formed objects are accepted", () => {
   // One fake serves all three reads: `{ value, models }` satisfies the config
   // envelope and the catalog at once; each config read then takes `value` as its record.
   const printed = JSON.stringify({ value: {}, models: CATALOG.models });
-  const r = runCliWithFakeOmp(printed, ["--check", "--agents", agents], d);
+  const r = runCliWithFakeOmp(printed, ["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 32)], d);
   assert.notEqual(r.status, 2, r.stderr);
   assert.doesNotMatch(r.stderr, /not a JSON object/);
 });
@@ -530,6 +550,167 @@ test("CLI: live `omp` reads printing well-formed objects are accepted", () => {
 test("CLI: live `omp` reads printing an empty object are not refused by the readOmpJson guard", () => {
   const d = dir();
   const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-  const r = runCliWithFakeOmp("{}", ["--check", "--agents", agents], d);
+  const r = runCliWithFakeOmp("{}", ["--check", "--in-flight", "5", "--agents", agents, "--max-concurrency", jsonFile(d, "mc.json", 32)], d);
   assert.doesNotMatch(r.stderr, /exited 0 but printed/);
 });
+
+// ---------------------------------------------------------------------------
+// semaphoreNotice — the phase-0 `task.maxConcurrency` notice
+// ---------------------------------------------------------------------------
+
+const NOTICE_8_AT_5 = "task.maxConcurrency is 8, below 2·5+2 = 12 for In-flight bound 5 — omp queues members past it, so a Pulled implementer may sit unstarted; raise it in omp config (the fleet never writes it)";
+
+test("semaphoreNotice: below 2·B+2 names c, B and the threshold", () => {
+  assert.equal(semaphoreNotice({ inFlight: 5, read: { ok: true, value: 8 } }), NOTICE_8_AT_5);
+  assert.equal(semaphoreNotice({ inFlight: 5, read: { ok: true, value: 11 } }), NOTICE_8_AT_5.replace("is 8,", "is 11,"));
+});
+
+test("semaphoreNotice: the threshold is 2·B+2 for the B it is given", () => {
+  assert.equal(semaphoreNotice({ inFlight: 1, read: { ok: true, value: 3 } }), "task.maxConcurrency is 3, below 2·1+2 = 4 for In-flight bound 1 — omp queues members past it, so a Pulled implementer may sit unstarted; raise it in omp config (the fleet never writes it)");
+  assert.equal(semaphoreNotice({ inFlight: 1, read: { ok: true, value: 4 } }), null);
+  assert.equal(semaphoreNotice({ inFlight: 5, read: { ok: true, value: 12 } }), null);
+  assert.equal(semaphoreNotice({ inFlight: 5, read: { ok: true, value: 32 } }), null);
+});
+
+test("semaphoreNotice: 0 is unbounded and prints nothing", () => {
+  assert.equal(semaphoreNotice({ inFlight: 5, read: { ok: true, value: 0 } }), null);
+});
+
+test("semaphoreNotice: a read that failed is an unreadable notice carrying why", () => {
+  assert.equal(
+    semaphoreNotice({ inFlight: 5, read: { ok: false, why: "boom" } }),
+    "task.maxConcurrency unreadable — boom; In-flight bound 5 is unchecked against it",
+  );
+});
+
+test("semaphoreNotice: a multi-line why (omp's raw stderr) still yields one line", () => {
+  const line = semaphoreNotice({ inFlight: 5, read: { ok: false, why: "omp config get task.maxConcurrency --json failed: Unknown setting: x\n\nRun omp config list\n" } });
+  assert.equal(line, "task.maxConcurrency unreadable — omp config get task.maxConcurrency --json failed: Unknown setting: x Run omp config list; In-flight bound 5 is unchecked against it");
+});
+
+// What a read can hold that is not a non-negative integer, with what the
+// notice quotes back.
+for (const [value, quoted] of [[-1, "-1"], [1.5, "1.5"], ["8", "\"8\""], [null, "null"], [{}, "{}"], [undefined, "no value"]]) {
+  test(`semaphoreNotice: a value of ${quoted} is unreadable, not a number`, () => {
+    assert.equal(
+      semaphoreNotice({ inFlight: 5, read: { ok: true, value } }),
+      `task.maxConcurrency unreadable — not a non-negative integer (got ${quoted}); In-flight bound 5 is unchecked against it`,
+    );
+  });
+}
+
+function noticeLines(stdout) {
+  return stdout.split("\n").filter((l) => l.startsWith("tier-roles: notice: "));
+}
+
+test("CLI: semaphore notice, the ruled line, on stdout after the pass line when task.maxConcurrency is below 2·B+2", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  const r = runCli(["--check", "--agents", agents, ...installFlags(d, { maxConcurrencyPath: jsonFile(d, "mc.json", 8) })], d);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(noticeLines(r.stdout), [`tier-roles: notice: ${NOTICE_8_AT_5}`]);
+});
+
+for (const c of [12, 32, 0]) {
+  test(`CLI: no semaphore notice when task.maxConcurrency is ${c}`, () => {
+    const d = dir();
+    const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+    const r = runCli(["--check", "--agents", agents, ...installFlags(d, { maxConcurrencyPath: jsonFile(d, "mc.json", c) })], d);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(noticeLines(r.stdout), []);
+  });
+}
+
+// The three ways the read itself can fail, each with its own why: a file that
+// is not JSON, a file that is not there, and a value that parses but is no
+// number. jsonFile() would write the last kind as a valid JSON string, so the
+// first two are written or pointed at directly.
+test("CLI: semaphore notice when the --max-concurrency file is not JSON", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  const bad = join(d, "bad.json");
+  writeFileSync(bad, "{invalid");
+  const r = runCli(["--check", "--agents", agents, ...installFlags(d, { maxConcurrencyPath: bad })], d);
+  assert.equal(r.status, 0, r.stderr);
+  const [line, ...rest] = noticeLines(r.stdout);
+  assert.deepEqual(rest, []);
+  assert.match(line, /^tier-roles: notice: task\.maxConcurrency unreadable — .*JSON.*; In-flight bound 5 is unchecked against it$/);
+  assert.doesNotMatch(line, /not a non-negative integer/);
+});
+
+test("CLI: semaphore notice when the --max-concurrency file is missing", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  const r = runCli(["--check", "--agents", agents, ...installFlags(d, { maxConcurrencyPath: join(d, "nope.json") })], d);
+  assert.equal(r.status, 0, r.stderr);
+  const [line, ...rest] = noticeLines(r.stdout);
+  assert.deepEqual(rest, []);
+  assert.match(line, /^tier-roles: notice: task\.maxConcurrency unreadable — ENOENT: no such file or directory.*; In-flight bound 5 is unchecked against it$/);
+});
+
+test("CLI: semaphore notice when the --max-concurrency file holds a string", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  const r = runCli(["--check", "--agents", agents, ...installFlags(d, { maxConcurrencyPath: jsonFile(d, "mc.json", "{invalid}") })], d);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(noticeLines(r.stdout), ["tier-roles: notice: task.maxConcurrency unreadable — not a non-negative integer (got \"{invalid}\"); In-flight bound 5 is unchecked against it"]);
+});
+
+// With no --max-concurrency the notice reads the live install. This fake
+// answers only `task.maxConcurrency` and refuses every other key, so a read
+// of a different key fails the test; the other three reads take fixtures.
+test("CLI: with no --max-concurrency the notice reads the live task.maxConcurrency", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  const r = runCliWithOmpScript(
+    "case \"$3\" in task.maxConcurrency) echo '{\"value\":8}' ;; *) echo \"Unknown setting: $3\" >&2; exit 1 ;; esac",
+    ["--check", "--agents", agents, ...installFlags(d, { maxConcurrencyPath: null })],
+    d,
+  );
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(noticeLines(r.stdout), [`tier-roles: notice: ${NOTICE_8_AT_5}`]);
+});
+
+test("CLI: a failed live task.maxConcurrency read is one unreadable line, whatever omp's stderr spans", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  const r = runCliWithOmpScript(
+    "printf 'Unknown setting: x\\n\\nRun omp config list\\n' >&2; exit 1",
+    ["--check", "--agents", agents, ...installFlags(d, { maxConcurrencyPath: null })],
+    d,
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const lines = r.stdout.trimEnd().split("\n");
+  assert.equal(lines.length, 2, r.stdout);
+  assert.equal(lines[1], "tier-roles: notice: task.maxConcurrency unreadable — omp config get task.maxConcurrency --json failed: Unknown setting: x Run omp config list; In-flight bound 5 is unchecked against it");
+});
+
+test("CLI: with a violation the notice goes to stderr, stdout stays empty, and the exit stays 1", () => {
+  const d = dir();
+  // A definition whose `model:` is not a route.
+  const agents = agentsDir({ "fleet-bad": "no agent here" });
+  const r = runCli(["--check", "--agents", agents, ...installFlags(d, { maxConcurrencyPath: jsonFile(d, "mc.json", 8) })], d);
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.stdout, "");
+  assert.deepEqual(noticeLines(r.stderr), [`tier-roles: notice: ${NOTICE_8_AT_5}`]);
+});
+
+test("CLI: --in-flight 0 is a usage error and prints nothing on stdout", () => {
+  const d = dir();
+  const r = runCli(["--check", ...installFlags(d, { inFlight: "0" })], d);
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /--in-flight must be at least 1, got 0/);
+});
+
+// Digits, not a `Number()` coercion: each of these coerces to a number, and
+// `1e1` would have been read as a bound of 10.
+for (const raw of ["abc", "1e1", "0x5", " 5", "5.0", "+5"]) {
+  test(`CLI: --in-flight ${JSON.stringify(raw)} is a usage error and prints nothing on stdout`, () => {
+    const d = dir();
+    const r = runCli(["--check", ...installFlags(d, { inFlight: raw })], d);
+    assert.equal(r.status, 2, r.stdout);
+    assert.equal(r.stdout, "");
+    assert.match(r.stderr, /--in-flight needs a number, got /);
+  });
+}

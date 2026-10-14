@@ -34,7 +34,13 @@
 //       with none, (a), (b) and (d) have nothing to check; an agents
 //       directory that cannot be read (missing, not a directory) or a
 //       definition that cannot be read (a directory named `*.agent.md`)
-//       fails too.
+//       fails too;
+//   (g) `--in-flight <B>`, required under `--check`: omp's
+//       `task.maxConcurrency` below 2·B+2, or one that cannot be read, is a
+//       notice (`0` is unbounded and prints none). The value is read live
+//       with `omp config get`, or from the file `--max-concurrency <path>`
+//       names, which takes its place when given. A notice never changes the
+//       exit code.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -304,20 +310,52 @@ export function checkRoutes({ agentsDir, agentsSource = `--agents ${agentsDir}`,
   return { violations, notices };
 }
 
+// The phase-0 semaphore notice: omp's `task.maxConcurrency` against the
+// In-flight bound. `read` is `{ ok: true, value }` or `{ ok: false, why }`.
+// Returns the notice line, or null for `0` (unbounded) and `>= 2·B+2`. A
+// notice never changes the exit code, so a value that cannot be read is a
+// line too, not a refusal.
+export function semaphoreNotice({ inFlight, read }) {
+  const unreadable = (why) => `task.maxConcurrency unreadable — ${why}; In-flight bound ${inFlight} is unchecked against it`;
+  // `why` can be omp's raw stderr, which ends in a newline and may span
+  // lines; a notice is one line.
+  if (!read.ok) return unreadable(read.why.replace(/\s+/g, " ").trim());
+  const c = read.value;
+  if (!Number.isInteger(c) || c < 0) return unreadable(`not a non-negative integer (got ${c === undefined ? "no value" : JSON.stringify(c)})`);
+  const threshold = 2 * inFlight + 2;
+  if (c === 0 || c >= threshold) return null;
+  return `task.maxConcurrency is ${c}, below 2·${inFlight}+2 = ${threshold} for In-flight bound ${inFlight} — omp queues members past it, so a Pulled implementer may sit unstarted; raise it in omp config (the fleet never writes it)`;
+}
+
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
 const die = makeDie(NAME);
-const { arg, has, sweep, stray } = defineFlags(die, {
+const { arg, numArg, has, sweep, stray } = defineFlags(die, {
   flags: {
     check: "bool",
+    "in-flight": "value",
     agents: "value",
     overrides: "value",
     "model-roles": "value",
     catalog: "value",
+    "max-concurrency": "value",
   },
 });
+
+// The `task.maxConcurrency` read `semaphoreNotice` formats: the
+// `--max-concurrency <path>` fixture (a file holding the bare JSON value)
+// when given, else the live `omp config get` read. A read that throws is a
+// result, not a refusal — the notice says it was unreadable and the exit
+// code is the role check's either way.
+function readMaxConcurrency(path) {
+  try {
+    return { ok: true, value: path === null ? readOmpConfigValue("task.maxConcurrency") : JSON.parse(readFileSync(path, "utf8")) };
+  } catch (e) {
+    return { ok: false, why: e.message };
+  }
+}
 
 // `--<flagName> <path>` when given, else the live install read `readLive()`
 // performs (`source` names it in a refusal).
@@ -339,7 +377,14 @@ function main() {
   stray();
 
   const check = has("check");
-  if (!check) die("--check is required (usage: tier-roles.mjs --check [--agents <dir>] [--model-roles <path>] [--overrides <path>] [--catalog <path>])");
+  if (!check) die("--check --in-flight <B> is required (usage: tier-roles.mjs --check --in-flight <B> [--agents <dir>] [--model-roles <path>] [--overrides <path>] [--catalog <path>] [--max-concurrency <path>])");
+
+  // numArg() is the fleet's digits rule (arg.mjs): `0x5`, `1e1`, ` 5`, `5.0`
+  // and `+5` are refused where `Number()` would have read a bound the caller
+  // never wrote.
+  const inFlightBound = numArg("in-flight");
+  if (inFlightBound === null) die("--in-flight is required with --check");
+  if (inFlightBound < 1) die(`--in-flight must be at least 1, got ${inFlightBound}`);
 
   const agentsFlag = arg("agents");
   const agentsDir = agentsFlag ?? join(SCRIPT_DIR, "..", "agents");
@@ -355,6 +400,9 @@ function main() {
     overrides,
     catalog,
   });
+
+  const notice = semaphoreNotice({ inFlight: inFlightBound, read: readMaxConcurrency(arg("max-concurrency")) });
+  if (notice !== null) notices.push(notice);
 
   if (violations.length === 0) {
     console.log("tier-roles: every definition routes to a resolvable model at a level it runs, no shadowing override");
