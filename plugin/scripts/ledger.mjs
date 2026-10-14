@@ -1564,9 +1564,16 @@ function runRotate() {
     carry = carryOf(text);
   }
   const carrying = carry.rows.length > 0 || carry.dispatched.length > 0 || carry.retired.length > 0;
+  // The phase-0 receipt beside the ledger belongs to the run being rotated
+  // away, so it takes the archive's own stamp: `phase0.<stamp>.json` next to
+  // `ledger.<stamp>.md`. A name already taken refuses before anything moves,
+  // as the ledger's own does.
+  const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "");
+  const receipt = join(dirname(file), "phase0.json");
+  const receiptArchive = existsSync(receipt) ? join(dirname(file), `phase0.${stamp}.json`) : null;
+  if (receiptArchive !== null && existsSync(receiptArchive)) die(`refusing to rotate ${file}: ${receiptArchive} already exists`);
   let archive = null;
   if (exists) {
-    const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "");
     archive = join(dirname(file), `${basename(file, ".md")}.${stamp}.md`);
     try {
       linkSync(file, archive);
@@ -1587,6 +1594,17 @@ function runRotate() {
     }
   } else {
     console.error(`    nothing to rotate: ${file} does not exist`);
+  }
+  // After the ledger has moved, and a warning rather than a refusal: the
+  // ledger is already archived, and a receipt left where it is is read as a
+  // previous run's by the next phase 0, which moves it aside itself.
+  if (receiptArchive !== null) {
+    try {
+      renameSync(receipt, receiptArchive);
+      console.error(`    archived ${receipt} -> ${receiptArchive}`);
+    } catch (e) {
+      console.error(`    could not archive ${receipt} -> ${receiptArchive}: ${e.message}`);
+    }
   }
   // Nothing to carry writes nothing, so the next write starts the skeleton
   // exactly as after any other verdict.

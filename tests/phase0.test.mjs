@@ -1,0 +1,683 @@
+// `phase0.mjs`: phase 0 as one command that runs the start sequence in order
+// and writes `.fleet/phase0.json`.
+//
+// Every case runs the real script against a throwaway repository (a real
+// clone of a real bare origin) with a copy of the plugin's scripts directory in
+// which each external step is replaced by a stub that logs its call and answers
+// from a control file the case writes. `ledger.mjs` stays real except for
+// `rotate`, whose controller record needs an `omp` process above the caller
+// and so is written by the stub; `gh` is a stub on PATH. No network, no omp.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { tempDir } from "./support/temp-dir.mjs";
+import { writeExecStub } from "./support/exec-stub.mjs";
+
+const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
+const REAL_SCRIPTS = join(PLUGIN, "scripts");
+const RUN_AT = 1_700_000_000_000;
+
+const GIT_ENV = { ...process.env };
+delete GIT_ENV.GIT_DIR;
+delete GIT_ENV.GIT_WORK_TREE;
+delete GIT_ENV.GH_REPO;
+const git = (cwd, ...args) => {
+  const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8", env: GIT_ENV });
+  assert.equal(r.status, 0, `git ${args.join(" ")}: ${r.stderr}`);
+  return r.stdout.trim();
+};
+
+// What every stub is: log the call, then answer from `<name>.json` in the
+// case's control directory — `{exit, out, err}`, or `by[<args>]` for a script
+// whose answer turns on its arguments.
+const DRIVER = `import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+const dir = process.env.PH0_STUBS;
+const control = (name) => {
+  try {
+    return JSON.parse(readFileSync(join(dir, name + ".json"), "utf8"));
+  } catch {
+    return {};
+  }
+};
+const log = (name, extra = {}) => {
+  appendFileSync(join(dir, "order.log"), name + "\\n");
+  appendFileSync(join(dir, name + ".calls"), JSON.stringify(extra) + "\\n");
+};
+
+export function drive(name, args) {
+  log(name, { args, cwd: process.cwd(), GIT_DIR: process.env.GIT_DIR ?? null });
+  const c = control(name);
+  const spec = (c.by && c.by[args.join(" ")]) || c;
+  process.stdout.write(spec.out ?? "");
+  process.stderr.write(spec.err ?? "");
+  process.exit(spec.exit ?? 0);
+}
+
+// What \`ledger.mjs rotate\` leaves behind that phase 0 reads: the controller
+// record, with the \`at\` the case chose.
+export function rotate() {
+  const fleet = join(process.cwd(), ".fleet");
+  log("rotate", { args: ["rotate"], sawReceipt: existsSync(join(fleet, "phase0.json")) });
+  const c = control("rotate");
+  if (c.exit) {
+    process.stderr.write(c.err ?? "");
+    process.exit(c.exit);
+  }
+  mkdirSync(fleet, { recursive: true });
+  writeFileSync(join(fleet, "heartbeat.json"), JSON.stringify({
+    quiet: 0, elapsed: 0, digest: "", controller: { pid: 4242, lstart: "fixture", prior: "dead", at: c.at ?? ${RUN_AT} },
+  }));
+  process.exit(0);
+}
+
+if (process.argv[1].endsWith("stub-driver.mjs")) drive(process.argv[2], process.argv.slice(3));
+`;
+
+const MJS_STUBS = ["main-checkout", "preflight", "tier-roles", "metrics-refresh", "board", "reclaim-scratch", "stranded", "shortlist"];
+const SH_STUBS = ["instruments", "derive-testcmd"];
+
+// The plugin's scripts directory, copied once, with the external steps
+// replaced. `ledger.mjs` becomes a shim: `rotate` is the stub's, every other
+// subcommand the real script's.
+const TREE = tempDir("phase0-tree-");
+cpSync(PLUGIN, join(TREE, "plugin"), { recursive: true });
+const SCRIPTS = join(TREE, "plugin", "scripts");
+const STUBBED = join(SCRIPTS, "stub-driver.mjs");
+writeFileSync(STUBBED, DRIVER);
+// Two of them are imported by other scripts for their exports, so the real
+// module stays importable behind the stub and only its command line is replaced.
+const IMPORTED = ["main-checkout", "tier-roles"];
+for (const n of MJS_STUBS) {
+  if (IMPORTED.includes(n)) {
+    cpSync(join(SCRIPTS, `${n}.mjs`), join(SCRIPTS, `${n}-real.mjs`));
+    writeFileSync(join(SCRIPTS, `${n}.mjs`), `export * from "./${n}-real.mjs";
+import { drive } from "./stub-driver.mjs";
+import { isCLI } from "./is-cli.mjs";
+if (isCLI(import.meta.url)) drive(${JSON.stringify(n)}, process.argv.slice(2));
+`);
+  } else {
+    writeFileSync(join(SCRIPTS, `${n}.mjs`), `import { drive } from "./stub-driver.mjs";\ndrive(${JSON.stringify(n)}, process.argv.slice(2));\n`);
+  }
+}
+for (const n of SH_STUBS) writeFileSync(join(SCRIPTS, `${n}.sh`), `#!/bin/sh\nexec node "$(dirname "$0")/stub-driver.mjs" ${n} "$@"\n`);
+cpSync(join(SCRIPTS, "ledger.mjs"), join(SCRIPTS, "ledger-real.mjs"));
+writeFileSync(join(SCRIPTS, "ledger.mjs"), `if (process.argv[2] === "rotate") {
+  (await import("./stub-driver.mjs")).rotate();
+} else {
+  await import("./ledger-real.mjs");
+}
+`);
+const SCRIPT = join(SCRIPTS, "phase0.mjs");
+
+const GH_STUB = `#!/bin/sh
+printf 'gh\\n' >> "$PH0_STUBS/order.log"
+printf '%s GH_REPO=[%s] GIT_DIR=[%s]\\n' "$*" "\${GH_REPO-}" "\${GIT_DIR-}" >> "$PH0_STUBS/gh.calls"
+if [ -f "$PH0_STUBS/gh.fail" ]; then echo "gh boom" >&2; exit 1; fi
+cat "$PH0_STUBS/gh.json"
+`;
+
+// Every external step the script reaches, in the order it reaches them, per
+// step: the stub names its work shows up under in `order.log`.
+const STEPS = [
+  ["branch", []], ["fast-forward", []], ["pin", ["instruments"]], ["baseline", ["main-checkout"]],
+  ["preflight", ["preflight"]], ["ruleset", ["ruleset"]], ["tier-roles", ["tier-roles"]],
+  ["metrics", ["metrics-refresh"]], ["cockpit", ["board"]], ["rotate", ["rotate"]],
+  ["reclaim", ["reclaim-scratch"]], ["recipe", ["derive-testcmd"]], ["fold-in", ["gh"]],
+  ["stranded", ["stranded"]], ["shortlist", ["shortlist"]],
+];
+const NAMES = STEPS.map(([n]) => n);
+
+const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+// A main checkout cloned from a bare origin, a home directory of its own (the
+// scratch root lands under it), a session directory and the control files.
+function fixture({ spec = false } = {}) {
+  const dir = realpathSync(tempDir("phase0-"));
+  const origin = join(dir, "origin.git");
+  const repo = join(dir, "repo");
+  const home = join(dir, "home");
+  const stubs = join(dir, "stubs");
+  const bin = join(dir, "bin");
+  const session = join(dir, "session");
+  for (const d of [home, stubs, bin, session]) mkdirSync(d);
+  git(dir, "init", "-q", "--bare", "-b", "main", origin);
+  git(dir, "clone", "-q", origin, repo);
+  writeFileSync(join(repo, "README"), "x\n");
+  git(repo, "add", "README");
+  git(repo, "commit", "-q", "-m", "root");
+  git(repo, "push", "-q", "-u", "origin", "main");
+  writeExecStub(join(bin, "gh"), GH_STUB);
+  writeFileSync(join(stubs, "gh.json"), "[]");
+  writeFileSync(join(stubs, "stranded.json"), JSON.stringify({ out: JSON.stringify({ prior: "dead", claims: [], carried: [] }) }));
+  if (spec) {
+    mkdirSync(join(repo, ".github", "rulesets"), { recursive: true });
+    mkdirSync(join(repo, ".github", "scripts"), { recursive: true });
+    writeFileSync(join(repo, ".github", "rulesets", "main.json"), "{}");
+    writeFileSync(join(repo, ".github", "scripts", "apply-ruleset.sh"), `#!/bin/sh\nexec node "${STUBBED}" ruleset "$@"\n`);
+  }
+  const f = {
+    dir, repo, home, stubs, session, origin,
+    control: (name, value) => writeFileSync(join(stubs, `${name}.json`), JSON.stringify(value)),
+    calls: (name) => (existsSync(join(stubs, `${name}.calls`)) ? readFileSync(join(stubs, `${name}.calls`), "utf8").trim().split("\n").map((l) => JSON.parse(l)) : []),
+    order: () => (existsSync(join(stubs, "order.log")) ? readFileSync(join(stubs, "order.log"), "utf8").trim().split("\n") : []),
+    receiptPath: join(repo, ".fleet", "phase0.json"),
+    receipt: () => JSON.parse(readFileSync(join(repo, ".fleet", "phase0.json"), "utf8")),
+    setReceipt: (r) => {
+      mkdirSync(join(repo, ".fleet"), { recursive: true });
+      writeFileSync(join(repo, ".fleet", "phase0.json"), JSON.stringify(r));
+    },
+    setRecord: (at) => {
+      mkdirSync(join(repo, ".fleet"), { recursive: true });
+      writeFileSync(join(repo, ".fleet", "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller: { pid: 4242, lstart: "fixture", prior: "dead", at } }));
+    },
+    asides: () => readdirSync(join(repo, ".fleet")).filter((n) => /^phase0\..+\.json$/.test(n)),
+    ledgerRow: (key, text) => {
+      const r = spawnSync(process.execPath, [join(SCRIPTS, "ledger.mjs"), "row", String(key), text], { cwd: repo, encoding: "utf8", env: GIT_ENV });
+      assert.equal(r.status, 0, r.stderr);
+    },
+    ledgerRows: () => {
+      const r = spawnSync(process.execPath, [join(SCRIPTS, "ledger.mjs"), "read"], { cwd: repo, encoding: "utf8", env: GIT_ENV });
+      assert.equal(r.status, 0, r.stderr);
+      return JSON.parse(r.stdout).rows;
+    },
+    run: (args = null, { env = {}, cwd = repo, script = SCRIPT } = {}) => {
+      const r = spawnSync(process.execPath, [script, ...(args ?? ["--session", session])], {
+        cwd, encoding: "utf8",
+        env: { ...GIT_ENV, HOME: home, PATH: `${bin}:${process.env.PATH}`, PH0_STUBS: stubs, ...env },
+      });
+      const out = r.stdout.split("\n").filter(Boolean);
+      return { status: r.status, out, err: r.stderr, stdout: r.stdout };
+    },
+  };
+  return f;
+}
+
+// Every step ran and none failed: the status of each, by name.
+const statuses = (receipt) => Object.fromEntries(NAMES.map((n) => [n, receipt.steps[n]?.status]));
+const allOk = Object.fromEntries(NAMES.map((n) => [n, "ok"]));
+const stepLines = (out) => out.filter((l) => l.startsWith("phase0: "));
+
+test("a clean run passes every step in order, writes one receipt and exits 0", () => {
+  const f = fixture({ spec: true });
+  const r = f.run();
+  assert.equal(r.status, 0, r.err);
+  assert.deepEqual(stepLines(r.out).map((l) => l.split(": ")[1]), NAMES, "one line per step, in order");
+  assert.ok(stepLines(r.out).every((l) => /^phase0: [a-z-]+: ok\b/.test(l)), r.stdout);
+  const receipt = f.receipt();
+  assert.deepEqual(statuses(receipt), allOk);
+  assert.deepEqual(Object.keys(receipt.steps), NAMES);
+  assert.equal(receipt.run, RUN_AT, "run is the at the rotation wrote into the controller record");
+  assert.equal(receipt.session, f.session);
+  assert.equal(receipt.scratch.startsWith(join(f.home, ".fleet", "scratch")), true, receipt.scratch);
+  assert.deepEqual(receipt.caps, { impl: null, review: null });
+  for (const n of NAMES) {
+    assert.match(receipt.steps[n].at, /^\d{4}-\d\d-\d\dT/, `${n} carries a time`);
+    assert.ok(receipt.steps[n].output.length > 0, `${n} records its output`);
+  }
+  // The scripts ran in the runbook's order. The cockpit is detached, so its
+  // own line in the log lands whenever it starts.
+  const order = f.order().filter((n) => n !== "board");
+  assert.deepEqual(order, ["instruments", "main-checkout", "preflight", "ruleset", "tier-roles", "metrics-refresh", "rotate", "reclaim-scratch", "derive-testcmd", "derive-testcmd", "gh", "stranded", "shortlist"]);
+  assert.deepEqual(f.calls("instruments")[0].args, ["--pin"]);
+  assert.deepEqual(f.calls("main-checkout")[0].args, ["--record"]);
+  assert.deepEqual(f.calls("preflight")[0].args, []);
+  assert.deepEqual(f.calls("ruleset")[0].args, ["--check"]);
+  assert.deepEqual(f.calls("tier-roles")[0].args, ["--check"]);
+  assert.deepEqual(f.calls("reclaim-scratch")[0].args, ["--root", receipt.scratch, "--after-rotate", "--apply"]);
+  assert.deepEqual(f.calls("derive-testcmd").map((c) => c.args), [[".", "install"], [".", "test", "--at", "origin/main"]]);
+  for (let i = 0; i < 40 && f.calls("board").length === 0; i++) wait(100);
+  assert.deepEqual(f.calls("board")[0].args, ["serve", "--open"]);
+  assert.equal(f.calls("board")[0].cwd, f.repo);
+});
+
+test("every flag reaches the step that owns it and the receipt records the caps", () => {
+  const f = fixture();
+  const plugin = join(f.dir, "plugin-checkout");
+  const spend = join(f.dir, "spend");
+  const r = f.run(["--session", f.session, "--implementer-cap", "3", "--reviewer-cap", "5", "--plugin-checkout", plugin, "--spend-dir", spend, "--workflow", "CI"]);
+  assert.equal(r.status, 0, r.err);
+  const receipt = f.receipt();
+  assert.deepEqual(receipt.caps, { impl: 3, review: 5 });
+  assert.deepEqual(f.calls("instruments")[0].args, ["--pin", "--audit", plugin]);
+  assert.deepEqual(f.calls("preflight")[0].args, [], "preflight.mjs takes no arguments, so the CI flag is recorded and never passed");
+  assert.match(receipt.steps.preflight.output, /CI: workflow CI/);
+  for (let i = 0; i < 40 && f.calls("board").length === 0; i++) wait(100);
+  assert.deepEqual(f.calls("board")[0].args, ["serve", "--open", "--spend-dir", spend]);
+
+  const g = fixture();
+  assert.equal(g.run(["--session", g.session, "--declare-no-ci"]).status, 0);
+  assert.match(g.receipt().steps.preflight.output, /CI: declared absent/);
+});
+
+// One case per step: its refusal exits 3, the receipt names it `failed` with the
+// step's own output, every step before it is ok and every step after it is
+// pending and was never run.
+const REFUSALS = [
+  ["branch", (f) => git(f.repo, "switch", "-q", "-c", "other"), /HEAD is refs\/heads\/other, not refs\/heads\/main/],
+  ["fast-forward", (f) => git(f.repo, "remote", "set-url", "origin", join(f.dir, "no-such-origin.git")), /git fetch origin failed/],
+  ["pin", (f) => f.control("instruments", { exit: 1, err: "instruments: nothing to certify" }), /instruments: nothing to certify/],
+  ["baseline", (f) => f.control("main-checkout", { exit: 1, err: "MAIN-CHECKOUT-DIRTY: README" }), /MAIN-CHECKOUT-DIRTY: README/],
+  ["preflight", (f) => f.control("preflight", { exit: 1, out: "ok gh-auth\nFAIL label:in-progress: missing\nFAIL ruleset: none\nPREFLIGHT FAILED: label:in-progress, ruleset" }), /FAIL label:in-progress: missing\nFAIL ruleset: none/],
+  ["preflight", (f) => f.control("preflight", { exit: 2, err: "preflight: cannot write the marker" }), /preflight: cannot write the marker/],
+  ["tier-roles", (f) => f.control("tier-roles", { exit: 1, err: "tier-roles: no modelRoles.slow" }), /tier-roles: no modelRoles\.slow/],
+  ["metrics", (f) => f.control("metrics-refresh", { exit: 1, err: "metrics-refresh: drain failed" }), /metrics-refresh: drain failed/],
+  ["metrics", (f) => f.control("metrics-refresh", { exit: 2, err: "metrics-refresh: usage" }), /metrics-refresh: usage/],
+  ["rotate", (f) => f.control("rotate", { exit: 2, err: "refusing to rotate: the controller that owns it is alive" }), /the controller that owns it is alive/],
+  ["recipe", (f) => f.control("derive-testcmd", { by: { ". install": { exit: 3, err: "derive-testcmd: no node" }, ". test --at origin/main": {} } }), /derive-testcmd: no node/],
+  ["fold-in", (f) => writeFileSync(join(f.stubs, "gh.fail"), ""), /gh pr list failed: exit 1\ngh boom/],
+  ["stranded", (f) => f.control("stranded", { exit: 2, err: "stranded: gh issue list failed" }), /stranded: gh issue list failed/],
+  ["shortlist", (f) => f.control("shortlist", { exit: 2, err: "shortlist: the scan did not answer" }), /shortlist: the scan did not answer/],
+];
+for (const [step, arrange, shows] of REFUSALS) {
+  test(`${step}: a refusal exits 3, is failed in the receipt with its output, and nothing after it runs (${shows.source.slice(0, 28)})`, () => {
+    const f = fixture();
+    arrange(f);
+    const r = f.run();
+    assert.equal(r.status, 3, `${r.stdout}${r.err}`);
+    const receipt = f.receipt();
+    const at = NAMES.indexOf(step);
+    assert.deepEqual(statuses(receipt), Object.fromEntries(NAMES.map((n, i) => [n, i < at ? "ok" : i === at ? "failed" : "pending"])));
+    assert.match(receipt.steps[step].output, shows);
+    for (const n of NAMES.slice(at + 1)) assert.equal(receipt.steps[n].output, "not run", `${n} was not run`);
+    assert.match(r.stdout, new RegExp(`^phase0: ${step}: failed`, "m"));
+    assert.deepEqual(stepLines(r.out).map((l) => l.split(": ")[1]), NAMES.slice(0, at + 1), "the script stops at the failed step");
+    const reached = new Set(STEPS.slice(0, at + 1).flatMap(([, names]) => names));
+    assert.deepEqual(f.order().filter((n) => n !== "board" && !reached.has(n)), [], "a stub after the failed step ran");
+  });
+}
+
+test("a failed preflight prints every FAIL line on stdout and none of the passing ones", () => {
+  const f = fixture();
+  f.control("preflight", { exit: 1, out: "ok gh-auth\nFAIL label:in-progress: missing\nFAIL ruleset: none\nPREFLIGHT FAILED: label:in-progress, ruleset" });
+  const r = f.run();
+  assert.equal(r.status, 3);
+  assert.ok(r.out.some((l) => l.includes("FAIL label:in-progress: missing")), r.stdout);
+  assert.ok(r.out.some((l) => l.includes("FAIL ruleset: none")), r.stdout);
+  assert.ok(!r.stdout.includes("ok gh-auth"), "a passing check line is not part of the report");
+});
+
+test("a fast-forward that moves HEAD prints SUPERSEDED, fails, and a re-run starts from the new tree", () => {
+  const f = fixture();
+  const other = join(f.dir, "other");
+  git(f.dir, "clone", "-q", f.origin, other);
+  for (const n of ["a", "b"]) {
+    writeFileSync(join(other, n), n);
+    git(other, "add", n);
+    git(other, "commit", "-q", "-m", n);
+  }
+  git(other, "push", "-q", "origin", "main");
+  const before = git(f.repo, "rev-parse", "HEAD");
+  const r = f.run();
+  assert.equal(r.status, 3, r.stdout + r.err);
+  assert.match(r.stdout, /^phase0: fast-forward: failed — SUPERSEDED 2 commits; re-run phase0\.mjs$/m);
+  assert.equal(f.receipt().steps["fast-forward"].output, "SUPERSEDED 2 commits; re-run phase0.mjs");
+  assert.notEqual(git(f.repo, "rev-parse", "HEAD"), before, "the checkout did fast-forward");
+  assert.deepEqual(f.order(), [], "nothing past the fast-forward ran, the pin least of all");
+  const again = f.run();
+  assert.equal(again.status, 0, again.stdout + again.err);
+  assert.deepEqual(statuses(f.receipt()), allOk);
+});
+
+test("ruleset: drift and unanswered are recorded and the run goes on; a workspace with no spec skips the check", () => {
+  const f = fixture({ spec: true });
+  f.control("ruleset", { exit: 3, err: "apply-ruleset: ruleset main does NOT match\n- required: check" });
+  let r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(f.receipt().steps.ruleset.status, "drift");
+  assert.match(f.receipt().steps.ruleset.output, /- required: check/);
+  assert.match(r.stdout, /^phase0: ruleset: drift/m);
+  assert.equal(f.receipt().steps.shortlist.status, "ok", "the run went on past the drift");
+
+  const g = fixture({ spec: true });
+  g.control("ruleset", { exit: 2, err: "apply-ruleset: no gh" });
+  r = g.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(g.receipt().steps.ruleset.status, "unanswered");
+
+  const h = fixture();
+  r = h.run();
+  assert.equal(r.status, 0);
+  assert.equal(h.receipt().steps.ruleset.status, "ok");
+  assert.deepEqual(h.calls("ruleset"), [], "no spec checked in, nothing to run");
+});
+
+test("cockpit and reclaim are recorded and never stop the run, whatever they answer", () => {
+  const f = fixture();
+  f.control("reclaim-scratch", { exit: 2, err: "reclaim-scratch: refuses" });
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  const receipt = f.receipt();
+  assert.deepEqual(statuses(receipt), allOk);
+  assert.match(receipt.steps.reclaim.output, /exit 2/);
+  assert.match(receipt.steps.cockpit.output, /launched/);
+});
+
+test("recipe: a cache that refuses is a pending NEED with exit 4, and a re-run after it is met continues from there", () => {
+  const f = fixture();
+  f.control("derive-testcmd", { by: { ". install": { exit: 1, err: "no Recipe cache" }, ". test --at origin/main": {} } });
+  const r = f.run();
+  assert.equal(r.status, 4, r.stdout + r.err);
+  assert.equal(r.out.at(-1), "NEED derive-recipe", "the NEED lines come last");
+  const receipt = f.receipt();
+  assert.deepEqual(statuses(receipt), Object.fromEntries(NAMES.map((n, i) => [n, i < NAMES.indexOf("recipe") ? "ok" : "pending"])));
+  assert.match(receipt.steps.recipe.output, /NEED derive-recipe/);
+  assert.deepEqual(f.order().filter((n) => n === "gh" || n === "stranded" || n === "shortlist"), [], "the fold-in waits for the Recipe");
+
+  f.control("derive-testcmd", { by: { ". install": { out: "npm ci" }, ". test --at origin/main": { out: "./agent-test" } } });
+  const again = f.run();
+  assert.equal(again.status, 0, again.stdout + again.err);
+  assert.deepEqual(statuses(f.receipt()), allOk);
+  assert.equal(f.calls("instruments").length, 1, "the steps done earlier in this run are not run again");
+  assert.equal(f.calls("rotate").length, 1, "the rotation is never run twice in one run");
+  assert.match(again.stdout, /^phase0: pin: ok \(done earlier in this run\)$/m);
+  assert.deepEqual(stepLines(again.out).map((l) => l.split(": ")[1]), NAMES);
+});
+
+test("recipe: both reads exit 1 at once is one NEED, not two", () => {
+  const f = fixture();
+  f.control("derive-testcmd", { exit: 1, err: "refused" });
+  const r = f.run();
+  assert.equal(r.status, 4);
+  assert.equal(r.out.filter((l) => l === "NEED derive-recipe").length, 1);
+});
+
+test("stranded: a resume entry is a pending NEED with exit 4, a report entry is printed, and a re-run once the row is written continues", () => {
+  const f = fixture();
+  f.control("stranded", {
+    out: JSON.stringify({
+      prior: "dead",
+      claims: [
+        { n: 21, t: "twenty-one", action: "resume", worktree: "/w/21-impl-21", branch: "implementer/21-impl-21", why: "its worktree is in this checkout" },
+        { n: 22, t: "twenty-two", action: "report", worktree: null, branch: null, why: "no worktree for it in this checkout" },
+      ],
+      carried: [],
+    }),
+  });
+  const r = f.run();
+  assert.equal(r.status, 4, r.stdout + r.err);
+  assert.equal(r.out.at(-1), "NEED resume #21 /w/21-impl-21 implementer/21-impl-21");
+  assert.ok(r.out.some((l) => l.includes("report #22 — no worktree for it in this checkout")), r.stdout);
+  const receipt = f.receipt();
+  assert.equal(receipt.steps.stranded.status, "pending");
+  assert.equal(receipt.steps.shortlist.status, "pending");
+  assert.equal(f.calls("shortlist").length, 0, "the shortlist waits for the stranded claims");
+
+  f.ledgerRow(21, "impl-21-b");
+  const again = f.run();
+  assert.equal(again.status, 0, again.stdout + again.err);
+  assert.deepEqual(statuses(f.receipt()), allOk);
+  assert.equal(f.calls("shortlist").length, 1);
+  assert.equal(f.calls("rotate").length, 1);
+  assert.ok(again.out.some((l) => l.includes("report #22")), "the report entry is printed again");
+  assert.ok(!again.out.some((l) => l.startsWith("NEED")), again.stdout);
+});
+
+test("stranded: the live tokens a rotation carried are listed and are no NEED", () => {
+  const f = fixture();
+  f.control("stranded", {
+    out: JSON.stringify({ prior: "ancestor", claims: [], carried: [{ name: "impl-7", token: "impl-7", row: "#7" }, { name: "review-pr-9", token: "review=member:review-pr-9", row: null }] }),
+  });
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.ok(r.out.some((l) => l.includes("carried impl-7 impl-7 (row #7)")), r.stdout);
+  assert.ok(r.out.some((l) => l.includes("carried review-pr-9 review=member:review-pr-9 (row none)")), r.stdout);
+});
+
+test("fold-in: rows only for PRs that close an issue, a PR a carried row already names is skipped, the rest are NEED lines", () => {
+  const f = fixture();
+  f.ledgerRow(12, "PR#12 · inherited, held by hand");
+  f.ledgerRow(7, "impl-7=PR#13 → PR#13");
+  writeFileSync(join(f.stubs, "gh.json"), JSON.stringify([
+    { number: 10, closingIssuesReferences: [{ number: 3 }] },
+    { number: 11, closingIssuesReferences: [] },
+    { number: 12, closingIssuesReferences: [{ number: 4 }] },
+    { number: 13, closingIssuesReferences: [{ number: 5 }] },
+    { number: 14 },
+  ]));
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  const rows = f.ledgerRows();
+  assert.deepEqual(rows.sort(), ["#10 PR#10 · inherited (closes #3)", "#12 PR#12 · inherited, held by hand", "#7 impl-7=PR#13 → PR#13"].sort(), "no row for a PR closing no issue, none rewritten for a PR a carried row names");
+  assert.deepEqual(r.out.filter((l) => l.startsWith("NEED")), ["NEED review PR#11 (closes no issue)", "NEED review PR#14 (closes no issue)"]);
+  assert.equal(r.out.at(-1), "NEED review PR#14 (closes no issue)", "the NEED lines come last");
+  assert.equal(f.receipt().steps["fold-in"].status, "ok", "a NEED the fold-in prints is advice");
+  assert.match(readFileSync(join(f.stubs, "gh.calls"), "utf8"), /^pr list --state open --json number,closingIssuesReferences --limit \d+ GH_REPO=\[\]/);
+
+  // A re-run in the same run does not queue anything twice, and still prints the advice.
+  const again = f.run();
+  assert.equal(again.status, 0);
+  assert.equal(f.ledgerRows().length, 3);
+  assert.deepEqual(again.out.filter((l) => l.startsWith("NEED")).length, 2);
+});
+
+test("fold-in: a ledger that cannot be read fails the step rather than queueing over a carried row", () => {
+  const f = fixture();
+  // A ledger path that is not a file: `ledger.mjs read` cannot answer for it.
+  mkdirSync(join(f.repo, ".fleet", "ledger.md"), { recursive: true });
+  writeFileSync(join(f.stubs, "gh.json"), JSON.stringify([{ number: 10, closingIssuesReferences: [{ number: 3 }] }]));
+  const r = f.run();
+  assert.equal(r.status, 3, r.stdout + r.err);
+  assert.equal(f.receipt().steps["fold-in"].status, "failed");
+  assert.equal(f.calls("shortlist").length, 0);
+});
+
+// ── the resume rule ───────────────────────────────────────────────────────────
+
+const stale = (f, extra) => ({
+  run: RUN_AT, session: f.session, scratch: "/old/scratch", caps: { impl: null, review: null },
+  steps: Object.fromEntries(NAMES.map((n) => [n, { status: "ok", at: "2026-01-01T00:00:00.000Z", output: "from the previous run" }])),
+  ...extra,
+});
+
+test("a receipt with a stale run is ignored: every step re-runs and the old receipt is moved aside", () => {
+  const f = fixture();
+  f.setRecord(RUN_AT);
+  f.setReceipt(stale(f, { run: RUN_AT - 5 }));
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  for (const [, names] of STEPS) for (const n of names.filter((x) => x !== "board" && x !== "ruleset")) assert.ok(f.order().includes(n), `${n} ran`);
+  assert.equal(f.calls("instruments").length, 1);
+  const receipt = f.receipt();
+  assert.equal(receipt.run, RUN_AT);
+  assert.ok(Object.values(receipt.steps).every((s) => s.output !== "from the previous run"));
+  const aside = f.asides();
+  assert.equal(aside.length, 1, aside.join());
+  assert.match(aside[0], /^phase0\.\d{4}-\d\d-\d\dT\d{6}Z\.json$/, "named under the ledger archive's own stamp format");
+  assert.equal(JSON.parse(readFileSync(join(f.repo, ".fleet", aside[0]), "utf8")).run, RUN_AT - 5);
+});
+
+test("a receipt whose run matches the record but whose session differs is a previous run's: rotate runs again", () => {
+  const f = fixture();
+  f.setRecord(RUN_AT);
+  f.setReceipt(stale(f, { session: join(f.dir, "another-session") }));
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(f.calls("rotate").length, 1, "the previous run's receipt did not skip rotate");
+  assert.equal(f.calls("instruments").length, 1);
+  assert.equal(f.asides().length, 1);
+  assert.equal(f.receipt().session, f.session);
+});
+
+test("a receipt whose run and session both match resumes: its ok steps are skipped, the rest re-run", () => {
+  const f = fixture();
+  f.setRecord(RUN_AT);
+  const receipt = stale(f);
+  receipt.steps.recipe = { status: "pending", at: "2026-01-01T00:00:00.000Z", output: "NEED derive-recipe" };
+  receipt.steps["fold-in"] = { status: "pending", at: "2026-01-01T00:00:00.000Z", output: "not run" };
+  receipt.steps.stranded = { status: "failed", at: "2026-01-01T00:00:00.000Z", output: "old refusal" };
+  receipt.steps.shortlist = { status: "pending", at: "2026-01-01T00:00:00.000Z", output: "not run" };
+  f.setReceipt(receipt);
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.deepEqual(f.order().filter((n) => n !== "board"), ["derive-testcmd", "derive-testcmd", "gh", "stranded", "shortlist"]);
+  assert.deepEqual(statuses(f.receipt()), allOk);
+  assert.equal(f.asides().length, 0, "a receipt that resumes is not moved aside");
+  assert.equal(f.receipt().steps.pin.output, "from the previous run", "a skipped step keeps what it recorded");
+});
+
+test("a receipt that never reached its rotation is overwritten, and every step before it runs again", () => {
+  const f = fixture();
+  const partial = stale(f, { run: null });
+  for (const n of NAMES.slice(NAMES.indexOf("rotate"))) partial.steps[n] = { status: "pending", at: "2026-01-01T00:00:00.000Z", output: "not run" };
+  f.setReceipt(partial);
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(f.calls("instruments").length, 1, "the steps before the rotation are idempotent and run every time");
+  assert.equal(f.calls("main-checkout").length, 1);
+  assert.equal(f.asides().length, 0, "a partial receipt is not a previous run's record");
+  assert.deepEqual(statuses(f.receipt()), allOk);
+});
+
+test("the receipt of the run in progress is off disk while the rotation runs, so the rotation cannot file it under the previous run", () => {
+  const f = fixture();
+  f.setReceipt(stale(f, { run: null }));
+  assert.equal(f.run().status, 0);
+  assert.equal(f.calls("rotate")[0].sawReceipt, false);
+});
+
+test("a receipt that cannot be read is treated as absent", () => {
+  const f = fixture();
+  mkdirSync(join(f.repo, ".fleet"), { recursive: true });
+  writeFileSync(f.receiptPath, "{ not json");
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.deepEqual(statuses(f.receipt()), allOk);
+});
+
+// ── the rotation archives the receipt ────────────────────────────────────────
+
+const OMP = 2_000_000_002;
+const REAL_TABLE = { [process.pid]: { ppid: OMP, argv: [process.execPath, "--test"], lstart: "runner-start" }, [OMP]: { ppid: 1, argv: ["bun", "/home/u/.bun/bin/omp"], lstart: "omp-start" } };
+
+function rotateFixture() {
+  const f = fixture();
+  mkdirSync(join(f.repo, ".fleet"), { recursive: true });
+  // The recorded controller is this test runner: alive, started when recorded, and an ancestor of the rotation.
+  writeFileSync(join(f.repo, ".fleet", "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller: { pid: process.pid, lstart: "runner-start", prior: "dead", at: RUN_AT } }));
+  const table = join(f.dir, "proc-table.json");
+  writeFileSync(table, JSON.stringify(REAL_TABLE));
+  const rotate = () => spawnSync(process.execPath, [join(REAL_SCRIPTS, "ledger.mjs"), "rotate"], {
+    cwd: f.repo, encoding: "utf8", env: { ...GIT_ENV, FLEET_PROC_TABLE: table },
+  });
+  return { f, rotate };
+}
+
+test("ledger.mjs rotate archives phase0.json beside the ledger under the ledger archive's own timestamp", () => {
+  const { f, rotate } = rotateFixture();
+  f.ledgerRow(5, "impl-5=PR#6");
+  writeFileSync(f.receiptPath, '{"run": 1}\n');
+  const r = rotate();
+  assert.equal(r.status, 0, r.stderr);
+  const names = readdirSync(join(f.repo, ".fleet"));
+  const ledger = names.filter((n) => /^ledger\..+\.md$/.test(n));
+  const receipt = names.filter((n) => /^phase0\..+\.json$/.test(n));
+  assert.equal(ledger.length, 1, names.join());
+  assert.equal(receipt.length, 1, names.join());
+  assert.equal(receipt[0], ledger[0].replace(/^ledger\./, "phase0.").replace(/\.md$/, ".json"), "one timestamp names both");
+  assert.equal(readFileSync(join(f.repo, ".fleet", receipt[0]), "utf8"), '{"run": 1}\n', "the receipt is archived byte for byte");
+  assert.equal(existsSync(f.receiptPath), false, "no receipt is left for the next run to read");
+  assert.equal(r.stdout.trim().startsWith("{"), true);
+  assert.deepEqual(Object.keys(JSON.parse(r.stdout)).sort(), ["archive", "carried", "retired", "rotated", "skipped"], "rotate's own answer is unchanged");
+});
+
+test("ledger.mjs rotate with no phase0.json archives the ledger exactly as before", () => {
+  const { f, rotate } = rotateFixture();
+  f.ledgerRow(5, "impl-5=PR#6");
+  const r = rotate();
+  assert.equal(r.status, 0, r.stderr);
+  const names = readdirSync(join(f.repo, ".fleet"));
+  assert.equal(names.filter((n) => /^ledger\..+\.md$/.test(n)).length, 1);
+  assert.deepEqual(names.filter((n) => /^phase0\./.test(n)), []);
+});
+
+test("ledger.mjs rotate with a receipt and no ledger still files the receipt", () => {
+  const { f, rotate } = rotateFixture();
+  writeFileSync(f.receiptPath, "{}\n");
+  const r = rotate();
+  assert.equal(r.status, 0, r.stderr);
+  const names = readdirSync(join(f.repo, ".fleet"));
+  assert.equal(names.filter((n) => /^phase0\..+\.json$/.test(n)).length, 1, names.join());
+  assert.equal(existsSync(f.receiptPath), false);
+});
+
+// ── the command line ─────────────────────────────────────────────────────────
+
+const refuses = (f, args, shows) => {
+  const r = f.run(args);
+  assert.equal(r.status, 2, `${args.join(" ")} → ${r.status}\n${r.stdout}${r.err}`);
+  assert.match(r.err, shows);
+  assert.deepEqual(f.order(), [], "a refused command line ran nothing");
+  assert.equal(existsSync(f.receiptPath), false, "nor wrote a receipt");
+};
+
+test("usage: every malformed command line exits 2 before a step runs", () => {
+  const f = fixture();
+  const s = ["--session", f.session];
+  refuses(f, [], /--session is required/);
+  refuses(f, [...s, "--bogus"], /--bogus/);
+  refuses(f, ["--session"], /--session needs a value/);
+  refuses(f, ["--session", join(f.dir, "missing")], /not readable/);
+  refuses(f, ["--session", join(f.repo, "README")], /not a directory/);
+  refuses(f, [...s, "--implementer-cap", "0"], /positive/);
+  refuses(f, [...s, "--implementer-cap", "many"], /needs a number/);
+  refuses(f, [...s, "--reviewer-cap"], /--reviewer-cap needs a value/);
+  refuses(f, [...s, "--workflow", "CI", "--declare-no-ci"], /alternatives/);
+  refuses(f, [...s, "--declare-no-ci=1"], /boolean flag/);
+  refuses(f, [...s, "stray"], /unexpected argument 'stray'/);
+});
+
+test("usage: a linked worktree refuses, because the checks judge the main checkout", () => {
+  const f = fixture();
+  const tree = join(f.repo, ".worktrees", "t");
+  git(f.repo, "worktree", "add", "-q", "-b", "side", tree);
+  const r = f.run(null, { cwd: tree });
+  assert.equal(r.status, 2, r.stdout + r.err);
+  assert.match(r.err, /run this from the main checkout/);
+  assert.deepEqual(f.order(), []);
+});
+
+test("an ambient GIT_DIR or GH_REPO naming another repository does not change what any step reads or runs", () => {
+  const f = fixture();
+  const elsewhere = fixture();
+  git(elsewhere.repo, "switch", "-q", "-c", "not-main");
+  const r = f.run(null, { env: { GIT_DIR: join(elsewhere.repo, ".git"), GH_REPO: "someone/else" } });
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.deepEqual(statuses(f.receipt()), allOk);
+  for (const call of ["instruments", "main-checkout", "preflight", "tier-roles", "metrics-refresh", "derive-testcmd", "stranded", "shortlist"]) {
+    assert.equal(f.calls(call)[0].GIT_DIR, null, `${call} inherited GIT_DIR`);
+  }
+  assert.match(readFileSync(join(f.stubs, "gh.calls"), "utf8"), /GH_REPO=\[\] GIT_DIR=\[\]/);
+});
+
+// ── arg.mjs consumers and the instruments pin cover the script ────────────────
+
+test("arg.mjs: the script binds defineFlags and refuses an unknown flag in the shared wording, before it looks at git", () => {
+  assert.match(readFileSync(join(REAL_SCRIPTS, "phase0.mjs"), "utf8"), /^import \{[^}]*\bdefineFlags\b[^}]*\} from "\.\/arg\.mjs";$/m);
+  const r = spawnSync(process.execPath, [join(REAL_SCRIPTS, "phase0.mjs"), "--bogus"], { cwd: tempDir("phase0-nogit-"), encoding: "utf8", env: GIT_ENV });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /^phase0: unknown flag --bogus/m);
+});
+
+test("the instruments pin covers phase0.mjs: a rewrite of it is a changed instrument set, and an untracked file beside it is not", () => {
+  const dir = realpathSync(tempDir("phase0-pin-"));
+  mkdirSync(join(dir, "plugin", "scripts"), { recursive: true });
+  cpSync(join(REAL_SCRIPTS, "phase0.mjs"), join(dir, "plugin", "scripts", "phase0.mjs"));
+  git(dir, "init", "-q", "-b", "main");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-q", "-m", "i");
+  const pin = (...a) => spawnSync("sh", [join(REAL_SCRIPTS, "instruments.sh"), ...a], { cwd: dir, encoding: "utf8", env: GIT_ENV });
+  assert.equal(pin("--pin").status, 0);
+  assert.equal(pin().status, 0, "unchanged");
+  writeFileSync(join(dir, "plugin", "scripts", "scratch.txt"), "untracked\n");
+  assert.equal(pin().status, 0, "an untracked file is no instrument");
+  writeFileSync(join(dir, "plugin", "scripts", "phase0.mjs"), `${readFileSync(join(dir, "plugin", "scripts", "phase0.mjs"), "utf8")}\n// edited\n`);
+  const changed = pin();
+  assert.equal(changed.status, 1);
+  assert.match(changed.stdout + changed.stderr, /phase0\.mjs/);
+});
