@@ -15,7 +15,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
+import { chmodSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
@@ -157,6 +157,32 @@ test("live-editor: an untracked file is still dirt under status.showUntrackedFil
   assert.equal(r.out.cause, "live-editor");
 });
 
+test("live-editor: the status cross-check alone sees dirt the audit row reads as zero, under status.showUntrackedFiles = no", () => {
+  const f = fixture();
+  git(f.w, "config", "status.showUntrackedFiles", "no");
+  writeFileSync(join(f.wt, "scratch.txt"), "x\n");
+  // A git on PATH that answers the audit's own `status --porcelain -uall` with
+  // nothing, so the row's dirty count is 0 over a tree that is dirty, and only
+  // the script's own `-unormal` status read can tell.
+  const bin = join(f.root, "bin");
+  mkdirSync(bin);
+  const real = execFileSync("sh", ["-c", "command -v git"], { env: ENV, encoding: "utf8" }).trim();
+  writeExecStub(
+    join(bin, "git"),
+    `#!/bin/sh
+case " $* " in
+*" status --porcelain -uall "*) exit 0 ;;
+esac
+exec ${real} "$@"
+`,
+  );
+  const r = std(f, [], { env: { PATH: `${bin}:${ENV.PATH}` } });
+  assert.equal(r.out?.evidence.audit.row.dirty, 0, "the stub made the row read the dirty tree as clean");
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.out.cause, "live-editor");
+  assert.match(r.out.evidence.status[0], /\?\? scratch\.txt/);
+});
+
 test("live-editor: the two samples are read --sample-seconds apart, and a growing diff shows in the second", () => {
   const f = fixture();
   appendFileSync(join(f.wt, "work.txt"), "more\n");
@@ -211,6 +237,38 @@ test("rebase: a reset to another commit is a rebase entry too", () => {
   assert.equal(r.status, 1, r.stderr);
   assert.equal(r.out.cause, "rebase");
   assert.match(r.out.evidence.reflog, /HEAD@\{0\}: reset/);
+});
+
+test("a user's log.decorate or color.ui config does not change how the reflog subject is read", () => {
+  // Each config alone puts something ahead of the subject - `(HEAD -> feat)`, or
+  // an escape around the abbreviated SHA - that a bare `git reflog` hands the
+  // subject match and the evidence line.
+  for (const [key, value] of [["log.decorate", "short"], ["color.ui", "always"]]) {
+    const f = pastPin();
+    git(f.w, "config", key, value);
+    const plain = /^[0-9a-f]+ HEAD@\{0\}: commit: late$/;
+    assert.doesNotMatch(git(f.wt, "reflog", "-n", "1"), plain, `${key} reached the reflog`);
+    const r = std(f);
+    assert.equal(r.status, 1, `${key}: ${r.stderr}`);
+    assert.equal(r.out.cause, "past-pin", key);
+    assert.match(r.out.evidence.reflog, plain, key);
+  }
+});
+
+test("exit 2: a --repo whose stat is refused is could-not-look, never a crash with no verdict", (t) => {
+  if (process.getuid?.() === 0) t.skip("root is never refused a stat");
+  const f = fixture();
+  const locked = join(f.root, "locked");
+  mkdirSync(join(locked, "sub"), { recursive: true });
+  chmodSync(locked, 0o000);
+  try {
+    const r = audit(f, ["--worktree", f.wt, "--pin", f.pin, "--repo", join(locked, "sub")]);
+    assert.equal(r.status, 2, r.stderr);
+    assert.equal(r.out, null);
+    assert.match(r.stderr, /^\nfinisher-audit: --repo cannot be read: /);
+  } finally {
+    chmodSync(locked, 0o755);
+  }
 });
 
 // past-pin: the commit made after the dispatch, and whether anything can reach it.

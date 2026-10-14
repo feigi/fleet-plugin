@@ -3355,10 +3355,11 @@ a minute apart showed *different* mutants, so a member's report and any single
    `git cherry <pin> HEAD origin/main` that its `evidence` holds.
 
 **Give the finisher the instrument re-check verbatim too.** Duty 1 and duty 2
-each run a script the digest covers — `worktree-audit.sh` and `ledger.mjs`,
-both under `plugin/scripts/` — and the label at duty 3 rests on what they
-returned. The rule is stated once, at the top of this file, which no finisher
-is dispatched to read, so it reaches one through this block or not at all:
+each run a script the digest covers — `finisher-audit.mjs` (which runs
+`worktree-audit.sh`) and `ledger.mjs`, both under `plugin/scripts/` — and the
+label at duty 3 rests on what they returned. The rule is stated once, at the
+top of this file, which no finisher is dispatched to read, so it reaches one
+through this block or not at all:
 
 > **Re-check the instrument set before you act on what duty 1 or duty 2 read,
 > and again before you add the label.**

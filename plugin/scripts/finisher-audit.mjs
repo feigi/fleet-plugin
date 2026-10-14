@@ -140,9 +140,16 @@ if (!worktree.startsWith("/")) die(`--worktree needs an absolute path, got ${wor
 const pin = pinArg.toLowerCase();
 if (!/^[0-9a-f]{40}$/.test(pin)) die(`--pin needs a full 40-character commit SHA, got ${pinArg}`);
 // A missing directory makes spawn report ENOENT for the binary itself, which
-// would blame git or sh for a bad --repo.
-if (repoArg !== null && !statSync(repoArg, { throwIfNoEntry: false })?.isDirectory()) {
-  die(`--repo is not a directory: ${repoArg}`);
+// would blame git or sh for a bad --repo. A stat that throws (EACCES on an
+// ancestor) is the same refusal, not a crash with no verdict.
+if (repoArg !== null) {
+  let isDir = false;
+  try {
+    isDir = statSync(repoArg, { throwIfNoEntry: false })?.isDirectory() === true;
+  } catch (e) {
+    die(`--repo cannot be read: ${repoArg} (${e.code ?? e.message})`);
+  }
+  if (!isDir) die(`--repo is not a directory: ${repoArg}`);
 }
 const repo = repoArg === null ? process.cwd() : resolve(repoArg);
 
@@ -249,7 +256,10 @@ verdict.head = head;
 if (head === pin) finish(0);
 
 // --- 4: the reflog -------------------------------------------------------------
-const reflog = git("reflog", ["reflog", "-n", REFLOG_LIMIT]).out;
+// `--no-decorate --no-color`: a user's `log.decorate` or `color.ui` config would
+// otherwise put `(HEAD -> branch)` or an escape ahead of the subject, and the
+// subject match below would read every move as `other`.
+const reflog = git("reflog", ["reflog", "--no-decorate", "--no-color", "-n", REFLOG_LIMIT]).out;
 const move = reflog.split("\n").find((l) => l.trim() !== "") ?? null;
 // `<abbrev> HEAD@{0}: <subject>`: the subject is what names the operation.
 const subject = move === null ? "" : (/^\S+ [^\s:]*@\{\d+\}: (.*)$/.exec(move)?.[1] ?? "");
