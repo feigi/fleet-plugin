@@ -117,9 +117,9 @@ export function parseFeatures(text) {
   });
 }
 
-const EXCLUDED_MEMBER = /^(?:merge-?bot|memory$|__advisor$)/i;
+export const EXCLUDED_MEMBER = /^(?:merge-?bot|memory$|__advisor$)/i;
 // omp nests a member's id as `<parent>/<parent>.<child>`: the child is the last segment after either separator.
-const lastSegment = (agent) => String(agent).split(/[/.]/).at(-1);
+export const lastSegment = (agent) => String(agent).split(/[/.]/).at(-1);
 const usd = (r) => (r.cost === "" || r.cost === undefined ? 0 : Number(r.cost));
 const isMerged = (pr) => pr?.state === "MERGED";
 const failed = (tier) => tier.minted_false_claim === "yes" || tier.closed_own_ticket === "no";
