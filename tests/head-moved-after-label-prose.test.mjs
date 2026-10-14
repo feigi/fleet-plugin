@@ -22,6 +22,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { Pin } from "./support/prose-pin.mjs";
+import { stripComments } from "./support/strip-comments.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const DOC = Pin.file(join(REPO, "commands", "run-merge-bot.md"));
@@ -364,11 +365,12 @@ test("the recovery removes the label before approving, and says why messaging th
 });
 
 // #2945, the writing half: the record is only as good as every path that adds
-// `ready-to-merge` writing it — the fleet finisher (its duty list and the
-// verbatim block it is handed) and `review-and-fix` step 6 standalone. Each
-// must post the record BEFORE the label, so a merge bot
-// dispatched the moment the label appears finds the record already there, and
-// must name the head it audited, not whatever the branch tip reads.
+// `ready-to-merge` writing it — the fleet finisher (through `finisher-label.mjs`,
+// named in its duty list and in the verbatim block it is handed) and
+// `review-and-fix` step 6 standalone. Each must post the record BEFORE the
+// label, so a merge bot dispatched the moment the label appears finds the
+// record already there, and must name the head it audited, not whatever the
+// branch tip reads.
 const recordBeforeLabel = (slice, where, head) => {
   const record = slice.indexOf(`gh pr comment <`);
   const label = slice.indexOf("--add-label ready-to-merge");
@@ -378,17 +380,29 @@ const recordBeforeLabel = (slice, where, head) => {
   assert.match(slice, Pin.phrase(`--body "ready-to-merge-head: ${head}"`), `${where} records something other than the audited head`);
 };
 
+// The finisher no longer spells the two commands, so its prose is held to
+// handing the script the audited head, and the script's own source to writing
+// the record before the label. The order is also run, against a stub `gh`, in
+// finisher-label.test.mjs.
+const FINISHER_LABEL = stripComments(readFileSync(join(REPO, "scripts", "finisher-label.mjs"), "utf8"));
+
 test("every writer of ready-to-merge records the audited head before the label", () => {
-  recordBeforeLabel(
-    RUN_TEAM.between("- **(b) Add the label:**", "4. Report you the label", "finisher duty 3(b)").text,
-    "finisher duty 3(b)",
-    "<your dispatch pin>",
-  );
-  recordBeforeLabel(
-    RUN_TEAM.between("**Duty 3 is two steps, and only the second one labels.**", "**Once the label is on, take it off", "finisher duty-3 verbatim block").text,
-    "the finisher's verbatim duty-3 block",
-    "<your dispatch pin>",
-  );
+  for (const [slice, where] of [
+    [RUN_TEAM.between("3. Add `ready-to-merge` by running one script", "4. Report you the label", "finisher duty 3").text, "finisher duty 3"],
+    [
+      RUN_TEAM.between("**Duty 3 is one script, and its exit code is your verdict.**", "**Once the label is on, take it off", "finisher duty-3 verbatim block").text,
+      "the finisher's verbatim duty-3 block",
+    ],
+  ]) {
+    assert.match(slice, Pin.phrase("finisher-label.mjs --pr"), `${where} no longer runs the script that records the head and adds the label`);
+    assert.match(slice, Pin.phrase("--pin <your dispatch pin>"), `${where} hands the script something other than the audited head`);
+  }
+  const record = FINISHER_LABEL.indexOf('"pr", "comment"');
+  const label = FINISHER_LABEL.indexOf('"pr", "edit"');
+  assert.ok(record !== -1, "finisher-label.mjs posts no record");
+  assert.ok(label !== -1, "finisher-label.mjs no longer adds the label");
+  assert.ok(record < label, "finisher-label.mjs labels before it records the head");
+  assert.match(FINISHER_LABEL, /`ready-to-merge-head: \$\{pin\}`/, "finisher-label.mjs records something other than the audited head");
   recordBeforeLabel(
     REVIEW_AND_FIX.between("6. Diff-check green", "**Bind green to the *run*", "review-and-fix.md step 6").text,
     "review-and-fix.md step 6",
