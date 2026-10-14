@@ -228,6 +228,15 @@ for (const [why, args, said] of [
   });
 }
 
+// A stdout that takes no bytes (fd 1 a read-only descriptor, so the write is
+// refused) must not read as a printed schema: exit 2, nothing on stdout.
+test("print whose stdout takes no bytes is exit 2", () => {
+  const r = spawnSync("/bin/sh", ["-c", `"$0" "$1" print impl 1<&0`, process.execPath, SCRIPT], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  assert.equal(r.status, 2, `${r.stdout}${r.stderr}`);
+  assert.equal(r.stdout, "");
+  assert.ok(r.stderr.includes("report-schema: the schema could not be written to stdout"), r.stderr);
+});
+
 test("validate of an unreadable file is exit 2, naming the file", () => {
   const missing = join(DIR, "absent.json");
   const r = run("validate", "impl", missing);

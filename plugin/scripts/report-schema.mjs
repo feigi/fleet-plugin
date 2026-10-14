@@ -40,19 +40,35 @@
 // as `$.merged[1].sha`.
 //
 // Strict mode. A `task` call can carry this schema as `outputSchema` with
-// `schemaMode: "strict"`. What omp does with a result that fails it was NOT
-// measurable from a member session, so nothing here assumes an answer:
-// measured 2026-10-14 under omp/18.10.3, the member session's `task` tool
-// takes items of { agent, name, solutionSpace, task, tools } and no
-// `outputSchema` or `schemaMode`, and one dispatch carrying both, told to
-// return `{}` against a schema requiring a field, was refused before any job
-// existed — no job status to observe. The refusal, verbatim:
+// `schemaMode: "strict"`. Measured 2026-10-14 under omp/18.10.3, and only on
+// the path a member session can reach: the session's `task` tool takes items
+// of { agent, name, solutionSpace, task, tools } and no `outputSchema` or
+// `schemaMode`, so the same schema was handed to `eval`'s `agent(prompt,
+// { schema, schemaMode })`, with a child told to submit `{}` and never
+// anything else, against a schema requiring a field `x`. Each of its first
+// three submissions got a notice from the child's `yield` tool:
 //
-//   Task SchemaProbe failed preflight: Cannot spawn 'task'. Allowed: none
-//   (spawns disabled for this agent)
+//   Output does not match schema: x: is required. Call yield again with the
+//   corrected shape — 2 retry attempt(s) remain before the schema constraint
+//   is dropped.
 //
-// So a caller reading a report validates the file itself, whatever the
-// dispatch's schema mode.
+// then `1 retry attempt(s) remain`, then `this is the final retry`, and the
+// fourth submission was taken: `Result submitted (schema validation
+// overridden after 4 failed attempt(s)).` What the caller then saw depended
+// on the mode:
+//
+//   strict      job status `failed`; the handle's wait() rejected with
+//               `schema_violation: missing required fields: x`; its output
+//               text was {"error":"schema_violation","message":"x: is
+//               required","missingRequired":["x"],"data":"{}"}
+//   permissive  job status `completed`; the invalid `{}` came back as the
+//               result
+//
+// A child that corrected itself after the first notice, in strict mode,
+// resolved with its corrected data. Not measured: a `task` dispatch that
+// carries both fields, which this session's tool cannot express. So a caller
+// reading a report validates the file itself, whatever the dispatch's
+// schema mode.
 
 import { readFileSync } from "node:fs";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
@@ -192,7 +208,7 @@ function main() {
   if (rest.length > 0 || family === undefined) die(USAGE);
 
   if (cmd === "print" && path === undefined) {
-    writeAll(1, `${JSON.stringify(familyOf(family), null, 2)}\n`);
+    if (!writeAll(1, `${JSON.stringify(familyOf(family), null, 2)}\n`)) die("the schema could not be written to stdout");
     return;
   }
   if (cmd !== "validate" || path === undefined) die(USAGE);
