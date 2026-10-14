@@ -47,8 +47,8 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, premisesOf, MEMBER_FAMILIES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
-import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
+import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
 import { attemptLock, releaseLockFile, reapPathOf } from "./pid-lock.mjs";
@@ -168,6 +168,9 @@ function defaultLedgerPath() {
     return ".fleet/ledger.md";
   }
 }
+
+// What `row` and `token` say of a `label-off=` naming no finisher this run has.
+const LABEL_OFF_UNKNOWN = "names no finisher-pr member this run has dispatched or recorded — label-off=<finisher-pr-M[-x]>, the latest finisher attempt, before taking ready-to-merge off PR M";
 
 const argv = process.argv.slice(2);
 // Both flags are read by EXACT token below (`indexOf`), so the `--flag=value`
@@ -710,7 +713,7 @@ if (cmd === "read") {
   // nothing; see badLabelOff().
   const badOff = badLabelOff(line.split(/\s+/));
   if (badOff !== undefined) {
-    die(`row ${key}: '${badOff}' names no finisher-pr member this run has dispatched or recorded — label-off=<finisher-pr-M[-x]>, the latest finisher attempt, before taking ready-to-merge off PR M`);
+    die(`row ${key}: '${badOff}' ${LABEL_OFF_UNKNOWN}`);
   }
   const i = data.rows.findIndex((r) => r.split(/\s/)[0] === key);
   const created = i === -1;
@@ -744,8 +747,12 @@ if (cmd === "read") {
   // A rewrite loses every token the new text does not repeat, so the ones it
   // lost are named: the controller learns of a dropped `ports=` or `→ PR#`
   // here and not from a later reader that finds it missing.
-  const dropped = created ? [] : droppedTokens(oldRow, line);
-  console.error(created ? `    new row ${key}` : `    rewrote row ${key}${dropped.length === 0 ? "" : `; dropped: ${dropped.join(" ")}`}`);
+  if (created) {
+    console.error(`    new row ${key}`);
+  } else {
+    const dropped = droppedTokens(oldRow, line);
+    console.error(`    rewrote row ${key}${dropped.length === 0 ? "" : `; dropped: ${dropped.join(" ")}`}`);
+  }
   console.log(JSON.stringify({ ticket: key, line, created }));
 } else if (cmd === "filed") {
   const [issue, ...subjectParts] = rest;
@@ -2014,6 +2021,15 @@ function runSettle() {
   console.log(JSON.stringify(payload(i, true)));
 }
 
+// A ticket or PR number argument as a number: a leading `#` is allowed, a
+// stray flag or anything but digits refused, saying `what` was expected.
+function numberArg(arg, what, usage) {
+  refuseStrayInId(arg, what);
+  const digits = arg.replace(/^#/, "");
+  if (!isDigits(digits)) die(`'${arg}' is not ${what} — ${usage}`);
+  return Number(digits);
+}
+
 // `review <pr> <token>…`: the only writer of a PR's `review=`/`reviewed=`
 // tokens. Each lands on the PR's row — the ticket row once `settle
 // impl-<N>=PR#M` has run, else `#M`, created when neither exists — so the
@@ -2026,10 +2042,7 @@ function runReview() {
   const usage = "usage: ledger.mjs review <pr> <review=…|reviewed=…>…";
   const [pr, ...parts] = rest;
   if (!pr || parts.length === 0) die(usage);
-  refuseStrayInId(pr, "a PR number");
-  const digits = pr.replace(/^#/, "");
-  if (!isDigits(digits)) die(`'${pr}' is not a PR number — ${usage}`);
-  const prNum = Number(digits);
+  const prNum = numberArg(pr, "a PR number", usage);
   const tokens = parts.join(" ").split(/\s+/).filter(Boolean);
   const other = tokens.find((tok) => !isReviewToken(tok));
   if (other !== undefined) {
@@ -2068,14 +2081,7 @@ function rowTokens(text) {
 // Every token `oldRow` had that `line` lacks, duplicates counted, in the old
 // row's order: what a `row` rewrite lost.
 function droppedTokens(oldRow, line) {
-  const kept = new Map();
-  for (const tok of rowTokens(line)) kept.set(tok, (kept.get(tok) ?? 0) + 1);
-  return rowTokens(oldRow).filter((tok) => {
-    const n = kept.get(tok) ?? 0;
-    if (n === 0) return true;
-    kept.set(tok, n - 1);
-    return false;
-  });
+  return added(rowTokens(line), rowTokens(oldRow));
 }
 
 // The first of `words` that is a `label-off=` naming no finisher-pr member
@@ -2093,11 +2099,21 @@ function badLabelOff(words) {
   });
 }
 
-// Why `token` may not write `tok`, or null when it may. A member token is
-// `dispatch`'s or `settle`'s, a review token `review`'s; a word shaped like a
-// member that the grammar cannot parse, and a `tier=` that is not a cell, are
-// refused as `row` refuses them. Every other word is a freeform token.
-function tokenRefusal(tok) {
+// Why `token` may not write `tok` onto a row whose text is `rowText` (the row
+// as it stands plus the call's earlier tokens), or null when it may. A token
+// is one word: an empty argument, one with a space in it (prose, which would
+// split into words the row's own words then dedupe against), and the row's
+// ` · ` separator are no token. A member token is `dispatch`'s or `settle`'s,
+// a review token `review`'s. A word shaped like a member that the grammar
+// cannot parse, a `tier=` that is not a cell, a `tier=` naming a second tier
+// on a row that already has one, a `held-behind` or `conflict-hold` token the
+// tick cannot read, and a lone `→` — an arrow with no PR beside it points at
+// nothing — are refused. Every other word is a freeform token.
+function tokenRefusal(tok, rowText) {
+  if (tok === "" || /\s/.test(tok)) {
+    return "is not one token — pass each token as its own argument, with no space in it";
+  }
+  if (tok === "·") return "is the row's ` · ` separator, which `token` writes between tokens itself";
   if (parseToken(tok) !== null) {
     return "is a member token — members are written only with `ledger.mjs dispatch` and `ledger.mjs settle`";
   }
@@ -2108,11 +2124,21 @@ function tokenRefusal(tok) {
   if (MEMBER_FAMILIES.some((family) => name.startsWith(`${family}-`))) {
     return "is shaped like a member token this grammar cannot parse — a member is impl-<N>, fix-pr-<M>, finisher-pr-<M> or merge-bot-<n>, a retry suffix allowed";
   }
-  const badTier = tierValues(tok).find((v) => !CELL.test(v));
-  if (badTier !== undefined) return `is not tier=<cell> — a cell is <slow|task|smol>-<level>`;
-  if (badLabelOff([tok]) !== undefined) {
-    return "names no finisher-pr member this run has dispatched or recorded — label-off=<finisher-pr-M[-x]>, the latest finisher attempt, before taking ready-to-merge off PR M";
+  for (const [prefix, shape] of [["held-behind", HELD], ["conflict-hold", CONFLICT_HOLD]]) {
+    if (tok.startsWith(prefix) && !shape.test(tok)) {
+      return `is not ${prefix}:#<M> — the tick reads only ${prefix}:#<number> and would ignore this one`;
+    }
   }
+  const [tier] = tierValues(tok);
+  if (tier !== undefined) {
+    if (!CELL.test(tier)) return "is not tier=<cell> — a cell is <slow|task|smol>-<level>";
+    const other = tierValues(rowText).find((v) => v !== tier);
+    if (other !== undefined) {
+      return `names a second tier — the row already carries tier=${other}, and a row names one; replacing it takes ledger.mjs row, which rewrites the whole line`;
+    }
+  }
+  if (tok === "→") return "is the row's arrow, which is written with the PR it points at — ledger.mjs row writes the whole line";
+  if (badLabelOff([tok]) !== undefined) return LABEL_OFF_UNKNOWN;
   return null;
 }
 
@@ -2124,21 +2150,18 @@ function tokenRefusal(tok) {
 // written, whole call alike, under the lock.
 function runToken() {
   const usage = "usage: ledger.mjs token <ticket|pr> <token>…";
-  const [keyArg, ...parts] = rest;
-  if (!keyArg || parts.length === 0) die(usage);
-  refuseStrayInId(keyArg, "a ticket or PR number");
-  const digits = keyArg.replace(/^#/, "");
-  if (!isDigits(digits)) die(`'${keyArg}' is not a ticket or PR number — ${usage}`);
-  const num = Number(digits);
-  const tokens = parts.join(" ").split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) die(usage);
-  for (const tok of tokens) {
-    const why = tokenRefusal(tok);
-    if (why !== null) die(`token #${num}: '${tok}' ${why}`);
-  }
+  const [keyArg, ...tokens] = rest;
+  if (!keyArg || tokens.length === 0) die(usage);
+  const num = numberArg(keyArg, "a ticket or PR number", usage);
   const i = prRowIndex(num);
   const created = i === -1;
   const oldLine = created ? null : data.rows[i];
+  let carried = oldLine ?? "";
+  for (const tok of tokens) {
+    const why = tokenRefusal(tok, carried);
+    if (why !== null) die(`token #${num}: '${tok}' ${why}`);
+    carried += ` ${tok}`;
+  }
   const key = created ? `#${num}` : rowKey(oldLine);
   const have = new Set(created ? [] : rowTokens(oldLine));
   const appended = [];

@@ -3532,8 +3532,14 @@ test("token accepts a label-off= naming a finisher the ledger knows, whether on 
   const { run, rows } = tokenFixture(t, ["#5 impl-5=PR#9 → PR#9 · finisher-pr-9=labelled"]);
   run("token", "9", "label-off=finisher-pr-9");
   assert.equal(rows()[0], "#5 impl-5=PR#9 → PR#9 · finisher-pr-9=labelled · label-off=finisher-pr-9");
+  // `dispatch` puts the finisher on the row as well, so the row would vouch for
+  // it; a `row` rewrite that drops the member token leaves ## Dispatched alone
+  // knowing it.
   const d = tokenFixture(t, ["#9 fix-pr-9"]);
   d.run("dispatch", "9", "finisher-pr-9");
+  d.run("row", "9", "fix-pr-9");
+  assert.doesNotMatch(d.rows()[0], /finisher-pr-9/, "the fixture's row no longer names the finisher");
+  assert.match(d.bytes(), /## Dispatched\n[^]*finisher-pr-9/, "the finisher is still in ## Dispatched");
   d.run("token", "9", "label-off=finisher-pr-9");
   assert.match(d.rows()[0], /label-off=finisher-pr-9$/);
 });
@@ -3549,6 +3555,47 @@ test("token with a token the row already carries is a no-op at exit 0 and says `
   assert.match(mixed.stderr, /already present/);
   assert.deepEqual(mixed.payload.added, ["held-behind:#3"], "the new token lands once, the duplicates are skipped");
   assert.deepEqual(rows(), [`${SETTLED_ROW} · held-behind:#3`]);
+});
+
+test("token refuses a second tier= on a row that has one, and in one call, but takes a first or a repeated one", (t) => {
+  const { run, refused, rows } = tokenFixture(t, ["#5 impl-5 · tier=task-low", "#6 impl-6"]);
+  refused(["token", "5", "tier=slow-high"], /names a second tier — the row already carries tier=task-low/);
+  assert.match(run("token", "5", "tier=task-low").stderr, /already present/, "the tier the row carries is a duplicate, not a conflict");
+  refused(["token", "6", "tier=slow-high", "tier=task-low"], /names a second tier — the row already carries tier=slow-high/);
+  assert.equal(run("token", "6", "tier=slow-high").payload.line, "#6 impl-6 · tier=slow-high", "a row with no tier takes one");
+  assert.deepEqual(rows(), ["#5 impl-5 · tier=task-low", "#6 impl-6 · tier=slow-high"]);
+});
+
+test("token refuses the ` · ` separator, an arrow, and an argument that is not one word, writing nothing", (t) => {
+  const { run, refused, rows } = tokenFixture(t, ["#5 impl-5=PR#9 → PR#9 · ports=1 · waiting on review"]);
+  refused(["token", "5", "·"], /'·' is the row's ` · ` separator/);
+  refused(["token", "5", "a · b"], /'a · b' is not one token/);
+  refused(["token", "5", "conflict-hold:#4 (conflict: mergeable=CONFLICTING)"], /is not one token/);
+  refused(["token", "5", ""], /is not one token/);
+  refused(["token", "5", "→"], /'→' is the row's arrow/);
+  refused(["token", "5", "→ PR#9"], /is not one token/);
+  // A refused word refuses the call: the clean word before it is not written.
+  refused(["token", "5", "ci=1:1:success", "·"], /separator/);
+  assert.deepEqual(rows(), ["#5 impl-5=PR#9 → PR#9 · ports=1 · waiting on review"], "every refusal left the row as it was");
+  assert.equal(run("token", "5", "ci=1:1:success").payload.added.length, 1, "the same row still takes a clean token");
+});
+
+test("token refuses a held-behind or conflict-hold token the tick cannot read, and takes the ones it reads", (t) => {
+  const { run, refused, rows } = tokenFixture(t, ["#5 impl-5"]);
+  for (const tok of ["conflict-hold:#4O", "conflict-hold:", "conflict-hold", "held-behind:#x", "held-behind:#", "held-behind=4"]) {
+    refused(["token", "5", tok], /would ignore this one/);
+  }
+  for (const tok of ["held-behind:#3", "conflict-hold:#9"]) run("token", "5", tok);
+  assert.match(rows()[0], /^#5 impl-5 · held-behind:#3 · conflict-hold:#9$/);
+});
+
+test("token refuses a freeform PR#<n> that would split one PR across two rows, and one that would crowd a PR with a second open launch", (t) => {
+  const split = tokenFixture(t, ["#5 impl-5=PR#9", "#6 class=routine"]);
+  split.refused(["token", "6", "PR#9"], /PR #9 would map to more than one row — its PR's row is #5/);
+  // PR 9 is already split across two rows, so the split rule stands aside; the
+  // write still lands wf:b beside the open wf:a in PR 9's stream.
+  const crowd = tokenFixture(t, ["#5 impl-5=PR#9 · review=wf:a", "#8 PR#9 note", "#6 review=wf:b"]);
+  crowd.refused(["token", "6", "PR#9"], /one open launch per PR/);
 });
 
 test("token takes the write lock: a held lock refuses it, as for every other write", (t) => {

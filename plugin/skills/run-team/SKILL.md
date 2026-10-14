@@ -4425,7 +4425,7 @@ is yours, written before you take `ready-to-merge` off PR M on purpose (taking
 it off before you approve a push, or clearing one left on a moved head),
 naming that PR's latest finisher attempt: the tick reads a missing label as a
 finisher's miss only after the last attempt a `label-off=` names, so without
-it your own removal reads as one. `row` refuses a `label-off=` naming no
+it your own removal reads as one. `row` and `token` refuse a `label-off=` naming no
 `finisher-pr` member that `## Dispatched` or some row already carries.
 
 `review` holds a PR's review record to these rules, read across every row that
@@ -4457,7 +4457,7 @@ Plus two append-only lists:
 - **ruled** (`ledger.mjs ruled <pr> <decision>`) — PR + decision + one-line reason,
   so a replacement controller does not re-litigate a settled call.
 
-**Writer policy: the controller owns run state (`row`/`settle`/`dispatch`/`review`/`drain`/`ruled`);
+**Writer policy: the controller owns run state (`row`/`token`/`settle`/`dispatch`/`review`/`drain`/`ruled`);
 filers append filings with `filed`; all writes are serialized by `<file>.lock`.**
 Every write rewrites the whole file from what it read, so without the lock two
 concurrent writers are last-writer-wins — measured, 8 concurrent `filed` kept

@@ -76,9 +76,10 @@ test("phase 2 dispatches every implementer at its definition's tier, and says so
     /Keep `name: impl-<N>`/,
     "phase 2 no longer keeps the impl-<N> name alongside the dispatched agent",
   );
-  // `row` REPLACES the line (ledger.mjs's `data.rows[i] = line`). Replaying a
-  // two-token literal over a row carrying KILLED or → PR# drops those tokens, so
-  // the paragraph says so and points a token addition at `token`.
+  // `row` REPLACES the line (ledger.mjs's `data.rows = after`, `line` in place
+  // of the old row). Replaying a two-token literal over a row carrying KILLED or
+  // → PR# drops those tokens, so the paragraph says so and points a token
+  // addition at `token`.
   assert.match(
     slice,
     /replaces the whole line/,

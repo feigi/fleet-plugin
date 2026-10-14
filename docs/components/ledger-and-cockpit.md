@@ -11,7 +11,7 @@ finished work. The ledger exists so it never has to.
 1. **Write.** [`ledger.mjs`](../../plugin/scripts/ledger.mjs) owns
    `.fleet/ledger.md`, one row per ticket, serialized by a file lock —
    without it, concurrent writers would be last-writer-wins (#531).
-   `row`/`settle`/`dispatch`/`review`/`drain` are the controller's own
+   `row`/`token`/`settle`/`dispatch`/`review`/`drain` are the controller's own
    subcommands; `filed`/`ruled` are
    append-only, outliving the reasoning that produced them.
 2. **Track.** `dispatch` writes a member's live token (e.g. `impl-412`)
