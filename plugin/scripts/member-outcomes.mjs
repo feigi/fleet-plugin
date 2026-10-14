@@ -91,8 +91,8 @@ export function rowsForSession(sessionDir, stats = {}) {
 // A column is APPENDED, never inserted, as a rule: a read-out that indexes by
 // position (`$5`, in the file's header) silently repoints when one is added
 // ahead of it. `report` is placed after `subagent_type` regardless, which
-// moves the four priced columns one place right; every reader in this
-// repository takes those four by name through parseTsv, and the header's
+// moves the four priced columns one place right; every script that reads this
+// file through parseTsv takes those four by name, and the header's
 // position-indexed read-outs name columns ahead of them. `subagent_type`
 // follows `harness`. `cost` is the provider's own per-turn `usage.cost.total`,
 // summed to the micro-dollar — the $ of record; `tokens_cache_write_1h` and
@@ -213,6 +213,15 @@ if (isCLI(import.meta.url)) {
   // flag the operator typed.
   if (isFlagLike(file)) die("--file needs a path");
   if (scratchIdx >= 0 && isFlagLike(scratchArg)) die("--scratch needs a path");
+  // An explicit root that is not a directory is a mistyped path, and reading it
+  // as a root would stamp `absent` on every covered row and, by the replace-by-key
+  // merge, over a recorded `ok`/`invalid` — indistinguishable from "wrote no report".
+  if (scratchIdx >= 0) {
+    let isDir = false;
+    try { isDir = statSync(scratchArg).isDirectory(); }
+    catch (e) { die(`cannot read --scratch ${scratchArg}: ${e.code ?? e.message}`); }
+    if (!isDir) die(`--scratch ${scratchArg} is not a directory`);
+  }
 
   const sessionDir = dirs[0].replace(/\/+$/, "");
   // A wrong guess used to exit 0 having scraped and written nothing, because

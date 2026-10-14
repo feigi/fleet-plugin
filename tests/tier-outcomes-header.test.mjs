@@ -321,12 +321,13 @@ test("a `member` mentioned later in the sentence does not cover a `sizing` misat
   );
 });
 
-test("the dispatch brief tells the member to emit the Sizing line the ruling step reads", () => {
-  // Both ends or neither: a ruling step that reads `Sizing:` off a PR body no
-  // member was told to write is the same blank column with more words. Pinned
-  // apart from the reader above so dropping either end reds. The brief is the
-  // implementer agent body since #1804 (spec 2026-09-24 § 2 Decision 2) — the
-  // member's system prompt, where run-team's phase 2 used to paste it.
+test("the dispatch brief tells the member to put its Sizing verdict in the PR body", () => {
+  // The PR body's `Sizing:` line is the member's own copy of the verdict, not
+  // the source `append` reads (the report file, pinned below); the brief is
+  // where the member is told to write it, so dropping that instruction reds
+  // here. The brief is the implementer agent body since #1804 (spec
+  // 2026-09-24 § 2 Decision 2) — the member's system prompt, where run-team's
+  // phase 2 used to paste it.
   const brief = readFileSync(join(REPO, "plugin", "agents", "fleet-implementer-slow-high.agent.md"), "utf8").split("---").slice(2).join("---");
   assert.match(
     brief,

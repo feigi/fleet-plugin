@@ -304,8 +304,14 @@ function judgeRoot(root, names, live, now) {
     let isDir = false;
     try {
       isDir = name === REPORTS_DIR && lstatSync(path).isDirectory();
-    } catch {
-      // raced away or unreadable: judged below as any other entry
+    } catch (e) {
+      // raced away: judged below as any other entry. Anything else (an
+      // unsearchable root) leaves `reports` unclassified, and judging it as an
+      // ordinary entry would age the whole directory out.
+      if (e.code !== "ENOENT") {
+        kept.push({ path, reason: `its type cannot be read: ${e.message}` });
+        continue;
+      }
     }
     if (!isDir) {
       entries.push({ path, name, report: false });

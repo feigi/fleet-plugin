@@ -49,3 +49,10 @@ test("latestImplReport: the highest letter wins, the unlettered name ranks lowes
   assert.equal(found.path, join(scratch, "reports", "impl-10-d.json"));
   assert.equal(latestImplReport(scratch, "11"), null);
 });
+
+test("a `reports` that is a regular file holds no report: absent, and no implementer report, never a throw", () => {
+  const scratch = tempDir("rf-");
+  writeFileSync(join(scratch, "reports"), "not a directory");
+  assert.equal(readReport(scratch, "impl-1").state, "absent");
+  assert.equal(latestImplReport(scratch, "1"), null);
+});

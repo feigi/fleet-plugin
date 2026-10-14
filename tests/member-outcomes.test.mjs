@@ -702,6 +702,7 @@ test("a second scrape replaces each row in place: the value follows the file, no
   const dir = fixture(REPORT_MEMBERS);
   const work = tempDir("mo-report-");
   const scratch = join(work, "scratch");
+  mkdirSync(scratch);
   const out = join(work, "member-outcomes.tsv");
   assert.equal(scrapeWith(dir, out, scratch).status, 0);
   const first = parseTsv(readFileSync(out, "utf8"));
@@ -724,6 +725,27 @@ test("a second scrape replaces each row in place: the value follows the file, no
   assert.equal(reportOf(out)["merge-bot-3"], "absent");
 });
 
+test("a --scratch that is not a directory exits 2 and leaves a recorded report value alone, never stamping every covered row absent", () => {
+  const dir = fixture([REPORT_MEMBERS[0]]);
+  const work = tempDir("mo-report-");
+  const scratch = join(work, "scratch");
+  putReport(scratch, "impl-580", MEASURED_IMPL("impl-580"));
+  const out = join(work, "member-outcomes.tsv");
+  assert.equal(scrapeWith(dir, out, scratch).status, 0);
+  assert.deepEqual(reportOf(out), { "impl-580": "ok" });
+  const before = readFileSync(out, "utf8");
+
+  const typo = scrapeWith(dir, out, `${scratch}-typo`);
+  assert.equal(typo.status, 2, typo.stderr);
+  assert.match(typo.stderr, /--scratch .*-typo/);
+  const plain = join(work, "plain-file");
+  writeFileSync(plain, "");
+  const file = scrapeWith(dir, out, plain);
+  assert.equal(file.status, 2, file.stderr);
+  assert.match(file.stderr, /is not a directory/);
+  assert.equal(readFileSync(out, "utf8"), before, "a refused scrape rewrote the file");
+});
+
 test("`report` reads blank, never absent, for a covered member when no scratch root can be resolved, and `-` still needs no root", () => {
   const dir = fixture([REPORT_MEMBERS[0], REPORT_MEMBERS[4]]);
   const cwd = tempDir("mo-noroot-"); // not a git work tree: no repository to key a root on
@@ -741,7 +763,9 @@ test("--scratch needs a value, and its value is not mistaken for the session dir
   const bare = spawnSync(process.execPath, [CLI, dir, "--file", out, "--scratch"], { encoding: "utf8" });
   assert.equal(bare.status, 2);
   assert.match(bare.stderr, /--scratch/);
-  const ok = spawnSync(process.execPath, ["--no-warnings", CLI, "--scratch", join(work, "s"), dir, "--file", out], { encoding: "utf8" });
+  const root = join(work, "s");
+  mkdirSync(root);
+  const ok = spawnSync(process.execPath, ["--no-warnings", CLI, "--scratch", root, dir, "--file", out], { encoding: "utf8" });
   assert.equal(ok.status, 0, ok.stderr);
   assert.deepEqual(reportOf(out), { "impl-580": "absent" });
 });

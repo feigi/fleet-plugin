@@ -2,13 +2,15 @@
 // side of report-schema.mjs, shared by the scripts that look a report up
 // rather than write one.
 //
-// A member writes `<scratch>/reports/<member>.json`, `<member>` being its
-// ledger name (`impl-412`, `impl-412-b`, `fix-pr-88`, `finisher-pr-88`,
-// `merge-bot-3`). The file is checked against the schema of the member's
-// family, report-schema.mjs's SCHEMAS. The review runner and every member
-// outside those four families have no schema, so no file to look up.
+// The readers here take a member's report at `<scratch>/reports/<member>.json`
+// (flat: no per-run directory), `<member>` being its ledger name (`impl-412`,
+// `impl-412-b`, `fix-pr-88`, `finisher-pr-88`, `merge-bot-3`). The file is
+// checked against the schema of the member's family, report-schema.mjs's
+// SCHEMAS. The review runner and every member outside those four families
+// have no schema, so no file to look up.
 //
-// Nothing here writes, and nothing here creates the scratch root.
+// This module only looks files up: it writes none, and creates no scratch
+// root.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";

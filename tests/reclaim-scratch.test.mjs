@@ -826,7 +826,7 @@ test("(10) a lookup GitHub could not answer keeps the reports that name that num
   assert.deepEqual(paths(r.out.removed), [unkeyed], "the age rule still runs on an unkeyed file");
 });
 
-test("(10) a `reports` that is a file or a link, not a directory, is judged as any other entry", (t) => {
+test("(10) a `reports` that is a file, not a directory, is judged as any other entry", (t) => {
   const f = fixture(t);
   f.ledger();
   f.states({});
@@ -836,4 +836,45 @@ test("(10) a `reports` that is a file or a link, not a directory, is judged as a
 
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(paths(r.out.removed), [lone]);
+});
+
+test("(10) a `reports` that is a link is unlinked as any other entry, never read through into its target", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({});
+  const target = join(f.base, "outside");
+  mkdirSync(target);
+  const inside = join(target, "merge-bot-9.json");
+  writeFileSync(inside, "x");
+  const link = join(f.root, "reports");
+  symlinkSync(target, link);
+  f.age(target, 8);
+  spawnSync("touch", ["-h", "-t", "200001010000", link]);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [link]);
+  assert.ok(!existsSync(link) && existsSync(inside), "a report under the link's target was reached through the link");
+});
+
+test("(10) a `reports` whose type cannot be read is kept, never aged out whole", { skip: process.getuid?.() === 0 && "root ignores the unsearchable root" }, (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({});
+  const bot = f.file("reports/merge-bot-9.json", 8);
+  f.age(join(f.root, "reports"), 8);
+  // Listable but not searchable: the names read, an lstat of any of them fails EACCES.
+  chmodSync(f.root, 0o444);
+  let r;
+  try {
+    r = f.run(["--root", f.root, "--apply"]);
+  } finally {
+    chmodSync(f.root, 0o755);
+  }
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.removed, []);
+  assert.match(reasonOf(r.out.kept, join(f.root, "reports")), /its type cannot be read: EACCES/);
+  assert.ok(existsSync(bot));
 });
