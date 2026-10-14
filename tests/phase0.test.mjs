@@ -106,7 +106,7 @@ if (isCLI(import.meta.url)) drive(${JSON.stringify(n)}, process.argv.slice(2));
 }
 for (const n of SH_STUBS) writeFileSync(join(SCRIPTS, `${n}.sh`), `#!/bin/sh\nexec node "$(dirname "$0")/stub-driver.mjs" ${n} "$@"\n`);
 cpSync(join(SCRIPTS, "ledger.mjs"), join(SCRIPTS, "ledger-real.mjs"));
-writeFileSync(join(SCRIPTS, "ledger.mjs"), `if (process.argv[2] === "rotate") {
+writeFileSync(join(SCRIPTS, "ledger.mjs"), `if (process.argv[2] === "rotate" && !process.env.PH0_REAL_ROTATE) {
   (await import("./stub-driver.mjs")).rotate();
 } else {
   await import("./ledger-real.mjs");
@@ -160,22 +160,24 @@ function fixture({ spec = false } = {}) {
     writeFileSync(join(repo, ".github", "rulesets", "main.json"), "{}");
     writeFileSync(join(repo, ".github", "scripts", "apply-ruleset.sh"), `#!/bin/sh\nexec node "${STUBBED}" ruleset "$@"\n`);
   }
+  const fleet = join(repo, ".fleet");
+  const receiptPath = join(fleet, "phase0.json");
   const f = {
     dir, repo, home, stubs, session, origin,
     control: (name, value) => writeFileSync(join(stubs, `${name}.json`), JSON.stringify(value)),
     calls: (name) => (existsSync(join(stubs, `${name}.calls`)) ? readFileSync(join(stubs, `${name}.calls`), "utf8").trim().split("\n").map((l) => JSON.parse(l)) : []),
     order: () => (existsSync(join(stubs, "order.log")) ? readFileSync(join(stubs, "order.log"), "utf8").trim().split("\n") : []),
-    receiptPath: join(repo, ".fleet", "phase0.json"),
-    receipt: () => JSON.parse(readFileSync(join(repo, ".fleet", "phase0.json"), "utf8")),
+    receiptPath,
+    receipt: () => JSON.parse(readFileSync(receiptPath, "utf8")),
     setReceipt: (r) => {
-      mkdirSync(join(repo, ".fleet"), { recursive: true });
-      writeFileSync(join(repo, ".fleet", "phase0.json"), JSON.stringify(r));
+      mkdirSync(fleet, { recursive: true });
+      writeFileSync(receiptPath, JSON.stringify(r));
     },
     setRecord: (at) => {
-      mkdirSync(join(repo, ".fleet"), { recursive: true });
-      writeFileSync(join(repo, ".fleet", "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller: { pid: 4242, lstart: "fixture", prior: "dead", at } }));
+      mkdirSync(fleet, { recursive: true });
+      writeFileSync(join(fleet, "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller: { pid: 4242, lstart: "fixture", prior: "dead", at } }));
     },
-    asides: () => readdirSync(join(repo, ".fleet")).filter((n) => /^phase0\..+\.json$/.test(n)),
+    asides: () => readdirSync(fleet).filter((n) => /^phase0\.\d.+\.json$/.test(n)),
     ledgerRow: (key, text) => {
       const r = spawnSync(process.execPath, [join(SCRIPTS, "ledger.mjs"), "row", String(key), text], { cwd: repo, encoding: "utf8", env: GIT_ENV });
       assert.equal(r.status, 0, r.stderr);
@@ -301,6 +303,15 @@ test("a failed preflight prints every FAIL line on stdout and none of the passin
   assert.ok(!r.stdout.includes("ok gh-auth"), "a passing check line is not part of the report");
 });
 
+test("a preflight that exits 1 without a FAIL line reports what it printed", () => {
+  const f = fixture();
+  f.control("preflight", { exit: 1, out: "some diagnostic that is not FAIL-prefixed", err: "gh: auth required" });
+  const r = f.run();
+  assert.equal(r.status, 3);
+  assert.match(f.receipt().steps.preflight.output, /gh: auth required/);
+  assert.match(r.stdout, /some diagnostic that is not FAIL-prefixed/);
+});
+
 test("a fast-forward that moves HEAD prints SUPERSEDED, fails, and a re-run starts from the new tree", () => {
   const f = fixture();
   const other = join(f.dir, "other");
@@ -353,7 +364,7 @@ test("cockpit and reclaim are recorded and never stop the run, whatever they ans
   assert.equal(r.status, 0, r.stdout + r.err);
   const receipt = f.receipt();
   assert.deepEqual(statuses(receipt), allOk);
-  assert.match(receipt.steps.reclaim.output, /exit 2/);
+  assert.match(receipt.steps.reclaim.output, /not enforced\nreclaim-scratch: refuses/, "the step's own words are kept");
   assert.match(receipt.steps.cockpit.output, /launched/);
 });
 
@@ -602,6 +613,99 @@ test("rotate's own account of what it skipped or could not archive is in the ste
   assert.match(f.receipt().steps.rotate.output, /could not archive phase0\.json -> phase0\.x\.json: EACCES/);
 });
 
+test("a controller record that cannot be read refuses with exit 3 and sets no receipt aside", () => {
+  const f = fixture();
+  f.setRecord(RUN_AT);
+  const receipt = stale(f);
+  receipt.steps.shortlist = { status: "pending", at: "2026-01-01T00:00:00.000Z", output: "not run" };
+  f.setReceipt(receipt);
+  writeFileSync(join(f.repo, ".fleet", "heartbeat.json"), "{bad");
+  const r = f.run();
+  assert.equal(r.status, 3, r.stdout + r.err);
+  assert.match(r.err, /heartbeat\.json/);
+  assert.deepEqual(f.order(), [], "no step ran");
+  assert.equal(f.asides().length, 0);
+  assert.equal(existsSync(join(f.repo, ".fleet", "phase0.previous.json")), false);
+  assert.equal(f.receipt().run, RUN_AT, "the receipt is where it was");
+});
+
+// ── the previous run's receipt is held until the rotation files it ───────────
+
+const HELD_NAME = "phase0.previous.json";
+
+test("the real rotation files the previous run's receipt under the ledger archive's own stamp, and nothing is left held", () => {
+  const f = fixture();
+  f.setRecord(RUN_AT);
+  f.setReceipt(stale(f, { run: RUN_AT - 5 }));
+  f.ledgerRow(5, "impl-5=PR#6");
+  const noOmp = join(f.dir, "no-omp.json");
+  writeFileSync(noOmp, "{}");
+  const r = f.run(null, { env: { PH0_REAL_ROTATE: "1", FLEET_PROC_TABLE: noOmp } });
+  assert.equal(r.status, 0, r.stdout + r.err);
+  const fleet = join(f.repo, ".fleet");
+  const names = readdirSync(fleet);
+  const ledger = names.filter((n) => /^ledger\.\d.+\.md$/.test(n));
+  assert.equal(ledger.length, 1, names.join());
+  assert.deepEqual(f.asides(), [ledger[0].replace(/^ledger\./, "phase0.").replace(/\.md$/, ".json")], "one stamp names both");
+  assert.equal(JSON.parse(readFileSync(join(fleet, f.asides()[0]), "utf8")).run, RUN_AT - 5, "it is the previous run's receipt");
+  assert.equal(existsSync(join(fleet, HELD_NAME)), false);
+  assert.equal(f.receipt().session, f.session, "and this run's own receipt is the one at phase0.json");
+});
+
+test("a rotation that refuses leaves the previous run's receipt held, and the re-run files it", () => {
+  const f = fixture();
+  f.setRecord(RUN_AT);
+  f.setReceipt(stale(f, { run: RUN_AT - 5 }));
+  f.control("rotate", { exit: 2, err: "refusing to rotate: the controller that owns it is alive" });
+  const refused = f.run();
+  assert.equal(refused.status, 3, refused.stdout + refused.err);
+  const held = join(f.repo, ".fleet", HELD_NAME);
+  assert.equal(JSON.parse(readFileSync(held, "utf8")).run, RUN_AT - 5, "held, not lost");
+  assert.equal(f.asides().length, 0, "and not filed under a stamp the ledger never took");
+
+  f.control("rotate", {});
+  const again = f.run();
+  assert.equal(again.status, 0, again.stdout + again.err);
+  assert.equal(existsSync(held), false);
+  assert.equal(f.asides().length, 1, "the rotation that went through filed it");
+});
+
+test("a receipt that has to be held while another is still held refuses with exit 3 and moves nothing", () => {
+  const f = fixture();
+  f.setRecord(RUN_AT);
+  f.setReceipt(stale(f, { run: RUN_AT - 5 }));
+  const held = join(f.repo, ".fleet", HELD_NAME);
+  writeFileSync(held, "an earlier receipt\n");
+  const r = f.run();
+  assert.equal(r.status, 3, r.stdout + r.err);
+  assert.match(r.err, /cannot hold the previous run's receipt/);
+  assert.equal(readFileSync(held, "utf8"), "an earlier receipt\n");
+  assert.equal(f.receipt().run, RUN_AT - 5, "the receipt stays where it was");
+  assert.deepEqual(f.order(), [], "no step ran");
+});
+
+test("a receipt the rotation did not archive is filed under a stamp of its own, and under a taken stamp it stays held", () => {
+  const f = fixture();
+  f.setRecord(RUN_AT);
+  f.setReceipt(stale(f, { run: RUN_AT - 5 }));
+  assert.equal(f.run().status, 0);
+  assert.equal(f.asides().length, 1, "the stub rotation archives nothing, so the script files it");
+  assert.equal(existsSync(join(f.repo, ".fleet", HELD_NAME)), false);
+
+  const g = fixture();
+  const clock = join(g.dir, "clock.mjs");
+  writeFileSync(clock, `const T = Date.parse("2026-03-04T05:06:07Z"); const R = Date;
+globalThis.Date = class extends R { constructor(...a) { super(...(a.length ? a : [T])); } static now() { return T; } };\n`);
+  g.setRecord(RUN_AT);
+  g.setReceipt(stale(g, { run: RUN_AT - 5 }));
+  const taken = join(g.repo, ".fleet", "phase0.2026-03-04T050607Z.json");
+  writeFileSync(taken, "an earlier aside\n");
+  const r = g.run(null, { env: { NODE_OPTIONS: `--import ${clock}` } });
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(readFileSync(taken, "utf8"), "an earlier aside\n", "a filed receipt is never overwritten");
+  assert.equal(JSON.parse(readFileSync(join(g.repo, ".fleet", HELD_NAME), "utf8")).run, RUN_AT - 5, "it waits, held");
+});
+
 // ── the rotation archives the receipt ────────────────────────────────────────
 
 const OMP = 2_000_000_002;
@@ -656,6 +760,44 @@ test("ledger.mjs rotate with a receipt and no ledger still files the receipt", (
   const names = readdirSync(join(f.repo, ".fleet"));
   assert.equal(names.filter((n) => /^phase0\..+\.json$/.test(n)).length, 1, names.join());
   assert.equal(existsSync(f.receiptPath), false);
+});
+
+test("ledger.mjs rotate refuses when the receipt's archive name is taken, moving nothing", () => {
+  const { f, rotate } = rotateFixture();
+  f.ledgerRow(5, "impl-5=PR#6");
+  writeFileSync(f.receiptPath, '{"run": 1}\n');
+  const dir = join(f.repo, ".fleet");
+  const ledgerBefore = readFileSync(join(dir, "ledger.md"), "utf8");
+  // Every second this call can plausibly land on is taken.
+  const now = Date.now();
+  for (let s = -2; s < 30; s++) writeFileSync(join(dir, `phase0.${new Date(now + s * 1000).toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "")}.json`), "older receipt\n");
+  const r = rotate();
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /refusing to rotate .*phase0\..*\.json already exists/);
+  assert.equal(readFileSync(f.receiptPath, "utf8"), '{"run": 1}\n', "the receipt stays where it was");
+  assert.equal(readFileSync(join(dir, "ledger.md"), "utf8"), ledgerBefore, "the ledger stays where it was");
+  assert.deepEqual(readdirSync(dir).filter((n) => /^ledger\..+\.md$/.test(n)), [], "no ledger archive was made");
+  for (const n of readdirSync(dir).filter((n) => /^phase0\..+\.json$/.test(n))) assert.equal(readFileSync(join(dir, n), "utf8"), "older receipt\n", `${n} is untouched`);
+});
+
+test("ledger.mjs rotate that cannot move the receipt warns and still succeeds", () => {
+  const { f } = rotateFixture();
+  writeFileSync(f.receiptPath, "{}\n");
+  const preload = join(f.dir, "fail-receipt-rename.cjs");
+  writeFileSync(preload, `const fs = require("node:fs");
+const real = fs.renameSync;
+fs.renameSync = (from, to) => {
+  if (/phase0\\.json$/.test(String(from))) throw Object.assign(new Error("EXDEV: injected"), { code: "EXDEV" });
+  return real(from, to);
+};
+require("node:module").syncBuiltinESMExports();
+`);
+  const r = spawnSync(process.execPath, ["--require", preload, join(REAL_SCRIPTS, "ledger.mjs"), "rotate"], {
+    cwd: f.repo, encoding: "utf8", env: { ...GIT_ENV, FLEET_PROC_TABLE: join(f.dir, "proc-table.json") },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /could not archive .*phase0\.json -> .*phase0\..+\.json: EXDEV: injected/);
+  assert.equal(existsSync(f.receiptPath), true, "the receipt is left where it was");
 });
 
 // ── the command line ─────────────────────────────────────────────────────────

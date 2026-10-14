@@ -24,15 +24,15 @@
 //   pin           `instruments.sh --pin`, with `--audit <plugin-checkout>` when
 //                 given (a workspace that tracks no `plugin/…` of its own).
 //   baseline      `main-checkout.mjs --record`; its refusals fail the step.
-//   preflight     `preflight.mjs`. Exit 1 or 2 fails the step and every FAIL line
-//                 is printed.
+//   preflight     `preflight.mjs`. A non-zero exit fails the step; every FAIL
+//                 line of an exit 1 is printed.
 //   ruleset       `.github/scripts/apply-ruleset.sh --check`, when the workspace
 //                 checks a ruleset spec in. Exit 3 is `drift` (the diff is the
 //                 output), exit 2 or anything else `unanswered`; neither stops
 //                 the run — reconciling is a write to the gate and the
 //                 maintainer's.
 //   tier-roles    `tier-roles.mjs --check`.
-//   metrics       `metrics-refresh.mjs`. Exit 1 or 2 fails the step.
+//   metrics       `metrics-refresh.mjs`. A non-zero exit fails the step.
 //   cockpit       `board.mjs serve --open` launched detached, `--spend-dir`
 //                 passed through. Recorded; never fails the run.
 //   rotate        `ledger.mjs rotate`. Exit 2 is a refusal and fails the step.
@@ -50,7 +50,7 @@
 //                 yet is pending: `NEED resume #<n> <worktree> <branch>`. A
 //                 `report` entry is printed. Resuming a claim writes its row, so
 //                 a re-run after the dispatch finds the need met.
-//   shortlist     `shortlist.mjs`. Exit 2 fails the step.
+//   shortlist     `shortlist.mjs`. A non-zero exit fails the step.
 //
 // THE RECEIPT is `.fleet/phase0.json` (resolved through fleet-dir.mjs, so a
 // worktree and the main checkout name one file):
@@ -75,16 +75,22 @@
 // the record still carries the previous run's `at` until `ledger.mjs rotate`
 // writes the next, so the previous run's receipt still matches it, and a
 // re-run that trusted `run` alone would skip `rotate`. The session rule closes
-// a new session; a receipt of any other run (a `run` that is set and does not
-// match, or a different session) is moved aside beside the ledger as
-// `phase0.<UTC stamp>.json` and the script starts at `branch`. A receipt whose
-// rotation has not run is simply overwritten: every step before `rotate` is
-// idempotent and is re-run on every invocation until the rotation has run. The
-// rotation's own archive would otherwise file that partial receipt under the
-// previous run's ledger, so it is taken off disk just before `rotate` runs and
-// written again straight after. With no omp process above the run the rotation
-// writes no controller record and `run` stays null; a receipt whose `rotate`
-// step is `ok` is then resumed on the session alone.
+// a new session. A receipt of any other run (a `run` that is set and does not
+// match, or a different session) is held as `phase0.previous.json` and the
+// script starts at `branch`; this run's own receipt is written at
+// `phase0.json` after every step. A receipt whose rotation has not run is
+// simply overwritten: every step before `rotate` is idempotent and is re-run
+// on every invocation until the rotation has run.
+//
+// THE ROTATION FILES THE PREVIOUS RUN'S RECEIPT. The `rotate` step takes this
+// run's partial receipt off disk, puts the held one back at `phase0.json` and
+// runs `ledger.mjs rotate`, which archives it as `phase0.<UTC stamp>.json`
+// beside `ledger.<UTC stamp>.md`, one stamp for both. A rotation that refused
+// leaves it held for the next attempt; one that archived the ledger and not
+// the receipt files it under a stamp of this script's own. With no omp process
+// above the run the rotation writes no controller record and `run` stays
+// null; a receipt whose `rotate` step is `ok` is then resumed on the session
+// alone.
 //
 // A step that fails stops the script; so does a pending one — nothing after
 // the recipe may run before it is proven, and the shortlist waits for the
@@ -114,7 +120,7 @@ import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { rowPr } from "./ledger-grammar.mjs";
+import { RECEIPT, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
 
 const NAME = "phase0";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -123,21 +129,12 @@ const NETWORK_TIMEOUT_MS = 120_000;
 const PR_LIMIT = 1000;
 // The tail of a child's output is the part that says why it stopped.
 const OUTPUT_MAX = 16_000;
-const RECEIPT = "phase0.json";
+// The previous run's receipt, set aside at startup until the rotation files it.
+const HELD = "phase0.previous.json";
 const RULESET_SPEC = join(".github", "rulesets", "main.json");
 const RULESET_CHECK = join(".github", "scripts", "apply-ruleset.sh");
 
-const STEP_NAMES = [
-  "branch", "fast-forward", "pin", "baseline", "preflight", "ruleset", "tier-roles", "metrics",
-  "cockpit", "rotate", "reclaim", "recipe", "fold-in", "stranded", "shortlist",
-];
-
-const stamp = () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "");
 const script = (name) => join(SCRIPTS, name);
-
-// The one env every child gets: GIT_DIR and GIT_WORK_TREE scrubbed, so an
-// ambient one cannot point a child at another repository.
-const childEnv = (overrides = {}) => gitEnv(overrides);
 
 function how(r) {
   if (r.error) return r.error.code ?? r.error.message;
@@ -155,7 +152,7 @@ const lines = (s) => trimmed(s).split("\n").filter((l) => l.trim() !== "");
  */
 function run(cmd, args, { cwd, env, timeoutMs } = {}) {
   const r = spawnSync(cmd, args, {
-    cwd, encoding: "utf8", maxBuffer: MAX_BUFFER, env: childEnv(env), ...(timeoutMs ? { timeout: timeoutMs } : {}),
+    cwd, encoding: "utf8", maxBuffer: MAX_BUFFER, env: gitEnv(env), timeout: timeoutMs,
   });
   const stdout = trimmed(r.stdout);
   const stderr = trimmed(r.stderr);
@@ -207,8 +204,10 @@ function preflight({ cwd, ci }) {
   const r = node("preflight.mjs", [], { cwd });
   if (r.status !== 0) {
     // Exit 1 is a row that failed, and every FAIL line is the report; exit 2
-    // is a script that could not run, whose own words are all there is.
-    const keep = r.status === 1 ? lines(r.text).filter((l) => /^(FAIL|WARN|PREFLIGHT)/.test(l)) : lines(r.text);
+    // is a script that could not run, whose own words are all there is, as are
+    // an exit 1 that printed no such line.
+    const fails = r.status === 1 ? lines(r.text).filter((l) => /^(FAIL|WARN|PREFLIGHT)/.test(l)) : [];
+    const keep = fails.length > 0 ? fails : lines(r.text);
     return failed([`preflight.mjs ${r.how}`, ...keep].join("\n"));
   }
   return ok([`preflight.mjs passed (${lines(r.stdout).at(-1) ?? "no output"})`, ...(ci === null ? [] : [ci])].join("\n"));
@@ -238,7 +237,7 @@ function cockpit({ cwd, spendDir }) {
   const args = [script("board.mjs"), "serve", "--open", ...(spendDir ? ["--spend-dir", spendDir] : [])];
   let child;
   try {
-    child = spawn(process.execPath, args, { cwd, detached: true, stdio: "ignore", env: childEnv() });
+    child = spawn(process.execPath, args, { cwd, detached: true, stdio: "ignore", env: gitEnv() });
   } catch (e) {
     return ok(`not launched: ${e.message}`);
   }
@@ -249,10 +248,20 @@ function cockpit({ cwd, spendDir }) {
 }
 
 function rotate(ctx) {
-  // The rotation files a receipt it finds beside the ledger under the
-  // previous run's stamp; what is on disk now is this run's own partial one.
+  // This run's own partial receipt is off disk while the rotation runs, so the
+  // archive cannot file it under the previous run's stamp. What the rotation
+  // finds beside the ledger is the previous run's receipt, held since startup.
   rmSync(ctx.receiptPath, { force: true });
+  const restored = existsSync(ctx.held);
+  if (restored) renameSync(ctx.held, ctx.receiptPath);
   const r = node("ledger.mjs", ["rotate"], { cwd: ctx.cwd });
+  if (restored && existsSync(ctx.receiptPath)) {
+    // Not archived. After a refusal it waits, held, for the next attempt; after
+    // a rotation that moved the ledger and not the receipt it is filed here,
+    // unless that name is taken.
+    const filed = join(ctx.fleetDir, receiptArchiveName(archiveStamp()));
+    renameSync(ctx.receiptPath, r.status === 0 && !existsSync(filed) ? filed : ctx.held);
+  }
   if (r.status !== 0) return refusal("ledger.mjs rotate refused:", r);
   const { controller } = readState(stateFileIn(ctx.fleetDir), NAME);
   ctx.receipt.run = controller?.at ?? null;
@@ -264,7 +273,7 @@ function rotate(ctx) {
 
 function reclaim({ cwd, scratch }) {
   const r = node("reclaim-scratch.mjs", ["--root", scratch, "--after-rotate", "--apply"], { cwd });
-  return ok(r.status === 0 ? "scratch reclaimed" : `reclaim-scratch.mjs ${r.how}, not enforced`);
+  return ok(r.status === 0 ? "scratch reclaimed" : withText(`reclaim-scratch.mjs ${r.how}, not enforced`, r));
 }
 
 function recipe({ cwd }) {
@@ -281,7 +290,7 @@ function recipe({ cwd }) {
 }
 
 // The ledger's rows, read through `ledger.mjs read` so the ledger keeps one
-// parser. Null when the read did not answer.
+// parser. `{ error }` when the read did not answer, `{ rows }` otherwise.
 function ledgerRows(cwd) {
   const r = node("ledger.mjs", ["read"], { cwd });
   if (r.status !== 0) return { error: withText(`ledger.mjs read ${r.how}`, r) };
@@ -316,9 +325,8 @@ function foldIn({ cwd }) {
   // replaces the whole line, wiping the live tokens carried on it.
   const named = new Set();
   for (const row of ledger.rows) {
-    const key = /^#(\d+)$/.exec(rowKey(row));
-    if (key) named.add(Number(key[1]));
-    const pr = rowPr(row);
+    const { keyNum, pr } = rowNums(row);
+    if (keyNum !== null) named.add(keyNum);
     if (pr !== null) named.add(pr);
   }
   const queued = [];
@@ -334,9 +342,10 @@ function foldIn({ cwd }) {
       advice.push(`NEED review PR#${pr.number} (closes no issue)`);
       continue;
     }
-    const w = node("ledger.mjs", ["row", String(pr.number), `PR#${pr.number} · inherited (closes ${issues.map((n) => `#${n}`).join(", ")})`], { cwd });
+    const closes = `closes ${issues.map((n) => `#${n}`).join(", ")}`;
+    const w = node("ledger.mjs", ["row", String(pr.number), `PR#${pr.number} · inherited (${closes})`], { cwd });
     if (w.status !== 0) return refusal(`ledger.mjs row ${pr.number} failed:`, w);
-    queued.push(`queued PR#${pr.number} for review (closes ${issues.map((n) => `#${n}`).join(", ")})`);
+    queued.push(`queued PR#${pr.number} for review (${closes})`);
   }
   const head = `${queued.length} PR(s) queued, ${carried} already on a carried row, ${advice.length} closing no issue`;
   return ok([head, ...queued, ...advice].join("\n"));
@@ -359,9 +368,9 @@ function stranded({ cwd }) {
   const body = [];
   const needs = [];
   for (const c of verdict.claims) {
-    if (c.action === "resume" && rowed.has(`#${c.n}`)) body.push(`#${c.n} resumed: its ledger row is there`);
-    else if (c.action === "resume") needs.push(`NEED resume #${c.n} ${c.worktree} ${c.branch}`);
-    else body.push(`report #${c.n} — ${c.why}`);
+    if (c.action !== "resume") body.push(`report #${c.n} — ${c.why}`);
+    else if (rowed.has(`#${c.n}`)) body.push(`#${c.n} resumed: its ledger row is there`);
+    else needs.push(`NEED resume #${c.n} ${c.worktree} ${c.branch}`);
   }
   for (const t of verdict.carried) body.push(`carried ${t.name} ${t.token} (row ${t.row ?? "none"})`);
   const head = `prior ${verdict.prior}: ${verdict.claims.length} claim(s), ${verdict.carried.length} live token(s) carried`;
@@ -379,6 +388,8 @@ const STEPS = {
   "ruleset": ruleset, "tier-roles": tierRoles, "metrics": metrics, "cockpit": cockpit, "rotate": rotate,
   "reclaim": reclaim, "recipe": recipe, "fold-in": foldIn, "stranded": stranded, "shortlist": shortlist,
 };
+
+const STEP_NAMES = Object.keys(STEPS);
 
 // ── the receipt ──────────────────────────────────────────────────────────────
 
@@ -466,7 +477,16 @@ function main() {
   const scratch = root.stdout;
 
   const receiptPath = join(fleetDir, RECEIPT);
-  const record = readState(stateFileIn(fleetDir), NAME).controller;
+  const held = join(fleetDir, HELD);
+  const state = readState(stateFileIn(fleetDir), NAME);
+  if (state.degraded) {
+    // The record decides whether a receipt is the previous run's, and a record
+    // that could not be read says nothing about that.
+    process.stderr.write(`${NAME}: ${stateFileIn(fleetDir)} ${state.degraded} — repair it so the controller record is intact; a receipt is not set aside on a record that could not be read\n`);
+    process.exitCode = 3;
+    return;
+  }
+  const record = state.controller;
   const now = new Date().toISOString();
   let previous;
   try {
@@ -485,13 +505,12 @@ function main() {
   const rotated = previous !== null && (previous.run !== null || previous.steps.rotate?.status === "ok");
   const resumed = rotated && previous.run === (record?.at ?? null) && previous.session === session;
   if (rotated && !resumed) {
-    const aside = join(fleetDir, `phase0.${stamp()}.json`);
-    if (existsSync(aside)) {
-      process.stderr.write(`${NAME}: cannot move the previous run's receipt aside: ${aside} already exists\n`);
+    if (existsSync(held)) {
+      process.stderr.write(`${NAME}: cannot hold the previous run's receipt for the rotation: ${held} already holds another\n`);
       process.exitCode = 3;
       return;
     }
-    renameSync(receiptPath, aside);
+    renameSync(receiptPath, held);
   }
 
   const receipt = { run: resumed ? previous.run : null, session, scratch, caps, steps: {} };
@@ -500,7 +519,7 @@ function main() {
     receipt.steps[name] = was?.status === "ok" ? was : { status: "pending", at: now, output: "not run" };
   }
 
-  const ctx = { cwd, fleetDir, receipt, receiptPath, scratch, session, pluginCheckout, spendDir, ci };
+  const ctx = { cwd, fleetDir, held, receipt, receiptPath, scratch, session, pluginCheckout, spendDir, ci };
   const say = (line) => process.stdout.write(`${line}\n`);
   let stop = null;
   for (const name of STEP_NAMES) {
