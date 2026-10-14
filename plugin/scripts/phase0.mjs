@@ -24,8 +24,8 @@
 //   pin           `instruments.sh --pin`, with `--audit <plugin-checkout>` when
 //                 given (a workspace that tracks no `plugin/…` of its own).
 //   baseline      `main-checkout.mjs --record`; its refusals fail the step.
-//   preflight     `preflight.mjs`. A non-zero exit fails the step; every FAIL
-//                 line of an exit 1 is printed.
+//   preflight     `preflight.mjs`. A non-zero exit fails the step; the FAIL, WARN
+//                 and PREFLIGHT lines of an exit 1 are printed.
 //   ruleset       `.github/scripts/apply-ruleset.sh --check`, when the workspace
 //                 checks a ruleset spec in. Exit 3 is `drift` (the diff is the
 //                 output), exit 2 or anything else `unanswered`; neither stops
@@ -104,10 +104,12 @@
 // One `phase0: <step>: <status> …` line per step on stdout, a step's further
 // output indented under it when there is any, and the `NEED` lines last.
 // Exit 0 every step ok, or `drift`/`unanswered` — advice the run goes on past;
-// 2 a usage error; 3 a step failed; 4 a step needs the controller — dispatch
-// what the NEED line names, then run this again. A NEED the fold-in prints is
-// advice too and changes no exit status: a PR with no issue behind it is the
-// controller's to queue or leave, and nothing a re-run could meet.
+// 2 a usage error; 3 a step failed, or the run could not start or record itself
+// (the scratch root, the controller record, the receipt); 4 a step needs the
+// controller — dispatch what the NEED line names, then run this again. A NEED
+// the fold-in prints is advice too and changes no exit status: a PR with no
+// issue behind it is the controller's to queue or leave, and nothing a re-run
+// could meet.
 //
 // Zero deps: node builtins and sibling scripts only.
 
@@ -203,9 +205,9 @@ function baseline({ cwd }) {
 function preflight({ cwd, ci }) {
   const r = node("preflight.mjs", [], { cwd });
   if (r.status !== 0) {
-    // Exit 1 is a row that failed, and every FAIL line is the report; exit 2
-    // is a script that could not run, whose own words are all there is, as are
-    // an exit 1 that printed no such line.
+    // Exit 1 is a row that failed, and its FAIL, WARN and PREFLIGHT lines are
+    // the report; exit 2 is a script that could not run, whose own words are
+    // all there is, as are an exit 1 that printed none of those lines.
     const fails = r.status === 1 ? lines(r.text).filter((l) => /^(FAIL|WARN|PREFLIGHT)/.test(l)) : [];
     const keep = fails.length > 0 ? fails : lines(r.text);
     return failed([`preflight.mjs ${r.how}`, ...keep].join("\n"));
@@ -230,7 +232,7 @@ function tierRoles({ cwd }) {
 function metrics({ cwd }) {
   const r = node("metrics-refresh.mjs", [], { cwd });
   if (r.status !== 0) return refusal("metrics-refresh.mjs failed:", r);
-  return ok("pending ticket-features rows drained and the cost guard refreshed");
+  return ok(withText("metrics-refresh.mjs ran", r));
 }
 
 function cockpit({ cwd, spendDir }) {
@@ -519,7 +521,7 @@ function main() {
     receipt.steps[name] = was?.status === "ok" ? was : { status: "pending", at: now, output: "not run" };
   }
 
-  const ctx = { cwd, fleetDir, held, receipt, receiptPath, scratch, session, pluginCheckout, spendDir, ci };
+  const ctx = { cwd, fleetDir, held, receipt, receiptPath, scratch, pluginCheckout, spendDir, ci };
   const say = (line) => process.stdout.write(`${line}\n`);
   let stop = null;
   for (const name of STEP_NAMES) {

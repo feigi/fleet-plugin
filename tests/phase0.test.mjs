@@ -5,8 +5,9 @@
 // clone of a real bare origin) with a copy of the plugin's scripts directory in
 // which each external step is replaced by a stub that logs its call and answers
 // from a control file the case writes. `ledger.mjs` stays real except for
-// `rotate`, whose controller record needs an `omp` process above the caller
-// and so is written by the stub; `gh` is a stub on PATH. No network, no omp.
+// `rotate` (unless PH0_REAL_ROTATE is set), whose controller record needs an
+// `omp` process above the caller and so is written by the stub; `gh` is a stub
+// on PATH. No network, no omp.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -750,6 +751,26 @@ test("ledger.mjs rotate with no phase0.json archives the ledger exactly as befor
   const names = readdirSync(join(f.repo, ".fleet"));
   assert.equal(names.filter((n) => /^ledger\..+\.md$/.test(n)).length, 1);
   assert.deepEqual(names.filter((n) => /^phase0\./.test(n)), []);
+  assert.doesNotMatch(r.stderr, /could not archive/, "no receipt, so nothing to warn about");
+});
+
+test("ledger.mjs rotate with no phase0.json is not refused by a taken receipt-archive name", () => {
+  const { f, rotate } = rotateFixture();
+  f.ledgerRow(5, "impl-5=PR#6");
+  const dir = join(f.repo, ".fleet");
+  const now = Date.now();
+  const taken = [];
+  // Every second this call can plausibly land on is taken, and there is no receipt to move there.
+  for (let s = -2; s < 30; s++) {
+    const n = `phase0.${new Date(now + s * 1000).toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "")}.json`;
+    writeFileSync(join(dir, n), "older receipt\n");
+    taken.push(n);
+  }
+  const r = rotate();
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /refusing|could not archive/);
+  assert.equal(readdirSync(dir).filter((n) => /^ledger\..+\.md$/.test(n)).length, 1, "the ledger was archived");
+  for (const n of taken) assert.equal(readFileSync(join(dir, n), "utf8"), "older receipt\n", `${n} is untouched`);
 });
 
 test("ledger.mjs rotate with a receipt and no ledger still files the receipt", () => {
