@@ -78,12 +78,13 @@
 // a new session; a receipt of any other run (a `run` that is set and does not
 // match, or a different session) is moved aside beside the ledger as
 // `phase0.<UTC stamp>.json` and the script starts at `branch`. A receipt whose
-// `run` is still null belongs to a run that never reached its rotation, so it
-// is simply overwritten: every step before `rotate` is idempotent and is
-// re-run on every invocation until the rotation has written the record. The
+// rotation has not run is simply overwritten: every step before `rotate` is
+// idempotent and is re-run on every invocation until the rotation has run. The
 // rotation's own archive would otherwise file that partial receipt under the
 // previous run's ledger, so it is taken off disk just before `rotate` runs and
-// written again straight after.
+// written again straight after. With no omp process above the run the rotation
+// writes no controller record and `run` stays null; a receipt whose `rotate`
+// step is `ok` is then resumed on the session alone.
 //
 // A step that fails stops the script; so does a pending one — nothing after
 // the recipe may run before it is proven, and the shortlist waits for the
@@ -255,7 +256,10 @@ function rotate(ctx) {
   if (r.status !== 0) return refusal("ledger.mjs rotate refused:", r);
   const { controller } = readState(stateFileIn(ctx.fleetDir), NAME);
   ctx.receipt.run = controller?.at ?? null;
-  return ok(ctx.receipt.run === null ? "ledger rotated; no omp process above this run, so no controller record to key a re-run on" : `ledger rotated, run ${ctx.receipt.run}`);
+  const head = ctx.receipt.run === null ? "ledger rotated; no omp process above this run, so no controller record — a re-run is keyed on the session alone" : `ledger rotated, run ${ctx.receipt.run}`;
+  // What rotate says on stderr is the only account of rows it did not carry
+  // and a receipt it could not archive.
+  return ok([head, ...lines(r.stderr).map((l) => l.trim())].join("\n"));
 }
 
 function reclaim({ cwd, scratch }) {
@@ -378,15 +382,27 @@ const STEPS = {
 
 // ── the receipt ──────────────────────────────────────────────────────────────
 
+// Null when there is no receipt; a receipt that is there and cannot be read or
+// is not one throws, naming the file and why.
 function readReceipt(path) {
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw new Error(`cannot read the receipt ${path} (${e.code ?? e.message}) — move it aside and re-run`);
+  }
   let r;
   try {
-    r = JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return null;
+    r = JSON.parse(text);
+  } catch (e) {
+    throw new Error(`the receipt ${path} is not JSON (${e.message}) — move it aside and re-run`);
   }
   const record = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
-  return record(r) && record(r.steps) && Object.hasOwn(r, "run") && typeof r.session === "string" ? r : null;
+  if (!(record(r) && record(r.steps) && Object.hasOwn(r, "run") && typeof r.session === "string")) {
+    throw new Error(`the receipt ${path} has no steps, run and session — move it aside and re-run`);
+  }
+  return r;
 }
 
 function writeReceipt(path, receipt) {
@@ -452,9 +468,23 @@ function main() {
   const receiptPath = join(fleetDir, RECEIPT);
   const record = readState(stateFileIn(fleetDir), NAME).controller;
   const now = new Date().toISOString();
-  const previous = readReceipt(receiptPath);
-  const resumed = previous !== null && previous.run !== null && previous.run === (record?.at ?? null) && previous.session === session;
-  if (previous !== null && previous.run !== null && !resumed) {
+  let previous;
+  try {
+    previous = readReceipt(receiptPath);
+  } catch (e) {
+    // A receipt that is there and cannot be used may record a rotation already
+    // done; starting over would run it a second time.
+    process.stderr.write(`${NAME}: ${e.message}\n`);
+    process.exitCode = 3;
+    return;
+  }
+  // A receipt belongs to a rotated run when the rotation wrote a controller
+  // record it can be keyed on, or, with no omp process above the run to write
+  // one, when its rotation is recorded `ok`. Either way it is this run's only
+  // if the record now holds the `at` it names and the session is the same.
+  const rotated = previous !== null && (previous.run !== null || previous.steps.rotate?.status === "ok");
+  const resumed = rotated && previous.run === (record?.at ?? null) && previous.session === session;
+  if (rotated && !resumed) {
     const aside = join(fleetDir, `phase0.${stamp()}.json`);
     if (existsSync(aside)) {
       process.stderr.write(`${NAME}: cannot move the previous run's receipt aside: ${aside} already exists\n`);

@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -65,10 +65,9 @@ export function rotate() {
   const fleet = join(process.cwd(), ".fleet");
   log("rotate", { args: ["rotate"], sawReceipt: existsSync(join(fleet, "phase0.json")) });
   const c = control("rotate");
-  if (c.exit) {
-    process.stderr.write(c.err ?? "");
-    process.exit(c.exit);
-  }
+  process.stderr.write(c.err ?? "");
+  if (c.exit) process.exit(c.exit);
+  if (c.noRecord) process.exit(0);
   mkdirSync(fleet, { recursive: true });
   writeFileSync(join(fleet, "heartbeat.json"), JSON.stringify({
     quiet: 0, elapsed: 0, digest: "", controller: { pid: 4242, lstart: "fixture", prior: "dead", at: c.at ?? ${RUN_AT} },
@@ -521,11 +520,17 @@ test("a receipt whose run and session both match resumes: its ok steps are skipp
   assert.equal(f.receipt().steps.pin.output, "from the previous run", "a skipped step keeps what it recorded");
 });
 
-test("a receipt that never reached its rotation is overwritten, and every step before it runs again", () => {
-  const f = fixture();
+// A run that stopped before its rotation: no run to key on, `rotate` and every
+// step after it still pending.
+const partialReceipt = (f) => {
   const partial = stale(f, { run: null });
   for (const n of NAMES.slice(NAMES.indexOf("rotate"))) partial.steps[n] = { status: "pending", at: "2026-01-01T00:00:00.000Z", output: "not run" };
-  f.setReceipt(partial);
+  return partial;
+};
+
+test("a receipt that never reached its rotation is overwritten, and every step before it runs again", () => {
+  const f = fixture();
+  f.setReceipt(partialReceipt(f));
   const r = f.run();
   assert.equal(r.status, 0, r.stdout + r.err);
   assert.equal(f.calls("instruments").length, 1, "the steps before the rotation are idempotent and run every time");
@@ -536,18 +541,65 @@ test("a receipt that never reached its rotation is overwritten, and every step b
 
 test("the receipt of the run in progress is off disk while the rotation runs, so the rotation cannot file it under the previous run", () => {
   const f = fixture();
-  f.setReceipt(stale(f, { run: null }));
+  f.setReceipt(partialReceipt(f));
   assert.equal(f.run().status, 0);
   assert.equal(f.calls("rotate")[0].sawReceipt, false);
 });
 
-test("a receipt that cannot be read is treated as absent", () => {
+test("a receipt that is there and cannot be used refuses with exit 3, naming the file, and runs no step", () => {
   const f = fixture();
   mkdirSync(join(f.repo, ".fleet"), { recursive: true });
-  writeFileSync(f.receiptPath, "{ not json");
+  const damaged = [
+    ["{ not json", /is not JSON/],
+    ["[]", /has no steps, run and session/],
+    [JSON.stringify({ run: null, session: f.session }), /has no steps, run and session/],
+  ];
+  for (const [text, shows] of damaged) {
+    writeFileSync(f.receiptPath, text);
+    const r = f.run();
+    assert.equal(r.status, 3, r.stdout + r.err);
+    assert.match(r.err, shows);
+    assert.match(r.err, /phase0\.json/);
+    assert.deepEqual(f.order(), [], "a damaged receipt may record a rotation done: nothing runs again");
+    assert.equal(readFileSync(f.receiptPath, "utf8"), text, "and it is left where it is for the maintainer");
+  }
+  rmSync(f.receiptPath);
+  mkdirSync(f.receiptPath);
+  const unreadable = f.run();
+  assert.equal(unreadable.status, 3, unreadable.stdout + unreadable.err);
+  assert.match(unreadable.err, /cannot read the receipt/);
+  assert.deepEqual(f.order(), []);
+});
+
+test("with no omp process above the run the rotation writes no record: a re-run in the same session resumes past it, a new session starts over", () => {
+  const f = fixture();
+  f.control("rotate", { noRecord: true });
+  f.control("stranded", { out: JSON.stringify({ prior: "dead", claims: [{ n: 21, t: "x", action: "resume", worktree: "/w/21", branch: "b21", why: "w" }], carried: [] }) });
+  const first = f.run();
+  assert.equal(first.status, 4, first.stdout + first.err);
+  assert.equal(f.receipt().run, null);
+  assert.equal(f.receipt().steps.rotate.status, "ok");
+
+  f.ledgerRow(21, "impl-21-b");
+  const again = f.run();
+  assert.equal(again.status, 0, again.stdout + again.err);
+  assert.equal(f.calls("rotate").length, 1, "the rotation is not run a second time in the same run");
+  assert.equal(f.asides().length, 0);
+
+  mkdirSync(join(f.dir, "next-session"));
+  const next = f.run(["--session", join(f.dir, "next-session")]);
+  assert.equal(next.status, 0, next.stdout + next.err);
+  assert.equal(f.calls("rotate").length, 2, "another session's run rotates again");
+  assert.equal(f.asides().length, 1, "and the earlier receipt is moved aside");
+});
+
+test("rotate's own account of what it skipped or could not archive is in the step output", () => {
+  const f = fixture();
+  f.control("rotate", { err: "    skipped unparseable line '#7 junk' — not carried: bad grammar\n    could not archive phase0.json -> phase0.x.json: EACCES\n" });
   const r = f.run();
   assert.equal(r.status, 0, r.stdout + r.err);
-  assert.deepEqual(statuses(f.receipt()), allOk);
+  assert.match(r.stdout, /^ {4}skipped unparseable line '#7 junk' — not carried: bad grammar$/m);
+  assert.match(f.receipt().steps.rotate.output, /could not archive phase0\.json -> phase0\.x\.json: EACCES/);
 });
 
 // ── the rotation archives the receipt ────────────────────────────────────────
