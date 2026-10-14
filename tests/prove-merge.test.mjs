@@ -181,9 +181,10 @@ test("rebase-then-merge (pre != post) proves true on the rebase path", (t) => {
   assert.equal(code, 0);
 });
 
-test("rebase path still fails leg 1 when the branch was updated by merging main in", (t) => {
+test("merge-commit path proves true when the branch was updated by merging main in", (t) => {
   // Not a rebase: main was merged *into* the branch, so the pre head survives as
-  // an ancestor of main. pre != post, so the leg-1 gate stays mandatory here.
+  // a direct parent of post. pre != post and pre is a parent of post, triggering
+  // the merge-commit path, which replaces preDidNotLand with preIsParentOfHead.
   const w = repo(t);
   const branchPoint = git(w, "rev-parse", "main");
   git(w, "checkout", "-q", "main");
@@ -200,7 +201,122 @@ test("rebase path still fails leg 1 when the branch was updated by merging main 
 
   const { code, json } = prove(w, pre, post, merge);
   assert.equal(json.preIsAncestor, true);
-  assert.equal(json.proved, false, "leg 1 must still bite on the rebase path");
+  assert.equal(json.proofPath, "merge-commit");
+  assert.equal(json.gates.preIsParentOfHead, true);
+  assert.equal(json.proved, true, "merge-commit path should prove true when pre is a parent of post");
+  assert.equal(code, 0);
+});
+
+test("merge-commit path — both parent orders (pre as first parent)", (t) => {
+  // Pre is the first parent of post (typical order when merging feature into main,
+  // then merging that result back into main)
+  const w = repo(t);
+  const branchPoint = git(w, "rev-parse", "main");
+  git(w, "checkout", "-q", "main");
+  commit(w, "main moves on");
+  git(w, "push", "-q", "origin", "main");
+
+  git(w, "checkout", "-q", "-b", "feat", branchPoint);
+  const pre = commit(w, "feature work");
+  git(w, "merge", "-q", "--no-ff", "-m", "merge main into feat", "main");
+  const post = git(w, "rev-parse", "HEAD");
+
+  const merge = mergeNoFf(w, post, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json } = prove(w, pre, post, merge);
+  assert.equal(json.proofPath, "merge-commit");
+  assert.equal(json.gates.preIsParentOfHead, true);
+  assert.equal(json.proved, true);
+  assert.equal(code, 0);
+});
+
+test("merge-commit path — pre is second parent of post", (t) => {
+  // When merging a branch into main, the branch becomes the second parent.
+  // Setup: feat at old main point, main advances, then merge feat into main again
+  // with main advanced further, so we have pre != post and pre is second parent.
+  const w = repo(t);
+  const oldMain = git(w, "rev-parse", "main");
+  
+  git(w, "checkout", "-q", "-b", "feat", oldMain);
+  const pre = commit(w, "feature work");
+  
+  git(w, "checkout", "-q", "main");
+  commit(w, "main moves on");
+  git(w, "push", "-q", "origin", "main");
+  
+  // Merge feat into main, creating post with main as first parent, pre as second
+  git(w, "merge", "-q", "--no-ff", "-m", "merge feat into main", pre);
+  const post = git(w, "rev-parse", "HEAD");
+  
+  // Now advance main further and merge post into it
+  git(w, "reset", "-q", "--hard", "HEAD^");
+  commit(w, "main advances again");
+  git(w, "push", "-q", "origin", "main");
+  
+  const merge = mergeNoFf(w, post, "merge feat PR");
+  git(w, "push", "-q", "origin", "main");
+  
+  const { code, json } = prove(w, pre, post, merge);
+  assert.equal(json.proofPath, "merge-commit", "should detect merge-commit path when pre is a parent of post");
+  assert.equal(json.gates.preIsParentOfHead, true);
+  assert.equal(json.proved, true);
+  assert.equal(code, 0);
+});
+
+test("stacked merge-updates still route to rebase path", (t) => {
+  // When pre is an ancestor but not a direct parent of post, it still takes the rebase path.
+  // This is the case where pre was merged into feat, then feat was merged into main
+  // (two levels of merge), creating post where pre is an ancestor but not a parent.
+  const w = repo(t);
+  const branchPoint = git(w, "rev-parse", "main");
+  git(w, "checkout", "-q", "main");
+  commit(w, "main moves on");
+  git(w, "push", "-q", "origin", "main");
+
+  git(w, "checkout", "-q", "-b", "feat", branchPoint);
+  const pre = commit(w, "feature work");
+  // Merge main into feat to create an intermediate merge
+  git(w, "merge", "-q", "--no-ff", "-m", "merge main into feat", "main");
+  const intermediate = git(w, "rev-parse", "HEAD");
+  // Create another commit on top of this merge to create a non-direct-parent scenario
+  commit(w, "more feature work");
+  const post = git(w, "rev-parse", "HEAD");
+
+  const merge = mergeNoFf(w, post, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json } = prove(w, pre, post, merge);
+  // pre is an ancestor but NOT a direct parent, so this routes to rebase path
+  assert.equal(json.proofPath, "rebase");
+  assert.equal(json.gates.hasOwnProperty("preDidNotLand"), true, "rebase path should have preDidNotLand gate");
+  assert.equal(json.gates.hasOwnProperty("preIsParentOfHead"), false, "rebase path should not have preIsParentOfHead gate");
+});
+
+test("merge-commit path rejects: secondParentIsHead false when post has wrong second parent", (t) => {
+  // Even if pre is a parent of post, if post is not the merge's second parent,
+  // the proof still fails.
+  const w = repo(t);
+  const branchPoint = git(w, "rev-parse", "main");
+  git(w, "checkout", "-q", "main");
+  commit(w, "main moves on");
+  git(w, "push", "-q", "origin", "main");
+
+  git(w, "checkout", "-q", "-b", "feat", branchPoint);
+  const pre = commit(w, "feature work");
+  git(w, "merge", "-q", "--no-ff", "-m", "merge main into feat", "main");
+  const post = git(w, "rev-parse", "HEAD");
+
+  // Merge a different head into main instead of post
+  git(w, "checkout", "-q", "-b", "otherfeat", branchPoint);
+  const otherHead = commit(w, "other feature");
+  const merge = mergeNoFf(w, otherHead, "merge other");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json } = prove(w, pre, post, merge);
+  assert.equal(json.proofPath, "merge-commit", "should detect merge-commit path");
+  assert.equal(json.gates.secondParentIsHead, false, "should fail secondParentIsHead gate");
+  assert.equal(json.proved, false, "proof should fail when second parent doesn't match");
   assert.equal(code, 1);
 });
 
