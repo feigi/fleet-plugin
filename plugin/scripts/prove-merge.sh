@@ -1,12 +1,7 @@
 #!/bin/sh
 # Prove which head actually landed in a merge.
 #
-# Two proof paths, because a PR that is already current never gets rebased.
-#
-# rebase path (pre != post) — three legs, all required:
-#   1. the pre-rebase head is NOT an ancestor of main  (the old version did not land)
-#   2. the rebased head IS an ancestor of main         (the new version did)
-#   3. the merge commit's second parent IS the rebased head
+# Three proof paths exist, distinguished by how the PR branch came to be current.
 #
 # no-rebase path (pre == post) — leg 1 is dropped, because legs 1 and 2 cannot
 # both hold here: a commit is its own ancestor, so leg 2 (post IS an ancestor)
@@ -14,23 +9,34 @@
 # prove. Note leg 1 alone is perfectly satisfiable when pre == post — it holds
 # whenever the merge has not landed. It is the *conjunction* that is impossible.
 #
-# Two gates carry the weight instead, and both are required on BOTH paths:
+# rebase path (pre != post, and pre is not a parent of post) — three legs, all required:
+#   1. the pre-rebase head is NOT an ancestor of main  (the old version did not land)
+#   2. the rebased head IS an ancestor of main         (the new version did)
+#   3. the merge commit's second parent IS the rebased head
+#
+# merge-commit path (pre != post, and pre is a parent of post) — one gate replaces leg 1:
+#   1. pre IS a parent of post  (the old version survives as an ancestor of the new)
+#   2. the rebased head IS an ancestor of main         (the new version did)
+#   3. the merge commit's second parent IS the rebased head
+#
+# Four gates carry the weight on all three paths, and all are required on EACH:
 #
 #   headWasCurrent — the merge's first parent IS an ancestor of the merged head,
 #                    which is what behind_by=0 means for a merge built on main.
-#   merge ∈ base   — <merge> is reachable from $base, so that first parent really
-#                    is a main tip and not something the caller made up.
+#   postIsAncestor — the rebased head IS an ancestor of main
+#   secondParentIsHead — the merge commit's second parent IS the rebased head
+#   exactlyTwoParents — the merge commit has exactly two parents (not an octopus)
+#
+#   merge ∈ base   — <merge> is reachable from $base (a precondition, not a gate:
+#                    by the time any payload is emitted it has already been proven true)
 #
 # Both read structure off the merge object rather than off a ref, so the fetch
 # below cannot establish them the way it can establish legs 1 and 2.
 #
-# Leg 1 is not a substitute for headWasCurrent: it proves the pre-rebase version
-# did not land, not that the merged head was current, and it only bites a caller
-# who reports `pre` honestly. headWasCurrent is derived from history alone, which
-# is why it is required even on the rebase path — see run-merge-bot.md, "you are
-# the only place currency is proven". Both paths also require exactly two parents,
-# so an octopus merge cannot drag an unreviewed third parent along behind a second
-# parent that looks right.
+# The path-specific gate replaces leg 1, which is the load-bearing check on its path:
+#   no-rebase path — leg 1 is dropped (impossible by construction)
+#   rebase path — preDidNotLand: the pre-rebase head is NOT an ancestor of main
+#   merge-commit path — preIsParentOfHead: the pre-rebase head IS a parent of post
 #
 # The payload splits the checks into three kinds, because a flat object could not
 # say which of its fields were load-bearing for the verdict it sits next to:
@@ -42,8 +48,9 @@
 #   gates         — the `gates` object. `proved` is true exactly when every value
 #                   in it is true, so a consumer asserts all-true rather than
 #                   inferring load-bearing-ness from `proofPath`. Membership is
-#                   per-invocation: `preDidNotLand` (leg 1) is present only on the
-#                   rebase path, because it is the leg the no-rebase path drops.
+#                   per-invocation: the path-specific leg 1 gate is present only on
+#                   the rebase and merge-commit paths, because the no-rebase path
+#                   drops it. The four common gates are present on all three paths.
 #   observations  — the flat fields. They are the raw readings, and a true one can
 #                   sit next to `proved:true` without contradiction. The one that
 #                   prompted all this is `preIsAncestor` on the no-rebase path: it
@@ -177,12 +184,20 @@ if [ "$pre_full" = "$post_full" ]; then
   proof_path=no-rebase
   teeth=true
   echo "    no rebase (pre == post) — leg 1 dropped, headWasCurrent carries it" >&2
+elif [ "$parents" -eq 2 ] && ([ "$first" = "$pre_full" ] || [ "$second" = "$pre_full" ]); then
+  proof_path=merge-commit
+  if [ "$first" = "$pre_full" ]; then
+    echo "    merge-commit (pre != post, pre is first parent) — pre is a parent of post" >&2
+  else
+    echo "    merge-commit (pre != post, pre is second parent) — pre is a parent of post" >&2
+  fi
+  teeth=true
 else
   proof_path=rebase
   if [ "$pre_anc" = false ]; then teeth=true; else teeth=false; fi
   echo "    rebase (pre != post) — pre is-ancestor = $pre_anc, so leg 1 = $teeth (wants false)" >&2
 fi
-echo "    headWasCurrent = $head_current (want true, both paths)" >&2
+echo "    headWasCurrent = $head_current (want true, all paths)" >&2
 
 # Named before the conjunction rather than tested inside it, so the verdict and
 # the `gates` object below read the same booleans. Two spellings of one gate is
@@ -192,10 +207,13 @@ if [ "$parents" -eq 2 ]; then two_parents=true; else two_parents=false; fi
 # `$teeth` is a constant true on the no-rebase path, and it is left OUT of the
 # object there rather than emitted as one: leg 1 is dropped on that path, and a
 # gate that cannot fail is not a gate. Its absence is the machine-readable form
-# of "leg 1 did not carry this proof".
+# of "leg 1 did not carry this proof". Similarly, on the merge-commit path,
+# `$teeth` is true (pre is a parent of post) and it is included as `preIsParentOfHead`.
 gates="\"postIsAncestor\":$post_anc,\"secondParentIsHead\":$second_is_head,\"exactlyTwoParents\":$two_parents,\"headWasCurrent\":$head_current"
 if [ "$proof_path" = rebase ]; then
   gates="\"preDidNotLand\":$teeth,$gates"
+elif [ "$proof_path" = merge-commit ]; then
+  gates="\"preIsParentOfHead\":$teeth,$gates"
 fi
 
 # Derived FROM $gates, not restated: two independently hand-written booleans
