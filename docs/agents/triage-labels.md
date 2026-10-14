@@ -14,7 +14,9 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 confirmed defect included, because confirming a defect does not settle its
 remedy. Only triage sets `ready-for-agent`. A later review landing the same
 finding on an open issue comments there and changes no label, so an issue triage
-already promoted stays `ready-for-agent`. See ADR 0032.
+already promoted stays `ready-for-agent`. An incident ticket without a
+`Mechanism:` line is `needs-triage`; see `docs/agents/incident-policy.md`.
+See ADR 0032.
 
 All five roles resolve — label string equals role name. Verified against
 `gh api repos/feigi/fleet-plugin/labels` on 2026-09-08 (re-run after the repo was

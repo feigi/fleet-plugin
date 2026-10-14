@@ -15,6 +15,11 @@ record path (`adr`/`specs`/`research`/`agents`/`requirements`) or test
 file — state the claim instead; provenance lives in git history. See ADR
 0019 and `CONTEXT.md`'s **Shipped surface**.
 
+## Incident policy
+
+A member-reliability incident closes with a mechanism, not a paragraph in the runbook.
+What counts as one, and the order of preference, is in `docs/agents/incident-policy.md`.
+
 ## Runs on this repo
 
 After a `/fleet-ctl:run-team` run on this repository, run the `run-team-local`
