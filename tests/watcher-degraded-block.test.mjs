@@ -562,7 +562,7 @@ const perTick = (out) => {
 // cleared the reported gate — so the list case, whose ticks 1 and 3 fail the
 // list, probes on ticks 2 and 4 alone.
 const PAUSES = [
-  // The reported bucket: a floor-clearing 201 is under 200 + 4 for any list.
+  // The reported bucket: a floor-clearing 201 is under 200 + 4 for any non-empty list.
   { gate: "the reported bucket", paused: "budget", env: "RLSEQ", list: "5000\n201\n5000\n5000\n", cap: "5000\n201\n5000\n5000\n" },
   { gate: "the unreported bucket", paused: "hidden", env: "HRLSEQ", list: "5\n5000\n", cap: "5000\n5\n5000\n5000\n" },
 ];
