@@ -76,9 +76,18 @@ second run finds its writes already made and re-ticks.
 
 **D2. `ledger.mjs token <key> <token>…`.** Appends tokens to a row and
 keeps every token already there; refuses a member token (those are
-`dispatch`/`settle`'s), a review token (`review`'s), and any token the
-grammar does not parse. `row` stays for a full rewrite and for creating a
-row, and its stderr `rewrote row #N` becomes a warning that names every
+`dispatch`/`settle`'s), a review token (`review`'s), a word shaped like a
+member token that the grammar cannot parse, a `tier=` that is not a cell
+or that names a second tier, on the row or earlier in the same call, a
+`held-behind` or `conflict-hold` token the tick cannot read, a `label-off=`
+naming no
+finisher-pr member the ledger knows, the row's ` · ` separator, a lone
+`→`, and any argument that is not one word. Every other word (`ci=…`,
+`ports=…`, `route=…`, `tier-ok=…`, `dispositions-*=…`) is a freeform
+token, written unless it would split one PR across two rows or crowd a PR
+with a second open launch (a `PR#<n>` mention can). `row` stays for a full
+rewrite and for creating a row, and its stderr `rewrote row #N` becomes a
+warning that names every
 token the rewrite dropped. `fleet-event.mjs` never calls `row` on an
 existing line.
 
@@ -126,8 +135,9 @@ a judgement (the finisher gate's outbox test, never dispatch while a ruling
 is owed) stay.
 
 **D6. Tests.** A fixture ledger drives every `fleet-event.mjs` kind twice
-and asserts the second run writes nothing new; `ledger-token.test.mjs`
-proves `token` keeps every existing token and refuses the three families;
+and asserts the second run writes nothing new; `tests/ledger.test.mjs`
+proves `token` keeps every existing token and refuses each refusal D2 lists,
+and `tests/ledger-grammar.test.mjs` proves it accepts the freeform tokens;
 a tick test proves `--apply` reaps exactly once per `merge-bot-<n>=done`,
 and again for a same-numbered bot in a later run, and that without `--apply`
 nothing is executed; a reconcile test with a fixture session directory for
