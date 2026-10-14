@@ -202,11 +202,11 @@ echo "\$ git merge-base --is-ancestor $first $post_full" >&2
 head_current=$(is_ancestor "$first" "$post_full")
 
 if [ "$pre_full" = "$post_full" ]; then
-  proof_path=no-rebase
+  proof_path="no-rebase"
   teeth=true
   echo "    no rebase (pre == post) — leg 1 dropped, headWasCurrent carries it" >&2
 elif [ "$post_parents" -eq 2 ] && { [ "$post_first" = "$pre_full" ] || [ "$post_second" = "$pre_full" ]; }; then
-  proof_path=merge-commit
+  proof_path="merge-commit"
   if [ "$post_first" = "$pre_full" ]; then
     echo "    merge-commit (pre != post, pre is first parent of post) — pre is a parent of post" >&2
   else
@@ -214,7 +214,7 @@ elif [ "$post_parents" -eq 2 ] && { [ "$post_first" = "$pre_full" ] || [ "$post_
   fi
   teeth=true
 else
-  proof_path=rebase
+  proof_path="rebase"
   if [ "$pre_anc" = false ]; then teeth=true; else teeth=false; fi
   echo "    rebase (pre != post) — pre is-ancestor = $pre_anc, so leg 1 = $teeth (wants false)" >&2
 fi
