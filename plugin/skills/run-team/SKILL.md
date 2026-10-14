@@ -73,10 +73,6 @@ Names follow the unit of work: `impl-<issue#>`, `fix-pr-<pr#>`,
 `review-pr-<pr#>`, `finisher-pr-<pr#>`, `merge-bot-<n>`. See
 references/member-lifecycle.md.
 
-**A depth-2 member cannot dispatch further** (`task.maxRecursionDepth: 2`):
-if `task` is absent at your depth, ask the controller to dispatch the
-specialists and relay their reports. See references/member-lifecycle.md.
-
 **Fresh context per member.** One member, one unit of work, gone. Never
 re-task a finished member — waking it drags the old ticket back in. Refill =
 **new** member, **new** name. Sending is still right for pinging a live
@@ -4542,7 +4538,6 @@ Plus a queue-depth line: shortlist, supply, whether triage was suggested.
 - "Fork the controller so the member has context" → fork inherits everything.
 - "This member finished, send it the next ticket" → resumes its transcript.
 - "The name is cosmetic" → the name is the ledger token and the hub address.
-- "Name the specialists too" → a depth-2 member cannot dispatch further.
 - "ready-for-agent came back empty, widen to ready-for-human" → empty with no `specs-dropped=` means no work; empty with drops means specs awaiting to-tickets, and is still never a reason to widen.
 - "The reap at the end will pick up the claim I never dispatched" → it declines:
   not `[gone]`, no unique commits. Release it, or it reads as taken next run.

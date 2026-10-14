@@ -327,6 +327,21 @@ test("review-and-fix agrees the workflow is the controller's default, not its pr
     /fallback/i,
     "review-and-fix no longer marks its hand-dispatch rules as the fallback",
   );
+  // The reword that retired the member-fallback framing: the hand-dispatch
+  // rules are for a standalone session with no `eval` access, and step 4 now
+  // sends the reader to the specialist first, then the controller, with no
+  // relay in between. Bare `fallback` above is satisfied by either framing.
+  assert.match(
+    specialists,
+    Pin.phrase("hand-dispatch fallback for a standalone session with no `eval` access"),
+    "review-and-fix Specialists no longer names itself the standalone session's hand-dispatch fallback",
+  );
+  const step4 = REVIEW_AND_FIX.between("4. **Under the fleet", "\n5. File each deferred", "review-and-fix step 4").text;
+  assert.match(
+    step4,
+    Pin.phrase("`hub send` it by name for its report, then ask the controller, before ruling"),
+    "review-and-fix step 4 no longer has a missing specialist report chased by name before the controller",
+  );
   // #143's rule, in the place it is HANDED OVER rather than the place it is
   // obeyed. The section's own instruction is to carry the reading rule and not
   // the command, so the rule it carries has to be the widened one — otherwise a
@@ -686,7 +701,7 @@ test("the member-naming rule still names the fix-applier", () => {
   // green. The name is the ledger token and the hub address, so a controller
   // reading only this list names the member something else and the ledger
   // cannot match it.
-  const naming = RUN_TEAM.between("**Name every member.**", "**A depth-2 member cannot dispatch further", "run-team member naming").text;
+  const naming = RUN_TEAM.paragraph("**Name every member.**", "run-team member naming", "**Fresh context per member.**").text;
   assert.match(
     naming,
     /fix-pr-<pr#>/,
