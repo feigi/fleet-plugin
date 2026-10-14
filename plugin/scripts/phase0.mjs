@@ -108,7 +108,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeDie, defineFlags } from "./arg.mjs";
+import { makeDie, defineFlags, isDigits } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { gitEnv } from "./git-env.mjs";
@@ -182,7 +182,7 @@ function fastForward({ cwd }) {
   const fetch = run("git", ["fetch", "origin"], { cwd, timeoutMs: NETWORK_TIMEOUT_MS });
   if (fetch.status !== 0) return refusal("git fetch origin failed:", fetch);
   const count = run("git", ["rev-list", "--count", "main..origin/main"], { cwd });
-  if (count.status !== 0 || !/^\d+$/.test(count.stdout)) return refusal("git rev-list --count main..origin/main failed:", count);
+  if (count.status !== 0 || !isDigits(count.stdout)) return refusal("git rev-list --count main..origin/main failed:", count);
   const behind = Number(count.stdout);
   if (behind === 0) return ok("main is level with origin/main");
   const merge = run("git", ["merge", "--ff-only", "origin/main"], { cwd });
