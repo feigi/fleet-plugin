@@ -533,3 +533,77 @@ test("a PR already blind is reported by its own latch alone across an unreported
   const out = run({ SEQ: seq, HRLSEQ: hrl, PRS: "42" }, 3);
   assert.deepEqual(events(out), ["D42", "D*", "R*", "R42"], `wrong events, or in the wrong order:\n${out}`);
 });
+
+// The WATCHER lines of each tick, as "D:<cause>"/"R:<cause>", sorted within the
+// tick: these cases are about WHICH tick a recovery speaks on, not the order of
+// lines inside one. A tick ends at its tail sleep.
+const cause = (l) =>
+  l.includes(CAPPED) || l.includes("under its --limit") ? "cap"
+  : l.includes("open-PR list") || l.includes("cannot list open PRs") ? "list"
+  : l.includes(HIDDEN) ? "hidden"
+  : l.includes(BUDGET) || l.includes("core budget=") ? "budget"
+  : "pr";
+const perTick = (out) => {
+  const ticks = [[]];
+  for (const l of out.split("\n")) {
+    if (l.startsWith("SLEEP")) ticks.push([]);
+    else if (l.startsWith("WATCHER")) ticks.at(-1).push(`${l.includes("DEGRADED") ? "D" : "R"}:${cause(l)}`);
+  }
+  ticks.pop();
+  return ticks.map((t) => t.sort());
+};
+
+// The list and cap latches recover on the tick the pass runs, never on the
+// tick that reads the list back while a pass gate still pauses the pass.
+// Tick 3 of each is the held latch's other half: the list fails again, or the
+// list fills its limit again, while still latched, and must say nothing.
+// One sequence value per probe the block makes: `rate_limit` is read every
+// tick, the unreported-bucket probe only on a tick that read the list and
+// cleared the reported gate — so the list case, whose ticks 1 and 3 fail the
+// list, probes on ticks 2 and 4 alone.
+const PAUSES = [
+  // The reported bucket: a floor-clearing 201 is under 200 + 4 for any list.
+  { gate: "the reported bucket", paused: "budget", env: "RLSEQ", list: "5000\n201\n5000\n5000\n", cap: "5000\n201\n5000\n5000\n" },
+  { gate: "the unreported bucket", paused: "hidden", env: "HRLSEQ", list: "5\n5000\n", cap: "5000\n5\n5000\n5000\n" },
+];
+
+for (const { gate, paused, env, ...seqs } of PAUSES) {
+  const files = (scenario) => {
+    const f = join(DIR, `seq-${scenario}-${env}-pause-${paused}`);
+    writeFileSync(f, seqs[scenario]);
+    return { [env]: f };
+  };
+
+  test(`the open-PR list announces recovery only on the tick the pass runs, not while ${gate} pauses it`, () => {
+    const list = join(DIR, `seq-list-pause-${paused}`);
+    writeFileSync(list, "err\nok\nerr\nok\n");
+    const out = run({ LISTSEQ: list, ...files("list"), MODE: "normal", PRS: "7" }, 4, "sh", { strict: true });
+    assert.deepEqual(
+      perTick(out),
+      [["D:list"], [`D:${paused}`], [], ["R:list", `R:${paused}`].sort()],
+      `the list recovery spoke on the wrong tick, or a held latch spoke again:\n${out}`,
+    );
+  });
+
+  test(`the list cap announces recovery only on the tick the pass runs, not while ${gate} pauses it`, () => {
+    const prs = join(DIR, `seq-prs-cap-pause-${paused}`);
+    writeFileSync(prs, `${openPrs(250)}\n7\n${openPrs(250)}\n7\n`);
+    const out = run({ PRSSEQ: prs, ...files("cap"), MODE: "normal" }, 4, "sh", { strict: true });
+    assert.deepEqual(
+      perTick(out),
+      // Tick 3 runs its pass on a full page: the cap is still out, so it stays
+      // latched and silent rather than recovering.
+      [["D:cap"], [`D:${paused}`], [`R:${paused}`], ["R:cap"]],
+      `the cap recovery spoke on the wrong tick, or a held latch spoke again:\n${out}`,
+    );
+  });
+}
+
+test("a list outage followed by a tick whose pass runs recovers on that very tick", () => {
+  // The input the deferral must ACCEPT: nothing pauses the pass, so the
+  // recovery is not held back a tick.
+  const seq = join(DIR, "seq-list-run");
+  writeFileSync(seq, "err\nok\n");
+  const out = run({ LISTSEQ: seq, MODE: "normal", PRS: "7" }, 2);
+  assert.deepEqual(perTick(out), [["D:list"], ["R:list"]], out);
+});
