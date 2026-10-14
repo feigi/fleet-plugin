@@ -136,6 +136,14 @@ for (const family of FAMILIES) {
   });
 }
 
+// A key that exists on Object.prototype is still unexpected. Written as raw
+// JSON text: a `constructor` key in a JS object literal would be fine, but a
+// text fixture keeps the case independent of how the report is built.
+test("validate fails an Object.prototype-named top-level key, naming it", () => {
+  const raw = JSON.stringify(VALID.impl).replace(/}$/, ',"constructor":"x"}');
+  assertInvalid(check("impl", raw), '$: unexpected field "constructor"');
+});
+
 test("validate fails a bad enum value in each family that has an enum, naming it", () => {
   assertInvalid(check("impl", variant("impl", { outcome: "merged" })), '$.outcome: "merged" is not one of "pr", "bailed"');
   assertInvalid(check("fix-pr", variant("fix-pr", { outcome: "done" })), '$.outcome: "done" is not one of "applied", "no-op", "failed"');
@@ -162,6 +170,10 @@ test("validate fails a bad hex in each family, naming it", () => {
     check("merge-bot", variant("merge-bot", { merged: [{ pr: 3300, sha: OTHER }, { pr: 3301, sha: "deadbeef" }] })),
     '$.merged[1].sha: "deadbeef" does not match ^[0-9a-f]{40}$',
   );
+});
+
+test("validate fails a relative fix-pr dispositionsRecord, naming it", () => {
+  assertInvalid(check("fix-pr", variant("fix-pr", { dispositionsRecord: "relative/path.json" })), '$.dispositionsRecord: "relative/path.json" does not match ^/');
 });
 
 test("validate fails a wrong type, naming the expected and the given", () => {
@@ -216,6 +228,7 @@ for (const [why, args, said] of [
   ["print with no family", ["print"], "usage:"],
   ["print with an extra argument", ["print", "impl", "x"], "usage:"],
   ["validate with no file", ["validate", "impl"], "usage:"],
+  ["validate with an extra argument", ["validate", "impl", "f.json", "x"], "usage:"],
   ["print of an unknown family", ["print", "review-pr"], "unknown family 'review-pr'"],
   ["validate of an unknown family", ["validate", "nope", "/nonexistent"], "unknown family 'nope'"],
   ["an unknown flag", ["print", "impl", "--json"], "unknown flag --json"],
@@ -249,4 +262,19 @@ test("validate of an unreadable file is exit 2, naming the file", () => {
   const d = run("validate", "impl", dir);
   assert.equal(d.status, 2, d.stdout);
   assert.ok(d.stderr.includes(`report-schema: cannot read ${dir}`), d.stderr);
+});
+
+test("SCHEMAS uses only the keywords validate() implements", () => {
+  const supported = new Set(["type", "enum", "pattern", "required", "properties", "additionalProperties", "items"]);
+  let seen = 0;
+  const walk = (node, at) => {
+    for (const key of Object.keys(node)) {
+      seen++;
+      assert.ok(supported.has(key), `${at}: keyword '${key}' is not checked by validate()`);
+    }
+    for (const [k, sub] of Object.entries(node.properties ?? {})) walk(sub, `${at}.${k}`);
+    if (node.items !== undefined) walk(node.items, `${at}[]`);
+  };
+  for (const [family, schema] of Object.entries(SCHEMAS)) walk(schema, family);
+  assert.ok(seen > 0);
 });

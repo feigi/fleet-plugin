@@ -19,8 +19,11 @@
 //   1  validate: `invalid: <violation>` on stdout, naming the FIRST violation;
 //      a file that is not JSON is invalid too, as `$: not JSON (...)`
 //   2  usage: no or unknown subcommand, a wrong argument count, an unknown
-//      family, any flag; or <file> could not be read. Refused on stderr,
-//      nothing on stdout
+//      family, any flag; or <file> could not be read; or print could not
+//      write the schema to stdout. Refused on stderr, nothing on stdout
+//
+// A validate verdict line that stdout would not take changes nothing: the
+// exit code, 0 or 1, is the verdict.
 //
 // Every field a family lists is required, a nullable one included: a report
 // says `null`, it never leaves the field out. Only the top level is closed
