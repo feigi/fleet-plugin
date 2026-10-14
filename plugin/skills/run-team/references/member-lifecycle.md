@@ -16,7 +16,7 @@ outcome), *consume* (the controller deliberately taking a settled result):
 - A refill is a **new** member under a **new** name, never a wake back into the old one — waking a finished member drags its old ticket in.
 - Liveness is not settlement. A member that is not currently executing is not thereby done (Settle and liveness, below).
 - A settled result is consumed deliberately, never assumed — the discipline holds even where the *hazard* it guards against does not (Grandchildren, below).
-- Every send is reconciled against its receipt; whoever holds the receipt is the only party that can detect a discrepancy (Grandchildren, below).
+- Every send is reconciled against its receipt, the `delivered`/`failed` result `hub send` returns inline (Grandchildren, below).
 
 `hub send` is the omp messaging mechanism. It appears in the recipes below, never in this contract's own vocabulary.
 
