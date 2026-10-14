@@ -184,7 +184,7 @@ if [ "$pre_full" = "$post_full" ]; then
   proof_path=no-rebase
   teeth=true
   echo "    no rebase (pre == post) — leg 1 dropped, headWasCurrent carries it" >&2
-elif [ "$parents" -eq 2 ] && ([ "$first" = "$pre_full" ] || [ "$second" = "$pre_full" ]); then
+elif [ "$parents" -eq 2 ] && { [ "$first" = "$pre_full" ] || [ "$second" = "$pre_full" ]; }; then
   proof_path=merge-commit
   if [ "$first" = "$pre_full" ]; then
     echo "    merge-commit (pre != post, pre is first parent) — pre is a parent of post" >&2
