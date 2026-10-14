@@ -35,3 +35,4 @@ not a repo-wide gate.
 
 - #2732 — "external-assumptions: no test resolves prose.md's path:N cites, so every SKILL.md edit re-drifts them"
 - #2153, #2634, #2445, #2709 — the same drift filed against a single row, closed on the records ruling
+- #3249 — "harness-node.md rows 39, 40, 44, 45, 59, 60 cite review-core.mjs lines that no longer hold the cited text" — one more single-census drift filing, closed on the records ruling
