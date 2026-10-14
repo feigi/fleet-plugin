@@ -9,12 +9,12 @@
 # prove. Note leg 1 alone is perfectly satisfiable when pre == post — it holds
 # whenever the merge has not landed. It is the *conjunction* that is impossible.
 #
-# rebase path (pre != post, and pre is not a parent of post) — three legs, all required:
+# rebase path (pre != post, and pre is not a parent of a two-parent post) — three legs, all required:
 #   1. the pre-rebase head is NOT an ancestor of main  (the old version did not land)
 #   2. the rebased head IS an ancestor of main         (the new version did)
 #   3. the merge commit's second parent IS the rebased head
 #
-# merge-commit path (pre != post, and pre is a parent of post) — one gate replaces leg 1:
+# merge-commit path (pre != post, post has exactly two parents, and pre is one of them) — one gate replaces leg 1:
 #   1. pre IS a parent of post  (the old version survives as an ancestor of the new)
 #   2. the rebased head IS an ancestor of main         (the new version did)
 #   3. the merge commit's second parent IS the rebased head
@@ -30,13 +30,17 @@
 #   merge ∈ base   — <merge> is reachable from $base (a precondition, not a gate:
 #                    by the time any payload is emitted it has already been proven true)
 #
-# Both read structure off the merge object rather than off a ref, so the fetch
-# below cannot establish them the way it can establish legs 1 and 2.
+# headWasCurrent, secondParentIsHead and exactlyTwoParents read structure off the
+# merge object rather than off a ref, so the fetch below cannot establish them the
+# way it can establish legs 1 and 2. postIsAncestor and merge ∈ base are read
+# against $base, which is what the fetch refreshes.
 #
-# The path-specific gate replaces leg 1, which is the load-bearing check on its path:
+# What stands in for leg 1 on each path:
 #   no-rebase path — leg 1 is dropped (impossible by construction)
 #   rebase path — preDidNotLand: the pre-rebase head is NOT an ancestor of main
-#   merge-commit path — preIsParentOfHead: the pre-rebase head IS a parent of post
+#   merge-commit path — preIsParentOfHead: the pre-rebase head IS a parent of post;
+#                       the path selection already established that, so the gate
+#                       records which path ran rather than testing anything new
 #
 # The payload splits the checks into three kinds, because a flat object could not
 # say which of its fields were load-bearing for the verdict it sits next to:
@@ -224,8 +228,13 @@ if [ "$parents" -eq 2 ]; then two_parents=true; else two_parents=false; fi
 # `$teeth` is a constant true on the no-rebase path, and it is left OUT of the
 # object there rather than emitted as one: leg 1 is dropped on that path, and a
 # gate that cannot fail is not a gate. Its absence is the machine-readable form
-# of "leg 1 did not carry this proof". Similarly, on the merge-commit path,
-# `$teeth` is true (pre is a parent of post) and it is included as `preIsParentOfHead`.
+# of "leg 1 did not carry this proof". On the merge-commit path `$teeth` is a
+# constant true too — the elif that selects the path is itself the check that pre
+# is a parent of post — and it is emitted anyway, as `preIsParentOfHead`, because
+# the payload contract names it: it records which leg-1 replacement the proof ran
+# under. It cannot fail, so nothing rests on it; the four shared gates carry the
+# verdict there, and any parent of a two-parent post, the main side included,
+# satisfies it.
 gates="\"postIsAncestor\":$post_anc,\"secondParentIsHead\":$second_is_head,\"exactlyTwoParents\":$two_parents,\"headWasCurrent\":$head_current"
 if [ "$proof_path" = rebase ]; then
   gates="\"preDidNotLand\":$teeth,$gates"
@@ -246,7 +255,7 @@ echo "$NAME: proved=$proved (path=$proof_path)" >&2
 
 # None of the three string fields is reachable today — `$second` and `$first`
 # come from `git rev-parse`, 40 hex characters and nothing else, and
-# `$proof_path` is this script's own `rebase`/`no-rebase` literal. They go
+# `$proof_path` is this script's own `rebase`/`no-rebase`/`merge-commit` literal. They go
 # through `jstr` for uniformity against a later edit that changes where a field
 # comes from, the same reason inflight.sh wraps `$pr`, and it costs nothing.
 # Assigned before the printf, never inline in its argument list — a

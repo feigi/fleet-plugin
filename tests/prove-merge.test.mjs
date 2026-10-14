@@ -181,57 +181,218 @@ test("rebase-then-merge (pre != post) proves true on the rebase path", (t) => {
   assert.equal(code, 0);
 });
 
-test("merge-commit path proves true when the branch was updated by merging main in", (t) => {
-  // Not a rebase: main was merged *into* the branch, so the pre head survives as
-  // a direct parent of post. pre != post and pre is a parent of post, triggering
-  // the merge-commit path, which replaces preDidNotLand with preIsParentOfHead.
+/**
+ * A branch brought current by merging main INTO it. Main moves on after the
+ * branch is cut, then `main` is merged into `feat`: `pre` is the reviewed head
+ * and survives as post^1, main's tip is post^2. Nothing is merged back yet;
+ * each test lands `post` (or something else) itself. Leaves `feat` checked out.
+ */
+function mergeUpdated(t) {
   const w = repo(t);
   const branchPoint = git(w, "rev-parse", "main");
-  git(w, "checkout", "-q", "main");
   commit(w, "main moves on");
   git(w, "push", "-q", "origin", "main");
+  const mainTip = git(w, "rev-parse", "main");
 
   git(w, "checkout", "-q", "-b", "feat", branchPoint);
   const pre = commit(w, "feature work");
   git(w, "merge", "-q", "--no-ff", "-m", "merge main into feat", "main");
   const post = git(w, "rev-parse", "HEAD");
+  assert.equal(git(w, "rev-parse", `${post}^1`), pre, "fixture: pre is the first parent of post");
+  assert.equal(git(w, "rev-parse", `${post}^2`), mainTip, "fixture: main's tip is the second parent");
+  return { w, branchPoint, mainTip, pre, post };
+}
 
+// The four shared gates plus leg 1's merge-commit replacement, all true.
+const MERGE_COMMIT_GATES = {
+  preIsParentOfHead: true,
+  postIsAncestor: true,
+  secondParentIsHead: true,
+  exactlyTwoParents: true,
+  headWasCurrent: true,
+};
+
+test("merge-commit path proves true when the branch was updated by merging main in", (t) => {
+  // Not a rebase: main was merged *into* the branch, so the pre head survives as
+  // a direct parent of post. pre != post and pre is a parent of post, triggering
+  // the merge-commit path, which replaces preDidNotLand with preIsParentOfHead.
+  const { w, pre, post } = mergeUpdated(t);
   const merge = mergeNoFf(w, post, "merge feat");
   git(w, "push", "-q", "origin", "main");
 
   const { code, json } = prove(w, pre, post, merge);
   assert.equal(json.preIsAncestor, true);
   assert.equal(json.proofPath, "merge-commit");
-  assert.equal(json.gates.preIsParentOfHead, true);
+  assert.deepEqual(json.gates, MERGE_COMMIT_GATES);
   assert.equal(json.proved, true, "merge-commit path should prove true when pre is a parent of post");
   assert.equal(code, 0);
 });
 
-test("merge-commit path — both parent orders (pre as first parent)", (t) => {
-  // Pre is the first parent of post (typical order when merging feature into main,
-  // then merging that result back into main)
+test("merge-commit path proves true when pre is the SECOND parent of post", (t) => {
+  // The other merge direction: a main-based branch merges the feature branch in,
+  // so the reviewed head `pre` is post^2 and main's side is post^1.
   const w = repo(t);
-  const branchPoint = git(w, "rev-parse", "main");
+  git(w, "checkout", "-q", "-b", "feat");
+  const pre = commit(w, "feature work");
   git(w, "checkout", "-q", "main");
   commit(w, "main moves on");
   git(w, "push", "-q", "origin", "main");
-
-  git(w, "checkout", "-q", "-b", "feat", branchPoint);
-  const pre = commit(w, "feature work");
-  git(w, "merge", "-q", "--no-ff", "-m", "merge main into feat", "main");
+  git(w, "checkout", "-q", "-b", "upd", "main");
+  git(w, "merge", "-q", "--no-ff", "-m", "merge feat into upd", "feat");
   const post = git(w, "rev-parse", "HEAD");
+  assert.equal(git(w, "rev-parse", `${post}^2`), pre, "fixture: pre is the second parent of post");
 
+  const merge = mergeNoFf(w, post, "merge upd");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json } = prove(w, pre, post, merge);
+  assert.equal(json.proofPath, "merge-commit");
+  assert.deepEqual(json.gates, MERGE_COMMIT_GATES);
+  assert.equal(json.proved, true);
+  assert.equal(code, 0);
+});
+
+test("a single-parent post stacked on pre routes to the rebase path and proves false", (t) => {
+  // An unreviewed commit pushed on top of the reviewed head has `pre` as its ONLY
+  // parent. Only a two-parent post is a merge-commit update, so this must stay on
+  // the rebase path, where leg 1 bites: pre landed transitively through post.
+  const w = repo(t);
+  git(w, "checkout", "-q", "-b", "feat");
+  const pre = commit(w, "reviewed head");
+  const post = commit(w, "unreviewed commit pushed after review");
+  assert.equal(git(w, "rev-parse", `${post}^`), pre, "fixture: pre is post's only parent");
   const merge = mergeNoFf(w, post, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json } = prove(w, pre, post, merge);
+  assert.equal(json.proofPath, "rebase");
+  assert.equal(json.gates.preDidNotLand, false);
+  assert.ok(!("preIsParentOfHead" in json.gates));
+  assert.equal(json.proved, false);
+  assert.equal(code, 1);
+});
+
+test("an octopus post containing pre routes to the rebase path and proves false", (t) => {
+  // `pre` is a parent of post, but post has three parents: the second parent is
+  // main, the third is unreviewed code. Detection requires exactly two parents.
+  const w = repo(t);
+  const base = git(w, "rev-parse", "main");
+  git(w, "checkout", "-q", "-b", "smuggled", base);
+  commit(w, "unreviewed code riding along");
+  git(w, "checkout", "-q", "main");
+  commit(w, "main moves on");
+  git(w, "push", "-q", "origin", "main");
+  git(w, "checkout", "-q", "-b", "feat", base);
+  const pre = commit(w, "feature work");
+  git(w, "merge", "-q", "--no-ff", "-m", "octopus update", "main", "smuggled");
+  const post = git(w, "rev-parse", "HEAD");
+  assert.equal(git(w, "rev-list", "--parents", "-n", "1", post).split(" ").length, 4, "fixture: post has three parents");
+  assert.equal(git(w, "rev-parse", `${post}^1`), pre, "fixture: pre is still a parent of post");
+  const merge = mergeNoFf(w, post, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json } = prove(w, pre, post, merge);
+  assert.equal(json.proofPath, "rebase");
+  assert.equal(json.gates.preDidNotLand, false);
+  assert.equal(json.proved, false);
+  assert.equal(code, 1);
+});
+
+test("stacked merge-updates (pre is an ancestor of post, not a parent) stay on the rebase path", (t) => {
+  // One-level parent detection is the documented ceiling: after a second
+  // update-branch, pre is a grandparent of post, so leg 1 still bites.
+  const { w, pre } = mergeUpdated(t);
+  git(w, "checkout", "-q", "main");
+  commit(w, "main moves on again");
+  git(w, "push", "-q", "origin", "main");
+  git(w, "checkout", "-q", "feat");
+  git(w, "merge", "-q", "--no-ff", "-m", "merge main into feat again", "main");
+  const post = git(w, "rev-parse", "HEAD");
+  assert.notEqual(git(w, "rev-parse", `${post}^1`), pre, "fixture: pre is not a direct parent");
+  assert.notEqual(git(w, "rev-parse", `${post}^2`), pre, "fixture: pre is not a direct parent");
+  const merge = mergeNoFf(w, post, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json } = prove(w, pre, post, merge);
+  assert.equal(json.proofPath, "rebase");
+  assert.equal(json.gates.preDidNotLand, false);
+  assert.equal(json.proved, false);
+  assert.equal(code, 1);
+});
+
+test("merge-commit path still rejects a post that never landed", (t) => {
+  const { w, pre, post, branchPoint } = mergeUpdated(t);
+  // A real, unrelated merge lands; the claimed post itself never does.
+  git(w, "checkout", "-q", "-b", "other", branchPoint);
+  const other = commit(w, "something else entirely");
+  const merge = mergeNoFf(w, other, "merge other");
   git(w, "push", "-q", "origin", "main");
 
   const { code, json } = prove(w, pre, post, merge);
   assert.equal(json.proofPath, "merge-commit");
   assert.equal(json.gates.preIsParentOfHead, true);
-  assert.equal(json.proved, true);
-  assert.equal(code, 0);
+  assert.equal(json.gates.postIsAncestor, false, "fixture: post really never landed");
+  assert.equal(json.proved, false);
+  assert.equal(code, 1);
 });
 
+test("merge-commit path still rejects a wrong secondParent", (t) => {
+  const { w, pre, post, mainTip } = mergeUpdated(t);
+  // Main lands `other` as the merge under test, then lands post later, so post is
+  // an ancestor of main and the merge's first parent is still behind post.
+  git(w, "checkout", "-q", "-b", "other", mainTip);
+  const other = commit(w, "a different head");
+  const wrongMerge = mergeNoFf(w, other, "merge the wrong branch");
+  mergeNoFf(w, post, "merge feat later");
+  git(w, "push", "-q", "origin", "main");
 
+  const { code, json } = prove(w, pre, post, wrongMerge);
+  assert.equal(json.proofPath, "merge-commit");
+  assert.deepEqual(
+    { ...json.gates, secondParentIsHead: undefined },
+    { ...MERGE_COMMIT_GATES, secondParentIsHead: undefined },
+    "every other gate must pass, so only the second parent explains the disproof",
+  );
+  assert.equal(json.gates.secondParentIsHead, false);
+  assert.equal(json.secondParent, other);
+  assert.equal(json.proved, false);
+  assert.equal(code, 1);
+});
+
+test("merge-commit path still rejects an octopus <merge>", (t) => {
+  const { w, pre, post, mainTip } = mergeUpdated(t);
+  git(w, "checkout", "-q", "-b", "smuggled", mainTip);
+  commit(w, "unreviewed code riding along");
+  git(w, "checkout", "-q", "main");
+  git(w, "merge", "-q", "--no-ff", "-m", "octopus", post, "smuggled");
+  const merge = git(w, "rev-parse", "HEAD");
+  git(w, "push", "-q", "origin", "main");
+  assert.equal(git(w, "rev-parse", `${merge}^2`), post, "fixture: ^2 still looks right");
+
+  const { code, json } = prove(w, pre, post, merge);
+  assert.equal(json.proofPath, "merge-commit");
+  assert.equal(json.parentCount, 3);
+  assert.equal(json.gates.exactlyTwoParents, false);
+  assert.equal(json.proved, false);
+  assert.equal(code, 1);
+});
+
+test("merge-commit path still rejects a stale head", (t) => {
+  // Main moves again after post was built and the merge lands without a second
+  // update: the merge's first parent is no longer an ancestor of post.
+  const { w, pre, post } = mergeUpdated(t);
+  git(w, "checkout", "-q", "main");
+  commit(w, "main moves on after the update");
+  const merge = mergeNoFf(w, post, "merge feat without updating again");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json } = prove(w, pre, post, merge);
+  assert.equal(json.proofPath, "merge-commit");
+  assert.equal(json.gates.preIsParentOfHead, true);
+  assert.equal(json.gates.headWasCurrent, false, "prior main tip is not an ancestor of the merged head");
+  assert.equal(json.proved, false);
+  assert.equal(code, 1);
+});
 
 test("ATTACK: un-rebased head that merged cleanly still proves false", (t) => {
   // The head was built on an older main, main moved, and it was merged without
