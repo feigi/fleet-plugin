@@ -4054,3 +4054,208 @@ test("CLI: a real ancestor rotation carries the heartbeat's `seen` through, so a
     rmSync(dead.dir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// SETTLE: a live member whose report file is on disk. The message carrying a
+// report can be dropped or delayed; the file cannot. Advisory only — the tick
+// prints the settle it is for and runs none of it.
+import { utimesSync } from "node:fs";
+import { reportLines } from "../plugin/scripts/fleet-tick.mjs";
+
+// A live fix-applier on PR 5 and a live merge-bot, an in-flight
+// `review=member:` runner on PR 6, a `review=wf:` run on PR 7, and implementers
+// already settled.
+const REPORTED = {
+  shortlist: shortlistText([]), refresh: shortlistText([]), prs: [pr(5), pr(6), pr(7)],
+  ledger: {
+    rows: [
+      "#3 impl-3=PR#5 → PR#5 · tier-ok=impl-3:fleet-implementer-slow-high · reviewed=abc1234:1/0/0:run-abcdefgh · fix-pr-5",
+      "#4 impl-4=PR#6 → PR#6 · tier-ok=impl-4:fleet-implementer-slow-high · review=member:review-pr-6",
+      "#8 impl-8=PR#7 → PR#7 · tier-ok=impl-8:fleet-implementer-slow-high · review=wf:r7",
+    ],
+    dispatched: ["impl-3=PR#5", "impl-4=PR#6", "impl-8=PR#7", "fix-pr-5", "merge-bot-1"],
+  },
+};
+// A scratch root of its own holding `<root>/reports/<name>.json` for each
+// entry of `files` — `{name: {member, agoMin, text, dir}}`, the file `agoMin`
+// minutes old and holding `{member}`, or `text` verbatim, or a directory in
+// its place when `dir` is set.
+const scratchWith = (files) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-scratch-")));
+  mkdirSync(join(root, "reports"));
+  for (const [name, { member, agoMin = 0, text, dir = false }] of Object.entries(files)) {
+    const path = join(root, "reports", `${name}.json`);
+    if (dir) {
+      mkdirSync(path);
+      continue;
+    }
+    writeFileSync(path, text ?? JSON.stringify({ member }));
+    const t = new Date(Date.now() - agoMin * MIN);
+    utimesSync(path, t, t);
+  }
+  return root;
+};
+// The phase-0 receipt naming `root` as the scratch root, or naming none.
+const receiptScratch = (root) => (r) => {
+  const { scratch, ...rest } = r;
+  return root === null ? rest : { ...rest, scratch: root };
+};
+// One tick over REPORTED with the given report files, the receipt naming their
+// root unless `receipt` is false; `args` maps that root to the tick's argv.
+const reportTick = (files, { receipt = true, args = () => [], fixture = {} } = {}) => {
+  const root = scratchWith(files);
+  try {
+    return runCli(args(root), { ...REPORTED, phase0: receiptScratch(receipt ? root : null), ...fixture, keep: true });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+const reportLinesOf = (stdout) => stdout.split("\n").filter((l) => /^(?:SETTLE|REPORT-MISMATCH|REPORT-UNREADABLE) /.test(l));
+const settleLine = (member, age, reportsFrom = "") => `SETTLE ${member} (report on disk since ${age}m — ledger.mjs settle ${member} --from-report${reportsFrom && ` --reports ${reportsFrom}`})`;
+const NO_SCRATCH = "fleet-tick: report files not checked — no scratch in the phase-0 receipt and no --scratch";
+
+test("CLI: a live token with a report file prints SETTLE above the rows; a settled token with a file, a live token without one and an in-flight review runner with one print nothing; rows, quiet and the ledger are untouched", () => {
+  const r = reportTick({
+    "fix-pr-5": { member: "fix-pr-5", agoMin: 7 },
+    "merge-bot-1": { member: "merge-bot-1", agoMin: 2 },
+    "review-pr-6": { member: "review-pr-6", agoMin: 2 },
+    "impl-3": { member: "impl-3", agoMin: 30 },
+  });
+  const bare = reportTick({});
+  try {
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(bare.status, 0, bare.stderr);
+    assert.deepEqual(reportLinesOf(r.stdout), [settleLine("fix-pr-5", 7), settleLine("merge-bot-1", 2)]);
+    const out = r.stdout.split("\n");
+    assert.ok(out.findIndex((l) => l.startsWith("SETTLE ")) < out.findIndex((l) => /^implementers /.test(l)), "printed above the rows");
+    // The same live tokens with no file on disk: nothing.
+    assert.deepEqual(reportLinesOf(bare.stdout), []);
+    assert.doesNotMatch(r.stderr + bare.stderr, /report files not checked/);
+    // Advice, never a row: the rest of the output and the quiet streak are the
+    // same either way, and the ledger is never written.
+    const withoutReports = (s) => s.split("\n").filter((l) => !l.startsWith("SETTLE ")).join("\n");
+    assert.equal(withoutReports(r.stdout), bare.stdout);
+    assert.equal(stateOf(r).quiet, stateOf(bare).quiet);
+    assert.equal(readFileSync(join(r.repo, ".fleet", "ledger.md"), "utf8"), ledgerText(REPORTED.ledger));
+  } finally {
+    rmSync(r.dir, { recursive: true, force: true });
+    rmSync(bare.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: a report file whose `member` is not its filename prints REPORT-MISMATCH once, naming the file and what it names, and no SETTLE; a file that is there and cannot be read prints REPORT-UNREADABLE with its error code, and no SETTLE", () => {
+  let mismatchRoot, unreadableRoot;
+  const r = reportTick({ "fix-pr-5": { member: "fix-pr-9" }, "merge-bot-1": { text: "not json" } }, { args: (at) => { mismatchRoot = at; return []; } });
+  const unreadable = reportTick({ "fix-pr-5": { dir: true } }, { args: (at) => { unreadableRoot = at; return []; } });
+  try {
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(reportLinesOf(r.stdout), [
+      `REPORT-MISMATCH ${join(mismatchRoot, "reports", "fix-pr-5.json")} (member: fix-pr-9)`,
+      `REPORT-MISMATCH ${join(mismatchRoot, "reports", "merge-bot-1.json")} (member: none)`,
+    ]);
+    assert.equal(unreadable.status, 0, unreadable.stderr);
+    assert.deepEqual(reportLinesOf(unreadable.stdout), [`REPORT-UNREADABLE ${join(unreadableRoot, "reports", "fix-pr-5.json")} (EISDIR)`]);
+  } finally {
+    rmSync(r.dir, { recursive: true, force: true });
+    rmSync(unreadable.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: --fold-unchanged with a report waiting and nothing else changed folds to one line carrying `SETTLE <member> persists`, without resetting quiet", () => {
+  const root = scratchWith({ "fix-pr-5": { member: "fix-pr-5", agoMin: 3 } });
+  try {
+    const ticks = ticksOver(["--fold-unchanged"], { ...REPORTED, phase0: receiptScratch(root) }, 2);
+    for (const t of ticks) assert.equal(t.status, 0, t.stderr);
+    // The tick that finds it is a change, so it prints in full.
+    assert.match(ticks[0].stdout, new RegExp(`^${RegExp.escape(settleLine("fix-pr-5", 3))}$`, "m"));
+    for (const t of ticks.slice(1)) {
+      assert.deepEqual(t.stdout.trim().split("\n"), [
+        `fleet-tick: unchanged, nothing to act on (quiet=${ticks.indexOf(t) + 1}); SETTLE fix-pr-5 persists — full rows on the next change`,
+      ]);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI: the digest leaves a report's age out, so one waiting on disk folds however long it waits, and its arrival is a change", () => {
+  const digestOf = (files) => {
+    const r = reportTick(files);
+    try {
+      assert.equal(r.status, 0, r.stderr);
+      return stateOf(r).digest;
+    } finally {
+      rmSync(r.dir, { recursive: true, force: true });
+    }
+  };
+  const at = (agoMin) => digestOf({ "fix-pr-5": { member: "fix-pr-5", agoMin } });
+  assert.equal(at(1), at(40));
+  assert.notEqual(at(1), digestOf({}));
+});
+
+test("CLI: with no scratch in the receipt the tick reads --scratch and its SETTLE names that root's reports for the settle to read; with neither it skips the check with one stderr line; the receipt's scratch outranks --scratch", () => {
+  const files = { "fix-pr-5": { member: "fix-pr-5" } };
+  const run = (opts) => {
+    let root;
+    const r = reportTick(files, { ...opts, args: (at) => { root = at; return (opts.args ?? (() => []))(at); } });
+    try {
+      assert.equal(r.status, 0, r.stderr);
+      return {
+        lines: reportLinesOf(r.stdout).map((l) => l.replaceAll(root, "<root>")),
+        skipped: r.stderr.split("\n").filter((l) => /report files not checked/.test(l)),
+      };
+    } finally {
+      rmSync(r.dir, { recursive: true, force: true });
+    }
+  };
+  assert.deepEqual(run({ receipt: false, args: (root) => ["--scratch", root] }), { lines: [settleLine("fix-pr-5", 0, "<root>/reports")], skipped: [] });
+  assert.deepEqual(run({ fixture: { phase0: false }, args: (root) => ["--scratch", root] }), { lines: [settleLine("fix-pr-5", 0, "<root>/reports")], skipped: [] },
+    "no receipt at all reads --scratch the same way");
+  assert.deepEqual(run({ receipt: false }), { lines: [], skipped: [NO_SCRATCH] });
+  // The receipt's root is the one ledger.mjs reads unaided, so no --reports.
+  assert.deepEqual(run({ args: () => ["--scratch", join(tmpdir(), "fleet-tick-no-such-scratch")] }), { lines: [settleLine("fix-pr-5", 0)], skipped: [] });
+});
+
+test("reportLines: SETTLE for a live name whose file names it, REPORT-MISMATCH once for one that names another, REPORT-UNREADABLE for one that cannot be read, nothing for a name with no file; the key drops the age", () => {
+  const now = 1_000_000_000_000;
+  const file = (member, agoMin) => ({ path: `/s/reports/${member}.json`, since: now - agoMin * MIN, member });
+  const reports = new Map([
+    ["impl-12", file("impl-12", 9)],
+    ["merge-bot-2", { ...file("merge-bot-2", 1), member: "merge-bot-3" }],
+    ["finisher-pr-4", { ...file("finisher-pr-4", 1), member: undefined }],
+    ["fix-pr-5", file("fix-pr-5", -5)],
+    ["impl-14", { path: "/s/reports/impl-14.json", unreadable: "EACCES" }],
+  ]);
+  assert.deepEqual(reportLines({ reporters: ["impl-12", "impl-12", "merge-bot-2", "finisher-pr-4", "fix-pr-5", "impl-13", "impl-14"], reports, now }), [
+    { member: "impl-12", settle: true, key: "SETTLE impl-12", line: settleLine("impl-12", 9) },
+    { member: "merge-bot-2", settle: false, key: "REPORT-MISMATCH /s/reports/merge-bot-2.json (member: merge-bot-3)", line: "REPORT-MISMATCH /s/reports/merge-bot-2.json (member: merge-bot-3)" },
+    { member: "finisher-pr-4", settle: false, key: "REPORT-MISMATCH /s/reports/finisher-pr-4.json (member: none)", line: "REPORT-MISMATCH /s/reports/finisher-pr-4.json (member: none)" },
+    { member: "fix-pr-5", settle: true, key: "SETTLE fix-pr-5", line: settleLine("fix-pr-5", 0) },
+    { member: "impl-14", settle: false, key: "REPORT-UNREADABLE /s/reports/impl-14.json (EACCES)", line: "REPORT-UNREADABLE /s/reports/impl-14.json (EACCES)" },
+  ]);
+  // A name that is not live is never looked up, whatever is on disk for it.
+  assert.deepEqual(reportLines({ reporters: [], reports, now }), []);
+  assert.equal(reportLines({ reporters: ["impl-12"], reports: new Map([["impl-12", { ...file("impl-12", 0), member: 12 }]]), now })[0].line,
+    "REPORT-MISMATCH /s/reports/impl-12.json (member: 12)");
+  // `reportsFrom` names the reports directory the settle reads, as one shell word.
+  const settleFrom = (reportsFrom) => reportLines({ reporters: ["impl-12"], reports, now, reportsFrom })[0];
+  assert.equal(settleFrom("/r/reports").line, settleLine("impl-12", 9, "/r/reports"));
+  assert.equal(settleFrom("/r/reports").key, "SETTLE impl-12", "the key does not carry the directory");
+  assert.equal(settleFrom("/a b/it's").line, settleLine("impl-12", 9, "'/a b/it'\\''s'"));
+});
+
+test("deriveRun: reporters are every unsettled member token — never a settled token, a review runner, a wf: run, or a review that returned or failed", () => {
+  const run = deriveRun({
+    rows: [
+      "#3 impl-3=PR#5 → PR#5 · tier-ok=impl-3:fleet-implementer-slow-high · reviewed=abc1234:1/0/0:run-abcdefgh · fix-pr-5",
+      "#4 impl-4=PR#6 → PR#6 · tier-ok=impl-4:fleet-implementer-slow-high · review=member:review-pr-6",
+      "#8 impl-8=PR#7 → PR#7 · tier-ok=impl-8:fleet-implementer-slow-high · review=wf:r7",
+      "#9 impl-9=PR#10 → PR#10 · tier-ok=impl-9:fleet-implementer-slow-high · review=member:review-pr-10 · reviewed=abc1234:0/0/0:run-abcdefgh",
+      "#11 impl-11=PR#12 → PR#12 · tier-ok=impl-11:fleet-implementer-slow-high · review=member:review-pr-12=failed",
+      "#13 impl-13 · tier-ok=impl-13:fleet-implementer-slow-high",
+    ],
+    dispatched: ["impl-3=PR#5", "impl-4=PR#6", "impl-8=PR#7", "impl-9=PR#10", "impl-11=PR#12", "impl-13", "fix-pr-5", "merge-bot-1"],
+    drain: null,
+  }, [pr(5), pr(6), pr(7), pr(10), pr(12)]);
+  assert.deepEqual([...run.reporters].sort(), ["fix-pr-5", "impl-13", "merge-bot-1"]);
+});
