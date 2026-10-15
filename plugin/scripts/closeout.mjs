@@ -45,6 +45,12 @@
 //                   the PR once it exists, are kept in the receipt: a re-run
 //                   after a failed push or PR resumes on that branch and never
 //                   opens a second PR.
+//   phase0-receipt  moves `.fleet/phase0.json` beside the ledger as
+//                   `phase0.finished.<UTC stamp>.json`, so a run that ended
+//                   here leaves no phase-0 receipt for the next run in this
+//                   session to resume. After the tick, which reads the caps
+//                   from it, and before the stop. No `phase0.json` is nothing
+//                   to move and is `ok`; a name already taken is a failed step.
 //   heartbeat-stop  `fleet-heartbeat.mjs --stop "<reason>"`, last, because
 //                   every reader takes a recorded stop as the end of the run.
 //
@@ -70,7 +76,7 @@
 // Zero deps: node builtins and sibling scripts only.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -78,7 +84,7 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { CLOSEOUT_RECEIPT, memberTokens, rowPr } from "./ledger-grammar.mjs";
+import { CLOSEOUT_RECEIPT, RECEIPT, archiveStamp, memberTokens, rowPr } from "./ledger-grammar.mjs";
 import { encodeProjectDir, isOmpSessionDirName } from "./member-record.mjs";
 import { tickCaps } from "./phase0-receipt.mjs";
 
@@ -334,6 +340,27 @@ function stepCommitAndPR({ reason, branch, receipt, save }) {
   return result;
 }
 
+// The receipt `phase0.mjs` resumes would otherwise outlive the run it describes.
+// Its name carries a word of its own, so it is neither the rotation's
+// `phase0.<stamp>.json` nor phase0.mjs's held `phase0.previous.json`. Linked,
+// then unlinked, so a name already taken is refused rather than overwritten.
+function stepPhase0Receipt({ fleetDir }) {
+  const from = join(fleetDir, RECEIPT);
+  if (!existsSync(from)) return ok(`no ${RECEIPT} to move`);
+  const to = join(fleetDir, RECEIPT.replace(/\.json$/, `.finished.${archiveStamp()}.json`));
+  try {
+    linkSync(from, to);
+  } catch (e) {
+    return failed(e.code === "EEXIST" ? `${to} already exists` : `cannot move ${from} to ${to}: ${e.message}`);
+  }
+  try {
+    unlinkSync(from);
+  } catch (e) {
+    return failed(`moved ${from} to ${to} but could not remove it: ${e.message} — remove it by hand before the next run`);
+  }
+  return ok(`${from} -> ${to}`);
+}
+
 function stepHeartbeatStop({ cwd, reason }) {
   const r = node("fleet-heartbeat.mjs", ["--stop", reason], { cwd });
   return r.status === 0 ? ok(r.stdout) : failed(`fleet-heartbeat.mjs --stop failed: ${detail(r)}`);
@@ -348,6 +375,7 @@ const FINISH = {
   "tier-outcomes": stepTierOutcomes,
   metrics: stepMetrics,
   "commit-and-pr": stepCommitAndPR,
+  "phase0-receipt": stepPhase0Receipt,
   "heartbeat-stop": stepHeartbeatStop,
 };
 const STEP_NAMES = [...Object.keys(BEGIN), ...Object.keys(FINISH)];

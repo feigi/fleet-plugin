@@ -80,7 +80,7 @@ export function rotate() {
 if (process.argv[1].endsWith("stub-driver.mjs")) drive(process.argv[2], process.argv.slice(3));
 `;
 
-const MJS_STUBS = ["main-checkout", "preflight", "tier-roles", "metrics-refresh", "board", "reclaim-scratch", "stranded", "shortlist"];
+const MJS_STUBS = ["main-checkout", "preflight", "tier-roles", "metrics-refresh", "board", "reclaim-scratch", "stranded", "shortlist", "fleet-heartbeat"];
 const SH_STUBS = ["instruments", "derive-testcmd"];
 
 // The plugin's scripts directory, copied once, with the external steps
@@ -532,6 +532,31 @@ test("a receipt whose run and session both match resumes: its ok steps are skipp
   assert.deepEqual(statuses(f.receipt()), allOk);
   assert.equal(f.asides().length, 0, "a receipt that resumes is not moved aside");
   assert.equal(f.receipt().steps.pin.output, "from the previous run", "a skipped step keeps what it recorded");
+});
+
+test("a same-session run after `closeout.mjs finish` starts at branch and rotates again, and skips nothing as done earlier", () => {
+  const f = fixture({ spec: true });
+  assert.equal(f.run().status, 0);
+  assert.equal(f.calls("rotate").length, 1);
+  assert.equal(f.receipt().run, RUN_AT, "the run the record names is the receipt's, as it still is after the run ends");
+
+  // The end of that run: every closeout step before the receipt's own is done.
+  const at = new Date().toISOString();
+  const done = Object.fromEntries(["drain", "release", "tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr"].map((n) => [n, { status: "ok", at, output: "" }]));
+  writeFileSync(join(f.repo, ".fleet", "closeout.json"), JSON.stringify({ reason: "wrap up", begun: at, steps: done }));
+  const finish = spawnSync(process.execPath, [join(SCRIPTS, "closeout.mjs"), "finish", "--reason", "wrap up"], {
+    cwd: f.repo, encoding: "utf8", env: { ...GIT_ENV, HOME: f.home, PATH: `${join(f.dir, "bin")}:${process.env.PATH}`, PH0_STUBS: f.stubs },
+  });
+  assert.equal(finish.status, 0, finish.stdout + finish.stderr);
+  assert.equal(existsSync(f.receiptPath), false, "finish left no receipt for the next run");
+
+  const again = f.run();
+  assert.equal(again.status, 0, again.stdout + again.err);
+  assert.doesNotMatch(again.stdout, /done earlier in this run/);
+  assert.equal(f.calls("rotate").length, 2, "the second run rotated");
+  assert.equal(f.calls("instruments").length, 2, "and ran every step before it");
+  assert.deepEqual(statuses(f.receipt()), allOk);
+  assert.equal(existsSync(join(f.repo, ".fleet", "phase0.previous.json")), false, "no previous run's receipt was held");
 });
 
 // A run that stopped before its rotation: no run to key on, `rotate` and every

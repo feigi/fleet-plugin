@@ -189,7 +189,7 @@ function fixture() {
 }
 
 const stepLines = (out) => out.filter((l) => l.startsWith("closeout: "));
-const FINISH_STEPS = ["tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr", "heartbeat-stop"];
+const FINISH_STEPS = ["tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr", "phase0-receipt", "heartbeat-stop"];
 const BEGIN_STEPS = ["drain", "release"];
 const statusOf = (receipt, names) => Object.fromEntries(names.map((n) => [n, receipt.steps[n].status]));
 const allOk = (names) => Object.fromEntries(names.map((n) => [n, "ok"]));
@@ -343,7 +343,7 @@ test("a finish before any begin leaves begin's steps pending in the receipt, and
 
 // ── finish ───────────────────────────────────────────────────────────────────
 
-test("finish: runs the six steps in order, one status line each, heartbeat --stop last, and exits 0", () => {
+test("finish: runs the steps in order, one status line each, heartbeat --stop last, and exits 0", () => {
   const f = fixture();
   const r = f.run("finish", ["--reason", "wrap up"]);
   assert.equal(r.status, 0, r.err + r.stdout);
@@ -385,7 +385,7 @@ test("finish: exits 3 and runs nothing after it unless the tick's last line is `
     assert.equal(r.status, 3, JSON.stringify(out) + r.err + r.stdout);
     assert.match(r.stdout, /^closeout: tick: failed$/m);
     assert.deepEqual(f.order(), ["fleet-tick"]);
-    assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), { tick: "failed", scrape: "pending", "tier-outcomes": "pending", metrics: "pending", "commit-and-pr": "pending", "heartbeat-stop": "pending" });
+    assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), { tick: "failed", scrape: "pending", "tier-outcomes": "pending", metrics: "pending", "commit-and-pr": "pending", "phase0-receipt": "pending", "heartbeat-stop": "pending" });
   }
   const f = fixture();
   f.control("fleet-tick", { exit: 1, err: "fleet-tick: cannot read the ledger\n" });
@@ -444,7 +444,7 @@ test("finish: exits 4 naming each reviewed= PR without a tier-outcomes row, and 
   assert.deepEqual(r.out.filter((l) => l.startsWith("NEED ")), ["NEED tier-outcomes append 23", "NEED tier-outcomes append 30"]);
   assert.match(r.stdout, /^closeout: tier-outcomes: pending$/m);
   assert.deepEqual(f.order(), ["fleet-tick", "member-outcomes"], "the metrics refresh and everything after it waits");
-  assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), { tick: "ok", scrape: "ok", "tier-outcomes": "pending", metrics: "pending", "commit-and-pr": "pending", "heartbeat-stop": "pending" });
+  assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), { tick: "ok", scrape: "ok", "tier-outcomes": "pending", metrics: "pending", "commit-and-pr": "pending", "phase0-receipt": "pending", "heartbeat-stop": "pending" });
 
   writeFileSync(join(f.repo, METRICS[2]), HEADER + [tierRow(20, 10), tierRow(23, 13), tierRow(30, 30)].join("\n") + "\n");
   const again = f.run("finish", ["--reason", "wrap up"]);
@@ -615,6 +615,123 @@ test("finish: a re-run after commit-and-pr succeeded does not open a second PR, 
   assert.equal(f.calls("fleet-tick").length, 1);
   assert.equal(f.calls("metrics-refresh").length, 1);
   assert.equal(f.calls("fleet-heartbeat").length, 2);
+});
+
+// ── the phase-0 receipt is retired ───────────────────────────────────────────
+
+const PHASE0 = '{"run": 1700000000000, "session": "/s", "caps": {"impl": 3, "review": null}}\n';
+// What sits beside the ledger as a retired phase-0 receipt: not `phase0.json`,
+// not the rotation's `phase0.<stamp>.json`, not phase0.mjs's held
+// `phase0.previous.json`.
+const retired = (f) => readdirSync(f.fleet).filter((n) => /^phase0\./.test(n) && n !== "phase0.json");
+const RETIRED_NAME = /^phase0\.finished\.\d{4}-\d\d-\d\dT\d{6}Z\.json$/;
+
+test("finish: moves phase0.json beside the ledger under a name no other phase-0 file bears, after the tick and before heartbeat --stop", () => {
+  const f = fixture();
+  writeFileSync(join(f.fleet, "phase0.json"), PHASE0);
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.equal(existsSync(join(f.fleet, "phase0.json")), false, "no receipt is left for the next run to resume");
+  const names = retired(f);
+  assert.equal(names.length, 1, names.join());
+  assert.match(names[0], RETIRED_NAME);
+  assert.doesNotMatch(names[0], /^phase0\.\d.*\.json$/, "not the rotation's archive name");
+  assert.notEqual(names[0], "phase0.previous.json", "not the name phase0.mjs holds a previous run's receipt under");
+  assert.equal(readFileSync(join(f.fleet, names[0]), "utf8"), PHASE0, "kept byte for byte");
+  assert.deepEqual(f.calls("fleet-tick")[0].args, ["--implementer-cap", "3"], "the tick still read the caps from it");
+  assert.deepEqual(stepLines(r.out), FINISH_STEPS.map((n) => `closeout: ${n}: ok`));
+
+  // The move is before --stop: a stop that fails finds the receipt already moved.
+  const g = fixture();
+  writeFileSync(join(g.fleet, "phase0.json"), PHASE0);
+  g.control("fleet-heartbeat", { exit: 1, err: "fleet-heartbeat: cannot write the state\n" });
+  assert.equal(g.run("finish", ["--reason", "wrap up"]).status, 3);
+  assert.equal(existsSync(join(g.fleet, "phase0.json")), false);
+  assert.equal(retired(g).length, 1);
+  assert.equal(g.receipt().steps["phase0-receipt"].status, "ok");
+});
+
+test("finish: a step that fails or waits before the move leaves phase0.json where it was", () => {
+  const arrangements = [
+    ["tick", 3, (f) => f.control("fleet-tick", { out: "ACTION: dispatch\n" })],
+    ["metrics", 3, (f) => f.control("metrics-refresh", { exit: 1, err: "metrics-refresh: cost guard failed\n" })],
+    ["commit-and-pr", 3, (f) => f.control("metrics-refresh", {})],
+    ["tier-outcomes", 4, (f) => {
+      writeFileSync(join(f.repo, METRICS[2]), HEADER + tierRow(20, 10) + "\n");
+      git(f.repo, "commit", "-q", "-am", "a row");
+      git(f.repo, "push", "-q");
+      f.setLedger(REVIEWED);
+    }],
+  ];
+  for (const [step, status, arrange] of arrangements) {
+    const f = fixture();
+    writeFileSync(join(f.fleet, "phase0.json"), PHASE0);
+    arrange(f);
+    const r = f.run("finish", ["--reason", "wrap up"]);
+    assert.equal(r.status, status, `${step}: ${r.err}${r.stdout}`);
+    assert.equal(readFileSync(join(f.fleet, "phase0.json"), "utf8"), PHASE0, `${step}: the receipt stays`);
+    assert.deepEqual(retired(f), [], `${step}: nothing was moved`);
+    assert.equal(f.receipt().steps["phase0-receipt"].status, "pending", step);
+  }
+});
+
+test("finish: a receipt that cannot be parsed is moved all the same, and no phase0.json at all is a step that is ok", () => {
+  const f = fixture();
+  // The tick refuses to read it, so the step is reached through a receipt whose earlier steps are already ok.
+  const at = new Date().toISOString();
+  const done = Object.fromEntries(["drain", "release", "tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr"].map((n) => [n, { status: "ok", at, output: "" }]));
+  writeFileSync(f.receiptPath, JSON.stringify({ reason: "wrap up", begun: at, steps: done }));
+  writeFileSync(join(f.fleet, "phase0.json"), "{not json");
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.equal(existsSync(join(f.fleet, "phase0.json")), false);
+  assert.equal(readFileSync(join(f.fleet, retired(f)[0]), "utf8"), "{not json");
+
+  const g = fixture();
+  const none = g.run("finish", ["--reason", "wrap up"]);
+  assert.equal(none.status, 0, none.err + none.stdout);
+  assert.equal(g.receipt().steps["phase0-receipt"].status, "ok");
+  assert.deepEqual(retired(g), [], "nothing to move, nothing made");
+});
+
+test("finish: a re-run after the move neither fails nor moves again, including after a crash between the move and the receipt", () => {
+  const f = fixture();
+  writeFileSync(join(f.fleet, "phase0.json"), PHASE0);
+  f.control("fleet-heartbeat", { exit: 1, err: "fleet-heartbeat: cannot write the state\n" });
+  assert.equal(f.run("finish", ["--reason", "wrap up"]).status, 3);
+  const [name] = retired(f);
+  const at = f.receipt().steps["phase0-receipt"].at;
+
+  f.control("fleet-heartbeat", { out: "stopped\n" });
+  const again = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(again.status, 0, again.err + again.stdout);
+  assert.deepEqual(retired(f), [name], "still the one archive");
+  assert.equal(f.receipt().steps["phase0-receipt"].at, at, "the step was skipped, not run again");
+
+  // The crash: the file moved, the receipt never said so.
+  const receipt = f.receipt();
+  receipt.steps["phase0-receipt"] = { status: "pending", at: null, output: "" };
+  receipt.steps["heartbeat-stop"] = { status: "pending", at: null, output: "" };
+  writeFileSync(f.receiptPath, JSON.stringify(receipt));
+  const third = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(third.status, 0, third.err + third.stdout);
+  assert.deepEqual(retired(f), [name], "an absent phase0.json is not moved a second time");
+  assert.equal(f.receipt().steps["phase0-receipt"].status, "ok");
+});
+
+test("finish: an archive name already taken fails the step and leaves phase0.json and every other file where it was", () => {
+  const f = fixture();
+  writeFileSync(join(f.fleet, "phase0.json"), PHASE0);
+  const now = Date.now();
+  // Every second this call can plausibly land on is taken.
+  for (let s = -2; s < 30; s++) writeFileSync(join(f.fleet, `phase0.finished.${new Date(now + s * 1000).toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "")}.json`), "older receipt\n");
+  const taken = retired(f).length;
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 3, r.err + r.stdout);
+  assert.match(r.stdout, /closeout: phase0-receipt: failed\n\s+.*already exists/);
+  assert.equal(readFileSync(join(f.fleet, "phase0.json"), "utf8"), PHASE0);
+  assert.equal(retired(f).length, taken, "no archive was overwritten or added");
+  assert.deepEqual(f.calls("fleet-heartbeat"), [], "--stop is not run after a failed step");
 });
 
 test("an ambient GIT_DIR or GH_REPO naming another repository does not change what any step reads or runs", () => {
