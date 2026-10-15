@@ -87,11 +87,11 @@ resized in place from `task.maxConcurrency` (default 32, `0` unbounded),
 own fan-out runs on its own counter. It counts live members, not tickets. The
 fleet reads and writes it nowhere today.
 
-The guard's own history: over 2026-09-25T18:58:33Z → 2026-10-09, consecutive
-20-PR windows (79 pairs, offset 5) move the "wrong" way **53 %** of the time
-for cycle and **48 %** for throughput with no change at all. The p90 band is
-**×2.23** for cycle and **×0.68** for throughput (as of 2026-10-09; recomputed
-at the cutover, § 8.2).
+The guard's own history: over 2026-09-25T18:58:33Z → 2026-10-09, adjoining
+20-PR window pairs (79 pairs, a pair every 5 PRs) move the "wrong" way
+**53 %** of the time for cycle and **48 %** for throughput with no change at
+all. The p90 band is **×2.23** for cycle and **×0.68** for throughput (as of
+2026-10-09; recomputed at the cutover, § 8.2).
 
 ## Vocabulary
 
@@ -605,33 +605,31 @@ describe a loop that no longer exists. The pre window above is the slot loop's
 first recorded reading.
 
 **Trip rule — a margin from the slot loop's own history, not a direction.** For
-each test the script computes the ratio of consecutive same-size windows
-(window k+1 ÷ window k) across the slot-loop history before the cutover, from
-2026-09-25T18:58:33Z to the merge (20-PR windows, offset 5, § 8.2). A test
-trips when post ÷ pre lands **past the one-sided p90** of those ratios: above
-it for a "must not rise" test (cycle, signals 1 and 2, and signal 4's two
-tests on their rise side), **below the p10** for a "must not fall" test
-(throughput). The band is computed at the cutover from the same history the
-pre window ends.
+each test the script computes the ratio of pairs of adjoining same-size windows
+(the later window ÷ the earlier one) across the slot-loop history before the
+cutover, from 2026-09-25T18:58:33Z to the merge (20-PR windows, a pair every 5
+PRs, § 8.2). A test trips when post ÷ pre lands **past the one-sided p90** of
+those ratios: above it for a "must not rise" test (cycle, signals 1 and 2, and
+signal 4's two tests on their rise side), **below the p10** for a "must not
+fall" test (throughput). The band is computed at the cutover from the same
+history the pre window ends.
 
-- **Why a margin.** With no change at all, consecutive 20-PR windows over that
-  history (79 pairs, offset 5) move the "wrong" way **53 %** of the time for
-  cycle and **48 %** for throughput. ADR 0012's "any signal in the wrong
-  direction" would trip on almost every reading.
+- **Why a margin.** With no change at all, adjoining 20-PR window pairs over
+  that history (79 pairs, a pair every 5 PRs) move the "wrong" way **53 %** of
+  the time for cycle and **48 %** for throughput. ADR 0012's "any signal in
+  the wrong direction" would trip on almost every reading.
 - **False-trip arithmetic.** On today's data (2026-10-09) the band is
   **×2.23** for cycle (trips above) and **×0.68** for throughput (trips
-  below). A one-sided p90 of *disjoint* windows would give about **10 % false
-  trips per test**. The band here comes from windows that overlap (N − K = 15
-  of 20 PRs shared), and their ratios spread less than a pre and a post window
-  that share no PR, so the rate is higher: an iid lognormal null model fitted
-  to the baseline's median 1.38 h and p90 5.23 h gives **24.9 %** false trips
-  for the cycle test with the overlapping band against 10.2 % with a
-  disjoint-pair band (4000 trials; a model figure, not a measurement — the
-  model's band is ×1.29 against the real ×2.23). With all six at that rate and
-  independent, any of the six trips about **82 %** of the time (1 − 0.75⁶);
-  less, since the tests are correlated. A trip means revisiting the owning
-  decision with the measurement in hand, never a rollback, so a false trip
-  costs one look.
+  below). The band comes from disjoint pairs of adjoining windows, the same
+  shape as the pre and post windows, so a one-sided p90 gives about **10 %
+  false trips per test** (an iid lognormal null model fitted to the
+  baseline's median 1.38 h and p90 5.23 h gives 10.2 % for the cycle test;
+  4000 trials; a model figure, not a measurement — the model's band is ×1.29
+  against the real ×2.23). With all six at that rate and independent, any of
+  the six trips up to about **47 %** of the time (1 − 0.9⁶); less, since the
+  tests are correlated, consistent with #2875's 35–47 %. A trip means
+  revisiting the owning decision with the measurement in hand, never a
+  rollback, so a false trip costs one look.
 - **Limit.** At N = 20 the guard catches only harm of roughly 1.5–2× or more.
 
 **Then — what each trip revisits first**, with the measurement in hand:
@@ -678,14 +676,15 @@ node docs/research/in-flight-guard-derive.mjs --merge <ISO> [--cutover <ISO>]
 | `--merge <ISO>` | required. The `mergedAt` of the ticket that changes which PRs get Pulled (T1, § 8.1). Pre window = the `--n` merged PRs created most recently **before** it; PRs created between it and `--cutover` are in neither window. The history ends here. |
 | `--after <ISO>` | start of the slot-loop history, default `2026-09-25T18:58:33Z` (the baseline note's first creation). |
 | `--n <N>` | window size, default 20. |
-| `--offset <K>` | the stride between consecutive history windows, default 5 PRs. |
+| `--offset <K>` | the stride between successive history pairs, default 5 PRs. |
 | `--member-outcomes`, `--sessions` | the signal 1 / 4 and signal 2 inputs (below); the defaults are the paths shown. |
 
 - **Windows over the history.** The history is the merged PRs created in
-  `[--after, --merge)`, ordered by creation. History window k is the PRs at
-  positions `k·K … k·K + N − 1`; window k+1 starts K PRs later, so consecutive
-  windows overlap by N − K. On 2026-10-09's data that is 79 pairs (80 windows
-  over ≈ 415 PRs). The ratio of a test is `f(window k+1) ÷ f(window k)`; the
+  `[--after, --merge)`, ordered by creation. A history pair is the N PRs at
+  positions `s … s + N − 1` (early) and the N at `s + N … s + 2N − 1` (late),
+  for s = 0, K, 2K, … while both fit: disjoint, adjoining windows, the shape
+  of the pre and post windows. On 2026-10-09's data the history holds 431 PRs
+  and 79 pairs. The ratio of a test is `f(late) ÷ f(early)`; the
   band is its **p90** for the "must not rise" tests and its **p10** for the
   "must not fall" one, by the linear-interpolation percentile the baseline
   script's `pct()` uses.
@@ -1067,7 +1066,7 @@ heading; blockers named under `## Blocked by` as a list).
 | T1 | `fleet-tick.mjs`: the In-flight bound — `--in-flight <B>` (default 5) replaces `--implementer-cap`, `--reviewer-cap`, `--max-reviews`; the In-flight count; `HOLD (in-flight <n>/<B>)`; the uncapped reviewer row; refresh at unclaimed < B and none while held; the `blocked` settle outcome | — | `node plugin/scripts/fleet-tick.mjs` reads `--in-flight` through `positive()` (0, `x`, empty refused, exit 2); derives `n = i + p` from the ledger and the open issue-closing PR list by § 2's rules; prints `implementers n/B` with `HOLD (in-flight <n>/<B>)` at n ≥ B (`acts: false`, detail `implementers=<i> prs=<p> unclaimed=… supply=…`) ranked below the main-checkout overlay, `HOLD (draining)`, the tier holds; `PULL` takes `B − n` heads; `reviewers <units>/<B>` dispatches every due fix and review; `HOLD (review side saturated)`, `HOLD (max-reviews …)` and the reviewer `AT CAP` appear nowhere in `plugin/scripts/fleet-tick.mjs`; `--implementer-cap`, `--reviewer-cap`, `--max-reviews` exit 2 as unknown options; `refreshWhy` reads `unclaimed <k> < in-flight bound <B>` and `main()` runs no refresh at n ≥ B; `ledger-grammar.mjs` and `ledger.mjs settle` accept `impl-<N>=blocked` and the tick counts nothing for it; `compute-board.mjs` renders a settled `impl-<N>=blocked` row in IMPLEMENTING with the `blocked` flag; `node --test tests/fleet-tick.test.mjs tests/ledger-grammar.test.mjs tests/ledger-dispatch.test.mjs tests/compute-board.test.mjs` green with § 10's DELETE, REWRITE and ADD lists applied | 1, 2, 3, 4, 5, 7, 10 |
 | T2 | `tier-roles.mjs --check --in-flight <B>`: the semaphore notice | — | `--check` without `--in-flight` exits 2 with a usage error; with a `--max-concurrency` file `8` and `--in-flight 5` stdout carries `tier-roles: notice: task.maxConcurrency is 8, below 2·5+2 = 12 for In-flight bound 5 — omp queues members past it, so a Pulled implementer may sit unstarted; raise it in omp config (the fleet never writes it)` and the exit is 0; `0` and `12` print no notice line; an unreadable value prints `tier-roles: notice: task.maxConcurrency unreadable — <why>; In-flight bound 5 is unchecked against it`; with violations the notice goes to stderr and the exit stays 1; `node --test tests/tier-roles.test.mjs` green | 6, 10 |
 | T3 | Prose cutover: `/run-team [in-flight]` — SKILL.md, README, `docs/components`, and the pins | T1, T2 | `grep -n -E 'implementer-cap\|reviewer-cap\|max-reviews\|implementers\] \[reviewers\]\|default 2 and 6\|2 implementers\|6 reviewers\|1\.95' plugin README.md docs/components` prints nothing; SKILL.md's `argument-hint`, `$ARGUMENTS` paragraph, tick invocation, caps paragraph, `--max-reviews` paragraph, § Queue depth, Defaults paragraph, description, `tier-roles.mjs --check --in-flight <B>` step, failure row and settle-outcomes list read as § 10's Prose table says; `node --test tests/fleet-tick-prose.test.mjs tests/review-path-default.test.mjs` green with the moved pins | 1, 5, 6, 7, 10 |
-| T4 | The guard script `docs/research/in-flight-guard-derive.mjs` | — | `node docs/research/in-flight-guard-derive.mjs --merge <ISO> --cutover <ISO>` prints both 20-PR windows, the six values per window, post ÷ pre, the per-test band (p90 / p10 of consecutive same-size history-window ratios, stride 5, from 2026-09-25T18:58:33Z to the merge) and the six verdicts, with exit 0 / 3 / 4 / 2 as § 8.2 says; `node --test tests/in-flight-guard-derive.test.mjs` green on synthetic windows; not a cutover blocker | 8 |
+| T4 | The guard script `docs/research/in-flight-guard-derive.mjs` | — | `node docs/research/in-flight-guard-derive.mjs --merge <ISO> --cutover <ISO>` prints both 20-PR windows, the six values per window, post ÷ pre, the per-test band (p90 / p10 of the ratios of adjoining, disjoint 20-PR window pairs, a pair every 5 PRs, from 2026-09-25T18:58:33Z to the merge) and the six verdicts, with exit 0 / 3 / 4 / 2 as § 8.2 says; `node --test tests/in-flight-guard-derive.test.mjs` green on synthetic windows; not a cutover blocker | 8 |
 
 ## Not yet specified (for the map)
 

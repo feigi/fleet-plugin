@@ -29,12 +29,11 @@
 //                     the N merged PRs at positions s … s+N-1 of the history and
 //                     the N at s+N … s+2N-1, for s = 0, K, 2K, …: disjoint,
 //                     adjoining windows, the shape of the pre and post
-//                     windows. Successive pairs start K PRs apart. Spec § 8.2
-//                     and ADR 0031 § Guard word the history's windows as
-//                     overlapping (window k+1 starts K PRs after window k);
-//                     this script does not build those. The disjoint pairs are
-//                     what gives the ticket's 79 pairs and its published
-//                     ×2.23 cycle / ×0.68 throughput band.
+//                     windows. Successive pairs start K PRs apart. This is the
+//                     construction spec § 8.2 defines and ADR 0031's Status
+//                     amendment records for § Guard; on 2026-10-09's history
+//                     it gives 79 pairs and the published ×2.23 cycle / ×0.68
+//                     throughput band.
 //   --member-outcomes the signal 1 / 4 input (default docs/metrics/
 //                     member-outcomes.tsv beside this script's repo root).
 //                     Step 0 of every reading: re-scrape it first with
