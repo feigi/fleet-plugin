@@ -1,449 +1,427 @@
 #!/usr/bin/env node
-// Closeout the run: drain claims, release unclaimed tickets, scrape and commit metrics.
+// The end of a run as two commands, each a list of named steps with a receipt.
 //
-//   closeout.mjs begin --reason "<r>"
+//   closeout.mjs begin  --reason "<r>"
 //   closeout.mjs finish --reason "<r>" [--branch <name>]
 //
-// Reached through the Resolver and run from the MAIN checkout. The receipt
-// `.fleet/closeout.json` is resolved through fleet-dir.mjs, so a worktree and
-// the main checkout name one file.
+// Reached through the Resolver and run from the MAIN checkout. The middle of
+// the end of a run is the ordinary loop (the tick's review, fix-applier and
+// merge rows), so the end is two calls around it: `begin` starts the drain,
+// `finish` closes the run once the tick says it is over.
 //
-// `begin` drains the ledger, releases every claim without a PR, and writes
-// the receipt with `begun` status. A re-run skips `ok` steps.
+// `begin` steps:
 //
-// `finish` runs six ordered steps: tick gate, scrape, tier-outcomes check,
-// metrics refresh, commit and PR, then heartbeat stop. Exit codes are 0 for
-// success, 2 for usage error, 3 for a step refusal, and 4 for a pending NEED.
+//   drain     `ledger.mjs drain "<reason>"`. A second drain is answered with the
+//             standing marker at exit 0, so a run already draining is `ok`.
+//   release   every ticket row that carries a live or `bailed` `impl-` member
+//             token and no PR: `release-ticket.sh <N> impl-<N> implementer
+//             --apply`, then `ledger.mjs settle <member>=released` for each of
+//             its live tokens (a `bailed` token is settled already). A claim the
+//             script refuses is printed `NEED hand-release #<N> <blocker>` and
+//             the loop goes on to the next claim; the step is then pending.
+//
+// `finish` steps, in order, because the order is the point:
+//
+//   tick            `fleet-tick.mjs`, with the caps `.fleet/phase0.json` records
+//                   when it names them. Failed unless its last line is
+//                   `ACTION: run over`.
+//   scrape          `member-outcomes.mjs <dir>` for every session directory
+//                   omp keeps for this cwd, each scraper's own yield line as the
+//                   output. A scraper that exits non-zero fails the step: a
+//                   skipped scrape loses the run's member rows for good.
+//   tier-outcomes   `tier-outcomes.mjs check --live`. Its exit 1 is a failed
+//                   step. At exit 0 each `WARNING PR #<n> carries reviewed=` on
+//                   its stderr is a PR the ledger marks reviewed with no row:
+//                   `NEED tier-outcomes append <n>`, and the step is pending.
+//                   The verdicts are the controller's; this script never
+//                   writes one.
+//   metrics         `metrics-refresh.mjs`. Any non-zero exit is a failed step.
+//   commit-and-pr   `git switch -c <branch>` (`--branch`, default
+//                   `chore/run-artifacts-<UTC date>`, suffixed `b`, `c`… while
+//                   that name exists locally or on origin), commit exactly the
+//                   three `docs/metrics/*.tsv` files, push `-u`, `gh pr create
+//                   --label patch` with a body naming the reason and the rows
+//                   each file gained and lost, `git switch main`. The branch, and
+//                   the PR once it exists, are kept in the receipt: a re-run
+//                   after a failed push or PR resumes on that branch and never
+//                   opens a second PR.
+//   heartbeat-stop  `fleet-heartbeat.mjs --stop "<reason>"`, last, because
+//                   every reader takes a recorded stop as the end of the run.
+//
+// THE RECEIPT is `.fleet/closeout.json` (resolved through fleet-dir.mjs, so a
+// worktree and the main checkout name one file), shared by both commands:
+//
+//   { reason, begun, branch, pr, steps: { <name>: { status, at, output } } }
+//
+// `status` is ok, pending or failed; `at` an ISO time; `output` the step's own
+// words. Every step name of both commands is always present: one not yet run
+// is `pending`. `begun` is the time `begin` finished its steps, ok or pending,
+// null until then; `branch` and `pr` belong to the commit-and-pr step. A re-run
+// skips every `ok` step and runs the rest, stopping at the first that is not
+// `ok`, so the steps after it stay `pending`. `ledger.mjs rotate` archives the
+// receipt beside the ledger as `closeout.<UTC stamp>.json`.
+//
+// One `closeout: <step>: <status>` line per step on stdout, its output under
+// it, indented, with the `NEED` lines at the left margin. Exit 0 every step
+// ok; 2 a usage error; 3 a step failed, or the receipt could not be read or
+// written; 4 a `NEED` is pending: dispatch what the line names, then run the
+// same command again.
+//
+// Zero deps: node builtins and sibling scripts only.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { makeDie, defineFlags } from "./arg.mjs";
+import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
+import { CLOSEOUT_RECEIPT, RECEIPT, memberTokens, rowPr } from "./ledger-grammar.mjs";
+import { encodeProjectDir, isOmpSessionDirName } from "./member-record.mjs";
 
 const NAME = "closeout";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
+const MAX_BUFFER = 64 * 1024 * 1024;
+const NETWORK_TIMEOUT_MS = 120_000;
+const METRICS = ["docs/metrics/member-outcomes.tsv", "docs/metrics/ticket-features.tsv", "docs/metrics/tier-outcomes.tsv"];
+const TICK_OVER = "ACTION: run over";
 
 const script = (name) => join(SCRIPTS, name);
-const node = (name, args, opts = {}) =>
-  spawnSync(process.execPath, [script(name), ...args], {
-    encoding: "utf8",
-    stdio: ["pipe", "pipe", "pipe"],
-    ...opts,
-  });
-const sh = (name, args, opts = {}) =>
-  spawnSync("sh", [script(name), ...args], {
-    encoding: "utf8",
-    stdio: ["pipe", "pipe", "pipe"],
-    ...opts,
-  });
 
-// ── receipt ──────────────────────────────────────────────────────────────────
-
-function getFleetDir() {
-  const result = node("fleet-dir.mjs");
-  if (result.status !== 0) {
-    console.error(`fatal: fleet-dir.mjs failed: ${result.stderr}`);
-    process.exit(3);
-  }
-  return result.stdout.trim();
+function how(r) {
+  if (r.error) return r.error.code ?? r.error.message;
+  if (r.signal) return `killed by ${r.signal}`;
+  return `exit ${r.status}`;
 }
 
-function readReceipt(path) {
+const trimmed = (s) => String(s ?? "").trim();
+
+/**
+ * Runs a child to completion from `cwd`. `status` is the exit status, null
+ * when the child never ran or was killed (`how` says which). The environment
+ * is scrubbed of GIT_DIR/GIT_WORK_TREE for every child — git itself, `gh`,
+ * and the sibling scripts — so an ambient one cannot point any step at another
+ * repository.
+ */
+function run(cmd, args, { cwd, env, timeoutMs } = {}) {
+  const r = spawnSync(cmd, args, { cwd, encoding: "utf8", maxBuffer: MAX_BUFFER, env: gitEnv(env), timeout: timeoutMs });
+  return { status: r.error ? null : r.status, stdout: trimmed(r.stdout), stderr: trimmed(r.stderr), how: how(r) };
+}
+
+const node = (name, args, opts) => run(process.execPath, [script(name), ...args], opts);
+const sh = (name, args, opts) => run("sh", [script(name), ...args], opts);
+
+// What a failed child said, or how it ended when it said nothing.
+const detail = (r) => [r.stdout, r.stderr].filter(Boolean).join("\n") || r.how;
+
+const ok = (output = "") => ({ status: "ok", output });
+const pending = (output) => ({ status: "pending", output });
+const failed = (output) => ({ status: "failed", output });
+
+function fatal(message) {
+  process.stderr.write(`${NAME}: ${message}\n`);
+  process.exit(3);
+}
+
+// ── the receipt ──────────────────────────────────────────────────────────────
+
+const blank = () => ({ status: "pending", at: null, output: "" });
+
+function readReceipt(path, stepNames) {
+  let prior = null;
   try {
-    const text = readFileSync(path, "utf8");
-    return JSON.parse(text);
+    prior = JSON.parse(readFileSync(path, "utf8"));
   } catch (e) {
-    if (e.code === "ENOENT") return null;
-    console.error(`fatal: cannot read receipt ${path}: ${e.message}`);
-    process.exit(3);
+    if (e.code !== "ENOENT") fatal(`cannot read receipt ${path}: ${e.message}`);
   }
+  const steps = Object.fromEntries(stepNames.map((n) => [n, { ...blank(), ...prior?.steps?.[n] }]));
+  return { reason: prior?.reason ?? null, begun: prior?.begun ?? null, branch: prior?.branch ?? null, pr: prior?.pr ?? null, steps };
 }
 
 function writeReceipt(path, receipt) {
+  const tmp = `${path}.${process.pid}.tmp`;
   try {
-    const tmp = `${path}.${process.pid}.tmp`;
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(tmp, `${JSON.stringify(receipt, null, 2)}\n`);
     renameSync(tmp, path);
   } catch (e) {
-    console.error(`fatal: cannot write receipt ${path}: ${e.message}`);
-    process.exit(3);
+    fatal(`cannot write receipt ${path}: ${e.message}`);
   }
 }
 
-const timestamp = () => new Date().toISOString();
+// ── begin ────────────────────────────────────────────────────────────────────
 
-// ── steps ────────────────────────────────────────────────────────────────────
-
-function stepDrain(reason) {
-  const result = node("ledger.mjs", ["drain", reason]);
-  if (result.status === 0) {
-    return { status: "ok", output: result.stdout.trim() };
-  }
-  // Check if already drained
-  if (result.stdout.includes("already drained")) {
-    return { status: "ok", output: "already drained" };
-  }
-  return { status: "failed", output: result.stderr.trim() };
+function stepDrain({ cwd, reason }) {
+  const r = node("ledger.mjs", ["drain", reason], { cwd });
+  return r.status === 0 ? ok(r.stdout) : failed(`ledger.mjs drain failed: ${detail(r)}`);
 }
 
-function stepRelease(reason) {
-  // Read ledger to find tickets with impl- but no PR#
-  const ledgerRead = node("ledger.mjs", ["read"]);
-  if (ledgerRead.status !== 0) {
-    return { status: "failed", output: `ledger read failed: ${ledgerRead.stderr.trim()}` };
-  }
-
-  let data;
+// What release-ticket.sh refused for: the blockers of its JSON receipt on
+// stdout, else the first line it printed.
+function blocker(r) {
   try {
-    data = JSON.parse(ledgerRead.stdout);
+    const { blockers } = JSON.parse(r.stdout);
+    if (Array.isArray(blockers) && blockers.length > 0) return blockers.join("; ");
+  } catch {
+    // Not a receipt: a refusal before it could write one, in prose.
+  }
+  return detail(r).split("\n")[0];
+}
+
+function stepRelease({ cwd }) {
+  const read = node("ledger.mjs", ["read"], { cwd });
+  if (read.status !== 0) return failed(`ledger.mjs read failed: ${detail(read)}`);
+  let rows;
+  try {
+    rows = JSON.parse(read.stdout).rows;
   } catch (e) {
-    return { status: "failed", output: `ledger JSON parse failed: ${e.message}` };
+    return failed(`ledger.mjs read: unparseable answer: ${e.message}`);
   }
+  if (!Array.isArray(rows)) return failed("ledger.mjs read: no rows in its answer");
 
-  const needRelease = [];
-  const released = [];
-
-  // Find all rows with impl- but no PR#
-  if (!data.rows) return { status: "ok", output: "no rows to release" };
-
-  for (const row of data.rows) {
-    const parts = row.split(/\s+/);
-    if (parts.length < 1) continue;
-
-    const ticketKey = parts[0]; // Should be #N
-    if (!ticketKey.match(/^#\d+$/)) continue;
-
-    const ticket = ticketKey.slice(1);
-    let implToken = null;
-    let hasReviewedOrPR = false;
-
-    for (let i = 1; i < parts.length; i++) {
-      const part = parts[i];
-      // Look for impl-N token (live, not settled)
-      if (part.match(/^impl-\d+$/) && !part.includes("=")) {
-        implToken = part;
-      }
-      // Check for PR# or reviewed=
-      if (part.includes("PR#") || part.includes("reviewed=")) {
-        hasReviewedOrPR = true;
-      }
+  const lines = [];
+  let needs = 0;
+  const need = (line) => {
+    needs += 1;
+    lines.push(line);
+  };
+  for (const text of rows) {
+    if (rowPr(text) !== null) continue;
+    const members = memberTokens(text).filter((t) => t.family === "impl" && t.error === null && (t.outcome === null || t.outcome === "bailed"));
+    if (members.length === 0) continue;
+    const ticket = members[0].number;
+    const release = sh("release-ticket.sh", [String(ticket), `impl-${ticket}`, "implementer", "--apply"], { cwd });
+    if (release.status !== 0) {
+      need(`NEED hand-release #${ticket} ${blocker(release)}`);
+      continue;
     }
-
-    // If we have impl- but no PR# or reviewed=, try to release
-    if (implToken && !hasReviewedOrPR) {
-      const release = sh("release-ticket.sh", [ticket, implToken, "implementer", "--apply"]);
-      if (release.status === 0) {
-        const settle = node("ledger.mjs", ["settle", `${implToken}=released`]);
-        if (settle.status === 0) {
-          released.push(`${ticket}/${implToken}`);
-        } else {
-          needRelease.push(`#${ticket}: settle failed`);
-        }
-      } else {
-        // Extract the blocker message from release output
-        const output = release.stdout.trim() || release.stderr.trim();
-        const blocker = output.split("\n")[0];
-        console.log(`NEED hand-release #${ticket} ${blocker}`);
-      }
+    lines.push(`released #${ticket}`);
+    for (const t of members.filter((m) => m.outcome === null)) {
+      const settle = node("ledger.mjs", ["settle", `${t.name}=released`], { cwd });
+      if (settle.status !== 0) need(`NEED hand-release #${ticket} released, but ledger.mjs settle ${t.name}=released failed: ${detail(settle)}`);
     }
   }
-
-  if (needRelease.length > 0) {
-    // Return pending if there are any unreleasable
-    return { status: "pending", output: `released: ${released.join(", ")}` };
-  }
-
-  return { status: "ok", output: released.length > 0 ? `released: ${released.join(", ")}` : "no claims released" };
+  if (lines.length === 0) return ok("no claim to release");
+  return (needs > 0 ? pending : ok)(lines.join("\n"));
 }
 
-function stepTick() {
-  const result = node("fleet-tick.mjs");
-  if (result.status !== 0) {
-    return { status: "failed", output: `tick failed: ${result.stderr.trim()}` };
+// ── finish ───────────────────────────────────────────────────────────────────
+
+// The caps `phase0.mjs` recorded, as the tick's own flags; none when there is
+// no receipt or it names none.
+function tickCaps(fleetDir) {
+  let phase0;
+  try {
+    phase0 = JSON.parse(readFileSync(join(fleetDir, RECEIPT), "utf8"));
+  } catch (e) {
+    if (e.code === "ENOENT") return { args: [] };
+    return { error: `cannot read ${join(fleetDir, RECEIPT)}: ${e.message}` };
   }
-
-  const lines = result.stdout.trim().split("\n");
-  const lastLine = lines[lines.length - 1] || "";
-
-  if (!lastLine.includes("ACTION: run over")) {
-    return { status: "failed", output: `tick did not complete: ${lastLine}` };
-  }
-
-  return { status: "ok", output: "tick completed: run over" };
+  const args = [];
+  if (phase0?.caps?.impl != null) args.push("--implementer-cap", String(phase0.caps.impl));
+  if (phase0?.caps?.review != null) args.push("--reviewer-cap", String(phase0.caps.review));
+  return { args };
 }
 
-function stepScrape() {
-  // Scrape member outcomes for this session
-  const result = node("member-record.mjs", ["encodeProjectDir"]);
-  if (result.status !== 0) {
-    return { status: "ok", output: "no scraper output" };
-  }
-  return { status: "ok", output: result.stdout.trim() };
+function stepTick({ cwd, fleetDir }) {
+  const caps = tickCaps(fleetDir);
+  if (caps.error) return failed(caps.error);
+  const r = node("fleet-tick.mjs", caps.args, { cwd });
+  if (r.status !== 0) return failed(`fleet-tick.mjs failed: ${detail(r)}`);
+  const last = r.stdout.split("\n").at(-1);
+  if (!last.startsWith(TICK_OVER)) return failed(`the tick's last line is not \`${TICK_OVER}\`: ${last || "(no output)"}`);
+  return ok(last);
 }
 
-function stepTierOutcomes() {
-  const result = node("tier-outcomes.mjs", ["check", "--live"]);
-  if (result.status === 0) {
-    return { status: "ok", output: result.stdout.trim() };
+function stepScrape({ cwd }) {
+  let root;
+  try {
+    const home = process.env.HOME ?? homedir();
+    root = join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home }));
+  } catch (e) {
+    return failed(`cannot name this cwd's omp session directory: ${e.message}`);
   }
+  let sessions;
+  try {
+    // Directories only: the same directory holds this cwd's own top-level
+    // transcripts as loose files, which are not sessions.
+    sessions = readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && isOmpSessionDirName(e.name)).map((e) => e.name).sort();
+  } catch (e) {
+    if (e.code === "ENOENT") return ok(`no session directory at ${root}`);
+    return failed(`cannot read ${root}: ${e.code ?? e.message}`);
+  }
+  if (sessions.length === 0) return ok(`no session under ${root}`);
+  const lines = [];
+  for (const name of sessions) {
+    const r = node("member-outcomes.mjs", [join(root, name)], { cwd });
+    if (r.status !== 0) return failed([...lines, `member-outcomes.mjs ${name} failed: ${detail(r)}`].join("\n"));
+    lines.push(`${name}: ${r.stderr || r.stdout}`);
+  }
+  return ok(lines.join("\n"));
+}
 
-  // Exit 4 means there are NEED tier-outcomes append lines
-  if (result.status === 4) {
-    const lines = result.stdout.trim().split("\n");
-    for (const line of lines) {
-      if (line.includes("NEED tier-outcomes")) {
-        console.log(line);
-      }
+function stepTierOutcomes({ cwd }) {
+  const r = node("tier-outcomes.mjs", ["check", "--live"], { cwd });
+  if (r.status !== 0) return failed(`tier-outcomes.mjs check --live failed: ${detail(r)}`);
+  const prs = [...new Set([...r.stderr.matchAll(/WARNING PR #(\d+) carries reviewed=/g)].map((m) => m[1]))];
+  if (prs.length > 0) return pending(prs.map((pr) => `NEED tier-outcomes append ${pr}`).join("\n"));
+  return ok(r.stdout);
+}
+
+function stepMetrics({ cwd }) {
+  const r = node("metrics-refresh.mjs", [], { cwd });
+  return r.status === 0 ? ok(r.stdout) : failed(`metrics-refresh.mjs failed: ${detail(r)}`);
+}
+
+// A name for the metrics branch: `--branch` as given, else the dated default,
+// lettered while the name is taken. A probe that fails to answer is no answer
+// at all, never "not taken".
+function pickBranch(git, given) {
+  if (given !== null) return { name: given };
+  const base = `chore/run-artifacts-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}`;
+  for (const suffix of ["", ..."bcdefghijklmnopqrstuvwxyz"]) {
+    const name = base + suffix;
+    const local = git(["show-ref", "--verify", "--quiet", `refs/heads/${name}`]);
+    if (local.status !== 0 && local.status !== 1) return { error: `git show-ref refs/heads/${name} failed: ${detail(local)}` };
+    const remote = git(["ls-remote", "--exit-code", "--heads", "origin", name], NETWORK_TIMEOUT_MS);
+    if (remote.status !== 0 && remote.status !== 2) return { error: `git ls-remote origin ${name} failed: ${detail(remote)}` };
+    if (local.status === 1 && remote.status === 2) return { name };
+  }
+  return { error: `every lettered ${base} name is taken` };
+}
+
+// The rows each metrics file gained and lost on the branch, one TSV line a row.
+function rowCounts(git) {
+  const r = git(["diff", "--numstat", "origin/main...HEAD", "--", ...METRICS]);
+  if (r.status !== 0) return { error: `git diff --numstat failed: ${detail(r)}` };
+  return { lines: r.stdout.split("\n").filter(Boolean).map((l) => l.split("\t")).map(([added, removed, file]) => `- ${file}: +${added} -${removed}`) };
+}
+
+// Everything the step does while the checkout is on the metrics branch; the
+// caller switches back to main whatever this returns.
+function onBranch({ git, cwd, reason, receipt, save }) {
+  const dirty = git(["status", "--porcelain", "--", ...METRICS]);
+  if (dirty.status !== 0) return failed(`git status failed: ${detail(dirty)}`);
+  if (dirty.stdout !== "") {
+    const commit = git(["commit", "-m", `Closeout: ${reason}`, "--", ...METRICS]);
+    if (commit.status !== 0) return failed(`git commit failed: ${detail(commit)}`);
+  }
+  const ahead = git(["rev-list", "--count", "origin/main..HEAD"]);
+  if (ahead.status !== 0) return failed(`git rev-list --count origin/main..HEAD failed: ${detail(ahead)}`);
+  if (ahead.stdout === "0") return failed(`nothing to commit: ${METRICS.join(", ")} are unchanged`);
+
+  const push = git(["push", "-u", "origin", receipt.branch], NETWORK_TIMEOUT_MS);
+  if (push.status !== 0) return failed(`git push failed: ${detail(push)}`);
+
+  if (receipt.pr !== null) return ok(`PR ${receipt.pr} already opened for ${receipt.branch}`);
+  const counts = rowCounts(git);
+  if (counts.error) return failed(counts.error);
+  const body = `Closeout: ${reason}\n\nRows changed:\n${counts.lines.join("\n")}\n`;
+  const pr = run("gh", ["pr", "create", "--head", receipt.branch, "--title", `Closeout: ${reason}`, "--label", "patch", "--body", body], { cwd, env: { GH_REPO: "" }, timeoutMs: NETWORK_TIMEOUT_MS });
+  if (pr.status !== 0) return failed(`gh pr create failed: ${detail(pr)}`);
+  receipt.pr = pr.stdout.split("\n").at(-1);
+  save();
+  return ok(`PR ${receipt.pr} opened on ${receipt.branch}`);
+}
+
+function stepCommitAndPR({ reason, branch, receipt, save }) {
+  const top = run("git", ["rev-parse", "--show-toplevel"], { cwd: process.cwd() });
+  if (top.status !== 0) return failed(`not inside a git work tree: ${detail(top)}`);
+  const cwd = top.stdout;
+  const git = (args, timeoutMs) => run("git", args, { cwd, timeoutMs });
+
+  if (receipt.branch === null) {
+    const picked = pickBranch(git, branch);
+    if (picked.error) return failed(picked.error);
+    const made = git(["switch", "-c", picked.name]);
+    if (made.status !== 0) return failed(`git switch -c ${picked.name} failed: ${detail(made)}`);
+    receipt.branch = picked.name;
+    save();
+  } else {
+    const back = git(["switch", receipt.branch]);
+    if (back.status !== 0) return failed(`git switch ${receipt.branch} failed: ${detail(back)}`);
+  }
+  const result = onBranch({ git, cwd, reason, receipt, save });
+  const main = git(["switch", "main"]);
+  if (main.status !== 0) return failed([result.status === "ok" ? null : result.output, `git switch main failed: ${detail(main)}`].filter(Boolean).join("\n"));
+  return result;
+}
+
+function stepHeartbeatStop({ cwd, reason }) {
+  const r = node("fleet-heartbeat.mjs", ["--stop", reason], { cwd });
+  return r.status === 0 ? ok(r.stdout) : failed(`fleet-heartbeat.mjs --stop failed: ${detail(r)}`);
+}
+
+// ── the steps, in order ──────────────────────────────────────────────────────
+
+const BEGIN = { drain: stepDrain, release: stepRelease };
+const FINISH = {
+  tick: stepTick,
+  scrape: stepScrape,
+  "tier-outcomes": stepTierOutcomes,
+  metrics: stepMetrics,
+  "commit-and-pr": stepCommitAndPR,
+  "heartbeat-stop": stepHeartbeatStop,
+};
+const STEP_NAMES = [...Object.keys(BEGIN), ...Object.keys(FINISH)];
+
+const say = (line) => process.stdout.write(`${line}\n`);
+
+// Runs `steps` in order against the receipt, skipping every `ok` one, and
+// stops at the first that is not: the receipt is written after each step, and
+// the exit status is the one that step earns.
+function runSteps(steps, ctx, receipt, receiptPath) {
+  const save = () => writeReceipt(receiptPath, receipt);
+  for (const [name, step] of Object.entries(steps)) {
+    if (receipt.steps[name].status !== "ok") {
+      const result = step({ ...ctx, receipt, save });
+      receipt.steps[name] = { status: result.status, at: new Date().toISOString(), output: result.output };
+      save();
     }
-    return { status: "pending", output: "tier-outcomes missing rows" };
+    const { status, output } = receipt.steps[name];
+    say(`${NAME}: ${name}: ${status}`);
+    for (const line of output.split("\n").filter(Boolean)) say(line.startsWith("NEED ") ? line : `  ${line}`);
+    if (status === "failed") return 3;
+    if (status === "pending") return 4;
   }
-
-  return { status: "failed", output: result.stderr.trim() };
+  return 0;
 }
-
-function stepMetrics() {
-  const result = node("metrics-refresh.mjs");
-  if (result.status === 0) {
-    return { status: "ok", output: result.stdout.trim() };
-  }
-  if (result.status === 1 || result.status === 2) {
-    return { status: "failed", output: `metrics-refresh failed` };
-  }
-  return { status: "failed", output: result.stderr.trim() };
-}
-
-function stepCommitAndPR(reason, branchNameArg) {
-  // Get main checkout
-  const mainCheckoutResult = spawnSync("git", ["rev-parse", "--show-toplevel"], {
-    encoding: "utf8",
-    stdio: "pipe",
-    env: gitEnv(),
-  });
-  if (mainCheckoutResult.status !== 0) {
-    return { status: "failed", output: "not in git repository" };
-  }
-  const cwd = mainCheckoutResult.stdout.trim();
-
-  // Generate or use provided branch name
-  let branchName = branchNameArg;
-  if (!branchName) {
-    const date = new Date().toISOString().split("T")[0].replace(/-/g, "");
-    branchName = `chore/run-artifacts-${date}`;
-
-    // Check for unique name
-    let suffix = "";
-    while (true) {
-      const fullName = branchName + suffix;
-      const localCheck = spawnSync("git", ["rev-parse", "--verify", fullName], {
-        cwd,
-        stdio: "pipe",
-        env: gitEnv(),
-      });
-      const remoteCheck = spawnSync("git", ["ls-remote", "origin", `refs/heads/${fullName}`], {
-        cwd,
-        stdio: "pipe",
-        env: gitEnv(),
-      });
-
-      if (localCheck.status !== 0 && remoteCheck.stdout.toString().trim() === "") {
-        branchName = fullName;
-        break;
-      }
-
-      suffix = suffix ? String.fromCharCode(suffix.charCodeAt(0) + 1) : "b";
-      if (suffix > "z") {
-        return { status: "failed", output: "could not find unique branch name" };
-      }
-    }
-  }
-
-  // Create branch
-  const switchResult = spawnSync("git", ["switch", "-c", branchName], {
-    cwd,
-    stdio: "pipe",
-    env: gitEnv(),
-  });
-  if (switchResult.status !== 0) {
-    return { status: "failed", output: "git switch failed" };
-  }
-
-  // Commit the three metrics files
-  const commitResult = spawnSync("git", ["commit", "docs/metrics/member-outcomes.tsv", "docs/metrics/ticket-features.tsv", "docs/metrics/tier-outcomes.tsv", "-m", `Closeout: ${reason}`], {
-    cwd,
-    stdio: "pipe",
-    env: gitEnv(),
-  });
-  if (commitResult.status !== 0) {
-    spawnSync("git", ["switch", "main"], { cwd, stdio: "pipe", env: gitEnv() });
-    return { status: "failed", output: "git commit failed" };
-  }
-
-  // Push
-  const pushResult = spawnSync("git", ["push", "-u", "origin", branchName], {
-    cwd,
-    stdio: "pipe",
-    env: gitEnv(),
-  });
-  if (pushResult.status !== 0) {
-    spawnSync("git", ["switch", "main"], { cwd, stdio: "pipe", env: gitEnv() });
-    return { status: "failed", output: "git push failed" };
-  }
-
-  // Create PR
-  const prResult = spawnSync("gh", ["pr", "create", "--label", "patch", "--body", `Closeout: ${reason}`], {
-    cwd,
-    stdio: "pipe",
-  });
-  if (prResult.status !== 0) {
-    spawnSync("git", ["switch", "main"], { cwd, stdio: "pipe", env: gitEnv() });
-    return { status: "failed", output: "gh pr create failed" };
-  }
-
-  // Switch back to main
-  spawnSync("git", ["switch", "main"], { cwd, stdio: "pipe", env: gitEnv() });
-
-  return { status: "ok", output: `PR created on ${branchName}` };
-}
-
-function stepHeartbeatStop(reason) {
-  const result = node("fleet-heartbeat.mjs", ["--stop", reason]);
-  if (result.status === 0) {
-    return { status: "ok", output: result.stdout.trim() };
-  }
-  return { status: "failed", output: result.stderr.trim() };
-}
-
-// ── main ─────────────────────────────────────────────────────────────────────
 
 function main() {
-  const args = process.argv.slice(2);
-  const cmd = args[0];
+  const die = makeDie(NAME);
+  const F = defineFlags(die, { flags: { reason: "value", branch: "value" }, positionals: ["begin", "finish"] });
+  F.sweep();
+  F.stray();
+  const cmd = process.argv[2];
+  if (cmd !== "begin" && cmd !== "finish") die(`usage: ${NAME}.mjs begin --reason <reason> | finish --reason <reason> [--branch <name>]`);
+  const reason = F.arg("reason");
+  if (reason === null) die("--reason is required");
+  const branch = F.arg("branch");
+  if (branch !== null && cmd === "begin") die("--branch belongs to finish");
 
-  if (!cmd) {
-    console.error(`usage: ${NAME}.mjs begin|finish --reason <reason> [options]`);
-    process.exit(2);
+  let fleetDir;
+  try {
+    fleetDir = fleetFile(null);
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
+    die(e.message);
   }
-
-  const reasonIdx = args.indexOf("--reason");
-  if (reasonIdx === -1 || reasonIdx + 1 >= args.length) {
-    console.error(`usage: ${NAME}.mjs ${cmd} --reason <reason> [options]`);
-    process.exit(2);
-  }
-  const reason = args[reasonIdx + 1];
-
-  const receiptPath = join(getFleetDir(), "closeout.json");
+  const receiptPath = join(fleetDir, CLOSEOUT_RECEIPT);
+  const receipt = readReceipt(receiptPath, STEP_NAMES);
+  receipt.reason = reason;
+  const ctx = { cwd: process.cwd(), fleetDir, reason, branch };
 
   if (cmd === "begin") {
-    const receipt = readReceipt(receiptPath) || {
-      reason,
-      begun: null,
-      steps: {
-        drain: { status: "pending", at: null, output: "" },
-        release: { status: "pending", at: null, output: "" },
-      },
-    };
-
-    // drain step
-    if (receipt.steps.drain.status !== "ok") {
-      const step = stepDrain(reason);
-      receipt.steps.drain = { ...step, at: timestamp() };
-      console.log(`closeout: drain: ${step.status}`);
-      if (step.output) console.log(step.output);
-
-      if (step.status === "failed") {
-        writeReceipt(receiptPath, receipt);
-        process.exit(3);
-      }
+    const code = runSteps(BEGIN, ctx, receipt, receiptPath);
+    if (receipt.steps.drain.status === "ok" && receipt.steps.release.status !== "failed") {
+      receipt.begun = new Date().toISOString();
+      writeReceipt(receiptPath, receipt);
     }
-
-    // release step
-    if (receipt.steps.release.status !== "ok") {
-      const step = stepRelease(reason);
-      receipt.steps.release = { ...step, at: timestamp() };
-      console.log(`closeout: release: ${step.status}`);
-      if (step.output) console.log(step.output);
-
-      if (step.status === "failed") {
-        writeReceipt(receiptPath, receipt);
-        process.exit(3);
-      }
-
-      if (step.status === "pending") {
-        receipt.begun = timestamp();
-        writeReceipt(receiptPath, receipt);
-        process.exit(4);
-      }
-    }
-
-    receipt.begun = timestamp();
-    writeReceipt(receiptPath, receipt);
-    process.exit(0);
-  } else if (cmd === "finish") {
-    const branchIdx = args.indexOf("--branch");
-    const branchName = branchIdx !== -1 && branchIdx + 1 < args.length ? args[branchIdx + 1] : null;
-
-    const receipt = readReceipt(receiptPath) || {
-      reason,
-      begun: null,
-      steps: {
-        tick: { status: "pending", at: null, output: "" },
-        scrape: { status: "pending", at: null, output: "" },
-        "tier-outcomes": { status: "pending", at: null, output: "" },
-        metrics: { status: "pending", at: null, output: "" },
-        "commit-and-pr": { status: "pending", at: null, output: "" },
-        "heartbeat-stop": { status: "pending", at: null, output: "" },
-      },
-    };
-
-    const stepNames = ["tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr", "heartbeat-stop"];
-    const stepFuncs = {
-      tick: stepTick,
-      scrape: stepScrape,
-      "tier-outcomes": stepTierOutcomes,
-      metrics: stepMetrics,
-      "commit-and-pr": () => stepCommitAndPR(reason, branchName),
-      "heartbeat-stop": () => stepHeartbeatStop(reason),
-    };
-
-    let failureFound = false;
-
-    for (const stepName of stepNames) {
-      if (receipt.steps[stepName].status === "ok") {
-        console.log(`closeout: ${stepName}: ok`);
-        continue;
-      }
-
-      if (failureFound) {
-        receipt.steps[stepName].status = "pending";
-        console.log(`closeout: ${stepName}: pending`);
-        continue;
-      }
-
-      const step = stepFuncs[stepName]();
-      receipt.steps[stepName] = { ...step, at: timestamp() };
-      console.log(`closeout: ${stepName}: ${step.status}`);
-      if (step.output) console.log(step.output);
-
-      if (step.status === "failed") {
-        failureFound = true;
-        writeReceipt(receiptPath, receipt);
-        process.exit(3);
-      }
-
-      if (step.status === "pending") {
-        writeReceipt(receiptPath, receipt);
-        process.exit(4);
-      }
-    }
-
-    writeReceipt(receiptPath, receipt);
-    process.exit(0);
+    process.exitCode = code;
   } else {
-    console.error(`usage: ${NAME}.mjs begin|finish --reason <reason> [options]`);
-    process.exit(2);
+    process.exitCode = runSteps(FINISH, ctx, receipt, receiptPath);
   }
 }
 
