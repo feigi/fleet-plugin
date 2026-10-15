@@ -1609,6 +1609,19 @@ function runRotate() {
       console.error(`    could not archive ${receipt} -> ${receiptArchive}: ${e.message}`);
     }
   }
+  // Archive closeout.json the same way as phase0.json
+  const closeoutReceipt = join(dirname(file), "closeout.json");
+  const closeoutArchive = existsSync(closeoutReceipt) ? join(dirname(file), `closeout.${stamp}.json`) : null;
+  if (closeoutArchive !== null && existsSync(closeoutArchive)) {
+    console.error(`    closeout archive ${closeoutArchive} already exists, skipping`);
+  } else if (closeoutArchive !== null) {
+    try {
+      renameSync(closeoutReceipt, closeoutArchive);
+      console.error(`    archived ${closeoutReceipt} -> ${closeoutArchive}`);
+    } catch (e) {
+      console.error(`    could not archive ${closeoutReceipt} -> ${closeoutArchive}: ${e.message}`);
+    }
+  }
   // Nothing to carry writes nothing, so the next write starts the skeleton
   // exactly as after any other verdict.
   if (carrying) {
