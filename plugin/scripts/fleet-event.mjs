@@ -87,7 +87,7 @@
 // Zero deps: node builtins and sibling scripts only.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, isDigits, writeAll } from "./arg.mjs";
@@ -431,6 +431,15 @@ function mergeBotReport(ev, member) {
   ev.settle(member);
 }
 
+// `p` with its symlinks resolved, or as written when it does not exist yet.
+function real(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
 // The run name of a review result file at `path` in PR `pr`'s partition of
 // `scratch`, or die naming why it is not one.
 function reviewRun(scratch, pr, path) {
@@ -438,7 +447,7 @@ function reviewRun(scratch, pr, path) {
   const file = resolve(path);
   const runRoot = dirname(file);
   const partition = join(normalize(scratch), `pr${pr}`);
-  if (dirname(runRoot) !== partition) die(`review-result: ${file} is not under PR #${pr}'s partition ${partition}/ — nothing written`);
+  if (real(dirname(runRoot)) !== real(partition)) die(`review-result: ${file} is not under PR #${pr}'s partition ${partition}/ — nothing written`);
   const run = basename(runRoot);
   if (!/^run-[A-Za-z0-9]{8}$/.test(run)) die(`review-result: ${runRoot} is not a review run root (run- and eight characters) — nothing written`);
   return { file, run };
@@ -467,7 +476,7 @@ function reviewResult(ev, pr, path) {
 
 function reviewFailed(ev, pr, launch) {
   const tok = `review=${launch.replace(/^review=/, "")}=failed`;
-  if (!REVIEW.test(tok) || launch.endsWith("=failed")) {
+  if (!REVIEW.test(tok)) {
     die(`review-failed: '${launch}' is not a launch — member:<runner> or wf:<runId>, as the PR's row spells it after review=`);
   }
   let next;

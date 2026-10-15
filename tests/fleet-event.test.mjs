@@ -8,8 +8,9 @@
 // `dispatch-prompt.mjs` and `release-ticket.sh` are stubs that log their call
 // to `order.log` and answer from a control file the case writes, and
 // `ledger.mjs` is a shim: `settle --from-report` is stubbed — it logs, then
-// either refuses as the control file says or settles the outcome the control
-// file names through the real script's bare form — and every other subcommand
+// refuses as the control file says, or prints the control file's own stdout
+// and stderr and exits 0, or settles the outcome the control file names
+// through the real script's bare form — and every other subcommand
 // is the real script's, its writes logged. `gh` is a stub on PATH that keeps
 // each issue's and PR's labels and comments in a state file, so a second run
 // reads what the first one wrote. No network, no omp.
@@ -17,7 +18,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -82,14 +83,14 @@ const SCRIPTS = join(TREE, "plugin", "scripts");
 writeFileSync(join(SCRIPTS, "stub-driver.mjs"), DRIVER);
 // Imported by other scripts for their exports (the ledger and this script
 // take the tick's), so the real module stays importable behind the stub.
-for (const n of ["fleet-tick", "dispositions-check"]) {
-  cpSync(join(SCRIPTS, `${n}.mjs`), join(SCRIPTS, `${n}-real.mjs`));
-  writeFileSync(join(SCRIPTS, `${n}.mjs`), `export * from "./${n}-real.mjs";
+cpSync(join(SCRIPTS, "fleet-tick.mjs"), join(SCRIPTS, "fleet-tick-real.mjs"));
+writeFileSync(join(SCRIPTS, "fleet-tick.mjs"), `export * from "./fleet-tick-real.mjs";
 import { drive } from "./stub-driver.mjs";
 import { isCLI } from "./is-cli.mjs";
-if (isCLI(import.meta.url)) drive(${JSON.stringify(n)}, process.argv.slice(2));
+if (isCLI(import.meta.url)) drive("fleet-tick", process.argv.slice(2));
 `);
-}
+// dispositions-check.mjs is only ever run, never imported, by the scripts.
+writeFileSync(join(SCRIPTS, "dispositions-check.mjs"), `import { drive } from "./stub-driver.mjs";\ndrive("dispositions-check", process.argv.slice(2));\n`);
 // dispatch-prompt.mjs runs on import, so nothing imports it: a plain stub.
 writeFileSync(join(SCRIPTS, "dispatch-prompt.mjs"), `import { drive } from "./stub-driver.mjs";\ndrive("dispatch-prompt", process.argv.slice(2));\n`);
 writeFileSync(join(SCRIPTS, "release-ticket.sh"), `#!/bin/sh\nexec node "$(dirname "$0")/stub-driver.mjs" release-ticket "$@"\n`);
@@ -107,6 +108,11 @@ if (argv[0] === "settle" && argv.includes("--from-report")) {
     // No control file: every settle is refused below.
   }
   const spec = c[argv[1]] ?? { exit: 2, err: "no settle control for " + argv[1] + "\\n" };
+  if (spec.raw) {
+    process.stdout.write(spec.out ?? "");
+    process.stderr.write(spec.err ?? "");
+    process.exit(0);
+  }
   if (spec.exit) {
     process.stderr.write(spec.err ?? "");
     process.exit(spec.exit);
@@ -349,6 +355,55 @@ test("the tick's own exit is the event's when every write landed", () => {
   assert.match(r.err, /fleet-tick: gh pr list failed/);
 });
 
+for (const [why, setup] of [
+  ["no report on disk", () => {}],
+  ["an unreadable report", (f) => writeFileSync(join(f.scratch, "reports", "impl-412.json"), "{not json")],
+  ["a report that names no bail cause", (f) => f.report(implReport("impl-412"))],
+]) {
+  test(`impl-report on a bail with ${why} prints a NEED to relabel by hand, touches no issue, releases nothing, and still ticks`, () => {
+    const f = fixture({ rows: ["#412 impl-412"] });
+    setup(f);
+    f.control("settle", { "impl-412": { outcome: "bailed" } });
+    const r = f.run(["impl-report", "impl-412"]);
+    assert.equal(r.status, 4, r.err + r.stdout);
+    assert.match(r.stdout, /^NEED relabel #412 — impl-412's report .*impl-412\.json is (absent|invalid|missing a bailCause): relabel by its cause by hand$/m);
+    assert.ok(!r.order.some((l) => l.startsWith("gh ") || l.startsWith("release-ticket")), r.order.join("\n"));
+    assert.equal(r.order.at(-1), TICK);
+  });
+}
+
+for (const stale of ["in-progress", "ready-for-agent"]) {
+  test(`impl-report still edits an issue that already holds the target label beside a stale ${stale}`, () => {
+    const f = fixture({ rows: ["#412 impl-412"] });
+    f.setGh({ issue: { 412: { labels: ["ready-for-human", stale], comments: [] } }, pr: {} });
+    f.report(bail("impl-412", "fork", "a or b"));
+    f.control("settle", { "impl-412": { outcome: "bailed" } });
+    f.control("dispatch-prompt", { out: "comment\n" });
+    const r = f.run(["impl-report", "impl-412"]);
+    assert.equal(r.status, 0, r.err + r.stdout);
+    assert.ok(r.order.includes("gh issue edit 412"), r.order.join("\n"));
+    assert.deepEqual(f.gh().issue[412].labels, ["ready-for-human"]);
+  });
+}
+
+test("a settle that exits 0 with no receipt on stdout is refused with exit 2, naming what it printed, and the tick still runs", () => {
+  const f = fixture({ rows: ["#412 impl-412"] });
+  f.control("settle", { "impl-412": { raw: true, out: "garbage\n" } });
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 2, r.err + r.stdout);
+  assert.match(r.err, /^fleet-event: settle impl-412 exited 0 with no receipt on stdout: garbage$/m);
+  assert.equal(r.order.at(-1), TICK);
+});
+
+test("a settle's own stderr on success is passed through", () => {
+  const f = fixture({ rows: ["#412 impl-412"] });
+  f.control("settle", { "impl-412": { raw: true, out: JSON.stringify({ outcome: "PR#88" }), err: "ledger: warning: a note\n" } });
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.match(r.err, /^ledger: warning: a note$/m);
+  assert.match(eventLine(r), /settled impl-412=PR#88/);
+});
+
 // ── caps ─────────────────────────────────────────────────────────────────────
 
 test("the caps are each flag as given, else the receipt's, else none: the tick's own default", () => {
@@ -488,6 +543,20 @@ test("finisher-report posts no escalation for a first finisher, nor for a repair
   }
 });
 
+test("finisher-report's escalation quotes the latest earlier finisher's read-back, not the first", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88 · finisher-pr-88=labelled · finisher-pr-88-b=labelled · finisher-pr-88-c"] });
+  f.report(finisherReport("finisher-pr-88", { labelsReadBack: ["ready-to-merge", "patch"] }));
+  f.report(finisherReport("finisher-pr-88-b", { labelsReadBack: ["ready-to-merge", "minor"] }));
+  f.report(finisherReport("finisher-pr-88-c", { labelsReadBack: ["patch"] }));
+  f.control("settle", { "finisher-pr-88-c": { exit: 3, err: "ledger: failed: labelsReadBack carries ready-to-merge\n" } });
+  const r = f.run(["finisher-report", "finisher-pr-88-c"]);
+  assert.equal(r.status, 3, r.err + r.stdout);
+  const [comment] = f.gh().pr[88].comments;
+  assert.match(comment, /finisher-pr-88-c read back: patch$/m);
+  assert.match(comment, /finisher-pr-88-b read back: ready-to-merge, minor$/m);
+  assert.doesNotMatch(comment, /finisher-pr-88 read back/);
+});
+
 // ── merge-bot-report ─────────────────────────────────────────────────────────
 
 test("merge-bot-report writes a held-behind token onto each held PR's row, then settles, then ticks; a second run only ticks", () => {
@@ -564,6 +633,21 @@ test("review-result passes the ledger's own refusal through, and still ticks", (
   assert.match(r.err, /answers no open launch/);
   assert.equal(r.order.at(-1), TICK);
 });
+
+for (const [why, receiptIsLink] of [["the receipt names the symlink and the path the real directory", true], ["the receipt names the real directory and the path the symlink", false]]) {
+  test(`review-result accepts a result file inside the PR's partition when ${why}`, () => {
+    const f = fixture({ rows: [REVIEW_ROW] });
+    const file = reviewFile(f);
+    const link = join(f.dir, "scratch-link");
+    symlinkSync(f.scratch, link);
+    if (receiptIsLink) writeFileSync(join(f.fleet, "phase0.json"), JSON.stringify({ run: null, session: "", steps: {}, scratch: link, caps: { impl: 3, review: 5 } }));
+    const path = receiptIsLink ? file : join(link, "pr88", RUN, "review.json");
+    const r = f.run(["review-result", "88", path]);
+    assert.equal(r.status, 0, r.err + r.stdout);
+    assert.deepEqual(r.order, [`ledger review 88 ${REVIEWED}`, TICK]);
+    assert.deepEqual(f.rows(), [`${REVIEW_ROW} · ${REVIEWED}`]);
+  });
+}
 
 // ── review-failed ────────────────────────────────────────────────────────────
 
