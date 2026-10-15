@@ -3209,40 +3209,34 @@ correctly halted. Note what that costs to detect: two reads of the same worktree
 a minute apart showed *different* mutants, so a member's report and any single
 `git status` are each valid only at their instant. Its duties, in this order:
 
-1. **Audit the worktree** — run `worktree-audit.sh` (it takes no argument; it
-   audits every worktree in one pass, so find this worktree's row in its
-   output). Match the row by the resolved form of the worktree path you were
-   dispatched with — `realpath <abs-path>`, or `cd <abs-path> && pwd -P` —
-   never by that path as written: the row's `worktree` field is the physical
-   path `git worktree list` reports, so a spelling reached through a symlink
-   (macOS's `/tmp` and `/var/folders` are symlinks too) matches no row on a
-   healthy worktree. Two checks, each with the instrument that can answer it.
-   **Dirty:** the row's `dirty` field, or `git status --porcelain -unormal`
-   inside the worktree itself — the explicit mode, never bare `--porcelain`, or
-   `status.showUntrackedFiles = no` reads a dirty worktree as clean. The
-   row is the better read: in a worktree whose `.git` linkage is missing,
-   `git status` answers for the enclosing repo at rc 0, where the audit reports
-   the worktree unreadable. **Diverged:** the worktree's `HEAD` against your
-   dispatch pin — the cause block's head-equality check below. Neither
-   instrument above answers it: `git status --porcelain` reports no commits,
-   and the row's `ahead` is counted against `origin/main`, which a healthy
-   worktree on an open, unmerged PR is ahead of too, so it cannot answer this.
-   Three row shapes halt too, each named in the report with the script's
-   stderr line quoted where it prints one: `readable:false` with `null` counts
-   (`UNREADABLE: <wt> (<cause>)`) is *worktree unreadable*, `readable:false`
-   with zero counts (`MISSING on disk: <wt>`) is *worktree missing*, and no
-   row for this worktree at all is *worktree absent*. `git status` is no
-   substitute for the audit here — it answers the dirty check only, and a
-   finisher that cannot see the tree it labels cannot vouch for it. Dirty,
-   diverged, unreadable, missing or absent halts the finisher *here*, before
-   the label: it reports what it found and labels nothing. A finisher that
+1. **Audit the worktree** by running one script, `finisher-audit.mjs` — the row
+   lookup, the dirty check, the head-equality check and the cause derivation
+   are one command, because each of them alone reads like the whole duty. Its
+   exit code is the verdict of this duty:
+   `~/.fleet/bin/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`,
+   the path the one you were dispatched with, however it was spelled, and the
+   pin the full SHA. It runs `worktree-audit.sh` itself and finds this
+   worktree's row by its `realpath`, so a spelling reached through a symlink
+   still finds a healthy worktree's row; it reads dirty from the row and from
+   `git status --porcelain -unormal`; it compares the worktree's `HEAD` to your
+   dispatch pin; and when the head differs from the pin it derives the cause
+   from the reflog. It prints one JSON verdict,
+   `{worktree, realpath, pin, head, cause, evidence}`. Exit 0, `cause` null, is
+   the only result that means the worktree is clean at your pin. Exit 1 means
+   `cause` names why not — `live-editor`, `rebase`, `past-pin`, `unreadable`,
+   `missing`, `absent` or `other` — and exit 2 means the script could not
+   look. Every non-zero exit halts the finisher *here*, before the label: it
+   reports the verdict as printed and labels nothing, and an exit 2 is cause
+   `other` with the line the script printed on stderr as its evidence. A
+   finisher that cannot see the tree it labels cannot vouch for it, so none of
+   the script's steps is run by hand to get past a halt. A finisher that
    verifies the dirt is harmless and labels anyway has substituted the rule's
-   purpose for the rule, and you find out at merge time. **Give it the cause block below,
-   verbatim** — a bare SHA mismatch names no cause, and the halt report needs
-   one. **Give it `<testCmd>` too** — the same string you passed the workflow
-   and the fix-applier — because duty 2's mutation gate runs it and nothing
-   else hands the finisher one; substituted with nothing it leaves that gate
-   no command at all.
+   purpose for the rule, and you find out at merge time. **Give it the cause
+   block below, verbatim** — it holds the script call and what each exit
+   means, and a bare SHA mismatch names no cause. **Give it `<testCmd>` too** —
+   the same string you passed the workflow and the fix-applier — because duty
+   2's mutation gate runs it and nothing else hands the finisher one;
+   substituted with nothing it leaves that gate no command at all.
 2. **Confirm every deferral — and every claimed APPLY — has a home that outlives
    the merge.** The test is a durable home, not a tracker number: a tracker
    issue and a committed in-tree comment both qualify, and for a finding whose
@@ -3353,18 +3347,19 @@ a minute apart showed *different* mutants, so a member's report and any single
    `filed` failed twice — and anything
    it halted on — cause and evidence, below, never a bare "head moved". The
    cause is one word of the ledger's `halted:<cause>` vocabulary:
-   `live-editor`, `rebase` or `past-pin` from the cause block below,
-   `unreadable`, `missing` or `absent` from duty 1's row shapes, and `other`
-   for every other halt — the block's *anything else*, and a halt at duty 2,
-   duty 3, the instrument re-check or the CI gate. A `rebase` halt's report
-   carries the output of `git cherry <pin> HEAD origin/main`, run in the
-   worktree.
+   `live-editor`, `rebase`, `past-pin`, `unreadable`, `missing` or `absent` as
+   duty 1's verdict names it, and `other` for every other halt — that
+   verdict's own `other`, and a halt at duty 2, duty 3, the instrument
+   re-check or the CI gate. A duty 1 halt's report carries the verdict as
+   printed, the JSON line, so a `rebase` halt's report carries the output of
+   `git cherry <pin> HEAD origin/main` that its `evidence` holds.
 
 **Give the finisher the instrument re-check verbatim too.** Duty 1 and duty 2
-each run a script the digest covers — `worktree-audit.sh` and `ledger.mjs`,
-both under `plugin/scripts/` — and the label at duty 3 rests on what they
-returned. The rule is stated once, at the top of this file, which no finisher
-is dispatched to read, so it reaches one through this block or not at all:
+each run a script the digest covers — `finisher-audit.mjs` (which runs
+`worktree-audit.sh`) and `ledger.mjs`, both under `plugin/scripts/` — and the
+label at duty 3 rests on what they returned. The rule is stated once, at the
+top of this file, which no finisher is dispatched to read, so it reaches one
+through this block or not at all:
 
 > **Re-check the instrument set before you act on what duty 1 or duty 2 read,
 > and again before you add the label.**
@@ -3495,61 +3490,29 @@ guard — but its refusal costs a pass and leaves the label lying, which is your
 to clear either way, the same way: `label-off=` first, then the removal.
 
 A halt at step 1 reads identical from a bare SHA mismatch whatever caused it,
-and the causes below are the ones seen so far, not a closed list. Give the
-finisher this verbatim, so it derives the cause itself instead of asking anyone:
+and the causes `finisher-audit.mjs` names are the ones seen so far, not a
+closed list. Give the finisher this verbatim, so it gets the cause from one
+script instead of asking anyone:
 
-> Worktree differs from your pin, or from what you last read. **Check
-> head-equality first: `worktree HEAD == the SHA you were dispatched against` on
-> a clean tree settles it.** Against your dispatch pin, never against
-> `PR headRefOid`: a member that kept working and pushed after the pin matches
-> the branch tip on a clean tree, so a headRefOid comparison reports "settled"
-> over commits no reviewer read — the exact divergence this halt exists to
-> catch. `headRefOid` is a second, separate read (pushed vs unpushed), never the
-> equality the halt turns on. A rebase entry sitting at or behind the pin is
-> that head's provenance — the implementer's own pre-push replay — not
-> divergence from it, and needs no adjudication at all. Three finishers in one
-> run adjudicated a reflog this one check had already answered. Only when the
-> head differs from your pin, work out what happened. Each cause below is cheap
-> and self-checkable, and `anything else` is a cause too, not a gap:
+> **Duty 1 is one script, and its exit code is your verdict.**
+> `~/.fleet/bin/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`
+> (the path you were dispatched with, and the full SHA). It finds your
+> worktree's row, reads whether the tree is dirty, compares the worktree's
+> `HEAD` to your pin, and when the head differs derives the cause from the
+> reflog. Exit 0, with `cause` null, is the only code that means the worktree is
+> clean at your pin. Exit 1 means `cause` is non-null: you are halted, and
+> `cause` is the word you name — `live-editor`, `rebase`, `past-pin`,
+> `unreadable`, `missing`, `absent` or `other`, and `other` is a cause too, not
+> a gap. Exit 2 means the script could not look: you are halted with cause
+> `other`, with the line it printed on stderr as the evidence.
 >
-> - **Live editor.** `git status --porcelain -unormal` is dirty. Sample
->   `git diff --stat` twice, a minute apart — diffstat growing means someone
->   is still writing. Halt, name `live-editor`, report both samples.
-> - **Rebase.** `git status --porcelain -unormal` is clean, head still differs
->   from your pin. `git reflog` in the worktree: a `reset`/rebase entry near
->   the move, not a plain `commit`, means the branch replayed onto a new
->   base — its own commits on a new parent, content-identical only on a
->   conflict-free replay.
->   Halt, name `rebase`, report the reflog line and the output of
->   `git cherry <pin> HEAD origin/main`, run in the worktree.
-> - **Work past the pin.** `git status --porcelain -unormal` is clean, head
->   still differs from your pin, and `git reflog` in the worktree reads a plain
->   `commit` at the move — no `reset`/rebase entry there, any of those sitting
->   at or behind the pin as provenance. A member kept working and committed
->   after you were dispatched. Measured 2026-08-28 on one PR, where the finisher
->   matched neither cause above and halted on its own judgement.
->   Halt, name `past-pin`, and report **the commit, and whether it
->   is pushed, unpushed, or unknown**: `git log -1 --format='%h %s'` names it,
->   and `git ls-remote origin <branch>` answers the rest — a non-zero exit or
->   any other failed read is **unknown**, never folded into "unpushed": the
->   same rule `release-ticket.sh`'s own `ls-remote` names ("a failure here is
->   an unknown answer, never a 'no'") and `reaping.md`'s remote check shares
->   ("its failure is an unknown answer, never a 'not pushed'"). Only a
->   successful read settles pushed vs not: equal to that commit means pushed,
->   and a fresh finisher can audit it; a successful read that comes back
->   without it means the commit exists only in that worktree, where no
->   reviewer can reach it. Ask the remote, not the PR object, whose head lags
->   a ref move — the same field `run-merge-bot.md` refuses to poll, for that
->   reason. The controller's next move differs between pushed, unpushed, and
->   unknown, so a report naming only two of the three is not a report of this
->   cause.
-> - **Anything else.** Matching none of the above is not a licence to report
->   the mismatch as unexplained — that report is the one this block exists to
->   make unnecessary, and it is where labelling over a moved head starts
->   looking reasonable. Halt, name `other`, and name what you did find: both
->   `git status --porcelain -unormal` samples, the `git reflog` line at the
->   move, and both SHAs. A cause nobody has named yet is still a cause you
->   observed, and your report is what gets it named.
+> The pin is the SHA you were dispatched against, never `PR headRefOid`: a
+> member that kept working and pushed after the pin matches the branch tip on a
+> clean tree, so a headRefOid comparison reports "settled" over commits no
+> reviewer read — the exact divergence this halt exists to catch. You do not
+> run any of the script's steps by hand to get past a halt or to second-guess
+> it. Put the verdict, the JSON line it printed, in your report as printed: its
+> `evidence` is what the controller resolves the halt from.
 >
 > Every cause halts, always — named or not, you never verify the dirt is
 > harmless and label over it, a rebase is not a fast-forward you get to accept,

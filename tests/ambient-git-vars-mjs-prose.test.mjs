@@ -262,6 +262,13 @@ const COVERED_MJS = {
   // GIT_WORK_TREE naming another repository does not change what fit and
   // --check read".
   "ticket-router.mjs": 1,
+  // ONE scrubbed env, built once and handed to every child — the `git -C
+  // <worktree>` status, diff, rev-parse, reflog, cherry, log and ls-remote
+  // reads and the `worktree-audit.sh` child. An ambient GIT_DIR would answer
+  // every one of them for another repository, so the verdict would name that
+  // repository's head against the pin. Measured in finisher-audit.test.mjs,
+  // "an inherited GIT_DIR cannot retarget the head read".
+  "finisher-audit.mjs": 1,
 };
 
 // The exemption list #1599's second design question answers with — two names

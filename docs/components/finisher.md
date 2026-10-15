@@ -18,11 +18,13 @@ durable, and applies the label the merge bot waits on.
    existing head, with no new CI run. With `verdict: "no-ci"`, it
    dispatches off the reviewer's final verdict instead, gated on
    `--declare-no-ci`.
-2. **Audit the worktree** via
-   [`worktree-audit.sh`](../../plugin/scripts/worktree-audit.sh) for
-   dirty, unreadable, missing, or absent state, and check the
-   worktree's `HEAD` against the dispatch pin for divergence — any of
-   the five halts before the label.
+2. **Audit the worktree** by running one script,
+   [`finisher-audit.mjs`](../../plugin/scripts/finisher-audit.mjs), which
+   finds the worktree's row in
+   [`worktree-audit.sh`](../../plugin/scripts/worktree-audit.sh)'s output,
+   checks it for dirty, unreadable, missing, or absent state, compares the
+   worktree's `HEAD` against the dispatch pin, and names the cause of any
+   divergence — a non-null cause halts before the label.
 3. **Confirm durable homes.** Every deferral and claimed apply needs a
    tracker issue or in-tree comment (via `ledger.mjs check`, filing what
    isn't found), and every "applied" claim is re-verified against `git
