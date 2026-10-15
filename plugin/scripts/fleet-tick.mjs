@@ -98,9 +98,10 @@
 //             `## Dispatched` entry, no `## Retired` line — prints
 //             `UNRECORDED <stem>`; a live member token first seen more than
 //             `--no-transcript-after` minutes ago with no file prints
-//             `NO-TRANSCRIPT <member>`. A directory not there yet holds no
-//             transcript; one that cannot be listed skips the check with one
-//             stderr line. Advice, like CHECK-LIVENESS.
+//             `NO-TRANSCRIPT <member>`. The receipt's directory not there yet
+//             holds no transcript; a `--session` one that is not there, like
+//             one that cannot be listed, skips the check with one stderr line.
+//             Advice, like CHECK-LIVENESS.
 //
 // The pure half below is `reconcile()` over the counts `deriveRun()` reads off
 // the ledger; main() does the I/O. Split so the guard table and the reading are
@@ -1149,8 +1150,8 @@ export function reportLines({ reporters, reports, now, reportsFrom = null }) {
 }
 
 // The stems of the `<stem>.jsonl` names in a session directory's listing,
-// once each, sorted: the listing's own order is the filesystem's.
-export const transcriptStems = (names) => [...new Set(names.filter((n) => n.endsWith(".jsonl")).map((n) => n.slice(0, -".jsonl".length)))].sort();
+// sorted: the listing's own order is the filesystem's.
+export const transcriptStems = (names) => names.filter((n) => n.endsWith(".jsonl")).map((n) => n.slice(0, -".jsonl".length)).sort();
 
 // The UNRECORDED lines: one per stem in `stems` that is a member name
 // (parseMember's, any family, retry letters included) and that `recorded`
@@ -1375,7 +1376,7 @@ function options() {
     implCap: positive("implementer-cap"), reviewerCap,
     maxReviews: values["max-reviews"] === undefined ? reviewerCap : positive("max-reviews"),
     fold: values["fold-unchanged"], apply: values.apply, state: values.state || statePath(NAME), scratch: values.scratch,
-    session: values.session, noTranscriptAfter: positive("no-transcript-after"),
+    session: values.session || null, noTranscriptAfter: positive("no-transcript-after"),
     liveness: Object.fromEntries(Object.entries(LIVENESS_FLAGS).map(([family, flag]) => [family, positive(flag)])),
   };
 }
@@ -1785,14 +1786,15 @@ function readReports(scratch, reporters) {
 }
 
 // The transcript stems in `session`, off one readdir: no file in it is read.
-// A directory that is not there yet holds no transcript, so it lists none.
-// One that cannot be listed is null and one stderr line — read as empty, it
-// would name every live member NO-TRANSCRIPT.
-function listTranscripts(session) {
+// The receipt's directory not being there yet holds no transcript, so it lists
+// none; a `--session` one that is not there is a path somebody typed, and is
+// no such case. One that cannot be listed is null and one stderr line — read
+// as empty, it would name every live member NO-TRANSCRIPT.
+function listTranscripts(session, { missingIsEmpty }) {
   try {
     return transcriptStems(readdirSync(session));
   } catch (e) {
-    if (e.code === "ENOENT") return [];
+    if (e.code === "ENOENT" && missingIsEmpty) return [];
     console.error(`${NAME}: transcripts not checked — cannot list ${session} (${e.code ?? e.message})`);
     return null;
   }
@@ -1832,6 +1834,24 @@ function main() {
       : {}));
   }
 
+  // This run's phase 0, off its receipt: unfinished holds the same rows the
+  // main checkout does, and never refuses the tick either. Judged against
+  // the controller record this tick started from, and against whether that
+  // record's process is still there: a finished receipt of the run before
+  // carries the same `at` until this run's rotation writes the next.
+  const receipt = readRunReceipt();
+  const phase0 = phase0Gate(receipt.read, {
+    path: receipt.path, controllerAt: controller?.at, controller: controllerState(controller),
+  });
+  // The session directory's listing, ahead of every ledger read: a dispatch is
+  // written to the ledger before its `task` call makes the transcript, so a
+  // stem listed here is on whatever ledger is read after. Listed later, a
+  // dispatch landing in between would print UNRECORDED for a token the ledger
+  // holds. This run's receipt's `session`, else --session, else no check.
+  const session = phase0.session ?? sessionFlag;
+  if (session === null) console.error(`${NAME}: transcripts not checked — no session in this run's phase-0 receipt and no --session`);
+  const stems = session === null ? null : listTranscripts(session, { missingIsEmpty: phase0.session !== null });
+
   // Every read happens before anything prints: a partial tick is worse than no
   // tick, because half a reconcile still reads like a reconcile. The APPLIED
   // lines are the exception, printed as each duty runs: they say what was
@@ -1844,15 +1864,6 @@ function main() {
   // every answer but `clean` is a hold on the dispatching rows plus one line
   // saying why, so the rest of the run keeps reporting.
   const mainCheckout = checkMainCheckout();
-  // This run's phase 0, off its receipt: unfinished holds the same rows the
-  // main checkout does, and never refuses the tick either. Judged against
-  // the controller record this tick started from, and against whether that
-  // record's process is still there: a finished receipt of the run before
-  // carries the same `at` until this run's rotation writes the next.
-  const receipt = readRunReceipt();
-  const phase0 = phase0Gate(receipt.read, {
-    path: receipt.path, controllerAt: controller?.at, controller: controllerState(controller),
-  });
 
   if (apply) {
     // Reap and reclaim after every merge pass settled `done` since the last
@@ -1917,11 +1928,6 @@ function main() {
   const scratch = reportsScratch(receipt, scratchFlag);
   if (scratch === null) console.error(`${NAME}: report files not checked — no scratch in the phase-0 receipt and no --scratch`);
   const reports = scratch === null ? new Map() : readReports(scratch.root, run.reporters);
-  // The session directory's listing, read before the state file for the same
-  // reason: this run's receipt's `session`, else --session, else no check.
-  const session = phase0.session ?? (sessionFlag === "" ? null : sessionFlag);
-  if (session === null) console.error(`${NAME}: transcripts not checked — no session in this run's phase-0 receipt and no --session`);
-  const stems = session === null ? null : listTranscripts(session);
   // Re-read rather than reusing priorState: this must be the freshest
   // snapshot, or this tick reverts whatever the heartbeat wrote while the
   // reads above were in flight. Read before the lines are built because the
@@ -1952,13 +1958,14 @@ function main() {
   // last act, and only the controller can write it.
   const over = run.draining !== null && prs.length === 0 && run.implLive === 0;
   if (over) rowLines.push(RUN_OVER);
-  const lines = [...above, ...transcribed.map((t) => t.line), ...reported.map((r) => r.line), ...rowLines];
+  const advice = [...transcribed, ...reported];
+  const lines = [...above, ...advice.map((a) => a.line), ...rowLines];
 
   // The back-off streak and the fold digest, written on EVERY tick: an edge
   // tick that dispatched is the clearest possible "there is work here". Digest,
   // not the lines themselves, so the file stays readable. A report or
   // NO-TRANSCRIPT line goes in without its age.
-  const digest = createHash("sha256").update([...above, ...transcribed.map((t) => t.key), ...reported.map((r) => r.key), ...rowLines].join("\n")).digest("hex");
+  const digest = createHash("sha256").update([...above, ...advice.map((a) => a.key), ...rowLines].join("\n")).digest("hex");
   const acts = actionable(rows) || over;
   // `seen` is pruned to the live set on the same write; an empty one removes
   // the key. A file that was degraded at this read is left byte-identical, so

@@ -1656,7 +1656,7 @@ depth** guard table applied in code. Act on each line as it reads:
   rows — the session directory holds a `<stem>.jsonl` whose stem is a member
   name no row token, `## Dispatched` entry or `## Retired` line names: a
   dispatch whose ledger write was forgotten. Record it with `ledger.mjs
-  dispatch` or `ledger.mjs review`, or confirm it is a stranger's member.
+  dispatch`, or confirm it is a stranger's member.
   Advice, like `CHECK-LIVENESS`: it resets no `quiet`, changes no row and
   frees no slot, it repeats every tick while it holds, and the folded line
   names it (`…; UNRECORDED <stem> persists — …`).

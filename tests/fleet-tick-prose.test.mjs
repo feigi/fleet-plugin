@@ -367,7 +367,7 @@ test("the ask-by-name paragraph reads a missing message off the tick's SETTLE li
 // list item so a sibling row's words cannot satisfy it.
 test("the UNRECORDED tick row names its remedy: record the dispatch on the ledger, or confirm it is a stranger's member", () => {
   const row = RUN_TEAM.bullet("- `UNRECORDED <stem> (transcript exists, no ledger token)`", "- `NO-TRANSCRIPT <member>", "run-team UNRECORDED row").text;
-  assert.match(row, Pin.phrase("Record it with `ledger.mjs dispatch` or `ledger.mjs review`, or confirm it is a stranger's member."));
+  assert.match(row, Pin.phrase("Record it with `ledger.mjs dispatch`, or confirm it is a stranger's member."));
   assert.match(row, Pin.phrase("it resets no `quiet`, changes no row and frees no slot"));
   assert.match(row, Pin.phrase("(`…; UNRECORDED <stem> persists — …`)"));
 });
