@@ -374,9 +374,12 @@ mechanical steps below in order and stops at each judgement with a `QUESTION
 <qid>:` block and exit 10; `pull.mjs answer <N> <qid> <token> [--path <p>] [--]
 [<text>…]` records the answer and resumes it. Exit 0 prints `DISPATCH {name,
 agent, brief}`, the `task` call phase 2 makes; exit 1 means the ticket left the
-Pull, so take the next entry; exit 2 names what could not be looked at, and
-`next --head <N>` again retries that step; exit 3 is an answer the question does
-not take. The record is `<scratch>/impl-<N>/pull.json`. The steps below are what
+Pull, so take the next entry; exit 2 names what could not be looked at —
+`next --head <N>` again retries a step that failed, the same `answer` again
+retries one that failed while applying an answer (the question stands), and
+after a router refusal `next --head <N>` starts the ticket over; exit 3 is a
+usage mistake, or an answer the question does not take, and records nothing.
+The record is `<scratch>/impl-<N>/pull.json`. The steps below are what
 the driver runs, and the guidance for answering `staleness` and `decided`.
 
 One free implementer slot is one Pull. The tick names the heads — `PULL #<n>

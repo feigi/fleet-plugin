@@ -12,13 +12,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { briefPaths, issueMetrics } from "../plugin/scripts/ticket-router.mjs";
-import { chainHead, implRow, outOfScope, parseAnswer, relabel } from "../plugin/scripts/pull.mjs";
+import { chainHead, defang, implRow, outOfScope, parseAnswer, relabel } from "../plugin/scripts/pull.mjs";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
 const SKILL = readFileSync(join(PLUGIN, "skills", "run-team", "SKILL.md"), "utf8");
@@ -55,7 +55,7 @@ const control = (name) => {
 
 export function drive(name, args) {
   appendFileSync(join(dir, "order.log"), name + "\\n");
-  appendFileSync(join(dir, name + ".calls"), JSON.stringify({ args, cwd: process.cwd() }) + "\\n");
+  appendFileSync(join(dir, name + ".calls"), JSON.stringify({ args, cwd: process.cwd(), GH_REPO: process.env.GH_REPO ?? null }) + "\\n");
   const c = control(name);
   if (c.sleep) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, c.sleep);
   if (name === "dispatch-prompt" && !c.exit) {
@@ -376,6 +376,23 @@ test("an exclusion whose premise cannot be read stands", () => {
   assert.match(r.stdout, /^PULL #14: started/m);
 });
 
+test("a shortlist emptied only by exclusions whose premise cannot be read exits 2 naming them, not EMPTY", () => {
+  const f = fixture({ shortlist: [12] });
+  f.ledgerRow(12, "excluded · behind-pr:#90");
+  f.ghRules([{ match: "^pr view 90 ", exit: 1, err: "HTTP 401: bad credentials" }]);
+  const r = f.next();
+  assert.equal(r.status, 2, r.stdout + r.err);
+  assert.match(r.err, /gh could not read the premise of an exclusion, which stands: gh pr view 90 \(exit 1: HTTP 401: bad credentials\)/);
+  assert.equal(r.stdout.includes("EMPTY"), false);
+
+  const g = fixture({ shortlist: [12] });
+  g.ledgerRow(12, "excluded · behind-pr:#90");
+  g.ghRules([{ match: "^pr view 90 --json state$", out: '{"state":"OPEN"}' }]);
+  const open = g.next();
+  assert.equal(open.status, 1, "a premise that answered and still holds is an empty shortlist");
+  assert.match(open.stdout, /^EMPTY:/m);
+});
+
 test("a ticket whose Pull already left is skipped by `next` and started over by `next --head`", () => {
   const f = fixture({ shortlist: [12, 14] });
   f.control("inflight", { by: {} });
@@ -387,6 +404,43 @@ test("a ticket whose Pull already left is skipped by `next` and started over by 
   const again = f.next("--head", "12");
   assert.match(again.stdout, /^PULL #12: started/m, "asked for by number, it starts over");
   assert.equal(JSON.parse(readFileSync(join(f.scratch(), "impl-12", "pull.previous.json"), "utf8")).status, "left", "the ended Pull is kept beside it");
+});
+
+// A new run is a new phase-0 receipt naming a new session, and a new ledger;
+// the scratch root, and the Pull records in it, persist.
+function newRun(f) {
+  writeFileSync(join(f.fleet, "phase0.json"), JSON.stringify({ run: null, session: "2026-10-16T09-00-00-000Z_next", steps: { branch: { status: "ok" } } }));
+  rmSync(join(f.fleet, "ledger.md"), { force: true });
+}
+
+test("a Pull that left in an earlier run does not hide its ticket from this run's `next`", () => {
+  const f = fixture({ shortlist: [12, 14] });
+  f.control("inflight", { exit: 1 });
+  assert.equal(f.next().status, 1, "12 is taken this run");
+  f.control("inflight", {});
+  assert.match(f.next().stdout, /^PULL #14: started/m, "within the run, the entry that left is not the head again");
+  newRun(f);
+  const r = f.next();
+  assert.match(r.stdout, /^PULL #12: started/m, "in the next run, 12 is offered again");
+  assert.equal(JSON.parse(readFileSync(join(f.scratch(), "impl-12", "pull.previous.json"), "utf8")).status, "left");
+});
+
+test("a Pull dispatched in an earlier run is not replayed in this one: the ticket is pulled again, claim and all", () => {
+  const f = fixture();
+  toCollision(f);
+  assert.equal(f.answer(12, "collision", "clear").status, 0);
+  assert.equal(f.calls("claim-ticket").length, 1);
+  newRun(f);
+  const r = f.next();
+  assert.equal(r.status, 10, r.stdout + r.err);
+  assert.match(r.stdout, /^PULL #12: started/m);
+  assert.equal(r.stdout.includes("DISPATCH"), false, "the earlier run's DISPATCH is not printed again");
+  assert.equal(f.calls("inflight").length, 2, "the in-flight check ran again");
+  assert.equal(JSON.parse(readFileSync(join(f.scratch(), "impl-12", "pull.previous.json"), "utf8")).status, "dispatched");
+  assert.equal(f.answer(12, "staleness", "done").status, 10);
+  assert.equal(f.answer(12, "decided", "decided").status, 10);
+  assert.equal(f.answer(12, "collision", "clear").status, 0);
+  assert.equal(f.calls("claim-ticket").length, 2, "this run claims the ticket itself");
 });
 
 test("an empty shortlist exits 1 EMPTY; an unreadable one exits 2", () => {
@@ -537,6 +591,16 @@ test("Q1: a `fixed` verdict that names no commit is could-not-check, never a clo
   const r = f.answer(12, "staleness", "gone", "--path", "p.mjs", "x");
   assert.match(r.stdout, /^QUESTION staleness:/m);
   assert.deepEqual(f.state().staleness, ["could-not-check: the probe read the ticket as fixed and named no commit"]);
+});
+
+test("Q1: exit 1 with no verdict JSON is a probe that crashed, never a `fixed` verdict, and says so", () => {
+  const f = fixture();
+  f.control("staleness", { exit: 1, err: "TypeError: x is not a function\n    at probe" });
+  f.next("--head", "12");
+  const r = f.answer(12, "staleness", "gone", "--path", "p.mjs", "x");
+  assert.match(r.stdout, /^QUESTION staleness:/m);
+  assert.deepEqual(f.state().staleness, ["could-not-check: the probe exited 1 with no verdict JSON, which is a crash and no verdict: TypeError: x is not a function"]);
+  assert.equal(f.state().close, null);
 });
 
 // ── Q2: decided ──────────────────────────────────────────────────────────────
@@ -736,6 +800,16 @@ test("claim-ticket.sh exit 2 is taken, exit 1; any other failure is exit 2; neit
   assert.equal(g.calls("ticket-router").length, 0);
 });
 
+test("a claim refused at exit 2 says why: the child's own words are in the reason and in the record", () => {
+  const f = fixture();
+  toCollision(f);
+  f.control("claim-ticket", { exit: 2, err: "claim-ticket: the Install step did not run in the worktree (exit 1)" });
+  const r = f.answer(12, "collision", "clear");
+  assert.equal(r.status, 1, r.stdout + r.err);
+  assert.match(r.stdout, /^LEFT #12: taken \(claim-ticket\.sh refused the claim: claim-ticket: the Install step did not run in the worktree \(exit 1\)\) — next entry$/m);
+  assert.equal(f.state().outcome.reason.includes("the Install step did not run"), true);
+});
+
 test("a Pull with no phase-0 session claims nothing and exits 2", () => {
   const f = fixture();
   writeFileSync(join(f.fleet, "phase0.json"), JSON.stringify({ run: null, session: "", steps: { branch: { status: "ok" } } }));
@@ -776,7 +850,7 @@ test("router exit 2 releases the claim, exits 2 with the router's line, writes n
   assert.match(again.stdout, /^PULL #12: started/m);
 });
 
-test("router exit 2 whose claim cannot be released says the claim is STILL standing", () => {
+test("router exit 2 whose claim cannot be released says the claim is STILL standing, and the Pull stays to route again", () => {
   const f = fixture();
   toCollision(f);
   f.control("ticket-router", { exit: 2, err: "ticket-router: no table" });
@@ -784,6 +858,18 @@ test("router exit 2 whose claim cannot be released says the claim is STILL stand
   const r = f.answer(12, "collision", "clear");
   assert.equal(r.status, 2);
   assert.match(r.err, /its claim is STILL STANDING: release-ticket\.sh failed \(exit 2\)\nrelease: carries commits/);
+  assert.equal(f.state().status, "running", "the claim stands, so the Pull is not over");
+  assert.equal(f.state().stage, "route");
+
+  // Not skipped as an ended Pull: the next entry is this ticket, resumed at the step that failed.
+  f.control("ticket-router", { out: ROUTE_OK });
+  f.control("release-ticket", {});
+  const again = f.next();
+  assert.equal(again.status, 0, again.stdout + again.err);
+  assert.match(again.stdout, /^PULL #12: resumed at /m, "the Pull is resumed, not started over");
+  assert.equal(f.calls("ticket-router").length, 2, "the router is asked again");
+  assert.equal(f.calls("claim-ticket").length, 1, "the claim is not made twice");
+  assert.equal(f.state().status, "dispatched");
 });
 
 test("a router that prints no routing line is a refusal and releases the claim", () => {
@@ -1025,6 +1111,78 @@ test("an ambient GIT_DIR or GH_REPO naming another repository does not change wh
   const g = fixture();
   const ran = g.run(["next", "--head", "12"], { env });
   assert.equal(ran.status, 10, "the main-checkout check is not answered for the ambient repository: " + ran.stdout + ran.err);
+});
+
+test("an ambient GH_REPO does not reach the steps the Pull runs as scripts either", () => {
+  const env = { GH_REPO: "someone/else" };
+  const step = (f, ...args) => f.run(args, { env });
+  const f = fixture();
+  assert.equal(step(f, "next", "--head", "12").status, 10);
+  assert.equal(step(f, "answer", "12", "staleness", "done").status, 10);
+  assert.equal(step(f, "answer", "12", "decided", "decided").status, 10);
+  const end = step(f, "answer", "12", "collision", "clear");
+  assert.equal(end.status, 0, end.stdout + end.err);
+  for (const name of ["inflight", "claim-ticket", "ticket-router", "dispatch-prompt"]) {
+    assert.equal(f.calls(name).length > 0, true, `${name} ran`);
+    for (const c of f.calls(name)) assert.equal(c.GH_REPO, "", `${name} was given an ambient GH_REPO`);
+  }
+
+  const g = fixture();
+  g.control("ticket-router", { exit: 2 });
+  step(g, "next", "--head", "12");
+  step(g, "answer", "12", "staleness", "done");
+  step(g, "answer", "12", "decided", "decided");
+  assert.equal(step(g, "answer", "12", "collision", "clear").status, 2);
+  assert.equal(g.calls("release-ticket").length, 1);
+  assert.equal(g.calls("release-ticket")[0].GH_REPO, "", "release-ticket.sh was given an ambient GH_REPO");
+});
+
+test("a `gh pr list` that came back at its cap is exit 2, and the Pull stays at the collision stage", () => {
+  const prs = (n) => JSON.stringify(Array.from({ length: n }, (_, i) => ({ number: i + 1 })));
+  const f = fixture();
+  f.next("--head", "12");
+  f.answer(12, "staleness", "done");
+  f.ghRules([{ match: "^pr list ", out: prs(1000) }]);
+  const r = f.answer(12, "decided", "decided");
+  assert.equal(r.status, 2, r.stdout + r.err);
+  assert.match(r.err, /gh pr list came back at its cap of 1000/);
+  assert.equal(f.state().openPrs, null);
+  assert.equal(f.state().stage, "collision");
+
+  const g = fixture();
+  g.next("--head", "12");
+  g.answer(12, "staleness", "done");
+  g.ghRules([{ match: "^pr list ", out: prs(999) }]);
+  const under = g.answer(12, "decided", "decided");
+  assert.equal(under.status, 10, "one short of the cap is a whole answer");
+  assert.match(under.stdout, /^QUESTION collision:/m);
+});
+
+test("defang writes the spelling of each declared placeholder `‹name›` and leaves every other `<…>` alone", () => {
+  assert.equal(defang("run <N> on <abs-path> with <qid> and <distilled brief>", ["N", "abs-path", "distilled brief"]), "run ‹N› on ‹abs-path› with <qid> and ‹distilled brief›");
+  assert.equal(defang("nothing to do", ["N"]), "nothing to do");
+});
+
+test("a ticket that spells a placeholder the implementer template declares reaches the renderer without the spelling", () => {
+  const template = readFileSync(join(PLUGIN, "skills", "run-team", "briefs", "implementer.md"), "utf8");
+  const names = [...template.matchAll(/^arg \S+ (.+)$/gm)].map((m) => m[1]);
+  assert.equal(names.includes("N"), true, "the template declares <N>");
+  const issue = { ...ISSUE, body: "## What to build\n\nRun `pull.mjs next --head <N>` in <branch>, giving <distilled brief> and <qid>.\n" };
+  const f = fixture({ issue });
+  f.next("--head", "12");
+  f.answer(12, "staleness", "none", "no string settles <scratch>");
+  f.answer(12, "decided", "decided");
+  const end = f.answer(12, "collision", "clear");
+  assert.equal(end.status, 0, end.stdout + end.err);
+  const render = f.calls("dispatch-prompt")[0].args;
+  for (const flag of ["--brief", "--staleness"]) {
+    const value = render[render.indexOf(flag) + 1];
+    for (const name of names) assert.equal(value.includes(`<${name}>`), false, `${flag} spells <${name}>`);
+  }
+  const brief = render[render.indexOf("--brief") + 1];
+  assert.equal(brief.includes("‹N›") && brief.includes("‹branch›") && brief.includes("‹distilled brief›"), true);
+  assert.equal(brief.includes("<qid>"), true, "a spelling the template does not declare is the ticket's own");
+  assert.equal(render[render.indexOf("--staleness") + 1].includes("‹scratch›"), true);
 });
 
 test("SKILL.md Phase 1 names `pull.mjs next` as the Pull's entry, and its step paragraphs stay", () => {

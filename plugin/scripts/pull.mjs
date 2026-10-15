@@ -8,7 +8,7 @@
 // Reached through the Resolver and run from the MAIN checkout (a linked
 // worktree refuses). `next` starts a Pull on the shortlist head — `--head`, else
 // the first `.fleet/shortlist.json` entry with no `impl-` row, no live
-// `excluded` row and no Pull of its own already ended this run — or resumes the
+// `excluded` row and no Pull of its own already ended in this phase-0 session — or resumes the
 // one in progress for `--head`; `answer` records one answer and resumes. Both
 // run until the next question or the end of the Pull, and both are safe to
 // run again: the state is on disk after every step.
@@ -20,10 +20,15 @@
 //       relabelled by cause, excluded — with the reason printed; take the next
 //       entry. An empty shortlist is this exit too.
 //   2   could not look, named on stderr: a probe that did not answer, a write
-//       that failed, a router that refused (its claim released first). The
-//       Pull stays where it was, so running it again retries that step. An
-//       unknown flag is exit 2 as well, as for every script that holds a
-//       command line of its own.
+//       that failed, a router that refused. `next --head <N>` runs a step that
+//       failed again; when the failure came from applying an answer, the
+//       question stands and the answer is given again. A router that refused
+//       has its claim released and the Pull is over, `next --head <N>` starting
+//       the ticket over; one whose claim could not be released leaves the Pull
+//       at the route step with the claim standing, and `next` routes again. An
+//       exclusion premise `gh` could not read is exit 2 when no other entry is
+//       left. An unknown flag is exit 2 as well, as for every script that holds
+//       a command line of its own.
 //   3   usage: any other mistake in the command line, or an answer the pending
 //       question does not take. Nothing is recorded.
 //   10  a question is pending: its `QUESTION <qid>:` block, with the tokens it
@@ -40,10 +45,12 @@
 //   3  Q1 staleness   `gone` / `present` (each with `--path <p>` and the string
 //                 as the text) run `staleness.mjs --path <p> --gone|--present --
 //                 <string>`; `none <why>` and `done` end the question. Exit 1
-//                 from the probe asks Q1b `close`: `yes` closes the issue with
-//                 a comment citing the probe's commit and that commit's
-//                 subject, `no <why>` asks Q1 again. Exit 2 is recorded as
-//                 `could-not-check: <reason>` and carried into the brief.
+//                 from the probe with a JSON verdict naming a commit asks Q1b
+//                 `close`: `yes` closes the issue with a comment citing the
+//                 probe's commit and that commit's subject, `no <why>` asks Q1
+//                 again. Exit 2, and exit 1 with no verdict JSON or no commit,
+//                 are recorded as `could-not-check: <reason>` and carried into
+//                 the brief.
 //   4  Q2 decided     `decided`, or a cause whose comment is posted and whose
 //                 label replaces `ready-for-agent`.
 //   5  Q3 collision   `clear`, `behind-pr:#M`, `behind-issue:#M`. The script
@@ -51,17 +58,22 @@
 //                 scan of its own. An exclusion is a ledger row.
 //   6  claim      `claim-ticket.sh <N> impl-<N> implementer --apply`.
 //   7  route      `ticket-router.mjs route …`; a router that refuses releases
-//                 the claim. `--chain-head` is given when a ledger row reads
+//                 the claim, and a release that fails is exit 2 with the claim
+//                 still standing. `--chain-head` is given when a ledger row reads
 //                 `excluded · behind-issue:#<N>`: another open ticket
 //                 sequences after this one.
 //   8  row, render, dispatch   `ledger.mjs row`, `dispatch-prompt.mjs render
-//                 implementer --member impl-<N>`, `ledger.mjs dispatch`.
+//                 implementer --member impl-<N>`, `ledger.mjs dispatch`. The
+//                 brief and the staleness text are given with `‹name›` for each
+//                 `<name>` the implementer template declares: the renderer
+//                 refuses a value that spells one.
 //
 // THE STATE is `<scratch>/impl-<N>/pull.json`: every command run (script, its
 // arguments, exit status, bounded stdout, time), every question asked and every
 // answer with its text and time, and where the Pull stands. A Pull that left
 // the Pull (exit 1) or was refused by the router is held as `pull.previous.json`
-// when `next --head <N>` starts the ticket over.
+// when `next` starts the ticket over, and so is a record from another phase-0
+// session, whatever it says.
 //
 // No judgement lives here: the script offers evidence and takes a token.
 //
@@ -181,6 +193,28 @@ export function outOfScope(text) {
   return all.slice(at, end).join("\n").trim();
 }
 
+// The placeholders the implementer's brief template declares. dispatch-prompt.mjs
+// refuses a value that spells one, and a ticket's text is a value: one that
+// names `<N>` would stop every render, with the claim standing.
+const TEMPLATE = join(SCRIPTS, "..", "skills", "run-team", "briefs", "implementer.md");
+
+function declaredPlaceholders() {
+  const lines = readFileSync(TEMPLATE, "utf8").split("\n");
+  if (lines[0] !== "---") return [];
+  const names = [];
+  for (const line of lines.slice(1)) {
+    if (line === "---") break;
+    const m = /^arg \S+ (.+)$/.exec(line);
+    if (m !== null) names.push(m[1]);
+  }
+  return names;
+}
+
+/** `text` with each declared placeholder's spelling `<name>` written `‹name›`, which the renderer does not read. */
+export function defang(text, names) {
+  return names.reduce((t, n) => t.split(`<${n}>`).join(`‹${n}›`), text);
+}
+
 // ── children ─────────────────────────────────────────────────────────────────
 
 const trimmed = (s) => String(s ?? "").trim();
@@ -206,7 +240,7 @@ const withText = (head, r) => (r.text ? `${head}\n${r.text}` : head);
 
 // ── the state ────────────────────────────────────────────────────────────────
 
-function fresh(ticket) {
+function fresh(ticket, session) {
   return {
     ticket,
     member: `impl-${ticket}`,
@@ -220,7 +254,7 @@ function fresh(ticket) {
     staleness: [],
     close: null,
     openPrs: null,
-    session: null,
+    session,
     commented: null,
     route: null,
     dispatch: null,
@@ -386,7 +420,7 @@ class Pull {
 
   script(step, file, args, opts, shown) {
     const cmd = file.endsWith(".sh") ? "sh" : process.execPath;
-    return this.exec(step, file, cmd, [join(SCRIPTS, file)], args, opts, shown);
+    return this.exec(step, file, cmd, [join(SCRIPTS, file)], args, { env: GH_ENV, ...opts }, shown);
   }
 
   gh(step, args, shown) {
@@ -567,7 +601,7 @@ class Pull {
       st.stage = "route";
       return null;
     }
-    if (r.status === 2) return this.leave("taken (claim-ticket.sh refused the claim)");
+    if (r.status === 2) return this.leave(`taken (claim-ticket.sh refused the claim${r.text === "" ? "" : `: ${r.text.replace(/\s+/g, " ")}`})`);
     return this.stop(withText(`claim-ticket.sh could not claim (${r.how})`, r));
   }
 
@@ -585,10 +619,13 @@ class Pull {
     if (m === null) {
       const said = r.status === 0 ? `printed no routing line: ${r.stdout}` : withText(`refused (${r.how})`, r);
       const rel = this.script("release", "release-ticket.sh", [String(st.ticket), st.member, "implementer", "--apply"]);
+      if (rel.status !== 0) {
+        // The claim stands, so the Pull is not over: it stays at this step, and running it again routes, or refuses and releases, again.
+        return this.stop(`ticket-router.mjs ${said}\n${withText(`its claim is STILL STANDING: release-ticket.sh failed (${rel.how})`, rel)}`);
+      }
       st.status = "released";
       st.outcome = { exit: 2, reason: `router ${said}`, at: now() };
-      const claim = rel.status === 0 ? "its claim is released" : withText(`its claim is STILL STANDING: release-ticket.sh failed (${rel.how})`, rel);
-      return this.stop(`ticket-router.mjs ${said}\n${claim}`);
+      return this.stop(`ticket-router.mjs ${said}\nits claim is released`);
     }
     st.route = { line: m[0], cell: m[2], draw: m[3], reason: m[5], implRow: k, chainHead: head };
     st.stage = "row";
@@ -609,10 +646,16 @@ class Pull {
     const { st } = this;
     const worktree = join(this.p.cwd, ".worktrees", `${st.ticket}-${st.member}`);
     const staleness = st.staleness.length === 0 ? "no probe was run" : st.staleness.join("; ");
+    let names;
+    try {
+      names = declaredPlaceholders();
+    } catch (e) {
+      return this.stop(`cannot read the brief template ${TEMPLATE} (${e.code ?? e.message})`);
+    }
     const r = this.script("render", "dispatch-prompt.mjs", [
       "render", "implementer", "--member", st.member, "--ticket", String(st.ticket), "--worktree", worktree,
       "--branch", `implementer/${st.ticket}-${st.member}`, "--scratch", this.p.scratch,
-      "--brief", this.dispatchBrief(), "--staleness", staleness,
+      "--brief", defang(this.dispatchBrief(), names), "--staleness", defang(staleness, names),
     ]);
     if (r.status !== 0) return this.stop(withText(`dispatch-prompt.mjs render refused (${r.how}) — the claim stands`, r));
     st.stage = "dispatch";
@@ -686,9 +729,14 @@ class Pull {
       st.close = { mode: token, path, needle: text, commit: payload.commit, subject: null };
       return null;
     }
-    const reason = r.status === 1
-      ? "the probe read the ticket as fixed and named no commit"
-      : (typeof payload?.why === "string" ? payload.why : (r.stderr || r.stdout || r.how).split("\n")[0]);
+    let reason;
+    if (r.status === 1) {
+      reason = payload !== null && typeof payload === "object"
+        ? "the probe read the ticket as fixed and named no commit"
+        : `the probe exited 1 with no verdict JSON, which is a crash and no verdict: ${(r.stderr || r.stdout || r.how).split("\n")[0]}`;
+    } else {
+      reason = typeof payload?.why === "string" ? payload.why : (r.stderr || r.stdout || r.how).split("\n")[0];
+    }
     st.staleness.push(`could-not-check: ${reason}`);
     return null;
   }
@@ -733,7 +781,7 @@ class Pull {
       return null;
     }
     const r = this.script("exclude", "ledger.mjs", ["row", String(st.ticket), `excluded · ${token}`]);
-    if (r.status !== 0) return this.stop(withText(`ledger.mjs row failed (${r.status === null ? r.how : `exit ${r.status}`})`, r));
+    if (r.status !== 0) return this.stop(withText(`ledger.mjs row failed (${r.how})`, r));
     return this.leave(`excluded · ${token}`);
   }
 }
@@ -742,17 +790,22 @@ class Pull {
 
 // Whether an exclusion's premises still hold: a premise `gh` cannot be asked
 // about, or whose state could not be read, stands, as the shortlist's refresh
-// reads it.
-function exclusionLive(premises, cwd) {
+// reads it. Each such premise is added to `unreadable`, so that a shortlist
+// emptied by premises nobody could read is told apart from an empty one.
+function exclusionLive(premises, cwd, unreadable) {
   if (premises.length === 0) return true;
   for (const { kind, target } of premises) {
     if (target.startsWith("-") || !(kind === "pr" || isDigits(target))) return true;
     const r = spawn("gh", [kind, "view", target, "--json", "state"], { cwd, env: GH_ENV, timeoutMs: NETWORK_TIMEOUT_MS });
-    if (r.status !== 0) return true;
+    if (r.status !== 0) {
+      unreadable.push(`gh ${kind} view ${target} (${r.how}${r.stderr === "" ? "" : `: ${r.stderr.split("\n")[0]}`})`);
+      return true;
+    }
     let state;
     try {
       ({ state } = JSON.parse(r.stdout));
     } catch {
+      unreadable.push(`gh ${kind} view ${target} (printed no JSON state)`);
       return true;
     }
     if (!LIFTED.has(state)) return true;
@@ -760,8 +813,19 @@ function exclusionLive(premises, cwd) {
   return false;
 }
 
+// The phase-0 session names the run a Pull belongs to: the persistent scratch
+// root holds every run's records, and only this run's are this run's. Null when
+// the receipt names none, which the claim step refuses in its own words.
+function currentRun(cwd) {
+  try {
+    return sessionFromReceipt({ cwd });
+  } catch {
+    return null;
+  }
+}
+
 /** The first shortlist entry still to be pulled, or null when the list holds none. */
-function shortlistHead(p) {
+function shortlistHead(p, run) {
   let list;
   try {
     list = JSON.parse(readFileSync(p.shortlist, "utf8"));
@@ -781,14 +845,18 @@ function shortlistHead(p) {
   if (led.status !== 0 || !Array.isArray(rows) || !rows.every((r) => typeof r === "string")) {
     throw new Refusal(withText(`ledger.mjs read did not answer (${led.how})`, led));
   }
+  const unreadable = [];
   for (const { n } of list.shortlist) {
     const row = rows.find((r) => rowKey(r) === `#${n}`);
     if (row !== undefined && isImplRow(row)) continue;
     const premises = row === undefined ? null : premisesOf(row);
-    if (premises !== null && exclusionLive(premises, p.cwd)) continue;
+    if (premises !== null && exclusionLive(premises, p.cwd, unreadable)) continue;
     const ended = readPull(p.statePath(n));
-    if (ended !== null && (ended.status === "left" || ended.status === "released")) continue;
+    if (ended !== null && (ended.status === "left" || ended.status === "released") && (run === null || ended.session === run)) continue;
     return n;
+  }
+  if (unreadable.length > 0) {
+    throw new Refusal(`no entry to pull, and gh could not read the premise of an exclusion, which stands: ${unreadable.join("; ")} — run again once gh answers`);
   }
   return null;
 }
@@ -836,20 +904,22 @@ function parseNext(args) {
 function next(args) {
   const head = parseNext(args);
   const base = setup();
-  const n = head ?? shortlistHead(base);
+  const run = currentRun(base.cwd);
+  const n = head ?? shortlistHead(base, run);
   if (n === null) return result(1, ["EMPTY: the shortlist holds no entry to pull — run shortlist.mjs once and Pull again; still empty, hold the slot idle until the next refresh trigger"]);
   let st = readPull(base.statePath(n));
-  if (st !== null && (st.status === "left" || st.status === "released")) {
-    // Asked for by number, so asked for again: the ended Pull is kept beside the new one.
+  if (st !== null && (st.status === "left" || st.status === "released" || (run !== null && st.session !== run))) {
+    // Asked for by number, so asked for again: the ended Pull is kept beside the new one. A record from another
+    // run is ended too, whatever it says: the ledger rotated, and a dispatch it made is none of this run's.
     renameSync(base.statePath(n), base.previousPath(n));
     st = null;
   }
   const first = st === null;
-  if (first) st = fresh(n);
+  if (first) st = fresh(n, run);
   const pull = pullFor(base, st);
   if (first) pull.save();
   const r = pull.advance();
-  return { ...r, out: [...(first ? [`PULL #${n}: started, state in ${base.statePath(n)}`] : [`PULL #${n}: resumed at ${st.pending === null ? st.stage : `question ${st.pending.qid}`}`]), ...pull.log, ...r.out] };
+  return { ...r, out: [first ? `PULL #${n}: started, state in ${base.statePath(n)}` : `PULL #${n}: resumed at ${st.pending === null ? st.stage : `question ${st.pending.qid}`}`, ...pull.log, ...r.out] };
 }
 
 function answer(args) {
