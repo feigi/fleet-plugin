@@ -47,7 +47,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -1446,10 +1446,10 @@ function runCheck() {
 // hard-linked to its stamped name, then unlinked or, when a successor is
 // carried, replaced by it — so its bytes are untouched, and the link refuses
 // atomically when that name is already taken rather than overwriting an older
-// archive. A `phase0.json` receipt beside the ledger belongs to the same run,
-// so it is archived as `phase0.<stamp>.json` under the ledger archive's own
-// stamp — a warning-only move after the ledger move, refused up front only
-// when that name is taken.
+// archive. The two receipts beside the ledger, `phase0.json` and
+// `closeout.json`, belong to the same run, so each is archived as
+// `<name>.<stamp>.json` under the ledger archive's own stamp — a warning-only
+// move after the ledger move, refused up front only when a name is taken.
 //
 // What follows depends on the verdict below. After a `dead` or `none` one
 // nothing is carried: the next write subcommand finds no file and starts the
@@ -1567,14 +1567,17 @@ function runRotate() {
     carry = carryOf(text);
   }
   const carrying = carry.rows.length > 0 || carry.dispatched.length > 0 || carry.retired.length > 0;
-  // The phase-0 receipt beside the ledger belongs to the run being rotated
-  // away, so it takes the archive's own stamp: `phase0.<stamp>.json` next to
-  // `ledger.<stamp>.md`. A name already taken refuses before anything moves,
-  // as the ledger's own does.
+  // The receipts beside the ledger belong to the run being rotated away, so
+  // each takes the archive's own stamp: `phase0.<stamp>.json` and
+  // `closeout.<stamp>.json` next to `ledger.<stamp>.md`. A name already taken
+  // refuses before anything moves, as the ledger's own does.
   const stamp = archiveStamp();
-  const receipt = join(dirname(file), RECEIPT);
-  const receiptArchive = existsSync(receipt) ? join(dirname(file), receiptArchiveName(stamp)) : null;
-  if (receiptArchive !== null && existsSync(receiptArchive)) die(`refusing to rotate ${file}: ${receiptArchive} already exists`);
+  const receipts = [[RECEIPT, receiptArchiveName], [CLOSEOUT_RECEIPT, closeoutArchiveName]]
+    .map(([name, archiveName]) => ({ from: join(dirname(file), name), to: join(dirname(file), archiveName(stamp)) }))
+    .filter(({ from }) => existsSync(from));
+  for (const { to } of receipts) {
+    if (existsSync(to)) die(`refusing to rotate ${file}: ${to} already exists`);
+  }
   let archive = null;
   if (exists) {
     archive = join(dirname(file), `${basename(file, ".md")}.${stamp}.md`);
@@ -1601,12 +1604,12 @@ function runRotate() {
   // After the ledger has moved, and a warning rather than a refusal: the
   // ledger is already archived, and a receipt left where it is is read as a
   // previous run's by the next phase 0, which moves it aside itself.
-  if (receiptArchive !== null) {
+  for (const { from, to } of receipts) {
     try {
-      renameSync(receipt, receiptArchive);
-      console.error(`    archived ${receipt} -> ${receiptArchive}`);
+      renameSync(from, to);
+      console.error(`    archived ${from} -> ${to}`);
     } catch (e) {
-      console.error(`    could not archive ${receipt} -> ${receiptArchive}: ${e.message}`);
+      console.error(`    could not archive ${from} -> ${to}: ${e.message}`);
     }
   }
   // Nothing to carry writes nothing, so the next write starts the skeleton
