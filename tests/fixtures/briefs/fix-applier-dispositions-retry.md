@@ -41,6 +41,11 @@ answers `valid`. Your final message is then one line,
 `<your name>: <outcome> /abs/scratch-retry/reports/<your name>.json`, `<outcome>` the
 report's `outcome`.
 
+Push, write your report, exit; never poll a CI run.
+
+The controller does not acknowledge reports. Send once and exit; never re-send unless the controller asks by name.
+A member runs its test suite in the foreground and blocks on it. Exit 75 from the suite is not a test result; run the command again.
+
 This is the one automatic retry of a dispositions mismatch. The mismatched
 member's record is `/abs/scratch-retry/dispositions-fix-pr-3294.json`: start from it, and write your own
 record as above. The check printed these violations, each naming a bucket, an

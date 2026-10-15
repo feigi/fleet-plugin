@@ -5,9 +5,11 @@
 //                                     [--member <name>] [--json]
 //
 // Roles: implementer, fix-applier, finisher, merge-bot, review-runner,
-// recipe-deriver. A role with kinds (fix-applier: review, conflict,
-// dispositions-retry, red-check; finisher: fresh, repair) requires --kind; a role
-// without them refuses it as an unknown flag.
+// recipe-deriver, relabel (the comment a Pull posts on a ticket it returns,
+// not a member's brief). A role with kinds (fix-applier: review, conflict,
+// dispositions-retry, red-check; finisher: fresh, repair; relabel:
+// needs-triage, fork, hands) requires --kind; a role without them refuses it
+// as an unknown flag.
 //
 // OUTPUT. The brief on stdout and nothing else. With --json the payload
 // {role, kind, args, sha256} replaces it, `sha256` being the hash of the
@@ -73,7 +75,7 @@ import { runnerScratchRefusal } from "./review-core.mjs";
 const NAME = "dispatch-prompt";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const BRIEFS_DIR = join(SCRIPT_DIR, "..", "skills", "run-team", "briefs");
-const ROLES = ["implementer", "fix-applier", "finisher", "merge-bot", "review-runner", "recipe-deriver"];
+const ROLES = ["implementer", "fix-applier", "finisher", "merge-bot", "review-runner", "recipe-deriver", "relabel"];
 const RESERVED = ["member", "json", "kind"];
 const USAGE = `usage: ${NAME}.mjs render <role> [--kind <kind>] [--<arg> <value>…] [--member <name>] [--json] — roles: ${ROLES.join(", ")}`;
 const PLACEHOLDER = /<([A-Za-z][^<>\n]*)>/g;

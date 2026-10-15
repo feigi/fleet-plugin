@@ -278,16 +278,13 @@ unknown: fix that environment fault and check again; deriving would not
 help. This step is yours: one derivation
 per run start at most, never one per member, and a member never derives.
 Dispatch a `task` member named `derive-recipe`, agent
-`fleet-recipe-deriver`, and wait for its report — nothing in this run can
-claim before it lands:
-
-> Derive, prove and cache the Recipe of the repository at `<repo>`. Your
-> scratch directory is `<scratch>/derive-recipe/`; write nowhere else.
-> Follow your definition's procedure exactly, and end with its report line.
-
-`<repo>` is this main checkout's absolute path and `<scratch>` is the
-absolute path `scratch-root.mjs` prints (SKILL.md's **The scratch root is
-computed**), written into the prompt before you send it. The member reads the repository,
+`fleet-recipe-deriver`, its prompt the brief `~/.fleet/bin/fleet-run
+dispatch-prompt.mjs render recipe-deriver --member derive-recipe --repo <repo>
+--scratch <scratch>` prints, and wait for its report — nothing in this run can
+claim before it lands. `<repo>` is this main checkout's absolute path and
+`<scratch>` is the absolute path `scratch-root.mjs` prints (SKILL.md's **The
+scratch root is computed**); the renderer refuses a relative one. The member
+reads the repository,
 proposes both commands and proves them with `recipe-prove.mjs` in a
 throwaway worktree of `origin/main`: the Install step must leave the tree
 clean, and the Test entrypoint must be shown to run real tests — the

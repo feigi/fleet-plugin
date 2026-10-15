@@ -183,7 +183,7 @@ test("the crash population is the dispatched-refuter half of unverified, and onl
 // on the reader in the other is the defect moved, not fixed.
 const RULE_FILES = [
   ["commands/review-and-fix.md", "A finding in `unverified` whose refuters ran and", "Only a `survived` finding"],
-  ["skills/run-team/SKILL.md", "Apply `survived` findings. A finding in `unverified`", "Severity records how much"],
+  ["agents/fleet-fix-applier.agent.md", "Apply `survived` findings. A finding in `unverified`", "Severity records how much"],
 ];
 
 for (const [rel, from, to] of RULE_FILES) {

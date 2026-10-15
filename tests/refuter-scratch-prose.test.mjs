@@ -13,8 +13,8 @@
 // a fix-applier's own scratch path is out of scope. Citing that failure as
 // motivation here would claim coverage these pins do not have.
 //
-// The instruction is quoted VERBATIM in two documents — run-team/SKILL.md's
-// fix-applier dispatch block, and review-and-fix.md step 2 — and neither carried
+// The instruction is quoted VERBATIM in two documents — the fix-applier's
+// member prompt (its agent body's dispatch block), and review-and-fix.md step 2 — and neither carried
 // a scratch clause. A fix added to only one is the one that does not reach
 // whichever path a given caller takes, so both slices are pinned here.
 //
@@ -30,12 +30,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+const FIX_APPLIER = () => memberPrompt("fix-applier", "review");
 const REVIEW_AND_FIX = Pin.file(join(REPO, "commands", "review-and-fix.md"));
 
-// The run-team/SKILL.md copy sits inside a nested `> > ` blockquote, so a hard
+// The fix-applier member prompt's copy sits inside a nested `> ` blockquote, so a hard
 // wrap can land INSIDE a phrase with the quote gutter, not whitespace, at the
 // break — `\s+` does not span it, `>` is not whitespace. Strip the gutter per
 // line and rejoin with a single space, which restores exactly the original
@@ -50,7 +51,7 @@ function stripQuoteGutter(text) {
 
 const runTeamPrompt = () =>
   stripQuoteGutter(
-    RUN_TEAM.between("Try to REFUTE this finding", "Survives → apply it, with one hold", "run-team/SKILL.md").text,
+    Pin.of(FIX_APPLIER(), "the fix-applier member prompt").between("Try to REFUTE this finding", "Survives → apply it, with one hold", "the fix-applier member prompt").text,
   );
 const reviewAndFixPrompt = () =>
   stripQuoteGutter(
@@ -62,7 +63,7 @@ const reviewAndFixPrompt = () =>
   );
 
 for (const [name, getPrompt] of [
-  ["run-team/SKILL.md", runTeamPrompt],
+  ["the fix-applier member prompt", runTeamPrompt],
   ["review-and-fix.md", reviewAndFixPrompt],
 ]) {
   // `\s+` between every word, never a literal space — a wrap point can land
@@ -120,7 +121,7 @@ for (const [name, getPrompt] of [
 const SUBSTITUTION =
   "with one substitution: resolve `<scratch>/pr<N>/<finding>/` in it to an absolute path under your own run root — `mktemp -d` once per round for `<scratch>/pr<N>/fix-XXXXXXXX/`, never bare `pr<N>`, since finding ids restart at 1 each round too — and write that absolute path into the refuter's prompt in its place; a refuter never derives its own path";
 for (const [name, getLeadIn] of [
-  ["run-team/SKILL.md", () => stripQuoteGutter(RUN_TEAM.between("In scope → dispatch ONE refuter", "Try to REFUTE this finding", "run-team/SKILL.md").text)],
+  ["the fix-applier member prompt", () => stripQuoteGutter(Pin.of(FIX_APPLIER(), "the fix-applier member prompt").between("In scope → dispatch ONE refuter", "Try to REFUTE this finding", "the fix-applier member prompt").text)],
   ["review-and-fix.md", () => REVIEW_AND_FIX.between("In scope → dispatch one refuter", "Try to REFUTE this finding", "review-and-fix.md").text],
 ]) {
   test(`${name}: the fix-applier resolves the refuter's scratch path to an absolute one and writes it into the refuter's prompt`, () => {

@@ -71,12 +71,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 
-const REPO = join(import.meta.dirname, "..", "plugin");
-// The body alone — everything after the frontmatter's closing `---` — so a
-// frontmatter field can never satisfy a pin meant for text the member reads.
-const AGENT_FILE = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8");
-const BODY = AGENT_FILE.split("---").slice(2).join("---");
+// What the implementer reads: its agent body — the system prompt each harness
+// injects, so a frontmatter field can never satisfy a pin meant for text the
+// member reads — followed by the brief the renderer prints for the fixed
+// argument set of support/render-brief.mjs.
+const BODY = memberPrompt("implementer");
 
 function region(text = BODY) {
   assert.ok(text.trim().length > 0, "agents/fleet-implementer-slow-high.agent.md has no body — the implementer background moved again; update this test");

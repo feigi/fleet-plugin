@@ -8,22 +8,22 @@
 // block tells the finisher to judge a run by how it ended.
 // The rule is stated in two places: the finisher's agent body carries a copy
 // of the block (held sentence by sentence by member-bodies-split.test.mjs),
-// and SKILL.md holds the block the controller's duty list quotes — which is
+// and the member prompt — the body plus the brief the renderer prints — is
 // what this file pins, one sentence per pin so a clause deleted from inside
 // the block reaches its own pin rather than being satisfied by a neighbour. The
-// lead-in paragraph above the block names it and is pinned on its own.
+// brief hands the member the `<testCmd>` the block governs and is pinned on its own.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt, renderBrief } from "./support/render-brief.mjs";
 import { HALT_CAUSES } from "../plugin/scripts/ledger-grammar.mjs";
-
-const RUN_TEAM = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"));
 
 const OPENER = "**A test run is a verdict only if it ran to completion";
 const block = () =>
-  RUN_TEAM.quoteBlock(OPENER, "the finisher's test-run verdict block").stripGutter(">").text.replace(/\s+/g, " ");
+  Pin.of(memberPrompt("finisher", "fresh"), "the finisher's member prompt")
+    .between(OPENER, "**Duty 3 is one script", "the finisher's test-run verdict block")
+    .text.replace(/\s+/g, " ");
 const sentenceWith = (re, what) => {
   const hits = Pin.sentences(block()).filter((s) => re.test(s));
   assert.equal(hits.length, 1, `${what}: ${hits.length} sentences match ${re} in the verdict block`);
@@ -94,8 +94,12 @@ test("a completed run that exits 1 and a zero-test run keep their own verdicts",
   assert.match(sentenceWith(/Exit 0 with `tests 0`/, "zero-test run"), /Exit 0 with `tests 0` stays FAILED/);
 });
 
-// The lead-in paragraph above the block says what duty 2 uses `<testCmd>` for.
-test("the lead-in tells the controller to hand the verdict rule over, and says duty 2 runs testCmd for the acceptance mutation", () => {
-  const p = RUN_TEAM.paragraph("Give the finisher the test-run verdict rule verbatim too.", "the verdict block's lead-in", "> **A test run is a").text.replace(/\s+/g, " ");
-  assert.match(p, /^Give the finisher the test-run verdict rule verbatim too\.\*\* Duty 2 runs `<testCmd>` for the acceptance mutation,/);
+// The brief hands the finisher the `<testCmd>` the block governs, and the body
+// says what duty 2 runs it for.
+test("the brief hands the finisher its testCmd, and duty 2 runs it for the acceptance mutation", () => {
+  assert.match(renderBrief("finisher", "fresh"), /^testCmd: TESTCMD-4$/m);
+  assert.match(
+    memberPrompt("finisher", "fresh"),
+    Pin.phrase("Independently re-running the ticket's acceptance mutation — loosen the regex, delete the guard clause, flip the per-entry reset, run `<testCmd>`, confirm a kill by the test-run verdict rule below"),
+  );
 });

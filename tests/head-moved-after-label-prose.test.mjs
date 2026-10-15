@@ -22,6 +22,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 import { stripComments } from "./support/strip-comments.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
@@ -353,7 +354,7 @@ test("an unanswered member question blocks finisher dispatch, with the same weig
 const labelRecovery = () =>
   RUN_TEAM.between(
     "**Once the label is on, take it off before you approve any push.**",
-    "A halt at step 1 reads identical from a bare SHA mismatch",
+    "A halt at duty 1 reads identical from a bare SHA mismatch",
     "run-team/SKILL.md",
   ).text;
 
@@ -365,8 +366,7 @@ test("the recovery removes the label before approving, and says why messaging th
 });
 
 // #2945, the writing half: the record is only as good as every path that adds
-// `ready-to-merge` writing it — the fleet finisher (through `finisher-label.mjs`,
-// named in its duty list and in the verbatim block it is handed) and
+// named in its duty list and in the finisher's member prompt) and
 // `review-and-fix` step 6 standalone. Each must post the record BEFORE the
 // label, so a merge bot dispatched the moment the label appears finds the
 // record already there, and must name the head it audited, not whatever the
@@ -390,8 +390,8 @@ test("every writer of ready-to-merge records the audited head before the label",
   for (const [slice, where] of [
     [RUN_TEAM.between("3. Add `ready-to-merge` by running one script", "4. Report you the label", "finisher duty 3").text, "finisher duty 3"],
     [
-      RUN_TEAM.between("**Duty 3 is one script, and its exit code is your verdict.**", "**Once the label is on, take it off", "finisher duty-3 verbatim block").text,
-      "the finisher's verbatim duty-3 block",
+      Pin.of(memberPrompt("finisher", "fresh"), "the finisher's member prompt").between("**Duty 3 is one script, and its exit code is your verdict.**", "Report to the controller in the report file your brief names", "finisher duty-3 block").text,
+      "the finisher's duty-3 block in its member prompt",
     ],
   ]) {
     assert.match(slice, Pin.phrase("finisher-label.mjs --pr"), `${where} no longer runs the script that records the head and adds the label`);

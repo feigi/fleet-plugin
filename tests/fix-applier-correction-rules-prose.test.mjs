@@ -1,39 +1,28 @@
-// #859. The fix-applier dispatch block (phase 3) is a `>` blockquote pasted
-// VERBATIM into the fix-applier's prompt — the controller copies those lines
-// as-is, it does not paraphrase them, and it does not chase a cross-reference
-// out of the block. Before this ticket the block carried the mutation-testing
-// rule and the re-derive-the-pin rule, but none of the three prose-discipline
-// rules the implementer block carries, even though a fix-applier's whole job
-// is writing prose after review — commit messages, deferral-issue rationale,
-// its final report — on a snapshot nothing downstream re-reviews.
+// #859. The fix-applier's member prompt — its agent body, which the harness
+// injects as the member's system prompt, and the brief the renderer prints for
+// a review fix-applier — carries the three prose-discipline rules the
+// implementer's body carries, because a fix-applier's whole job is writing
+// prose after review — commit messages, deferral-issue rationale, its final
+// report — on a snapshot nothing downstream re-reviews. The controller pastes
+// none of it: SKILL.md carries no copy of the prompt, so a pin here reads the
+// text where the member reads it.
 //
 // Measured against `origin/main` before this file existed: an
-// implementer-only search of the fix-applier's prompt slice —
-// `awk 'NR==1483,NR==1631' skills/run-team/SKILL.md | grep -iE
-// "settling command|positional|COUNT|tally"` — hit nothing but unrelated CI
-// behind-count prose. No test in this suite pinned any of the three rules
-// inside the fix-applier's own prompt slice either; the two files that pin
-// this text (`immutable-body-claim-prose.test.mjs`,
+// implementer-only search of the fix-applier's prompt slice hit nothing but
+// unrelated CI behind-count prose, and no test in this suite pinned any of the
+// three rules inside the fix-applier's own prompt either; the two files that
+// pin this text (`immutable-body-claim-prose.test.mjs`,
 // `cross-repo-citation-prose.test.mjs`) both scope to the IMPLEMENTER'S copy,
-// which lives in `plugin/agents/fleet-implementer-<cell>.agent.md`, not in this
-// section of SKILL.md. `grep -n '### Reviewers\|You are ALREADY in
-// worktree\|Put the standing CI facts\|Two of the rules above are what
-// caught both' skills/run-team/SKILL.md` against
-// this tree finds `You are ALREADY in worktree` exactly ONCE, opening the
-// fix-applier's own prompt this file pins below — it does not recur
-// anywhere else in SKILL.md.
+// which lives in `plugin/agents/fleet-implementer-<cell>.agent.md`.
 //
 // SHAPE, matching the convention every file beside this one uses. Each rule
 // gets its own ordered-span assertion, gaps sized to the punctuation that
 // actually separates the anchors today (a handful of characters) so a
 // deletion of the connecting clause reds without a loose `.{0,N}?` papering
-// over it. A positive regex over the whole fix-applier prompt — 1200+ chars —
-// would be satisfied by equivalent wording anywhere else in the Reviewers
-// section it happened to also match; these slices are bounded to the fix-applier
-// prompt specifically (`reviewersSection()` below, mirroring
-// `review-path-default.test.mjs`'s `fixApplierPrompt()`, duplicated rather
-// than imported for the reason `implementer-model-tier.test.mjs` gives for
-// its own copy: two files, seven lines, nothing detects drift between them).
+// over it. A positive regex over a section of text a dozen other sentences
+// could satisfy would be satisfied by equivalent wording elsewhere in it; the
+// member prompt is one member's text only, so the ordered spans below are
+// read against the whole of it (`fixApplierPrompt()` below).
 //
 // THE CEILING these pins have: they prove a phrase is PRESENT and ADJACENT
 // to its neighbor. A sentence appended after a pinned span that carves out
@@ -65,20 +54,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
-// Scoped to the Reviewers section first, so an `indexOf`-based anchor search
-// starts inside the fix-applier's own prompt rather than risking a match
-// against equivalent wording elsewhere in the file, present or future.
-const reviewersSection = () =>
-  RUN_TEAM.between("### Reviewers", "### Merge bot", "run-team Reviewers section").text;
-
-const PROMPT_ANCHOR = "> You are ALREADY in worktree";
-const PROMPT_END = "\n**Put the standing CI facts";
-const fixApplierPrompt = () =>
-  Pin.of(reviewersSection(), "reviewersSection()").between(PROMPT_ANCHOR, PROMPT_END, "run-team fix-applier prompt").text;
+// The member prompt as a whole: the fix-applier's agent body, then its rendered
+// review brief. Nothing in it is another member's text, so no slice is needed
+// to keep an implementer's identical sentence from satisfying a pin.
+const fixApplierPrompt = () => memberPrompt("fix-applier", "review");
 
 // The implementer's own copy of the count rule, the OTHER seat #859 requires
 // the qualification to reach. It lives in the claim-discipline block of the
@@ -171,8 +154,8 @@ test("a rewrapped fix-applier prompt still matches every pinned rule — these p
   // a column width nothing here assumes leaves every ordered span intact.
   const raw = Pin.of(fixApplierPrompt(), "fixApplierPrompt()").between(
     "Every factual claim your diff restates",
-    "\n>\n> **Apply",
-    "the fix-applier's new prose-discipline paragraph",
+    "\n\n**Apply",
+    "the fix-applier's prose-discipline paragraph",
   ).text;
   const body = flatten(raw);
   const words = body.split(/\s+/).filter(Boolean);
@@ -182,15 +165,11 @@ test("a rewrapped fix-applier prompt still matches every pinned rule — these p
     else acc.push(w);
     return acc;
   }, []);
-  const narrow = lines.map((l) => `> ${l}`).join("\n");
+  const narrow = lines.join("\n");
   assert.notEqual(narrow, raw, "the rewrap fixture no longer changes the paragraph's wrapping — update it");
-  const rewrappedFile = RUN_TEAM.text.replace(raw, () => narrow);
-  const rewrappedReviewers = Pin.of(rewrappedFile, "rewrappedFile").between(
-    "### Reviewers",
-    "### Merge bot",
-    "rewrapped run-team Reviewers section",
-  ).text;
-  const prompt = flatten(Pin.of(rewrappedReviewers, "rewrappedReviewers").between(PROMPT_ANCHOR, PROMPT_END, "rewrapped fix-applier prompt").text);
+  const rewrapped = fixApplierPrompt().replace(raw, () => narrow);
+  assert.notEqual(rewrapped, fixApplierPrompt(), "the rewrap never landed in the prompt — this control did not run");
+  const prompt = flatten(rewrapped);
   assert.match(prompt, Pin.phrase("Every factual claim your diff restates needs a settling command run against the tree first"));
   assert.match(prompt, Pin.phrase("No positional references"));
   assert.match(prompt, Pin.phrase("unless it is a past-tense record of a measurement you performed"));

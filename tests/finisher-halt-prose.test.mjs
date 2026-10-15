@@ -91,7 +91,7 @@ test("the tick paragraph says why past-pin cannot use the dead-review path, and 
 });
 
 test("finisher duty 4 names the cause in the ledger's vocabulary, and a duty 1 halt reports the verdict as printed", () => {
-  const duty = flat(RUN_TEAM.bullet("4. Report you the label", "**Give the finisher the instrument re-check verbatim too.**", "finisher duty 4").text);
+  const duty = flat(RUN_TEAM.bullet("4. Report you the label", "**What a finisher receives.**", "finisher duty 4").text);
   const vocab = Pin.sentences(duty).find((x) => x.includes("vocabulary")) ?? "";
   for (const c of HALT_CAUSES) assert.match(vocab, new RegExp(`\`${c}\``), `duty 4 no longer names \`${c}\``);
   assert.match(vocab, /`other` for every other halt/);

@@ -9,6 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { CASES, label, renderBrief } from "./support/render-brief.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
 const RUN_TEAM = Pin.file(join(ROOT, "plugin", "skills", "run-team", "SKILL.md"));
@@ -37,8 +38,19 @@ test("SKILL.md says the wait is capped, exit 75 is not a test result, and what e
   assert.match(p, Pin.phrase("`FLEET_SUITE_WAIT_S` seconds, 1800 by default, then exit **75** with `suite-slot: no slot after <n>s` on stderr, having launched nothing"),
     "the wait cap, its exit status or its message changed");
   assert.match(p, Pin.phrase("**Exit 75 is not a test result.**"), "the prose no longer says exit 75 is not a test result");
-  assert.match(p, Pin.phrase("Tell every implementer, fix-applier and finisher, in its brief, in one line: exit 75 is not a test result; run the command again."),
-    "the controller is no longer told to put the exit-75 line in the briefs");
+  assert.match(p, Pin.phrase("The implementer, fix-applier and finisher briefs carry the one-line rule: *Exit 75 from the suite is not a test result; run the command again.*"),
+    "the prose no longer says the briefs carry the exit-75 line");
+});
+
+// The sentence above is a claim about the templates, so it is pinned against what
+// each of those roles' briefs renders, every kind.
+test("every implementer, fix-applier and finisher brief carries the exit-75 line", () => {
+  const cases = CASES.filter((c) => ["implementer", "fix-applier", "finisher"].includes(c.role));
+  assert.ok(cases.length >= 3, "the cases this pins went missing");
+  for (const c of cases) {
+    assert.match(renderBrief(c.role, c.kind), Pin.phrase("Exit 75 from the suite is not a test result; run the command again."),
+      `${label(c)}'s brief no longer says exit 75 is not a test result`);
+  }
 });
 
 test("the runbook names the slot directory and the files its takeover cannot clear", () => {

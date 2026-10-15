@@ -91,17 +91,16 @@
 // its WIP-commit substitute.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 
-const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
-// The implementer's copy lives in the implementer agent body since #1804 (spec
-// 2026-09-24 § 2 Decision 2): the body is what each harness injects as the
-// member's system prompt, and SKILL.md's phase 2 no longer re-pastes it. The
-// fix-applier's copy is still a quote block in SKILL.md's Reviewers section.
-const IMPLEMENTER_BODY = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8").split("---").slice(2).join("---");
+// Both copies live in the agent body each harness injects as the member's
+// system prompt — the implementer's and the fix-applier's — and SKILL.md
+// re-pastes neither. Each is read from the member prompt, the body followed by
+// the brief the renderer prints for a fixed argument set, so a rule the
+// brief ever carries is found where the member finds it.
+const IMPLEMENTER_BODY = memberPrompt("implementer");
+const FIX_APPLIER_PROMPT = memberPrompt("fix-applier", "review");
 
 // `>` gutter and `**` emphasis stripped, whitespace collapsed — mirrors
 // `dispatch-block-pins-prose.test.mjs`'s `flatten`, so a pin here survives the
@@ -135,7 +134,7 @@ const implementerStashBlock = () =>
 
 const fixApplierStashBlock = () =>
   flatten(
-    RUN_TEAM.between(
+    Pin.of(FIX_APPLIER_PROMPT, "FIX_APPLIER_PROMPT").between(
       "**Never `git stash` or `git stash pop` here either",
       "**Report LAST",
       "the fix-applier's stash-prohibition block",
@@ -297,7 +296,7 @@ test("a rewrapped implementer stash block still matches every pin above — thes
 
 test("a rewrapped fix-applier stash block still matches every pin above — these pins refuse drift, not reflow", () => {
   assertSurvivesRewrap(
-    RUN_TEAM.text,
+    FIX_APPLIER_PROMPT,
     "**Never `git stash` or `git stash pop` here either",
     "**Report LAST",
     "the fix-applier's stash-prohibition block",

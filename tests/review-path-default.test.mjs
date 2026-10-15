@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 // The board's real parser, imported rather than re-described: the doc example
 // below is fed through it, so a widened/narrowed regex and a reverted example
 // both surface here instead of only in compute-board.test.mjs's own fixtures.
@@ -117,23 +118,18 @@ test("objectKeys reads fields by depth, not by line, and ignores brackets/commas
 });
 
 const REVIEWERS_END = "### Merge bot";
-const PROMPT_ANCHOR = "> You are ALREADY in worktree";
-const PROMPT_END = "\n**Put the standing CI facts";
 
 const reviewersSection = () => RUN_TEAM.between("### Reviewers", REVIEWERS_END, "run-team Reviewers").text;
-// Sliced out of the Reviewers section, never out of the whole file: `section()`
-// takes the FIRST hit, and the implementer dispatch in Phase 2 opens with the
-// same sentence. Anchored file-wide this silently returns the implementer's
-// prompt, and every assertion below then reports on the wrong agent.
-const fixApplierPrompt = () =>
-  Pin.of(reviewersSection(), "reviewersSection()").between(PROMPT_ANCHOR, PROMPT_END, "run-team fix-applier prompt").text;
-// The lead-in is what SUBSTITUTES the prompt's `<testCmd>` placeholder, so it
-// gets its own slice ending where the prompt begins — deliberately tighter than
-// the Reviewers section. Section-wide, the phrase is satisfied by any mention
-// inside the prompt itself, so the substitution duty could be deleted with the
-// pin still green; that is the whole failure mode being pinned.
+// The fix-applier's prompt is what the member reads: its agent body, then the
+// brief the renderer prints for a review fix-applier. SKILL.md carries neither.
+const fixApplierPrompt = () => memberPrompt("fix-applier", "review");
+// The lead-in is what passes the prompt's `<testCmd>` as an argument, so it
+// gets its own slice ending where the next dispatch paragraph begins —
+// deliberately tighter than the Reviewers section. Section-wide, the phrase is
+// satisfied by any mention elsewhere, so the substitution duty could be deleted
+// with the pin still green; that is the whole failure mode being pinned.
 const fixApplierLeadIn = () =>
-  Pin.of(reviewersSection(), "reviewersSection()").between("**Then dispatch a fix-applier**", PROMPT_ANCHOR, "run-team fix-applier lead-in").text;
+  Pin.of(reviewersSection(), "reviewersSection()").between("**Then dispatch a fix-applier**", "**A `DISPATCH fix-pr PR#<M>` on a conflict hold**", "run-team fix-applier lead-in").text;
 
 // Review1816: both `doesNotMatch` guards below were closed enumerations of
 // specific historical bad-phrasings — a syntactically different restatement
@@ -504,10 +500,12 @@ test("the fix commit is gated on a test run, in both files", () => {
     /Report the test\s*\n?>?\s*result with your SHA/i,
     "the fix-applier prompt no longer reports the test result with its SHA",
   );
-  // The prompt says `<testCmd>` — a PLACEHOLDER. Only the lead-in tells the
-  // controller to substitute it. Delete that sentence and the fix-applier is
-  // handed a literal `<testCmd>` against a step reading "copied verbatim — not
-  // a runner you picked": no error, both files individually coherent.
+  // The brief names `<testCmd>` and the renderer fills it from `--testCmd`, so
+  // the rendered prompt carries the command it was handed; the lead-in below is
+  // what tells the controller to pass the review's own `testCmd`. Delete that
+  // sentence and the fix-applier is handed a command nobody chose against a
+  // step reading "copied verbatim — not a runner you picked": no error, both
+  // files individually coherent.
   assert.match(
     fixApplierLeadIn(),
     /the same `testCmd` you\s+passed the review/,
@@ -515,8 +513,8 @@ test("the fix commit is gated on a test run, in both files", () => {
   );
   assert.match(
     prompt,
-    /`<testCmd>` from the worktree before committing/i,
-    "the fix-applier prompt no longer carries testCmd",
+    /`TESTCMD-1` from the worktree before committing/i,
+    "the fix-applier's rendered prompt no longer carries the test command it was handed",
   );
   assert.match(prompt, /never `--no-verify`/i, "the fix-applier prompt no longer forbids --no-verify");
 });
@@ -574,8 +572,8 @@ test("the fix commit pushes by refspec, in both files, to a branch the prompt bi
   // spends the operand, once in the lead-in that carries it.
   assert.match(
     prompt(),
-    Pin.phrase("whose PR branch is `<branch>`"),
-    "the fix-applier prompt no longer binds `<branch>` yet still pushes to it — the operand it spends is introduced nowhere in the block, and a detached worktree cannot supply one",
+    Pin.phrase("whose PR branch is `fix-branch`"),
+    "the fix-applier prompt no longer binds the branch it was handed yet still pushes to it — the operand it spends is introduced nowhere in the prompt, and a detached worktree cannot supply one",
   );
   // Pinned to the carry list itself, not to a bare mention of the branch: the
   // lead-in already names `the PR's implementer` two clauses earlier, so a

@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { renderBrief } from "./support/render-brief.mjs";
 import { briefPaths, issueMetrics } from "../plugin/scripts/ticket-router.mjs";
 import { chainHead, defang, implRow, outOfScope, parseAnswer, relabel } from "../plugin/scripts/pull.mjs";
 
@@ -605,53 +606,40 @@ test("Q1: exit 1 with no verdict JSON is a probe that crashed, never a `fixed` v
 
 // ── Q2: decided ──────────────────────────────────────────────────────────────
 
-// The three relabel comments, as SKILL.md § Relabel by cause words them,
-// each unwrapped into one line.
+// The three relabel comments, as `briefs/relabel.md` words them — rendered
+// through the shared fixture, each unwrapped into one line. The fixture's own
+// argument values (`LINE-1`, `OPTIONS-1`, `HANDS-1`, `LINE-2`) are what each
+// case below swaps for its own text.
+const unwrapped = (kind) => renderBrief("relabel", kind).trim().replace(/\n/g, " ");
 function skillTemplates() {
-  const from = SKILL.indexOf("**Relabel by cause.**");
-  const to = SKILL.indexOf("Neither label invokes anything", from);
-  assert.ok(from !== -1 && to > from, "SKILL.md still has the Relabel by cause section");
-  const quoted = SKILL.slice(from, to).split("\n").filter((l) => /^\s+> /.test(l) || /^\s*>$/.test(l));
-  const blocks = [];
-  let cur = [];
-  for (const l of [...SKILL.slice(from, to).split("\n"), ""]) {
-    const m = /^\s+> (.*)$/.exec(l);
-    if (m) cur.push(m[1]);
-    else if (cur.length) {
-      blocks.push(cur.join(" "));
-      cur = [];
-    }
-  }
-  assert.ok(quoted.length > 0);
-  assert.equal(blocks.length, 3, "three comment templates");
-  return { triage: blocks[0], fork: blocks[1], hands: blocks[2] };
+  return { triage: unwrapped("needs-triage"), fork: unwrapped("fork"), hands: unwrapped("hands") };
 }
 
 const CAUSES = [
   {
     token: "needs-triage", text: ["the", "API", "shape"], label: "needs-triage",
-    expect: (t) => t.triage.replace("<one line>", "the API shape"),
+    expect: (t) => t.triage.replace("LINE-1", "the API shape"),
   },
   {
     token: "ready-for-human-fork", text: ["A", "or", "B"], label: "ready-for-human",
-    expect: (t) => t.fork.replace("<options, verbatim from the brief>", "A or B"),
+    expect: (t) => t.fork.replace("OPTIONS-1", "A or B"),
   },
   {
     token: "ready-for-human-hands", text: ["external access", "needs", "a", "token"], label: "ready-for-human",
-    expect: (t) => t.hands.replace("<external access | manual testing | judgment during the work>", "external access").replace("<one line>", "needs a token"),
+    expect: (t) => t.hands.replace("HANDS-1", "external access").replace("LINE-2", "needs a token"),
   },
   {
     token: "ready-for-human-hands", text: ["manual", "testing", "click", "through"], label: "ready-for-human",
-    expect: (t) => t.hands.replace("<external access | manual testing | judgment during the work>", "manual testing").replace("<one line>", "click through"),
+    expect: (t) => t.hands.replace("HANDS-1", "manual testing").replace("LINE-2", "click through"),
   },
   {
     token: "ready-for-human-hands", text: ["judgment", "pick", "a", "name"], label: "ready-for-human",
-    expect: (t) => t.hands.replace("<external access | manual testing | judgment during the work>", "judgment during the work").replace("<one line>", "pick a name"),
+    expect: (t) => t.hands.replace("HANDS-1", "judgment during the work").replace("LINE-2", "pick a name"),
   },
 ];
 
 for (const c of CAUSES) {
-  test(`Q2 ${c.token} (${c.text[0]}): the comment is byte-equal to SKILL.md's template, the label moves, exit 1, nothing is claimed`, () => {
+  test(`Q2 ${c.token} (${c.text[0]}): the comment is byte-equal to the rendered relabel brief, the label moves, exit 1, nothing is claimed`, () => {
     const f = fixture();
     f.next("--head", "12");
     f.answer(12, "staleness", "done");
@@ -670,10 +658,11 @@ for (const c of CAUSES) {
   });
 }
 
-test("the comment helper is the template: relabel() agrees with SKILL.md for every cause", () => {
+test("the comment helper is the template: relabel() agrees with the rendered relabel brief for every cause", () => {
   const t = skillTemplates();
-  assert.equal(relabel("needs-triage", "X").comment, t.triage.replace("<one line>", "X"));
-  assert.equal(relabel("ready-for-human-fork", "X").comment, t.fork.replace("<options, verbatim from the brief>", "X"));
+  assert.equal(relabel("needs-triage", "X").comment, t.triage.replace("LINE-1", "X"));
+  assert.equal(relabel("ready-for-human-fork", "X").comment, t.fork.replace("OPTIONS-1", "X"));
+  assert.equal(relabel("ready-for-human-hands", "external access X").comment, t.hands.replace("HANDS-1", "external access").replace("LINE-2", "X"));
 });
 
 test("Q2 decided: the Pull goes on to the collision question and posts nothing", () => {
