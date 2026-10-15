@@ -47,7 +47,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -1446,7 +1446,10 @@ function runCheck() {
 // hard-linked to its stamped name, then unlinked or, when a successor is
 // carried, replaced by it — so its bytes are untouched, and the link refuses
 // atomically when that name is already taken rather than overwriting an older
-// archive.
+// archive. A `phase0.json` receipt beside the ledger belongs to the same run,
+// so it is archived as `phase0.<stamp>.json` under the ledger archive's own
+// stamp — a warning-only move after the ledger move, refused up front only
+// when that name is taken.
 //
 // What follows depends on the verdict below. After a `dead` or `none` one
 // nothing is carried: the next write subcommand finds no file and starts the
@@ -1564,9 +1567,16 @@ function runRotate() {
     carry = carryOf(text);
   }
   const carrying = carry.rows.length > 0 || carry.dispatched.length > 0 || carry.retired.length > 0;
+  // The phase-0 receipt beside the ledger belongs to the run being rotated
+  // away, so it takes the archive's own stamp: `phase0.<stamp>.json` next to
+  // `ledger.<stamp>.md`. A name already taken refuses before anything moves,
+  // as the ledger's own does.
+  const stamp = archiveStamp();
+  const receipt = join(dirname(file), RECEIPT);
+  const receiptArchive = existsSync(receipt) ? join(dirname(file), receiptArchiveName(stamp)) : null;
+  if (receiptArchive !== null && existsSync(receiptArchive)) die(`refusing to rotate ${file}: ${receiptArchive} already exists`);
   let archive = null;
   if (exists) {
-    const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "");
     archive = join(dirname(file), `${basename(file, ".md")}.${stamp}.md`);
     try {
       linkSync(file, archive);
@@ -1587,6 +1597,17 @@ function runRotate() {
     }
   } else {
     console.error(`    nothing to rotate: ${file} does not exist`);
+  }
+  // After the ledger has moved, and a warning rather than a refusal: the
+  // ledger is already archived, and a receipt left where it is is read as a
+  // previous run's by the next phase 0, which moves it aside itself.
+  if (receiptArchive !== null) {
+    try {
+      renameSync(receipt, receiptArchive);
+      console.error(`    archived ${receipt} -> ${receiptArchive}`);
+    } catch (e) {
+      console.error(`    could not archive ${receipt} -> ${receiptArchive}: ${e.message}`);
+    }
   }
   // Nothing to carry writes nothing, so the next write starts the skeleton
   // exactly as after any other verdict.

@@ -232,6 +232,17 @@ const COVERED_MJS = {
   // main-gain.test.mjs, "an ambient GIT_DIR naming another repository cannot
   // move the check there".
   "main-gain.mjs": 1,
+  // TWO scrubbed envs. `gitEnv(env)` in `run()` is behind every child the
+  // script starts that it waits for: its own git calls (the branch, the fetch,
+  // the fast-forward), the `gh pr list` of the fold-in, which also blanks
+  // GH_REPO, and the steps it runs as scripts of this directory; `gitEnv()` in
+  // `cockpit()` is the detached cockpit's. An ambient GIT_DIR would answer the
+  // branch and fast-forward reads for another repository, and an ambient
+  // GH_REPO would fold in another repository's PRs. Measured in
+  // phase0.test.mjs, "an ambient GIT_DIR or GH_REPO naming another repository
+  // does not change what any step reads or runs". Its other git call is
+  // `fleetFile()`'s, counted under fleet-dir.mjs.
+  "phase0.mjs": 2,
   // TWO scrubbed envs. `worktrees()`'s `worktree list` names which claims have
   // a worktree in this checkout; an ambient GIT_DIR would list another
   // repository's, and a claim to resume would read as one to report. Measured
