@@ -34,6 +34,15 @@ Relabelling and excluding write a `ledger.mjs row` comment naming the
 cause; a relabelled ticket costs nothing until a human runs `/triage`,
 and an excluded one re-enters the Shortlist once its premise closes.
 
+[`pull.mjs`](../../plugin/scripts/pull.mjs) runs the mechanical steps
+of a Pull in order and stops at each judgement — staleness, decided?,
+collision — with a `QUESTION <qid>:` block (exit 10) that the
+controller answers in one token with `pull.mjs answer`. State and every
+answer, with its time, are in `<scratch>/impl-<N>/pull.json`, so a
+process killed between answers resumes at the pending question. Exit 0
+prints the `DISPATCH` spec; exit 1 means the ticket left the Pull; a
+router that refuses releases the claim.
+
 ## Opinionated choices
 
 - **Relabel by cause, not a bare demotion.** Every non-admission is a
