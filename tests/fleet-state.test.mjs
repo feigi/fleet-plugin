@@ -328,10 +328,9 @@ test("readState: `applied` is read against a run or not at all; a junk entry cos
     writeFileSync(path, JSON.stringify({ quiet: 3, applied }));
     return readState(path, "fleet-state-test");
   };
-  for (const bad of [undefined, null, "x", [1], { reapAfter: [1] }, { run: 0, reapAfter: [1] }, { run: "5", reapAfter: [1] }, { run: 5 }, { run: 5, reapAfter: "1" }]) {
+  for (const bad of [undefined, null, "x", [1], { reapAfter: [1] }, { run: null, reapAfter: [2] }, { run: 0, reapAfter: [1] }, { run: "5", reapAfter: [1] }, { run: 5 }, { run: 5, reapAfter: "1" }]) {
     assert.equal(read(bad).applied, null, JSON.stringify(bad));
   }
-  assert.deepEqual(read({ run: null, reapAfter: [2] }).applied, { run: null, reapAfter: [2] });
   assert.deepEqual(read({ run: 5, reapAfter: [1, 0, -2, 1.5, "3", null, 4] }).applied, { run: 5, reapAfter: [1, 4] });
   assert.equal(read("junk").quiet, 3, "a junk `applied` costs the streak beside it");
   rmSync(dir, { recursive: true, force: true });

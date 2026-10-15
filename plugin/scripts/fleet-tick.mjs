@@ -207,9 +207,10 @@ function implementers(s, left) {
   }
   // Held until tier-check.mjs has run on the newest implementer and written
   // its verdict to the ledger — a Pull on top of an unchecked
-  // dispatch repeats whatever it got wrong. Running the check is the
-  // controller's own step, so it is asked to act, with the command in the
-  // detail.
+  // dispatch repeats whatever it got wrong. `--apply` runs the check itself
+  // before this row is read; the row is the controller's to act on when the
+  // tick ran without `--apply`, or the check wrote no verdict, so it asks to
+  // act, with the command in the detail.
   if (s.tierUnchecked.length) {
     return row(`HOLD (tier unchecked ${s.tierUnchecked.join(" ")})`, { acts: true, extra: tierCheckStep(s.tierUnchecked, s.phase0?.session) });
   }
@@ -1079,9 +1080,11 @@ export function livenessLines({ live, seen, thresholds, now }) {
 // --apply's pure half. The merge-bot numbers `applied.reapAfter` names for
 // THIS run: none when its `run` is not the controller record's `at`, since
 // merge-bot numbering restarts with a run and the state file outlives it
-// (fleet-state.mjs's `applied`). `controllerAt` is null with no record.
+// (fleet-state.mjs's `applied`). `controllerAt` is null with no record, and
+// with no record nothing tells this run from the one before it: a list then
+// names nothing, and the sweeps run again on the next tick.
 export function reapedAfter(applied, controllerAt) {
-  return applied !== null && applied.run === (controllerAt ?? null) ? applied.reapAfter : [];
+  return applied !== null && controllerAt != null && applied.run === controllerAt ? applied.reapAfter : [];
 }
 
 // The merge passes owed their reap and reclaim: every merge bot settled
@@ -1109,11 +1112,16 @@ function receiptOf(stdout) {
 }
 
 // reap.sh's receipt as `reaped <k>, kept <m>, worktreesRemoved <w>`, or null
-// for a stdout that carries none.
+// for a stdout that carries none. A receipt with warnings adds `warnings
+// <n>: <first note>`: reap.sh exits 0 with them, and this line is the only
+// place an unattended tick can say so.
 export function reapSummary(stdout) {
   const r = receiptOf(stdout);
   if (r === null || ![r.reaped, r.kept, r.worktreesRemoved].every(Array.isArray)) return null;
-  return `reaped ${r.reaped.length}, kept ${r.kept.length}, worktreesRemoved ${r.worktreesRemoved.length}`;
+  const warned = Array.isArray(r.warnings) ? r.warnings : [];
+  const first = warned[0]?.note;
+  return `reaped ${r.reaped.length}, kept ${r.kept.length}, worktreesRemoved ${r.worktreesRemoved.length}`
+    + (warned.length ? `, warnings ${warned.length}${typeof first === "string" ? `: ${first}` : ""}` : "");
 }
 
 // reclaim-scratch.mjs's receipt as `removed <k>, kept <m>, failed <f>`, or
@@ -1514,8 +1522,18 @@ function applyReap(due) {
 }
 
 // tier-check.mjs's verdict by its exit status, each one a token the check
-// writes on the ledger itself. Exit 2 writes nothing.
+// writes on the ledger itself. Exit 2 writes nothing. Exit 1 is the check's
+// mismatch and also what node exits with on a throw, so it stands as a
+// verdict only once the ledger carries it.
 const TIER_VERDICTS = new Map([[0, "tier-ok"], [1, "tier-mismatch"], [3, "tier-unverifiable"]]);
+
+// Whether the ledger holds tier-check.mjs's mismatch for `member`: the token
+// on a row, or the member itself settled `tier-mismatch`.
+function mismatchOnLedger(member) {
+  const { rows, dispatched } = readLedger();
+  return [...rows, ...dispatched].some((text) => text.split(/\s+/)
+    .some((tok) => tok === `${member}=tier-mismatch` || tok.startsWith(`tier-mismatch=${member}:`)));
+}
 
 // tier-check.mjs on each member, a batch of one apiece in a temporary file,
 // `session` the phase-0 receipt's — left out when the receipt records none,
@@ -1534,7 +1552,7 @@ function applyTierChecks(members, session) {
       rmSync(dir, { recursive: true, force: true });
     }
     const verdict = r.error ? undefined : TIER_VERDICTS.get(r.status);
-    if (verdict !== undefined) {
+    if (verdict !== undefined && (r.status !== 1 || mismatchOnLedger(member))) {
       wrote = true;
       console.log(`APPLIED tier-check ${member}: ${verdict}`);
     } else if (!r.error && r.status === 2) {
@@ -1662,11 +1680,12 @@ function main() {
   if (apply) {
     // Reap and reclaim after every merge pass settled `done` since the last
     // time they ran. Recorded only once both applied, on a fresh read of the
-    // state file so nothing the heartbeat wrote meanwhile is reverted, and
-    // never onto a file that could not be read.
+    // state file so nothing the heartbeat wrote meanwhile is reverted, never
+    // onto a file that could not be read, and never with no controller
+    // record: nothing could tell a list recorded then from the next run's.
     const run0 = controller?.at ?? null;
     const due = reapDue(run.mergeBotDone, priorState.applied, run0);
-    if (due.length && applyReap(due)) {
+    if (due.length && applyReap(due) && run0 !== null) {
       const now = readState(path, NAME);
       if (!now.degraded) {
         writeState(path, NAME, now, { applied: { run: run0, reapAfter: [...new Set([...reapedAfter(now.applied, run0), ...due])] } });

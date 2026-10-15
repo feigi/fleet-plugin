@@ -50,11 +50,13 @@
 //   applied  fleet-tick only, and only under --apply. {run, reapAfter}: the
 //            merge-bot numbers whose `merge-bot-<n>=done` the tick has already
 //            run reap.sh and reclaim-scratch.mjs after, and the controller
-//            record's `at` they belong to. Merge-bot numbering restarts at 1
-//            in a run that carries no bot forward, and this file outlives the
-//            rotation, so a list whose `run` is not the current record's `at`
-//            is the previous run's and names nothing in this one. Carried,
-//            never written, by the heartbeat and by ledger.mjs.
+//            record's `at` they belong to. Written only under a record: with
+//            none, nothing tells one run from the next. Merge-bot numbering
+//            restarts at 1 in a run that carries no bot forward, and this
+//            file outlives the rotation, so a list whose `run` is not the
+//            current record's `at` is the previous run's and names nothing in
+//            this one. Carried, never written, by the heartbeat and by
+//            ledger.mjs.
 //
 // One writer per key. A key two scripts wrote would need locking to be
 // correct, and none of them is in a position to hold one. That holds per key,
@@ -236,14 +238,14 @@ export function readState(path, name) {
     return out;
   };
   // `applied` is validated as a unit for the controller record's reason: a
-  // list is only read against the run it names, so one whose `run` is
-  // neither null (no record when it was written) nor a positive integer
-  // belongs to no run and reads as absent. Absent is the safe direction: the
-  // duties it records are idempotent, and the next --apply tick runs them
-  // again. A junk entry in the list costs that entry alone.
+  // list is only read against the run it names, so one whose `run` is not a
+  // positive integer belongs to no run and reads as absent. Absent is the
+  // safe direction: the duties it records are idempotent, and the next
+  // --apply tick runs them again. A junk entry in the list costs that entry
+  // alone.
   const done = (v) => {
     if (!isRecord(v) || !Array.isArray(v.reapAfter)) return null;
-    if (v.run !== null && !(Number.isInteger(v.run) && v.run > 0)) return null;
+    if (!(Number.isInteger(v.run) && v.run > 0)) return null;
     return { run: v.run, reapAfter: v.reapAfter.filter((n) => Number.isInteger(n) && n > 0) };
   };
   const { quiet, elapsed, digest, beat, ticked, acted, controller, seen, applied, ...rest } = parsed;

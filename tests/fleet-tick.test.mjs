@@ -1546,7 +1546,7 @@ test("refreshWhy: short of the cap, missing or empty refreshes; draining never d
 // resolves them — against the git common dir.
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync, realpathSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync, readdirSync, realpathSync, existsSync } from "node:fs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -2884,6 +2884,7 @@ test("CLI: the tier hold's step names no <session> when this run's receipt recor
 const REAP_STUB = `#!/bin/sh
 echo "reap.sh $*" >> "$(dirname "$0")/../apply.log"
 [ -n "$REAP_FAIL" ] && { echo "reap.sh: git worktree prune failed: simulated" >&2; exit 2; }
+[ -n "$REAP_CORRUPT" ] && echo '{ not json' > "$(dirname "$0")/../heartbeat.json"
 echo '{"applied":true,"reaped":["a","b"],"worktreesRemoved":["/w/a"],"kept":[{"ref":"c","reason":"r"}],"warnings":[]}'
 `;
 const RECLAIM_STUB = `import { appendFileSync } from "node:fs";
@@ -2893,12 +2894,14 @@ if (process.env.RECLAIM_FAIL) { console.error("reclaim-scratch: simulated refusa
 console.log(JSON.stringify({ applied: true, ledger: null, removed: [{ path: "a", reason: "r" }], kept: [], failed: [{ path: "b", error: "e" }] }));
 `;
 // The batch file's content is the logged line. A verdict lands as the token
-// the real check writes on the member's row; exit 2 writes nothing.
+// the real check writes on the member's row; exit 2 writes nothing, and
+// TIER_CRASH exits 1 writing nothing, as a node throw does.
 const TIER_STUB = `import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 const batch = readFileSync(process.argv[process.argv.indexOf("--batch") + 1], "utf8");
 appendFileSync(join(dirname(process.argv[1]), "..", "apply.log"), "tier-check.mjs " + batch + "\\n");
 const [{ member }] = JSON.parse(batch);
+if (process.env.TIER_CRASH) { console.error("tier-check: boom"); process.exit(1); }
 const code = Number(process.env.TIER_EXIT ?? 0);
 if (code === 2) { console.error(member + ": no " + member + ".jsonl found under the session"); process.exit(2); }
 const token = { 0: "tier-ok=" + member + ":fleet-implementer-slow-high", 1: "tier-mismatch=" + member + ":fleet-implementer-slow-high", 3: "tier-unverifiable=" + member + ":no-transcript" }[code];
@@ -2932,8 +2935,17 @@ function applyTicks(fixture, ticks) {
       seen = all.length;
       return mine;
     };
-    const applied = () => JSON.parse(readFileSync(state, "utf8")).applied;
-    const out = [{ stdout: first.stdout, stderr: first.stderr, status: first.status, calls: calls(), applied: applied() }];
+    const stateText = () => readFileSync(state, "utf8");
+    // A state file a stub corrupted reads as no list at all: its text is the evidence.
+    const applied = () => {
+      try {
+        return JSON.parse(stateText()).applied;
+      } catch (e) {
+        if (!(e instanceof SyntaxError)) throw e;
+        return undefined;
+      }
+    };
+    const out = [{ stdout: first.stdout, stderr: first.stderr, status: first.status, calls: calls(), applied: applied(), stateText: stateText() }];
     for (const t of rest) {
       (t.before ?? (() => {}))(first.repo);
       const r = spawnBounded(process.execPath, [join(first.dir, "bin", "fleet-tick.mjs"), ...t.args, "--state", state], {
@@ -2947,7 +2959,7 @@ function applyTicks(fixture, ticks) {
           ...(t.env ?? {}),
         },
       });
-      out.push({ stdout: r.stdout, stderr: r.stderr, status: r.status, calls: calls(), applied: applied() });
+      out.push({ stdout: r.stdout, stderr: r.stderr, status: r.status, calls: calls(), applied: applied(), stateText: stateText() });
     }
     return { ticks: out, dir: first.dir };
   } finally {
@@ -2955,7 +2967,14 @@ function applyTicks(fixture, ticks) {
   }
 }
 const APPLY = { args: ["--apply"] };
-const MERGED = (dispatched) => ({ ledger: { rows: [], dispatched }, shortlist: shortlistText([7, 8]) });
+// The controller record is what a list recorded by --apply is read against.
+const MERGED = (dispatched, extra = {}) => ({ ledger: { rows: [], dispatched }, shortlist: shortlistText([7, 8]), beforeRun: controllerRecord(), ...extra });
+// The controller record plus a list recorded by an earlier --apply tick.
+const withApplied = (applied) => (repo) => {
+  controllerRecord()(repo);
+  const state = join(repo, "..", "heartbeat.json");
+  writeFileSync(state, JSON.stringify({ ...JSON.parse(readFileSync(state, "utf8")), applied }));
+};
 const REAP_CALL = "reap.sh --apply";
 const isReclaim = (line) => /^reclaim-scratch\.mjs --root \/\S+ --apply$/.test(line);
 
@@ -2970,15 +2989,15 @@ test("CLI --apply: one `done` merge bot reaps and reclaims once across two ticks
   assert.ok(isReclaim(one.calls[1]), one.calls[1]);
   assert.match(one.stdout, /^APPLIED reap after merge-bot-1: reaped 2, kept 1, worktreesRemoved 1$/m);
   assert.match(one.stdout, /^APPLIED reclaim: removed 1, kept 0, failed 1$/m);
-  assert.deepEqual(one.applied, { run: null, reapAfter: [1] });
+  assert.deepEqual(one.applied, { run: CONTROLLER_AT, reapAfter: [1] });
 
   assert.deepEqual(two.calls, [], "the second tick reaped again after a pass already reaped after");
   assert.doesNotMatch(two.stdout, /APPLIED/);
-  assert.deepEqual(two.applied, { run: null, reapAfter: [1] });
+  assert.deepEqual(two.applied, { run: CONTROLLER_AT, reapAfter: [1] });
 
   assert.equal(three.calls.length, 2, JSON.stringify(three.calls));
   assert.match(three.stdout, /^APPLIED reap after merge-bot-2: /m);
-  assert.deepEqual(three.applied, { run: null, reapAfter: [1, 2] });
+  assert.deepEqual(three.applied, { run: CONTROLLER_AT, reapAfter: [1, 2] });
 });
 
 test("CLI --apply: a failing reap or reclaim retries on the next tick and records nothing until both apply", () => {
@@ -2993,26 +3012,58 @@ test("CLI --apply: a failing reap or reclaim retries on the next tick and record
   assert.match(two.stdout, /^APPLY FAILED reclaim: reclaim-scratch\.mjs exited 2: reclaim-scratch: simulated refusal$/m);
   assert.equal(two.applied, undefined, "a failed reclaim recorded merge-bot-1");
   assert.equal(three.calls.length, 2, JSON.stringify(three.calls));
-  assert.deepEqual(three.applied, { run: null, reapAfter: [1] });
+  assert.deepEqual(three.applied, { run: CONTROLLER_AT, reapAfter: [1] });
 });
 
-test("CLI --apply: a list recorded against another run's controller record names nothing in this one", () => {
+test("CLI --apply: a list recorded against this run's controller record is read, another run's names nothing", () => {
   // Merge-bot numbering restarts with a run that carries no bot forward, and
   // the state file outlives the rotation: the previous run's `merge-bot-1`
   // must not stand in for this run's.
-  const { ticks: [one] } = applyTicks({
-    ...MERGED(["merge-bot-1=done"]),
-    beforeRun: (repo) => writeFileSync(join(repo, "..", "heartbeat.json"), JSON.stringify({ applied: { run: 1_700_000_000_000, reapAfter: [1] } })),
-  }, [APPLY]);
+  const same = applyTicks(MERGED(["merge-bot-1=done"], { beforeRun: withApplied({ run: CONTROLLER_AT, reapAfter: [1] }) }), [APPLY]).ticks[0];
+  assert.equal(same.status, 0, same.stderr);
+  assert.deepEqual(same.calls, [], "a list recorded under this run's record was not read");
+  assert.deepEqual(same.applied, { run: CONTROLLER_AT, reapAfter: [1] });
+  const other = applyTicks(MERGED(["merge-bot-1=done"], { beforeRun: withApplied({ run: 1_700_000_000_000, reapAfter: [1] }) }), [APPLY]).ticks[0];
+  assert.equal(other.status, 0, other.stderr);
+  assert.equal(other.calls[0], REAP_CALL);
+  assert.deepEqual(other.applied, { run: CONTROLLER_AT, reapAfter: [1] });
+});
+
+test("CLI --apply: with no controller record nothing is recorded and every tick runs both again", () => {
+  // Nothing tells this run's `merge-bot-1` from the next run's, so a list
+  // recorded without a record would swallow the next run's first passes.
+  const { ticks: [one, two] } = applyTicks(MERGED(["merge-bot-1=done"], { beforeRun: () => {} }), [APPLY, APPLY]);
+  for (const t of [one, two]) {
+    assert.equal(t.status, 0, t.stderr);
+    assert.equal(t.calls.length, 2, JSON.stringify(t.calls));
+    assert.equal(t.calls[0], REAP_CALL);
+    assert.equal(t.applied, undefined, "a list was recorded with no controller record to read it against");
+  }
+});
+
+test("CLI --apply: only a merge bot settled `done` is a merge pass to reap after", () => {
+  const owed = applyTicks(MERGED(["merge-bot-1", "merge-bot-2=killed", "merge-bot-3=done"]), [APPLY]).ticks[0];
+  assert.equal(owed.status, 0, owed.stderr);
+  assert.match(owed.stdout, /^APPLIED reap after merge-bot-3: /m, "a live or killed merge bot counted as a pass");
+  assert.deepEqual(owed.applied, { run: CONTROLLER_AT, reapAfter: [3] });
+  const none = applyTicks(MERGED(["merge-bot-1", "merge-bot-2=killed"]), [APPLY]).ticks[0];
+  assert.equal(none.status, 0, none.stderr);
+  assert.deepEqual(none.calls, []);
+  assert.doesNotMatch(none.stdout, /APPLIED/);
+});
+
+test("CLI --apply: a state file the reap left unreadable is not written over", () => {
+  const { ticks: [one] } = applyTicks(MERGED(["merge-bot-1=done"]), [{ ...APPLY, env: { REAP_CORRUPT: "1" } }]);
   assert.equal(one.status, 0, one.stderr);
-  assert.equal(one.calls[0], REAP_CALL);
-  assert.deepEqual(one.applied, { run: null, reapAfter: [1] });
+  assert.equal(one.calls.length, 2, "the reap and the reclaim both ran, so the record was owed");
+  assert.equal(one.stateText, "{ not json\n", "the tick wrote a list onto a file it could not read");
 });
 
 test("reapDue: a list counts only against the controller record it was written under", () => {
   assert.deepEqual(reapDue([1, 2], { run: 5, reapAfter: [1] }, 5), [2]);
   assert.deepEqual(reapDue([1, 2], { run: 5, reapAfter: [1] }, 6), [1, 2], "another run's list named this run's merge-bot-1");
-  assert.deepEqual(reapDue([1, 2], { run: null, reapAfter: [1, 2] }, undefined), [], "no record then and none now is the same run");
+  assert.deepEqual(reapDue([1, 2], { run: 5, reapAfter: [1] }, null), [1, 2], "a list named a run with no record");
+  assert.deepEqual(reapDue([1, 2], { run: null, reapAfter: [1, 2] }, undefined), [1, 2], "no record then and none now is not the same run");
   assert.deepEqual(reapDue([3], null, 5), [3]);
   assert.deepEqual(reapedAfter({ run: 5, reapAfter: [1] }, 6), []);
 });
@@ -3020,6 +3071,9 @@ test("reapDue: a list counts only against the controller record it was written u
 test("reapSummary / reclaimSummary: a receipt's counts, null for a stdout carrying none", () => {
   assert.equal(reapSummary('warning first\n{"applied":true,"reaped":[1],"worktreesRemoved":[],"kept":[1,2],"warnings":[]}\n'),
     "reaped 1, kept 2, worktreesRemoved 0");
+  const warned = JSON.stringify({ applied: true, reaped: [1], worktreesRemoved: [], kept: [], warnings: [{ branch: "b", note: "branch config section was left: boom" }, { branch: "c", note: "x" }] });
+  assert.equal(reapSummary(warned), "reaped 1, kept 0, worktreesRemoved 0, warnings 2: branch config section was left: boom");
+  assert.equal(reapSummary(warned.replace(/"warnings":.*\}$/, '"warnings":[{"branch":"b"}]}')), "reaped 1, kept 0, worktreesRemoved 0, warnings 1");
   assert.equal(reclaimSummary('{"applied":true,"ledger":null,"removed":[],"kept":[1],"failed":[1,2,3]}'), "removed 0, kept 1, failed 3");
   for (const junk of ["", "not json", "null", '{"reaped":[]}', '{"removed":[],"kept":[],"failed":"x"}']) {
     assert.equal(reapSummary(junk), null, junk);
@@ -3047,6 +3101,40 @@ test("CLI --apply: an unchecked implementer gets one batch call with the receipt
   assert.deepEqual(JSON.parse(one.calls[0].slice("tier-check.mjs ".length)), [{ member: "impl-412", session: join(dir, "session") }]);
   assert.match(one.stdout, /^APPLIED tier-check impl-412: tier-ok$/m);
   assert.match(one.stdout, /^implementers 1\/2 → PULL #420/m, "the verdict the check wrote was not read back");
+});
+
+test("CLI --apply: a check that exits 1 having written no mismatch failed, and one that wrote it is a verdict", () => {
+  // Node exits 1 on a throw, as the check does on a mismatch: only the
+  // ledger tells them apart.
+  const crashed = applyTicks(UNCHECKED_412, [{ ...APPLY, env: { TIER_CRASH: "1" } }]).ticks[0];
+  assert.equal(crashed.status, 0, crashed.stderr);
+  assert.match(crashed.stdout, /^APPLY FAILED tier-check impl-412: tier-check\.mjs exited 1: tier-check: boom$/m);
+  assert.doesNotMatch(crashed.stdout, /APPLIED tier-check/);
+  assert.match(crashed.stdout, /^implementers 1\/2 → HOLD \(tier unchecked impl-412\)/m);
+  const mismatch = applyTicks(UNCHECKED_412, [{ ...APPLY, env: { TIER_EXIT: "1" } }]).ticks[0];
+  assert.equal(mismatch.status, 0, mismatch.stderr);
+  assert.match(mismatch.stdout, /^APPLIED tier-check impl-412: tier-mismatch$/m);
+  assert.doesNotMatch(mismatch.stdout, /APPLY FAILED/);
+  assert.match(mismatch.stdout, /^implementers 1\/2 → HOLD \(tier mismatch impl-412\)/m, "the verdict the check wrote was not read back");
+});
+
+test("CLI --apply: a check that exits 3 is the unverifiable verdict, which lifts the hold", () => {
+  const { ticks: [one] } = applyTicks(UNCHECKED_412, [{ ...APPLY, env: { TIER_EXIT: "3" } }]);
+  assert.equal(one.status, 0, one.stderr);
+  assert.match(one.stdout, /^APPLIED tier-check impl-412: tier-unverifiable$/m);
+  assert.match(one.stdout, /^implementers 1\/2 → PULL #420/m, "the verdict the check wrote was not read back");
+});
+
+test("CLI --apply: a receipt that records no session sends the member alone, and the batch file is removed after", (t) => {
+  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-tmpdir-")));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  const { ticks: [one] } = applyTicks({
+    ...UNCHECKED_412, phase0: (receipt) => ({ ...receipt, session: "" }),
+  }, [{ ...APPLY, env: { TMPDIR: tmp } }]);
+  assert.equal(one.status, 0, one.stderr);
+  assert.equal(one.calls.length, 1, JSON.stringify(one.calls));
+  assert.deepEqual(JSON.parse(one.calls[0].slice("tier-check.mjs ".length)), [{ member: "impl-412" }]);
+  assert.deepEqual(readdirSync(tmp), [], "the batch file's directory was left behind");
 });
 
 test("CLI --apply: a check that exits 2 prints its line and the hold stays", () => {

@@ -1265,8 +1265,9 @@ verdicts, whether that member is still running or already settled `bailed`,
 one. Only the newest member counts, so a replacement (`impl-<N>-b`) is what
 clears a mismatch — and is then owed its own check. A mismatch on a ticket
 whose issue is already CLOSED holds nothing: the tick probes that issue and
-drops it, since there is nothing left to replace. The tick never reads a
-transcript: clear an unchecked hold by running the check on that member. A
+drops it, since there is nothing left to replace. The tick reads no transcript
+itself: `tick --apply` runs the check, and an unchecked hold it leaves is
+cleared by running the check on that member by hand. A
 settled member's check works only when its transcript exists;
 without one, the verdict is `tier-unverifiable` for a member settled `killed`
 or `released`, and exit 2 naming the wrong session for any other. Clear a
@@ -1790,7 +1791,8 @@ owes beyond its row:
   reclaims their scratch with `reclaim-scratch.mjs --root <scratch> --apply`
   (below), once for every merge bot settled `done` — always, even when the pass
   merged nothing — and runs both again on the next tick after an `APPLY FAILED`
-  line. A label that landed at the last moment reads `DISPATCH
+  line, and on every tick while this run has no controller record to remember
+  the pass by. A label that landed at the last moment reads `DISPATCH
   merge-bot` again: dispatch the next bot straight away. A `rebase-fallback-#<pr>`
   on a conflict needs no record from you — the bot already appended
   `conflict-hold:#<pr>` to that PR's row, and the tick turns it into `DISPATCH
@@ -1969,12 +1971,14 @@ depth** guard table applied in code. Act on each line as it reads:
   the hold stays while the check writes no verdict (its `tier-ok=`, or
   `tier-unverifiable=` for a member settled `killed` or `released` with no
   transcript, clears it); a mismatch is yours to clear, by dispatching the
-  replacement at the right tier (phase 2). Each
-  prints its clearing step in the row's detail: the `tier-check.mjs` command
+  replacement at the right tier (phase 2). Each prints its clearing step in
+  the row's detail. For a mismatch that is the replacement's name —
+  `impl-<N>-b` on a first retry, else one letter past the highest the ticket
+  has used, or that no retry letter is left. For an unchecked tier, which
+  `tick --apply` has already tried, it is the `tier-check.mjs` command to run
+  by hand when the tick ran without `--apply` or the check wrote no verdict,
   with a batch entry per member it names (fill in `<file>`; `<session>` too
-  when no receipt of this run records one),
-  or the replacement's name — `impl-<N>-b` on a first retry, else one letter
-  past the highest the ticket has used, or that no retry letter is left.
+  when no receipt of this run records one).
 - `AT CAP`, `IDLE OK` — nothing to do on that row.
 - `MAIN-CHECKOUT-DIRTY <paths> …`, printed above the rows, with every
   dispatching row (implementers, reviewers, merge-bot) reading
