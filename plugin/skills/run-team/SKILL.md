@@ -382,7 +382,8 @@ retries one that failed while applying an answer (the question stands), and
 after a router refusal `next --head <N>` starts the ticket over; exit 3 is a
 usage mistake, or an answer the question does not take, and records nothing.
 The record is `<scratch>/impl-<N>/pull.json`. The steps below are what
-the driver runs, and the guidance for answering `staleness` and `decided`.
+the driver runs, and the guidance for answering `staleness`, `decided` and
+`collision`.
 
 One free implementer slot is one Pull. The tick names the heads — `PULL #<n>
 #<m>`, one per free slot — and each Pull runs this sequence on its head,
@@ -592,22 +593,19 @@ terminating in exactly one dispatch or an empty shortlist:
 
    No sizing agent here. `sizing-a-ticket` picks the *process path*, and that is
    phase 2's call, after the ticket is claimed.
-4. **Collision scan against open PRs and live branches** — the ticket is an
-   *un-implemented issue* with no diff, so infer its target files from the brief
-   (the paths it names) and compare them against each open PR's `gh pr diff <PR>
-   --name-only` **and** each live worktree's `git diff --name-only
-   origin/main...<branch>` (the branches `git worktree list` names) — a member
-   mid-work has a branch before it has a PR. `pr-overlap.mjs` is **PR-vs-PR
-   only** — it runs `gh pr diff` on *both* args and errors on an issue number,
-   so use it the way the merge bot does (PR vs PR), never on a ticket here.
-   Step 2 catches a ticket already taken, not one that *edits a file an open PR
-   edits*. Overlap → exclude it `behind-pr:#M`, next entry. The tracker cannot
-   express this, and it is what actually stalls a Pull's PR at merge.
-5. **Sequence check** — the brief's `Out of scope` names an open ticket this one
-   sequences after → exclude it `behind-issue:#M`, next entry. That lives in the
-   brief, is invisible to the dependency scan, and oldest-first order puts a
-   chain's members next to each other, where two consecutive numbers read as
-   two independent tickets.
+4. **Collision scan against open PRs and live branches** — `pull.mjs` runs it
+   before Q3 and prints one line per open PR or live worktree branch that shares
+   a path with the brief, `no overlap` when none, and `could not look: <which>`
+   for one it could not read. Answer Q3 off those lines: an overlap →
+   `behind-pr:#M`, a branch with no PR yet by its name; a target file the brief
+   does not spell as a path → `paths <p>…`, which scans again and asks again. A
+   PR the scan could not read is still yours to judge, and `behind-pr` on it is
+   taken. `pr-overlap.mjs` is **PR-vs-PR only** — it runs `gh pr diff` on both
+   args and errors on an issue number, so never run it on a ticket here.
+5. **Sequence check** — the `#N` refs of the brief's `Out of scope` section are
+   printed beside Q3 as the candidates: one naming an open ticket this one
+   sequences after → `behind-issue:#M`. No overlap and no such ticket →
+   `clear`.
 6. **Claim** — `~/.fleet/bin/fleet-run claim-ticket.sh <N> impl-<N> implementer
    --apply` (below). Exit 2 → treat it as taken, next entry.
 7. **Route, row, then dispatch** — `~/.fleet/bin/fleet-run ticket-router.mjs route
