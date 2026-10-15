@@ -243,6 +243,15 @@ const COVERED_MJS = {
   // does not change what any step reads or runs". Its other git call is
   // `fleetFile()`'s, counted under fleet-dir.mjs.
   "phase0.mjs": 2,
+  // ONE scrubbed env, in `spawn()`, behind every child the script starts: its
+  // own git calls (the main-checkout probe, the subject read for a close), the
+  // `gh` reads and writes, and the steps it runs as scripts of this directory.
+  // An ambient GIT_DIR would answer the checkout probe and the subject read for
+  // another repository, and an ambient GH_REPO would read and relabel another
+  // repository's ticket. Measured in pull.test.mjs, "an ambient GIT_DIR or
+  // GH_REPO naming another repository does not change what any step reads or
+  // runs". Its other git call is `fleetFile()`'s, counted under fleet-dir.mjs.
+  "pull.mjs": 1,
   // ONE scrubbed env, in `run()`, behind every child the script starts: its own
   // git calls (the branch probes, the switch, the commit, the push), the `gh pr
   // create`, which also blanks GH_REPO, and the steps it runs as scripts of

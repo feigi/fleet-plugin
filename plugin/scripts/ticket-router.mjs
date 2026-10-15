@@ -90,17 +90,26 @@ export function briefText(issue) {
   return String(issue.body ?? "");
 }
 
-/** The metric columns for a parsed `gh issue view --json title,body,comments,labels,createdAt`, or null when it is not one. */
-export function issueMetrics(issue, now = Date.now()) {
-  if (issue === null || typeof issue !== "object" || Array.isArray(issue) || typeof issue.body !== "string") return null;
-  const brief = briefText(issue).trim();
-  const lines = brief.split(/\r?\n/);
+/**
+ * The file paths a brief names: every backticked token without whitespace that
+ * holds a `/` or ends in an extension, in first-seen order, each once.
+ */
+export function briefPaths(brief) {
   const paths = new Set();
   for (const m of brief.matchAll(/`([^`\n]+)`/g)) {
     const tok = m[1];
     if (/\s/.test(tok)) continue;
     if (tok.includes("/") || /\.[A-Za-z][A-Za-z0-9]*$/.test(tok)) paths.add(tok);
   }
+  return [...paths];
+}
+
+/** The metric columns for a parsed `gh issue view --json title,body,comments,labels,createdAt`, or null when it is not one. */
+export function issueMetrics(issue, now = Date.now()) {
+  if (issue === null || typeof issue !== "object" || Array.isArray(issue) || typeof issue.body !== "string") return null;
+  const brief = briefText(issue).trim();
+  const lines = brief.split(/\r?\n/);
+  const paths = briefPaths(brief);
   const created = Date.parse(issue.createdAt ?? "");
   const kind = (Array.isArray(issue.labels) ? issue.labels : []).map((l) => l?.name).find((n) => KINDS.has(n)) ?? "";
   return {
@@ -108,8 +117,8 @@ export function issueMetrics(issue, now = Date.now()) {
     criteria: String(lines.filter((l) => /^\s*[-*]\s*\[[ xX]\]/.test(l)).length),
     comments: String(Array.isArray(issue.comments) ? issue.comments.length : 0),
     age_days: Number.isFinite(created) ? String(Math.max(0, Math.floor((now - created) / DAY_MS))) : "",
-    paths: String(paths.size),
-    test_paths: String([...paths].filter((p) => /\.test\.|(^|\/)tests?\//.test(p)).length),
+    paths: String(paths.length),
+    test_paths: String(paths.filter((p) => /\.test\.|(^|\/)tests?\//.test(p)).length),
     xrefs: String(new Set([...brief.matchAll(/#(\d+)/g)].map((m) => m[1])).size),
     kind,
   };
