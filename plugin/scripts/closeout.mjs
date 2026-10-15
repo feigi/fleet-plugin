@@ -19,7 +19,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-
+import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 
 const NAME = "closeout";
@@ -143,21 +143,20 @@ function stepRelease(reason) {
           needRelease.push(`#${ticket}: settle failed`);
         }
       } else {
-        needRelease.push(`#${ticket}: ${release.stderr.trim().split("\n")[0]}`);
+        // Extract the blocker message from release output
+        const output = release.stdout.trim() || release.stderr.trim();
+        const blocker = output.split("\n")[0];
+        console.log(`NEED hand-release #${ticket} ${blocker}`);
       }
     }
   }
 
-  let output = released.length > 0 ? `released: ${released.join(", ")}` : "no claims released";
   if (needRelease.length > 0) {
-    for (const need of needRelease) {
-      console.log(`NEED hand-release ${need}`);
-    }
     // Return pending if there are any unreleasable
-    return { status: "pending", output };
+    return { status: "pending", output: `released: ${released.join(", ")}` };
   }
 
-  return { status: "ok", output };
+  return { status: "ok", output: released.length > 0 ? `released: ${released.join(", ")}` : "no claims released" };
 }
 
 function stepTick() {
@@ -177,12 +176,10 @@ function stepTick() {
 }
 
 function stepScrape() {
-  // Call member-outcomes.mjs scraper
-  const result = node("member-outcomes.mjs");
+  // Scrape member outcomes for this session
+  const result = node("member-record.mjs", ["encodeProjectDir"]);
   if (result.status !== 0) {
-    // member-outcomes scraper might not exist or might be optional
-    // Return ok but note it
-    return { status: "ok", output: "no scraper available" };
+    return { status: "ok", output: "no scraper output" };
   }
   return { status: "ok", output: result.stdout.trim() };
 }
@@ -223,6 +220,7 @@ function stepCommitAndPR(reason, branchNameArg) {
   const mainCheckoutResult = spawnSync("git", ["rev-parse", "--show-toplevel"], {
     encoding: "utf8",
     stdio: "pipe",
+    env: gitEnv(),
   });
   if (mainCheckoutResult.status !== 0) {
     return { status: "failed", output: "not in git repository" };
@@ -242,10 +240,12 @@ function stepCommitAndPR(reason, branchNameArg) {
       const localCheck = spawnSync("git", ["rev-parse", "--verify", fullName], {
         cwd,
         stdio: "pipe",
+        env: gitEnv(),
       });
       const remoteCheck = spawnSync("git", ["ls-remote", "origin", `refs/heads/${fullName}`], {
         cwd,
         stdio: "pipe",
+        env: gitEnv(),
       });
 
       if (localCheck.status !== 0 && remoteCheck.stdout.toString().trim() === "") {
@@ -264,6 +264,7 @@ function stepCommitAndPR(reason, branchNameArg) {
   const switchResult = spawnSync("git", ["switch", "-c", branchName], {
     cwd,
     stdio: "pipe",
+    env: gitEnv(),
   });
   if (switchResult.status !== 0) {
     return { status: "failed", output: "git switch failed" };
@@ -273,9 +274,10 @@ function stepCommitAndPR(reason, branchNameArg) {
   const commitResult = spawnSync("git", ["commit", "docs/metrics/member-outcomes.tsv", "docs/metrics/ticket-features.tsv", "docs/metrics/tier-outcomes.tsv", "-m", `Closeout: ${reason}`], {
     cwd,
     stdio: "pipe",
+    env: gitEnv(),
   });
   if (commitResult.status !== 0) {
-    spawnSync("git", ["switch", "main"], { cwd, stdio: "pipe" });
+    spawnSync("git", ["switch", "main"], { cwd, stdio: "pipe", env: gitEnv() });
     return { status: "failed", output: "git commit failed" };
   }
 
@@ -283,9 +285,10 @@ function stepCommitAndPR(reason, branchNameArg) {
   const pushResult = spawnSync("git", ["push", "-u", "origin", branchName], {
     cwd,
     stdio: "pipe",
+    env: gitEnv(),
   });
   if (pushResult.status !== 0) {
-    spawnSync("git", ["switch", "main"], { cwd, stdio: "pipe" });
+    spawnSync("git", ["switch", "main"], { cwd, stdio: "pipe", env: gitEnv() });
     return { status: "failed", output: "git push failed" };
   }
 
@@ -295,12 +298,12 @@ function stepCommitAndPR(reason, branchNameArg) {
     stdio: "pipe",
   });
   if (prResult.status !== 0) {
-    spawnSync("git", ["switch", "main"], { cwd, stdio: "pipe" });
+    spawnSync("git", ["switch", "main"], { cwd, stdio: "pipe", env: gitEnv() });
     return { status: "failed", output: "gh pr create failed" };
   }
 
   // Switch back to main
-  spawnSync("git", ["switch", "main"], { cwd, stdio: "pipe" });
+  spawnSync("git", ["switch", "main"], { cwd, stdio: "pipe", env: gitEnv() });
 
   return { status: "ok", output: `PR created on ${branchName}` };
 }
