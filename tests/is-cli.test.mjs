@@ -75,7 +75,7 @@ test("isCLI defaults to the live process.argv[1]", () => {
 const LINK_NAME = "script.mjs";
 const CLI_SCRIPTS = [
   "diff-stats", "fleet-heartbeat", "fleet-tick", "frontmatter-check", "main-checkout",
-  "member-outcomes", "tier-check", "tier-outcomes", "tier-roles", "board", "dispositions-check", "recipe-prove",
+  "member-outcomes", "tier-check", "tier-outcomes", "tier-roles", "board", "dispositions-check", "recipe-prove", "fleet-event",
 ];
 
 // A guard that wrongly runs main() on import leaves a child that need never

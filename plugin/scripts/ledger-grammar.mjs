@@ -276,6 +276,13 @@ function nextReviewer(launches, pr, retired) {
   return null;
 }
 
+/** The runner name the next launch on PR `pr` takes, read off a ledger's
+ * `rows` and its `## Retired` names: nextReviewer() over the PR's stream.
+ * null with every letter taken. */
+export function nextReviewerName(rows, pr, retired = []) {
+  return nextReviewer(readReviews(streams(rows).get(pr) ?? []).launches, pr, retired);
+}
+
 const OPEN_WAYS_OUT = "wait for its reviewed=, or, once Member-killed confirms its runner dead, settle it =failed in the same `ledger.mjs review` call as the new launch";
 
 /** Whether a word of a row is a review token — `review=…` or `reviewed=…`,

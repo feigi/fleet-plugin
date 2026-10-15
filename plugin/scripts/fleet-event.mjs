@@ -1,0 +1,583 @@
+#!/usr/bin/env node
+// A member's report, recorded as one command: the writes its wake owes, then
+// the tick.
+//
+//   fleet-event.mjs <kind> <args> [--implementer-cap <n>] [--reviewer-cap <n>]
+//
+// Reached through the Resolver and run from the main checkout. Every kind
+// performs its writes, then runs `fleet-tick.mjs --apply` with the caps —
+// each flag as given, else the one `.fleet/phase0.json` records, else the
+// tick's own default — and prints one `event: <kind>: <summary>` line with
+// the tick's output verbatim after it. Every kind is idempotent: a second run
+// finds its writes made and only ticks again.
+//
+// `<scratch>` below is the phase-0 receipt's `scratch`, else the root
+// scratch-root.mjs prints; every settle reads its report under
+// `<scratch>/reports` (`--reports`). A member the ledger already holds
+// settled, under any outcome, is not settled again.
+//
+//   impl-report <impl-N[-x]>
+//       `ledger.mjs settle <member> --from-report`. Settled `bailed`: the
+//       report's `bailCause` names the label (undecided `needs-triage`, fork
+//       and hands `ready-for-human`), then:
+//         `gh issue edit <N> --remove-label ready-for-agent --remove-label
+//         in-progress --add-label <label>`, skipped when the issue already
+//         carries the label and neither of the others;
+//         `gh issue comment <N>` with the comment `dispatch-prompt.mjs render
+//         relabel` renders from the report's `bailDetail` — kind
+//         `needs-triage` (`--line`), `fork` (`--options`), or `hands`, whose
+//         detail opens with the cause the Pull's answer names (`external
+//         access`, `manual testing`, `judgment`) and goes on with the line —
+//         skipped when the issue already carries that comment;
+//         `release-ticket.sh <N> impl-<N> implementer --apply`, only once the
+//         label is in place, since the release drops `in-progress` itself.
+//         It runs on a second run too: it measures the claim again and
+//         writes nothing when nothing is left to release. A refusal prints
+//         `NEED hand-release #<N> <blocker>` and is never forced.
+//   fix-report <fix-pr-M[-x]>
+//       `settle --from-report`, which records the filings and rulings the
+//       report carries. Settled `applied:`/`no-op`, on a PR whose rows carry
+//       `reviewed=`, by a member whose rendered brief
+//       (`.fleet/briefs/<member>.json`) is kind `review` or
+//       `dispositions-retry` — a review fix-applier, not one that cleared a
+//       conflict hold or a red check — and with no `dispositions-*=<member>:`
+//       token on the PR's rows yet: `dispositions-check.mjs --member <member>
+//       --scratch <scratch>`, its stdout printed. That script writes its own
+//       verdict token; its exit 1 is a verdict, its exit 2 a NEED.
+//   finisher-report <finisher-pr-M[-x]>
+//       `settle --from-report`. Settled `halted:<cause>`: `gh pr comment <M>`
+//       with the report's cause and evidence. A repair finisher (a retry
+//       suffix) whose report claims `labelled` and whose `labelsReadBack`
+//       lacks `ready-to-merge`: the one-shot escalation, `gh pr comment <M>`
+//       with its read-back and the read-back of the finisher before it —
+//       whether or not its settle was accepted, since the settle refuses
+//       exactly that read-back. Either comment is skipped when the PR already
+//       carries it.
+//   merge-bot-report <merge-bot-n>
+//       `ledger.mjs token <pr> held-behind:#<behind>` for each `held[]` entry
+//       of the report the PR's rows do not already carry, then `settle
+//       --from-report`. The reap and the reclaim run under the tick's
+//       `--apply`.
+//   review-result <pr> <path>
+//       The review result file at `<path>`, which must be
+//       `<scratch>/pr<pr>/<run>/<file>`, `<run>` a review run root
+//       (`run-` and eight characters) and no `..` segment: its `head` and
+//       `counts` make `ledger.mjs review <pr>
+//       reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, skipped when
+//       the PR's rows already carry that token.
+//   review-failed <pr> <launch>
+//       `ledger.mjs review <pr> review=<launch>=failed`, `<launch>` as the
+//       PR's row spells it after `review=` (`member:<runner>` or
+//       `wf:<runId>`), skipped when the rows already carry it; the summary
+//       names the runner the PR's next launch takes, as `review` reports it.
+//
+// A write this script cannot make, and does not refuse, is printed as a
+// `NEED <what> …` line, at the left margin, for the controller to make by
+// hand.
+//
+// Exit: 0 every write made and the tick exited 0. 2 a usage error, refused
+// before anything is written or ticked: an unknown kind or flag, a member of
+// the wrong family, a review path outside the PR's partition or a file that
+// is no review result, a ledger or phase-0 receipt that cannot be read. A
+// ledger write's own refusal — `settle`'s 3 (the report's claim and the world
+// disagree) or 2, `token`'s or `review`'s 2 — passes its exit and message
+// through, and the tick still runs so the controller sees the rows. Else the
+// tick's own exit when it is not 0. Else 4 when a NEED line was printed.
+//
+// Zero deps: node builtins and sibling scripts only.
+
+import { spawnSync } from "node:child_process";
+import { readFileSync, realpathSync } from "node:fs";
+import { basename, dirname, join, normalize, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { makeDie, defineFlags, isDigits, writeAll } from "./arg.mjs";
+import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
+import { gitEnv } from "./git-env.mjs";
+import { isCLI } from "./is-cli.mjs";
+import { BRIEFS, REVIEW, REVIEWED, memberTokens, nextReviewerName, parseDispatchedEntry, parseMember, parseToken, rowNums } from "./ledger-grammar.mjs";
+import { dispositionsToken } from "./fleet-tick.mjs";
+import { readRunReceipt, tickCaps } from "./phase0-receipt.mjs";
+import { defaultScratch, readReportIn, reportsDir } from "./report-files.mjs";
+
+const NAME = "fleet-event";
+const die = makeDie(NAME);
+const SCRIPTS = dirname(fileURLToPath(import.meta.url));
+const MAX_BUFFER = 64 * 1024 * 1024;
+const GH_TIMEOUT_MS = 60_000;
+const CHILD_TIMEOUT_MS = 300_000;
+const READY = "ready-to-merge";
+
+const KINDS = {
+  "impl-report": { args: ["<member>"], family: "impl" },
+  "fix-report": { args: ["<member>"], family: "fix-pr" },
+  "finisher-report": { args: ["<member>"], family: "finisher-pr" },
+  "merge-bot-report": { args: ["<member>"], family: "merge-bot" },
+  "review-result": { args: ["<pr>", "<path>"] },
+  "review-failed": { args: ["<pr>", "<launch>"] },
+};
+const FLAGS = { "implementer-cap": "value", "reviewer-cap": "value" };
+const USAGE = `usage: ${NAME}.mjs <kind> <args> [--implementer-cap <n>] [--reviewer-cap <n>] — kinds: `
+  + Object.entries(KINDS).map(([k, { args }]) => `${k} ${args.join(" ")}`).join(", ");
+
+// The label each `bailCause` demotes to, and the relabel template's kind.
+const BAILS = {
+  undecided: { label: "needs-triage", kind: "needs-triage", flag: "line" },
+  fork: { label: "ready-for-human", kind: "fork", flag: "options" },
+  hands: { label: "ready-for-human", kind: "hands" },
+};
+// The causes a `hands` detail opens with — the Pull's answer grammar — and the
+// words each puts in the comment.
+const HANDS = { "external access": "external access", "manual testing": "manual testing", judgment: "judgment during the work" };
+// The fix-applier brief kinds that answer a review and so write a disposition
+// record.
+const REVIEW_FIX_KINDS = new Set(["review", "dispositions-retry"]);
+
+// ── children ────────────────────────────────────────────────────────────────
+
+function how(r) {
+  if (r.error) return r.error.code ?? r.error.message;
+  if (r.signal) return `killed by ${r.signal}`;
+  return `exit ${r.status}`;
+}
+
+/**
+ * Runs a child to completion from the cwd, every one with GIT_DIR and
+ * GIT_WORK_TREE scrubbed and GH_REPO blanked, so no ambient value points a
+ * write at another repository. `status` is null when the child never ran or
+ * was killed.
+ */
+function run(cmd, args, timeoutMs = CHILD_TIMEOUT_MS) {
+  const r = spawnSync(cmd, args, { encoding: "utf8", maxBuffer: MAX_BUFFER, env: gitEnv({ GH_REPO: "" }), timeout: timeoutMs });
+  return { status: r.error ? null : r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", how: how(r) };
+}
+
+const node = (script, args) => run(process.execPath, [join(SCRIPTS, script), ...args]);
+const gh = (args) => run("gh", args, GH_TIMEOUT_MS);
+
+// What a failed child said: the last line of its stderr, else of its stdout —
+// its own end says why it stopped — else how it ended.
+const said = (r) => [r.stderr, r.stdout].map((s) => s.trim().split("\n").at(-1)).find(Boolean) || r.how;
+
+// ── the run's state ─────────────────────────────────────────────────────────
+
+/** The ledger as `ledger.mjs read` prints it. */
+function readLedger() {
+  const r = node("ledger.mjs", ["read"]);
+  if (r.status !== 0) die(`ledger.mjs read failed (${r.how}): ${said(r)} — nothing written`);
+  try {
+    return JSON.parse(r.stdout);
+  } catch (e) {
+    return die(`ledger.mjs read printed no JSON: ${e.message} — nothing written`);
+  }
+}
+
+/** Every member token the ledger holds: its rows', then `## Dispatched`'s. */
+const ledgerMembers = (ledger) => [
+  ...ledger.rows.flatMap(memberTokens),
+  ...ledger.dispatched.map((e) => parseToken(parseDispatchedEntry(e).token)),
+].filter((t) => t !== null && t.error === null);
+
+/** The outcome the ledger records for `member`, or null while it is live or unknown. */
+const settledOutcome = (ledger, member) => ledgerMembers(ledger).find((t) => t.name === member && t.outcome !== null)?.outcome ?? null;
+
+/** Every word of the rows PR `pr` maps to. */
+const prWords = (ledger, pr) => ledger.rows.filter((r) => rowNums(r).pr === pr).flatMap((r) => r.split(/\s+/).filter(Boolean));
+
+// ── the event's record ──────────────────────────────────────────────────────
+
+class Event {
+  constructor(ctx) {
+    Object.assign(this, ctx);
+    this.lines = [];
+    this.summary = [];
+    this.needs = 0;
+    // The exit of the first ledger write that refused, null while none has.
+    this.refused = null;
+  }
+
+  note(text) {
+    this.summary.push(text);
+  }
+
+  print(text) {
+    for (const line of text.split("\n").filter((l) => l.trim() !== "")) this.lines.push(line);
+  }
+
+  need(text) {
+    this.needs += 1;
+    this.lines.push(`NEED ${text}`);
+  }
+
+  // A ledger write that refused: its message on stderr, its exit kept.
+  refuse(what, r) {
+    if (r.stderr) writeAll(2, r.stderr.endsWith("\n") ? r.stderr : `${r.stderr}\n`);
+    if (this.refused === null) this.refused = r.status ?? 2;
+    this.note(`${what} refused (${r.how})`);
+  }
+
+  report(member) {
+    return readReportIn(reportsDir(this.scratch), member);
+  }
+
+  // `settle <member> --from-report` unless the ledger holds it settled.
+  // Returns the outcome, or null when the settle refused.
+  settle(member) {
+    const before = settledOutcome(this.ledger, member);
+    if (before !== null) {
+      this.note(`${member}=${before} already settled`);
+      return before;
+    }
+    const r = node("ledger.mjs", ["settle", member, "--from-report", "--reports", reportsDir(this.scratch)]);
+    if (r.status !== 0) {
+      this.refuse(`settle ${member}`, r);
+      return null;
+    }
+    if (r.stderr) writeAll(2, r.stderr);
+    let outcome;
+    try {
+      ({ outcome } = JSON.parse(r.stdout));
+    } catch {
+      // The settle wrote; only its receipt is unreadable.
+    }
+    if (typeof outcome !== "string") {
+      this.refuse(`settle ${member} printed no receipt`, { ...r, status: 2, stderr: `${NAME}: settle ${member} exited 0 with no receipt on stdout: ${r.stdout.trim()}\n` });
+      return null;
+    }
+    this.note(`settled ${member}=${outcome}`);
+    return outcome;
+  }
+
+  // The bodies of the comments on issue or PR `n`, trimmed, or null when gh
+  // could not answer (the NEED is printed here).
+  comments(noun, n, what) {
+    const r = gh([noun, "view", String(n), "--json", noun === "issue" ? "labels,comments" : "comments"]);
+    let v = null;
+    if (r.status === 0) {
+      try {
+        v = JSON.parse(r.stdout);
+      } catch {
+        // Falls through to the NEED below.
+      }
+    }
+    if (v === null || !Array.isArray(v.comments) || (noun === "issue" && !Array.isArray(v.labels))) {
+      this.need(`${what} — gh ${noun} view ${n} did not answer (${r.status === 0 ? "no JSON" : said(r)})`);
+      return null;
+    }
+    return { labels: (v.labels ?? []).map((l) => l?.name), bodies: v.comments.map((c) => String(c?.body ?? "").trim()) };
+  }
+
+  // `gh <noun> comment <n> --body <body>` unless `seen` already holds it.
+  comment(noun, n, body, seen, what) {
+    if (seen.bodies.includes(body.trim())) {
+      this.note(`${what} already on #${n}`);
+      return true;
+    }
+    const r = gh([noun, "comment", String(n), "--body", body]);
+    if (r.status !== 0) {
+      this.need(`${what} #${n} — gh ${noun} comment failed: ${said(r)}`);
+      return false;
+    }
+    this.note(`${what} posted on #${n}`);
+    return true;
+  }
+}
+
+// ── the kinds ───────────────────────────────────────────────────────────────
+
+// The relabel comment's render arguments for a bail, or a reason there are none.
+function relabelArgs(cause, detail) {
+  const bail = BAILS[cause];
+  const text = String(detail ?? "").trim();
+  if (text === "") return { why: "the report's bailDetail is empty" };
+  if (bail.kind !== "hands") return { args: ["--kind", bail.kind, `--${bail.flag}`, text] };
+  const opener = Object.keys(HANDS).find((c) => text === c || text.startsWith(`${c} `) || text.startsWith(`${c}:`));
+  const line = opener === undefined ? "" : text.slice(opener.length).replace(/^[\s:—-]+/, "");
+  if (line === "") return { why: `the report's bailDetail opens with none of ${Object.keys(HANDS).join(", ")} and a line` };
+  return { args: ["--kind", "hands", "--hands", HANDS[opener], "--line", line] };
+}
+
+function bailed(ev, member) {
+  const ticket = parseMember(member).number;
+  const read = ev.report(member);
+  const cause = read.state === "ok" ? read.report.bailCause : null;
+  if (!Object.hasOwn(BAILS, cause ?? "")) {
+    ev.need(`relabel #${ticket} — ${member}'s report ${read.path} is ${read.state === "ok" ? `missing a bailCause` : read.state}: relabel by its cause by hand`);
+    return;
+  }
+  const { label } = BAILS[cause];
+  const seen = ev.comments("issue", ticket, `relabel #${ticket} ${label}`);
+  if (seen === null) return;
+  if (seen.labels.includes(label) && !seen.labels.includes("ready-for-agent") && !seen.labels.includes("in-progress")) {
+    ev.note(`#${ticket} already ${label}`);
+  } else {
+    const e = gh(["issue", "edit", String(ticket), "--remove-label", "ready-for-agent", "--remove-label", "in-progress", "--add-label", label]);
+    if (e.status !== 0) {
+      ev.need(`relabel #${ticket} ${label} — gh issue edit failed: ${said(e)}`);
+      return;
+    }
+    ev.note(`relabelled #${ticket} ${label} (${cause})`);
+  }
+  const relabel = relabelArgs(cause, read.report.bailDetail);
+  if (relabel.why !== undefined) {
+    ev.need(`relabel-comment #${ticket} — ${relabel.why}: comment the cause by hand`);
+  } else {
+    const r = node("dispatch-prompt.mjs", ["render", "relabel", ...relabel.args]);
+    if (r.status !== 0) ev.need(`relabel-comment #${ticket} — dispatch-prompt.mjs render relabel refused: ${said(r)}`);
+    else ev.comment("issue", ticket, r.stdout, seen, "relabel comment");
+  }
+  const release = run("sh", [join(SCRIPTS, "release-ticket.sh"), String(ticket), `impl-${ticket}`, "implementer", "--apply"]);
+  if (release.status === 0) ev.note(`released #${ticket}`);
+  else ev.need(`hand-release #${ticket} ${blocker(release)}`);
+}
+
+// What release-ticket.sh refused for: the blockers of its JSON receipt, else
+// the last thing it said.
+function blocker(r) {
+  try {
+    const { blockers } = JSON.parse(r.stdout);
+    if (Array.isArray(blockers) && blockers.length > 0) return blockers.join("; ");
+  } catch {
+    // Not a receipt: a refusal before it could write one, in prose.
+  }
+  return said(r);
+}
+
+function implReport(ev, member) {
+  if (ev.settle(member) === "bailed") bailed(ev, member);
+}
+
+function fixReport(ev, member) {
+  const outcome = ev.settle(member);
+  if (outcome === null) return;
+  const pr = parseMember(member).number;
+  if (outcome !== "no-op" && !outcome.startsWith("applied:")) {
+    ev.note("no dispositions check: it answered nothing");
+    return;
+  }
+  const words = prWords(ev.ledger, pr);
+  if (!words.some((w) => REVIEWED.test(w))) {
+    ev.note(`no dispositions check: PR #${pr} has no reviewed=`);
+    return;
+  }
+  if (words.some((w) => dispositionsToken(w)?.member.name === member)) {
+    ev.note(`dispositions already checked for ${member}`);
+    return;
+  }
+  const by = `dispositions-check.mjs --member ${member} --scratch ${ev.scratch}`;
+  const sidecar = join(ev.fleetDir, BRIEFS, `${member}.json`);
+  let kind;
+  try {
+    ({ kind } = JSON.parse(readFileSync(sidecar, "utf8")));
+  } catch (e) {
+    ev.need(`dispositions-check ${member} — its brief ${sidecar} is unreadable (${e.code ?? e.message}), so whether it answered a review is unknown: run ${by} if it did`);
+    return;
+  }
+  if (!REVIEW_FIX_KINDS.has(kind)) {
+    ev.note(`no dispositions check: ${member} was a ${kind} fix-applier`);
+    return;
+  }
+  const r = node("dispositions-check.mjs", ["--member", member, "--scratch", ev.scratch]);
+  ev.print(r.stdout);
+  if (r.status === 0 || r.status === 1) ev.note(`dispositions checked (exit ${r.status})`);
+  else ev.need(`dispositions-check ${member} — nothing judged (${r.how}): ${said(r)}; run ${by} again`);
+}
+
+const listed = (labels) => (labels.length === 0 ? "(none)" : labels.join(", "));
+
+function finisherReport(ev, member) {
+  const outcome = ev.settle(member);
+  const self = parseMember(member);
+  const pr = self.number;
+  const read = ev.report(member);
+  const report = read.state === "ok" ? read.report : null;
+  if (outcome?.startsWith("halted:")) {
+    if (report === null) {
+      ev.need(`halt-comment PR #${pr} — ${member}'s report ${read.path} is ${read.state}: comment its cause and evidence by hand`);
+    } else {
+      const seen = ev.comments("pr", pr, `halt-comment PR #${pr}`);
+      const body = `**${member} halted: \`${report.cause}\`.**\n\n${String(report.evidence ?? "").trim()}`;
+      if (seen !== null) ev.comment("pr", pr, body, seen, "halt comment");
+    }
+  }
+  // The escalation is for a repair finisher that claims the label and reads
+  // back none; a halt says why in its own comment above.
+  if (self.retry === null || report?.outcome !== "labelled" || report.labelsReadBack.includes(READY)) return;
+  const earlier = ledgerMembers(ev.ledger)
+    .filter((t) => t.family === "finisher-pr" && t.number === pr && (t.retry ?? "") < self.retry)
+    .sort((a, b) => (a.retry ?? "").localeCompare(b.retry ?? "")).at(-1)?.name;
+  let before = "no earlier finisher on the ledger";
+  if (earlier !== undefined) {
+    const prior = ev.report(earlier);
+    before = prior.state === "ok" ? `${earlier} read back: ${listed(prior.report.labelsReadBack)}` : `${earlier}'s report ${prior.path} is ${prior.state}`;
+  }
+  const body = `**${member}, a repair finisher, read back no \`${READY}\` on PR #${pr}.**\n\n`
+    + `- ${member} read back: ${listed(report.labelsReadBack)}\n- ${before}`;
+  const seen = ev.comments("pr", pr, `escalation-comment PR #${pr}`);
+  if (seen !== null) ev.comment("pr", pr, body, seen, "escalation comment");
+}
+
+function mergeBotReport(ev, member) {
+  const read = ev.report(member);
+  for (const { pr, behind } of read.state === "ok" ? read.report.held : []) {
+    const tok = `held-behind:#${behind}`;
+    if (prWords(ev.ledger, pr).includes(tok)) {
+      ev.note(`#${pr} already ${tok}`);
+      continue;
+    }
+    const r = node("ledger.mjs", ["token", String(pr), tok]);
+    if (r.status === 0) ev.note(`#${pr} ${tok}`);
+    else ev.refuse(`token #${pr} ${tok}`, r);
+  }
+  ev.settle(member);
+}
+
+// `p` with its symlinks resolved, or as written when it does not exist yet.
+function real(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+// The run name of a review result file at `path` in PR `pr`'s partition of
+// `scratch`, or die naming why it is not one.
+function reviewRun(scratch, pr, path) {
+  if (path.split("/").includes("..")) die(`review-result: ${path} has a ".." segment — pass the result file's path without one`);
+  const file = resolve(path);
+  const runRoot = dirname(file);
+  const partition = join(normalize(scratch), `pr${pr}`);
+  if (real(dirname(runRoot)) !== real(partition)) die(`review-result: ${file} is not under PR #${pr}'s partition ${partition}/ — nothing written`);
+  const run = basename(runRoot);
+  if (!/^run-[A-Za-z0-9]{8}$/.test(run)) die(`review-result: ${runRoot} is not a review run root (run- and eight characters) — nothing written`);
+  return { file, run };
+}
+
+function reviewResult(ev, pr, path) {
+  const { file, run } = reviewRun(ev.scratch, pr, path);
+  let result;
+  try {
+    result = JSON.parse(readFileSync(file, "utf8"));
+  } catch (e) {
+    die(`review-result: cannot read ${file}: ${e.code ?? e.message} — nothing written`);
+  }
+  if (result?.pr !== undefined && Number(result.pr) !== pr) die(`review-result: ${file} is PR #${result.pr}'s review, not #${pr}'s — nothing written`);
+  const { survived, refuted, unverified } = result?.counts ?? {};
+  const token = `reviewed=${result?.head}:${survived}/${refuted}/${unverified}:${run}`;
+  if (!REVIEWED.test(token)) die(`review-result: ${file} carries no head and counts a reviewed= token can name (${token}) — nothing written`);
+  if (prWords(ev.ledger, pr).includes(token)) {
+    ev.note(`PR #${pr} already ${token}`);
+    return;
+  }
+  const r = node("ledger.mjs", ["review", String(pr), token]);
+  if (r.status === 0) ev.note(`PR #${pr} ${token}`);
+  else ev.refuse(`review #${pr} ${token}`, r);
+}
+
+function reviewFailed(ev, pr, launch) {
+  const tok = `review=${launch.replace(/^review=/, "")}=failed`;
+  if (!REVIEW.test(tok)) {
+    die(`review-failed: '${launch}' is not a launch — member:<runner> or wf:<runId>, as the PR's row spells it after review=`);
+  }
+  let next;
+  if (prWords(ev.ledger, pr).includes(tok)) {
+    ev.note(`PR #${pr} already ${tok}`);
+    next = nextReviewerName(ev.ledger.rows, pr, ev.ledger.retired ?? []);
+  } else {
+    const r = node("ledger.mjs", ["review", String(pr), tok]);
+    if (r.status !== 0) {
+      ev.refuse(`review #${pr} ${tok}`, r);
+      return;
+    }
+    ev.note(`PR #${pr} ${tok}`);
+    try {
+      ({ next } = JSON.parse(r.stdout));
+    } catch {
+      // The write landed; only the name is unread, and the summary says so.
+    }
+  }
+  ev.note(next === undefined ? "next free runner unread: review printed no receipt"
+    : next === null ? "no free runner name left" : `next free runner ${next}`);
+}
+
+// ── main ────────────────────────────────────────────────────────────────────
+
+function capArg(F, name) {
+  const v = F.arg(name);
+  if (v === null) return null;
+  if (!isDigits(v) || Number(v) < 1) die(`--${name} must be a whole number of at least 1, got '${v}'`);
+  return v;
+}
+
+// The words of argv that are no flag or flag value.
+function positionals() {
+  const argv = process.argv.slice(2);
+  const out = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i].startsWith("--")) {
+      if (FLAGS[argv[i].slice(2)] === "value") i++;
+      continue;
+    }
+    out.push(argv[i]);
+  }
+  return out;
+}
+
+function main() {
+  const F = defineFlags(die, { flags: FLAGS });
+  F.sweep();
+  const [kind, ...args] = positionals();
+  if (!Object.hasOwn(KINDS, kind ?? "")) die(kind === undefined ? USAGE : `unknown kind '${kind}' — ${USAGE}`);
+  const spec = KINDS[kind];
+  if (args.length !== spec.args.length) die(`${kind} takes ${spec.args.join(" ")} — ${USAGE}`);
+  const implCap = capArg(F, "implementer-cap");
+  const reviewCap = capArg(F, "reviewer-cap");
+  let pr = null;
+  if (spec.family !== undefined) {
+    const m = parseMember(args[0]);
+    if (m === null || m.family !== spec.family) die(`${kind} takes a member of the ${spec.family} family, not '${args[0]}'`);
+  } else {
+    const digits = args[0].replace(/^#/, "");
+    if (!isDigits(digits) || Number(digits) < 1) die(`${kind}: '${args[0]}' is not a PR number`);
+    pr = Number(digits);
+  }
+
+  let fleetDir;
+  let scratch;
+  try {
+    fleetDir = fleetFile(null);
+    const { read } = readRunReceipt();
+    const named = read.state === "ok" ? read.receipt.scratch : undefined;
+    scratch = typeof named === "string" && named !== "" ? named : defaultScratch();
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
+    die(e.message);
+  }
+  const caps = tickCaps(fleetDir);
+  if (caps.error) die(`${caps.error} — nothing written`);
+  const recorded = (flag) => {
+    const i = caps.args.indexOf(flag);
+    return i === -1 ? null : caps.args[i + 1];
+  };
+  const tickArgs = ["--apply"];
+  for (const [flag, given] of [["--implementer-cap", implCap], ["--reviewer-cap", reviewCap]]) {
+    const value = given ?? recorded(flag);
+    if (value !== null) tickArgs.push(flag, value);
+  }
+
+  const ev = new Event({ fleetDir, scratch, ledger: readLedger() });
+  if (kind === "impl-report") implReport(ev, args[0]);
+  else if (kind === "fix-report") fixReport(ev, args[0]);
+  else if (kind === "finisher-report") finisherReport(ev, args[0]);
+  else if (kind === "merge-bot-report") mergeBotReport(ev, args[0]);
+  else if (kind === "review-result") reviewResult(ev, pr, args[1]);
+  else reviewFailed(ev, pr, args[1]);
+
+  writeAll(1, `${[...ev.lines, `event: ${kind}: ${ev.summary.join("; ") || "nothing to record"}`].join("\n")}\n`);
+  const tick = spawnSync(process.execPath, [join(SCRIPTS, "fleet-tick.mjs"), ...tickArgs], { stdio: ["ignore", "inherit", "inherit"], env: gitEnv() });
+  const tickExit = tick.error || tick.status === null ? 2 : tick.status;
+  if (tick.error || tick.signal) writeAll(2, `${NAME}: fleet-tick.mjs did not finish (${how(tick)})\n`);
+  process.exitCode = ev.refused ?? (tickExit !== 0 ? tickExit : ev.needs > 0 ? 4 : 0);
+}
+
+if (isCLI(import.meta.url)) main();

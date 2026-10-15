@@ -1,13 +1,14 @@
 // The phase-0 receipt, read. `.fleet/phase0.json` is written by phase0.mjs
 // after every step (its header gives the shape); this module is its readers'
-// half: the tick's dispatch gate, and the session directory tier-check.mjs
-// and ticket-router.mjs take when their own flag is omitted. One reading of
-// the file, so the gate and the session readers cannot disagree about what a
-// receipt is.
+// half: the tick's dispatch gate, the session directory tier-check.mjs
+// and ticket-router.mjs take when their own flag is omitted, and the caps the
+// drivers hand the tick. One reading of the file, so the gate and the session
+// readers cannot disagree about what a receipt is.
 //
 // Zero deps: node builtins and sibling modules only.
 
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { RECEIPT } from "./ledger-grammar.mjs";
 
@@ -142,4 +143,23 @@ export function sessionFromReceipt(opts) {
     : read.state === "unreadable" ? `unreadable: ${read.why}`
     : "it records no session";
   throw new Error(`no session given and none in the phase-0 receipt ${path} (${why}) — give one, or run ${phase0Command(null)} first`);
+}
+
+/**
+ * The caps the receipt in `fleetDir` records, as the tick's own flags:
+ * `{ args }`, none when there is no receipt or it names none, or `{ error }`
+ * for a receipt that is there and cannot be read.
+ */
+export function tickCaps(fleetDir) {
+  let phase0;
+  try {
+    phase0 = JSON.parse(readFileSync(join(fleetDir, RECEIPT), "utf8"));
+  } catch (e) {
+    if (e.code === "ENOENT") return { args: [] };
+    return { error: `cannot read ${join(fleetDir, RECEIPT)}: ${e.message}` };
+  }
+  const args = [];
+  if (phase0?.caps?.impl != null) args.push("--implementer-cap", String(phase0.caps.impl));
+  if (phase0?.caps?.review != null) args.push("--reviewer-cap", String(phase0.caps.review));
+  return { args };
 }

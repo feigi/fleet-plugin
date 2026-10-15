@@ -51,7 +51,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, unescapeText, nextReviewerName } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -2447,7 +2447,9 @@ function numberArg(arg, what, usage) {
 // record in. `review=X=failed` for a launch the row holds open as `review=X`
 // rewrites that token in place; every other token is appended as ` · <token>`.
 // The whole ledger before and after is judged by rowWriteRefusal() under the
-// lock, and a refusal writes nothing.
+// lock, and a refusal writes nothing. The receipt's `next` is the runner name
+// the PR's next launch takes as the ledger stands after the write, null with
+// every letter taken.
 function runReview() {
   const usage = "usage: ledger.mjs review <pr> <review=…|reviewed=…>…";
   const [pr, ...parts] = rest;
@@ -2479,7 +2481,7 @@ function runReview() {
   save(data);
   const key = rowKey(line);
   console.error(`    review on row ${key}`);
-  console.log(JSON.stringify({ pr: prNum, row: key, line, created }));
+  console.log(JSON.stringify({ pr: prNum, row: key, line, created, next: nextReviewerName(data.rows, prNum, data.retired) }));
 }
 
 // A row's tokens: its words after the key, bar the ` · ` separators between

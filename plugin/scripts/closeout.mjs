@@ -78,8 +78,9 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { CLOSEOUT_RECEIPT, RECEIPT, memberTokens, rowPr } from "./ledger-grammar.mjs";
+import { CLOSEOUT_RECEIPT, memberTokens, rowPr } from "./ledger-grammar.mjs";
 import { encodeProjectDir, isOmpSessionDirName } from "./member-record.mjs";
+import { tickCaps } from "./phase0-receipt.mjs";
 
 const NAME = "closeout";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -208,22 +209,6 @@ function stepRelease({ cwd }) {
 }
 
 // ── finish ───────────────────────────────────────────────────────────────────
-
-// The caps `phase0.mjs` recorded, as the tick's own flags; none when there is
-// no receipt or it names none.
-function tickCaps(fleetDir) {
-  let phase0;
-  try {
-    phase0 = JSON.parse(readFileSync(join(fleetDir, RECEIPT), "utf8"));
-  } catch (e) {
-    if (e.code === "ENOENT") return { args: [] };
-    return { error: `cannot read ${join(fleetDir, RECEIPT)}: ${e.message}` };
-  }
-  const args = [];
-  if (phase0?.caps?.impl != null) args.push("--implementer-cap", String(phase0.caps.impl));
-  if (phase0?.caps?.review != null) args.push("--reviewer-cap", String(phase0.caps.review));
-  return { args };
-}
 
 function stepTick({ cwd, fleetDir }) {
   const caps = tickCaps(fleetDir);
