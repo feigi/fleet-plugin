@@ -17,8 +17,8 @@ const DERIVER = read("agents/fleet-recipe-deriver.agent.md").text;
 const PROVER = read("scripts/recipe-prove.mjs").text;
 
 const phase0 = () => PHASE0.text;
-// The step spans its quoted dispatch prompt, so it is bounded by the next
-// rule's opener rather than by a blank line.
+// The step ends at the next rule's opener, not at a blank line: its dispatch is
+// rendered by dispatch-prompt.mjs, so the step carries no quoted prompt.
 const step = () => Pin.of(phase0(), "phase0()").between("**Derive the Recipe — the Recipe derivation step — before the fold-in below", "**Mid-run, a cache that stops running", "the phase-0 Recipe derivation step").text;
 const stall = () => Pin.of(phase0(), "phase0()").paragraph("**Mid-run, a cache that stops running is re-derived once", "the re-derive-once and stall rule", "## Fold in every PR a prior").text;
 

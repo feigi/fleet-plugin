@@ -12,3 +12,4 @@ never a directory whose last component is `pr` plus digits: the review creates
 that partition under the root itself.
 
 The controller does not acknowledge reports. Send once and exit; never re-send unless the controller asks by name.
+Confirmation state includes warnings received and acted on, even when the outcome is no change: say so when you report.

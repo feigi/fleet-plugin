@@ -15,3 +15,4 @@ answers `valid`. Your final message is then one line,
 `merge-bot-<n>: done <scratch>/reports/merge-bot-<n>.json`.
 
 The controller does not acknowledge reports. Send once and exit; never re-send unless the controller asks by name.
+Confirmation state includes warnings received and acted on, even when the outcome is no change: say so when you report.

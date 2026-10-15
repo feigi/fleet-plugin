@@ -30,12 +30,13 @@ finishers, a reviewer and merge bots alike, the work done and only the
 delivery missing. Every brief's report paragraph says it. See
 references/member-lifecycle.md.
 
-**Every brief tells the member you do not acknowledge reports; you never write
-that line yourself.** A member cannot see whether its report arrived, so silence
+**The implementer, fix-applier, finisher, merge-bot and review-runner briefs
+each tell the member you do not acknowledge reports; you never write that line
+yourself.** A member cannot see whether its report arrived, so silence
 from you is indistinguishable from loss and it re-sends — three members did in
 one run, each burning a turn, and in all three the original had in fact arrived.
-Each template under `briefs/` carries the line: *"The controller does not
-acknowledge reports. Send once and exit; never re-send unless the controller
+Each of those templates under `briefs/` carries the line: *"The controller does
+not acknowledge reports. Send once and exit; never re-send unless the controller
 asks by name."*
 
 **But a missing report is NOT evidence the member failed to send one — the
@@ -659,7 +660,8 @@ prints. `--kind needs-triage` takes `--line`, the one-line missing decision;
 the `ready-for-human` comment for a fork; `--kind hands` takes `--hands`,
 one of external access, manual testing or judgment during the work, and
 `--line`, and is the `ready-for-human` comment for hands. The three comments
-live in `briefs/relabel.md`, where a Pull driver reads them.
+live in `briefs/relabel.md`; `pull.mjs` posts its own one-line copy of the same
+words when a Pull answer relabels, so a change to either is a change to both.
 
 Neither label invokes anything: `/triage` is maintainer-run, and both labels
 only stop the ticket costing a read per scan. These comments are the only
@@ -3234,7 +3236,7 @@ vs specific finding with paths → paths win.
 **Members share one filesystem, one docker stack and one process table**, and the
 failures arrive as *wrong findings*, not errors:
 
-- **A pattern kill reaches siblings — say so in the dispatch prompt.** `pkill -f
+- **A pattern kill reaches siblings — the implementer, fix-applier and finisher briefs forbid it.** `pkill -f
   <pattern>` matches on the whole command line, machine-wide. Members hold
   separate worktrees, but the process table is not partitioned by them and a
   test file's name is identical in every one, so a pattern naming a test file
@@ -3293,8 +3295,8 @@ failures arrive as *wrong findings*, not errors:
   arrived.** The same incident: the controller's warning DID reach the member,
   which re-ran, found nothing changed, and said nothing — correctly reading
   "send once, never re-send" as covering it. The controller then had to spend a
-  round trip asking whether its own outbox was lossy. So say in the dispatch
-  prompt that **confirmation state includes warnings received and acted on, even
+  round trip asking whether its own outbox was lossy. So the briefs say that
+  **confirmation state includes warnings received and acted on, even
   when the outcome is no change** — one line, in the report the member already
   owes. That is the cheap half of the *never read silence as assent* rule, paid
   by the member rather than by the controller's guesswork.

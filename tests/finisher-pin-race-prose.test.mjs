@@ -196,7 +196,7 @@ test("the cause list is open — no count is asserted, and `other` is a cause ra
   assert.doesNotMatch(
     text,
     /\b(two|three|four|five|six|seven|eight|\d+)\b(?:\s+\w+){0,3}\s+(causes|things)\b/i,
-    "the block the finisher reads counts the causes again — the count word inside the `>` block is the one that reaches the finisher verbatim",
+    "the block the finisher reads counts the causes again — the count word inside the finisher's halt-cause block is the one that reaches the finisher verbatim",
   );
 });
 

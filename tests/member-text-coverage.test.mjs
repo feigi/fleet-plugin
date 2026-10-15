@@ -62,10 +62,10 @@ test("every agent body has a golden fixture, and no body fixture is an orphan", 
 
 // --- duplication -----------------------------------------------------------
 
-/** The sentences of a text: gutters and emphasis dropped, whitespace folded, split on `. `. */
-export function sentencesOf(text) {
+/** The sentences of a text: gutters and emphasis dropped, whitespace folded, split on `. `, the closing full stop of the last one dropped so a sentence has one key wherever it sits. */
+function sentencesOf(text) {
   const folded = text.replace(/^[ \t]*(>[ \t]?)+/gm, "").replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
-  return folded.split(". ").map((s) => s.trim()).filter((s) => s.split(" ").length >= 7);
+  return folded.split(". ").map((s) => s.trim().replace(/\.$/, "")).filter((s) => s.split(" ").length >= 7);
 }
 
 /** `{label, text}` for every file in the compared set. */
@@ -87,7 +87,7 @@ function sources() {
 }
 
 /** Every sentence found in more than one source, grouped by the exact set of files that hold it. */
-export function sharedSentences(srcs) {
+function sharedSentences(srcs) {
   const holders = new Map();
   for (const { label, text } of srcs) {
     for (const s of sentencesOf(text)) {
@@ -116,9 +116,8 @@ const ALLOWED = [
     reason: "the kill rule — Valid red, Narrowed run, Kill and Evidence line — quoted word for word at every seat that scores a kill; kill-rule-prose holds every copy",
   },
   { files: [A("finisher"), A("fix-applier")], reason: "the Valid red sentence in the two members that carry the kill rule beside a longer sentence; kill-rule-prose" },
-  { files: [BRIEF("finisher"), BRIEF("fix-applier"), BRIEF("implementer")], reason: "the report paragraph's closing line, the one shape every ledger-family member answers in; report-schema holds the shape" },
-  { files: [BRIEF("finisher"), BRIEF("fix-applier")], reason: "the exit-75 line, carried by every member that runs a suite; suite-slot-prose pins it in each brief" },
-  { files: [BRIEF("merge-bot"), BRIEF("review-runner")], reason: "the no-acknowledgement line, carried by every brief; run-team-no-member-blocks-prose pins it in each" },
+  { files: [BRIEF("finisher"), BRIEF("fix-applier"), BRIEF("implementer")], reason: "the report paragraph's closing line, the one shape every ledger-family member answers in, the exit-75 line and the pattern-kill prohibition carried by every member that runs a suite; report-schema holds the shape, suite-slot-prose pins the exit-75 line and run-team-no-member-blocks-prose the prohibition in each brief" },
+  { files: [BRIEF("finisher"), BRIEF("fix-applier"), BRIEF("implementer"), BRIEF("merge-bot"), BRIEF("review-runner")], reason: "the no-acknowledgement line and the warnings-acted-on line, carried by every brief; run-team-no-member-blocks-prose pins each" },
   { files: [A("fix-applier"), A("implementer")], reason: "the session-root rule both members that write in a worktree carry; stash-prohibition-prose and dispatch-block-pins-prose pin each" },
   { files: [A("review-comments"), A("review-tests"), A("review-types")], reason: "the specialists' model-route sentence" },
   { files: [A("review-comments"), A("review-types")], reason: "the specialists' model-route and pre-cutover sentences" },
@@ -158,6 +157,9 @@ test("the duplication check reds on a sentence copied into a third file, and acc
   const copied = srcs.map((s) => (s.label === BRIEF("merge-bot") ? { ...s, text: `${s.text}\n${sentence}. A different closing sentence follows it here.\n` } : s));
   const refused = [...sharedSentences(copied)].filter(([key]) => !allowed.has(key));
   assert.ok(refused.some(([key]) => key === keyOf([A("implementer"), BRIEF("merge-bot")])), "a sentence copied into a brief did not red");
+  // Copied as the last sentence of the brief, closing full stop and nothing after it: the same sentence, the same pair.
+  const closing = srcs.map((s) => (s.label === BRIEF("merge-bot") ? { ...s, text: `${s.text}\n${sentence}.\n` } : s));
+  assert.ok([...sharedSentences(closing)].filter(([key]) => !allowed.has(key)).some(([key]) => key === keyOf([A("implementer"), BRIEF("merge-bot")])), "a sentence copied as a file's last sentence did not red");
   // The same text reflowed and gutter-quoted still counts as the same sentence.
   const reflowed = srcs.map((s) => (s.label === BRIEF("merge-bot") ? { ...s, text: `${s.text}\n> ${sentence.split(" ").join("\n> ")}. A different closing sentence follows it here.\n` } : s));
   assert.ok([...sharedSentences(reflowed)].some(([key]) => key === keyOf([A("implementer"), BRIEF("merge-bot")])), "a reflowed copy escaped the check");

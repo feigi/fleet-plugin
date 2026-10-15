@@ -2,10 +2,10 @@
 // two seats that act on it: review-and-fix.md step 2 tells the fix-applier to
 // write `<scratch>/dispositions-<your name>.json` and what passes, and run-team's
 // gate paragraph tells the controller when `ledger.mjs dispatch` refuses a
-// finisher and what each refusal asks of it. The fix-applier prompt block that
-// restates the record is a `>` block, which the dispatch-block golden fixture
-// pins whole; these two paragraphs sit outside every `>` block, so nothing
-// else holds them.
+// finisher and what each refusal asks of it. The fix-applier's restatement of
+// the record lives in its agent body, which the dispatch-block golden fixture
+// pins whole; these two paragraphs sit in review-and-fix.md and run-team's
+// SKILL.md, which no golden fixture holds, so nothing else holds them.
 //
 // THE CEILING: presence pins over bounded slices, each a contiguous clause —
 // the rule and its condition in one span, so an inverted verdict (`ok` →

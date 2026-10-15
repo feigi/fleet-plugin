@@ -85,20 +85,18 @@
 // assertion, and keep whichever form replaces it honest about both halves.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-
-import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 import { memberPrompt } from "./support/render-brief.mjs";
 
-const SKILL = "the fix-applier's member prompt";
+const WHERE = "the fix-applier's member prompt";
 
 // The note, and no more of the document than that. A moved anchor throws rather
 // than widening the slice back to the file, which is the false green the bound
 // exists to prevent.
 const note = () =>
-  Pin.of(memberPrompt("fix-applier", "review"), SKILL).stripGutter(">").paragraph(
+  Pin.of(memberPrompt("fix-applier", "review"), WHERE).stripGutter(">").paragraph(
     "The CI facts in that file apply to you",
-    SKILL,
+    WHERE,
     "**A test you ADD must kill its own mutant**",
   ).text;
 
@@ -110,7 +108,7 @@ test("the five-condition note measures merge commits with a fetched, origin-rela
   assert.match(
     note(),
     Pin.phrase(PROBE),
-    `${SKILL}'s five-condition note no longer spells the merge-commit probe ${PROBE}.
+    `${WHERE}'s five-condition note no longer spells the merge-commit probe ${PROBE}.
 
 Both halves are load-bearing, and dropping either is silent:
   - a \`$VAR\` range (the \`"$BASE..HEAD"\` form \`376c19c\` shipped and \`7b48720\` fixed) expands to \`..HEAD\` when unset, which git reads as \`HEAD..HEAD\` — count \`0\`, exit 0, the "no merge commits" answer this note exists to deny.

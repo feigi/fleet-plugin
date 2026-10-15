@@ -29,9 +29,9 @@ export const PLUGIN = fileURLToPath(new URL("../../plugin/", import.meta.url));
 /** Where the tests' golden fixtures live: a rendered brief per role and kind, and an agent body per agent. */
 export const GOLDEN_DIR = fileURLToPath(new URL("../fixtures/briefs/", import.meta.url));
 
-export const MODULES = ["dispatch-prompt.mjs", "arg.mjs", "git-env.mjs", "fleet-dir.mjs", "review-core.mjs"];
+const MODULES = ["dispatch-prompt.mjs", "arg.mjs", "git-env.mjs", "fleet-dir.mjs", "review-core.mjs"];
 
-export const INSTRUMENTS_STUB = `#!/bin/sh
+const INSTRUMENTS_STUB = `#!/bin/sh
 printf '%s\\n' "$*" >> "$CALL_LOG"
 [ -n "\${INSTR_KILL:-}" ] && kill -9 $$
 echo "\${INSTR_SAYS:-stub}" >&2
@@ -60,15 +60,14 @@ export const CASES = [
   { role: "relabel", kind: "hands", args: { hands: "HANDS-1", line: "LINE-2" } },
 ];
 
-/** The agent definition each role's member runs as; a relabel comment is no member's brief. */
-export const AGENT_OF = {
+/** The agent definition each member role runs as; a relabel comment is no member's brief and has none. */
+const AGENT_OF = {
   implementer: "fleet-implementer-slow-high",
   "fix-applier": "fleet-fix-applier",
   finisher: "fleet-finisher",
   "merge-bot": "fleet-merge-bot",
   "review-runner": "fleet-review-runner",
   "recipe-deriver": "fleet-recipe-deriver",
-  relabel: null,
 };
 
 export const label = ({ role, kind }) => (kind ? `${role} ${kind}` : role);
@@ -171,11 +170,7 @@ export function agentBody(agent) {
   return text.slice(text.indexOf("\n---\n", 4) + "\n---\n".length);
 }
 
-/**
- * What the member's context holds: its agent body, then the rendered brief —
- * `body` and `brief` are overridable so a control can pin against a modified
- * copy of either.
- */
-export function memberPrompt(role, kind = null, { body = agentBody(AGENT_OF[role]), brief = renderBrief(role, kind) } = {}) {
-  return `${body}\n${brief}`;
+/** What the member's context holds: its agent body, then the rendered brief. */
+export function memberPrompt(role, kind = null) {
+  return `${agentBody(AGENT_OF[role])}\n${renderBrief(role, kind)}`;
 }

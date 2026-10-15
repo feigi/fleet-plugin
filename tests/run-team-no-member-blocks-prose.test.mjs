@@ -70,6 +70,8 @@ const RETIRED_RULES = [
   "Tell it to read `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md`",
   "Put the standing CI facts in that prompt",
   "Its prompt takes the prompt below's",
+  "A pattern kill reaches siblings — say so in the dispatch prompt",
+  "So say in the dispatch prompt that",
 ];
 
 test("every `say it in the dispatch prompt` rule is gone from SKILL.md", () => {
@@ -81,9 +83,13 @@ test("every `say it in the dispatch prompt` rule is gone from SKILL.md", () => {
 
 const ack = "The controller does not acknowledge reports. Send once and exit; never re-send unless the controller asks by name.";
 const foreground = "A member runs its test suite in the foreground and blocks on it. Exit 75 from the suite is not a test result; run the command again.";
+const warnings = "Confirmation state includes warnings received and acted on, even when the outcome is no change: say so when you report.";
+const noPkill = "Never run `pkill -f` on a pattern: members share one process table, so a pattern such as a test file's name matches every member's run, not only yours.";
 const REPLACEMENTS = [
   ["the no-acknowledgement line", ack, ["implementer", "fix-applier", "finisher", "merge-bot", "review-runner"]],
+  ["the warnings-acted-on line", warnings, ["implementer", "fix-applier", "finisher", "merge-bot", "review-runner"]],
   ["the foreground-suite and exit-75 lines", foreground, ["implementer", "fix-applier", "finisher"]],
+  ["the pattern-kill prohibition", noPkill, ["implementer", "fix-applier", "finisher"]],
   ["the report paragraph", "Your report is a file,", ["implementer", "fix-applier", "finisher", "merge-bot"]],
 ];
 

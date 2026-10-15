@@ -361,10 +361,11 @@ test("review-and-fix agrees the workflow is the controller's default, not its pr
 });
 
 test("the fix-applier's step citations match review-and-fix.md's actual numbering", () => {
-  // run-team's dispatch prompt hardcodes "steps 2, 3 and 5 only" and "skip step
-  // 1 … and steps 4 and 6" against this file's numbering, across a file
-  // boundary. One inserted step renumbers everything and the fix-applier
-  // silently runs the wrong ones — no error, both files individually coherent.
+  // The fix-applier brief (briefs/fix-applier.md) hardcodes "steps 2, 3 and 5
+  // only" and "skip step 1 … and steps 4 and 6" against this file's numbering,
+  // across a file boundary. One inserted step renumbers everything and the
+  // fix-applier silently runs the wrong ones — no error, both files
+  // individually coherent.
   const steps = Object.fromEntries(
     [...REVIEW_AND_FIX.text.matchAll(/^(\d)\. (.*)$/gm)].map((m) => [m[1], m[2]]),
   );

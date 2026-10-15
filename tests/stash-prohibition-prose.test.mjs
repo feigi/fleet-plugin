@@ -15,9 +15,9 @@
 // reaches the members who actually reach for `git stash` in practice —
 // implementers and fix-appliers isolating a mutation-testing pass — because
 // neither is copied into a dispatch prompt. This file pins the two new
-// paragraphs that close that gap: one in phase 2's implementer block, beside
-// the commit-incrementally rule it extends, one in the Reviewers section's
-// fix-applier block, beside the commit-before-you-mutate rule it extends.
+// paragraphs that close that gap: one in the implementer's agent body, beside
+// the commit-incrementally rule it extends, one in the fix-applier's agent body,
+// beside the commit-before-you-mutate rule it extends.
 //
 // Measured against this tree before either paragraph existed (i.e. against
 // `origin/main`): neither `skills/run-team/SKILL.md`'s phase-2 member prompt

@@ -18,12 +18,11 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
-import { CASES, PIN, PLUGIN, argvOf, cleanEnv, flagsOf, installRenderer, label } from "./support/render-brief.mjs";
+import { CASES, GOLDEN_DIR, PLUGIN, argvOf, briefFixtureName, cleanEnv, flagsOf, installRenderer, label } from "./support/render-brief.mjs";
 
 const TMP = realpathSync(mkdtempSync(join(tmpdir(), "dispatch-prompt-")));
 after(() => rmSync(TMP, { recursive: true, force: true }));
@@ -219,6 +218,27 @@ test("a template that declares a placeholder it never carries is refused", () =>
   assert.ok(r.err.includes("<never carried>"), r.err);
 });
 
+test("a template declaring a flag the renderer reserves is refused, naming the flag", () => {
+  const rd = CASES.find((c) => c.role === "recipe-deriver");
+  const declare = (label, flag) =>
+    install(label, {
+      edit: (briefs) => {
+        const p = join(briefs, "recipe-deriver.md");
+        writeFileSync(p, readFileSync(p, "utf8").replace("---\n", `---\narg ${flag} carried ${flag}\n`) + `and <carried ${flag}> too\n`);
+      },
+    });
+  for (const flag of ["member", "json", "kind"]) {
+    const r = render(argvOf(rd), { inst: declare(`reserved-${flag}`, flag) });
+    assert.equal(r.status, 2, `--${flag}: ${r.err}`);
+    assert.equal(r.out, "");
+    assert.ok(r.err.includes(`declares the reserved flag --${flag}`), r.err);
+  }
+  // The control: the same edit under a flag no one reserves renders, once the flag is passed.
+  const ok = render([...argvOf(rd), "--ghost", "value"], { inst: declare("reserved-control", "ghost") });
+  assert.equal(ok.status, 0, ok.err);
+  assert.ok(ok.out.includes("and value too"), ok.out);
+});
+
 test("a value spelling a declared placeholder exits 2 naming it; any other angle text is carried", () => {
   const fix = CASES.find((c) => c.role === "fix-applier" && c.kind === "review");
   const spelled = render(argvOf({ ...fix, args: { ...fix.args, branch: "<branch>" } }));
@@ -248,14 +268,12 @@ test("a value is inserted verbatim, whatever replacement syntax it holds", () =>
 // member-bodies-split.test.mjs and dispatch-block-golden-prose.test.mjs; a
 // brief that regained a line the body owns, or lost a per-dispatch line, is red
 // here.
-const GOLDEN = fileURLToPath(new URL("./fixtures/briefs/", import.meta.url));
-const goldenName = (c) => [c.role, c.kind].filter(Boolean).join("-") + ".md";
 
 for (const c of CASES) {
   test(`render ${label(c)} prints its golden brief, placeholders filled`, () => {
     const r = render(argvOf(c));
     assert.equal(r.status, 0, r.err);
-    assert.equal(r.out, readFileSync(join(GOLDEN, goldenName(c)), "utf8"));
+    assert.equal(r.out, readFileSync(join(GOLDEN_DIR, briefFixtureName(c)), "utf8"));
   });
 }
 
