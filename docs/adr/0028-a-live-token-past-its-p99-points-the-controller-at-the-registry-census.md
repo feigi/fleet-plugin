@@ -4,7 +4,9 @@
 on #2890, against the measurements below. Amends ADR 0008 (§8, which gains a
 key owner) and ADR 0012 (Decision 4, whose "`read proc://` is reserved for the
 Member-killed confirmation, not the tick" stands: the tick prints a pointer
-from its own key and the census stays the controller's).
+from its own key and the census stays the controller's). Amended by #3201: the
+tick reads the session directory's listing to reconcile ledger tokens; it still
+reads no transcript's contents and no registry.
 
 ## Context
 

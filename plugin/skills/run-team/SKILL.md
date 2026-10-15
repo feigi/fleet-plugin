@@ -1652,6 +1652,22 @@ depth** guard table applied in code. Act on each line as it reads:
   token. It repeats every tick while the token stays live past the threshold.
   `--liveness-impl`, `--liveness-fix-pr`, `--liveness-finisher`,
   `--liveness-merge-bot` and `--liveness-review` set the thresholds, in minutes.
+- `UNRECORDED <stem> (transcript exists, no ledger token)`, printed above the
+  rows — the session directory holds a `<stem>.jsonl` whose stem is a member
+  name no row token, `## Dispatched` entry or `## Retired` line names: a
+  dispatch whose ledger write was forgotten. Record it with `ledger.mjs
+  dispatch`, or confirm it is a stranger's member.
+  Advice, like `CHECK-LIVENESS`: it resets no `quiet`, changes no row and
+  frees no slot, it repeats every tick while it holds, and the folded line
+  names it (`…; UNRECORDED <stem> persists — …`).
+- `NO-TRANSCRIPT <member> (live <age>m, no <session>/<member>.jsonl)`, printed
+  above the rows — a live ledger token first seen more than
+  `--no-transcript-after` minutes ago (default 5) has no transcript in the
+  session directory: a dispatch whose `task` call was never made. Make the
+  `task` call, or settle the token `killed`. Advice the same way, folded as
+  `…; NO-TRANSCRIPT <member> persists — …`. Both lines read the session
+  directory this run's phase-0 receipt names, else `--session <dir>`; with
+  neither the tick skips them with one stderr line.
 
 **Tier guards under Pull.** The per-dispatch `tier-check.mjs --batch` is
 phase 2's own step, run by `tick --apply`: a mismatch it finds is the

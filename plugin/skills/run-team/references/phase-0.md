@@ -184,9 +184,10 @@ the run. `dispatch` refuses a retired name and names the replacement — one
 retry letter past the highest the session has used on that number,
 `impl-42-b` for a ticket this session's earlier run worked as `impl-42` —
 `review` refuses a retired runner name and names the next free reviewer
-name, and `dispatch merge-bot` numbers past retired bots. The tick never
-reads `## Retired`: a ticket an earlier run worked is not claimed by it
-and can be shortlisted again.
+name, and `dispatch merge-bot` numbers past retired bots. The tick reads
+`## Retired` only to account for a transcript in the session directory: a
+ticket an earlier run worked is not claimed by it and can be shortlisted
+again.
 A line it cannot parse is skipped with a warning naming it, and the
 rotation still succeeds; a member name on a skipped line that carries an
 outcome is retired all the same, and a bare member token on a skipped row

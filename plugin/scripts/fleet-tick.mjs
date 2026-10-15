@@ -89,6 +89,19 @@
 //             REPORT-UNREADABLE. Advice, like CHECK-LIVENESS: the tick
 //             settles nothing. A review runner has no report schema and files
 //             none, so no `review=` token is looked up.
+//   session   The listing of the session directory omp writes one
+//             `<member>.jsonl` transcript into per dispatched member: this
+//             run's phase-0 receipt's `session`, else `--session`; with
+//             neither the check is skipped with one stderr line. One readdir
+//             per tick, and no file in it is read. A `<stem>.jsonl` whose stem
+//             is a member name the ledger records nowhere — no row token, no
+//             `## Dispatched` entry, no `## Retired` line — prints
+//             `UNRECORDED <stem>`; a live member token first seen more than
+//             `--no-transcript-after` minutes ago with no file prints
+//             `NO-TRANSCRIPT <member>`. The receipt's directory not there yet
+//             holds no transcript; a `--session` one that is not there, like
+//             one that cannot be listed, skips the check with one stderr line.
+//             Advice, like CHECK-LIVENESS.
 //
 // The pure half below is `reconcile()` over the counts `deriveRun()` reads off
 // the ledger; main() does the I/O. Split so the guard table and the reading are
@@ -826,7 +839,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
 export const pastPinDue = (st, head) => st !== undefined && st.pastPinHalt && !st.inFlight && st.reviewedHead !== null
   && !String(head).toLowerCase().startsWith(st.reviewedHead);
 
-export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), finished = new Set()) {
+export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed = new Set(), finished = new Set()) {
   const open = new Set(prs.map((p) => p.number));
   const { members, byPr, verdicts, claimed, excluded } = foldLedger({ rows, dispatched }, open);
 
@@ -839,9 +852,9 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
   // replacement's own check passes, the row holds — a replacement that is
   // ALSO mismatched keeps holding, and one not yet checked holds as
   // unchecked. A member with no verdict at all holds whether it is live or
-  // settled — the tick never reads a transcript, so only tier-check.mjs can
-  // say whether one exists; a settled member whose transcript was never
-  // written gets `tier-unverifiable=` from it, which clears the hold here.
+  // settled — the tick reads no transcript, so only tier-check.mjs can judge
+  // one; a settled member whose transcript was never written gets
+  // `tier-unverifiable=` from it, which clears the hold here.
   const newest = impls.filter((m, i) => !impls.some((o, j) => j > i && o.number === m.number));
   // A mismatch on a ticket whose issue is CLOSED holds nothing: there
   // is nothing left for `impl-<N>-b` to replace, and a retired definition can
@@ -986,6 +999,10 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     // unsettled member token. A review runner has no report schema and a
     // `review=wf:` run no member, so neither files one.
     reporters: unsettled,
+    // Every member name the ledger records, settled or live: each row's
+    // member tokens, each `## Dispatched` entry and each `## Retired` line —
+    // the names a transcript in the session directory is accounted for by.
+    recorded: new Set([...members.keys(), ...retired]),
   };
 }
 
@@ -1132,6 +1149,45 @@ export function reportLines({ reporters, reports, now, reportsFrom = null }) {
   return out;
 }
 
+// The stems of the `<stem>.jsonl` names in a session directory's listing,
+// sorted: the listing's own order is the filesystem's.
+export const transcriptStems = (names) => names.filter((n) => n.endsWith(".jsonl")).map((n) => n.slice(0, -".jsonl".length)).sort();
+
+// The UNRECORDED lines: one per stem in `stems` that is a member name
+// (parseMember's, any family, retry letters included) and that `recorded`
+// — deriveRun's every name on the ledger — lacks, as `{kind, name, line, key}`. A
+// transcript is a dispatch the ledger never recorded, so the next tick would
+// name that dispatch again. A stem that is no member's name (a reviewer
+// runner's, `agent-abc123`) is never one. Advice: nothing here writes
+// the ledger.
+export function unrecordedLines({ stems, recorded }) {
+  return stems.filter((stem) => parseMember(stem) !== null && !recorded.has(stem)).map((name) => {
+    const line = `UNRECORDED ${name} (transcript exists, no ledger token)`;
+    return { kind: "UNRECORDED", name, line, key: line };
+  });
+}
+
+// The NO-TRANSCRIPT lines: one per live member token in `live` whose `seen`
+// stamp is more than `after` minutes old and whose `<member>.jsonl` is not
+// among `stems`, as `{kind, name, line, key}` — a ledger token whose `task` call
+// was never made. A `review:PR#<n>` launch is no member and has no
+// transcript named after it, so it is never one. `key` is the line without
+// its age, what the digest `--fold-unchanged` compares takes.
+export function noTranscriptLines({ live, seen, stems, session, after, now }) {
+  const has = new Set(stems);
+  const out = [];
+  for (const name of live) {
+    if (parseMember(name) === null || seen[name] === undefined || has.has(name)) continue;
+    const ms = now - seen[name];
+    if (ms <= after * 60_000) continue;
+    out.push({
+      kind: "NO-TRANSCRIPT", name, key: `NO-TRANSCRIPT ${name}`,
+      line: `NO-TRANSCRIPT ${name} (live ${Math.floor(ms / 60_000)}m, no ${join(session, `${name}.jsonl`)})`,
+    });
+  }
+  return out;
+}
+
 // --apply's pure half. The merge-bot numbers `applied.reapAfter` names for
 // THIS run: none when its `run` is not the controller record's `at`, since
 // merge-bot numbering restarts with a run and the state file outlives it
@@ -1194,7 +1250,7 @@ export function reclaimSummary(stdout) {
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1281,6 +1337,13 @@ const OPTIONS = {
   // receipt names none; the receipt's `scratch` wins when it does. Empty is
   // absent, as with --state.
   scratch: { type: "string", default: "" },
+  // The session directory the transcript listing is read off, for a run whose
+  // phase-0 receipt names none; the receipt's `session` wins when it does.
+  // Empty is absent, as with --state.
+  session: { type: "string", default: "" },
+  // Minutes a live member token may go with no transcript in the session
+  // directory before NO-TRANSCRIPT names it.
+  "no-transcript-after": { type: "string", default: "5" },
   // Minutes a live token of each family may run before CHECK-LIVENESS names it.
   ...Object.fromEntries(Object.entries(LIVENESS_FLAGS).map(([family, flag]) => [flag, { type: "string", default: String(LIVENESS_DEFAULTS[family]) }])),
 };
@@ -1313,6 +1376,7 @@ function options() {
     implCap: positive("implementer-cap"), reviewerCap,
     maxReviews: values["max-reviews"] === undefined ? reviewerCap : positive("max-reviews"),
     fold: values["fold-unchanged"], apply: values.apply, state: values.state || statePath(NAME), scratch: values.scratch,
+    session: values.session || null, noTranscriptAfter: positive("no-transcript-after"),
     liveness: Object.fromEntries(Object.entries(LIVENESS_FLAGS).map(([family, flag]) => [family, positive(flag)])),
   };
 }
@@ -1721,8 +1785,23 @@ function readReports(scratch, reporters) {
   return out;
 }
 
+// The transcript stems in `session`, off one readdir: no file in it is read.
+// The receipt's directory not being there yet holds no transcript, so it lists
+// none; a `--session` one that is not there is a path somebody typed, and is
+// no such case. One that cannot be listed is null and one stderr line — read
+// as empty, it would name every live member NO-TRANSCRIPT.
+function listTranscripts(session, { missingIsEmpty }) {
+  try {
+    return transcriptStems(readdirSync(session));
+  } catch (e) {
+    if (e.code === "ENOENT" && missingIsEmpty) return [];
+    console.error(`${NAME}: transcripts not checked — cannot list ${session} (${e.code ?? e.message})`);
+    return null;
+  }
+}
+
 function main() {
-  const { fold, apply, state: path, liveness, scratch: scratchFlag, ...caps } = options();
+  const { fold, apply, state: path, liveness, scratch: scratchFlag, session: sessionFlag, noTranscriptAfter, ...caps } = options();
   const listPath = shortlistPath();
   const current = readShortlist(listPath);
   // Beside the shortlist, off the same git probe rather than a second one.
@@ -1755,6 +1834,24 @@ function main() {
       : {}));
   }
 
+  // This run's phase 0, off its receipt: unfinished holds the same rows the
+  // main checkout does, and never refuses the tick either. Judged against
+  // the controller record this tick started from, and against whether that
+  // record's process is still there: a finished receipt of the run before
+  // carries the same `at` until this run's rotation writes the next.
+  const receipt = readRunReceipt();
+  const phase0 = phase0Gate(receipt.read, {
+    path: receipt.path, controllerAt: controller?.at, controller: controllerState(controller),
+  });
+  // The session directory's listing, ahead of every ledger read: a dispatch is
+  // written to the ledger before its `task` call makes the transcript, so a
+  // stem listed here is on whatever ledger is read after. Listed later, a
+  // dispatch landing in between would print UNRECORDED for a token the ledger
+  // holds. This run's receipt's `session`, else --session, else no check.
+  const session = phase0.session ?? sessionFlag;
+  if (session === null) console.error(`${NAME}: transcripts not checked — no session in this run's phase-0 receipt and no --session`);
+  const stems = session === null ? null : listTranscripts(session, { missingIsEmpty: phase0.session !== null });
+
   // Every read happens before anything prints: a partial tick is worse than no
   // tick, because half a reconcile still reads like a reconcile. The APPLIED
   // lines are the exception, printed as each duty runs: they say what was
@@ -1767,15 +1864,6 @@ function main() {
   // every answer but `clean` is a hold on the dispatching rows plus one line
   // saying why, so the rest of the run keeps reporting.
   const mainCheckout = checkMainCheckout();
-  // This run's phase 0, off its receipt: unfinished holds the same rows the
-  // main checkout does, and never refuses the tick either. Judged against
-  // the controller record this tick started from, and against whether that
-  // record's process is still there: a finished receipt of the run before
-  // carries the same `at` until this run's rotation writes the next.
-  const receipt = readRunReceipt();
-  const phase0 = phase0Gate(receipt.read, {
-    path: receipt.path, controllerAt: controller?.at, controller: controllerState(controller),
-  });
 
   if (apply) {
     // Reap and reclaim after every merge pass settled `done` since the last
@@ -1855,6 +1943,13 @@ function main() {
   // Advisory the same way: a report on disk prints the settle it is for, and
   // nothing here runs it.
   const reported = reportLines({ reporters: run.reporters, reports, now, reportsFrom: scratch?.flagged ? reportsDir(scratch.root) : null });
+  // Advisory the same way: a transcript the ledger records nowhere, and a live
+  // member token with no transcript past `--no-transcript-after`. Neither is a
+  // row, and nothing here dispatches, settles or kills.
+  const transcribed = stems === null ? [] : [
+    ...unrecordedLines({ stems, recorded: run.recorded }),
+    ...noTranscriptLines({ live: run.live, seen, stems, session, after: noTranscriptAfter, now }),
+  ];
   const above = [...(phase0.line === null ? [] : [phase0.line]), ...(said === null ? [] : [said]), ...stale.map((s) => s.line)];
   const rowLines = formatLines(rows);
   // The run is over once it is draining and nothing is left in flight: no
@@ -1863,13 +1958,14 @@ function main() {
   // last act, and only the controller can write it.
   const over = run.draining !== null && prs.length === 0 && run.implLive === 0;
   if (over) rowLines.push(RUN_OVER);
-  const lines = [...above, ...reported.map((r) => r.line), ...rowLines];
+  const advice = [...transcribed, ...reported];
+  const lines = [...above, ...advice.map((a) => a.line), ...rowLines];
 
   // The back-off streak and the fold digest, written on EVERY tick: an edge
   // tick that dispatched is the clearest possible "there is work here". Digest,
-  // not the lines themselves, so the file stays readable. A report line goes in
-  // without its age.
-  const digest = createHash("sha256").update([...above, ...reported.map((r) => r.key), ...rowLines].join("\n")).digest("hex");
+  // not the lines themselves, so the file stays readable. A report or
+  // NO-TRANSCRIPT line goes in without its age.
+  const digest = createHash("sha256").update([...above, ...advice.map((a) => a.key), ...rowLines].join("\n")).digest("hex");
   const acts = actionable(rows) || over;
   // `seen` is pruned to the live set on the same write; an empty one removes
   // the key. A file that was degraded at this read is left byte-identical, so
@@ -1899,11 +1995,14 @@ function main() {
     // A report waiting on disk persists the same way, for as long as its
     // member stays live.
     const settle = reported.filter((r) => r.settle).map((r) => `; SETTLE ${r.member} persists`).join("");
+    // A transcript the ledger lacks, or a live token lacking one, the same
+    // way, for as long as it holds.
+    const unmatched = transcribed.map((t) => `; ${t.kind} ${t.name} persists`).join("");
     // The to-spec drops the same way: advice, and the one reason an empty
     // shortlist is not "no work".
     const specs = specsDropped(dropped);
     const drops = specs ? `; ${specs} persists` : "";
-    console.log(`fleet-tick: unchanged, nothing to act on (quiet=${prev.quiet + 1})${held}${aged}${settle}${drops} — full rows on the next change`);
+    console.log(`fleet-tick: unchanged, nothing to act on (quiet=${prev.quiet + 1})${held}${aged}${unmatched}${settle}${drops} — full rows on the next change`);
     return;
   }
   for (const line of lines) console.log(line);
