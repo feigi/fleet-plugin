@@ -252,6 +252,47 @@ test("merge-commit path proves true when pre is the SECOND parent of post", (t) 
   assert.equal(code, 0);
 });
 
+test("merge-commit path proves false when pre is post's main-side SECOND parent (already on main)", (t) => {
+  // pre is a parent of post, so routing picks the merge-commit path, but this
+  // parent is main's tip from before the merge: it landed before this merge did,
+  // which is exactly what leg 1 exists to refuse.
+  const { w, post, mainTip } = mergeUpdated(t);
+  const merge = mergeNoFf(w, post, "merge feat");
+  git(w, "push", "-q", "origin", "main");
+  assert.equal(git(w, "rev-parse", `${merge}^1`), mainTip, "fixture: the main-side parent is merge^1");
+
+  const { code, json } = prove(w, mainTip, post, merge);
+  assert.equal(json.proofPath, "merge-commit");
+  assert.deepEqual(json.gates, { ...MERGE_COMMIT_GATES, preIsParentOfHead: false });
+  assert.equal(json.proved, false);
+  assert.equal(code, 1);
+});
+
+test("merge-commit path proves false when pre is post's main-side FIRST parent (already on main)", (t) => {
+  // The mirrored parent order: a main-based branch merges the feature in, so
+  // main's tip is post^1 and the reviewed head is post^2. Passing the main side
+  // as pre must fail leg 1 whichever parent position it holds.
+  const w = repo(t);
+  git(w, "checkout", "-q", "-b", "feat");
+  commit(w, "feature work");
+  git(w, "checkout", "-q", "main");
+  const mainTip = commit(w, "main moves on");
+  git(w, "push", "-q", "origin", "main");
+  git(w, "checkout", "-q", "-b", "upd", "main");
+  git(w, "merge", "-q", "--no-ff", "-m", "merge feat into upd", "feat");
+  const post = git(w, "rev-parse", "HEAD");
+  assert.equal(git(w, "rev-parse", `${post}^1`), mainTip, "fixture: main's tip is the first parent of post");
+
+  const merge = mergeNoFf(w, post, "merge upd");
+  git(w, "push", "-q", "origin", "main");
+
+  const { code, json } = prove(w, mainTip, post, merge);
+  assert.equal(json.proofPath, "merge-commit");
+  assert.deepEqual(json.gates, { ...MERGE_COMMIT_GATES, preIsParentOfHead: false });
+  assert.equal(json.proved, false);
+  assert.equal(code, 1);
+});
+
 test("a single-parent post stacked on pre routes to the rebase path and proves false", (t) => {
   // An unreviewed commit pushed on top of the reviewed head has `pre` as its ONLY
   // parent. Only a two-parent post is a merge-commit update, so this must stay on
