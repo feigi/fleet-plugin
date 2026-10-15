@@ -35,6 +35,8 @@ import { writeExecStub } from "./support/exec-stub.mjs";
 const SKILLS = join(import.meta.dirname, "..", "plugin", "skills");
 const SKILL = Pin.file(join(SKILLS, "run-team", "SKILL.md"));
 const MERGE_BOT = Pin.file(join(import.meta.dirname, "..", "plugin", "commands", "run-merge-bot.md")).text;
+// The merge bot's agent definition: where its copy of the traps lives.
+const MERGE_BOT_AGENT = Pin.file(join(import.meta.dirname, "..", "plugin", "agents", "fleet-merge-bot.agent.md")).text;
 
 const DIR = tempDir("shell-traps-");
 const BIN = join(DIR, "bin");
@@ -70,12 +72,12 @@ const TRAPS = SKILL.section("## Shell traps", "run-team/SKILL.md").text;
 const LIST = "849\\n850\\n852\\n";
 
 test("the section exists and is the only place the zsh loop family is stated, in either document", () => {
-  // The mechanism sentence lives once. The two seats that consume it cite the
-  // section instead of restating it — that is #854's placement ruling, and the
-  // drift it prevents is a second copy going stale against the first, whether
-  // that copy lands back in SKILL.md or in run-merge-bot.md, the document this
-  // ticket edits most heavily and whose own brief bullet was replaced by a
-  // pointer.
+  // The mechanism sentence lives once in the controller's skill file and once,
+  // deliberately, in the merge bot's agent body (pinned below). The seats that
+  // consume it elsewhere cite the section instead of restating it — that is
+  // #854's placement ruling, and the drift it prevents is a further copy going
+  // stale against the first, whether it lands back in SKILL.md outside the
+  // section or in run-merge-bot.md, the document this ticket edits most heavily.
   const mechanism = Pin.phrase("word-splits an unquoted command substitution's result; it does NOT split an unquoted parameter expansion");
   assert.match(TRAPS, mechanism, "the Shell traps section dropped the mechanism sentence");
 
@@ -90,10 +92,9 @@ test("the section exists and is the only place the zsh loop family is stated, in
   );
 });
 
-test("both consumer seats reach the section instead of restating it", () => {
-  // Phase 3 writes the CI watcher's loop; the merge-bot brief is where a bot
-  // gets the same traps. The ticket's ruling is that neither carries its own
-  // copy, so each has to name the section.
+test("phase 3's monitor paragraph reaches the section instead of restating it", () => {
+  // Phase 3 writes the CI watcher's loop. The ticket's ruling is that it carries
+  // no copy of the mechanism of its own, so it has to name the section.
   const watcherPara = SKILL.paragraph("**Guard every probe, not just the ones with a verdict field.**", "phase 3's monitor paragraph", "**A readable list can still be a short one.**").text;
   // The citation is the section NAME, in whatever emphasis the sentence wants.
   // Pinning `**Shell traps**` exactly would fail on a bold span that opens
@@ -103,16 +104,34 @@ test("both consumer seats reach the section instead of restating it", () => {
     /\bShell traps\b/,
     "phase 3's monitor paragraph no longer points at Shell traps — it either lost the pointer or grew its own copy of the mechanism",
   );
-
-  // The brief's one bullet since #1806 retired the gate traps into
-  // merge-gate.mjs: sliced to that paragraph alone.
-  const briefPara = SKILL.paragraph("**Put the shell traps in the bot's brief", "the merge bot's shell-traps brief paragraph", "**Its merge gate is one script, run twice.**").text;
-  assert.match(
-    briefPara,
-    /\bShell traps\b/,
-    "the merge bot's brief no longer points at Shell traps, so a dispatched bot never receives them",
-  );
 });
+
+// The merge bot is the one seat that holds the whole block as a copy: it cannot
+// cite a section of a file it is not given, and a bot already looping cannot be
+// corrected. So the copy is in its agent body, which is its system prompt, and
+// what is pinned is that each trap's RULE is still stated there — one span per
+// trap, the smallest clause that makes the claim, so a re-wrap or a re-emphasis
+// stays green and a trap dropped from the body goes red naming that trap.
+const AGENT_TRAPS = [
+  ["word-splits an unquoted command substitution's result; it does NOT split an unquoted parameter expansion", "the zsh loop mechanism"],
+  ["hazard is the **assigned-variable** form, never `$(…)`", "the hazard's direction"],
+  ["`$(…)` splits. Leave it alone.", "the blessing of the command-substitution form"],
+  ["Capture-then-loop needs `while IFS= read -r` fed by a heredoc", "the heredoc-fed `while read` remedy"],
+  ["`</dev/null` every command inside a `while read` loop", "the `</dev/null` rule"],
+  ["**A probe that could not look emits an event; it never `continue`s.**", "the probe-could-not-look rule"],
+  ["zsh has no `PIPESTATUS`", "the PIPESTATUS trap"],
+  ["`status` is a READ-ONLY variable in zsh", "the read-only-`status` trap"],
+];
+
+for (const [span, name] of AGENT_TRAPS) {
+  test(`the merge bot's agent body states ${name}`, () => {
+    assert.match(
+      MERGE_BOT_AGENT,
+      Pin.phrase(span),
+      `fleet-merge-bot.agent.md no longer states ${name} — the bot's shell traps live in that body and nowhere else it reads`,
+    );
+  });
+}
 
 // CI runs ubuntu-latest, which ships no zsh. So the document's whole contract
 // is asserted in tests that need no shell — including the rule's DIRECTION,

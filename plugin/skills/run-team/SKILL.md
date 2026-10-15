@@ -164,11 +164,12 @@ makes one up.
 ## Shell traps
 
 Monitor and Bash commands run under **zsh**, and the shell in this file is
-prescriptive — copied verbatim into a watcher or pasted into a bot's brief. So
-every trap here is a zsh-vs-bash difference that ships as a green-looking gate:
-correct in the shell you tested in, silently wrong in the one it runs in. Phase
-3's monitor paragraph and the **Merge bot**'s brief both point here
-instead of restating any of it; the one deliberate copy is named at the end.
+prescriptive — copied verbatim into a watcher or into the merge bot's agent
+body. So every trap here is a zsh-vs-bash difference that ships as a
+green-looking gate: correct in the shell you tested in, silently wrong in the
+one it runs in. Phase 3's monitor paragraph points here instead of restating
+any of it. The merge bot's agent body is the one place this block is copied
+whole (see **Merge bot**); the other deliberate copy is named at the end.
 
 **zsh word-splits an unquoted command substitution's result; it does NOT split
 an unquoted parameter expansion.** That one difference is the whole rule, and the
@@ -236,7 +237,7 @@ reads as a check that silently did not run. Same root cause as the `PIPESTATUS`
 trap, opposite failure direction — so name the variable anything else
 (`ci_status`).
 
-**The one deliberate copy is `env $cfg sh ./probe.sh`.** The first trap's
+**The other deliberate copy is `env $cfg sh ./probe.sh`.** The first trap's
 mechanism bites argv as well as loops, and that instance stays written out in the
 fix-applier prompt and every refuter brief under **Reviewers** rather than here,
 because the seats that inject faults are the ones that need it and a bot reads
@@ -3662,14 +3663,16 @@ deterministic, script-driven backstop run before every push specifically to
 catch a wrongly-resolved conflict, so the tier buys nothing that backstop
 doesn't already cover.
 
-**Put the shell traps in the bot's brief, not in a follow-up message.** A bot
-already looping cannot be corrected — the loop consumes the turns a correction
-would land in. **Every entry in Shell traps, verbatim** — that section is where
-they are stated once, and this is the seat that has to paste them: the bot
-reads an exit code off `gh pr update-branch`, `merge-gate.mjs` and
-`prove-merge.sh`, which is the `PIPESTATUS` and read-only-`status` pair, and its
-grace poll captures `gh pr list` output and loops over it, which is the
-assigned-variable trap. The brief always travels with the dispatch.
+**The shell traps live in the merge bot's agent body, not in its brief and not
+in a follow-up message.** A bot already looping cannot be corrected — the loop
+consumes the turns a correction would land in — so
+`agents/fleet-merge-bot.agent.md` carries **every entry in Shell traps**, copied
+from that section, and the bot has them before its first turn. The bot reads an
+exit code off `gh pr update-branch`, `merge-gate.mjs` and `prove-merge.sh`,
+which is the `PIPESTATUS` and read-only-`status` pair, and its grace poll
+captures `gh pr list` output and loops over it, which is the assigned-variable
+trap. Its brief names the bot and `<scratch>` and nothing else; do not paste the
+traps there. An edit to Shell traps lands in that body in the same change.
 
 **Its merge gate is one script, run twice.** Step 3 of `run-merge-bot.md` is
 `merge-gate.mjs --pr <n> --pre <sha> [--post <sha>]`: read-only, it runs the
