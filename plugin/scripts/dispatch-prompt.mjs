@@ -57,9 +57,8 @@
 //   only a caller passing a value like `<branch>` can cause — refuses, naming
 //   it.
 //
-// The text every member of a role shares is meant to live in that role's
-// agent body; until it does, the templates carry what the controller pasted
-// into the dispatch prompt by hand.
+// The text every member of a role shares lives in that role's agent body; a
+// template carries only what varies between dispatches of the role.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";

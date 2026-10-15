@@ -1877,15 +1877,17 @@ function runDispatch() {
   // refused here, before the member is live, not discovered by the check
   // after the call.
   //
-  // A fix-applier's turns on whether its PR sits on an unresolved conflict
-  // hold, and that is the tick's own verdict, not a second reading
-  // of row `i`: a PR's tokens can be split across its ticket row and its own
-  // `#<pr>` row, and a settle can live in `## Dispatched` alone, so
+  // A fix-applier is `fleet-fix-applier` for every kind of work — review,
+  // conflict hold, dispositions retry — so its definition reads nothing off
+  // the ledger.
+  //
+  // The finisher's gates below turn on the tick's own verdict, not a second
+  // reading of row `i`: a PR's tokens can be split across its ticket row and
+  // its own `#<pr>` row, and a settle can live in `## Dispatched` alone, so
   // one row's text can read held where the tick reads cleared, and the
   // reverse. A ledger the tick refuses is refused here too, before the member
-  // is live, rather than named a definition off a reading the tick rejects.
-  // `tickFold` reads that fold for whichever of the two families needs it,
-  // `what` naming what could not be read off a refused ledger.
+  // is live. `tickFold` reads that fold, `what` naming what could not be read
+  // off a refused ledger.
   const tickFold = (what) => {
     try {
       return deriveRun({ rows: data.rows, dispatched: data.dispatched, drain: data.drain }, []);
@@ -1894,7 +1896,6 @@ function runDispatch() {
       die(`${e.message} — fleet-tick.mjs refuses this ledger, so ${member.name}'s ${what} cannot be read off it; fix it with \`ledger.mjs row\` before dispatching`);
     }
   };
-  const held = member.family === "fix-pr" && tickFold("definition").conflictHeld.includes(member.number);
 
   // A finisher labels its PR `ready-to-merge`, so it is recorded only once
   // the PR sits on no conflict hold a fix-applier has yet to clear — a PR
@@ -1922,7 +1923,7 @@ function runDispatch() {
   // refusal's tail names neither.
   let agent;
   try {
-    agent = agentDefinition(member, i === -1 ? "" : data.rows[i], held);
+    agent = agentDefinition(member, i === -1 ? "" : data.rows[i]);
     if (member.family === "impl" && !existsSync(join(AGENTS_DIR, `${agent}.agent.md`))) {
       throw new Error(`row #${member.number}'s tier= names ${agent}, which has no agents/${agent}.agent.md — fix the row with \`ledger.mjs row\``);
     }
