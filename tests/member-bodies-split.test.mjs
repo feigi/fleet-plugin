@@ -23,7 +23,7 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -85,6 +85,18 @@ test("fleet-fix-applier: model is a @<role>:<level> route, and tier-roles accept
   assert.deepEqual(r.violations, []);
 });
 
+// omp gives a definition that declares no `spawns` the empty spawn policy, so a fix-applier
+// without one cannot dispatch the refuters its own body tells it to dispatch.
+test("fleet-fix-applier: its spawn policy allows the task agent its body tells it to dispatch refuters through", () => {
+  const text = agentText("fleet-fix-applier");
+  const fm = parseFrontmatter(text);
+  assert.equal(fm.error, undefined);
+  const spawns = fm.fields.find((f) => f.key === "spawns")?.value;
+  assert.ok(spawns, "fleet-fix-applier.agent.md declares no spawns field");
+  assert.ok(spawns.split(",").map((s) => s.trim()).includes("task"), `spawns is ${spawns}`);
+  assert.match(bodyOf(text), /dispatch ONE refuter/);
+});
+
 test("tier-roles refuses a fix-applier definition whose model is not a route (the control for the accepting case above)", () => {
   const dir = join(TMP, "bad-route");
   mkdirSync(dir);
@@ -115,33 +127,9 @@ test("frontmatter-check accepts the fix-applier definition against the shipped a
 
 // --- (2) the pair -----------------------------------------------------------
 
-const INSTRUMENTS_STUB = "#!/bin/sh\nexit 0\n";
-const INSTALL = join(TMP, "install");
-mkdirSync(join(INSTALL, "scripts"), { recursive: true });
-mkdirSync(join(INSTALL, "skills", "run-team"), { recursive: true });
-for (const m of ["dispatch-prompt.mjs", "arg.mjs", "git-env.mjs", "fleet-dir.mjs", "review-core.mjs"]) {
-  writeFileSync(join(INSTALL, "scripts", m), readFileSync(join(PLUGIN, "scripts", m)));
-}
-writeFileSync(join(INSTALL, "scripts", "instruments.sh"), INSTRUMENTS_STUB);
-cpSync(join(PLUGIN, "skills", "run-team", "briefs"), join(INSTALL, "skills", "run-team", "briefs"), { recursive: true });
-const REPO = join(TMP, "repo");
-mkdirSync(REPO);
-{
-  const env = { ...process.env };
-  delete env.GIT_DIR;
-  delete env.GIT_WORK_TREE;
-  const r = spawnSync("git", ["init", "-q"], { cwd: REPO, encoding: "utf8", env });
-  assert.equal(r.status, 0, r.stderr);
-}
-
-function renderBrief(role, kind, args) {
-  const env = { ...process.env };
-  for (const k of ["GIT_DIR", "GIT_WORK_TREE", "FORCE_COLOR"]) delete env[k];
-  const argv = ["render", role, ...(kind ? ["--kind", kind] : []), ...Object.entries(args).flatMap(([k, v]) => [`--${k}`, v])];
-  const r = spawnSync(process.execPath, [join(INSTALL, "scripts", "dispatch-prompt.mjs"), ...argv], { cwd: REPO, encoding: "utf8", env });
-  assert.equal(r.status, 0, `render ${role} ${kind}: ${r.stderr}`);
-  return r.stdout;
-}
+// The rendered brief is the golden dispatch-prompt.test.mjs pins byte-for-byte
+// against render output for the same arguments, so it is read, not rendered again.
+const GOLDEN = fileURLToPath(new URL("./fixtures/rendered-briefs/", import.meta.url));
 
 const PIN = "0123456789abcdef0123456789abcdef01234567";
 // The placeholder each argument fills, per role — the arguments are values no
@@ -186,7 +174,7 @@ for (const p of PAIRS) {
   test(`${label(p)}: its body and its rendered brief hold every sentence of the pre-change text, each as often as it stood`, () => {
     const fixture = readFileSync(join(FIXTURES, p.fixture), "utf8");
     const body = fold(bodyOf(agentText(`fleet-${p.role}`)));
-    const brief = fold(renderBrief(p.role, p.kind, p.args));
+    const brief = fold(readFileSync(join(GOLDEN, p.fixture), "utf8"));
     const fillValues = Object.fromEntries(Object.entries(p.fills).map(([inner, flag]) => [inner, p.args[flag]]));
     const fill = (s) => s.replace(/<([A-Za-z][^<>\n]*)>/g, (whole, inner) => (inner in fillValues ? fillValues[inner] : whole));
 

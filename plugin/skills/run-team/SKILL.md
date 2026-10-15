@@ -2622,8 +2622,8 @@ what lifts the tick's merge hold; a dispatched-but-live one does not, and
 `failed`/`killed` leave the PR fix-due for a replacement. It answers the
 hold and nothing else: survived or unverified findings of a returned review the row also carries
 stay unanswered through its settle, so the tick prints `DISPATCH fix-pr
-PR#<M>` again once it lands, and that one — `dispatch` now prints `null` —
-is a review fix-applier, dispatched as above. On a PR carrying
+PR#<M>` again once it lands, and that one is a review fix-applier, dispatched
+as above. On a PR carrying
 `ready-to-merge`, the push moves the head after the label, so the next merge
 bot refuses it `head-moved-after-label-#<M>`: a fresh finisher, per **Failure
 handling**.
@@ -3377,7 +3377,7 @@ each run a script the digest covers — `finisher-audit.mjs` (which runs
 `worktree-audit.sh`) and `ledger.mjs`, both under `plugin/scripts/` — and the
 label at duty 3 rests on what they returned. The rule is stated once, at the
 top of this file, which no finisher is dispatched to read, so it reaches one
-through this block or not at all:
+through this block, which `agents/fleet-finisher.agent.md` carries in its body:
 
 > **Re-check the instrument set before you act on what duty 1 or duty 2 read,
 > and again before you add the label.**
@@ -3399,7 +3399,7 @@ through this block or not at all:
 
 **Give the finisher the test-run verdict rule verbatim too.** Duty 2 runs
 `<testCmd>` for the acceptance mutation, and the finisher's agent definition
-says nothing about what a run that was cut short looks like. A `node --test`
+carries a copy of the rule below. A `node --test`
 stopped by an outside `timeout` still prints a summary, covering only the tests
 it reached, so reading that summary alone reads a partial suite as a whole one:
 
@@ -3469,8 +3469,8 @@ it reached, so reading that summary alone reads a partial suite as a whole one:
 > evidence; label nothing. A kill's evidence line goes in your report.
 
 **Give the finisher duty 3 verbatim as well, as one script.** The finisher's
-agent definition carries no duty text, so this brief is the whole of duty 3 it
-sees. Two finishers in one run read the release-label check as the whole duty
+agent definition carries this block in its body, so the brief does not repeat
+it. Two finishers in one run read the release-label check as the whole duty
 and reported `labelled` on a PR that never got the label, so the check and the
 label write are one command and the finisher never runs either alone:
 
@@ -3671,7 +3671,8 @@ from that section, and the bot has them before its first turn. The bot reads an
 exit code off `gh pr update-branch`, `merge-gate.mjs` and `prove-merge.sh`,
 which is the `PIPESTATUS` and read-only-`status` pair, and its grace poll
 captures `gh pr list` output and loops over it, which is the assigned-variable
-trap. Its brief names the bot and `<scratch>` and nothing else; do not paste the
+trap. Its brief names the bot and `<scratch>`, plus the one-line
+no-acknowledgement notice; do not paste the
 traps there. An edit to Shell traps lands in that body in the same change.
 
 **Its merge gate is one script, run twice.** Step 3 of `run-merge-bot.md` is

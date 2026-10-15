@@ -142,9 +142,16 @@ test("a fix-applier is guarded whether or not its definition name says so: bash 
     await allowed(agent, "write", { path: "plugin/tool.mjs" }, WT, `${label}'s write from its worktree`);
     await allowed(agent, "bash", { command: "true", cwd: WT }, ROOT, `${label}'s bash cwd set to its worktree`);
   }
-  // The pattern is anchored: a generic `task` agent whose own id does not
-  // match `fix-pr-<n>` is nobody's fix-applier and stays unguarded — the
-  // existing UNRELATED/CHILD near-miss rows above already cover this shape.
+  // A recovery member (`-b`, `-c`, …) is the same fix-applier under a new name.
+  for (const id of ["fix-pr-88-b", "fix-pr-88-z"]) {
+    await refused({ ...FIX_APPLIER_UNTYPED, id }, "bash", { command: "true" }, ROOT, `an untyped fix-applier recovery member ${id}'s bash with no cwd`);
+  }
+  // The pattern is anchored at both ends and the suffix is one letter: a
+  // generic `task` agent whose own id merely resembles `fix-pr-<n>` is nobody's
+  // fix-applier and keeps its inherited cwd.
+  for (const id of ["fix-pr-7x", "xfix-pr-7", "myfix-pr-7", "fix-pr-", "fix-pr-7-bb", "fix-pr-7-"]) {
+    await allowed({ ...FIX_APPLIER_UNTYPED, id }, "bash", { command: "true" }, ROOT, `a task agent named ${id}'s bash with no cwd`);
+  }
 });
 
 test("bash: an implementer is refused from the main checkout, never from its worktree; nobody else is", async () => {

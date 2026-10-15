@@ -305,9 +305,6 @@ for (const c of CASES.filter((x) => ["fix-applier", "finisher", "merge-bot"].inc
   });
 }
 
-// The recipe deriver's seed text is still the quoted block SKILL.md carries.
-const fill = (text, values) => text.replace(/<([A-Za-z][^<>\n]*)>/g, (whole, inner) => (inner in values ? values[inner] : whole));
-
 test("render finisher repair is the fresh brief plus a repair section", () => {
   const fresh_ = CASES.find((x) => x.role === "finisher" && x.kind === "fresh");
   const repair = CASES.find((x) => x.role === "finisher" && x.kind === "repair");
@@ -316,6 +313,9 @@ test("render finisher repair is the fresh brief plus a repair section", () => {
   assert.ok(out.startsWith(base), "the repair brief no longer begins with the fresh brief");
   assert.ok(out.length > base.length);
 });
+
+// The recipe deriver's seed text is still the quoted block SKILL.md carries.
+const fill = (text, values) => text.replace(/<([A-Za-z][^<>\n]*)>/g, (whole, inner) => (inner in values ? values[inner] : whole));
 
 test("render recipe-deriver prints the recipe-deriver block SKILL.md carries, placeholders filled", () => {
   const c = CASES.find((x) => x.role === "recipe-deriver");
