@@ -15,7 +15,9 @@
 // row and appends it to `## Dispatched` with `brief=<hash>`, the brief it
 // refuses to dispatch without, `settle` rewrites that token to
 // `<member>=<outcome>` in both places (an implementer's settle to `PR#M` also
-// folds the PR's own `#M` row into its ticket's), `review` appends a PR's
+// folds the PR's own `#M` row into its ticket's) — with `--from-report`, the
+// outcome derived from the member's report file and checked against git and
+// GitHub first, see runSettleFromReport() — `review` appends a PR's
 // `review=`/`reviewed=` tokens to the PR's row, and `drain` writes the
 // one marker that stops supply. The token grammar is
 // ledger-grammar.mjs's. Within a run `## Dispatched` gains an entry per
@@ -47,13 +49,14 @@ import { createHash } from "node:crypto";
 import { dirname, resolve, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
-import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
+import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
 import { attemptLock, releaseLockFile, reapPathOf } from "./pid-lock.mjs";
+import { readReportIn, reportsDir, reportFamily, defaultScratch } from "./report-files.mjs";
 
 const NAME = "ledger";
 // The plugin's own agent definitions — the directory tier-check.mjs reads
@@ -664,11 +667,14 @@ async function acquireLock() {
 if (requireFile && !existsSync(file)) die(`--require-file given but ledger file does not exist: ${file}`);
 
 const WRITE_COMMANDS = new Set(["row", "token", "filed", "ruled", "dispatch", "settle", "review", "drain", "rotate"]);
-if (WRITE_COMMANDS.has(cmd)) await acquireLock();
+// `settle --from-report` takes the lock itself, once its checks have run —
+// see runSettleFromReport().
+const FROM_REPORT = cmd === "settle" && rest.includes("--from-report");
+if (WRITE_COMMANDS.has(cmd) && !FROM_REPORT) await acquireLock();
 // `rotate` never load()s: a ledger load() would refuse is still the previous
 // run's record, and it is archived as-is — and read line by line when it
 // carries live members forward, see carryOf().
-const data = cmd === "rotate" ? null : load();
+let data = cmd === "rotate" ? null : load();
 
 // The payload subcommands end by falling out of this chain, never by calling
 // process.exit(). On a pipe, process.stdout.write is async and process.exit()
@@ -784,21 +790,11 @@ if (cmd === "read") {
   // `check` against that row silently degrades from the hard "already
   // filed" block to a soft near-miss suggestion instead.
   if (!isDigits(id)) die(`'${issue}' is not an issue number`);
-  // Both callers retry once on a failure they observed, and an observed
-  // failure is not proof the write failed — a timeout after the row landed
-  // reads as one — so a repeat filing of an issue already on file is a no-op.
-  // Identity is the issue number alone, matched NUMERICALLY — so a
-  // non-canonical spelling (`08`) still dedupes against `8` — as the token
-  // between `#` and the first whitespace: never `check`'s fuzzy subject
-  // matcher, and never a prefix test, which would dedupe issue 8 against issue 80.
-  // The existing row wins, subject and all — a retry reworded is still the
-  // same filing.
-  const existing = data.filed.find((row) => Number(row.match(/^#(\S+)/)?.[1]) === Number(id));
-  if (existing !== undefined) {
-    console.error(`    already recorded: ${existing}`);
-    console.log(JSON.stringify({ issue, subject, total: data.filed.length, alreadyRecorded: true, row: existing }));
+  const { row, alreadyRecorded } = recordFiled(id, subject);
+  if (alreadyRecorded) {
+    console.error(`    already recorded: ${row}`);
+    console.log(JSON.stringify({ issue, subject, total: data.filed.length, alreadyRecorded: true, row }));
   } else {
-    data.filed.push(`#${id} ${subject}`);
     save(data);
     console.log(JSON.stringify({ issue, subject, total: data.filed.length }));
   }
@@ -819,7 +815,8 @@ if (cmd === "read") {
 } else if (cmd === "dispatch") {
   runDispatch();
 } else if (cmd === "settle") {
-  runSettle();
+  if (FROM_REPORT) await runSettleFromReport();
+  else runSettle();
 } else if (cmd === "token") {
   runToken();
 } else if (cmd === "review") {
@@ -2022,8 +2019,18 @@ function renderedBrief(name, role) {
   return { path, sha256: s.sha256 };
 }
 
+// Whether `outcome` is one whose claim a member's report carries and `settle
+// --from-report` checks against git or GitHub before writing. Settled with
+// the bare form, the claim goes unchecked, so that form says so on stderr.
+function reportedOutcome(outcome) {
+  return /^(?:PR#|applied:|halted:)|^(?:bailed|no-op|labelled|done)$/.test(outcome);
+}
+
 function runSettle() {
-  const usage = "usage: ledger.mjs settle <member> <outcome>";
+  const usage = "usage: ledger.mjs settle <member> <outcome> | settle <member> --from-report [--reports <dir>]";
+  // `--reports` names where `--from-report` reads; alone it would land here
+  // as an outcome.
+  if (rest.includes("--reports")) die(`--reports is read only with --from-report — ${usage}`);
   // `settle impl-<N> PR#<n>`, or the one token it writes — `settle
   // impl-<N>=PR#<n>` — which is how the spec's record-before-tick table
   // spells every settlement.
@@ -2032,6 +2039,27 @@ function runSettle() {
   const parsed = parseToken(rest.length === 2 ? `${rest[0]}=${rest[1]}` : rest[0]);
   if (!parsed) die(unknownMember(rest[0].split("=")[0]));
   if (parsed.error) die(`${parsed.name}: ${parsed.error}`);
+  const { name, outcome } = parsed;
+  const token = `${name}=${outcome}`;
+  const { i, changed } = settleMember(parsed);
+  if (changed) {
+    save(data);
+    console.error(`    settled ${token}`);
+  }
+  if (reportedOutcome(outcome)) {
+    console.error(`${NAME}: WARNING ${token} settled without --from-report — the member's claim was not checked`);
+  }
+  console.log(JSON.stringify({
+    member: name, outcome, ticket: i === -1 ? null : rowKey(data.rows[i]), line: i === -1 ? null : data.rows[i], changed,
+  }));
+}
+
+// The settle both forms share: rewrites `parsed`'s live token to
+// `<member>=<outcome>` in `data`, saving nothing. `{i, changed}`: `i` the row
+// the token sits on (-1 for none), `changed` false when the same outcome was
+// already on record and nothing was rewritten. Every refusal is die(), exit 2,
+// before anything in `data` changes.
+function settleMember(parsed) {
   const { name, outcome } = parsed;
   const token = `${name}=${outcome}`;
   // Same guard as runDispatch(): a `## Dispatched` entry this grammar cannot
@@ -2048,14 +2076,10 @@ function runSettle() {
 
   const liveRows = data.rows.flatMap((r, i) => (carries(r, name, true) ? [i] : []));
   const liveEntry = entry !== null && entry.outcome === null;
-  const payload = (i, changed) => ({
-    member: name, outcome, ticket: i === -1 ? null : rowKey(data.rows[i]), line: i === -1 ? null : data.rows[i], changed,
-  });
   if (!liveEntry && liveRows.length === 0) {
     if (settled.length === 0) die(`no live ${name} in the ledger — \`dispatch\` it first`);
     // The same outcome again: already on record, so nothing is written.
-    console.log(JSON.stringify(payload(data.rows.findIndex((r) => carries(r, name)), false)));
-    return;
+    return { i: data.rows.findIndex((r) => carries(r, name)), changed: false };
   }
 
   // The rows before any write below: the fold's guard reads the row this
@@ -2112,9 +2136,285 @@ function runSettle() {
   // carried. The refused member settles `=bailed` or to a PR of its own.
   const split = newSplitRow(before, data.rows);
   if (split !== null) die(`settle ${token}: ${splitRowClause(split)}; settle ${name} =bailed or to a PR of its own`);
-  save(data);
-  console.error(`    settled ${token}`);
-  console.log(JSON.stringify(payload(i, true)));
+  return { i, changed: true };
+}
+
+// One filing into `## Filed`, unsaved: `{row, alreadyRecorded}`. A repeat
+// filing of an issue already on file is a no-op — both callers of `filed`
+// retry once on a failure they observed, and an observed failure is not
+// proof the write failed (a timeout after the row landed reads as one), and
+// `settle --from-report` run twice records the same report twice. Identity
+// is the issue number alone, matched NUMERICALLY — so a non-canonical
+// spelling (`08`) still dedupes against `8` — as the token between `#` and
+// the first whitespace: never `check`'s fuzzy subject matcher, and never a
+// prefix test, which would dedupe issue 8 against issue 80. The existing row
+// wins, subject and all — a retry reworded is still the same filing.
+function recordFiled(id, subject) {
+  const existing = data.filed.find((row) => Number(row.match(/^#(\S+)/)?.[1]) === Number(id));
+  if (existing !== undefined) return { row: existing, alreadyRecorded: true };
+  const row = `#${id} ${subject}`;
+  data.filed.push(row);
+  return { row, alreadyRecorded: false };
+}
+
+// -- settle --from-report -----------------------------------------------------
+//
+// `settle <member> --from-report [--reports <dir>]`: the member's outcome read
+// off the report file it wrote, `<dir>/<member>.json` — `<dir>` by default
+// `<scratch>/reports`, `<scratch>` the root scratch-root.mjs prints — rather
+// than typed by hand. The file must check against its family's schema
+// (report-schema.mjs) and name this member in `member`. The token is derived
+// from it, and an outcome that asserts a git or GitHub state has that state
+// checked before anything is written:
+//
+//   impl-N=PR#M               verify-sha.sh <branch> <head> exits 0; PR M
+//                             reads OPEN and its closingIssuesReferences name N
+//   impl-N=bailed             bailCause is not null; the receipt names it
+//   fix-pr-M=applied:<head>   origin's refs/heads/<branch> is <head>
+//   fix-pr-M=no-op            origin's refs/heads/<branch> is the head PR M's
+//                             latest reviewed= names, as the tick folds it
+//   finisher-pr-M=labelled    PR M's labels carry ready-to-merge, and so does
+//                             the report's labelsReadBack
+//   finisher-pr-M=halted:<c>  cause is in the halted:<cause> vocabulary and
+//                             evidence is not empty
+//   merge-bot-n=done          every merged[].pr reads MERGED
+//
+// A `failed` report claims no state, so it settles `=failed` unchecked. A
+// fix-applier's `refuted` deferral claims one more thing: that its disposition
+// record gives the reversal a reason, which is the text `## Ruled` gets.
+//
+// Exit 3: a check failed — the member's claim and the world disagree — and
+// stderr names each failed check; nothing written. Exit 2: the report is
+// absent, unreadable or invalid, a check could not look (a `gh`, `git` or
+// verify-sha.sh call that failed, printed what it was not asked for, or never
+// finished), or a refusal the bare form makes; nothing written either.
+//
+// After the settle, in the same write: every `unrecorded` entry goes to `##
+// Filed` the way `filed` records one, and for a fix-applier every `deferred`
+// entry in the `refuted` bucket goes to `## Ruled` as `#M reversed refutation
+// <index>: <reason>`. A line already there is not written again, so a second
+// run of the same settle writes nothing. The receipt on stdout is `{member,
+// outcome, checks: [{name, ok}], filed, ruled}`, `filed` and `ruled` the
+// lines this call added.
+//
+// The checks run before the write lock is taken, against the ledger as read
+// without it, because they are network calls and every other writer waits
+// for the lock 10 s at most. The settle itself is judged again under the
+// lock, on the ledger reloaded there.
+
+// A failed check: die()'s refusal shape, on stderr with nothing on stdout,
+// at exit 3.
+function mismatch(msg) {
+  try {
+    writeAll(2, `\n${NAME}: ${msg}\n`);
+  } catch {
+    // The message may be lost; the exit code may not.
+  }
+  process.exit(3);
+}
+
+async function runSettleFromReport() {
+  const usage = "usage: ledger.mjs settle <member> --from-report [--reports <dir>]";
+  const verifySha = join(dirname(fileURLToPath(import.meta.url)), "verify-sha.sh");
+  const ready = "ready-to-merge";
+  // The bound on each child a check runs: generous, because verify-sha.sh
+  // fetches, and still a bound, because the child may never answer at all.
+  const checkTimeoutMs = 60_000;
+  let member;
+  let reports = null;
+  for (let k = 0; k < rest.length; k++) {
+    const a = rest[k];
+    if (a === "--from-report") continue;
+    if (a === "--reports") {
+      const v = rest[++k];
+      if (isFlagLike(v)) die(`--reports needs a directory — ${usage}`);
+      if (reports !== null) die(`--reports given twice — ${usage}`);
+      reports = v;
+    } else if (a.startsWith("-")) {
+      die(`unknown flag '${a}' — ${usage}`);
+    } else if (member === undefined) {
+      member = a;
+    } else {
+      die(usage);
+    }
+  }
+  if (member === undefined) die(usage);
+  if (member.includes("=")) die(`settle --from-report takes a member name, not '${member}': the outcome is the report's — ${usage}`);
+  const live = parseToken(member);
+  if (!live) die(unknownMember(member));
+  const where = `settle ${member} --from-report`;
+
+  if (reports === null) {
+    try {
+      reports = reportsDir(defaultScratch());
+    } catch (e) {
+      if (!(e instanceof FleetDirUnresolvable)) throw e;
+      die(`${where}: no --reports, and the scratch root could not be resolved — ${e.message}`);
+    }
+  }
+  const read = readReportIn(reports, member);
+  if (read.state === "absent") die(`${where}: no report at ${read.path}; nothing written`);
+  if (read.state === "invalid") die(`${where}: ${read.path} is not a ${reportFamily(member)} report — ${read.violation}; nothing written`);
+  const report = read.report;
+  const invalid = (violation) => die(`${where}: ${read.path} is not a ${reportFamily(member)} report — ${violation}; nothing written`);
+  if (report.member !== member) invalid(`$.member: ${JSON.stringify(report.member)} is not ${member}`);
+
+  // Every child runs from the ledger's repository with runCheck()'s
+  // environment, for runCheck()'s reasons: GH_REPO would point gh at another
+  // tracker whatever the cwd, and GIT_DIR/GIT_WORK_TREE git at another repo.
+  const env = { ...process.env, GH_REPO: "" };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  let repo = null;
+  const repoDir = () => {
+    if (repo !== null) return repo;
+    let dir = dirname(resolve(file));
+    while (!existsSync(dir) && dirname(dir) !== dir) dir = dirname(dir);
+    const r = spawnSync("git", ["-C", dir, "rev-parse", "--show-toplevel"], { encoding: "utf8", env, timeout: GIT_TIMEOUT_MS });
+    if (r.status !== 0) {
+      const why = cause(r.error && r.error.message, r.stderr);
+      die(`${where}: could not look — cannot resolve the ledger's repository (${dir})${why ? `: ${why}` : ""}; nothing written`);
+    }
+    repo = r.stdout.trim();
+    return repo;
+  };
+  // A child that must answer with one of `answers`; anything else — another
+  // status, a spawn failure, a timeout — could not look.
+  const look = (what, cmd, args, answers = [0]) => {
+    const r = spawnSync(cmd, args, { encoding: "utf8", cwd: repoDir(), env, timeout: checkTimeoutMs, stdio: ["ignore", "pipe", "pipe"] });
+    if (r.status === null || !answers.includes(r.status)) {
+      const why = cause(r.error && r.error.message, r.stderr);
+      die(`${where}: could not look — ${what}${r.status === null ? "" : ` exited ${r.status}`}${why ? `: ${why}` : ""}; nothing written`);
+    }
+    return r;
+  };
+  const prView = (pr, fields) => {
+    const what = `gh pr view ${pr} --json ${fields}`;
+    const r = look(what, "gh", ["pr", "view", String(pr), "--json", fields]);
+    try {
+      const v = JSON.parse(r.stdout);
+      if (v !== null && typeof v === "object") return v;
+    } catch {
+      // Falls through to the refusal below.
+    }
+    return die(`${where}: could not look — ${what} printed no JSON object: ${cause(r.stdout)}; nothing written`);
+  };
+  // origin's head of `branch`, or null when origin has no such branch.
+  const remoteHead = (branch) => {
+    const ref = `refs/heads/${branch}`;
+    const r = look(`git ls-remote origin ${ref}`, "git", ["ls-remote", "origin", ref]);
+    const line = r.stdout.split("\n").find((l) => l.endsWith(`\t${ref}`));
+    return line === undefined ? null : line.split("\t")[0];
+  };
+
+  const checks = [];
+  const check = (name, ok) => {
+    checks.push({ name, ok });
+    return ok;
+  };
+  const ruledLines = [];
+  let outcome;
+  if (live.family === "impl") {
+    if (report.outcome === "pr") {
+      if (report.pr === null || report.pr < 1) invalid(`$.pr: ${JSON.stringify(report.pr)} is not a PR number, with outcome "pr"`);
+      if (report.head === null) invalid('$.head: null, with outcome "pr"');
+      outcome = `PR#${report.pr}`;
+      const sha = look(`verify-sha.sh ${report.branch} ${report.head}`, "sh", [verifySha, report.branch, report.head], [0, 1]);
+      check(`verify-sha.sh ${report.branch} ${report.head} exits 0`, sha.status === 0);
+      const pr = prView(report.pr, "state,closingIssuesReferences");
+      check(`PR #${report.pr} reads OPEN`, pr.state === "OPEN");
+      const closes = Array.isArray(pr.closingIssuesReferences) ? pr.closingIssuesReferences : [];
+      check(`PR #${report.pr} closes #${live.number}`, closes.some((c) => c?.number === live.number));
+    } else {
+      outcome = "bailed";
+      check(`bailCause: ${report.bailCause}`, report.bailCause !== null);
+    }
+  } else if (live.family === "fix-pr") {
+    if (report.outcome === "applied") {
+      outcome = `applied:${report.head}`;
+      const head = remoteHead(report.branch);
+      check(`origin refs/heads/${report.branch} is ${report.head}`, head === report.head);
+    } else if (report.outcome === "no-op") {
+      outcome = "no-op";
+      let fold;
+      try {
+        fold = deriveRun({ rows: data.rows, dispatched: data.dispatched, drain: data.drain }, []);
+      } catch (e) {
+        if (!(e instanceof LedgerError)) throw e;
+        die(`${where}: ${e.message} — fleet-tick.mjs refuses this ledger, so PR #${live.number}'s latest reviewed= cannot be read off it; nothing written`);
+      }
+      const reviewed = fold.reviewed.find((r) => r.pr === live.number)?.head ?? null;
+      if (reviewed === null) {
+        check(`PR #${live.number}'s row names a reviewed= head`, false);
+      } else {
+        const head = remoteHead(report.branch);
+        check(`origin refs/heads/${report.branch} is ${reviewed}, the head PR #${live.number}'s latest reviewed= names`,
+          head !== null && head.toLowerCase().startsWith(reviewed.toLowerCase()));
+      }
+    } else {
+      outcome = "failed";
+    }
+    const refuted = report.deferred.filter((d) => d.bucket === "refuted");
+    if (refuted.length > 0) {
+      const path = report.dispositionsRecord;
+      let record;
+      try {
+        record = JSON.parse(readFileSync(path, "utf8"));
+      } catch (e) {
+        die(`${where}: could not look — the disposition record ${path} could not be read as JSON: ${e.code ?? e.message}; nothing written`);
+      }
+      const entries = Array.isArray(record?.entries) ? record.entries : [];
+      for (const d of refuted) {
+        const entry = entries.find((e) => e?.bucket === "refuted" && e?.index === d.index);
+        const reason = typeof entry?.reason === "string" ? entry.reason.trim() : "";
+        if (check(`${path} gives refuted[${d.index}] a reason`, reason !== "")) {
+          ruledLines.push(`#${live.number} reversed refutation ${d.index}: ${reason}`);
+        }
+      }
+    }
+  } else if (live.family === "finisher-pr") {
+    if (report.outcome === "labelled") {
+      outcome = "labelled";
+      const pr = prView(live.number, "labels");
+      const labels = Array.isArray(pr.labels) ? pr.labels : [];
+      check(`PR #${live.number} carries ${ready}`, labels.some((l) => l?.name === ready));
+      check(`labelsReadBack carries ${ready}`, report.labelsReadBack.includes(ready));
+    } else if (report.outcome === "halted") {
+      outcome = `halted:${report.cause}`;
+      check(`cause ${report.cause} is in the halted:<cause> vocabulary`, HALT_CAUSES.includes(report.cause));
+      check("evidence is not empty", (report.evidence ?? "").trim() !== "");
+    } else {
+      outcome = "failed";
+    }
+  } else {
+    outcome = "done";
+    for (const { pr } of report.merged) check(`PR #${pr} reads MERGED`, prView(pr, "state").state === "MERGED");
+  }
+
+  const failed = checks.filter((c) => !c.ok);
+  if (failed.length > 0) {
+    mismatch(`${where}: the report's claim and the world disagree — ${failed.map((c) => `failed: ${c.name}`).join("; ")}; nothing written`);
+  }
+  const parsed = parseToken(`${member}=${outcome}`);
+  if (parsed.error) invalid(`${parsed.name}: ${parsed.error}`);
+
+  await acquireLock();
+  data = load();
+  const { changed } = settleMember(parsed);
+  const filed = [];
+  for (const { issue, subject } of report.unrecorded ?? []) {
+    const { row, alreadyRecorded } = recordFiled(String(issue), subject);
+    if (!alreadyRecorded) filed.push(row);
+  }
+  const ruled = [];
+  for (const line of ruledLines) {
+    if (data.ruled.includes(line)) continue;
+    data.ruled.push(line);
+    ruled.push(line);
+  }
+  if (changed || filed.length > 0 || ruled.length > 0) save(data);
+  if (changed) console.error(`    settled ${member}=${outcome}`);
+  console.log(JSON.stringify({ member, outcome, checks, filed, ruled }));
 }
 
 // A ticket or PR number argument as a number: a leading `#` is allowed, a
