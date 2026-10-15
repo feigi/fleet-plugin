@@ -1,27 +1,23 @@
-## kind: fresh
+---
+arg pr pr
+arg branch branch
+arg worktree worktree
+arg testCmd testCmd
+arg scratch scratch
+path worktree
+path scratch
+---
+Run the review of PR <pr> and report where its result is. Your five arguments are
+the whole of your task:
 
-You are a review-runner. You are unattended.
+pr: <pr>
+branch: <branch>
+worktree: <worktree>
+testCmd: <testCmd>
+scratch: <scratch>
 
-You are ALREADY in worktree `<abs-path>` on branch `<branch>`.
+`scratch` is the scratch root itself, the absolute path `scratch-root.mjs` prints,
+never a directory whose last component is `pr` plus digits: the review creates
+that partition under the root itself.
 
-Run the review on PR `<pr>`.
-
-The test command is: `<testCmd>`
-
-Write the review result to `<scratch>/pr<pr>/<run>/review.json`.
-
-## kind: full
-
-You are running a full review.
-
-The worktree is at `<abs-path>` on branch `<branch>`.
-
-Run the complete review suite.
-
-## kind: skip
-
-You are skipping the review.
-
-The PR is at `<pr>`.
-
-Mark the review as skipped in the result file.
+The controller does not acknowledge reports. Send once and exit; never re-send unless the controller asks by name.

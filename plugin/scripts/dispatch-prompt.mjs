@@ -1,244 +1,255 @@
 #!/usr/bin/env node
-// dispatch-prompt.mjs: render a member brief from a template, refusing a missing
-// argument or a leftover placeholder.
+// dispatch-prompt.mjs — render one member's dispatch brief from its template.
 //
-// Usage: node scripts/dispatch-prompt.mjs render <role> [--<arg> <value>…] [--member <name>] [--json]
+//   dispatch-prompt.mjs render <role> [--kind <kind>] [--<arg> <value>…]
+//                                     [--member <name>] [--json]
 //
-// Roles: implementer, fix-applier, finisher, merge-bot, review-runner, tier-check
+// Roles: implementer, fix-applier, finisher, merge-bot, review-runner,
+// recipe-deriver. A role with kinds (fix-applier: review, conflict,
+// dispositions-retry; finisher: fresh, repair) requires --kind; a role
+// without them refuses it as an unknown flag.
 //
-// Output: the brief on stdout. With --json: {role, kind, args, sha256}.
-// With --member <name>: also writes both .md and .json files to the member directory.
+// OUTPUT. The brief on stdout and nothing else. With --json the payload
+// {role, kind, args, sha256} replaces it, `sha256` being the hash of the
+// brief's bytes. With --member <name> the brief is also written to
+// `<fleet-dir>/briefs/<name>.md` and the payload plus `path` (the .md file)
+// to `<fleet-dir>/briefs/<name>.json`, `<fleet-dir>` as fleet-dir.mjs's
+// fleetFile() resolves it. Every file is written before anything reaches
+// stdout, so a failed write leaves no brief for a caller to dispatch on.
 //
-// The template contract:
-// - Every placeholder <name> in a template is a required argument
-// - Paths (--worktree, --scratch, --review-file, --abs-path) must be absolute
-// - instruments.sh runs first; its exit 1/2 becomes exit 2 here
-// - A template with an undeclared <foo> exits 2 naming it
-// - Missing --kind for roles that require it exits 2
+// EXIT. 0 rendered. 2 refused, with the reason on stderr and nothing on
+// stdout: a missing, unknown or relative argument, a template that carries a
+// placeholder it never declared, a leftover declared placeholder in the
+// output, or instruments.sh answering anything but 0.
+//
+// INSTRUMENTS. After the command line has parsed and before anything is
+// validated or rendered, instruments.sh runs from the main checkout — the
+// directory holding the git common dir, where the run's baseline lives — and
+// any outcome but exit 0 refuses: a changed set, an unanswerable check, a
+// spawn that never ran, a signal. That is the fail-closed contract
+// instruments.sh states for its own callers.
+//
+// THE TEMPLATE CONTRACT. One file per role, `skills/run-team/briefs/<role>.md`,
+// beside the install this script runs from.
+//
+// - A frontmatter block, `---` on the first line and on its own closing line,
+//   holds one directive per line:
+//     arg <flag> <placeholder>   the argument `--<flag>` fills `<placeholder>`
+//     path <flag>                that argument must be an absolute path
+//     literal <text>             `<text>` is carried to the member as written
+//   A placeholder is `<` + a letter + anything but `<`, `>` and a newline +
+//   `>`, matched by its inner text exactly; it may hold spaces. No flag and
+//   no placeholder is declared twice, and --member, --json and --kind are
+//   reserved.
+// - Every placeholder the selected text carries must be declared by `arg` or
+//   `literal`; an undeclared one is a template defect and refuses, naming it.
+// - An argument is required exactly when its placeholder occurs in the text
+//   selected for the kind. A flag the selected text never uses is refused.
+// - The body is plain text. Lines `## kind: <k>[, <k>…]` open a section that
+//   applies to those kinds; text before the first such line applies to every
+//   kind. The brief is the applicable sections' lines in file order, joined
+//   with newlines and ended by one. Sections may repeat and interleave, which
+//   is how kinds share text without a copy.
+// - Substitution is one pass over the template: a value is never rescanned,
+//   so a value holding another placeholder's spelling is not substituted into.
+//   After it, any declared placeholder still present in the output — which
+//   only a caller passing a value like `<branch>` can cause — refuses, naming
+//   it.
+//
+// The text every member of a role shares is meant to live in that role's
+// agent body; until it does, the templates carry what the controller pasted
+// into the dispatch prompt by hand.
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join, dirname, isAbsolute } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeDie } from "./arg.mjs";
+import { makeDie, defineFlags, writeAll } from "./arg.mjs";
+import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
+import { gitEnv } from "./git-env.mjs";
+import { runnerScratchRefusal } from "./review-core.mjs";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const die = makeDie("dispatch-prompt.mjs");
+const NAME = "dispatch-prompt";
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const BRIEFS_DIR = join(SCRIPT_DIR, "..", "skills", "run-team", "briefs");
+const ROLES = ["implementer", "fix-applier", "finisher", "merge-bot", "review-runner", "recipe-deriver"];
+const RESERVED = ["member", "json", "kind"];
+const USAGE = `usage: ${NAME}.mjs render <role> [--kind <kind>] [--<arg> <value>…] [--member <name>] [--json] — roles: ${ROLES.join(", ")}`;
+const PLACEHOLDER = /<([A-Za-z][^<>\n]*)>/g;
+const KIND_HEADER = /^## kind: (.+)$/;
 
-// Role definitions: which roles have --kind variants, and what kinds
-const ROLE_KINDS = {
-  "fix-applier": ["review", "conflict", "dispositions-retry"],
-  finisher: ["fresh", "repair"],
-  "review-runner": ["fresh", "full", "skip"],
-};
+const die = makeDie(NAME);
 
-// Path arguments that must be absolute
-const PATH_ARGS = new Set(["worktree", "scratch", "review-file", "abs-path"]);
+// --- the template ------------------------------------------------------------
 
-function parseArgs() {
-  const argv = process.argv.slice(2);
-  if (argv.length === 0 || argv[0] !== "render") {
-    die("Usage: dispatch-prompt.mjs render <role> [--<arg> <value>…] [--member <name>] [--json]");
-  }
+function parseTemplate(role, text) {
+  const lines = text.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  const refuse = (why) => die(`template ${role}.md ${why}`);
+  if (lines[0] !== "---") refuse("does not open with a --- frontmatter block");
+  const close = lines.indexOf("---", 1);
+  if (close === -1) refuse("never closes its frontmatter block");
 
-  if (argv.length < 2) {
-    die("Usage: dispatch-prompt.mjs render <role>");
-  }
-
-  const role = argv[1];
-  const args = {};
-  let member = null;
-  let jsonOutput = false;
-  let kind = null;
-
-  for (let i = 2; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--member") {
-      if (i + 1 >= argv.length) {
-        die("--member needs a value");
-      }
-      member = argv[++i];
-    } else if (arg === "--json") {
-      jsonOutput = true;
-    } else if (arg === "--kind") {
-      if (i + 1 >= argv.length) {
-        die("--kind needs a value");
-      }
-      kind = argv[++i];
-    } else if (arg.startsWith("--")) {
-      const name = arg.slice(2);
-      if (i + 1 >= argv.length) {
-        die(`--${name} needs a value`);
-      }
-      const value = argv[++i];
-      if (value.startsWith("--")) {
-        die(`--${name} needs a value`);
-      }
-      args[name] = value;
+  const args = [];
+  const paths = new Set();
+  const literals = new Set();
+  for (const line of lines.slice(1, close)) {
+    const m = /^(arg|path|literal) (.+)$/.exec(line);
+    if (m === null) refuse(`has a frontmatter line that is no directive: ${line}`);
+    if (m[1] === "literal") {
+      literals.add(m[2]);
+    } else if (m[1] === "path") {
+      paths.add(m[2]);
     } else {
-      die(`Unexpected argument: ${arg}`);
+      const split = /^(\S+) (.+)$/.exec(m[2]);
+      if (split === null) refuse(`has an arg line without a placeholder: ${line}`);
+      const [, flag, placeholder] = split;
+      if (RESERVED.includes(flag)) refuse(`declares the reserved flag --${flag}`);
+      if (args.some((a) => a.flag === flag || a.placeholder === placeholder)) refuse(`declares --${flag} or <${placeholder}> twice`);
+      args.push({ flag, placeholder });
     }
   }
+  for (const flag of paths) if (!args.some((a) => a.flag === flag)) refuse(`marks --${flag} as a path but never declares it`);
+  for (const a of args) if (literals.has(a.placeholder)) refuse(`declares <${a.placeholder}> as both an argument and a literal`);
 
-  return { role, kind, args, member, jsonOutput };
-}
-
-function validateRole(role) {
-  const validRoles = ["implementer", "fix-applier", "finisher", "merge-bot", "review-runner", "tier-check"];
-  if (!validRoles.includes(role)) {
-    die(`Invalid role: ${role}. Valid roles: ${validRoles.join(", ")}`);
-  }
-}
-
-function validateKind(role, kind) {
-  if (ROLE_KINDS[role]) {
-    if (!kind) {
-      die(`Role ${role} requires --kind. Valid values: ${ROLE_KINDS[role].join(", ")}`);
+  const sections = [];
+  let current = { kinds: null, lines: [] };
+  sections.push(current);
+  for (const line of lines.slice(close + 1)) {
+    const header = KIND_HEADER.exec(line);
+    if (header === null) {
+      current.lines.push(line);
+      continue;
     }
-    if (!ROLE_KINDS[role].includes(kind)) {
-      die(`Invalid kind for ${role}: ${kind}. Valid values: ${ROLE_KINDS[role].join(", ")}`);
-    }
+    current = { kinds: header[1].split(",").map((k) => k.trim()), lines: [] };
+    sections.push(current);
   }
+  const kinds = [...new Set(sections.flatMap((s) => s.kinds ?? []))];
+
+  const whole = sections.flatMap((s) => s.lines).join("\n");
+  for (const a of args) if (!whole.includes(`<${a.placeholder}>`)) refuse(`declares <${a.placeholder}> but never carries it`);
+  return { args, paths, literals, sections, kinds };
 }
 
-function loadTemplate(role, kind) {
-  let templatePath = join(__dirname, "..", "skills", "run-team", "briefs", `${role}.md`);
-  let template = readFileSync(templatePath, "utf8");
-
-  // Handle kind-specific sections
-  if (kind && ROLE_KINDS[role]) {
-    // Extract kind-specific content
-    const kindPattern = new RegExp(`^## kind: ${kind}$`, "m");
-    const kindMatch = template.match(kindPattern);
-    if (!kindMatch) {
-      die(`Template for ${role} has no section for kind: ${kind}`);
-    }
-
-    const startIdx = template.indexOf(kindMatch[0]) + kindMatch[0].length;
-    const restOfTemplate = template.slice(startIdx);
-    const nextKindMatch = restOfTemplate.match(/^## kind: /m);
-    const endIdx = nextKindMatch ? startIdx + restOfTemplate.indexOf(nextKindMatch[0]) : template.length;
-
-    template = template.slice(startIdx, endIdx).trim();
+function loadTemplate(role) {
+  let text;
+  try {
+    text = readFileSync(join(BRIEFS_DIR, `${role}.md`), "utf8");
+  } catch (err) {
+    return die(`cannot read the template for ${role}: ${err.message}`);
   }
-
-  return template;
+  return parseTemplate(role, text);
 }
 
-function findPlaceholders(text) {
-  const placeholders = new Set();
-  const regex = /<([a-zA-Z-_][a-zA-Z0-9-_]*)>/g;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    placeholders.add(match[1]);
-  }
-  return placeholders;
-}
-
-function validateArguments(role, kind, args, template) {
-  const requiredPlaceholders = findPlaceholders(template);
-
-  // Check for missing arguments
-  for (const placeholder of requiredPlaceholders) {
-    if (!args[placeholder]) {
-      die(`Missing required argument: --${placeholder}`);
-    }
-  }
-
-  // Validate path arguments are absolute
-  for (const [name, value] of Object.entries(args)) {
-    if (PATH_ARGS.has(name)) {
-      if (!isAbsolute(value)) {
-        die(`Path argument --${name} must be absolute: ${value}`);
-      }
-    }
-  }
-
-  // Check for leftover placeholders in rendered output
-  const rendered = template.replace(/<[a-zA-Z-_][a-zA-Z0-9-_]*>/g, (match) => {
-    const name = match.slice(1, -1);
-    return args[name] !== undefined ? args[name] : match;
-  });
-
-  const leftoverPlaceholders = findPlaceholders(rendered);
-  if (leftoverPlaceholders.size > 0) {
-    const placeholder = Array.from(leftoverPlaceholders)[0];
-    die(`Leftover placeholder in rendered brief: <${placeholder}>`);
-  }
-}
-
-function renderBrief(template, args) {
-  return template.replace(/<([a-zA-Z-_][a-zA-Z0-9-_]*)>/g, (match) => {
-    const name = match.slice(1, -1);
-    return args[name] !== undefined ? args[name] : match;
-  });
-}
+// --- the instrument check ---------------------------------------------------
 
 function runInstruments() {
-  const instrumentsPath = join(__dirname, "instruments.sh");
-  const result = spawnSync("bash", [instrumentsPath], {
-    cwd: join(__dirname, ".."),
-    stdio: "pipe",
+  let root;
+  try {
+    root = dirname(fleetFile(null));
+  } catch (err) {
+    if (err instanceof FleetDirUnresolvable) die(`instruments.sh not run — no main checkout to run it from: ${err.message}`);
+    throw err;
+  }
+  const r = spawnSync("sh", [join(SCRIPT_DIR, "instruments.sh"), "--repo", root], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: gitEnv(),
   });
+  if (r.error) die(`instruments.sh could not run: ${r.error.message}`);
+  if (r.signal) die(`instruments.sh was killed by ${r.signal}`);
+  if (r.status === 0) return;
+  const said = (r.stderr ?? "").trim() || (r.stdout ?? "").trim();
+  const verdict = r.status === 1 ? "the instrument set changed" : `the check could not answer (exit ${r.status})`;
+  die(`instruments.sh refused: ${verdict}${said ? ` — ${said}` : ""}`);
+}
 
-  if (result.status === 1 || result.status === 2) {
-    die("instruments.sh failed");
+// --- main --------------------------------------------------------------------
+
+const argv = process.argv.slice(2);
+const role = argv[0] === "render" && argv[1] !== undefined && !argv[1].startsWith("--") ? argv[1] : null;
+if (role !== null && !ROLES.includes(role)) die(`unknown role ${role} — roles: ${ROLES.join(", ")}`);
+const template = role === null ? null : loadTemplate(role);
+// The role is the one positional the shared stray() refusal does not know:
+// take it out of argv so the declared grammar is just `render`.
+if (role !== null) process.argv.splice(3, 1);
+
+const flags = { member: "value", json: "bool" };
+if (template !== null) {
+  if (template.kinds.length > 0) flags.kind = "value";
+  for (const a of template.args) flags[a.flag] = "value";
+}
+const { arg, has, sweep, stray } = defineFlags(die, { flags, positionals: ["render"] });
+sweep();
+stray();
+if (role === null) die(USAGE);
+
+runInstruments();
+
+let kind = null;
+if (template.kinds.length > 0) {
+  kind = arg("kind");
+  if (kind === null) die(`--kind is required for ${role} — one of ${template.kinds.join(", ")}`);
+  if (!template.kinds.includes(kind)) die(`--kind ${kind} is not a kind of ${role} — one of ${template.kinds.join(", ")}`);
+}
+const selected = template.sections.filter((s) => s.kinds === null || s.kinds.includes(kind)).flatMap((s) => s.lines);
+const body = selected.join("\n");
+
+const declared = new Set(template.args.map((a) => a.placeholder));
+for (const [, inner] of body.matchAll(PLACEHOLDER)) {
+  if (!declared.has(inner) && !template.literals.has(inner)) die(`template ${role}.md carries the undeclared placeholder <${inner}>`);
+}
+
+const required = template.args.filter((a) => body.includes(`<${a.placeholder}>`));
+for (const a of template.args) {
+  if (!required.includes(a) && arg(a.flag) !== null) {
+    die(`--${a.flag} is not an argument of ${role}${kind === null ? "" : ` ${kind}`} — accepted: ${required.map((r) => `--${r.flag}`).join(", ")}`);
   }
 }
 
-function computeSha256(content) {
-  return createHash("sha256").update(content).digest("hex");
+const values = new Map();
+for (const a of required) {
+  const value = arg(a.flag);
+  if (value === null) die(`missing required argument: --${a.flag}`);
+  if (template.paths.has(a.flag) && !isAbsolute(value)) die(`--${a.flag} must be an absolute path, got ${value}`);
+  if (role === "review-runner" && a.flag === "scratch") {
+    const refusal = runnerScratchRefusal(value);
+    if (refusal !== null) die(refusal);
+  }
+  values.set(a.placeholder, value);
 }
 
-async function main() {
-  const { role, kind, args, member, jsonOutput } = parseArgs();
+const brief = `${body.replace(PLACEHOLDER, (whole, inner) => (values.has(inner) ? values.get(inner) : whole))}\n`;
+for (const a of required) {
+  if (brief.includes(`<${a.placeholder}>`)) die(`the rendered brief still carries <${a.placeholder}> — an argument value spells it`);
+}
 
-  validateRole(role);
-  validateKind(role, kind);
+const payload = {
+  role,
+  kind,
+  args: Object.fromEntries(required.map((a) => [a.flag, values.get(a.placeholder)])),
+  sha256: createHash("sha256").update(brief).digest("hex"),
+};
 
-  // Run instruments first
-  runInstruments();
-
-  // Load and validate template
-  const template = loadTemplate(role, kind);
-  validateArguments(role, kind, args, template);
-
-  // Render brief
-  const brief = renderBrief(template, args);
-
-  // Prepare output
-  if (jsonOutput) {
-    const output = {
-      role,
-      kind: kind || null,
-      args,
-      sha256: computeSha256(brief),
-    };
-    console.log(JSON.stringify(output, null, 2));
-  } else {
-    console.log(brief);
+const member = arg("member");
+if (member !== null) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(member)) die(`--member ${member} is not a member name: letters, digits, '.', '_' and '-', starting alphanumeric`);
+  let mdPath;
+  try {
+    mdPath = fleetFile(`briefs/${member}.md`);
+  } catch (err) {
+    if (err instanceof FleetDirUnresolvable) die(`cannot place --member ${member}'s files: ${err.message}`);
+    throw err;
   }
-
-  // Write member files if requested
-  if (member) {
-    const memberDir = join(args.scratch || "", member);
-    mkdirSync(memberDir, { recursive: true });
-    const mdPath = join(memberDir, `${member}.md`);
-    const jsonPath = join(memberDir, `${member}.json`);
-
-    writeFileSync(mdPath, brief, "utf8");
-
-    const jsonData = {
-      role,
-      kind: kind || null,
-      args,
-      sha256: computeSha256(brief),
-    };
-    writeFileSync(jsonPath, JSON.stringify(jsonData, null, 2) + "\n", "utf8");
+  const jsonPath = join(dirname(mdPath), `${member}.json`);
+  try {
+    mkdirSync(dirname(mdPath), { recursive: true });
+    writeFileSync(mdPath, brief);
+    writeFileSync(jsonPath, `${JSON.stringify({ ...payload, path: mdPath }, null, 2)}\n`);
+  } catch (err) {
+    die(`cannot write --member ${member}'s files under ${dirname(mdPath)}: ${err.message}`);
   }
 }
 
-main().catch((err) => {
-  die(err.message);
-});
+writeAll(1, has("json") ? `${JSON.stringify(payload, null, 2)}\n` : brief);
