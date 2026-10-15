@@ -55,6 +55,15 @@
 //             Anything but `clean` — dirty, unknown, no baseline — prints one
 //             MAIN-CHECKOUT-* line and holds every dispatching row until the
 //             maintainer clears it; it never refuses the tick.
+//   phase0    `.fleet/phase0.json`, phase0.mjs's receipt, through
+//             phase0-receipt.mjs. Missing, unreadable, a `run` other than
+//             the controller record's `at`, one whose controller has exited
+//             or cannot be judged, or a step `failed`, `pending` or absent
+//             prints one PHASE0-INCOMPLETE line naming what is not done and
+//             holds every dispatching row, ahead of the main-checkout reason;
+//             it never refuses the tick. A step's `drift` or `unanswered`
+//             and a `fold-in` NEED are advice, named on the line and holding
+//             nothing. The receipt's `session` fills the tier hold's step.
 //   guard     `.fleet/cost-guard.json` beside the shortlist, pr-cost.mjs
 //             --guard's verdict on the implementer cells. Printed as the
 //             `router` row and never acted on here: a missing or unreadable
@@ -86,12 +95,12 @@ import { parseMember, parseToken, premisesOf, rowNums, nextRetry, REVIEW, REVIEW
 export function reconcile(s) {
   const rev = reviewers(s);
   // The conflict rows only ask the controller to write a record — never to
-  // dispatch — so they stand outside the main-checkout hold: the fix-applier a
+  // dispatch — so they stand outside the dispatch hold: the fix-applier a
   // conflict hold leads to obeys the hold through its own role's row.
   return [
-    ...mainCheckoutHold(s, [implementers(s, rev.left), ...rev.rows]),
+    ...dispatchHold(s, [implementers(s, rev.left), ...rev.rows]),
     ...rev.conflictRows,
-    ...mainCheckoutHold(s, [mergeBot(s)]),
+    ...dispatchHold(s, [mergeBot(s)]),
     ...shortlistRows(s),
     ...routerRows(s),
   ];
@@ -114,9 +123,20 @@ function mainCheckoutHoldReason(mainCheckout) {
   if (state === "clean") return null;
   return MAIN_CHECKOUT_HOLD[state] ?? "main checkout unknown";
 }
-function mainCheckoutHold(s, rows) {
-  const why = mainCheckoutHoldReason(s.mainCheckout);
-  if (why === null) return rows;
+// A phase 0 this run has not finished holds the same rows the same way, and
+// outranks the main-checkout reason on them: the baseline is one of its
+// steps. Only a gate that answered `held: false` lets dispatch through — no
+// answer is not a finished phase 0. Not actionable, so the fold carries it
+// across an unattended night; a missing baseline under it still asks the
+// controller to act, as it does alone.
+const PHASE0_HOLD = "phase 0 incomplete";
+// Every reason dispatch is held on this tick, outermost first.
+function holdReasons(s) {
+  return [s.phase0?.held === false ? null : PHASE0_HOLD, mainCheckoutHoldReason(s.mainCheckout)].filter((w) => w !== null);
+}
+function dispatchHold(s, rows) {
+  const [why] = holdReasons(s);
+  if (why === undefined) return rows;
   const acts = s.mainCheckout?.state === "absent";
   const held = [];
   for (const r of rows) {
@@ -134,11 +154,13 @@ const mkRow = (role, actual, target, detail) => (action, { acts = false, extra =
 });
 
 // The clearing step a tier hold names in its detail. The tick reads no
-// transcript and so does not know the session directory: `<session>` stays a
-// placeholder the controller fills in, as `<file>` does — one batch file, one
-// entry per held member (SKILL.md's phase-2 tier check).
-const tierCheckStep = (members) => "run ~/.fleet/bin/fleet-run tier-check.mjs --batch <file> with "
-  + JSON.stringify(members.map((member) => ({ member, session: "<session>" })));
+// transcript; the session directory is the phase-0 receipt's, which
+// tier-check.mjs reads itself when an entry omits it. Without a receipt of
+// this run, `<session>` stays a placeholder the controller fills in, as
+// `<file>` does — one batch file, one entry per held member (SKILL.md's
+// phase-2 tier check).
+const tierCheckStep = (members, session) => "run ~/.fleet/bin/fleet-run tier-check.mjs --batch <file> with "
+  + JSON.stringify(members.map((member) => (session ? { member } : { member, session: "<session>" })));
 
 // A mismatch clears when the next attempt on the ticket is dispatched at its
 // row's tier: ledger-grammar.mjs's nextRetry(), one letter past the highest
@@ -189,7 +211,7 @@ function implementers(s, left) {
   // controller's own step, so it is asked to act, with the command in the
   // detail.
   if (s.tierUnchecked.length) {
-    return row(`HOLD (tier unchecked ${s.tierUnchecked.join(" ")})`, { acts: true, extra: tierCheckStep(s.tierUnchecked) });
+    return row(`HOLD (tier unchecked ${s.tierUnchecked.join(" ")})`, { acts: true, extra: tierCheckStep(s.tierUnchecked, s.phase0?.session) });
   }
 
   const deficit = s.implCap - s.implLive;
@@ -1068,6 +1090,8 @@ import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { statePath, readState, writeState, assessBeat, isStalled, isReported, stallReport, stallOwner } from "./fleet-state.mjs";
 import { checkMainCheckout, describe } from "./main-checkout.mjs";
+import { readRunReceipt, phase0Gate } from "./phase0-receipt.mjs";
+import { judgeRecord, ProcUnreadable } from "./proc.mjs";
 
 const NAME = "fleet-tick";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -1412,6 +1436,21 @@ function claimed() {
   return n === CLAIMED_LIMIT ? `${n}+` : n;
 }
 
+// What the controller record's process is now, for the phase-0 gate: `none`
+// with no record, else judgeRecord()'s answer. A process table that cannot
+// be read is `unreadable`, said on stderr: a controller nobody could judge
+// is not one whose receipt this tick may take as this run's.
+function controllerState(controller) {
+  if (controller === null) return "none";
+  try {
+    return judgeRecord(controller);
+  } catch (e) {
+    if (!(e instanceof ProcUnreadable)) throw e;
+    console.error(`${NAME}: WARNING ${e.message} — the recorded controller pid ${controller.pid} cannot be judged, so the phase-0 receipt is held`);
+    return "unreadable";
+  }
+}
+
 function main() {
   const { fold, state: path, liveness, ...caps } = options();
   const listPath = shortlistPath();
@@ -1495,9 +1534,18 @@ function main() {
   // every answer but `clean` is a hold on the dispatching rows plus one line
   // saying why, so the rest of the run keeps reporting.
   const mainCheckout = checkMainCheckout();
+  // This run's phase 0, off its receipt: unfinished holds the same rows the
+  // main checkout does, and never refuses the tick either. Judged against
+  // the controller record this tick started from, and against whether that
+  // record's process is still there: a finished receipt of the run before
+  // carries the same `at` until this run's rotation writes the next.
+  const receipt = readRunReceipt();
+  const phase0 = phase0Gate(receipt.read, {
+    path: receipt.path, controllerAt: controller?.at, controller: controllerState(controller),
+  });
 
   const rows = reconcile({
-    ...caps, ...run, heads, supply, dropped, shortlistStatus: current.status, refresh: fresh, mainCheckout, router,
+    ...caps, ...run, heads, supply, dropped, shortlistStatus: current.status, refresh: fresh, mainCheckout, phase0, router,
   });
   const said = describe(mainCheckout, run.live);
   // Re-read rather than reusing priorState: this must be the freshest
@@ -1512,7 +1560,7 @@ function main() {
   // and frees no slot — and nothing here settles, kills or writes the ledger.
   const seen = stampSeen({ live: run.live, prev: prev.seen, controller: prev.controller, now });
   const stale = livenessLines({ live: run.live, seen, thresholds: liveness, now });
-  const lines = [...(said === null ? [] : [said]), ...stale.map((s) => s.line), ...formatLines(rows)];
+  const lines = [...(phase0.line === null ? [] : [phase0.line]), ...(said === null ? [] : [said]), ...stale.map((s) => s.line), ...formatLines(rows)];
   // The run is over once it is draining and nothing is left in flight: no
   // open PR and no implementer still holding a claim. Printed last and read
   // as actionable, so it never folds away: the stop it names is the run's
@@ -1540,13 +1588,12 @@ function main() {
   }
 
   // Fold only when BOTH hold: nothing to act on, and nothing new to say. A
-  // main-checkout hold still holding dispatch stays named on the folded line
-  // — not actionable, so it never resets `quiet`, but the one reason
-  // nothing dispatches must not drop out of view. Outside the digest, which
-  // already covers it through the rows.
+  // phase-0 or main-checkout hold still holding dispatch stays named on the
+  // folded line — not actionable, so it never resets `quiet`, but the one
+  // reason nothing dispatches must not drop out of view. Outside the digest,
+  // which already covers it through the rows.
   if (fold && !acts && digest === prev.digest) {
-    const why = mainCheckoutHoldReason(mainCheckout);
-    const held = why === null ? "" : `; HOLD (${why}) persists`;
+    const held = holdReasons({ phase0, mainCheckout }).map((why) => `; HOLD (${why}) persists`).join("");
     // A stale member persists the same way: advisory, so it never resets
     // `quiet`, and named on the folded line for as long as it stays live
     // past its threshold. The digest already moves when its bucket does.

@@ -261,7 +261,6 @@ test("route: exit 2 only on usage errors and an unreadable or invalid table — 
   const without = (flag) => { const i = base.indexOf(flag); return [...base.slice(0, i), ...base.slice(i + 2)]; };
   const swap = (flag, value) => base.map((a, i) => (base[i - 1] === flag ? value : a));
   const cases = [
-    [without("--session"), /route needs --session/],
     [without("--guard"), /route needs --guard/],
     [swap("--arm", "C"), /--arm C is not A or B/],
     [swap("--ticket", "0"), /--ticket 0 is not an issue number/],
@@ -285,6 +284,49 @@ test("route: exit 2 only on usage errors and an unreadable or invalid table — 
     assert.match(r.stderr, /router table:/);
   }
   assert.equal(existsSync(p.pending), false, "a refused route wrote a features row");
+});
+
+// With no --session the router takes the session directory the phase-0
+// receipt `.fleet/phase0.json` records, in the git workspace it runs from.
+function receiptWorld(t, receipt) {
+  const p = world(t);
+  assert.equal(spawnSync("git", ["init", "-q", p.dir], { encoding: "utf8", env: gitEnv() }).status, 0);
+  mkdirSync(join(p.dir, ".fleet"), { recursive: true });
+  if (receipt !== undefined) writeFileSync(join(p.dir, ".fleet", "phase0.json"), typeof receipt === "string" ? receipt : JSON.stringify(receipt));
+  const run = (session) => spawnSync(process.execPath, [SCRIPT, "route", ...(session === undefined ? [] : ["--session", session]),
+    "--ticket", "42", "--arm", "A", "--impl-row", "3", "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending],
+  { encoding: "utf8", cwd: p.dir, env: gitEnv() });
+  return { ...p, run };
+}
+const receiptFor = (session) => ({ run: null, session, scratch: "/scratch", caps: { impl: null, review: null }, steps: {} });
+
+test("route: with no --session the session is the one the phase-0 receipt records", (t) => {
+  const p = receiptWorld(t, receiptFor(`/home/u/.omp/agent/sessions/-w/${SESSION2}`));
+  const r = p.run();
+  assert.equal(r.status, 0, r.stderr);
+  const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
+  assert.equal(row.session, SESSION2);
+  assert.equal(row.run_date, "2026-10-01");
+});
+
+test("route: a given --session wins over the receipt's, and an unreadable receipt is never opened for it", (t) => {
+  for (const receipt of [receiptFor(`/s/${SESSION2}`), "{"]) {
+    const p = receiptWorld(t, receipt);
+    const r = p.run(SESSION);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].session, SESSION);
+  }
+});
+
+test("route: no --session and no session in the receipt is exit 2 naming the receipt, and nothing is recorded", (t) => {
+  for (const [receipt, why] of [[undefined, "no receipt"], [receiptFor(""), "it records no session"], ["{", "unreadable: not JSON"]]) {
+    const p = receiptWorld(t, receipt);
+    const r = p.run();
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, new RegExp(`no session given and none in the phase-0 receipt \\S+/\\.fleet/phase0\\.json \\(${why}`));
+    assert.equal(r.stdout, "");
+    assert.equal(existsSync(p.pending), false, `${why}: a refused route wrote a features row`);
+  }
 });
 
 test("route: the checked-in table is valid and is the day-one table", () => {

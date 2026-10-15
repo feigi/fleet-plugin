@@ -345,14 +345,14 @@ test("AC4: job record absent -> the CLI opens the transcript file (and a missing
   assert.match(r.stderr, /ENOENT|does-not-exist\.jsonl/);
 });
 
-test("AC4b: job record PARTIAL (resolvedModel only, no transcript/session given) -> refuses rather than defaulting the missing level to null", () => {
+test("AC4b: job record PARTIAL (resolvedModel only, no transcript/session given, no phase-0 receipt) -> refuses rather than defaulting the missing level to null", () => {
   const d = dir();
   writeFileSync(join(d, "fleet-implementer.agent.md"), agentMd("@slow:xhigh"));
   const batch = [{ member: "PartialNoFallback", agentFile: "fleet-implementer.agent.md", resolvedModel: "anthropic/claude-opus-5" }];
   writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
   const r = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", modelRolesFile(d)]);
   assert.equal(r.status, 2, r.stdout + r.stderr);
-  assert.match(r.stderr, /no --transcript or --session given/);
+  assert.match(r.stderr, /PartialNoFallback: no session given and none in the phase-0 receipt/);
 });
 
 test("AC4c: job record PARTIAL (resolvedModel only) plus a transcript for the missing level -> resolves correctly, not a false mismatch", () => {
@@ -513,7 +513,7 @@ function implWorld({
   writeFileSync(join(d, "batch.json"), JSON.stringify([{ member, session: "session" }]));
   const read = () => JSON.parse(ledgerCli(ledger, "read"));
   return {
-    ledger, read,
+    d, ledger, read,
     check: () => runCli(["--batch", "batch.json", "--repo", d, "--ledger", ledger, "--model-roles", modelRolesFile(d)], d),
     row: () => read().rows.find((r) => r.split(/\s/)[0] === `#${ticket}`),
     tick: () => deriveRun({ ...read(), drain: null }, []),
@@ -532,6 +532,67 @@ test("implementer pass: exit 0 writes tier-ok=impl-<N>:<definition> onto the row
   ledgerCli(w.ledger, "row", "7", "impl-7 · class=routine · tier-ok=impl-7:fleet-implementer-slow-high · → PR#9");
   assert.equal(w.check().status, 0);
   assert.equal(w.row().split("tier-ok=").length - 1, 1, w.row());
+});
+
+// The session directory phase 0 recorded, read off `.fleet/phase0.json` in
+// the git workspace the check runs from when an entry omits `session`.
+function withReceipt(w, receipt) {
+  execFileSync("git", ["init", "-q"], { cwd: w.d });
+  mkdirSync(join(w.d, ".fleet"), { recursive: true });
+  if (receipt !== undefined) writeFileSync(join(w.d, ".fleet", "phase0.json"), typeof receipt === "string" ? receipt : JSON.stringify(receipt));
+  return (entries) => { writeFileSync(join(w.d, "batch.json"), JSON.stringify(entries)); return w.check(); };
+}
+const receiptFor = (session) => ({ run: null, session, scratch: "/scratch", caps: { impl: null, review: null }, steps: { branch: { status: "ok", at: "t", output: "" } } });
+
+test("session: an entry that omits it takes the session directory the phase-0 receipt records", () => {
+  const w = implWorld();
+  const check = withReceipt(w, receiptFor(join(w.d, "session")));
+  const r = check([{ member: "impl-7" }]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(w.row(), "#7 impl-7 · class=routine · tier-ok=impl-7:fleet-implementer-slow-high");
+});
+
+test("session: an entry's own session wins over the receipt's, and an unreadable receipt is never opened for it", () => {
+  const w = implWorld();
+  mkdirSync(join(w.d, "elsewhere"));
+  // The receipt names a directory holding no transcript: read, it would refuse.
+  assert.equal(withReceipt(w, receiptFor(join(w.d, "elsewhere")))([{ member: "impl-7", session: "session" }]).status, 0);
+  const v = implWorld();
+  const r = withReceipt(v, "{")([{ member: "impl-7", session: "session" }]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(v.row(), /tier-ok=impl-7:/);
+});
+
+test("session: an entry's empty session is given, not omitted — it refuses even beside a receipt that records one", () => {
+  const w = implWorld();
+  const check = withReceipt(w, receiptFor(join(w.d, "session")));
+  const before = readFileSync(w.ledger, "utf8");
+  const r = check([{ member: "impl-7", session: "" }]);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /impl-7: an impl- entry needs session or transcript/);
+  assert.equal(readFileSync(w.ledger, "utf8"), before, "the ledger changed");
+});
+
+test("session: omitted with no receipt, or one that records none, is exit 2 naming the receipt and writes nothing", () => {
+  for (const [receipt, why] of [[undefined, "no receipt"], [receiptFor(""), "it records no session"], ["{", "unreadable: not JSON"]]) {
+    const w = implWorld();
+    const before = readFileSync(w.ledger, "utf8");
+    const r = withReceipt(w, receipt)([{ member: "impl-7" }]);
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, new RegExp(`impl-7: no session given and none in the phase-0 receipt \\S+/\\.fleet/phase0\\.json \\(${why}`));
+    assert.equal(readFileSync(w.ledger, "utf8"), before, `${why}: the ledger changed`);
+  }
+});
+
+test("session: an entry that gives a transcript, or a non-implementer with a full job record, reads no receipt", () => {
+  const w = implWorld();
+  writeFileSync(join(w.d, "t.jsonl"), ompTranscript("anthropic/claude-opus-5", "high", { agent: "fleet-implementer-slow-high" }));
+  const check = withReceipt(w);
+  const r = check([{ member: "impl-7", transcript: "t.jsonl" }]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  writeFileSync(join(w.d, "agents", "fleet-reviewer.agent.md"), agentMd("@slow:high"));
+  const j = check([{ member: "SomeWordPair", agentFile: "agents/fleet-reviewer.agent.md", resolvedModel: "anthropic/claude-opus-5", resolvedThinkingLevel: "high" }]);
+  assert.equal(j.status, 0, j.stdout + j.stderr);
 });
 
 test("implementer mismatch: exit 1 settles the member tier-mismatch on the ledger and notes why, once", () => {
@@ -665,6 +726,24 @@ test("no transcript, member live: still an error — exit 2, nothing written, st
   assert.match(r.stderr, /no impl-7\.jsonl found under --session/);
   assert.equal(w.bytes(), before);
   assert.deepEqual(w.tick().tierUnchecked, ["impl-7"]);
+});
+
+test("no transcript under the receipt's session: every message names the receipt's session, never --session the caller did not give", () => {
+  const said = (settle) => {
+    const w = noTranscriptWorld({ settle });
+    withReceipt(w, receiptFor(join(w.d, "session")));
+    return { r: w.check([{ member: "impl-7" }]), session: join(w.d, "session") };
+  };
+  const live = said(null);
+  assert.equal(live.r.status, 2, live.r.stderr);
+  assert.ok(live.r.stderr.includes(`no impl-7.jsonl found under the phase-0 receipt's session ${live.session}`), live.r.stderr);
+  const ran = said("PR#20");
+  assert.equal(ran.r.status, 2, ran.r.stderr);
+  assert.ok(ran.r.stderr.includes(`settled PR#20 with no impl-7.jsonl under the phase-0 receipt's session ${ran.session} — `), ran.r.stderr);
+  const killed = said("killed");
+  assert.equal(killed.r.status, 3, killed.r.stderr);
+  assert.ok(killed.r.stderr.includes(`settled killed with no impl-7.jsonl under the phase-0 receipt's session ${killed.session} — nothing to check`), killed.r.stderr);
+  for (const { r } of [live, ran, killed]) assert.ok(!r.stderr.includes("--session"), r.stderr);
 });
 
 test("no transcript: a session omitted, empty, missing or not a directory is a usage error for live and settled members alike", () => {

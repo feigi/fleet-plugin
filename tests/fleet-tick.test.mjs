@@ -18,7 +18,7 @@ const state = (over = {}) => ({
   heads: [], supply: 0, shortlistStatus: "ok", refresh: null, dropped: [],
   reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [], unlabelled: [], conflicts: [], conflictEscalate: [],
   mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeConflictHeld: 0,
-  mainCheckout: { state: "clean" },
+  mainCheckout: { state: "clean" }, phase0: { held: false, line: null, session: null },
   ...over,
 });
 const rowsOf = (s, role) => reconcile(s).filter((r) => r.role === role);
@@ -141,6 +141,13 @@ test("implementers: several unchecked members share one batch file, one entry ea
   const r = row(state({ tierUnchecked: ["impl-7", "impl-8-b"] }), "implementers");
   assert.ok(r.detail.includes(
     `[{"member":"impl-7","session":"<session>"},{"member":"impl-8-b","session":"<session>"}]`), r.detail);
+});
+
+test("implementers: with the phase-0 receipt naming the session, the tier step's batch entries carry no <session> placeholder", () => {
+  const r = row(state({ heads: [7], tierUnchecked: ["impl-412", "impl-9"], phase0: { held: false, line: null, session: "/s/run" } }), "implementers");
+  assert.ok(r.detail.includes(
+    `run ~/.fleet/bin/fleet-run tier-check.mjs --batch <file> with [{"member":"impl-412"},{"member":"impl-9"}]`), r.detail);
+  assert.doesNotMatch(r.detail, /<session>/);
 });
 
 test("implementers: no tier hold, no clearing step in the detail", () => {
@@ -521,6 +528,32 @@ test("main checkout: a conflict line still prints under the hold and under a dra
   }
   const drained = rowsOf(state({ ...BUSY, refresh: null, draining: "x", conflicts: [40] }), "reviewers");
   assert.deepEqual(drained.map((r) => r.action), ["DISPATCH fix-pr PR#346", "DISPATCH review PR#350", "CONFLICT PR#40"]);
+});
+
+test("phase 0: an unfinished phase 0 holds every dispatching row, keeps their counts, and lets the conflict rows print", () => {
+  const phase0 = { held: true, line: "PHASE0-INCOMPLETE recipe", session: null };
+  assert.deepEqual(summary(state({ ...BUSY, refresh: null, conflicts: [40], phase0 })), [
+    ["implementers", "HOLD (phase 0 incomplete)", false],
+    ["reviewers", "HOLD (phase 0 incomplete)", false],
+    ["reviewers", "CONFLICT PR#40", true],
+    ["merge-bot", "HOLD (phase 0 incomplete)", false],
+  ]);
+  const [impl] = reconcile(state({ ...BUSY, implLive: 1, phase0 }));
+  assert.equal(`${impl.actual}/${impl.target}`, "1/2", "the held row lost its counts");
+});
+
+test("phase 0: its hold outranks the main-checkout reason and every role's guards; a missing baseline under it still asks to act", () => {
+  const phase0 = { held: true, line: "x", session: null };
+  const dirty = state({ ...BUSY, refresh: null, draining: "x", tierMismatch: ["impl-1"], phase0, mainCheckout: { state: "dirty", changed: ["x"] } });
+  assert.deepEqual(reconcile(dirty).map((r) => r.action), Array(3).fill("HOLD (phase 0 incomplete)"));
+  assert.equal(actionable(reconcile(dirty)), false);
+  const absent = reconcile(state({ ...BUSY, refresh: null, phase0, mainCheckout: { state: "absent", baseline: "/x" } }));
+  assert.deepEqual(absent.map((r) => r.action), Array(3).fill("HOLD (phase 0 incomplete)"));
+  assert.equal(actionable(absent), true);
+});
+
+test("phase 0: a gate that gave no answer holds, never reads as finished", () => {
+  assert.deepEqual(reconcile(state({ ...BUSY, refresh: null, phase0: undefined })).map((r) => r.action), Array(3).fill("HOLD (phase 0 incomplete)"));
 });
 
 // ---------------------------------------------------------------------------
@@ -1524,7 +1557,7 @@ const SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-tick.mjs", import.
 // or transitive — and ledger.mjs with its own, because the tick reads the
 // ledger through `ledger.mjs read`. An unlisted sibling is a module-not-found
 // at startup: exit 1, a shape no case below expects.
-const SIBLING_MODULES = ["arg.mjs", "fleet-dir.mjs", "fleet-state.mjs", "git-env.mjs", "is-cli.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs", "pid-lock.mjs", "proc.mjs"].map(
+const SIBLING_MODULES = ["arg.mjs", "fleet-dir.mjs", "fleet-state.mjs", "git-env.mjs", "is-cli.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs"].map(
   (m) => [m, fileURLToPath(new URL(`../plugin/scripts/${m}`, import.meta.url))],
 );
 
@@ -1643,14 +1676,28 @@ const INFLIGHT_FREE = `#!/bin/sh
 printf '{"issue":%s,"taken":false,"hits":[],"unknown":[]}\\n' "$1"
 `;
 
+// phase0.mjs's steps, every one present as its receipt always carries them.
+const PHASE0_STEPS = ["branch", "fast-forward", "pin", "baseline", "preflight", "ruleset", "tier-roles", "metrics",
+  "cockpit", "rotate", "reclaim", "recipe", "fold-in", "stranded", "shortlist"];
+// A receipt in phase0.mjs's shape with every step `ok`; `steps` overrides
+// individual steps.
+const receiptOf = ({ run = null, session = "/s", steps = {} } = {}) => ({
+  run, session, scratch: "/scratch", caps: { impl: null, review: null },
+  steps: Object.fromEntries(PHASE0_STEPS.map((name) => [name, { status: "ok", at: "2026-10-15T00:00:00.000Z", output: "", ...steps[name] }])),
+});
+
 // `baseline` records the run's main-checkout baseline the way Phase 0 does,
 // after `beforeRun`; `afterBaseline` is a stray write landing mid-run. The
 // repo ignores `.fleet/` and `.worktrees/` as a fleet repo's .gitignore does,
-// through info/exclude so no tracked file says so.
+// through info/exclude so no tracked file says so. `phase0` is the run's
+// phase-0 receipt, written after `afterBaseline`: by default every step `ok`
+// and `run` the `at` of the controller record in the state file the tick
+// reads, so the gate lets dispatch through; `false` writes none; a function
+// maps that default receipt to the case's own.
 function runCli(args = [], {
   prs = [], ledger, shortlist, refresh = shortlistText([]), refreshFail = false,
   issueStates = {}, prStates = {}, claimed = [], candidates, env: extraEnv = {}, defaultState = false, keep = false, beforeRun = () => {},
-  baseline = true, afterBaseline = () => {},
+  baseline = true, afterBaseline = () => {}, phase0 = (receipt) => receipt,
 } = {}) {
   // On macOS tmpdir() is /var -> /private/var; resolving it up front makes
   // every path below the resolved one. (A symlinked path no longer stops a
@@ -1690,6 +1737,14 @@ function runCli(args = [], {
       assert.equal(rec.status, 0, rec.stderr);
     }
     afterBaseline(repo);
+    if (phase0 !== false) {
+      const statePathOf = args.includes("--state") ? args[args.indexOf("--state") + 1]
+        : defaultState ? join(repo, ".fleet", "heartbeat.json") : join(dir, "heartbeat.json");
+      let at = null;
+      try { at = JSON.parse(readFileSync(statePathOf, "utf8")).controller?.at ?? null; } catch { /* no record: run null */ }
+      writeFileSync(join(repo, ".fleet", "phase0.json"),
+        JSON.stringify(phase0(receiptOf({ run: at, session: join(dir, "session") }))));
+    }
     const refreshLog = fx("refresh.log", "");
     const issueViewLog = fx("issue-view.log", "");
     const prViewLog = fx("pr-view.log", "");
@@ -2011,7 +2066,7 @@ test("CLI: a tier mismatch holds the implementer row until a replacement is disp
 
 test("CLI: an implementer with no tier verdict on the ledger holds the implementer row until tier-check writes one", () => {
   const r = runCli([], { ledger: { rows: ["#7 impl-7 · class=routine"], dispatched: ["impl-7"] }, shortlist: shortlistText([8, 9]) });
-  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier unchecked impl-7\) +\(.* — run ~\/\.fleet\/bin\/fleet-run tier-check\.mjs --batch <file> with \[\{"member":"impl-7","session":"<session>"\}\]\)$/m);
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier unchecked impl-7\) +\(.* — run ~\/\.fleet\/bin\/fleet-run tier-check\.mjs --batch <file> with \[\{"member":"impl-7"\}\]\)$/m);
   const ok = runCli([], {
     ledger: { rows: ["#7 impl-7 · class=routine · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7"] },
     shortlist: shortlistText([8, 9]),
@@ -2692,6 +2747,134 @@ test("CLI: an ambient GIT_DIR naming a dirty repository does not move the main-c
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stdout, /MAIN-CHECKOUT/);
   assert.match(r.stdout, /^implementers 1\/2 → PULL #420 /m);
+});
+
+// The phase-0 receipt the tick gates on. Every case holds all three
+// dispatching rows and prints the line naming why above them.
+const PHASE0_LIVE = { ...LIVE, prs: [pr(350)] };
+const withStep = (name, step) => (r) => ({ ...r, steps: { ...r.steps, [name]: { ...r.steps[name], ...step } } });
+const CONTROLLER_AT = 1_760_000_000_000;
+// A controller record in the case's own state file, the one the tick reads.
+const controllerRecord = (record = {}) => (repo) => writeFileSync(join(repo, "..", "heartbeat.json"),
+  JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller: { pid: process.pid, lstart: "runner-start", prior: "none", at: CONTROLLER_AT, ...record } }));
+const withController = controllerRecord();
+// The process table the tick judges that record against: this runner is the
+// tick's parent, and the table's omp is above it.
+const procEnv = (t, extra = {}) => {
+  const d = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-proc-")));
+  t.after(() => rmSync(d, { recursive: true, force: true }));
+  return { FLEET_PROC_TABLE: procTable(d, extra) };
+};
+for (const [what, fixture, named] of [
+  ["no receipt", { phase0: false }, /^PHASE0-INCOMPLETE no receipt at \S+\/\.fleet\/phase0\.json — dispatch held: run ~\/\.fleet\/bin\/fleet-run phase0\.mjs --session <session> and act on what it prints$/],
+  ["a receipt of another run", {
+    beforeRun: withController,
+    phase0: (r) => ({ ...r, run: CONTROLLER_AT - 1 }),
+  }, new RegExp(`^PHASE0-INCOMPLETE receipt \\S+/\\.fleet/phase0\\.json is another run's: run ${CONTROLLER_AT - 1}, controller record ${CONTROLLER_AT} — dispatch held: `)],
+  ["a failed step", { phase0: withStep("recipe", { status: "failed", output: "derive-testcmd.sh exited 3" }) }, /^PHASE0-INCOMPLETE recipe — dispatch held: run ~\/\.fleet\/bin\/fleet-run phase0\.mjs --session \S+\/session and act on what it prints$/],
+  ["a pending step", { phase0: withStep("stranded", { status: "pending", output: "NEED resume #5 /w b" }) }, /^PHASE0-INCOMPLETE stranded — dispatch held: /],
+  ["a step the receipt lacks", { phase0: (r) => { const { recipe: _recipe, ...steps } = r.steps; return { ...r, steps }; } }, /^PHASE0-INCOMPLETE recipe — dispatch held: /],
+]) {
+  test(`CLI: ${what} prints PHASE0-INCOMPLETE first, naming it, and holds every dispatching row`, () => {
+    const r = runCli([], { ...PHASE0_LIVE, ...fixture });
+    assert.equal(r.status, 0, r.stderr);
+    const lines = r.stdout.trim().split("\n");
+    const at = lines.findIndex((l) => l.startsWith("PHASE0-"));
+    assert.match(lines[at] ?? "", named, r.stdout);
+    assert.ok(at < lines.findIndex((l) => l.startsWith("implementers")), "the line prints above the rows");
+    assert.match(r.stdout, /^implementers 1\/2 → HOLD \(phase 0 incomplete\)/m);
+    assert.match(r.stdout, /^reviewers +0\/6 → HOLD \(phase 0 incomplete\)/m);
+    assert.match(r.stdout, /^merge-bot +0\/1 → HOLD \(phase 0 incomplete\)/m);
+    assert.doesNotMatch(r.stdout, /PULL|DISPATCH/);
+  });
+}
+
+test("CLI: a receipt of this run with every step ok prints nothing extra and holds nothing", (t) => {
+  const r = runCli([], PHASE0_LIVE);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /PHASE0|phase 0/);
+  assert.match(r.stdout, /^implementers 1\/2 → PULL #420 /m);
+  assert.match(r.stdout, /^merge-bot +0\/1 → (?!HOLD)/m);
+  // The controller record's `at` is what `run` must equal, and its process
+  // is this tick's ancestor.
+  const ctl = runCli([], { ...PHASE0_LIVE, beforeRun: withController, env: procEnv(t) });
+  assert.equal(ctl.status, 0, ctl.stderr);
+  assert.doesNotMatch(ctl.stdout, /PHASE0|phase 0/);
+});
+
+test("CLI: a finished receipt whose run's controller has exited holds every dispatching row, and one whose controller is alive does not", (t) => {
+  const gone = runCli([], { ...PHASE0_LIVE, beforeRun: controllerRecord({ pid: deadPid() }), env: procEnv(t) });
+  assert.equal(gone.status, 0, gone.stderr);
+  const line = gone.stdout.trim().split("\n").find((l) => l.startsWith("PHASE0-"));
+  assert.match(line ?? "", new RegExp(`^PHASE0-INCOMPLETE receipt \\S+/\\.fleet/phase0\\.json is run ${CONTROLLER_AT}'s and its controller has exited: not this session's finished phase 0 — dispatch held: run \\S+ phase0\\.mjs --session <session> `), gone.stdout);
+  assert.match(gone.stdout, /^implementers 1\/2 → HOLD \(phase 0 incomplete\)/m);
+  assert.match(gone.stdout, /^reviewers +0\/6 → HOLD \(phase 0 incomplete\)/m);
+  assert.match(gone.stdout, /^merge-bot +0\/1 → HOLD \(phase 0 incomplete\)/m);
+  assert.doesNotMatch(gone.stdout, /PULL|DISPATCH/);
+  const foreign = liveForeign(t);
+  const alive = runCli([], {
+    ...PHASE0_LIVE, beforeRun: controllerRecord({ pid: foreign, lstart: "foreign-start" }),
+    env: procEnv(t, { [foreign]: { ppid: 1, argv: ["bun", "/x/omp"], lstart: "foreign-start" } }),
+  });
+  assert.equal(alive.status, 0, alive.stderr);
+  assert.doesNotMatch(alive.stdout, /PHASE0|phase 0/);
+  assert.match(alive.stdout, /^implementers 1\/2 → PULL #420 /m);
+});
+
+test("CLI: ruleset drift and a fold-in NEED print as advice on a PHASE0-ADVICE line and hold nothing", () => {
+  const r = runCli([], {
+    ...PHASE0_LIVE,
+    phase0: (x) => withStep("fold-in", { output: "queued 0 PR(s), 0 already on a carried row, 1 closing no issue\nNEED review PR#77 (closes no issue)" })(
+      withStep("ruleset", { status: "drift", output: "- required_approving_review_count" })(x)),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.split("\n")[0], "PHASE0-ADVICE ruleset drift, fold-in NEED review PR#77 (closes no issue)");
+  assert.doesNotMatch(r.stdout, /phase 0 incomplete|PHASE0-INCOMPLETE/);
+  assert.match(r.stdout, /^implementers 1\/2 → PULL #420 /m);
+});
+
+test("CLI: --fold-unchanged under an unfinished phase 0 folds to one line naming the hold, quiet rising every tick", () => {
+  const ticks = foldTicks({ ...LIVE, phase0: withStep("recipe", { status: "pending", output: "NEED derive-recipe" }) });
+  for (const t of ticks) assert.equal(t.status, 0, t.stderr);
+  assert.match(ticks[0].stdout, /^PHASE0-INCOMPLETE recipe — /);
+  assert.match(ticks[0].stdout, /^implementers 1\/2 → HOLD \(phase 0 incomplete\)/m);
+  assert.deepEqual(ticks.map((t) => t.quiet), [1, 2, 3]);
+  for (const [i, t] of ticks.slice(1).entries()) {
+    assert.deepEqual(t.stdout.trim().split("\n"), [
+      `fleet-tick: unchanged, nothing to act on (quiet=${i + 2}); HOLD (phase 0 incomplete) persists — full rows on the next change`,
+    ]);
+  }
+});
+
+test("CLI: an unfinished phase 0 over a dirty main checkout prints the phase-0 line above the main-checkout line, and the fold names both holds", () => {
+  const both = {
+    ...LIVE, phase0: withStep("recipe", { status: "pending", output: "NEED derive-recipe" }),
+    afterBaseline: (repo) => writeFileSync(join(repo, "stray.mjs"), "x\n"),
+  };
+  const ticks = foldTicks(both);
+  for (const t of ticks) assert.equal(t.status, 0, t.stderr);
+  const lines = ticks[0].stdout.trim().split("\n");
+  const phase0At = lines.findIndex((l) => l.startsWith("PHASE0-INCOMPLETE "));
+  const mainAt = lines.findIndex((l) => l.startsWith("MAIN-CHECKOUT-DIRTY "));
+  assert.ok(phase0At >= 0 && mainAt >= 0, ticks[0].stdout);
+  assert.ok(phase0At < mainAt, "the phase-0 line prints above the main-checkout line");
+  assert.match(ticks[0].stdout, /^implementers 1\/2 → HOLD \(phase 0 incomplete\)/m);
+  for (const [i, t] of ticks.slice(1).entries()) {
+    assert.deepEqual(t.stdout.trim().split("\n"), [
+      `fleet-tick: unchanged, nothing to act on (quiet=${i + 2}); HOLD (phase 0 incomplete) persists; HOLD (main checkout dirty) persists — full rows on the next change`,
+    ]);
+  }
+});
+
+test("CLI: the tier hold's step names no <session> when this run's receipt records one, and keeps the placeholder without it", () => {
+  const UNCHECKED = { ledger: { rows: ["#412 impl-412"], dispatched: ["impl-412"] }, shortlist: shortlistText([420]) };
+  const step = (entries) => `run ~/.fleet/bin/fleet-run tier-check.mjs --batch <file> with ${JSON.stringify(entries)}`;
+  const withReceipt = runCli([], UNCHECKED);
+  assert.equal(withReceipt.status, 0, withReceipt.stderr);
+  assert.ok(lineOf(withReceipt, "implementers")[0].includes(step([{ member: "impl-412" }])), withReceipt.stdout);
+  const without = runCli([], { ...UNCHECKED, phase0: false });
+  assert.equal(without.status, 0, without.stderr);
+  assert.ok(lineOf(without, "implementers")[0].includes(step([{ member: "impl-412", session: "<session>" }])), without.stdout);
 });
 
 // ---------------------------------------------------------------------------
