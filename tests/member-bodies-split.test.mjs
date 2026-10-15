@@ -1,0 +1,219 @@
+// The fix-applier, finisher and merge-bot agent definitions carry the text that
+// never varies between dispatches of the role, and each role's brief template
+// carries only what varies. Three things are pinned:
+//
+//   (1) none of the three bodies is the one-line "follow your brief" it used
+//       to be, and the fix-applier's definition is a tier route the checkers
+//       accept;
+//   (2) the body and the rendered brief TOGETHER hold every sentence of the
+//       text the controller used to paste into the dispatch prompt — nothing
+//       lost, nothing duplicated across the pair;
+//   (3) the pre-change text is a fixture this test owns
+//       (fixtures/pre-split-blocks/), never read off SKILL.md, so deleting
+//       the blocks there cannot loosen the check.
+//
+// THE CEILING. (2) counts sentences, split on a full stop followed by a
+// capital, an opening backtick, bold marker, bracket or quote, after folding
+// every run of whitespace — so a re-wrap of the text passes and a reworded
+// sentence does not. A sentence the pre-change text states twice (the nested
+// refuter prompt repeats the kill rules) is expected twice, not once.
+// Text ADDED to a body or a brief is not seen: this is a no-loss, no-duplicate
+// check, not a check that nothing new was written.
+import { after, test } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { checkFields, parseAllowlist, parseFrontmatter } from "../plugin/scripts/frontmatter-check.mjs";
+import { checkRoutes, parseModelRoute } from "../plugin/scripts/tier-roles.mjs";
+
+const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
+const AGENTS = join(PLUGIN, "agents");
+const FIXTURES = fileURLToPath(new URL("./fixtures/pre-split-blocks/", import.meta.url));
+
+const TMP = realpathSync(mkdtempSync(join(tmpdir(), "member-bodies-split-")));
+after(() => rmSync(TMP, { recursive: true, force: true }));
+
+const agentText = (name) => readFileSync(join(AGENTS, `${name}.agent.md`), "utf8");
+const bodyOf = (text) => text.slice(text.indexOf("\n---\n", 4) + "\n---\n".length);
+
+// --- (1) the bodies ---------------------------------------------------------
+
+// A phrase only each role's own invariant text holds, so a body that is long
+// but about something else is not a pass.
+const BODIES = [
+  { name: "fleet-fix-applier", marker: "resolve a bare relative path against the SESSION ROOT" },
+  { name: "fleet-finisher", marker: "finisher-audit.mjs" },
+  { name: "fleet-merge-bot", marker: "`status` is a READ-ONLY variable in zsh" },
+];
+
+for (const { name, marker } of BODIES) {
+  test(`${name}: the body is no one-liner and carries its role's invariant text`, () => {
+    const body = bodyOf(agentText(name));
+    assert.ok(!body.includes("Follow the dispatch brief you were given"), "the retired one-line body is back");
+    assert.ok(body.split("\n").filter((l) => l.trim() !== "").length > 10, "the body is a handful of lines");
+    assert.ok(body.includes(marker), `the body does not carry ${JSON.stringify(marker)}`);
+  });
+}
+
+test("fleet-finisher: the body names finisher-audit.mjs at duty 1 and finisher-label.mjs at duty 3", () => {
+  const body = bodyOf(agentText("fleet-finisher"));
+  const at = (s) => body.indexOf(s);
+  assert.ok(at("**Duty 1 is one script") !== -1 && at("fleet-run finisher-audit.mjs") > at("**Duty 1 is one script"));
+  assert.ok(at("**Duty 3 is one script") !== -1 && at("fleet-run finisher-label.mjs") > at("**Duty 3 is one script"));
+});
+
+const ROLES = { slow: "anthropic/claude-opus-5:auto", task: "anthropic/claude-sonnet-5:auto", smol: "anthropic/claude-haiku-4-5:auto" };
+const ADAPTIVE = ["low", "medium", "high", "xhigh", "max"];
+const CATALOG = {
+  models: [
+    { provider: "anthropic", id: "claude-opus-5", selector: "anthropic/claude-opus-5", thinking: ADAPTIVE },
+    { provider: "anthropic", id: "claude-sonnet-5", selector: "anthropic/claude-sonnet-5", thinking: ADAPTIVE },
+    { provider: "anthropic", id: "claude-haiku-4-5", selector: "anthropic/claude-haiku-4-5", thinking: ["minimal", "low", "medium", "high", "xhigh"] },
+  ],
+};
+
+test("fleet-fix-applier: model is a @<role>:<level> route, and tier-roles accepts the shipped agents directory with it", () => {
+  const fm = parseFrontmatter(agentText("fleet-fix-applier"));
+  assert.equal(fm.error, undefined);
+  const model = fm.fields.find((f) => f.key === "model")?.value;
+  assert.deepEqual(parseModelRoute(model), { role: "slow", level: "high" });
+  const r = checkRoutes({ agentsDir: AGENTS, modelRoles: ROLES, overrides: {}, catalog: CATALOG });
+  assert.deepEqual(r.violations, []);
+});
+
+test("tier-roles refuses a fix-applier definition whose model is not a route (the control for the accepting case above)", () => {
+  const dir = join(TMP, "bad-route");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "fleet-fix-applier.agent.md"), agentText("fleet-fix-applier").replace('model: "@slow:high"', "model: opus"));
+  const r = checkRoutes({ agentsDir: dir, modelRoles: ROLES, overrides: {}, catalog: CATALOG });
+  assert.equal(r.violations.length, 1);
+  assert.match(r.violations[0], /fleet-fix-applier\.agent\.md/);
+});
+
+test("frontmatter-check accepts the fix-applier definition against the shipped allow-list, and refuses a forbidden key on it", () => {
+  const { allowlist, error } = parseAllowlist(readFileSync(join(PLUGIN, "scripts", "frontmatter-allowlist.json"), "utf8"));
+  assert.equal(error, undefined);
+  const { fields } = parseFrontmatter(agentText("fleet-fix-applier"));
+  assert.deepEqual(checkFields("agents", allowlist, fields), []);
+  const withEffort = [...fields, { key: "effort", value: "high", line: 9 }];
+  assert.equal(checkFields("agents", allowlist, withEffort).length, 1);
+  // And through the CLI, from the plugin directory, as CI runs it.
+  const r = spawnSync(process.execPath, [join(PLUGIN, "scripts", "frontmatter-check.mjs"), "agents/fleet-fix-applier.agent.md"], { cwd: PLUGIN, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  // The control: the same file with a forbidden key is refused by the same command.
+  const bad = join(TMP, "fm-bad", "agents");
+  mkdirSync(bad, { recursive: true });
+  writeFileSync(join(bad, "fleet-fix-applier.agent.md"), agentText("fleet-fix-applier").replace('model: "@slow:high"', 'model: "@slow:high"\neffort: high'));
+  const refused = spawnSync(process.execPath, [join(PLUGIN, "scripts", "frontmatter-check.mjs"), "--allowlist", join(PLUGIN, "scripts", "frontmatter-allowlist.json"), "agents/fleet-fix-applier.agent.md"], { cwd: join(TMP, "fm-bad"), encoding: "utf8" });
+  assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+  assert.match(refused.stdout + refused.stderr, /effort/);
+});
+
+// --- (2) the pair -----------------------------------------------------------
+
+const INSTRUMENTS_STUB = "#!/bin/sh\nexit 0\n";
+const INSTALL = join(TMP, "install");
+mkdirSync(join(INSTALL, "scripts"), { recursive: true });
+mkdirSync(join(INSTALL, "skills", "run-team"), { recursive: true });
+for (const m of ["dispatch-prompt.mjs", "arg.mjs", "git-env.mjs", "fleet-dir.mjs", "review-core.mjs"]) {
+  writeFileSync(join(INSTALL, "scripts", m), readFileSync(join(PLUGIN, "scripts", m)));
+}
+writeFileSync(join(INSTALL, "scripts", "instruments.sh"), INSTRUMENTS_STUB);
+cpSync(join(PLUGIN, "skills", "run-team", "briefs"), join(INSTALL, "skills", "run-team", "briefs"), { recursive: true });
+const REPO = join(TMP, "repo");
+mkdirSync(REPO);
+{
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  const r = spawnSync("git", ["init", "-q"], { cwd: REPO, encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+}
+
+function renderBrief(role, kind, args) {
+  const env = { ...process.env };
+  for (const k of ["GIT_DIR", "GIT_WORK_TREE", "FORCE_COLOR"]) delete env[k];
+  const argv = ["render", role, ...(kind ? ["--kind", kind] : []), ...Object.entries(args).flatMap(([k, v]) => [`--${k}`, v])];
+  const r = spawnSync(process.execPath, [join(INSTALL, "scripts", "dispatch-prompt.mjs"), ...argv], { cwd: REPO, encoding: "utf8", env });
+  assert.equal(r.status, 0, `render ${role} ${kind}: ${r.stderr}`);
+  return r.stdout;
+}
+
+const PIN = "0123456789abcdef0123456789abcdef01234567";
+// The placeholder each argument fills, per role — the arguments are values no
+// other argument shares, so a swapped substitution cannot pass.
+const PAIRS = [
+  { role: "fix-applier", kind: "review", body: "fleet-fix-applier", fixture: "fix-applier-review.md",
+    args: { worktree: "/abs/wt-fix", branch: "fix-branch", testCmd: "TESTCMD-1", scratch: "/abs/scratch-fix", pr: "3293", run: "run-AbCd1234" },
+    fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch", pr: "pr", run: "run" } },
+  { role: "fix-applier", kind: "conflict", body: "fleet-fix-applier", fixture: "fix-applier-conflict.md",
+    args: { worktree: "/abs/wt-conflict", branch: "conflict-branch", testCmd: "TESTCMD-2" },
+    fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd" } },
+  { role: "fix-applier", kind: "dispositions-retry", body: "fleet-fix-applier", fixture: "fix-applier-dispositions-retry.md",
+    args: { worktree: "/abs/wt-retry", branch: "retry-branch", testCmd: "TESTCMD-3", scratch: "/abs/scratch-retry", pr: "3294", run: "run-ZyXw9876", "mismatched-record": "/abs/scratch-retry/dispositions-fix-pr-3294.json", violations: "VIOLATION-LIST-1" },
+    fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch", pr: "pr", run: "run", "mismatched record": "mismatched-record", violations: "violations" } },
+  { role: "finisher", kind: "fresh", body: "fleet-finisher", fixture: "finisher-fresh.md",
+    args: { worktree: "/abs/wt-fin", pin: PIN, pr: "3295", testCmd: "TESTCMD-4", scratch: "/abs/scratch-fin" },
+    fills: { "abs-path": "worktree", "your dispatch pin": "pin", M: "pr", testCmd: "testCmd", scratch: "scratch" } },
+  { role: "finisher", kind: "repair", body: "fleet-finisher", fixture: "finisher-repair.md",
+    args: { worktree: "/abs/wt-fin-r", pin: PIN, pr: "3296", testCmd: "TESTCMD-5", scratch: "/abs/scratch-fin-r" },
+    fills: { "abs-path": "worktree", "your dispatch pin": "pin", M: "pr", testCmd: "testCmd", scratch: "scratch" } },
+  { role: "merge-bot", kind: null, body: "fleet-merge-bot", fixture: "merge-bot.md",
+    args: { n: "17", scratch: "/abs/scratch-bot" },
+    fills: { n: "n", scratch: "scratch" } },
+];
+
+const fold = (s) => s.replace(/\s+/g, " ").trim();
+const count = (haystack, needle) => haystack.split(needle).length - 1;
+
+// The sentences of a text, paragraph by paragraph so none spans a blank line.
+function sentencesOf(text) {
+  return text
+    .split(/\n[ \t]*\n/)
+    .map(fold)
+    .filter((p) => p !== "")
+    .flatMap((p) => p.split(/(?<=[.!?])\s+(?=[A-Z*`"(\[<])/))
+    .filter((s) => s !== "");
+}
+
+const label = ({ role, kind }) => (kind ? `${role} ${kind}` : role);
+
+for (const p of PAIRS) {
+  test(`${label(p)}: its body and its rendered brief hold every sentence of the pre-change text, each as often as it stood`, () => {
+    const fixture = readFileSync(join(FIXTURES, p.fixture), "utf8");
+    const body = fold(bodyOf(agentText(p.body)));
+    const brief = fold(renderBrief(p.role, p.kind, p.args));
+    const fillValues = Object.fromEntries(Object.entries(p.fills).map(([inner, flag]) => [inner, p.args[flag]]));
+    const fill = (s) => s.replace(/<([A-Za-z][^<>\n]*)>/g, (whole, inner) => (inner in fillValues ? fillValues[inner] : whole));
+
+    const sentences = sentencesOf(fixture);
+    assert.ok(sentences.length >= 3, "the fixture reads as a few sentences at least");
+    const folded = sentences.map(fold);
+    const fixtureText = fold(fixture);
+
+    const lost = [];
+    const duplicated = [];
+    for (const s of new Set(folded)) {
+      const expected = count(fixtureText, s);
+      // The body names a value by its placeholder; the brief carries it filled.
+      const found = count(body, s) + count(brief, fill(s));
+      if (found < expected) lost.push(s);
+      if (found > expected) duplicated.push(s);
+    }
+    const show = (list) => list.slice(0, 3).map((s) => JSON.stringify(s.slice(0, 90))).join("\n  ");
+    assert.deepEqual(lost, [], `${lost.length} pre-change sentence(s) in neither the body nor the brief:\n  ${show(lost)}`);
+    assert.deepEqual(duplicated, [], `${duplicated.length} sentence(s) stated in both, or twice over:\n  ${show(duplicated)}`);
+  });
+}
+
+test("the sentence counter sees a lost sentence and a duplicated one, and passes a re-wrapped one", () => {
+  const text = "First rule here. Second rule here.\n\nThird rule `x`. Fourth rule.";
+  assert.deepEqual(sentencesOf(text), ["First rule here.", "Second rule here.", "Third rule `x`.", "Fourth rule."]);
+  // A re-wrap folds to the same sentences.
+  assert.deepEqual(sentencesOf("First rule\nhere. Second rule\nhere.\n\nThird rule `x`. Fourth\nrule."), sentencesOf(text));
+  // A paragraph break is never inside a sentence.
+  assert.deepEqual(sentencesOf("An unfinished\n\nthought. Next one."), ["An unfinished", "thought.", "Next one."]);
+});

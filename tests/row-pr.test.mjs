@@ -73,7 +73,7 @@ for (const { row, own, keyed, board } of FIXTURES) {
     assert.equal(cli("dispatch", String(keyed), `fix-pr-${keyed}`).ticket, key, "ledger.mjs memberRowIndex");
     for (const other of [481, 471].filter((n) => n !== own && row.includes(`PR#${n}`))) {
       assert.deepEqual(cli("dispatch", String(other), `fix-pr-${other}`), {
-        member: `fix-pr-${other}`, agent: null, ticket: `#${other}`, line: `#${other} fix-pr-${other}`, created: true, total: 2,
+        member: `fix-pr-${other}`, agent: "fleet-fix-applier", ticket: `#${other}`, line: `#${other} fix-pr-${other}`, created: true, total: 2,
       }, `PR#${other} is not this row's PR`);
     }
   });
