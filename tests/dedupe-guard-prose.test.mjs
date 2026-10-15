@@ -215,15 +215,21 @@ test("both report contracts carry `filed: #N <subject>` and the `unrecorded:` fa
 });
 
 test("the controller records every filing a filer reported unrecorded", () => {
-  // The fallback is only a fallback if someone acts on it: an `unrecorded:`
-  // line nobody turns into a `filed` row leaves the arm exactly as blind as
-  // before, one filing at a time.
+  // The fallback is only a fallback if someone acts on it: an `unrecorded`
+  // entry nobody turns into a `filed` row leaves the arm exactly as blind as
+  // before, one filing at a time. The entry is in the member's report file,
+  // and `settle --from-report` records it; a finisher settled by hand past an
+  // exit 3 has its entries recorded by hand.
   const table = RUN_TEAM.paragraph("| Wake | Record, then tick |", "record-before-tick table", "Then run the tick, act on every line it prints,").text;
   for (const wake of ["Fix-applier report", "Finisher report", "Finisher report (halted)"]) {
     const row = table.split("\n").find((r) => r.startsWith(`| ${wake} |`)) ?? "";
-    assert.match(row, /`ledger\.mjs filed <N> "<subject>"` for each `unrecorded:` line/, `the "${wake}" wake no longer records unrecorded filings`);
+    assert.match(row, /`ledger\.mjs settle [a-z-]+<M> --from-report`, which records each `unrecorded` filing/, `the "${wake}" wake no longer records unrecorded filings`);
   }
-  assert.match(runLedger(), /reports `unrecorded: #N <subject>` instead, and you run `filed` for it/, "the Run ledger section no longer hands unrecorded filings to the controller");
+  const finisher = table.split("\n").find((r) => r.startsWith("| Finisher report |")) ?? "";
+  assert.match(finisher, /settle it `ledger\.mjs settle finisher-pr-<M>=labelled` as reported, and `ledger\.mjs filed <N> "<subject>"` for each `unrecorded` entry/,
+    "the finisher settled by hand past its exit 3 no longer has its unrecorded filings recorded");
+  assert.match(runLedger(), /reports `unrecorded: #N <subject>` instead — an `unrecorded` entry of\s+its report file — and `settle <member> --from-report` runs `filed` for it/,
+    "the Run ledger section no longer hands unrecorded filings to the settle");
 });
 
 test("the Run ledger section states the writer policy and the check→create gap; step 5 states the gap too", () => {

@@ -77,16 +77,18 @@ test("the record-before-tick table names every wake, each with what it records",
   const table = RUN_TEAM.paragraph("| Wake | Record, then tick |", "record-before-tick table", "Then run the tick, act on every line it prints,").text;
   const rows = table.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Wake"));
   const WAKES = [
-    ["Implementer report", ["verify-sha.sh", "settle impl-<N>=PR#<M>", "=bailed"]],
+    // A member's report is a file; the settle reads it, checks its claim and records its filings.
+    ["Implementer report", ["settle impl-<N> --from-report", "verify-sha.sh", "`bailed`"]],
     ["Review workflow notification / `review-pr-<n>` report", ["<scratch>/pr<pr>/<run>/review.json", "reviewed=<head>:<survived>/<refuted>/<unverified>:<run>"]],
-    ["Fix-applier report", ["settle fix-pr-<M>=", "ruled"]],
-    ["Finisher report", ["settle finisher-pr-<M>=labelled"]],
+    ["Fix-applier report", ["settle fix-pr-<M> --from-report", "ruled"]],
+    // The settle refuses a `labelled` with no label; the controller's ruling keeps the repair path.
+    ["Finisher report", ["settle finisher-pr-<M> --from-report", "settle finisher-pr-<M>=labelled"]],
     // #2083: a halt is its own outcome, escalated on the PR itself, then resolved by cause.
-    ["Finisher report (halted)", ["settle finisher-pr-<M>=halted:<cause>", "gh pr comment <M>", "**Resolving a finisher halt**"]],
+    ["Finisher report (halted)", ["settle finisher-pr-<M> --from-report", "gh pr comment <M>", "**Resolving a finisher halt**"]],
     ["Finisher report (failed / killed)", ["settle finisher-pr-<M>=failed", "**Resolving a finisher that died**"]],
     ["Label seen (persistent Monitor)", ["nothing to record"]],
     ["CI run terminal", ["ci=<run-id>:<attempt>:<conclusion>", "finisher gate"]],
-    ["Merge-bot pass report", ["held-behind:#<lower>", "settle merge-bot-<n>=done", "`tick --apply` runs the reap and the reclaim"]],
+    ["Merge-bot pass report", ["held-behind:#<lower>", "settle merge-bot-<n> --from-report", "`tick --apply` runs the reap and the reclaim"]],
     ["Drain", ["ledger.mjs drain", "settle impl-<N>=released"]],
     ["Heartbeat", ["nothing to record"]],
   ];

@@ -10,3 +10,12 @@ Report the new head and **stop**: do not watch, poll or wait for CI — the
 controller owns the next run on the pushed head. A red that is not yours to
 fix — a flake that passes on rerun, or staleness — gets nothing pushed: report
 that instead.
+
+Your report is a file, `/abs/scratch-red/reports/<your name>.json`, `<your name>` the
+`fix-pr-` name you were dispatched as, in the shape
+`~/.fleet/bin/fleet-run report-schema.mjs print fix-pr` prints. Write it
+before your final message, and send nothing until
+`~/.fleet/bin/fleet-run report-schema.mjs validate fix-pr /abs/scratch-red/reports/<your name>.json`
+answers `valid`. Your final message is then one line,
+`<your name>: <outcome> /abs/scratch-red/reports/<your name>.json`, `<outcome>` the
+report's `outcome`.

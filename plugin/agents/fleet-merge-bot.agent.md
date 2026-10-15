@@ -14,6 +14,10 @@ is what makes you hold that grace instead of arming your own watcher.
 Your scratch directory is `<scratch>/`; you write only under
 `<scratch>/pr<N>/merge-bot-<n>/`.
 
+Your report is the one file you write outside it: `<scratch>/reports/merge-bot-<n>.json`,
+the path your brief names, holding every PR you merged in `merged`. Your final
+message is the one line your brief gives, `merge-bot-<n>: done <path>`.
+
 The shell traps below are copied from the controller's skill file,
 `run-team/SKILL.md`. In them "Phase 3" is the controller's event loop, which you
 do not run, and "this file" is that skill file; each trap applies to every shell

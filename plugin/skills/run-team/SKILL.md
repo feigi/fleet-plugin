@@ -1316,15 +1316,15 @@ ticket's line — never a hand edit.
 
 | Wake | Record, then tick |
 |---|---|
-| Implementer report | `verify-sha.sh`; `ledger.mjs settle impl-<N>=PR#<M>`, or `=bailed` and relabel by cause (**Implementer bails before implementing**, below) |
+| Implementer report | `ledger.mjs settle impl-<N> --from-report`, which runs `verify-sha.sh` and reads the PR itself (**Run ledger**); on `bailed`, relabel by the cause its receipt names (**Implementer bails before implementing**, below) |
 | Review workflow notification / `review-pr-<n>` report | the result file is `<scratch>/pr<pr>/<run>/review.json`, `<run>` the review's own `run-XXXXXXXX` run root; `ledger.mjs review <pr> reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` on the PR's row (**Reviewers**) |
-| Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; for a fix-applier that answered a review — not one that cleared a conflict hold, which has no review file — `~/.fleet/bin/fleet-run dispositions-check.mjs --member <that member> --scratch <scratch>`, from the checkout root: it judges that member's own record `<scratch>/dispositions-<member>.json` against the review file the PR's latest `reviewed=` names, `<scratch>/pr<M>/<run>/review.json`, writes `dispositions-ok=`, `dispositions-mismatch=`, `dispositions-escalate=` or `dispositions-unchecked=<member>:<run>` onto the PR's row itself, and exits 1 on a mismatch, an escalation or an unchecked, naming each violating or escalated entry's bucket and index, a violation its rule too, and each entry whose filed issue `gh` could not read — **Then dispatch a fix-applier** says what a mismatch asks of you, the gate paragraph below what an escalation or an unchecked does; copy the refutations it reversed — the record's `refuted` entries — to `ruled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
-| Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled` as reported, even when its read-back lacks `ready-to-merge` — the tick's `DISPATCH finisher PR#<M>` catches that next. A **repair** finisher's (one sent on that line) read-back lacking it also gets `gh pr comment <M>` with both finishers' read-backs: the one-shot escalation, where halts comment. `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
-| Finisher report (halted) | `ledger.mjs settle finisher-pr-<M>=halted:<cause>`; `gh pr comment <M>` with the finisher's halt report, cause and evidence; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line; then the per-cause rule (**Resolving a finisher halt**, below) |
+| Fix-applier report | `ledger.mjs settle fix-pr-<M> --from-report`, which records each `unrecorded` filing and copies to `ruled` each refutation the report defers; for a fix-applier that answered a review — not one that cleared a conflict hold, which has no review file — `~/.fleet/bin/fleet-run dispositions-check.mjs --member <that member> --scratch <scratch>`, from the checkout root: it judges that member's own record `<scratch>/dispositions-<member>.json` against the review file the PR's latest `reviewed=` names, `<scratch>/pr<M>/<run>/review.json`, writes `dispositions-ok=`, `dispositions-mismatch=`, `dispositions-escalate=` or `dispositions-unchecked=<member>:<run>` onto the PR's row itself, and exits 1 on a mismatch, an escalation or an unchecked, naming each violating or escalated entry's bucket and index, a violation its rule too, and each entry whose filed issue `gh` could not read — **Then dispatch a fix-applier** says what a mismatch asks of you, the gate paragraph below what an escalation or an unchecked does; copy any other refutation it reversed — a `refuted` entry of the record the report does not defer — to `ruled` yourself |
+| Finisher report | `ledger.mjs settle finisher-pr-<M> --from-report`, which records each `unrecorded` filing. Its exit 3 on `ready-to-merge` — missing from the PR or from the read-back — is the case the tick's `DISPATCH finisher PR#<M>` catches next: settle it `ledger.mjs settle finisher-pr-<M>=labelled` as reported, and `ledger.mjs filed <N> "<subject>"` for each `unrecorded` entry. A **repair** finisher's (one sent on that line) read-back lacking it also gets `gh pr comment <M>` with both finishers' read-backs: the one-shot escalation, where halts comment |
+| Finisher report (halted) | `ledger.mjs settle finisher-pr-<M> --from-report`, which records each `unrecorded` filing; `gh pr comment <M>` with the finisher's halt report, cause and evidence; then the per-cause rule (**Resolving a finisher halt**, below) |
 | Finisher report (failed / killed) | `ledger.mjs settle finisher-pr-<M>=failed` for a finisher that crashed or gave up, `=killed` for one that was killed; no label, and the tick prints no dispatch for it. The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, below) |
 | Label seen (persistent Monitor) | nothing to record |
 | CI run terminal | `ci=<run-id>:<attempt>:<conclusion>` on the row; then the finisher gate (below) |
-| Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `tick --apply` runs the reap and the reclaim. (The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in this same pass, before reporting — a token the bot wrote in this pass, never one `reap.sh` writes.) |
+| Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n> --from-report`; `tick --apply` runs the reap and the reclaim. (The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in this same pass, before reporting — a token the bot wrote in this pass, never one `reap.sh` writes.) |
 | Drain | `ledger.mjs drain "<reason>"`; release the claims (below); `settle impl-<N>=released`; then the rest of **End of run** (below), `--stop` last |
 | Heartbeat | nothing to record |
 
@@ -3983,6 +3983,24 @@ live count from it, so nobody states one. Write neither by hand:
   row as its own. `settle impl-N=PR#M` refuses a settle after which a PR maps
   to more than one row when it did not before, judged after the fold — a PR
   has one row, the PR's row; a split already on disk is carried.
+- **`ledger.mjs settle <member> --from-report [--reports <dir>]`** — the
+  settle for a member that wrote a report: reads `<dir>/<member>.json`
+  (`<dir>` defaults to `<scratch>/reports`), derives the outcome from it and,
+  before writing, checks what that outcome claims — `PR#M`: `verify-sha.sh`
+  on the report's branch and head, and PR M OPEN and closing N; `bailed`: a
+  `bailCause`, which the receipt names; `applied:<head>`: origin's branch at
+  that head; `no-op`: origin's branch at the head the PR's latest
+  `reviewed=` names; `labelled`: `ready-to-merge` on the PR and in the
+  read-back; `halted:<cause>`: a cause and non-empty evidence; `done`: every
+  PR the bot merged reads MERGED. It then records each `unrecorded` filing in
+  **filed** and, for a fix-applier, each refutation the report defers in
+  **ruled**, once however often it runs, and prints `{member, outcome,
+  checks, filed, ruled}`. Exit 3: a check failed — the member's claim and the
+  world disagree — and nothing is written; you rule. Exit 2: the report is
+  absent or invalid, or a check could not look, and nothing is written; a
+  check that could not look is run again once `gh` and `git` answer. The bare
+  form above, for an outcome a report carries, warns `settled without
+  --from-report` on stderr.
 - **`ledger.mjs review <pr> <token>…`** — the only writer of `review=` and
   `reviewed=` (below): appends each to the PR's row — the ticket row once
   `settle impl-<N>=PR#M` has run, else `#M`, created when neither exists —
@@ -4070,7 +4088,8 @@ Plus two append-only lists:
   one, not you: `review-and-fix.md` step 5 and finisher duty 2 each run `filed`
   immediately after their own `gh issue create`, with the subject they passed
   to `check`, and report `filed: #N <subject>`. A filer whose `filed` failed
-  twice reports `unrecorded: #N <subject>` instead, and you run `filed` for it.
+  twice reports `unrecorded: #N <subject>` instead — an `unrecorded` entry of
+  its report file — and `settle <member> --from-report` runs `filed` for it.
 - **ruled** (`ledger.mjs ruled <pr> <decision>`) — PR + decision + one-line reason,
   so a replacement controller does not re-litigate a settled call.
 

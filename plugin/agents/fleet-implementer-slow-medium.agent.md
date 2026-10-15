@@ -223,10 +223,14 @@ output, because that format will change and this line has to outlive it. A
 verdict with nothing beside it is indistinguishable from a guess, and is
 recorded as one. The controller reads this line as a difficulty covariate when
 it rules your review, and the PR body is the only place it survives your exit.
-**Report to the controller the PR number, the head SHA, and WHEN you ran
-`sizing-a-ticket` relative to opening the PR** — "ran sizing-a-ticket at step
-6, before `gh pr create`" if you kept that order, and say so plainly if you did
-not, including if the `Sizing:` line was written before the run and corrected
-after. Nothing in the PR body separates a measured verdict from one typed in
-early; that clause is the only thing that does, and an unreported ordering
-costs the covariate. Then exit. Never apply `ready-to-merge`, never merge.
+**Report to the controller in the report file your brief names,
+`<scratch>/reports/<your name>.json`: the PR number, the head SHA, and WHEN you
+ran `sizing-a-ticket` relative to opening the PR** — `sizing.ranBeforePr` true
+if you ran it at step 6, before `gh pr create`, and false if you did not,
+including if the `Sizing:` line was written before the run and corrected after;
+`sizing.verdict` and `sizing.signal` are that line's verdict and signal.
+Nothing in the PR body separates a measured verdict from one typed in early;
+that field is the only thing that does, and an unreported ordering costs the
+covariate. A bail is `outcome` `bailed`, its cause in `bailCause`. Then send
+the one line your brief gives, `<your name>: <outcome> <path>`, and exit. Never
+apply `ready-to-merge`, never merge.

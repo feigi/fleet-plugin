@@ -11,6 +11,7 @@ path worktree
 path scratch
 path mismatched-record
 literal your name
+literal outcome
 ---
 ## kind: review, dispositions-retry
 You are ALREADY in worktree `<abs-path>`, whose PR branch is `<branch>` — the
@@ -74,6 +75,16 @@ Report the new head and **stop**: do not watch, poll or wait for CI — the
 controller owns the next run on the pushed head. A red that is not yours to
 fix — a flake that passes on rerun, or staleness — gets nothing pushed: report
 that instead.
+## kind: review, dispositions-retry, conflict, red-check
+
+Your report is a file, `<scratch>/reports/<your name>.json`, `<your name>` the
+`fix-pr-` name you were dispatched as, in the shape
+`~/.fleet/bin/fleet-run report-schema.mjs print fix-pr` prints. Write it
+before your final message, and send nothing until
+`~/.fleet/bin/fleet-run report-schema.mjs validate fix-pr <scratch>/reports/<your name>.json`
+answers `valid`. Your final message is then one line,
+`<your name>: <outcome> <scratch>/reports/<your name>.json`, `<outcome>` the
+report's `outcome`.
 ## kind: dispositions-retry
 
 This is the one automatic retry of a dispositions mismatch. The mismatched

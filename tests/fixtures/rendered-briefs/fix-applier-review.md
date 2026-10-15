@@ -31,3 +31,12 @@ claim, never your patch.
 **Before you report, write every ruling to `/abs/scratch-fix/dispositions-<your name>.json`**,
 `<your name>` the `fix-pr-3293[-x]` you were dispatched as — the record the controller checks with
 `dispositions-check.mjs` before it dispatches any finisher.
+
+Your report is a file, `/abs/scratch-fix/reports/<your name>.json`, `<your name>` the
+`fix-pr-` name you were dispatched as, in the shape
+`~/.fleet/bin/fleet-run report-schema.mjs print fix-pr` prints. Write it
+before your final message, and send nothing until
+`~/.fleet/bin/fleet-run report-schema.mjs validate fix-pr /abs/scratch-fix/reports/<your name>.json`
+answers `valid`. Your final message is then one line,
+`<your name>: <outcome> /abs/scratch-fix/reports/<your name>.json`, `<outcome>` the
+report's `outcome`.
