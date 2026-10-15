@@ -12,12 +12,13 @@ Phase 0 is fifteen ordered commands, stated in prose paragraphs of their own
 (the `branch` check opens the fast-forward paragraph, and the `tier-roles`
 check is stated in Phase 2, "before the run's first dispatch"): branch
 check, fast-forward check, instrument pin, main-checkout baseline,
-pre-flight, ruleset check, tier-roles check, metrics refresh, cockpit launch, ledger rotate,
-scratch reclaim, recipe check or derivation, fold-in of inherited PRs,
-stranded claims, shortlist. The order matters (pin after
-the fast-forward, rotate before the fold-in, reclaim straight after rotate,
-guard refresh before the first Pull). End of run is six ordered steps, with
-`fleet-heartbeat.mjs --stop` last because every reader takes it as the end.
+pre-flight, ruleset check, tier-roles check, metrics refresh, cockpit
+launch, ledger rotate, scratch reclaim, recipe check or derivation,
+fold-in of inherited PRs, stranded claims, shortlist. The order matters
+(pin after the fast-forward, rotate before the fold-in, reclaim straight
+after rotate, guard refresh before the first Pull). End of run is six
+ordered steps, with `fleet-heartbeat.mjs --stop` last because every reader
+takes it as the end.
 
 Nothing checks that the sequence ran or ran in order. The tick's only start
 gate is `MAIN-CHECKOUT-NO-BASELINE`, which proves one step of fifteen. The
@@ -161,9 +162,11 @@ tier-outcomes row and the move of `phase0.json` before `--stop`.
 
 - The per-wake commands and the tick executing idempotent actions (spec 4).
 - Changing any step's semantics, or the relative order of the runbook's
-  Phase 0 steps. The table is that order, with two edits of form: `branch`
-  is split out of the fast-forward paragraph, and `tier-roles`, which the
-  runbook states in Phase 2, runs between `ruleset` and `metrics`.
+  Phase 0 steps. The table keeps that order for the steps the runbook
+  states there, with the edit of form that `branch` is split out of the
+  fast-forward paragraph. `tier-roles`, which the runbook states only in
+  Phase 2 and gives no Phase 0 position, is placed by the driver between
+  `ruleset` and `metrics`.
 - Phase 0 dispatching a member itself. The two member needs stay the
   controller's one `task` call each.
 
@@ -172,5 +175,7 @@ tier-outcomes row and the move of `phase0.json` before `--stop`.
 - Whether `cockpit` belongs in the receipt at all, given it is idempotent
   and never gates anything. Lean: recorded, never a hold.
 - Whether `tier-roles --check` belongs in phase 0 at all. The runbook
-  states it in Phase 2, before the run's first dispatch; running it between `ruleset` and `metrics` in phase 0 is the nearest point to that, and keeps the table's order the
-  runbook's.
+  states it in Phase 2, before the run's first dispatch, and names it in
+  no Phase 0 paragraph. Placed between `ruleset` and `metrics`, the order
+  `STEPS` in `phase0.mjs` pins, a bad route stops the run before
+  `metrics`, `rotate` and every later step.
