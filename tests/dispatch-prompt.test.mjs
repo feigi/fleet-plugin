@@ -291,7 +291,7 @@ test("a value is inserted verbatim, whatever replacement syntax it holds", () =>
 
 // Each rendered brief of the ledger-family roles is compared byte for byte with
 // a golden file the test owns, rendered from the CASES arguments above. What a
-// member's agent body carries is pinned beside this, in the body-split test; a
+// member's agent body carries is pinned beside this, in member-bodies-split.test.mjs; a
 // brief that regained a line the body owns, or lost a per-dispatch line, is red
 // here.
 const GOLDEN = fileURLToPath(new URL("./fixtures/rendered-briefs/", import.meta.url));

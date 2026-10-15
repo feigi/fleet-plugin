@@ -637,10 +637,9 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
     // fix-applier is still working the conflict.
     // `reviewFixed`: a REVIEW fix-applier landed after the latest
     // `reviewed=` — one read while no hold stood unresolved. The one read
-    // while a hold did is the conflict fix-applier `ledger.mjs dispatch` named
-    // a `fleet-implementer-<cell>`: it rebases and never sees the review file,
-    // so it clears the hold and answers no finding. Each fix-applier
-    // does one of those jobs once, so its landing folds once per PR
+    // while a hold did is the conflict fix-applier: it rebases and never sees
+    // the review file, so it clears the hold and answers no finding. Each
+    // fix-applier does one of those jobs once, so its landing folds once per PR
     // (`fixLanded`), however many copies of its token the rows carry.
     // `fixMembers`: every fix-applier on this PR, wherever its token sits —
     // one still unsettled anywhere holds the PR off fixDue, since `dispatch`

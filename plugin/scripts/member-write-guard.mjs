@@ -18,8 +18,8 @@
 //   - any subagent whose definition name starts with `fleet-`;
 //   - any subagent whose own id is a fleet member's task name (`impl-1411`,
 //     `fix-pr-88`, `review-pr-2245`, `finisher-pr-7`, with an optional `-b`
-//     recovery suffix): this is how a fix-applier is caught, since it is
-//     dispatched under a generic `task` definition with no `fleet-` prefix;
+//     recovery suffix): a member named by id is caught whatever definition
+//     name its dispatch gave it;
 //   - any subagent spawned BY a fleet member: its `parentId` is the member's
 //     task name, while its own definition name is a generic one no prefix
 //     check could see.
@@ -36,7 +36,8 @@
 //     same set, and the checkout's HEAD besides).
 //   - `bash` cwd, for every `fleet-implementer-<cell>` (ledger-grammar.mjs's
 //     `CELL_DEF`), and for a fix-applier's own id (`fix-pr-<n>`) directly,
-//     since a review fix-applier is a generic `task`: refuse when
+//     since its definition, `fleet-fix-applier`, is no implementer cell and
+//     `CELL_DEF` does not match it: refuse when
 //     `input.cwd ?? ctx.cwd` lies inside the main checkout outside
 //     `.worktrees/`. Command text is never parsed. Review specialists and
 //     refuters are REQUIRED to start from the inherited cwd (`pwd` first,
@@ -71,7 +72,7 @@ import { fileURLToPath } from "node:url";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 import { CELL_DEF } from "./ledger-grammar.mjs";
 
-/** The task names the controller gives fleet members; a subagent whose parent carries one is a member's child, and a fix-applier — dispatched under a generic `task` definition with no `fleet-` prefix — is caught by its own id matching this directly. */
+/** The task names the controller gives fleet members; a subagent whose parent carries one is a member's child, and a member whose own id matches this is caught directly, whatever definition name its dispatch gave it. */
 const MEMBER_TASK_NAME = /^(impl|fix-pr|review-pr|finisher-pr)-\d+(-[a-z])?$/;
 const FIX_APPLIER_ID = /^fix-pr-\d+(-[a-z])?$/;
 const PATH_WRITERS = new Set(["write", "edit", "ast_edit"]);

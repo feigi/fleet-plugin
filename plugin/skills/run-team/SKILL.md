@@ -4332,7 +4332,7 @@ live count from it, so nobody states one. Write neither by hand:
   `## Retired` — and names the replacement (`-b`, `-c` …), a
   second live member on one ticket or PR, any implementer once the run is
   draining, an implementer whose row's `tier=` names no single definition
-  or one with no file under `agents/`, and a fix-applier on a ledger the tick
+  or one with no file under `agents/`, and a finisher on a ledger the tick
   itself refuses.
 - **`ledger.mjs settle <member> <outcome>`** — rewrites the token to
   `<member>=<outcome>` in both places. Outcomes: `impl-N` = `PR#M | bailed |

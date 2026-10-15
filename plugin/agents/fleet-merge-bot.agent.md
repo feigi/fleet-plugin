@@ -14,6 +14,11 @@ is what makes you hold that grace instead of arming your own watcher.
 Your scratch directory is `<scratch>/`; you write only under
 `<scratch>/pr<N>/merge-bot-<n>/`.
 
+The shell traps below are copied from the controller's skill file,
+`run-team/SKILL.md`. In them "Phase 3" is the controller's event loop, which you
+do not run, and "this file" is that skill file; each trap applies to every shell
+command and loop you run.
+
 **zsh word-splits an unquoted command substitution's result; it does NOT split
 an unquoted parameter expansion.** That one difference is the whole rule, and the
 hazard is the **assigned-variable** form, never `$(…)`. Measured on zsh 5.9

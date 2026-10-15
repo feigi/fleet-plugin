@@ -12,11 +12,12 @@
 //       (fixtures/pre-split-blocks/), never read off SKILL.md, so deleting
 //       the blocks there cannot loosen the check.
 //
-// THE CEILING. (2) counts sentences, split on a full stop followed by a
-// capital, an opening backtick, bold marker, bracket or quote, after folding
-// every run of whitespace — so a re-wrap of the text passes and a reworded
-// sentence does not. A sentence the pre-change text states twice (the nested
-// refuter prompt repeats the kill rules) is expected twice, not once.
+// THE CEILING. (2) counts sentences, split after terminal punctuation (`.`,
+// `!` or `?`) and whitespace, before a capital, an opening backtick, bold
+// marker, bracket, quote or `<`, after folding every run of whitespace — so a
+// re-wrap of the text passes and a reworded sentence does not. A sentence the
+// pre-change text states twice (the nested refuter prompt repeats the kill
+// rules) is expected twice, not once.
 // Text ADDED to a body or a brief is not seen: this is a no-loss, no-duplicate
 // check, not a check that nothing new was written.
 import { after, test } from "node:test";
@@ -146,22 +147,22 @@ const PIN = "0123456789abcdef0123456789abcdef01234567";
 // The placeholder each argument fills, per role — the arguments are values no
 // other argument shares, so a swapped substitution cannot pass.
 const PAIRS = [
-  { role: "fix-applier", kind: "review", body: "fleet-fix-applier", fixture: "fix-applier-review.md",
+  { role: "fix-applier", kind: "review", fixture: "fix-applier-review.md",
     args: { worktree: "/abs/wt-fix", branch: "fix-branch", testCmd: "TESTCMD-1", scratch: "/abs/scratch-fix", pr: "3293", run: "run-AbCd1234" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch", pr: "pr", run: "run" } },
-  { role: "fix-applier", kind: "conflict", body: "fleet-fix-applier", fixture: "fix-applier-conflict.md",
+  { role: "fix-applier", kind: "conflict", fixture: "fix-applier-conflict.md",
     args: { worktree: "/abs/wt-conflict", branch: "conflict-branch", testCmd: "TESTCMD-2" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd" } },
-  { role: "fix-applier", kind: "dispositions-retry", body: "fleet-fix-applier", fixture: "fix-applier-dispositions-retry.md",
+  { role: "fix-applier", kind: "dispositions-retry", fixture: "fix-applier-dispositions-retry.md",
     args: { worktree: "/abs/wt-retry", branch: "retry-branch", testCmd: "TESTCMD-3", scratch: "/abs/scratch-retry", pr: "3294", run: "run-ZyXw9876", "mismatched-record": "/abs/scratch-retry/dispositions-fix-pr-3294.json", violations: "VIOLATION-LIST-1" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch", pr: "pr", run: "run", "mismatched record": "mismatched-record", violations: "violations" } },
-  { role: "finisher", kind: "fresh", body: "fleet-finisher", fixture: "finisher-fresh.md",
+  { role: "finisher", kind: "fresh", fixture: "finisher-fresh.md",
     args: { worktree: "/abs/wt-fin", pin: PIN, pr: "3295", testCmd: "TESTCMD-4", scratch: "/abs/scratch-fin" },
     fills: { "abs-path": "worktree", "your dispatch pin": "pin", M: "pr", testCmd: "testCmd", scratch: "scratch" } },
-  { role: "finisher", kind: "repair", body: "fleet-finisher", fixture: "finisher-repair.md",
+  { role: "finisher", kind: "repair", fixture: "finisher-repair.md",
     args: { worktree: "/abs/wt-fin-r", pin: PIN, pr: "3296", testCmd: "TESTCMD-5", scratch: "/abs/scratch-fin-r" },
     fills: { "abs-path": "worktree", "your dispatch pin": "pin", M: "pr", testCmd: "testCmd", scratch: "scratch" } },
-  { role: "merge-bot", kind: null, body: "fleet-merge-bot", fixture: "merge-bot.md",
+  { role: "merge-bot", kind: null, fixture: "merge-bot.md",
     args: { n: "17", scratch: "/abs/scratch-bot" },
     fills: { n: "n", scratch: "scratch" } },
 ];
@@ -184,19 +185,18 @@ const label = ({ role, kind }) => (kind ? `${role} ${kind}` : role);
 for (const p of PAIRS) {
   test(`${label(p)}: its body and its rendered brief hold every sentence of the pre-change text, each as often as it stood`, () => {
     const fixture = readFileSync(join(FIXTURES, p.fixture), "utf8");
-    const body = fold(bodyOf(agentText(p.body)));
+    const body = fold(bodyOf(agentText(`fleet-${p.role}`)));
     const brief = fold(renderBrief(p.role, p.kind, p.args));
     const fillValues = Object.fromEntries(Object.entries(p.fills).map(([inner, flag]) => [inner, p.args[flag]]));
     const fill = (s) => s.replace(/<([A-Za-z][^<>\n]*)>/g, (whole, inner) => (inner in fillValues ? fillValues[inner] : whole));
 
     const sentences = sentencesOf(fixture);
     assert.ok(sentences.length >= 3, "the fixture reads as a few sentences at least");
-    const folded = sentences.map(fold);
     const fixtureText = fold(fixture);
 
     const lost = [];
     const duplicated = [];
-    for (const s of new Set(folded)) {
+    for (const s of new Set(sentences)) {
       const expected = count(fixtureText, s);
       // The body names a value by its placeholder; the brief carries it filled.
       const found = count(body, s) + count(brief, fill(s));
