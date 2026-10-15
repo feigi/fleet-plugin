@@ -346,3 +346,19 @@ test("End of run follows the drain bullet and ends with --stop (#2968)", () => {
   assert.match(b, Pin.phrase("3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason \"<reason>\"`"));
   assert.match(b, Pin.phrase("then records `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded stop as the end of the run."));
 });
+
+// The ask-by-name paragraph, where a missing report is handled. The tick's
+// SETTLE line is the report file read off disk, so the paragraph sends the
+// controller to that line before it pings anyone; without the sentence a
+// report that is on disk still costs an ask-by-name round trip.
+const askByNameParagraph = () => RUN_TEAM.paragraph(
+  "**But a missing report is NOT evidence the member failed to send one",
+  "run-team ask-by-name paragraph",
+  "Note this cuts against the paragraph above only in appearance",
+).text;
+
+test("the ask-by-name paragraph reads a missing message off the tick's SETTLE line before anyone is pinged", () => {
+  assert.match(askByNameParagraph(),
+    Pin.phrase("The tick prints `SETTLE <member>` for a report file on disk, so a missing message is read off that line before anyone is pinged."),
+    "the ask-by-name paragraph no longer sends the controller to the tick's SETTLE line before a ping");
+});

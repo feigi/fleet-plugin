@@ -78,12 +78,21 @@
 //             take the registry census, never an action: it resets no
 //             `quiet`, changes no row and frees no slot, and the tick never
 //             settles or kills anything.
+//   reports   `<scratch>/reports/<member>.json`, the report file a member
+//             writes beside the message it sends, for every live member
+//             token and every in-flight `review=member:<name>`. `<scratch>`
+//             is the phase-0 receipt's `scratch`, else `--scratch`; with
+//             neither the check is skipped with one stderr line. A file on
+//             disk prints one `SETTLE <member>` line naming the
+//             `ledger.mjs settle <member> --from-report` it is for, and one
+//             whose `member` is not its filename's prints REPORT-MISMATCH
+//             instead. Advice, like CHECK-LIVENESS: the tick settles nothing.
 //
 // The pure half below is `reconcile()` over the counts `deriveRun()` reads off
 // the ledger; main() does the I/O. Split so the guard table and the reading are
 // both unit-testable without a network.
 
-import { parseMember, parseToken, premisesOf, rowNums, nextRetry, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, premisesOf, rowNums, nextRetry, REVIEW, REVIEWED, REVIEWER } from "./ledger-grammar.mjs";
 
 // Every role's TARGET is its configured cap. Availability of work belongs in
 // the ACTION, not the target: a reviewer target that shrank to the backlog
@@ -656,11 +665,13 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
     // `workers`: every fix-applier and finisher bound to this PR, and every
     // implementer on a row resolving to it — one still unsettled holds the
     // CONFLICT line off, since it may be pushing to the branch right now.
+    // `reviewMember`: the runner the in-flight `review=member:<name>` names,
+    // null while no review is in flight or the one in flight is a `wf:` run.
     const st = (pr !== null && byPr.get(pr)) || {
       inFlight: false, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
       fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(), held: [],
       conflictOpen: false, reviewedHead: null, reviewedRun: null, pastPinHalt: false, dispositions: [], workers: new Set(),
-      finishers: new Set(),
+      finishers: new Set(), reviewMember: null,
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
     // retry suffix ("" < "b" < "c" …) — never by row-text position. A
@@ -734,17 +745,19 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
           malformed.add(i);
           st.inFlight = true;
           st.reviewedAny = true;
+          st.reviewMember = null;
           continue;
         }
         if (!m) throw new LedgerError(`${where}: '${tok}' is not review=wf:<runId> | member:review-pr-<n>, optionally =failed`);
         st.inFlight = !m.groups.failed;
+        st.reviewMember = !m.groups.failed && m.groups.kind === "member" ? m.groups.name : null;
         if (!m.groups.failed) st.reviewedAny = true;
       } else if (tok.startsWith("reviewed=")) {
         const m = REVIEWED.exec(tok);
         if (!m && lenient) {
           malformed.add(i);
           latestFinisher = null;
-          Object.assign(st, { inFlight: false, reviewedAny: true, reviewFixed: false, pastPinHalt: false });
+          Object.assign(st, { inFlight: false, reviewedAny: true, reviewFixed: false, pastPinHalt: false, reviewMember: null });
           continue;
         }
         if (!m && REVIEWED_RUNLESS.test(tok)) {
@@ -754,7 +767,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
         if (!m) throw new LedgerError(`${where}: '${tok}' is not reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`);
         latestFinisher = null;
         Object.assign(st, {
-          inFlight: false, reviewedAny: true, survived: Number(m[2]), unverified: Number(m[4]), reviewFixed: false,
+          inFlight: false, reviewedAny: true, survived: Number(m[2]), unverified: Number(m[4]), reviewFixed: false, reviewMember: null,
           reviewedHead: m[1].toLowerCase(), reviewedRun: m[5], pastPinHalt: false,
         });
       } else if (labelOffMember(tok) === null) {
@@ -970,6 +983,15 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
       ...all.filter((m) => m.outcome === null).map((m) => m.name),
       ...liveReviews.map(([n]) => `review:PR#${n}`),
     ],
+    // Who may have a report file on disk, by the name it is filed under: every
+    // unsettled member token, then the runner each in-flight
+    // `review=member:<name>` names, when that name is a reviewer runner's —
+    // it becomes a path, so nothing else is looked up. A `review=wf:` run has
+    // no member to file one.
+    reporters: [
+      ...all.filter((m) => m.outcome === null).map((m) => m.name),
+      ...liveReviews.map(([, st]) => st.reviewMember).filter((name) => name !== null && REVIEWER.test(name)),
+    ],
   };
 }
 
@@ -1077,6 +1099,35 @@ export function livenessLines({ live, seen, thresholds, now }) {
   return out;
 }
 
+// The SETTLE lines: one per name in `reporters` with a report file on disk, as
+// `{member, settle, line, key}`. `reports` maps a name to what main() read off
+// its file — `{path, since, member}`, `since` the file's mtime in ms and
+// `member` the file's own `member` field, undefined when it has none or is
+// not JSON — and has no entry for a name with no file. A file that names a
+// member other than the one it is filed under prints REPORT-MISMATCH instead,
+// once, and `settle` is false. `key` is the line without its age, what the
+// digest `--fold-unchanged` compares takes, so a report waiting on disk folds
+// rather than moving the digest every minute.
+export function reportLines({ reporters, reports, now }) {
+  const out = [];
+  for (const member of new Set(reporters)) {
+    const r = reports.get(member);
+    if (r === undefined) continue;
+    if (r.member !== member) {
+      const named = typeof r.member === "string" ? r.member : JSON.stringify(r.member) ?? "none";
+      const line = `REPORT-MISMATCH ${r.path} (member: ${named})`;
+      out.push({ member, settle: false, line, key: line });
+      continue;
+    }
+    const age = Math.floor(Math.max(0, now - r.since) / 60_000);
+    out.push({
+      member, settle: true, key: `SETTLE ${member}`,
+      line: `SETTLE ${member} (report on disk since ${age}m — ledger.mjs settle ${member} --from-report)`,
+    });
+  }
+  return out;
+}
+
 // --apply's pure half. The merge-bot numbers `applied.reapAfter` names for
 // THIS run: none when its `run` is not the controller record's `at`, since
 // merge-bot numbering restarts with a run and the state file outlives it
@@ -1139,7 +1190,7 @@ export function reclaimSummary(stdout) {
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1152,6 +1203,7 @@ import { statePath, readState, writeState, assessBeat, isStalled, isReported, st
 import { checkMainCheckout, describe } from "./main-checkout.mjs";
 import { readRunReceipt, phase0Gate } from "./phase0-receipt.mjs";
 import { judgeRecord, ProcUnreadable } from "./proc.mjs";
+import { reportPath } from "./report-files.mjs";
 
 const NAME = "fleet-tick";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -1221,6 +1273,10 @@ const OPTIONS = {
   // under parseArgs, and no path is legitimately empty, so empty resolves to
   // the default.
   state: { type: "string", default: "" },
+  // The scratch root the report files are under, for a run whose phase-0
+  // receipt names none; the receipt's `scratch` wins when it does. Empty is
+  // absent, as with --state.
+  scratch: { type: "string", default: "" },
   // Minutes a live token of each family may run before CHECK-LIVENESS names it.
   ...Object.fromEntries(Object.entries(LIVENESS_FLAGS).map(([family, flag]) => [flag, { type: "string", default: String(LIVENESS_DEFAULTS[family]) }])),
 };
@@ -1252,7 +1308,7 @@ function options() {
   return {
     implCap: positive("implementer-cap"), reviewerCap,
     maxReviews: values["max-reviews"] === undefined ? reviewerCap : positive("max-reviews"),
-    fold: values["fold-unchanged"], apply: values.apply, state: values.state || statePath(NAME),
+    fold: values["fold-unchanged"], apply: values.apply, state: values.state || statePath(NAME), scratch: values.scratch,
     liveness: Object.fromEntries(Object.entries(LIVENESS_FLAGS).map(([family, flag]) => [family, positive(flag)])),
   };
 }
@@ -1621,8 +1677,43 @@ function readRun(prs) {
   }
 }
 
+// The scratch root the report files are under: the phase-0 receipt's
+// `scratch`, else `--scratch`, else null — no root, no check.
+function reportsScratch(receipt, flag) {
+  const named = receipt.read.state === "ok" ? receipt.read.receipt.scratch : undefined;
+  if (typeof named === "string" && named !== "") return named;
+  return flag === "" ? null : flag;
+}
+
+// The report file of each name in `reporters`, as reportLines() takes them:
+// `{path, since, member}` per file on disk, nothing for a name with none.
+// Only `member` is read out of a file, and a file that cannot be read or
+// parsed carries none.
+function readReports(scratch, reporters) {
+  const out = new Map();
+  for (const member of reporters) {
+    const path = reportPath(scratch, member);
+    let since;
+    try {
+      since = statSync(path).mtimeMs;
+    } catch (e) {
+      if (e.code === "ENOENT" || e.code === "ENOTDIR") continue;
+      since = Date.now();
+    }
+    let named;
+    try {
+      const d = JSON.parse(readFileSync(path, "utf8"));
+      named = d !== null && typeof d === "object" && !Array.isArray(d) ? d.member : undefined;
+    } catch {
+      named = undefined;
+    }
+    out.set(member, { path, since, member: named });
+  }
+  return out;
+}
+
 function main() {
-  const { fold, apply, state: path, liveness, ...caps } = options();
+  const { fold, apply, state: path, liveness, scratch: scratchFlag, ...caps } = options();
   const listPath = shortlistPath();
   const current = readShortlist(listPath);
   // Beside the shortlist, off the same git probe rather than a second one.
@@ -1734,6 +1825,12 @@ function main() {
     ...caps, ...run, heads, supply, dropped, shortlistStatus: current.status, refresh: fresh, mainCheckout, phase0, router,
   });
   const said = describe(mainCheckout, run.live);
+  // The report files of the live members, read before the state file for the
+  // reason given below. A member's report on disk is the outcome its message
+  // was to carry, whether or not that message arrived.
+  const scratch = reportsScratch(receipt, scratchFlag);
+  if (scratch === null) console.error(`${NAME}: report files not checked — no scratch in the phase-0 receipt and no --scratch`);
+  const reports = scratch === null ? new Map() : readReports(scratch, run.reporters);
   // Re-read rather than reusing priorState: this must be the freshest
   // snapshot, or this tick reverts whatever the heartbeat wrote while the
   // reads above were in flight. Read before the lines are built because the
@@ -1746,18 +1843,24 @@ function main() {
   // and frees no slot — and nothing here settles, kills or writes the ledger.
   const seen = stampSeen({ live: run.live, prev: prev.seen, controller: prev.controller, now });
   const stale = livenessLines({ live: run.live, seen, thresholds: liveness, now });
-  const lines = [...(phase0.line === null ? [] : [phase0.line]), ...(said === null ? [] : [said]), ...stale.map((s) => s.line), ...formatLines(rows)];
+  // Advisory the same way: a report on disk prints the settle it is for, and
+  // nothing here runs it.
+  const reported = reportLines({ reporters: run.reporters, reports, now });
+  const above = [...(phase0.line === null ? [] : [phase0.line]), ...(said === null ? [] : [said]), ...stale.map((s) => s.line)];
+  const rowLines = formatLines(rows);
   // The run is over once it is draining and nothing is left in flight: no
   // open PR and no implementer still holding a claim. Printed last and read
   // as actionable, so it never folds away: the stop it names is the run's
   // last act, and only the controller can write it.
   const over = run.draining !== null && prs.length === 0 && run.implLive === 0;
-  if (over) lines.push(RUN_OVER);
+  if (over) rowLines.push(RUN_OVER);
+  const lines = [...above, ...reported.map((r) => r.line), ...rowLines];
 
   // The back-off streak and the fold digest, written on EVERY tick: an edge
   // tick that dispatched is the clearest possible "there is work here". Digest,
-  // not the lines themselves, so the file stays readable.
-  const digest = createHash("sha256").update(lines.join("\n")).digest("hex");
+  // not the lines themselves, so the file stays readable. A report line goes in
+  // without its age.
+  const digest = createHash("sha256").update([...above, ...reported.map((r) => r.key), ...rowLines].join("\n")).digest("hex");
   const acts = actionable(rows) || over;
   // `seen` is pruned to the live set on the same write; an empty one removes
   // the key. A file that was degraded at this read is left byte-identical, so
@@ -1784,11 +1887,14 @@ function main() {
     // `quiet`, and named on the folded line for as long as it stays live
     // past its threshold. The digest already moves when its bucket does.
     const aged = stale.map((s) => `; CHECK-LIVENESS ${s.member} persists`).join("");
+    // A report waiting on disk persists the same way, for as long as its
+    // member stays live.
+    const settle = reported.filter((r) => r.settle).map((r) => `; SETTLE ${r.member} persists`).join("");
     // The to-spec drops the same way: advice, and the one reason an empty
     // shortlist is not "no work".
     const specs = specsDropped(dropped);
     const drops = specs ? `; ${specs} persists` : "";
-    console.log(`fleet-tick: unchanged, nothing to act on (quiet=${prev.quiet + 1})${held}${aged}${drops} — full rows on the next change`);
+    console.log(`fleet-tick: unchanged, nothing to act on (quiet=${prev.quiet + 1})${held}${aged}${settle}${drops} — full rows on the next change`);
     return;
   }
   for (const line of lines) console.log(line);
