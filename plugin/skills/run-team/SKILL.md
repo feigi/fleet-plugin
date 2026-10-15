@@ -1224,9 +1224,12 @@ that the tier it resolves to is now declared and pinned rather than inherited by
 accident. Keep `name: impl-<N>`: the name is what makes a member, and both the
 spend classifier and `member-outcomes.mjs` read it.
 
-**After every Pull's dispatch, run the tier check — a scripted step, never a
-prose reminder.** `~/.fleet/bin/fleet-run tier-check.mjs --batch <path-to-batch.json>`
-judges the implementer just dispatched on the ledger's terms. The definition it
+**After every Pull's dispatch, the tier check runs — a scripted step, never a
+prose reminder.** `tick --apply` runs it itself, a batch of one apiece, on every
+implementer it would print `HOLD (tier unchecked impl-<N>)` for, `session` off
+the phase-0 receipt, and prints `APPLIED tier-check impl-<N>: <verdict>`. By
+hand it is `~/.fleet/bin/fleet-run tier-check.mjs --batch <path-to-batch.json>`,
+which judges the implementer just dispatched on the ledger's terms. The definition it
 should have run under comes off its ticket row's `tier=` token: none means the
 policy cell, `fleet-implementer-slow-high`; `tier=<cell>` means
 `fleet-implementer-<cell>` — the same mapping `ledger.mjs dispatch` prints its
@@ -1262,8 +1265,9 @@ verdicts, whether that member is still running or already settled `bailed`,
 one. Only the newest member counts, so a replacement (`impl-<N>-b`) is what
 clears a mismatch — and is then owed its own check. A mismatch on a ticket
 whose issue is already CLOSED holds nothing: the tick probes that issue and
-drops it, since there is nothing left to replace. The tick never reads a
-transcript: clear an unchecked hold by running the check on that member. A
+drops it, since there is nothing left to replace. The tick reads no transcript
+itself: `tick --apply` runs the check, and an unchecked hold it leaves is
+cleared by running the check on that member by hand. A
 settled member's check works only when its transcript exists;
 without one, the verdict is `tier-unverifiable` for a member settled `killed`
 or `released`, and exit 2 naming the wrong session for any other. Clear a
@@ -1724,7 +1728,7 @@ ticket's line — never a hand edit.
 | Finisher report (failed / killed) | `ledger.mjs settle finisher-pr-<M>=failed` for a finisher that crashed or gave up, `=killed` for one that was killed; no label, and the tick prints no dispatch for it. The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, below) |
 | Label seen (persistent Monitor) | nothing to record |
 | CI run terminal | `ci=<run-id>:<attempt>:<conclusion>` on the row; then the finisher gate (below) |
-| Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `reap.sh --apply`; `reclaim-scratch.mjs --root <scratch> --apply`. (The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in this same pass, before reporting — a token the bot wrote in this pass, never one `reap.sh` writes.) |
+| Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `tick --apply` runs the reap and the reclaim. (The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in this same pass, before reporting — a token the bot wrote in this pass, never one `reap.sh` writes.) |
 | Drain | `ledger.mjs drain "<reason>"`; release the claims (below); `settle impl-<N>=released`; then the rest of **End of run** (below), `--stop` last |
 | Heartbeat | nothing to record |
 
@@ -1782,10 +1786,13 @@ owes beyond its row:
 - **Merge-bot pass reports done** → write each `held-behind-#<lower>` it reports
   into that ticket's row as `held-behind:#<lower>` — the verdict moves no label
   and leaves nothing in the repo, so the row is the only place the tick can read
-  it from — settle `merge-bot-<n>=done`, reap merged branches and worktrees with
-  `reap.sh --apply` (below) — always, even when the pass merged nothing — then
-  reclaim their scratch with `reclaim-scratch.mjs --root <scratch> --apply`
-  (below), and then run the tick. A label that landed at the last moment reads `DISPATCH
+  it from — settle `merge-bot-<n>=done`, and then run the tick: `tick --apply`
+  reaps merged branches and worktrees with `reap.sh --apply` (below), then
+  reclaims their scratch with `reclaim-scratch.mjs --root <scratch> --apply`
+  (below), once for every merge bot settled `done` — always, even when the pass
+  merged nothing — and runs both again on the next tick after an `APPLY FAILED`
+  line, and on every tick while this run has no controller record to remember
+  the pass by. A label that landed at the last moment reads `DISPATCH
   merge-bot` again: dispatch the next bot straight away. A `rebase-fallback-#<pr>`
   on a conflict needs no record from you — the bot already appended
   `conflict-hold:#<pr>` to that PR's row, and the tick turns it into `DISPATCH
@@ -1884,7 +1891,7 @@ owes beyond its row:
 **Every wake ends in the tick.** One invocation, and you act on what it prints:
 
 ```
-~/.fleet/bin/fleet-run fleet-tick.mjs [--implementer-cap <n>] [--reviewer-cap <n>] [--max-reviews <n>]
+~/.fleet/bin/fleet-run fleet-tick.mjs --apply [--implementer-cap <n>] [--reviewer-cap <n>] [--max-reviews <n>]
 ```
 
 It reads the run itself, and nobody states a count. Live implementers, live
@@ -1960,16 +1967,18 @@ depth** guard table applied in code. Act on each line as it reads:
 - `HOLD (…)` — the row is held and says why: draining, a tier mismatch, an
   unchecked tier, a saturated review side, `--max-reviews` in flight, or every
   queued merge candidate held behind a lower PR or on a conflict hold no
-  fix-applier has cleared. The two tier holds are yours to clear — an
-  unchecked tier by running `tier-check.mjs --batch` on the member it names
-  (its `tier-ok=`, or `tier-unverifiable=` for a member settled `killed` or
-  `released` with no transcript, clears it), a mismatch by dispatching the
-  replacement at the right tier (phase 2). Each
-  prints its clearing step in the row's detail: the `tier-check.mjs` command
+  fix-applier has cleared. An unchecked tier is `tick --apply`'s to check, and
+  the hold stays while the check writes no verdict (its `tier-ok=`, or
+  `tier-unverifiable=` for a member settled `killed` or `released` with no
+  transcript, clears it); a mismatch is yours to clear, by dispatching the
+  replacement at the right tier (phase 2). Each prints its clearing step in
+  the row's detail. For a mismatch that is the replacement's name —
+  `impl-<N>-b` on a first retry, else one letter past the highest the ticket
+  has used, or that no retry letter is left. For an unchecked tier, which
+  `tick --apply` has already tried, it is the `tier-check.mjs` command to run
+  by hand when the tick ran without `--apply` or the check wrote no verdict,
   with a batch entry per member it names (fill in `<file>`; `<session>` too
-  when no receipt of this run records one),
-  or the replacement's name — `impl-<N>-b` on a first retry, else one letter
-  past the highest the ticket has used, or that no retry letter is left.
+  when no receipt of this run records one).
 - `AT CAP`, `IDLE OK` — nothing to do on that row.
 - `MAIN-CHECKOUT-DIRTY <paths> …`, printed above the rows, with every
   dispatching row (implementers, reviewers, merge-bot) reading
@@ -2032,7 +2041,7 @@ depth** guard table applied in code. Act on each line as it reads:
   `--liveness-merge-bot` and `--liveness-review` set the thresholds, in minutes.
 
 **Tier guards under Pull.** The per-dispatch `tier-check.mjs --batch` is
-phase 2's own step: a mismatch it finds is the
+phase 2's own step, run by `tick --apply`: a mismatch it finds is the
 `HOLD (tier mismatch impl-<N>)` above, and a member it has no verdict on is
 the `HOLD (tier unchecked impl-<N>)`. Nothing else in the loop owns it.
 
@@ -3709,8 +3718,9 @@ worktree — and its installed dependencies — still on disk. Reap after **each
 not once at the end: a stale worktree still answers `git worktree list`, so the
 in-flight probe (`inflight.sh`, run by the Shortlist and by every Pull) reads an
 already-merged ticket as taken and the queue quietly shrinks. The trigger is the
-bot's one exit report, and it reaps every time — a pass that merged nothing
-included (phase 3, **Merge-bot pass reports done**). See references/reaping.md.
+bot's `merge-bot-<n>=done`, and `tick --apply` reaps once for every one — a pass
+that merged nothing included (phase 3, **Merge-bot pass reports done**). See
+references/reaping.md.
 
 `~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition
 inside the same invocation as the delete — `for-each-ref` for `[gone]`, `git
@@ -3738,7 +3748,7 @@ See references/reaping.md.
 
 ### Reclaim scratch after each merge pass
 
-Right after `reap.sh --apply`, every pass:
+`tick --apply` runs it right after `reap.sh --apply`, every pass:
 `~/.fleet/bin/fleet-run reclaim-scratch.mjs --root <scratch> --apply`,
 `<scratch>` the path `scratch-root.mjs` prints. Reap authorizes on git's
 evidence and never removes scratch; Reclaim authorizes on GitHub state and

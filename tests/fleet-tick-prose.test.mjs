@@ -86,7 +86,7 @@ test("the record-before-tick table names every wake, each with what it records",
     ["Finisher report (failed / killed)", ["settle finisher-pr-<M>=failed", "**Resolving a finisher that died**"]],
     ["Label seen (persistent Monitor)", ["nothing to record"]],
     ["CI run terminal", ["ci=<run-id>:<attempt>:<conclusion>", "finisher gate"]],
-    ["Merge-bot pass report", ["held-behind:#<lower>", "settle merge-bot-<n>=done", "reap.sh --apply"]],
+    ["Merge-bot pass report", ["held-behind:#<lower>", "settle merge-bot-<n>=done", "`tick --apply` runs the reap and the reclaim"]],
     ["Drain", ["ledger.mjs drain", "settle impl-<N>=released"]],
     ["Heartbeat", ["nothing to record"]],
   ];
@@ -96,6 +96,10 @@ test("the record-before-tick table names every wake, each with what it records",
     assert.ok(row, `the record-before-tick table has no "${wake}" row`);
     for (const rec of records) assert.ok(row.includes(rec), `the "${wake}" row no longer records ${rec}`);
   }
+  // The reap and the reclaim are the tick's now: a row that still records
+  // them by hand has the controller run them a second time.
+  const mergeBot = rows.find((r) => r.startsWith("| Merge-bot pass report |"));
+  for (const step of ["`reap.sh --apply`", "reclaim-scratch.mjs"]) assert.ok(!mergeBot.includes(step), `the "Merge-bot pass report" row still records ${step}`);
   // What follows the table: the tick, every printed line acted on, the beat.
   assert.match(RUN_TEAM.between("| Heartbeat |", "\n- **", "after the table").text, Pin.phrase("act on every line it prints, and arm the beat"));
 });
@@ -111,10 +115,23 @@ test("the tick block admits no wake covers a drained queue, and says whose case 
 
 // Both merge-side wakes, each sliced to its own bullet — the shared vocabulary
 // makes a section-wide match worthless here.
-test("the merge-bot-pass-done wake records, reaps, then ticks", () => {
+test("the merge-bot-pass-done wake records, then ticks with --apply, which reaps and reclaims", () => {
   const bullet = RUN_TEAM.between("- **Merge-bot pass reports done**", "\n- **The run ends", "merge-bot-done wake").text;
-  assert.match(bullet, /reap\.sh --apply/);
-  assert.match(bullet, /run the tick/);
+  assert.match(bullet, /run the tick: `tick --apply`\s+reaps merged branches and worktrees with `reap\.sh --apply`/);
+  assert.match(bullet, /reclaim-scratch\.mjs --root <scratch> --apply/);
+  assert.match(bullet, Pin.phrase("always, even when the pass merged nothing"));
+});
+
+test("the tick block runs the tick with --apply", () => {
+  assert.match(tickBlock(), /fleet-tick\.mjs --apply/);
+});
+
+test("phase 2's tier check and the tier guards say tick --apply runs the check", () => {
+  const phase2 = RUN_TEAM.paragraph("**After every Pull's dispatch, the tier check runs", "run-team phase 2 tier check paragraph", "**The tick holds the next Pull until that verdict exists.**").text;
+  assert.match(phase2, /`tick --apply` runs it itself/);
+  assert.match(phase2, Pin.phrase("HOLD (tier unchecked impl-<N>)"));
+  const guards = RUN_TEAM.paragraph("**Tier guards under Pull.**", "run-team tier guards paragraph", "**`--max-reviews <n>`**").text;
+  assert.match(guards, /run by `tick --apply`/);
 });
 
 test("the CI-terminal wake runs the tick", () => {

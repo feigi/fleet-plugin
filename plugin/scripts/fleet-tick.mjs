@@ -207,9 +207,10 @@ function implementers(s, left) {
   }
   // Held until tier-check.mjs has run on the newest implementer and written
   // its verdict to the ledger — a Pull on top of an unchecked
-  // dispatch repeats whatever it got wrong. Running the check is the
-  // controller's own step, so it is asked to act, with the command in the
-  // detail.
+  // dispatch repeats whatever it got wrong. `--apply` runs the check itself
+  // before this row is read; the row is the controller's to act on when the
+  // tick ran without `--apply`, or the check wrote no verdict, so it asks to
+  // act, with the command in the detail.
   if (s.tierUnchecked.length) {
     return row(`HOLD (tier unchecked ${s.tierUnchecked.join(" ")})`, { acts: true, extra: tierCheckStep(s.tierUnchecked, s.phase0?.session) });
   }
@@ -886,6 +887,9 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     implLive: live("impl"),
     fixLive: live("fix-pr"),
     mergeBotLive,
+    // The number of every merge bot settled `done`: each is a merge pass
+    // `--apply` reaps and reclaims after, once (reapDue).
+    mergeBotDone: all.filter((m) => m.family === "merge-bot" && m.outcome === "done").map((m) => m.number).sort(asc),
     reviewsLive: liveReviews.length,
     // The in-flight reviews of PRs the open list does not carry: the ones
     // `finished` could retire, so the caller asks gh about these and no others.
@@ -1073,20 +1077,77 @@ export function livenessLines({ live, seen, thresholds, now }) {
   return out;
 }
 
+// --apply's pure half. The merge-bot numbers `applied.reapAfter` names for
+// THIS run: none when its `run` is not the controller record's `at`, since
+// merge-bot numbering restarts with a run and the state file outlives it
+// (fleet-state.mjs's `applied`). `controllerAt` is null with no record, and
+// with no record nothing tells this run from the one before it: a list then
+// names nothing, and the sweeps run again on the next tick.
+export function reapedAfter(applied, controllerAt) {
+  return applied !== null && controllerAt != null && applied.run === controllerAt ? applied.reapAfter : [];
+}
+
+// The merge passes owed their reap and reclaim: every merge bot settled
+// `done` that reapedAfter() does not name.
+export function reapDue(done, applied, controllerAt) {
+  const ran = new Set(reapedAfter(applied, controllerAt));
+  return done.filter((n) => !ran.has(n));
+}
+
+// The implementers the tick would print `HOLD (tier unchecked …)` for: read
+// off the rows reconcile() computed, so whatever outranks that hold — the
+// drain, a mismatch, phase 0, the main checkout — outranks the check too.
+export function tierCheckDue(rows, unchecked) {
+  return rows.some((r) => r.role === "implementers" && r.action.startsWith("HOLD (tier unchecked ")) ? unchecked : [];
+}
+
+// The one JSON line a receipt-printing script ends on, or null.
+function receiptOf(stdout) {
+  try {
+    const r = JSON.parse(String(stdout).trim().split("\n").at(-1));
+    return r !== null && typeof r === "object" ? r : null;
+  } catch {
+    return null;
+  }
+}
+
+// reap.sh's receipt as `reaped <k>, kept <m>, worktreesRemoved <w>`, or null
+// for a stdout that carries none. A receipt with warnings adds `warnings
+// <n>: <first note>`: reap.sh exits 0 with them, and this line is the only
+// place an unattended tick can say so.
+export function reapSummary(stdout) {
+  const r = receiptOf(stdout);
+  if (r === null || ![r.reaped, r.kept, r.worktreesRemoved].every(Array.isArray)) return null;
+  const warned = Array.isArray(r.warnings) ? r.warnings : [];
+  const first = warned[0]?.note;
+  return `reaped ${r.reaped.length}, kept ${r.kept.length}, worktreesRemoved ${r.worktreesRemoved.length}`
+    + (warned.length ? `, warnings ${warned.length}${typeof first === "string" ? `: ${first}` : ""}` : "");
+}
+
+// reclaim-scratch.mjs's receipt as `removed <k>, kept <m>, failed <f>`, or
+// null. A removal that failed is in the receipt and exits 0: it is reported
+// here, and the pass still counts as reclaimed after.
+export function reclaimSummary(stdout) {
+  const r = receiptOf(stdout);
+  if (r === null || ![r.removed, r.kept, r.failed].every(Array.isArray)) return null;
+  return `removed ${r.removed.length}, kept ${r.kept.length}, failed ${r.failed.length}`;
+}
+
 // --------------------------------------------------------------------------
 // I/O. Everything below runs only as a CLI — importing this file must never
 // parse argv or touch the network, or the pure half stops being unit-testable.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isCLI } from "./is-cli.mjs";
 import { parseArgs } from "node:util";
 import { makeDie, isDigits } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
-import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
+import { fleetFile, FleetDirUnresolvable, scratchRoot } from "./fleet-dir.mjs";
 import { statePath, readState, writeState, assessBeat, isStalled, isReported, stallReport, stallOwner } from "./fleet-state.mjs";
 import { checkMainCheckout, describe } from "./main-checkout.mjs";
 import { readRunReceipt, phase0Gate } from "./phase0-receipt.mjs";
@@ -1149,6 +1210,13 @@ const OPTIONS = {
   // unattended night affordable. Opt-in because folding is wrong on an edge:
   // a controller that just acted needs the full rows.
   "fold-unchanged": { type: "boolean", default: false },
+  // `--apply` runs the idempotent follow-ups whose trigger the ledger and the
+  // state file show, before the rows: reap.sh and reclaim-scratch.mjs after
+  // every merge pass settled `done`, and tier-check.mjs on every implementer
+  // the tick would hold as unchecked. It never dispatches, never settles a
+  // member and writes no ledger row but through those scripts. Without it the
+  // tick is read-only.
+  apply: { type: "boolean", default: false },
   // Path override, for tests. An empty value cannot be told from an absent one
   // under parseArgs, and no path is legitimately empty, so empty resolves to
   // the default.
@@ -1184,7 +1252,7 @@ function options() {
   return {
     implCap: positive("implementer-cap"), reviewerCap,
     maxReviews: values["max-reviews"] === undefined ? reviewerCap : positive("max-reviews"),
-    fold: values["fold-unchanged"], state: values.state || statePath(NAME),
+    fold: values["fold-unchanged"], apply: values.apply, state: values.state || statePath(NAME),
     liveness: Object.fromEntries(Object.entries(LIVENESS_FLAGS).map(([family, flag]) => [family, positive(flag)])),
   };
 }
@@ -1411,6 +1479,94 @@ function refresh() {
   return { ok: true, ...p };
 }
 
+// A sibling script --apply runs, the way refresh() runs shortlist.mjs: stdout
+// kept for its receipt, stderr captured so only a failure's last line rides
+// along. A `.mjs` runs under this node, reap.sh by its own shebang.
+function runSibling(file, args) {
+  const opts = { encoding: "utf8", maxBuffer: MAX_BUFFER, stdio: ["ignore", "pipe", "pipe"] };
+  return file.endsWith(".mjs")
+    ? spawnSync(process.execPath, [join(SCRIPT_DIR, file), ...args], opts)
+    : spawnSync(join(SCRIPT_DIR, file), args, opts);
+}
+
+// One duty's line: `APPLIED <label>: <receipt summary>`, or `APPLY FAILED
+// <duty>: <why>` for a script that did not exit 0 or printed no receipt.
+// True when it applied.
+function reportDuty(r, { label, duty, what, summarise }) {
+  const ran = !r.error && r.status === 0;
+  const summary = ran ? summarise(r.stdout) : null;
+  console.log(summary !== null ? `APPLIED ${label}: ${summary}`
+    : `APPLY FAILED ${duty}: ${ran ? `${what} printed no receipt` : failure(r, what)}`);
+  return summary !== null;
+}
+
+// Reap, then reclaim, after the merge passes in `due` — once however many
+// there are, since both sweep the whole repository and scratch root rather
+// than one pass's share. Reclaim runs whether or not reap did: neither reads
+// the other's result. True only when both applied, the one case `due` is
+// recorded as reaped after; otherwise the next --apply tick runs both again.
+function applyReap(due) {
+  const label = `reap after ${due.map((n) => `merge-bot-${n}`).join(" ")}`;
+  const reaped = reportDuty(runSibling("reap.sh", ["--apply"]), { label, duty: "reap", what: "reap.sh", summarise: reapSummary });
+  let root;
+  try {
+    root = scratchRoot();
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
+    console.log(`APPLY FAILED reclaim: ${e.message}`);
+    return false;
+  }
+  const reclaimed = reportDuty(runSibling("reclaim-scratch.mjs", ["--root", root, "--apply"]),
+    { label: "reclaim", duty: "reclaim", what: "reclaim-scratch.mjs", summarise: reclaimSummary });
+  return reaped && reclaimed;
+}
+
+// tier-check.mjs's verdict by its exit status, each one a token the check
+// writes on the ledger itself. Exit 2 writes nothing. Exit 1 is the check's
+// mismatch and also what node exits with on a throw, so it stands as a
+// verdict only once the ledger carries it.
+const TIER_VERDICTS = new Map([[0, "tier-ok"], [1, "tier-mismatch"], [3, "tier-unverifiable"]]);
+
+// Whether the ledger holds tier-check.mjs's mismatch for `member`: the token
+// on a row, or the member itself settled `tier-mismatch`.
+function mismatchOnLedger(member) {
+  const { rows, dispatched } = readLedger();
+  return [...rows, ...dispatched].some((text) => text.split(/\s+/)
+    .some((tok) => tok === `${member}=tier-mismatch` || tok.startsWith(`tier-mismatch=${member}:`)));
+}
+
+// tier-check.mjs on each member, a batch of one apiece in a temporary file,
+// `session` the phase-0 receipt's — left out when the receipt records none,
+// which the check refuses by name. True when any check wrote a verdict, so
+// the caller reads the ledger it changed again.
+function applyTierChecks(members, session) {
+  let wrote = false;
+  for (const member of members) {
+    const dir = mkdtempSync(join(tmpdir(), "fleet-tick-tier-"));
+    let r;
+    try {
+      const batch = join(dir, "batch.json");
+      writeFileSync(batch, JSON.stringify([session === null ? { member } : { member, session }]));
+      r = runSibling("tier-check.mjs", ["--batch", batch]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    const verdict = r.error ? undefined : TIER_VERDICTS.get(r.status);
+    if (verdict !== undefined && (r.status !== 1 || mismatchOnLedger(member))) {
+      wrote = true;
+      console.log(`APPLIED tier-check ${member}: ${verdict}`);
+    } else if (!r.error && r.status === 2) {
+      // No verdict — most often a live member with no transcript yet — so
+      // the hold stands, and the check's own line says why.
+      const last = String(r.stderr ?? "").trim().split("\n").at(-1);
+      console.log(`APPLIED tier-check ${member}: no verdict${last ? ` — ${last}` : ""}`);
+    } else {
+      console.log(`APPLY FAILED tier-check ${member}: ${failure(r, "tier-check.mjs")}`);
+    }
+  }
+  return wrote;
+}
+
 // How many tickets a dead run stranded. `in-progress` is the claim label
 // claim-ticket.sh adds and candidates.mjs's query EXCLUDES — which is why a
 // stranded ticket is invisible to the next run's scans, and why this count is
@@ -1450,8 +1606,23 @@ function controllerState(controller) {
   }
 }
 
+// The run off the ledger, with the closed tickets and finished reviews gh
+// says the ledger cannot. A ledger it cannot read refuses the tick.
+function readRun(prs) {
+  try {
+    const ledger = readLedger();
+    const run = deriveRun(ledger, prs);
+    const closed = closedTickets(run.tierMismatch);
+    const finished = finishedReviewPrs(run.reviewsOffList);
+    return closed.size || finished.size ? deriveRun(ledger, prs, closed, finished) : run;
+  } catch (e) {
+    if (e instanceof LedgerError) die(e.message);
+    throw e;
+  }
+}
+
 function main() {
-  const { fold, state: path, liveness, ...caps } = options();
+  const { fold, apply, state: path, liveness, ...caps } = options();
   const listPath = shortlistPath();
   const current = readShortlist(listPath);
   // Beside the shortlist, off the same git probe rather than a second one.
@@ -1485,18 +1656,49 @@ function main() {
   }
 
   // Every read happens before anything prints: a partial tick is worse than no
-  // tick, because half a reconcile still reads like a reconcile.
+  // tick, because half a reconcile still reads like a reconcile. The APPLIED
+  // lines are the exception, printed as each duty runs: they say what was
+  // done, which is true whether or not the reconcile after them lands.
   const prs = openPrs();
-  let run;
-  try {
-    const ledger = readLedger();
-    run = deriveRun(ledger, prs);
-    const closed = closedTickets(run.tierMismatch);
-    const finished = finishedReviewPrs(run.reviewsOffList);
-    if (closed.size || finished.size) run = deriveRun(ledger, prs, closed, finished);
-  } catch (e) {
-    if (e instanceof LedgerError) die(e.message);
-    throw e;
+  let run = readRun(prs);
+
+  // The main checkout against the run's baseline, on every tick — the
+  // backstop for what member-write-guard cannot see. Never a refusal of the tick:
+  // every answer but `clean` is a hold on the dispatching rows plus one line
+  // saying why, so the rest of the run keeps reporting.
+  const mainCheckout = checkMainCheckout();
+  // This run's phase 0, off its receipt: unfinished holds the same rows the
+  // main checkout does, and never refuses the tick either. Judged against
+  // the controller record this tick started from, and against whether that
+  // record's process is still there: a finished receipt of the run before
+  // carries the same `at` until this run's rotation writes the next.
+  const receipt = readRunReceipt();
+  const phase0 = phase0Gate(receipt.read, {
+    path: receipt.path, controllerAt: controller?.at, controller: controllerState(controller),
+  });
+
+  if (apply) {
+    // Reap and reclaim after every merge pass settled `done` since the last
+    // time they ran. Recorded only once both applied, on a fresh read of the
+    // state file so nothing the heartbeat wrote meanwhile is reverted, never
+    // onto a file that could not be read, and never with no controller
+    // record: nothing could tell a list recorded then from the next run's.
+    const run0 = controller?.at ?? null;
+    const due = reapDue(run.mergeBotDone, priorState.applied, run0);
+    if (due.length && applyReap(due) && run0 !== null) {
+      const now = readState(path, NAME);
+      if (!now.degraded) {
+        writeState(path, NAME, now, { applied: { run: run0, reapAfter: [...new Set([...reapedAfter(now.applied, run0), ...due])] } });
+      }
+    }
+    // The tier check, on exactly the members the implementer row would hold
+    // as unchecked — that row reads the same before the refresh as after it.
+    // A verdict written changes the ledger, so the run is read again.
+    const unchecked = tierCheckDue(reconcile({
+      ...caps, ...run, heads: unclaimed(current.entries, run), supply: current.scanned, dropped: current.dropped,
+      shortlistStatus: current.status, refresh: null, mainCheckout, phase0, router,
+    }), run.tierUnchecked);
+    if (unchecked.length && applyTierChecks(unchecked, phase0.session)) run = readRun(prs);
   }
 
   // Pull from the current file first; refresh when it is short, absent, an
@@ -1527,21 +1729,6 @@ function main() {
       fresh = { ok: false, trigger, why: r.why };
     }
   }
-
-  // The main checkout against the run's baseline, on every tick — the
-  // backstop for what member-write-guard cannot see. Never a refusal of the tick:
-  // every answer but `clean` is a hold on the dispatching rows plus one line
-  // saying why, so the rest of the run keeps reporting.
-  const mainCheckout = checkMainCheckout();
-  // This run's phase 0, off its receipt: unfinished holds the same rows the
-  // main checkout does, and never refuses the tick either. Judged against
-  // the controller record this tick started from, and against whether that
-  // record's process is still there: a finished receipt of the run before
-  // carries the same `at` until this run's rotation writes the next.
-  const receipt = readRunReceipt();
-  const phase0 = phase0Gate(receipt.read, {
-    path: receipt.path, controllerAt: controller?.at, controller: controllerState(controller),
-  });
 
   const rows = reconcile({
     ...caps, ...run, heads, supply, dropped, shortlistStatus: current.status, refresh: fresh, mainCheckout, phase0, router,

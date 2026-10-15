@@ -47,6 +47,16 @@
 //            never when. Pruned to the live set on every tick, so a settled
 //            member's stamp does not outlive it. Carried, never written, by
 //            the heartbeat and by ledger.mjs.
+//   applied  fleet-tick only, and only under --apply. {run, reapAfter}: the
+//            merge-bot numbers whose `merge-bot-<n>=done` the tick has already
+//            run reap.sh and reclaim-scratch.mjs after, and the controller
+//            record's `at` they belong to. Written only under a record: with
+//            none, nothing tells one run from the next. Merge-bot numbering
+//            restarts at 1 in a run that carries no bot forward, and this
+//            file outlives the rotation, so a list whose `run` is not the
+//            current record's `at` is the previous run's and names nothing in
+//            this one. Carried, never written, by the heartbeat and by
+//            ledger.mjs.
 //
 // One writer per key. A key two scripts wrote would need locking to be
 // correct, and none of them is in a position to hold one. That holds per key,
@@ -119,7 +129,7 @@ export function readState(path, name) {
   // to judge and nothing to report. A zeroed mark would date the beat to the
   // epoch and read as decades overdue on a run that has simply not started
   // one — the cry-wolf direction this key must never fail in.
-  const fresh = { quiet: 0, elapsed: 0, digest: "", beat: null, ticked: null, acted: null, controller: null, seen: {}, rest: {} };
+  const fresh = { quiet: 0, elapsed: 0, digest: "", beat: null, ticked: null, acted: null, controller: null, seen: {}, applied: null, rest: {} };
   // The same state, flagged: the file EXISTS and could not be used. A caller
   // that acts on the absence of a record — ledger.mjs rotate — must tell this
   // from `fresh`, which is a run that has simply not written one yet. The
@@ -227,7 +237,18 @@ export function readState(path, name) {
     for (const [member, at] of Object.entries(v)) if (Number.isInteger(at) && at > 0) out[member] = at;
     return out;
   };
-  const { quiet, elapsed, digest, beat, ticked, acted, controller, seen, ...rest } = parsed;
+  // `applied` is validated as a unit for the controller record's reason: a
+  // list is only read against the run it names, so one whose `run` is not a
+  // positive integer belongs to no run and reads as absent. Absent is the
+  // safe direction: the duties it records are idempotent, and the next
+  // --apply tick runs them again. A junk entry in the list costs that entry
+  // alone.
+  const done = (v) => {
+    if (!isRecord(v) || !Array.isArray(v.reapAfter)) return null;
+    if (!(Number.isInteger(v.run) && v.run > 0)) return null;
+    return { run: v.run, reapAfter: v.reapAfter.filter((n) => Number.isInteger(n) && n > 0) };
+  };
+  const { quiet, elapsed, digest, beat, ticked, acted, controller, seen, applied, ...rest } = parsed;
   // A controller key that ctl() rejects is a record someone wrote and nobody
   // can judge, not the absence of one — announced like the other degraded
   // causes, and flagged.
@@ -245,6 +266,7 @@ export function readState(path, name) {
     acted: tick(acted),
     controller: record,
     seen: stamps(seen),
+    applied: done(applied),
     rest,
   };
 }
@@ -301,6 +323,9 @@ export function writeState(path, name, prev, patch) {
     // `seen` is fleet-tick's, and the heartbeat and ledger.mjs write this file
     // too: carried the same way, so neither erases the ages the tick keeps.
     ...(prev.seen && Object.keys(prev.seen).length > 0 ? { seen: prev.seen } : {}),
+    // `applied` too: a heartbeat write that dropped it would have the next
+    // --apply tick reap again after every merge pass it already reaped after.
+    ...(prev.applied ? { applied: prev.applied } : {}),
     ...patch,
   };
   const tmp = `${path}.${process.pid}.tmp`;
