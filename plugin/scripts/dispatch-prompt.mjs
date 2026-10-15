@@ -6,7 +6,7 @@
 //
 // Roles: implementer, fix-applier, finisher, merge-bot, review-runner,
 // recipe-deriver. A role with kinds (fix-applier: review, conflict,
-// dispositions-retry; finisher: fresh, repair) requires --kind; a role
+// dispositions-retry, red-check; finisher: fresh, repair) requires --kind; a role
 // without them refuses it as an unknown flag.
 //
 // OUTPUT. The brief on stdout and nothing else. With --json the payload

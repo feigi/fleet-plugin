@@ -33,14 +33,20 @@ export const receiptArchiveName = (stamp) => `${RECEIPT_STEM}.${stamp}.json`;
 const CLOSEOUT_STEM = "closeout";
 export const CLOSEOUT_RECEIPT = `${CLOSEOUT_STEM}.json`;
 export const closeoutArchiveName = (stamp) => `${CLOSEOUT_STEM}.${stamp}.json`;
+// The directory dispatch-prompt.mjs renders a member's brief into, beside the
+// ledger, archived by the same rotate under the same stamp: `briefs.<stamp>`.
+export const BRIEFS = "briefs";
+export const briefsArchiveName = (stamp) => `${BRIEFS}.${stamp}`;
 
 // The outcome vocabulary, verbatim from the spec. A word is matched exactly,
 // except the three that carry a value, which match OUTCOME_PATTERNS below.
+// `role` is the dispatch-prompt.mjs template a member of the family is
+// rendered from, the one its brief's sidecar must name.
 const FAMILIES = {
-  impl: { label: "impl-N", bound: "ticket", outcomes: ["PR#M", "bailed", "released", "killed", "tier-mismatch"] },
-  "fix-pr": { label: "fix-pr-M", bound: "pr", outcomes: ["applied:<head>", "no-op", "failed", "killed"] },
-  "finisher-pr": { label: "finisher-pr-M", bound: "pr", outcomes: ["labelled", "failed", "killed", "halted:<cause>"] },
-  "merge-bot": { label: "merge-bot-n", bound: null, outcomes: ["done", "killed"] },
+  impl: { label: "impl-N", bound: "ticket", role: "implementer", outcomes: ["PR#M", "bailed", "released", "killed", "tier-mismatch"] },
+  "fix-pr": { label: "fix-pr-M", bound: "pr", role: "fix-applier", outcomes: ["applied:<head>", "no-op", "failed", "killed"] },
+  "finisher-pr": { label: "finisher-pr-M", bound: "pr", role: "finisher", outcomes: ["labelled", "failed", "killed", "halted:<cause>"] },
+  "merge-bot": { label: "merge-bot-n", bound: null, role: "merge-bot", outcomes: ["done", "killed"] },
 };
 // Every family parseMember can yield: MEMBER below is built from this list,
 // so every family it matches has an entry here by construction.
@@ -96,6 +102,36 @@ export function parseToken(token) {
 /** Every member token in a row's text, in order. */
 export function memberTokens(text) {
   return text.split(/\s+/).filter(Boolean).map(parseToken).filter(Boolean);
+}
+
+/** The dispatch-prompt.mjs role a member of `family` is rendered as. */
+export function memberRole(family) {
+  return FAMILIES[family].role;
+}
+
+// A `## Dispatched` entry is a member token, followed by `brief=<hash>` when
+// `ledger.mjs dispatch` recorded the brief the member was dispatched with:
+// the first 8 hex of the sha256 the brief's sidecar carries. `settle`
+// rewrites the token and keeps the word beside it.
+const BRIEF_WORD = /^brief=([0-9a-f]{8})$/;
+
+/**
+ * `{token, brief}` for one `## Dispatched` entry: the member token and the
+ * brief's hash, or null for an entry without one. An entry that is not a
+ * member token plus one well-formed `brief=` word is returned whole as
+ * `token`, so a reader parsing it with parseToken() refuses it exactly as it
+ * refuses any other entry this grammar cannot parse.
+ */
+export function parseDispatchedEntry(entry) {
+  const words = entry.split(" ");
+  const m = words.length === 2 ? BRIEF_WORD.exec(words[1]) : null;
+  if (m === null || parseToken(words[0]) === null) return { token: entry, brief: null };
+  return { token: words[0], brief: m[1] };
+}
+
+/** The `## Dispatched` entry for `token`, with `brief=<brief>` unless brief is null. */
+export function dispatchedEntry(token, brief) {
+  return brief === null ? token : `${token} brief=${brief}`;
 }
 
 // `PR#<n>` as a word of a row's text, `PR #<n>` too.

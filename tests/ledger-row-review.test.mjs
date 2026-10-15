@@ -24,6 +24,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { rowWriteRefusal } from "../plugin/scripts/ledger-grammar.mjs";
 import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
+import { rendering } from "./support/rendered-brief.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -40,7 +41,7 @@ function fixture(t, rows = null) {
   const env = { ...process.env, PATH: bin };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
-  const cli = (...args) => spawnSync(process.execPath, [SCRIPT, "--file", file, ...args], { encoding: "utf8", env, cwd: dir });
+  const cli = rendering(dir, (...args) => spawnSync(process.execPath, [SCRIPT, "--file", file, ...args], { encoding: "utf8", env, cwd: dir }));
   const bytes = () => (existsSync(file) ? readFileSync(file, "utf8") : null);
   const run = (...args) => {
     const r = cli(...args);

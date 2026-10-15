@@ -1,0 +1,65 @@
+// `ledger.mjs dispatch` refuses a member whose brief `dispatch-prompt.mjs
+// render --member <name>` never rendered for its role, so every place
+// run-team's SKILL.md dispatches a ledger-family member states the render
+// first. These pins hold that order, one per dispatch sentence, and that
+// every `--kind` a render command names is a kind of its template.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { Pin } from "./support/prose-pin.mjs";
+
+const PLUGIN = join(import.meta.dirname, "..", "plugin");
+const RUN_TEAM = Pin.file(join(PLUGIN, "skills", "run-team", "SKILL.md"));
+
+test("phase 2 renders the implementer's brief, then records the dispatch, and the call is handed the printed brief", () => {
+  const p = RUN_TEAM.paragraph("**Record the dispatch before you make it.**", "phase 2 record-the-dispatch paragraph", "**The prompt carries only what varies.**").text;
+  assert.match(p, Pin.phrase("`~/.fleet/bin/fleet-run dispatch-prompt.mjs render implementer --member impl-<N> …` then renders its brief, and `~/.fleet/bin/fleet-run ledger.mjs dispatch <N> impl-<N>` marks `impl-<N>` live on it and in `## Dispatched`, and the call follows."));
+  assert.match(p, Pin.phrase("Its JSON carries `agent`, the definition that call names, and `brief.path`, the rendered brief whose content is that call's prompt — read both off that output, never recall them."));
+  assert.match(p, Pin.phrase("`dispatch` refuses a member with no brief rendered for its role, naming the `render` command to run first"));
+});
+
+test("each fix-applier kind renders its brief before ledger.mjs dispatch records it", () => {
+  const review = RUN_TEAM.paragraph("**Then dispatch a fix-applier** — on `DISPATCH fix-pr PR#<M>`", "review fix-applier paragraph", "**A `DISPATCH fix-pr PR#<M>` on a conflict hold**").text;
+  assert.match(review, Pin.phrase("its brief rendered with `dispatch-prompt.mjs render fix-applier --kind review --member fix-pr-<pr#> …` and then recorded with `ledger.mjs dispatch <pr#> fix-pr-<pr#>` before the call."));
+  const conflict = RUN_TEAM.paragraph("**A `DISPATCH fix-pr PR#<M>` on a conflict hold** — the row carries an", "conflict fix-applier paragraph", "**Then dispatch a red-check fixer**").text;
+  assert.match(conflict, Pin.phrase("render its brief with `dispatch-prompt.mjs render fix-applier --kind conflict --member <name> …`, and dispatch it with the `agent` that `ledger.mjs dispatch` printed"));
+  const red = RUN_TEAM.paragraph("Name it `fix-pr-<M>`, or the next free suffix", "red-check fixer paragraph", "**A `DISPATCH fix-pr PR#<M>` on a dispositions mismatch**").text;
+  assert.match(red, Pin.phrase("render its brief with `dispatch-prompt.mjs render fix-applier --kind red-check --member <name> …`, record it with `ledger.mjs dispatch <pr#> <name>` before the call"));
+  const retry = RUN_TEAM.paragraph("**A `DISPATCH fix-pr PR#<M>` on a dispositions mismatch**", "dispositions retry paragraph", "**A refutation resting on an injection").text;
+  assert.match(retry, Pin.phrase("dispatched like the first, its brief rendered with `--kind dispositions-retry`."));
+});
+
+test("the finisher renders its brief, then is recorded, then dispatched", () => {
+  const p = RUN_TEAM.paragraph("**The fix-applier pushes and exits", "finisher dispatch paragraph", "**That `dispatch` refuses a finisher").text;
+  assert.match(p, Pin.phrase("Render its brief with `dispatch-prompt.mjs render finisher --kind fresh --member finisher-pr-<pr#> …` (`--kind repair` once an earlier finisher reported `labelled` without the label landing), record it with `ledger.mjs dispatch <pr#> finisher-pr-<pr#>` before the call, then"));
+});
+
+test("the merge bot's refusal names the bot whose brief to render, and dispatch merge-bot runs again after it", () => {
+  const p = RUN_TEAM.paragraph("Per pass, named `merge-bot-<n>`, never two at once.", "merge bot dispatch paragraph", "Rebase, wait for green, check the").text;
+  assert.match(p, Pin.phrase("With no brief rendered for that name it refuses, naming the bot and the `dispatch-prompt.mjs render merge-bot --member merge-bot-<n> …` to run — render it, then run `ledger.mjs dispatch merge-bot` again."));
+});
+
+test("the ledger reference says what dispatch records of the brief, prints, and refuses", () => {
+  const b = RUN_TEAM.bullet("- **`ledger.mjs dispatch <ticket|pr> <member>`**", "- **`ledger.mjs settle <member> <outcome>`**", "ledger.mjs dispatch reference bullet").text;
+  assert.match(b, Pin.phrase("appends it to `## Dispatched` with `brief=<first 8 hex of its brief's sha256>`."));
+  assert.match(b, Pin.phrase("It prints `{member, agent, ticket, line, created, total, brief}`, `brief` the `{path, sha256}` of the rendered brief the `task` call is handed;"));
+  assert.match(b, Pin.phrase("refuses a member whose `briefs/<member>.json` beside the ledger is missing, names another role or carries no sha256,"));
+});
+
+// The kinds a template carries, off its `## kind:` lines — the renderer's own
+// grammar for them, so a render command naming a kind the template lacks is
+// one the controller could not run.
+const kindsOf = (role) => new Set(readFileSync(join(PLUGIN, "skills", "run-team", "briefs", `${role}.md`), "utf8")
+  .split("\n").flatMap((l) => /^## kind: (.+)$/.exec(l)?.[1].split(",").map((k) => k.trim()) ?? []));
+
+test("every --kind SKILL.md's render commands name is a kind of that role's template", () => {
+  const text = RUN_TEAM.text.replace(/\s+/g, " ");
+  const named = [...text.matchAll(/dispatch-prompt\.mjs render ([a-z-]+) --kind ([a-z-]+)/g)].map(([, role, kind]) => [role, kind]);
+  assert.deepEqual([...new Set(named.map(([role]) => role))].sort(), ["finisher", "fix-applier"], "the render commands this pins are the kinded roles'");
+  for (const [role, kind] of named) assert.ok(kindsOf(role).has(kind), `${role}.md has no kind ${kind}`);
+  // Every fix-applier kind has a dispatch sentence that renders it.
+  for (const kind of kindsOf("fix-applier")) {
+    assert.ok(named.some(([r, k]) => r === "fix-applier" && k === kind) || text.includes(`its brief rendered with \`--kind ${kind}\``), `no SKILL.md render command names fix-applier --kind ${kind}`);
+  }
+});

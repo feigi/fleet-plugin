@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -463,4 +463,33 @@ test("token accepts every non-member, non-review token family a row carries, eac
   const written = JSON.parse(spawnSync(process.execPath, [script, "--file", file, "read"], { encoding: "utf8", env, cwd: dir }).stdout);
   assert.deepEqual(written.rows, [`${row} · ${FREEFORM_FAMILIES.join(" · ")}`]);
   assert.ok(readFileSync(file, "utf8").includes(FREEFORM_FAMILIES.at(-1)));
+});
+
+test("a ## Dispatched entry's brief= word is parsed off its member token, live or settled, and written back beside it", () => {
+  for (const token of ["impl-412", "impl-412-b=PR#420", "fix-pr-346=applied:73b356de", "finisher-pr-346=halted:past-pin", "merge-bot-2=done"]) {
+    assert.deepEqual(parseDispatchedEntry(`${token} brief=0123abcd`), { token, brief: "0123abcd" });
+    assert.equal(dispatchedEntry(token, "0123abcd"), `${token} brief=0123abcd`);
+    // An entry from before the brief was recorded is its token alone.
+    assert.deepEqual(parseDispatchedEntry(token), { token, brief: null });
+    assert.equal(dispatchedEntry(token, null), token);
+  }
+});
+
+test("an entry that is not a member token plus one well-formed brief= word is kept whole, for parseToken to refuse", () => {
+  for (const entry of [
+    "impl-412 brief=0123abc", "impl-412 brief=0123abcde", "impl-412 brief=0123ABCD", "impl-412 brief=",
+    "impl-412 brief=0123abcd brief=0123abcd", "impl-412  brief=0123abcd", "impl-412 sha=0123abcd",
+    "review-pr-5 brief=0123abcd", "brief=0123abcd",
+  ]) {
+    assert.deepEqual(parseDispatchedEntry(entry), { token: entry, brief: null }, entry);
+    assert.equal(parseToken(entry), null, `${entry}: kept whole, it parses as no member token`);
+  }
+  // An outcome outside the family's vocabulary is the token's own error, not the brief's.
+  assert.deepEqual(parseDispatchedEntry("impl-412=bogus brief=0123abcd"), { token: "impl-412=bogus", brief: "0123abcd" });
+});
+
+test("each ledger family renders from its own dispatch-prompt.mjs role", () => {
+  assert.deepEqual(Object.fromEntries(MEMBER_FAMILIES.map((f) => [f, memberRole(f)])), {
+    impl: "implementer", "fix-pr": "fix-applier", "finisher-pr": "finisher", "merge-bot": "merge-bot",
+  });
 });

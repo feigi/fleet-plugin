@@ -72,7 +72,7 @@ fact about a duty has one owner file.
 
 **D1. The renderer.** `plugin/scripts/dispatch-prompt.mjs render <role>
 [--<arg> <value>…] [--json]`. Roles: `implementer`, `fix-applier`
-(`--kind review|conflict|dispositions-retry`), `finisher` (`--kind
+(`--kind review|conflict|dispositions-retry|red-check`), `finisher` (`--kind
 fresh|repair`), `merge-bot`, `review-runner`, `recipe-deriver`. Every
 placeholder a template carries is a named required argument; a missing one
 is exit 2 naming it, and nothing prints. After substitution the renderer
@@ -90,8 +90,8 @@ same reason `review-core.mjs` refuses it. Output is the brief on stdout;
   the halt-cause block, the claim discipline, the `edit`/`read` absolute-path
   rule, the kill rule, the stash prohibition. New definition:
   `plugin/agents/fleet-fix-applier.agent.md`, used for every fix-applier
-  kind (review, conflict, dispositions retry). `ledger.mjs dispatch` prints
-  it as `agent` for all three, retiring the `null` and the
+  kind (review, conflict, dispositions retry, red-check fix). `ledger.mjs dispatch` prints
+  it as `agent` for all four, retiring the `null` and the
   `fleet-implementer-slow-high` special case for conflict holds.
 - The brief template (`plugin/skills/run-team/briefs/<role>.md`) carries
   only the lines that vary or are per-dispatch: the identity line with

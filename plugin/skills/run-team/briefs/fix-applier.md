@@ -25,6 +25,13 @@ it. Do NOT create another worktree. There is no review file: the PR sits on a
 conflict hold and you are here to clear it — do not review, do not dispatch
 specialists.
 
+## kind: red-check
+You are ALREADY in worktree `<abs-path>`, whose PR branch is `<branch>` — the
+push destination below, given to you because a detached worktree cannot supply
+it. Do NOT create another worktree. There is no review file: the PR's `check`
+job is red on its current head and you are here to fix it — do not review, do
+not dispatch specialists.
+
 ## kind: review, dispositions-retry
 Read `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` and run **steps 2, 3
 and 5 only**: split apply-now/defer, commit, push, file every deferral as its
@@ -60,6 +67,13 @@ Bring `<branch>` current with `origin/main`, resolving every conflict by the
 Run `<testCmd>` from the worktree before you push, then push with
 `git push origin HEAD:<branch>`. Report the new head, or that no conflict was
 left.
+## kind: red-check
+Read the failing job's log and fix the cause. Run `<testCmd>` from the
+worktree before you push, then push with `git push origin HEAD:<branch>`.
+Report the new head and **stop**: do not watch, poll or wait for CI — the
+controller owns the next run on the pushed head. A red that is not yours to
+fix — a flake that passes on rerun, or staleness — gets nothing pushed: report
+that instead.
 ## kind: dispositions-retry
 
 This is the one automatic retry of a dispositions mismatch. The mismatched

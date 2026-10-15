@@ -12,6 +12,7 @@ import {
 import { drawCell, CELL } from "../plugin/scripts/ledger-grammar.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as VERDICT_COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
+import { rendering } from "./support/rendered-brief.mjs";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
@@ -102,11 +103,11 @@ test("a scripted Pull dispatches the router's cell: tier=<cell> on an Exploratio
     const env = { ...process.env, PATH: p.dir };
     delete env.GIT_DIR;
     delete env.GIT_WORK_TREE;
-    const led = (...args) => {
+    const led = rendering(p.dir, (...args) => {
       const r = spawnSync(process.execPath, [LEDGER, "--file", ledgerFile, ...args], { encoding: "utf8", env, cwd: p.dir });
       assert.equal(r.status, 0, `${args.join(" ")}: ${r.stderr}`);
       return JSON.parse(r.stdout);
-    };
+    });
     const row = led("row", String(ticket), `impl-${ticket}${out.DRAW === "-" ? "" : ` · tier=${out.CELL}`}`);
     return { out, row: row.line, agent: led("dispatch", String(ticket), `impl-${ticket}`).agent };
   };

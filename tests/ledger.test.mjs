@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { rendering } from "./support/rendered-brief.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 // #155's fix resolves the ledger's own repository with a real `git`
@@ -2456,7 +2457,7 @@ test("read hands a pipe the whole ledger — a truncated payload must never read
   // object is unterminated. Comparing the whole object also catches a key the
   // payload should not carry, which the per-key assertions let through.
   // The fixture predates `## Dispatched`, `## Drain` and `## Retired`, so all three read empty.
-  assert.deepEqual(payload, { rows, filed, ruled, dispatched: [], drain: null, retired: [] });
+  assert.deepEqual(payload, { rows, filed, ruled, dispatched: [], briefs: {}, drain: null, retired: [] });
 });
 
 // The same mechanism in the three siblings. Their payloads echo the free-text
@@ -2527,6 +2528,7 @@ test("an ordinary ledger still round-trips through a pipe, and an unknown subcom
     filed: ["#8 a short filed subject"],
     ruled: ["#9 MERGE · green"],
     dispatched: [],
+    briefs: {},
     drain: null,
     retired: [],
   });
@@ -2736,7 +2738,7 @@ test("check hands a pipe its whole not-filed payload, and still reaches the trac
 // same flag. `check` is the fourth and was already correct; the tests above
 // pin it, and hoisting the guard leaves its message and its exit code alone.
 
-const READ_EMPTY = { rows: [], filed: [], ruled: [], dispatched: [], drain: null, retired: [] };
+const READ_EMPTY = { rows: [], filed: [], ruled: [], dispatched: [], briefs: {}, drain: null, retired: [] };
 
 test("read --require-file refuses an absent ledger, naming the path, with no payload (#816)", (t) => {
   const { dir, cli } = cliFixture(t);
@@ -3451,7 +3453,7 @@ function tokenFixture(t, initial = []) {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");
   writeFileSync(file, `# Fleet run ledger\n\n## Rows\n\n${initial.map((r) => `- ${r}\n`).join("")}\n## Filed\n\n## Ruled\n\n`);
-  const call = (...args) => cli(["--file", file, ...args]);
+  const call = rendering(dir, (...args) => cli(["--file", file, ...args]));
   const run = (...args) => {
     const r = call(...args);
     assert.equal(r.status, 0, `${args.join(" ")}: got exit ${r.status}\n${r.stderr}`);
