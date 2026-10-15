@@ -12,9 +12,9 @@ Phase 0 is fifteen ordered commands, stated in prose paragraphs of their own
 (the `branch` check opens the fast-forward paragraph, and the `tier-roles`
 check is stated in Phase 2, "before the run's first dispatch"): branch
 check, fast-forward check, instrument pin, main-checkout baseline,
-pre-flight, ruleset check, metrics refresh, cockpit launch, ledger rotate,
+pre-flight, ruleset check, tier-roles check, metrics refresh, cockpit launch, ledger rotate,
 scratch reclaim, recipe check or derivation, fold-in of inherited PRs,
-stranded claims, shortlist, tier-roles check. The order matters (pin after
+stranded claims, shortlist. The order matters (pin after
 the fast-forward, rotate before the fold-in, reclaim straight after rotate,
 guard refresh before the first Pull). End of run is six ordered steps, with
 `fleet-heartbeat.mjs --stop` last because every reader takes it as the end.
@@ -74,6 +74,7 @@ entry in the receipt:
 | `baseline` | `main-checkout.mjs --record` | DIRTY/UNKNOWN refusals as today, exit 3 |
 | `preflight` | `preflight.mjs` | exit 1 or 2 → exit 3 with every FAIL line |
 | `ruleset` | `.github/scripts/apply-ruleset.sh --check` when the spec exists | 3 or 2 → recorded as `drift`/`unanswered`, continue |
+| `tier-roles` | `tier-roles.mjs --check` | exit 3, stop |
 | `metrics` | `metrics-refresh.mjs` | exit 1 or 2 → exit 3 |
 | `cockpit` | `board.mjs serve --open` detached | recorded, continue |
 | `rotate` | `ledger.mjs rotate` | exit 2 → exit 3 with the refusal |
@@ -82,7 +83,6 @@ entry in the receipt:
 | `fold-in` | open PRs with no row rotate carried; writes `#M` rows for those closing an issue; lists the rest | `NEED review PR#M (closes no issue)` recorded, continue |
 | `stranded` | `stranded.mjs` | `resume` entries → `NEED resume #N <worktree> <branch>` exit 4; `report` entries printed |
 | `shortlist` | `shortlist.mjs` | exit 2 → exit 3 |
-| `tier-roles` | `tier-roles.mjs --check` | exit 3, stop |
 
 Exit 0: every step `ok`. Exit 4: a step needs the controller; the receipt
 marks it `pending`, the script prints the need, and the controller does
@@ -163,7 +163,7 @@ tier-outcomes row and the move of `phase0.json` before `--stop`.
 - Changing any step's semantics, or the relative order of the runbook's
   Phase 0 steps. The table is that order, with two edits of form: `branch`
   is split out of the fast-forward paragraph, and `tier-roles`, which the
-  runbook states in Phase 2, runs last, after `shortlist`.
+  runbook states in Phase 2, runs between `ruleset` and `metrics`.
 - Phase 0 dispatching a member itself. The two member needs stay the
   controller's one `task` call each.
 
@@ -172,6 +172,5 @@ tier-outcomes row and the move of `phase0.json` before `--stop`.
 - Whether `cockpit` belongs in the receipt at all, given it is idempotent
   and never gates anything. Lean: recorded, never a hold.
 - Whether `tier-roles --check` belongs in phase 0 at all. The runbook
-  states it in Phase 2, before the run's first dispatch; running it last in
-  phase 0 is the nearest point to that, and keeps the table's order the
+  states it in Phase 2, before the run's first dispatch; running it between `ruleset` and `metrics` in phase 0 is the nearest point to that, and keeps the table's order the
   runbook's.
