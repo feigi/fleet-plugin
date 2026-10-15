@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
 const MODULES = ["dispatch-prompt.mjs", "arg.mjs", "git-env.mjs", "fleet-dir.mjs", "review-core.mjs"];
-const SKILL_MD = readFileSync(join(PLUGIN, "skills", "run-team", "SKILL.md"), "utf8");
+const PHASE0_MD = readFileSync(join(PLUGIN, "skills", "run-team", "references", "phase-0.md"), "utf8");
 
 const TMP = realpathSync(mkdtempSync(join(tmpdir(), "dispatch-prompt-")));
 after(() => rmSync(TMP, { recursive: true, force: true }));
@@ -315,12 +315,12 @@ test("render finisher repair is the fresh brief plus a repair section", () => {
   assert.ok(out.length > base.length);
 });
 
-// The recipe deriver's seed text is still the quoted block SKILL.md carries.
+// The recipe deriver's seed text is still the quoted block phase-0.md carries.
 const fill = (text, values) => text.replace(/<([A-Za-z][^<>\n]*)>/g, (whole, inner) => (inner in values ? values[inner] : whole));
 
-test("render recipe-deriver prints the recipe-deriver block SKILL.md carries, placeholders filled", () => {
+test("render recipe-deriver prints the recipe-deriver block phase-0.md carries, placeholders filled", () => {
   const c = CASES.find((x) => x.role === "recipe-deriver");
-  const lines = SKILL_MD.split("\n");
+  const lines = PHASE0_MD.split("\n");
   const at = lines.findIndex((l) => l.trimStart().startsWith("> Derive, prove and cache the Recipe"));
   assert.notEqual(at, -1);
   let end = at;

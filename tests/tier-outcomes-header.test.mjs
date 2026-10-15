@@ -36,7 +36,7 @@ const HEADER = headerLines.join("\n");
 // satisfiable from outside the paragraph it guards, and this file is 2700 lines
 // of prose about exactly these words. One definition, because three hand-rolled
 // copies of one slice is how two of them end up bounded differently.
-const rulingStep = () => RUN_TEAM.between("**Guard: accumulate per PR", "**Then record the run's member facts", "phase 3's ruling step").text;
+const rulingStep = () => RUN_TEAM.between("**Guard: accumulate per PR", "The member-facts scrape, the drain of the pending ticket-features rows", "phase 3's ruling step").text;
 
 // The first sentence of the ruling step that names `sizing` — the sentence the
 // phase-0 negative below reads. `sentences()`, never a first-period `[^.]`
