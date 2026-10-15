@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, readFileSync, utimesSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, utimesSync, existsSync, rmSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -318,19 +318,24 @@ test("a row whose cell count is wrong is REFUSED, never padded", () => {
   //
   // Mutation this must survive: restoring `cells[i] ?? ""`.
   const short = ["s1", "2026-08-25", "memory"].join("\t");
-  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 19/);
+  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 20/);
   assert.throws(() => parseTsv("<<<<<<< HEAD"), /malformed row/);
   const full = formatTsv([row()]).replace(/\n$/, "").split("\t");
-  assert.equal(full.length, 19);
-  assert.throws(() => parseTsv(full.slice(0, 15).join("\t")), /15 fields, expected 19/);
-  assert.throws(() => parseTsv(full.slice(0, 14).join("\t")), /14 fields, expected 19/);
+  assert.equal(full.length, 20);
+  // The 19-field spelling is the schema from before `report`: refused rather
+  // than padded with a blank, which would read as "no scratch root to look
+  // in". Re-scraping is the migration. The 15- and 14-field ones before it are
+  // refused the same way.
+  assert.throws(() => parseTsv(full.slice(0, 19).join("\t")), /19 fields, expected 20/);
+  assert.throws(() => parseTsv(full.slice(0, 15).join("\t")), /15 fields, expected 20/);
+  assert.throws(() => parseTsv(full.slice(0, 14).join("\t")), /14 fields, expected 20/);
   // A long row is refused too — that is the schema-drift direction.
-  assert.throws(() => parseTsv(full.join("\t") + "\textra"), /20 fields/);
+  assert.throws(() => parseTsv(full.join("\t") + "\textra"), /21 fields/);
 });
 
-test("the four priced columns follow subagent_type, and a scraped member fills them", () => {
+test("`report` follows subagent_type and the four priced columns follow it, and a scraped member fills them", () => {
   assert.deepEqual(COLUMNS.slice(COLUMNS.indexOf("subagent_type")),
-    ["subagent_type", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost"]);
+    ["subagent_type", "report", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost"]);
   const [parsed] = parseTsv(formatTsv([row({ tokensIn: 12, tokensCacheRead: 3400, tokensCacheWrite1h: 900, cost: 0.123457 })]));
   assert.deepEqual([parsed.tokensIn, parsed.tokensCacheRead, parsed.tokensCacheWrite1h, parsed.cost], ["12", "3400", "900", "0.123457"]);
 });
@@ -635,4 +640,132 @@ test("a run dispatched under PascalCase names scrapes into rows tier-outcomes ch
   assert.equal(mutant.status, 1);
   assert.match(mutant.stdout, /1 rows; 1 checked, 1 failed/);
   assert.match(mutant.stderr, /PR #774 \(ticket #327\): tier=WRONGTIER/);
+});
+
+// ---------------------------------------------------------------------------
+// `report`: derived from the member's name and the scratch root's report files
+// ---------------------------------------------------------------------------
+
+const HEX = "a".repeat(40);
+const MEASURED_IMPL = (member) => ({
+  member, outcome: "pr", pr: 5, head: HEX, branch: "b",
+  sizing: { verdict: "light", signal: "one file", ranBeforePr: true }, bailCause: null, bailDetail: null, confirmation: [],
+});
+const EMPTY_BOT = (member) => ({ member, merged: [], held: [], conflictHold: [], refused: [], branchKept: [] });
+const putReport = (scratch, member, body) => {
+  mkdirSync(join(scratch, "reports"), { recursive: true });
+  writeFileSync(join(scratch, "reports", `${member}.json`), typeof body === "string" ? body : JSON.stringify(body));
+};
+const reportOf = (file) => Object.fromEntries(parseTsv(readFileSync(file, "utf8")).map((r) => [r.member, r.report]));
+const scrapeWith = (dir, file, scratch) => spawnSync(process.execPath, [CLI, dir, "--file", file, "--scratch", scratch], { encoding: "utf8" });
+
+const REPORT_MEMBERS = [
+  ["impl-580", [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")]],
+  ["fix-pr-88", [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")]],
+  ["finisher-pr-88", [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")]],
+  ["merge-bot-3", [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")]],
+  ["review-pr-88", [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")]],
+  ["memory-proxy", [sessionEvt("/x"), sessionInitEvt("recall", "memory-proxy"), assistantEvt("claude-haiku-4-5")]],
+];
+
+test("`report` is ok for a file that validates, invalid for one that does not, absent for none, and `-` where no schema covers the member", () => {
+  const dir = fixture(REPORT_MEMBERS);
+  const work = tempDir("mo-report-");
+  const scratch = join(work, "scratch");
+  putReport(scratch, "impl-580", MEASURED_IMPL("impl-580"));
+  putReport(scratch, "fix-pr-88", "{}");
+  // A file under a name no schema covers is not looked at, and neither is
+  // one for a family whose file simply is not there.
+  putReport(scratch, "review-pr-88", { whatever: true });
+  putReport(scratch, "memory-proxy", MEASURED_IMPL("memory-proxy"));
+  const out = join(work, "member-outcomes.tsv");
+  const r = scrapeWith(dir, out, scratch);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(reportOf(out), {
+    "impl-580": "ok", "fix-pr-88": "invalid", "finisher-pr-88": "absent",
+    "merge-bot-3": "absent", "review-pr-88": "-", "memory-proxy": "-",
+  });
+});
+
+test("a report that is not JSON, or is a directory, is invalid, not absent", () => {
+  const dir = fixture([REPORT_MEMBERS[0], REPORT_MEMBERS[3]]);
+  const work = tempDir("mo-report-");
+  const scratch = join(work, "scratch");
+  putReport(scratch, "impl-580", "{ not json");
+  mkdirSync(join(scratch, "reports", "merge-bot-3.json"));
+  const out = join(work, "member-outcomes.tsv");
+  assert.equal(scrapeWith(dir, out, scratch).status, 0);
+  assert.deepEqual(reportOf(out), { "impl-580": "invalid", "merge-bot-3": "invalid" });
+});
+
+test("a second scrape replaces each row in place: the value follows the file, no row is added", () => {
+  const dir = fixture(REPORT_MEMBERS);
+  const work = tempDir("mo-report-");
+  const scratch = join(work, "scratch");
+  mkdirSync(scratch);
+  const out = join(work, "member-outcomes.tsv");
+  assert.equal(scrapeWith(dir, out, scratch).status, 0);
+  const first = parseTsv(readFileSync(out, "utf8"));
+  assert.equal(reportOf(out)["merge-bot-3"], "absent");
+
+  putReport(scratch, "merge-bot-3", EMPTY_BOT("merge-bot-3"));
+  putReport(scratch, "impl-580", "{}");
+  assert.equal(scrapeWith(dir, out, scratch).status, 0);
+  const second = parseTsv(readFileSync(out, "utf8"));
+  assert.equal(second.length, first.length, "a row was added instead of replaced");
+  assert.deepEqual(second.map((r) => r.member), first.map((r) => r.member), "rows moved or were reordered");
+  assert.equal(reportOf(out)["merge-bot-3"], "ok");
+  assert.equal(reportOf(out)["impl-580"], "invalid");
+  assert.equal(reportOf(out)["fix-pr-88"], "absent", "a row nothing changed for changed anyway");
+
+  // The file going away is read as absent: the value is the file's state at
+  // the scrape, which is what reclaim leaves behind for a settled member.
+  rmSync(join(scratch, "reports", "merge-bot-3.json"));
+  assert.equal(scrapeWith(dir, out, scratch).status, 0);
+  assert.equal(reportOf(out)["merge-bot-3"], "absent");
+});
+
+test("a --scratch that is not a directory exits 2 and leaves a recorded report value alone, never stamping every covered row absent", () => {
+  const dir = fixture([REPORT_MEMBERS[0]]);
+  const work = tempDir("mo-report-");
+  const scratch = join(work, "scratch");
+  putReport(scratch, "impl-580", MEASURED_IMPL("impl-580"));
+  const out = join(work, "member-outcomes.tsv");
+  assert.equal(scrapeWith(dir, out, scratch).status, 0);
+  assert.deepEqual(reportOf(out), { "impl-580": "ok" });
+  const before = readFileSync(out, "utf8");
+
+  const typo = scrapeWith(dir, out, `${scratch}-typo`);
+  assert.equal(typo.status, 2, typo.stderr);
+  assert.match(typo.stderr, /--scratch .*-typo/);
+  const plain = join(work, "plain-file");
+  writeFileSync(plain, "");
+  const file = scrapeWith(dir, out, plain);
+  assert.equal(file.status, 2, file.stderr);
+  assert.match(file.stderr, /is not a directory/);
+  assert.equal(readFileSync(out, "utf8"), before, "a refused scrape rewrote the file");
+});
+
+test("`report` reads blank, never absent, for a covered member when no scratch root can be resolved, and `-` still needs no root", () => {
+  const dir = fixture([REPORT_MEMBERS[0], REPORT_MEMBERS[4]]);
+  const cwd = tempDir("mo-noroot-"); // not a git work tree: no repository to key a root on
+  const out = join(cwd, "member-outcomes.tsv");
+  const r = spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8", cwd });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /WARNING no scratch root to look for report files in/);
+  assert.deepEqual(reportOf(out), { "impl-580": "", "review-pr-88": "-" });
+});
+
+test("--scratch needs a value, and its value is not mistaken for the session directory", () => {
+  const dir = fixture([REPORT_MEMBERS[0]]);
+  const work = tempDir("mo-report-");
+  const out = join(work, "member-outcomes.tsv");
+  const bare = spawnSync(process.execPath, [CLI, dir, "--file", out, "--scratch"], { encoding: "utf8" });
+  assert.equal(bare.status, 2);
+  assert.match(bare.stderr, /--scratch/);
+  const root = join(work, "s");
+  mkdirSync(root);
+  const ok = spawnSync(process.execPath, ["--no-warnings", CLI, "--scratch", root, dir, "--file", out], { encoding: "utf8" });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.deepEqual(reportOf(out), { "impl-580": "absent" });
 });

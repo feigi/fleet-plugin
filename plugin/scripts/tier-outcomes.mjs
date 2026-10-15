@@ -7,8 +7,10 @@
 //
 //   append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no
 //          --note <text> [--sizing light|heavy] [--profile <p>] [--loc <n>] [--files <n>]
+//          [--scratch <dir>]
 //     Fills `run_date` (today's UTC date, the ruling date), `pr`, `ticket` (off
-//     `gh pr view --json closingIssuesReferences`) and `tier`. Idempotent by
+//     `gh pr view --json closingIssuesReferences`), `tier` and, unless
+//     `--sizing` names it, `sizing` (see below). Idempotent by
 //     PR: a row already present is named and nothing is written, exit 0.
 //   check [--live]
 //     Post-switch rows only: a filled `tier` must equal the short name of the
@@ -43,6 +45,17 @@
 // `opus`/`sonnet` spelling and are never checked; the header records the
 // switch and how the old values map.
 //
+// `sizing` resolution, in order:
+//   1. `--sizing`, as given — it wins, and stderr names it as the source;
+//   2. else the `sizing.verdict` of the ticket's implementer report,
+//      `<scratch>/reports/impl-<ticket>[-x].json` (`--scratch`, default the
+//      root scratch-root.mjs prints), the highest retry letter's when several
+//      exist — and only when the report checks against its schema, its
+//      `sizing.ranBeforePr` is true and its `sizing.signal` is non-empty: a
+//      verdict typed after the PR was opened measured nothing, and one with no
+//      signal named is a guess;
+//   3. else blank, with a WARNING naming each condition that failed.
+//
 // A row's position in the file is its order: rows are appended, never inserted
 // mid-file or reordered. An in-place edit (a re-judged `class`, a backfilled
 // verdict) keeps the row's position; a ruling meant to supersede an earlier one
@@ -60,6 +73,8 @@ import { makeDie, defineFlags, isDigits } from "./arg.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { parseMember, parseToken, memberTokens, rowPr } from "./ledger-grammar.mjs";
 import { rowText } from "./tier-check.mjs";
+import { latestImplReport, readReport, reportsDir, defaultScratch } from "./report-files.mjs";
+import { FleetDirUnresolvable } from "./fleet-dir.mjs";
 
 const NAME = "tier-outcomes";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -274,6 +289,25 @@ export function resolveTier({ ledger, memberRows, ticket, pr }) {
   return tierFromLedger(ledger, ticket, pr) ?? tierFromMembers(memberRows, ticket);
 }
 
+// The `sizing` covariate off the ticket's implementer report under `scratch`:
+// `{sizing, source, warning: null}`, or `{sizing: "", source: null, warning}`
+// naming every condition that failed. The report must check against its
+// schema first: a verdict read off a malformed file is not a measurement.
+function sizingFromReport(scratch, ticket) {
+  const blank = (warning) => ({ sizing: "", source: null, warning });
+  const found = latestImplReport(scratch, ticket);
+  const report = found === null ? null : readReport(scratch, found.member);
+  if (report === null || report.state === "absent") return blank(`no implementer report for ticket #${ticket} under ${reportsDir(scratch)}`);
+  if (report.state === "invalid") return blank(`${report.path} does not check against its schema: ${report.violation}`);
+  const s = report.report.sizing;
+  if (s === null) return blank(`${report.path} carries no sizing (sizing is null)`);
+  const failed = [];
+  if (s.ranBeforePr !== true) failed.push("sizing.ranBeforePr is not true");
+  if (s.signal.trim() === "") failed.push("sizing.signal is empty");
+  if (failed.length) return blank(`${report.path}: ${failed.join(" and ")}`);
+  return { sizing: s.verdict, source: report.path, warning: null };
+}
+
 // `check` over the committed files. Returns failure lines and skip counts.
 export function checkRows(rows, memberRows) {
   const failures = [];
@@ -338,13 +372,13 @@ export function unrecordedReviewedPrs(ledger, rows) {
 // ---------------------------------------------------------------------------
 
 const USAGE = "usage: tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note <text> "
-  + "[--sizing light|heavy] [--profile <p>] [--loc <n>] [--files <n>] [--file <tsv>] [--member-outcomes <tsv>] [--ledger <path>]\n"
+  + "[--sizing light|heavy] [--profile <p>] [--loc <n>] [--files <n>] [--scratch <dir>] [--file <tsv>] [--member-outcomes <tsv>] [--ledger <path>]\n"
   + "       tier-outcomes.mjs check [--live] [--file <tsv>] [--member-outcomes <tsv>] [--ledger <path>]";
 
 const die = makeDie(NAME);
 const APPEND_FLAGS = {
   "closed-own-ticket": "value", "minted-false-claim": "value", note: "value",
-  sizing: "value", profile: "value", loc: "value", files: "value",
+  sizing: "value", profile: "value", loc: "value", files: "value", scratch: "value",
 };
 const FLAGS = { ...APPEND_FLAGS, file: "value", "member-outcomes": "value", ledger: "value", live: "bool" };
 const { arg, has, sweep } = defineFlags(die, { flags: FLAGS });
@@ -442,9 +476,10 @@ function append(pr, paths) {
   if (!isDigits(pr) || Number(pr) === 0) die(`append needs a PR number, got '${pr}'`);
   pr = String(Number(pr));
   if (has("live")) die("--live is a check flag");
+  const sizingFlag = arg("sizing");
   const fields = {
     closed_own_ticket: arg("closed-own-ticket"), minted_false_claim: arg("minted-false-claim"),
-    note: arg("note"), sizing: arg("sizing") ?? "", profile: arg("profile") ?? "", loc: arg("loc") ?? "", files: arg("files") ?? "",
+    note: arg("note"), sizing: sizingFlag ?? "", profile: arg("profile") ?? "", loc: arg("loc") ?? "", files: arg("files") ?? "",
   };
   for (const col of ["closed_own_ticket", "minted_false_claim", "note"]) {
     if (fields[col] === null) die(`append needs --${col.replaceAll("_", "-")}\n${USAGE}`);
@@ -473,6 +508,25 @@ function append(pr, paths) {
   const resolved = resolveTier({ ledger, memberRows, ticket, pr });
   if (resolved.warning) console.error(`${NAME}: WARNING tier left blank for PR #${pr} (ticket #${ticket}): ${resolved.warning}`);
   else console.error(`${NAME}: tier=${resolved.tier} from ${resolved.source}`);
+
+  if (sizingFlag !== null) {
+    console.error(`${NAME}: sizing=${fields.sizing} from --sizing`);
+  } else {
+    let scratch = paths.scratch;
+    let unresolvable = null;
+    if (scratch === null) {
+      try {
+        scratch = defaultScratch();
+      } catch (e) {
+        if (!(e instanceof FleetDirUnresolvable)) throw e;
+        unresolvable = e.message;
+      }
+    }
+    const sized = unresolvable === null ? sizingFromReport(scratch, ticket) : { sizing: "", source: null, warning: `no scratch root to look in: ${unresolvable}` };
+    fields.sizing = sized.sizing;
+    if (sized.warning) console.error(`${NAME}: WARNING sizing left blank for PR #${pr} (ticket #${ticket}): ${sized.warning}`);
+    else console.error(`${NAME}: sizing=${sized.sizing} from ${sized.source}`);
+  }
 
   const line = formatRow({ ...fields, run_date: today(), pr, ticket, tier: resolved.tier });
   if (text === null) writeFileSync(paths.file, `# ${COLUMNS.join("\t")}\n${line}\n`);
@@ -507,6 +561,7 @@ function main() {
     file: arg("file") ?? "docs/metrics/tier-outcomes.tsv",
     members: arg("member-outcomes") ?? "docs/metrics/member-outcomes.tsv",
     ledger: arg("ledger"),
+    scratch: arg("scratch"),
   };
   // Below every flag read, per arg.mjs's ordering contract, and above the
   // subcommand checks, so a stray flag is refused by name before anything

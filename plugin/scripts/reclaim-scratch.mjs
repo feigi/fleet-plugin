@@ -24,6 +24,17 @@
 //            removed when issue #N is CLOSED, or OPEN with no live
 //            impl-<N>[-x] token and idle past the retention, so a bailed or
 //            released ticket's partition is not inherited by its next claim.
+//   reports/<member>.json
+//            a member's report file. `reports/` itself is never removed, and
+//            is not aged out whole: each file is judged on its own, by the
+//            entry it goes with. A fix-pr-<M>[-x], finisher-pr-<M>[-x] or
+//            review-pr-<M>[-x] report goes with pr<M>/ — the same verdict,
+//            the same live-token holds, though no pr<M>/ need exist; an
+//            impl-<N>[-x] report goes with impl-<N>/ the same way; any other
+//            file in it (a merge-bot-<n> report, which names no PR and no
+//            ticket) is judged as "anything else" below, so it is removed
+//            only when idle past the retention and its member's token is not
+//            live.
 //   anything else, and a keyed name whose number GitHub resolves to the
 //   other type (a pr<N> that is an issue, an impl-<N> that is a PR) or to
 //   nothing
@@ -114,6 +125,11 @@ const REMOVE = [
 const PR_ENTRY = /^pr([1-9][0-9]*)$/;
 const IMPL_ENTRY = /^impl-([1-9][0-9]*)$/;
 const DISPOSITIONS_ENTRY = /^dispositions-fix-pr-([1-9][0-9]*)(?:-[a-z])?\.json$/;
+// A member's report file, `reports/<member>.json`: one that names a PR goes
+// with that PR's entries, one that names a ticket with that ticket's.
+const REPORTS_DIR = "reports";
+const REPORT_PR_ENTRY = /^(?:fix-pr|finisher-pr|review-pr)-([1-9][0-9]*)(?:-[a-z])?\.json$/;
+const REPORT_IMPL_ENTRY = /^impl-([1-9][0-9]*)(?:-[a-z])?\.json$/;
 const RUN_ROOT = /^run-/;
 
 function how(r) {
@@ -279,12 +295,50 @@ function judgeRoot(root, names, live, now) {
     kept.push({ path, reason: young ? `${young}; modified within 7 days` : "modified within 7 days" });
   };
 
-  const keyed = [];
-  const numbers = new Set();
+  // `reports/` is not an entry to age out whole: each file in it is judged as
+  // the member's own, so a live member's report is never swept along with an
+  // idle directory.
+  const entries = [];
   for (const name of names) {
     const path = join(root, name);
+    let isDir = false;
+    try {
+      isDir = name === REPORTS_DIR && lstatSync(path).isDirectory();
+    } catch (e) {
+      // raced away: judged below as any other entry. Anything else (an
+      // unsearchable root) leaves `reports` unclassified, and judging it as an
+      // ordinary entry would age the whole directory out.
+      if (e.code !== "ENOENT") {
+        kept.push({ path, reason: `its type cannot be read: ${e.message}` });
+        continue;
+      }
+    }
+    if (!isDir) {
+      entries.push({ path, name, report: false });
+      continue;
+    }
+    let inner;
+    try {
+      inner = readdirSync(path).sort();
+    } catch (e) {
+      kept.push({ path, reason: `its entries cannot be listed: ${e.message}` });
+      continue;
+    }
+    for (const f of inner) entries.push({ path: join(path, f), name: f, report: true });
+  }
+
+  const keyed = [];
+  const numbers = new Set();
+  for (const { path, name, report } of entries) {
     let m;
-    if ((m = PR_ENTRY.exec(name))) keyed.push({ path, name, kind: "pr", n: Number(m[1]) });
+    if (report) {
+      if ((m = REPORT_PR_ENTRY.exec(name))) keyed.push({ path, name, kind: "pr", n: Number(m[1]) });
+      else if ((m = REPORT_IMPL_ENTRY.exec(name))) keyed.push({ path, name, kind: "impl", n: Number(m[1]) });
+      else {
+        byAge(path, name, null);
+        continue;
+      }
+    } else if ((m = PR_ENTRY.exec(name))) keyed.push({ path, name, kind: "pr", n: Number(m[1]) });
     else if ((m = IMPL_ENTRY.exec(name))) keyed.push({ path, name, kind: "impl", n: Number(m[1]) });
     else if ((m = DISPOSITIONS_ENTRY.exec(name))) keyed.push({ path, name, kind: "pr", n: Number(m[1]) });
     else {
