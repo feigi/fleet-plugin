@@ -9,19 +9,19 @@
 // Output: the brief on stdout. With --json: {role, kind, args, sha256}.
 // With --member <name>: also writes both .md and .json files to the member directory.
 //
-// The template contract: 
+// The template contract:
 // - Every placeholder <name> in a template is a required argument
-// - Paths (--worktree, --scratch, etc.) must be absolute
+// - Paths (--worktree, --scratch, --review-file, --abs-path) must be absolute
 // - instruments.sh runs first; its exit 1/2 becomes exit 2 here
 // - A template with an undeclared <foo> exits 2 naming it
 // - Missing --kind for roles that require it exits 2
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname, isAbsolute } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { makeDie, defineFlags } from "./arg.mjs";
+import { makeDie } from "./arg.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const die = makeDie("dispatch-prompt.mjs");
@@ -34,7 +34,7 @@ const ROLE_KINDS = {
 };
 
 // Path arguments that must be absolute
-const PATH_ARGS = new Set(["worktree", "scratch", "review-file"]);
+const PATH_ARGS = new Set(["worktree", "scratch", "review-file", "abs-path"]);
 
 function parseArgs() {
   const argv = process.argv.slice(2);
@@ -110,16 +110,15 @@ function loadTemplate(role, kind) {
   if (kind && ROLE_KINDS[role]) {
     // Extract kind-specific content
     const kindPattern = new RegExp(`^## kind: ${kind}$`, "m");
-    const nextKindPattern = /^## kind: /m;
-
     const kindMatch = template.match(kindPattern);
     if (!kindMatch) {
       die(`Template for ${role} has no section for kind: ${kind}`);
     }
 
     const startIdx = template.indexOf(kindMatch[0]) + kindMatch[0].length;
-    const nextKind = template.slice(startIdx).match(nextKindPattern);
-    const endIdx = nextKind ? startIdx + template.slice(startIdx).indexOf(nextKind[0]) : template.length;
+    const restOfTemplate = template.slice(startIdx);
+    const nextKindMatch = restOfTemplate.match(/^## kind: /m);
+    const endIdx = nextKindMatch ? startIdx + restOfTemplate.indexOf(nextKindMatch[0]) : template.length;
 
     template = template.slice(startIdx, endIdx).trim();
   }
@@ -147,18 +146,6 @@ function validateArguments(role, kind, args, template) {
     }
   }
 
-  // Check for leftover placeholders in rendered output
-  const rendered = template.replace(/<[a-zA-Z-_][a-zA-Z0-9-_]*>/g, (match) => {
-    const name = match.slice(1, -1);
-    return args[name] || match;
-  });
-
-  const leftoverPlaceholders = findPlaceholders(rendered);
-  if (leftoverPlaceholders.size > 0) {
-    const placeholder = Array.from(leftoverPlaceholders)[0];
-    die(`Leftover placeholder in rendered brief: <${placeholder}>`);
-  }
-
   // Validate path arguments are absolute
   for (const [name, value] of Object.entries(args)) {
     if (PATH_ARGS.has(name)) {
@@ -166,6 +153,18 @@ function validateArguments(role, kind, args, template) {
         die(`Path argument --${name} must be absolute: ${value}`);
       }
     }
+  }
+
+  // Check for leftover placeholders in rendered output
+  const rendered = template.replace(/<[a-zA-Z-_][a-zA-Z0-9-_]*>/g, (match) => {
+    const name = match.slice(1, -1);
+    return args[name] !== undefined ? args[name] : match;
+  });
+
+  const leftoverPlaceholders = findPlaceholders(rendered);
+  if (leftoverPlaceholders.size > 0) {
+    const placeholder = Array.from(leftoverPlaceholders)[0];
+    die(`Leftover placeholder in rendered brief: <${placeholder}>`);
   }
 }
 
@@ -177,7 +176,7 @@ function renderBrief(template, args) {
 }
 
 function runInstruments() {
-  const instrumentsPath = join(__dirname, "..", "..", "instruments.sh");
+  const instrumentsPath = join(__dirname, "instruments.sh");
   const result = spawnSync("bash", [instrumentsPath], {
     cwd: join(__dirname, ".."),
     stdio: "pipe",
@@ -224,6 +223,7 @@ async function main() {
   // Write member files if requested
   if (member) {
     const memberDir = join(args.scratch || "", member);
+    mkdirSync(memberDir, { recursive: true });
     const mdPath = join(memberDir, `${member}.md`);
     const jsonPath = join(memberDir, `${member}.json`);
 
