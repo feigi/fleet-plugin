@@ -69,7 +69,6 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDigits, writeAll } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
@@ -79,6 +78,9 @@ import { briefPaths, briefText } from "./ticket-router.mjs";
 
 const NAME = "pull";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
+// Not arg.mjs's: this script's usage refusal is exit 3, and a script that
+// imports arg.mjs is held to its exit 2 for a stray flag.
+const isDigits = (value) => /^[0-9]+$/.test(value);
 const MAX_BUFFER = 64 * 1024 * 1024;
 const NETWORK_TIMEOUT_MS = 120_000;
 const PR_LIMIT = 1000;
@@ -875,18 +877,18 @@ function main() {
     else throw new Usage(USAGE);
   } catch (e) {
     if (e instanceof Usage) {
-      writeAll(2, `${NAME}: ${e.message}\n`);
+      process.stderr.write(`${NAME}: ${e.message}\n`);
       process.exitCode = 3;
       return;
     }
     // Node exits 1 on an uncaught throw, and 1 here means the ticket left the
     // Pull: a crash must never read as a verdict.
-    writeAll(2, `${NAME}: ${e instanceof Refusal ? e.message : `unexpected: ${e?.stack ?? e}`}\n`);
+    process.stderr.write(`${NAME}: ${e instanceof Refusal ? e.message : `unexpected: ${e?.stack ?? e}`}\n`);
     process.exitCode = 2;
     return;
   }
-  for (const l of r.out) writeAll(1, `${l}\n`);
-  for (const l of r.err) writeAll(2, `${l}\n`);
+  for (const l of r.out) process.stdout.write(`${l}\n`);
+  for (const l of r.err) process.stderr.write(`${l}\n`);
   process.exitCode = r.exit;
 }
 

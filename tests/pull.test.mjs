@@ -171,8 +171,8 @@ function fixture({ issue = ISSUE, shortlist = [12] } = {}) {
       return JSON.parse(r.stdout).rows;
     },
     env: () => ({ ...GIT_ENV, HOME: home, PATH: `${bin}:${process.env.PATH}`, PULL_STUBS: stubs }),
-    run: (args, { cwd = repo, timeout } = {}) => {
-      const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: "utf8", env: f.env(), timeout, killSignal: "SIGKILL" });
+    run: (args, { cwd = repo, timeout, env = {} } = {}) => {
+      const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: "utf8", env: { ...f.env(), ...env }, timeout, killSignal: "SIGKILL" });
       return { status: r.status, signal: r.signal, out: r.stdout.split("\n").filter(Boolean), err: r.stderr, stdout: r.stdout };
     },
     next: (...args) => f.run(["next", ...args]),
@@ -1006,4 +1006,34 @@ test("run from a linked worktree it refuses with exit 3: the checks judge the ma
   assert.equal(r.status, 3, r.stdout + r.err);
   assert.match(r.err, /run this from the main checkout/);
   assert.deepEqual(f.order(), []);
+});
+
+test("an ambient GIT_DIR or GH_REPO naming another repository does not change what any step reads or runs", () => {
+  const { f, sha } = fixedFixture();
+  const other = join(f.dir, "other");
+  git(f.dir, "init", "-q", "-b", "main", other);
+  const env = { GIT_DIR: join(other, ".git"), GIT_WORK_TREE: other, GH_REPO: "someone/else" };
+  const asked = f.run(["answer", "12", "staleness", "gone", "--path", "p.mjs", "old wording"], { env });
+  assert.equal(asked.status, 10, asked.stdout + asked.err);
+  assert.match(asked.stdout, /subject: the real subject of the fix$/m, "the subject is read from this repository, not the ambient one");
+  assert.equal(asked.stdout.includes(sha), true);
+  const closed = f.run(["answer", "12", "close", "yes"], { env });
+  assert.equal(closed.status, 1, closed.stdout + closed.err);
+  for (const c of f.calls("gh")) assert.equal(c.GH_REPO, "", `gh ${c.args.join(" ")} was given an ambient GH_REPO`);
+  assert.equal(f.state().commands.filter((c) => c.step !== "staleness").every((c) => c.exit === 0), true, "the probe's exit 1 is the fixture's own");
+
+  const g = fixture();
+  const ran = g.run(["next", "--head", "12"], { env });
+  assert.equal(ran.status, 10, "the main-checkout check is not answered for the ambient repository: " + ran.stdout + ran.err);
+});
+
+test("SKILL.md Phase 1 names `pull.mjs next` as the Pull's entry, and its step paragraphs stay", () => {
+  const phase1 = SKILL.slice(SKILL.indexOf("## Phase 1 — Pull"), SKILL.indexOf("## Phase 2 — dispatch"));
+  assert.ok(phase1.length > 1000, "Phase 1 is found");
+  const flat = phase1.replace(/\s+/g, " ");
+  assert.ok(flat.includes("A Pull's entry is `~/.fleet/bin/fleet-run pull.mjs next --head <N>`"), "Phase 1 names pull.mjs next as the entry");
+  assert.ok(flat.includes("`pull.mjs answer <N> <qid> <token> [--path <p>] [--] [<text>…]`"), "and the answer command");
+  for (const step of ["1. **Take the shortlist head**", "2. **In-flight check, again**", "3. **Read the ticket in full, once**", "4. **Collision scan", "5. **Sequence check**", "6. **Claim**", "7. **Route, row, then dispatch**"]) {
+    assert.ok(flat.includes(step), `the step paragraph stays: ${step}`);
+  }
 });
