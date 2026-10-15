@@ -21,9 +21,11 @@
 //       entry. An empty shortlist is this exit too.
 //   2   could not look, named on stderr: a probe that did not answer, a write
 //       that failed, a router that refused (its claim released first). The
-//       Pull stays where it was, so running it again retries that step.
-//   3   usage: a bad command line, or an answer the pending question does not
-//       take. Nothing is recorded.
+//       Pull stays where it was, so running it again retries that step. An
+//       unknown flag is exit 2 as well, as for every script that holds a
+//       command line of its own.
+//   3   usage: any other mistake in the command line, or an answer the pending
+//       question does not take. Nothing is recorded.
 //   10  a question is pending: its `QUESTION <qid>:` block, with the tokens it
 //       takes, is printed.
 //
@@ -69,6 +71,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDigits, makeDie } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
@@ -78,9 +81,7 @@ import { briefPaths, briefText } from "./ticket-router.mjs";
 
 const NAME = "pull";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
-// Not arg.mjs's: this script's usage refusal is exit 3, and a script that
-// imports arg.mjs is held to its exit 2 for a stray flag.
-const isDigits = (value) => /^[0-9]+$/.test(value);
+const die = makeDie(NAME);
 const MAX_BUFFER = 64 * 1024 * 1024;
 const NETWORK_TIMEOUT_MS = 120_000;
 const PR_LIMIT = 1000;
@@ -868,10 +869,21 @@ function answer(args) {
   return { ...r, out: [...pull.log, ...r.out] };
 }
 
+// An unknown flag is refused the way every script that holds a command line of
+// its own refuses one, through arg.mjs's die() at exit 2; every other mistake
+// in the command line is exit 3.
+function refuseUnknownFlags(sub, args) {
+  const known = sub === "next" ? ["--head"] : [];
+  for (const word of [sub, ...(sub === "next" ? args : [])]) {
+    if (typeof word === "string" && word.startsWith("-") && !known.includes(word)) die(`unknown flag ${word} — ${USAGE}`);
+  }
+}
+
 function main() {
   const [sub, ...args] = process.argv.slice(2);
   let r;
   try {
+    refuseUnknownFlags(sub, args);
     if (sub === "next") r = next(args);
     else if (sub === "answer") r = answer(args);
     else throw new Usage(USAGE);

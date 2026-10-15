@@ -1037,3 +1037,14 @@ test("SKILL.md Phase 1 names `pull.mjs next` as the Pull's entry, and its step p
     assert.ok(flat.includes(step), `the step paragraph stays: ${step}`);
   }
 });
+
+test("an unknown flag is refused at exit 2 naming it, as arg.mjs's own refusal is; the other command-line mistakes are exit 3", () => {
+  const f = fixture();
+  for (const args of [["--bogus"], ["next", "--bogus"], ["next", "--head", "12", "--bogus"], ["-x"]]) {
+    const r = f.run(args);
+    assert.equal(r.status, 2, `${args.join(" ")}: ${r.stdout}${r.err}`);
+    assert.match(r.err, new RegExp(`^pull: unknown flag ${args.findLast((a) => a.startsWith("-")).replace(/[-]/g, "\\-")} `, "m"));
+  }
+  assert.deepEqual(f.order(), [], "nothing ran");
+  assert.equal(f.run(["next", "12"]).status, 3, "a word that is no flag is usage");
+});
