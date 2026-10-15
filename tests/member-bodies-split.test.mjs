@@ -129,7 +129,7 @@ test("frontmatter-check accepts the fix-applier definition against the shipped a
 
 // The rendered brief is the golden dispatch-prompt.test.mjs pins byte-for-byte
 // against render output for the same arguments, so it is read, not rendered again.
-const GOLDEN = fileURLToPath(new URL("./fixtures/rendered-briefs/", import.meta.url));
+const GOLDEN = fileURLToPath(new URL("./fixtures/briefs/", import.meta.url));
 
 const PIN = "0123456789abcdef0123456789abcdef01234567";
 // The fix-applier's report became a file in the shape report-schema.mjs gives

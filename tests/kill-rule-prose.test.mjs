@@ -10,8 +10,9 @@
 // of review-core.mjs, so a reword in one place reds instead of quietly
 // becoming the fixture. Each site is read where its instructions live: the
 // prompts review-core.mjs actually dispatches (rendered through runReview
-// over a scripted host), the two agent definitions, and the two run-team
-// briefs the controller pastes verbatim.
+// over a scripted host), the agent definitions, and the member prompts the
+// renderer completes — the fix-applier's and the finisher's, each its agent
+// body and the brief printed for it.
 //
 // THE CEILING (prose-pin.mjs): a negating sentence added beside an intact
 // paragraph stays green. The golden fixtures cover that for the run-team
@@ -20,12 +21,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 import { runReview, sharedRunNote, DEFAULT_DIMENSIONS } from "../plugin/scripts/review-core.mjs";
 import { pipeline, parallel, ARGS, SNAP, review, finding, vote, scriptedHost } from "./support/review-host-fixture.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const read = (...p) => Pin.file(join(REPO, ...p));
-const RUN_TEAM = read("plugin", "skills", "run-team", "SKILL.md");
 const CONTEXT = read("CONTEXT.md");
 const REVIEW_AND_FIX = read("plugin", "commands", "review-and-fix.md").text;
 
@@ -63,12 +64,13 @@ async function renderedPrompts() {
   return { tests: prompts["review:tests"][0], refuter: prompts["verify:correctness"][0] };
 }
 
-const fixApplier = () =>
-  RUN_TEAM.between("### Reviewers", "### Merge bot", "run-team's Reviewers section").quoteBlock(
-    "You are ALREADY in worktree `<abs-path>`, whose PR branch is",
-    "the fix-applier prompt",
+const fixApplier = () => memberPrompt("fix-applier", "review");
+const finisher = () =>
+  Pin.of(memberPrompt("finisher", "fresh"), "the finisher's member prompt").between(
+    "**A test run is a verdict only if it ran to completion",
+    "**Duty 3 is one script",
+    "the finisher's test-run verdict block",
   ).text;
-const finisher = () => RUN_TEAM.quoteBlock("**A test run is a verdict only if it ran to completion", "the finisher's test-run verdict block").text;
 const agent = (name) => read("plugin", "agents", `${name}.agent.md`).text.split("---").slice(2).join("---");
 
 // The in-scope suggestion refuter has no abstain — its verdict is `{refuted,
@@ -88,10 +90,10 @@ const KILL_SITES = async () => {
     ["agents/fleet-review-tests.agent.md", agent("fleet-review-tests"), "file no finding above `suggestion` on it, and name the gap — both runs — in `scope_searched`", true],
     ["the refuter's dispatched prompt", refuter, "set `inconclusive` to true and name the runs in `reason`", true],
     ["agents/fleet-review-verifier.agent.md", agent("fleet-review-verifier"), "set `inconclusive` to true and name the runs in `reason`", true],
-    ["run-team's fix-applier prompt", fixApplier(), "do not report the test as proven, and measure again in a clean state", true],
-    ["run-team's in-scope suggestion refuter brief", suggestionRefuter(RUN_TEAM.text, "run-team/SKILL.md", "Survives → apply it, with one hold"), SUGGESTION_ABSTAIN, true],
+    ["the fix-applier's member prompt", fixApplier(), "do not report the test as proven, and measure again in a clean state", true],
+    ["the fix-applier's in-scope suggestion refuter brief", suggestionRefuter(fixApplier(), "the fix-applier's member prompt", "Survives → apply it, with one hold"), SUGGESTION_ABSTAIN, true],
     ["review-and-fix.md step 2's in-scope suggestion refuter brief", suggestionRefuter(REVIEW_AND_FIX, "review-and-fix.md", "That last clause is the whole mechanism"), SUGGESTION_ABSTAIN, false],
-    ["run-team's finisher test-run verdict block", finisher(), "halt with cause `other`, with both runs — the mutant's and the unmutated tree's — as evidence", true],
+    ["the finisher's test-run verdict block", finisher(), "halt with cause `other`, with both runs — the mutant's and the unmutated tree's — as evidence", true],
   ];
 };
 

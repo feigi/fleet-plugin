@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 
 // #375. A `gh pr create --label patch` that exceeds the caller's tool timeout is
 // backgrounded with the PR ALREADY OPEN and the label unapplied, and a timeout
@@ -34,7 +35,7 @@ const step7 = () =>
 const memberBlocks = () => read("agents", "fleet-implementer-slow-high.agent.md").text.split("---").slice(2).join("---");
 
 const finisherLabelDuty = () =>
-  RUN_TEAM.between("Add `ready-to-merge`", "A halt at step 1 reads identical from a bare SHA mismatch", "run-team finisher duty 3").text;
+  RUN_TEAM.between("Add `ready-to-merge`", "4. Report you the label", "run-team finisher duty 3").text;
 
 test("next-ticket's step 7 writes the label with a command of its own, not a flag on the create", () => {
   const s = step7();
@@ -146,11 +147,13 @@ test("the finisher's assertion accepts a normally-labelled PR — it counts rele
 // check and report `labelled` with no `ready-to-merge` on the PR. The check and
 // the add are now one script the finisher runs, whose exit code is its
 // verdict, so neither can be run alone — and the finisher's prose no longer
-// spells the commands that were each read as the whole duty.
-test("duty 3 is one script — named in the duty list and the verbatim block, with no gh commands spelled", () => {
+// spells the commands that were each read as the whole duty. The duty is
+// stated twice: in the controller's duty list, and in the finisher's member
+// prompt, where its agent body carries the block the member reads.
+test("duty 3 is one script — named in the duty list and the member prompt, with no gh commands spelled", () => {
   const item = RUN_TEAM.between("3. Add `ready-to-merge` by running one script", "4. Report you the label", "finisher duty 3").text;
-  const block = RUN_TEAM.between("**Duty 3 is one script, and its exit code is your verdict.**", "**Once the label is on, take it off", "finisher duty-3 verbatim block").text;
-  for (const [text, where] of [[item, "the duty list"], [block, "the verbatim block"]]) {
+  const block = Pin.of(memberPrompt("finisher", "fresh"), "the finisher's member prompt").between("**Duty 3 is one script, and its exit code is your verdict.**", "Report to the controller in the report file your brief names", "finisher duty-3 block").text;
+  for (const [text, where] of [[item, "the duty list"], [block, "the member prompt's duty 3 block"]]) {
     assert.match(text, Pin.phrase("finisher-label.mjs --pr"), `${where} no longer runs the script`);
     assert.match(text, Pin.phrase("fleet-run finisher-label.mjs"), `${where} reaches the script by something other than the Resolver`);
     assert.doesNotMatch(text, /gh pr (view|comment|edit)/, `${where} spells a gh command again — the steps are separable by hand once more`);
@@ -159,7 +162,7 @@ test("duty 3 is one script — named in the duty list and the verbatim block, wi
   assert.match(block, Pin.phrase("Exit 0 is the only code that means the label is on"), "the block no longer says only exit 0 is a label");
   assert.match(block, Pin.phrase("Every non-zero exit halts you"), "the block lets a non-zero exit go on");
   assert.match(block, Pin.phrase("its steps by hand to get past it"), "the block no longer forbids replaying the steps by hand");
-  assert.match(RUN_TEAM.bullet("4. Report you the label", "**Give the finisher the instrument re-check verbatim too.**", "finisher duty 4").text, Pin.phrase("the script's receipt, the JSON line it printed, as printed"),
+  assert.match(RUN_TEAM.bullet("4. Report you the label", "**What a finisher receives.**", "finisher duty 4").text, Pin.phrase("the script's receipt, the JSON line it printed, as printed"),
     "duty 4 no longer reports the script's receipt");
 });
 

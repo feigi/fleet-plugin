@@ -34,8 +34,8 @@
 //   1. run-team/SKILL.md's Reviewers prose — the controller's own admission
 //      gate, and the one place the rule is JUSTIFIED rather than dictated, so
 //      the two-shell reproduction lives there and is pinned as one span.
-//   2/3. The two hand-dispatch refuter briefs — run-team/SKILL.md's nested
-//      `> >` block and review-and-fix.md step 2 — the pair
+//   2/3. The two hand-dispatch refuter briefs — the fix-applier's member
+//      prompt (its agent body's nested `> ` block) and review-and-fix.md step 2 — the pair
 //      refuter-scratch-prose.test.mjs already treats as one population,
 //      for the reason it gives: a rule added to one is the one that misses
 //      whichever path a caller takes.
@@ -72,6 +72,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 import { stripComments } from "./support/strip-comments.mjs";
 import { promptRenderer } from "./support/prompt-renderer.mjs";
 
@@ -140,8 +141,8 @@ const REFUTER_CONTROL = span(
 
 const SEATS = [
   [
-    "run-team/SKILL.md's nested refuter brief",
-    () => stripQuoteGutter(RUN_TEAM.between("Try to REFUTE this finding", "Survives → apply it, with one hold", "run-team/SKILL.md").text),
+    "the fix-applier member prompt's nested refuter brief",
+    () => stripQuoteGutter(Pin.of(memberPrompt("fix-applier", "review"), "the fix-applier member prompt").between("Try to REFUTE this finding", "Survives → apply it, with one hold", "the fix-applier member prompt").text),
   ],
   [
     "review-and-fix.md step 2's refuter brief",
@@ -272,7 +273,7 @@ test("the rule names both failure directions, not only the injection that never 
 // --- the sixth seat: the fix-applier's own mutation paragraph ----------------
 const fixApplierMutationRule = () =>
   stripQuoteGutter(
-    RUN_TEAM.between("A mutation that never landed is not a green", "**Commit BEFORE you mutate", "run-team/SKILL.md fix-applier prompt").text,
+    Pin.of(memberPrompt("fix-applier", "review"), "the fix-applier member prompt").between("A mutation that never landed is not a green", "**Commit BEFORE you mutate", "the fix-applier member prompt").text,
   );
 
 test("the fix-applier prompt refuses a mutation nothing proved landed, and carries the same invocation form", () => {

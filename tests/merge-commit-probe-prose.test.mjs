@@ -1,4 +1,5 @@
-// #911. `run-team/SKILL.md`'s five-condition note sends the fix-applier to
+// #911. The fix-applier's five-condition note (in its agent body, which the
+// member reads with the brief the renderer prints) sends the fix-applier to
 // measure the merge-commit condition by hand, because `ci.yml`'s `rebase-check`
 // exits on the staleness condition before the merge-commit one is evaluated, so
 // the job log cannot name it. That hand-run probe is the whole of the evidence,
@@ -84,21 +85,19 @@
 // assertion, and keep whichever form replaces it honest about both halves.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-
-import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 
-const REPO = join(import.meta.dirname, "..", "plugin");
-const SKILL = "skills/run-team/SKILL.md";
+const WHERE = "the fix-applier's member prompt";
 
 // The note, and no more of the document than that. A moved anchor throws rather
 // than widening the slice back to the file, which is the false green the bound
 // exists to prevent.
 const note = () =>
-  Pin.file(join(REPO, ...SKILL.split("/"))).stripGutter(">").paragraph(
+  Pin.of(memberPrompt("fix-applier", "review"), WHERE).stripGutter(">").paragraph(
     "The CI facts in that file apply to you",
-    SKILL,
-    "**Run `<testCmd>` from the worktree before",
+    WHERE,
+    "**A test you ADD must kill its own mutant**",
   ).text;
 
 // Backticks included: they are what keeps this a code span the reader can run,
@@ -109,7 +108,7 @@ test("the five-condition note measures merge commits with a fetched, origin-rela
   assert.match(
     note(),
     Pin.phrase(PROBE),
-    `${SKILL}'s five-condition note no longer spells the merge-commit probe ${PROBE}.
+    `${WHERE}'s five-condition note no longer spells the merge-commit probe ${PROBE}.
 
 Both halves are load-bearing, and dropping either is silent:
   - a \`$VAR\` range (the \`"$BASE..HEAD"\` form \`376c19c\` shipped and \`7b48720\` fixed) expands to \`..HEAD\` when unset, which git reads as \`HEAD..HEAD\` — count \`0\`, exit 0, the "no merge commits" answer this note exists to deny.

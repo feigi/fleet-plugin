@@ -18,24 +18,14 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
-const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
-const MODULES = ["dispatch-prompt.mjs", "arg.mjs", "git-env.mjs", "fleet-dir.mjs", "review-core.mjs"];
-const PHASE0_MD = readFileSync(join(PLUGIN, "skills", "run-team", "references", "phase-0.md"), "utf8");
+import { CASES, GOLDEN_DIR, PLUGIN, argvOf, briefFixtureName, cleanEnv, flagsOf, installRenderer, label } from "./support/render-brief.mjs";
 
 const TMP = realpathSync(mkdtempSync(join(tmpdir(), "dispatch-prompt-")));
 after(() => rmSync(TMP, { recursive: true, force: true }));
-
-const INSTRUMENTS_STUB = `#!/bin/sh
-printf '%s\\n' "$*" >> "$CALL_LOG"
-[ -n "\${INSTR_KILL:-}" ] && kill -9 $$
-echo "\${INSTR_SAYS:-stub}" >&2
-exit "\${INSTR_EXIT:-0}"
-`;
 
 let counter = 0;
 const fresh = (label) => {
@@ -44,14 +34,6 @@ const fresh = (label) => {
   return d;
 };
 
-function cleanEnv() {
-  const env = { ...process.env };
-  delete env.GIT_DIR;
-  delete env.GIT_WORK_TREE;
-  delete env.FORCE_COLOR;
-  return env;
-}
-
 function git(cwd, ...args) {
   const r = spawnSync("git", args, { cwd, encoding: "utf8", env: cleanEnv() });
   assert.equal(r.status, 0, `fixture: git ${args.join(" ")} failed: ${r.stderr}`);
@@ -59,16 +41,7 @@ function git(cwd, ...args) {
 }
 
 function install(label, { edit } = {}) {
-  const root = fresh(`install-${label}`);
-  const scripts = join(root, "scripts");
-  mkdirSync(scripts);
-  for (const m of MODULES) writeFileSync(join(scripts, m), readFileSync(join(PLUGIN, "scripts", m)));
-  writeFileSync(join(scripts, "instruments.sh"), INSTRUMENTS_STUB);
-  const briefs = join(root, "skills", "run-team", "briefs");
-  mkdirSync(dirname(briefs), { recursive: true });
-  cpSync(join(PLUGIN, "skills", "run-team", "briefs"), briefs, { recursive: true });
-  if (edit) edit(briefs);
-  return { root, script: join(scripts, "dispatch-prompt.mjs"), briefs };
+  return installRenderer(fresh(`install-${label}`), { edit });
 }
 
 const MAIN = install("main");
@@ -87,30 +60,8 @@ function render(argv, { inst = MAIN, cwd = REPO, env = {} } = {}) {
   return { status: r.status, out: r.stdout, err: r.stderr, calls: readFileSync(log, "utf8").split("\n").filter(Boolean) };
 }
 
-const flagsOf = (args) => Object.entries(args).flatMap(([k, v]) => [`--${k}`, v]);
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
-const PIN = "0123456789abcdef0123456789abcdef01234567";
-
-// Every argument each (role, kind) takes, with a value no other argument
-// shares so a swapped substitution cannot pass. Spelled out here, never read
-// off the templates: the omitted-argument cases below are generated from this
-// table, and a template that gains or loses a required argument disagrees
-// with it in the "renders with exactly these arguments" case.
-const CASES = [
-  { role: "implementer", kind: null, args: { ticket: "4120", worktree: "/abs/wt-impl", branch: "impl-branch", scratch: "/abs/scratch-impl", brief: "BRIEF-TEXT-1", staleness: "STALE-NOTE-1" } },
-  { role: "fix-applier", kind: "review", args: { worktree: "/abs/wt-fix", branch: "fix-branch", testCmd: "TESTCMD-1", scratch: "/abs/scratch-fix", pr: "3293", run: "run-AbCd1234" } },
-  { role: "fix-applier", kind: "conflict", args: { worktree: "/abs/wt-conflict", branch: "conflict-branch", testCmd: "TESTCMD-2", scratch: "/abs/scratch-conflict" } },
-  { role: "fix-applier", kind: "dispositions-retry", args: { worktree: "/abs/wt-retry", branch: "retry-branch", testCmd: "TESTCMD-3", scratch: "/abs/scratch-retry", pr: "3294", run: "run-ZyXw9876", "mismatched-record": "/abs/scratch-retry/dispositions-fix-pr-3294.json", violations: "VIOLATION-LIST-1" } },
-  { role: "fix-applier", kind: "red-check", args: { worktree: "/abs/wt-red", branch: "red-branch", testCmd: "TESTCMD-7", scratch: "/abs/scratch-red" } },
-  { role: "finisher", kind: "fresh", args: { worktree: "/abs/wt-fin", pin: PIN, pr: "3295", testCmd: "TESTCMD-4", scratch: "/abs/scratch-fin" } },
-  { role: "finisher", kind: "repair", args: { worktree: "/abs/wt-fin-r", pin: PIN, pr: "3296", testCmd: "TESTCMD-5", scratch: "/abs/scratch-fin-r" } },
-  { role: "merge-bot", kind: null, args: { n: "17", scratch: "/abs/scratch-bot" } },
-  { role: "review-runner", kind: null, args: { pr: "3297", branch: "rr-branch", worktree: "/abs/wt-rr", testCmd: "TESTCMD-6", scratch: "/abs/scratch-root" } },
-  { role: "recipe-deriver", kind: null, args: { repo: "/abs/repo-x", scratch: "/abs/scratch-rd" } },
-];
-const argvOf = ({ role, kind, args }) => ["render", role, ...(kind ? ["--kind", kind] : []), ...flagsOf(args)];
-const label = ({ role, kind }) => (kind ? `${role} ${kind}` : role);
 
 for (const c of CASES) {
   test(`${label(c)} renders with exactly these arguments, each reaching the brief`, () => {
@@ -267,6 +218,27 @@ test("a template that declares a placeholder it never carries is refused", () =>
   assert.ok(r.err.includes("<never carried>"), r.err);
 });
 
+test("a template declaring a flag the renderer reserves is refused, naming the flag", () => {
+  const rd = CASES.find((c) => c.role === "recipe-deriver");
+  const declare = (label, flag) =>
+    install(label, {
+      edit: (briefs) => {
+        const p = join(briefs, "recipe-deriver.md");
+        writeFileSync(p, readFileSync(p, "utf8").replace("---\n", `---\narg ${flag} carried ${flag}\n`) + `and <carried ${flag}> too\n`);
+      },
+    });
+  for (const flag of ["member", "json", "kind"]) {
+    const r = render(argvOf(rd), { inst: declare(`reserved-${flag}`, flag) });
+    assert.equal(r.status, 2, `--${flag}: ${r.err}`);
+    assert.equal(r.out, "");
+    assert.ok(r.err.includes(`declares the reserved flag --${flag}`), r.err);
+  }
+  // The control: the same edit under a flag no one reserves renders, once the flag is passed.
+  const ok = render([...argvOf(rd), "--ghost", "value"], { inst: declare("reserved-control", "ghost") });
+  assert.equal(ok.status, 0, ok.err);
+  assert.ok(ok.out.includes("and value too"), ok.out);
+});
+
 test("a value spelling a declared placeholder exits 2 naming it; any other angle text is carried", () => {
   const fix = CASES.find((c) => c.role === "fix-applier" && c.kind === "review");
   const spelled = render(argvOf({ ...fix, args: { ...fix.args, branch: "<branch>" } }));
@@ -290,19 +262,18 @@ test("a value is inserted verbatim, whatever replacement syntax it holds", () =>
 
 // --- the golden briefs -----------------------------------------------------
 
-// Each rendered brief of the ledger-family roles is compared byte for byte with
-// a golden file the test owns, rendered from the CASES arguments above. What a
-// member's agent body carries is pinned beside this, in member-bodies-split.test.mjs; a
+// Each rendered brief, of every role, is compared byte for byte with a golden
+// file the test owns, rendered from the CASES arguments in support/render-brief.mjs.
+// What a member's agent body carries is pinned beside this, in
+// member-bodies-split.test.mjs and dispatch-block-golden-prose.test.mjs; a
 // brief that regained a line the body owns, or lost a per-dispatch line, is red
 // here.
-const GOLDEN = fileURLToPath(new URL("./fixtures/rendered-briefs/", import.meta.url));
-const goldenName = (c) => [c.role, c.kind].filter(Boolean).join("-") + ".md";
 
-for (const c of CASES.filter((x) => ["fix-applier", "finisher", "merge-bot"].includes(x.role))) {
+for (const c of CASES) {
   test(`render ${label(c)} prints its golden brief, placeholders filled`, () => {
     const r = render(argvOf(c));
     assert.equal(r.status, 0, r.err);
-    assert.equal(r.out, readFileSync(join(GOLDEN, goldenName(c)), "utf8"));
+    assert.equal(r.out, readFileSync(join(GOLDEN_DIR, briefFixtureName(c)), "utf8"));
   });
 }
 
@@ -313,21 +284,6 @@ test("render finisher repair is the fresh brief plus a repair section", () => {
   const out = render(argvOf(repair)).out;
   assert.ok(out.startsWith(base), "the repair brief no longer begins with the fresh brief");
   assert.ok(out.length > base.length);
-});
-
-// The recipe deriver's seed text is still the quoted block phase-0.md carries.
-const fill = (text, values) => text.replace(/<([A-Za-z][^<>\n]*)>/g, (whole, inner) => (inner in values ? values[inner] : whole));
-
-test("render recipe-deriver prints the recipe-deriver block phase-0.md carries, placeholders filled", () => {
-  const c = CASES.find((x) => x.role === "recipe-deriver");
-  const lines = PHASE0_MD.split("\n");
-  const at = lines.findIndex((l) => l.trimStart().startsWith("> Derive, prove and cache the Recipe"));
-  assert.notEqual(at, -1);
-  let end = at;
-  while (lines[end].trimStart().startsWith(">")) end++;
-  const block = lines.slice(at, end).map((l) => l.trimStart().replace(/^> ?/, "")).join("\n") + "\n";
-  const r = render(argvOf(c));
-  assert.equal(r.out, fill(block, { repo: c.args.repo, scratch: c.args.scratch }));
 });
 
 // --- output ----------------------------------------------------------------

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 
 // #172. A fleet member learns what it is, and what to run, only from the blocks
 // run-team phase 2 carries VERBATIM. Everything else in that section is
@@ -55,13 +56,12 @@ const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 const SIZING = readFileSync(join(REPO, "skills", "sizing-a-ticket", "SKILL.md"), "utf8");
 
-// #1804: the member-facing text is the BODY of the implementer agent
-// definition (spec 2026-09-24 § 2 Decision 2), which each harness injects as
-// the member's system prompt — the verbatim carrier the `>` blocks in phase 2
-// used to be. Byte-identical in every `fleet-implementer-<cell>` file
-// (implementer-model-tier.test.mjs pins that), so one file stands for all.
-const AGENT_FILE = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8");
-const memberBlocks = () => AGENT_FILE.split("---").slice(2).join("---");
+// The member-facing text is the member prompt: the BODY of the implementer
+// agent definition, which each harness injects as the member's system prompt
+// (byte-identical in every `fleet-implementer-<cell>` file, so one stands for
+// all), followed by the brief `dispatch-prompt.mjs render implementer` prints.
+// SKILL.md's phase 2 carries neither.
+const memberBlocks = () => memberPrompt("implementer");
 const memberProse = () => Pin.of(memberBlocks(), "memberBlocks()").stripGutter(">").text;
 const phase2 = () => RUN_TEAM.text.slice(RUN_TEAM.anchorAt("## Phase 2", "run-team phase 2"), RUN_TEAM.anchorAt("## Phase 3", "run-team phase 3"));
 

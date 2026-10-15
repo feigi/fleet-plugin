@@ -1,133 +1,68 @@
-// #1002. Phase 2 hands the controller a run of `>` blocks and says to carry
-// each one VERBATIM into every implementer prompt; the Reviewers section does
-// the same for the fix-applier prompt and for the halt-cause text it gives the
-// finisher. Those blocks are the only text a member ever sees.
+// What a member RECEIVES, pinned whole. A member's context is two texts: its
+// agent body, which the harness injects as the system prompt, and the brief
+// `dispatch-prompt.mjs render <role> [--kind <kind>]` prints for it, which is
+// the `task` call's prompt. Nothing else reaches it — run-team/SKILL.md carries
+// no copy of either for the controller to paste. So this file holds each of the
+// two against a known-good copy it owns:
 //
-// The presence pins on them — `dispatch-block-pins-prose.test.mjs`,
-// `member-prompt-prose.test.mjs`, `stash-prohibition-prose.test.mjs`,
-// `fix-applier-correction-rules-prose.test.mjs` — cover the LOCATION half and
-// only that half. A block deleted, gutted or moved out of the `>` quoting reds
-// there. A sentence APPENDED inside a block, carving an exception out of a rule
-// already pinned in it, leaves every pinned fragment byte-identical and stays
-// green; so does a meaning-changing clause inserted MID-GAP, between the two
-// anchors of an `<anchor A>.{0,N}?<anchor B>` span, wherever that gap still has
-// headroom. Both shapes are measured, not assumed — four mutants of the first
-// and four of the second, each recorded on #1002.
+//   tests/fixtures/briefs/<role>[-<kind>].md      the rendered brief, for the
+//                                                 fixed argument set of
+//                                                 support/render-brief.mjs
+//   tests/fixtures/briefs/bodies/<agent>.md       the agent body, frontmatter
+//                                                 excluded; the implementer
+//                                                 cells carry one body and
+//                                                 share one fixture
 //
-// MECHANISM, and #1002's triage ruling. A whole-block golden fixture. Not a
-// tighter regex: `doesNotMatch(/\bunless\b|\bexcept\b/i)` was tried against this
-// exact question and failed all three of its controls — scoped to the pinned
-// sentence it did not kill its own mutant, broadened enough to kill it four
-// rewordings preserved the defect, and it reds on a legitimate edit, since a
-// standing rule containing the word "unless" is exactly the kind of text that
-// belongs in a verbatim block. Not an LLM judge and not a schema'd rule format
-// either: both were considered and rejected on #1002, the first for buying
-// semantics at the price of a nondeterministic gate, the second as a large
-// change that still has to keep these blocks readable as prose. What settles it
-// is what the blocks ARE: verbatim dispatch text, whose whole purpose is
-// reaching the member unchanged. The assertion that fits that is equality
-// against a known-good copy, not the presence of fragments inside it.
+// The presence pins beside this file — dispatch-block-pins-prose,
+// member-prompt-prose, stash-prohibition-prose, fix-applier-correction-rules-
+// prose — cover the LOCATION half: they render the member prompt and name WHICH
+// rule was lost. They cannot see a sentence APPENDED inside a block, carving an
+// exception out of a rule already pinned in it, nor a meaning-changing clause
+// inserted MID-GAP between the two anchors of an `<anchor A>.{0,N}?<anchor B>`
+// span. Both shapes were measured green against those pins; the controls below
+// re-measure each against this file's equality.
 //
-// THE COST IS INTENDED. Because the expected text lives HERE, a legitimate edit
-// to a block reds until its fixture is updated in the same change. These blocks
-// are change-controlled by construction, and that re-blessing is the review
-// point a presence pin does not have. Every failure message below says so and
-// says where, so the next editor updates the fixture deliberately rather than
-// reading the red as breakage.
+// MECHANISM. Whole-text equality against a known-good copy, not a tighter
+// regex: a blacklist (`/\bunless\b|\bexcept\b/i`) failed its own controls — it
+// did not kill its mutant when scoped to the pinned sentence, four trivial
+// rewordings survived when broadened, and it reds on a legitimate standing rule
+// containing "unless". An LLM judge and a schema'd rule format were considered
+// and rejected for a nondeterministic gate and a large change that still has to
+// keep these texts readable as prose. What settles it is what the texts ARE:
+// text whose whole purpose is reaching the member unchanged. The assertion that
+// fits that is equality against a known-good copy.
 //
-// COMPLEMENTARY TO THE PRESENCE PINS, never a replacement, and none of them was
-// deleted for this. A golden red says "this block changed"; a fragment red says
-// WHICH RULE was lost, and that is the more actionable half. Dropping a fragment
-// pin because this file now covers its block would trade a message naming the
-// rule for a diff the reader has to read.
+// THE COST IS INTENDED. The expected text lives in a fixture, so a legitimate
+// edit to a body or a template reds until its fixture is updated in the same
+// change. These texts are change-controlled by construction, and that
+// re-blessing is the review point a presence pin does not have. Every failure
+// message says so and says where.
 //
-// THE FIXTURES ARE OWNED HERE, never derived from `SKILL.md` at test time. A
-// fixture read out of the instruction file compares that file to itself and
-// asserts nothing — which is the one way to write this mechanism so that it
-// passes unconditionally.
+// THE FIXTURES ARE OWNED HERE, never derived from a template or a body at test
+// time: a fixture read out of the file it checks compares that file to itself
+// and asserts nothing.
 //
-// SCOPE. Every block of the implementer agent body and every quote run in the Reviewers
-// section has a fixture, and the two coverage tests below are what keep that
-// true as blocks are added — a block this file does not name is a block a
-// carve-out can be appended to unseen. Prose that is NOT verbatim dispatch text
-// is deliberately left out: the golden form is justified by these blocks being
-// change-controlled, and that argument does not carry to ordinary prose, where
-// the same ceiling stays recorded and open in
-// `immutable-body-claim-prose.test.mjs`. The copies of these blocks in other
-// files are a separate question too — `docs/agents/issue-tracker.md` reproduces
-// the issue-read block, and `tracker-block-copy-prose.test.mjs` compares the two
-// (#374 owns that comparison's own fixture; nothing here touches it).
+// Wrapping is normalized away on both sides, and nothing else is. Every editor
+// that touches a body reflows it, and a pin that reds on a rewrap is one the
+// next person weakens or deletes. `**` emphasis, punctuation and word choice are
+// NOT normalized: they are the verbatim text itself. Paragraph boundaries are
+// kept — a line with no words on it is a break the member reads, so merging two
+// paragraphs is a change and not a rewrap. NESTING DEPTH IS STRUCTURE: the
+// fix-applier body quotes a refuter prompt inside itself, and un-nesting it
+// changes what the fix-applier hands a refuter, so every `>` level is counted
+// and re-emitted as a marker, relative to the text's own outermost level, which
+// is also what makes the comparison reflow-proof.
 //
-// WHERE THE IMPLEMENTER BLOCKS LIVE (#1804). They were a run of `>` quote
-// blocks in SKILL.md's phase 2 until spec 2026-09-24 § 2 Decision 2 moved them
-// into the implementer agent body, `agents/fleet-implementer-<cell>.agent.md`
-// (byte-identical in every cell, pinned by implementer-model-tier.test.mjs), which each harness
-// injects as the member's system prompt; #1804 deleted the SKILL.md copy. The
-// body carries no `>` gutter, so a block there is delimited the only way the
-// body itself can say: it opens on its own opener's paragraph and runs to the
-// paragraph that opens the next fixtured block, or to the end of the body. That
-// makes the body's coverage STRONGER than a quote run's — any paragraph added
-// to it lands inside some fixtured block and reds that block's golden, and the
-// one place outside every block, ahead of the first opener, is pinned empty.
+// What each text must carry is the other half, and the coverage suite owns it:
+// member-text-coverage.test.mjs fails a template or an agent body with no fixture
+// here, and a sentence stated in more than one member-facing file.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { CASES, GOLDEN_DIR, agentBody, agentNames, bodyFixtureName, briefFixtureName, label, renderBrief } from "./support/render-brief.mjs";
 
-const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
-
-// The body alone — everything after the frontmatter's closing `---`.
-const AGENT_FILE = Pin.file(join(REPO, "agents", "fleet-implementer-slow-high.agent.md")).text;
-const BODY = AGENT_FILE.split("---").slice(2).join("---");
-
-// The Reviewers section is sliced before any opener is looked for, for the
-// reason `quoteBlock`'s uniqueness assert would otherwise fire. The body is its
-// own surface and needs no slice; `body` exists so both surfaces take the same
-// shape — each takes the text to slice, defaulting to the real file, so the
-// mutation controls below can re-run the whole extraction against a modified
-// copy instead of asserting against a hand-built imitation of it.
-const body = (text = BODY) => text;
-const reviewers = (text = RUN_TEAM.text) =>
-  Pin.of(text, "run-team/SKILL.md").between("### Reviewers", "### Merge bot", "run-team's Reviewers section").text;
-
-// Wrapping is normalized away on both sides, and nothing else is.
-//
-// Wrapping, because every editor that touches `SKILL.md` reflows it, and a pin
-// that reds on a rewrap is one the next person weakens or deletes. `**`
-// emphasis, punctuation and word choice are NOT normalized: they are the
-// verbatim text itself. This is the one place where the golden is deliberately
-// stricter than the presence pins beside it, which do strip `**` — they have
-// to, because a `**` seam inside a regex-matched span makes the seam's exact
-// position test surface and reds with a message claiming some rule was lost. A
-// golden cannot misdirect that way: its message says the block changed, which a
-// moved `**` is.
-//
-// Paragraph boundaries are kept. A quote line with no words on it is a paragraph
-// break the member reads, so merging two paragraphs is a change to the block and
-// not a rewrap. Any such line closes the paragraph whatever its own gutter says,
-// which is also what keeps a gutter left with a trailing space (`> `) from
-// silently joining two paragraphs — the same false green `prose-pin.mjs`'s
-// `paragraph` matches `\n[ \t]*\n` to avoid.
-//
-// NESTING DEPTH IS STRUCTURE, not text, and this is the half a plain
-// one-level strip gets wrong. The fix-applier prompt quotes a refuter prompt
-// inside itself at `> >`; strip one level and those inner `>` markers become
-// ordinary words, so their position depends on where the OUTER block happens to
-// wrap — a pure reflow of that prompt then reds, which is exactly the false red
-// that gets a pin deleted (measured: the first draft of this file did that, and
-// the fix-applier fixture reddened on a 45-column rewrap of identical words).
-// Strip every level, count it instead, and re-emit the depth as a marker, and
-// the comparison is reflow-proof while un-nesting that prompt — which changes
-// what the fix-applier pastes — still reds.
-//
-// Depth is RELATIVE to the block's own outermost level, so how many gutter
-// levels the FIXTURE carries does not matter: a block re-blessed by copying it
-// out of `SKILL.md` with its `> ` markers left on normalizes the same as one
-// with them taken off, while the nesting INSIDE it is preserved either way.
-// Measured over lines that carry words, never over the breaks — a break written
-// as a bare newline rather than a bare `>` would otherwise drag the base level
-// down and re-read the whole block as one level of nesting.
 const norm = (text) => {
   const rows = text.split("\n").map((line) => {
     const gutter = line.match(/^(?:>[ \t]?)*/)[0];
@@ -150,940 +85,45 @@ const norm = (text) => {
     .join("\n\n");
 };
 
-// The body's blocks, by character span, so a block is always a true substring
-// of the text it came from — the mutation controls splice into the source by
-// `replace(raw, …)` and would silently miss on a rejoined copy.
-const paragraphSpans = (text) => {
-  const spans = [];
-  const sep = /\n[ \t]*\n/g;
-  let at = 0;
-  for (let m; (m = sep.exec(text)) !== null; at = m.index + m[0].length) spans.push([at, m.index]);
-  spans.push([at, text.length]);
-  return spans.filter(([a, b]) => text.slice(a, b).trim() !== "");
+// Loud when a fixture is missing: a loader that returned "" would compare an
+// empty fixture against whatever the text was, or against nothing.
+const fixture = (rel) => {
+  const path = join(GOLDEN_DIR, rel);
+  if (!existsSync(path)) throw new Error(`no golden fixture at tests/fixtures/briefs/${rel} — bless one from the text it is meant to hold; this throws rather than comparing against nothing`);
+  const text = readFileSync(path, "utf8");
+  assert.notEqual(text.trim(), "", `tests/fixtures/briefs/${rel} is empty`);
+  return text;
 };
-const opensOn = (text, [a, b], opener) =>
-  new RegExp(`^${Pin.phrase(opener).source}`).test(text.slice(a, b).split(/\s+/).join(" ").trim());
-const heads = (text, spans) => spans.flatMap((sp, i) => (REGION_BLOCKS.some((b) => opensOn(text, sp, b.opener)) ? [i] : []));
 
-// Loud in both failure directions, for `quoteBlock`'s reason: an extractor that
-// returns "" for a block it cannot find compares empty against empty, and a
-// deleted block passes.
-function bodyBlock(text, opener, what) {
-  const spans = paragraphSpans(text);
-  const at = spans.flatMap((sp, i) => (opensOn(text, sp, opener) ? [i] : []));
-  assert.notEqual(at.length, 0, `${what}: no paragraph of the implementer agent body opens on "${opener}" — the block was deleted or its opening words changed. Re-anchor or restore it; this throws rather than comparing a golden fixture against nothing`);
-  assert.equal(at.length, 1, `${what}: ${at.length} paragraphs of the implementer agent body open on "${opener}" — narrow the opener`);
-  const next = heads(text, spans).find((h) => h > at[0]);
-  return text.slice(spans[at[0]][0], spans[(next ?? spans.length) - 1][1]);
-}
-// Every block the body holds, split at every fixtured opener, plus whatever sits
-// ahead of the first one — text no fixture covers.
-function bodyBlocks(text) {
-  const spans = paragraphSpans(text);
-  const hs = heads(text, spans);
-  return {
-    lead: hs.length === 0 ? text.trim() : text.slice(0, spans[hs[0]][0]).trim(),
-    blocks: hs.map((h, k) => text.slice(spans[h][0], spans[(hs[k + 1] ?? spans.length) - 1][1])),
-  };
-}
+const reblessing = (what, rel) =>
+  `${what} no longer matches its golden fixture. This text reaches a member VERBATIM and is change-controlled, so this red is a re-blessing point, not necessarily a defect: if you edited it on purpose, update tests/fixtures/briefs/${rel} in the SAME change. A pure re-wrap cannot cause this; wrapping is normalized away on both sides. If you did NOT edit it, a sentence or clause was added to it, which is what this fixture exists to catch.`;
 
-// The fixtures. One entry per quote run, in source order — the coverage tests
-// below hold both halves of that: one per run, and in that order.
-//
-// `opener` is the block's identifier: the words it BEGINS with, which is what
-// makes it name the block rather than merely occur in it. `golden` is the block
-// as it must reach the member, gutter stripped, wrapped however `SKILL.md`
-// happened to wrap it when the fixture was last blessed — `norm` makes that
-// wrapping irrelevant on both sides.
-const REGION_BLOCKS = [
-  {
-    what: "the implementer body's unattended-member identity block",
-    opener: "**You are an unattended fleet member.**",
-    golden: [
-      "**You are an unattended fleet member.** No maintainer is reachable, no user",
-      "will answer you, and no approval gate will ever clear for you. Report to the",
-      "controller and to nobody else. Where a skill offers a maintainer-present step",
-      "and an unattended one, yours is the unattended one.",
-    ],
-  },
-  {
-    what: "the implementer body's worktree block",
-    opener: "You are ALREADY in worktree",
-    golden: [
-      "You are ALREADY in worktree `<abs-path>` on branch `<branch>`. Do NOT create",
-      "another worktree. Verify with `git rev-parse --git-dir` and",
-      "`git rev-parse --git-common-dir`. Skip the using-git-worktrees skill's Step 1.",
-    ],
-  },
-  {
-    what: "the implementer body's edit/read session-root block",
-    opener: "**`edit` and `read` resolve",
-    golden: [
-      "**`edit` and `read` resolve a bare relative path against the SESSION ROOT —",
-      "the controller's own main checkout — not against your worktree and not",
-      "against your `bash` cwd. Give them the absolute worktree path on every",
-      "call.** They take no `cwd` parameter, so shell discipline does not reach",
-      "them: a member whose every command is correctly scoped with `cd` or `git -C`",
-      "still leaks through `edit`/`read` alone, and the rev-parse check above",
-      "settles only where your SHELL is. Your worktree is the `<abs-path>` you were",
-      "handed; the main checkout is the parent of `git rev-parse",
-      "--path-format=absolute --git-common-dir`, which you derive yourself — nothing",
-      "substitutes it for you.",
-      "",
-      "So: prefix every `edit` and `read` path with an absolute path — the",
-      "worktree `<abs-path>` for repo files, `<scratch>/impl-<N>/` for scratch —",
-      "never a bare relative one, and never `plugin/scripts/foo.mjs` on its own.",
-      "A `member-write-guard` refusal means the path hit the main checkout — for",
-      "`bash`, a missing or main-checkout `cwd` — so re-issue it absolute, under",
-      "your worktree.",
-    ],
-  },
-  {
-    what: "the implementer body's distilled-brief block",
-    opener: "Here is the ticket's distilled brief",
-    golden: [
-      "Here is the ticket's distilled brief, already read once at the Pull —",
-      "title, plus whichever of the `## Agent Brief` comment or the issue body",
-      "carries the ticket's actual brief, and its `Out of scope`, pasted verbatim:",
-      "`<distilled brief>`. Skip the fetch below if this already answers what you",
-      "need.",
-    ],
-  },
-  {
-    what: "the implementer body's issue-read block",
-    opener: "Read the issue with",
-    golden: [
-      "Read the issue with `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + \": \" + .body)'`.",
-      "Not bare `gh issue view <N> --comments` — non-interactively that prints only",
-      "the comments, and nothing at all when there are none, dropping the title and",
-      "body either way, exit 0, so the loss is silent. The `## Agent Brief` comment",
-      "is authoritative over the issue body. Read the issue **before",
-      "touching code**: with the repo in front of you, still undecided or needing",
-      "human hands you do not have → bail, name the cause, do not implement.",
-    ],
-  },
-  {
-    what: "the implementer body's re-derive block",
-    opener: "**Re-derive the ticket's claims",
-    golden: [
-      "**Re-derive the ticket's claims against `origin/main` before implementing** —",
-      "not the working tree, and not the ticket's line numbers, which drift. The Pull",
-      "runs a cheap version of this check, so what reaches you is what a `grep` could",
-      "not settle; you have the tree, so you are the backstop. Already fixed → report",
-      "that with the commit and do NOT invent work. An acceptance criterion the tree",
-      "now **contradicts** is a bail, not a thing to implement: say which, and stop.",
-    ],
-  },
-  {
-    what: "the implementer body's claim-discipline block",
-    opener: "**Claim discipline, on every ticket:**",
-    golden: [
-      "**Claim discipline, on every ticket:**",
-      "",
-      "1. The issue body is a lead, never a citation. Every factual claim the diff",
-      "   restates needs a settling command run against the tree first.",
-      "2. Write no prose the ticket did not ask for — added prose is where minted",
-      "   claims enter.",
-      "3. No positional references (`the closing/second/last X`); name the thing.",
-      "4. Evidence from another repo is cited by host: a github.com source as",
-      "   `owner/repo#N`; anything else (GHE, GitLab, internal) as prose naming host",
-      "   and repo and saying it cannot be settled from this repo. A bare `#N` is only",
-      "   for the current repo's own issues and PRs.",
-      "5. Never write a count or tally into present-tense prose; state the property",
-      "   instead (`every other test in the file`). A past-tense record of a",
-      "   measurement you performed stays as written.",
-      "6. Every claim in a commit body or PR body gets its settling command re-run at",
-      "   the commit that ships it, written inline beside the claim — a pushed body",
-      "   cannot be edited.",
-      "7. A settling command over literal text uses `grep -F`, and its zero counts",
-      "   only after the same command, with the same flags, finds a line known to",
-      "   match.",
-    ],
-  },
-  {
-    what: "the implementer body's commit-incrementally block",
-    opener: "Commit incrementally as you go",
-    golden: [
-      "Commit incrementally as you go. Do not accumulate a large uncommitted diff — if",
-      "you stop for any reason, uncommitted work is invisible to the controller and",
-      "effectively unrecoverable.",
-    ],
-  },
-  {
-    what: "the implementer body's stash-prohibition block",
-    opener: "**Never `git stash` or `git stash pop` to shelve",
-    golden: [
-      "**Never `git stash` or `git stash pop` to shelve your own progress — take a",
-      "WIP commit instead: `git commit -m wip`, then amend it or",
-      "`git reset --soft HEAD^` once you have something real to commit.** The",
-      "stash stack is repo-global, not per-worktree or per-session — the same",
-      "`refs/stash` is shared by every worktree, the main checkout, and every",
-      "concurrent member. A bare pop takes whichever entry is on top, from any",
-      "worktree, and it is **silent** about it — rc 0, no error — exactly when the",
-      "tree receiving it is clean on the affected paths, which is the moment you",
-      "would assume it is safe; it refuses loudly only when that tree is already",
-      "dirty on them. A bare `git stash` (push) does **not** reach into a sibling",
-      "worktree's uncommitted work — that half is unfounded, it acts on your own",
-      "tree only — so the hazard is entirely on the pop side: yours can take a",
-      "sibling's entry, or a sibling's pop can take yours. Nothing partitions the",
-      "stack the way the scratch root below is partitioned — one `refs/stash` per",
-      "repository, with no per-member address for it — so this prohibition is the",
-      "whole of the protection, not a stopgap standing in for one.",
-    ],
-  },
-  {
-    what: "the implementer body's scratch-discipline block",
-    opener: "**Every scratch file",
-    golden: [
-      "**Every scratch file, fixture or mutation copy you create goes under",
-      "`<scratch>/impl-<N>/`, never into the scratch root by itself.** Your dispatch",
-      "prompt names your partition with an absolute path, and no harness supplies one:",
-      "the root above it is shared with every sibling running this session, so writing",
-      "to it directly, not into your own subdirectory, is the defect. Never build a",
-      "root of your own — if your prompt names no path, ask the controller by name and",
-      "never invent one. Your partition is `<scratch>/impl-<N>/`, shaped the same",
-      "way `claim-ticket.sh` already derives per-ticket ports from the issue",
-      "number (`postgres=16<N>`, `ollama=22<N>`), not a second",
-      "scheme, and `mkdir -p` it yourself the first time — nothing creates it for you.",
-      "The harm is a false measurement, not untidiness: a mutation harness writes a",
-      "broken copy of a file, measures against it, then restores from `.orig`, and",
-      "two members in one directory are one filename collision away from restoring a",
-      "sibling's `.orig` over their own file, or measuring a \"clean baseline\" that is",
-      "actually a sibling's mutant — silently, indistinguishable from a real result.",
-      "This is not the worktree isolation rule: `claim-ticket.sh` already gives you",
-      "your own worktree, and the scratch root sits deliberately outside every",
-      "worktree so a harness never dirties one — nothing partitions the scratch root",
-      "itself but this rule.",
-      "",
-      "**A subagent you dispatch gets its own directory under yours,",
-      "`<scratch>/impl-<N>/<childName>/`, and you write that path, absolute, into its",
-      "prompt — it writes nowhere else, and never derives a path of its own.**",
-      "`<childName>` is a slug of the name you dispatch it under (omp's task `name`) —",
-      "`[a-z0-9-]` only, never the raw field itself,",
-      "which can carry spaces and `/` and would split or nest the path in an",
-      "unquoted shell command — unique among your children and never one of your",
-      "own entries (`probe`, `mutate`, or any other name you write under",
-      "`<scratch>/impl-<N>/` yourself), so no child shares a directory with a",
-      "sibling or with you. A child left to derive its own path has no root to",
-      "derive it from but a guess, which is this block's collision one",
-      "level down — and its files under your partition are what show the controller",
-      "you are alive while you wait on it.",
-    ],
-  },
-  {
-    what: "the implementer body's eval-kernel-discipline block",
-    opener: "**The `eval` kernel is shared",
-    golden: [
-      "**The `eval` kernel is shared with every sibling member and with the",
-      "controller that dispatched you — namespace every binding you make in it, and",
-      "never hand it a relative path.** Measured live, three ways in one",
-      "run: two sibling implementers dispatched in the same batch, and the",
-      "controller above them, reported the SAME Python kernel pid and the same",
-      "runner file, and each could read the others' top-level variables — a bare",
-      "`WT` bound by one member was read back out of another member's own kernel,",
-      "which is the exact collision an earlier member self-reported and could not",
-      "prove. `omp://tools/eval.md` is where the mechanism is written down:",
-      "retained kernels are keyed by `python:${sessionId}`, normalized cwd and",
-      "interpreter (`js:${sessionId}` for the JS VM), and \"Parent and ordinary task",
-      "subagents may share an inherited eval executor id\" — so no part of that key",
-      "separates two members of one run, because the session id is inherited from",
-      "the controller and the cwd is the same main checkout for all of you.",
-      "",
-      "Three consequences. The bare-name collision and a kernel `reset` leave nothing",
-      "`git status` can surface at all; the relative-path hazard does only when the",
-      "cell writes rather than reads. **A bare top-level name is a shared global** a",
-      "sibling can overwrite between two of your own cells, so prefix what you bind",
-      "with your own member NAME, not its bare ticket number —",
-      "`WT_impl_1447`, never a bare `WT` and never a prefix a recovery member for",
-      "the same ticket (`impl-1447-b`) would also produce. **The kernel's cwd is",
-      "the MAIN CHECKOUT, not your worktree** — unlike `bash`, `eval` takes no",
-      "`cwd` parameter at all — so a relative path in a cell resolves into the tree",
-      "every member reads its instruments out of: measured, a bare `work/scripts`",
-      "in a member's cell resolved under the main checkout root, never under that",
-      "member's own worktree — the stray `work/` tree found there has exactly that",
-      "shape — so pass absolute paths rooted at `<scratch>/impl-<N>/` or at your",
-      "worktree, the same discipline the `edit`/`read` block above spells out.",
-      "Treat that as one rule stated twice, with one difference: `member-write-guard`",
-      "refuses a relative `write` or `edit` into the main checkout, and nothing",
-      "refuses one here.",
-      "And **never call",
-      "`eval` with `reset: true`**, which is destructive to every other member",
-      "sharing that backend session, not only to your own state.",
-      "",
-      "Using the kernel is not the defect, and this is not the `isolated` question",
-      "— the bare name, the relative path and the reset are. The harm is that the",
-      "collision fails in the looks-already-correct direction: you read a value",
-      "that is a sibling's rather than your own, and nothing anywhere reports it.",
-    ],
-  },
-  {
-    what: "the implementer body's enumerate-the-class block",
-    opener: "Your ticket names the cases",
-    golden: [
-      "Your ticket names the cases it was written from. **Before implementing, enumerate",
-      "every member of that class — including any the ticket names only in passing — and",
-      "say which you cover and which you deliberately leave** — a guard on one path",
-      "has siblings, a predicate has other inputs, a check on a directory has",
-      "subdirectories. Fixing exactly the named cases is how a fix ships without",
-      "closing its own ticket.",
-      "",
-      "Build that list from **the ticket's own prose first**, then from the mechanism.",
-      "A case the body names in passing is still a named case, and enumerating from",
-      "first principles is how you miss it. Then ask the other half: **what can this",
-      "change wrongly REFUSE?** A new guard's false-positive class is not its",
-      "false-negative class, and a suite that only feeds it valid input pins neither —",
-      "so leave one test behind that feeds it input it must ACCEPT.",
-      "",
-      "**Both halves above are about the bug class. The third is about YOUR EDIT:",
-      "enumerate what your change newly does, not only what the code already did",
-      "wrong.** Moving, reordering or wrapping a statement has effects the ticket",
-      "never mentions — the last command of a script sets its exit status, a",
-      "relocated line changes what `set -e` covers, a hoisted guard changes what runs",
-      "first. **Ask which of the ticket's own acceptance criteria your restructuring",
-      "could newly violate, and test that path.** Measured: a ticket required \"no path in",
-      "the script exits 1\", and the fix for it moved a guard to the file's end,",
-      "regressing the default dry run from exit 0 to exit 1 — the ticket's exact",
-      "defect, relocated onto the path nobody tested. The implementer had enumerated",
-      "every exit-1 path and declared two it was leaving; all of them were",
-      "pre-existing, and none was the one its own edit created.",
-      "",
-      "**Then check the suite can even see the mode you changed.** That regression",
-      "shipped under 616 green tests because all eight call sites passed the same",
-      "flag, so the default mode had no test at all. A green suite is evidence only",
-      "about the paths it exercises.",
-    ],
-  },
-  {
-    what: "the implementer body's sizing-and-PR block",
-    opener: "Run `sizing-a-ticket`",
-    golden: [
-      "Run `sizing-a-ticket` for the process path and proceed on **either row** —",
-      "heavy is never a bail reason, and that skill owns the fleet's heavy-row entry",
-      "point, whose condition you are. A brief that will not support a plan is the",
-      "undecided case: bail and name the cause, never a heavy row. Selection and",
-      "claiming are already done (`next-ticket` steps 1-5), so you start at",
-      "`next-ticket` **step 6**, which is that sizing run.",
-      "",
-      "Then `next-ticket` **step 7**: rebase, re-run tests, push, `gh pr create` with",
-      "`Closes #N` in the body, then `gh pr edit --add-label` as its own command",
-      "carrying exactly one release label — `patch`/`minor`/`major`, the *label*, not",
-      "the branch *type*. **Never fold `--label` into the create**: a create that",
-      "outruns your tool timeout is backgrounded with the PR already open, its flags",
-      "unapplied and no exit status for you to react to, so the label goes missing",
-      "and every later gate still reads the PR as correctly opened. Separate, the",
-      "label write has its own exit status and fails loudly. **Put your step-6 sizing verdict in the PR",
-      "body on its own line, `Sizing: light` or `Sizing: heavy`, and name the signal",
-      "it turned on beside it** — `Sizing: heavy — >3 implementation files, arg.mjs",
-      "plus four consumers`. Your own words, one clause: never paste the skill's",
-      "output, because that format will change and this line has to outlive it. A",
-      "verdict with nothing beside it is indistinguishable from a guess, and is",
-      "recorded as one. The controller reads this line as a difficulty covariate when",
-      "it rules your review, and the PR body is the only place it survives your exit.",
-      "**Report to the controller in the report file your brief names,",
-      "`<scratch>/reports/<your name>.json`: the PR number, the head SHA, and WHEN you",
-      "ran `sizing-a-ticket` relative to opening the PR** — `sizing.ranBeforePr` true",
-      "if you ran it at step 6, before `gh pr create`, and false if you did not,",
-      "including if the `Sizing:` line was written before the run and corrected after;",
-      "`sizing.verdict` and `sizing.signal` are that line's verdict and signal.",
-      "Nothing in the PR body separates a measured verdict from one typed in early;",
-      "that field is the only thing that does, and an unreported ordering costs the",
-      "covariate. A bail is `outcome` `bailed`, its cause in `bailCause`. Then send",
-      "the one line your brief gives, `<your name>: <outcome> <path>`, and exit. Never",
-      "apply `ready-to-merge`, never merge.",
-    ],
-  },
-];
+// --- the rendered briefs ---------------------------------------------------
 
-const REVIEWER_BLOCKS = [
-  {
-    what: "the fix-applier prompt",
-    opener: "You are ALREADY in worktree",
-    golden: [
-      "You are ALREADY in worktree `<abs-path>`, whose PR branch is `<branch>` — the",
-      "push destination below, given to you because a detached worktree cannot supply",
-      "it. Do NOT create another worktree. The review is done and its result is the",
-      "file below — do not re-review, do not dispatch specialists.",
-      "",
-      "**`edit` and `read` resolve a bare relative path against the SESSION ROOT —",
-      "the controller's own main checkout — not against that worktree and not",
-      "against your `bash` cwd, which they share no `cwd` parameter with. Give them",
-      "the absolute worktree path on every call, mutation-probe copies included.**",
-      "The main checkout is the parent of `git rev-parse --path-format=absolute",
-      "--git-common-dir`. A `member-write-guard` refusal means the path hit the",
-      "main checkout — for `bash`, a missing or main-checkout `cwd` — so re-issue",
-      "it absolute, under your worktree.",
-      "",
-      "Read `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` and run **steps 2, 3",
-      "and 5 only**: split apply-now/defer, commit, push, file every deferral as its",
-      "own issue with the label the finding's state calls for. Skip step 1 — the",
-      "review already ran — and steps 4 and 6: the controller owns the CI wait and",
-      "dispatches the finisher.",
-      "",
-      "**The review's result is `<scratch>/pr<pr>/<run>/review.json`** — the digest first",
-      "(`jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}'`),",
-      "then every finding (`jq '.survived'`, `jq '.unverified'`, `jq '.refuted'`).",
-      "Read it through `review-and-fix.md`'s **The review result file**, which holds",
-      "the rest of the recipes and every ruling on the findings: both",
-      "mutual-exclusion scans, the suggested-fix re-derivation, `refuted=false` ≠",
-      "apply, per-site measurement for a sibling-site extension, and `testEnvironment`",
-      "and `cwdAudit` before any result of the shared test run. Every one of those",
-      "rulings is yours — nobody upstream has made one, and the controller never",
-      "reads the findings.",
-      "",
-      "**Every factual claim your diff restates needs a settling command run",
-      "against the tree first** — the issue body is a lead, never a citation.",
-      "**No positional references** (`the closing/second/last X`); name the thing",
-      "semantically. **Never write a COUNT or a tally into prose; state the",
-      "property instead** — unless it is a past-tense record of a measurement you",
-      "performed, which stays as written; a present-tense claim about a live",
-      "property must be restated as a property (`every other test in the file`),",
-      "true at any count. **A settling grep over literal text takes `grep -F`, and",
-      "its zero counts only after the same command finds a line known to match.**",
-      "",
-      "**Apply `survived` findings. A finding in `unverified` whose refuters ran and",
-      "crashed or abstained always defers** — and which it is, you read off",
-      "`refutersDispatched` and `refutersInconclusive`, never off severity and never",
-      "off an empty vote list: `refutersDispatched` above zero with nothing decided",
-      "means every refuter dispatched against it died or abstained, and",
-      "`refutersInconclusive` counts the ones that abstained. Severity records how much a",
-      "finding would matter if true, never whether anything looked. Say *in the",
-      "deferral* which it was rather than that it went unchecked. Name a crash as",
-      "crashed refuters — the review re-dispatched each crash once already and",
-      "reports what died again, so a deferral that names the crash can still be",
-      "re-verified. An abstention is not a crash: cite the inconclusive runs each",
-      "abstaining refuter named in its `reason`, and never describe its refuters as",
-      "crashed. **A `suggestion` is also in `unverified`,",
-      "for a different reason — `refutersDispatched` of zero, the 0-refuter budget",
-      "the review gives that band by policy — and the rule below, not this one,",
-      "covers it.**",
-      "",
-      "**A `suggestion` is budgeted 0 refuters, so it is unchecked until you check",
-      "it.** For each one, first decide scope: is it inside the scope of the PR's own",
-      "ticket, or a different piece of work? **Out of scope → defer and file, never",
-      "apply** — but the claim bar runs first: an out-of-scope suggestion whose",
-      "claim is about shape (`claimKind: shape`) gets no refuter and goes to the",
-      "closed suggestion-band record, and every other one gets the same refuter an",
-      "in-scope one does, dispatched the same way, before it is filed.",
-      "**In scope → dispatch ONE refuter** against the finding before",
-      "touching the tree, biased to refuse, and hand it the prompt below with one",
-      "substitution: resolve `<scratch>/pr<N>/<finding>/` in it to an absolute path",
-      "under your own run root — `mktemp -d` once per round for",
-      "`<scratch>/pr<N>/fix-XXXXXXXX/`, never bare `pr<N>`, since finding ids",
-      "restart at 1 each round too — and write that absolute path into the",
-      "refuter's prompt in its place; a refuter never derives its own path:",
-      "",
-      "> Try to REFUTE this finding. Default to refuted=true if uncertain. Verify by",
-      "> RUNNING something — compile it, run the test, apply the mutation. Do not",
-      "> reason your way to agreement. Observe that run synchronously — run the",
-      "> command, wait for it, read its exit code. Never poll a log file for a",
-      "> completion marker: prefer ONE blocking run to a poll loop, and treat its",
-      "> return as permission to look, never as the answer. Reading a log the run has",
-      "> already finished writing is fine; waiting on one is not. If you match a test",
-      "> reporter's own output, accepting both `ℹ` and `#` is necessary but NOT",
-      "> sufficient — strip SGR escapes first as well. node's prefix moves with the",
-      "> node version and with whether stdout is a TTY, and color wraps the whole line",
-      "> so it begins with ESC and no prefix anchor matches at all, which returns",
-      "> empty at exit 0 — indistinguishable from a hung run and from a run of zero",
-      "> tests. For an uncolored baseline use `env -u FORCE_COLOR`; `FORCE_COLOR=`",
-      "> empty still enables color, so it is not a control. State your search scope",
-      "> AND what your pattern would have missed. A grep over one ref does not",
-      "> support a claim about history; a pattern built from the token a diff removed",
-      "> does not support a claim that the category is empty.",
-      ">",
-      "> When your check scores a mutant killed or a test red, run only in your own",
-      "> copy of the tree, and these rules decide it and nothing else:",
-      ">",
-      "> **Valid red:** a run that completed — the command returned on its own, with no",
-      "> signal and no timeout, deadline or kill having fired — in which the test the",
-      "> claim names is reported failing. An exit ≠ 0 with no failing test is not red,",
-      "> and a different test failing is not red for this claim. A red in the full",
-      "> suite only triggers a narrowed run; it is never evidence on its own.",
-      ">",
-      "> **Narrowed run:** the Test entrypoint with arguments appended, `<testCmd>",
-      "> <args>`. That appended arguments reach the Test entrypoint is all that is",
-      "> promised about them, so a narrowed run counts only if it reports `tests` > 0",
-      "> and its output names the claimed test. If no narrowing can be proven, run the",
-      "> full `<testCmd>` and read the named test's own result from its output.",
-      ">",
-      "> **Kill:** the mutant produced a valid red in a narrowed run, and the same",
-      "> narrowed command, in the same tree with the mutant reverted, ran a valid green",
-      "> with the named test passing — completed, exit 0, `tests` > 0, `cancelled` 0. A",
-      "> completed exit ≠ 0 with the named test not failing is not a kill, and no kill",
-      "> stands without that green run on the unmutated tree. The result is",
-      "> inconclusive, never a kill, when the red does not reproduce in the narrowed",
-      "> run, when the unmutated tree is red too, or when no usable run exists.",
-      ">",
-      "> **Evidence line:** every kill and every valid red you claim carries one line",
-      "> in the claim's own free-text field: `red: <cmd> → exit N, fail K incl <test>;",
-      "> baseline: <cmd> → exit 0, <test> pass`. A failing-test finding filed off the",
-      "> review's shared run carries the `red:` half alone.",
-      ">",
-      "> This refuter has no abstain: a run that could not decide — neither a valid red",
-      "> nor a valid green — is no kill and no refutation, so name the runs in",
-      "> `reason`, each with its evidence line, and leave `refuted` true, so the",
-      "> suggestion defers on the record instead of applying on a check that decided",
-      "> nothing.",
-      ">",
-      "> A failure injection with",
-      "> no positive control has produced NO result, never a negative one. Before you",
-      "> read an injected fault — an env var, an argv word, a mutant — as having had",
-      "> no effect, prove the injection reached the child: one run whose output",
-      "> differs with it present versus absent, or the child echoing the injected",
-      "> value back. Uncontrolled, the cell is unrun — say so in your verdict instead",
-      "> of reporting a no-effect result. Build such an invocation as an array",
-      "> expanded braced and quoted —",
-      "> `cfg=(SETB=1 BADJ=1); env \"${cfg[@]}\" sh ./probe.sh` — or inline the",
-      "> assignments literally — `env SETB=1 BADJ=1 sh ./probe.sh`; NEVER from an",
-      "> unquoted scalar — `cfg=\"SETB=1 BADJ=1\"; env $cfg sh ./probe.sh` — which under",
-      "> zsh passes ONE argument, sets a variable literally named `SETB` to",
-      "> `1 BADJ=1`, never sets `BADJ` at all, and still exits 0. `env $cfg[@]` is not",
-      "> the portable spelling either: measured, bash word-splits it into `SETB=1`",
-      "> and `BADJ=1[@]`, so the injection variable is set to a corrupted value,",
-      "> while zsh behaves exactly as with the bare `$cfg` — `BADJ` never set,",
-      "> exit 0. Everything you",
-      "> write — mutants, fixtures,",
-      "> scratch repos — goes under `<scratch>/pr<N>/<finding>/` and nowhere else;",
-      "> the checkout and any worktree are never write targets, though",
-      "> `git show`/`git archive` at a pinned ref read fine anywhere. Chain the",
-      "> directory change into the command, `cd \"$D\" && git …`, never",
-      "> `cd \"$D\"; git …`, so a failed `cd` cannot leave a `git` command running in",
-      "> the checkout — and bracket a fixture's own git with",
-      "> `git rev-parse --show-toplevel`: before `git init` it must NOT resolve to",
-      "> the host repository, and `fatal: not a git repository` (exit 128) is the",
-      "> usual pass, not a failure — an outer repository whose ignore rules cover",
-      "> your scratch dir is a pass too; before any `git commit` it must resolve to",
-      "> your scratch path, which catches a forgotten `git init` under any enclosing",
-      "> repository — compare resolved forms (`realpath`), since `--show-toplevel`",
-      "> can report a symlinked parent such as `/tmp` or a symlinked `$HOME` under",
-      "> its resolved name.",
-      "",
-      "Survives → apply it, with one hold: if its refuter reports a blast radius",
-      "touching lines another finding also changes, that is the mutual-exclusion",
-      "scan's second input — rule the pair before either change reaches the tree;",
-      "you hold every finding, so only you can see that the two cannot both land. Refuted → defer and file it, and",
-      "say the refutation in the issue body. **Apply only what survives — no report is not a survival.** A",
-      "refuter you never hear from leaves the finding exactly as unchecked as it",
-      "arrived, so it defers like a refuted one.",
-      "",
-      "**Out of scope, the refuter decides only where the suggestion is filed — it",
-      "defers either way, never applied.** Refuted → the closed suggestion-band",
-      "record, never an open issue. Survived, or its refuter crashed or abstained →",
-      "its own open issue labelled `needs-triage`, citing the verdict, or the run",
-      "that crashed, in the body. There is no cap on these refuters: count the ones",
-      "you dispatch against out-of-scope suggestions, since your report names that",
-      "count.",
-      "",
-      "**A finding's `suggested_fix` is a hypothesis, not a patch — the review never",
-      "ran it.** Only the claim is verified adversarially; the remedy text is unchecked.",
-      "Three were wrong as written in one run: a stated end state that dropped a",
-      "load-bearing option and measured RED, an assertion against a property the test",
-      "helper does not expose (`TypeError`), and an enumeration that stopped short of",
-      "two further stale clauses — one of them false in the *dangerous* direction. Run",
-      "the remedy before you commit it, and re-derive an assertion from the post-fix",
-      "tree rather than from the finding, since a sibling finding may edit the very",
-      "text it asserts on.",
-      "",
-      "**Retrieve that report yourself; do not wait to be handed it — this covers the",
-      "refuters YOU dispatch, and only those.** The review's own specialists do leave",
-      "transcripts, but nothing gives you their address: the review had `agent()`",
-      "return their findings into the script, so the result file holds their findings",
-      "and names no transcript, and nothing on disk indexes a transcript by PR or",
-      "dimension. Hunting their paths gets you nothing; read the file. A report from a refuter you spawned is",
-      "different — it surfaces to the controller rather than to you, and waiting for a",
-      "relay that never comes strands the finding. Its transcript is at the output file",
-      "named in your spawn result, and its report is the last record:",
-      "",
-      "A depth-2 helper cannot dispatch further (`task.maxRecursionDepth: 2`); reach it directly instead, by its full dotted id (`<member>.<helper>`), via `hub send` — delivered, woken, no transcript workaround needed.",
-      "",
-      "If retrieval comes back empty, ask the controller by name. Only when neither",
-      "works is the finding **unchecked** — defer and file it, and say so in the body. This is",
-      "`review-and-fix.md`'s **Specialists** rule; it reaches you here because the",
-      "steps that point at it are the ones you skip.",
-      "",
-      "The CI facts in that file apply to you — a `rebase-check` red, or heavy jobs",
-      "`skipped`, **solely** off a non-zero behind-count, is staleness and not a",
-      "failure. Never rebase to clear it. **`solely` is the load-bearing word:**",
-      "`ci.yml`'s `rebase-check` exits 1 on five conditions and only one is",
-      "staleness, so a non-zero behind-count does not by itself settle which fired.",
-      "The job log names the condition — and because the staleness condition exits",
-      "before the merge-commit condition is evaluated, the log is silent on that one",
-      "by construction, so measure it separately with",
-      "`git fetch origin && git rev-list --merges --count \"origin/<base>..HEAD\"` —",
-      "keep the fetch, or a stale local `origin/<base>` widens the range over the",
-      "base's own merge commits and reports a merge commit this branch never added.",
-      "A non-zero count does not send you to a local rebase either: the merge bot's",
-      "step-1 `gh pr update-branch --rebase` drops merge commits too",
-      "(`run-merge-bot.md` step 1), so both conditions clear on that one server-side",
-      "rebase. What it buys you is knowing the red was never solely staleness.",
-      "",
-      "**Run `<testCmd>` from the worktree before committing**, copied verbatim.",
-      "`tests 0` is a FAILED run, not a pass. Red or zero-test → fix it, or move that",
-      "finding to defer; never commit over it. **Never `--no-verify`** — a failing",
-      "hook is a finding you report, not an obstacle you route around. Report the test",
-      "result with your SHA. Nothing re-reviews this commit: the review ran against a",
-      "snapshot cut before your edits existed, and a refuter checked the finding's",
-      "claim, never your patch.",
-      "",
-      "**A test you ADD must kill its own mutant** — break what it pins, confirm it and",
-      "only it goes red and that the red is a kill by the rules below, restore. **Then",
-      "a change it should *not* catch, staying green** — else you proved it fails, not",
-      "that it discriminates: a pin asserting whole-file text clears \"it and only it",
-      "goes red\" and still reddens on any edit (measured). A green suite says nothing",
-      "about a new test: one pin this run survived the exact mutation it was named for.",
-      "",
-      "**Valid red:** a run that completed — the command returned on its own, with",
-      "no signal and no timeout, deadline or kill having fired — in which the test",
-      "the claim names is reported failing. An exit ≠ 0 with no failing test is not",
-      "red, and a different test failing is not red for this claim. A red in the full",
-      "suite only triggers a narrowed run; it is never evidence on its own.",
-      "",
-      "**Narrowed run:** the Test entrypoint with arguments appended,",
-      "`<testCmd> <args>`. That appended arguments reach the Test entrypoint is all",
-      "that is promised about them, so a narrowed run counts only if it reports",
-      "`tests` > 0 and its output names the claimed test. If no narrowing can be",
-      "proven, run the full `<testCmd>` and read the named test's own result from its",
-      "output.",
-      "",
-      "**Kill:** the mutant produced a valid red in a narrowed run, and the same",
-      "narrowed command, in the same tree with the mutant reverted, ran a valid green",
-      "with the named test passing — completed, exit 0, `tests` > 0, `cancelled` 0. A",
-      "completed exit ≠ 0 with the named test not failing is not a kill, and no kill",
-      "stands without that green run on the unmutated tree. The result is",
-      "inconclusive, never a kill, when the red does not reproduce in the narrowed",
-      "run, when the unmutated tree is red too, or when no usable run exists.",
-      "",
-      "**Evidence line:** every kill and every valid red you claim carries one line",
-      "in the claim's own free-text field:",
-      "`red: <cmd> → exit N, fail K incl <test>; baseline: <cmd> → exit 0, <test> pass`.",
-      "A failing-test finding filed off the review's shared run carries the `red:`",
-      "half alone.",
-      "",
-      "An inconclusive result proves nothing about the test: do not report the test",
-      "as proven, and measure again in a clean state. Put each kill's evidence line in",
-      "your report, beside the test result.",
-      "",
-      "**A mutation that never landed is not a green — it is a cell that did not",
-      "run.** Same rule for any fault you inject to see what breaks: prove the",
-      "injection reached the child before you read its result — one run whose output",
-      "differs with the injection present versus absent, or the child echoing the",
-      "injected value back. Without one, a probe that exits 0 reporting the mutant",
-      "behaving exactly like its baseline is indistinguishable from a real no-effect",
-      "result, and a reproduction that never happened reads as a refutation. Build",
-      "such an invocation as an array expanded braced and quoted —",
-      "`cfg=(SETB=1 BADJ=1); env \"${cfg[@]}\" sh ./probe.sh` — or inline the",
-      "assignments literally — `env SETB=1 BADJ=1 sh ./probe.sh`; NEVER from an",
-      "unquoted scalar — `cfg=\"SETB=1 BADJ=1\"; env $cfg sh ./probe.sh` — which under",
-      "zsh passes ONE argument, sets a variable literally named `SETB` to `1 BADJ=1`,",
-      "never sets `BADJ` at all, and still exits 0. `env $cfg[@]` is not the portable",
-      "spelling either: measured, bash word-splits it into `SETB=1` and",
-      "`BADJ=1[@]`, so the injection variable is set to a corrupted value, while",
-      "zsh behaves exactly as with the bare `$cfg` — `BADJ` never set, exit 0.",
-      "",
-      "**Commit BEFORE you mutate, and restore with `cp`, never a git discard.**",
-      "`git checkout -- <file>` reverts the whole file, not your mutant — so it also",
-      "eats uncommitted edits you made earlier, and the \"clean baseline\" you measure",
-      "next is silently the reverted file. Two members hit this in one run; one lost",
-      "prose edits and caught it only because a non-catch control failed. Copy the",
-      "file aside and copy it back. Better still, mutate a copy under",
-      "`<scratch>/pr<N>/mutate/` and leave the worktree untouched — that is what",
-      "refuters are already required to do, and it has no blast radius at all.",
-      "",
-      "**Never `git stash` or `git stash pop` here either — a WIP commit is the",
-      "substitute, not a second scratch mechanism: `git commit -m wip`, then",
-      "restore or amend once you're back to real work.** The stash stack is",
-      "repo-global too, not per-worktree or per-session — the same `refs/stash`",
-      "every concurrent member and the main checkout share, not partitioned the",
-      "way `<scratch>/pr<N>/mutate/` above is. A bare pop takes whichever entry is",
-      "on top, from any worktree, silently — rc 0, no error — when the tree",
-      "receiving it is clean on the affected paths, and refuses only when that",
-      "tree is already dirty there. A bare `git stash` (push) does not reach into",
-      "a sibling's tree, so that half is not the risk — the pop is. Nothing",
-      "partitions the stack; this prohibition is the whole of the protection.",
-      "",
-      "**Report LAST, and only once nothing can still change.** A report you have",
-      "sent **pins that SHA** for the controller, which dispatches a finisher against",
-      "it. If a further instruction arrives after you have reported, reply saying the",
-      "SHA is moving *before* you touch the tree again — do not silently do the work",
-      "and re-report. Measured: three members in one run sent a final report and kept",
-      "working; one had its worktree audited mid-mutation, another handed over a SHA",
-      "that was two commits stale, and a finisher dispatched on either would have",
-      "halted on a diverged head.",
-      "",
-      "**Before you report, write every ruling to `<scratch>/dispositions-<your name>.json`**,",
-      "`<your name>` the `fix-pr-<pr>[-x]` you were dispatched as — the record the controller checks with",
-      "`dispositions-check.mjs` before it dispatches any finisher. It is",
-      "`{\"head\": \"<the review file's head>\", \"run\": \"<the run root's name in the review path>\", \"entries\": [ … ]}`",
-      "— `run` the `<run>` of the review path above, which the check holds against the",
-      "review the PR's latest `reviewed=` names: a record written against an earlier",
-      "review, a same-head one included, is a mismatch. One entry per",
-      "`survived` finding and per `unverified` finding, plus one per `refuted`",
-      "finding you reverse. Each entry carries `bucket`",
-      "(`survived|unverified|refuted`), `index` (its position in that bucket of the",
-      "review file), `scope` (`in|out`), `claimKind` (`behavior|shape`) and",
-      "`disposition` (`apply|defer`), and where they apply `reason`, `issue` (the",
-      "number you filed it to or commented on), `verdictPath` (a suggestion's",
-      "refuter verdict file, in scope and, above the claim bar, out of scope) and",
-      "`remedyFiles` (the files its remedy names). An out-of-scope suggestion whose",
-      "refuter crashed before any verdict reached you still names the path its",
-      "verdict would have taken. A `refuted` entry carries `scope`, `claimKind` and `disposition`",
-      "like every other entry, and a non-empty `reason` holding the evidence that",
-      "reverses it; a missing or blank `reason` is a mismatch. A finding with no",
-      "`line`, or on a line the PR's diff touched —",
-      "`git diff` from its merge-base with `origin/main` to the review's head — is",
-      "in scope whatever its `scope` says. An in-scope `survived` finding you defer",
-      "carries `reason` `false-rationale`, `mutual-exclusion`, `remedy-worse` or",
-      "`remedy-outside-diff`; the last needs `remedyFiles` to name a file the PR's",
-      "diff does not touch, and for a `critical` or `important` finding it sends the",
-      "PR to a human instead of passing. Any",
-      "other reason, none, or a `survived` or `unverified` finding with no entry is",
-      "a mismatch, and the PR gets no finisher. `disposition` has no `dismiss`: an",
-      "in-scope `survived` finding verified correct, needing no change, is deferred",
-      "with `reason` `false-rationale` and filed on the closed suggestion-band",
-      "record.",
-      "",
-      "Then write your report to the file your brief names,",
-      "`<scratch>/reports/<your name>.json`: `head` the pushed SHA, `applied` and",
-      "`deferred` your apply/defer split by bucket and index, each deferral's issue",
-      "number on its `deferred` entry, the deferral issues as `{issue, subject}`",
-      "entries — `filed` for every issue step 5 created, and `unrecorded` for one",
-      "whose `ledger.mjs filed` failed twice, which the controller's settle records —",
-      "`dispositionsRecord` your record's path and `testRun` your test result. Then",
-      "send the one line your brief gives, `<your name>: <outcome> <path>`, and exit.",
-      "**Deferring everything is a normal",
-      "outcome, not a stall:** nothing is then staged, `git commit` refuses an empty",
-      "index, `git push origin HEAD:<branch>` prints `Everything up-to-date`, and your",
-      "report's `outcome` is `no-op`, its `head` the unchanged SHA. Say it",
-      "explicitly — silence there is indistinguishable from a member that died. Never",
-      "manufacture a commit to make CI fire.",
-    ],
-  },
-  {
-    what: "the finisher's instrument re-check block",
-    opener: "**Re-check the instrument set before you act on what duty 1 or duty 2 read",
-    golden: [
-      "**Re-check the instrument set before you act on what duty 1 or duty 2 read,",
-      "and again before you add the label.**",
-      "`~/.fleet/bin/fleet-run instruments.sh --repo \"$(dirname \"$(env -u GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir)\")\"`.",
-      "Exit 0 is the only code that lets you go on. Exit 1 (the set changed) and",
-      "exit 2 (the check could not answer) both halt you: report what it printed,",
-      "add no label, and do NOT re-read the script that gave you the reading.",
-      "`--repo` is required and the spelling is the point — the run's baseline lives",
-      "in the audited checkout's gitignored `.fleet/`, which the scratch worktree",
-      "you take at duty 2 does not carry, so a bare invocation from there exits 2 on",
-      "a missing baseline instead of comparing anything. The `env -u GIT_DIR -u",
-      "GIT_WORK_TREE` wrapper guards against an ambient `GIT_DIR` in your own shell",
-      "pointing this check at the wrong tree — the script's own internal unset",
-      "cannot reach back and fix a path you already resolved wrong. The baseline",
-      "itself names the tree to audit: a cross-workspace run pinned it once at",
-      "phase 0, and your `--repo` only locates that baseline, never the audited",
-      "tree — so an exit 2 naming a moved or unreadable audited tree is a halt",
-      "like every other, not a spelling for you to correct.",
-    ],
-  },
-  {
-    what: "the finisher's test-run verdict block",
-    opener: "**A test run is a verdict only if it ran to completion",
-    golden: [
-      "**A test run is a verdict only if it ran to completion — and you read that",
-      "off the test command's own exit status.**",
-      "Redirect the run's output to a file in your scratch directory and read the",
-      "command's own `$?` straight after it, then read the file. In an `eval` cell",
-      "there is no `$?`: spawn `<testCmd>` with its output going to that file and",
-      "read the exit code and the signal off the spawn result — `exitCode` and",
-      "`signalCode` on Bun's `spawnSync`, `returncode` on Python's `subprocess.run`,",
-      "which is negative for a signal. Never read the status of",
-      "`<testCmd> | tail` or `<testCmd> | grep`: a pipeline's status is its",
-      "last stage's, so the filter's 0 hides the run's own exit, and the array that",
-      "holds the earlier stages' statuses is spelled differently per shell. A run is",
-      "a verdict only when that exit status is 0 **and** its summary shows `tests`",
-      "above 0 and `cancelled` 0. A summary line without that",
-      "is not a verdict, whatever pass count it prints.",
-      "**A run completed when the command itself returned on its own** — an exit",
-      "code, no signal, and no `timeout`, deadline or kill of yours having fired.",
-      "Judge that by how the run ended, never by its `cancelled` count: a failing",
-      "`before` hook or a per-test `timeout` cancels tests inside a run that",
-      "completed, and a SIGTERM'd `node --test` can exit 1 with `cancelled` above 0",
-      "in a run that did not.",
-      "**Any run that did not complete is a killed run** — 124 (`timeout`), 137",
-      "(SIGKILL), 143 (SIGTERM), a signal in the spawn result, an `eval` cell's",
-      "deadline — and read for green it is FAILED, the same bucket as",
-      "`tests 0`, however many tests had passed before the kill. Halt with cause",
-      "`other` and the exit code plus the summary line as evidence; label nothing.",
-      "The same holds for the mutation gate: a killed run is not a mutant that",
-      "reddened, and the files it cancelled are not failures — only a run that",
-      "completed can kill a mutant. A completed run that exits 1 is not a killed run",
-      "either, whatever its `cancelled` count, and not a killed mutant on its exit",
-      "status alone: the acceptance mutation scores a kill only by the rules below.",
-      "Exit 0 with `tests 0` stays FAILED.",
-      "Do not wrap `<testCmd>` in an external `timeout`. Run a long suite in one",
-      "`eval` cell with `timeout: 0`, as the review runner does, and wait for it.",
-      "",
-      "**Valid red:** a run that completed — the command returned on its own, with",
-      "no signal and no timeout, deadline or kill having fired — in which the test",
-      "the claim names is reported failing. An exit ≠ 0 with no failing test is not",
-      "red, and a different test failing is not red for this claim. A red in the full",
-      "suite only triggers a narrowed run; it is never evidence on its own.",
-      "",
-      "**Narrowed run:** the Test entrypoint with arguments appended,",
-      "`<testCmd> <args>`. That appended arguments reach the Test entrypoint is all",
-      "that is promised about them, so a narrowed run counts only if it reports",
-      "`tests` > 0 and its output names the claimed test. If no narrowing can be",
-      "proven, run the full `<testCmd>` and read the named test's own result from its",
-      "output.",
-      "",
-      "**Kill:** the mutant produced a valid red in a narrowed run, and the same",
-      "narrowed command, in the same tree with the mutant reverted, ran a valid green",
-      "with the named test passing — completed, exit 0, `tests` > 0, `cancelled` 0. A",
-      "completed exit ≠ 0 with the named test not failing is not a kill, and no kill",
-      "stands without that green run on the unmutated tree. The result is",
-      "inconclusive, never a kill, when the red does not reproduce in the narrowed",
-      "run, when the unmutated tree is red too, or when no usable run exists.",
-      "",
-      "**Evidence line:** every kill and every valid red you claim carries one line",
-      "in the claim's own free-text field:",
-      "`red: <cmd> → exit N, fail K incl <test>; baseline: <cmd> → exit 0, <test> pass`.",
-      "A failing-test finding filed off the review's shared run carries the `red:`",
-      "half alone.",
-      "",
-      "An inconclusive acceptance mutation is neither a kill nor a pass: halt with",
-      "cause `other`, with both runs — the mutant's and the unmutated tree's — as",
-      "evidence; label nothing. A kill's evidence line goes in your report.",
-    ],
-  },
-  {
-    what: "the finisher's duty-3 one-script block",
-    opener: "**Duty 3 is one script, and its exit code is your verdict.**",
-    golden: [
-      "**Duty 3 is one script, and its exit code is your verdict.**",
-      "`~/.fleet/bin/fleet-run finisher-label.mjs --pr <M> --pin <your dispatch pin>`",
-      "(the full SHA). It confirms exactly one of `patch`/`minor`/`major` is on the",
-      "PR, records the head you audited, adds `ready-to-merge`, and reads the labels",
-      "back. Exit 0 is the only code that means the label is on. Exit 3 means the PR",
-      "carries zero or more than one release label: you are halted before the label,",
-      "and the receipt names which it found. Exit 4 means the read-back does not carry",
-      "the label, written or not. Exit 2 means a `gh` call or the invocation",
-      "itself failed: report the stderr it printed. Every non-zero exit halts you",
-      "with cause `other`, with the receipt as evidence, and you do not run any of",
-      "its steps by hand to get past it. A repo whose label list defines none of the",
-      "three does not gate on one, and the script says so in its receipt. Put the",
-      "receipt, the JSON line it printed, in your report as printed: it is what tells",
-      "the controller the label is on.",
-    ],
-  },
-  {
-    what: "the finisher's halt-cause block",
-    opener: "**Duty 1 is one script, and its exit code is your verdict.**",
-    golden: [
-      "**Duty 1 is one script, and its exit code is your verdict.**",
-      "`~/.fleet/bin/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`",
-      "(the path you were dispatched with, and the full SHA). It finds your",
-      "worktree's row, reads whether the tree is dirty, compares the worktree's",
-      "`HEAD` to your pin, and when the head differs derives the cause from the",
-      "reflog. Exit 0, with `cause` null, is the only code that means the worktree is",
-      "clean at your pin. Exit 1 means `cause` is non-null: you are halted, and",
-      "`cause` is the word you name — `live-editor`, `rebase`, `past-pin`,",
-      "`unreadable`, `missing`, `absent` or `other`, and `other` is a cause too, not",
-      "a gap. Exit 2 means the script could not look: you are halted with cause",
-      "`other`, with the line it printed on stderr as the evidence.",
-      "",
-      "The pin is the SHA you were dispatched against, never `PR headRefOid`: a",
-      "member that kept working and pushed after the pin matches the branch tip on a",
-      "clean tree, so a headRefOid comparison reports \"settled\" over commits no",
-      "reviewer read — the exact divergence this halt exists to catch. You do not",
-      "run any of the script's steps by hand to get past a halt or to second-guess",
-      "it. Put the verdict, the JSON line it printed, in your report as printed: its",
-      "`evidence` is what the controller resolves the halt from.",
-      "",
-      "Every cause halts, always — named or not, you never verify the dirt is",
-      "harmless and label over it, a rebase is not a fast-forward you get to accept,",
-      "a commit past the pin is not one either, and a cause you could not name is",
-      "the least settled of the lot. Naming the cause makes the halt cheap to",
-      "resolve, never a reason to skip it.",
-    ],
-  },
-];
-
-const SURFACES = [
-  {
-    label: "the implementer agent body", file: "agents/fleet-implementer-slow-high.agent.md", source: BODY, slice: body,
-    extract: bodyBlock, all: (text) => bodyBlocks(text).blocks, blocks: REGION_BLOCKS, table: "REGION_BLOCKS",
-  },
-  {
-    label: "run-team's Reviewers section", file: "skills/run-team/SKILL.md", source: RUN_TEAM.text, slice: reviewers,
-    extract: (text, opener, what) => Pin.of(text, "run-team's Reviewers section").quoteBlock(opener, what).text,
-    all: (text) => Pin.of(text, "run-team's Reviewers section").quoteBlocks().map((run) => run.text),
-    blocks: REVIEWER_BLOCKS, table: "REVIEWER_BLOCKS",
-  },
-];
-const ALL = SURFACES.flatMap(({ file, source, slice, extract, blocks, table }) =>
-  blocks.map((b) => ({ ...b, file, source, slice, extract, table })));
-
-// Says the red is a re-blessing point, and where. A golden's failure message is
-// the whole difference between an editor updating the fixture on purpose and an
-// editor reading an equality failure as breakage and loosening the comparison.
-const reblessing = (what, table, file) =>
-  `${what} no longer matches its golden fixture. These blocks reach a member VERBATIM and are change-controlled, so this red is a re-blessing point, not necessarily a defect: if you edited the block on purpose, update the "${what}" entry in \`${table}\` in plugin/scripts/dispatch-block-golden-prose.test.mjs in the SAME change — copy the block out of plugin/${file}, with or without any "> " markers. A pure re-wrap cannot cause this; wrapping is normalized away on both sides. If you did NOT edit it, a sentence or clause was added to the block, which is what this fixture exists to catch.`;
-
-for (const { what, opener, golden, slice, extract, table, file } of ALL) {
-  test(`${what} matches its golden fixture`, () => {
-    assert.equal(norm(extract(slice(), opener, what)), norm(golden.join("\n")), reblessing(what, table, file));
+for (const c of CASES) {
+  const rel = briefFixtureName(c);
+  test(`${label(c)}'s rendered brief matches its golden fixture`, () => {
+    assert.equal(norm(renderBrief(c.role, c.kind)), norm(fixture(rel)), reblessing(`${label(c)}'s rendered brief`, rel));
   });
 }
 
-// The coverage half, and what keeps the mechanism from decaying one block at a
-// time: a block added to a dispatch surface that this file does not name is a
-// block an appended carve-out reaches unseen, and every per-block test above
-// would still pass. Compares the located runs against ALL the surface's runs, so
-// an unfixtured block reds, and so does a reordering — which changes the order
-// the member reads the rules in.
-//
-// Source-to-source, never against the fixtures: the equality tests above own
-// that comparison, and repeating it here would red twice for one edit while
-// saying nothing about coverage.
-for (const { label, slice, extract, all, blocks, table } of SURFACES) {
-  test(`every verbatim block in ${label} has a golden fixture, in source order`, () => {
-    assert.deepEqual(
-      blocks.map((b) => extract(slice(), b.opener, b.what)),
-      all(slice()),
-      `${label} holds a quote block \`${table}\` does not name, or its blocks were reordered. A block with no fixture is one a carve-out can be appended to with this whole file green — add it to \`${table}\`, in source order.`,
-    );
+// --- the agent bodies ------------------------------------------------------
+
+for (const agent of agentNames()) {
+  const rel = `bodies/${bodyFixtureName(agent)}`;
+  test(`${agent}'s body matches its golden fixture`, () => {
+    assert.equal(norm(agentBody(agent)), norm(fixture(rel)), reblessing(`${agent}'s body`, rel));
   });
 }
 
-// The body's one uncovered place: text ahead of its first fixtured opener
-// belongs to no block, so no golden sees a rule added there.
-test("the implementer agent body opens on its first fixtured block, with nothing ahead of it", () => {
-  assert.equal(
-    bodyBlocks(BODY).lead,
-    "",
-    "agents/fleet-implementer-slow-high.agent.md carries text ahead of its first fixtured block — a rule added there reaches every member and no golden fixture sees it",
-  );
-});
+// --- the controls: what this mechanism must ACCEPT, and what it must REFUSE ----
 
-// The Reviewers coverage test above is bounded by its OWN surface's anchors —
-// a verbatim block added past `reviewers()`'s anchors (or wherever a future
-// dispatch surface lands in SKILL.md) is invisible to it and to the whole prose
-// suite. This test catches that shape: it counts every quote run in the WHOLE
-// file and asserts it equals the runs inside the Reviewers section, so a quote
-// run anywhere else reds here even though no per-surface loop above saw it.
-// That includes a re-pasted copy of the implementer blocks, which #1804 removed
-// from phase 2 because the agent body now carries them (a copy here would be
-// a second source free to drift from the one members actually read).
-test("run-team/SKILL.md has no verbatim block outside the fixtured Reviewers section", () => {
-  assert.equal(
-    RUN_TEAM.quoteBlocks().length,
-    Pin.of(reviewers(), "run-team's Reviewers section").quoteBlocks().length,
-    "run-team/SKILL.md holds a quote block outside the Reviewers section — a block added there is invisible to the coverage tests above, and an implementer block re-pasted into phase 2 is a second copy of what the agents/fleet-implementer-<cell>.agent.md body already carries",
-  );
-});
-
-// Re-wrapped, one gutter depth at a time, so the fix-applier prompt's nested
+// Re-wrapped, one gutter depth at a time, so the fix-applier body's nested
 // refuter prompt is re-wrapped as its own quote rather than having its inner `>`
 // markers shuffled into the outer text. Wrapping at word boundaries, never one
-// word per line: an unconditional break would split the block's own opener and
-// red the extractor on its anchor instead of exercising the comparison.
-const rewrap = (block, width) =>
-  block
+// word per line: an unconditional break would split a block's own opener.
+const rewrap = (text, width) =>
+  text
     .split("\n")
     .reduce((groups, line) => {
       const gutter = line.match(/^(?:>[ \t]?)*/)[0];
@@ -1094,8 +134,8 @@ const rewrap = (block, width) =>
       else groups.push({ gutter, depth, text: words === "" ? [] : [words] });
       return groups;
     }, [])
-    .map(({ gutter, text }) => {
-      const words = text.join(" ").split(/\s+/).filter(Boolean);
+    .map(({ gutter, text: t }) => {
+      const words = t.join(" ").split(/\s+/).filter(Boolean);
       if (words.length === 0) return gutter.trimEnd();
       return words
         .reduce((out, w) => {
@@ -1110,132 +150,94 @@ const rewrap = (block, width) =>
     .join("\n");
 
 // The ACCEPT side, and the half that decides whether this mechanism survives
-// contact with an editor. Re-wrapping is not drift, and a golden that reddened
-// on it would be re-blessed once and then deleted.
-//
-// Every block, not one: these fixtures were blessed at TODAY'S wrap points, so a
-// `norm` that handled them by accident would pass a single-block control. The
-// staleness guard is per block for the same reason the comparison is — a block
-// already at the target width would be re-wrapped to itself and prove nothing.
-test("a re-wrapped block does not red — this mechanism refuses drift, not reflow", () => {
-  for (const { what, opener, golden, slice, extract, source } of ALL) {
-    const raw = extract(slice(), opener, what);
+// contact with an editor. Every text, not one: the fixtures were blessed at
+// TODAY'S wrap points, so a `norm` that handled them by accident would pass a
+// single-text control. The staleness guard is per text for the same reason.
+test("a re-wrapped body or brief does not red — this mechanism refuses drift, not reflow", () => {
+  const texts = [
+    ...CASES.map((c) => [`${label(c)}'s rendered brief`, renderBrief(c.role, c.kind), fixture(briefFixtureName(c))]),
+    ...agentNames().map((a) => [`${a}'s body`, agentBody(a), fixture(`bodies/${bodyFixtureName(a)}`)]),
+  ];
+  for (const [what, raw, golden] of texts) {
     const narrow = rewrap(raw, 45);
     assert.notEqual(narrow, raw, `the rewrap fixture no longer changes ${what}'s wrapping — it is already at or below 45 columns, so this control proves nothing about it`);
-    // Replacer function, not a replacement string: `$&`, `$'` and `` $` `` are
-    // interpreted in the latter, and the fix-applier prompt carries a literal
-    // `$(...)` command substitution today.
-    const mutated = source.replace(raw, () => narrow);
-    const after = extract(slice(mutated), opener, what);
-    assert.notEqual(after, raw, `the re-wrap never landed in ${what}'s slice — this control did not run`);
-    const flat = norm(after);
-    assert.equal(flat, norm(golden.join("\n")), `${what} reds on a pure re-wrap — the words are identical and only the wrap points moved, so the normalization above is broken, not the block`);
+    assert.equal(norm(narrow), norm(golden), `${what} reds on a pure re-wrap — the words are identical and only the wrap points moved, so the normalization above is broken, not the text`);
   }
 });
 
-// The REFUSE side, mutant by mutant. Each entry is a carve-out appended inside a
-// block, after the rule it contradicts, keeping every word the presence pins
-// match — the shape #1002 measured green against those pins four times, twice
-// over on two different suites.
-//
-// `after` is asserted to be the block's own tail before the carve-out is
-// appended, so a control that stops testing the measured insertion point says so
-// instead of quietly moving to a different one.
+// The REFUSE side, mutant by mutant. Each entry is a carve-out appended right
+// after the sentence it contradicts, keeping every word the presence pins
+// match — the shape measured green against those pins. `after` is asserted to
+// occur exactly once in the body, so a control that stops testing the measured
+// insertion point says so instead of quietly moving to a different one.
 const APPENDED = [
-  {
-    what: "the implementer body's commit-incrementally block",
-    after: "effectively unrecoverable.",
-    carveOut: "A single commit at the end is fine when the diff is small.",
-  },
-  {
-    what: "the implementer body's enumerate-the-class block",
-    after: "A green suite is evidence only about the paths it exercises.",
-    carveOut: "Skip the enumeration entirely when the ticket names only one case.",
-  },
-  {
-    what: "the implementer body's re-derive block",
-    after: "say which, and stop.",
-    carveOut: "If the criterion looks close enough, implement it anyway.",
-  },
-  {
-    what: "the implementer body's claim-discipline block",
-    after: "finds a line known to match.",
-    carveOut: "Skip all of this when the ticket is a pure code change.",
-  },
-  {
-    what: "the implementer body's issue-read block",
-    after: "bail, name the cause, do not implement.",
-    carveOut: "Unless the tree looks tractable to you, in which case implement anyway.",
-  },
+  { agent: "fleet-implementer-slow-high", after: "effectively unrecoverable.", carveOut: "A single commit at the end is fine when the diff is small." },
+  { agent: "fleet-implementer-slow-high", after: "A green suite is evidence only about the paths it exercises.", carveOut: "Skip the enumeration entirely when the ticket names only one case." },
+  { agent: "fleet-implementer-slow-high", after: "say which, and stop.", carveOut: "If the criterion looks close enough, implement it anyway." },
+  { agent: "fleet-implementer-slow-high", after: "finds a line known to match.", carveOut: "Skip all of this when the ticket is a pure code change." },
+  { agent: "fleet-implementer-slow-high", after: "bail, name the cause, do not implement.", carveOut: "Unless the tree looks tractable to you, in which case implement anyway." },
+  { agent: "fleet-fix-applier", after: "manufacture a commit to make CI fire.", carveOut: "A commit is fine when CI is slow to start." },
+  { agent: "fleet-finisher", after: "never a reason to skip it.", carveOut: "A named cause that looks harmless may be labelled over." },
+  { agent: "fleet-merge-bot", after: "instead of arming your own watcher.", carveOut: "Arm your own watcher as well when the queue is long." },
 ];
 
-test("a carve-out appended inside a block reds — the shape the presence pins cannot see", () => {
-  for (const { what, after, carveOut } of APPENDED) {
-    const entry = ALL.find((b) => b.what === what);
-    assert.ok(entry, `${what} has no golden fixture, so this mutant cannot be measured against one`);
-    const raw = entry.extract(entry.slice(), entry.opener, what);
-    assert.ok(
-      norm(raw).endsWith(after),
-      `${what} no longer ends on "${after}" — this mutant's measured insertion point moved, so appending after it no longer tests what #1002 measured`,
-    );
-    // Appended to the block's last line, so the carve-out lands INSIDE the block
-    // — its last paragraph — rather than after it. A mutation that
-    // never landed is not a green: the guard above and this splice's own
-    // difference from `raw` are what make the assertion below evidence.
-    const mutant = `${raw} ${carveOut}`;
-    assert.notEqual(mutant, raw, "the mutant is identical to the block — nothing was appended");
+test("a carve-out appended inside a body reds — the shape the presence pins cannot see", () => {
+  for (const { agent, after, carveOut } of APPENDED) {
+    const raw = agentBody(agent);
+    // Located through `phrase()`: a sentence wraps wherever the body's editor
+    // left it, and a literal anchor would stop finding it on a reflow.
+    const anchor = new RegExp(Pin.phrase(after).source, "g");
+    assert.equal([...raw.matchAll(anchor)].length, 1, `${agent}'s body no longer holds "${after}" exactly once — this mutant's measured insertion point moved`);
+    const mutant = raw.replace(anchor, (hit) => `${hit} ${carveOut}`);
+    assert.notEqual(mutant, raw, "the mutant is identical to the body — nothing was appended");
     assert.notEqual(
-      norm(entry.extract(entry.slice(entry.source.replace(raw, () => mutant)), entry.opener, what)),
-      norm(entry.golden.join("\n")),
-      `a carve-out appended to ${what} does not red its golden fixture — the mechanism #1002 replaced the presence pins with is not seeing an insertion, which is the entire defect`,
+      norm(mutant),
+      norm(fixture(`bodies/${bodyFixtureName(agent)}`)),
+      `a carve-out appended after "${after}" in ${agent}'s body does not red its golden fixture — the mechanism is not seeing an insertion, which is the entire defect`,
     );
   }
 });
 
-// The second measured shape, and the one no assertion in this repo saw before:
-// a meaning-changing clause inserted strictly BETWEEN the two anchors of an
-// ordered span, touching neither fragment, absorbed by that span's `.{0,N}?`
-// tolerance. Measured on the enumerate pin's first half, whose gap spends 56 of
-// its 120 characters today — this 27-character insertion fits, and the presence
-// pin stays green.
+// The second measured shape: a meaning-changing clause inserted strictly
+// BETWEEN the two anchors of an ordered span, touching neither fragment.
+// Located through `phrase()`, never a literal: the words sit two thirds of the
+// way through a wrapped line, so a literal anchor stops finding them the moment
+// the body is reflowed and the guard below would decline a control that should
+// have run.
 test("a clause inserted mid-gap reds — the second shape the gap-bounded spans absorb", () => {
-  const entry = ALL.find((b) => b.what === "the implementer body's enumerate-the-class block");
-  const raw = entry.extract(entry.slice(), entry.opener, entry.what);
-  // Located through `phrase()`, never a literal: the words this clause is
-  // inserted between are two thirds of the way through a wrapped line, so a
-  // literal anchor stops finding them the moment the block is reflowed, and the
-  // guard below would then decline a control that should have run. Measured —
-  // it declined against a 45-column rewrap of the region until this anchor
-  // learned to span a wrap point.
+  const raw = agentBody("fleet-implementer-slow-high");
   const midGap = "every member of that class (yes, even the boring ones) —";
   const mutant = raw.replace(Pin.phrase("every member of that class —"), () => midGap);
   assert.notEqual(mutant, raw, "the mid-gap insertion point moved — the clause was never inserted, so what follows would measure nothing");
   assert.notEqual(
-    norm(entry.extract(entry.slice(entry.source.replace(raw, () => mutant)), entry.opener, entry.what)),
-    norm(entry.golden.join("\n")),
-    "a clause inserted between the enumerate pin's two anchors does not red its golden fixture — the gap tolerance that absorbs it is still the only thing reading this block",
+    norm(mutant),
+    norm(fixture(`bodies/${bodyFixtureName("fleet-implementer-slow-high")}`)),
+    "a clause inserted between the enumerate pin's two anchors does not red its golden fixture — the gap tolerance that absorbs it is still the only thing reading this text",
   );
 });
 
-// The extractors' loud half. A golden mechanism whose extractor returns "" for
-// a block it cannot find compares empty against empty, or against a fixture
-// nobody re-blessed, and a DELETED block passes — the one failure that would
-// make every test above vacuous. One mutant per extractor: a body block
-// deleted outright, and a Reviewers block moved out of the `>` quoting, which is
-// #172's own defect and leaves every word of it still in the file.
-test("a block that is gone, or no longer quoted, throws instead of comparing against nothing", () => {
-  {
-    const { what, opener, slice, extract, source } = ALL.find((b) => b.what === "the implementer body's scratch-discipline block");
-    const raw = extract(slice(), opener, what);
-    const deleted = source.replace(raw, () => "");
-    assert.notEqual(deleted, source, "the block was not deleted, so the throw below would prove nothing");
-    assert.throws(() => extract(slice(deleted), opener, what), /no paragraph of the implementer agent body opens on/, `deleting ${what} did not throw — a golden comparison would run against whatever the extractor returned instead`);
-  }
-  {
-    const { what, opener, slice, extract, source } = ALL.find((b) => b.what === "the finisher's halt-cause block");
-    const raw = extract(slice(), opener, what);
-    const unquoted = source.replace(raw, () => raw.split("\n").map((l) => l.replace(/^>[ \t]?/, "")).join("\n"));
-    assert.notEqual(unquoted, source, "the gutter was not stripped, so the throw below would prove nothing");
-    assert.throws(() => extract(slice(unquoted), opener, what), /no quote block opens on/, `moving ${what} out of the \`>\` quoting did not throw — the controller carries only the blocks, so an unquoted rule reaches the member by paraphrase or not at all`);
-  }
+// A rendered brief refuses the same way: the templates are text too, and a line
+// dropped from one never reaches a member. The mutation edits a COPY of the
+// template the renderer reads, never the shipped file.
+test("a line dropped from a template reds the rendered brief's golden fixture", () => {
+  const dropped = "Push, write your report, exit; never poll a CI run.";
+  const mutated = renderBrief("fix-applier", "review", {
+    edit: (briefs) => {
+      const path = join(briefs, "fix-applier.md");
+      const text = readFileSync(path, "utf8");
+      assert.ok(text.includes(dropped), "the line this control drops is gone from the template — move the control with it");
+      writeFileSync(path, text.replace(dropped, ""));
+    },
+  });
+  assert.notEqual(mutated, renderBrief("fix-applier", "review"), "the edit never reached the render — this control did not run");
+  assert.notEqual(norm(mutated), norm(fixture("fix-applier-review.md")), "a line dropped from the template did not red the golden fixture");
+});
+
+// The loaders' loud half. A mechanism whose loader returns "" for a fixture it
+// cannot find compares empty against empty, or against a fixture nobody
+// blessed, and a DELETED fixture passes — the one failure that would make every
+// test above vacuous.
+test("a missing fixture throws, and an emptied body reds, instead of comparing against nothing", () => {
+  assert.throws(() => fixture("bodies/not-an-agent.md"), /no golden fixture at tests\/fixtures\/briefs\/bodies\/not-an-agent\.md/);
+  assert.notEqual(norm(""), norm(fixture(`bodies/${bodyFixtureName("fleet-finisher")}`)), "an emptied finisher body equals its golden fixture");
 });

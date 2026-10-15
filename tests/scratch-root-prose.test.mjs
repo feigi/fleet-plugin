@@ -45,9 +45,9 @@ test("run-team names scratch-root.mjs where it first defines <scratch>, and in e
     ["recipe deriver", phase0, "references/phase-0.md", "`<scratch>` is the absolute path `scratch-root.mjs` prints"],
     ["implementer", skill, "SKILL.md", "`<scratch>` as `scratch-root.mjs` printed it"],
     ["review runner", skill, "SKILL.md", "the absolute path `scratch-root.mjs` prints, never the review side's"],
-    ["fix-applier", skill, "SKILL.md", "Every `<scratch>` in that prompt is the absolute path `scratch-root.mjs` printed"],
+    ["fix-applier", skill, "SKILL.md", "Every `<scratch>` in that brief is the absolute path `scratch-root.mjs` printed"],
     ["finisher", skill, "SKILL.md", "`<scratch>` is the absolute root your dispatch prompt names"],
-    ["merge bot", skill, "SKILL.md", "Its prompt names the absolute `<scratch>` (`scratch-root.mjs`'s output)"],
+    ["merge bot", skill, "SKILL.md", "`<scratch>` the absolute `scratch-root.mjs` output"],
   ]) {
     assert.ok(doc.includes(needle), `run-team/${file}: the ${what} dispatch no longer says where <scratch> comes from`);
   }

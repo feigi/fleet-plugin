@@ -28,8 +28,9 @@
 //
 // All THREE live dispatch sites are pinned, not the two the ticket counted:
 // `grep -rn 'Try to REFUTE this finding'` finds the instruction quoted
-// verbatim in run-team/SKILL.md's fix-applier block, in review-and-fix.md
-// step 2, and in review-core.mjs's own prompt.
+// verbatim in the fix-applier's agent body (the fix-applier member prompt,
+// which SKILL.md no longer carries), in review-and-fix.md step 2, and in
+// review-core.mjs's own prompt.
 // refuter-scratch-prose.test.mjs already ruled the reason — "a fix added to
 // only one is the one that does not reach whichever path a given caller
 // takes".
@@ -50,12 +51,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const read = (...p) => Pin.file(join(REPO, ...p));
 
-// Two source shapes reach these regexes. run-team/SKILL.md's copy sits in a
-// nested `> > ` blockquote, so a hard wrap lands with the quote gutter — not
+// Two source shapes reach these regexes. The fix-applier body's copy sits in a
+// nested `> ` blockquote, so a hard wrap lands with the quote gutter — not
 // whitespace — at the break, and `\s+` does not span `>`. review-core.mjs's copy
 // is inside a template literal, so every backtick in it is BACKSLASH-ESCAPED
 // in the source text; unescape them or every pin naming a code span fails on
@@ -69,13 +71,13 @@ const norm = (text) =>
 
 const SITES = [
   [
-    "run-team/SKILL.md",
+    "the fix-applier member prompt",
     () =>
       norm(
-        read("skills", "run-team", "SKILL.md").between(
+        Pin.of(memberPrompt("fix-applier", "review"), "the fix-applier member prompt").between(
           "Try to REFUTE this finding",
           "Survives → apply it, with one hold",
-          "run-team/SKILL.md",
+          "the fix-applier member prompt",
         ).text,
       ),
   ],
@@ -189,14 +191,14 @@ for (const [name, getPrompt] of SITES) {
 // goes green on all three sites. The anchor is shared with
 // refuter-scratch-prose.test.mjs and review-core-reads.test.mjs, so this one
 // guard covers their slices too.
-for (const [name, ...p] of [
-  ["run-team/SKILL.md", "skills", "run-team", "SKILL.md"],
-  ["review-and-fix.md", "commands", "review-and-fix.md"],
-  ["review-core.mjs", "scripts", "review-core.mjs"],
+for (const [name, text] of [
+  ["the fix-applier member prompt", () => memberPrompt("fix-applier", "review")],
+  ["review-and-fix.md", () => read("commands", "review-and-fix.md").text],
+  ["review-core.mjs", () => read("scripts", "review-core.mjs").text],
 ]) {
   test(`${name}: the refuter-prompt slice anchor occurs exactly once`, () => {
     assert.equal(
-      read(...p).text.split("Try to REFUTE this finding").length - 1,
+      text().split("Try to REFUTE this finding").length - 1,
       1,
       `${name} contains "Try to REFUTE this finding" more than once — every pin over this file slices from the FIRST occurrence, so a second copy silently moves what they check away from the live prompt`,
     );

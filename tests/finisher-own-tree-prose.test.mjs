@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { renderBrief } from "./support/render-brief.mjs";
 import { HALT_CAUSES } from "../plugin/scripts/ledger-grammar.mjs";
 
 // #389. The runbook calls the finisher an auditor, but its gate MUTATES: the
@@ -168,18 +169,20 @@ test("independent re-verification survives — the gate still mutates and runs t
     "the gate no longer runs the suite itself — reading the fix-applier's recorded result is the option this ticket's ruling rejected",
   );
   // A placeholder nobody substitutes is not a gate. `<testCmd>` reaches the
-  // finisher only through the controller's prompt — there is no fleet-finisher
-  // agent definition to carry a default — and the runbook's pass-list named
-  // the workflow and the fix-applier only, so the gate shipped unenforceable.
+  // finisher only through its brief — the agent body names the value, never
+  // carries one — and the renderer refuses a finisher brief rendered without
+  // `--testCmd`, so the controller's instruction to pass it is pinned beside
+  // the brief that carries it.
   //
   // The instruction and its reason in ONE sentence, `sentences()`'s (#1940).
   // The first-period `[^.]*` gap this replaces refused a valid rewording with
   // an "e.g." or a filename between the two, and ran on past a `?` or `!` —
   // the latter nearly inert here, since both phrases must be verbatim anyway.
   assert.ok(
-    Pin.sentences(duty1Text()).some((s) => /Give it `<testCmd>` too.*duty 2's mutation gate runs it/.test(s)),
-    "the controller is no longer told to hand the finisher a `<testCmd>` — duty 2's placeholders reach it unsubstituted and the gate has no command to run",
+    Pin.sentences(duty1Text()).some((s) => /Pass `--testCmd` too.*duty 2's mutation gate runs it/.test(s)),
+    "the controller is no longer told to pass the finisher a `--testCmd` — duty 2's placeholders reach it unsubstituted and the gate has no command to run",
   );
+  assert.match(renderBrief("finisher", "fresh"), /^testCmd: TESTCMD-4$/m, "the finisher's brief no longer carries the test command duty 2's gate runs");
 });
 
 // Duty 1 was a procedure a finisher followed by hand (#525, #1106, #2141): run

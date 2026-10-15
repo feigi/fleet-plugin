@@ -287,6 +287,10 @@ working; one had its worktree audited mid-mutation, another handed over a SHA
 that was two commits stale, and a finisher dispatched on either would have
 halted on a diverged head.
 
+**The CI wait is the controller's, never yours.** Once your work is pushed,
+write your report and exit; never poll a CI run. `review-and-fix.md` step 4
+states who owns the wait.
+
 **The dispositions record**, the one your brief names the path of:
 
 It is

@@ -27,15 +27,17 @@ correctly and ends its turn has reported nothing: the controller learns the
 outcome only by re-reading artifacts and pinging, and a finding held only in
 that member's context is lost. Members did exactly this in one run —
 finishers, a reviewer and merge bots alike, the work done and only the
-delivery missing. Say it in every dispatch prompt. See
+delivery missing. Every brief's report paragraph says it. See
 references/member-lifecycle.md.
 
-**Say in every dispatch prompt that you do not acknowledge reports.** A
-member cannot see whether its report arrived, so silence from you is
-indistinguishable from loss and it re-sends — three members did in one run,
-each burning a turn, and in all three the original had in fact arrived. Give
-them the line verbatim: *"The controller does not acknowledge reports. Send
-once and exit; never re-send unless the controller asks by name."*
+**The implementer, fix-applier, finisher, merge-bot and review-runner briefs
+each tell the member you do not acknowledge reports; you never write that line
+yourself.** A member cannot see whether its report arrived, so silence
+from you is indistinguishable from loss and it re-sends — three members did in
+one run, each burning a turn, and in all three the original had in fact arrived.
+Each of those templates under `briefs/` carries the line: *"The controller does
+not acknowledge reports. Send once and exit; never re-send unless the controller
+asks by name."*
 
 **But a missing report is NOT evidence the member failed to send one — the
 inbound direction drops AND delays messages.** Both were measured in one run,
@@ -114,9 +116,9 @@ changed.
   **A label gate and a CI verdict are also taken by dispatched members, not
   only by you** — the finisher labels, and the merge bot merges on its own
   reading — and neither is dispatched to read this file, so neither can be
-  reached by stating the rule here. Each carries its own copy: the finisher's
-  in the verbatim block at its duties below, the merge bot's inside
-  `merge-gate.mjs`, step 3 of `run-merge-bot.md`.
+reached by stating the rule here. Each carries its own copy: the finisher's
+in the instrument re-check block of `agents/fleet-finisher.agent.md`, the merge bot's inside
+`merge-gate.mjs`, step 3 of `run-merge-bot.md`.
 - **Re-pin only after a change you made deliberately.** The mid-run tooling fix
   below is the one legitimate writer. Re-pinning to clear a refusal you cannot
   explain discards the check.
@@ -141,9 +143,9 @@ was lost is that you pinged it by name with a concrete next action.
 `finisher-pr-1184` reached for the same pattern minutes later — a proactive
 warning is the only reason it did not repeat the stall. Its
 `pgrep -f 'finish-finisher-pr-1184'` could never have matched any process, so
-the poll it was waiting on was structurally incapable of firing. Say it in
-every dispatch prompt — this file is yours, not theirs, so a member learns
-it only if you write it into the prompt.
+the poll it was waiting on was structurally incapable of firing. This file is
+yours, not theirs: the implementer, fix-applier and finisher briefs carry the
+rule, as the line `A member runs its test suite in the foreground and blocks on it.`
 
 **The scratch root is computed, never invented and never recorded.** No harness
 supplies a scratch directory to a member, so a member left to name its own
@@ -156,7 +158,7 @@ re-invoked controller runs it, so nothing writes it down. It exits non-zero,
 with its reason, when the root would sit inside a git work tree that does not
 ignore it; that is an environment to fix, not a cue to pick another root.
 `<scratch>` in this file is that path, resolved before you send anything: every
-prompt below that carries one carries the absolute path you wrote — an
+brief that carries one carries the absolute path you passed it — an
 implementer's `<scratch>/impl-<N>/`, the recipe deriver's
 `<scratch>/derive-recipe/`, a fix-applier's, a finisher's and a merge bot's
 `<scratch>/pr<N>/…`, and a review runner's `scratch` argument, which is the
@@ -241,7 +243,7 @@ trap, opposite failure direction — so name the variable anything else
 
 **The other deliberate copy is `env $cfg sh ./probe.sh`.** The first trap's
 mechanism bites argv as well as loops, and that instance stays written out in the
-fix-applier prompt and every refuter brief under **Reviewers** rather than here,
+fix-applier body and every refuter brief rather than here,
 because the seats that inject faults are the ones that need it and a bot reads
 gates without ever injecting one. Do not fold it into this block, and do not
 restate this block there.
@@ -651,25 +653,15 @@ fleet has already judged unimplementable straight to the next member.
 three causes, two labels: `ready-for-human` for hands or a fork;
 `needs-triage` for a brief that names no *what*.
 `gh issue edit <N> --remove-label ready-for-agent --add-label <label>` (no
-`in-progress` to drop — it was never claimed), preceded by exactly one comment:
-
-- `needs-triage`:
-
-  > *Relabelled by the fleet controller.* Pulled for implementation and
-  > returned: the brief does not decide what to build. Missing decision: <one
-  > line>. Returning to /triage; `ready-for-agent` restored once decided.
-
-- `ready-for-human` (fork):
-
-  > *Relabelled by the fleet controller.* Pulled for implementation and
-  > returned: the brief leaves a decision open. Open fork: <options, verbatim
-  > from the brief>.
-
-- `ready-for-human` (hands):
-
-  > *Relabelled by the fleet controller.* Pulled for implementation and
-  > returned: needs human hands — <external access | manual testing |
-  > judgment during the work>: <one line>.
+`in-progress` to drop — it was never claimed), preceded by exactly one comment,
+the one `~/.fleet/bin/fleet-run dispatch-prompt.mjs render relabel --kind <kind> …`
+prints. `--kind needs-triage` takes `--line`, the one-line missing decision;
+`--kind fork` takes `--options`, the options verbatim from the brief, and is
+the `ready-for-human` comment for a fork; `--kind hands` takes `--hands`,
+one of external access, manual testing or judgment during the work, and
+`--line`, and is the `ready-for-human` comment for hands. The three comments
+live in `briefs/relabel.md`; `pull.mjs` posts its own one-line copy of the same
+words when a Pull answer relabels, so a change to either is a change to both.
 
 Neither label invokes anything: `/triage` is maintainer-run, and both labels
 only stop the ticket costing a read per scan. These comments are the only
@@ -873,10 +865,10 @@ placeholders — the ticket number, the worktree abs path and branch
 `<scratch>` as `scratch-root.mjs` printed it — and the
 distilled brief (`<distilled brief>`): the title plus the `## Agent Brief`
 comment or the issue body, whichever carries the brief, and its `Out of
-scope`, pasted verbatim from the Pull's own read. Beyond those it carries only
-the lines **Rules that fail silently** above say every dispatch prompt
-carries — the report is a message, reports are not acknowledged, the suite
-runs in the foreground — and a `staleness.mjs` **could not check** verdict with its
+scope`, pasted verbatim from the Pull's own read. Beyond those
+`briefs/implementer.md` carries only its report paragraph, the
+no-acknowledgement line, the foreground-suite line
+— and a `staleness.mjs` **could not check** verdict with its
 reason when the Pull got one, so the member's own re-derive step knows the
 controller's probe could not look.
 
@@ -2224,10 +2216,10 @@ named member per PR, `fix-pr-<pr#>` (the next suffix when that name is already
 on record), never the PR's
 implementer, its brief rendered with `dispatch-prompt.mjs render fix-applier
 --kind review --member fix-pr-<pr#> …` and then recorded with `ledger.mjs
-dispatch <pr#> fix-pr-<pr#>` before the call. Its prompt carries the PR number, the worktree abs path, the PR's branch,
+dispatch <pr#> fix-pr-<pr#>` before the call. Its brief carries the PR number, the worktree abs path, the PR's branch,
 the same `testCmd` you passed the review, and the **path** `<scratch>/pr<pr>/<run>/review.json`,
 `<run>` off the PR's latest `reviewed=` — never the findings. Every `<scratch>`
-in that prompt is the absolute path `scratch-root.mjs` printed, the
+in that brief is the absolute path `scratch-root.mjs` printed, the
 `dispositions-<its name>.json` record's included. The fix-applier owns every per-PR ruling you once made
 before dispatch: both mutual-exclusion scans, the suggested-fix re-derivation,
 `refuted=false` ≠ apply, per-site measurement for a sibling-site extension, and
@@ -2246,8 +2238,8 @@ already on record — `dispatch` refuses a reused one — render its brief with
 and dispatch it with the
 `agent` that `ledger.mjs dispatch` printed, in the PR's existing worktree.
 `dispatch` prints this member's definition, `fleet-fix-applier` whatever the
-row's `tier=` — read it off that output, never recall it. Its prompt takes the prompt below's
-worktree, branch and path discipline, but in place of its review paragraphs:
+row's `tier=` — read it off that output, never recall it. Its `conflict` brief carries the
+same worktree and branch identity paragraph, but in place of the review paragraphs:
 bring `<branch>` current with `origin/main`, resolving every conflict by
 `run-merge-bot.md`'s **No-undo audit**, run `<testCmd>`, push, report the new
 head. Settle it `applied:<head>` — `no-op` if no conflict was left — which is
@@ -2264,7 +2256,7 @@ handling**.
 **Then dispatch a red-check fixer** — on a `check`-job `failure` bound to the
 PR's current head that is not **solely** staleness: a `rebase-check` red, or
 heavy jobs `skipped`, that comes only off the behind-count gets no fixer (the
-five-condition note in the fix-applier block below states how to establish
+five-condition note in the fix-applier body states how to establish
 that). The tick prints no `DISPATCH` for it, so you reconcile it yourself, and
 it always goes after the review, never before. Take the common case, the
 implementer's own first CI firing turning red before any review exists: the
@@ -2289,8 +2281,8 @@ refuses a reused name — render its brief with `dispatch-prompt.mjs render
 fix-applier --kind red-check --member <name> …`, record it with `ledger.mjs dispatch <pr#> <name>`
 before the call, and dispatch it with the `agent` that command printed
 (`fleet-fix-applier`, as for a review fix-applier), in the PR's
-existing worktree. Its prompt takes the prompt below's worktree, branch and
-path discipline, but in place of its review paragraphs: read the failing job's
+existing worktree. Its `red-check` brief carries the same worktree and branch
+identity paragraph, but in place of the review paragraphs: read the failing job's
 log, fix the cause, run `<testCmd>`, push, report the new head, and **stop**.
 It is told outright not to watch, poll or wait for CI: your persistent Monitor
 owns the next run on the pushed head, and the finisher gate — review returned
@@ -2306,9 +2298,9 @@ reach green" covers.
 `dispositions-mismatch=<member>:<run>` for its latest review's run, and no later
 fix-applier has landed — is one automatic retry, a review fix-applier named the
 next suffix (`fix-pr-<M>-b`) and dispatched like the first, its brief rendered with `--kind dispositions-retry`. Its prompt is the
-first one's, with three paths and a list copied in: the review file
-`<scratch>/pr<M>/<run>/review.json`, the mismatched member's record `<scratch>/dispositions-<member>.json`
-it starts from, its own record `<scratch>/dispositions-<its own name>.json` it writes, and the check's violation list **verbatim** — the lines
+first one's with the retry paragraph added: `--mismatched-record`, the mismatched member's record
+`<scratch>/dispositions-<member>.json` it starts from, and `--violations`, the check's
+violation list as printed — the lines
 `dispositions-check.mjs` printed, each naming a bucket, an index and a rule;
 re-run the check for the mismatched member to reprint them. It writes its own
 record, and when it reports you run the check for it exactly as for the first
@@ -2343,7 +2335,7 @@ arrives as ONE argument: a variable literally named `SETB` takes the value
 while `fix-pr-1153` nearly retired a real review finding as non-reproducing after
 the same shape handed both trees a single argv word and drew `exit 2` from each,
 which is the signature of a correct refutation with nothing anomalous to notice.
-The fix-applier prompt and every refuter brief carry the rule and the safe
+The fix-applier body and every refuter brief carry the rule and the safe
 invocation form; the merge bot's brief is the wrong seat, because a bot
 reads gates and never injects a fault.
 
@@ -2382,9 +2374,9 @@ review's test-run block captures into its log and the test-run agent reports as
 dimension unrun, for the reason "no suite slot within <n> s — the host is at its
 suite bound; not a test failure", with no retry inside the run: re-review it
 under the next runner letter (`review-pr-<pr#>-b` after a first runner), as for
-a runner that reported `failed`. Tell every implementer, fix-applier and
-finisher, in its brief, in one line: exit 75 is not a test result; run the
-command again.
+a runner that reported `failed`. The implementer, fix-applier and finisher briefs
+carry the one-line rule: *Exit 75 from the suite is not a test result; run the
+command again.*
 
 A slot holder killed without releasing is taken over by the next waiter under
 the same `.reap` discipline as the ledger's lock; the wedges that discipline
@@ -2403,384 +2395,40 @@ substituting `<testCmd>` with nothing leaves it no gate at all.
 
 **Where `<branch>` comes from:** the PR's head branch —
 `gh pr view <N> --json headRefName -q .headRefName`, or the same branch you cut
-the worktree from. Substitute it exactly as you substitute `<testCmd>`, because
+the worktree from. Pass it as `--branch`, because
 the member cannot read it off git: phase 1 creates an already-open PR's worktree
 with `--detach`, and there `git branch --show-current` prints nothing and exits 0
 (measured 2026-09-18, git 2.50.1), so `git push origin
 "HEAD:$(git branch --show-current)"` exits 128 on `fatal: invalid refspec
-'HEAD:'`. Left unsubstituted, the push that prompt ends on has no destination at
-all.
+'HEAD:'`. A brief rendered without it would leave the push no destination at
+all, which is why the renderer requires it.
 
-> You are ALREADY in worktree `<abs-path>`, whose PR branch is `<branch>` — the
-> push destination below, given to you because a detached worktree cannot supply
-> it. Do NOT create another worktree. The review is done and its result is the
-> file below — do not re-review, do not dispatch specialists.
->
-> **`edit` and `read` resolve a bare relative path against the SESSION ROOT —
-> the controller's own main checkout — not against that worktree and not
-> against your `bash` cwd, which they share no `cwd` parameter with. Give them
-> the absolute worktree path on every call, mutation-probe copies included.**
-> The main checkout is the parent of `git rev-parse --path-format=absolute
-> --git-common-dir`. A `member-write-guard` refusal means the path hit the
-> main checkout — for `bash`, a missing or main-checkout `cwd` — so re-issue
-> it absolute, under your worktree.
->
-> Read `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` and run **steps 2, 3
-> and 5 only**: split apply-now/defer, commit, push, file every deferral as its
-> own issue with the label the finding's state calls for. Skip step 1 — the
-> review already ran — and steps 4 and 6: the controller owns the CI wait and
-> dispatches the finisher.
->
-> **The review's result is `<scratch>/pr<pr>/<run>/review.json`** — the digest first
-> (`jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}'`),
-> then every finding (`jq '.survived'`, `jq '.unverified'`, `jq '.refuted'`).
-> Read it through `review-and-fix.md`'s **The review result file**, which holds
-> the rest of the recipes and every ruling on the findings: both
-> mutual-exclusion scans, the suggested-fix re-derivation, `refuted=false` ≠
-> apply, per-site measurement for a sibling-site extension, and `testEnvironment`
-> and `cwdAudit` before any result of the shared test run. Every one of those
-> rulings is yours — nobody upstream has made one, and the controller never
-> reads the findings.
->
-> **Every factual claim your diff restates needs a settling command run
-> against the tree first** — the issue body is a lead, never a citation.
-> **No positional references** (`the closing/second/last X`); name the thing
-> semantically. **Never write a COUNT or a tally into prose; state the
-> property instead** — unless it is a past-tense record of a measurement you
-> performed, which stays as written; a present-tense claim about a live
-> property must be restated as a property (`every other test in the file`),
-> true at any count. **A settling grep over literal text takes `grep -F`, and
-> its zero counts only after the same command finds a line known to match.**
->
-> **Apply `survived` findings. A finding in `unverified` whose refuters ran and
-> crashed or abstained always defers** — and which it is, you read off
-> `refutersDispatched` and `refutersInconclusive`, never off severity and never
-> off an empty vote list: `refutersDispatched` above zero with nothing decided
-> means every refuter dispatched against it died or abstained, and
-> `refutersInconclusive` counts the ones that abstained. Severity records how much a
-> finding would matter if true, never whether anything looked. Say *in the
-> deferral* which it was rather than that it went unchecked. Name a crash as
-> crashed refuters — the review re-dispatched each crash once already and
-> reports what died again, so a deferral that names the crash can still be
-> re-verified. An abstention is not a crash: cite the inconclusive runs each
-> abstaining refuter named in its `reason`, and never describe its refuters as
-> crashed. **A `suggestion` is also in `unverified`,
-> for a different reason — `refutersDispatched` of zero, the 0-refuter budget
-> the review gives that band by policy — and the rule below, not this one,
-> covers it.**
->
-> **A `suggestion` is budgeted 0 refuters, so it is unchecked until you check
-> it.** For each one, first decide scope: is it inside the scope of the PR's own
-> ticket, or a different piece of work? **Out of scope → defer and file, never
-> apply** — but the claim bar runs first: an out-of-scope suggestion whose
-> claim is about shape (`claimKind: shape`) gets no refuter and goes to the
-> closed suggestion-band record, and every other one gets the same refuter an
-> in-scope one does, dispatched the same way, before it is filed.
-> **In scope → dispatch ONE refuter** against the finding before
-> touching the tree, biased to refuse, and hand it the prompt below with one
-> substitution: resolve `<scratch>/pr<N>/<finding>/` in it to an absolute path
-> under your own run root — `mktemp -d` once per round for
-> `<scratch>/pr<N>/fix-XXXXXXXX/`, never bare `pr<N>`, since finding ids
-> restart at 1 each round too — and write that absolute path into the
-> refuter's prompt in its place; a refuter never derives its own path:
->
-> > Try to REFUTE this finding. Default to refuted=true if uncertain. Verify by
-> > RUNNING something — compile it, run the test, apply the mutation. Do not
-> > reason your way to agreement. Observe that run synchronously — run the
-> > command, wait for it, read its exit code. Never poll a log file for a
-> > completion marker: prefer ONE blocking run to a poll loop, and treat its
-> > return as permission to look, never as the answer. Reading a log the run has
-> > already finished writing is fine; waiting on one is not. If you match a test
-> > reporter's own output, accepting both `ℹ` and `#` is necessary but NOT
-> > sufficient — strip SGR escapes first as well. node's prefix moves with the
-> > node version and with whether stdout is a TTY, and color wraps the whole line
-> > so it begins with ESC and no prefix anchor matches at all, which returns
-> > empty at exit 0 — indistinguishable from a hung run and from a run of zero
-> > tests. For an uncolored baseline use `env -u FORCE_COLOR`; `FORCE_COLOR=`
-> > empty still enables color, so it is not a control. State your search scope
-> > AND what your pattern would have missed. A grep over one ref does not
-> > support a claim about history; a pattern built from the token a diff removed
-> > does not support a claim that the category is empty.
-> >
-> > When your check scores a mutant killed or a test red, run only in your own
-> > copy of the tree, and these rules decide it and nothing else:
-> >
-> > **Valid red:** a run that completed — the command returned on its own, with no
-> > signal and no timeout, deadline or kill having fired — in which the test the
-> > claim names is reported failing. An exit ≠ 0 with no failing test is not red,
-> > and a different test failing is not red for this claim. A red in the full
-> > suite only triggers a narrowed run; it is never evidence on its own.
-> >
-> > **Narrowed run:** the Test entrypoint with arguments appended, `<testCmd>
-> > <args>`. That appended arguments reach the Test entrypoint is all that is
-> > promised about them, so a narrowed run counts only if it reports `tests` > 0
-> > and its output names the claimed test. If no narrowing can be proven, run the
-> > full `<testCmd>` and read the named test's own result from its output.
-> >
-> > **Kill:** the mutant produced a valid red in a narrowed run, and the same
-> > narrowed command, in the same tree with the mutant reverted, ran a valid green
-> > with the named test passing — completed, exit 0, `tests` > 0, `cancelled` 0. A
-> > completed exit ≠ 0 with the named test not failing is not a kill, and no kill
-> > stands without that green run on the unmutated tree. The result is
-> > inconclusive, never a kill, when the red does not reproduce in the narrowed
-> > run, when the unmutated tree is red too, or when no usable run exists.
-> >
-> > **Evidence line:** every kill and every valid red you claim carries one line
-> > in the claim's own free-text field: `red: <cmd> → exit N, fail K incl <test>;
-> > baseline: <cmd> → exit 0, <test> pass`. A failing-test finding filed off the
-> > review's shared run carries the `red:` half alone.
-> >
-> > This refuter has no abstain: a run that could not decide — neither a valid red
-> > nor a valid green — is no kill and no refutation, so name the runs in
-> > `reason`, each with its evidence line, and leave `refuted` true, so the
-> > suggestion defers on the record instead of applying on a check that decided
-> > nothing.
-> >
-> > A failure injection with
-> > no positive control has produced NO result, never a negative one. Before you
-> > read an injected fault — an env var, an argv word, a mutant — as having had
-> > no effect, prove the injection reached the child: one run whose output
-> > differs with it present versus absent, or the child echoing the injected
-> > value back. Uncontrolled, the cell is unrun — say so in your verdict instead
-> > of reporting a no-effect result. Build such an invocation as an array
-> > expanded braced and quoted —
-> > `cfg=(SETB=1 BADJ=1); env "${cfg[@]}" sh ./probe.sh` — or inline the
-> > assignments literally — `env SETB=1 BADJ=1 sh ./probe.sh`; NEVER from an
-> > unquoted scalar — `cfg="SETB=1 BADJ=1"; env $cfg sh ./probe.sh` — which under
-> > zsh passes ONE argument, sets a variable literally named `SETB` to
-> > `1 BADJ=1`, never sets `BADJ` at all, and still exits 0. `env $cfg[@]` is not
-> > the portable spelling either: measured, bash word-splits it into `SETB=1`
-> > and `BADJ=1[@]`, so the injection variable is set to a corrupted value,
-> > while zsh behaves exactly as with the bare `$cfg` — `BADJ` never set,
-> > exit 0. Everything you
-> > write — mutants, fixtures,
-> > scratch repos — goes under `<scratch>/pr<N>/<finding>/` and nowhere else;
-> > the checkout and any worktree are never write targets, though
-> > `git show`/`git archive` at a pinned ref read fine anywhere. Chain the
-> > directory change into the command, `cd "$D" && git …`, never
-> > `cd "$D"; git …`, so a failed `cd` cannot leave a `git` command running in
-> > the checkout — and bracket a fixture's own git with
-> > `git rev-parse --show-toplevel`: before `git init` it must NOT resolve to
-> > the host repository, and `fatal: not a git repository` (exit 128) is the
-> > usual pass, not a failure — an outer repository whose ignore rules cover
-> > your scratch dir is a pass too; before any `git commit` it must resolve to
-> > your scratch path, which catches a forgotten `git init` under any enclosing
-> > repository — compare resolved forms (`realpath`), since `--show-toplevel`
-> > can report a symlinked parent such as `/tmp` or a symlinked `$HOME` under
-> > its resolved name.
->
-> Survives → apply it, with one hold: if its refuter reports a blast radius
-> touching lines another finding also changes, that is the mutual-exclusion
-> scan's second input — rule the pair before either change reaches the tree;
-> you hold every finding, so only you can see that the two cannot both land. Refuted → defer and file it, and
-> say the refutation in the issue body. **Apply only what survives — no report is not a survival.** A
-> refuter you never hear from leaves the finding exactly as unchecked as it
-> arrived, so it defers like a refuted one.
->
-> **Out of scope, the refuter decides only where the suggestion is filed — it
-> defers either way, never applied.** Refuted → the closed suggestion-band
-> record, never an open issue. Survived, or its refuter crashed or abstained →
-> its own open issue labelled `needs-triage`, citing the verdict, or the run
-> that crashed, in the body. There is no cap on these refuters: count the ones
-> you dispatch against out-of-scope suggestions, since your report names that
-> count.
->
-> **A finding's `suggested_fix` is a hypothesis, not a patch — the review never
-> ran it.** Only the claim is verified adversarially; the remedy text is unchecked.
-> Three were wrong as written in one run: a stated end state that dropped a
-> load-bearing option and measured RED, an assertion against a property the test
-> helper does not expose (`TypeError`), and an enumeration that stopped short of
-> two further stale clauses — one of them false in the *dangerous* direction. Run
-> the remedy before you commit it, and re-derive an assertion from the post-fix
-> tree rather than from the finding, since a sibling finding may edit the very
-> text it asserts on.
->
-> **Retrieve that report yourself; do not wait to be handed it — this covers the
-> refuters YOU dispatch, and only those.** The review's own specialists do leave
-> transcripts, but nothing gives you their address: the review had `agent()`
-> return their findings into the script, so the result file holds their findings
-> and names no transcript, and nothing on disk indexes a transcript by PR or
-> dimension. Hunting their paths gets you nothing; read the file. A report from a refuter you spawned is
-> different — it surfaces to the controller rather than to you, and waiting for a
-> relay that never comes strands the finding. Its transcript is at the output file
-> named in your spawn result, and its report is the last record:
->
-> A depth-2 helper cannot dispatch further (`task.maxRecursionDepth: 2`); reach it directly instead, by its full dotted id (`<member>.<helper>`), via `hub send` — delivered, woken, no transcript workaround needed.
->
-> If retrieval comes back empty, ask the controller by name. Only when neither
-> works is the finding **unchecked** — defer and file it, and say so in the body. This is
-> `review-and-fix.md`'s **Specialists** rule; it reaches you here because the
-> steps that point at it are the ones you skip.
->
-> The CI facts in that file apply to you — a `rebase-check` red, or heavy jobs
-> `skipped`, **solely** off a non-zero behind-count, is staleness and not a
-> failure. Never rebase to clear it. **`solely` is the load-bearing word:**
-> `ci.yml`'s `rebase-check` exits 1 on five conditions and only one is
-> staleness, so a non-zero behind-count does not by itself settle which fired.
-> The job log names the condition — and because the staleness condition exits
-> before the merge-commit condition is evaluated, the log is silent on that one
-> by construction, so measure it separately with
-> `git fetch origin && git rev-list --merges --count "origin/<base>..HEAD"` —
-> keep the fetch, or a stale local `origin/<base>` widens the range over the
-> base's own merge commits and reports a merge commit this branch never added.
-> A non-zero count does not send you to a local rebase either: the merge bot's
-> step-1 `gh pr update-branch --rebase` drops merge commits too
-> (`run-merge-bot.md` step 1), so both conditions clear on that one server-side
-> rebase. What it buys you is knowing the red was never solely staleness.
->
-> **Run `<testCmd>` from the worktree before committing**, copied verbatim.
-> `tests 0` is a FAILED run, not a pass. Red or zero-test → fix it, or move that
-> finding to defer; never commit over it. **Never `--no-verify`** — a failing
-> hook is a finding you report, not an obstacle you route around. Report the test
-> result with your SHA. Nothing re-reviews this commit: the review ran against a
-> snapshot cut before your edits existed, and a refuter checked the finding's
-> claim, never your patch.
->
-> **A test you ADD must kill its own mutant** — break what it pins, confirm it and
-> only it goes red and that the red is a kill by the rules below, restore. **Then
-> a change it should *not* catch, staying green** — else you proved it fails, not
-> that it discriminates: a pin asserting whole-file text clears "it and only it
-> goes red" and still reddens on any edit (measured). A green suite says nothing
-> about a new test: one pin this run survived the exact mutation it was named for.
->
-> **Valid red:** a run that completed — the command returned on its own, with
-> no signal and no timeout, deadline or kill having fired — in which the test
-> the claim names is reported failing. An exit ≠ 0 with no failing test is not
-> red, and a different test failing is not red for this claim. A red in the full
-> suite only triggers a narrowed run; it is never evidence on its own.
->
-> **Narrowed run:** the Test entrypoint with arguments appended,
-> `<testCmd> <args>`. That appended arguments reach the Test entrypoint is all
-> that is promised about them, so a narrowed run counts only if it reports
-> `tests` > 0 and its output names the claimed test. If no narrowing can be
-> proven, run the full `<testCmd>` and read the named test's own result from its
-> output.
->
-> **Kill:** the mutant produced a valid red in a narrowed run, and the same
-> narrowed command, in the same tree with the mutant reverted, ran a valid green
-> with the named test passing — completed, exit 0, `tests` > 0, `cancelled` 0. A
-> completed exit ≠ 0 with the named test not failing is not a kill, and no kill
-> stands without that green run on the unmutated tree. The result is
-> inconclusive, never a kill, when the red does not reproduce in the narrowed
-> run, when the unmutated tree is red too, or when no usable run exists.
->
-> **Evidence line:** every kill and every valid red you claim carries one line
-> in the claim's own free-text field:
-> `red: <cmd> → exit N, fail K incl <test>; baseline: <cmd> → exit 0, <test> pass`.
-> A failing-test finding filed off the review's shared run carries the `red:`
-> half alone.
->
-> An inconclusive result proves nothing about the test: do not report the test
-> as proven, and measure again in a clean state. Put each kill's evidence line in
-> your report, beside the test result.
->
-> **A mutation that never landed is not a green — it is a cell that did not
-> run.** Same rule for any fault you inject to see what breaks: prove the
-> injection reached the child before you read its result — one run whose output
-> differs with the injection present versus absent, or the child echoing the
-> injected value back. Without one, a probe that exits 0 reporting the mutant
-> behaving exactly like its baseline is indistinguishable from a real no-effect
-> result, and a reproduction that never happened reads as a refutation. Build
-> such an invocation as an array expanded braced and quoted —
-> `cfg=(SETB=1 BADJ=1); env "${cfg[@]}" sh ./probe.sh` — or inline the
-> assignments literally — `env SETB=1 BADJ=1 sh ./probe.sh`; NEVER from an
-> unquoted scalar — `cfg="SETB=1 BADJ=1"; env $cfg sh ./probe.sh` — which under
-> zsh passes ONE argument, sets a variable literally named `SETB` to `1 BADJ=1`,
-> never sets `BADJ` at all, and still exits 0. `env $cfg[@]` is not the portable
-> spelling either: measured, bash word-splits it into `SETB=1` and
-> `BADJ=1[@]`, so the injection variable is set to a corrupted value, while
-> zsh behaves exactly as with the bare `$cfg` — `BADJ` never set, exit 0.
->
-> **Commit BEFORE you mutate, and restore with `cp`, never a git discard.**
-> `git checkout -- <file>` reverts the whole file, not your mutant — so it also
-> eats uncommitted edits you made earlier, and the "clean baseline" you measure
-> next is silently the reverted file. Two members hit this in one run; one lost
-> prose edits and caught it only because a non-catch control failed. Copy the
-> file aside and copy it back. Better still, mutate a copy under
-> `<scratch>/pr<N>/mutate/` and leave the worktree untouched — that is what
-> refuters are already required to do, and it has no blast radius at all.
->
-> **Never `git stash` or `git stash pop` here either — a WIP commit is the
-> substitute, not a second scratch mechanism: `git commit -m wip`, then
-> restore or amend once you're back to real work.** The stash stack is
-> repo-global too, not per-worktree or per-session — the same `refs/stash`
-> every concurrent member and the main checkout share, not partitioned the
-> way `<scratch>/pr<N>/mutate/` above is. A bare pop takes whichever entry is
-> on top, from any worktree, silently — rc 0, no error — when the tree
-> receiving it is clean on the affected paths, and refuses only when that
-> tree is already dirty there. A bare `git stash` (push) does not reach into
-> a sibling's tree, so that half is not the risk — the pop is. Nothing
-> partitions the stack; this prohibition is the whole of the protection.
->
-> **Report LAST, and only once nothing can still change.** A report you have
-> sent **pins that SHA** for the controller, which dispatches a finisher against
-> it. If a further instruction arrives after you have reported, reply saying the
-> SHA is moving *before* you touch the tree again — do not silently do the work
-> and re-report. Measured: three members in one run sent a final report and kept
-> working; one had its worktree audited mid-mutation, another handed over a SHA
-> that was two commits stale, and a finisher dispatched on either would have
-> halted on a diverged head.
->
-> **Before you report, write every ruling to `<scratch>/dispositions-<your name>.json`**,
-> `<your name>` the `fix-pr-<pr>[-x]` you were dispatched as — the record the controller checks with
-> `dispositions-check.mjs` before it dispatches any finisher. It is
-> `{"head": "<the review file's head>", "run": "<the run root's name in the review path>", "entries": [ … ]}`
-> — `run` the `<run>` of the review path above, which the check holds against the
-> review the PR's latest `reviewed=` names: a record written against an earlier
-> review, a same-head one included, is a mismatch. One entry per
-> `survived` finding and per `unverified` finding, plus one per `refuted`
-> finding you reverse. Each entry carries `bucket`
-> (`survived|unverified|refuted`), `index` (its position in that bucket of the
-> review file), `scope` (`in|out`), `claimKind` (`behavior|shape`) and
-> `disposition` (`apply|defer`), and where they apply `reason`, `issue` (the
-> number you filed it to or commented on), `verdictPath` (a suggestion's
-> refuter verdict file, in scope and, above the claim bar, out of scope) and
-> `remedyFiles` (the files its remedy names). An out-of-scope suggestion whose
-> refuter crashed before any verdict reached you still names the path its
-> verdict would have taken. A `refuted` entry carries `scope`, `claimKind` and `disposition`
-> like every other entry, and a non-empty `reason` holding the evidence that
-> reverses it; a missing or blank `reason` is a mismatch. A finding with no
-> `line`, or on a line the PR's diff touched —
-> `git diff` from its merge-base with `origin/main` to the review's head — is
-> in scope whatever its `scope` says. An in-scope `survived` finding you defer
-> carries `reason` `false-rationale`, `mutual-exclusion`, `remedy-worse` or
-> `remedy-outside-diff`; the last needs `remedyFiles` to name a file the PR's
-> diff does not touch, and for a `critical` or `important` finding it sends the
-> PR to a human instead of passing. Any
-> other reason, none, or a `survived` or `unverified` finding with no entry is
-> a mismatch, and the PR gets no finisher. `disposition` has no `dismiss`: an
-> in-scope `survived` finding verified correct, needing no change, is deferred
-> with `reason` `false-rationale` and filed on the closed suggestion-band
-> record.
->
-> Then write your report to the file your brief names,
-> `<scratch>/reports/<your name>.json`: `head` the pushed SHA, `applied` and
-> `deferred` your apply/defer split by bucket and index, each deferral's issue
-> number on its `deferred` entry, the deferral issues as `{issue, subject}`
-> entries — `filed` for every issue step 5 created, and `unrecorded` for one
-> whose `ledger.mjs filed` failed twice, which the controller's settle records —
-> `dispositionsRecord` your record's path and `testRun` your test result. Then
-> send the one line your brief gives, `<your name>: <outcome> <path>`, and exit.
-> **Deferring everything is a normal
-> outcome, not a stall:** nothing is then staged, `git commit` refuses an empty
-> index, `git push origin HEAD:<branch>` prints `Everything up-to-date`, and your
-> report's `outcome` is `no-op`, its `head` the unchanged SHA. Say it
-> explicitly — silence there is indistinguishable from a member that died. Never
-> manufacture a commit to make CI fire.
+**What a fix-applier receives.** Its standing text — the worktree and
+session-root discipline, the review result file and every ruling on it, the
+claim discipline, the refuter prompt, the kill rule, the stash prohibition, the
+dispositions record and the report rules — is the body of
+`agents/fleet-fix-applier.agent.md`, which the harness injects as its system
+prompt, so none of it is pasted. The brief carries what varies, and the
+renderer prints it: `~/.fleet/bin/fleet-run dispatch-prompt.mjs render
+fix-applier --kind <review|conflict|dispositions-retry|red-check> --member <name>
+--worktree <abs-path> --branch <branch> --testCmd <testCmd> --scratch <scratch>`,
+plus `--pr <pr#> --run <run>` for a review or a dispositions retry and
+`--mismatched-record <path> --violations <list>` for a retry. Then
+`ledger.mjs dispatch <pr#> <name>` records it before the call.
 
-**Put the standing CI facts in that prompt, not in per-event messages** —
+**The standing CI facts are in the fix-applier body, not in per-event messages** —
 otherwise you send "your red is staleness, do not rebase" once per member per
-merge. `review-and-fix.md` states them; the prompt only has to say they apply.
+merge. `review-and-fix.md` states them; the body says they apply.
 
 **The fix-applier pushes and exits — it does not hold the CI wait.** You own the
 persistent Monitor; a turn-based member re-reading `gh pr checks` each idle cycle
-rebuilds a 100k-token context for nothing the Monitor lacks. The prompt block
-above carries the report-last rule; you do not have to restate it. When the
+rebuilds a 100k-token context for nothing the Monitor lacks. The body
+carries the report-last rule and the brief says to push, write the report and exit; you do not have to restate either. When the
 diff-validating `check` job is green **and no
 heavy job is in `failure`** (the heavy diff-validating suites — not the
 `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and
 fine — **solely** off that count, which is a condition to establish rather than
-infer, see the five-condition note in the fix-applier block above) — or
+infer, see the five-condition note in the fix-applier body) — or
 `ci-state.mjs` reads `verdict: "no-ci"`, see below — **and once the PR's review
 has returned and its fix-applier, if one was dispatched, has sent its report,
 which the CI-completes edge above states in full** — dispatch a
@@ -2889,12 +2537,12 @@ a minute apart showed *different* mutants, so a member's report and any single
    finisher that cannot see the tree it labels cannot vouch for it, so none of
    the script's steps is run by hand to get past a halt. A finisher that
    verifies the dirt is harmless and labels anyway has substituted the rule's
-   purpose for the rule, and you find out at merge time. **Give it the cause
-   block below, verbatim** — it holds the script call and what each exit
-   means, and a bare SHA mismatch names no cause. **Give it `<testCmd>` too** —
-   the same string you passed the workflow and the fix-applier — because duty
-   2's mutation gate runs it and nothing else hands the finisher one;
-   substituted with nothing it leaves that gate no command at all.
+purpose for the rule, and you find out at merge time. The halt-cause block in
+`agents/fleet-finisher.agent.md` holds the script call and what each exit
+means, and a bare SHA mismatch names no cause. **Pass `--testCmd` too** —
+the same string you passed the workflow and the fix-applier — because duty
+2's mutation gate runs it and nothing else hands the finisher one; the renderer
+refuses a finisher brief rendered without it.
 2. **Confirm every deferral — and every claimed APPLY — has a home that outlives
    the merge.** The test is a durable home, not a tracker number: a tracker
    issue and a committed in-tree comment both qualify, and for a finding whose
@@ -3012,122 +2660,17 @@ a minute apart showed *different* mutants, so a member's report and any single
    printed, the JSON line, so a `rebase` halt's report carries the output of
    `git cherry <pin> HEAD origin/main` that its `evidence` holds.
 
-**Give the finisher the instrument re-check verbatim too.** Duty 1 and duty 2
-each run a script the digest covers — `finisher-audit.mjs` (which runs
-`worktree-audit.sh`) and `ledger.mjs`, both under `plugin/scripts/` — and the
-label at duty 3 rests on what they returned. The rule is stated once, at the
-top of this file, which no finisher is dispatched to read, so it reaches one
-through this block, which `agents/fleet-finisher.agent.md` carries in its body:
-
-> **Re-check the instrument set before you act on what duty 1 or duty 2 read,
-> and again before you add the label.**
-> `~/.fleet/bin/fleet-run instruments.sh --repo "$(dirname "$(env -u GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir)")"`.
-> Exit 0 is the only code that lets you go on. Exit 1 (the set changed) and
-> exit 2 (the check could not answer) both halt you: report what it printed,
-> add no label, and do NOT re-read the script that gave you the reading.
-> `--repo` is required and the spelling is the point — the run's baseline lives
-> in the audited checkout's gitignored `.fleet/`, which the scratch worktree
-> you take at duty 2 does not carry, so a bare invocation from there exits 2 on
-> a missing baseline instead of comparing anything. The `env -u GIT_DIR -u
-> GIT_WORK_TREE` wrapper guards against an ambient `GIT_DIR` in your own shell
-> pointing this check at the wrong tree — the script's own internal unset
-> cannot reach back and fix a path you already resolved wrong. The baseline
-> itself names the tree to audit: a cross-workspace run pinned it once at
-> phase 0, and your `--repo` only locates that baseline, never the audited
-> tree — so an exit 2 naming a moved or unreadable audited tree is a halt
-> like every other, not a spelling for you to correct.
-
-**Give the finisher the test-run verdict rule verbatim too.** Duty 2 runs
-`<testCmd>` for the acceptance mutation, and the finisher's agent definition
-carries a copy of the rule below. A `node --test`
-stopped by an outside `timeout` still prints a summary, covering only the tests
-it reached, so reading that summary alone reads a partial suite as a whole one:
-
-> **A test run is a verdict only if it ran to completion — and you read that
-> off the test command's own exit status.**
-> Redirect the run's output to a file in your scratch directory and read the
-> command's own `$?` straight after it, then read the file. In an `eval` cell
-> there is no `$?`: spawn `<testCmd>` with its output going to that file and
-> read the exit code and the signal off the spawn result — `exitCode` and
-> `signalCode` on Bun's `spawnSync`, `returncode` on Python's `subprocess.run`,
-> which is negative for a signal. Never read the status of
-> `<testCmd> | tail` or `<testCmd> | grep`: a pipeline's status is its
-> last stage's, so the filter's 0 hides the run's own exit, and the array that
-> holds the earlier stages' statuses is spelled differently per shell. A run is
-> a verdict only when that exit status is 0 **and** its summary shows `tests`
-> above 0 and `cancelled` 0. A summary line without that
-> is not a verdict, whatever pass count it prints.
-> **A run completed when the command itself returned on its own** — an exit
-> code, no signal, and no `timeout`, deadline or kill of yours having fired.
-> Judge that by how the run ended, never by its `cancelled` count: a failing
-> `before` hook or a per-test `timeout` cancels tests inside a run that
-> completed, and a SIGTERM'd `node --test` can exit 1 with `cancelled` above 0
-> in a run that did not.
-> **Any run that did not complete is a killed run** — 124 (`timeout`), 137
-> (SIGKILL), 143 (SIGTERM), a signal in the spawn result, an `eval` cell's
-> deadline — and read for green it is FAILED, the same bucket as
-> `tests 0`, however many tests had passed before the kill. Halt with cause
-> `other` and the exit code plus the summary line as evidence; label nothing.
-> The same holds for the mutation gate: a killed run is not a mutant that
-> reddened, and the files it cancelled are not failures — only a run that
-> completed can kill a mutant. A completed run that exits 1 is not a killed run
-> either, whatever its `cancelled` count, and not a killed mutant on its exit
-> status alone: the acceptance mutation scores a kill only by the rules below.
-> Exit 0 with `tests 0` stays FAILED.
-> Do not wrap `<testCmd>` in an external `timeout`. Run a long suite in one
-> `eval` cell with `timeout: 0`, as the review runner does, and wait for it.
->
-> **Valid red:** a run that completed — the command returned on its own, with
-> no signal and no timeout, deadline or kill having fired — in which the test
-> the claim names is reported failing. An exit ≠ 0 with no failing test is not
-> red, and a different test failing is not red for this claim. A red in the full
-> suite only triggers a narrowed run; it is never evidence on its own.
->
-> **Narrowed run:** the Test entrypoint with arguments appended,
-> `<testCmd> <args>`. That appended arguments reach the Test entrypoint is all
-> that is promised about them, so a narrowed run counts only if it reports
-> `tests` > 0 and its output names the claimed test. If no narrowing can be
-> proven, run the full `<testCmd>` and read the named test's own result from its
-> output.
->
-> **Kill:** the mutant produced a valid red in a narrowed run, and the same
-> narrowed command, in the same tree with the mutant reverted, ran a valid green
-> with the named test passing — completed, exit 0, `tests` > 0, `cancelled` 0. A
-> completed exit ≠ 0 with the named test not failing is not a kill, and no kill
-> stands without that green run on the unmutated tree. The result is
-> inconclusive, never a kill, when the red does not reproduce in the narrowed
-> run, when the unmutated tree is red too, or when no usable run exists.
->
-> **Evidence line:** every kill and every valid red you claim carries one line
-> in the claim's own free-text field:
-> `red: <cmd> → exit N, fail K incl <test>; baseline: <cmd> → exit 0, <test> pass`.
-> A failing-test finding filed off the review's shared run carries the `red:`
-> half alone.
->
-> An inconclusive acceptance mutation is neither a kill nor a pass: halt with
-> cause `other`, with both runs — the mutant's and the unmutated tree's — as
-> evidence; label nothing. A kill's evidence line goes in your report.
-
-**Give the finisher duty 3 verbatim as well, as one script.** The finisher's
-agent definition carries this block in its body, so the brief does not repeat
-it. Two finishers in one run read the release-label check as the whole duty
-and reported `labelled` on a PR that never got the label, so the check and the
-label write are one command and the finisher never runs either alone:
-
-> **Duty 3 is one script, and its exit code is your verdict.**
-> `~/.fleet/bin/fleet-run finisher-label.mjs --pr <M> --pin <your dispatch pin>`
-> (the full SHA). It confirms exactly one of `patch`/`minor`/`major` is on the
-> PR, records the head you audited, adds `ready-to-merge`, and reads the labels
-> back. Exit 0 is the only code that means the label is on. Exit 3 means the PR
-> carries zero or more than one release label: you are halted before the label,
-> and the receipt names which it found. Exit 4 means the read-back does not carry
-> the label, written or not. Exit 2 means a `gh` call or the invocation
-> itself failed: report the stderr it printed. Every non-zero exit halts you
-> with cause `other`, with the receipt as evidence, and you do not run any of
-> its steps by hand to get past it. A repo whose label list defines none of the
-> three does not gate on one, and the script says so in its receipt. Put the
-> receipt, the JSON line it printed, in your report as printed: it is what tells
-> the controller the label is on.
+**What a finisher receives.** The instrument re-check, the test-run verdict
+rule, duty 1's audit script and what each of its exits means, duty 3's script
+and the halt-cause rule are the body of `agents/fleet-finisher.agent.md`, which
+the harness injects as its system prompt; none of them is pasted. The
+instrument-set rule is stated once, at the top of this file, which no finisher
+is dispatched to read, so it reaches one through that body. The brief carries
+the PR, the worktree, the dispatch pin, `<testCmd>` and the scratch root:
+`~/.fleet/bin/fleet-run dispatch-prompt.mjs render finisher --kind <fresh|repair>
+--member finisher-pr-<pr#> --pr <pr#> --pin <sha> --worktree <abs-path>
+--testCmd <testCmd> --scratch <scratch>`, which `ledger.mjs dispatch <pr#>
+finisher-pr-<pr#>` records.
 
 **Once the label is on, take it off before you approve any push.** The label is a
 verdict on the tree the finisher read, and a GitHub label does not follow the
@@ -3147,36 +2690,10 @@ its own (`run-merge-bot.md`, **The labelled head**), so this is not the only
 guard — but its refusal costs a pass and leaves the label lying, which is yours
 to clear either way, the same way: `label-off=` first, then the removal.
 
-A halt at step 1 reads identical from a bare SHA mismatch whatever caused it,
+A halt at duty 1 reads identical from a bare SHA mismatch whatever caused it,
 and the causes `finisher-audit.mjs` names are the ones seen so far, not a
-closed list. Give the finisher this verbatim, so it gets the cause from one
-script instead of asking anyone:
-
-> **Duty 1 is one script, and its exit code is your verdict.**
-> `~/.fleet/bin/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`
-> (the path you were dispatched with, and the full SHA). It finds your
-> worktree's row, reads whether the tree is dirty, compares the worktree's
-> `HEAD` to your pin, and when the head differs derives the cause from the
-> reflog. Exit 0, with `cause` null, is the only code that means the worktree is
-> clean at your pin. Exit 1 means `cause` is non-null: you are halted, and
-> `cause` is the word you name — `live-editor`, `rebase`, `past-pin`,
-> `unreadable`, `missing`, `absent` or `other`, and `other` is a cause too, not
-> a gap. Exit 2 means the script could not look: you are halted with cause
-> `other`, with the line it printed on stderr as the evidence.
->
-> The pin is the SHA you were dispatched against, never `PR headRefOid`: a
-> member that kept working and pushed after the pin matches the branch tip on a
-> clean tree, so a headRefOid comparison reports "settled" over commits no
-> reviewer read — the exact divergence this halt exists to catch. You do not
-> run any of the script's steps by hand to get past a halt or to second-guess
-> it. Put the verdict, the JSON line it printed, in your report as printed: its
-> `evidence` is what the controller resolves the halt from.
->
-> Every cause halts, always — named or not, you never verify the dirt is
-> harmless and label over it, a rebase is not a fast-forward you get to accept,
-> a commit past the pin is not one either, and a cause you could not name is
-> the least settled of the lot. Naming the cause makes the halt cheap to
-> resolve, never a reason to skip it.
+closed list; the finisher's agent body gives it the cause from one script
+instead of asking anyone.
 
 **Resolving a finisher halt.** A halt is the finisher working correctly — it
 refused to label — so it is never `failed`, which stays for a finisher that
@@ -3289,13 +2806,15 @@ that name it refuses, naming the bot and the `dispatch-prompt.mjs render
 merge-bot --member merge-bot-<n> …` to run — render it, then run `ledger.mjs
 dispatch merge-bot` again. Dispatch
 it on the tick's `DISPATCH merge-bot`: the first `ready-to-merge` label is
-enough, and it never waits for the finisher's report. Tell it to read
+enough, and it never waits for the finisher's report. Its body
+(`agents/fleet-merge-bot.agent.md`) tells it to read
 `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md` and run **one**
 pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace
-for late labels, then report once and exit — and say that you dispatched it,
+for late labels, then report once and exit — and that you dispatched it,
 which is what makes it hold that grace instead of arming its own watcher. Its
-prompt names the absolute `<scratch>` (`scratch-root.mjs`'s output): the bot
-writes only under `<scratch>/pr<N>/merge-bot-<n>/`. **Dispatch
+brief is `~/.fleet/bin/fleet-run dispatch-prompt.mjs render merge-bot --member
+merge-bot-<n> --n <n> --scratch <scratch>`, `<scratch>` the absolute
+`scratch-root.mjs` output: the bot writes only under `<scratch>/pr<N>/merge-bot-<n>/`. **Dispatch
 it with the `agent` that `ledger.mjs dispatch merge-bot` printed and omit
 `model` on the call** — the tier lives in that definition's frontmatter,
 `agents/fleet-merge-bot.agent.md`, as the `@smol:low` route, which resolves
@@ -3717,7 +3236,7 @@ vs specific finding with paths → paths win.
 **Members share one filesystem, one docker stack and one process table**, and the
 failures arrive as *wrong findings*, not errors:
 
-- **A pattern kill reaches siblings — say so in the dispatch prompt.** `pkill -f
+- **A pattern kill reaches siblings — the implementer, fix-applier and finisher briefs forbid it.** `pkill -f
   <pattern>` matches on the whole command line, machine-wide. Members hold
   separate worktrees, but the process table is not partitioned by them and a
   test file's name is identical in every one, so a pattern naming a test file
@@ -3776,8 +3295,8 @@ failures arrive as *wrong findings*, not errors:
   arrived.** The same incident: the controller's warning DID reach the member,
   which re-ran, found nothing changed, and said nothing — correctly reading
   "send once, never re-send" as covering it. The controller then had to spend a
-  round trip asking whether its own outbox was lossy. So say in the dispatch
-  prompt that **confirmation state includes warnings received and acted on, even
+  round trip asking whether its own outbox was lossy. So the briefs say that
+  **confirmation state includes warnings received and acted on, even
   when the outcome is no change** — one line, in the report the member already
   owes. That is the cheap half of the *never read silence as assent* rule, paid
   by the member rather than by the controller's guesswork.
@@ -3920,7 +3439,7 @@ at the price, because the cost of the wrong call is asymmetric — a live member
 written off gets killed and re-dispatched, which discards the work in flight
 and, where it holds a claim or a worktree, collides the fleet with itself,
 while one poll spent on a member that had in fact stopped costs only the poll.
-The refuter's own observation rule in the fix-applier prompt above stops a
+The refuter's own observation rule in the fix-applier body stops a
 member from creating that state; this one stops you from misreading whoever
 reaches it anyway, and neither replaces the other.
 

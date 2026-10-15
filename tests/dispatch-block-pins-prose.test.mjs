@@ -1,7 +1,9 @@
-// #400. Phase 2 hands the controller a run of `>` blocks and says to carry each
-// one VERBATIM into every implementer prompt. Those blocks are not prose about
-// the fleet — they are the only text a member ever sees, so a block that goes
-// missing does not misinform the member, it silently stops governing it.
+// #400. The implementer's agent body and the brief the renderer prints for it
+// are the only text an implementer ever sees, so a block of them that goes
+// missing does not misinform the member, it silently stops governing it. Phase 2
+// of run-team's SKILL.md once handed the controller a run of `>` blocks to carry
+// VERBATIM into every implementer prompt; it holds none now (see WHERE THE
+// BLOCKS LIVE below).
 //
 // Measured against `origin/main` before this file existed: deleting the
 // enumerate-the-class block outright left the suite green, and no test file
@@ -46,11 +48,12 @@
 // Both shapes were measured green here.
 //
 // #1002 closed that half with a mechanism that is not a regex —
-// `dispatch-block-golden-prose.test.mjs` holds a whole-block golden fixture for
-// every block this file slices, and any insertion reds there because the block
-// no longer equals its known-good copy. An LLM judge and a schema'd rule format
-// were the two candidates and both were rejected: a nondeterministic gate, and
-// a large change that still has to keep these blocks readable as prose.
+// `dispatch-block-golden-prose.test.mjs` holds a whole-text golden fixture for
+// every agent body and every rendered brief, and any insertion reds there
+// because the text no longer equals its known-good copy. An LLM judge and a
+// schema'd rule format were the two candidates and both were rejected: a
+// nondeterministic gate, and a large change that still has to keep these blocks
+// readable as prose.
 //
 // So read a green run here as "every pinned rule is still present and still
 // adjacent", never as "no exception was added to these blocks" — that second
@@ -68,18 +71,18 @@
 // retargeted with them: same slices, same bounds, read off the agent body.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 
-const REPO = join(import.meta.dirname, "..", "plugin");
-// The body alone — everything after the frontmatter's closing `---` — so a
-// frontmatter field can never satisfy a pin meant for text the member reads.
-const AGENT_FILE = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8");
-const BODY = AGENT_FILE.split("---").slice(2).join("---");
+// What the implementer reads: its agent body — the system prompt each harness
+// injects, so a frontmatter field can never satisfy a pin meant for text the
+// member reads — followed by the brief the renderer prints for the fixed
+// argument set of support/render-brief.mjs.
+const BODY = memberPrompt("implementer");
 
 function region(text = BODY) {
-  assert.ok(text.trim().length > 0, "agents/fleet-implementer-slow-high.agent.md has no body — the implementer background moved again; update this test");
+  assert.ok(text.trim().length > 0, "the implementer's member prompt (its agent body and rendered brief) is empty — the implementer background moved again; update this test");
   return text;
 }
 

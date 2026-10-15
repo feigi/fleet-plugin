@@ -30,6 +30,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
@@ -178,9 +179,11 @@ test("the finisher files its own deferrals through the same guard", () => {
 // a second kind of writer exist; these pin the instruction half of it.
 const runLedger = () => flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
 const finisherReport = () =>
-  flat(RUN_TEAM.between("4. Report you the label", "**Give the finisher the instrument", "run-team finisher duty 4").text);
+  flat(RUN_TEAM.between("4. Report you the label", "**What a finisher receives.**", "run-team finisher duty 4").text);
+// The fix-applier's report line is in its agent body, which the member reads
+// with the brief the renderer prints; SKILL.md carries no copy of it.
 const fixApplierReport = () =>
-  flat(RUN_TEAM.stripGutter(">").between("Then write your report to the file your brief names", "**Deferring everything", "fix-applier report line").text);
+  flat(Pin.of(memberPrompt("fix-applier", "review"), "the fix-applier's member prompt").between("Then write your report to the file your brief names", "**Deferring everything", "fix-applier report line").text);
 
 test("both filing sites run `ledger.mjs filed` right after `gh issue create`, under the subject they checked", () => {
   // The subject is half of it: `check` matches the filed list by the words in

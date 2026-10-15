@@ -2,10 +2,10 @@
 // two seats that act on it: review-and-fix.md step 2 tells the fix-applier to
 // write `<scratch>/dispositions-<your name>.json` and what passes, and run-team's
 // gate paragraph tells the controller when `ledger.mjs dispatch` refuses a
-// finisher and what each refusal asks of it. The fix-applier prompt block that
-// restates the record is a `>` block, which the dispatch-block golden fixture
-// pins whole; these two paragraphs sit outside every `>` block, so nothing
-// else holds them.
+// finisher and what each refusal asks of it. The fix-applier's restatement of
+// the record lives in its agent body, which the dispatch-block golden fixture
+// pins whole; these two paragraphs sit in review-and-fix.md and run-team's
+// SKILL.md, which no golden fixture holds, so nothing else holds them.
 //
 // THE CEILING: presence pins over bounded slices, each a contiguous clause —
 // the rule and its condition in one span, so an inverted verdict (`ok` →
@@ -18,6 +18,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { CASES, memberPrompt, renderBrief } from "./support/render-brief.mjs";
 import { ALLOWED_DEFER } from "../plugin/scripts/dispositions-check.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
@@ -99,8 +100,14 @@ test("a mismatch is retried once by the next suffix, whose prompt carries the vi
   const s = SKILL.paragraph("`DISPATCH fix-pr PR#<M>` on a dispositions mismatch", "run-team/SKILL.md", "**A refutation resting on an injection", { emphasisTolerant: true }).text;
   assert.match(s, Pin.phrase("is one automatic retry, a review fix-applier named the next suffix (`fix-pr-<M>-b`)"));
   assert.match(s, Pin.phrase(
-    "the review file `<scratch>/pr<M>/<run>/review.json`, the mismatched member's record `<scratch>/dispositions-<member>.json` it starts from, its own record `<scratch>/dispositions-<its own name>.json` it writes, and the check's violation list **verbatim**",
+    "first one's with the retry paragraph added: `--mismatched-record`, the mismatched member's record `<scratch>/dispositions-<member>.json` it starts from, and `--violations`, the check's violation list as printed",
   ));
+  // The two arguments reach the member: the rendered retry brief carries the
+  // mismatched record's path and the violation list the controller passed.
+  const retry = CASES.find((c) => c.role === "fix-applier" && c.kind === "dispositions-retry").args;
+  const brief = renderBrief("fix-applier", "dispositions-retry");
+  assert.match(brief, Pin.phrase(`The mismatched member's record is \`${retry["mismatched-record"]}\``));
+  assert.match(brief, Pin.phrase(`each naming a bucket, an index and a rule: ${retry.violations}`));
   assert.match(s, Pin.phrase(
     "A second failure on the same review is written as `dispositions-escalate=fix-pr-<M>-b:<run>` in place of a mismatch: the tick prints no `DISPATCH fix-pr` for it, `dispatch` refuses the finisher naming `dispositions escalate`",
   ));
@@ -211,7 +218,7 @@ const headerRecord = () => CHECK.stripGutter("//").between("The record:", "Rules
 const headerDeferRule = () =>
   CHECK.stripGutter("//").bullet("- An in-scope `survived` finding deferred passes only with `reason` one", "`remedy-outside-diff` passes only when", "dispositions-check.mjs header").text;
 const fixApplierRecord = () =>
-  SKILL.stripGutter(">").between("**Before you report, write every ruling to", "Then write your report to the file your brief names", "run-team/SKILL.md").text;
+  Pin.of(memberPrompt("fix-applier", "review"), "the fix-applier member prompt").stripGutter(">").between("**The dispositions record**, the one your brief names the path of:", "Then write your report to the file your brief names", "the fix-applier member prompt").text;
 
 const REFUTED_ENTRY =
   "A `refuted` entry carries `scope`, `claimKind` and `disposition` like every other entry, and a non-empty `reason` holding the evidence that reverses it; a missing or blank `reason` is a mismatch.";

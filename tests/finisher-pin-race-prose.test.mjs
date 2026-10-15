@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { memberPrompt } from "./support/render-brief.mjs";
 import { HALT_CAUSES } from "../plugin/scripts/ledger-grammar.mjs";
 
 // The finisher is dispatched pinned to a SHA, and a head that moves after the
@@ -21,57 +22,51 @@ import { HALT_CAUSES } from "../plugin/scripts/ledger-grammar.mjs";
 // script's test, where a mutation of the derivation reds a behaviour instead of
 // a sentence.
 //
-// Slice-scoped, not whole-file: a bare presence check anywhere in this
-// 1200+ line SKILL.md would stay green even if the text moved somewhere
-// that never reaches its reader (measured before, in this same file —
-// member-prompt-prose.test.mjs #172). The block is finisher-facing and must sit
-// inside a `>` block the controller carries verbatim.
+// Slice-scoped, not whole-file: a bare presence check anywhere in the member
+// prompt would stay green even if the text moved somewhere that never reaches
+// its reader (measured before, in this same file — member-prompt-prose.test.mjs
+// #172). The block is finisher-facing: it lives in the finisher's agent body,
+// which the harness injects as the member's system prompt, and SKILL.md carries
+// no copy of it for the controller to paraphrase.
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
-const CAUSE_BLOCK_START = "instead of asking anyone:";
-// The controller-facing resolution table (#2083) follows the block directly;
-// it is no part of what the finisher is handed.
-const CAUSE_BLOCK_END = "**Resolving a finisher halt.**";
+const CAUSE_BLOCK_START = "**Duty 1 is one script, and its exit code is your verdict.**";
+// The paragraph that follows the block opens the instrument re-check; it is
+// no part of the halt-cause text.
+const CAUSE_BLOCK_END = "**Re-check the instrument set before you act on what duty 1 or duty 2 read";
 
-// Raw slice: keeps the `>` prefixes, needed by the structural (every-line-quoted)
-// test below.
+// The finisher's member prompt sliced to the cause block, whitespace-collapsed:
+// a phrase match needs the wrap invisible.
 function causeBlock() {
-  const at = RUN_TEAM.text.indexOf(CAUSE_BLOCK_START);
-  assert.notEqual(at, -1, `cause-block anchor ('${CAUSE_BLOCK_START}') moved — update this test`);
-  const end = RUN_TEAM.text.indexOf(CAUSE_BLOCK_END, at);
-  assert.notEqual(end, -1, `the resolution paragraph that follows ('${CAUSE_BLOCK_END}') moved — update this test`);
-  return RUN_TEAM.text.slice(at + CAUSE_BLOCK_START.length, end);
+  return Pin.of(memberPrompt("finisher", "fresh"), "the finisher's member prompt")
+    .between(CAUSE_BLOCK_START, CAUSE_BLOCK_END, "the finisher's halt-cause block")
+    .text;
 }
 
-// Flattened: markdown hard-wraps a `>` block at ~80 columns, so a phrase can
-// split across a line with a literal `>` re-injected at the wrap point. A
-// phrase match needs the wrap invisible; the structural test needs it intact,
-// hence two helpers instead of one.
 function causeText() {
-  return causeBlock().replace(/\n>?[ \t]*/g, " ");
+  return causeBlock().replace(/\s+/g, " ");
 }
 
-// The lead-in that introduces the block sits OUTSIDE the `>` block, so
-// `causeText()` cannot see it — and the closed-count wording #997 removed lived
-// there, not in the block. Anchored on the surviving half of that sentence and
-// bounded by its own paragraph: `paragraph` refuses a duplicated or missing
-// anchor rather than widening to the whole file, which is the only way a "no
-// closed count anywhere" assertion could pass by looking at nothing.
-const LEAD_ANCHOR = "A halt at step 1 reads identical from a bare SHA mismatch";
-const leadIn = () => RUN_TEAM.paragraph(LEAD_ANCHOR, "run-team halt-cause lead-in", "> **Duty 1 is one script, and its exit code is your verdict.**").text;
+// The paragraph that says the cause list is open sits in the controller-facing
+// halt resolution, outside the block, so `causeText()` cannot see it — and the
+// closed-count wording #997 removed lived in prose like it. Anchored on the
+// surviving half of that sentence and bounded by its own paragraph:
+// `paragraph` refuses a duplicated or missing anchor rather than widening to
+// the whole file, which is the only way a "no closed count anywhere" assertion
+// could pass by looking at nothing.
+const LEAD_ANCHOR = "A halt at duty 1 reads identical from a bare SHA mismatch";
+const leadIn = () => RUN_TEAM.paragraph(LEAD_ANCHOR, "run-team halt-cause lead-in", "**Resolving a finisher halt.**").text;
 
 const list = (words) => `${words.slice(0, -1).map((w) => `\`${w}\``).join(", ")} or \`${words.at(-1)}\``;
 
-test("the cause evidence sits inside a quote block, not only in controller narrative", () => {
+test("the cause evidence reaches the finisher through its agent body, and SKILL.md carries no copy of it", () => {
   const block = causeBlock();
-  const lines = block.split("\n").filter((l) => l.trim() !== "");
-  assert.ok(lines.length > 0, "the cause block is empty");
-  const stray = lines.filter((l) => !l.startsWith(">"));
-  assert.deepEqual(
-    stray,
-    [],
-    "cause text sits outside the `>` block — a finisher only receives this if the controller paraphrases it, same failure #172 already fixed once in this file for the implementer",
+  assert.ok(block.trim().length > 0, "the cause block is empty");
+  assert.doesNotMatch(
+    RUN_TEAM.text,
+    Pin.phrase("Every cause halts, always"),
+    "SKILL.md carries the halt-cause rule again — a second copy beside the finisher's body is free to drift from the one the member reads",
   );
 });
 
@@ -201,14 +196,14 @@ test("the cause list is open — no count is asserted, and `other` is a cause ra
   assert.doesNotMatch(
     text,
     /\b(two|three|four|five|six|seven|eight|\d+)\b(?:\s+\w+){0,3}\s+(causes|things)\b/i,
-    "the block the finisher reads counts the causes again — the count word inside the `>` block is the one that reaches the finisher verbatim",
+    "the block the finisher reads counts the causes again — the count word inside the finisher's halt-cause block is the one that reaches the finisher verbatim",
   );
 });
 
-test("the lead-in names the script the block runs", () => {
+test("the lead-in names the script the member's body runs", () => {
   assert.match(
     leadIn(),
-    Pin.phrase("so it gets the cause from one script instead of asking anyone:"),
+    Pin.phrase("the finisher's agent body gives it the cause from one script instead of asking anyone"),
     "the lead-in no longer says the cause comes from one script — a controller reading it paraphrases the steps back in",
   );
 });
