@@ -5,13 +5,14 @@
 //
 //   - nothing the move took out of SKILL.md was lost: the fixtures under
 //     tests/fixtures/run-team-moved-text/ are the removed text, owned by this
-//     test, and every sentence of them is found exactly once across
+//     test — each sentence as the reference file now says it, where the move
+//     corrected one — and every sentence of them is found exactly once across
 //     references/ and not at all in SKILL.md;
 //   - step 0 and End of run stay short — the point of the move;
 //   - each `NEED` line a driver prints has its paragraph in SKILL.md, read off
 //     the scripts' own sources so a new kind cannot ship unexplained;
-//   - the reference files keep a heading per step and carry no issue numbers
-//     (plugin/skills ships).
+//   - the reference files keep a heading per moved step paragraph and carry no
+//     issue numbers (plugin/skills ships).
 //
 // Each pin below holds one claim by a contiguous phrase or an exact count, never
 // by independent keywords. THE CEILING shared with every prose pin here: this
@@ -153,6 +154,7 @@ test("End of run runs closeout.mjs begin, the ordinary loop, then closeout.mjs f
   assert.ok(begin !== -1 && begin < loop && loop < finish, `begin at ${begin}, the tick's last line at ${loop}, finish at ${finish}`);
   assert.match(endOfRun(), Pin.phrase("A `NEED tier-outcomes append <pr>` is a PR the ledger marks reviewed with no verdict row: append it with the verdict you rule (**Guard: accumulate per PR**) and run `finish` again."));
   assert.match(endOfRun(), Pin.phrase("A claim it refuses prints `NEED hand-release #<N> <blocker>`"));
+  assert.match(endOfRun(), Pin.phrase("so a claim you keep leaves `begin` at exit 4 on every run"));
 });
 
 test("the verdict rules stay in the guard, where the controller rules each PR", () => {
@@ -197,7 +199,7 @@ test("the stranded and fold-in paragraphs name their remedies: a stranded impl-<
 test("step 0 says to run phase0.mjs again until it exits 0 and to dispatch nothing before then", () => {
   const s = step0();
   assert.match(s, Pin.phrase("Dispatch nothing before it exits 0."));
-  assert.match(s, Pin.phrase("A re-run skips every `ok` step and resumes where the last one stopped."));
+  assert.match(s, Pin.phrase("Once `rotate` has run, a re-run skips every `ok` step and resumes where the last one stopped; before it, a re-run runs every step again."));
 });
 
 test("the PHASE0-INCOMPLETE tick row names its remedy: run phase0.mjs again, which resumes at the step that stopped", () => {

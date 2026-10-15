@@ -23,8 +23,8 @@ construction: stale text reads as authoritative.
 **Pin the instruments, after that fast-forward and before anything reads
 them, from this main checkout.** `~/.fleet/bin/fleet-run instruments.sh --pin`
 records what the scripts and runbooks in this repo say right now, which is
-what every later gate compares against; the rule above says what its exit
-codes mean. Pinning before that fast-forward would instead pin the
+what every later gate compares against; SKILL.md's **Re-check before you act
+on any instrument reading** says what its exit codes mean. Pinning before that fast-forward would instead pin the
 superseded text and certify it for the rest of the run.
 **When this workspace does not track `plugin/…`** — fleets run here on an
 installed plugin rather than a vendored tree — the bare pin refuses on an
@@ -286,8 +286,8 @@ claim before it lands:
 > Follow your definition's procedure exactly, and end with its report line.
 
 `<repo>` is this main checkout's absolute path and `<scratch>` is the
-absolute path `scratch-root.mjs` prints (**The scratch root is computed**
-above), written into the prompt before you send it. The member reads the repository,
+absolute path `scratch-root.mjs` prints (SKILL.md's **The scratch root is
+computed**), written into the prompt before you send it. The member reads the repository,
 proposes both commands and proves them with `recipe-prove.mjs` in a
 throwaway worktree of `origin/main`: the Install step must leave the tree
 clean, and the Test entrypoint must be shown to run real tests — the

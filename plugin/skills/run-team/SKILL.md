@@ -266,8 +266,9 @@ phase, or in any later one, asks the maintainer which tickets to take.
    `PHASE0-INCOMPLETE` and holds every dispatching row until the receipt is whole.
    Dispatch nothing before it exits 0. Exit 3 is a step that failed: its line
    carries the refusal, so fix the cause and run it again. Exit 4 is a step
-   that needs you: act on each `NEED` line below, then run it again. A re-run
-   skips every `ok` step and resumes where the last one stopped.
+   that needs you: act on each `NEED` line below, then run it again. Once
+   `rotate` has run, a re-run skips every `ok` step and resumes where the last
+   one stopped; before it, a re-run runs every step again.
 
    - `NEED derive-recipe` — the Recipe cache holds nothing valid. Dispatch a
      `task` member named `derive-recipe`, agent `fleet-recipe-deriver`, its
@@ -1403,8 +1404,10 @@ owes beyond its row:
      (`ledger.mjs drain`), then releases every claim that never became a PR and
      settles each `impl-<N>=released` (**Release the claims that never became
      PRs**). A claim it refuses prints `NEED hand-release #<N> <blocker>`: that
-     refusal is the finding, so run `worktree-audit.sh`, decide by hand, and run
-     `begin` again.
+     refusal is the finding, so run `worktree-audit.sh` and decide by hand.
+     `begin` selects a claim with no PR and a live or `bailed` implementer token
+     on every run, so a claim you keep leaves `begin` at exit 4 on every run:
+     release the rest by hand and run `begin` again.
   2. Act on the review, fix-applier and merge rows until the tick prints
      `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`, which it does
      once the run is draining with no open PR and no live implementer.

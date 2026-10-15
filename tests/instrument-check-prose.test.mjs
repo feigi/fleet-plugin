@@ -29,7 +29,7 @@ import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
-// The phase-0 step paragraphs live in the reference file, one heading per step.
+// The phase-0 step paragraphs live in the reference file, one heading per moved step paragraph.
 const PHASE0 = Pin.file(join(REPO, "skills", "run-team", "references", "phase-0.md"));
 
 // Bounded at both ends, and the slices are small on purpose: the file names

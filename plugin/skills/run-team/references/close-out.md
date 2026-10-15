@@ -71,10 +71,11 @@ two. It then runs `pr-cost.mjs --guard`, which rewrites
 own exit 3 (a cell tripped) and 4 (no verdict yet, baseline too thin) are
 verdicts the router and `fleet-tick.mjs` read, never failures; the script
 absorbs them. Exit 1 names the duty that failed on stderr and the duty after it
-did not run; exit 2 is a usage error. At close-out a failure is reported to the
-maintainer and does not stop the commit — the pending file stays in `.fleet/`
-and the next run's phase-0 pass drains it — but never commit the metrics files
-with a drain that failed claiming the corpus is complete.
+did not run; exit 2 is a usage error. At close-out a failure fails the
+`metrics` step of `closeout.mjs finish`, so `commit-and-pr` stays pending: fix
+the cause and run `finish` again — the pending file stays in `.fleet/` and the
+next run's phase-0 pass drains it — and never commit the metrics files with a
+drain that failed claiming the corpus is complete.
 
 ## Commit the metrics files and open a PR
 

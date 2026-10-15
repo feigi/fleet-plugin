@@ -5,12 +5,18 @@ import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const CLOSE_OUT = Pin.file(join(REPO, "skills", "run-team", "references", "close-out.md"));
+const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 // Slice by named anchors and fail loudly when one moves; slice SIZE is what does
 // the work. The scrape and its check are one section of the close-out reference
 // file, so the slice ends at the next heading rather than on a later duty's
 // prose it never touches.
 const SLICE = () => CLOSE_OUT.section("## Scrape the member facts and check the tier rows", "member-outcomes scrape section").text;
+
+// The paragraph where the controller still rules each PR's review: it stays in
+// the skill file, and its end anchor is the paragraph that hands the scrape
+// over to the close-out reference.
+const RULING = () => RUN_TEAM.between("**Guard: accumulate per PR", "The member-facts scrape, the drain", "tier-outcomes ruling paragraph").text;
 
 // Everything the instruction needs in order to RUN. Matching only the filename
 // was mutation-proven vacuous: the pin stayed green both when the command was
@@ -57,6 +63,9 @@ test("the ruling step scrapes EVERY session for the cwd, not one guessed session
 
 test("the ruling step does NOT ask the controller to hand-write member rows", () => {
   // The whole invariant: member-outcomes.tsv is derived. An instruction to
-  // author a row there would make it un-regenerable.
+  // author a row there would make it un-regenerable. Two places carry the
+  // controller's side of it: the scrape section in the close-out reference
+  // and the ruling paragraph that stays in the skill file.
   assert.doesNotMatch(SLICE(), /append .{0,40}member-outcomes/i);
+  assert.doesNotMatch(RULING(), /append .{0,40}member-outcomes/i);
 });
