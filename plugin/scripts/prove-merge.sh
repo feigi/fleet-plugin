@@ -15,7 +15,8 @@
 #   3. the merge commit's second parent IS the rebased head
 #
 # merge-commit path (pre != post, post has exactly two parents, and pre is one of them) — one gate replaces leg 1:
-#   1. pre IS a parent of post  (the old version survives as an ancestor of the new)
+#   1. pre IS a parent of post, and pre is NOT an ancestor of the merge's first
+#      parent  (the old version survives in the new, and was not already on main)
 #   2. the rebased head IS an ancestor of main         (the new version did)
 #   3. the merge commit's second parent IS the rebased head
 #
@@ -38,9 +39,9 @@
 # What stands in for leg 1 on each path:
 #   no-rebase path — leg 1 is dropped (impossible by construction)
 #   rebase path — preDidNotLand: the pre-rebase head is NOT an ancestor of main
-#   merge-commit path — preIsParentOfHead: the pre-rebase head IS a parent of post;
-#                       the path selection already established that, so the gate
-#                       records which path ran rather than testing anything new
+#   merge-commit path — preIsParentOfHead: the pre-rebase head IS a parent of post
+#                       and is NOT an ancestor of <merge>^1, so a parent of post
+#                       that was already on main before the merge fails it
 #
 # The payload splits the checks into three kinds, because a flat object could not
 # say which of its fields were load-bearing for the verdict it sits next to:
@@ -212,7 +213,13 @@ elif [ "$post_parents" -eq 2 ] && { [ "$post_first" = "$pre_full" ] || [ "$post_
   else
     echo "    merge-commit (pre != post, pre is second parent of post) — pre is a parent of post" >&2
   fi
-  teeth=true
+  # Being a parent of post does not tell the PR head from main's side of the
+  # merge-in: both are parents. The side that was already on main is an
+  # ancestor of the merge's first parent, the main this merge was built on.
+  echo "\$ git merge-base --is-ancestor $pre $first" >&2
+  pre_landed=$(is_ancestor "$pre_full" "$first")
+  if [ "$pre_landed" = false ]; then teeth=true; else teeth=false; fi
+  echo "    pre is-ancestor of ${merge}^1 = $pre_landed, so preIsParentOfHead = $teeth (wants pre not already on main)" >&2
 else
   proof_path="rebase"
   if [ "$pre_anc" = false ]; then teeth=true; else teeth=false; fi
@@ -228,13 +235,13 @@ if [ "$parents" -eq 2 ]; then two_parents=true; else two_parents=false; fi
 # `$teeth` is a constant true on the no-rebase path, and it is left OUT of the
 # object there rather than emitted as one: leg 1 is dropped on that path, and a
 # gate that cannot fail is not a gate. Its absence is the machine-readable form
-# of "leg 1 did not carry this proof". On the merge-commit path `$teeth` is a
-# constant true too — the elif that selects the path is itself the check that pre
-# is a parent of post — and it is emitted anyway, as `preIsParentOfHead`, because
-# the payload contract names it: it records which leg-1 replacement the proof ran
-# under. It cannot fail, so nothing rests on it; the four shared gates carry the
-# verdict there, and any parent of a two-parent post, the main side included,
-# satisfies it.
+# of "leg 1 did not carry this proof". On the merge-commit path `$teeth` is
+# emitted as `preIsParentOfHead` and is a real test: the elif that selects the
+# path already established that pre is a parent of post, and on top of that
+# `$teeth` is false when pre is an ancestor of the merge's first parent — main's
+# side of the merge-in, a commit that landed before this merge did. The test does
+# not depend on which parent position pre holds, so either merge direction is
+# covered.
 gates="\"postIsAncestor\":$post_anc,\"secondParentIsHead\":$second_is_head,\"exactlyTwoParents\":$two_parents,\"headWasCurrent\":$head_current"
 if [ "$proof_path" = rebase ]; then
   gates="\"preDidNotLand\":$teeth,$gates"
