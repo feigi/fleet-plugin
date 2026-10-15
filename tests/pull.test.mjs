@@ -703,7 +703,7 @@ test("Q2: an edit that fails after its comment landed is answered again without 
 // and two live worktrees: `feature/x`, a branch with no PR, and `fix/31`,
 // #31's head. Each worktree's branch carries one commit of its own.
 function scanFixture({ failing = false, issue } = {}) {
-  const f = fixture(issue === undefined ? {} : { issue });
+  const f = fixture({ issue });
   const branch = (name, files) => {
     const wt = join(f.dir, name.replace("/", "-"));
     git(f.repo, "worktree", "add", "-q", "-b", name, wt);
@@ -753,7 +753,7 @@ test("Q3 scans every open PR and live worktree branch against the brief's paths 
     ["pr", "diff", "31", "--name-only"],
   ]);
   const diffs = f.state().commands.filter((c) => c.cmd[0] === "git" && c.cmd[1] === "diff").map((c) => c.cmd.slice(1));
-  assert.deepEqual(diffs, [["diff", "--name-only", "origin/main...feature/x", "--"], ["diff", "--name-only", "origin/main...fix/31", "--"]], "every branch but main is diffed");
+  assert.deepEqual(diffs, [["diff", "--name-only", "-z", "origin/main...feature/x", "--"], ["diff", "--name-only", "-z", "origin/main...fix/31", "--"]], "every branch but main is diffed");
   assert.equal(f.calls("claim-ticket").length, 0, "nothing is claimed before Q3 is answered");
   const [scan] = f.state().scans;
   assert.deepEqual(scan.paths, ["plugin/scripts/pull.mjs", "tests/pull.test.mjs"]);
@@ -875,6 +875,99 @@ test("Q3: the scan is printed again, unchanged, when the pending question is res
   assert.equal(again.status, 10);
   assert.deepEqual(collisionLines(again.stdout), first);
   assert.equal(f.state().scans.length, 1, "resuming scans nothing");
+});
+
+test("Q3: a path the brief spells as a bare name or as a directory matches the changed files under it", () => {
+  const f = scanFixture({ issue: { ...ISSUE, body: "## What to build\n\nChange `pull.mjs` under `plugin/scripts/`, and `docs/`.\n" } });
+  const lines = collisionLines(toCollision(f).stdout);
+  assert.deepEqual(lines, [
+    "paths scanned: pull.mjs plugin/scripts/ docs/",
+    "PR #7: plugin/scripts/",
+    "PR #31: pull.mjs plugin/scripts/",
+    "branch feature/x: docs/",
+    "branch fix/31 (PR #31): pull.mjs plugin/scripts/",
+    "behind-issue candidates (Out of scope): (none)",
+  ]);
+  // A directory is a whole path segment, not a prefix of a name: `plugin/script` names no directory here.
+  const again = collisionLines(f.answer(12, "collision", "paths", "plugin/script", "ugin").stdout);
+  assert.deepEqual(again.slice(1, -1), lines.slice(1, -1));
+  assert.equal(again[0], `${lines[0]} plugin/script ugin`);
+});
+
+test("Q3: a branch that changes a non-ASCII path is scanned by the path's own name", () => {
+  const f = fixture({ issue: { ...ISSUE, body: "## What to build\n\nChange `docs/é.md`.\n" } });
+  git(f.repo, "config", "core.quotePath", "true");
+  const wt = join(f.dir, "uni");
+  git(f.repo, "worktree", "add", "-q", "-b", "uni", wt);
+  mkdirSync(join(wt, "docs"));
+  writeFileSync(join(wt, "docs", "é.md"), "x\n");
+  git(wt, "add", ".");
+  git(wt, "commit", "-q", "-m", "uni");
+  const lines = collisionLines(toCollision(f).stdout);
+  assert.deepEqual(lines, ["paths scanned: docs/é.md", "branch uni: docs/é.md", "behind-issue candidates (Out of scope): (none)"]);
+});
+
+test("Q3 skips a worktree branch whose upstream is gone and scans one whose upstream stands", () => {
+  const f = fixture();
+  const pushed = (name) => {
+    const wt = join(f.dir, name);
+    git(f.repo, "worktree", "add", "-q", "-b", name, wt);
+    mkdirSync(join(wt, "plugin", "scripts"), { recursive: true });
+    writeFileSync(join(wt, "plugin", "scripts", "pull.mjs"), `${name}\n`);
+    git(wt, "add", ".");
+    git(wt, "commit", "-q", "-m", name);
+    git(wt, "push", "-q", "-u", "origin", name);
+  };
+  pushed("merged/9");
+  pushed("live/1");
+  git(f.repo, "push", "-q", "origin", "--delete", "merged/9");
+  git(f.repo, "fetch", "-q", "--prune");
+  const lines = collisionLines(toCollision(f).stdout);
+  assert.deepEqual(lines, [
+    "paths scanned: plugin/scripts/pull.mjs tests/pull.test.mjs",
+    "branch live/1: plugin/scripts/pull.mjs",
+    "behind-issue candidates (Out of scope): (none)",
+  ]);
+});
+
+test("Q3: a pull.json from before the scan resumes and scans, unless a collision question stands on it", () => {
+  const old = (f, patch) => {
+    const st = f.state();
+    delete st.scans;
+    delete st.addedPaths;
+    writeFileSync(f.statePath(), `${JSON.stringify({ ...st, openPrs: [7, 31], ...patch }, null, 2)}\n`);
+  };
+  const f = fixture();
+  toCollision(f);
+  old(f, { pending: null });
+  const r = f.next("--head", "12");
+  assert.equal(r.status, 10, r.stdout + r.err);
+  assert.deepEqual(collisionLines(r.stdout), ["paths scanned: plugin/scripts/pull.mjs tests/pull.test.mjs", "no overlap", "behind-issue candidates (Out of scope): (none)"]);
+  assert.equal(f.state().scans.length, 1);
+
+  const g = fixture();
+  toCollision(g);
+  old(g, {});
+  for (const r2 of [g.next("--head", "12"), g.answer(12, "collision", "paths", "x.md")]) {
+    assert.equal(r2.status, 2, r2.stdout + r2.err);
+    assert.match(r2.err, /pull\.json holds a collision question that no scan of this script asked — move it aside and run again/);
+  }
+
+  const h = fixture();
+  toCollision(h);
+  writeFileSync(h.statePath(), `${JSON.stringify({ ...h.state(), scans: "x" }, null, 2)}\n`);
+  const bad = h.next("--head", "12");
+  assert.equal(bad.status, 2, bad.stdout + bad.err);
+  assert.match(bad.err, /pull\.json is not a Pull record — move it aside and run again/);
+});
+
+test("Q3 `paths <p>…` naming a path the brief already names scans it once", () => {
+  const f = scanFixture();
+  toCollision(f);
+  const r = f.answer(12, "collision", "paths", "plugin/scripts/pull.mjs");
+  assert.equal(r.status, 10, r.stdout + r.err);
+  assert.equal(collisionLines(r.stdout)[0], "paths scanned: plugin/scripts/pull.mjs tests/pull.test.mjs");
+  assert.deepEqual(f.state().scans[1].paths, ["plugin/scripts/pull.mjs", "tests/pull.test.mjs"]);
 });
 
 test("Q3 behind-pr / behind-issue: the exclusion is a ledger row, exit 1, nothing claimed", () => {
@@ -1113,6 +1206,7 @@ test("pull.json records every command, question and answer with a time, in the o
     ["staleness", "staleness.mjs", 0],
     ["collision", "gh", 0],
     ["collision", "git", 0],
+    ["collision", "git", 0],
     ["claim", "claim-ticket.sh", 0],
     ["ledger", "ledger.mjs", 0],
     ["route", "ticket-router.mjs", 0],
@@ -1125,7 +1219,8 @@ test("pull.json records every command, question and answer with a time, in the o
   assert.match(st.commands[1].stdout, /^\d+ bytes, written to .*issue\.json$/, "the issue is on disk, not in the record");
   assert.equal(st.commands[2].stdout, '{"verdict":"live"}');
   assert.deepEqual(st.commands[4].cmd, ["git", "worktree", "list", "--porcelain", "-z"]);
-  assert.deepEqual(st.commands[8].cmd, ["ledger.mjs", "row", "12", "impl-12"]);
+  assert.deepEqual(st.commands[5].cmd, ["git", "for-each-ref", "--format=%(refname:short)%09%(upstream:track)", "refs/heads"]);
+  assert.deepEqual(st.commands[9].cmd, ["ledger.mjs", "row", "12", "impl-12"]);
   for (const c of st.commands) assert.match(c.at, NOW);
   assert.deepEqual(st.questions.map((q) => q.qid), ["staleness", "staleness", "decided", "collision"], "Q1 asked once by `next` and once more after the probe");
   assert.deepEqual(st.answers.map((a) => [a.qid, a.token, a.text, a.path ?? null, a.applied]), [

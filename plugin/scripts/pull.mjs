@@ -56,13 +56,16 @@
 //   5  Q3 collision   the scan first: the brief's paths, and every path a
 //                 `paths <p>…` answer added, against each open PR's `gh pr diff
 //                 <M> --name-only` and each live worktree branch's `git diff
-//                 --name-only origin/main...<branch>` — `main` excepted. One line
-//                 per PR or branch sharing a path, `no overlap` when none, and
-//                 `could not look: <which>` for one that could not be read; the
-//                 `#N` refs of the brief's Out of scope section are printed as
-//                 the behind-issue candidates. Then `clear`, `behind-pr:#M`,
-//                 `behind-issue:#M`, or `paths <p>…`, which scans again and asks
-//                 again. An exclusion is a ledger row.
+//                 --name-only -z origin/main...<branch>` — `main` excepted, and
+//                 a branch whose upstream is gone, its PR already merged or
+//                 closed. A path matches a changed file of that path, one
+//                 under it as a directory, or, with no `/`, one of that name.
+//                 One line per PR or branch sharing a path, `no overlap` when
+//                 none, and `could not look: <which>` for one that could not be
+//                 read; the `#N` refs of the brief's Out of scope section are
+//                 printed as the behind-issue candidates. Then `clear`,
+//                 `behind-pr:#M`, `behind-issue:#M`, or `paths <p>…`, which
+//                 scans again and asks again. An exclusion is a ledger row.
 //   6  claim      `claim-ticket.sh <N> impl-<N> implementer --apply`.
 //   7  route      `ticket-router.mjs route …`; a router that refuses releases
 //                 the claim, and a release that fails is exit 2 with the claim
@@ -264,6 +267,12 @@ function worktreeBranches(out) {
   return out.split("\0").filter((f) => f.startsWith(head)).map((f) => f.slice(head.length));
 }
 
+/** The local branches whose upstream is gone, from `git for-each-ref --format=%(refname:short)%09%(upstream:track)`. */
+function goneBranches(out) {
+  const mark = "\t[gone]";
+  return new Set(out.split("\n").filter((l) => l.endsWith(mark)).map((l) => l.slice(0, -mark.length)));
+}
+
 // ── the state ────────────────────────────────────────────────────────────────
 
 function fresh(ticket, session) {
@@ -308,6 +317,14 @@ function readPull(path) {
     && Number.isInteger(s.ticket) && typeof s.stage === "string" && typeof s.status === "string"
     && Array.isArray(s.commands) && Array.isArray(s.questions) && Array.isArray(s.answers);
   if (!ok) throw new Refusal(`${path} is not a Pull record — move it aside and run again`);
+  // A record written before the collision scan holds neither field.
+  s.scans ??= [];
+  s.addedPaths ??= [];
+  if (!Array.isArray(s.scans) || !Array.isArray(s.addedPaths)) throw new Refusal(`${path} is not a Pull record — move it aside and run again`);
+  // A collision question is printed from the latest scan, so one standing with no scan behind it cannot be.
+  if (s.pending?.qid === "collision" && s.scans.length === 0) {
+    throw new Refusal(`${path} holds a collision question that no scan of this script asked — move it aside and run again`);
+  }
   return s;
 }
 
@@ -623,27 +640,36 @@ class Pull {
     if (prs.length >= PR_LIMIT) return this.stop(`gh pr list came back at its cap of ${PR_LIMIT} — it may hold more PRs than it showed`);
     const wt = this.exec("collision", "git", "git", [], ["worktree", "list", "--porcelain", "-z"]);
     if (wt.status !== 0) return this.stop(withText(`git worktree list failed (${wt.how})`, wt));
+    const refs = this.exec("collision", "git", "git", [], ["for-each-ref", "--format=%(refname:short)%09%(upstream:track)", "refs/heads"]);
+    if (refs.status !== 0) return this.stop(withText(`git for-each-ref failed (${refs.how})`, refs));
+    const gone = goneBranches(refs.stdout);
 
     const paths = [...new Set([...briefPaths(briefText(this.issue()).trim()), ...st.addedPaths])];
-    const shared = (stdout) => {
-      const files = new Set(stdout.split("\n"));
-      return paths.filter((p) => files.has(p));
+    // A path names a changed file, a directory above it (with or without its trailing `/`), or, with no `/`, a file by its name.
+    const hits = (p, f) => {
+      const q = p.replace(/\/+$/, "");
+      return f === q || f.startsWith(`${q}/`) || (!q.includes("/") && f.split("/").pop() === q);
+    };
+    const shared = (stdout, sep) => {
+      const files = stdout.split(sep).filter((f) => f !== "");
+      return paths.filter((p) => files.some((f) => hits(p, f)));
     };
     const overlaps = [];
     const unread = [];
     for (const pr of prs.map((p) => p.number).sort((a, b) => a - b)) {
       const d = this.gh("collision", ["pr", "diff", String(pr), "--name-only"]);
-      const common = d.status === 0 ? shared(d.stdout) : [];
+      const common = shared(d.stdout, "\n");
       if (d.status !== 0) unread.push(`gh pr diff ${pr} (${failure(d)})`);
       // Fail closed, as pr-overlap.mjs does: a PR with no changed file is a query that did not work, never "no overlap".
       else if (d.stdout === "") unread.push(`gh pr diff ${pr} (printed no file)`);
       else if (common.length > 0) overlaps.push({ pr, paths: common });
     }
     const heads = new Map(prs.map((p) => [p.headRefName, p.number]));
-    for (const branch of worktreeBranches(wt.stdout).filter((b) => b !== "main").sort()) {
+    for (const branch of worktreeBranches(wt.stdout).filter((b) => b !== "main" && !gone.has(b)).sort()) {
       const range = `origin/main...${branch}`;
-      const d = this.exec("collision", "git", "git", [], ["diff", "--name-only", range, "--"]);
-      const common = d.status === 0 ? shared(d.stdout) : [];
+      // NUL-separated: git quotes a non-ASCII path in the newline form, and a quoted name equals no path the brief spells.
+      const d = this.exec("collision", "git", "git", [], ["diff", "--name-only", "-z", range, "--"]);
+      const common = shared(d.stdout, "\0");
       if (d.status !== 0) unread.push(`git diff --name-only ${range} (${failure(d)})`);
       else if (common.length > 0) overlaps.push({ branch, pr: heads.get(branch) ?? null, paths: common });
     }
