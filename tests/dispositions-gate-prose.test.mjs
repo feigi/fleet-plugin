@@ -211,7 +211,7 @@ const headerRecord = () => CHECK.stripGutter("//").between("The record:", "Rules
 const headerDeferRule = () =>
   CHECK.stripGutter("//").bullet("- An in-scope `survived` finding deferred passes only with `reason` one", "`remedy-outside-diff` passes only when", "dispositions-check.mjs header").text;
 const fixApplierRecord = () =>
-  SKILL.stripGutter(">").between("**Before you report, write every ruling to", "Then report to the controller the pushed SHA", "run-team/SKILL.md").text;
+  SKILL.stripGutter(">").between("**Before you report, write every ruling to", "Then write your report to the file your brief names", "run-team/SKILL.md").text;
 
 const REFUTED_ENTRY =
   "A `refuted` entry carries `scope`, `claimKind` and `disposition` like every other entry, and a non-empty `reason` holding the evidence that reverses it; a missing or blank `reason` is a mismatch.";

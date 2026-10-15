@@ -2258,6 +2258,11 @@ async function runSettleFromReport() {
   const report = read.report;
   const invalid = (violation) => die(`${where}: ${read.path} is not a ${reportFamily(member)} report — ${violation}; nothing written`);
   if (report.member !== member) invalid(`$.member: ${JSON.stringify(report.member)} is not ${member}`);
+  // An issue number is a positive integer. A negative id writes a row `#-3 …`
+  // that `filed` refuses and `check`'s subjectOf() cannot strip.
+  for (const [k, { issue }] of (report.unrecorded ?? []).entries()) {
+    if (!Number.isInteger(issue) || issue < 1) invalid(`$.unrecorded[${k}].issue: ${JSON.stringify(issue)} is not an issue number`);
+  }
 
   // Every child runs from the ledger's repository with runCheck()'s
   // environment, for runCheck()'s reasons: GH_REPO would point gh at another
@@ -2288,16 +2293,27 @@ async function runSettleFromReport() {
     }
     return r;
   };
+  // A `gh pr view --json <fields>` answer: an object whose every requested
+  // field has the type that field has. Anything else was not what was asked
+  // for, so it could not look.
+  const prFieldOk = { state: (v) => typeof v === "string", labels: Array.isArray, closingIssuesReferences: Array.isArray };
   const prView = (pr, fields) => {
     const what = `gh pr view ${pr} --json ${fields}`;
     const r = look(what, "gh", ["pr", "view", String(pr), "--json", fields]);
+    let v = null;
     try {
-      const v = JSON.parse(r.stdout);
-      if (v !== null && typeof v === "object") return v;
+      v = JSON.parse(r.stdout);
     } catch {
       // Falls through to the refusal below.
     }
-    return die(`${where}: could not look — ${what} printed no JSON object: ${cause(r.stdout)}; nothing written`);
+    if (v === null || typeof v !== "object") {
+      die(`${where}: could not look — ${what} printed no JSON object: ${cause(r.stdout)}; nothing written`);
+    }
+    const missing = fields.split(",").filter((f) => !prFieldOk[f](v[f]));
+    if (missing.length > 0) {
+      die(`${where}: could not look — ${what} answered without a usable ${missing.join(", ")}: ${cause(r.stdout)}; nothing written`);
+    }
+    return v;
   };
   // origin's head of `branch`, or null when origin has no such branch.
   const remoteHead = (branch) => {
@@ -2323,8 +2339,7 @@ async function runSettleFromReport() {
       check(`verify-sha.sh ${report.branch} ${report.head} exits 0`, sha.status === 0);
       const pr = prView(report.pr, "state,closingIssuesReferences");
       check(`PR #${report.pr} reads OPEN`, pr.state === "OPEN");
-      const closes = Array.isArray(pr.closingIssuesReferences) ? pr.closingIssuesReferences : [];
-      check(`PR #${report.pr} closes #${live.number}`, closes.some((c) => c?.number === live.number));
+      check(`PR #${report.pr} closes #${live.number}`, pr.closingIssuesReferences.some((c) => c?.number === live.number));
     } else {
       outcome = "bailed";
       check(`bailCause: ${report.bailCause}`, report.bailCause !== null);
@@ -2376,8 +2391,7 @@ async function runSettleFromReport() {
     if (report.outcome === "labelled") {
       outcome = "labelled";
       const pr = prView(live.number, "labels");
-      const labels = Array.isArray(pr.labels) ? pr.labels : [];
-      check(`PR #${live.number} carries ${ready}`, labels.some((l) => l?.name === ready));
+      check(`PR #${live.number} carries ${ready}`, pr.labels.some((l) => l?.name === ready));
       check(`labelsReadBack carries ${ready}`, report.labelsReadBack.includes(ready));
     } else if (report.outcome === "halted") {
       outcome = `halted:${report.cause}`;

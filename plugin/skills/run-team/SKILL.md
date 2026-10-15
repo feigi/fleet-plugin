@@ -2737,14 +2737,18 @@ all.
 > with `reason` `false-rationale` and filed on the closed suggestion-band
 > record.
 >
-> Then report to the controller the pushed SHA, your apply/defer split, how
-> many refuters you dispatched against out-of-scope suggestions, and
-> the deferral issue numbers — a `filed: #N <subject>` line for every issue
-> step 5 created, and `unrecorded: #N <subject>` for one whose `ledger.mjs filed`
-> failed twice — and exit. **Deferring everything is a normal
+> Then write your report to the file your brief names,
+> `<scratch>/reports/<your name>.json`: `head` the pushed SHA, `applied` and
+> `deferred` your apply/defer split by bucket and index, each deferral's issue
+> number on its `deferred` entry, the deferral issues as `{issue, subject}`
+> entries — `filed` for every issue step 5 created, and `unrecorded` for one
+> whose `ledger.mjs filed` failed twice, which the controller's settle records —
+> `dispositionsRecord` your record's path and `testRun` your test result. Then
+> send the one line your brief gives, `<your name>: <outcome> <path>`, and exit.
+> **Deferring everything is a normal
 > outcome, not a stall:** nothing is then staged, `git commit` refuses an empty
-> index, `git push origin HEAD:<branch>` prints `Everything up-to-date`, and you
-> report `no-op, HEAD unchanged at <sha>` in place of a new SHA. Say it
+> index, `git push origin HEAD:<branch>` prints `Everything up-to-date`, and your
+> report's `outcome` is `no-op`, its `head` the unchanged SHA. Say it
 > explicitly — silence there is indistinguishable from a member that died. Never
 > manufacture a commit to make CI fire.
 

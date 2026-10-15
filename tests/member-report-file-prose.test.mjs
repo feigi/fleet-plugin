@@ -5,20 +5,42 @@
 // the brief rendered for each dispatch, every kind of it, and the agent body
 // the member carries.
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
-const RENDER = join(PLUGIN, "scripts", "dispatch-prompt.mjs");
 const PIN = "0123456789abcdef0123456789abcdef01234567";
+
+// The renderer resolves its templates and its instrument check relative to
+// itself, and derives the fleet directory from the git repository it runs in.
+// So it runs as a copy out of a fixture install — its modules, a stub
+// instruments.sh that answers clean, the briefs — from a `git init`-ed cwd of
+// its own, never the checkout this suite runs from, which holds no pinned
+// baseline when it is a fresh clone.
+const TMP = realpathSync(mkdtempSync(join(tmpdir(), "member-report-file-")));
+after(() => rmSync(TMP, { recursive: true, force: true }));
+const MODULES = ["dispatch-prompt.mjs", "arg.mjs", "git-env.mjs", "fleet-dir.mjs", "review-core.mjs"];
+const scripts = join(TMP, "install", "scripts");
+mkdirSync(scripts, { recursive: true });
+for (const m of MODULES) writeFileSync(join(scripts, m), readFileSync(join(PLUGIN, "scripts", m)));
+writeFileSync(join(scripts, "instruments.sh"), "#!/bin/sh\nexit 0\n");
+cpSync(join(PLUGIN, "skills", "run-team", "briefs"), join(TMP, "install", "skills", "run-team", "briefs"), { recursive: true });
+const REPO = join(TMP, "repo");
+mkdirSync(REPO);
+const env = { ...process.env };
+for (const k of ["GIT_DIR", "GIT_WORK_TREE", "FORCE_COLOR"]) delete env[k];
+const init = spawnSync("git", ["init", "-q"], { cwd: REPO, encoding: "utf8", env });
+assert.equal(init.status, 0, init.stderr);
+const RENDER = join(scripts, "dispatch-prompt.mjs");
 
 const flagsOf = (args) => Object.entries(args).flatMap(([k, v]) => [`--${k}`, v]);
 const render = (role, kind, args) => {
-  const r = spawnSync(process.execPath, [RENDER, "render", role, ...(kind ? ["--kind", kind] : []), ...flagsOf(args)], { encoding: "utf8" });
+  const r = spawnSync(process.execPath, [RENDER, "render", role, ...(kind ? ["--kind", kind] : []), ...flagsOf(args)], { cwd: REPO, encoding: "utf8", env });
   assert.equal(r.status, 0, r.stderr);
   return r.stdout.replace(/\s+/g, " ");
 };

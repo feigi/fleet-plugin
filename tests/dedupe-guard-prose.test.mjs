@@ -180,7 +180,7 @@ const runLedger = () => flat(RUN_TEAM.section("## Run ledger", "run-team Run led
 const finisherReport = () =>
   flat(RUN_TEAM.between("4. Report you the label", "**Give the finisher the instrument", "run-team finisher duty 4").text);
 const fixApplierReport = () =>
-  flat(RUN_TEAM.between("> Then report to the controller the pushed SHA", "**Deferring everything", "fix-applier report line").text);
+  flat(RUN_TEAM.stripGutter(">").between("Then write your report to the file your brief names", "**Deferring everything", "fix-applier report line").text);
 
 test("both filing sites run `ledger.mjs filed` right after `gh issue create`, under the subject they checked", () => {
   // The subject is half of it: `check` matches the filed list by the words in
@@ -205,13 +205,13 @@ test("a failed `filed` is retried once, then reported unrecorded — never a sec
   }
 });
 
-test("both report contracts carry `filed: #N <subject>` and the `unrecorded:` fallback", () => {
-  for (const [where, s] of [["fix-applier report", fixApplierReport()], ["finisher duty 4", finisherReport()], ["step 5", step5()]]) {
+test("both report contracts carry the issues filed and the `unrecorded` fallback", () => {
+  assert.match(fixApplierReport(), /`filed` for every issue step 5 created, and `unrecorded` for one whose `ledger\.mjs filed` failed twice/,
+    "fix-applier report no longer carries the filed issues and the unrecorded fallback");
+  for (const [where, s] of [["finisher duty 4", finisherReport()], ["step 5", step5()]]) {
     assert.match(s, /`filed: #N <subject>`/, `${where} no longer returns the issues it filed`);
   }
-  for (const [where, s] of [["fix-applier report", fixApplierReport()], ["finisher duty 4", finisherReport()]]) {
-    assert.match(s, /`unrecorded: #N <subject>`/, `${where} no longer carries the unrecorded fallback`);
-  }
+  assert.match(finisherReport(), /`unrecorded: #N <subject>`/, "finisher duty 4 no longer carries the unrecorded fallback");
 });
 
 test("the controller records every filing a filer reported unrecorded", () => {

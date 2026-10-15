@@ -183,6 +183,24 @@ test("could not look: a gh that answers something other than JSON is exit 2", ()
   f.refused("impl-5", 2, /could not look — gh pr view 6 .* printed no JSON object/);
 });
 
+test("could not look: a gh answer lacking a field it was asked for is exit 2, not a failed check", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.ok("dispatch", "6", "finisher-pr-6");
+  f.ok("dispatch", "merge-bot");
+  f.report("impl-5", implReport(f));
+  f.report("finisher-pr-6", finisherReport(f));
+  f.report("merge-bot-1", botReport(f, { merged: [{ pr: 7, sha: f.head }] }));
+  for (const body of [{}, { closingIssuesReferences: [{ number: 5 }] }, { state: "OPEN", closingIssuesReferences: null }, { state: "OPEN" }]) {
+    f.pr(6, body);
+    f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences answered without a usable/);
+  }
+  f.pr(6, {});
+  f.refused("finisher-pr-6", 2, /could not look — gh pr view 6 --json labels answered without a usable labels/);
+  f.pr(7, {});
+  f.refused("merge-bot-1", 2, /could not look — gh pr view 7 --json state answered without a usable state/);
+});
+
 // -- impl-N=bailed ------------------------------------------------------------
 
 test("impl-N=bailed: a bail cause settles, and the receipt names it", () => {
@@ -257,6 +275,14 @@ test("fix-pr-M=no-op: origin's branch moved past the reviewed= head is exit 3", 
   f.ok("dispatch", "6", "fix-pr-6");
   f.report("fix-pr-6", fixReport(f, { outcome: "no-op" }));
   f.refused("fix-pr-6", 3, new RegExp(`failed: origin refs/heads/feat is ${f.stray}, the head PR #6's latest reviewed= names`));
+});
+
+test("fix-pr-M=no-op: a branch origin does not have is exit 3", () => {
+  const f = fixture();
+  f.ok("review", "6", "review=member:review-pr-6", `reviewed=${f.head.slice(0, 12)}:0/0/0:run-abcd1234`);
+  f.ok("dispatch", "6", "fix-pr-6");
+  f.report("fix-pr-6", fixReport(f, { outcome: "no-op", branch: "gone" }));
+  f.refused("fix-pr-6", 3, /failed: origin refs\/heads\/gone is /);
 });
 
 test("fix-pr-M=no-op: a PR with no reviewed= is exit 3", () => {
@@ -377,6 +403,16 @@ test("an invalid report is exit 2 naming the violation, one family at a time", (
   f.refused("merge-bot-1", 2, /is not a merge-bot report — \$\.merged\[0\]\.sha: "abc" does not match/);
 });
 
+test("an unrecorded filing with no issue number is exit 2 before anything is looked up", () => {
+  const f = fixture();
+  f.ok("dispatch", "6", "finisher-pr-6");
+  for (const issue of [-3, 0]) {
+    f.report("finisher-pr-6", finisherReport(f, { outcome: "halted", cause: "other", evidence: "e", labelsReadBack: [], unrecorded: [{ issue, subject: "neg" }] }));
+    f.refused("finisher-pr-6", 2, new RegExp(`\\$\\.unrecorded\\[0\\]\\.issue: ${issue} is not an issue number; nothing written`));
+  }
+  assert.equal(existsSync(join(f.root, "gh.log")), false, "no gh call came first");
+});
+
 test("a report that is absent, not JSON, or names another member is exit 2", () => {
   const f = fixture();
   f.ok("dispatch", "5", "impl-5");
@@ -422,13 +458,56 @@ test("unrecorded filings reach ## Filed and refuted deferrals reach ## Ruled, on
   assert.equal(f.bytes(), before, "a second run of the same settle writes nothing");
 });
 
-test("a refuted deferral the disposition record gives no reason is exit 3", () => {
+test("a refuted deferral the disposition record gives no reason, or only whitespace, is exit 3", () => {
   const f = fixture();
   f.ok("dispatch", "6", "fix-pr-6");
   const record = join(f.root, "dispositions-fix-pr-6.json");
-  writeFileSync(record, JSON.stringify({ head: f.head, run: "run-abcd1234", entries: [{ bucket: "refuted", index: 2, reason: "" }] }));
   f.report("fix-pr-6", fixReport(f, { deferred: [{ bucket: "refuted", index: 2, issue: 43 }] }));
-  f.refused("fix-pr-6", 3, new RegExp(`failed: ${record} gives refuted\\[2\\] a reason`));
+  for (const reason of ["", "  "]) {
+    writeFileSync(record, JSON.stringify({ head: f.head, run: "run-abcd1234", entries: [{ bucket: "refuted", index: 2, reason }] }));
+    f.refused("fix-pr-6", 3, new RegExp(`failed: ${record} gives refuted\\[2\\] a reason`));
+  }
+});
+
+test("a member already settled by hand still has its report's new filings and rulings recorded", () => {
+  const f = fixture();
+  f.ok("dispatch", "6", "fix-pr-6");
+  const hand = f.run("settle", `fix-pr-6=applied:${f.head}`);
+  assert.equal(hand.status, 0, hand.stderr);
+  const record = join(f.root, "dispositions-fix-pr-6.json");
+  writeFileSync(record, JSON.stringify({
+    head: f.head, run: "run-abcd1234", entries: [{ bucket: "refuted", index: 2, reason: "the red run reproduces it" }],
+  }));
+  f.report("fix-pr-6", fixReport(f, {
+    deferred: [{ bucket: "refuted", index: 2, issue: 43 }],
+    unrecorded: [{ issue: 40, subject: "a late filing" }],
+  }));
+  const receipt = f.settled("fix-pr-6");
+  assert.deepEqual([receipt.filed, receipt.ruled], [["#40 a late filing"], ["#6 reversed refutation 2: the red run reproduces it"]]);
+  const ledger = f.ok("read");
+  assert.deepEqual(ledger.filed, ["#40 a late filing"]);
+  assert.deepEqual(ledger.ruled, ["#6 reversed refutation 2: the red run reproduces it"]);
+});
+
+test("the settle is written against the ledger as it stands under the lock, not as the checks read it", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [{ number: 5 }] });
+  // The first gh call, which the settle makes after it read the ledger and
+  // before it takes the lock, is when another writer files an issue.
+  const raced = join(f.root, "raced");
+  writeExecStub(join(f.root, "bin", "gh"), `#!/bin/sh
+if [ ! -e '${raced}' ]; then
+  : > '${raced}'
+  '${process.execPath}' '${SCRIPT}' --file '${f.file}' filed 77 racer >/dev/null || exit 70
+fi
+cat '${join(f.root, "gh")}'/"$3.json"
+`);
+  f.settled("impl-5");
+  assert.equal(existsSync(raced), true, "the other writer ran");
+  assert.deepEqual(f.ok("read").filed, ["#77 racer"]);
+  assert.equal(dispatched(f, "impl-5"), "impl-5=PR#6");
 });
 
 test("a refuted deferral whose disposition record cannot be read is exit 2", () => {
