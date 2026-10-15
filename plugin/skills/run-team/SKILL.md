@@ -1262,8 +1262,8 @@ one. Only the newest member counts, so a replacement (`impl-<N>-b`) is what
 clears a mismatch — and is then owed its own check. A mismatch on a ticket
 whose issue is already CLOSED holds nothing: the tick probes that issue and
 drops it, since there is nothing left to replace. The tick never reads a
-transcript: clear an unchecked hold by running the check on that member with
-`session`. A settled member's check works only when its transcript exists;
+transcript: clear an unchecked hold by running the check on that member. A
+settled member's check works only when its transcript exists;
 without one, the verdict is `tier-unverifiable` for a member settled `killed`
 or `released`, and exit 2 naming the wrong session for any other. Clear a
 mismatch by fixing the definition or the dispatch and dispatching the
@@ -1288,14 +1288,16 @@ dispatch time, so a late check judges a member against a tier it was never
 dispatched under.
 
 **The batch file is a JSON array, one entry per dispatched member** — under
-Pull, a batch of one, the member just dispatched: `{member, session}`.
-`member` is the AgentId the dispatch returns (`impl-<N>`). `session` is the
-SAME session directory `member-outcomes.mjs`/`board.mjs` are already handed
-for this run; the check reads the member's own `<session>/<member>.jsonl`
-directly, so a member with no assistant turn yet still resolves off its
-dispatch-time record. A caller already holding the exact transcript path may
-give `transcript` instead. Either one is required: the agent type an
-implementer was dispatched as lives only in its transcript. `resolvedModel`
+Pull, a batch of one, the member just dispatched: `{member}`.
+`member` is the AgentId the dispatch returns (`impl-<N>`). An entry that
+names neither `session` nor `transcript` takes the session directory phase
+0's receipt `.fleet/phase0.json` records, and is exit 2 naming the receipt
+when it records none; the check reads the member's own
+`<session>/<member>.jsonl` directly, so a member with no assistant turn yet
+still resolves off its dispatch-time record. A `session` the entry gives
+wins over the receipt's; a caller already holding the exact transcript path
+may give `transcript` instead. The agent type an implementer was dispatched
+as lives only in its transcript. `resolvedModel`
 **and** `resolvedThinkingLevel` together — the dispatch's own job record —
 may ride beside it and are preferred for the model and level. An `impl-`
 entry carries no `agentFile`: its definition is the row's, never the
@@ -1963,7 +1965,8 @@ depth** guard table applied in code. Act on each line as it reads:
   `released` with no transcript, clears it), a mismatch by dispatching the
   replacement at the right tier (phase 2). Each
   prints its clearing step in the row's detail: the `tier-check.mjs` command
-  with a batch entry per member it names (fill in `<file>` and `<session>`),
+  with a batch entry per member it names (fill in `<file>`; `<session>` too
+  when no receipt of this run records one),
   or the replacement's name — `impl-<N>-b` on a first retry, else one letter
   past the highest the ticket has used, or that no retry letter is left.
 - `AT CAP`, `IDLE OK` — nothing to do on that row.
@@ -2000,6 +2003,20 @@ depth** guard table applied in code. Act on each line as it reads:
   baseline was recorded. Yours to fix: run Phase 0's `--record`. A baseline
   that vanished mid-run is not a fresh run — report it to the maintainer
   before recording over whatever the tree now holds.
+- `PHASE0-INCOMPLETE <step>[, <step>…] …`, printed first above the rows,
+  with every dispatching row (implementers, reviewers, merge-bot) reading
+  `HOLD (phase 0 incomplete)` — this run's phase-0 receipt
+  `.fleet/phase0.json` names a step `failed` or `pending`. In place of the
+  steps the line says the receipt is missing, unreadable, or another run's
+  (its `run` is not the `at` in the controller record). It outranks every
+  other reason on those rows, `MAIN-CHECKOUT-*` included, whose lines still
+  print; a `baseline` step not `ok` is one of the steps it names.
+  `CONFLICT` rows and the stall report still print. Run the
+  `phase0.mjs` command the line names and act on what it prints: a re-run
+  resumes at the step that stopped. A `drift` or `unanswered` step and a
+  `fold-in` `NEED` are advice, named after `; advice:` on the line, or alone
+  on a `PHASE0-ADVICE …` line when nothing is incomplete; advice holds
+  nothing.
 - `CHECK-LIVENESS <member> (<family> > p99 <t>m)`, printed above the rows — a
   live ledger token has stayed live past its family's p99 run time, counted
   from the first tick that saw it (`> 2×p99 …` from the second multiple of the

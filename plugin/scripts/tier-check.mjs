@@ -20,7 +20,10 @@
 //      member's own transcript lives: the flat `<session>/<member>.jsonl`
 //      file, read directly (this layer's extension to member-record.mjs's
 //      readers — a member with no assistant turn yet still resolves off its
-//      dispatch-time `session_init` record, never treated as absent).
+//      dispatch-time `session_init` record, never treated as absent). An
+//      entry that names neither a `session` nor a `transcript` takes the
+//      `session` the phase-0 receipt `.fleet/phase0.json` records, and is
+//      exit 2 naming the receipt when it records none.
 //   3. `--transcript <file>` — the member's own transcript, when the caller
 //      already holds the exact path (tests, or a caller with no session
 //      root handy).
@@ -70,8 +73,9 @@
 // the tier was right. Every other case with no transcript is still exit 2: a
 // LIVE member may yet write one; a member settled `PR#M`, `bailed` or
 // `tier-mismatch` ran, so its transcript exists and the `session` is the
-// wrong directory; a `session` that is omitted, empty, missing or not a
-// directory is exit 2 whether the member is live or settled; and a session
+// wrong directory; a `session` that is empty, missing or not a directory,
+// or omitted with none in the phase-0 receipt, is exit 2 whether the member
+// is live or settled; and a session
 // directory that cannot be searched (EACCES) is exit 2 naming the errno,
 // never read as holding no transcript.
 
@@ -84,6 +88,7 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { foldOmpTranscript, parseMemberName } from "./member-record.mjs";
 import { parseFrontmatter, expectedOmpModel, modelsEqual, readOmpConfigValue } from "./tier-roles.mjs";
 import { parseMember, parseToken, memberTokens, expectedDefinition } from "./ledger-grammar.mjs";
+import { sessionFromReceipt } from "./phase0-receipt.mjs";
 
 const NAME = "tier-check";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -442,6 +447,7 @@ function main() {
   // expected definition comes off its row, and nothing this loop does
   // writes a `tier=` token.
   let ledgerData = null;
+  let receiptSession;
   const results = entries.map((raw) => {
     const parsed = parseMember(String(raw.member ?? ""));
     const impl = parsed?.family === "impl";
@@ -466,7 +472,12 @@ function main() {
       // An implementer's transcript is read even beside a full job record:
       // the agent type it was dispatched as lives only there.
       if (impl || !hasJobRecord) {
-        if (raw.session) {
+        // An entry naming neither a session nor a transcript takes the
+        // session directory the phase-0 receipt records — read once per
+        // batch — and refuses naming the receipt when it records none. A
+        // given one always wins.
+        const session = raw.session ?? (raw.transcript ? undefined : (receiptSession ??= sessionFromReceipt()));
+        if (session) {
           // A member settled `killed` or `released` with no transcript under
           // a session directory that does exist: its dispatch failed before
           // one was written, so there is nothing to judge. Recorded, not
@@ -474,12 +485,12 @@ function main() {
           // ledger nowhere, or a session path that is not a directory still
           // refuses below; one settled any other way ran, so its missing
           // transcript names the wrong session and refuses here.
-          if (impl && sessionLacksTranscript(repoRoot, raw.session, raw.member)) {
+          if (impl && sessionLacksTranscript(repoRoot, session, raw.member)) {
             const outcome = memberOutcome(ledgerData, raw.member);
-            if (NO_TRANSCRIPT_OUTCOMES.has(outcome)) return { impl: true, unverifiable: true, member: raw.member, ticket, outcome, session: raw.session };
-            if (outcome) throw new Error(`settled ${outcome} with no ${raw.member}.jsonl under --session ${raw.session} — a member settled ${outcome} ran, so its transcript exists: name the session directory that dispatched it`);
+            if (NO_TRANSCRIPT_OUTCOMES.has(outcome)) return { impl: true, unverifiable: true, member: raw.member, ticket, outcome, session };
+            if (outcome) throw new Error(`settled ${outcome} with no ${raw.member}.jsonl under --session ${session} — a member settled ${outcome} ran, so its transcript exists: name the session directory that dispatched it`);
           }
-          transcriptText = resolveViaSession(repoRoot, raw.session, raw.member);
+          transcriptText = resolveViaSession(repoRoot, session, raw.member);
         } else if (raw.transcript) {
           transcriptText = readFileSync(resolvePath(repoRoot, raw.transcript), "utf8");
         } else if (impl) {

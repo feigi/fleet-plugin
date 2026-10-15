@@ -3,7 +3,7 @@
 // for dispatch and for the offline fit, because the stratum rule is the one
 // function that must never read differently between the two.
 //
-//   route --session <dir|id> --ticket <N> --arm A|B --impl-row <k>
+//   route [--session <dir|id>] --ticket <N> --arm A|B --impl-row <k>
 //         --issue <issue.json> --guard <cost-guard.json>
 //         [--sizing <sizing.json>] [--table <router-table.json>]
 //         [--chain-head] [--pending <tsv>]
@@ -13,7 +13,9 @@
 //     `ticket-features.pending.tsv` beside `--guard`, in the run's `.fleet/`). Exit 0 on
 //     every data degradation — a missing or unreadable issue, sizing or guard
 //     file degrades the line, never the exit. Exit 2 only on a usage error or
-//     an unreadable/invalid table: the caller does not dispatch then.
+//     an unreadable/invalid table: the caller does not dispatch then. With no
+//     `--session`, the session is the one the phase-0 receipt
+//     `.fleet/phase0.json` records; a receipt that records none is exit 2.
 //   fit --table <json> --features <tsv> --members <tsv> --verdicts <tsv>
 //       --guard <cost-guard.json> --commit <rev> [--due]
 //     Re-fits the table from the three TSVs as committed at `--commit` (read
@@ -43,6 +45,7 @@ import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { CELL, POLICY_CELL, drawCell, parseMember } from "./ledger-grammar.mjs";
+import { sessionFromReceipt } from "./phase0-receipt.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { DATE, lastPullByTicket, parseTierOutcomes, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
@@ -546,8 +549,6 @@ function main() {
   if (valid instanceof Error) die(`${tablePath}: ${valid.message}`);
 
   if (mode === "route") {
-    const sessionArg = need("session").replace(/\/+$/, "");
-    const session = basename(sessionArg);
     const ticket = need("ticket");
     if (!/^[1-9][0-9]*$/.test(ticket)) die(`--ticket ${ticket} is not an issue number`);
     const arm = need("arm");
@@ -556,6 +557,13 @@ function main() {
     if (!/^[1-9][0-9]*$/.test(implRowArg)) die(`--impl-row ${implRowArg} is not a positive row count`);
     const issuePath = need("issue");
     const guardPath = need("guard");
+    // `--session` omitted is the session directory the phase-0 receipt
+    // records; a receipt that records none is a usage error naming it.
+    let sessionArg = F.arg("session");
+    if (sessionArg === null || sessionArg === undefined) {
+      try { sessionArg = sessionFromReceipt(); } catch (e) { die(e.message); }
+    }
+    const session = basename(sessionArg.replace(/\/+$/, ""));
     const { line, row } = route({
       session, ticket: Number(ticket), arm, implRow: Number(implRowArg), chainHead: F.has("chain-head"),
       issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard: readGuard(readJson(guardPath)), table,
