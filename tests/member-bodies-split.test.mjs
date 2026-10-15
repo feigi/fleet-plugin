@@ -132,16 +132,24 @@ test("frontmatter-check accepts the fix-applier definition against the shipped a
 const GOLDEN = fileURLToPath(new URL("./fixtures/rendered-briefs/", import.meta.url));
 
 const PIN = "0123456789abcdef0123456789abcdef01234567";
+// The fix-applier's report became a file in the shape report-schema.mjs gives
+// its family, and its final message one line pointing at it: the pre-change
+// sentences that spelled the report as free-text lines are replaced, not lost.
+const REPORT_FILE_RETIRED = [
+  "There is no cap on these refuters: count the ones you dispatch against out-of-scope suggestions, since your report names that count.",
+  "Then report to the controller the pushed SHA, your apply/defer split, how many refuters you dispatched against out-of-scope suggestions, and the deferral issue numbers — a `filed: #N <subject>` line for every issue step 5 created, and `unrecorded: #N <subject>` for one whose `ledger.mjs filed` failed twice — and exit.",
+  "**Deferring everything is a normal outcome, not a stall:** nothing is then staged, `git commit` refuses an empty index, `git push origin HEAD:<branch>` prints `Everything up-to-date`, and you report `no-op, HEAD unchanged at <sha>` in place of a new SHA.",
+];
 // The placeholder each argument fills, per role — the arguments are values no
 // other argument shares, so a swapped substitution cannot pass.
 const PAIRS = [
-  { role: "fix-applier", kind: "review", fixture: "fix-applier-review.md",
+  { role: "fix-applier", kind: "review", fixture: "fix-applier-review.md", retired: REPORT_FILE_RETIRED,
     args: { worktree: "/abs/wt-fix", branch: "fix-branch", testCmd: "TESTCMD-1", scratch: "/abs/scratch-fix", pr: "3293", run: "run-AbCd1234" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch", pr: "pr", run: "run" } },
   { role: "fix-applier", kind: "conflict", fixture: "fix-applier-conflict.md",
-    args: { worktree: "/abs/wt-conflict", branch: "conflict-branch", testCmd: "TESTCMD-2" },
-    fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd" } },
-  { role: "fix-applier", kind: "dispositions-retry", fixture: "fix-applier-dispositions-retry.md",
+    args: { worktree: "/abs/wt-conflict", branch: "conflict-branch", testCmd: "TESTCMD-2", scratch: "/abs/scratch-conflict" },
+    fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch" } },
+  { role: "fix-applier", kind: "dispositions-retry", fixture: "fix-applier-dispositions-retry.md", retired: REPORT_FILE_RETIRED,
     args: { worktree: "/abs/wt-retry", branch: "retry-branch", testCmd: "TESTCMD-3", scratch: "/abs/scratch-retry", pr: "3294", run: "run-ZyXw9876", "mismatched-record": "/abs/scratch-retry/dispositions-fix-pr-3294.json", violations: "VIOLATION-LIST-1" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch", pr: "pr", run: "run", "mismatched record": "mismatched-record", violations: "violations" } },
   { role: "finisher", kind: "fresh", fixture: "finisher-fresh.md",
@@ -182,9 +190,19 @@ for (const p of PAIRS) {
     assert.ok(sentences.length >= 3, "the fixture reads as a few sentences at least");
     const fixtureText = fold(fixture);
 
+    // A retired sentence is one a later change replaced on purpose: it must
+    // still be a sentence of the pre-change text, so the list cannot name
+    // nothing, and gone from both halves, so it is not carried on unseen.
+    const retired = new Set(p.retired ?? []);
+    for (const s of retired) {
+      assert.ok(sentences.includes(s), `retired sentence is not in the pre-change text: ${JSON.stringify(s.slice(0, 90))}`);
+      assert.equal(count(body, s) + count(brief, fill(s)), 0, `retired sentence is still stated: ${JSON.stringify(s.slice(0, 90))}`);
+    }
+
     const lost = [];
     const duplicated = [];
     for (const s of new Set(sentences)) {
+      if (retired.has(s)) continue;
       const expected = count(fixtureText, s);
       // The body names a value by its placeholder; the brief carries it filled.
       const found = count(body, s) + count(brief, fill(s));

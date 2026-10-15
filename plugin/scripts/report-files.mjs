@@ -38,9 +38,14 @@ export const reportPath = (scratch, member) => join(reportsDir(scratch), `${memb
  * wrong shape, or `{state: "absent", path}`. Throws on a member no schema
  * covers: ask reportFamily() first. */
 export function readReport(scratch, member) {
+  return readReportIn(reportsDir(scratch), member);
+}
+
+/** readReport() for a reports directory named directly, `<dir>/<member>.json`. */
+export function readReportIn(dir, member) {
   const family = reportFamily(member);
   if (family === null) throw new Error(`no report schema for '${member}'`);
-  const path = reportPath(scratch, member);
+  const path = join(dir, `${member}.json`);
   let text;
   try {
     text = readFileSync(path, "utf8");

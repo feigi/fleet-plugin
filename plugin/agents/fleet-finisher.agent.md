@@ -215,15 +215,18 @@ three does not gate on one, and the script says so in its receipt. Put the
 receipt, the JSON line it printed, in your report as printed: it is what tells
 the controller the label is on.
 
-Report to the controller the label (the script's receipt, the JSON line it printed, as
-printed), the deferral issue numbers — a `filed: #N <subject>` line for
-every issue duty 2 created, and `unrecorded: #N <subject>` for one whose
-`filed` failed twice — and anything
-it halted on — cause and evidence, below, never a bare "head moved". The
+Report to the controller in the report file your brief names,
+`<scratch>/reports/<your name>.json`: `outcome` `labelled`, `halted` or
+`failed`; `labelsReadBack` the labels the script's receipt read back; the
+deferral issues as `{issue, subject}` entries — `filed` for every issue duty 2
+created, and `unrecorded` for one whose `filed` failed twice, which the
+controller's settle records — and, for anything it halted on, `cause` and
+`evidence`, below, never a bare "head moved". The
 cause is one word of the ledger's `halted:<cause>` vocabulary:
 `live-editor`, `rebase`, `past-pin`, `unreadable`, `missing` or `absent` as
 duty 1's verdict names it, and `other` for every other halt — that
 verdict's own `other`, and a halt at duty 2, duty 3 or the instrument
-re-check. A duty 1 halt's report carries the verdict as
-printed, the JSON line, so a `rebase` halt's report carries the output of
-`git cherry <pin> HEAD origin/main` that its `evidence` holds.
+re-check. A duty 1 halt's `evidence` carries the verdict as
+printed, the JSON line, so a `rebase` halt's carries the output of
+`git cherry <pin> HEAD origin/main`. Then send the one line your brief gives,
+`<your name>: <outcome> <path>`.

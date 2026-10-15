@@ -9,3 +9,12 @@ Bring `conflict-branch` current with `origin/main`, resolving every conflict by 
 Run `TESTCMD-2` from the worktree before you push, then push with
 `git push origin HEAD:conflict-branch`. Report the new head, or that no conflict was
 left.
+
+Your report is a file, `/abs/scratch-conflict/reports/<your name>.json`, `<your name>` the
+`fix-pr-` name you were dispatched as, in the shape
+`~/.fleet/bin/fleet-run report-schema.mjs print fix-pr` prints. Write it
+before your final message, and send nothing until
+`~/.fleet/bin/fleet-run report-schema.mjs validate fix-pr /abs/scratch-conflict/reports/<your name>.json`
+answers `valid`. Your final message is then one line,
+`<your name>: <outcome> /abs/scratch-conflict/reports/<your name>.json`, `<outcome>` the
+report's `outcome`.

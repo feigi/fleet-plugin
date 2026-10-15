@@ -32,6 +32,15 @@ claim, never your patch.
 `<your name>` the `fix-pr-3294[-x]` you were dispatched as — the record the controller checks with
 `dispositions-check.mjs` before it dispatches any finisher.
 
+Your report is a file, `/abs/scratch-retry/reports/<your name>.json`, `<your name>` the
+`fix-pr-` name you were dispatched as, in the shape
+`~/.fleet/bin/fleet-run report-schema.mjs print fix-pr` prints. Write it
+before your final message, and send nothing until
+`~/.fleet/bin/fleet-run report-schema.mjs validate fix-pr /abs/scratch-retry/reports/<your name>.json`
+answers `valid`. Your final message is then one line,
+`<your name>: <outcome> /abs/scratch-retry/reports/<your name>.json`, `<outcome>` the
+report's `outcome`.
+
 This is the one automatic retry of a dispositions mismatch. The mismatched
 member's record is `/abs/scratch-retry/dispositions-fix-pr-3294.json`: start from it, and write your own
 record as above. The check printed these violations, each naming a bucket, an

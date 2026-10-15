@@ -557,10 +557,11 @@ test("the sizing block makes the verdict checkable — signal beside it, and the
   );
   // The direction, as one span. `before` and `after` are a one-word splice, and
   // a pin that matched either would pass on the exact defect this ticket is.
+  // The report is a file now, so the clause is the field that carries it.
   assert.match(
     b,
-    Pin.phrase('"ran sizing-a-ticket at step 6, before `gh pr create`"'),
-    "the worked example no longer shows the sizing run preceding the PR, so the clause no longer has a direction",
+    Pin.phrase("`sizing.ranBeforePr` true if you ran it at step 6, before `gh pr create`"),
+    "the report field no longer says the sizing run precedes the PR, so the clause no longer has a direction",
   );
   assert.match(
     b,

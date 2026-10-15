@@ -180,7 +180,7 @@ const runLedger = () => flat(RUN_TEAM.section("## Run ledger", "run-team Run led
 const finisherReport = () =>
   flat(RUN_TEAM.between("4. Report you the label", "**Give the finisher the instrument", "run-team finisher duty 4").text);
 const fixApplierReport = () =>
-  flat(RUN_TEAM.between("> Then report to the controller the pushed SHA", "**Deferring everything", "fix-applier report line").text);
+  flat(RUN_TEAM.stripGutter(">").between("Then write your report to the file your brief names", "**Deferring everything", "fix-applier report line").text);
 
 test("both filing sites run `ledger.mjs filed` right after `gh issue create`, under the subject they checked", () => {
   // The subject is half of it: `check` matches the filed list by the words in
@@ -205,25 +205,31 @@ test("a failed `filed` is retried once, then reported unrecorded — never a sec
   }
 });
 
-test("both report contracts carry `filed: #N <subject>` and the `unrecorded:` fallback", () => {
-  for (const [where, s] of [["fix-applier report", fixApplierReport()], ["finisher duty 4", finisherReport()], ["step 5", step5()]]) {
+test("both report contracts carry the issues filed and the `unrecorded` fallback", () => {
+  assert.match(fixApplierReport(), /`filed` for every issue step 5 created, and `unrecorded` for one whose `ledger\.mjs filed` failed twice/,
+    "fix-applier report no longer carries the filed issues and the unrecorded fallback");
+  for (const [where, s] of [["finisher duty 4", finisherReport()], ["step 5", step5()]]) {
     assert.match(s, /`filed: #N <subject>`/, `${where} no longer returns the issues it filed`);
   }
-  for (const [where, s] of [["fix-applier report", fixApplierReport()], ["finisher duty 4", finisherReport()]]) {
-    assert.match(s, /`unrecorded: #N <subject>`/, `${where} no longer carries the unrecorded fallback`);
-  }
+  assert.match(finisherReport(), /`unrecorded: #N <subject>`/, "finisher duty 4 no longer carries the unrecorded fallback");
 });
 
 test("the controller records every filing a filer reported unrecorded", () => {
-  // The fallback is only a fallback if someone acts on it: an `unrecorded:`
-  // line nobody turns into a `filed` row leaves the arm exactly as blind as
-  // before, one filing at a time.
+  // The fallback is only a fallback if someone acts on it: an `unrecorded`
+  // entry nobody turns into a `filed` row leaves the arm exactly as blind as
+  // before, one filing at a time. The entry is in the member's report file,
+  // and `settle --from-report` records it; a finisher settled by hand past an
+  // exit 3 has its entries recorded by hand.
   const table = RUN_TEAM.paragraph("| Wake | Record, then tick |", "record-before-tick table", "Then run the tick, act on every line it prints,").text;
   for (const wake of ["Fix-applier report", "Finisher report", "Finisher report (halted)"]) {
     const row = table.split("\n").find((r) => r.startsWith(`| ${wake} |`)) ?? "";
-    assert.match(row, /`ledger\.mjs filed <N> "<subject>"` for each `unrecorded:` line/, `the "${wake}" wake no longer records unrecorded filings`);
+    assert.match(row, /`ledger\.mjs settle [a-z-]+<M> --from-report`, which records each `unrecorded` filing/, `the "${wake}" wake no longer records unrecorded filings`);
   }
-  assert.match(runLedger(), /reports `unrecorded: #N <subject>` instead, and you run `filed` for it/, "the Run ledger section no longer hands unrecorded filings to the controller");
+  const finisher = table.split("\n").find((r) => r.startsWith("| Finisher report |")) ?? "";
+  assert.match(finisher, /settle it `ledger\.mjs settle finisher-pr-<M>=labelled` as reported, and `ledger\.mjs filed <N> "<subject>"` for each `unrecorded` entry/,
+    "the finisher settled by hand past its exit 3 no longer has its unrecorded filings recorded");
+  assert.match(runLedger(), /reports `unrecorded: #N <subject>` instead — an `unrecorded` entry of\s+its report file — and `settle <member> --from-report` runs `filed` for it/,
+    "the Run ledger section no longer hands unrecorded filings to the settle");
 });
 
 test("the Run ledger section states the writer policy and the check→create gap; step 5 states the gap too", () => {
