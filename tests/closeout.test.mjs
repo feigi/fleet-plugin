@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -617,27 +617,22 @@ test("finish: a re-run after commit-and-pr succeeded does not open a second PR, 
   assert.equal(f.calls("fleet-heartbeat").length, 2);
 });
 
-// ── the phase-0 receipt is retired ───────────────────────────────────────────
+// ── the phase-0 receipt is set aside ─────────────────────────────────────────
 
 const PHASE0 = '{"run": 1700000000000, "session": "/s", "caps": {"impl": 3, "review": null}}\n';
-// What sits beside the ledger as a retired phase-0 receipt: not `phase0.json`,
-// not the rotation's `phase0.<stamp>.json`, not phase0.mjs's held
-// `phase0.previous.json`.
-const retired = (f) => readdirSync(f.fleet).filter((n) => /^phase0\./.test(n) && n !== "phase0.json");
-const RETIRED_NAME = /^phase0\.finished\.\d{4}-\d\d-\d\dT\d{6}Z\.json$/;
+// Where phase0.mjs holds a previous run's receipt until the next rotation files it.
+const HELD = "phase0.previous.json";
+// Every phase-0 file beside the ledger but the live receipt.
+const aside = (f) => readdirSync(f.fleet).filter((n) => /^phase0\./.test(n) && n !== "phase0.json");
 
-test("finish: moves phase0.json beside the ledger under a name no other phase-0 file bears, after the tick and before heartbeat --stop", () => {
+test("finish: moves phase0.json to the name phase0.mjs holds a previous run's receipt under, after the tick and before heartbeat --stop", () => {
   const f = fixture();
   writeFileSync(join(f.fleet, "phase0.json"), PHASE0);
   const r = f.run("finish", ["--reason", "wrap up"]);
   assert.equal(r.status, 0, r.err + r.stdout);
   assert.equal(existsSync(join(f.fleet, "phase0.json")), false, "no receipt is left for the next run to resume");
-  const names = retired(f);
-  assert.equal(names.length, 1, names.join());
-  assert.match(names[0], RETIRED_NAME);
-  assert.doesNotMatch(names[0], /^phase0\.\d.*\.json$/, "not the rotation's archive name");
-  assert.notEqual(names[0], "phase0.previous.json", "not the name phase0.mjs holds a previous run's receipt under");
-  assert.equal(readFileSync(join(f.fleet, names[0]), "utf8"), PHASE0, "kept byte for byte");
+  assert.deepEqual(aside(f), [HELD]);
+  assert.equal(readFileSync(join(f.fleet, HELD), "utf8"), PHASE0, "kept byte for byte");
   assert.deepEqual(f.calls("fleet-tick")[0].args, ["--implementer-cap", "3"], "the tick still read the caps from it");
   assert.deepEqual(stepLines(r.out), FINISH_STEPS.map((n) => `closeout: ${n}: ok`));
 
@@ -647,7 +642,7 @@ test("finish: moves phase0.json beside the ledger under a name no other phase-0 
   g.control("fleet-heartbeat", { exit: 1, err: "fleet-heartbeat: cannot write the state\n" });
   assert.equal(g.run("finish", ["--reason", "wrap up"]).status, 3);
   assert.equal(existsSync(join(g.fleet, "phase0.json")), false);
-  assert.equal(retired(g).length, 1);
+  assert.deepEqual(aside(g), [HELD]);
   assert.equal(g.receipt().steps["phase0-receipt"].status, "ok");
 });
 
@@ -670,7 +665,7 @@ test("finish: a step that fails or waits before the move leaves phase0.json wher
     const r = f.run("finish", ["--reason", "wrap up"]);
     assert.equal(r.status, status, `${step}: ${r.err}${r.stdout}`);
     assert.equal(readFileSync(join(f.fleet, "phase0.json"), "utf8"), PHASE0, `${step}: the receipt stays`);
-    assert.deepEqual(retired(f), [], `${step}: nothing was moved`);
+    assert.deepEqual(aside(f), [], `${step}: nothing was moved`);
     assert.equal(f.receipt().steps["phase0-receipt"].status, "pending", step);
   }
 });
@@ -685,13 +680,13 @@ test("finish: a receipt that cannot be parsed is moved all the same, and no phas
   const r = f.run("finish", ["--reason", "wrap up"]);
   assert.equal(r.status, 0, r.err + r.stdout);
   assert.equal(existsSync(join(f.fleet, "phase0.json")), false);
-  assert.equal(readFileSync(join(f.fleet, retired(f)[0]), "utf8"), "{not json");
+  assert.equal(readFileSync(join(f.fleet, HELD), "utf8"), "{not json");
 
   const g = fixture();
   const none = g.run("finish", ["--reason", "wrap up"]);
   assert.equal(none.status, 0, none.err + none.stdout);
   assert.equal(g.receipt().steps["phase0-receipt"].status, "ok");
-  assert.deepEqual(retired(g), [], "nothing to move, nothing made");
+  assert.deepEqual(aside(g), [], "nothing to move, nothing made");
 });
 
 test("finish: a re-run after the move neither fails nor moves again, including after a crash between the move and the receipt", () => {
@@ -699,13 +694,13 @@ test("finish: a re-run after the move neither fails nor moves again, including a
   writeFileSync(join(f.fleet, "phase0.json"), PHASE0);
   f.control("fleet-heartbeat", { exit: 1, err: "fleet-heartbeat: cannot write the state\n" });
   assert.equal(f.run("finish", ["--reason", "wrap up"]).status, 3);
-  const [name] = retired(f);
+  assert.deepEqual(aside(f), [HELD]);
   const at = f.receipt().steps["phase0-receipt"].at;
 
   f.control("fleet-heartbeat", { out: "stopped\n" });
   const again = f.run("finish", ["--reason", "wrap up"]);
   assert.equal(again.status, 0, again.err + again.stdout);
-  assert.deepEqual(retired(f), [name], "still the one archive");
+  assert.deepEqual(aside(f), [HELD], "still the one held receipt");
   assert.equal(f.receipt().steps["phase0-receipt"].at, at, "the step was skipped, not run again");
 
   // The crash: the file moved, the receipt never said so.
@@ -715,22 +710,31 @@ test("finish: a re-run after the move neither fails nor moves again, including a
   writeFileSync(f.receiptPath, JSON.stringify(receipt));
   const third = f.run("finish", ["--reason", "wrap up"]);
   assert.equal(third.status, 0, third.err + third.stdout);
-  assert.deepEqual(retired(f), [name], "an absent phase0.json is not moved a second time");
+  assert.deepEqual(aside(f), [HELD], "an absent phase0.json is not moved a second time");
+  assert.equal(readFileSync(join(f.fleet, HELD), "utf8"), PHASE0);
   assert.equal(f.receipt().steps["phase0-receipt"].status, "ok");
 });
 
-test("finish: an archive name already taken fails the step and leaves phase0.json and every other file where it was", () => {
+test("finish: a crash between the link and the unlink leaves one file under two names, and the re-run finishes the move", () => {
   const f = fixture();
   writeFileSync(join(f.fleet, "phase0.json"), PHASE0);
-  const now = Date.now();
-  // Every second this call can plausibly land on is taken.
-  for (let s = -2; s < 30; s++) writeFileSync(join(f.fleet, `phase0.finished.${new Date(now + s * 1000).toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "")}.json`), "older receipt\n");
-  const taken = retired(f).length;
+  linkSync(join(f.fleet, "phase0.json"), join(f.fleet, HELD));
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.equal(existsSync(join(f.fleet, "phase0.json")), false);
+  assert.equal(readFileSync(join(f.fleet, HELD), "utf8"), PHASE0);
+  assert.equal(f.receipt().steps["phase0-receipt"].status, "ok");
+});
+
+test("finish: a held receipt that is another file fails the step and leaves phase0.json and the held receipt where they were", () => {
+  const f = fixture();
+  writeFileSync(join(f.fleet, "phase0.json"), PHASE0);
+  writeFileSync(join(f.fleet, HELD), "older receipt\n");
   const r = f.run("finish", ["--reason", "wrap up"]);
   assert.equal(r.status, 3, r.err + r.stdout);
-  assert.match(r.stdout, /closeout: phase0-receipt: failed\n\s+.*already exists/);
+  assert.match(r.stdout, /closeout: phase0-receipt: failed\n\s+.*already holds another receipt/);
   assert.equal(readFileSync(join(f.fleet, "phase0.json"), "utf8"), PHASE0);
-  assert.equal(retired(f).length, taken, "no archive was overwritten or added");
+  assert.equal(readFileSync(join(f.fleet, HELD), "utf8"), "older receipt\n", "the held receipt was not overwritten");
   assert.deepEqual(f.calls("fleet-heartbeat"), [], "--stop is not run after a failed step");
 });
 

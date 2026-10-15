@@ -29,6 +29,11 @@ import { createHash } from "node:crypto";
 // way, so the format lives here once.
 const RECEIPT_STEM = "phase0";
 export const RECEIPT = `${RECEIPT_STEM}.json`;
+// Where a previous run's receipt waits, beside the ledger, until the next run's
+// rotation files it: `phase0.mjs` holds a receipt there at startup, and
+// `closeout.mjs finish` sets the run's own there, so a run that ended cleanly
+// leaves no receipt for the next run to resume.
+export const RECEIPT_HELD = `${RECEIPT_STEM}.previous.json`;
 export const archiveStamp = () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "");
 export const receiptArchiveName = (stamp) => `${RECEIPT_STEM}.${stamp}.json`;
 const CLOSEOUT_STEM = "closeout";

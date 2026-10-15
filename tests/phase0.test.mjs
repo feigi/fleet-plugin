@@ -541,6 +541,7 @@ test("a same-session run after `closeout.mjs finish` starts at branch and rotate
   assert.equal(f.receipt().run, RUN_AT, "the run the record names is the receipt's, as it still is after the run ends");
 
   // The end of that run: every closeout step before the receipt's own is done.
+  const finished = readFileSync(f.receiptPath, "utf8");
   const at = new Date().toISOString();
   const done = Object.fromEntries(["drain", "release", "tick", "scrape", "tier-outcomes", "metrics", "commit-and-pr"].map((n) => [n, { status: "ok", at, output: "" }]));
   writeFileSync(join(f.repo, ".fleet", "closeout.json"), JSON.stringify({ reason: "wrap up", begun: at, steps: done }));
@@ -549,6 +550,7 @@ test("a same-session run after `closeout.mjs finish` starts at branch and rotate
   });
   assert.equal(finish.status, 0, finish.stdout + finish.stderr);
   assert.equal(existsSync(f.receiptPath), false, "finish left no receipt for the next run");
+  assert.equal(readFileSync(join(f.repo, ".fleet", "phase0.previous.json"), "utf8"), finished, "it is held for the next rotation");
 
   const again = f.run();
   assert.equal(again.status, 0, again.stdout + again.err);
@@ -556,7 +558,10 @@ test("a same-session run after `closeout.mjs finish` starts at branch and rotate
   assert.equal(f.calls("rotate").length, 2, "the second run rotated");
   assert.equal(f.calls("instruments").length, 2, "and ran every step before it");
   assert.deepEqual(statuses(f.receipt()), allOk);
-  assert.equal(existsSync(join(f.repo, ".fleet", "phase0.previous.json")), false, "no previous run's receipt was held");
+  assert.equal(existsSync(join(f.repo, ".fleet", "phase0.previous.json")), false, "the rotation took the held receipt");
+  const filed = readdirSync(join(f.repo, ".fleet")).filter((n) => /^phase0\.\d{4}-\d\d-\d\dT\d{6}Z\.json$/.test(n));
+  assert.equal(filed.length, 1, filed.join());
+  assert.equal(readFileSync(join(f.repo, ".fleet", filed[0]), "utf8"), finished, "and filed the finished run's receipt under an archive name");
 });
 
 // A run that stopped before its rotation: no run to key on, `rotate` and every
