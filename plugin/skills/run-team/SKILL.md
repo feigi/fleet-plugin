@@ -611,7 +611,8 @@ phase, or in any later one, asks the maintainer which tickets to take.
    --oneline origin/main..HEAD`, `git -C <worktree> status --short`, and the
    files under `<scratch>/impl-<N>/`). Record it the ordinary way —
    `ledger.mjs row <N>
-   "impl-<N>-b"`, then `ledger.mjs dispatch <N> impl-<N>-b`, then the `task`
+   "impl-<N>-b"`, then `dispatch-prompt.mjs render implementer --member
+   impl-<N>-b …`, then `ledger.mjs dispatch <N> impl-<N>-b`, then the `task`
    call naming the `agent` it printed, then the tier check — and never
    `claim-ticket.sh`: the claim already stands. A `report` goes to the
    maintainer as `#<N> — <why>` and nothing else: no dispatch, no label change,
@@ -1939,8 +1940,10 @@ depth** guard table applied in code. Act on each line as it reads:
   list shows PR M without `ready-to-merge`, and no `label-off=` (**Run ledger**)
   accounts for the removal. Apply the finisher gate (**Reviewers**: the
   `check` job green on the current head), then dispatch the next-suffix
-  finisher at that head — `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`, one
-  letter past the highest the PR has used. Never add the label yourself. A head
+  finisher at that head, one letter past the highest the PR has used: render
+  its brief with `dispatch-prompt.mjs render finisher --kind repair --member
+  finisher-pr-<M>-<x> …`, then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`.
+  Never add the label yourself. A head
   that moved is caught by the new finisher's duty 1 `past-pin` halt and the
   re-review path that follows it. Finishers take no reviewer slot, so this
   prints whatever the reviewer cap reads.
@@ -3590,8 +3593,11 @@ REVIEW-column open PR without the label, whose latest finisher attempt settled
 so, `finisher:failed` or `finisher:killed` at severity 4 — one token per
 outcome, neither the implementer's bare `killed` flag nor `unlabelled`. You
 resolve it by hand: investigate why the finisher died, or dispatch the
-next-suffix finisher after the finisher gate, `ledger.mjs dispatch <M>
-finisher-pr-<M>-<x>`. The flag clears when a later attempt settles — `labelled`
+next-suffix finisher after the finisher gate: render its brief with
+`dispatch-prompt.mjs render finisher --kind fresh --member finisher-pr-<M>-<x>
+…` (`--kind repair` once an earlier finisher reported `labelled` without the
+label landing), then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`. The flag
+clears when a later attempt settles — `labelled`
 (then `unlabelled` takes over while the label is still off), `halted:<cause>`,
 or a live `-b` — or when the PR carries `ready-to-merge`, merges or closes.
 You never add the label yourself, and the tick does not retry.
@@ -4358,7 +4364,7 @@ live count from it, so nobody states one. Write neither by hand:
   mapping), a finisher's and a merge bot's are their own definitions, and a
   fix-applier's is `fleet-fix-applier` for every kind of work. It
   refuses a member whose `briefs/<member>.json` beside the ledger is missing,
-  names another role or carries no sha256, a name this session already used — on the ledger or in its
+  names another role or carries no sha256, a brief file beside it that is missing or does not hash to that sha256, a name this session already used — on the ledger or in its
   `## Retired` — and names the replacement (`-b`, `-c` …), a
   second live member on one ticket or PR, any implementer once the run is
   draining, an implementer whose row's `tier=` names no single definition

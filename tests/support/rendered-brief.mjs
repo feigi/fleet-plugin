@@ -12,11 +12,12 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const ROLE_OF = { impl: "implementer", "fix-pr": "fix-applier", "finisher-pr": "finisher", "merge-bot": "merge-bot" };
+const ROLE_OF = { impl: "implementer", "fix-pr": "fix-applier", "finisher-pr": "finisher", "merge-bot": "merge-bot" };
+const FAMILY = new RegExp(`^(${Object.keys(ROLE_OF).join("|")})-[1-9]`);
 
 /** The role a member name renders as, or null for a name no family owns. */
-export function roleOf(member) {
-  const m = /^(impl|fix-pr|finisher-pr|merge-bot)-[1-9]/.exec(member);
+function roleOf(member) {
+  const m = FAMILY.exec(member);
   return m === null ? null : ROLE_OF[m[1]];
 }
 

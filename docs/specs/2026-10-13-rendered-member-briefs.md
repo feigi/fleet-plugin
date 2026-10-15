@@ -109,8 +109,10 @@ the Reviewers and finisher sections is deleted in the same change.
 **D3. The dispatch records the brief.** The renderer writes the brief to
 `<fleet-dir>/briefs/<member>.md` and its sidecar `<member>.json` (D1's
 `--json` payload) when given `--member <name>`. `ledger.mjs dispatch <key>
-<member>` reads the sidecar, refuses (exit 2, nothing written) when it is
-missing or its `role` does not match the member's family, and appends
+<member>` reads the sidecar and the brief file beside it, refuses (exit 2,
+nothing written) when the sidecar is missing, its `role` does not match the
+member's family, or the brief file is missing or does not hash to the
+sidecar's `sha256`, and appends
 `brief=<sha256 first 8>` to the `## Dispatched` entry. The controller passes
 the file's content as the `task` prompt. The gate covers the four ledger
 families (`impl`, `fix-pr`, `finisher-pr`, `merge-bot`), that is the

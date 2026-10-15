@@ -43,6 +43,7 @@
 // the rule).
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync, linkSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, resolve, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
@@ -1461,7 +1462,8 @@ function runCheck() {
 // atomically when that name is already taken rather than overwriting an older
 // archive. The two receipts beside the ledger, `phase0.json` and
 // `closeout.json`, belong to the same run, so each is archived as
-// `<name>.<stamp>.json` under the ledger archive's own stamp — a warning-only
+// `<name>.<stamp>.json` under the ledger archive's own stamp, and the
+// `briefs` directory beside them as `briefs.<stamp>` — a warning-only
 // move after the ledger move, refused up front only when a name is taken.
 //
 // What follows depends on the verdict below. After a `dead` or `none` one
@@ -1691,8 +1693,9 @@ function carryOf(text) {
       return false;
     }
   });
-  // An entry's `brief=` travels with it, so a carried member's record still
-  // names the brief it was dispatched with.
+  // An entry's `brief=` travels with it: save() writes a brief only beside
+  // the token it writes, so a carried member's record still names the brief
+  // it was dispatched with and a dropped member's does not.
   const { dispatched: allDispatched, briefs: allBriefs } = dispatchedOf(sectionOf(text, DISPATCHED));
   const dispatched = allDispatched.filter((e) => {
     const t = parseToken(e);
@@ -1707,10 +1710,8 @@ function carryOf(text) {
   });
   const live = liveOnLedger(rows, dispatched);
   const carried = { rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched };
-  const briefs = Object.fromEntries(carried.dispatched.map((e) => parseToken(e).name)
-    .filter((name) => Object.hasOwn(allBriefs, name)).map((name) => [name, allBriefs[name]]));
   const retired = retiredOnLedger([...rows, ...skippedRows], allDispatched, archivedRetired, carried);
-  return { ...carried, briefs, retired, skipped };
+  return { ...carried, briefs: allBriefs, retired, skipped };
 }
 
 // ── dispatch / settle ────────────────────────────────────────────────────────
@@ -1978,10 +1979,10 @@ function runDispatch() {
 // The brief `name` is dispatched with, as dispatch-prompt.mjs `render
 // --member <name>` left it in the briefs directory beside the ledger: the
 // sidecar `<name>.json` must exist, name `role` — the template of the
-// member's family — and carry the brief's sha256. `{path, sha256}` comes
-// back, `path` the brief file beside the sidecar, so the controller hands the
-// `task` call that file's content from the path printed. Refused, nothing is
-// written.
+// member's family — and carry the brief's sha256, and the brief file beside
+// it, `<name>.md`, must exist and hash to it. `{path, sha256}` comes back,
+// `path` that file, so the controller hands the `task` call its content from
+// the path printed. Refused, nothing is written.
 function renderedBrief(name, role) {
   const dir = resolve(dirname(file), BRIEFS);
   const sidecar = join(dir, `${name}.json`);
@@ -2006,7 +2007,19 @@ function renderedBrief(name, role) {
   if (typeof s.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(s.sha256)) {
     die(`${sidecar} carries no sha256 of 64 lowercase hex (${JSON.stringify(s.sha256 ?? null)}) — ${render}`);
   }
-  return { path: join(dir, `${name}.md`), sha256: s.sha256 };
+  const path = join(dir, `${name}.md`);
+  let brief;
+  try {
+    brief = readFileSync(path);
+  } catch (e) {
+    if (e.code === "ENOENT") die(`no rendered brief for ${name} — ${render} (${path} does not exist)`);
+    die(`cannot read ${path}: ${e.message} — not dispatching ${name}`);
+  }
+  const actual = createHash("sha256").update(brief).digest("hex");
+  if (actual !== s.sha256) {
+    die(`${path} hashes to ${actual}, but ${sidecar} carries ${s.sha256} — ${render}`);
+  }
+  return { path, sha256: s.sha256 };
 }
 
 function runSettle() {

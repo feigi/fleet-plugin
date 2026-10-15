@@ -1243,6 +1243,23 @@ test("dispatch refuses a sidecar with no 64-hex sha256, or one that is no JSON o
   }
 });
 
+test("dispatch refuses a sidecar whose brief file is missing, or does not hash to the sidecar's sha256, and writes nothing", (t) => {
+  const f = fixture(t);
+  const rendered = renderBrief(f.dir, "impl-412");
+  rmSync(rendered.path);
+  const r = refusedBare(f, ["dispatch", "412", "impl-412"], "no rendered brief for impl-412 — run `dispatch-prompt.mjs render implementer --member impl-412 …`");
+  assert.ok(r.stderr.includes(`${rendered.path} does not exist`), `the refusal names the brief it looked for: ${r.stderr}`);
+
+  writeFileSync(rendered.path, "NOT THE BRIEF HASHED\n");
+  const edited = refusedBare(f, ["dispatch", "412", "impl-412"], `${rendered.path} hashes to `);
+  assert.ok(edited.stderr.includes(`carries ${rendered.sha256}`), `the refusal names the sidecar's hash: ${edited.stderr}`);
+  assert.ok(edited.stderr.includes("dispatch-prompt.mjs render implementer --member impl-412"), `the refusal names the render command: ${edited.stderr}`);
+
+  // The other half of the gate: the brief as rendered is accepted.
+  writeFileSync(rendered.path, "The brief for impl-412.\n");
+  assert.equal(f.bare("dispatch", "412", "impl-412").status, 0);
+});
+
 test("a rendered brief is recorded as brief=<first 8 hex> on the ## Dispatched entry, the path and sha256 are printed, and settle keeps the brief", (t) => {
   const f = fixture(t);
   const text = "Implement ticket #412.\n";

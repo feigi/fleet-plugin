@@ -23,7 +23,7 @@ test("the stranded-claim step runs stranded.mjs after the rotation and reads pri
 test("a resume dispatches a new member under a new name on the same ticket and worktree, through the ordinary ledger path", () => {
   const s = step();
   assert.match(s, Pin.phrase("a new member under a new name — `impl-<N>-b`, or one letter past the highest `impl-<N>-<x>` in the archive that rotate printed the path of — on the same ticket, in the printed worktree and branch"));
-  assert.match(s, Pin.phrase("Record it the ordinary way — `ledger.mjs row <N> \"impl-<N>-b\"`, then `ledger.mjs dispatch <N> impl-<N>-b`, then the `task` call naming the `agent` it printed, then the tier check — and never `claim-ticket.sh`: the claim already stands."));
+  assert.match(s, Pin.phrase("Record it the ordinary way — `ledger.mjs row <N> \"impl-<N>-b\"`, then `dispatch-prompt.mjs render implementer --member impl-<N>-b …`, then `ledger.mjs dispatch <N> impl-<N>-b`, then the `task` call naming the `agent` it printed, then the tier check — and never `claim-ticket.sh`: the claim already stands."));
 });
 
 test("a report goes to the maintainer and nothing else, and ancestor and none resume nothing", () => {

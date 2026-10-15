@@ -22,10 +22,11 @@
 import { createHash } from "node:crypto";
 
 // How an archive beside the ledger is named. `ledger.mjs rotate` files the
-// ledger as `ledger.<stamp>.md` and the two run receipts, the phase-0 one as
+// ledger as `ledger.<stamp>.md`, the two run receipts, the phase-0 one as
 // `phase0.<stamp>.json` and the end-of-run one as `closeout.<stamp>.json`,
-// under one stamp. `phase0.mjs` files a phase-0 receipt the rotation left
-// behind the same way, so the format lives here once.
+// and the briefs directory as `briefs.<stamp>`, all under one stamp.
+// `phase0.mjs` files a phase-0 receipt the rotation left behind the same
+// way, so the format lives here once.
 const RECEIPT_STEM = "phase0";
 export const RECEIPT = `${RECEIPT_STEM}.json`;
 export const archiveStamp = () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "");
