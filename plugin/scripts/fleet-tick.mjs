@@ -57,7 +57,8 @@
 //             maintainer clears it; it never refuses the tick.
 //   phase0    `.fleet/phase0.json`, phase0.mjs's receipt, through
 //             phase0-receipt.mjs. Missing, unreadable, a `run` other than
-//             the controller record's `at`, or a step `failed` or `pending`
+//             the controller record's `at`, one whose controller has exited
+//             or cannot be judged, or a step `failed`, `pending` or absent
 //             prints one PHASE0-INCOMPLETE line naming what is not done and
 //             holds every dispatching row, ahead of the main-checkout reason;
 //             it never refuses the tick. A step's `drift` or `unanswered`
@@ -1090,6 +1091,7 @@ import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { statePath, readState, writeState, assessBeat, isStalled, isReported, stallReport, stallOwner } from "./fleet-state.mjs";
 import { checkMainCheckout, describe } from "./main-checkout.mjs";
 import { readRunReceipt, phase0Gate } from "./phase0-receipt.mjs";
+import { judgeRecord, ProcUnreadable } from "./proc.mjs";
 
 const NAME = "fleet-tick";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -1434,6 +1436,21 @@ function claimed() {
   return n === CLAIMED_LIMIT ? `${n}+` : n;
 }
 
+// What the controller record's process is now, for the phase-0 gate: `none`
+// with no record, else judgeRecord()'s answer. A process table that cannot
+// be read is `unreadable`, said on stderr: a controller nobody could judge
+// is not one whose receipt this tick may take as this run's.
+function controllerState(controller) {
+  if (controller === null) return "none";
+  try {
+    return judgeRecord(controller);
+  } catch (e) {
+    if (!(e instanceof ProcUnreadable)) throw e;
+    console.error(`${NAME}: WARNING ${e.message} — the recorded controller pid ${controller.pid} cannot be judged, so the phase-0 receipt is held`);
+    return "unreadable";
+  }
+}
+
 function main() {
   const { fold, state: path, liveness, ...caps } = options();
   const listPath = shortlistPath();
@@ -1519,9 +1536,13 @@ function main() {
   const mainCheckout = checkMainCheckout();
   // This run's phase 0, off its receipt: unfinished holds the same rows the
   // main checkout does, and never refuses the tick either. Judged against
-  // the controller record this tick started from.
+  // the controller record this tick started from, and against whether that
+  // record's process is still there: a finished receipt of the run before
+  // carries the same `at` until this run's rotation writes the next.
   const receipt = readRunReceipt();
-  const phase0 = phase0Gate(receipt.read, { path: receipt.path, controllerAt: controller?.at ?? null });
+  const phase0 = phase0Gate(receipt.read, {
+    path: receipt.path, controllerAt: controller?.at, controller: controllerState(controller),
+  });
 
   const rows = reconcile({
     ...caps, ...run, heads, supply, dropped, shortlistStatus: current.status, refresh: fresh, mainCheckout, phase0, router,

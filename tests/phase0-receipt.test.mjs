@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readReceipt, phase0Gate, sessionFromReceipt } from "../plugin/scripts/phase0-receipt.mjs";
+import { readReceipt, phase0Gate, sessionFromReceipt, STEP_NAMES } from "../plugin/scripts/phase0-receipt.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 
 const STEPS = ["branch", "fast-forward", "pin", "baseline", "preflight", "ruleset", "tier-roles", "metrics",
@@ -62,6 +62,48 @@ test("phase0Gate: failed, pending and unknown statuses hold, every one named in 
     line: "PHASE0-INCOMPLETE baseline, recipe, stranded — dispatch held: run ~/.fleet/bin/fleet-run phase0.mjs --session /s/run and act on what it prints",
     session: "/s/run",
   });
+});
+
+test("phase0Gate: a receipt that records no session holds with the <session> placeholder and hands out none", () => {
+  const g = phase0Gate(ok(receipt({ session: "", steps: { recipe: { status: "failed" } } })), { path: PATH, controllerAt: 5 });
+  assert.deepEqual(g, {
+    held: true,
+    line: "PHASE0-INCOMPLETE recipe — dispatch held: run ~/.fleet/bin/fleet-run phase0.mjs --session <session> and act on what it prints",
+    session: null,
+  });
+  assert.deepEqual(phase0Gate(ok(receipt({ session: "" })), { path: PATH, controllerAt: 5 }), { held: false, line: null, session: null });
+});
+
+test("phase0Gate: a step the receipt does not carry holds, named after the steps it does carry", () => {
+  const none = phase0Gate(ok({ ...receipt(), steps: {} }), { path: PATH, controllerAt: 5 });
+  assert.deepEqual(none, {
+    held: true,
+    line: `PHASE0-INCOMPLETE ${STEPS.join(", ")} — dispatch held: run ~/.fleet/bin/fleet-run phase0.mjs --session /s/run and act on what it prints`,
+    session: "/s/run",
+  });
+  const { recipe: _recipe, ...rest } = receipt({ steps: { baseline: { status: "failed" } } }).steps;
+  const some = phase0Gate(ok({ ...receipt(), steps: rest }), { path: PATH, controllerAt: 5 });
+  assert.match(some.line, /^PHASE0-INCOMPLETE baseline, recipe — dispatch held: /);
+  // An entry beyond the known steps is read like any other.
+  assert.equal(phase0Gate(ok(receipt({ steps: { extra: { status: "ok" } } })), { path: PATH, controllerAt: 5 }).held, false);
+  assert.deepEqual(STEP_NAMES, STEPS);
+});
+
+test("phase0Gate: a finished receipt whose controller has exited or cannot be judged is the run before's and holds", () => {
+  const cmd = "dispatch held: run ~/.fleet/bin/fleet-run phase0.mjs --session <session> and act on what it prints";
+  assert.deepEqual(phase0Gate(ok(receipt()), { path: PATH, controllerAt: 5, controller: "dead" }), {
+    held: true,
+    line: `PHASE0-INCOMPLETE receipt ${PATH} is run 5's and its controller has exited: not this session's finished phase 0 — ${cmd}`,
+    session: null,
+  });
+  assert.deepEqual(phase0Gate(ok(receipt()), { path: PATH, controllerAt: 5, controller: "unreadable" }), {
+    held: true,
+    line: `PHASE0-INCOMPLETE receipt ${PATH} is run 5's and its controller cannot be judged: not this session's finished phase 0 — ${cmd}`,
+    session: null,
+  });
+  for (const controller of ["none", "alive", "ancestor"]) {
+    assert.deepEqual(phase0Gate(ok(receipt()), { path: PATH, controllerAt: 5, controller }), { held: false, line: null, session: "/s/run" }, controller);
+  }
 });
 
 test("phase0Gate: drift, unanswered and a fold-in NEED are advice — on the ADVICE line alone, after the steps when one holds", () => {

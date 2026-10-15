@@ -13,16 +13,20 @@ import { RECEIPT } from "./ledger-grammar.mjs";
 
 const isRecord = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
 
+// The steps phase0.mjs runs, in order: its receipt always carries every one,
+// a step not yet run being `pending`. A receipt missing one was not written
+// by a finished phase 0.
+export const STEP_NAMES = Object.freeze([
+  "branch", "fast-forward", "pin", "baseline", "preflight", "ruleset", "tier-roles", "metrics",
+  "cockpit", "rotate", "reclaim", "recipe", "fold-in", "stranded", "shortlist",
+]);
+
 // The statuses a step can end in that let the run go on: `ok`, and the two
 // a ruleset check answers with when the gate drifted or could not be asked.
 // Every other status — `failed`, `pending`, or one this reader does not know
 // — is a step not done.
 const ADVICE = new Set(["drift", "unanswered"]);
 const DONE = new Set(["ok", ...ADVICE]);
-
-// The receipt's place, resolved the way phase0.mjs resolves it, so a
-// worktree and the main checkout name one file. Throws FleetDirUnresolvable.
-export const receiptPath = (opts) => fleetFile(RECEIPT, opts);
 
 /**
  * `{ state: "missing" }`, `{ state: "unreadable", why }`, or
@@ -53,12 +57,13 @@ export function readReceipt(path) {
   return { state: "ok", receipt: r };
 }
 
-// The receipt at its resolved place, or the reason it has none: an
-// unresolvable workspace is a receipt nobody can read.
+// The receipt at its resolved place — resolved the way phase0.mjs resolves
+// it, so a worktree and the main checkout name one file — or the reason it
+// has none: an unresolvable workspace is a receipt nobody can read.
 export function readRunReceipt(opts) {
   let path;
   try {
-    path = receiptPath(opts);
+    path = fleetFile(RECEIPT, opts);
   } catch (e) {
     if (!(e instanceof FleetDirUnresolvable)) throw e;
     return { path: RECEIPT, read: { state: "unreadable", why: e.message } };
@@ -72,18 +77,26 @@ const phase0Command = (session) => `~/.fleet/bin/fleet-run phase0.mjs --session 
  * The tick's gate over one read of the receipt. `controllerAt` is the `at`
  * of the controller record in `.fleet/heartbeat.json` now, null when there is
  * no record or it carries no `at` — the value phase0.mjs records as `run`, and
- * compares the same way.
+ * compares the same way. `controller` is what that record's process is now,
+ * as proc.mjs's judgeController() answers (`none`, `dead`, `alive`,
+ * `ancestor`), or `unreadable` when the process table could not be read.
+ *
+ * `run` alone cannot tell this run's receipt from the previous run's: the
+ * record keeps the previous run's `at` until this run's rotation writes the
+ * next, so a finished receipt of the run before still matches it. A record
+ * whose process is gone, or cannot be judged, is that case, and holds.
  *
  * `{ held, line, session }`: `held` holds every dispatching row; `line` is the
  * one line printed above the rows, or null when there is nothing to say;
  * `session` is the receipt's session directory when the receipt is this
  * run's, else null.
  *
- * A step `failed` or `pending`, or in a status this reader does not know,
- * holds. `drift` and `unanswered`, and a `NEED` line in a `fold-in` step's
- * output, are advice: named on the line, holding nothing.
+ * A step `failed` or `pending`, in a status this reader does not know, or
+ * absent from the receipt, holds. `drift` and `unanswered`, and a `NEED` line
+ * in a `fold-in` step's output, are advice: named on the line, holding
+ * nothing.
  */
-export function phase0Gate(read, { path, controllerAt = null }) {
+export function phase0Gate(read, { path, controllerAt = null, controller = "none" }) {
   const held = (why, session = null) => ({
     held: true,
     line: `PHASE0-INCOMPLETE ${why} — dispatch held: run ${phase0Command(session)} and act on what it prints`,
@@ -95,8 +108,16 @@ export function phase0Gate(read, { path, controllerAt = null }) {
   if (receipt.run !== controllerAt) {
     return held(`receipt ${path} is another run's: run ${receipt.run ?? "none"}, controller record ${controllerAt ?? "none"}`);
   }
+  if (controller === "dead" || controller === "unreadable") {
+    const why = controller === "dead" ? "its controller has exited" : "its controller cannot be judged";
+    return held(`receipt ${path} is run ${receipt.run ?? "none"}'s and ${why}: not this session's finished phase 0`);
+  }
   const steps = Object.entries(receipt.steps);
-  const incomplete = steps.filter(([, step]) => !DONE.has(step.status)).map(([name]) => name);
+  const absent = STEP_NAMES.filter((name) => !Object.hasOwn(receipt.steps, name));
+  const incomplete = [
+    ...steps.filter(([, step]) => !DONE.has(step.status)).map(([name]) => name),
+    ...absent,
+  ];
   const advice = [
     ...steps.filter(([, step]) => ADVICE.has(step.status)).map(([name, step]) => `${name} ${step.status}`),
     ...String(receipt.steps["fold-in"]?.output ?? "").split("\n").map((l) => l.trim())

@@ -563,6 +563,16 @@ test("session: an entry's own session wins over the receipt's, and an unreadable
   assert.match(v.row(), /tier-ok=impl-7:/);
 });
 
+test("session: an entry's empty session is given, not omitted — it refuses even beside a receipt that records one", () => {
+  const w = implWorld();
+  const check = withReceipt(w, receiptFor(join(w.d, "session")));
+  const before = readFileSync(w.ledger, "utf8");
+  const r = check([{ member: "impl-7", session: "" }]);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /impl-7: an impl- entry needs session or transcript/);
+  assert.equal(readFileSync(w.ledger, "utf8"), before, "the ledger changed");
+});
+
 test("session: omitted with no receipt, or one that records none, is exit 2 naming the receipt and writes nothing", () => {
   for (const [receipt, why] of [[undefined, "no receipt"], [receiptFor(""), "it records no session"], ["{", "unreadable: not JSON"]]) {
     const w = implWorld();
@@ -716,6 +726,24 @@ test("no transcript, member live: still an error — exit 2, nothing written, st
   assert.match(r.stderr, /no impl-7\.jsonl found under --session/);
   assert.equal(w.bytes(), before);
   assert.deepEqual(w.tick().tierUnchecked, ["impl-7"]);
+});
+
+test("no transcript under the receipt's session: every message names the receipt's session, never --session the caller did not give", () => {
+  const said = (settle) => {
+    const w = noTranscriptWorld({ settle });
+    withReceipt(w, receiptFor(join(w.d, "session")));
+    return { r: w.check([{ member: "impl-7" }]), session: join(w.d, "session") };
+  };
+  const live = said(null);
+  assert.equal(live.r.status, 2, live.r.stderr);
+  assert.ok(live.r.stderr.includes(`no impl-7.jsonl found under the phase-0 receipt's session ${live.session}`), live.r.stderr);
+  const ran = said("PR#20");
+  assert.equal(ran.r.status, 2, ran.r.stderr);
+  assert.ok(ran.r.stderr.includes(`settled PR#20 with no impl-7.jsonl under the phase-0 receipt's session ${ran.session} — `), ran.r.stderr);
+  const killed = said("killed");
+  assert.equal(killed.r.status, 3, killed.r.stderr);
+  assert.ok(killed.r.stderr.includes(`settled killed with no impl-7.jsonl under the phase-0 receipt's session ${killed.session} — nothing to check`), killed.r.stderr);
+  for (const { r } of [live, ran, killed]) assert.ok(!r.stderr.includes("--session"), r.stderr);
 });
 
 test("no transcript: a session omitted, empty, missing or not a directory is a usage error for live and settled members alike", () => {

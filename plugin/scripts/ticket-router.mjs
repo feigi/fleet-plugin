@@ -560,7 +560,7 @@ function main() {
     // `--session` omitted is the session directory the phase-0 receipt
     // records; a receipt that records none is a usage error naming it.
     let sessionArg = F.arg("session");
-    if (sessionArg === null || sessionArg === undefined) {
+    if (sessionArg === null) {
       try { sessionArg = sessionFromReceipt(); } catch (e) { die(e.message); }
     }
     const session = basename(sessionArg.replace(/\/+$/, ""));

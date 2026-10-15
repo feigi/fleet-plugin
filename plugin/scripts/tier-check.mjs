@@ -23,7 +23,10 @@
 //      dispatch-time `session_init` record, never treated as absent). An
 //      entry that names neither a `session` nor a `transcript` takes the
 //      `session` the phase-0 receipt `.fleet/phase0.json` records, and is
-//      exit 2 naming the receipt when it records none.
+//      exit 2 naming the receipt when it records none. That session is taken
+//      as the receipt stands: whether the receipt is this run's is judged by
+//      fleet-tick.mjs's phase-0 gate, not here, and a message about it names
+//      the receipt's session where it would name `--session`.
 //   3. `--transcript <file>` — the member's own transcript, when the caller
 //      already holds the exact path (tests, or a caller with no session
 //      root handy).
@@ -294,10 +297,10 @@ function resolvePath(repoRoot, p) {
 // (`<parent-AgentId>/<stem>.jsonl`, one directory level down) is out of
 // reach of this flat lookup — pass `--transcript` for a transcript this
 // cannot find directly.
-function resolveViaSession(repoRoot, sessionPath, member) {
+function resolveViaSession(repoRoot, sessionPath, member, where) {
   const root = resolvePath(repoRoot, sessionPath);
   const flat = join(root, `${member}.jsonl`);
-  if (!existsSync(flat)) throw new Error(`no ${member}.jsonl found under --session ${sessionPath}`);
+  if (!existsSync(flat)) throw new Error(`no ${member}.jsonl found under ${where}`);
   return readFileSync(flat, "utf8");
 }
 
@@ -390,7 +393,7 @@ function recordImplementer(ledgerFile, r) {
 // ticket's row, under the same presence rule as the other two.
 function recordUnverifiable(ledgerFile, r) {
   const token = tierUnverifiableToken(r.member);
-  console.error(`${r.member}: settled ${r.outcome} with no ${r.member}.jsonl under --session ${r.session} — nothing to check; recorded ${token}`);
+  console.error(`${r.member}: settled ${r.outcome} with no ${r.member}.jsonl under ${r.where} — nothing to check; recorded ${token}`);
   const existing = rowText(readLedger(ledgerFile), r.ticket);
   const updated = withToken(existing, token);
   if (updated === existing) console.error(`    ${r.member}: row #${r.ticket} already carries ${token} — not written again`);
@@ -477,6 +480,8 @@ function main() {
         // batch — and refuses naming the receipt when it records none. A
         // given one always wins.
         const session = raw.session ?? (raw.transcript ? undefined : (receiptSession ??= sessionFromReceipt()));
+        // Said as the caller's flag only when the caller gave it.
+        const where = raw.session ? `--session ${session}` : `the phase-0 receipt's session ${session}`;
         if (session) {
           // A member settled `killed` or `released` with no transcript under
           // a session directory that does exist: its dispatch failed before
@@ -487,10 +492,10 @@ function main() {
           // transcript names the wrong session and refuses here.
           if (impl && sessionLacksTranscript(repoRoot, session, raw.member)) {
             const outcome = memberOutcome(ledgerData, raw.member);
-            if (NO_TRANSCRIPT_OUTCOMES.has(outcome)) return { impl: true, unverifiable: true, member: raw.member, ticket, outcome, session };
-            if (outcome) throw new Error(`settled ${outcome} with no ${raw.member}.jsonl under --session ${session} — a member settled ${outcome} ran, so its transcript exists: name the session directory that dispatched it`);
+            if (NO_TRANSCRIPT_OUTCOMES.has(outcome)) return { impl: true, unverifiable: true, member: raw.member, ticket, outcome, where };
+            if (outcome) throw new Error(`settled ${outcome} with no ${raw.member}.jsonl under ${where} — a member settled ${outcome} ran, so its transcript exists: name the session directory that dispatched it`);
           }
-          transcriptText = resolveViaSession(repoRoot, session, raw.member);
+          transcriptText = resolveViaSession(repoRoot, session, raw.member, where);
         } else if (raw.transcript) {
           transcriptText = readFileSync(resolvePath(repoRoot, raw.transcript), "utf8");
         } else if (impl) {

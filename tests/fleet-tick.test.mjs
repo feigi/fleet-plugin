@@ -1693,7 +1693,7 @@ const receiptOf = ({ run = null, session = "/s", steps = {} } = {}) => ({
 // phase-0 receipt, written after `afterBaseline`: by default every step `ok`
 // and `run` the `at` of the controller record in the state file the tick
 // reads, so the gate lets dispatch through; `false` writes none; a function
-// maps that default receipt to the case's own; a string is written verbatim.
+// maps that default receipt to the case's own.
 function runCli(args = [], {
   prs = [], ledger, shortlist, refresh = shortlistText([]), refreshFail = false,
   issueStates = {}, prStates = {}, claimed = [], candidates, env: extraEnv = {}, defaultState = false, keep = false, beforeRun = () => {},
@@ -1743,7 +1743,7 @@ function runCli(args = [], {
       let at = null;
       try { at = JSON.parse(readFileSync(statePathOf, "utf8")).controller?.at ?? null; } catch { /* no record: run null */ }
       writeFileSync(join(repo, ".fleet", "phase0.json"),
-        typeof phase0 === "string" ? phase0 : JSON.stringify(phase0(receiptOf({ run: at, session: join(dir, "session") }))));
+        JSON.stringify(phase0(receiptOf({ run: at, session: join(dir, "session") }))));
     }
     const refreshLog = fx("refresh.log", "");
     const issueViewLog = fx("issue-view.log", "");
@@ -2755,8 +2755,16 @@ const PHASE0_LIVE = { ...LIVE, prs: [pr(350)] };
 const withStep = (name, step) => (r) => ({ ...r, steps: { ...r.steps, [name]: { ...r.steps[name], ...step } } });
 const CONTROLLER_AT = 1_760_000_000_000;
 // A controller record in the case's own state file, the one the tick reads.
-const withController = (repo) => writeFileSync(join(repo, "..", "heartbeat.json"),
-  JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller: { pid: process.pid, lstart: "runner-start", prior: "none", at: CONTROLLER_AT } }));
+const controllerRecord = (record = {}) => (repo) => writeFileSync(join(repo, "..", "heartbeat.json"),
+  JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller: { pid: process.pid, lstart: "runner-start", prior: "none", at: CONTROLLER_AT, ...record } }));
+const withController = controllerRecord();
+// The process table the tick judges that record against: this runner is the
+// tick's parent, and the table's omp is above it.
+const procEnv = (t, extra = {}) => {
+  const d = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-proc-")));
+  t.after(() => rmSync(d, { recursive: true, force: true }));
+  return { FLEET_PROC_TABLE: procTable(d, extra) };
+};
 for (const [what, fixture, named] of [
   ["no receipt", { phase0: false }, /^PHASE0-INCOMPLETE no receipt at \S+\/\.fleet\/phase0\.json — dispatch held: run ~\/\.fleet\/bin\/fleet-run phase0\.mjs --session <session> and act on what it prints$/],
   ["a receipt of another run", {
@@ -2765,6 +2773,7 @@ for (const [what, fixture, named] of [
   }, new RegExp(`^PHASE0-INCOMPLETE receipt \\S+/\\.fleet/phase0\\.json is another run's: run ${CONTROLLER_AT - 1}, controller record ${CONTROLLER_AT} — dispatch held: `)],
   ["a failed step", { phase0: withStep("recipe", { status: "failed", output: "derive-testcmd.sh exited 3" }) }, /^PHASE0-INCOMPLETE recipe — dispatch held: run ~\/\.fleet\/bin\/fleet-run phase0\.mjs --session \S+\/session and act on what it prints$/],
   ["a pending step", { phase0: withStep("stranded", { status: "pending", output: "NEED resume #5 /w b" }) }, /^PHASE0-INCOMPLETE stranded — dispatch held: /],
+  ["a step the receipt lacks", { phase0: (r) => { const { recipe: _recipe, ...steps } = r.steps; return { ...r, steps }; } }, /^PHASE0-INCOMPLETE recipe — dispatch held: /],
 ]) {
   test(`CLI: ${what} prints PHASE0-INCOMPLETE first, naming it, and holds every dispatching row`, () => {
     const r = runCli([], { ...PHASE0_LIVE, ...fixture });
@@ -2780,16 +2789,36 @@ for (const [what, fixture, named] of [
   });
 }
 
-test("CLI: a receipt of this run with every step ok prints nothing extra and holds nothing", () => {
+test("CLI: a receipt of this run with every step ok prints nothing extra and holds nothing", (t) => {
   const r = runCli([], PHASE0_LIVE);
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stdout, /PHASE0|phase 0/);
   assert.match(r.stdout, /^implementers 1\/2 → PULL #420 /m);
   assert.match(r.stdout, /^merge-bot +0\/1 → (?!HOLD)/m);
-  // The controller record's `at` is what `run` must equal.
-  const ctl = runCli([], { ...PHASE0_LIVE, beforeRun: withController });
+  // The controller record's `at` is what `run` must equal, and its process
+  // is this tick's ancestor.
+  const ctl = runCli([], { ...PHASE0_LIVE, beforeRun: withController, env: procEnv(t) });
   assert.equal(ctl.status, 0, ctl.stderr);
   assert.doesNotMatch(ctl.stdout, /PHASE0|phase 0/);
+});
+
+test("CLI: a finished receipt whose run's controller has exited holds every dispatching row, and one whose controller is alive does not", (t) => {
+  const gone = runCli([], { ...PHASE0_LIVE, beforeRun: controllerRecord({ pid: deadPid() }), env: procEnv(t) });
+  assert.equal(gone.status, 0, gone.stderr);
+  const line = gone.stdout.trim().split("\n").find((l) => l.startsWith("PHASE0-"));
+  assert.match(line ?? "", new RegExp(`^PHASE0-INCOMPLETE receipt \\S+/\\.fleet/phase0\\.json is run ${CONTROLLER_AT}'s and its controller has exited: not this session's finished phase 0 — dispatch held: run \\S+ phase0\\.mjs --session <session> `), gone.stdout);
+  assert.match(gone.stdout, /^implementers 1\/2 → HOLD \(phase 0 incomplete\)/m);
+  assert.match(gone.stdout, /^reviewers +0\/6 → HOLD \(phase 0 incomplete\)/m);
+  assert.match(gone.stdout, /^merge-bot +0\/1 → HOLD \(phase 0 incomplete\)/m);
+  assert.doesNotMatch(gone.stdout, /PULL|DISPATCH/);
+  const foreign = liveForeign(t);
+  const alive = runCli([], {
+    ...PHASE0_LIVE, beforeRun: controllerRecord({ pid: foreign, lstart: "foreign-start" }),
+    env: procEnv(t, { [foreign]: { ppid: 1, argv: ["bun", "/x/omp"], lstart: "foreign-start" } }),
+  });
+  assert.equal(alive.status, 0, alive.stderr);
+  assert.doesNotMatch(alive.stdout, /PHASE0|phase 0/);
+  assert.match(alive.stdout, /^implementers 1\/2 → PULL #420 /m);
 });
 
 test("CLI: ruleset drift and a fold-in NEED print as advice on a PHASE0-ADVICE line and hold nothing", () => {
@@ -2813,6 +2842,26 @@ test("CLI: --fold-unchanged under an unfinished phase 0 folds to one line naming
   for (const [i, t] of ticks.slice(1).entries()) {
     assert.deepEqual(t.stdout.trim().split("\n"), [
       `fleet-tick: unchanged, nothing to act on (quiet=${i + 2}); HOLD (phase 0 incomplete) persists — full rows on the next change`,
+    ]);
+  }
+});
+
+test("CLI: an unfinished phase 0 over a dirty main checkout prints the phase-0 line above the main-checkout line, and the fold names both holds", () => {
+  const both = {
+    ...LIVE, phase0: withStep("recipe", { status: "pending", output: "NEED derive-recipe" }),
+    afterBaseline: (repo) => writeFileSync(join(repo, "stray.mjs"), "x\n"),
+  };
+  const ticks = foldTicks(both);
+  for (const t of ticks) assert.equal(t.status, 0, t.stderr);
+  const lines = ticks[0].stdout.trim().split("\n");
+  const phase0At = lines.findIndex((l) => l.startsWith("PHASE0-INCOMPLETE "));
+  const mainAt = lines.findIndex((l) => l.startsWith("MAIN-CHECKOUT-DIRTY "));
+  assert.ok(phase0At >= 0 && mainAt >= 0, ticks[0].stdout);
+  assert.ok(phase0At < mainAt, "the phase-0 line prints above the main-checkout line");
+  assert.match(ticks[0].stdout, /^implementers 1\/2 → HOLD \(phase 0 incomplete\)/m);
+  for (const [i, t] of ticks.slice(1).entries()) {
+    assert.deepEqual(t.stdout.trim().split("\n"), [
+      `fleet-tick: unchanged, nothing to act on (quiet=${i + 2}); HOLD (phase 0 incomplete) persists; HOLD (main checkout dirty) persists — full rows on the next change`,
     ]);
   }
 });

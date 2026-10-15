@@ -2006,9 +2006,11 @@ depth** guard table applied in code. Act on each line as it reads:
 - `PHASE0-INCOMPLETE <step>[, <step>…] …`, printed first above the rows,
   with every dispatching row (implementers, reviewers, merge-bot) reading
   `HOLD (phase 0 incomplete)` — this run's phase-0 receipt
-  `.fleet/phase0.json` names a step `failed` or `pending`. In place of the
-  steps the line says the receipt is missing, unreadable, or another run's
-  (its `run` is not the `at` in the controller record). It outranks every
+  `.fleet/phase0.json` names a step `failed` or `pending`, or lacks one. In
+  place of the steps the line says the receipt is missing, unreadable,
+  another run's (its `run` is not the `at` in the controller record), or a
+  run whose controller has exited — the previous run's finished receipt, in
+  a session that has not yet run its own phase 0. It outranks every
   other reason on those rows, `MAIN-CHECKOUT-*` included, whose lines still
   print; a `baseline` step not `ok` is one of the steps it names.
   `CONFLICT` rows and the stall report still print. Run the

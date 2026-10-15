@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { STEP_NAMES } from "../plugin/scripts/phase0-receipt.mjs";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
 const REAL_SCRIPTS = join(PLUGIN, "scripts");
@@ -214,6 +215,7 @@ test("a clean run passes every step in order, writes one receipt and exits 0", (
   const receipt = f.receipt();
   assert.deepEqual(statuses(receipt), allOk);
   assert.deepEqual(Object.keys(receipt.steps), NAMES);
+  assert.deepEqual(NAMES, [...STEP_NAMES], "the receipt readers name the steps phase0.mjs writes");
   assert.equal(receipt.run, RUN_AT, "run is the at the rotation wrote into the controller record");
   assert.equal(receipt.session, f.session);
   assert.equal(receipt.scratch.startsWith(join(f.home, ".fleet", "scratch")), true, receipt.scratch);
