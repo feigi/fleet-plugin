@@ -287,6 +287,56 @@ test("readState: `seen` keeps each valid stamp and drops each junk one, never th
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("writeState: `applied` is written only by the tick, and survives a heartbeat write and a controller write", () => {
+  // fleet-tick --apply is the key's one writer. A heartbeat or rotate write
+  // that dropped it would have the next --apply tick reap again after every
+  // merge pass it already reaped after.
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-applied-"));
+  const path = join(dir, "heartbeat.json");
+  const applied = { run: 1_700_000_000_000, reapAfter: [1, 3] };
+  writeFileSync(path, JSON.stringify({ quiet: 2, applied, note: "not ours" }));
+  const prev = readState(path, "fleet-state-test");
+  assert.deepEqual(prev.applied, applied);
+  assert.deepEqual(prev.rest, { note: "not ours" }, "`applied` must be destructured out, not left in `rest`");
+
+  // The real heartbeat's own write, not a stand-in for it.
+  const heartbeat = fileURLToPath(new URL("../plugin/scripts/fleet-heartbeat.mjs", import.meta.url));
+  const r = spawnSync(process.execPath, [heartbeat, "--stop", "test over", "--state", path], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const after = JSON.parse(readFileSync(path, "utf8"));
+  assert.equal(after.beat?.stopped, "test over", "the heartbeat wrote no mark, so this case measured nothing");
+  assert.deepEqual(after.applied, applied, "a heartbeat write erased `applied`");
+  const controller = { pid: 29405, lstart: "Fri Oct  9 14:26:16 2026", prior: "ancestor", at: 1_700_000_000_000 };
+  assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { controller }), true);
+  assert.deepEqual(readState(path, "fleet-state-test").applied, applied, "a rotate write erased `applied`");
+  rmSync(dir, { recursive: true, force: true });
+
+  // Of every script that writes this file, only fleet-tick names `applied`
+  // in a patch. Each writeState call is read up to its closing `);`.
+  const scripts = fileURLToPath(new URL("../plugin/scripts/", import.meta.url));
+  const writers = readdirSync(scripts).filter((f) => f.endsWith(".mjs") && f !== "fleet-state.mjs").filter((f) => {
+    const src = readFileSync(join(scripts, f), "utf8");
+    return [...src.matchAll(/\bwriteState\(/g)].some((m) => /\bapplied\s*:/.test(src.slice(m.index, src.indexOf(");", m.index))));
+  });
+  assert.deepEqual(writers, ["fleet-tick.mjs"]);
+});
+
+test("readState: `applied` is read against a run or not at all; a junk entry costs that entry alone", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-applied-shape-"));
+  const path = join(dir, "heartbeat.json");
+  const read = (applied) => {
+    writeFileSync(path, JSON.stringify({ quiet: 3, applied }));
+    return readState(path, "fleet-state-test");
+  };
+  for (const bad of [undefined, null, "x", [1], { reapAfter: [1] }, { run: 0, reapAfter: [1] }, { run: "5", reapAfter: [1] }, { run: 5 }, { run: 5, reapAfter: "1" }]) {
+    assert.equal(read(bad).applied, null, JSON.stringify(bad));
+  }
+  assert.deepEqual(read({ run: null, reapAfter: [2] }).applied, { run: null, reapAfter: [2] });
+  assert.deepEqual(read({ run: 5, reapAfter: [1, 0, -2, 1.5, "3", null, 4] }).applied, { run: 5, reapAfter: [1, 4] });
+  assert.equal(read("junk").quiet, 3, "a junk `applied` costs the streak beside it");
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("readState: `controller` is a record only with a pid and a start time; a junk prior reads as none", () => {
   const dir = mkdtempSync(join(tmpdir(), "fleet-state-controller-shape-"));
   const path = join(dir, "heartbeat.json");
