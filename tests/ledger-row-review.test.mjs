@@ -62,7 +62,7 @@ function fixture(t, rows = null) {
   const review = (pr, ...tokens) => run("review", pr, ...tokens);
   const reviewRefused = (pr, tokens, ...whys) => refusedCall(["review", pr, ...tokens], whys);
   const read = () => JSON.parse(cli("read").stdout);
-  return { run, ok, refused, review, reviewRefused, read, rows: () => read().rows };
+  return { run, ok, refused, review, reviewRefused, read, rows: () => read().rows, file };
 }
 
 const A = "review=member:review-pr-482";
@@ -79,16 +79,30 @@ const HALT = "finisher-pr-482=halted:past-pin";
 
 test("review appends each token to the ticket row that maps the PR, in write order, and prints the row key", (t) => {
   const { review, rows } = fixture(t, [`#1 ${IMPL}`]);
-  assert.deepEqual(review("482", A), { pr: 482, row: "#1", line: `#1 ${IMPL} · ${A}`, created: false });
+  assert.deepEqual(review("482", A), { pr: 482, row: "#1", line: `#1 ${IMPL} · ${A}`, created: false, next: "review-pr-482-b" });
   assert.equal(review("#482", r1).row, "#1");
   assert.deepEqual(rows(), [`#1 ${IMPL} · ${A} · ${r1}`]);
 });
 
 test("review on a PR no row maps creates its #M row, and the next call lands there", (t) => {
   const { review, rows } = fixture(t);
-  assert.deepEqual(review("482", A, r1), { pr: 482, row: "#482", line: `#482 ${A} · ${r1}`, created: true });
+  assert.deepEqual(review("482", A, r1), { pr: 482, row: "#482", line: `#482 ${A} · ${r1}`, created: true, next: "review-pr-482-b" });
   review("482", "review=member:review-pr-482-b");
   assert.deepEqual(rows(), [`#482 ${A} · ${r1} · review=member:review-pr-482-b`]);
+});
+
+test("review's receipt names the next free runner as the ledger stands after the write: a workflow launch takes no name, a launch settled =failed keeps its own", (t) => {
+  const { review } = fixture(t, [`#1 ${IMPL}`]);
+  assert.equal(review("482", "review=wf:12345").next, "review-pr-482", "a workflow launch uses no runner name");
+  assert.equal(review("482", "review=wf:12345=failed", A).next, "review-pr-482-b");
+  assert.equal(review("482", `${A}=failed`).next, "review-pr-482-b", "a launch settled =failed keeps its name");
+  assert.equal(review("482", B).next, "review-pr-482-c");
+});
+
+test("review's next skips a runner name the ledger's ## Retired holds", (t) => {
+  const { review, file } = fixture(t, [`#1 ${IMPL}`]);
+  writeFileSync(file, `${readFileSync(file, "utf8")}## Retired\n\n- review-pr-482-b\n`);
+  assert.equal(review("482", A).next, "review-pr-482-c");
 });
 
 test("review finds the PR's row by its PR before by its key: a ticket row settled to the PR wins over a later #M row", (t) => {

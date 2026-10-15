@@ -3559,7 +3559,9 @@ live count from it, so nobody states one. Write neither by hand:
 - **`ledger.mjs review <pr> <token>…`** — the only writer of `review=` and
   `reviewed=` (below): appends each to the PR's row — the ticket row once
   `settle impl-<N>=PR#M` has run, else `#M`, created when neither exists —
-  and prints `{pr, row, line, created}`, `row` the key written. A
+  and prints `{pr, row, line, created, next}`, `row` the key written and
+  `next` the runner name the PR's next launch takes, null with every letter
+  taken. A
   `review=<launch>=failed` whose `review=<launch>` the row holds settles that
   launch in place, alone or with the next launch in the same call. Any other
   token is refused.
