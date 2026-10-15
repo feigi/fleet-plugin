@@ -611,7 +611,8 @@ phase, or in any later one, asks the maintainer which tickets to take.
    --oneline origin/main..HEAD`, `git -C <worktree> status --short`, and the
    files under `<scratch>/impl-<N>/`). Record it the ordinary way —
    `ledger.mjs row <N>
-   "impl-<N>-b"`, then `ledger.mjs dispatch <N> impl-<N>-b`, then the `task`
+   "impl-<N>-b"`, then `dispatch-prompt.mjs render implementer --member
+   impl-<N>-b …`, then `ledger.mjs dispatch <N> impl-<N>-b`, then the `task`
    call naming the `agent` it printed, then the tier check — and never
    `claim-ticket.sh`: the claim already stands. A `report` goes to the
    maintainer as `#<N> — <why>` and nothing else: no dispatch, no label change,
@@ -1157,12 +1158,16 @@ a worktree, a branch and an `in-progress` label with no member behind them,
 released by the end-of-run sweep rather than by a member that did the work.
 
 **Record the dispatch before you make it.** `ledger.mjs row` wrote the row at
-the Pull's step 7; `~/.fleet/bin/fleet-run ledger.mjs dispatch <N> impl-<N>`
-then marks `impl-<N>` live on it and in `## Dispatched`, and the call follows.
-Its JSON carries `agent`, the definition that call names — read it off that
-output, never recall it. Live implementers are the `impl-` tokens with no
+the Pull's step 7; `~/.fleet/bin/fleet-run dispatch-prompt.mjs render
+implementer --member impl-<N> …` then renders its brief, and
+`~/.fleet/bin/fleet-run ledger.mjs dispatch <N> impl-<N>`
+marks `impl-<N>` live on it and in `## Dispatched`, and the call follows.
+Its JSON carries `agent`, the definition that call names, and `brief.path`,
+the rendered brief whose content is that call's prompt — read both off that
+output, never recall them. Live implementers are the `impl-` tokens with no
 `=<outcome>` — the tick reads that count off the ledger, and nobody states
-it. `dispatch` refuses once the
+it. `dispatch` refuses a member with no brief rendered for its role, naming
+the `render` command to run first, and refuses once the
 run is draining: drain stops supply. It also refuses a row whose `tier=`
 names no single definition — two different values, or one that is not a
 definition suffix — or names one with no `agents/<definition>.agent.md`,
@@ -1935,8 +1940,10 @@ depth** guard table applied in code. Act on each line as it reads:
   list shows PR M without `ready-to-merge`, and no `label-off=` (**Run ledger**)
   accounts for the removal. Apply the finisher gate (**Reviewers**: the
   `check` job green on the current head), then dispatch the next-suffix
-  finisher at that head — `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`, one
-  letter past the highest the PR has used. Never add the label yourself. A head
+  finisher at that head, one letter past the highest the PR has used: render
+  its brief with `dispatch-prompt.mjs render finisher --kind repair --member
+  finisher-pr-<M>-<x> …`, then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`.
+  Never add the label yourself. A head
   that moved is caught by the new finisher's duty 1 `past-pin` halt and the
   re-review path that follows it. Finishers take no reviewer slot, so this
   prints whatever the reviewer cap reads.
@@ -2601,8 +2608,9 @@ no review fix-applier
 has landed `applied:`/`no-op` on since, with no fix-applier live on it — one
 named member per PR, `fix-pr-<pr#>` (the next suffix when that name is already
 on record), never the PR's
-implementer, recorded with `ledger.mjs dispatch <pr#> fix-pr-<pr#>` before the
-call. Its prompt carries the PR number, the worktree abs path, the PR's branch,
+implementer, its brief rendered with `dispatch-prompt.mjs render fix-applier
+--kind review --member fix-pr-<pr#> …` and then recorded with `ledger.mjs
+dispatch <pr#> fix-pr-<pr#>` before the call. Its prompt carries the PR number, the worktree abs path, the PR's branch,
 the same `testCmd` you passed the review, and the **path** `<scratch>/pr<pr>/<run>/review.json`,
 `<run>` off the PR's latest `reviewed=` — never the findings. Every `<scratch>`
 in that prompt is the absolute path `scratch-root.mjs` printed, the
@@ -2619,7 +2627,9 @@ unresolved `conflict-hold:#<M>`, the merge bot's (`run-merge-bot.md` step 1's
 fallback) or one you recorded off the tick's `CONFLICT` line —
 is the same slot with a different job, and no review file to hand
 over. Name it `fix-pr-<M>`, or the next suffix (`-b`, `-c` …) when that name is
-already on record — `dispatch` refuses a reused one — and dispatch it with the
+already on record — `dispatch` refuses a reused one — render its brief with
+`dispatch-prompt.mjs render fix-applier --kind conflict --member <name> …`,
+and dispatch it with the
 `agent` that `ledger.mjs dispatch` printed, in the PR's existing worktree.
 `dispatch` prints this member's definition, `fleet-fix-applier` whatever the
 row's `tier=` — read it off that output, never recall it. Its prompt takes the prompt below's
@@ -2661,7 +2671,8 @@ edges are the only route there, so do not wait for an event. Edit one of these
 bullets without the others and what strands is exactly the red-only PR.
 
 Name it `fix-pr-<M>`, or the next free suffix (`-b`, `-c` …) — `dispatch`
-refuses a reused name — record it with `ledger.mjs dispatch <pr#> <name>`
+refuses a reused name — render its brief with `dispatch-prompt.mjs render
+fix-applier --kind red-check --member <name> …`, record it with `ledger.mjs dispatch <pr#> <name>`
 before the call, and dispatch it with the `agent` that command printed
 (`fleet-fix-applier`, as for a review fix-applier), in the PR's
 existing worktree. Its prompt takes the prompt below's worktree, branch and
@@ -2680,7 +2691,7 @@ reach green" covers.
 **A `DISPATCH fix-pr PR#<M>` on a dispositions mismatch** — the PR's row carries
 `dispositions-mismatch=<member>:<run>` for its latest review's run, and no later
 fix-applier has landed — is one automatic retry, a review fix-applier named the
-next suffix (`fix-pr-<M>-b`) and dispatched like the first. Its prompt is the
+next suffix (`fix-pr-<M>-b`) and dispatched like the first, its brief rendered with `--kind dispositions-retry`. Its prompt is the
 first one's, with three paths and a list copied in: the review file
 `<scratch>/pr<M>/<run>/review.json`, the mismatched member's record `<scratch>/dispositions-<member>.json`
 it starts from, its own record `<scratch>/dispositions-<its own name>.json` it writes, and the check's violation list **verbatim** — the lines
@@ -3155,7 +3166,9 @@ infer, see the five-condition note in the fix-applier block above) — or
 `ci-state.mjs` reads `verdict: "no-ci"`, see below — **and once the PR's review
 has returned and its fix-applier, if one was dispatched, has sent its report,
 which the CI-completes edge above states in full** — dispatch a
-**finisher** — a fresh small agent, not the fix-applier resumed. Record it with
+**finisher** — a fresh small agent, not the fix-applier resumed. Render its brief
+with `dispatch-prompt.mjs render finisher --kind fresh --member finisher-pr-<pr#> …`
+(`--kind repair` once an earlier finisher reported `labelled` without the label landing), record it with
 `ledger.mjs dispatch <pr#> finisher-pr-<pr#>` before the call, then **dispatch
 it with the `agent` that command printed and omit `model` on the call** — the
 tier lives in that definition's frontmatter, `agents/fleet-finisher.agent.md`,
@@ -3580,8 +3593,11 @@ REVIEW-column open PR without the label, whose latest finisher attempt settled
 so, `finisher:failed` or `finisher:killed` at severity 4 — one token per
 outcome, neither the implementer's bare `killed` flag nor `unlabelled`. You
 resolve it by hand: investigate why the finisher died, or dispatch the
-next-suffix finisher after the finisher gate, `ledger.mjs dispatch <M>
-finisher-pr-<M>-<x>`. The flag clears when a later attempt settles — `labelled`
+next-suffix finisher after the finisher gate: render its brief with
+`dispatch-prompt.mjs render finisher --kind fresh --member finisher-pr-<M>-<x>
+…` (`--kind repair` once an earlier finisher reported `labelled` without the
+label landing), then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`. The flag
+clears when a later attempt settles — `labelled`
 (then `unlabelled` takes over while the label is still off), `halted:<cause>`,
 or a live `-b` — or when the PR carries `ready-to-merge`, merges or closes.
 You never add the label yourself, and the tick does not retry.
@@ -3650,7 +3666,10 @@ merge-bot` names it before the dispatch call — `n` is 1 + the highest
 `merge-bot-<n>` the session holds, in the ledger's `## Dispatched` list, on a
 row or in `## Retired`, so it restarts at 1 only when none was carried or
 retired (a `dead` or `none` rotate, or a fresh start), a replacement for a
-dead bot takes the next `n`, and nobody counts. Dispatch
+dead bot takes the next `n`, and nobody counts. With no brief rendered for
+that name it refuses, naming the bot and the `dispatch-prompt.mjs render
+merge-bot --member merge-bot-<n> …` to run — render it, then run `ledger.mjs
+dispatch merge-bot` again. Dispatch
 it on the tick's `DISPATCH merge-bot`: the first `ready-to-merge` label is
 enough, and it never waits for the finisher's report. Tell it to read
 `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md` and run **one**
@@ -4336,13 +4355,16 @@ it settles** — the grammar is `ledger-grammar.mjs`'s, and the tick derives eve
 live count from it, so nobody states one. Write neither by hand:
 
 - **`ledger.mjs dispatch <ticket|pr> <member>`** — before the dispatch call,
-  marks the member live on its row and appends it to `## Dispatched`. `dispatch
+  marks the member live on its row and appends it to `## Dispatched` with
+  `brief=<first 8 hex of its brief's sha256>`. `dispatch
   merge-bot` names the next bot itself. It prints `{member, agent, ticket,
-  line, created, total}`; `agent` is the definition the `task` call names — an
+  line, created, total, brief}`, `brief` the `{path, sha256}` of the rendered
+  brief the `task` call is handed; `agent` is the definition the `task` call names — an
   implementer's comes off its row's `tier=` (phase 2's tier check states the
   mapping), a finisher's and a merge bot's are their own definitions, and a
   fix-applier's is `fleet-fix-applier` for every kind of work. It
-  refuses a name this session already used — on the ledger or in its
+  refuses a member whose `briefs/<member>.json` beside the ledger is missing,
+  names another role or carries no sha256, a brief file beside it that is missing or does not hash to that sha256, a name this session already used — on the ledger or in its
   `## Retired` — and names the replacement (`-b`, `-c` …), a
   second live member on one ticket or PR, any implementer once the run is
   draining, an implementer whose row's `tier=` names no single definition

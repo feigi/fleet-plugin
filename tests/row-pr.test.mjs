@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { rowPr, rowNums } from "../plugin/scripts/ledger-grammar.mjs";
 import { parseRow } from "../plugin/scripts/compute-board.mjs";
 import { unrecordedReviewedPrs } from "../plugin/scripts/tier-outcomes.mjs";
+import { rendering } from "./support/rendered-brief.mjs";
 
 const LEDGER = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -52,11 +53,11 @@ function ledger(t, rows = null) {
   delete env.GIT_WORK_TREE;
   const file = join(dir, "ledger.md");
   if (rows !== null) writeFileSync(file, `# Fleet run ledger\n\n## Rows\n\n${rows.map((r) => `- ${r}\n`).join("")}\n## Filed\n\n## Ruled\n\n`);
-  return (...args) => {
+  return rendering(dir, (...args) => {
     const r = spawnSync(process.execPath, [LEDGER, "--file", file, ...args], { encoding: "utf8", env, cwd: dir });
     assert.equal(r.status, 0, `${args.join(" ")}: got exit ${r.status}\n${r.stderr}`);
     return JSON.parse(r.stdout);
-  };
+  });
 }
 
 for (const { row, own, keyed, board } of FIXTURES) {
@@ -72,7 +73,10 @@ for (const { row, own, keyed, board } of FIXTURES) {
     const key = row.split(" ")[0];
     assert.equal(cli("dispatch", String(keyed), `fix-pr-${keyed}`).ticket, key, "ledger.mjs memberRowIndex");
     for (const other of [481, 471].filter((n) => n !== own && row.includes(`PR#${n}`))) {
-      assert.deepEqual(cli("dispatch", String(other), `fix-pr-${other}`), {
+      // The brief it was dispatched with is ledger-dispatch.test.mjs's subject.
+      const { brief, ...out } = cli("dispatch", String(other), `fix-pr-${other}`);
+      assert.equal(typeof brief?.sha256, "string");
+      assert.deepEqual(out, {
         member: `fix-pr-${other}`, agent: "fleet-fix-applier", ticket: `#${other}`, line: `#${other} fix-pr-${other}`, created: true, total: 2,
       }, `PR#${other} is not this row's PR`);
     }

@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { deriveRun, LedgerError } from "../plugin/scripts/fleet-tick.mjs";
 import { rowPr } from "../plugin/scripts/ledger-grammar.mjs";
+import { rendering, renderBrief } from "./support/rendered-brief.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -32,10 +33,14 @@ function fixture(t, body = null) {
   const env = { ...process.env, PATH: bin };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
-  const cli = (...args) => {
+  // Every dispatch through `cli` finds its member's brief rendered beside the
+  // ledger, as a controller's does; `bare` renders nothing, for the tests of
+  // that gate.
+  const bare = (...args) => {
     const r = spawnSync(process.execPath, [SCRIPT, "--file", file, ...args], { encoding: "utf8", env, cwd: dir });
     return { ...r, json: r.status === 0 ? JSON.parse(r.stdout) : null };
   };
+  const cli = rendering(dir, bare);
   const ok = (...args) => {
     const r = cli(...args);
     assert.equal(r.status, 0, `${args.join(" ")}: got exit ${r.status}\n${r.stderr}`);
@@ -64,41 +69,48 @@ function fixture(t, body = null) {
     writeFileSync(file, `# Fleet run ledger\n\n## Rows\n\n${list(rows)}\n## Dispatched\n\n${list(l.dispatched)}\n## Filed\n\n${list(l.filed)}\n## Ruled\n\n${list(l.ruled)}`
       + (l.drain === null ? "" : `\n## Drain\n\n- ${l.drain}\n`));
   };
-  return { file, cli, ok, read, bytes, refused, put };
+  // The `brief` a dispatch prints for `member`: the sidecar's sha256, and the
+  // brief file beside it.
+  const briefOf = (member) => ({
+    path: join(dir, "briefs", `${member}.md`),
+    sha256: JSON.parse(readFileSync(join(dir, "briefs", `${member}.json`), "utf8")).sha256,
+  });
+  return { dir, file, bare, cli, ok, read, bytes, refused, put, briefOf };
 }
 
 test("dispatch appends a live member row and records the dispatch in ## Dispatched", (t) => {
-  const { ok, read, bytes } = fixture(t);
-  assert.deepEqual(ok("dispatch", "412", "impl-412"), {
-    member: "impl-412", agent: "fleet-implementer-slow-high", ticket: "#412", line: "#412 impl-412", created: true, total: 1,
+  const { ok, read, bytes, briefOf } = fixture(t);
+  const out = ok("dispatch", "412", "impl-412");
+  assert.deepEqual(out, {
+    member: "impl-412", agent: "fleet-implementer-slow-high", ticket: "#412", line: "#412 impl-412", created: true, total: 1, brief: briefOf("impl-412"),
   });
   const l = read();
   assert.deepEqual(l.rows, ["#412 impl-412"]);
   assert.deepEqual(l.dispatched, ["impl-412"]);
-  assert.match(bytes(), /^## Dispatched\n\n- impl-412$/m);
+  assert.match(bytes(), new RegExp(`^## Dispatched\\n\\n- impl-412 brief=${out.brief.sha256.slice(0, 8)}$`, "m"));
 });
 
 // SKILL.md's phase 2 writes `row <N> "impl-<N> · class=routine"` at dispatch
 // today, so a row that already carries the live token is the ordinary case
 // and must be accepted without a second copy of it.
 test("dispatch keeps an existing row's text, appending the token only where it is missing", (t) => {
-  const { ok, read } = fixture(t);
+  const { ok, read, briefOf } = fixture(t);
   ok("row", "412", "impl-412 · class=routine");
   ok("row", "415", "claimed · class=correction");
   assert.deepEqual(ok("dispatch", "412", "impl-412"), {
-    member: "impl-412", agent: "fleet-implementer-slow-high", ticket: "#412", line: "#412 impl-412 · class=routine", created: false, total: 1,
+    member: "impl-412", agent: "fleet-implementer-slow-high", ticket: "#412", line: "#412 impl-412 · class=routine", created: false, total: 1, brief: briefOf("impl-412"),
   });
   assert.equal(ok("dispatch", "#415", "impl-415").line, "#415 claimed · class=correction · impl-415");
   assert.deepEqual(read().dispatched, ["impl-412", "impl-415"]);
 });
 
 test("a PR-bound member lands on the row carrying its PR, named by PR or by ticket", (t) => {
-  const { ok, read } = fixture(t);
+  const { ok, read, briefOf } = fixture(t);
   ok("dispatch", "324", "impl-324");
   ok("settle", "impl-324", "PR#346");
   // By the PR number: found through the implementer's own settled token.
   assert.deepEqual(ok("dispatch", "346", "fix-pr-346"), {
-    member: "fix-pr-346", agent: "fleet-fix-applier", ticket: "#324", line: "#324 impl-324=PR#346 · fix-pr-346", created: false, total: 2,
+    member: "fix-pr-346", agent: "fleet-fix-applier", ticket: "#324", line: "#324 impl-324=PR#346 · fix-pr-346", created: false, total: 2, brief: briefOf("fix-pr-346"),
   });
   // By the ticket number whose row carries that PR.
   assert.equal(ok("dispatch", "324", "finisher-pr-346").line, "#324 impl-324=PR#346 · fix-pr-346 · finisher-pr-346");
@@ -112,7 +124,7 @@ test("a PR-bound member lands on the row carrying its PR, named by PR or by tick
   assert.equal(ok("dispatch", "351", "fix-pr-351").ticket, "#351");
   // A PR no row carries gets a row of its own.
   assert.deepEqual(ok("dispatch", "777", "fix-pr-777"), {
-    member: "fix-pr-777", agent: "fleet-fix-applier", ticket: "#777", line: "#777 fix-pr-777", created: true, total: 6,
+    member: "fix-pr-777", agent: "fleet-fix-applier", ticket: "#777", line: "#777 fix-pr-777", created: true, total: 6, brief: briefOf("fix-pr-777"),
   });
   assert.equal(read().rows.length, 5);
 });
@@ -149,8 +161,8 @@ test("a member is dispatched once; its replacement takes a name of its own", (t)
 });
 
 test("merge-bot-<n> counts the ## Dispatched merge-bot entries, and a new ledger starts again at 1", (t) => {
-  const { ok, read, refused } = fixture(t);
-  assert.deepEqual(ok("dispatch", "merge-bot"), { member: "merge-bot-1", agent: "fleet-merge-bot", ticket: null, line: null, created: false, total: 1 });
+  const { ok, read, refused, briefOf } = fixture(t);
+  assert.deepEqual(ok("dispatch", "merge-bot"), { member: "merge-bot-1", agent: "fleet-merge-bot", ticket: null, line: null, created: false, total: 1, brief: briefOf("merge-bot-1") });
   ok("dispatch", "412", "impl-412");
   ok("settle", "merge-bot-1", "done");
   // A settled bot still counts: its replacement gets a new n.
@@ -870,11 +882,11 @@ test("drain needs a reason", (t) => {
 });
 
 test("a ledger written before ## Dispatched existed reads as none dispatched, none retired and not draining, and survives a dispatch", (t) => {
-  const { ok, read } = fixture(t, "# Fleet run ledger\n\n## Rows\n\n- #7 impl-7 · class=routine\n\n## Filed\n\n- #8 a filed subject\n\n## Ruled\n\n- #9 MERGE · green\n");
+  const { ok, read, briefOf } = fixture(t, "# Fleet run ledger\n\n## Rows\n\n- #7 impl-7 · class=routine\n\n## Filed\n\n- #8 a filed subject\n\n## Ruled\n\n- #9 MERGE · green\n");
   const legacy = { rows: ["#7 impl-7 · class=routine"], filed: ["#8 a filed subject"], ruled: ["#9 MERGE · green"] };
-  assert.deepEqual(read(), { ...legacy, dispatched: [], drain: null, retired: [] });
+  assert.deepEqual(read(), { ...legacy, dispatched: [], briefs: {}, drain: null, retired: [] });
   assert.equal(ok("dispatch", "merge-bot").member, "merge-bot-1");
-  assert.deepEqual(read(), { ...legacy, dispatched: ["merge-bot-1"], drain: null, retired: [] });
+  assert.deepEqual(read(), { ...legacy, dispatched: ["merge-bot-1"], briefs: { "merge-bot-1": briefOf("merge-bot-1").sha256.slice(0, 8) }, drain: null, retired: [] });
 });
 
 // #1799 fix-applier follow-up: a `## Dispatched` entry this grammar cannot
@@ -1164,4 +1176,129 @@ test("a finisher is refused while a fix-applier on the PR is live, even with an 
     "fix-pr-40-b=applied:fedcba9", `dispositions-ok=fix-pr-40-b:${ROUND2_RUN}`));
   assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
   assert.deepEqual(read().dispatched, ["finisher-pr-40"]);
+});
+
+// ── the rendered brief ───────────────────────────────────────────────────────
+//
+// `dispatch` records the brief a member is dispatched with, and refuses a
+// member whose brief was never rendered for its role. These calls go through
+// `bare`, which renders nothing on the member's behalf.
+
+// A gate refusal: exit 2, the reason, no payload, the ledger's bytes as they
+// were.
+function refusedBare(f, args, why) {
+  const before = f.bytes();
+  const r = f.bare(...args);
+  assert.equal(r.status, 2, `${args.join(" ")}: got exit ${r.status}\n${r.stderr}`);
+  if (typeof why === "string") assert.ok(r.stderr.includes(why), `${args.join(" ")}: stderr was ${r.stderr}`);
+  else assert.match(r.stderr, why, `${args.join(" ")}: stderr was ${r.stderr}`);
+  assert.equal(r.stdout, "", `${args.join(" ")}: a refusal must not also emit a payload`);
+  assert.equal(f.bytes(), before, `${args.join(" ")}: a refusal must not touch the ledger`);
+  return r;
+}
+
+test("dispatch refuses a member with no rendered brief, naming the render command for its family, and writes nothing", (t) => {
+  const f = fixture(t);
+  f.ok("dispatch", "324", "impl-324");
+  f.ok("settle", "impl-324", "PR#346");
+  for (const [args, member, role] of [
+    [["dispatch", "412", "impl-412"], "impl-412", "implementer"],
+    [["dispatch", "346", "fix-pr-346"], "fix-pr-346", "fix-applier"],
+    [["dispatch", "346", "finisher-pr-346"], "finisher-pr-346", "finisher"],
+    [["dispatch", "merge-bot"], "merge-bot-1", "merge-bot"],
+  ]) {
+    const sidecar = join(f.dir, "briefs", `${member}.json`);
+    const r = refusedBare(f, args, `no rendered brief for ${member} — run \`dispatch-prompt.mjs render ${role} --member ${member} …\``);
+    assert.ok(r.stderr.includes(`${sidecar} does not exist`), `${member}: the refusal names the sidecar it looked for: ${r.stderr}`);
+    assert.equal(existsSync(sidecar), false, `${member}: a refusal renders nothing`);
+  }
+  assert.deepEqual(f.read().dispatched, ["impl-324=PR#346"]);
+});
+
+test("dispatch refuses a brief rendered for another role, naming both, and writes nothing", (t) => {
+  const f = fixture(t);
+  for (const role of ["fix-applier", "review-runner", "recipe-deriver"]) {
+    renderBrief(f.dir, "impl-412", { role });
+    refusedBare(f, ["dispatch", "412", "impl-412"], `is a brief for role "${role}", but impl-412 is dispatched as implementer`);
+  }
+  renderBrief(f.dir, "merge-bot-1", { sidecar: { role: undefined } });
+  refusedBare(f, ["dispatch", "merge-bot"], "is a brief for role null, but merge-bot-1 is dispatched as merge-bot");
+  // The other half of the gate: each family's own role is the one it accepts.
+  renderBrief(f.dir, "impl-412", { role: "implementer" });
+  assert.equal(f.bare("dispatch", "412", "impl-412").status, 0);
+});
+
+test("dispatch refuses a sidecar with no 64-hex sha256, or one that is no JSON object, and writes nothing", (t) => {
+  const f = fixture(t);
+  for (const sha256 of [undefined, "abc", "A".repeat(64), "g".repeat(64), "a".repeat(65), 42]) {
+    renderBrief(f.dir, "impl-412", { sidecar: { sha256 } });
+    refusedBare(f, ["dispatch", "412", "impl-412"], /carries no sha256 of 64 lowercase hex/);
+  }
+  const sidecar = join(f.dir, "briefs", "impl-412.json");
+  writeFileSync(sidecar, "{ not json");
+  refusedBare(f, ["dispatch", "412", "impl-412"], /impl-412\.json is not JSON/);
+  for (const body of ["[]", "null", "\"implementer\""]) {
+    writeFileSync(sidecar, body);
+    refusedBare(f, ["dispatch", "412", "impl-412"], /impl-412\.json is not a JSON object/);
+  }
+});
+
+test("dispatch refuses a sidecar whose brief file is missing, or does not hash to the sidecar's sha256, and writes nothing", (t) => {
+  const f = fixture(t);
+  const rendered = renderBrief(f.dir, "impl-412");
+  rmSync(rendered.path);
+  const r = refusedBare(f, ["dispatch", "412", "impl-412"], "no rendered brief for impl-412 — run `dispatch-prompt.mjs render implementer --member impl-412 …`");
+  assert.ok(r.stderr.includes(`${rendered.path} does not exist`), `the refusal names the brief it looked for: ${r.stderr}`);
+
+  writeFileSync(rendered.path, "NOT THE BRIEF HASHED\n");
+  const edited = refusedBare(f, ["dispatch", "412", "impl-412"], `${rendered.path} hashes to `);
+  assert.ok(edited.stderr.includes(`carries ${rendered.sha256}`), `the refusal names the sidecar's hash: ${edited.stderr}`);
+  assert.ok(edited.stderr.includes("dispatch-prompt.mjs render implementer --member impl-412"), `the refusal names the render command: ${edited.stderr}`);
+
+  // The other half of the gate: the brief as rendered is accepted.
+  writeFileSync(rendered.path, "The brief for impl-412.\n");
+  assert.equal(f.bare("dispatch", "412", "impl-412").status, 0);
+});
+
+test("a rendered brief is recorded as brief=<first 8 hex> on the ## Dispatched entry, the path and sha256 are printed, and settle keeps the brief", (t) => {
+  const f = fixture(t);
+  const text = "Implement ticket #412.\n";
+  // Every field the renderer writes beside the two the gate reads is accepted as it is.
+  const rendered = renderBrief(f.dir, "impl-412", { text, sidecar: { kind: null, args: { ticket: "412" } } });
+  const out = f.bare("dispatch", "412", "impl-412");
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(out.json.brief, { path: rendered.path, sha256: rendered.sha256 });
+  assert.equal(readFileSync(out.json.brief.path, "utf8"), text, "the path printed is the brief the task call is handed");
+  const hash = rendered.sha256.slice(0, 8);
+  assert.match(f.bytes(), new RegExp(`\\n## Dispatched\\n\\n- impl-412 brief=${hash}\\n`));
+  assert.deepEqual(f.read().dispatched, ["impl-412"], "read's dispatched stays the member tokens every reader parses");
+  assert.deepEqual(f.read().briefs, { "impl-412": hash });
+
+  f.ok("settle", "impl-412", "PR#500");
+  assert.match(f.bytes(), new RegExp(`\\n- impl-412=PR#500 brief=${hash}\\n`), "settle rewrites the token and keeps its brief");
+  // A fix-applier's brief carries a kind; the gate reads only role and sha256.
+  const fix = renderBrief(f.dir, "fix-pr-500", { sidecar: { kind: "conflict", args: { pr: "500" } } });
+  assert.deepEqual(f.bare("dispatch", "500", "fix-pr-500").json.brief, { path: fix.path, sha256: fix.sha256 });
+  assert.deepEqual(f.read().dispatched, ["impl-412=PR#500", "fix-pr-500"]);
+  assert.deepEqual(f.read().briefs, { "impl-412": hash, "fix-pr-500": fix.sha256.slice(0, 8) });
+});
+
+test("a ## Dispatched entry with no brief= still settles, and one whose brief= is malformed is refused as unparseable", (t) => {
+  const legacy = fixture(t, "# Fleet run ledger\n\n## Rows\n\n- #7 impl-7\n\n## Dispatched\n\n- impl-7\n\n## Filed\n\n## Ruled\n");
+  legacy.ok("settle", "impl-7", "killed");
+  assert.match(legacy.bytes(), /\n## Dispatched\n\n- impl-7=killed\n/);
+  assert.deepEqual(legacy.read().briefs, {});
+
+  for (const entry of ["impl-7 brief=1234567", "impl-7 brief=ABCDEF12", "impl-7 brief=12345678 brief=12345678", "impl-7  brief=12345678"]) {
+    const f = fixture(t, `# Fleet run ledger\n\n## Rows\n\n- #7 impl-7\n\n## Dispatched\n\n- ${entry}\n\n## Filed\n\n## Ruled\n`);
+    f.refused(["settle", "impl-7", "killed"], new RegExp(`## Dispatched has an entry '${entry}' this grammar cannot parse`));
+  }
+});
+
+test("a dispatch refused for a cause of its own names that cause, not the missing brief", (t) => {
+  const f = fixture(t);
+  f.ok("drain", "budget");
+  refusedBare(f, ["dispatch", "5", "impl-5"], /the run is draining \(budget\)/);
+  f.ok("dispatch", "6", "fix-pr-6");
+  refusedBare(f, ["dispatch", "6", "fix-pr-6"], /fix-pr-6 was already dispatched this session/);
 });

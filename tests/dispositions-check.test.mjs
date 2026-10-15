@@ -13,12 +13,13 @@ import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, symlinkSync, existsSync, realpathSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
 import {
   touchedLines, checkDispositions, withVerdict, repoPath, formatViolation, failedBefore, verdictProblem, recordTitle, FILING_ROWS,
 } from "../plugin/scripts/dispositions-check.mjs";
+import { rendering } from "./support/rendered-brief.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/dispositions-check.mjs", import.meta.url));
 const LEDGER = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
@@ -89,7 +90,7 @@ function fixture(t) {
   const scratch = join(dir, "scratch");
   mkdirSync(scratch);
   const ledger = join(dir, "ledger.md");
-  const ledgerCli = (...args) => spawnSync(process.execPath, [LEDGER, "--file", ledger, ...args], { encoding: "utf8", env: cleanEnv() });
+  const ledgerCli = rendering(dir, (...args) => spawnSync(process.execPath, [LEDGER, "--file", ledger, ...args], { encoding: "utf8", env: cleanEnv() }));
   const okLedger = (...args) => {
     const r = ledgerCli(...args);
     assert.equal(r.status, 0, `ledger ${args.join(" ")}: exit ${r.status}\n${r.stderr}`);
@@ -539,10 +540,10 @@ test("an explicit --ledger naming no file is no ledger either: the default ledge
 // run's `ledger.mjs dispatch` leaves it, and returns its path.
 function seedOwnLedger(f) {
   const ledger = join(f.repo, ".fleet", "ledger.md");
-  const run = (...args) => {
+  const run = rendering(dirname(ledger), (...args) => {
     const r = spawnSync(process.execPath, [LEDGER, "--file", ledger, ...args], { encoding: "utf8", env: cleanEnv() });
     assert.equal(r.status, 0, r.stderr);
-  };
+  });
   run("row", "10", "impl-10=PR#40 → PR#40");
   run("review", "40", "review=member:review-pr-40", `reviewed=${f.head}:2/1/1:${f.run}`);
   run("dispatch", "40", "fix-pr-40");

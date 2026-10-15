@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, readFileSync, chmodSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rendering } from "./support/rendered-brief.mjs";
 
 import {
   declaredPairFor,
@@ -492,7 +493,8 @@ test("--session: no <member>.jsonl under the session root refuses by name", () =
 // on a failure. fleet-tick.mjs's deriveRun is the reader of both.
 // ---------------------------------------------------------------------------
 
-const ledgerCli = (file, ...args) => execFileSync(process.execPath, [LEDGER_SCRIPT, "--file", file, ...args], { encoding: "utf8" });
+const ledgerCli = (file, ...args) =>
+  rendering(dirname(file), (...a) => execFileSync(process.execPath, [LEDGER_SCRIPT, "--file", file, ...a], { encoding: "utf8" }))(...args);
 
 // One implementer's world: its definitions under <d>/agents/, its ticket row
 // on a --file ledger, its transcript at <d>/session/<member>.jsonl — the flat

@@ -12,7 +12,8 @@
 // `dispatch`, `settle`, `review` and `drain` exist so a reader can derive
 // every liveness count from this file alone, rather than from row text a
 // controller typed by hand: `dispatch` writes a member's live token onto its
-// row and appends it to `## Dispatched`, `settle` rewrites that token to
+// row and appends it to `## Dispatched` with `brief=<hash>`, the brief it
+// refuses to dispatch without, `settle` rewrites that token to
 // `<member>=<outcome>` in both places (an implementer's settle to `PR#M` also
 // folds the PR's own `#M` row into its ticket's), `review` appends a PR's
 // `review=`/`reviewed=` tokens to the PR's row, and `drain` writes the
@@ -42,12 +43,13 @@
 // the rule).
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync, linkSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, resolve, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -465,7 +467,7 @@ function sectionOf(text, name) {
 }
 
 function load() {
-  if (!existsSync(file)) return { rows: [], filed: [], ruled: [], dispatched: [], drain: null, retired: [] };
+  if (!existsSync(file)) return { rows: [], filed: [], ruled: [], dispatched: [], briefs: {}, drain: null, retired: [] };
   let text;
   try {
     text = readFileSync(file, "utf8");
@@ -491,8 +493,20 @@ function load() {
   }
   return {
     rows: section(ROWS), filed: section(FILED), ruled: section(RULED),
-    dispatched: section(DISPATCHED), drain: drainEntries[0] ?? null,
+    ...dispatchedOf(section(DISPATCHED)), drain: drainEntries[0] ?? null,
     retired: section(RETIRED),
+  };
+}
+
+// `## Dispatched` held as its tokens, which is what every reader of `read`
+// parses, and `briefs`, each member's `brief=` hash by name: one token per
+// member name for the session, so a settle that rewrites the token keeps the
+// name its brief is filed under. save() joins them back.
+function dispatchedOf(entries) {
+  const parsed = entries.map(parseDispatchedEntry);
+  return {
+    dispatched: parsed.map((p) => p.token),
+    briefs: Object.fromEntries(parsed.filter((p) => p.brief !== null).map((p) => [parseToken(p.token).name, p.brief])),
   };
 }
 
@@ -506,7 +520,7 @@ function save(d) {
   const list = (entries) => entries.map((r) => `- ${escapeText(r)}`).join("\n");
   const out =
     `# Fleet run ledger\n\n${ROWS}\n\n` + list(d.rows) +
-    `\n\n${DISPATCHED}\n\n` + list(d.dispatched) +
+    `\n\n${DISPATCHED}\n\n` + list(d.dispatched.map((t) => dispatchedEntry(t, d.briefs[parseToken(t)?.name] ?? null))) +
     `\n\n${FILED}\n\n` + list(d.filed) +
     `\n\n${RULED}\n\n` + list(d.ruled) +
     (d.drain === null ? "" : `\n\n${DRAIN}\n\n` + list([d.drain])) +
@@ -1448,7 +1462,8 @@ function runCheck() {
 // atomically when that name is already taken rather than overwriting an older
 // archive. The two receipts beside the ledger, `phase0.json` and
 // `closeout.json`, belong to the same run, so each is archived as
-// `<name>.<stamp>.json` under the ledger archive's own stamp — a warning-only
+// `<name>.<stamp>.json` under the ledger archive's own stamp, and the
+// `briefs` directory beside them as `briefs.<stamp>` — a warning-only
 // move after the ledger move, refused up front only when a name is taken.
 //
 // What follows depends on the verdict below. After a `dead` or `none` one
@@ -1556,7 +1571,7 @@ function runRotate() {
   }
   // Read before anything moves: a ledger whose live tokens cannot be read is
   // refused with nothing moved, never archived with those tokens dropped.
-  let carry = { rows: [], dispatched: [], retired: [], skipped: [] };
+  let carry = { rows: [], dispatched: [], briefs: {}, retired: [], skipped: [] };
   if (prior === "ancestor" && exists) {
     let text;
     try {
@@ -1569,10 +1584,12 @@ function runRotate() {
   const carrying = carry.rows.length > 0 || carry.dispatched.length > 0 || carry.retired.length > 0;
   // The receipts beside the ledger belong to the run being rotated away, so
   // each takes the archive's own stamp: `phase0.<stamp>.json` and
-  // `closeout.<stamp>.json` next to `ledger.<stamp>.md`. A name already taken
-  // refuses before anything moves, as the ledger's own does.
+  // `closeout.<stamp>.json` next to `ledger.<stamp>.md`, and the briefs
+  // directory `briefs.<stamp>`, so no brief of that run is found under a
+  // name the next run dispatches. A name already taken refuses before
+  // anything moves, as the ledger's own does.
   const stamp = archiveStamp();
-  const receipts = [[RECEIPT, receiptArchiveName], [CLOSEOUT_RECEIPT, closeoutArchiveName]]
+  const receipts = [[RECEIPT, receiptArchiveName], [CLOSEOUT_RECEIPT, closeoutArchiveName], [BRIEFS, briefsArchiveName]]
     .map(([name, archiveName]) => ({ from: join(dirname(file), name), to: join(dirname(file), archiveName(stamp)) }))
     .filter(({ from }) => existsSync(from));
   for (const { to } of receipts) {
@@ -1615,7 +1632,7 @@ function runRotate() {
   // Nothing to carry writes nothing, so the next write starts the skeleton
   // exactly as after any other verdict.
   if (carrying) {
-    save({ rows: carry.rows, dispatched: carry.dispatched, filed: [], ruled: [], drain: null, retired: carry.retired });
+    save({ rows: carry.rows, dispatched: carry.dispatched, briefs: carry.briefs, filed: [], ruled: [], drain: null, retired: carry.retired });
   }
   if (archive !== null) console.error(`    rotated ${file} -> ${archive}`);
   for (const { line, why } of carry.skipped) {
@@ -1676,7 +1693,10 @@ function carryOf(text) {
       return false;
     }
   });
-  const allDispatched = sectionOf(text, DISPATCHED);
+  // An entry's `brief=` travels with it: save() writes a brief only beside
+  // the token it writes, so a carried member's record still names the brief
+  // it was dispatched with and a dropped member's does not.
+  const { dispatched: allDispatched, briefs: allBriefs } = dispatchedOf(sectionOf(text, DISPATCHED));
   const dispatched = allDispatched.filter((e) => {
     const t = parseToken(e);
     if (t !== null && t.error === null) return true;
@@ -1691,7 +1711,7 @@ function carryOf(text) {
   const live = liveOnLedger(rows, dispatched);
   const carried = { rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched };
   const retired = retiredOnLedger([...rows, ...skippedRows], allDispatched, archivedRetired, carried);
-  return { ...carried, retired, skipped };
+  return { ...carried, briefs: allBriefs, retired, skipped };
 }
 
 // ── dispatch / settle ────────────────────────────────────────────────────────
@@ -1931,6 +1951,10 @@ function runDispatch() {
     die(`${member.name}: ${e.message} — not dispatching ${member.name}`);
   }
 
+  // Last, so every refusal above still names its own cause first, and before
+  // anything is written.
+  const brief = renderedBrief(member.name, memberRole(member.family));
+
   let line = null;
   const created = member.bound !== null && i === -1;
   if (created) {
@@ -1944,11 +1968,58 @@ function runDispatch() {
     data.rows[i] = line;
   }
   data.dispatched.push(member.name);
+  data.briefs[member.name] = brief.sha256.slice(0, 8);
   save(data);
   console.error(`    dispatched ${member.name}`);
   console.log(JSON.stringify({
-    member: member.name, agent, ticket: line === null ? null : rowKey(line), line, created, total: data.dispatched.length,
+    member: member.name, agent, ticket: line === null ? null : rowKey(line), line, created, total: data.dispatched.length, brief,
   }));
+}
+
+// The brief `name` is dispatched with, as dispatch-prompt.mjs `render
+// --member <name>` left it in the briefs directory beside the ledger: the
+// sidecar `<name>.json` must exist, name `role` — the template of the
+// member's family — and carry the brief's sha256, and the brief file beside
+// it, `<name>.md`, must exist and hash to it. `{path, sha256}` comes back,
+// `path` that file, so the controller hands the `task` call its content from
+// the path printed. Refused, nothing is written.
+function renderedBrief(name, role) {
+  const dir = resolve(dirname(file), BRIEFS);
+  const sidecar = join(dir, `${name}.json`);
+  const render = `run \`dispatch-prompt.mjs render ${role} --member ${name} …\` with the ${role} template's arguments, then dispatch again`;
+  let text;
+  try {
+    text = readFileSync(sidecar, "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") die(`no rendered brief for ${name} — ${render} (${sidecar} does not exist)`);
+    die(`cannot read ${sidecar}: ${e.message} — not dispatching ${name}`);
+  }
+  let s;
+  try {
+    s = JSON.parse(text);
+  } catch (e) {
+    die(`${sidecar} is not JSON (${e.message}) — ${render}`);
+  }
+  if (s === null || typeof s !== "object" || Array.isArray(s)) die(`${sidecar} is not a JSON object — ${render}`);
+  if (s.role !== role) {
+    die(`${sidecar} is a brief for role ${JSON.stringify(s.role ?? null)}, but ${name} is dispatched as ${role} — ${render}`);
+  }
+  if (typeof s.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(s.sha256)) {
+    die(`${sidecar} carries no sha256 of 64 lowercase hex (${JSON.stringify(s.sha256 ?? null)}) — ${render}`);
+  }
+  const path = join(dir, `${name}.md`);
+  let brief;
+  try {
+    brief = readFileSync(path);
+  } catch (e) {
+    if (e.code === "ENOENT") die(`no rendered brief for ${name} — ${render} (${path} does not exist)`);
+    die(`cannot read ${path}: ${e.message} — not dispatching ${name}`);
+  }
+  const actual = createHash("sha256").update(brief).digest("hex");
+  if (actual !== s.sha256) {
+    die(`${path} hashes to ${actual}, but ${sidecar} carries ${s.sha256} — ${render}`);
+  }
+  return { path, sha256: s.sha256 };
 }
 
 function runSettle() {

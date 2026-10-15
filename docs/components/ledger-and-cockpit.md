@@ -18,7 +18,10 @@ finished work. The ledger exists so it never has to.
    onto its row and appends it to `## Dispatched`; `settle` rewrites it
    to `<member>=<outcome>` in both places. `dispatch` also prints the
    agent definition the `task` call names (`agent`), so it survives a
-   compaction that drops the prose naming it (#2208). The ledger's
+   compaction that drops the prose naming it (#2208). It refuses a member
+   whose brief `dispatch-prompt.mjs render --member <name>` never rendered
+   for its role, and records the one it was rendered with as
+   `brief=<hash>` on the `## Dispatched` entry. The ledger's
    grammar — its section headers, a row's Exclusion premises and PR, its
    member tokens — and that definition mapping live in
    [`ledger-grammar.mjs`](../../plugin/scripts/ledger-grammar.mjs),

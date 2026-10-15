@@ -72,7 +72,7 @@ fact about a duty has one owner file.
 
 **D1. The renderer.** `plugin/scripts/dispatch-prompt.mjs render <role>
 [--<arg> <value>…] [--json]`. Roles: `implementer`, `fix-applier`
-(`--kind review|conflict|dispositions-retry`), `finisher` (`--kind
+(`--kind review|conflict|dispositions-retry|red-check`), `finisher` (`--kind
 fresh|repair`), `merge-bot`, `review-runner`, `recipe-deriver`. Every
 placeholder a template carries is a named required argument; a missing one
 is exit 2 naming it, and nothing prints. After substitution the renderer
@@ -90,8 +90,8 @@ same reason `review-core.mjs` refuses it. Output is the brief on stdout;
   the halt-cause block, the claim discipline, the `edit`/`read` absolute-path
   rule, the kill rule, the stash prohibition. New definition:
   `plugin/agents/fleet-fix-applier.agent.md`, used for every fix-applier
-  kind (review, conflict, dispositions retry). `ledger.mjs dispatch` prints
-  it as `agent` for all three, retiring the `null` and the
+  kind (review, conflict, dispositions retry, red-check fix). `ledger.mjs dispatch` prints
+  it as `agent` for all four, retiring the `null` and the
   `fleet-implementer-slow-high` special case for conflict holds.
 - The brief template (`plugin/skills/run-team/briefs/<role>.md`) carries
   only the lines that vary or are per-dispatch: the identity line with
@@ -109,8 +109,10 @@ the Reviewers and finisher sections is deleted in the same change.
 **D3. The dispatch records the brief.** The renderer writes the brief to
 `<fleet-dir>/briefs/<member>.md` and its sidecar `<member>.json` (D1's
 `--json` payload) when given `--member <name>`. `ledger.mjs dispatch <key>
-<member>` reads the sidecar, refuses (exit 2, nothing written) when it is
-missing or its `role` does not match the member's family, and appends
+<member>` reads the sidecar and the brief file beside it, refuses (exit 2,
+nothing written) when the sidecar is missing, its `role` does not match the
+member's family, or the brief file is missing or does not hash to the
+sidecar's `sha256`, and appends
 `brief=<sha256 first 8>` to the `## Dispatched` entry. The controller passes
 the file's content as the `task` prompt. The gate covers the four ledger
 families (`impl`, `fix-pr`, `finisher-pr`, `merge-bot`), that is the
