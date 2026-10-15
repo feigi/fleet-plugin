@@ -53,9 +53,19 @@
 //                 the brief.
 //   4  Q2 decided     `decided`, or a cause whose comment is posted and whose
 //                 label replaces `ready-for-agent`.
-//   5  Q3 collision   `clear`, `behind-pr:#M`, `behind-issue:#M`. The script
-//                 prints the brief's paths and the open PR numbers and runs no
-//                 scan of its own. An exclusion is a ledger row.
+//   5  Q3 collision   the scan first: the brief's paths, and every path a
+//                 `paths <p>…` answer added, against each open PR's `gh pr diff
+//                 <M> --name-only` and each live worktree branch's `git diff
+//                 --name-only -z origin/main...<branch>` — `main` excepted, and
+//                 a branch whose upstream is gone, its PR already merged or
+//                 closed. A path matches a changed file of that path, one
+//                 under it as a directory, or, with no `/`, one of that name.
+//                 One line per PR or branch sharing a path, `no overlap` when
+//                 none, and `could not look: <which>` for one that could not be
+//                 read; the `#N` refs of the brief's Out of scope section are
+//                 printed as the behind-issue candidates. Then `clear`,
+//                 `behind-pr:#M`, `behind-issue:#M`, or `paths <p>…`, which
+//                 scans again and asks again. An exclusion is a ledger row.
 //   6  claim      `claim-ticket.sh <N> impl-<N> implementer --apply`.
 //   7  route      `ticket-router.mjs route …`; a router that refuses releases
 //                 the claim, and a release that fails is exit 2 with the claim
@@ -96,7 +106,7 @@ const SCRIPTS = dirname(fileURLToPath(import.meta.url));
 const die = makeDie(NAME);
 const MAX_BUFFER = 64 * 1024 * 1024;
 const NETWORK_TIMEOUT_MS = 120_000;
-const PR_LIMIT = 1000;
+const PR_LIMIT = 200;
 // A command's stdout and each of its arguments are kept to this many characters
 // in the record, the tail kept: the end of a child's output says why it stopped.
 const RECORD_MAX = 4000;
@@ -193,6 +203,17 @@ export function outOfScope(text) {
   return all.slice(at, end).join("\n").trim();
 }
 
+/** The ticket's `Out of scope` section: the brief's, else the body's; null when neither holds one. */
+function scopeOf(issue) {
+  return outOfScope(briefText(issue).trim()) ?? outOfScope(String(issue.body ?? ""));
+}
+
+/** The `#N` refs in `section`, each once, in the order they first appear; `owner/repo#N` is another repository's and none. */
+export function issueRefs(section) {
+  if (section === null) return [];
+  return [...new Set([...section.matchAll(/(?<![\w/.-])#(\d+)\b/g)].map((m) => `#${m[1]}`))];
+}
+
 // The placeholders the implementer's brief template declares. dispatch-prompt.mjs
 // refuses a value that spells one, and a ticket's text is a value: one that
 // names `<N>` would stop every render, with the claim standing.
@@ -237,6 +258,20 @@ function spawn(cmd, args, { cwd, env, timeoutMs } = {}) {
 
 const GH_ENV = { GH_REPO: "" };
 const withText = (head, r) => (r.text ? `${head}\n${r.text}` : head);
+// How a child failed, with the first line of what it said.
+const failure = (r) => `${r.how}${r.stderr === "" ? "" : `: ${r.stderr.split("\n")[0]}`}`;
+
+/** The branches `git worktree list --porcelain -z` names; a detached worktree names none. */
+function worktreeBranches(out) {
+  const head = "branch refs/heads/";
+  return out.split("\0").filter((f) => f.startsWith(head)).map((f) => f.slice(head.length));
+}
+
+/** The local branches whose upstream is gone, from `git for-each-ref --format=%(refname:short)%09%(upstream:track)`. */
+function goneBranches(out) {
+  const mark = "\t[gone]";
+  return new Set(out.split("\n").filter((l) => l.endsWith(mark)).map((l) => l.slice(0, -mark.length)));
+}
 
 // ── the state ────────────────────────────────────────────────────────────────
 
@@ -253,7 +288,8 @@ function fresh(ticket, session) {
     answers: [],
     staleness: [],
     close: null,
-    openPrs: null,
+    addedPaths: [],
+    scans: [],
     session,
     commented: null,
     route: null,
@@ -281,6 +317,14 @@ function readPull(path) {
     && Number.isInteger(s.ticket) && typeof s.stage === "string" && typeof s.status === "string"
     && Array.isArray(s.commands) && Array.isArray(s.questions) && Array.isArray(s.answers);
   if (!ok) throw new Refusal(`${path} is not a Pull record — move it aside and run again`);
+  // A record written before the collision scan holds neither field.
+  s.scans ??= [];
+  s.addedPaths ??= [];
+  if (!Array.isArray(s.scans) || !Array.isArray(s.addedPaths)) throw new Refusal(`${path} is not a Pull record — move it aside and run again`);
+  // A collision question is printed from the latest scan, so one standing with no scan behind it cannot be.
+  if (s.pending?.qid === "collision" && s.scans.length === 0) {
+    throw new Refusal(`${path} holds a collision question that no scan of this script asked — move it aside and run again`);
+  }
   return s;
 }
 
@@ -312,7 +356,12 @@ const DECIDED_TOKENS = [
   "ready-for-human-fork <the options, verbatim from the brief>",
   "ready-for-human-hands <external access|manual testing|judgment> <one line>",
 ];
-const COLLISION_TOKENS = ["clear", "behind-pr:#M", "behind-issue:#M"];
+const COLLISION_TOKENS = [
+  "clear",
+  "behind-pr:#M      an open PR, or a branch with no PR yet by its name",
+  "behind-issue:#M   an open issue the brief's Out of scope sequences this one after",
+  "paths <p>…        adds paths to the scan, which runs again",
+];
 
 const TOKEN_LINES = { staleness: STALENESS_TOKENS, close: CLOSE_TOKENS, decided: DECIDED_TOKENS, collision: COLLISION_TOKENS };
 
@@ -346,6 +395,7 @@ export function parseAnswer(qid, token, rest) {
   if (qid === "collision") {
     const m = /^behind-(pr|issue):#?(\S+)$/.exec(token);
     if (token === "clear") spec = {};
+    else if (token === "paths") spec = { text: true };
     else if (m !== null && !m[2].startsWith("-") && (m[1] === "pr" || isDigits(m[2]))) {
       spec = {};
       said = `behind-${m[1]}:#${m[2]}`;
@@ -454,7 +504,7 @@ class Pull {
   brief() {
     const issue = this.issue();
     const text = briefText(issue).trim();
-    const found = outOfScope(text) ?? outOfScope(String(issue.body ?? ""));
+    const found = scopeOf(issue);
     const paths = briefPaths(text);
     return [
       `TICKET #${this.st.ticket}: ${issue.title}`,
@@ -496,12 +546,17 @@ class Pull {
     ];
   }
 
+  // The latest scan, line by line, and the behind-issue candidates.
   collisionContext() {
-    const paths = briefPaths(briefText(this.issue()).trim());
-    const prs = this.st.openPrs;
+    const { paths, overlaps, unread } = this.st.scans.at(-1);
+    const refs = issueRefs(scopeOf(this.issue()));
+    const who = (o) => (o.branch === undefined ? `PR #${o.pr}` : `branch ${o.branch}${o.pr === null ? "" : ` (PR #${o.pr})`}`);
     return [
-      `paths the brief names: ${paths.length === 0 ? "(none)" : paths.join(" ")}`,
-      `open PRs: ${prs.length === 0 ? "(none)" : prs.map((n) => `#${n}`).join(" ")}`,
+      `paths scanned: ${paths.length === 0 ? "(none)" : paths.join(" ")}`,
+      ...overlaps.map((o) => `${who(o)}: ${o.paths.join(" ")}`),
+      ...unread.map((u) => `could not look: ${u}`),
+      ...(overlaps.length === 0 ? ["no overlap"] : []),
+      `behind-issue candidates (Out of scope): ${refs.length === 0 ? "(none)" : refs.join(" ")}`,
     ];
   }
 
@@ -568,22 +623,57 @@ class Pull {
     return this.ask("decided", []);
   }
 
+  // The scan runs every time this stage does: after Q2, and after each `paths` answer.
   stage_collision() {
     const { st } = this;
-    if (st.openPrs === null) {
-      const r = this.gh("collision", ["pr", "list", "--state", "open", "--json", "number", "--limit", String(PR_LIMIT)]);
-      if (r.status !== 0) return this.stop(withText(`gh pr list failed (${r.how})`, r));
-      let prs;
-      try {
-        prs = JSON.parse(r.stdout);
-      } catch (e) {
-        return this.stop(`could not parse gh pr list: ${e.message}`);
-      }
-      if (!Array.isArray(prs) || !prs.every((p) => Number.isInteger(p?.number))) return this.stop("gh pr list did not print a JSON array of numbered PRs");
-      if (prs.length >= PR_LIMIT) return this.stop(`gh pr list came back at its cap of ${PR_LIMIT} — it may hold more PRs than it showed`);
-      st.openPrs = prs.map((p) => p.number).sort((a, b) => a - b);
-      this.save();
+    const r = this.gh("collision", ["pr", "list", "--state", "open", "--limit", String(PR_LIMIT), "--json", "number,headRefName"]);
+    if (r.status !== 0) return this.stop(withText(`gh pr list failed (${r.how})`, r));
+    let prs;
+    try {
+      prs = JSON.parse(r.stdout);
+    } catch (e) {
+      return this.stop(`could not parse gh pr list: ${e.message}`);
     }
+    if (!Array.isArray(prs) || !prs.every((p) => Number.isInteger(p?.number) && typeof p.headRefName === "string")) {
+      return this.stop("gh pr list did not print a JSON array of PRs with their number and head branch");
+    }
+    if (prs.length >= PR_LIMIT) return this.stop(`gh pr list came back at its cap of ${PR_LIMIT} — it may hold more PRs than it showed`);
+    const wt = this.exec("collision", "git", "git", [], ["worktree", "list", "--porcelain", "-z"]);
+    if (wt.status !== 0) return this.stop(withText(`git worktree list failed (${wt.how})`, wt));
+    const refs = this.exec("collision", "git", "git", [], ["for-each-ref", "--format=%(refname:short)%09%(upstream:track)", "refs/heads"]);
+    if (refs.status !== 0) return this.stop(withText(`git for-each-ref failed (${refs.how})`, refs));
+    const gone = goneBranches(refs.stdout);
+
+    const paths = [...new Set([...briefPaths(briefText(this.issue()).trim()), ...st.addedPaths])];
+    // A path names a changed file, a directory above it (with or without its trailing `/`), or, with no `/`, a file by its name.
+    const hits = (p, f) => {
+      const q = p.replace(/\/+$/, "");
+      return f === q || f.startsWith(`${q}/`) || (!q.includes("/") && f.split("/").pop() === q);
+    };
+    const shared = (stdout, sep) => {
+      const files = stdout.split(sep).filter((f) => f !== "");
+      return paths.filter((p) => files.some((f) => hits(p, f)));
+    };
+    const overlaps = [];
+    const unread = [];
+    for (const pr of prs.map((p) => p.number).sort((a, b) => a - b)) {
+      const d = this.gh("collision", ["pr", "diff", String(pr), "--name-only"]);
+      const common = shared(d.stdout, "\n");
+      if (d.status !== 0) unread.push(`gh pr diff ${pr} (${failure(d)})`);
+      // Fail closed, as pr-overlap.mjs does: a PR with no changed file is a query that did not work, never "no overlap".
+      else if (d.stdout === "") unread.push(`gh pr diff ${pr} (printed no file)`);
+      else if (common.length > 0) overlaps.push({ pr, paths: common });
+    }
+    const heads = new Map(prs.map((p) => [p.headRefName, p.number]));
+    for (const branch of worktreeBranches(wt.stdout).filter((b) => b !== "main" && !gone.has(b)).sort()) {
+      const range = `origin/main...${branch}`;
+      // NUL-separated: git quotes a non-ASCII path in the newline form, and a quoted name equals no path the brief spells.
+      const d = this.exec("collision", "git", "git", [], ["diff", "--name-only", "-z", range, "--"]);
+      const common = shared(d.stdout, "\0");
+      if (d.status !== 0) unread.push(`git diff --name-only ${range} (${failure(d)})`);
+      else if (common.length > 0) overlaps.push({ branch, pr: heads.get(branch) ?? null, paths: common });
+    }
+    st.scans.push({ at: now(), paths, overlaps, unread });
     return this.ask("collision", this.collisionContext());
   }
 
@@ -774,10 +864,15 @@ class Pull {
     return this.leave(`relabelled ${label}: ${token}`);
   }
 
-  answer_collision(token) {
+  answer_collision(token, text) {
     const { st } = this;
     if (token === "clear") {
       st.stage = "claim";
+      return null;
+    }
+    // The stage stays at collision, so the scan runs again and the question is asked again.
+    if (token === "paths") {
+      for (const p of text.split(/\s+/)) if (!st.addedPaths.includes(p)) st.addedPaths.push(p);
       return null;
     }
     const r = this.script("exclude", "ledger.mjs", ["row", String(st.ticket), `excluded · ${token}`]);
