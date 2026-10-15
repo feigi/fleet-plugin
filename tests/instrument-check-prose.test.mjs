@@ -29,6 +29,8 @@ import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+// The phase-0 step paragraphs live in the reference file, one heading per step.
+const PHASE0 = Pin.file(join(REPO, "skills", "run-team", "references", "phase-0.md"));
 
 // Bounded at both ends, and the slices are small on purpose: the file names
 // `instruments.sh` in three separate places, so a slice running to EOF is
@@ -55,7 +57,7 @@ const RULE = () =>
 // `paragraph()` is this directory's single definition of that bound (#823,
 // #1372): a hand-rolled end anchor on neighbouring text is the defect it
 // removes, not a style choice.
-const PIN_STEP = () => RUN_TEAM.paragraph("**Pin the instruments,", "run-team phase 0 pin", "**Record the main-checkout baseline in the").text;
+const PIN_STEP = () => PHASE0.paragraph("**Pin the instruments,", "phase-0 pin", "## Record the main-checkout baseline").text;
 
 // The gate list is one bullet, and this slice is bounded to it. Read out of the
 // whole RULE slice, `phrase("reap")` is satisfied by the unrelated `reap.sh`
@@ -131,7 +133,7 @@ test("phase 0 step 0 pins the set, and only after the fast-forward", () => {
   // reword the fast-forward away and `indexOf` returns -1, which is less than
   // anything. `between` throws by name on either anchor missing and on the
   // reversed order, which is every case the comparison was meant to cover.
-  RUN_TEAM.between("git merge --ff-only origin/main", "**Pin the instruments,", "run-team phase 0 ordering").text;
+  PHASE0.between("git merge --ff-only origin/main", "**Pin the instruments,", "phase-0 ordering").text;
 });
 
 /**

@@ -445,7 +445,19 @@ const FILES = [
     // cites by its quoted text, so the line cannot be reworded away unseen.
     path: ["skills", "run-team", "SKILL.md"],
     stale: [/board\.mjs:153/],
-    live: ["encodeProjectDir", "`node ~/.fleet/bin/fleet-run board.mjs serve --open &`"],
+    live: [],
+  },
+  // The cockpit launch line and the scrape both moved out of SKILL.md into the
+  // reference files, with the paragraphs that carry them.
+  {
+    path: ["skills", "run-team", "references", "phase-0.md"],
+    stale: [/board\.mjs:153/],
+    live: ["`node ~/.fleet/bin/fleet-run board.mjs serve --open &`"],
+  },
+  {
+    path: ["skills", "run-team", "references", "close-out.md"],
+    stale: [],
+    live: ["encodeProjectDir"],
   },
   // #1725 fixed this ADR's `ci.yml:269` citation by hand, replacing it with
   // the `# Blocking, every PR` comment anchor. Ban the general `\d+` form,

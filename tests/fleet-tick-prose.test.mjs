@@ -220,16 +220,13 @@ test("the review-backlog definition states what the script actually counts", () 
   assert.match(def, /BY\s+HAND/);
 });
 
-// The step-0 fold-in bullet only, ending where the numbered candidate scan
-// begins. Widened to the whole of phase 0 it would be satisfied by the
-// candidate-scan and in-flight bullets, which talk about queueing and review
-// without saying inherited PRs are in scope at all.
+// The step-0 fold-in section only, in the phase-0 reference file. Widened to
+// the whole of phase 0 it would be satisfied by the candidate-scan and
+// in-flight bullets, which talk about queueing and review without saying
+// inherited PRs are in scope at all.
+const PHASE0 = Pin.file(join(REPO, "skills", "run-team", "references", "phase-0.md"));
 const foldInBlock = () =>
-  RUN_TEAM.between(
-    "**Fold in every PR a prior run left open, before shortlisting.**",
-    "1. **Build the Shortlist**",
-    "run-team step-0 fold-in block",
-  ).text;
+  PHASE0.section("## Fold in every PR a prior run left open", "phase-0 fold-in block").text;
 
 test("the fold-in block says inherited PRs are queued before shortlisting, as ordinary review work", () => {
   // #1237's own review found this bullet unpinned while its sibling addition in
@@ -341,7 +338,9 @@ test("the --stop paragraph keeps the drain out of it and points at End of run (#
 test("End of run follows the drain bullet and ends with --stop (#2968)", () => {
   const b = RUN_TEAM.bullet("- **The run ends, or the maintainer says drain**", "- **Monitor: CI run completes**", "run-team drain bullet").text;
   const steps = [...b.matchAll(/^\s+(\d+)\. /gm)].map((m) => Number(m[1]));
-  assert.deepEqual(steps, [1, 2, 3, 4, 5, 6], "End of run is one ordered list of six steps");
-  assert.match(b, Pin.phrase("3. Act on the review, fix-applier and merge rows until no PR is open. Once the run is draining with no open PR and no live implementer, the tick's last line is `ACTION: run over → fleet-heartbeat.mjs --stop \"<reason>\"`."));
-  assert.match(b, Pin.phrase("6. `~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop \"<reason>\"` — last, because every reader takes a recorded stop as the end of the run."));
+  assert.deepEqual(steps, [1, 2, 3], "End of run is one ordered list: begin, the loop, finish");
+  assert.match(b, Pin.phrase("1. `~/.fleet/bin/fleet-run closeout.mjs begin --reason \"<reason>\"` — drains (`ledger.mjs drain`), then releases every claim that never became a PR and settles each `impl-<N>=released`"));
+  assert.match(b, Pin.phrase("2. Act on the review, fix-applier and merge rows until the tick prints `ACTION: run over → fleet-heartbeat.mjs --stop \"<reason>\"`, which it does once the run is draining with no open PR and no live implementer."));
+  assert.match(b, Pin.phrase("3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason \"<reason>\"`"));
+  assert.match(b, Pin.phrase("then records `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded stop as the end of the run."));
 });

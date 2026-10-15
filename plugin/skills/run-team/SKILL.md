@@ -251,375 +251,46 @@ refreshes the Shortlist itself, and every admission is a **Pull** — one ticket
 into one free implementer slot, the moment it frees (phase 1). Nothing in this
 phase, or in any later one, asks the maintainer which tickets to take.
 
-0. **Once per run, before anything else.**
+0. **Once per run, before anything else.** Run `~/.fleet/bin/fleet-run
+   phase0.mjs --session <session-dir>` from this main checkout, `<session-dir>`
+   being this run's own session directory. Add `--implementer-cap <n>` and
+   `--reviewer-cap <n>` for the caps `$ARGUMENTS` gave, `--plugin-checkout
+   <dir>` when this workspace tracks no `plugin/…` of its own, `--spend-dir
+   <dir>` to name the directory the cockpit's spend panel reads, and
+   `--workflow <name>` or `--declare-no-ci` when the repository has no workflow
+   named CI. It runs the start sequence in its fixed order — branch,
+   fast-forward, pin, baseline, preflight, ruleset, tier-roles, metrics,
+   cockpit, rotate, reclaim, recipe, fold-in, stranded, shortlist — prints one
+   `phase0: <step>: <status>` line per step with the `NEED` lines last, and
+   records each step in `.fleet/phase0.json`, which the tick reads: it prints
+   `PHASE0-INCOMPLETE` and holds every dispatching row until the receipt is whole.
+   Dispatch nothing before it exits 0. Exit 3 is a step that failed: its line
+   carries the refusal, so fix the cause and run it again. Exit 4 is a step
+   that needs you: act on each `NEED` line below, then run it again. A re-run
+   skips every `ok` step and resumes where the last one stopped.
 
-   **Fast-forward the checkout before you trust these rules — you are reading
-   them from it.** First, `git symbolic-ref -q HEAD` must print
-   `refs/heads/main`; anything else, stop and tell the maintainer — a checkout
-   left on a branch whose PR has merged would fast-forward that branch, and the
-   baseline below would record it as the run's ref. Then
-   `git fetch origin && git rev-list --count main..origin/main`;
-   non-zero means the SKILL.md you are executing is superseded, so
-   `git merge --ff-only origin/main` and re-read what changed under
-   `commands/`, `scripts/` and `skills/`. The usual cause is the PREVIOUS run's own close-out PR: it
-   lands the rules THIS run needs and nothing pulls them. Measured twice — 57
-   commits stale in one run, 20 in another, the second shipping every dispatch
-   prompt without two rules that had merged the day before. Silent by
-   construction: stale text reads as authoritative.
+   - `NEED derive-recipe` — the Recipe cache holds nothing valid. Dispatch a
+     `task` member named `derive-recipe`, agent `fleet-recipe-deriver`, its
+     prompt the brief `~/.fleet/bin/fleet-run dispatch-prompt.mjs render
+     recipe-deriver --member derive-recipe --repo <repo> --scratch <scratch>`
+     prints (`<repo>` this main checkout's absolute path, `<scratch>` what
+     `scratch-root.mjs` prints), and wait for its report. `RECIPE PROVEN` →
+     run `phase0.mjs` again. `RECIPE NOT PROVEN` → stall: report `STALL —
+     Recipe not proven: <cause>` to the maintainer with the deriver's reason
+     verbatim, and claim, Pull and review nothing.
+   - `NEED resume #<n> <worktree> <branch>` — a dead run's claim with no PR.
+     Dispatch a stranded `impl-<n>-b` the ordinary way (record it with
+     `ledger.mjs row`, render its brief, `ledger.mjs dispatch`, the `task`
+     call, the tier check), in that worktree and branch, and never with
+     `claim-ticket.sh`: the claim stands. A re-run finds the need met once its
+     row is written. A `report #<n> — <why>` line is the maintainer's and
+     nothing else, and a `carried` line is a live token to reconcile first.
+   - `NEED review PR#<pr> (closes no issue)` — an open PR a prior run left
+     that no row can queue. Advice, never an exit status: hand-dispatch its
+     review exactly as ticket work, or leave it.
 
-   **Pin the instruments, after that fast-forward and before anything reads
-   them, from this main checkout.** `~/.fleet/bin/fleet-run instruments.sh --pin`
-   records what the scripts and runbooks in this repo say right now, which is
-   what every later gate compares against; the rule above says what its exit
-   codes mean. Pinning before that fast-forward would instead pin the
-   superseded text and certify it for the rest of the run.
-   **When this workspace does not track `plugin/…`** — fleets run here on an
-   installed plugin rather than a vendored tree — the bare pin refuses on an
-   empty instrument set, because this checkout holds no instruments to certify.
-   Name the plugin checkout to the pin instead:
-   `~/.fleet/bin/fleet-run instruments.sh --pin --audit <plugin-checkout>`.
-   The baseline records the audited tree beside the digest, and every later
-   check — yours, a finisher's, the merge gate's own leg — follows that
-   recorded root without being told twice. Refusing the bare pin and naming
-   the tree once is the whole cross-workspace contract; never dispatch a
-   member into a run whose phase-0 pin refused.
-
-   **Record the main-checkout baseline in the same step, right after the
-   pin.** `~/.fleet/bin/fleet-run main-checkout.mjs --record` writes
-   `.fleet/main-checkout.sha`: the main checkout's `git status --porcelain
-   -uall` entries plus a content hash of every path they name, and its HEAD —
-   symbolic ref and commit. Your own
-   uncommitted work is fine — it is in the baseline and holds nothing. From
-   then on every `fleet-tick.mjs` compares the main checkout against it and
-   holds dispatch on any change: the backstop for the stray member
-   writes `member-write-guard` cannot see — an `eval` cell, a `bash` that
-   `cd`s or `git -C`s into this checkout. `.fleet/`, `.worktrees/` and
-   `.agent-brain/` are gitignored and never trip it. Nor does this run's own
-   bookkeeping: `docs/metrics/tier-outcomes.tsv`,
-   `docs/metrics/member-outcomes.tsv` and `docs/metrics/ticket-features.tsv`,
-   which you write mid-run, are left out by name — anything else under
-   `docs/metrics/` still trips it. **The same
-   command is the clear, and it overwrites; it never compares.** On `MAIN-CHECKOUT-DIRTY`
-   the maintainer resolves the stray paths FIRST — inspect, keep or remove
-   them — and only then re-runs `--record`; re-recording over unresolved paths
-   certifies them. **Never re-record over `MAIN-CHECKOUT-UNKNOWN`**: that
-   walks the run from "could not look" to "certified clean" in one step, so
-   `--record` itself refuses over a baseline it cannot read, over one a newer
-   plugin wrote, and on any git read that fails. The exceptions are an
-   older-version baseline and a baseline whose commit is missing from the
-   repository; Phase 3's tick lines say how each is cleared.
-   `main-checkout.mjs --check` prints the same answer
-   without a tick.
-
-   **Run the pre-flight, once the pin and the baseline are recorded.**
-   `~/.fleet/bin/fleet-run preflight.mjs` checks what this machine and this
-   repository must give the fleet — the binaries, `gh` auth, `origin/main`,
-   `.worktrees/` and `.fleet/` ignored, the three labels, merge commits on, a
-   ruleset, the Resolver — and prints one `ok`, `WARN` or `FAIL` line per
-   check, each naming its check. **Exit 1 stops the run:** no shortlist, no
-   dispatch. Report every `FAIL` line to the maintainer by its check's name;
-   the run starts again once they are fixed. Exit 2 means it could not run at
-   all, or every check passed and the marker could not be written, and stops
-   the run the same way. `WARN ci-workflow` stops nothing:
-   a repo with no workflow named CI still runs, its workflow named per call
-   with `--workflow` or declared absent with `--declare-no-ci`. A pass writes
-   `.fleet/preflight.json`, keyed to a hash of the check set, and every later
-   run prints `PREFLIGHT SKIPPED` without a single `gh` call until a check is
-   added or changed.
-
-   **Check the merge gate against its spec, once the fast-forward has put the
-   ratified spec in front of you.** Where the workspace checks a ruleset spec
-   in, `.github/scripts/apply-ruleset.sh --check` compares it to the live gate
-   without writing anything (no spec checked in → nothing to run, skip it).
-   Three statuses and they are not interchangeable: **0** the gate is what the
-   tree says it is; **3** it is not — including the gate having been deleted
-   or renamed — and the diff it prints says how; **2** the question could not
-   be answered at all: no spec, no `gh`, a listing or read that failed
-   outright, or a read that succeeded but withheld `bypass_actors` because
-   the session lacks repository admin.
-
-   **3 does not stop the run and is not yours to fix** — reconciling is a
-   write to the gate protecting this repo, so it needs the maintainer.
-   Surface the diff and carry on. What it changes is what you may then claim:
-   every statement this run makes about which checks must pass before a merge
-   is sourced from the checked-in spec and is true of the live gate only
-   while this check is green, so a 3 means saying "the gate requires X"
-   without naming the drift is a false claim, and a 2 means you never learned
-   either way. Measured 2026-09-23: four contexts the spec required were
-   enforced by nothing live, and the gap sat
-   there unnoticed because the only thing that ever read the live gate was a
-   person choosing to.
-
-   **Drain the pending ticket-features rows and refresh the cost guard, after
-   the fast-forward and before the first Pull is routed.**
-   `~/.fleet/bin/fleet-run metrics-refresh.mjs` moves
-   `.fleet/ticket-features.pending.tsv` into `docs/metrics/ticket-features.tsv`,
-   deduped on `session`+`agent` — this recovers the rows of a run that crashed
-   before its close-out — and then runs `pr-cost.mjs --guard`, rewriting
-   `.fleet/cost-guard.json`, which the router reads and fails closed without
-   (no file: the default cell only). The guard has to be fresh before the
-   first Pull is routed, so the verdict reflects any rows just recovered. Exit
-   0: both ran. The guard's own exit 3 (a cell tripped) and 4 (no verdict yet)
-   are verdicts the router and `fleet-tick.mjs` read, never failures; the
-   script absorbs them. A workspace that lacks one of the three metrics TSVs
-   has no corpus to guard yet — its first run: the script prints a line naming
-   the missing file, skips the guard and exits 0. Exit 1 or 2 stops the run
-   before its first Pull: report the line the script printed on stderr, fix
-   the cause and run it again — each duty is safe to repeat.
-
-   **Launch the cockpit.** On every phase-0 pass, not just the first:
-   `node ~/.fleet/bin/fleet-run board.mjs serve --open &` in the
-   background. It is a read-only mirror of `.fleet/ledger.md` + `gh` — you never
-   feed or update it, and it survives your own compaction. The launch is
-   idempotent per workspace when the running cockpit answers the identity
-   handshake: an already-served workspace's launch finds the running server
-   over HTTP, prints its URL, and exits 0 without starting a second one —
-   nothing to skip. It opens nothing either: `--open` opens a tab
-   only from the launch that binds a port and starts the server, so a
-   re-shortlist leaves the board tab you already have alone. A second fleet
-   on another workspace collides with none of that: its own launch derives
-   that workspace's own port and binds it when free, or scans to the next
-   free port in its range when the derived one is already held by something
-   else — either way it gets its own board, just not always on the port its
-   hash predicts.
-
-   The spend panel reads this workspace's own `~/.omp/agent/sessions` tree,
-   and is pinned to whichever session first writes a transcript on this
-   cockpit's own watch: it will not follow a workspace that
-   already had another session's transcripts sitting there at launch. If the
-   panel is reading someone else's numbers, relaunch with `--spend-dir <path>`
-   naming this run's own session directory to override the heuristic outright —
-   `~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>` (the directory, never
-   the `.jsonl` file of the same name beside it).
-
-   **Rotate the ledger before the fold-in below and before shortlisting —
-   every run, whatever way the previous one ended.** One ledger per run:
-   `~/.fleet/bin/fleet-run ledger.mjs rotate` moves the previous run's
-   `.fleet/ledger.md` byte-for-byte to `.fleet/ledger.<UTC
-   YYYY-MM-DDTHHMMSSZ>.md` and leaves none behind. What it carries forward
-   turns on the verdict it reaches below. After `dead` or `none` nothing is
-   carried — no row, exclusion, `## Filed` or `## Ruled` entry — so this
-   run's first write starts the empty skeleton, and an unchecked `impl-` row
-   a prior run left behind can no longer hold this run's tick: a dead
-   controller took its in-process members with it. After `ancestor` — this
-   session's own earlier run, whose members run inside the same omp process
-   and may still be live — it writes a new ledger holding every row of a
-   stream (one PR's rows) in which a row carries an unsettled member token
-   or an open `review=` launch, whole and with every other token on it, plus
-   every unsettled `## Dispatched` entry and the settled entry of each
-   member a carried row names; exclusions, `## Filed`, `## Ruled` and the
-   drain marker are never carried. Every other settled name — in
-   `## Dispatched` or on any row, and including a name whose outcome is
-   outside its family's vocabulary, whose line is skipped below — and every
-   reviewer runner a row launched goes into the new ledger's `## Retired` as
-   a bare name, with whatever the archive's own `## Retired` held: omp answers a second `task` under a name
-   this process has used with `<name>-2` while `hub send <name>` keeps
-   reaching the first, so a settled name stays taken for the session, not
-   the run. `dispatch` refuses a retired name and names the replacement — one
-   retry letter past the highest the session has used on that number,
-   `impl-42-b` for a ticket this session's earlier run worked as `impl-42` —
-   `review` refuses a retired runner name and names the next free reviewer
-   name, and `dispatch merge-bot` numbers past retired bots. The tick never
-   reads `## Retired`: a ticket an earlier run worked is not claimed by it
-   and can be shortlisted again.
-   A line it cannot parse is skipped with a warning naming it, and the
-   rotation still succeeds; a member name on a skipped line that carries an
-   outcome is retired all the same, and a bare member token on a skipped row
-   retires nothing. It prints `{rotated, archive, carried: {rows,
-   dispatched}, retired, skipped}`. The carried tokens keep the tick from
-   dispatching onto those members' work, keep their names taken, and give
-   their late results a token to settle; the stranded-claim step below
-   reconciles them.
-   What an unclean end left in
-   flight comes back through the ordinary per-run path: open PRs through the
-   fold-in below, `behind-pr:`/`behind-issue:` exclusions through phase 1's
-   collision and sequence checks, and a claim a dead run left without a PR
-   through the stranded-claim step below — resumed by a new member under a
-   new name when its worktree is in this checkout, reported to the
-   maintainer otherwise. An exclusion that expires with the run that wrote
-   it (`deferred-to-session-end` and its like) must be restated if it still
-   holds. **The guard is the
-   controller record**, `controller` in `.fleet/heartbeat.json`: the omp
-   process the previous run's rotation found above itself, and that
-   process's start time. Rotate judges it once, before anything moves. A
-   recorded controller that is still alive, still the same process (its
-   start time matches), and not an ancestor of this run refuses — exit 2,
-   nothing moved — **whatever its heartbeat mark says**, because a
-   controller can stop beating and keep dispatching. A dead one, a pid
-   reused by another process, or this session's own earlier run lets it
-   rotate. With no record the heartbeat mark decides, as the only guard
-   there is: still beating or acting — a beat inside its window, or with no
-   beat at all a tick or ledger write inside its window — refuses, naming
-   the latest beat, tick or ledger write and when it would count as stalled;
-   a stalled mark, a recorded `--stop`, or no mark at all lets it rotate —
-   and that fallback proves "not beating", never "dead", and
-   guards a ledger only: with none to move the mark is not consulted. With no
-   ledger the record is still judged, so a live recorded controller refuses
-   even then. It also refuses, nothing moved, when the stamped archive name
-   already exists, when the process table cannot be read, or when
-   `.fleet/heartbeat.json` exists but cannot be used — unreadable, not JSON,
-   not a JSON object, or holding a `controller` that cannot be judged — a
-   record nobody could judge is never taken for no record. On that refusal
-   phase 0 stops and the refusal goes to the maintainer verbatim: the
-   controller never edits or removes `.fleet/heartbeat.json`, because
-   removing it inside a live omp session makes this rotate judge `none` and
-   forfeits the carry — the live members and the retired names — so this
-   run could dispatch onto their work and reuse their names. Every writer
-   (`fleet-tick.mjs`, `fleet-heartbeat.mjs`, the ledger's write subcommands)
-   leaves such a file as it is. Its last act, ledger or none, is
-   to replace the record with this run's own — the nearest `omp` process
-   above it, its start time, as `prior` the verdict it reached on the
-   record it found (`dead`, `ancestor` or `none`), and as `at` when it wrote
-   it — or to remove the key when
-   no `omp` process is above it. The same write stamps `acted`, the time of
-   this run's latest ledger write, which every write subcommand stamps from
-   then on. That write can fail, and then exit 2 follows
-   a move: `rotated <file> -> <archive>` on stderr, then the refusal that the
-   record could not be written. Run the rotation before this run's own first
-   tick, beat or ledger write, each of which writes a mark the fallback reads. Older
-   archives, hand-named ones included, are left alone.
-
-   **Reclaim scratch straight after the rotation — every run.**
-   `~/.fleet/bin/fleet-run reclaim-scratch.mjs --root <scratch>
-   --after-rotate --apply`, `<scratch>` the path `scratch-root.mjs` prints,
-   so a run that merges nothing still reclaims the previous run's leftovers
-   (**Reclaim scratch after each merge pass** says what it removes).
-   `--after-rotate` goes on this call always and on no other: rotate leaves
-   no ledger behind when it carried nothing, and the flag reads that absence
-   as "no live token" — rotate's own verdict — where without it the script
-   refuses. A ledger rotate did write is read as usual. Record nothing on the
-   ledger and act on nothing in its receipt.
-
-   **Derive the Recipe — the Recipe derivation step — before the fold-in below
-   and before the first claim.** Every claim runs this repository's Install
-   step and bakes its Test entrypoint into the member's runner, and every
-   review reads the Test entrypoint, all out of the **Recipe cache**
-   (`.fleet/recipe.json` beside the common git dir); no script infers either
-   command. Check it first: `~/.fleet/bin/fleet-run derive-testcmd.sh .
-   install` and `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at
-   origin/main`. **Both exit
-   0 → the cache is present and valid: use it as it stands and derive
-   nothing.** Either exits 1 (a refusal about the cache) → derive it; a refusal
-   naming `--at` says `origin/main` does not resolve, which is no cache fault —
-   fetch it and check again, since deriving would not help. Either
-   exits 3 → the reader could not run a tool it needs, so the cache's state is
-   unknown: fix that environment fault and check again; deriving would not
-   help. This step is yours: one derivation
-   per run start at most, never one per member, and a member never derives.
-   Dispatch a `task` member named `derive-recipe`, agent
-   `fleet-recipe-deriver`, and wait for its report — nothing in this run can
-   claim before it lands:
-
-   > Derive, prove and cache the Recipe of the repository at `<repo>`. Your
-   > scratch directory is `<scratch>/derive-recipe/`; write nowhere else.
-   > Follow your definition's procedure exactly, and end with its report line.
-
-   `<repo>` is this main checkout's absolute path and `<scratch>` is the
-   absolute path `scratch-root.mjs` prints (**The scratch root is computed**
-   above), written into the prompt before you send it. The member reads the repository,
-   proposes both commands and proves them with `recipe-prove.mjs` in a
-   throwaway worktree of `origin/main`: the Install step must leave the tree
-   clean, and the Test entrypoint must be shown to run real tests — the
-   runner's own non-zero count, or a deliberate mutation of one test that
-   turns the run red. Only a proof writes the cache, with `derivedAt` (the
-   `origin/main` commit it ran against) and the proof itself. **`RECIPE
-   PROVEN`** → re-run both reads above (`derive-testcmd.sh . install` and
-   `derive-testcmd.sh . test --at origin/main`); their output is the
-   Recipe this run uses. **`RECIPE NOT PROVEN`** → stall, below.
-
-   **Mid-run, a cache that stops running is re-derived once, then the run
-   stalls.** A claim or a review that refuses because the Recipe cache is
-   invalid — a command that no longer runs, or an Install step that changed
-   the tree — is the one mid-run trigger: dispatch `derive-recipe` again
-   exactly as above, then retry what refused. The Install step's refusals
-   fire after the claim has labelled the ticket and created its worktree, so
-   release that claim with `release-ticket.sh` first (**Release the claims
-   that never became PRs**). A red suite never triggers it: a failing test is
-   a finding, not a stale Recipe. **Stall:** `RECIPE NOT PROVEN` from any
-   derivation, or a second invalid-cache refusal after this run's one
-   re-derivation, halts the run — no Pull, no claim, no review dispatch — and
-   you report `STALL — Recipe not proven: <cause>` to the maintainer with the
-   deriver's reason verbatim. A repository the fleet cannot run needs human
-   hands, the `ready-for-human` cause: a toolchain this machine lacks, a
-   suite that runs no tests the proof can see, or an Install step, Test
-   entrypoint or mutation that hangs until the proof's own bound refuses it as
-   timed out. It is never a loop: no third derivation, and never a cache
-   written by hand.
-
-   **Fold in every PR a prior run left open, before shortlisting.** However it
-   is named and whatever it carries — ticket work whose review was deferred, or
-   that run's own metrics — it is reviewable work no member otherwise picks up,
-   because the Shortlist holds ISSUES and nothing looks at inherited PRs. Queue
-   each for review exactly as ticket work: same review workflow, same
-   fix-applier, same finisher. **Skip a PR a row rotate carried already
-   holds** — its `#<pr>` key, or the PR of its `impl-<N>=PR#<pr>` token: that
-   row already queues it, and a `ledger.mjs row` write replaces the whole
-   line, wiping the live tokens carried on it. Measured 2026-09-03 — a prior
-   run's ticket PR arrived this way and its review found a defect its own PR
-   body called
-   unreviewed, and a metrics PR's review then caught two metrics rows the
-   controller had missed in its own close-out, so no PR is exempt from being
-   wrong. Reviewing them next run is also what stops one pinning
-   `fleet-tick`'s backlog forever: unreviewable AND uncounted is the state
-   that strands it.
-
-   **Resume the claims a dead run left without a PR — after the fold-in,
-   before shortlisting.** A claim's label and worktree exist before its first
-   push, and rotation after a dead run carries no row forward, the candidate
-   scan excludes `in-progress`, and the in-flight check reads the worktree as
-   taken — so a
-   claim the previous run left without a PR is held by nobody until this step
-   names it. `~/.fleet/bin/fleet-run stranded.mjs` lists and classifies; you
-   dispatch. It reads the `prior` rotate just recorded, never the record
-   itself, which names this run's own live controller, and prints
-   `{prior, claims: [{n, t, action, worktree, branch, why}], carried: [{name,
-   token, row}]}`:
-
-   - `prior: dead` — every open `in-progress` issue with no open PR (one with
-     an open PR is the fold-in's): `resume` when exactly one worktree for it
-     sits under this checkout's `.worktrees/`, `report` otherwise.
-   - `prior: ancestor` — this session's own earlier run: no claim is listed.
-     `carried` lists every live token rotate carried — its member or runner
-     `name` (a `review=wf:` launch's runId), the `token` as the ledger holds
-     it, and the `row` carrying it, null for a member only `## Dispatched`
-     names. Reconcile them before shortlisting: read `proc://` once, find
-     each `name` among this session's jobs, and act on its state.
-     `running` → keep the token. `completed` or `failed` → record its
-     result from `agent://<id>` as the **Record, then tick** table records
-     that member's report; an output you cannot read is a death the
-     Member-killed row confirms. `cancelled` → record it dead. Absent, or a
-     state you cannot read → keep the token live and let the Member-killed
-     row clear it: a token nothing confirms dead counts as live. Recording a
-     death has two forms, here and on the Member-killed row alike. An
-     `impl-`, `fix-pr-`, `finisher-pr-` or `merge-bot-` member is settled:
-     `ledger.mjs settle <name> killed`. A reviewer is no member `settle`
-     takes — `settle review-pr-<n> killed` exits 2 — so its launch is
-     settled `=failed` where it stands: a `ledger.mjs review <pr>
-     review=member:<name>=failed` call that turns `review=member:<name>` on
-     the PR's row into `review=member:<name>=failed`
-     (`wf:` launches alike), after which the tick owes the PR
-     a review again under the next free reviewer name.
-   - `prior: none` — no record proves the previous run dead (no record yet, or
-     no `omp` process found above the rotation): every claim is `report`, and
-     nothing is resumed.
-
-   A `resume` follows the Member-killed row across the run boundary: a new
-   member under a new name — `impl-<N>-b`, or one letter past the highest
-   `impl-<N>-<x>` in the archive that rotate printed the path of — on the same
-   ticket, in the printed worktree and branch, its prompt the phase 2 prompt
-   off a fresh read of the issue plus what it inherits (`git -C <worktree> log
-   --oneline origin/main..HEAD`, `git -C <worktree> status --short`, and the
-   files under `<scratch>/impl-<N>/`). Record it the ordinary way —
-   `ledger.mjs row <N>
-   "impl-<N>-b"`, then `dispatch-prompt.mjs render implementer --member
-   impl-<N>-b …`, then `ledger.mjs dispatch <N> impl-<N>-b`, then the `task`
-   call naming the `agent` it printed, then the tier check — and never
-   `claim-ticket.sh`: the claim already stands. A `report` goes to the
-   maintainer as `#<N> — <why>` and nothing else: no dispatch, no label change,
-   no release. Exit 2 is a list that did not answer — a `gh` or `git`
-   failure, a list at its cap, a worktree whose presence cannot be told, or,
-   after `ancestor`, a ledger that cannot be read — and is never nothing
-   stranded.
+   A `drift` or `unanswered` ruleset step is advice too: surface the diff and
+   go on. See references/phase-0.md.
 
 1. **Build the Shortlist** — `~/.fleet/bin/fleet-run shortlist.mjs`, then read
    `.fleet/shortlist.json`. The script runs the cheap filters and nothing else
@@ -1506,90 +1177,9 @@ in-between width cannot be told apart from a shifted one. The `note` field is
 free text and sits before those four, so the script refuses a tab or newline in
 it: one tab would shift all four for that row alone.
 
-**Then record the run's member facts — do not author them.** Scrape EVERY session
-directory for this cwd, not one:
-
-```bash
-PROJECT_DIR="$(node -e 'import("./scripts/member-record.mjs").then(m => console.log(m.encodeProjectDir(process.cwd())))')"
-for d in "$HOME/.omp/agent/sessions/$PROJECT_DIR"/*/; do
-  node scripts/member-outcomes.mjs "$d"
-done
-```
-
-`encodeProjectDir` (defined in `scripts/member-record.mjs`) encodes the cwd
-exactly as omp names its session directories — see its comment for the rule — and hand-guessing that path is why
-the fleet's own panel once rendered nothing here. The trailing `/` on the glob matters:
-the same encoded-cwd directory also holds this cwd's own top-level session
-transcripts as loose FILES sibling to the per-session directories, and a
-glob without it would try to scrape one of those as if it were a session.
-
-**Do not narrow this to "this run's session" with `findSubagentsDir`.** That helper
-answers a different question — the session with the NEWEST transcript for this cwd,
-which is not the same as the one you are in. Any other session sharing this cwd —
-a second terminal, a second controller run — can hold a newer transcript than
-yours at the moment you reach this step, and a second session dispatching
-anything while you reach it wins the tie: the run then re-scrapes a stranger's
-members, prints a plausible row count and exits 0 while its own facts are
-never recorded. Looping every session dir costs a few seconds, cannot pick
-wrong, and is idempotent by construction.
-
-The scraper takes the session directory itself and refuses a path it cannot
-read — a missing, unreadable or non-directory path all exit 2 — so a wrong
-path fails loudly instead of writing nothing and exiting 0. It reports the
-run's own YIELD, `scraped N of M members (D dropped)`, alongside the file's
-total: read the yield, because the total is the whole corpus and looks
-healthy even when every member of this session dropped.
-
-It derives every row from the member transcripts omp already wrote — both the
-flat ones and a member's own nested fan-out one level down — so a
-second run over the same session changes nothing and a re-run after a member is
-re-dispatched picks the new transcript up. **Never hand-edit
-`docs/metrics/member-outcomes.tsv`** — it is regenerated wholesale whenever the
-role classifier changes, and a hand-entered value would not survive that. The
-verdict for a PR goes to `tier-outcomes.tsv` through `tier-outcomes.mjs
-append`, as above. Once both files hold this run's rows, and before either is
-committed, run `~/.fleet/bin/fleet-run tier-outcomes.mjs check --live`. Exit 1
-names each row whose `tier` disagrees with the one implementer the member facts
-say ran for its ticket: correct that row's `tier` to the short name it prints,
-or blank it and say why in `note`. Exit 1 also names the PRs of the case where
-the latest `run_date`'s filled rows have no implementer row in the member file
-and none could be compared, so nothing from that run was checked: append the
-run's member rows if they are missing, or blank each named row's `tier` and say
-why in `note`.
-Each WARNING names a PR this run's ledger marks `reviewed=` that has no row yet
-— append it before committing if it is an implementer PR.
-
-**Drain the pending ticket-features rows and refresh the cost guard, after
-the member-outcomes scrape and every `tier-outcomes.mjs append`, before the
-metrics files are committed.** `~/.fleet/bin/fleet-run metrics-refresh.mjs`
-moves `.fleet/ticket-features.pending.tsv` — the row the router script
-appended for each Pull at dispatch — into `docs/metrics/ticket-features.tsv`,
-deduped on `session`+`agent`, so this run's own rows are in the file that gets
-committed; that file is a run artifact too and is committed with the other
-two. It then runs `pr-cost.mjs --guard`, which rewrites
-`.fleet/cost-guard.json` from all three files. Exit 0: both ran. The guard's
-own exit 3 (a cell tripped) and 4 (no verdict yet, baseline too thin) are
-verdicts the router and `fleet-tick.mjs` read, never failures; the script
-absorbs them. Exit 1 names the duty that failed on stderr and the duty after it
-did not run; exit 2 is a usage error. At close-out a failure is reported to the
-maintainer and does not stop the commit — the pending file stays in `.fleet/`
-and the next run's phase-0 pass drains it — but never commit the metrics files
-with a drain that failed claiming the corpus is complete.
-
-The metrics files are the run's own artifacts and none commits itself. Carry
-them to main the same way the run carries any other controller-authored change;
-leaving a regenerated 5,000-row corpus uncommitted in the checkout is how it gets
-discarded by the next `git checkout` with nothing to show it ever ran.
-
-**Commit the metrics files and open a PR — at end of run.** The branch name is
-the repository's choice. Make the commit on a branch in the main checkout,
-switch back to `main` before the next tick, and never `--record` while on that
-branch; the round trip reads clean. A PR still open when the run ends is one phase 0's
-fold-in queues for review next run, however it is named, so the files reach
-`main` through the same review as ticket work rather than being lost. Stranding
-a data row loses it: `member-outcomes.tsv` is regenerated from harness
-transcripts the fleet does not own, so re-running the scrape later is worth
-only what the harness still holds.
+The member-facts scrape, the drain of the pending ticket-features rows and the
+commit of the metrics files are steps of `closeout.mjs finish`, which **End of
+run** (Phase 3) drives. See references/close-out.md.
 
 **Why not decide inside one run.** A run holds 2-3 implementer PRs, and ticket
 difficulty swamps the tier effect — a gojq parity harness and a two-statement
@@ -1802,25 +1392,30 @@ owes beyond its row:
   on a conflict needs no record from you — the bot already appended
   `conflict-hold:#<pr>` to that PR's row, and the tick turns it into `DISPATCH
   fix-pr PR#<pr>` (**Reviewers**).
-- **The run ends, or the maintainer says drain** → `ledger.mjs drain
-  "<reason>"` first, then release every claim that never became a PR (below)
-  and settle each `impl-<N>=released`. Nothing else in the loop fires for those
-  claims. The marker is on disk, so the tick holds the implementer row at
-  `HOLD (draining)` from then on — for a replacement controller too — and keeps
-  the review, fix-applier and merge rows firing until the open PRs merge.
-  The drain starts the end of the run; it does not end it. **End of run**, in
-  this order:
-  1. `ledger.mjs drain "<reason>"`.
-  2. Release every claim that never became a PR, settling each
-     `impl-<N>=released`.
-  3. Act on the review, fix-applier and merge rows until no PR is open. Once
-     the run is draining with no open PR and no live implementer, the tick's
-     last line is `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`.
-  4. Scrape the run's member facts, append every `tier-outcomes.mjs` row, and
-     run `metrics-refresh.mjs` (above).
-  5. Commit the metrics files and open their PR (above).
-  6. `~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop "<reason>"` — last,
-     because every reader takes a recorded stop as the end of the run.
+- **The run ends, or the maintainer says drain** → `closeout.mjs begin` first
+  (below): it drains and releases every claim that never became a PR. Nothing
+  else in the loop fires for those claims. The marker is on disk, so the tick
+  holds the implementer row at `HOLD (draining)` from then on — for a
+  replacement controller too — and keeps the review, fix-applier and merge rows
+  firing until the open PRs merge. The drain starts the end of the run; it does
+  not end it. **End of run**, in this order:
+  1. `~/.fleet/bin/fleet-run closeout.mjs begin --reason "<reason>"` — drains
+     (`ledger.mjs drain`), then releases every claim that never became a PR and
+     settles each `impl-<N>=released` (**Release the claims that never became
+     PRs**). A claim it refuses prints `NEED hand-release #<N> <blocker>`: that
+     refusal is the finding, so run `worktree-audit.sh`, decide by hand, and run
+     `begin` again.
+  2. Act on the review, fix-applier and merge rows until the tick prints
+     `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`, which it does
+     once the run is draining with no open PR and no live implementer.
+  3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason "<reason>"` — scrapes
+     the run's member facts, checks the tier-outcomes rows, refreshes the
+     metrics, commits the three metrics files and opens their PR, then records
+     `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded
+     stop as the end of the run. A `NEED tier-outcomes append <pr>` is a PR
+     the ledger marks reviewed with no verdict row: append it with the verdict
+     you rule (**Guard: accumulate per PR**) and run `finish` again. A step it
+     fails is explained in references/close-out.md. Exit 0 is the run closed.
 - **Monitor: CI run completes** → bind it (`ci-state.mjs --pr <N>`) and **record
   it as `ci=<run-id>:<attempt>:<conclusion>`, not just "CI green"** — in the
   ticket's ledger row, which outlives your context: `ledger.mjs token <key>
@@ -2001,8 +1596,8 @@ depth** guard table applied in code. Act on each line as it reads:
   paths yourself, and never re-baseline over paths nobody has resolved. The
   changes of yours that trip it are a mid-run tooling fix edited in this
   checkout and the close-out commit's round trip through a branch; **Fix the
-  tooling mid-run** and **Commit the metrics files and open a PR — at end of
-  run** say how each is cleared.
+  tooling mid-run** and the commit section of references/close-out.md say how
+  each is cleared.
 - `MAIN-CHECKOUT-UNKNOWN …` with `HOLD (main checkout unknown)` — the tick
   could not look: a git or hash read failed (`could not look:`), or the
   baseline exists but cannot be read (`baseline unreadable:`). Never clean,

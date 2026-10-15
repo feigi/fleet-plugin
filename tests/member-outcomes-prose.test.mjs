@@ -4,13 +4,13 @@ import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+const CLOSE_OUT = Pin.file(join(REPO, "skills", "run-team", "references", "close-out.md"));
 
 // Slice by named anchors and fail loudly when one moves; slice SIZE is what does
-// the work. The end anchor is the paragraph immediately after the insertion
-// point (not the next "## " heading, which is 174 lines away and would satisfy
-// this pin on prose it never touches).
-const SLICE = () => RUN_TEAM.between("Append one row", "**Why not decide inside one run.**", "member-outcomes ruling step").text;
+// the work. The scrape and its check are one section of the close-out reference
+// file, so the slice ends at the next heading rather than on a later duty's
+// prose it never touches.
+const SLICE = () => CLOSE_OUT.section("## Scrape the member facts and check the tier rows", "member-outcomes scrape section").text;
 
 // Everything the instruction needs in order to RUN. Matching only the filename
 // was mutation-proven vacuous: the pin stayed green both when the command was

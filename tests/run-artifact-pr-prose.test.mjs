@@ -21,9 +21,10 @@
 // markdown section is a vacuous pin: this document says `docs/metrics/` in
 // multiple other places, so a file-wide match is bought by prose that has
 // nothing to do with the rule and survives the rule's deletion. Slice size is
-// what anchors a prose pin. Rules 1 and 2 share one slice bounded by two
-// landmark phrases — the sentence that introduces them and the next unrelated
-// bolded lead — never `paragraph`'s blank-line bound. Rule 3 lives in a list
+// what anchors a prose pin. Rules 1 and 2 share one slice, the commit section
+// of the close-out reference file, bounded by its own heading and the end of
+// that file — the duty moved there from SKILL.md, and a heading bound is not
+// one a rewrap can move. Rule 3 lives in a list
 // item with no blank line before the next one, so it is bounded by its own
 // landmark phrase and cut at the next top-level bullet (`\n- `), built from the
 // same `anchorAt` uniqueness check rather than a local copy of `paragraph`'s
@@ -55,20 +56,22 @@ import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+// The commit duty and its reasons moved with the rest of the close-out metrics
+// steps into the reference file; the invariant it is exempt from stayed in
+// SKILL.md. The document under test is the pair, and each mutant says which of
+// the two it edits.
+const CLOSE_OUT = readFileSync(join(REPO, "skills", "run-team", "references", "close-out.md"), "utf8");
 
-// Rules 1 and 2 share one slice, bounded by two landmarks NEITHER rule owns:
-// the sentence that introduces them and the bolded lead of the next unrelated
-// paragraph. Anchoring each rule on its OWN bolded lead, the obvious shape,
-// puts the slice anchor inside the text every deletion fixture replaces:
-// `betweenPhrases` THROWS on the mutant instead of the pin reddening, which is
-// not a pin discriminating, it is the harness losing its footing — and a thrown
-// anchor reads as "re-anchor this test" to whoever next deletes the rule.
-//
-// Both bounds go through `phrase`, so a reflow of either cannot move them, and
-// both are proven single-hit by `betweenPhrases`' exactly-once guard.
-const ARTIFACT_FROM = "The metrics files are the run's own artifacts and none commits itself";
-const ARTIFACT_TO = "**Why not decide inside one run.**";
-const artifactRules = (text = RUN_TEAM) => Pin.of(text, "text").betweenPhrases(ARTIFACT_FROM, ARTIFACT_TO, "run-team metrics-PR rules").text;
+// Rules 1 and 2 share one slice: the close-out file's whole commit section,
+// which opens on the paragraph that says the metrics files are the run's own
+// artifacts and none commits itself and ends at the end of the file. Taken by
+// heading, never anchored on the text every deletion fixture replaces, for the
+// reason that a thrown anchor on the mutant reads as "re-anchor this test" to
+// whoever next deletes the rule instead of the pin reddening.
+const ARTIFACT_HEADING = "## Commit the metrics files and open a PR";
+// The body below the heading line, so a reflow of the slice cannot fold the
+// heading into the paragraph that follows it.
+const artifactRules = (text = CLOSE_OUT) => Pin.of(text, "close-out.md").section(ARTIFACT_HEADING, "run-team metrics-PR rules").text.split("\n").slice(1).join("\n");
 
 // Rule 3's bullet under `## Invariants`, bounded at the next top-level list
 // item. Not `paragraph`: the bullets are adjacent, so a blank-line bound would
@@ -129,17 +132,20 @@ const faults = (pattern, slice) => Pin.sentences(slice).filter((s) => pattern.te
 // Every pin in one place, so a fixture asserts WHICH pins fire rather than that
 // something somewhere went red — a pin that reddens on the wrong mutant has
 // discriminated nothing.
+const DOC = { skill: RUN_TEAM, closeOut: CLOSE_OUT };
 const PINS = {
-  commit: (t) => !COMMIT_DUTY.test(artifactRules(t)),
-  noCommit: (t) => NO_COMMIT.test(artifactRules(t)),
-  reason: (t) => !STRANDING_REASON.test(artifactRules(t)),
-  branchChoice: (t) => !BRANCH_CHOICE.test(artifactRules(t)),
-  branchMandate: (t) => BRANCH_MANDATE.test(t),
-  exempt: (t) => !EXEMPT_DUTY.test(invariant(t)),
-  label: (t) => !LABEL_DUTY.test(invariant(t)),
-  needsReview: (t) => faults(NEEDS_REVIEW, invariant(t)).length > 0,
+  commit: (d) => !COMMIT_DUTY.test(artifactRules(d.closeOut)),
+  noCommit: (d) => NO_COMMIT.test(artifactRules(d.closeOut)),
+  reason: (d) => !STRANDING_REASON.test(artifactRules(d.closeOut)),
+  branchChoice: (d) => !BRANCH_CHOICE.test(artifactRules(d.closeOut)),
+  branchMandate: (d) => BRANCH_MANDATE.test(d.skill) || BRANCH_MANDATE.test(d.closeOut),
+  exempt: (d) => !EXEMPT_DUTY.test(invariant(d.skill)),
+  label: (d) => !LABEL_DUTY.test(invariant(d.skill)),
+  needsReview: (d) => faults(NEEDS_REVIEW, invariant(d.skill)).length > 0,
 };
-const firing = (text) => Object.keys(PINS).filter((name) => PINS[name](text));
+const firing = (doc) => Object.keys(PINS).filter((name) => PINS[name](doc));
+// The document with `edit` applied to the one file it names.
+const withEdit = (target, edit) => ({ ...DOC, [target]: edit(DOC[target]) });
 
 test("the metrics PR is a stated duty with a stated reason, not just an instruction to leave files in the checkout", () => {
   const slice = artifactRules();
@@ -155,6 +161,7 @@ test("the metrics PR is a stated duty with a stated reason, not just an instruct
 test("the plugin leaves the metrics PR's branch name to the repository and mandates none", () => {
   assert.match(artifactRules(), BRANCH_CHOICE, "the end-of-run step no longer says the branch name is the repository's choice");
   assert.doesNotMatch(RUN_TEAM, BRANCH_MANDATE, "run-team prose names this repository's own metrics branch convention — that belongs in the repo's AGENTS.md, not the shipped plugin");
+  assert.doesNotMatch(CLOSE_OUT, BRANCH_MANDATE, "the close-out reference names this repository's own metrics branch convention — that belongs in the repo's AGENTS.md, not the shipped plugin");
 });
 
 test("the ready-to-merge invariant states its own metrics-PR exemption", () => {
@@ -183,41 +190,43 @@ const EXEMPT_TAIL = Pin.phrase("is exempt, and it is exempt because this invaria
 const appendTo = (anchor, sentence) => (text) => text.replace(anchor, (m) => `${m} ${sentence}`);
 
 const mutants = [
-  ["the commit duty is reduced to advice", ["commit"],
+  ["the commit duty is reduced to advice", ["commit"], "closeOut",
     (text) => text.replace(COMMIT_DUTY, "**Consider keeping the metrics files.**")],
-  ["the commit duty is negated while keeping the lead's capital", ["commit", "noCommit"],
+  ["the commit duty is negated while keeping the lead's capital", ["commit", "noCommit"], "closeOut",
     (text) => text.replace(COMMIT_DUTY, "**Do not commit the metrics files and open a PR — at end of run.**")],
-  ["the stranding reason is deleted", ["reason"],
+  ["the stranding reason is deleted", ["reason"], "closeOut",
     (text) => text.replace(STRANDING_REASON, "A data row is cheap")],
-  ["the branch is left to the repository no longer", ["branchChoice"],
+  ["the branch is left to the repository no longer", ["branchChoice"], "closeOut",
     (text) => text.replace(BRANCH_CHOICE, "The branch name is set by the fleet")],
-  ["the branch name is mandated in the duty", ["branchChoice", "branchMandate"],
+  ["the branch name is mandated in the duty", ["branchChoice", "branchMandate"], "closeOut",
     (text) => text.replace(BRANCH_CHOICE, "The branch name is `chore/run-artifacts-<date>`")],
-  ["this repository's branch name is mentioned elsewhere in the document", ["branchMandate"],
+  ["this repository's branch name is mentioned elsewhere in the document", ["branchMandate"], "skill",
     (text) => `${text}\nSee chore/run-artifacts-<date>.\n`],
-  ["the exemption is removed from the invariant", ["exempt"],
+  ["this repository's branch name is mentioned in the close-out reference", ["branchMandate"], "closeOut",
+    (text) => `${text}\nSee chore/run-artifacts-<date>.\n`],
+  ["the exemption is removed from the invariant", ["exempt"], "skill",
     (text) => text.replace(EXEMPT_TAIL, "is no different, and this invariant reaches it like any other")],
-  ["the exemption is inverted rather than removed", ["exempt"],
+  ["the exemption is inverted rather than removed", ["exempt"], "skill",
     (text) => text.replace(EXEMPT_TAIL, "is not exempt, and this invariant reaches it too")],
-  ["the exemption is stated but the action it licenses is withheld", ["label"],
+  ["the exemption is stated but the action it licenses is withheld", ["label"], "skill",
     (text) => text.replace(LABEL_DUTY, "Leave that one unlabelled for the maintainer")],
-  ["a reviewer is re-imposed on the run's own metrics PR", ["needsReview"],
+  ["a reviewer is re-imposed on the run's own metrics PR", ["needsReview"], "skill",
     appendTo(LABEL_DUTY, "It still needs a reviewer before the label goes on.")],
-  ["a reviewer is re-imposed on the run's own metrics PR via passive phrasing NEEDS_REVIEW's old keyword list missed", ["needsReview"],
+  ["a reviewer is re-imposed on the run's own metrics PR via passive phrasing NEEDS_REVIEW's old keyword list missed", ["needsReview"], "skill",
     appendTo(LABEL_DUTY, "It must still be reviewed before the label goes on.")],
   // A period in the gap — an abbreviation, a filename — ended the old `[^.]`
   // window before the review word, and each of these was green.
-  ["a reviewer is re-imposed with an abbreviation between the need and the reviewer", ["needsReview"],
+  ["a reviewer is re-imposed with an abbreviation between the need and the reviewer", ["needsReview"], "skill",
     appendTo(LABEL_DUTY, "It still needs, i.e. before the label goes on, a reviewer.")],
-  ["a reviewer is re-imposed passively with a filename in the gap", ["needsReview"],
+  ["a reviewer is re-imposed passively with a filename in the gap", ["needsReview"], "skill",
     appendTo(LABEL_DUTY, "It must, per SKILL.md, still be reviewed.")],
 ];
 
-for (const [what, expected, mutate] of mutants) {
+for (const [what, expected, target, mutate] of mutants) {
   test(`the pins redden when ${what}`, () => {
-    const mutated = mutate(RUN_TEAM);
-    assert.notEqual(mutated, RUN_TEAM, `the "${what}" fixture no longer matches the prose and applied nothing — update the fixture, do not delete it`);
-    assert.deepEqual(firing(mutated), expected, `the "${what}" fixture did not fire exactly the pins it is here to exercise`);
+    const doc = withEdit(target, mutate);
+    assert.notEqual(doc[target], DOC[target], `the "${what}" fixture no longer matches the prose and applied nothing — update the fixture, do not delete it`);
+    assert.deepEqual(firing(doc), expected, `the "${what}" fixture did not fire exactly the pins it is here to exercise`);
   });
 }
 
@@ -226,9 +235,9 @@ for (const [what, expected, mutate] of mutants) {
 // review word in the next. The fixture is benign and reds the moment the scan
 // reads the raw slice instead of `sentences()`.
 test("a need word in one sentence does not pair with the next sentence's review word", () => {
-  const mutated = appendTo(Pin.phrase("stranding the rows behind it."), "Nothing here needs one. A reviewer is for ticket work.")(RUN_TEAM);
-  assert.notEqual(mutated, RUN_TEAM, "an accept fixture no longer matches the prose and applied nothing — update it");
-  assert.deepEqual(firing(mutated), [], "a need word paired with a word in the NEXT sentence");
+  const doc = withEdit("skill", appendTo(Pin.phrase("stranding the rows behind it."), "Nothing here needs one. A reviewer is for ticket work."));
+  assert.notEqual(doc.skill, DOC.skill, "an accept fixture no longer matches the prose and applied nothing — update it");
+  assert.deepEqual(firing(doc), [], "a need word paired with a word in the NEXT sentence");
 });
 
 // KNOWN GAP: NO_COMMIT only fires when the negation sits immediately before
@@ -236,9 +245,9 @@ test("a need word in one sentence does not pair with the next sentence's review 
 // sentence, semantically identical, evades it. Documented here as an accepted
 // limitation rather than left silently unpinned.
 test("KNOWN GAP: a negation of the commit duty placed away from the verb evades NO_COMMIT", () => {
-  const mutated = appendTo(COMMIT_DUTY, "On reflection, don't actually do any of that.")(RUN_TEAM);
-  assert.notEqual(mutated, RUN_TEAM, "the fixture no longer matches the prose — update it");
-  assert.deepEqual(firing(mutated), [], "NO_COMMIT now catches a non-adjacent negation — if intentional, narrow this comment/test rather than deleting them silently");
+  const doc = withEdit("closeOut", appendTo(COMMIT_DUTY, "On reflection, don't actually do any of that."));
+  assert.notEqual(doc.closeOut, DOC.closeOut, "the fixture no longer matches the prose — update it");
+  assert.deepEqual(firing(doc), [], "NO_COMMIT now catches a non-adjacent negation — if intentional, narrow this comment/test rather than deleting them silently");
 });
 
 // The accept direction, and the half that decides whether these pins survive
@@ -252,16 +261,16 @@ test("reflowing both slices and rewording unpinned sentences inside them stays g
   // the slice, blank lines included, which is a harsher edit than any real
   // rewrap and is the point.
   const rules = artifactRules();
-  let benign = RUN_TEAM.replace(rules, () => rules.replace(/\n/g, " "));
+  const closeOut = CLOSE_OUT.replace(rules, () => rules.replace(/\n/g, " "))
+    .replace(Pin.phrase("is how it gets discarded by the next `git checkout` with nothing to show it ever ran"),
+      "is how it gets lost at the next `git checkout`");
   const bullet = invariant();
-  benign = benign.replace(bullet, () => bullet.replace(/\n {2}/g, " "));
   // Two unrelated rewords: one inside the metrics-PR slice and one inside the
   // invariant slice — the sentence that explains the rule, never the sentence
   // that states it.
-  benign = benign
-    .replace(Pin.phrase("is how it gets discarded by the next `git checkout` with nothing to show it ever ran"),
-      "is how it gets lost at the next `git checkout`")
+  const skill = RUN_TEAM.replace(bullet, () => bullet.replace(/\n {2}/g, " "))
     .replace(Pin.phrase("stranding the rows behind it"), "rather than leaving the rows stranded behind a question nobody owns");
-  assert.notEqual(benign, RUN_TEAM, "the benign-edit fixture applied nothing — update it");
-  assert.deepEqual(firing(benign), [], "a reflow plus unrelated rewords reddened a pin — the pins are over-tight, not the docs wrong");
+  assert.notEqual(closeOut, CLOSE_OUT, "the benign-edit fixture applied nothing to the close-out file — update it");
+  assert.notEqual(skill, RUN_TEAM, "the benign-edit fixture applied nothing to SKILL.md — update it");
+  assert.deepEqual(firing({ skill, closeOut }), [], "a reflow plus unrelated rewords reddened a pin — the pins are over-tight, not the docs wrong");
 });

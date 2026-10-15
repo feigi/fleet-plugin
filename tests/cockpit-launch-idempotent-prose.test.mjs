@@ -65,11 +65,11 @@ import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+const PHASE0 = Pin.file(join(REPO, "skills", "run-team", "references", "phase-0.md"));
 
 // The whole bullet, bounded by its own blank line — the bound the two
 // sibling bullets above it already use in `instrument-check-prose.test.mjs`.
-const LAUNCH_STEP = () => RUN_TEAM.paragraph("**Launch the cockpit.**", "run-team phase 0 cockpit-launch bullet", "The spend panel reads this workspace's").text;
+const LAUNCH_STEP = () => PHASE0.paragraph("**Launch the cockpit.**", "phase-0 cockpit-launch bullet", "The spend panel reads this workspace's").text;
 
 test("phase 0 runs the cockpit launch on every pass, not just the first", () => {
   const step = LAUNCH_STEP();

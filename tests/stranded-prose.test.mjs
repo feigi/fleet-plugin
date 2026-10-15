@@ -8,15 +8,15 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 
-const RUN_TEAM = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"));
-const step = () => RUN_TEAM.between("**Resume the claims a dead run left without a PR", "1. **Build the Shortlist**",
-  "run-team stranded-claim step").text;
+// The phase-0 step paragraphs live in the reference file, one heading per step.
+const PHASE0 = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "references", "phase-0.md"));
+const step = () => PHASE0.section("## Resume the claims a dead run left without a PR", "phase-0 stranded-claim step").text;
 
 test("the stranded-claim step runs stranded.mjs after the rotation and reads prior, never the record", () => {
   const s = step();
   assert.match(s, Pin.phrase("`~/.fleet/bin/fleet-run stranded.mjs` lists and classifies; you dispatch."));
   assert.match(s, Pin.phrase("It reads the `prior` rotate just recorded, never the record itself, which names this run's own live controller"));
-  assert.ok(RUN_TEAM.text.indexOf("**Rotate the ledger before the fold-in") < RUN_TEAM.text.indexOf("**Resume the claims a dead run left"),
+  assert.ok(PHASE0.text.indexOf("**Rotate the ledger before the fold-in") < PHASE0.text.indexOf("**Resume the claims a dead run left"),
     "the step reads the prior rotate writes, so it must come after the rotation");
 });
 

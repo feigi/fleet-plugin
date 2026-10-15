@@ -38,16 +38,18 @@ test("review-core keeps no /tmp/review-pr fallback and resolves a missing scratc
 test("run-team names scratch-root.mjs where it first defines <scratch>, and in each dispatch template that carries one", () => {
   const flat = (t) => t.replace(/\s+/g, " ");
   const skill = flat(read("skills", "run-team", "SKILL.md"));
+  // The recipe deriver's dispatch paragraph moved to the phase-0 reference file.
+  const phase0 = flat(read("skills", "run-team", "references", "phase-0.md"));
   assert.match(skill, /\*\*The scratch root is computed, never invented and never recorded\.\*\*/);
-  for (const [what, needle] of [
-    ["recipe deriver", "`<scratch>` is the absolute path `scratch-root.mjs` prints"],
-    ["implementer", "`<scratch>` as `scratch-root.mjs` printed it"],
-    ["review runner", "the absolute path `scratch-root.mjs` prints, never the review side's"],
-    ["fix-applier", "Every `<scratch>` in that prompt is the absolute path `scratch-root.mjs` printed"],
-    ["finisher", "`<scratch>` is the absolute root your dispatch prompt names"],
-    ["merge bot", "Its prompt names the absolute `<scratch>` (`scratch-root.mjs`'s output)"],
+  for (const [what, doc, file, needle] of [
+    ["recipe deriver", phase0, "references/phase-0.md", "`<scratch>` is the absolute path `scratch-root.mjs` prints"],
+    ["implementer", skill, "SKILL.md", "`<scratch>` as `scratch-root.mjs` printed it"],
+    ["review runner", skill, "SKILL.md", "the absolute path `scratch-root.mjs` prints, never the review side's"],
+    ["fix-applier", skill, "SKILL.md", "Every `<scratch>` in that prompt is the absolute path `scratch-root.mjs` printed"],
+    ["finisher", skill, "SKILL.md", "`<scratch>` is the absolute root your dispatch prompt names"],
+    ["merge bot", skill, "SKILL.md", "Its prompt names the absolute `<scratch>` (`scratch-root.mjs`'s output)"],
   ]) {
-    assert.ok(skill.includes(needle), `run-team/SKILL.md: the ${what} dispatch no longer says where <scratch> comes from`);
+    assert.ok(doc.includes(needle), `run-team/${file}: the ${what} dispatch no longer says where <scratch> comes from`);
   }
 });
 
