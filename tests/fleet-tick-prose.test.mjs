@@ -362,3 +362,26 @@ test("the ask-by-name paragraph reads a missing message off the tick's SETTLE li
     Pin.phrase("The tick prints `SETTLE <member>` for a report file on disk, so a missing message is read off that line before anyone is pinged."),
     "the ask-by-name paragraph no longer sends the controller to the tick's SETTLE line before a ping");
 });
+
+// The transcript-listing tick rows, each with its remedy, read inside its own
+// list item so a sibling row's words cannot satisfy it.
+test("the UNRECORDED tick row names its remedy: record the dispatch on the ledger, or confirm it is a stranger's member", () => {
+  const row = RUN_TEAM.bullet("- `UNRECORDED <stem> (transcript exists, no ledger token)`", "- `NO-TRANSCRIPT <member>", "run-team UNRECORDED row").text;
+  assert.match(row, Pin.phrase("Record it with `ledger.mjs dispatch` or `ledger.mjs review`, or confirm it is a stranger's member."));
+  assert.match(row, Pin.phrase("it resets no `quiet`, changes no row and frees no slot"));
+  assert.match(row, Pin.phrase("(`…; UNRECORDED <stem> persists — …`)"));
+});
+
+test("the NO-TRANSCRIPT tick row names its remedy: make the task call, or settle the token killed; and where the session directory comes from", () => {
+  const row = RUN_TEAM.bullet("- `NO-TRANSCRIPT <member> (live <age>m, no <session>/<member>.jsonl)`", "**Tier guards under Pull.**", "run-team NO-TRANSCRIPT row").text;
+  assert.match(row, Pin.phrase("Make the `task` call, or settle the token `killed`."));
+  assert.match(row, Pin.phrase("`--no-transcript-after` minutes ago (default 5)"));
+  assert.match(row, Pin.phrase("`…; NO-TRANSCRIPT <member> persists — …`"));
+  assert.match(row, Pin.phrase("Both lines read the session directory this run's phase-0 receipt names, else `--session <dir>`; with neither the tick skips them with one stderr line."));
+});
+
+test("ADR 0028's Status line records that the tick now reads the session directory's listing, and still no transcript's contents", () => {
+  const adr = Pin.file(join(import.meta.dirname, "..", "docs", "adr", "0028-a-live-token-past-its-p99-points-the-controller-at-the-registry-census.md"));
+  const status = adr.paragraph("**Status:**", "ADR 0028 Status line", "## Context").text;
+  assert.match(status, Pin.phrase("Amended by #3201: the tick reads the session directory's listing to reconcile ledger tokens; it still reads no transcript's contents and no registry."));
+});

@@ -32,7 +32,7 @@ test("the rotate step says what an ancestor rotate carries, and that dead and no
     "the rotate step must say which names retire");
   assert.match(s, Pin.phrase("`dispatch` refuses a retired name and names the replacement"), "and that dispatch reads them");
   assert.match(s, Pin.phrase("`review` refuses a retired runner name and names the next free reviewer name"), "and that review does");
-  assert.match(s, Pin.phrase("The tick never reads `## Retired`"), "and the accepted non-goal: a retired ticket is not claimed");
+  assert.match(s, Pin.phrase("The tick reads `## Retired` only to account for a transcript in the session directory: a ticket an earlier run worked is not claimed by it"), "and the accepted non-goal: a retired ticket is not claimed");
   assert.doesNotMatch(s, /Nothing is carried forward/, "the unconditional no-carry claim must be gone");
   assert.doesNotMatch(s, /Member-killed row's check/, "the ancestor case is the carry's now, not the Member-killed check's");
 });

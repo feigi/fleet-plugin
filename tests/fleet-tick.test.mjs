@@ -1659,10 +1659,11 @@ console.log(JSON.stringify({ file, ...JSON.parse(payload) }));
 `;
 
 // The ledger on disk, in the layout ledger.mjs's save() writes.
-const ledgerText = ({ rows = [], dispatched = [], drain = null } = {}) => {
+const ledgerText = ({ rows = [], dispatched = [], drain = null, retired = [] } = {}) => {
   const list = (xs) => xs.map((x) => `- ${x}`).join("\n");
   return `# Fleet run ledger\n\n## Rows\n\n${list(rows)}\n\n## Dispatched\n\n${list(dispatched)}\n\n## Filed\n\n\n\n## Ruled\n\n`
-    + (drain === null ? "" : `\n\n## Drain\n\n- ${drain}`) + "\n";
+    + (drain === null ? "" : `\n\n## Drain\n\n- ${drain}`)
+    + (retired.length === 0 ? "" : `\n\n## Retired\n\n${list(retired)}`) + "\n";
 };
 const shortlistText = (ns, scanned = ns.length, dropped) =>
   JSON.stringify({ scanned, shortlist: ns.map((n) => ({ n, t: `t${n}` })), ...(dropped === undefined ? {} : { dropped }) });
@@ -1693,11 +1694,13 @@ const receiptOf = ({ run = null, session = "/s", steps = {} } = {}) => ({
 // phase-0 receipt, written after `afterBaseline`: by default every step `ok`
 // and `run` the `at` of the controller record in the state file the tick
 // reads, so the gate lets dispatch through; `false` writes none; a function
-// maps that default receipt to the case's own.
+// maps that default receipt to the case's own. `transcripts`, when given, are
+// the stems of the `<stem>.jsonl` files in that receipt's session directory,
+// `<dir>/session`, which no case has otherwise.
 function runCli(args = [], {
   prs = [], ledger, shortlist, refresh = shortlistText([]), refreshFail = false,
   issueStates = {}, prStates = {}, claimed = [], candidates, env: extraEnv = {}, defaultState = false, keep = false, beforeRun = () => {},
-  baseline = true, afterBaseline = () => {}, phase0 = (receipt) => receipt,
+  baseline = true, afterBaseline = () => {}, phase0 = (receipt) => receipt, transcripts,
 } = {}) {
   // On macOS tmpdir() is /var -> /private/var; resolving it up front makes
   // every path below the resolved one. (A symlinked path no longer stops a
@@ -1732,6 +1735,10 @@ function runCli(args = [], {
     if (ledger !== undefined) writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText(ledger));
     if (shortlist !== undefined) writeFileSync(join(repo, ".fleet", "shortlist.json"), shortlist);
     beforeRun(repo);
+    if (transcripts !== undefined) {
+      mkdirSync(join(dir, "session"));
+      for (const stem of transcripts) writeFileSync(join(dir, "session", `${stem}.jsonl`), "");
+    }
     if (baseline) {
       const rec = spawnBounded(process.execPath, [join(bin, "main-checkout.mjs"), "--record"], { cwd: repo });
       assert.equal(rec.status, 0, rec.stderr);
@@ -3805,6 +3812,8 @@ const AGED = {
     ],
     dispatched: ["impl-3=PR#5", "impl-4=PR#6", "fix-pr-5"],
   },
+  // Every member it dispatched wrote its transcript.
+  transcripts: ["impl-3", "impl-4", "fix-pr-5"],
 };
 // The state file the fixture's tick reads, written before it runs: `seen`
 // stamps `agoMin` minutes old, and whatever else the case needs.
@@ -4258,4 +4267,128 @@ test("deriveRun: reporters are every unsettled member token — never a settled 
     drain: null,
   }, [pr(5), pr(6), pr(7), pr(10), pr(12)]);
   assert.deepEqual([...run.reporters].sort(), ["fix-pr-5", "impl-13", "merge-bot-1"]);
+});
+
+// ---------------------------------------------------------------------------
+// UNRECORDED / NO-TRANSCRIPT: the session directory's listing against the
+// ledger's tokens. Advisory, like CHECK-LIVENESS: no row, no `quiet`, no slot.
+import { transcriptStems, unrecordedLines, noTranscriptLines } from "../plugin/scripts/fleet-tick.mjs";
+
+test("transcriptStems: the stem of every .jsonl name once, sorted; nothing else in the listing", () => {
+  assert.deepEqual(transcriptStems(["impl-9.jsonl", "impl-12-b.jsonl", "notes.txt", "impl-9.jsonl", "agent-abc123.jsonl", "impl-3.json"]),
+    ["agent-abc123", "impl-12-b", "impl-9"]);
+});
+
+test("unrecordedLines: a member-named stem the ledger records nowhere prints UNRECORDED, any family and retry letters included; a recorded stem and a stem that is no member's name print nothing", () => {
+  const recorded = new Set(["impl-3", "fix-pr-5", "impl-7"]);
+  const stems = ["agent-abc123", "finisher-pr-4", "fix-pr-5", "impl-12-b", "impl-3", "impl-7", "merge-bot-2", "review-pr-6"];
+  assert.deepEqual(unrecordedLines({ stems, recorded }), ["finisher-pr-4", "impl-12-b", "merge-bot-2"].map((name) => ({
+    kind: "UNRECORDED", name, line: `UNRECORDED ${name} (transcript exists, no ledger token)`, key: `UNRECORDED ${name} (transcript exists, no ledger token)`,
+  })));
+  assert.deepEqual(unrecordedLines({ stems: ["impl-3", "fix-pr-5"], recorded }), [], "every stem the ledger records is accepted");
+});
+
+test("deriveRun: recorded is every member name on a row, in ## Dispatched and in ## Retired, settled or live; a ledger with no ## Retired records the rest", () => {
+  const ledger = { rows: ["#3 impl-3=PR#5 → PR#5 · fix-pr-5=applied:abc1234"], dispatched: ["impl-3=PR#5", "merge-bot-1"], drain: null };
+  const prs = [pr(5)];
+  assert.deepEqual([...deriveRun({ ...ledger, retired: ["impl-2", "review-pr-4"] }, prs).recorded].sort(), ["fix-pr-5", "impl-2", "impl-3", "merge-bot-1", "review-pr-4"]);
+  assert.deepEqual([...deriveRun(ledger, prs).recorded].sort(), ["fix-pr-5", "impl-3", "merge-bot-1"]);
+});
+
+test("noTranscriptLines: a live member token first seen more than `after` minutes ago with no transcript prints NO-TRANSCRIPT; one with a transcript, one at the threshold and a review launch print nothing; the key drops the age", () => {
+  const now = 1_000_000_000_000;
+  const seen = { "impl-12": now - 6 * MIN, "fix-pr-5": now - 60 * MIN, "merge-bot-1": now - 5 * MIN, "review:PR#6": now - 60 * MIN, "impl-13": now - 5 * MIN - 1 };
+  const live = ["impl-12", "fix-pr-5", "merge-bot-1", "review:PR#6", "impl-13", "impl-14"];
+  assert.deepEqual(noTranscriptLines({ live, seen, stems: ["fix-pr-5"], session: "/s/run", after: 5, now }), [
+    { kind: "NO-TRANSCRIPT", name: "impl-12", key: "NO-TRANSCRIPT impl-12", line: "NO-TRANSCRIPT impl-12 (live 6m, no /s/run/impl-12.jsonl)" },
+    { kind: "NO-TRANSCRIPT", name: "impl-13", key: "NO-TRANSCRIPT impl-13", line: "NO-TRANSCRIPT impl-13 (live 5m, no /s/run/impl-13.jsonl)" },
+  ]);
+  assert.deepEqual(noTranscriptLines({ live, seen, stems: ["fix-pr-5"], session: "/s/run", after: 10, now }), [],
+    "a longer threshold names nobody under it");
+});
+
+// A live implementer with no transcript, a live fix-applier with one, a
+// settled implementer, a retired name and a stranger in the session directory.
+const SESSIONED = {
+  shortlist: shortlistText([]), refresh: shortlistText([]), prs: [pr(5)],
+  ledger: {
+    rows: ["#3 impl-3=PR#5 → PR#5 · tier-ok=impl-3:fleet-implementer-slow-high · reviewed=abc1234:1/0/0:run-abcdefgh · fix-pr-5", "#12 impl-12 · tier-ok=impl-12:fleet-implementer-slow-high"],
+    dispatched: ["impl-3=PR#5", "fix-pr-5", "impl-12"],
+    retired: ["impl-7"],
+  },
+  transcripts: ["impl-3", "fix-pr-5", "impl-7", "impl-20", "agent-abc123"],
+};
+const transcriptLinesOf = (stdout) => stdout.split("\n").filter((l) => /^(UNRECORDED|NO-TRANSCRIPT) /.test(l));
+const withoutTranscripts = (stdout) => stdout.split("\n").filter((l) => !/^(UNRECORDED|NO-TRANSCRIPT) /.test(l)).join("\n");
+
+test("CLI: with a session directory, an unrecorded member stem prints UNRECORDED and a live token with no file prints NO-TRANSCRIPT only past the threshold, above the rows; a retired stem, a stranger's stem and a live token with a file print nothing; rows and quiet are the same either way", () => {
+  const old = runCli([], { ...SESSIONED, keep: true, beforeRun: seedState(seenAgo({ "impl-12": 10, "fix-pr-5": 10 })) });
+  const fresh = runCli([], { ...SESSIONED, keep: true, beforeRun: seedState(seenAgo({ "impl-12": 2, "fix-pr-5": 10 })) });
+  try {
+    assert.equal(old.status, 0, old.stderr);
+    assert.equal(fresh.status, 0, fresh.stderr);
+    assert.deepEqual(transcriptLinesOf(old.stdout), [
+      "UNRECORDED impl-20 (transcript exists, no ledger token)",
+      `NO-TRANSCRIPT impl-12 (live 10m, no ${join(old.dir, "session", "impl-12.jsonl")})`,
+    ]);
+    assert.deepEqual(transcriptLinesOf(fresh.stdout), ["UNRECORDED impl-20 (transcript exists, no ledger token)"]);
+    const lines = old.stdout.split("\n");
+    assert.ok(lines.findIndex((l) => l.startsWith("NO-TRANSCRIPT")) < lines.findIndex((l) => l.startsWith("implementers")), "printed above the rows");
+    assert.equal(withoutTranscripts(old.stdout), withoutTranscripts(fresh.stdout));
+    assert.equal(stateOf(old).quiet, stateOf(fresh).quiet);
+    assert.equal(old.stderr, "", "a listed session directory says nothing on stderr");
+  } finally {
+    rmSync(old.dir, { recursive: true, force: true });
+    rmSync(fresh.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI --fold-unchanged: UNRECORDED and NO-TRANSCRIPT fold to the one line, each named on it, without resetting quiet", () => {
+  const ticks = ticksOver(["--fold-unchanged"], { ...SESSIONED, beforeRun: seedState(seenAgo({ "impl-12": 10, "fix-pr-5": 10 })) }, 2);
+  for (const t of ticks) assert.equal(t.status, 0, t.stderr);
+  assert.match(ticks[0].stdout, /^UNRECORDED impl-20 /m, "the tick that finds them is a change, so it prints in full");
+  for (const t of ticks.slice(1)) {
+    assert.deepEqual(t.stdout.trim().split("\n"), [
+      `fleet-tick: unchanged, nothing to act on (quiet=${ticks.indexOf(t) + 1}); UNRECORDED impl-20 persists; NO-TRANSCRIPT impl-12 persists — full rows on the next change`,
+    ]);
+  }
+});
+
+test("CLI: the session is this run's receipt's, else --session; with neither the check is skipped with one stderr line; a directory not there yet lists no transcript, and one that cannot be listed skips the check", () => {
+  const SKIPPED = "fleet-tick: transcripts not checked — no session in this run's phase-0 receipt and no --session";
+  const aged = { ...SESSIONED, beforeRun: seedState(seenAgo({ "impl-12": 10, "fix-pr-5": 10 })) };
+  const tick = (args, fixture) => {
+    const r = runCli(args, { ...aged, ...fixture });
+    assert.equal(r.status, 0, r.stderr);
+    return { lines: transcriptLinesOf(r.stdout).map((l) => l.replace(/\(live \d+m, no .*\)$/, "(…)")), stderr: r.stderr.trim().split("\n").filter((l) => l.startsWith("fleet-tick: transcripts")) };
+  };
+  const other = mkdtempSync(join(tmpdir(), "fleet-tick-session-"));
+  try {
+    writeFileSync(join(other, "impl-12.jsonl"), "");
+    writeFileSync(join(other, "fix-pr-5.jsonl"), "");
+    const both = ["UNRECORDED impl-20 (transcript exists, no ledger token)", "NO-TRANSCRIPT impl-12 (…)"];
+    assert.deepEqual(tick(["--session", other], {}), { lines: both, stderr: [] }, "the receipt's session outranks --session");
+    const noSession = (r) => ({ ...r, session: "" });
+    assert.deepEqual(tick(["--session", other], { phase0: noSession }), { lines: [], stderr: [] }, "--session when the receipt names none");
+    assert.deepEqual(tick([], { phase0: noSession }), { lines: [], stderr: [SKIPPED] });
+    assert.deepEqual(tick([], { phase0: false }), { lines: [], stderr: [SKIPPED] }, "no receipt at all");
+    assert.deepEqual(tick([], { transcripts: undefined }), { lines: ["NO-TRANSCRIPT fix-pr-5 (…)", "NO-TRANSCRIPT impl-12 (…)"], stderr: [] },
+      "a session directory not there yet holds no transcript");
+    const file = join(other, "impl-12.jsonl");
+    const unlisted = tick(["--session", file], { phase0: noSession });
+    assert.deepEqual(unlisted.lines, []);
+    assert.deepEqual(unlisted.stderr, [`fleet-tick: transcripts not checked — cannot list ${file} (ENOTDIR)`]);
+  } finally {
+    rmSync(other, { recursive: true, force: true });
+  }
+});
+
+test("CLI: --no-transcript-after sets the NO-TRANSCRIPT threshold in minutes, and must be at least 1", () => {
+  const aged = { ...SESSIONED, beforeRun: seedState(seenAgo({ "impl-12": 10, "fix-pr-5": 10 })) };
+  const named = (args) => transcriptLinesOf(runCli(args, aged).stdout).filter((l) => l.startsWith("NO-TRANSCRIPT")).length;
+  assert.equal(named(["--no-transcript-after", "9"]), 1);
+  assert.equal(named(["--no-transcript-after", "11"]), 0);
+  const zero = runCli(["--no-transcript-after", "0"], aged);
+  assert.notEqual(zero.status, 0);
+  assert.match(zero.stderr, /--no-transcript-after must be at least 1, got 0/);
 });
