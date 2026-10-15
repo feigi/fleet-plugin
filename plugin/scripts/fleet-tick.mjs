@@ -637,10 +637,9 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
     // fix-applier is still working the conflict.
     // `reviewFixed`: a REVIEW fix-applier landed after the latest
     // `reviewed=` — one read while no hold stood unresolved. The one read
-    // while a hold did is the conflict fix-applier `ledger.mjs dispatch` named
-    // a `fleet-implementer-<cell>`: it rebases and never sees the review file,
-    // so it clears the hold and answers no finding. Each fix-applier
-    // does one of those jobs once, so its landing folds once per PR
+    // while a hold did is the conflict fix-applier: it rebases and never sees
+    // the review file, so it clears the hold and answers no finding. Each
+    // fix-applier does one of those jobs once, so its landing folds once per PR
     // (`fixLanded`), however many copies of its token the rows carry.
     // `fixMembers`: every fix-applier on this PR, wherever its token sits —
     // one still unsettled anywhere holds the PR off fixDue, since `dispatch`
@@ -927,8 +926,8 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     unlabelled: unlabelledFinishers({ rows, dispatched },
       new Set(prs.filter((p) => !isQueued(p)).map((p) => p.number))),
     // Every PR, open or not, on a conflict hold no fix-applier has cleared —
-    // the one reading of a hold: `ledger.mjs dispatch` names a
-    // fix-applier's definition and refuses a finisher off this list, so it
+    // the one reading of a hold: `ledger.mjs dispatch` refuses a finisher off
+    // this list, so it
     // answers the same per-PR fold this tick holds the merge on, split rows
     // and a settle made anywhere included, rather than re-deriving it from
     // one row's text.

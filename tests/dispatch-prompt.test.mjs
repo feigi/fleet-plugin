@@ -102,8 +102,8 @@ const CASES = [
   { role: "fix-applier", kind: "review", args: { worktree: "/abs/wt-fix", branch: "fix-branch", testCmd: "TESTCMD-1", scratch: "/abs/scratch-fix", pr: "3293", run: "run-AbCd1234" } },
   { role: "fix-applier", kind: "conflict", args: { worktree: "/abs/wt-conflict", branch: "conflict-branch", testCmd: "TESTCMD-2" } },
   { role: "fix-applier", kind: "dispositions-retry", args: { worktree: "/abs/wt-retry", branch: "retry-branch", testCmd: "TESTCMD-3", scratch: "/abs/scratch-retry", pr: "3294", run: "run-ZyXw9876", "mismatched-record": "/abs/scratch-retry/dispositions-fix-pr-3294.json", violations: "VIOLATION-LIST-1" } },
-  { role: "finisher", kind: "fresh", args: { worktree: "/abs/wt-fin", pin: PIN, pr: "3295", testCmd: "TESTCMD-4" } },
-  { role: "finisher", kind: "repair", args: { worktree: "/abs/wt-fin-r", pin: PIN, pr: "3296", testCmd: "TESTCMD-5" } },
+  { role: "finisher", kind: "fresh", args: { worktree: "/abs/wt-fin", pin: PIN, pr: "3295", testCmd: "TESTCMD-4", scratch: "/abs/scratch-fin" } },
+  { role: "finisher", kind: "repair", args: { worktree: "/abs/wt-fin-r", pin: PIN, pr: "3296", testCmd: "TESTCMD-5", scratch: "/abs/scratch-fin-r" } },
   { role: "merge-bot", kind: null, args: { n: "17", scratch: "/abs/scratch-bot" } },
   { role: "review-runner", kind: null, args: { pr: "3297", branch: "rr-branch", worktree: "/abs/wt-rr", testCmd: "TESTCMD-6", scratch: "/abs/scratch-root" } },
   { role: "recipe-deriver", kind: null, args: { repo: "/abs/repo-x", scratch: "/abs/scratch-rd" } },
@@ -287,40 +287,23 @@ test("a value is inserted verbatim, whatever replacement syntax it holds", () =>
   assert.ok(r.out.includes("Run `echo $& $1 $$ $`` from the worktree"), r.out);
 });
 
-// --- the seed text ---------------------------------------------------------
+// --- the golden briefs -----------------------------------------------------
 
-// The quoted blocks SKILL.md carries are the source the templates were seeded
-// from. They are read here by their own marker — a run of lines each opening
-// with `>` — and unquoted by removing that marker and the one space after it.
-function quotedRun(firstLine) {
-  const lines = SKILL_MD.split("\n");
-  const runs = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].startsWith(firstLine)) continue;
-    let j = i;
-    while (j < lines.length && lines[j].startsWith(">")) j++;
-    runs.push(lines.slice(i, j).map((l) => l.replace(/^> ?/, "")));
-  }
-  assert.equal(runs.length, 1, `expected exactly one quoted block opening ${JSON.stringify(firstLine)}`);
-  return runs[0].join("\n") + "\n";
+// Each rendered brief of the ledger-family roles is compared byte for byte with
+// a golden file the test owns, rendered from the CASES arguments above. What a
+// member's agent body carries is pinned beside this, in member-bodies-split.test.mjs; a
+// brief that regained a line the body owns, or lost a per-dispatch line, is red
+// here.
+const GOLDEN = fileURLToPath(new URL("./fixtures/rendered-briefs/", import.meta.url));
+const goldenName = (c) => [c.role, c.kind].filter(Boolean).join("-") + ".md";
+
+for (const c of CASES.filter((x) => ["fix-applier", "finisher", "merge-bot"].includes(x.role))) {
+  test(`render ${label(c)} prints its golden brief, placeholders filled`, () => {
+    const r = render(argvOf(c));
+    assert.equal(r.status, 0, r.err);
+    assert.equal(r.out, readFileSync(join(GOLDEN, goldenName(c)), "utf8"));
+  });
 }
-const fill = (text, values) => text.replace(/<([A-Za-z][^<>\n]*)>/g, (whole, inner) => (inner in values ? values[inner] : whole));
-
-test("render finisher prints the finisher blocks SKILL.md carries, placeholders filled", () => {
-  const c = CASES.find((x) => x.role === "finisher" && x.kind === "fresh");
-  const expected = [
-    "> **Re-check the instrument set before you act",
-    "> **A test run is a verdict only if it ran to completion",
-    "> **Duty 3 is one script",
-    "> **Duty 1 is one script",
-  ]
-    .map(quotedRun)
-    .join("\n");
-  const values = { testCmd: c.args.testCmd, "abs-path": c.args.worktree, "your dispatch pin": c.args.pin, M: c.args.pr };
-  const r = render(argvOf(c));
-  assert.equal(r.status, 0, r.err);
-  assert.equal(r.out, fill(expected, values));
-});
 
 test("render finisher repair is the fresh brief plus a repair section", () => {
   const fresh_ = CASES.find((x) => x.role === "finisher" && x.kind === "fresh");
@@ -331,13 +314,8 @@ test("render finisher repair is the fresh brief plus a repair section", () => {
   assert.ok(out.length > base.length);
 });
 
-test("render fix-applier review prints the fix-applier block SKILL.md carries, placeholders filled", () => {
-  const c = CASES.find((x) => x.role === "fix-applier" && x.kind === "review");
-  const values = { "abs-path": c.args.worktree, branch: c.args.branch, testCmd: c.args.testCmd, scratch: c.args.scratch, pr: c.args.pr, run: c.args.run };
-  const r = render(argvOf(c));
-  assert.equal(r.status, 0, r.err);
-  assert.equal(r.out, fill(quotedRun("> You are ALREADY in worktree `<abs-path>`, whose PR branch is `<branch>`"), values));
-});
+// The recipe deriver's seed text is still the quoted block SKILL.md carries.
+const fill = (text, values) => text.replace(/<([A-Za-z][^<>\n]*)>/g, (whole, inner) => (inner in values ? values[inner] : whole));
 
 test("render recipe-deriver prints the recipe-deriver block SKILL.md carries, placeholders filled", () => {
   const c = CASES.find((x) => x.role === "recipe-deriver");

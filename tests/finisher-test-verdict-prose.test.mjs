@@ -6,12 +6,12 @@
 // `cancelled` above 0 does not tell the two runs apart: a failing `before` hook
 // or a per-test `timeout` cancels tests inside a run that completed, so the
 // block tells the finisher to judge a run by how it ended.
-// The finisher's agent definition carries no duty text, so the rule reaches
-// it only through the verbatim block the controller hands over — which is
+// The rule is stated in two places: the finisher's agent body carries a copy
+// of the block (held sentence by sentence by member-bodies-split.test.mjs),
+// and SKILL.md holds the block the controller's duty list quotes — which is
 // what this file pins, one sentence per pin so a clause deleted from inside
-// the block reds its own pin rather than being satisfied by a neighbour. The
-// lead-in paragraph above the block is what tells the controller to hand it
-// over, and is pinned on its own.
+// the block reaches its own pin rather than being satisfied by a neighbour. The
+// lead-in paragraph above the block names it and is pinned on its own.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -94,8 +94,7 @@ test("a completed run that exits 1 and a zero-test run keep their own verdicts",
   assert.match(sentenceWith(/Exit 0 with `tests 0`/, "zero-test run"), /Exit 0 with `tests 0` stays FAILED/);
 });
 
-// The block reaches a finisher only because the controller is told to hand it
-// over, and the same sentence says what duty 2 uses `<testCmd>` for.
+// The lead-in paragraph above the block says what duty 2 uses `<testCmd>` for.
 test("the lead-in tells the controller to hand the verdict rule over, and says duty 2 runs testCmd for the acceptance mutation", () => {
   const p = RUN_TEAM.paragraph("Give the finisher the test-run verdict rule verbatim too.", "the verdict block's lead-in", "> **A test run is a").text.replace(/\s+/g, " ");
   assert.match(p, /^Give the finisher the test-run verdict rule verbatim too\.\*\* Duty 2 runs `<testCmd>` for the acceptance mutation,/);

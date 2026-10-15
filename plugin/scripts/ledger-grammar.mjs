@@ -651,22 +651,16 @@ export function expectedDefinition(rowText) {
 // The agent definition a member is dispatched as, for a parsed member
 // and the text of the row it works: `ledger.mjs dispatch` prints it so the
 // `task` call that follows names it off a script's output, not off prose a
-// compaction drops. A fix-applier on an unresolved conflict hold of its own PR
-// is a `fleet-implementer-<POLICY_CELL>` whatever the row's `tier=` —
-// it rebases the PR, it does not work a ticket at a tier. Any other fix-applier is a review
-// one and gets null: a generic `task` by design. Whether the hold is
-// unresolved is `conflictHeld`, the caller's to supply from fleet-tick.mjs's
-// deriveRun() — the reading the tick holds the merge on, which folds every
-// row of the PR, never one row's text alone. Throws whatever
-// expectedDefinition throws, and throws on a family this switch has no case
-// for: null is the review fix-applier's deliberate answer, so a
-// `default: return null` would print a new family as a generic `task`
-// without anyone having decided it is one.
-/** @returns {string|null} the definition name; null only for a review fix-applier. */
-export function agentDefinition(member, rowText, conflictHeld = false) {
+// compaction drops. A fix-applier is `fleet-fix-applier` for every kind of
+// work — a review's findings, a conflict hold, a dispositions retry — whatever
+// the row says. Throws whatever expectedDefinition throws, and throws on a
+// family this switch has no case for: a `default` answer would print a new
+// family as a definition without anyone having decided it is one.
+/** @returns {string} the definition name. */
+export function agentDefinition(member, rowText) {
   switch (member.family) {
     case "impl": return expectedDefinition(rowText);
-    case "fix-pr": return conflictHeld ? `fleet-implementer-${POLICY_CELL}` : null;
+    case "fix-pr": return "fleet-fix-applier";
     case "finisher-pr": return "fleet-finisher";
     case "merge-bot": return "fleet-merge-bot";
     default: throw new Error(`agentDefinition has no case for member family '${member.family}' (${member.name}) — add one to ledger-grammar.mjs`);

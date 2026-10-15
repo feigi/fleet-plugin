@@ -59,9 +59,10 @@ const FINISHER = { kind: "sub", id: "finisher-pr-9", name: "fleet-finisher", dep
 const CHILD = { kind: "sub", id: "impl-42.Probe", name: "task", depth: 2, parentId: "impl-42" };
 const UNRELATED = { kind: "sub", id: "0-Explore", name: "explore", depth: 1, parentId: "Main" };
 const MAIN = { kind: "main", id: "Main", name: "main", depth: 0 };
-// A fix-applier: dispatched under the generic `task` definition (no `fleet-`
-// prefix) directly by the controller, so only its own id names it.
-const FIX_APPLIER = { kind: "sub", id: "fix-pr-2246", name: "task", depth: 0, parentId: "Main" };
+// A fix-applier is dispatched as `fleet-fix-applier`; the untyped one is the
+// same member under a generic `task` definition, which only its own id names.
+const FIX_APPLIER = { kind: "sub", id: "fix-pr-2246", name: "fleet-fix-applier", depth: 0, parentId: "Main" };
+const FIX_APPLIER_UNTYPED = { ...FIX_APPLIER, name: "task" };
 
 let handler;
 memberWriteGuard({ on: (event, fn) => { if (event === "tool_call") handler = fn; } });
@@ -132,16 +133,25 @@ test("only fleet members and their children are guarded — nothing else in the 
   }
 });
 
-test("a fix-applier dispatched under the generic `task` definition is guarded by its own id, not its definition name", async () => {
-  await refused(FIX_APPLIER, "write", { path: "plugin/tool.mjs" }, ROOT, "a fix-applier's relative write");
-  await refused(FIX_APPLIER, "edit", { input: "[plugin/tool.mjs#ABCD]\nPUT 1.=1:\n+x\n" }, ROOT, "a fix-applier's edit");
-  await refused(FIX_APPLIER, "bash", { command: "true" }, ROOT, "a fix-applier's bash with no cwd");
-  await refused(FIX_APPLIER, "bash", { command: "true", cwd: ROOT }, WT, "a fix-applier's bash at the main checkout root");
-  await allowed(FIX_APPLIER, "write", { path: "plugin/tool.mjs" }, WT, "a fix-applier's write from its worktree");
-  await allowed(FIX_APPLIER, "bash", { command: "true", cwd: WT }, ROOT, "a fix-applier's bash cwd set to its worktree");
-  // The pattern is anchored: a generic `task` agent whose own id does not
-  // match `fix-pr-<n>` is nobody's fix-applier and stays unguarded — the
-  // existing UNRELATED/CHILD near-miss rows above already cover this shape.
+test("a fix-applier is guarded whether or not its definition name says so: bash by its own id, path writers by name or id", async () => {
+  for (const [agent, label] of [[FIX_APPLIER, "a fleet-fix-applier"], [FIX_APPLIER_UNTYPED, "an untyped fix-applier"]]) {
+    await refused(agent, "write", { path: "plugin/tool.mjs" }, ROOT, `${label}'s relative write`);
+    await refused(agent, "edit", { input: "[plugin/tool.mjs#ABCD]\nPUT 1.=1:\n+x\n" }, ROOT, `${label}'s edit`);
+    await refused(agent, "bash", { command: "true" }, ROOT, `${label}'s bash with no cwd`);
+    await refused(agent, "bash", { command: "true", cwd: ROOT }, WT, `${label}'s bash at the main checkout root`);
+    await allowed(agent, "write", { path: "plugin/tool.mjs" }, WT, `${label}'s write from its worktree`);
+    await allowed(agent, "bash", { command: "true", cwd: WT }, ROOT, `${label}'s bash cwd set to its worktree`);
+  }
+  // A recovery member (`-b`, `-c`, …) is the same fix-applier under a new name.
+  for (const id of ["fix-pr-88-b", "fix-pr-88-z"]) {
+    await refused({ ...FIX_APPLIER_UNTYPED, id }, "bash", { command: "true" }, ROOT, `an untyped fix-applier recovery member ${id}'s bash with no cwd`);
+  }
+  // The pattern is anchored at both ends and the suffix is one letter: a
+  // generic `task` agent whose own id merely resembles `fix-pr-<n>` is nobody's
+  // fix-applier and keeps its inherited cwd.
+  for (const id of ["fix-pr-7x", "xfix-pr-7", "myfix-pr-7", "fix-pr-", "fix-pr-7-bb", "fix-pr-7-"]) {
+    await allowed({ ...FIX_APPLIER_UNTYPED, id }, "bash", { command: "true" }, ROOT, `a task agent named ${id}'s bash with no cwd`);
+  }
 });
 
 test("bash: an implementer is refused from the main checkout, never from its worktree; nobody else is", async () => {

@@ -347,26 +347,26 @@ test("expectedDefinition refuses a tier= it cannot name one definition file by",
   assert.equal(expectedDefinition("impl-7 · tier=task-high · tier=task-high"), "fleet-implementer-task-high");
 });
 
-// #2330: null is a review fix-applier's deliberate "generic `task`", so a
-// family agentDefinition has no case for must throw, never read as one. This
-// walks every family parseMember can yield (MEMBER is built from
-// MEMBER_FAMILIES) — a family added to FAMILIES without a case here fails
+// A family agentDefinition has no case for must throw, never read as a
+// definition. This walks every family parseMember can yield (MEMBER is built
+// from MEMBER_FAMILIES) — a family added to FAMILIES without a case here fails
 // this test, not a dispatch.
 test("agentDefinition names a definition for every member family, and throws on one it has no case for", () => {
   const agents = join(import.meta.dirname, "..", "plugin", "agents");
   for (const family of MEMBER_FAMILIES) {
     const member = parseMember(`${family}-7`);
-    const definition = agentDefinition(member, "", true);
+    const definition = agentDefinition(member, "");
     assert.match(definition, /^fleet-/, `${family}: ${definition}`);
     // #2129 deleted the bare `fleet-implementer`: a name with no file behind
-    // it is what `ledger.mjs dispatch` refuses, so an untiered impl row or a
-    // conflict-hold fix-applier pointing at it would stop every such dispatch.
+    // it is what `ledger.mjs dispatch` refuses, so an untiered impl row
+    // pointing at it would stop every such dispatch.
     assert.ok(existsSync(join(agents, `${definition}.agent.md`)), `${family}: ${definition} has no agents/${definition}.agent.md`);
   }
-  // The must-ACCEPT half: the deliberate null is still null, not a throw.
-  assert.equal(agentDefinition(parseMember("fix-pr-7"), "", false), null);
+  // The must-ACCEPT half: a fix-applier is its own definition, whatever the row says.
+  assert.equal(agentDefinition(parseMember("fix-pr-7"), ""), "fleet-fix-applier");
+  assert.equal(agentDefinition(parseMember("fix-pr-7"), "impl-7=PR#7 · tier=task-high · conflict-hold:#7"), "fleet-fix-applier");
   assert.throws(
-    () => agentDefinition({ name: "review-pr-7", family: "review-pr", number: 7 }, "", false),
+    () => agentDefinition({ name: "review-pr-7", family: "review-pr", number: 7 }, ""),
     /no case for member family 'review-pr' \(review-pr-7\)/,
   );
 });

@@ -164,11 +164,12 @@ makes one up.
 ## Shell traps
 
 Monitor and Bash commands run under **zsh**, and the shell in this file is
-prescriptive — copied verbatim into a watcher or pasted into a bot's brief. So
-every trap here is a zsh-vs-bash difference that ships as a green-looking gate:
-correct in the shell you tested in, silently wrong in the one it runs in. Phase
-3's monitor paragraph and the **Merge bot**'s brief both point here
-instead of restating any of it; the one deliberate copy is named at the end.
+prescriptive — copied verbatim into a watcher or into the merge bot's agent
+body. So every trap here is a zsh-vs-bash difference that ships as a
+green-looking gate: correct in the shell you tested in, silently wrong in the
+one it runs in. Phase 3's monitor paragraph points here instead of restating
+any of it. The merge bot's agent body is the one place this block is copied
+whole (see **Merge bot**); the other deliberate copy is named at the end.
 
 **zsh word-splits an unquoted command substitution's result; it does NOT split
 an unquoted parameter expansion.** That one difference is the whole rule, and the
@@ -236,7 +237,7 @@ reads as a check that silently did not run. Same root cause as the `PIPESTATUS`
 trap, opposite failure direction — so name the variable anything else
 (`ci_status`).
 
-**The one deliberate copy is `env $cfg sh ./probe.sh`.** The first trap's
+**The other deliberate copy is `env $cfg sh ./probe.sh`.** The first trap's
 mechanism bites argv as well as loops, and that instance stays written out in the
 fix-applier prompt and every refuter brief under **Reviewers** rather than here,
 because the seats that inject faults are the ones that need it and a bot reads
@@ -2611,10 +2612,8 @@ is the same slot with a different job, and no review file to hand
 over. Name it `fix-pr-<M>`, or the next suffix (`-b`, `-c` …) when that name is
 already on record — `dispatch` refuses a reused one — and dispatch it with the
 `agent` that `ledger.mjs dispatch` printed, in the PR's existing worktree.
-`dispatch` reads the unresolved hold off the tick's own per-PR state — every
-row naming the PR, not one — and prints this member's own definition, whatever
-the row's `tier=` — read it off that output, never recall it; a review
-fix-applier's is `null`. Its prompt takes the prompt below's
+`dispatch` prints this member's definition, `fleet-fix-applier` whatever the
+row's `tier=` — read it off that output, never recall it. Its prompt takes the prompt below's
 worktree, branch and path discipline, but in place of its review paragraphs:
 bring `<branch>` current with `origin/main`, resolving every conflict by
 `run-merge-bot.md`'s **No-undo audit**, run `<testCmd>`, push, report the new
@@ -2623,8 +2622,8 @@ what lifts the tick's merge hold; a dispatched-but-live one does not, and
 `failed`/`killed` leave the PR fix-due for a replacement. It answers the
 hold and nothing else: survived or unverified findings of a returned review the row also carries
 stay unanswered through its settle, so the tick prints `DISPATCH fix-pr
-PR#<M>` again once it lands, and that one — `dispatch` now prints `null` —
-is a review fix-applier, dispatched as above. On a PR carrying
+PR#<M>` again once it lands, and that one is a review fix-applier, dispatched
+as above. On a PR carrying
 `ready-to-merge`, the push moves the head after the label, so the next merge
 bot refuses it `head-moved-after-label-#<M>`: a fresh finisher, per **Failure
 handling**.
@@ -2654,8 +2653,8 @@ bullets without the others and what strands is exactly the red-only PR.
 
 Name it `fix-pr-<M>`, or the next free suffix (`-b`, `-c` …) — `dispatch`
 refuses a reused name — record it with `ledger.mjs dispatch <pr#> <name>`
-before the call, and dispatch it with the `agent` that command printed (`null`
-while no conflict hold stands, as for a review fix-applier), in the PR's
+before the call, and dispatch it with the `agent` that command printed
+(`fleet-fix-applier`, as for a review fix-applier), in the PR's
 existing worktree. Its prompt takes the prompt below's worktree, branch and
 path discipline, but in place of its review paragraphs: read the failing job's
 log, fix the cause, run `<testCmd>`, push, report the new head, and **stop**.
@@ -3378,7 +3377,7 @@ each run a script the digest covers — `finisher-audit.mjs` (which runs
 `worktree-audit.sh`) and `ledger.mjs`, both under `plugin/scripts/` — and the
 label at duty 3 rests on what they returned. The rule is stated once, at the
 top of this file, which no finisher is dispatched to read, so it reaches one
-through this block or not at all:
+through this block, which `agents/fleet-finisher.agent.md` carries in its body:
 
 > **Re-check the instrument set before you act on what duty 1 or duty 2 read,
 > and again before you add the label.**
@@ -3400,7 +3399,7 @@ through this block or not at all:
 
 **Give the finisher the test-run verdict rule verbatim too.** Duty 2 runs
 `<testCmd>` for the acceptance mutation, and the finisher's agent definition
-says nothing about what a run that was cut short looks like. A `node --test`
+carries a copy of the rule below. A `node --test`
 stopped by an outside `timeout` still prints a summary, covering only the tests
 it reached, so reading that summary alone reads a partial suite as a whole one:
 
@@ -3470,8 +3469,8 @@ it reached, so reading that summary alone reads a partial suite as a whole one:
 > evidence; label nothing. A kill's evidence line goes in your report.
 
 **Give the finisher duty 3 verbatim as well, as one script.** The finisher's
-agent definition carries no duty text, so this brief is the whole of duty 3 it
-sees. Two finishers in one run read the release-label check as the whole duty
+agent definition carries this block in its body, so the brief does not repeat
+it. Two finishers in one run read the release-label check as the whole duty
 and reported `labelled` on a PR that never got the label, so the check and the
 label write are one command and the finisher never runs either alone:
 
@@ -3664,14 +3663,17 @@ deterministic, script-driven backstop run before every push specifically to
 catch a wrongly-resolved conflict, so the tier buys nothing that backstop
 doesn't already cover.
 
-**Put the shell traps in the bot's brief, not in a follow-up message.** A bot
-already looping cannot be corrected — the loop consumes the turns a correction
-would land in. **Every entry in Shell traps, verbatim** — that section is where
-they are stated once, and this is the seat that has to paste them: the bot
-reads an exit code off `gh pr update-branch`, `merge-gate.mjs` and
-`prove-merge.sh`, which is the `PIPESTATUS` and read-only-`status` pair, and its
-grace poll captures `gh pr list` output and loops over it, which is the
-assigned-variable trap. The brief always travels with the dispatch.
+**The shell traps live in the merge bot's agent body, not in its brief and not
+in a follow-up message.** A bot already looping cannot be corrected — the loop
+consumes the turns a correction would land in — so
+`agents/fleet-merge-bot.agent.md` carries **every entry in Shell traps**, copied
+from that section, and the bot has them before its first turn. The bot reads an
+exit code off `gh pr update-branch`, `merge-gate.mjs` and `prove-merge.sh`,
+which is the `PIPESTATUS` and read-only-`status` pair, and its grace poll
+captures `gh pr list` output and loops over it, which is the assigned-variable
+trap. Its brief names the bot and `<scratch>`, plus the one-line
+no-acknowledgement notice; do not paste the
+traps there. An edit to Shell traps lands in that body in the same change.
 
 **Its merge gate is one script, run twice.** Step 3 of `run-merge-bot.md` is
 `merge-gate.mjs --pr <n> --pre <sha> [--post <sha>]`: read-only, it runs the
@@ -4328,14 +4330,13 @@ live count from it, so nobody states one. Write neither by hand:
   merge-bot` names the next bot itself. It prints `{member, agent, ticket,
   line, created, total}`; `agent` is the definition the `task` call names — an
   implementer's comes off its row's `tier=` (phase 2's tier check states the
-  mapping), a finisher's and a merge bot's are their own definitions, a
-  review fix-applier's is `null`, and a conflict-hold fix-applier's is
-  `fleet-implementer-slow-high`: its own section says how it is dispatched. It
+  mapping), a finisher's and a merge bot's are their own definitions, and a
+  fix-applier's is `fleet-fix-applier` for every kind of work. It
   refuses a name this session already used — on the ledger or in its
   `## Retired` — and names the replacement (`-b`, `-c` …), a
   second live member on one ticket or PR, any implementer once the run is
   draining, an implementer whose row's `tier=` names no single definition
-  or one with no file under `agents/`, and a fix-applier on a ledger the tick
+  or one with no file under `agents/`, and a finisher on a ledger the tick
   itself refuses.
 - **`ledger.mjs settle <member> <outcome>`** — rewrites the token to
   `<member>=<outcome>` in both places. Outcomes: `impl-N` = `PR#M | bailed |

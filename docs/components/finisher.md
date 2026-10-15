@@ -9,8 +9,8 @@ durable, and applies the label the merge bot waits on.
 ## How it works
 1. **Dispatch trigger — a controller rule, not a tick row.** The
    controller dispatches
-   [`fleet-finisher`](../../plugin/agents/fleet-finisher.agent.md) — a
-   7-line stub whose duty list lives in
+   [`fleet-finisher`](../../plugin/agents/fleet-finisher.agent.md) — an agent
+   whose body carries the finisher's duties, and whose controller-side duty list lives in
    [`plugin/skills/run-team/SKILL.md`](../../plugin/skills/run-team/SKILL.md)
    — directly. Check green only makes a PR a *candidate*; the gate is
    the review has returned and its fix-applier, if dispatched, has
