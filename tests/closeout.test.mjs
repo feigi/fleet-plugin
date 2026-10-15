@@ -25,7 +25,13 @@ const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
 const REAL_SCRIPTS = join(PLUGIN, "scripts");
 const RUN_AT = 1_700_000_000_000;
 
-const GIT_ENV = { ...process.env };
+// closeout.mjs runs `git commit` itself, so the fixture supplies the identity:
+// a CI runner has none configured, and git there cannot guess a name.
+const GIT_ENV = {
+  ...process.env,
+  GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com",
+  GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com",
+};
 delete GIT_ENV.GIT_DIR;
 delete GIT_ENV.GIT_WORK_TREE;
 delete GIT_ENV.GH_REPO;
