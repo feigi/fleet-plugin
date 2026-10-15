@@ -19,8 +19,9 @@
 //
 // EXIT. 0 rendered. 2 refused, with the reason on stderr and nothing on
 // stdout: a missing, unknown or relative argument, a template that carries a
-// placeholder it never declared, a leftover declared placeholder in the
-// output, or instruments.sh answering anything but 0.
+// placeholder it never declared or no text at all for the kind, a leftover
+// declared placeholder in the output, or instruments.sh answering anything
+// but 0.
 //
 // INSTRUMENTS. After the command line has parsed and before anything is
 // validated or rendered, instruments.sh runs from the main checkout — the
@@ -195,6 +196,7 @@ if (template.kinds.length > 0) {
 }
 const selected = template.sections.filter((s) => s.kinds === null || s.kinds.includes(kind)).flatMap((s) => s.lines);
 const body = selected.join("\n");
+if (body.trim() === "") die(`template ${role}.md carries no text for ${kind === null ? "the role" : `kind ${kind}`}`);
 
 const declared = new Set(template.args.map((a) => a.placeholder));
 for (const [, inner] of body.matchAll(PLACEHOLDER)) {

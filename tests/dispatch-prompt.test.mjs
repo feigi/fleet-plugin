@@ -233,6 +233,26 @@ test("an undeclared placeholder in a section the kind does not select is not thi
   assert.ok(r.err.includes("<foo>"), r.err);
 });
 
+test("a template with no text for the selected kind exits 2 instead of printing a blank brief", () => {
+  const inst = install("empty", {
+    edit: (briefs) => writeFileSync(join(briefs, "recipe-deriver.md"), "---\n---\n"),
+  });
+  const bare = render(["render", "recipe-deriver"], { inst });
+  assert.equal(bare.status, 2);
+  assert.equal(bare.out, "");
+  assert.ok(bare.err.includes("template recipe-deriver.md carries no text for the role"), bare.err);
+  const kinds = install("empty-kind", {
+    edit: (briefs) => writeFileSync(join(briefs, "finisher.md"), "---\n---\n## kind: fresh\n## kind: repair\nwords\n"),
+  });
+  const empty = render(["render", "finisher", "--kind", "fresh"], { inst: kinds });
+  assert.equal(empty.status, 2);
+  assert.equal(empty.out, "");
+  assert.ok(empty.err.includes("template finisher.md carries no text for kind fresh"), empty.err);
+  const filled = render(["render", "finisher", "--kind", "repair"], { inst: kinds });
+  assert.equal(filled.status, 0, filled.err);
+  assert.equal(filled.out, "words\n");
+});
+
 test("a template that declares a placeholder it never carries is refused", () => {
   const rd = CASES.find((c) => c.role === "recipe-deriver");
   const inst = install("dead-arg", {
