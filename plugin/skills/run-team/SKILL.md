@@ -966,8 +966,10 @@ impl-<N>)` then stops the whole tick, not only that member's ticket. It
 clears once the member settles: one settled `killed` or `released` gets
 `tier-unverifiable=` from the same check, and one settled any other way ran,
 so pass the directory that dispatched it, as above. Until it settles,
-follow the carried token's reconciliation in phase 0: `proc://` reads
-`running` → wait; dead → the Member-killed row.
+follow the carried token's reconciliation in references/phase-0.md, the
+"Resume the claims a dead run left without a PR" section, under its
+`prior: ancestor` branch: `proc://` reads `running` → wait; dead → the
+Member-killed row.
 
 **Run the check right after the dispatch, and never reinstall the plugin or
 change `modelRoles` while any member is unchecked.** The check reads the
@@ -1621,7 +1623,9 @@ depth** guard table applied in code. Act on each line as it reads:
   since HEAD moved off that commit and nobody has looked at the move, and
   resolve any stray paths, which the line does not name; only then re-record.
 - `MAIN-CHECKOUT-NO-BASELINE …` with `HOLD (main checkout no baseline)` — no
-  baseline was recorded. Yours to fix: run Phase 0's `--record`. A baseline
+  baseline was recorded. Yours to fix: run
+  `~/.fleet/bin/fleet-run main-checkout.mjs --record`, which references/phase-0.md
+  describes under "Record the main-checkout baseline". A baseline
   that vanished mid-run is not a fresh run — report it to the maintainer
   before recording over whatever the tree now holds.
 - `PHASE0-INCOMPLETE <step>[, <step>…] …`, printed first above the rows,
@@ -1773,7 +1777,8 @@ record:
 
 - `heartbeat STALLED, controller gone` — the run that stranded them is dead.
   Its claims without a PR come back through the next run's phase 0
-  stranded-claim step, and its open PRs through the fold-in.
+  stranded-claim step (references/phase-0.md, "Resume the claims a dead run
+  left without a PR"), and its open PRs through the fold-in.
 - `heartbeat not beating, controller alive (pid N)`, or `(this session's
   earlier run)` — a controller that stopped beating and kept going. Nothing
   died, so nothing is resumed; when that controller is you, the fix is to
@@ -3572,7 +3577,7 @@ live count from it, so nobody states one. Write neither by hand:
   the previous run was this session's own, when it first writes the rows and
   `## Dispatched` entries still live into a new ledger, and every other
   settled name, or name given an out-of-vocabulary outcome, into its
-  `## Retired` (phase 0 says which). Refused
+  `## Retired` (references/phase-0.md, "Rotate the ledger", says which). Refused
   while the recorded controller is alive and not this run's ancestor, ledger
   or none — or, with no record and a ledger to move, while the heartbeat mark
   is still beating, or a tick or ledger write is inside its window with no
@@ -3580,8 +3585,8 @@ live count from it, so nobody states one. Write neither by hand:
   table cannot be read, or `.fleet/heartbeat.json` exists but cannot be used
   (unreadable, not JSON, not an object, or a `controller` it cannot judge);
   with no ledger and no such refusal it moves nothing and exits 0. Then it
-  records this run's controller in `.fleet/heartbeat.json`. Phase 0 states
-  the guard.
+  records this run's controller in `.fleet/heartbeat.json`. The guard is
+  stated in references/phase-0.md, "Rotate the ledger".
 
 `row` refuses a malformed member token anywhere in its text — one whose outcome
 is outside the vocabulary above, e.g. `merge-bot-1=dispatched` — at exit 2,
