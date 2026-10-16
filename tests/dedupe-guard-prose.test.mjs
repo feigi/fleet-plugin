@@ -189,7 +189,7 @@ test("the finisher files its own deferrals through the same guard", () => {
 // a second kind of writer exist; these pin the instruction half of it.
 const runLedger = () => flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
 const finisherReport = () =>
-  flat(RUN_TEAM.between("4. Report you the label", "**What a finisher receives.**", "run-team finisher duty 4").text);
+  flat(RUN_TEAM.between("4. Report you the label", "**Once the label is on, take it off before you approve any push.**", "run-team finisher duty 4").text);
 // The fix-applier's report line is in its agent body, which the member reads
 // with the brief the renderer prints; SKILL.md carries no copy of it.
 const fixApplierReport = () =>

@@ -29,6 +29,8 @@ const RUN_TEAM_DIR = join(PLUGIN, "skills", "run-team");
 const REFERENCES = join(RUN_TEAM_DIR, "references");
 const FIXTURES = join(import.meta.dirname, "fixtures", "run-team-moved-text");
 const SKILL = Pin.file(join(RUN_TEAM_DIR, "SKILL.md"));
+// The tick rows' full text is in references/tick-rows.md; SKILL.md keeps one line for each.
+const TICK_ROWS = Pin.file(join(REFERENCES, "tick-rows.md"));
 const PHASE0 = readFileSync(join(REFERENCES, "phase-0.md"), "utf8");
 const CLOSE_OUT = readFileSync(join(REFERENCES, "close-out.md"), "utf8");
 
@@ -134,7 +136,7 @@ test("phase 0 step 0 ends by pointing at references/phase-0.md", () => {
 });
 
 const endOfRun = () => {
-  const b = SKILL.bullet("- **The run ends, or the maintainer says drain**", "- **Monitor: CI run completes**", "run-team drain bullet").text;
+  const b = SKILL.bullet("- **The run ends, or the maintainer says drain**", "- **The finisher-gate wakes**", "run-team drain bullet").text;
   const at = b.indexOf("**End of run**");
   assert.notEqual(at, -1, "End of run moved out of the drain bullet — re-anchor this test");
   return b.slice(at).replace(/\n+$/, "");
@@ -204,7 +206,7 @@ test("step 0 says to run phase0.mjs again until it exits 0 and to dispatch nothi
 });
 
 test("the PHASE0-INCOMPLETE tick row names its remedy: run phase0.mjs again, which resumes at the step that stopped", () => {
-  const row = SKILL.bullet("- `PHASE0-INCOMPLETE <step>[, <step>…] …`", "- `CHECK-LIVENESS <member>", "run-team tick rows").text;
+  const row = TICK_ROWS.bullet("- `PHASE0-INCOMPLETE <step>[, <step>…] …`", "- `CHECK-LIVENESS <member>", "run-team tick rows").text;
   assert.match(row, Pin.phrase("Run the `phase0.mjs` command the line names and act on what it prints: a re-run resumes at the step that stopped."));
 });
 
@@ -278,7 +280,7 @@ test("the carried-token reconciliation after /resume is sent to the stranded-cla
 });
 
 test("the no-baseline remedy runs main-checkout.mjs --record and names the baseline section, never a phase0.mjs re-run", () => {
-  const row = SKILL.bullet("- `MAIN-CHECKOUT-NO-BASELINE …`", "- `PHASE0-INCOMPLETE <step>[, <step>…] …`", "run-team tick rows").text;
+  const row = TICK_ROWS.bullet("- `MAIN-CHECKOUT-NO-BASELINE …`", "- `PHASE0-INCOMPLETE <step>[, <step>…] …`", "run-team tick rows").text;
   assert.match(row, Pin.phrase(`Yours to fix: run \`~/.fleet/bin/fleet-run main-checkout.mjs --record\`, which references/phase-0.md describes under "${BASELINE}".`));
   assert.match(row, Pin.phrase("A baseline that vanished mid-run is not a fresh run — report it to the maintainer before recording over whatever the tree now holds."));
   assert.doesNotMatch(row, /phase0\.mjs/, "a re-run skips the `ok` baseline step, so it records nothing");

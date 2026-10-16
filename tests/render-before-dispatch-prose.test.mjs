@@ -11,6 +11,8 @@ import { Pin } from "./support/prose-pin.mjs";
 
 const PLUGIN = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(PLUGIN, "skills", "run-team", "SKILL.md"));
+// The tick rows' full text moved into references/tick-rows.md; SKILL.md keeps one line for each.
+const TICK_ROWS = Pin.file(join(PLUGIN, "skills", "run-team", "references", "tick-rows.md"));
 // Phase 2's record-the-dispatch paragraph moved into references/pull.md.
 const PULL_MD = Pin.file(join(PLUGIN, "skills", "run-team", "references", "pull.md"));
 
@@ -26,9 +28,9 @@ test("each fix-applier kind renders its brief before ledger.mjs dispatch records
   assert.match(review, Pin.phrase("its brief rendered with `dispatch-prompt.mjs render fix-applier --kind review --member fix-pr-<pr#> …` and then recorded with `ledger.mjs dispatch <pr#> fix-pr-<pr#>` before the call."));
   const conflict = RUN_TEAM.paragraph("**A `DISPATCH fix-pr PR#<M>` on a conflict hold** — the row carries an", "conflict fix-applier paragraph", "**Then dispatch a red-check fixer**").text;
   assert.match(conflict, Pin.phrase("render its brief with `dispatch-prompt.mjs render fix-applier --kind conflict --member <name> …`, and dispatch it with the `agent` that `ledger.mjs dispatch` printed"));
-  const red = RUN_TEAM.paragraph("Name it `fix-pr-<M>`, or the next free suffix", "red-check fixer paragraph", "**A `DISPATCH fix-pr PR#<M>` on a dispositions mismatch**").text;
+  const red = RUN_TEAM.paragraph("Name it `fix-pr-<M>`, or the next free suffix", "red-check fixer paragraph", "**What a fix-applier receives.**").text;
   assert.match(red, Pin.phrase("render its brief with `dispatch-prompt.mjs render fix-applier --kind red-check --member <name> …`, record it with `ledger.mjs dispatch <pr#> <name>` before the call"));
-  const retry = RUN_TEAM.paragraph("**A `DISPATCH fix-pr PR#<M>` on a dispositions mismatch**", "dispositions retry paragraph", "**A refutation resting on an injection").text;
+  const retry = RUN_TEAM.paragraph("**A `DISPATCH fix-pr PR#<M>` on a dispositions mismatch**", "dispositions retry paragraph", "### The main-gain hit").text;
   assert.match(retry, Pin.phrase("dispatched like the first, its brief rendered with `--kind dispositions-retry`."));
 });
 
@@ -38,9 +40,9 @@ test("the finisher renders its brief, then is recorded, then dispatched", () => 
 });
 
 test("a replacement finisher's brief is rendered before ledger.mjs dispatch records it", () => {
-  const moved = RUN_TEAM.bullet("- `DISPATCH finisher PR#<M> …`", "- `ESCALATE unlabelled PR#<M> …`", "DISPATCH finisher tick-line bullet").text;
+  const moved = TICK_ROWS.bullet("- `DISPATCH finisher PR#<M> …`", "- `ESCALATE unlabelled PR#<M> …`", "DISPATCH finisher tick-line bullet").text;
   assert.match(moved, Pin.phrase("render its brief with `dispatch-prompt.mjs render finisher --kind repair --member finisher-pr-<M>-<x> …`, then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`."));
-  const died = RUN_TEAM.paragraph("**Resolving a finisher that died.**", "finisher-died paragraph", "Gate on the `check` job").text;
+  const died = RUN_TEAM.paragraph("**Resolving a finisher that died.**", "finisher-died paragraph", "### Dispositions escalation").text;
   assert.match(died, Pin.phrase("render its brief with `dispatch-prompt.mjs render finisher --kind fresh --member finisher-pr-<M>-<x> …` (`--kind repair` once an earlier finisher reported `labelled` without the label landing), then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`."));
 });
 

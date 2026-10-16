@@ -97,7 +97,7 @@ test("the gate says what each refusal asks of the controller", () => {
 });
 
 test("a mismatch is retried once by the next suffix, whose prompt carries the violation list, and a second failure escalates", () => {
-  const s = SKILL.paragraph("`DISPATCH fix-pr PR#<M>` on a dispositions mismatch", "run-team/SKILL.md", "**A refutation resting on an injection", { emphasisTolerant: true }).text;
+  const s = SKILL.paragraph("`DISPATCH fix-pr PR#<M>` on a dispositions mismatch", "run-team/SKILL.md", "### The main-gain hit", { emphasisTolerant: true }).text;
   assert.match(s, Pin.phrase("is one automatic retry, a review fix-applier named the next suffix (`fix-pr-<M>-b`)"));
   assert.match(s, Pin.phrase(
     "first one's with the retry paragraph added: `--mismatched-record`, the mismatched member's record `<scratch>/dispositions-<member>.json` it starts from, and `--violations`, the check's violation list as printed",

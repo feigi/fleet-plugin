@@ -22,7 +22,7 @@ const flat = (s) => s.replace(/\s+/g, " ");
 
 const RESOLVING = "**Resolving a finisher halt.**";
 const resolutionRows = () => {
-  const table = RUN_TEAM.paragraph("| Cause | Resolution |", "halt resolution table", "`past-pin` needs the tick because").text;
+  const table = RUN_TEAM.paragraph("| Cause | Resolution |", "halt resolution table", "### Why a `past-pin` halt needs the tick").text;
   return table.split("\n").filter((l) => l.startsWith("| `"));
 };
 // A row's first-cell backticked causes, in order — shared by rowFor's
@@ -85,13 +85,13 @@ test("every halt escalates on the PR itself — a comment that outlives the run 
 });
 
 test("the tick paragraph says why past-pin cannot use the dead-review path, and that a fix-applier push stays not due", () => {
-  const para = flat(RUN_TEAM.paragraph("`past-pin` needs the tick because", "past-pin tick rationale", "**Resolving a finisher that died.** A").text);
+  const para = flat(RUN_TEAM.paragraph("`past-pin` needs the tick because", "past-pin tick rationale", "### Resolving a finisher that died").text);
   assert.match(para, /settling that review `=failed` re-queues nothing — that path covers only a review that died before returning\./);
   assert.match(para, /A head that moved past `reviewed=` with no such halt — a fix-applier's push — stays not due: duty 2 verifies what it applied\./);
 });
 
 test("finisher duty 4 names the cause in the ledger's vocabulary, and a duty 1 halt reports the verdict as printed", () => {
-  const duty = flat(RUN_TEAM.bullet("4. Report you the label", "**What a finisher receives.**", "finisher duty 4").text);
+  const duty = flat(RUN_TEAM.bullet("4. Report you the label", "**Once the label is on, take it off before you approve any push.**", "finisher duty 4").text);
   const vocab = Pin.sentences(duty).find((x) => x.includes("vocabulary")) ?? "";
   for (const c of HALT_CAUSES) assert.match(vocab, new RegExp(`\`${c}\``), `duty 4 no longer names \`${c}\``);
   assert.match(vocab, /`other` for every other halt/);

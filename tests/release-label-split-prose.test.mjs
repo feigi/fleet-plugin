@@ -162,7 +162,7 @@ test("duty 3 is one script — named in the duty list and the member prompt, wit
   assert.match(block, Pin.phrase("Exit 0 is the only code that means the label is on"), "the block no longer says only exit 0 is a label");
   assert.match(block, Pin.phrase("Every non-zero exit halts you"), "the block lets a non-zero exit go on");
   assert.match(block, Pin.phrase("its steps by hand to get past it"), "the block no longer forbids replaying the steps by hand");
-  assert.match(RUN_TEAM.bullet("4. Report you the label", "**What a finisher receives.**", "finisher duty 4").text, Pin.phrase("the script's receipt, the JSON line it printed, as printed"),
+  assert.match(RUN_TEAM.bullet("4. Report you the label", "**Once the label is on, take it off before you approve any push.**", "finisher duty 4").text, Pin.phrase("the script's receipt, the JSON line it printed, as printed"),
     "duty 4 no longer reports the script's receipt");
 });
 

@@ -117,9 +117,13 @@ test("objectKeys reads fields by depth, not by line, and ignores brackets/commas
   assert.deepEqual(objectKeys('label: "a, {b}", next: 1,'), ["label", "next"]);
 });
 
-const REVIEWERS_END = "### Merge bot";
-
-const reviewersSection = () => RUN_TEAM.between("### Reviewers", REVIEWERS_END, "run-team Reviewers").text;
+// The Reviewers prose is in two places now: the dispatch paragraphs under Phase
+// 2, and the review mechanics under Phase 3's Reviewers.
+const reviewersSection = () =>
+  [
+    RUN_TEAM.between("### The reviewer", "### The tier check", "run-team Phase 2 reviewer dispatch").text,
+    RUN_TEAM.between("### Reviewers", "### Merge bot", "run-team Reviewers").text,
+  ].join("\n\n");
 // The fix-applier's prompt is what the member reads: its agent body, then the
 // brief the renderer prints for a review fix-applier. SKILL.md carries neither.
 const fixApplierPrompt = () => memberPrompt("fix-applier", "review");
@@ -301,7 +305,7 @@ test("the Phase 3 finisher edges gate on a ruling the controller still owes", ()
   // One list item, not anchor to anchor: on the fixed end anchor alone, the
   // clause gutted here and restated in an inserted sibling bullet stayed green
   // (#491, measured). `bullet` clamps the slice at that sibling.
-  const noCiEdge = flat(RUN_TEAM.bullet('- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**In one line, every wake is one `fleet-event.mjs` call, which ends in the tick.**", "run-team no-ci edge").text);
+  const noCiEdge = flat(RUN_TEAM.bullet('- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "Gate on the `check` job, **not** on `ci-state --quiet` exit 0", "run-team no-ci edge").text);
   assert.match(
     noCiEdge,
     /never while you still owe it a ruling/i,

@@ -130,7 +130,7 @@ test("the wake table names every wake, each with its fleet-event.mjs command", (
   // nothing and so is invisible to the tick, which reads only the ledger. What
   // each command records is in fleet-event.mjs's header, which
   // fleet-event-wake-table.test.mjs pins; here each wake is pinned to its command.
-  const table = RUN_TEAM.paragraph("| Wake | Command |", "wake table", "Act on every line the call prints, the tick's last, and arm the beat.").text;
+  const table = RUN_TEAM.paragraph("| Wake | Command |", "wake table", "### Nothing to do: arm the beat").text;
   const rows = table.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Wake"));
   const WAKES = [
     ["Implementer report", "`fleet-event.mjs impl-report impl-<N>`"],
@@ -393,7 +393,7 @@ test("the --stop paragraph keeps the drain out of it and points at End of run (#
 });
 
 test("End of run follows the drain bullet and ends with --stop (#2968)", () => {
-  const b = RUN_TEAM.bullet("- **The run ends, or the maintainer says drain**", "- **Monitor: CI run completes**", "run-team drain bullet").text;
+  const b = RUN_TEAM.bullet("- **The run ends, or the maintainer says drain**", "- **The finisher-gate wakes**", "run-team drain bullet").text;
   const steps = [...b.matchAll(/^\s+(\d+)\. /gm)].map((m) => Number(m[1]));
   assert.deepEqual(steps, [1, 2, 3], "End of run is one ordered list: begin, the loop, finish");
   assert.match(b, Pin.phrase("1. `~/.fleet/bin/fleet-run fleet-event.mjs drain --reason \"<reason>\"` — runs `closeout.mjs begin --reason \"<reason>\"`"));
@@ -424,16 +424,19 @@ test("the ask-by-name paragraph reads a missing message off the tick's SETTLE an
 });
 
 // The transcript-listing tick rows, each with its remedy, read inside its own
-// list item so a sibling row's words cannot satisfy it.
+// list item so a sibling row's words cannot satisfy it. The rows' full text is
+// in references/tick-rows.md; SKILL.md keeps one line for each.
+const TICK_ROWS = Pin.file(join(REPO, "skills", "run-team", "references", "tick-rows.md"));
+
 test("the UNRECORDED tick row names its remedy: record the dispatch on the ledger, or confirm it is a stranger's member", () => {
-  const row = RUN_TEAM.bullet("- `UNRECORDED <stem> (transcript exists, no ledger token)`", "- `NO-TRANSCRIPT <member>", "run-team UNRECORDED row").text;
+  const row = TICK_ROWS.bullet("- `UNRECORDED <stem> (transcript exists, no ledger token)`", "- `NO-TRANSCRIPT <member>", "tick-rows UNRECORDED row").text;
   assert.match(row, Pin.phrase("Record it with `ledger.mjs dispatch`, or confirm it is a stranger's member."));
   assert.match(row, Pin.phrase("it resets no `quiet`, changes no row and frees no slot"));
   assert.match(row, Pin.phrase("(`…; UNRECORDED <stem> persists — …`)"));
 });
 
 test("the NO-TRANSCRIPT tick row names its remedy: make the task call, or settle the token killed; and where the session directory comes from", () => {
-  const row = RUN_TEAM.bullet("- `NO-TRANSCRIPT <member> (live <age>m, no <session>/<member>.jsonl)`", "**Tier guards under Pull.**", "run-team NO-TRANSCRIPT row").text;
+  const row = TICK_ROWS.bullet("- `NO-TRANSCRIPT <member> (live <age>m, no <session>/<member>.jsonl)`", "- `SETTLE <member>", "tick-rows NO-TRANSCRIPT row").text;
   assert.match(row, Pin.phrase("Make the `task` call, or settle the token `killed`."));
   assert.match(row, Pin.phrase("`--no-transcript-after` minutes ago (default 5)"));
   assert.match(row, Pin.phrase("`…; NO-TRANSCRIPT <member> persists — …`"));
@@ -441,7 +444,7 @@ test("the NO-TRANSCRIPT tick row names its remedy: make the task call, or settle
 });
 
 test("the NO-TRANSCRIPT tick row says a heartbeat file that cannot be used silences both age checks, and names the one stderr line the tick prints for it", () => {
-  const row = RUN_TEAM.bullet("- `NO-TRANSCRIPT <member> (live <age>m, no <session>/<member>.jsonl)`", "**Tier guards under Pull.**", "run-team NO-TRANSCRIPT row").text;
+  const row = TICK_ROWS.bullet("- `NO-TRANSCRIPT <member> (live <age>m, no <session>/<member>.jsonl)`", "- `SETTLE <member>", "tick-rows NO-TRANSCRIPT row").text;
   assert.match(row, Pin.phrase("neither `CHECK-LIVENESS` nor `NO-TRANSCRIPT` can fire."));
   assert.match(row, Pin.phrase("The tick says so with one stderr line, `fleet-tick: CHECK-LIVENESS and NO-TRANSCRIPT not checked — <file> <cause>, so first-seen ages are unavailable`, naming only the checks that would have run that tick."));
 });
