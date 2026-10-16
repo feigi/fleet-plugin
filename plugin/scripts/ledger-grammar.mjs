@@ -49,7 +49,7 @@ export const briefsArchiveName = (stamp) => `${BRIEFS}.${stamp}`;
 // `role` is the dispatch-prompt.mjs template a member of the family is
 // rendered from, the one its brief's sidecar must name.
 const FAMILIES = {
-  impl: { label: "impl-N", bound: "ticket", role: "implementer", outcomes: ["PR#M", "bailed", "released", "killed", "tier-mismatch"] },
+  impl: { label: "impl-N", bound: "ticket", role: "implementer", outcomes: ["PR#M", "bailed", "released", "killed", "tier-mismatch", "blocked"] },
   "fix-pr": { label: "fix-pr-M", bound: "pr", role: "fix-applier", outcomes: ["applied:<head>", "no-op", "failed", "killed"] },
   "finisher-pr": { label: "finisher-pr-M", bound: "pr", role: "finisher", outcomes: ["labelled", "failed", "killed", "halted:<cause>"] },
   "merge-bot": { label: "merge-bot-n", bound: null, role: "merge-bot", outcomes: ["done", "killed"] },

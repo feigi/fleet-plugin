@@ -513,6 +513,18 @@ test("#1820: a killed or tier-mismatch implementer stays IMPLEMENTING, flagged i
   assert.equal(card(b, 904).agent, null, "a settled member is not live");
 });
 
+test("a settled impl-<N>=blocked implementer stays IMPLEMENTING, carrying the blocked flag", () => {
+  const b = computeBoard(reproInputs({ rows: ["#904 impl-904=blocked", "#905 impl-905=bailed"] }));
+  assert.equal(card(b, 904).column, "IMPLEMENTING");
+  assert.ok(card(b, 904).flags.includes("blocked"));
+  assert.equal(card(b, 904).agent, null, "a settled member is not live");
+  assert.ok(b.attention.map((t) => t.issue).includes(904), "the blocked ticket waits for a human, so it is in attention");
+  assert.ok(!b.attention.map((t) => t.issue).includes(905), "control: a bailed one is not flagged");
+  // The same word in its uppercase enrichment form flags once, not twice.
+  const both = computeBoard(reproInputs({ rows: ["#906 impl-906=blocked BLOCKED"] }));
+  assert.equal(card(both, 906).flags.filter((f) => f === "blocked").length, 1);
+});
+
 test("#1820: the uppercase enrichment causes keep working, and KILLED beside =killed flags once", () => {
   const b = computeBoard(reproInputs({ rows: ["#912 impl-912 BLOCKED", "#913 impl-913=PR#931 SHA-OFF-BRANCH", "#914 impl-914=killed KILLED"] }));
   assert.ok(card(b, 912).flags.includes("blocked"));

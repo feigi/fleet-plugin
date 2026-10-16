@@ -30,7 +30,12 @@
 //             holds (`held-behind:#M`, and `conflict-hold:#<pr>`, written by
 //             the merge bot or by the controller off a `CONFLICT` line),
 //             tier mismatches and the drain marker
-//             all come off it. A missing ledger is a fresh run: zero rows.
+//             all come off it, and so does the ledger half of the In-flight
+//             count: every claimed ticket whose newest `impl-` member is live,
+//             or settled `killed`/`tier-mismatch` and so owed a replacement,
+//             with no open issue-closing PR yet. A newest member settled
+//             `blocked` counts nothing. A missing ledger is a fresh run: zero
+//             rows.
 //   shortlist `.fleet/shortlist.json`, shortlist.mjs's output, resolved against
 //             the git common dir as ledger.mjs resolves the ledger. Its
 //             entries minus every ticket with an `impl-` row, or an `excluded`
@@ -43,13 +48,16 @@
 //             downward. A file with no `dropped` names no drops.
 //   gh        The open PRs, by label, by whether they close an issue and by
 //             GitHub's `mergeable` — the merge queue, which PRs are owed a
-//             review, and which conflict. Also, for each ticket
-//             holding the implementer row on a tier mismatch, whether its issue
-//             is CLOSED (`gh issue view`): a closed ticket's mismatch
-//             holds nothing. And, for each in-flight `review=` token whose PR
+//             review, which conflict, and the PR half of the In-flight count:
+//             every open PR that closes an issue, whoever opened it and
+//             whatever its state. Also, for each ticket holding the
+//             implementer row on a tier mismatch or owed a replacement,
+//             whether its issue is CLOSED (`gh issue view`): a closed
+//             ticket's mismatch holds nothing and its owed replacement is not
+//             in flight. And, for each in-flight `review=` token whose PR
 //             the open list does not carry, whether that PR is MERGED or
 //             CLOSED (`gh pr view`): a review cannot be running against a
-//             finished PR, so its dangling token holds no reviewer slot.
+//             finished PR, so its dangling token is not a review unit.
 //   main      The main checkout against the run-start baseline
 //             `.fleet/main-checkout.sha`, through main-checkout.mjs.
 //             Anything but `clean` — dirty, unknown, no baseline — prints one
@@ -109,20 +117,17 @@
 
 import { parseMember, parseToken, premisesOf, rowNums, nextRetry, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
 
-// Every role's TARGET is its configured cap. Availability of work belongs in
-// the ACTION, not the target: a reviewer target that shrank to the backlog
-// would print `0/0 → idle` and read as "correctly sized" for the exact drained
-// state that is the defect.
-//
-// The reviewer rows are computed first because the implementer row's gate
-// reads what they leave: the slots this tick's own dispatches fill.
+// The implementer and reviewer rows' TARGET is the In-flight bound; the merge
+// bot's is 1. Availability of work belongs in the ACTION, not the target: a
+// reviewer target that shrank to the backlog would print `0/0 → idle` and read
+// as "correctly sized" for the exact drained state that is the defect.
 export function reconcile(s) {
   const rev = reviewers(s);
   // The conflict rows only ask the controller to write a record — never to
   // dispatch — so they stand outside the dispatch hold: the fix-applier a
   // conflict hold leads to obeys the hold through its own role's row.
   return [
-    ...dispatchHold(s, [implementers(s, rev.left), ...rev.rows]),
+    ...dispatchHold(s, [implementers(s), ...rev.rows]),
     ...rev.conflictRows,
     ...dispatchHold(s, [mergeBot(s)]),
     ...shortlistRows(s),
@@ -212,10 +217,10 @@ function specsDropped(dropped) {
   return `specs-dropped=${[...by].map(([reason, ns]) => `${ns.join(" ")} (${reason})`).join(", ")}`;
 }
 
-function implementers(s, left) {
+function implementers(s) {
   const dropped = specsDropped(s.dropped);
-  const row = mkRow("implementers", s.implLive, s.implCap,
-    `unclaimed=${s.heads.length} supply=${s.supply ?? "?"} unreviewed=${left.unreviewed}`
+  const row = mkRow("implementers", s.inFlight, s.bound,
+    `implementers=${s.inFlightImpl} prs=${s.inFlightPrs} unclaimed=${s.heads.length} supply=${s.supply ?? "?"}`
     + (s.shortlistStatus === "ok" ? "" : ` shortlist=${s.shortlistStatus}`)
     + (dropped ? ` ${dropped}` : ""));
 
@@ -239,20 +244,22 @@ function implementers(s, left) {
     return row(`HOLD (tier unchecked ${s.tierUnchecked.join(" ")})`, { acts: true, extra: tierCheckStep(s.tierUnchecked, s.phase0?.session) });
   }
 
-  const deficit = s.implCap - s.implLive;
-  if (deficit <= 0) return row("AT CAP");
+  // The In-flight bound: n tickets between their Claim and their PR's merge,
+  // at or over B, hold every Pull until a merge brings n below B. Quiet — a
+  // merge is what clears it, and the controller has nothing to do meanwhile —
+  // except for a ticket whose implementer was killed: it counts with no PR
+  // that could merge, so the dispatch of its replacement is what clears it,
+  // and the row asks the controller for it.
+  // A replacement implementer is never a Pull, so no branch here reads it.
+  // The merge queue and the review backlog never gate this row: a deep
+  // ready-to-merge queue adds no rebases per PR, and a review owed is the
+  // reviewer row's DISPATCH on this same tick.
+  if (s.inFlight >= s.bound) {
+    const hold = `HOLD (in-flight ${s.inFlight}/${s.bound})`;
+    return s.owedCounted.length ? row(hold, { acts: true, extra: replaceStep(s.owedCounted, s.implNames) }) : row(hold);
+  }
 
-  // The review-backlog gate, NARROWED: more PRs into a review-bound
-  // pipeline buy nothing — but the pipeline is review-bound only when a PR is
-  // still owed its review after this tick's dispatches AND no reviewer slot is
-  // left for it. A deep backlog with free slots is a reviewer-row DISPATCH on
-  // this same tick, not a reason to idle an implementer; the old
-  // `backlog >= 2` gate held there and starved implementers.
-  // The merge queue never gates this row: a deep ready-to-merge queue adds no
-  // rebases per PR.
-  if (left.unreviewed >= 1 && left.free <= 0) return row("HOLD (review side saturated)");
-
-  if (s.heads.length) return row(`PULL ${s.heads.slice(0, deficit).map((n) => `#${n}`).join(" ")}`, { acts: true });
+  if (s.heads.length) return row(`PULL ${s.heads.slice(0, s.bound - s.inFlight).map((n) => `#${n}`).join(" ")}`, { acts: true });
 
   // Nothing unclaimed even after a refresh. `SUGGEST /triage` asks a
   // MAINTAINER to tick tickets, and on the unattended night the heartbeat
@@ -261,21 +268,18 @@ function implementers(s, left) {
   return row("SUGGEST /triage, hold idle");
 }
 
-// Reviewer units: an in-flight review = 1, each fix-applier = 1.
+// Reviewer units: an in-flight review = 1, each fix-applier = 1. Every due
+// unit is dispatched, no cap: a PR holds at most one live review unit, so
+// units stay within the open PRs. The In-flight bound gates Pulls, not these,
+// so a run that inherited more than B PRs dispatches a unit for each.
 // Named in priority order — fix-appliers first, then reviews, oldest first —
-// because finishing what is started beats starting more. Reviews are also
-// bounded by `--max-reviews`, left at its default (the reviewer cap) since
-// every review unit already counts against the session's own concurrency
-// semaphore; the other slots still serve fix-appliers.
+// because finishing what is started beats starting more.
 function reviewers(s) {
   const detail = `reviews=${s.reviewsLive} fix-pr=${s.fixLive} fix-due=${s.fixDue.length}`
-    + ` review-due=${s.reviewDue.length} max-reviews=${s.maxReviews}`;
-  const row = mkRow("reviewers", s.reviewsLive + s.fixLive, s.reviewerCap, detail);
-  let free = Math.max(0, s.reviewerCap - s.reviewsLive - s.fixLive);
-  const fixes = s.fixDue.slice(0, free);
-  free -= fixes.length;
-  const reviews = s.reviewDue.slice(0, Math.min(free, Math.max(0, s.maxReviews - s.reviewsLive)));
-  free -= reviews.length;
+    + ` review-due=${s.reviewDue.length}`;
+  const row = mkRow("reviewers", s.reviewsLive + s.fixLive, s.bound, detail);
+  const fixes = s.fixDue;
+  const reviews = s.reviewDue;
   const prs = (ns) => ns.map((n) => `PR#${n}`).join(" ");
 
   const rows = [];
@@ -284,7 +288,7 @@ function reviewers(s) {
   // A finisher settled `labelled` on a PR the open list shows without
   // `ready-to-merge`. One such attempt since the controller's last deliberate
   // removal gets one fresh finisher; a second one escalates, never a third
-  // dispatch. Finishers take no reviewer slot, so neither waits on the cap.
+  // dispatch. Finishers are not review units, so neither waits on one.
   const names = (us) => us.flatMap((u) => u.labelled).join(", ");
   const repair = s.unlabelled.filter((u) => u.labelled.length === 1);
   const stuck = s.unlabelled.filter((u) => u.labelled.length > 1);
@@ -301,7 +305,7 @@ function reviewers(s) {
   // record and nobody working it: the controller writes the hold the merge
   // bot would, and the tick turns it into `DISPATCH fix-pr` from then on.
   // Past two landed conflict fix-appliers it is a treadmill, handed to a human
-  // instead — no hold, no fix-applier. Neither row takes a reviewer slot, and
+  // instead — no hold, no fix-applier. Neither row is a review unit, and
   // neither stands aside for IDLE OK: that row is the one a hold replaces. They
   // are returned beside `rows`, not among them, so a main-checkout hold never
   // turns a record-only line into a HOLD.
@@ -315,14 +319,9 @@ function reviewers(s) {
     conflictRows.push(row(`ESCALATE conflict ${prs(s.conflictEscalate)}`,
       { extra: "GitHub reads CONFLICTING again after two conflict fix-appliers landed; comment on the PR and flag it for a human — no hold, no fix-applier" }));
   }
-  if (!rows.length) {
-    const owed = s.fixDue.length + s.reviewDue.length;
-    if (owed && free <= 0) rows.push(row("AT CAP"));
-    else if (s.reviewDue.length) rows.push(row(`HOLD (max-reviews ${s.maxReviews} in flight)`));
-    else if (!unlabelledRows.length) rows.push(row("IDLE OK"));
-  }
+  if (!rows.length && !unlabelledRows.length) rows.push(row("IDLE OK"));
   rows.push(...unlabelledRows);
-  return { rows, conflictRows, left: { unreviewed: s.reviewDue.length - reviews.length, free } };
+  return { rows, conflictRows };
 }
 
 function mergeBot(s) {
@@ -343,7 +342,8 @@ function mergeBot(s) {
 
 // The refresh this tick ran, if it ran one. A REFRESHED that changed the list
 // is actionable — supply arrived. One that changed nothing is not: every idle
-// heartbeat tick refreshes while the shortlist is short of the cap, and an
+// heartbeat tick refreshes while the shortlist is short of the In-flight
+// bound and nothing holds the row, and an
 // unconditionally actionable REFRESHED would pin the beat at its base interval
 // on exactly the quiet night the heartbeat backs off on. A failed refresh IS
 // actionable: a blind implementer row backing off tick after identical tick is
@@ -865,6 +865,22 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
   const tierMismatch = newest.filter((m) => mismatched(m) && !closed.has(m.number)).map((m) => m.name);
   const cleared = (m) => verdicts.ok.has(m.name) || verdicts.unverifiable.has(m.name);
   const tierUnchecked = newest.filter((m) => !mismatched(m) && !cleared(m)).map((m) => m.name);
+  // The In-flight count: tickets between a Claim and their PR's merge. Read off
+  // the ledger and `prs` on every tick, never the Phase-0 fold. One term per
+  // open PR that closes an issue (GitHub's linked set; a PR closing nothing is
+  // never in flight, however it was made), plus one per claimed ticket whose
+  // newest impl member is live, or owes a replacement — settled `killed` or
+  // `tier-mismatch` on an issue not probed CLOSED — and that no open PR closes
+  // yet. A PR absorbs its ticket, so the hand-off from implementer to PR counts
+  // once; a ticket counts once however many members it has had. A member
+  // settled `blocked`, `bailed`, `released` or `PR#M` counts nothing on its
+  // own account, and neither does an Exclusion row, which is no member.
+  const prsIn = prs.filter((p) => p.closingIssuesReferences.length > 0);
+  const closing = new Set(prsIn.flatMap((p) => p.closingIssuesReferences.map((r) => r.number)));
+  const owesReplacement = (m) => (m.outcome === "killed" || m.outcome === "tier-mismatch") && !closing.has(m.number);
+  const owedReplacement = newest.filter(owesReplacement).map((m) => m.name);
+  const owedCounted = newest.filter((m) => owesReplacement(m) && !closed.has(m.number)).map((m) => m.name);
+  const inFlightImpl = newest.filter((m) => m.outcome === null && !closing.has(m.number)).length + owedCounted.length;
   const isQueued = (p) => p.labels.some((l) => l && l.name === "ready-to-merge");
   const queued = prs.filter(isQueued);
   const asc = (a, b) => a - b;
@@ -900,7 +916,7 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
   };
   // A `review=` token with no `reviewed=` after it reads as in flight, and the
   // ledger alone never says otherwise: a review whose own `reviewed=` write
-  // never landed stays in flight after its PR merges, holding a reviewer slot
+  // never landed stays in flight after its PR merges, counting as a review unit
   // for good. `finished` is the PR numbers the caller has found MERGED or
   // CLOSED, and a finished PR has no review running against it. A PR on the
   // open list is open whatever `finished` says, and none is the default, so a
@@ -910,6 +926,11 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
   const unsettled = all.filter((m) => m.outcome === null).map((m) => m.name);
   return {
     implLive: live("impl"),
+    inFlight: inFlightImpl + prsIn.length,
+    inFlightImpl,
+    inFlightPrs: prsIn.length,
+    owedReplacement,
+    owedCounted,
     fixLive: live("fix-pr"),
     mergeBotLive,
     // The number of every merge bot settled `done`: each is a merge pass
@@ -1044,11 +1065,14 @@ export function parseShortlist(text) {
 
 // Why this tick refreshes the shortlist, or null. The premise-lifted
 // trigger costs gh calls, so main() asks it only when these answer null.
-export function refreshWhy({ draining, status, entries, unclaimed: k, implCap }) {
-  if (draining !== null) return null;
+// Nothing refreshes while the bound holds (`held`, n ≥ B, whichever HOLD row
+// prints): a refresh then cannot feed a Pull, and the first tick back under
+// the bound refreshes and Pulls in the same tick, so nothing is lost.
+export function refreshWhy({ draining, held, status, entries, unclaimed: k, bound }) {
+  if (draining !== null || held) return null;
   if (status !== "ok") return `shortlist ${status}`;
   if (entries === 0) return "shortlist empty";
-  if (k < implCap) return `unclaimed ${k} < cap ${implCap}`;
+  if (k < bound) return `unclaimed ${k} < in-flight bound ${bound}`;
   return null;
 }
 
@@ -1309,14 +1333,10 @@ const die = makeDie(NAME);
 // Every input the controller used to state is read off the run now, so what
 // is left is configuration, and all of it defaults.
 const OPTIONS = {
-  // Defaults here, not threaded through int(): declared this way they still
-  // go through the guard below, where a hand-passed default went round it.
-  // No hard cap on either role, defaults only.
-  "implementer-cap": { type: "string", default: "2" },
-  "reviewer-cap": { type: "string", default: "6" },
-  // Reviews in flight at once. Default = the reviewer cap; run-team's own
-  // guidance is to leave it there rather than pass a tighter bound.
-  "max-reviews": { type: "string" },
+  // The In-flight bound: the most tickets between Claim and merge at once. The
+  // default lives here and nowhere else in code, declared this way so it still
+  // goes through the guard below, where a hand-passed default went round it.
+  "in-flight": { type: "string", default: "5" },
   // `--fold-unchanged` prints ONE line instead of the rows when this tick asks
   // for nothing and says exactly what the last one said — what makes an
   // unattended night affordable. Opt-in because folding is wrong on an edge:
@@ -1361,7 +1381,7 @@ function options() {
   const int = (name) => {
     const raw = values[name];
     // The digits rule, called rather than restated. Digits, not
-    // Number(): `Number("")` is 0, so `--max-reviews ""` — the shape an unset
+    // Number(): `Number("")` is 0, so `--in-flight ""` — the shape an unset
     // shell variable produces — would otherwise read as a real number.
     if (!isDigits(String(raw).trim())) die(`--${name} must be a non-negative integer, got '${raw}'`);
     return Number(raw);
@@ -1371,10 +1391,8 @@ function options() {
     if (n < 1) die(`--${name} must be at least 1, got ${n}`);
     return n;
   };
-  const reviewerCap = positive("reviewer-cap");
   return {
-    implCap: positive("implementer-cap"), reviewerCap,
-    maxReviews: values["max-reviews"] === undefined ? reviewerCap : positive("max-reviews"),
+    bound: positive("in-flight"),
     fold: values["fold-unchanged"], apply: values.apply, state: values.state || statePath(NAME), scratch: values.scratch,
     session: values.session || null, noTranscriptAfter: positive("no-transcript-after"),
     liveness: Object.fromEntries(Object.entries(LIVENESS_FLAGS).map(([family, flag]) => [family, positive(flag)])),
@@ -1402,14 +1420,18 @@ function openPrs() {
     die(`could not parse gh pr list output as JSON: ${e.message}`);
   }
   // closingIssuesReferences is checked, not defaulted: absent, it would read as
-  // an empty list and drop every open PR from review work. headRefOid likewise
+  // an empty list and drop every open PR from review work — and from the
+  // In-flight count. Each reference must carry an integer `number`: the count
+  // matches a PR to the ticket it closes by it, and a reference without one
+  // would leave that ticket's implementer counted twice. headRefOid likewise
   // — absent, a `halted:past-pin` PR would read as moved forever — and
   // mergeable: absent or outside GitHub's MergeableState enum, no PR would ever
   // read CONFLICTING.
   if (!Array.isArray(prs) || prs.some((p) => !p || typeof p.number !== "number"
     || !Array.isArray(p.labels) || !Array.isArray(p.closingIssuesReferences)
+    || !p.closingIssuesReferences.every((r) => r && Number.isInteger(r.number))
     || typeof p.headRefOid !== "string" || !MERGEABLE_STATES.includes(p.mergeable))) {
-    die("gh pr list did not return {number,labels,closingIssuesReferences,headRefOid,mergeable} rows, mergeable one of MERGEABLE, CONFLICTING, UNKNOWN");
+    die("gh pr list did not return {number,labels,closingIssuesReferences[{number}],headRefOid,mergeable} rows, mergeable one of MERGEABLE, CONFLICTING, UNKNOWN");
   }
   if (prs.length === PR_LIMIT) {
     die(`exactly ${PR_LIMIT} open PRs — the list is capped and may be truncated. Raise PR_LIMIT; a backlog that silently drops PRs is not a reconcile.`);
@@ -1539,18 +1561,25 @@ function liftedPremise(excluded, entries, prs) {
   return null;
 }
 
-// The tickets, of those holding the implementer row on a tier mismatch, whose
-// issue is CLOSED: the one live read deriveRun needs to lift a hold
-// whose replacement has nothing left to replace. One `gh issue view` per
-// mismatched ticket, and none when nothing is mismatched. A probe that cannot
-// answer — a nonzero exit, or a reply carrying no issue state — is disclosed
-// and the hold stands.
-function closedTickets(mismatched) {
+// The tickets whose issue is CLOSED, of those the tick would otherwise keep
+// counting or holding on: every ticket holding the implementer row on a tier
+// mismatch, and every ticket owed a replacement. One live read deriveRun needs
+// to lift a hold, and uncount a ticket, whose replacement has nothing left to
+// replace. One `gh issue view` per ticket, deduped (a tier-mismatch outcome is
+// both), and none when nothing is owed. A probe that cannot answer — a nonzero
+// exit, or a reply carrying no issue state — is disclosed, and the ticket
+// stays counted and its hold stands: an unreadable state never uncounts.
+function closedTickets(mismatched, owed) {
   const closed = new Set();
-  for (const { number } of mismatched.map(parseMember)) {
+  const mismatchedNumbers = new Set(mismatched.map((name) => parseMember(name).number));
+  const numbers = new Set([...mismatchedNumbers, ...owed.map((name) => parseMember(name).number)]);
+  for (const number of numbers) {
+    const unconfirmed = mismatchedNumbers.has(number)
+      ? `tier mismatch on #${number} unconfirmed closed, hold stands`
+      : `replacement owed on #${number} unconfirmed closed, ticket stays counted`;
     const r = spawnSync("gh", ["issue", "view", String(number), "--json", "state"], { encoding: "utf8", timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }) });
     if (r.error || r.status !== 0) {
-      console.error(`${NAME}: ${failure(r, `gh issue view ${number}`)} — tier mismatch on #${number} unconfirmed closed, hold stands`);
+      console.error(`${NAME}: ${failure(r, `gh issue view ${number}`)} — ${unconfirmed}`);
       continue;
     }
     let st = null;
@@ -1559,7 +1588,7 @@ function closedTickets(mismatched) {
     else if (typeof st !== "string") {
       // Exit 0 with a body that is not an issue (an HTML error page, a proxy's
       // text, JSON with no state) is as unanswered as a nonzero exit.
-      console.error(`${NAME}: gh issue view ${number} printed no state — tier mismatch on #${number} unconfirmed closed, hold stands`);
+      console.error(`${NAME}: gh issue view ${number} printed no state — ${unconfirmed}`);
     }
   }
   return closed;
@@ -1568,23 +1597,23 @@ function closedTickets(mismatched) {
 // The PRs, of those whose review the ledger reads as in flight yet the open
 // list does not carry, that gh says are MERGED or CLOSED. A review cannot be
 // running against a finished PR, so the ledger's dangling `review=` token must
-// not hold a reviewer slot for good. A probe that cannot answer — a nonzero
+// not count as a review unit for good. A probe that cannot answer — a nonzero
 // exit, a reply carrying no state, a state that is none of the three — is
-// disclosed and the review keeps its slot: an unreadable state is never read
+// disclosed and the review keeps its unit: an unreadable state is never read
 // as finished. A PR gh calls OPEN keeps it quietly.
 function finishedReviewPrs(offList) {
   const finished = new Set();
   for (const number of offList) {
     const r = spawnSync("gh", ["pr", "view", String(number), "--json", "state"], { encoding: "utf8", timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }) });
     if (r.error || r.status !== 0) {
-      console.error(`${NAME}: ${failure(r, `gh pr view ${number}`)} — review on PR#${number} unconfirmed finished, its slot stands`);
+      console.error(`${NAME}: ${failure(r, `gh pr view ${number}`)} — review on PR#${number} unconfirmed finished, its unit stands`);
       continue;
     }
     let st = null;
     try { st = JSON.parse(r.stdout).state; } catch { /* no state: disclosed below */ }
     if (st === "MERGED" || st === "CLOSED") finished.add(number);
     else if (st !== "OPEN") {
-      console.error(`${NAME}: gh pr view ${number} printed no PR state — review on PR#${number} unconfirmed finished, its slot stands`);
+      console.error(`${NAME}: gh pr view ${number} printed no PR state — review on PR#${number} unconfirmed finished, its unit stands`);
     }
   }
   return finished;
@@ -1736,7 +1765,7 @@ function readRun(prs) {
   try {
     const ledger = readLedger();
     const run = deriveRun(ledger, prs);
-    const closed = closedTickets(run.tierMismatch);
+    const closed = closedTickets(run.tierMismatch, run.owedReplacement);
     const finished = finishedReviewPrs(run.reviewsOffList);
     return closed.size || finished.size ? deriveRun(ledger, prs, closed, finished) : run;
   } catch (e) {
@@ -1898,9 +1927,13 @@ function main() {
   let supply = current.scanned;
   let dropped = current.dropped;
   let fresh = null;
-  const trigger = refreshWhy({ draining: run.draining, status: current.status, entries: current.entries.length,
-    unclaimed: heads.length, implCap: caps.implCap })
-    ?? (run.draining === null ? liftedPremise(run.excluded, current.entries, prs) : null);
+  // While the bound holds a refresh cannot feed a Pull, so none of its
+  // triggers runs: the first tick back under the bound refreshes and Pulls in
+  // the same tick.
+  const held = run.inFlight >= caps.bound;
+  const trigger = refreshWhy({ draining: run.draining, held, status: current.status, entries: current.entries.length,
+    unclaimed: heads.length, bound: caps.bound })
+    ?? (run.draining === null && !held ? liftedPremise(run.excluded, current.entries, prs) : null);
   if (trigger) {
     const r = refresh();
     if (r.ok) {

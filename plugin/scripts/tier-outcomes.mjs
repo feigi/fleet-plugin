@@ -243,7 +243,7 @@ export function tierFromLedger(ledger, ticket, pr) {
   if (verdicts.length === 0) return null;
 
   const owners = new Set(tokens.filter((t) => t.outcome === `PR#${pr}`).map((t) => t.name));
-  // A member settled to anything else terminal (released, bailed, killed) is
+  // A member settled to anything else terminal (released, bailed, blocked, killed) is
   // positive evidence it did NOT open this PR, so its stale tier-ok verdict
   // never wins the no-owner fallback below — but `tier-mismatch` itself is
   // exempt: that outcome IS the mismatch verdict this function reports, not

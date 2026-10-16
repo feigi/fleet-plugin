@@ -16,7 +16,7 @@ import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot,
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
 const VOCABULARY = [
-  ["impl-412", ["PR#420", "bailed", "released", "killed", "tier-mismatch"]],
+  ["impl-412", ["PR#420", "bailed", "released", "killed", "tier-mismatch", "blocked"]],
   ["fix-pr-346", ["applied:73b356de", "applied:73b356de0123456789abcdef0123456789abcdef", "no-op", "failed", "killed"]],
   ["finisher-pr-346", [
     "labelled", "failed", "killed",
@@ -68,7 +68,7 @@ test("every outcome in the spec's vocabulary settles its own family", () => {
 
 test("an outcome from another family's vocabulary, or none at all, is refused by name", () => {
   const refused = [
-    ["impl-412=done", /expected PR#M \| bailed \| released \| killed \| tier-mismatch/],
+    ["impl-412=done", /expected PR#M \| bailed \| released \| killed \| tier-mismatch \| blocked/],
     ["impl-412=labelled", /not an outcome of impl-N/],
     ["impl-412=", /'' is not an outcome of impl-N/],
     ["impl-412=PR#", /not an outcome of impl-N/],

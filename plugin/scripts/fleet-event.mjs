@@ -2,14 +2,15 @@
 // A member's report, recorded as one command: the writes its wake owes, then
 // the tick.
 //
-//   fleet-event.mjs <kind> <args> [--implementer-cap <n>] [--reviewer-cap <n>]
+//   fleet-event.mjs <kind> <args> [--in-flight <n>]
 //
 // Reached through the Resolver and run from the main checkout. Every kind
-// performs its writes, then runs `fleet-tick.mjs --apply` with the caps —
-// each flag as given, else the one `.fleet/phase0.json` records, else the
-// tick's own default — and prints one `event: <kind>: <summary>` line with
-// the tick's output verbatim after it. Every kind is idempotent: a second run
-// finds its writes made and only ticks again.
+// performs its writes, then runs `fleet-tick.mjs --apply` with the In-flight
+// bound — `--in-flight` as given, else the one `.fleet/phase0.json`'s caps
+// add up to, else the tick's own default — and prints one
+// `event: <kind>: <summary>` line with the tick's output verbatim after it.
+// Every kind is idempotent: a second run finds its writes made and only ticks
+// again.
 //
 // `<scratch>` below is the phase-0 receipt's `scratch`, else the root
 // scratch-root.mjs prints; every settle reads its report under
@@ -115,8 +116,8 @@ const KINDS = {
   "review-result": { args: ["<pr>", "<path>"] },
   "review-failed": { args: ["<pr>", "<launch>"] },
 };
-const FLAGS = { "implementer-cap": "value", "reviewer-cap": "value" };
-const USAGE = `usage: ${NAME}.mjs <kind> <args> [--implementer-cap <n>] [--reviewer-cap <n>] — kinds: `
+const FLAGS = { "in-flight": "value" };
+const USAGE = `usage: ${NAME}.mjs <kind> <args> [--in-flight <n>] — kinds: `
   + Object.entries(KINDS).map(([k, { args }]) => `${k} ${args.join(" ")}`).join(", ");
 
 // The label each `bailCause` demotes to, and the relabel template's kind.
@@ -502,7 +503,7 @@ function reviewFailed(ev, pr, launch) {
 
 // ── main ────────────────────────────────────────────────────────────────────
 
-function capArg(F, name) {
+function boundArg(F, name) {
   const v = F.arg(name);
   if (v === null) return null;
   if (!isDigits(v) || Number(v) < 1) die(`--${name} must be a whole number of at least 1, got '${v}'`);
@@ -530,8 +531,7 @@ function main() {
   if (!Object.hasOwn(KINDS, kind ?? "")) die(kind === undefined ? USAGE : `unknown kind '${kind}' — ${USAGE}`);
   const spec = KINDS[kind];
   if (args.length !== spec.args.length) die(`${kind} takes ${spec.args.join(" ")} — ${USAGE}`);
-  const implCap = capArg(F, "implementer-cap");
-  const reviewCap = capArg(F, "reviewer-cap");
+  const inFlight = boundArg(F, "in-flight");
   let pr = null;
   if (spec.family !== undefined) {
     const m = parseMember(args[0]);
@@ -555,15 +555,7 @@ function main() {
   }
   const caps = tickCaps(fleetDir);
   if (caps.error) die(`${caps.error} — nothing written`);
-  const recorded = (flag) => {
-    const i = caps.args.indexOf(flag);
-    return i === -1 ? null : caps.args[i + 1];
-  };
-  const tickArgs = ["--apply"];
-  for (const [flag, given] of [["--implementer-cap", implCap], ["--reviewer-cap", reviewCap]]) {
-    const value = given ?? recorded(flag);
-    if (value !== null) tickArgs.push(flag, value);
-  }
+  const tickArgs = ["--apply", ...(inFlight === null ? caps.args : ["--in-flight", inFlight])];
 
   const ev = new Event({ fleetDir, scratch, ledger: readLedger() });
   if (kind === "impl-report") implReport(ev, args[0]);
