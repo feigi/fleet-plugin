@@ -57,10 +57,12 @@ import { Pin } from "./support/prose-pin.mjs";
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
 // The commit duty and its reasons moved with the rest of the close-out metrics
-// steps into the reference file; the invariant it is exempt from stayed in
-// SKILL.md. The document under test is the pair, and each mutant says which of
-// the two it edits.
+// steps into the reference file; the invariant it is exempt from moved into
+// references/invariants.md when SKILL.md tightened its invariants to one line
+// each, and SKILL.md keeps the exemption on that line. The document under test
+// is the three, and each mutant says which it edits.
 const CLOSE_OUT = readFileSync(join(REPO, "skills", "run-team", "references", "close-out.md"), "utf8");
+const INVARIANTS = readFileSync(join(REPO, "skills", "run-team", "references", "invariants.md"), "utf8");
 
 // Rules 1 and 2 share one slice: the close-out file's whole commit section,
 // which opens on the paragraph that says the metrics files are the run's own
@@ -78,7 +80,7 @@ const artifactRules = (text = CLOSE_OUT) => Pin.of(text, "close-out.md").section
 // swallow the rest of the section and every pin below would be satisfiable from
 // a neighbouring invariant. Continuation lines are indented, so `\n- ` is the
 // item boundary and cannot match inside the item itself.
-const invariant = (text = RUN_TEAM) => {
+const invariant = (text = INVARIANTS) => {
   const what = "run-team ready-to-merge invariant";
   const rest = text.slice(Pin.of(text, "text").anchorAt("`ready-to-merge` is added by a reviewer only", what));
   const end = rest.search(/\n- /);
@@ -132,16 +134,16 @@ const faults = (pattern, slice) => Pin.sentences(slice).filter((s) => pattern.te
 // Every pin in one place, so a fixture asserts WHICH pins fire rather than that
 // something somewhere went red — a pin that reddens on the wrong mutant has
 // discriminated nothing.
-const DOC = { skill: RUN_TEAM, closeOut: CLOSE_OUT };
+const DOC = { skill: RUN_TEAM, closeOut: CLOSE_OUT, invariants: INVARIANTS };
 const PINS = {
   commit: (d) => !COMMIT_DUTY.test(artifactRules(d.closeOut)),
   noCommit: (d) => NO_COMMIT.test(artifactRules(d.closeOut)),
   reason: (d) => !STRANDING_REASON.test(artifactRules(d.closeOut)),
   branchChoice: (d) => !BRANCH_CHOICE.test(artifactRules(d.closeOut)),
-  branchMandate: (d) => BRANCH_MANDATE.test(d.skill) || BRANCH_MANDATE.test(d.closeOut),
-  exempt: (d) => !EXEMPT_DUTY.test(invariant(d.skill)),
-  label: (d) => !LABEL_DUTY.test(invariant(d.skill)),
-  needsReview: (d) => faults(NEEDS_REVIEW, invariant(d.skill)).length > 0,
+  branchMandate: (d) => BRANCH_MANDATE.test(d.skill) || BRANCH_MANDATE.test(d.closeOut) || BRANCH_MANDATE.test(d.invariants),
+  exempt: (d) => !EXEMPT_DUTY.test(invariant(d.invariants)),
+  label: (d) => !LABEL_DUTY.test(invariant(d.invariants)),
+  needsReview: (d) => faults(NEEDS_REVIEW, invariant(d.invariants)).length > 0,
 };
 const firing = (doc) => Object.keys(PINS).filter((name) => PINS[name](doc));
 // The document with `edit` applied to the one file it names.
@@ -204,21 +206,21 @@ const mutants = [
     (text) => `${text}\nSee chore/run-artifacts-<date>.\n`],
   ["this repository's branch name is mentioned in the close-out reference", ["branchMandate"], "closeOut",
     (text) => `${text}\nSee chore/run-artifacts-<date>.\n`],
-  ["the exemption is removed from the invariant", ["exempt"], "skill",
+  ["the exemption is removed from the invariant", ["exempt"], "invariants",
     (text) => text.replace(EXEMPT_TAIL, "is no different, and this invariant reaches it like any other")],
-  ["the exemption is inverted rather than removed", ["exempt"], "skill",
+  ["the exemption is inverted rather than removed", ["exempt"], "invariants",
     (text) => text.replace(EXEMPT_TAIL, "is not exempt, and this invariant reaches it too")],
-  ["the exemption is stated but the action it licenses is withheld", ["label"], "skill",
+  ["the exemption is stated but the action it licenses is withheld", ["label"], "invariants",
     (text) => text.replace(LABEL_DUTY, "Leave that one unlabelled for the maintainer")],
-  ["a reviewer is re-imposed on the run's own metrics PR", ["needsReview"], "skill",
+  ["a reviewer is re-imposed on the run's own metrics PR", ["needsReview"], "invariants",
     appendTo(LABEL_DUTY, "It still needs a reviewer before the label goes on.")],
-  ["a reviewer is re-imposed on the run's own metrics PR via passive phrasing NEEDS_REVIEW's old keyword list missed", ["needsReview"], "skill",
+  ["a reviewer is re-imposed on the run's own metrics PR via passive phrasing NEEDS_REVIEW's old keyword list missed", ["needsReview"], "invariants",
     appendTo(LABEL_DUTY, "It must still be reviewed before the label goes on.")],
   // A period in the gap — an abbreviation, a filename — ended the old `[^.]`
   // window before the review word, and each of these was green.
-  ["a reviewer is re-imposed with an abbreviation between the need and the reviewer", ["needsReview"], "skill",
+  ["a reviewer is re-imposed with an abbreviation between the need and the reviewer", ["needsReview"], "invariants",
     appendTo(LABEL_DUTY, "It still needs, i.e. before the label goes on, a reviewer.")],
-  ["a reviewer is re-imposed passively with a filename in the gap", ["needsReview"], "skill",
+  ["a reviewer is re-imposed passively with a filename in the gap", ["needsReview"], "invariants",
     appendTo(LABEL_DUTY, "It must, per SKILL.md, still be reviewed.")],
 ];
 
@@ -235,8 +237,8 @@ for (const [what, expected, target, mutate] of mutants) {
 // review word in the next. The fixture is benign and reds the moment the scan
 // reads the raw slice instead of `sentences()`.
 test("a need word in one sentence does not pair with the next sentence's review word", () => {
-  const doc = withEdit("skill", appendTo(Pin.phrase("stranding the rows behind it."), "Nothing here needs one. A reviewer is for ticket work."));
-  assert.notEqual(doc.skill, DOC.skill, "an accept fixture no longer matches the prose and applied nothing — update it");
+  const doc = withEdit("invariants", appendTo(Pin.phrase("stranding the rows behind it."), "Nothing here needs one. A reviewer is for ticket work."));
+  assert.notEqual(doc.invariants, DOC.invariants, "an accept fixture no longer matches the prose and applied nothing — update it");
   assert.deepEqual(firing(doc), [], "a need word paired with a word in the NEXT sentence");
 });
 
@@ -268,9 +270,9 @@ test("reflowing both slices and rewording unpinned sentences inside them stays g
   // Two unrelated rewords: one inside the metrics-PR slice and one inside the
   // invariant slice — the sentence that explains the rule, never the sentence
   // that states it.
-  const skill = RUN_TEAM.replace(bullet, () => bullet.replace(/\n {2}/g, " "))
+  const invariants = INVARIANTS.replace(bullet, () => bullet.replace(/\n {2}/g, " "))
     .replace(Pin.phrase("stranding the rows behind it"), "rather than leaving the rows stranded behind a question nobody owns");
   assert.notEqual(closeOut, CLOSE_OUT, "the benign-edit fixture applied nothing to the close-out file — update it");
-  assert.notEqual(skill, RUN_TEAM, "the benign-edit fixture applied nothing to SKILL.md — update it");
-  assert.deepEqual(firing({ skill, closeOut }), [], "a reflow plus unrelated rewords reddened a pin — the pins are over-tight, not the docs wrong");
+  assert.notEqual(invariants, INVARIANTS, "the benign-edit fixture applied nothing to the invariants reference — update it");
+  assert.deepEqual(firing({ skill: RUN_TEAM, closeOut, invariants }), [], "a reflow plus unrelated rewords reddened a pin — the pins are over-tight, not the docs wrong");
 });

@@ -38,7 +38,7 @@ const PHASE0 = Pin.file(join(REPO, "skills", "run-team", "references", "phase-0.
 const RULE = () =>
   RUN_TEAM.between(
     "**You read your instruments out of a tree every member can write to",
-    "\n## Phase 0 — shortlist",
+    "\n**A member runs its test suite in the foreground and blocks on it.**",
     "run-team instrument rule",
   ).text;
 

@@ -59,7 +59,7 @@ const section = (from, to) => {
   return SKILL.slice(at, end);
 };
 const phase1 = () => section("## Phase 1 — Pull", "## Phase 2 — dispatch");
-const phase2 = () => section("## Phase 2 — dispatch", "## Phase 3 — event loop");
+const phase2 = () => section("## Phase 2 — dispatch", "## The finisher gate");
 
 // --- nothing the move took out is lost ----------------------------------------
 

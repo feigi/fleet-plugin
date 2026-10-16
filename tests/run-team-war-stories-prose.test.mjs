@@ -56,7 +56,6 @@ const CORRECTIONS = [
   ["`fix-pr-1184` backgrounded its suite", "`fix-pr-<M>` backgrounded its suite"],
   ["`finisher-pr-1184` reached", "`finisher-pr-<M>` reached"],
   ["`pgrep -f 'finish-finisher-pr-1184'`", "`pgrep -f 'finish-finisher-pr-<M>'`"],
-  ["the guard above is what stops", "the guard in SKILL.md's heredoc block is what stops"],
   [
     "**A member runs its test suite in the foreground** above, where `fix-pr-1184`",
     "**A member runs its test suite in the foreground** in references/member-lifecycle.md, where `fix-pr-<M>`",
@@ -208,6 +207,10 @@ test("the fixture is the removed text: from the first Measured paragraph to the 
 
 const keptCount = (text, clause, file) => (text.match(new RegExp(Pin.phrase(`${clause} See references/${file}`).source, "g")) ?? []).length;
 
+// The Shell traps section moved whole into references/shell-traps.md, so its
+// five rules keep their clause beside the pointer there, not in SKILL.md.
+const SHELL_TRAPS_MD = reference("shell-traps.md");
+
 for (const [file, heading, clause, opening, imperative] of MOVED) {
   test(`references/${file} carries the paragraph under "## ${heading}"`, () => {
     const slice = Pin.file(join(REFERENCES, file)).section(`## ${heading}`, `references/${file}`).text;
@@ -215,8 +218,9 @@ for (const [file, heading, clause, opening, imperative] of MOVED) {
   });
   if (clause === null) continue;
   const kept = imperative === undefined ? clause : `${clause} ${imperative}`;
-  test(`SKILL.md keeps "${kept.slice(0, 60)}…" with See references/${file} beside it`, () => {
-    assert.equal(keptCount(SKILL, kept, file), 1);
+  const where = file === "shell-traps.md" ? "references/shell-traps.md" : "SKILL.md";
+  test(`${where} keeps "${kept.slice(0, 60)}…" with See references/${file} beside it`, () => {
+    assert.equal(keptCount(file === "shell-traps.md" ? SHELL_TRAPS_MD : SKILL, kept, file), 1);
   });
 }
 

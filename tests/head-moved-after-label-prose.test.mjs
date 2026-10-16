@@ -366,7 +366,7 @@ test("an unanswered member question blocks finisher dispatch, with the same weig
 const labelRecovery = () =>
   RUN_TEAM.between(
     "**Once the label is on, take it off before you approve any push.**",
-    "A halt at duty 1 reads identical from a bare SHA mismatch",
+    "**Every implementer body carries the claim discipline",
     "run-team/SKILL.md",
   ).text;
 

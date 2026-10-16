@@ -1,0 +1,170 @@
+# The tick's rows: what each asks of the controller
+
+The full text of each row `fleet-tick.mjs` prints and what it asks of the controller. SKILL.md's **The tick's rows** carries one line for each.
+
+- `PULL #<N> …` — one Pull per named ticket, in the order printed: phase 1's
+  read, then phase 2's dispatch. A ticket that fails the read is relabelled or
+  excluded (phase 1), and the next tick names the next head.
+- `REFRESHED shortlist: <n> entries; <k> lifted` — the tick refreshed the
+  shortlist itself, and its `PULL` row already reads the result. `REFRESH
+  FAILED` is yours: `shortlist.mjs` could not run, and the implementer row is
+  blind until it can.
+- `SUGGEST /triage, hold idle` — nothing is admissible after the refresh.
+  Suggest, never run (**Queue depth**).
+- `specs-dropped=#<N> … (to-spec: User Stories heading)` at the end of the
+  implementer row's counts, whatever its ACTION — the tickets the to-spec
+  filter kept out of `supply`, read off the shortlist's `dropped`. Never
+  actionable. Log them as specs awaiting to-tickets (phase 0), not as no work.
+- `DISPATCH fix-pr PR#<M> …` — a fix-applier per PR, for a review's survived or unverified findings,
+  a dispositions mismatch no retry has answered, or a `conflict-hold:#<M>` — the merge bot's, or one you recorded off a `CONFLICT` line (**Reviewers**). Printed
+  ahead of reviews on purpose: finishing what is started beats starting more.
+- `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn
+  (**Reviewers**).
+- `DISPATCH merge-bot` — the next `merge-bot-<n>` (**Merge bot**).
+- `DISPATCH finisher PR#<M> …` — a finisher settled `labelled`, yet the open
+  list shows PR M without `ready-to-merge`, and no `label-off=` (**Run ledger**)
+  accounts for the removal. Apply the finisher gate (**Reviewers**: the
+  `check` job green on the current head), then dispatch the next-suffix
+  finisher at that head, one letter past the highest the PR has used: render
+  its brief with `dispatch-prompt.mjs render finisher --kind repair --member
+  finisher-pr-<M>-<x> …`, then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`.
+  Never add the label yourself. A head
+  that moved is caught by the new finisher's duty 1 `past-pin` halt and the
+  re-review path that follows it. Finishers are not review units, so this
+  prints whatever the unit count reads.
+- `ESCALATE unlabelled PR#<M> …` — a second finisher since the last `label-off=`
+  settled `labelled` and the label is still not on: the tick dispatches no
+  third. Not actionable; the maintainer's, through the cockpit's `unlabelled`
+  flag and the comment the repair finisher's report left (`fleet-event.mjs`'s
+  `finisher-report` entry).
+- `CONFLICT PR#<M> …` — GitHub reads PR M `mergeable=CONFLICTING`, the ledger
+  tracks it, no conflict hold stands on it, no fix-applier, finisher or
+  implementer on it is live, and, if it carries `ready-to-merge`, no merge bot
+  is live: a queued PR is the bot's while one runs, and its own fallback records
+  the hold. Record it with `fleet-event.mjs conflict <M>`, not with the `ledger.mjs
+  row` form the row's detail prints: `row` replaces the whole line. The call
+  refuses a PR whose row already carries a hold no fix-applier has answered.
+  The tick then reads the hold as `DISPATCH fix-pr
+  PR#<M>`, a conflict fix-applier (**A `DISPATCH fix-pr PR#<M>` on a conflict
+  hold**), and that row obeys every hold. A review in flight does not stop the
+  line: `fix-due` waits for the review to return. It prints under a
+  main-checkout hold and a drain too, since it writes a record and dispatches
+  nothing.
+- `ESCALATE conflict PR#<M> …` — PR M reads CONFLICTING again after two
+  conflict fix-appliers landed on it: a rebase treadmill. Comment on the PR
+  and flag it for a human; write no hold and dispatch no fix-applier. Not
+  actionable; it repeats while the PR reads CONFLICTING and clears once it
+  stops, closes or merges.
+- `HOLD (…)` — the row is held and says why: draining, a tier mismatch, an
+  unchecked tier, the In-flight bound reached (`HOLD (in-flight <n>/<B>)` —
+  nothing to do unless its detail names a replacement to dispatch, else a
+  merge brings n below B), or every
+  queued merge candidate held behind a lower PR or on a conflict hold no
+  fix-applier has cleared. An unchecked tier is `tick --apply`'s to check, and
+  the hold stays while the check writes no verdict (its `tier-ok=`, or
+  `tier-unverifiable=` for a member settled `killed` or `released` with no
+  transcript, clears it); a mismatch is yours to clear, by dispatching the
+  replacement at the right tier (phase 2). Each prints its clearing step in
+  the row's detail. For a mismatch that is the replacement's name —
+  `impl-<N>-b` on a first retry, else one letter past the highest the ticket
+  has used, or that no retry letter is left. For an unchecked tier, which
+  `tick --apply` has already tried, it is the `tier-check.mjs` command to run
+  by hand when the tick ran without `--apply` or the check wrote no verdict,
+  with a batch entry per member it names (fill in `<file>`; `<session>` too
+  when no receipt of this run records one).
+- `AT CAP`, `IDLE OK` — nothing to do on that row.
+- `MAIN-CHECKOUT-DIRTY <paths> …`, printed above the rows, with every
+  dispatching row (implementers, reviewers, merge-bot) reading
+  `HOLD (main checkout dirty)` — the main checkout changed since the Phase 0
+  baseline. The line names the changed paths, or a `HEAD <was> → <now>` entry
+  when HEAD moved, and every live member; it
+  attributes nothing, because concurrent members make that a guess. Dispatch
+  nothing new and tell the maintainer: they resolve the stray paths FIRST,
+  then re-baseline with `~/.fleet/bin/fleet-run main-checkout.mjs --record`.
+  A path entry holds until that re-baseline, tick after tick; a `HEAD …` entry
+  clears itself once HEAD reads clean again, and is never re-baselined while
+  HEAD is off the run's branch. Never revert the
+  paths yourself, and never re-baseline over paths nobody has resolved. The
+  changes of yours that trip it are a mid-run tooling fix edited in this
+  checkout and the close-out commit's round trip through a branch; **Fix the
+  tooling mid-run** and the commit section of references/close-out.md say how
+  each is cleared.
+- `MAIN-CHECKOUT-UNKNOWN …` with `HOLD (main checkout unknown)` — the tick
+  could not look: a git or hash read failed (`could not look:`), or the
+  baseline exists but cannot be read (`baseline unreadable:`). Never clean,
+  and **never re-baseline over it** — `--record` overwrites, so that certifies
+  a tree nobody read. Fix what the line names and tick again. `baseline v<n>
+  written by a newer plugin` is a baseline a newer plugin version wrote:
+  `--record` refuses over it too — run the plugin that wrote it. The
+  exceptions are the two whose remedy is `--record`: `baseline v<n> —
+  re-record`, an older-format baseline this plugin cannot compare; and
+  `baseline commit <oid> is missing from this repository`, which an amend or
+  reset followed by gc leaves — examine HEAD against `origin/main` FIRST,
+  since HEAD moved off that commit and nobody has looked at the move, and
+  resolve any stray paths, which the line does not name; only then re-record.
+- `MAIN-CHECKOUT-NO-BASELINE …` with `HOLD (main checkout no baseline)` — no
+  baseline was recorded. Yours to fix: run
+  `~/.fleet/bin/fleet-run main-checkout.mjs --record`, which references/phase-0.md
+  describes under "Record the main-checkout baseline". A baseline
+  that vanished mid-run is not a fresh run — report it to the maintainer
+  before recording over whatever the tree now holds.
+- `PHASE0-INCOMPLETE <step>[, <step>…] …`, printed first above the rows,
+  with every dispatching row (implementers, reviewers, merge-bot) reading
+  `HOLD (phase 0 incomplete)` — this run's phase-0 receipt
+  `.fleet/phase0.json` names a step `failed` or `pending`, or lacks one. In
+  place of the steps the line says the receipt is missing, unreadable,
+  another run's (its `run` is not the `at` in the controller record), or a
+  run whose controller has exited — the previous run's finished receipt, in
+  a session that has not yet run its own phase 0. It outranks every
+  other reason on those rows, `MAIN-CHECKOUT-*` included, whose lines still
+  print; a `baseline` step not `ok` is one of the steps it names.
+  `CONFLICT` rows and the stall report still print. Run the
+  `phase0.mjs` command the line names and act on what it prints: a re-run
+  resumes at the step that stopped. A `drift` or `unanswered` step and a
+  `fold-in` `NEED` are advice, named after `; advice:` on the line, or alone
+  on a `PHASE0-ADVICE …` line when nothing is incomplete; advice holds
+  nothing.
+- `CHECK-LIVENESS <member> (<family> > p99 <t>m)`, printed above the rows — a
+  live ledger token has stayed live past its family's p99 run time, counted
+  from the first tick that saw it (`> 2×p99 …` from the second multiple of the
+  threshold on; `review:PR#<n>` names an in-flight `review=` launch). Advice,
+  not an action: it is not actionable, resets no `quiet`, changes no row and
+  frees no slot, and the tick settles and kills nothing. Take the census the
+  **Member unaccounted** row of **Failure handling** gives before you touch the
+  token. It repeats every tick while the token stays live past the threshold.
+  `--liveness-impl`, `--liveness-fix-pr`, `--liveness-finisher`,
+  `--liveness-merge-bot` and `--liveness-review` set the thresholds, in minutes.
+- `UNRECORDED <stem> (transcript exists, no ledger token)`, printed above the
+  rows — the session directory holds a `<stem>.jsonl` whose stem is a member
+  name no row token, `## Dispatched` entry or `## Retired` line names: a
+  dispatch whose ledger write was forgotten. Record it with `ledger.mjs
+  dispatch`, or confirm it is a stranger's member.
+  Advice, like `CHECK-LIVENESS`: it resets no `quiet`, changes no row and
+  frees no slot, it repeats every tick while it holds, and the folded line
+  names it (`…; UNRECORDED <stem> persists — …`).
+- `NO-TRANSCRIPT <member> (live <age>m, no <session>/<member>.jsonl)`, printed
+  above the rows — a live ledger token first seen more than
+  `--no-transcript-after` minutes ago (default 5) has no transcript in the
+  session directory: a dispatch whose `task` call was never made. Make the
+  `task` call, or settle the token `killed`. Advice the same way, folded as
+  `…; NO-TRANSCRIPT <member> persists — …`. Both lines read the session
+  directory this run's phase-0 receipt names, else `--session <dir>`; with
+  neither the tick skips them with one stderr line. A heartbeat state file
+  that exists but cannot be used — unreadable, not JSON, not a JSON object,
+  or holding a `controller` that cannot be judged — holds no first-seen
+  ages, and the tick never rewrites it, so every live token reads as first
+  seen that tick and neither `CHECK-LIVENESS` nor `NO-TRANSCRIPT` can fire.
+  The tick says so with one stderr line, `fleet-tick: CHECK-LIVENESS and
+  NO-TRANSCRIPT not checked — <file> <cause>, so first-seen ages are
+  unavailable`, naming only the checks that would have run that tick.
+- `SETTLE <member> (report on disk since <n>m — ledger.mjs settle <member>
+  --from-report)`, printed above the rows — a live ledger token whose report
+  file, `<scratch>/reports/<member>.json`, is on disk and passes its member
+  family's report schema. Run the settle the line prints. Advice, like
+  `CHECK-LIVENESS`: the tick settles nothing. Three lines name a report file
+  `settle --from-report` cannot settle from: `REPORT-MISMATCH <path> (member:
+  …)`, a file whose `member` is not its filename's; `REPORT-UNREADABLE <path>
+  (…)`, one that is there but cannot be read; and `REPORT-INVALID <path> (…)`,
+  one that names its own member and fails its family's schema, with the first
+  violation. A review runner has no report schema and files none, so none of
+  these lines names one.

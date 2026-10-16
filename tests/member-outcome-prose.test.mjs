@@ -39,7 +39,7 @@ const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 const outcomeParagraph = () =>
-  RUN_TEAM.section("## Phase 2 — dispatch the Pull's implementer", "run-team/SKILL.md ## Phase 2").paragraph(
+  RUN_TEAM.section("## Phase 2 — dispatch every member", "run-team/SKILL.md ## Phase 2").paragraph(
     "A member settling with nothing is not, by itself, a bail.",
     "run-team/SKILL.md member outcome-classification paragraph",
     "**Dispatch every implementer with the `agent`",

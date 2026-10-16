@@ -1,0 +1,479 @@
+// run-team's SKILL.md is a wake-to-command table: its sections run in the order
+// the controller needs them, each opens with its exit condition, and what the
+// controller reads only when a member needs the why lives under references/.
+// These pins hold what only the runbook carries about that shape:
+//
+//   - the section order, by heading text, and the shape of the section list
+//     the ticket names: invariants, phase 0, the wake table, the tick's rows,
+//     the Pull, dispatch, the finisher gate, the judgement rules, then the
+//     failure table, guards, red flags and the report;
+//   - every `## ` section's first paragraph states what the controller does and
+//     when it is done with the section, and no section's table is followed by
+//     prose;
+//   - the invariants are at most ten lines, one line each, and the tick's rows
+//     are one line each, each row name the tick prints present once;
+//   - nothing the rewrite took out was lost: the fixture
+//     tests/fixtures/run-team-moved-text/skill-before-shape-rewrite.md is the
+//     whole SKILL.md as it read before the rewrite, owned by this test, and
+//     every sentence of it is found in SKILL.md or across references/ as often
+//     as it was said, but for the sentences CHANGED and DELETED below, each
+//     named with the copy that survives it;
+//   - the three blocks the rewrite moved whole — Shell traps, the invariants'
+//     full statements, the tick rows' full text — are found across references/
+//     as often as they were said, and not at all in SKILL.md.
+//
+// THE CEILING shared with every prose pin here: this proves text is PRESENT,
+// not that no sentence beside it negates it.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { Pin } from "./support/prose-pin.mjs";
+
+const RUN_TEAM_DIR = join(import.meta.dirname, "..", "plugin", "skills", "run-team");
+const REFERENCES = join(RUN_TEAM_DIR, "references");
+const FIXTURE = join(import.meta.dirname, "fixtures", "run-team-moved-text", "skill-before-shape-rewrite.md");
+const SKILL = readFileSync(join(RUN_TEAM_DIR, "SKILL.md"), "utf8");
+
+const flat = (text) => text.replace(/\s+/g, " ").trim();
+const occurrences = (haystack, needle) => {
+  let n = 0;
+  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) n += 1;
+  return n;
+};
+
+// --- the blocks of a document -------------------------------------------------
+
+const FENCE = /^\s*(?:```|~~~)/;
+// The document's units, each whitespace-flattened: a paragraph, a top-level
+// list item with whatever hangs off it, one table row, a fenced block. A
+// heading carries no sentence. A unit that ends without a full stop (a table
+// row, a code span, a colon before a block) would otherwise run into the next
+// unit's first sentence, so units are what sentences are cut from.
+export const units = (text) => {
+  const out = [];
+  let cur = [];
+  let fence = false;
+  const push = () => {
+    if (cur.length > 0) out.push(flat(cur.join("\n")));
+    cur = [];
+  };
+  for (const line of text.split("\n")) {
+    if (fence) {
+      cur.push(line);
+      if (FENCE.test(line)) {
+        push();
+        fence = false;
+      }
+      continue;
+    }
+    if (FENCE.test(line)) {
+      push();
+      cur.push(line);
+      fence = true;
+      continue;
+    }
+    if (line.trim() === "" || /^#{1,6}\s/.test(line)) {
+      push();
+      continue;
+    }
+    if (/^(?:[-*]|\d+\.)\s/.test(line) || /^\s*\|/.test(line)) push();
+    cur.push(line);
+  }
+  push();
+  return out;
+};
+
+// A moved list item's marker and a numbered step's ordinal claim nothing.
+const sentencesOf = (text) =>
+  units(text)
+    .flatMap((u) => Pin.sentences(u))
+    .map((s) => s.replace(/^(?:\d+\.|-)\s+/, ""))
+    .filter((s) => s !== "" && !/^\d+\.$/.test(s));
+
+const counted = (sentences) => {
+  const m = new Map();
+  for (const s of sentences) m.set(s, (m.get(s) ?? 0) + 1);
+  return m;
+};
+
+// Every reference file, whitespace-flattened, joined by a character no sentence
+// holds, so a sentence cannot be matched across two files.
+const referenceCorpus = () =>
+  readdirSync(REFERENCES)
+    .filter((f) => f.endsWith(".md"))
+    .sort()
+    .map((f) => flat(readFileSync(join(REFERENCES, f), "utf8")))
+    .join("\u0000");
+
+// --- the section order --------------------------------------------------------
+
+// Every `## ` heading, in order, fences skipped.
+export const headingsOf = (text) => {
+  const out = [];
+  let fence = false;
+  for (const line of text.split("\n")) {
+    if (FENCE.test(line)) fence = !fence;
+    else if (!fence && /^## /.test(line)) out.push(line);
+  }
+  return out;
+};
+
+// The ticket's ten, in its order — the sections the controller acts from.
+const TICKET_ORDER = [
+  "## Invariants",
+  "## Phase 0 — shortlist",
+  "## The wake table",
+  "## The tick's rows",
+  "## Phase 1 — Pull: judge, then claim or relabel",
+  "## Phase 2 — dispatch every member",
+  "## The finisher gate",
+  "## Judgement rules the drivers stop for",
+  "## Failure handling",
+  "## Guards",
+  "## Red flags",
+  "## Report",
+];
+
+// What the ticket does not name stays in the file, between the judgement rules
+// and the failure table, in the order the file had it.
+const STANDING = [
+  "## Rules that fail silently",
+  "## Phase 3 — event loop",
+  "## Worktree and claim model",
+  "## Queue depth",
+  "## Tier outcomes guard",
+  "## Why the implementer body carries what it does",
+  "## Fix the tooling mid-run",
+  "## Run ledger",
+];
+
+test("the sections run in the order the ticket names, the standing sections between the judgement rules and the failure table", () => {
+  const judge = TICKET_ORDER.indexOf("## Judgement rules the drivers stop for");
+  const expected = [...TICKET_ORDER.slice(0, judge + 1), ...STANDING, ...TICKET_ORDER.slice(judge + 1)];
+  assert.deepEqual(headingsOf(SKILL), expected);
+});
+
+test("no `## ` heading is a section this file did not have a reason to keep: Shell traps live in references/", () => {
+  assert.ok(!headingsOf(SKILL).includes("## Shell traps"));
+  assert.match(readFileSync(join(REFERENCES, "shell-traps.md"), "utf8"), /^## Shell traps$/m);
+});
+
+// --- the first paragraph is the exit condition --------------------------------
+
+const EXIT_VERBS = ["run", "dispatch", "answer", "act", "hold", "report", "stop"];
+const EXIT_VERB = new RegExp(`\\b(?:${EXIT_VERBS.join("|")})\\b`, "i");
+
+// A `## ` section as its top-level blocks: the text between its heading and the
+// next `## ` heading, cut into paragraphs, lists, tables, code blocks and
+// headings by the blank lines and markers a reader sees.
+export const sectionsOf = (text) => {
+  const out = [];
+  let cur = null;
+  let fence = false;
+  for (const line of text.split("\n")) {
+    if (FENCE.test(line)) fence = !fence;
+    if (!fence && /^## /.test(line)) {
+      cur = { heading: line, lines: [] };
+      out.push(cur);
+    } else if (cur !== null) cur.lines.push(line);
+  }
+  return out.map(({ heading, lines }) => ({ heading, blocks: blocksOf(lines) }));
+};
+
+// Each block is {kind, text}: heading, table, fence, list or para.
+export const blocksOf = (lines) => {
+  const blocks = [];
+  let cur = null;
+  let fence = false;
+  const close = () => {
+    if (cur !== null) blocks.push(cur);
+    cur = null;
+  };
+  const open = (kind, line) => {
+    close();
+    cur = { kind, text: line };
+  };
+  for (const line of lines) {
+    if (fence) {
+      cur.text += `\n${line}`;
+      if (FENCE.test(line)) {
+        close();
+        fence = false;
+      }
+      continue;
+    }
+    if (FENCE.test(line)) {
+      open("fence", line);
+      fence = true;
+    } else if (line.trim() === "") close();
+    else if (/^#{1,6}\s/.test(line)) {
+      open("heading", line);
+      close();
+    } else if (cur === null) {
+      open(/^\|/.test(line) ? "table" : /^(?:[-*]|\d+\.)\s/.test(line) ? "list" : "para", line);
+    } else if (cur.kind === "table" && !/^\|/.test(line)) {
+      open("para", line);
+    } else if (cur.kind === "para" && /^\|/.test(line)) {
+      open("table", line);
+    } else cur.text += `\n${line}`;
+  }
+  close();
+  return blocks;
+};
+
+// The first paragraph of a section: its first block that is not a heading.
+export const firstParagraph = ({ blocks }) => blocks.find((b) => b.kind !== "heading");
+
+test("every `## ` section opens with a paragraph that states what the controller does and when it is done", () => {
+  const sections = sectionsOf(SKILL);
+  assert.ok(sections.length >= 20, `${sections.length} sections read — the splitter is broken`);
+  for (const section of sections) {
+    const first = firstParagraph(section);
+    assert.ok(first !== undefined && first.kind === "para", `${section.heading} does not open with a paragraph`);
+    assert.match(first.text, EXIT_VERB, `${section.heading}'s first paragraph names none of ${EXIT_VERBS.join(", ")}: it states no exit condition`);
+  }
+});
+
+test("a first paragraph naming none of the exit verbs, or no paragraph at all, is refused; one naming any is accepted", () => {
+  const sec = (md) => sectionsOf(`## S\n\n${md}\n`)[0];
+  for (const verb of EXIT_VERBS) {
+    const p = firstParagraph(sec(`Done when you ${verb} it.\n\nMore.`));
+    assert.match(p.text, EXIT_VERB, verb);
+  }
+  assert.doesNotMatch(firstParagraph(sec("Nothing to see here, move along.\n\nStop.")).text, EXIT_VERB);
+  assert.equal(firstParagraph(sec("- a list first\n\nStop.")).kind, "list");
+  assert.equal(firstParagraph(sec("| a | b |\n|---|---|\n| 1 | 2 |\n\nStop.")).kind, "table");
+});
+
+// --- no table is followed by prose --------------------------------------------
+
+// A top-level table is the last thing before a heading or the end of its
+// section. A table nested in a list item is part of that item.
+export const proseAfterTable = (section) => {
+  const hits = [];
+  section.blocks.forEach((b, i) => {
+    if (b.kind !== "table") return;
+    const next = section.blocks[i + 1];
+    if (next !== undefined && next.kind !== "heading") hits.push(`${section.heading}: a table is followed by ${next.kind}: ${flat(next.text).slice(0, 60)}`);
+  });
+  return hits;
+};
+
+test("no section has a table followed by prose: every table closes its section or the block under its heading", () => {
+  const sections = sectionsOf(SKILL);
+  const tables = sections.flatMap((s) => s.blocks.filter((b) => b.kind === "table"));
+  assert.ok(tables.length >= 5, `${tables.length} tables read — the splitter is broken`);
+  assert.deepEqual(sections.flatMap(proseAfterTable), []);
+});
+
+test("a table followed by a paragraph, a list or a second table is refused; one that ends its section or precedes a heading is accepted", () => {
+  const sec = (md) => sectionsOf(`## S\n\nFirst.\n\n${md}\n`)[0];
+  assert.equal(proseAfterTable(sec("| a |\n|---|\n| 1 |\n\nTrailing prose.")).length, 1);
+  assert.equal(proseAfterTable(sec("| a |\n|---|\n| 1 |\n\n- trailing item")).length, 1);
+  assert.equal(proseAfterTable(sec("| a |\n|---|\n| 1 |\n\n| b |\n|---|\n| 2 |")).length, 1);
+  assert.equal(proseAfterTable(sec("| a |\n|---|\n| 1 |")).length, 0);
+  assert.equal(proseAfterTable(sec("| a |\n|---|\n| 1 |\n\n### Next\n\nProse under it.")).length, 0);
+  assert.equal(proseAfterTable(sec("A table with no blank line before the prose:\n| a |\n|---|\n| 1 |\nTrailing prose.")).length, 1);
+});
+
+// --- the invariants and the rows are one line each ----------------------------
+
+test("the invariants are at most ten lines, one line each", () => {
+  const section = sectionsOf(SKILL).find((s) => s.heading === "## Invariants");
+  const lines = section.blocks.flatMap((b) => b.text.split("\n")).filter((l) => l.trim() !== "");
+  assert.ok(lines.length <= 10, `${lines.length} lines`);
+  const items = section.blocks.filter((b) => b.kind === "list").flatMap((b) => b.text.split("\n"));
+  assert.ok(items.length >= 6, "the invariants list is gone");
+  for (const line of items) assert.match(line, /^- /, `an invariant runs over a line: ${line}`);
+});
+
+const ROW_NAMES = [
+  "`PULL #<N> …`",
+  "`REFRESHED shortlist: <n> entries; <k> lifted`",
+  "`SUGGEST /triage, hold idle`",
+  "`specs-dropped=#<N> …`",
+  "`DISPATCH fix-pr PR#<M> …`",
+  "`DISPATCH review PR#<M> …`",
+  "`DISPATCH merge-bot`",
+  "`DISPATCH finisher PR#<M> …`",
+  "`ESCALATE unlabelled PR#<M> …`",
+  "`CONFLICT PR#<M> …`",
+  "`ESCALATE conflict PR#<M> …`",
+  "`HOLD (…)`",
+  "`AT CAP`, `IDLE OK`",
+  "`MAIN-CHECKOUT-DIRTY …`",
+  "`MAIN-CHECKOUT-UNKNOWN …`",
+  "`MAIN-CHECKOUT-NO-BASELINE …`",
+  "`PHASE0-INCOMPLETE <step>…`",
+  "`CHECK-LIVENESS <member> (…)`",
+  "`UNRECORDED <stem> (…)`",
+  "`NO-TRANSCRIPT <member> (…)`",
+  "`SETTLE <member> (report on disk …)`",
+];
+
+test("the tick's rows are one line each, each row the tick prints named once, with what it asks and where its full text is", () => {
+  const section = sectionsOf(SKILL).find((s) => s.heading === "## The tick's rows");
+  const list = section.blocks.filter((b) => b.kind === "list");
+  assert.equal(list.length, 1, "the rows are one list");
+  const lines = list[0].text.split("\n");
+  assert.deepEqual(
+    lines.map((l) => ROW_NAMES.find((n) => l.startsWith(`- ${n} — `)) ?? l),
+    ROW_NAMES,
+    "a row line is missing, repeated, out of order, or runs over a line",
+  );
+  assert.match(firstParagraph(section).text, Pin.phrase("The full text of each row is in references/tick-rows.md."));
+});
+
+// The reference carries each row's full text: its bullets are the fixture's rows.
+test("references/tick-rows.md names every row the tick's list names", () => {
+  const ref = readFileSync(join(REFERENCES, "tick-rows.md"), "utf8");
+  for (const name of ROW_NAMES) {
+    const lead = name.replace(/^`([^`]*?)(?: …| \(…\)|…)?`.*$/, "$1").replace(/ <.*$/, "");
+    assert.ok(ref.includes(`- \`${lead}`), `references/tick-rows.md has no row for ${name}`);
+  }
+});
+
+// --- nothing the rewrite took out is lost -------------------------------------
+
+// Sentences the rewrite changed: the pre-rewrite sentence and the sentence that
+// stands in SKILL.md (or the reference file named) now. A positional pointer
+// whose target moved names where the target is; a sentence a split paragraph
+// left dangling is finished; a lead-in whose block moved says so.
+const CHANGED = [
+  [
+    "**Pin once**, at phase 0 step 0 below, from the main checkout you are running this from — never from a member's worktree, which is gitignored and carries no baseline: `~/.fleet/bin/fleet-run instruments.sh --pin`.",
+    "**Pin once**, at phase 0 step 0 above, from the main checkout you are running this from — never from a member's worktree, which is gitignored and carries no baseline: `~/.fleet/bin/fleet-run instruments.sh --pin`."
+  ],
+  [
+    "No harness supplies a scratch directory to a member, so a member left to name its own invents one — and the liveness read below, which looks at the files under the directory a member's own prompt assigned it, then watches a directory nobody else can find.",
+    "No harness supplies a scratch directory to a member, so a member left to name its own invents one — and the liveness read in **The tick's rows**, which looks at the files under the directory a member's own prompt assigned it, then watches a directory nobody else can find."
+  ],
+  [
+    "Monitor and Bash commands run under **zsh**, and the shell in this file is prescriptive — copied verbatim into a watcher or into the merge bot's agent body.",
+    "Monitor and Bash commands run under **zsh**, and the shell in SKILL.md is prescriptive — copied verbatim into a watcher or into the merge bot's agent body."
+  ],
+  [
+    "Stated in full at *A probe that cannot read is a transition event, not silence* in Phase 3, and it binds every watcher in this file rather than that one block: the third value beside pass and fail is what turns a broken loop into a loud failure instead of a quiet one.",
+    "Stated in full at *A probe that cannot read is a transition event, not silence* in Phase 3, and it binds every watcher in SKILL.md rather than that one block: the third value beside pass and fail is what turns a broken loop into a loud failure instead of a quiet one."
+  ],
+  [
+    "Listed first because it is the only wake with no trigger — every other row above arrives; this one is the absence of one.",
+    "Listed on its own because it is the only wake with no trigger — every other row above arrives; this one is the absence of one."
+  ],
+  [
+    "**Finisher reports halted** → the per-cause rule (**Resolving a finisher halt**, below).",
+    "**Finisher reports halted** → the per-cause rule (**Resolving a finisher halt**, above)."
+  ],
+  [
+    "The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, below), then run the tick.",
+    "The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, above), then run the tick."
+  ],
+  [
+    "No survived or unverified finding and nothing to file → skip the fix-applier and dispatch the **finisher** directly — or, when that head's bound conclusion is red and not solely staleness, the red-check fixer instead (**Then dispatch a red-check fixer**, below): no member will touch that PR, so no push is coming and nothing will wake you.",
+    "No survived or unverified finding and nothing to file → skip the fix-applier and dispatch the **finisher** directly — or, when that head's bound conclusion is red and not solely staleness, the red-check fixer instead (**Then dispatch a red-check fixer**, above): no member will touch that PR, so no push is coming and nothing will wake you."
+  ],
+  [
+    "The diff-validating `check` job green with no heavy job (the diff-validating suites, not the `rebase-check` currency gate) in `failure` → a finisher CANDIDATE (gated below), a `check` **failure** that is not solely staleness → the **red-check fixer** (**Then dispatch a red-check fixer**, below), behind the same review-returned and fix-applier-reported gate as a finisher.",
+    "The diff-validating `check` job green with no heavy job (the diff-validating suites, not the `rebase-check` currency gate) in `failure` → a finisher CANDIDATE (gated below), a `check` **failure** that is not solely staleness → the **red-check fixer** (**Then dispatch a red-check fixer**, above), behind the same review-returned and fix-applier-reported gate as a finisher."
+  ],
+  [
+    "**A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch the finisher **now**, against the existing head — when that head's bound conclusion is red, the red-check fixer instead (**Then dispatch a red-check fixer**, below), never a finisher and never a wait.",
+    "**A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch the finisher **now**, against the existing head — when that head's bound conclusion is red, the red-check fixer instead (**Then dispatch a red-check fixer**, above), never a finisher and never a wait."
+  ],
+  [
+    "**Then iterate with the inline `$(printf '%s\\n' \"$prs\")` form, never a bare `for pr in $prs`** — the assigned-variable trap in **Shell traps**, which carries the mechanism, with its measurements in references/shell-traps.md.",
+    "**Then iterate with the inline `$(printf '%s\\n' \"$prs\")` form, never a bare `for pr in $prs`** — the assigned-variable trap in **Shell traps**, in references/shell-traps.md, which carries the mechanism and its measurements."
+  ],
+  [
+    "When the diff-validating `check` job is green **and no heavy job is in `failure`** (the heavy diff-validating suites — not the `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and fine — **solely** off that count, which is a condition to establish rather than infer, see the five-condition note in the fix-applier body) — or `ci-state.mjs` reads `verdict: \"no-ci\"`, see below — **and once the PR's review has returned and its fix-applier, if one was dispatched, has sent its report, which the CI-completes edge above states in full** — dispatch a **finisher** — a fresh small agent, not the fix-applier resumed.",
+    "When the diff-validating `check` job is green **and no heavy job is in `failure`** (the heavy diff-validating suites — not the `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and fine — **solely** off that count, which is a condition to establish rather than infer, see the five-condition note in the fix-applier body) — or `ci-state.mjs` reads `verdict: \"no-ci\"`, see above — **and once the PR's review has returned and its fix-applier, if one was dispatched, has sent its report, which the CI-completes edge above states in full** — dispatch a **finisher** — a fresh small agent, not the fix-applier resumed."
+  ],
+  [
+    "Its four duties are a checklist — audit the worktree, confirm every deferral has a tracker home and re-run the acceptance mutation, apply one release label, report — and the merge gate downstream still catches whatever it gets wrong, the same argument that puts the merge bot on the same tier below.",
+    "Its four duties are a checklist — audit the worktree, confirm every deferral has a tracker home and re-run the acceptance mutation, apply one release label, report — and the merge gate downstream still catches whatever it gets wrong, the same argument that puts the merge bot on the same tier above."
+  ],
+  [
+    "Its duties, in this order:",
+    "The finisher's duties, in this order:"
+  ],
+  [
+    "The instrument-set rule is stated once, at the top of this file, which no finisher is dispatched to read, so it reaches one through that body.",
+    "The instrument-set rule is stated once, in **Rules that fail silently**, which no finisher is dispatched to read, so it reaches one through that body."
+  ],
+  [
+    "A bot already looping cannot be corrected — the loop consumes the turns a correction would land in — so `agents/fleet-merge-bot.agent.md` carries **every entry in Shell traps**, each written out in full: the rules in that section with the measurements from `references/shell-traps.md` beside them, and the bot has them before its first turn.",
+    "A bot already looping cannot be corrected — the loop consumes the turns a correction would land in — so `agents/fleet-merge-bot.agent.md` carries **every entry in `references/shell-traps.md`'s Shell traps**, each written out in full: the rules with the measurements from that file beside them, and the bot has them before its first turn."
+  ],
+  [
+    "An edit to Shell traps or to `references/shell-traps.md` lands in that body in the same change.",
+    "An edit to `references/shell-traps.md` lands in that body in the same change."
+  ]
+];
+
+// Sentences the rewrite deleted, each a duplicate whose surviving copy is
+// named.
+const DELETED = [];
+
+const oldSentences = () => counted(sentencesOf(readFileSync(FIXTURE, "utf8")));
+const referenceFiles = () => readdirSync(REFERENCES).filter((f) => f.endsWith(".md")).sort().map((f) => readFileSync(join(REFERENCES, f), "utf8"));
+const newSentences = () => counted([...sentencesOf(SKILL), ...referenceFiles().flatMap(sentencesOf)]);
+
+test("every sentence of the pre-rewrite SKILL.md is in SKILL.md or across references/ as often as it was said, but for the changed and the deleted", () => {
+  const was = oldSentences();
+  assert.ok(was.size > 1000, `the fixture read as ${was.size} distinct sentences — the fixture or the splitter is broken`);
+  const now = newSentences();
+  const excused = new Set([...CHANGED.map(([from]) => from), ...DELETED.map(([from]) => from)]);
+  const lost = [];
+  for (const [s, n] of was) {
+    if (excused.has(s)) continue;
+    const found = now.get(s) ?? 0;
+    if (found < n) lost.push(`${found}× (said ${n}×) ${s}`);
+  }
+  assert.deepEqual(lost, [], "sentences the rewrite lost");
+  const missing = CHANGED.filter(([, to]) => (now.get(to) ?? 0) < 1).map(([from]) => from);
+  assert.deepEqual(missing, [], "changed sentences whose replacement is not in SKILL.md or across references/");
+  for (const [from] of [...CHANGED, ...DELETED]) assert.ok(was.has(from), `a changed or deleted sentence the fixture never said: ${from}`);
+});
+
+// --- the three blocks that moved whole ----------------------------------------
+
+const fixtureText = () => readFileSync(FIXTURE, "utf8");
+const cut = (text, from, to) => {
+  const at = text.indexOf(from);
+  assert.notEqual(at, -1, `the fixture lost: ${from}`);
+  const end = text.indexOf(to, at + from.length);
+  assert.notEqual(end, -1, `the fixture lost: ${to}`);
+  return text.slice(at, end);
+};
+// The two lines SKILL.md keeps word for word as its one-liner: already one line.
+const KEPT_VERBATIM = new Set(["A reviewer never reviews a PR it implemented.", "`AT CAP`, `IDLE OK` — nothing to do on that row."]);
+const MOVED_BLOCKS = [
+  ["Shell traps", () => cut(fixtureText(), "## Shell traps\n", "\n## Phase 0 — shortlist")],
+  ["the invariants' full statements", () => cut(fixtureText(), "## Invariants\n", "\n## Guards")],
+  ["the tick rows' full text", () => cut(fixtureText(), "- `PULL #<N> …`", "\n**Tier guards under Pull.**")],
+];
+
+for (const [what, block] of MOVED_BLOCKS) {
+  test(`${what}: every sentence is across references/ as often as it was said, and none is in SKILL.md`, () => {
+    const was = counted(sentencesOf(block()));
+    assert.ok(was.size >= 5, `${what} read as ${was.size} sentences — the fixture or the splitter is broken`);
+    const refs = counted(referenceFiles().flatMap(sentencesOf));
+    const skill = counted(sentencesOf(SKILL));
+    const excused = new Set([...CHANGED, ...DELETED].map(([from]) => from));
+    const lost = [];
+    const stayed = [];
+    for (const [s, n] of was) {
+      if (excused.has(s)) continue;
+      if ((refs.get(s) ?? 0) < n) lost.push(s);
+      if ((skill.get(s) ?? 0) > 0 && !KEPT_VERBATIM.has(s)) stayed.push(s);
+    }
+    assert.deepEqual(lost, [], `sentences of ${what} the references lost`);
+    assert.deepEqual(stayed, [], `sentences of ${what} SKILL.md still says`);
+  });
+}
+
+test("SKILL.md's invariant for ready-to-merge keeps the metrics-PR exemption on its own line", () => {
+  const line = SKILL.split("\n").find((l) => l.startsWith("- `ready-to-merge` is added by a reviewer only"));
+  assert.match(line, Pin.phrase("but for the run's own artifact PR, which this line does not reach"));
+});

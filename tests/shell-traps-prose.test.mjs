@@ -1,4 +1,4 @@
-// #854. `run-team/SKILL.md`'s **Shell traps** section is the single seat for the
+// #854. `run-team/references/shell-traps.md`'s **Shell traps** section is the single seat for the
 // zsh family, and the one thing a pin here has to stop is the rule being written
 // BACKWARDS. The ticket was filed naming `for x in $(…)` as the hazard — that is
 // the form that works — and a member acted on the uncorrected version and
@@ -64,9 +64,11 @@ const sh = (shell, script, env = {}) => {
   });
 };
 
-// Slice to the section, so a sentence elsewhere in a 3000-line file can never
-// stand in for one here. Anchored on the heading text, never on an offset.
-const TRAPS = SKILL.section("## Shell traps", "run-team/SKILL.md").text;
+// Slice to the section, so a sentence elsewhere can never stand in for one
+// here. Anchored on the heading text, never on an offset. The section lives in
+// references/shell-traps.md: SKILL.md points at it, and carries none of it.
+const TRAPS_MD = Pin.file(join(SKILLS, "run-team", "references", "shell-traps.md"));
+const TRAPS = TRAPS_MD.section("## Shell traps", "references/shell-traps.md").text;
 
 // The three-value list the section's own table is measured against.
 const LIST = "849\\n850\\n852\\n";
@@ -144,9 +146,8 @@ const needs = (t, shell) => {
   return false;
 };
 
-// The section's measured paragraphs moved, with their table, to
-// references/shell-traps.md; the section keeps each rule beside the pointer.
-const TRAPS_MD = Pin.file(join(SKILLS, "run-team", "references", "shell-traps.md"));
+// The section's measured paragraphs sit beside it in references/shell-traps.md,
+// each under the rule it justifies.
 
 test("the section states the rule in the corrected direction", () => {
   // The half the original ticket got backwards, and the half that matters most:
