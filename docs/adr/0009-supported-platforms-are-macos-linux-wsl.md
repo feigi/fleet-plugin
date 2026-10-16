@@ -1,6 +1,7 @@
 # 0009 — Supported platforms are macOS, Linux and WSL; native Windows is not
 
 **Status:** Accepted. Ruled 2026-09-23 while closing #39, against the audit below.
+Amended by #3036: the controller record's start identity is the second macOS/Linux divergence (procfs on Linux, ps on macOS); per Decision 3 a macos-latest CI job runs tests/proc.test.mjs.
 
 ## Context
 

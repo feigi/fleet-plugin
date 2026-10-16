@@ -1,17 +1,20 @@
-// proc.mjs: the one liveness predicate, and the process tree and start times
-// the controller record is judged by. The real `ps` source is measured here
-// on whatever platform runs the suite — macOS locally, Linux in CI — because
-// a start time compared as an opaque string is only as good as `ps` printing
-// the same string for the same process every time it is asked.
+// proc.mjs: the one liveness predicate, and the process tree and start
+// identities the controller record is judged by. A start identity is compared
+// as an opaque string, so it is only as good as the reader giving the same
+// string for the same process every time it is asked, and a different one for
+// a reused pid. Both readers are measured here on whatever platform runs the
+// suite: `ps` everywhere, procfs against a fake root everywhere and against
+// the real /proc on Linux. The real-system tests go through processSource(),
+// so CI's Linux and macOS jobs each measure the reader their platform uses.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDead, processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "../plugin/scripts/proc.mjs";
+import { isDead, processSource, psSource, procfsStartTime, ancestry, controllerOf, judgeController, ProcUnreadable } from "../plugin/scripts/proc.mjs";
 
 const deadPid = () => spawnSync(process.execPath, ["-e", ""]).pid;
 
@@ -38,30 +41,49 @@ test("the ledger lock, the suite slots and the controller record share proc.mjs'
 });
 
 test("ps: a live process's start time is a non-empty string, the same on every read and under every caller's TZ and locale", () => {
-  const plain = processSource().startTime(process.pid);
+  const plain = psSource(process.env).startTime(process.pid);
   assert.equal(typeof plain, "string");
   assert.notEqual(plain, "");
-  assert.equal(processSource().startTime(process.pid), plain);
+  assert.equal(psSource(process.env).startTime(process.pid), plain);
   // Twenty-four hours apart: an unpinned zone prints a different date.
-  const east = processSource({ ...process.env, TZ: "Pacific/Kiritimati" }).startTime(process.pid);
-  const west = processSource({ ...process.env, TZ: "Pacific/Pago_Pago" }).startTime(process.pid);
+  const east = psSource({ ...process.env, TZ: "Pacific/Kiritimati" }).startTime(process.pid);
+  const west = psSource({ ...process.env, TZ: "Pacific/Pago_Pago" }).startTime(process.pid);
   assert.equal(east, plain);
   assert.equal(west, plain);
   // Measured on macOS: a German locale prints `Fr.  9 Okt.` for `Fri Oct  9`.
-  const german = processSource({ ...process.env, LC_ALL: "de_DE.UTF-8", LANG: "de_DE.UTF-8" }).startTime(process.pid);
+  const german = psSource({ ...process.env, LC_ALL: "de_DE.UTF-8", LANG: "de_DE.UTF-8" }).startTime(process.pid);
   assert.equal(german, plain);
 });
 
 test("ps: a gone process has no start time", () => {
+  assert.equal(psSource(process.env).startTime(deadPid()), null);
+});
+
+test("processSource: a gone process has no start identity", () => {
   assert.equal(processSource().startTime(deadPid()), null);
 });
 
-test("ps: two processes started apart have different start times", async (t) => {
-  const first = processSource().startTime(process.pid);
+test("processSource reads the start identity from procfs on Linux and from ps on every other platform: a non-empty string, the same on every read", () => {
+  const linux = process.platform === "linux";
+  const expected = linux ? procfsStartTime(process.pid) : psSource(process.env).startTime(process.pid);
+  assert.equal(typeof expected, "string");
+  assert.notEqual(expected, "");
+  assert.equal(processSource().startTime(process.pid), expected);
+  if (linux) assert.match(expected, /^[0-9a-f-]{36} \d+$/);
+});
+
+// `ps -o lstart=` prints whole seconds, so the second process starts more than
+// a second after the first.
+test("two processes started apart have different start identities, from ps and from processSource()", async (t) => {
+  const ps = psSource(process.env);
+  const first = { ps: ps.startTime(process.pid), source: processSource().startTime(process.pid) };
   await new Promise((r) => setTimeout(r, 1100));
   const child = spawn("sleep", ["30"], { stdio: "ignore" });
   t.after(() => child.kill("SIGKILL"));
-  assert.notEqual(processSource().startTime(child.pid), first);
+  assert.notEqual(ps.startTime(child.pid), first.ps);
+  const second = processSource().startTime(child.pid);
+  assert.equal(typeof second, "string");
+  assert.notEqual(second, first.source);
 });
 
 test("ps: the ancestry starts at the caller's parent and walks up through each parent", (t) => {
@@ -85,9 +107,9 @@ test("ps: the ancestry starts at the caller's parent and walks up through each p
 test("ps: an unrunnable ps is unreadable, never an empty tree or a gone process", () => {
   const dir = mkdtempSync(join(tmpdir(), "proc-nops-"));
   try {
-    const source = processSource({ ...process.env, PATH: dir });
-    assert.throws(() => source.startTime(process.pid), ProcUnreadable);
-    assert.throws(() => source.parentOf(process.pid), ProcUnreadable);
+    assert.throws(() => psSource({ ...process.env, PATH: dir }).startTime(process.pid), ProcUnreadable);
+    // The process tree is read by `ps` on every platform.
+    assert.throws(() => processSource({ ...process.env, PATH: dir }).parentOf(process.pid), ProcUnreadable);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -101,7 +123,7 @@ function stubPs(t, status, { stdout = "", stderr = "" } = {}) {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const echo = (text, fd) => (text === "" ? "" : `echo '${text}'${fd}\n`);
   writeFileSync(join(dir, "ps"), `#!/bin/sh\n${echo(stdout, "")}${echo(stderr, " >&2")}exit ${status}\n`, { mode: 0o755 });
-  return processSource({ ...process.env, PATH: dir });
+  return psSource({ ...process.env, PATH: dir });
 }
 
 test("ps: exit 1 with nothing printed is a gone process; any other answer is unreadable", (t) => {
@@ -117,6 +139,59 @@ test("ps: a failing process listing is unreadable, never an empty tree", (t) => 
   assert.throws(() => stubPs(t, 1).parentOf(1), ProcUnreadable);
   assert.throws(() => stubPs(t, 2, { stderr: "ps: boom" }).parentOf(1), ProcUnreadable);
   assert.deepEqual(stubPs(t, 0, { stdout: "  1     0 /sbin/init" }).parentOf(1), { ppid: 0, argv: ["/sbin/init"] });
+});
+
+// A fake procfs root: `boot_id` unless it is null, and a `<pid>/stat` for
+// each entry of `stats`.
+function fakeProc(t, { bootId = "0b3c9e4a-6f1d-4e2b-9a7c-5d8e1f2a3b4c", stats = {} } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "proc-fakeroot-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  if (bootId !== null) {
+    mkdirSync(join(root, "sys", "kernel", "random"), { recursive: true });
+    writeFileSync(join(root, "sys", "kernel", "random", "boot_id"), `${bootId}\n`);
+  }
+  for (const [pid, line] of Object.entries(stats)) {
+    mkdirSync(join(root, pid));
+    writeFileSync(join(root, pid, "stat"), line);
+  }
+  return root;
+}
+
+// A /proc/<pid>/stat line whose field 22 is `ticks`. Its neighbours are
+// numbers of their own, so a parse off by a field reads a different one.
+const statLine = (pid, comm, ticks) =>
+  `${pid} (${comm}) S 1 41 41 0 -1 4194560 113 0 0 0 7 3 0 0 20 0 1 0 ${ticks} 987654 321 18446744073709551615\n`;
+
+test("procfs: the start identity is the boot id and field 22, counted after the last `)` of comm", (t) => {
+  const root = fakeProc(t, { stats: { 42: statLine(42, "a) b (c", 2084), 43: statLine(43, "sleep", 3347) } });
+  assert.equal(procfsStartTime(42, root), "0b3c9e4a-6f1d-4e2b-9a7c-5d8e1f2a3b4c 2084");
+  assert.equal(procfsStartTime(43, root), "0b3c9e4a-6f1d-4e2b-9a7c-5d8e1f2a3b4c 3347");
+});
+
+test("procfs: a pid with no stat file is a gone process", (t) => {
+  assert.equal(procfsStartTime(42, fakeProc(t)), null);
+});
+
+test("procfs: a missing or blank boot id is unreadable, never a gone process or a ps fallback", (t) => {
+  assert.throws(() => procfsStartTime(42, fakeProc(t, { bootId: null, stats: { 42: statLine(42, "sleep", 2084) } })), ProcUnreadable);
+  assert.throws(() => procfsStartTime(42, fakeProc(t, { bootId: null })), ProcUnreadable);
+  assert.throws(() => procfsStartTime(42, fakeProc(t, { bootId: "  ", stats: { 42: statLine(42, "sleep", 2084) } })), ProcUnreadable);
+});
+
+test("procfs: a stat file that cannot be read or parsed is unreadable", (t) => {
+  for (const line of ["", "42 (sleep S 1 41", "42 (sleep) S 1 41 41 0", statLine(42, "sleep", "x")]) {
+    assert.throws(() => procfsStartTime(42, fakeProc(t, { stats: { 42: line } })), ProcUnreadable, JSON.stringify(line));
+  }
+  const root = fakeProc(t);
+  mkdirSync(join(root, "42", "stat"), { recursive: true });
+  assert.throws(() => procfsStartTime(42, root), ProcUnreadable);
+});
+
+test("procfs: the same start ticks under another boot id are another process", (t) => {
+  const stats = { 42: statLine(42, "sleep", 2084) };
+  const before = procfsStartTime(42, fakeProc(t, { stats }));
+  const after = procfsStartTime(42, fakeProc(t, { bootId: "7e1d2c3b-4a5f-4e6d-8c7b-9a0f1e2d3c4b", stats }));
+  assert.notEqual(after, before);
 });
 
 function tableFile(t, table) {

@@ -18,9 +18,9 @@
 ## Context
 
 `.nvmrc` holds an exact version and is the single source of truth for the target
-runtime: `ci.yml` reads it at three `node-version-file` sites (the `check`,
-`validate-claude`, and `install-and-smoke` jobs) and nothing else in the repo
-reads its contents. #335 pinned it to `26.5.0`
+runtime: `ci.yml` reads it at every `node-version-file` site (the `check`,
+`proc-macos`, and `install-and-smoke` jobs; the since-deleted `validate-claude`
+read it too) and nothing else in the repo reads its contents. #335 pinned it to `26.5.0`
 and deliberately deferred the question this ADR answers; #354 re-opened it.
 
 The standing proposal was to replace the exact pin with a partial spec (`26`) so
