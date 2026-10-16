@@ -252,3 +252,42 @@ test("SKILL.md sends the controller to both reference files", () => {
   assert.match(SKILL.text, /See references\/phase-0\.md\./);
   assert.match(SKILL.text, /See references\/close-out\.md\./);
 });
+
+// --- the pointers that send the controller from SKILL.md into phase-0.md ------
+//
+// Step 0 is a short driver: a SKILL.md sentence that says "phase 0" for detail
+// lands on a paragraph that does not carry it. Each pointer below names the
+// reference file and the heading that holds the detail, and the heading is read
+// off phase-0.md, so renaming one there reddens the pointer here too.
+
+const heading = (name) => {
+  assert.ok(PHASE0.split("\n").includes(`## ${name}`), `phase-0.md has no "## ${name}" heading, so a SKILL.md pointer to it points nowhere`);
+  return name;
+};
+const STRANDED = heading("Resume the claims a dead run left without a PR");
+const BASELINE = heading("Record the main-checkout baseline");
+const ROTATE = heading("Rotate the ledger");
+
+test("the carried-token reconciliation after /resume is sent to the stranded-claim section's ancestor branch, which holds it", () => {
+  const para = SKILL.paragraph("**After `/resume`, a carried implementer can hold the whole tick.**", "run-team after-/resume paragraph", "**Run the check right after the dispatch");
+  assert.match(para.text, Pin.phrase(`follow the carried token's reconciliation in references/phase-0.md, the "${STRANDED}" section, under its \`prior: ancestor\` branch: \`proc://\` reads \`running\` → wait; dead → the Member-killed row.`));
+  const branch = Pin.of(PHASE0, "phase-0.md").section(`## ${STRANDED}`, "phase-0 stranded-claim section").text;
+  assert.match(branch, Pin.phrase("- `prior: ancestor` — this session's own earlier run"), "the section no longer has the branch the pointer names");
+  assert.match(branch, Pin.phrase("read `proc://` once, find each `name` among this session's jobs, and act on its state."), "the section no longer holds the reconciliation");
+});
+
+test("the no-baseline remedy runs main-checkout.mjs --record and names the baseline section, never a phase0.mjs re-run", () => {
+  const row = SKILL.bullet("- `MAIN-CHECKOUT-NO-BASELINE …`", "- `PHASE0-INCOMPLETE <step>[, <step>…] …`", "run-team tick rows").text;
+  assert.match(row, Pin.phrase(`Yours to fix: run \`~/.fleet/bin/fleet-run main-checkout.mjs --record\`, which references/phase-0.md describes under "${BASELINE}".`));
+  assert.match(row, Pin.phrase("A baseline that vanished mid-run is not a fresh run — report it to the maintainer before recording over whatever the tree now holds."));
+  assert.doesNotMatch(row, /phase0\.mjs/, "a re-run skips the `ok` baseline step, so it records nothing");
+});
+
+test("rotate's retired-name rule and its guard are sent to the rotate section, which holds both", () => {
+  const rotate = SKILL.bullet("- **`ledger.mjs rotate`**", "`row` refuses a malformed member token", "run-team ledger rotate bullet").text;
+  assert.match(rotate, Pin.phrase(`into its \`## Retired\` (references/phase-0.md, "${ROTATE}", says which).`));
+  assert.match(rotate, Pin.phrase(`The guard is stated in references/phase-0.md, "${ROTATE}".`));
+  const section = Pin.of(PHASE0, "phase-0.md").section(`## ${ROTATE}`, "phase-0 rotate section").text;
+  assert.match(section, Pin.phrase("goes into the new ledger's `## Retired` as a bare name"), "the section no longer says which names retire");
+  assert.match(section, Pin.phrase("**The guard is the controller record**"), "the section no longer states the guard");
+});
