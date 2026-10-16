@@ -92,6 +92,7 @@ test("§ Queue depth defines In flight and the In-flight bound, and documents th
   const bound = RUN_TEAM.bullet("- **In-flight bound**", "**Default: In-flight bound 5", "In-flight bound definition").text;
   assert.match(bound, Pin.phrase("reviewers, finishers and the merge bot never slow for it"));
   const s = queueDepthTable();
+  assert.match(s, Pin.phrase("`HOLD (in-flight <n>/<B>)` when n tickets are between Claim and merge and n ≥ B"));
   assert.match(s, Pin.phrase("`HOLD (in-flight <n>/<B>)` ranks last of the four"));
   assert.match(s, Pin.phrase("implementers=<i> prs=<p> unclaimed=<k> supply=<s>"));
   assert.match(s, Pin.phrase("The reviewer row reads `<units>/<B>`"));
