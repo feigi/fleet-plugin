@@ -232,7 +232,7 @@ test("a clean run passes every step in order, writes one receipt and exits 0", (
   assert.deepEqual(f.calls("main-checkout")[0].args, ["--record"]);
   assert.deepEqual(f.calls("preflight")[0].args, []);
   assert.deepEqual(f.calls("ruleset")[0].args, ["--check"]);
-  assert.deepEqual(f.calls("tier-roles")[0].args, ["--check"]);
+  assert.deepEqual(f.calls("tier-roles")[0].args, ["--check", "--in-flight", "5"]);
   assert.deepEqual(f.calls("reclaim-scratch")[0].args, ["--root", receipt.scratch, "--after-rotate", "--apply"]);
   assert.deepEqual(f.calls("derive-testcmd").map((c) => c.args), [[".", "install"], [".", "test", "--at", "origin/main"]]);
   for (let i = 0; i < 40 && f.calls("board").length === 0; i++) wait(100);
