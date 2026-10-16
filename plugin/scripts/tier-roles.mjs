@@ -381,6 +381,7 @@ const { arg, numArg, has, sweep, stray } = defineFlags(die, {
     overrides: "value",
     "model-roles": "value",
     catalog: "value",
+    table: "value",
     "max-concurrency": "value",
   },
 });
