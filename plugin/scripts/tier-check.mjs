@@ -74,8 +74,8 @@
 // `<member>.jsonl`, the trace of a dispatch that failed before a transcript
 // was written. That token clears the tick's unchecked hold without claiming
 // the tier was right. Every other case with no transcript is still exit 2: a
-// LIVE member may yet write one; a member settled `PR#M`, `bailed` or
-// `tier-mismatch` ran, so its transcript exists and the `session` is the
+// LIVE member may yet write one; a member settled `PR#M`, `bailed`, `blocked`
+// or `tier-mismatch` ran, so its transcript exists and the `session` is the
 // wrong directory; a `session` that is empty, missing or not a directory,
 // or omitted with none in the phase-0 receipt, is exit 2 whether the member
 // is live or settled; and a session
@@ -320,9 +320,10 @@ function sessionLacksTranscript(repoRoot, sessionPath, member) {
 // The settle outcomes a dispatch that failed before writing a transcript can
 // carry: `killed` (the Member-killed row — spend limit, API error, crash) and
 // `released` (a drain releases every claim that never became a PR). `PR#M`,
-// `bailed` and `tier-mismatch` each prove the member ran — it opened a PR,
-// reported its own bail, or had its transcript read by this check — so for
-// them a missing `<member>.jsonl` means the `session` is the wrong directory,
+// `bailed`, `blocked` and `tier-mismatch` each prove the member ran — it
+// opened a PR, reported its own bail or block, or had its transcript read by
+// this check — so for them a missing `<member>.jsonl` means the `session` is
+// the wrong directory,
 // and recording `tier-unverifiable` would clear the hold on a member whose
 // tier can still be judged.
 const NO_TRANSCRIPT_OUTCOMES = new Set(["killed", "released"]);
