@@ -5,9 +5,16 @@
 // reads: the deriving agent chooses both commands by reading the repository,
 // and this script is what turns that choice into a cache, or refuses to.
 //
-//   recipe-prove.mjs <repo> --install <cmd> --test <cmd>
+//   recipe-prove.mjs <repo> --install <cmd> --test <cmd> --uncovered <json>
 //                    [--count-line <literal> --test-count <n>]
 //                    [--mutate <cmd> --mutation <description>]
+//
+// `--uncovered` is one JSON array, `[]` when the Test entrypoint runs every
+// test step of the merge-gating CI jobs, and otherwise one
+// `{ "step": <string>, "reason": <string> }` per step it leaves out, both
+// non-empty. It is not proven — nothing here can run CI — but required, so a
+// cache never stays silent about a step the Test entrypoint skips; it is
+// written as given, as the cache's `uncovered`.
 //
 // Every check runs in a throwaway worktree of `origin/main`, detached and
 // removed afterwards, so neither the caller's checkout nor its uncommitted
@@ -48,7 +55,8 @@
 // On proof, the cache is written atomically to <workspace>/.fleet/recipe.json
 // — <workspace> being the directory holding the repository's common git dir,
 // the place derive-testcmd.sh reads it from — and then read back through
-// derive-testcmd.sh for both fields, the Test entrypoint against `derivedAt`'s
+// derive-testcmd.sh for every field, `uncovered` byte for byte as the compact
+// JSON of the list given, the Test entrypoint against `derivedAt`'s
 // tree (`--at`): the tree the proof ran in, and the one a claim probes, so a
 // main checkout still on an older layout cannot refuse a Recipe that holds
 // where it runs. A cache the reader refuses is rolled
@@ -84,7 +92,7 @@ import { isDigits } from "./arg.mjs";
 
 const NAME = "recipe-prove";
 const USAGE =
-  "usage: recipe-prove.mjs <repo> --install <cmd> --test <cmd> [--count-line <literal> --test-count <n>] [--mutate <cmd> --mutation <description>]";
+  "usage: recipe-prove.mjs <repo> --install <cmd> --test <cmd> --uncovered <json> [--count-line <literal> --test-count <n>] [--mutate <cmd> --mutation <description>]";
 const READER = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh");
 
 // Scrubbed once, for every child: an ambient GIT_DIR or GIT_WORK_TREE — set
@@ -132,7 +140,7 @@ const READER_COULD_NOT_RUN = 3;
 function parseArgs(argv) {
   const [repo, ...rest] = argv;
   if (!repo || repo.startsWith("--")) throw cannot(USAGE);
-  const flags = new Set(["--install", "--test", "--count-line", "--test-count", "--mutate", "--mutation"]);
+  const flags = new Set(["--install", "--test", "--uncovered", "--count-line", "--test-count", "--mutate", "--mutation"]);
   const a = {};
   for (let i = 0; i < rest.length; i += 2) {
     const [flag, value] = [rest[i], rest[i + 1]];
@@ -145,6 +153,8 @@ function parseArgs(argv) {
   for (const f of ["--install", "--test"]) {
     if (!a[f] || !a[f].trim()) throw cannot(`${f} needs a non-empty command — ${USAGE}`);
   }
+  if (!("--uncovered" in a)) throw cannot(`--uncovered is required: the CI test steps the Test entrypoint leaves out, as one JSON array, \`[]\` for none — ${USAGE}`);
+  const uncovered = parseUncovered(a["--uncovered"]);
   if (("--count-line" in a) !== ("--test-count" in a)) throw cannot("--count-line and --test-count go together");
   if ("--test-count" in a && !isDigits(a["--test-count"])) {
     throw cannot(`--test-count must be a whole number, got '${a["--test-count"]}'`);
@@ -163,7 +173,28 @@ function parseArgs(argv) {
     testCount: a["--test-count"],
     mutate: a["--mutate"],
     mutation: a["--mutation"],
+    uncovered,
   };
+}
+
+// The same rule derive-testcmd.sh holds the cache to, applied before any
+// command runs, so a malformed list is a usage error rather than a proof that
+// held and a cache the reader then refuses.
+function parseUncovered(json) {
+  let list;
+  try {
+    list = JSON.parse(json);
+  } catch (e) {
+    throw cannot(`--uncovered is not JSON: ${e.message}`);
+  }
+  if (!Array.isArray(list)) throw cannot("--uncovered is not a JSON array of { step, reason } entries, `[]` for none");
+  const filled = (s) => typeof s === "string" && s.trim() !== "";
+  list.forEach((u, i) => {
+    if (u === null || typeof u !== "object" || Array.isArray(u) || !filled(u.step) || !filled(u.reason)) {
+      throw cannot(`--uncovered entry ${i + 1} is not an object with a non-empty \`step\` and \`reason\``);
+    }
+  });
+  return list;
 }
 
 // A git that cannot be started is no verdict, as for `sh` below: read as a
@@ -343,9 +374,11 @@ function writeCache(cache, recipe, repo) {
     rmSync(tmp, { force: true });
     throw e;
   }
-  for (const field of ["install", "test"]) {
+  for (const field of ["install", "test", "uncovered"]) {
     const r = spawnSync("sh", [READER, repo, field, ...(field === "test" ? ["--at", recipe.derivedAt] : [])], { env: ENV, encoding: "utf8" });
-    if (r.status === 0 && r.stdout.replace(/\n$/, "") === recipe[field]) continue;
+    const expected = field === "uncovered" ? JSON.stringify(recipe.uncovered) : recipe[field];
+    const got = r.status === 0 ? r.stdout.replace(/\n$/, "") : null;
+    if (got === expected) continue;
     if (prior === null) unlinkSync(cache);
     else writeFileSync(cache, prior);
     if (r.error && !r.pid) throw cannot(`could not start sh to read the Recipe cache back: ${r.error.message}`);
@@ -365,6 +398,9 @@ function writeCache(cache, recipe, repo) {
       const exit = probe.status === null ? "did not exit 0" : `exited ${probe.status}`;
       const stderrNote = probe.err ? `: ${probe.err}` : " and wrote nothing to stderr";
       throw noVerdict(`git started but does not run: \`git --version\` ${exit}${stderrNote}`);
+    }
+    if (got !== null) {
+      throw notProven(`the Recipe cache reader reads \`${field}\` back as ${JSON.stringify(got)}, not the ${JSON.stringify(expected)} written`);
     }
     const said = r.stderr.trim() || r.stdout.trim();
     throw notProven(`the Recipe cache reader refuses what was proven: ${said || `it wrote nothing and exited with status ${r.status}`}`);
@@ -437,7 +473,7 @@ function main(argv) {
       removeWorktree(wt, o.repo);
     }
 
-    recipe = { install: o.install, test: o.test, derivedAt: sha.out, installClean: true, ...proof };
+    recipe = { install: o.install, test: o.test, derivedAt: sha.out, installClean: true, ...proof, uncovered: o.uncovered };
     writeCache(cache, recipe, o.repo);
   } catch (e) {
     if (!(e instanceof Refusal && e.message.includes(logs))) removeLogs(logs);

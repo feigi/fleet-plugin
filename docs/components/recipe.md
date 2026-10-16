@@ -4,7 +4,8 @@
 
 The pair of commands the fleet needs to work in any consumer repo: an
 **Install step** that materializes dependencies, and a **Test
-entrypoint** that runs the repo's own suite. Both are derived by agent
+entrypoint** that covers every test step in the merge-gating CI jobs that
+can run in a fresh worktree on the host. Both are derived by agent
 reasoning over the repo, never guessed from a hardcoded table of
 technologies
 ([ADR 0015](../adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md)).
@@ -24,8 +25,10 @@ The reading side shipped with #2117 and the deriving side with #2118.
    mutation turning the run red.
 3. **Cache.** A proven Recipe lives in the **Recipe cache**,
    `<workspace>/.fleet/recipe.json` in the main checkout, carrying the
-   commit it was derived at and the proof. `recipe-prove.mjs` is its only
-   writer, and writes only once the proof holds.
+   commit it was derived at, the proof, and `uncovered` — the CI test
+   steps the Test entrypoint leaves out, each with its reason, `[]` for
+   none. `recipe-prove.mjs` is its only writer, and writes only once the
+   proof holds.
 4. **Read (shipped, #2117).**
    [`derive-testcmd.sh`](../../plugin/scripts/derive-testcmd.sh) is the
    one reader of the cache and infers nothing. It is reused (never

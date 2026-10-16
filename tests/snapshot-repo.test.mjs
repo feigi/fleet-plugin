@@ -130,7 +130,7 @@ function installedRepo(t, { install = DEPS_INSTALL } = {}) {
   git(dir, "add", "-A");
   git(dir, "-c", "user.name=fixture", "-c", "user.email=fixture@invalid", "commit", "-q", "-m", "recipe");
   mkdirSync(join(dir, ".fleet"), { recursive: true });
-  const recipe = { install: "sh ./install.sh", test: "sh ./check.sh", derivedAt: git(dir, "rev-parse", "HEAD"), installClean: true, testCount: 1 };
+  const recipe = { install: "sh ./install.sh", test: "sh ./check.sh", derivedAt: git(dir, "rev-parse", "HEAD"), installClean: true, testCount: 1, uncovered: [] };
   writeFileSync(join(dir, ".fleet", "recipe.json"), `${JSON.stringify(recipe)}\n`);
   return dir;
 }
@@ -1097,7 +1097,7 @@ test("a status that reads cleanly never reports a failed read, and a failed one 
     /the snapshot's status could not be read \(SNAPSHOT_STATUS_FAILED\), so what it left untracked is not known\./,
     "the payload's testEnvironment does not say the status could not be read",
   );
-  assert.doesNotMatch(environmentNote({ repoVerified: true }), /could not be read/, "a snapshot whose status read fine is reported as unreadable");
+  assert.doesNotMatch(environmentNote({ repoVerified: true, uncovered: "[]" }), /could not be read/, "a snapshot whose status read fine is reported as unreadable");
 });
 
 // A PR that breaks its own install is the PR's defect: the block reports the

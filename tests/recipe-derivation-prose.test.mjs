@@ -102,6 +102,19 @@ test("the deriver is told to quote a pattern a program resolves under its own di
   assert.match(DERIVER, Pin.phrase("Quote a pattern that a program resolves under its own directory option, e.g. `git -C web ls-files -- '*.test.ts'`: the reader accepts a quoted pattern unchecked."));
 });
 
+// The Test entrypoint covers every merge-gating CI test step this host can
+// run in a fresh worktree; what it leaves out — a step no single invocation
+// covers beside the rest, or one this host cannot run — is recorded with its
+// reason, and is never a refusal.
+test("the deriver is told the coverage rule, the widest-invocation fallback, and to record what it leaves out", () => {
+  assert.match(DERIVER, Pin.phrase("**Test entrypoint** — every test step in the merge-gating CI jobs that can run in a fresh worktree on this host."));
+  assert.match(DERIVER, Pin.phrase("so it is one invocation: an `&&` chain hands those arguments to its last command alone."));
+  assert.match(DERIVER, Pin.phrase("When no single invocation covers every qualifying step, take the widest one and list every qualifying step it leaves out; that is never a reason to report `RECIPE NOT PROVEN`."));
+  assert.match(DERIVER, Pin.phrase("A test step that cannot run here — it needs a service this host lacks, secrets, or another OS — is listed too, with that reason."));
+  assert.match(DERIVER, Pin.phrase("~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>' --uncovered '<uncovered>'"));
+  assert.doesNotMatch(DERIVER, /the whole suite, the way CI runs it/);
+});
+
 test("every flag the deriver's procedure passes is one recipe-prove.mjs accepts", () => {
   // The invocations are the indented command blocks naming recipe-prove.mjs;
   // flags elsewhere in the definition (its `git` reads) are not the proof's.
