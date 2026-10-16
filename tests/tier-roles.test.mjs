@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   parseModelRoute, parseFrontmatter, stripLevel, resolveRole, expectedOmpModel,
-  modelsEqual, checkRoutes, catalogEntry, semaphoreNotice,
+  modelsEqual, checkRoutes, catalogEntry, semaphoreNotice, extractImplementerCell, isCellRoutable,
 } from "../plugin/scripts/tier-roles.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/tier-roles.mjs", import.meta.url));
@@ -81,6 +81,45 @@ test("parseModelRoute: an unrecognised level is not a route", () => {
 test("parseModelRoute: missing the :<level> suffix is not a route", () => {
   assert.deepEqual(parseModelRoute("@slow"), { role: null, level: null });
 });
+
+// ---------------------------------------------------------------------------
+// extractImplementerCell / isCellRoutable
+// ---------------------------------------------------------------------------
+
+test("extractImplementerCell: extracts cell name from fleet-implementer-<cell>.agent.md", () => {
+  assert.equal(extractImplementerCell("fleet-implementer-task-high.agent.md"), "task-high");
+  assert.equal(extractImplementerCell("fleet-implementer-task-max.agent.md"), "task-max");
+  assert.equal(extractImplementerCell("fleet-implementer-slow-high.agent.md"), "slow-high");
+});
+
+test("extractImplementerCell: returns null for non-implementer definitions", () => {
+  assert.equal(extractImplementerCell("fleet-reviewer-high.agent.md"), null);
+  assert.equal(extractImplementerCell("fleet-merge-bot.agent.md"), null);
+  assert.equal(extractImplementerCell("some-other-file.agent.md"), null);
+});
+
+test("isCellRoutable: returns true if cell is in cells list", () => {
+  const table = { cells: ["slow-high", "task-high"], rows: {} };
+  assert.equal(isCellRoutable("slow-high", table), true);
+  assert.equal(isCellRoutable("task-high", table), true);
+});
+
+test("isCellRoutable: returns true if cell is in rows values", () => {
+  const table = { cells: ["slow-high"], rows: { "*": "slow-high", "tier=task-high": "task-high" } };
+  assert.equal(isCellRoutable("slow-high", table), true);
+  assert.equal(isCellRoutable("task-high", table), true);
+});
+
+test("isCellRoutable: returns false if cell is not routable", () => {
+  const table = { cells: ["slow-high", "task-high"], rows: { "*": "slow-high" } };
+  assert.equal(isCellRoutable("task-max", table), false);
+  assert.equal(isCellRoutable("smol-high", table), false);
+});
+
+test("isCellRoutable: returns true if table is null (treats as if all cells are routable)", () => {
+  assert.equal(isCellRoutable("task-max", null), true);
+});
+
 
 test("parseFrontmatter: a quoted route parses model/role/level together", () => {
   const text = '---\nname: fleet-x\ndescription: d\nmodel: "@slow:xhigh"\n---\nbody\n';
@@ -189,8 +228,8 @@ const CATALOG = {
   ],
 };
 
-const routes = (files, modelRoles = MODEL_ROLES, overrides = {}) =>
-  checkRoutes({ agentsDir: agentsDir(files), modelRoles, overrides, catalog: CATALOG });
+const routes = (files, modelRoles = MODEL_ROLES, overrides = {}, table = null, catalog = CATALOG) =>
+  checkRoutes({ agentsDir: agentsDir(files), modelRoles, overrides, catalog, table });
 
 test("checkRoutes: every definition routed and every role resolvable -> no violations or notices", () => {
   assert.deepEqual(routes({ "fleet-a": "@slow:xhigh", "fleet-b": "@smol:low" }), { violations: [], notices: [] });
@@ -354,6 +393,72 @@ test("checkRoutes: every real plugin/agents definition routes cleanly, and the i
   const { violations } = checkRoutes({ agentsDir: REPO_AGENTS, modelRoles: MODEL_ROLES, overrides: {}, catalog: CATALOG });
   assert.deepEqual(violations, []);
 });
+
+
+// Non-routable implementer definitions: level mismatches should be notices, not violations
+test("checkRoutes: a non-routable implementer definition with unsupported level is a notice", () => {
+  const table = { cells: ["slow-high", "task-high"], rows: { "*": "slow-high" } };
+  // Use a catalog where task target doesn't support max
+  const catalogWithoutTaskMax = {
+    models: [
+      { provider: "anthropic", id: "claude-opus-5", selector: "anthropic/claude-opus-5", thinking: ADAPTIVE },
+      { provider: "anthropic", id: "claude-sonnet-5", selector: "anthropic/claude-sonnet-5", thinking: ["low", "medium", "high", "xhigh"] },
+      { provider: "anthropic", id: "claude-haiku-4-5", selector: "anthropic/claude-haiku-4-5", thinking: ["minimal", "low", "medium", "high", "xhigh"] },
+    ],
+  };
+  const { violations, notices } = routes(
+    { "fleet-implementer-task-max": "@task:max", "fleet-implementer-task-high": "@task:high" },
+    MODEL_ROLES,
+    {},
+    table,
+    catalogWithoutTaskMax,
+  );
+  assert.deepEqual(violations, []);
+  assert.equal(notices.length, 1);
+  assert.match(notices[0], /fleet-implementer-task-max\.agent\.md: level max is not one modelRoles\.task/);
+  assert.match(notices[0], /cell task-max is not in the router table/);
+});
+
+test("checkRoutes: a routable implementer definition with unsupported level is still a violation", () => {
+  const table = { cells: ["slow-high", "task-high", "smol-high"], rows: { "*": "slow-high" } };
+  const { violations } = routes(
+    { "fleet-implementer-smol-max": "@smol:max" },
+    MODEL_ROLES,
+    {},
+    table,
+  );
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /fleet-implementer-smol-max\.agent\.md: level max is not one modelRoles\.smol/);
+  assert.match(violations[0], /omp would clamp it silently/);
+});
+
+test("checkRoutes: a non-implementer definition with unsupported level is always a violation", () => {
+  const table = { cells: ["slow-high", "task-high"], rows: { "*": "slow-high" } };
+  const { violations } = routes(
+    { "fleet-reviewer-xhigh": "@slow:max" },
+    MODEL_ROLES,
+    {},
+    table,
+  );
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /fleet-reviewer-xhigh\.agent\.md: level max is not one/);
+  assert.match(violations[0], /omp would clamp it silently/);
+});
+
+test("checkRoutes: a non-routable cell that matches a rows value is still routable", () => {
+  const table = { cells: ["slow-high", "task-high"], rows: { "*": "slow-high", "tier=task-max": "task-max" } };
+  const { violations, notices } = routes(
+    { "fleet-implementer-task-max": "@task:max", "fleet-implementer-task-high": "@task:high" },
+    MODEL_ROLES,
+    {},
+    table,
+  );
+  // task-max is routable (in rows), so unsupported level is a violation, not a notice
+  assert.equal(violations.length, 1);
+  assert.deepEqual(notices, []);
+  assert.match(violations[0], /fleet-implementer-task-max\.agent\.md: level max is not one/);
+});
+
 
 // ---------------------------------------------------------------------------
 // CLI
