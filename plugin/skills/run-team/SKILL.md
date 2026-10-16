@@ -25,7 +25,7 @@ These hold in every phase: check a wake against them before you act on it, and r
 - A grandchild surfaces as its own task-notification; an unrecognized task-id is not a member reporting done.
 - A reviewer never reviews a PR it implemented.
 - The merge bot only touches PRs whose implementer reported done; rebasing a worktree someone is working in destroys uncommitted work.
-- `ready-to-merge` is added by a reviewer only — never an implementer, never you — but for the run's own artifact PR, which this line does not reach.
+- `ready-to-merge` is added by a reviewer only — never an implementer, never you — but for the run's own artifact PR, which this line does not reach: label and merge that one yourself.
 - Every member acts through the maintainer's `gh` credentials, so no write is attributable: when a label moves unexpectedly, ask members directly, rule out automation with `grep -rn '<label>' .github/workflows/`, and do not re-add it.
 - Phase 1 is serial; everything else may run concurrently.
 
@@ -263,7 +263,7 @@ depth** guard table applied in code. Act on each line as it reads:
 - `REFRESHED shortlist: <n> entries; <k> lifted` — the tick refreshed the shortlist itself, and its `PULL` row already reads the result; `REFRESH FAILED` is yours, since `shortlist.mjs` could not run.
 - `SUGGEST /triage, hold idle` — nothing is admissible after the refresh: suggest `/triage` in the report, never run it.
 - `specs-dropped=#<N> …` — never actionable: log those tickets as specs awaiting to-tickets, not as no work.
-- `DISPATCH fix-pr PR#<M> …` — a fix-applier for that PR (review findings, a dispositions mismatch no retry has answered, or a conflict hold): render its brief with `dispatch-prompt.mjs render fix-applier --kind <kind>`, `ledger.mjs dispatch <M> fix-pr-<M>`, then the `task` call.
+- `DISPATCH fix-pr PR#<M> …` — a fix-applier for that PR (review findings, a dispositions mismatch no retry has answered, or a conflict hold): render its brief with `dispatch-prompt.mjs render fix-applier --kind <kind>`, `ledger.mjs dispatch <M> fix-pr-<M>` (the next suffix when that name is already on record), then the `task` call.
 - `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn: record `review=member:review-pr-<M>` with `ledger.mjs review <M> …`, then dispatch `review-pr-<M>`.
 - `DISPATCH merge-bot` — the next `merge-bot-<n>`: render its brief with `dispatch-prompt.mjs render merge-bot --member merge-bot-<n> …`, `ledger.mjs dispatch merge-bot`, then the `task` call.
 - `DISPATCH finisher PR#<M> …` — a finisher settled `labelled` with no label on the PR and no `label-off=` to account for it: apply the finisher gate, render the next-suffix finisher's brief with `dispatch-prompt.mjs render finisher --kind repair --member finisher-pr-<M>-<x> …`, `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`, and never add the label yourself.
@@ -273,13 +273,13 @@ depth** guard table applied in code. Act on each line as it reads:
 - `HOLD (…)` — the row is held and its detail names the clearing step: dispatch nothing on that row until it clears; a tier mismatch is yours to clear by dispatching the replacement.
 - `AT CAP`, `IDLE OK` — nothing to do on that row.
 - `MAIN-CHECKOUT-DIRTY …` — dispatch nothing new and tell the maintainer; once they have resolved the paths, `main-checkout.mjs --record`; never revert the paths or re-baseline over them yourself.
-- `MAIN-CHECKOUT-UNKNOWN …` — the tick could not look: fix what the line names and tick again, and never `--record` over it.
+- `MAIN-CHECKOUT-UNKNOWN …` — the tick could not look: fix what the line names and tick again, and never `--record` over it unless the line itself says re-record (an older-format baseline, or a baseline commit missing from this repository), and then only after resolving the stray paths.
 - `MAIN-CHECKOUT-NO-BASELINE …` — yours: run `main-checkout.mjs --record`, after reporting a baseline that vanished mid-run.
 - `PHASE0-INCOMPLETE <step>…` — every dispatching row is held: run the `phase0.mjs` command the line names; advice lines hold nothing.
 - `CHECK-LIVENESS <member> (…)` — advice, never an action: take the census the **Member unaccounted** row of **Failure handling** gives before you touch the token.
 - `UNRECORDED <stem> (…)` — record it with `ledger.mjs dispatch`, or confirm it is a stranger's member.
 - `NO-TRANSCRIPT <member> (…)` — make the `task` call, or settle the token `killed`.
-- `SETTLE <member> (report on disk …)` — run the `ledger.mjs settle <member> --from-report` it prints; `REPORT-MISMATCH`, `REPORT-UNREADABLE` and `REPORT-INVALID` name a report file that cannot be settled from, and the tick settles nothing itself.
+- `SETTLE <member> (report on disk …)` — a live token whose report is on disk: run that member's report wake from the wake table, which runs the `ledger.mjs settle <member> --from-report` the line prints plus the follow-on work its report calls for; `REPORT-MISMATCH`, `REPORT-UNREADABLE` and `REPORT-INVALID` name a report file that cannot be settled from, and the tick settles nothing itself.
 
 ## Phase 1 — Pull: judge, then claim or relabel
 

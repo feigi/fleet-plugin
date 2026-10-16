@@ -160,7 +160,9 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
 - `SETTLE <member> (report on disk since <n>m — ledger.mjs settle <member>
   --from-report)`, printed above the rows — a live ledger token whose report
   file, `<scratch>/reports/<member>.json`, is on disk and passes its member
-  family's report schema. Run the settle the line prints. Advice, like
+  family's report schema. Run that member's report wake from the wake table:
+  it runs the settle the line prints and the follow-on work its report
+  calls for, which a bare settle does not do. Advice, like
   `CHECK-LIVENESS`: the tick settles nothing. Three lines name a report file
   `settle --from-report` cannot settle from: `REPORT-MISMATCH <path> (member:
   …)`, a file whose `member` is not its filename's; `REPORT-UNREADABLE <path>

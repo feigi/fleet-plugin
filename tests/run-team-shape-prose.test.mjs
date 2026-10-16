@@ -467,7 +467,27 @@ for (const [what, block] of MOVED_BLOCKS) {
   });
 }
 
-test("SKILL.md's invariant for ready-to-merge keeps the metrics-PR exemption on its own line", () => {
+test("SKILL.md's invariant for ready-to-merge keeps the metrics-PR exemption and the duty it licenses on its own line", () => {
   const line = SKILL.split("\n").find((l) => l.startsWith("- `ready-to-merge` is added by a reviewer only"));
   assert.match(line, Pin.phrase("but for the run's own artifact PR, which this line does not reach"));
+  assert.match(line, Pin.phrase("label and merge that one yourself"));
+});
+
+// A one-line row is the rule's whole meaning for a controller that reads only
+// SKILL.md: the qualifier the full row carries goes on the line too.
+const rowLine = (name) => SKILL.split("\n").find((l) => l.startsWith(`- ${name} — `));
+
+test("the MAIN-CHECKOUT-UNKNOWN row keeps the exception to never recording over it", () => {
+  const line = rowLine("`MAIN-CHECKOUT-UNKNOWN …`");
+  assert.match(line, Pin.phrase("never `--record` over it unless the line itself says re-record"));
+});
+
+test("the SETTLE row sends the controller to the report wake, which does the work a bare settle does not", () => {
+  const line = rowLine("`SETTLE <member> (report on disk …)`");
+  assert.match(line, Pin.phrase("run that member's report wake from the wake table"));
+});
+
+test("the DISPATCH fix-pr row names the next suffix when the member name is already on record", () => {
+  const line = rowLine("`DISPATCH fix-pr PR#<M> …`");
+  assert.match(line, Pin.phrase("`ledger.mjs dispatch <M> fix-pr-<M>` (the next suffix when that name is already on record)"));
 });
