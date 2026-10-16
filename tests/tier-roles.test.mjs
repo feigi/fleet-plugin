@@ -8,8 +8,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   parseModelRoute, parseFrontmatter, stripLevel, resolveRole, expectedOmpModel,
-  modelsEqual, checkRoutes, catalogEntry, semaphoreNotice,
+  modelsEqual, checkRoutes, catalogEntry, semaphoreNotice, implementerCell, routableCells,
 } from "../plugin/scripts/tier-roles.mjs";
+import { POLICY_CELL } from "../plugin/scripts/ledger-grammar.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/tier-roles.mjs", import.meta.url));
 const SCRIPTS_DIR = fileURLToPath(new URL("../plugin/scripts", import.meta.url));
@@ -189,8 +190,8 @@ const CATALOG = {
   ],
 };
 
-const routes = (files, modelRoles = MODEL_ROLES, overrides = {}) =>
-  checkRoutes({ agentsDir: agentsDir(files), modelRoles, overrides, catalog: CATALOG });
+const routes = (files, modelRoles = MODEL_ROLES, overrides = {}, routable = null, catalog = CATALOG) =>
+  checkRoutes({ agentsDir: agentsDir(files), modelRoles, overrides, catalog, routable });
 
 test("checkRoutes: every definition routed and every role resolvable -> no violations or notices", () => {
   assert.deepEqual(routes({ "fleet-a": "@slow:xhigh", "fleet-b": "@smol:low" }), { violations: [], notices: [] });
@@ -355,6 +356,104 @@ test("checkRoutes: every real plugin/agents definition routes cleanly, and the i
   assert.deepEqual(violations, []);
 });
 
+// An implementer definition whose cell the router never selects: the level
+// the role's target does not run is a notice there, a violation anywhere else.
+const MAX_WITHOUT = (id) => ({ models: CATALOG.models.map((m) => (m.id === id ? { ...m, thinking: ADAPTIVE.filter((l) => l !== "max") } : m)) });
+const NO_TASK_MAX = MAX_WITHOUT("claude-sonnet-5");
+const TABLE = { cells: [POLICY_CELL, "task-high", "smol-high"], rows: { "*": POLICY_CELL } };
+const TASK_MAX_DEFS = { "fleet-implementer-task-high": "@task:high", "fleet-implementer-task-max": "@task:max" };
+const TASK_MAX_MISMATCH = "fleet-implementer-task-max.agent.md: level max is not one modelRoles.task's target anthropic/claude-sonnet-5 runs at (thinking: low, medium, high, xhigh)";
+const routableOf = (table) => {
+  const r = routableCells(table);
+  assert.ok(r instanceof Set, String(r));
+  return r;
+};
+
+test("checkRoutes: an implementer definition whose cell the router never selects gets a notice, not a violation, for a level its target lacks", () => {
+  const { violations, notices } = routes(TASK_MAX_DEFS, MODEL_ROLES, {}, routableOf(TABLE), NO_TASK_MAX);
+  assert.deepEqual(violations, []);
+  assert.deepEqual(notices, [`${TASK_MAX_MISMATCH} — cell task-max is not one the router selects; omp would clamp this level silently once it does`]);
+});
+
+test("checkRoutes: the same level on a cell in the router table's `cells` is a violation", () => {
+  const { violations, notices } = routes(TASK_MAX_DEFS, MODEL_ROLES, {}, routableOf({ ...TABLE, cells: [...TABLE.cells, "task-max"] }), NO_TASK_MAX);
+  assert.deepEqual(violations, [`${TASK_MAX_MISMATCH} — omp would clamp it silently`]);
+  assert.deepEqual(notices, []);
+});
+
+test("checkRoutes: a cell a `rows` value names, absent from `cells`, is selected and so a violation", () => {
+  const table = { ...TABLE, rows: { "*": POLICY_CELL, heavy: "task-max" } };
+  const { violations, notices } = routes(TASK_MAX_DEFS, MODEL_ROLES, {}, routableOf(table), NO_TASK_MAX);
+  assert.deepEqual(violations, [`${TASK_MAX_MISMATCH} — omp would clamp it silently`]);
+  assert.deepEqual(notices, []);
+});
+
+test("checkRoutes: the policy cell is selected whatever the table lists, so its mismatch is a violation", () => {
+  const table = { cells: ["task-high"], rows: { "*": "task-high" } };
+  const { violations, notices } = routes({ [`fleet-implementer-${POLICY_CELL}`]: "@slow:max" }, MODEL_ROLES, {}, routableOf(table), MAX_WITHOUT("claude-opus-5"));
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], new RegExp(`^fleet-implementer-${POLICY_CELL}\\.agent\\.md: level max is not one modelRoles\\.slow's target .* — omp would clamp it silently$`));
+  assert.deepEqual(notices, []);
+});
+
+test("checkRoutes: a definition that is not an implementer cell is held to the level check whatever the table lists", () => {
+  const defs = { "fleet-reviewer-xhigh": "@task:max", "fleet-implementer-alt": "@task:max" };
+  const { violations, notices } = routes(defs, MODEL_ROLES, {}, routableOf(TABLE), NO_TASK_MAX);
+  assert.equal(violations.length, 2);
+  assert.match(violations[0], /^fleet-implementer-alt\.agent\.md: level max is not one modelRoles\.task's target .* — omp would clamp it silently$/);
+  assert.match(violations[1], /^fleet-reviewer-xhigh\.agent\.md: level max is not one modelRoles\.task's target .* — omp would clamp it silently$/);
+  assert.deepEqual(notices, []);
+});
+
+test("checkRoutes: with no router table at all every implementer definition is held to the level check", () => {
+  const { violations, notices } = routes(TASK_MAX_DEFS, MODEL_ROLES, {}, null, NO_TASK_MAX);
+  assert.deepEqual(violations, [`${TASK_MAX_MISMATCH} — omp would clamp it silently`]);
+  assert.deepEqual(notices, []);
+});
+
+// ---------------------------------------------------------------------------
+// implementerCell / routableCells
+// ---------------------------------------------------------------------------
+
+test("implementerCell: a fleet-implementer-<cell> definition names its cell", () => {
+  assert.equal(implementerCell("fleet-implementer-task-max.agent.md"), "task-max");
+  assert.equal(implementerCell("fleet-implementer-slow-high.agent.md"), "slow-high");
+});
+
+test("implementerCell: any other definition, or an implementer whose name is not a cell, is null", () => {
+  for (const file of ["fleet-reviewer-xhigh.agent.md", "fleet-merge-bot.agent.md", "fleet-implementer-alt.agent.md", "fleet-implementer.agent.md", "fleet-implementer-task-max-x.agent.md", "xfleet-implementer-task-max.agent.md"]) {
+    assert.equal(implementerCell(file), null, file);
+  }
+});
+
+test("routableCells: the policy cell, every `cells` entry and every `rows` value, and nothing else", () => {
+  const table = { cells: ["task-high", "smol-high"], rows: { "*": "task-high", heavy: "task-max" } };
+  assert.deepEqual([...routableOf(table)].sort(), [POLICY_CELL, "smol-high", "task-high", "task-max"].sort());
+  assert.deepEqual([...routableOf({ cells: [], rows: {} })], [POLICY_CELL]);
+});
+
+for (const [label, table, why] of [
+  ["null", null, /not a JSON object/],
+  ["an array", [], /not a JSON object/],
+  ["a string", "slow-high", /not a JSON object/],
+  ["an object without `cells`", { rows: {} }, /`cells` is not an array of cell names/],
+  ["a string `cells`", { cells: "slow-high,task-max", rows: {} }, /`cells` is not an array of cell names/],
+  ["a number `cells`", { cells: 5, rows: {} }, /`cells` is not an array of cell names/],
+  ["an object `cells`", { cells: { a: 1 }, rows: {} }, /`cells` is not an array of cell names/],
+  ["a `cells` array holding a non-string", { cells: ["task-high", 1], rows: {} }, /`cells` is not an array of cell names/],
+  ["an object without `rows`", { cells: [] }, /`rows` is not an object of cell names/],
+  ["an array `rows`", { cells: [], rows: ["task-high"] }, /`rows` is not an object of cell names/],
+  ["a `rows` value that is not a string", { cells: [], rows: { "*": 5 } }, /`rows` is not an object of cell names/],
+]) {
+  test(`routableCells: ${label} is an Error naming the missing shape, never an empty set`, () => {
+    const r = routableCells(table);
+    assert.ok(r instanceof Error, String(r));
+    assert.match(r.message, /^router table: /);
+    assert.match(r.message, why);
+  });
+}
+
+
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
@@ -362,16 +461,19 @@ test("checkRoutes: every real plugin/agents definition routes cleanly, and the i
 // Every flag the check reads the live install through, pointed at a fixture:
 // a test that left one off would shell out to the box's own `omp`. Each flag
 // is given here once and a test never repeats one: arg() is first-wins, so a
-// second copy would be ignored without a sound. `maxConcurrencyPath` is a
-// path, not a value, so a test can hand over a file that is not JSON; null
-// leaves the flag off, so the notice reads the live `omp`.
-function installFlags(d, { overrides = {}, modelRoles = MODEL_ROLES, catalog = CATALOG, inFlight = "5", maxConcurrencyPath = jsonFile(d, "max-concurrency.json", 32) } = {}) {
+// second copy would be ignored without a sound. `maxConcurrencyPath` and
+// `tablePath` are paths, not values, so a test can hand over a file that is
+// missing or not JSON; null leaves `maxConcurrencyPath` off, so the notice
+// reads the live `omp`, and `table: null` leaves `--table` off, so the
+// router-table.json beside the script is read.
+function installFlags(d, { overrides = {}, modelRoles = MODEL_ROLES, catalog = CATALOG, table = TABLE, tablePath = null, inFlight = "5", maxConcurrencyPath = jsonFile(d, "max-concurrency.json", 32) } = {}) {
   return [
     "--in-flight", inFlight,
     ...(maxConcurrencyPath === null ? [] : ["--max-concurrency", maxConcurrencyPath]),
     "--overrides", jsonFile(d, "overrides.json", overrides),
     "--model-roles", jsonFile(d, "model-roles.json", modelRoles),
     "--catalog", jsonFile(d, "catalog.json", catalog),
+    ...(table === null ? [] : ["--table", tablePath ?? jsonFile(d, "table.json", table)]),
   ];
 }
 
@@ -408,10 +510,8 @@ test("CLI: --check on an --agents path that is missing, a regular file, or holds
 
 test("CLI: --check with no --agents and an unreadable built-in agents directory refuses without naming a flag it was not given", () => {
   const d = dir();
-  const scripts = join(d, "scripts");
-  mkdirSync(scripts);
-  for (const f of ["tier-roles.mjs", "arg.mjs", "is-cli.mjs"]) copyFileSync(join(SCRIPTS_DIR, f), join(scripts, f));
-  const r = spawnSync(process.execPath, [join(scripts, "tier-roles.mjs"), "--check", ...installFlags(d)], { cwd: d, encoding: "utf8" });
+  const script = copiedScript(d, TABLE);
+  const r = spawnSync(process.execPath, [script, "--check", ...installFlags(d, { table: null })], { cwd: d, encoding: "utf8" });
   assert.equal(r.status, 1, r.stderr);
   assert.match(r.stderr, /^tier-roles: the default agents directory .*agents: cannot read the agents directory \(ENOENT\)/);
   assert.doesNotMatch(r.stderr, /--agents/);
@@ -437,10 +537,73 @@ test("CLI: --check with a shadowing fleet- override exits 1 naming the remedy", 
 test("CLI: --check with a smol-max cell exits 1 — haiku has no max, and the check refuses rather than clamps", () => {
   const d = dir();
   const agents = agentsDir({ "fleet-implementer-smol-high": "\"@smol:high\"", "fleet-implementer-smol-max": "\"@smol:max\"" });
-  const r = runCli(["--check", "--agents", agents, ...installFlags(d)], d);
+  const r = runCli(["--check", "--agents", agents, ...installFlags(d, { table: { ...TABLE, cells: [...TABLE.cells, "smol-max"] } })], d);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /fleet-implementer-smol-max\.agent\.md: level max is not one modelRoles\.smol's target/);
   assert.doesNotMatch(r.stderr, /smol-high/);
+});
+
+test("CLI: --check with a task-max cell the router table lacks exits 0 with a notice, and exits 1 once the table lists it", () => {
+  const d = dir();
+  const agents = agentsDir(TASK_MAX_DEFS);
+  const absent = runCli(["--check", "--agents", agents, ...installFlags(d, { catalog: NO_TASK_MAX })], d);
+  assert.equal(absent.status, 0, absent.stderr);
+  assert.match(absent.stdout, /^tier-roles: every definition routes/);
+  assert.deepEqual(noticeLines(absent.stdout), [`tier-roles: notice: ${TASK_MAX_MISMATCH} — cell task-max is not one the router selects; omp would clamp this level silently once it does`]);
+
+  const listed = runCli(["--check", "--agents", agents, ...installFlags(d, { catalog: NO_TASK_MAX, table: { ...TABLE, cells: [...TABLE.cells, "task-max"] } })], d);
+  assert.equal(listed.status, 1);
+  assert.match(listed.stderr, /fleet-implementer-task-max\.agent\.md: level max is not one modelRoles\.task's target .* — omp would clamp it silently/);
+});
+
+test("CLI: a --table that is malformed refuses by path with the missing shape, never an exemption", () => {
+  const d = dir();
+  const agents = agentsDir(TASK_MAX_DEFS);
+  const r = runCli(["--check", "--agents", agents, ...installFlags(d, { catalog: NO_TASK_MAX, table: { cells: "task-high,task-max", rows: {} } })], d);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /^tier-roles: .*table\.json: router table: `cells` is not an array of cell names/m);
+  assert.doesNotMatch(r.stderr, /\n\s+at /);
+  assert.equal(r.stdout, "");
+});
+
+test("CLI: a --table that is missing or not JSON refuses naming the path", () => {
+  const d = dir();
+  const agents = agentsDir(TASK_MAX_DEFS);
+  const notJson = join(d, "not-json.json");
+  writeFileSync(notJson, "{ not json");
+  for (const path of [join(d, "nope.json"), notJson]) {
+    const r = runCli(["--check", "--agents", agents, ...installFlags(d, { catalog: NO_TASK_MAX, tablePath: path })], d);
+    assert.equal(r.status, 2, path);
+    assert.ok(r.stderr.trimStart().startsWith(`tier-roles: cannot read the router table ${path}: `), r.stderr);
+    assert.doesNotMatch(r.stderr, /\n\s+at /, path);
+    assert.equal(r.stdout, "", path);
+  }
+});
+
+// A copy of the script and the three modules it imports, with `table` as the
+// router-table.json beside it (null leaves none), so the default table is the
+// one under test.
+function copiedScript(d, table) {
+  const scripts = join(d, "scripts");
+  mkdirSync(scripts);
+  for (const f of ["tier-roles.mjs", "arg.mjs", "is-cli.mjs", "ledger-grammar.mjs"]) copyFileSync(join(SCRIPTS_DIR, f), join(scripts, f));
+  if (table !== null) writeFileSync(join(scripts, "router-table.json"), JSON.stringify(table));
+  return join(scripts, "tier-roles.mjs");
+}
+
+test("CLI: without --table the router table is router-table.json beside the script, and its absence refuses", () => {
+  const agents = agentsDir(TASK_MAX_DEFS);
+  const run = (table) => {
+    const d = dir();
+    const script = copiedScript(d, table);
+    return { d, r: spawnSync(process.execPath, [script, "--check", "--agents", agents, ...installFlags(d, { catalog: NO_TASK_MAX, table: null })], { cwd: d, encoding: "utf8" }) };
+  };
+  assert.equal(run(TABLE).r.status, 0, "task-max absent from the beside-the-script table is a notice");
+  const listed = run({ ...TABLE, cells: [...TABLE.cells, "task-max"] }).r;
+  assert.equal(listed.status, 1, "task-max listed in the beside-the-script table is a violation");
+  const missing = run(null);
+  assert.equal(missing.r.status, 2);
+  assert.match(missing.r.stderr, /^tier-roles: cannot read the router table .*scripts\/router-table\.json: ENOENT/m);
 });
 
 test("CLI: a --catalog that is not a JSON object refuses by flag", () => {
