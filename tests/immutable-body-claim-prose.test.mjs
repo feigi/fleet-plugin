@@ -117,10 +117,12 @@ test("a settling command over literal text takes -F, and its zero counts only af
   // #1087. The `-F` half, bound to the measured case that shows why: a
   // literal line holding `\s+` is read as a pattern and answers 0 against
   // itself. Without the case the rule reads as style, not as a false zero.
+  // The pinned span runs past the section heading's own words, into the lead
+  // sentence's body, so the heading cannot stand in for the rule.
   assert.match(
     r,
-    Pin.phrase("A settling command over literal text uses `grep -F`"),
-    "the rule no longer tells a settling command over literal text to use grep -F",
+    Pin.phrase("A settling command over literal text uses `grep -F`, and its zero counts only after the same command finds a line known to match."),
+    "the rule no longer tells a settling command over literal text to use grep -F, with its zero counted only after a known match",
   );
   assert.match(
     r,
