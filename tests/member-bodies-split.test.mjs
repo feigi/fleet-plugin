@@ -140,6 +140,10 @@ const REPORT_FILE_RETIRED = [
   "Then report to the controller the pushed SHA, your apply/defer split, how many refuters you dispatched against out-of-scope suggestions, and the deferral issue numbers — a `filed: #N <subject>` line for every issue step 5 created, and `unrecorded: #N <subject>` for one whose `ledger.mjs filed` failed twice — and exit.",
   "**Deferring everything is a normal outcome, not a stall:** nothing is then staged, `git commit` refuses an empty index, `git push origin HEAD:<branch>` prints `Everything up-to-date`, and you report `no-op, HEAD unchanged at <sha>` in place of a new SHA.",
 ];
+// The finisher's duty 3 moved to its agent body, so the repair kind's pointer
+// to it "as above" pointed at nothing in the brief: the sentence now points
+// at the agent definition instead.
+const DUTY3_POINTER_RETIRED = ["Duty 3's script decides whether the label is on, as above."];
 // The placeholder each argument fills, per role — the arguments are values no
 // other argument shares, so a swapped substitution cannot pass.
 const PAIRS = [
@@ -155,7 +159,7 @@ const PAIRS = [
   { role: "finisher", kind: "fresh", fixture: "finisher-fresh.md",
     args: { worktree: "/abs/wt-fin", pin: PIN, pr: "3295", testCmd: "TESTCMD-4", scratch: "/abs/scratch-fin" },
     fills: { "abs-path": "worktree", "your dispatch pin": "pin", M: "pr", testCmd: "testCmd", scratch: "scratch" } },
-  { role: "finisher", kind: "repair", fixture: "finisher-repair.md",
+  { role: "finisher", kind: "repair", fixture: "finisher-repair.md", retired: DUTY3_POINTER_RETIRED,
     args: { worktree: "/abs/wt-fin-r", pin: PIN, pr: "3296", testCmd: "TESTCMD-5", scratch: "/abs/scratch-fin-r" },
     fills: { "abs-path": "worktree", "your dispatch pin": "pin", M: "pr", testCmd: "testCmd", scratch: "scratch" } },
   { role: "merge-bot", kind: null, fixture: "merge-bot.md",
