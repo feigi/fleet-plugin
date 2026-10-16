@@ -1,6 +1,7 @@
 #!/bin/sh
-# Read one command of a repository's proven Recipe out of its Recipe cache:
-# `install` (the Install step) or `test` (the Test entrypoint).
+# Read one field of a repository's proven Recipe out of its Recipe cache:
+# `install` (the Install step), `test` (the Test entrypoint) or `uncovered`
+# (the CI test steps the Test entrypoint leaves out).
 #
 # The fleet keeps no table of technologies. A Recipe is DERIVED by an agent
 # reasoning over the repository and PROVEN before it is written — the Install
@@ -27,11 +28,16 @@
 #   installClean  true    the Install step left `git status --porcelain` empty
 #   testCount     integer >0, the test count the proving run reported, and/or
 #   mutation      string  the deliberate failing mutation that turned it red
+#   uncovered     array   every test step of the merge-gating CI jobs the Test
+#                         entrypoint does not run, `[]` when it runs them all:
+#                         each entry `{ "step": <string>, "reason": <string> }`,
+#                         both non-empty
 #
 # At least one of testCount/mutation is the proof; a cache carrying neither,
-# or `installClean` anything but `true`, is an UNPROVEN Recipe and refused like
-# an absent one. Written only by recipe-prove.mjs, the derivation step's proof,
-# and only once that proof holds; this script never writes it.
+# `installClean` anything but `true`, or no well-formed `uncovered`, is an
+# UNPROVEN Recipe and refused like an absent one. Written only by
+# recipe-prove.mjs, the derivation step's proof, and only once that proof
+# holds; this script never writes it.
 #
 # INVALID on failure to RUN, never on failing tests: the command this script
 # is asked for must name something that resolves from <repo> (a builtin, a
@@ -44,8 +50,9 @@
 # tree that probe reads instead of <repo>'s own index, for a caller that runs
 # the command in a worktree cut from a ref.
 #
-# Exit status: 0 the command is printed; 1 a refusal about the cache, the
-# repository or the arguments; 3 a tool this script needs to read the cache
+# Exit status: 0 the field is printed, `uncovered` as one line of compact
+# JSON; 1 a refusal about the cache, the repository or the arguments; 3 a
+# tool this script needs to read the cache
 # (git, node, mktemp, cat) could not be started, mktemp could not create its
 # temp file, git did not run to an answer, node died mid-read, or node exited
 # non-zero with no reason and a status other than 2, its only verdict on the
@@ -116,7 +123,7 @@ derive="run the Recipe derivation step (run-team phase 0, before the first claim
 # the checkout still lists the old layout until someone updates it. Without
 # `--at` the probe reads <repo>'s own index, as for a caller that runs the
 # command in <repo> itself. Three arguments is neither shape: a refusal.
-usage="usage: derive-testcmd.sh <repo> <install|test> [--at <rev>]"
+usage="usage: derive-testcmd.sh <repo> <install|test|uncovered> [--at <rev>]"
 rev=
 case $# in
   2) ;;
@@ -139,8 +146,8 @@ gitout=$(git -C "$repo" rev-parse --git-dir 2>&1) || {
 }
 
 case $field in
-  install|test) ;;
-  *) die "unknown Recipe field '$field' — expected install or test" ;;
+  install|test|uncovered) ;;
+  *) die "unknown Recipe field '$field' — expected install, test or uncovered" ;;
 esac
 
 # A <rev> is only ever consulted by the probe, which only the Test entrypoint
@@ -223,7 +230,13 @@ if (r.installClean !== true) bad("`installClean` is not true — the Install ste
 const counted = Number.isInteger(r.testCount) && r.testCount > 0;
 const mutated = typeof r.mutation === "string" && r.mutation.trim() !== "";
 if (!counted && !mutated) bad("it carries no proof of real tests — neither a positive `testCount` nor a `mutation`");
-const value = r[field];
+if (!Array.isArray(r.uncovered)) bad("`uncovered` is not a list of { step, reason } entries — the CI test steps the Test entrypoint leaves out, `[]` for none");
+const filled = (s) => typeof s === "string" && s.trim() !== "";
+r.uncovered.forEach((u, i) => {
+  if (u === null || typeof u !== "object" || Array.isArray(u) || !filled(u.step) || !filled(u.reason))
+    bad(`\`uncovered\` entry ${i + 1} is not an object with a non-empty \`step\` and \`reason\``);
+});
+const value = field === "uncovered" ? JSON.stringify(r.uncovered) : r[field];
 fs.writeFileSync(lenFile, String(Buffer.byteLength(open + value + close)));
 process.stdout.write(open + value + close);
 ' "$cache" "$field" "$open" "$close" "$lenf" 2>"$errf") || rc=$?
@@ -291,6 +304,14 @@ esac
 [ "${#framed}" -eq "$framedlen" ] || die "$carriedmsg"
 value=${framed#"$open"}
 value=${value%"$close"}
+
+# `uncovered` is data, not a command: nothing runs it and nothing appends to
+# it, so none of the command checks below apply. JSON.stringify above made it
+# one line.
+if [ "$field" = uncovered ]; then
+  printf '%s\n' "$value"
+  exit 0
+fi
 
 # claim-ticket.sh appends the runner's own arguments after this string
 # textually (`exec sh -c '<cmd> "$@"' agent-test "$@"`), so a command ending in

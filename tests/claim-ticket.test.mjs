@@ -53,6 +53,7 @@ function repo(files, local = {}, recipe = {}) {
       derivedAt: git("rev-parse", "HEAD").trim(),
       installClean: true,
       testCount: 1,
+      uncovered: [],
       ...recipe,
     }));
   }

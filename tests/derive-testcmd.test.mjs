@@ -48,6 +48,7 @@ const recipe = (head, over = {}) => ({
   derivedAt: head,
   installClean: true,
   testCount: 3,
+  uncovered: [],
   ...over,
 });
 
@@ -111,11 +112,11 @@ test("wrong argument count and an unknown field refuse with a usage message", ()
   for (const argv of [[], [dir], [dir, "test", "extra"]]) {
     const r = spawnSync("sh", [SCRIPT, ...argv], { encoding: "utf8" });
     assert.equal(r.status, 1, JSON.stringify(argv));
-    assert.match(r.stderr, /usage: derive-testcmd\.sh <repo> <install\|test>/);
+    assert.match(r.stderr, /usage: derive-testcmd\.sh <repo> <install\|test\|uncovered>/);
   }
   const r = derive(dir, "derivedAt");
   assert.equal(r.status, 1);
-  assert.match(r.err, /unknown Recipe field 'derivedAt' — expected install or test/);
+  assert.match(r.err, /unknown Recipe field 'derivedAt' — expected install, test or uncovered/);
 });
 
 test("a non-repository directory refuses cleanly", () => {
@@ -197,10 +198,23 @@ test("an unparseable or unproven cache refuses, naming what is missing", (t) => 
     [recipe(head, { testCount: 0 }), /no proof of real tests/],
     [recipe(head, { testCount: 2.5 }), /no proof of real tests/],
     [recipe(head, { testCount: undefined, mutation: "" }), /no proof of real tests/],
+    [recipe(head, { uncovered: undefined }), /`uncovered` is not a list of \{ step, reason \} entries/],
+    [recipe(head, { uncovered: null }), /`uncovered` is not a list of \{ step, reason \} entries/],
+    [recipe(head, { uncovered: {} }), /`uncovered` is not a list of \{ step, reason \} entries/],
+    [recipe(head, { uncovered: "[]" }), /`uncovered` is not a list of \{ step, reason \} entries/],
+    [recipe(head, { uncovered: ["hooks"] }), /`uncovered` entry 1 is not an object with a non-empty `step` and `reason`/],
+    [recipe(head, { uncovered: [null] }), /`uncovered` entry 1 is not an object with a non-empty `step` and `reason`/],
+    [recipe(head, { uncovered: [[]] }), /`uncovered` entry 1 is not an object with a non-empty `step` and `reason`/],
+    [recipe(head, { uncovered: [{ reason: "needs docker" }] }), /`uncovered` entry 1 is not an object with a non-empty `step` and `reason`/],
+    [recipe(head, { uncovered: [{ step: "test:docker" }] }), /`uncovered` entry 1 is not an object with a non-empty `step` and `reason`/],
+    [recipe(head, { uncovered: [{ step: "", reason: "needs docker" }] }), /`uncovered` entry 1 is not an object with a non-empty `step` and `reason`/],
+    [recipe(head, { uncovered: [{ step: "test:docker", reason: " \t" }] }), /`uncovered` entry 1 is not an object with a non-empty `step` and `reason`/],
+    [recipe(head, { uncovered: [{ step: 7, reason: "needs docker" }] }), /`uncovered` entry 1 is not an object with a non-empty `step` and `reason`/],
+    [recipe(head, { uncovered: [{ step: "a", reason: "b" }, { step: "test:docker", reason: "" }] }), /`uncovered` entry 2 is not an object with a non-empty `step` and `reason`/],
   ];
   for (const [body, why] of rows) {
     cache(dir, body);
-    for (const field of ["test", "install"]) {
+    for (const field of ["test", "install", "uncovered"]) {
       const r = derive(dir, field);
       const label = `${field} from ${typeof body === "string" ? body : JSON.stringify(body)}`;
       assert.equal(r.status, 1, label);
@@ -226,6 +240,52 @@ test("either proof alone is accepted, and so is a 64-hex commit id", () => {
     assert.equal(r.status, 0, `${JSON.stringify(over)}: ${r.err}`);
     assert.equal(r.out, "true");
   }
+});
+
+// `uncovered` is what the Test entrypoint leaves out of CI's merge-gating test
+// steps. The reader prints it as one line of compact JSON inside the same
+// frame, and it is data, not a command: none of the command checks apply to
+// it, so a reason holding a `#` word, a trailing `;` or a multi-byte
+// character — all refused in a command — is accepted here.
+test("`uncovered` prints `[]` for an empty list and the compact JSON of a non-empty one", () => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head, { test: "true" }));
+  const empty = derive(dir, "uncovered");
+  assert.equal(empty.status, 0, empty.err);
+  assert.equal(empty.out, "[]");
+  assert.equal(empty.err, "");
+
+  const list = [
+    { step: "integration-docker: npm run test:docker", reason: "needs a Docker daemon this host lacks — # not a comment;" },
+    { step: "hooks", reason: "the Test entrypoint runs one config; `&&` would not take appended args &" },
+  ];
+  cache(dir, recipe(head, { test: "true", uncovered: list }));
+  const r = run([dir, "uncovered"]);
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out, JSON.stringify(list), "the list is not printed as its compact JSON");
+  assert.equal(r.err, "");
+  const raw = spawnSync("sh", [SCRIPT, dir, "uncovered"], { encoding: "utf8", env: process.env, cwd: tmpdir() });
+  assert.equal(raw.stdout, `${JSON.stringify(list)}\n`, "the list is not printed as exactly one line");
+});
+
+test("a well-formed `uncovered` leaves the install and test output unchanged", () => {
+  const { dir, head } = repo();
+  const over = { install: "true", test: `sh -c 'echo "a b"'` };
+  cache(dir, recipe(head, over));
+  const before = [derive(dir, "install"), derive(dir, "test")];
+  cache(dir, recipe(head, { ...over, uncovered: [{ step: "lint", reason: "not a test step of this host" }] }));
+  const after = [derive(dir, "install"), derive(dir, "test")];
+  assert.deepEqual(after, before);
+  assert.deepEqual(after.map((r) => r.out), ["true", `sh -c 'echo "a b"'`]);
+});
+
+test("`--at` applies to the test field only, never to `uncovered`", () => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head, { test: "true" }));
+  const r = run([dir, "uncovered", "--at", head]);
+  assert.equal(r.status, 1, r.err);
+  assert.equal(r.out, "");
+  assert.match(r.err, /--at applies to the test field only, not 'uncovered'/);
 });
 
 // Invalid on failure to RUN (ADR 0015): a leading word that does not resolve
@@ -765,7 +825,7 @@ test("--at refuses what it cannot read: an unresolvable rev, a non-test field, a
   assert.match(inst.err, /--at applies to the test field only, not 'install'/);
   const flag = run([dir, "test", "--on", "moved"]);
   assert.equal(flag.status, 1, flag.err);
-  assert.match(flag.err, /usage: derive-testcmd\.sh <repo> <install\|test>/);
+  assert.match(flag.err, /usage: derive-testcmd\.sh <repo> <install\|test\|uncovered>/);
   const broken = deriveAt(dir, "moved", gitFailing("read-tree"));
   assert.equal(broken.status, 1, broken.err);
   assert.equal(broken.out, "");

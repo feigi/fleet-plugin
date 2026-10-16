@@ -42,8 +42,11 @@ from the repository root by `sh -c`:
   and rewrites nothing: the frozen or locked mode where the tool has one.
   `true` when nothing needs installing. It must leave every file exactly as
   checked out; build output the repository ignores is fine.
-- **Test entrypoint** — the whole suite, the way CI runs it. Members run it
-  with their own arguments appended (`sh -c '<test> "$@"'`), so prefer a form
+- **Test entrypoint** — every test step in the merge-gating CI jobs that can
+  run in a fresh worktree on this host. Which steps qualify is yours to
+  decide, by reading CI and the repository. Members run it with their own
+  arguments appended (`sh -c '<test> "$@"'`), so it is one invocation: an
+  `&&` chain hands those arguments to its last command alone. Prefer a form
   where an appended test file or test name lands as an argument to the test
   runner. The cache reader refuses a command whose first word does not
   resolve from the repository root (a builtin, a `PATH` entry, or an
@@ -53,6 +56,13 @@ from the repository root by `sh -c`:
   resolves under its own directory option, e.g.
   `git -C web ls-files -- '*.test.ts'`: the reader accepts a quoted pattern
   unchecked.
+- **Uncovered steps** — what the Test entrypoint leaves out, passed as
+  `--uncovered`: one JSON array of `{"step": "<the CI step>", "reason": "<why
+  it is left out>"}`, `'[]'` when it leaves out nothing. When no single
+  invocation covers every qualifying step, take the widest one and list every
+  qualifying step it leaves out; that is never a reason to report
+  `RECIPE NOT PROVEN`. A test step that cannot run here — it needs a service
+  this host lacks, secrets, or another OS — is listed too, with that reason.
 
 ## 2. Prove it — this procedure exactly
 
@@ -61,7 +71,7 @@ script creates and removes; `<repo>`'s own tree is never touched.
 
 **First run, to see the output** — no proof flags:
 
-    ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>'
+    ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>' --uncovered '<uncovered>'
 
 It exits 1 with `NOT PROVEN — no proof given` once both commands ran, and
 names the Test entrypoint's output file (`test output: <path>`). Any other
@@ -74,7 +84,7 @@ and revise.
   text off that summary line, as printed, into `--count-line`, and the number
   of tests that ran into `--test-count`:
 
-      ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>' \
+      ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>' --uncovered '<uncovered>' \
         --count-line '<literal text of the count line>' --test-count <n>
 
   The number is the tests that ran — never the skipped, the failed, or a
@@ -92,14 +102,14 @@ and revise.
   must change a tracked file; the script runs it in the throwaway worktree,
   requires the suite to go red, and discards the worktree after:
 
-      ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>' \
+      ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>' --uncovered '<uncovered>' \
         --mutate '<shell command that breaks one test>' --mutation '<one line: what it breaks>'
 
 Exit 0 is the proof holding: the script wrote the Recipe cache and printed
 `PROVEN` and the cache's contents. Exit 1 is `NOT PROVEN`, with the reason;
 no cache was written. Exit 2 means no verdict on the proof: it could not be
-attempted (no `origin/main`, not a repository) or the cache could not be
-written — report it, do not work around it.
+attempted (no `origin/main`, not a repository, a malformed `--uncovered`) or
+the cache could not be written — report it, do not work around it.
 
 The script bounds each command it runs itself — the Install step, both Test
 runs and the mutation — and refuses one still running at that bound as
