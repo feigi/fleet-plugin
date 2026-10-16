@@ -76,7 +76,8 @@
 // writes the next, so the previous run's receipt still matches it, and a
 // re-run that trusted `run` alone would skip `rotate`. The session rule closes
 // a new session. A receipt of any other run (a `run` that is set and does not
-// match, or a different session) is held as `phase0.previous.json` and the
+// match, or a different session) is held as `phase0.previous.json`, where
+// `closeout.mjs finish` also leaves a finished run's receipt, and the
 // script starts at `branch`; this run's own receipt is written at
 // `phase0.json` after every step. A receipt whose rotation has not run is
 // simply overwritten: every step before `rotate` is idempotent and is re-run
@@ -122,7 +123,7 @@ import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { RECEIPT, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
+import { RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
 
 const NAME = "phase0";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -131,8 +132,6 @@ const NETWORK_TIMEOUT_MS = 120_000;
 const PR_LIMIT = 1000;
 // The tail of a child's output is the part that says why it stopped.
 const OUTPUT_MAX = 16_000;
-// The previous run's receipt, set aside at startup until the rotation files it.
-const HELD = "phase0.previous.json";
 const RULESET_SPEC = join(".github", "rulesets", "main.json");
 const RULESET_CHECK = join(".github", "scripts", "apply-ruleset.sh");
 
@@ -479,7 +478,7 @@ function main() {
   const scratch = root.stdout;
 
   const receiptPath = join(fleetDir, RECEIPT);
-  const held = join(fleetDir, HELD);
+  const held = join(fleetDir, RECEIPT_HELD);
   const state = readState(stateFileIn(fleetDir), NAME);
   if (state.degraded) {
     // The record decides whether a receipt is the previous run's, and a record

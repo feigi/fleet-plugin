@@ -45,6 +45,15 @@
 //                   the PR once it exists, are kept in the receipt: a re-run
 //                   after a failed push or PR resumes on that branch and never
 //                   opens a second PR.
+//   phase0-receipt  moves `.fleet/phase0.json` to `.fleet/phase0.previous.json`,
+//                   the name `phase0.mjs` holds a previous run's receipt under,
+//                   so a run that ended here leaves no phase-0 receipt for the
+//                   next run in this session to resume, and that run's rotation
+//                   files it as `phase0.<UTC stamp>.json` beside the ledger
+//                   archive. After the tick, which reads the caps from it, and
+//                   before the stop. No `phase0.json` is nothing to move and is
+//                   `ok`; a held receipt already there that is not this one is
+//                   a failed step.
 //   heartbeat-stop  `fleet-heartbeat.mjs --stop "<reason>"`, last, because
 //                   every reader takes a recorded stop as the end of the run.
 //
@@ -70,7 +79,7 @@
 // Zero deps: node builtins and sibling scripts only.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -78,7 +87,7 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { CLOSEOUT_RECEIPT, memberTokens, rowPr } from "./ledger-grammar.mjs";
+import { CLOSEOUT_RECEIPT, RECEIPT, RECEIPT_HELD, memberTokens, rowPr } from "./ledger-grammar.mjs";
 import { encodeProjectDir, isOmpSessionDirName } from "./member-record.mjs";
 import { tickCaps } from "./phase0-receipt.mjs";
 
@@ -334,6 +343,31 @@ function stepCommitAndPR({ reason, branch, receipt, save }) {
   return result;
 }
 
+// The receipt `phase0.mjs` resumes would otherwise outlive the run it describes.
+// It is set aside under the name `phase0.mjs` holds a previous run's receipt
+// under, which the next run's rotation restores and archives with the ledger.
+// Linked, then unlinked, so a held receipt already there is refused rather than
+// overwritten; one that is this very file, left by a crash between the two, is
+// finished off.
+function stepPhase0Receipt({ fleetDir }) {
+  const from = join(fleetDir, RECEIPT);
+  if (!existsSync(from)) return ok(`no ${RECEIPT} to move`);
+  const to = join(fleetDir, RECEIPT_HELD);
+  try {
+    linkSync(from, to);
+  } catch (e) {
+    if (e.code !== "EEXIST") return failed(`cannot move ${from} to ${to}: ${e.message}`);
+    const [a, b] = [statSync(from), statSync(to)];
+    if (a.dev !== b.dev || a.ino !== b.ino) return failed(`${to} already holds another receipt — move it out of the way, then run finish again`);
+  }
+  try {
+    unlinkSync(from);
+  } catch (e) {
+    return failed(`moved ${from} to ${to} but could not remove it: ${e.message} — remove it by hand before the next run`);
+  }
+  return ok(`${from} -> ${to}`);
+}
+
 function stepHeartbeatStop({ cwd, reason }) {
   const r = node("fleet-heartbeat.mjs", ["--stop", reason], { cwd });
   return r.status === 0 ? ok(r.stdout) : failed(`fleet-heartbeat.mjs --stop failed: ${detail(r)}`);
@@ -348,6 +382,7 @@ const FINISH = {
   "tier-outcomes": stepTierOutcomes,
   metrics: stepMetrics,
   "commit-and-pr": stepCommitAndPR,
+  "phase0-receipt": stepPhase0Receipt,
   "heartbeat-stop": stepHeartbeatStop,
 };
 const STEP_NAMES = [...Object.keys(BEGIN), ...Object.keys(FINISH)];
