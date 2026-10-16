@@ -40,7 +40,7 @@ export class ProcUnreadable extends Error {}
 export function processSource(env = process.env) {
   if (env.FLEET_PROC_TABLE) return tableSource(env.FLEET_PROC_TABLE);
   const ps = psSource(env);
-  return process.platform === "linux" ? { parentOf: ps.parentOf, startTime: (pid) => procfsStartTime(pid) } : ps;
+  return process.platform === "linux" ? { ...ps, startTime: (pid) => procfsStartTime(pid) } : ps;
 }
 
 function tableSource(path) {
@@ -123,13 +123,14 @@ export function psSource(env) {
 // unreadable — never a reason to ask `ps` instead.
 export function procfsStartTime(pid, root = "/proc") {
   const unreadable = (why) => new ProcUnreadable(`cannot read the start identity of pid ${pid}: ${why}`);
+  const bootIdPath = join(root, "sys", "kernel", "random", "boot_id");
   let bootId;
   try {
-    bootId = readFileSync(join(root, "sys", "kernel", "random", "boot_id"), "utf8").trim();
+    bootId = readFileSync(bootIdPath, "utf8").trim();
   } catch (e) {
     throw unreadable(e.message);
   }
-  if (bootId === "") throw unreadable(`${join(root, "sys", "kernel", "random", "boot_id")} is empty`);
+  if (bootId === "") throw unreadable(`${bootIdPath} is empty`);
   const statPath = join(root, String(pid), "stat");
   let stat;
   try {
@@ -142,7 +143,7 @@ export function procfsStartTime(pid, root = "/proc") {
   // `)`, so the fields are counted from the last `)`: field 3 comes first.
   const close = stat.lastIndexOf(")");
   const ticks = close === -1 ? undefined : stat.slice(close + 1).trim().split(/\s+/)[22 - 3];
-  if (ticks === undefined || !isDigits(ticks)) throw unreadable(`${statPath} has no start time in field 22`);
+  if (!isDigits(ticks)) throw unreadable(`${statPath} has no start time in field 22`);
   return `${bootId} ${ticks}`;
 }
 

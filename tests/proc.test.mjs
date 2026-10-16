@@ -59,20 +59,15 @@ test("ps: a gone process has no start time", () => {
   assert.equal(psSource(process.env).startTime(deadPid()), null);
 });
 
-test("processSource: a live process's start identity is a non-empty string, the same on every read", () => {
-  const first = processSource().startTime(process.pid);
-  assert.equal(typeof first, "string");
-  assert.notEqual(first, "");
-  assert.equal(processSource().startTime(process.pid), first);
-});
-
 test("processSource: a gone process has no start identity", () => {
   assert.equal(processSource().startTime(deadPid()), null);
 });
 
-test("processSource reads the start identity from procfs on Linux and from ps on every other platform", () => {
+test("processSource reads the start identity from procfs on Linux and from ps on every other platform: a non-empty string, the same on every read", () => {
   const linux = process.platform === "linux";
   const expected = linux ? procfsStartTime(process.pid) : psSource(process.env).startTime(process.pid);
+  assert.equal(typeof expected, "string");
+  assert.notEqual(expected, "");
   assert.equal(processSource().startTime(process.pid), expected);
   if (linux) assert.match(expected, /^[0-9a-f-]{36} \d+$/);
 });
