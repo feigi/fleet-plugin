@@ -1285,7 +1285,7 @@ import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable, scratchRoot } from "./fleet-dir.mjs";
 import { statePath, readState, writeState, assessBeat, isStalled, isReported, stallReport, stallOwner } from "./fleet-state.mjs";
 import { checkMainCheckout, describe } from "./main-checkout.mjs";
-import { readRunReceipt, phase0Gate } from "./phase0-receipt.mjs";
+import { readRunReceipt, phase0Gate, IN_FLIGHT_DEFAULT } from "./phase0-receipt.mjs";
 import { judgeRecord, ProcUnreadable } from "./proc.mjs";
 import { reportPath, reportsDir } from "./report-files.mjs";
 
@@ -1334,9 +1334,10 @@ const die = makeDie(NAME);
 // is left is configuration, and all of it defaults.
 const OPTIONS = {
   // The In-flight bound: the most tickets between Claim and merge at once. The
-  // default lives here and nowhere else in code, declared this way so it still
-  // goes through the guard below, where a hand-passed default went round it.
-  "in-flight": { type: "string", default: "5" },
+  // default is phase0-receipt.mjs's, the one phase 0 also takes, declared this
+  // way so it still goes through the guard below, where a hand-passed default
+  // went round it.
+  "in-flight": { type: "string", default: String(IN_FLIGHT_DEFAULT) },
   // `--fold-unchanged` prints ONE line instead of the rows when this tick asks
   // for nothing and says exactly what the last one said — what makes an
   // unattended night affordable. Opt-in because folding is wrong on an edge:

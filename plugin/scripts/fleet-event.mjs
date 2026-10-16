@@ -6,8 +6,8 @@
 //
 // Reached through the Resolver and run from the main checkout. Every kind
 // performs its writes, then runs `fleet-tick.mjs --apply` with the In-flight
-// bound — `--in-flight` as given, else the one `.fleet/phase0.json`'s caps
-// add up to, else the tick's own default — and prints one
+// bound — `--in-flight` as given, else the one `.fleet/phase0.json` records,
+// else the tick's own default — and prints one
 // `event: <kind>: <summary>` line with the tick's output verbatim after it.
 // Every kind is idempotent: a second run finds its writes made and only ticks
 // again.
