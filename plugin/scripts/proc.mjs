@@ -4,7 +4,7 @@
 
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 
 // ESRCH alone is dead. EPERM is a live process we may not signal, and any
 // other error is not evidence of death either.
@@ -17,23 +17,29 @@ export function isDead(pid) {
   }
 }
 
-// Thrown when the process tree or a start time cannot be read. A caller that
-// would act on a verdict refuses instead: a controller nobody could judge is
-// never judged dead.
+// Thrown when the process tree or a start identity cannot be read. A caller
+// that would act on a verdict refuses instead: a controller nobody could judge
+// is never judged dead.
 export class ProcUnreadable extends Error {}
 
 // The two reads the controller record needs — a process's parent and argv,
-// and its start time — behind one source. The real one is `ps`. A
-// FLEET_PROC_TABLE file replaces it whole: a test suite run from inside a live
-// omp session would otherwise find that session's omp as its ancestor. The
-// file is a JSON object keyed by pid:
+// and its start identity — behind one source. The parent comes from `ps` on
+// every platform. The start identity comes from procfs on Linux and from `ps`
+// everywhere else, chosen by platform rather than by whether /proc can be
+// read: the run that writes a record and the run that judges it must read it
+// the same way, and a key read one way never equals one read the other way.
+// A FLEET_PROC_TABLE file replaces both whole: a test suite run from inside a
+// live omp session would otherwise find that session's omp as its ancestor.
+// The file is a JSON object keyed by pid:
 //
 //   { "<pid>": { "ppid": <pid>, "argv": ["bun", "/…/omp"], "lstart": "<start>" } }
 //
-// A pid the table does not name has no parent and no start time, as a pid
-// `ps` does not list.
+// A pid the table does not name has no parent and no start identity, as a
+// pid that is gone.
 export function processSource(env = process.env) {
-  return env.FLEET_PROC_TABLE ? tableSource(env.FLEET_PROC_TABLE) : psSource(env);
+  if (env.FLEET_PROC_TABLE) return tableSource(env.FLEET_PROC_TABLE);
+  const ps = psSource(env);
+  return process.platform === "linux" ? { parentOf: ps.parentOf, startTime: (pid) => procfsStartTime(pid) } : ps;
 }
 
 function tableSource(path) {
@@ -69,10 +75,13 @@ function tableProblem(table) {
   return null;
 }
 
-function psSource(env) {
-  // `lstart` is printed in the caller's zone and locale, and a later run —
-  // with its own TZ — compares it as an opaque string. Pinning both makes the
-  // string a property of the process, not of whoever asked.
+// The `ps` source: the process tree, and a start identity that is the
+// process's start time as `ps -o lstart=` prints it. On macOS that time is
+// written once, when the process forks, so it never changes for a live
+// process. It is printed in the caller's zone and locale, and a later run —
+// with its own TZ — compares it as an opaque string. Pinning both makes the
+// string a property of the process, not of whoever asked.
+export function psSource(env) {
   const psEnv = { ...env, TZ: "UTC", LC_ALL: "C" };
   const ps = (args) => {
     const r = spawnSync("ps", args, { encoding: "utf8", env: psEnv });
@@ -101,6 +110,39 @@ function psSource(env) {
       throw new ProcUnreadable(`cannot read the start time of pid ${pid}: ps exited ${r.status}: ${r.stderr.trim()}`);
     },
   };
+}
+
+// The Linux start identity, `<boot id> <start ticks>`, read from the procfs
+// mounted at `root`. The ticks are field 22 of `<pid>/stat`, the process's
+// start time in clock ticks since boot, which never changes for a live
+// process; `ps -o lstart=` adds them to a boot time that moves with every
+// step of the wall clock. Within a boot a reused pid starts later, and the
+// boot id tells two boots' processes apart. Only a missing stat file is a gone
+// process; any other failure, and any failure to read the boot id, is
+// unreadable — never a reason to ask `ps` instead.
+export function procfsStartTime(pid, root = "/proc") {
+  const unreadable = (why) => new ProcUnreadable(`cannot read the start identity of pid ${pid}: ${why}`);
+  let bootId;
+  try {
+    bootId = readFileSync(join(root, "sys", "kernel", "random", "boot_id"), "utf8").trim();
+  } catch (e) {
+    throw unreadable(e.message);
+  }
+  if (bootId === "") throw unreadable(`${join(root, "sys", "kernel", "random", "boot_id")} is empty`);
+  const statPath = join(root, String(pid), "stat");
+  let stat;
+  try {
+    stat = readFileSync(statPath, "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw unreadable(e.message);
+  }
+  // Field 2, comm, is wrapped in parentheses and may itself hold spaces and
+  // `)`, so the fields are counted from the last `)`: field 3 comes first.
+  const close = stat.lastIndexOf(")");
+  const ticks = close === -1 ? undefined : stat.slice(close + 1).trim().split(/\s+/)[22 - 3];
+  if (ticks === undefined || !/^\d+$/.test(ticks)) throw unreadable(`${statPath} has no start time in field 22`);
+  return `${bootId} ${ticks}`;
 }
 
 // `args` is argv joined by single spaces, so an argument that itself holds a
@@ -147,11 +189,14 @@ export function controllerOf(source, chain) {
 
 // What a recorded controller is now, judged against the caller's chain:
 //   none      no record
-//   dead      isDead() says so, or the pid's start time is not the recorded
-//             one — a reused pid, which the record must outlast for days
-//             where the ledger lock tolerates it for seconds
+//   dead      isDead() says so, or the pid's start identity is not the
+//             recorded one — a reused pid, which the record must outlast for
+//             days where the ledger lock tolerates it for seconds
 //   ancestor  the record names one of the caller's own ancestors
 //   alive     any other live controller
+// `lstart` is a start identity, not a printed time: it never changes for a
+// live process and differs for a reused pid — on Linux both within a boot and
+// across boots — so an exact comparison is the whole test.
 export function judgeController(record, source, chain) {
   if (!record) return "none";
   if (isDead(record.pid)) return "dead";
