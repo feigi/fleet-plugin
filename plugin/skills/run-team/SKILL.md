@@ -55,8 +55,9 @@ named request should state the original's msg_id and that it is a re-send, which
 is what distinguishes a lost message from a member that never sent one; a
 controller that skips the ask cannot tell those apart and will guess wrong in
 whichever direction its expectations point. The tick prints `SETTLE <member>`
-for a report file on disk, so a missing message is read off that line before
-anyone is pinged.
+for a report file on disk that passes its schema and `REPORT-INVALID` for one
+that fails it, so a missing message is read off those lines before anyone is
+pinged.
 
 Note this cuts against the paragraph above only in appearance: the default stays
 *send once*, because unprompted re-sends were measured 2-to-1 false. The ask is

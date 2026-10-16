@@ -4384,7 +4384,8 @@ test("CLI: a real ancestor rotation carries the heartbeat's `seen` through, so a
 // report can be dropped or delayed; the file cannot. Advisory only — the tick
 // prints the settle it is for and runs none of it.
 import { utimesSync } from "node:fs";
-import { reportLines } from "../plugin/scripts/fleet-tick.mjs";
+import { reportLines, readReports } from "../plugin/scripts/fleet-tick.mjs";
+import { SCHEMAS, validate } from "../plugin/scripts/report-schema.mjs";
 
 // A live fix-applier on PR 5 and a live merge-bot, an in-flight
 // `review=member:` runner on PR 6, a `review=wf:` run on PR 7, and implementers
@@ -4400,20 +4401,31 @@ const REPORTED = {
     dispatched: ["impl-3=PR#5", "impl-4=PR#6", "impl-8=PR#7", "fix-pr-5", "merge-bot-1"],
   },
 };
+// The smallest report that validates against its member family's schema, for a
+// name in one of the four families; a name no schema covers holds `{member}`.
+const SHA40 = "0123456789abcdef0123456789abcdef01234567";
+const validReport = (name) => {
+  if (/^impl-/.test(name)) return { member: name, outcome: "pr", pr: 5, head: SHA40, branch: "b", sizing: null, bailCause: null, bailDetail: null, confirmation: [] };
+  if (/^fix-pr-/.test(name)) return { member: name, outcome: "no-op", head: SHA40, branch: "b", applied: [], deferred: [], filed: [], unrecorded: [], dispositionsRecord: "/r", testRun: { cmd: "t", exit: 0, tests: 1, cancelled: 0 }, confirmation: [] };
+  if (/^finisher-pr-/.test(name)) return { member: name, outcome: "labelled", cause: null, evidence: null, pin: SHA40, labelsReadBack: [], kill: null, filed: [], unrecorded: [], confirmation: [] };
+  if (/^merge-bot-/.test(name)) return { member: name, merged: [], held: [], conflictHold: [], refused: [], branchKept: [] };
+  return { member: name };
+};
 // A scratch root of its own holding `<root>/reports/<name>.json` for each
-// entry of `files` — `{name: {member, agoMin, text, dir}}`, the file `agoMin`
-// minutes old and holding `{member}`, or `text` verbatim, or a directory in
-// its place when `dir` is set.
+// entry of `files` — `{name: {member, agoMin, body, text, dir}}`, the file
+// `agoMin` minutes old and holding the valid report of `name` (its `member`
+// field set to `member` when that is given), or `body` as JSON, or `text`
+// verbatim, or a directory in its place when `dir` is set.
 const scratchWith = (files) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-scratch-")));
   mkdirSync(join(root, "reports"));
-  for (const [name, { member, agoMin = 0, text, dir = false }] of Object.entries(files)) {
+  for (const [name, { member = name, agoMin = 0, body, text, dir = false }] of Object.entries(files)) {
     const path = join(root, "reports", `${name}.json`);
     if (dir) {
       mkdirSync(path);
       continue;
     }
-    writeFileSync(path, text ?? JSON.stringify({ member }));
+    writeFileSync(path, text ?? JSON.stringify(body ?? { ...validReport(name), member }));
     const t = new Date(Date.now() - agoMin * MIN);
     utimesSync(path, t, t);
   }
@@ -4434,7 +4446,7 @@ const reportTick = (files, { receipt = true, args = () => [], fixture = {} } = {
     rmSync(root, { recursive: true, force: true });
   }
 };
-const reportLinesOf = (stdout) => stdout.split("\n").filter((l) => /^(?:SETTLE|REPORT-MISMATCH|REPORT-UNREADABLE) /.test(l));
+const reportLinesOf = (stdout) => stdout.split("\n").filter((l) => /^(?:SETTLE|REPORT-MISMATCH|REPORT-UNREADABLE|REPORT-INVALID) /.test(l));
 const settleLine = (member, age, reportsFrom = "") => `SETTLE ${member} (report on disk since ${age}m — ledger.mjs settle ${member} --from-report${reportsFrom && ` --reports ${reportsFrom}`})`;
 const NO_SCRATCH = "fleet-tick: report files not checked — no scratch in the phase-0 receipt and no --scratch";
 
@@ -4566,6 +4578,120 @@ test("reportLines: SETTLE for a live name whose file names it, REPORT-MISMATCH o
   assert.equal(settleFrom("/r/reports").line, settleLine("impl-12", 9, "/r/reports"));
   assert.equal(settleFrom("/r/reports").key, "SETTLE impl-12", "the key does not carry the directory");
   assert.equal(settleFrom("/a b/it's").line, settleLine("impl-12", 9, "'/a b/it'\\''s'"));
+});
+
+test("the report fixtures every SETTLE test relies on validate against their family's schema", () => {
+  for (const [name, family] of [["impl-3", "impl"], ["fix-pr-5", "fix-pr"], ["finisher-pr-4", "finisher"], ["merge-bot-1", "merge-bot"]]) {
+    assert.equal(validate(SCHEMAS[family], validReport(name)), null, `${name} fixture is not a valid ${family} report`);
+  }
+});
+
+test("reportLines: a file that names its member and fails the schema prints REPORT-INVALID with the violation, never settleable, keyed on the line itself; a mismatch or an unreadable file outranks it; an entry with no violation, as a member no schema covers has, is unaffected", () => {
+  const now = 1_000_000_000_000;
+  const violation = '$: missing required field "outcome"';
+  const file = (member, agoMin, extra = {}) => ({ path: `/s/reports/${member}.json`, since: now - agoMin * MIN, member, ...extra });
+  const invalid = `REPORT-INVALID /s/reports/fix-pr-5.json (${violation})`;
+  const reports = new Map([
+    ["fix-pr-5", file("fix-pr-5", 9, { violation })],
+    ["merge-bot-2", file("merge-bot-2", 1, { member: "merge-bot-3", violation })],
+    ["impl-12", file("impl-12", 4)],
+    ["review-pr-6", file("review-pr-6", 3)],
+  ]);
+  assert.deepEqual(reportLines({ reporters: ["fix-pr-5", "merge-bot-2", "impl-12", "review-pr-6"], reports, now }), [
+    { member: "fix-pr-5", settle: false, invalid: true, key: invalid, line: invalid },
+    { member: "merge-bot-2", settle: false, key: "REPORT-MISMATCH /s/reports/merge-bot-2.json (member: merge-bot-3)", line: "REPORT-MISMATCH /s/reports/merge-bot-2.json (member: merge-bot-3)" },
+    { member: "impl-12", settle: true, key: "SETTLE impl-12", line: settleLine("impl-12", 4) },
+    { member: "review-pr-6", settle: true, key: "SETTLE review-pr-6", line: settleLine("review-pr-6", 3) },
+  ]);
+  const unreadable = new Map([["fix-pr-5", { path: "/s/reports/fix-pr-5.json", unreadable: "EACCES", violation }]]);
+  assert.equal(reportLines({ reporters: ["fix-pr-5"], reports: unreadable, now })[0].line, "REPORT-UNREADABLE /s/reports/fix-pr-5.json (EACCES)");
+  // The age is not in the line, so the digest does not move while it waits.
+  const aged = (agoMin) => reportLines({ reporters: ["fix-pr-5"], reports: new Map([["fix-pr-5", file("fix-pr-5", agoMin, { violation })]]), now })[0];
+  assert.deepEqual(aged(1), aged(40));
+});
+
+test("readReports: a file that fails its family's schema carries the violation, one that validates carries none, a name no schema covers is read for its member and never looked up, and a name with no file has no entry", () => {
+  const root = scratchWith({
+    "fix-pr-5": { body: { member: "fix-pr-5" } },
+    "merge-bot-1": {},
+    "impl-12": { text: "not json" },
+    "review-pr-6": {},
+  });
+  try {
+    const read = readReports(root, ["fix-pr-5", "merge-bot-1", "impl-12", "review-pr-6", "finisher-pr-4"]);
+    assert.equal(read.get("fix-pr-5").violation, '$: missing required field "outcome"');
+    assert.equal(read.get("fix-pr-5").member, "fix-pr-5");
+    assert.equal("violation" in read.get("merge-bot-1"), false);
+    assert.match(read.get("impl-12").violation, /^\$: not JSON/);
+    assert.equal(read.get("impl-12").member, undefined);
+    assert.equal(read.get("review-pr-6").member, "review-pr-6");
+    assert.equal("violation" in read.get("review-pr-6"), false);
+    assert.equal(read.has("finisher-pr-4"), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI: a report file that names its member and fails its family's schema prints REPORT-INVALID with the file and the violation and no SETTLE; a fully valid report prints SETTLE; the tick still exits 0 and writes no ledger row", () => {
+  let root;
+  const r = reportTick({ "fix-pr-5": { body: { member: "fix-pr-5" }, agoMin: 4 }, "merge-bot-1": { body: { member: "merge-bot-1" } } }, { args: (at) => { root = at; return []; } });
+  const valid = reportTick({ "fix-pr-5": { agoMin: 4 }, "merge-bot-1": {} });
+  try {
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(reportLinesOf(r.stdout), [
+      `REPORT-INVALID ${join(root, "reports", "fix-pr-5.json")} ($: missing required field "outcome")`,
+      `REPORT-INVALID ${join(root, "reports", "merge-bot-1.json")} ($: missing required field "merged")`,
+    ]);
+    assert.doesNotMatch(r.stdout, /^SETTLE /m);
+    assert.equal(readFileSync(join(r.repo, ".fleet", "ledger.md"), "utf8"), ledgerText(REPORTED.ledger));
+    assert.equal(valid.status, 0, valid.stderr);
+    assert.deepEqual(reportLinesOf(valid.stdout), [settleLine("fix-pr-5", 4), settleLine("merge-bot-1", 0)]);
+    assert.doesNotMatch(valid.stdout, /^REPORT-INVALID /m);
+  } finally {
+    rmSync(r.dir, { recursive: true, force: true });
+    rmSync(valid.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: --fold-unchanged with an invalid report waiting folds to one line carrying `REPORT-INVALID <member> persists` and not `SETTLE <member> persists`, without resetting quiet; the age is not in the digest", () => {
+  const root = scratchWith({ "fix-pr-5": { body: { member: "fix-pr-5" }, agoMin: 3 } });
+  try {
+    const ticks = ticksOver(["--fold-unchanged"], { ...REPORTED, phase0: receiptScratch(root) }, 3);
+    for (const t of ticks) assert.equal(t.status, 0, t.stderr);
+    assert.match(ticks[0].stdout, /^REPORT-INVALID .*fix-pr-5\.json \(\$: missing required field "outcome"\)$/m);
+    for (const t of ticks.slice(1)) {
+      assert.deepEqual(t.stdout.trim().split("\n"), [
+        `fleet-tick: unchanged, nothing to act on (quiet=${ticks.indexOf(t) + 1}); REPORT-INVALID fix-pr-5 persists — full rows on the next change`,
+      ]);
+      assert.doesNotMatch(t.stdout, /SETTLE/);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI: the digest of a waiting invalid report leaves its age out, and the report turning valid is a change", () => {
+  const root = scratchWith({ "fix-pr-5": { body: { member: "fix-pr-5" }, agoMin: 1 } });
+  const path = join(root, "reports", "fix-pr-5.json");
+  const digest = () => {
+    const r = runCli([], { ...REPORTED, phase0: receiptScratch(root), keep: true });
+    try {
+      assert.equal(r.status, 0, r.stderr);
+      return stateOf(r).digest;
+    } finally {
+      rmSync(r.dir, { recursive: true, force: true });
+    }
+  };
+  try {
+    const young = digest();
+    const old = new Date(Date.now() - 40 * MIN);
+    utimesSync(path, old, old);
+    assert.equal(digest(), young);
+    writeFileSync(path, JSON.stringify(validReport("fix-pr-5")));
+    assert.notEqual(digest(), young);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("deriveRun: reporters are every unsettled member token — never a settled token, a review runner, a wf: run, or a review that returned or failed", () => {
