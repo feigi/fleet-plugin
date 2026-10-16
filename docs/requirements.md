@@ -73,7 +73,7 @@ Hard rules for any technology:
 
 Check, once a run's phase 0 has derived the Recipe:
 ```sh
-~/.fleet/bin/fleet-run derive-testcmd.sh . install && ~/.fleet/bin/fleet-run derive-testcmd.sh . test
+~/.fleet/bin/fleet-run derive-testcmd.sh . install && ~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main
 ```
 
 ### 2.4 Labels — HARD
