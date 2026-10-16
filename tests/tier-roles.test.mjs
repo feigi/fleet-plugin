@@ -421,14 +421,22 @@ test("checkRoutes: a non-routable implementer definition with unsupported level 
 
 test("checkRoutes: a routable implementer definition with unsupported level is still a violation", () => {
   const table = { cells: ["slow-high", "task-high", "smol-high"], rows: { "*": "slow-high" } };
+  const catalogWithoutSmolMax = {
+    models: [
+      { provider: "anthropic", id: "claude-opus-5", selector: "anthropic/claude-opus-5", thinking: ADAPTIVE },
+      { provider: "anthropic", id: "claude-sonnet-5", selector: "anthropic/claude-sonnet-5", thinking: ADAPTIVE },
+      { provider: "anthropic", id: "claude-haiku-4-5", selector: "anthropic/claude-haiku-4-5", thinking: ["minimal", "low", "medium", "high", "xhigh"] },
+    ],
+  };
   const { violations } = routes(
-    { "fleet-implementer-smol-max": "@smol:max" },
+    { "fleet-implementer-smol-high": "@smol:max" },
     MODEL_ROLES,
     {},
     table,
+    catalogWithoutSmolMax,
   );
   assert.equal(violations.length, 1);
-  assert.match(violations[0], /fleet-implementer-smol-max\.agent\.md: level max is not one modelRoles\.smol/);
+  assert.match(violations[0], /fleet-implementer-smol-high\.agent\.md: level max is not one modelRoles\.smol/);
   assert.match(violations[0], /omp would clamp it silently/);
 });
 
