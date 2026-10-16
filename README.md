@@ -56,11 +56,11 @@ restart; extensions load only at session start.
 ## Quickstart
 
 Start a fleet run over the `ready-for-agent` queue — implementers and reviewers
-(both optional, default 2 and 6, no hard cap), plus one
+(one optional argument, the In-flight bound, default 5), plus one
 non-configurable merge bot:
 
 ```
-/skill:run-team [implementers] [reviewers]
+/skill:run-team [in-flight]
 ```
 
 `run-team` is invoke-only: the model never starts it. In the `/` picker, type
@@ -97,9 +97,10 @@ finisher, merge bot. Standalone commands (`review-and-fix`, `run-merge-bot`,
 the `next-ticket` skill) run the same roles one ticket/PR at a time, with no
 controller above them. Full design rationale:
 [`docs/specs/2026-07-22-run-team-agent-fleet-design.md`](docs/specs/2026-07-22-run-team-agent-fleet-design.md);
-the loop's current slot-based shape, drawn below, is
+the loop's current shape, drawn below, is the slot-based design in
 [`docs/specs/2026-09-24-slot-based-fleet-loop-design.md`](docs/specs/2026-09-24-slot-based-fleet-loop-design.md)
-(ADR 0012/0013).
+(ADR 0012/0013), its slot gate replaced by the In-flight bound
+([ADR 0031](docs/adr/)).
 
 Every box below is documented on its own page under
 [`docs/components/`](docs/components/README.md). Solid arrows are work
@@ -118,7 +119,7 @@ flowchart TD
         SL["Shortlist<br/>.fleet/shortlist.json"]
     end
 
-    SL -->|"tick: PULL #N<br/>(implementer slot free)"| JUDGE{"Pull &amp; Claim<br/>judge one ticket"}
+    SL -->|"tick: PULL #N<br/>(In flight below the bound)"| JUDGE{"Pull &amp; Claim<br/>judge one ticket"}
     JUDGE -->|"relabel: needs-triage /<br/>ready-for-human"| OUT(["leaves the loop,<br/>needs a human"])
     JUDGE -->|"exclude: behind-pr#N /<br/>behind-issue#N"| SL
     JUDGE -->|"staleness.mjs: provably fixed<br/>(close, next entry)"| FIXED(["closed, citing<br/>the fixing commit"])
@@ -127,15 +128,13 @@ flowchart TD
     subgraph IMPLSUB["Implementer — fleet-implementer-&lt;cell&gt;"]
         IMPL["build the ticket<br/>tier-check.mjs verifies dispatch"]
     end
-    IMPL -.->|"slot frees on report"| SL
     IMPL -->|"reports PR # + head SHA"| PR(["PR open, closes the issue"])
 
-    PR -->|"tick: DISPATCH review PR#N<br/>(reviewer slot free)"| REVIEW
+    PR -->|"tick: DISPATCH review PR#N"| REVIEW
 
     subgraph REVIEWSUB["Reviewer — fleet-review-runner"]
         REVIEW["snapshot → specialists → verifier<br/>→ fix-applier"]
     end
-    REVIEW -.->|"reviewer slot frees:<br/>next queued PR"| PR
     REVIEW -->|"push"| CI{"CI check job"}
     CI -->|"tick: DISPATCH fix-pr PR#N<br/>(check job failure)"| REVIEW
     CI -->|"controller: check green necessary,<br/>not sufficient — gate is review<br/>returned + fix-applier reported"| FINISH
@@ -158,6 +157,7 @@ flowchart TD
         CONFLICT -.->|"tick: DISPATCH fix-pr PR#pr<br/>(rebase via implementer)"| HOLD
     end
     MERGE --> MERGED(["PR merged"])
+    MERGED -.->|"a merge brings In flight<br/>below the bound"| SL
 
     MERGEBOTSUB -.->|"controller: reap.sh on the Pass report<br/>(even a Pass that merged nothing)"| REAP["Reaping &amp; Liveness"]
     REAP -.->|"worktree/branch freed"| SL
@@ -168,7 +168,7 @@ flowchart TD
 ```
 
 No batching and no maintainer queue: the controller keeps an ordered
-**Shortlist** and performs a **Pull** the instant an implementer slot frees —
+**Shortlist** and performs a **Pull** the instant the In-flight count is below the bound —
 one ticket judged, then claimed, relabelled by cause, or excluded
 ([Supply & Shortlist](docs/components/supply-and-shortlist.md),
 [Pull & Claim](docs/components/pull-and-claim.md)). Every 5th Pull dispatches

@@ -10,7 +10,7 @@ import { gitEnv } from "../plugin/scripts/git-env.mjs";
 const STEPS = ["branch", "fast-forward", "pin", "baseline", "preflight", "ruleset", "tier-roles", "metrics",
   "cockpit", "rotate", "reclaim", "recipe", "fold-in", "stranded", "shortlist"];
 const receipt = ({ run = 5, session = "/s/run", steps = {} } = {}) => ({
-  run, session, scratch: "/scratch", caps: { impl: null, review: null },
+  run, session, scratch: "/scratch",
   steps: Object.fromEntries(STEPS.map((n) => [n, { status: "ok", at: "t", output: "", ...steps[n] }])),
 });
 const ok = (r) => ({ state: "ok", receipt: r });

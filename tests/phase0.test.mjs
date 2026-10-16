@@ -219,7 +219,7 @@ test("a clean run passes every step in order, writes one receipt and exits 0", (
   assert.equal(receipt.run, RUN_AT, "run is the at the rotation wrote into the controller record");
   assert.equal(receipt.session, f.session);
   assert.equal(receipt.scratch.startsWith(join(f.home, ".fleet", "scratch")), true, receipt.scratch);
-  assert.deepEqual(receipt.caps, { impl: null, review: null });
+  assert.equal(Object.hasOwn(receipt, "caps"), false, "the retired cap flags leave no field in the receipt");
   assert.equal(receipt.inFlight, 5, "the receipt records the bound the run used: the default, with no --in-flight");
   for (const n of NAMES) {
     assert.match(receipt.steps[n].at, /^\d{4}-\d\d-\d\dT/, `${n} carries a time`);
@@ -241,15 +241,15 @@ test("a clean run passes every step in order, writes one receipt and exits 0", (
   assert.equal(f.calls("board")[0].cwd, f.repo);
 });
 
-test("every flag reaches the step that owns it and the receipt records the caps", () => {
+test("every flag reaches the step that owns it", () => {
   const f = fixture();
   const plugin = join(f.dir, "plugin-checkout");
   const spend = join(f.dir, "spend");
-  const r = f.run(["--session", f.session, "--implementer-cap", "3", "--reviewer-cap", "5", "--plugin-checkout", plugin, "--spend-dir", spend, "--workflow", "CI"]);
+  const r = f.run(["--session", f.session, "--in-flight", "3", "--plugin-checkout", plugin, "--spend-dir", spend, "--workflow", "CI"]);
   assert.equal(r.status, 0, r.err);
   const receipt = f.receipt();
-  assert.deepEqual(receipt.caps, { impl: 3, review: 5 });
   assert.deepEqual(f.calls("instruments")[0].args, ["--pin", "--audit", plugin]);
+  assert.deepEqual(f.calls("tier-roles")[0].args, ["--check", "--in-flight", "3"], "--in-flight reaches tier-roles, the step that owns it");
   assert.deepEqual(f.calls("preflight")[0].args, [], "preflight.mjs takes no arguments, so the CI flag is recorded and never passed");
   assert.match(receipt.steps.preflight.output, /CI: workflow CI/);
   for (let i = 0; i < 40 && f.calls("board").length === 0; i++) wait(100);
@@ -260,13 +260,11 @@ test("every flag reaches the step that owns it and the receipt records the caps"
   assert.match(g.receipt().steps.preflight.output, /CI: declared absent/);
 });
 
-test("tier-roles gets the in-flight bound: --in-flight when given, else the default; the caps play no part, and the receipt records the bound", () => {
+test("tier-roles gets the in-flight bound: --in-flight when given, else the default, and the receipt records the bound", () => {
   const cases = [
     [[], "5"],
     [["--in-flight", "7"], "7"],
-    [["--implementer-cap", "3", "--reviewer-cap", "4"], "5"],
-    [["--implementer-cap", "3"], "5"],
-    [["--in-flight", "11", "--implementer-cap", "3", "--reviewer-cap", "4"], "11"],
+    [["--in-flight", "11"], "11"],
   ];
   for (const [flags, bound] of cases) {
     const f = fixture();
@@ -563,7 +561,7 @@ test("fold-in: a ledger that cannot be read fails the step rather than queueing 
 // ── the resume rule ───────────────────────────────────────────────────────────
 
 const stale = (f, extra) => ({
-  run: RUN_AT, session: f.session, scratch: "/old/scratch", caps: { impl: null, review: null },
+  run: RUN_AT, session: f.session, scratch: "/old/scratch",
   steps: Object.fromEntries(NAMES.map((n) => [n, { status: "ok", at: "2026-01-01T00:00:00.000Z", output: "from the previous run" }])),
   ...extra,
 });
@@ -951,12 +949,12 @@ test("usage: every malformed command line exits 2 before a step runs", () => {
   refuses(f, ["--session"], /--session needs a value/);
   refuses(f, ["--session", join(f.dir, "missing")], /not readable/);
   refuses(f, ["--session", join(f.repo, "README")], /not a directory/);
-  refuses(f, [...s, "--implementer-cap", "0"], /positive/);
-  refuses(f, [...s, "--implementer-cap", "many"], /needs a number/);
+  refuses(f, [...s, "--implementer-cap", "3"], /--implementer-cap/);
+  refuses(f, [...s, "--reviewer-cap", "4"], /--reviewer-cap/);
   refuses(f, [...s, "--in-flight", "0"], /positive/);
   refuses(f, [...s, "--in-flight", "many"], /needs a number/);
   refuses(f, [...s, "--in-flight", ""], /--in-flight needs a value/);
-  refuses(f, [...s, "--reviewer-cap"], /--reviewer-cap needs a value/);
+  refuses(f, [...s, "--max-reviews", "2"], /--max-reviews/);
   refuses(f, [...s, "--workflow", "CI", "--declare-no-ci"], /alternatives/);
   refuses(f, [...s, "--declare-no-ci=1"], /boolean flag/);
   refuses(f, [...s, "stray"], /unexpected argument 'stray'/);

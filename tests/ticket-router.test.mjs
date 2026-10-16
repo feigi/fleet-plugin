@@ -299,7 +299,7 @@ function receiptWorld(t, receipt) {
   { encoding: "utf8", cwd: p.dir, env: gitEnv() });
   return { ...p, run };
 }
-const receiptFor = (session) => ({ run: null, session, scratch: "/scratch", caps: { impl: null, review: null }, steps: {} });
+const receiptFor = (session) => ({ run: null, session, scratch: "/scratch", steps: {} });
 
 test("route: with no --session the session is the one the phase-0 receipt records", (t) => {
   const p = receiptWorld(t, receiptFor(`/home/u/.omp/agent/sessions/-w/${SESSION2}`));

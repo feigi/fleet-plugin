@@ -544,7 +544,7 @@ function withReceipt(w, receipt) {
   if (receipt !== undefined) writeFileSync(join(w.d, ".fleet", "phase0.json"), typeof receipt === "string" ? receipt : JSON.stringify(receipt));
   return (entries) => { writeFileSync(join(w.d, "batch.json"), JSON.stringify(entries)); return w.check(); };
 }
-const receiptFor = (session) => ({ run: null, session, scratch: "/scratch", caps: { impl: null, review: null }, steps: { branch: { status: "ok", at: "t", output: "" } } });
+const receiptFor = (session) => ({ run: null, session, scratch: "/scratch", steps: { branch: { status: "ok", at: "t", output: "" } } });
 
 test("session: an entry that omits it takes the session directory the phase-0 receipt records", () => {
   const w = implWorld();

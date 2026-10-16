@@ -26,10 +26,13 @@ human curates this list — admission is fully automatic
    start; after that,
    [`fleet-tick.mjs`](../../plugin/scripts/fleet-tick.mjs) refreshes it
    (`REFRESHED shortlist: <n> entries; <k> lifted`) whenever unclaimed
-   entries fall below the implementer cap, the file is missing/empty,
+   entries fall below the In-flight bound,
+   the file is missing/empty,
    an exclusion's premise has lifted, or a branch-named `behind-pr` or a
    `behind-issue` exclusion that has not lifted names a ticket the file
-   still carries — a low-water-mark refresh, never refill-on-empty.
+   still carries — a low-water-mark refresh, never refill-on-empty. No
+   trigger fires while the bound holds (ADR 0031,
+   [`docs/adr/`](../adr/)): a refresh then cannot feed a Pull.
 
 **Shortlist** entries (no live `impl-` row, no live `excluded` row) are
 what the tick prints as `unclaimed=`; its `dropped` is what the tick prints
