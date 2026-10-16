@@ -191,3 +191,20 @@ run, change `SESSION_NAME`/`SESSION_DIR` and the three `invocations` entries
 (read them straight off that session's own `/fleet-ctl:run-team <impl>
 <reviewers>` lines, `grep -n "fleet-ctl:run-team"` against its top-level
 `.jsonl`).
+
+## 2026-10-16 — run-team SKILL.md in tokens, before and after the runbook diet
+
+- **Before:** 93.2k tokens, as #2929 measured it on the 257 KB
+  `plugin/skills/run-team/SKILL.md` of that time (the figure
+  `docs/specs/2026-10-13-runbook-diet-and-incident-policy.md` cites).
+- **After:** 69,159 tokens for the 186,100-byte file #3210 left on `main`
+  (`500b2738`), a ratio of 2.69 bytes per input token. Measured with omp
+  18.11.2 on `anthropic/claude-opus-5-5` (`modelRoles.slow`) as the
+  difference between two `omp -p --mode json --no-session --no-tools
+  --system-prompt x` runs: SKILL.md plus "Reply with the single word ok."
+  (72,987 input tokens: `input` + `cacheWrite`) less that sentence alone
+  (3,828). `tests/skill-budget.test.mjs` records the same numbers in its
+  header and holds the file at a 187,000-byte ceiling.
+- **To re-read:** controller `cache_creation` per merged PR (signal 2
+  above, **133,720**), once 20 PRs have merged under the new runbook, by the
+  method in this note.
