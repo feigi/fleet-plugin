@@ -1006,7 +1006,9 @@ Before the run's first dispatch run `~/.fleet/bin/fleet-run tier-roles.mjs
 --check`; exit 1 names every definition whose `model:` is not a route,
 every unset `modelRoles.<role>` a definition needs, every definition whose
 `:<level>` its role's target does not run at (omp's model catalog — omp
-would clamp it silently), every
+would clamp it silently), except an implementer definition whose cell the
+router never selects (not in `router-table.json`'s `cells` or `rows` values,
+and not the policy cell), which is a notice and never stops the run; every
 `task.agentModelOverrides` entry that would shadow a fleet definition, and
 an `--agents` directory holding no `*.agent.md` definition,
 prints the exact remedy, and **stops the run** before any member is

@@ -21,19 +21,19 @@
 //       the definition's own `model:`, and that config is retired as a lever;
 //   (d) every definition's `:<level>` is one its role's current target
 //       runs at — in that model's `thinking` efforts in omp's own model
-//       catalog (`omp models --json`), EXCEPT for non-routable implementer
-//       definitions. A `fleet-implementer-<cell>` definition is routable if
-//       its cell appears in the router table's `cells` list or `rows` values.
-//       Stage-2 cells like `task-max` exist on disk before entering the router
-//       table, so they are non-routable until added; a non-routable implementer
-//       with an unsupported level is a notice, not a violation. Non-implementer
-//       definitions (reviewers, merge-bot, finisher, recipe-deriver) are
-//       always subject to the level check. omp clamps an unsupported level
+//       catalog (`omp models --json`). omp clamps an unsupported level
 //       silently (`claude-haiku-4-5` has no `max`, so `@smol:max` would run
 //       at something else), tier-check would then read a level the
 //       definition never declared, and every row the definition ran would
-//       be inadmissible. A target the catalog does
-//       not list cannot be checked, so it fails too;
+//       be inadmissible. The one exception is an implementer definition
+//       whose cell the router never selects (not in the router table's
+//       `cells`, in none of its `rows` values, and not the policy cell): a
+//       cell can be defined before the router may pick it, so its mismatch
+//       is a notice. The router table is `router-table.json` beside this
+//       script, or the file `--table <path>` names; one that cannot be read,
+//       or that lacks a `cells` array or a `rows` object of cell names,
+//       refuses. A target the catalog does not list cannot be checked, so it
+//       fails too;
 //   (e) `modelRoles.slow`/`modelRoles.task` resolving to the same model is
 //       flagged as a notice — legal, but every `slow-*` cell then measures
 //       the same model as its `task-*` twin;
@@ -55,6 +55,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
+import { CELL_DEF, POLICY_CELL } from "./ledger-grammar.mjs";
 
 const NAME = "tier-roles";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -129,30 +130,28 @@ export function expectedOmpModel(declaredModel, modelRoles) {
   return { role, level, model: role ? resolveRole(role, modelRoles) : null };
 }
 
-
-// Extracts the cell name from a fleet-implementer-<cell>.agent.md file name.
-// Returns the cell name or null if the file is not an implementer definition.
-export function extractImplementerCell(fileName) {
-  const match = fileName.match(/^fleet-implementer-(.+)\.agent\.md$/);
-  return match ? match[1] : null;
+// A definition file name -> the implementer cell it is (`task-max` for
+// `fleet-implementer-task-max.agent.md`), `null` for any other definition,
+// including one whose name is not a cell.
+export function implementerCell(file) {
+  const name = file.replace(/\.agent\.md$/, "");
+  return CELL_DEF.test(name) ? name.slice("fleet-implementer-".length) : null;
 }
 
-// Checks if a cell is routable according to the router table.
-// A cell is routable if it is in the cells list, in any rows value, or is the policy cell.
-export function isCellRoutable(cell, table) {
-  if (!table || typeof table !== "object") return true;
-  const cells = table.cells ?? [];
-  const rows = table.rows ?? {};
-  
-  // Check if cell is in cells list
-  if (cells.includes(cell)) return true;
-  
-  // Check if cell is in rows values
-  if (Object.values(rows).includes(cell)) return true;
-  
-  // Not routable
-  return false;
+// The cells the router can select from a parsed router table: the pool it
+// explores (`cells`), the cell each stratum's row names (`rows` values) and the
+// policy cell, which every Pull falls back to whatever the table says. An
+// Error saying why when the table lacks a `cells` array of names or a `rows`
+// object of names — a table that cannot be read must refuse, never quietly
+// make every cell non-routable.
+export function routableCells(table) {
+  const bad = (why) => new Error(`router table: ${why}`);
+  if (!isJsonObject(table)) return bad("not a JSON object");
+  if (!Array.isArray(table.cells) || !table.cells.every((c) => typeof c === "string")) return bad("`cells` is not an array of cell names");
+  if (!isJsonObject(table.rows) || !Object.values(table.rows).every((c) => typeof c === "string")) return bad("`rows` is not an object of cell names");
+  return new Set([POLICY_CELL, ...table.cells, ...Object.values(table.rows)]);
 }
+
 // Tolerates a role value written without its provider prefix — omp's
 // `resolvedModelIdentity` is always provider-prefixed, a plain `modelRoles`
 // entry may not be.
@@ -241,8 +240,11 @@ function kindOf(v) {
 // leftover `task.agentModelOverrides`) against what the fleet's own
 // definitions need. `violations` stop a run; `notices` never do —
 // they flag a hazard (two roles' cells measuring one model) that is legal
-// configuration, just probably not what the operator meant.
-export function checkRoutes({ agentsDir, agentsSource = `--agents ${agentsDir}`, modelRoles, overrides, catalog, table }) {
+// configuration, just probably not what the operator meant. `routable` is
+// the set `routableCells` returns: the router never selects an implementer
+// definition outside it, so an unsupported level there is a notice; `null`
+// is no table at all, and then every definition is held to the level check.
+export function checkRoutes({ agentsDir, agentsSource = `--agents ${agentsDir}`, modelRoles, overrides, catalog, routable = null }) {
   const violations = [];
   const notices = [];
   const usedBy = {}; // role -> [{ file, level }, ...]
@@ -307,18 +309,13 @@ export function checkRoutes({ agentsDir, agentsSource = `--agents ${agentsDir}`,
     }
     const efforts = entry.thinking ?? [];
     for (const { file, level } of usedBy[role]) {
-      if (!efforts.includes(level)) {
-        // Check if this is a non-routable implementer definition
-        const implementerCell = extractImplementerCell(file);
-        const isRoutable = implementerCell === null || isCellRoutable(implementerCell, table);
-        
-        if (implementerCell !== null && !isRoutable) {
-          // This is a non-routable implementer definition, report as notice
-          notices.push(`${file}: level ${level} is not one modelRoles.${role}'s target ${model} runs at (thinking: ${efforts.join(", ") || "none"}) — cell ${implementerCell} is not in the router table`);
-        } else {
-          // This is either not an implementer definition, or it is routable, report as violation
-          violations.push(`${file}: level ${level} is not one modelRoles.${role}'s target ${model} runs at (thinking: ${efforts.join(", ") || "none"}) — omp would clamp it silently`);
-        }
+      if (efforts.includes(level)) continue;
+      const mismatch = `${file}: level ${level} is not one modelRoles.${role}'s target ${model} runs at (thinking: ${efforts.join(", ") || "none"})`;
+      const cell = implementerCell(file);
+      if (routable !== null && cell !== null && !routable.has(cell)) {
+        notices.push(`${mismatch} — cell ${cell} is not one the router selects; omp would clamp this level silently once it does`);
+      } else {
+        violations.push(`${mismatch} — omp would clamp it silently`);
       }
     }
   }
@@ -434,15 +431,15 @@ function main() {
   const overrides = loadJsonObject(arg("overrides"), ...config("task.agentModelOverrides"), "overrides");
   const modelRoles = loadJsonObject(arg("model-roles"), ...config("modelRoles"), "model-roles");
   const catalog = loadJsonObject(arg("catalog"), readOmpModelCatalog, "omp models --json", "catalog");
-  const table = arg("table")
-    ? loadJsonObject(arg("table"), () => { throw new Error("table file not provided"); }, "", "table")
-    : (() => {
-        try {
-          return JSON.parse(readFileSync(join(SCRIPT_DIR, "router-table.json"), "utf8"));
-        } catch {
-          return null;
-        }
-      })();
+  const tablePath = arg("table") ?? join(SCRIPT_DIR, "router-table.json");
+  let table;
+  try {
+    table = JSON.parse(readFileSync(tablePath, "utf8"));
+  } catch (e) {
+    die(`cannot read the router table ${tablePath}: ${e.message}`);
+  }
+  const routable = routableCells(table);
+  if (routable instanceof Error) die(`${tablePath}: ${routable.message}`);
 
   const { violations, notices } = checkRoutes({
     agentsDir,
@@ -450,7 +447,7 @@ function main() {
     modelRoles,
     overrides,
     catalog,
-    table,
+    routable,
   });
   const notice = semaphoreNotice({ inFlight: inFlightBound, read: readMaxConcurrency(arg("max-concurrency")) });
   if (notice !== null) notices.push(notice);
