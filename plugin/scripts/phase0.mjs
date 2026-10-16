@@ -33,8 +33,10 @@
 //                 maintainer's.
 //   tier-roles    `tier-roles.mjs --check --in-flight <B>`. <B> is `--in-flight`
 //                 when given, else the two caps added: each the flag as given,
-//                 or the tick's own default for a cap nobody set. A notice
-//                 tier-roles prints on a pass is part of the step's output.
+//                 or, for a cap nobody set, what the tick's retired cap flag
+//                 defaulted to (the fill-in tickCaps in phase0-receipt.mjs
+//                 uses). A notice tier-roles prints on a pass is part of the
+//                 step's output.
 //   metrics       `metrics-refresh.mjs`. A non-zero exit fails the step.
 //   cockpit       `board.mjs serve --open` launched detached, `--spend-dir`
 //                 passed through. Recorded; never fails the run.
@@ -225,9 +227,9 @@ function ruleset({ cwd }) {
   return { status: "unanswered", output: withText(`apply-ruleset.sh --check could not answer (${r.how})`, r) };
 }
 
-// The tick's own defaults for the two caps it is handed (its option table in
-// fleet-tick.mjs): a cap nobody set is what the tick runs with, so it is what
-// the in-flight bound counts.
+// What the tick's retired cap flags defaulted to — the fill-in tickCaps in
+// phase0-receipt.mjs gives a cap the receipt leaves unset when it hands the
+// tick its bound — so a cap nobody set counts here as it counts there.
 const TICK_IMPL_CAP = 2;
 const TICK_REVIEW_CAP = 6;
 
