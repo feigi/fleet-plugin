@@ -328,7 +328,7 @@
      names. Reconcile them before shortlisting: read `proc://` once, find
      each `name` among this session's jobs, and act on its state.
      `running` → keep the token. `completed` or `failed` → record its
-     result from `agent://<id>` as the **Record, then tick** table records
+     result from `agent://<id>` as the wake table of **Rule: record, tick, act, beat** records
      that member's report; an output you cannot read is a death the
      Member-killed row confirms. `cancelled` → record it dead. Absent, or a
      state you cannot read → keep the token live and let the Member-killed

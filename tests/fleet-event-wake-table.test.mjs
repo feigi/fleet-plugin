@@ -14,14 +14,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
+import { EVENT_HEADER } from "./support/fleet-event-header.mjs";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
 const SCRIPT = join(PLUGIN, "scripts", "fleet-event.mjs");
 const SKILL = readFileSync(join(PLUGIN, "skills", "run-team", "SKILL.md"), "utf8");
-const SOURCE = readFileSync(SCRIPT, "utf8");
 
 const squash = (s) => s.replace(/\s+/g, " ").trim();
-const HEADER = squash(SOURCE.split("\n").slice(1).filter((l) => l.startsWith("//")).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
 const SKILL_FLAT = squash(SKILL);
 
 const env = { ...process.env };
@@ -58,7 +57,7 @@ const MOVED = [
   "`ledger.mjs settle <member> --from-report`, which runs `verify-sha.sh` and reads the PR itself.",
   "Dropping `in-progress` is the load-bearing half: phase 1 applied it and `candidates.mjs` excludes it, so leaving it makes the ticket invisible to the controller's scans and the maintainer's. It does not loop; it disappears.",
   "`reap.sh` declines a claim that never became a PR, so the release of a bailed claim is `release-ticket.sh`'s.",
-  "A settle that refuses on `ready-to-merge` — missing from the PR or from the read-back — is the case the tick's `DISPATCH finisher PR#<M>` catches next.",
+  "A settle that refuses on `ready-to-merge` — missing from the PR or from the read-back — is the case the tick's `DISPATCH finisher PR#<M>` catches next: settle it `ledger.mjs settle finisher-pr-<M>=labelled` as reported, and `ledger.mjs filed <N> \"<subject>\"` for each `unrecorded` entry.",
   "The verdict moves no label and leaves nothing in the repo, so the row is the only place the tick can read a `held-behind` from.",
   "The reap and the reclaim run once for every merge bot settled `done`, always, even when the pass merged nothing, and again on the next tick after an `APPLY FAILED` line, and on every tick while this run has no controller record to remember the pass by.",
   "The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in the same pass, before reporting: a token the bot wrote in that pass, never one `reap.sh` writes.",
@@ -71,7 +70,7 @@ const MOVED = [
 
 for (const sentence of MOVED) {
   test(`moved text is in fleet-event.mjs's header and out of the skill: ${sentence.slice(0, 60)}…`, () => {
-    assert.ok(HEADER.includes(squash(sentence)), "in the header comment");
+    assert.ok(EVENT_HEADER.includes(squash(sentence)), "in the header comment");
     assert.ok(!SKILL_FLAT.includes(squash(sentence)), "not in SKILL.md");
   });
 }

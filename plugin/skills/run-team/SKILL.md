@@ -1407,7 +1407,7 @@ owes beyond its call:
   firing until the open PRs merge. The drain starts the end of the run; it does
   not end it. **End of run**, in this order:
   1. `~/.fleet/bin/fleet-run fleet-event.mjs drain --reason "<reason>"` — runs
-     `closeout.mjs begin` (**Release the claims that never became
+     `closeout.mjs begin --reason "<reason>"` (**Release the claims that never became
      PRs**), then the tick. A claim it refuses prints `NEED hand-release #<N> <blocker>`: that
      refusal is the finding, so run `worktree-audit.sh` and decide by hand.
      `begin` selects a claim with no PR and a live or `bailed` implementer token
@@ -1493,7 +1493,7 @@ owes beyond its call:
   repo has no CI configured and no declaration, and stop. Absence never reads as
   pass. See `review-and-fix.md` step 6.
 
-**The rule above in one line: every wake is one `fleet-event.mjs` call, which ends in the tick.** One tick invocation, and you act on what it prints:
+**In one line, every wake is one `fleet-event.mjs` call, which ends in the tick.** One tick invocation, and you act on what it prints:
 
 ```
 ~/.fleet/bin/fleet-run fleet-tick.mjs --apply [--implementer-cap <n>] [--reviewer-cap <n>] [--max-reviews <n>]

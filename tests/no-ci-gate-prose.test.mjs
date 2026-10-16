@@ -69,7 +69,7 @@ function paragraphSaying(text, anchor, label) {
 const SITES = [
   [
     "run-team Phase 3 no-ci edge",
-    () => flat(RUN_TEAM.bullet('- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**Every wake ends in the tick.**", "run-team no-ci edge").text),
+    () => flat(RUN_TEAM.bullet('- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**In one line, every wake is one `fleet-event.mjs` call, which ends in the tick.**", "run-team no-ci edge").text),
     /label off the reviewer's (own )?verified suite run/i,
     /without it, do not label/i,
   ],

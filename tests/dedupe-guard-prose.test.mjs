@@ -31,6 +31,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 import { memberPrompt } from "./support/render-brief.mjs";
+import { EVENT_HEADER } from "./support/fleet-event-header.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
@@ -221,15 +222,12 @@ test("the controller records every filing a filer reported unrecorded", () => {
   // The fallback is only a fallback if someone acts on it: an `unrecorded`
   // entry nobody turns into a `filed` row leaves the arm exactly as blind as
   // before, one filing at a time. The entry is in the member's report file,
-  // and `settle --from-report` records it; a finisher settled by hand past an
-  // exit 3 has its entries recorded by hand.
-  const table = RUN_TEAM.paragraph("| Wake | Record, then tick |", "record-before-tick table", "Then run the tick, act on every line it prints,").text;
-  for (const wake of ["Fix-applier report", "Finisher report", "Finisher report (halted)"]) {
-    const row = table.split("\n").find((r) => r.startsWith(`| ${wake} |`)) ?? "";
-    assert.match(row, /`ledger\.mjs settle [a-z-]+<M> --from-report`, which records each `unrecorded` filing/, `the "${wake}" wake no longer records unrecorded filings`);
-  }
-  const finisher = table.split("\n").find((r) => r.startsWith("| Finisher report |")) ?? "";
-  assert.match(finisher, /settle it `ledger\.mjs settle finisher-pr-<M>=labelled` as reported, and `ledger\.mjs filed <N> "<subject>"` for each `unrecorded` entry/,
+  // and `settle --from-report` records it, which `fleet-event.mjs`'s fix-report
+  // and finisher-report kinds run; a finisher settled by hand past an exit 3
+  // has its entries recorded by hand, which the script's header says.
+  assert.match(EVENT_HEADER, Pin.phrase("fix-report <fix-pr-M[-x]> `settle --from-report`, which records the filings and rulings the report carries."));
+  assert.match(EVENT_HEADER, Pin.phrase("finisher-report <finisher-pr-M[-x]> `settle --from-report`."));
+  assert.match(EVENT_HEADER, Pin.phrase("settle it `ledger.mjs settle finisher-pr-<M>=labelled` as reported, and `ledger.mjs filed <N> \"<subject>\"` for each `unrecorded` entry"),
     "the finisher settled by hand past its exit 3 no longer has its unrecorded filings recorded");
   assert.match(runLedger(), /reports `unrecorded: #N <subject>` instead — an `unrecorded` entry of\s+its report file — and `settle <member> --from-report` runs `filed` for it/,
     "the Run ledger section no longer hands unrecorded filings to the settle");

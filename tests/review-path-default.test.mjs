@@ -296,7 +296,7 @@ test("the Phase 3 finisher edges gate on a ruling the controller still owes", ()
   // One list item, not anchor to anchor: on the fixed end anchor alone, the
   // clause gutted here and restated in an inserted sibling bullet stayed green
   // (#491, measured). `bullet` clamps the slice at that sibling.
-  const noCiEdge = flat(RUN_TEAM.bullet('- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**Every wake ends in the tick.**", "run-team no-ci edge").text);
+  const noCiEdge = flat(RUN_TEAM.bullet('- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**In one line, every wake is one `fleet-event.mjs` call, which ends in the tick.**", "run-team no-ci edge").text);
   assert.match(
     noCiEdge,
     /never while you still owe it a ruling/i,

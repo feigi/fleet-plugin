@@ -56,7 +56,7 @@
 //       whether or not its settle was accepted, since the settle refuses
 //       exactly that read-back. Either comment is skipped when the PR already
 //       carries it.
-//       A settle that refuses on `ready-to-merge` — missing from the PR or from the read-back — is the case the tick's `DISPATCH finisher PR#<M>` catches next.
+//       A settle that refuses on `ready-to-merge` — missing from the PR or from the read-back — is the case the tick's `DISPATCH finisher PR#<M>` catches next: settle it `ledger.mjs settle finisher-pr-<M>=labelled` as reported, and `ledger.mjs filed <N> "<subject>"` for each `unrecorded` entry.
 //   merge-bot-report <merge-bot-n>
 //       `ledger.mjs token <pr> held-behind:#<behind>` for each `held[]` entry
 //       of the report the PR's rows do not already carry, then `settle
