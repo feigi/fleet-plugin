@@ -100,7 +100,7 @@ controller above them. Full design rationale:
 the loop's current shape, drawn below, is the slot-based design in
 [`docs/specs/2026-09-24-slot-based-fleet-loop-design.md`](docs/specs/2026-09-24-slot-based-fleet-loop-design.md)
 (ADR 0012/0013), its slot gate replaced by the In-flight bound
-([ADR 0031](docs/adr/0031-in-flight-bound-replaces-the-implementer-and-reviewer-caps.md)).
+([ADR 0031](docs/adr/)).
 
 Every box below is documented on its own page under
 [`docs/components/`](docs/components/README.md). Solid arrows are work
