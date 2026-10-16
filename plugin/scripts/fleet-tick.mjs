@@ -1288,6 +1288,19 @@ export function noTranscriptLines({ live, seen, stems, session, after, now }) {
   return out;
 }
 
+// The age-based checks this tick would run: CHECK-LIVENESS on
+// a live name of a known family, NO-TRANSCRIPT on a live member token with no
+// transcript among `stems` (null when the session was not listed). main()
+// names them on stderr when the state file is degraded: its `seen` stamps
+// cannot be read, so every token reads as first seen now and neither fires.
+export function ageChecks({ live, stems }) {
+  const has = new Set(stems);
+  return [
+    ...(live.some((name) => livenessFamily(name) !== null) ? ["CHECK-LIVENESS"] : []),
+    ...(stems !== null && live.some((name) => parseMember(name) !== null && !has.has(name)) ? ["NO-TRANSCRIPT"] : []),
+  ];
+}
+
 // --apply's pure half. The merge-bot numbers `applied.reapAfter` names for
 // THIS run: none when its `run` is not the controller record's `at`, since
 // merge-bot numbering restarts with a run and the state file outlives it
@@ -2087,6 +2100,8 @@ function main() {
   // registry census. It is not a row — it resets no `quiet`, moves no count
   // and frees no slot — and nothing here settles, kills or writes the ledger.
   const seen = stampSeen({ live: run.live, prev: prev.seen, controller: prev.controller, now });
+  const ageless = prev.degraded ? ageChecks({ live: run.live, stems }) : [];
+  if (ageless.length) console.error(`${NAME}: ${ageless.join(" and ")} not checked — ${path} ${prev.degraded}, so first-seen ages are unavailable`);
   const stale = livenessLines({ live: run.live, seen, thresholds: liveness, now });
   // Advisory the same way: a report on disk prints the settle it is for, and
   // nothing here runs it.

@@ -1304,7 +1304,14 @@ depth** guard table applied in code. Act on each line as it reads:
   `task` call, or settle the token `killed`. Advice the same way, folded as
   `…; NO-TRANSCRIPT <member> persists — …`. Both lines read the session
   directory this run's phase-0 receipt names, else `--session <dir>`; with
-  neither the tick skips them with one stderr line.
+  neither the tick skips them with one stderr line. A heartbeat state file
+  that exists but cannot be used — unreadable, not JSON, not a JSON object,
+  or holding a `controller` that cannot be judged — holds no first-seen
+  ages, and the tick never rewrites it, so every live token reads as first
+  seen that tick and neither `CHECK-LIVENESS` nor `NO-TRANSCRIPT` can fire.
+  The tick says so with one stderr line, `fleet-tick: CHECK-LIVENESS and
+  NO-TRANSCRIPT not checked — <file> <cause>, so first-seen ages are
+  unavailable`, naming only the checks that would have run that tick.
 
 **Tier guards under Pull.** The per-dispatch `tier-check.mjs --batch` is
 phase 2's own step, run by `tick --apply`: a mismatch it finds is the
