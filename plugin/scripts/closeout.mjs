@@ -22,8 +22,8 @@
 //
 // `finish` steps, in order, because the order is the point:
 //
-//   tick            `fleet-tick.mjs`, with the In-flight bound the caps
-//                   `.fleet/phase0.json` records add up to, when it names them.
+//   tick            `fleet-tick.mjs`, with the In-flight bound
+//                   `.fleet/phase0.json` records, when it records one.
 //                   Failed unless its last line is `ACTION: run over`.
 //   scrape          `member-outcomes.mjs <dir>` for every session directory
 //                   omp keeps for this cwd, each scraper's own yield line as the
@@ -50,7 +50,7 @@
 //                   so a run that ended here leaves no phase-0 receipt for the
 //                   next run in this session to resume, and that run's rotation
 //                   files it as `phase0.<UTC stamp>.json` beside the ledger
-//                   archive. After the tick, which reads the caps from it, and
+//                   archive. After the tick, which reads the bound from it, and
 //                   before the stop. No `phase0.json` is nothing to move and is
 //                   `ok`; a held receipt already there that is not this one is
 //                   a failed step.

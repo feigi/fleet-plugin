@@ -2,7 +2,7 @@
 // Phase 0 as one command: the run's start sequence, in order, with a receipt.
 //
 //   phase0.mjs --session <dir> [--implementer-cap n] [--reviewer-cap n]
-//              [--plugin-checkout <dir>] [--spend-dir <dir>]
+//              [--in-flight n] [--plugin-checkout <dir>] [--spend-dir <dir>]
 //              [--workflow <name> | --declare-no-ci]
 //
 // Reached through the Resolver and run from the MAIN checkout (a linked
@@ -31,7 +31,11 @@
 //                 output), exit 2 or anything else `unanswered`; neither stops
 //                 the run — reconciling is a write to the gate and the
 //                 maintainer's.
-//   tier-roles    `tier-roles.mjs --check`.
+//   tier-roles    `tier-roles.mjs --check --in-flight <B>`. <B> is `--in-flight`
+//                 when given, else the In-flight bound's default
+//                 (IN_FLIGHT_DEFAULT in phase0-receipt.mjs); the caps play no
+//                 part in it. A notice tier-roles prints on a pass is part of
+//                 the step's output.
 //   metrics       `metrics-refresh.mjs`. A non-zero exit fails the step.
 //   cockpit       `board.mjs serve --open` launched detached, `--spend-dir`
 //                 passed through. Recorded; never fails the run.
@@ -55,7 +59,7 @@
 // THE RECEIPT is `.fleet/phase0.json` (resolved through fleet-dir.mjs, so a
 // worktree and the main checkout name one file):
 //
-//   { run, session, scratch, caps: {impl, review},
+//   { run, session, scratch, caps: {impl, review}, inFlight,
 //     steps: { <name>: { status, at, output } } }
 //
 // `status` is ok, pending, failed, drift or unanswered; `at` an ISO time;
@@ -66,7 +70,8 @@
 // run. `session` is `--session`, the one place the controller states its
 // session directory. `scratch` is what `scratch-root.mjs` prints. `caps` are
 // the flags as given, null for one not given: the tick's own defaults apply to
-// a cap nobody set, and a number here would pretend somebody had.
+// a cap nobody set, and a number here would pretend somebody had. `inFlight`
+// is the In-flight bound this run used — `--in-flight`, or its default.
 //
 // RESUMABLE. A re-run reads the receipt. It continues it — skipping every `ok`
 // step and re-running the rest — only when its `run` equals the `at` the
@@ -124,6 +129,7 @@ import { readState, stateFileIn } from "./fleet-state.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
+import { IN_FLIGHT_DEFAULT } from "./phase0-receipt.mjs";
 
 const NAME = "phase0";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -222,10 +228,10 @@ function ruleset({ cwd }) {
   return { status: "unanswered", output: withText(`apply-ruleset.sh --check could not answer (${r.how})`, r) };
 }
 
-function tierRoles({ cwd }) {
-  const r = node("tier-roles.mjs", ["--check"], { cwd });
+function tierRoles({ cwd, receipt }) {
+  const r = node("tier-roles.mjs", ["--check", "--in-flight", String(receipt.inFlight)], { cwd });
   if (r.status !== 0) return refusal("tier-roles.mjs --check failed:", r);
-  return ok("every tier route resolves");
+  return ok(withText(`every tier route resolves (in-flight bound ${receipt.inFlight})`, r));
 }
 
 function metrics({ cwd }) {
@@ -430,7 +436,7 @@ function main() {
   const die = makeDie(NAME);
   const F = defineFlags(die, {
     flags: {
-      session: "value", "implementer-cap": "value", "reviewer-cap": "value", "plugin-checkout": "value",
+      session: "value", "implementer-cap": "value", "reviewer-cap": "value", "in-flight": "value", "plugin-checkout": "value",
       "spend-dir": "value", workflow: "value", "declare-no-ci": "bool",
     },
   });
@@ -451,6 +457,7 @@ function main() {
     return n;
   };
   const caps = { impl: positive("implementer-cap"), review: positive("reviewer-cap") };
+  const inFlight = positive("in-flight") ?? IN_FLIGHT_DEFAULT;
   if (F.has("declare-no-ci") && !absent("workflow")) die("--workflow and --declare-no-ci are alternatives, not a pair");
   const ci = F.has("declare-no-ci") ? "CI: declared absent (--declare-no-ci)" : absent("workflow") ? null : `CI: workflow ${F.arg("workflow")} (--workflow)`;
   const pathOf = (name) => (absent(name) ? null : resolve(F.arg(name)));
@@ -514,7 +521,7 @@ function main() {
     renameSync(receiptPath, held);
   }
 
-  const receipt = { run: resumed ? previous.run : null, session, scratch, caps, steps: {} };
+  const receipt = { run: resumed ? previous.run : null, session, scratch, caps, inFlight, steps: {} };
   for (const name of STEP_NAMES) {
     const was = resumed ? previous.steps[name] : undefined;
     receipt.steps[name] = was?.status === "ok" ? was : { status: "pending", at: now, output: "not run" };

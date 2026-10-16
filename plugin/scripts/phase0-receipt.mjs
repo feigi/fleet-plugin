@@ -2,8 +2,8 @@
 // after every step (its header gives the shape); this module is its readers'
 // half: the tick's dispatch gate, the session directory tier-check.mjs
 // and ticket-router.mjs take when their own flag is omitted, and the In-flight
-// bound the drivers hand the tick. One reading of the file, so the gate and
-// the session readers cannot disagree about what a receipt is.
+// bound the drivers hand the tick, with its default. One reading of the file,
+// so the gate and the session readers cannot disagree about what a receipt is.
 //
 // Zero deps: node builtins and sibling modules only.
 
@@ -145,18 +145,17 @@ export function sessionFromReceipt(opts) {
   throw new Error(`no session given and none in the phase-0 receipt ${path} (${why}) — give one, or run ${phase0Command(null)} first`);
 }
 
-// What the tick's two retired cap flags defaulted to, which is what a cap the
-// receipt leaves unset counts as in the bound its caps add up to.
-const RETIRED_IMPL_CAP = 2;
-const RETIRED_REVIEW_CAP = 6;
+// The In-flight bound a run takes when nobody gives one: the most tickets
+// between Claim and merge at once. Its one definition — phase0.mjs and the
+// tick's own flag default both read it from here.
+export const IN_FLIGHT_DEFAULT = 5;
 
 /**
  * The bound the receipt in `fleetDir` records, as the tick's own flag:
- * `{ args }`, none when there is no receipt or it names no cap, or `{ error }`
- * for a receipt that is there and cannot be read. The tick takes one
- * In-flight bound, `--in-flight <B>`; a receipt that recorded the two caps
- * phase 0 was given maps to their sum, an unset one at what its flag
- * defaulted to.
+ * `{ args }` — `--in-flight <B>` for the `inFlight` phase 0 ran with, none
+ * when there is no receipt or it records no bound — or `{ error }` for a
+ * receipt that is there and cannot be read. The caps the receipt records
+ * play no part: the bound counts tickets, not members.
  */
 export function tickCaps(fleetDir) {
   let phase0;
@@ -166,7 +165,6 @@ export function tickCaps(fleetDir) {
     if (e.code === "ENOENT") return { args: [] };
     return { error: `cannot read ${join(fleetDir, RECEIPT)}: ${e.message}` };
   }
-  const { impl, review } = phase0?.caps ?? {};
-  if (impl == null && review == null) return { args: [] };
-  return { args: ["--in-flight", String((impl ?? RETIRED_IMPL_CAP) + (review ?? RETIRED_REVIEW_CAP))] };
+  const bound = phase0?.inFlight;
+  return { args: bound == null ? [] : ["--in-flight", String(bound)] };
 }

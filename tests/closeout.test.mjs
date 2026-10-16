@@ -354,21 +354,16 @@ test("finish: runs the steps in order, one status line each, heartbeat --stop la
   assert.equal(git(f.repo, "branch", "--show-current"), "main", "the checkout is back on main");
 });
 
-test("finish: the tick runs with the In-flight bound phase0.json's caps add up to, and with none when there is no phase0.json or it names none", () => {
+test("finish: the tick runs with the In-flight bound phase0.json records, and with none when there is no phase0.json or it records none — the caps play no part", () => {
   const f = fixture();
-  writeFileSync(join(f.fleet, "phase0.json"), JSON.stringify({ caps: { impl: 3, review: 5 } }));
+  writeFileSync(join(f.fleet, "phase0.json"), JSON.stringify({ caps: { impl: 3, review: 5 }, inFlight: 4 }));
   assert.equal(f.run("finish", ["--reason", "wrap up"]).status, 0);
-  assert.deepEqual(f.calls("fleet-tick")[0].args, ["--in-flight", "8"]);
-
-  const g = fixture();
-  writeFileSync(join(g.fleet, "phase0.json"), JSON.stringify({ caps: { impl: null, review: 2 } }));
-  assert.equal(g.run("finish", ["--reason", "wrap up"]).status, 0);
-  assert.deepEqual(g.calls("fleet-tick")[0].args, ["--in-flight", "4"], "a cap nobody set counts at its old default");
+  assert.deepEqual(f.calls("fleet-tick")[0].args, ["--in-flight", "4"]);
 
   const k = fixture();
-  writeFileSync(join(k.fleet, "phase0.json"), JSON.stringify({ caps: { impl: null, review: null } }));
+  writeFileSync(join(k.fleet, "phase0.json"), JSON.stringify({ caps: { impl: 3, review: 5 } }));
   assert.equal(k.run("finish", ["--reason", "wrap up"]).status, 0);
-  assert.deepEqual(k.calls("fleet-tick")[0].args, [], "no cap named, no bound passed");
+  assert.deepEqual(k.calls("fleet-tick")[0].args, [], "caps recorded without a bound pass no bound");
 
   const h = fixture();
   assert.equal(h.run("finish", ["--reason", "wrap up"]).status, 0);
@@ -624,7 +619,7 @@ test("finish: a re-run after commit-and-pr succeeded does not open a second PR, 
 
 // ── the phase-0 receipt is set aside ─────────────────────────────────────────
 
-const PHASE0 = '{"run": 1700000000000, "session": "/s", "caps": {"impl": 3, "review": null}}\n';
+const PHASE0 = '{"run": 1700000000000, "session": "/s", "caps": {"impl": 3, "review": null}, "inFlight": 6}\n';
 // Where phase0.mjs holds a previous run's receipt until the next rotation files it.
 const HELD = "phase0.previous.json";
 // Every phase-0 file beside the ledger but the live receipt.
@@ -638,7 +633,7 @@ test("finish: moves phase0.json to the name phase0.mjs holds a previous run's re
   assert.equal(existsSync(join(f.fleet, "phase0.json")), false, "no receipt is left for the next run to resume");
   assert.deepEqual(aside(f), [HELD]);
   assert.equal(readFileSync(join(f.fleet, HELD), "utf8"), PHASE0, "kept byte for byte");
-  assert.deepEqual(f.calls("fleet-tick")[0].args, ["--in-flight", "9"], "the tick still read the caps from it");
+  assert.deepEqual(f.calls("fleet-tick")[0].args, ["--in-flight", "6"], "the tick still read the bound from it");
   assert.deepEqual(stepLines(r.out), FINISH_STEPS.map((n) => `closeout: ${n}: ok`));
 
   // The move is before --stop: a stop that fails finds the receipt already moved.

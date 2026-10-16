@@ -176,8 +176,8 @@ const finisherReport = (member, over = {}) => ({
 const mergeBotReport = (member, held) => ({ member, merged: [], held, conflictHold: [], refused: [], branchKept: [] });
 
 // A main checkout with a fixture ledger, a phase-0 receipt naming the scratch
-// root and caps 3 and 5, and the gh stub on PATH.
-function fixture({ rows = [], dispatched = [], retired = [], caps = { impl: 3, review: 5 } } = {}) {
+// root, caps 3 and 5 and In-flight bound 7, and the gh stub on PATH.
+function fixture({ rows = [], dispatched = [], retired = [], caps = { impl: 3, review: 5 }, inFlight = 7 } = {}) {
   const dir = realpathSync(tempDir("fleet-event-"));
   const repo = join(dir, "repo");
   const stubs = join(dir, "stubs");
@@ -192,7 +192,7 @@ function fixture({ rows = [], dispatched = [], retired = [], caps = { impl: 3, r
   const fleet = join(repo, ".fleet");
   mkdirSync(join(fleet, "briefs"), { recursive: true });
   writeFileSync(join(fleet, "ledger.md"), ledgerText({ rows, dispatched, retired }));
-  writeFileSync(join(fleet, "phase0.json"), JSON.stringify({ run: null, session: "", steps: {}, scratch, ...(caps === null ? {} : { caps }) }));
+  writeFileSync(join(fleet, "phase0.json"), JSON.stringify({ run: null, session: "", steps: {}, scratch, ...(caps === null ? {} : { caps }), ...(inFlight === null ? {} : { inFlight }) }));
   const f = {
     dir, repo, stubs, scratch, fleet,
     control: (name, value) => writeFileSync(join(stubs, `${name}.json`), JSON.stringify(value)),
@@ -222,14 +222,14 @@ function fixture({ rows = [], dispatched = [], retired = [], caps = { impl: 3, r
   return f;
 }
 
-const TICK = "fleet-tick --apply --in-flight 8";
+const TICK = "fleet-tick --apply --in-flight 7";
 // The calls that write: everything but a ledger read, a gh view and the tick.
 const writes = (order) => order.filter((l) => !/^gh \w+ view /.test(l) && !l.startsWith("fleet-tick "));
 const eventLine = (r) => r.out.find((l) => l.startsWith("event: "));
 
 // ── impl-report ──────────────────────────────────────────────────────────────
 
-test("impl-report settles from the report under the receipt's scratch, then ticks with --apply and the receipt's caps; a second run only ticks", () => {
+test("impl-report settles from the report under the receipt's scratch, then ticks with --apply and the receipt's bound; a second run only ticks", () => {
   const f = fixture({ rows: ["#412 impl-412"] });
   f.control("settle", { "impl-412": { outcome: "PR#88" } });
   const first = f.run(["impl-report", "impl-412"]);
@@ -406,16 +406,14 @@ test("a settle's own stderr on success is passed through", () => {
 
 // ── In-flight bound ──────────────────────────────────────────────────────────
 
-test("the bound is --in-flight as given, else the receipt's two caps added (an unset one at its old default), else none: the tick's own default", () => {
+test("the bound is --in-flight as given, else the one the receipt records, else none: the tick's own default; the receipt's caps play no part", () => {
   const f = fixture({ rows: ["#412 impl-412=PR#88"] });
   assert.deepEqual(f.run(["impl-report", "impl-412", "--in-flight", "9"]).order, ["fleet-tick --apply --in-flight 9"]);
   assert.deepEqual(f.run(["impl-report", "--in-flight", "1", "impl-412"]).order, ["fleet-tick --apply --in-flight 1"]);
-  assert.deepEqual(f.run(["impl-report", "impl-412"]).order, ["fleet-tick --apply --in-flight 8"]);
-  const review = fixture({ rows: ["#412 impl-412=PR#88"], caps: { impl: null, review: 2 } });
-  assert.deepEqual(review.run(["impl-report", "impl-412"]).order, ["fleet-tick --apply --in-flight 4"]);
-  const impl = fixture({ rows: ["#412 impl-412=PR#88"], caps: { impl: 3, review: null } });
-  assert.deepEqual(impl.run(["impl-report", "impl-412"]).order, ["fleet-tick --apply --in-flight 9"]);
-  const bare = fixture({ rows: ["#412 impl-412=PR#88"], caps: null });
+  assert.deepEqual(f.run(["impl-report", "impl-412"]).order, ["fleet-tick --apply --in-flight 7"]);
+  const capsOnly = fixture({ rows: ["#412 impl-412=PR#88"], inFlight: null });
+  assert.deepEqual(capsOnly.run(["impl-report", "impl-412"]).order, ["fleet-tick --apply"], "caps recorded without a bound pass no bound");
+  const bare = fixture({ rows: ["#412 impl-412=PR#88"], caps: null, inFlight: null });
   assert.deepEqual(bare.run(["impl-report", "impl-412"]).order, ["fleet-tick --apply"]);
   const bad = f.run(["impl-report", "impl-412", "--in-flight", "0"]);
   assert.equal(bad.status, 2);
@@ -654,7 +652,7 @@ for (const [why, receiptIsLink] of [["the receipt names the symlink and the path
     const file = reviewFile(f);
     const link = join(f.dir, "scratch-link");
     symlinkSync(f.scratch, link);
-    if (receiptIsLink) writeFileSync(join(f.fleet, "phase0.json"), JSON.stringify({ run: null, session: "", steps: {}, scratch: link, caps: { impl: 3, review: 5 } }));
+    if (receiptIsLink) writeFileSync(join(f.fleet, "phase0.json"), JSON.stringify({ run: null, session: "", steps: {}, scratch: link, caps: { impl: 3, review: 5 }, inFlight: 7 }));
     const path = receiptIsLink ? file : join(link, "pr88", RUN, "review.json");
     const r = f.run(["review-result", "88", path]);
     assert.equal(r.status, 0, r.err + r.stdout);
