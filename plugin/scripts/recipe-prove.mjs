@@ -377,7 +377,8 @@ function writeCache(cache, recipe, repo) {
   for (const field of ["install", "test", "uncovered"]) {
     const r = spawnSync("sh", [READER, repo, field, ...(field === "test" ? ["--at", recipe.derivedAt] : [])], { env: ENV, encoding: "utf8" });
     const expected = field === "uncovered" ? JSON.stringify(recipe.uncovered) : recipe[field];
-    if (r.status === 0 && r.stdout.replace(/\n$/, "") === expected) continue;
+    const got = r.status === 0 ? r.stdout.replace(/\n$/, "") : null;
+    if (got === expected) continue;
     if (prior === null) unlinkSync(cache);
     else writeFileSync(cache, prior);
     if (r.error && !r.pid) throw cannot(`could not start sh to read the Recipe cache back: ${r.error.message}`);
@@ -398,8 +399,8 @@ function writeCache(cache, recipe, repo) {
       const stderrNote = probe.err ? `: ${probe.err}` : " and wrote nothing to stderr";
       throw noVerdict(`git started but does not run: \`git --version\` ${exit}${stderrNote}`);
     }
-    if (r.status === 0) {
-      throw notProven(`the Recipe cache reader reads \`${field}\` back as ${JSON.stringify(r.stdout.replace(/\n$/, ""))}, not the ${JSON.stringify(expected)} written`);
+    if (got !== null) {
+      throw notProven(`the Recipe cache reader reads \`${field}\` back as ${JSON.stringify(got)}, not the ${JSON.stringify(expected)} written`);
     }
     const said = r.stderr.trim() || r.stdout.trim();
     throw notProven(`the Recipe cache reader refuses what was proven: ${said || `it wrote nothing and exited with status ${r.status}`}`);
