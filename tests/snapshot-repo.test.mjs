@@ -1097,7 +1097,7 @@ test("a status that reads cleanly never reports a failed read, and a failed one 
     /the snapshot's status could not be read \(SNAPSHOT_STATUS_FAILED\), so what it left untracked is not known\./,
     "the payload's testEnvironment does not say the status could not be read",
   );
-  assert.doesNotMatch(environmentNote({ repoVerified: true }), /could not be read/, "a snapshot whose status read fine is reported as unreadable");
+  assert.doesNotMatch(environmentNote({ repoVerified: true, uncovered: "[]" }), /could not be read/, "a snapshot whose status read fine is reported as unreadable");
 });
 
 // A PR that breaks its own install is the PR's defect: the block reports the

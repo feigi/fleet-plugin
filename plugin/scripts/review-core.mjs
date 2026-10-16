@@ -122,6 +122,12 @@ export const SNAPSHOT_SCHEMA = {
     prHead: { type: "string" },
     testCmd: { type: "string" },
     testCmdError: { type: "string" },
+    // The Recipe's `uncovered` as derive-testcmd.sh printed it: the CI test
+    // steps the Test entrypoint leaves out, one line of JSON, `[]` for none.
+    // `uncoveredError` carries the reader's refusal instead when it could not
+    // be read, so an unread list never reads as an empty one.
+    uncovered: { type: "string" },
+    uncoveredError: { type: "string" },
     // The Recipe's Install step as the snapshot agent read it, and its exit
     // status in the snapshot. Optional, so an absent `installExit` is read
     // as an install that did not succeed, never as one that did:
@@ -499,7 +505,34 @@ export function environmentNote(snap) {
     note += `\nAfter the Install step the snapshot's status could not be read (${snap.statusError.trim()}), so what it left untracked is not known.`;
   if (shown.length)
     note += `\nAfter the Install step the snapshot reads untracked under the repository's own ignore rules: ${shown.join(", ")}${more > 0 ? `, and ${more} more (the whole status is in ${snap.runRoot ?? "the run root"}/status.txt)` : ""}.`;
+  note += uncoveredNote(snap);
   return note;
+}
+
+// The CI test steps the Recipe's Test entrypoint leaves out, as the snapshot
+// agent read them through the cache's one reader, ride on the end as one line
+// naming each step and why: a green run here says nothing about them, and no
+// specialist runs them. An empty list adds nothing. A list the agent could
+// not read, or reported in another shape, is said so — never left to read as
+// an empty one.
+const oneLine = (s) => s.replace(/\s+/g, " ").trim();
+function uncoveredNote(snap) {
+  let list = null;
+  if (snap && typeof snap.uncovered === "string") {
+    try {
+      list = JSON.parse(snap.uncovered);
+    } catch {
+      list = null;
+    }
+  }
+  if (Array.isArray(list) && list.every((u) => u && typeof u.step === "string" && typeof u.reason === "string")) {
+    if (!list.length) return "";
+    return `\nThe Recipe's Test entrypoint does not run these merge-gating CI test steps, and nothing in this review ran them: ${list.map((u) => `${oneLine(u.step)} (${oneLine(u.reason)})`).join("; ")}.`;
+  }
+  const why =
+    (snap && typeof snap.uncoveredError === "string" && snap.uncoveredError.trim() && oneLine(snap.uncoveredError)) ||
+    (snap && typeof snap.uncovered === "string" ? `it reported ${JSON.stringify(oneLine(snap.uncovered))}, not a list of steps` : "the snapshot agent reported nothing for it");
+  return `\nWhich merge-gating CI test steps the Recipe's Test entrypoint leaves out could not be read (${why}), so a passing run here is not known to cover them.`;
 }
 
 function repoNote(snap) {
@@ -1085,6 +1118,15 @@ guess a command yourself: a refusal about the cache names the step that
 derives it; an exit-3 refusal names an environment fault, and the caller fixes
 that instead of deriving.
 
+Then read, out of the same cache, the merge-gating CI test steps that Test
+entrypoint leaves out:
+
+    ~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} uncovered
+
+Report \`uncovered\` = its stdout, one line of JSON copied verbatim, ONLY if it
+exited 0. If it exited non-zero, report \`uncoveredError\` = its stderr and omit
+\`uncovered\`. Run none of the steps it lists.
+
 Then size the diff:
 
     ~/.fleet/bin/fleet-run diff-stats.mjs --pr ${pr}
@@ -1100,7 +1142,8 @@ specialists into another run's tree. Report the HEAD sha, and — in
 STDOUT, copied verbatim. Only runRoot, path, head, pathVerified and repoVerified
 are ever required — diffStats, diffPath, diffLines, refHead and prHead are each
 omitted independently when their command failed, repoError only accompanies
-a false repoVerified, and installError only replaces installCmd and installExit.`,
+a false repoVerified, installError only replaces installCmd and installExit,
+and uncoveredError only replaces uncovered.`,
     { label: `snapshot${forPr}`, phase: "Snapshot", agentType: SNAPSHOT_AGENT_TYPE, schema: SNAPSHOT_SCHEMA },
   );
 

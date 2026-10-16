@@ -111,9 +111,13 @@ function withoutTests(files) {
 
 const cachePath = (dir) => join(dir, ".fleet", "recipe.json");
 
-function prove(dir, args, { env = {}, cwd = dir } = {}) {
+// Every proof states what its Test entrypoint leaves out of CI; a case that is
+// not about `--uncovered` passes `[]`, and one that is passes its own — or
+// `bare`, to pass none at all.
+function prove(dir, args, { env = {}, cwd = dir, bare = false } = {}) {
   const tmp = tempDir("recipe-prove-tmp-");
-  const r = spawnSync(process.execPath, [SCRIPT, dir, ...args], {
+  const full = bare || args.includes("--uncovered") ? args : [...args, "--uncovered", "[]"];
+  const r = spawnSync(process.execPath, [SCRIPT, dir, ...full], {
     encoding: "utf8",
     cwd,
     env: { ...FIXTURE_ENV, PATH: `${BIN}:${process.env.PATH}`, TMPDIR: tmp, ...env },
@@ -149,8 +153,63 @@ test("a Maven-shaped repo gets a proven cache: the count proof, derivedAt, insta
     derivedAt: head,
     installClean: true,
     testCount: 1,
+    uncovered: [],
   });
-  assert.deepEqual([read(dir, "install").out, read(dir, "test").out], ["mvn -q dependency:go-offline", "mvn -q test"]);
+  assert.deepEqual([read(dir, "install").out, read(dir, "test").out, read(dir, "uncovered").out], ["mvn -q dependency:go-offline", "mvn -q test", "[]"]);
+});
+
+// The steps CI gates merges on that the Test entrypoint leaves out are written
+// as given — reasons carrying a `#` word, a trailing `;` and a multi-byte
+// character included, all refused in a command — and read back as the same
+// compact JSON, whatever whitespace the flag's value carried.
+const UNCOVERED = [
+  { step: "integration-docker", reason: "needs a Docker daemon this host lacks — # no comment;" },
+  { step: "test:hooks", reason: "a second runner config; no one invocation runs both" },
+];
+test("the uncovered list given is written into the cache and read back as its compact JSON", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, [...MAVEN_PROOF, "--uncovered", JSON.stringify(UNCOVERED, null, 2)]);
+  assert.equal(r.status, 0, r.err);
+  assert.deepEqual(JSON.parse(readFileSync(cachePath(dir), "utf8")).uncovered, UNCOVERED);
+  assert.equal(read(dir, "uncovered").out, JSON.stringify(UNCOVERED));
+  assert.match(r.out, new RegExp(`"uncovered":${JSON.stringify(UNCOVERED).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), "the PROVEN line does not carry the list");
+});
+
+// The read-back compares `uncovered` byte for byte: a reader that prints
+// anything but the compact JSON of the list given refuses the proof and rolls
+// the cache back. The control is the same stub in front of a proof whose list
+// is what the stub prints, which holds.
+test("a read-back of `uncovered` that differs from the list written is NOT PROVEN, and no cache is left", () => {
+  const path = fakeReaderSh(`case "$3" in uncovered) echo '[]'; exit 0 ;; esac`);
+  const { dir: ok } = repo(MAVEN_FILES);
+  const control = prove(ok, [...MAVEN_PROOF, "--uncovered", "[]"], { env: { PATH: path } });
+  assert.equal(control.status, 0, control.err);
+
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, [...MAVEN_PROOF, "--uncovered", JSON.stringify(UNCOVERED)], { env: { PATH: path } });
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /^recipe-prove: NOT PROVEN — the Recipe cache reader reads `uncovered` back as "\[\]", not the ".*" written$/m);
+  assert.equal(existsSync(cachePath(dir)), false, "a cache whose read-back differs is left behind");
+});
+
+test("a proof with no `--uncovered`, or a malformed one, cannot be attempted — exit 2, no worktree", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const none = prove(dir, MAVEN_PROOF, { bare: true });
+  assert.equal(none.status, 2, none.err);
+  assert.match(none.err, /^recipe-prove: --uncovered is required: /m);
+  for (const [value, why] of [
+    ["{not json", /--uncovered is not JSON/],
+    ['{"step":"a","reason":"b"}', /--uncovered is not a JSON array/],
+    ['["hooks"]', /--uncovered entry 1 is not an object with a non-empty `step` and `reason`/],
+    ['[{"step":"hooks"}]', /--uncovered entry 1 is not an object with a non-empty `step` and `reason`/],
+    ['[{"step":"a","reason":"b"},{"step":" ","reason":"b"}]', /--uncovered entry 2 is not an object with a non-empty `step` and `reason`/],
+  ]) {
+    const r = prove(dir, [...MAVEN_PROOF, "--uncovered", value]);
+    assert.equal(r.status, 2, `${value}: ${r.err}`);
+    assert.match(r.err, why, value);
+  }
+  assert.equal(worktrees(dir), 1, "a refusal at the argument boundary creates no worktree");
+  assert.equal(existsSync(cachePath(dir)), false);
 });
 
 test("a Go-shaped repo gets a proven cache through the mutation proof, which records what turned the run red", () => {
@@ -440,7 +499,7 @@ test("an ambient GIT_DIR naming another repository does not change the answer", 
 test("a proof that cannot be attempted exits 2, distinct from a Recipe that is not proven", () => {
   const usage = spawnSync(process.execPath, [SCRIPT], { encoding: "utf8", env: FIXTURE_ENV });
   assert.equal(usage.status, 2);
-  assert.match(usage.stderr, /usage: recipe-prove\.mjs <repo> --install <cmd> --test <cmd>/);
+  assert.match(usage.stderr, /usage: recipe-prove\.mjs <repo> --install <cmd> --test <cmd> --uncovered <json>/);
 
   const notRepo = prove(tempDir("recipe-prove-norepo-"), MAVEN_PROOF);
   assert.equal(notRepo.status, 2);
