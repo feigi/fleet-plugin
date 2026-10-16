@@ -15,7 +15,7 @@ import { reconcile, formatLines, actionable, deriveRun, parseShortlist, unclaime
 const state = (over = {}) => ({
   bound: 5, inFlight: 0, inFlightImpl: 0, inFlightPrs: 0, owedCounted: [],
   draining: null, tierMismatch: [], tierUnchecked: [], implNames: [],
-  heads: [], supply: 0, shortlistStatus: "ok", refresh: null, dropped: [],
+  heads: [], supply: 0, shortlistStatus: "ok", refresh: null, dropped: [], pulls: new Map(),
   reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [], unlabelled: [], conflicts: [], conflictEscalate: [],
   mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeConflictHeld: 0,
   mainCheckout: { state: "clean" }, phase0: { held: false, line: null, session: null },
@@ -27,30 +27,34 @@ const row = (s, role) => rowsOf(s, role)[0];
 // ---------------------------------------------------------------------------
 // The implementer row.
 
+// The PULL actions the implementer rows print: one row per head pulled.
+const pulledHeads = (s) => rowsOf(s, "implementers").map((r) => r.action).filter((a) => a.startsWith("PULL")).map((a) => Number(/^PULL #(\d+)/.exec(a)[1]));
+
 test("implementers: free slots PULL the next unclaimed heads, one per slot, oldest first", () => {
-  const r = row(state({ bound: 2, heads: [412, 415, 420], supply: 9 }), "implementers");
-  assert.equal(r.action, "PULL #412 #415");
-  assert.equal(r.actual, 0);
-  assert.equal(r.target, 2);
-  assert.equal(r.acts, true);
+  const rows = rowsOf(state({ bound: 2, heads: [412, 415, 420], supply: 9 }), "implementers");
+  assert.deepEqual(rows.map((r) => r.action), ["PULL #412 — pull.mjs next --head 412", "PULL #415 — pull.mjs next --head 415"]);
+  for (const r of rows) {
+    assert.equal(r.actual, 0);
+    assert.equal(r.target, 2);
+    assert.equal(r.acts, true);
+  }
 });
 
 test("implementers: a PULL never takes In flight past the bound", () => {
   const heads = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
   for (const bound of [1, 2, 5, 8]) {
     for (const inFlight of [0, 1, 2, 5, 9]) {
-      const r = row(state({ bound, inFlight, heads }), "implementers");
-      const pulled = r.action.startsWith("PULL") ? r.action.split(" ").length - 1 : 0;
-      assert.equal(pulled, Math.max(0, Math.min(heads.length, bound - inFlight)), `bound ${bound} in flight ${inFlight} → ${r.action}`);
-      assert.ok(pulled === 0 || inFlight + pulled <= bound, `bound ${bound} in flight ${inFlight} → ${r.action}`);
+      const pulled = pulledHeads(state({ bound, inFlight, heads })).length;
+      assert.equal(pulled, Math.max(0, Math.min(heads.length, bound - inFlight)), `bound ${bound} in flight ${inFlight} → ${pulled}`);
+      assert.ok(pulled === 0 || inFlight + pulled <= bound, `bound ${bound} in flight ${inFlight} → ${pulled}`);
     }
   }
 });
 
 test("implementers: PULL takes B − n heads, never more than the heads there are", () => {
-  assert.equal(row(state({ bound: 5, inFlight: 3, heads: [1, 2, 3, 4] }), "implementers").action, "PULL #1 #2");
-  assert.equal(row(state({ bound: 5, inFlight: 4, heads: [1, 2] }), "implementers").action, "PULL #1");
-  assert.equal(row(state({ bound: 5, heads: [7] }), "implementers").action, "PULL #7");
+  assert.deepEqual(pulledHeads(state({ bound: 5, inFlight: 3, heads: [1, 2, 3, 4] })), [1, 2]);
+  assert.deepEqual(pulledHeads(state({ bound: 5, inFlight: 4, heads: [1, 2] })), [1]);
+  assert.deepEqual(pulledHeads(state({ bound: 5, heads: [7] })), [7]);
 });
 
 test("implementers: at the bound nothing is pulled, however many heads are waiting", () => {
@@ -69,7 +73,7 @@ test("implementers: at the bound with a killed implementer's replacement owed, t
   const quiet = row(state({ inFlight: 5, heads: [1] }), "implementers");
   assert.equal(quiet.acts, false, "with none owed the hold stays quiet");
   assert.doesNotMatch(quiet.detail, /dispatch/);
-  assert.equal(row(state({ inFlight: 4, owedCounted: ["impl-7"], implNames: ["impl-7"], heads: [1] }), "implementers").action, "PULL #1", "below the bound it still pulls");
+  assert.equal(row(state({ inFlight: 4, owedCounted: ["impl-7"], implNames: ["impl-7"], heads: [1] }), "implementers").action, "PULL #1 — pull.mjs next --head 1", "below the bound it still pulls");
   const mismatch = row(state({ inFlight: 5, owedCounted: ["impl-7"], implNames: ["impl-7"], tierMismatch: ["impl-7"] }), "implementers");
   assert.equal(mismatch.action, "HOLD (tier mismatch impl-7)");
 });
@@ -81,7 +85,7 @@ test("implementers: HOLD (in-flight n/B) whenever n ≥ B — the wording, n/B o
     assert.equal(`${r.actual}/${r.target}`, `${inFlight}/${bound}`);
     assert.equal(r.acts, false);
   }
-  assert.equal(row(state({ bound: 5, inFlight: 4, heads: [1] }), "implementers").action, "PULL #1", "one below the bound still pulls");
+  assert.equal(row(state({ bound: 5, inFlight: 4, heads: [1] }), "implementers").action, "PULL #1 — pull.mjs next --head 1", "one below the bound still pulls");
   assert.equal(formatLines(reconcile(state({ inFlight: 7, inFlightImpl: 2, inFlightPrs: 5, heads: [4, 5, 6], supply: 57 })))[0],
     "implementers 7/5 → HOLD (in-flight 7/5)   (implementers=2 prs=5 unclaimed=3 supply=57)");
 });
@@ -191,7 +195,7 @@ test("implementers: every to-spec drop is named by number and reason, whatever t
   assert.equal(all.detail, `implementers=0 prs=0 unclaimed=0 supply=0 specs-dropped=#2151 (${TO_SPEC})`);
   // A partial drop: survivors are Pulled and the drops still named.
   const partial = row(state({ heads: [7], supply: 1, dropped: [{ n: 6, reason: TO_SPEC }, { n: 9, reason: TO_SPEC }] }), "implementers");
-  assert.equal(partial.action, "PULL #7");
+  assert.equal(partial.action, "PULL #7 — pull.mjs next --head 7");
   assert.match(partial.detail, new RegExp(`^implementers=0 prs=0 unclaimed=1 supply=1 specs-dropped=#6 #9 \\(${TO_SPEC}\\)$`));
   // One clause per reason, in the order the reasons first appear.
   const mixed = row(state({ dropped: [{ n: 3, reason: "b" }, { n: 4, reason: "a" }, { n: 5, reason: "b" }] }), "implementers");
@@ -475,7 +479,7 @@ test("formatLines prints role, actual/target and the ACTION on one line each", (
       refresh: { ok: true, entries: 3, lifted: 0, changed: true, trigger: "unclaimed 1 < in-flight bound 5" },
     }))),
     [
-      "implementers 0/5 → PULL #412   (implementers=0 prs=0 unclaimed=1 supply=57)",
+      "implementers 0/5 → PULL #412 — pull.mjs next --head 412   (implementers=0 prs=0 unclaimed=1 supply=57)",
       "reviewers    0/5 → DISPATCH fix-pr PR#346   (reviews=0 fix-pr=0 fix-due=1 review-due=1)",
       "reviewers    0/5 → DISPATCH review PR#350   (reviews=0 fix-pr=0 fix-due=1 review-due=1)",
       "merge-bot    0/1 → DISPATCH merge-bot   (merge-queue=2 held=1)",
@@ -541,7 +545,7 @@ test("main checkout: the hold outranks every role's own guards — drain and tie
 
 test("main checkout: clean holds nothing", () => {
   assert.deepEqual(summary(state({ ...BUSY, refresh: null })).map(([, action]) => action),
-    ["PULL #412", "DISPATCH fix-pr PR#346", "DISPATCH review PR#350", "DISPATCH merge-bot"]);
+    ["PULL #412 — pull.mjs next --head 412", "DISPATCH fix-pr PR#346", "DISPATCH review PR#350", "DISPATCH merge-bot"]);
 });
 
 // A CONFLICT line only writes a record; the fix-applier it leads to obeys
@@ -1967,6 +1971,11 @@ function runCli(args = [], {
   }
 }
 const lineOf = (r, role) => r.stdout.split("\n").filter((l) => l.startsWith(role));
+// The fresh PULL rows a tick prints for `heads`, one line each and in that
+// order, as one multiline regex: `prefix` is the row's role and n/B, `detail`
+// what must follow each row's action, both regex sources ("" leaves it open).
+const pullRows = (prefix, heads, detail = "") =>
+  new RegExp(heads.map((n) => `^${prefix} → PULL #${n} — pull\\.mjs next --head ${n} {3}${detail}`).join("[^\\n]*\\n"), "m");
 
 // A throw inside runCli (a failed `git init`/`--record` assert, spawnBounded's
 // timeout) used to leave its `fleet-tick-*` fixture in the tmpdir.
@@ -2019,7 +2028,7 @@ test("CLI: the #1692 shape, read off the ledger — two live implementers at bou
     shortlist: shortlistText([412, 415, 420, 421, 422]),
   });
   assert.equal(one.status, 0, one.stderr);
-  assert.match(one.stdout, /^implementers 1\/2 → PULL #420 {3}\(/m);
+  assert.match(one.stdout, pullRows(String.raw`implementers 1\/2`, [420], String.raw`\(`));
 });
 
 test("CLI: a fresh run with no ledger reads zero live members, and no shortlist is depth 0 plus a refresh", () => {
@@ -2027,7 +2036,7 @@ test("CLI: a fresh run with no ledger reads zero live members, and no shortlist 
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 1);
   // Pulled from the file the refresh just wrote — not a tick of waiting.
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 {3}\(implementers=0 prs=0 unclaimed=3 supply=12 shortlist=missing\)/m);
+  assert.match(r.stdout, pullRows(String.raw`implementers 0\/2`, [7, 8], String.raw`\(implementers=0 prs=0 unclaimed=3 supply=12 shortlist=missing\)`));
   assert.match(r.stdout, /^shortlist {4}→ REFRESHED shortlist: 3 entries; 0 lifted {3}\(shortlist missing\)$/m);
 });
 
@@ -2057,7 +2066,7 @@ test("CLI: one spec-shaped ready-for-agent row through the real shortlist.mjs is
 test("CLI: a partial drop through the real shortlist.mjs is named beside the PULL it leaves", () => {
   const r = runCli([], { candidates: [specIssue(2151), plainIssue(2160)] });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #2160 {3}\(implementers=0 prs=0 unclaimed=1 supply=1 shortlist=missing specs-dropped=#2151 \(to-spec: User Stories heading\)\)$/m);
+  assert.match(r.stdout, pullRows(String.raw`implementers 0\/2`, [2160], String.raw`\(implementers=0 prs=0 unclaimed=1 supply=1 shortlist=missing specs-dropped=#2151 \(to-spec: User Stories heading\)\)$`));
 });
 
 test("CLI: a tick that does not refresh still names the drops, read back from shortlist.json", () => {
@@ -2066,7 +2075,7 @@ test("CLI: a tick that does not refresh still names the drops, read back from sh
   const r = runCli([], { shortlist: shortlistText([7, 8], 2, dropped) });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 0);
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 {3}\(implementers=0 prs=0 unclaimed=2 supply=2 specs-dropped=#2151 \(to-spec: User Stories heading\)\)$/m);
+  assert.match(r.stdout, pullRows(String.raw`implementers 0\/2`, [7, 8], String.raw`\(implementers=0 prs=0 unclaimed=2 supply=2 specs-dropped=#2151 \(to-spec: User Stories heading\)\)$`));
 });
 
 test("CLI: a refresh's drops replace the ones the file held before it", () => {
@@ -2084,7 +2093,7 @@ test("CLI: a shortlist.json written before `dropped` existed still reads ok, wit
   const r = runCli([], { shortlist: shortlistText([7, 8]) });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 0);
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 {3}\(implementers=0 prs=0 unclaimed=2 supply=2\)$/m);
+  assert.match(r.stdout, pullRows(String.raw`implementers 0\/2`, [7, 8], String.raw`\(implementers=0 prs=0 unclaimed=2 supply=2\)$`));
   assert.doesNotMatch(r.stdout, /specs-dropped|shortlist=/);
 });
 
@@ -2120,7 +2129,7 @@ test("CLI: PULL names unclaimed heads only — claimed, bailed and excluded tick
     prs: [pr(99)],
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 2\/3 → PULL #4 {3}\(implementers=1 prs=1 unclaimed=3 supply=6\)$/m, "impl-2 and PR 99 each hold a slot: one left");
+  assert.match(r.stdout, pullRows(String.raw`implementers 2\/3`, [4], String.raw`\(implementers=1 prs=1 unclaimed=3 supply=6\)$`), "impl-2 and PR 99 each hold a slot: one left");
   assert.equal(r.refreshed, 0, "three unclaimed at bound 3 is not short");
 });
 
@@ -2147,14 +2156,14 @@ test("CLI: reviewer rows are named per PR, fix-appliers first, reviews oldest fi
 test("CLI: a deep review backlog never holds the implementer row", () => {
   const r = runCli(["--in-flight", "5"], { shortlist: shortlistText([7, 8, 9, 10, 11]), prs: [pr(51), pr(52), pr(53)] });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 3\/5 → PULL #7 #8 /m, "its three fixture PRs close issues, so they count");
+  assert.match(r.stdout, pullRows(String.raw`implementers 3\/5`, [7, 8]), "its three fixture PRs close issues, so they count");
   assert.match(r.stdout, /^reviewers {4}0\/5 → DISPATCH review PR#51 PR#52 PR#53 /m, "every due review is dispatched, no cap");
   // Live reviews with a PR still owed one: the review side is as full as it
   // gets, and the implementer row still pulls.
   const busy = runCli(["--in-flight", "5"], {
     ledger: { rows: ["#51 review=wf:x"] }, shortlist: shortlistText([7, 8, 9, 10, 11]), prs: [pr(51), pr(52)],
   });
-  assert.match(busy.stdout, /^implementers 2\/5 → PULL #7 #8 #9 /m);
+  assert.match(busy.stdout, pullRows(String.raw`implementers 2\/5`, [7, 8, 9]));
   assert.match(busy.stdout, /^reviewers {4}1\/5 → DISPATCH review PR#52 /m);
   assert.doesNotMatch(busy.stdout, /saturated/);
 });
@@ -2296,7 +2305,7 @@ test("CLI: a behind-issue exclusion already reflected in the current file names 
   });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 0, "already reflected — no refresh needed to admit it");
-  assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 #50 /m);
+  assert.match(r.stdout, pullRows(String.raw`implementers 0\/3`, [1, 2, 50]));
 });
 
 // A behind-issue exclusion on a ticket the current file still carries: the
@@ -2313,7 +2322,7 @@ test("CLI: a behind-issue exclusion with an open issue on a ticket in the shortl
   assert.equal(r.refreshed, 1, "an open issue does not lift the exclusion: the refresh's own probe decides");
   assert.deepEqual(r.issueViews, ["9"]);
   assert.match(r.stdout, /REFRESHED shortlist: 2 entries; 0 lifted {3}\(behind-issue:#9 not closed, #50 still on the shortlist\)/);
-  assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 +\(implementers=0 prs=0 unclaimed=2 supply=2\)/m);
+  assert.match(r.stdout, pullRows(String.raw`implementers 0\/3`, [1, 2], String.raw`\(implementers=0 prs=0 unclaimed=2 supply=2\)`));
   assert.doesNotMatch(r.stdout, /PULL[^\n]*#50/);
 });
 
@@ -2323,7 +2332,7 @@ test("CLI: a behind-issue exclusion whose refresh fails leaves the PULL as it wa
   });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 1);
-  assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 #50 +\(implementers=0 prs=0 unclaimed=3 supply=3\)/m);
+  assert.match(r.stdout, pullRows(String.raw`implementers 0\/3`, [1, 2, 50], String.raw`\(implementers=0 prs=0 unclaimed=3 supply=3\)`));
   assert.match(r.stdout, /REFRESH FAILED/);
 });
 
@@ -2334,7 +2343,7 @@ test("CLI: a behind-issue probe that cannot answer never lifts the exclusion, an
   assert.equal(down.status, 0, down.stderr);
   assert.equal(down.refreshed, 1, "an unanswered probe is not a lift: the refresh's own probe decides");
   assert.match(down.stderr, /fleet-tick: gh issue view 9 exited 1: gh: issue view failed — behind-issue:#9 premise unconfirmed, exclusion stands/);
-  assert.match(down.stdout, /^implementers 0\/3 → PULL #1 #2 +\(implementers=0 prs=0 unclaimed=2 supply=2\)/m);
+  assert.match(down.stdout, pullRows(String.raw`implementers 0\/3`, [1, 2], String.raw`\(implementers=0 prs=0 unclaimed=2 supply=2\)`));
   const noState = runCli(["--in-flight", "3"], {
     shortlist: shortlistText([1, 2, 50]), refresh: shortlistText([1, 2]), ledger: ISSUE_HELD,
     issueStates: { 9: "CLOSED" }, env: { ISSUE_VIEW_BODY: "<html>rate limited</html>" },
@@ -2342,7 +2351,7 @@ test("CLI: a behind-issue probe that cannot answer never lifts the exclusion, an
   assert.equal(noState.status, 0, noState.stderr);
   assert.equal(noState.refreshed, 1, "a body with no state is no lift either");
   assert.match(noState.stderr, /fleet-tick: gh issue view 9 printed no state — behind-issue:#9 premise unconfirmed, exclusion stands/);
-  assert.match(noState.stdout, /^implementers 0\/3 → PULL #1 #2 +\(implementers=0 prs=0 unclaimed=2 supply=2\)/m);
+  assert.match(noState.stdout, pullRows(String.raw`implementers 0\/3`, [1, 2], String.raw`\(implementers=0 prs=0 unclaimed=2 supply=2\)`));
 });
 
 test("CLI: a behind-issue exclusion whose issue is MERGED on a ticket in the shortlist asks for no refresh", () => {
@@ -2352,7 +2361,7 @@ test("CLI: a behind-issue exclusion whose issue is MERGED on a ticket in the sho
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 0, "MERGED lifts the premise, as CLOSED does");
   assert.deepEqual(r.issueViews, ["9"]);
-  assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 #50 /m);
+  assert.match(r.stdout, pullRows(String.raw`implementers 0\/3`, [1, 2, 50]));
 });
 
 test("CLI: a behind-issue exclusion with a non-numeric target is never handed to gh, on a ticket in the shortlist or not", () => {
@@ -2380,7 +2389,7 @@ test("CLI: a branch-named behind-pr exclusion holds its ticket out of the PULL r
   });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 1, "the file still carries #2305 and no PR exists yet: only a refresh can drop it");
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #10 #11 .*unclaimed=2 supply=2/m);
+  assert.match(r.stdout, pullRows(String.raw`implementers 0\/2`, [10, 11], String.raw`.*unclaimed=2 supply=2`));
   assert.doesNotMatch(r.stdout, /PULL[^\n]*#2305/);
 });
 
@@ -2390,7 +2399,7 @@ test("CLI: a branch-named behind-pr exclusion whose refresh fails leaves the PUL
   });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 1);
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #2305 #10 +\(implementers=0 prs=0 unclaimed=3 supply=3\)/m);
+  assert.match(r.stdout, pullRows(String.raw`implementers 0\/2`, [2305, 10], String.raw`\(implementers=0 prs=0 unclaimed=3 supply=3\)`));
   assert.match(r.stdout, /REFRESH FAILED/);
 });
 
@@ -2415,7 +2424,7 @@ test("CLI: a branch-named behind-pr exclusion already reflected in the current f
   });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 0, "the file already carries the lifted ticket — nothing to refresh");
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #2305 #10 /m);
+  assert.match(r.stdout, pullRows(String.raw`implementers 0\/2`, [2305, 10]));
 });
 
 test("CLI: a branch-named behind-pr probe that cannot answer never lifts the exclusion, and on a ticket in the file it refreshes", () => {
@@ -2433,7 +2442,7 @@ test("CLI: a branch-named behind-pr probe that cannot answer never lifts the exc
     shortlist: shortlistText([2305, 10, 11]), refresh: shortlistText([10, 11]), ledger: branchExcluded, env: { PR_VIEW_FAIL: "1" },
   });
   assert.equal(inFile.refreshed, 1, "an unanswered probe is not a lift: the refresh's own probe decides");
-  assert.match(inFile.stdout, /^implementers 0\/2 → PULL #10 #11 /m);
+  assert.match(inFile.stdout, pullRows(String.raw`implementers 0\/2`, [10, 11]));
 });
 
 test("CLI: a behind-issue probe answering exit 0 with no state is disclosed and the exclusion stands", () => {
@@ -2453,7 +2462,7 @@ test("CLI: a tier mismatch on a CLOSED ticket no longer holds the implementer ro
   const base = { shortlist: shortlistText([1, 2, 3]) };
   const closed = runCli([], { ...base, ledger: mismatch, issueStates: { 7: "CLOSED" } });
   assert.equal(closed.status, 0, closed.stderr);
-  assert.match(closed.stdout, /^implementers 0\/2 → PULL #1 #2 /m);
+  assert.match(closed.stdout, pullRows(String.raw`implementers 0\/2`, [1, 2]));
   assert.doesNotMatch(closed.stdout, /tier mismatch/);
   assert.deepEqual(closed.issueViews, ["7"]);
   const open = runCli([], { ...base, ledger: mismatch, issueStates: { 7: "OPEN" } });
@@ -2572,7 +2581,7 @@ test("CLI: --in-flight must be a positive integer, with no upper bound", () => {
 test("CLI: --in-flight defaults to 5 and prints n/B", () => {
   const r = runCli([], { bound: null, shortlist: shortlistText([7, 8, 9, 10, 11, 12, 13]), prs: [pr(51), pr(52)] });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 2\/5 → PULL #7 #8 #9 {3}\(implementers=0 prs=2 unclaimed=7 supply=7\)$/m);
+  assert.match(r.stdout, pullRows(String.raw`implementers 2\/5`, [7, 8, 9], String.raw`\(implementers=0 prs=2 unclaimed=7 supply=7\)$`));
   assert.match(r.stdout, /^reviewers {4}0\/5 → DISPATCH review PR#51 PR#52 /m);
 });
 
@@ -2628,10 +2637,10 @@ test("CLI: an owed replacement on a CLOSED issue is not In flight; a probe that 
   const base = { shortlist: shortlistText([1, 2, 3]), ledger: killed };
   const closed = runCli([], { ...base, issueStates: { 7: "CLOSED" } });
   assert.equal(closed.status, 0, closed.stderr);
-  assert.match(closed.stdout, /^implementers 0\/2 → PULL #1 #2 {3}\(implementers=0 prs=0 /m);
+  assert.match(closed.stdout, pullRows(String.raw`implementers 0\/2`, [1, 2], String.raw`\(implementers=0 prs=0 `));
   assert.deepEqual(closed.issueViews, ["7"], "a killed ticket is probed, not only a tier-mismatched one");
   const open = runCli([], { ...base, issueStates: { 7: "OPEN" } });
-  assert.match(open.stdout, /^implementers 1\/2 → PULL #1 {3}\(implementers=1 prs=0 /m, "an open issue's owed replacement is In flight");
+  assert.match(open.stdout, pullRows(String.raw`implementers 1\/2`, [1], String.raw`\(implementers=1 prs=0 `), "an open issue's owed replacement is In flight");
   const failed = runCli([], { ...base, issueStates: { 7: "CLOSED" }, env: { ISSUE_VIEW_FAIL: "1" } });
   assert.match(failed.stdout, /^implementers 1\/2 → PULL #1 /m, "a probe that cannot answer never uncounts");
   assert.match(failed.stderr, /fleet-tick: gh issue view 7 exited 1: gh: issue view failed — replacement owed on #7 unconfirmed closed, ticket stays counted/);
@@ -2646,21 +2655,21 @@ test("CLI: an owed replacement on a CLOSED issue is not In flight; a probe that 
   // One merge-bound PR closing the ticket absorbs it: nothing is owed, nothing probed, one slot held.
   const absorbed = runCli([], { ...base, prs: [pr(60, ["ready-to-merge"], [7])], issueStates: { 7: "CLOSED" } });
   assert.deepEqual(absorbed.issueViews, []);
-  assert.match(absorbed.stdout, /^implementers 1\/2 → PULL #1 {3}\(implementers=0 prs=1 /m);
+  assert.match(absorbed.stdout, pullRows(String.raw`implementers 1\/2`, [1], String.raw`\(implementers=0 prs=1 `));
   // Two owed tickets: one probe each.
   const two = runCli([], {
     shortlist: shortlistText([1, 2, 3]), issueStates: { 7: "CLOSED", 8: "OPEN" },
     ledger: { rows: ["#7 impl-7=killed · tier-ok=impl-7:fleet-implementer", "#8 impl-8=killed · tier-ok=impl-8:fleet-implementer"], dispatched: ["impl-7=killed", "impl-8=killed"] },
   });
   assert.deepEqual(two.issueViews, ["7", "8"]);
-  assert.match(two.stdout, /^implementers 1\/2 → PULL #1 {3}\(implementers=1 prs=0 /m, "#7 is closed and uncounted, #8 still owes its replacement");
+  assert.match(two.stdout, pullRows(String.raw`implementers 1\/2`, [1], String.raw`\(implementers=1 prs=0 `), "#7 is closed and uncounted, #8 still owes its replacement");
 });
 
 test("CLI: a ledger carrying impl-<N>=blocked counts nothing for N — no In-flight slot, no PULL held on its account", () => {
   const blocked = { rows: ["#7 impl-7=blocked · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7=blocked"] };
   const r = runCli([], { shortlist: shortlistText([7, 1, 2]), ledger: blocked });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #1 #2 {3}\(implementers=0 prs=0 unclaimed=2 supply=3\)$/m, "a blocked ticket keeps its claim: it is no head, and no slot");
+  assert.match(r.stdout, pullRows(String.raw`implementers 0\/2`, [1, 2], String.raw`\(implementers=0 prs=0 unclaimed=2 supply=3\)$`), "a blocked ticket keeps its claim: it is no head, and no slot");
   assert.deepEqual(r.issueViews, [], "no replacement is owed, so nothing is probed");
   // A settled blocked member is still a member for the tier hold: no verdict holds the row, and still counts nothing.
   const unchecked = runCli([], { shortlist: shortlistText([1, 2]), ledger: { rows: ["#7 impl-7=blocked"], dispatched: ["impl-7=blocked"] } });
@@ -2777,7 +2786,7 @@ test("CLI: an ambient GIT_DIR naming another repository cannot move the shortlis
   writeFileSync(join(decoy, ".fleet", "shortlist.json"), shortlistText([666]));
   const r = runCli([], { shortlist: shortlistText([7, 8]), env: { GIT_DIR: join(decoy, ".git") } });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 /m);
+  assert.match(r.stdout, pullRows(String.raw`implementers 0\/2`, [7, 8]));
 });
 
 // A missing shortlist is also what an empty queue looks like, so a workspace
@@ -2800,7 +2809,7 @@ test("CLI: a workspace the tick cannot resolve is announced once, and the shortl
   assert.deepEqual(warnings, ["fleet-tick: WARNING could not resolve --git-common-dir: fatal: simulated unresolvable workspace; reading the shortlist as missing"],
     `expected exactly one warning naming git's reason: ${r.stderr}`);
   assert.equal(r.refreshed, 1, "a missing shortlist must still trigger the refresh");
-  assert.doesNotMatch(r.stdout, /PULL #7 #8/, "the shortlist on disk was unreachable, so its entries must not be pulled");
+  assert.doesNotMatch(r.stdout, /PULL #[78] /, "the shortlist on disk was unreachable, so its entries must not be pulled");
 });
 
 test("CLI: an inherited GIT_DIR cannot retarget the tier-mismatch closed-ticket probe", (t) => {
@@ -3540,7 +3549,7 @@ test("CLI: --fold-unchanged never folds an actionable tick, even an identical on
   const first = runCli(["--fold-unchanged", "--state", path], busy);
   const second = runCli(["--fold-unchanged", "--state", path], busy);
   assert.equal(second.stdout, first.stdout);
-  assert.match(second.stdout, /PULL #9 #10/);
+  assert.match(second.stdout, pullRows(String.raw`implementers 0\/2`, [9, 10]));
   assert.equal(JSON.parse(readFileSync(path, "utf8")).quiet, 0);
 });
 
@@ -4002,7 +4011,7 @@ test("CLI: a slow gh that answers inside the bound is read as usual", () => {
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stderr, /timed out/);
   assert.deepEqual(r.issueViews, ["7"]);
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #1 #2 /m, "the slow CLOSED answer was read and lifted the hold");
+  assert.match(r.stdout, pullRows(String.raw`implementers 0\/2`, [1, 2]), "the slow CLOSED answer was read and lifted the hold");
 });
 
 // The cases above pin the gh spawns the tick has today; this pins the next
@@ -4093,7 +4102,7 @@ test("CLI: live fix-pr, finisher-pr, merge-bot and impl members carried across a
 
   const dead = runCli(["--in-flight", "5"], { ...fixture, beforeRun: rotateAs({ pid: deadPid(), lstart: "x", prior: "ancestor" }) });
   assert.equal(dead.status, 0, dead.stderr);
-  assert.match(dead.stdout, /^implementers 3\/5 → PULL #20 #21/m);
+  assert.match(dead.stdout, pullRows(String.raw`implementers 3\/5`, [20, 21]));
   assert.match(dead.stdout, /DISPATCH review PR#5 PR#6/);
   assert.match(dead.stdout, /^merge-bot +0\/1 → DISPATCH merge-bot/m);
 });
@@ -4879,4 +4888,186 @@ test("CLI: --no-transcript-after sets the NO-TRANSCRIPT threshold in minutes, an
   const zero = runCli(["--no-transcript-after", "0"], aged);
   assert.notEqual(zero.status, 0);
   assert.match(zero.stderr, /--no-transcript-after must be at least 1, got 0/);
+});
+
+// ---------------------------------------------------------------------------
+// The Pull records. Each head a PULL row names is read off its
+// `<scratch>/impl-<N>/pull.json`, pull.mjs's record: a question standing is a
+// Pull in progress, and the fresh row there would have it asked twice.
+import { pullOf } from "../plugin/scripts/fleet-tick.mjs";
+
+const PULL_SESSION = "/pull-session";
+// A record in pull.mjs's shape: `over` sets where it stands.
+const pullRecord = (n, over = {}) => ({
+  ticket: n, member: `impl-${n}`, started: "2026-10-16T00:00:00.000Z", status: "running", stage: "decided",
+  pending: null, commands: [], questions: [], answers: [], staleness: [], close: null, addedPaths: [], scans: [],
+  session: PULL_SESSION, commented: null, route: null, dispatch: null, outcome: null, ...over,
+});
+const pendingOn = (n, qid, over = {}) => pullRecord(n, { pending: { qid, at: "2026-10-16T00:00:00.000Z" }, ...over });
+const ROW_COMMAND = { at: "2026-10-16T00:00:00.000Z", step: "row", cmd: ["ledger.mjs", "row", "7", "impl-7 · tier=task-high"], exit: 0, stdout: "" };
+const dispatchedRecord = (n, commands = [ROW_COMMAND]) => pullRecord(n, {
+  status: "dispatched", stage: "done", commands,
+  dispatch: { name: `impl-${n}`, agent: "fleet-implementer-task-high", brief: "/b.md" }, outcome: { exit: 0, at: "2026-10-16T00:00:00.000Z" },
+});
+const pullOpts = (over = {}) => ({ session: PULL_SESSION, since: 0, now: 0, staleMinutes: 120, ...over });
+const pullActions = (s) => rowsOf(s, "implementers").map((r) => r.action);
+
+test("implementers: each head a free slot Pulls is its own row, the fresh one naming `pull.mjs next --head N`, and every one acts", () => {
+  const rows = rowsOf(state({ bound: 3, inFlight: 1, heads: [412, 415, 420] }), "implementers");
+  assert.deepEqual(rows.map((r) => r.action), ["PULL #412 — pull.mjs next --head 412", "PULL #415 — pull.mjs next --head 415"]);
+  assert.ok(rows.every((r) => r.acts && r.actual === 1 && r.target === 3));
+  assert.deepEqual(formatLines(reconcile(state({ heads: [7], supply: 4 }))).filter((l) => l.startsWith("implementers")),
+    ["implementers 0/5 → PULL #7 — pull.mjs next --head 7   (implementers=0 prs=0 unclaimed=1 supply=4)"]);
+});
+
+test("implementers: a head whose Pull has a question standing prints it in place of the fresh row, (stale) appended once it is stale", () => {
+  const pulls = new Map([[7, { kind: "pending", qid: "decided", stale: false }], [8, { kind: "pending", qid: "collision", stale: true }]]);
+  assert.deepEqual(pullActions(state({ heads: [7, 8, 9], pulls })), [
+    "PULL #7 (Q2 pending — pull.mjs answer 7 decided …)",
+    "PULL #8 (Q3 pending — pull.mjs answer 8 collision …) (stale)",
+    "PULL #9 — pull.mjs next --head 9",
+  ]);
+  for (const [qid, q] of [["staleness", "Q1"], ["close", "Q1b"], ["decided", "Q2"], ["collision", "Q3"], ["later", "later"]]) {
+    assert.equal(pullActions(state({ heads: [5], pulls: new Map([[5, { kind: "pending", qid, stale: false }]]) }))[0],
+      `PULL #5 (${q} pending — pull.mjs answer 5 ${qid} …)`, `the question ${qid}`);
+  }
+  assert.ok(rowsOf(state({ heads: [7, 8], pulls }), "implementers").every((r) => r.acts), "a Pull in progress is work waiting on the controller");
+});
+
+test("implementers: a head whose Pull dispatched prints the row it is missing, never a fresh Pull", () => {
+  const row = (text) => pullActions(state({ heads: [7], pulls: new Map([[7, { kind: "dispatched", text }]]) }))[0];
+  assert.equal(row("impl-7 · tier=task-high"), `PULL #7 (dispatched, row missing — ledger.mjs row 7 "impl-7 · tier=task-high")`);
+  assert.equal(row(null), "PULL #7 (dispatched, row missing — ledger.mjs row 7 …)");
+});
+
+test("implementers: a Pull record changes no hold — the bound, the tier holds and draining still print one HOLD row", () => {
+  const pulls = new Map([[1, { kind: "pending", qid: "decided", stale: true }]]);
+  for (const over of [{ inFlight: 5 }, { draining: "x" }, { tierMismatch: ["impl-4"] }, { tierUnchecked: ["impl-4"] }, { phase0: { held: true, line: "x", session: null } }]) {
+    const rows = rowsOf(state({ heads: [1, 2], pulls, ...over }), "implementers");
+    assert.equal(rows.length, 1, JSON.stringify(over));
+    assert.match(rows[0].action, /^HOLD /);
+  }
+});
+
+test("pullOf: a question standing is pending, stale only once the record is older than the stale minutes", () => {
+  const minutes = (m) => m * 60_000;
+  assert.deepEqual(pullOf(pendingOn(7, "decided"), pullOpts({ since: 0, now: minutes(120) })), { kind: "pending", qid: "decided", stale: false });
+  assert.deepEqual(pullOf(pendingOn(7, "decided"), pullOpts({ since: 0, now: minutes(120) + 1 })), { kind: "pending", qid: "decided", stale: true });
+  assert.equal(pullOf(pendingOn(7, "close"), pullOpts({ now: minutes(30), staleMinutes: 20 })).stale, true);
+});
+
+test("pullOf: a dispatched record carries the text its own ledger.mjs row wrote, the last one that exited 0", () => {
+  const failed = { ...ROW_COMMAND, cmd: ["ledger.mjs", "row", "7", "impl-7 · tier=wrong"], exit: 2 };
+  const earlier = { ...ROW_COMMAND, cmd: ["ledger.mjs", "row", "7", "impl-7"] };
+  assert.deepEqual(pullOf(dispatchedRecord(7, [earlier, ROW_COMMAND, failed]), pullOpts()), { kind: "dispatched", text: "impl-7 · tier=task-high" });
+  assert.deepEqual(pullOf(dispatchedRecord(7, []), pullOpts()), { kind: "dispatched", text: null });
+});
+
+test("pullOf: no record of this run's in progress is the fresh row — another session's, an ended one, one between steps, not a record", () => {
+  assert.equal(pullOf(pendingOn(7, "decided", { session: "/another" }), pullOpts()), null, "pull.mjs starts another run's record afresh");
+  assert.equal(pullOf(dispatchedRecord(7), pullOpts({ session: "/another" })), null);
+  for (const status of ["left", "released"]) assert.equal(pullOf(pullRecord(7, { status }), pullOpts()), null, status);
+  assert.equal(pullOf(pullRecord(7, { stage: "claim" }), pullOpts()), null, "a step that failed resumes with `next`, as the fresh row says");
+  for (const junk of [null, [], "x", 3]) assert.equal(pullOf(junk, pullOpts()), null, JSON.stringify(junk));
+});
+
+test("pullOf: with no session in the receipt, a record is read whatever session it names, as pull.mjs reads it", () => {
+  assert.deepEqual(pullOf(pendingOn(7, "decided", { session: "/any" }), pullOpts({ session: null })), { kind: "pending", qid: "decided", stale: false });
+});
+
+// A scratch root holding `<root>/impl-<n>/pull.json` for each entry of
+// `records` — `{n: {record, agoMin, text}}`, `text` written verbatim in place
+// of the record — the file `agoMin` minutes old.
+const pullScratch = (records) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-pulls-")));
+  for (const [n, { record, agoMin = 0, text }] of Object.entries(records)) {
+    mkdirSync(join(root, `impl-${n}`));
+    const path = join(root, `impl-${n}`, "pull.json");
+    writeFileSync(path, text ?? JSON.stringify(record));
+    const t = new Date(Date.now() - agoMin * MIN);
+    utimesSync(path, t, t);
+  }
+  return root;
+};
+// Ticks over a shortlist of `heads` with the Pull records given, the receipt
+// naming their root and PULL_SESSION unless `receipt` maps it otherwise.
+const pullTicks = (records, { heads = [7, 8], args = [], again = 0, receipt = (root) => (r) => ({ ...r, scratch: root, session: PULL_SESSION }) } = {}) => {
+  const root = pullScratch(records);
+  try {
+    return ticksOver(args, { shortlist: shortlistText(heads), refresh: shortlistText(heads), phase0: receipt(root) }, again);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+const pullLines = (stdout) => stdout.split("\n").filter((l) => l.startsWith("implementers"));
+const actionOf = (line) => line.slice(line.indexOf("→ ") + 2, line.lastIndexOf("   ("));
+
+test("CLI: a pending question, a stale one, a dispatched Pull with no row and no record each print their row, one per head", () => {
+  const [t] = pullTicks({
+    7: { record: pendingOn(7, "decided"), agoMin: 1 },
+    8: { record: pendingOn(8, "staleness"), agoMin: 121 },
+    9: { record: dispatchedRecord(9, [{ ...ROW_COMMAND, cmd: ["ledger.mjs", "row", "9", "impl-9 · tier=task-high"] }]) },
+  }, { heads: [7, 8, 9, 10], args: ["--in-flight", "4"] });
+  assert.equal(t.status, 0, t.stderr);
+  assert.deepEqual(pullLines(t.stdout), [
+    "implementers 0/4 → PULL #7 (Q2 pending — pull.mjs answer 7 decided …)   (implementers=0 prs=0 unclaimed=4 supply=4)",
+    "implementers 0/4 → PULL #8 (Q1 pending — pull.mjs answer 8 staleness …) (stale)   (implementers=0 prs=0 unclaimed=4 supply=4)",
+    `implementers 0/4 → PULL #9 (dispatched, row missing — ledger.mjs row 9 "impl-9 · tier=task-high")   (implementers=0 prs=0 unclaimed=4 supply=4)`,
+    "implementers 0/4 → PULL #10 — pull.mjs next --head 10   (implementers=0 prs=0 unclaimed=4 supply=4)",
+  ]);
+});
+
+test("CLI: --pull-stale-minutes sets when a standing question reads stale, 120 without it, and must be at least 1", () => {
+  const aged = { 7: { record: pendingOn(7, "decided"), agoMin: 90 } };
+  const first = (args) => actionOf(pullLines(pullTicks(aged, { heads: [7], args })[0].stdout)[0]);
+  assert.equal(first([]), "PULL #7 (Q2 pending — pull.mjs answer 7 decided …)");
+  assert.equal(first(["--pull-stale-minutes", "60"]), "PULL #7 (Q2 pending — pull.mjs answer 7 decided …) (stale)");
+  const zero = runCli(["--pull-stale-minutes", "0"], { shortlist: shortlistText([7]) });
+  assert.notEqual(zero.status, 0);
+  assert.match(zero.stderr, /--pull-stale-minutes must be at least 1, got 0/);
+});
+
+test("CLI: none of the PULL rows folds — a pending, a stale and a dispatched row print in full on every --fold-unchanged tick, quiet held at 0", () => {
+  const ticks = pullTicks({
+    7: { record: pendingOn(7, "decided"), agoMin: 200 },
+    8: { record: dispatchedRecord(8) },
+  }, { args: ["--fold-unchanged"], again: 2 });
+  for (const t of ticks) {
+    assert.equal(t.status, 0, t.stderr);
+    assert.deepEqual(pullLines(t.stdout).map(actionOf), [
+      "PULL #7 (Q2 pending — pull.mjs answer 7 decided …) (stale)",
+      `PULL #8 (dispatched, row missing — ledger.mjs row 8 "impl-7 · tier=task-high")`,
+    ]);
+    assert.doesNotMatch(t.stdout, /unchanged, nothing to act on/);
+    assert.equal(t.state.quiet, 0);
+  }
+});
+
+test("CLI: a record the tick cannot use prints the fresh row — not JSON, another session's, an ended Pull — and the tick still exits 0", () => {
+  const [t] = pullTicks({
+    7: { text: "{not json" },
+    8: { record: pendingOn(8, "decided", { session: "/another-run" }) },
+    9: { record: pullRecord(9, { status: "left", outcome: { exit: 1, reason: "taken" } }) },
+  }, { heads: [7, 8, 9], args: ["--in-flight", "3"] });
+  assert.equal(t.status, 0, t.stderr);
+  assert.deepEqual(pullLines(t.stdout).map(actionOf), [7, 8, 9].map((n) => `PULL #${n} — pull.mjs next --head ${n}`));
+});
+
+test("CLI: the records are read under --scratch when the receipt names no scratch root, and the receipt's root wins when it does", () => {
+  const records = { 7: { record: pendingOn(7, "decided") } };
+  const noRoot = (root) => (r) => { const { scratch, ...rest } = r; return { ...rest, session: PULL_SESSION }; };
+  const root = pullScratch(records);
+  try {
+    const [flagged] = ticksOver(["--scratch", root], { shortlist: shortlistText([7]), refresh: shortlistText([7]), phase0: noRoot(root) }, 0);
+    assert.equal(actionOf(pullLines(flagged.stdout)[0]), "PULL #7 (Q2 pending — pull.mjs answer 7 decided …)");
+    const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-pulls-empty-")));
+    try {
+      const [wins] = ticksOver(["--scratch", root], { shortlist: shortlistText([7]), refresh: shortlistText([7]), phase0: (r) => ({ ...r, scratch: elsewhere, session: PULL_SESSION }) }, 0);
+      assert.equal(actionOf(pullLines(wins.stdout)[0]), "PULL #7 — pull.mjs next --head 7");
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

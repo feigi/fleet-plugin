@@ -9,7 +9,8 @@
 //
 // So compute the deficit instead of remembering it. Every wake ends in one
 // invocation (record, tick, act, beat), and each prints
-// actual/target and a named ACTION per role — `PULL #<n> #<n>`, `DISPATCH
+// actual/target and a named ACTION per role — `PULL #<n> — pull.mjs next --head
+// <n>`, one row per head, `DISPATCH
 // fix-pr PR#<pr>`, `DISPATCH review PR#<pr>`, `DISPATCH merge-bot`, `HOLD (…)`,
 // `REFRESHED shortlist: …` — with run-team's guards applied in code rather than
 // recalled from its table. You cannot forget what a script prints at you. A
@@ -101,6 +102,15 @@
 //             CHECK-LIVENESS: the tick settles nothing. A review runner has no
 //             report schema and files none, so no `review=` token is looked
 //             up; a member with no schema is never checked against one.
+//   pulls     `<scratch>/impl-<N>/pull.json`, pull.mjs's record of a Pull, for
+//             each head a PULL row names, `<scratch>` as for the report
+//             files. A question standing prints `PULL #<N> (Q<n> pending —
+//             pull.mjs answer <N> <qid> …)` in place of the fresh row, with
+//             ` (stale)` once the file is older than `--pull-stale-minutes`; a
+//             Pull that dispatched with the head still holding no `impl-` row
+//             prints `(dispatched, row missing — ledger.mjs row …)`. A record
+//             from another phase-0 session, or one that ended, unreadable or
+//             absent, is the fresh row: `pull.mjs next` starts or resumes it.
 //   session   The listing of the session directory omp writes one
 //             `<member>.jsonl` transcript into per dispatched member: this
 //             run's phase-0 receipt's `session`, else `--session`; with
@@ -131,7 +141,7 @@ export function reconcile(s) {
   // dispatch — so they stand outside the dispatch hold: the fix-applier a
   // conflict hold leads to obeys the hold through its own role's row.
   return [
-    ...dispatchHold(s, [implementers(s), ...rev.rows]),
+    ...dispatchHold(s, [...implementers(s), ...rev.rows]),
     ...rev.conflictRows,
     ...dispatchHold(s, [mergeBot(s)]),
     ...shortlistRows(s),
@@ -221,12 +231,55 @@ function specsDropped(dropped) {
   return `specs-dropped=${[...by].map(([reason, ns]) => `${ns.join(" ")} (${reason})`).join(", ")}`;
 }
 
+// The question numbers SKILL.md's phase 1 gives pull.mjs's questions. The row
+// names the number and the command names the qid, which is what `pull.mjs
+// answer` takes; a qid with no number here is named by itself.
+const QUESTION_NUMBERS = { staleness: "Q1", close: "Q1b", decided: "Q2", collision: "Q3" };
+
+/**
+ * Where a head's Pull stands, off its `pull.json` record as parsed, for the
+ * PULL row: `{kind: "pending", qid, stale}`, `{kind: "dispatched", text}` with
+ * the text the Pull's own `ledger.mjs row` wrote (null when it recorded none),
+ * or null for the fresh row. `since` is the file's mtime and `session` this
+ * run's phase-0 session, null when the receipt names none.
+ */
+export function pullOf(record, { session, since, now, staleMinutes }) {
+  if (record === null || typeof record !== "object" || Array.isArray(record)) return null;
+  // pull.mjs ends a record from another phase-0 session whatever it says, and
+  // starts the ticket afresh.
+  if (session !== null && record.session !== session) return null;
+  if (record.status === "running" && typeof record.pending?.qid === "string") {
+    return { kind: "pending", qid: record.pending.qid, stale: now - since > staleMinutes * 60_000 };
+  }
+  if (record.status === "dispatched") {
+    const row = Array.isArray(record.commands)
+      ? record.commands.findLast((c) => c?.step === "row" && c.exit === 0 && Array.isArray(c.cmd))
+      : undefined;
+    return { kind: "dispatched", text: typeof row?.cmd[3] === "string" ? row.cmd[3] : null };
+  }
+  return null;
+}
+
+// A head's PULL action. A question standing is a Pull in progress: the fresh
+// row there would ask it twice. A dispatched Pull whose head still holds no
+// `impl-` row should not occur, and must not read as a fresh Pull either.
+function pullAction(n, p) {
+  if (p?.kind === "pending") {
+    return `PULL #${n} (${QUESTION_NUMBERS[p.qid] ?? p.qid} pending — pull.mjs answer ${n} ${p.qid} …)${p.stale ? " (stale)" : ""}`;
+  }
+  if (p?.kind === "dispatched") return `PULL #${n} (dispatched, row missing — ledger.mjs row ${n} ${p.text === null ? "…" : JSON.stringify(p.text)})`;
+  return `PULL #${n} — pull.mjs next --head ${n}`;
+}
+
+// The implementer rows: one per head a free slot Pulls, else the one row
+// saying why none is pulled.
 function implementers(s) {
   const dropped = specsDropped(s.dropped);
-  const row = mkRow("implementers", s.inFlight, s.bound,
+  const one = mkRow("implementers", s.inFlight, s.bound,
     `implementers=${s.inFlightImpl} prs=${s.inFlightPrs} unclaimed=${s.heads.length} supply=${s.supply ?? "?"}`
     + (s.shortlistStatus === "ok" ? "" : ` shortlist=${s.shortlistStatus}`)
     + (dropped ? ` ${dropped}` : ""));
+  const row = (...a) => [one(...a)];
 
   // Drain stops supply and nothing else. Read from the file, so
   // a replacement controller that never saw the drain is held by it too.
@@ -263,7 +316,7 @@ function implementers(s) {
     return s.owedCounted.length ? row(hold, { acts: true, extra: replaceStep(s.owedCounted, s.implNames) }) : row(hold);
   }
 
-  if (s.heads.length) return row(`PULL ${s.heads.slice(0, s.bound - s.inFlight).map((n) => `#${n}`).join(" ")}`, { acts: true });
+  if (s.heads.length) return s.heads.slice(0, s.bound - s.inFlight).map((n) => one(pullAction(n, s.pulls?.get(n)), { acts: true }));
 
   // Nothing unclaimed even after a refresh. `SUGGEST /triage` asks a
   // MAINTAINER to tick tickets, and on the unattended night the heartbeat
@@ -1378,6 +1431,9 @@ const OPTIONS = {
   // Minutes a live member token may go with no transcript in the session
   // directory before NO-TRANSCRIPT names it.
   "no-transcript-after": { type: "string", default: "5" },
+  // Minutes a Pull's question may stand, its `pull.json` unwritten, before the
+  // PULL row naming it says `(stale)`.
+  "pull-stale-minutes": { type: "string", default: "120" },
   // Minutes a live token of each family may run before CHECK-LIVENESS names it.
   ...Object.fromEntries(Object.entries(LIVENESS_FLAGS).map(([family, flag]) => [flag, { type: "string", default: String(LIVENESS_DEFAULTS[family]) }])),
 };
@@ -1408,7 +1464,7 @@ function options() {
   return {
     bound: positive("in-flight"),
     fold: values["fold-unchanged"], apply: values.apply, state: values.state || statePath(NAME), scratch: values.scratch,
-    session: values.session || null, noTranscriptAfter: positive("no-transcript-after"),
+    session: values.session || null, noTranscriptAfter: positive("no-transcript-after"), pullStaleMinutes: positive("pull-stale-minutes"),
     liveness: Object.fromEntries(Object.entries(LIVENESS_FLAGS).map(([family, flag]) => [family, positive(flag)])),
   };
 }
@@ -1850,8 +1906,28 @@ function listTranscripts(session, { missingIsEmpty }) {
   }
 }
 
+// Where each head's Pull stands, as pullOf() reads its record, for the heads
+// with one. A record that is not there, or cannot be read or parsed, is the
+// fresh row: `pull.mjs next` names one it cannot use, in its own words.
+function readPulls(scratch, heads, { session, now, staleMinutes }) {
+  const out = new Map();
+  for (const n of heads) {
+    const path = join(scratch, `impl-${n}`, "pull.json");
+    let since, record;
+    try {
+      since = statSync(path).mtimeMs;
+      record = JSON.parse(readFileSync(path, "utf8"));
+    } catch {
+      continue;
+    }
+    const p = pullOf(record, { session, since, now, staleMinutes });
+    if (p !== null) out.set(n, p);
+  }
+  return out;
+}
+
 function main() {
-  const { fold, apply, state: path, liveness, scratch: scratchFlag, session: sessionFlag, noTranscriptAfter, ...caps } = options();
+  const { fold, apply, state: path, liveness, scratch: scratchFlag, session: sessionFlag, noTranscriptAfter, pullStaleMinutes, ...caps } = options();
   const listPath = shortlistPath();
   const current = readShortlist(listPath);
   // Beside the shortlist, off the same git probe rather than a second one.
@@ -1972,15 +2048,22 @@ function main() {
     }
   }
 
+  // The scratch root of the report files and the Pull records alike.
+  const scratch = reportsScratch(receipt, scratchFlag);
+  if (scratch === null) console.error(`${NAME}: report files not checked — no scratch in the phase-0 receipt and no --scratch`);
+  // The heads a PULL row names, each with its Pull record read: the session it
+  // is judged against is the receipt's, as pull.mjs judges it.
+  const pulled = heads.slice(0, Math.max(0, caps.bound - run.inFlight));
+  const runSession = receipt.read.state === "ok" && receipt.read.receipt.session !== "" ? receipt.read.receipt.session : null;
+  const pulls = scratch === null ? new Map()
+    : readPulls(scratch.root, pulled, { session: runSession, now: Date.now(), staleMinutes: pullStaleMinutes });
   const rows = reconcile({
-    ...caps, ...run, heads, supply, dropped, shortlistStatus: current.status, refresh: fresh, mainCheckout, phase0, router,
+    ...caps, ...run, heads, supply, dropped, shortlistStatus: current.status, refresh: fresh, mainCheckout, phase0, router, pulls,
   });
   const said = describe(mainCheckout, run.live);
   // The report files of the live members, read before the state file for the
   // reason given below. A member's report on disk is the outcome its message
   // was to carry, whether or not that message arrived.
-  const scratch = reportsScratch(receipt, scratchFlag);
-  if (scratch === null) console.error(`${NAME}: report files not checked — no scratch in the phase-0 receipt and no --scratch`);
   const reports = scratch === null ? new Map() : readReports(scratch.root, run.reporters);
   // Re-read rather than reusing priorState: this must be the freshest
   // snapshot, or this tick reverts whatever the heartbeat wrote while the
