@@ -15,12 +15,14 @@
 // carrying only the refuter's observation rule, so this half survived nowhere
 // but the tracker.
 //
-// WHERE IT GOES, and that is half the ticket. The clause sits in `## Failure
+// WHERE IT GOES, and that is half the ticket. The rule sits in `## Failure
 // handling`, between the table row that acts on a dead member and the
 // Settle/liveness pair that says how to ask each harness — not in Phase 3's
 // narrative, which is about reacting to artifacts rather than judging death.
 // The killed row itself carries the gate in one clause, because a controller
-// scanning the table acts off the row.
+// scanning the table acts off the row. The clause's paragraph, with the
+// measurement that produced it, moved to references/failure-handling.md;
+// `## Failure handling` keeps the rule beside the pointer in that same place.
 //
 // THE SPAN IS ONE JOIN, not four assertions. The instruction runs from "does
 // not establish" through the two verdicts, the carve-out, and the measurement
@@ -42,15 +44,15 @@ import { Pin } from "./support/prose-pin.mjs";
 
 const SKILL = "skills/run-team/SKILL.md";
 const read = () => Pin.file(join(import.meta.dirname, "..", "plugin", ...SKILL.split("/")));
+const REFERENCE = "skills/run-team/references/failure-handling.md";
+const readReference = () => Pin.file(join(import.meta.dirname, "..", "plugin", ...REFERENCE.split("/")));
 
-// The paragraph carrying the rule, and no more of the file than that — the
-// shared bound, which also asserts the anchor occurs exactly once. This
-// document says "transcript", "scratch" and "mtime" in several other places
-// (`board.mjs`'s ranking is discussed nowhere near here, but the dispatch
-// prompts' own scratch-partition rule is), so an unbounded match is
-// satisfiable from outside the clause it guards.
-const ANCHOR = "**A frozen transcript does not establish that a member is dead";
-const clause = () => read().paragraph(ANCHOR, `${SKILL}'s stalled-member liveness clause`, "Settle outcome and liveness are different").text;
+// The section carrying the clause, and no more of the file than that — the
+// shared bound, which also asserts the heading occurs exactly once.
+const HEADING = "## A frozen transcript does not establish that a member is dead";
+const clause = () => readReference().section(HEADING, `${REFERENCE}'s stalled-member liveness clause`).text;
+// The rule as `## Failure handling` keeps it, beside its pointer.
+const KEPT = "**A frozen transcript does not establish that a member is dead — the discriminator is its scratch dir.** See references/failure-handling.md.";
 
 // One span: the epistemic rule, the discriminator, BOTH verdicts, the
 // carve-out that keeps the second verdict from licensing a false kill, and the
@@ -72,11 +74,12 @@ nothing itself while that child writes below it. Read them at two observations
 a poll apart — \`touch\` a marker file outside that directory at the first, and
 \`find <dir> -type f -newer <marker>\` at the second lists every file that
 moved: **mtimes that moved between the two mean BLOCKED, a live member
-still holding its claim and its worktree, so the killed row above does not
-apply to it; mtimes unchanged at both are the dead signature.** Only the first
+still holding its claim and its worktree, so the killed row of SKILL.md's
+Failure handling table does not apply to it; mtimes unchanged at both are
+the dead signature.** Only the first
 of those two verdicts is conclusive — a member wedged on a call that writes
 nothing freezes its scratch dir too — so settle the dead one on the Member
-unaccounted row above, never on the two listings alone. Measured once: a refuter
+unaccounted row of that table, never on the two listings alone. Measured once: a refuter
 wedged forever on \`until grep -q\` for a marker \`node --test\` never writes, its
 transcript's record counts unchanged across two polls while its own scratch
 files carried fresh mtimes throughout — alive the entire time it read as dead.`;
@@ -85,7 +88,7 @@ test("the stalled-member guidance says a frozen transcript does not establish de
   assert.match(
     clause(),
     Pin.phrase(INSTRUCTION),
-    `${SKILL}'s stalled-member clause no longer carries the whole instruction. One of these went, or a sentence was spliced between them: (1) a frozen transcript does not establish death; (2) the signature it shares with a blocked tool call; (3) the discriminator — the mtimes of the files anywhere under the member's own scratch directory, subdirectories included, read at TWO observations a poll apart with the command that reads them recursively; (4) moved mtimes mean BLOCKED, unchanged mtimes are the dead signature; (5) only the blocked verdict is conclusive, because a call that writes nothing freezes the scratch dir too; (6) the #503 measurement it was derived from. Without (3) and (4) the controller is back to judging death off the transcript, which is #503's own residue; a (3) that stops at the directory's direct children reads a member waiting on its own child as dead; without (5) the clause licenses killing a live member wedged on a network read. Re-anchor this span against the reworded paragraph rather than dropping a half.`,
+    `${REFERENCE}'s stalled-member clause no longer carries the whole instruction. One of these went, or a sentence was spliced between them: (1) a frozen transcript does not establish death; (2) the signature it shares with a blocked tool call; (3) the discriminator — the mtimes of the files anywhere under the member's own scratch directory, subdirectories included, read at TWO observations a poll apart with the command that reads them recursively; (4) moved mtimes mean BLOCKED, unchanged mtimes are the dead signature; (5) only the blocked verdict is conclusive, because a call that writes nothing freezes the scratch dir too; (6) the #503 measurement it was derived from. Without (3) and (4) the controller is back to judging death off the transcript, which is #503's own residue; a (3) that stops at the directory's direct children reads a member waiting on its own child as dead; without (5) the clause licenses killing a live member wedged on a network read. Re-anchor this span against the reworded paragraph rather than dropping a half.`,
   );
 });
 
@@ -127,12 +130,12 @@ test("the stalled-member guidance says a frozen transcript does not establish de
 // and a carve-out land together with only one of them reported.
 //
 // Binding the neighbourhood to the surrounding prose (below) rather than to
-// the clause's own anchor has a second effect, free of an extra assertion:
-// if the whole clause paragraph is moved elsewhere in the file, INSTRUCTION
-// no longer appears between the two fixed sentences NEIGHBOURHOOD is bounded
-// by, and the `assert.ok(span, ...)` in the test below reds — this also
-// catches the clause moving out of its place in `## Failure handling`, not
-// only a carve-out landing beside it where it stays.
+// the rule's own anchor has a second effect, free of an extra assertion: if
+// the kept rule is moved elsewhere in the file, KEPT no longer appears
+// between the two fixed sentences NEIGHBOURHOOD is bounded by, and the
+// `assert.ok(kept, ...)` in the test below reds — this also catches the rule
+// moving out of its place in `## Failure handling`, not only a carve-out
+// landing beside it where it stays.
 const SUBJECT_VOCABULARY = /\b(?:transcripts?|mtimes?|record\s+counts?|scratch|frozen|dead|blocked)\b/i;
 
 // The region a carve-out beside the clause can land in: from the sentence
@@ -148,17 +151,28 @@ const NEIGHBOURHOOD = () =>
   ).text;
 
 test("nothing beside the clause carves an exception out of it", () => {
+  // In SKILL.md the neighbourhood holds the rule beside its pointer and nothing
+  // else on the subject; in the reference file the section holds the pinned
+  // instruction and why-prose that carries none of the subject vocabulary.
   const whole = NEIGHBOURHOOD();
-  const span = whole.match(Pin.phrase(INSTRUCTION));
+  const kept = whole.match(Pin.phrase(KEPT));
   assert.ok(
-    span,
-    `${SKILL}'s stalled-member instruction does not match inside its neighbourhood (between "A red PR never silently becomes" and "Settle outcome and liveness are different facts") — read the presence pin above first: if it is green, the instruction is intact but the whole clause moved out of this neighbourhood, which this pin also treats as a failure.`,
+    kept,
+    `${SKILL}'s stalled-member rule does not sit beside its pointer inside its neighbourhood (between "A red PR never silently becomes" and "Settle outcome and liveness are different facts") — the rule moved out of its place in \`## Failure handling\`, or lost its pointer to ${REFERENCE}.`,
   );
-  const residue = whole.replace(span[0], "");
+  assert.doesNotMatch(
+    whole.replace(kept[0], ""),
+    SUBJECT_VOCABULARY,
+    `${SKILL}'s stalled-member neighbourhood says something about the transcript, the scratch dir, the mtimes or the verdicts OUTSIDE the kept rule — a carve-out, or an unpinned restatement that drifts from the reference file's copy. Delete it, or fold it into ${REFERENCE}'s pinned span.`,
+  );
+  const section = clause();
+  const span = section.match(Pin.phrase(INSTRUCTION));
+  assert.ok(span, `${REFERENCE}'s stalled-member instruction does not match inside its section — read the presence pin above first.`);
+  const residue = section.slice(HEADING.length).replace(span[0], "");
   assert.doesNotMatch(
     residue,
     SUBJECT_VOCABULARY,
-    `${SKILL}'s stalled-member neighbourhood says something about the transcript, the scratch dir, the mtimes or the verdicts OUTSIDE the pinned instruction — in the paragraph above it, the paragraph below it, or appended to the clause's own paragraph. That is either a carve-out — the mutation this pin exists to catch, since the instruction itself survives it intact — or an unpinned restatement, which drifts from the pinned copy and becomes a contradiction. Fold the sentence into the span this file pins, or delete it.`,
+    `${REFERENCE}'s stalled-member section says something about the transcript, the scratch dir, the mtimes or the verdicts OUTSIDE the pinned instruction. That is either a carve-out — the mutation this pin exists to catch, since the instruction itself survives it intact — or an unpinned restatement, which drifts from the pinned copy and becomes a contradiction. Fold the sentence into the span this file pins, or delete it.`,
   );
 });
 
@@ -248,7 +262,7 @@ const ASYMMETRY =
   "the cost of the wrong call is asymmetric — a live member written off gets killed and re-dispatched, which discards the work in flight and, where it holds a claim or a worktree, collides the fleet with itself, while one poll spent on a member that had in fact stopped costs only the poll.";
 
 test("the clause keeps the asymmetry that makes every alive-signal a precondition of the kill", () => {
-  assert.match(clause(), Pin.phrase(ASYMMETRY), `${SKILL}'s stalled-member clause lost its cost asymmetry — the reason a kill waits for every alive-signal to be silent.`);
+  assert.match(clause(), Pin.phrase(ASYMMETRY), `${REFERENCE}'s stalled-member clause lost its cost asymmetry — the reason a kill waits for every alive-signal to be silent.`);
 });
 
 // The two other sentences this change put in SKILL.md that the controller acts

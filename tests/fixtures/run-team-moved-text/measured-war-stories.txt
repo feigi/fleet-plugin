@@ -1,0 +1,644 @@
+**But a missing report is NOT evidence the member failed to send one — the
+inbound direction drops AND delays messages.** Both were measured in one run,
+and they are indistinguishable at the moment you look: one finisher's report was
+accepted with a msg_id and never arrived at all, while another's arrived late —
+its original and its re-send landing together, after the controller had already
+concluded it was missing. Measured: a finisher completed every
+duty, labelled the PR, and sent its report; the send was accepted with a msg_id
+and never arrived. The controller read the silence as the member ending its turn
+without reporting, said so, and was wrong. The re-send it asked for by name is
+the only reason the report exists. So when a report is missing, **ask by name —
+that is what the "unless the controller asks by name" clause is for — and do not
+attribute the gap to the member until it answers.** A member re-sending on a
+named request should state the original's msg_id and that it is a re-send, which
+is what distinguishes a lost message from a member that never sent one; a
+controller that skips the ask cannot tell those apart and will guess wrong in
+whichever direction its expectations point. The tick prints `SETTLE <member>`
+for a report file on disk that passes its schema and `REPORT-INVALID` for one
+that fails it, so a missing message is read off those lines before anyone is
+pinged.
+
+Note this cuts against the paragraph above only in appearance: the default stays
+*send once*, because unprompted re-sends were measured 2-to-1 false. The ask is
+the controller's move, not the member's.
+
+**You read your instruments out of a tree every member can write to — re-check
+them before every gate decision.** Per-member worktrees and `./agent-test`'s port
+derivation protect members from each other; neither protects the main checkout,
+which you run every gate probe out of and which any member can edit — except
+through a `write`/`edit`/`ast_edit` the `member-write-guard` extension refuses;
+a `bash` or `eval` write still lands. Measured: a
+member edited two files there instead of in its worktree while the CI monitor was
+polling one of them every 120s and a live finisher was using it to decide a
+label. It caught itself; nothing in the fleet would have. That is the silent
+direction — a modified instrument raises no error, shows in no PR and leaves
+nothing in the ledger, and it still returns a verdict, just not necessarily the
+right one, so you have no reason to re-check a script you did not know had
+changed.
+
+**A member runs its test suite in the foreground and blocks on it.**
+Backgrounding a suite and polling for it makes the member's own progress
+depend on a wake-up nothing in the fleet guarantees, and an idle member is
+indistinguishable from a working one — you learn only by pinging. Measured
+twice in one run: `fix-pr-1184` backgrounded its suite plus a Monitor and sat
+idle for roughly two hours; neither ever woke it, and the only reason no work
+was lost is that you pinged it by name with a concrete next action.
+`finisher-pr-1184` reached for the same pattern minutes later — a proactive
+warning is the only reason it did not repeat the stall. Its
+`pgrep -f 'finish-finisher-pr-1184'` could never have matched any process, so
+the poll it was waiting on was structurally incapable of firing. This file is
+yours, not theirs: the implementer, fix-applier and finisher briefs carry the
+rule, as the line `A member runs its test suite in the foreground and blocks on it.`
+
+**zsh word-splits an unquoted command substitution's result; it does NOT split
+an unquoted parameter expansion.** That one difference is the whole rule, and the
+hazard is the **assigned-variable** form, never `$(…)`. Measured on zsh 5.9
+against `849`, `850`, `852` on three lines:
+
+| Form | zsh | bash / sh |
+|---|---|---|
+| `prs=$(gh pr list …)` then `for pr in $prs` | **1 iteration**, all three glued into one value | 3 |
+| `for pr in $(gh pr list …)` | 3 | 3 |
+| `for _ in $(seq 1 60)` | 60 | 60 |
+
+**Word the rule against the first row.** A warning spelled *never `for x in
+$(…)`* names the safe form as the hazard, so a reader avoids the form that works,
+keeps the one that collapses, and rewrites correct bounded polls on the way.
+A ticket was once filed carrying that inversion in its own remedy clause and in its title,
+and its filer measured both forms and retracted it; the corrected rule is this
+row. `$(…)` splits. Leave it alone.
+
+The inline `$(printf '%s\n' "$prs")` form splits correctly too and is what Phase
+3's block uses, but it splits on *every* whitespace character, so it is safe only
+for values that cannot contain one — PR numbers cannot, branch names and paths
+can. Measured on a two-line list whose first value is `two words`: three
+iterations through `$(printf …)`, two through `while IFS= read -r`. On an empty
+`$prs` the counts diverge the other way: `for pr in $(printf '%s\n' "$prs")`
+iterates **zero** times, but the heredoc form iterates **once** with `pr` empty —
+the guard above is what stops that iteration from probing `--pr ""`.
+
+**`</dev/null` every command inside a `while read` loop.** The loop's stdin *is*
+the list, and any inner command that reads stdin eats the rest of it. Measured on
+the three-line list above: one unredirected inner reader takes the loop to **1
+iteration**, `</dev/null` on it restores 3 — the identical signature to the
+word-split bug, so a correct heredoc fix missing this half looks exactly like no
+fix at all, and reads as one.
+
+**`status` is a READ-ONLY variable in zsh**, an alias for `$?`. So the obvious
+bash idiom for reading the payload — `status=$(jq -r '.status' ci.json)` — aborts
+with `read-only variable: status`. Measured this way it fails safe (a hard abort,
+no merge), but the same assignment inside an `if`, or with stderr suppressed,
+reads as a check that silently did not run. Same root cause as the `PIPESTATUS`
+trap, opposite failure direction — so name the variable anything else
+(`ci_status`).
+
+**Every 5th Pull by ledger count goes at an exploration cell.** Count the `impl-`
+rows in `.fleet/ledger.md` at Pull time; the Pull that creates row 5, 10, 15 …
+is an Exploration Pull, and the router draws its cell: `k = 1 +
+(sha256("<session>\t<ticket>")[0:8] mod K)` over `router-table.json`'s
+`cells` minus the policy cell, in token order. While the table's `burn_in` is
+true every Pull draws, over every cell, the policy cell included. An
+Exploration Pull records `tier=<cell>` in the row, and a replacement inherits the row's tier —
+written at the Pull's row step, ahead of `ledger.mjs dispatch`, which reads it
+and prints `fleet-implementer-<cell>` as the `agent` to dispatch; a row with
+no `tier=` runs the policy cell. The
+assignment rolls to the next Pull when another open ticket sequences after
+it — a ticket the rest of the run
+depends on; `class` is not read. Do not tell the member it is a control: a member that
+knows it is being measured is not measuring the same thing.
+
+**The readout counts DELIBERATE comparisons.** An earlier rule asked
+only for a `session`+`role` carrying more than one distinct `model`, which any
+session that happened to stage a routine ticket beside a correction one
+satisfies. Measured 2026-09-12 on one corpus: 198 keys as that query was
+literally written, 35 sessions across 21 `run_date`s once restricted to
+implementers, against 17 real pairs across 8 — so the gate below read itself
+past its floor on sessions where nothing had been controlled. Dispatch alone
+is not enough either: the two rows must actually have RUN a different model or
+effort, because a deliberate dispatch whose two sides resolve to the same model
+(a `modelRoles` override, measured on omp 2026-09-12) controls nothing.
+
+**A verdict is a measurement only if it post-dates the run that produced it.** A
+`Sizing:` line typed in before the skill ever ran is byte-identical to one the
+skill produced, so the body cannot settle this alone, and neither can the
+member's prose. The report file carries the second source: `sizing.ranBeforePr`,
+whether `sizing-a-ticket` ran before the PR was opened (measured on a member
+that wrote the line first, caught itself, and corrected it), and
+`sizing.signal`, what the verdict turned on. `append` applies the rule itself:
+it records `sizing` only when `ranBeforePr` is true AND `signal` is non-empty.
+Any other state — no report file, one that fails its schema, `sizing` null,
+`ranBeforePr` not true, an empty `signal` — leaves the field BLANK with a
+WARNING naming which, and you say which in `note`. A `--sizing` you do pass
+wins over the file, and stderr names the flag as the source: do not use it to
+fill that gap, and do not re-derive the verdict from the diff to fill it
+either — `sizing-a-ticket` weighs more than file count, and a substituted proxy
+reads as measured too. **A value not in hand is left BLANK, never estimated** —
+blank reads as unknown and drops the row from a stratified comparison, while a
+guess reads as measured and poisons one. Blank still means the field is
+WRITTEN and empty: omit the flag (`--sizing`, `--profile`, `--loc`, `--files`)
+and the script writes that field empty at full width, because a row of some
+in-between width cannot be told apart from a shifted one. The `note` field is
+free text and sits before those four, so the script refuses a tab or newline in
+it: one tab would shift all four for that row alone.
+
+Why the agent body carries what it does — read this before editing any
+`fleet-implementer-<cell>` file, and keep every cell's body byte-identical. Each rule in the body's
+enumerate-and-declare block is load-bearing, for a different reason.
+**Enumerate-and-declare** answers a signature measured four times in one run:
+each implementer fixed exactly the cases its ticket named and left an adjacent
+one of the same class broken — a CRLF body **broken by** the fix for depth and
+split headings, a symlinked worktree after fixing locked and regular-file ones,
+an unreadable `refs/heads/<type>/` after fixing `refs/heads` itself, a bracketed
+file path after fixing typos and vendored ones. **All four failed to close their
+own ticket** — one's acceptance criterion went unmet, and the other three left
+the named defect reachable by a sibling spelling. Every one was caught by
+review, at review cost, which runs 3-5x the implementation it checks.
+
+**Beat when there is nothing to do, and never end your turn on a drained
+queue.** You cannot be woken. A backgrounded Monitor does not wake an idle
+agent — measured twice, see **A member runs its test suite in the foreground**
+above, where `fix-pr-1184` backgrounded a suite plus a Monitor and sat idle for
+roughly two hours — and `run-merge-bot.md`'s CI gate states the general rule:
+"whatever wakes you is external and may never come". So hold the wait yourself,
+exactly the way that gate does:
+
+**A conclusion is not stable, even for a fixed run id on an unchanged head.** A
+rerun rewrites the run in place, so never cache a conclusion; key watchers on
+`<run-id>:<attempt>:<conclusion>`. Leaving `attempt` out of the key is the bug
+that looks like it works: a rerun that lands on the *same* conclusion regenerates
+an already-seen key and fires nothing, so the second failure is silent and reads
+exactly like a run still in progress. **Building that key with jq's `//` is the
+same bug in the opposite direction**: `ci-state` reports an in-progress run as
+`conclusion: ""`, and `//` catches `null` and `false` but never the empty
+string, so `.conclusion // "-"` passes `""` straight through, keys a RUNNING job
+as terminal and fires a spurious not-green — measured in four separate runs,
+including one where the controller then had to re-arm blind. Test any fallback
+you write against `""`, `null` AND a real conclusion, and check it still lets
+the real one through: `map(if . == null or . == "" then "-" else tostring end)`.
+Also: the newest
+run on a branch is frequently *not* CI, so `--limit 1` can hide the CI result
+entirely.
+
+The 4 is the measured ceiling of one ci-state.mjs call on the counter `gh api rate_limit` reports, for single-page reads: 2 on the common path, 4 for a PR whose head dropped required jobs.
+
+**One gate, not a gate plus a caveat.** `jq -e '.verdict and .verdict !=
+"rate-limited"'` exits non-zero on unparseable input *and* on a false result, so
+that single test covers empty, garbage AND a self-named quota refusal. Empty
+stdin produces no result at all, which `-e` reports as exit 4 (measured), so a
+`[ -z "$st" ] ||` pre-check in front of it is a *second* gate testing what this
+one already tests — the caveat this heading is about. Leaving
+the named verdict to prose instead is how a watcher clears its latch on an
+outage payload and hands it downstream as CI state — the very blindness this
+section exists to remove, one level in. **The `.verdict and` half is load-bearing
+and not belt-and-braces**: inequality alone never tests that a verdict *exists*,
+so `{}`, `null` and `{"verdict":null}` all evaluate `null != "rate-limited"` →
+true and clear the gate (measured), handing an empty or error object downstream
+as a CI reading. Require the field, then compare it.
+
+**All pacing in exactly one place — the tick loop's own tail `sleep`.** A sleep
+inside the per-PR pass multiplies by the number of open PRs (8 open PRs → 960s
+of pause per tick, against the 24s outage reset measured below), and a degraded
+branch that `continue`s the *outer* loop skips the tail sleep and busy-spins
+probe pairs during exactly the outage it is reporting. Every degraded
+branch above falls through to the same single sleep instead.
+
+**The budget is gated at the floor and again at the pass, and only the pass
+gates announce recovery.** The tick-top floor (`200`) covers the `rate_limit`
+and `gh pr list` reads. Once the open-PR list is
+read, the pass gate reserves `200 + 4 × count` core REST units — 4 per listed PR
+on top of the floor, so the reserve grows with the list instead of staying a
+flat 200 that a long list drains mid-pass. The 4 is the measured ceiling of one
+`ci-state.mjs` call's cost on the counter `gh api rate_limit` reports (measured
+2026-10-13): 2 on the common path, 4 when the head dropped required jobs, for up
+to 100 jobs and 100 rules — more pages cost more. That counter is not the only
+core bucket one call bills. The lookups `actions/workflows`,
+`actions/workflows/<id>`, `actions/workflows/<id>/runs` and `actions/runs/<id>`
+bill a second one that `rate_limit` does not report; the boundary is per route,
+so `actions/runs/<id>/jobs` is on the reported counter. Every response says
+`X-Ratelimit-Resource: core`, so only the reset epoch and the used sequence tell
+the two apart, and the unreported bucket's remaining count is readable only from
+the `X-Ratelimit-Remaining` header of a call that bills it. **A second pass gate
+therefore probes it too**: one `gh api -i` read of
+`actions/workflows?per_page=1` per tick, 1 unit of that bucket (measured
+2026-10-13: its remaining count fell by 1 per call while `rate_limit` stood
+still, and its reset epoch differed from `rate_limit`'s). A `ci-state` call
+spends 4 units of it on the common path — one `gh run list` and one `gh run view`
+cost 2 each (measured the same day) — so it is held to the same `200 + 4 × count`
+reserve. It has its own global latch (`hidden_out`) and its DEGRADED and
+RECOVERED lines name it, so a pause on this bucket is not misread as the
+reported budget running low. An unreadable header is an outage here exactly as a
+non-numeric `rate_limit` read is. The probe runs only when the reported-bucket
+gate has cleared, so a tick costs at most one probe call. The gate pauses before
+the per-PR pass, so it never touches the per-PR blind latch: a PR is either not
+polled — no per-PR line, and one already latched blind stays latched — or polled
+and reported through that latch alone, never by both. A shortfall at any of
+these gates pauses the **whole** pass and never polls a prefix of the list: a prefix runs
+in list order, so the same tail PRs would go unread every tick with no line at
+all (never polled, so nothing marks them blind), while the PRs that were polled
+would run dry mid-pass and each emit a blind line. The DEGRADED line from each
+pass gate names the amount it needed and the count it needed it for — except an
+unreadable header, which has no amount to compare and prints `bucket=ERR` alone
+— so a healthy-looking `budget=999` is not read as an outage with no cause. Only the
+pass gates emit RECOVERED lines — the budget's and the unreported bucket's, and the
+open-PR list's and its cap's with them — and all of them only once the pass will
+actually run: announcing recovery at the floor, or for one bucket while the other
+still pauses the pass, would report resumption on a tick whose other gate then
+pauses it again — a DEGRADED/RECOVERED pair every tick — and announcing the list or
+its cap on the tick that reads it back would say polling resumed on a tick that
+polls nothing. A list or cap latch held across a paused tick stays latched and says
+nothing more.
+
+**Do not back off and wait.** These outages are short — a rolling window; one
+measured reset came 24 seconds after `remaining: 0` — and pausing members for a
+fixed interval stalls the fleet longer than the outage itself would have. A
+retry-and-wait loop is what turns a 60s outage into a stalled member. Report it,
+keep the local work moving (git, tests and mutation runs are all unaffected),
+re-probe.
+
+**Know the trim before you rely on it — it is wider than `docsOnly` suggests.**
+`diff-stats.mjs` calls a PR docs-only only when it touches **no** src, tests *or*
+config, but that strictness cuts both ways and the size tier trims again on top.
+Measured: a docs PR that also adds one test file is profile `tests-only` and runs
+**three** (correctness+tests+comments), not six; a no-src, no-test diff that
+carries a config file keeps silent-failure at **any** size, so a docs+config diff
+too big for the size tier now runs correctness+silent-failure+comments, not
+correctness+comments; and any `single-file` or `small` profile trims to
+correctness+silent-failure+comments, keeping tests only when a test file is in
+the diff. `comments` is on that floor
+unconditionally — it used to need a docs FILE, and `classify()` scores
+only a prose extension or a README/CHANGELOG-style name docs, so five production PRs whose whole
+substance was prose inside a `.js`/`.mjs`/`.sh` comment scored `docs: 0` and ran
+without the one specialist that fit them, `dimensionsUnrun` empty every time.
+That floor holds **regardless of `hasSrc`** — a one-file `.yml` or
+`.github/` shell change gets silent-failure too, not correctness alone.
+It is the size **tier's** floor,
+so `tests-only` outranks it when the diff has no config file: that profile is
+assigned ahead of `single-file`/`small`, so a no-src, no-config diff that also
+touches a test file gets no silent-failure-hunter — a tests-only diff that also
+carries a config file keeps it. `single-file` means one file at **any** size, so a
+one-file rewrite trims too. An unknown profile widens to the full six, the safe
+direction, so a trim is never something to count on in advance — and a full six
+is never something to assume.
+
+**A refutation resting on an injection nothing proved landed is not a refutation
+— it is a cell that never ran.** A mutation test and a finding reproduction are
+both failure injections: break something, read what the child does. When the
+break never reaches the child, the child behaves exactly like its baseline, which
+is what a genuine no-effect mutation looks like and what a correctly refuted
+finding looks like. So a negative result is admitted only together with its
+**positive control** — one run proving the injected difference is observable,
+either the child's output differing with the injection present versus absent or
+the child echoing the injected value back from inside. No control → the cell is
+unrun: re-run it, and never record it as a negative. Measured 2026-08-28 and
+re-measured on this tree, against a `probe.sh` that echoes both variables back:
+
+```sh
+zsh  -c 'cfg="SETB=1 BADJ=1"; env $cfg sh ./probe.sh'   # BADJ=[unset] SETB=[1 BADJ=1]
+bash -c 'cfg="SETB=1 BADJ=1"; env $cfg sh ./probe.sh'   # BADJ=[1]     SETB=[1]
+```
+
+zsh does not word-split an unquoted parameter expansion, so the whole string
+arrives as ONE argument: a variable literally named `SETB` takes the value
+`1 BADJ=1`, the injection variable `BADJ` is never set, and the probe still exits
+0. It bites in both directions, and the reproduction direction is the worse one —
+`fix-pr-983` nearly reported a mutant as behaving identically to its baseline,
+while `fix-pr-1153` nearly retired a real review finding as non-reproducing after
+the same shape handed both trees a single argv word and drew `exit 2` from each,
+which is the signature of a correct refutation with nothing anomalous to notice.
+The fix-applier body and every refuter brief carry the rule and the safe
+invocation form; the merge bot's brief is the wrong seat, because a bot
+reads gates and never injects a fault.
+
+**Where `<branch>` comes from:** the PR's head branch —
+`gh pr view <N> --json headRefName -q .headRefName`, or the same branch you cut
+the worktree from. Pass it as `--branch`, because
+the member cannot read it off git: references/isolation.md creates an already-open PR's worktree
+with `--detach`, and there `git branch --show-current` prints nothing and exits 0
+(measured 2026-09-18, git 2.50.1), so `git push origin
+"HEAD:$(git branch --show-current)"` exits 128 on `fatal: invalid refspec
+'HEAD:'`. A brief rendered without it would leave the push no destination at
+all, which is why the renderer requires it.
+
+**An unanswered question from the member is an outbox item, and it blocks
+dispatch with the same weight as a ruling you have already made.** It does not
+feel like one — you have decided nothing yet, so the outbox reads empty — but a
+member waiting on you is a member that will push once you answer, and the SHA
+you are about to pin is exactly what that push moves. Measured on one run:
+a `fix-pr-<M>` member asked whether to add two pins, and the finisher was held until the
+member acknowledged the answer. That worked because the controller chose to
+hold, not because a rule required it. Answer it, or tell the member you are not
+ruling and it should proceed on its own default — either empties the outbox.
+What does not empty it is noticing the question and dispatching anyway.
+
+2. **Confirm every deferral — and every claimed APPLY — has a home that outlives
+   the merge.** The test is a durable home, not a tracker number: a tracker
+   issue and a committed in-tree comment both qualify, and for a finding whose
+   remedy was measured worse than the defect the in-tree note is the better one.
+   What fails is a promise living only in a PR body, or on the PR's *own* source
+   issue, which `Closes #N` buries on merge. Caught once at seven findings. A
+   comment on an existing *follow-up* issue is filed: that is
+   `review-and-fix.md` step 5, not a violation. Not filed → file it or halt,
+   never label over it — and file it the way step 5 does, through
+   `ledger.mjs check "<subject>"`, never a bare search, labelled `needs-triage`
+   as every issue the plugin creates is, its body carrying the refuter's
+   verdict or the review's votes and the candidate remedy. A duplicate is a
+   comment citing that verdict on the existing issue, never a relabel: an open
+   `ready-for-agent` issue triage already promoted holds the deferral as it
+   stands. Only triage sets `ready-for-agent`, and step 5's guard on this rule —
+   open `needs-triage` issues citing `Deferred from PR` above 40 on 3
+   consecutive run dates send it back to the maintainer — counts these
+   filings too. The finisher files last,
+   off its own read of what the reviewer left behind, so a deferral it reads as
+   unfiled may already be on the tracker under someone else's wording. Then
+   record it the way step 5 does: `ledger.mjs filed <N> "<subject>"`
+   immediately after `gh issue create`, with the same subject string you passed
+   to `check`. If `filed` fails, retry once; if it fails again, leave the issue
+   alone — it exists and is correct — and report it `unrecorded: #N <subject>`.
+
+   **That range is right for the positive check and wrong for a negative one.**
+   It spans the implementer's commits too, so a constraint of the form *file X
+   was not touched* has to be scoped to the apply commit. Measured on one PR:
+   a controller wrote "neither document was touched" against
+   `origin/main...HEAD` on a two-commit branch whose documents the IMPLEMENTER
+   had correctly edited — the PR's whole point — and a finisher reading that
+   literally halts a correct PR. It caught the error instead, and said so; do
+   not rely on that.
+
+   **Whatever you verify by RUNNING, run in a tree nobody else owns.**
+   Independently re-running the ticket's acceptance mutation — loosen the
+   regex, delete the guard clause, flip the per-entry reset, run `<testCmd>`,
+   confirm a kill by the test-run verdict rule below, discard — is the half of this duty reading a diff cannot
+   do, and it stays. But it **writes**, and the PR's worktree belongs to
+   another member. Measured once: a finisher was inside that worktree at the
+   instant the fix-applier announced one more clause to land, and neither
+   ordering is detectable afterwards from the diff — a restore lands on the
+   uncommitted clause and destroys it silently, or the mutant is still in the
+   tree when the fix-applier commits and a deliberately broken guard ships as
+   the fix, in a commit nothing re-reviews. So take your own:
+   `git worktree add --detach <scratch>/pr<N>/finish-<your member name> <your dispatch pin>`,
+   mutate and run `<testCmd>` in there, then
+   `git worktree remove --force <scratch>/pr<N>/finish-<your member name>`.
+   **At your dispatch pin, never at the fetched branch tip** — duty 1 just
+   proved the owned worktree sits at that pin, and `PR headRefOid` may carry
+   commits no reviewer read, the substitution the halt block's head-equality
+   check rejects for the same reason. `<scratch>` is the absolute root your dispatch prompt names. The member name is in the path because
+   the scratch root is shared with every sibling, so `<scratch>/pr<N>` alone
+   collides whenever a PR gets a second finisher, and `worktree add` on an
+   occupied path fails closed into a halt with a purely mechanical cause.
+
+   **Remove it on every path, the failing ones included** — a mutant that comes
+   back green, a suite that will not start, your own halt at any duty. `--force`
+   is required and is right only here: the tree is deliberately dirty when you
+   are done, so a plain `git worktree remove` refuses it (`contains modified or
+   untracked files`, rc 128, directory left on disk — measured, git 2.50.1),
+   while everywhere else in this runbook that refusal is a finding precisely
+   because the dirt may be someone's only copy. Here nothing in it is anyone's.
+   Nothing sweeps a leak for you either: `reap.sh`'s branchless sweep is bounded
+   to the fleet's worktree home, so a tree under `<scratch>` is a `kept` entry
+   it reports and never collects. No claim built the tree you added, so it has
+   `./agent-test` only if the repository tracks one — run that or `<testCmd>`
+   in it, per `references/isolation.md`, **A reused worktree may lack the runner**.
+
+**Every implementer body carries the claim discipline, because tickets that
+restate facts ship new wrong claims** — inherited from the ticket, and minted
+in prose nobody asked for. It was measured on tickets that would have been
+judged routine too: an unasked-for comment asserting a silent-failure mode
+that does not exist, a false comparative plus positional references replacing
+a name-based one, and two present-tense counts already false when they were
+written.
+Nothing before dispatch can see the diff, so the discipline goes to every
+implementer. A pushed commit body cannot be edited, so its claims are settled
+at write time.
+
+**A settling command over literal text uses `grep -F`, and its zero counts only
+after the same command finds a line known to match.** Prose fragments and
+code snippets routinely carry `\`, `.`, `*`, `[` or `$`, and without `-F` those
+are read as a pattern rather than as the text itself, so the command answers
+for a different string from the one the claim names — and a wrong zero is the
+benign-looking answer. Measured once: `grep -c 'settled by:\s+x'` answers
+0 against a file holding that exact line, and `grep -cF` answers 1. A zero or
+an absence counts only after the same command, with the same flags, finds a
+line known to match: a command that cannot find a match settles nothing, and
+under `Verified:` its zero reads as a checked absence.
+
+Measured 2026-09-09 in a throwaway clone (`/tmp/fleet-probe`)
+that never touched the real checkout.
+
+**A fleet member is never dispatched with omp's `isolated: true`.** Measured:
+an isolated spawn builds its workspace under `~/.omp/wt/<hash>/m` — an APFS
+clone (on this box), never a registered `git worktree` of the repo — and,
+because `apply` defaults to `true`, its changes are patch-applied into the
+**calling session's own cwd** the instant the spawn completes: a file an
+isolated probe created there appeared as `?? probe-isolated.txt` in the probe
+session's own cwd — which for an actual fleet run is the controller's main
+checkout — not in the worktree the prompt named. That is the exact
+silent-spill hazard this section exists to guard against, on by default, so
+`isolated` stays unused for every member and `task.isolation.enabled` stays
+off.
+
+**A member's tree is the claimed worktree, addressed by absolute path.** An
+`edit` header without the worktree prefix resolves into the main checkout,
+where `member-write-guard` refuses it (**You read your instruments out of a
+tree every member can write to** above). How a
+member gets its cwd: the `task` tool's item schema — `name`/`agent`/`task`/
+`outputSchema`/`schemaMode` always, `effort`/`isolated` only when their own
+settings enable them — carries no working-directory field; measured
+directly: a member dispatched through it with none of those fields, told
+only to report `pwd`, returned the calling session's own cwd, not the
+claimed worktree, the same output an un-`cwd`-set `bash` call gives from
+that session, so the recipe is the dispatch-prompt absolute path, plus
+`bash`'s own `cwd` parameter set to it on every call and absolute paths for
+`write`/`edit`.
+
+**The one open gap that probe measured: `task` does not accept a per-dispatch
+working directory.** `omp://tools/task.md` documents non-isolated spawns as
+running `runSubprocess(...)` "directly with parent cwd" — no `cwd` field
+appears anywhere in the item schema — and the probe above confirms it in
+practice: the recipe is the absolute-path discipline above, not a placeholder
+for a `cwd` field that does not exist. The gap is now enforced rather than only
+written down: the plugin's `member-write-guard` omp extension
+refuses a fleet member's `write`/`edit`/`ast_edit` into the main checkout's
+non-ignored tree and an implementer's `bash` from a main-checkout cwd, and the
+missing field itself is requested upstream in `can1357/oh-my-pi`.
+
+**The same gap reaches past the filesystem: `task`-dispatched members share one
+`eval` kernel.** Measured 2026-09-21, in a live run rather than a
+probe clone: two sibling implementers dispatched in the same batch, and the
+controller that dispatched both, reported the same Python kernel pid and the
+same runner file under `$TMPDIR/omp-python-runner/`, and each read the others'
+top-level bindings out of its own `eval` cell — a bare `WT` bound by one member
+was read back by a sibling and by the controller, the collision a ticket was filed
+on as an unproven self-report. `omp://tools/eval.md` states the mechanism:
+retained kernels are keyed by `python:${sessionId}`, normalized cwd and
+interpreter — `js:${sessionId}` for the JS VM — and "Parent and ordinary task
+subagents may share an inherited eval executor id; children created by eval's
+own `agent()` explicitly do not." Neither key component separates two members
+of one run: the session id is inherited from the controller, and the cwd is the
+main checkout for all of them, because `eval`, unlike `bash`, takes no `cwd`
+parameter to set. So the absolute-path discipline above is load-bearing inside
+`eval` too, and it needs one rule `write`/`edit` do not — member-prefixed
+binding names, since a shared global has no path to be absolute about. The
+corollary is `reset`: it "is likewise destructive to concurrent work sharing
+that backend session", so a member resetting its own kernel resets every
+concurrent sibling's. No per-dispatch knob turns any of this off: `task`'s item
+shape carries no kernel, executor or cwd field, and `python.kernelMode` set to
+`"per-call"` — the one documented lever that would hand every call a fresh
+kernel — is a session setting a child inherits, not something one dispatch can
+set for one member. Isolating a member's kernel is an omp-side change, so
+discipline is the whole of the remedy here — unlike the missing `cwd` field
+above, which `member-write-guard` enforces for `write`/`edit`/`ast_edit` and
+`eval` bypasses. **Phase 2** carries all three rules to every member.
+
+**`release-ticket.sh` is not a no-op on omp, and `inflight.sh`'s probes are
+unaffected by a running member.** Measured against a hand-built claim (a
+branch plus a `git worktree add`) with a member sleeping inside it: a `bash`
+call with `cwd` set to the worktree, and a non-isolated `task` spawn told to
+work there, both operate inside the existing worktree and leave `git worktree
+list` unchanged — they coexist with the claim rather than duplicating it. An
+isolated spawn is architecturally blind to the worktree — its relative writes
+land in its own `~/.omp/wt/…` workspace regardless of the prompt — but it
+neither removes nor hides the claim, and `~/.omp/wt/` was empty after every
+isolated run: omp's own teardown touches only omp's own workspace, never the
+claim. `release-ticket.sh`'s three-artifact teardown (label, worktree, branch)
+is therefore still necessary. With the member live inside
+the worktree, `git worktree list` and `git branch --list` from the main
+checkout reported the claim unchanged before, during and after — `inflight.sh`
+hides nothing from omp.
+
+**Default: In-flight bound 5, fixed for the run.** The level is set by load, not
+throughput: B caps live review units (≤ open PRs ≤ B), and the review side is
+about 84 % of cache-write tokens, fanning out to 1 snapshot + up to 6
+specialists + 2 refuters per finding. 5 keeps worst-case review concurrency
+below the former reviewer count of 6 and sits near the measured mean In flight
+of 5.6. On the means that allows ≈ 1.7 merges per open-time hour against 1.89
+measured, so the default does not rest on throughput headroom and the guard's
+throughput test may trip on it; the merge gate saturates near 10–11, so
+raising B past that buys nothing. 8 was rejected: peak review concurrency above
+the former reviewer count, for a throughput gain the backlog does not show it
+needs. Re-derive it from the map's guard once 20 or more PRs have merged under
+it, never from one run's rows.
+
+- **A pattern kill reaches siblings — the implementer, fix-applier and finisher briefs forbid it.** `pkill -f
+  <pattern>` matches on the whole command line, machine-wide. Members hold
+  separate worktrees, but the process table is not partitioned by them and a
+  test file's name is identical in every one, so a pattern naming a test file
+  matches whichever member happens to be running it. Measured: an implementer
+  chasing its own stalled run issued a `pkill -f` on its test file's name and
+  killed a `node --test` over two test files that was not
+  its own.
+
+  **What the victim's output looks like depends on the signal — and one of the
+  cases is a clean green.** Each measured on node v26.8.1/darwin against a
+  purpose-spawned fixture killed by its own PID. `pkill -f` **defaults to
+  SIGTERM**, and a SIGTERMed runner prints `Interrupted while running:` followed
+  by a *complete* summary block with `cancelled` non-zero, exiting `rc=1` — so
+  `cancelled` is exactly the thing to search for in the default case. `pkill -9
+  -f` leaves no summary block at all and the shell reports `rc=137`: SIGKILL
+  means the harness never lived long enough to report. A kill landing on one of
+  node's per-file **child** test processes leaves a complete block with `fail`
+  non-zero and `cancelled 0` at `rc=1`, indistinguishable from an ordinary test
+  failure. And a kill landing on a process a **test itself spawns** leaves a
+  complete `pass N / fail 0 / cancelled 0` at the expected N over a corrupted
+  run: `spawnSync` reports a SIGKILLed child as `status null`, and a test
+  asserting only that the process it spawned exited non-zero —
+  `assert.notEqual(r.status, 0)`, a form used across this suite, in files that
+  spawn the shell scripts they cover — passes vacuously on `null`.
+
+  **The command line is no partition either — not reliably.** Ports are derived
+  per issue precisely so collisions are impossible; argv isolates a run only
+  sometimes. Measured with `ps -Ao pid,ppid,args -ww` (without `-ww` macOS `ps`
+  truncates, and the truncation reads as an absence): an invocation carrying an
+  **absolute** path puts a member-unique string in argv, while one carrying
+  repo-relative filenames is byte-identical across members. Which of the two you
+  get is not yours to choose — members are briefed on `./agent-test` with the
+  arguments the Test entrypoint takes, and the runner hands them on exactly as
+  its caller's shell expanded them. Clearing your own leftover process needs its
+  PID, not a pattern.
+
+**Landing it.** The file being right is not the end of it. `main` carries a
+ruleset with no bypass actors, so a direct `git push origin main` is **refused** —
+`! [remote rejected] main -> main (push declined due to repository rule
+violations)`, measured 2026-08-10 by a controller that tried exactly that at the
+end of a 7-PR run. A mid-run tooling fix goes through a PR like every other
+change, and that PR faces every required check any other PR faces — the set
+`.github/rulesets/main.json` declares — so it carries a release label too.
+Plan it as a PR the run's own merge queue lands, never as an edit-and-continue.
+
+**A frozen transcript does not establish that a member is dead — the
+discriminator is its scratch dir.** A member wedged on a blocked tool call
+emits the whole signature of a dead one: record counts unchanged from one poll
+of its transcript to the next. So read the mtimes of the files anywhere under
+the scratch directory its own dispatch prompt assigned it, subdirectories
+included — `<scratch>/impl-<N>/` for an implementer, that member's own
+run-scoped subdirectory under `<scratch>/pr<N>/` on the review side, never
+the bare `pr<N>/` tree those siblings share — since a member waiting on a
+child it dispatched writes nothing itself while that child writes below it.
+Read them at two observations a poll apart — `touch` a marker file outside
+that directory at the first, and
+`find <dir> -type f -newer <marker>` at the second lists every file that
+moved: **mtimes that moved between the two mean BLOCKED, a live member
+still holding its claim and its worktree, so the killed row above does not
+apply to it; mtimes unchanged at both are the dead signature.** Only the first
+of those two verdicts is conclusive — a member wedged on a call that writes
+nothing freezes its scratch dir too — so settle the dead one on the Member
+unaccounted row above, never on the two listings alone. Measured once: a refuter
+wedged forever on `until grep -q` for a marker `node --test` never writes, its
+transcript's record counts unchanged across two polls while its own scratch
+files carried fresh mtimes throughout — alive the entire time it read as dead.
+The filenames are not a contract: they are whatever that member happens to be
+writing, and they differ by member and by role. That second listing is cheap
+at the price, because the cost of the wrong call is asymmetric — a live member
+written off gets killed and re-dispatched, which discards the work in flight
+and, where it holds a claim or a worktree, collides the fleet with itself,
+while one poll spent on a member that had in fact stopped costs only the poll.
+The refuter's own observation rule in the fix-applier body stops a
+member from creating that state; this one stops you from misreading whoever
+reaches it anyway, and neither replaces the other.
+
+**Writer policy: the controller owns run state (`row`/`token`/`settle`/`dispatch`/`review`/`drain`/`ruled`);
+filers append filings with `filed`; all writes are serialized by `<file>.lock`.**
+Every write rewrites the whole file from what it read, so without the lock two
+concurrent writers are last-writer-wins — measured, 8 concurrent `filed` kept
+2–5 of 8 rows. A writer that cannot take the lock within 10 s exits 2
+naming the holder's pid, having written nothing; a lock whose holder is dead is
+taken over, and a leftover `<file>.lock.reap` is never reclaimed. One other
+shape wedges the lock permanently the same way, needing the same fix: an empty
+`<file>.lock` — its writer was killed between creating it and writing its pid
+into it — is unparseable and therefore, by design, always read as live rather
+than handed to the death check; its timeout names `<file>.lock` itself, since
+there is no pid to name. A zombie holder — a pid whose process exited
+but whose parent never `wait()`-ed on it — also answers a liveness check as
+alive, because the OS keeps a reserved pid until it is reaped, but that is
+transient, not a wedge: once the pid is reaped (the parent's own exit is
+normally enough to trigger this), the next writer's death check reads it as
+dead and takes the lock over the same as any other dead holder — no hand
+removal needed. The other two shapes do not clear on their own — remove
+`<file>.lock` or `<file>.lock.reap` by hand once nothing is writing. Reads
+(`check`, `read`) take no lock.
+
+**The gap the lock does not close:** `check` → `gh issue create` → `filed` is
+three commands, and the lock covers each one alone, so two filers can both read
+`clean` in the seconds before either records. Accepted — the measured
+same-run accidental duplicate was filed minutes apart — and no
+claim/reserve step exists to close it.
+
+`check` exits **0** clean, **1** already in this run's filed list, **2** usage
+error (no JSON on stdout), **3** the ledger is clean but open or closed tracker issues match — read
+those and decide. Exit **3** is scored: some row gh returned has to score above
+zero against the subject, because the ANDed query also matches issues the
+overlap rates 0.00, and every measured stop over those was survived only by a
+reader who overrode it and searched the tracker by hand — obeying it would have
+dropped a real deferral. It also prints the closest filed rows with an overlap score.
+Those never move the exit code — the same finding gets worded differently by
+whoever finds it second — but once the tracker read succeeds, a filed row at or
+above `NEAR_SOFT_HIT` in `ledger.mjs` does move the verdict to `soft-hit`, as
+does a tracker set with no scoring row in it; a read that failed stays
+`unverified`, which outranks both. **Exit 0 is not automatically "safe to file":** when `gh`
+cannot be reached the answer is ledger-only, and it says `TRACKER NOT CHECKED` —
+an issue filed by an earlier run is invisible to it; and `soft-hit` means rows
+worth reading were found while none of them established a duplicate, so read
+them before filing. The stdout JSON names all of that in one field:
+`verdict` is `already-filed`, `tracker-hit`, `clean`, `soft-hit` or
+`unverified`. Only `already-filed` and `tracker-hit` carry a non-zero code, so
+`verdict` is the only thing that tells a searched-and-clean tracker from one
+that was never read and from one whose rows you have to read yourself.

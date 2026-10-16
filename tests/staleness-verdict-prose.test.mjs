@@ -139,7 +139,7 @@ for (const [code, row] of VERDICT_ROWS) {
 
 test(`${SKILL} makes a \`could not check\` ticket reach its member annotated as one`, () => {
   assert.match(
-    pull.paragraph(SURVIVORS, PULL, Pin.END).text,
+    pull.paragraph(SURVIVORS, PULL, "## Every 5th Pull goes at an exploration cell").text,
     Pin.phrase(ANNOTATE),
     `${SKILL} no longer says "${ANNOTATE}". The dispatch prompt is where the third value has to land — a probe that could not look answers exactly like one that looked and found nothing, so a ticket dispatched without the verdict reads to its member as one the probe checked and found live, which is the collapse into a neighbour that the third value exists to prevent. Restore it, or re-anchor ANNOTATE in this file to the new wording.`,
   );

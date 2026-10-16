@@ -38,8 +38,29 @@ const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 // Nested inside the section (never `RUN_TEAM` directly), so a sibling
 // ticket's own prose elsewhere in the file cannot satisfy or break these
 // anchors.
+//
+// The section's measured paragraphs — the isolated spill, the cwd recipe, the
+// missing cwd field, the shared eval kernel, the release/inflight probe —
+// moved, with the probes' provenance, to references/isolation.md; the section
+// keeps each rule beside its pointer. Their pins read the reference file's
+// probe sections, bounded at both ends for the same reason.
+const ISOLATION = Pin.file(join(REPO, "skills", "run-team", "references", "isolation.md"));
+const probes = () => ISOLATION.between("## Where the omp probes ran", "## A pattern kill reaches siblings", "references/isolation.md omp probe sections").text;
 const cwdRecipe = () =>
-  RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").paragraph("**A member's tree is the claimed worktree", "run-team/SKILL.md cwd recipe", "**The one open gap").text;
+  ISOLATION.section("## A member's tree is the claimed worktree, addressed by absolute path", "references/isolation.md cwd recipe").text;
+
+test("run-team/SKILL.md: the section keeps each moved rule beside its pointer to references/isolation.md", () => {
+  const section = RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text;
+  for (const rule of [
+    "**A fleet member is never dispatched with omp's `isolated: true`.**",
+    "**A member's tree is the claimed worktree, addressed by absolute path.**",
+    "**The one open gap that probe measured: `task` does not accept a per-dispatch working directory.**",
+    "**The same gap reaches past the filesystem: `task`-dispatched members share one `eval` kernel.**",
+    "**`release-ticket.sh` is not a no-op on omp, and `inflight.sh`'s probes are unaffected by a running member.**",
+  ]) {
+    assert.match(section, Pin.phrase(`${rule} See references/isolation.md.`), `the section lost, or lost the pointer beside: ${rule}`);
+  }
+});
 
 test("run-team/SKILL.md: claim, release and reap are named unchanged on omp, with no dialect branch", () => {
   assert.match(
@@ -58,12 +79,12 @@ test("run-team/SKILL.md: isolated is never used, with the calling-session-cwd sp
   // "unless X" exception clause (~140 chars) to survive inside it; these do
   // not.
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    probes(),
     /`isolated:\s+true`[\s\S]{0,80}~\/\.omp\/wt\/<hash>\/m[\s\S]{0,160}patch-applied\s+into\s+the[\s\S]{0,20}calling\s+session's\s+own\s+cwd[\s\S]{0,120}probe-isolated\.txt/,
     "the isolated-never-used rule or its measured evidence (workspace path, patch-apply-into-calling-session's-cwd, the probe file) is gone, or an exception clause was spliced into one of the tightened gaps",
   );
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    probes(),
     Pin.phrase("`isolated` stays unused for every member and `task.isolation.enabled` stays off"),
   );
   // The measured/inferred split the review demanded: the probe measured its
@@ -71,7 +92,7 @@ test("run-team/SKILL.md: isolated is never used, with the calling-session-cwd sp
   // controller case is stated as the explicit inference it is, not folded
   // into the measurement.
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    probes(),
     Pin.phrase("in the probe session's own cwd — which for an actual fleet run is the controller's main checkout"),
     "the probe-cwd sentence no longer distinguishes what was measured from the controller case it infers",
   );
@@ -91,12 +112,12 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
   // probe clone, and a reader who assumes the same of this one would discount
   // it as not reproducing the real dispatch path.
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    probes(),
     /`task`-dispatched\s+members\s+share\s+one\s+`eval`\s+kernel[\s\S]{0,80}live\s+run\s+rather\s+than\s+a\s+probe\s+clone[\s\S]{0,170}same\s+Python\s+kernel\s+pid[\s\S]{0,90}each\s+read\s+the\s+others'\s+top-level\s+bindings/,
     "the shared-kernel claim, its live-run provenance, or the pid/cross-read evidence behind it is gone",
   );
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    probes(),
     Pin.phrase("a bare `WT` bound by one member was read back by a sibling and by the controller"),
     "the reproduced collision no longer names the bare variable the original report was filed on",
   );
@@ -104,7 +125,7 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
   // keying reads as a partition and the conclusion looks unsupported — the
   // point is that both key components are constant across one run's members.
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    probes(),
     Pin.phrase("the session id is inherited from the controller, and the cwd is the main checkout for all of them"),
     "the section no longer explains why the documented kernel key fails to separate two members of one run",
   );
@@ -113,14 +134,14 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
   // own `agent()` children are isolated by construction, and a future editor
   // deciding how to fix this needs to know which spawns already are.
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    probes(),
     Pin.phrase("children created by eval's own `agent()` explicitly do not"),
     "the isolated-by-construction exception for eval's own agent() children is gone, so the finding reads as covering every spawn",
   );
   // The corollary bound to its blast radius — `reset` is the destructive half
   // of the same mechanism, and it is the one a member reaches for innocently.
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    probes(),
     /corollary\s+is\s+`reset`[\s\S]{0,140}resetting\s+its\s+own\s+kernel\s+resets\s+every[\s\S]{0,20}concurrent\s+sibling's/,
     "the reset corollary or the sibling damage it causes is gone from the section",
   );
@@ -131,14 +152,14 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
   // field. Bound to the lever that does exist, so "no knob" cannot be read as
   // "nobody checked".
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    probes(),
     /No\s+per-dispatch\s+knob\s+turns\s+any\s+of\s+this\s+off[\s\S]{0,50}no\s+kernel,\s+executor\s+or\s+cwd\s+field[\s\S]{0,180}session\s+setting\s+a\s+child\s+inherits,\s+not\s+something\s+one\s+dispatch\s+can[\s\S]{0,30}set\s+for\s+one\s+member/,
     "the section no longer records that no per-dispatch knob isolates a member's kernel, or drops the inherited-session-setting reason behind it",
   );
   // The measurement is only worth recording if it reaches members. Phase 2 is
   // where the rules are carried verbatim, so the pointer is pinned with it.
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    probes(),
     Pin.phrase("**Phase 2** carries all three rules to every member"),
     "the section no longer points at the phase that actually delivers these rules to a member",
   );
@@ -173,7 +194,7 @@ test("run-team/SKILL.md: the cwd recipe names the task tool's missing cwd field,
 
 test("run-team/SKILL.md: the measured gap states task has no per-dispatch cwd, quoting the doc", () => {
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    probes(),
     /`task`\s+does\s+not\s+accept\s+a[\s\S]{0,30}per-dispatch\s+working\s+directory[\s\S]{0,200}directly\s+with\s+parent\s+cwd[\s\S]{0,200}no\s+`cwd`\s+field\s+appears\s+anywhere\s+in\s+the\s+item\s+schema/,
     "the gap verdict, or the omp://tools/task.md quote it rests on, is gone",
   );
@@ -181,17 +202,17 @@ test("run-team/SKILL.md: the measured gap states task has no per-dispatch cwd, q
 
 test("run-team/SKILL.md: release-ticket.sh is not a no-op on omp and inflight.sh's probes are unaffected", () => {
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    probes(),
     /`release-ticket\.sh`\s+is\s+not\s+a\s+no-op\s+on\s+omp,\s+and\s+`inflight\.sh`'s\s+probes\s+are\s+unaffected\s+by\s+a\s+running\s+member/,
     "the release/inflight headline claim is gone",
   );
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    probes(),
     Pin.phrase("`~/.omp/wt/` was empty after every isolated run: omp's own teardown touches only omp's own workspace, never the claim"),
     "the measured teardown-scope evidence behind 'not a no-op' is gone",
   );
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    probes(),
     Pin.phrase("`inflight.sh` hides nothing from omp"),
   );
 });

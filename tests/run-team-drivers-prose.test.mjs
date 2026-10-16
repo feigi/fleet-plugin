@@ -157,11 +157,12 @@ test("End of run runs closeout.mjs begin, the ordinary loop, then closeout.mjs f
   assert.match(endOfRun(), Pin.phrase("so a claim you keep leaves `begin` at exit 4 on every run"));
 });
 
-test("the verdict rules stay in the guard, where the controller rules each PR", () => {
+test("the verdict rules stay in the guard, where the controller rules each PR; the BLANK rule's paragraph is in references/reviewers.md", () => {
   const guard = SKILL.between("**Guard: accumulate per PR", "The member-facts scrape, the drain of the pending ticket-features rows", "run-team guard").text;
-  assert.match(guard, Pin.phrase("**A value not in hand is left BLANK, never estimated**"));
   assert.match(guard, Pin.phrase("--closed-own-ticket yes|no --minted-false-claim yes|no"));
-  assert.match(guard, Pin.phrase("A verdict is a measurement only if it post-dates the run that produced it."));
+  assert.match(guard, Pin.phrase("**A verdict is a measurement only if it post-dates the run that produced it.** See references/reviewers.md."));
+  const moved = Pin.file(join(REFERENCES, "reviewers.md")).section("## A sizing verdict is a measurement only if it post-dates the run that produced it", "references/reviewers.md").text;
+  assert.match(moved, Pin.phrase("**A value not in hand is left BLANK, never estimated**"));
 });
 
 // --- each NEED a driver prints has its paragraph --------------------------------

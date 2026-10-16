@@ -85,12 +85,17 @@ test("--in-flight is the run's bound, omp leaves it at its default, and the sema
   assert.doesNotMatch(region, /--in-flight \d/, "the rule now hard-codes a numeric bound — the point of leaving it at its default is that no caller passes one");
 });
 
+// The Defaults paragraph moved, with its measurements, to references/pull.md;
+// SKILL.md keeps the default beside the pointer.
+const PULL_MD = Pin.file(join(REPO, "skills", "run-team", "references", "pull.md"));
 test("the Defaults paragraph states the bound's default with its rationale and the re-derive rule, and the retired sizing note is gone", () => {
-  const def = RUN_TEAM.paragraph("**Default: In-flight bound 5, fixed for the run.**", "run-team Defaults paragraph", "**The review backlog never gates").text;
+  const kept = RUN_TEAM.paragraph("**Default: In-flight bound 5, fixed for the run.**", "run-team Defaults paragraph", "**The review backlog never gates").text;
+  assert.match(kept, Pin.phrase("**Default: In-flight bound 5, fixed for the run.** See references/pull.md."));
+  const def = PULL_MD.section("## Default: In-flight bound 5", "references/pull.md Defaults section").text;
   assert.match(def, Pin.phrase("fixed for the run"));
   assert.match(def, Pin.phrase("set by load, not throughput"));
   assert.match(def, Pin.phrase("once 20 or more PRs have merged under it, never from one run's rows"));
-  assert.doesNotMatch(def, /1\.95/, "the Defaults paragraph still carries the retired reviewer sizing note");
+  assert.doesNotMatch(`${kept}\n${def}`, /1\.95/, "the Defaults paragraph still carries the retired reviewer sizing note");
 });
 
 test("§ Queue depth defines In flight and the In-flight bound, and documents the hold's rank, detail and refresh rule", () => {
@@ -398,15 +403,17 @@ test("End of run follows the drain bullet and ends with --stop (#2968)", () => {
   assert.match(b, Pin.phrase("then records `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded stop as the end of the run."));
 });
 
-// The ask-by-name paragraph, where a missing report is handled. The tick's
-// SETTLE line is the report file read off disk, so the paragraph sends the
-// controller to that line before it pings anyone; without the sentence a
-// report that is on disk still costs an ask-by-name round trip. A file that
-// fails its schema is REPORT-INVALID, not SETTLE, because `settle
+// The ask-by-name paragraph, where a missing report is handled; it moved to
+// references/member-lifecycle.md, and SKILL.md keeps its rule beside a pointer.
+// The tick's SETTLE line is the report file read off disk, so the paragraph
+// sends the controller to that line before it pings anyone; without the
+// sentence a report that is on disk still costs an ask-by-name round trip. A
+// file that fails its schema is REPORT-INVALID, not SETTLE, because `settle
 // --from-report` refuses it, so the paragraph names both.
-const askByNameParagraph = () => RUN_TEAM.paragraph(
+const MEMBER_LIFECYCLE = Pin.file(join(REPO, "skills", "run-team", "references", "member-lifecycle.md"));
+const askByNameParagraph = () => MEMBER_LIFECYCLE.paragraph(
   "**But a missing report is NOT evidence the member failed to send one",
-  "run-team ask-by-name paragraph",
+  "member-lifecycle.md ask-by-name paragraph",
   "Note this cuts against the paragraph above only in appearance",
 ).text;
 

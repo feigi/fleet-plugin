@@ -1,0 +1,57 @@
+# The run ledger: the evidence behind its rules
+
+Evidence for the rules SKILL.md states in **Run ledger**, keyed by the rule each justifies.
+
+## Writer policy: every write is serialized by `<file>.lock`
+
+**Writer policy: the controller owns run state (`row`/`token`/`settle`/`dispatch`/`review`/`drain`/`ruled`);
+filers append filings with `filed`; all writes are serialized by `<file>.lock`.**
+Every write rewrites the whole file from what it read, so without the lock two
+concurrent writers are last-writer-wins — measured, 8 concurrent `filed` kept
+2–5 of 8 rows. A writer that cannot take the lock within 10 s exits 2
+naming the holder's pid, having written nothing; a lock whose holder is dead is
+taken over, and a leftover `<file>.lock.reap` is never reclaimed. One other
+shape wedges the lock permanently the same way, needing the same fix: an empty
+`<file>.lock` — its writer was killed between creating it and writing its pid
+into it — is unparseable and therefore, by design, always read as live rather
+than handed to the death check; its timeout names `<file>.lock` itself, since
+there is no pid to name. A zombie holder — a pid whose process exited
+but whose parent never `wait()`-ed on it — also answers a liveness check as
+alive, because the OS keeps a reserved pid until it is reaped, but that is
+transient, not a wedge: once the pid is reaped (the parent's own exit is
+normally enough to trigger this), the next writer's death check reads it as
+dead and takes the lock over the same as any other dead holder — no hand
+removal needed. The other two shapes do not clear on their own — remove
+`<file>.lock` or `<file>.lock.reap` by hand once nothing is writing. Reads
+(`check`, `read`) take no lock.
+
+## The gap the lock does not close
+
+**The gap the lock does not close:** `check` → `gh issue create` → `filed` is
+three commands, and the lock covers each one alone, so two filers can both read
+`clean` in the seconds before either records. Accepted — the measured
+same-run accidental duplicate was filed minutes apart — and no
+claim/reserve step exists to close it.
+
+## `check`'s exits and its `verdict`
+
+`check` exits **0** clean, **1** already in this run's filed list, **2** usage
+error (no JSON on stdout), **3** the ledger is clean but open or closed tracker issues match — read
+those and decide. Exit **3** is scored: some row gh returned has to score above
+zero against the subject, because the ANDed query also matches issues the
+overlap rates 0.00, and every measured stop over those was survived only by a
+reader who overrode it and searched the tracker by hand — obeying it would have
+dropped a real deferral. It also prints the closest filed rows with an overlap score.
+Those never move the exit code — the same finding gets worded differently by
+whoever finds it second — but once the tracker read succeeds, a filed row at or
+above `NEAR_SOFT_HIT` in `ledger.mjs` does move the verdict to `soft-hit`, as
+does a tracker set with no scoring row in it; a read that failed stays
+`unverified`, which outranks both. **Exit 0 is not automatically "safe to file":** when `gh`
+cannot be reached the answer is ledger-only, and it says `TRACKER NOT CHECKED` —
+an issue filed by an earlier run is invisible to it; and `soft-hit` means rows
+worth reading were found while none of them established a duplicate, so read
+them before filing. The stdout JSON names all of that in one field:
+`verdict` is `already-filed`, `tracker-hit`, `clean`, `soft-hit` or
+`unverified`. Only `already-filed` and `tracker-hit` carry a non-zero code, so
+`verdict` is the only thing that tells a searched-and-clean tracker from one
+that was never read and from one whose rows you have to read yourself.

@@ -2,9 +2,11 @@
 // re-run at the commit that ships it, written inline beside it, because a
 // pushed body cannot be edited and none of the diff-scoped rules reach it. The
 // rule itself and the literal-text `-F` rule live in the claim-discipline block
-// every implementer agent body carries; run-team's SKILL.md keeps the rationale
-// paragraph and the two settling-command paragraphs that follow it. This file
-// pins both homes. The same block's anti-count rule is pinned in
+// every implementer agent body carries; run-team's SKILL.md keeps the
+// literal-path grep paragraph, and the rationale paragraph and the `-F`
+// paragraph each as its rule beside a pointer — both paragraphs moved, with
+// their measurements, to references/correction-tickets.md. This file pins
+// every home. The same block's anti-count rule is pinned in
 // `fix-applier-correction-rules-prose.test.mjs`, as one ordered span.
 //
 // Measured against `origin/main` before this file existed: no test read the
@@ -62,6 +64,19 @@ const FROM = "Every implementer body carries the";
 const TO = "### Merge bot";
 const rule = () => flatten(RUN_TEAM.between(FROM, TO, "the claim-discipline rationale and settling-command rules").text);
 
+// The rationale and the `-F` paragraph, as references/correction-tickets.md
+// carries them under their headings.
+const CORRECTION_TICKETS = Pin.file(join(REPO, "skills", "run-team", "references", "correction-tickets.md"));
+const MOVED_SECTIONS = ["## Every implementer body carries the claim discipline", "## A settling command over literal text uses `grep -F`"];
+const movedFrom = (pin) => flatten(MOVED_SECTIONS.map((h) => pin.section(h, "references/correction-tickets.md").text).join("\n"));
+const moved = () => movedFrom(CORRECTION_TICKETS);
+
+test("SKILL.md keeps the rationale's rule and the -F rule, each beside its pointer to references/correction-tickets.md", () => {
+  const r = rule();
+  assert.match(r, Pin.phrase("Every implementer body carries the claim discipline, because tickets that restate facts ship new wrong claims — inherited from the ticket, and minted in prose nobody asked for. See references/correction-tickets.md."));
+  assert.match(r, Pin.phrase("A settling command over literal text uses `grep -F`, and its zero counts only after the same command finds a line known to match. See references/correction-tickets.md."));
+});
+
 // The claim-discipline block of the implementer agent body — the hand-over
 // itself, since the harness injects that body as every implementer's system
 // prompt.
@@ -98,14 +113,16 @@ test("the literal-path grep is forbidden AND the method that replaces it is give
 });
 
 test("a settling command over literal text takes -F, and its zero counts only after a known match", () => {
-  const r = rule();
+  const r = moved();
   // #1087. The `-F` half, bound to the measured case that shows why: a
   // literal line holding `\s+` is read as a pattern and answers 0 against
   // itself. Without the case the rule reads as style, not as a false zero.
+  // The pinned span runs past the section heading's own words, into the lead
+  // sentence's body, so the heading cannot stand in for the rule.
   assert.match(
     r,
-    Pin.phrase("A settling command over literal text uses `grep -F`"),
-    "the rule no longer tells a settling command over literal text to use grep -F",
+    Pin.phrase("A settling command over literal text uses `grep -F`, and its zero counts only after the same command finds a line known to match."),
+    "the rule no longer tells a settling command over literal text to use grep -F, with its zero counted only after a known match",
   );
   assert.match(
     r,
@@ -132,14 +149,14 @@ test("a settling command over literal text takes -F, and its zero counts only af
   // boundary between "ree" and "BSD"), and this repo's own dev grep reports
   // itself as "2.6.0-FreeBSD" (measured), so that miss is not hypothetical.
   assert.doesNotMatch(
-    RUN_TEAM.paragraph("**A settling command over literal text uses `grep -F`", "the literal-text grep rule", "### Merge bot").text,
+    CORRECTION_TICKETS.section("## A settling command over literal text uses `grep -F`", "references/correction-tickets.md").text,
     /ugrep|ripgrep|claude code|bsd|gnu/i,
     "the literal-text grep rule now names a grep implementation or harness — #1087 ruled it harness-independent",
   );
 });
 
 test("the rationale says why every implementer gets the discipline and why a body claim is settled at write time", () => {
-  const r = rule();
+  const r = moved();
   assert.match(
     r,
     Pin.phrase("Nothing before dispatch can see the diff, so the discipline goes to every implementer"),
@@ -169,18 +186,42 @@ test("the agent body hands every implementer the literal-text -F rule, positive 
 });
 
 test("a rewrapped rule still matches — these pins refuse drift, not reflow", () => {
-  // The ACCEPT side. Re-wrapping this paragraph is not drift, and a pin that
+  // The ACCEPT side. Re-wrapping these paragraphs is not drift, and a pin that
   // reddened on it would be deleted by the next person who reflowed the file.
   // The fixture is DERIVED from the live text, never a quoted line: a quoted
   // one turns every reword into a red on the fixture guard rather than on the
   // pin, which is an accept control that reddens on the edits it exists to
-  // accept.
+  // accept. Each section's body is rewrapped below its own heading line, so
+  // the headings that bound the slices stay headings.
+  let text = CORRECTION_TICKETS.text;
+  for (const heading of MOVED_SECTIONS) {
+    const body = CORRECTION_TICKETS.section(heading, "references/correction-tickets.md").text.slice(heading.length).trim();
+    // Re-wrapped narrower than the file's ~80 columns, so every wrap point lands
+    // somewhere different from today's. At word boundaries, not one word per line.
+    const words = body.split(/\s+/).filter(Boolean);
+    const lines = words.reduce((acc, w) => {
+      const last = acc[acc.length - 1];
+      if (last && `${last} ${w}`.length <= 45) acc[acc.length - 1] = `${last} ${w}`;
+      else acc.push(w);
+      return acc;
+    }, []);
+    const narrow = lines.join("\n");
+    // Load-bearing: it reds if the source is already at this width, which would
+    // make the rewrap a no-op and this whole test vacuous.
+    assert.notEqual(narrow, body, "the rewrap fixture no longer changes the rule's wrapping — update it");
+    // Replacer function, not a replacement string: `$&`, `$'` and `` $` `` are
+    // interpreted in the latter.
+    text = text.replace(body, () => narrow);
+  }
+  const flat = movedFrom(Pin.of(text, "the fixture"));
+  assert.match(flat, Pin.phrase("A pushed commit body cannot be edited, so its claims are settled at write time"));
+  assert.match(flat, Pin.phrase("A zero or an absence counts only after the same command, with the same flags, finds a line known to match"));
+  assert.match(flat, Pin.phrase("A settling command over literal text uses `grep -F`"));
+});
+
+test("a rewrapped SKILL.md slice still matches — the literal-path grep paragraph that stayed", () => {
   const raw = RUN_TEAM.between(FROM, TO, "the claim-discipline rationale and settling-command rules").text;
   const body = raw.replace(/\n*#*\s*$/, "");
-  // Re-wrapped narrower than the file's ~80 columns, so every wrap point lands
-  // somewhere different from today's. At word boundaries, not one word per
-  // line: an unconditional break would split the slice's own opening anchor and
-  // red this test on the anchor rather than on the pin.
   const words = body.split(/\s+/).filter(Boolean);
   const lines = words.reduce((acc, w) => {
     const last = acc[acc.length - 1];
@@ -189,15 +230,8 @@ test("a rewrapped rule still matches — these pins refuse drift, not reflow", (
     return acc;
   }, []);
   const narrow = lines.join("\n");
-  // Load-bearing: it reds if the source is already at this width, which would
-  // make the rewrap a no-op and this whole test vacuous.
   assert.notEqual(narrow, body, "the rewrap fixture no longer changes the rule's wrapping — update it");
-  // Replacer function, not a replacement string: `$&`, `$'` and `` $` `` are
-  // interpreted in the latter, and this slice carries a `$` today in `%b`'s
-  // neighbourhood the moment anyone adds a shell variable to the example.
   const flat = flatten(Pin.of(RUN_TEAM.text.replace(raw, () => narrow), "the fixture").between(FROM, TO, "rewrapped rule").text);
-  assert.match(flat, Pin.phrase("A pushed commit body cannot be edited, so its claims are settled at write time"));
   assert.match(flat, Pin.phrase("that answers which ones depend on its contents"));
-  assert.match(flat, Pin.phrase("A zero or an absence counts only after the same command, with the same flags, finds a line known to match"));
   assert.match(flat, Pin.phrase("A settling command over literal text uses `grep -F`"));
 });

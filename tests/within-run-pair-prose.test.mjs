@@ -25,6 +25,14 @@ const PULL_MD = Pin.file(join(REPO, "skills", "run-team", "references", "pull.md
 const dispatch = () =>
   RUN_TEAM.between("**Dispatch every implementer", "The raw split still favours the top tier", "run-team phase 2 dispatch rule").text;
 
+// The every-5th-Pull paragraph moved, with its measurement, to
+// references/pull.md; phase 2 keeps the rule beside the pointer.
+const exploration = () => PULL_MD.section("## Every 5th Pull goes at an exploration cell", "run-team references/pull.md exploration cell").text;
+
+test("phase 2 keeps the every-5th-Pull rule beside its pointer to references/pull.md", () => {
+  assert.match(dispatch(), Pin.phrase("**Every 5th Pull by ledger count goes at an exploration cell.** See references/pull.md."));
+});
+
 test("phase 2 dispatches an exploration cell's implementer on every 5th Pull", () => {
   const slice = dispatch();
   assert.match(slice, /fleet-implementer-<cell>/, "phase 2 no longer dispatches an exploration cell at all");
@@ -50,7 +58,7 @@ test("phase 2 dispatches an exploration cell's implementer on every 5th Pull", (
 // the concrete row-count claim — only the "every 5th Pull" phrase two
 // sentences above it.
 test("phase 2 counts the exploration cell by ledger row 5, 10, 15 …, not by any other cadence", () => {
-  const slice = dispatch();
+  const slice = exploration();
   assert.match(
     slice,
     /the Pull that creates row 5, 10, 15 …/,
@@ -61,7 +69,7 @@ test("phase 2 counts the exploration cell by ledger row 5, 10, 15 …, not by an
 test("phase 2 does not tell the exploration member it is a control", () => {
   // A member that knows it is being measured is not measuring the same thing.
   assert.match(
-    dispatch(),
+    exploration(),
     /do not tell the member it is a control/i,
     "phase 2 no longer withholds the control status from the member",
   );
@@ -115,7 +123,7 @@ test("phase 2 counts the rate off the ledger's impl- rows, and a replacement doe
   // member inherits its row's tier instead of drawing a Pull number of its
   // own. Without that clause a killed-and-replaced member shifts every later
   // exploration assignment by one, silently.
-  const slice = dispatch();
+  const slice = exploration();
   assert.match(
     slice,
     /Count\s+the\s+`impl-`\s+rows\s+in\s+`\.fleet\/ledger\.md`\s+at\s+Pull\s+time/,
@@ -130,7 +138,7 @@ test("phase 2 counts the rate off the ledger's impl- rows, and a replacement doe
   // written here is a second copy of the routing, free to disagree with the
   // table the router reads.
   assert.match(slice, /the\s+router\s+draws\s+its\s+cell/, "phase 2 no longer says the router draws the exploration cell");
-  assert.doesNotMatch(slice, /Until\s+the\s+router\s+draws/, "phase 2 names a stand-in exploration cell again");
+  assert.doesNotMatch(`${dispatch()}\n${slice}`, /Until\s+the\s+router\s+draws/, "phase 2 names a stand-in exploration cell again");
   assert.match(
     slice,
     /While\s+the\s+table's\s+`burn_in`\s+is\s+true\s+every\s+Pull\s+draws,\s+over\s+every\s+cell,\s+the\s+policy\s+cell\s+included/,

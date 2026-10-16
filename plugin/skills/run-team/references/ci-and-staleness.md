@@ -60,6 +60,23 @@ currency check. So never cache conclusion; key watchers on
 re-marked, not re-run. Nothing in `ci-state.mjs` cached for same reason: only
 safe design is re-query at moment of decision.
 
+**A conclusion is not stable, even for a fixed run id on an unchanged head.** A
+rerun rewrites the run in place, so never cache a conclusion; key watchers on
+`<run-id>:<attempt>:<conclusion>`. Leaving `attempt` out of the key is the bug
+that looks like it works: a rerun that lands on the *same* conclusion regenerates
+an already-seen key and fires nothing, so the second failure is silent and reads
+exactly like a run still in progress. **Building that key with jq's `//` is the
+same bug in the opposite direction**: `ci-state` reports an in-progress run as
+`conclusion: ""`, and `//` catches `null` and `false` but never the empty
+string, so `.conclusion // "-"` passes `""` straight through, keys a RUNNING job
+as terminal and fires a spurious not-green — measured in four separate runs,
+including one where the controller then had to re-arm blind. Test any fallback
+you write against `""`, `null` AND a real conclusion, and check it still lets
+the real one through: `map(if . == null or . == "" then "-" else tostring end)`.
+Also: the newest
+run on a branch is frequently *not* CI, so `--limit 1` can hide the CI result
+entirely.
+
 ## `--limit 1` hides CI
 
 Newest run on branch frequently *not* CI — label or policy workflow often lands
@@ -74,3 +91,12 @@ stale-**green**. Behind-count only honest signal. And one rebase per PR at merge
 time enough: reviewers label on own green without requiring currency, and
 requiring it earlier costs full CI cycle per sibling merge — six wasted cycles
 in one run. Any behind-count you hand bot expired on arrival.
+
+## Beat when there is nothing to do, and never end your turn on a drained queue
+
+**Beat when there is nothing to do, and never end your turn on a drained
+queue.** You cannot be woken. A backgrounded Monitor does not wake an idle
+agent — measured twice, see **A member runs its test suite in the foreground** in references/member-lifecycle.md, where `fix-pr-<M>` backgrounded a suite plus a Monitor and sat idle for
+roughly two hours — and `run-merge-bot.md`'s CI gate states the general rule:
+"whatever wakes you is external and may never come". So hold the wait yourself,
+exactly the way that gate does:

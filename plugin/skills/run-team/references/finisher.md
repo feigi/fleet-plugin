@@ -1,0 +1,93 @@
+# The finisher: why its gate and duties are shaped the way they are
+
+Evidence for the finisher rules SKILL.md states in **Reviewers**, keyed by the rule each justifies.
+
+## An unanswered question from the member is an outbox item
+
+**An unanswered question from the member is an outbox item, and it blocks
+dispatch with the same weight as a ruling you have already made.** It does not
+feel like one — you have decided nothing yet, so the outbox reads empty — but a
+member waiting on you is a member that will push once you answer, and the SHA
+you are about to pin is exactly what that push moves. Measured on one run:
+a `fix-pr-<M>` member asked whether to add two pins, and the finisher was held until the
+member acknowledged the answer. That worked because the controller chose to
+hold, not because a rule required it. Answer it, or tell the member you are not
+ruling and it should proceed on its own default — either empties the outbox.
+What does not empty it is noticing the question and dispatching anyway.
+
+## Duty 2: every deferral, and every claimed APPLY, has a home that outlives the merge
+
+**Confirm every deferral — and every claimed APPLY — has a home that outlives
+   the merge.** The test is a durable home, not a tracker number: a tracker
+   issue and a committed in-tree comment both qualify, and for a finding whose
+   remedy was measured worse than the defect the in-tree note is the better one.
+   What fails is a promise living only in a PR body, or on the PR's *own* source
+   issue, which `Closes #N` buries on merge. Caught once at seven findings. A
+   comment on an existing *follow-up* issue is filed: that is
+   `review-and-fix.md` step 5, not a violation. Not filed → file it or halt,
+   never label over it — and file it the way step 5 does, through
+   `ledger.mjs check "<subject>"`, never a bare search, labelled `needs-triage`
+   as every issue the plugin creates is, its body carrying the refuter's
+   verdict or the review's votes and the candidate remedy. A duplicate is a
+   comment citing that verdict on the existing issue, never a relabel: an open
+   `ready-for-agent` issue triage already promoted holds the deferral as it
+   stands. Only triage sets `ready-for-agent`, and step 5's guard on this rule —
+   open `needs-triage` issues citing `Deferred from PR` above 40 on 3
+   consecutive run dates send it back to the maintainer — counts these
+   filings too. The finisher files last,
+   off its own read of what the reviewer left behind, so a deferral it reads as
+   unfiled may already be on the tracker under someone else's wording. Then
+   record it the way step 5 does: `ledger.mjs filed <N> "<subject>"`
+   immediately after `gh issue create`, with the same subject string you passed
+   to `check`. If `filed` fails, retry once; if it fails again, leave the issue
+   alone — it exists and is correct — and report it `unrecorded: #N <subject>`.
+
+## `origin/main...HEAD` is right for the positive check and wrong for a negative one
+
+**That range is right for the positive check and wrong for a negative one.**
+It spans the implementer's commits too, so a constraint of the form *file X
+was not touched* has to be scoped to the apply commit. Measured on one PR:
+a controller wrote "neither document was touched" against
+`origin/main...HEAD` on a two-commit branch whose documents the IMPLEMENTER
+had correctly edited — the PR's whole point — and a finisher reading that
+literally halts a correct PR. It caught the error instead, and said so; do
+not rely on that.
+
+## Whatever you verify by running, run in a tree nobody else owns
+
+**Whatever you verify by RUNNING, run in a tree nobody else owns.**
+Independently re-running the ticket's acceptance mutation — loosen the
+regex, delete the guard clause, flip the per-entry reset, run `<testCmd>`,
+confirm a kill by the test-run verdict rule in SKILL.md, discard — is the half of this duty reading a diff cannot
+do, and it stays. But it **writes**, and the PR's worktree belongs to
+another member. Measured once: a finisher was inside that worktree at the
+instant the fix-applier announced one more clause to land, and neither
+ordering is detectable afterwards from the diff — a restore lands on the
+uncommitted clause and destroys it silently, or the mutant is still in the
+tree when the fix-applier commits and a deliberately broken guard ships as
+the fix, in a commit nothing re-reviews. So take your own:
+`git worktree add --detach <scratch>/pr<N>/finish-<your member name> <your dispatch pin>`,
+mutate and run `<testCmd>` in there, then
+`git worktree remove --force <scratch>/pr<N>/finish-<your member name>`.
+**At your dispatch pin, never at the fetched branch tip** — duty 1 just
+proved the owned worktree sits at that pin, and `PR headRefOid` may carry
+commits no reviewer read, the substitution the halt block's head-equality
+check rejects for the same reason. `<scratch>` is the absolute root your dispatch prompt names. The member name is in the path because
+the scratch root is shared with every sibling, so `<scratch>/pr<N>` alone
+collides whenever a PR gets a second finisher, and `worktree add` on an
+occupied path fails closed into a halt with a purely mechanical cause.
+
+## Remove the verification worktree on every path
+
+**Remove it on every path, the failing ones included** — a mutant that comes
+back green, a suite that will not start, your own halt at any duty. `--force`
+is required and is right only here: the tree is deliberately dirty when you
+are done, so a plain `git worktree remove` refuses it (`contains modified or
+untracked files`, rc 128, directory left on disk — measured, git 2.50.1),
+while everywhere else in this runbook that refusal is a finding precisely
+because the dirt may be someone's only copy. Here nothing in it is anyone's.
+Nothing sweeps a leak for you either: `reap.sh`'s branchless sweep is bounded
+to the fleet's worktree home, so a tree under `<scratch>` is a `kept` entry
+it reports and never collects. No claim built the tree you added, so it has
+`./agent-test` only if the repository tracks one — run that or `<testCmd>`
+in it, per `references/isolation.md`, **A reused worktree may lack the runner**.

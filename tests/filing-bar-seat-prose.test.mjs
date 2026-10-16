@@ -96,8 +96,15 @@ test("step 5 files every issue needs-triage, a confirmed defect with an open rem
   );
 });
 
+// Duty 2's paragraph moved, with its war story, to references/finisher.md; the
+// duty list keeps the rule beside the pointer.
+const FINISHER_MD = read("skills", "run-team", "references", "finisher.md");
 test("finisher duty 2 files the way step 5 does, needs-triage, and lands a duplicate as a comment", () => {
-  const d = flat(RUN_TEAM.between("2. **Confirm every deferral", "**A fix-applier's \"applied\" is a claim like any other**", "run-team finisher duty 2").text);
+  assert.match(
+    flat(RUN_TEAM.between("2. **Confirm every deferral", "**A fix-applier's \"applied\" is a claim like any other**", "run-team finisher duty 2").text),
+    Pin.phrase("2. **Confirm every deferral — and every claimed APPLY — has a home that outlives the merge.** See references/finisher.md."),
+  );
+  const d = flat(FINISHER_MD.section("## Duty 2: every deferral, and every claimed APPLY, has a home that outlives the merge", "references/finisher.md duty 2").text);
   assert.match(d, Pin.phrase("labelled `needs-triage` as every issue the plugin creates is"), "finisher duty 2 no longer files `needs-triage`");
   assert.match(d, Pin.phrase("A duplicate is a comment citing that verdict on the existing issue, never a relabel"), "finisher duty 2 no longer lands a duplicate as a comment");
   assert.match(d, Pin.phrase("Only triage sets `ready-for-agent`"), "finisher duty 2 no longer reserves `ready-for-agent` to triage");
