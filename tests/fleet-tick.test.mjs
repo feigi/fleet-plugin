@@ -4722,7 +4722,7 @@ test("deriveRun: reporters are every unsettled member token — never a settled 
 // ---------------------------------------------------------------------------
 // UNRECORDED / NO-TRANSCRIPT: the session directory's listing against the
 // ledger's tokens. Advisory, like CHECK-LIVENESS: no row, no `quiet`, no slot.
-import { transcriptStems, unrecordedLines, noTranscriptLines } from "../plugin/scripts/fleet-tick.mjs";
+import { transcriptStems, unrecordedLines, noTranscriptLines, ageChecks } from "../plugin/scripts/fleet-tick.mjs";
 
 test("transcriptStems: the stem of every .jsonl name, sorted; nothing else in the listing", () => {
   assert.deepEqual(transcriptStems(["impl-9.jsonl", "impl-12-b.jsonl", "notes.txt", "agent-abc123.jsonl", "impl-3.json"]),
@@ -5108,4 +5108,52 @@ test("CLI: a receipt whose session is empty names no session, so a record is rea
     { heads: [7], receipt: (root) => (r) => ({ ...r, scratch: root, session: "" }) });
   assert.equal(t.status, 0, t.stderr);
   assert.deepEqual(pullLines(t.stdout).map(actionOf), ["PULL #7 (Q2 pending — pull.mjs answer 7 decided …)"]);
+});
+
+// The age-based checks a degraded heartbeat file silences: its `seen` stamps
+// cannot be read, so every live token reads as first seen now.
+test("ageChecks: CHECK-LIVENESS for a live token of a known family, NO-TRANSCRIPT for a live member token with no transcript in a listed session", () => {
+  assert.deepEqual(ageChecks({ live: ["fix-pr-5", "impl-12", "review:PR#6"], stems: ["fix-pr-5"] }), ["CHECK-LIVENESS", "NO-TRANSCRIPT"]);
+  assert.deepEqual(ageChecks({ live: ["fix-pr-5", "impl-12"], stems: null }), ["CHECK-LIVENESS"], "no session listing, so no NO-TRANSCRIPT");
+  assert.deepEqual(ageChecks({ live: ["fix-pr-5", "impl-12"], stems: ["fix-pr-5", "impl-12"] }), ["CHECK-LIVENESS"], "every member has its transcript");
+  assert.deepEqual(ageChecks({ live: ["review:PR#6"], stems: [] }), ["CHECK-LIVENESS"], "a review launch is no member and has no transcript named after it");
+  assert.deepEqual(ageChecks({ live: ["agent-abc123"], stems: [] }), [], "a name of no family is in neither check");
+  assert.deepEqual(ageChecks({ live: [], stems: [] }), []);
+});
+
+test("CLI: a degraded heartbeat file prints one stderr line naming the age checks it silences, prints no age-based line, leaves the file byte-identical and stdout otherwise unchanged; a valid file prints no such line", () => {
+  const corrupt = '{ "seen": {"impl-12"';
+  const writeCorrupt = (repo) => writeFileSync(join(repo, "..", "heartbeat.json"), corrupt);
+  const skipped = (r, checks) => `fleet-tick: ${checks} not checked — ${join(r.dir, "heartbeat.json")} is not JSON, so first-seen ages are unavailable`;
+  const agelessOf = (r) => r.stderr.split("\n").filter((l) => l.includes(" not checked — ") && l.endsWith("first-seen ages are unavailable"));
+  const ageBased = /^(CHECK-LIVENESS|NO-TRANSCRIPT) /;
+  const withoutAgeBased = (stdout) => stdout.split("\n").filter((l) => !ageBased.test(l)).join("\n");
+  const degraded = runCli([], { ...SESSIONED, keep: true, beforeRun: writeCorrupt });
+  const valid = runCli([], { ...SESSIONED, keep: true, beforeRun: seedState(seenAgo({ "impl-12": 10, "fix-pr-5": 10 })) });
+  try {
+    assert.equal(degraded.status, 0, degraded.stderr);
+    assert.equal(valid.status, 0, valid.stderr);
+    assert.deepEqual(agelessOf(degraded), [skipped(degraded, "CHECK-LIVENESS and NO-TRANSCRIPT")]);
+    assert.equal(degraded.stdout.split("\n").filter((l) => ageBased.test(l)).length, 0, "nothing age-based prints off a degraded file");
+    assert.equal(readFileSync(join(degraded.dir, "heartbeat.json"), "utf8"), corrupt, "the degraded file is left byte-identical");
+    assert.deepEqual(agelessOf(valid), []);
+    assert.match(valid.stdout, /^NO-TRANSCRIPT impl-12 /m, "the valid file's ages do reach the check");
+    assert.equal(withoutAgeBased(degraded.stdout), withoutAgeBased(valid.stdout));
+  } finally {
+    rmSync(degraded.dir, { recursive: true, force: true });
+    rmSync(valid.dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: over a degraded heartbeat file the line names only the age checks that would have run, and none prints with no live token", () => {
+  const writeCorrupt = (repo) => writeFileSync(join(repo, "..", "heartbeat.json"), "{");
+  const agelessOf = (r) => {
+    assert.equal(r.status, 0, r.stderr);
+    return r.stderr.split("\n").filter((l) => l.endsWith("first-seen ages are unavailable")).map((l) => l.replace(/ not checked — .*$/, ""));
+  };
+  assert.deepEqual(agelessOf(runCli([], { ...SESSIONED, beforeRun: writeCorrupt, phase0: (r) => ({ ...r, session: "" }) })), ["fleet-tick: CHECK-LIVENESS"],
+    "no session to list, so NO-TRANSCRIPT would not have run");
+  assert.deepEqual(agelessOf(runCli([], { ...AGED, beforeRun: writeCorrupt })), ["fleet-tick: CHECK-LIVENESS"],
+    "every live member has its transcript, so NO-TRANSCRIPT would not have named one");
+  assert.deepEqual(agelessOf(runCli([], { ...IDLE, beforeRun: writeCorrupt })), [], "no live token, nothing to check");
 });
