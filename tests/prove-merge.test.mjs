@@ -203,6 +203,25 @@ function mergeUpdated(t) {
   return { w, branchPoint, mainTip, pre, post };
 }
 
+/**
+ * The mirrored direction: a main-based branch merges the feature branch in.
+ * Main moves on after `feat` is cut, then `feat` is merged into `upd`: main's
+ * tip is post^1 and the reviewed head `pre` is post^2. Nothing is merged back
+ * yet; each test lands `post` itself. Leaves `upd` checked out.
+ */
+function mergeFeatIntoUpd(t) {
+  const w = repo(t);
+  git(w, "checkout", "-q", "-b", "feat");
+  const pre = commit(w, "feature work");
+  git(w, "checkout", "-q", "main");
+  const mainTip = commit(w, "main moves on");
+  git(w, "push", "-q", "origin", "main");
+  git(w, "checkout", "-q", "-b", "upd", "main");
+  git(w, "merge", "-q", "--no-ff", "-m", "merge feat into upd", "feat");
+  const post = git(w, "rev-parse", "HEAD");
+  return { w, pre, mainTip, post };
+}
+
 // The four shared gates plus leg 1's merge-commit replacement, all true.
 const MERGE_COMMIT_GATES = {
   preIsParentOfHead: true,
@@ -231,15 +250,7 @@ test("merge-commit path proves true when the branch was updated by merging main 
 test("merge-commit path proves true when pre is the SECOND parent of post", (t) => {
   // The other merge direction: a main-based branch merges the feature branch in,
   // so the reviewed head `pre` is post^2 and main's side is post^1.
-  const w = repo(t);
-  git(w, "checkout", "-q", "-b", "feat");
-  const pre = commit(w, "feature work");
-  git(w, "checkout", "-q", "main");
-  commit(w, "main moves on");
-  git(w, "push", "-q", "origin", "main");
-  git(w, "checkout", "-q", "-b", "upd", "main");
-  git(w, "merge", "-q", "--no-ff", "-m", "merge feat into upd", "feat");
-  const post = git(w, "rev-parse", "HEAD");
+  const { w, pre, post } = mergeFeatIntoUpd(t);
   assert.equal(git(w, "rev-parse", `${post}^2`), pre, "fixture: pre is the second parent of post");
 
   const merge = mergeNoFf(w, post, "merge upd");
@@ -272,15 +283,7 @@ test("merge-commit path proves false when pre is post's main-side FIRST parent (
   // The mirrored parent order: a main-based branch merges the feature in, so
   // main's tip is post^1 and the reviewed head is post^2. Passing the main side
   // as pre must fail leg 1 whichever parent position it holds.
-  const w = repo(t);
-  git(w, "checkout", "-q", "-b", "feat");
-  commit(w, "feature work");
-  git(w, "checkout", "-q", "main");
-  const mainTip = commit(w, "main moves on");
-  git(w, "push", "-q", "origin", "main");
-  git(w, "checkout", "-q", "-b", "upd", "main");
-  git(w, "merge", "-q", "--no-ff", "-m", "merge feat into upd", "feat");
-  const post = git(w, "rev-parse", "HEAD");
+  const { w, mainTip, post } = mergeFeatIntoUpd(t);
   assert.equal(git(w, "rev-parse", `${post}^1`), mainTip, "fixture: main's tip is the first parent of post");
 
   const merge = mergeNoFf(w, post, "merge upd");
