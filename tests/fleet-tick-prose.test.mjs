@@ -12,6 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { EVENT_HEADER } from "./support/fleet-event-header.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
@@ -24,7 +25,7 @@ const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 // begins. Widened to the whole Phase 3 loop it would be satisfied by the wake
 // bullets' own mentions of the tick, which say nothing about the script.
 const tickBlock = () =>
-  RUN_TEAM.between("**Every wake ends in the tick.**", "**Own the CI waits.**", "run-team tick block").text;
+  RUN_TEAM.between("**In one line, every wake is one `fleet-event.mjs` call, which ends in the tick.**", "**Own the CI waits.**", "run-team tick block").text;
 
 // The six counts a caller used to state (#1803 deleted them, spec 2026-09-24
 // § 6 §1). Any one of them back in the block is a controller told to supply a
@@ -70,40 +71,39 @@ test("--max-reviews defaults to the reviewer cap, and omp leaves it there", () =
   assert.doesNotMatch(region, /--max-reviews \d/, "the rule now hard-codes a numeric bound — the point of leaving it at its default is that no caller passes one");
 });
 
-test("the record-before-tick table names every wake, each with what it records", () => {
-  // Spec 2026-09-24 § 6 §7. The table IS the edge list now: a wake missing from
-  // it is a wake that records nothing and so is invisible to the tick, which
-  // reads only the ledger. Row by row, each by its wake and its record.
-  const table = RUN_TEAM.paragraph("| Wake | Record, then tick |", "record-before-tick table", "Then run the tick, act on every line it prints,").text;
+test("the wake table names every wake, each with its fleet-event.mjs command", () => {
+  // The table IS the edge list: a wake missing from it is a wake that records
+  // nothing and so is invisible to the tick, which reads only the ledger. What
+  // each command records is in fleet-event.mjs's header, which
+  // fleet-event-wake-table.test.mjs pins; here each wake is pinned to its command.
+  const table = RUN_TEAM.paragraph("| Wake | Command |", "wake table", "Act on every line the call prints, the tick's last, and arm the beat.").text;
   const rows = table.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Wake"));
   const WAKES = [
-    // A member's report is a file; the settle reads it, checks its claim and records its filings.
-    ["Implementer report", ["settle impl-<N> --from-report", "verify-sha.sh", "`bailed`"]],
-    ["Review workflow notification / `review-pr-<n>` report", ["<scratch>/pr<pr>/<run>/review.json", "reviewed=<head>:<survived>/<refuted>/<unverified>:<run>"]],
-    ["Fix-applier report", ["settle fix-pr-<M> --from-report", "ruled"]],
-    // The settle refuses a `labelled` with no label; the controller's ruling keeps the repair path.
-    ["Finisher report", ["settle finisher-pr-<M> --from-report", "settle finisher-pr-<M>=labelled"]],
-    // #2083: a halt is its own outcome, escalated on the PR itself, then resolved by cause.
-    ["Finisher report (halted)", ["settle finisher-pr-<M> --from-report", "gh pr comment <M>", "**Resolving a finisher halt**"]],
-    ["Finisher report (failed / killed)", ["settle finisher-pr-<M>=failed", "**Resolving a finisher that died**"]],
-    ["Label seen (persistent Monitor)", ["nothing to record"]],
-    ["CI run terminal", ["ci=<run-id>:<attempt>:<conclusion>", "finisher gate"]],
-    ["Merge-bot pass report", ["held-behind:#<lower>", "settle merge-bot-<n> --from-report", "`tick --apply` runs the reap and the reclaim"]],
-    ["Drain", ["ledger.mjs drain", "settle impl-<N>=released"]],
-    ["Heartbeat", ["nothing to record"]],
+    ["Implementer report", "`fleet-event.mjs impl-report impl-<N>`"],
+    ["Review result file written (workflow notification / `review-pr-<n>` report)", "`fleet-event.mjs review-result <pr> <path>`"],
+    ["Review launch failed", "`fleet-event.mjs review-failed <pr> <launch>`"],
+    ["Fix-applier report", "`fleet-event.mjs fix-report fix-pr-<M>`"],
+    ["Finisher report", "`fleet-event.mjs finisher-report finisher-pr-<M>`"],
+    ["Merge-bot pass report", "`fleet-event.mjs merge-bot-report merge-bot-<n>`"],
+    ["CI run terminal", "`fleet-event.mjs ci <pr>`"],
+    ["Label seen (persistent Monitor)", "`fleet-event.mjs label <pr>`"],
+    ["`CONFLICT` line", "`fleet-event.mjs conflict <pr>`"],
+    ["Heartbeat", "`fleet-event.mjs heartbeat`"],
+    ["Drain", "`fleet-event.mjs drain --reason \"<reason>\"`"],
   ];
-  assert.equal(rows.length, WAKES.length, `the table has ${rows.length} wake rows, not the ${WAKES.length} the spec names`);
-  for (const [wake, records] of WAKES) {
-    const row = rows.find((r) => r.startsWith(`| ${wake} |`));
-    assert.ok(row, `the record-before-tick table has no "${wake}" row`);
-    for (const rec of records) assert.ok(row.includes(rec), `the "${wake}" row no longer records ${rec}`);
+  assert.equal(rows.length, WAKES.length, `the table has ${rows.length} wake rows, not the ${WAKES.length} the script's kinds make`);
+  for (const [wake, command] of WAKES) {
+    assert.ok(rows.includes(`| ${wake} | ${command} |`), `the wake table has no "${wake}" row naming ${command}`);
   }
-  // The reap and the reclaim are the tick's now: a row that still records
-  // them by hand has the controller run them a second time.
-  const mergeBot = rows.find((r) => r.startsWith("| Merge-bot pass report |"));
-  for (const step of ["`reap.sh --apply`", "reclaim-scratch.mjs"]) assert.ok(!mergeBot.includes(step), `the "Merge-bot pass report" row still records ${step}`);
-  // What follows the table: the tick, every printed line acted on, the beat.
-  assert.match(RUN_TEAM.between("| Heartbeat |", "\n- **", "after the table").text, Pin.phrase("act on every line it prints, and arm the beat"));
+  // A finisher halt is the finisher-report kind, so its bullet keeps only the
+  // by-hand per-cause rule; a finisher that died has no kind, so its bullet
+  // keeps the settle too.
+  assert.match(RUN_TEAM.bullet("- **Finisher reports halted**", "- **A finisher failed or was killed**", "finisher-halted wake").text, Pin.phrase("**Resolving a finisher halt**"));
+  const died = RUN_TEAM.bullet("- **A finisher failed or was killed**", "- **Implementer bails before implementing**", "finisher-died wake").text;
+  assert.match(died, Pin.phrase("`ledger.mjs settle finisher-pr-<M>=failed`"));
+  assert.match(died, Pin.phrase("**Resolving a finisher that died**"));
+  // What follows the table: the call's lines acted on, the beat.
+  assert.match(RUN_TEAM.between("| Drain |", "\n- **", "after the table").text, Pin.phrase("arm the beat"));
 });
 
 test("the tick block admits no wake covers a drained queue, and says whose case that is", () => {
@@ -117,11 +117,12 @@ test("the tick block admits no wake covers a drained queue, and says whose case 
 
 // Both merge-side wakes, each sliced to its own bullet — the shared vocabulary
 // makes a section-wide match worthless here.
-test("the merge-bot-pass-done wake records, then ticks with --apply, which reaps and reclaims", () => {
+test("the merge-bot-pass-done wake is one fleet-event.mjs call; the reap and the reclaim it owes are in the script's header", () => {
   const bullet = RUN_TEAM.between("- **Merge-bot pass reports done**", "\n- **The run ends", "merge-bot-done wake").text;
-  assert.match(bullet, /run the tick: `tick --apply`\s+reaps merged branches and worktrees with `reap\.sh --apply`/);
-  assert.match(bullet, /reclaim-scratch\.mjs --root <scratch> --apply/);
-  assert.match(bullet, Pin.phrase("always, even when the pass merged nothing"));
+  assert.match(bullet, /`fleet-event\.mjs merge-bot-report merge-bot-<n>`/);
+  assert.doesNotMatch(bullet, /reap\.sh --apply|reclaim-scratch\.mjs/, "the bullet restates the reap and the reclaim the tick's --apply owns");
+  assert.match(EVENT_HEADER, /The reap and the reclaim run under the tick's `--apply`\./);
+  assert.match(EVENT_HEADER, Pin.phrase("always, even when the pass merged nothing"));
 });
 
 test("the tick block runs the tick with --apply", () => {
@@ -341,7 +342,8 @@ test("End of run follows the drain bullet and ends with --stop (#2968)", () => {
   const b = RUN_TEAM.bullet("- **The run ends, or the maintainer says drain**", "- **Monitor: CI run completes**", "run-team drain bullet").text;
   const steps = [...b.matchAll(/^\s+(\d+)\. /gm)].map((m) => Number(m[1]));
   assert.deepEqual(steps, [1, 2, 3], "End of run is one ordered list: begin, the loop, finish");
-  assert.match(b, Pin.phrase("1. `~/.fleet/bin/fleet-run closeout.mjs begin --reason \"<reason>\"` — drains (`ledger.mjs drain`), then releases every claim that never became a PR and settles each `impl-<N>=released`"));
+  assert.match(b, Pin.phrase("1. `~/.fleet/bin/fleet-run fleet-event.mjs drain --reason \"<reason>\"` — runs `closeout.mjs begin --reason \"<reason>\"`"));
+  assert.match(EVENT_HEADER, Pin.phrase("`closeout.mjs begin` drains (`ledger.mjs drain`), then releases every claim that never became a PR and settles each `impl-<N>=released`"));
   assert.match(b, Pin.phrase("2. Act on the review, fix-applier and merge rows until the tick prints `ACTION: run over → fleet-heartbeat.mjs --stop \"<reason>\"`, which it does once the run is draining with no open PR and no live implementer."));
   assert.match(b, Pin.phrase("3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason \"<reason>\"`"));
   assert.match(b, Pin.phrase("then records `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded stop as the end of the run."));

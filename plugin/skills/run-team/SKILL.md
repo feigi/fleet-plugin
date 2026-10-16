@@ -1316,44 +1316,53 @@ unconfirmed. Invoking the command was the opt-in. One exception: **a judgement t
 evidence cannot settle**.
 
 **Rule: record, tick, act, beat.** Every wake — a member report, a review
-notification, a label, a CI run reaching a terminal state, a heartbeat — ends in
-one `fleet-tick.mjs` invocation, and you do what it prints. There are no hand-run
+notification, a label, a CI run reaching a terminal state, a `CONFLICT` line, a
+heartbeat, the maintainer's drain — is one `fleet-event.mjs` call, which makes
+the wake's writes and ends in one `fleet-tick.mjs` invocation, and you do what
+it prints. There are no hand-run
 refill or dispatch edges left. Record first, because the tick reads the run off
 `.fleet/ledger.md` and nothing else of yours: a wake you have not written down is
 one it cannot see, and it names the same dispatch again. Every record goes
-through `ledger.mjs` (**Run ledger**) — `settle` for a member's outcome,
-`review` for a review token on the PR's row, `row` for any other token on a
-ticket's line — never a hand edit.
+through `ledger.mjs` (**Run ledger**), which `fleet-event.mjs` drives — never a
+hand edit. What each kind writes is in the header comment of `fleet-event.mjs`.
 
-| Wake | Record, then tick |
+Run each as `~/.fleet/bin/fleet-run fleet-event.mjs <kind> <args>`, from the main checkout:
+
+| Wake | Command |
 |---|---|
-| Implementer report | `ledger.mjs settle impl-<N> --from-report`, which runs `verify-sha.sh` and reads the PR itself (**Run ledger**); on `bailed`, relabel by the cause its receipt names (**Implementer bails before implementing**, below) |
-| Review workflow notification / `review-pr-<n>` report | the result file is `<scratch>/pr<pr>/<run>/review.json`, `<run>` the review's own `run-XXXXXXXX` run root; `ledger.mjs review <pr> reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` on the PR's row (**Reviewers**) |
-| Fix-applier report | `ledger.mjs settle fix-pr-<M> --from-report`, which records each `unrecorded` filing and copies to `ruled` each refutation the report defers; for a fix-applier that answered a review — not one that cleared a conflict hold, which has no review file — `~/.fleet/bin/fleet-run dispositions-check.mjs --member <that member> --scratch <scratch>`, from the checkout root: it judges that member's own record `<scratch>/dispositions-<member>.json` against the review file the PR's latest `reviewed=` names, `<scratch>/pr<M>/<run>/review.json`, writes `dispositions-ok=`, `dispositions-mismatch=`, `dispositions-escalate=` or `dispositions-unchecked=<member>:<run>` onto the PR's row itself, and exits 1 on a mismatch, an escalation or an unchecked, naming each violating or escalated entry's bucket and index, a violation its rule too, and each entry whose filed issue `gh` could not read — **Then dispatch a fix-applier** says what a mismatch asks of you, the gate paragraph below what an escalation or an unchecked does; copy any other refutation it reversed — a `refuted` entry of the record the report does not defer — to `ruled` yourself |
-| Finisher report | `ledger.mjs settle finisher-pr-<M> --from-report`, which records each `unrecorded` filing. Its exit 3 on `ready-to-merge` — missing from the PR or from the read-back — is the case the tick's `DISPATCH finisher PR#<M>` catches next: settle it `ledger.mjs settle finisher-pr-<M>=labelled` as reported, and `ledger.mjs filed <N> "<subject>"` for each `unrecorded` entry. A **repair** finisher's (one sent on that line) read-back lacking it also gets `gh pr comment <M>` with both finishers' read-backs: the one-shot escalation, where halts comment |
-| Finisher report (halted) | `ledger.mjs settle finisher-pr-<M> --from-report`, which records each `unrecorded` filing; `gh pr comment <M>` with the finisher's halt report, cause and evidence; then the per-cause rule (**Resolving a finisher halt**, below) |
-| Finisher report (failed / killed) | `ledger.mjs settle finisher-pr-<M>=failed` for a finisher that crashed or gave up, `=killed` for one that was killed; no label, and the tick prints no dispatch for it. The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, below) |
-| Label seen (persistent Monitor) | nothing to record |
-| CI run terminal | `ci=<run-id>:<attempt>:<conclusion>` on the row; then the finisher gate (below) |
-| Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n> --from-report`; `tick --apply` runs the reap and the reclaim. (The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in this same pass, before reporting — a token the bot wrote in this pass, never one `reap.sh` writes.) |
-| Drain | `ledger.mjs drain "<reason>"`; release the claims (below); `settle impl-<N>=released`; then the rest of **End of run** (below), `--stop` last |
-| Heartbeat | nothing to record |
+| Implementer report | `fleet-event.mjs impl-report impl-<N>` |
+| Review result file written (workflow notification / `review-pr-<n>` report) | `fleet-event.mjs review-result <pr> <path>` |
+| Review launch failed | `fleet-event.mjs review-failed <pr> <launch>` |
+| Fix-applier report | `fleet-event.mjs fix-report fix-pr-<M>` |
+| Finisher report | `fleet-event.mjs finisher-report finisher-pr-<M>` |
+| Merge-bot pass report | `fleet-event.mjs merge-bot-report merge-bot-<n>` |
+| CI run terminal | `fleet-event.mjs ci <pr>` |
+| Label seen (persistent Monitor) | `fleet-event.mjs label <pr>` |
+| `CONFLICT` line | `fleet-event.mjs conflict <pr>` |
+| Heartbeat | `fleet-event.mjs heartbeat` |
+| Drain | `fleet-event.mjs drain --reason "<reason>"` |
 
-Then run the tick, act on every line it prints, and arm the beat. What a wake
-owes beyond its row:
+Act on every line the call prints, the tick's last, and arm the beat. What a wake
+owes beyond its call:
 
 - **Nothing to do right now** → **do not end your turn.** Arm the heartbeat
   below. A turn that ends on a drained queue is #3's stall itself: nothing
   external will wake you, and the level-check you are one command away from
   never runs. Listed first because it is the only wake with no trigger —
   every other row above arrives; this one is the absence of one.
-- **Implementer report** → verify the SHA is reachable on the expected branch,
-  settle the member, then run the tick. The PR is owed a review from here on:
+- **Implementer report** → the PR is owed a review from here on:
   the tick names it as `DISPATCH review PR#<M>` once a reviewer slot is free,
   and it names the next shortlist head for the slot the implementer left. Pull
   nothing the tick did not name.
-- **Implementer bails before implementing** → settle `impl-<N>=bailed`, then
-  demote by cause:
+- **Finisher reports halted** → the per-cause rule (**Resolving a finisher
+  halt**, below).
+- **A finisher failed or was killed** → `ledger.mjs settle finisher-pr-<M>=failed` for a
+  finisher that crashed or gave up, `=killed` for one that was killed; no label,
+  and the tick prints no dispatch for it. The cockpit flags the PR
+  `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand
+  (**Resolving a finisher that died**, below), then run the tick.
+- **Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>`
+  settles `impl-<N>=bailed` and demotes by cause:
 
   | Cause | Label |
   |---|---|
@@ -1361,60 +1370,45 @@ owes beyond its row:
   | genuine fork — options named, none ruled | `ready-for-human` |
   | needs human hands — external access, manual testing, judgment during the work | `ready-for-human` |
 
-  `gh issue edit <N> --remove-label ready-for-agent --remove-label in-progress
-  --add-label <label>`, comment the cause, release the worktree and branch with
-  `release-ticket.sh` (below — `reap.sh` declines a claim that never became a
-  PR), then run the tick: the head it names next is a *different* ticket.
+  The call relabels, comments the cause and releases the claim, then ticks:
+  the head the tick names next is a *different* ticket.
   `needs-triage` routes back to `/triage`, which can return it as
   `ready-for-agent`; `ready-for-human` for hands or a fork; `needs-triage` for a
   brief that names no *what*.
 
-  **Dropping `in-progress` is the load-bearing half** — phase 1 applied it and
-  `candidates.mjs` excludes it, so leaving it makes the ticket invisible to your
-  scans *and* the maintainer's. It does not loop; it disappears. The same causes
-  relabel an unclaimed ticket at the Pull (phase 1), where there is no
-  `in-progress` to drop — the causes and labels are one table, applied at
+  The same causes relabel an unclaimed ticket at the Pull (phase 1), where there
+  is no `in-progress` to drop — the causes and labels are one table, applied at
   whichever point the ticket fails them.
 - **A review result lands** → see the result file written (by you or by the
-  runner — **Reviewers** says which, per harness) and record `reviewed=` off its
-  digest with `ledger.mjs review <M>`, then run the tick: a PR with survived or unverified findings prints as
+  runner — **Reviewers** says which, per harness), then
+  `fleet-event.mjs review-result <pr> <path>`: a PR with survived or unverified findings prints as
   `DISPATCH fix-pr PR#<M>`. No survived or unverified finding and nothing to file → skip the
   fix-applier and dispatch the **finisher** directly — or, when that head's
   bound conclusion is red and not solely staleness, the red-check fixer
   instead (**Then dispatch a red-check fixer**, below): no member will touch that
   PR, so no push is coming and nothing will wake you. A review that failed is
   not a result — **Reviewers** says who retries it and what takes over.
-- **Monitor: `ready-to-merge` appears** → nothing to record; run the tick, and
+- **Monitor: `ready-to-merge` appears** → `fleet-event.mjs label <pr>`, and
   on `DISPATCH merge-bot` dispatch the next `merge-bot-<n>` (**Merge bot**).
   Catches hand-added labels as well as a finisher's own. The bot does not wait
   for that finisher's report: its rebase is server-side,
   `gh pr update-branch --rebase`, so nothing on the finisher's worktree has to
   happen first.
-- **Merge-bot pass reports done** → write each `held-behind-#<lower>` it reports
-  into that ticket's row as `held-behind:#<lower>` — the verdict moves no label
-  and leaves nothing in the repo, so the row is the only place the tick can read
-  it from — settle `merge-bot-<n>=done`, and then run the tick: `tick --apply`
-  reaps merged branches and worktrees with `reap.sh --apply` (below), then
-  reclaims their scratch with `reclaim-scratch.mjs --root <scratch> --apply`
-  (below), once for every merge bot settled `done` — always, even when the pass
-  merged nothing — and runs both again on the next tick after an `APPLY FAILED`
-  line, and on every tick while this run has no controller record to remember
-  the pass by. A label that landed at the last moment reads `DISPATCH
+- **Merge-bot pass reports done** → `fleet-event.mjs merge-bot-report merge-bot-<n>`. A label that
+  landed at the last moment reads `DISPATCH
   merge-bot` again: dispatch the next bot straight away. A `rebase-fallback-#<pr>`
   on a conflict needs no record from you — the bot already appended
   `conflict-hold:#<pr>` to that PR's row, and the tick turns it into `DISPATCH
   fix-pr PR#<pr>` (**Reviewers**).
-- **The run ends, or the maintainer says drain** → `closeout.mjs begin` first
-  (below): it drains and releases every claim that never became a PR. Nothing
-  else in the loop fires for those claims. The marker is on disk, so the tick
+- **The run ends, or the maintainer says drain** → `fleet-event.mjs drain --reason "<reason>"`
+  first (below). The marker is on disk, so the tick
   holds the implementer row at `HOLD (draining)` from then on — for a
   replacement controller too — and keeps the review, fix-applier and merge rows
   firing until the open PRs merge. The drain starts the end of the run; it does
   not end it. **End of run**, in this order:
-  1. `~/.fleet/bin/fleet-run closeout.mjs begin --reason "<reason>"` — drains
-     (`ledger.mjs drain`), then releases every claim that never became a PR and
-     settles each `impl-<N>=released` (**Release the claims that never became
-     PRs**). A claim it refuses prints `NEED hand-release #<N> <blocker>`: that
+  1. `~/.fleet/bin/fleet-run fleet-event.mjs drain --reason "<reason>"` — runs
+     `closeout.mjs begin --reason "<reason>"` (**Release the claims that never became
+     PRs**), then the tick. A claim it refuses prints `NEED hand-release #<N> <blocker>`: that
      refusal is the finding, so run `worktree-audit.sh` and decide by hand.
      `begin` selects a claim with no PR and a live or `bailed` implementer token
      on every run, so a claim you keep leaves `begin` at exit 4 on every run:
@@ -1430,15 +1424,12 @@ owes beyond its row:
      the ledger marks reviewed with no verdict row: append it with the verdict
      you rule (**Guard: accumulate per PR**) and run `finish` again. A step it
      fails is explained in references/close-out.md. Exit 0 is the run closed.
-- **Monitor: CI run completes** → bind it (`ci-state.mjs --pr <N>`) and **record
-  it as `ci=<run-id>:<attempt>:<conclusion>`, not just "CI green"** — in the
-  ticket's ledger row, which outlives your context: `ledger.mjs token <key>
-  ci=<run-id>:<attempt>:<conclusion>` appends it and keeps every token already on
-  the row, where `row` would replace the whole line (above).
-  That key cannot be reconstructed once the head is superseded, so a
-  controller holding only the colour cannot later tell an edge it has already
-  spent from one that never fired, and that is the distinction the sibling
-  bullet below turns on. The whole key, never the conclusion alone: **a
+- **Monitor: CI run completes** → `fleet-event.mjs ci <pr>`, which binds the run
+  (`ci-state.mjs --pr <N>`) and **records it as
+  `ci=<run-id>:<attempt>:<conclusion>`, not just "CI green"** — in the
+  ticket's ledger row, which outlives your context. The key is what the sibling
+  bullet below turns on: it tells an edge already spent from one that never
+  fired. The whole key, never the conclusion alone: **a
   conclusion is not stable** (below), because a rerun rewrites the run in
   place. The diff-validating `check` job green with no heavy job (the
   diff-validating suites, not the `rebase-check` currency gate) in `failure`
@@ -1502,7 +1493,7 @@ owes beyond its row:
   repo has no CI configured and no declaration, and stop. Absence never reads as
   pass. See `review-and-fix.md` step 6.
 
-**Every wake ends in the tick.** One invocation, and you act on what it prints:
+**In one line, every wake is one `fleet-event.mjs` call, which ends in the tick.** One tick invocation, and you act on what it prints:
 
 ```
 ~/.fleet/bin/fleet-run fleet-tick.mjs --apply [--implementer-cap <n>] [--reviewer-cap <n>] [--max-reviews <n>]
@@ -1559,17 +1550,16 @@ depth** guard table applied in code. Act on each line as it reads:
 - `ESCALATE unlabelled PR#<M> …` — a second finisher since the last `label-off=`
   settled `labelled` and the label is still not on: the tick dispatches no
   third. Not actionable; the maintainer's, through the cockpit's `unlabelled`
-  flag and the comment the repair finisher's report left (**Finisher report**
-  row above).
+  flag and the comment the repair finisher's report left (`fleet-event.mjs`'s
+  `finisher-report` entry).
 - `CONFLICT PR#<M> …` — GitHub reads PR M `mergeable=CONFLICTING`, the ledger
   tracks it, no conflict hold stands on it, no fix-applier, finisher or
   implementer on it is live, and, if it carries `ready-to-merge`, no merge bot
   is live: a queued PR is the bot's while one runs, and its own fallback records
-  the hold. Record it with `ledger.mjs token <key> conflict-hold:#<M>`, `<key>`
-  the row naming PR M, or M itself: it appends the token and keeps every token
-  the row already carries. The row's detail prints the `row` form of that
-  write for each PR it names; the `token` form is the one that keeps the row's
-  tokens. Then run the tick: the hold reads as `DISPATCH fix-pr
+  the hold. Record it with `fleet-event.mjs conflict <M>`, not with the `ledger.mjs
+  row` form the row's detail prints: `row` replaces the whole line. The call
+  refuses a PR whose row already carries a hold no fix-applier has answered.
+  The tick then reads the hold as `DISPATCH fix-pr
   PR#<M>`, a conflict fix-applier (**A `DISPATCH fix-pr PR#<M>` on a conflict
   hold**), and that row obeys every hold. A review in flight does not stop the
   line: `fix-due` waits for the review to return. It prints under a
@@ -1709,8 +1699,8 @@ exactly the way that gate does:
 
 It blocks, then prints one line. Which line it is, is the whole protocol:
 
-- `… interval elapsed (quiet=<n>) → run fleet-tick` — the level-check is due.
-  Run the tick above **with `--fold-unchanged`** and act on what it prints.
+- `… interval elapsed (quiet=<n>) → run fleet-event.mjs heartbeat` — the level-check
+  is due. Run that command and act on what the tick it ends in prints.
   Then arm the beat again.
 - `… Ns of Ms remain → re-issue this command now, do not end your turn` — no
   command blocks for a whole interval (omp backgrounds one at 60s, which is
@@ -1729,7 +1719,7 @@ not a reason to end the run; they are the state a newly triaged ticket arrives
 into. The run ends when you drain it, when the budget goes, or when this
 context does — not because there was briefly nothing to do.
 
-**`--fold-unchanged` belongs to the heartbeat alone**, never to any other wake.
+**`--fold-unchanged` belongs to the heartbeat alone** — `fleet-event.mjs heartbeat` passes it, no other kind does.
 It prints one line instead of the rows when a tick asks for nothing AND says
 exactly what the last one said, which is what makes an unattended night
 affordable; a tick on any other wake is read by a controller that just acted and
@@ -1921,7 +1911,7 @@ while :; do                                   # one tick
               echo "WATCHER RECOVERED: ci-state reading #$pr again — CI polling resumed"
               keep=; for b in $(printf '%s\n' "$blind"); do [ "$b" = "$pr" ] || keep="$keep $b"; done; blind=$keep ;;
             esac
-            : # your normal handling of $st for this PR
+            : # your normal handling of $st for this PR; a run at a terminal state is the CI wake: fleet-event.mjs ci "$pr"
           done
         fi
       fi
@@ -2180,8 +2170,9 @@ No replay exists for a review that ran in a runner's own kernel — `resume` is 
 `refuted` comes back deliberately as well — a refutation is itself a claim, and
 one has been reversed on new evidence. The fix-applier may reverse one; it
 records each reversal as a `refuted` entry in its disposition record, the
-evidence in `reason`, and you copy those entries to the ledger's `ruled` line
-(the Fix-applier report edge).
+evidence in `reason`, and you copy those entries to the ledger's `ruled` line by
+running `fleet-event.mjs fix-report`, whose `settle --from-report` records each
+refutation the report defers.
 
 **`dimensionsRun` is the dispatch; `dimensionsUnrun` is what names a gap.** A
 specialist that dies contributes zero findings while its key stays in
@@ -2487,8 +2478,8 @@ gated like survivors, and the tick prints `DISPATCH fix-pr PR#<M>` for it: that
 fix-applier's `no-op` and its `ok` verdict are what open the finisher. The
 refusal names its cause. `dispositions
 unchecked` — no verdict answers that review: run `dispositions-check.mjs` for
-the fix-applier that answered the review, as the Fix-applier report edge
-states, then dispatch again. It names a `dispositions-unchecked=` verdict too —
+the fix-applier that answered the review, as `fleet-event.mjs`'s `fix-report`
+entry states, then dispatch again. It names a `dispositions-unchecked=` verdict too —
 no rule broke, but the check could not read where a deferral was filed, `gh`
 unreachable or an issue unreadable: run the check again for that fix-applier
 once `gh` answers (an issue that does not exist is unreadable too, and no re-run

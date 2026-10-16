@@ -21,8 +21,8 @@ test("a finisher that died is flagged by the cockpit and resolved by hand — no
   assert.match(para, /You never add the label yourself, and the tick does not retry\./);
 });
 
-test("the finisher-report wake row records failed and killed and points at the by-hand resolution", () => {
-  const row = flat(RUN_TEAM.text.split("\n").find((l) => l.startsWith("| Finisher report (failed / killed) |")) ?? "");
+test("the finisher-died wake bullet records failed and killed and points at the by-hand resolution", () => {
+  const row = flat(RUN_TEAM.bullet("- **A finisher failed or was killed**", "- **Implementer bails before implementing**", "finisher-died wake").text);
   assert.match(row, /settle finisher-pr-<M>=failed` for a finisher that crashed or gave up, `=killed` for one that was killed/);
   assert.match(row, /the tick prints no dispatch for it/);
   assert.match(row, /`finisher:failed` \/ `finisher:killed` at severity 4/);

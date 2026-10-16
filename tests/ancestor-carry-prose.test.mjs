@@ -45,7 +45,7 @@ test("the ancestor branch reconciles each carried token against proc://, and rec
   const s = ancestor();
   assert.match(s, Pin.phrase("read `proc://` once, find each `name` among this session's jobs, and act on its state."));
   assert.match(s, Pin.phrase("`running` → keep the token."));
-  assert.match(s, Pin.phrase("`completed` or `failed` → record its result from `agent://<id>` as the **Record, then tick** table records that member's report"));
+  assert.match(s, Pin.phrase("`completed` or `failed` → record its result from `agent://<id>` as the wake table of **Rule: record, tick, act, beat** records that member's report"));
   assert.match(s, Pin.phrase("`cancelled` → record it dead."));
   assert.match(s, Pin.phrase("Absent, or a state you cannot read → keep the token live and let the Member-killed row clear it: a token nothing confirms dead counts as live."));
   assert.match(s, Pin.phrase("An `impl-`, `fix-pr-`, `finisher-pr-` or `merge-bot-` member is settled: `ledger.mjs settle <name> killed`."),

@@ -90,7 +90,8 @@ test("CLI: a long interval survives being served by several short holds", () => 
     { state: JSON.stringify({ elapsed: 1 }) });
   assert.equal(second.status, 0);
   assert.match(second.stdout, /interval elapsed/);
-  assert.match(second.stdout, /run fleet-tick/);
+  assert.match(second.stdout, /→ run fleet-event\.mjs heartbeat$/m, "the elapsed line names the one command that ticks");
+  assert.doesNotMatch(second.stdout, /run fleet-tick/);
   // Reset on fire, so the next interval starts from zero rather than from a
   // total already spent.
   assert.equal(second.state.elapsed, 0);
@@ -474,7 +475,7 @@ test("CLI: a mark that cannot be written is announced and the heartbeat keeps be
       { encoding: "utf8" });
     assert.equal(r.status, 0, "a failed mark write must never be fatal");
     assert.match(r.stderr, /WARNING could not write/, "a failed mark write is announced, never silent");
-    assert.match(r.stdout, /run fleet-tick/, "the beat goes on: the controller is still told what to do next");
+    assert.match(r.stdout, /→ run fleet-event\.mjs heartbeat/, "the beat goes on: the controller is still told what to do next");
     assert.equal(existsSync(join(dir, "heartbeat.json")), false);
 
     // The same policy on the stop path, which has no next beat to keep going:

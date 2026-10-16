@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// A member's report, recorded as one command: the writes its wake owes, then
-// the tick.
+// A wake recorded as one command: the writes it owes, then the tick.
 //
 //   fleet-event.mjs <kind> <args> [--in-flight <n>]
+//   fleet-event.mjs drain --reason "<reason>" [--in-flight <n>]
 //
 // Reached through the Resolver and run from the main checkout. Every kind
 // performs its writes, then runs `fleet-tick.mjs --apply` with the In-flight
@@ -18,7 +18,7 @@
 // settled, under any outcome, is not settled again.
 //
 //   impl-report <impl-N[-x]>
-//       `ledger.mjs settle <member> --from-report`. Settled `bailed`: the
+//       `ledger.mjs settle <member> --from-report`, which runs `verify-sha.sh` and reads the PR itself. Settled `bailed`: the
 //       report's `bailCause` names the label (undecided `needs-triage`, fork
 //       and hands `ready-for-human`), then:
 //         `gh issue edit <N> --remove-label ready-for-agent --remove-label
@@ -35,6 +35,8 @@
 //         It runs on a second run too: it measures the claim again and
 //         writes nothing when nothing is left to release. A refusal prints
 //         `NEED hand-release #<N> <blocker>` and is never forced.
+//         Dropping `in-progress` is the load-bearing half: phase 1 applied it and `candidates.mjs` excludes it, so leaving it makes the ticket invisible to the controller's scans and the maintainer's. It does not loop; it disappears.
+//         `reap.sh` declines a claim that never became a PR, so the release of a bailed claim is `release-ticket.sh`'s.
 //   fix-report <fix-pr-M[-x]>
 //       `settle --from-report`, which records the filings and rulings the
 //       report carries. Settled `applied:`/`no-op`, on a PR whose rows carry
@@ -54,11 +56,15 @@
 //       whether or not its settle was accepted, since the settle refuses
 //       exactly that read-back. Either comment is skipped when the PR already
 //       carries it.
+//       A settle that refuses on `ready-to-merge` — missing from the PR or from the read-back — is the case the tick's `DISPATCH finisher PR#<M>` catches next: settle it `ledger.mjs settle finisher-pr-<M>=labelled` as reported, and `ledger.mjs filed <N> "<subject>"` for each `unrecorded` entry.
 //   merge-bot-report <merge-bot-n>
 //       `ledger.mjs token <pr> held-behind:#<behind>` for each `held[]` entry
 //       of the report the PR's rows do not already carry, then `settle
 //       --from-report`. The reap and the reclaim run under the tick's
 //       `--apply`.
+//       The verdict moves no label and leaves nothing in the repo, so the row is the only place the tick can read a `held-behind` from.
+//       The reap and the reclaim run once for every merge bot settled `done`, always, even when the pass merged nothing, and again on the next tick after an `APPLY FAILED` line, and on every tick while this run has no controller record to remember the pass by.
+//       The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in the same pass, before reporting: a token the bot wrote in that pass, never one `reap.sh` writes.
 //   review-result <pr> <path>
 //       The review result file at `<path>`, which must be
 //       `<scratch>/pr<pr>/<run>/<file>`, `<run>` a review run root
@@ -66,24 +72,68 @@
 //       `counts` make `ledger.mjs review <pr>
 //       reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, skipped when
 //       the PR's rows already carry that token.
+//       The result file is `<scratch>/pr<pr>/<run>/review.json`, `<run>` the review's own `run-XXXXXXXX` run root.
 //   review-failed <pr> <launch>
 //       `ledger.mjs review <pr> review=<launch>=failed`, `<launch>` as the
 //       PR's row spells it after `review=` (`member:<runner>` or
 //       `wf:<runId>`), skipped when the rows already carry it; the summary
 //       names the runner the PR's next launch takes, as `review` reports it.
+//   ci <pr>
+//       `ci-state.mjs --pr <pr>`, never `--quiet`, then `ledger.mjs token <pr>
+//       ci=<run-id>:<attempt>:<conclusion>` on the PR's row, `<conclusion>`
+//       `-` when ci-state reports it as `""` or null (an in-progress run),
+//       skipped when the PR's rows already carry that token. The payload is
+//       the verdict, never the exit code: not-green exits 1 and is an
+//       ordinary state. A payload with no `verdict`, or `verdict:
+//       rate-limited`, prints `WATCHER DEGRADED: no usable ci-state reading
+//       for #<pr> — silence is NOT green` and writes nothing; a payload that
+//       binds no run (`no-ci`) writes nothing either.
+//       `token` appends the key to the PR's row and keeps every token already on it, where `row` would replace the whole line.
+//       That key cannot be reconstructed once the head is superseded, so a controller holding only the colour cannot later tell an edge it has already spent from one that never fired.
+//   label <pr>
+//       No write: a `ready-to-merge` label was seen, and the tick is the whole
+//       of the event.
+//   conflict <pr>
+//       The tick's `CONFLICT` line for the PR, recorded: `ledger.mjs token
+//       <pr> conflict-hold:#<pr>`, no note beside it (`token` refuses any
+//       `conflict-hold` word that is not `conflict-hold:#<number>`, spelled
+//       with `:` or `-`). `token` appends the hold and keeps every token the row already carries, where `row` would replace the whole line.
+//       Refused, nothing written, exit 2, when the PR's row already carries a
+//       hold no fix-applier has answered (the tick's own reading of the row),
+//       or both spellings. A row whose one hold a fix-applier answered takes
+//       the other spelling, `conflict-hold-#<pr>`: `token` writes no word the
+//       row already carries, and the tick reads a fresh hold after an answer
+//       as unresolved.
+//   heartbeat
+//       No write: the tick runs with `--fold-unchanged`, which prints one line
+//       instead of the rows when the tick asks for nothing and says what the
+//       last one said. The hold itself stays `fleet-heartbeat.mjs`, whose
+//       interval-elapsed line names this command.
+//   drain --reason "<reason>"
+//       `closeout.mjs begin --reason "<reason>"`, its output printed as it
+//       stands, then the tick.
+//       `closeout.mjs begin` drains (`ledger.mjs drain`), then releases every claim that never became a PR and settles each `impl-<N>=released`. Nothing else in the loop fires for those claims.
+//       `begin` answers a second drain with the standing marker, so a second
+//       run releases what is left and writes nothing else. Its exit 4 (a
+//       `NEED hand-release #<N> <blocker>` line) is this script's exit 4; its
+//       exit 2 or 3 is passed through. The rest of the end of a run,
+//       `closeout.mjs finish` last, is the controller's.
 //
 // A write this script cannot make, and does not refuse, is printed as a
 // `NEED <what> …` line, at the left margin, for the controller to make by
 // hand.
 //
 // Exit: 0 every write made and the tick exited 0. 2 a usage error, refused
-// before anything is written or ticked: an unknown kind or flag, a member of
+// before anything is written or ticked: an unknown kind or flag, a `--reason`
+// that is empty or beside any kind but `drain`, a member of
 // the wrong family, a review path outside the PR's partition or a file that
 // is no review result, a ledger or phase-0 receipt that cannot be read. A
 // ledger write's own refusal — `settle`'s 3 (the report's claim and the world
 // disagree) or 2, `token`'s or `review`'s 2 — passes its exit and message
-// through, and the tick still runs so the controller sees the rows. Else the
-// tick's own exit when it is not 0. Else 4 when a NEED line was printed.
+// through, as does `closeout.mjs begin`'s 2 or 3 and the refusal of a second
+// conflict hold (2), and the tick still runs so the controller sees the rows.
+// Else the tick's own exit when it is not 0. Else 4 when a NEED line was
+// printed, `begin`'s own exit 4 included.
 //
 // Zero deps: node builtins and sibling scripts only.
 
@@ -96,7 +146,7 @@ import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { BRIEFS, REVIEW, REVIEWED, memberTokens, nextReviewerName, parseDispatchedEntry, parseMember, parseToken, rowNums } from "./ledger-grammar.mjs";
-import { dispositionsToken } from "./fleet-tick.mjs";
+import { dispositionsToken, foldLedger } from "./fleet-tick.mjs";
 import { readRunReceipt, tickCaps } from "./phase0-receipt.mjs";
 import { defaultScratch, readReportIn, reportsDir } from "./report-files.mjs";
 
@@ -113,12 +163,17 @@ const KINDS = {
   "fix-report": { args: ["<member>"], family: "fix-pr" },
   "finisher-report": { args: ["<member>"], family: "finisher-pr" },
   "merge-bot-report": { args: ["<member>"], family: "merge-bot" },
-  "review-result": { args: ["<pr>", "<path>"] },
-  "review-failed": { args: ["<pr>", "<launch>"] },
+  "review-result": { args: ["<pr>", "<path>"], pr: true },
+  "review-failed": { args: ["<pr>", "<launch>"], pr: true },
+  ci: { args: ["<pr>"], pr: true },
+  label: { args: ["<pr>"], pr: true },
+  conflict: { args: ["<pr>"], pr: true },
+  heartbeat: { args: [] },
+  drain: { args: [], flag: "--reason \"<reason>\"" },
 };
-const FLAGS = { "in-flight": "value" };
+const FLAGS = { "in-flight": "value", reason: "value" };
 const USAGE = `usage: ${NAME}.mjs <kind> <args> [--in-flight <n>] — kinds: `
-  + Object.entries(KINDS).map(([k, { args }]) => `${k} ${args.join(" ")}`).join(", ");
+  + Object.entries(KINDS).map(([k, { args, flag }]) => [k, ...args, ...(flag ? [flag] : [])].join(" ")).join(", ");
 
 // The label each `bailCause` demotes to, and the relabel template's kind.
 const BAILS = {
@@ -501,6 +556,74 @@ function reviewFailed(ev, pr, launch) {
     : next === null ? "no free runner name left" : `next free runner ${next}`);
 }
 
+// The line the CI watcher prints for a PR whose ci-state reading it cannot use.
+const degraded = (pr) => `WATCHER DEGRADED: no usable ci-state reading for #${pr} — silence is NOT green`;
+
+function ci(ev, pr) {
+  const r = node("ci-state.mjs", ["--pr", String(pr)]);
+  let payload = null;
+  try {
+    payload = JSON.parse(r.stdout);
+  } catch {
+    // No payload is a reading that cannot be used, judged below.
+  }
+  // The payload is the verdict, never the exit: not-green exits 1 and is an
+  // ordinary state.
+  const verdict = payload?.verdict;
+  if (typeof verdict !== "string" || verdict === "" || verdict === "rate-limited") {
+    ev.print(degraded(pr));
+    ev.note(`#${pr} ci: no usable ci-state reading, nothing written`);
+    return;
+  }
+  const { runId, attempt, conclusion } = payload;
+  if (!isDigits(String(runId)) || !isDigits(String(attempt))) {
+    ev.note(`#${pr} ci: verdict ${verdict} binds no run, nothing to record`);
+    return;
+  }
+  // `""` is an in-progress run, which `//` would pass through as a conclusion.
+  const tok = `ci=${runId}:${attempt}:${conclusion === null || conclusion === undefined || conclusion === "" ? "-" : conclusion}`;
+  if (prWords(ev.ledger, pr).includes(tok)) {
+    ev.note(`#${pr} already ${tok}`);
+    return;
+  }
+  const w = node("ledger.mjs", ["token", String(pr), tok]);
+  if (w.status === 0) ev.note(`#${pr} ${tok}`);
+  else ev.refuse(`token #${pr} ${tok}`, w);
+}
+
+// A second hold on a row that already answered one is the same word spelled
+// the other way the tick reads, because `token` writes no word a row carries.
+const HOLD_SPELLINGS = (pr) => [`conflict-hold:#${pr}`, `conflict-hold-#${pr}`];
+
+function conflict(ev, pr) {
+  const open = foldLedger(ev.ledger, new Set(), { lenient: true }).byPr.get(pr)?.conflictOpen === true;
+  const words = prWords(ev.ledger, pr);
+  const tok = HOLD_SPELLINGS(pr).find((t) => !words.includes(t));
+  if (open || tok === undefined) {
+    const why = open ? "an unresolved conflict hold" : "every spelling of a conflict hold the tick reads";
+    writeAll(2, `${NAME}: conflict: PR #${pr}'s row already carries ${why} — nothing written\n`);
+    if (ev.refused === null) ev.refused = 2;
+    ev.note(`#${pr} conflict hold refused (row already holds)`);
+    return;
+  }
+  const w = node("ledger.mjs", ["token", String(pr), tok]);
+  if (w.status === 0) ev.note(`#${pr} ${tok}`);
+  else ev.refuse(`token #${pr} ${tok}`, w);
+}
+
+function drain(ev, reason) {
+  const r = node("closeout.mjs", ["begin", "--reason", reason]);
+  ev.print(r.stdout);
+  if (r.status === 0) {
+    ev.note("drain begun");
+  } else if (r.status === 4) {
+    ev.needs += 1;
+    ev.note("drain begun, a claim to hand-release");
+  } else {
+    ev.refuse("closeout begin", r);
+  }
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 
 function boundArg(F, name) {
@@ -530,13 +653,19 @@ function main() {
   const [kind, ...args] = positionals();
   if (!Object.hasOwn(KINDS, kind ?? "")) die(kind === undefined ? USAGE : `unknown kind '${kind}' — ${USAGE}`);
   const spec = KINDS[kind];
-  if (args.length !== spec.args.length) die(`${kind} takes ${spec.args.join(" ")} — ${USAGE}`);
+  if (args.length !== spec.args.length) die(`${kind} takes ${spec.args.join(" ") || "no arguments"} — ${USAGE}`);
   const inFlight = boundArg(F, "in-flight");
+  const reason = F.arg("reason");
+  if (kind === "drain") {
+    if (reason === null) die("drain takes --reason \"<reason>\"");
+  } else if (reason !== null) {
+    die(`--reason belongs to drain, not ${kind}`);
+  }
   let pr = null;
   if (spec.family !== undefined) {
     const m = parseMember(args[0]);
     if (m === null || m.family !== spec.family) die(`${kind} takes a member of the ${spec.family} family, not '${args[0]}'`);
-  } else {
+  } else if (spec.pr) {
     const digits = args[0].replace(/^#/, "");
     if (!isDigits(digits) || Number(digits) < 1) die(`${kind}: '${args[0]}' is not a PR number`);
     pr = Number(digits);
@@ -555,7 +684,7 @@ function main() {
   }
   const caps = tickCaps(fleetDir);
   if (caps.error) die(`${caps.error} — nothing written`);
-  const tickArgs = ["--apply", ...(inFlight === null ? caps.args : ["--in-flight", inFlight])];
+  const tickArgs = ["--apply", ...(inFlight === null ? caps.args : ["--in-flight", inFlight]), ...(kind === "heartbeat" ? ["--fold-unchanged"] : [])];
 
   const ev = new Event({ fleetDir, scratch, ledger: readLedger() });
   if (kind === "impl-report") implReport(ev, args[0]);
@@ -563,7 +692,10 @@ function main() {
   else if (kind === "finisher-report") finisherReport(ev, args[0]);
   else if (kind === "merge-bot-report") mergeBotReport(ev, args[0]);
   else if (kind === "review-result") reviewResult(ev, pr, args[1]);
-  else reviewFailed(ev, pr, args[1]);
+  else if (kind === "review-failed") reviewFailed(ev, pr, args[1]);
+  else if (kind === "ci") ci(ev, pr);
+  else if (kind === "conflict") conflict(ev, pr);
+  else if (kind === "drain") drain(ev, reason);
 
   writeAll(1, `${[...ev.lines, `event: ${kind}: ${ev.summary.join("; ") || "nothing to record"}`].join("\n")}\n`);
   const tick = spawnSync(process.execPath, [join(SCRIPTS, "fleet-tick.mjs"), ...tickArgs], { stdio: ["ignore", "inherit", "inherit"], env: gitEnv() });

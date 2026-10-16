@@ -34,6 +34,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
+import { EVENT_HEADER } from "./support/fleet-event-header.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
@@ -179,16 +180,21 @@ test("the controller records the bound run identifier under a named field, not j
   const s = ciEdge();
   assert.match(
     s,
-    Pin.phrase('record it as `ci=<run-id>:<attempt>:<conclusion>`, not just "CI green"'),
+    Pin.phrase('records it as `ci=<run-id>:<attempt>:<conclusion>`, not just "CI green"'),
     "the bullet no longer tells the controller to record the bound run identifier under a named field",
   );
   assert.match(
     s,
-    Pin.phrase("`ledger.mjs token <key> ci=<run-id>:<attempt>:<conclusion>` appends it and keeps every token already on the row, where `row` would replace the whole line"),
-    "the instruction no longer records the key with `token`, so a controller following it will silently destroy the row's other tokens",
+    Pin.phrase("`fleet-event.mjs ci <pr>`"),
+    "the bullet no longer names the command that records it",
   );
   assert.match(
-    s,
+    EVENT_HEADER,
+    Pin.phrase("`token` appends the key to the PR's row and keeps every token already on it, where `row` would replace the whole line"),
+    "the script no longer says it records the key with `token`, so a controller reading it may destroy the row's other tokens",
+  );
+  assert.match(
+    EVENT_HEADER,
     Pin.phrase("That key cannot be reconstructed once the head is superseded"),
     "the reason the whole key has to be recorded is gone, which is what stops it being cut as bookkeeping",
   );
