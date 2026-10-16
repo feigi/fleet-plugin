@@ -682,6 +682,25 @@ test("review-failed settles the launch =failed in place and names the next free 
   assert.equal(f.ledger(), ledger);
 });
 
+test("review-failed on a launch already =failed names the next free runner past a ## Retired line that carries an outcome", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88 · review=member:review-pr-88=failed"], retired: ["review-pr-88-b=failed"] });
+  const r = f.run(["review-failed", "88", "member:review-pr-88"]);
+  assert.equal(r.status, 0, r.err);
+  assert.deepEqual(r.order, [TICK]);
+  assert.match(eventLine(r), /already review=member:review-pr-88=failed; next free runner review-pr-88-c$/);
+});
+
+test("review-failed on a launch already =failed refuses a ## Retired line naming no member or reviewer, naming it, and still ticks", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88 · review=member:review-pr-88=failed"], retired: ["garbage-name"] });
+  const ledger = f.ledger();
+  const r = f.run(["review-failed", "88", "member:review-pr-88"]);
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /## Retired has a line 'garbage-name' that names no member or reviewer — fix the ledger by hand before review can trust it/);
+  assert.deepEqual(r.order, [TICK]);
+  assert.match(eventLine(r), /already review=member:review-pr-88=failed; next free runner for PR #88 refused \(exit 2\)$/, "no runner name is offered");
+  assert.equal(f.ledger(), ledger);
+});
+
 // ── ci ───────────────────────────────────────────────────────────────────────
 
 const ciPayload = (over = {}) => JSON.stringify({ pr: 88, branch: "b", prHead: HEAD, runId: 123, attempt: 2, runHeadSha: HEAD, status: "completed", conclusion: "success", behind: 0, verdict: "green", reasons: [], ...over });

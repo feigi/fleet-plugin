@@ -105,6 +105,18 @@ test("review's next skips a runner name the ledger's ## Retired holds", (t) => {
   assert.equal(review("482", A).next, "review-pr-482-c");
 });
 
+test("review refuses a runner name a ## Retired line holds with an outcome, naming the next free one", (t) => {
+  const { reviewRefused, file } = fixture(t, ["#1 impl-1=PR#9 → PR#9"]);
+  writeFileSync(file, `${readFileSync(file, "utf8")}## Retired\n\n- review-pr-9=failed\n`);
+  reviewRefused("9", ["review=member:review-pr-9"], /names a runner an earlier run of this session already used/, /the next free reviewer name is review-pr-9-b/);
+});
+
+test("review's next skips a runner name a ## Retired line holds with an outcome", (t) => {
+  const { review, file } = fixture(t, [`#1 ${IMPL}`]);
+  writeFileSync(file, `${readFileSync(file, "utf8")}## Retired\n\n- review-pr-482-b=failed\n`);
+  assert.equal(review("482", A).next, "review-pr-482-c");
+});
+
 test("review finds the PR's row by its PR before by its key: a ticket row settled to the PR wins over a later #M row", (t) => {
   const { review, rows } = fixture(t, ["#1 impl-1", "#482 fix-pr-482", `#2 impl-2=PR#483`]);
   assert.equal(review("482", A).row, "#482", "an implementer that has not settled to the PR does not map it");

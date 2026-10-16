@@ -51,7 +51,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, unescapeText, nextReviewerName } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, unescapeText, nextReviewerName } from "./ledger-grammar.mjs"
 import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -1673,9 +1673,8 @@ function runRotate() {
 // or one whose outcome is outside its family's vocabulary, which skips the
 // line but not the name — and every reviewer runner a row launched, read off
 // the parsed rows, the skipped ones and every `## Dispatched` entry alike — a
-// line the tick refuses still names members this session ran — and the
-// archive's own `## Retired`, each line of which must be a bare member or
-// reviewer name.
+// line the tick refuses still names members this session ran — and the names
+// the archive's own `## Retired` lines hold.
 function carryOf(text) {
   const skipped = [];
   const skippedRows = [];
@@ -1700,11 +1699,19 @@ function carryOf(text) {
     skipped.push({ line: e, why: t === null ? "not a member token" : `${t.name}: ${t.error}` });
     return false;
   });
-  const archivedRetired = sectionOf(text, RETIRED).filter((name) => {
-    if (isRetirable(name)) return true;
-    skipped.push({ line: name, why: "not a bare member or reviewer name" });
-    return false;
-  });
+  // A `## Retired` line is read through retiredName(), as every reader reads
+  // it: one that carries an outcome is skipped — the new ledger holds names
+  // bare — but its name retires, and one naming no member or reviewer is
+  // skipped and retires nothing.
+  const archivedRetired = [];
+  for (const line of sectionOf(text, RETIRED)) {
+    const name = retiredName(line);
+    if (name === null) skipped.push({ line, why: "names no member or reviewer" });
+    else {
+      if (name !== line) skipped.push({ line, why: `${name} is retired bare` });
+      archivedRetired.push(name);
+    }
+  }
   const live = liveOnLedger(rows, dispatched);
   const carried = { rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched };
   const retired = retiredOnLedger([...rows, ...skippedRows], allDispatched, archivedRetired, carried);
@@ -1766,6 +1773,20 @@ function refuseMalformedDispatched() {
   }
 }
 
+// The names `## Retired` holds, for `cmd` (dispatch or review) to refuse a
+// repeat from: each line's name read through readRetired(), the grammar's
+// one reading of the section, so a line that carries an outcome still holds
+// its name. A line naming no member or reviewer would release the name it
+// was meant to hold; refuse it, naming it, as refuseMalformedDispatched()
+// refuses an entry.
+function retiredNames(cmd) {
+  const { names, malformed } = readRetired(data.retired);
+  if (malformed.length > 0) {
+    die(`## Retired has a line '${malformed[0]}' that names no member or reviewer — fix the ledger by hand before ${cmd} can trust it`);
+  }
+  return names;
+}
+
 // Why a finisher on PR `pr` may not be recorded yet, or null when it may.
 // `review` is the tick fold's `reviewed` entry for the PR, undefined when the
 // PR has no returned review.
@@ -1810,13 +1831,14 @@ function runDispatch() {
   // Read ahead of every lookup below that trusts `## Dispatched` by name,
   // including `nextMergeBot()`'s own read of it.
   refuseMalformedDispatched();
+  const retired = retiredNames("dispatch");
 
   // `merge-bot` bare is the merge-bot case of this command: the ledger names
   // the bot, 1 + the highest merge-bot name this session holds — in
   // `## Dispatched`, on a row or in `## Retired` — so the controller never
   // counts. An explicit `merge-bot-<n>` is accepted only when it is that one.
   // `sessionNames` is every name beyond `## Dispatched` the session has used.
-  const sessionNames = [...data.rows.flatMap(memberTokens).map((t) => t.name), ...data.retired];
+  const sessionNames = [...data.rows.flatMap(memberTokens).map((t) => t.name), ...retired];
   const member = parseMember(name === "merge-bot" ? nextMergeBot(data.dispatched, sessionNames) : name);
   if (!member) die(unknownMember(name));
   if (member.bound === null) {
@@ -1847,7 +1869,7 @@ function runDispatch() {
   const prior =
     data.dispatched.find((e) => parseToken(e).name === member.name) ??
     (settledOnRow && `${settledOnRow.name}=${settledOnRow.outcome}`) ??
-    (data.retired.includes(member.name) ? "retired by rotate" : undefined);
+    (retired.includes(member.name) ? "retired by rotate" : undefined);
   if (prior !== undefined) {
     // Never a merge bot: it is accepted only as the number past every name
     // the session holds, so none of the three places above can name it.
@@ -2460,6 +2482,7 @@ function runReview() {
   if (other !== undefined) {
     die(`review #${prNum}: '${other}' is not a review token — review writes only review=… and reviewed=…; every other token goes through row, dispatch or settle`);
   }
+  const retired = retiredNames("review");
   const i = prRowIndex(prNum);
   const created = i === -1;
   const oldLine = created ? null : data.rows[i];
@@ -2475,13 +2498,13 @@ function runReview() {
     : created ? `${head} ${appended.join(" · ")}`
     : `${head} · ${appended.join(" · ")}`;
   const after = created ? [...data.rows, line] : data.rows.with(i, line);
-  const refusal = rowWriteRefusal(data.rows, after, oldLine, line, data.retired);
+  const refusal = rowWriteRefusal(data.rows, after, oldLine, line, retired);
   if (refusal !== null) die(`review #${prNum}: ${refusal}`);
   data.rows = after;
   save(data);
   const key = rowKey(line);
   console.error(`    review on row ${key}`);
-  console.log(JSON.stringify({ pr: prNum, row: key, line, created, next: nextReviewerName(data.rows, prNum, data.retired) }));
+  console.log(JSON.stringify({ pr: prNum, row: key, line, created, next: nextReviewerName(data.rows, prNum, retired) }));
 }
 
 // A row's tokens: its words after the key, bar the ` · ` separators between
@@ -2595,7 +2618,7 @@ function runToken() {
   // on a row with no implementer), or split one PR across two rows.
   const split = newSplitRow(data.rows, after);
   if (split !== null) die(`token ${key}: ${splitRowClause(split)}`);
-  const refusal = rowWriteRefusal(data.rows, after, oldLine, line, data.retired);
+  const refusal = rowWriteRefusal(data.rows, after, oldLine, line, readRetired(data.retired).names);
   if (refusal !== null) die(`token ${key}: ${refusal}`);
   data.rows = after;
   save(data);

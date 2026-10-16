@@ -59,6 +59,17 @@ write subcommands — leaves a degraded file byte-identical, so rotate keeps
 refusing on it; and Decision 6's mark-based check refuses a tick or ledger
 write still inside its window whether or not a beat exists, a recorded stop
 still letting rotation through.
+Amended by #3132: every reader reads a `## Retired` line one way — its name
+is the text before the first `=` (the whole line when there is none), and a
+name that is a member's or a reviewer runner's is retired whatever outcome
+follows it. Any other line is malformed: `dispatch`, `review` and the tick
+refuse it, naming the line, until the ledger is fixed by hand, and an
+`ancestor` rotate skips it with a warning and still rotates. A line that
+carries an outcome is skipped by rotate with a warning too, but its name is
+retired and the new ledger holds it bare. The #3082 amendment's "The tick
+never reads the section" is corrected: the tick reads it to account for a
+transcript in the session directory, and now also refuses a malformed line
+there; a ticket an earlier run worked is still not `claimed` by it.
 
 ## Context
 

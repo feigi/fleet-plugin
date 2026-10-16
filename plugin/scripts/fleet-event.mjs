@@ -145,7 +145,7 @@ import { makeDie, defineFlags, isDigits, writeAll } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { BRIEFS, REVIEW, REVIEWED, memberTokens, nextReviewerName, parseDispatchedEntry, parseMember, parseToken, rowNums } from "./ledger-grammar.mjs";
+import { BRIEFS, REVIEW, REVIEWED, memberTokens, nextReviewerName, parseDispatchedEntry, parseMember, parseToken, readRetired, rowNums } from "./ledger-grammar.mjs";
 import { dispositionsToken, foldLedger } from "./fleet-tick.mjs";
 import { readRunReceipt, tickCaps } from "./phase0-receipt.mjs";
 import { defaultScratch, readReportIn, reportsDir } from "./report-files.mjs";
@@ -538,7 +538,15 @@ function reviewFailed(ev, pr, launch) {
   let next;
   if (prWords(ev.ledger, pr).includes(tok)) {
     ev.note(`PR #${pr} already ${tok}`);
-    next = nextReviewerName(ev.ledger.rows, pr, ev.ledger.retired ?? []);
+    // `## Retired` read as `ledger.mjs review` reads it, refusing a line that
+    // names no member or reviewer as `review` does.
+    const { names, malformed } = readRetired(ev.ledger.retired ?? []);
+    if (malformed.length > 0) {
+      ev.refuse(`next free runner for PR #${pr}`, { status: 2, how: "exit 2",
+        stderr: `${NAME}: ## Retired has a line '${malformed[0]}' that names no member or reviewer — fix the ledger by hand before review can trust it\n` });
+      return;
+    }
+    next = nextReviewerName(ev.ledger.rows, pr, names);
   } else {
     const r = node("ledger.mjs", ["review", String(pr), tok]);
     if (r.status !== 0) {
