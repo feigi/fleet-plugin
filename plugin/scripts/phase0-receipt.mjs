@@ -22,10 +22,6 @@ export const STEP_NAMES = Object.freeze([
   "cockpit", "rotate", "reclaim", "recipe", "fold-in", "stranded", "shortlist",
 ]);
 
-// The default in-flight bound when phase0.mjs is run without --in-flight.
-// This value is shared with fleet-tick.mjs and other places that need it.
-export const DEFAULT_IN_FLIGHT_BOUND = 5;
-
 // The statuses a step can end in that let the run go on: `ok`, and the two
 // a ruleset check answers with when the gate drifted or could not be asked.
 // Every other status — `failed`, `pending`, or one this reader does not know

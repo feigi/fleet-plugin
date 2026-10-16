@@ -232,7 +232,7 @@ test("a clean run passes every step in order, writes one receipt and exits 0", (
   assert.deepEqual(f.calls("main-checkout")[0].args, ["--record"]);
   assert.deepEqual(f.calls("preflight")[0].args, []);
   assert.deepEqual(f.calls("ruleset")[0].args, ["--check"]);
-  assert.deepEqual(f.calls("tier-roles")[0].args, ["--check", "--in-flight", "5"]);
+  assert.deepEqual(f.calls("tier-roles")[0].args, ["--check", "--in-flight", "8"]);
   assert.deepEqual(f.calls("reclaim-scratch")[0].args, ["--root", receipt.scratch, "--after-rotate", "--apply"]);
   assert.deepEqual(f.calls("derive-testcmd").map((c) => c.args), [[".", "install"], [".", "test", "--at", "origin/main"]]);
   for (let i = 0; i < 40 && f.calls("board").length === 0; i++) wait(100);
@@ -257,6 +257,69 @@ test("every flag reaches the step that owns it and the receipt records the caps"
   const g = fixture();
   assert.equal(g.run(["--session", g.session, "--declare-no-ci"]).status, 0);
   assert.match(g.receipt().steps.preflight.output, /CI: declared absent/);
+});
+
+test("tier-roles gets the in-flight bound: --in-flight when given, else the caps added, a cap nobody set at the tick's own default", () => {
+  const cases = [
+    [[], "8"],
+    [["--implementer-cap", "3", "--reviewer-cap", "4"], "7"],
+    [["--implementer-cap", "3"], "9"],
+    [["--reviewer-cap", "4"], "6"],
+    [["--in-flight", "11", "--implementer-cap", "3", "--reviewer-cap", "4"], "11"],
+  ];
+  for (const [flags, bound] of cases) {
+    const f = fixture();
+    const r = f.run(["--session", f.session, ...flags]);
+    assert.equal(r.status, 0, `${flags.join(" ")}: ${r.stdout}${r.err}`);
+    assert.deepEqual(f.calls("tier-roles")[0].args, ["--check", "--in-flight", bound], `flags: ${flags.join(" ") || "none"}`);
+    assert.match(f.receipt().steps["tier-roles"].output, new RegExp(`\\(in-flight bound ${bound}\\)$`), "the step records the bound it checked");
+  }
+});
+
+// The suite stubs tier-roles.mjs, so a stub accepts any argv: the one command
+// line phase 0 builds is also run through the real script, whose flag parser
+// refuses what it does not know and what it requires.
+test("the tier-roles command line phase 0 builds is accepted by the real tier-roles.mjs", () => {
+  const f = fixture();
+  assert.equal(f.run(["--session", f.session, "--in-flight", "3"]).status, 0);
+  const argv = f.calls("tier-roles")[0].args;
+  const agents = join(f.dir, "agents");
+  mkdirSync(agents);
+  writeFileSync(join(agents, "fleet-a.agent.md"), "---\nname: fleet-a\ndescription: fixture\nmodel: @slow:xhigh\n---\n\nFollow the dispatch brief.\n");
+  const json = (name, value) => {
+    const p = join(f.dir, name);
+    writeFileSync(p, JSON.stringify(value));
+    return p;
+  };
+  const effort = ["low", "medium", "high", "xhigh", "max"];
+  const install = [
+    "--agents", agents,
+    "--overrides", json("overrides.json", {}),
+    "--model-roles", json("model-roles.json", { slow: "anthropic/claude-opus-5:auto", task: "anthropic/claude-sonnet-5:auto", smol: "anthropic/claude-haiku-4-5:auto" }),
+    "--catalog", json("catalog.json", { models: [
+      { provider: "anthropic", id: "claude-opus-5", selector: "anthropic/claude-opus-5", thinking: effort },
+      { provider: "anthropic", id: "claude-sonnet-5", selector: "anthropic/claude-sonnet-5", thinking: effort },
+      { provider: "anthropic", id: "claude-haiku-4-5", selector: "anthropic/claude-haiku-4-5", thinking: ["minimal", "low", "medium", "high", "xhigh"] },
+    ] }),
+    "--max-concurrency", json("max-concurrency.json", 32),
+  ];
+  const r = spawnSync(process.execPath, [join(REAL_SCRIPTS, "tier-roles.mjs"), ...argv, ...install], { cwd: f.repo, encoding: "utf8", env: { ...GIT_ENV, HOME: f.home } });
+  assert.equal(r.status, 0, `${argv.join(" ")}\n${r.stdout}${r.stderr}`);
+  const bare = spawnSync(process.execPath, [join(REAL_SCRIPTS, "tier-roles.mjs"), "--check", ...install], { cwd: f.repo, encoding: "utf8", env: { ...GIT_ENV, HOME: f.home } });
+  assert.equal(bare.status, 2, "the real script refuses --check without --in-flight, so the run above is a control that discriminates");
+  assert.match(bare.stderr, /--in-flight is required/);
+});
+
+test("tier-roles: a notice printed on a pass reaches the step's output and stdout, and the step stays ok", () => {
+  const f = fixture();
+  const notice = "tier-roles: notice: task.maxConcurrency is 3, below 2·8+2 = 18 for In-flight bound 8";
+  f.control("tier-roles", { out: `${notice}\n` });
+  const r = f.run();
+  assert.equal(r.status, 0, `${r.stdout}${r.err}`);
+  const step = f.receipt().steps["tier-roles"];
+  assert.equal(step.status, "ok");
+  assert.ok(step.output.includes(notice), step.output);
+  assert.ok(r.out.includes(`    ${notice}`), r.stdout);
 });
 
 // One case per step: its refusal exits 3, the receipt names it `failed` with the
@@ -873,6 +936,8 @@ test("usage: every malformed command line exits 2 before a step runs", () => {
   refuses(f, ["--session", join(f.repo, "README")], /not a directory/);
   refuses(f, [...s, "--implementer-cap", "0"], /positive/);
   refuses(f, [...s, "--implementer-cap", "many"], /needs a number/);
+  refuses(f, [...s, "--in-flight", "0"], /positive/);
+  refuses(f, [...s, "--in-flight", "many"], /needs a number/);
   refuses(f, [...s, "--reviewer-cap"], /--reviewer-cap needs a value/);
   refuses(f, [...s, "--workflow", "CI", "--declare-no-ci"], /alternatives/);
   refuses(f, [...s, "--declare-no-ci=1"], /boolean flag/);

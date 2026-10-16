@@ -31,7 +31,10 @@
 //                 output), exit 2 or anything else `unanswered`; neither stops
 //                 the run — reconciling is a write to the gate and the
 //                 maintainer's.
-//   tier-roles    `tier-roles.mjs --check --in-flight <B>`, where <B> is the in-flight bound.
+//   tier-roles    `tier-roles.mjs --check --in-flight <B>`. <B> is `--in-flight`
+//                 when given, else the two caps added: each the flag as given,
+//                 or the tick's own default for a cap nobody set. A notice
+//                 tier-roles prints on a pass is part of the step's output.
 //   metrics       `metrics-refresh.mjs`. A non-zero exit fails the step.
 //   cockpit       `board.mjs serve --open` launched detached, `--spend-dir`
 //                 passed through. Recorded; never fails the run.
@@ -55,7 +58,7 @@
 // THE RECEIPT is `.fleet/phase0.json` (resolved through fleet-dir.mjs, so a
 // worktree and the main checkout name one file):
 //
-//   { run, session, scratch, caps: {impl, review}, inFlightBound,
+//   { run, session, scratch, caps: {impl, review},
 //     steps: { <name>: { status, at, output } } }
 //
 // `status` is ok, pending, failed, drift or unanswered; `at` an ISO time;
@@ -66,8 +69,7 @@
 // run. `session` is `--session`, the one place the controller states its
 // session directory. `scratch` is what `scratch-root.mjs` prints. `caps` are
 // the flags as given, null for one not given: the tick's own defaults apply to
-// a cap nobody set, and a number here would pretend somebody had. `inFlightBound`
-// is the in-flight bound used for the run, or the default if not given.
+// a cap nobody set, and a number here would pretend somebody had.
 //
 // RESUMABLE. A re-run reads the receipt. It continues it — skipping every `ok`
 // step and re-running the rest — only when its `run` equals the `at` the
@@ -125,7 +127,6 @@ import { readState, stateFileIn } from "./fleet-state.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
-import { DEFAULT_IN_FLIGHT_BOUND } from "./phase0-receipt.mjs";
 
 const NAME = "phase0";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -224,10 +225,16 @@ function ruleset({ cwd }) {
   return { status: "unanswered", output: withText(`apply-ruleset.sh --check could not answer (${r.how})`, r) };
 }
 
+// The tick's own defaults for the two caps it is handed (its option table in
+// fleet-tick.mjs): a cap nobody set is what the tick runs with, so it is what
+// the in-flight bound counts.
+const TICK_IMPL_CAP = 2;
+const TICK_REVIEW_CAP = 6;
+
 function tierRoles({ cwd, inFlightBound }) {
   const r = node("tier-roles.mjs", ["--check", "--in-flight", String(inFlightBound)], { cwd });
   if (r.status !== 0) return refusal("tier-roles.mjs --check failed:", r);
-  return ok("every tier route resolves");
+  return ok(withText(`every tier route resolves (in-flight bound ${inFlightBound})`, r));
 }
 
 function metrics({ cwd }) {
@@ -453,7 +460,7 @@ function main() {
     return n;
   };
   const caps = { impl: positive("implementer-cap"), review: positive("reviewer-cap") };
-  const inFlightBound = positive("in-flight") ?? DEFAULT_IN_FLIGHT_BOUND;
+  const inFlightBound = positive("in-flight") ?? (caps.impl ?? TICK_IMPL_CAP) + (caps.review ?? TICK_REVIEW_CAP);
   if (F.has("declare-no-ci") && !absent("workflow")) die("--workflow and --declare-no-ci are alternatives, not a pair");
   const ci = F.has("declare-no-ci") ? "CI: declared absent (--declare-no-ci)" : absent("workflow") ? null : `CI: workflow ${F.arg("workflow")} (--workflow)`;
   const pathOf = (name) => (absent(name) ? null : resolve(F.arg(name)));
@@ -517,7 +524,7 @@ function main() {
     renameSync(receiptPath, held);
   }
 
-  const receipt = { run: resumed ? previous.run : null, session, scratch, caps, inFlightBound, steps: {} };
+  const receipt = { run: resumed ? previous.run : null, session, scratch, caps, steps: {} };
   for (const name of STEP_NAMES) {
     const was = resumed ? previous.steps[name] : undefined;
     receipt.steps[name] = was?.status === "ok" ? was : { status: "pending", at: now, output: "not run" };
