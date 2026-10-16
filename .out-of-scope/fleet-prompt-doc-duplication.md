@@ -74,6 +74,14 @@ here because the steps that point at it are the ones you skip." The fleet copy n
 it to the refuters the fix-applier itself dispatches. So it belongs with the deliberate
 duplication above, not against it — and editing either copy means editing both.
 
+## When to reconsider
+
+**2026-10-16.** The condition this record turns on — a skimmed file read — is met by
+#3177's rendered briefs: a member's text is in its agent body and in the brief
+`dispatch-prompt.mjs` renders for it, so nothing is left for a skimmed read to miss.
+This record does not forbid moving text out of `run-team/SKILL.md`; #3209 moves its
+war stories to `run-team/references/` on that ground.
+
 ## Prior requests
 
 - #219 — "run-team/SKILL.md restates review-and-fix.md steps 2-3 in a file that says 'do not restate it' — pick one"

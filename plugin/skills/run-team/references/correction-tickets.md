@@ -35,3 +35,29 @@ A bare `#N` copied from another repo's run reads as **this** repo's N — to a h
 - **This repo's own issues and PRs stay bare `#N`.** Convention covers foreign evidence only; qualifying local reference is noise.
 
 Disclaimer must reach every foreign token it covers — numbers, ordinals, file names, test vocabulary — and must say unverifiable, because the clause-by-clause duty demands settling command and none exists to run. Where lesson itself is host-neutral, name behaviour generically instead of scoping it foreign: foreign-scoped lesson invites reader to discard one that does apply here.
+
+## Every implementer body carries the claim discipline
+
+**Every implementer body carries the claim discipline, because tickets that
+restate facts ship new wrong claims** — inherited from the ticket, and minted
+in prose nobody asked for. It was measured on tickets that would have been
+judged routine too: an unasked-for comment asserting a silent-failure mode
+that does not exist, a false comparative plus positional references replacing
+a name-based one, and two present-tense counts already false when they were
+written.
+Nothing before dispatch can see the diff, so the discipline goes to every
+implementer. A pushed commit body cannot be edited, so its claims are settled
+at write time.
+
+## A settling command over literal text uses `grep -F`
+
+**A settling command over literal text uses `grep -F`, and its zero counts only
+after the same command finds a line known to match.** Prose fragments and
+code snippets routinely carry `\`, `.`, `*`, `[` or `$`, and without `-F` those
+are read as a pattern rather than as the text itself, so the command answers
+for a different string from the one the claim names — and a wrong zero is the
+benign-looking answer. Measured once: `grep -c 'settled by:\s+x'` answers
+0 against a file holding that exact line, and `grep -cF` answers 1. A zero or
+an absence counts only after the same command, with the same flags, finds a
+line known to match: a command that cannot find a match settles nothing, and
+under `Verified:` its zero reads as a checked absence.

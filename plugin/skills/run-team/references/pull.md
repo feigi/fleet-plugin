@@ -344,3 +344,48 @@ no-acknowledgement line, the foreground-suite line
 — and a `staleness.mjs` **could not check** verdict with its
 reason when the Pull got one, so the member's own re-derive step knows the
 controller's probe could not look.
+
+## Every 5th Pull goes at an exploration cell
+
+**Every 5th Pull by ledger count goes at an exploration cell.** Count the `impl-`
+rows in `.fleet/ledger.md` at Pull time; the Pull that creates row 5, 10, 15 …
+is an Exploration Pull, and the router draws its cell: `k = 1 +
+(sha256("<session>\t<ticket>")[0:8] mod K)` over `router-table.json`'s
+`cells` minus the policy cell, in token order. While the table's `burn_in` is
+true every Pull draws, over every cell, the policy cell included. An
+Exploration Pull records `tier=<cell>` in the row, and a replacement inherits the row's tier —
+written at the Pull's row step, ahead of `ledger.mjs dispatch`, which reads it
+and prints `fleet-implementer-<cell>` as the `agent` to dispatch; a row with
+no `tier=` runs the policy cell. The
+assignment rolls to the next Pull when another open ticket sequences after
+it — a ticket the rest of the run
+depends on; `class` is not read. Do not tell the member it is a control: a member that
+knows it is being measured is not measuring the same thing.
+
+## The readout counts deliberate comparisons
+
+**The readout counts DELIBERATE comparisons.** An earlier rule asked
+only for a `session`+`role` carrying more than one distinct `model`, which any
+session that happened to stage a routine ticket beside a correction one
+satisfies. Measured 2026-09-12 on one corpus: 198 keys as that query was
+literally written, 35 sessions across 21 `run_date`s once restricted to
+implementers, against 17 real pairs across 8 — so the gate below read itself
+past its floor on sessions where nothing had been controlled. Dispatch alone
+is not enough either: the two rows must actually have RUN a different model or
+effort, because a deliberate dispatch whose two sides resolve to the same model
+(a `modelRoles` override, measured on omp 2026-09-12) controls nothing.
+
+## Why the implementer body carries enumerate-and-declare
+
+Why the agent body carries what it does — read this before editing any
+`fleet-implementer-<cell>` file, and keep every cell's body byte-identical. Each rule in the body's
+enumerate-and-declare block is load-bearing, for a different reason.
+**Enumerate-and-declare** answers a signature measured four times in one run:
+each implementer fixed exactly the cases its ticket named and left an adjacent
+one of the same class broken — a CRLF body **broken by** the fix for depth and
+split headings, a symlinked worktree after fixing locked and regular-file ones,
+an unreadable `refs/heads/<type>/` after fixing `refs/heads` itself, a bracketed
+file path after fixing typos and vendored ones. **All four failed to close their
+own ticket** — one's acceptance criterion went unmet, and the other three left
+the named defect reachable by a sibling spelling. Every one was caught by
+review, at review cost, which runs 3-5x the implementation it checks.

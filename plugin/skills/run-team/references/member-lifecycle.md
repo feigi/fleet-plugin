@@ -57,3 +57,45 @@ Reviewers go idle waiting on CI, won't resume alone — rebased, pushed, stopped
 ## React to artifacts, not agents
 
 Liveness says nothing: `idle` means "not currently executing", not "done"; finished member's finding may never arrive. In one run every member that looked dead had its work in git or on PR — pushed commits, self-removed label, applied ruling. Read `gh pr view`, `gh run view`, `git -C <worktree> status` before messaging: one command settles what round-trip usually doesn't, and member that ignored one ping tends to ignore second. When you message, send specific next action, never "what is your status".
+
+## A missing report is not evidence the member failed to send one
+
+**But a missing report is NOT evidence the member failed to send one — the
+inbound direction drops AND delays messages.** Both were measured in one run,
+and they are indistinguishable at the moment you look: one finisher's report was
+accepted with a msg_id and never arrived at all, while another's arrived late —
+its original and its re-send landing together, after the controller had already
+concluded it was missing. Measured: a finisher completed every
+duty, labelled the PR, and sent its report; the send was accepted with a msg_id
+and never arrived. The controller read the silence as the member ending its turn
+without reporting, said so, and was wrong. The re-send it asked for by name is
+the only reason the report exists. So when a report is missing, **ask by name —
+that is what the "unless the controller asks by name" clause is for — and do not
+attribute the gap to the member until it answers.** A member re-sending on a
+named request should state the original's msg_id and that it is a re-send, which
+is what distinguishes a lost message from a member that never sent one; a
+controller that skips the ask cannot tell those apart and will guess wrong in
+whichever direction its expectations point. The tick prints `SETTLE <member>`
+for a report file on disk that passes its schema and `REPORT-INVALID` for one
+that fails it, so a missing message is read off those lines before anyone is
+pinged.
+
+Note this cuts against the paragraph above only in appearance: the default stays
+*send once*, because unprompted re-sends were measured 2-to-1 false. The ask is
+the controller's move, not the member's.
+
+## A member runs its test suite in the foreground and blocks on it
+
+**A member runs its test suite in the foreground and blocks on it.**
+Backgrounding a suite and polling for it makes the member's own progress
+depend on a wake-up nothing in the fleet guarantees, and an idle member is
+indistinguishable from a working one — you learn only by pinging. Measured
+twice in one run: `fix-pr-<M>` backgrounded its suite plus a Monitor and sat
+idle for roughly two hours; neither ever woke it, and the only reason no work
+was lost is that you pinged it by name with a concrete next action.
+`finisher-pr-<M>` reached for the same pattern minutes later — a proactive
+warning is the only reason it did not repeat the stall. Its
+`pgrep -f 'finish-finisher-pr-<M>'` could never have matched any process, so
+the poll it was waiting on was structurally incapable of firing. This file is
+yours, not theirs: the implementer, fix-applier and finisher briefs carry the
+rule, as the line `A member runs its test suite in the foreground and blocks on it.`

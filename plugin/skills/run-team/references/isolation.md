@@ -124,3 +124,142 @@ The axis is two-sided: the member partitions, and the parent assigns each child'
 ## IDE/harness diagnostics attribute by bare filename, with no path
 
 Probe copies carry same filenames as real tree, so specialist's throwaway mutation surfaces as errors that read exactly like live worktree's — and line numbers can plausibly line up with real in-flight edits. Never relay diagnostic without reproducing it in that member's specific worktree (re-run the check that raised it — the typechecker, the linter — from there). Ran twice in one session: clean first time (sibling's probe), genuinely broken second. Telling implementer to chase phantom in file it is mid-rewrite on is expensive failure.
+
+## Where the omp probes ran
+
+Measured 2026-09-09 in a throwaway clone (`/tmp/fleet-probe`)
+that never touched the real checkout.
+
+## A fleet member is never dispatched with omp's `isolated: true`
+
+**A fleet member is never dispatched with omp's `isolated: true`.** Measured:
+an isolated spawn builds its workspace under `~/.omp/wt/<hash>/m` — an APFS
+clone (on this box), never a registered `git worktree` of the repo — and,
+because `apply` defaults to `true`, its changes are patch-applied into the
+**calling session's own cwd** the instant the spawn completes: a file an
+isolated probe created there appeared as `?? probe-isolated.txt` in the probe
+session's own cwd — which for an actual fleet run is the controller's main
+checkout — not in the worktree the prompt named. That is the exact
+silent-spill hazard this section exists to guard against, on by default, so
+`isolated` stays unused for every member and `task.isolation.enabled` stays
+off.
+
+## A member's tree is the claimed worktree, addressed by absolute path
+
+**A member's tree is the claimed worktree, addressed by absolute path.** An
+`edit` header without the worktree prefix resolves into the main checkout,
+where `member-write-guard` refuses it (**You read your instruments out of a
+tree every member can write to** in SKILL.md). How a
+member gets its cwd: the `task` tool's item schema — `name`/`agent`/`task`/
+`outputSchema`/`schemaMode` always, `effort`/`isolated` only when their own
+settings enable them — carries no working-directory field; measured
+directly: a member dispatched through it with none of those fields, told
+only to report `pwd`, returned the calling session's own cwd, not the
+claimed worktree, the same output an un-`cwd`-set `bash` call gives from
+that session, so the recipe is the dispatch-prompt absolute path, plus
+`bash`'s own `cwd` parameter set to it on every call and absolute paths for
+`write`/`edit`.
+
+## `task` does not accept a per-dispatch working directory
+
+**The one open gap that probe measured: `task` does not accept a per-dispatch
+working directory.** `omp://tools/task.md` documents non-isolated spawns as
+running `runSubprocess(...)` "directly with parent cwd" — no `cwd` field
+appears anywhere in the item schema — and the probe above confirms it in
+practice: the recipe is the absolute-path discipline above, not a placeholder
+for a `cwd` field that does not exist. The gap is now enforced rather than only
+written down: the plugin's `member-write-guard` omp extension
+refuses a fleet member's `write`/`edit`/`ast_edit` into the main checkout's
+non-ignored tree and an implementer's `bash` from a main-checkout cwd, and the
+missing field itself is requested upstream in `can1357/oh-my-pi`.
+
+## `task`-dispatched members share one `eval` kernel
+
+**The same gap reaches past the filesystem: `task`-dispatched members share one
+`eval` kernel.** Measured 2026-09-21, in a live run rather than a
+probe clone: two sibling implementers dispatched in the same batch, and the
+controller that dispatched both, reported the same Python kernel pid and the
+same runner file under `$TMPDIR/omp-python-runner/`, and each read the others'
+top-level bindings out of its own `eval` cell — a bare `WT` bound by one member
+was read back by a sibling and by the controller, the collision a ticket was filed
+on as an unproven self-report. `omp://tools/eval.md` states the mechanism:
+retained kernels are keyed by `python:${sessionId}`, normalized cwd and
+interpreter — `js:${sessionId}` for the JS VM — and "Parent and ordinary task
+subagents may share an inherited eval executor id; children created by eval's
+own `agent()` explicitly do not." Neither key component separates two members
+of one run: the session id is inherited from the controller, and the cwd is the
+main checkout for all of them, because `eval`, unlike `bash`, takes no `cwd`
+parameter to set. So the absolute-path discipline above is load-bearing inside
+`eval` too, and it needs one rule `write`/`edit` do not — member-prefixed
+binding names, since a shared global has no path to be absolute about. The
+corollary is `reset`: it "is likewise destructive to concurrent work sharing
+that backend session", so a member resetting its own kernel resets every
+concurrent sibling's. No per-dispatch knob turns any of this off: `task`'s item
+shape carries no kernel, executor or cwd field, and `python.kernelMode` set to
+`"per-call"` — the one documented lever that would hand every call a fresh
+kernel — is a session setting a child inherits, not something one dispatch can
+set for one member. Isolating a member's kernel is an omp-side change, so
+discipline is the whole of the remedy here — unlike the missing `cwd` field
+above, which `member-write-guard` enforces for `write`/`edit`/`ast_edit` and
+`eval` bypasses. **Phase 2** carries all three rules to every member.
+
+## `release-ticket.sh` is not a no-op on omp, and a running member hides nothing from `inflight.sh`
+
+**`release-ticket.sh` is not a no-op on omp, and `inflight.sh`'s probes are
+unaffected by a running member.** Measured against a hand-built claim (a
+branch plus a `git worktree add`) with a member sleeping inside it: a `bash`
+call with `cwd` set to the worktree, and a non-isolated `task` spawn told to
+work there, both operate inside the existing worktree and leave `git worktree
+list` unchanged — they coexist with the claim rather than duplicating it. An
+isolated spawn is architecturally blind to the worktree — its relative writes
+land in its own `~/.omp/wt/…` workspace regardless of the prompt — but it
+neither removes nor hides the claim, and `~/.omp/wt/` was empty after every
+isolated run: omp's own teardown touches only omp's own workspace, never the
+claim. `release-ticket.sh`'s three-artifact teardown (label, worktree, branch)
+is therefore still necessary. With the member live inside
+the worktree, `git worktree list` and `git branch --list` from the main
+checkout reported the claim unchanged before, during and after — `inflight.sh`
+hides nothing from omp.
+
+## A pattern kill reaches siblings
+
+**A pattern kill reaches siblings — the implementer, fix-applier and finisher briefs forbid it.** `pkill -f
+  <pattern>` matches on the whole command line, machine-wide. Members hold
+  separate worktrees, but the process table is not partitioned by them and a
+  test file's name is identical in every one, so a pattern naming a test file
+  matches whichever member happens to be running it. Measured: an implementer
+  chasing its own stalled run issued a `pkill -f` on its test file's name and
+  killed a `node --test` over two test files that was not
+  its own.
+
+## What a killed run's output looks like depends on the signal
+
+**What the victim's output looks like depends on the signal — and one of the
+cases is a clean green.** Each measured on node v26.8.1/darwin against a
+purpose-spawned fixture killed by its own PID. `pkill -f` **defaults to
+SIGTERM**, and a SIGTERMed runner prints `Interrupted while running:` followed
+by a *complete* summary block with `cancelled` non-zero, exiting `rc=1` — so
+`cancelled` is exactly the thing to search for in the default case. `pkill -9
+-f` leaves no summary block at all and the shell reports `rc=137`: SIGKILL
+means the harness never lived long enough to report. A kill landing on one of
+node's per-file **child** test processes leaves a complete block with `fail`
+non-zero and `cancelled 0` at `rc=1`, indistinguishable from an ordinary test
+failure. And a kill landing on a process a **test itself spawns** leaves a
+complete `pass N / fail 0 / cancelled 0` at the expected N over a corrupted
+run: `spawnSync` reports a SIGKILLed child as `status null`, and a test
+asserting only that the process it spawned exited non-zero —
+`assert.notEqual(r.status, 0)`, a form used across this suite, in files that
+spawn the shell scripts they cover — passes vacuously on `null`.
+
+## The command line is no partition either
+
+**The command line is no partition either — not reliably.** Ports are derived
+per issue precisely so collisions are impossible; argv isolates a run only
+sometimes. Measured with `ps -Ao pid,ppid,args -ww` (without `-ww` macOS `ps`
+truncates, and the truncation reads as an absence): an invocation carrying an
+**absolute** path puts a member-unique string in argv, while one carrying
+repo-relative filenames is byte-identical across members. Which of the two you
+get is not yours to choose — members are briefed on `./agent-test` with the
+arguments the Test entrypoint takes, and the runner hands them on exactly as
+its caller's shell expanded them. Clearing your own leftover process needs its
+PID, not a pattern.
