@@ -540,7 +540,7 @@ function reviewFailed(ev, pr, launch) {
     ev.note(`PR #${pr} already ${tok}`);
     // `## Retired` read as `ledger.mjs review` reads it, refusing a line that
     // names no member or reviewer as `review` does.
-    const { names, malformed } = readRetired(ev.ledger.retired ?? []);
+    const { names, malformed } = readRetired(ev.ledger.retired);
     if (malformed.length > 0) {
       ev.refuse(`next free runner for PR #${pr}`, { status: 2, how: "exit 2",
         stderr: `${NAME}: ## Retired has a line '${malformed[0]}' that names no member or reviewer — fix the ledger by hand before review can trust it\n` });

@@ -51,7 +51,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, unescapeText, nextReviewerName } from "./ledger-grammar.mjs"
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, unescapeText, nextReviewerName } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -2618,6 +2618,10 @@ function runToken() {
   // on a row with no implementer), or split one PR across two rows.
   const split = newSplitRow(data.rows, after);
   if (split !== null) die(`token ${key}: ${splitRowClause(split)}`);
+  // The names only: `token` adds no launch of its own, but a `PR#<n>` mention
+  // can move a row that already holds one onto another PR, and that launch is
+  // then judged against the retired names. A malformed `## Retired` line is
+  // left to the readers that refuse it.
   const refusal = rowWriteRefusal(data.rows, after, oldLine, line, readRetired(data.retired).names);
   if (refusal !== null) die(`token ${key}: ${refusal}`);
   data.rows = after;

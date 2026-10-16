@@ -510,7 +510,9 @@ export const isRetirable = (name) => parseMember(name) !== null || REVIEWER.test
  * has none — whatever outcome follows it, so a name written with an outcome
  * stays taken. Null when that name is not retirable: the line names no
  * member or reviewer and is malformed, and read as no name it would release
- * the name it was meant to hold, so each reader refuses it or skips it aloud. */
+ * the name it was meant to hold, so `dispatch`, `review`, the tick and
+ * `review-failed` refuse it and `rotate` skips it aloud; `token` reads the
+ * names and leaves a malformed line to them. */
 export function retiredName(line) {
   const eq = line.indexOf("=");
   const name = eq === -1 ? line : line.slice(0, eq);
