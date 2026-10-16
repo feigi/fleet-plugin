@@ -382,7 +382,7 @@ test("#878: every numArg() consumer tests absence with === null, never a bare fa
   // assertion in the loop is skipped and this test passes for the wrong
   // reason. Pinned against the known set (#878's routed three, plus
   // merge-gate.mjs's `--pr` (#1800), finisher-label.mjs's `--pr` (#3186),
-  // tier-roles.mjs's `--in-flight` (#3228), phase0.mjs's caps and
+  // tier-roles.mjs's `--in-flight` (#3228), phase0.mjs's `--in-flight` and
   // finisher-audit.mjs's `--sample-seconds` (#3187)), not just a non-empty check, so the scan
   // itself breaking (a reformat of the import line, say) reds here instead of
   // silently stopping coverage.

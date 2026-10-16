@@ -1865,7 +1865,7 @@ const PHASE0_STEPS = ["branch", "fast-forward", "pin", "baseline", "preflight", 
 // A receipt in phase0.mjs's shape with every step `ok`; `steps` overrides
 // individual steps.
 const receiptOf = ({ run = null, session = "/s", steps = {} } = {}) => ({
-  run, session, scratch: "/scratch", caps: { impl: null, review: null },
+  run, session, scratch: "/scratch",
   steps: Object.fromEntries(PHASE0_STEPS.map((name) => [name, { status: "ok", at: "2026-10-15T00:00:00.000Z", output: "", ...steps[name] }])),
 });
 

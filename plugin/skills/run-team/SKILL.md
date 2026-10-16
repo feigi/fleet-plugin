@@ -1,15 +1,16 @@
 ---
 name: run-team
-description: Run an agent fleet — implementers, reviewers (default 2 and 6), one merge bot — over the ready-for-agent queue. Invoke-only; the fleet writes to a live repo and must never start unasked.
-argument-hint: "[implementers] [reviewers]"
+description: Run an agent fleet — implementers, reviewers, one merge bot — over the ready-for-agent queue. Invoke-only; the fleet writes to a live repo and must never start unasked.
+argument-hint: "[in-flight]"
 disable-model-invocation: true
 ---
 
 Run `next-ticket`, `review-and-fix`, `run-merge-bot` as one fleet. You are the
 **controller**, in the main thread, never a member.
 
-`$ARGUMENTS` = `[implementers] [reviewers]`, both optional, default 2 and 6, no
-hard cap — they become the tick's `--implementer-cap` and `--reviewer-cap`.
+`$ARGUMENTS` = `[in-flight]`, optional, one positive integer, default 5: the
+In-flight bound, the most tickets between Claim and merge at once. It becomes
+the tick's `--in-flight` and `tier-roles.mjs --check --in-flight`.
 Merge bot is at most one, not configurable.
 
 The war story behind a rule ending `See references/<file>` lives in that file; load
@@ -258,8 +259,8 @@ phase, or in any later one, asks the maintainer which tickets to take.
 
 0. **Once per run, before anything else.** Run `~/.fleet/bin/fleet-run
    phase0.mjs --session <session-dir>` from this main checkout, `<session-dir>`
-   being this run's own session directory. Add `--implementer-cap <n>` and
-   `--reviewer-cap <n>` for the caps `$ARGUMENTS` gave, `--plugin-checkout
+   being this run's own session directory. Add `--in-flight <n>` when
+   `$ARGUMENTS` gave one, `--plugin-checkout
    <dir>` when this workspace tracks no `plugin/…` of its own, `--spend-dir
    <dir>` to name the directory the cockpit's spend panel reads, and
    `--workflow <name>` or `--declare-no-ci` when the repository has no workflow
@@ -274,6 +275,13 @@ phase, or in any later one, asks the maintainer which tickets to take.
    that needs you: act on each `NEED` line below, then run it again. Once
    `rotate` has run, a re-run skips every `ok` step and resumes where the last
    one stopped; before it, a re-run runs every step again.
+
+   The `tier-roles` step runs `~/.fleet/bin/fleet-run tier-roles.mjs --check
+   --in-flight <B>`, `<B>` being the `--in-flight` given, else the default
+   **Defaults** (**Queue depth**) states. What it checks is under **Phase 2**'s
+   tier routes. A line it prints on a pass about omp's `task.maxConcurrency`
+   is a notice in the step's output and never holds: read it, report it, and
+   go on — the fleet never writes that setting.
 
    - `NEED derive-recipe` — the Recipe cache holds nothing valid. Dispatch a
      `task` member named `derive-recipe`, agent `fleet-recipe-deriver`, its
@@ -352,13 +360,15 @@ phase, or in any later one, asks the maintainer which tickets to take.
    `ready-for-human` and untriaged work you have no channel for. A partial
    drop, survivors and specs together, is named the same way.
 2. **Refresh is the tick's from here on.** `fleet-tick.mjs` runs
-   `shortlist.mjs` itself when unclaimed entries fall below the implementer
-   cap, when the file is missing or empty, when an `excluded` premise has
+   `shortlist.mjs` itself when unclaimed entries fall below the In-flight
+   bound, when the file is missing or empty, when an `excluded` premise has
    lifted, and when a branch-named `behind-pr` exclusion whose PR is not yet
    MERGED or CLOSED, or a `behind-issue` exclusion whose issue is not yet
    closed, names a ticket the file still carries, and prints
    `REFRESHED shortlist: <n> entries; <k> lifted`. Phase 0 runs it by hand
    once because a dead run's shortlist is stale by definition.
+   None of those triggers runs while `HOLD (in-flight <n>/<B>)` stands
+   (**Queue depth**).
 
 **No multi-select, no maintainer tick.** Selection and ordering are batched —
 one scan, oldest first; admission never is. The invariant this replaces — one
@@ -481,7 +491,7 @@ worktree re-created for an already-open PR is in references/isolation.md.
 ## Phase 2 — dispatch the Pull's implementer
 
 **A Pull is one claim followed by one dispatch of a new member under a name no
-member has held; nothing holds a queue.** The implementer cap is the fleet's
+member has held; nothing holds a queue.** The In-flight bound is the fleet's
 own accounting rather than anything the runtime enforces, and the member is
 fresh and never a wake of one that already ran. Admission is per slot and
 never batched, so there is nothing to hand a freed slot its next ticket but
@@ -587,7 +597,7 @@ next member on top of an unchecked or mismatched dispatch multiplies whatever
 silently degraded. The tick prints `HOLD (tier unchecked impl-<N>)` for the
 newest `impl-` member of a ticket whose row carries none of the three
 verdicts, whether that member is still running or already settled `bailed`,
-`killed` or `released`, and `HOLD (tier mismatch impl-<N>)` for a mismatched
+`killed`, `released` or `blocked`, and `HOLD (tier mismatch impl-<N>)` for a mismatched
 one. Only the newest member counts, so a replacement (`impl-<N>-b`) is what
 clears a mismatch — and is then owed its own check. A mismatch on a ticket
 whose issue is already CLOSED holds nothing: the tick probes that issue and
@@ -646,7 +656,8 @@ the role's baked one, and the tier check judges a member against the
 role's own target (`modelRoles.<role>`), never a model family.
 
 Before the run's first dispatch run `~/.fleet/bin/fleet-run tier-roles.mjs
---check`; exit 1 names every definition whose `model:` is not a route,
+--check --in-flight <B>`, `<B>` the run's In-flight bound (phase 0's
+`tier-roles` step runs it); exit 1 names every definition whose `model:` is not a route,
 every unset `modelRoles.<role>` a definition needs, every definition whose
 `:<level>` its role's target does not run at (omp's model catalog — omp
 would clamp it silently), except an implementer definition whose cell the
@@ -655,7 +666,12 @@ and not the policy cell), which is a notice and never stops the run; every
 `task.agentModelOverrides` entry that would shadow a fleet definition, and
 an `--agents` directory holding no `*.agent.md` definition,
 prints the exact remedy, and **stops the run** before any member is
-dispatched — the fleet reads that config and never writes it.
+dispatched — the fleet reads that config and never writes it. omp's
+`task.maxConcurrency` is not the bound (it counts live members, not tickets,
+queues at its ceiling rather than refusing, and is session-wide): below
+2·B+2, or when it cannot be read, the check prints a notice line and still
+exits 0, so the notice is the operator's to read and report, never a reason to
+stop the run.
 
 **Every 5th Pull by ledger count goes at an exploration cell.** Count the `impl-`
 rows in `.fleet/ledger.md` at Pull time; the Pull that creates row 5, 10, 15 …
@@ -993,8 +1009,8 @@ owes beyond its call:
   never runs. Listed first because it is the only wake with no trigger —
   every other row above arrives; this one is the absence of one.
 - **Implementer report** → the PR is owed a review from here on:
-  the tick names it as `DISPATCH review PR#<M>` once a reviewer slot is free,
-  and it names the next shortlist head for the slot the implementer left. Pull
+  the tick names it as `DISPATCH review PR#<M>`, and it names the next
+  shortlist head whenever the In-flight count is below the bound. Pull
   nothing the tick did not name.
 - **Finisher reports halted** → the per-cause rule (**Resolving a finisher
   halt**, below).
@@ -1138,23 +1154,26 @@ owes beyond its call:
 **In one line, every wake is one `fleet-event.mjs` call, which ends in the tick.** One tick invocation, and you act on what it prints:
 
 ```
-~/.fleet/bin/fleet-run fleet-tick.mjs --apply [--implementer-cap <n>] [--reviewer-cap <n>] [--max-reviews <n>]
+~/.fleet/bin/fleet-run fleet-tick.mjs --apply [--in-flight <n>]
 ```
 
-It reads the run itself, and nobody states a count. Live implementers, live
-review units (in-flight `review=` tokens plus unsettled `fix-pr-` ones), the
-merge bot, merge holds, tier mismatches and the drain marker come off
-`.fleet/ledger.md`; the unclaimed heads and the supply come off
-`.fleet/shortlist.json`, which it refreshes itself when the unclaimed count is
-below the implementer cap, when the file is missing or empty, when an
-Exclusion's premise has lifted, or when a branch-named `behind-pr` or a
-`behind-issue` Exclusion still not lifted names a ticket the file carries; the
-open PRs come off `gh`. A ledger token it
+It reads the run itself, and nobody states a count. The In-flight count —
+every open PR that closes an issue off `gh`, plus every claimed ticket whose
+newest implementer is live or owed a replacement and has no such PR yet, off
+the ledger — sits beside the live review units (in-flight `review=` tokens
+plus unsettled `fix-pr-` ones), the merge bot, merge holds, tier mismatches
+and the drain marker, all off `.fleet/ledger.md`; the unclaimed heads and the
+supply come off `.fleet/shortlist.json`, which it refreshes itself when the
+unclaimed count is below the In-flight bound, when the file is missing or
+empty, when an Exclusion's premise has lifted, or when a branch-named
+`behind-pr` or a `behind-issue` Exclusion still not lifted names a ticket the
+file carries — never while the bound holds; the open PRs come off `gh`. A
+ledger token it
 cannot read, it refuses rather than guessing — a member counted live or gone on
 a guess is the over- or under-dispatch it exists to prevent — so correct that
-row with `ledger.mjs row` and tick again. The caps default to 2 implementers
-and 6 reviewers, and neither is a hard bound: pass `--implementer-cap` and
-`--reviewer-cap` on every tick when `$ARGUMENTS` set them, and never otherwise.
+row with `ledger.mjs row` and tick again. The In-flight bound defaults to 5
+and is fixed for the run: pass `--in-flight` on every tick when `$ARGUMENTS`
+set it, and never otherwise.
 
 It prints `actual/target` and a named ACTION per role, with the whole **Queue
 depth** guard table applied in code. Act on each line as it reads:
@@ -1187,8 +1206,8 @@ depth** guard table applied in code. Act on each line as it reads:
   finisher-pr-<M>-<x> …`, then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`.
   Never add the label yourself. A head
   that moved is caught by the new finisher's duty 1 `past-pin` halt and the
-  re-review path that follows it. Finishers take no reviewer slot, so this
-  prints whatever the reviewer cap reads.
+  re-review path that follows it. Finishers are not review units, so this
+  prints whatever the unit count reads.
 - `ESCALATE unlabelled PR#<M> …` — a second finisher since the last `label-off=`
   settled `labelled` and the label is still not on: the tick dispatches no
   third. Not actionable; the maintainer's, through the cockpit's `unlabelled`
@@ -1213,7 +1232,8 @@ depth** guard table applied in code. Act on each line as it reads:
   actionable; it repeats while the PR reads CONFLICTING and clears once it
   stops, closes or merges.
 - `HOLD (…)` — the row is held and says why: draining, a tier mismatch, an
-  unchecked tier, a saturated review side, `--max-reviews` in flight, or every
+  unchecked tier, the In-flight bound reached (`HOLD (in-flight <n>/<B>)` —
+  nothing to do: a merge brings n below B), or every
   queued merge candidate held behind a lower PR or on a conflict hold no
   fix-applier has cleared. An unchecked tier is `tick --apply`'s to check, and
   the hold stays while the check writes no verdict (its `tier-ok=`, or
@@ -1318,12 +1338,11 @@ phase 2's own step, run by `tick --apply`: a mismatch it finds is the
 `HOLD (tier mismatch impl-<N>)` above, and a member it has no verdict on is
 the `HOLD (tier unchecked impl-<N>)`. Nothing else in the loop owns it.
 
-**`--max-reviews <n>`** bounds how many reviews are in flight at once, inside
-the reviewer cap. It defaults to the reviewer cap, and the reviewer slots it
-leaves still serve fix-appliers. Leave it at its default: every review unit
-already counts against the session's single `task.maxConcurrency` semaphore,
-which queues at its ceiling rather than refusing, so reviews run up
-to the reviewer cap without a tighter explicit bound.
+**`--in-flight <B>`** is the run's In-flight bound: leave it at its default
+unless `$ARGUMENTS` set it. omp's `task.maxConcurrency` is not the bound — it
+counts live members, not tickets, queues at its ceiling rather than refusing,
+and is session-wide — so phase 0 reports it below 2·B+2 as a notice, never a
+hold, and the fleet never writes it.
 
 **Why every wake.** A merge cascade is a firehose of merges, CI greens and
 rebases that holds your attention on the merge side while the implementer side
@@ -1759,19 +1778,16 @@ one-file rewrite trims too. An unknown profile widens to the full six, the safe
 direction, so a trim is never something to count on in advance — and a full six
 is never something to assume.
 
-**The reviewer cap counts live review units.** A review in flight — a
+**Review units are counted, never capped.** A review in flight — a
 `review-pr-<pr#>` member still running — is one; each
 `fix-pr-<pr#>` is one; a finisher and a CI wait are zero; and a PR holds at most
-one slot at a time. In-flight reviews are derived, never remembered: a row with
+one unit at a time. In-flight reviews are derived, never remembered: a row with
 `review=` and no `reviewed=` is one, which is why the token goes on before
 anything else. A review whose PR has left the open list is probed: when
 `gh pr view` reports that PR MERGED or CLOSED, the tick drops the review,
 since none runs against a finished PR, and a probe that
-cannot answer keeps the slot. The defaults are 2 implementers and 6 reviewers,
-and neither is a hard cap. The cap bounds units, not the agents a review fans
-out to — 1 snapshot + up to 6 specialists + 2 refuters per critical/important finding — and
-how many reviews may be in flight at once, inside it, is `--max-reviews`. The
-slots a review does not hold still serve fix-appliers.
+cannot answer keeps the unit counted. A unit is not the agents a review fans
+out to — 1 snapshot + up to 6 specialists + 2 refuters per critical/important finding.
 
 It returns `{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts, snapshot, survived, refuted, unverified}` —
 the **digest** first, then the snapshot and the findings — and it lands as
@@ -1866,7 +1882,7 @@ token, then append `review=member:<that name>` after it, both in one
 call — `review` settles the dead launch in place, and refuses a new launch
 while the dead one still reads open, and the tick takes the last `review=`
 token on a row as the one in flight, so that order is what keeps the retry
-counted against the cap. A
+counted as the live review unit. A
 runner member that is killed rather than failed follows **Failure
 handling** (fresh name, inherited state stated).
 
@@ -2750,8 +2766,8 @@ where the controller itself runs from.
   closing-issue test is what keeps it from widening: a PR that closes no issue
   — one you author yourself, for instance — is left unlabelled for the
   maintainer, so no member of the fleet will ever review it, and counting it
-  floors the backlog at a depth nothing in the run can drain — the implementer
-  gate then holds for the rest of the run against a queue of nothing.
+  floors the backlog at a depth nothing in the run can drain — the reviewer
+  row would then report a review owed for the rest of the run.
   GitHub's own linked-issue set decides that, not a keyword regex over the body.
   **That exemption is for a PR THIS run authors, never one a PRIOR run left
   open** — step 0 folds those into this run's review queue, so count one when
@@ -2761,23 +2777,35 @@ where the controller itself runs from.
   way — folding one in cannot reach the count. So the by-hand judgement and
   the script's output differ here, and such a PR's review is dispatched by
   hand.
+- **In flight** — a ticket between its Claim and its PR's merge: an implementer
+  live or owed a replacement on it, or an open PR closing it. A PR closing
+  nothing is never in flight, and a ticket whose newest implementer settled
+  `blocked` is not either. The tick's `n`; the implementer row's counts read it
+  as `implementers=<i> prs=<p>`, n being i + p.
+- **In-flight bound** — the most tickets a run lets be In flight at once, fixed
+  for the run, set by `/run-team`'s one argument. Reaching it holds every Pull
+  until a merge brings the count below it; reviewers, finishers and the merge
+  bot never slow for it. The tick's `B`.
 
-**Defaults: 2 implementers, 6 reviewers — no hard cap on either.** Reviewer
-slots in use ≈ I·(T_review + 0.94·T_fix)/T_impl ≈ 1.95·I (medians since
-2026-08-07: T_impl 19.3 min, T_fix 21.0 min, T_review ~18
-min, 0.94 fix-appliers per review), so at the default about four of the six
-are busy, and an idle slot costs nothing. Re-derive it from the map's guard
-once 20 or more PRs have merged under it, never from one run's rows.
+**Default: In-flight bound 5, fixed for the run.** The level is set by load, not
+throughput: B caps live review units (≤ open PRs ≤ B), and the review side is
+about 84 % of cache-write tokens, fanning out to 1 snapshot + up to 6
+specialists + 2 refuters per finding. 5 keeps worst-case review concurrency
+below the former reviewer count of 6 and sits near the measured mean In flight
+of 5.6. On the means that allows ≈ 1.7 merges per open-time hour against 1.89
+measured, so the default does not rest on throughput headroom and the guard's
+throughput test may trip on it; the merge gate saturates near 10–11, so
+raising B past that buys nothing. 8 was rejected: peak review concurrency above
+the former reviewer count, for a throughput gain the backlog does not show it
+needs. Re-derive it from the map's guard once 20 or more PRs have merged under
+it, never from one run's rows.
 
-**The review-backlog gate is narrowed, and the merge-queue depth never gates.**
-More PRs into a review-bound pipeline buy nothing, but the pipeline is
-review-bound only when a PR is still owed its review after the tick's own
-dispatches AND no reviewer slot is left for it — `HOLD (review side
-saturated)`. A deep backlog with free slots is a `DISPATCH review` on the same
-tick, never a reason to idle an implementer. A deep `ready-to-merge` queue is
-*not* that signal at all: each PR rebases exactly once, when it becomes the
-candidate, so producing more PRs adds no rebases-per-PR — it changes only
-*when* a given PR is ready.
+**The review backlog never gates, and the merge-queue depth is still no
+signal.** The only gate on a Pull is the In-flight count. A deep backlog is a
+`DISPATCH review` on the same tick, never a reason to idle an implementer. A
+deep `ready-to-merge` queue adds no rebases per PR — each PR rebases exactly
+once, when it becomes the candidate — and those PRs count as In flight because
+they sit between Claim and merge, not because the queue is deep.
 
 **Reconcile, do not wait for an event.** "A slot is free and the shortlist is
 non-empty" is a *level* condition — re-derive the deficit on **every** tick,
@@ -2800,21 +2828,33 @@ never as a second, hand-run copy of it.
 | shortlist (unclaimed) | implementer row prints |
 |---|---|
 | ≥ 1 | `PULL #N …`, one head per free slot — a Pull each (phase 1) |
-| below the cap, missing or empty | the tick refreshes first — `REFRESHED shortlist: n entries; k lifted` — and Pulls from what it found |
+| below the In-flight bound, missing or empty | the tick refreshes first — `REFRESHED shortlist: n entries; k lifted` — and Pulls from what it found |
 | 0 after that refresh | `SUGGEST /triage, hold idle` |
 
 Whatever the row prints, a `specs-dropped=#<N> (…)` at the end of its counts
 names the tickets the to-spec filter kept out of the shortlist — specs
 awaiting to-tickets, so an empty shortlist carrying one is not "no work".
 
+The refresh runs at unclaimed < B and, with every other refresh trigger, never
+while the bound holds: a refresh then cannot feed a Pull, and the first tick
+back under the bound refreshes and Pulls in the same tick.
+
 Four holds outrank every row: `HOLD (draining)` once `ledger.mjs drain` has
 recorded the drain, `HOLD (tier mismatch impl-<N>)` until a replacement is
 dispatched at the right tier, `HOLD (tier unchecked impl-<N>)` until
 `tier-check.mjs` has written its verdict on the newest implementer —
 `tier-ok=`, `tier-mismatch=` or `tier-unverifiable=` — and
-`HOLD (review side saturated)` when a PR is still owed its review and no
-reviewer slot is left for it — refreshing to enable a Pull you are holding
-buys nothing.
+`HOLD (in-flight <n>/<B>)` when n tickets are between Claim and merge and
+n ≥ B — refreshing to enable a Pull you are holding buys nothing.
+
+`HOLD (in-flight <n>/<B>)` ranks last of the four: the other three print in
+its place. Its detail is the implementer row's counts, `implementers=<i>
+prs=<p> unclaimed=<k> supply=<s>`. It is quiet — a merge brings n below B and
+the next tick Pulls — except for a ticket whose newest implementer settled
+`killed` or `tier-mismatch`: it counts as In flight with no PR that could
+merge, so the row asks for the replacement's dispatch and names it in the
+detail. The reviewer row reads `<units>/<B>`, its live review units against
+the same bound, and never holds on it.
 
 A main checkout that is not `clean` against its Phase 0 baseline outranks all
 of them, and every dispatching row besides: `HOLD (main checkout dirty)`,
@@ -2828,9 +2868,9 @@ A starved implementer queue never stalls the review or merge side.
 
 ## Invariants
 
-- Implementers and review units at their caps (default 2 and 6, no hard cap on
-  either), ≤ 1 merge bot. Caps bound *members* and review units, not live
-  agents — members fan out and their children consume slots you never dispatched.
+- In-flight tickets at most the bound (default 5), ≤ 1 merge bot. The bound
+  counts tickets, not live agents — members fan out and their children consume
+  slots you never dispatched.
 - A grandchild surfaces as its own task-notification. An unrecognized task-id is
   not a member reporting done.
 - A reviewer never reviews a PR it implemented.
@@ -3056,7 +3096,7 @@ Plan it as a PR the run's own merge queue lands, never as an edit-and-continue.
 |---|---|
 | SHA not on expected branch | Flag, do not enqueue, report |
 | Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands or leaves a fork open; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |
-| Implementer blocked or ambiguous *mid-implementation* | Free the slot, leave `in-progress`, report — the row above is the pre-code bail, not this one |
+| Implementer blocked or ambiguous *mid-implementation* | Free the slot, `ledger.mjs settle impl-<N> blocked`, leave `in-progress`, report — the ticket is not In flight and waits for a human; the row above is the pre-code bail, not this one |
 | `review-pr` workflow throws or returns no tree | Retry once under the next letter (`review-pr-<pr#>-b`); still failing, report and leave the PR at review-due. Never enqueue the PR as reviewed — the workflow is not a member, so no other row here covers it |
 | Reviewer, fix-applier or red-check fixer cannot reach green | Report, leave the PR unlabeled, free the slot — a fix-applier or red-check fixer settles `failed` |
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
@@ -3171,7 +3211,7 @@ live count from it, so nobody states one. Write neither by hand:
   itself refuses.
 - **`ledger.mjs settle <member> <outcome>`** — rewrites the token to
   `<member>=<outcome>` in both places. Outcomes: `impl-N` = `PR#M | bailed |
-  released | killed | tier-mismatch`; `fix-pr-M` = `applied:<head> | no-op |
+  released | killed | tier-mismatch | blocked`; `fix-pr-M` = `applied:<head> | no-op |
   failed | killed`; `finisher-pr-M` = `labelled | failed | killed |
   halted:<cause>`, `<cause>` one of `live-editor | rebase | past-pin |
   unreadable | missing | absent | other` (**Resolving a finisher halt**);
@@ -3253,7 +3293,7 @@ carry yet (`review-pr-<n>-b`, `-c`, …) for every later one,
 settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`
 when the result lands, `<run>` the review's `run-XXXXXXXX` run root under
 `<scratch>/pr<n>/`, which holds its `review.json`. A row with `review=` and no `reviewed=` is a review in
-flight, and the tick counts it against the reviewer cap unless gh reports its PR
+flight, and the tick counts it as a live review unit unless gh reports its PR
 MERGED or CLOSED. `ci=<run-id>:<attempt>:<conclusion>`
 and `held-behind:#<lower>` are row tokens the same way (Phase 3), and so is
 `conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md`

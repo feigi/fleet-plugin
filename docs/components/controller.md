@@ -5,8 +5,9 @@
 The `run-team` controller is the orchestrator: a single, long-running
 session — never a dispatched subagent — that owns the main checkout and
 drives every other role over one repo's `ready-for-agent` queue until it
-drains. Invoked as `/skill:run-team [implementers] [reviewers]`
-(defaults 2 and 6, no hard cap; the merge bot is always at most 1).
+drains. Invoked as `/skill:run-team [in-flight]`
+(one optional argument, the In-flight bound, default 5; the merge bot is always at most 1,
+ADR 0031, [`docs/adr/`](../adr/)).
 Follows [`plugin/skills/run-team/SKILL.md`](../../plugin/skills/run-team/SKILL.md).
 
 ## How it works
@@ -30,7 +31,7 @@ Follows [`plugin/skills/run-team/SKILL.md`](../../plugin/skills/run-team/SKILL.m
    `fleet-tick.mjs` call: it reconciles `.fleet/ledger.md` and prints
    one action per role — `PULL #N`, `REFRESHED`, `DISPATCH review`/
    `DISPATCH fix-pr`/`DISPATCH merge-bot`, or a `HOLD` on the
-   implementer row (draining, tier mismatch, review saturated) that
+   implementer row (draining, tier mismatch, tier unchecked, in-flight) that
    outranks that row's `PULL`; the reviewer and merge-bot rows act
    independently of it.
 3. **Dispatch exactly what the tick printed:**
@@ -44,7 +45,7 @@ Follows [`plugin/skills/run-team/SKILL.md`](../../plugin/skills/run-team/SKILL.m
    fix-applier (if any) has reported — a `no-op` report clears that
    gate immediately, with no new CI run — see [Finisher](finisher.md).
 5. **Phase 1 (Pull) is strictly serial**; everything else may run
-   concurrently, bounded by the implementer/reviewer caps.
+   concurrently, bounded by the In-flight bound.
 
 ## Opinionated choices
 

@@ -236,13 +236,18 @@ test("the controller keeps the rules the workflow's return shape needs", () => {
     /"checked and cleared"/,
     "run-team no longer warns that `unverified` is not a passed verification",
   );
-  // #1773 §3: the reviewer cap counts live review UNITS — an in-flight review
+  // #1773 §3: review units are counted, never capped — an in-flight review
   // is one, each fix-applier is one — derived from the ledger. The retired
-  // "one review workflow at a time" left the review ungated by the cap.
+  // "one review workflow at a time" left the review uncounted.
   assert.match(
     dflt,
-    /The reviewer cap counts live review units/,
-    "run-team no longer says what the reviewer cap counts — an in-flight review is a unit, not a free slot",
+    /Review units are counted, never capped/,
+    "run-team no longer says review units are counted and never capped — an in-flight review is a unit, not a free slot",
+  );
+  assert.match(
+    dflt,
+    /cannot\s+answer\s+keeps\s+the\s+unit\s+counted/,
+    "run-team no longer keeps a review unit counted when the MERGED-or-CLOSED probe cannot answer",
   );
   assert.match(
     dflt,

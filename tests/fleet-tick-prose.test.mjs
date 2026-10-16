@@ -31,14 +31,19 @@ const tickBlock = () =>
 // § 6 §1). Any one of them back in the block is a controller told to supply a
 // number the tick now refuses as an unknown flag — exit 2 on every wake.
 const DELETED_FLAGS = ["--implementers", "--reviewers", "--merge-bots", "--pool", "--reviews-ready", "--merge-holds"];
+// The three configuration flags `--in-flight` replaced. Any one of them back
+// in the block is a controller told to pass a flag the tick refuses as unknown.
+const RETIRED_FLAGS = ["--implementer-cap", "--reviewer-cap", "--max-reviews"];
 
 test("the tick block names the script and only the flags it still takes", () => {
   const s = tickBlock();
   assert.match(s, /fleet-tick\.mjs/);
-  // The three configuration flags that survived, individually: a cap passed
-  // from `$ARGUMENTS` and the review bound are the only things a caller says.
-  for (const flag of ["--implementer-cap", "--reviewer-cap", "--max-reviews"]) {
-    assert.ok(s.includes(flag), `tick block does not name ${flag}`);
+  // The one configuration flag that survived: the In-flight bound a caller
+  // passes from `$ARGUMENTS` is the only thing it says.
+  assert.ok(s.includes("--in-flight"), "tick block does not name --in-flight");
+  assert.match(s, Pin.phrase("pass `--in-flight` on every tick when `$ARGUMENTS` set it, and never otherwise"));
+  for (const flag of RETIRED_FLAGS) {
+    assert.doesNotMatch(s, new RegExp(`${flag}(?![\\w-])`), `tick block still names ${flag}, which fleet-tick.mjs refuses since --in-flight replaced it`);
   }
   // A lookahead after the name, so `--reviewer-cap` never reads as `--reviewers`
   // and `--pool` never matches inside a longer word.
@@ -61,14 +66,49 @@ test("the tick block says the tick reads the run itself, and nobody states a cou
 });
 
 // The rule itself, bounded to its own paragraph.
-const maxReviewsPair = () =>
-  RUN_TEAM.paragraph("**`--max-reviews <n>`", "run-team --max-reviews rule", "**Why every wake.** A merge cascade is a firehose").text;
+const inFlightPair = () =>
+  RUN_TEAM.paragraph("**`--in-flight <B>`**", "run-team --in-flight rule", "**Why every wake.** A merge cascade is a firehose").text;
 
-test("--max-reviews defaults to the reviewer cap, and omp leaves it there", () => {
-  const region = maxReviewsPair();
-  assert.match(region, Pin.phrase("Leave it at its default"));
+test("--in-flight is the run's bound, omp leaves it at its default, and the semaphore is a notice, never a hold", () => {
+  const region = inFlightPair();
+  assert.match(region, Pin.phrase("leave it at its default"));
   assert.match(region, Pin.phrase("task.maxConcurrency"));
-  assert.doesNotMatch(region, /--max-reviews \d/, "the rule now hard-codes a numeric bound — the point of leaving it at its default is that no caller passes one");
+  assert.match(region, Pin.phrase("never a hold"));
+  assert.doesNotMatch(region, /--in-flight \d/, "the rule now hard-codes a numeric bound — the point of leaving it at its default is that no caller passes one");
+});
+
+test("the Defaults paragraph states the bound's default with its rationale and the re-derive rule, and the retired sizing note is gone", () => {
+  const def = RUN_TEAM.paragraph("**Default: In-flight bound 5, fixed for the run.**", "run-team Defaults paragraph", "**The review backlog never gates").text;
+  assert.match(def, Pin.phrase("fixed for the run"));
+  assert.match(def, Pin.phrase("set by load, not throughput"));
+  assert.match(def, Pin.phrase("once 20 or more PRs have merged under it, never from one run's rows"));
+  assert.doesNotMatch(def, /1\.95/, "the Defaults paragraph still carries the retired reviewer sizing note");
+});
+
+test("§ Queue depth defines In flight and the In-flight bound, and documents the hold's rank, detail and refresh rule", () => {
+  const inFlight = RUN_TEAM.bullet("- **In flight**", "- **In-flight bound**", "In flight definition").text;
+  assert.match(inFlight, Pin.phrase("a ticket between its Claim and its PR's merge"));
+  assert.match(inFlight, Pin.phrase("A PR closing nothing is never in flight"));
+  const bound = RUN_TEAM.bullet("- **In-flight bound**", "**Default: In-flight bound 5", "In-flight bound definition").text;
+  assert.match(bound, Pin.phrase("reviewers, finishers and the merge bot never slow for it"));
+  const s = queueDepthTable();
+  assert.match(s, Pin.phrase("`HOLD (in-flight <n>/<B>)` ranks last of the four"));
+  assert.match(s, Pin.phrase("implementers=<i> prs=<p> unclaimed=<k> supply=<s>"));
+  assert.match(s, Pin.phrase("The reviewer row reads `<units>/<B>`"));
+  assert.match(s, Pin.phrase("never while the bound holds"));
+});
+
+test("phase 0 runs tier-roles.mjs --check --in-flight <B> and says its notice never holds", () => {
+  const step = RUN_TEAM.paragraph("The `tier-roles` step runs", "run-team phase 0 tier-roles step", "- `NEED derive-recipe`").text;
+  assert.match(step, Pin.phrase("tier-roles.mjs --check --in-flight <B>"));
+  assert.match(step, Pin.phrase("is a notice in the step's output and never holds"));
+});
+
+test("the failure-handling row and the settle-outcomes list name blocked", () => {
+  const row = RUN_TEAM.between("| Implementer blocked or ambiguous *mid-implementation* |", "\n| `review-pr` workflow throws or returns no tree", "failure-handling blocked row").text;
+  assert.match(row, Pin.phrase("`ledger.mjs settle impl-<N> blocked`"));
+  assert.match(row, Pin.phrase("the ticket is not In flight"));
+  assert.match(RUN_TEAM.between("Outcomes: `impl-N` = `PR#M | bailed |", "`fix-pr-M` = `applied:<head>", "settle-outcomes list").text, Pin.phrase("tier-mismatch | blocked"));
 });
 
 test("the wake table names every wake, each with its fleet-event.mjs command", () => {
@@ -133,7 +173,7 @@ test("phase 2's tier check and the tier guards say tick --apply runs the check",
   const phase2 = RUN_TEAM.paragraph("**After every Pull's dispatch, the tier check runs", "run-team phase 2 tier check paragraph", "**The tick holds the next Pull until that verdict exists.**").text;
   assert.match(phase2, /`tick --apply` runs it itself/);
   assert.match(phase2, Pin.phrase("HOLD (tier unchecked impl-<N>)"));
-  const guards = RUN_TEAM.paragraph("**Tier guards under Pull.**", "run-team tier guards paragraph", "**`--max-reviews <n>`**").text;
+  const guards = RUN_TEAM.paragraph("**Tier guards under Pull.**", "run-team tier guards paragraph", "**`--in-flight <B>`**").text;
   assert.match(guards, /run by `tick --apply`/);
 });
 
@@ -156,13 +196,13 @@ test("the queue-depth table points at the executable reconcile", () => {
 
 test("the queue-depth table keeps the implementer row's four holds above its rows", () => {
   // The one ordering the script encodes that the table cannot show: implementers()
-  // returns a HOLD for a drain, a tier mismatch, an unchecked tier or a saturated
-  // review side before it ever reaches a PULL. A table read as authoritative
+  // returns a HOLD for a drain, a tier mismatch, an unchecked tier or the
+  // In-flight bound before it ever reaches a PULL. A table read as authoritative
   // without them Pulls under a hold. All four, each by the ACTION string the tick
   // prints.
   const s = queueDepthTable();
   assert.match(s, /Four\s+holds\s+outrank\s+every\s+row/);
-  for (const hold of ["`HOLD (draining)`", "`HOLD (tier mismatch impl-<N>)`", "`HOLD (tier unchecked impl-<N>)`", "`HOLD (review side saturated)`"]) {
+  for (const hold of ["`HOLD (draining)`", "`HOLD (tier mismatch impl-<N>)`", "`HOLD (tier unchecked impl-<N>)`", "`HOLD (in-flight <n>/<B>)`"]) {
     assert.ok(s.includes(hold), `the queue-depth table no longer names ${hold} above its rows`);
   }
 });
@@ -188,7 +228,7 @@ test("the queue-depth table says a specs-dropped tail on the row is not \"no wor
 test("the review-backlog definition states what the script actually counts", () => {
   // The gate's input. Left as the narrow definition alone, a controller reading
   // a HOLD cannot tell an over-count from a real review-bound pipeline.
-  const def = RUN_TEAM.bullet("- **review backlog**", "**Defaults: 2 implementers, 6 reviewers", "review-backlog definition").text;
+  const def = RUN_TEAM.bullet("- **review backlog**", "- **In flight**", "review-backlog definition").text;
   assert.match(def, /open PR without `ready-to-merge`/);
   // The review state now lives on the ledger (spec 2026-09-24 § 3 §7), so the
   // count is exact rather than a wider read held "earlier, never later": a PR

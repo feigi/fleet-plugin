@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Phase 0 as one command: the run's start sequence, in order, with a receipt.
 //
-//   phase0.mjs --session <dir> [--implementer-cap n] [--reviewer-cap n]
-//              [--in-flight n] [--plugin-checkout <dir>] [--spend-dir <dir>]
+//   phase0.mjs --session <dir> [--in-flight n] [--plugin-checkout <dir>]
+//              [--spend-dir <dir>]
 //              [--workflow <name> | --declare-no-ci]
 //
 // Reached through the Resolver and run from the MAIN checkout (a linked
@@ -33,8 +33,8 @@
 //                 maintainer's.
 //   tier-roles    `tier-roles.mjs --check --in-flight <B>`. <B> is `--in-flight`
 //                 when given, else the In-flight bound's default
-//                 (IN_FLIGHT_DEFAULT in phase0-receipt.mjs); the caps play no
-//                 part in it. A notice tier-roles prints on a pass is part of
+//                 (IN_FLIGHT_DEFAULT in phase0-receipt.mjs). A notice
+//                 tier-roles prints on a pass is part of
 //                 the step's output.
 //   metrics       `metrics-refresh.mjs`. A non-zero exit fails the step.
 //   cockpit       `board.mjs serve --open` launched detached, `--spend-dir`
@@ -59,7 +59,7 @@
 // THE RECEIPT is `.fleet/phase0.json` (resolved through fleet-dir.mjs, so a
 // worktree and the main checkout name one file):
 //
-//   { run, session, scratch, caps: {impl, review}, inFlight,
+//   { run, session, scratch, inFlight,
 //     steps: { <name>: { status, at, output } } }
 //
 // `status` is ok, pending, failed, drift or unanswered; `at` an ISO time;
@@ -68,9 +68,7 @@
 // `pending`. `run` is the `at` that `ledger.mjs rotate` wrote into the
 // controller record in `.fleet/heartbeat.json`, null until the rotation has
 // run. `session` is `--session`, the one place the controller states its
-// session directory. `scratch` is what `scratch-root.mjs` prints. `caps` are
-// the flags as given, null for one not given: the tick's own defaults apply to
-// a cap nobody set, and a number here would pretend somebody had. `inFlight`
+// session directory. `scratch` is what `scratch-root.mjs` prints. `inFlight`
 // is the In-flight bound this run used — `--in-flight`, or its default.
 //
 // RESUMABLE. A re-run reads the receipt. It continues it — skipping every `ok`
@@ -436,7 +434,7 @@ function main() {
   const die = makeDie(NAME);
   const F = defineFlags(die, {
     flags: {
-      session: "value", "implementer-cap": "value", "reviewer-cap": "value", "in-flight": "value", "plugin-checkout": "value",
+      session: "value", "in-flight": "value", "plugin-checkout": "value",
       "spend-dir": "value", workflow: "value", "declare-no-ci": "bool",
     },
   });
@@ -456,7 +454,6 @@ function main() {
     if (n !== null && n < 1) die(`--${name} needs a positive number, got ${n}`);
     return n;
   };
-  const caps = { impl: positive("implementer-cap"), review: positive("reviewer-cap") };
   const inFlight = positive("in-flight") ?? IN_FLIGHT_DEFAULT;
   if (F.has("declare-no-ci") && !absent("workflow")) die("--workflow and --declare-no-ci are alternatives, not a pair");
   const ci = F.has("declare-no-ci") ? "CI: declared absent (--declare-no-ci)" : absent("workflow") ? null : `CI: workflow ${F.arg("workflow")} (--workflow)`;
@@ -521,7 +518,7 @@ function main() {
     renameSync(receiptPath, held);
   }
 
-  const receipt = { run: resumed ? previous.run : null, session, scratch, caps, inFlight, steps: {} };
+  const receipt = { run: resumed ? previous.run : null, session, scratch, inFlight, steps: {} };
   for (const name of STEP_NAMES) {
     const was = resumed ? previous.steps[name] : undefined;
     receipt.steps[name] = was?.status === "ok" ? was : { status: "pending", at: now, output: "not run" };

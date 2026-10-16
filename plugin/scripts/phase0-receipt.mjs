@@ -154,8 +154,7 @@ export const IN_FLIGHT_DEFAULT = 5;
  * The bound the receipt in `fleetDir` records, as the tick's own flag:
  * `{ args }` — `--in-flight <B>` for the `inFlight` phase 0 ran with, none
  * when there is no receipt or it records no bound — or `{ error }` for a
- * receipt that is there and cannot be read. The caps the receipt records
- * play no part: the bound counts tickets, not members.
+ * receipt that is there and cannot be read.
  */
 export function tickCaps(fleetDir) {
   let phase0;
