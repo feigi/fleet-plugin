@@ -132,7 +132,7 @@
 // the ledger; main() does the I/O. Split so the guard table and the reading are
 // both unit-testable without a network.
 
-import { parseMember, parseToken, premisesOf, rowNums, nextRetry, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, premisesOf, rowNums, nextRetry, readRetired, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
 
 // The implementer and reviewer rows' TARGET is the In-flight bound; the merge
 // bot's is 1. Availability of work belongs in the ACTION, not the target: a
@@ -909,6 +909,14 @@ export const pastPinDue = (st, head) => st !== undefined && st.pastPinHalt && !s
 export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed = new Set(), finished = new Set()) {
   const open = new Set(prs.map((p) => p.number));
   const { members, byPr, verdicts, claimed, excluded } = foldLedger({ rows, dispatched }, open);
+  // `## Retired` lines as every reader reads them: a line's name before its
+  // first `=`. One naming no member or reviewer would leave the name it was
+  // meant to hold unaccounted for, so it is refused, as a `## Dispatched`
+  // entry that is no member token is.
+  const { names: retiredNames, malformed: badRetired } = readRetired(retired);
+  if (badRetired.length > 0) {
+    throw new LedgerError(`## Retired line '${badRetired[0]}' names no member or reviewer — fix the ledger by hand before the tick can count from it`);
+  }
 
   const all = [...members.values()];
   const live = (family) => all.filter((m) => m.family === family && m.outcome === null).length;
@@ -1088,9 +1096,9 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
     // `review=wf:` run no member, so neither files one.
     reporters: unsettled,
     // Every member name the ledger records, settled or live: each row's
-    // member tokens, each `## Dispatched` entry and each `## Retired` line —
-    // the names a transcript in the session directory is accounted for by.
-    recorded: new Set([...members.keys(), ...retired]),
+    // member tokens, each `## Dispatched` entry and each `## Retired` line's
+    // name — the names a transcript in the session directory is accounted for by.
+    recorded: new Set([...members.keys(), ...retiredNames]),
   };
 }
 

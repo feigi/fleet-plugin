@@ -62,7 +62,7 @@ function fixture(t, rows = null) {
   const review = (pr, ...tokens) => run("review", pr, ...tokens);
   const reviewRefused = (pr, tokens, ...whys) => refusedCall(["review", pr, ...tokens], whys);
   const read = () => JSON.parse(cli("read").stdout);
-  return { run, ok, refused, review, reviewRefused, read, rows: () => read().rows, file };
+  return { run, ok, refused, review, reviewRefused, refusedCall, read, rows: () => read().rows, file };
 }
 
 const A = "review=member:review-pr-482";
@@ -103,6 +103,24 @@ test("review's next skips a runner name the ledger's ## Retired holds", (t) => {
   const { review, file } = fixture(t, [`#1 ${IMPL}`]);
   writeFileSync(file, `${readFileSync(file, "utf8")}## Retired\n\n- review-pr-482-b\n`);
   assert.equal(review("482", A).next, "review-pr-482-c");
+});
+
+test("review refuses a runner name a ## Retired line holds with an outcome, naming the next free one", (t) => {
+  const { reviewRefused, file } = fixture(t, ["#1 impl-1=PR#9 → PR#9"]);
+  writeFileSync(file, `${readFileSync(file, "utf8")}## Retired\n\n- review-pr-9=failed\n`);
+  reviewRefused("9", ["review=member:review-pr-9"], /names a runner an earlier run of this session already used/, /the next free reviewer name is review-pr-9-b/);
+});
+
+test("review's next skips a runner name a ## Retired line holds with an outcome", (t) => {
+  const { review, file } = fixture(t, [`#1 ${IMPL}`]);
+  writeFileSync(file, `${readFileSync(file, "utf8")}## Retired\n\n- review-pr-482-b=failed\n`);
+  assert.equal(review("482", A).next, "review-pr-482-c");
+});
+
+test("token refuses a PR# mention that moves a launched row onto a PR whose runner name a ## Retired line holds with an outcome", (t) => {
+  const { refusedCall, file } = fixture(t);
+  writeFileSync(file, "# Fleet run ledger\n\n## Rows\n\n- #5 review=member:review-pr-5=failed\n\n## Filed\n\n## Ruled\n\n## Retired\n\n- review-pr-5=failed\n");
+  refusedCall(["token", "5", "PR#9"], [/launch 'review=member:review-pr-5' on PR #9 names a runner an earlier run of this session already used/]);
 });
 
 test("review finds the PR's row by its PR before by its key: a ticket row settled to the PR wins over a later #M row", (t) => {

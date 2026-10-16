@@ -8,7 +8,7 @@
 // settled member live, has to go red here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reconcile, formatLines, actionable, deriveRun, parseShortlist, unclaimed, refreshWhy, dispositionsToken, currentDispositions, reapDue, reapedAfter, reapSummary, reclaimSummary } from "../plugin/scripts/fleet-tick.mjs";
+import { reconcile, formatLines, actionable, deriveRun, LedgerError, parseShortlist, unclaimed, refreshWhy, dispositionsToken, currentDispositions, reapDue, reapedAfter, reapSummary, reclaimSummary } from "../plugin/scripts/fleet-tick.mjs";
 
 // Every field named, so a test that cares about one number still states the
 // rest — a defaulted field is a guard nobody is pinning.
@@ -2235,6 +2235,13 @@ test("CLI: a ledger token outside the grammar refuses the tick, printing no row"
   assert.equal(r.status, 2);
   assert.equal(r.stdout.trim(), "");
   assert.match(r.stderr, /^fleet-tick: .*impl-9.*'merged' is not an outcome/m);
+});
+
+test("CLI: a ## Retired line naming no member or reviewer refuses the tick, naming the line and printing no row", () => {
+  const r = runCli([], { ledger: { retired: ["impl-1", "garbage-name"] }, shortlist: shortlistText([]) });
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /^fleet-tick: ## Retired line 'garbage-name' names no member or reviewer — fix the ledger by hand before the tick can count from it$/m);
 });
 
 test("CLI: a ledger ledger.mjs itself refuses is a refusal here too", (t) => {
@@ -4746,6 +4753,17 @@ test("deriveRun: recorded is every member name on a row, in ## Dispatched and in
   const prs = [pr(5)];
   assert.deepEqual([...deriveRun({ ...ledger, retired: ["impl-2", "review-pr-4"] }, prs).recorded].sort(), ["fix-pr-5", "impl-2", "impl-3", "merge-bot-1", "review-pr-4"]);
   assert.deepEqual([...deriveRun(ledger, prs).recorded].sort(), ["fix-pr-5", "impl-3", "merge-bot-1"]);
+});
+
+test("deriveRun: a ## Retired line with an outcome records its name, the text before the first `=`", () => {
+  const ledger = { rows: [], dispatched: [], drain: null, retired: ["impl-5=killed", "review-pr-9=failed"] };
+  assert.deepEqual([...deriveRun(ledger, []).recorded].sort(), ["impl-5", "review-pr-9"]);
+});
+
+test("deriveRun: a ## Retired line naming no member or reviewer throws LedgerError naming it", () => {
+  const ledger = { rows: [], dispatched: [], drain: null, retired: ["impl-1", "garbage-name"] };
+  assert.throws(() => deriveRun(ledger, []), (e) => e instanceof LedgerError
+    && e.message === "## Retired line 'garbage-name' names no member or reviewer — fix the ledger by hand before the tick can count from it");
 });
 
 test("noTranscriptLines: a live member token first seen more than `after` minutes ago with no transcript prints NO-TRANSCRIPT; one with a transcript, one at the threshold and a review launch print nothing; the key drops the age", () => {

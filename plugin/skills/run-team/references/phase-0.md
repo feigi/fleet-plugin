@@ -187,7 +187,11 @@ retry letter past the highest the session has used on that number,
 name, and `dispatch merge-bot` numbers past retired bots. The tick reads
 `## Retired` only to account for a transcript in the session directory: a
 ticket an earlier run worked is not claimed by it and can be shortlisted
-again.
+again. Every reader takes a `## Retired` line's name as its text before
+the first `=` — the whole line when there is none — so a name written
+with an outcome stays retired; a line whose name is no member or reviewer
+name makes `dispatch`, `review` and the tick refuse, naming the line, until
+it is fixed by hand.
 A line it cannot parse is skipped with a warning naming it, and the
 rotation still succeeds; a member name on a skipped line that carries an
 outcome is retired all the same, and a bare member token on a skipped row

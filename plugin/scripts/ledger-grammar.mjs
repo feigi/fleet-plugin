@@ -505,6 +505,33 @@ export const REVIEWER = /^review-pr-([1-9][0-9]*)(-[b-z])?$/;
  * reviewer's, bare. */
 export const isRetirable = (name) => parseMember(name) !== null || REVIEWER.test(name);
 
+/** The name a `## Retired` line retires, read the one way every reader reads
+ * the section: the line's text before its first `=` — the whole line when it
+ * has none — whatever outcome follows it, so a name written with an outcome
+ * stays taken. Null when that name is not retirable: the line names no
+ * member or reviewer and is malformed, and read as no name it would release
+ * the name it was meant to hold, so `dispatch`, `review`, the tick and
+ * `review-failed` refuse it and `rotate` skips it aloud; `token` reads the
+ * names and leaves a malformed line to them. */
+export function retiredName(line) {
+  const eq = line.indexOf("=");
+  const name = eq === -1 ? line : line.slice(0, eq);
+  return isRetirable(name) ? name : null;
+}
+
+/** `## Retired` lines read through retiredName(): `names`, the names they
+ * retire in line order, and `malformed`, the lines that name none. */
+export function readRetired(lines) {
+  const names = [];
+  const malformed = [];
+  for (const line of lines) {
+    const name = retiredName(line);
+    if (name === null) malformed.push(line);
+    else names.push(name);
+  }
+  return { names, malformed };
+}
+
 // The reviewer runner names a row's `review=member:<name>` launches took,
 // `=failed` or answered or open. A workflow launch is named by its runId,
 // which no hub member holds.
@@ -522,8 +549,8 @@ function launchedRunners(text) {
  * in `## Dispatched` or on any row, the same two places `ledger.mjs dispatch`
  * refuses a repeat from within a run — and every reviewer runner a row
  * launched, that `liveOnLedger` does not carry, plus every name the archive's
- * own `## Retired` already held (`retired`, bare retirable names — the caller
- * validates them), once each: the `## Retired` names first, then the
+ * own `## Retired` already held (`retired`, the names the caller read off its
+ * lines with retiredName()), once each: the `## Retired` names first, then the
  * `## Dispatched` entries' in order, then the rows' in the order given, a
  * row's member tokens before the reviewer runners it launched. A retired
  * name stays taken for the rest of the omp session: the process that ran

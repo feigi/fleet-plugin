@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -269,6 +269,15 @@ test("isRetirable: a member's name or a reviewer's, bare", () => {
   for (const bad of ["impl-4=killed", "garbage-name", "merge-bot-2-b", "impl-5-zz", "review-pr-6-a", "review-pr-0", "review-pr-6=failed"]) {
     assert.ok(!isRetirable(bad), bad);
   }
+});
+
+test("readRetired: a line's name is the text before its first `=`, retired whatever follows; a line whose name is not retirable is malformed", () => {
+  const lines = ["impl-1", "impl-4=killed", "review-pr-9=failed", "impl-5=", "merge-bot-3=done=x", "garbage-name", "merge-bot-2-b", "=impl-6", "impl-7 =killed"];
+  assert.deepEqual(readRetired(lines), {
+    names: ["impl-1", "impl-4", "review-pr-9", "impl-5", "merge-bot-3"],
+    malformed: ["garbage-name", "merge-bot-2-b", "=impl-6", "impl-7 =killed"],
+  });
+  assert.deepEqual(readRetired([]), { names: [], malformed: [] }, "no ## Retired reads as nothing retired");
 });
 
 test("nextRetry: one letter past the highest used on the number, across every name given, null past -z", () => {

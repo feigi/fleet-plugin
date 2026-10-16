@@ -754,16 +754,66 @@ test("an out-of-vocabulary outcome on a name a carried row already names is not 
   assert.deepEqual(JSON.parse(r.stdout).retired, ["impl-5"]);
 });
 
-test("a ## Retired line that is no bare member or reviewer name is skipped with a warning naming it, and the rest is kept", (t) => {
+test("a ## Retired line with an outcome is skipped with a warning that its name is retired bare, a line naming no member or reviewer is skipped with a warning, and the rest is kept", (t) => {
   const bad = ["impl-4=killed", "garbage-name", "merge-bot-2-b"];
   const ledger = `${ledgerOf({ rows: ["#12 impl-12"], dispatched: ["impl-12"] })}\n## Retired\n\n- impl-1\n${bad.map((l) => `- ${l}\n`).join("")}- review-pr-6\n`;
   const f = fixture(t, { ledger, controller: ANCESTOR });
   const r = f.cli(["rotate"]);
   assert.equal(r.status, 0, r.stderr);
   for (const line of bad) assert.ok(r.stderr.includes(`skipped unparseable line '${line}'`), `stderr must name ${line}: ${r.stderr}`);
+  assert.ok(r.stderr.includes("skipped unparseable line 'impl-4=killed' — not carried: impl-4 is retired bare"), r.stderr);
+  assert.ok(r.stderr.includes("skipped unparseable line 'garbage-name' — not carried: names no member or reviewer"), r.stderr);
   const out = JSON.parse(r.stdout);
   assert.deepEqual(out.skipped, bad);
-  assert.deepEqual(out.retired, ["impl-1", "review-pr-6"]);
+  assert.deepEqual(out.retired, ["impl-1", "impl-4", "review-pr-6"]);
+  assert.deepEqual(read(f).retired, ["impl-1", "impl-4", "review-pr-6"], "the new ledger holds the bare name");
+});
+
+test("after a rotate over a ## Retired line with an outcome, dispatch refuses its name and names the replacement", (t) => {
+  const ledger = `${ledgerOf({ rows: ["#12 impl-12"], dispatched: ["impl-12"] })}\n## Retired\n\n- impl-4=bogus\n`;
+  const f = fixture(t, { ledger, controller: ANCESTOR });
+  assert.equal(f.cli(["rotate"]).status, 0);
+  const d = f.cli(["dispatch", "4", "impl-4"]);
+  assert.equal(d.status, 2, d.stderr);
+  assert.match(d.stderr, /impl-4 was already dispatched this session \(retired by rotate\) — a replacement takes a name of its own \(impl-4-b\)/);
+});
+
+// A `## Retired` section as a hand edit leaves it, on a ledger no rotate has
+// read: every reader takes a line's name before its first `=`.
+const withRetired = (lines) => `${ledgerOf({ rows: ["#12 impl-12"], dispatched: ["impl-12"], drain: [] })}\n## Retired\n\n${lines.map((l) => `- ${l}\n`).join("")}`;
+
+test("before any rotate, a ## Retired line with an outcome holds its name: dispatch refuses it, naming the replacement, and a name no line holds stays free", (t) => {
+  const f = fixture(t, { ledger: withRetired(["impl-4=killed"]) });
+  const d = f.cli(["dispatch", "4", "impl-4"]);
+  assert.equal(d.status, 2, d.stderr);
+  assert.match(d.stderr, /impl-4 was already dispatched this session \(retired by rotate\) — a replacement takes a name of its own \(impl-4-b\)/);
+  const free = f.cli(["dispatch", "5", "impl-5"]);
+  assert.equal(free.status, 0, free.stderr);
+});
+
+test("before any rotate, dispatch merge-bot numbers past a bot a ## Retired line holds with an outcome", (t) => {
+  const f = fixture(t, { ledger: withRetired(["merge-bot-3=done"]) });
+  const next = f.cli(["dispatch", "merge-bot"]);
+  assert.equal(next.status, 0, next.stderr);
+  assert.equal(JSON.parse(next.stdout).member, "merge-bot-4");
+});
+
+test("a ## Retired line naming no member or reviewer refuses dispatch, naming the line, and writes nothing", (t) => {
+  const f = fixture(t, { ledger: withRetired(["impl-1", "garbage-name"]) });
+  const before = readFileSync(f.file, "utf8");
+  const d = f.cli(["dispatch", "5", "impl-5"]);
+  assert.equal(d.status, 2, d.stderr);
+  assert.match(d.stderr, /## Retired has a line 'garbage-name' that names no member or reviewer — fix the ledger by hand before dispatch can trust it/);
+  assert.equal(readFileSync(f.file, "utf8"), before);
+});
+
+test("a ## Retired line naming no member or reviewer refuses review, naming the line, and writes nothing", (t) => {
+  const f = fixture(t, { ledger: withRetired(["review-pr-6", "garbage-name"]) });
+  const before = readFileSync(f.file, "utf8");
+  const r = f.cli(["review", "21", "review=member:review-pr-21"]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /## Retired has a line 'garbage-name' that names no member or reviewer — fix the ledger by hand before review can trust it/);
+  assert.equal(readFileSync(f.file, "utf8"), before);
 });
 
 test("an ancestor rotate skips an unparseable line with a warning naming it, carries every parseable live line, and still rotates a ledger load() refuses", (t) => {
