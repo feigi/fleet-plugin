@@ -1550,8 +1550,8 @@ depth** guard table applied in code. Act on each line as it reads:
 - `ESCALATE unlabelled PR#<M> …` — a second finisher since the last `label-off=`
   settled `labelled` and the label is still not on: the tick dispatches no
   third. Not actionable; the maintainer's, through the cockpit's `unlabelled`
-  flag and the comment the repair finisher's report left (**Finisher report**
-  row above).
+  flag and the comment the repair finisher's report left (`fleet-event.mjs`'s
+  `finisher-report` entry).
 - `CONFLICT PR#<M> …` — GitHub reads PR M `mergeable=CONFLICTING`, the ledger
   tracks it, no conflict hold stands on it, no fix-applier, finisher or
   implementer on it is live, and, if it carries `ready-to-merge`, no merge bot
@@ -2170,8 +2170,9 @@ No replay exists for a review that ran in a runner's own kernel — `resume` is 
 `refuted` comes back deliberately as well — a refutation is itself a claim, and
 one has been reversed on new evidence. The fix-applier may reverse one; it
 records each reversal as a `refuted` entry in its disposition record, the
-evidence in `reason`, and you copy those entries to the ledger's `ruled` line
-(the Fix-applier report edge).
+evidence in `reason`, and you copy those entries to the ledger's `ruled` line by
+running `fleet-event.mjs fix-report`, whose `settle --from-report` records each
+refutation the report defers.
 
 **`dimensionsRun` is the dispatch; `dimensionsUnrun` is what names a gap.** A
 specialist that dies contributes zero findings while its key stays in
@@ -2477,8 +2478,8 @@ gated like survivors, and the tick prints `DISPATCH fix-pr PR#<M>` for it: that
 fix-applier's `no-op` and its `ok` verdict are what open the finisher. The
 refusal names its cause. `dispositions
 unchecked` — no verdict answers that review: run `dispositions-check.mjs` for
-the fix-applier that answered the review, as the Fix-applier report edge
-states, then dispatch again. It names a `dispositions-unchecked=` verdict too —
+the fix-applier that answered the review, as `fleet-event.mjs`'s `fix-report`
+entry states, then dispatch again. It names a `dispositions-unchecked=` verdict too —
 no rule broke, but the check could not read where a deferral was filed, `gh`
 unreachable or an issue unreadable: run the check again for that fix-applier
 once `gh` answers (an issue that does not exist is unreadable too, and no re-run

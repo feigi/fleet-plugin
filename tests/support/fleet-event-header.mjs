@@ -9,9 +9,10 @@ import { join } from "node:path";
 
 const SCRIPT = join(import.meta.dirname, "..", "..", "plugin", "scripts", "fleet-event.mjs");
 
-export const EVENT_HEADER = readFileSync(SCRIPT, "utf8")
-  .split("\n").slice(1)
-  .filter((l) => l.startsWith("//"))
+const LINES = readFileSync(SCRIPT, "utf8").split("\n").slice(1);
+const END = LINES.findIndex((l) => !l.startsWith("//"));
+
+export const EVENT_HEADER = LINES.slice(0, END === -1 ? LINES.length : END)
   .map((l) => l.replace(/^\/\/ ?/, ""))
   .join(" ")
   .replace(/\s+/g, " ")

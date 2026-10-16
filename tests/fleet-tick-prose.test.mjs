@@ -95,8 +95,9 @@ test("the wake table names every wake, each with its fleet-event.mjs command", (
   for (const [wake, command] of WAKES) {
     assert.ok(rows.includes(`| ${wake} | ${command} |`), `the wake table has no "${wake}" row naming ${command}`);
   }
-  // The wakes that have no kind keep their by-hand bullets: a finisher halt's
-  // per-cause rule, and a finisher that died.
+  // A finisher halt is the finisher-report kind, so its bullet keeps only the
+  // by-hand per-cause rule; a finisher that died has no kind, so its bullet
+  // keeps the settle too.
   assert.match(RUN_TEAM.bullet("- **Finisher reports halted**", "- **A finisher failed or was killed**", "finisher-halted wake").text, Pin.phrase("**Resolving a finisher halt**"));
   const died = RUN_TEAM.bullet("- **A finisher failed or was killed**", "- **Implementer bails before implementing**", "finisher-died wake").text;
   assert.match(died, Pin.phrase("`ledger.mjs settle finisher-pr-<M>=failed`"));

@@ -709,7 +709,7 @@ test("ci reads ci-state without --quiet and records the run's key on the PR's ro
   assert.deepEqual(f.rows(), ["#412 impl-412=PR#88 · ports=1 · ci=123:2:failure · ci=123:3:success"]);
 });
 
-for (const conclusion of ["", null]) {
+for (const conclusion of ["", null, undefined]) {
   test(`ci keys an in-progress run's ${JSON.stringify(conclusion)} conclusion as -, never as a terminal one, while a real conclusion passes through`, () => {
     const f = fixture({ rows: ["#412 impl-412=PR#88"] });
     f.control("ci-state", { out: `${ciPayload({ status: "in_progress", conclusion, verdict: "not-green" })}\n`, exit: 1 });
@@ -752,6 +752,19 @@ test("ci writes nothing and prints no degraded line for a verdict that binds no 
   assert.deepEqual(r.order, ["ci-state --pr 88", TICK]);
   assert.equal(f.ledger(), ledger);
 });
+
+for (const [missing, over] of [["attempt", { attempt: null }], ["runId", { runId: null }]]) {
+  test(`ci writes nothing for a payload with no ${missing}, whichever other half of the run key it carries`, () => {
+    const f = fixture({ rows: ["#412 impl-412=PR#88"] });
+    f.control("ci-state", { out: `${ciPayload(over)}\n` });
+    const ledger = f.ledger();
+    const r = f.run(["ci", "88"]);
+    assert.equal(r.status, 0, r.err + r.stdout);
+    assert.match(eventLine(r), /#88 ci: verdict green binds no run, nothing to record$/);
+    assert.deepEqual(r.order, ["ci-state --pr 88", TICK]);
+    assert.equal(f.ledger(), ledger);
+  });
+}
 
 test("ci passes a ledger refusal through and still ticks", () => {
   const f = fixture({ rows: ["#412 impl-412=PR#88"] });
@@ -881,6 +894,7 @@ test("drain prints a claim closeout could not release as its NEED line, exits 4,
   const r = f.run(["drain", "--reason", "stop"]);
   assert.equal(r.status, 4, r.err + r.stdout);
   assert.ok(r.out.includes("NEED hand-release #412 worktree has uncommitted changes"), r.stdout);
+  assert.match(eventLine(r), /^event: drain: drain begun, a claim to hand-release$/);
   assert.equal(r.order.at(-1), TICK);
   assert.equal(r.out.at(-1), "TICK ROWS");
 });
