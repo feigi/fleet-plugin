@@ -85,12 +85,17 @@ test("--in-flight is the run's bound, omp leaves it at its default, and the sema
   assert.doesNotMatch(region, /--in-flight \d/, "the rule now hard-codes a numeric bound — the point of leaving it at its default is that no caller passes one");
 });
 
+// The Defaults paragraph moved, with its measurements, to references/pull.md;
+// SKILL.md keeps the default beside the pointer.
+const PULL_MD = Pin.file(join(REPO, "skills", "run-team", "references", "pull.md"));
 test("the Defaults paragraph states the bound's default with its rationale and the re-derive rule, and the retired sizing note is gone", () => {
-  const def = RUN_TEAM.paragraph("**Default: In-flight bound 5, fixed for the run.**", "run-team Defaults paragraph", "**The review backlog never gates").text;
+  const kept = RUN_TEAM.paragraph("**Default: In-flight bound 5, fixed for the run.**", "run-team Defaults paragraph", "**The review backlog never gates").text;
+  assert.match(kept, Pin.phrase("**Default: In-flight bound 5, fixed for the run.** See references/pull.md."));
+  const def = PULL_MD.section("## Default: In-flight bound 5", "references/pull.md Defaults section").text;
   assert.match(def, Pin.phrase("fixed for the run"));
   assert.match(def, Pin.phrase("set by load, not throughput"));
   assert.match(def, Pin.phrase("once 20 or more PRs have merged under it, never from one run's rows"));
-  assert.doesNotMatch(def, /1\.95/, "the Defaults paragraph still carries the retired reviewer sizing note");
+  assert.doesNotMatch(`${kept}\n${def}`, /1\.95/, "the Defaults paragraph still carries the retired reviewer sizing note");
 });
 
 test("§ Queue depth defines In flight and the In-flight bound, and documents the hold's rank, detail and refresh rule", () => {

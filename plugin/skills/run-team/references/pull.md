@@ -389,3 +389,18 @@ file path after fixing typos and vendored ones. **All four failed to close their
 own ticket** — one's acceptance criterion went unmet, and the other three left
 the named defect reachable by a sibling spelling. Every one was caught by
 review, at review cost, which runs 3-5x the implementation it checks.
+
+## Default: In-flight bound 5
+
+**Default: In-flight bound 5, fixed for the run.** The level is set by load, not
+throughput: B caps live review units (≤ open PRs ≤ B), and the review side is
+about 84 % of cache-write tokens, fanning out to 1 snapshot + up to 6
+specialists + 2 refuters per finding. 5 keeps worst-case review concurrency
+below the former reviewer count of 6 and sits near the measured mean In flight
+of 5.6. On the means that allows ≈ 1.7 merges per open-time hour against 1.89
+measured, so the default does not rest on throughput headroom and the guard's
+throughput test may trip on it; the merge gate saturates near 10–11, so
+raising B past that buys nothing. 8 was rejected: peak review concurrency above
+the former reviewer count, for a throughput gain the backlog does not show it
+needs. Re-derive it from the map's guard once 20 or more PRs have merged under
+it, never from one run's rows.
