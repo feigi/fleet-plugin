@@ -246,12 +246,18 @@ function implementers(s) {
 
   // The In-flight bound: n tickets between their Claim and their PR's merge,
   // at or over B, hold every Pull until a merge brings n below B. Quiet — a
-  // merge is what clears it, and the controller has nothing to do meanwhile.
+  // merge is what clears it, and the controller has nothing to do meanwhile —
+  // except for a ticket whose implementer was killed: it counts with no PR
+  // that could merge, so the dispatch of its replacement is what clears it,
+  // and the row asks the controller for it.
   // A replacement implementer is never a Pull, so no branch here reads it.
   // The merge queue and the review backlog never gate this row: a deep
   // ready-to-merge queue adds no rebases per PR, and a review owed is the
   // reviewer row's DISPATCH on this same tick.
-  if (s.inFlight >= s.bound) return row(`HOLD (in-flight ${s.inFlight}/${s.bound})`);
+  if (s.inFlight >= s.bound) {
+    const hold = `HOLD (in-flight ${s.inFlight}/${s.bound})`;
+    return s.owedCounted.length ? row(hold, { acts: true, extra: replaceStep(s.owedCounted, s.implNames) }) : row(hold);
+  }
 
   if (s.heads.length) return row(`PULL ${s.heads.slice(0, s.bound - s.inFlight).map((n) => `#${n}`).join(" ")}`, { acts: true });
 
@@ -264,7 +270,8 @@ function implementers(s) {
 
 // Reviewer units: an in-flight review = 1, each fix-applier = 1. Every due
 // unit is dispatched, no cap: a PR holds at most one live review unit, so
-// units stay within the open PRs, which the In-flight bound keeps within B.
+// units stay within the open PRs. The In-flight bound gates Pulls, not these,
+// so a run that inherited more than B PRs dispatches a unit for each.
 // Named in priority order — fix-appliers first, then reviews, oldest first —
 // because finishing what is started beats starting more.
 function reviewers(s) {
@@ -335,7 +342,8 @@ function mergeBot(s) {
 
 // The refresh this tick ran, if it ran one. A REFRESHED that changed the list
 // is actionable — supply arrived. One that changed nothing is not: every idle
-// heartbeat tick refreshes while the shortlist is short of the cap, and an
+// heartbeat tick refreshes while the shortlist is short of the In-flight
+// bound and nothing holds the row, and an
 // unconditionally actionable REFRESHED would pin the beat at its base interval
 // on exactly the quiet night the heartbeat backs off on. A failed refresh IS
 // actionable: a blind implementer row backing off tick after identical tick is
@@ -871,8 +879,8 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
   const closing = new Set(prsIn.flatMap((p) => p.closingIssuesReferences.map((r) => r.number)));
   const owesReplacement = (m) => (m.outcome === "killed" || m.outcome === "tier-mismatch") && !closing.has(m.number);
   const owedReplacement = newest.filter(owesReplacement).map((m) => m.name);
-  const inFlightImpl = newest.filter((m) => !closing.has(m.number)
-    && (m.outcome === null || (owesReplacement(m) && !closed.has(m.number)))).length;
+  const owedCounted = newest.filter((m) => owesReplacement(m) && !closed.has(m.number)).map((m) => m.name);
+  const inFlightImpl = newest.filter((m) => m.outcome === null && !closing.has(m.number)).length + owedCounted.length;
   const isQueued = (p) => p.labels.some((l) => l && l.name === "ready-to-merge");
   const queued = prs.filter(isQueued);
   const asc = (a, b) => a - b;
@@ -922,6 +930,7 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
     inFlightImpl,
     inFlightPrs: prsIn.length,
     owedReplacement,
+    owedCounted,
     fixLive: live("fix-pr"),
     mergeBotLive,
     // The number of every merge bot settled `done`: each is a merge pass

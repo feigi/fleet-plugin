@@ -373,7 +373,7 @@ function recordImplementer(ledgerFile, r) {
   if (outcome === undefined) {
     die(`${r.member}: not on the ledger — \`ledger.mjs dispatch\` records a member before its tier can be settled`);
   }
-  // A member already settled some other way (`bailed`, `killed`,
+  // A member already settled some other way (`bailed`, `blocked`, `killed`,
   // `released`, `PR#M`) cannot be re-settled — `settle` refuses — so the
   // mismatch rides as a row token instead, ahead of the note so the note
   // stays the row's trailing segment.

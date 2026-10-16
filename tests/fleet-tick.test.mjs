@@ -13,7 +13,7 @@ import { reconcile, formatLines, actionable, deriveRun, parseShortlist, unclaime
 // Every field named, so a test that cares about one number still states the
 // rest — a defaulted field is a guard nobody is pinning.
 const state = (over = {}) => ({
-  bound: 5, inFlight: 0, inFlightImpl: 0, inFlightPrs: 0,
+  bound: 5, inFlight: 0, inFlightImpl: 0, inFlightPrs: 0, owedCounted: [],
   draining: null, tierMismatch: [], tierUnchecked: [], implNames: [],
   heads: [], supply: 0, shortlistStatus: "ok", refresh: null, dropped: [],
   reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [], unlabelled: [], conflicts: [], conflictEscalate: [],
@@ -57,6 +57,21 @@ test("implementers: at the bound nothing is pulled, however many heads are waiti
   const r = row(state({ inFlight: 5, heads: [1, 2, 3] }), "implementers");
   assert.equal(r.action, "HOLD (in-flight 5/5)");
   assert.equal(r.acts, false);
+});
+
+test("implementers: at the bound with a killed implementer's replacement owed, the hold acts and names the dispatch; a tier mismatch outranks it", () => {
+  const owed = row(state({ inFlight: 5, inFlightImpl: 1, inFlightPrs: 4, owedCounted: ["impl-7"], implNames: ["impl-7"], heads: [1] }), "implementers");
+  assert.equal(owed.action, "HOLD (in-flight 5/5)");
+  assert.equal(owed.acts, true, "no merge can clear a ticket with no PR: the replacement is the controller's move");
+  assert.match(owed.detail, / — dispatch impl-7-b at its row's tier$/);
+  const several = row(state({ inFlight: 5, owedCounted: ["impl-7", "impl-8"], implNames: ["impl-7", "impl-8"] }), "implementers");
+  assert.match(several.detail, / — dispatch impl-7-b, impl-8-b each at its row's tier$/);
+  const quiet = row(state({ inFlight: 5, heads: [1] }), "implementers");
+  assert.equal(quiet.acts, false, "with none owed the hold stays quiet");
+  assert.doesNotMatch(quiet.detail, /dispatch/);
+  assert.equal(row(state({ inFlight: 4, owedCounted: ["impl-7"], implNames: ["impl-7"], heads: [1] }), "implementers").action, "PULL #1", "below the bound it still pulls");
+  const mismatch = row(state({ inFlight: 5, owedCounted: ["impl-7"], implNames: ["impl-7"], tierMismatch: ["impl-7"] }), "implementers");
+  assert.equal(mismatch.action, "HOLD (tier mismatch impl-7)");
 });
 
 test("implementers: HOLD (in-flight n/B) whenever n ≥ B — the wording, n/B on the row, acts false, an inherited n over B printed as 7/5", () => {
@@ -1619,6 +1634,16 @@ test("deriveRun: an owed replacement whose issue is in closed counts nothing; un
   }
   // A closed set never uncounts a live implementer or an open PR.
   assert.deepEqual(counts(flight(memberRow(7), [pr(60, [], [8])], new Set([7, 8]))), [2, 1, 1]);
+});
+
+test("deriveRun: owedCounted names the owed replacements that count — not a live replacement's, an absorbed ticket's or a closed issue's", () => {
+  for (const outcome of ["killed", "tier-mismatch"]) {
+    assert.deepEqual(flight(memberRow(7, outcome)).owedCounted, ["impl-7"], outcome);
+    assert.deepEqual(flight(memberRow(7, outcome), [], new Set([7])).owedCounted, [], `${outcome}: closed, so none counts`);
+    assert.deepEqual(flight(memberRow(7, outcome), [pr(60, [], [7])]).owedCounted, [], `${outcome}: the PR absorbs it`);
+  }
+  assert.deepEqual(flight({ rows: ["#7 impl-7=killed · impl-7-b"], dispatched: ["impl-7=killed", "impl-7-b"] }).owedCounted, []);
+  assert.deepEqual(flight(memberRow(7)).owedCounted, [], "a live implementer owes nothing");
 });
 
 test("deriveRun: a ticket counts once however many members it has had", () => {

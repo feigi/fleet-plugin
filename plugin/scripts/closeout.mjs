@@ -22,9 +22,9 @@
 //
 // `finish` steps, in order, because the order is the point:
 //
-//   tick            `fleet-tick.mjs`, with the caps `.fleet/phase0.json` records
-//                   when it names them. Failed unless its last line is
-//                   `ACTION: run over`.
+//   tick            `fleet-tick.mjs`, with the In-flight bound the caps
+//                   `.fleet/phase0.json` records add up to, when it names them.
+//                   Failed unless its last line is `ACTION: run over`.
 //   scrape          `member-outcomes.mjs <dir>` for every session directory
 //                   omp keeps for this cwd, each scraper's own yield line as the
 //                   output. A scraper that exits non-zero fails the step: a

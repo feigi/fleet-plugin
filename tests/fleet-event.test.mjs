@@ -222,7 +222,7 @@ function fixture({ rows = [], dispatched = [], retired = [], caps = { impl: 3, r
   return f;
 }
 
-const TICK = "fleet-tick --apply --implementer-cap 3 --reviewer-cap 5";
+const TICK = "fleet-tick --apply --in-flight 8";
 // The calls that write: everything but a ledger read, a gh view and the tick.
 const writes = (order) => order.filter((l) => !/^gh \w+ view /.test(l) && !l.startsWith("fleet-tick "));
 const eventLine = (r) => r.out.find((l) => l.startsWith("event: "));
@@ -404,18 +404,32 @@ test("a settle's own stderr on success is passed through", () => {
   assert.match(eventLine(r), /settled impl-412=PR#88/);
 });
 
-// ── caps ─────────────────────────────────────────────────────────────────────
+// ── In-flight bound ──────────────────────────────────────────────────────────
 
-test("the caps are each flag as given, else the receipt's, else none: the tick's own default", () => {
+test("the bound is --in-flight as given, else the receipt's two caps added (an unset one at its old default), else none: the tick's own default", () => {
   const f = fixture({ rows: ["#412 impl-412=PR#88"] });
-  assert.deepEqual(f.run(["impl-report", "impl-412", "--reviewer-cap", "9"]).order, ["fleet-tick --apply --implementer-cap 3 --reviewer-cap 9"]);
-  assert.deepEqual(f.run(["impl-report", "--implementer-cap", "1", "impl-412"]).order, ["fleet-tick --apply --implementer-cap 1 --reviewer-cap 5"]);
+  assert.deepEqual(f.run(["impl-report", "impl-412", "--in-flight", "9"]).order, ["fleet-tick --apply --in-flight 9"]);
+  assert.deepEqual(f.run(["impl-report", "--in-flight", "1", "impl-412"]).order, ["fleet-tick --apply --in-flight 1"]);
+  assert.deepEqual(f.run(["impl-report", "impl-412"]).order, ["fleet-tick --apply --in-flight 8"]);
+  const review = fixture({ rows: ["#412 impl-412=PR#88"], caps: { impl: null, review: 2 } });
+  assert.deepEqual(review.run(["impl-report", "impl-412"]).order, ["fleet-tick --apply --in-flight 4"]);
+  const impl = fixture({ rows: ["#412 impl-412=PR#88"], caps: { impl: 3, review: null } });
+  assert.deepEqual(impl.run(["impl-report", "impl-412"]).order, ["fleet-tick --apply --in-flight 9"]);
   const bare = fixture({ rows: ["#412 impl-412=PR#88"], caps: null });
   assert.deepEqual(bare.run(["impl-report", "impl-412"]).order, ["fleet-tick --apply"]);
-  const bad = f.run(["impl-report", "impl-412", "--implementer-cap", "0"]);
+  const bad = f.run(["impl-report", "impl-412", "--in-flight", "0"]);
   assert.equal(bad.status, 2);
-  assert.match(bad.err, /^fleet-event: --implementer-cap must be a whole number of at least 1, got '0'/m);
+  assert.match(bad.err, /^fleet-event: --in-flight must be a whole number of at least 1, got '0'/m);
   assert.deepEqual(bad.order, [], "a usage refusal neither writes nor ticks");
+});
+
+test("the retired cap flags are refused before anything is written or ticked", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88"] });
+  for (const flag of ["--implementer-cap", "--reviewer-cap"]) {
+    const r = f.run(["impl-report", "impl-412", flag, "3"]);
+    assert.equal(r.status, 2, `${flag}: ${r.err}`);
+    assert.deepEqual(r.order, [], `${flag}: a usage refusal neither writes nor ticks`);
+  }
 });
 
 // ── fix-report ───────────────────────────────────────────────────────────────
