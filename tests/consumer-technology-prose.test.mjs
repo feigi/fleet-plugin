@@ -77,7 +77,7 @@ test("requirements 2.3 describes the Recipe derivation: any technology, what it 
   assert.match(proof, Pin.phrase("`RECIPE NOT PROVEN` writes no cache and halts the run."));
   const cache = Pin.of(section, "section").bullet("- **The cache:**", "Hard rules for any technology:", "requirements.md 2.3 cache bullet").text;
   assert.match(cache, Pin.phrase("Every claim reads both commands from it and every review its Test entrypoint; a missing or unproven cache is a refusal naming the derivation step, never a guess."));
-  assert.match(section, Pin.phrase("~/.fleet/bin/fleet-run derive-testcmd.sh . install && ~/.fleet/bin/fleet-run derive-testcmd.sh . test"));
+  assert.match(section, Pin.phrase("~/.fleet/bin/fleet-run derive-testcmd.sh . install && ~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main"));
 });
 
 test("requirements 1.1 adds whatever the Recipe runs to the tool floor", () => {
