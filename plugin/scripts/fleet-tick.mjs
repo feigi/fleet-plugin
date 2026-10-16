@@ -1294,7 +1294,7 @@ export function noTranscriptLines({ live, seen, stems, session, after, now }) {
 // names them on stderr when the state file is degraded: its `seen` stamps
 // cannot be read, so every token reads as first seen now and neither fires.
 export function ageChecks({ live, stems }) {
-  const has = new Set(stems ?? []);
+  const has = new Set(stems);
   return [
     ...(live.some((name) => livenessFamily(name) !== null) ? ["CHECK-LIVENESS"] : []),
     ...(stems !== null && live.some((name) => parseMember(name) !== null && !has.has(name)) ? ["NO-TRANSCRIPT"] : []),

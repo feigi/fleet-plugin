@@ -1830,6 +1830,9 @@ if (process.env.MID_TICK_LEDGER) {
   writeFileSync(join(process.cwd(), ".fleet", "ledger.md"), process.env.MID_TICK_LEDGER);
   writeFileSync(join(process.cwd(), "..", "session", process.env.MID_TICK_TRANSCRIPT + ".jsonl"), "");
 }
+// Stands in for the heartbeat rewriting the state file between the tick's
+// top-of-tick read and its late one.
+if (process.env.MID_TICK_STATE) writeFileSync(join(process.cwd(), "..", "heartbeat.json"), process.env.MID_TICK_STATE);
 const payload = readFileSync(process.env.FIXTURE_REFRESH, "utf8");
 const file = join(process.cwd(), ".fleet", "shortlist.json");
 mkdirSync(join(process.cwd(), ".fleet"), { recursive: true });
@@ -5156,4 +5159,17 @@ test("CLI: over a degraded heartbeat file the line names only the age checks tha
   assert.deepEqual(agelessOf(runCli([], { ...AGED, beforeRun: writeCorrupt })), ["fleet-tick: CHECK-LIVENESS"],
     "every live member has its transcript, so NO-TRANSCRIPT would not have named one");
   assert.deepEqual(agelessOf(runCli([], { ...IDLE, beforeRun: writeCorrupt })), [], "no live token, nothing to check");
+});
+
+test("CLI: the not-checked line follows the state file's late re-read, not the top-of-tick one: valid then corrupt prints it, corrupt then valid does not", () => {
+  const valid = JSON.stringify({ quiet: 0, elapsed: 0, digest: "", ...seenAgo({ "impl-12": 10, "fix-pr-5": 10 }) });
+  const agelessOf = (r) => {
+    assert.equal(r.status, 0, r.stderr);
+    return r.stderr.split("\n").filter((l) => l.endsWith("first-seen ages are unavailable"));
+  };
+  const wasValid = runCli([], { ...SESSIONED, bound: 5, beforeRun: seedState(seenAgo({ "impl-12": 10, "fix-pr-5": 10 })), env: { MID_TICK_STATE: "{" } });
+  assert.equal(agelessOf(wasValid).length, 1, "the file read at the top of the tick was valid, the one read late was not");
+  const wasCorrupt = runCli([], { ...SESSIONED, bound: 5, beforeRun: (repo) => writeFileSync(join(repo, "..", "heartbeat.json"), "{"), env: { MID_TICK_STATE: valid } });
+  assert.deepEqual(agelessOf(wasCorrupt), [], "the file read at the top of the tick was corrupt, the one read late was valid");
+  assert.match(wasCorrupt.stdout, /^NO-TRANSCRIPT impl-12 /m, "and its ages did reach the check");
 });
