@@ -90,13 +90,17 @@
 //             writes beside the message it sends, for every live member
 //             token. `<scratch>` is the phase-0 receipt's `scratch`, else
 //             `--scratch`; with neither the check is skipped with one stderr
-//             line. A file on disk prints one `SETTLE <member>` line naming
-//             the `ledger.mjs settle <member> --from-report` it is for, and
-//             one whose `member` is not its filename's prints REPORT-MISMATCH
-//             instead; one that is there but cannot be read prints
-//             REPORT-UNREADABLE. Advice, like CHECK-LIVENESS: the tick
-//             settles nothing. A review runner has no report schema and files
-//             none, so no `review=` token is looked up.
+//             line. A file on disk that validates against its member family's
+//             report schema prints one `SETTLE <member>` line naming the
+//             `ledger.mjs settle <member> --from-report` it is for. One whose
+//             `member` is not its filename's prints REPORT-MISMATCH instead;
+//             one that is there but cannot be read prints REPORT-UNREADABLE;
+//             one that names its own member and fails its family's schema
+//             prints REPORT-INVALID with the first violation, because
+//             `settle --from-report` refuses such a file. Advice, like
+//             CHECK-LIVENESS: the tick settles nothing. A review runner has no
+//             report schema and files none, so no `review=` token is looked
+//             up; a member with no schema is never checked against one.
 //   session   The listing of the session directory omp writes one
 //             `<member>.jsonl` transcript into per dispatched member: this
 //             run's phase-0 receipt's `session`, else `--session`; with
@@ -1135,18 +1139,22 @@ export function livenessLines({ live, seen, thresholds, now }) {
 }
 
 // The report lines: one per name in `reporters` with a report file on disk, as
-// `{member, settle, line, key}`. `reports` maps a name to what main() read off
-// its file — `{path, since, member}`, `since` the file's mtime in ms and
-// `member` the file's own `member` field, undefined when it has none or is
-// not JSON, or `{path, unreadable}`, `unreadable` the error code of a file
-// that is there and cannot be read — and has no entry for a name with no file.
-// A file that names a member other than the one it is filed under prints
-// REPORT-MISMATCH instead, once, and an unreadable one REPORT-UNREADABLE; for
-// both `settle` is false. `reportsFrom`, when set, is the directory the
-// printed settle reads its file from: ledger.mjs reads the default scratch
-// root's `reports/` unless told otherwise. `key` is the line without its age,
-// what the digest `--fold-unchanged` compares takes, so a report waiting on
-// disk folds rather than moving the digest every minute.
+// `{member, settle, line, key}`, and `invalid: true` on a REPORT-INVALID one.
+// `reports` maps a name to what main() read off its file — `{path, since,
+// member, violation}`, `since` the file's mtime in ms, `member` the file's own
+// `member` field (undefined when it has none or is not JSON) and `violation`
+// the first violation of the schema of the name's family (undefined when the
+// file validates, or when no schema covers the name) — or `{path, unreadable}`,
+// `unreadable` the error code of a file that is there and cannot be read — and
+// has no entry for a name with no file. A file that names a member other than
+// the one it is filed under prints REPORT-MISMATCH instead, once, an
+// unreadable one REPORT-UNREADABLE, and one that names its member and fails
+// its schema REPORT-INVALID; for all three `settle` is false. `reportsFrom`,
+// when set, is the directory the printed settle reads its file from:
+// ledger.mjs reads the default scratch root's `reports/` unless told
+// otherwise. `key` is the line without its age, what the digest
+// `--fold-unchanged` compares takes, so a report waiting on disk folds rather
+// than moving the digest every minute.
 export function reportLines({ reporters, reports, now, reportsFrom = null }) {
   const out = [];
   const from = reportsFrom === null ? "" : ` --reports ${/^[\w./@%+=:,-]+$/.test(reportsFrom) ? reportsFrom : `'${reportsFrom.replaceAll("'", "'\\''")}'`}`;
@@ -1162,6 +1170,11 @@ export function reportLines({ reporters, reports, now, reportsFrom = null }) {
       const named = typeof r.member === "string" ? r.member : JSON.stringify(r.member) ?? "none";
       const line = `REPORT-MISMATCH ${r.path} (member: ${named})`;
       out.push({ member, settle: false, line, key: line });
+      continue;
+    }
+    if (r.violation !== undefined) {
+      const line = `REPORT-INVALID ${r.path} (${r.violation})`;
+      out.push({ member, settle: false, invalid: true, line, key: line });
       continue;
     }
     const age = Math.floor(Math.max(0, now - r.since) / 60_000);
@@ -1287,7 +1300,7 @@ import { statePath, readState, writeState, assessBeat, isStalled, isReported, st
 import { checkMainCheckout, describe } from "./main-checkout.mjs";
 import { readRunReceipt, phase0Gate, IN_FLIGHT_DEFAULT } from "./phase0-receipt.mjs";
 import { judgeRecord, ProcUnreadable } from "./proc.mjs";
-import { reportPath, reportsDir } from "./report-files.mjs";
+import { reportFamily, readReport, reportPath, reportsDir } from "./report-files.mjs";
 
 const NAME = "fleet-tick";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -1787,10 +1800,12 @@ function reportsScratch(receipt, flag) {
 }
 
 // The report file of each name in `reporters`, as reportLines() takes them:
-// `{path, since, member}` per file on disk, `{path, unreadable}` for one that
-// cannot be read, nothing for a name with none. Only `member` is read out of a
-// file, and a file that is not JSON carries none.
-function readReports(scratch, reporters) {
+// `{path, since, member, violation}` per file on disk, `{path, unreadable}` for
+// one that cannot be read, nothing for a name with none. `member` is the file's
+// own, and a file that is not JSON carries none. `violation` is report-files's
+// verdict on a file that is there for a name a schema covers, set only when
+// that verdict is invalid; a name no schema covers is never looked up.
+export function readReports(scratch, reporters) {
   const out = new Map();
   for (const member of reporters) {
     const path = reportPath(scratch, member);
@@ -1810,7 +1825,12 @@ function readReports(scratch, reporters) {
     } catch {
       named = undefined;
     }
-    out.set(member, { path, since, member: named });
+    const entry = { path, since, member: named };
+    if (reportFamily(member) !== null) {
+      const checked = readReport(scratch, member);
+      if (checked.state === "invalid") entry.violation = checked.violation;
+    }
+    out.set(member, entry);
   }
   return out;
 }
@@ -2027,8 +2047,9 @@ function main() {
     // past its threshold. The digest already moves when its bucket does.
     const aged = stale.map((s) => `; CHECK-LIVENESS ${s.member} persists`).join("");
     // A report waiting on disk persists the same way, for as long as its
-    // member stays live.
-    const settle = reported.filter((r) => r.settle).map((r) => `; SETTLE ${r.member} persists`).join("");
+    // member stays live: the settle it is for, or REPORT-INVALID where that
+    // settle would be refused.
+    const settle = reported.filter((r) => r.settle || r.invalid).map((r) => `; ${r.settle ? "SETTLE" : "REPORT-INVALID"} ${r.member} persists`).join("");
     // A transcript the ledger lacks, or a live token lacking one, the same
     // way, for as long as it holds.
     const unmatched = transcribed.map((t) => `; ${t.kind} ${t.name} persists`).join("");

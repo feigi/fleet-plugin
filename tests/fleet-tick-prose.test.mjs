@@ -350,17 +350,19 @@ test("End of run follows the drain bullet and ends with --stop (#2968)", () => {
 // The ask-by-name paragraph, where a missing report is handled. The tick's
 // SETTLE line is the report file read off disk, so the paragraph sends the
 // controller to that line before it pings anyone; without the sentence a
-// report that is on disk still costs an ask-by-name round trip.
+// report that is on disk still costs an ask-by-name round trip. A file that
+// fails its schema is REPORT-INVALID, not SETTLE, because `settle
+// --from-report` refuses it, so the paragraph names both.
 const askByNameParagraph = () => RUN_TEAM.paragraph(
   "**But a missing report is NOT evidence the member failed to send one",
   "run-team ask-by-name paragraph",
   "Note this cuts against the paragraph above only in appearance",
 ).text;
 
-test("the ask-by-name paragraph reads a missing message off the tick's SETTLE line before anyone is pinged", () => {
+test("the ask-by-name paragraph reads a missing message off the tick's SETTLE and REPORT-INVALID lines before anyone is pinged", () => {
   assert.match(askByNameParagraph(),
-    Pin.phrase("The tick prints `SETTLE <member>` for a report file on disk, so a missing message is read off that line before anyone is pinged."),
-    "the ask-by-name paragraph no longer sends the controller to the tick's SETTLE line before a ping");
+    Pin.phrase("The tick prints `SETTLE <member>` for a report file on disk that passes its schema and `REPORT-INVALID` for one that fails it, so a missing message is read off those lines before anyone is pinged."),
+    "the ask-by-name paragraph no longer sends the controller to the tick's SETTLE and REPORT-INVALID lines before a ping");
 });
 
 // The transcript-listing tick rows, each with its remedy, read inside its own
