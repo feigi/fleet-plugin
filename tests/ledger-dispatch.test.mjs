@@ -343,12 +343,31 @@ test("settle rewrites the member's token in its row and in ## Dispatched, and no
   ]);
 });
 
+test("settle accepts impl-<N>=blocked in both spellings, keeping the row and the claim", (t) => {
+  const { ok, read } = fixture(t);
+  ok("row", "412", "impl-412 · class=routine");
+  ok("dispatch", "412", "impl-412");
+  // The one-token spelling.
+  assert.deepEqual(ok("settle", "impl-412=blocked"), {
+    member: "impl-412", outcome: "blocked", ticket: "#412", line: "#412 impl-412=blocked · class=routine", changed: true,
+  });
+  // The two-token spelling.
+  ok("dispatch", "415", "impl-415");
+  assert.equal(ok("settle", "impl-415", "blocked").line, "#415 impl-415=blocked");
+  assert.deepEqual(read().dispatched, ["impl-412=blocked", "impl-415=blocked"]);
+  assert.deepEqual(read().rows, ["#412 impl-412=blocked · class=routine", "#415 impl-415=blocked"]);
+  // Another family has no such outcome.
+  const f = fixture(t);
+  f.ok("dispatch", "20", "fix-pr-20");
+  f.refused(["settle", "fix-pr-20", "blocked"], /'blocked' is not an outcome of fix-pr-M/);
+});
+
 test("settle refuses an outcome outside the member's vocabulary, and a malformed call, writing nothing", (t) => {
   const { ok, refused } = fixture(t);
   ok("dispatch", "412", "impl-412");
   ok("dispatch", "merge-bot");
   for (const [args, why] of [
-    [["settle", "impl-412", "done"], /'done' is not an outcome of impl-N — expected PR#M \| bailed \| released \| killed \| tier-mismatch/],
+    [["settle", "impl-412", "done"], /'done' is not an outcome of impl-N — expected PR#M \| bailed \| released \| killed \| tier-mismatch \| blocked/],
     [["settle", "impl-412=labelled"], /'labelled' is not an outcome of impl-N/],
     [["settle", "impl-412", "PR#420 extra"], /is not an outcome of impl-N/],
     [["settle", "merge-bot-1", "labelled"], /expected done \| killed/],

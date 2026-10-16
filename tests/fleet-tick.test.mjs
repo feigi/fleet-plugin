@@ -13,8 +13,8 @@ import { reconcile, formatLines, actionable, deriveRun, parseShortlist, unclaime
 // Every field named, so a test that cares about one number still states the
 // rest — a defaulted field is a guard nobody is pinning.
 const state = (over = {}) => ({
-  implCap: 2, reviewerCap: 6, maxReviews: 6,
-  implLive: 0, draining: null, tierMismatch: [], tierUnchecked: [], implNames: [],
+  bound: 5, inFlight: 0, inFlightImpl: 0, inFlightPrs: 0,
+  draining: null, tierMismatch: [], tierUnchecked: [], implNames: [],
   heads: [], supply: 0, shortlistStatus: "ok", refresh: null, dropped: [],
   reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [], unlabelled: [], conflicts: [], conflictEscalate: [],
   mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeConflictHeld: 0,
@@ -28,70 +28,68 @@ const row = (s, role) => rowsOf(s, role)[0];
 // The implementer row.
 
 test("implementers: free slots PULL the next unclaimed heads, one per slot, oldest first", () => {
-  const r = row(state({ heads: [412, 415, 420], supply: 9 }), "implementers");
+  const r = row(state({ bound: 2, heads: [412, 415, 420], supply: 9 }), "implementers");
   assert.equal(r.action, "PULL #412 #415");
   assert.equal(r.actual, 0);
   assert.equal(r.target, 2);
   assert.equal(r.acts, true);
 });
 
-test("implementers: a PULL never takes live past the cap", () => {
-  for (const implCap of [1, 2, 5, 8]) {
-    for (const implLive of [0, 1, 2, 5, 9]) {
-      const r = row(state({ implCap, implLive, heads: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] }), "implementers");
-      const n = r.action.startsWith("PULL") ? r.action.split(" ").length - 1 : 0;
-      assert.ok(n === 0 || implLive + n <= implCap, `cap ${implCap} live ${implLive} → ${r.action}`);
+test("implementers: a PULL never takes In flight past the bound", () => {
+  const heads = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  for (const bound of [1, 2, 5, 8]) {
+    for (const inFlight of [0, 1, 2, 5, 9]) {
+      const r = row(state({ bound, inFlight, heads }), "implementers");
+      const pulled = r.action.startsWith("PULL") ? r.action.split(" ").length - 1 : 0;
+      assert.equal(pulled, Math.max(0, Math.min(heads.length, bound - inFlight)), `bound ${bound} in flight ${inFlight} → ${r.action}`);
+      assert.ok(pulled === 0 || inFlight + pulled <= bound, `bound ${bound} in flight ${inFlight} → ${r.action}`);
     }
   }
 });
 
-test("implementers: the PULL is bounded by the heads there are, not only by the deficit", () => {
-  assert.equal(row(state({ implCap: 5, heads: [7] }), "implementers").action, "PULL #7");
+test("implementers: PULL takes B − n heads, never more than the heads there are", () => {
+  assert.equal(row(state({ bound: 5, inFlight: 3, heads: [1, 2, 3, 4] }), "implementers").action, "PULL #1 #2");
+  assert.equal(row(state({ bound: 5, inFlight: 4, heads: [1, 2] }), "implementers").action, "PULL #1");
+  assert.equal(row(state({ bound: 5, heads: [7] }), "implementers").action, "PULL #7");
 });
 
-test("implementers: at cap nothing is pulled, however many heads are waiting", () => {
-  const r = row(state({ implLive: 2, heads: [1, 2, 3] }), "implementers");
-  assert.equal(r.action, "AT CAP");
+test("implementers: at the bound nothing is pulled, however many heads are waiting", () => {
+  const r = row(state({ inFlight: 5, heads: [1, 2, 3] }), "implementers");
+  assert.equal(r.action, "HOLD (in-flight 5/5)");
   assert.equal(r.acts, false);
 });
 
-test("implementers: nothing unclaimed suggests /triage and holds idle — never actionable", () => {
-  const r = row(state({ heads: [] }), "implementers");
-  assert.equal(r.action, "SUGGEST /triage, hold idle");
-  assert.equal(r.acts, false);
+test("implementers: HOLD (in-flight n/B) whenever n ≥ B — the wording, n/B on the row, acts false, an inherited n over B printed as 7/5", () => {
+  for (const [bound, inFlight] of [[1, 1], [2, 2], [5, 5], [5, 6], [5, 7], [9, 12]]) {
+    const r = row(state({ bound, inFlight, heads: [1] }), "implementers");
+    assert.equal(r.action, `HOLD (in-flight ${inFlight}/${bound})`);
+    assert.equal(`${r.actual}/${r.target}`, `${inFlight}/${bound}`);
+    assert.equal(r.acts, false);
+  }
+  assert.equal(row(state({ bound: 5, inFlight: 4, heads: [1] }), "implementers").action, "PULL #1", "one below the bound still pulls");
+  assert.equal(formatLines(reconcile(state({ inFlight: 7, inFlightImpl: 2, inFlightPrs: 5, heads: [4, 5, 6], supply: 57 })))[0],
+    "implementers 7/5 → HOLD (in-flight 7/5)   (implementers=2 prs=5 unclaimed=3 supply=57)");
 });
 
-test("implementers: the backlog gate holds only when an unreviewed PR is left AND no reviewer slot is free", () => {
-  // Saturated: six units live, one PR still owed its review.
-  const held = row(state({ heads: [9], reviewsLive: 1, fixLive: 5, reviewDue: [501] }), "implementers");
-  assert.equal(held.action, "HOLD (review side saturated)");
-  assert.equal(held.acts, false);
-  // The narrowing: a deep review backlog with slots free is NOT a hold — the
-  // reviewer row dispatches into those slots on this same tick. The old gate
-  // held here at backlog >= 2.
-  const deep = row(state({ heads: [9], reviewDue: [501, 502, 503] }), "implementers");
-  assert.equal(deep.action, "PULL #9");
-  // Saturated slots with nothing owed is not a hold either.
-  assert.equal(row(state({ heads: [9], fixLive: 6 }), "implementers").action, "PULL #9");
-});
-
-test("implementers: the gate counts the slots this tick's own dispatches fill", () => {
-  // Five units live, one slot free, two PRs owed: the one free slot takes a
-  // review now, one PR is left owed and nothing is free — saturated.
-  const s = state({ heads: [9], reviewsLive: 0, fixLive: 5, reviewDue: [501, 502] });
-  assert.equal(row(s, "reviewers").action, "DISPATCH review PR#501");
-  assert.equal(row(s, "implementers").action, "HOLD (review side saturated)");
-});
-
-test("implementers: --max-reviews leaving a PR owed with slots free does not hold implementers", () => {
-  // The review side is throttled, not saturated: fix-appliers can still take
-  // the free slots, so more PRs are not a pipeline that gains nothing.
-  const s = state({ heads: [9], maxReviews: 1, reviewsLive: 1, reviewDue: [501] });
-  assert.equal(row(s, "implementers").action, "PULL #9");
+test("implementers: the in-flight hold ranks below the overlays, draining and both tier holds — and the tier holds stay actionable", () => {
+  const held = { inFlight: 5, heads: [7] };
+  const act = (over) => row(state({ ...held, ...over }), "implementers");
+  assert.equal(act({}).action, "HOLD (in-flight 5/5)");
+  assert.equal(act({ phase0: { held: true, line: "x", session: null } }).action, "HOLD (phase 0 incomplete)");
+  assert.equal(act({ mainCheckout: { state: "dirty", changed: ["x"] } }).action, "HOLD (main checkout dirty)");
+  assert.equal(act({ draining: "x", tierMismatch: ["impl-4"], tierUnchecked: ["impl-5"] }).action, "HOLD (draining)");
+  const mismatch = act({ tierMismatch: ["impl-4"], tierUnchecked: ["impl-5"] });
+  assert.equal(mismatch.action, "HOLD (tier mismatch impl-4)");
+  assert.equal(mismatch.acts, true, "the tier hold stays visible and actionable while the bound also holds");
+  const unchecked = act({ tierUnchecked: ["impl-5"] });
+  assert.equal(unchecked.action, "HOLD (tier unchecked impl-5)");
+  assert.equal(unchecked.acts, true);
+  assert.equal(actionable(reconcile(state({ ...held }))), false, "the bound hold alone is quiet");
+  assert.equal(actionable(reconcile(state({ ...held, tierMismatch: ["impl-4"] }))), true);
 });
 
 test("implementers: draining holds the row and outranks every other branch", () => {
-  for (const over of [{}, { implLive: 2 }, { tierMismatch: ["impl-4"] }, { tierUnchecked: ["impl-4"] }, { reviewDue: [1], fixLive: 6 }]) {
+  for (const over of [{}, { inFlight: 5 }, { inFlight: 9 }, { tierMismatch: ["impl-4"] }, { tierUnchecked: ["impl-4"] }, { reviewDue: [1], fixLive: 6 }]) {
     const r = row(state({ heads: [7], draining: "maintainer asked", ...over }), "implementers");
     assert.equal(r.action, "HOLD (draining)", JSON.stringify(over));
     assert.equal(r.acts, false);
@@ -104,7 +102,7 @@ test("implementers: a tier mismatch holds the row, names the member, asks the co
   const r = row(state({ heads: [7], tierMismatch: ["impl-412"] }), "implementers");
   assert.equal(r.action, "HOLD (tier mismatch impl-412)");
   assert.equal(r.acts, true, "the controller fixes a mismatch unattended — backing off on it is a stall");
-  assert.match(r.detail, /^unclaimed=1 supply=0 unreviewed=0 — /, "the counts stay in front of the clearing step");
+  assert.match(r.detail, /^implementers=0 prs=0 unclaimed=1 supply=0 — /, "the counts stay in front of the clearing step");
   assert.match(r.detail, /dispatch impl-412-b at its row's tier/);
 });
 
@@ -119,7 +117,7 @@ test("implementers: a mismatched replacement names the NEXT retry letter, one pe
 });
 
 test("implementers: a mismatch batch with some members named and some out of letters prints both clauses, `; `-joined", () => {
-  const counts = "unclaimed=0 supply=0 unreviewed=0";
+  const counts = "implementers=0 prs=0 unclaimed=0 supply=0";
   assert.equal(row(state({ tierMismatch: ["impl-8-b", "impl-9-z"] }), "implementers").detail,
     `${counts} — dispatch impl-8-c at its row's tier; impl-9-z has no retry letter left`);
   assert.equal(row(state({ tierMismatch: ["impl-7-z", "impl-9-z"] }), "implementers").detail,
@@ -156,12 +154,15 @@ test("implementers: no tier hold, no clearing step in the detail", () => {
   }
 });
 
-test("implementers: the detail carries the numbers the branch turned on", () => {
-  const r = row(state({ heads: [4, 5, 6], supply: 57, reviewDue: [1] }), "implementers");
-  assert.match(r.detail, /unclaimed=3/);
-  assert.match(r.detail, /supply=57/);
-  assert.match(r.detail, /unreviewed=0/);
-  assert.match(row(state({ supply: null, shortlistStatus: "missing" }), "implementers").detail, /supply=\? unreviewed=0 shortlist=missing$/);
+test("implementers: the detail is implementers=<i> prs=<p> unclaimed=<k> supply=<s>, with no unreviewed=", () => {
+  const r = row(state({ inFlight: 5, inFlightImpl: 2, inFlightPrs: 3, heads: [4, 5, 6], supply: 57, reviewDue: [1] }), "implementers");
+  assert.equal(r.detail, "implementers=2 prs=3 unclaimed=3 supply=57");
+  assert.equal(row(state({ supply: null, shortlistStatus: "missing" }), "implementers").detail, "implementers=0 prs=0 unclaimed=0 supply=? shortlist=missing");
+  const tier = row(state({ inFlight: 2, inFlightImpl: 1, inFlightPrs: 1, tierMismatch: ["impl-412"] }), "implementers");
+  assert.match(tier.detail, /^implementers=1 prs=1 unclaimed=0 supply=0 — dispatch impl-412-b at its row's tier$/);
+  for (const over of [{}, { reviewDue: [1, 2], fixLive: 6 }, { inFlight: 5 }, { tierUnchecked: ["impl-4"] }]) {
+    assert.doesNotMatch(row(state(over), "implementers").detail, /unreviewed/, JSON.stringify(over));
+  }
 });
 
 // The rows candidates.mjs's to-spec filter removed never reach `supply`, so
@@ -172,11 +173,11 @@ test("implementers: every to-spec drop is named by number and reason, whatever t
   const all = row(state({ dropped: [{ n: 2151, reason: TO_SPEC }] }), "implementers");
   assert.equal(all.action, "SUGGEST /triage, hold idle");
   assert.equal(all.acts, false);
-  assert.equal(all.detail, `unclaimed=0 supply=0 unreviewed=0 specs-dropped=#2151 (${TO_SPEC})`);
+  assert.equal(all.detail, `implementers=0 prs=0 unclaimed=0 supply=0 specs-dropped=#2151 (${TO_SPEC})`);
   // A partial drop: survivors are Pulled and the drops still named.
   const partial = row(state({ heads: [7], supply: 1, dropped: [{ n: 6, reason: TO_SPEC }, { n: 9, reason: TO_SPEC }] }), "implementers");
   assert.equal(partial.action, "PULL #7");
-  assert.match(partial.detail, new RegExp(`^unclaimed=1 supply=1 unreviewed=0 specs-dropped=#6 #9 \\(${TO_SPEC}\\)$`));
+  assert.match(partial.detail, new RegExp(`^implementers=0 prs=0 unclaimed=1 supply=1 specs-dropped=#6 #9 \\(${TO_SPEC}\\)$`));
   // One clause per reason, in the order the reasons first appear.
   const mixed = row(state({ dropped: [{ n: 3, reason: "b" }, { n: 4, reason: "a" }, { n: 5, reason: "b" }] }), "implementers");
   assert.match(mixed.detail, /specs-dropped=#3 #5 \(b\), #4 \(a\)$/);
@@ -185,7 +186,7 @@ test("implementers: every to-spec drop is named by number and reason, whatever t
 test("implementers: a genuinely empty queue carries no specs-dropped text", () => {
   const r = row(state(), "implementers");
   assert.equal(r.action, "SUGGEST /triage, hold idle");
-  assert.equal(r.detail, "unclaimed=0 supply=0 unreviewed=0");
+  assert.equal(r.detail, "implementers=0 prs=0 unclaimed=0 supply=0");
 });
 
 // ---------------------------------------------------------------------------
@@ -194,7 +195,7 @@ test("implementers: a genuinely empty queue carries no specs-dropped text", () =
 test("reviewers: nothing owed and nothing in flight is idle", () => {
   const r = row(state(), "reviewers");
   assert.equal(r.action, "IDLE OK");
-  assert.equal(r.target, 6);
+  assert.equal(r.target, 5);
   assert.equal(r.acts, false);
 });
 
@@ -202,37 +203,53 @@ test("reviewers: fix-appliers are named before reviews — finish what is starte
   const rs = rowsOf(state({ fixDue: [346, 348], reviewDue: [350, 351] }), "reviewers");
   assert.deepEqual(rs.map((r) => r.action), ["DISPATCH fix-pr PR#346 PR#348", "DISPATCH review PR#350 PR#351"]);
   assert.ok(rs.every((r) => r.acts));
-  // One free slot: the fix-applier takes it and the review waits.
-  const one = rowsOf(state({ fixLive: 5, fixDue: [346], reviewDue: [350] }), "reviewers");
-  assert.deepEqual(one.map((r) => r.action), ["DISPATCH fix-pr PR#346"]);
+  // No cap: a reviewer side with units already live still takes both.
+  const live = rowsOf(state({ fixLive: 5, fixDue: [346], reviewDue: [350] }), "reviewers");
+  assert.deepEqual(live.map((r) => r.action), ["DISPATCH fix-pr PR#346", "DISPATCH review PR#350"]);
 });
 
-test("reviewers: dispatches never take live units past the reviewer cap", () => {
-  for (const reviewerCap of [1, 3, 6]) {
-    for (const [reviewsLive, fixLive] of [[0, 0], [1, 0], [0, 3], [2, 4], [4, 4]]) {
-      const rs = rowsOf(state({
-        reviewerCap, maxReviews: reviewerCap, reviewsLive, fixLive,
-        fixDue: [1, 2, 3, 4], reviewDue: [5, 6, 7, 8],
-      }), "reviewers");
-      const n = rs.filter((r) => r.action.startsWith("DISPATCH")).reduce((k, r) => k + r.action.match(/PR#/g).length, 0);
-      assert.ok(n === 0 || reviewsLive + fixLive + n <= reviewerCap,
-        `cap ${reviewerCap} live ${reviewsLive}+${fixLive} → ${rs.map((r) => r.action)}`);
+test("reviewers: every due fix and every due review is dispatched with no cap, fix-appliers first", () => {
+  for (const bound of [1, 5]) {
+    for (const [reviewsLive, fixLive] of [[0, 0], [1, 0], [0, 3], [2, 4], [4, 4], [9, 9]]) {
+      const rs = rowsOf(state({ bound, reviewsLive, fixLive, fixDue: [1, 2, 3, 4], reviewDue: [5, 6, 7, 8] }), "reviewers");
+      assert.deepEqual(rs.map((r) => r.action), ["DISPATCH fix-pr PR#1 PR#2 PR#3 PR#4", "DISPATCH review PR#5 PR#6 PR#7 PR#8"],
+        `bound ${bound} live ${reviewsLive}+${fixLive}`);
+      assert.ok(rs.every((r) => r.acts));
     }
   }
 });
 
-test("reviewers: --max-reviews bounds reviews in flight, and a throttled review is a HOLD that says why", () => {
-  assert.equal(row(state({ maxReviews: 1, reviewDue: [350, 351] }), "reviewers").action, "DISPATCH review PR#350");
-  const held = row(state({ maxReviews: 1, reviewsLive: 1, reviewDue: [351] }), "reviewers");
-  assert.equal(held.action, "HOLD (max-reviews 1 in flight)");
-  assert.equal(held.acts, false);
-  // The bound is on REVIEWS: fix-appliers still take the free slots.
-  const rs = rowsOf(state({ maxReviews: 1, reviewsLive: 1, fixDue: [346], reviewDue: [351] }), "reviewers");
-  assert.deepEqual(rs.map((r) => r.action), ["DISPATCH fix-pr PR#346"]);
+test("reviewers: the row prints <units>/<B>, an inherited run over B printing the overflow", () => {
+  const r = row(state({ bound: 5, reviewsLive: 2, fixLive: 1 }), "reviewers");
+  assert.equal(`${r.actual}/${r.target}`, "3/5");
+  const inherited = row(state({ bound: 5, inFlight: 7, inFlightPrs: 7, reviewsLive: 5, fixLive: 2, reviewDue: [9] }), "reviewers");
+  assert.equal(`${inherited.actual}/${inherited.target}`, "7/5");
+  assert.equal(inherited.action, "DISPATCH review PR#9");
+  assert.equal(formatLines(reconcile(state({ reviewDue: [350, 351], reviewsLive: 1 })))[1],
+    "reviewers    1/5 → DISPATCH review PR#350 PR#351   (reviews=1 fix-pr=0 fix-due=0 review-due=2)");
 });
 
-test("reviewers: work owed with every slot full is AT CAP", () => {
-  assert.equal(row(state({ fixLive: 6, fixDue: [1], reviewDue: [2] }), "reviewers").action, "AT CAP");
+test("reviewers: no state prints AT CAP, HOLD (max-reviews …) or HOLD (review side saturated)", () => {
+  const bad = /AT CAP|max-reviews|saturated/;
+  let seen = 0;
+  for (const bound of [1, 5]) {
+    for (const inFlight of [0, 5, 9]) {
+      for (const [reviewsLive, fixLive] of [[0, 0], [3, 0], [0, 9], [9, 9]]) {
+        for (const [fixDue, reviewDue] of [[[], []], [[1], []], [[], [2]], [[1, 2], [3, 4]]]) {
+          for (const heads of [[], [7]]) {
+            const rows = reconcile(state({ bound, inFlight, reviewsLive, fixLive, fixDue, reviewDue, heads }))
+              .filter((r) => r.role !== "merge-bot");
+            for (const r of rows) {
+              assert.doesNotMatch(`${r.action} ${r.detail}`, bad, JSON.stringify({ bound, inFlight, reviewsLive, fixLive, fixDue, reviewDue, heads }));
+              seen += 1;
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.ok(seen > 0);
+  assert.equal(row(state({ mergeBotLive: 1, mergeQueue: 3 }), "merge-bot").action, "AT CAP", "the merge-bot row keeps its AT CAP");
 });
 
 // #2331: a finisher that settled `labelled` on a PR still lacking
@@ -244,8 +261,8 @@ test("reviewers: one labelled finisher on an unlabelled PR dispatches a finisher
   assert.deepEqual(rs.map((r) => r.action), ["DISPATCH finisher PR#40 PR#44"], "IDLE OK never prints beside it");
   assert.equal(rs[0].acts, true);
   assert.match(rs[0].detail, /finisher-pr-40, finisher-pr-44-b settled labelled; no ready-to-merge/);
-  const full = rowsOf(state({ fixLive: 6, fixDue: [1], unlabelled }), "reviewers");
-  assert.deepEqual(full.map((r) => r.action), ["AT CAP", "DISPATCH finisher PR#40 PR#44"], "a full reviewer side holds no finisher");
+  const over = rowsOf(state({ fixLive: 6, fixDue: [1], unlabelled }), "reviewers");
+  assert.deepEqual(over.map((r) => r.action), ["DISPATCH fix-pr PR#1", "DISPATCH finisher PR#40 PR#44"], "units live never hold a finisher");
 });
 
 test("reviewers: a second labelled finisher in one stretch escalates instead — never actionable, never a dispatch", () => {
@@ -283,9 +300,9 @@ test("reviewers: a conflict past the treadmill cap escalates instead — never a
   assert.deepEqual(both.map((r) => r.action), ["IDLE OK", "CONFLICT PR#41", "ESCALATE conflict PR#40"]);
 });
 
-test("reviewers: a conflict line still prints with the reviewer side at cap, and sits after the unlabelled rows", () => {
+test("reviewers: a conflict line prints beside every owed dispatch, and sits after the unlabelled rows", () => {
   const full = rowsOf(state({ fixLive: 6, fixDue: [1], reviewDue: [2], conflicts: [40], conflictEscalate: [41] }), "reviewers");
-  assert.deepEqual(full.map((r) => r.action), ["AT CAP", "CONFLICT PR#40", "ESCALATE conflict PR#41"], "a full reviewer side holds no conflict line");
+  assert.deepEqual(full.map((r) => r.action), ["DISPATCH fix-pr PR#1", "DISPATCH review PR#2", "CONFLICT PR#40", "ESCALATE conflict PR#41"]);
   const ordered = rowsOf(state({
     conflicts: [42], conflictEscalate: [43],
     unlabelled: [{ pr: 40, labelled: ["finisher-pr-40", "finisher-pr-40-b"] }, { pr: 41, labelled: ["finisher-pr-41"] }],
@@ -322,7 +339,7 @@ test("merge-bot: never a second bot, an empty queue is idle, a fully held queue 
 // The shortlist row.
 
 test("shortlist: a refresh prints REFRESHED with its counts, and is actionable only when it changed the list", () => {
-  const changed = reconcile(state({ refresh: { ok: true, entries: 5, lifted: 1, changed: true, trigger: "unclaimed 0 < cap 2" } })).at(-1);
+  const changed = reconcile(state({ refresh: { ok: true, entries: 5, lifted: 1, changed: true, trigger: "unclaimed 0 < in-flight bound 5" } })).at(-1);
   assert.equal(changed.role, "shortlist");
   assert.equal(changed.action, "REFRESHED shortlist: 5 entries; 1 lifted");
   assert.equal(changed.acts, true);
@@ -440,14 +457,14 @@ test("formatLines prints role, actual/target and the ACTION on one line each", (
   assert.deepEqual(
     formatLines(reconcile(state({
       heads: [412], supply: 57, fixDue: [346], reviewDue: [350], mergeQueue: 2, mergeHeld: 1,
-      refresh: { ok: true, entries: 3, lifted: 0, changed: true, trigger: "unclaimed 1 < cap 2" },
+      refresh: { ok: true, entries: 3, lifted: 0, changed: true, trigger: "unclaimed 1 < in-flight bound 5" },
     }))),
     [
-      "implementers 0/2 → PULL #412   (unclaimed=1 supply=57 unreviewed=0)",
-      "reviewers    0/6 → DISPATCH fix-pr PR#346   (reviews=0 fix-pr=0 fix-due=1 review-due=1 max-reviews=6)",
-      "reviewers    0/6 → DISPATCH review PR#350   (reviews=0 fix-pr=0 fix-due=1 review-due=1 max-reviews=6)",
+      "implementers 0/5 → PULL #412   (implementers=0 prs=0 unclaimed=1 supply=57)",
+      "reviewers    0/5 → DISPATCH fix-pr PR#346   (reviews=0 fix-pr=0 fix-due=1 review-due=1)",
+      "reviewers    0/5 → DISPATCH review PR#350   (reviews=0 fix-pr=0 fix-due=1 review-due=1)",
       "merge-bot    0/1 → DISPATCH merge-bot   (merge-queue=2 held=1)",
-      "shortlist    → REFRESHED shortlist: 3 entries; 0 lifted   (unclaimed 1 < cap 2)",
+      "shortlist    → REFRESHED shortlist: 3 entries; 0 lifted   (unclaimed 1 < in-flight bound 5)",
     ],
   );
 });
@@ -459,7 +476,7 @@ test("actionable: exactly the rows that name work the controller can do unattend
   assert.equal(acts({ fixDue: [1] }), true, "DISPATCH fix-pr");
   assert.equal(acts({ reviewDue: [1] }), true, "DISPATCH review");
   assert.equal(acts({ mergeQueue: 1 }), true, "DISPATCH merge-bot");
-  assert.equal(acts({ implLive: 2, heads: [1] }), false, "AT CAP");
+  assert.equal(acts({ inFlight: 5, heads: [1] }), false, "HOLD (in-flight 5/5)");
   assert.equal(acts({ draining: "x", heads: [1] }), false, "HOLD (draining)");
 });
 
@@ -469,7 +486,7 @@ test("actionable: exactly the rows that name work the controller can do unattend
 
 const BUSY = {
   heads: [412], fixDue: [346], reviewDue: [350], mergeQueue: 1,
-  refresh: { ok: true, entries: 3, lifted: 0, changed: true, trigger: "unclaimed 1 < cap 2" },
+  refresh: { ok: true, entries: 3, lifted: 0, changed: true, trigger: "unclaimed 1 < in-flight bound 5" },
 };
 const summary = (s) => reconcile(s).map((r) => [r.role, r.action, r.acts]);
 
@@ -481,8 +498,8 @@ test("main checkout: dirty holds every dispatching row once per role, never acti
     ["merge-bot", hold, false],
     ["shortlist", "REFRESHED shortlist: 3 entries; 0 lifted", true],
   ]);
-  const [impl] = reconcile(state({ ...BUSY, implLive: 1, mainCheckout: { state: "dirty", changed: ["x"] } }));
-  assert.equal(`${impl.actual}/${impl.target}`, "1/2", "the held row lost its counts");
+  const [impl] = reconcile(state({ ...BUSY, inFlight: 1, mainCheckout: { state: "dirty", changed: ["x"] } }));
+  assert.equal(`${impl.actual}/${impl.target}`, "1/5", "the held row lost its counts");
 });
 
 test("main checkout: unknown holds too, never clean; so does a check that gave no answer at all", () => {
@@ -538,8 +555,8 @@ test("phase 0: an unfinished phase 0 holds every dispatching row, keeps their co
     ["reviewers", "CONFLICT PR#40", true],
     ["merge-bot", "HOLD (phase 0 incomplete)", false],
   ]);
-  const [impl] = reconcile(state({ ...BUSY, implLive: 1, phase0 }));
-  assert.equal(`${impl.actual}/${impl.target}`, "1/2", "the held row lost its counts");
+  const [impl] = reconcile(state({ ...BUSY, inFlight: 1, phase0 }));
+  assert.equal(`${impl.actual}/${impl.target}`, "1/5", "the held row lost its counts");
 });
 
 test("phase 0: its hold outranks the main-checkout reason and every role's guards; a missing baseline under it still asks to act", () => {
@@ -1489,6 +1506,128 @@ test("deriveRun: a token it cannot read refuses by naming it, never counts it li
   }
 });
 
+// ---------------------------------------------------------------------------
+// The In-flight count: n = i + p, read off the ledger and the open-PR list on
+// every tick. Every case runs through `flight`, so n = i + p is asserted on
+// each fixture below.
+
+const flight = (ledger, prs = [], closed) => {
+  const r = run(ledger, prs, closed);
+  assert.equal(r.inFlight, r.inFlightImpl + r.inFlightPrs, "n = i + p");
+  return r;
+};
+const memberRow = (n, outcome, tail = "") => ({
+  rows: [`#${n} impl-${n}${outcome ? `=${outcome}` : ""}${tail}`], dispatched: [`impl-${n}${outcome ? `=${outcome}` : ""}`],
+});
+const counts = (r) => [r.inFlight, r.inFlightImpl, r.inFlightPrs];
+
+test("deriveRun: an open issue-closing PR is In flight once, however many issues it closes", () => {
+  assert.deepEqual(counts(flight({}, [pr(50, [], [7, 8])])), [1, 0, 1]);
+  assert.deepEqual(counts(flight({}, [pr(50, [], [7]), pr(51, [], [8, 9, 10])])), [2, 0, 2]);
+  // A live implementer on either issue is absorbed into the one PR.
+  const both = flight({ rows: ["#7 impl-7", "#8 impl-8"], dispatched: ["impl-7", "impl-8"] }, [pr(50, [], [7, 8])]);
+  assert.deepEqual(counts(both), [1, 0, 1]);
+});
+
+test("deriveRun: a live implementer with no open PR is In flight; with its PR open and unreported it counts once, as the PR", () => {
+  assert.deepEqual(counts(flight(memberRow(7))), [1, 1, 0]);
+  assert.deepEqual(counts(flight(memberRow(7), [pr(60, [], [7])])), [1, 0, 1], "the PR absorbs its ticket: no double count at the hand-off");
+  assert.deepEqual(counts(flight(memberRow(7, "PR#60", " → PR#60"), [pr(60, [], [7])])), [1, 0, 1], "reported: still the one PR");
+  assert.equal(run(memberRow(7)).implLive, 1, "implLive stays what it was");
+  assert.deepEqual(counts(flight({ rows: ["#7 impl-7", "#8 impl-8", "#9 impl-9"], dispatched: ["impl-7", "impl-8", "impl-9"] }, [pr(60, [], [8])])), [3, 2, 1]);
+});
+
+test("deriveRun: a replacement owed — newest impl settled killed or tier-mismatch on an open issue — counts, and its live replacement counts the same one", () => {
+  for (const outcome of ["killed", "tier-mismatch"]) {
+    const owed = flight(memberRow(7, outcome));
+    assert.deepEqual(counts(owed), [1, 1, 0], outcome);
+    assert.deepEqual(owed.owedReplacement, ["impl-7"], outcome);
+    const replaced = flight({ rows: [`#7 impl-7=${outcome} · impl-7-b`], dispatched: [`impl-7=${outcome}`, "impl-7-b"] });
+    assert.deepEqual(counts(replaced), [1, 1, 0], `${outcome}: the replacement is the same ticket, n does not move`);
+    assert.deepEqual(replaced.owedReplacement, [], `${outcome}: the newest member is live, so none is owed`);
+  }
+  // The replacement settles killed too: the ticket is owed again, still one.
+  const again = flight({ rows: ["#7 impl-7=killed · impl-7-b=killed"], dispatched: ["impl-7=killed", "impl-7-b=killed"] });
+  assert.deepEqual(counts(again), [1, 1, 0]);
+  assert.deepEqual(again.owedReplacement, ["impl-7-b"]);
+  // An open PR closing the ticket absorbs it: nothing is owed.
+  const absorbed = flight(memberRow(7, "killed"), [pr(60, [], [7])]);
+  assert.deepEqual(counts(absorbed), [1, 0, 1]);
+  assert.deepEqual(absorbed.owedReplacement, []);
+});
+
+test("deriveRun: a newest impl settled blocked, bailed, released, or PR#M with PR M merged counts nothing", () => {
+  for (const [what, ledger] of [
+    ["blocked", memberRow(7, "blocked")],
+    ["bailed", memberRow(7, "bailed")],
+    ["released", memberRow(7, "released")],
+    ["PR#M with PR M merged", memberRow(7, "PR#60", " → PR#60")],
+    ["blocked replacement over a killed member", { rows: ["#7 impl-7=killed · impl-7-b=blocked"], dispatched: ["impl-7=killed", "impl-7-b=blocked"] }],
+  ]) {
+    const r = flight(ledger);
+    assert.deepEqual(counts(r), [0, 0, 0], what);
+    assert.deepEqual(r.owedReplacement, [], what);
+    assert.ok(r.claimed.has(7), `${what}: the claim stands`);
+  }
+});
+
+test("deriveRun: held and halted PRs count — conflict-hold, held-behind, halted:past-pin, dispositions-escalate, finisher failed, finisher killed", () => {
+  const rowWith = (tail) => `#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:0/0/0:run-abc1234r · ${tail}`;
+  for (const [what, tail, extra] of [
+    ["conflict-hold", "conflict-hold:#40", {}],
+    ["held-behind", "held-behind:#38", {}],
+    ["halted:past-pin", "finisher-pr-40=halted:past-pin", {}],
+    ["dispositions-escalate", "fix-pr-40=applied:def5678 · dispositions-escalate=fix-pr-40:run-abc1234r", {}],
+    ["finisher failed", "finisher-pr-40=failed", {}],
+    ["finisher killed", "finisher-pr-40=killed", {}],
+    ["queued", "finisher-pr-40=labelled", { labels: ["ready-to-merge"] }],
+  ]) {
+    const r = flight({ rows: [rowWith(tail)] }, [pr(40, extra.labels ?? [], [10])]);
+    assert.deepEqual(counts(r), [1, 0, 1], what);
+  }
+});
+
+test("deriveRun: an Exclusion row counts nothing, and the PR it waits behind counts in its own right", () => {
+  const r = flight({ rows: ["#50 excluded · behind-pr:#44", "#51 excluded · behind-issue:#9"] }, [pr(44)]);
+  assert.deepEqual(counts(r), [1, 0, 1], "only PR 44 counts, and only because it closes an issue");
+  assert.ok(r.claimed.has(50) && r.claimed.has(51), "the exclusions still gate their claims");
+  assert.deepEqual(counts(flight({ rows: ["#50 excluded · behind-pr:#44"] }, [pr(44, [], [])])), [0, 0, 0], "a PR closing nothing is no premise worth counting");
+});
+
+test("deriveRun: inherited, human-authored and draft issue-closing PRs count from the first tick; a chore PR closing nothing never does", () => {
+  assert.deepEqual(counts(flight({}, [pr(70)])), [1, 0, 1], "inherited: no ledger row at all");
+  assert.deepEqual(counts(flight({}, [{ ...pr(71), isDraft: true }])), [1, 0, 1], "draft");
+  assert.deepEqual(counts(flight({}, [{ ...pr(72), author: { login: "a-human", is_bot: false } }])), [1, 0, 1], "human-authored");
+  assert.deepEqual(counts(flight({}, [pr(73, [], []), { ...pr(74, [], []), isDraft: true }])), [0, 0, 0], "chore PRs, this run's or inherited");
+  assert.deepEqual(counts(flight(memberRow(7, "PR#75", " → PR#75"), [pr(75, [], [])])), [0, 0, 0], "this run's own PR, closing nothing");
+  assert.deepEqual(counts(flight({}, [pr(70), pr(73, [], []), pr(76)])), [2, 0, 2]);
+});
+
+test("deriveRun: two open PRs closing one issue count two", () => {
+  assert.deepEqual(counts(flight({}, [pr(80, [], [7]), pr(81, [], [7])])), [2, 0, 2]);
+  assert.deepEqual(counts(flight(memberRow(7), [pr(80, [], [7]), pr(81, [], [7])])), [2, 0, 2], "and the implementer on that issue is absorbed into them");
+});
+
+test("deriveRun: an owed replacement whose issue is in closed counts nothing; unprobed it counts", () => {
+  for (const outcome of ["killed", "tier-mismatch"]) {
+    const ledger = memberRow(7, outcome);
+    const probed = flight(ledger, [], new Set([7]));
+    assert.deepEqual(counts(probed), [0, 0, 0], `${outcome}, issue CLOSED`);
+    assert.deepEqual(probed.owedReplacement, ["impl-7"], `${outcome}: still owed, so still the probe's input`);
+    assert.deepEqual(counts(flight(ledger, [], new Set([8]))), [1, 1, 0], `${outcome}: another ticket's closed state does not uncount it`);
+    assert.deepEqual(counts(flight(ledger)), [1, 1, 0], `${outcome}, unprobed`);
+  }
+  // A closed set never uncounts a live implementer or an open PR.
+  assert.deepEqual(counts(flight(memberRow(7), [pr(60, [], [8])], new Set([7, 8]))), [2, 1, 1]);
+});
+
+test("deriveRun: a ticket counts once however many members it has had", () => {
+  const r = flight({
+    rows: ["#7 impl-7=killed · impl-7-b=tier-mismatch · impl-7-c"], dispatched: ["impl-7=killed", "impl-7-b=tier-mismatch", "impl-7-c"],
+  });
+  assert.deepEqual(counts(r), [1, 1, 0]);
+});
+
 test("unclaimed: shortlist entries with no impl- or excluded row, in the file's order", () => {
   const r = run({ rows: ["#2 impl-2", "#4 excluded · behind-pr:#1", "#5 impl-5=bailed"] }, [pr(1)]);
   assert.deepEqual(unclaimed([1, 2, 3, 4, 5, 6].map((n) => ({ n, t: `t${n}` })), r), [1, 3, 6]);
@@ -1529,14 +1668,19 @@ test("parseShortlist: shortlist.mjs's payload reads; anything else is unparsable
   }
 });
 
-test("refreshWhy: short of the cap, missing or empty refreshes; draining never does", () => {
-  const base = { draining: null, status: "ok", entries: 5, unclaimed: 2, implCap: 2 };
+test("refreshWhy: unclaimed below the bound refreshes, held refreshes nothing, draining nothing", () => {
+  const base = { draining: null, held: false, status: "ok", entries: 5, unclaimed: 2, bound: 2 };
   assert.equal(refreshWhy(base), null);
-  assert.equal(refreshWhy({ ...base, unclaimed: 1 }), "unclaimed 1 < cap 2");
+  assert.equal(refreshWhy({ ...base, unclaimed: 1 }), "unclaimed 1 < in-flight bound 2");
   assert.equal(refreshWhy({ ...base, status: "missing", entries: 0, unclaimed: 0 }), "shortlist missing");
   assert.equal(refreshWhy({ ...base, status: "unparsable", entries: 0, unclaimed: 0 }), "shortlist unparsable");
-  assert.equal(refreshWhy({ ...base, entries: 0, unclaimed: 0, implCap: 0 }), "shortlist empty");
+  assert.equal(refreshWhy({ ...base, entries: 0, unclaimed: 0, bound: 1 }), "shortlist empty");
   assert.equal(refreshWhy({ ...base, status: "missing", draining: "x" }), null);
+  // Held: no trigger refreshes — the low-water mark, a missing, unparsable or empty list.
+  for (const over of [{ unclaimed: 1 }, { status: "missing", entries: 0, unclaimed: 0 }, { status: "unparsable", entries: 0, unclaimed: 0 }, { entries: 0, unclaimed: 0 }]) {
+    assert.equal(refreshWhy({ ...base, ...over, held: true }), null, JSON.stringify(over));
+    assert.notEqual(refreshWhy({ ...base, ...over }), null, `control, unheld: ${JSON.stringify(over)}`);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1703,11 +1847,14 @@ const receiptOf = ({ run = null, session = "/s", steps = {} } = {}) => ({
 // maps that default receipt to the case's own. `transcripts`, when given, are
 // the stems of the `<stem>.jsonl` files in that receipt's session directory,
 // `<dir>/session`, which is created only when `transcripts` is given: without
-// it the receipt names a directory that does not exist.
+// it the receipt names a directory that does not exist. `bound` is the
+// In-flight bound a case runs under unless its args name `--in-flight`
+// themselves: 2, so the fixtures sized for two slots read as they always did.
+// `null` passes none, which is the tick's own default.
 function runCli(args = [], {
   prs = [], ledger, shortlist, refresh = shortlistText([]), refreshFail = false,
   issueStates = {}, prStates = {}, claimed = [], candidates, env: extraEnv = {}, defaultState = false, keep = false, beforeRun = () => {},
-  baseline = true, afterBaseline = () => {}, phase0 = (receipt) => receipt, transcripts,
+  baseline = true, afterBaseline = () => {}, phase0 = (receipt) => receipt, transcripts, bound = 2,
 } = {}) {
   // On macOS tmpdir() is /var -> /private/var; resolving it up front makes
   // every path below the resolved one. (A symlinked path no longer stops a
@@ -1767,7 +1914,8 @@ function runCli(args = [], {
     // make the fold cases order-dependent. `defaultState` opts out for the case
     // whose subject IS that resolution.
     const stateArg = args.includes("--state") || defaultState ? [] : ["--state", join(dir, "heartbeat.json")];
-    const r = spawnBounded(process.execPath, [script, ...args, ...stateArg], {
+    const boundArg = bound === null || args.some((a) => a === "--in-flight" || a.startsWith("--in-flight=")) ? [] : ["--in-flight", String(bound)];
+    const r = spawnBounded(process.execPath, [script, ...boundArg, ...args, ...stateArg], {
       cwd: repo,
       env: {
         ...process.env, PATH: `${bin}:${process.env.PATH}`,
@@ -1829,18 +1977,19 @@ test("CLI: the router row reads the run's .fleet/cost-guard.json, and prints DEF
   assert.deepEqual(lineOf(ok, "router"), ["router       → NO VERDICT   (baseline n=12/20; guard computed 2026-10-03T00:00:00.000Z)"]);
 });
 
-test("CLI: the #1692 shape, read off the ledger — two live implementers at cap 2 pull nothing", () => {
-  const r = runCli([], {
+test("CLI: the #1692 shape, read off the ledger — two live implementers at bound 2 pull nothing", () => {
+  const r = runCli(["--in-flight", "2"], {
     ledger: { rows: ["#412 impl-412 · tier-ok=impl-412:fleet-implementer", "#415 impl-415 · tier-ok=impl-415:fleet-implementer"], dispatched: ["impl-412", "impl-415"] },
     shortlist: shortlistText([412, 415, 420, 421, 422]),
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 2\/2 → AT CAP/m);
+  assert.match(r.stdout, /^implementers 2\/2 → HOLD \(in-flight 2\/2\) {3}\(implementers=2 prs=0 unclaimed=3 supply=5\)$/m);
   assert.doesNotMatch(r.stdout, /PULL/);
-  assert.equal(r.refreshed, 0, "three unclaimed at cap 2 is not short of the cap");
+  assert.equal(r.refreshed, 0, "a held tick refreshes nothing");
 
-  // One settles: exactly one slot frees, and the next unclaimed head fills it.
-  const one = runCli([], {
+  // One settles to a PR that has left the open list: exactly one slot frees,
+  // and the next unclaimed head fills it.
+  const one = runCli(["--in-flight", "2"], {
     ledger: { rows: ["#412 impl-412=PR#500 → PR#500 · tier-ok=impl-412:fleet-implementer", "#415 impl-415 · tier-ok=impl-415:fleet-implementer"], dispatched: ["impl-412=PR#500", "impl-415"] },
     shortlist: shortlistText([412, 415, 420, 421, 422]),
   });
@@ -1853,7 +2002,7 @@ test("CLI: a fresh run with no ledger reads zero live members, and no shortlist 
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 1);
   // Pulled from the file the refresh just wrote — not a tick of waiting.
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 {3}\(unclaimed=3 supply=12 unreviewed=0 shortlist=missing\)/m);
+  assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 {3}\(implementers=0 prs=0 unclaimed=3 supply=12 shortlist=missing\)/m);
   assert.match(r.stdout, /^shortlist {4}→ REFRESHED shortlist: 3 entries; 0 lifted {3}\(shortlist missing\)$/m);
 });
 
@@ -1861,7 +2010,7 @@ test("CLI: an unparsable shortlist is depth 0 plus a refresh, never a refusal", 
   const r = runCli([], { shortlist: "{not json", refresh: shortlistText([]) });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 1);
-  assert.match(r.stdout, /^implementers 0\/2 → SUGGEST \/triage, hold idle {3}\(unclaimed=0 supply=0 unreviewed=0 shortlist=unparsable\)/m);
+  assert.match(r.stdout, /^implementers 0\/2 → SUGGEST \/triage, hold idle {3}\(implementers=0 prs=0 unclaimed=0 supply=0 shortlist=unparsable\)/m);
   assert.match(r.stdout, /REFRESHED shortlist: 0 entries; 0 lifted {3}\(shortlist unparsable; unchanged\)/);
 });
 
@@ -1876,14 +2025,14 @@ const plainIssue = (number) => ({ number, title: `t${number}`, labels: [{ name: 
 test("CLI: one spec-shaped ready-for-agent row through the real shortlist.mjs is named on the tick with its number and reason", () => {
   const r = runCli([], { candidates: [specIssue(2151)] });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 0\/2 → SUGGEST \/triage, hold idle {3}\(unclaimed=0 supply=0 unreviewed=0 shortlist=missing specs-dropped=#2151 \(to-spec: User Stories heading\)\)$/m);
+  assert.match(r.stdout, /^implementers 0\/2 → SUGGEST \/triage, hold idle {3}\(implementers=0 prs=0 unclaimed=0 supply=0 shortlist=missing specs-dropped=#2151 \(to-spec: User Stories heading\)\)$/m);
   assert.match(r.stdout, /^shortlist {4}→ REFRESHED shortlist: 0 entries; 0 lifted/m);
 });
 
 test("CLI: a partial drop through the real shortlist.mjs is named beside the PULL it leaves", () => {
   const r = runCli([], { candidates: [specIssue(2151), plainIssue(2160)] });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #2160 {3}\(unclaimed=1 supply=1 unreviewed=0 shortlist=missing specs-dropped=#2151 \(to-spec: User Stories heading\)\)$/m);
+  assert.match(r.stdout, /^implementers 0\/2 → PULL #2160 {3}\(implementers=0 prs=0 unclaimed=1 supply=1 shortlist=missing specs-dropped=#2151 \(to-spec: User Stories heading\)\)$/m);
 });
 
 test("CLI: a tick that does not refresh still names the drops, read back from shortlist.json", () => {
@@ -1892,7 +2041,7 @@ test("CLI: a tick that does not refresh still names the drops, read back from sh
   const r = runCli([], { shortlist: shortlistText([7, 8], 2, dropped) });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 0);
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 {3}\(unclaimed=2 supply=2 unreviewed=0 specs-dropped=#2151 \(to-spec: User Stories heading\)\)$/m);
+  assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 {3}\(implementers=0 prs=0 unclaimed=2 supply=2 specs-dropped=#2151 \(to-spec: User Stories heading\)\)$/m);
 });
 
 test("CLI: a refresh's drops replace the ones the file held before it", () => {
@@ -1910,14 +2059,14 @@ test("CLI: a shortlist.json written before `dropped` existed still reads ok, wit
   const r = runCli([], { shortlist: shortlistText([7, 8]) });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 0);
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 {3}\(unclaimed=2 supply=2 unreviewed=0\)$/m);
+  assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 {3}\(implementers=0 prs=0 unclaimed=2 supply=2\)$/m);
   assert.doesNotMatch(r.stdout, /specs-dropped|shortlist=/);
 });
 
 test("CLI: a genuinely empty queue prints no specs-dropped text", () => {
   const r = runCli([], { shortlist: shortlistText([], 0, []), refresh: shortlistText([], 0, []) });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 0\/2 → SUGGEST \/triage, hold idle {3}\(unclaimed=0 supply=0 unreviewed=0\)$/m);
+  assert.match(r.stdout, /^implementers 0\/2 → SUGGEST \/triage, hold idle {3}\(implementers=0 prs=0 unclaimed=0 supply=0\)$/m);
   assert.doesNotMatch(r.stdout, /specs-dropped/);
 });
 
@@ -1939,15 +2088,15 @@ test("CLI: a failed refresh prints REFRESH FAILED and every other row, at exit 0
   assert.match(r.stdout, /^merge-bot {4}0\/1 → DISPATCH merge-bot/m);
 });
 
-test("CLI: PULL names unclaimed heads only — claimed, bailed and excluded tickets are skipped", () => {
-  const r = runCli(["--implementer-cap", "3"], {
+test("CLI: PULL names unclaimed heads only — claimed, bailed and excluded tickets are skipped; an open issue-closing PR holds a slot", () => {
+  const r = runCli(["--in-flight", "3"], {
     ledger: { rows: ["#1 impl-1=bailed · tier-ok=impl-1:fleet-implementer", "#2 impl-2 · tier-ok=impl-2:fleet-implementer", "#3 excluded · behind-pr:#99"], dispatched: ["impl-1=bailed", "impl-2"] },
     shortlist: shortlistText([1, 2, 3, 4, 5, 6]),
     prs: [pr(99)],
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 1\/3 → PULL #4 #5 /m);
-  assert.equal(r.refreshed, 0, "three unclaimed at cap 3 is not short");
+  assert.match(r.stdout, /^implementers 2\/3 → PULL #4 {3}\(implementers=1 prs=1 unclaimed=3 supply=6\)$/m, "impl-2 and PR 99 each hold a slot: one left");
+  assert.equal(r.refreshed, 0, "three unclaimed at bound 3 is not short");
 });
 
 test("CLI: reviewer rows are named per PR, fix-appliers first, reviews oldest first", () => {
@@ -1965,32 +2114,24 @@ test("CLI: reviewer rows are named per PR, fix-appliers first, reviews oldest fi
   });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(lineOf(r, "reviewers").map((l) => l.replace(/ {3}\(.*$/, "")), [
-    "reviewers    0/6 → DISPATCH fix-pr PR#346",
-    "reviewers    0/6 → DISPATCH review PR#349 PR#350",
+    "reviewers    0/2 → DISPATCH fix-pr PR#346",
+    "reviewers    0/2 → DISPATCH review PR#349 PR#350",
   ]);
 });
 
-test("CLI: --max-reviews bounds the reviews one tick starts", () => {
-  const r = runCli(["--max-reviews", "1"], { shortlist: shortlistText([]), prs: [pr(51), pr(52), pr(53)] });
+test("CLI: a deep review backlog never holds the implementer row", () => {
+  const r = runCli(["--in-flight", "5"], { shortlist: shortlistText([7, 8, 9, 10, 11]), prs: [pr(51), pr(52), pr(53)] });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^reviewers {4}0\/6 → DISPATCH review PR#51 {3}\(.*max-reviews=1\)$/m);
-  const busy = runCli(["--max-reviews", "1"], {
-    ledger: { rows: ["#51 review=wf:x"] }, shortlist: shortlistText([]), prs: [pr(51), pr(52)],
+  assert.match(r.stdout, /^implementers 3\/5 → PULL #7 #8 /m, "its three fixture PRs close issues, so they count");
+  assert.match(r.stdout, /^reviewers {4}0\/5 → DISPATCH review PR#51 PR#52 PR#53 /m, "every due review is dispatched, no cap");
+  // Live reviews with a PR still owed one: the review side is as full as it
+  // gets, and the implementer row still pulls.
+  const busy = runCli(["--in-flight", "5"], {
+    ledger: { rows: ["#51 review=wf:x"] }, shortlist: shortlistText([7, 8, 9, 10, 11]), prs: [pr(51), pr(52)],
   });
-  assert.match(busy.stdout, /^reviewers {4}1\/6 → HOLD \(max-reviews 1 in flight\)/m);
-  // Default = the reviewer cap.
-  const open = runCli(["--reviewer-cap", "2"], { shortlist: shortlistText([]), prs: [pr(51), pr(52), pr(53)] });
-  assert.match(open.stdout, /^reviewers {4}0\/2 → DISPATCH review PR#51 PR#52 /m);
-});
-
-test("CLI: the narrowed backlog gate — a deep backlog with free reviewer slots still pulls", () => {
-  const r = runCli([], { shortlist: shortlistText([7, 8]), prs: [pr(51), pr(52), pr(53)] });
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 /m);
-  const saturated = runCli(["--reviewer-cap", "1"], {
-    ledger: { rows: ["#51 review=wf:x"] }, shortlist: shortlistText([7, 8]), prs: [pr(51), pr(52)],
-  });
-  assert.match(saturated.stdout, /^implementers 0\/2 → HOLD \(review side saturated\)/m);
+  assert.match(busy.stdout, /^implementers 2\/5 → PULL #7 #8 #9 /m);
+  assert.match(busy.stdout, /^reviewers {4}1\/5 → DISPATCH review PR#52 /m);
+  assert.doesNotMatch(busy.stdout, /saturated/);
 });
 
 test("CLI: drain holds the implementer row, stops refreshing, and keeps the review and merge rows firing", () => {
@@ -1999,10 +2140,10 @@ test("CLI: drain holds the implementer row, stops refreshing, and keeps the revi
     prs: [pr(51), pr(60, ["ready-to-merge"])],
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 0\/2 → HOLD \(draining\)/m);
+  assert.match(r.stdout, /^implementers 2\/2 → HOLD \(draining\)/m);
   assert.equal(r.refreshed, 0, "a draining run's missing shortlist is not a reason to restart supply");
   assert.doesNotMatch(r.stdout, /REFRESH/);
-  assert.match(r.stdout, /^reviewers {4}0\/6 → DISPATCH review PR#51 /m);
+  assert.match(r.stdout, /^reviewers {4}0\/2 → DISPATCH review PR#51 /m);
   assert.match(r.stdout, /^merge-bot {4}0\/1 → DISPATCH merge-bot /m);
 });
 
@@ -2042,7 +2183,7 @@ test("CLI: a conflict hold prints DISPATCH fix-pr and holds the merge bot until 
     shortlist: shortlistText([]), prs: [pr(40, ["ready-to-merge"])],
   }).stdout;
   const held = tick("conflict-hold:#40", []);
-  assert.match(held, /^reviewers +0\/6 → DISPATCH fix-pr PR#40 /m);
+  assert.match(held, /^reviewers +0\/2 → DISPATCH fix-pr PR#40 /m);
   assert.match(held, /^merge-bot {4}0\/1 → HOLD {3}\(merge-queue=1 held=1 — every queued candidate is held behind a lower PR or on a merge conflict no fix-pr has cleared\)$/m);
   const working = tick("conflict-hold:#40 · fix-pr-40", ["fix-pr-40"]);
   assert.doesNotMatch(working, /DISPATCH fix-pr/);
@@ -2075,7 +2216,7 @@ test("CLI: a ledger ledger.mjs itself refuses is a refusal here too", (t) => {
 
 test("CLI: a tier mismatch holds the implementer row until a replacement is dispatched", () => {
   const r = runCli([], { ledger: { rows: ["#7 impl-7=tier-mismatch"], dispatched: ["impl-7=tier-mismatch"] }, shortlist: shortlistText([8, 9]) });
-  assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\) +\(.* — dispatch impl-7-b at its row's tier\)$/m);
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier mismatch impl-7\) +\(.* — dispatch impl-7-b at its row's tier\)$/m);
 });
 
 test("CLI: an implementer with no tier verdict on the ledger holds the implementer row until tier-check writes one", () => {
@@ -2111,7 +2252,7 @@ test("CLI: a lifted exclusion premise triggers a refresh even with the shortlist
 });
 
 test("CLI: a lifted behind-pr exclusion names its ticket in the PULL row, with no refresh needed", () => {
-  const r = runCli(["--implementer-cap", "1"], {
+  const r = runCli(["--in-flight", "1"], {
     shortlist: shortlistText([50]), ledger: { rows: ["#50 excluded · behind-pr:#44"] }, prs: [],
   });
   assert.equal(r.status, 0, r.stderr);
@@ -2125,7 +2266,7 @@ test("CLI: a behind-issue exclusion already reflected in the current file names 
   // row is untouched until a Pull rewrites it. This tick gets no refresh
   // trigger at all (the file already carries #50), so the fix has to live in
   // how a claim from that stale row is read, not in another gh call.
-  const r = runCli(["--implementer-cap", "3"], {
+  const r = runCli(["--in-flight", "3"], {
     shortlist: shortlistText([1, 2, 50]), ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "CLOSED" },
   });
   assert.equal(r.status, 0, r.stderr);
@@ -2140,47 +2281,47 @@ test("CLI: a behind-issue exclusion already reflected in the current file names 
 const ISSUE_HELD = { rows: ["#50 excluded · behind-issue:#9"] };
 
 test("CLI: a behind-issue exclusion with an open issue on a ticket in the shortlist refreshes and holds the ticket out of the PULL", () => {
-  const r = runCli(["--implementer-cap", "3"], {
+  const r = runCli(["--in-flight", "3"], {
     shortlist: shortlistText([1, 2, 50]), refresh: shortlistText([1, 2]), ledger: ISSUE_HELD, issueStates: { 9: "OPEN" },
   });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 1, "an open issue does not lift the exclusion: the refresh's own probe decides");
   assert.deepEqual(r.issueViews, ["9"]);
   assert.match(r.stdout, /REFRESHED shortlist: 2 entries; 0 lifted {3}\(behind-issue:#9 not closed, #50 still on the shortlist\)/);
-  assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 +\(unclaimed=2 supply=2 /m);
+  assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 +\(implementers=0 prs=0 unclaimed=2 supply=2\)/m);
   assert.doesNotMatch(r.stdout, /PULL[^\n]*#50/);
 });
 
 test("CLI: a behind-issue exclusion whose refresh fails leaves the PULL as it was and reports the failure", () => {
-  const r = runCli(["--implementer-cap", "3"], {
+  const r = runCli(["--in-flight", "3"], {
     shortlist: shortlistText([1, 2, 50]), ledger: ISSUE_HELD, issueStates: { 9: "OPEN" }, refreshFail: true,
   });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 1);
-  assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 #50 +\(unclaimed=3 supply=3 /m);
+  assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 #50 +\(implementers=0 prs=0 unclaimed=3 supply=3\)/m);
   assert.match(r.stdout, /REFRESH FAILED/);
 });
 
 test("CLI: a behind-issue probe that cannot answer never lifts the exclusion, and on a ticket in the file it refreshes", () => {
-  const down = runCli(["--implementer-cap", "3"], {
+  const down = runCli(["--in-flight", "3"], {
     shortlist: shortlistText([1, 2, 50]), refresh: shortlistText([1, 2]), ledger: ISSUE_HELD, env: { ISSUE_VIEW_FAIL: "1" },
   });
   assert.equal(down.status, 0, down.stderr);
   assert.equal(down.refreshed, 1, "an unanswered probe is not a lift: the refresh's own probe decides");
   assert.match(down.stderr, /fleet-tick: gh issue view 9 exited 1: gh: issue view failed — behind-issue:#9 premise unconfirmed, exclusion stands/);
-  assert.match(down.stdout, /^implementers 0\/3 → PULL #1 #2 +\(unclaimed=2 supply=2 /m);
-  const noState = runCli(["--implementer-cap", "3"], {
+  assert.match(down.stdout, /^implementers 0\/3 → PULL #1 #2 +\(implementers=0 prs=0 unclaimed=2 supply=2\)/m);
+  const noState = runCli(["--in-flight", "3"], {
     shortlist: shortlistText([1, 2, 50]), refresh: shortlistText([1, 2]), ledger: ISSUE_HELD,
     issueStates: { 9: "CLOSED" }, env: { ISSUE_VIEW_BODY: "<html>rate limited</html>" },
   });
   assert.equal(noState.status, 0, noState.stderr);
   assert.equal(noState.refreshed, 1, "a body with no state is no lift either");
   assert.match(noState.stderr, /fleet-tick: gh issue view 9 printed no state — behind-issue:#9 premise unconfirmed, exclusion stands/);
-  assert.match(noState.stdout, /^implementers 0\/3 → PULL #1 #2 +\(unclaimed=2 supply=2 /m);
+  assert.match(noState.stdout, /^implementers 0\/3 → PULL #1 #2 +\(implementers=0 prs=0 unclaimed=2 supply=2\)/m);
 });
 
 test("CLI: a behind-issue exclusion whose issue is MERGED on a ticket in the shortlist asks for no refresh", () => {
-  const r = runCli(["--implementer-cap", "3"], {
+  const r = runCli(["--in-flight", "3"], {
     shortlist: shortlistText([1, 2, 50]), ledger: ISSUE_HELD, issueStates: { 9: "MERGED" },
   });
   assert.equal(r.status, 0, r.stderr);
@@ -2192,12 +2333,12 @@ test("CLI: a behind-issue exclusion whose issue is MERGED on a ticket in the sho
 test("CLI: a behind-issue exclusion with a non-numeric target is never handed to gh, on a ticket in the shortlist or not", () => {
   for (const target of ["feature-x", "--web"]) {
     const ledger = { rows: [`#50 excluded · behind-issue:${target}`] };
-    const inFile = runCli(["--implementer-cap", "3"], { shortlist: shortlistText([1, 2, 50]), ledger });
+    const inFile = runCli(["--in-flight", "3"], { shortlist: shortlistText([1, 2, 50]), ledger });
     assert.equal(inFile.status, 0, inFile.stderr);
     assert.deepEqual(inFile.issueViews, [], target);
     assert.equal(inFile.refreshed, 0, target);
     assert.doesNotMatch(inFile.stderr, /premise unconfirmed/, target);
-    const absent = runCli(["--implementer-cap", "2"], { shortlist: shortlistText([1, 2, 3]), ledger });
+    const absent = runCli(["--in-flight", "2"], { shortlist: shortlistText([1, 2, 3]), ledger });
     assert.deepEqual(absent.issueViews, [], target);
   }
 });
@@ -2224,7 +2365,7 @@ test("CLI: a branch-named behind-pr exclusion whose refresh fails leaves the PUL
   });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.refreshed, 1);
-  assert.match(r.stdout, /^implementers 0\/2 → PULL #2305 #10 +\(unclaimed=3 supply=3 /m);
+  assert.match(r.stdout, /^implementers 0\/2 → PULL #2305 #10 +\(implementers=0 prs=0 unclaimed=3 supply=3\)/m);
   assert.match(r.stdout, /REFRESH FAILED/);
 });
 
@@ -2291,7 +2432,7 @@ test("CLI: a tier mismatch on a CLOSED ticket no longer holds the implementer ro
   assert.doesNotMatch(closed.stdout, /tier mismatch/);
   assert.deepEqual(closed.issueViews, ["7"]);
   const open = runCli([], { ...base, ledger: mismatch, issueStates: { 7: "OPEN" } });
-  assert.match(open.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m);
+  assert.match(open.stdout, /^implementers 1\/2 → HOLD \(tier mismatch impl-7\)/m);
   const none = runCli([], { ...base, ledger: { rows: ["#7 impl-7 · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7"] } });
   assert.deepEqual(none.issueViews, [], "nothing mismatched: no probe");
 });
@@ -2302,7 +2443,7 @@ test("CLI: a failed probe of a mismatched ticket is disclosed and the hold stand
     issueStates: { 7: "CLOSED" }, env: { ISSUE_VIEW_FAIL: "1" },
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m);
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier mismatch impl-7\)/m);
   assert.match(r.stderr, /fleet-tick: gh issue view 7 exited 1: gh: issue view failed — tier mismatch on #7 unconfirmed closed, hold stands/);
 });
 
@@ -2313,7 +2454,7 @@ test("CLI: a probe answering exit 0 with no issue state is disclosed and the hol
       issueStates: { 7: "CLOSED" }, env: { ISSUE_VIEW_BODY: body },
     });
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m, body);
+    assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier mismatch impl-7\)/m, body);
     assert.match(r.stderr, /fleet-tick: gh issue view 7 printed no state — tier mismatch on #7 unconfirmed closed, hold stands/, body);
   }
 });
@@ -2327,7 +2468,7 @@ test("CLI: a state other than exactly CLOSED leaves the mismatch hold standing",
       issueStates: { 7: "CLOSED" }, env: { ISSUE_VIEW_BODY: JSON.stringify({ state }) },
     });
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m, state);
+    assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier mismatch impl-7\)/m, state);
   }
 });
 
@@ -2367,21 +2508,155 @@ test("CLI: the six caller-stated flags are gone — each refuses as unknown", ()
   for (const flag of ["--implementers", "--reviewers", "--merge-bots", "--pool", "--reviews-ready", "--merge-holds"]) {
     const r = runCli([flag, "1"], { shortlist: shortlistText([]) });
     assert.equal(r.status, 2, flag);
-    assert.match(r.stderr, /accepted: --implementer-cap, --reviewer-cap, --max-reviews, --fold-unchanged, --apply, --state/, flag);
+    assert.match(r.stderr, /accepted: --in-flight, --fold-unchanged, --apply, --state/, flag);
     assert.equal(r.stdout.trim(), "", flag);
   }
 });
 
-test("CLI: caps must be positive integers, with no upper bound", () => {
-  for (const bad of [["--implementer-cap", "0"], ["--reviewer-cap", "0"], ["--max-reviews", "0"], ["--implementer-cap=x"], ["--max-reviews="]]) {
-    const r = runCli(bad, { shortlist: shortlistText([]) });
-    assert.equal(r.status, 2, bad.join(" "));
-    assert.equal(r.stdout.trim(), "");
+test("CLI: the three retired flags refuse as unknown", () => {
+  for (const flag of ["--implementer-cap", "--reviewer-cap", "--max-reviews"]) {
+    for (const args of [[flag, "3"], [`${flag}=3`]]) {
+      const r = runCli(args, { shortlist: shortlistText([]) });
+      assert.equal(r.status, 2, args.join(" "));
+      assert.equal(r.stdout.trim(), "", args.join(" "));
+      assert.match(r.stderr, new RegExp(`Unknown option '${flag}[^']*' — accepted: --in-flight, --fold-unchanged, --apply, --state`), args.join(" "));
+    }
   }
-  const big = runCli(["--implementer-cap", "9", "--reviewer-cap", "12"], { shortlist: shortlistText([]) });
-  assert.equal(big.status, 0, big.stderr);
-  assert.match(big.stdout, /^implementers 0\/9 /m);
-  assert.match(big.stdout, /^reviewers {4}0\/12 /m);
+});
+
+test("CLI: --in-flight must be a positive integer, with no upper bound", () => {
+  const refused = (args) => runCli(args, { shortlist: shortlistText([]) });
+  const zero = refused(["--in-flight", "0"]);
+  assert.equal(zero.status, 2);
+  assert.equal(zero.stdout.trim(), "");
+  assert.match(zero.stderr, /--in-flight must be at least 1, got 0/);
+  for (const [args, raw] of [[["--in-flight=x"], "x"], [["--in-flight="], ""], [["--in-flight", "3 6"], "3 6"], [["--in-flight=-1"], "-1"], [["--in-flight", "1.5"], "1.5"]]) {
+    const r = refused(args);
+    assert.equal(r.status, 2, args.join(" "));
+    assert.equal(r.stdout.trim(), "", args.join(" "));
+    assert.match(r.stderr, new RegExp(`--in-flight must be a non-negative integer, got '${raw}'`), args.join(" "));
+  }
+  for (const n of ["9", "100"]) {
+    const big = runCli(["--in-flight", n], { shortlist: shortlistText([]) });
+    assert.equal(big.status, 0, big.stderr);
+    assert.match(big.stdout, new RegExp(`^implementers 0/${n} `, "m"));
+    assert.match(big.stdout, new RegExp(`^reviewers {4}0/${n} `, "m"));
+  }
+});
+
+test("CLI: --in-flight defaults to 5 and prints n/B", () => {
+  const r = runCli([], { bound: null, shortlist: shortlistText([7, 8, 9, 10, 11, 12, 13]), prs: [pr(51), pr(52)] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^implementers 2\/5 → PULL #7 #8 #9 {3}\(implementers=0 prs=2 unclaimed=7 supply=7\)$/m);
+  assert.match(r.stdout, /^reviewers {4}0\/5 → DISPATCH review PR#51 PR#52 /m);
+});
+
+test("CLI: an inherited run over B starts fully held — seven open issue-closing PRs at B = 5", () => {
+  const prs = [1, 2, 3, 4, 5, 6, 7].map((n) => pr(100 + n));
+  const r = runCli(["--in-flight", "5"], { prs, shortlist: shortlistText([7, 8, 9]) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^implementers 7\/5 → HOLD \(in-flight 7\/5\) {3}\(implementers=0 prs=7 unclaimed=3 supply=3\)$/m);
+  assert.doesNotMatch(r.stdout, /PULL/);
+  assert.match(r.stdout, /^reviewers {4}0\/5 → DISPATCH review PR#101 PR#102 PR#103 PR#104 PR#105 PR#106 PR#107 /m, "the reviewer row still dispatches every due review");
+  assert.equal(r.refreshed, 0, "three unclaimed is short of 5, and a held tick still refreshes nothing");
+});
+
+test("CLI: a held tick refreshes no shortlist; the same fixture one merge later does", () => {
+  const fixture = { shortlist: undefined, refresh: shortlistText([7, 8]) };
+  const held = runCli(["--in-flight", "2"], { ...fixture, prs: [pr(51), pr(52)] });
+  assert.equal(held.status, 0, held.stderr);
+  assert.equal(held.refreshed, 0, "n = 2 = B: a missing shortlist is not a reason to refresh while the bound holds");
+  assert.match(held.stdout, /^implementers 2\/2 → HOLD \(in-flight 2\/2\) {3}\(implementers=0 prs=2 unclaimed=0 supply=\? shortlist=missing\)$/m);
+  assert.doesNotMatch(held.stdout, /REFRESH/);
+  const merged = runCli(["--in-flight", "2"], { ...fixture, prs: [pr(51)] });
+  assert.equal(merged.refreshed, 1, "one merge brings n below B: the refresh runs");
+  assert.match(merged.stdout, /^shortlist {4}→ REFRESHED shortlist: 2 entries; 0 lifted {3}\(shortlist missing\)$/m);
+  assert.match(merged.stdout, /^implementers 1\/2 → PULL #7 /m, "the refresh and the Pull land in the same tick");
+  // The low-water mark is the bound itself: one unclaimed head under B = 2 refreshes.
+  const low = runCli(["--in-flight", "2"], { shortlist: shortlistText([7]), refresh: shortlistText([7, 8]) });
+  assert.equal(low.refreshed, 1);
+  assert.match(low.stdout, /REFRESHED shortlist: 2 entries; 0 lifted {3}\(unclaimed 1 < in-flight bound 2\)/);
+  // …and a held tick holds back even a lifted exclusion premise's refresh.
+  const lifted = runCli(["--in-flight", "2"], {
+    shortlist: shortlistText([1, 2, 3]), refresh: shortlistText([1, 2, 3, 50]), ledger: { rows: ["#50 excluded · behind-pr:#44"] }, prs: [pr(51), pr(52)],
+  });
+  assert.equal(lifted.refreshed, 0, "held: the exclusion's lift waits for the first unheld tick");
+});
+
+test("CLI: a held tick is quiet — the state file's quiet increments", () => {
+  const reviewed = (n, ticket) => `#${ticket} impl-${ticket}=PR#${n} → PR#${n} · tier-ok=impl-${ticket}:fleet-implementer · review=wf:r${n} reviewed=abc1234:0/0/0:run-abc1234r`;
+  const held = { bound: 2, ledger: { rows: [reviewed(51, 10), reviewed(52, 11)], dispatched: ["impl-10=PR#51", "impl-11=PR#52"] }, prs: [pr(51), pr(52)], shortlist: shortlistText([7, 8, 9]) };
+  const ticks = foldTicks(held);
+  for (const t of ticks) assert.equal(t.status, 0, t.stderr);
+  assert.match(ticks[0].stdout, /^implementers 2\/2 → HOLD \(in-flight 2\/2\)/m);
+  assert.deepEqual(ticks.map((t) => t.quiet), [1, 2, 3], "a held tick asks for nothing, so quiet rises every tick");
+  for (const [i, t] of ticks.slice(1).entries()) {
+    assert.equal(t.stdout.trim(), `fleet-tick: unchanged, nothing to act on (quiet=${i + 2}) — full rows on the next change`);
+  }
+  const free = foldTicks({ ...held, prs: [pr(51)] });
+  assert.match(free[0].stdout, /^implementers 1\/2 → PULL #7 /m);
+  assert.deepEqual(free.map((t) => t.quiet), [0, 0, 0], "control: an unheld tick names a PULL, which resets quiet");
+});
+
+test("CLI: an owed replacement on a CLOSED issue is not In flight; a probe that cannot answer leaves it counted and is disclosed on stderr", () => {
+  const killed = { rows: ["#7 impl-7=killed · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7=killed"] };
+  const base = { shortlist: shortlistText([1, 2, 3]), ledger: killed };
+  const closed = runCli([], { ...base, issueStates: { 7: "CLOSED" } });
+  assert.equal(closed.status, 0, closed.stderr);
+  assert.match(closed.stdout, /^implementers 0\/2 → PULL #1 #2 {3}\(implementers=0 prs=0 /m);
+  assert.deepEqual(closed.issueViews, ["7"], "a killed ticket is probed, not only a tier-mismatched one");
+  const open = runCli([], { ...base, issueStates: { 7: "OPEN" } });
+  assert.match(open.stdout, /^implementers 1\/2 → PULL #1 {3}\(implementers=1 prs=0 /m, "an open issue's owed replacement is In flight");
+  const failed = runCli([], { ...base, issueStates: { 7: "CLOSED" }, env: { ISSUE_VIEW_FAIL: "1" } });
+  assert.match(failed.stdout, /^implementers 1\/2 → PULL #1 /m, "a probe that cannot answer never uncounts");
+  assert.match(failed.stderr, /fleet-tick: gh issue view 7 exited 1: gh: issue view failed — replacement owed on #7 unconfirmed closed, ticket stays counted/);
+  for (const body of ["<html>rate limited</html>", "{}", "null"]) {
+    const r = runCli([], { ...base, issueStates: { 7: "CLOSED" }, env: { ISSUE_VIEW_BODY: body } });
+    assert.match(r.stdout, /^implementers 1\/2 → PULL #1 /m, body);
+    assert.match(r.stderr, /fleet-tick: gh issue view 7 printed no state — replacement owed on #7 unconfirmed closed, ticket stays counted/, body);
+  }
+  // A tier-mismatched ticket is probed once, though it is both held and owed.
+  const mismatch = runCli([], { shortlist: shortlistText([1, 2, 3]), ledger: { rows: ["#7 impl-7=tier-mismatch"], dispatched: ["impl-7=tier-mismatch"] }, issueStates: { 7: "CLOSED" } });
+  assert.deepEqual(mismatch.issueViews, ["7"]);
+  // One merge-bound PR closing the ticket absorbs it: nothing is owed, nothing probed, one slot held.
+  const absorbed = runCli([], { ...base, prs: [pr(60, ["ready-to-merge"], [7])], issueStates: { 7: "CLOSED" } });
+  assert.deepEqual(absorbed.issueViews, []);
+  assert.match(absorbed.stdout, /^implementers 1\/2 → PULL #1 {3}\(implementers=0 prs=1 /m);
+  // Two owed tickets: one probe each.
+  const two = runCli([], {
+    shortlist: shortlistText([1, 2, 3]), issueStates: { 7: "CLOSED", 8: "OPEN" },
+    ledger: { rows: ["#7 impl-7=killed · tier-ok=impl-7:fleet-implementer", "#8 impl-8=killed · tier-ok=impl-8:fleet-implementer"], dispatched: ["impl-7=killed", "impl-8=killed"] },
+  });
+  assert.deepEqual(two.issueViews, ["7", "8"]);
+  assert.match(two.stdout, /^implementers 1\/2 → PULL #1 {3}\(implementers=1 prs=0 /m, "#7 is closed and uncounted, #8 still owes its replacement");
+});
+
+test("CLI: a ledger carrying impl-<N>=blocked counts nothing for N — no In-flight slot, no PULL held on its account", () => {
+  const blocked = { rows: ["#7 impl-7=blocked · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7=blocked"] };
+  const r = runCli([], { shortlist: shortlistText([7, 1, 2]), ledger: blocked });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^implementers 0\/2 → PULL #1 #2 {3}\(implementers=0 prs=0 unclaimed=2 supply=3\)$/m, "a blocked ticket keeps its claim: it is no head, and no slot");
+  assert.deepEqual(r.issueViews, [], "no replacement is owed, so nothing is probed");
+  // A settled blocked member is still a member for the tier hold: no verdict holds the row, and still counts nothing.
+  const unchecked = runCli([], { shortlist: shortlistText([1, 2]), ledger: { rows: ["#7 impl-7=blocked"], dispatched: ["impl-7=blocked"] } });
+  assert.match(unchecked.stdout, /^implementers 0\/2 → HOLD \(tier unchecked impl-7\) {3}\(implementers=0 prs=0 /m);
+});
+
+test("CLI: a replacement is never a Pull and never held — owed, then dispatched, the ticket stays the one slot at the bound", () => {
+  const owed = { rows: ["#7 impl-7=killed · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7=killed"] };
+  const replaced = {
+    rows: ["#7 impl-7=killed · tier-ok=impl-7:fleet-implementer · impl-7-b · tier-ok=impl-7-b:fleet-implementer"],
+    dispatched: ["impl-7=killed", "impl-7-b"],
+  };
+  const base = { shortlist: shortlistText([1, 2, 3]), issueStates: { 7: "OPEN" } };
+  const before = runCli(["--in-flight", "1"], { ...base, ledger: owed });
+  assert.match(before.stdout, /^implementers 1\/1 → HOLD \(in-flight 1\/1\) {3}\(implementers=1 prs=0 /m, "the owed ticket fills the one slot: no Pull takes it");
+  const after = runCli(["--in-flight", "1"], { ...base, ledger: replaced });
+  assert.match(after.stdout, /^implementers 1\/1 → HOLD \(in-flight 1\/1\) {3}\(implementers=1 prs=0 /m, "dispatching the replacement moves n by nothing");
+  // Past the bound outright: the replacement of an owed ticket beside an inherited PR over B.
+  const over = runCli(["--in-flight", "1"], { ...base, ledger: replaced, prs: [pr(50)] });
+  assert.match(over.stdout, /^implementers 2\/1 → HOLD \(in-flight 2\/1\) {3}\(implementers=1 prs=1 /m);
+  assert.doesNotMatch(over.stdout, /PULL/);
 });
 
 test("CLI: a failed gh read refuses — it is not an empty backlog", () => {
@@ -2395,6 +2670,17 @@ test("CLI: a PR list at the limit refuses rather than serving a truncated one", 
   const r = runCli([], { prs: Array.from({ length: 200 }, (_, i) => pr(i + 1)), shortlist: shortlistText([]) });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /truncated|capped/i);
+});
+
+test("CLI: an issue-closing reference with no integer number refuses the tick rather than miscounting it", () => {
+  for (const ref of [{}, { number: "7" }, { number: null }, { number: 7.5 }, null, { title: "no number" }]) {
+    const r = runCli([], { prs: [{ ...pr(1), closingIssuesReferences: [{ number: 1001 }, ref] }], shortlist: shortlistText([]) });
+    assert.equal(r.status, 2, JSON.stringify(ref));
+    assert.equal(r.stdout.trim(), "", JSON.stringify(ref));
+    assert.match(r.stderr, /gh pr list did not return .*closingIssuesReferences\[\{number\}\]/, JSON.stringify(ref));
+  }
+  const ok = runCli([], { prs: [{ ...pr(1), closingIssuesReferences: [{ number: 1001 }, { number: 1002 }] }], shortlist: shortlistText([]) });
+  assert.equal(ok.status, 0, ok.stderr);
 });
 
 test("CLI: a gh row missing closingIssuesReferences refuses rather than counting as no-issue", () => {
@@ -2442,7 +2728,7 @@ test("CLI: a tracked PR GitHub reads CONFLICTING prints CONFLICT on the reviewer
     env: { PR_LIST_LOG: log },
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^reviewers {4}0\/6 → CONFLICT PR#40 +\(.* — .*ledger\.mjs row <key> "<text> · conflict-hold:#40 \(conflict: mergeable=CONFLICTING\)".*\)$/m);
+  assert.match(r.stdout, /^reviewers {4}0\/2 → CONFLICT PR#40 +\(.* — .*ledger\.mjs row <key> "<text> · conflict-hold:#40 \(conflict: mergeable=CONFLICTING\)".*\)$/m);
   assert.doesNotMatch(r.stdout, /PR#41/);
   const calls = readFileSync(log, "utf8").trim().split("\n");
   assert.equal(calls.length, 1, "no extra gh call");
@@ -2455,7 +2741,7 @@ test("CLI: a past-pin halt prints DISPATCH review for its PR (#2083)", () => {
     shortlist: shortlistText([]), prs: [pr(40, [], [10], HEAD_B)],
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^reviewers {4}0\/6 → DISPATCH review PR#40 /m);
+  assert.match(r.stdout, /^reviewers {4}0\/2 → DISPATCH review PR#40 /m);
 });
 
 test("CLI: an ambient GIT_DIR naming another repository cannot move the shortlist read", (t) => {
@@ -2502,7 +2788,7 @@ test("CLI: an inherited GIT_DIR cannot retarget the tier-mismatch closed-ticket 
   });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.issueViews, ["7"], "the probe must still run");
-  assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m, "#7 is OPEN in the case's own repository - the hold stands");
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier mismatch impl-7\)/m, "#7 is OPEN in the case's own repository - the hold stands");
 });
 
 test("CLI: an inherited GIT_DIR cannot retarget the behind-issue premise probe", (t) => {
@@ -2519,65 +2805,61 @@ test("CLI: an inherited GIT_DIR cannot retarget the behind-issue premise probe",
 });
 
 // A review whose `reviewed=` write never landed stays in flight in the ledger
-// after its PR merges. Each such row holds one reviewer slot unless the tick
+// after its PR merges. Each such row counts as one review unit unless the tick
 // asks gh about the PR and finds it finished.
 const zombieRows = (numbers) => numbers.map((n) => `#${n - 90} impl-${n - 90}=PR#${n} → PR#${n} · review=member:review-pr-${n}`);
 const ZOMBIES = Array.from({ length: 10 }, (_, i) => 101 + i);
 const REVIEW_DUE = pr(500, [], [1500], HEAD_B);
-const CAPS = ["--reviewer-cap", "10", "--max-reviews", "10"];
 
-test("CLI: dangling in-flight reviews of merged PRs do not starve review dispatch", () => {
-  const r = runCli(CAPS, {
+test("CLI: dangling in-flight reviews of merged PRs are no review units, and dispatch is never starved", () => {
+  const r = runCli([], {
     shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows(ZOMBIES) },
     prStates: Object.fromEntries(ZOMBIES.map((n) => [n, "MERGED"])),
   });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.prViews.map(Number).sort((a, b) => a - b), ZOMBIES, "each off-list PR is asked about");
-  assert.match(r.stdout, /^reviewers +0\/10 → DISPATCH review PR#500/m);
+  assert.match(r.stdout, /^reviewers +0\/2 → DISPATCH review PR#500/m);
 });
 
-test("CLI: a CLOSED PR's dangling review is released too", () => {
-  const r = runCli(["--reviewer-cap", "1", "--max-reviews", "1"], {
+test("CLI: a CLOSED PR's dangling review is no review unit either", () => {
+  const r = runCli([], {
     shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows([101]) }, prStates: { 101: "CLOSED" },
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^reviewers +0\/1 → DISPATCH review PR#500/m);
+  assert.match(r.stdout, /^reviewers +0\/2 → DISPATCH review PR#500/m);
 });
 
-test("CLI: an in-flight review on an open PR keeps its slot and is never probed", () => {
-  const r = runCli(["--reviewer-cap", "1", "--max-reviews", "1"], {
+test("CLI: an in-flight review on an open PR counts as a unit and is never probed", () => {
+  const r = runCli([], {
     shortlist: shortlistText([]), prs: [pr(101, [], [1101]), REVIEW_DUE], ledger: { rows: zombieRows([101]) },
   });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.prViews, [], "an open PR needs no probe");
-  assert.match(r.stdout, /^reviewers +1\/1 → AT CAP/m);
-  assert.doesNotMatch(r.stdout, /DISPATCH review/);
+  assert.match(r.stdout, /^reviewers +1\/2 → DISPATCH review PR#500/m, "the unit counts, and the due review is still dispatched: no cap");
 });
 
-test("CLI: a PR off the open list that gh still calls OPEN keeps its review's slot", () => {
-  const r = runCli(["--reviewer-cap", "1", "--max-reviews", "1"], {
+test("CLI: a PR off the open list that gh still calls OPEN keeps its review counted as a unit", () => {
+  const r = runCli([], {
     shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows([101]) }, prStates: { 101: "OPEN" },
   });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.prViews, ["101"]);
-  assert.match(r.stdout, /^reviewers +1\/1 → AT CAP/m);
-  assert.doesNotMatch(r.stdout, /DISPATCH review/);
+  assert.match(r.stdout, /^reviewers +1\/2 → DISPATCH review PR#500/m);
 });
 
-test("CLI: a PR gh cannot answer for is not read as merged - the slot is held and the failure disclosed", () => {
+test("CLI: a PR gh cannot answer for is not read as merged - the unit stays counted and the failure disclosed", () => {
   const cases = [
     ["a nonzero exit", { PR_VIEW_FAIL: "1" }, /gh pr view 101 exited 1: gh: pr view failed/],
     ["a reply with no state", { PR_VIEW_BODY: "<html>proxy error</html>" }, /gh pr view 101 printed no PR state/],
     ["a state that is not MERGED or CLOSED", { PR_VIEW_BODY: JSON.stringify({ state: "merged" }) }, /gh pr view 101 printed no PR state/],
   ];
   for (const [what, env, shown] of cases) {
-    const r = runCli(["--reviewer-cap", "1", "--max-reviews", "1"], {
+    const r = runCli([], {
       shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows([101]) }, prStates: { 101: "MERGED" }, env,
     });
     assert.equal(r.status, 0, `${what}: ${r.stderr}`);
     assert.match(r.stderr, shown, what);
-    assert.match(r.stdout, /^reviewers +1\/1 → AT CAP/m, what);
-    assert.doesNotMatch(r.stdout, /DISPATCH review/, what);
+    assert.match(r.stdout, /^reviewers +1\/2 → DISPATCH review PR#500/m, what);
   }
 });
 
@@ -2585,66 +2867,66 @@ test("CLI: an inherited GIT_DIR cannot retarget the merged-PR review probe", (t)
   const decoy = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-decoy-pr-")));
   t.after(() => rmSync(decoy, { recursive: true, force: true }));
   spawnBounded("git", ["init", "-q", decoy]);
-  const r = runCli(["--reviewer-cap", "1", "--max-reviews", "1"], {
+  const r = runCli([], {
     shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows([101]) }, prStates: { 101: "OPEN" },
     env: { GIT_DIR: join(decoy, ".git"), GH_REPO: "someone/else" },
   });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.prViews, ["101"], "the probe must still run");
-  assert.match(r.stdout, /^reviewers +1\/1 → AT CAP/m, "101 is OPEN in the case's own repository - its review keeps the slot");
+  assert.match(r.stdout, /^reviewers +1\/2 → DISPATCH review PR#500/m, "101 is OPEN in the case's own repository - its review stays a counted unit");
 });
 
 // #2210, end to end: a real repo, a real baseline, a real stray write.
 const LIVE = {
   ledger: { rows: ["#412 impl-412 · tier-ok=impl-412:fleet-implementer"], dispatched: ["impl-412"] },
-  shortlist: shortlistText([412, 420, 421]),
+  shortlist: shortlistText([412, 420, 421, 422]),
 };
-// One more tick over a kept runCli fixture, as the next wake would run it.
-const tickAgain = (r) => spawnBounded(process.execPath, [join(r.dir, "bin", "fleet-tick.mjs"), "--state", join(r.dir, "hb.json")], {
+// One more tick over a kept runCli fixture, as the next wake would run it — under the same bound.
+const tickAgain = (r, bound = 2) => spawnBounded(process.execPath, [join(r.dir, "bin", "fleet-tick.mjs"), "--in-flight", String(bound), "--state", join(r.dir, "hb.json")], {
   cwd: r.repo,
   env: { ...process.env, PATH: `${join(r.dir, "bin")}:${process.env.PATH}`, FIXTURE_PRS: join(r.dir, "prs.json") },
 });
 
 test("CLI: a stray write after the baseline prints MAIN-CHECKOUT-DIRTY first, naming the path and the live members, and holds every dispatching row", (t) => {
   const r = runCli([], {
-    ...LIVE, prs: [pr(350)], keep: true,
+    ...LIVE, prs: [pr(350)], bound: 3, keep: true,
     afterBaseline: (repo) => writeFileSync(join(repo, "stray.mjs"), "x\n"),
   });
   t.after(() => rmSync(r.dir, { recursive: true, force: true }));
   assert.equal(r.status, 0, r.stderr);
   const lines = r.stdout.trim().split("\n");
   assert.match(lines[0], /^MAIN-CHECKOUT-DIRTY stray\.mjs — changed since the run's baseline; live members: impl-412 — dispatch held: resolve the stray paths FIRST, then re-baseline with ~\/\.fleet\/bin\/fleet-run main-checkout\.mjs --record/);
-  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(main checkout dirty\)/m);
-  assert.match(r.stdout, /^reviewers +0\/6 → HOLD \(main checkout dirty\)/m);
+  assert.match(r.stdout, /^implementers 2\/3 → HOLD \(main checkout dirty\)/m);
+  assert.match(r.stdout, /^reviewers +0\/3 → HOLD \(main checkout dirty\)/m);
   assert.match(r.stdout, /^merge-bot +0\/1 → HOLD \(main checkout dirty\)/m);
   assert.doesNotMatch(r.stdout, /PULL|DISPATCH/);
 
   // Not a one-tick warning: the next tick holds the same way, and only an
   // explicit re-baseline after the path is resolved lets dispatch through.
-  assert.match(tickAgain(r).stdout, /^MAIN-CHECKOUT-DIRTY stray\.mjs /m);
+  assert.match(tickAgain(r, 3).stdout, /^MAIN-CHECKOUT-DIRTY stray\.mjs /m);
   rmSync(join(r.repo, "stray.mjs"));
   const rec = spawnBounded(process.execPath, [join(r.dir, "bin", "main-checkout.mjs"), "--record"], { cwd: r.repo });
   assert.equal(rec.status, 0, rec.stderr);
-  const after = tickAgain(r);
+  const after = tickAgain(r, 3);
   assert.equal(after.status, 0, after.stderr);
   assert.doesNotMatch(after.stdout, /MAIN-CHECKOUT|main checkout/);
-  assert.match(after.stdout, /^implementers 1\/2 → PULL #420 /m);
+  assert.match(after.stdout, /^implementers 2\/3 → PULL #420 /m);
 });
 
 test("CLI: a branch switch in the main checkout after the baseline holds the run, naming HEAD, and clears itself on the switch back", (t) => {
   const r = runCli([], {
-    ...LIVE, prs: [pr(350)], keep: true,
+    ...LIVE, prs: [pr(350)], bound: 3, keep: true,
     afterBaseline: (repo) => assert.equal(spawnBounded("git", ["checkout", "-q", "-b", "other"], { cwd: repo }).status, 0),
   });
   t.after(() => rmSync(r.dir, { recursive: true, force: true }));
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout.trim().split("\n")[0], /^MAIN-CHECKOUT-DIRTY HEAD refs\/heads\/\S+@[0-9a-f]{7} → refs\/heads\/other@[0-9a-f]{7} — changed since the run's baseline; live members: impl-412 — dispatch held/);
-  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(main checkout dirty\)/m);
+  assert.match(r.stdout, /^implementers 2\/3 → HOLD \(main checkout dirty\)/m);
   const back = spawnBounded("git", ["switch", "-q", "-"], { cwd: r.repo });
   assert.equal(back.status, 0, back.stderr);
-  const after = tickAgain(r);
+  const after = tickAgain(r, 3);
   assert.doesNotMatch(after.stdout, /MAIN-CHECKOUT|main checkout/);
-  assert.match(after.stdout, /^implementers 1\/2 → PULL #420 /m);
+  assert.match(after.stdout, /^implementers 2\/3 → PULL #420 /m);
 });
 
 test("CLI: uncommitted work in the main checkout at run start does not hold the run", () => {
@@ -2684,7 +2966,7 @@ const foldTicks = (fixture) => {
     const quiet = () => JSON.parse(readFileSync(state, "utf8")).quiet;
     const ticks = [{ stdout: first.stdout, status: first.status, stderr: first.stderr, quiet: quiet() }];
     for (let i = 0; i < 2; i++) {
-      const t = spawnBounded(process.execPath, [join(first.dir, "bin", "fleet-tick.mjs"), "--fold-unchanged", "--state", state], {
+      const t = spawnBounded(process.execPath, [join(first.dir, "bin", "fleet-tick.mjs"), "--in-flight", String(fixture.bound ?? 2), "--fold-unchanged", "--state", state], {
         cwd: first.repo,
         env: {
           ...process.env, PATH: `${join(first.dir, "bin")}:${process.env.PATH}`,
@@ -2765,7 +3047,7 @@ test("CLI: an ambient GIT_DIR naming a dirty repository does not move the main-c
 
 // The phase-0 receipt the tick gates on. Every case holds all three
 // dispatching rows and prints the line naming why above them.
-const PHASE0_LIVE = { ...LIVE, prs: [pr(350)] };
+const PHASE0_LIVE = { ...LIVE, prs: [pr(350)], bound: 3 };
 const withStep = (name, step) => (r) => ({ ...r, steps: { ...r.steps, [name]: { ...r.steps[name], ...step } } });
 const CONTROLLER_AT = 1_760_000_000_000;
 // A controller record in the case's own state file, the one the tick reads.
@@ -2796,8 +3078,8 @@ for (const [what, fixture, named] of [
     const at = lines.findIndex((l) => l.startsWith("PHASE0-"));
     assert.match(lines[at] ?? "", named, r.stdout);
     assert.ok(at < lines.findIndex((l) => l.startsWith("implementers")), "the line prints above the rows");
-    assert.match(r.stdout, /^implementers 1\/2 → HOLD \(phase 0 incomplete\)/m);
-    assert.match(r.stdout, /^reviewers +0\/6 → HOLD \(phase 0 incomplete\)/m);
+    assert.match(r.stdout, /^implementers 2\/3 → HOLD \(phase 0 incomplete\)/m);
+    assert.match(r.stdout, /^reviewers +0\/3 → HOLD \(phase 0 incomplete\)/m);
     assert.match(r.stdout, /^merge-bot +0\/1 → HOLD \(phase 0 incomplete\)/m);
     assert.doesNotMatch(r.stdout, /PULL|DISPATCH/);
   });
@@ -2807,7 +3089,7 @@ test("CLI: a receipt of this run with every step ok prints nothing extra and hol
   const r = runCli([], PHASE0_LIVE);
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stdout, /PHASE0|phase 0/);
-  assert.match(r.stdout, /^implementers 1\/2 → PULL #420 /m);
+  assert.match(r.stdout, /^implementers 2\/3 → PULL #420 /m);
   assert.match(r.stdout, /^merge-bot +0\/1 → (?!HOLD)/m);
   // The controller record's `at` is what `run` must equal, and its process
   // is this tick's ancestor.
@@ -2821,8 +3103,8 @@ test("CLI: a finished receipt whose run's controller has exited holds every disp
   assert.equal(gone.status, 0, gone.stderr);
   const line = gone.stdout.trim().split("\n").find((l) => l.startsWith("PHASE0-"));
   assert.match(line ?? "", new RegExp(`^PHASE0-INCOMPLETE receipt \\S+/\\.fleet/phase0\\.json is run ${CONTROLLER_AT}'s and its controller has exited: not this session's finished phase 0 — dispatch held: run \\S+ phase0\\.mjs --session <session> `), gone.stdout);
-  assert.match(gone.stdout, /^implementers 1\/2 → HOLD \(phase 0 incomplete\)/m);
-  assert.match(gone.stdout, /^reviewers +0\/6 → HOLD \(phase 0 incomplete\)/m);
+  assert.match(gone.stdout, /^implementers 2\/3 → HOLD \(phase 0 incomplete\)/m);
+  assert.match(gone.stdout, /^reviewers +0\/3 → HOLD \(phase 0 incomplete\)/m);
   assert.match(gone.stdout, /^merge-bot +0\/1 → HOLD \(phase 0 incomplete\)/m);
   assert.doesNotMatch(gone.stdout, /PULL|DISPATCH/);
   const foreign = liveForeign(t);
@@ -2832,7 +3114,7 @@ test("CLI: a finished receipt whose run's controller has exited holds every disp
   });
   assert.equal(alive.status, 0, alive.stderr);
   assert.doesNotMatch(alive.stdout, /PHASE0|phase 0/);
-  assert.match(alive.stdout, /^implementers 1\/2 → PULL #420 /m);
+  assert.match(alive.stdout, /^implementers 2\/3 → PULL #420 /m);
 });
 
 test("CLI: ruleset drift and a fold-in NEED print as advice on a PHASE0-ADVICE line and hold nothing", () => {
@@ -2844,7 +3126,7 @@ test("CLI: ruleset drift and a fold-in NEED print as advice on a PHASE0-ADVICE l
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.split("\n")[0], "PHASE0-ADVICE ruleset drift, fold-in NEED review PR#77 (closes no issue)");
   assert.doesNotMatch(r.stdout, /phase 0 incomplete|PHASE0-INCOMPLETE/);
-  assert.match(r.stdout, /^implementers 1\/2 → PULL #420 /m);
+  assert.match(r.stdout, /^implementers 2\/3 → PULL #420 /m);
 });
 
 test("CLI: --fold-unchanged under an unfinished phase 0 folds to one line naming the hold, quiet rising every tick", () => {
@@ -2962,7 +3244,7 @@ function applyTicks(fixture, ticks) {
     const out = [{ stdout: first.stdout, stderr: first.stderr, status: first.status, calls: calls(), applied: applied(), stateText: stateText() }];
     for (const t of rest) {
       (t.before ?? (() => {}))(first.repo);
-      const r = spawnBounded(process.execPath, [join(first.dir, "bin", "fleet-tick.mjs"), ...t.args, "--state", state], {
+      const r = spawnBounded(process.execPath, [join(first.dir, "bin", "fleet-tick.mjs"), "--in-flight", String(fixture.bound ?? 2), ...t.args, "--state", state], {
         cwd: first.repo,
         env: {
           ...process.env, PATH: `${join(first.dir, "bin")}:${process.env.PATH}`,
@@ -3174,7 +3456,7 @@ test("CLI --apply: no check runs where another hold outranks the unchecked one",
   }, [APPLY]).ticks[0];
   assert.equal(mismatch.status, 0, mismatch.stderr);
   assert.deepEqual(mismatch.calls, []);
-  assert.match(mismatch.stdout, /^implementers 1\/2 → HOLD \(tier mismatch impl-9\)/m);
+  assert.match(mismatch.stdout, /^implementers 2\/2 → HOLD \(tier mismatch impl-9\)/m, "impl-412 is live and impl-9 is owed a replacement: both are In flight");
 });
 
 // ---------------------------------------------------------------------------
@@ -3398,7 +3680,7 @@ test("CLI: a busy, fully-staffed fleet is not reported STALLED just because the 
   });
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stdout, /STALLED/);
-  assert.match(r.stdout, /^implementers 2\/2 → AT CAP/m);
+  assert.match(r.stdout, /^implementers 2\/2 → HOLD \(in-flight 2\/2\)/m);
 });
 
 // The Stall report names which kind of stall it sees, off the controller
@@ -3540,7 +3822,7 @@ test("CLI: a tick refused by the gh or the ledger read still records `ticked`, a
   // A usage refusal never reached the state file.
   const untouched = JSON.stringify({ quiet: 3, elapsed: 0, digest: "old", ticked: { at: 1_000 } });
   writeFileSync(path, untouched);
-  const r = runCli(["--state", path, "--implementer-cap", "0"], IDLE);
+  const r = runCli(["--state", path, "--in-flight", "0"], IDLE);
   assert.equal(r.status, 2, r.stderr);
   assert.equal(readFileSync(path, "utf8"), untouched);
 });
@@ -3641,7 +3923,7 @@ test("CLI: a hung probe of a mismatched ticket is disclosed at the bound and the
     issueStates: { 7: "CLOSED" }, env: hang("issue view"),
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m);
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier mismatch impl-7\)/m);
   assert.match(r.stderr, /fleet-tick: gh issue view 7 timed out after 1s — tier mismatch on #7 unconfirmed closed, hold stands/);
 });
 
@@ -3655,14 +3937,14 @@ test("CLI: a hung behind-issue probe is disclosed at the bound and the exclusion
   assert.match(r.stderr, /fleet-tick: gh issue view 9 timed out after 1s — behind-issue:#9 premise unconfirmed, exclusion stands/);
 });
 
-test("CLI: a hung probe of a PR off the open list is disclosed at the bound and its review keeps the slot", () => {
-  const r = runCli(["--reviewer-cap", "1", "--max-reviews", "1"], {
+test("CLI: a hung probe of a PR off the open list is disclosed at the bound and its review stays a counted unit", () => {
+  const r = runCli([], {
     shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows([101]) }, prStates: { 101: "MERGED" },
     env: hang("pr view"),
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stderr, /fleet-tick: gh pr view 101 timed out after 1s — review on PR#101 unconfirmed finished, its slot stands/);
-  assert.match(r.stdout, /^reviewers +1\/1 → AT CAP/m);
+  assert.match(r.stderr, /fleet-tick: gh pr view 101 timed out after 1s — review on PR#101 unconfirmed finished, its unit stands/);
+  assert.match(r.stdout, /^reviewers +1\/2 → DISPATCH review PR#500/m);
 });
 
 test("CLI: a hung claimed-count read makes the stall report's count unknown at the bound", (t) => {
@@ -3759,12 +4041,12 @@ test("CLI: a live review=member:review-pr-5 carried across an ancestor rotate is
   const ledger = { rows: ["#5 review=member:review-pr-5"] };
   const carried = runCli([], { ...IDLE, prs: [pr(5)], ledger, beforeRun: rotateAs(ANCESTOR_RECORD) });
   assert.equal(carried.status, 0, carried.stderr);
-  assert.match(carried.stdout, /^reviewers +1\/6 → IDLE OK/m);
+  assert.match(carried.stdout, /^reviewers +1\/2 → IDLE OK/m);
   assert.doesNotMatch(carried.stdout, /DISPATCH review PR#5/);
 
   const dead = runCli([], { ...IDLE, prs: [pr(5)], ledger, beforeRun: rotateAs({ pid: deadPid(), lstart: "x", prior: "ancestor" }) });
   assert.equal(dead.status, 0, dead.stderr);
-  assert.match(dead.stdout, /^reviewers +0\/6 → DISPATCH review PR#5/m);
+  assert.match(dead.stdout, /^reviewers +0\/2 → DISPATCH review PR#5/m);
 });
 
 test("CLI: live fix-pr, finisher-pr, merge-bot and impl members carried across an ancestor rotate cause no new dispatch", () => {
@@ -3778,15 +4060,15 @@ test("CLI: live fix-pr, finisher-pr, merge-bot and impl members carried across a
     dispatched: ["impl-3=PR#5", "impl-4=PR#6", "fix-pr-5", "finisher-pr-6", "merge-bot-1", "impl-12", "impl-13"],
   };
   const fixture = { shortlist: shortlistText([20, 21]), refresh: shortlistText([20, 21]), prs: [pr(5), pr(6), pr(8, ["ready-to-merge"])], ledger };
-  const carried = runCli([], { ...fixture, beforeRun: rotateAs(ANCESTOR_RECORD) });
+  const carried = runCli(["--in-flight", "5"], { ...fixture, beforeRun: rotateAs(ANCESTOR_RECORD) });
   assert.equal(carried.status, 0, carried.stderr);
-  assert.match(carried.stdout, /^implementers 2\/2 → AT CAP/m);
+  assert.match(carried.stdout, /^implementers 5\/5 → HOLD \(in-flight 5\/5\)/m, "two live implementers and three open issue-closing PRs");
   assert.match(carried.stdout, /^merge-bot +1\/1 → AT CAP/m);
   assert.doesNotMatch(carried.stdout, /DISPATCH|PULL/);
 
-  const dead = runCli([], { ...fixture, beforeRun: rotateAs({ pid: deadPid(), lstart: "x", prior: "ancestor" }) });
+  const dead = runCli(["--in-flight", "5"], { ...fixture, beforeRun: rotateAs({ pid: deadPid(), lstart: "x", prior: "ancestor" }) });
   assert.equal(dead.status, 0, dead.stderr);
-  assert.match(dead.stdout, /^implementers 0\/2 → PULL #20 #21/m);
+  assert.match(dead.stdout, /^implementers 3\/5 → PULL #20 #21/m);
   assert.match(dead.stdout, /DISPATCH review PR#5 PR#6/);
   assert.match(dead.stdout, /^merge-bot +0\/1 → DISPATCH merge-bot/m);
 });
@@ -3797,7 +4079,7 @@ test("CLI: a carried reviewer recorded dead with =failed frees its PR, and the n
     beforeRun: rotateAs(ANCESTOR_RECORD, ["review", "5", "review=member:review-pr-5=failed"]),
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^reviewers +0\/6 → DISPATCH review PR#5/m);
+  assert.match(r.stdout, /^reviewers +0\/2 → DISPATCH review PR#5/m);
 });
 
 // ---------------------------------------------------------------------------
@@ -3843,7 +4125,7 @@ test("CLI: a live fix-pr and a live review= launch past their threshold print CH
     // The rows — actual, target, action — and the quiet streak are the same
     // either way: the line is advice, never a row.
     assert.equal(withoutLiveness(stale.stdout), withoutLiveness(fresh.stdout));
-    assert.match(stale.stdout, /^reviewers +\d+\/6 /m);
+    assert.match(stale.stdout, /^reviewers +\d+\/2 /m);
     assert.equal(stateOf(stale).quiet, stateOf(fresh).quiet);
   } finally {
     rmSync(stale.dir, { recursive: true, force: true });
@@ -3926,7 +4208,7 @@ const ticksOver = (args, fixture, again = 1, between = () => {}) => {
     const out = [{ stdout: first.stdout, status: first.status, stderr: first.stderr, state: stateOf(first) }];
     for (let i = 0; i < again; i++) {
       between(first.dir, i);
-      const t = spawnBounded(process.execPath, [join(first.dir, "bin", "fleet-tick.mjs"), ...args, "--state", state], {
+      const t = spawnBounded(process.execPath, [join(first.dir, "bin", "fleet-tick.mjs"), ...(args.includes("--in-flight") ? [] : ["--in-flight", String(fixture.bound ?? 2)]), ...args, "--state", state], {
         cwd: first.repo,
         env: {
           ...process.env, PATH: `${join(first.dir, "bin")}:${process.env.PATH}`,
@@ -4385,7 +4667,7 @@ test("CLI: a dispatch that lands while the tick runs, its ledger entry written b
     dispatched: [...SESSIONED.ledger.dispatched, "impl-30"],
   });
   const r = runCli([], {
-    ...SESSIONED, keep: true, env: { MID_TICK_LEDGER: during, MID_TICK_TRANSCRIPT: "impl-30" },
+    ...SESSIONED, keep: true, bound: 5, env: { MID_TICK_LEDGER: during, MID_TICK_TRANSCRIPT: "impl-30" },
     beforeRun: seedState(seenAgo({ "impl-12": 10, "fix-pr-5": 10 })),
   });
   try {

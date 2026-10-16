@@ -47,8 +47,8 @@ import { latestFinisherAttempts, foldLedger, pastPinDue } from "./fleet-tick.mjs
 // wherever it sits (laterAttempt below): live → IMPLEMENTING, `=PR#M`
 // → that PR decides, `=released`/`=bailed` → no card of
 // the row's own (the POOL loop shows the ticket if it is still
-// `ready-for-agent`), `=killed`/`=tier-mismatch` → IMPLEMENTING with that
-// outcome as a flag. There a `PR#` mention — the `→ PR#M` arrow or any
+// `ready-for-agent`), `=killed`/`=tier-mismatch`/`=blocked` → IMPLEMENTING with
+// that outcome as a flag. There a `PR#` mention — the `→ PR#M` arrow or any
 // other prose — is human-readable only; parseRow reads only the settled impl
 // token's outcome, as rowPr() does for every reader. rowPr() takes the row's
 // first settled `=PR#M` impl token, this card its latest attempt: the two
@@ -273,7 +273,7 @@ export function deriveFlags(parsed, ctx) {
   if (parsed.heldBehind != null) flags.push(`held-behind:#${parsed.heldBehind}`);
   for (const c of parsed.causes) flags.push(c); // killed | blocked | sha-off-branch
   const o = parsed.implOutcome;
-  if ((o === "killed" || o === "tier-mismatch") && !flags.includes(o)) flags.push(o);
+  if ((o === "killed" || o === "tier-mismatch" || o === "blocked") && !flags.includes(o)) flags.push(o);
   // Only while the halt still parks the PR: once a human resolves an
   // escalated halt by labelling or merging it, the flag has nothing to ask.
   // `past-pin`'s own automatic resolution (SKILL.md "Resolving a finisher
