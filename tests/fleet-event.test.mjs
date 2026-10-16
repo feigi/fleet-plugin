@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { foldLedger } from "../plugin/scripts/fleet-tick.mjs";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
 const REAL_SCRIPTS = join(PLUGIN, "scripts");
@@ -93,6 +94,8 @@ if (isCLI(import.meta.url)) drive("fleet-tick", process.argv.slice(2));
 writeFileSync(join(SCRIPTS, "dispositions-check.mjs"), `import { drive } from "./stub-driver.mjs";\ndrive("dispositions-check", process.argv.slice(2));\n`);
 // dispatch-prompt.mjs runs on import, so nothing imports it: a plain stub.
 writeFileSync(join(SCRIPTS, "dispatch-prompt.mjs"), `import { drive } from "./stub-driver.mjs";\ndrive("dispatch-prompt", process.argv.slice(2));\n`);
+// ci-state.mjs is only ever run, never imported, by the scripts.
+writeFileSync(join(SCRIPTS, "ci-state.mjs"), `import { drive } from "./stub-driver.mjs";\ndrive("ci-state", process.argv.slice(2));\n`);
 writeFileSync(join(SCRIPTS, "release-ticket.sh"), `#!/bin/sh\nexec node "$(dirname "$0")/stub-driver.mjs" release-ticket "$@"\n`);
 cpSync(join(SCRIPTS, "ledger.mjs"), join(SCRIPTS, "ledger-real.mjs"));
 writeFileSync(join(SCRIPTS, "ledger.mjs"), `import { appendFileSync, readFileSync } from "node:fs";
@@ -679,13 +682,224 @@ test("review-failed settles the launch =failed in place and names the next free 
   assert.equal(f.ledger(), ledger);
 });
 
+// ── ci ───────────────────────────────────────────────────────────────────────
+
+const ciPayload = (over = {}) => JSON.stringify({ pr: 88, branch: "b", prHead: HEAD, runId: 123, attempt: 2, runHeadSha: HEAD, status: "completed", conclusion: "success", behind: 0, verdict: "green", reasons: [], ...over });
+const DEGRADED = "WATCHER DEGRADED: no usable ci-state reading for #88 — silence is NOT green";
+
+test("ci reads ci-state without --quiet and records the run's key on the PR's row, then ticks; a second run with the same key writes nothing, a rerun's key is new", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88 · ports=1"] });
+  f.control("ci-state", { out: `${ciPayload({ conclusion: "failure", verdict: "not-green" })}\n`, exit: 1 });
+  const first = f.run(["ci", "88"]);
+  assert.equal(first.status, 0, "not-green exits 1 from ci-state and is an ordinary reading: " + first.err + first.stdout);
+  assert.deepEqual(first.order, ["ci-state --pr 88", "ledger token 88 ci=123:2:failure", TICK]);
+  assert.deepEqual(f.rows(), ["#412 impl-412=PR#88 · ports=1 · ci=123:2:failure"]);
+  assert.match(eventLine(first), /^event: ci: #88 ci=123:2:failure$/);
+
+  const ledger = f.ledger();
+  const second = f.run(["ci", "#88"]);
+  assert.equal(second.status, 0, second.err);
+  assert.deepEqual(second.order, ["ci-state --pr 88", TICK]);
+  assert.equal(f.ledger(), ledger);
+  assert.match(eventLine(second), /#88 already ci=123:2:failure$/);
+
+  f.control("ci-state", { out: `${ciPayload({ attempt: 3, conclusion: "success" })}\n` });
+  const rerun = f.run(["ci", "88"]);
+  assert.deepEqual(rerun.order, ["ci-state --pr 88", "ledger token 88 ci=123:3:success", TICK]);
+  assert.deepEqual(f.rows(), ["#412 impl-412=PR#88 · ports=1 · ci=123:2:failure · ci=123:3:success"]);
+});
+
+for (const conclusion of ["", null]) {
+  test(`ci keys an in-progress run's ${JSON.stringify(conclusion)} conclusion as -, never as a terminal one, while a real conclusion passes through`, () => {
+    const f = fixture({ rows: ["#412 impl-412=PR#88"] });
+    f.control("ci-state", { out: `${ciPayload({ status: "in_progress", conclusion, verdict: "not-green" })}\n`, exit: 1 });
+    const r = f.run(["ci", "88"]);
+    assert.equal(r.status, 0, r.err + r.stdout);
+    assert.deepEqual(r.order, ["ci-state --pr 88", "ledger token 88 ci=123:2:-", TICK]);
+    assert.deepEqual(f.rows(), ["#412 impl-412=PR#88 · ci=123:2:-"]);
+    f.control("ci-state", { out: `${ciPayload({ conclusion: "cancelled", verdict: "not-green" })}\n`, exit: 1 });
+    assert.deepEqual(f.run(["ci", "88"]).order.at(1), "ledger token 88 ci=123:2:cancelled", "the real conclusion is a new key beside the in-progress one");
+  });
+}
+
+for (const [why, control] of [
+  ["no verdict", { out: `${JSON.stringify({ pr: 88, runId: 1, attempt: 1, conclusion: "success" })}\n` }],
+  ["a rate-limited verdict", { out: `${JSON.stringify({ pr: 88, verdict: "rate-limited" })}\n`, exit: 2 }],
+  ["an empty verdict", { out: `${JSON.stringify({ pr: 88, verdict: "", runId: 1, attempt: 1, conclusion: "success" })}\n` }],
+  ["output that is no JSON", { out: "garbage\n", exit: 2 }],
+  ["no output at all", { exit: 2 }],
+]) {
+  test(`ci prints WATCHER DEGRADED and writes nothing for ${why}, then still ticks`, () => {
+    const f = fixture({ rows: ["#412 impl-412=PR#88"] });
+    f.control("ci-state", control);
+    const ledger = f.ledger();
+    const r = f.run(["ci", "88"]);
+    assert.equal(r.status, 0, r.err + r.stdout);
+    assert.ok(r.out.includes(DEGRADED), "at the left margin, whole: " + r.stdout);
+    assert.deepEqual(r.order, ["ci-state --pr 88", TICK]);
+    assert.equal(f.ledger(), ledger);
+  });
+}
+
+test("ci writes nothing and prints no degraded line for a verdict that binds no run (no-ci)", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88"] });
+  f.control("ci-state", { out: `${ciPayload({ verdict: "no-ci", runId: null, attempt: null, conclusion: null })}\n`, exit: 1 });
+  const ledger = f.ledger();
+  const r = f.run(["ci", "88"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.ok(!r.out.some((l) => l.startsWith("WATCHER")), r.stdout);
+  assert.match(eventLine(r), /#88 ci: verdict no-ci binds no run, nothing to record$/);
+  assert.deepEqual(r.order, ["ci-state --pr 88", TICK]);
+  assert.equal(f.ledger(), ledger);
+});
+
+test("ci passes a ledger refusal through and still ticks", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88"] });
+  f.control("ci-state", { out: `${ciPayload({ conclusion: "a b" })}\n` });
+  const r = f.run(["ci", "88"]);
+  assert.equal(r.status, 2, r.err + r.stdout);
+  assert.match(r.err, /is not one token/);
+  assert.equal(r.order.at(-1), TICK);
+});
+
+// ── label ────────────────────────────────────────────────────────────────────
+
+test("label writes nothing and only ticks, with no fold", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88"] });
+  const ledger = f.ledger();
+  const r = f.run(["label", "88"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(r.order, [TICK]);
+  assert.match(eventLine(r), /^event: label: nothing to record$/);
+  assert.equal(f.ledger(), ledger);
+});
+
+// ── conflict ─────────────────────────────────────────────────────────────────
+
+// Whether the tick's own fold of the fixture ledger reads PR `pr`'s conflict hold as open.
+function holdOpen(f, pr) {
+  const r = spawnSync(process.execPath, [join(SCRIPTS, "ledger-real.mjs"), "read"], { cwd: f.repo, encoding: "utf8", env: GIT_ENV });
+  assert.equal(r.status, 0, r.stderr);
+  return foldLedger(JSON.parse(r.stdout), new Set(), { lenient: true }).byPr.get(pr)?.conflictOpen;
+}
+
+test("conflict writes the bare hold token onto the PR's row, then ticks; a second hold is refused with nothing written, and the tick still runs", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88 · ports=1"] });
+  const first = f.run(["conflict", "88"]);
+  assert.equal(first.status, 0, first.err + first.stdout);
+  assert.deepEqual(first.order, ["ledger token 88 conflict-hold:#88", TICK]);
+  assert.deepEqual(f.rows(), ["#412 impl-412=PR#88 · ports=1 · conflict-hold:#88"]);
+  assert.equal(holdOpen(f, 88), true);
+  assert.match(eventLine(first), /^event: conflict: #88 conflict-hold:#88$/);
+
+  const ledger = f.ledger();
+  const second = f.run(["conflict", "88"]);
+  assert.equal(second.status, 2, second.err + second.stdout);
+  assert.match(second.err, /^fleet-event: conflict: PR #88's row already carries an unresolved conflict hold — nothing written$/m);
+  assert.deepEqual(second.order, [TICK]);
+  assert.equal(f.ledger(), ledger);
+  assert.equal(second.out.at(-1), "TICK ROWS");
+});
+
+test("conflict refuses a hold the merge bot wrote, since that one is unresolved too", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88 · conflict-hold:#88"] });
+  const ledger = f.ledger();
+  const r = f.run(["conflict", "88"]);
+  assert.equal(r.status, 2, r.err + r.stdout);
+  assert.deepEqual(r.order, [TICK]);
+  assert.equal(f.ledger(), ledger);
+});
+
+test("conflict accepts a PR whose one hold a fix-applier has answered: it writes the other spelling, which the tick reads as a fresh hold", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88 · conflict-hold:#88 · fix-pr-88=no-op"] });
+  assert.equal(holdOpen(f, 88), false, "the fixture's hold is answered");
+  const r = f.run(["conflict", "88"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(r.order, ["ledger token 88 conflict-hold-#88", TICK]);
+  assert.equal(holdOpen(f, 88), true);
+});
+
+test("conflict refuses a PR whose row carries both spellings, answered or not, rather than repeating a no-op", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88 · conflict-hold:#88 · fix-pr-88=no-op · conflict-hold-#88 · fix-pr-88-b=no-op"] });
+  assert.equal(holdOpen(f, 88), false);
+  const ledger = f.ledger();
+  const r = f.run(["conflict", "88"]);
+  assert.equal(r.status, 2, r.err + r.stdout);
+  assert.match(r.err, /already carries every spelling of a conflict hold the tick reads — nothing written/);
+  assert.deepEqual(r.order, [TICK]);
+  assert.equal(f.ledger(), ledger);
+});
+
+test("conflict accepts a row that carries other holds and another PR's conflict row", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88 · held-behind:#80", "#413 impl-413=PR#89 · conflict-hold:#89"] });
+  const r = f.run(["conflict", "88"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(f.rows(), ["#412 impl-412=PR#88 · held-behind:#80 · conflict-hold:#88", "#413 impl-413=PR#89 · conflict-hold:#89"]);
+});
+
+// ── heartbeat ────────────────────────────────────────────────────────────────
+
+test("heartbeat writes nothing and ticks with --fold-unchanged, which no other kind passes", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88"] });
+  const ledger = f.ledger();
+  const r = f.run(["heartbeat"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(r.order, [`${TICK} --fold-unchanged`]);
+  assert.match(eventLine(r), /^event: heartbeat: nothing to record$/);
+  assert.equal(f.ledger(), ledger);
+  assert.deepEqual(f.run(["heartbeat", "--in-flight", "4"]).order, ["fleet-tick --apply --in-flight 4 --fold-unchanged"]);
+});
+
+// ── drain ────────────────────────────────────────────────────────────────────
+
+test("drain runs closeout.mjs begin with the reason, which drains and releases the claim, then ticks; a second run drains and releases nothing again", () => {
+  const f = fixture({ rows: ["#412 impl-412"] });
+  const first = f.run(["drain", "--reason", "end of the night"]);
+  assert.equal(first.status, 0, first.err + first.stdout);
+  assert.deepEqual(first.order, [
+    "ledger drain end of the night",
+    "release-ticket 412 impl-412 implementer --apply",
+    "ledger settle impl-412=released",
+    TICK,
+  ]);
+  assert.match(first.stdout, /^closeout: drain: ok$/m);
+  assert.match(first.stdout, /^closeout: release: ok$/m);
+  assert.match(eventLine(first), /^event: drain: drain begun$/);
+  assert.match(f.ledger(), /end of the night/);
+  assert.deepEqual(f.rows(), ["#412 impl-412=released"]);
+
+  const ledger = f.ledger();
+  const second = f.run(["drain", "--reason", "end of the night"]);
+  assert.equal(second.status, 0, second.err + second.stdout);
+  assert.deepEqual(second.order, [TICK], "closeout's receipt holds both steps ok, so begin writes nothing");
+  assert.equal(f.ledger(), ledger);
+});
+
+test("drain prints a claim closeout could not release as its NEED line, exits 4, and still ticks", () => {
+  const f = fixture({ rows: ["#412 impl-412"] });
+  f.control("release-ticket", { exit: 1, out: JSON.stringify({ issue: 412, released: false, applied: true, blockers: ["worktree has uncommitted changes"] }) });
+  const r = f.run(["drain", "--reason", "stop"]);
+  assert.equal(r.status, 4, r.err + r.stdout);
+  assert.ok(r.out.includes("NEED hand-release #412 worktree has uncommitted changes"), r.stdout);
+  assert.equal(r.order.at(-1), TICK);
+  assert.equal(r.out.at(-1), "TICK ROWS");
+});
+
 // ── usage ────────────────────────────────────────────────────────────────────
 
 test("usage refusals exit 2 before any write or tick: no kind, an unknown kind, a wrong arity, a member of another family, a launch already =failed", () => {
   const f = fixture({ rows: [REVIEW_ROW] });
   for (const [args, why] of [
     [[], /^fleet-event: usage: fleet-event\.mjs <kind>/m],
-    [["ci", "88"], /^fleet-event: unknown kind 'ci'/m],
+    [["bogus-kind", "88"], /^fleet-event: unknown kind 'bogus-kind'/m],
+    [["ci"], /^fleet-event: ci takes <pr>/m],
+    [["ci", "x"], /^fleet-event: ci: 'x' is not a PR number/m],
+    [["conflict", "0"], /^fleet-event: conflict: '0' is not a PR number/m],
+    [["heartbeat", "88"], /^fleet-event: heartbeat takes no arguments/m],
+    [["drain"], /^fleet-event: drain takes --reason/m],
+    [["drain", "--reason", "  "], /^fleet-event: --reason needs a value/m],
+    [["drain", "now", "--reason", "r"], /^fleet-event: drain takes no arguments/m],
+    [["label", "88", "--reason", "r"], /^fleet-event: --reason belongs to drain, not label/m],
     [["impl-report"], /^fleet-event: impl-report takes <member>/m],
     [["impl-report", "fix-pr-88"], /^fleet-event: impl-report takes a member of the impl family, not 'fix-pr-88'/m],
     [["review-result", "x", "/p"], /^fleet-event: review-result: 'x' is not a PR number/m],

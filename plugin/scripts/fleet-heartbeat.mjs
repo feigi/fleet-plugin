@@ -32,7 +32,7 @@
 // script never reads or reports fleet state: counts captured before a
 // twenty-minute hold and printed after it are a stale verdict, and a stale
 // verdict is how a reconcile prints an ACTION nobody can take. The controller
-// runs fleet-tick itself at wake time, which reads the run as it stands then.
+// runs `fleet-event.mjs heartbeat` itself at wake time, which ticks and so reads the run as it stands then.
 // It also makes a late hold harmless: if a member reports at minute two and
 // the controller acts, the hold that fires afterwards is a free extra tick.
 //
@@ -277,7 +277,7 @@ function main() {
   // on every hold until the file is repaired.
   const skippedNote = now.degraded ? " — the heartbeat file is degraded and was left as it is, so interval progress is not kept and every hold fires" : "";
   console.log(done
-    ? `heartbeat: held ${held}s, ${target}s interval elapsed (quiet=${state.quiet}) → run fleet-tick${skippedNote}`
+    ? `heartbeat: held ${held}s, ${target}s interval elapsed (quiet=${state.quiet}) → run fleet-event.mjs heartbeat${skippedNote}`
     : `heartbeat: held ${held}s, ${target - elapsed}s of ${target}s remain (quiet=${state.quiet}) → re-issue this command now, do not end your turn`);
 }
 
