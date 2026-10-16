@@ -70,6 +70,7 @@ retired and the new ledger holds it bare. The #3082 amendment's "The tick
 never reads the section" is corrected: the tick reads it to account for a
 transcript in the session directory, and now also refuses a malformed line
 there; a ticket an earlier run worked is still not `claimed` by it.
+Amended by #3036: lstart is a start identity, not a printed time: ps lstart on macOS, "<boot_id> <start ticks>" on Linux, where ps lstart drifts with every wall-clock step.
 
 ## Context
 

@@ -55,6 +55,10 @@
           {
             "context": "install-and-smoke",
             "integration_id": 15368
+          },
+          {
+            "context": "proc-macos",
+            "integration_id": 15368
           }
         ]
       }

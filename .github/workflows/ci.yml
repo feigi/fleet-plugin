@@ -276,6 +276,24 @@ jobs:
           shopt -s failglob
           node --test tests/*.test.mjs
 
+  # The controller record's start identity is read from procfs on Linux and
+  # from `ps` on macOS: ADR 0009 Decision 3's second macOS/Linux divergence.
+  # This job runs tests/proc.test.mjs alone on macOS, so each reader is
+  # measured on the platform that uses it.
+  proc-macos:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      # Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      - name: Process-source tests
+        run: node --test tests/proc.test.mjs
+
   # #1314's ruling, #1293's findings on what "loaded" can mean headlessly,
   # ADR 0021's native route: links this checkout with `omp plugin link` and
   # asserts commands via substitution (bare names), agents and skills by
