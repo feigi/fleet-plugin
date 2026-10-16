@@ -165,7 +165,7 @@ instead of a quiet one. A guard that drops an unreadable probe — `[ -n "$json"
 empty and `[ "" -eq 0 ]` passes. A bot's merge gate opened without ever reading
 an exit code.
 
-**`status` is a READ-ONLY variable in zsh**, an alias for `$?`. See references/shell-traps.md.
+**`status` is a READ-ONLY variable in zsh**, an alias for `$?`. Name the variable anything else (`ci_status`). See references/shell-traps.md.
 
 **The other deliberate copy is `env $cfg sh ./probe.sh`.** The first trap's
 mechanism bites argv as well as loops, and that instance stays written out in the
@@ -1333,7 +1333,7 @@ event reads as unknown-behind. Call it **without `--quiet`** — that flag drops
 A monitor event is a wake-up, never a verdict; members re-query at labelling
 time. See references/ci-and-staleness.md.
 
-**A conclusion is not stable, even for a fixed run id on an unchanged head.** See references/ci-and-staleness.md.
+**A conclusion is not stable, even for a fixed run id on an unchanged head.** Never cache a conclusion, and test any fallback you write against `""`, `null` AND a real conclusion. See references/ci-and-staleness.md.
 
 **A probe that cannot read is a transition event, not silence.** The natural
 watcher shape — `st=$(ci-state.mjs --pr "$pr" 2>/dev/null) || continue` — fails
@@ -1461,7 +1461,8 @@ line — total silence per tick, which is exactly what this section exists to
 remove. Capture its status (`prs=$(…) || prs=ERR`), latch it globally, and fall
 through to the same tail sleep. **Then iterate with the inline `$(printf '%s\n'
 "$prs")` form, never a bare `for pr in $prs`** — the assigned-variable trap in
-**Shell traps** above, which carries the mechanism and the measurements. It
+**Shell traps**, which carries the mechanism, with its measurements in
+references/shell-traps.md. It
 applies to **every** loop in this block, the `blind`-latch removal included:
 under a bare `for b in $blind` a recovered PR never leaves the list and the block
 emits a fresh RECOVERED every tick thereafter — the per-tick volume the latch
@@ -2142,14 +2143,16 @@ doesn't already cover.
 **The shell traps live in the merge bot's agent body, not in its brief and not
 in a follow-up message.** A bot already looping cannot be corrected — the loop
 consumes the turns a correction would land in — so
-`agents/fleet-merge-bot.agent.md` carries **every entry in Shell traps**, copied
-from that section, and the bot has them before its first turn. The bot reads an
-exit code off `gh pr update-branch`, `merge-gate.mjs` and `prove-merge.sh`,
-which is the `PIPESTATUS` and read-only-`status` pair, and its grace poll
-captures `gh pr list` output and loops over it, which is the assigned-variable
-trap. Its brief names the bot and `<scratch>`, plus the one-line
-no-acknowledgement notice; do not paste the
-traps there. An edit to Shell traps lands in that body in the same change.
+`agents/fleet-merge-bot.agent.md` carries **every entry in Shell traps**, each
+written out in full: the rules in that section with the measurements from
+`references/shell-traps.md` beside them, and the bot has them before its first
+turn. The bot reads an exit code off `gh pr update-branch`, `merge-gate.mjs` and
+`prove-merge.sh`, which is the `PIPESTATUS` and read-only-`status` pair, and its
+grace poll captures `gh pr list` output and loops over it, which is the
+assigned-variable trap. Its brief names the bot and `<scratch>`, plus the
+one-line no-acknowledgement notice; do not paste the traps there. An edit to
+Shell traps or to `references/shell-traps.md` lands in that body in the same
+change.
 
 **Its merge gate is one script, run twice.** Step 3 of `run-merge-bot.md` is
 `merge-gate.mjs --pr <n> --pre <sha> [--post <sha>]`: read-only, it runs the

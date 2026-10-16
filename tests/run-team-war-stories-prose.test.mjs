@@ -107,7 +107,10 @@ const WATCHER_COMMENT_CLAUSE = "REST units per listed PR on top of the 200 floor
 // Each moved paragraph: the reference file it moved to; the heading it sits
 // under there; the rule clause SKILL.md kept, word for word from the paragraph,
 // with the pointer straight after it (null: the paragraph stated no rule); and
-// the paragraph's first sentence as the reference file says it.
+// the paragraph's first sentence as the reference file says it; and, where the
+// bold lead only describes and the imperative sentence went with the story, the
+// imperative SKILL.md keeps between the clause and the pointer, written for
+// SKILL.md rather than moved.
 const MOVED = [
   ["member-lifecycle.md", "A missing report is not evidence the member failed to send one", 'So when a report is missing, **ask by name — that is what the "unless the controller asks by name" clause is for — and do not attribute the gap to the member until it answers.**', "**But a missing report is NOT evidence the member failed to send one — the inbound direction drops AND delays messages.**"],
   ["member-lifecycle.md", "A missing report is not evidence the member failed to send one", "The ask is the controller's move, not the member's.", "Note this cuts against the paragraph above only in appearance: the default stays *send once*, because unprompted re-sends were measured 2-to-1 false."],
@@ -117,13 +120,13 @@ const MOVED = [
   ["shell-traps.md", "Word the rule against the first row", "**Word the rule against the first row.**", "A warning spelled *never `for x in $(…)`* names the safe form as the hazard,"],
   ["shell-traps.md", "The inline `$(printf …)` form splits on every whitespace character", "The inline `$(printf '%s\\n' \"$prs\")` form splits correctly too and is what Phase 3's block uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can.", "Measured on a two-line list whose first value is `two words`:"],
   ["shell-traps.md", "`</dev/null` every command inside a `while read` loop", "**`</dev/null` every command inside a `while read` loop.**", "The loop's stdin *is* the list, and any inner command that reads stdin eats the rest of it."],
-  ["shell-traps.md", "`status` is a read-only variable in zsh", "**`status` is a READ-ONLY variable in zsh**, an alias for `$?`.", "So the obvious bash idiom for reading the payload — `status=$(jq -r '.status' ci.json)` — aborts with `read-only variable: status`."],
+  ["shell-traps.md", "`status` is a read-only variable in zsh", "**`status` is a READ-ONLY variable in zsh**, an alias for `$?`.", "So the obvious bash idiom for reading the payload — `status=$(jq -r '.status' ci.json)` — aborts with `read-only variable: status`.", "Name the variable anything else (`ci_status`)."],
   ["pull.md", "Every 5th Pull goes at an exploration cell", "**Every 5th Pull by ledger count goes at an exploration cell.**", "Count the `impl-` rows in `.fleet/ledger.md` at Pull time;"],
   ["pull.md", "The readout counts deliberate comparisons", "**The readout counts DELIBERATE comparisons.**", "An earlier rule asked only for a `session`+`role` carrying more than one distinct `model`,"],
   ["reviewers.md", "A sizing verdict is a measurement only if it post-dates the run that produced it", "**A verdict is a measurement only if it post-dates the run that produced it.**", "A `Sizing:` line typed in before the skill ever ran is byte-identical to one the skill produced,"],
   ["pull.md", "Why the implementer body carries enumerate-and-declare", "Why the agent body carries what it does — read this before editing any `fleet-implementer-<cell>` file, and keep every cell's body byte-identical.", "**Enumerate-and-declare** answers a signature measured four times in one run:"],
   ["ci-and-staleness.md", "Beat when there is nothing to do, and never end your turn on a drained queue", "**Beat when there is nothing to do, and never end your turn on a drained queue.**", "You cannot be woken."],
-  ["ci-and-staleness.md", "A conclusion is not stable, even for a fixed run id on an unchanged head", "**A conclusion is not stable, even for a fixed run id on an unchanged head.**", "**Building that key with jq's `//` is the same bug in the opposite direction**:"],
+  ["ci-and-staleness.md", "A conclusion is not stable, even for a fixed run id on an unchanged head", "**A conclusion is not stable, even for a fixed run id on an unchanged head.**", "**Building that key with jq's `//` is the same bug in the opposite direction**:", "Never cache a conclusion, and test any fallback you write against `\"\"`, `null` AND a real conclusion."],
   // A code comment in the watcher block: its measured sentence moved, the code stayed.
   ["ci-watcher.md", "The pass is budgeted at 4 core REST units per listed PR", WATCHER_COMMENT_CLAUSE, "The 4 is the measured ceiling of one ci-state.mjs call on the counter `gh api rate_limit` reports,"],
   ["ci-watcher.md", "One gate, not a gate plus a caveat", "**One gate, not a gate plus a caveat.**", "`jq -e '.verdict and .verdict != \"rate-limited\"'` exits non-zero on unparseable input *and* on a false result,"],
@@ -205,14 +208,15 @@ test("the fixture is the removed text: from the first Measured paragraph to the 
 
 const keptCount = (text, clause, file) => (text.match(new RegExp(Pin.phrase(`${clause} See references/${file}`).source, "g")) ?? []).length;
 
-for (const [file, heading, clause, opening] of MOVED) {
+for (const [file, heading, clause, opening, imperative] of MOVED) {
   test(`references/${file} carries the paragraph under "## ${heading}"`, () => {
     const slice = Pin.file(join(REFERENCES, file)).section(`## ${heading}`, `references/${file}`).text;
     assert.match(slice, Pin.phrase(opening), `${file}'s "${heading}" section lost: ${opening}`);
   });
   if (clause === null) continue;
-  test(`SKILL.md keeps "${clause.slice(0, 60)}…" with See references/${file} beside it`, () => {
-    assert.equal(keptCount(SKILL, clause, file), 1);
+  const kept = imperative === undefined ? clause : `${clause} ${imperative}`;
+  test(`SKILL.md keeps "${kept.slice(0, 60)}…" with See references/${file} beside it`, () => {
+    assert.equal(keptCount(SKILL, kept, file), 1);
   });
 }
 
