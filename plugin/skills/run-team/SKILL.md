@@ -1233,7 +1233,8 @@ depth** guard table applied in code. Act on each line as it reads:
   stops, closes or merges.
 - `HOLD (…)` — the row is held and says why: draining, a tier mismatch, an
   unchecked tier, the In-flight bound reached (`HOLD (in-flight <n>/<B>)` —
-  nothing to do: a merge brings n below B), or every
+  nothing to do unless its detail names a replacement to dispatch, else a
+  merge brings n below B), or every
   queued merge candidate held behind a lower PR or on a conflict hold no
   fix-applier has cleared. An unchecked tier is `tick --apply`'s to check, and
   the hold stays while the check writes no verdict (its `tier-ok=`, or
@@ -1339,10 +1340,8 @@ phase 2's own step, run by `tick --apply`: a mismatch it finds is the
 the `HOLD (tier unchecked impl-<N>)`. Nothing else in the loop owns it.
 
 **`--in-flight <B>`** is the run's In-flight bound: leave it at its default
-unless `$ARGUMENTS` set it. omp's `task.maxConcurrency` is not the bound — it
-counts live members, not tickets, queues at its ceiling rather than refusing,
-and is session-wide — so phase 0 reports it below 2·B+2 as a notice, never a
-hold, and the fleet never writes it.
+unless `$ARGUMENTS` set it. omp's `task.maxConcurrency` is not the bound
+(**Phase 2** gives the reasons) — below 2·B+2 it is a notice, never a hold.
 
 **Why every wake.** A merge cascade is a firehose of merges, CI greens and
 rebases that holds your attention on the merge side while the implementer side

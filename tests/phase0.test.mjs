@@ -249,6 +249,7 @@ test("every flag reaches the step that owns it", () => {
   assert.equal(r.status, 0, r.err);
   const receipt = f.receipt();
   assert.deepEqual(f.calls("instruments")[0].args, ["--pin", "--audit", plugin]);
+  assert.deepEqual(f.calls("tier-roles")[0].args, ["--check", "--in-flight", "3"], "--in-flight reaches tier-roles, the step that owns it");
   assert.deepEqual(f.calls("preflight")[0].args, [], "preflight.mjs takes no arguments, so the CI flag is recorded and never passed");
   assert.match(receipt.steps.preflight.output, /CI: workflow CI/);
   for (let i = 0; i < 40 && f.calls("board").length === 0; i++) wait(100);
