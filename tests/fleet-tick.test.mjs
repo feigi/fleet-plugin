@@ -4457,7 +4457,7 @@ const reportTick = (files, { receipt = true, args = () => [], fixture = {} } = {
 };
 const reportLinesOf = (stdout) => stdout.split("\n").filter((l) => /^(?:SETTLE|REPORT-MISMATCH|REPORT-UNREADABLE|REPORT-INVALID) /.test(l));
 const settleLine = (member, age, reportsFrom = "") => `SETTLE ${member} (report on disk since ${age}m — ledger.mjs settle ${member} --from-report${reportsFrom && ` --reports ${reportsFrom}`})`;
-const NO_SCRATCH = "fleet-tick: report files not checked — no scratch in the phase-0 receipt and no --scratch";
+const NO_SCRATCH = "fleet-tick: report files and Pull records not checked — no scratch in the phase-0 receipt and no --scratch";
 
 test("CLI: a live token with a report file prints SETTLE above the rows; a settled token with a file, a live token without one and an in-flight review runner with one print nothing; rows, quiet and the ledger are untouched", () => {
   const r = reportTick({
@@ -4475,7 +4475,7 @@ test("CLI: a live token with a report file prints SETTLE above the rows; a settl
     assert.ok(out.findIndex((l) => l.startsWith("SETTLE ")) < out.findIndex((l) => /^implementers /.test(l)), "printed above the rows");
     // The same live tokens with no file on disk: nothing.
     assert.deepEqual(reportLinesOf(bare.stdout), []);
-    assert.doesNotMatch(r.stderr + bare.stderr, /report files not checked/);
+    assert.doesNotMatch(r.stderr + bare.stderr, /Pull records not checked/);
     // Advice, never a row: the rest of the output and the quiet streak are the
     // same either way, and the ledger is never written.
     const withoutReports = (s) => s.split("\n").filter((l) => !l.startsWith("SETTLE ")).join("\n");
@@ -4547,7 +4547,7 @@ test("CLI: with no scratch in the receipt the tick reads --scratch and its SETTL
       assert.equal(r.status, 0, r.stderr);
       return {
         lines: reportLinesOf(r.stdout).map((l) => l.replaceAll(root, "<root>")),
-        skipped: r.stderr.split("\n").filter((l) => /report files not checked/.test(l)),
+        skipped: r.stderr.split("\n").filter((l) => /Pull records not checked/.test(l)),
       };
     } finally {
       rmSync(r.dir, { recursive: true, force: true });
@@ -4940,6 +4940,13 @@ test("implementers: a head whose Pull dispatched prints the row it is missing, n
   assert.equal(row(null), "PULL #7 (dispatched, row missing — ledger.mjs row 7 …)");
 });
 
+test("implementers: a head whose Pull ended in this run takes no slot, the next head fills it, and with no head left the row is the idle one", () => {
+  const ended = { kind: "ended" };
+  assert.deepEqual(pullActions(state({ bound: 3, inFlight: 1, heads: [5, 6, 7], pulls: new Map([[5, ended]]) })),
+    ["PULL #6 — pull.mjs next --head 6", "PULL #7 — pull.mjs next --head 7"]);
+  assert.deepEqual(pullActions(state({ heads: [5, 6], pulls: new Map([[5, ended], [6, ended]]) })), ["SUGGEST /triage, hold idle"]);
+});
+
 test("implementers: a Pull record changes no hold — the bound, the tier holds and draining still print one HOLD row", () => {
   const pulls = new Map([[1, { kind: "pending", qid: "decided", stale: true }]]);
   for (const over of [{ inFlight: 5 }, { draining: "x" }, { tierMismatch: ["impl-4"] }, { tierUnchecked: ["impl-4"] }, { phase0: { held: true, line: "x", session: null } }]) {
@@ -4961,14 +4968,28 @@ test("pullOf: a dispatched record carries the text its own ledger.mjs row wrote,
   const earlier = { ...ROW_COMMAND, cmd: ["ledger.mjs", "row", "7", "impl-7"] };
   assert.deepEqual(pullOf(dispatchedRecord(7, [earlier, ROW_COMMAND, failed]), pullOpts()), { kind: "dispatched", text: "impl-7 · tier=task-high" });
   assert.deepEqual(pullOf(dispatchedRecord(7, []), pullOpts()), { kind: "dispatched", text: null });
+  const claim = { ...ROW_COMMAND, step: "claim", cmd: ["claim-ticket.sh", "7", "impl-7", "implementer"] };
+  assert.deepEqual(pullOf(dispatchedRecord(7, [ROW_COMMAND, claim]), pullOpts()), { kind: "dispatched", text: "impl-7 · tier=task-high" }, "a later command of another step is no row");
+  const odd = { ...ROW_COMMAND, cmd: ["ledger.mjs", "row", "7", 42] };
+  assert.deepEqual(pullOf(dispatchedRecord(7, [odd]), pullOpts()), { kind: "dispatched", text: null }, "a row command whose fourth word is no string wrote no text");
 });
 
-test("pullOf: no record of this run's in progress is the fresh row — another session's, an ended one, one between steps, not a record", () => {
+test("pullOf: no record of this run's in progress is the fresh row — another session's, one between steps, not a record", () => {
   assert.equal(pullOf(pendingOn(7, "decided", { session: "/another" }), pullOpts()), null, "pull.mjs starts another run's record afresh");
   assert.equal(pullOf(dispatchedRecord(7), pullOpts({ session: "/another" })), null);
-  for (const status of ["left", "released"]) assert.equal(pullOf(pullRecord(7, { status }), pullOpts()), null, status);
+  for (const status of ["left", "released"]) assert.equal(pullOf(pullRecord(7, { status, session: "/another" }), pullOpts()), null, `another run's ${status} Pull is started over`);
   assert.equal(pullOf(pullRecord(7, { stage: "claim" }), pullOpts()), null, "a step that failed resumes with `next`, as the fresh row says");
   for (const junk of [null, [], "x", 3]) assert.equal(pullOf(junk, pullOpts()), null, JSON.stringify(junk));
+});
+
+test("pullOf: a Pull that left or was released in this run is ended, whatever question it still carries; only a running Pull is pending", () => {
+  for (const status of ["left", "released"]) {
+    assert.deepEqual(pullOf(pullRecord(7, { status }), pullOpts()), { kind: "ended" }, status);
+    assert.deepEqual(pullOf(pendingOn(7, "decided", { status }), pullOpts()), { kind: "ended" }, `${status} with a question recorded`);
+  }
+  assert.deepEqual(pullOf(pullRecord(7, { status: "left", session: "/any" }), pullOpts({ session: null })), { kind: "ended" }, "with no session in the receipt, pull.mjs skips an ended Pull of any session");
+  assert.deepEqual(pullOf(pendingOn(7, "decided", { status: "dispatched" }), pullOpts()), { kind: "dispatched", text: null }, "a dispatched Pull is not pending");
+  assert.equal(pullOf(pendingOn(7, "decided", { status: "unknown" }), pullOpts()), null, "only a running Pull is pending");
 });
 
 test("pullOf: with no session in the receipt, a record is read whatever session it names, as pull.mjs reads it", () => {
@@ -5043,14 +5064,24 @@ test("CLI: none of the PULL rows folds — a pending, a stale and a dispatched r
   }
 });
 
-test("CLI: a record the tick cannot use prints the fresh row — not JSON, another session's, an ended Pull — and the tick still exits 0", () => {
+test("CLI: a record the tick cannot use prints the fresh row — not JSON, another session's, another run's ended Pull — and the tick still exits 0", () => {
   const [t] = pullTicks({
     7: { text: "{not json" },
     8: { record: pendingOn(8, "decided", { session: "/another-run" }) },
-    9: { record: pullRecord(9, { status: "left", outcome: { exit: 1, reason: "taken" } }) },
+    9: { record: pullRecord(9, { status: "left", session: "/another-run", outcome: { exit: 1, reason: "taken" } }) },
   }, { heads: [7, 8, 9], args: ["--in-flight", "3"] });
   assert.equal(t.status, 0, t.stderr);
   assert.deepEqual(pullLines(t.stdout).map(actionOf), [7, 8, 9].map((n) => `PULL #${n} — pull.mjs next --head ${n}`));
+});
+
+test("CLI: a head whose Pull left or was released in this run takes no slot, and a head past the free slots is read for its own record when one fills it", () => {
+  const [t] = pullTicks({
+    7: { record: pullRecord(7, { status: "left", outcome: { exit: 1, reason: "taken" } }) },
+    8: { record: pullRecord(8, { status: "released", outcome: { exit: 2, reason: "router refused" } }) },
+    10: { record: pendingOn(10, "close"), agoMin: 1 },
+  }, { heads: [7, 8, 9, 10, 11], args: ["--in-flight", "2"] });
+  assert.equal(t.status, 0, t.stderr);
+  assert.deepEqual(pullLines(t.stdout).map(actionOf), ["PULL #9 — pull.mjs next --head 9", "PULL #10 (Q1b pending — pull.mjs answer 10 close …)"]);
 });
 
 test("CLI: the records are read under --scratch when the receipt names no scratch root, and the receipt's root wins when it does", () => {
@@ -5070,4 +5101,11 @@ test("CLI: the records are read under --scratch when the receipt names no scratc
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("CLI: a receipt whose session is empty names no session, so a record is read whatever session it carries", () => {
+  const [t] = pullTicks({ 7: { record: pendingOn(7, "decided", { session: "/any" }) } },
+    { heads: [7], receipt: (root) => (r) => ({ ...r, scratch: root, session: "" }) });
+  assert.equal(t.status, 0, t.stderr);
+  assert.deepEqual(pullLines(t.stdout).map(actionOf), ["PULL #7 (Q2 pending — pull.mjs answer 7 decided …)"]);
 });

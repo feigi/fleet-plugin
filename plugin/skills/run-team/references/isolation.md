@@ -1,6 +1,6 @@
 # Isolation: filesystem vs stack
 
-Why isolation envelope file not briefing, why private filesystem not private stack. Assertions these justify live in SKILL.md Phase 1 + Guards sections; evidence here.
+Why isolation envelope file not briefing, why private filesystem not private stack. Assertions these justify live in references/pull.md Claiming section and SKILL.md Guards section; evidence here.
 
 ## Materialize the isolation envelope as a file, not a briefing
 

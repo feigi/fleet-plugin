@@ -396,6 +396,11 @@ Pull, and each head a free slot Pulls gets its own row, read off that head's
 | `… (stale)` appended | that question has stood longer than `--pull-stale-minutes` (120 by default) |
 | `PULL #N (dispatched, row missing — ledger.mjs row N "…")` | dispatched, yet the head holds no `impl-` row: write the row it names |
 
+A head whose Pull already ended in this run — the ticket left, or the router
+refused it and its claim was released — gets no row: `next` without `--head`
+skips it, `next --head <N>` would start the ticket over, and the next head
+fills the slot.
+
 **The questions**, each answered with `pull.mjs answer <N> <qid> <token> …`:
 
 1. **`staleness` (Q1)** — `gone --path <p> [--] <string>`, the string the fix
@@ -2046,7 +2051,7 @@ substituting `<testCmd>` with nothing leaves it no gate at all.
 **Where `<branch>` comes from:** the PR's head branch —
 `gh pr view <N> --json headRefName -q .headRefName`, or the same branch you cut
 the worktree from. Pass it as `--branch`, because
-the member cannot read it off git: phase 1 creates an already-open PR's worktree
+the member cannot read it off git: references/isolation.md creates an already-open PR's worktree
 with `--detach`, and there `git branch --show-current` prints nothing and exits 0
 (measured 2026-09-18, git 2.50.1), so `git push origin
 "HEAD:$(git branch --show-current)"` exits 128 on `fatal: invalid refspec
@@ -2267,7 +2272,7 @@ refuses a finisher brief rendered without it.
    to the fleet's worktree home, so a tree under `<scratch>` is a `kept` entry
    it reports and never collects. No claim built the tree you added, so it has
    `./agent-test` only if the repository tracks one — run that or `<testCmd>`
-   in it, per **A reused worktree may lack the runner** above.
+   in it, per `references/isolation.md`, **A reused worktree may lack the runner**.
 
    **None of this licenses a write to the owned worktree.** Duty 1 is a read;
    you never restore that tree, because you never wrote to it. A controller

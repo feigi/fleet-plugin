@@ -202,8 +202,8 @@ terminating in exactly one dispatch or an empty shortlist:
    says what each argument is); then `ledger.mjs row <N> "impl-<N>[ · tier=<CELL>][ · route=<REASON>]"`,
    `tier=<CELL>` exactly when `DRAW` is not `-`; then phase 2 at once: claim
    what you are about to dispatch; dispatch what you have just claimed. Router
-   exit 2 → no row and no dispatch: release the claim (`release-ticket.sh`,
-   below) and emit an event, a probe that could not look — a table the router
+   exit 2 → no row and no dispatch: release the claim (`release-ticket.sh`, SKILL.md's
+   **Release the claims that never became PRs**) and emit an event, a probe that could not look — a table the router
    refuses refuses every Pull.
 
 **The Pull table** — every verdict a Pull can reach, and the one thing each

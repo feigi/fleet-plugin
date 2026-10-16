@@ -103,14 +103,17 @@
 //             report schema and files none, so no `review=` token is looked
 //             up; a member with no schema is never checked against one.
 //   pulls     `<scratch>/impl-<N>/pull.json`, pull.mjs's record of a Pull, for
-//             each head a PULL row names, `<scratch>` as for the report
+//             every head on the shortlist, `<scratch>` as for the report
 //             files. A question standing prints `PULL #<N> (Q<n> pending —
 //             pull.mjs answer <N> <qid> …)` in place of the fresh row, with
 //             ` (stale)` once the file is older than `--pull-stale-minutes`; a
 //             Pull that dispatched with the head still holding no `impl-` row
-//             prints `(dispatched, row missing — ledger.mjs row …)`. A record
-//             from another phase-0 session, or one that ended, unreadable or
-//             absent, is the fresh row: `pull.mjs next` starts or resumes it.
+//             prints `(dispatched, row missing — ledger.mjs row …)`. A Pull
+//             that ended in this run's session (the ticket left, or its claim
+//             was released) names no row: `pull.mjs next` skips it, `next
+//             --head` would start the ticket over, so the next head fills the
+//             slot. A record from another phase-0 session, or one unreadable
+//             or absent, is the fresh row: `pull.mjs next` starts or resumes it.
 //   session   The listing of the session directory omp writes one
 //             `<member>.jsonl` transcript into per dispatched member: this
 //             run's phase-0 receipt's `session`, else `--session`; with
@@ -240,14 +243,18 @@ const QUESTION_NUMBERS = { staleness: "Q1", close: "Q1b", decided: "Q2", collisi
  * Where a head's Pull stands, off its `pull.json` record as parsed, for the
  * PULL row: `{kind: "pending", qid, stale}`, `{kind: "dispatched", text}` with
  * the text the Pull's own `ledger.mjs row` wrote (null when it recorded none),
- * or null for the fresh row. `since` is the file's mtime and `session` this
- * run's phase-0 session, null when the receipt names none.
+ * `{kind: "ended"}` for a Pull that left or was released, or null for the
+ * fresh row. `since` is the file's mtime and `session` this run's phase-0
+ * session, null when the receipt names none.
  */
 export function pullOf(record, { session, since, now, staleMinutes }) {
   if (record === null || typeof record !== "object" || Array.isArray(record)) return null;
   // pull.mjs ends a record from another phase-0 session whatever it says, and
   // starts the ticket afresh.
   if (session !== null && record.session !== session) return null;
+  // pull.mjs's `next` skips a Pull that ended in this run, and `next --head`
+  // would start the ticket over: the head is no one for a PULL row to name.
+  if (record.status === "left" || record.status === "released") return { kind: "ended" };
   if (record.status === "running" && typeof record.pending?.qid === "string") {
     return { kind: "pending", qid: record.pending.qid, stale: now - since > staleMinutes * 60_000 };
   }
@@ -316,9 +323,12 @@ function implementers(s) {
     return s.owedCounted.length ? row(hold, { acts: true, extra: replaceStep(s.owedCounted, s.implNames) }) : row(hold);
   }
 
-  if (s.heads.length) return s.heads.slice(0, s.bound - s.inFlight).map((n) => one(pullAction(n, s.pulls?.get(n)), { acts: true }));
+  // A head whose Pull ended in this run takes no slot: the next head does.
+  const pullable = s.heads.filter((n) => s.pulls?.get(n)?.kind !== "ended");
+  if (pullable.length) return pullable.slice(0, s.bound - s.inFlight).map((n) => one(pullAction(n, s.pulls?.get(n)), { acts: true }));
 
-  // Nothing unclaimed even after a refresh. `SUGGEST /triage` asks a
+  // Nothing to Pull even after a refresh: no unclaimed head, or only heads
+  // whose Pull ended in this run, which `pull.mjs next` skips. `SUGGEST /triage` asks a
   // MAINTAINER to tick tickets, and on the unattended night the heartbeat
   // exists for there is nobody to ask — so it prints (the fold shows it once)
   // but is not actionable, or it would pin the interval at the base all night.
@@ -2050,13 +2060,14 @@ function main() {
 
   // The scratch root of the report files and the Pull records alike.
   const scratch = reportsScratch(receipt, scratchFlag);
-  if (scratch === null) console.error(`${NAME}: report files not checked — no scratch in the phase-0 receipt and no --scratch`);
-  // The heads a PULL row names, each with its Pull record read: the session it
-  // is judged against is the receipt's, as pull.mjs judges it.
-  const pulled = heads.slice(0, Math.max(0, caps.bound - run.inFlight));
+  if (scratch === null) console.error(`${NAME}: report files and Pull records not checked — no scratch in the phase-0 receipt and no --scratch`);
+  // Each head's Pull record read, not only the heads a free slot names: a head
+  // whose Pull ended gives its slot to the next, so the heads past the slots
+  // can fill one. The session it is judged against is the receipt's, as
+  // pull.mjs judges it.
   const runSession = receipt.read.state === "ok" && receipt.read.receipt.session !== "" ? receipt.read.receipt.session : null;
   const pulls = scratch === null ? new Map()
-    : readPulls(scratch.root, pulled, { session: runSession, now: Date.now(), staleMinutes: pullStaleMinutes });
+    : readPulls(scratch.root, heads, { session: runSession, now: Date.now(), staleMinutes: pullStaleMinutes });
   const rows = reconcile({
     ...caps, ...run, heads, supply, dropped, shortlistStatus: current.status, refresh: fresh, mainCheckout, phase0, router, pulls,
   });
