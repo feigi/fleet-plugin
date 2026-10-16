@@ -6,7 +6,7 @@
 #
 # The claim is branch `<type>/<issue>-<slug>` and worktree
 # `.worktrees/<issue>-<slug>`. The fleet always calls it as
-# `claim-ticket.sh <N> impl-<N> implementer` (run-team SKILL.md, **Claiming**),
+# `claim-ticket.sh <N> impl-<N> implementer` (run-team references/pull.md, **Claiming**),
 # giving `implementer/<N>-impl-<N>` and `.worktrees/<N>-impl-<N>`, and releases
 # with the same pair through release-ticket.sh. <slug> and <type> are
 # free text — neither derived nor validated here — so a caller outside the fleet

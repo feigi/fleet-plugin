@@ -68,6 +68,11 @@ import { Pin } from "./support/prose-pin.mjs";
 
 const SKILL = "skills/run-team/SKILL.md";
 const text = Pin.file(join(import.meta.dirname, "..", "plugin", ...SKILL.split("/")));
+// The usage paragraph and the prompt paragraph moved from phases 1 and 2 into
+// the Pull reference file; the verdict table stayed in phase 1, under the
+// `staleness` question.
+const PULL = "skills/run-team/references/pull.md";
+const pull = Pin.file(join(import.meta.dirname, "..", "plugin", ...PULL.split("/")));
 
 const USAGE = "**`staleness.mjs` runs that check";
 const TABLE = "| Exit | Verdict |";
@@ -100,7 +105,7 @@ const VERDICT_ROWS = [
 
 test(`${SKILL} keeps the invocation on the flag \`staleness.mjs\` actually accepts`, () => {
   assert.match(
-    text.paragraph(USAGE, SKILL, "A needle that itself starts with").text,
+    pull.paragraph(USAGE, PULL, "A needle that itself starts with").text,
     Pin.phrase(INVOCATION),
     `${SKILL} no longer spells the invocation "${INVOCATION}". A reader who copies a flag the script does not accept gets \`staleness: --path <path> is required\` at exit 2 — a could-not-check indistinguishable from a real one, which the table below then says to admit and annotate. Restore it, or re-anchor INVOCATION in this file to the new wording.`,
   );
@@ -108,7 +113,7 @@ test(`${SKILL} keeps the invocation on the flag \`staleness.mjs\` actually accep
 
 test(`${SKILL} keeps \`--gone\` and \`--present\` bound to the direction each one means`, () => {
   assert.match(
-    text.paragraph(USAGE, SKILL, "A needle that itself starts with").text,
+    pull.paragraph(USAGE, PULL, "A needle that itself starts with").text,
     Pin.phrase(DIRECTIONS),
     `${SKILL} no longer says "${DIRECTIONS}". The direction is not recoverable from the needle itself, so a reader who loses this gloss picks a flag by guess and the wrong one answers the OPPOSITE verdict with full confidence — a live defect reported fixed, or a fixed one reported live. Restore it, or re-anchor DIRECTIONS in this file to the new wording.`,
   );
@@ -116,7 +121,7 @@ test(`${SKILL} keeps \`--gone\` and \`--present\` bound to the direction each on
 
 test(`${SKILL} keeps the probe to exactly one direction per invocation`, () => {
   assert.match(
-    text.paragraph(USAGE, SKILL, "A needle that itself starts with").text,
+    pull.paragraph(USAGE, PULL, "A needle that itself starts with").text,
     Pin.phrase(EXACTLY_ONE),
     `${SKILL} no longer says "${EXACTLY_ONE}". Without it the usage block reads as if both flags may be passed together, which no verdict in the table below describes. Restore it, or re-anchor EXACTLY_ONE in this file to the new wording.`,
   );
@@ -125,7 +130,7 @@ test(`${SKILL} keeps the probe to exactly one direction per invocation`, () => {
 for (const [code, row] of VERDICT_ROWS) {
   test(`${SKILL} keeps exit ${code}'s verdict bound to what it does at the Pull`, () => {
     assert.match(
-      text.paragraph(TABLE, SKILL, "The third value is the one").text,
+      text.paragraph(TABLE, SKILL, "2. **`close` (Q1b)**").text,
       Pin.phrase(row),
       `${SKILL}'s exit-code table no longer carries "${row}". A verdict whose supply action drifts is worse than a missing one: the reader still acts, on the wrong instruction. Restore the row, or re-anchor VERDICT_ROWS in this file to the new wording.`,
     );
@@ -134,7 +139,7 @@ for (const [code, row] of VERDICT_ROWS) {
 
 test(`${SKILL} makes a \`could not check\` ticket reach its member annotated as one`, () => {
   assert.match(
-    text.paragraph(SURVIVORS, SKILL, "**The prompt pastes the Pull's own").text,
+    pull.paragraph(SURVIVORS, PULL, Pin.END).text,
     Pin.phrase(ANNOTATE),
     `${SKILL} no longer says "${ANNOTATE}". The dispatch prompt is where the third value has to land — a probe that could not look answers exactly like one that looked and found nothing, so a ticket dispatched without the verdict reads to its member as one the probe checked and found live, which is the collapse into a neighbour that the third value exists to prevent. Restore it, or re-anchor ANNOTATE in this file to the new wording.`,
   );

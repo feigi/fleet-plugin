@@ -27,13 +27,15 @@ import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+// The Pull table moved from phase 1 into references/pull.md; phase 1's exit
+// table is the script's.
+const PULL_MD = Pin.file(join(REPO, "skills", "run-team", "references", "pull.md"));
 
 const pullTable = () =>
-  RUN_TEAM.between(
+  PULL_MD.between(
     "**The Pull table**",
     "**The shortlist runs out",
-    "run-team/SKILL.md Pull table",
+    "references/pull.md Pull table",
   ).text;
 
 test("run-team/SKILL.md: the Pull table ties each relabel cause to its own label", () => {

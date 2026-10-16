@@ -41,11 +41,12 @@ import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const read = (...p) => Pin.file(join(REPO, ...p));
-const RUN_TEAM = read("skills", "run-team", "SKILL.md");
+// Phase 1's step paragraphs moved into references/pull.md.
+const PULL_MD = read("skills", "run-team", "references", "pull.md");
 const NEXT_TICKET = read("skills", "next-ticket", "SKILL.md");
 
 const step = () =>
-  RUN_TEAM.between("**In-flight check, again**", "**Read the ticket in full, once**", "run-team/SKILL.md phase 1 Pull step 2").text;
+  PULL_MD.between("**In-flight check, again**", "**Read the ticket in full, once**", "run-team references/pull.md Pull step 2").text;
 
 test("the in-flight step names exit 2 and refuses to read it as free", () => {
   assert.match(step(), Pin.phrase("Exit 2 is not free"));

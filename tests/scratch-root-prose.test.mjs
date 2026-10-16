@@ -40,10 +40,12 @@ test("run-team names scratch-root.mjs where it first defines <scratch>, and in e
   const skill = flat(read("skills", "run-team", "SKILL.md"));
   // The recipe deriver's dispatch paragraph moved to the phase-0 reference file.
   const phase0 = flat(read("skills", "run-team", "references", "phase-0.md"));
+  // The implementer's prompt paragraph moved with phase 2's mechanical half to the Pull reference file.
+  const pull = flat(read("skills", "run-team", "references", "pull.md"));
   assert.match(skill, /\*\*The scratch root is computed, never invented and never recorded\.\*\*/);
   for (const [what, doc, file, needle] of [
     ["recipe deriver", phase0, "references/phase-0.md", "`<scratch>` is the absolute path `scratch-root.mjs` prints"],
-    ["implementer", skill, "SKILL.md", "`<scratch>` as `scratch-root.mjs` printed it"],
+    ["implementer", pull, "references/pull.md", "`<scratch>` as `scratch-root.mjs` printed it"],
     ["review runner", skill, "SKILL.md", "the absolute path `scratch-root.mjs` prints, never the review side's"],
     ["fix-applier", skill, "SKILL.md", "Every `<scratch>` in that brief is the absolute path `scratch-root.mjs` printed"],
     ["finisher", skill, "SKILL.md", "`<scratch>` is the absolute root your dispatch prompt names"],

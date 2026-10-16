@@ -16,6 +16,8 @@ import { Pin } from "./support/prose-pin.mjs";
 // are what notices.
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+// Phase 1's step paragraphs moved into references/pull.md.
+const PULL_MD = Pin.file(join(REPO, "skills", "run-team", "references", "pull.md"));
 
 // Paragraph-tight, and deliberately NARROWER than the dispatch slice in
 // implementer-model-tier.test.mjs: widened to the phase, the tier-guard
@@ -148,7 +150,7 @@ test("phase 2 counts the rate off the ledger's impl- rows, and a replacement doe
 // the draw's record — on a row exactly when the router drew. Written for a
 // row the router did not draw for, `ledger.mjs dispatch` would print a cell
 // nothing chose.
-const pullStep7 = () => RUN_TEAM.between("7. **Route, row, then dispatch**", "**The Pull table**", "run-team Pull step 7").text;
+const pullStep7 = () => PULL_MD.between("7. **Route, row, then dispatch**", "**The Pull table**", "run-team references/pull.md Pull step 7").text;
 
 test("Pull step 7 routes through ticket-router.mjs and writes tier= exactly when it drew", () => {
   const slice = pullStep7();
@@ -162,7 +164,7 @@ test("Pull step 7 routes through ticket-router.mjs and writes tier= exactly when
   assert.match(slice, /release\s+the\s+claim\s+\(`release-ticket\.sh`/, "step 7 no longer releases the claim on a router exit 2");
   // The Pull's one read is what the router reads: a second fetch would be a
   // second network call per Pull.
-  const step3 = RUN_TEAM.between("3. **Read the ticket in full, once**", "Record the ticket's real", "run-team Pull step 3").text;
+  const step3 = PULL_MD.between("3. **Read the ticket in full, once**", "Record the ticket's real", "run-team references/pull.md Pull step 3").text;
   assert.match(step3, /--json\s+title,body,comments,labels,createdAt`\s+written\s+to\s+`<scratch>\/impl-<N>\/issue\.json`/, "step 3 no longer writes the file the router reads");
 });
 

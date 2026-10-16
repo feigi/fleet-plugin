@@ -45,10 +45,14 @@ const outcomeParagraph = () =>
     "**Dispatch every implementer with the `agent`",
   ).text;
 
+// The relabel-safety paragraph and the Pull's step paragraphs moved from
+// phase 1 into references/pull.md; phase 1 states the check as the script's exit.
+const PULL_MD = Pin.file(join(REPO, "skills", "run-team", "references", "pull.md"));
+
 const relabelParagraph = () =>
-  RUN_TEAM.section("## Phase 1 — Pull: judge, then claim or relabel", "run-team/SKILL.md ## Phase 1").paragraph(
+  PULL_MD.section("## Relabels and exclusions", "references/pull.md ## Relabels and exclusions").paragraph(
     "A Pull never re-admits a ticket already relabelled.",
-    "run-team/SKILL.md Pull relabel-safety paragraph",
+    "references/pull.md Pull relabel-safety paragraph",
     "**Relabel by cause.** An unclaimed ticket",
   ).text;
 
@@ -159,6 +163,6 @@ test("run-team/SKILL.md: a Pull reads the ticket's labels and drops one that los
 // fetches — cross-checked against step 3's own invocation, the way #1591 once
 // cross-checked the pool's borrowed `candidates.mjs` call against phase 0's.
 test("run-team/SKILL.md: the Pull's full read fetches the labels the relabel check reads", () => {
-  const step3 = RUN_TEAM.between("3. **Read the ticket in full, once**", "One read answers every question", "run-team/SKILL.md Pull step 3").text;
+  const step3 = PULL_MD.between("3. **Read the ticket in full, once**", "One read answers every question", "references/pull.md Pull step 3").text;
   assert.match(step3, /gh\s+issue\s+view\s+<N>\s+--json\s+title,body,comments,labels/, "the Pull's full read no longer fetches `labels`, so the relabel check has nothing to read");
 });

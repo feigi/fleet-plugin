@@ -9,9 +9,9 @@
 // promises them promises every consumer something its runner does not do.
 //
 // The brief is pinned in both documents by one set, because the two are the
-// same brief written twice: run-team/SKILL.md's Phase 1 step and
-// references/isolation.md's rationale for it. A fix landing in only one leaves
-// whichever the reader reached still wrong.
+// same brief written twice: the Materialize paragraph phase 1 moved into
+// references/pull.md and references/isolation.md's rationale for it. A fix
+// landing in only one leaves whichever the reader reached still wrong.
 //
 // The runner used to be a tracked bootstrap that re-materialized itself from
 // `claim-ticket.sh` on every invocation; nothing emits a runner on request any
@@ -32,7 +32,7 @@ import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const read = (...p) => Pin.file(join(REPO, ...p));
-const RUN_TEAM = read("skills", "run-team", "SKILL.md");
+const PULL = read("skills", "run-team", "references", "pull.md");
 const ISOLATION = read("skills", "run-team", "references", "isolation.md");
 
 // A brief that promises the shim: a directory argument, or the refusal of one
@@ -45,8 +45,8 @@ const DIRECTORY_CLAUSE = /<file-or-dir>|expands? to the test files under it|one 
 const BOOTSTRAP_RUNNER = /--write-runner|\.agent-test\.sh|re-?materiali[sz]|#55\b/;
 
 const slices = [
-  ["run-team/SKILL.md", () =>
-    RUN_TEAM.between("Materialize the isolation envelope as a file", "A reused worktree may lack the runner", "run-team/SKILL.md").text],
+  ["references/pull.md", () =>
+    PULL.between("Materialize the isolation envelope as a file", "## Claim, record, render", "references/pull.md").text],
   ["references/isolation.md", () =>
     ISOLATION.section("## Materialize the isolation envelope as a file, not a briefing", "references/isolation.md").text],
 ];
@@ -84,8 +84,8 @@ for (const [name, slice] of slices) {
   });
 }
 
-test("run-team/SKILL.md says only a fresh claim writes the runner", () => {
-  const p = RUN_TEAM.paragraph("**A reused worktree may lack the runner.**", "run-team/SKILL.md reused-worktree runner paragraph", "**A reused worktree may also be").text;
+test("references/isolation.md says only a fresh claim writes the runner", () => {
+  const p = ISOLATION.paragraph("**A reused worktree may lack the runner.**", "references/isolation.md reused-worktree runner paragraph", "**A reused worktree may also be").text;
   assert.match(p, Pin.phrase("`claim-ticket.sh` writes `agent-test` only into the fresh worktree it claims"));
 });
 

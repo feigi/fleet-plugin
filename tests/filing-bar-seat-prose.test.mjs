@@ -54,10 +54,12 @@ const readRoot = (...p) => readFileSync(join(ROOT, ...p), "utf8");
 const flat = (s) => s.replace(/\s+/g, " ");
 
 const step5 = () => flat(REVIEW_AND_FIX.between("5. File each deferred finding", "\n6. Diff-check green", "review-and-fix step 5").text);
-// Bounded by the two phase-0 markers that bracket the note, never by the note
-// itself: anchoring on the sentence under test turns its deletion into a
-// slicing error rather than a failed assertion.
-const decidedNote = () => flat(RUN_TEAM.between("**Torn → surface, never guess**", "4. **Collision scan", "run-team phase 0 decided? note").text);
+// Bounded by the two markers that bracket the note, never by the note itself:
+// anchoring on the sentence under test turns its deletion into a slicing error
+// rather than a failed assertion. The note moved with the rest of phase 1's
+// step paragraphs into references/pull.md.
+const PULL_MD = read("skills", "run-team", "references", "pull.md");
+const decidedNote = () => flat(PULL_MD.between("It does not run a reproduction.", "4. **Collision scan", "references/pull.md decided? note").text);
 
 test("step 5 files every issue needs-triage, a confirmed defect with an open remedy included, with the evidence triage needs", () => {
   const s = step5();
