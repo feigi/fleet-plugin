@@ -439,13 +439,7 @@ test("every sentence of the pre-rewrite SKILL.md is in SKILL.md or across refere
 // --- the three blocks that moved whole ----------------------------------------
 
 const fixtureText = () => readFileSync(FIXTURE, "utf8");
-const cut = (text, from, to) => {
-  const at = text.indexOf(from);
-  assert.notEqual(at, -1, `the fixture lost: ${from}`);
-  const end = text.indexOf(to, at + from.length);
-  assert.notEqual(end, -1, `the fixture lost: ${to}`);
-  return text.slice(at, end);
-};
+const cut = (text, start, stop) => Pin.of(text, "the fixture").between(start, stop, "the moved block").text;
 // The two lines SKILL.md keeps word for word as its one-liner: already one line.
 const KEPT_VERBATIM = new Set(["A reviewer never reviews a PR it implemented.", "`AT CAP`, `IDLE OK` — nothing to do on that row."]);
 const MOVED_BLOCKS = [
