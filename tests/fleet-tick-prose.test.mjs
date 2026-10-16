@@ -384,6 +384,12 @@ test("the NO-TRANSCRIPT tick row names its remedy: make the task call, or settle
   assert.match(row, Pin.phrase("Both lines read the session directory this run's phase-0 receipt names, else `--session <dir>`; with neither the tick skips them with one stderr line."));
 });
 
+test("the NO-TRANSCRIPT tick row says a heartbeat file that cannot be used silences both age checks, and names the one stderr line the tick prints for it", () => {
+  const row = RUN_TEAM.bullet("- `NO-TRANSCRIPT <member> (live <age>m, no <session>/<member>.jsonl)`", "**Tier guards under Pull.**", "run-team NO-TRANSCRIPT row").text;
+  assert.match(row, Pin.phrase("neither `CHECK-LIVENESS` nor `NO-TRANSCRIPT` can fire."));
+  assert.match(row, Pin.phrase("The tick says so with one stderr line, `fleet-tick: CHECK-LIVENESS and NO-TRANSCRIPT not checked — <file> <cause>, so first-seen ages are unavailable`, naming only the checks that would have run that tick."));
+});
+
 test("ADR 0028's Status line records that the tick now reads the session directory's listing, and still no transcript's contents", () => {
   const adr = Pin.file(join(import.meta.dirname, "..", "docs", "adr", "0028-a-live-token-past-its-p99-points-the-controller-at-the-registry-census.md"));
   const status = adr.paragraph("**Status:**", "ADR 0028 Status line", "## Context").text;
