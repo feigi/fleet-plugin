@@ -34,10 +34,11 @@ import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+// Phase 1's step paragraphs moved into references/pull.md.
+const PULL_MD = Pin.file(join(REPO, "skills", "run-team", "references", "pull.md"));
 
 const step = () =>
-  RUN_TEAM.between("**In-flight check, again**", "**Read the ticket in full, once**", "run-team/SKILL.md phase 1 Pull step 2").text;
+  PULL_MD.between("**In-flight check, again**", "**Read the ticket in full, once**", "run-team references/pull.md Pull step 2").text;
 
 test("the in-flight step names the four branch-shaped claims the scan's probes look for", () => {
   assert.match(

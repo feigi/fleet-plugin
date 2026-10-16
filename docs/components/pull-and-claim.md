@@ -41,7 +41,12 @@ controller answers in one token with `pull.mjs answer`. State and every
 answer, with its time, are in `<scratch>/impl-<N>/pull.json`, so a
 process killed between answers resumes at the pending question. Exit 0
 prints the `DISPATCH` spec; exit 1 means the ticket left the Pull; a
-router that refuses releases the claim.
+router that refuses releases the claim. The tick reads that file for each
+head it names: a standing question prints `PULL #N (Q<n> pending —
+pull.mjs answer N <qid> …)` in place of `PULL #N — pull.mjs next --head
+N`, so a controller that lost its place never asks it twice. A head whose
+Pull already ended in this run names no row, since `next --head` would
+start that ticket over and the next head fills the slot.
 
 ## Opinionated choices
 

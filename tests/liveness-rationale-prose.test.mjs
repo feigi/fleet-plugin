@@ -45,7 +45,8 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 
-const SKILL = "skills/run-team/SKILL.md";
+// Moved with phase 1's step paragraphs into references/pull.md.
+const SKILL = "skills/run-team/references/pull.md";
 const ANCHOR = "**Both halves of that command are load-bearing.**";
 
 // The paragraph carrying the rule, and no more of the file than that. A missing

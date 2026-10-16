@@ -37,7 +37,8 @@ import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+// The reused-worktree paragraphs moved from phase 1 into references/isolation.md.
+const ISOLATION = Pin.file(join(REPO, "skills", "run-team", "references", "isolation.md"));
 
 // Starts inside this paragraph's own lead, not at the reused-runner paragraph
 // above it: the two are siblings and a slice spanning both lets the runner
@@ -46,7 +47,7 @@ const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 // sentence, because `between()` throws "update this test" when its anchor moves
 // — a rename of the anchor reds every test in this file at once, which is loud
 // but says nothing about which claim was lost. A shorter anchor is less of that.
-const slice = () => RUN_TEAM.between("on the wrong COMMIT", "## Phase 2", "run-team/SKILL.md phase 1").text;
+const slice = () => ISOLATION.between("on the wrong COMMIT", "## Filesystem isolation is not stack isolation", "run-team references/isolation.md reused worktree").text;
 
 // Narrower than `slice()`: just the verify + empty-read bullet, ending before
 // the headRefOid-read bullet starts. A presence-only pin on the compare
@@ -55,10 +56,10 @@ const slice = () => RUN_TEAM.between("on the wrong COMMIT", "## Phase 2", "run-t
 // bound is what lets a bare `doesNotMatch(/headRefOid/)` mean "nowhere in
 // this bullet, under any phrasing" instead of "not this one exact string."
 const compareBulletSlice = () =>
-  RUN_TEAM.between(
+  ISOLATION.between(
     "Then verify against the branch REF",
     "- **Read `gh pr view",
-    "run-team/SKILL.md phase 1 ref-compare + empty-read bullet",
+    "run-team references/isolation.md ref-compare + empty-read bullet",
   ).text;
 
 // The cause, not the symptom. A controller told only "the worktree may be stale"
@@ -159,10 +160,10 @@ test("phase 1 keeps the headRefOid read but says it is not the gate", () => {
   assert.match(slice(), Pin.phrase("gh pr view <N> --json headRefOid -q .headRefOid"));
   assert.match(slice(), Pin.phrase("it is NOT the gate"));
   assert.match(slice(), Pin.phrase("never the operand this refusal turns on"));
-  const gateBullet = RUN_TEAM.between(
+  const gateBullet = ISOLATION.between(
     "- **Read `gh pr view",
     "**Why the ref and not",
-    "run-team/SKILL.md phase 1 headRefOid-read bullet",
+    "run-team references/isolation.md headRefOid-read bullet",
   ).text;
   const gateMentions = gateBullet.match(/gate/gi) ?? [];
   assert.equal(gateMentions.length, 1, 'a second "gate" mention re-admits headRefOid as a gate, under any wording');

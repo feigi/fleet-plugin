@@ -72,8 +72,10 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 
-const SKILL = "skills/run-team/SKILL.md";
-const ANCHOR = "**Grep for the ticket's ASKED-FOR CHANGE, not only its subject construct**";
+// The walk's paragraph moved from SKILL.md's phase 1 into references/pull.md,
+// split off the asked-for-change rule that stays in phase 1.
+const SKILL = "skills/run-team/references/pull.md";
+const ANCHOR = "Old string gone from `git show origin/main:<file>`";
 const text = () => Pin.file(join(import.meta.dirname, "..", "plugin", ...SKILL.split("/")));
 
 // `**` stripped, nothing else: every pinned span below opens on a bolded lead

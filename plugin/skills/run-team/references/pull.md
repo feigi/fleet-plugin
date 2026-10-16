@@ -1,0 +1,346 @@
+# The Pull: what each step does and why
+
+`pull.mjs` runs the Pull; SKILL.md's phase 1 says how to drive it, how to read the tick's `PULL` row and how to answer the questions it asks. This file is what each step means, and the measured reasons behind them, for the controller to read when a step refuses or an answer needs more than SKILL.md says.
+
+## The steps
+
+The steps below are what the driver runs, and the guidance for answering
+`staleness`, `decided` and `collision`.
+
+One free implementer slot is one Pull. The tick names the heads — one `PULL` row
+per free slot — and each Pull runs this sequence on its head,
+terminating in exactly one dispatch or an empty shortlist:
+
+1. **Take the shortlist head** — the next `.fleet/shortlist.json` entry with no
+   `impl-` row and no `excluded` row whose premise still holds, which is the
+   ticket the tick's `PULL` row names.
+2. **In-flight check, again** — `~/.fleet/bin/fleet-run inflight.sh <N>`; any
+   hit = taken, drop it and take the next entry. The shortlist is as old as its
+   last refresh. It runs all three probes (PRs, remote heads, local
+   worktrees + branches) so a partial one cannot read as free. The PR probe is
+   two signals rather than a bare full-text match — GitHub's own closing-PR links
+   plus branch-segment matching — and both drop `MERGED` and `CLOSED`, so a
+   merged or abandoned PR the `gh pr list` window covers cannot hold a ticket
+   forever. A linked PR that window does *not* cover has no state to read: it
+   prints `?` and still counts as taken, merged or not.
+
+   **Exit 2 is not free** — the question went unanswered, so treat it as taken
+   and say which ticket it was in the log. A probe that could not look is
+   recorded rather than aborting the run, so exit 2 from one prints the same
+   JSON as 0 and 1 plus an `unknown[]` naming the probes that could not look:
+   read `unknown`, never `taken` alone, because exit 2 says `"taken": false`,
+   which summarizes `hits` and is not a claim the ticket is free. A hit outranks
+   an unknown — a payload can carry a non-empty `hits[]` and a non-empty
+   `unknown[]` at exit 1, which is taken. Four causes print nothing at all — a
+   bad argument, not inside a git repository, no such issue, a verdict that could
+   not be written — so never assume exit 2 parses.
+
+   **A free verdict is not evidence that nobody is editing the ticket's
+   target files.** All three probes ask whether a branch-shaped claim
+   exists — a PR, a remote head, a local branch, or a worktree — and
+   nothing else; work done directly against the shared checkout, by a
+   human or another agent session, stakes no branch-shaped claim and trips
+   none of them.
+3. **Read the ticket in full, once** — `gh issue view <N> --json title,body,comments,labels,createdAt`
+   written to `<scratch>/impl-<N>/issue.json`, then read off that file with `jq -r
+   '.title, .body, ([.labels[].name]|join(",")), (.comments[]|.author.login + ": " + .body)'`.
+   One read answers every question the Pull asks; step 7's router reads the same file. Record the ticket's real
+   brief — the `## Agent Brief` comment where one exists, otherwise the issue
+   body, which is where most tickets actually carry it (a controller probe found only 43/100 open
+   `ready-for-agent` issues have a separate Agent Brief comment; the rest,
+   this ticket included, carry the brief in the body) — plus its `Out of
+   scope` sequencing wherever that section is found. Then judge **decided?**
+   — never size.
+
+   **Still live?** A backlog ticket's claims rot. Before `decided?`, settle the
+   ticket's central claim against `origin/main` — never the working tree, never
+   the ticket's own line numbers, which drift. One `git show origin/main:<file>`
+   piped to `grep` does it for any ticket citing a construct, which is most of
+   them. **That read is fatal, not empty, when the path is untracked in
+   `origin/main`** — `git show origin/main:<path>` exits 128 saying the path
+   does not exist, and the file may still sit right there on disk, so it is a
+   probe that could not look rather than a clean tree. Fall back to
+   `git ls-tree origin/main -- <path>` (empty output at exit 0 = untracked)
+   before reading the failure as "unfixed". Already fixed → close it citing the
+   commit, do not claim it. Partly fixed → say which acceptance criteria the
+   tree already meets, and which the tree now **contradicts**.
+
+   Old string gone from `git show origin/main:<file>`
+   ⇒ the fix landed, and
+   `git log -S '<old string>' --oneline origin/main -- <file> | head -1` names
+   the commit that removed it; close citing that commit. Seconds either way,
+   and the construct half alone is the probe that could not look.
+   **No ancestry check on what that walk printed.** `origin/main` is where the
+   walk starts, so every commit it can print is reachable from `origin/main` by
+   construction, and `git merge-base --is-ancestor <sha> origin/main` is true
+   for all of them — true again when the sha *is* `origin/main`. A step that
+   cannot answer no is not evidence, and reads as evidence anyway.
+   **That check belongs one input over — a sha the TICKET quotes**, where it
+   can answer no: a rebase leaves the commit it orphaned a whole object, so
+   `git show` resolves it happily while nothing in `origin/main`'s history
+   reaches it, and a "fixed in `<sha>`" premise built on one describes a tree
+   that no longer exists. Separate its two non-zero answers before citing
+   either — exit 1 is the answer *not reachable*, while exit 128 with `Not a
+   valid object name` is a sha this clone does not have at all, a probe that
+   could not look rather than an orphan (measured: one ticket's comment cited
+   `35c0845` on a since-deleted branch, and 128 is what it exits here).
+
+   **Both halves of that command are load-bearing.** Drop the `origin/main`
+   argument and `git log -S` searches `HEAD`, contradicting the rule a paragraph
+   up — and the two searches fail differently there. On a checkout behind the
+   fix the prescribed **old**-string search names a *wrong* commit at exit 0,
+   the old string still being present in that tree: measured at
+   `0dc39ef^`, `| head -1` names the rename `4fd2f73`, not the fix. It is the
+   **new**-string search the paragraph above forbids that prints nothing at exit
+   0 there, indistinguishable from "the change never landed"; the old-string
+   search goes empty on a checkout that predates the old string's own arrival
+   at that path — behind that rename in that case, and with no rename in play
+   at all in this file's: measured at `647ae44^`, which already tracks this
+   path under this name, `git log -S 'ls-tree origin/main'` prints nothing at
+   exit 0.
+   Add `--reverse` and you get the *oldest* count-changing commit, which is the
+   file's last rename whenever the string predates one — measured on a ticket's old
+   wording, `--reverse` names `4fd2f73` ("move next-ticket and sizing-a-ticket
+   into the plugin"), a refactor that clears an ancestry gate exactly as
+   well as the real fix, while newest-first `| head -1` names `0dc39ef`, the
+   commit that actually did it.
+   (`--follow` fixes the rename half but is mutually destructive with
+   `--reverse`: the two together return empty at exit 0, and `--follow` takes
+   exactly one pathspec or exits 128.) So read the subject of whatever it names
+   before citing it in the close, and treat empty output as an answer you did
+   not get rather than a commit.
+
+   Measured, one run: one ticket's one-line remedy had shipped in `e7b11e6` ten days
+   earlier and another's AC-2 asked for an exit code a later design
+   deliberately changed — neither commit carried a trailer back, so the tracker
+   showed both as open work. The one-line-remedy ticket cost a full claim, worktree and implementer
+   dispatch to learn this; the exit-code ticket would have shipped a test asserting the opposite
+   of the shipped behaviour. The two probes that settled both took seconds.
+   **A ticket deferred from a review is a claim about a tree that has since
+   moved** — and the older the ticket, the more it has moved, so this bites
+   hardest at exactly the head of an oldest-first queue.
+
+   Measured again 2026-08-19: four stale in the 20 oldest, and the construct
+   probe caught **none** of the four. It **missed** a ticket whose two pins and the
+   `contentWords()` extraction it asks for had all landed (`d016414`, `1abd6c8`)
+   while `overlap()`, the construct, sat right where the ticket said, so the
+   probe passed the ticket through as live work and it cost a claim, a worktree
+   and a dispatch. It **missed** a ticket whose `d:` scan the candidates test suite
+   already pinned — `6d94451` and `43d6ac5` both added `.d` assertions, and the
+   ticket's own closing comment cites both. It **missed** a ticket whose wording
+   defect `0dc39ef` had already fixed — by an **equivalent rewording**, not by
+   the literal string the ticket proposed, which appears nowhere in
+   `origin/main`; the ticket's **line number** had drifted too, `:95` → `:98`.
+   And one ticket it could not read at all: that ticket's file is untracked in
+   `origin/main`, the fatal-not-empty case above.
+
+   **`staleness.mjs` runs that check for you, and answers in THREE values.**
+   `~/.fleet/bin/fleet-run staleness.mjs --path <path> --gone
+   '<string>'`, or `--present '<string>'`, once per claim the ticket makes.
+   It goes here and not in `shortlist.mjs` because choosing WHICH string
+   settles a ticket needs the ticket read, which the step above already did —
+   so the cost lands on the pulled ticket and never on the backlog.
+   `--gone` is a defect the fix must remove, the wording the ticket quotes as
+   wrong; `--present` is what the fix must add, the assertion a pin ticket asks
+   for. Give exactly one — the direction is not inferable from the string, and
+   the wrong one answers the opposite verdict with full confidence.
+
+   A needle that itself starts with `--` — `--label ready-for-agent`
+   is one this backlog carries — needs the end-of-options separator: `--gone
+   -- '<string>'`/`--present -- '<string>'`. Given bare, with no `--`
+   immediately before it, the value guard still refuses it — `staleness:
+   --gone needs a value` — at exit 2, a could-not-check to admit and annotate,
+   not an invocation to retry.
+
+   The third value is the one that has to survive. A probe that could not look
+   answers exactly like a probe that looked and found nothing, so folding it
+   into either neighbour retires live supply on a guess in one direction and
+   reports a defect as live on a spelling the tree stopped using in the other.
+   Exit 2 is also where every guard and every failed git call in that script
+   lands, so a probe that breaks keeps the ticket in the queue.
+
+   What it refuses to answer is the point of it. It reads `origin/main` and
+   nothing else — never the working tree, never anything on disk — so a path
+   this repo does not track is exit 2 rather than a clean read: that is the untracked-file
+   case and the generated-artifact case together, `agent-test` being written
+   into a claimed worktree by `claim-ticket.sh`'s heredoc, which makes every
+   copy under `.worktrees/` a snapshot of whenever that worktree was claimed.
+   `fixed` is never read off the string's presence alone either: it carries the
+   commit `git log -S` names for that string at that path, reachable from
+   `origin/main` by construction since that is where the walk starts. A
+   `--gone` string absent from the file that ALSO never changed count there is
+   exit 2, not a fix — that is the positive control, and without it a typo in
+   the string closes a live ticket.
+
+   It does not run a reproduction. The general "is this still reproducible?"
+   oracle over the whole backlog is ruled out, and a reproduction run
+   without a positive and a negative control misattributes causes rather than
+   merely missing defects — one such check needed a purpose-built fixture plus
+   both. A ticket no single string settles is a `could not check`: admitted,
+   annotated in the dispatch prompt (phase 2), never quietly dropped.
+
+   **This is a consumption gate**, priced for the seat where implementer
+   divergence costs a claim, a worktree and a dispatch; at filing time every
+   issue the plugin creates is filed `needs-triage`, and only triage sets
+   `ready-for-agent`.
+
+   No sizing agent here. `sizing-a-ticket` picks the *process path*, and that is
+   phase 2's call, after the ticket is claimed.
+4. **Collision scan against open PRs and live branches** — `pull.mjs` runs it
+   before Q3 and prints one line per open PR or live worktree branch that shares
+   a path with the brief, `no overlap` when none, and `could not look: <which>`
+   for one it could not read. Answer Q3 off those lines: an overlap →
+   `behind-pr:#M`, a branch with no PR yet by its name; a target file the brief
+   does not spell as a path → `paths <p>…`, which scans again and asks again. A
+   PR the scan could not read is still yours to judge, and `behind-pr` on it is
+   taken. `pr-overlap.mjs` is **PR-vs-PR only** — it runs `gh pr diff` on both
+   args and errors on an issue number, so never run it on a ticket here.
+5. **Sequence check** — the `#N` refs of the brief's `Out of scope` section are
+   printed beside Q3 as the candidates: one naming an open ticket this one
+   sequences after → `behind-issue:#M`. No overlap and no such ticket →
+   `clear`.
+6. **Claim** — `~/.fleet/bin/fleet-run claim-ticket.sh <N> impl-<N> implementer
+   --apply` (below). Exit 2 → treat it as taken, next entry.
+7. **Route, row, then dispatch** — `~/.fleet/bin/fleet-run ticket-router.mjs route
+   --session <session> --ticket <N> --arm <A|B> --impl-row <k>[ --chain-head] --issue
+   <scratch>/impl-<N>/issue.json --guard .fleet/cost-guard.json` prints
+   `POLICY=… CELL=… DRAW=… STRATUM=… REASON=…` (phase 2's exploration rule
+   says what each argument is); then `ledger.mjs row <N> "impl-<N>[ · tier=<CELL>][ · route=<REASON>]"`,
+   `tier=<CELL>` exactly when `DRAW` is not `-`; then phase 2 at once: claim
+   what you are about to dispatch; dispatch what you have just claimed. Router
+   exit 2 → no row and no dispatch: release the claim (`release-ticket.sh`, SKILL.md's
+   **Release the claims that never became PRs**) and emit an event, a probe that could not look — a table the router
+   refuses refuses every Pull.
+
+**The Pull table** — every verdict a Pull can reach, and the one thing each
+does:
+
+| At the Pull | Action |
+|---|---|
+| in-flight hit, or an in-flight check that could not answer | drop, next entry |
+| no longer labelled `ready-for-agent` | drop, next entry |
+| `staleness.mjs` exit 1 — provably fixed | close citing the commit, next entry |
+| brief names no *what* | relabel `needs-triage`, next entry |
+| genuine fork — options named, none ruled | relabel `ready-for-human`, next entry |
+| needs human hands — external access, manual testing, judgment during the work | relabel `ready-for-human`, next entry |
+| target files collide with an open PR or a live branch | exclude `behind-pr:#M`, next entry |
+| `Out of scope` sequences it after an open ticket | exclude `behind-issue:#M`, next entry |
+| `claim-ticket.sh` exit 2 | taken, next entry |
+| decided, live, free, claimed | row, then dispatch (phase 2) |
+
+**The shortlist runs out → run `shortlist.mjs` once and Pull again; still
+empty → hold the slot idle until the next refresh trigger.** Within a turn,
+Pull from the current list first and refresh second — a refresh never delays a
+dispatch.
+
+## Relabels and exclusions
+
+**A Pull never re-admits a ticket already relabelled.** The shortlist file can
+be older than a relabel — this run's own Pulls, or a demotion in phase 3 — so
+read the ticket's labels in step 3's full read (`--json
+title,body,comments,labels`) and drop it when `ready-for-agent` is gone. A Pull
+that trusted a list built before the relabel landed would hand a ticket the
+fleet has already judged unimplementable straight to the next member.
+
+**Relabel by cause.** An unclaimed ticket is yours to reclassify at the Pull —
+three causes, two labels: `ready-for-human` for hands or a fork;
+`needs-triage` for a brief that names no *what*.
+`gh issue edit <N> --remove-label ready-for-agent --add-label <label>` (no
+`in-progress` to drop — it was never claimed), preceded by exactly one comment,
+the one `~/.fleet/bin/fleet-run dispatch-prompt.mjs render relabel --kind <kind> …`
+prints. `--kind needs-triage` takes `--line`, the one-line missing decision;
+`--kind fork` takes `--options`, the options verbatim from the brief, and is
+the `ready-for-human` comment for a fork; `--kind hands` takes `--hands`,
+one of external access, manual testing or judgment during the work, and
+`--line`, and is the `ready-for-human` comment for hands. The three comments
+live in `briefs/relabel.md`; `pull.mjs` posts its own one-line copy of the same
+words when a Pull answer relabels, so a change to either is a change to both.
+
+Neither label invokes anything: `/triage` is maintainer-run, and both labels
+only stop the ticket costing a read per scan. These comments are the only
+writes the fleet makes to a ticket it did not claim.
+
+**Exclusion is a ticket row with a premise.** `ledger.mjs row <N> "excluded ·
+behind-pr:#M"` or `ledger.mjs row <N> "excluded · behind-issue:#M"` — `#M` is
+the open PR, or the branch name until its PR exists, or the issue this ticket
+sequences after. No new ledger section. `shortlist.mjs` probes every premise at
+each refresh — MERGED or CLOSED lifts a `behind-pr`, CLOSED lifts a
+`behind-issue` — and a lifted ticket re-enters the shortlist in its own
+oldest-first slot; its row is rewritten to `impl-<N> …` when it is pulled,
+because `row` replaces the whole line.
+
+## Claiming
+
+**Claiming.** `~/.fleet/bin/fleet-run claim-ticket.sh <N> impl-<N> implementer --apply` does
+the label, worktree, branch, the Recipe's Install step, the clean-tree assertion, and the
+isolation runner in one serial pass. The two arguments are always that literal
+pair — `impl-<N>` as `<slug>`, `implementer` as `<type>` — so the claim is
+branch `implementer/<N>-impl-<N>`, worktree `.worktrees/<N>-impl-<N>`. Never
+read them off `git branch -r` or `git worktree list`: human branches on origin
+(`fix/…`, `docs/…`) have another shape, and the script takes both arguments as
+free text, so a pair copied from one claims under that shape at exit 0.
+
+**The Install step comes from the Recipe cache — never pass or infer one.** The
+claim reads it through `derive-testcmd.sh . install`, and the Test entrypoint
+through `derive-testcmd.sh . test --at origin/main`, runs the
+Install step in the fresh worktree and refuses if it left any file changed: an
+install that rewrites the tree in a throwaway worktree corrupts it for everyone.
+No cache is phase 0's Recipe derivation step not having run; an invalid one is
+its re-derive-once rule.
+
+**Materialize the isolation envelope as a file, not a briefing.** The claim
+writes the runner, `agent-test`, into the fresh worktree it creates: an exec of
+the Recipe's Test entrypoint, through the suite-slot wrapper (see SKILL.md's **The
+suite slot bound**), that exports one port triple derived from `<N>`
+(so collisions stay impossible), kept out of `git status` through the
+repository's exclude file. A repository that tracks its own `agent-test` keeps
+it byte-identical, with whatever isolation that repository built, and takes the
+suite slot bound for its own full runs itself: nothing else will. Brief members
+with `./agent-test` and nothing else — anyone who finds the worktree finds the
+runner, including grandchildren you never dispatched. Its arguments land after
+the Test entrypoint, so what one may name — a test file, a test name — is that
+entrypoint's to say, and nothing in the runner refuses one that selects no
+test: a run of zero tests is a failed run, not a pass. See isolation.md.
+
+## Claim, record, render: the dispatch steps
+
+**Claim what you are about to dispatch; dispatch what you have just claimed.**
+Phase 1 makes the claim, serially in the main checkout — its rule is measured —
+and the dispatch follows it at once. A claim that runs ahead of its dispatch is
+a worktree, a branch and an `in-progress` label with no member behind them,
+released by the end-of-run sweep rather than by a member that did the work.
+
+**Record the dispatch before you make it.** `ledger.mjs row` wrote the row at
+the Pull's step 7; `~/.fleet/bin/fleet-run dispatch-prompt.mjs render
+implementer --member impl-<N> …` then renders its brief, and
+`~/.fleet/bin/fleet-run ledger.mjs dispatch <N> impl-<N>`
+marks `impl-<N>` live on it and in `## Dispatched`, and the call follows.
+Its JSON carries `agent`, the definition that call names, and `brief.path`,
+the rendered brief whose content is that call's prompt — read both off that
+output, never recall them. Live implementers are the `impl-` tokens with no
+`=<outcome>` — the tick reads that count off the ledger, and nobody states
+it. `dispatch` refuses a member with no brief rendered for its role, naming
+the `render` command to run first, and refuses once the
+run is draining: drain stops supply. It also refuses a row whose `tier=`
+names no single definition — two different values, or one that is not a
+definition suffix — or names one with no `agents/<definition>.agent.md`,
+before the member is live; fix the row with `row` first.
+
+**The prompt carries only what varies.** Everything shared — the
+unattended-member block, the `edit`/`read` absolute-path rule, the
+issue re-read and re-derive backstop, commit incrementally, no `git stash`, the
+shared `eval` kernel, enumerate-and-declare, sizing and the PR steps —
+is the body of every `agents/fleet-implementer-<cell>.agent.md`, byte-identical
+across all of them, and each harness injects it as the
+member's system prompt. Never re-paste it. The prompt fills that body's
+placeholders — the ticket number, the worktree abs path and branch
+(`<abs-path>`, `<branch>`), the scratch path `<scratch>/impl-<N>/` — absolute,
+`<scratch>` as `scratch-root.mjs` printed it — and the
+distilled brief (`<distilled brief>`): the title plus the `## Agent Brief`
+comment or the issue body, whichever carries the brief, and its `Out of
+scope`, pasted verbatim from the Pull's own read. Beyond those
+`briefs/implementer.md` carries only its report paragraph, the
+no-acknowledgement line, the foreground-suite line
+— and a `staleness.mjs` **could not check** verdict with its
+reason when the Pull got one, so the member's own re-derive step knows the
+controller's probe could not look.

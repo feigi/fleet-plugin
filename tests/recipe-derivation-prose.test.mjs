@@ -13,6 +13,8 @@ const PLUGIN = join(import.meta.dirname, "..", "plugin");
 const read = (rel) => Pin.file(join(PLUGIN, rel));
 const RUN_TEAM = read("skills/run-team/SKILL.md");
 const PHASE0 = read("skills/run-team/references/phase-0.md");
+// Phase 1's claiming paragraphs moved into references/pull.md.
+const PULL_MD = read("skills/run-team/references/pull.md");
 const DERIVER = read("agents/fleet-recipe-deriver.agent.md").text;
 const PROVER = read("scripts/recipe-prove.mjs").text;
 
@@ -54,7 +56,7 @@ test("an invalid cache is re-derived once; a failed derivation stalls the run in
 });
 
 test("the claim paragraph sends an absent or invalid cache to the derivation step, and infers no Install step", () => {
-  const p = RUN_TEAM.paragraph("**The Install step comes from the Recipe cache", "run-team/SKILL.md claim Install paragraph", "**Materialize the isolation envelope as a").text;
+  const p = PULL_MD.paragraph("**The Install step comes from the Recipe cache", "references/pull.md claim Install paragraph", "**Materialize the isolation envelope as a").text;
   assert.match(p, Pin.phrase("never pass or infer one."));
   assert.match(p, Pin.phrase("No cache is phase 0's Recipe derivation step not having run"));
 });

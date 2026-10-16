@@ -21,6 +21,8 @@ import { CASES, PLUGIN, agentBody, label, renderBrief } from "./support/render-b
 
 const RUN_TEAM = join(PLUGIN, "skills", "run-team");
 const SKILL = readFileSync(join(RUN_TEAM, "SKILL.md"), "utf8");
+// Phase 1's relabel-by-cause paragraph moved into references/pull.md.
+const PULL_MD = readFileSync(join(RUN_TEAM, "references", "pull.md"), "utf8");
 const QUOTE_LINE = /^[ \t]*>/;
 const quoteLines = (text) => text.split("\n").filter((l) => QUOTE_LINE.test(l));
 
@@ -106,6 +108,6 @@ test("the relabel comments live in briefs/relabel.md and SKILL.md renders them i
     assert.match(renderBrief("relabel", kind), Pin.phrase("*Relabelled by the fleet controller.* Pulled for implementation and returned:"), `relabel ${kind} lost its opening`);
   }
   const flat = SKILL.replace(/\s+/g, " ");
-  assert.ok(flat.includes("dispatch-prompt.mjs render relabel --kind <kind>"), "SKILL.md no longer says the comment is rendered");
+  assert.ok(PULL_MD.replace(/\s+/g, " ").includes("dispatch-prompt.mjs render relabel --kind <kind>"), "references/pull.md no longer says the comment is rendered");
   assert.ok(!flat.includes("Relabelled by the fleet controller"), "SKILL.md quotes a relabel comment again");
 });

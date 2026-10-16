@@ -23,6 +23,8 @@ import { chainHead, defang, implRow, outOfScope, parseAnswer, relabel } from "..
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
 const SKILL = readFileSync(join(PLUGIN, "skills", "run-team", "SKILL.md"), "utf8");
+// Phase 1's step paragraphs, moved into the reference file phase 1 points at.
+const PULL_MD = readFileSync(join(PLUGIN, "skills", "run-team", "references", "pull.md"), "utf8");
 
 const GIT_ENV = {
   ...process.env,
@@ -1468,20 +1470,21 @@ test("a ticket that spells a placeholder the implementer template declares reach
   assert.equal(render[render.indexOf("--staleness") + 1].includes("‹scratch›"), true);
 });
 
-test("SKILL.md Phase 1 names `pull.mjs next` as the Pull's entry, and its step paragraphs stay", () => {
+test("SKILL.md Phase 1 names `pull.mjs next` as the Pull's entry, and its step paragraphs stay in references/pull.md", () => {
   const phase1 = SKILL.slice(SKILL.indexOf("## Phase 1 — Pull"), SKILL.indexOf("## Phase 2 — dispatch"));
   assert.ok(phase1.length > 1000, "Phase 1 is found");
   const flat = phase1.replace(/\s+/g, " ");
   assert.ok(flat.includes("A Pull's entry is `~/.fleet/bin/fleet-run pull.mjs next --head <N>`"), "Phase 1 names pull.mjs next as the entry");
   assert.ok(flat.includes("`pull.mjs answer <N> <qid> <token> [--path <p>] [--] [<text>…]`"), "and the answer command");
+  const steps = PULL_MD.replace(/\s+/g, " ");
   for (const step of ["1. **Take the shortlist head**", "2. **In-flight check, again**", "3. **Read the ticket in full, once**", "4. **Collision scan", "5. **Sequence check**", "6. **Claim**", "7. **Route, row, then dispatch**"]) {
-    assert.ok(flat.includes(step), `the step paragraph stays: ${step}`);
+    assert.ok(steps.includes(step), `the step paragraph stays: ${step}`);
   }
 });
 
-test("SKILL.md Phase 1 steps 4 and 5 answer Q3 off the printed scan and the Out of scope candidates, and run no scan by hand", () => {
-  const at = SKILL.indexOf("4. **Collision scan");
-  const steps = SKILL.slice(at, SKILL.indexOf("6. **Claim**", at)).replace(/\s+/g, " ");
+test("references/pull.md steps 4 and 5 answer Q3 off the printed scan and the Out of scope candidates, and run no scan by hand", () => {
+  const at = PULL_MD.indexOf("4. **Collision scan");
+  const steps = PULL_MD.slice(at, PULL_MD.indexOf("6. **Claim**", at)).replace(/\s+/g, " ");
   assert.ok(at !== -1 && steps.length > 200, "steps 4 and 5 are found");
   for (const phrase of [
     "`pull.mjs` runs it before Q3",
