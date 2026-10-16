@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { basename, join } from "node:path";
+import { isDigits } from "./arg.mjs";
 
 // ESRCH alone is dead. EPERM is a live process we may not signal, and any
 // other error is not evidence of death either.
@@ -141,7 +142,7 @@ export function procfsStartTime(pid, root = "/proc") {
   // `)`, so the fields are counted from the last `)`: field 3 comes first.
   const close = stat.lastIndexOf(")");
   const ticks = close === -1 ? undefined : stat.slice(close + 1).trim().split(/\s+/)[22 - 3];
-  if (ticks === undefined || !/^\d+$/.test(ticks)) throw unreadable(`${statPath} has no start time in field 22`);
+  if (ticks === undefined || !isDigits(ticks)) throw unreadable(`${statPath} has no start time in field 22`);
   return `${bootId} ${ticks}`;
 }
 
