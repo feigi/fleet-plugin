@@ -55,8 +55,22 @@ function between(start, end) {
 const duty1Text = () => between(DUTY1_START, DUTY2_START);
 const duty2Text = () => between(DUTY2_START, DUTY2_END);
 
-test("the mutation gate runs in a worktree the finisher adds itself, at its dispatch pin", () => {
+// The gate's two paragraphs moved, with their war stories, to
+// references/finisher.md; duty 2 keeps each rule beside the pointer, so the
+// gate is still duty 2's, and the reference file carries the gate itself.
+const FINISHER_MD = Pin.of(readFileSync(join(REPO, "skills", "run-team", "references", "finisher.md"), "utf8"), "references/finisher.md");
+const OWN_TREE = "## Whatever you verify by running, run in a tree nobody else owns";
+const REMOVE_IT = "## Remove the verification worktree on every path";
+const gateText = () => flat(FINISHER_MD.section(OWN_TREE, "references/finisher.md").text + FINISHER_MD.section(REMOVE_IT, "references/finisher.md").text);
+
+test("duty 2 keeps the gate's two rules, each beside its pointer to references/finisher.md", () => {
   const text = duty2Text();
+  assert.match(text, Pin.phrase("**Whatever you verify by RUNNING, run in a tree nobody else owns.** See references/finisher.md."));
+  assert.match(text, Pin.phrase("**Remove it on every path, the failing ones included** — a mutant that comes back green, a suite that will not start, your own halt at any duty. See references/finisher.md."));
+});
+
+test("the mutation gate runs in a worktree the finisher adds itself, at its dispatch pin", () => {
+  const text = gateText();
   // ONE contiguous span. The command and its ref operand have to stay joined:
   // `worktree add --detach` at some other ref is a different instruction, and
   // two independent phrase matches stay green through exactly that swap.
@@ -101,7 +115,7 @@ test("the mutation gate runs in a worktree the finisher adds itself, at its disp
 });
 
 test("the throwaway tree is removed on every path, failures included, and --force is scoped to it", () => {
-  const text = duty2Text();
+  const text = gateText();
   assert.match(
     text,
     /git worktree remove --force/,
@@ -152,7 +166,7 @@ test("the owned worktree stays a read — the finisher never writes to or restor
 });
 
 test("independent re-verification survives — the gate still mutates and runs the suite itself", () => {
-  const text = duty2Text();
+  const text = gateText();
   // ACCEPT side. The ticket's third option was to make the finisher
   // non-mutating and have it read the fix-applier's record instead. That was
   // ruled out: the independent gate caught two unpinned fixes in the run that

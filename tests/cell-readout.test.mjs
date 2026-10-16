@@ -346,8 +346,12 @@ test("the line SKILL.md says the readout prints is the line it prints: four fiel
   assert.match(r.stderr, /smol-high below the gate: 2 comparisons/);
 });
 
+// The DELIBERATE paragraph moved, with its measurement, to references/pull.md;
+// SKILL.md keeps the rule beside the pointer.
+const PULL_MD = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "references", "pull.md"));
 test("SKILL.md says the readout counts a pair only when the two rows ran a different model or effort, as the readout does", () => {
-  const deliberate = Pin.unemphasized(RUN_TEAM.paragraph("**The readout counts DELIBERATE comparisons.**", "run-team's DELIBERATE paragraph", "**Why one in five within the").text);
+  assert.match(RUN_TEAM.text, Pin.phrase("**The readout counts DELIBERATE comparisons.** See references/pull.md."));
+  const deliberate = Pin.unemphasized(PULL_MD.section("## The readout counts deliberate comparisons", "references/pull.md DELIBERATE section").text);
   assert.match(deliberate, Pin.phrase("the two rows must actually have RUN a different model or effort"));
   // Run, not read: the same model at the same level is no comparison, the same
   // model at a different level is one, a different model at the same level is one.

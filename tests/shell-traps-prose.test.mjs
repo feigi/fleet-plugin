@@ -144,6 +144,10 @@ const needs = (t, shell) => {
   return false;
 };
 
+// The section's measured paragraphs moved, with their table, to
+// references/shell-traps.md; the section keeps each rule beside the pointer.
+const TRAPS_MD = Pin.file(join(SKILLS, "run-team", "references", "shell-traps.md"));
+
 test("the section states the rule in the corrected direction", () => {
   // The half the original ticket got backwards, and the half that matters most:
   // a reader who takes `$(…)` for the hazard avoids the form that works and
@@ -151,10 +155,19 @@ test("the section states the rule in the corrected direction", () => {
   // either one leaves a reader able to infer the wrong discriminator.
   assert.match(
     TRAPS,
+    Pin.phrase("**zsh word-splits an unquoted command substitution's result; it does NOT split an unquoted parameter expansion.** See references/shell-traps.md."),
+    "Shell traps no longer states the split rule beside its pointer to references/shell-traps.md",
+  );
+  assert.match(
+    TRAPS_MD.section("## zsh splits a command substitution, never an unquoted parameter expansion", "references/shell-traps.md").text,
     Pin.phrase("hazard is the **assigned-variable** form, never `$(…)`"),
     "Shell traps no longer names the assigned-variable form as the hazard — #854's whole correction is that direction",
   );
-  assert.match(TRAPS, Pin.phrase("`$(…)` splits. Leave it alone."), "Shell traps stopped blessing the command-substitution form");
+  assert.match(
+    TRAPS_MD.section("## Word the rule against the first row", "references/shell-traps.md").text,
+    Pin.phrase("`$(…)` splits. Leave it alone."),
+    "Shell traps stopped blessing the command-substitution form",
+  );
   assert.match(
     TRAPS,
     Pin.phrase("Capture-then-loop needs `while IFS= read -r` fed by a heredoc"),

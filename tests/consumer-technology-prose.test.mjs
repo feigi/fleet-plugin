@@ -133,6 +133,6 @@ test("a merged branch's stale worktree is said to keep its installed dependencie
 test("the isolation reference says symlinking installed dependencies in does not isolate the stack, and reproduces a diagnostic by re-running the check", () => {
   const stack = ISOLATION.paragraph("Private copy and test command solve different problems", "isolation.md stack-isolation paragraph", "## Scratchpad paths need two levels").text;
   assert.match(stack, Pin.phrase("Symlinking installed dependencies in does not help."));
-  const diag = ISOLATION.paragraph("Probe copies carry same filenames as real tree", "isolation.md diagnostics paragraph", Pin.END).text;
+  const diag = ISOLATION.paragraph("Probe copies carry same filenames as real tree", "isolation.md diagnostics paragraph", "## Where the omp probes ran").text;
   assert.match(diag, Pin.phrase("(re-run the check that raised it — the typechecker, the linter — from there)"));
 });

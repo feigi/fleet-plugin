@@ -398,15 +398,17 @@ test("End of run follows the drain bullet and ends with --stop (#2968)", () => {
   assert.match(b, Pin.phrase("then records `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded stop as the end of the run."));
 });
 
-// The ask-by-name paragraph, where a missing report is handled. The tick's
-// SETTLE line is the report file read off disk, so the paragraph sends the
-// controller to that line before it pings anyone; without the sentence a
-// report that is on disk still costs an ask-by-name round trip. A file that
-// fails its schema is REPORT-INVALID, not SETTLE, because `settle
+// The ask-by-name paragraph, where a missing report is handled; it moved to
+// references/member-lifecycle.md, and SKILL.md keeps its rule beside a pointer.
+// The tick's SETTLE line is the report file read off disk, so the paragraph
+// sends the controller to that line before it pings anyone; without the
+// sentence a report that is on disk still costs an ask-by-name round trip. A
+// file that fails its schema is REPORT-INVALID, not SETTLE, because `settle
 // --from-report` refuses it, so the paragraph names both.
-const askByNameParagraph = () => RUN_TEAM.paragraph(
+const MEMBER_LIFECYCLE = Pin.file(join(REPO, "skills", "run-team", "references", "member-lifecycle.md"));
+const askByNameParagraph = () => MEMBER_LIFECYCLE.paragraph(
   "**But a missing report is NOT evidence the member failed to send one",
-  "run-team ask-by-name paragraph",
+  "member-lifecycle.md ask-by-name paragraph",
   "Note this cuts against the paragraph above only in appearance",
 ).text;
 

@@ -203,18 +203,23 @@ for (const [name, getSeat] of SEATS) {
   });
 }
 
-// --- AC-1, AC-2 and AC-4, in the Reviewers section's own prose ----------------
+// --- AC-1, AC-2 and AC-4, in the rule's justification ---------------------
 // This is the seat where the rule is JUSTIFIED rather than dictated, so it is
 // the seat AC-4 binds: the reproduction has to be here or the rule rests on
 // assertion. Since the fix-applier took over every ruling on the findings
 // (spec 2026-09-24 § 3 §4), the reader it justifies the rule to is the one
-// admitting a refutation — the fix-applier, whose prompt carries the rule.
-const justification = () =>
-  RUN_TEAM.between(
-    "A refutation resting on an injection nothing proved landed is not a refutation",
-    "**Where `testCmd` comes from:**",
-    "run-team/SKILL.md Reviewers prose",
-  ).text;
+// admitting a refutation — the fix-applier, whose prompt carries the rule. The
+// justification moved, with its reproduction, from SKILL.md's Reviewers prose
+// to references/reviewers.md; Reviewers keeps the rule beside the pointer.
+const REVIEWERS_MD = Pin.file(join(REPO, "skills", "run-team", "references", "reviewers.md"));
+const justification = () => REVIEWERS_MD.section("## A refutation needs its positive control", "references/reviewers.md").text;
+
+test("Reviewers keeps the refutation rule beside its pointer to references/reviewers.md", () => {
+  assert.match(
+    RUN_TEAM.section("### Reviewers", "run-team/SKILL.md Reviewers").text,
+    Pin.phrase("**A refutation resting on an injection nothing proved landed is not a refutation — it is a cell that never ran.** See references/reviewers.md."),
+  );
+});
 
 test("a negative result is admitted only with its positive control", () => {
   assert.match(

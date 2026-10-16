@@ -37,6 +37,11 @@ const HEADER = headerLines.join("\n");
 // of prose about exactly these words. One definition, because three hand-rolled
 // copies of one slice is how two of them end up bounded differently.
 const rulingStep = () => RUN_TEAM.between("**Guard: accumulate per PR", "The member-facts scrape, the drain of the pending ticket-features rows", "phase 3's ruling step").text;
+// The sizing-verdict paragraph, with its measurement, moved to
+// references/reviewers.md; the ruling step keeps its rule beside the pointer.
+const REVIEWERS_MD = Pin.file(join(REPO, "plugin", "skills", "run-team", "references", "reviewers.md"));
+const sizingVerdict = () =>
+  REVIEWERS_MD.section("## A sizing verdict is a measurement only if it post-dates the run that produced it", "references/reviewers.md").text;
 
 // The first sentence of the ruling step that names `sizing` — the sentence the
 // phase-0 negative below reads. `sentences()`, never a first-period `[^.]`
@@ -199,7 +204,7 @@ test("SKILL.md's ruling step names all four covariates and says a missing one st
     assert.match(slice, new RegExp("`" + col + "`"), `the ruling step never names \`${col}\``);
   }
   assert.match(
-    slice,
+    sizingVerdict(),
     /left BLANK, never estimated/,
     "the ruling step no longer says a value not in hand is left blank",
   );
@@ -346,7 +351,12 @@ test("the ruling step records a sizing verdict only from a report that dates it,
   // second source is the report FILE's `sizing.ranBeforePr` and
   // `sizing.signal`, which `tier-outcomes.mjs append` reads and applies; the
   // controller is no longer told to read an ordering clause off report prose.
-  const slice = rulingStep();
+  assert.match(
+    rulingStep(),
+    Pin.phrase("**A verdict is a measurement only if it post-dates the run that produced it.** See references/reviewers.md."),
+    "the ruling step no longer keeps the dated-verdict rule beside its pointer to references/reviewers.md",
+  );
+  const slice = sizingVerdict();
 
   // The rule as ONE span, both conditions joined. Split into two presence
   // checks, a controller holding a signalled-but-undated verdict satisfies the
@@ -375,9 +385,9 @@ test("the ruling step records a sizing verdict only from a report that dates it,
   );
   // The channel is the file: the path `append` reads, so a controller can find
   // it, and the old instruction is gone.
-  assert.match(slice, Pin.phrase("`<scratch>/reports/impl-<ticket>[-x].json`"), "the ruling step no longer names the report file `append` reads");
+  assert.match(rulingStep(), Pin.phrase("`<scratch>/reports/impl-<ticket>[-x].json`"), "the ruling step no longer names the report file `append` reads");
   assert.doesNotMatch(
-    slice,
+    `${rulingStep()}\n${slice}`,
     /Ordering clause missing|places that run before the PR|the member's report\s+carries the second source/,
     "the ruling step again tells the controller to read the ordering clause off the member's report prose",
   );

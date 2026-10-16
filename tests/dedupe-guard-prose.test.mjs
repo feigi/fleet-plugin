@@ -51,6 +51,15 @@ const flat = (s) => s.replace(/\s+/g, " ");
 const step5 = () => flat(REVIEW_AND_FIX.between("5. File each deferred finding", "\n6. Diff-check green", "review-and-fix step 5").text);
 const finisherDeferrals = () =>
   flat(RUN_TEAM.between("**Confirm every deferral — and every claimed APPLY —", "Add `ready-to-merge`", "run-team finisher duty 2").text);
+// Duty 2's own paragraph — the file-it branch — moved, with its war story, to
+// references/finisher.md; the duty list keeps the rule beside the pointer.
+const FINISHER_MD = Pin.file(join(REPO, "skills", "run-team", "references", "finisher.md"));
+const finisherFileIt = () =>
+  flat(FINISHER_MD.section("## Duty 2: every deferral, and every claimed APPLY, has a home that outlives the merge", "references/finisher.md duty 2").text);
+// The Run ledger section keeps `check`'s exit codes beside a pointer; the
+// paragraph spelling the exits out and the verdicts moved to references/ledger.md.
+const LEDGER_MD = Pin.file(join(REPO, "skills", "run-team", "references", "ledger.md"));
+const checkExits = () => flat(LEDGER_MD.section("## `check`'s exits and its `verdict`", "references/ledger.md check section").text);
 
 test("step 5 files through ledger.mjs check, not its own gh search", () => {
   const s = step5();
@@ -110,7 +119,8 @@ test("step 5 cites a Run ledger section that exists in run-team", () => {
   // un-flattened match reds on a pure reflow — the one thing the header at the
   // top of this file promises stays green.
   const runLedger = flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
-  assert.match(runLedger, /`verdict` is `already-filed`, `tracker-hit`, `clean`, `soft-hit` or `unverified`/, "the cited section no longer enumerates the verdict values");
+  assert.match(runLedger, /read those and decide\. See references\/ledger\.md\./, "the cited section no longer sends its reader on to references/ledger.md for check's exits");
+  assert.match(checkExits(), /`verdict` is `already-filed`, `tracker-hit`, `clean`, `soft-hit` or `unverified`/, "the cited section no longer enumerates the verdict values");
 });
 
 test("step 5's exit-code readings agree with the section it cites", () => {
@@ -131,7 +141,7 @@ test("step 5's exit-code readings agree with the section it cites", () => {
   assert.match(runLedger, /\*\*3\*\* the ledger is clean but open or closed tracker issues match/, "run-team no longer reads exit 3 as a tracker hit — step 5 still does");
   // The exit-0 hazard is the one both files must state, not merely agree on:
   // it is the code that reads as permission.
-  assert.match(runLedger, /Exit 0 is not\s+automatically "safe to file"/, "the cited section no longer warns that exit 0 can mean unverified");
+  assert.match(checkExits(), /Exit 0 is not\s+automatically "safe to file"/, "the cited section no longer warns that exit 0 can mean unverified");
 });
 
 test("both filing sites read soft-hit as rows to read rather than as permission", () => {
@@ -141,8 +151,7 @@ test("both filing sites read soft-hit as rows to read rather than as permission"
   // verdict it replaced (#388), and there are two callers because two different
   // agents file issues and each reads only its own instructions.
   assert.match(step5(), /`soft-hit`[\s\S]{0,400}?read the rows/i, "step 5 names soft-hit without telling its reader to read the rows it printed");
-  const runLedger = flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
-  assert.match(runLedger, /`soft-hit`[\s\S]{0,400}?read\s+them before filing/i, "the cited section names soft-hit without saying what to do about it");
+  assert.match(checkExits(), /`soft-hit`[\s\S]{0,400}?read\s+them before filing/i, "the cited section names soft-hit without saying what to do about it");
 });
 
 test("the finisher verifies a claimed APPLY against the branch diff, not the applier's word", () => {
@@ -167,7 +176,7 @@ test("the finisher files its own deferrals through the same guard", () => {
   // The finisher reaches `gh issue create` by a different route — auditing the
   // reviewer's deferrals and filing whatever is missing — so it is precisely
   // the agent most likely to re-file what a reviewer already filed.
-  assert.match(finisherDeferrals(), /ledger\.mjs check/, "the finisher's file-it branch no longer runs the dedupe guard");
+  assert.match(finisherFileIt(), /ledger\.mjs check/, "the finisher's file-it branch no longer runs the dedupe guard");
 });
 
 // ── Filers record what they file (#531) ──────────────────────────────────────
@@ -193,7 +202,7 @@ test("both filing sites run `ledger.mjs filed` right after `gh issue create`, un
   const s = step5();
   assert.match(s, /immediately after each `gh issue create`, run `[^`]*ledger\.mjs filed <N> "<subject>"`/, "step 5 no longer records the issue it just created");
   assert.match(s, /the same subject string you passed to `check`/, "step 5 no longer ties the recorded subject to the one it checked");
-  const f = finisherDeferrals();
+  const f = finisherFileIt();
   assert.match(f, /`ledger\.mjs filed <N> "<subject>"` immediately after `gh issue create`/, "the finisher's file-it branch no longer records the issue it created");
   assert.match(f, /the same subject string you passed to `check`/, "the finisher no longer ties the recorded subject to the one it checked");
 });
@@ -202,7 +211,7 @@ test("a failed `filed` is retried once, then reported unrecorded — never a sec
   // The issue exists and is correct once `gh issue create` returned; only its
   // ledger row is missing. Re-filing to "fix" that makes the duplicate the
   // whole guard exists to stop.
-  for (const [where, s] of [["step 5", step5()], ["finisher duty 2", finisherDeferrals()]]) {
+  for (const [where, s] of [["step 5", step5()], ["finisher duty 2", finisherFileIt()]]) {
     assert.match(s, /retry (it )?once/, `${where} no longer retries a failed \`filed\``);
     assert.match(s, /leave the issue alone — it exists and is correct/, `${where} no longer says to leave a created issue alone`);
     assert.match(s, /`unrecorded: #N <subject>`/, `${where} no longer reports a filing it could not record`);

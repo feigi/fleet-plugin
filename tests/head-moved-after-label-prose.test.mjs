@@ -332,8 +332,20 @@ const dispatchGate = () =>
     "run-team/SKILL.md",
   ).text;
 
+// The rule's paragraph moved, with its war story, to references/finisher.md;
+// the dispatch paragraph keeps the rule beside the pointer.
+const FINISHER_REFERENCE = Pin.file(join(REPO, "skills", "run-team", "references", "finisher.md"));
+const outboxQuestion = () =>
+  FINISHER_REFERENCE.section("## An unanswered question from the member is an outbox item", "references/finisher.md").text;
+
 test("an unanswered member question blocks finisher dispatch, with the same weight as an owed ruling", () => {
-  const s = dispatchGate();
+  assert.match(
+    dispatchGate(),
+    Pin.phrase(
+      "**An unanswered question from the member is an outbox item, and it blocks dispatch with the same weight as a ruling you have already made.** See references/finisher.md.",
+    ),
+  );
+  const s = outboxQuestion();
   assert.match(
     s,
     Pin.phrase(
@@ -341,7 +353,7 @@ test("an unanswered member question blocks finisher dispatch, with the same weig
     ),
   );
   // WHY it does not feel like one is what stops it being read as a restatement
-  // of the owed-ruling rule directly above and deleted as duplication.
+  // of the owed-ruling rule and deleted as duplication.
   assert.match(s, Pin.phrase("you have decided nothing yet, so the outbox reads empty"));
   // Both exits, or "answer it" reads as a mandate to rule on everything.
   assert.match(s, Pin.phrase("tell the member you are not ruling and it should proceed on its own default"));
