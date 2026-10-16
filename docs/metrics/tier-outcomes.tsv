@@ -125,7 +125,7 @@
 #                          records the verdict only when the report passes its
 #                          schema check, `sizing.ranBeforePr` is true AND
 #                          `sizing.signal` is non-empty; otherwise the field is
-#                          BLANK and a WARNING names which condition failed.
+#                          BLANK and a WARNING names each condition that failed.
 #                          An explicit `--sizing` overrides the report. The
 #                          rule exists because a verdict typed in early is
 #                          byte-identical to a measured one, so an undated one
