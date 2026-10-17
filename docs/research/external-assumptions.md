@@ -18,6 +18,15 @@ the map. 485 rows total, deduplicated within slice, not across:
 Row references below are `slice#N`. Twelve rows sampled across all four slices
 were re-read against source before this summary was written; all twelve held.
 
+**Reading a cite.** Each slice row is a dated record. Its `path:N` cites hold
+at the commit that last changed that row, not at `HEAD`. To read a row, find
+that commit (`git log -L <n>,<n>:<slice-file>` or `git blame`) and read the
+cited file there (`git show <sha>:<path>`). A cite that misses on `HEAD` is
+expected drift, not a defect, so don't file it. When you edit a row for
+another reason, re-pointing its cites is optional. Re-pointing them as a
+ticket class, or guarding them with a test, is out of scope
+(`.out-of-scope/research-record-citation-guard.md`).
+
 ## 1. Preconditions a consumer must satisfy
 
 The short list. If any of these is false the plugin does not degrade — it
