@@ -22,7 +22,8 @@ work in flight rather than every run's history.
    PR's `pr<M>/` and `dispositions-fix-pr-<M>*.json` go unless a live
    `review-pr-<M>`, `fix-pr-<M>` or `finisher-pr-<M>` token names it; any live
    `merge-bot-<n>` holds every `pr<N>`. A closed issue's `impl-<N>/` goes; an
-   open one's goes only with no live `impl-<N>` token and 7 days idle. A
+   open one's goes only with no live `impl-<N>` token, no claim worktree under
+   `.worktrees/` standing for it, and 7 days idle. A
    number `gh` gives no usable answer for — `gh` unreachable, or a partial
    failure that errored on it — keeps every keyed entry that names it. A
    member's report file, `reports/<member>.json`, goes with the entry its

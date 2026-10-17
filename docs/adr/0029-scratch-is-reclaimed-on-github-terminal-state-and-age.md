@@ -4,7 +4,9 @@
 on #2316, against `main` at `c54a597d`, and amended the same day (main
 `532b8f48`) to add `--after-rotate`. Builds on ADR 0027, which fixed where the
 scratch root lives and left its cleanup to #2316. Amended by #3317: decisions
-1 and 3 are extended by decision 11, the sibling keys.
+1 and 3 are extended by decision 11, the sibling keys. Amended by #3403: an
+OPEN ticket's `impl-<N>/` is also kept while a claim worktree under
+`.worktrees/` still stands for it, and is judged by the 7-day rule once none does.
 
 ## Context
 

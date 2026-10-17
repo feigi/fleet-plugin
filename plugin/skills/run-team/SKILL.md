@@ -2027,7 +2027,8 @@ age, reading which members are live off `.fleet/ledger.md`:
   sweep — its token names no PR. An OPEN PR's `pr<M>/` stays, all but its
   `run-*` roots idle past 7 days.
 - **`impl-<N>/`** goes once issue #N is CLOSED, or when it is OPEN, no live
-  `impl-<N>` token names it and nothing under it has changed in 7 days.
+  `impl-<N>` token names it, no claim worktree under `.worktrees/` still stands
+  for it, and nothing under it has changed in 7 days.
 - **Anything else at the root** — your own ad-hoc files included — goes
   once nothing under it has changed in 7 days and no live token's name
   appears in its name.
