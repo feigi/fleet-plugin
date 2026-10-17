@@ -204,7 +204,7 @@ test("CLI: --ledger given an empty value dies rather than falling back to the de
 // already refuses them with. All three die before gather()'s first gh read
 // (the guard moved above the dispatch, not just above serve()'s own call),
 // so — like the --ledger/--prev cases above — none of these need the gh-stub
-// rig board-cli.test.mjs carries for the guards that fire mid-gather().
+// rig that board-cli.test.mjs carries for its other runBoard cases.
 test("CLI: build refuses a trailing --port, same message as serve", () => {
   const r = spawnSync(process.execPath, [SCRIPT, "build", "--port"], { encoding: "utf8" });
   assert.equal(r.status, 2, r.stderr);
