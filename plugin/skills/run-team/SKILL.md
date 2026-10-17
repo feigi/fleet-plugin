@@ -2345,7 +2345,7 @@ A member that bails demotes nothing itself; demotion by cause is yours
 
 ## Fix the tooling mid-run
 
-A tooling fix is done when it is re-pinned, written onto the ledger, reported to the maintainer in one line and landed as a PR through the run's own merge queue.
+Re-pin the fix, write it onto the ledger, report it to the maintainer in one line, then land it as a PR through the run's own merge queue.
 
 Two members failing the same way is the instruction, not the agents. Fix the file
 during the run — deferring loses the evidence that found it.
