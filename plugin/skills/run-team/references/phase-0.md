@@ -249,6 +249,7 @@ record could not be written. Run the rotation before this run's own first
 tick, beat or ledger write, each of which writes a mark the fallback reads. Older
 archives, hand-named ones included, are left alone.
 
+Before the rotation, `phase0.mjs` puts the held-aside receipt (`phase0.previous.json`) back at `phase0.json`, which `ledger.mjs rotate` then files as `phase0.<UTC stamp>.json`.
 `ledger.mjs rotate` archives the run's two receipts with the ledger, under the ledger archive's own stamp: `.fleet/phase0.<UTC stamp>.json` and `.fleet/closeout.<UTC stamp>.json` beside `.fleet/ledger.<UTC stamp>.md`.
 
 ## Reclaim scratch
