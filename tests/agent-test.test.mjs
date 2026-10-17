@@ -194,10 +194,10 @@ test("runner: an invalid UTF-8 byte in a discovered path does not drop it", () =
 // byte-orientation makes the pin invisible anyway, same ceiling as the
 // directory branch. Nothing behavioural can fail if this pin goes missing, on
 // any platform available here — only a source check can.
-test("agent-test still pins the locale on both find-output commands", () => {
+test("agent-test still pins the locale on every find-output command", () => {
   const src = readFileSync(RUNNER, "utf8");
-  assert.equal((src.match(/LC_ALL=C grep\b/g) ?? []).length, 1,
-    "the directory branch's grep pin (find's output, above) went missing or moved");
+  assert.equal((src.match(/LC_ALL=C grep\b/g) ?? []).length, 2,
+    "a directory-branch grep pin on find's output (test files, or skipped .worktrees) went missing or moved");
   assert.equal((src.match(/LC_ALL=C sed\b/g) ?? []).length, 2,
     "one of the two sed pins (directory branch above, file-argument branch below) went missing");
 });
@@ -520,7 +520,7 @@ test("runner: the divergence walk ends on an argument that resolves TO the share
   // discarding the runner's own file-list handoff (`set -- "$@"` in place of
   // `set -- "$@" $files`) leaves this row byte-identical
   // at `pass 1`, because node's own default discovery from this cwd
-  // independently excludes the same vendored file too. V2's `pass 12` below
+  // independently excludes the same vendored file too. V2's `pass 7` below
   // is what pins the argument being honoured; this row does not.
   const bare = v1();
   assert.equal(bare.status, 0, bare.stdout + bare.stderr);
@@ -538,13 +538,14 @@ test("runner: the divergence walk ends on an argument that resolves TO the share
   const under = join(tempDir("anc-"), "node_modules");
   mkdirSync(under, { recursive: true });
   const a = apply(SUITE, under);
-  // 12: the six test files of the committed fixture, once in the repo's own
-  // checkout and once in the worktree built from it, both under the named
-  // ancestor. Bare discovery from the worktree reports 6, so the count also
-  // says the argument reached node instead of being dropped.
+  // 7: the six test files of the committed fixture in the repo's own checkout,
+  // plus one placed there alone; the worktree's copy sits under `.worktrees`,
+  // which the walk skips (#3378). Bare discovery from the worktree reports 6,
+  // so the count also says the argument reached node instead of being dropped.
+  writeFileSync(join(dirname(dirname(a.wt)), "main-only.test.mjs"), PASSES);
   const r = a.run(join("..", "..", ".."));
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^(?:ℹ|#) pass 12$/m);
+  assert.match(r.stdout, /^(?:ℹ|#) pass 7$/m);
 });
 
 // The guard resolves `$arg` against the process cwd, but `$root` against the
@@ -1571,6 +1572,62 @@ test("runner: a mixed argv of files and directories still runs everything", () =
   const r = apply(SUITE).run("t/a.test.mjs", "t/nested");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /^(?:ℹ|#) pass 2$/m);
+});
+
+// #3378: a walk that reaches `.worktrees/` folds every worktree's suite into
+// this tree's run. The runner is installed in the repository's own checkout
+// here — the `claim-XXXX` that holds `.worktrees/42-slug` — beside a second
+// worktree, because that checkout is where a bare or `.` walk meets
+// `.worktrees`; from inside a worktree it never does.
+test("runner: the directory walk skips .worktrees and says so, unless .worktrees is the start point", () => {
+  const a = apply(SUITE);
+  const dir = dirname(dirname(a.wt));
+  const other = join(dir, ".worktrees", "99-other", "t");
+  mkdirSync(other, { recursive: true });
+  writeFileSync(join(other, "other.test.mjs"), PASSES);
+  writeExecStub(join(dir, "agent-test"), RUNNER_BODY);
+  installWrapper(dir);
+  const run = (...args) =>
+    spawnSync(join(dir, "agent-test"), args, { cwd: dir, encoding: "utf8", env: runnerEnv() });
+  const skipped = /\.worktrees skipped — worktree suites are excluded from the walk, not missing/;
+
+  // 6: the checkout's own suite. A walk into `.worktrees` would add the
+  // worktree's six and the second worktree's one.
+  for (const [label, r] of [["bare", run()], [".", run(".")]]) {
+    assert.equal(r.status, 0, label + ": " + r.stdout + r.stderr);
+    assert.match(r.stdout, /^(?:ℹ|#) pass 6$/m, label);
+    assert.match(r.stderr, skipped, label);
+  }
+
+  // 7: both worktrees' suites, for every spelling whose last component is
+  // `.worktrees` — BSD find applies `-name` to the start point too, so an
+  // exemption read off a spelling prefix prunes the `./` and absolute ones.
+  for (const arg of [".worktrees", "./.worktrees", ".worktrees/", join(dir, ".worktrees")]) {
+    const r = run(arg);
+    assert.equal(r.status, 0, arg + ": " + r.stdout + r.stderr);
+    assert.match(r.stdout, /^(?:ℹ|#) pass 7$/m, arg);
+    assert.doesNotMatch(r.stderr, skipped, arg);
+  }
+
+  // A name that only starts with `.worktrees` is not the exemption: the
+  // worktree nested in it is skipped like any other.
+  const old = join(dir, ".worktrees-old");
+  mkdirSync(join(old, ".worktrees", "1-x"), { recursive: true });
+  writeFileSync(join(old, "o.test.mjs"), PASSES);
+  writeFileSync(join(old, ".worktrees", "1-x", "x.test.mjs"), PASSES);
+  const prefixed = run(".worktrees-old");
+  assert.equal(prefixed.status, 0, prefixed.stdout + prefixed.stderr);
+  assert.match(prefixed.stdout, /^(?:ℹ|#) pass 1$/m);
+  assert.match(prefixed.stderr, skipped);
+
+  // From inside a worktree, an argument naming its ancestor checkout skips
+  // the caller's own suite with its siblings' — said on stderr, so a
+  // smaller suite cannot pass for the whole one. 7: the checkout's six and
+  // `.worktrees-old`'s own one.
+  const up = a.run(join("..", ".."));
+  assert.equal(up.status, 0, up.stdout + up.stderr);
+  assert.match(up.stdout, /^(?:ℹ|#) pass 7$/m);
+  assert.match(up.stderr, skipped);
 });
 
 // #97: a bare invocation must go through the same expansion as an explicit
