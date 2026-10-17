@@ -1729,8 +1729,8 @@ reason: null}` says the run executed real tests and its exit status is
 explained by its counts; usable is not green, so a usable run can have failing
 tests. `usable: false` carries `reason`, including a run that never started
 (install skipped, no suite slot). The verdict says nothing about whether a
-dimension reviewed: a specialist that returned reviewed, and its findings were
-verified as usual, whatever the suite verdict. With `usable: false` the
+dimension reviewed: a specialist that returned reviewed, its findings verified
+as usual, whatever the suite verdict. With `usable: false` the
 fix-applier names `shared test run not usable: <reason>` in its final verdict
 and does nothing more — its own `<testCmd>` run and CI cover the suite.
 
