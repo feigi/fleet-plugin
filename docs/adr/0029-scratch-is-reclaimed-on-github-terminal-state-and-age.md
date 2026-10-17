@@ -4,7 +4,10 @@
 on #2316, against `main` at `c54a597d`, and amended the same day (main
 `532b8f48`) to add `--after-rotate`. Builds on ADR 0027, which fixed where the
 scratch root lives and left its cleanup to #2316. Amended by #3317: decisions
-1 and 3 are extended by decision 11, the sibling keys.
+1 and 3 are extended by decision 11, the sibling keys. Amended by #3403:
+decision 5 also keeps an OPEN ticket's `impl-<N>/` while a claim worktree
+under `.worktrees/` still stands for it, and judges it by the 7-day rule once
+none does.
 
 ## Context
 
@@ -52,8 +55,9 @@ change; in the files this change edits those numbers no longer hold.
    (`review-pr-<M>`, `fix-pr-<M>`, `finisher-pr-<M>`, any retry suffix). Any
    live `merge-bot-<n>` holds all `pr<N>` reclamation for that sweep. An OPEN
    PR's `pr<M>/` is kept, except its `run-*` roots (rule 7).
-5. **`impl-<N>/`:** reclaimed when the issue is CLOSED, or OPEN with no live
-   `impl-<N>` token and idle past the retention.
+5. **`impl-<N>/` (amended by #3403):** reclaimed when the issue is CLOSED, or
+   OPEN with no live `impl-<N>` token, no claim worktree under `.worktrees/`
+   still standing for it, and idle past the retention.
 6. **Age rule, 7 days.** Every other entry at the root is reclaimed when idle
    past 7 days and no live token's name appears in its name. "Idle" is the
    newest mtime anywhere under the entry, never the top-level mtime. A keyed

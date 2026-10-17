@@ -30,8 +30,15 @@
 //            follow the --pr rule below.
 //   impl-<N>/
 //            removed when issue #N is CLOSED, or OPEN with no live
-//            impl-<N>[-x] token and idle past the retention, so a bailed or
-//            released ticket's partition is not inherited by its next claim.
+//            impl-<N>[-x] token, no claim worktree standing, and idle past
+//            the retention, so a bailed or released ticket's partition is not
+//            inherited by its next claim. A claim worktree stands when a
+//            worktree directly under this checkout's .worktrees/ names N as a
+//            whole segment of its directory name and that directory is there:
+//            an OPEN ticket's partition is kept while one stands, however idle.
+//            A claim worktree that cannot be checked — `git worktree list`
+//            failing, a .worktrees/ that cannot be read, or a directory there
+//            named for N that git does not list — keeps it, with that reason.
 //   reports/<member>.json
 //            a member's report file. `reports/` itself is never removed, and
 //            is not aged out whole: each file is judged on its own, by the
@@ -93,7 +100,7 @@
 // read for any reason other than ENOENT. Nothing is removed before a refusal.
 
 import { spawnSync } from "node:child_process";
-import { lstatSync, readdirSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineFlags, isDigits, makeDie, writeAll } from "./arg.mjs";
@@ -205,24 +212,88 @@ function liveNames(file) {
   return liveOnLedger(d.rows, d.dispatched).tokens.map((t) => t.name);
 }
 
-// The ledger file, or null when it is absent. Only ENOENT is absence; a
-// workspace that cannot be resolved, or a path that cannot be looked up,
-// refuses. `lstat`, so a dangling symlink is a ledger that cannot be read.
+// The checkout the fleet dir sits in, and its ledger file — `file` null when it
+// is absent. Only ENOENT is absence; a workspace that cannot be resolved, or a
+// path that cannot be looked up, refuses. `lstat`, so a dangling symlink is a
+// ledger that cannot be read.
 function ledgerFile() {
-  let file;
+  let dir;
   try {
-    file = fleetFile("ledger.md");
+    dir = fleetFile(null);
   } catch (e) {
     if (!(e instanceof FleetDirUnresolvable)) throw e;
     die(`${e.message} — the ledger cannot be found, so which members are live is unknown`);
   }
+  const file = join(dir, "ledger.md");
   try {
     lstatSync(file);
-    return file;
+    return { checkout: dirname(dir), file };
   } catch (e) {
-    if (e.code === "ENOENT") return null;
+    if (e.code === "ENOENT") return { checkout: dirname(dir), file: null };
     die(`could not look for the ledger ${file}: ${e.message}`);
   }
+}
+
+// The linked worktrees under `checkout`'s `.worktrees/`, read the way
+// stranded.mjs reads them. `paths` is every path git lists; `home` is that
+// directory's realpath, or null when it does not exist, so no worktree sits
+// inside it. `{unknown}` when git's registry cannot be read or the directory
+// cannot be resolved; what stands inside it is read in claimWorktree(). An
+// unknown is never read as no worktree.
+function worktreeListing(checkout) {
+  const r = spawnSync("git", ["worktree", "list", "--porcelain", "-z"], {
+    cwd: checkout, encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS, env: gitEnv(),
+  });
+  if (r.error || r.status !== 0) return { unknown: `git worktree list failed (${how(r)})` };
+  const paths = r.stdout.split("\0").filter((f) => f.startsWith("worktree ")).map((f) => f.slice("worktree ".length));
+  const dir = join(checkout, ".worktrees");
+  try {
+    return { paths, home: realpathSync(dir) };
+  } catch (e) {
+    if (e.code === "ENOENT") return { paths, home: null };
+    return { unknown: `cannot resolve ${dir} (${e.code ?? e.message})` };
+  }
+}
+
+// Whether a claim worktree stands for issue `n`: a listed worktree directly under
+// `.worktrees/` whose directory name names `n` as a whole segment, and whose
+// directory is still there. `{stands}` is true or false; `{unknown}`
+// when a candidate's presence cannot be told. A registration whose directory is
+// gone stands for nothing. A directory under `.worktrees/` named for `n` that git
+// does not list is an unknown, never none: git drops a worktree whose
+// registration it cannot read — an unreadable `.git/worktrees/`, an empty
+// `gitdir` file — from the list and still exits 0. The segment rule is
+// stranded.mjs's, for a claim's own worktree.
+function claimWorktree(listing, n) {
+  if (listing.unknown !== undefined) return { unknown: listing.unknown };
+  if (listing.home === null) return { stands: false };
+  const named = new RegExp(`(^|[/-])${n}([-/]|$)`);
+  for (const p of listing.paths) {
+    if (!named.test(basename(p))) continue;
+    try {
+      if (realpathSync(dirname(p)) !== listing.home) continue;
+    } catch (e) {
+      if (e.code === "ENOENT") continue;
+      return { unknown: `cannot resolve ${dirname(p)} (${e.code ?? e.message})` };
+    }
+    try {
+      statSync(p);
+    } catch (e) {
+      if (e.code === "ENOENT") continue;
+      return { unknown: `cannot tell whether ${p} exists (${e.code ?? e.message})` };
+    }
+    return { stands: true };
+  }
+  let names;
+  try {
+    names = readdirSync(listing.home);
+  } catch (e) {
+    if (e.code === "ENOENT") return { stands: false };
+    return { unknown: `cannot read ${listing.home} (${e.code ?? e.message})` };
+  }
+  const unlisted = names.find((name) => named.test(name));
+  if (unlisted !== undefined) return { unknown: `${join(listing.home, unlisted)} is there but git does not list it as a worktree` };
+  return { stands: false };
 }
 
 // `{type, state}` per number GitHub answered (type "Issue" or "PullRequest",
@@ -285,7 +356,7 @@ function githubStates(numbers) {
 }
 
 // The root sweep's verdicts: `{remove: [{path, reason}], kept: [{path, reason}]}`.
-function judgeRoot(root, names, live, now) {
+function judgeRoot(root, names, live, now, listing) {
   const cutoff = now - RETENTION_MS;
   const remove = [];
   const kept = [];
@@ -404,6 +475,15 @@ function judgeRoot(root, names, live, now) {
     const holder = implHolder(n);
     if (holder !== undefined) {
       kept.push({ path, reason: `issue #${n} is OPEN and live ${holder} names it` });
+      continue;
+    }
+    const claim = claimWorktree(listing, n);
+    if (claim.unknown !== undefined) {
+      kept.push({ path, reason: `its claim worktree cannot be checked: ${claim.unknown}` });
+      continue;
+    }
+    if (claim.stands) {
+      kept.push({ path, reason: "claim worktree stands" });
       continue;
     }
     if (freshUnder(path, cutoff) === null) remove.push({ path, reason: `issue #${n} is OPEN, no live impl-${n} token, idle past 7 days` });
@@ -530,7 +610,8 @@ function main() {
       failed.push({ path: dirname(root), error: e.message });
     }
   } else {
-    ledger = ledgerFile();
+    const found = ledgerFile();
+    ledger = found.file;
     if (ledger === null && !afterRotate) die("no .fleet/ledger.md — without it no live member can hold its scratch, so nothing is reclaimed; pass --after-rotate only straight after `ledger.mjs rotate`");
     const live = ledger === null ? [] : liveNames(ledger);
     let names;
@@ -539,7 +620,8 @@ function main() {
     } catch (e) {
       die(`could not list --root ${root}: ${e.message}`);
     }
-    ({ remove, kept } = judgeRoot(root, names, live, now));
+    const listing = worktreeListing(found.checkout);
+    ({ remove, kept } = judgeRoot(root, names, live, now, listing));
   }
 
   const removed = [];
