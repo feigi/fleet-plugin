@@ -211,6 +211,29 @@ test("a pending file with a column the corpus lacks fails the drain, leaves the 
   assert.deepEqual(f.ghCalls(), []);
 });
 
+test("an empty or blank-only pending file is removed with its own line, exit 0, and the corpus is untouched", () => {
+  for (const pending of ["", "\n\n", " \t\r\n"]) {
+    const f = fixture({ pending });
+    const before = readFileSync(join(f.repo, FEATURES), "utf8");
+    const r = f.run();
+    assert.equal(r.status, 0, `${JSON.stringify(pending)}: ${r.stderr}`);
+    assert.equal(existsSync(join(f.repo, PENDING)), false, `${JSON.stringify(pending)}: the empty pending file is gone`);
+    assert.match(r.stdout, /metrics-refresh: drain: \.fleet\/ticket-features\.pending\.tsv was empty — removed \(an append created it and never wrote: crash or full disk\)/);
+    assert.doesNotMatch(r.stdout, /nothing pending/);
+    assert.equal(readFileSync(join(f.repo, FEATURES), "utf8"), before);
+  }
+});
+
+test("a pending file with rows but no header fails the drain naming the pending file, and is left in place", () => {
+  const row = pull({ ticket: "2", agent: "impl-2" });
+  const f = fixture({ pending: `${FEATURE_COLUMNS.map((c) => row[c]).join("\t")}\n` });
+  const r = f.run();
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /metrics-refresh: drain failed: \.fleet\/ticket-features\.pending\.tsv: ticket-features\.tsv header lacks run_date/);
+  assert.equal(existsSync(join(f.repo, PENDING)), true, "a headerless file is not repaired or removed");
+  assert.equal(existsSync(join(f.repo, GUARD)), false);
+});
+
 test("usage: only the declared flag and no positional, else exit 2", () => {
   const f = fixture();
   for (const args of [["--bogus"], ["phase-0"], ["--repo"]]) {

@@ -14,6 +14,8 @@
 // `docs/metrics/ticket-features.tsv`, deduped on `session` + `agent`, and
 // deletes the pending file. A crash between the write and the delete leaves
 // rows the next drain finds already there, so a second run changes nothing.
+// A pending file that is empty, or blank lines only, is removed with its own
+// line: an append created it and never wrote.
 //
 // COST GUARD. `pr-cost.mjs --guard` rewrites `.fleet/cost-guard.json`, which
 // the router reads and fails closed without. It needs all three metrics TSVs;
@@ -56,7 +58,16 @@ function drain(repo) {
   const pending = join(repo, PENDING);
   if (!existsSync(pending)) return say(`drain: nothing pending in ${PENDING}`);
   const pendingText = readFileSync(pending, "utf8");
-  const incoming = parseFeatures(pendingText);
+  if (pendingText.trim() === "") {
+    unlinkSync(pending);
+    return say(`drain: ${PENDING} was empty — removed (an append created it and never wrote: crash or full disk)`);
+  }
+  let incoming;
+  try {
+    incoming = parseFeatures(pendingText);
+  } catch (e) {
+    throw new Error(`${PENDING}: ${e.message}`);
+  }
   const target = join(repo, FEATURES);
   let text = existsSync(target) ? readFileSync(target, "utf8") : `${FEATURE_COLUMNS.join("\t")}\n`;
   const seen = new Set(parseFeatures(text).map(pullKey));
