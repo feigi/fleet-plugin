@@ -1118,7 +1118,7 @@ decides the rest — two resolve automatically, every other one escalates:
 |---|---|
 | `live-editor` | **Automatic.** Ask the live member **by name** for its report, wait for it, then dispatch `finisher-pr-<M>-b` at the current head. If the head moved in the meantime, resolve it as `past-pin` instead. |
 | `past-pin` | **Automatic, through the tick: re-review.** The head carries commits no reviewer read. The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's tokens as any review's, with `ledger.mjs review <M>` onto the PR's row, its runner under the next letter the PR's rows do not carry yet (`review-pr-<M>-b`, or `-c` where a retry already took `-b`) — `review` refuses a second `review-pr-<M>` and names the free one — and its result reaches a fresh finisher through the same gate. |
-| `rebase` | **Escalate** — comment and flag, nothing more. Read the report's `git cherry <pin> HEAD origin/main`: only `-` lines is a clean rebase, and a `+` line is a conflict resolution that changed content or a commit past the pin. No automatic rule until a live halt shows the case recurring. |
+| `rebase` | **Escalate** — comment and flag, nothing more. The report's `evidence.replay` reads `pure` only when `git range-diff origin/main <pin> HEAD` pairs every pinned commit with an unchanged one; `changed` (a commit dropped, edited or added, or a stale `origin/main`) or `unknown` means read `evidence.rangeDiff` before acting, and `evidence.remote.state` says whether that head is on the PR. No automatic rule until a live halt shows the case recurring. |
 | `unreadable`, `missing`, `absent`, `other` | **Escalate** — comment and flag, no automatic retry. |
 
 ### Why a `past-pin` halt needs the tick
@@ -1904,8 +1904,8 @@ refuses a finisher brief rendered without it.
    duty 1's verdict names it, and `other` for every other halt — that
    verdict's own `other`, and a halt at duty 2, duty 3, the instrument
    re-check or the CI gate. A duty 1 halt's report carries the verdict as
-   printed, the JSON line, so a `rebase` halt's report carries the output of
-   `git cherry <pin> HEAD origin/main` that its `evidence` holds.
+   printed, the JSON line, so a `rebase` halt's report carries `replay`,
+   `rangeDiff` and `remote` from its `evidence`.
 
 **Once the label is on, take it off before you approve any push.** The label is a
 verdict on the tree the finisher read, and a GitHub label does not follow the
