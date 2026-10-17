@@ -474,16 +474,19 @@ const FILES = [
   // #3346. The `allowed_merge_methods` row's prove-merge.sh cites drifted the
   // same way: the die's line and the `:8-9` continuation for the proof header.
   // Converted to the die's message and the header's `secondParentIsHead` gate.
-  // The bare backticked `:N` / `:N-M` ban catches a continuation cite whose
-  // file is named earlier in the sentence, which the `file:\d+` forms miss.
+  // The bare `:N` / `:N-M` ban, backticked or not and comma lists included,
+  // catches a continuation cite whose file is named earlier in the sentence,
+  // which the `file:\d+` forms miss; its `(?<!\w)` lets a timestamp's `12:30`
+  // through. The prove-merge.sh ban also takes the file backticked apart from
+  // its `:N`, and the `prove-merge.sh line N` prose spelling.
   {
     path: ["..", "docs", "adr", "0007-main-ruleset-is-the-merge-gate.md"],
     stale: [
       /ci\.yml:\d+/,
       /release\.yml:\d+/,
       /release-label\.yml:\d+/,
-      /prove-merge\.sh:\d+/,
-      /`:\d+(-\d+)?`/,
+      /prove-merge\.sh`?\s*(?::|line\s+)\d+/,
+      /(?<!\w)`?:\d+(?:[-,]\d+)*`?/,
     ],
     live: [
       "# Blocking, every PR",
