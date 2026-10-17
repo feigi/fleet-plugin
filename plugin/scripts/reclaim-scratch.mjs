@@ -30,8 +30,13 @@
 //            follow the --pr rule below.
 //   impl-<N>/
 //            removed when issue #N is CLOSED, or OPEN with no live
-//            impl-<N>[-x] token and idle past the retention, so a bailed or
-//            released ticket's partition is not inherited by its next claim.
+//            impl-<N>[-x] token, no claim worktree standing, and idle past
+//            the retention, so a bailed or released ticket's partition is not
+//            inherited by its next claim. A claim worktree stands when a
+//            worktree directly under this checkout's .worktrees/ names N as a
+//            whole segment of its directory name and that directory is there:
+//            an OPEN ticket's partition is kept while one stands, however idle.
+//            A .worktrees/ that cannot be read keeps it, with that reason.
 //   reports/<member>.json
 //            a member's report file. `reports/` itself is never removed, and
 //            is not aged out whole: each file is judged on its own, by the
@@ -93,7 +98,7 @@
 // read for any reason other than ENOENT. Nothing is removed before a refusal.
 
 import { spawnSync } from "node:child_process";
-import { lstatSync, readdirSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineFlags, isDigits, makeDie, writeAll } from "./arg.mjs";
@@ -225,6 +230,62 @@ function ledgerFile() {
   }
 }
 
+// The linked worktrees under this checkout's `.worktrees/`, read the way
+// stranded.mjs reads them. `paths` is every path git lists; `home` is that
+// directory's realpath, or null when it does not exist, so no worktree sits
+// inside it. `{unknown}` when git's registry or the directory cannot be read:
+// an unknown is never read as no worktree.
+function worktreeListing() {
+  let checkout;
+  try {
+    checkout = dirname(fleetFile(null));
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
+    return { unknown: e.message };
+  }
+  const r = spawnSync("git", ["worktree", "list", "--porcelain", "-z"], {
+    cwd: checkout, encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS, env: gitEnv(),
+  });
+  if (r.error || r.status !== 0) return { unknown: `git worktree list failed (${how(r)})` };
+  const paths = r.stdout.split("\0").filter((f) => f.startsWith("worktree ")).map((f) => f.slice("worktree ".length));
+  const dir = join(checkout, ".worktrees");
+  try {
+    return { paths, home: realpathSync(dir) };
+  } catch (e) {
+    if (e.code === "ENOENT") return { paths, home: null };
+    return { unknown: `cannot resolve ${dir} (${e.code ?? e.message})` };
+  }
+}
+
+// The claim worktree standing for issue `n`: a listed worktree directly under
+// `.worktrees/` whose directory name names `n` as a whole segment, and whose
+// directory is still there. `{stands}` is its path or null for none; `{unknown}`
+// when a candidate's presence cannot be told. A registration whose directory is
+// gone stands for nothing. The segment rule is stranded.mjs's, for a claim's own
+// worktree.
+function claimWorktree(listing, n) {
+  if (listing.unknown !== undefined) return { unknown: listing.unknown };
+  if (listing.home === null) return { stands: null };
+  const named = new RegExp(`(^|[/-])${n}([-/]|$)`);
+  for (const p of listing.paths) {
+    if (!named.test(basename(p))) continue;
+    try {
+      if (realpathSync(dirname(p)) !== listing.home) continue;
+    } catch (e) {
+      if (e.code === "ENOENT") continue;
+      return { unknown: `cannot resolve ${dirname(p)} (${e.code ?? e.message})` };
+    }
+    try {
+      statSync(p);
+    } catch (e) {
+      if (e.code === "ENOENT") continue;
+      return { unknown: `cannot tell whether ${p} exists (${e.code ?? e.message})` };
+    }
+    return { stands: p };
+  }
+  return { stands: null };
+}
+
 // `{type, state}` per number GitHub answered (type "Issue" or "PullRequest",
 // or null for a number that names nothing), or `{unreachable}` for a number
 // that has no usable answer. GitHub resolves every alias it can and nulls the
@@ -285,7 +346,7 @@ function githubStates(numbers) {
 }
 
 // The root sweep's verdicts: `{remove: [{path, reason}], kept: [{path, reason}]}`.
-function judgeRoot(root, names, live, now) {
+function judgeRoot(root, names, live, now, listing) {
   const cutoff = now - RETENTION_MS;
   const remove = [];
   const kept = [];
@@ -404,6 +465,15 @@ function judgeRoot(root, names, live, now) {
     const holder = implHolder(n);
     if (holder !== undefined) {
       kept.push({ path, reason: `issue #${n} is OPEN and live ${holder} names it` });
+      continue;
+    }
+    const claim = claimWorktree(listing, n);
+    if (claim.unknown !== undefined) {
+      kept.push({ path, reason: `its claim worktree cannot be checked: ${claim.unknown}` });
+      continue;
+    }
+    if (claim.stands !== null) {
+      kept.push({ path, reason: "claim worktree stands" });
       continue;
     }
     if (freshUnder(path, cutoff) === null) remove.push({ path, reason: `issue #${n} is OPEN, no live impl-${n} token, idle past 7 days` });
@@ -539,7 +609,8 @@ function main() {
     } catch (e) {
       die(`could not list --root ${root}: ${e.message}`);
     }
-    ({ remove, kept } = judgeRoot(root, names, live, now));
+    const listing = worktreeListing();
+    ({ remove, kept } = judgeRoot(root, names, live, now, listing));
   }
 
   const removed = [];

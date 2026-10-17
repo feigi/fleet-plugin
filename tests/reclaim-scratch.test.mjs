@@ -278,6 +278,88 @@ test("(3) impl-<N>: CLOSED removed; OPEN + live token kept; OPEN, no token, idle
   assert.ok(existsSync(held) && existsSync(young));
 });
 
+// A linked worktree at `.worktrees/<rel>` of the fixture repository, on a
+// branch of its own. The repository has no commit until this makes one.
+function worktree(f, rel, branch) {
+  const env = { ...GIT_ENV, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+  if (spawnSync("git", ["-C", f.repo, "rev-parse", "--verify", "-q", "HEAD"], { env }).status !== 0) {
+    const c = spawnSync("git", ["-C", f.repo, "commit", "-q", "--allow-empty", "-m", "init"], { env, encoding: "utf8" });
+    assert.equal(c.status, 0, c.stderr);
+  }
+  const p = join(f.repo, ".worktrees", rel);
+  const w = spawnSync("git", ["-C", f.repo, "worktree", "add", "-q", "-b", branch, p], { env, encoding: "utf8" });
+  assert.equal(w.status, 0, w.stderr);
+  return p;
+}
+
+test("(3b) OPEN impl-<N>/ idle 8 d is kept while .worktrees/<N>-impl-<N> stands, and removed once that directory is gone", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 22: ISSUE("OPEN"), 23: ISSUE("OPEN") });
+  worktree(f, "22-impl-22", "implementer/22-impl-22");
+  const gone = worktree(f, "23-impl-23", "implementer/23-impl-23");
+  rmSync(gone, { recursive: true, force: true });
+  const standing = f.dir("impl-22", 8);
+  const absent = f.dir("impl-23", 8);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [join(f.root, "impl-23")]);
+  assert.match(reasonOf(r.out.removed, absent), /issue #23 is OPEN, no live impl-23 token, idle past 7 days/);
+  assert.equal(reasonOf(r.out.kept, standing), "claim worktree stands");
+  assert.ok(existsSync(standing) && !existsSync(absent));
+});
+
+test("(3c) CLOSED impl-<N>/ is removed with its claim worktree standing; OPEN with a live token is kept with the token's reason", (t) => {
+  const f = fixture(t);
+  f.ledger(["#25 impl-25"], ["impl-25"]);
+  f.states({ 24: ISSUE("CLOSED"), 25: ISSUE("OPEN") });
+  worktree(f, "24-impl-24", "implementer/24-impl-24");
+  worktree(f, "25-impl-25", "implementer/25-impl-25");
+  const closed = f.dir("impl-24", 0);
+  const held = f.dir("impl-25", 8);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [join(f.root, "impl-24")]);
+  assert.match(reasonOf(r.out.removed, closed), /issue #24 is CLOSED/);
+  assert.match(reasonOf(r.out.kept, held), /live impl-25/);
+  assert.ok(existsSync(held) && !existsSync(closed));
+});
+
+test("(3d) a worktree for another issue does not keep impl-<N>/: .worktrees/129-impl-129 leaves impl-12 idle and removable", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 12: ISSUE("OPEN") });
+  worktree(f, "129-impl-129", "implementer/129-impl-129");
+  const idle = f.dir("impl-12", 8);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [join(f.root, "impl-12")]);
+  assert.match(reasonOf(r.out.removed, idle), /issue #12 is OPEN, no live impl-12 token, idle past 7 days/);
+  assert.ok(!existsSync(idle));
+});
+
+test("(3e) an undeterminable .worktrees/ keeps an idle OPEN impl-<N>/ with the reason it could not be checked", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 13: ISSUE("OPEN") });
+  worktree(f, "13-impl-13", "implementer/13-impl-13");
+  const idle = f.dir("impl-13", 8);
+  chmodSync(join(f.repo, ".worktrees"), 0o000);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), []);
+  assert.match(reasonOf(r.out.kept, idle), /its claim worktree cannot be checked: cannot tell whether .*13-impl-13 exists/);
+  assert.ok(existsSync(idle));
+});
+
 test("(4) an unkeyed entry idle 8 d is removed; one fresh file nested three levels down keeps it", (t) => {
   const f = fixture(t);
   f.ledger();
