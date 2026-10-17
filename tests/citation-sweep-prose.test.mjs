@@ -470,14 +470,28 @@ const FILES = [
   // `validate-release-label` jobs' `if:` conditions, both cited on the same
   // `required_status_checks` table row). Converted to the job/step names,
   // the same construct ADR 0010 already uses for these same two files.
+  //
+  // #3346. The `allowed_merge_methods` row's prove-merge.sh cites drifted the
+  // same way: the die's line and the `:8-9` continuation for the proof header.
+  // Converted to the die's message and the header's `secondParentIsHead` gate.
+  // The bare backticked `:N` / `:N-M` ban catches a continuation cite whose
+  // file is named earlier in the sentence, which the `file:\d+` forms miss.
   {
     path: ["..", "docs", "adr", "0007-main-ruleset-is-the-merge-gate.md"],
-    stale: [/ci\.yml:\d+/, /release\.yml:\d+/, /release-label\.yml:\d+/],
+    stale: [
+      /ci\.yml:\d+/,
+      /release\.yml:\d+/,
+      /release-label\.yml:\d+/,
+      /prove-merge\.sh:\d+/,
+      /`:\d+(-\d+)?`/,
+    ],
     live: [
       "# Blocking, every PR",
       "`release.yml`'s `Determine bump segment` step",
       "`release-label.yml`'s `auto-label-bots` job",
       "`release-label.yml`'s `validate-release-label` job",
+      "`has no second parent — not a merge commit` die",
+      "`secondParentIsHead` gate",
     ],
   },
   // #1756. ADR 0010's own evidence, corrected in place. Its ci.yml citation
