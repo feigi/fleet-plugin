@@ -157,7 +157,7 @@ test("the section states the rule in the corrected direction", () => {
   assert.match(
     TRAPS,
     Pin.phrase("**zsh word-splits an unquoted command substitution's result; it does NOT split an unquoted parameter expansion.**"),
-    "Shell traps states the split rule without a self-referential pointer to references/shell-traps.md",
+    "Shell traps no longer states the split rule",
   );
   assert.match(
     TRAPS_MD.section("## zsh splits a command substitution, never an unquoted parameter expansion", "references/shell-traps.md").text,

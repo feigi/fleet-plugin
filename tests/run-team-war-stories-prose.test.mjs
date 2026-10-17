@@ -11,7 +11,9 @@
 //     every sentence of it — after CORRECTIONS below — is found as often as it
 //     was said across references/, and, but for a kept clause, not in SKILL.md;
 //   - each moved paragraph sits under its heading in its reference file, and
-//     its rule's kept clause sits beside the pointer to that file;
+//     its rule's kept clause sits beside the pointer to that file in SKILL.md —
+//     but for the Shell traps rules, whose clauses sit in
+//     references/shell-traps.md with no pointer;
 //   - SKILL.md says `measured` only on a line carrying a pointer, and every
 //     reference file SKILL.md cites exists.
 //
@@ -207,8 +209,9 @@ test("the fixture is the removed text: from the first Measured paragraph to the 
 
 const keptCount = (text, clause, file) => (text.match(new RegExp(Pin.phrase(`${clause} See references/${file}`).source, "g")) ?? []).length;
 
-// The Shell traps section moved whole into references/shell-traps.md, and its
-// five rules have no pointer beside them — each clause appears exactly once.
+// The Shell traps section moved whole into references/shell-traps.md, and none
+// of its rules has a pointer beside it: each clause appears there exactly once,
+// with no pointer after it.
 const SHELL_TRAPS_MD = reference("shell-traps.md");
 
 for (const [file, heading, clause, opening, imperative] of MOVED) {
@@ -219,14 +222,12 @@ for (const [file, heading, clause, opening, imperative] of MOVED) {
   if (clause === null) continue;
   const kept = imperative === undefined ? clause : `${clause} ${imperative}`;
   if (file === "shell-traps.md") {
-    // shell-traps.md: check clause appears exactly once without pointer
     const clauseCount = (text, c) => (text.match(new RegExp(Pin.phrase(c).source, "g")) ?? []).length;
     test(`references/${file} keeps "${kept.slice(0, 60)}…" with no pointer`, () => {
       assert.equal(clauseCount(SHELL_TRAPS_MD, kept), 1);
+      assert.equal(keptCount(SHELL_TRAPS_MD, kept, file), 0, `references/${file} points this rule at itself`);
     });
   } else {
-    // Other files: check clause appears exactly once beside the pointer
-    const keptCount = (text, c, f) => (text.match(new RegExp(Pin.phrase(`${c} See references/${f}`).source, "g")) ?? []).length;
     test(`SKILL.md keeps "${kept.slice(0, 60)}…" with See references/${file} beside it`, () => {
       assert.equal(keptCount(SKILL, kept, file), 1);
     });
