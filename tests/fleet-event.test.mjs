@@ -24,6 +24,8 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { foldLedger } from "../plugin/scripts/fleet-tick.mjs";
+import { BAILS } from "../plugin/scripts/fleet-event.mjs";
+import { SCHEMAS } from "../plugin/scripts/report-schema.mjs";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
 const REAL_SCRIPTS = join(PLUGIN, "scripts");
@@ -296,6 +298,10 @@ for (const [cause, label, detail, kindArgs] of [
   });
 }
 
+test("every bailCause the impl report schema admits is a cause impl-report acts on, and impl-report acts on no other", () => {
+  assert.deepEqual(SCHEMAS.impl.properties.bailCause.enum.filter((c) => c !== null).sort(), Object.keys(BAILS).sort());
+});
+
 // ── impl-report: a `fixed` bail ──────────────────────────────────────────────
 
 const SHORT = "abc1234";
@@ -380,6 +386,32 @@ test("impl-report on a fixed bail whose bailDetail opens with no sha prints NEED
   assert.match(r.stdout, /^NEED close #412 — the report's bailDetail opens with no commit sha/m);
   assert.deepEqual(r.order, [`settle impl-412 --from-report --reports ${join(f.scratch, "reports")}`, TICK]);
   assert.deepEqual(f.gh().issue[412], { labels: ["ready-for-agent", "in-progress", "bug"], comments: [] });
+});
+
+// Each opens with something that is not a whole 7-to-40-character sha: too
+// short, glued to the letters after it, and one hex character too long.
+for (const [what, detail] of [
+  ["too short", "abc12 — origin/main's guard already refuses the input"],
+  ["glued to letters", "abc1234zz — origin/main's guard already refuses the input"],
+  ["41 hex characters long", `abc1234${"0".repeat(34)} — origin/main's guard already refuses the input`],
+]) {
+  test(`impl-report on a fixed bail whose bailDetail opens with a sha ${what} prints NEED and never asks verify-sha.sh`, () => {
+    const f = fixedFixture({ exit: 0 });
+    f.report(bail("impl-412", "fixed", detail));
+    const r = f.run(["impl-report", "impl-412"]);
+    assert.equal(r.status, 4, r.err + r.stdout);
+    assert.match(r.stdout, /^NEED close #412 — the report's bailDetail opens with no commit sha/m);
+    assert.deepEqual(r.order, [`settle impl-412 --from-report --reports ${join(f.scratch, "reports")}`, TICK]);
+  });
+}
+
+test("impl-report on a fixed bail whose close comment landed before its close failed closes the still-open issue without posting the comment twice", () => {
+  const f = fixedFixture({ exit: 0, out: JSON.stringify({ branch: "main", sha: SHORT, reachable: true, tip: HEAD }) });
+  f.setGh({ issue: { 412: { labels: ["ready-for-agent", "in-progress", "bug"], comments: [CLOSE_BODY] } }, pr: {} });
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(f.ghCalls().find((c) => c.args[1] === "close").args, ["issue", "close", "412"]);
+  assert.deepEqual(f.gh().issue[412], { labels: ["bug"], comments: [CLOSE_BODY], state: "CLOSED" });
 });
 
 test("impl-report on a fixed bail whose close fails prints NEED and leaves the labels and the claim as they were", () => {

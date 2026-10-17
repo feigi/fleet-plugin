@@ -189,12 +189,12 @@ const USAGE = `usage: ${NAME}.mjs <kind> <args> [--in-flight <n>] — kinds: `
 // The label each `bailCause` demotes to, and the relabel template's kind.
 // `fixed` takes no label: it closes the ticket once `verify-sha.sh` finds the
 // commit on origin/main, and demotes to `needs-triage` when it does not.
-const BAILS = {
+export const BAILS = {
   undecided: { label: "needs-triage", kind: "needs-triage", flag: "line" },
   fork: { label: "ready-for-human", kind: "fork", flag: "options" },
   hands: { label: "ready-for-human", kind: "hands" },
   covered: { label: "ready-for-human", kind: "covered", flag: "detail" },
-  fixed: { label: null, kind: "fixed", flag: "detail" },
+  fixed: { kind: "fixed", flag: "detail" },
 };
 // The commit a `fixed` bail's detail opens with.
 const FIXED_SHA = /^([0-9a-f]{7,40})(?![0-9A-Za-z])/;

@@ -501,7 +501,7 @@ const CHANGED = [
   ],
   [
     "The call relabels, comments the cause and releases the claim, then ticks: the head the tick names next is a *different* ticket.",
-    "The call comments the cause and releases the claim — never on `fixed`'s exit 2 — then ticks: the head the tick names next is a *different* ticket."
+    "The call comments the cause and releases the claim — never when `fixed` neither closes nor relabels N — then ticks: the head the tick names next is a *different* ticket."
   ],
   [
     "| Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands or leaves a fork open; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |",

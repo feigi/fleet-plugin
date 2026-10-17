@@ -1089,7 +1089,7 @@ Each rule here is a judgement a driver stops for: answer it by the cause it name
   | already fixed on main | `fixed` | `<sha> — <how origin/main's tree meets the acceptance>` | `verify-sha.sh main <sha>` first. Exit 0: close N with the `fixed` comment (quotes `bailDetail`), drop `ready-for-agent`, release the claim (drops `in-progress`); no label. Exit 1: relabel `needs-triage`, comment `<sha> not on origin/main`. Exit 2: `NEED`, N untouched. | `=bailed` |
   | covered by an open PR M | `covered` | `PR#M — <how M's diff meets N's acceptance>` | relabel `ready-for-human` with the `covered` comment: close N when M merges, or restore `ready-for-agent` if M closes unmerged. PR M's body is never edited. | `=bailed` |
 
-  The call comments the cause and releases the claim — never on `fixed`'s exit 2 — then ticks:
+  The call comments the cause and releases the claim — never when `fixed` neither closes nor relabels N — then ticks:
   the head the tick names next is a *different* ticket.
 
 ### Resolving a finisher halt
@@ -1298,7 +1298,7 @@ owes beyond its call:
   and the tick prints no dispatch for it. The cockpit flags the PR
   `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand
   (**Resolving a finisher that died**, above), then run the tick.
-- **Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>`; the causes and the labels they take are under **Relabel causes**.
+- **Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>`; the causes and the issue action each takes are under **Relabel causes**.
 - **A review result lands** → see the result file written (by you or by the
   runner — **Reviewers** says which, per harness), then
   `fleet-event.mjs review-result <pr> <path>`: a PR with survived or unverified findings prints as
