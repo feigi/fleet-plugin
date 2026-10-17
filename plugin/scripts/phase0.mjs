@@ -43,7 +43,8 @@
 //   reclaim       `reclaim-scratch.mjs --root <scratch> --after-rotate --apply`,
 //                 then `reclaim-scratch.mjs --siblings --root <scratch> --apply`
 //                 for the other keys under the scratch parent, which runs
-//                 whatever the first answered. Recorded; never fails the run.
+//                 whatever the first answered. What either receipt's failed[]
+//                 names is listed. Recorded; never fails the run.
 //   recipe        `derive-testcmd.sh . install` and `. test --at origin/main`.
 //                 Either exiting 1 is a cache with nothing valid in it: pending,
 //                 `NEED derive-recipe`. Exit 3 (a tool the reader could not run)
@@ -282,9 +283,25 @@ function reclaim({ cwd, scratch }) {
   const live = node("reclaim-scratch.mjs", ["--root", scratch, "--after-rotate", "--apply"], { cwd });
   // The sibling pass runs whatever the live sweep answered: a failure there is recorded beside it, never a reason to skip it.
   const siblings = node("reclaim-scratch.mjs", ["--siblings", "--root", scratch, "--apply"], { cwd });
-  const lines = [live.status === 0 ? "scratch reclaimed" : withText(`reclaim-scratch.mjs ${live.how}, not enforced`, live)];
-  if (siblings.status !== 0) lines.push(withText(`sibling keys: reclaim-scratch.mjs ${siblings.how}, not enforced`, siblings));
-  return ok(lines.join("\n"));
+  return ok([
+    live.status === 0 ? "scratch reclaimed" : withText(`reclaim-scratch.mjs ${live.how}, not enforced`, live),
+    ...unreclaimed("scratch root", live),
+    ...(siblings.status === 0 ? unreclaimed("sibling keys", siblings) : [withText(`sibling keys: reclaim-scratch.mjs ${siblings.how}, not enforced`, siblings)]),
+  ].join("\n"));
+}
+
+// A pass that exited 0 still lists in its receipt's `failed[]` what it could
+// not judge or remove: each is named here, and none fails the step.
+function unreclaimed(what, r) {
+  if (r.status !== 0) return [];
+  let entries;
+  try {
+    ({ failed: entries } = JSON.parse(r.stdout));
+  } catch (e) {
+    return [`${what}: could not read reclaim-scratch.mjs's receipt: ${e.message}`];
+  }
+  if (!Array.isArray(entries)) return [`${what}: reclaim-scratch.mjs's receipt holds no failed[]`];
+  return entries.map((x) => `${what}: could not reclaim ${x?.path} (${x?.error})`);
 }
 
 function recipe({ cwd }) {

@@ -35,7 +35,8 @@ const git = (cwd, ...args) => {
 
 // What every stub is: log the call, then answer from `<name>.json` in the
 // case's control directory — `{exit, out, err}`, or `by[<args>]` for a script
-// whose answer turns on its arguments.
+// whose answer turns on its arguments, keyed by the whole argv joined, else by
+// its first word.
 const DRIVER = `import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -55,7 +56,7 @@ const log = (name, extra = {}) => {
 export function drive(name, args) {
   log(name, { args, cwd: process.cwd(), GIT_DIR: process.env.GIT_DIR ?? null });
   const c = control(name);
-  const spec = (c.by && c.by[args.join(" ")]) || c;
+  const spec = (c.by && (c.by[args.join(" ")] || c.by[args[0]])) || c;
   process.stdout.write(spec.out ?? "");
   process.stderr.write(spec.err ?? "");
   process.exit(spec.exit ?? 0);
@@ -450,6 +451,41 @@ test("cockpit and reclaim are recorded and never stop the run, whatever they ans
   assert.equal(f.calls("reclaim-scratch").length, 2, "the sibling pass did not run after the live sweep failed");
   assert.deepEqual(f.calls("reclaim-scratch")[1].args, ["--siblings", "--root", receipt.scratch, "--apply"]);
   assert.match(receipt.steps.cockpit.output, /launched/);
+});
+
+test("reclaim: a sibling pass that fails alone is recorded beside a clean live sweep, and never stops the run", () => {
+  const f = fixture();
+  f.control("reclaim-scratch", { by: { "--root": { out: JSON.stringify({ failed: [] }) }, "--siblings": { exit: 2, err: "reclaim-scratch: refuses" } } });
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  const receipt = f.receipt();
+  assert.deepEqual(statuses(receipt), allOk);
+  assert.deepEqual(receipt.steps.reclaim.output.split("\n"), ["scratch reclaimed", "sibling keys: reclaim-scratch.mjs exit 2, not enforced", "reclaim-scratch: refuses"]);
+});
+
+test("reclaim: what either pass's receipt lists in failed[] at exit 0 is named, and the step stays ok", () => {
+  const f = fixture();
+  const receiptOf = (failed) => ({ out: JSON.stringify({ applied: true, ledger: null, removed: [], kept: [], failed }) });
+  f.control("reclaim-scratch", {
+    by: {
+      "--root": receiptOf([{ path: "/s/pr7", error: "exit 1: rm: denied" }]),
+      "--siblings": receiptOf([{ path: "/p/other-aaaaaaaa", error: "EACCES" }]),
+    },
+  });
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  const receipt = f.receipt();
+  assert.deepEqual(statuses(receipt), allOk);
+  assert.deepEqual(receipt.steps.reclaim.output.split("\n"), [
+    "scratch reclaimed",
+    "scratch root: could not reclaim /s/pr7 (exit 1: rm: denied)",
+    "sibling keys: could not reclaim /p/other-aaaaaaaa (EACCES)",
+  ]);
+
+  const g = fixture();
+  g.control("reclaim-scratch", { by: { "--root": receiptOf([]), "--siblings": { out: "not json" } } });
+  assert.equal(g.run().status, 0);
+  assert.match(g.receipt().steps.reclaim.output, /^sibling keys: could not read reclaim-scratch\.mjs's receipt: /m);
 });
 
 test("recipe: a cache that refuses is a pending NEED with exit 4, and a re-run after it is met continues from there", () => {
