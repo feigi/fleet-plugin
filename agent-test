@@ -277,31 +277,6 @@ for arg do
       -*) findarg="./$arg/" ;;
       *) findarg="$arg/" ;;
     esac
-    # Exclude `.worktrees` during the directory walk, unless the argument
-    # itself is `.worktrees` or under it (in which case the user explicitly
-    # requested tests from that directory). This matters because BSD `find`
-    # matches `-name` against the starting point even with a trailing slash,
-    # so an unanchored `-name .worktrees` prune would prevent the walk from
-    # descending when `.worktrees` is the starting point, yielding a false
-    # "no test files" error. Check the argument's spelling (for `.worktrees`
-    # and `./.worktrees` explicitly passed) rather than its resolution,
-    # because the directory branch does not resolve. An argument passing the
-    # diverge walk as UNDER `.worktrees` (from this worktree's ancestry) is
-    # rare: only when called from within `.worktrees` with a relative path
-    # pointing outside and back into a sibling worktree, so the spelling
-    # alone suffices here.
-    # Exclude `.worktrees` during the directory walk, unless the argument
-    # itself is `.worktrees` or under it (in which case the user explicitly
-    # requested tests from that directory). Use if-else to avoid variable
-    # expansion issues with the find command.
-    case "$arg" in
-      .worktrees*)
-        found=$(find "$findarg" -name node_modules -prune -o -type f -perm -400 -print) || { printf 'agent-test: cannot read every path under %s\n' "$arg" >&2; exit 1; }
-        ;;
-      *)
-        found=$(find "$findarg" -name node_modules -prune -o -name .worktrees -prune -o -type f -perm -400 -print) || { printf 'agent-test: cannot read every path under %s\n' "$arg" >&2; exit 1; }
-        ;;
-    esac
     # GNU find (ubuntu-latest CI) answers `-type f` straight from the
     # dirent's own `d_type` field when the filesystem provides one (ext4
     # does) — no `stat`/`lstat` at all — and `-print` only ever needs the
@@ -341,8 +316,34 @@ for arg do
     # a check that was never meant to see it. One call, on the existing
     # `-type f` term, is what stays inside every fixture's contract that
     # this runner calls `find` exactly once per directory argument.
-    # Byte semantics for the two tools that read find's output, because a
-    # filename is bytes and neither tool is told which. Measured on macOS with
+    # `.worktrees` is the fleet's own worktree layout, gitignored, so a clean
+    # clone never has one: each sibling worktree's suite sits under it, at
+    # whatever commit that worktree holds. A walk that reaches them folds
+    # suites that say nothing about this tree into its result, and enough of
+    # them overflow the argv this runner hands node (#3378). So the walk
+    # prunes every `.worktrees` it meets and names each one on stderr —
+    # skipped, not missing — because an argument that is an ancestor of the
+    # caller's own worktree (`../..` from inside one) prunes that worktree's
+    # suite along with its siblings'.
+    # Naming a `.worktrees` directory itself is how to run those suites, and
+    # that is read off the start point's last path component, never off a
+    # spelling prefix. BSD find (measured) applies `-name` to the start point
+    # too, trailing slash and all, so pruning there would end the walk before
+    # it began and report "no test files" for `./.worktrees`, `../.worktrees`
+    # and an absolute path alike; a prefix match would instead exempt
+    # `.worktrees-old` and walk the worktrees nested in it. The exempt arm
+    # prunes `node_modules` a second time rather than dropping the term — a
+    # term that never fires, since the first one has already pruned every
+    # `node_modules` — so this stays the one `find` call per directory
+    # argument.
+    start=${findarg%"${findarg##*[!/]}"}
+    case "${start##*/}" in
+      .worktrees) skip=node_modules ;;
+      *) skip=.worktrees ;;
+    esac
+    found=$(find "$findarg" -name node_modules -prune -o -name "$skip" -prune -print -o -type f -perm -400 -print) || { printf 'agent-test: cannot read every path under %s\n' "$arg" >&2; exit 1; }
+    # Byte semantics for the tools that read find's output, because a
+    # filename is bytes and no tool is told which. Measured on macOS with
     # a name holding \377, under en_US.UTF-8: `grep` drops that line silently
     # (#582's own false-green shape — a green over a smaller suite). Measured
     # with `sed` fed that byte directly, BSD `sed` gives up on the whole
@@ -359,7 +360,7 @@ for arg do
     # suite: an exported pin would reach node and every process the tests spawn,
     # so the fleet's OWN locale fixtures — which need a UTF-8 ambient locale to
     # discriminate — would go green with their scripts' pins deleted. The pin
-    # belongs to these two commands, not to the suite they discover.
+    # belongs to these commands, not to the suite they discover.
     # grep's and sed's own exit codes were never read here — only whether
     # $files ended up non-empty — so a scan failure inside either (rc 2+: an
     # OOM'd grep, an interpreter that chokes on the input) read through the
@@ -387,6 +388,17 @@ for arg do
     # has no rc-1 "no match" analog to grep's — any non-zero rc reaching
     # here is a genuine tool failure, not an accepted outcome.
     [ "$sed_rc" -eq 0 ] || { printf 'agent-test: could not scan for test files under %s (sed exited %s)\n' "$arg" "$sed_rc" >&2; exit 1; }
+    # The pruned `.worktrees` directories `find` printed, read the same way:
+    # an rc of 2+ would lose the notice and leave a smaller suite running
+    # green with nothing said, so it refuses like the scan above. A regular
+    # file named `.worktrees` is printed too, by the `-type f` term, and is
+    # not a skipped worktree, hence `-d`.
+    pruned=$(printf '%s\n' "$found" | LC_ALL=C grep '/\.worktrees$')
+    pruned_rc=$?
+    [ "$pruned_rc" -le 1 ] || { printf 'agent-test: could not scan for skipped worktrees under %s (grep exited %s)\n' "$arg" "$pruned_rc" >&2; exit 1; }
+    [ -z "$pruned" ] || printf '%s\n' "$pruned" | while IFS= read -r dir; do
+      [ ! -d "$dir" ] || printf 'agent-test: %s skipped — worktree suites are excluded from the walk, not missing; name a worktree as the argument to run its suite\n' "$dir" >&2
+    done
     # No `set -e` in this runner, and that is load-bearing: grep exits 1 on no
     # match, so under -e the shell would abort here (both above and in the
     # emptiness check below) and none of these refusals would ever print.
