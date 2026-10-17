@@ -2345,7 +2345,7 @@ A member that bails demotes nothing itself; demotion by cause is yours
 
 ## Fix the tooling mid-run
 
-Report the fix to the maintainer in one line after re-pinning it, writing it onto the ledger, and landing it as a PR.
+Re-pin the fix, write it onto the ledger, report it to the maintainer in one line, then land it as a PR through the run's own merge queue.
 
 Two members failing the same way is the instruction, not the agents. Fix the file
 during the run — deferring loses the evidence that found it.
