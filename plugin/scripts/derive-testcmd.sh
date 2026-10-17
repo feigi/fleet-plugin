@@ -411,7 +411,11 @@ esac
 # such as `git -C`, does not stop it: whether that option moves where the
 # program resolves a pattern is the program's to say, so a Recipe must quote a
 # pattern that a program resolves under its own directory option, as in
-# `git -C web ls-files -- '*.test.ts'`. A word right after an option
+# `git -C web ls-files -- '*.test.ts'`. An unquoted pattern under a program's
+# own directory option is still judged from <repo>, so a Recipe proven while a
+# file of the same name was tracked both at the root and under the option's
+# directory is still accepted after the one under the directory goes away,
+# though the program then finds nothing there. A word right after an option
 # written without `=`, with no operator between them, is accepted unless it
 # has a `/` or a `.`: it may be that option's value, which names no path. A
 # pattern under a path git ignores names generated output, such as a build
