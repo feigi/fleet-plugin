@@ -57,11 +57,12 @@ test("past-pin resolves automatically through the tick, as a re-review", () => {
   assert.match(r, /The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head/);
 });
 
-test("rebase escalates with the git cherry read, and has no automatic rule yet", () => {
+test("rebase escalates on the range-diff replay verdict, and has no automatic rule yet", () => {
   const r = rowFor(["rebase"]);
   assert.match(r, /^\s*\*\*Escalate\*\* — comment and flag, nothing more\./);
-  assert.match(r, /only `-` lines is a clean rebase, and a `\+` line is a conflict resolution that changed content or a commit past the pin/);
-  assert.match(r, /`git cherry <pin> HEAD origin\/main`/);
+  assert.match(r, /`evidence\.replay` reads `pure` only when `git range-diff origin\/main <pin> HEAD` pairs every pinned commit with an unchanged one/);
+  assert.match(r, /`changed` \(a commit dropped, edited or added, or a stale `origin\/main`\) or `unknown` means read `evidence\.rangeDiff` before acting/);
+  assert.match(r, /`evidence\.remote\.state` says whether that head is on the PR\./);
   assert.match(r, /No automatic rule until a live halt shows the case recurring\./);
   assert.doesNotMatch(r, /Automatic\./);
 });
@@ -95,13 +96,13 @@ test("finisher duty 4 names the cause in the ledger's vocabulary, and a duty 1 h
   const vocab = Pin.sentences(duty).find((x) => x.includes("vocabulary")) ?? "";
   for (const c of HALT_CAUSES) assert.match(vocab, new RegExp(`\`${c}\``), `duty 4 no longer names \`${c}\``);
   assert.match(vocab, /`other` for every other halt/);
-  // The cherry output is the script's evidence now, not a command the finisher
-  // runs: the report carries the verdict, and a rebase verdict's evidence holds
-  // the read the resolution table's rebase row asks for.
+  // The range-diff replay is the script's evidence now, not a command the
+  // finisher runs: the report carries the verdict, and a rebase verdict's
+  // evidence holds the replay the resolution table's rebase row asks for.
   assert.match(
     duty,
-    Pin.phrase("A duty 1 halt's report carries the verdict as printed, the JSON line, so a `rebase` halt's report carries the output of `git cherry <pin> HEAD origin/main` that its `evidence` holds."),
-    "duty 4 no longer has a duty 1 halt report the script's verdict as printed — a rebase halt reaches the controller without the cherry output the resolution table escalates on",
+    Pin.phrase("A duty 1 halt's report carries the verdict as printed, the JSON line, so a `rebase` halt's report carries `replay`, `rangeDiff` and `remote` from its `evidence`."),
+    "duty 4 no longer has a duty 1 halt report the script's verdict as printed — a rebase halt reaches the controller without the replay evidence the resolution table escalates on",
   );
 });
 

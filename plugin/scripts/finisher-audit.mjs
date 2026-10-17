@@ -72,8 +72,16 @@
 //   newest entry is the move that put HEAD where it is.
 //     - a `reset` or `rebase` entry: `rebase`. The branch replayed onto a new
 //       base - its own commits on a new parent, content-identical only on a
-//       conflict-free replay. Evidence: the reflog line and the output of
-//       `git cherry <pin> HEAD origin/main`, run in the worktree.
+//       conflict-free replay. Evidence: `replay`, the verdict of `git range-diff
+//       --no-patch origin/main <pin> HEAD` run in the worktree; `rangeDiff`, that
+//       output (or the error that stopped it); and `remote`, read as `past-pin`
+//       reads it. `pure` only when every pinned commit pairs with an unchanged
+//       one. A dropped, edited or added commit, or a stale `origin/main`, is
+//       `changed`; a listing that cannot be read is `unknown`. Not `git cherry`:
+//       it lists only the head-side commits, reads a whitespace-only edit as
+//       unchanged, and reads a conflict resolved to main's side as nothing at all.
+//       `range-diff` pairs both sides of the replay, so each of those is an
+//       unpaired line.
 //     - a plain `commit` entry: `past-pin`. A member kept working after the
 //       dispatch. Evidence: `git log -1 --format='%h %s'` and whether that
 //       commit is pushed, unpushed or unknown, read from `git ls-remote origin
@@ -210,6 +218,32 @@ function git(step, args, { soft = false, timeout } = {}) {
   return { ok: true, out: r.stdout, error: null };
 }
 
+// The branch's remote ref against `head`. Only a successful read settles pushed
+// against unpushed; a failed read, a timeout, or a detached HEAD is `unknown`.
+function remoteState(head) {
+  const branch = row.branch === "DETACHED" ? null : row.branch;
+  if (typeof branch !== "string" || branch === "") {
+    return { state: "unknown", error: "detached HEAD: no branch to ask the remote about" };
+  }
+  const ref = `refs/heads/${branch}`;
+  const r = git("ls-remote", ["ls-remote", "origin", ref], { soft: true, timeout: LS_REMOTE_TIMEOUT_MS });
+  if (!r.ok) return { state: "unknown", ref, error: r.error };
+  const line = r.out.split("\n").find((l) => l.split("\t")[1] === ref);
+  const sha = line === undefined ? null : line.split("\t")[0];
+  return { state: sha === head ? "pushed" : "unpushed", ref, sha };
+}
+
+// `git range-diff` prints one line per pairing, `<n>:  <sha> <marker> <m>:  <sha>
+// <subject>`, with `-:` on the side a commit is missing from. The replay is pure
+// only when every line is a pairing marked `=`; an empty listing pairs nothing
+// and is not pure.
+const RANGE_PAIR = /^\s*\S+:\s+\S+\s+([=!<>])\s+\S+:\s+\S+\s/;
+function replayVerdict(rangeDiff) {
+  if (!rangeDiff.ok) return "unknown";
+  const lines = rangeDiff.out.split("\n").filter((l) => l.trim() !== "");
+  return lines.length > 0 && lines.every((l) => RANGE_PAIR.exec(l)?.[1] === "=") ? "pure" : "changed";
+}
+
 // --- 1: the row --------------------------------------------------------------
 const audit = run("sh", [AUDIT], { cwd: repo });
 if (audit.error || audit.signal || audit.status !== 0) {
@@ -266,27 +300,16 @@ const subject = move === null ? "" : (/^\S+ [^\s:]*@\{\d+\}: (.*)$/.exec(move)?.
 evidence.reflog = move;
 
 if (/^(reset|rebase)\b/.test(subject)) {
-  const cherry = git("cherry", ["cherry", pin, "HEAD", "origin/main"], { soft: true });
-  evidence.cherry = cherry.ok ? cherry.out : { error: cherry.error };
+  const rangeDiff = git("range-diff", ["range-diff", "--no-color", "--no-patch", "--creation-factor=60", "origin/main", pin, "HEAD"], { soft: true });
+  evidence.replay = replayVerdict(rangeDiff);
+  evidence.rangeDiff = rangeDiff.ok ? rangeDiff.out : { error: rangeDiff.error };
+  evidence.remote = remoteState(head);
   halt("rebase");
 }
 
 if (/^commit\b/.test(subject)) {
   evidence.commit = git("log", ["log", "-1", "--format=%h %s"]).out.trim();
-  const branch = row.branch === "DETACHED" ? null : row.branch;
-  if (typeof branch !== "string" || branch === "") {
-    evidence.remote = { state: "unknown", error: "detached HEAD: no branch to ask the remote about" };
-  } else {
-    const ref = `refs/heads/${branch}`;
-    const r = git("ls-remote", ["ls-remote", "origin", ref], { soft: true, timeout: LS_REMOTE_TIMEOUT_MS });
-    if (!r.ok) {
-      evidence.remote = { state: "unknown", ref, error: r.error };
-    } else {
-      const line = r.out.split("\n").find((l) => l.split("\t")[1] === ref);
-      const sha = line === undefined ? null : line.split("\t")[0];
-      evidence.remote = { state: sha === head ? "pushed" : "unpushed", ref, sha };
-    }
-  }
+  evidence.remote = remoteState(head);
   halt("past-pin");
 }
 
