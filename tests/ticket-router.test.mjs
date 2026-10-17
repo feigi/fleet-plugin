@@ -84,6 +84,19 @@ test("route: a clean non-exploration Pull prints the full line, REASON=ok, and r
   assert.equal(again.filter((l) => l === COLUMNS.join("\t")).length, 1);
 });
 
+test("route: a 0-byte pending file gets the header before its first row", (t) => {
+  const p = world(t);
+  mkdirSync(dirname(p.pending), { recursive: true });
+  writeFileSync(p.pending, "");
+  const r = routeCli(p);
+  assert.equal(r.status, 0, r.stderr);
+  const lines = readFileSync(p.pending, "utf8").split("\n");
+  assert.equal(lines.pop(), "", "the file ends with a newline");
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0], COLUMNS.join("\t"));
+  assert.equal(parseFeatures(lines.join("\n"))[0].agent, "impl-42");
+});
+
 test("route: with no --pending the features row lands beside the guard, in the run's .fleet/", (t) => {
   const p = world(t);
   const r = cli(["route", "--session", SESSION, "--ticket", "42", "--arm", "A", "--impl-row", "3",
