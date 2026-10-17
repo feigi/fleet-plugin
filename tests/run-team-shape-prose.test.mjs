@@ -442,6 +442,14 @@ const CHANGED = [
   [
     "`heartbeat not beating, controller alive (pid N)`, or `(this session's earlier run)` — a controller that stopped beating and kept going.",
     "`heartbeat not beating, controller alive (pid N)` — a controller that stopped beating and kept going."
+  ],
+  [
+    "Read the report's `git cherry <pin> HEAD origin/main`: only `-` lines is a clean rebase, and a `+` line is a conflict resolution that changed content or a commit past the pin.",
+    "The report's `evidence.replay` reads `pure` only when `git range-diff origin/main <pin> HEAD` pairs every pinned commit with an unchanged one; `changed` (a commit dropped, edited or added, or a stale `origin/main`) or `unknown` means read `evidence.rangeDiff` before acting, and `evidence.remote.state` says whether that head is on the PR."
+  ],
+  [
+    "A duty 1 halt's report carries the verdict as printed, the JSON line, so a `rebase` halt's report carries the output of `git cherry <pin> HEAD origin/main` that its `evidence` holds.",
+    "A duty 1 halt's report carries the verdict as printed, the JSON line, so a `rebase` halt's report carries `replay`, `rangeDiff` and `remote` from its `evidence`."
   ]
 ];
 

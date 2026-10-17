@@ -227,6 +227,6 @@ cause is one word of the ledger's `halted:<cause>` vocabulary:
 duty 1's verdict names it, and `other` for every other halt — that
 verdict's own `other`, and a halt at duty 2, duty 3 or the instrument
 re-check. A duty 1 halt's `evidence` carries the verdict as
-printed, the JSON line, so a `rebase` halt's carries the output of
-`git cherry <pin> HEAD origin/main`. Then send the one line your brief gives,
+printed, the JSON line, so a `rebase` halt's carries `replay`,
+`rangeDiff` and `remote`. Then send the one line your brief gives,
 `<your name>: <outcome> <path>`.
