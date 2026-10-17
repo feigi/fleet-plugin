@@ -517,3 +517,20 @@
 2026-10-12	3146	3133		smol-high	yes	no	tests-only PR; sizing reported as conceptual		production	52	2
 2026-10-12	3147	3143		smol-high	yes	yes	implementer reported tests added; all four failed on its own head; fix-applier reworked the change		production	116	4
 2026-10-12	3151	2321		smol-high	yes	yes	implementer shipped no tests, reported a 4289-test full run on a partial base and called mutants not applicable; fix-applier reworked the whole design (26 survived findings)	heavy	production	1430	20
+2026-10-17	3393	3375		task-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3394	3384		smol-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3396	3385		smol-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3398	3342		smol-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3405	3031		smol-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3408	3044		slow-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3409	3051		smol-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3412	3069		slow-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3414	3048		task-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3415	3317		smol-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3419	3346		slow-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3423	3077		smol-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3425	3410		task-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3426	3407		task-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3429	3403		smol-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3432	3086		slow-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
+2026-10-17	3399	3378		smol-high	yes	yes	2026-10-17 run: agent-test comment says a regular file named .worktrees is printed by the -type f term; the diff's own find prints it through the prune arm				
