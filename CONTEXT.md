@@ -145,6 +145,21 @@ Anything short of both — the red not reproducing, the unmutated tree red too, 
 usable run — is inconclusive, never a kill.
 _Avoid_: reddened, caught, exit 1
 
+**Unrun dimension**:
+A dispatched specialist that returned nothing, even after the review's in-run retry.
+It reviewed nothing, so its lack of findings says nothing about the code. It is named
+in the review's `dimensionsUnrun`, and the state of the test suite never makes a
+dimension unrun.
+_Avoid_: skipped dimension, uncovered dimension
+
+**Suite verdict**:
+The review's single judgement on its shared test run. The run is usable when it
+executed real tests and its exit status is explained by its counts. Otherwise it is
+not usable, and the verdict gives the reason, which includes a run that never started
+(install skipped, or no suite slot). Usable does not mean green: a usable run can have
+failing tests. The verdict says nothing about whether any dimension reviewed.
+_Avoid_: test status, run quality
+
 ### Release outcome
 
 The state of a claim's worktree after a release attempt. Named states, because the

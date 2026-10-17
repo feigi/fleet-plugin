@@ -10,7 +10,7 @@ review already ran — and steps 4 and 6: the controller owns the CI wait and
 dispatches the finisher.
 
 **The review's result is `/abs/scratch-retry/pr3294/run-ZyXw9876/review.json`** — the digest first
-(`jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}'`),
+(`jq '{pr, head, resume, testEnvironment, suiteVerdict, dimensionsRun, dimensionsUnrun, cwdAudit, counts}'`),
 then every finding (`jq '.survived'`, `jq '.unverified'`, `jq '.refuted'`).
 Read it through `review-and-fix.md`'s **The review result file**, which holds
 the rest of the recipes and every ruling on the findings: both

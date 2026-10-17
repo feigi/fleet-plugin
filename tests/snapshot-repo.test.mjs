@@ -1102,7 +1102,7 @@ test("a status that reads cleanly never reports a failed read, and a failed one 
 
 // A PR that breaks its own install is the PR's defect: the block reports the
 // exit and runs on to its end — the caller turns the exit into a finding and
-// every dimension unrun — and the Recipe cache, proven on the base, is left
+// an unusable suite verdict — and the Recipe cache, proven on the base, is left
 // exactly as it was.
 test("an Install step that exits non-zero is reported with its exit, the block runs on, and the Recipe cache is untouched", (t) => {
   const worktree = installedRepo(t, { install: "echo install-broke; exit 3" });
