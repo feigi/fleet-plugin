@@ -56,9 +56,10 @@ _Avoid_: prune, cleanup
 **Reclaim**:
 Removing what a run left under its scratch root once nothing can still want it: a
 merged or closed PR's `pr<M>/` and disposition records, a closed ticket's `impl-<N>/`,
-and anything else idle past 7 days with no live member's name on it. Authorized on
-GitHub state and age, by `reclaim-scratch.mjs` (ADR 0029) — never on git evidence,
-which is Reap's.
+and anything else idle past 7 days with no live member's name on it, and each sibling
+key (another key-shaped directory beside this run's, under the scratch parent) idle past
+7 days. Authorized on GitHub state and age, by `reclaim-scratch.mjs` (ADR 0029) — never
+on git evidence, which is Reap's.
 _Avoid_: reap, prune, cleanup
 
 **Upstream**:
