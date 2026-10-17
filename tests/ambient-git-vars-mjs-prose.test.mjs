@@ -272,6 +272,14 @@ const COVERED_MJS = {
   // with no ambient GIT_DIR or GH_REPO…". Its second git call is
   // `fleetFile()`'s, counted under fleet-dir.mjs.
   "stranded.mjs": 2,
+  // TWO scrubbed envs. The sweep's gh read, `gitEnv({ GH_REPO: "" })`, is
+  // measured in reclaim-scratch.test.mjs, "gh is asked with GH_REPO empty
+  // however the parent's environment names a repository". Its git read,
+  // `worktreeListing()`'s `worktree list`, decides whether an OPEN ticket's
+  // impl-<N>/ is kept; an ambient GIT_DIR would list another repository's
+  // worktrees. Measured in reclaim-scratch.test.mjs, "an ambient GIT_DIR naming
+  // another repository does not change which claim worktree stands for impl-<N>/".
+  "reclaim-scratch.mjs": 2,
   // ONE spawn primitive, `gitBeside(path, args)`, behind both of the fit's git
   // reads — `rev-parse --verify` of the commit and `show <sha>:./<file>`. An
   // ambient GIT_DIR would answer both for another repository, and an ambient

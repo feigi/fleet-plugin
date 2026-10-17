@@ -470,6 +470,10 @@ const CHANGED = [
   [
     "In a review it leaves every dimension unrun, for the reason \"no suite slot within <n> s — the host is at its suite bound; not a test failure\", with no retry inside the run: re-review it under the next runner letter (`review-pr-<pr#>-b` after a first runner), as for a runner that reported `failed`.",
     "In a review it makes `suiteVerdict` not usable, `suiteVerdict.reason` beginning \"no suite slot within <n> s — the host is at its suite bound; not a test failure\", with no retry inside the run: read that `reason` off the digest and re-review it under the next runner letter (`review-pr-<pr#>-b` after a first runner), as for a runner that reported `failed`."
+  ],
+  [
+    "**`impl-<N>/`** goes once issue #N is CLOSED, or when it is OPEN, no live `impl-<N>` token names it and nothing under it has changed in 7 days.",
+    "**`impl-<N>/`** goes once issue #N is CLOSED, or when it is OPEN, no live `impl-<N>` token names it, no claim worktree under `.worktrees/` still stands for it, and nothing under it has changed in 7 days."
   ]
 ];
 

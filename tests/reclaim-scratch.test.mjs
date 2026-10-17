@@ -360,6 +360,25 @@ test("(3e) an undeterminable .worktrees/ keeps an idle OPEN impl-<N>/ with the r
   assert.ok(existsSync(idle));
 });
 
+test("(3f) an ambient GIT_DIR naming another repository does not change which claim worktree stands for impl-<N>/", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 26: ISSUE("OPEN") });
+  worktree(f, "26-impl-26", "implementer/26-impl-26");
+  const standing = f.dir("impl-26", 8);
+  const other = join(f.repo, "elsewhere");
+  mkdirSync(other);
+  const init = spawnSync("git", ["init", "-q", other], { env: GIT_ENV, encoding: "utf8" });
+  assert.equal(init.status, 0, init.stderr);
+
+  const r = f.run(["--root", f.root, "--apply"], { env: { GIT_DIR: join(other, ".git") } });
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), []);
+  assert.equal(reasonOf(r.out.kept, standing), "claim worktree stands");
+  assert.ok(existsSync(standing));
+});
+
 test("(4) an unkeyed entry idle 8 d is removed; one fresh file nested three levels down keeps it", (t) => {
   const f = fixture(t);
   f.ledger();

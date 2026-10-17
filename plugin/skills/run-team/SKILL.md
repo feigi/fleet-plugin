@@ -2033,13 +2033,9 @@ age, reading which members are live off `.fleet/ledger.md`:
   once nothing under it has changed in 7 days and no live token's name
   appears in its name.
 
-No ledger refuses this call (exit 2, nothing removed): mid-run there is
-always one, so its absence is a fault to look at, never permission. A `gh`
-that cannot answer keeps every PR- and ticket-keyed entry. It prints one
-JSON receipt — `removed`, `kept` and `failed`, each entry with its reason —
-and exits 0 even when a removal failed; record nothing on the ledger. The
-review snapshot runs the same script as `--pr <N>` on its own PR's stale
-`run-*` roots.
+The review snapshot runs the same script as `--pr <N>` on its own PR's stale
+`run-*` roots. What a refused or unanswered sweep does is in
+references/phase-0.md, under **Reclaim scratch**.
 
 ### Release the claims that never became PRs — at end of run, and on drain
 
