@@ -537,19 +537,17 @@ function mins(ms) {
 }
 
 // Whose stall a reader sees, off the controller record — the mark says only
-// that the beat stopped, never whether the run did. No record: unknown, and
-// the report keeps the wording it had before there was one.
-//
-// Whose stall it is comes off the record, judged through proc.mjs: dead or a
-// reused pid is gone and the next run resumes; alive, or an ancestor of the
-// reader, is alive.
+// that the beat stopped, never whether the run did. The record is judged
+// through proc.mjs: dead or a reused pid is gone and the next run resumes;
+// alive, or an ancestor of the reader, is alive and named by pid. No record:
+// unknown, and the report keeps the wording it had before there was one.
 //
 // `judge` is replaceable for the same reason proc.mjs's process source is: a
 // reader under a live omp session would otherwise find that session. A
 // process table that cannot be read leaves the stall unattributed, said on
 // stderr, rather than calling a controller nobody could judge dead or alive.
 export const NO_OWNER = Object.freeze({ kind: "none" });
-export function stallOwner({ controller }, name, judge = judgeRecord) {
+export function stallOwner(controller, name, judge = judgeRecord) {
   if (!controller) return NO_OWNER;
   let verdict;
   try {

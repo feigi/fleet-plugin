@@ -1987,7 +1987,7 @@ function main() {
   if (!priorState.degraded) writeState(path, NAME, priorState, { ticked: { at: tickedAt } });
   if (isReported(verdict)) {
     console.log(stallReport(verdict, isStalled(verdict)
-      ? { claimed: claimed(), supply: current.scanned, owner: stallOwner(priorState, NAME) }
+      ? { claimed: claimed(), supply: current.scanned, owner: stallOwner(priorState.controller, NAME) }
       : {}));
   }
 

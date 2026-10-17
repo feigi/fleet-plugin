@@ -658,54 +658,38 @@ test("stallReport: age always reconciles to overdue+interval, across every unit 
   }
 });
 
-// ── stallOwner: whose stall a mark is ───────────────────────────────────────
+// ── stallOwner: whose stall it is ───────────────────────────────────────────
 //
-// Whose stall it is comes off the record, judged through `judge`, whatever
-// the marks' ages against the record's `at`. `judge` is injected so no reader
-// finds the omp session running this suite.
+// Whose stall it is comes off the record, judged through `judge`: stallOwner
+// is handed the record alone, so neither a mark's age against the record's
+// `at` nor `prior` can decide it. `judge` is injected so no reader finds the
+// omp session running this suite.
 const RECORD_AT = 1_000_000;
 const recordWith = (prior) => ({ pid: 4242, lstart: "x", prior, at: RECORD_AT });
 
-test("stallOwner: a stall whose every mark predates the record still judges the record, whatever `prior` says", () => {
-  // A legacy record: written before rotate stamped `acted`, so every mark is
-  // older than it, and the stall is the recorded run's own.
-  const old = { at: RECORD_AT - 10 * 60_000 };
-  const verdicts = { dead: { kind: "gone" }, alive: { kind: "alive", pid: 4242 }, ancestor: { kind: "alive", pid: 4242 } };
+test("stallOwner: the owner is the record's judged verdict, whatever `prior` says", () => {
+  const verdicts = {
+    dead: { kind: "gone" },
+    alive: { kind: "alive", pid: 4242 },
+    ancestor: { kind: "alive", pid: 4242 },
+    none: { kind: "none" },
+  };
   for (const prior of ["dead", "ancestor", "none"]) {
     for (const [verdict, owner] of Object.entries(verdicts)) {
-      const controller = recordWith(prior);
-      assert.deepEqual(stallOwner({ controller, beat: old, ticked: old, acted: null }, "t", () => verdict), owner, `prior ${prior}, judge ${verdict}`);
-    }
-  }
-});
-
-test("stallOwner: a mark at or after the record is the recorded controller's own — the record is judged, whatever `prior` says", () => {
-  const old = { at: RECORD_AT - 60_000 };
-  const marks = {
-    "a tick after the record, the beat still the previous run's": { beat: old, ticked: { at: RECORD_AT + 60_000 } },
-    "a beat exactly at the record": { beat: { at: RECORD_AT }, ticked: old },
-    "a tick exactly at the record": { beat: old, ticked: { at: RECORD_AT } },
-    "a beat after the record": { beat: { at: RECORD_AT + 60_000 }, ticked: null },
-  };
-  for (const [what, { beat, ticked }] of Object.entries(marks)) {
-    for (const prior of ["dead", "ancestor", "none"]) {
-      const controller = recordWith(prior);
-      assert.deepEqual(stallOwner({ controller, beat, ticked }, "t", () => "alive"), { kind: "alive", pid: 4242 }, `${what}, prior ${prior}`);
-      assert.deepEqual(stallOwner({ controller, beat, ticked }, "t", () => "dead"), { kind: "gone" }, `${what}, prior ${prior}`);
+      assert.deepEqual(stallOwner(recordWith(prior), "t", () => verdict), owner, `prior ${prior}, judge ${verdict}`);
     }
   }
 });
 
 test("stallOwner: a judge failure that is not an unreadable process table propagates", () => {
   const controller = { pid: 1, lstart: "x", prior: "none", at: 1 };
-  const marks = { beat: { at: 5 }, ticked: { at: 5 } };
   const bug = new TypeError("a programming error");
-  assert.throws(() => stallOwner({ controller, ...marks }, "t", () => { throw bug; }), (e) => e === bug);
+  assert.throws(() => stallOwner(controller, "t", () => { throw bug; }), (e) => e === bug);
   const err = console.error;
   const lines = [];
   console.error = (m) => lines.push(m);
   try {
-    assert.deepEqual(stallOwner({ controller, ...marks }, "t", () => { throw new ProcUnreadable("table gone"); }), { kind: "none" });
+    assert.deepEqual(stallOwner(controller, "t", () => { throw new ProcUnreadable("table gone"); }), { kind: "none" });
   } finally {
     console.error = err;
   }
@@ -803,14 +787,4 @@ test("assessBeat: a controller record that cannot place a mark, beside no mark a
   // With a mark the record cannot partition it away, so it is judged.
   assert.equal(assessBeat({ beat: null, ticked: { at: now - 5 * MIN }, controller, now }).kind, "beating");
   assert.equal(assessBeat({ beat: null, ticked: { at: now - WINDOW - 1 }, controller, now }).kind, "stale");
-});
-
-test("stallOwner: a ledger write at or after the record is the recorded controller's own", () => {
-  const old = { at: RECORD_AT - 60_000 };
-  for (const prior of ["dead", "ancestor", "none"]) {
-    const controller = recordWith(prior);
-    for (const acted of [{ at: RECORD_AT }, { at: RECORD_AT + 60_000 }]) {
-      assert.deepEqual(stallOwner({ controller, beat: old, ticked: old, acted }, "t", () => "dead"), { kind: "gone" }, `prior ${prior}`);
-    }
-  }
 });
