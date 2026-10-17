@@ -379,6 +379,102 @@ test("(3f) an ambient GIT_DIR naming another repository does not change which cl
   assert.ok(existsSync(standing));
 });
 
+test("(3g) N must start a segment: .worktrees/112-impl-112 leaves impl-12 idle and removable", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 12: ISSUE("OPEN") });
+  worktree(f, "112-impl-112", "implementer/112-impl-112");
+  const idle = f.dir("impl-12", 8);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [join(f.root, "impl-12")]);
+  assert.match(reasonOf(r.out.removed, idle), /issue #12 is OPEN, no live impl-12 token, idle past 7 days/);
+});
+
+test("(3h) N as a later segment of the worktree's name keeps impl-<N>/: .worktrees/impl-27 and .worktrees/fix-28-x stand", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 27: ISSUE("OPEN"), 28: ISSUE("OPEN") });
+  worktree(f, "impl-27", "implementer/impl-27");
+  worktree(f, "fix-28-x", "implementer/fix-28-x");
+  const trailing = f.dir("impl-27", 8);
+  const middle = f.dir("impl-28", 8);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), []);
+  assert.equal(reasonOf(r.out.kept, trailing), "claim worktree stands");
+  assert.equal(reasonOf(r.out.kept, middle), "claim worktree stands");
+});
+
+test("(3i) a .worktrees/ that cannot be resolved keeps an idle OPEN impl-<N>/ with the reason it could not be checked", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 14: ISSUE("OPEN") });
+  symlinkSync(".worktrees", join(f.repo, ".worktrees"));
+  const idle = f.dir("impl-14", 8);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), []);
+  assert.match(reasonOf(r.out.kept, idle), /^its claim worktree cannot be checked: cannot resolve .*\.worktrees \(ELOOP\)$/);
+  assert.ok(existsSync(idle));
+});
+
+test("(3j) a `git worktree list` that fails keeps an idle OPEN impl-<N>/ with the reason it could not be checked", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 15: ISSUE("OPEN") });
+  const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  assert.ok(realGit, "no git on PATH");
+  writeExecStub(join(f.base, "bin", "git"), `#!/bin/sh
+if [ "$1" = worktree ]; then echo "fatal: injected worktree failure" >&2; exit 128; fi
+exec '${realGit}' "$@"
+`);
+  const idle = f.dir("impl-15", 8);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), []);
+  assert.match(reasonOf(r.out.kept, idle), /^its claim worktree cannot be checked: git worktree list failed \(.*injected worktree failure/);
+  assert.ok(existsSync(idle));
+});
+
+test("(3k) a worktree nested below .worktrees/ does not keep impl-<N>/: .worktrees/nest/40-impl-40 leaves impl-40 idle and removable", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 40: ISSUE("OPEN") });
+  worktree(f, "nest/40-impl-40", "implementer/40-impl-40");
+  const idle = f.dir("impl-40", 8);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [join(f.root, "impl-40")]);
+  assert.match(reasonOf(r.out.removed, idle), /issue #40 is OPEN, no live impl-40 token, idle past 7 days/);
+});
+
+test("(3l) a directory under .worktrees/ named for N that git no longer lists keeps an idle OPEN impl-<N>/ as unchecked", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 32: ISSUE("OPEN") });
+  const dropped = worktree(f, "32-impl-32", "implementer/32-impl-32");
+  writeFileSync(join(f.repo, ".git", "worktrees", "32-impl-32", "gitdir"), "");
+  const idle = f.dir("impl-32", 8);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), []);
+  assert.equal(reasonOf(r.out.kept, idle), `its claim worktree cannot be checked: ${dropped} is there but git does not list it as a worktree`);
+  assert.ok(existsSync(idle));
+});
+
 test("(4) an unkeyed entry idle 8 d is removed; one fresh file nested three levels down keeps it", (t) => {
   const f = fixture(t);
   f.ledger();

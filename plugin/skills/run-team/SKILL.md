@@ -2034,8 +2034,8 @@ age, reading which members are live off `.fleet/ledger.md`:
   appears in its name.
 
 The review snapshot runs the same script as `--pr <N>` on its own PR's stale
-`run-*` roots. What a refused or unanswered sweep does is in
-references/phase-0.md, under **Reclaim scratch**.
+`run-*` roots. What this sweep does with no ledger, or with a `gh` that cannot
+answer, is in references/phase-0.md, under **Reclaim scratch**.
 
 ### Release the claims that never became PRs — at end of run, and on drain
 

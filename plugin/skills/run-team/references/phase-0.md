@@ -265,11 +265,13 @@ as "no live token" — rotate's own verdict — where without it the script
 refuses. A ledger rotate did write is read as usual. Record nothing on the
 ledger and act on nothing in its receipt.
 
-No ledger refuses this call (exit 2, nothing removed): mid-run there is
-always one, so its absence is a fault to look at, never permission. A `gh`
-that cannot answer keeps every PR- and ticket-keyed entry. It prints one
-JSON receipt — `removed`, `kept` and `failed`, each entry with its reason —
-and exits 0 even when a removal failed; record nothing on the ledger.
+Without `--after-rotate` — the per-pass sweep **Reclaim scratch after each
+merge pass** runs — no ledger refuses the call (exit 2, nothing removed):
+mid-run there is always one, so its absence is a fault to look at, never
+permission. A `gh` that cannot answer keeps every PR- and ticket-keyed entry.
+It prints one JSON receipt — `removed`, `kept` and `failed`, each entry with
+its reason — and exits 0 even when a removal failed; record nothing on the
+ledger.
 
 Straight after that, the same step reclaims the other keys under the scratch parent:
 `~/.fleet/bin/fleet-run reclaim-scratch.mjs --siblings --root <scratch> --apply`. A key

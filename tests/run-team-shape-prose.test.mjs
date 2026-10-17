@@ -474,6 +474,10 @@ const CHANGED = [
   [
     "**`impl-<N>/`** goes once issue #N is CLOSED, or when it is OPEN, no live `impl-<N>` token names it and nothing under it has changed in 7 days.",
     "**`impl-<N>/`** goes once issue #N is CLOSED, or when it is OPEN, no live `impl-<N>` token names it, no claim worktree under `.worktrees/` still stands for it, and nothing under it has changed in 7 days."
+  ],
+  [
+    "No ledger refuses this call (exit 2, nothing removed): mid-run there is always one, so its absence is a fault to look at, never permission.",
+    "Without `--after-rotate` — the per-pass sweep **Reclaim scratch after each merge pass** runs — no ledger refuses the call (exit 2, nothing removed): mid-run there is always one, so its absence is a fault to look at, never permission."
   ]
 ];
 
