@@ -268,7 +268,9 @@ ledger and act on nothing in its receipt.
 Straight after that, the same step reclaims the other keys under the scratch parent:
 `~/.fleet/bin/fleet-run reclaim-scratch.mjs --siblings --root <scratch> --apply`. A key
 goes whole when nothing under it has changed in 7 days, and stays whole otherwise. The
-call runs whatever the root sweep answered, and records nothing on the ledger.
+call runs whatever the root sweep answered, and records nothing on the ledger. A non-zero
+exit, and each path its receipt's `failed[]` names, is listed in the step's output; neither
+stops the run.
 
 ## Derive the Recipe
 
