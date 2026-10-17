@@ -265,6 +265,11 @@ as "no live token" — rotate's own verdict — where without it the script
 refuses. A ledger rotate did write is read as usual. Record nothing on the
 ledger and act on nothing in its receipt.
 
+Straight after that, the same step reclaims the other keys under the scratch parent:
+`~/.fleet/bin/fleet-run reclaim-scratch.mjs --siblings --root <scratch> --apply`. A key
+goes whole when nothing under it has changed in 7 days, and stays whole otherwise. The
+call runs whatever the root sweep answered, and records nothing on the ledger.
+
 ## Derive the Recipe
 
 **Derive the Recipe — the Recipe derivation step — before the fold-in below

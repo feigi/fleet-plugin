@@ -40,8 +40,10 @@
 //   cockpit       `board.mjs serve --open` launched detached, `--spend-dir`
 //                 passed through. Recorded; never fails the run.
 //   rotate        `ledger.mjs rotate`. Exit 2 is a refusal and fails the step.
-//   reclaim       `reclaim-scratch.mjs --root <scratch> --after-rotate --apply`.
-//                 Recorded; never fails the run.
+//   reclaim       `reclaim-scratch.mjs --root <scratch> --after-rotate --apply`,
+//                 then `reclaim-scratch.mjs --siblings --root <scratch> --apply`
+//                 for the other keys under the scratch parent, which runs
+//                 whatever the first answered. Recorded; never fails the run.
 //   recipe        `derive-testcmd.sh . install` and `. test --at origin/main`.
 //                 Either exiting 1 is a cache with nothing valid in it: pending,
 //                 `NEED derive-recipe`. Exit 3 (a tool the reader could not run)
@@ -277,8 +279,12 @@ function rotate(ctx) {
 }
 
 function reclaim({ cwd, scratch }) {
-  const r = node("reclaim-scratch.mjs", ["--root", scratch, "--after-rotate", "--apply"], { cwd });
-  return ok(r.status === 0 ? "scratch reclaimed" : withText(`reclaim-scratch.mjs ${r.how}, not enforced`, r));
+  const live = node("reclaim-scratch.mjs", ["--root", scratch, "--after-rotate", "--apply"], { cwd });
+  // The sibling pass runs whatever the live sweep answered: a failure there is recorded beside it, never a reason to skip it.
+  const siblings = node("reclaim-scratch.mjs", ["--siblings", "--root", scratch, "--apply"], { cwd });
+  const lines = [live.status === 0 ? "scratch reclaimed" : withText(`reclaim-scratch.mjs ${live.how}, not enforced`, live)];
+  if (siblings.status !== 0) lines.push(withText(`sibling keys: reclaim-scratch.mjs ${siblings.how}, not enforced`, siblings));
+  return ok(lines.join("\n"));
 }
 
 function recipe({ cwd }) {

@@ -6,10 +6,16 @@
 //
 //   reclaim-scratch.mjs --root <abs> [--after-rotate] [--apply]
 //   reclaim-scratch.mjs --pr <N> --root <abs> [--apply]
+//   reclaim-scratch.mjs --siblings --root <abs> [--apply]
 //
 // Dry run by default; `--apply` removes. `--root` is required, an absolute
 // path to an existing directory: the controller passes the path
 // scratch-root.mjs prints.
+//
+// `--siblings` is the sibling pass, its own invocation: `--root` names the live
+// key, which must sit directly under the scratch parent, and the pass judges the
+// other key-shaped directories there by age alone (judgeSiblings below). It reads
+// no ledger and is never combined with --pr or --after-rotate.
 //
 // THE ROOT SWEEP judges every entry directly under `--root`:
 //   pr<M>/, dispositions-fix-pr-<M>[-x].json
@@ -86,10 +92,10 @@
 
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineFlags, isDigits, makeDie, writeAll } from "./arg.mjs";
-import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
+import { fleetFile, FleetDirUnresolvable, SCRATCH_KEY_SHAPE, scratchParent } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { liveOnLedger, parseMember, REVIEWER } from "./ledger-grammar.mjs";
@@ -421,9 +427,35 @@ function staleRunRoots(parent, cutoff, kept) {
   return remove;
 }
 
+// THE SIBLING PASS judges every key-shaped directory directly under the scratch
+// parent of `root`, other than the live key, by age alone: one with nothing
+// modified within the retention goes whole; one with anything fresh stays whole.
+// Other entries under the parent, links and the live key are not judged at all.
+function judgeSiblings(root, cutoff) {
+  const parent = dirname(root);
+  const live = basename(root);
+  const remove = [];
+  const kept = [];
+  const failed = [];
+  for (const entry of readdirSync(parent, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name === live || !SCRATCH_KEY_SHAPE.test(entry.name)) continue;
+    const path = join(parent, entry.name);
+    let fresh;
+    try {
+      fresh = freshUnder(path, cutoff);
+    } catch (e) {
+      failed.push({ path, error: e.message });
+      continue;
+    }
+    if (fresh === null) remove.push({ path, reason: "sibling key idle past 7 days" });
+    else kept.push({ path, reason: "sibling key modified within 7 days" });
+  }
+  return { remove, kept, failed };
+}
+
 function main() {
   const { arg, has, sweep, stray } = defineFlags(die, {
-    flags: { root: "value", pr: "value", "after-rotate": "bool", apply: "bool" },
+    flags: { root: "value", pr: "value", "after-rotate": "bool", apply: "bool", siblings: "bool" },
   });
   sweep();
   stray();
@@ -431,7 +463,8 @@ function main() {
   const pr = arg("pr");
   const afterRotate = has("after-rotate");
   const apply = has("apply");
-  const usage = "usage: reclaim-scratch.mjs --root <abs> [--after-rotate] [--apply] | --pr <N> --root <abs> [--apply]";
+  const siblings = has("siblings");
+  const usage = "usage: reclaim-scratch.mjs --root <abs> [--after-rotate] [--apply] | --pr <N> --root <abs> [--apply] | --siblings --root <abs> [--apply]";
   if (rootArg === null) die(`--root is required — ${usage}`);
   if (!isAbsolute(rootArg)) die(`--root must be an absolute path, got ${JSON.stringify(rootArg)}`);
   if (pr !== null && !isDigits(pr)) die(`--pr must be a PR number, got ${JSON.stringify(pr)}`);
@@ -441,6 +474,11 @@ function main() {
     if (!statSync(root).isDirectory()) die(`--root ${root} is not a directory`);
   } catch (e) {
     die(`--root ${root} is not a directory: ${e.message}`);
+  }
+  if (siblings) {
+    if (pr !== null) die("--siblings and --pr are separate passes");
+    if (afterRotate) die("--after-rotate is the root sweep's; --siblings reads no ledger");
+    if (!SCRATCH_KEY_SHAPE.test(basename(root)) || dirname(root) !== scratchParent()) die(`--siblings judges the keys beside the live one: --root must be a scratch key directly under ${scratchParent()}, got ${root}`);
   }
 
   const now = Date.now();
@@ -455,6 +493,16 @@ function main() {
     } catch (e) {
       remove = [];
       failed.push({ path: parent, error: e.message });
+    }
+  } else if (siblings) {
+    try {
+      const judged = judgeSiblings(root, now - RETENTION_MS);
+      remove = judged.remove;
+      kept = judged.kept;
+      failed.push(...judged.failed);
+    } catch (e) {
+      remove = [];
+      failed.push({ path: dirname(root), error: e.message });
     }
   } else {
     ledger = ledgerFile();
