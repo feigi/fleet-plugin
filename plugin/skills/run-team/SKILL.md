@@ -2029,6 +2029,8 @@ and exits 0 even when a removal failed; record nothing on the ledger. The
 review snapshot runs the same script as `--pr <N>` on its own PR's stale
 `run-*` roots.
 
+Phase 0 runs `reclaim-scratch.mjs --siblings --root <scratch> --apply` straight after its root sweep, every run: it removes each other key directory under the scratch parent once nothing under it has changed in 7 days, and keeps it whole otherwise. Its exit is recorded and never stops the run.
+
 ### Release the claims that never became PRs — at end of run, and on drain
 
 Phase 1 is serial and claims ahead of dispatch, so a ticket can be legitimately

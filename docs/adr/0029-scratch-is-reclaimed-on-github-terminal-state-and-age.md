@@ -3,7 +3,8 @@
 **Status:** Accepted. Ruled 2026-10-12 by the maintainer in a grilling session
 on #2316, against `main` at `c54a597d`, and amended the same day (main
 `532b8f48`) to add `--after-rotate`. Builds on ADR 0027, which fixed where the
-scratch root lives and left its cleanup to #2316.
+scratch root lives and left its cleanup to #2316. Amended by #3317: decisions
+1 and 3 are extended by decision 11, the sibling keys.
 
 ## Context
 
@@ -77,6 +78,17 @@ change; in the files this change edits those numbers no longer hold.
    receipt line, `{applied, ledger, removed, kept, failed}`; removal is
    best-effort per entry; non-zero only for a refused invocation.
 10. **Shapes unchanged.** `dispositions-<member>.json` stays at the root.
+11. **Sibling keys (amends 1 and 3, #3317).** `reclaim-scratch.mjs --siblings
+    --root <scratch> [--apply]` judges every key-shaped directory directly under
+    the scratch parent (`~/.fleet/scratch/`) other than the live key, by age
+    alone: one with nothing modified in 7 days goes whole, one with anything
+    fresh stays whole, and so does one with any part that cannot be read. Each
+    is judged again just before `--apply` removes it. `--root` must be this
+    workspace's own scratch root, so the live key is never judged. Entries that
+    are not key-shaped, and links, are not judged. It reads no ledger and its
+    receipt carries `ledger: null`. Phase 0 runs it straight after the root
+    sweep, whatever the sweep answered; a failure, and what either receipt's
+    `failed[]` names, is recorded and never fails the run.
 
 ## Consequences
 

@@ -42,6 +42,17 @@ work in flight rather than every run's history.
    `uchg`/`uappnd` flags where `chflags` exists, then `rm -rf`, so a fixture
    that dropped its own read bit cannot wedge it. A removal that still fails is
    reported in the receipt's `failed[]`, and the sweep goes on.
+6. **Sibling keys are judged on age alone.** `reclaim-scratch.mjs --siblings
+   --root <scratch>` judges each key-shaped directory directly under the scratch
+   parent, other than the live key: one with nothing modified in 7 days goes
+   whole, one with anything fresh stays whole, and so does one with any part
+   that cannot be read. `--apply` judges each key again just before removing
+   it, so a key another run wrote to meanwhile is kept. `--root` must be this
+   workspace's own scratch root. Entries that are not key-shaped, and links,
+   are never judged. Its receipt carries `ledger: null`, and its entries are
+   the sibling key directories. Phase 0 runs it on every pass, straight after
+   the root sweep, whatever the root sweep answered, and lists what either
+   pass's `failed[]` names.
 
 ## Opinionated choices
 

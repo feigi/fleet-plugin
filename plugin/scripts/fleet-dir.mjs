@@ -125,8 +125,16 @@ export function fleetFile(name, { cwd = process.cwd(), timeoutMs, canonicalise =
 export function scratchRoot({ cwd = process.cwd(), timeoutMs, home = homedir() } = {}) {
   const workspace = dirname(fleetFile(null, { cwd, timeoutMs, canonicalise: true }));
   const hex = createHash("sha256").update(workspace).digest("hex").slice(0, 8);
-  return join(home, ".fleet", "scratch", `${basename(workspace)}-${hex}`);
+  return join(scratchParent(home), `${basename(workspace)}-${hex}`);
 }
+
+/** The directory every run's scratch root sits directly in: `<home>/.fleet/scratch`. */
+export function scratchParent(home = homedir()) {
+  return join(home, ".fleet", "scratch");
+}
+
+/** The shape of a scratch root's last segment: `<workspace basename>-<8 hex>`. */
+export const SCRATCH_KEY_SHAPE = /-[0-9a-f]{8}$/;
 
 function nearestExisting(path) {
   let at = path;

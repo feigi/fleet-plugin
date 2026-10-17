@@ -6,10 +6,18 @@
 //
 //   reclaim-scratch.mjs --root <abs> [--after-rotate] [--apply]
 //   reclaim-scratch.mjs --pr <N> --root <abs> [--apply]
+//   reclaim-scratch.mjs --siblings --root <abs> [--apply]
 //
 // Dry run by default; `--apply` removes. `--root` is required, an absolute
 // path to an existing directory: the controller passes the path
 // scratch-root.mjs prints.
+//
+// `--siblings` is the sibling pass, its own invocation: `--root` names the live
+// key, which must be this workspace's own scratch root (the path
+// scratch-root.mjs prints), and the pass judges the other key-shaped
+// directories beside it by age alone (judgeSiblings below), judging each again
+// just before `--apply` removes it. It reads no ledger and is never combined
+// with --pr or --after-rotate.
 //
 // THE ROOT SWEEP judges every entry directly under `--root`:
 //   pr<M>/, dispositions-fix-pr-<M>[-x].json
@@ -86,10 +94,10 @@
 
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineFlags, isDigits, makeDie, writeAll } from "./arg.mjs";
-import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
+import { fleetFile, FleetDirUnresolvable, SCRATCH_KEY_SHAPE, scratchRoot } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { liveOnLedger, parseMember, REVIEWER } from "./ledger-grammar.mjs";
@@ -143,8 +151,10 @@ function how(r) {
  * `cutoff`, or null when everything is older. Symlinks are not followed. A
  * directory that cannot be listed counts its own mtime only, and so does one
  * that can be listed but not searched: an entry inside it whose lstat is
- * refused is skipped, its parent's mtime already counted. */
-export function freshUnder(path, cutoff) {
+ * refused is skipped, its parent's mtime already counted. Given `unreadable`,
+ * an array, each path skipped for EACCES or EPERM is pushed onto it as
+ * `<path>: <code>`. */
+export function freshUnder(path, cutoff, unreadable = null) {
   const stack = [path];
   while (stack.length) {
     const p = stack.pop();
@@ -152,6 +162,7 @@ export function freshUnder(path, cutoff) {
     try {
       st = lstatSync(p);
     } catch (e) {
+      if (e.code === "EACCES" || e.code === "EPERM") unreadable?.push(`${p}: ${e.code}`);
       if (e.code === "ENOENT" || e.code === "EACCES" || e.code === "EPERM") continue;
       throw e;
     }
@@ -161,6 +172,7 @@ export function freshUnder(path, cutoff) {
     try {
       names = readdirSync(p);
     } catch (e) {
+      if (e.code === "EACCES" || e.code === "EPERM") unreadable?.push(`${p}: ${e.code}`);
       if (e.code === "EACCES" || e.code === "EPERM" || e.code === "ENOENT") continue;
       throw e;
     }
@@ -421,9 +433,46 @@ function staleRunRoots(parent, cutoff, kept) {
   return remove;
 }
 
+// THE SIBLING PASS judges every key-shaped directory directly under the scratch
+// parent of `root`, other than the live key, by age alone: one with nothing
+// modified within the retention goes whole; one with anything fresh stays whole,
+// and so does one with any part that could not be read, since what that part
+// holds is unknown. Other entries under the parent, links and the live key are
+// not judged at all. The keys are judged in name order.
+function judgeSiblings(root, cutoff) {
+  const parent = dirname(root);
+  const live = basename(root);
+  const remove = [];
+  const kept = [];
+  const failed = [];
+  const entries = readdirSync(parent, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name === live || !SCRATCH_KEY_SHAPE.test(entry.name)) continue;
+    const path = join(parent, entry.name);
+    let verdict;
+    try {
+      verdict = judgeSibling(path, cutoff);
+    } catch (e) {
+      failed.push({ path, error: e.message });
+      continue;
+    }
+    (verdict.idle ? remove : kept).push({ path, reason: verdict.reason });
+  }
+  return { remove, kept, failed };
+}
+
+// One sibling key's verdict: `idle` only when nothing under it is fresh and
+// every part of it could be read.
+function judgeSibling(path, cutoff) {
+  const unreadable = [];
+  if (freshUnder(path, cutoff, unreadable) !== null) return { idle: false, reason: "sibling key modified within 7 days" };
+  if (unreadable.length > 0) return { idle: false, reason: `sibling key could not be read whole (${unreadable[0]})` };
+  return { idle: true, reason: "sibling key idle past 7 days" };
+}
+
 function main() {
   const { arg, has, sweep, stray } = defineFlags(die, {
-    flags: { root: "value", pr: "value", "after-rotate": "bool", apply: "bool" },
+    flags: { root: "value", pr: "value", "after-rotate": "bool", apply: "bool", siblings: "bool" },
   });
   sweep();
   stray();
@@ -431,7 +480,8 @@ function main() {
   const pr = arg("pr");
   const afterRotate = has("after-rotate");
   const apply = has("apply");
-  const usage = "usage: reclaim-scratch.mjs --root <abs> [--after-rotate] [--apply] | --pr <N> --root <abs> [--apply]";
+  const siblings = has("siblings");
+  const usage = "usage: reclaim-scratch.mjs --root <abs> [--after-rotate] [--apply] | --pr <N> --root <abs> [--apply] | --siblings --root <abs> [--apply]";
   if (rootArg === null) die(`--root is required — ${usage}`);
   if (!isAbsolute(rootArg)) die(`--root must be an absolute path, got ${JSON.stringify(rootArg)}`);
   if (pr !== null && !isDigits(pr)) die(`--pr must be a PR number, got ${JSON.stringify(pr)}`);
@@ -441,6 +491,19 @@ function main() {
     if (!statSync(root).isDirectory()) die(`--root ${root} is not a directory`);
   } catch (e) {
     die(`--root ${root} is not a directory: ${e.message}`);
+  }
+  if (siblings) {
+    if (pr !== null) die("--siblings and --pr are separate passes");
+    if (afterRotate) die("--after-rotate is the root sweep's; --siblings reads no ledger");
+    // The live key is never judged, so it must be this workspace's own: any other
+    // key passed here would put the real live key among the judged siblings.
+    let own;
+    try {
+      own = scratchRoot();
+    } catch (e) {
+      die(`--siblings judges the keys beside this workspace's scratch root, which could not be resolved: ${e.message}`);
+    }
+    if (root !== own) die(`--siblings judges the keys beside the live one: --root must be this workspace's scratch root ${own}, got ${root}`);
   }
 
   const now = Date.now();
@@ -455,6 +518,16 @@ function main() {
     } catch (e) {
       remove = [];
       failed.push({ path: parent, error: e.message });
+    }
+  } else if (siblings) {
+    try {
+      const judged = judgeSiblings(root, now - RETENTION_MS);
+      remove = judged.remove;
+      kept = judged.kept;
+      failed.push(...judged.failed);
+    } catch (e) {
+      remove = [];
+      failed.push({ path: dirname(root), error: e.message });
     }
   } else {
     ledger = ledgerFile();
@@ -477,6 +550,14 @@ function main() {
     }
     let error;
     try {
+      // A sibling key belongs to another workspace's runs, which can write to it
+      // while an earlier key is still being removed: it is judged again here, so
+      // a key that turned fresh since the pass judged it is kept.
+      const again = siblings ? judgeSibling(entry.path, now - RETENTION_MS) : null;
+      if (again !== null && !again.idle) {
+        kept.push({ path: entry.path, reason: again.reason });
+        continue;
+      }
       error = removeEntry(entry.path);
     } catch (e) {
       error = e.message;
