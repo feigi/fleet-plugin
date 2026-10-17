@@ -681,6 +681,13 @@ test("stallOwner: the owner is the record's judged verdict, whatever `prior` say
   }
 });
 
+test("stallOwner: no controller record is no owner, and the judge is never asked", () => {
+  const neverJudged = () => assert.fail("judge was called with no controller record");
+  for (const missing of [null, undefined]) {
+    assert.deepEqual(stallOwner(missing, "t", neverJudged), { kind: "none" }, `record ${missing}`);
+  }
+});
+
 test("stallOwner: a judge failure that is not an unreadable process table propagates", () => {
   const controller = { pid: 1, lstart: "x", prior: "none", at: 1 };
   const bug = new TypeError("a programming error");
