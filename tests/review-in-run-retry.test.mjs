@@ -53,20 +53,21 @@ for (const [name, run] of COPIES) {
   // #2315: the suite is the review's one shared run now, and it is never
   // re-dispatched either — a crashed test-run agent may already have launched
   // the command, so a retry would be a second full run.
-  test(`${name}: a specialist that RETURNED over a shared run that ran nothing is not a crash — never re-dispatched`, async () => {
+  test(`${name}: a specialist that RETURNED over a shared run that ran nothing is not a crash — never re-dispatched, and not unrun`, async () => {
     const { host, calls } = scriptedHost({
       snapshot: [SNAP],
       "test-run": [{ exitCode: 0, tests: 0, pass: 0, fail: 0 }],
       "review:correctness": [review([])],
     });
     const result = await run(host, ARGS);
-    assert.equal(calls["review:correctness"], 1, "a returned-but-unrun review was re-dispatched as if it had crashed");
+    assert.equal(calls["review:correctness"], 1, "a returned review over an unusable shared run was re-dispatched as if it had crashed");
     assert.equal(calls["test-run"], 1);
-    assert.equal(result.dimensionsUnrun.length, 1);
-    assert.match(result.dimensionsUnrun[0].reason, /0 tests/);
+    assert.deepEqual(result.dimensionsUnrun, [], "an unusable shared run made a returned review unrun");
+    assert.equal(result.suiteVerdict.usable, false);
+    assert.match(result.suiteVerdict.reason, /0 tests/);
   });
 
-  test(`${name}: a crashed shared test run is dispatched once, never retried, and every dimension is unrun`, async () => {
+  test(`${name}: a crashed shared test run is dispatched once, never retried, and the suite verdict is not usable`, async () => {
     for (const crash of [null, new Error("spend limit")]) {
       const { host, calls } = scriptedHost({
         snapshot: [SNAP],
@@ -76,11 +77,9 @@ for (const [name, run] of COPIES) {
       });
       const result = await run(host, { ...ARGS, dimensions: ["correctness", "tests"] });
       assert.equal(calls["test-run"], 1, "the shared test run was re-dispatched — a second full-suite launch");
-      assert.deepEqual(
-        result.dimensionsUnrun.map((u) => u.dimension),
-        ["correctness", "tests"],
-      );
-      for (const u of result.dimensionsUnrun) assert.match(u.reason, /no counts|returned nothing/);
+      assert.deepEqual(result.dimensionsUnrun, [], "a crashed shared run made a returned review unrun");
+      assert.equal(result.suiteVerdict.usable, false);
+      assert.match(result.suiteVerdict.reason, /no counts|returned nothing/);
     }
   });
 
@@ -188,6 +187,7 @@ for (const [name, run] of COPIES) {
       "verify:correctness": [vote(false)],
     });
     const result = await run(host, ARGS);
+    assert.deepEqual(DIGEST_KEYS, ["pr", "head", "resume", "testEnvironment", "suiteVerdict", "dimensionsRun", "dimensionsUnrun", "cwdAudit", "counts"]);
     assert.deepEqual(Object.keys(result), [...DIGEST_KEYS, "snapshot", "survived", "refuted", "unverified"]);
     // The consumer-visible property, not the key list: the pre-cutover
     // harness hands the controller the FIRST ~8 KB of the serialized result,

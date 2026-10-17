@@ -355,7 +355,7 @@ test("the anti-substitution rationale is portable, not a present-tense claim abo
 
 // The rule #143 widened, now in the one prompt that runs the suite. The
 // classifier catches the zero-pass case on its own (`review-core-unrun.test.mjs`),
-// but the partial-tree case it CANNOT: `unrunReason` is pure and never learns
+// but the partial-tree case it CANNOT: `suiteVerdictOf` is pure and never learns
 // how many tests the whole tree has, so the only guard is the run itself
 // starting from the snapshot's root. If this instruction goes, that case has no
 // other guard.

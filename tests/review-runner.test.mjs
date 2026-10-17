@@ -35,6 +35,7 @@ const resultIn = (dir, run = "run-Ab12Cd34") => ({
   head: "abc123",
   resume: null,
   testEnvironment: "The snapshot is a verified repository.",
+  suiteVerdict: { usable: true, reason: null },
   dimensionsRun: ["correctness"],
   dimensionsUnrun: [],
   cwdAudit: [{ dimension: "correctness", state: "clean", line: "CWD-AUDIT: clean /repo" }],
@@ -140,7 +141,7 @@ test("a write that fails partway throws and removes the truncated file", { skip:
     import { join } from "node:path";
     const dir = process.argv[1];
     const result = {
-      pr: 7, head: "abc123", resume: null, testEnvironment: "t", dimensionsRun: [], dimensionsUnrun: [], cwdAudit: [],
+      pr: 7, head: "abc123", resume: null, testEnvironment: "t", suiteVerdict: { usable: true, reason: null }, dimensionsRun: [], dimensionsUnrun: [], cwdAudit: [],
       counts: { survived: 1, refuted: 0, unverified: 0, crashed: 0 },
       snapshot: join(dir, "pr7", "run-Ab12Cd34", "snapshot-abc123"),
       survived: [{ claim: "x".repeat(200000) }], refuted: [], unverified: [],

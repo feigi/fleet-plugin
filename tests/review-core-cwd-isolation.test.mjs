@@ -25,7 +25,7 @@
 // agent must not write to, `pwd` fixes which directory that is, and the
 // `CWD-AUDIT:` line is what makes a CLEAN run say so. An audit reported only
 // when it finds something is indistinguishable from one never run — the same
-// reading `unrunReason` already applies to a shared test run reporting nothing, and
+// reading `suiteVerdictOf` already applies to a shared test run reporting nothing, and
 // the reason "four files dirty" was found by chance rather than by a report.
 //
 // WHY THESE PINS RENDER RATHER THAN GREP, and why the slice is the pin: same
@@ -285,7 +285,7 @@ test("every command line in the snapshot prompt is -C-anchored, cd-chained, or p
 // there. Measured against the PR #1671 review's own reproduction: a
 // specialist that dutifully reported `CWD-AUDIT: dirty <checkout>` into
 // `scope_searched` had that fact dropped before `runReview`'s return —
-// `scope_searched` fed only `unrunReason`'s test-run check, which never reads
+// `scope_searched` fed only the shared run's verdict, which never reads
 // it, so the audit dead-ended inside a field nothing else looked at.
 // `cwdAuditFrom` extracts the line; the tests below pin that `runReview`
 // folds its result into the payload under `cwdAudit`, and that a missing or
