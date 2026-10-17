@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { freshUnder } from "../plugin/scripts/reclaim-scratch.mjs";
+import { scratchRoot } from "../plugin/scripts/fleet-dir.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/reclaim-scratch.mjs", import.meta.url));
 const DAY = 24 * 60 * 60 * 1000;
@@ -879,17 +880,17 @@ test("(10) a `reports` whose type cannot be read is kept, never aged out whole",
   assert.ok(existsSync(bot));
 });
 
-// The sibling pass: `--root` names the live key, whose parent must be the scratch
-// parent of the fixture's HOME. Ages every node under `p`, then freshens `fresh`.
+// The sibling pass: `--root` names the live key, which must be the fixture
+// repository's own scratch root under the fixture's HOME. Returns the live key,
+// aged 8 d, plus the scratch parent and the env for the run.
 function siblingFixture(t) {
   const f = fixture(t);
   const home = join(f.base, "home");
-  const parent = join(home, ".fleet", "scratch");
-  mkdirSync(parent, { recursive: true });
-  const live = join(parent, "fleet-plugin-28971265");
-  mkdirSync(live);
+  const live = scratchRoot({ cwd: f.repo, home });
+  const parent = dirname(live);
+  mkdirSync(live, { recursive: true });
   f.age(live, 8);
-  return { ...f, home, parent, live, env: { HOME: home } };
+  return { ...f, parent, live, env: { HOME: home } };
 }
 
 test("(11) a sibling key idle 8 d is removed whole; a sibling with a fresh file three levels down is kept; non-key entries and the live key are untouched", (t) => {
@@ -948,6 +949,8 @@ test("(11) a key-shaped file or a symlink under the scratch parent is never remo
   f.age(target, 8);
   const link = join(f.parent, "link-cafebabe");
   symlinkSync(target, link);
+  // Aged too, so a pass that admitted links as keys would find nothing fresh and remove it.
+  spawnSync("touch", ["-h", "-t", "200001010000", link]);
 
   const r = f.run(["--siblings", "--root", f.live, "--apply"], { env: f.env });
 
@@ -956,7 +959,7 @@ test("(11) a key-shaped file or a symlink under the scratch parent is never remo
   assert.ok(existsSync(file) && existsSync(link) && existsSync(target), "a non-directory or a link was judged as a key");
 });
 
-test("(11) the sibling pass refuses a root that is not a key directly under the scratch parent", (t) => {
+test("(11) the sibling pass refuses a root that is not this workspace's own scratch root", (t) => {
   const f = siblingFixture(t);
   const stale = join(f.parent, "impl-tool-aaaaaaaa");
   mkdirSync(stale);
@@ -971,6 +974,8 @@ test("(11) the sibling pass refuses a root that is not a key directly under the 
     ["--siblings", "--root", notKey],
     ["--siblings", "--root", outside],
     ["--siblings", "--root", f.root],
+    // Another key under the same parent: accepted, it would judge the live key.
+    ["--siblings", "--root", stale, "--apply"],
     ["--siblings", "--pr", "5", "--root", f.live],
     ["--siblings", "--after-rotate", "--root", f.live],
   ];
@@ -978,7 +983,7 @@ test("(11) the sibling pass refuses a root that is not a key directly under the 
     const r = f.run(args, { env: f.env });
     assert.equal(r.status, 2, `${args.join(" ")} was accepted: ${r.stdout}`);
   }
-  assert.ok(existsSync(stale) && existsSync(outside), "a refused invocation removed something");
+  assert.ok(existsSync(stale) && existsSync(outside) && existsSync(f.live), "a refused invocation removed something");
 });
 
 test("(11) a sibling key with nothing modified in 7 days is removed, one modified 6 days ago is kept — the boundary is the retention", (t) => {
@@ -996,4 +1001,43 @@ test("(11) a sibling key with nothing modified in 7 days is removed, one modifie
   assert.deepEqual(paths(r.out.removed), [old]);
   assert.deepEqual(paths(r.out.kept), [young]);
   assert.ok(existsSync(young), "a key modified 6 days ago was removed");
+});
+
+test("(11) a sibling key written to while an earlier key is being removed is judged again and kept", (t) => {
+  const f = siblingFixture(t);
+  const first = join(f.parent, "aaa-11111111");
+  mkdirSync(first);
+  f.age(first, 8);
+  const second = join(f.parent, "zzz-22222222");
+  mkdirSync(second);
+  f.age(second, 8);
+  // An `rm` that, removing the first key, has another run write into the second.
+  writeExecStub(join(f.base, "bin", "rm"), `#!/bin/sh\nfor a in "$@"; do [ "$a" = "$RACE_ON" ] && : > "$RACE_WRITE"; done\nexec /bin/rm "$@"\n`);
+  const written = join(second, "fresh.txt");
+
+  const r = f.run(["--siblings", "--root", f.live, "--apply"], { env: { ...f.env, RACE_ON: first, RACE_WRITE: written } });
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [first]);
+  assert.deepEqual(paths(r.out.kept), [second]);
+  assert.equal(reasonOf(r.out.kept, second), "sibling key modified within 7 days");
+  assert.ok(existsSync(written), "a key written to after it was judged was removed");
+});
+
+test("(11) a sibling key with a part that cannot be read is kept whole, with that part named", { skip: process.getuid?.() === 0 && "root reads the locked directory" }, (t) => {
+  const f = siblingFixture(t);
+  const key = join(f.parent, "locked-33333333");
+  const locked = join(key, "locked");
+  mkdirSync(locked, { recursive: true });
+  writeFileSync(join(locked, "fresh.txt"), "x");
+  f.age(key, 8);
+  chmodSync(locked, 0o000);
+
+  const r = f.run(["--siblings", "--root", f.live, "--apply"], { env: f.env });
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.removed, []);
+  assert.deepEqual(paths(r.out.kept), [key]);
+  assert.equal(reasonOf(r.out.kept, key), `sibling key could not be read whole (${locked}: EACCES)`);
+  assert.ok(existsSync(key), "a key with an unreadable part was removed");
 });
