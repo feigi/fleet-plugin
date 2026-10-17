@@ -162,7 +162,12 @@ test("no `## ` heading is a section this file did not have a reason to keep: She
 // --- the first paragraph is the exit condition --------------------------------
 
 const EXIT_VERBS = ["run", "dispatch", "answer", "act", "hold", "report", "stop"];
-const EXIT_VERB = new RegExp(`\\b(?:${EXIT_VERBS.join("|")})\\b`, "i");
+// Refuses a listed word that directly follows a determiner (a, an, the, one, this,
+// that, each, every, its, their, your) or is followed by 's (possessive). A
+// determiner lookbehind cannot catch every noun use (e.g. "a single run" or "the
+// team's run"), and a full part-of-speech parser is deliberately not used. This
+// keeps the check honest rather than claiming paraphrase-proofness.
+const EXIT_VERB = new RegExp(`(?<!(?:a|an|the|one|this|that|each|every|its|their|your)\\s)\\b(?:${EXIT_VERBS.join("|")})\\b(?!'s)`, "i");
 
 // A `## ` section as its top-level blocks: the text between its heading and the
 // next `## ` heading, cut into paragraphs, lists, tables, code blocks and
@@ -241,6 +246,16 @@ test("a first paragraph naming none of the exit verbs, or no paragraph at all, i
     const p = firstParagraph(sec(`Done when you ${verb} it.\n\nMore.`));
     assert.match(p.text, EXIT_VERB, verb);
   }
+  // Test determiners that should be rejected
+  assert.doesNotMatch(firstParagraph(sec("Something happens inside one run.\n\nMore.")).text, EXIT_VERB, "word after 'one ' should be rejected");
+  assert.doesNotMatch(firstParagraph(sec("Through the run's own merge queue.\n\nMore.")).text, EXIT_VERB, "word followed by 's should be rejected");
+  assert.doesNotMatch(firstParagraph(sec("A dispatch is started.\n\nMore.")).text, EXIT_VERB, "word after 'A ' should be rejected");
+  // Test determiners with different exit verbs
+  assert.doesNotMatch(firstParagraph(sec("Inside the dispatch.\n\nMore.")).text, EXIT_VERB, "word after 'the ' should be rejected");
+  assert.doesNotMatch(firstParagraph(sec("Inside each answer.\n\nMore.")).text, EXIT_VERB, "word after 'each ' should be rejected");
+  assert.doesNotMatch(firstParagraph(sec("The act's details.\n\nMore.")).text, EXIT_VERB, "word followed by 's should be rejected");
+  // Verify verbs without determiners still match
+  assert.match(firstParagraph(sec("Report it to the maintainer.\n\nMore.")).text, EXIT_VERB, "verb without determiner should match");
   assert.doesNotMatch(firstParagraph(sec("Nothing to see here, move along.\n\nStop.")).text, EXIT_VERB);
   assert.equal(firstParagraph(sec("- a list first\n\nStop.")).kind, "list");
   assert.equal(firstParagraph(sec("| a | b |\n|---|---|\n| 1 | 2 |\n\nStop.")).kind, "table");
