@@ -235,6 +235,7 @@ test("close-out.md has one heading per moved metrics step", () => {
     "## Scrape the member facts and check the tier rows",
     "## Drain the pending ticket-features rows and refresh the cost guard",
     "## Commit the metrics files and open a PR",
+    "## Move the phase-0 receipt",
   ]);
 });
 

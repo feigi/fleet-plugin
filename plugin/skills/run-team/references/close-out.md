@@ -1,6 +1,6 @@
 # Close-out: what each metrics step does and why
 
-`closeout.mjs finish` runs the scrape, the tier-outcomes check, the metrics refresh and the commit of the metrics files, and SKILL.md's **End of run** says how to drive it. This file is how each of those works, for the controller to read when a step refuses. The verdict rules — what `closed_own_ticket` and `minted_false_claim` mean, and that a value not in hand is left blank — stay in SKILL.md under **Guard: accumulate per PR**, because the controller still rules them.
+`closeout.mjs finish` runs the scrape, the tier-outcomes check, the metrics refresh, the commit of the metrics files, and the phase-0 receipt move, and SKILL.md's **End of run** says how to drive it. This file is how each of those works, for the controller to read when a step refuses. The verdict rules — what `closed_own_ticket` and `minted_false_claim` mean, and that a value not in hand is left blank — stay in SKILL.md under **Guard: accumulate per PR**, because the controller still rules them.
 
 ## Scrape the member facts and check the tier rows
 
@@ -93,3 +93,12 @@ fold-in queues for review next run, however it is named, so the files reach
 a data row loses it: `member-outcomes.tsv` is regenerated from harness
 transcripts the fleet does not own, so re-running the scrape later is worth
 only what the harness still holds.
+
+## Move the phase-0 receipt
+
+**Set aside the phase-0 receipt after the commit — before the heartbeat.** The receipt `.fleet/phase0.json` records what phase 0 decided and the run's tracing; `closeout.mjs finish` moves it to `.fleet/phase0.previous.json` so the next run can find it under the name `phase0.mjs` reserves for a previous run's receipt, and that run's rotation restores and archives it with the ledger. A missing `.fleet/phase0.json` counts as nothing to move and is `ok`.
+
+The step can refuse in two ways:
+
+- `.fleet/phase0.previous.json` already holds a receipt from a different run. **Move it out of the way, then run finish again.** This happens when a previous run's close-out moved its receipt there but the next run never rotated — a controller crash between the move and rotation, or a stalled or deleted run before rotation. Clean it up by hand and resume.
+- The receipt was moved to the destination but the original copy could not be removed. **Remove it by hand before the next run.** A rare race: the link succeeded but the unlink failed on a stray filesystem error or permission issue. Delete the `.fleet/phase0.json` file so the next run does not try to move it again.
