@@ -264,9 +264,9 @@ if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|token|file
 // `check`'s tail ALONE — narrower than the first pass, which called this
 // from `filed`, `row` and `ruled` too. The length rule is only sound where
 // the documented convention IS one quoted argument, and `check` is the only
-// subcommand where it is: both places that instruct a caller to run it spell
-// it `ledger.mjs check "<subject>"` (run-team/SKILL.md's finisher step,
-// review-and-fix.md's filing step), while run-team/SKILL.md's ledger section
+// subcommand where it is: every caller that instructs running it spells it
+// `ledger.mjs check "<subject>"` (the finisher's deferred-finding filing duty,
+// review-and-fix's filing step), while run-team/SKILL.md's ledger section
 // spells the other three `filed <issue> <subject>`, `row <ticket> <text>` and
 // `ruled <pr> <decision>` — a bare multi-word tail, as did this file's own
 // usage strings for them. Applied there, the rule refused what the docs
@@ -304,7 +304,7 @@ if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|token|file
 // answer it replaces was silent. One residual of that trade is not this
 // file's to close: SKILL.md's ledger section spells `check <subject>`
 // unquoted inside the same entry that spells `filed <issue> <subject>`, where
-// the two instructions that tell a caller to RUN it quote the subject.
+// the instructions that tell a caller to RUN it quote the subject.
 //
 // Narrowed on `check` too, not closed: a lone stray with no subject beside it
 // is a one-element tail, so it is still taken as the subject and answered at
