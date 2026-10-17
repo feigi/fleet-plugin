@@ -6,10 +6,11 @@
 // is told to make that copy.
 //
 // An Install step that exits non-zero in the snapshot is the PR's defect, not a
-// crash: the shared test run is skipped, every dimension is reported unrun
-// with the install's exit and log as the reason, and the review files one
-// finding naming it. One the Recipe cache cannot supply is reported unrun too,
-// but files nothing — that is the Recipe's state, not the PR's. And the accept
+// crash: the shared test run is skipped, the review's suite verdict is not
+// usable with the install's exit and log as the reason, and the review files one
+// finding naming it. One the Recipe cache cannot supply is not usable too,
+// but files nothing — that is the Recipe's state, not the PR's. Neither makes a
+// dimension unrun: every specialist still returns. And the accept
 // case: an install that exited 0 runs the shared test run exactly as before.
 //
 // Zero deps: `node --test tests/review-core-install-step.test.mjs`.
@@ -78,26 +79,29 @@ test("installFinding files nothing for a snapshot that is not the reviewed tree,
   assert.equal(installFinding({ ...FAILED, repoVerified: undefined }), null, "an omitted repoVerified reads as a verified tree");
   const { calls, result } = await reviewOf(mismatch);
   assert.equal(calls["test-run"], undefined, "the shared test run was dispatched into a snapshot the Install step failed in");
-  assert.equal(result.dimensionsUnrun.length, 2, "not every dimension is reported unrun");
+  assert.deepEqual(result.dimensionsUnrun, [], "a skipped shared run made a dimension unrun");
+  assert.equal(result.suiteVerdict.usable, false, "the suite verdict is usable though the shared run was skipped");
   assert.equal(result.survived.filter((f) => f.dimension === "install").length, 0, "the review filed an install finding off a snapshot it says is not the reviewed tree");
 });
 
-test("an Install step that fails in the snapshot skips the shared run, reports every dimension unrun naming it, and files one finding", async () => {
+test("an Install step that fails in the snapshot skips the shared run, makes the suite verdict not usable naming it, and files one finding", async () => {
   const { calls, prompts, result } = await reviewOf(FAILED);
   assert.equal(calls["test-run"], undefined, "the shared test run was dispatched into a snapshot the Install step failed in");
-  assert.deepEqual(result.dimensionsUnrun.map((u) => u.dimension).sort(), ["correctness", "tests"], "not every dimension is reported unrun");
-  for (const u of result.dimensionsUnrun) assert.match(u.reason, /Install step `sh \.\/install\.sh` exited 3 .*install\.log/, `${u.dimension}'s unrun reason does not name the install`);
+  assert.deepEqual(result.dimensionsUnrun, [], "the skipped run made a dimension unrun");
+  assert.equal(result.suiteVerdict.usable, false);
+  assert.match(result.suiteVerdict.reason, /Install step `sh \.\/install\.sh` exited 3 .*install\.log/, "the suite verdict's reason does not name the install");
   const filed = result.survived.filter((f) => f.dimension === "install");
   assert.equal(filed.length, 1, "the review did not file exactly one finding naming the install failure");
   assert.equal(result.counts.survived, result.survived.length, "the install finding is not counted with the survivors it sits among");
   assert.match(prompts["review:correctness"][0], Pin.phrase("Tests: this review did NOT run its test command: the Install step"), "a specialist is not told the shared run was skipped for the install");
 });
 
-test("an Install step the Recipe cache cannot supply skips the shared run and reports every dimension unrun, filing nothing", async () => {
+test("an Install step the Recipe cache cannot supply skips the shared run and makes the suite verdict not usable, filing nothing", async () => {
   const { calls, result } = await reviewOf(UNREAD);
   assert.equal(calls["test-run"], undefined, "the shared test run was dispatched into a snapshot nothing was installed into");
-  for (const u of result.dimensionsUnrun) assert.match(u.reason, /no Recipe cache/, `${u.dimension}'s unrun reason does not carry the refusal`);
-  assert.equal(result.dimensionsUnrun.length, 2, "not every dimension is reported unrun");
+  assert.equal(result.suiteVerdict.usable, false);
+  assert.match(result.suiteVerdict.reason, /no Recipe cache/, "the suite verdict's reason does not carry the refusal");
+  assert.deepEqual(result.dimensionsUnrun, [], "the skipped run made a dimension unrun");
   assert.equal(result.survived.filter((f) => f.dimension === "install").length, 0, "an unreadable Recipe was filed on the PR");
 });
 
@@ -107,12 +111,13 @@ test("an Install step that exited 0 runs the shared test run once and files noth
   const { calls, result } = await reviewOf(SNAP);
   assert.equal(calls["test-run"], 1, "the shared test run did not run after a passing Install step");
   assert.deepEqual(result.dimensionsUnrun, [], "a passing Install step left a dimension unrun");
+  assert.deepEqual(result.suiteVerdict, { usable: true, reason: null }, "a passing Install step left the suite verdict not usable");
   assert.equal(result.survived.filter((f) => f.dimension === "install").length, 0, "a passing Install step was filed on the PR");
 });
 
 test("the skipped run's note tells a specialist not to replace the run and not to file the install", () => {
   const note = sharedRunNote({ command: "node --test", logPath: "/r/test-run.log", unprovisioned: installReason(FAILED) }, "correctness", "tests");
-  assert.match(note, Pin.phrase("Every dimension of this review is reported unrun for it — do not run the full command yourself to replace it, and file nothing about the install: the review reports it itself."));
+  assert.match(note, Pin.phrase("The review reports its suite verdict not usable for it — do not run the full command yourself to replace it, and file nothing about the install: the review reports it itself."));
   assert.doesNotMatch(note, /ran its test command ONCE/, "the skipped run is described as a run that happened");
 });
 

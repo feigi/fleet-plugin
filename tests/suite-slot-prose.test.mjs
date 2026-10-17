@@ -38,6 +38,12 @@ test("SKILL.md says the wait is capped, exit 75 is not a test result, and what e
   assert.match(p, Pin.phrase("`FLEET_SUITE_WAIT_S` seconds, 1800 by default, then exit **75** with `suite-slot: no slot after <n>s` on stderr, having launched nothing"),
     "the wait cap, its exit status or its message changed");
   assert.match(p, Pin.phrase("**Exit 75 is not a test result.**"), "the prose no longer says exit 75 is not a test result");
+  // #3048: the controller recognises a no-slot review by the verdict's reason,
+  // which begins "no suite slot" — not by an entry in `dimensionsUnrun`, which
+  // only a crashed specialist is named in.
+  assert.match(p, Pin.phrase("it makes `suiteVerdict` not usable, `suiteVerdict.reason` beginning \"no suite slot within <n> s"), "the prose no longer tells the controller to read the no-slot verdict off suiteVerdict.reason");
+  assert.match(p, Pin.phrase("re-review it under the next runner letter"), "the prose no longer sends a no-slot review to the next runner letter");
+  assert.doesNotMatch(p, /every\s+dimension\s+unrun/i, "the prose says an exit 75 leaves every dimension unrun");
   assert.match(p, Pin.phrase("The implementer, fix-applier and finisher briefs carry the one-line rule: *Exit 75 from the suite is not a test result; run the command again.*"),
     "the prose no longer says the briefs carry the exit-75 line");
 });

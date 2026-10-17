@@ -69,10 +69,11 @@ copy), so nothing anchored at the workspace is reachable from the review's run.
    3600 — the wait cap plus the run's own 1800 — because one omp command
    deadline is clamped at 3600 s, so wait and run inside a single command cannot
    exceed it. `TEST_RUN_SCHEMA` gains an optional `slotWaitMs`.
-8. **A review that exits 75 is unrun, with no retry.** `testRunReason` has a
-   distinct branch — no suite slot within the wait, the host at its bound, not a
-   test failure — so every dimension is unrun for that reason, and the
-   controller re-reviews through the next runner letter. The test-run agent
+8. **A review that exits 75 has an unusable suite verdict, with no retry.**
+   `testRunReason` has a distinct branch — no suite slot within the wait, the
+   host at its bound, not a test failure — so the review's `suiteVerdict` is
+   not usable for that reason, and the controller re-reviews through the next
+   runner letter. The test-run agent
    keeps "never a second time". Implementers, fix-appliers and finishers are
    told in one line that exit 75 is not a test result and to run the command
    again.

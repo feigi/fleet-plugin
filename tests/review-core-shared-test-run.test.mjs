@@ -4,7 +4,8 @@
 //
 // Driven through runReview over a scripted host, as review-in-run-retry.test.mjs
 // is: `agent`/`pipeline`/`parallel`/`phase`/`log` are exactly what runReview
-// takes off `host`, so the dispatch count, the prompts and the unrun verdicts
+// is: `agent`/`pipeline`/`parallel`/`phase`/`log` are exactly what runReview
+// takes off `host`, so the dispatch count, the prompts and the digest verdicts
 // below are review-core.mjs's own wiring, never a re-derived copy of it.
 //
 // THE CEILING: a scripted host answers for the agents, so nothing here proves
@@ -83,6 +84,7 @@ test("one review with all six dimensions launches the test command exactly once,
       assert.match(prompts[`review:${k}`][0], /Do NOT run that full command yourself/);
     }
     assert.deepEqual(result.dimensionsUnrun, []);
+    assert.deepEqual(result.suiteVerdict, { usable: true, reason: null });
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -136,8 +138,9 @@ test("a test command holding single quotes runs as written through the slot wrap
 
 // The two ends of an expired wait, joined: the block run against a host whose
 // slots are all held exits 75 and says so in its log, and a test-run agent that
-// reports that exit makes every dimension unrun for the bound — not for a crash.
-test("a wait for a suite slot that expires leaves every dimension unrun for the bound, not a failure", async () => {
+// reports that exit makes the suite verdict not usable for the bound — not a
+// dimension unrun, and not a crash.
+test("a wait for a suite slot that expires makes the suite verdict not usable for the bound, and no dimension unrun", async () => {
   const tmp = mkdtempSync(join(tmpdir(), "shared-test-run-nosl-"));
   try {
     const runRoot = join(tmp, "pr7", "run-ab12");
@@ -154,11 +157,13 @@ test("a wait for a suite slot that expires leaves every dimension unrun for the 
     assert.ok(line, log);
     const { host: h2, calls } = scriptedHost(script({ snapshot: [snap], "test-run": [{ exitCode: 75, error: line }] }));
     const result = await run(h2, { ...ALL_ARGS, scratch: tmp, testCmd: "echo SHOULD-NOT-RUN" });
-    assert.deepEqual(result.dimensionsUnrun.map((u) => u.dimension), ALL);
-    for (const u of result.dimensionsUnrun) {
-      assert.equal(u.reason, "no suite slot within 1 s — the host is at its suite bound; not a test failure");
-    }
+    assert.deepEqual(result.dimensionsUnrun, [], "the bound made a dimension unrun — every specialist returned a review");
+    assert.deepEqual(result.suiteVerdict, {
+      usable: false,
+      reason: "no suite slot within 1 s — the host is at its suite bound; not a test failure",
+    });
     assert.equal(calls["test-run"], 1, "an expired wait was run a second time");
+    for (const k of ALL) assert.equal(calls[`review:${k}`], 1, `${k}: the specialist was not dispatched after the expired wait`);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -169,7 +174,8 @@ test("a wait for a suite slot that expires leaves every dimension unrun for the 
 test("a run that printed counts and exited 75 is judged as a run, not as an expired wait", async () => {
   const { host } = scriptedHost(script({ "test-run": [{ exitCode: 75, tests: 4, pass: 3, fail: 1 }] }));
   const result = await run(host);
-  for (const u of result.dimensionsUnrun) assert.doesNotMatch(u.reason, /no suite slot/);
+  assert.deepEqual(result.suiteVerdict, { usable: true, reason: null }, "a suite that ran and failed is a usable run");
+  assert.deepEqual(result.dimensionsUnrun, []);
 });
 
 test("the test-run schema carries the wait the wrapper printed, as an optional integer", () => {
@@ -177,97 +183,96 @@ test("the test-run schema carries the wait the wrapper printed, as an optional i
   assert.equal(TEST_RUN_SCHEMA.required, undefined, "a required wait would force a 0 the log never stated");
 });
 
-test("a shared run reporting tests 0 makes every selected dimension unrun", async () => {
+test("a shared run reporting tests 0 makes the suite verdict not usable, and no dimension unrun", async () => {
   const { host, calls } = scriptedHost(script({ "test-run": [{ exitCode: 0, tests: 0, pass: 0, fail: 0 }] }));
   const result = await run(host);
-  assert.deepEqual(result.dimensionsUnrun.map((u) => u.dimension), ALL);
-  for (const u of result.dimensionsUnrun) assert.match(u.reason, /produced 0 tests/);
+  assert.equal(result.suiteVerdict.usable, false);
+  assert.match(result.suiteVerdict.reason, /produced 0 tests/);
+  assert.deepEqual(result.dimensionsUnrun, [], "an unusable shared run made a dimension unrun");
   // Still a review: the specialists were dispatched and their findings verified.
   for (const k of ALL) assert.equal(calls[`review:${k}`], 1);
 });
 
-test("a shared run that yields no counts reports every selected dimension unrun, never a pass", async () => {
+test("a shared run that yields no counts has a suite verdict that is not usable, never a pass", async () => {
   for (const answer of [null, new Error("spend limit"), {}, { exitCode: 124, error: "hit the 1800 s deadline" }]) {
     const { host, calls, prompts } = scriptedHost(script({ "test-run": [answer] }));
     const result = await run(host);
     const where = answer instanceof Error ? "a thrown dispatch" : JSON.stringify(answer);
     assert.equal(calls["test-run"], 1, `${where}: the shared run was dispatched again — a second full-suite launch`);
-    assert.deepEqual(result.dimensionsUnrun.map((u) => u.dimension), ALL, `${where}: not every dimension is unrun`);
-    for (const u of result.dimensionsUnrun) assert.match(u.reason, /no counts/, `${where}: ${u.reason}`);
+    assert.equal(result.suiteVerdict.usable, false, `${where}: the verdict is usable`);
+    assert.match(result.suiteVerdict.reason, /no counts/, `${where}: ${result.suiteVerdict.reason}`);
+    assert.deepEqual(result.dimensionsUnrun, [], `${where}: a dimension is unrun for the shared run`);
     assert.match(prompts["review:correctness"][0], /This run is NOT usable/);
   }
 });
 
 // Failing tests are the REVIEW's, not each dimension's: the first selected
-// dimension is told to file them and every other one not to duplicate it.
-test("a shared run with failures: one dimension's finding leaves no dimension unrun, and the others are told not to duplicate it", async () => {
+// dimension is told to file them and every other one not to duplicate it. The
+// run is usable either way — usable is not green.
+test("a shared run with failures: a usable verdict, no dimension unrun, and the others told not to duplicate the owner's finding", async () => {
   const failing = { exitCode: 1, tests: 10, pass: 8, fail: 2 };
   const { host, prompts } = scriptedHost(
     script({ "test-run": [failing], "review:correctness": [review([finding("suggestion")])] }),
   );
   const result = await run(host);
-  assert.deepEqual(result.dimensionsUnrun, [], "a sibling's finding about the failures must satisfy every dimension");
+  assert.deepEqual(result.dimensionsUnrun, []);
+  assert.deepEqual(result.suiteVerdict, { usable: true, reason: null });
   assert.match(prompts["review:correctness"][0], /filing them is YOUR job/);
   for (const k of ALL.filter((k) => k !== "correctness")) {
     const p = prompts[`review:${k}`][0];
     assert.match(p, /the correctness dimension files the finding\s+about them\. Do not file a duplicate/, `${k} is not told to leave the failures to correctness`);
     assert.doesNotMatch(p, /YOUR job/, `${k} is told to file the failures too — a duplicate per dimension`);
   }
-  // The accept side: ownership is a duplicate-avoidance rule, not a verdict
-  // key — a finding from a NON-owner satisfies the check just as well.
-  const other = scriptedHost(script({ "test-run": [failing], "review:types": [review([finding("suggestion")])] }));
-  assert.deepEqual((await run(other.host)).dimensionsUnrun, []);
 });
 
-test("a shared run with failures and no finding from any dimension makes every selected dimension unrun", async () => {
-  const { host } = scriptedHost(script({ "test-run": [{ exitCode: 1, tests: 10, pass: 8, fail: 2 }] }));
-  const result = await run(host);
-  assert.deepEqual(result.dimensionsUnrun.map((u) => u.dimension), ALL);
-  for (const u of result.dimensionsUnrun) assert.match(u.reason, /2 failing tests and no selected dimension filed a finding/);
-});
-
-// The failing-tests check reads what reached the payload, never what a
-// specialist returned before its findings were verified: an unrelated finding
-// the refuters threw out, or the findings of a dimension whose verify stage
-// died, would otherwise stand in for failures nobody reported — and the
-// failures would reach neither the report nor dimensionsUnrun.
-test("a shared run with failures is not satisfied by a refuted finding, nor by a dimension whose verify stage died", async () => {
+// #3048: nothing in the shared run's verdict reads a finding. Failing tests with
+// no kept finding from any dimension — none filed, or every one refuted — are
+// the owner's duty unmet, not an unusable run and not an unrun dimension. Pinned
+// both ways, because the heuristic this replaced read exactly these inputs.
+test("a shared run with failures and no kept finding is still usable, and the owner's duty is unchanged", async () => {
   const failing = { exitCode: 1, tests: 10, pass: 8, fail: 2 };
+  const none = scriptedHost(script({ "test-run": [failing] }));
+  const r0 = await run(none.host);
+  assert.deepEqual(r0.suiteVerdict, { usable: true, reason: null });
+  assert.deepEqual(r0.dimensionsUnrun, []);
+  assert.deepEqual([r0.survived, r0.refuted, r0.unverified], [[], [], []], "the fixture filed a finding — this case tests nothing");
+  assert.match(none.prompts["review:correctness"][0], /filing them is YOUR job/);
+  assert.doesNotMatch(none.prompts["review:correctness"][0], /reported unrun|unrun/i, "the owner's note still threatens an unrun review");
+
   const refuted = scriptedHost(
     script({ "test-run": [failing], "review:correctness": [review([finding("critical")])], "verify:correctness": [vote(true)] }),
   );
   const r1 = await run(refuted.host);
   assert.equal(r1.refuted.length, 1, "the fixture's finding was not refuted — this case tests nothing");
-  assert.deepEqual(r1.dimensionsUnrun.map((u) => u.dimension), ALL, "a refuted finding satisfied the failing-tests check");
-  for (const u of r1.dimensionsUnrun) assert.match(u.reason, /2 failing tests and no selected dimension filed a finding/);
+  assert.deepEqual(r1.suiteVerdict, { usable: true, reason: null }, "a refuted finding changed the verdict on the run");
+  assert.deepEqual(r1.dimensionsUnrun, []);
+});
 
-  // A malformed finding throws inside the verify stage: the slot dies, so its
-  // dimension is crashed and its findings never reach the payload.
-  const died = scriptedHost(script({ "test-run": [failing], "review:correctness": [review([null])] }));
-  const r2 = await run(died.host);
-  assert.equal(r2.dimensionsUnrun.find((u) => u.dimension === "correctness")?.reason, CRASHED_REASON);
-  assert.deepEqual(
-    r2.dimensionsUnrun.filter((u) => u.dimension !== "correctness").map((u) => u.dimension),
-    ALL.filter((k) => k !== "correctness"),
-    "a dead dimension's unverified findings satisfied the failing-tests check",
-  );
-
-  // The accept side: a finding that survived its refuters settles it.
-  const kept = scriptedHost(
-    script({ "test-run": [failing], "review:correctness": [review([finding("critical")])], "verify:correctness": [vote(false)] }),
-  );
-  assert.deepEqual((await run(kept.host)).dimensionsUnrun, []);
+// A malformed finding throws inside the verify stage: the slot dies, so its
+// dimension is crashed and named with CRASHED_REASON — whatever the shared run
+// says — and no sibling is named with it.
+test("a dimension whose verify stage died is the only one unrun, with the shared run usable or not", async () => {
+  for (const [name, shared, usable] of [
+    ["failing", { exitCode: 1, tests: 10, pass: 8, fail: 2 }, true],
+    ["zero tests", { exitCode: 0, tests: 0, pass: 0, fail: 0 }, false],
+  ]) {
+    const died = scriptedHost(script({ "test-run": [shared], "review:correctness": [review([null])] }));
+    const result = await run(died.host);
+    assert.deepEqual(result.dimensionsUnrun, [{ dimension: "correctness", reason: CRASHED_REASON }], `${name}: unrun is not exactly the crashed dimension`);
+    assert.equal(result.suiteVerdict.usable, usable, `${name}: the verdict depends on the crash`);
+  }
 });
 
 // The exit status is the command's verdict: clean-looking counts beside a
 // non-zero or missing exit are not a pass, and every specialist is told so.
-test("a shared run whose exit is non-zero with nothing failing, or missing, makes every selected dimension unrun", async () => {
+test("a shared run whose exit is non-zero with nothing failing, or missing, has a suite verdict that is not usable", async () => {
   for (const answer of [{ exitCode: 137, tests: 5, pass: 5, fail: 0 }, { exitCode: 1, tests: 5, pass: 5 }, { tests: 5, pass: 5, fail: 0 }]) {
     const { host, prompts } = scriptedHost(script({ "test-run": [answer], "review:correctness": [review([finding("suggestion")])] }));
     const result = await run(host);
     const where = JSON.stringify(answer);
-    assert.deepEqual(result.dimensionsUnrun.map((u) => u.dimension), ALL, `${where}: not every dimension is unrun`);
-    for (const u of result.dimensionsUnrun) assert.match(u.reason, /exited \d+ but reported no failing|no exit status/, `${where}: ${u.reason}`);
+    assert.equal(result.suiteVerdict.usable, false, `${where}: the verdict is usable`);
+    assert.match(result.suiteVerdict.reason, /exited \d+ but reported no failing|no exit status/, `${where}: ${result.suiteVerdict.reason}`);
+    assert.deepEqual(result.dimensionsUnrun, [], `${where}: a dimension is unrun for the shared run`);
     assert.match(prompts["review:tests"][0], /This run is NOT usable/, `${where}: a specialist was not told the run is unusable`);
   }
 });
@@ -280,10 +285,8 @@ test("a shared run with cancelled tests and no failing count hands the owner the
   const result = await run(host);
   assert.match(prompts["review:correctness"][0], /It has 0 failing and 1 cancelled tests, and filing them is YOUR job/);
   assert.doesNotMatch(prompts["review:correctness"][0], /NOT usable/);
-  assert.deepEqual(result.dimensionsUnrun.map((u) => u.dimension), ALL);
-  for (const u of result.dimensionsUnrun) assert.match(u.reason, /1 cancelled tests and no selected dimension filed a finding/);
-  const filed = scriptedHost(script({ "test-run": [cancelled], "review:correctness": [review([finding("suggestion")])] }));
-  assert.deepEqual((await run(filed.host)).dimensionsUnrun, []);
+  assert.deepEqual(result.suiteVerdict, { usable: true, reason: null });
+  assert.deepEqual(result.dimensionsUnrun, []);
 });
 
 // #2879: vitest's `expected fail` is reported in its own field — the counts
@@ -293,6 +296,7 @@ test("a shared run whose only non-pass is an expected fail reads fail 0 and hand
   const { host, prompts } = scriptedHost(script({ "test-run": [{ exitCode: 0, tests: 121, pass: 120, fail: 0, expectedFail: 1 }] }));
   const result = await run(host);
   assert.deepEqual(result.dimensionsUnrun, []);
+  assert.deepEqual(result.suiteVerdict, { usable: true, reason: null });
   for (const k of ALL) {
     const p = prompts[`review:${k}`][0];
     assert.match(p, /counts: {2}tests 121, pass 120, fail 0, expectedFail 1\n/, `${k}'s prompt lacks the expected-fail count`);
@@ -300,17 +304,17 @@ test("a shared run whose only non-pass is an expected fail reads fail 0 and hand
   }
 });
 
-// A crashed specialist is named once, with its own reason — never a second
-// entry for the shared run's verdict on top.
-test("a crashed dimension is listed once, with its crash reason, beside the shared run's verdict for the rest", async () => {
+// A crashed specialist is named once, with its own reason, and ONLY it: the
+// shared run's verdict lives in suiteVerdict, never as a second entry — or an
+// entry per sibling — in dimensionsUnrun.
+test("a crashed dimension is listed once, with its crash reason, beside an unusable suite verdict", async () => {
   const { host } = scriptedHost(
     script({ "test-run": [{ exitCode: 0, tests: 0 }], "review:types": [null] }),
   );
   const result = await run(host);
-  const keys = result.dimensionsUnrun.map((u) => u.dimension);
-  assert.equal(keys.length, new Set(keys).size, `a dimension is listed twice: ${keys.join(", ")}`);
-  assert.deepEqual([...keys].sort(), [...ALL].sort());
-  assert.equal(result.dimensionsUnrun.find((u) => u.dimension === "types").reason, CRASHED_REASON);
+  assert.deepEqual(result.dimensionsUnrun, [{ dimension: "types", reason: CRASHED_REASON }]);
+  assert.equal(result.suiteVerdict.usable, false);
+  assert.match(result.suiteVerdict.reason, /produced 0 tests/);
 });
 
 // The shared run alone decides. A specialist whose payload still carries its
@@ -349,9 +353,11 @@ test("a specialist's stray test_run never changes the result, and the shared run
     const text = JSON.stringify(actual);
     assert.doesNotMatch(text, /MARKER-CMD|test_run/, `${name}: the stray test_run reached the result`);
     if (shared.tests === 0) {
-      assert.deepEqual(actual.dimensionsUnrun.map((u) => u.dimension), ALL, `${name}: not every live dimension is unrun`);
+      assert.equal(actual.suiteVerdict.usable, false, `${name}: the shared run's verdict is usable`);
+      assert.deepEqual(actual.dimensionsUnrun, [], `${name}: a dimension is unrun for the shared run`);
       assert.doesNotMatch(text, /9999/, `${name}: the stray count reached the result`);
     } else {
+      assert.deepEqual(actual.suiteVerdict, { usable: true, reason: null }, `${name}: a stray count of 0 made the verdict not usable`);
       assert.deepEqual(actual.dimensionsUnrun, [], `${name}: a stray count of 0 made a dimension unrun`);
       for (const key of ["survived", "refuted", "unverified"]) assert.equal(actual[key].length, 1, `${name}: ${key} holds no finding — this case tests nothing`);
     }
