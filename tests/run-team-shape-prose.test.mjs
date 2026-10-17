@@ -434,6 +434,10 @@ const CHANGED = [
   [
     "An edit to Shell traps or to `references/shell-traps.md` lands in that body in the same change.",
     "An edit to `references/shell-traps.md` lands in that body in the same change."
+  ],
+  [
+    "`~/.fleet/bin/fleet-run closeout.mjs finish --reason \"<reason>\"` — scrapes the run's member facts, checks the tier-outcomes rows, refreshes the metrics, commits the three metrics files and opens their PR, then records `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded stop as the end of the run.",
+    "`~/.fleet/bin/fleet-run closeout.mjs finish --reason \"<reason>\"` — scrapes the run's member facts, checks the tier-outcomes rows, refreshes the metrics, commits the three metrics files and opens their PR, sets the phase-0 receipt aside as `.fleet/phase0.previous.json`, then records `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded stop as the end of the run."
   ]
 ];
 

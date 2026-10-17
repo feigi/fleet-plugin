@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
-import { closeoutArchiveName, receiptArchiveName } from "../plugin/scripts/ledger-grammar.mjs";
+import { RECEIPT, RECEIPT_HELD, closeoutArchiveName, receiptArchiveName } from "../plugin/scripts/ledger-grammar.mjs";
 
 const PLUGIN = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM_DIR = join(PLUGIN, "skills", "run-team");
@@ -239,9 +239,21 @@ test("close-out.md has one heading per moved metrics step", () => {
   ]);
 });
 
-test("the rotate section names both receipts rotate archives, by the names the script gives them", () => {
+test("the receipt section names when the step runs, the files it moves between by the names the scripts give them, and how each refusal resumes", () => {
+  const s = Pin.of(CLOSE_OUT, "close-out.md").section("## Move the phase-0 receipt", "close-out receipt section").text;
+  assert.match(s, Pin.phrase("**Set aside the phase-0 receipt after the commit — before the heartbeat.**"));
+  assert.match(s, Pin.phrase(`The receipt \`.fleet/${RECEIPT}\` records`));
+  assert.match(s, Pin.phrase(`\`closeout.mjs finish\` moves it to \`.fleet/${RECEIPT_HELD}\``));
+  assert.match(s, Pin.phrase(`A missing \`.fleet/${RECEIPT}\` counts as nothing to move and is \`ok\`.`));
+  assert.match(s, Pin.phrase("**Fix the cause the error names, then run finish again.**"));
+  assert.match(s, Pin.phrase(`**File it by hand as \`.fleet/${receiptArchiveName("<UTC stamp>")}\`, then run finish again.**`));
+  assert.match(s, Pin.phrase("**Run finish again:** it finds both names are one file and retries the removal."));
+});
+
+test("the rotate section names the held receipt the rotation restores and both receipts rotate archives, by the names the scripts give them", () => {
   const rotate = Pin.of(PHASE0, "phase-0.md").section("## Rotate the ledger", "phase-0 rotate section").text;
   const stamp = "<UTC stamp>";
+  assert.match(rotate, Pin.phrase(`Before the rotation, \`phase0.mjs\` puts the held-aside receipt (\`${RECEIPT_HELD}\`) back at \`${RECEIPT}\`, which \`ledger.mjs rotate\` then files as \`${receiptArchiveName(stamp)}\`.`));
   assert.match(rotate, Pin.phrase(`\`ledger.mjs rotate\` archives the run's two receipts with the ledger, under the ledger archive's own stamp: \`.fleet/${receiptArchiveName(stamp)}\` and \`.fleet/${closeoutArchiveName(stamp)}\` beside \`.fleet/ledger.${stamp}.md\`.`));
 });
 
