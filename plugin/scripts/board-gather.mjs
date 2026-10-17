@@ -990,7 +990,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   // here because it reads the process table, and only when the mark is
   // stalled, so a healthy board reads none. computeBoard() words it.
   const now = Date.now();
-  const stallOwnerOf = isStalled(assessBeat({ beat, ticked, acted, controller, now })) ? stallOwner(priorState, NAME) : null;
+  const stallOwnerOf = isStalled(assessBeat({ beat, ticked, acted, controller, now })) ? stallOwner(controller, NAME) : null;
   return { ledger, issues, prs, merged, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
     poolCapped, prsCapped,
     now, interval };
