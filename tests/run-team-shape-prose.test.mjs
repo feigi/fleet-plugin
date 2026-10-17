@@ -17,7 +17,7 @@
 //     whole SKILL.md as it read before the rewrite, owned by this test, and
 //     every sentence of it is found in SKILL.md or across references/ as often
 //     as it was said, but for the sentences CHANGED and DELETED below, each
-//     named with the copy that survives it;
+//     named with what stands in its place;
 //   - the three blocks the rewrite moved whole — Shell traps, the invariants'
 //     full statements, the tick rows' full text — are found across references/
 //     as often as they were said, and not at all in SKILL.md.
@@ -411,9 +411,13 @@ const CHANGED = [
   ]
 ];
 
-// Sentences the rewrite deleted, each a duplicate whose surviving copy is
-// named.
-const DELETED = [];
+// Sentences deleted outright, each named with what stands in its place.
+const DELETED = [
+  [
+    "See references/shell-traps.md.",
+    "nothing: each Shell traps rule now sits in references/shell-traps.md, with its evidence under its own heading there, so the pointer named the file it was in"
+  ]
+];
 
 const oldSentences = () => counted(sentencesOf(readFileSync(FIXTURE, "utf8")));
 const referenceFiles = () => readdirSync(REFERENCES).filter((f) => f.endsWith(".md")).sort().map((f) => readFileSync(join(REFERENCES, f), "utf8"));
