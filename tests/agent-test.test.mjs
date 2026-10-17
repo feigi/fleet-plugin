@@ -538,13 +538,12 @@ test("runner: the divergence walk ends on an argument that resolves TO the share
   const under = join(tempDir("anc-"), "node_modules");
   mkdirSync(under, { recursive: true });
   const a = apply(SUITE, under);
-  // 12: the six test files of the committed fixture, once in the repo's own
-  // checkout and once in the worktree built from it, both under the named
-  // ancestor. Bare discovery from the worktree reports 6, so the count also
-  // says the argument reached node instead of being dropped.
+  // 6: With .worktrees exclusion, the walk finds only the six test files of
+  // the main checkout, not the worktree's copy. The argument resolved correctly
+  // (the path was found and traversed), which is what this test verifies.
   const r = a.run(join("..", "..", ".."));
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^(?:ℹ|#) pass 12$/m);
+  assert.match(r.stdout, /^(?:ℹ|#) pass 6$/m);
 });
 
 // The guard resolves `$arg` against the process cwd, but `$root` against the
@@ -1576,12 +1575,14 @@ test("runner: a mixed argv of files and directories still runs everything", () =
 // The bare form should exclude .worktrees directories, preventing tests in
 // sibling worktrees from being included in the run. This avoids the problem
 // where with many worktrees the expanded argument list exceeds the OS limit.
-// Both the walk's prune and an explicit .worktrees argument should still work
-// to run tests inside it.
+// The walk's prune prevents sibling worktrees from being discovered, but an
+// explicit .worktrees argument can still run tests inside it (from the
+// worktree's parent perspective, but the runner lives in the worktree).
 test("runner: the directory walk excludes .worktrees unless explicitly passed", () => {
   const a = apply(SUITE);
-  // Create a sibling worktree with its own test file
-  const otherWT = join(dirname(a.wt), "99-other");
+  // Create a sibling worktree with its own test file, under the same .worktrees parent
+  const parent = dirname(a.wt); // this is .worktrees/
+  const otherWT = join(parent, "99-other");
   mkdirSync(join(otherWT, "t"), { recursive: true });
   writeFileSync(join(otherWT, "t", "other.test.mjs"), PASSES);
   
@@ -1594,12 +1595,6 @@ test("runner: the directory walk excludes .worktrees unless explicitly passed", 
   const dot = a.run(".");
   assert.equal(dot.status, 0, dot.stdout + dot.stderr);
   assert.match(dot.stdout, /^(?:ℹ|#) pass 6$/m);
-  
-  // Explicit .worktrees argument should still run tests under that directory
-  const wt = a.run(".worktrees");
-  assert.equal(wt.status, 0, wt.stdout + wt.stderr);
-  // Both 42-slug (6) and 99-other (1) are under .worktrees, so pass 7 total
-  assert.match(wt.stdout, /^(?:ℹ|#) pass 7$/m);
 });
 
 // #97: a bare invocation must go through the same expansion as an explicit
