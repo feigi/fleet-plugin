@@ -10,9 +10,9 @@ one it runs in. Phase 3's monitor paragraph points here instead of restating
 any of it. The merge bot's agent body is the one place this block is copied
 whole (see **Merge bot**); the other deliberate copy is named at the end.
 
-**zsh word-splits an unquoted command substitution's result; it does NOT split an unquoted parameter expansion.** See references/shell-traps.md.
+**zsh word-splits an unquoted command substitution's result; it does NOT split an unquoted parameter expansion.**
 
-**Word the rule against the first row.** See references/shell-traps.md.
+**Word the rule against the first row.**
 
 **Capture-then-loop needs `while IFS= read -r` fed by a heredoc**, which is
 line-exact under every shell:
@@ -26,9 +26,9 @@ $prs
 EOF
 ```
 
-The inline `$(printf '%s\n' "$prs")` form splits correctly too and is what Phase 3's block uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can. See references/shell-traps.md.
+The inline `$(printf '%s\n' "$prs")` form splits correctly too and is what Phase 3's block uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can.
 
-**`</dev/null` every command inside a `while read` loop.** See references/shell-traps.md.
+**`</dev/null` every command inside a `while read` loop.**
 
 **A probe that could not look emits an event; it never `continue`s.** Stated in
 full at *A probe that cannot read is a transition event, not silence* in Phase 3,
@@ -42,7 +42,7 @@ instead of a quiet one. A guard that drops an unreadable probe — `[ -n "$json"
 empty and `[ "" -eq 0 ]` passes. A bot's merge gate opened without ever reading
 an exit code.
 
-**`status` is a READ-ONLY variable in zsh**, an alias for `$?`. Name the variable anything else (`ci_status`). See references/shell-traps.md.
+**`status` is a READ-ONLY variable in zsh**, an alias for `$?`. Name the variable anything else (`ci_status`).
 
 **The other deliberate copy is `env $cfg sh ./probe.sh`.** The first trap's
 mechanism bites argv as well as loops, and that instance stays written out in the

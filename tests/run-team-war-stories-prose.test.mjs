@@ -207,8 +207,8 @@ test("the fixture is the removed text: from the first Measured paragraph to the 
 
 const keptCount = (text, clause, file) => (text.match(new RegExp(Pin.phrase(`${clause} See references/${file}`).source, "g")) ?? []).length;
 
-// The Shell traps section moved whole into references/shell-traps.md, so its
-// five rules keep their clause beside the pointer there, not in SKILL.md.
+// The Shell traps section moved whole into references/shell-traps.md, and its
+// five rules have no pointer beside them — each clause appears exactly once.
 const SHELL_TRAPS_MD = reference("shell-traps.md");
 
 for (const [file, heading, clause, opening, imperative] of MOVED) {
@@ -218,10 +218,19 @@ for (const [file, heading, clause, opening, imperative] of MOVED) {
   });
   if (clause === null) continue;
   const kept = imperative === undefined ? clause : `${clause} ${imperative}`;
-  const where = file === "shell-traps.md" ? "references/shell-traps.md" : "SKILL.md";
-  test(`${where} keeps "${kept.slice(0, 60)}…" with See references/${file} beside it`, () => {
-    assert.equal(keptCount(file === "shell-traps.md" ? SHELL_TRAPS_MD : SKILL, kept, file), 1);
-  });
+  if (file === "shell-traps.md") {
+    // shell-traps.md: check clause appears exactly once without pointer
+    const clauseCount = (text, c) => (text.match(new RegExp(Pin.phrase(c).source, "g")) ?? []).length;
+    test(`references/${file} keeps "${kept.slice(0, 60)}…" with no pointer`, () => {
+      assert.equal(clauseCount(SHELL_TRAPS_MD, kept), 1);
+    });
+  } else {
+    // Other files: check clause appears exactly once beside the pointer
+    const keptCount = (text, c, f) => (text.match(new RegExp(Pin.phrase(`${c} See references/${f}`).source, "g")) ?? []).length;
+    test(`SKILL.md keeps "${kept.slice(0, 60)}…" with See references/${file} beside it`, () => {
+      assert.equal(keptCount(SKILL, kept, file), 1);
+    });
+  }
 }
 
 // The ACCEPT side: a kept rule hard-wrapped at the file's width, its pointer on
