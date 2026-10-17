@@ -277,6 +277,24 @@ for arg do
       -*) findarg="./$arg/" ;;
       *) findarg="$arg/" ;;
     esac
+    # Exclude `.worktrees` during the directory walk, unless the argument
+    # itself is `.worktrees` or under it (in which case the user explicitly
+    # requested tests from that directory). This matters because BSD `find`
+    # matches `-name` against the starting point even with a trailing slash,
+    # so an unanchored `-name .worktrees` prune would prevent the walk from
+    # descending when `.worktrees` is the starting point, yielding a false
+    # "no test files" error. Check the argument's spelling (for `.worktrees`
+    # and `./.worktrees` explicitly passed) rather than its resolution,
+    # because the directory branch does not resolve. An argument passing the
+    # diverge walk as UNDER `.worktrees` (from this worktree's ancestry) is
+    # rare: only when called from within `.worktrees` with a relative path
+    # pointing outside and back into a sibling worktree, so the spelling
+    # alone suffices here.
+    worktrees_prune=
+    case "$arg" in
+      .worktrees*) worktrees_prune= ;;
+      *) worktrees_prune="-name .worktrees -prune -o" ;;
+    esac
     # GNU find (ubuntu-latest CI) answers `-type f` straight from the
     # dirent's own `d_type` field when the filesystem provides one (ext4
     # does) — no `stat`/`lstat` at all — and `-print` only ever needs the
@@ -316,7 +334,7 @@ for arg do
     # a check that was never meant to see it. One call, on the existing
     # `-type f` term, is what stays inside every fixture's contract that
     # this runner calls `find` exactly once per directory argument.
-    found=$(find "$findarg" -name node_modules -prune -o -type f -perm -400 -print) || { printf 'agent-test: cannot read every path under %s\n' "$arg" >&2; exit 1; }
+    found=$(find "$findarg" -name node_modules -prune -o $worktrees_prune -type f -perm -400 -print) || { printf 'agent-test: cannot read every path under %s\n' "$arg" >&2; exit 1; }
     # Byte semantics for the two tools that read find's output, because a
     # filename is bytes and neither tool is told which. Measured on macOS with
     # a name holding \377, under en_US.UTF-8: `grep` drops that line silently

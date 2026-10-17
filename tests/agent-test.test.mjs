@@ -1573,6 +1573,35 @@ test("runner: a mixed argv of files and directories still runs everything", () =
   assert.match(r.stdout, /^(?:ℹ|#) pass 2$/m);
 });
 
+// The bare form should exclude .worktrees directories, preventing tests in
+// sibling worktrees from being included in the run. This avoids the problem
+// where with many worktrees the expanded argument list exceeds the OS limit.
+// Both the walk's prune and an explicit .worktrees argument should still work
+// to run tests inside it.
+test("runner: the directory walk excludes .worktrees unless explicitly passed", () => {
+  const a = apply(SUITE);
+  // Create a sibling worktree with its own test file
+  const otherWT = join(dirname(a.wt), "99-other");
+  mkdirSync(join(otherWT, "t"), { recursive: true });
+  writeFileSync(join(otherWT, "t", "other.test.mjs"), PASSES);
+  
+  // Bare invocation should not include the sibling worktree's test (still pass 6)
+  const bare = a.run();
+  assert.equal(bare.status, 0, bare.stdout + bare.stderr);
+  assert.match(bare.stdout, /^(?:ℹ|#) pass 6$/m);
+  
+  // Explicit . should also not include sibling worktree tests (still pass 6)
+  const dot = a.run(".");
+  assert.equal(dot.status, 0, dot.stdout + dot.stderr);
+  assert.match(dot.stdout, /^(?:ℹ|#) pass 6$/m);
+  
+  // Explicit .worktrees argument should still run tests under that directory
+  const wt = a.run(".worktrees");
+  assert.equal(wt.status, 0, wt.stdout + wt.stderr);
+  // Both 42-slug (6) and 99-other (1) are under .worktrees, so pass 7 total
+  assert.match(wt.stdout, /^(?:ℹ|#) pass 7$/m);
+});
+
 // #97: a bare invocation must go through the same expansion as an explicit
 // ".", not fall through to node's own default discovery. `for arg do` with no
 // `in` clause iterates "$@", so on an empty argv the loop body never ran and
