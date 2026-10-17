@@ -308,7 +308,7 @@ test("computeBoard: the cockpit's stall line names the controller gather() judge
   const stale = { at: NOW - 90 * 60_000, interval: 1200, stopped: "" };
   const text = (stallOwner) => computeBoard({ ...livenessInputs(stale), stallOwner }).liveness.text;
   assert.match(text({ kind: "alive", pid: 4242 }), /^heartbeat not beating, controller alive \(pid 4242\): /);
-  assert.match(text({ kind: "gone", resumes: "the next run" }), /^heartbeat STALLED, controller gone: .*; the next run resumes its claims without a PR, and its open PRs return through the fold-in$/);
+  assert.match(text({ kind: "gone" }), /^heartbeat STALLED, controller gone: .*; the next run resumes its claims without a PR, and its open PRs return through the fold-in$/);
   for (const none of [undefined, null, { kind: "none" }]) {
     assert.match(text(none), /^heartbeat STALLED: /);
     assert.doesNotMatch(text(none), /controller/);

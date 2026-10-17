@@ -375,7 +375,7 @@ test("the heartbeat block says whose stall a line is and names what is stranded"
   // saying what follows from it: a gone controller's claims come back, a live
   // one's do not, and no record decides nothing.
   assert.match(s, Pin.phrase("`heartbeat STALLED, controller gone` — the run that stranded them is dead. Its claims without a PR come back through the next run's phase 0 stranded-claim step (references/phase-0.md, \"Resume the claims a dead run left without a PR\"), and its open PRs through the fold-in."));
-  assert.match(s, Pin.phrase("`heartbeat not beating, controller alive (pid N)`, or `(this session's earlier run)` — a controller that stopped beating and kept going. Nothing died, so nothing is resumed"));
+  assert.match(s, Pin.phrase("`heartbeat not beating, controller alive (pid N)` — a controller that stopped beating and kept going. Nothing died, so nothing is resumed"));
   assert.match(s, Pin.phrase("`heartbeat STALLED` alone — no record says whether that controller lives. The line is detection only."));
   // #2968: the previous run's recorded stop is its end, printed once.
   assert.match(s, Pin.phrase("Your first tick may print `previous run stopped deliberately at <time> (<age> ago) — recorded reason: <reason>` instead: the stop the previous run recorded. It is that run's end, not a verdict on yours, and no later tick prints it."));

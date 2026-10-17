@@ -540,32 +540,17 @@ function mins(ms) {
 // that the beat stopped, never whether the run did. No record: unknown, and
 // the report keeps the wording it had before there was one.
 //
-// A mark older than the record's `at` was left by the run BEFORE the one
-// that wrote the record: rotate replaced the record after that run's last
-// beat, tick and ledger write. When every mark is that old, the record names
-// a controller that has left no mark yet, so judging it would call every
-// previous run alive. That stall reads the verdict rotate reached on the
-// record it replaced, `prior`: dead is a controller gone whose claims this run
-// resumes, ancestor is this same session's earlier run and so alive, none is
-// unknown. A mark written since the record — any later beat, tick or ledger
-// write — is the recorded controller's own, so the record itself is judged,
-// through proc.mjs: dead or a reused pid is gone and the NEXT run resumes;
-// alive, or an ancestor of the reader, is alive. A record with no `at` cannot
-// place the mark and is judged too.
+// Whose stall it is comes off the record, judged through proc.mjs: dead or a
+// reused pid is gone and the next run resumes; alive, or an ancestor of the
+// reader, is alive.
 //
 // `judge` is replaceable for the same reason proc.mjs's process source is: a
 // reader under a live omp session would otherwise find that session. A
 // process table that cannot be read leaves the stall unattributed, said on
 // stderr, rather than calling a controller nobody could judge dead or alive.
 export const NO_OWNER = Object.freeze({ kind: "none" });
-export function stallOwner({ controller, beat = null, ticked = null, acted = null }, name, judge = judgeRecord) {
+export function stallOwner({ controller }, name, judge = judgeRecord) {
   if (!controller) return NO_OWNER;
-  const before = (mark) => thisRun(mark, controller) === null;
-  if (controller.at !== null && before(beat) && before(ticked) && before(acted)) {
-    if (controller.prior === "dead") return { kind: "gone", resumes: "this run" };
-    if (controller.prior === "ancestor") return { kind: "alive", pid: null };
-    return NO_OWNER;
-  }
   let verdict;
   try {
     verdict = judge(controller);
@@ -574,7 +559,7 @@ export function stallOwner({ controller, beat = null, ticked = null, acted = nul
     console.error(`${name}: WARNING ${e.message} — the recorded controller pid ${controller.pid} cannot be judged, so the stall report names no controller`);
     return NO_OWNER;
   }
-  if (verdict === "dead") return { kind: "gone", resumes: "the next run" };
+  if (verdict === "dead") return { kind: "gone" };
   if (verdict === "alive" || verdict === "ancestor") return { kind: "alive", pid: controller.pid };
   return NO_OWNER;
 }
@@ -619,10 +604,10 @@ export function stallReport(verdict, { claimed, supply, owner = NO_OWNER } = {})
     ? `stopped deliberately — recorded reason: ${verdict.reason}`
     : verdict.beatless ? "no beat, tick or ledger write since, and no recorded reason" : "the beat stopped without a recorded reason";
   const head = owner.kind === "alive"
-    ? `heartbeat not beating, controller alive (${owner.pid === null ? "this session's earlier run" : `pid ${owner.pid}`})`
+    ? `heartbeat not beating, controller alive (pid ${owner.pid})`
     : owner.kind === "gone" ? "heartbeat STALLED, controller gone" : "heartbeat STALLED";
   const tail = owner.kind === "gone"
-    ? `; ${owner.resumes} resumes its claims without a PR, and its open PRs return through the fold-in`
+    ? "; the next run resumes its claims without a PR, and its open PRs return through the fold-in"
     : "";
   const seen = verdict.beatless
     ? `no beat this run, last ${MARK_NAMES[verdict.mark]} ${when(verdict.at)}`

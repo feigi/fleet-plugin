@@ -660,19 +660,23 @@ test("stallReport: age always reconciles to overdue+interval, across every unit 
 
 // ── stallOwner: whose stall a mark is ───────────────────────────────────────
 //
-// The mark is judged against the record's `at`: one older than it is the
-// previous run's and the verdict rotate reached, `prior`, words the stall; one
-// at or after it is the recorded controller's own and the record is judged.
-// `judge` is injected so no reader finds the omp session running this suite.
+// Whose stall it is comes off the record, judged through `judge`, whatever
+// the marks' ages against the record's `at`. `judge` is injected so no reader
+// finds the omp session running this suite.
 const RECORD_AT = 1_000_000;
 const recordWith = (prior) => ({ pid: 4242, lstart: "x", prior, at: RECORD_AT });
-const noJudge = () => assert.fail("the record was judged where only `prior` should read");
 
-test("stallOwner: a stall whose every mark predates the record reads `prior`, and the record is never judged", () => {
-  const beat = { at: RECORD_AT - 60_000 };
-  assert.deepEqual(stallOwner({ controller: recordWith("dead"), beat, ticked: null }, "t", noJudge), { kind: "gone", resumes: "this run" });
-  assert.deepEqual(stallOwner({ controller: recordWith("ancestor"), beat, ticked: beat }, "t", noJudge), { kind: "alive", pid: null });
-  assert.deepEqual(stallOwner({ controller: recordWith("none"), beat, ticked: beat }, "t", noJudge), { kind: "none" });
+test("stallOwner: a stall whose every mark predates the record still judges the record, whatever `prior` says", () => {
+  // A legacy record: written before rotate stamped `acted`, so every mark is
+  // older than it, and the stall is the recorded run's own.
+  const old = { at: RECORD_AT - 10 * 60_000 };
+  const verdicts = { dead: { kind: "gone" }, alive: { kind: "alive", pid: 4242 }, ancestor: { kind: "alive", pid: 4242 } };
+  for (const prior of ["dead", "ancestor", "none"]) {
+    for (const [verdict, owner] of Object.entries(verdicts)) {
+      const controller = recordWith(prior);
+      assert.deepEqual(stallOwner({ controller, beat: old, ticked: old, acted: null }, "t", () => verdict), owner, `prior ${prior}, judge ${verdict}`);
+    }
+  }
 });
 
 test("stallOwner: a mark at or after the record is the recorded controller's own — the record is judged, whatever `prior` says", () => {
@@ -687,7 +691,7 @@ test("stallOwner: a mark at or after the record is the recorded controller's own
     for (const prior of ["dead", "ancestor", "none"]) {
       const controller = recordWith(prior);
       assert.deepEqual(stallOwner({ controller, beat, ticked }, "t", () => "alive"), { kind: "alive", pid: 4242 }, `${what}, prior ${prior}`);
-      assert.deepEqual(stallOwner({ controller, beat, ticked }, "t", () => "dead"), { kind: "gone", resumes: "the next run" }, `${what}, prior ${prior}`);
+      assert.deepEqual(stallOwner({ controller, beat, ticked }, "t", () => "dead"), { kind: "gone" }, `${what}, prior ${prior}`);
     }
   }
 });
@@ -806,9 +810,7 @@ test("stallOwner: a ledger write at or after the record is the recorded controll
   for (const prior of ["dead", "ancestor", "none"]) {
     const controller = recordWith(prior);
     for (const acted of [{ at: RECORD_AT }, { at: RECORD_AT + 60_000 }]) {
-      assert.deepEqual(stallOwner({ controller, beat: old, ticked: old, acted }, "t", () => "dead"), { kind: "gone", resumes: "the next run" }, `prior ${prior}`);
+      assert.deepEqual(stallOwner({ controller, beat: old, ticked: old, acted }, "t", () => "dead"), { kind: "gone" }, `prior ${prior}`);
     }
-    // One older than the record leaves the reading on `prior`.
-    assert.notDeepEqual(stallOwner({ controller, beat: old, ticked: null, acted: old }, "t", noJudge), { kind: "gone", resumes: "the next run" });
   }
 });

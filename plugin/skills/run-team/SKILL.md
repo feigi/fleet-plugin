@@ -1438,10 +1438,10 @@ record:
   Its claims without a PR come back through the next run's phase 0
   stranded-claim step (references/phase-0.md, "Resume the claims a dead run
   left without a PR"), and its open PRs through the fold-in.
-- `heartbeat not beating, controller alive (pid N)`, or `(this session's
-  earlier run)` — a controller that stopped beating and kept going. Nothing
-  died, so nothing is resumed; when that controller is you, the fix is to
-  tick on every wake and beat when there is nothing to do.
+- `heartbeat not beating, controller alive (pid N)` — a controller that
+  stopped beating and kept going. Nothing died, so nothing is resumed; when
+  that controller is you, the fix is to tick on every wake and beat when there
+  is nothing to do.
 - `heartbeat STALLED` alone — no record says whether that controller lives.
   The line is detection only.
 
