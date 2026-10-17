@@ -228,13 +228,14 @@ test("a clean run passes every step in order, writes one receipt and exits 0", (
   // The scripts ran in the runbook's order. The cockpit is detached, so its
   // own line in the log lands whenever it starts.
   const order = f.order().filter((n) => n !== "board");
-  assert.deepEqual(order, ["instruments", "main-checkout", "preflight", "ruleset", "tier-roles", "metrics-refresh", "rotate", "reclaim-scratch", "derive-testcmd", "derive-testcmd", "gh", "stranded", "shortlist"]);
+  assert.deepEqual(order, ["instruments", "main-checkout", "preflight", "ruleset", "tier-roles", "metrics-refresh", "rotate", "reclaim-scratch", "reclaim-scratch", "derive-testcmd", "derive-testcmd", "gh", "stranded", "shortlist"]);
   assert.deepEqual(f.calls("instruments")[0].args, ["--pin"]);
   assert.deepEqual(f.calls("main-checkout")[0].args, ["--record"]);
   assert.deepEqual(f.calls("preflight")[0].args, []);
   assert.deepEqual(f.calls("ruleset")[0].args, ["--check"]);
   assert.deepEqual(f.calls("tier-roles")[0].args, ["--check", "--in-flight", "5"]);
   assert.deepEqual(f.calls("reclaim-scratch")[0].args, ["--root", receipt.scratch, "--after-rotate", "--apply"]);
+  assert.deepEqual(f.calls("reclaim-scratch")[1].args, ["--siblings", "--root", receipt.scratch, "--apply"]);
   assert.deepEqual(f.calls("derive-testcmd").map((c) => c.args), [[".", "install"], [".", "test", "--at", "origin/main"]]);
   for (let i = 0; i < 40 && f.calls("board").length === 0; i++) wait(100);
   assert.deepEqual(f.calls("board")[0].args, ["serve", "--open"]);
@@ -446,6 +447,8 @@ test("cockpit and reclaim are recorded and never stop the run, whatever they ans
   const receipt = f.receipt();
   assert.deepEqual(statuses(receipt), allOk);
   assert.match(receipt.steps.reclaim.output, /not enforced\nreclaim-scratch: refuses/, "the step's own words are kept");
+  assert.equal(f.calls("reclaim-scratch").length, 2, "the sibling pass did not run after the live sweep failed");
+  assert.deepEqual(f.calls("reclaim-scratch")[1].args, ["--siblings", "--root", receipt.scratch, "--apply"]);
   assert.match(receipt.steps.cockpit.output, /launched/);
 });
 
