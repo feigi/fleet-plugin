@@ -10,7 +10,7 @@
 // #1076 hoisted the same read (now argSpendSince()) into
 // main(), ahead of the build/serve dispatch and ahead of gh reads too — but
 // the rig stays: the success-path cases below (a valid value reaching the
-// payload, the #807/#363 pipe-race cases) still run gather() to completion
+// payload, the #807 case) still run gather() to completion
 // and need the stub either way.
 //
 // The validation under test lives in main(), which reads process.argv directly
@@ -18,7 +18,7 @@
 // than called in-process the way gatherSpend() is.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync, spawn, execFileSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
@@ -280,159 +280,6 @@ test("build: a valid --interval survives the guard and reaches the payload", () 
   // still exit 0 and say so via ledgerState, not go silent about the refusal.
   assert.equal(body.ledgerState, "unread");
 });
-
-// ── #363: the pipe-race that motivated this file's --spend-since rig ──────────
-//
-// Same reason this file exists at all (see header): the --spend-since guard
-// fires only AFTER gather()'s gh reads, and tryRun() (board-gather.mjs) runs each
-// one through execRead's async `execFile`, passing no `stdio` option. That
-// CAPTURES the child's stderr rather than inheriting it, and re-emits it
-// through board.mjs's OWN process.stderr — the child never touches an
-// inherited fd 2. So the write that has to clear the pipe before die() can
-// land is board.mjs's own, and on a pipe that is an async stream write:
-// whatever is still queued when process.exit() runs is discarded. Going
-// through execFile rather than execFileSync does not change this: the read
-// side moved from sync to async, but the re-emitting write itself was always
-// `process.stderr.write`, a non-blocking pipe write either way.
-//
-// Measured, both shapes, each parent flooding 200,000 B and then exiting,
-// read by a spawn() reader identical to runBoardFlooded's — tryRun's
-// no-stdio form delivers 65,536 B, while stdio [..., "inherit"], which is
-// what actually inherits fd 2, delivers all 200,000.
-//
-// #367 fixed the write itself (writeSync, not console.error — see arg.mjs),
-// but nothing drove the race that motivated it. This does, and it is the
-// non-flaky shape the ticket asks for — deliberately NOT candidates.test.mjs's
-// EAGAIN test, which pins a different failure (the exit CODE inverting to 1,
-// not the message vanishing), is racy by its own account (its comment: "7/15
-// unfixed runs inverted"), and says darwin never fires it at all.
-//
-// Driven through this test's own rig, against a die() reverted to
-// console.error: the refusal is dropped every run and delivered stderr caps
-// at exactly 65,536 B, at 66,000 / 200,000 / 2,000,000 alike. The shipped
-// writeSync die() delivers 65,599 B at every one of those sizes — the same
-// cap plus the refusal.
-//
-// This ran darwin-only until #951, behind "the loss was measured on darwin and
-// nowhere else". That was true of the measurement, not of the loss — nobody had
-// driven this scenario on Linux, and the gate's own wording is what stopped
-// anyone re-checking. Driven on it now, 100 runs per arm, ubuntu-24.04 /
-// node 26.5.0 (this repo's CI runner and its .nvmrc), same rig as below:
-//
-//   build                          refusal LOST  stderr bytes  distinct
-//   die() = writeSync   (PIPE)         0/100     146239-182783        2
-//   die() = console.error (PIPE)     100/100            146176        1
-//   die() = console.error (FILE)       0/100            600187        1
-//
-// The mutant drops the refusal on every Linux run, at one byte count, so the
-// platform gate was hiding real coverage rather than protecting a vacuous
-// green. It is gone, and this file no longer reads process.platform at all.
-//
-// It was the last one: no test in this suite is now gated on the platform, so
-// nothing here is unexercised on CI by construction the way #337 found. The
-// conditional skips that remain — candidates.test.mjs's gojq gate and the
-// SKIP_WITHOUT_REPO sweeps — are runtime-capability gates that CI provisions
-// for and does execute. A non-zero `skipped` on CI is therefore a real signal
-// again rather than the permanent floor it used to be, which is the residue
-// #337 left and #951 closes.
-//
-// The FILE row is the control that removal rests on, and it is why the stdio
-// below must stay a pipe: on a file fd the same mutant keeps the refusal 100/100
-// and delivers all 600,187 bytes, so a harness capturing to a file would pass
-// whether or not die() was ever fixed.
-//
-// Two sampling notes, both recorded because each misleads on its own:
-//
-//   - A SINGLE Linux run of the mutant delivered all 600,187 bytes with the
-//     refusal intact. The loss is deterministic under the back-to-back load of
-//     a repeated run and absent in one isolated shot, so n=1 is not evidence
-//     here in either direction, including a single green run of this test.
-//   - One 25-run sample of the FIXED build lost the refusal 1/25, with a
-//     546,301-byte outlier. That was #889 — die()'s writeSync used to be
-//     unlooped, so a non-blocking pipe could short-write it — not this gate's
-//     subject. It did not recur over 100 further runs, and the whole test
-//     flaked 0/30 end to end. #889 landed die()'s bounded EAGAIN-retry loop
-//     (arg.mjs); if this test ever goes red on a correct build now, the
-//     cause is elsewhere.
-//
-// Nothing about the EAGAIN exit-code inversion (#299/#328) is claimed here.
-// That is the other half of this file family — probabilistic, and genuinely
-// darwin-immune. This is the truncation half (#176/#246/#328/#363), which is
-// deterministic on both platforms. Do not merge the two.
-
-// The stub has one job: make board.mjs's re-emission of this output a single
-// write bigger than the pipe can hold. `head -c` rather than a hand-rolled
-// Node writer so the bytes come off an ordinary child, as gh's do. Any size
-// past the 65,536 B capacity does it, and they all behave identically —
-// measured on the fixed build, 66,000 / 200,000 / 2,000,000 each deliver
-// 65,599 B — so the headroom above the cap buys nothing and costs nothing.
-// Named, because the guard below is tied to it: de-tune one and the other
-// goes red instead of quietly vacuous.
-const FLOOD_BYTES = 200_000;
-const FLOOD_GH_STUB = `#!/bin/sh\nyes F | head -c ${FLOOD_BYTES} >&2\nexit 0\n`;
-
-// One pipe buffer — the cap every measurement above lands on. The fixture has
-// to clear it or this test proves nothing: shrink FLOOD_BYTES under the cap and
-// the flood arrives whole, the refusal is never at risk, and all three
-// assertions below pass green under the very bug they exist to pin. Asserted
-// rather than trusted to the comment, because that is the failure a later
-// de-tuning would introduce silently.
-const PIPE_BUF = 65_536;
-assert.ok(
-  FLOOD_BYTES > PIPE_BUF * 2,
-  `flood fixture must outgrow the pipe buffer with headroom: ${FLOOD_BYTES} <= ${PIPE_BUF * 2}`,
-);
-
-// Async spawn + immediate drain: `close` rather than `exit`, so every byte
-// the stream ever receives is captured before assertions run, not just
-// whatever arrived by the time the process exited. stdout is discarded
-// rather than piped — nothing here asserts on it, and an unread pipe is one
-// more thing that can stall the child.
-function runBoardFlooded() {
-  const cwd = tempDir("since-flood-cwd-");
-  const bin = tempDir("since-flood-bin-");
-  writeExecStub(join(bin, "gh"), FLOOD_GH_STUB);
-  return new Promise((resolve) => {
-    const child = spawn(
-      process.execPath,
-      [BOARD, "build", "--ledger", join(cwd, "nope.md"), "--spend-since", "notanumber"],
-      { cwd, env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, stdio: ["ignore", "ignore", "pipe"] },
-    );
-    let stderr = "";
-    child.stderr.on("data", (d) => (stderr += d));
-    child.on("close", (status) => resolve({ status, stderr }));
-  });
-}
-
-test(
-  "build: --spend-since's refusal survives a gh child that has already pushed past the pipe buffer, unread",
-  async () => {
-    const r = await runBoardFlooded();
-    // The flood must have OVERRUN the pipe, not arrived whole — and tied to
-    // FLOOD_BYTES this is exact rather than a heuristic: gather() re-emits
-    // three of these, so delivering even the FIRST one intact already puts
-    // r.stderr at >= FLOOD_BYTES. Landing below it means the first re-write
-    // was cut short, which is the loss this test exists for.
-    //
-    // A literal 65,536 floor fails open instead, because r.stderr sums all
-    // three calls: three sub-cap floods total past it while every one of
-    // them arrives complete, refusal included. Measured against a
-    // console.error die() at 22,000 B — 66,188 delivered, refusal PRESENT,
-    // all three assertions here green under the very bug they pin. That
-    // darwin-era (65,536 mutant, 65,599 fixed) pair reads as headroom this
-    // gate no longer has: the 100-run Linux measurement above puts the real
-    // outcomes at 146,176 (mutant) and 146,239-182,783 (fixed) — within
-    // ~17,217 B of FLOOD_BYTES, not far below it. The #889 outlier
-    // (546,301 B) clears FLOOD_BYTES outright, so it would fail this
-    // overrun assertion too, not only the refusal-match below.
-    assert.ok(
-      r.stderr.length < FLOOD_BYTES,
-      `gh's flood must overrun the pipe, not arrive whole: got ${r.stderr.length} of ${FLOOD_BYTES}`,
-    );
-    assert.match(r.stderr, /board: --spend-since wants epoch milliseconds, got notanumber/);
-    assert.equal(r.status, 2, r.stderr.slice(-300));
-  },
-);
 
 // #365: board.mjs's known set is the UNION over both subcommands, so every
 // name in it has to survive a run of either one. Driven on `build` because

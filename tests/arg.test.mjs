@@ -721,11 +721,12 @@ for (const { script, argv } of GH_FLOOD) {
     // The row the guard must NOT change. A catch around the write could just as
     // easily swallow the refusal on the ordinary path, or return before the
     // exit — so the small case pins both halves: the line lands, the code is 2.
-    // Anchored on the script's own NAME prefix only, not the wording after it,
-    // so rephrasing a refusal is not this test's business.
+    // Anchored on the script's own NAME and on the refusal being the last line,
+    // not on the wording after the name, so rephrasing a refusal is not this
+    // test's business.
     const ordinary = runWithFloodingGh(script, argv, 64);
     assert.equal(ordinary.status, 2, `expected exit 2 on the ordinary path, got ${ordinary.status}: ${ordinary.stderr}`);
-    assert.match(ordinary.stderr, new RegExp(`^${script}: `, "m"), `${script}.mjs refused without saying so: ${ordinary.stderr}`);
+    assert.match(ordinary.stderr, new RegExp(`\n${script}: [^\n]*\n$`), `${script}.mjs refused without saying so, as the last line: ${ordinary.stderr}`);
 
     // The row that inverted. Platform-bound and therefore a CI gate, not a
     // local one: measured on darwin, all four of these still exit 2 with the
@@ -752,6 +753,28 @@ for (const { script, argv } of GH_FLOOD) {
       `gh's forwarded stderr must exceed the pipe buffer or this pins nothing, got ${flooded.stderr.length}`,
     );
     assert.equal(flooded.status, 2, `expected exit 2 behind ${flooded.stderr.length} B of forwarded stderr, got ${flooded.status}`);
+    // The refusal must be stderr's LAST line, not merely present somewhere in it.
+    // This row kills a different mutant from the EAGAIN inversion the size and
+    // status asserts above pin: die() written through console.error and then
+    // process.exit(2). The refusal queues behind the forwarded flood, and
+    // process.exit() discards whatever is still queued, so the status stays 2
+    // while the line is gone. End-anchored on purpose: fleet-tick prints
+    // `fleet-tick: WARNING ...` lines before gh, so an unanchored match passes
+    // with the refusal lost.
+    //
+    // Measured under the #3077 ruling, mutant vs shipped, refusal-is-last-line:
+    // darwin arm64 0/30 vs 30/30 on every flooded row; Linux isolated shots 0/30
+    // vs 30/30 (diff-stats 1/30 under the mutant); Linux back-to-back 0/30 vs
+    // 30/30.
+    //
+    // runWithFloodingGh's spawnSync must keep stderr a pipe, the default: on a
+    // file fd the same mutant keeps the refusal, so a file-backed stdio would
+    // make this assertion vacuous.
+    assert.match(
+      flooded.stderr,
+      new RegExp(`\n${script}: [^\n]*\n$`),
+      `${script}.mjs lost its refusal behind ${flooded.stderr.length} B of forwarded stderr`,
+    );
   });
 }
 

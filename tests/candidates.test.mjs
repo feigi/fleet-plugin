@@ -1580,12 +1580,12 @@ test("the exit code survives a gh stderr larger than the pipe buffer — the cas
   // caught the revert 0/15 — so a local green confirms nothing and the source
   // pin at the end is the only gate on this platform.
   //
-  // Text, not just status: this only asserts the EXIT CODE, not the refusal
-  // wording. #889 gave die() a bounded EAGAIN retry loop (MAX_EAGAIN_RETRIES
-  // in arg.mjs) that resumes a short write and retries the exact EAGAIN this
-  // test forces, so the message is no longer lost on the first EAGAIN the way
-  // it was before #889 — only a reader that never drains past the retry cap
-  // can still lose it, and #299 is what keeps the exit code honest either way.
+  // Text, not just status: the refusal line must be stderr's LAST line. A die()
+  // that writes through console.error and then exits 2 keeps this status while
+  // the line queues behind the forwarded flood and process.exit() discards it,
+  // so the status alone cannot see the loss; the end-anchored match below does.
+  // #889's bounded EAGAIN retry (MAX_EAGAIN_RETRIES in arg.mjs) is why the line
+  // lands on the shipped build, and #299 is what keeps the exit code honest.
   const { status, stderr } = run(
     [ticket(11, "## What to build\n\nx\n")],
     ["--require-label", "ready-for-agent"],
@@ -1594,6 +1594,7 @@ test("the exit code survives a gh stderr larger than the pipe buffer — the cas
   );
   assert.ok(stderr.length > 60_000, `gh stderr must exceed the buffer, got ${stderr.length}`);
   assert.equal(status, 2);
+  assert.match(stderr, /\ncandidates: [^\n]*\n$/, `refusal must be stderr's last line, got: ${stderr.slice(-300)}`);
   // The guard's SHAPE, deterministically — the assertion above is the race.
   // Stripped first, and this is not optional: against raw source a `die()`
   // genuinely reverted to console.error with the good shape parked in a block

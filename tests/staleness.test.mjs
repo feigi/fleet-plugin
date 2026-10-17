@@ -643,9 +643,10 @@ const WRITE_WINDOW_BYTES = 4096;
 // filling slots as the reader frees them, returning only once it finds the
 // pipe full. The ceiling is a RACE against the reader, not a constant —
 // measured at 146176 bytes in one call on this repo's CI runner, with
-// board-cli.test.mjs's independent 100-run ubuntu measurement reporting that
-// same 146176 for one console.error write and a RANGE of 146239-182783 for
-// the looped build. The spread is the race. And 146176 is past
+// the independent 100-run ubuntu measurement that board-cli.test.mjs carried
+// until #3077 removed it (readable at 0eacb958), reporting that same 146176 for
+// one console.error write and a RANGE of 146239-182783 for the looped build.
+// The spread is the race. And 146176 is past
 // ARG_STRLEN_MAX, so on that runner NO needle both outgrows one write and
 // survives execve: the two constraints do not overlap, and picking a bigger
 // number cannot fix it. Raising the needle was tried twice and reddened CI
