@@ -503,6 +503,27 @@ test("a pattern a program resolves under its own directory option is refused unq
   assert.equal(q.err, "");
 });
 
+// CHARACTERIZATION TEST pinning a KNOWN LIMITATION — not a spec, and not
+// desired behaviour. It records what the probe does today: it judges every
+// unquoted glob from the repository root, so `git -C web ls-files -- *.test.ts`
+// is accepted whenever a tracked ROOT file matches, even though git resolves
+// the pattern under `web/`, finds nothing there, and the suite selects no test.
+// The fixture tracks the match at the root only, since a match under `web/` too
+// would make the acceptance correct. A red run here means the gap was closed:
+// delete this test and the header sentence documenting the limitation, together.
+test("CHARACTERIZATION (known limitation, not desired behaviour): an unquoted glob after git -C is accepted when only a root file matches", () => {
+  const { dir, head } = repo({ "x.test.ts": "", "web/other.txt": "" });
+  const cmd = "git -C web ls-files -- *.test.ts";
+  const control = spawnSync("sh", ["-c", cmd], { cwd: dir, encoding: "utf8", env: FIXTURE_ENV });
+  assert.equal(control.status, 0, `fixture: ${control.stderr}`);
+  assert.equal(control.stdout, "", "fixture: the program itself selects no file from the repo root");
+  cache(dir, recipe(head, { test: cmd }));
+  const r = derive(dir);
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out, cmd);
+  assert.equal(r.err, "");
+});
+
 // The must-ACCEPT half. A pattern matching a tracked file at any depth reads
 // cleanly. A word the shell does not glob as written — quoted, carrying an
 // expansion, an option or an `=` — is the program's own to read and cannot be
