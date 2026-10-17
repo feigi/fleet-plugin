@@ -450,6 +450,26 @@ const CHANGED = [
   [
     "A duty 1 halt's report carries the verdict as printed, the JSON line, so a `rebase` halt's report carries the output of `git cherry <pin> HEAD origin/main` that its `evidence` holds.",
     "A duty 1 halt's report carries the verdict as printed, the JSON line, so a `rebase` halt's report carries `replay`, `rangeDiff` and `remote` from its `evidence`."
+  ],
+  [
+    "It returns `{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts, snapshot, survived, refuted, unverified}` — the **digest** first, then the snapshot and the findings — and it lands as one artefact, `<scratch>/pr<pr>/<run>/review.json`, holding that bare object.",
+    "It returns `{pr, head, resume, testEnvironment, suiteVerdict, dimensionsRun, dimensionsUnrun, cwdAudit, counts, snapshot, survived, refuted, unverified}` — the **digest** first, then the snapshot and the findings — and it lands as one artefact, `<scratch>/pr<pr>/<run>/review.json`, holding that bare object."
+  ],
+  [
+    "`jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/pr<pr>/<run>/review.json` is the whole of your read, and it is what you record: `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, off `head`, `counts` and the run root's name — the runner's `ledger` field — on the PR's row, with `ledger.mjs review <pr>`.",
+    "`jq '{pr, head, resume, testEnvironment, suiteVerdict, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/pr<pr>/<run>/review.json` is the whole of your read, and it is what you record: `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, off `head`, `counts` and the run root's name — the runner's `ledger` field — on the PR's row, with `ledger.mjs review <pr>`."
+  ],
+  [
+    "A specialist that dies contributes zero findings while its key stays in `dimensionsRun`; a review whose one shared test run executed nothing — the review runs the test command once, and every specialist reads that run instead of running its own — leaves every key there with no suite behind it.",
+    "A specialist that dies contributes zero findings while its key stays in `dimensionsRun`."
+  ],
+  [
+    "A key in `dimensionsRun` and NOT in `dimensionsUnrun` ran a suite; every `dimensionsUnrun` entry is `{dimension, reason}` naming which failure it was.",
+    "A key in `dimensionsRun` and NOT in `dimensionsUnrun` returned a review; every `dimensionsUnrun` entry is `{dimension, reason}` naming a specialist that returned nothing, its `reason` the crash."
+  ],
+  [
+    "In a review it leaves every dimension unrun, for the reason \"no suite slot within <n> s — the host is at its suite bound; not a test failure\", with no retry inside the run: re-review it under the next runner letter (`review-pr-<pr#>-b` after a first runner), as for a runner that reported `failed`.",
+    "In a review it makes `suiteVerdict` not usable, `suiteVerdict.reason` beginning \"no suite slot within <n> s — the host is at its suite bound; not a test failure\", with no retry inside the run: read that `reason` off the digest and re-review it under the next runner letter (`review-pr-<pr#>-b` after a first runner), as for a runner that reported `failed`."
   ]
 ];
 

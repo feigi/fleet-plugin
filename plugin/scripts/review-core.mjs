@@ -3,7 +3,7 @@
 // This file holds every host-independent declaration PR review needs: the
 // JSON schemas, `usableDiff`, `readRules`, `resolveTestCmd`,
 // `decodeArgs`, `selectDimensions`, `resolveDimensions`, `snapshotMissing`,
-// `installReason`/`installFinding`, `unrunReason`/`unrunEntries`/`unrunCrashed`,
+// `installReason`/`installFinding`, `suiteVerdictOf`/`unrunCrashed`,
 // `sharedRunNote`, `copyRule`,
 // `verdictFor`, `resumeFor`, and `runReview(host, args)` — the orchestration
 // function itself.
@@ -152,7 +152,7 @@ export const SNAPSHOT_SCHEMA = {
 // log path are NOT asked for: the caller handed both out, so it already knows
 // them, and an agent's echo of either could only disagree. Every count is
 // optional and stays absent when the log does not state it — an absent
-// `tests` is how `unrunReason` learns the run produced no counts at all
+// `tests` is how `suiteVerdictOf` learns the run produced no counts at all
 // (crash, deadline, no summary), which a typed-in 0 would misreport as a run
 // that collected nothing.
 export const TEST_RUN_SCHEMA = {
@@ -652,26 +652,14 @@ function failingDesc(run) {
   return run.cancelled ? `${run.fail || 0} failing and ${run.cancelled} cancelled tests` : `${run.fail} failing tests`;
 }
 
-// Failing tests are owned by the review as a whole: `findings` is
-// every finding that reached the payload, and ONE from any dimension
-// satisfies the check for all — no dimension is asked to duplicate a
-// sibling's, and none is marked unrun because a sibling filed it. A refuted
-// finding does not count: the review rejected it, so an unrelated claim its
-// verifiers threw out would otherwise stand in for failures nobody reported.
-// A dimension whose verify stage died never reaches the payload, so its
-// findings are not here to count either.
-export function unrunReason(run, findings) {
-  const why = testRunReason(run);
-  if (why) return why;
-  if (failingOf(run) > 0 && !findings.some((f) => f && f.verdict !== "refuted"))
-    return `\`${run.command || "the test command"}\` reported ${failingDesc(run)} and no selected dimension filed a finding about them that the review kept`;
-  return null;
-}
-
-// One verdict, every key: the shared run is the same run for each of them.
-export function unrunEntries(run, findings, keys) {
-  const why = unrunReason(run, findings);
-  return why ? keys.map((dimension) => ({ dimension, reason: why })) : [];
+// The review's single judgement on its shared test run: `{usable, reason}`,
+// `reason` null when the run is usable. It reads the run alone — never a
+// specialist's findings, and never whether a dimension reviewed: a usable run
+// is not a green one (failing tests are the owner dimension's to file), and an
+// unusable one says nothing about what the specialists read.
+export function suiteVerdictOf(run) {
+  const reason = testRunReason(run);
+  return { usable: reason === null, reason };
 }
 
 export const CRASHED_REASON = "the reviewer returned nothing — spend limit, timeout, or terminal error";
@@ -719,7 +707,7 @@ mutation in the copy never runs.`;
 export function sharedRunNote(run, owner, key) {
   if (run.unprovisioned)
     return `Tests: this review did NOT run its test command: ${run.unprovisioned}.
-Every dimension of this review is reported unrun for it — do not run the full
+The review reports its suite verdict not usable for it — do not run the full
 command yourself to replace it, and file nothing about the install: the review
 reports it itself.
   command: ${run.command}`;
@@ -737,8 +725,8 @@ Read the log for anything the counts do not say.`,
   ];
   const why = testRunReason(run);
   if (why)
-    lines.push(`This run is NOT usable: ${why}. Every dimension of this review is reported
-unrun for it — do not run the full command yourself to replace it.`);
+    lines.push(`This run is NOT usable: ${why}. The review reports its suite verdict not
+usable for it — do not run the full command yourself to replace it.`);
   else if (failingOf(run) > 0)
     lines.push(
       key === owner
@@ -749,9 +737,8 @@ narrowed run in your own copy of the snapshot, where \`<testCmd>\` is the
 command above, and when that run does not show it failing, file no finding
 above \`suggestion\` on it and name both runs. A failure you cannot separate
 from the environment is still filed — say so in the finding, so it is
-reproduced in the worktree before anyone acts on it. If none is filed, or this
-review's refuters reject every finding filed, every dimension of this review
-is reported unrun. A red is read by these rules and nothing else:
+reproduced in the worktree before anyone acts on it. A red is read by these
+rules and nothing else:
 
 ${VALID_RED_RULE}
 
@@ -841,7 +828,7 @@ export function resumeFor(unverified) {
 // same reason a struct's fields stay ordered: a reader scanning top-down
 // meets the fields that matter first.
 // `snapshot`, `survived`, `refuted` and `unverified` follow it.
-export const DIGEST_KEYS = ["pr", "head", "resume", "testEnvironment", "dimensionsRun", "dimensionsUnrun", "cwdAudit", "counts"];
+export const DIGEST_KEYS = ["pr", "head", "resume", "testEnvironment", "suiteVerdict", "dimensionsRun", "dimensionsUnrun", "cwdAudit", "counts"];
 
 export function digestOf(result) {
   return Object.fromEntries(DIGEST_KEYS.map((k) => [k, result[k]]));
@@ -1162,8 +1149,8 @@ and uncoveredError only replaces uncovered.`,
   const testCmd = resolveTestCmd(A.testCmd, snap);
   log(`testCmd ${A.testCmd ? "(caller override)" : "(derived)"} ${testCmd}`);
   // An Install step that failed or never ran leaves a snapshot that cannot
-  // measure the tree: the shared run is skipped, every dimension is reported
-  // unrun through `testRunReason`, and a non-zero exit is filed as a finding.
+  // measure the tree: the shared run is skipped, the suite verdict is not
+  // usable through `testRunReason`, and a non-zero exit is filed as a finding.
   const notInstalled = installReason(snap);
   log(notInstalled ? `install: ${notInstalled}` : `install: ${snap.installCmd ?? "the Install step"} exited 0 in the snapshot`);
 
@@ -1195,8 +1182,8 @@ and uncoveredError only replaces uncovered.`,
   // review was up to six full sweeps of one immutable snapshot. NOT wrapped in
   // `retryCrashed`: a crashed dispatch may already have launched the command,
   // so a retry would be a second launch — the load this step removes. A null
-  // or thrown answer is a run with no counts, which `unrunReason` reports for
-  // every dimension, never a pass.
+  // or thrown answer is a run with no counts, which `suiteVerdictOf` reports as
+  // not usable, never a pass.
   const logPath = `${snap.runRoot}/test-run.log`;
   phase("Test run");
   const ran = notInstalled ? null : await agent(
@@ -1247,7 +1234,7 @@ copied as printed; omit any the runner does not print. A test the runner reports
 as failing by design (vitest \`expected fail\`, pytest \`xfailed\`) goes in \`expectedFail\`, never in
 \`fail\`. Copy the counts, never judge them: 'tests 0' is a FAILED run, not a
 pass, and 0 passes with no failures is everything skipped — report both
-exactly as printed, and the caller reports every dimension unrun for them.
+exactly as printed, and the caller reports its suite verdict not usable for them.
 
 If the command hit its deadline, crashed before printing a summary, or printed
 no counts at all, omit every count and say what happened in \`error\`. Never
@@ -1282,13 +1269,13 @@ learns the run produced none.`,
   // tree it must not write to, `pwd` fixes which directory that is, and the
   // `CWD-AUDIT:` line is what makes a clean run say so — an audit reported
   // only when dirty is indistinguishable from one never run, the same reading
-  // `unrunReason` applies to a shared test run that reports nothing.
+  // `suiteVerdictOf` applies to a shared test run that reports nothing.
   phase("Review");
   const reviewed = await pipeline(
     dimensions,
     // A crashed specialist (null or thrown) is re-dispatched once
     // before it counts as unrun. A specialist that RETURNED is never re-run
-    // here — the shared run, not the specialist, is what `unrunEntries` judges.
+    // here — the shared run is judged once, by `suiteVerdictOf`.
     (d) =>
       retryCrashed(
         () =>
@@ -1489,14 +1476,10 @@ how three reviews from one cell left four files modified in that checkout.`,
   const refuted = all.filter((f) => f.verdict === "refuted");
   const unverified = all.filter((f) => f.verdict === "unverified");
 
-  // One verdict on the shared run, for every dimension whose chain did
-  // not die — a crashed one is named below with its own reason instead, so no
-  // key is listed twice. Read only once every dimension has been verified: the
-  // failing-tests check reads the findings that reached the payload, across
-  // ALL dimensions, refuted ones excluded.
-  const live = dimensions.filter((_, i) => reviewed[i]).map((d) => d.key);
-  dimensionsUnrun.push(...unrunEntries(sharedRun, all, live));
+  // A crashed dimension is named with its own reason. The shared run is not
+  // a dimension's crash: it is judged once, as `suiteVerdict`, below.
   dimensionsUnrun.push(...unrunCrashed(reviewed, dimensions));
+  const suiteVerdict = suiteVerdictOf(sharedRun);
 
   const { crashed, resume } = resumeFor(unverified);
 
@@ -1516,19 +1499,24 @@ how three reviews from one cell left four files modified in that checkout.`,
   // checked" for "survived".
   // `dimensionsRun` names what was DISPATCHED after the size trim: a trimmed
   // fan-out must say so, never read as full coverage. It is not a coverage claim
-  // on its own and never was — a specialist can be dispatched and die, or the
-  // review's one shared test run can execute nothing — so
-  // `dimensionsUnrun` names which of those keys did not cover their ground,
-  // and why. A key in the first and NOT in the second ran a suite — not that
-  // it is covered. `unrunReason` reads the shared run's counts and
+  // on its own and never was — a specialist can be dispatched and die — so
+  // `dimensionsUnrun` names which of those keys returned nothing, and why. A
+  // key in the first and NOT in the second returned a review — not that it is
+  // covered.
+  //
+  // `suiteVerdict` is the review's one judgement on its shared test run, apart
+  // from both: a run that executed nothing usable does not make a dimension
+  // unrun, because the dimensions that returned reviewed and their findings
+  // were verified as usual. `suiteVerdictOf` reads the shared run's counts and
   // quotes its command into its message; it never checks that the test-run
   // agent ran the command it was handed rather than a narrower one, so a
-  // substituted runner is not classified unrun.
+  // substituted runner is not classified not usable.
   //
-  // The two are siblings rather than one filtered list because they answer
-  // different questions. Subtracting the unrun ones from `dimensionsRun` would
-  // make a crashed dimension indistinguishable from one the size tier never
-  // dispatched — this ticket set's own defect, moved one field over.
+  // `dimensionsRun` and `dimensionsUnrun` are siblings rather than one
+  // filtered list because they answer different questions. Subtracting the
+  // unrun ones from `dimensionsRun` would make a crashed dimension
+  // indistinguishable from one the size tier never dispatched — this ticket
+  // set's own defect, moved one field over.
   //
   // Digest first, in DIGEST_KEYS order, bulk last — see DIGEST_KEYS
   // above for why the order is the contract.
@@ -1542,6 +1530,7 @@ how three reviews from one cell left four files modified in that checkout.`,
     // never be left unable to tell an environment artifact from a regression,
     // and that costs nothing when there is nothing wrong to report.
     testEnvironment: environmentNote(snap),
+    suiteVerdict,
     dimensionsRun: dimensions.map((d) => d.key),
     dimensionsUnrun,
     // `cwdAuditFrom`'s per-dimension read of the specialist's own

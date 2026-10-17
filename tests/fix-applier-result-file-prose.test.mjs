@@ -59,7 +59,7 @@ test("every top-level field the jq recipes read is a field the review returns", 
     assert.ok(RESULT_KEYS.has(field), `a jq recipe reads .${field}, which the review result does not carry — it would print null at exit 0`);
   }
   // Both inputs every other ruling depends on must actually be read.
-  for (const field of ["survived", "unverified", "refuted", "counts", "testEnvironment", "cwdAudit", "dimensionsUnrun", "resume"]) {
+  for (const field of ["survived", "unverified", "refuted", "counts", "testEnvironment", "suiteVerdict", "cwdAudit", "dimensionsUnrun", "resume"]) {
     assert.ok(read.has(field), `no jq recipe reads .${field}`);
   }
 });
@@ -85,6 +85,16 @@ test("the testEnvironment recipe calls it evidence about the shared test run, an
   const fenced = [...DOC.section("## The review result file", "review-and-fix.md's result-file section").text.matchAll(/^```bash\n([\s\S]*?)^```$/gm)].flatMap((m) => m[1].split("\n"));
   assert.ok(fenced.length > 0, "the result-file section lost its fenced recipe block");
   for (const l of fenced) assert.doesNotMatch(l, /test_run/i, `a recipe line names the retired test_run field: ${l}`);
+});
+
+// #3048: the suite verdict has a recipe of its own, and the digest recipe
+// projects it, so a fix-applier reads it where it reads the rest of the digest.
+test("the result-file section reads suiteVerdict in the digest and in a recipe of its own", () => {
+  const recipes = DOC.section("## The review result file", "review-and-fix.md's result-file section").text.match(/^jq .*$/gm) ?? [];
+  const digest = recipes.find((l) => l.includes("# the digest"));
+  assert.ok(digest, "the result-file section no longer has the digest recipe");
+  assert.match(digest, /\{pr, head, resume, testEnvironment, suiteVerdict, dimensionsRun, dimensionsUnrun, cwdAudit, counts\}/, "the digest recipe does not project suiteVerdict in digest order");
+  assert.ok(recipes.some((l) => l.startsWith("jq -r '.suiteVerdict' ")), "the result-file section no longer has a `jq -r '.suiteVerdict'` recipe");
 });
 
 test("the fix-applier owns the mutual-exclusion scan, run twice, with a single refuter for a conflicting pair", () => {
@@ -114,6 +124,17 @@ test("the fix-applier reads testEnvironment and cwdAudit before acting on any re
   assert.match(p, Pin.phrase("status --porcelain -uall"), "the cwdAudit check lost its explicit untracked mode");
   assert.match(p, Pin.phrase("never revert content you did not write"));
   assert.match(p, Pin.phrase("re-run nothing"), "a dimensionsUnrun entry now reads as an instruction to re-run the review");
+});
+
+// #3048: an unusable shared run is named in the verdict and nothing more — the
+// fix-applier's own `<testCmd>` run and CI cover the suite — and it is never a
+// reason to call a dimension unrun, which only a crashed specialist is.
+test("the fix-applier names an unusable shared test run in its verdict and does nothing more about it, and never rules a dimension unrun for it", () => {
+  const p = ruling("**Read `testEnvironment` and `cwdAudit` before you act on any result of the shared test run.**");
+  assert.match(p, Pin.phrase("`suiteVerdict.usable` is false, name `shared test run not usable: <reason>` in your final verdict and do nothing more about it"));
+  assert.match(p, Pin.phrase("your own `<testCmd>` run and CI cover the suite"));
+  assert.doesNotMatch(p, /not a reason to rule a dimension unrun/, "the testEnvironment clause about ruling a dimension unrun for the shared run is back");
+  assert.match(p, Pin.phrase("A `dimensionsUnrun` entry is a specialist that returned nothing"));
 });
 
 // The two run-team/SKILL.md sentences that hand the fix-applier the same ruling

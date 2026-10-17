@@ -1662,7 +1662,7 @@ since none runs against a finished PR, and a probe that
 cannot answer keeps the unit counted. A unit is not the agents a review fans
 out to — 1 snapshot + up to 6 specialists + 2 refuters per critical/important finding.
 
-It returns `{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts, snapshot, survived, refuted, unverified}` —
+It returns `{pr, head, resume, testEnvironment, suiteVerdict, dimensionsRun, dimensionsUnrun, cwdAudit, counts, snapshot, survived, refuted, unverified}` —
 the **digest** first, then the snapshot and the findings — and it lands as
 one artefact, `<scratch>/pr<pr>/<run>/review.json`, holding that bare object.
 `<run>` is the review's own `run-XXXXXXXX` run root, the one its snapshot sits
@@ -1671,7 +1671,7 @@ of its own and never replaces the first. The `review-pr-<pr#>` runner writes it
 and reports the digest, the path and the `reviewed=` token naming that run.
 
 **You read the digest; the findings are the fix-applier's.**
-`jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/pr<pr>/<run>/review.json`
+`jq '{pr, head, resume, testEnvironment, suiteVerdict, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/pr<pr>/<run>/review.json`
 is the whole of your read, and it is what you record: `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`,
 off `head`, `counts` and the run root's name — the runner's `ledger` field — on
 the PR's row, with `ledger.mjs review <pr>`. Every later path to the review is built from that token, before a
@@ -1714,15 +1714,25 @@ refutation the report defers.
 
 **`dimensionsRun` is the dispatch; `dimensionsUnrun` is what names a gap.** A
 specialist that dies contributes zero findings while its key stays in
-`dimensionsRun`; a review whose one shared test run executed nothing — the
-review runs the test command once, and every specialist reads that run instead
-of running its own — leaves every key there with no suite behind it. So
-read the two together. A key
-in `dimensionsRun` and NOT in `dimensionsUnrun` ran a suite; every
-`dimensionsUnrun` entry is `{dimension, reason}` naming which failure it was.
+`dimensionsRun`. So read the two together. A key
+in `dimensionsRun` and NOT in `dimensionsUnrun` returned a review; every
+`dimensionsUnrun` entry is `{dimension, reason}` naming a specialist that
+returned nothing, its `reason` the crash.
 The review already re-dispatched each crashed specialist once, so what
 `dimensionsUnrun` still names is residue: the fix-applier names it unrun in its
 report and re-runs nothing — an absence of findings is not coverage.
+
+**`suiteVerdict` is the review's one judgement on its shared test run:
+`{usable, reason}`, always present.** The review runs the test command once,
+and every specialist reads that run instead of running its own. `{usable: true,
+reason: null}` says the run executed real tests and its exit status is
+explained by its counts; usable is not green, so a usable run can have failing
+tests. `usable: false` carries `reason`, including a run that never started
+(install skipped, no suite slot). The verdict says nothing about whether a
+dimension reviewed: a specialist that returned reviewed, and its findings were
+verified as usual, whatever the suite verdict. With `usable: false` the
+fix-applier names `shared test run not usable: <reason>` in its final verdict
+and does nothing more — its own `<testCmd>` run and CI cover the suite.
 
 The rule this replaces — treat any dimension with nothing in
 `survived`/`refuted`/`unverified` as unrun — was the workaround for having no
@@ -1792,9 +1802,10 @@ seconds, 1800 by default, then exit **75** with `suite-slot: no slot after <n>s`
 on stderr, having launched nothing. On getting a slot the wrapper prints
 `SUITE_SLOT_WAIT_MS=<n>` — the wait in milliseconds — to stderr, which the
 review's test-run block captures into its log and the test-run agent reports as
-`slotWaitMs`. **Exit 75 is not a test result.** In a review it leaves every
-dimension unrun, for the reason "no suite slot within <n> s — the host is at its
-suite bound; not a test failure", with no retry inside the run: re-review it
+`slotWaitMs`. **Exit 75 is not a test result.** In a review it makes
+`suiteVerdict` not usable, `suiteVerdict.reason` beginning "no suite slot within
+<n> s — the host is at its suite bound; not a test failure", with no retry
+inside the run: read that `reason` off the digest and re-review it
 under the next runner letter (`review-pr-<pr#>-b` after a first runner), as for
 a runner that reported `failed`. The implementer, fix-applier and finisher briefs
 carry the one-line rule: *Exit 75 from the suite is not a test result; run the

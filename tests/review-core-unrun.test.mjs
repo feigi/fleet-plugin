@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./support/strip-comments.mjs";
 import { Pin } from "./support/prose-pin.mjs";
-import { unrunReason, unrunEntries, unrunCrashed, sharedRunNote, FINDINGS_SCHEMA, CRASHED_REASON } from "../plugin/scripts/review-core.mjs";
+import { suiteVerdictOf, unrunCrashed, sharedRunNote, FINDINGS_SCHEMA, CRASHED_REASON } from "../plugin/scripts/review-core.mjs";
 
 // A dimension that crashed and a dimension that ran clean returned BYTE-
 // IDENTICAL shapes: `findings: []` either way, with the key listed in
@@ -14,10 +14,11 @@ import { unrunReason, unrunEntries, unrunCrashed, sharedRunNote, FINDINGS_SCHEMA
 // that missing eye.
 //
 // #2315: every run-quality verdict reads the review's ONE shared test run —
-// `unrunReason(run, findings)`, `findings` being every finding that reached
-// the payload, across all selected dimensions — because no specialist runs the
-// full suite any more. The fixtures below are that run's shape: the caller's
-// `command` plus the test-run agent's exit status and counts.
+// `suiteVerdictOf(run)` — because no specialist runs the full suite any more.
+// The fixtures below are that run's shape: the caller's `command` plus the
+// test-run agent's exit status and counts. The verdict reads the run ALONE: no
+// finding from any dimension can make a run usable or unusable, and no verdict
+// on the run makes a dimension unrun (#3048).
 //
 // Pins read CODE, not SOURCE, wherever they read source text at all:
 // `stripComments` exists because two pins in this directory were MEASURED
@@ -28,61 +29,80 @@ const REPO = join(import.meta.dirname, "..", "plugin");
 const SOURCE = Pin.file(join(REPO, "scripts", "review-core.mjs"));
 const CODE = stripComments(SOURCE.text);
 
+// What the verdict says about a run, in one place: `{usable, reason}`, `reason`
+// null exactly when the run is usable.
+const reasonOf = (run) => suiteVerdictOf(run).reason;
+
 // #2315's no-counts case, from its two causes: the test-run dispatch returned
 // nothing at all, or it returned without a count (crash, deadline, no
 // summary). Neither is ever a pass.
-test("a shared run that returned nothing is unrun, and says why", () => {
+test("a shared run that returned nothing is not usable, and says why", () => {
   for (const dead of [null, undefined, false, 0, ""]) {
-    const reason = unrunReason(dead, []);
-    assert.equal(typeof reason, "string", `a falsy shared run (${JSON.stringify(dead)}) must yield a reason`);
-    assert.match(reason, /returned nothing/, "the reason no longer names a test run that returned nothing");
+    const verdict = suiteVerdictOf(dead);
+    assert.equal(verdict.usable, false, `a falsy shared run (${JSON.stringify(dead)}) must not be usable`);
+    assert.equal(typeof verdict.reason, "string");
+    assert.match(verdict.reason, /returned nothing/, "the reason no longer names a test run that returned nothing");
   }
 });
 
 // #137's case: the `'tests 0'` reading rule, given somewhere to land. The
 // reason names the COMMAND, because "0 tests" without it sends a reader
 // hunting for which command produced them.
-test("a zero-test run is unrun, naming the command that produced no tests", () => {
-  const reason = unrunReason({ command: "npm test --", tests: 0, pass: 0, fail: 0 }, []);
-  assert.equal(typeof reason, "string", "a zero-test run must yield a reason");
-  assert.match(reason, /npm test --/, "the reason no longer names the command that produced no tests");
-  assert.match(reason, /0 tests/);
+test("a zero-test run is not usable, naming the command that produced no tests", () => {
+  const verdict = suiteVerdictOf({ command: "npm test --", tests: 0, pass: 0, fail: 0 });
+  assert.equal(verdict.usable, false, "a zero-test run must not be usable");
+  assert.match(verdict.reason, /npm test --/, "the reason no longer names the command that produced no tests");
+  assert.match(verdict.reason, /0 tests/);
 });
 
 // ABSENT or null is "no counts", not `tests: 0`: the test-run agent is told to
 // omit a count the log does not state, so an absent one is a run that printed
 // no summary — and its `error` says why, which the reason must carry.
-test("a shared run that reported no count at all is unrun, carrying the agent's error", () => {
+test("a shared run that reported no count at all is not usable, carrying the agent's error", () => {
   for (const run of [{ command: "npm test --" }, { command: "npm test --", tests: null }]) {
-    const reason = unrunReason(run, [{ severity: "critical", claim: "x", evidence: "y" }]);
-    assert.equal(typeof reason, "string", `a countless run (${JSON.stringify(run)}) must yield a reason`);
-    assert.match(reason, /no counts/);
+    const verdict = suiteVerdictOf(run);
+    assert.equal(verdict.usable, false, `a countless run (${JSON.stringify(run)}) must not be usable`);
+    assert.match(verdict.reason, /no counts/);
   }
-  assert.match(unrunReason({ command: "npm test --", error: "hit the 1800 s deadline" }, []), /hit the 1800 s deadline/);
+  assert.match(reasonOf({ command: "npm test --", error: "hit the 1800 s deadline" }), /hit the 1800 s deadline/);
+});
+
+// #3048: a run the review never started is not usable either, each with its OWN
+// reason — the controller reads the no-slot one off `suiteVerdict.reason` to
+// re-review under the next runner letter, so that text must stay what it keys
+// on, and the install-skipped one must say which install failed.
+test("a run that never started is not usable, the install-skipped and no-slot runs each with their own reason", () => {
+  const skipped = suiteVerdictOf({ command: "npm test --", logPath: "/r/test-run.log", unprovisioned: "the Install step `sh ./install.sh` exited 3" });
+  assert.deepEqual(skipped, { usable: false, reason: "the Install step `sh ./install.sh` exited 3" });
+  const noSlot = suiteVerdictOf({ command: "npm test --", exitCode: 75, error: "suite-slot: no slot after 1800s" });
+  assert.equal(noSlot.usable, false);
+  assert.match(noSlot.reason, /^no suite slot within 1800 s/, "run-team/SKILL.md tells the controller this reason begins \"no suite slot\"");
+  assert.notEqual(noSlot.reason, skipped.reason);
+  // A run that printed counts and happened to exit 75 is the suite's own
+  // answer, judged like any other — not a no-slot run.
+  assert.doesNotMatch(reasonOf({ command: "npm test --", exitCode: 75, tests: 9, pass: 9, fail: 0 }) ?? "", /no suite slot/);
 });
 
 // THE REFUSAL SURFACE, and the half a suite fed only broken input cannot pin.
-// A new required field and a new unrun predicate are both refusal surfaces: a
-// review that legitimately has nothing to report must still come back
-// clean. Marking a genuinely clean dimension unrun re-runs work that was done
-// and teaches a controller to ignore the field — the same end state as not
-// having it.
-test("a clean run with every dimension's findings list empty is NOT unrun", () => {
-  assert.equal(
-    unrunReason({ command: "npm test --", exitCode: 0, tests: 12, pass: 12, fail: 0 }, []),
-    null,
-    "a review whose shared run passed and found nothing is clean, not unrun",
+// A new required field and a new classifier are both refusal surfaces: a
+// review whose run did its work must still come back usable.
+test("a clean run is usable, with the reason null", () => {
+  assert.deepEqual(
+    suiteVerdictOf({ command: "npm test --", exitCode: 0, tests: 12, pass: 12, fail: 0 }),
+    { usable: true, reason: null },
+    "a shared run that passed is usable",
   );
 });
 
-// A suite with real failures RAN. Reading `fail > 0` as unrun would hide the
-// one class of test result that most needs reporting.
-test("a run with failing tests is NOT unrun", () => {
-  assert.equal(
-    unrunReason({ command: "npm test --", exitCode: 1, tests: 14, pass: 11, fail: 3 }, [{ severity: "critical", claim: "x", evidence: "y" }]),
-    null,
-    "a suite that reported failures still ran",
-  );
+// A suite with real failures RAN. Reading `fail > 0` as unusable would hide the
+// one class of test result that most needs reporting — and since #3048 nothing
+// else reads the findings either: a usable run is not a green one, so failing
+// tests with NO kept finding from any dimension are still a usable run.
+test("a run with failing or cancelled tests is usable, whatever any dimension filed", () => {
+  assert.deepEqual(suiteVerdictOf({ command: "npm test --", exitCode: 1, tests: 14, pass: 11, fail: 3 }), { usable: true, reason: null });
+  assert.deepEqual(suiteVerdictOf({ command: "node --test", exitCode: 1, tests: 744, pass: 738, fail: 6 }), { usable: true, reason: null });
+  assert.deepEqual(suiteVerdictOf({ command: "node --test", exitCode: 1, tests: 744, pass: 743, fail: 0, cancelled: 1 }), { usable: true, reason: null });
+  assert.deepEqual(suiteVerdictOf({ command: "node --test", exitCode: 1, tests: 10, pass: 9, fail: 1 }), { usable: true, reason: null });
 });
 
 // #143's all-skipped case, and the reason the clause reads `pass === 0 && !fail`
@@ -90,45 +110,31 @@ test("a run with failing tests is NOT unrun", () => {
 // test skipped arrives as `pass: 0` with `fail` zero or absent (the shared run
 // may also report `skipped`, but the verdict never needs it). Nothing passed
 // and nothing failed is no work done.
-// BOTH arms of `findings`, because this clause is findings-INDEPENDENT by
-// design and only a non-empty fixture says so. The sibling `fail > 0` clause
-// below is the one that reads `findings`; ANDing a findings check in here too
-// would let a review that reports 0 passes and 0 fails and attaches one filler
-// finding read as clean — the loophole #143 exists to close. Every fixture
-// here once sent `[]`, so that mutation survived the whole suite.
-test("a run where nothing passed and nothing failed is unrun — every test skipped", () => {
-  for (const findings of [[], [{ severity: "suggestion", claim: "x", evidence: "y" }]]) {
-    for (const run of [
-      { command: "node --test", tests: 2, pass: 0, fail: 0 },
-      { command: "node --test", tests: 2, pass: 0 },
-    ]) {
-      const reason = unrunReason(run, findings);
-      const where = `${JSON.stringify(run)} with ${findings.length} findings`;
-      assert.equal(typeof reason, "string", `an all-skipped run (${where}) must yield a reason`);
-      assert.match(reason, /node --test/, "the reason no longer names the command that did no work");
-    }
+test("a run where nothing passed and nothing failed is not usable — every test skipped", () => {
+  for (const run of [
+    { command: "node --test", tests: 2, pass: 0, fail: 0 },
+    { command: "node --test", tests: 2, pass: 0 },
+  ]) {
+    const verdict = suiteVerdictOf(run);
+    assert.equal(verdict.usable, false, `an all-skipped run (${JSON.stringify(run)}) must not be usable`);
+    assert.match(verdict.reason, /node --test/, "the reason no longer names the command that did no work");
   }
 });
 
 // #651: the clause above fired at EXACTLY zero, so one executed test bought a
 // clean read — `tests 937 / pass 1 / fail 0` is a crash mid-suite, not a pass.
 // The `pass` variants are the two shapes a no-failure run arrives in (`fail: 0`
-// and `fail` absent, both falsy); the fixture with a finding attached is there
-// for the same reason the all-skipped one is — this clause is findings-
-// INDEPENDENT, and every fixture sending `[]` is how that mutation survives.
-test("a run that executed a fraction of what it collected is unrun, not clean", () => {
-  for (const findings of [[], [{ severity: "suggestion", claim: "x", evidence: "y" }]]) {
-    for (const run of [
-      { command: "node --test", tests: 937, pass: 1, fail: 0 },
-      { command: "node --test", tests: 937, pass: 1 },
-      { command: "node --test", tests: 937, pass: 468, fail: 0 },
-    ]) {
-      const reason = unrunReason(run, findings);
-      const where = `${JSON.stringify(run)} with ${findings.length} findings`;
-      assert.equal(typeof reason, "string", `a mostly-unexecuted run (${where}) must yield a reason`);
-      assert.match(reason, /node --test/, "the reason no longer names the command that ran a fraction of its collection");
-      assert.match(reason, new RegExp(`${run.pass}\\b.*\\b${run.tests}\\b`), "the reason no longer reports both counts");
-    }
+// and `fail` absent, both falsy).
+test("a run that executed a fraction of what it collected is not usable", () => {
+  for (const run of [
+    { command: "node --test", tests: 937, pass: 1, fail: 0 },
+    { command: "node --test", tests: 937, pass: 1 },
+    { command: "node --test", tests: 937, pass: 468, fail: 0 },
+  ]) {
+    const verdict = suiteVerdictOf(run);
+    assert.equal(verdict.usable, false, `a mostly-unexecuted run (${JSON.stringify(run)}) must not be usable`);
+    assert.match(verdict.reason, /node --test/, "the reason no longer names the command that ran a fraction of its collection");
+    assert.match(verdict.reason, new RegExp(`${run.pass}\\b.*\\b${run.tests}\\b`), "the reason no longer reports both counts");
   }
 });
 
@@ -137,123 +143,54 @@ test("a run that executed a fraction of what it collected is unrun, not clean", 
 // fixture is the MEASURED hazard the issue names — `node --test` counts a todo
 // outside `pass` (tests 2 / pass 1 / fail 0 / todo 1), so a strict
 // `pass + fail === tests` rule would refuse any host repo carrying one, and a
-// floor at exactly half is what keeps it clean. `pass: null` is the optional
+// floor at exactly half is what keeps it usable. `pass: null` is the optional
 // field arriving explicitly empty: `null * 2 < tests` is 0 < tests, so only the
 // `typeof` guard stops that from reading as no work.
-test("a small-but-complete run, a half-todo run, and one that omitted pass are NOT unrun", () => {
+test("a small-but-complete run, a half-todo run, and one that omitted pass are usable", () => {
   for (const run of [
     { command: "node --test", exitCode: 0, tests: 3, pass: 3, fail: 0 },
     { command: "node --test", exitCode: 0, tests: 937, pass: 937, fail: 0 },
     { command: "node --test", exitCode: 0, tests: 2, pass: 1, fail: 0 },
     { command: "node --test", exitCode: 0, tests: 937, pass: null },
   ]) {
-    assert.equal(
-      unrunReason(run, []),
-      null,
-      `a run that did its work (${JSON.stringify(run)}) must stay clean`,
-    );
+    assert.equal(reasonOf(run), null, `a run that did its work (${JSON.stringify(run)}) must stay usable`);
   }
 });
 
 // The ratio must not swallow a failing suite that actually EXECUTED its whole
 // collection: pass+fail equals tests here, so every test collected ran, and
-// refusing it would be the over-refusal #137 removed — reached only because
-// this fixture files findings, which is what keeps the sibling clause below
-// off it.
-test("a fully-executed failing run is NOT unrun by the ratio — a suite that failed ran", () => {
-  assert.equal(
-    unrunReason({ command: "node --test", exitCode: 1, tests: 10, pass: 4, fail: 6 }, [{ severity: "critical", claim: "x", evidence: "y" }]),
-    null,
-    "a suite that reported failures still ran, having executed everything it collected",
-  );
+// refusing it would be the over-refusal #137 removed.
+test("a fully-executed failing run is usable by the ratio — a suite that failed ran", () => {
+  assert.equal(reasonOf({ command: "node --test", exitCode: 1, tests: 10, pass: 4, fail: 6 }), null);
 });
 
-// #651 CONTINUED: the ratio clause above was gated on `!run.fail`, so a crash
-// that left even ONE failing test alongside its one pass skipped it entirely
-// and fell to the CONJUNCTION clause below, which one filed finding defeats —
-// `{tests:937, pass:1, fail:1}` plus a finding read clean, 935 of 937 never
-// run. The ratio now sums pass AND fail against the same half floor, findings-
-// INDEPENDENT for the same reason the fail-free ratio test above is.
-test("a run that executed a fraction of what it collected through a MIX of pass and fail is unrun", () => {
-  for (const findings of [[], [{ severity: "suggestion", claim: "x", evidence: "y" }]]) {
-    for (const run of [
-      { command: "node --test", tests: 937, pass: 1, fail: 1 },
-      { command: "node --test", tests: 937, pass: 200, fail: 200 },
-    ]) {
-      const reason = unrunReason(run, findings);
-      const where = `${JSON.stringify(run)} with ${findings.length} findings`;
-      assert.equal(typeof reason, "string", `a mostly-unexecuted mixed run (${where}) must yield a reason`);
-      assert.match(reason, /node --test/, "the reason no longer names the command that ran a fraction of its collection");
-    }
+// #651 CONTINUED: the ratio sums pass AND fail against the half floor, so a
+// crash that left even ONE failing test alongside its one pass still reads as
+// a run that never got through its collection.
+test("a run that executed a fraction of what it collected through a MIX of pass and fail is not usable", () => {
+  for (const run of [
+    { command: "node --test", tests: 937, pass: 1, fail: 1 },
+    { command: "node --test", tests: 937, pass: 200, fail: 200 },
+  ]) {
+    const verdict = suiteVerdictOf(run);
+    assert.equal(verdict.usable, false, `a mostly-unexecuted mixed run (${JSON.stringify(run)}) must not be usable`);
+    assert.match(verdict.reason, /node --test/, "the reason no longer names the command that ran a fraction of its collection");
   }
 });
 
 // THE ACCEPT SIDE of the mixed-ratio test above: pass+fail reaching past half
-// of tests is work done, whatever the split between the two. A finding is
-// attached so the sibling CONJUNCTION clause (`fail > 0 && no findings`)
-// cannot be the thing keeping this clean — only the ratio is under test here.
-test("a mixed pass/fail run that executed past half its collection is NOT unrun", () => {
-  assert.equal(
-    unrunReason({ command: "node --test", exitCode: 1, tests: 937, pass: 300, fail: 300 }, [{ severity: "critical", claim: "x", evidence: "y" }]),
-    null,
-    "a mixed run past the half floor did its work",
-  );
+// of tests is work done, whatever the split between the two.
+test("a mixed pass/fail run that executed past half its collection is usable", () => {
+  assert.equal(reasonOf({ command: "node --test", exitCode: 1, tests: 937, pass: 300, fail: 300 }), null);
 });
 
-// THE ACCEPT SIDE of the clause above, and the case a bare `pass 0` rule gets
-// wrong: a suite where every test failed also reports zero passes, and it is the
-// run that most needs reporting — refusing it is the over-refusal #137 removed.
-// The `fail > 0` pin above cannot stand in for this one. Its fixture passes 11
-// tests, so it stays clean whether the clause reads `pass === 0` or
-// `pass === 0 && !fail`; only a fixture with BOTH zero passes and failures can
-// tell those two apart.
-test("a run where every test failed is NOT unrun, even though nothing passed", () => {
-  assert.equal(
-    unrunReason({ command: "npm test --", exitCode: 1, tests: 3, pass: 0, fail: 3 }, [{ severity: "critical", claim: "x", evidence: "y" }]),
-    null,
-    "a suite that reported only failures still ran",
-  );
-});
-
-// #143's third case, deferred there from the #526 review. `fail > 0` on its own
-// is a suite that ran, pinned clean above and deliberately so; the contradiction
-// is the CONJUNCTION with no findings — the suite ran, it reported failures,
-// and nobody filed anything about them. #2315 widened "nobody" from one
-// dimension to the whole review: the shared run's failures are the review's,
-// so EVERY finding that reached the payload is read — and a refuted one does
-// not count, because the review rejected it (an unrelated claim its verifiers
-// threw out is not a report of the failures). Cancelled tests are failures
-// too: node's runner exits 1 on one with `fail 0`.
-test("a run with failing or cancelled tests and no kept finding from ANY dimension is unrun", () => {
-  const refutedOnly = [{ severity: "critical", claim: "x", evidence: "y", verdict: "refuted" }];
-  for (const findings of [[], [null], refutedOnly]) {
-    const reason = unrunReason({ command: "node --test", exitCode: 1, tests: 744, pass: 738, fail: 6 }, findings);
-    assert.equal(typeof reason, "string", `fail>0 with findings ${JSON.stringify(findings)} must yield a reason`);
-    assert.match(reason, /6 failing tests/, "the reason no longer says how many tests failed unreported");
-    assert.match(reason, /no selected dimension/);
-  }
-  const cancelled = unrunReason({ command: "node --test", exitCode: 1, tests: 744, pass: 743, fail: 0, cancelled: 1 }, refutedOnly);
-  assert.match(cancelled ?? "", /0 failing and 1 cancelled tests and no selected dimension/, "a cancelled test nobody reported must not read clean");
-  // The boundary: ONE failing test is failures nobody reported, and one kept
-  // finding settles it — a `> 1` threshold would read the first clean.
-  const one = { command: "node --test", exitCode: 1, tests: 10, pass: 9, fail: 1 };
-  assert.match(unrunReason(one, []) ?? "", /1 failing tests and no selected dimension/, "a single failing test nobody reported read clean");
-  assert.equal(unrunReason(one, [{ severity: "suggestion", claim: "x", evidence: "y", verdict: "unverified" }]), null);
-});
-
-// The ACCEPT side, and #2315's ownership rule: one finding from ANY dimension
-// satisfies the check for the whole review — the other dimensions are told not
-// to file a duplicate, so reading each dimension's own list would mark every
-// one of them unrun for obeying that.
-test("a run with failing tests and a finding from ONE dimension is NOT unrun", () => {
-  const run = { command: "node --test", exitCode: 1, tests: 744, pass: 738, fail: 6 };
-  for (const verdict of [undefined, "survived", "unverified"]) {
-    const one = [{ severity: "critical", claim: "x", evidence: "y", verdict }];
-    assert.equal(unrunReason(run, one), null, `a ${verdict ?? "bare"} finding about the failures must satisfy every dimension`);
-    assert.deepEqual(unrunEntries(run, one, ["correctness", "tests", "types"]), []);
-  }
-  // A cancelled test routes the same way: one kept finding settles it.
-  assert.equal(unrunReason({ ...run, fail: 0, cancelled: 2, pass: 742 }, [{ severity: "suggestion", claim: "x", evidence: "y", verdict: "unverified" }]), null);
+// THE ACCEPT SIDE of the all-skipped clause, and the case a bare `pass 0` rule
+// gets wrong: a suite where every test failed also reports zero passes, and it
+// is the run that most needs reporting — refusing it is the over-refusal #137
+// removed. Only a fixture with BOTH zero passes and failures can tell
+// `pass === 0` from `pass === 0 && !fail` apart.
+test("a run where every test failed is usable, even though nothing passed", () => {
+  assert.equal(reasonOf({ command: "npm test --", exitCode: 1, tests: 3, pass: 0, fail: 3 }), null);
 });
 
 // #2879: vitest prints an `it.fails` test as its own `N expected fail` token,
@@ -262,63 +199,58 @@ test("a run with failing tests and a finding from ONE dimension is NOT unrun", (
 // fixture clears the half floor ONLY through its expected fails (1 pass of 4
 // collected), and the `pass: 0` fixture clears the all-skipped clause only
 // through them — so dropping `expectedFail` from the executed sum reads each
-// fixture unrun.
-test("a run whose only non-pass is an expected fail is NOT unrun, and its expected fails count as executed", () => {
+// fixture unusable.
+test("a run whose only non-pass is an expected fail is usable, and its expected fails count as executed", () => {
   for (const run of [
     { command: "vitest run", exitCode: 0, tests: 121, pass: 120, fail: 0, expectedFail: 1 },
     { command: "vitest run", exitCode: 0, tests: 4, pass: 1, fail: 0, expectedFail: 2 },
     { command: "vitest run", exitCode: 0, tests: 1, pass: 0, expectedFail: 1 },
   ]) {
-    assert.equal(unrunReason(run, []), null, `a run whose non-passes are all expected fails (${JSON.stringify(run)}) must stay clean`);
+    assert.equal(reasonOf(run), null, `a run whose non-passes are all expected fails (${JSON.stringify(run)}) must stay usable`);
   }
 });
 
 // The expected fails weigh one each against the half floor: 2 passes and 2
-// expected fails of 10 collected is 4 executed and unrun, 3 and 2 is exactly
-// half and clean — a weight other than one moves one of the two.
+// expected fails of 10 collected is 4 executed and unusable, 3 and 2 is exactly
+// half and usable — a weight other than one moves one of the two.
 test("an expected fail counts once toward the half floor", () => {
-  assert.match(unrunReason({ command: "vitest run", exitCode: 0, tests: 10, pass: 2, fail: 0, expectedFail: 2 }, []) ?? "", /most of what it collected never ran/);
-  assert.equal(unrunReason({ command: "vitest run", exitCode: 0, tests: 10, pass: 3, fail: 0, expectedFail: 2 }, []), null);
+  assert.match(reasonOf({ command: "vitest run", exitCode: 0, tests: 10, pass: 2, fail: 0, expectedFail: 2 }) ?? "", /most of what it collected never ran/);
+  assert.equal(reasonOf({ command: "vitest run", exitCode: 0, tests: 10, pass: 3, fail: 0, expectedFail: 2 }), null);
 });
 
-// The other half: an expected fail is never failing, so it neither hides a
-// real failure nor accounts for a non-zero exit, and a zero count of them
-// leaves an all-skipped run unrun exactly as an absent one does.
-test("an expected fail beside a real failure, a non-zero exit, or as a zero count changes no verdict", () => {
-  const failing = { command: "vitest run", exitCode: 1, tests: 10, pass: 8, fail: 1, expectedFail: 1 };
-  assert.match(unrunReason(failing, []) ?? "", /1 failing tests and no selected dimension/, "an expected fail hid a real failure nobody reported");
-  assert.equal(unrunReason(failing, [{ severity: "critical", claim: "x", evidence: "y" }]), null);
+// The other half: an expected fail is never failing, so it does not account
+// for a non-zero exit, and a zero count of them leaves an all-skipped run
+// unusable exactly as an absent one does.
+test("an expected fail beside a non-zero exit, or as a zero count, changes no verdict", () => {
   const exitOnly = { command: "vitest run", exitCode: 1, tests: 10, pass: 9, fail: 0, expectedFail: 1 };
-  assert.match(unrunReason(exitOnly, []) ?? "", /exited 1 but reported no failing or cancelled tests/, "an expected fail accounted for a non-zero exit");
+  assert.match(reasonOf(exitOnly) ?? "", /exited 1 but reported no failing or cancelled tests/, "an expected fail accounted for a non-zero exit");
   const skipped = { command: "vitest run", exitCode: 0, tests: 2, pass: 0, fail: 0, expectedFail: 0 };
-  assert.match(unrunReason(skipped, []) ?? "", /every test skipped/, "a zero expected-fail count read an all-skipped run clean");
+  assert.match(reasonOf(skipped) ?? "", /every test skipped/, "a zero expected-fail count read an all-skipped run usable");
+  // ...and beside a real failure the run is still usable: it ran.
+  assert.equal(reasonOf({ command: "vitest run", exitCode: 1, tests: 10, pass: 8, fail: 1, expectedFail: 1 }), null);
 });
 
 // `pass`/`fail` are optional, so a run that reported only a count must still
-// come back clean rather than tripping the predicate on a field the runner
+// come back usable rather than tripping the predicate on a field the runner
 // never printed.
-test("a run that reported tests but not pass/fail is NOT unrun", () => {
-  assert.equal(unrunReason({ command: "node --test", exitCode: 0, tests: 7 }, []), null, "an optional field's absence must not mark a real run unrun");
+test("a run that reported tests but not pass/fail is usable", () => {
+  assert.equal(reasonOf({ command: "node --test", exitCode: 0, tests: 7 }), null, "an optional field's absence must not make a real run unusable");
 });
 
 // The exit status is the command's own verdict, and the counts must account
 // for it. A run reporting none, or exiting non-zero with nothing failing or
-// cancelled, is unusable whatever its counts say — and findings cannot buy it
-// clean, because nothing in it names a failure to report.
-test("a run whose exit status is missing, or non-zero with no failing count, is unrun", () => {
-  const finding = [{ severity: "critical", claim: "x", evidence: "y", verdict: "survived" }];
+// cancelled, is unusable whatever its counts say.
+test("a run whose exit status is missing, or non-zero with no failing count, is not usable", () => {
   for (const [run, pattern] of [
     [{ command: "node --test", tests: 10, pass: 10, fail: 0 }, /no exit status/],
     [{ command: "node --test", exitCode: null, tests: 10, pass: 10 }, /no exit status/],
     [{ command: "node --test", exitCode: 1, tests: 10, pass: 10, fail: 0 }, /exited 1 but reported no failing or cancelled tests/],
     [{ command: "node --test", exitCode: 137, tests: 10, pass: 10 }, /exited 137/],
   ]) {
-    for (const findings of [[], finding]) {
-      const reason = unrunReason(run, findings);
-      assert.equal(typeof reason, "string", `${JSON.stringify(run)} must yield a reason`);
-      assert.match(reason, pattern);
-      assert.match(reason, /node --test/, "the reason no longer names the command");
-    }
+    const verdict = suiteVerdictOf(run);
+    assert.equal(verdict.usable, false, `${JSON.stringify(run)} must not be usable`);
+    assert.match(verdict.reason, pattern);
+    assert.match(verdict.reason, /node --test/, "the reason no longer names the command");
   }
 });
 
@@ -348,21 +280,23 @@ test("FINDINGS_SCHEMA neither requires nor declares a specialist copy of the tes
   assert.equal(FINDINGS_SCHEMA.additionalProperties, false);
 });
 
-// The entry, not the call site. `unrunEntries` returns zero entries or one per
-// key, so its writer `push(...)`es it with no guard of its own — and a guard is
-// exactly what the predecessor of this test could not see: it compared the
-// source positions of two substrings, so wrapping the recording in
-// `if (review && why)` left both in place, kept the suite green, and silently
-// dropped every crashed dimension.
-test("an unrun classification becomes one entry per key, with no guard for a caller to get wrong", () => {
-  const entries = unrunEntries(null, [], ["correctness", "tests"]);
-  assert.deepEqual(entries.map((e) => e.dimension), ["correctness", "tests"], "a dead shared run must name EVERY key it was asked about");
-  for (const e of entries) assert.match(e.reason, /returned nothing/, "the entry no longer carries the classifier's reason");
-  assert.deepEqual(
-    unrunEntries({ command: "npm test --", exitCode: 0, tests: 9 }, [], ["tests"]),
-    [],
-    "a covered review must yield NO entry — an empty push is what lets the call site stay unguarded",
-  );
+// The verdict's shape, which the digest carries verbatim: `usable` is a boolean
+// and `reason` is a string exactly when it is false, never undefined — a
+// reader of the digest keys off `usable` and prints `reason`.
+test("suiteVerdictOf returns {usable, reason} with reason null exactly when usable", () => {
+  for (const run of [
+    null,
+    { command: "npm test --" },
+    { command: "npm test --", exitCode: 0, tests: 9, pass: 9, fail: 0 },
+    { command: "npm test --", exitCode: 1, tests: 9, pass: 6, fail: 3 },
+    { command: "npm test --", logPath: "/r/test-run.log", unprovisioned: "install skipped" },
+  ]) {
+    const verdict = suiteVerdictOf(run);
+    assert.deepEqual(Object.keys(verdict), ["usable", "reason"], "the verdict's keys changed");
+    assert.equal(typeof verdict.usable, "boolean");
+    assert.equal(verdict.reason === null, verdict.usable, `reason must be null exactly when usable (${JSON.stringify(run)})`);
+    if (!verdict.usable) assert.equal(typeof verdict.reason, "string");
+  }
 });
 
 // #138's ACTUAL case, and the one its first attempt could not reach. `pipeline()`
@@ -400,40 +334,42 @@ test("a null slot the dimension list cannot explain is still reported, never thr
   assert.match(unrun[0].dimension, /slot 0/, "an unnameable slot must say which slot it was");
 });
 
-// Wiring, not classification — and textual, because it has to be. Both writers
-// are executable above; whether runReview calls them is pinned here. Stated
+// Wiring, not classification — and textual, because it has to be. Both are
+// executable above; whether runReview calls them is pinned here. Stated
 // ceiling: this sees a call deleted or moved, and does not see one wrapped in a
 // guard of its own. That is why the classification moved behind lifted
 // functions — the pin it replaced had source positions as its only evidence.
 // runReview's own behaviour over a scripted host is review-core-shared-test-run.test.mjs's.
-test("both writers are wired in AFTER the pipeline, the failing-tests check reading the payload's findings", () => {
+test("the crash writer is wired in AFTER the pipeline, and the suite verdict is read off the shared run alone", () => {
   // AFTER the pipeline returns, never inside a stage: a stage cannot observe its
-  // own absence (#138), and the failing-tests check needs every dimension's
-  // findings at once (#2315).
+  // own absence (#138).
   const call = CODE.indexOf("const reviewed = await pipeline(");
   assert.notEqual(call, -1, "the pipeline call moved — update this test");
-  for (const writer of [
-    "dimensionsUnrun.push(...unrunEntries(sharedRun, all, live))",
-    "dimensionsUnrun.push(...unrunCrashed(reviewed, dimensions))",
-  ]) {
-    const at = CODE.indexOf(writer);
-    assert.notEqual(at, -1, `\`${writer}\` is gone — a half of dimensionsUnrun is unreachable again`);
-    assert.ok(call < at, `\`${writer}\` runs before the pipeline returns, where its input does not exist yet`);
-  }
+  const writer = "dimensionsUnrun.push(...unrunCrashed(reviewed, dimensions))";
+  const at = CODE.indexOf(writer);
+  assert.notEqual(at, -1, `\`${writer}\` is gone — a crashed dimension is unreachable again`);
+  assert.ok(call < at, `\`${writer}\` runs before the pipeline returns, where its input does not exist yet`);
+  assert.ok(CODE.includes("const suiteVerdict = suiteVerdictOf(sharedRun)"), "the suite verdict is no longer read off the shared run alone");
+  // The shared run never marks a dimension unrun (#3048): neither classifier
+  // that did is allowed back.
+  assert.doesNotMatch(CODE, /\bunrunReason\b|\bunrunEntries\b/, "a classifier that reported a shared-run verdict as a dimension's is back");
 });
 
-test("the returned object carries dimensionsUnrun alongside dimensionsRun", () => {
+test("the returned object carries suiteVerdict and dimensionsUnrun alongside dimensionsRun, in digest order", () => {
   assert.match(CODE, /const dimensionsUnrun = \[\]/, "dimensionsUnrun is never declared — the return would throw");
   const at = CODE.lastIndexOf("return {");
   assert.notEqual(at, -1, "review-core.mjs no longer ends in a return literal — update this test");
   const tail = CODE.slice(at);
-  // BOTH, adjacent. `dimensionsRun` keeps its meaning and its value — the
-  // dispatched set after the size trim — because a consumer diffing it against
-  // DEFAULT_DIMENSIONS to spot a trim would otherwise read a crashed dimension
-  // as a trimmed one: the same conflation this ticket set closes, one field over.
-  // The new list is what subtracts from it, which only works if it ships too.
+  // `dimensionsRun` keeps its meaning and its value — the dispatched set after
+  // the size trim — because a consumer diffing it against DEFAULT_DIMENSIONS to
+  // spot a trim would otherwise read a crashed dimension as a trimmed one: the
+  // same conflation this ticket set closes, one field over. The unrun list is
+  // what subtracts from it, which only works if it ships too.
   assert.match(tail, /dimensionsRun: dimensions\.map\(\(d\) => d\.key\)/, "dimensionsRun no longer reports the dispatched set");
   assert.match(tail, /dimensionsUnrun/, "the return never surfaces dimensionsUnrun — the classification dies in the script (#137, #138)");
+  assert.match(tail, /\n\s+suiteVerdict,\n/, "the return never surfaces suiteVerdict — the verdict dies in the script (#3048)");
+  const order = ["testEnvironment", "suiteVerdict", "dimensionsRun", "dimensionsUnrun", "cwdAudit"].map((k) => tail.search(new RegExp(`\\n\\s+${k}\\b`)));
+  assert.ok(order.every((n, i) => n !== -1 && (i === 0 || order[i - 1] < n)), `the return's digest keys are out of order: ${order}`);
 });
 
 // The note hands every specialist the shared run and tells it not to run the
@@ -493,6 +429,9 @@ test("the shared-run note hands over the run and forbids a rerun, and asks for n
   ]) {
     const note = sharedRunNote(run, "correctness", key);
     assert.doesNotMatch(note, /test_run/, `${name}: the note still names test_run`);
+    // #3048: a shared run never makes a dimension unrun, so no rendering says
+    // so — the NOT-usable one says the review's suite verdict is not usable.
+    assert.doesNotMatch(note, /unrun/i, `${name}: the note says a dimension is reported unrun for the shared run`);
     assert.match(note, /Do NOT run that full command yourself/, `${name}: the note no longer forbids a rerun`);
     assert.match(note, /\n {2}command: node --test\n/, `${name}: the note lacks the command line`);
     assert.match(note, /\n {2}counts: {2}\S/, `${name}: the note lacks the counts line`);
@@ -510,10 +449,12 @@ test("the shared-run note hands over the run and forbids a rerun, and asks for n
 
 // The workflow's return shape is documented in one place a controller actually
 // reads, and this repo's recurring defect is a second copy disconnecting in one
-// token. A `dimensionsUnrun` nobody is told to read is a field nobody reads.
-test("run-team's Reviewers section documents dimensionsUnrun, not only dimensionsRun", () => {
+// token. A `dimensionsUnrun` or a `suiteVerdict` nobody is told to read is a
+// field nobody reads.
+test("run-team's Reviewers section documents dimensionsUnrun and suiteVerdict, not only dimensionsRun", () => {
   const doc = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
   assert.match(doc, /dimensionsUnrun/, "run-team/SKILL.md still documents a return shape without dimensionsUnrun");
+  assert.match(doc, /`suiteVerdict`/, "run-team/SKILL.md still documents a return shape without suiteVerdict");
   // The superseded workaround must be GONE, not merely accompanied. It reads
   // every zero-finding dimension as unrun — including one that ran clean — so
   // leaving it in place next to the real field teaches the opposite rule.
@@ -524,38 +465,36 @@ test("run-team's Reviewers section documents dimensionsUnrun, not only dimension
   );
 });
 
-// What the absence of an unrun classification ESTABLISHES is that a suite ran —
-// never that the dimension is covered. `unrunReason` above reads the shared
-// run's counts and quotes its `command` into its message; it never judges what
-// that command covers, so a narrower runner reports a non-zero count, is not
-// classified unrun, and reads as covered having validated a fraction of the
-// suite. Comparing that command against the dispatched one was refuted 2-0 and
-// stays refuted (#535) — the doc claiming only what the classifier can see is
-// the remedy, and nothing pinned the word it turns on.
+// What the absence of an unrun entry ESTABLISHES is that the specialist
+// RETURNED a review — never that the dimension is covered. `suiteVerdictOf` above
+// reads the shared run's counts and quotes its `command` into its message; it
+// never judges what that command covers, and a key's absence from
+// `dimensionsUnrun` says nothing about the suite at all. Comparing the command
+// against the dispatched one was refuted 2-0 and stays refuted (#535) — the doc
+// claiming only what the field can see is the remedy, and nothing pinned the
+// word it turns on.
 //
 // The positive pin carries the claim: sliced to the paragraph so a failure
 // prints it rather than the whole 2000-line doc, matched through `phrase` so a
 // reflow of the hard wrap cannot fire it, and run out to the sentence's `;` so
 // the clause has to END there. That terminator is what catches the likelier
-// regression — an editor softening rather than reverting, `ran a suite AND IS
-// THEREFORE COVERED` — which a pin on the anchor alone reads as still present.
+// regression — an editor softening rather than reverting, `returned a review AND
+// IS THEREFORE COVERED` — which a pin on the anchor alone reads as still present.
 // The exclusion then has nothing left to guess at, so it stays whole-doc and
 // case-insensitive: the retracted claim is caught wherever in the file it comes
 // back, and in the lowercase paraphrase a `phrase` pin on `NOT` walks past.
-// Measured both ways — each form reds, and a reflow, a `; every` → `; each`
-// reword, and a correctly negated coverage sentence in the paragraph stay green.
-test("run-team claims a suite RAN from a key's absence from dimensionsUnrun, never that it is covered", () => {
+test("run-team claims a review RETURNED from a key's absence from dimensionsUnrun, never that it is covered", () => {
   const doc = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
   const para = Pin.of(doc, "doc").between("**`dimensionsRun` is the dispatch", "The rule this replaces", "run-team/SKILL.md").text;
   assert.match(
     para,
-    Pin.phrase("and NOT in `dimensionsUnrun` ran a suite;"),
-    "run-team/SKILL.md no longer says a key absent from dimensionsUnrun ran a suite, full stop",
+    Pin.phrase("and NOT in `dimensionsUnrun` returned a review;"),
+    "run-team/SKILL.md no longer says a key absent from dimensionsUnrun returned a review, full stop",
   );
   assert.doesNotMatch(
     doc,
     /in\s+`dimensionsUnrun`\s+is\s+covered/i,
-    "run-team/SKILL.md reads a key's absence from dimensionsUnrun as coverage — the classifier never checked the command that ran",
+    "run-team/SKILL.md reads a key's absence from dimensionsUnrun as coverage — nothing checked what the specialist covered",
   );
 });
 
@@ -583,22 +522,36 @@ test("run-team claims a suite RAN from a key's absence from dimensionsUnrun, nev
 //
 // The positive pin runs out through `covered.` for the SKILL.md pin's reason —
 // the likelier regression is an editor softening rather than reverting, and a
-// pin stopping at `ran a suite` reads `ran a suite and is therefore covered` as
-// still present. The exclusion is whole-file and case-insensitive so the
-// retracted wording is caught wherever it comes back, and it targets `only
+// pin stopping at `returned a review` reads `returned a review and is therefore
+// covered` as still present. The exclusion is whole-file and case-insensitive so
+// the retracted wording is caught wherever it comes back, and it targets `only
 // thing that means covered` rather than `covered` alone so the paragraph's own
 // correct denials — which must keep saying the word — stay green.
-test("review-core.mjs's own comment claims a suite RAN from a key's absence from dimensionsUnrun, never that it is covered", () => {
+test("review-core.mjs's own comment claims a review RETURNED from a key's absence from dimensionsUnrun, never that it is covered", () => {
   const prose = SOURCE.stripGutter("//").text;
-  const para = Pin.of(prose, "prose").paragraph("`dimensionsRun` names what was DISPATCHED", "review-core.mjs", "The two are siblings rather than").text;
+  const para = Pin.of(prose, "prose").paragraph("`dimensionsRun` names what was DISPATCHED", "review-core.mjs", "`suiteVerdict` is the review's one judgement").text;
   assert.match(
     para,
-    Pin.phrase("A key in the first and NOT in the second ran a suite — not that it is covered."),
-    "review-core.mjs's dimensionsRun/dimensionsUnrun comment no longer says a key absent from dimensionsUnrun ran a suite, full stop",
+    Pin.phrase("A key in the first and NOT in the second returned a review — not that it is covered."),
+    "review-core.mjs's dimensionsRun/dimensionsUnrun comment no longer says a key absent from dimensionsUnrun returned a review, full stop",
   );
   assert.doesNotMatch(
     prose,
     /only\s+thing\s+that\s+means\s+covered/i,
-    "review-core.mjs is back to reading a key's absence from dimensionsUnrun as coverage — `unrunReason` never compares `run.command` against the command the dispatch handed out (#535)",
+    "review-core.mjs is back to reading a key's absence from dimensionsUnrun as coverage (#535)",
   );
+});
+
+// #3048: the two words the digest now keeps apart are defined where the
+// project's language lives, each saying what the other does not: an unrun
+// dimension is a crash and never the suite's state; a suite verdict is a
+// judgement on the run and never on whether a dimension reviewed.
+test("CONTEXT.md defines Unrun dimension and Suite verdict, each excluding the other's case", () => {
+  const context = Pin.file(join(REPO, "..", "CONTEXT.md"));
+  const unrunTerm = context.paragraph("**Unrun dimension**:", "CONTEXT.md's Unrun dimension", "**Suite verdict**:").text;
+  assert.match(unrunTerm, Pin.phrase("A dispatched specialist that returned nothing, even after the review's in-run retry."));
+  assert.match(unrunTerm, Pin.phrase("the state of the test suite never makes a dimension unrun"));
+  const verdictTerm = context.paragraph("**Suite verdict**:", "CONTEXT.md's Suite verdict", "### Release outcome").text;
+  assert.match(verdictTerm, Pin.phrase("Usable does not mean green: a usable run can have failing tests."));
+  assert.match(verdictTerm, Pin.phrase("The verdict says nothing about whether any dimension reviewed."));
 });

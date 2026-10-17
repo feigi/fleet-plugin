@@ -140,6 +140,11 @@ const REPORT_FILE_RETIRED = [
   "Then report to the controller the pushed SHA, your apply/defer split, how many refuters you dispatched against out-of-scope suggestions, and the deferral issue numbers — a `filed: #N <subject>` line for every issue step 5 created, and `unrecorded: #N <subject>` for one whose `ledger.mjs filed` failed twice — and exit.",
   "**Deferring everything is a normal outcome, not a stall:** nothing is then staged, `git commit` refuses an empty index, `git push origin HEAD:<branch>` prints `Everything up-to-date`, and you report `no-op, HEAD unchanged at <sha>` in place of a new SHA.",
 ];
+// The digest projection gained `suiteVerdict` (#3048), so the sentence that
+// spelled the old projection is replaced, not lost.
+const DIGEST_PROJECTION_RETIRED = [
+  "**The review's result is `<scratch>/pr<pr>/<run>/review.json`** — the digest first (`jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}'`), then every finding (`jq '.survived'`, `jq '.unverified'`, `jq '.refuted'`).",
+];
 // The finisher's duty 3 moved to its agent body, so the repair kind's pointer
 // to it "as above" pointed at nothing in the brief: the sentence now points
 // at the agent definition instead.
@@ -147,13 +152,13 @@ const DUTY3_POINTER_RETIRED = ["Duty 3's script decides whether the label is on,
 // The placeholder each argument fills, per role — the arguments are values no
 // other argument shares, so a swapped substitution cannot pass.
 const PAIRS = [
-  { role: "fix-applier", kind: "review", fixture: "fix-applier-review.md", retired: REPORT_FILE_RETIRED,
+  { role: "fix-applier", kind: "review", fixture: "fix-applier-review.md", retired: [...REPORT_FILE_RETIRED, ...DIGEST_PROJECTION_RETIRED],
     args: { worktree: "/abs/wt-fix", branch: "fix-branch", testCmd: "TESTCMD-1", scratch: "/abs/scratch-fix", pr: "3293", run: "run-AbCd1234" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch", pr: "pr", run: "run" } },
   { role: "fix-applier", kind: "conflict", fixture: "fix-applier-conflict.md",
     args: { worktree: "/abs/wt-conflict", branch: "conflict-branch", testCmd: "TESTCMD-2", scratch: "/abs/scratch-conflict" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch" } },
-  { role: "fix-applier", kind: "dispositions-retry", fixture: "fix-applier-dispositions-retry.md", retired: REPORT_FILE_RETIRED,
+  { role: "fix-applier", kind: "dispositions-retry", fixture: "fix-applier-dispositions-retry.md", retired: [...REPORT_FILE_RETIRED, ...DIGEST_PROJECTION_RETIRED],
     args: { worktree: "/abs/wt-retry", branch: "retry-branch", testCmd: "TESTCMD-3", scratch: "/abs/scratch-retry", pr: "3294", run: "run-ZyXw9876", "mismatched-record": "/abs/scratch-retry/dispositions-fix-pr-3294.json", violations: "VIOLATION-LIST-1" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch", pr: "pr", run: "run", "mismatched record": "mismatched-record", violations: "violations" } },
   { role: "finisher", kind: "fresh", fixture: "finisher-fresh.md",
