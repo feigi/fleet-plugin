@@ -1250,7 +1250,6 @@ learns the run produced none.`,
   // selected dimension is told to file them, and every other one not to.
   const failureOwner = dimensions[0].key;
 
-  const dimensionsUnrun = [];
   // Per-dimension record of the specialist's own CWD-AUDIT line (see
   // `cwdAuditFrom` above) — `{dimension, state, line}`, `state` one of
   // "clean"/"dirty"/"unrepo"/"missing". Populated for every dispatched
@@ -1478,7 +1477,7 @@ how three reviews from one cell left four files modified in that checkout.`,
 
   // A crashed dimension is named with its own reason. The shared run is not
   // a dimension's crash: it is judged once, as `suiteVerdict`, below.
-  dimensionsUnrun.push(...unrunCrashed(reviewed, dimensions));
+  const dimensionsUnrun = unrunCrashed(reviewed, dimensions);
   const suiteVerdict = suiteVerdictOf(sharedRun);
 
   const { crashed, resume } = resumeFor(unverified);

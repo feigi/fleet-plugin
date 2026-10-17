@@ -345,7 +345,7 @@ test("the crash writer is wired in AFTER the pipeline, and the suite verdict is 
   // own absence (#138).
   const call = CODE.indexOf("const reviewed = await pipeline(");
   assert.notEqual(call, -1, "the pipeline call moved — update this test");
-  const writer = "dimensionsUnrun.push(...unrunCrashed(reviewed, dimensions))";
+  const writer = "const dimensionsUnrun = unrunCrashed(reviewed, dimensions)";
   const at = CODE.indexOf(writer);
   assert.notEqual(at, -1, `\`${writer}\` is gone — a crashed dimension is unreachable again`);
   assert.ok(call < at, `\`${writer}\` runs before the pipeline returns, where its input does not exist yet`);
@@ -356,7 +356,7 @@ test("the crash writer is wired in AFTER the pipeline, and the suite verdict is 
 });
 
 test("the returned object carries suiteVerdict and dimensionsUnrun alongside dimensionsRun, in digest order", () => {
-  assert.match(CODE, /const dimensionsUnrun = \[\]/, "dimensionsUnrun is never declared — the return would throw");
+  assert.match(CODE, /const dimensionsUnrun = /, "dimensionsUnrun is never declared — the return would throw");
   const at = CODE.lastIndexOf("return {");
   assert.notEqual(at, -1, "review-core.mjs no longer ends in a return literal — update this test");
   const tail = CODE.slice(at);
