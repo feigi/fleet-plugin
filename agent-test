@@ -294,11 +294,14 @@ for arg do
     # itself is `.worktrees` or under it (in which case the user explicitly
     # requested tests from that directory). Use if-else to avoid variable
     # expansion issues with the find command.
-    if [[ "$arg" == .worktrees* ]]; then
-      found=$(find "$findarg" -name node_modules -prune -o -type f -perm -400 -print) || { printf 'agent-test: cannot read every path under %s\n' "$arg" >&2; exit 1; }
-    else
-      found=$(find "$findarg" -name node_modules -prune -o -name .worktrees -prune -o -type f -perm -400 -print) || { printf 'agent-test: cannot read every path under %s\n' "$arg" >&2; exit 1; }
-    fi
+    case "$arg" in
+      .worktrees*)
+        found=$(find "$findarg" -name node_modules -prune -o -type f -perm -400 -print) || { printf 'agent-test: cannot read every path under %s\n' "$arg" >&2; exit 1; }
+        ;;
+      *)
+        found=$(find "$findarg" -name node_modules -prune -o -name .worktrees -prune -o -type f -perm -400 -print) || { printf 'agent-test: cannot read every path under %s\n' "$arg" >&2; exit 1; }
+        ;;
+    esac
     # GNU find (ubuntu-latest CI) answers `-type f` straight from the
     # dirent's own `d_type` field when the filesystem provides one (ext4
     # does) — no `stat`/`lstat` at all — and `-print` only ever needs the
