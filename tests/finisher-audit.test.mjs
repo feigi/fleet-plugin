@@ -251,6 +251,20 @@ test("rebase: a replay pushed over the pin reads pushed, the remote at the repla
   assert.equal(r.out.evidence.remote.sha, head);
 });
 
+test("rebase: a replayed commit with an empty subject still pairs, and reads pure", () => {
+  const f = fixture();
+  writeFileSync(join(f.wt, "e.txt"), "e\n");
+  git(f.wt, "add", "e.txt");
+  git(f.wt, "commit", "-q", "--allow-empty-message", "-m", "");
+  f.pin = git(f.wt, "rev-parse", "HEAD");
+  moveMain(f);
+  git(f.wt, "rebase", "-q", "origin/main");
+  const r = std(f);
+  assert.equal(r.out.cause, "rebase");
+  assert.match(r.out.evidence.rangeDiff, /^2:\s+\S+ = 2:\s+\S+$/m);
+  assert.equal(r.out.evidence.replay, "pure");
+});
+
 test("rebase: an unreadable remote reads the remote state unknown, never unpushed", () => {
   const f = fixture();
   moveMain(f);
@@ -260,6 +274,20 @@ test("rebase: an unreadable remote reads the remote state unknown, never unpushe
   assert.equal(r.out.cause, "rebase");
   assert.equal(r.out.evidence.remote.state, "unknown");
   assert.equal(r.out.evidence.remote.ref, "refs/heads/feat");
+});
+
+test("rebase: a remote ref that only ends in the row's branch ref is not the row's, and reads unpushed", () => {
+  const f = fixture();
+  moveMain(f);
+  git(f.wt, "rebase", "-q", "origin/main");
+  // `ls-remote` matches its pattern against the tail of each ref, so it lists
+  // this decoy for `refs/heads/feat` too, at the replayed head.
+  git(f.wt, "push", "-q", "origin", "HEAD:refs/heads/x/refs/heads/feat");
+  git(f.wt, "push", "-q", "origin", ":refs/heads/feat");
+  const r = std(f);
+  assert.equal(r.out.cause, "rebase");
+  assert.equal(r.out.evidence.remote.state, "unpushed");
+  assert.equal(r.out.evidence.remote.sha, null);
 });
 
 test("rebase: a commit dropped from the replay reads changed, and the kept commit still pairs", () => {
@@ -298,6 +326,43 @@ test("rebase: a whitespace-only edit made while replaying reads changed", () => 
   assert.match(r.out.evidence.rangeDiff, /^-:\s+-+ > 1:\s+\S+ work$/m);
 });
 
+test("rebase: a small content edit made while replaying pairs the commit with !, lists no diff body, and reads changed", () => {
+  const f = fixture();
+  // A one-line edit in a file of many lines leaves most of the commit's diff
+  // intact, so range-diff pairs the edited commit with its original instead of
+  // listing the two unpaired.
+  writeFileSync(join(f.wt, "big.txt"), Array.from({ length: 20 }, (_, i) => `line ${i}\n`).join(""));
+  git(f.wt, "add", "big.txt");
+  git(f.wt, "commit", "-q", "-m", "big");
+  f.pin = git(f.wt, "rev-parse", "HEAD");
+  moveMain(f);
+  git(f.wt, "rebase", "-q", "--exec", "if [ -f big.txt ]; then sed 's/line 3$/line three/' big.txt > big.tmp && mv big.tmp big.txt && git commit -q -a --amend --no-edit; fi", "origin/main");
+  const r = std(f);
+  assert.equal(r.out.cause, "rebase");
+  assert.match(r.out.evidence.rangeDiff, /^2:\s+\S+ ! 2:\s+\S+ big$/m);
+  assert.doesNotMatch(r.out.evidence.rangeDiff, /^\s+@@/m);
+  assert.equal(r.out.evidence.replay, "changed");
+});
+
+test("rebase: a commit half rewritten while replaying still pairs with ! at the creation factor the script passes", () => {
+  const f = fixture();
+  // Rewriting half the lines a commit adds is a change range-diff still pairs
+  // at the script's creation factor; a lower one lists the original and the
+  // rewrite unpaired.
+  writeFileSync(join(f.wt, "big.txt"), "a\nb\nc\nd\ne\nf\ng\nh\n");
+  git(f.wt, "add", "big.txt");
+  git(f.wt, "commit", "-q", "-m", "base8");
+  writeFileSync(join(f.wt, "big.txt"), "a\nb\nc\nd\ne\nf\ng\nh\nX1\nX2\nX3\nX4\n");
+  git(f.wt, "commit", "-q", "-a", "-m", "work2");
+  f.pin = git(f.wt, "rev-parse", "HEAD");
+  moveMain(f);
+  git(f.wt, "rebase", "-q", "--exec", "if [ \"$(git log -1 --format=%s)\" = work2 ]; then printf 'a\\nb\\nc\\nd\\ne\\nf\\ng\\nh\\nX1\\nX2\\nY3\\nY4\\n' > big.txt && git commit -q -a --amend --no-edit; fi", "origin/main");
+  const r = std(f);
+  assert.equal(r.out.cause, "rebase");
+  assert.match(r.out.evidence.rangeDiff, /^3:\s+\S+ ! 3:\s+\S+ work2$/m);
+  assert.equal(r.out.evidence.replay, "changed");
+});
+
 test("rebase: a reset to another commit is a rebase entry too, and reads changed", () => {
   const f = fixture();
   git(f.wt, "reset", "-q", "--hard", "origin/main");
@@ -307,6 +372,54 @@ test("rebase: a reset to another commit is a rebase entry too, and reads changed
   assert.match(r.out.evidence.reflog, /HEAD@\{0\}: reset/);
   assert.equal(r.out.evidence.replay, "changed");
   assert.match(r.out.evidence.rangeDiff, /^1:\s+\S+ < -:\s+-+ work$/m);
+});
+
+test("rebase: a reset to a main that already merged the pin lists nothing, and that empty listing reads changed", () => {
+  const f = fixture();
+  git(f.w, "merge", "-q", "--no-ff", "-m", "merge feat", "feat");
+  git(f.w, "push", "-q", "origin", "main");
+  moveMain(f);
+  git(f.wt, "reset", "-q", "--hard", "origin/main");
+  const r = std(f);
+  assert.equal(r.out.cause, "rebase");
+  assert.equal(r.out.evidence.rangeDiff, "");
+  assert.equal(r.out.evidence.replay, "changed");
+});
+
+// A merge of main into the branch that also adds `evil.txt`: content of the
+// merge commit's own, which `range-diff` never lists.
+function evilMerge(f) {
+  moveMain(f);
+  git(f.wt, "merge", "-q", "--no-ff", "--no-commit", "origin/main");
+  writeFileSync(join(f.wt, "evil.txt"), "evil\n");
+  git(f.wt, "add", "evil.txt");
+  git(f.wt, "commit", "-q", "-m", "merge main");
+  moveMain(f, "main-moves-2.txt");
+}
+
+test("rebase: a pinned merge commit the replay dropped reads changed, though range-diff pairs every other commit", () => {
+  const f = fixture();
+  evilMerge(f);
+  f.pin = git(f.wt, "rev-parse", "HEAD");
+  git(f.wt, "rebase", "-q", "origin/main");
+  assert.notEqual(spawnSync("git", ["-C", f.wt, "cat-file", "-e", "HEAD:evil.txt"], { env: ENV }).status, 0, "fixture: the replay dropped the merge's own content");
+  const r = std(f);
+  assert.equal(r.out.cause, "rebase");
+  assert.match(r.out.evidence.rangeDiff, /^1:\s+\S+ = 1:\s+\S+ work$/m);
+  assert.equal(r.out.evidence.replay, "changed");
+});
+
+test("rebase: a head reset onto a merge commit with content of its own reads changed, though range-diff pairs every other commit", () => {
+  const f = fixture();
+  evilMerge(f);
+  const merged = git(f.wt, "rev-parse", "HEAD");
+  git(f.wt, "reset", "-q", "--hard", f.pin);
+  git(f.wt, "reset", "-q", "--hard", merged);
+  git(f.wt, "cat-file", "-e", "HEAD:evil.txt");
+  const r = std(f);
+  assert.equal(r.out.cause, "rebase");
+  assert.match(r.out.evidence.rangeDiff, /^1:\s+\S+ = 1:\s+\S+ work$/m);
+  assert.equal(r.out.evidence.replay, "changed");
 });
 
 test("rebase: a stale origin/main reads changed, since the replay gained a commit the ref lacks", () => {

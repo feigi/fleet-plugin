@@ -140,7 +140,7 @@ test("a finisher never replays the script's steps by hand, and reports the verdi
   assert.match(
     text,
     Pin.phrase("Put the verdict, the JSON line it printed, in your report as printed: its `evidence` is what the controller resolves the halt from."),
-    "the block no longer has the finisher report the verdict as printed — the cause's evidence (the cherry output, the pushed/unpushed/unknown read) never reaches the controller",
+    "the block no longer has the finisher report the verdict as printed — the cause's evidence (the replay verdict and range-diff listing, the pushed/unpushed/unknown read) never reaches the controller",
   );
 });
 

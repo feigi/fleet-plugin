@@ -77,9 +77,12 @@
 //       output (or the error that stopped it); and `remote`, read as `past-pin`
 //       reads it. `pure` only when every pinned commit pairs with an unchanged
 //       one. A dropped, edited or added commit, or a stale `origin/main`, is
-//       `changed`; a listing that cannot be read is `unknown`. Not `git cherry`:
-//       it lists only the head-side commits, reads a whitespace-only edit as
-//       unchanged, and reads a conflict resolved to main's side as nothing at all.
+//       `changed`; a listing that cannot be read is `unknown`. `range-diff`
+//       lists non-merge commits only, so a merge commit in either range is
+//       `changed` as well: its own content - an evil merge, a conflict resolved
+//       inside it - would otherwise leave no line. Not `git cherry`: it lists
+//       only the head-side commits, reads a whitespace-only edit as unchanged,
+//       and reads a conflict resolved to main's side as nothing at all.
 //       `range-diff` pairs both sides of the replay, so each of those is an
 //       unpaired line.
 //     - a plain `commit` entry: `past-pin`. A member kept working after the
@@ -218,11 +221,11 @@ function git(step, args, { soft = false, timeout } = {}) {
   return { ok: true, out: r.stdout, error: null };
 }
 
-// The branch's remote ref against `head`. Only a successful read settles pushed
-// against unpushed; a failed read, a timeout, or a detached HEAD is `unknown`.
-function remoteState(head) {
-  const branch = row.branch === "DETACHED" ? null : row.branch;
-  if (typeof branch !== "string" || branch === "") {
+// The remote ref of `branch`, the row's, against `head`. Only a successful read
+// settles pushed against unpushed; a failed read, a timeout, or a detached HEAD
+// is `unknown`.
+function remoteState(branch, head) {
+  if (typeof branch !== "string" || branch === "" || branch === "DETACHED") {
     return { state: "unknown", error: "detached HEAD: no branch to ask the remote about" };
   }
   const ref = `refs/heads/${branch}`;
@@ -234,14 +237,16 @@ function remoteState(head) {
 }
 
 // `git range-diff` prints one line per pairing, `<n>:  <sha> <marker> <m>:  <sha>
-// <subject>`, with `-:` on the side a commit is missing from. The replay is pure
-// only when every line is a pairing marked `=`; an empty listing pairs nothing
-// and is not pure.
-const RANGE_PAIR = /^\s*\S+:\s+\S+\s+([=!<>])\s+\S+:\s+\S+\s/;
-function replayVerdict(rangeDiff) {
+// <subject>`, with `-:` on the side a commit is missing from, and nothing after
+// the second sha for a commit whose subject is empty. The replay is pure only
+// when every line is a pairing marked `=`; an empty listing pairs nothing and
+// is not pure. A merge commit never gets a line, so `merges`, the count of
+// them in either range, above zero is not pure either.
+const RANGE_PAIR = /^\s*\S+:\s+\S+\s+([=!<>])\s+\S+:\s+\S+(?:\s|$)/;
+function replayVerdict(rangeDiff, merges) {
   if (!rangeDiff.ok) return "unknown";
   const lines = rangeDiff.out.split("\n").filter((l) => l.trim() !== "");
-  return lines.length > 0 && lines.every((l) => RANGE_PAIR.exec(l)?.[1] === "=") ? "pure" : "changed";
+  return merges === 0 && lines.length > 0 && lines.every((l) => RANGE_PAIR.exec(l)?.[1] === "=") ? "pure" : "changed";
 }
 
 // --- 1: the row --------------------------------------------------------------
@@ -301,15 +306,16 @@ evidence.reflog = move;
 
 if (/^(reset|rebase)\b/.test(subject)) {
   const rangeDiff = git("range-diff", ["range-diff", "--no-color", "--no-patch", "--creation-factor=60", "origin/main", pin, "HEAD"], { soft: true });
-  evidence.replay = replayVerdict(rangeDiff);
+  const merges = rangeDiff.ok ? Number(git("merges", ["rev-list", "--merges", "--count", "^origin/main", pin, "HEAD"]).out.trim()) : 0;
+  evidence.replay = replayVerdict(rangeDiff, merges);
   evidence.rangeDiff = rangeDiff.ok ? rangeDiff.out : { error: rangeDiff.error };
-  evidence.remote = remoteState(head);
+  evidence.remote = remoteState(row.branch, head);
   halt("rebase");
 }
 
 if (/^commit\b/.test(subject)) {
   evidence.commit = git("log", ["log", "-1", "--format=%h %s"]).out.trim();
-  evidence.remote = remoteState(head);
+  evidence.remote = remoteState(row.branch, head);
   halt("past-pin");
 }
 
