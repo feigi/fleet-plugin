@@ -58,6 +58,8 @@ export const CASES = [
   { role: "relabel", kind: "needs-triage", args: { line: "LINE-1" } },
   { role: "relabel", kind: "fork", args: { options: "OPTIONS-1" } },
   { role: "relabel", kind: "hands", args: { hands: "HANDS-1", line: "LINE-2" } },
+  { role: "relabel", kind: "covered", args: { detail: "DETAIL-1" } },
+  { role: "relabel", kind: "fixed", args: { detail: "DETAIL-2" } },
 ];
 
 /** The agent definition each member role runs as; a relabel comment is no member's brief and has none. */

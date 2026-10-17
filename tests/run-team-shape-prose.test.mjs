@@ -478,6 +478,34 @@ const CHANGED = [
   [
     "No ledger refuses this call (exit 2, nothing removed): mid-run there is always one, so its absence is a fault to look at, never permission.",
     "Without `--after-rotate` — the per-pass sweep **Reclaim scratch after each merge pass** runs — no ledger refuses the call (exit 2, nothing removed): mid-run there is always one, so its absence is a fault to look at, never permission."
+  ],
+  [
+    "**Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>` settles `impl-<N>=bailed` and demotes by cause:",
+    "**Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>` settles `impl-<N>=bailed` and acts by `bailCause`, never by parsing `bailDetail`; no cause opens a PR:"
+  ],
+  [
+    "| Cause | Label |",
+    "| Cause | `bailCause` | `bailDetail` format | Issue action | Ledger |"
+  ],
+  [
+    "| brief does not decide *what* to build | `needs-triage` |",
+    "| brief does not decide *what* to build | `undecided` | `<one line>` | relabel `needs-triage` | `=bailed` |"
+  ],
+  [
+    "| genuine fork — options named, none ruled | `ready-for-human` |",
+    "| genuine fork — options named, none ruled | `fork` | `<options>` | relabel `ready-for-human` | `=bailed` |"
+  ],
+  [
+    "| needs human hands — external access, manual testing, judgment during the work | `ready-for-human` |",
+    "| needs human hands — external access, manual testing, judgment during the work | `hands` | `<cause>: <line>` | relabel `ready-for-human` | `=bailed` |"
+  ],
+  [
+    "The call relabels, comments the cause and releases the claim, then ticks: the head the tick names next is a *different* ticket.",
+    "The call comments the cause and releases the claim — never when `fixed` neither closes nor relabels N — then ticks: the head the tick names next is a *different* ticket."
+  ],
+  [
+    "| Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands or leaves a fork open; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |",
+    "| Implementer bails before implementing | Act by the report's `bailCause` as the **Relabel causes** table says, then refill (phase 3) |"
   ]
 ];
 
@@ -486,6 +514,14 @@ const DELETED = [
   [
     "See references/shell-traps.md.",
     "nothing: each Shell traps rule now sits in references/shell-traps.md, with its evidence under its own heading there, so the pointer named the file it was in"
+  ],
+  [
+    "`needs-triage` routes back to `/triage`, which can return it as `ready-for-agent`; `ready-for-human` for hands or a fork; `needs-triage` for a brief that names no *what*.",
+    "the bail table's Issue action column, which names each cause's label, and references/pull.md's **Relabel by cause**, which routes `needs-triage` and `ready-for-human`"
+  ],
+  [
+    "The same causes relabel an unclaimed ticket at the Pull (phase 1), where there is no `in-progress` to drop — the causes and labels are one table, applied at whichever point the ticket fails them.",
+    "references/pull.md's Pull table and **Relabel by cause**, which carry the Pull's own relabels and its close of a fixed ticket; the bail table gained `fixed` and `covered`, which the Pull does not apply"
   ]
 ];
 

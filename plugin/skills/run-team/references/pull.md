@@ -390,6 +390,17 @@ own ticket** — one's acceptance criterion went unmet, and the other three left
 the named defect reachable by a sibling spelling. Every one was caught by
 review, at review cost, which runs 3-5x the implementation it checks.
 
+**The identity block is what makes `sizing-a-ticket`'s fleet entry reachable.**
+That skill conditions its heavy-row process on the reader being a fleet member;
+a solo reader settles the open design choices with its user before planning,
+while a fleet member's `## Agent Brief` already is that settlement. A member
+that takes itself for a solo session waits on a user to settle design — a user
+no unattended member has, so it parks rather
+than fails. Nothing else you carry says what the member is — an incidental
+mention of the controller is not a statement that the reader is one of its
+members. That skill keeps its condition, so a solo session still runs the
+interactive path; this block is what puts a member on the fleet side of it.
+
 ## Default: In-flight bound 5
 
 **Default: In-flight bound 5, fixed for the run.** The level is set by load, not

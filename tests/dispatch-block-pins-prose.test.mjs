@@ -261,8 +261,13 @@ test("the re-derive block names origin/main as the reference, and says a contrad
   );
   assert.match(
     b,
-    Pin.phrase("Already fixed → report that with the commit and do NOT invent work"),
-    "the already-fixed exit no longer tells the member to report the commit instead of inventing work",
+    Pin.phrase("Already fixed on `origin/main` → bail with `bailCause` `fixed` and do NOT invent work"),
+    "the already-fixed exit no longer sends the member to a `fixed` bail instead of inventing work",
+  );
+  assert.match(
+    b,
+    Pin.phrase("Already covered by an open PR M you find → bail with `bailCause` `covered`"),
+    "the covered-by-an-open-PR exit no longer sends the member to a `covered` bail",
   );
   // Bail bound to its trigger, and to the thing it is NOT. Swapping the two
   // halves — "is a thing to implement, not a bail" — is the reading that turns

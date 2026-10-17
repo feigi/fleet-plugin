@@ -19,14 +19,15 @@
 //
 //   impl-report <impl-N[-x]>
 //       `ledger.mjs settle <member> --from-report`, which runs `verify-sha.sh` and reads the PR itself. Settled `bailed`: the
-//       report's `bailCause` names the label (undecided `needs-triage`, fork
-//       and hands `ready-for-human`), then:
+//       report's `bailCause` names the label (undecided `needs-triage`, fork,
+//       hands and covered `ready-for-human`), then:
 //         `gh issue edit <N> --remove-label ready-for-agent --remove-label
 //         in-progress --add-label <label>`, skipped when the issue already
 //         carries the label and neither of the others;
 //         `gh issue comment <N>` with the comment `dispatch-prompt.mjs render
 //         relabel` renders from the report's `bailDetail` — kind
-//         `needs-triage` (`--line`), `fork` (`--options`), or `hands`, whose
+//         `needs-triage` (`--line`), `fork` (`--options`), `covered`
+//         (`--detail`, `PR#M — <how>`), or `hands`, whose
 //         detail opens with the cause the Pull's answer names (`external
 //         access`, `manual testing`, `judgment`) and goes on with the line —
 //         skipped when the issue already carries that comment;
@@ -37,6 +38,16 @@
 //         `NEED hand-release #<N> <blocker>` and is never forced.
 //         Dropping `in-progress` is the load-bearing half: phase 1 applied it and `candidates.mjs` excludes it, so leaving it makes the ticket invisible to the controller's scans and the maintainer's. It does not loop; it disappears.
 //         `reap.sh` declines a claim that never became a PR, so the release of a bailed claim is `release-ticket.sh`'s.
+//       A `fixed` bail takes no label. Its `bailDetail` is `<sha> — <how>`,
+//       and `verify-sha.sh main <sha>` decides: exit 0 closes N, `gh issue
+//       close <N> --comment` with the kind `fixed` render (`--detail`, the
+//       whole `bailDetail`) — no comment when the issue already carries it,
+//       no close when it is already closed — then drops whichever of
+//       `ready-for-agent` and `in-progress` it carries and releases as above;
+//       exit 1 relabels `needs-triage` as above, its comment naming `<sha>`
+//       not on origin/main, and releases; any other answer, or a detail that
+//       opens with no sha, is a NEED and N is left untouched, claim and all.
+//       The PR a `covered` detail names is never written to.
 //   fix-report <fix-pr-M[-x]>
 //       `settle --from-report`, which records the filings and rulings the
 //       report carries. Settled `applied:`/`no-op`, on a PR whose rows carry
@@ -176,11 +187,17 @@ const USAGE = `usage: ${NAME}.mjs <kind> <args> [--in-flight <n>] — kinds: `
   + Object.entries(KINDS).map(([k, { args, flag }]) => [k, ...args, ...(flag ? [flag] : [])].join(" ")).join(", ");
 
 // The label each `bailCause` demotes to, and the relabel template's kind.
-const BAILS = {
+// `fixed` takes no label: it closes the ticket once `verify-sha.sh` finds the
+// commit on origin/main, and demotes to `needs-triage` when it does not.
+export const BAILS = {
   undecided: { label: "needs-triage", kind: "needs-triage", flag: "line" },
   fork: { label: "ready-for-human", kind: "fork", flag: "options" },
   hands: { label: "ready-for-human", kind: "hands" },
+  covered: { label: "ready-for-human", kind: "covered", flag: "detail" },
+  fixed: { kind: "fixed", flag: "detail" },
 };
+// The commit a `fixed` bail's detail opens with.
+const FIXED_SHA = /^([0-9a-f]{7,40})(?![0-9A-Za-z])/;
 // The causes a `hands` detail opens with — the Pull's answer grammar — and the
 // words each puts in the comment.
 const HANDS = { "external access": "external access", "manual testing": "manual testing", judgment: "judgment during the work" };
@@ -303,10 +320,11 @@ class Event {
     return outcome;
   }
 
-  // The bodies of the comments on issue or PR `n`, trimmed, or null when gh
-  // could not answer (the NEED is printed here).
+  // The labels, comments and state of issue `n`, or the comments of PR `n`,
+  // each comment trimmed, or null when gh could not answer (the NEED is
+  // printed here).
   comments(noun, n, what) {
-    const r = gh([noun, "view", String(n), "--json", noun === "issue" ? "labels,comments" : "comments"]);
+    const r = gh([noun, "view", String(n), "--json", noun === "issue" ? "labels,comments,state" : "comments"]);
     let v = null;
     if (r.status === 0) {
       try {
@@ -319,7 +337,7 @@ class Event {
       this.need(`${what} — gh ${noun} view ${n} did not answer (${r.status === 0 ? "no JSON" : said(r)})`);
       return null;
     }
-    return { labels: (v.labels ?? []).map((l) => l?.name), bodies: v.comments.map((c) => String(c?.body ?? "").trim()) };
+    return { labels: (v.labels ?? []).map((l) => l?.name), bodies: v.comments.map((c) => String(c?.body ?? "").trim()), state: v.state ?? null };
   }
 
   // `gh <noun> comment <n> --body <body>` unless `seen` already holds it.
@@ -352,6 +370,82 @@ function relabelArgs(cause, detail) {
   return { args: ["--kind", "hands", "--hands", HANDS[opener], "--line", line] };
 }
 
+// The comment `dispatch-prompt.mjs render relabel` renders for a bail, or null
+// when there is none (the NEED, named `what`, is printed here).
+function rendered(ev, ticket, cause, detail, what) {
+  const relabel = relabelArgs(cause, detail);
+  if (relabel.why !== undefined) {
+    ev.need(`${what} #${ticket} — ${relabel.why}: comment the cause by hand`);
+    return null;
+  }
+  const r = node("dispatch-prompt.mjs", ["render", "relabel", ...relabel.args]);
+  if (r.status !== 0) {
+    ev.need(`${what} #${ticket} — dispatch-prompt.mjs render relabel refused: ${said(r)}`);
+    return null;
+  }
+  return r.stdout;
+}
+
+// Moves #ticket to `label`, then posts the comment `body()` returns, if any.
+// False when the move could not be made, so nothing after it may run.
+function demote(ev, ticket, label, cause, body) {
+  const seen = ev.comments("issue", ticket, `relabel #${ticket} ${label}`);
+  if (seen === null) return false;
+  if (seen.labels.includes(label) && !seen.labels.includes("ready-for-agent") && !seen.labels.includes("in-progress")) {
+    ev.note(`#${ticket} already ${label}`);
+  } else {
+    const e = gh(["issue", "edit", String(ticket), "--remove-label", "ready-for-agent", "--remove-label", "in-progress", "--add-label", label]);
+    if (e.status !== 0) {
+      ev.need(`relabel #${ticket} ${label} — gh issue edit failed: ${said(e)}`);
+      return false;
+    }
+    ev.note(`relabelled #${ticket} ${label} (${cause})`);
+  }
+  const text = body();
+  if (text !== null) ev.comment("issue", ticket, text, seen, "relabel comment");
+  return true;
+}
+
+// A `fixed` bail: closed when its commit is on origin/main, demoted to
+// `needs-triage` when it is not, untouched when that cannot be told. False
+// when the claim must not be released.
+function fixed(ev, ticket, detail) {
+  const sha = FIXED_SHA.exec(String(detail ?? "").trim())?.[1];
+  if (sha === undefined) {
+    ev.need(`close #${ticket} — the report's bailDetail opens with no commit sha: check the fix on origin/main and close or relabel by hand`);
+    return false;
+  }
+  const v = run("sh", [join(SCRIPTS, "verify-sha.sh"), "main", sha]);
+  if (v.status === 1) {
+    return demote(ev, ticket, "needs-triage", "fixed", () => `*Relabelled by the fleet controller.* Pulled for implementation and returned as already fixed by ${sha}: ${sha} not on origin/main.`);
+  }
+  if (v.status !== 0) {
+    ev.need(`close #${ticket} — verify-sha.sh main ${sha} could not answer (${v.how}): ${said(v)}`);
+    return false;
+  }
+  const body = rendered(ev, ticket, "fixed", detail, "close-comment");
+  if (body === null) return false;
+  const seen = ev.comments("issue", ticket, `close #${ticket}`);
+  if (seen === null) return false;
+  if (seen.state === "CLOSED") {
+    ev.note(`#${ticket} already closed`);
+  } else {
+    // A comment that landed before its close failed is not posted twice.
+    const c = gh(["issue", "close", String(ticket), ...(seen.bodies.includes(body.trim()) ? [] : ["--comment", body])]);
+    if (c.status !== 0) {
+      ev.need(`close #${ticket} — gh issue close failed: ${said(c)}`);
+      return false;
+    }
+    ev.note(`closed #${ticket}: fixed by ${sha}`);
+  }
+  const stale = ["ready-for-agent", "in-progress"].filter((l) => seen.labels.includes(l));
+  if (stale.length > 0) {
+    const e = gh(["issue", "edit", String(ticket), ...stale.flatMap((l) => ["--remove-label", l])]);
+    if (e.status !== 0) ev.need(`unlabel #${ticket} ${stale.join(" ")} — gh issue edit failed: ${said(e)}`);
+  }
+  return true;
+}
+
 function bailed(ev, member) {
   const ticket = parseMember(member).number;
   const read = ev.report(member);
@@ -360,27 +454,11 @@ function bailed(ev, member) {
     ev.need(`relabel #${ticket} — ${member}'s report ${read.path} is ${read.state === "ok" ? `missing a bailCause` : read.state}: relabel by its cause by hand`);
     return;
   }
-  const { label } = BAILS[cause];
-  const seen = ev.comments("issue", ticket, `relabel #${ticket} ${label}`);
-  if (seen === null) return;
-  if (seen.labels.includes(label) && !seen.labels.includes("ready-for-agent") && !seen.labels.includes("in-progress")) {
-    ev.note(`#${ticket} already ${label}`);
-  } else {
-    const e = gh(["issue", "edit", String(ticket), "--remove-label", "ready-for-agent", "--remove-label", "in-progress", "--add-label", label]);
-    if (e.status !== 0) {
-      ev.need(`relabel #${ticket} ${label} — gh issue edit failed: ${said(e)}`);
-      return;
-    }
-    ev.note(`relabelled #${ticket} ${label} (${cause})`);
-  }
-  const relabel = relabelArgs(cause, read.report.bailDetail);
-  if (relabel.why !== undefined) {
-    ev.need(`relabel-comment #${ticket} — ${relabel.why}: comment the cause by hand`);
-  } else {
-    const r = node("dispatch-prompt.mjs", ["render", "relabel", ...relabel.args]);
-    if (r.status !== 0) ev.need(`relabel-comment #${ticket} — dispatch-prompt.mjs render relabel refused: ${said(r)}`);
-    else ev.comment("issue", ticket, r.stdout, seen, "relabel comment");
-  }
+  const detail = read.report.bailDetail;
+  const moved = cause === "fixed"
+    ? fixed(ev, ticket, detail)
+    : demote(ev, ticket, BAILS[cause].label, cause, () => rendered(ev, ticket, cause, detail, "relabel-comment"));
+  if (!moved) return;
   const release = run("sh", [join(SCRIPTS, "release-ticket.sh"), String(ticket), `impl-${ticket}`, "implementer", "--apply"]);
   if (release.status === 0) ev.note(`released #${ticket}`);
   else ev.need(`hand-release #${ticket} ${blocker(release)}`);

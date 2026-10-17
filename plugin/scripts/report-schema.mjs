@@ -109,7 +109,7 @@ export const SCHEMAS = {
       { verdict: { type: "string", enum: ["light", "heavy"] }, signal: str, ranBeforePr: { type: "boolean" } },
       ["object", "null"],
     ),
-    bailCause: { type: ["string", "null"], enum: ["undecided", "fork", "hands", null] },
+    bailCause: { type: ["string", "null"], enum: ["undecided", "fork", "hands", "fixed", "covered", null] },
     bailDetail: { type: ["string", "null"] },
     confirmation: strings,
   }),
