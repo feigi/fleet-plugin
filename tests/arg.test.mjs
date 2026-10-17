@@ -768,8 +768,9 @@ for (const { script, argv } of GH_FLOOD) {
     // 30/30.
     //
     // runWithFloodingGh's spawnSync must keep stderr a pipe, the default: on a
-    // file fd the same mutant keeps the refusal, so a file-backed stdio would
-    // make this assertion vacuous.
+    // file fd the same mutant keeps the refusal 100/100 (ubuntu-24.04, node
+    // 26.5.0, measured on board-cli.test.mjs's old harness, readable at
+    // 0eacb958), so a file-backed stdio would make this assertion vacuous.
     assert.match(
       flooded.stderr,
       new RegExp(`\n${script}: [^\n]*\n$`),
