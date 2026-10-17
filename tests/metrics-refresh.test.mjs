@@ -212,7 +212,7 @@ test("a pending file with a column the corpus lacks fails the drain, leaves the 
 });
 
 test("an empty or blank-only pending file is removed with its own line, exit 0, and the corpus is untouched", () => {
-  for (const pending of ["", "\n\n"]) {
+  for (const pending of ["", "\n\n", " \t\r\n"]) {
     const f = fixture({ pending });
     const before = readFileSync(join(f.repo, FEATURES), "utf8");
     const r = f.run();
@@ -229,7 +229,7 @@ test("a pending file with rows but no header fails the drain naming the pending 
   const f = fixture({ pending: `${FEATURE_COLUMNS.map((c) => row[c]).join("\t")}\n` });
   const r = f.run();
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /metrics-refresh: drain failed: \.fleet\/ticket-features\.pending\.tsv: /);
+  assert.match(r.stderr, /metrics-refresh: drain failed: \.fleet\/ticket-features\.pending\.tsv: ticket-features\.tsv header lacks run_date/);
   assert.equal(existsSync(join(f.repo, PENDING)), true, "a headerless file is not repaired or removed");
   assert.equal(existsSync(join(f.repo, GUARD)), false);
 });

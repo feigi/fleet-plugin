@@ -36,7 +36,7 @@
 // the guard are files the caller wrote, and a fitted commit is fetched by the
 // caller.
 
-import { readFileSync, writeFileSync, renameSync, existsSync, appendFileSync, mkdirSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, appendFileSync, mkdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -580,7 +580,7 @@ function main() {
     const pending = F.arg("pending") ?? join(dirname(guardPath), "ticket-features.pending.tsv");
     try {
       mkdirSync(dirname(pending), { recursive: true });
-      const header = existsSync(pending) && statSync(pending).size > 0 ? "" : `${COLUMNS.join("\t")}\n`;
+      const header = statSync(pending, { throwIfNoEntry: false })?.size > 0 ? "" : `${COLUMNS.join("\t")}\n`;
       appendFileSync(pending, `${header}${formatFeatureRow(row)}\n`);
     } catch (e) {
       process.stderr.write(`${NAME}: WARNING could not append to ${pending}: ${e.message} — this Pull's ticket-features row is not recorded\n`);
