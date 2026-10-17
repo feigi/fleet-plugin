@@ -37,3 +37,4 @@ not a repo-wide gate.
 - #2153, #2634, #2445, #2709 — the same drift filed against a single row, closed on the records ruling
 - #3249 — "harness-node.md rows 39, 40, 44, 45, 59, 60 cite review-core.mjs lines that no longer hold the cited text" — one more single-census drift filing, closed on the records ruling
 - #3346 — "ADR 0007 and shell.md cite prove-merge.sh by stale line numbers" — the shell.md half declined on the records ruling; the ADR 0007 half proceeded, since `docs/adr/` is outside this record
+- #3078 — "external-assumptions: harness-node rows citing board.mjs carry stale line numbers" — the four rows it measured hold at the commit that last changed each row; closed on the records ruling
