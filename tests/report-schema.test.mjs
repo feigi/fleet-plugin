@@ -215,6 +215,8 @@ test("validate passes the null and empty shapes each family allows", () => {
     assert.equal(r.status, 0, `${family} ${JSON.stringify(changes)}: ${r.stdout}${r.stderr}`);
   };
   ok("impl", { outcome: "bailed", pr: null, head: null, sizing: null, bailCause: "hands", bailDetail: "needs a maintainer's credentials" });
+  ok("impl", { outcome: "bailed", pr: null, head: null, sizing: null, bailCause: "fixed", bailDetail: "abc1234 — origin/main's guard already refuses the input" });
+  ok("impl", { outcome: "bailed", pr: null, head: null, sizing: null, bailCause: "covered", bailDetail: "PR#77 — its diff adds the same guard" });
   ok("impl", { sizing: { verdict: "light", signal: "one file", ranBeforePr: false }, confirmation: [] });
   ok("fix-pr", { outcome: "no-op", applied: [], deferred: [], filed: [] });
   ok("finisher", { outcome: "halted", cause: "live-editor", evidence: "a member still edits the worktree", kill: null, labelsReadBack: [] });

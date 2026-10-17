@@ -8,7 +8,7 @@
 // recipe-deriver, relabel (the comment a Pull posts on a ticket it returns,
 // not a member's brief). A role with kinds (fix-applier: review, conflict,
 // dispositions-retry, red-check; finisher: fresh, repair; relabel:
-// needs-triage, fork, hands) requires --kind; a role without them refuses it
+// needs-triage, fork, hands, covered, fixed) requires --kind; a role without them refuses it
 // as an unknown flag.
 //
 // OUTPUT. The brief on stdout and nothing else. With --json the payload

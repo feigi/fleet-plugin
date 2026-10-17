@@ -1079,23 +1079,18 @@ Each rule here is a judgement a driver stops for: answer it by the cause it name
 ### Relabel causes
 
 - **Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>`
-  settles `impl-<N>=bailed` and demotes by cause:
+  settles `impl-<N>=bailed` and acts by `bailCause`, never by parsing `bailDetail`; no cause opens a PR:
 
-  | Cause | Label |
-  |---|---|
-  | brief does not decide *what* to build | `needs-triage` |
-  | genuine fork — options named, none ruled | `ready-for-human` |
-  | needs human hands — external access, manual testing, judgment during the work | `ready-for-human` |
+  | Cause | `bailCause` | `bailDetail` format | Issue action | Ledger |
+  |---|---|---|---|---|
+  | brief does not decide *what* to build | `undecided` | `<one line>` | relabel `needs-triage` | `=bailed` |
+  | genuine fork — options named, none ruled | `fork` | `<options>` | relabel `ready-for-human` | `=bailed` |
+  | needs human hands — external access, manual testing, judgment during the work | `hands` | `<cause>: <line>` | relabel `ready-for-human` | `=bailed` |
+  | already fixed on main | `fixed` | `<sha> — <how origin/main's tree meets the acceptance>` | `verify-sha.sh main <sha>` first. Exit 0: close N with the `fixed` comment (quotes `bailDetail`), drop `ready-for-agent`, release the claim (drops `in-progress`); no label. Exit 1: relabel `needs-triage`, comment `<sha> not on origin/main`. Exit 2: `NEED`, N untouched. | `=bailed` |
+  | covered by an open PR M | `covered` | `PR#M — <how M's diff meets N's acceptance>` | relabel `ready-for-human` with the `covered` comment: close N when M merges, or restore `ready-for-agent` if M closes unmerged. PR M's body is never edited. | `=bailed` |
 
-  The call relabels, comments the cause and releases the claim, then ticks:
+  The call comments the cause and releases the claim — never on `fixed`'s exit 2 — then ticks:
   the head the tick names next is a *different* ticket.
-  `needs-triage` routes back to `/triage`, which can return it as
-  `ready-for-agent`; `ready-for-human` for hands or a fork; `needs-triage` for a
-  brief that names no *what*.
-
-  The same causes relabel an unclaimed ticket at the Pull (phase 1), where there
-  is no `in-progress` to drop — the causes and labels are one table, applied at
-  whichever point the ticket fails them.
 
 ### Resolving a finisher halt
 
@@ -2338,17 +2333,6 @@ or even see it — `worktree-audit.sh`'s committed-vs-uncommitted split is exact
 what decides whether a replacement redoes or destroys work. Observed twice in
 one run.
 
-**The identity block is what makes `sizing-a-ticket`'s fleet entry reachable.**
-That skill conditions its heavy-row process on the reader being a fleet member;
-a solo reader settles the open design choices with its user before planning,
-while a fleet member's `## Agent Brief` already is that settlement. A member
-that takes itself for a solo session waits on a user to settle design — a user
-no unattended member has, so it parks rather
-than fails. Nothing else you carry says what the member is — an incidental
-mention of the controller is not a statement that the reader is one of its
-members. That skill keeps its condition, so a solo session still runs the
-interactive path; this block is what puts a member on the fleet side of it.
-
 A member that bails demotes nothing itself; demotion by cause is yours
 (**Implementer bails before implementing**).
 
@@ -2606,7 +2590,7 @@ Match the failure to its row in the table below and run that response; where the
 | Failure | Response |
 |---|---|
 | SHA not on expected branch | Flag, do not enqueue, report |
-| Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands or leaves a fork open; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |
+| Implementer bails before implementing | Act by the report's `bailCause` as the **Relabel causes** table says, then refill (phase 3) |
 | Implementer blocked or ambiguous *mid-implementation* | Free the slot, `ledger.mjs settle impl-<N> blocked`, leave `in-progress`, report — the ticket is not In flight and waits for a human; the row above is the pre-code bail, not this one |
 | `review-pr` workflow throws or returns no tree | Retry once under the next letter (`review-pr-<pr#>-b`); still failing, report and leave the PR at review-due. Never enqueue the PR as reviewed — the workflow is not a member, so no other row here covers it |
 | Reviewer, fix-applier or red-check fixer cannot reach green | Report, leave the PR unlabeled, free the slot — a fix-applier or red-check fixer settles `failed` |

@@ -5,14 +5,14 @@
 // holds a fixture ledger, a phase-0 receipt naming the scratch root and the
 // caps, and the rendered briefs. The scripts directory is a copy of the
 // plugin's in which `fleet-tick.mjs`, `dispositions-check.mjs`,
-// `dispatch-prompt.mjs` and `release-ticket.sh` are stubs that log their call
+// `dispatch-prompt.mjs`, `release-ticket.sh` and `verify-sha.sh` are stubs that log their call
 // to `order.log` and answer from a control file the case writes, and
 // `ledger.mjs` is a shim: `settle --from-report` is stubbed — it logs, then
 // refuses as the control file says, or prints the control file's own stdout
 // and stderr and exits 0, or settles the outcome the control file names
 // through the real script's bare form — and every other subcommand
 // is the real script's, its writes logged. `gh` is a stub on PATH that keeps
-// each issue's and PR's labels and comments in a state file, so a second run
+// each issue's and PR's labels, comments and closed state in a state file, so a second run
 // reads what the first one wrote. No network, no omp.
 
 import { test } from "node:test";
@@ -97,6 +97,7 @@ writeFileSync(join(SCRIPTS, "dispatch-prompt.mjs"), `import { drive } from "./st
 // ci-state.mjs is only ever run, never imported, by the scripts.
 writeFileSync(join(SCRIPTS, "ci-state.mjs"), `import { drive } from "./stub-driver.mjs";\ndrive("ci-state", process.argv.slice(2));\n`);
 writeFileSync(join(SCRIPTS, "release-ticket.sh"), `#!/bin/sh\nexec node "$(dirname "$0")/stub-driver.mjs" release-ticket "$@"\n`);
+writeFileSync(join(SCRIPTS, "verify-sha.sh"), `#!/bin/sh\nexec node "$(dirname "$0")/stub-driver.mjs" verify-sha "$@"\n`);
 cpSync(join(SCRIPTS, "ledger.mjs"), join(SCRIPTS, "ledger-real.mjs"));
 writeFileSync(join(SCRIPTS, "ledger.mjs"), `import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -128,8 +129,8 @@ await import("./ledger-real.mjs");
 `);
 const SCRIPT = join(SCRIPTS, "fleet-event.mjs");
 
-// Keeps each issue's and PR's labels and comments in gh-state.json; a
-// `<noun> <verb>` listed in gh-fail.json fails.
+// Keeps each issue's and PR's labels, comments and closed state in
+// gh-state.json; a `<noun> <verb>` listed in gh-fail.json fails.
 const GH_STUB = `#!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
@@ -148,7 +149,10 @@ const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "
 const item = (state[noun][n] ??= { labels: [], comments: [] });
 const values = (flag) => args.flatMap((a, i) => (a === flag ? [args[i + 1]] : []));
 if (verb === "view") {
-  process.stdout.write(JSON.stringify({ labels: item.labels.map((name) => ({ name })), comments: item.comments.map((body) => ({ body })) }));
+  process.stdout.write(JSON.stringify({ labels: item.labels.map((name) => ({ name })), comments: item.comments.map((body) => ({ body })), state: item.state ?? "OPEN" }));
+} else if (verb === "close") {
+  item.state = "CLOSED";
+  for (const body of values("--comment")) item.comments.push(body);
 } else if (verb === "edit") {
   item.labels = item.labels.filter((l) => !values("--remove-label").includes(l));
   for (const l of values("--add-label")) if (!item.labels.includes(l)) item.labels.push(l);
@@ -256,6 +260,7 @@ for (const [cause, label, detail, kindArgs] of [
   ["fork", "ready-for-human", "keep the cache or drop it", ["--kind", "fork", "--options", "keep the cache or drop it"]],
   ["hands", "ready-for-human", "external access: the staging database", ["--kind", "hands", "--hands", "external access", "--line", "the staging database"]],
   ["hands", "ready-for-human", "judgment the rollout order", ["--kind", "hands", "--hands", "judgment during the work", "--line", "the rollout order"]],
+  ["covered", "ready-for-human", "PR#77 — its diff adds the same guard", ["--kind", "covered", "--detail", "PR#77 — its diff adds the same guard"]],
 ]) {
   test(`impl-report on a bail for ${cause} (${detail}) relabels ${label}, comments the rendered relabel brief, releases the claim, then ticks; a second run writes neither label nor comment again`, () => {
     const f = fixture({ rows: ["#412 impl-412"] });
@@ -290,6 +295,102 @@ for (const [cause, label, detail, kindArgs] of [
     assert.match(eventLine(second), new RegExp(`#412 already ${label}; relabel comment already on #412`));
   });
 }
+
+// ── impl-report: a `fixed` bail ──────────────────────────────────────────────
+
+const SHORT = "abc1234";
+const FIXED_DETAIL = `${SHORT} — origin/main's guard already refuses the input`;
+const VERIFY = `verify-sha main ${SHORT}`;
+const FIXED_RENDER = `dispatch-prompt render relabel --kind fixed --detail ${FIXED_DETAIL}`;
+const CLOSE_BODY = "*Closed by the fleet controller.* fixed\n";
+
+function fixedFixture(verify) {
+  const f = fixture({ rows: ["#412 impl-412"] });
+  f.setGh({ issue: { 412: { labels: ["ready-for-agent", "in-progress", "bug"], comments: [] } }, pr: {} });
+  f.report(bail("impl-412", "fixed", FIXED_DETAIL));
+  f.control("settle", { "impl-412": { outcome: "bailed" } });
+  f.control("verify-sha", verify);
+  f.control("dispatch-prompt", { out: CLOSE_BODY });
+  return f;
+}
+
+test("impl-report on a fixed bail whose sha is on origin/main closes the issue with the rendered fixed comment, drops ready-for-agent and in-progress, releases, then ticks; a second run closes and comments nothing again", () => {
+  const f = fixedFixture({ exit: 0, out: JSON.stringify({ branch: "main", sha: SHORT, reachable: true, tip: HEAD }) });
+  const first = f.run(["impl-report", "impl-412"]);
+  assert.equal(first.status, 0, first.err + first.stdout);
+  assert.deepEqual(first.order, [
+    `settle impl-412 --from-report --reports ${join(f.scratch, "reports")}`,
+    VERIFY,
+    FIXED_RENDER,
+    "gh issue view 412",
+    "gh issue close 412",
+    "gh issue edit 412",
+    "release-ticket 412 impl-412 implementer --apply",
+    TICK,
+  ]);
+  assert.deepEqual(f.gh().issue[412], { labels: ["bug"], comments: [CLOSE_BODY], state: "CLOSED" });
+  const calls = f.ghCalls();
+  assert.deepEqual(calls.find((c) => c.args[1] === "close").args, ["issue", "close", "412", "--comment", CLOSE_BODY]);
+  assert.deepEqual(calls.find((c) => c.args[1] === "edit").args, ["issue", "edit", "412", "--remove-label", "ready-for-agent", "--remove-label", "in-progress"]);
+  assert.ok(!calls.some((c) => c.args[0] === "issue" && c.args[1] === "edit" && c.args.includes("--add-label")), "a closed ticket takes no label");
+  assert.match(eventLine(first), /closed #412: fixed by abc1234; released #412/);
+
+  const second = f.run(["impl-report", "impl-412"]);
+  assert.equal(second.status, 0, second.err + second.stdout);
+  assert.deepEqual(writes(second.order), [VERIFY, FIXED_RENDER, "release-ticket 412 impl-412 implementer --apply"]);
+  assert.deepEqual(f.gh().issue[412].comments, [CLOSE_BODY]);
+  assert.match(eventLine(second), /#412 already closed/);
+});
+
+test("impl-report on a fixed bail whose sha is not on origin/main relabels needs-triage with a not-on-origin/main comment, releases, and closes nothing", () => {
+  const f = fixedFixture({ exit: 1, out: JSON.stringify({ branch: "main", sha: SHORT, reachable: false, tip: HEAD }) });
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(r.order, [
+    `settle impl-412 --from-report --reports ${join(f.scratch, "reports")}`,
+    VERIFY,
+    "gh issue view 412",
+    "gh issue edit 412",
+    "gh issue comment 412",
+    "release-ticket 412 impl-412 implementer --apply",
+    TICK,
+  ]);
+  const issue = f.gh().issue[412];
+  assert.deepEqual(issue.labels, ["bug", "needs-triage"]);
+  assert.equal(issue.state, undefined, "the issue was never closed");
+  assert.equal(issue.comments.length, 1);
+  assert.match(issue.comments[0], /abc1234 not on origin\/main/);
+  assert.deepEqual(f.ghCalls().find((c) => c.args[1] === "edit").args, ["issue", "edit", "412", "--remove-label", "ready-for-agent", "--remove-label", "in-progress", "--add-label", "needs-triage"]);
+});
+
+test("impl-report on a fixed bail whose sha verify-sha.sh cannot answer prints NEED, touches no issue, releases nothing, still ticks, exits 4", () => {
+  const f = fixedFixture({ exit: 2, err: "verify-sha: cannot fetch origin/main\n" });
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 4, r.err + r.stdout);
+  assert.match(r.stdout, /^NEED close #412 — verify-sha\.sh main abc1234 could not answer \(exit 2\): verify-sha: cannot fetch origin\/main/m);
+  assert.deepEqual(r.order, [`settle impl-412 --from-report --reports ${join(f.scratch, "reports")}`, VERIFY, TICK]);
+  assert.deepEqual(f.gh().issue[412], { labels: ["ready-for-agent", "in-progress", "bug"], comments: [] });
+});
+
+test("impl-report on a fixed bail whose bailDetail opens with no sha prints NEED and touches nothing", () => {
+  const f = fixedFixture({ exit: 0 });
+  f.report(bail("impl-412", "fixed", "already fixed upstream"));
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 4, r.err + r.stdout);
+  assert.match(r.stdout, /^NEED close #412 — the report's bailDetail opens with no commit sha/m);
+  assert.deepEqual(r.order, [`settle impl-412 --from-report --reports ${join(f.scratch, "reports")}`, TICK]);
+  assert.deepEqual(f.gh().issue[412], { labels: ["ready-for-agent", "in-progress", "bug"], comments: [] });
+});
+
+test("impl-report on a fixed bail whose close fails prints NEED and leaves the labels and the claim as they were", () => {
+  const f = fixedFixture({ exit: 0 });
+  writeFileSync(join(f.stubs, "gh-fail.json"), JSON.stringify(["issue close"]));
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 4, r.err + r.stdout);
+  assert.match(r.stdout, /^NEED close #412 — gh issue close failed: gh boom$/m);
+  assert.ok(!r.order.some((l) => l === "gh issue edit 412" || l.startsWith("release-ticket")), r.order.join("\n"));
+  assert.deepEqual(f.gh().issue[412].labels, ["ready-for-agent", "in-progress", "bug"]);
+});
 
 test("impl-report prints NEED hand-release on a release refusal, still ticks, and exits 4 rather than failing before the tick", () => {
   const f = fixture({ rows: ["#412 impl-412"] });

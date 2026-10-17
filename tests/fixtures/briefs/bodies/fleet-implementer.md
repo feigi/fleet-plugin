@@ -43,8 +43,14 @@ human hands you do not have → bail, name the cause, do not implement.
 **Re-derive the ticket's claims against `origin/main` before implementing** —
 not the working tree, and not the ticket's line numbers, which drift. The Pull
 runs a cheap version of this check, so what reaches you is what a `grep` could
-not settle; you have the tree, so you are the backstop. Already fixed → report
-that with the commit and do NOT invent work. An acceptance criterion the tree
+not settle; you have the tree, so you are the backstop. Already fixed on
+`origin/main` → bail with `bailCause` `fixed` and do NOT invent work:
+`bailDetail` is `<sha> — <how origin/main's tree meets the acceptance>`, `<sha>`
+the commit that fixed it. Already covered by an open PR M you find → bail with
+`bailCause` `covered`: `bailDetail` is `PR#M — <how M's diff meets N's
+acceptance>`, and PR M is never edited. What the controller does with each
+cause is the *Implementer bails before implementing* table in run-team's
+SKILL.md. An acceptance criterion the tree
 now **contradicts** is a bail, not a thing to implement: say which, and stop.
 
 **Claim discipline, on every ticket:**
