@@ -18,7 +18,23 @@ What does not empty it is noticing the question and dispatching anyway.
 ## Duty 2: every deferral, and every claimed APPLY, has a home that outlives the merge
 
 **Confirm every deferral — and every claimed APPLY — has a home that outlives
-   the merge.** The test is a durable home, not a tracker number: a tracker
+   the merge.** A deferral of a finding in the review's result is not yours to
+   re-judge when the PR's latest review counted a survived or unverified finding:
+   `ledger.mjs dispatch` then dispatched you only once the PR's ledger row held a
+   `dispositions-ok` verdict from `dispositions-check.mjs` on that review
+   (`dispositionsRefusal`), and that check had already read back where the
+   fix-applier's disposition record says each deferral was filed. That verdict is
+   the judgement of those homes: do not halt on a home the script accepted, and
+   do not re-file one as an open issue. One such home is the PR's own
+   `PR #<M> review: the suggestion band, checked` issue, which counts although it
+   is closed and labelled `wontfix`. Where the latest review counted no survived
+   and no unverified finding, dispatch required no verdict; that record is still
+   a home there when it matches the script's own definition — `homeHolds` in
+   `dispositions-check.mjs`: state `CLOSED`, labelled `wontfix`, titled exactly
+   `recordTitle(<M>)` — and any other closed issue is not. Everything else — a
+   claimed APPLY, a deferral the review's result does not carry, and a deferral
+   no verdict judged — you judge by hand, by the test below. The test is a
+   durable home, not a tracker number: a tracker
    issue and a committed in-tree comment both qualify, and for a finding whose
    remedy was measured worse than the defect the in-tree note is the better one.
    What fails is a promise living only in a PR body, or on the PR's *own* source
