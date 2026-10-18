@@ -1,5 +1,5 @@
 #!/bin/sh
-# Delete local branches whose upstream is gone, and their worktrees.
+# Delete local branches whose upstream is gone, and their worktrees. A branch with no upstream is reported as kept and never deleted.
 #
 # Dry-run by default; --apply mutates. Every precondition is recomputed inside
 # this invocation, because a branch list from an earlier call is already false:
@@ -683,12 +683,15 @@ null_head_why() {
 # away from them. %(refname) is always refs/heads/<name>, so the strip yields
 # the bare name for every branch, ambiguous or not.
 #
-# The $2=="[gone]" field test is deliberately untouched, and it still selects
-# the same branches: a space is not legal in a branch name (measured — git
-# refuses `has space` as invalid), so the name is always the whole of $1, and a
-# branch with no upstream leaves $2 empty rather than matching. The tracking
-# forms that DO carry a space, `[ahead 1]` and its siblings, split so that $2
-# holds `[ahead` — not `[gone]` either way.
+# The [gone] test reads $3 and the no-upstream test reads $2: a space is not
+# legal in a branch name (measured — git refuses `has space` as invalid), so
+# the name is always the whole of $1, and $2 is `upstream=` followed by
+# %(upstream)'s ref — exactly `upstream=` when the branch has none. The
+# tracking forms that DO carry a space, `[ahead 1]` and its siblings, split so
+# that $3 holds `[ahead` — not `[gone]` either way. That layout holds only
+# while the upstream ref carries no whitespace: %(upstream) is built from the
+# branch.<b>.merge value, which git does not validate, and a space there moves
+# the track out of $3 (measured, git 2.50.1).
 # A command substitution inside a `for ... in` word list discards its own
 # exit status entirely, in every shell measured here (bash, dash, macOS
 # /bin/sh): `for x in $(false); do …; done` completes at the loop's own end,
@@ -713,9 +716,13 @@ null_head_why() {
 # the same reason — dying here would also abort the second sweep and the
 # final `worktree prune`, neither of which this enumeration failing has
 # anything to do with, over a failure that only defers reaping to a later pass.
-if ! git_probe for-each-ref --format='%(refname) %(upstream:track)' refs/heads; then
+# `upstream=` makes an unset %(upstream) a field of its own. Without it the
+# whitespace split drops the empty field, and `$2` reads the track instead, so
+# `$2=="upstream="` is exactly the no-upstream case and `$3` the [gone] test.
+if ! git_probe for-each-ref --format='%(refname) upstream=%(upstream) %(upstream:track)' refs/heads; then
   keep "" "could not enumerate [gone] branches — none reaped, and none reported reapable either$(gp_why)"
   gone_branches=""
+  no_upstream=""
 else
   # git_probe captures git's stderr into $gp_err instead of leaving it on the
   # real fd — the whole reason it exists — and every OTHER call site in this
@@ -726,11 +733,20 @@ else
   # `git … | awk …` pipeline with git's stderr inherited, and now reaches no
   # one unless forwarded here explicitly.
   [ -z "$gp_err" ] || printf '%s' "$gp_err" >&2
-  if ! gone_branches=$(printf '%s\n' "$gp_out" | awk '$2=="[gone]"{sub(/^refs\/heads\//,"",$1); print $1}'); then
+  if ! gone_branches=$(printf '%s\n' "$gp_out" | awk '$3=="[gone]"{sub(/^refs\/heads\//,"",$1); print $1}'); then
     keep "" "could not enumerate [gone] branches — none reaped, and none reported reapable either"
     gone_branches=""
   fi
+  if ! no_upstream=$(printf '%s\n' "$gp_out" | awk '$2=="upstream="{sub(/^refs\/heads\//,"",$1); print $1}'); then
+    keep "" "could not enumerate branches with no upstream — none reported kept"
+    no_upstream=""
+  fi
 fi
+# A branch with no upstream has no [gone] state to act on. It is reported and
+# never selected for deletion, and no other guard runs on it.
+for b in $no_upstream; do
+  keep "$b" "no upstream — never selected"
+done
 for b in $gone_branches; do
 
   # The tip is read ONCE, here, and everything after it measures that frozen

@@ -8,6 +8,12 @@ breaks that worktree silently — it moves no ref, so the delete goes through,
 and `wt_recheck_delete` re-reads the listing after the delete and restores
 the branch at `$tip` (reap keeps the branch, release halts); `reap.sh` also
 reports any `.worktrees/` worktree left on a branch that no longer exists.
+Amended by #3156: point 5's "the -u premise stays prose" no longer holds — the
+controller's implementer-report settle writes a claim branch's upstream once
+its PR exists, and reap.sh reports a branch with no upstream as kept instead
+of omitting it; "nothing is lost" still holds. Point 5's "the only reader is
+reap.sh's candidate selection" was already false: pull.mjs's collision scan
+also excludes [gone] branches.
 
 ## Context
 

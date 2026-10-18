@@ -289,9 +289,11 @@ else
   # computes `%(upstream:track)` against the REMOTE ref, and an upstream naming
   # a remote ref that has never existed reads as `[gone]`, not as "no upstream"
   # — measured, a freshly claimed branch was reaped by `reap.sh --apply` before
-  # any work was done in it. The real upstream arrives with the documented first
-  # push, `git push --force-with-lease -u origin HEAD` (skills/next-ticket/SKILL.md
-  # step 7; its no-lease fallback carries `-u` too), and only then can be `[gone]`.
+  # any work was done in it. The real upstream arrives with the first push with `-u`: the documented form,
+  # `git push --force-with-lease -u origin HEAD` (skills/next-ticket/SKILL.md
+  # step 7; its no-lease fallback carries `-u` too), or else when the controller
+  # settles the implementer's report, which writes it. Only then can the branch
+  # be `[gone]`. Until then reap.sh reports it kept.
   #
   # `--no-track` is also why no branch delete uses `-d`: `-d` measures an
   # upstream-less branch against local HEAD, refusing a pristine claim behind

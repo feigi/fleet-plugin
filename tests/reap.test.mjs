@@ -768,7 +768,7 @@ test("a successful --apply run still reaps, still prunes, and exits 0 unchanged"
 
   assert.equal(code, 0);
   assert.deepEqual(json.reaped, ["feature/merged"]);
-  assert.deepEqual(json.kept, []);
+  assert.deepEqual(json.kept, [{ branch: "scratch/stale", reason: "no upstream — never selected" }]);
   assert.ok(!listedNames(w).includes("stale-wt"), "the prune must still run and clear the stale registration");
 });
 
@@ -1973,15 +1973,17 @@ test("a refusal that CLEARED the registration is reported as a partial removal, 
 
   assert.equal(code, 0, "a refusal is a finding, not a script failure");
   assert.deepEqual(json.reaped, []);
-  assert.equal(json.kept.length, 1);
-  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.equal(json.kept.length, 2, "the sibling has no upstream, so it is kept as well");
+  assert.deepEqual(json.kept.find((k) => k.branch === "scratch/sibling"), { branch: "scratch/sibling", reason: "no upstream — never selected" });
+  const [kept] = json.kept.filter((k) => k.branch === "feature/merged");
+  assert.equal(kept.branch, "feature/merged");
   assert.match(
-    json.kept[0].reason,
+    kept.reason,
     /registration cleared/,
-    `a refusal that unregistered the worktree must not read as a no-op: ${json.kept[0].reason}`,
+    `a refusal that unregistered the worktree must not read as a no-op: ${kept.reason}`,
   );
-  assert.match(json.kept[0].reason, /Not a directory/, "git's own diagnosis must reach the payload");
-  assert.doesNotMatch(json.kept[0].reason, /\n/, "git's stderr is multi-line; the reason must be flattened");
+  assert.match(kept.reason, /Not a directory/, "git's own diagnosis must reach the payload");
+  assert.doesNotMatch(kept.reason, /\n/, "git's stderr is multi-line; the reason must be flattened");
   assert.match(stderr, /KEEP feature\/merged — worktree remove refused/);
 
   // The registration really is gone — the state the reason claims, measured.
@@ -3378,8 +3380,8 @@ test("the dry run reports the detached worktree it would remove, removes nothing
 
 test("an attached worktree is never touched by the branchless sweep (#381)", (t) => {
   // The accept side of the enumeration itself. A worktree on a branch carries a
-  // `branch` line, so the sweep must not see it at all — including one on a
-  // live branch that is not `[gone]`, which nothing in this script may remove.
+  // `branch` line, so this sweep must not see it at all. The branch sweep does
+  // see its branch, and reports it kept because this one has no upstream.
   const w = repo(t);
   git(w, "worktree", "add", "-q", join(w, ".worktrees", "live"), "-b", "feature/live", "main");
   const live = join(w, ".worktrees", "live");
@@ -3387,10 +3389,69 @@ test("an attached worktree is never touched by the branchless sweep (#381)", (t)
   const { code, json, stderr } = runReap(w, ["--apply"]);
 
   assert.equal(code, 0);
-  assert.deepEqual(json, { applied: true, reaped: [], worktreesRemoved: [], kept: [], warnings: [] });
-  assert.doesNotMatch(stderr, /KEEP/, "a worktree on a live branch is not a finding");
+  assert.deepEqual(json, { applied: true, reaped: [], worktreesRemoved: [], kept: [{ branch: "feature/live", reason: "no upstream — never selected" }], warnings: [] });
+  assert.ok(stderr.includes("KEEP feature/live"), "a branch with no upstream is reported; its worktree is not touched");
   assert.equal(existsSync(live), true);
   assert.equal(branchExists(w, "feature/live"), true);
+});
+
+test("a merged claim branch with no upstream is kept and reported, never omitted, until its upstream is written", (t) => {
+  const w = repo(t);
+  const b = "implementer/9-x";
+  git(w, "checkout", "-q", "-b", b, "main");
+  commit(w, "claim work");
+  git(w, "push", "-q", "origin", b);
+  git(w, "checkout", "-q", "main");
+  git(w, "merge", "-q", "--no-ff", "-m", "merge claim", b);
+  git(w, "push", "-q", "origin", "main");
+  git(w, "push", "-q", "origin", "--delete", b);
+  git(w, "fetch", "-q", "--prune", "origin");
+
+  const dry = runReap(w, []);
+  assert.equal(dry.code, 0);
+  assert.deepEqual(dry.json.kept, [{ branch: b, reason: "no upstream — never selected" }]);
+
+  const kept = runReap(w, ["--apply"]);
+  assert.equal(kept.code, 0);
+  assert.deepEqual(kept.json.kept, [{ branch: b, reason: "no upstream — never selected" }]);
+  assert.deepEqual(kept.json.reaped, []);
+  assert.equal(branchExists(w, b), true);
+
+  git(w, "config", `branch.${b}.remote`, "origin");
+  git(w, "config", `branch.${b}.merge`, `refs/heads/${b}`);
+  const reaped = runReap(w, ["--apply"]);
+  assert.equal(reaped.code, 0);
+  assert.deepEqual(reaped.json.reaped, [b]);
+  assert.equal(branchExists(w, b), false);
+});
+
+test("a merged claim branch with no upstream held by a worktree is kept once, and the worktree is left alone until its upstream is written", (t) => {
+  const w = repo(t);
+  const b = "implementer/9-y";
+  const wt = join(w, ".worktrees", "claim");
+  git(w, "worktree", "add", "-q", wt, "-b", b, "main");
+  commit(wt, "claim work");
+  git(wt, "push", "-q", "origin", b);
+  git(w, "merge", "-q", "--no-ff", "-m", "merge claim", b);
+  git(w, "push", "-q", "origin", "main");
+  git(w, "push", "-q", "origin", "--delete", b);
+  git(w, "fetch", "-q", "--prune", "origin");
+
+  const { code, json } = runReap(w, ["--apply"]);
+  assert.equal(code, 0);
+  assert.deepEqual(json.kept.filter((k) => k.branch === b), [{ branch: b, reason: "no upstream — never selected" }]);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(existsSync(wt), true);
+  assert.equal(branchExists(w, b), true);
+
+  git(w, "config", `branch.${b}.remote`, "origin");
+  git(w, "config", `branch.${b}.merge`, `refs/heads/${b}`);
+  const reaped = runReap(w, ["--apply"]);
+  assert.equal(reaped.code, 0);
+  assert.deepEqual(reaped.json.reaped, [b]);
+  assert.deepEqual(reaped.json.worktreesRemoved, [wt]);
+  assert.equal(existsSync(wt), false);
+  assert.equal(branchExists(w, b), false);
 });
 
 test("a locked detached worktree is kept, its registration reported intact and its path named (#381)", (t) => {
@@ -3713,7 +3774,7 @@ test("a bare repo in the registry is not diagnosed as an unresolvable HEAD (#381
   const { code, json } = runReap(bare, ["--apply"]);
 
   assert.equal(code, 0);
-  assert.deepEqual(json.kept, [], `the bare root is not a finding: ${JSON.stringify(json.kept)}`);
+  assert.deepEqual(json.kept, [{ branch: "main", reason: "no upstream — never selected" }], `the bare root is not a finding; its branch with no upstream is kept: ${JSON.stringify(json.kept)}`);
   assert.deepEqual(json.worktreesRemoved, [wt], "and the detached worktree beside it is still swept");
 });
 
@@ -4083,6 +4144,31 @@ test("an unenumerable [gone] sweep is kept, not silently read as a clean no-op (
   assert.match(stderr, /KEEP \(no branch\) — could not enumerate \[gone\] branches/);
   assert.equal(branchExists(w, "feature/merged"), true, "a genuinely merged branch survives an enumeration that could not see it");
   assertToolShimFired(bin, "awk", "the awk shim must actually have fired for this fixture");
+});
+
+test("an unenumerable no-upstream sweep is kept, and the [gone] sweep beside it still reaps", (t) => {
+  // The no-upstream awk program is the only one carrying `upstream=`, so the
+  // shim fails that scan alone and the [gone] scan over the same capture runs.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const bin = toolFailShim(
+    t,
+    "awk",
+    REAL_AWK,
+    `case "$1" in *'upstream='*) : ;; *) false ;; esac`,
+    ["awk: multibyte conversion failure"],
+    2,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0, "an unanswerable enumeration is a finding, not a script failure");
+  assert.equal(json.kept.length, 1, JSON.stringify(json.kept));
+  assert.equal(json.kept[0].branch, null, "no branch was ever named, so none can be blamed");
+  assert.match(json.kept[0].reason, /^could not enumerate branches with no upstream/);
+  assert.match(stderr, /KEEP \(no branch\) — could not enumerate branches with no upstream/);
+  assert.deepEqual(json.reaped, ["feature/merged"], "the [gone] scan does not depend on the no-upstream one");
+  assertToolShimFired(bin, "awk", "the awk shim must actually have fired for this fixture", /upstream=/);
 });
 
 test("a `git for-each-ref` that dies is kept, never read as a clean no-op that just found nothing (#789)", (t) => {
