@@ -879,6 +879,38 @@ test("a baseline commit whose probe read fails for another reason than absence s
   assert.match(c.why, /^git merge-base --is-ancestor exited 128/);
 });
 
+test("a baseline commit whose probe is killed by a signal stays could-not-look, never missing", (t) => {
+  const dir = repo(t);
+  writeFileSync(join(dir, "tracked.txt"), "local\n");
+  git(dir, "commit", "-qam", "local");
+  const recorded = record(dir).head.oid;
+  git(dir, "commit", "-q", "--amend", "-m", "amended");
+  git(dir, "reflog", "expire", "--expire=now", "--all");
+  git(dir, "gc", "-q", "--prune=now");
+  // Control: real git answers exit 1 with nothing on stderr for the absent commit.
+  assert.equal(check(dir).cause, "missing");
+  // A git first on PATH that kills itself with SIGKILL for the probe's
+  // `rev-parse` of the baseline commit, which the module sees as status null
+  // and an empty stderr, and runs everything else as the real git,
+  // `originMain`'s `rev-parse` included.
+  const shim = join(dir, ".fleet", "shim");
+  mkdirSync(shim, { recursive: true });
+  writeFileSync(join(shim, "git"), [
+    "#!/bin/sh",
+    'if [ "$1" = rev-parse ]; then for a in "$@"; do',
+    '  if [ "$a" = "$BASELINE_OID^{commit}" ]; then kill -9 $$; fi',
+    "done; fi",
+    'PATH="$REAL_PATH" exec git "$@"',
+    "",
+  ].join("\n"));
+  chmodSync(join(shim, "git"), 0o755);
+  const env = { ...process.env, PATH: `${shim}:${process.env.PATH}`, REAL_PATH: process.env.PATH, BASELINE_OID: recorded };
+  const c = check(dir, env);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "read");
+  assert.match(c.why, /^git merge-base --is-ancestor exited 128/);
+});
+
 test("a baseline commit present but unreadable under a chmod 000 fan-out dir is could-not-look, never missing", { skip: ROOT }, (t) => {
   const dir = repo(t);
   // Re-commit until the baseline commit's fan-out dir holds its object alone:
