@@ -406,6 +406,17 @@ test("diffHunks reads each file's base-side hunk ranges and the lines their chan
   ]);
 });
 
+test("diffHunks counts each side alone: a delete-only and an add-only hunk with dashed bodies", () => {
+  const diff = [
+    "diff --git a/gone b/gone", "deleted file mode 100644", "--- a/gone", "+++ /dev/null", "@@ -1,2 +0,0 @@", "--- x", "-b",
+    "diff --git a/added b/added", "new file mode 100644", "--- /dev/null", "+++ b/added", "@@ -0,0 +1,2 @@", "+++ y", "+b",
+  ].join("\n");
+  assert.deepEqual(diffHunks(diff), [
+    { old: "gone", new: null, hunks: [{ a: 1, b: 2, from: 1, to: 2 }] },
+    { old: null, new: "added", hunks: [{ a: 0, b: 0, from: 0, to: 0 }] },
+  ]);
+});
+
 test("headings skips fenced code; sectionsOf names the heading a range starts under and each it crosses", () => {
   const hs = headings("# T\n\n```sh\n# a comment\n```\n## A\nx\n  ### B\ny\n~~~\n## not\n~~~\n");
   assert.deepEqual(hs, [{ line: 1, text: "# T" }, { line: 6, text: "## A" }, { line: 8, text: "### B" }]);
