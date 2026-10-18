@@ -584,7 +584,7 @@ test("#2108: a pool read AND an open-PR read that both fill their --limit are bo
 // missing the old PR rather than passing by accident. Every invocation's
 // argv is logged, so a test can count merged reads. The driver runs the real
 // computeBoard() over gather()'s answer: the card's column is the subject.
-async function gatherMerged(t, { rows, prs = [], prev = null, states = {}, fail = false, emptyRepo = false }) {
+async function gatherMerged(t, { rows, prs = [], prev = null, states = {}, issues = {}, fail = false, emptyRepo = false }) {
   const cwd = tempDir("board-gather-merged-");
   const bin = tempDir("board-gather-merged-bin-");
   const scriptDir = tempDir("board-gather-merged-scripts-");
@@ -593,7 +593,7 @@ async function gatherMerged(t, { rows, prs = [], prev = null, states = {}, fail 
   writeFileSync(join(scriptDir, "ledger.mjs"),
     `process.stdout.write(${JSON.stringify(JSON.stringify({ rows, filed: [], ruled: [] }))});\n`);
   const window = Array.from({ length: 100 }, (_, i) => ({ number: 5000 + i, state: "MERGED" }));
-  const config = { prs: prs.map((n) => ({ number: n, state: "OPEN", title: "t", labels: [] })), window, states, fail, emptyRepo, log };
+  const config = { prs: prs.map((n) => ({ number: n, state: "OPEN", title: "t", labels: [] })), window, states, issues, fail, emptyRepo, log };
   writeExecStub(join(bin, "gh"), `#!/usr/bin/env node
 const fs = require("node:fs");
 const c = ${JSON.stringify(config)};
@@ -613,6 +613,9 @@ else if (a[0] === "api" && a[1] === "graphql") {
     repository[alias] = state ? { number: Number(n), state } : null;
     if (!state) errors.push({ type: "NOT_FOUND", path: ["repository", alias], message: "Could not resolve to a PullRequest with the number of " + n + "." });
   }
+  for (const [, alias, n] of q.matchAll(/(\\w+)\\s*:\\s*issue\\s*\\(\\s*number\\s*:\\s*(\\d+)\\s*\\)/g)) {
+    repository[alias] = c.issues[n] ? { state: c.issues[n] } : null;
+  }
   out(errors.length ? { data: { repository }, errors } : { data: { repository } });
   if (errors.length) { process.stderr.write("gh: " + errors.map((e) => e.message).join("\\n") + "\\n"); process.exit(1); }
 }
@@ -627,7 +630,7 @@ else process.exit(1);
   // the old window. Both count, so a regression to the window cannot hide.
   const mergedReads = calls.filter((c) => c[0] === "api" || c.includes("merged"));
   const asked = (c) => [...c[c.indexOf("-f") + 1].matchAll(/pullRequest\s*\(\s*number\s*:\s*(\d+)\s*\)/g)].map((m) => Number(m[1]));
-  return { ...JSON.parse(JSON.stringify({ merged: inputs.merged, columns: Object.fromEntries(b.tickets.map((t) => [t.pr, t.column])) })), mergedReads, asked, stderr };
+  return { ...JSON.parse(JSON.stringify({ merged: inputs.merged, columns: Object.fromEntries(b.tickets.map((t) => [t.pr, t.column])), flags: Object.fromEntries(b.tickets.map((t) => [t.pr, t.flags])) })), mergedReads, asked, stderr };
 }
 
 test("#1840: a row PR merged outside the most-recent-100 window renders MERGED with no previous board", async (t) => {
@@ -682,6 +685,24 @@ test("#1840: the merged lookup is ONE gh invocation asking about exactly the row
   assert.equal(r.columns[960], "REVIEW", "open but beyond the open list is not merged");
 });
 
+test("#3520: a REVIEW card whose PR closed unmerged reads pr-closed through gather(), with its issue read in the same gh call", async (t) => {
+  const rows = ["#907 impl-907=PR#940"];
+  const open = await gatherMerged(t, { rows, states: { 940: "CLOSED" }, issues: { 907: "OPEN" } });
+  assert.equal(open.mergedReads.length, 1, JSON.stringify(open.mergedReads));
+  assert.deepEqual(open.asked(open.mergedReads[0]), [940]);
+  assert.match(open.mergedReads[0].at(-1), /i907:issue\(number:907\)/);
+  assert.equal(open.columns[940], "REVIEW", "closed unmerged stays REVIEW");
+  assert.ok(open.flags[940].includes("pr-closed"), JSON.stringify(open.flags[940]));
+  const finished = await gatherMerged(t, { rows, states: { 940: "CLOSED" }, issues: { 907: "CLOSED" } });
+  assert.ok(!(finished.flags[940] ?? []).includes("pr-closed"), "a CLOSED issue means the row is finished, not pr-closed");
+});
+
+test("#3520: a failed merged read reads no pr-closed, and its log line names the read", async (t) => {
+  const r = await gatherMerged(t, { rows: ["#907 impl-907=PR#940"], states: { 940: "CLOSED" }, fail: true });
+  assert.match(r.stderr, /merged read \(1 PR\) failed/);
+  assert.ok(!(r.flags[940] ?? []).includes("pr-closed"));
+});
+
 test("#1840: a failed merged lookup keeps #1841's rule — carried forward stays MERGED, the rest reads REVIEW", async (t) => {
   const r = await gatherMerged(t, {
     rows: ["#903 impl-903=PR#933", "#907 impl-907=PR#930"],
@@ -714,7 +735,7 @@ test("#1840: one unresolvable number does not poison the batch — the PRs gh di
 // #1840 review: real GitHub always answers every requested `p<N>` alias
 // (null or an object), never omits one — so `data.repository` present with
 // NONE of the requested keys is not a shape the API produces, only a
-// corrupted/truncated one, and readMerged() must not read it as "checked,
+// corrupted/truncated one, and readStates() must not read it as "checked,
 // nothing merged": it has to fail loudly (log + carry-forward/REVIEW) the
 // same as any other unusable answer, not silently.
 test("#1840: an object data.repository naming none of the requested PRs is a failed read, not a clean zero-merged answer", async (t) => {

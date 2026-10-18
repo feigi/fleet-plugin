@@ -197,7 +197,8 @@ export function parseRow(row) {
   const alive = live.filter((e) => !settled.has(e.name));
   const implOutcome = lastImpl ? (implOutcomes.get(lastImpl.name) ?? null) : null;
   const prM = implOutcome && /^PR#(\d+)$/.exec(implOutcome);
-  let pr = prM ? Number(prM[1]) : null;
+  const implPr = prM ? Number(prM[1]) : null;
+  let pr = implPr;
   // A row with NO impl token — a malformed one still
   // counts, since that row's key is a ticket — is keyed, once THIS row
   // carries a PR-bound signal, the way fleet-tick.mjs's rowPr-then-
@@ -217,6 +218,7 @@ export function parseRow(row) {
     excluded,
     impl: lastImpl?.name ?? null,
     implOutcome,
+    implPr,
     agent: alive.length ? alive[alive.length - 1].name : null,
     pr,
     merged: !!mergedM,
@@ -287,8 +289,12 @@ export function deriveFlags(parsed, ctx) {
   if (ctx.finisher?.startsWith("halted:") && ctx.column === "REVIEW") flags.push(ctx.finisher);
   if (ctx.finisher === "labelled" && ctx.column === "REVIEW") flags.push("unlabelled");
   if ((ctx.finisher === "failed" || ctx.finisher === "killed") && ctx.column === "REVIEW") flags.push(`finisher:${ctx.finisher}`);
+  // A closed-unmerged PR's card reads `pr-closed` in place of `stale`: the
+  // closed PR is what a reader has to act on, not how long the card has sat.
+  const prClosed = ctx.prClosed === true && ctx.column === "REVIEW";
+  if (prClosed) flags.push("pr-closed");
   const limit = STALE_MS[ctx.column];
-  if (limit != null && ctx.sinceEnteredStage != null && ctx.now - ctx.sinceEnteredStage > limit) {
+  if (!prClosed && limit != null && ctx.sinceEnteredStage != null && ctx.now - ctx.sinceEnteredStage > limit) {
     flags.push("stale");
   }
   return flags;
@@ -315,7 +321,7 @@ function titleFor(issue, pr, issues) {
 }
 
 const FLAG_SEVERITY = {
-  "red-ci": 5, "ledger-error": 5, killed: 4, "tier-mismatch": 4, blocked: 4, "sha-off-branch": 4, unlabelled: 4,
+  "red-ci": 5, "ledger-error": 5, killed: 4, "tier-mismatch": 4, "pr-closed": 4, blocked: 4, "sha-off-branch": 4, unlabelled: 4,
   "finisher:failed": 4, "finisher:killed": 4,
   ...Object.fromEntries(HALT_CAUSES.map((c) => [`halted:${c}`, 4])),
   stale: 1,
@@ -432,6 +438,20 @@ export function mergedReadPrs({ ledger, prs, prev }) {
   return [...need].sort((a, b) => a - b);
 }
 
+// The ticket issues whose row's latest settled impl PR is one of `prs`, sorted
+// and once each. gather() reads their state in the same call as the PR read;
+// computeBoard() takes the CLOSED ones as `closedIssues`. An Exclusion is none.
+// An issue number outside Number.isSafeInteger is left out for the reason
+// mergedReadPrs() leaves such a PR out: its `i1e+21` alias would fail the
+// whole batched query, PR aliases included.
+export function issuesOfPrs({ ledger, prs }) {
+  const set = new Set(prs);
+  const issues = (ledger.rows || []).map(parseRow).filter(Boolean)
+    .filter((p) => !p.excluded && p.implPr != null && set.has(p.implPr) && Number.isSafeInteger(p.issue))
+    .map((p) => p.issue);
+  return [...new Set(issues)].sort((a, b) => a - b);
+}
+
 // `merged` is gh's list of merged PR numbers, consulted only for a row
 // PR absent from the open list `prs`; absent means none known, and a PR in
 // neither list (closed unmerged, or a failed read) keeps REVIEW — unless
@@ -441,10 +461,16 @@ export function mergedReadPrs({ ledger, prs, prev }) {
 // this carry-forward — only the "absent from both `prs` and (maybe)
 // `merged`" branch below ever consults it. gather() asks gh only about
 // mergedReadPrs()'s set, so `merged` never lists more than that.
+// `closed` is the same read's CLOSED PRs, and `closedIssues` the CLOSED issues
+// among issuesOfPrs(). A pr-closed flag needs both: a missing `closed`
+// flags nothing, and a failed issue read reads as not CLOSED, as closedTickets()
+// reads its own failed probe.
 export function computeBoard(inputs) {
   const { ledger, issues, prs, ci, prev, now } = inputs;
   const prByNum = new Map(prs.map((p) => [p.number, p]));
   const mergedPrs = new Set(inputs.merged || []);
+  const closedPrs = new Set(inputs.closed || []);
+  const closedIssues = new Set(inputs.closedIssues || []);
   const prevByIssue = new Map((prev?.tickets || []).map((t) => [t.issue, t]));
   const ruledByPr = new Map();
   for (const r of ledger.ruled || []) {
@@ -501,7 +527,8 @@ export function computeBoard(inputs) {
     rowIssues.add(p.issue);
     const sinceEnteredStage = stageEntry(prevTicket, column, now);
     const ciState = p.pr != null ? (ci[p.pr] ?? "unknown") : null;
-    const flags = deriveFlags(p, { ci: ciState, column, sinceEnteredStage, now, finisher: latestFinishers.get(p.pr) });
+    const prClosed = pr === undefined && p.implPr != null && closedPrs.has(p.pr) && !closedIssues.has(p.issue);
+    const flags = deriveFlags(p, { ci: ciState, column, sinceEnteredStage, now, finisher: latestFinishers.get(p.pr), prClosed });
     tickets.push({
       issue: p.issue,
       title: titleFor(p.issue, pr, issues),
