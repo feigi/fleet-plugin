@@ -144,6 +144,7 @@ test("the wake table names every wake, each with its fleet-event.mjs command", (
     ["`CONFLICT` line", "`fleet-event.mjs conflict <pr>`"],
     ["Heartbeat", "`fleet-event.mjs heartbeat`"],
     ["Drain", "`fleet-event.mjs drain --reason \"<reason>\"`"],
+    ["Undrain", "`fleet-event.mjs undrain --reason \"<reason>\"`"],
   ];
   assert.equal(rows.length, WAKES.length, `the table has ${rows.length} wake rows, not the ${WAKES.length} the script's kinds make`);
   for (const [wake, command] of WAKES) {

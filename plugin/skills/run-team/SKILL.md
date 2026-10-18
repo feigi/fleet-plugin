@@ -202,6 +202,7 @@ Run each as `~/.fleet/bin/fleet-run fleet-event.mjs <kind> <args>`, from the mai
 | `CONFLICT` line | `fleet-event.mjs conflict <pr>` |
 | Heartbeat | `fleet-event.mjs heartbeat` |
 | Drain | `fleet-event.mjs drain --reason "<reason>"` |
+| Undrain | `fleet-event.mjs undrain --reason "<reason>"` |
 
 ### Nothing to do: arm the beat
 
@@ -1345,6 +1346,9 @@ owes beyond its call:
      the ledger marks reviewed with no verdict row: append it with the verdict
      you rule (**Guard: accumulate per PR**) and run `finish` again. A step it
      fails is explained in references/close-out.md. Exit 0 is the run closed.
+  Drain only when a documented trigger fired, and name the trigger in `--reason`.
+  **Undrain** only when the maintainer asks, never a drain that budget or
+  context exhaustion caused (references/close-out.md).
 - **The finisher-gate wakes** — a CI run reaching a terminal state, a fix-applier reporting `no-op`, a `no-ci` verdict → each is a bullet of **The finisher gate**.
 
 ### Tick notes
@@ -2472,9 +2476,11 @@ live count from it, so nobody states one. Write neither by hand:
   `review=<launch>=failed` whose `review=<launch>` the row holds settles that
   launch in place, alone or with the next launch in the same call. Any other
   token is refused.
-- **`ledger.mjs drain "<reason>"`** — the one drain marker per run; supply
+- **`ledger.mjs drain "<reason>"`** — at most one standing drain marker; supply
   stops, the review and merge sides keep going. It lives in this run's
   ledger, so the next run's rotation retires it with everything else.
+- **`ledger.mjs undrain "<reason>"`** — clears the drain marker and refuses when
+  no marker is set. `closeout.mjs reopen` runs it.
 - **`ledger.mjs rotate`** — phase 0's first ledger write, every run: moves
   the file as-is to `ledger.<UTC YYYY-MM-DDTHHMMSSZ>.md` beside it under the
   same `<file>.lock`, and the next write starts the empty skeleton — unless

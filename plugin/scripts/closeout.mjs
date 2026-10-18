@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-// The end of a run as two commands, each a list of named steps with a receipt.
+// The end of a run as two step-running commands, `begin` and `finish`, each a
+// list of named steps with a receipt, plus `reopen`, which undoes `begin`.
 //
 //   closeout.mjs begin  --reason "<r>"
 //   closeout.mjs finish --reason "<r>" [--branch <name>]
+//   closeout.mjs reopen --reason "<r>"
 //
 // Reached through the Resolver and run from the MAIN checkout. The middle of
 // the end of a run is the ordinary loop (the tick's review, fix-applier and
@@ -57,8 +59,14 @@
 //   heartbeat-stop  `fleet-heartbeat.mjs --stop "<reason>"`, last, because
 //                   every reader takes a recorded stop as the end of the run.
 //
+// `reopen` undoes `begin` for a run that must drain again: refused (exit 2)
+// once any `finish` step is ok, since the tick and what follows it have already
+// acted. Otherwise `begin`'s `drain` and `release` steps go back to pending, so
+// the next `begin` runs them again, and then `ledger.mjs undrain "<reason>"`
+// clears the marker. A claim `begin` released stays released.
+//
 // THE RECEIPT is `.fleet/closeout.json` (resolved through fleet-dir.mjs, so a
-// worktree and the main checkout name one file), shared by both commands:
+// worktree and the main checkout name one file), shared by all three commands:
 //
 //   { reason, begun, branch, pr, steps: { <name>: { status, at, output } } }
 //
@@ -72,9 +80,11 @@
 //
 // One `closeout: <step>: <status>` line per step on stdout, its output under
 // it, indented, with the `NEED` lines at the left margin. Exit 0 every step
-// ok; 2 a usage error; 3 a step failed, or the receipt could not be read or
-// written; 4 a `NEED` is pending: dispatch what the line names, then run the
-// same command again.
+// ok; 2 a usage error or a refused `reopen`, `ledger.mjs undrain`'s own exit 2
+// included, which it also gives for a ledger it could not lock or write; 3 a
+// step failed, `reopen`'s `ledger.mjs undrain` failed any other way, or the
+// receipt could not be read or written; 4 a `NEED` is pending: dispatch what
+// the line names, then run the same command again.
 //
 // Zero deps: node builtins and sibling scripts only.
 
@@ -409,17 +419,46 @@ function runSteps(steps, ctx, receipt, receiptPath) {
   return 0;
 }
 
+// ── reopen ───────────────────────────────────────────────────────────────────
+
+// Undoes `begin`'s drain. A finish step already ok means the tick and what
+// follows it have acted, so the reopen is refused; a failed tick is not ok and
+// blocks nothing. Otherwise the receipt goes back first and the marker second,
+// so a run stopped between the two is left with `drain` pending and a marker
+// standing, which the next `begin` re-drains ("already draining") or the next
+// `reopen` clears. A ledger with no marker refuses, the receipt already back.
+function reopen({ cwd, reason }, receipt, receiptPath) {
+  const done = Object.keys(FINISH).filter((n) => receipt.steps[n].status === "ok");
+  if (done.length > 0) {
+    process.stderr.write(`${NAME}: reopen refused: finish step ${done.join(", ")} is already ok\n`);
+    return 2;
+  }
+  if (existsSync(receiptPath)) {
+    for (const n of Object.keys(BEGIN)) receipt.steps[n] = blank();
+    receipt.begun = null;
+    writeReceipt(receiptPath, receipt);
+  }
+  const undrain = node("ledger.mjs", ["undrain", reason], { cwd });
+  if (undrain.status !== 0) {
+    process.stderr.write(`${NAME}: ledger.mjs undrain failed: ${detail(undrain)}\n`);
+    return undrain.status === 2 ? 2 : 3;
+  }
+  say(`${NAME}: reopen: ok`);
+  for (const line of undrain.stdout.split("\n").filter(Boolean)) say(`  ${line}`);
+  return 0;
+}
+
 function main() {
   const die = makeDie(NAME);
-  const F = defineFlags(die, { flags: { reason: "value", branch: "value" }, positionals: ["begin", "finish"] });
+  const F = defineFlags(die, { flags: { reason: "value", branch: "value" }, positionals: ["begin", "finish", "reopen"] });
   F.sweep();
   F.stray();
   const cmd = process.argv[2];
-  if (cmd !== "begin" && cmd !== "finish") die(`usage: ${NAME}.mjs begin --reason <reason> | finish --reason <reason> [--branch <name>]`);
+  if (cmd !== "begin" && cmd !== "finish" && cmd !== "reopen") die(`usage: ${NAME}.mjs begin --reason <reason> | finish --reason <reason> [--branch <name>] | reopen --reason <reason>`);
   const reason = F.arg("reason");
   if (reason === null) die("--reason is required");
   const branch = F.arg("branch");
-  if (branch !== null && cmd === "begin") die("--branch belongs to finish");
+  if (branch !== null && cmd !== "finish") die("--branch belongs to finish");
 
   let fleetDir;
   try {
@@ -432,8 +471,9 @@ function main() {
   const receipt = readReceipt(receiptPath, STEP_NAMES);
   receipt.reason = reason;
   const ctx = { cwd: process.cwd(), fleetDir, reason, branch };
-
-  if (cmd === "begin") {
+  if (cmd === "reopen") {
+    process.exitCode = reopen(ctx, receipt, receiptPath);
+  } else if (cmd === "begin") {
     const code = runSteps(BEGIN, ctx, receipt, receiptPath);
     if (receipt.steps.drain.status === "ok" && receipt.steps.release.status !== "failed") {
       receipt.begun = new Date().toISOString();

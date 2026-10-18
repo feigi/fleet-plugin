@@ -12,6 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, readdirSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -3200,11 +3201,38 @@ test("lock: every write subcommand takes the lock, before it validates anything 
     ["settle", "impl-5", "PR#6"],
     ["review", "5", "review=member:review-pr-5"],
     ["drain", "a reason"],
+    ["undrain", "a reason"],
   ]) {
     const r = cli(args, { LEDGER_LOCK_TIMEOUT_MS: "50" });
     assert.equal(r.status, 2, `${args[0]}: ${r.stderr}`);
     assert.match(r.stderr, /cannot lock .* held by pid/, `${args[0]} wrote without the lock`);
   }
+});
+
+test("undrain clears the marker and reports what it cleared; a dispatch the drain held goes through after it", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#5 widget"]));
+  const bare = cli(["--file", file, "undrain"]);
+  assert.equal(bare.status, 2, bare.stderr);
+  assert.match(bare.stderr, /usage: ledger\.mjs undrain/);
+  const none = cli(["--file", file, "undrain", "nothing to clear"]);
+  assert.equal(none.status, 2, none.stderr);
+  assert.match(none.stderr, /no drain marker is set — nothing to undrain/);
+  assert.equal(cli(["--file", file, "drain", "wrap up"]).status, 0);
+  const held = cli(["--file", file, "dispatch", "5", "impl-5"]);
+  assert.equal(held.status, 2, held.stderr);
+  assert.match(held.stderr, /the run is draining/);
+  const r = cli(["--file", file, "undrain", "drained", "by", "mistake"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), { undrained: "wrap up", reason: "drained by mistake" });
+  assert.equal(JSON.parse(cli(["--file", file, "read"]).stdout).drain, null);
+  const briefText = "# rendered brief for impl-5-b\n";
+  mkdirSync(join(dir, "briefs"), { recursive: true });
+  writeFileSync(join(dir, "briefs", "impl-5-b.md"), briefText);
+  writeFileSync(join(dir, "briefs", "impl-5-b.json"), JSON.stringify({ role: "implementer", sha256: createHash("sha256").update(briefText).digest("hex") }));
+  const again = cli(["--file", file, "dispatch", "5", "impl-5-b"]);
+  assert.equal(again.status, 0, again.stderr);
 });
 
 test("lock: reads take no lock — `check` and `read` answer while a live writer holds it (#531)", (t) => {

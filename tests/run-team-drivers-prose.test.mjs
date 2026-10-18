@@ -230,12 +230,13 @@ test("phase-0.md has one heading per moved step, in the order phase0.mjs runs th
   ]);
 });
 
-test("close-out.md has one heading per moved metrics step", () => {
+test("close-out.md has one heading per moved metrics step, then one for undoing a drain", () => {
   assert.deepEqual(CLOSE_OUT.split("\n").filter((l) => /^## /.test(l)), [
     "## Scrape the member facts and check the tier rows",
     "## Drain the pending ticket-features rows and refresh the cost guard",
     "## Commit the metrics files and open a PR",
     "## Move the phase-0 receipt",
+    "## Undo a drain",
   ]);
 });
 

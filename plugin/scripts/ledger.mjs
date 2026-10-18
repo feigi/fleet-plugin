@@ -245,7 +245,7 @@ const requireFile = requireFileIdx !== -1;
 if (requireFileIdx !== -1) argv.splice(requireFileIdx, 1);
 
 const [cmd, ...rest] = argv;
-if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|token|filed|ruled|check|read|dispatch|settle|review|drain|rotate [args]");
+if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|token|filed|ruled|check|read|dispatch|settle|review|drain|undrain|rotate [args]");
 
 // A `--`-prefixed token in `check`'s free-text tail used to fold
 // straight into the duplicate-filing subject, so a misspelled flag searched
@@ -666,7 +666,7 @@ async function acquireLock() {
 // so a caller gating on the exit code reads the same failure either way.
 if (requireFile && !existsSync(file)) die(`--require-file given but ledger file does not exist: ${file}`);
 
-const WRITE_COMMANDS = new Set(["row", "token", "filed", "ruled", "dispatch", "settle", "review", "drain", "rotate"]);
+const WRITE_COMMANDS = new Set(["row", "token", "filed", "ruled", "dispatch", "settle", "review", "drain", "undrain", "rotate"]);
 // `settle --from-report` takes the lock itself, once its checks have run —
 // see runSettleFromReport().
 const FROM_REPORT = cmd === "settle" && rest.includes("--from-report");
@@ -836,13 +836,23 @@ if (cmd === "read") {
     console.error(`    already draining: ${data.drain}`);
   }
   console.log(JSON.stringify({ drain: data.drain, created }));
+} else if (cmd === "undrain") {
+  // Clears the standing marker a drain wrote. Refused when none is set: an
+  // undrain with nothing to clear is reported, not answered as success.
+  const reason = rest.join(" ").trim();
+  if (!reason) die('usage: ledger.mjs undrain "<reason>"');
+  if (data.drain === null) die("no drain marker is set — nothing to undrain");
+  const undrained = data.drain;
+  data.drain = null;
+  save(data);
+  console.log(JSON.stringify({ undrained, reason }));
 } else if (cmd === "rotate") {
   // It moves the file, so a stray word — an imagined `--dry-run` — is
   // refused rather than read as permission to move it.
   if (rest.length) die("usage: ledger.mjs rotate");
   runRotate();
 } else {
-  die(`unknown subcommand '${cmd}' — expected row, token, filed, ruled, check, read, dispatch, settle, review, drain or rotate`);
+  die(`unknown subcommand '${cmd}' — expected row, token, filed, ruled, check, read, dispatch, settle, review, drain, undrain or rotate`);
 }
 
 // Reached only by an arm that did not die, so every write subcommand that did
