@@ -3,6 +3,7 @@
 //
 //   fleet-event.mjs <kind> <args> [--in-flight <n>]
 //   fleet-event.mjs drain --reason "<reason>" [--in-flight <n>]
+//   fleet-event.mjs undrain --reason "<reason>" [--in-flight <n>]
 //
 // Reached through the Resolver and run from the main checkout. Every kind
 // performs its writes, then runs `fleet-tick.mjs --apply` with the In-flight
@@ -129,6 +130,10 @@
 //       `NEED hand-release #<N> <blocker>` line) is this script's exit 4; its
 //       exit 2 or 3 is passed through. The rest of the end of a run,
 //       `closeout.mjs finish` last, is the controller's.
+//   undrain --reason "<reason>"
+//       `closeout.mjs reopen --reason "<reason>"`, its output printed as it
+//       stands, then the tick. Refused (its exit 2 passed through) once any
+//       `finish` step is ok, and when no drain marker is set.
 //
 // A write this script cannot make, and does not refuse, is printed as a
 // `NEED <what> …` line, at the left margin, for the controller to make by
@@ -136,7 +141,7 @@
 //
 // Exit: 0 every write made and the tick exited 0. 2 a usage error, refused
 // before anything is written or ticked: an unknown kind or flag, a `--reason`
-// that is empty or beside any kind but `drain`, a member of
+// that is empty or beside any kind but `drain` and `undrain`, a member of
 // the wrong family, a review path outside the PR's partition or a file that
 // is no review result, a ledger or phase-0 receipt that cannot be read. A
 // ledger write's own refusal — `settle`'s 3 (the report's claim and the world
@@ -181,6 +186,7 @@ const KINDS = {
   conflict: { args: ["<pr>"], pr: true },
   heartbeat: { args: [] },
   drain: { args: [], flag: "--reason \"<reason>\"" },
+  undrain: { args: [], flag: "--reason \"<reason>\"" },
 };
 const FLAGS = { "in-flight": "value", reason: "value" };
 const USAGE = `usage: ${NAME}.mjs <kind> <args> [--in-flight <n>] — kinds: `
@@ -710,6 +716,16 @@ function drain(ev, reason) {
   }
 }
 
+function undrain(ev, reason) {
+  const r = node("closeout.mjs", ["reopen", "--reason", reason]);
+  ev.print(r.stdout);
+  if (r.status === 0) {
+    ev.note("undrain reopened");
+  } else {
+    ev.refuse("closeout reopen", r);
+  }
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 
 function boundArg(F, name) {
@@ -742,10 +758,10 @@ function main() {
   if (args.length !== spec.args.length) die(`${kind} takes ${spec.args.join(" ") || "no arguments"} — ${USAGE}`);
   const inFlight = boundArg(F, "in-flight");
   const reason = F.arg("reason");
-  if (kind === "drain") {
-    if (reason === null) die("drain takes --reason \"<reason>\"");
+  if (kind === "drain" || kind === "undrain") {
+    if (reason === null) die(`${kind} takes --reason "<reason>"`);
   } else if (reason !== null) {
-    die(`--reason belongs to drain, not ${kind}`);
+    die(`--reason belongs to drain and undrain, not ${kind}`);
   }
   let pr = null;
   if (spec.family !== undefined) {
@@ -782,6 +798,7 @@ function main() {
   else if (kind === "ci") ci(ev, pr);
   else if (kind === "conflict") conflict(ev, pr);
   else if (kind === "drain") drain(ev, reason);
+  else if (kind === "undrain") undrain(ev, reason);
 
   writeAll(1, `${[...ev.lines, `event: ${kind}: ${ev.summary.join("; ") || "nothing to record"}`].join("\n")}\n`);
   const tick = spawnSync(process.execPath, [join(SCRIPTS, "fleet-tick.mjs"), ...tickArgs], { stdio: ["ignore", "inherit", "inherit"], env: gitEnv() });
