@@ -482,6 +482,132 @@ test("a ticket whose Pull already left is skipped by `next` and started over by 
   assert.equal(JSON.parse(readFileSync(join(f.scratch(), "impl-12", "pull.previous.json"), "utf8")).status, "left", "the ended Pull is kept beside it");
 });
 
+// ── `next --head` and a standing exclusion ───────────────────────────────────
+
+test("`next --head` for a ticket whose exclusion premise still holds leaves it: exit 1, the record saved, nothing claimed or read", () => {
+  const f = fixture({ shortlist: [50] });
+  f.ledgerRow(50, "excluded · behind-issue:#9");
+  f.ghRules([{ match: "^issue view 9 --json state$", out: '{"state":"OPEN"}' }]);
+  const r = f.next("--head", "50");
+  assert.equal(r.status, 1, r.stdout + r.err);
+  assert.equal(r.stdout, "LEFT #50: excluded · behind-issue:#9 OPEN — next entry\n");
+  const st = f.state(50);
+  assert.equal(st.status, "left");
+  assert.equal(st.session, f.session);
+  assert.equal(st.outcome.reason, "excluded · behind-issue:#9 OPEN");
+  assert.deepEqual(f.calls("inflight"), []);
+  assert.deepEqual(f.calls("claim-ticket"), []);
+  assert.deepEqual(ghCalls(f, /^issue view 50 /), []);
+  assert.deepEqual(ghCalls(f, /^issue comment|^issue edit/), []);
+  assert.deepEqual(f.ledgerRows().filter((x) => x.startsWith("#50 ")), ["#50 excluded · behind-issue:#9"], "the row is untouched");
+
+  // The saved record is what hands the slot on: plain `next` does not take the ticket again, and `--head` asks again.
+  assert.match(f.next().stdout, /^EMPTY:/m);
+  f.ghRules([{ match: "^issue view 9 --json state$", out: '{"state":"MERGED"}' }]);
+  const lifted = f.next("--head", "50");
+  assert.match(lifted.stdout, /^PULL #50: started/m, "the premise is lifted: the Pull starts as today");
+  assert.equal(JSON.parse(readFileSync(join(f.scratch(), "impl-50", "pull.previous.json"), "utf8")).status, "left", "the ended Pull is kept beside it");
+});
+
+test("`next --head` for a branch-named behind-pr premise: OPEN leaves, an unanswered `gh pr view` is exit 2 with no record", () => {
+  const f = fixture({ shortlist: [50] });
+  f.ledgerRow(50, "excluded · behind-pr:#implementer/2151-impl-2151");
+  f.ghRules([{ match: "^pr view implementer/2151-impl-2151 --json state$", out: '{"state":"OPEN"}' }]);
+  const open = f.next("--head", "50");
+  assert.equal(open.status, 1, open.stdout + open.err);
+  assert.equal(open.stdout, "LEFT #50: excluded · behind-pr:#implementer/2151-impl-2151 OPEN — next entry\n");
+  assert.equal(f.state(50).status, "left");
+
+  const g = fixture({ shortlist: [50] });
+  g.ledgerRow(50, "excluded · behind-pr:#implementer/2151-impl-2151");
+  g.ghRules([{ match: "^pr view implementer/2151-impl-2151 ", exit: 1, err: "no pull requests found for branch" }]);
+  const none = g.next("--head", "50");
+  assert.equal(none.status, 2, none.stdout + none.err);
+  assert.match(none.err, /#50: the premise of its exclusion could not be read, so the exclusion stands: gh pr view implementer\/2151-impl-2151 \(exit 1: no pull requests found for branch\)/);
+  assert.equal(existsSync(g.statePath(50)), false, "no record: the next tick asks again");
+  assert.deepEqual(g.calls("claim-ticket"), []);
+  assert.deepEqual(g.calls("inflight"), []);
+});
+
+test("`next --head` over an ended record whose premise cannot be read leaves that record where it is", () => {
+  const f = fixture({ shortlist: [50] });
+  f.control("inflight", { exit: 1 });
+  assert.equal(f.next("--head", "50").status, 1, "taken");
+  f.ledgerRow(50, "excluded · behind-issue:#9");
+  f.ghRules([{ match: "^issue view 9 ", exit: 1, err: "gh: no network" }]);
+  assert.equal(f.next("--head", "50").status, 2);
+  assert.equal(existsSync(join(f.scratch(), "impl-50", "pull.previous.json")), false);
+  assert.equal(f.state(50).outcome.reason, "taken");
+});
+
+test("`next --head` for an excluded row naming no premise leaves it with the row's own text as the reason", () => {
+  const f = fixture({ shortlist: [50] });
+  f.ledgerRow(50, "excluded · needs a human ruling");
+  const r = f.next("--head", "50");
+  assert.equal(r.status, 1, r.stdout + r.err);
+  assert.equal(r.stdout, "LEFT #50: excluded · needs a human ruling — next entry\n");
+  assert.equal(f.state(50).status, "left");
+  assert.deepEqual(ghCalls(f, /--json state$/), [], "no premise to probe");
+  assert.deepEqual(f.calls("inflight"), []);
+});
+
+test("`next --head` for a premise whose `gh` answer holds no state is exit 2 with no record", () => {
+  for (const out of ["{}", '{"state":null}', '{"state":7}', '{"state":""}']) {
+    const f = fixture({ shortlist: [50] });
+    f.ledgerRow(50, "excluded · behind-issue:#9");
+    f.ghRules([{ match: "^issue view 9 --json state$", out }]);
+    const r = f.next("--head", "50");
+    assert.equal(r.status, 2, `${out}: ${r.stdout}${r.err}`);
+    assert.match(r.err, /#50: the premise of its exclusion could not be read, so the exclusion stands: gh issue view 9 \(printed no JSON state\)/, out);
+    assert.equal(existsSync(f.statePath(50)), false, out);
+  }
+});
+
+test("`next --head` for a ticket whose exclusion premise is lifted or whose row is no exclusion starts the Pull", () => {
+  for (const state of ["CLOSED", "MERGED"]) {
+    const f = fixture({ shortlist: [50] });
+    f.ledgerRow(50, "excluded · behind-issue:#9");
+    f.ghRules([{ match: "^issue view 9 --json state$", out: JSON.stringify({ state }) }]);
+    const r = f.next("--head", "50");
+    assert.match(r.stdout, /^PULL #50: started/m, state);
+    assert.deepEqual(f.calls("inflight")[0].args, ["50"]);
+  }
+  const g = fixture({ shortlist: [50] });
+  const none = g.next("--head", "50");
+  assert.match(none.stdout, /^PULL #50: started/m, "no row");
+  assert.deepEqual(ghCalls(g, /--json state$/), [], "no premise to probe");
+
+  // Plain `next` checked the head it picked on the way there, so it probes that premise once, not twice.
+  const h = fixture({ shortlist: [50] });
+  h.ledgerRow(50, "excluded · behind-issue:#9");
+  h.ghRules([{ match: "^issue view 9 --json state$", out: '{"state":"CLOSED"}' }]);
+  assert.match(h.next().stdout, /^PULL #50: started/m);
+  assert.equal(ghCalls(h, /--json state$/).length, 1);
+});
+
+test("`next --head` for a Pull in progress or dispatched reads no ledger and probes no premise", () => {
+  const f = fixture({ shortlist: [12] });
+  assert.equal(f.next("--head", "12").status, 10);
+  f.ledgerRow(12, "excluded · behind-issue:#9");
+  f.ghRules([{ match: "^issue view 9 --json state$", out: '{"state":"OPEN"}' }]);
+  const resumed = f.next("--head", "12");
+  assert.equal(resumed.status, 10, resumed.stdout + resumed.err);
+  assert.match(resumed.stdout, /^PULL #12: resumed at question staleness/m);
+  assert.deepEqual(ghCalls(f, /--json state$/), []);
+
+  const g = fixture({ shortlist: [12] });
+  assert.equal(g.next("--head", "12").status, 10);
+  assert.equal(g.answer(12, "staleness", "done").status, 10);
+  assert.equal(g.answer(12, "decided", "decided").status, 10);
+  assert.equal(g.answer(12, "collision", "clear").status, 0);
+  g.ledgerRow(12, "excluded · behind-issue:#9");
+  g.ghRules([{ match: "^issue view 9 --json state$", out: '{"state":"OPEN"}' }]);
+  const again = g.next("--head", "12");
+  assert.equal(again.status, 0, again.stdout + again.err);
+  assert.match(again.stdout, /^DISPATCH /m);
+  assert.deepEqual(ghCalls(g, /--json state$/), []);
+});
+
 // A new run is a new phase-0 receipt naming a new session, and a new ledger;
 // the scratch root, and the Pull records in it, persist.
 function newRun(f) {

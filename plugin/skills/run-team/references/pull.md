@@ -276,7 +276,18 @@ sequences after. No new ledger section. `shortlist.mjs` probes every premise at
 each refresh — MERGED or CLOSED lifts a `behind-pr`, CLOSED lifts a
 `behind-issue` — and a lifted ticket re-enters the shortlist in its own
 oldest-first slot; its row is rewritten to `impl-<N> …` when it is pulled,
-because `row` replaces the whole line.
+because `row` replaces the whole line. `pull.mjs next --head <N>` reads the
+ticket's row too when it would start a Pull (no record, or an ended one, or one
+from another session; a Pull in progress or dispatched is resumed or reprinted
+without a read): a premise still standing — one `gh` cannot be asked about
+stands — ends the Pull at once, exit 1 `LEFT #<N>: excluded · behind-issue:#M
+OPEN`, and so does an `excluded` row naming no premise, its reason the row's
+own text; either way the record is saved and nothing claimed or commented. A
+premise `gh` could not read, or whose answer holds no state, is exit 2 naming
+it, the exclusion standing and nothing recorded, so the same command asks again
+once `gh` answers. A branch-named `behind-pr` whose PR does not exist yet is
+read that way: `gh pr view` finds no PR for the branch, so it is exit 2, not a
+`LEFT`.
 
 ## Claiming
 
