@@ -66,11 +66,11 @@ claim, never your patch.
 Bring `<branch>` current with `origin/main`, resolving every conflict by the
 **No-undo audit** in `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md`.
 Run `<testCmd>` from the worktree before you push, then push with
-`git push origin HEAD:<branch>`. Report the new head, or that no conflict was
+`~/.fleet/bin/fleet-run push-sync.mjs --branch <branch>`. Report the new head, or that no conflict was
 left.
 ## kind: red-check
 Read the failing job's log and fix the cause. Run `<testCmd>` from the
-worktree before you push, then push with `git push origin HEAD:<branch>`.
+worktree before you push, then push with `~/.fleet/bin/fleet-run push-sync.mjs --branch <branch>`.
 Report the new head and **stop**: do not watch, poll or wait for CI — the
 controller owns the next run on the pushed head. A red that is not yours to
 fix — a flake that passes on rerun, or staleness — gets nothing pushed: report

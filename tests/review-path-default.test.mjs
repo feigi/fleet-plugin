@@ -538,7 +538,10 @@ test("the fix commit is gated on a test run, in both files", () => {
 // a bare `git push` exits 128 `fatal: You are not currently on a branch`; every
 // push whose destination is `HEAD` exits 1 `not a full refname`, with `-u`,
 // without it, and forced; `git push origin HEAD:<branch>` exits 0 and on a
-// second run prints `Everything up-to-date`.
+// second run prints `Everything up-to-date`. That refspec push now runs inside
+// push-sync.mjs, which also moves the worktree holding `<branch>` to the pushed
+// SHA, so both texts name the helper; a bare refspec push left that worktree's
+// `refs/heads/<branch>` at its old tip.
 //
 // Why this is not left to the golden fixture in
 // `dispatch-block-golden-prose.test.mjs`: that fixture mirrors the prompt's
@@ -560,9 +563,10 @@ test("the fix commit pushes by refspec, in both files, to a branch the prompt bi
   for (const [label, slice] of [["review-and-fix step 3", step3], ["the fix-applier prompt", prompt()]]) {
     assert.match(
       slice,
-      Pin.phrase("git push origin HEAD:<branch>"),
-      `${label} no longer names the refspec push — a bare push exits 128 in the detached worktree this path runs from, so the member is left with no command that works`,
+      Pin.phrase("~/.fleet/bin/fleet-run push-sync.mjs --branch <branch>"),
+      `${label} no longer names the push helper — a bare push exits 128 in the detached worktree this path runs from, and a bare refspec push leaves the claim worktree's ref behind`,
     );
+    assert.doesNotMatch(slice, /`git push [^`]*HEAD:[^`]*`/, `${label} shows a bare refspec push again, which leaves the claim worktree's ref at its old tip`);
   }
   // The CAUSE, not the flag. `git push origin HEAD` fails identically with no
   // `-u` anywhere in it, so prose that blames the flag leaves the form a reader
