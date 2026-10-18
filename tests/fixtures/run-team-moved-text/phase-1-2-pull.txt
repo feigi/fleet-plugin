@@ -183,8 +183,17 @@ terminating in exactly one dispatch or an empty shortlist:
 4. **Collision scan against open PRs and live branches** — `pull.mjs` runs it
    before Q3 and prints one line per open PR or live worktree branch that shares
    a path with the brief, `no overlap` when none, and `could not look: <which>`
-   for one it could not read. Answer Q3 off those lines: an overlap →
-   `behind-pr:#M`, a branch with no PR yet by its name; a target file the brief
+   for one it could not read. A path the brief names only in its `Out of scope`
+   section is no target and is not scanned. Under each line come the shared
+   files' hunks, each by its base-side range with the Markdown headings its
+   changed lines sit under, then each brief `path:line` reference in a shared
+   file with its headings on `origin/main`. A shared file is evidence, not a
+   verdict. Answer Q3 off those lines: `behind-pr:#M`, a branch with no PR yet
+   by its name, only when a construct the brief names, or a brief `path:line`
+   reference, lands in or next to a hunk of `#M`'s diff in a shared file — next
+   to is the same Markdown section, under the nearest heading above, or, in a
+   file with no headings, within 20 lines of the hunk; with no such evidence the
+   ticket does not collide, whatever files it shares. A target file the brief
    does not spell as a path → `paths <p>…`, which scans again and asks again. A
    PR the scan could not read is still yours to judge, and `behind-pr` on it is
    taken. `pr-overlap.mjs` is **PR-vs-PR only** — it runs `gh pr diff` on both
@@ -217,7 +226,7 @@ does:
 | brief names no *what* | relabel `needs-triage`, next entry |
 | genuine fork — options named, none ruled | relabel `ready-for-human`, next entry |
 | needs human hands — external access, manual testing, judgment during the work | relabel `ready-for-human`, next entry |
-| target files collide with an open PR or a live branch | exclude `behind-pr:#M`, next entry |
+| a construct the brief names, or a brief `path:line` reference, lands in or next to a hunk of an open PR or a live branch | exclude `behind-pr:#M`, next entry |
 | `Out of scope` sequences it after an open ticket | exclude `behind-issue:#M`, next entry |
 | `claim-ticket.sh` exit 2 | taken, next entry |
 | decided, live, free, claimed | row, then dispatch (phase 2) |
