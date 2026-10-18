@@ -73,6 +73,7 @@ second run finds its writes already made and re-ticks.
 | `conflict` | `<pr>` | the `CONFLICT` row's hold write (`token <key> conflict-hold:#M`; the tick's `row` form carries the `(conflict: mergeable=CONFLICTING)` note, `token` cannot: it refuses any `conflict-hold` word that is not `conflict-hold:#<number>`) |
 | `heartbeat` | — | the tick with `--fold-unchanged` |
 | `drain` | `--reason` | `closeout.mjs begin` (spec 3) |
+| `member-died` | `<member>` | the session's markers name the outcome: a `.jsonl.tombstone` is `killed`; a `.md` is `failed` for `fix-pr` and `finisher-pr`, `killed` for `merge-bot`, and refused for `impl`; a transcript with no marker, a report on disk or a review runner refuses; no transcript is `killed` once the first-seen stamp is over five minutes old, and refused before that. Then `ledger.mjs settle <member>=<outcome>` |
 
 **D2. `ledger.mjs token <key> <token>…`.** Appends tokens to a row and
 keeps every token already there; refuses a member token (those are
@@ -126,13 +127,16 @@ rows like `CHECK-LIVENESS`, from one `readdir` of the phase-0 receipt's
 
 ADR 0028's "the tick reads no registry or transcript" is amended on its
 Status line: the tick reads the session directory's listing, nothing in it.
-The registry census stays the controller's.
+`member-died` (D1) reads that listing and the markers of the one member it
+names, never a transcript body. The registry census stays the controller's.
 
 **D5. SKILL.md.** The Record-then-tick table becomes a two-column table,
 wake → `fleet-event.mjs <kind> <args>`. The bullets under it that explain
 each wake's writes move to the script's header comment; the ones that state
 a judgement (the finisher gate's outbox test, never dispatch while a ruling
-is owed) stay.
+is owed) stay. The NO-TRANSCRIPT and finisher-failed bullets name the
+`member-died` wake, which is the one place a dead member's settle outcome
+is chosen.
 
 **D6. Tests.** A fixture ledger drives every `fleet-event.mjs` kind twice
 and asserts the second run writes nothing new; `tests/ledger.test.mjs`

@@ -203,6 +203,7 @@ Run each as `~/.fleet/bin/fleet-run fleet-event.mjs <kind> <args>`, from the mai
 | Heartbeat | `fleet-event.mjs heartbeat` |
 | Drain | `fleet-event.mjs drain --reason "<reason>"` |
 | Undrain | `fleet-event.mjs undrain --reason "<reason>"` |
+| Member confirmed dead or never dispatched | `fleet-event.mjs member-died <member>` |
 
 ### Nothing to do: arm the beat
 
@@ -280,7 +281,7 @@ depth** guard table applied in code. Act on each line as it reads:
 - `PHASE0-INCOMPLETE <step>…` — every dispatching row is held: run the `phase0.mjs` command the line names; advice lines hold nothing.
 - `CHECK-LIVENESS <member> (…)` — advice, never an action: take the census the **Member unaccounted** row of **Failure handling** gives before you touch the token.
 - `UNRECORDED <stem> (…)` — record it with `ledger.mjs dispatch`, or confirm it is a stranger's member.
-- `NO-TRANSCRIPT <member> (…)` — make the `task` call, or settle the token `killed`.
+- `NO-TRANSCRIPT <member> (…)` — make the `task` call, or run the **Member confirmed dead or never dispatched** wake.
 - `SETTLE <member> (report on disk …)` — a live token whose report is on disk: run that member's report wake from the wake table, which runs the `ledger.mjs settle <member> --from-report` the line prints plus the follow-on work its report calls for; `REPORT-MISMATCH`, `REPORT-UNREADABLE` and `REPORT-INVALID` name a report file that cannot be settled from, and the tick settles nothing itself.
 
 ## Phase 1 — Pull: judge, then claim or relabel
@@ -1296,11 +1297,7 @@ owes beyond its call:
   nothing the tick did not name.
 - **Finisher reports halted** → the per-cause rule (**Resolving a finisher
   halt**, above).
-- **A finisher failed or was killed** → `ledger.mjs settle finisher-pr-<M>=failed` for a
-  finisher that crashed or gave up, `=killed` for one that was killed; no label,
-  and the tick prints no dispatch for it. The cockpit flags the PR
-  `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand
-  (**Resolving a finisher that died**, above), then run the tick.
+- **A finisher failed or was killed** → the **Member confirmed dead or never dispatched** wake (`member-died finisher-pr-<M>`), which settles it `failed` or `killed` from its session markers; no label, and the tick prints no dispatch for it. Resolve it by hand (**Resolving a finisher that died**, above).
 - **Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>`; the causes and the issue action each takes are under **Relabel causes**.
 - **A review result lands** → see the result file written (by you or by the
   runner — **Reviewers** says which, per harness), then

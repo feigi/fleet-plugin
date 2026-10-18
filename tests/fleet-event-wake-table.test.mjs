@@ -40,7 +40,7 @@ function wakeTable() {
 }
 
 test("the usage line lists every kind, so the table is checked against the script", () => {
-  assert.deepEqual(KINDS, ["impl-report", "fix-report", "finisher-report", "merge-bot-report", "review-result", "review-failed", "ci", "label", "conflict", "heartbeat", "drain", "undrain"]);
+  assert.deepEqual(KINDS, ["impl-report", "fix-report", "finisher-report", "merge-bot-report", "review-result", "review-failed", "ci", "label", "conflict", "heartbeat", "drain", "undrain", "member-died"]);
 });
 
 test("the wake table has two columns and exactly one row per fleet-event.mjs kind", () => {
