@@ -5147,7 +5147,7 @@ function serverRebasedClaim(w, name, { commits = 1, local = 0, tipAt = null } = 
   }
   const tip = git(w, "rev-parse", `refs/heads/${name}`);
   assert.match(git(w, "cherry", "origin/main", tip), /^\+/m, "fixture: git cherry must keep this tip, or the second proof has nothing to prove");
-  return { name, wt, tip, head, before, pushed };
+  return { name, wt, tip, head, before };
 }
 
 /** One merged PR as the stub's GraphQL response carries it. */
@@ -5166,9 +5166,11 @@ const prNode = ({ number = 7, state = "MERGED", base = "main", cross = false, oi
  * variables the script sent, under the `b<N>` aliases it declared. It honours
  * the query's own `states:MERGED` (a node whose `state` differs is dropped), so
  * an open or closed PR reaches the script the way GitHub would hand it over:
- * not at all. `$GH_FAIL` prints that text to stderr and exits 1, `$GH_RAW`
- * prints it verbatim at exit 0, `$GH_SLEEP` stalls that many seconds, `$GH_EXIT` is
- * the status after a good body.
+ * not at all. A branch mapped to `null` comes back as a `null` alias, the way
+ * GitHub answers a field it errored on. `$GH_FAIL` prints that text to stderr
+ * and exits 1, `$GH_RAW` prints it verbatim at exit 0, `$GH_SLEEP` stalls that
+ * many seconds, `$GH_STDERR` is printed to stderr after a good body and
+ * `$GH_EXIT` is the status after it.
  * Every call's argv is appended to `<bin>/gh.calls`, one `CALL ` block each (the
  * script's multi-line `--jq` spans several lines of it).
  */
@@ -5195,14 +5197,15 @@ while [ $# -gt 0 ]; do
 done
 printf '%s' "$pairs" | jq -Rn --slurpfile prs "$GH_PRS" --argjson merged "$merged" '
   [inputs | capture("^(?<k>[0-9]+) (?<v>.*)$")]
-  | map({key: ("b" + .k), value: {nodes: [($prs[0][.v] // [])[] | select(($merged | not) or .state == "MERGED")]}})
+  | map(.v as $v | {key: ("b" + .k), value: (if ($prs[0] | has($v)) and $prs[0][$v] == null then null
+      else {nodes: [($prs[0][$v] // [])[] | select(($merged | not) or .state == "MERGED")]} end)})
   | from_entries | {data: {repository: .}}' | jq -r "$expr"
+[ -z "\${GH_STDERR:-}" ] || printf '%s\\n' "$GH_STDERR" >&2
 exit "\${GH_EXIT:-0}"
 `,
   );
   const prsFile = join(bin, "prs.json");
   return {
-    bin,
     /** Overrides for runReap: this stub first on PATH, answering with `prs`. */
     env: (prs, extra = {}) => {
       writeFileSync(prsFile, JSON.stringify(prs));
@@ -5276,7 +5279,7 @@ test("a tip that is an ancestor of a recorded head NOT present locally is kept",
   const { json, stderr } = runReap(w, ["--apply"], env);
 
   assert.deepEqual(json.reaped, []);
-  assert.match(json.kept[0].reason, /^unmerged commits — /);
+  assert.match(json.kept[0].reason, /^unmerged commits — .*not a head the PR recorded/);
   assert.equal(branchExists(w, c.name), true, stderr);
   assert.equal(worktreeStands(w, c.name), true);
 });
@@ -5311,6 +5314,8 @@ const REFUSALS = [
   ["a headRefOid this clone does not have", (c) => [prNode({ oid: "2".repeat(40), before: [c.before] })], /not a commit present locally/],
   ["a timeline with another page of force-pushes", (c) => [prNode({ oid: c.head, before: [c.before], hasNext: true })], /more force-pushes than one page/],
   ["a tip tied to no recorded head", (c) => [prNode({ oid: c.head, before: [git(c.w, "rev-parse", "main~1")] })], /not a head the PR recorded/],
+  ["a headRefOid that names a ref, not a commit id", () => [prNode({ oid: "main", before: [] })], /not a commit id: 'main'/],
+  ["a recorded head that names a ref holding the tip, not a commit id", (c) => [prNode({ oid: c.head, before: [c.name] })], /not a head the PR recorded/],
 ];
 for (const [label, nodes, reason] of REFUSALS) {
   test(`kept with a reason, branch and worktree intact: ${label}`, (t) => {
@@ -5332,6 +5337,20 @@ for (const [label, nodes, reason] of REFUSALS) {
     assert.equal(worktreeStands(w, c.name), true);
   });
 }
+
+test("an answer whose rows are all for other branches keeps the branch: no entry for it", (t) => {
+  const { w, gh } = githubRepo(t);
+  const c = serverRebasedClaim(w, "fix/3438-noentry");
+  const us = "\x1f";
+  const env = gh.env({}, { GH_RAW: ["b7", "0", "", "", "", "", "", "", "."].join(us) });
+
+  const { code, json, stderr } = runReap(w, ["--apply"], env);
+
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, []);
+  assert.match(json.kept[0].reason, /^unmerged commits — .*no entry for fix\/3438-noentry/);
+  assert.equal(branchExists(w, c.name), true);
+});
 
 // The environment half: nothing the PR says can be read at all. One reason per
 // cause, on every branch the batch covered, and the run carries on.
@@ -5405,6 +5424,25 @@ test("a non-zero gh exit that still carries a complete body is read, not discard
 
   assert.equal(code, 0, stderr);
   assert.deepEqual(json.reaped, [c.name]);
+});
+
+test("an alias that errored inside a complete body keeps with gh's exit status and stderr in its reason", (t) => {
+  // The same partial answer, but the errored field is this branch's own: its
+  // alias comes back null, and only gh's stderr says why.
+  const { w, gh } = githubRepo(t);
+  const c = serverRebasedClaim(w, "fix/3438-errored");
+  const env = gh.env({ [c.name]: null }, { GH_EXIT: "1", GH_STDERR: "gh: Resource protected by organization SAML enforcement" });
+
+  const { code, json, stderr } = runReap(w, ["--apply"], env);
+
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, []);
+  assert.equal(json.kept.length, 1, JSON.stringify(json.kept));
+  assert.match(
+    json.kept[0].reason,
+    /^unmerged commits — .*GitHub returned no usable PR list for fix\/3438-errored \(gh exited 1: gh: Resource protected by organization SAML enforcement\)$/,
+  );
+  assert.equal(branchExists(w, c.name), true);
 });
 
 test("one branch tied and one not, in the same batch: the first is reaped, the second kept", (t) => {
@@ -5491,9 +5529,9 @@ test("a gh that stalls is killed at its budget, and every affected branch is kep
 });
 
 for (const [label, url, host, owner, repoName] of [
-  ["an scp-style github.com origin", "git@github.com:acme/widgets.git", null, "acme", "widgets"],
+  ["an scp-style github.com origin", "git@github.com:acme/widgets.git", "github.com", "acme", "widgets"],
   ["an enterprise host with a port", "ssh://git@ghe.example.com:2222/acme/widgets.git", "ghe.example.com", "acme", "widgets"],
-  ["an https origin with a trailing slash and no .git", "https://github.com/acme/widgets/", null, "acme", "widgets"],
+  ["an https origin with a trailing slash and no .git", "https://github.com/acme/widgets/", "github.com", "acme", "widgets"],
 ]) {
   test(`the query names the repository ${label} points at`, (t) => {
     const w = repo(t);
@@ -5508,8 +5546,7 @@ for (const [label, url, host, owner, repoName] of [
     assert.deepEqual(json.reaped, [c.name]);
     const call = gh.calls()[0];
     assert.match(call, new RegExp(`-f owner=${owner} -f name=${repoName} `));
-    if (host) assert.match(call, new RegExp(`--hostname ${host} `));
-    else assert.doesNotMatch(call, /--hostname/);
+    assert.match(call, new RegExp(`--hostname ${host} `), "the host is origin's, never gh's own default or GH_HOST");
   });
 }
 
