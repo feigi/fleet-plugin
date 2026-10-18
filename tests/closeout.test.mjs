@@ -951,6 +951,23 @@ test("reopen: a second begin drains again and releases the claim a re-dispatched
   assert.equal(f.order().filter((l) => l.startsWith("release-ticket")).length, 2);
 });
 
+test("reopen: an undrain that fails leaves begin's steps pending under the standing marker, so the next begin drains again", () => {
+  const f = fixture();
+  assert.equal(f.run("begin", ["--reason", "wrap up"]).status, 0);
+  f.control("ledger-fail", { undrain: "ledger: boom\n" });
+  const r = f.run("reopen", ["--reason", "mistake"]);
+  assert.equal(r.status, 2, r.err + r.stdout);
+  assert.match(r.err, /ledger\.mjs undrain failed: .*boom/);
+  assert.doesNotMatch(r.stdout, /reopen: ok/);
+  assert.equal(f.ledgerRead().drain, "wrap up");
+  assert.deepEqual(statusOf(f.receipt(), BEGIN_STEPS), { drain: "pending", release: "pending" });
+  assert.equal(f.receipt().begun, null);
+  f.control("ledger-fail", {});
+  const again = f.run("begin", ["--reason", "wrap up"]);
+  assert.equal(again.status, 0, again.err + again.stdout);
+  assert.match(f.receipt().steps.drain.output, /"created":false/, "begin ran ledger.mjs drain again, which answered with the standing marker");
+});
+
 test("reopen: with no marker set, refuses with exit 2 and writes no receipt", () => {
   const f = fixture();
   const r = f.run("reopen", ["--reason", "mistake"]);

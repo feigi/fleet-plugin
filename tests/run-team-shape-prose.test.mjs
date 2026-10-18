@@ -506,6 +506,10 @@ const CHANGED = [
   [
     "| Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands or leaves a fork open; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |",
     "| Implementer bails before implementing | Act by the report's `bailCause` as the **Relabel causes** table says, then refill (phase 3) |"
+  ],
+  [
+    "**`ledger.mjs drain \"<reason>\"`** — the one drain marker per run; supply stops, the review and merge sides keep going.",
+    "**`ledger.mjs drain \"<reason>\"`** — at most one standing drain marker; supply stops, the review and merge sides keep going."
   ]
 ];
 

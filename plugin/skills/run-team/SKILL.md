@@ -1347,9 +1347,8 @@ owes beyond its call:
      you rule (**Guard: accumulate per PR**) and run `finish` again. A step it
      fails is explained in references/close-out.md. Exit 0 is the run closed.
   Drain only when a documented trigger fired, and name the trigger in `--reason`.
-  **Undrain** only when the maintainer asks: `fleet-event.mjs undrain --reason "<reason>"`
-  runs `closeout.mjs reopen` and clears the marker. It refuses once any `finish`
-  step is ok. Never undo a drain that budget or context exhaustion caused.
+  **Undrain** only when the maintainer asks, never a drain that budget or
+  context exhaustion caused (references/close-out.md).
 - **The finisher-gate wakes** — a CI run reaching a terminal state, a fix-applier reporting `no-op`, a `no-ci` verdict → each is a bullet of **The finisher gate**.
 
 ### Tick notes

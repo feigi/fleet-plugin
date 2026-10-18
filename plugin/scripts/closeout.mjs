@@ -60,9 +60,9 @@
 //
 // `reopen` undoes `begin` for a run that must drain again: refused (exit 2)
 // once any `finish` step is ok, since the tick and what follows it have already
-// acted. Otherwise `ledger.mjs undrain "<reason>"` clears the marker, and
-// `begin`'s `drain` and `release` steps go back to pending, so the next `begin`
-// runs them again. A claim `begin` released stays released.
+// acted. Otherwise `begin`'s `drain` and `release` steps go back to pending, so
+// the next `begin` runs them again, and then `ledger.mjs undrain "<reason>"`
+// clears the marker. A claim `begin` released stays released.
 //
 // THE RECEIPT is `.fleet/closeout.json` (resolved through fleet-dir.mjs, so a
 // worktree and the main checkout name one file), shared by both commands:
@@ -420,12 +420,20 @@ function runSteps(steps, ctx, receipt, receiptPath) {
 
 // Undoes `begin`'s drain. A finish step already ok means the tick and what
 // follows it have acted, so the reopen is refused; a failed tick is not ok and
-// blocks nothing. A ledger with no marker refuses too: there is nothing to undo.
+// blocks nothing. Otherwise the receipt goes back first and the marker second,
+// so a run stopped between the two is left with `drain` pending and a marker
+// standing, which the next `begin` re-drains ("already draining") or the next
+// `reopen` clears. A ledger with no marker refuses, the receipt already back.
 function reopen({ cwd, reason, receipt, receiptPath }) {
   const done = Object.keys(FINISH).filter((n) => receipt.steps[n].status === "ok");
   if (done.length > 0) {
     process.stderr.write(`${NAME}: reopen refused: finish step ${done.join(", ")} is already ok\n`);
     return 2;
+  }
+  if (existsSync(receiptPath)) {
+    for (const n of Object.keys(BEGIN)) receipt.steps[n] = blank();
+    receipt.begun = null;
+    writeReceipt(receiptPath, receipt);
   }
   const undrain = node("ledger.mjs", ["undrain", reason], { cwd });
   if (undrain.status !== 0) {
@@ -434,11 +442,6 @@ function reopen({ cwd, reason, receipt, receiptPath }) {
   }
   say(`${NAME}: reopen: ok`);
   for (const line of undrain.stdout.split("\n").filter(Boolean)) say(`  ${line}`);
-  if (existsSync(receiptPath)) {
-    for (const n of Object.keys(BEGIN)) receipt.steps[n] = blank();
-    receipt.begun = null;
-    writeReceipt(receiptPath, receipt);
-  }
   return 0;
 }
 
