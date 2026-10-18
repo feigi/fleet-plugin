@@ -124,12 +124,20 @@ function cause(...candidates) {
 // ledger and only warns (a fallback that predates this budget, not
 // something the budget introduces). It also stays under the `gh` bound beside it —
 // though "dominant" overstates that relationship: a normal invocation
-// without `--file` pays this same budget TWICE in sequence, once here and
-// once more in repoCheck() below, before ever reaching `gh` at all. At
-// default settings that TIES `gh`'s own 20 s bound when both probes stall,
-// and can EXCEED it — up to GIT_TIMEOUT_MS + 20 s — when only one stalls and
-// `gh` still runs (measured). `check`'s worst case is the sum of whichever
-// of the three children actually stall, not a single fixed term.
+// without `--file` can pay this same budget TWICE in sequence, once here and
+// once more in repoCheck() below, before ever reaching `gh` at all — and
+// THREE times in layouts whose common git dir is not named `.git` (the
+// `.bare` layout, a bare repository, a submodule, a `--separate-git-dir`
+// clone), where fleetFile() runs a second probe with its own full budget:
+// fleetFile()'s bound is per git child, not per call. At default settings
+// two stalled probes TIE `gh`'s own 20 s bound and three exceed it, and even
+// one stall can EXCEED it — up to GIT_TIMEOUT_MS + 20 s — when `gh` still
+// runs (measured). `check`'s worst case is the sum of whichever of its
+// children actually stall, not a single fixed term. That is three children
+// normally; in those layouts it is three git children, and `gh` is a fourth
+// only where the ledger's repository still has a work tree (a submodule) —
+// in the `.bare`, bare and `--separate-git-dir` layouts repoCheck() fails
+// and `gh` never runs (measured).
 //
 // `LEDGER_GIT_TIMEOUT` is this script's OWN override, in seconds, and it can
 // only ever SHORTEN. The rule and the reasons for it are net_budget's, in

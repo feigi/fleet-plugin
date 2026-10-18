@@ -159,6 +159,11 @@ function parentGitDirNames(parent, gitDir, cwd, timeoutMs) {
  * A path that does not resolve is not a failure: the caller gets back the
  * uncanonicalised path.
  *
+ * `timeoutMs` (default DEFAULT_GIT_TIMEOUT_MS) bounds this function's own
+ * step-2 probe only, the one spawn it makes. The caller's `--git-common-dir`
+ * probe that produced `gitCommonDir` is the caller's to bound, so a caller
+ * passing the same `timeoutMs` to both can wait close to twice that in all.
+ *
  * Throws WorkspaceProbeFailed only when the step-2 probe could not run to an
  * answer.
  */
