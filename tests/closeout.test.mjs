@@ -968,6 +968,20 @@ test("reopen: an undrain that fails leaves begin's steps pending under the stand
   assert.match(f.receipt().steps.drain.output, /"created":false/, "begin ran ledger.mjs drain again, which answered with the standing marker");
 });
 
+test("reopen: a receipt whose drain is ok over a ledger with no marker still goes back before the refusal, so the next begin drains", () => {
+  const f = fixture();
+  assert.equal(f.run("begin", ["--reason", "wrap up"]).status, 0);
+  const byHand = spawnSync(process.execPath, [join(SCRIPTS, "ledger.mjs"), "undrain", "by hand"], { cwd: f.repo, encoding: "utf8", env: { ...GIT_ENV, CLOSEOUT_STUBS: f.stubs } });
+  assert.equal(byHand.status, 0, byHand.stderr);
+  const r = f.run("reopen", ["--reason", "mistake"]);
+  assert.equal(r.status, 2, r.err + r.stdout);
+  assert.match(r.err, /nothing to undrain/);
+  assert.deepEqual(statusOf(f.receipt(), BEGIN_STEPS), { drain: "pending", release: "pending" });
+  assert.equal(f.receipt().begun, null);
+  assert.equal(f.run("begin", ["--reason", "wrap up"]).status, 0);
+  assert.equal(f.ledgerRead().drain, "wrap up");
+});
+
 test("reopen: with no marker set, refuses with exit 2 and writes no receipt", () => {
   const f = fixture();
   const r = f.run("reopen", ["--reason", "mistake"]);

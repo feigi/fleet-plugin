@@ -1051,12 +1051,14 @@ test("drain prints a claim closeout could not release as its NEED line, exits 4,
   assert.equal(r.out.at(-1), "TICK ROWS");
 });
 
-test("undrain runs closeout.mjs reopen with the reason, which clears the marker, then ticks", () => {
+test("undrain runs closeout.mjs reopen with the reason, prints its output, which clears the marker, then ticks", () => {
   const f = fixture({ rows: ["#412 impl-412"] });
   assert.equal(f.run(["drain", "--reason", "end of the night"]).status, 0);
   const r = f.run(["undrain", "--reason", "drained by mistake"]);
   assert.equal(r.status, 0, r.err + r.stdout);
   assert.equal(r.order.at(-1), TICK);
+  assert.match(r.stdout, /^closeout: reopen: ok$/m);
+  assert.match(r.stdout, /^ {2}\{"undrained":"end of the night","reason":"drained by mistake"\}$/m, "the reason reached ledger.mjs undrain through reopen");
   assert.match(eventLine(r), /^event: undrain: undrain reopened$/);
   assert.doesNotMatch(f.ledger(), /end of the night/);
 });

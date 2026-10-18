@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// The end of a run as two commands, each a list of named steps with a receipt.
+// The end of a run as two step-running commands, `begin` and `finish`, each a
+// list of named steps with a receipt, plus `reopen`, which undoes `begin`.
 //
 //   closeout.mjs begin  --reason "<r>"
 //   closeout.mjs finish --reason "<r>" [--branch <name>]
@@ -65,7 +66,7 @@
 // clears the marker. A claim `begin` released stays released.
 //
 // THE RECEIPT is `.fleet/closeout.json` (resolved through fleet-dir.mjs, so a
-// worktree and the main checkout name one file), shared by both commands:
+// worktree and the main checkout name one file), shared by all three commands:
 //
 //   { reason, begun, branch, pr, steps: { <name>: { status, at, output } } }
 //
@@ -79,9 +80,11 @@
 //
 // One `closeout: <step>: <status>` line per step on stdout, its output under
 // it, indented, with the `NEED` lines at the left margin. Exit 0 every step
-// ok; 2 a usage error or a refused `reopen`; 3 a step failed, or the receipt could not be read or
-// written; 4 a `NEED` is pending: dispatch what the line names, then run the
-// same command again.
+// ok; 2 a usage error or a refused `reopen`, `ledger.mjs undrain`'s own exit 2
+// included, which it also gives for a ledger it could not lock or write; 3 a
+// step failed, `reopen`'s `ledger.mjs undrain` failed any other way, or the
+// receipt could not be read or written; 4 a `NEED` is pending: dispatch what
+// the line names, then run the same command again.
 //
 // Zero deps: node builtins and sibling scripts only.
 
@@ -424,7 +427,7 @@ function runSteps(steps, ctx, receipt, receiptPath) {
 // so a run stopped between the two is left with `drain` pending and a marker
 // standing, which the next `begin` re-drains ("already draining") or the next
 // `reopen` clears. A ledger with no marker refuses, the receipt already back.
-function reopen({ cwd, reason, receipt, receiptPath }) {
+function reopen({ cwd, reason }, receipt, receiptPath) {
   const done = Object.keys(FINISH).filter((n) => receipt.steps[n].status === "ok");
   if (done.length > 0) {
     process.stderr.write(`${NAME}: reopen refused: finish step ${done.join(", ")} is already ok\n`);
@@ -469,11 +472,8 @@ function main() {
   receipt.reason = reason;
   const ctx = { cwd: process.cwd(), fleetDir, reason, branch };
   if (cmd === "reopen") {
-    process.exitCode = reopen({ cwd: ctx.cwd, reason, receipt, receiptPath });
-    return;
-  }
-
-  if (cmd === "begin") {
+    process.exitCode = reopen(ctx, receipt, receiptPath);
+  } else if (cmd === "begin") {
     const code = runSteps(BEGIN, ctx, receipt, receiptPath);
     if (receipt.steps.drain.status === "ok" && receipt.steps.release.status !== "failed") {
       receipt.begun = new Date().toISOString();

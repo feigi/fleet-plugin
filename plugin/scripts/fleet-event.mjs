@@ -132,8 +132,8 @@
 //       `closeout.mjs finish` last, is the controller's.
 //   undrain --reason "<reason>"
 //       `closeout.mjs reopen --reason "<reason>"`, its output printed as it
-//       stands, then the tick. Refused (its exit 2 passed through) once any
-//       `finish` step is ok, and when no drain marker is set.
+//       stands, then the tick. Refused once any `finish` step is ok, and when
+//       no drain marker is set; its exit 2 or 3 is passed through.
 //
 // A write this script cannot make, and does not refuse, is printed as a
 // `NEED <what> …` line, at the left margin, for the controller to make by
@@ -146,8 +146,9 @@
 // is no review result, a ledger or phase-0 receipt that cannot be read. A
 // ledger write's own refusal — `settle`'s 3 (the report's claim and the world
 // disagree) or 2, `token`'s or `review`'s 2 — passes its exit and message
-// through, as does `closeout.mjs begin`'s 2 or 3 and the refusal of a second
-// conflict hold (2), and the tick still runs so the controller sees the rows.
+// through, as do `closeout.mjs begin`'s and `reopen`'s 2 or 3 and the
+// refusal of a second conflict hold (2), and the tick still runs so the
+// controller sees the rows.
 // Else the tick's own exit when it is not 0. Else 4 when a NEED line was
 // printed, `begin`'s own exit 4 included.
 //
