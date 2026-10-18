@@ -187,10 +187,14 @@ Requires: `plugin/scripts/member-outcomes.mjs` runnable from the repo root
 session's transcript tree present under
 `~/.omp/agent/sessions/-dev-fleet-plugin/` on the machine running it — this
 last part is not portable off this workstation. To baseline a *different*
-run, change `SESSION_NAME`/`SESSION_DIR` and the three `invocations` entries
-(read them straight off that session's own `/fleet-ctl:run-team <impl>
-<reviewers>` lines, `grep -n "fleet-ctl:run-team"` against its top-level
-`.jsonl`).
+run, change `SESSION_NAME`/`SESSION_DIR` and the `invocations` entries, one
+per run-team invocation in that session's top-level `.jsonl`. A
+`/fleet-ctl:run-team <impl> <reviewers>` user turn (`grep -n
+"fleet-ctl:run-team"`) carries its implementer cap. A `/skill:run-team`
+invocation is a `skill-prompt` record instead (`grep -n "skill:run-team"`);
+with no arguments it runs at the default in-flight bound its own skill
+prompt states. Both greps also match lines that merely quote the command,
+so keep only the invocations.
 
 ## 2026-10-16 — run-team SKILL.md in tokens, before and after the runbook diet
 
@@ -244,7 +248,9 @@ dispatched member's name embeds, as that row does.
 Derived by `docs/research/baseline-efficiency-derive.py` re-pointed per
 Reproduction above: `SESSION_NAME` the after session, one invocation
 `(2026-10-17T06:37:19.614Z, 5)`, `session_end` 2026-10-18T00:00:17.874Z.
-The cap feeds only signal 3, which this section does not report. The
+The 5 is the in-flight bound a no-argument invocation defaults to, as that
+session's skill prompt states, not the reviewer cap of the before rows'
+`2 5`. The cap feeds only signal 3, which this section does not report. The
 script needed two fixes to run on today's tree: `COLUMNS` now lists the 20
 columns `plugin/scripts/member-outcomes.mjs` writes (it parsed 0 rows
 against 15), and `gh pr list --limit 400` no longer reached #1600 (now
