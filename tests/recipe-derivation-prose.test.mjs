@@ -79,7 +79,7 @@ test("every refusal naming the Recipe derivation step names one that phase 0 car
 
 test("the deriver is told never to write the cache itself, and to prove through recipe-prove.mjs", () => {
   assert.match(DERIVER, Pin.phrase("never write `.fleet/recipe.json` yourself"));
-  assert.match(DERIVER, Pin.phrase("~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>'"));
+  assert.match(DERIVER, Pin.phrase("~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>'"));
   assert.match(DERIVER, Pin.phrase("A count of 0 is a failed proof, never a pass."));
   assert.match(DERIVER, Pin.phrase("requires the suite to go red"));
 });
@@ -111,7 +111,7 @@ test("the deriver is told the coverage rule, the widest-invocation fallback, and
   assert.match(DERIVER, Pin.phrase("so it is one invocation: an `&&` chain hands those arguments to its last command alone."));
   assert.match(DERIVER, Pin.phrase("When no single invocation covers every qualifying step, take the widest one and list every qualifying step it leaves out; that is never a reason to report `RECIPE NOT PROVEN`."));
   assert.match(DERIVER, Pin.phrase("A test step that cannot run here — it needs a service this host lacks, secrets, or another OS — is listed too, with that reason."));
-  assert.match(DERIVER, Pin.phrase("~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>' --uncovered '<uncovered>'"));
+  assert.match(DERIVER, Pin.phrase("~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --uncovered '<uncovered>'"));
   assert.doesNotMatch(DERIVER, /the whole suite, the way CI runs it/);
 });
 
@@ -119,7 +119,7 @@ test("every flag the deriver's procedure passes is one recipe-prove.mjs accepts"
   // The invocations are the indented command blocks naming recipe-prove.mjs;
   // flags elsewhere in the definition (its `git` reads) are not the proof's.
   const blocks = DERIVER.split(/\n[ \t]*\n/).filter((b) => /^ {4,}/.test(b) && b.includes("recipe-prove.mjs"));
-  assert.equal(blocks.length, 3, "expected the observe, count-proof and mutation-proof invocations — update this test");
+  assert.equal(blocks.length, 4, "expected the observe, count-proof, mutation-proof and Check-proof invocations — update this test");
   const used = new Set(blocks.join("\n").match(/--[a-z][a-z-]+/g));
   const accepted = new Set(PROVER.match(/new Set\(\[([^\]]*)\]\)/)[1].match(/--[a-z-]+/g));
   assert.ok(used.size >= 6, `found only ${[...used].join(", ")} in the deriver — the procedure lost its proof flags`);
@@ -131,7 +131,7 @@ test("the deriver reports one of two lines, naming vacuity and a timeout as caus
   assert.match(DERIVER, /`RECIPE NOT PROVEN` followed by the last run's `NOT PROVEN` reason/);
   assert.match(DERIVER, /\*\*vacuous\*\*/);
   assert.match(DERIVER, /\*\*timed out\*\*/);
-  assert.match(DERIVER, Pin.phrase("the Install step, the Test entrypoint or the mutation — hung until the script's own bound stopped it"));
+  assert.match(DERIVER, Pin.phrase("the Install step, the Check step, the Test entrypoint or a mutation — hung until the script's own bound stopped it"));
 });
 
 // recipe-prove.mjs bounds its own commands and refuses one that overruns; an

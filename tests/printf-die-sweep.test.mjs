@@ -305,7 +305,7 @@ test("claim-ticket: the dry-run plan names a backslashed worktree path verbatim"
   // proven one, untracked in the checkout's own `.fleet/`.
   mkdirSync(join(w, ".fleet"), { recursive: true });
   writeFileSync(join(w, ".fleet", "recipe.json"), JSON.stringify({
-    install: "true", test: "true", derivedAt: git(w, "rev-parse", "HEAD").trim(), installClean: true, testCount: 1, uncovered: [],
+    install: "true", check: true, test: "true", derivedAt: git(w, "rev-parse", "HEAD").trim(), installClean: true, testCount: 1, uncovered: [],
   }));
   const r = run(w, "claim-ticket.sh", ["7", "back\\clue", "fix"]);
   assert.equal(r.status, 0, `stderr: ${r.stderr}`);

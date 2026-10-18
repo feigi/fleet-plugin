@@ -5,6 +5,7 @@
 #3188: the review snapshot provisions dependencies by running the Recipe
 Install step, in the snapshot and in every specialist copy; the node_modules
 symlink is removed.
+Amended by #3157: the Recipe gains a Check step, derived by agent reasoning and proven by script like the Install step and Test entrypoint.
 
 ## Context
 

@@ -538,6 +538,18 @@ const CHANGED = [
   [
     "A `running` row → the mtime discriminator below, two polls: moved means BLOCKED and alive; frozen at both polls **and** no artifact movement → `write proc://<member>/kill`, `ledger.mjs settle <member> killed`, fresh name.",
     "A `running` row → the mtime discriminator below, two polls: moved means BLOCKED and alive; frozen at both polls **and** no artifact movement → `write proc://<member>/kill`, the **Member confirmed dead or never dispatched** wake, fresh name."
+  ],
+  [
+    "Its `conflict` brief carries the same worktree and branch identity paragraph, but in place of the review paragraphs: bring `<branch>` current with `origin/main`, resolving every conflict by `run-merge-bot.md`'s **No-undo audit**, run `<testCmd>`, push, report the new head.",
+    "Its `conflict` brief carries the same worktree and branch identity paragraph, but in place of the review paragraphs: bring `<branch>` current with `origin/main`, resolving every conflict by `run-merge-bot.md`'s **No-undo audit**, run `<checkCmd>`/`<testCmd>`, push, report the new head."
+  ],
+  [
+    "Its `red-check` brief carries the same worktree and branch identity paragraph, but in place of the review paragraphs: read the failing job's log, fix the cause, run `<testCmd>`, push, report the new head, and **stop**.",
+    "Its `red-check` brief carries the same worktree and branch identity paragraph, but in place of the review paragraphs: read the failing job's log, fix the cause, run `<checkCmd>`/`<testCmd>`, push, report the new head, and **stop**."
+  ],
+  [
+    "The brief carries what varies, and the renderer prints it: `~/.fleet/bin/fleet-run dispatch-prompt.mjs render fix-applier --kind <review|conflict|dispositions-retry|red-check> --member <name> --worktree <abs-path> --branch <branch> --testCmd <testCmd> --scratch <scratch>`, plus `--pr <pr#> --run <run>` for a review or a dispositions retry and `--mismatched-record <path> --violations <list>` for a retry.",
+    "The brief carries what varies, and the renderer prints it: `~/.fleet/bin/fleet-run dispatch-prompt.mjs render fix-applier --kind <review|conflict|dispositions-retry|red-check> --member <name> --worktree <abs-path> --branch <branch> --testCmd <testCmd> --checkCmd <checkCmd> --scratch <scratch>`, plus `--pr <pr#> --run <run>` for a review or a dispositions retry and `--mismatched-record <path> --violations <list>` for a retry."
   ]
 ];
 

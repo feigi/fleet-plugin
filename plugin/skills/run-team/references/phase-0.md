@@ -330,6 +330,8 @@ PROVEN`** → re-run both reads above (`derive-testcmd.sh . install` and
 `derive-testcmd.sh . test --at origin/main`); their output is the
 Recipe this run uses. **`RECIPE NOT PROVEN`** → stall, below.
 
+**Where `checkCmd` comes from:** the repository's Check step, out of the same Recipe cache — `~/.fleet/bin/fleet-run derive-testcmd.sh . check` prints it. Pass it to the fix-applier beside `testCmd`; the review does not run it.
+
 **Mid-run, a cache that stops running is re-derived once, then the run
 stalls.** A claim or a review that refuses because the Recipe cache is
 invalid — a command that no longer runs, or an Install step that changed

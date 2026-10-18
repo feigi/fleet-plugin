@@ -96,8 +96,8 @@ test("the research note marks the Node-only consumer rows superseded by the Reci
 });
 
 test("review-and-fix step 3 reads the standalone testCmd off the Recipe cache and derives when there is none", () => {
-  const step = REVIEW_AND_FIX.bullet("3. **Run `testCmd` before you commit**", "\n4. **", "review-and-fix.md step 3").text;
-  assert.match(step, Pin.phrase("the Test entrypoint in the repo's Recipe cache (`derive-testcmd.sh <repo> test` prints it)"));
+  const step = REVIEW_AND_FIX.bullet("3. **Run `checkCmd` and `testCmd` before you commit**", "\n4. **", "review-and-fix.md step 3").text;
+  assert.match(step, Pin.phrase("the repo's own Check step and Test entrypoint**, read off the repo's Recipe cache (`derive-testcmd.sh <repo> check` prints the first, `derive-testcmd.sh <repo> test` the second)"));
   assert.match(step, Pin.phrase("run the Recipe derivation step first"));
   assert.doesNotMatch(step, /node --test/, "step 3 names this repository's own test command again");
 });
@@ -113,9 +113,15 @@ test("run-team: a tree with no runner gets the Recipe's Test entrypoint only whe
 });
 
 test("run-team: testCmd comes from the Recipe cache and names no repository's own command", () => {
-  const p = RUN_TEAM.paragraph("**Where `testCmd` comes from:**", "run-team/SKILL.md testCmd source paragraph", "**Where `<branch>` comes from:** the PR's").text;
+  const p = RUN_TEAM.paragraph("**Where `testCmd` comes from:**", "run-team/SKILL.md testCmd source paragraph", "**Where `<branch>` comes from:**").text;
   assert.match(p, Pin.phrase("the repository's Test entrypoint, out of the Recipe cache phase 0's Recipe derivation step proved — `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main` prints it — and the one you hand specialists"));
   assert.doesNotMatch(p, /node --test/, "the testCmd source paragraph names this repository's own test command again");
+});
+
+test("run-team: checkCmd comes from the Recipe cache, and the review does not run it", () => {
+  const p = readPlugin("skills/run-team/references/phase-0.md").paragraph("**Where `checkCmd` comes from:**", "references/phase-0.md checkCmd source paragraph", "**Mid-run, a cache that stops running").text;
+  assert.match(p, Pin.phrase("`~/.fleet/bin/fleet-run derive-testcmd.sh . check` prints it"));
+  assert.match(p, Pin.phrase("the review does not run it"));
 });
 
 test("run-team: the quick-install red flag points at the Recipe's Install step, not at an install command", () => {

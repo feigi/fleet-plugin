@@ -20,7 +20,7 @@ and `cwdAudit` before any result of the shared test run. Every one of those
 rulings is yours — nobody upstream has made one, and the controller never
 reads the findings.
 
-**Run `TESTCMD-1` from the worktree before committing**, copied verbatim.
+**Run `CHECKCMD-1` from the worktree before committing**, copied verbatim. **Run `TESTCMD-1` from the worktree before committing**, copied verbatim.
 `tests 0` is a FAILED run, not a pass. Red or zero-test → fix it, or move that
 finding to defer; never commit over it. **Never `--no-verify`** — a failing
 hook is a finding you report, not an obstacle you route around. Report the test

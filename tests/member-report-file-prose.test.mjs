@@ -54,7 +54,7 @@ const BRIEFS = [
   ...["review", "dispositions-retry", "conflict", "red-check"].map((kind) => ({
     role: "fix-applier", kind, family: "fix-pr", name: "<your name>", outcome: "<outcome>",
     args: {
-      worktree: "/abs/wt", branch: "b", testCmd: "T", scratch: "/abs/scratch",
+      worktree: "/abs/wt", branch: "b", testCmd: "T", checkCmd: "C", scratch: "/abs/scratch",
       ...(kind === "review" || kind === "dispositions-retry" ? { pr: "3293", run: "run-AbCd1234" } : {}),
       ...(kind === "dispositions-retry" ? { "mismatched-record": "/abs/scratch/dispositions-fix-pr-3293.json", violations: "V" } : {}),
     },

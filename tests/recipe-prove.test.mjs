@@ -111,12 +111,14 @@ function withoutTests(files) {
 
 const cachePath = (dir) => join(dir, ".fleet", "recipe.json");
 
-// Every proof states what its Test entrypoint leaves out of CI; a case that is
+// Every proof states what its Test entrypoint and Check step leave out of CI; a case that is
 // not about `--uncovered` passes `[]`, and one that is passes its own — or
-// `bare`, to pass none at all.
+// `bare`, to pass none at all. A case not about `--check` passes `--check true`
+// by default, unless it passes its own `--check`.
 function prove(dir, args, { env = {}, cwd = dir, bare = false } = {}) {
   const tmp = tempDir("recipe-prove-tmp-");
-  const full = bare || args.includes("--uncovered") ? args : [...args, "--uncovered", "[]"];
+  const checked = bare || args.includes("--check") ? args : [...args, "--check", "true"];
+  const full = bare || args.includes("--uncovered") ? checked : [...checked, "--uncovered", "[]"];
   const r = spawnSync(process.execPath, [SCRIPT, dir, ...full], {
     encoding: "utf8",
     cwd,
@@ -149,6 +151,7 @@ test("a Maven-shaped repo gets a proven cache: the count proof, derivedAt, insta
   const cache = JSON.parse(readFileSync(cachePath(dir), "utf8"));
   assert.deepEqual(cache, {
     install: "mvn -q dependency:go-offline",
+    check: true,
     test: "mvn -q test",
     derivedAt: head,
     installClean: true,
@@ -499,7 +502,7 @@ test("an ambient GIT_DIR naming another repository does not change the answer", 
 test("a proof that cannot be attempted exits 2, distinct from a Recipe that is not proven", () => {
   const usage = spawnSync(process.execPath, [SCRIPT], { encoding: "utf8", env: FIXTURE_ENV });
   assert.equal(usage.status, 2);
-  assert.match(usage.stderr, /usage: recipe-prove\.mjs <repo> --install <cmd> --test <cmd> --uncovered <json>/);
+  assert.match(usage.stderr, /usage: recipe-prove\.mjs <repo> --install <cmd> --check <cmd\|true> --test <cmd> --uncovered <json>/);
 
   const notRepo = prove(tempDir("recipe-prove-norepo-"), MAVEN_PROOF);
   assert.equal(notRepo.status, 2);
@@ -1385,4 +1388,82 @@ test("RECIPE_PROVE_TIMEOUT can only shorten the default bound", () => {
   assert.equal(commandBudget("1"), 1000);
   assert.equal(commandBudget("1199"), 1_199_000);
   assert.equal(commandBudget("007"), 7000);
+});
+
+// The Check step: a non-test merge-gating CI check, proven green on origin/main
+// and red under a mutation of a tracked file it reads. `--check true` is the
+// one case with no proof of its own.
+const CHECK_FILES = {
+  "run-tests.sh": "#!/bin/sh\necho 'Tests run: 1, Failures: 0'\n",
+  "check.sh": "#!/bin/sh\ngrep -q clean status.txt\n",
+  "status.txt": "clean\n",
+  "unrelated.txt": "x\n",
+};
+const TEST_PROOF = ["--install", "true", "--test", "sh ./run-tests.sh", "--count-line", "Tests run: 1,", "--test-count", "1"];
+const CHECK_PROOF = [
+  "--check", "sh ./check.sh",
+  "--check-mutate", "printf 'dirty\\n' > status.txt",
+  "--check-mutation", "the lint step fails on a dirty status",
+];
+
+test("a non-test CI step green on origin/main and red under its mutation is written as `check`", () => {
+  const { dir } = repo(CHECK_FILES);
+  const r = prove(dir, [...TEST_PROOF, ...CHECK_PROOF]);
+  assert.equal(r.status, 0, r.err);
+  const cache = JSON.parse(readFileSync(cachePath(dir), "utf8"));
+  assert.equal(cache.check, "sh ./check.sh");
+  assert.match(cache.checkMutation, /^the lint step fails on a dirty status — turned the Check step red \(exit 1\); changed status\.txt/);
+  assert.equal(read(dir, "check").out, "sh ./check.sh");
+});
+
+test("a Check step that stays green under its mutation is refused, and nothing is written", () => {
+  const { dir } = repo(CHECK_FILES);
+  const r = prove(dir, [
+    ...TEST_PROOF,
+    "--check", "sh ./check.sh",
+    "--check-mutate", "printf 'x\\n' >> unrelated.txt",
+    "--check-mutation", "touches a file the lint step does not read",
+  ]);
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /^recipe-prove: NOT PROVEN — vacuous: the check mutation \(touches a file the lint step does not read\) did not turn the Check step red/m);
+  assert.equal(existsSync(cachePath(dir)), false, "a vacuous Check proof left a cache behind");
+});
+
+test("a non-test CI step red on origin/main is refused and named for `uncovered`, with nothing written", () => {
+  const { dir } = repo({ ...CHECK_FILES, "status.txt": "dirty\n" });
+  const r = prove(dir, [...TEST_PROOF, ...CHECK_PROOF]);
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /is red on origin\/main \(exit 1\) .*`uncovered` with reason `red on origin\/main`/);
+  assert.equal(existsSync(cachePath(dir)), false, "a Check step red on origin/main left a cache behind");
+});
+
+test("`--check true` proves with no Check mutation, and the cache records the step as none", () => {
+  const { dir } = repo(CHECK_FILES);
+  const r = prove(dir, [...TEST_PROOF, "--check", "true"]);
+  assert.equal(r.status, 0, r.err);
+  const cache = JSON.parse(readFileSync(cachePath(dir), "utf8"));
+  assert.equal(cache.check, true);
+  assert.equal("checkMutation" in cache, false);
+  assert.equal(read(dir, "check").out, "true");
+});
+
+test("a Check step that does not run is refused, and the reason names it", () => {
+  const { dir } = repo(CHECK_FILES);
+  const r = prove(dir, [...TEST_PROOF, ...CHECK_PROOF.slice(0, 1), "no-such-check-xyz", ...CHECK_PROOF.slice(2)]);
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /the Check step 'no-such-check-xyz' did not run/);
+  assert.equal(existsSync(cachePath(dir)), false);
+});
+
+test("a Check step that changes the tree is refused, since it must only read it", () => {
+  const { dir } = repo(CHECK_FILES);
+  const r = prove(dir, [
+    ...TEST_PROOF,
+    "--check", "sh -c 'echo y >> unrelated.txt; grep -q clean status.txt'",
+    "--check-mutate", "printf 'dirty\\n' > status.txt",
+    "--check-mutation", "the lint step fails on a dirty status",
+  ]);
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /the Check step changed the tree/);
+  assert.equal(existsSync(cachePath(dir)), false);
 });

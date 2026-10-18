@@ -45,6 +45,7 @@ function repo(files = {}) {
 const recipe = (head, over = {}) => ({
   install: "true",
   test: "sh ./run-tests.sh",
+  check: true,
   derivedAt: head,
   installClean: true,
   testCount: 3,
@@ -137,11 +138,11 @@ test("wrong argument count and an unknown field refuse with a usage message", ()
   for (const argv of [[], [dir], [dir, "test", "extra"]]) {
     const r = spawnSync("sh", [SCRIPT, ...argv], { encoding: "utf8" });
     assert.equal(r.status, 1, JSON.stringify(argv));
-    assert.match(r.stderr, /usage: derive-testcmd\.sh <repo> <install\|test\|uncovered>/);
+    assert.match(r.stderr, /usage: derive-testcmd\.sh <repo> <install\|check\|test\|uncovered>/);
   }
   const r = derive(dir, "derivedAt");
   assert.equal(r.status, 1);
-  assert.match(r.err, /unknown Recipe field 'derivedAt' — expected install, test or uncovered/);
+  assert.match(r.err, /unknown Recipe field 'derivedAt' — expected install, check, test or uncovered/);
 });
 
 test("a non-repository directory refuses cleanly", () => {
@@ -302,6 +303,34 @@ test("a well-formed `uncovered` leaves the install and test output unchanged", (
   const after = [derive(dir, "install"), derive(dir, "test")];
   assert.deepEqual(after, before);
   assert.deepEqual(after.map((r) => r.out), ["true", `sh -c 'echo "a b"'`]);
+});
+
+// `check` is the Check step: `true` when the repository's CI has no such step,
+// otherwise its command, which only a recorded mutation proves. The reader
+// prints it and refuses a cache that cannot say which of the two it is.
+test("`check` prints `true` or its command, and a cache that cannot say what it checks is refused", () => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head, { check: true }));
+  const none = derive(dir, "check");
+  assert.equal(none.status, 0, none.err);
+  assert.equal(none.out, "true");
+  cache(dir, recipe(head, { check: "sh ./lint.sh", checkMutation: "echo broken >> ci.txt" }));
+  const cmd = derive(dir, "check");
+  assert.equal(cmd.status, 0, cmd.err);
+  assert.equal(cmd.out, "sh ./lint.sh");
+  for (const [body, why] of [
+    [recipe(head, { check: "sh ./lint.sh" }), /`check` is not `true` but `checkMutation` is missing — the change that turned the Check step red/],
+    [recipe(head, { check: "" }), /`check` is neither `true` nor a non-empty command string/],
+    [recipe(head, { check: undefined }), /`check` is neither `true` nor a non-empty command string/],
+  ]) {
+    cache(dir, body);
+    for (const field of ["check", "test", "install", "uncovered"]) {
+      const r = derive(dir, field);
+      assert.equal(r.status, 1, `${field} from ${JSON.stringify(body)}`);
+      assert.match(r.err, why, field);
+      assert.match(r.err, /re-derive the Recipe|run the Recipe derivation step/, field);
+    }
+  }
 });
 
 test("`--at` applies to the test field only, never to `uncovered`", () => {
@@ -874,7 +903,7 @@ test("--at refuses what it cannot read: an unresolvable rev, a non-test field, a
   assert.match(inst.err, /--at applies to the test field only, not 'install'/);
   const flag = run([dir, "test", "--on", "moved"]);
   assert.equal(flag.status, 1, flag.err);
-  assert.match(flag.err, /usage: derive-testcmd\.sh <repo> <install\|test\|uncovered>/);
+  assert.match(flag.err, /usage: derive-testcmd\.sh <repo> <install\|check\|test\|uncovered>/);
   const broken = deriveAt(dir, "moved", gitFailing("read-tree"));
   assert.equal(broken.status, 1, broken.err);
   assert.equal(broken.out, "");
