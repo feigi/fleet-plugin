@@ -68,8 +68,13 @@ test("duty 2 names the closed wontfix suggestion-band record as a home, and cove
       `${where}: duty 2 leaves the record unnamed where dispatch required no verdict, or no longer holds it to the script's definition`,
     );
     // The REFUSE side: the record is a home by the script's definition, never
-    // "any closed issue".
-    assert.doesNotMatch(d, /any closed issue (?:counts|is a home|qualifies)/i, `${where}: duty 2 loosened the record to any closed issue`);
+    // "any closed issue", a closed issue that simply counts, or a closed issue
+    // whatever its title. Literal phrasings only — the CEILING above still holds.
+    assert.doesNotMatch(
+      d,
+      /closed (?:issue|home)s? (?:also )?(?:counts?|qualif|is a home)|closed issue[^.]*(?:any title|whatever its title)/i,
+      `${where}: duty 2 loosened the record past the script's definition to a closed issue as such`,
+    );
   }
 });
 
