@@ -134,10 +134,14 @@ function cause(...candidates) {
 // one stall can EXCEED it — up to GIT_TIMEOUT_MS + 20 s — when `gh` still
 // runs (measured). `check`'s worst case is the sum of whichever of its
 // children actually stall, not a single fixed term. That is three children
-// normally; in those layouts it is three git children, and `gh` is a fourth
-// only where the ledger's repository still has a work tree (a submodule) —
-// in the `.bare`, bare and `--separate-git-dir` layouts repoCheck() fails
-// and `gh` never runs (measured).
+// normally; in those layouts it is three git children and `gh` is a fourth.
+// Where the ledger's repository has no work tree (the `.bare` layout, a bare
+// repository, a `--separate-git-dir` clone; not a submodule) repoCheck()'s
+// `--show-toplevel` is refused and it asks the same directory for
+// `--git-common-dir` to bind `gh` to, so there it is four git children and
+// `gh` a fifth. `gh` runs in every one of those layouts. With `--file` the
+// fleetFile() children drop out: two children normally, three where the
+// repository has no work tree.
 //
 // `LEDGER_GIT_TIMEOUT` is this script's OWN override, in seconds, and it can
 // only ever SHORTEN. The rule and the reasons for it are net_budget's, in
@@ -155,6 +159,13 @@ function gitBudget(defaultSeconds, override) {
   return (seconds > 0 && seconds < defaultSeconds ? seconds : defaultSeconds) * 1000;
 }
 const GIT_TIMEOUT_MS = gitBudget(10, process.env.LEDGER_GIT_TIMEOUT);
+
+// What `git rev-parse --show-toplevel` says (exit 128, under LC_ALL=C) in a
+// repository that has no work tree to name. NOT fleet-dir.mjs's
+// NOT_A_WORK_TREE, which also matches "not a git repository": that one is
+// "there is nothing here", this one is "there is a repository, and it has no
+// work tree", and only the second leaves a repository for `gh` to bind to.
+const NO_WORK_TREE = /must be run in a work tree/;
 
 // There is ONE ledger per run, and it lives in the main checkout. Members run
 // from their own worktrees, where a cwd-relative `.fleet/ledger.md` does not
@@ -1144,10 +1155,12 @@ function runCheck() {
     // the repo) the two agree, but an explicit --file naming a ledger
     // outside the caller's repo diverges silently: the query searches the
     // wrong tracker and reports a confident, empty result. Bind gh's
-    // cwd to the ledger's OWN repository instead of leaving it implicit. No
-    // --repo flag needed — gh's remote-based resolution does the rest once it
-    // is pointed at the right directory, and a worktree ledger (shared .git,
-    // own working tree) still resolves to the same repo either way.
+    // cwd to the ledger's OWN repository instead of leaving it implicit —
+    // its work tree's root, or its common git dir where it has no work tree
+    // (see the probe below). No --repo flag needed — gh's remote-based
+    // resolution does the rest once it is pointed at the right directory,
+    // and a worktree ledger (shared .git, own working tree) still resolves
+    // to the same repo either way.
     //
     // cwd is not the whole story: inherited git vars outrank it, so an
     // ambient GIT_DIR/GIT_WORK_TREE retargets BOTH the probe below and gh's
@@ -1181,7 +1194,27 @@ function runCheck() {
     // the missing directory instead reported every first `check` as not being
     // in a repository and dropped the tracker query outright.
     while (!existsSync(ledgerDir) && dirname(ledgerDir) !== ledgerDir) ledgerDir = dirname(ledgerDir);
-    const repoCheck = spawnSync("git", ["-C", ledgerDir, "rev-parse", "--show-toplevel"], { encoding: "utf8", env: queryEnv, timeout: GIT_TIMEOUT_MS });
+    // LC_ALL=C on this probe alone: the no-work-tree refusal below is told
+    // apart from every other failure by git's own wording, which a translated
+    // git would otherwise spell differently. gh keeps `queryEnv` untouched.
+    const probeEnv = { ...queryEnv, LC_ALL: "C" };
+    let repoCheck = spawnSync("git", ["-C", ledgerDir, "rev-parse", "--show-toplevel"], { encoding: "utf8", env: probeEnv, timeout: GIT_TIMEOUT_MS });
+    // A repository with no work tree — the `.bare` layout and its linked
+    // worktrees, a bare repository, a `--separate-git-dir` clone — is where
+    // fleetFile() puts the ledger INSIDE the git dir or beside it, and git
+    // refuses `--show-toplevel` there ("must be run in a work tree", exit
+    // 128). That is not "no repository": the same directory answers
+    // `--git-common-dir`, and `gh` resolves its remote from a git dir just as
+    // it does from a checkout (measured on a bare repository with a remote).
+    // Bind to the common git dir — the very repository fleetFile() resolved
+    // the ledger against — never to this process's cwd. ONLY that refusal
+    // gets this: "not a git repository", git missing, a dubious-ownership
+    // refusal, an unreadable gitfile and a probe killed at its bound all stay
+    // on the failure branch below, and so does a second probe that fails.
+    const noWorkTree = repoCheck.status === 128 && NO_WORK_TREE.test(repoCheck.stderr);
+    if (noWorkTree) {
+      repoCheck = spawnSync("git", ["-C", ledgerDir, "rev-parse", "--git-common-dir"], { encoding: "utf8", env: probeEnv, timeout: GIT_TIMEOUT_MS });
+    }
     if (repoCheck.status !== 0) {
       // More than one cause lands here: a ledger path genuinely outside any
       // repository, but also git missing entirely (spawn ENOENT, so `status`
@@ -1225,7 +1258,13 @@ function runCheck() {
       const why = cause(repoCheck.error && repoCheck.error.message, repoCheck.stderr);
       tracker = { ok: false, query, error: `cannot resolve the ledger's repository (${ledgerDir})${why ? `: ${why}` : ""}` };
     } else {
-      const ghCwd = repoCheck.stdout.trim();
+      // The work tree's root, or the common git dir where the repository has
+      // no work tree. `--git-common-dir` may answer relative to the directory
+      // it ran in (`.` when that is the git dir itself) or absolute, and
+      // resolve() takes either. Read only past the status check above: a
+      // probe that never spawned (git missing) leaves `stdout` undefined.
+      const probed = repoCheck.stdout.trim();
+      const ghCwd = noWorkTree ? resolve(ledgerDir, probed) : probed;
       try {
         const out = execFileSync(
           "gh",
