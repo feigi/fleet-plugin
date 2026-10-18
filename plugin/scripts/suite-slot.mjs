@@ -25,11 +25,18 @@
 // the home directory rather than a workspace's `.fleet/` because the bound is
 // host-wide and a review's snapshot is no repository. The holder stamps its own
 // pid and releases on exit; a holder killed without releasing is taken over by
-// the next waiter, so a SIGKILLed wrapper never wedges a slot. What the
-// takeover cannot clear — an empty or partial lock whose writer died before
-// stamping its pid, and a leftover `<i>.lock.reap` — is named on the way out
-// of an expired wait, for the operator to remove by hand once nothing is
-// running.
+// the next waiter, so a SIGKILLed wrapper never wedges a slot. The takeover
+// does not stop the dead holder's test run, so a wrapper killed with SIGKILL
+// alone leaves its run going uncounted and the host over its bound until that
+// run ends; stop a wrapper with SIGTERM, which it forwards to the `sh -c`
+// running its entrypoint, releasing its slot once that shell exits. The run
+// stops with it only if that shell execs the run, as `exec node --test` does;
+// a compound entrypoint (`cd sub && make test`), or a script that neither
+// execs nor relays the signal, can leave the run going past the release,
+// uncounted as after a SIGKILL. What the takeover cannot clear — an empty or
+// partial lock whose writer died before stamping its pid, and a leftover
+// `<i>.lock.reap` — is named on the way out of an expired wait, for the
+// operator to remove by hand once nothing is running.
 //
 // Environment:
 //   FLEET_SUITE_SLOTS   number of slots N, a positive integer. Default 2.
