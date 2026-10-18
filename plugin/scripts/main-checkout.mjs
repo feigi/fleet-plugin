@@ -34,7 +34,9 @@
 // in a repository with no protecting ruleset. This is a backstop for
 // accidents, not for adversaries.
 // If the pack holding the baseline commit is unreadable, git reports exactly
-// what it reports for a pruned commit, so the result is `missing`.
+// what it reports for a pruned commit, so the result is `missing`; an
+// unopenable loose object or a broken alternate is `unknown` with a read
+// cause instead (see `headMove`).
 //
 // THE PROTECTED SET is the non-ignored paths of the main checkout — what the
 // member-write-guard protects — and its HEAD. `.fleet/`, `.worktrees/` and
@@ -306,10 +308,12 @@ function originMain(root, env) {
  * is one this cannot vouch for.
  * A failed ancestry read is followed by `git rev-parse -q --verify B^{commit}`.
  * Only exit 1 with nothing on stderr is the missing answer: that is what an
- * absent commit gives. Exit 1 with stderr is a commit present but unreadable
- * (an unopenable loose object, an alternate moved away), and that read's own
- * failure is returned so `why` names the fault. Anything else, a corrupt
- * object's exit 128 included, keeps the ancestry failure.
+ * absent commit gives. Exit 1 with anything on stderr means git could not
+ * settle absence — an unopenable loose object, a broken alternate, an object
+ * that is not a commit, or output unrelated to the object such as GIT_TRACE's
+ * — and that read's own failure is returned, so `why` carries what git
+ * printed. Anything else, a corrupt object's exit 128 included, keeps the
+ * ancestry failure.
  */
 function headMove(root, env, was, now) {
   const origin = originMain(root, env);

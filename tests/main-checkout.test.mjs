@@ -876,7 +876,6 @@ test("a baseline commit present only in an alternate that has moved away is coul
     join(dir, ".git", "objects", recorded.slice(0, 2), recorded.slice(2)),
     join(alt, "objects", recorded.slice(0, 2), recorded.slice(2)),
   );
-  mkdirSync(join(dir, ".git", "objects", "info"), { recursive: true });
   writeFileSync(join(dir, ".git", "objects", "info", "alternates"), `${join(alt, "objects")}\n`);
   writeFileSync(join(dir, "tracked.txt"), "two\n");
   git(dir, "commit", "-qam", "next");
