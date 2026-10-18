@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, readFileSync, chmodSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { rendering } from "./support/rendered-brief.mjs";
 
@@ -595,6 +595,78 @@ test("session: an entry that gives a transcript, or a non-implementer with a ful
   writeFileSync(join(w.d, "agents", "fleet-reviewer.agent.md"), agentMd("@slow:high"));
   const j = check([{ member: "SomeWordPair", agentFile: "agents/fleet-reviewer.agent.md", resolvedModel: "anthropic/claude-opus-5", resolvedThinkingLevel: "high" }]);
   assert.equal(j.status, 0, j.stdout + j.stderr);
+});
+
+// The receipt is the ledger's workspace's, not the cwd's: a second git
+// workspace A, with a receipt of its own, is the cwd; the batch and the
+// transcript live in workspace B, and so does the ledger unless `run` is
+// handed another.
+function foreignCwd(w, a = dir()) {
+  mkdirSync(a, { recursive: true });
+  execFileSync("git", ["init", "-q"], { cwd: a });
+  mkdirSync(join(a, ".fleet"), { recursive: true });
+  mkdirSync(join(a, "sessA"));
+  writeFileSync(join(a, ".fleet", "phase0.json"), JSON.stringify(receiptFor(join(a, "sessA"))));
+  writeFileSync(join(w.d, "batch.json"), JSON.stringify([{ member: "impl-7" }]));
+  const run = (ledger = w.ledger) =>
+    runCli(["--batch", join(w.d, "batch.json"), "--repo", w.d, "--ledger", ledger, "--model-roles", modelRolesFile(w.d)], a);
+  return { a, run };
+}
+
+test("receipt: --ledger naming another workspace takes that workspace's receipt, not the cwd's", () => {
+  const w = implWorld();
+  withReceipt(w, receiptFor(join(w.d, "session")));
+  const r = foreignCwd(w).run();
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(w.row(), "#7 impl-7 · class=routine · tier-ok=impl-7:fleet-implementer-slow-high");
+});
+
+test("receipt: --ledger naming another workspace with no receipt of its own refuses naming that workspace's receipt, never reading the cwd's", () => {
+  const w = implWorld();
+  withReceipt(w);
+  const before = readFileSync(w.ledger, "utf8");
+  const { a, run } = foreignCwd(w);
+  const r = run();
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /impl-7: no session given and none in the phase-0 receipt \S+\/\.fleet\/phase0\.json \(no receipt\)/);
+  assert.ok(!r.stderr.includes(a), "the cwd workspace's receipt was named");
+  assert.equal(readFileSync(w.ledger, "utf8"), before, "the ledger changed");
+});
+
+// A relative --ledger is the caller's path from the cwd. The cwd is nested
+// deeper than --repo, so the same string resolved against --repo names a
+// different file.
+test("receipt: a relative --ledger is resolved against the cwd, not against --repo, before the receipt lookup", () => {
+  const w = implWorld();
+  withReceipt(w, receiptFor(join(w.d, "session")));
+  const { a, run } = foreignCwd(w, join(dir(), "deep", "er"));
+  const ledger = relative(a, w.ledger);
+  assert.ok(!isAbsolute(ledger) && ledger.startsWith(".."), ledger);
+  const r = run(ledger);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(w.row(), "#7 impl-7 · class=routine · tier-ok=impl-7:fleet-implementer-slow-high");
+});
+
+test("receipt: a --ledger in a directory that does not exist refuses through the unreadable-receipt path — exit 2, nothing written", () => {
+  const w = implWorld();
+  withReceipt(w, receiptFor(join(w.d, "session")));
+  const r = foreignCwd(w).run(join(w.d, "fresh", "sub", "ledger.md"));
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /impl-7: no session given and none in the phase-0 receipt .*\(unreadable: /);
+  assert.equal(existsSync(join(w.d, "fresh")), false, "a refused check created the ledger's directory");
+});
+
+test("receipt: a --ledger under no repository has no workspace and so no receipt — exit 2, even beside a cwd receipt", () => {
+  const w = implWorld();
+  const check = withReceipt(w, receiptFor(join(w.d, "session")));
+  const loose = dir();
+  const ledger = join(loose, "ledger.md");
+  ledgerCli(ledger, "row", "7", "impl-7 · class=routine");
+  writeFileSync(join(w.d, "batch.json"), JSON.stringify([{ member: "impl-7" }]));
+  const r = runCli(["--batch", "batch.json", "--repo", w.d, "--ledger", ledger, "--model-roles", modelRolesFile(w.d)], w.d);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /impl-7: no session given and none in the phase-0 receipt/);
+  assert.equal(check([{ member: "impl-7" }]).status, 0, "the cwd's own ledger still reads the cwd's receipt");
 });
 
 test("implementer mismatch: exit 1 settles the member tier-mismatch on the ledger and notes why, once", () => {

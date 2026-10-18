@@ -518,6 +518,10 @@ const CHANGED = [
   [
     "| 1 `LEFT #N: excluded · behind-…` | `collision` answered `behind-pr:#M` or `behind-issue:#M` | next entry |",
     "| 1 `LEFT #N: excluded …` | `collision` answered `behind-pr:#M` or `behind-issue:#M`, or its ledger exclusion stands | next entry |"
+  ],
+  [
+    "An entry that names neither `session` nor `transcript` takes the session directory phase 0's receipt `.fleet/phase0.json` records, and is exit 2 naming the receipt when it records none; the check reads the member's own `<session>/<member>.jsonl` directly, so a member with no assistant turn yet still resolves off its dispatch-time record.",
+    "An entry that names neither `session` nor `transcript` takes the session directory phase 0's receipt `.fleet/phase0.json` of `--ledger`'s workspace (else the cwd's, resolved as the default ledger is) records, and is exit 2 naming the receipt when it records none; the check reads `<session>/<member>.jsonl`, so a member with no assistant turn yet still resolves off its dispatch-time record."
   ]
 ];
 
