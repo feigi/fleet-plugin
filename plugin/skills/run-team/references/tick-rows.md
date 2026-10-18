@@ -151,7 +151,9 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   above the rows — a live ledger token first seen more than
   `--no-transcript-after` minutes ago (default 5) has no transcript in the
   session directory: a dispatch whose `task` call was never made. Make the
-  `task` call, or settle the token `killed`. Advice the same way, folded as
+  `task` call, or run the **Member confirmed dead or never dispatched** wake
+  (`fleet-event.mjs member-died <member>`), which settles the token `killed`
+  once the first-seen stamp is past five minutes. Advice the same way, folded as
   `…; NO-TRANSCRIPT <member> persists — …`. Both lines read the session
   directory this run's phase-0 receipt names, else `--session <dir>`; with
   neither the tick skips them with one stderr line. A heartbeat state file

@@ -154,17 +154,18 @@ test("the wake table names every wake, each with its fleet-event.mjs command", (
     ["Heartbeat", "`fleet-event.mjs heartbeat`"],
     ["Drain", "`fleet-event.mjs drain --reason \"<reason>\"`"],
     ["Undrain", "`fleet-event.mjs undrain --reason \"<reason>\"`"],
+    ["Member confirmed dead or never dispatched", "`fleet-event.mjs member-died <member>`"],
   ];
   assert.equal(rows.length, WAKES.length, `the table has ${rows.length} wake rows, not the ${WAKES.length} the script's kinds make`);
   for (const [wake, command] of WAKES) {
     assert.ok(rows.includes(`| ${wake} | ${command} |`), `the wake table has no "${wake}" row naming ${command}`);
   }
   // A finisher halt is the finisher-report kind, so its bullet keeps only the
-  // by-hand per-cause rule; a finisher that died has no kind, so its bullet
-  // keeps the settle too.
+  // by-hand per-cause rule; a finisher that died is the member-died kind, and
+  // its bullet keeps the cockpit flag it is resolved from by hand.
   assert.match(RUN_TEAM.bullet("- **Finisher reports halted**", "- **A finisher failed or was killed**", "finisher-halted wake").text, Pin.phrase("**Resolving a finisher halt**"));
   const died = RUN_TEAM.bullet("- **A finisher failed or was killed**", "- **Implementer bails before implementing**", "finisher-died wake").text;
-  assert.match(died, Pin.phrase("`ledger.mjs settle finisher-pr-<M>=failed`"));
+  assert.match(died, Pin.phrase("(`member-died finisher-pr-<M>`)"));
   assert.match(died, Pin.phrase("**Resolving a finisher that died**"));
   // What follows the table: the call's lines acted on, the beat.
   assert.match(RUN_TEAM.between("| Drain |", "\n- **", "after the table").text, Pin.phrase("arm the beat"));
@@ -452,9 +453,9 @@ test("the UNRECORDED tick row names its remedy: record the dispatch on the ledge
   assert.match(row, Pin.phrase("(`…; UNRECORDED <stem> persists — …`)"));
 });
 
-test("the NO-TRANSCRIPT tick row names its remedy: make the task call, or settle the token killed; and where the session directory comes from", () => {
+test("the NO-TRANSCRIPT tick row names its remedy: make the task call, or run the member-died wake; and where the session directory comes from", () => {
   const row = TICK_ROWS.bullet("- `NO-TRANSCRIPT <member> (live <age>m, no <session>/<member>.jsonl)`", "- `SETTLE <member>", "tick-rows NO-TRANSCRIPT row").text;
-  assert.match(row, Pin.phrase("Make the `task` call, or settle the token `killed`."));
+  assert.match(row, Pin.phrase("Make the `task` call, or run the **Member confirmed dead or never dispatched** wake (`fleet-event.mjs member-died <member>`)"));
   assert.match(row, Pin.phrase("`--no-transcript-after` minutes ago (default 5)"));
   assert.match(row, Pin.phrase("`…; NO-TRANSCRIPT <member> persists — …`"));
   assert.match(row, Pin.phrase("Both lines read the session directory this run's phase-0 receipt names, else `--session <dir>`; with neither the tick skips them with one stderr line."));

@@ -134,6 +134,27 @@
 //       `closeout.mjs reopen --reason "<reason>"`, its output printed as it
 //       stands, then the tick. Refused once any `finish` step is ok, and when
 //       no drain marker is set; its exit 2 or 3 is passed through.
+//   member-died <member>
+//       Settles a member the controller has confirmed dead, then ticks. The
+//       outcome comes from the session directory's listing, never from an
+//       argument or a file's contents. The first marker that matches decides:
+//         <m>.jsonl.tombstone                              killed
+//         <m>.md, no tombstone, fix-pr or finisher-pr      failed
+//         <m>.md, no tombstone, merge-bot                  killed
+//         <m>.md, no tombstone, impl                       refused: settle it by hand
+//         <m>.jsonl, no marker                             refused: running or parked
+//         no transcript, no marker                         killed once the tick's
+//                                                          first-seen stamp in
+//                                                          heartbeat.json is over
+//                                                          five minutes old; refused
+//                                                          when younger or unstamped
+//       Ahead of the markers: a review runner refuses, its death being
+//       `review-failed`; a member the ledger already holds settled is noted,
+//       and the tick runs; a report on disk refuses, naming the kind that
+//       settles it, or its violation when that kind could not settle from
+//       it. The session directory is this run's phase-0 receipt's
+//       `session`, else `--session <dir>`: the tick's lookup, so another
+//       run's receipt names none.
 //
 // A write this script cannot make, and does not refuse, is printed as a
 // `NEED <what> …` line, at the left margin, for the controller to make by
@@ -141,7 +162,10 @@
 //
 // Exit: 0 every write made and the tick exited 0. 2 a usage error, refused
 // before anything is written or ticked: an unknown kind or flag, a `--reason`
-// that is empty or beside any kind but `drain` and `undrain`, a member of
+// that is empty or beside any kind but `drain` and `undrain`, a `--session`
+// beside any kind but `member-died`, any `member-died` refusal (the table's,
+// a name that is no ledger member, no session directory, a session directory
+// that cannot be listed, a heartbeat file that cannot be used), a member of
 // the wrong family, a review path outside the PR's partition or a file that
 // is no review result, a ledger or phase-0 receipt that cannot be read. A
 // ledger write's own refusal — `settle`'s 3 (the report's claim and the world
@@ -155,17 +179,18 @@
 // Zero deps: node builtins and sibling scripts only.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, isDigits, writeAll } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { BRIEFS, REVIEW, REVIEWED, memberTokens, nextReviewerName, parseDispatchedEntry, parseMember, parseToken, readRetired, rowNums } from "./ledger-grammar.mjs";
-import { dispositionsToken, foldLedger } from "./fleet-tick.mjs";
-import { readRunReceipt, tickCaps } from "./phase0-receipt.mjs";
+import { BRIEFS, REVIEW, REVIEWED, REVIEWER, memberTokens, nextReviewerName, parseDispatchedEntry, parseMember, parseToken, readRetired, rowNums } from "./ledger-grammar.mjs";
+import { NO_TRANSCRIPT_AFTER_DEFAULT, controllerState, dispositionsToken, foldLedger } from "./fleet-tick.mjs";
+import { phase0Gate, readRunReceipt, tickCaps } from "./phase0-receipt.mjs";
 import { defaultScratch, readReportIn, reportsDir } from "./report-files.mjs";
+import { readState, statePath } from "./fleet-state.mjs";
 
 const NAME = "fleet-event";
 const die = makeDie(NAME);
@@ -188,8 +213,9 @@ const KINDS = {
   heartbeat: { args: [] },
   drain: { args: [], flag: "--reason \"<reason>\"" },
   undrain: { args: [], flag: "--reason \"<reason>\"" },
+  "member-died": { args: ["<member>"] },
 };
-const FLAGS = { "in-flight": "value", reason: "value" };
+const FLAGS = { "in-flight": "value", reason: "value", session: "value" };
 const USAGE = `usage: ${NAME}.mjs <kind> <args> [--in-flight <n>] — kinds: `
   + Object.entries(KINDS).map(([k, { args, flag }]) => [k, ...args, ...(flag ? [flag] : [])].join(" ")).join(", ");
 
@@ -299,15 +325,18 @@ class Event {
     return readReportIn(reportsDir(this.scratch), member);
   }
 
-  // `settle <member> --from-report` unless the ledger holds it settled.
-  // Returns the outcome, or null when the settle refused.
-  settle(member) {
+  // `settle <member> --from-report` unless the ledger holds it settled, or
+  // `settle <member> <decided>` when a marker decided the outcome — never one
+  // a file's contents named. Returns the outcome, or null when the settle
+  // refused.
+  settle(member, decided = null) {
     const before = settledOutcome(this.ledger, member);
     if (before !== null) {
       this.note(`${member}=${before} already settled`);
       return before;
     }
-    const r = node("ledger.mjs", ["settle", member, "--from-report", "--reports", reportsDir(this.scratch)]);
+    const tail = decided === null ? ["--from-report", "--reports", reportsDir(this.scratch)] : [decided];
+    const r = node("ledger.mjs", ["settle", member, ...tail]);
     if (r.status !== 0) {
       this.refuse(`settle ${member}`, r);
       return null;
@@ -727,6 +756,81 @@ function undrain(ev, reason) {
   }
 }
 
+// ── member-died ─────────────────────────────────────────────────────────────
+
+// fleet-tick's default `--no-transcript-after`: a member with no transcript
+// whose first-seen stamp is older than this never started.
+const NO_TRANSCRIPT_MS = NO_TRANSCRIPT_AFTER_DEFAULT * 60_000;
+
+// The kind whose report settles a family — the KINDS entry naming that family
+// — named in the refusal that finds one on disk.
+export const reportKind = (family) => Object.keys(KINDS).find((k) => KINDS[k].family === family);
+
+// This run's phase-0 receipt `session`, or null: the receipt phase0Gate()
+// judges this run's against the controller record in heartbeat.json and that
+// record's process, as fleet-tick judges it.
+function runSession({ read, path }) {
+  const { controller } = readState(statePath(NAME), NAME);
+  return phase0Gate(read, { path, controllerAt: controller?.at, controller: controllerState(controller, NAME) }).session;
+}
+
+// The names in the session directory. A missing one reads as empty when the
+// receipt named it, as the tick reads it, and refuses otherwise.
+function sessionListing(session, receiptNamed) {
+  try {
+    return new Set(readdirSync(session));
+  } catch (e) {
+    if (e.code === "ENOENT" && receiptNamed) return new Set();
+    return die(`member-died: cannot list the session directory ${session} (${e.code ?? e.message}) — nothing written`);
+  }
+}
+
+// Settles a member the controller has confirmed dead, by the first marker
+// that matches; see the header. The settle is a ledger write, so its
+// refusal passes through to the exit as every other kind's does. Every other
+// refusal is a die() before anything is written or ticked.
+function memberDied(ev, member, receipt, flagSession) {
+  const review = REVIEWER.exec(member);
+  if (review !== null) die(`member-died ${member}: a review runner settles nothing; its death is review-failed ${review[1]} member:${member} — nothing written`);
+  const m = parseMember(member);
+  if (m === null) die(`member-died: '${member}' is not a ledger member — nothing written`);
+  const before = settledOutcome(ev.ledger, member);
+  if (before !== null) {
+    ev.note(`${member}=${before} already settled`);
+    return;
+  }
+  const report = ev.report(member);
+  const kind = reportKind(m.family);
+  if (report.state === "invalid") die(`member-died ${member}: its report ${report.path} is on disk and ${kind} cannot settle from it (${report.violation}): fix the report and run ${kind} ${member}, or settle ${member} by hand — nothing written`);
+  if (report.state !== "absent") die(`member-died ${member}: its report ${report.path} is on disk; ${kind} ${member} settles it — nothing written`);
+  // The session directory the tick reads: this run's receipt's `session`,
+  // else `--session`. A `--session` the receipt's overrides is said, not
+  // dropped in silence.
+  const receiptSession = runSession(receipt);
+  if (receiptSession !== null && flagSession !== null && resolve(flagSession) !== resolve(receiptSession)) {
+    writeAll(2, `${NAME}: member-died ${member} reads ${receiptSession}, this run's phase-0 receipt's session, not --session ${flagSession}\n`);
+  }
+  const session = receiptSession ?? flagSession;
+  if (session === null) die(`member-died ${member} needs the session directory: this run's phase-0 receipt names none, so pass --session <dir> — nothing written`);
+  const listed = sessionListing(session, receiptSession !== null);
+  const md = `${member}.md`;
+  const jsonl = `${member}.jsonl`;
+  if (listed.has(`${jsonl}.tombstone`)) return ev.settle(member, "killed");
+  if (listed.has(md)) {
+    if (m.family === "impl") die(`member-died ${member}: ${md} is in ${session} with no tombstone, and an implementer's yield is its own outcome: read agent://${member} and settle it by hand — nothing written`);
+    return ev.settle(member, m.family === "merge-bot" ? "killed" : "failed");
+  }
+  if (listed.has(jsonl)) die(`member-died ${member}: ${member} has a transcript and no marker in ${session}, so it is running or parked; census it, kill it, then rerun — nothing written`);
+  const heartbeat = statePath("fleet-event");
+  const state = readState(heartbeat, "fleet-event");
+  if (state.degraded) die(`member-died ${member}: ${heartbeat} ${state.degraded} — nothing written`);
+  const stamp = state.seen[member];
+  if (typeof stamp !== "number") die(`member-died ${member}: no transcript and no first-seen stamp in ${heartbeat}, so the tick never saw it live — nothing written`);
+  const age = Date.now() - stamp;
+  if (age <= NO_TRANSCRIPT_MS) die(`member-died ${member}: first seen ${Math.floor(age / 60_000)} min ago, not yet past the ${NO_TRANSCRIPT_MS / 60_000}-minute no-transcript bound — nothing written`);
+  return ev.settle(member, "killed");
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 
 function boundArg(F, name) {
@@ -764,6 +868,7 @@ function main() {
   } else if (reason !== null) {
     die(`--reason belongs to drain and undrain, not ${kind}`);
   }
+  if (kind !== "member-died" && F.arg("session") !== null) die(`--session belongs to member-died, not ${kind}`);
   let pr = null;
   if (spec.family !== undefined) {
     const m = parseMember(args[0]);
@@ -776,9 +881,11 @@ function main() {
 
   let fleetDir;
   let scratch;
+  let receipt;
   try {
     fleetDir = fleetFile(null);
-    const { read } = readRunReceipt();
+    receipt = readRunReceipt();
+    const { read } = receipt;
     const named = read.state === "ok" ? read.receipt.scratch : undefined;
     scratch = typeof named === "string" && named !== "" ? named : defaultScratch();
   } catch (e) {
@@ -788,7 +895,6 @@ function main() {
   const caps = tickCaps(fleetDir);
   if (caps.error) die(`${caps.error} — nothing written`);
   const tickArgs = ["--apply", ...(inFlight === null ? caps.args : ["--in-flight", inFlight]), ...(kind === "heartbeat" ? ["--fold-unchanged"] : [])];
-
   const ev = new Event({ fleetDir, scratch, ledger: readLedger() });
   if (kind === "impl-report") implReport(ev, args[0]);
   else if (kind === "fix-report") fixReport(ev, args[0]);
@@ -800,6 +906,7 @@ function main() {
   else if (kind === "conflict") conflict(ev, pr);
   else if (kind === "drain") drain(ev, reason);
   else if (kind === "undrain") undrain(ev, reason);
+  else if (kind === "member-died") memberDied(ev, args[0], receipt, F.arg("session"));
 
   writeAll(1, `${[...ev.lines, `event: ${kind}: ${ev.summary.join("; ") || "nothing to record"}`].join("\n")}\n`);
   const tick = spawnSync(process.execPath, [join(SCRIPTS, "fleet-tick.mjs"), ...tickArgs], { stdio: ["ignore", "inherit", "inherit"], env: gitEnv() });
