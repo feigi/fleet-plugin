@@ -197,7 +197,8 @@ export function parseRow(row) {
   const alive = live.filter((e) => !settled.has(e.name));
   const implOutcome = lastImpl ? (implOutcomes.get(lastImpl.name) ?? null) : null;
   const prM = implOutcome && /^PR#(\d+)$/.exec(implOutcome);
-  let pr = prM ? Number(prM[1]) : null;
+  const implPr = prM ? Number(prM[1]) : null;
+  let pr = implPr;
   // A row with NO impl token — a malformed one still
   // counts, since that row's key is a ticket — is keyed, once THIS row
   // carries a PR-bound signal, the way fleet-tick.mjs's rowPr-then-
@@ -217,7 +218,7 @@ export function parseRow(row) {
     excluded,
     impl: lastImpl?.name ?? null,
     implOutcome,
-    implPr: prM ? Number(prM[1]) : null,
+    implPr,
     agent: alive.length ? alive[alive.length - 1].name : null,
     pr,
     merged: !!mergedM,
@@ -440,10 +441,13 @@ export function mergedReadPrs({ ledger, prs, prev }) {
 // The ticket issues whose row's latest settled impl PR is one of `prs`, sorted
 // and once each. gather() reads their state in the same call as the PR read;
 // computeBoard() takes the CLOSED ones as `closedIssues`. An Exclusion is none.
+// An issue number outside Number.isSafeInteger is left out for the reason
+// mergedReadPrs() leaves such a PR out: its `i1e+21` alias would fail the
+// whole batched query, PR aliases included.
 export function issuesOfPrs({ ledger, prs }) {
   const set = new Set(prs);
   const issues = (ledger.rows || []).map(parseRow).filter(Boolean)
-    .filter((p) => !p.excluded && p.implPr != null && set.has(p.implPr))
+    .filter((p) => !p.excluded && p.implPr != null && set.has(p.implPr) && Number.isSafeInteger(p.issue))
     .map((p) => p.issue);
   return [...new Set(issues)].sort((a, b) => a - b);
 }
@@ -523,7 +527,7 @@ export function computeBoard(inputs) {
     rowIssues.add(p.issue);
     const sinceEnteredStage = stageEntry(prevTicket, column, now);
     const ciState = p.pr != null ? (ci[p.pr] ?? "unknown") : null;
-    const prClosed = pr === undefined && p.implPr != null && p.implPr === p.pr && closedPrs.has(p.pr) && !closedIssues.has(p.issue);
+    const prClosed = pr === undefined && p.implPr != null && closedPrs.has(p.pr) && !closedIssues.has(p.issue);
     const flags = deriveFlags(p, { ci: ciState, column, sinceEnteredStage, now, finisher: latestFinishers.get(p.pr), prClosed });
     tickets.push({
       issue: p.issue,

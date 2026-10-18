@@ -735,7 +735,7 @@ test("#1840: one unresolvable number does not poison the batch — the PRs gh di
 // #1840 review: real GitHub always answers every requested `p<N>` alias
 // (null or an object), never omits one — so `data.repository` present with
 // NONE of the requested keys is not a shape the API produces, only a
-// corrupted/truncated one, and readMerged() must not read it as "checked,
+// corrupted/truncated one, and readStates() must not read it as "checked,
 // nothing merged": it has to fail loudly (log + carry-forward/REVIEW) the
 // same as any other unusable answer, not silently.
 test("#1840: an object data.repository naming none of the requested PRs is a failed read, not a clean zero-merged answer", async (t) => {

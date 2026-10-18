@@ -818,9 +818,10 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   // asked only about mergedReadPrs()'s set — row PRs absent from the open
   // list, with no token, not carried forward — in one batched read
   // that answers whatever their merge age; see readStates(). A failed read
-  // is `[]`, and the carry-forward in computeBoard() covers exactly the
-  // PRs this set leaves out, so a failure costs only a PR never yet seen
-  // MERGED, which reads REVIEW.
+  // leaves every list empty, and the carry-forward in computeBoard() covers
+  // exactly the PRs this set leaves out, so a failure costs only a PR never
+  // yet seen MERGED, which reads REVIEW — and flags no pr-closed, since the
+  // closed lists are empty too.
   const asked = mergedReadPrs({ ledger, prs, prev });
   const { merged, closed, closedIssues } = await readStates(asked, issuesOfPrs({ ledger, prs: asked }));
 

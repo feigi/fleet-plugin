@@ -976,7 +976,7 @@ test("#1840: mergedReadPrs is exactly the row PRs whose column the merged read c
 });
 
 // #1840 review: a ledger row whose PR mention is 22+ digits parses (via
-// `Number()`) to a value outside Number.isSafeInteger, which readMerged()
+// `Number()`) to a value outside Number.isSafeInteger, which readStates()
 // would stringify in exponential form (`1e+21`) — not a valid gh api
 // graphql alias/argument, and one that fails the WHOLE batched query, not
 // just that row. mergedReadPrs excludes it before it ever reaches gh, the
@@ -991,6 +991,19 @@ test("#1840: a PR number outside Number.isSafeInteger is excluded from mergedRea
     prs: [], prev: null,
   });
   assert.deepEqual(need, [930], "the unsafe-integer PR is left out; 930 still gets asked about");
+});
+
+// The same poisoning through the issue alias the batched read now carries: a
+// ticket number of 22+ digits would reach gh as `i1e+21:issue(number:1e+21)`.
+test("#3520 review: an issue number outside Number.isSafeInteger is excluded from issuesOfPrs, so it cannot poison the batch", () => {
+  const issues = issuesOfPrs({
+    ledger: { rows: [
+      "#907 impl-907=PR#930",
+      "#1000000000000000000000 impl-5=PR#931", // 22 digits: Number() -> 1e+21
+    ] },
+    prs: [930, 931],
+  });
+  assert.deepEqual(issues, [907], "the unsafe-integer issue is left out; 907 still gets asked about");
 });
 
 test("#1820: review=wf/member, or a live fix-pr/finisher-pr, is under review; agent is the latest live member", () => {
@@ -1313,6 +1326,12 @@ test("computeBoard: a CLOSED issue, or a merged PR, reads no pr-closed", () => {
   assert.ok(!cardOf(computeBoard(closedInputs({ closedIssues: [360] })), 360).flags.includes("pr-closed"));
   const t = cardOf(computeBoard(closedInputs({ merged: [361] })), 360);
   assert.equal(t.column, "MERGED");
+  assert.ok(!t.flags.includes("pr-closed"));
+});
+
+test("computeBoard: a PR still in the open list reads no pr-closed, whatever `closed` lists", () => {
+  const t = cardOf(computeBoard(closedInputs({ prs: [{ number: 361, state: "OPEN", labels: [], title: "impl 360" }] })), 360);
+  assert.equal(t.column, "REVIEW", "the card is where pr-closed could be read");
   assert.ok(!t.flags.includes("pr-closed"));
 });
 
