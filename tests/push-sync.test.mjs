@@ -78,7 +78,7 @@ function fixture({ claimDir = "9-slug" } = {}) {
 
 const run = (cwd, ...args) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd, env: ENV, encoding: "utf8" });
 
-/** stdout's labelled lines, in order: `push:`, `sync:`, `read-back:`. */
+/** stdout's labelled lines, in order: `push:`, `sync:` (one per failed condition on a refusal), `read-back:`. */
 const labels = (r) => r.stdout.split("\n").filter(Boolean).map((l) => l.slice(0, l.indexOf(":")));
 
 // The defect, reproduced with the command the five prose sites used to give.
@@ -178,6 +178,48 @@ test("both guards failing names both conditions", () => {
   assert.match(r.stdout, /claim-ref-diverged/);
 });
 
+test("an ancestry check git cannot answer refuses as ancestry-check-failed, with git's error, never as a divergence", () => {
+  const f = fixture();
+  const old = rev(f.claim, "HEAD");
+  commit(f.detached, "b.txt", "b\n", "second");
+  // A bare push strands the claim ref at an ancestor of the push, so only the
+  // ancestry check can let the sync through — and a shim on PATH makes that
+  // one git call fail the way a corrupt or shallow object store does.
+  git(f.detached, "push", "-q", "origin", `HEAD:${f.branch}`);
+  const realGit = execFileSync("sh", ["-c", "command -v git"], { env: ENV, encoding: "utf8" }).trim();
+  const shims = tempDir("push-sync-shim-");
+  writeFileSync(
+    join(shims, "git"),
+    `#!/bin/sh\nif [ "$1" = merge-base ]; then echo 'fatal: simulated object-store fault' >&2; exit 128; fi\nexec '${realGit}' "$@"\n`,
+    { mode: 0o755 },
+  );
+  const r = spawnSync(process.execPath, [SCRIPT, "--branch", f.branch], {
+    cwd: f.detached,
+    env: { ...ENV, PATH: `${shims}:${ENV.PATH}` },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, NOT_SYNCED, r.stderr);
+  assert.match(r.stdout, /^sync: refused \(ancestry-check-failed\): .*simulated object-store fault.*the push itself landed/m);
+  assert.doesNotMatch(r.stdout, /claim-ref-diverged/, "a check that did not answer is no evidence of a divergence");
+  assert.equal(rev(f.main, `refs/heads/${f.branch}`), old, "nothing moved");
+});
+
+test("an unreadable origin head leaves only the ancestor alternative: a rebased push is refused, the unread head named", () => {
+  const f = fixture();
+  const old = rev(f.claim, "HEAD");
+  writeFileSync(join(f.detached, "a.txt"), "rewritten\n");
+  git(f.detached, "commit", "-q", "-a", "--amend", "-m", "first, rewritten");
+  const pushed = rev(f.detached, "HEAD");
+  // `ls-remote origin` reads the url, the push the pushurl.
+  git(f.main, "config", "remote.origin.pushurl", f.origin);
+  git(f.main, "config", "remote.origin.url", join(f.root, "nonexistent.git"));
+  const r = run(f.detached, "--branch", f.branch, "--force-with-lease");
+  assert.equal(r.status, NOT_SYNCED, r.stderr);
+  assert.equal(remoteTip(f.origin, f.branch), pushed, "the push itself landed");
+  assert.equal(rev(f.main, `refs/heads/${f.branch}`), old, "nothing moved");
+  assert.match(r.stdout, /^sync: refused \(claim-ref-diverged\): .*\(unread: [^)]/m);
+});
+
 test("no worktree holds the branch: the push stands, `no worktree holds <branch>`, exit 0", () => {
   const f = fixture();
   git(f.main, "worktree", "remove", f.claim);
@@ -208,6 +250,17 @@ test("a denied lease: the push's own exit status, no sync attempted, no --force 
   assert.deepEqual(labels(r), ["push"], "no sync and no read-back after a failed push");
   assert.match(r.stdout, /^push: failed/m);
   assert.match(r.stderr, /stale info|rejected/);
+});
+
+test("a push git itself aborts exits with git's own status, not a fixed one", () => {
+  const f = fixture();
+  commit(f.detached, "b.txt", "b\n", "second");
+  git(f.detached, "remote", "set-url", "origin", join(f.root, "nonexistent.git"));
+  const control = spawnSync("git", ["push", "origin", `HEAD:refs/heads/${f.branch}`], { cwd: f.detached, env: ENV });
+  assert.equal(control.status, 128, "the fixture's push must die the way git's fatal errors do");
+  const r = run(f.detached, "--branch", f.branch);
+  assert.equal(r.status, 128, r.stderr);
+  assert.match(r.stdout, /^push: failed \(exit 128\)/m);
 });
 
 test("an ambient GIT_DIR and GIT_WORK_TREE naming another repository do not move the push or the sync", () => {
@@ -293,6 +346,30 @@ test("an empty --branch — `$(git branch --show-current)` in a detached worktre
   assert.equal(remoteTip(f.origin, f.branch), before, "nothing was pushed");
 });
 
+test("an invalid --branch refuses with exit 2 before pushing", () => {
+  const f = fixture();
+  const before = remoteTip(f.origin, f.branch);
+  commit(f.detached, "b.txt", "b\n", "second");
+  const r = run(f.detached, "--branch", "a..b");
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /'a\.\.b' is not a valid branch name/);
+  assert.equal(remoteTip(f.origin, f.branch), before, "nothing was pushed");
+});
+
+test("a git that cannot run, or a cwd outside any repository, is named as such — not as a bad branch or an unborn HEAD", () => {
+  const noGit = spawnSync(process.execPath, [SCRIPT, "--branch", "fix/1-x"], {
+    cwd: tempDir("push-sync-nogit-"),
+    env: { ...ENV, PATH: "/nonexistent" },
+    encoding: "utf8",
+  });
+  assert.equal(noGit.status, 2, noGit.stderr);
+  assert.match(noGit.stderr, /git could not run: .*ENOENT/);
+  const outside = run(tempDir("push-sync-norepo-"), "--branch", "fix/1-x");
+  assert.equal(outside.status, 2, outside.stderr);
+  assert.match(outside.stderr, /cannot read HEAD: .*not a git repository/);
+});
+
 test("claimHolder reads `worktree list --porcelain -z` by record, never by line", () => {
   const listing = [
     "worktree /r", "HEAD aaaa", "branch refs/heads/main", "",
@@ -302,11 +379,16 @@ test("claimHolder reads `worktree list --porcelain -z` by record, never by line"
   assert.equal(claimHolder(listing, "fix/9"), "/r/.worktrees/y");
   assert.equal(claimHolder(listing, "main"), "/r");
   assert.equal(claimHolder(listing, "fix"), null, "a prefix of a branch is not the branch");
+  const suffixed = ["worktree /r", "HEAD aaaa", "branch refs/heads/x/fix/9", ""].join("\0");
+  assert.equal(claimHolder(suffixed, "fix/9"), null, "a branch ending in the wanted name is not the branch");
   assert.equal(claimHolder("", "main"), null);
 });
 
-// Every prose site that pushes from a detached worktree names the helper, as
-// many times as it pushes, and none still shows a bare refspec push.
+// Every prose site that pushes from a detached worktree names the helper as
+// many times as the table says — once per push there, and once in
+// reviewers.md, which shows it as the worked example of binding `--branch`
+// rather than pushing — and none still shows a bare refspec push, in
+// backticks, in a fenced block or as plain text.
 test("each detached-push prose site names the helper and shows no bare `git push … HEAD:<branch>`", () => {
   const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
   const SITES = [
@@ -316,10 +398,10 @@ test("each detached-push prose site names the helper and shows no bare `git push
     ["agents/fleet-fix-applier.agent.md", 1],
     ["skills/run-team/references/reviewers.md", 1],
   ];
-  for (const [rel, pushes] of SITES) {
+  for (const [rel, mentions] of SITES) {
     const text = readFileSync(join(PLUGIN, rel), "utf8").replace(/\s+/g, " ");
     const named = text.split("~/.fleet/bin/fleet-run push-sync.mjs --branch ").length - 1;
-    assert.equal(named, pushes, `${rel} names the helper ${named} time(s), expected ${pushes}`);
-    assert.doesNotMatch(text, /`git push [^`]*HEAD:[^`]*`/, `${rel} still shows a bare refspec push`);
+    assert.equal(named, mentions, `${rel} names the helper ${named} time(s), expected ${mentions}`);
+    assert.doesNotMatch(text, /git push\b[^.]*\bHEAD:/, `${rel} still shows a bare refspec push`);
   }
 });

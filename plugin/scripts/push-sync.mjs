@@ -17,7 +17,8 @@
 //
 // BEFORE THE PUSH it reads origin's head of the branch (`ls-remote`) and the
 // local `refs/heads/<branch>`. A failed or timed-out `ls-remote` does not stop
-// the push — it only leaves the first ref guard below unmet.
+// the push — it only leaves the ref guard's "equals origin's pre-push head"
+// alternative below unmet; the ancestor alternative can still hold.
 //
 // THE PUSH is `git push [--force-with-lease] origin HEAD:refs/heads/<branch>`,
 // git's own output passed through on stderr. A failed push — a denied lease
@@ -35,19 +36,24 @@
 //     replaces exactly the tip origin had, so under this guard no commit that
 //     was only local is dropped.
 // A guard that fails moves nothing: the refusal names each failed condition
-// and says the push itself landed. The clean-tree check is the only
-// protection against a member working in the holder at the same moment.
+// and says the push itself landed. An ancestry check git cannot answer —
+// `merge-base --is-ancestor` exiting other than 0 or 1, or not running —
+// refuses as `ancestry-check-failed` with git's own error, never as a
+// divergence. The clean-tree check is the only protection against a member
+// working in the holder at the same moment.
 // A holder already at the pushed SHA — the attached claim worktree running
 // this itself — has nothing to move and is not checked.
 //
-// OUTPUT, on stdout, in this order: one `push:` line, then one `sync:` line,
-// then one `read-back:` line comparing `refs/heads/<branch>` with the pushed
+// OUTPUT, on stdout, in this order: one `push:` line, then the `sync:`
+// outcome — one line, or on a refusal one line per failed condition — then
+// one `read-back:` line comparing `refs/heads/<branch>` with the pushed
 // SHA. A failed push prints the `push:` line alone.
 //
 // Exit 0: pushed, and the holder is at the pushed SHA — or no worktree holds
 //         the branch (`sync: no worktree holds <branch>`), where the push
 //         result stands.
-// Exit 2: bad usage, or HEAD names no commit. Nothing was pushed.
+// Exit 2: bad usage, HEAD names no commit, or git could not run or read HEAD.
+//         Nothing was pushed.
 // Exit 3: pushed, NOT synced — a guard refused, a git call in the sync failed,
 //         or the read-back differs. Origin has the pushed SHA.
 // Any other non-zero: the push failed, with git's own exit status.
@@ -67,9 +73,8 @@ const USAGE = "usage: push-sync.mjs --branch <branch> [--force-with-lease]";
 
 const say = (line) => writeAll(1, `${line}\n`);
 
-function git(args, { cwd, timeout, stdio } = {}) {
+function git(args, { timeout, stdio } = {}) {
   return spawnSync("git", args, {
-    cwd,
     env: gitEnv(),
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
@@ -82,8 +87,8 @@ const ok = (r) => !r.error && r.status === 0;
 const why = (r) => r.error?.message ?? (r.signal ? `killed by ${r.signal}` : (r.stderr ?? "").trim() || `exit ${r.status}`);
 
 /** The commit `ref` names, or null when it names none. */
-function commitOf(ref, cwd) {
-  const r = git(["rev-parse", "-q", "--verify", `${ref}^{commit}`], { cwd });
+function commitOf(ref) {
+  const r = git(["rev-parse", "-q", "--verify", `${ref}^{commit}`]);
   return ok(r) ? r.stdout.trim() : null;
 }
 
@@ -153,10 +158,17 @@ function main() {
   const branch = flags.arg("branch");
   if (branch === null) die(`--branch is required\n${USAGE}`);
   const lease = flags.has("force-with-lease");
-  if (!ok(git(["check-ref-format", `refs/heads/${branch}`]))) die(`'${branch}' is not a valid branch name`);
+  const format = git(["check-ref-format", `refs/heads/${branch}`]);
+  if (format.error || format.signal) die(`git could not run: ${why(format)}`);
+  if (format.status !== 0) die(`'${branch}' is not a valid branch name`);
 
-  const pushed = commitOf("HEAD");
-  if (pushed === null) die("HEAD names no commit — nothing to push");
+  // `rev-parse -q --verify` says nothing when HEAD is unborn; anything it does
+  // say is git failing to read the repository at all.
+  const head = git(["rev-parse", "-q", "--verify", "HEAD^{commit}"]);
+  if (!ok(head)) {
+    die(head.error || head.signal || head.stderr.trim() !== "" ? `cannot read HEAD: ${why(head)}` : "HEAD names no commit — nothing to push");
+  }
+  const pushed = head.stdout.trim();
   const remoteBefore = remoteHead(branch);
   const localBefore = commitOf(`refs/heads/${branch}`);
 
@@ -191,13 +203,22 @@ function main() {
 
   const local = localBefore ?? "(absent)";
   const equalsRemote = remoteBefore.ok && remoteBefore.sha !== null && remoteBefore.sha === localBefore;
-  const ancestor = localBefore !== null && git(["merge-base", "--is-ancestor", localBefore, pushed]).status === 0;
-  if (!equalsRemote && !ancestor) {
+  if (!equalsRemote) {
     const remote = !remoteBefore.ok ? `unread: ${remoteBefore.why}` : remoteBefore.sha ?? "absent";
-    reasons.push([
-      "claim-ref-diverged",
-      `refs/heads/${branch} at ${local} neither equals origin's pre-push head (${remote}) nor is an ancestor of the pushed ${pushed}`,
-    ]);
+    // `--is-ancestor` answers 0 (an ancestor) or 1 (not one); anything else is
+    // git failing to answer, which is no evidence of a divergence.
+    const ancestry = localBefore === null ? null : git(["merge-base", "--is-ancestor", localBefore, pushed]);
+    if (ancestry !== null && !ok(ancestry) && (ancestry.error || ancestry.status !== 1)) {
+      reasons.push([
+        "ancestry-check-failed",
+        `refs/heads/${branch} at ${local} does not equal origin's pre-push head (${remote}), and git merge-base --is-ancestor ${local} ${pushed} failed: ${why(ancestry)}`,
+      ]);
+    } else if (ancestry === null || !ok(ancestry)) {
+      reasons.push([
+        "claim-ref-diverged",
+        `refs/heads/${branch} at ${local} neither equals origin's pre-push head (${remote}) nor is an ancestor of the pushed ${pushed}`,
+      ]);
+    }
   }
   if (reasons.length > 0) refuse(branch, pushed, reasons);
 
