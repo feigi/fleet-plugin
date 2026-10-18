@@ -435,3 +435,16 @@ raising B past that buys nothing. 8 was rejected: peak review concurrency above
 the former reviewer count, for a throughput gain the backlog does not show it
 needs. Re-derive it from the map's guard once 20 or more PRs have merged under
 it, never from one run's rows.
+
+A deep `ready-to-merge` queue adds no rebases per PR — each PR rebases exactly
+once, when it becomes the candidate — and those PRs count as In flight because
+they sit between Claim and merge, not because the queue is deep.
+
+## Reconcile, do not wait for an event
+
+"A slot is free and the shortlist is
+non-empty" is a *level* condition — re-derive the deficit on **every** tick,
+whatever woke you: a member finishing, a member bailing before implementing, a
+merge landing. An edge-triggered loop that only Pulls on completion stalls
+silently the moment the shortlist empties, because 0 implementers emit no
+completion event.

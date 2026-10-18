@@ -4968,6 +4968,17 @@ test("implementers: a head whose Pull ended in this run takes no slot, the next 
   assert.deepEqual(pullActions(state({ heads: [5, 6], pulls: new Map([[5, ended], [6, ended]]) })), ["SUGGEST /triage, hold idle"]);
 });
 
+test("implementers: unclaimed= leaves out the heads whose Pull ended, and after a refresh whose trigger names a count it prints that count", () => {
+  const ended = { kind: "ended" };
+  const detail = (over) => row(state({ bound: 3, heads: [5, 6, 7], pulls: new Map([[5, ended]]), ...over }), "implementers").detail;
+  assert.equal(detail({}), "implementers=0 prs=0 unclaimed=2 supply=0");
+  const refreshed = { ok: true, entries: 3, lifted: 0, changed: true, trigger: "unclaimed 1 < in-flight bound 3" };
+  assert.equal(detail({ refresh: { ...refreshed, unclaimed: 1 } }), "implementers=0 prs=0 unclaimed=1 supply=0");
+  assert.equal(detail({ refresh: { ...refreshed, trigger: "shortlist missing" } }), "implementers=0 prs=0 unclaimed=2 supply=0",
+    "a trigger that names no count leaves the row its own heads' count");
+  assert.equal(detail({ inFlight: 3 }), "implementers=0 prs=0 unclaimed=2 supply=0", "the held row's count leaves them out too");
+});
+
 test("implementers: a Pull record changes no hold — the bound, the tier holds and draining still print one HOLD row", () => {
   const pulls = new Map([[1, { kind: "pending", qid: "decided", stale: true }]]);
   for (const over of [{ inFlight: 5 }, { draining: "x" }, { tierMismatch: ["impl-4"] }, { tierUnchecked: ["impl-4"] }, { phase0: { held: true, line: "x", session: null } }]) {
@@ -5129,6 +5140,118 @@ test("CLI: a receipt whose session is empty names no session, so a record is rea
     { heads: [7], receipt: (root) => (r) => ({ ...r, scratch: root, session: "" }) });
   assert.equal(t.status, 0, t.stderr);
   assert.deepEqual(pullLines(t.stdout).map(actionOf), ["PULL #7 (Q2 pending — pull.mjs answer 7 decided …)"]);
+});
+
+// The short-queue refresh counts only the heads a PULL row could name: a head
+// whose Pull ended in this run's session is no such head. Ticks at
+// `--in-flight <bound>` over the shortlist `file`, the refresh writing
+// `refresh`, with a `left` record in this run's session for each of `ended`,
+// and `records` (pullScratch's shape) beside them.
+const LEFT = (n) => ({ record: pullRecord(n, { status: "left", outcome: { exit: 1, reason: "taken" } }) });
+const endedTicks = ({ file, refresh, ended = [], records = {}, bound = 3, again = 0, receipt, ...fixture }) => {
+  const root = pullScratch({ ...Object.fromEntries(ended.map((n) => [n, LEFT(n)])), ...records });
+  try {
+    const phase0 = (receipt ?? ((at) => (r) => ({ ...r, scratch: at, session: PULL_SESSION })))(root);
+    return ticksOver(["--in-flight", String(bound)], { shortlist: shortlistText(file), refresh: shortlistText(refresh), phase0, ...fixture }, again);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+// The count in a tick's `REFRESHED` short-queue trigger text, or null when the tick has none.
+const triggerCount = (stdout) => {
+  const m = /^shortlist {4}→ REFRESHED [^\n]*\(unclaimed (\d+) < in-flight bound \d+/m.exec(stdout);
+  return m === null ? null : Number(m[1]);
+};
+// Every `unclaimed=` the implementer rows of a tick print.
+const rowCounts = (stdout) => pullLines(stdout).map((l) => Number(/ unclaimed=(\d+) /.exec(l)[1]));
+const refreshedRow = /^shortlist {4}→ REFRESHED /m;
+
+test("CLI: a head whose Pull ended this run is not counted, so two pullable heads under B = 3 refresh and the third slot Pulls the new head", () => {
+  const [t] = endedTicks({ file: [1, 2, 50], ended: [50], refresh: [1, 2, 60] });
+  assert.equal(t.status, 0, t.stderr);
+  assert.match(t.stdout, /^shortlist {4}→ REFRESHED shortlist: 3 entries; 0 lifted {3}\(unclaimed 2 < in-flight bound 3\)$/m);
+  assert.deepEqual(pullLines(t.stdout).map(actionOf), [1, 2, 60].map((n) => `PULL #${n} — pull.mjs next --head ${n}`));
+  assert.deepEqual(rowCounts(t.stdout), [2, 2, 2], "the row prints the count its trigger read");
+});
+
+test("CLI: every head's Pull ended this run — the tick refreshes before any idle row, and Pulls what the refresh finds", () => {
+  const [found] = endedTicks({ file: [1, 2, 3], ended: [1, 2, 3], refresh: [60] });
+  assert.equal(found.status, 0, found.stderr);
+  assert.match(found.stdout, /\(unclaimed 0 < in-flight bound 3\)$/m);
+  assert.deepEqual(pullLines(found.stdout).map(actionOf), ["PULL #60 — pull.mjs next --head 60"]);
+  assert.deepEqual(rowCounts(found.stdout), [0]);
+  // A refresh that finds only the same ended heads leaves nothing to Pull: idle, after the refresh.
+  const [none] = endedTicks({ file: [1, 2, 3], ended: [1, 2, 3], refresh: [1, 2, 3] });
+  assert.equal(none.status, 0, none.stderr);
+  assert.match(none.stdout, refreshedRow);
+  assert.deepEqual(pullLines(none.stdout).map(actionOf), ["SUGGEST /triage, hold idle"]);
+  assert.deepEqual(rowCounts(none.stdout), [triggerCount(none.stdout)]);
+});
+
+test("CLI: control — no Pull records, two heads under B = 3 refresh and Pull the new head as before", () => {
+  const [t] = endedTicks({ file: [1, 2], refresh: [1, 2, 60] });
+  assert.equal(t.status, 0, t.stderr);
+  assert.match(t.stdout, /\(unclaimed 2 < in-flight bound 3\)$/m);
+  assert.deepEqual(pullLines(t.stdout).map(actionOf), [1, 2, 60].map((n) => `PULL #${n} — pull.mjs next --head ${n}`));
+  assert.deepEqual(rowCounts(t.stdout), [2, 2, 2]);
+});
+
+test("CLI: B = 2, both heads' Pulls ended this run — one left, one released — the refresh runs", () => {
+  const released = { 2: { record: pullRecord(2, { status: "released", outcome: { exit: 2, reason: "router refused" } }) } };
+  const [t] = endedTicks({ file: [1, 2], ended: [1], records: released, refresh: [60], bound: 2 });
+  assert.equal(t.status, 0, t.stderr);
+  assert.match(t.stdout, /\(unclaimed 0 < in-flight bound 2\)$/m);
+  assert.deepEqual(pullLines(t.stdout).map(actionOf), ["PULL #60 — pull.mjs next --head 60"]);
+});
+
+test("CLI: every head ended, over several ticks — each tick refreshes before its row, and prints the one count its trigger read", () => {
+  for (const refresh of [[1, 2, 3], [60]]) {
+    const ticks = endedTicks({ file: [1, 2, 3], ended: [1, 2, 3], refresh, again: 2 });
+    for (const [i, t] of ticks.entries()) {
+      assert.equal(t.status, 0, t.stderr);
+      assert.match(t.stdout, refreshedRow, `refresh ${refresh}, tick ${i}`);
+      const k = triggerCount(t.stdout);
+      assert.notEqual(k, null, `refresh ${refresh}, tick ${i}`);
+      for (const c of rowCounts(t.stdout)) assert.equal(c, k, `refresh ${refresh}, tick ${i}`);
+    }
+  }
+});
+
+test("CLI: three pullable heads beside an ended one at B = 3 are not short — no refresh", () => {
+  const [t] = endedTicks({ file: [1, 2, 3, 50], ended: [50], refresh: [60] });
+  assert.equal(t.status, 0, t.stderr);
+  assert.doesNotMatch(t.stdout, /REFRESH/);
+  assert.deepEqual(pullLines(t.stdout).map(actionOf), [1, 2, 3].map((n) => `PULL #${n} — pull.mjs next --head ${n}`));
+  assert.deepEqual(rowCounts(t.stdout), [3, 3, 3]);
+});
+
+test("CLI: a record the tick does not read as ended still counts toward the trigger, and with no scratch root no record is read", () => {
+  const records = {
+    1: { text: "{not json" },
+    2: { record: pullRecord(2, { status: "left", session: "/another-run" }) },
+    3: { record: pendingOn(3, "decided") },
+    4: { record: dispatchedRecord(4) },
+  };
+  const [t] = endedTicks({ file: [1, 2, 3, 4], records, refresh: [60], bound: 4 });
+  assert.equal(t.status, 0, t.stderr);
+  assert.doesNotMatch(t.stdout, /REFRESH/, "four heads a PULL row can name at B = 4 are not short");
+  assert.deepEqual(rowCounts(t.stdout), [4, 4, 4, 4]);
+  const [noRoot] = endedTicks({ file: [1, 2, 50], ended: [50], refresh: [60], receipt: () => (r) => ({ ...r, scratch: "", session: PULL_SESSION }) });
+  assert.equal(noRoot.status, 0, noRoot.stderr);
+  assert.doesNotMatch(noRoot.stdout, /REFRESH/, "no records read: the plain unclaimed count, 3, is not short of 3");
+  assert.deepEqual(pullLines(noRoot.stdout).map(actionOf), [1, 2, 50].map((n) => `PULL #${n} — pull.mjs next --head ${n}`));
+  assert.deepEqual(rowCounts(noRoot.stdout), [3, 3, 3]);
+});
+
+test("CLI: draining, or held at the bound, with ended heads — no refresh, the same HOLD row, its count without the ended heads", () => {
+  const held = endedTicks({ file: [1, 2, 50], ended: [50], refresh: [60], prs: [pr(51), pr(52), pr(53)] })[0];
+  assert.equal(held.status, 0, held.stderr);
+  assert.doesNotMatch(held.stdout, /REFRESH/);
+  assert.deepEqual(pullLines(held.stdout), ["implementers 3/3 → HOLD (in-flight 3/3)   (implementers=0 prs=3 unclaimed=2 supply=3)"]);
+  const draining = endedTicks({ file: [1, 2, 50], ended: [50], refresh: [60], ledger: { drain: "budget" } })[0];
+  assert.equal(draining.status, 0, draining.stderr);
+  assert.doesNotMatch(draining.stdout, /REFRESH/);
+  assert.deepEqual(pullLines(draining.stdout), ["implementers 0/3 → HOLD (draining)   (implementers=0 prs=0 unclaimed=2 supply=3)"]);
 });
 
 // The age-based checks a degraded heartbeat file silences: its `seen` stamps

@@ -8,9 +8,14 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
 - `REFRESHED shortlist: <n> entries; <k> lifted` — the tick refreshed the
   shortlist itself, and its `PULL` row already reads the result. `REFRESH
   FAILED` is yours: `shortlist.mjs` could not run, and the implementer row is
-  blind until it can.
+  blind until it can. When the refresh ran because fewer than B heads were
+  unclaimed (`unclaimed <u> < in-flight bound <B>`), a head whose Pull ended
+  this run not counted, the implementer row's `unclaimed=` prints that same
+  `<u>`, not the refreshed file's count.
 - `SUGGEST /triage, hold idle` — nothing is admissible after the refresh.
-  Suggest, never run (**Queue depth**).
+  Suggest, never run (**Queue depth**). A head whose Pull already ended in
+  this run is not counted toward the refresh, so a shortlist of only such
+  heads triggers the refresh before this row prints.
 - `specs-dropped=#<N> … (to-spec: User Stories heading)` at the end of the
   implementer row's counts, whatever its ACTION — the tickets the to-spec
   filter kept out of `supply`, read off the shortlist's `dropped`. Never

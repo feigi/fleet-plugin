@@ -147,7 +147,8 @@ phase, or in any later one, asks the maintainer which tickets to take.
    lifted, and when a branch-named `behind-pr` exclusion whose PR is not yet
    MERGED or CLOSED, or a `behind-issue` exclusion whose issue is not yet
    closed, names a ticket the file still carries, and prints
-   `REFRESHED shortlist: <n> entries; <k> lifted`. Phase 0 runs it by hand
+   `REFRESHED shortlist: <n> entries; <k> lifted`. A head whose Pull ended
+   this run is not counted. Phase 0 runs it by hand
    once because a dead run's shortlist is stale by definition.
    None of those triggers runs while `HOLD (in-flight <n>/<B>)` stands
    (**Queue depth**).
@@ -249,6 +250,7 @@ unclaimed count is below the In-flight bound, when the file is missing or
 empty, when an Exclusion's premise has lifted, or when a branch-named
 `behind-pr` or a `behind-issue` Exclusion still not lifted names a ticket the
 file carries — never while the bound holds; the open PRs come off `gh`. A
+head whose Pull ended this run is not counted. A
 ledger token it
 cannot read, it refuses rather than guessing — a member counted live or gone on
 a guess is the over- or under-dispatch it exists to prevent — so correct that
@@ -2110,6 +2112,8 @@ Read the depth off the tick and never derive it by hand: act on the row it print
 
 - **shortlist** — `.fleet/shortlist.json`'s entries with no `impl-` row and no
   live `excluded` row: admissible, not yet pulled. The tick's `unclaimed=`.
+  Not after a refresh at unclaimed < B (below). A head whose Pull ended this
+  run is not counted.
 - **supply** — `scanned`, the open `ready-for-agent` tickets `shortlist.mjs`'s
   candidate scan returned, before any filter. Only a Pull's full read judges
   decided?, so a shortlist of undecided tickets is supply that every Pull
@@ -2149,18 +2153,12 @@ Read the depth off the tick and never derive it by hand: act on the row it print
 
 **The review backlog never gates, and the merge-queue depth is still no
 signal.** The only gate on a Pull is the In-flight count. A deep backlog is a
-`DISPATCH review` on the same tick, never a reason to idle an implementer. A
-deep `ready-to-merge` queue adds no rebases per PR — each PR rebases exactly
-once, when it becomes the candidate — and those PRs count as In flight because
-they sit between Claim and merge, not because the queue is deep.
+`DISPATCH review` on the same tick, never a reason to idle an implementer.
+For the merge queue, see references/pull.md.
 
-**Reconcile, do not wait for an event.** "A slot is free and the shortlist is
-non-empty" is a *level* condition — re-derive the deficit on **every** tick,
-whatever woke you: a member finishing, a member bailing before implementing, a
-merge landing. An edge-triggered loop that only Pulls on completion stalls
-silently the moment the shortlist empties, because 0 implementers emit no
-completion event. With the shortlist empty the table below governs — refresh,
-and never Pull a ticket the shortlist does not hold.
+**Reconcile, do not wait for an event.** With the shortlist empty the table
+below governs — refresh, and never Pull a ticket the shortlist does not hold.
+See references/pull.md.
 
 **Do not re-derive this by hand — `fleet-tick.mjs` computes it.** One invocation
 prints per-role `actual/target` and an explicit ACTION with the backlog gate
@@ -2170,7 +2168,9 @@ the whole point: a table you must remember to consult is one you will not
 consult under a merge-side event storm, and that is how implementers reached
 0/target with one approved ticket waiting and ~57 `ready-for-agent` in supply while nobody
 noticed (#3). What follows stays here as the explanation of what the script decides —
-never as a second, hand-run copy of it.
+never as a second, hand-run copy of it. The table's shortlist counts no head
+whose Pull ended this run. A refresh at unclaimed < B leaves `unclaimed=` at
+that count, so `SUGGEST /triage` can print it above 0.
 
 | shortlist (unclaimed) | implementer row prints |
 |---|---|
@@ -2186,7 +2186,8 @@ awaiting to-tickets, so an empty shortlist carrying one is not "no work".
 
 The refresh runs at unclaimed < B and, with every other refresh trigger, never
 while the bound holds: a refresh then cannot feed a Pull, and the first tick
-back under the bound refreshes and Pulls in the same tick.
+back under the bound refreshes and Pulls in the same tick. Unclaimed there
+counts no head whose Pull ended this run.
 
 Four holds outrank every row: `HOLD (draining)` once `ledger.mjs drain` has
 recorded the drain, `HOLD (tier mismatch impl-<N>)` until a replacement is
