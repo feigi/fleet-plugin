@@ -193,7 +193,7 @@ async function readStates(prefix, field, nums, what) {
     // `how` as runCiState() spells it; never r.error.message, which repeats
     // the whole query — one field per number — into every failed tick's line.
     const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
-    console.error(`${NAME}: gh api graphql ${what} read (${nums.length}) failed (${how}) with no usable answer`);
+    console.error(`${NAME}: gh api graphql ${what} failed (${how}) with no usable answer`);
     return null;
   }
   return repo;
@@ -204,7 +204,7 @@ async function readStates(prefix, field, nums, what) {
 async function readPrStates(prNums) {
   const none = { merged: [], closed: [] };
   if (!prNums.length) return none;
-  const repo = await readStates("p", "pullRequest", prNums, "PR state");
+  const repo = await readStates("p", "pullRequest", prNums, `merged read (${prNums.length} PR${prNums.length === 1 ? "" : "s"})`);
   if (!repo) return none;
   return {
     merged: prNums.filter((n) => repo[`p${n}`]?.state === "MERGED"),
@@ -216,7 +216,7 @@ async function readPrStates(prNums) {
 // as not CLOSED, the way closedTickets() reads its own failed probe.
 async function readClosedIssues(issueNums) {
   if (!issueNums.length) return [];
-  const repo = await readStates("i", "issue", issueNums, "issue state");
+  const repo = await readStates("i", "issue", issueNums, `issue read (${issueNums.length} issue${issueNums.length === 1 ? "" : "s"})`);
   if (!repo) return [];
   return issueNums.filter((n) => repo[`i${n}`]?.state === "CLOSED");
 }
