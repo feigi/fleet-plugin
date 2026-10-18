@@ -2153,18 +2153,12 @@ Read the depth off the tick and never derive it by hand: act on the row it print
 
 **The review backlog never gates, and the merge-queue depth is still no
 signal.** The only gate on a Pull is the In-flight count. A deep backlog is a
-`DISPATCH review` on the same tick, never a reason to idle an implementer. A
-deep `ready-to-merge` queue adds no rebases per PR — each PR rebases exactly
-once, when it becomes the candidate — and those PRs count as In flight because
-they sit between Claim and merge, not because the queue is deep.
+`DISPATCH review` on the same tick, never a reason to idle an implementer.
+For the merge queue, see references/pull.md.
 
-**Reconcile, do not wait for an event.** "A slot is free and the shortlist is
-non-empty" is a *level* condition — re-derive the deficit on **every** tick,
-whatever woke you: a member finishing, a member bailing before implementing, a
-merge landing. An edge-triggered loop that only Pulls on completion stalls
-silently the moment the shortlist empties, because 0 implementers emit no
-completion event. With the shortlist empty the table below governs — refresh,
-and never Pull a ticket the shortlist does not hold.
+**Reconcile, do not wait for an event.** With the shortlist empty the table
+below governs — refresh, and never Pull a ticket the shortlist does not hold.
+See references/pull.md.
 
 **Do not re-derive this by hand — `fleet-tick.mjs` computes it.** One invocation
 prints per-role `actual/target` and an explicit ACTION with the backlog gate
