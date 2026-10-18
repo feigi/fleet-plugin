@@ -1,0 +1,215 @@
+// #3494. The review snapshot cuts its tree from `worktree` but used to read the
+// PR through `gh` commands that take their repository from the inherited working
+// directory. A snapshot agent starts in the CONTROLLER's checkout, so a review
+// of a PR in repository A dispatched from repository B's checkout read whichever
+// PR in B shared the number: `pr.diff`, `diffStats` and the `refHead` branch
+// lookup described another PR, and nothing in the payload said so. `refHead`
+// went empty, which `snapshotMissing` reads as "head check SKIPPED".
+//
+// Five call sites read the PR: `gh pr diff`, the three `gh pr view` field reads,
+// and `diff-stats.mjs --pr`. Each has to name the worktree's own repository, so
+// each is pinned on its own below — a pin on the first `gh pr diff` line alone
+// would stay green while any of the other four reverted.
+//
+// Two halves, for the reason snapshot-repo.test.mjs gives: the source-text pins
+// name the five sites; the executed cases run the block's own lines, lifted from
+// review-core.mjs, from a working directory that is a DIFFERENT repository from
+// the worktree's, against a `gh` that answers for the cwd's repository whenever
+// it is not told otherwise. The lagging-`prHead` admission (#1513) is not touched
+// here — review-core-snapshot-path.test.mjs still owns it.
+//
+// Zero deps: `node --test tests/review-core-pr-repo.test.mjs`.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { stripComments } from "./support/strip-comments.mjs";
+import { Pin } from "./support/prose-pin.mjs";
+import { writeExecStub } from "./support/exec-stub.mjs";
+
+const SOURCE = readFileSync(join(import.meta.dirname, "..", "plugin", "scripts", "review-core.mjs"), "utf8");
+const CODE = stripComments(SOURCE);
+const SNAPSHOT = Pin.of(CODE, "CODE").between("const snap = await agent(", "if (snap) {", "review-core.mjs").text;
+
+const ENV = {
+  ...process.env,
+  GIT_DIR: undefined,
+  GIT_WORK_TREE: undefined,
+  GIT_INDEX_FILE: undefined,
+  GIT_TEMPLATE_DIR: undefined,
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null",
+};
+const git = (dir, ...args) => execFileSync("git", ["-C", dir, ...args], { env: ENV, encoding: "utf8" }).trim();
+
+function scratch(t, prefix) {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+// --- source-text pins: one per call site -----------------------------------
+
+const lineOf = (re) => {
+  const hits = SNAPSHOT.split("\n").filter((l) => re.test(l));
+  assert.equal(hits.length, 1, `expected exactly one snapshot-prompt line matching ${re}, found ${hits.length}`);
+  return hits[0];
+};
+
+const NAMED = /-R "\$REPO"/;
+
+for (const [name, re] of [
+  ["gh pr diff", /gh pr diff \$\{pr\}/],
+  ["gh pr view isCrossRepository", /gh pr view \$\{pr\}.*--json isCrossRepository/],
+  ["gh pr view headRefName", /gh pr view \$\{pr\}.*--json headRefName/],
+  ["gh pr view headRefOid", /gh pr view \$\{pr\}.*--json headRefOid/],
+]) {
+  test(`snapshot prompt: \`${name}\` names the worktree's repository, not the cwd's`, () => {
+    assert.match(lineOf(re), NAMED, `\`${name}\` carries no -R "$REPO" — it reads the PR from the controller's cwd repository (#3494)`);
+  });
+}
+
+test("snapshot prompt: the sizing script is told the worktree's repository", () => {
+  assert.match(
+    lineOf(/fleet-run diff-stats\.mjs --pr \$\{pr\}/),
+    /--repo "\$REPO"/,
+    'diff-stats.mjs is invoked with no --repo "$REPO" — it sizes the cwd repository\'s PR of the same number (#3494)',
+  );
+});
+
+test("snapshot prompt: every `gh` in the PR-capture block is one of the four pinned above", () => {
+  const ghLines = SNAPSHOT.split("\n").filter((l) => /^\s*(?:\w+=\$\()?gh /.test(l));
+  assert.equal(ghLines.length, 4, `a new unpinned \`gh\` read joined the snapshot block:\n${ghLines.join("\n")}`);
+  for (const l of ghLines) assert.match(l, NAMED, `an unanchored gh read: ${l}`);
+});
+
+test("snapshot prompt: the repository comes from the worktree's own origin remote, never the cwd", () => {
+  const derivations = SNAPSHOT.split("\n").filter((l) => /REPO=\$\(/.test(l));
+  assert.ok(derivations.length >= 2, "the capture block and the sizing block each derive $REPO themselves — the sizing step is a separate shell command");
+  for (const l of derivations) {
+    assert.match(l, /^\s*REPO=\$\(git -C \$\{worktree\} remote get-url origin 2>\/dev\/null\)$/, `REPO is not read from the worktree's origin: ${l}`);
+  }
+});
+
+// --- executed cases ---------------------------------------------------------
+
+/** The lines from `from` up to and including the line matching `to`, as the shell would see them. */
+function lift(from, to) {
+  const start = CODE.search(from);
+  assert.ok(start !== -1, `${from} is gone from review-core.mjs — the block was reshaped past what this test lifts`);
+  const rest = CODE.slice(start);
+  const end = rest.search(to);
+  assert.ok(end !== -1, `${to} no longer closes the block that starts at ${from}`);
+  return rest.slice(0, rest.indexOf("\n", end));
+}
+
+const render = (block, worktree, pr) => new Function("worktree", "pr", "return `" + block + "`")(worktree, pr);
+
+// A `gh` that answers for the CWD's repository unless it is told a repository
+// with `-R`, the resolution rule the real one has (measured: `gh pr view 1
+// -R <git@host:o/r.git>` reads that repository; with no -R it reads the cwd's).
+// Every call is logged, one line of args per call, so "no gh ran" is a count.
+function ghStub(t) {
+  const dir = scratch(t, "pr-repo-bin-");
+  const log = join(dir, "gh.log");
+  const body = `#!/bin/sh
+printf '%s\\n' "$*" >> ${JSON.stringify(log)}
+named=
+prev=
+for a in "$@"; do
+  [ "$prev" = "-R" ] && named="$a"
+  prev="$a"
+done
+if [ -n "$named" ]; then who=RIGHT; else who=WRONG; fi
+case "$*" in
+  "pr diff"*) printf 'diff --git a/%s.txt b/%s.txt\\n' "$who" "$who" ;;
+  *isCrossRepository*) echo false ;;
+  *headRefName*) echo "branch-$who" ;;
+  *headRefOid*) echo "oid-$who" ;;
+  *) exit 9 ;;
+esac
+`;
+  writeExecStub(join(dir, "gh"), body);
+  return { dir, calls: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []) };
+}
+
+/** A worktree whose origin is a local bare repo carrying `refs/heads/branch-RIGHT`, plus an unrelated repository to stand in as cwd. */
+function fixture(t, { withOrigin = true } = {}) {
+  const origin = scratch(t, "pr-repo-origin-");
+  git(origin, "init", "-q", "--bare");
+  const worktree = scratch(t, "pr-repo-wt-");
+  git(worktree, "init", "-q");
+  writeFileSync(join(worktree, "a.txt"), "a\n");
+  git(worktree, "add", "-A");
+  git(worktree, "-c", "user.name=f", "-c", "user.email=f@invalid", "commit", "-q", "-m", "fixture");
+  const sha = git(worktree, "rev-parse", "HEAD");
+  if (withOrigin) {
+    git(worktree, "remote", "add", "origin", origin);
+    git(worktree, "push", "-q", "origin", "HEAD:refs/heads/branch-RIGHT");
+  }
+  const cwd = scratch(t, "pr-repo-cwd-");
+  git(cwd, "init", "-q");
+  git(cwd, "remote", "add", "origin", "https://other.example.com/unrelated/repo.git");
+  const run = scratch(t, "pr-repo-run-");
+  return { origin, worktree, sha, cwd, run };
+}
+
+const PR = 1270;
+const CAPTURE = lift(/^ *REPO=\$\(git .*\n *if \[ -n "\$REPO" \]; then\n *gh pr diff/m, /^ *fi$/m);
+const SIZING = lift(/^ *REPO=\$\(git .*\n *if \[ -n "\$REPO" \]; then ~\/\.fleet\/bin\/fleet-run diff-stats/m, /; fi$/m);
+
+function runBlock(block, { worktree, run, cwd, bin, home }) {
+  const r = spawnSync("sh", ["-c", `RUN=${JSON.stringify(run)}\n${render(block, worktree, PR)}`], {
+    cwd,
+    env: { ...ENV, HOME: home ?? ENV.HOME, PATH: `${bin}:${process.env.PATH}` },
+    encoding: "utf8",
+  });
+  return { out: r.stdout.trim().split("\n").map((l) => l.trim()), err: r.stderr, status: r.status };
+}
+
+test("capture block: dispatched from an unrelated repository, every PR read names the worktree's origin and reads the right PR", (t) => {
+  const f = fixture(t);
+  const gh = ghStub(t);
+  const r = runBlock(CAPTURE, { ...f, bin: gh.dir });
+  assert.equal(r.status, 0, r.err);
+  // ref (from the branch the RIGHT pr named), then headRefOid, then wc -l.
+  assert.deepEqual(r.out, [f.sha, "oid-RIGHT", "1"], r.err);
+  assert.match(readFileSync(join(f.run, "pr.diff"), "utf8"), /RIGHT\.txt/);
+  const calls = gh.calls();
+  assert.equal(calls.length, 4, `diff + three field reads: ${calls.join(" | ")}`);
+  for (const c of calls) assert.ok(c.includes(`-R ${f.origin}`), `a gh call did not name the worktree's origin: ${c}`);
+});
+
+test("capture block: with no origin remote nothing runs against the cwd's repository and the block says so", (t) => {
+  const f = fixture(t, { withOrigin: false });
+  const gh = ghStub(t);
+  const r = runBlock(CAPTURE, { ...f, bin: gh.dir });
+  assert.deepEqual(r.out, ["SNAPSHOT_REPO_UNRESOLVED"], r.err);
+  assert.deepEqual(gh.calls(), [], "a gh call ran with no repository to name — it read the cwd's");
+  assert.equal(existsSync(join(f.run, "pr.diff")), false, "a diff file exists for a capture that never ran");
+});
+
+test("sizing block: dispatched from an unrelated repository, diff-stats is handed the worktree's origin", (t) => {
+  const f = fixture(t);
+  const home = scratch(t, "pr-repo-home-");
+  mkdirSync(join(home, ".fleet", "bin"), { recursive: true });
+  const log = join(home, "fleet-run.log");
+  writeExecStub(join(home, ".fleet", "bin", "fleet-run"), `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit 3\n`);
+  const gh = ghStub(t);
+  const r = runBlock(SIZING, { ...f, bin: gh.dir, home });
+  assert.equal(r.status, 3, "the sizing script's own exit status must survive the block — fail-closed");
+  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), [`diff-stats.mjs --pr ${PR} --repo ${f.origin}`]);
+});
+
+test("sizing block: with no origin remote the script is never run and the block says so", (t) => {
+  const f = fixture(t, { withOrigin: false });
+  const home = scratch(t, "pr-repo-home-");
+  mkdirSync(join(home, ".fleet", "bin"), { recursive: true });
+  const log = join(home, "fleet-run.log");
+  writeExecStub(join(home, ".fleet", "bin", "fleet-run"), `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\n`);
+  const r = runBlock(SIZING, { ...f, bin: ghStub(t).dir, home });
+  assert.deepEqual(r.out, ["SNAPSHOT_REPO_UNRESOLVED"], r.err);
+  assert.equal(existsSync(log), false, "diff-stats ran with no repository to name — it would read the cwd's");
+});

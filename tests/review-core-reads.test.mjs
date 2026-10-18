@@ -290,13 +290,13 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
   // hang off the same per-run root, which is what keeps `pr.diff` a SIBLING of
   // the snapshot tree (the relationship the read-rules qualifier below depends
   // on) while stopping two reviews in one session from overwriting each other's.
-  assert.match(snapshot, /gh pr diff \$\{pr\} > "?\$RUN"?\/pr\.diff/, "no diff capture");
+  assert.match(snapshot, /gh pr diff \$\{pr\} -R "\$REPO" > "?\$RUN"?\/pr\.diff/, "no diff capture");
   // `/headRefOid/` alone also matches the prose ("Report `prHead` = the
   // headRefOid") in the same prompt, so deleting this command left the suite
   // green — pin the command line itself, not a word it shares with prose.
   assert.match(
     snapshot,
-    /gh pr view \$\{pr\} --json headRefOid -q \.headRefOid/,
+    /gh pr view \$\{pr\} -R "\$REPO" --json headRefOid -q \.headRefOid/,
     "no PR head to cross-check against the snapshot's",
   );
   // #1513: the read the caller actually compares the snapshot against. It sits
@@ -307,7 +307,7 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
   // prose also carries.
   assert.match(
     snapshot,
-    /branch=\$\(gh pr view \$\{pr\} --json headRefName -q \.headRefName\)/,
+    /branch=\$\(gh pr view \$\{pr\} -R "\$REPO" --json headRefName -q \.headRefName\)/,
     "no branch-name read — `refs/heads/$branch` then names no ref, and every PR falls through to the PR-ref read instead of reporting the branch ref #1513 chose",
   );
   // #1616 made this pair ORDERED rather than a single line, so all three facts

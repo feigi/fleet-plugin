@@ -1071,17 +1071,32 @@ bare \`git\` — reads or writes THERE. Add nothing relative to it, and
 chain a \`cd\` into "$RUN" or "$SNAP" for anything you run beyond it.
 
 Then capture the PR's diff for the specialists, plus the three facts the caller
-needs to judge whether it is usable:
+needs to judge whether it is usable. Every 'gh' call here names the repository
+with -R, read from the worktree's own 'origin' remote: this dispatch starts in
+the controller's checkout, which may be a different repository from the
+worktree's, and a 'gh' with no -R reads whichever PR in THAT repository shares
+the number — a diff, a branch and a head that belong to another PR entirely,
+with nothing in the output saying so:
 
-    gh pr diff ${pr} > "$RUN"/pr.diff
-    crossRepo=$(gh pr view ${pr} --json isCrossRepository -q .isCrossRepository)
-    branch=$(gh pr view ${pr} --json headRefName -q .headRefName)
-    ref=""
-    [ "$crossRepo" = "true" ] || ref=$(git -C ${worktree} ls-remote origin "refs/heads/$branch" | cut -f1)
-    [ -n "$ref" ] || ref=$(git -C ${worktree} ls-remote origin "refs/pull/${pr}/head" | cut -f1)
-    echo "$ref"
-    gh pr view ${pr} --json headRefOid -q .headRefOid
-    wc -l < "$RUN"/pr.diff
+    REPO=$(git -C ${worktree} remote get-url origin 2>/dev/null)
+    if [ -n "$REPO" ]; then
+      gh pr diff ${pr} -R "$REPO" > "$RUN"/pr.diff
+      crossRepo=$(gh pr view ${pr} -R "$REPO" --json isCrossRepository -q .isCrossRepository)
+      branch=$(gh pr view ${pr} -R "$REPO" --json headRefName -q .headRefName)
+      ref=""
+      [ "$crossRepo" = "true" ] || ref=$(git -C ${worktree} ls-remote origin "refs/heads/$branch" | cut -f1)
+      [ -n "$ref" ] || ref=$(git -C ${worktree} ls-remote origin "refs/pull/${pr}/head" | cut -f1)
+      echo "$ref"
+      gh pr view ${pr} -R "$REPO" --json headRefOid -q .headRefOid
+      wc -l < "$RUN"/pr.diff
+    else
+      echo SNAPSHOT_REPO_UNRESOLVED
+    fi
+
+If the block printed SNAPSHOT_REPO_UNRESOLVED, no 'gh' ran: the worktree has no
+'origin' remote to name the repository, and the controller's own repository is
+never a substitute. Omit \`diffPath\`, \`diffLines\`, \`refHead\` and \`prHead\`,
+and run nothing else against the PR yourself.
 
 Report \`diffPath\` = the SNAPSHOT_RUN_ROOT value with '/pr.diff' appended, ONLY
 if 'gh pr diff' exited 0. Report \`refHead\` = the sha the 'echo "$ref"' line
@@ -1120,9 +1135,13 @@ Report \`uncovered\` = its stdout, one line of JSON copied verbatim, ONLY if it
 exited 0. If it exited non-zero, report \`uncoveredError\` = its stderr and omit
 \`uncovered\`. Run none of the steps it lists.
 
-Then size the diff:
+Then size the diff, naming the same repository for the same reason — diff-stats.mjs
+given no --repo reads the PR from the controller's checkout:
 
-    ~/.fleet/bin/fleet-run diff-stats.mjs --pr ${pr}
+    REPO=$(git -C ${worktree} remote get-url origin 2>/dev/null)
+    if [ -n "$REPO" ]; then ~/.fleet/bin/fleet-run diff-stats.mjs --pr ${pr} --repo "$REPO"; else echo SNAPSHOT_REPO_UNRESOLVED; fi
+
+If that printed SNAPSHOT_REPO_UNRESOLVED, omit \`diffStats\`.
 
 Report \`runRoot\` = the SNAPSHOT_RUN_ROOT value and \`path\` = the SNAPSHOT_DEST
 value, both copied verbatim. Each ends in a component the shell substituted —
