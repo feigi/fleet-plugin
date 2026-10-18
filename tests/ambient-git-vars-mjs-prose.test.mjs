@@ -313,6 +313,13 @@ const COVERED_MJS = {
   // repository's head against the pin. Measured in finisher-audit.test.mjs,
   // "an inherited GIT_DIR cannot retarget the head read".
   "finisher-audit.mjs": 1,
+  // TWO scrubbed envs. `run()` is the one spawn primitive for the `gh` reads
+  // and the `git` upstream reads and writes; an ambient GIT_DIR would answer
+  // those reads for another repository and write the upstream into its config.
+  // The second is the `fleet-tick.mjs` child's spawn. Measured in
+  // fleet-event.test.mjs, "gh runs with GIT_DIR scrubbed…" and "impl-report's
+  // git and tick children run with GIT_DIR scrubbed…".
+  "fleet-event.mjs": 2,
 };
 
 // The exemption list #1599's second design question answers with — two names

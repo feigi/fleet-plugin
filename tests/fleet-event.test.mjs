@@ -91,6 +91,8 @@ cpSync(join(SCRIPTS, "fleet-tick.mjs"), join(SCRIPTS, "fleet-tick-real.mjs"));
 writeFileSync(join(SCRIPTS, "fleet-tick.mjs"), `export * from "./fleet-tick-real.mjs";
 import { drive } from "./stub-driver.mjs";
 import { isCLI } from "./is-cli.mjs";
+import { writeFileSync } from "node:fs";
+if (isCLI(import.meta.url) && process.env.TICK_ENV_LOG) writeFileSync(process.env.TICK_ENV_LOG, JSON.stringify({ GIT_DIR: process.env.GIT_DIR ?? null }));
 if (isCLI(import.meta.url)) drive("fleet-tick", process.argv.slice(2));
 `);
 // dispositions-check.mjs is only ever run, never imported, by the scripts.
@@ -336,6 +338,24 @@ test("impl-report whose upstream write fails prints a NEED naming the commands, 
   assert.equal(configOf(f, "remote"), null);
 });
 
+test("impl-report's git and tick children run with GIT_DIR scrubbed, so an ambient one cannot move the upstream to another repository", () => {
+  const f = fixture({ rows: ["#412 impl-412"] });
+  git(f.repo, "branch", CLAIM);
+  const other = join(f.dir, "other");
+  mkdirSync(other);
+  git(other, "init", "-q", "-b", "main");
+  git(other, "commit", "-q", "--allow-empty", "-m", "root");
+  git(other, "branch", CLAIM);
+  const tickEnv = join(f.stubs, "tick-env.json");
+  f.report(implReport("impl-412"));
+  f.control("settle", { "impl-412": { outcome: "PR#88" } });
+  const r = f.run(["impl-report", "impl-412"], { env: { GIT_DIR: join(other, ".git"), TICK_ENV_LOG: tickEnv } });
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.equal(configOf(f, "merge"), `refs/heads/${CLAIM}`);
+  const otherMerge = spawnSync("git", ["config", "--get", `branch.${CLAIM}.merge`], { cwd: other, encoding: "utf8", env: GIT_ENV });
+  assert.equal(otherMerge.status, 1, "the repository GIT_DIR names keeps no upstream for the claim branch");
+  assert.deepEqual(JSON.parse(readFileSync(tickEnv, "utf8")), { GIT_DIR: null });
+});
 
 for (const [cause, label, detail, kindArgs] of [
   ["undecided", "needs-triage", "which flag spelling wins", ["--kind", "needs-triage", "--line", "which flag spelling wins"]],
