@@ -141,11 +141,19 @@ const die = makeDie(NAME);
 
 // The one git primitive. `gitEnv()` drops an ambient GIT_DIR/GIT_WORK_TREE
 // and LC_ALL=C keeps a failure's last line readable as git wrote it.
+// GIT_NO_LAZY_FETCH=1: this check is a local read-only backstop, so it never
+// reaches the network. In a partial clone a missing baseline commit then
+// answers `missing` instead of being fetched from the promisor remote; with
+// lazy fetch on, the ancestry read fetches it and answers `moved`, and a
+// fetch that fails there but succeeds for the probe turns `missing` into
+// `read`. Git before 2.45 ignores the variable and still lazy-fetches; that
+// is accepted, not fixed — the `--no-lazy-fetch` flag would instead fail
+// every call there, since such a git rejects it as an unknown option.
 // `what` names the call in a failure, since `why` is printed to the operator.
 function git(what, args, cwd, env) {
   const r = spawnSync("git", args, {
     cwd, encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GIT_TIMEOUT_MS,
-    env: gitEnv({ LC_ALL: "C" }, env),
+    env: gitEnv({ LC_ALL: "C", GIT_NO_LAZY_FETCH: "1" }, env),
   });
   if (!r.error && r.status === 0) return { ok: true, stdout: r.stdout };
   if (r.error) return { ok: false, why: `${what} did not run: ${r.error.code ?? r.error.message}`, status: null };
