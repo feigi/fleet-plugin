@@ -160,9 +160,14 @@ esac
 # registration for and only THEN fails on, and the precondition that refuses a
 # non-directory has already run by the time this call lands.
 [ -z "\${GH_SYMLINK:-}" ] || { mv "\$GH_SYMLINK" "\$GH_SYMLINK.real" && ln -s "\$GH_SYMLINK.real" "\$GH_SYMLINK"; }
+# The same window, for whatever else can land in it: a push to origin, origin
+# going away, a commit on the branch. Fired on the label read alone, so it lands
+# after every precondition and before the first delete, never mid-check.
+case "$*" in *"--json labels"*) [ -z "\${GH_VIEW_RUN:-}" ] || sh -c "\$GH_VIEW_RUN" >&2 ;; esac
 case "$*" in
   *closedByPullRequestsReferences*) ;;
   *"--json labels"*) printf '%s\\n' "\${GH_LABELS-in-progress}" ;;
+  *"pr list"*"--jq"*) printf '%s\\n' "\${GH_PRS-}" ;;
   *"pr list"*) printf '[]\\n' ;;
 esac
 exit 0
@@ -860,6 +865,212 @@ test("a pushed branch blocks on its own", (t) => {
   assert.match(json.blockers[0], /exists on origin/);
   assert.equal(code, 1);
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
+/** A claim whose work was pushed: the branch is on origin, at the tip the local one holds. */
+function pushedClaim(r) {
+  const c = claim(r.w, 9, "release-ticket");
+  commit(c.wt, "work", "work\n");
+  git(c.wt, "push", "-q", "origin", c.branch);
+  return c;
+}
+
+test("a pushed branch whose only PR is CLOSED unmerged releases, its remote branch with it", (t) => {
+  const r = repo(t);
+  const c = pushedClaim(r);
+  const env = { GH_PRS: "12:CLOSED" };
+
+  const dry = release(r, c, { apply: false, env });
+  assert.deepEqual([dry.code, dry.json.released, dry.json.applied, dry.json.blockers], [0, true, false, []], dry.stderr);
+  assert.ok(dry.stderr.includes(`would: git push origin --delete refs/heads/${c.branch} `), `the dry run must list the remote delete: ${dry.stderr}`);
+  assert.ok(dry.stderr.includes("PR states on"), `the dry run must list the PR states: ${dry.stderr}`);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "a dry run deletes nothing");
+  assert.notEqual(git(r.w, "ls-remote", "--heads", "origin", c.branch), "", "nor the remote branch");
+
+  const { code, json } = release(r, c, { env });
+  assert.equal(code, 0);
+  assert.deepEqual([json.released, json.applied, json.blockers], [true, true, []]);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+  assert.equal(git(r.w, "ls-remote", "--heads", "origin", c.branch), "", "the remote branch is gone");
+  assert.ok(r.calls().some((l) => l.includes("--remove-label in-progress")), "and the label drops");
+});
+
+test("a pushed branch with a PR that is not CLOSED unmerged blocks, and nothing is deleted", (t) => {
+  for (const prs of ["12:OPEN", "12:MERGED", "12:CLOSED 13:OPEN"]) {
+    const r = repo(t);
+    const c = pushedClaim(r);
+    const { code, json } = release(r, c, { env: { GH_PRS: prs } });
+    assert.equal(code, 1, prs);
+    assert.match(json.blockers[0], /not closed unmerged/, prs);
+    assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, `${prs}: nothing may be deleted`);
+    assert.notEqual(git(r.w, "ls-remote", "--heads", "origin", c.branch), "", `${prs}: the remote branch stays`);
+  }
+});
+
+test("a pushed branch no PR names blocks, and so does a PR list that cannot be read", (t) => {
+  const r = repo(t);
+  const c = pushedClaim(r);
+
+  const none = release(r, c);
+  assert.equal(none.code, 1, none.stderr);
+  assert.match(none.json.blockers[0], /no PR names it/);
+
+  const failed = release(r, c, { env: { GH_RC: "1" } });
+  assert.equal(failed.code, 2, failed.stderr);
+  assert.match(failed.stderr, /gh pr list failed/);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
+test("a CLOSED PR does not release a branch carrying a commit origin lacks", (t) => {
+  const r = repo(t);
+  const c = pushedClaim(r);
+  commit(c.wt, "unpushed", "more\n");
+
+  const { code, json } = release(r, c, { env: { GH_PRS: "12:CLOSED" } });
+  assert.equal(code, 1);
+  assert.match(json.blockers[0], /not at the tip origin holds/);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "unpushed work must survive");
+});
+
+test("a pushed claim that is blocked locally reports every blocker without asking GitHub", (t) => {
+  // The PR states are read only once nothing local blocks: asked first, an
+  // unreachable tracker turned this claim into an exit 2 with no receipt, its
+  // dirty worktree unreported.
+  const r = repo(t);
+  const c = pushedClaim(r);
+  writeFileSync(join(c.wt, "scratch.txt"), "work that exists nowhere else\n");
+
+  const { code, json, stderr } = release(r, c, { env: { GH_RC: "1" } });
+  assert.equal(code, 1, `blocked, not unanswerable: ${stderr}`);
+  assert.ok(json.blockers.some((b) => /uncommitted change/.test(b)), `the local blocker is reported: ${json.blockers}`);
+  assert.ok(json.blockers.some((b) => /exists on origin/.test(b)), `and so is the pushed branch: ${json.blockers}`);
+  assert.deepEqual(r.calls(), [], "no tracker call is needed to know this claim is blocked");
+});
+
+test("the PR lookup counts only PRs from this repository", (t) => {
+  // `--head` matches a head branch NAME, so a fork's closed PR whose branch
+  // happens to share this one's name would read as this branch's and lift the
+  // block on a branch no PR of ours names. The stub cannot run gh's jq, so the
+  // filter is pinned on the call the script makes.
+  const r = repo(t);
+  const c = pushedClaim(r);
+  release(r, c, { apply: false, env: { GH_PRS: "12:CLOSED" } });
+  const list = r.calls().find((l) => l.startsWith("pr list"));
+  assert.ok(list, `the PR list was read: ${r.calls()}`);
+  assert.match(list, /--json number,state,isCrossRepository /);
+  assert.match(list, /select\(\.isCrossRepository \| not\)/, "and cross-repository PRs are filtered out before they are counted");
+});
+
+/** A second clone one commit ahead on the claim's branch, and the command that pushes it to origin. */
+function latePush(r, c) {
+  const late = join(r.w, "..", "late");
+  execFileSync("git", ["clone", "-q", "-b", c.branch, join(r.w, "..", "origin.git"), late], { env: ENV });
+  const sha = commit(late, "late", "late\n");
+  return { sha, run: `git -C '${late}' push -q origin HEAD:refs/heads/${c.branch}` };
+}
+
+const originTip = (r, c) => git(r.w, "ls-remote", "--heads", "origin", c.branch).split("\t")[0];
+
+test("a push landing on origin after the checks halts a closed-PR release before the remote delete", (t) => {
+  const r = repo(t);
+  const c = pushedClaim(r);
+  const late = latePush(r, c);
+
+  const { code, stderr } = release(r, c, { env: { GH_PRS: "12:CLOSED", GH_VIEW_RUN: late.run } });
+  assert.equal(code, 2, stderr);
+  assert.match(stderr, /PARTIALLY RELEASED — origin's \S+ moved since the checks — not deleted/);
+  assert.equal(originTip(r, c), late.sha, "the late push survives on origin, and the local branch's commits with it");
+  assert.ok(!r.calls().some((l) => l.includes("--remove-label")), "and the label stays");
+});
+
+test("a closed-PR claim whose local branch is already gone re-reads origin before the remote delete", (t) => {
+  const r = repo(t);
+  const c = pushedClaim(r);
+  git(r.w, "worktree", "remove", c.wt);
+  git(r.w, "update-ref", "-d", `refs/heads/${c.branch}`);
+  const late = latePush(r, c);
+
+  const halted = release(r, c, { env: { GH_PRS: "12:CLOSED", GH_VIEW_RUN: late.run } });
+  assert.equal(halted.code, 2, halted.stderr);
+  assert.match(halted.stderr, /origin's \S+ moved since the checks/);
+  assert.equal(originTip(r, c), late.sha, "the late push is not deleted with the branch");
+
+  // The control: with nothing landing in the window the same claim releases
+  // from the remote alone, so the halt above was the re-read and not a fixture
+  // that never reached the delete.
+  const { code, json, stderr } = release(r, c, { env: { GH_PRS: "12:CLOSED" } });
+  assert.equal(code, 0, stderr);
+  assert.equal(json.released, true);
+  assert.equal(git(r.w, "ls-remote", "--heads", "origin", c.branch), "", "the remote branch is gone");
+});
+
+test("an origin that cannot be re-read before the remote delete halts a closed-PR release", (t) => {
+  const r = repo(t);
+  const c = pushedClaim(r);
+  const origin = join(r.w, "..", "origin.git");
+
+  const { code, stderr } = release(r, c, { env: { GH_PRS: "12:CLOSED", GH_VIEW_RUN: `mv '${origin}' '${origin}.away'` } });
+  renameSync(`${origin}.away`, origin);
+  assert.equal(code, 2, stderr);
+  assert.match(stderr, /PARTIALLY RELEASED — cannot re-read origin's \S+ before the delete — not deleted/);
+  assert.notEqual(git(r.w, "ls-remote", "--heads", "origin", c.branch), "", "the remote branch is not deleted");
+  assert.ok(!r.calls().some((l) => l.includes("--remove-label")), "and the label stays");
+});
+
+test("a commit on the local branch after the checks halts a closed-PR release before either branch delete", (t) => {
+  const r = repo(t);
+  const c = pushedClaim(r);
+
+  const { code, stderr } = release(r, c, { env: { GH_PRS: "12:CLOSED", GH_VIEW_RUN: `git -C '${c.wt}' commit -q --allow-empty -m late` } });
+  assert.equal(code, 2, stderr);
+  assert.match(stderr, /\S+ is no longer at the tip origin holds — not deleted/);
+  assert.equal(artefacts(r, c).branch, true, "the late commit survives on the local branch");
+  assert.notEqual(git(r.w, "ls-remote", "--heads", "origin", c.branch), "", "and origin keeps its branch");
+});
+
+test("a pushed claim whose local tip cannot be read is unknown, never released", (t) => {
+  const r = repo(t);
+  const c = pushedClaim(r);
+  // Only the tip read fails: the `--quiet` probe that sets has_branch, and every
+  // other git call, reach real git.
+  gitShim(r, `[ "$*" = "rev-parse --verify refs/heads/${c.branch}" ] && { echo "fatal: simulated" >&2; exit 128; }`);
+
+  const { code, stderr } = release(r, c, { env: { GH_PRS: "12:CLOSED" } });
+  assert.equal(code, 2, stderr);
+  assert.match(stderr, /cannot read \S+'s tip, so whether it matches origin's is unknown/);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+  assert.notEqual(git(r.w, "ls-remote", "--heads", "origin", c.branch), "", "nor the remote branch");
+});
+
+test("a remote delete origin refuses halts naming the branch origin still holds", (t) => {
+  const r = repo(t);
+  const c = pushedClaim(r);
+  writeExecStub(
+    join(r.w, "..", "origin.git", "hooks", "pre-receive"),
+    "#!/bin/sh\nwhile read -r old new ref; do case $new in *[!0]*) ;; *) echo 'deletes refused' >&2; exit 1 ;; esac; done\n",
+  );
+
+  const { code, stderr } = release(r, c, { env: { GH_PRS: "12:CLOSED" } });
+  assert.equal(code, 2, stderr);
+  assert.match(stderr, /git push --delete refused \S+ on origin \(rc \d+\) — origin still holds it/);
+  assert.notEqual(git(r.w, "ls-remote", "--heads", "origin", c.branch), "", "the remote branch is still there");
+  assert.ok(!r.calls().some((l) => l.includes("--remove-label")), "and the label stays");
+});
+
+test("a remote delete killed after origin applied it is read back and the release completes", (t) => {
+  // origin runs post-receive after the ref update, and the push waits for it,
+  // so the watchdog kills a push whose delete already landed. Called a refusal,
+  // that left the label on a ticket with nothing left to release.
+  const r = repo(t);
+  const c = pushedClaim(r);
+  writeExecStub(join(r.w, "..", "origin.git", "hooks", "post-receive"), "#!/bin/sh\nsleep 4\n");
+
+  const { code, json, stderr } = release(r, c, { env: { GH_PRS: "12:CLOSED", FLEET_NET_TIMEOUT: "1" } });
+  assert.match(stderr, /\$ git ls-remote --heads origin/, `the push was killed and origin read back: ${stderr}`);
+  assert.equal(code, 0, stderr);
+  assert.equal(json.released, true);
+  assert.equal(git(r.w, "ls-remote", "--heads", "origin", c.branch), "", "the remote branch is gone");
+  assert.ok(r.calls().some((l) => l.includes("--remove-label in-progress")), "and the label drops");
 });
 
 test("a blocked claim reports its blocker without asking GitHub", (t) => {
