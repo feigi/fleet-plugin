@@ -115,6 +115,11 @@ export const SNAPSHOT_SCHEMA = {
     // printed instead of SNAPSHOT_TREE_MATCH. Optional, because a verified
     // snapshot has nothing to say here.
     repoError: { type: "string" },
+    // Only when the PR-capture block printed SNAPSHOT_REPO_UNRESOLVED: the
+    // error `gh` gave for the worktree's repository, verbatim. Optional, so a
+    // resolved repository has nothing to say here; present, it is the one
+    // record of why the review then runs with no diff and no sizing.
+    repoUnresolved: { type: "string" },
     diffStats: { type: "string" },
     diffPath: { type: "string" },
     diffLines: { type: "integer" },
@@ -1072,13 +1077,18 @@ chain a \`cd\` into "$RUN" or "$SNAP" for anything you run beyond it.
 
 Then capture the PR's diff for the specialists, plus the three facts the caller
 needs to judge whether it is usable. Every 'gh' call here names the repository
-with -R, read from the worktree's own 'origin' remote: this dispatch starts in
-the controller's checkout, which may be a different repository from the
-worktree's, and a 'gh' with no -R reads whichever PR in THAT repository shares
-the number — a diff, a branch and a head that belong to another PR entirely,
-with nothing in the output saying so:
+with -R, and that repository is the one 'gh repo view' resolves from inside the
+worktree: this dispatch starts in the controller's checkout, which may be a
+different repository from the worktree's, and a 'gh' with no -R reads whichever
+PR in THAT repository shares the number — a diff, a branch and a head that
+belong to another PR entirely, with nothing in the output saying so. It is
+gh's answer rather than the raw 'origin' URL because gh resolves a checkout's
+remotes through ssh-config host aliases ('git@my-alias:owner/repo.git') and -R
+does not: handed that URL raw, every read below fails. It is also the remote gh
+would pick for any command run in that checkout — 'origin', unless an
+'upstream' remote or 'gh repo set-default' names another:
 
-    REPO=$(git -C ${worktree} remote get-url origin 2>/dev/null)
+    REPO=$( { cd ${worktree} && gh repo view --json url -q .url; } 2>"$RUN"/repo.err )
     if [ -n "$REPO" ]; then
       gh pr diff ${pr} -R "$REPO" > "$RUN"/pr.diff
       crossRepo=$(gh pr view ${pr} -R "$REPO" --json isCrossRepository -q .isCrossRepository)
@@ -1091,12 +1101,16 @@ with nothing in the output saying so:
       wc -l < "$RUN"/pr.diff
     else
       echo SNAPSHOT_REPO_UNRESOLVED
+      cat "$RUN"/repo.err
     fi
 
-If the block printed SNAPSHOT_REPO_UNRESOLVED, no 'gh' ran: the worktree has no
-'origin' remote to name the repository, and the controller's own repository is
-never a substitute. Omit \`diffPath\`, \`diffLines\`, \`refHead\` and \`prHead\`,
-and run nothing else against the PR yourself.
+If the block printed SNAPSHOT_REPO_UNRESOLVED, no 'gh pr' read ran: gh could not
+name the worktree's repository, and the controller's own repository is never a
+substitute. Report \`repoUnresolved\` = every line the block printed after
+SNAPSHOT_REPO_UNRESOLVED, verbatim — gh's own reason, such as no remote, or no
+remote on a GitHub host it is logged in to — or 'no error output' if it printed
+none. Omit \`diffPath\`, \`diffLines\`, \`refHead\` and \`prHead\`, and run
+nothing else against the PR yourself.
 
 Report \`diffPath\` = the SNAPSHOT_RUN_ROOT value with '/pr.diff' appended, ONLY
 if 'gh pr diff' exited 0. Report \`refHead\` = the sha the 'echo "$ref"' line
@@ -1136,9 +1150,11 @@ exited 0. If it exited non-zero, report \`uncoveredError\` = its stderr and omit
 \`uncovered\`. Run none of the steps it lists.
 
 Then size the diff, naming the same repository for the same reason — diff-stats.mjs
-given no --repo reads the PR from the controller's checkout:
+given no --repo reads the PR from the controller's checkout. This block resolves
+it again because it is a separate command; the capture block above already
+reported why when it could not:
 
-    REPO=$(git -C ${worktree} remote get-url origin 2>/dev/null)
+    REPO=$(cd ${worktree} && gh repo view --json url -q .url 2>/dev/null)
     if [ -n "$REPO" ]; then ~/.fleet/bin/fleet-run diff-stats.mjs --pr ${pr} --repo "$REPO"; else echo SNAPSHOT_REPO_UNRESOLVED; fi
 
 If that printed SNAPSHOT_REPO_UNRESOLVED, omit \`diffStats\`.
@@ -1154,8 +1170,9 @@ specialists into another run's tree. Report the HEAD sha, and — in
 STDOUT, copied verbatim. Only runRoot, path, head, pathVerified and repoVerified
 are ever required — diffStats, diffPath, diffLines, refHead and prHead are each
 omitted independently when their command failed, repoError only accompanies
-a false repoVerified, installError only replaces installCmd and installExit,
-and uncoveredError only replaces uncovered.`,
+a false repoVerified, repoUnresolved only accompanies SNAPSHOT_REPO_UNRESOLVED,
+installError only replaces installCmd and installExit, and uncoveredError only
+replaces uncovered.`,
     { label: `snapshot${forPr}`, phase: "Snapshot", agentType: SNAPSHOT_AGENT_TYPE, schema: SNAPSHOT_SCHEMA },
   );
 
@@ -1183,7 +1200,7 @@ and uncoveredError only replaces uncovered.`,
   log(
     usable
       ? `diff ${usable} (${snap.diffLines} lines)`
-      : `no diff — diffPath=${snap.diffPath ?? "(absent)"} diffLines=${snap.diffLines ?? "(absent)"} refHead=${snap.refHead ?? "(absent)"} prHead=${snap.prHead ?? "(absent)"} head=${snap.head} — specialists get the fallback read rules`,
+      : `no diff — diffPath=${snap.diffPath ?? "(absent)"} diffLines=${snap.diffLines ?? "(absent)"} refHead=${snap.refHead ?? "(absent)"} prHead=${snap.prHead ?? "(absent)"} head=${snap.head}${typeof snap.repoUnresolved === "string" ? ` — repository unresolved: ${oneLine(snap.repoUnresolved) || "(no reason given)"}` : ""} — specialists get the fallback read rules`,
   );
 
   let stats = null;

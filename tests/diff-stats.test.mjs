@@ -333,10 +333,10 @@ test("CLI: a well-formed --pr value is accepted and the CLI succeeds", () => {
 // worktree's PR rather than the same-numbered one in the caller's cwd. The gh
 // stub logs every call's args; an absent `--repo` must leave the invocation as
 // it was — no `-R` at all — because every other caller still resolves from cwd.
-const runWithRepoArgs = (extra, ghBody = '#!/bin/sh\necho \'{"files":[{"path":"a.ts","additions":1,"deletions":0}],"changedFiles":1}\'\n') => {
+const runWithRepoArgs = (extra, ghScript = 'echo \'{"files":[{"path":"a.ts","additions":1,"deletions":0}],"changedFiles":1}\'\n') => {
   const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
   const log = join(bin, "gh.log");
-  writeExecStub(join(bin, "gh"), ghBody.replace("\n", `\nprintf '%s\\n' "$*" >> "${log}"\n`));
+  writeExecStub(join(bin, "gh"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${log}"\n${ghScript}`);
   const r = spawnSync(process.execPath, [SCRIPT, "--pr", "5", ...extra], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
@@ -370,8 +370,16 @@ test("CLI: --repo with no or an empty value dies (exit 2) and never reaches gh �
   }
 });
 
+// The usage line is what a caller reads when it gets the invocation wrong, so
+// it advertises `--repo` alongside `--pr`.
+test("CLI: the usage refusal names the optional --repo", () => {
+  const r = spawnSync(process.execPath, [SCRIPT], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /usage: diff-stats\.mjs --pr <number> \[--repo [^\]]+\]/);
+});
+
 test("CLI: a gh that cannot read the named repository's PR still fails closed with --repo", () => {
-  const { r } = runWithRepoArgs(["--repo", "o/r"], "#!/bin/sh\nexit 1\n");
+  const { r } = runWithRepoArgs(["--repo", "o/r"], "exit 1\n");
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.equal(r.stdout.trim(), "", "exit 2 emits no payload");
 });

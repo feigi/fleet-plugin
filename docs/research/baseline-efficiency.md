@@ -101,9 +101,11 @@ dispatches) and its `review<dimension>[-k]` specialists (label
 `review:<dimension>`), plus a hand-dispatched `review-pr-<n>` reviewer had
 this session used that fallback (it did not). Each dispatch is keyed on the
 PR it is *about*, read off the prompt's own PR interpolation: the snapshot
-prompt's `gh pr diff <N> > "$RUN"/pr.diff` line, and the specialist prompt's
-opening `Review PR #<N> (branch <branch>) for:`. That timestamp is compared
-against the PR's own `createdAt` from `gh pr list --json createdAt`.
+prompt's `gh pr diff <N> …` line (`gh pr diff <N> > "$RUN"/pr.diff` in this
+session; `gh pr diff <N> -R "$REPO" > "$RUN"/pr.diff` since #3494), and the
+specialist prompt's opening `Review PR #<N> (branch <branch>) for:`. That
+timestamp is compared against the PR's own `createdAt` from
+`gh pr list --json createdAt`.
 
 The match keys on those prompt lines, not on a scratch path: review-core.js's
 run root is `<scratch>/pr<N>`, where `<scratch>` is a caller argument

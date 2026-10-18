@@ -28,6 +28,8 @@ import { join } from "node:path";
 import { stripComments } from "./support/strip-comments.mjs";
 import { Pin } from "./support/prose-pin.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { ARGS, SNAP, parallel, pipeline, review, scriptedHost } from "./support/review-host-fixture.mjs";
+import { runReview, SNAPSHOT_SCHEMA } from "../plugin/scripts/review-core.mjs";
 
 const SOURCE = readFileSync(join(import.meta.dirname, "..", "plugin", "scripts", "review-core.mjs"), "utf8");
 const CODE = stripComments(SOURCE);
@@ -79,18 +81,40 @@ test("snapshot prompt: the sizing script is told the worktree's repository", () 
   );
 });
 
-test("snapshot prompt: every `gh` in the PR-capture block is one of the four pinned above", () => {
+test("snapshot prompt: every line of the snapshot prompt that opens a `gh` call is one of the four PR reads pinned above", () => {
   const ghLines = SNAPSHOT.split("\n").filter((l) => /^\s*(?:\w+=\$\()?gh /.test(l));
   assert.equal(ghLines.length, 4, `a new unpinned \`gh\` read joined the snapshot block:\n${ghLines.join("\n")}`);
   for (const l of ghLines) assert.match(l, NAMED, `an unanchored gh read: ${l}`);
 });
 
-test("snapshot prompt: the repository comes from the worktree's own origin remote, never the cwd", () => {
+// #3510 review: the raw `git remote get-url origin` URL was the first shape
+// here, and `-R` does not run it through gh's ssh-config alias translation —
+// measured, `gh pr view 3510 -R git@gh-alias:feigi/fleet-plugin.git` fails
+// with `error connecting to gh-alias`, while `gh repo view` run inside a
+// checkout with that origin answers `https://github.com/feigi/fleet-plugin`.
+// So REPO is gh's own answer from inside the worktree, which also leaves out
+// any credentials the remote URL carries.
+test("snapshot prompt: the repository is the one gh resolves inside the worktree, never the cwd", () => {
   const derivations = SNAPSHOT.split("\n").filter((l) => /REPO=\$\(/.test(l));
   assert.ok(derivations.length >= 2, "the capture block and the sizing block each derive $REPO themselves — the sizing step is a separate shell command");
   for (const l of derivations) {
-    assert.match(l, /^\s*REPO=\$\(git -C \$\{worktree\} remote get-url origin 2>\/dev\/null\)$/, `REPO is not read from the worktree's origin: ${l}`);
+    assert.match(l, /^\s*REPO=\$\((?: \{ )?cd \$\{worktree\} && gh repo view --json url -q \.url[; ]/, `REPO is not gh's answer from inside the worktree: ${l}`);
   }
+});
+
+// #3510 review: the executed cases below prove the blocks PRINT the marker;
+// nothing proved the agent is told what the marker means, and deleting either
+// instruction stayed green. An agent that is not told to omit the fields the
+// skipped reads would have filled is free to fill them some other way.
+test("snapshot prompt: SNAPSHOT_REPO_UNRESOLVED tells the agent to omit every field the skipped reads fill", () => {
+  const B = "\\\\?`";
+  const f = (name) => `${B}${name}${B}`;
+  assert.match(
+    SNAPSHOT,
+    new RegExp(`If\\s+the\\s+block\\s+printed\\s+SNAPSHOT_REPO_UNRESOLVED[^]*?Omit\\s+${f("diffPath")},\\s+${f("diffLines")},\\s+${f("refHead")}\\s+and\\s+${f("prHead")}`),
+    "the capture block's marker no longer tells the agent to omit the diff fields",
+  );
+  assert.match(SNAPSHOT, new RegExp(`If\\s+that\\s+printed\\s+SNAPSHOT_REPO_UNRESOLVED,\\s+omit\\s+${f("diffStats")}`), "the sizing block's marker no longer tells the agent to omit diffStats");
 });
 
 // --- executed cases ---------------------------------------------------------
@@ -110,7 +134,11 @@ const render = (block, worktree, pr) => new Function("worktree", "pr", "return `
 // A `gh` that answers for the CWD's repository unless it is told a repository
 // with `-R`, the resolution rule the real one has (measured: `gh pr view 1
 // -R <git@host:o/r.git>` reads that repository; with no -R it reads the cwd's).
-// Every call is logged, one line of args per call, so "no gh ran" is a count.
+// `gh repo view` answers from the cwd's own origin, as the real one resolves a
+// checkout's remotes, behind a `resolved:` prefix so a value that never went
+// through it — the raw remote URL — cannot pass for one that did; with no
+// remote it fails the way the real one does. Every call is logged, one line of
+// args per call, so "no gh ran" is a count.
 function ghStub(t) {
   const dir = scratch(t, "pr-repo-bin-");
   const log = join(dir, "gh.log");
@@ -124,6 +152,9 @@ for a in "$@"; do
 done
 if [ -n "$named" ]; then who=RIGHT; else who=WRONG; fi
 case "$*" in
+  "repo view"*)
+    url=$(git remote get-url origin 2>/dev/null) || { echo "no git remotes found" >&2; exit 1; }
+    echo "resolved:$url" ;;
   "pr diff"*) printf 'diff --git a/%s.txt b/%s.txt\\n' "$who" "$who" ;;
   *isCrossRepository*) echo false ;;
   *headRefName*) echo "branch-$who" ;;
@@ -157,8 +188,12 @@ function fixture(t, { withOrigin = true } = {}) {
 }
 
 const PR = 1270;
-const CAPTURE = lift(/^ *REPO=\$\(git .*\n *if \[ -n "\$REPO" \]; then\n *gh pr diff/m, /^ *fi$/m);
-const SIZING = lift(/^ *REPO=\$\(git .*\n *if \[ -n "\$REPO" \]; then ~\/\.fleet\/bin\/fleet-run diff-stats/m, /; fi$/m);
+// Anchored on the `REPO=$(` line whatever it runs, so a block whose derivation
+// regressed is still lifted and executed, and fails a named test below rather
+// than this file's lift.
+const CAPTURE = lift(/^ *REPO=\$\(.*\n *if \[ -n "\$REPO" \]; then\n *gh pr diff/m, /^ *fi$/m);
+const SIZING = lift(/^ *REPO=\$\(.*\n *if \[ -n "\$REPO" \]; then ~\/\.fleet\/bin\/fleet-run diff-stats/m, /; fi$/m);
+const prCalls = (gh) => gh.calls().filter((c) => c.startsWith("pr "));
 
 function runBlock(block, { worktree, run, cwd, bin, home }) {
   const r = spawnSync("sh", ["-c", `RUN=${JSON.stringify(run)}\n${render(block, worktree, PR)}`], {
@@ -169,7 +204,7 @@ function runBlock(block, { worktree, run, cwd, bin, home }) {
   return { out: r.stdout.trim().split("\n").map((l) => l.trim()), err: r.stderr, status: r.status };
 }
 
-test("capture block: dispatched from an unrelated repository, every PR read names the worktree's origin and reads the right PR", (t) => {
+test("capture block: dispatched from an unrelated repository, every PR read names the worktree's repository and reads the right PR", (t) => {
   const f = fixture(t);
   const gh = ghStub(t);
   const r = runBlock(CAPTURE, { ...f, bin: gh.dir });
@@ -177,21 +212,21 @@ test("capture block: dispatched from an unrelated repository, every PR read name
   // ref (from the branch the RIGHT pr named), then headRefOid, then wc -l.
   assert.deepEqual(r.out, [f.sha, "oid-RIGHT", "1"], r.err);
   assert.match(readFileSync(join(f.run, "pr.diff"), "utf8"), /RIGHT\.txt/);
-  const calls = gh.calls();
+  const calls = prCalls(gh);
   assert.equal(calls.length, 4, `diff + three field reads: ${calls.join(" | ")}`);
-  for (const c of calls) assert.ok(c.includes(`-R ${f.origin}`), `a gh call did not name the worktree's origin: ${c}`);
+  for (const c of calls) assert.ok(c.includes(`-R resolved:${f.origin}`), `a gh call did not name the repository gh resolved inside the worktree: ${c}`);
 });
 
-test("capture block: with no origin remote nothing runs against the cwd's repository and the block says so", (t) => {
+test("capture block: with no origin remote nothing runs against the cwd's repository and the block says why", (t) => {
   const f = fixture(t, { withOrigin: false });
   const gh = ghStub(t);
   const r = runBlock(CAPTURE, { ...f, bin: gh.dir });
-  assert.deepEqual(r.out, ["SNAPSHOT_REPO_UNRESOLVED"], r.err);
-  assert.deepEqual(gh.calls(), [], "a gh call ran with no repository to name — it read the cwd's");
+  assert.deepEqual(r.out, ["SNAPSHOT_REPO_UNRESOLVED", "no git remotes found"], r.err);
+  assert.deepEqual(prCalls(gh), [], "a gh pr read ran with no repository to name — it read the cwd's");
   assert.equal(existsSync(join(f.run, "pr.diff")), false, "a diff file exists for a capture that never ran");
 });
 
-test("sizing block: dispatched from an unrelated repository, diff-stats is handed the worktree's origin", (t) => {
+test("sizing block: dispatched from an unrelated repository, diff-stats is handed the worktree's repository", (t) => {
   const f = fixture(t);
   const home = scratch(t, "pr-repo-home-");
   mkdirSync(join(home, ".fleet", "bin"), { recursive: true });
@@ -200,7 +235,7 @@ test("sizing block: dispatched from an unrelated repository, diff-stats is hande
   const gh = ghStub(t);
   const r = runBlock(SIZING, { ...f, bin: gh.dir, home });
   assert.equal(r.status, 3, "the sizing script's own exit status must survive the block — fail-closed");
-  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), [`diff-stats.mjs --pr ${PR} --repo ${f.origin}`]);
+  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), [`diff-stats.mjs --pr ${PR} --repo resolved:${f.origin}`]);
 });
 
 test("sizing block: with no origin remote the script is never run and the block says so", (t) => {
@@ -212,4 +247,21 @@ test("sizing block: with no origin remote the script is never run and the block 
   const r = runBlock(SIZING, { ...f, bin: ghStub(t).dir, home });
   assert.deepEqual(r.out, ["SNAPSHOT_REPO_UNRESOLVED"], r.err);
   assert.equal(existsSync(log), false, "diff-stats ran with no repository to name — it would read the cwd's");
+});
+
+// #3510 review: an unresolvable repository used to leave the review running
+// with no diff and no sizing while the controller's `no diff` line named no
+// cause. The block now prints gh's reason after the marker, the agent reports
+// it as `repoUnresolved`, and the controller logs it on that line.
+test("an unresolved repository's reason is a declared optional field and reaches the controller's no-diff log line", async () => {
+  assert.deepEqual(SNAPSHOT_SCHEMA.properties.repoUnresolved, { type: "string" }, "repoUnresolved is not declared — additionalProperties:false drops it");
+  assert.ok(!SNAPSHOT_SCHEMA.required.includes("repoUnresolved"), "repoUnresolved is required — a resolved repository has nothing to report there");
+  assert.match(SNAPSHOT, /Report\s+\\?`repoUnresolved\\?`\s*=\s*every\s+line\s+the\s+block\s+printed\s+after\s+SNAPSHOT_REPO_UNRESOLVED/);
+  const why = "none of the git remotes configured for this repository point to a known GitHub host";
+  const run = scriptedHost({ snapshot: [{ ...SNAP, repoUnresolved: `${why}\n` }], "review:correctness": [review([])] });
+  const lines = [];
+  await runReview({ ...run.host, log: (m) => lines.push(m), pipeline, parallel }, { ...ARGS, dimensions: ["correctness"] });
+  const noDiff = lines.filter((l) => l.startsWith("no diff"));
+  assert.equal(noDiff.length, 1, lines.join("\n"));
+  assert.ok(noDiff[0].includes(`repository unresolved: ${why} —`), noDiff[0]);
 });
