@@ -33,6 +33,8 @@
 // switch and a switch back between two ticks; a stray commit pushed to `main`
 // in a repository with no protecting ruleset. This is a backstop for
 // accidents, not for adversaries.
+// If the pack holding the baseline commit is unreadable, git reports exactly
+// what it reports for a pruned commit, so the result is `missing`.
 //
 // THE PROTECTED SET is the non-ignored paths of the main checkout — what the
 // member-write-guard protects — and its HEAD. `.fleet/`, `.worktrees/` and
@@ -144,8 +146,9 @@ function git(what, args, cwd, env) {
   });
   if (!r.error && r.status === 0) return { ok: true, stdout: r.stdout };
   if (r.error) return { ok: false, why: `${what} did not run: ${r.error.code ?? r.error.message}`, status: null };
-  const last = String(r.stderr ?? "").trim().split("\n").at(-1);
-  return { ok: false, why: `${what} ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`}${last ? `: ${last}` : ""}`, status: r.status };
+  const stderr = String(r.stderr ?? "").trim();
+  const last = stderr.split("\n").at(-1);
+  return { ok: false, why: `${what} ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`}${last ? `: ${last}` : ""}`, status: r.status, stderr };
 }
 
 /** The main checkout `cwd` belongs to: `{ok, root}` or `{ok: false, why}`. */
@@ -301,10 +304,12 @@ function originMain(root, env) {
  * read clean, while a stray commit, a reset or an amend do not. `origin/main`
  * is read even when HEAD equals the baseline: a checkout that cannot name it
  * is one this cannot vouch for.
- * A failed ancestry read is followed by `git cat-file -e B`, which exits 1
- * for an absent object and 0 for a present one, even a corrupt one;
- * `-e B^{commit}` exits 128 for both, so it cannot tell them apart. Only
- * exit 1 is the missing answer; anything else keeps the ancestry failure.
+ * A failed ancestry read is followed by `git rev-parse -q --verify B^{commit}`.
+ * Only exit 1 with nothing on stderr is the missing answer: that is what an
+ * absent commit gives. Exit 1 with stderr is a commit present but unreadable
+ * (an unopenable loose object, an alternate moved away), and that read's own
+ * failure is returned so `why` names the fault. Anything else, a corrupt
+ * object's exit 128 included, keeps the ancestry failure.
  */
 function headMove(root, env, was, now) {
   const origin = originMain(root, env);
@@ -315,8 +320,9 @@ function headMove(root, env, was, now) {
   const ancestor = git("git merge-base --is-ancestor", ["merge-base", "--is-ancestor", was.oid, now.oid], root, env);
   if (!ancestor.ok) {
     if (ancestor.status === 1) return moved;
-    const present = git("git cat-file -e", ["cat-file", "-e", was.oid], root, env);
-    if (present.ok || present.status !== 1) return ancestor;
+    const probe = git("git rev-parse --verify", ["rev-parse", "-q", "--verify", `${was.oid}^{commit}`], root, env);
+    if (probe.ok || probe.status !== 1) return ancestor;
+    if (probe.stderr !== "") return probe;
     return { ok: false, missing: true, why: `baseline commit ${was.oid.slice(0, 7)} is missing from this repository; HEAD is ${headLabel(now)}` };
   }
   const stray = git("git rev-list", ["rev-list", "--max-count=1", `${was.oid}..${now.oid}`, "^refs/remotes/origin/main"], root, env);
