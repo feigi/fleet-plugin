@@ -25,11 +25,17 @@ durable, and applies the label the merge bot waits on.
    checks it for dirty, unreadable, missing, or absent state, compares the
    worktree's `HEAD` against the dispatch pin, and names the cause of any
    divergence — a non-null cause halts before the label.
-3. **Confirm durable homes.** Every deferral and claimed apply needs a
-   tracker issue or in-tree comment (via `ledger.mjs check`, filing what
-   isn't found), and every "applied" claim is re-verified against `git
-   diff origin/main...HEAD`, plus the acceptance mutation re-run in the
-   finisher's own detached worktree (never the owned one).
+3. **Confirm durable homes.** A deferral of a finding in the review's
+   result is judged by the `dispositions-ok` verdict
+   [`ledger.mjs`](../../plugin/scripts/ledger.mjs) `dispatch` required
+   before dispatching the finisher, not re-judged by hand — the PR's
+   closed `wontfix` suggestion-band record, matching
+   [`dispositions-check.mjs`](../../plugin/scripts/dispositions-check.mjs)'s
+   `homeHolds`, is one such home. Every other deferral and claimed apply
+   needs a tracker issue or in-tree comment (via `ledger.mjs check`,
+   filing what isn't found), and every "applied" claim is re-verified
+   against `git diff origin/main...HEAD`, plus the acceptance mutation
+   re-run in the finisher's own detached worktree (never the owned one).
 4. **Add `ready-to-merge`** — only after finding *exactly one* release
    label among `patch`/`minor`/`major` on the PR (zero or more than one
    halts, naming what was found).
