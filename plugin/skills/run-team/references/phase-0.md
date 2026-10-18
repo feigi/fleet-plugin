@@ -2,6 +2,16 @@
 
 `phase0.mjs` runs the start sequence and writes the receipt `.fleet/phase0.json`; SKILL.md's phase 0 step 0 says how to drive it and what to do about each `NEED` line. This file is what each step means, in the order the script runs them, for the controller to read when a step refuses or a line asks for more than SKILL.md says. One heading per step.
 
+**Run it from a Python eval cell, never the bash tool.** That kernel's
+environment carries `PI_ARTIFACTS_DIR`, this run's own session directory,
+which phase 0 records in its receipt; the bash tool's does not, so there
+phase 0 exits 2. `expanduser` is required: a literal `~/…` fails with
+`FileNotFoundError`. So is the `stderr` redirect: the cell never shows a
+child's stderr. `--session <dir>` overrides the variable.
+
+Exit 3 is a step that failed: its line carries the refusal, so fix the cause
+and run it again.
+
 ## Fast-forward the checkout
 
 **Fast-forward the checkout before you trust these rules — you are reading
