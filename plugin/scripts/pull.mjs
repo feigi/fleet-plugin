@@ -18,7 +18,9 @@
 //       `next --head <N>` on a dispatched Pull prints it again.
 //   1   the ticket left the Pull — taken, relabelled elsewhere, closed,
 //       relabelled by cause, excluded — with the reason printed; take the next
-//       entry. An empty shortlist is this exit too.
+//       entry. An empty shortlist is this exit too. `next --head <N>` starting
+//       a Pull for a ticket whose ledger row is an exclusion whose premise still
+//       stands is this exit as well.
 //   2   could not look, named on stderr: a probe that did not answer, a write
 //       that failed, a router that refused. `next --head <N>` runs a step that
 //       failed again; when the failure came from applying an answer, the
@@ -27,8 +29,10 @@
 //       the ticket over; one whose claim could not be released leaves the Pull
 //       at the route step with the claim standing, and `next` routes again. An
 //       exclusion premise `gh` could not read is exit 2 when no other entry is
-//       left. An unknown flag is exit 2 as well, as for every script that holds
-//       a command line of its own.
+//       left, and always exit 2 when `next --head <N>` starts a Pull for the
+//       ticket that holds it, the exclusion standing and no record written. An
+//       unknown flag is exit 2 as well, as for every script that holds a command
+//       line of its own.
 //   3   usage: any other mistake in the command line, or an answer the pending
 //       question does not take. Nothing is recorded.
 //   10  a question is pending: its `QUESTION <qid>:` block, with the tokens it
@@ -36,6 +40,15 @@
 //
 // THE STEPS, in this order:
 //
+//   0  hold-out   Only `next --head <N>` starting a Pull (no record, or one that
+//                 is `left`, `released` or another session's) runs it; resuming
+//                 a running Pull or reprinting a dispatched one does not. The
+//                 ledger row for `#<N>`, when it reads `excluded` with premises,
+//                 has them checked as `next` without `--head` checks them: one
+//                 still standing ends the Pull, reason `excluded · <premise>
+//                 <STATE>`, with the record saved and nothing else run, one `gh`
+//                 could not read is exit 2 with nothing recorded, and a lifted
+//                 one lets step 1 run.
 //   1  inflight   `inflight.sh <N>`: anything but exit 0 is taken.
 //   2  issue      `gh issue view <N> --json title,body,comments,labels,createdAt`
 //                 written to `<scratch>/impl-<N>/issue.json`. Without the
@@ -1096,29 +1109,70 @@ class Pull {
 
 // ── the shortlist head ───────────────────────────────────────────────────────
 
-// Whether an exclusion's premises still hold: a premise `gh` cannot be asked
-// about, or whose state could not be read, stands, as the shortlist's refresh
-// reads it. Each such premise is added to `unreadable`, so that a shortlist
-// emptied by premises nobody could read is told apart from an empty one.
-function exclusionLive(premises, cwd, unreadable) {
-  if (premises.length === 0) return true;
+// The first of an exclusion's premises that still stands, or null when every one is lifted. A premise `gh` cannot
+// be asked about, or whose state could not be read, stands, as the shortlist's refresh reads it: `token` is the
+// premise as the ledger row writes it (null for a row naming none), `state` what `gh` answered (null when it was
+// not asked or did not answer), `unread` what could not be read (null when nothing went unread).
+function standingPremise(premises, cwd) {
+  if (premises.length === 0) return { token: null, state: null, unread: null };
   for (const { kind, target } of premises) {
-    if (target.startsWith("-") || !(kind === "pr" || isDigits(target))) return true;
+    const token = `behind-${kind}:#${target}`;
+    if (target.startsWith("-") || !(kind === "pr" || isDigits(target))) return { token, state: null, unread: null };
     const r = spawn("gh", [kind, "view", target, "--json", "state"], { cwd, env: GH_ENV, timeoutMs: NETWORK_TIMEOUT_MS });
     if (r.status !== 0) {
-      unreadable.push(`gh ${kind} view ${target} (${r.how}${r.stderr === "" ? "" : `: ${r.stderr.split("\n")[0]}`})`);
-      return true;
+      return { token, state: null, unread: `gh ${kind} view ${target} (${r.how}${r.stderr === "" ? "" : `: ${r.stderr.split("\n")[0]}`})` };
     }
     let state;
     try {
       ({ state } = JSON.parse(r.stdout));
     } catch {
-      unreadable.push(`gh ${kind} view ${target} (printed no JSON state)`);
-      return true;
+      return { token, state: null, unread: `gh ${kind} view ${target} (printed no JSON state)` };
     }
-    if (!LIFTED.has(state)) return true;
+    if (!LIFTED.has(state)) return { token, state: typeof state === "string" ? state : null, unread: null };
   }
-  return false;
+  return null;
+}
+
+// Whether an exclusion's premises still hold. Each premise nobody could read is added to `unreadable`, so that a
+// shortlist emptied by premises nobody could read is told apart from an empty one.
+function exclusionLive(premises, cwd, unreadable) {
+  const standing = standingPremise(premises, cwd);
+  if (standing === null) return false;
+  if (standing.unread !== null) unreadable.push(standing.unread);
+  return true;
+}
+
+// The rows of the ledger, read through `ledger.mjs read`.
+function ledgerRows(p) {
+  const led = spawn(process.execPath, [join(SCRIPTS, "ledger.mjs"), "read"], { cwd: p.cwd });
+  let rows;
+  try {
+    ({ rows } = JSON.parse(led.stdout));
+  } catch {
+    rows = null;
+  }
+  if (led.status !== 0 || !Array.isArray(rows) || !rows.every((r) => typeof r === "string")) {
+    throw new Refusal(withText(`ledger.mjs read did not answer (${led.how})`, led));
+  }
+  return rows;
+}
+
+/**
+ * Why ticket `n` may not start a Pull: the reason a Pull would leave it with, when its ledger row is an exclusion
+ * whose premise still stands; null when the ledger holds no such row or the premise is lifted. A premise `gh`
+ * could not read is a refusal (exit 2) that says the exclusion stands.
+ */
+function heldOut(p, n) {
+  const row = ledgerRows(p).find((r) => rowKey(r) === `#${n}`);
+  const premises = row === undefined ? null : premisesOf(row);
+  if (premises === null) return null;
+  const standing = standingPremise(premises, p.cwd);
+  if (standing === null) return null;
+  if (standing.unread !== null) {
+    throw new Refusal(`#${n}: the premise of its exclusion could not be read, so the exclusion stands: ${standing.unread} — run again once gh answers`);
+  }
+  if (standing.token === null) return row.slice(rowKey(row).length).trim();
+  return `excluded · ${standing.token}${standing.state === null ? "" : ` ${standing.state}`}`;
 }
 
 // The phase-0 session names the run a Pull belongs to: the persistent scratch
@@ -1143,16 +1197,7 @@ function shortlistHead(p, run) {
   if (!Array.isArray(list?.shortlist) || !list.shortlist.every((e) => Number.isInteger(e?.n))) {
     throw new Refusal(`${p.shortlist} holds no shortlist[] of {n}`);
   }
-  const led = spawn(process.execPath, [join(SCRIPTS, "ledger.mjs"), "read"], { cwd: p.cwd });
-  let rows;
-  try {
-    ({ rows } = JSON.parse(led.stdout));
-  } catch {
-    rows = null;
-  }
-  if (led.status !== 0 || !Array.isArray(rows) || !rows.every((r) => typeof r === "string")) {
-    throw new Refusal(withText(`ledger.mjs read did not answer (${led.how})`, led));
-  }
+  const rows = ledgerRows(p);
   const unreadable = [];
   for (const { n } of list.shortlist) {
     const row = rows.find((r) => rowKey(r) === `#${n}`);
@@ -1216,7 +1261,11 @@ function next(args) {
   const n = head ?? shortlistHead(base, run);
   if (n === null) return result(1, ["EMPTY: the shortlist holds no entry to pull — run shortlist.mjs once and Pull again; still empty, hold the slot idle until the next refresh trigger"]);
   let st = readPull(base.statePath(n));
-  if (st !== null && (st.status === "left" || st.status === "released" || (run !== null && st.session !== run))) {
+  const starts = st === null || st.status === "left" || st.status === "released" || (run !== null && st.session !== run);
+  // The shortlist head was checked against the ledger on the way here; one asked for by number was not. A premise
+  // that cannot be read is refused here, before the ended record is moved, so the next run asks again.
+  const held = head !== null && starts ? heldOut(base, n) : null;
+  if (starts && st !== null) {
     // Asked for by number, so asked for again: the ended Pull is kept beside the new one. A record from another
     // run is ended too, whatever it says: the ledger rotated, and a dispatch it made is none of this run's.
     renameSync(base.statePath(n), base.previousPath(n));
@@ -1226,6 +1275,11 @@ function next(args) {
   if (first) st = fresh(n, run);
   const pull = pullFor(base, st);
   if (first) pull.save();
+  if (held !== null) {
+    const r = pull.leave(held);
+    pull.save();
+    return r;
+  }
   const r = pull.advance();
   return { ...r, out: [first ? `PULL #${n}: started, state in ${base.statePath(n)}` : `PULL #${n}: resumed at ${st.pending === null ? st.stage : `question ${st.pending.qid}`}`, ...pull.log, ...r.out] };
 }
