@@ -53,19 +53,30 @@
 //                 the brief.
 //   4  Q2 decided     `decided`, or a cause whose comment is posted and whose
 //                 label replaces `ready-for-agent`.
-//   5  Q3 collision   the scan first: the brief's paths, and every path a
-//                 `paths <p>…` answer added, against each open PR's `gh pr diff
-//                 <M> --name-only` and each live worktree branch's `git diff
-//                 --name-only -z origin/main...<branch>` — `main` excepted, and
-//                 a branch whose upstream is gone, its PR already merged or
-//                 closed. A path matches a changed file of that path, one
-//                 under it as a directory, or, with no `/`, one of that name.
-//                 One line per PR or branch sharing a path, `no overlap` when
-//                 none, and `could not look: <which>` for one that could not be
-//                 read; the `#N` refs of the brief's Out of scope section are
-//                 printed as the behind-issue candidates. Then `clear`,
-//                 `behind-pr:#M`, `behind-issue:#M`, or `paths <p>…`, which
-//                 scans again and asks again. An exclusion is a ledger row.
+//   5  Q3 collision   the scan first: the brief's paths, its Out of scope
+//                 section's excepted, and every path a `paths <p>…` answer
+//                 added, against each open PR's `gh pr diff <M> --name-only`
+//                 and each live worktree branch's `git diff --name-only -z
+//                 origin/main...<branch>` — `main` excepted, and a branch whose
+//                 upstream is gone, its PR already merged or closed. A path,
+//                 its trailing `:N` or `:N-M` dropped, matches a changed file
+//                 of that path, one under it as a directory, with no `/` one of
+//                 that name, or, holding a `/` but not starting with one, one
+//                 whose trailing whole segments it is or sits under. One line
+//                 per PR or branch sharing a path, then, from its full diff
+//                 (`gh pr diff <M>`, or `git diff origin/main...<branch>`),
+//                 each shared file's hunks by base-side range, each with the
+//                 Markdown headings it sits under in the file at the
+//                 merge-base (a PR's head fetched as `pull/<M>/head`); ranges
+//                 only for a file that is not Markdown or whose base could not
+//                 be read. Each brief path with a line reference in a shared
+//                 file follows, with its headings on origin/main. `no overlap`
+//                 when none, and `could not look: <which>` for one that could
+//                 not be read; the `#N` refs of the brief's Out of scope
+//                 section are printed as the behind-issue candidates. Then
+//                 `clear`, `behind-pr:#M`, `behind-issue:#M`, or `paths <p>…`,
+//                 which scans again and asks again. An exclusion is a ledger
+//                 row.
 //   6  claim      `claim-ticket.sh <N> impl-<N> implementer --apply`.
 //   7  route      `ticket-router.mjs route …`; a router that refuses releases
 //                 the claim, and a release that fails is exit 2 with the claim
@@ -99,7 +110,7 @@ import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { memberTokens, premisesOf, tierValues } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
-import { briefPaths, briefText } from "./ticket-router.mjs";
+import { briefPaths, briefText, outOfScope } from "./ticket-router.mjs";
 
 const NAME = "pull";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -186,23 +197,6 @@ export function chainHead(rows, n) {
 
 // ── the brief ────────────────────────────────────────────────────────────────
 
-/** The `Out of scope` section of `text`, heading to the next heading of its level or above; null when there is none. */
-export function outOfScope(text) {
-  const all = text.split("\n");
-  const at = all.findIndex((l) => /^#{1,6}\s*out of scope\b/i.test(l));
-  if (at === -1) return null;
-  const level = /^#+/.exec(all[at])[0].length;
-  let end = all.length;
-  for (let i = at + 1; i < all.length; i++) {
-    const h = /^(#{1,6})\s/.exec(all[i]);
-    if (h !== null && h[1].length <= level) {
-      end = i;
-      break;
-    }
-  }
-  return all.slice(at, end).join("\n").trim();
-}
-
 /** The ticket's `Out of scope` section: the brief's, else the body's; null when neither holds one. */
 function scopeOf(issue) {
   return outOfScope(briefText(issue).trim()) ?? outOfScope(String(issue.body ?? ""));
@@ -212,6 +206,122 @@ function scopeOf(issue) {
 export function issueRefs(section) {
   if (section === null) return [];
   return [...new Set([...section.matchAll(/(?<![\w/.-])#(\d+)\b/g)].map((m) => `#${m[1]}`))];
+}
+
+// ── the collision scan ───────────────────────────────────────────────────────
+
+// A brief path's trailing line reference, `:N` or `:N-M`.
+const LINE_REF = /:(\d+)(?:-(\d+))?$/;
+const MARKDOWN = /\.(md|markdown|mdx)$/i;
+
+/**
+ * Whether brief path `p` names changed file `f`, once a trailing `:N` or `:N-M`
+ * line reference is dropped: the same path, a directory above it (with or
+ * without its trailing `/`), or, with no `/`, a file by its name. A path that
+ * holds a `/` and does not start with one is also a suffix on whole segments,
+ * naming a file whose trailing segments equal it or one under a directory
+ * whose trailing segments do. A path starting with `/` is a slash command and
+ * is never a suffix.
+ */
+export function pathHits(p, f) {
+  const t = p.replace(LINE_REF, "");
+  const q = t.replace(/\/+$/, "");
+  if (q === "") return false;
+  if (f === q || f.startsWith(`${q}/`)) return true;
+  if (!q.includes("/")) return f.split("/").pop() === q || (t !== q && f.includes(`/${q}/`));
+  return !t.startsWith("/") && (f.endsWith(`/${q}`) || f.includes(`/${q}/`));
+}
+
+/** A path as a diff header spells it: C-quoted when git quotes it, its trailing tab dropped. */
+function diffPath(s) {
+  const raw = s.replace(/\t$/, "");
+  if (!raw.startsWith('"') || !raw.endsWith('"')) return raw;
+  const ESC = { n: 10, t: 9, '"': 34, "\\": 92, a: 7, b: 8, f: 12, r: 13, v: 11 };
+  const bytes = [];
+  for (let i = 1; i < raw.length - 1; i++) {
+    if (raw[i] !== "\\") {
+      const ch = String.fromCodePoint(raw.codePointAt(i));
+      bytes.push(...Buffer.from(ch));
+      i += ch.length - 1;
+    } else if (/[0-7]{3}/.test(raw.slice(i + 1, i + 4))) {
+      bytes.push(parseInt(raw.slice(i + 1, i + 4), 8));
+      i += 3;
+    } else {
+      i += 1;
+      bytes.push(ESC[raw[i]] ?? raw.charCodeAt(i));
+    }
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+/** The side of a `--- a/<p>` or `+++ b/<p>` line: the path, or null for `/dev/null`. */
+function diffSide(s, prefix) {
+  const p = diffPath(s);
+  if (p === "/dev/null") return null;
+  return p.startsWith(prefix) ? p.slice(prefix.length) : p;
+}
+
+/**
+ * Every file of a unified git diff, `{ old, new, hunks }`: `old` the base-side
+ * path and `new` the other, null for `/dev/null`, and each hunk its base-side
+ * range `{ a, b }` from `@@ -a,b`. A hunk's own lines are counted off its
+ * header, so a removed `-- x` line is never read as a file header.
+ */
+export function diffHunks(text) {
+  const files = [];
+  let file = null;
+  let left = 0;
+  let right = 0;
+  for (const line of text.split("\n")) {
+    if (left > 0 || right > 0) {
+      if (line.startsWith("-")) left--;
+      else if (line.startsWith("+")) right--;
+      else if (!line.startsWith("\\")) {
+        left--;
+        right--;
+      }
+      continue;
+    }
+    if (line.startsWith("diff --git ")) {
+      file = { old: null, new: null, hunks: [] };
+      files.push(file);
+      continue;
+    }
+    if (file === null) continue;
+    const h = /^@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line);
+    if (h !== null) {
+      const a = Number(h[1]);
+      const b = h[2] === undefined ? 1 : Number(h[2]);
+      file.hunks.push({ a, b });
+      left = b;
+      right = h[3] === undefined ? 1 : Number(h[3]);
+    } else if (line.startsWith("--- ")) file.old = diffSide(line.slice(4), "a/");
+    else if (line.startsWith("+++ ")) file.new = diffSide(line.slice(4), "b/");
+  }
+  return files;
+}
+
+/** The ATX headings of Markdown `text`, `{ line, text }`, 1-based, fenced code skipped. */
+export function headings(text) {
+  const out = [];
+  let fence = null;
+  text.split("\n").forEach((l, i) => {
+    const f = /^ {0,3}(`{3,}|~{3,})/.exec(l);
+    if (f !== null) {
+      if (fence === null) fence = f[1];
+      else if (f[1][0] === fence[0] && f[1].length >= fence.length) fence = null;
+      return;
+    }
+    if (fence === null && /^ {0,3}#{1,6}(\s|$)/.test(l)) out.push({ line: i + 1, text: l.trim() });
+  });
+  return out;
+}
+
+/** The heading lines `from`..`to` sit under: the one enclosing `from`, then each that starts after it, up to `to`. */
+export function sectionsOf(hs, from, to) {
+  const above = hs.filter((h) => h.line <= from).at(-1);
+  const within = hs.filter((h) => h.line > from && h.line <= to);
+  return [above === undefined ? "(no heading above)" : above.text, ...within.map((h) => h.text)].join(" → ");
 }
 
 // The placeholders the implementer's brief template declares. dispatch-prompt.mjs
@@ -240,6 +350,8 @@ export function defang(text, names) {
 
 const trimmed = (s) => String(s ?? "").trim();
 const cap = (s) => (s.length > RECORD_MAX ? `…${s.slice(-(RECORD_MAX - 1))}` : s);
+// What the record keeps of a child whose stdout is a whole file or diff: its size.
+const sized = (r) => `${Buffer.byteLength(r.stdout)} bytes`;
 const now = () => new Date().toISOString();
 
 function how(r) {
@@ -248,10 +360,10 @@ function how(r) {
   return `exit ${r.status}`;
 }
 
-/** `status` is the exit status, null when the child never ran or was killed (`how` says which). */
-function spawn(cmd, args, { cwd, env, timeoutMs } = {}) {
+/** `status` is the exit status, null when the child never ran or was killed (`how` says which). `raw` keeps stdout as printed. */
+function spawn(cmd, args, { cwd, env, timeoutMs, raw = false } = {}) {
   const r = spawnSync(cmd, args, { cwd, encoding: "utf8", maxBuffer: MAX_BUFFER, env: gitEnv(env), timeout: timeoutMs });
-  const stdout = trimmed(r.stdout);
+  const stdout = raw ? String(r.stdout ?? "") : trimmed(r.stdout);
   const stderr = trimmed(r.stderr);
   return { status: r.error ? null : r.status, stdout, stderr, text: [stdout, stderr].filter(Boolean).join("\n"), how: how(r) };
 }
@@ -546,18 +658,66 @@ class Pull {
     ];
   }
 
-  // The latest scan, line by line, and the behind-issue candidates.
+  // The latest scan, line by line, and the behind-issue candidates. A scan
+  // recorded before the hunk evidence holds no `evidence` and no `lineRefs`.
   collisionContext() {
-    const { paths, overlaps, unread } = this.st.scans.at(-1);
+    const { paths, overlaps, lineRefs = [], unread } = this.st.scans.at(-1);
     const refs = issueRefs(scopeOf(this.issue()));
     const who = (o) => (o.branch === undefined ? `PR #${o.pr}` : `branch ${o.branch}${o.pr === null ? "" : ` (PR #${o.pr})`}`);
     return [
       `paths scanned: ${paths.length === 0 ? "(none)" : paths.join(" ")}`,
-      ...overlaps.map((o) => `${who(o)}: ${o.paths.join(" ")}`),
+      ...overlaps.flatMap((o) => [`${who(o)}: ${o.paths.join(" ")}`, ...(o.evidence ?? [])]),
+      ...lineRefs,
       ...unread.map((u) => `could not look: ${u}`),
       ...(overlaps.length === 0 ? ["no overlap"] : []),
       `behind-issue candidates (Out of scope): ${refs.length === 0 ? "(none)" : refs.join(" ")}`,
     ];
+  }
+
+  // A file as it stands at `rev`, `{ text }`, or `{ why }` it could not be read.
+  fileAt(rev, path) {
+    const r = this.exec("collision", "git", "git", [], ["cat-file", "blob", `${rev}:${path}`], { raw: true }, sized);
+    return r.status === 0 ? { text: r.stdout } : { why: `git cat-file blob ${rev}:${path}: ${failure(r)}` };
+  }
+
+  // The merge-base of origin/main and `rev`, `{ rev }`, or `{ why }` there is none.
+  mergeBase(rev) {
+    const r = this.exec("collision", "git", "git", [], ["merge-base", "origin/main", rev]);
+    return r.status === 0 && r.stdout !== "" ? { rev: r.stdout } : { why: `git merge-base origin/main ${rev}: ${failure(r)}` };
+  }
+
+  // The merge-base a PR's diff is taken against: its head fetched, then met with origin/main.
+  prBase(pr) {
+    const r = this.exec("collision", "git", "git", [], ["fetch", "-q", "origin", `pull/${pr}/head`], { timeoutMs: NETWORK_TIMEOUT_MS });
+    return r.status === 0 ? this.mergeBase("FETCH_HEAD") : { why: `git fetch origin pull/${pr}/head: ${failure(r)}` };
+  }
+
+  // Each shared file's hunks in `diff`, by base-side range, each with the
+  // headings it sits under in the base file `base()` names — ranges only for a
+  // file that is not Markdown or whose base could not be read.
+  hunkLines(files, diff, base) {
+    const parsed = diffHunks(diff);
+    const lines = [];
+    let at;
+    for (const f of files) {
+      const d = parsed.find((x) => (x.new ?? x.old) === f);
+      if (d === undefined || d.hunks.length === 0) {
+        lines.push(`  ${f}: no hunk in the diff`);
+        continue;
+      }
+      let hs = null;
+      if (d.old !== null && MARKDOWN.test(d.old)) {
+        at ??= base();
+        const read = at.rev === undefined ? at : this.fileAt(at.rev, d.old);
+        if (read.text === undefined) lines.push(`  ${f}: base not read (${read.why})`);
+        else hs = headings(read.text);
+      }
+      for (const { a, b } of d.hunks) {
+        const where = d.old === null ? " (new file)" : hs === null ? "" : ` ${sectionsOf(hs, a, a + b - 1)}`;
+        lines.push(`  ${f} @@ -${a},${b} @@${where}`);
+      }
+    }
+    return lines;
   }
 
   // ── the stages: each returns null to go on to the stage `stage` now names, or a result ──
@@ -645,14 +805,11 @@ class Pull {
     const gone = goneBranches(refs.stdout);
 
     const paths = [...new Set([...briefPaths(briefText(this.issue()).trim()), ...st.addedPaths])];
-    // A path names a changed file, a directory above it (with or without its trailing `/`), or, with no `/`, a file by its name.
-    const hits = (p, f) => {
-      const q = p.replace(/\/+$/, "");
-      return f === q || f.startsWith(`${q}/`) || (!q.includes("/") && f.split("/").pop() === q);
-    };
+    const sharedFiles = new Set();
+    // The brief paths a listing shares, and its files they name.
     const shared = (stdout, sep) => {
       const files = stdout.split(sep).filter((f) => f !== "");
-      return paths.filter((p) => files.some((f) => hits(p, f)));
+      return { paths: paths.filter((p) => files.some((f) => pathHits(p, f))), files: files.filter((f) => paths.some((p) => pathHits(p, f))) };
     };
     const overlaps = [];
     const unread = [];
@@ -662,7 +819,15 @@ class Pull {
       if (d.status !== 0) unread.push(`gh pr diff ${pr} (${failure(d)})`);
       // Fail closed, as pr-overlap.mjs does: a PR with no changed file is a query that did not work, never "no overlap".
       else if (d.stdout === "") unread.push(`gh pr diff ${pr} (printed no file)`);
-      else if (common.length > 0) overlaps.push({ pr, paths: common });
+      else if (common.paths.length > 0) {
+        for (const f of common.files) sharedFiles.add(f);
+        const full = this.gh("collision", ["pr", "diff", String(pr)], sized);
+        let evidence = [];
+        if (full.status !== 0) unread.push(`gh pr diff ${pr} (${failure(full)})`);
+        else if (full.stdout === "") unread.push(`gh pr diff ${pr} (printed no diff)`);
+        else evidence = this.hunkLines(common.files, full.stdout, () => this.prBase(pr));
+        overlaps.push({ pr, paths: common.paths, evidence });
+      }
     }
     const heads = new Map(prs.map((p) => [p.headRefName, p.number]));
     for (const branch of worktreeBranches(wt.stdout).filter((b) => b !== "main" && !gone.has(b)).sort()) {
@@ -671,9 +836,32 @@ class Pull {
       const d = this.exec("collision", "git", "git", [], ["diff", "--name-only", "-z", range, "--"]);
       const common = shared(d.stdout, "\0");
       if (d.status !== 0) unread.push(`git diff --name-only ${range} (${failure(d)})`);
-      else if (common.length > 0) overlaps.push({ branch, pr: heads.get(branch) ?? null, paths: common });
+      else if (common.paths.length > 0) {
+        for (const f of common.files) sharedFiles.add(f);
+        const full = this.exec("collision", "git", "git", [], ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", range, "--"], {}, sized);
+        let evidence = [];
+        if (full.status !== 0) unread.push(`git diff ${range} (${failure(full)})`);
+        else evidence = this.hunkLines(common.files, full.stdout, () => this.mergeBase(branch));
+        overlaps.push({ branch, pr: heads.get(branch) ?? null, paths: common.paths, evidence });
+      }
     }
-    st.scans.push({ at: now(), paths, overlaps, unread });
+    // A brief path carrying a line reference, in a shared file, with the headings it sits under on origin/main.
+    const lineRefs = [];
+    const onMain = new Map();
+    for (const p of paths) {
+      const ref = LINE_REF.exec(p);
+      if (ref === null) continue;
+      for (const f of [...sharedFiles].filter((x) => pathHits(p, x))) {
+        let where = "(not Markdown)";
+        if (MARKDOWN.test(f)) {
+          if (!onMain.has(f)) onMain.set(f, this.fileAt("origin/main", f));
+          const read = onMain.get(f);
+          where = read.text === undefined ? `(not read: ${read.why})` : sectionsOf(headings(read.text), Number(ref[1]), Number(ref[2] ?? ref[1]));
+        }
+        lineRefs.push(`brief ref ${p} (${f} on origin/main): ${where}`);
+      }
+    }
+    st.scans.push({ at: now(), paths, overlaps, lineRefs, unread });
     return this.ask("collision", this.collisionContext());
   }
 

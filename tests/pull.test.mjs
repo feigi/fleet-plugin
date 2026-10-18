@@ -18,8 +18,8 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { renderBrief } from "./support/render-brief.mjs";
-import { briefPaths, issueMetrics } from "../plugin/scripts/ticket-router.mjs";
-import { chainHead, defang, implRow, outOfScope, parseAnswer, relabel } from "../plugin/scripts/pull.mjs";
+import { briefPaths, issueMetrics, outOfScope } from "../plugin/scripts/ticket-router.mjs";
+import { chainHead, defang, diffHunks, headings, implRow, parseAnswer, pathHits, relabel, sectionsOf } from "../plugin/scripts/pull.mjs";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
 const SKILL = readFileSync(join(PLUGIN, "skills", "run-team", "SKILL.md"), "utf8");
@@ -352,6 +352,66 @@ test("outOfScope: the section from its heading to the next heading of its level 
   assert.equal(outOfScope("## A\n\nx\n\n## Out of scope\n\n- y\n\n### sub\n\nz\n\n## B\n\nw"), "## Out of scope\n\n- y\n\n### sub\n\nz");
   assert.equal(outOfScope("# T\n\n## out of scope\n\n- y"), "## out of scope\n\n- y");
   assert.equal(outOfScope("## What\n\nonly this"), null);
+});
+
+test("briefPaths skips the Out of scope section, its heading at any level and in any case, through to the next heading of its level or above", () => {
+  const brief = [
+    "## What to build", "", "Change `a/in.mjs`.", "",
+    "### OUT of Scope", "", "- `a/out.mjs`", "", "#### Detail", "", "- `a/deeper.mjs`", "",
+    "### Acceptance", "", "- `a/after.mjs`, and `a/out.mjs` again",
+  ].join("\n");
+  assert.deepEqual(briefPaths(brief), ["a/in.mjs", "a/after.mjs", "a/out.mjs"], "a path the section names is still scanned where the brief names it outside it");
+  assert.deepEqual(briefPaths("Change `a/in.mjs`.\n\n# out of scope\n\n- `a/out.mjs`\n"), ["a/in.mjs"], "a section that runs to the end is skipped to the end");
+  assert.equal(issueMetrics({ ...ISSUE, body: brief }).paths, "3", "the router's metric counts what the extractor keeps");
+});
+
+test("pathHits: a brief path names its file from below the repository root, and with a line reference; a slash command names none", () => {
+  const skill = "plugin/skills/run-team/SKILL.md";
+  for (const [p, f] of [
+    ["run-team/SKILL.md", skill],
+    ["briefs/fix-applier.md", "plugin/skills/run-team/briefs/fix-applier.md"],
+    ["run-team/SKILL.md:256-263", skill],
+    ["plugin/scripts/pull.mjs:12", "plugin/scripts/pull.mjs"],
+    ["pull.mjs:12", "plugin/scripts/pull.mjs"],
+    ["briefs/", "plugin/skills/run-team/briefs/fix-applier.md"],
+    ["skills/run-team", skill],
+    [skill, skill],
+    ["plugin/", skill],
+    ["SKILL.md", skill],
+  ]) assert.equal(pathHits(p, f), true, `${p} names ${f}`);
+  for (const [p, f] of [
+    ["/run-team", skill],
+    ["/run-team/SKILL.md", skill],
+    ["n/SKILL.md", "run-team/SKILL.md"],
+    ["plugin/script", "plugin/scripts/pull.mjs"],
+    ["ugin", "plugin/scripts/pull.mjs"],
+    ["un-team/SKILL.md", skill],
+    [":12", skill],
+  ]) assert.equal(pathHits(p, f), false, `${p} names no ${f}`);
+});
+
+test("diffHunks reads each file's base-side hunk ranges, counting a hunk's lines so a removed `-- x` line is no header", () => {
+  const diff = [
+    "diff --git a/x.md b/x.md", "index 1..2 100644", "--- a/x.md", "+++ b/x.md",
+    "@@ -3,3 +3,3 @@ ## stale funcname", " a", "--- b", "+--- c", " d",
+    "@@ -20 +20,0 @@", "-q",
+    "diff --git \"a/docs/\\303\\251.md\" \"b/docs/\\303\\251.md\"", "new file mode 100644", "--- /dev/null", "+++ \"b/docs/\\303\\251.md\"", "@@ -0,0 +1 @@", "+x",
+    "diff --git a/gone.md b/gone.md", "deleted file mode 100644", "--- a/gone.md", "+++ /dev/null", "@@ -1,2 +0,0 @@", "-a", "-b",
+  ].join("\n");
+  assert.deepEqual(diffHunks(diff), [
+    { old: "x.md", new: "x.md", hunks: [{ a: 3, b: 3 }, { a: 20, b: 1 }] },
+    { old: null, new: "docs/é.md", hunks: [{ a: 0, b: 0 }] },
+    { old: "gone.md", new: null, hunks: [{ a: 1, b: 2 }] },
+  ]);
+});
+
+test("headings skips fenced code; sectionsOf names the heading a range starts under and each it crosses", () => {
+  const hs = headings("# T\n\n```sh\n# a comment\n```\n## A\nx\n  ### B\ny\n~~~\n## not\n~~~\n");
+  assert.deepEqual(hs, [{ line: 1, text: "# T" }, { line: 6, text: "## A" }, { line: 8, text: "### B" }]);
+  assert.equal(sectionsOf(hs, 7, 7), "## A");
+  assert.equal(sectionsOf(hs, 6, 9), "## A → ### B");
+  assert.equal(sectionsOf(hs, 0, -1), "(no heading above)");
+  assert.equal(sectionsOf([], 5, 9), "(no heading above)");
 });
 
 // ── the shortlist head ───────────────────────────────────────────────────────
@@ -703,7 +763,8 @@ test("Q2: an edit that fails after its comment landed is answered again without 
 
 // Two open PRs whose diffs the gh stub answers — #7's failing when asked —
 // and two live worktrees: `feature/x`, a branch with no PR, and `fix/31`,
-// #31's head. Each worktree's branch carries one commit of its own.
+// #31's head, pushed as origin's `pull/31/head`. Each worktree's branch
+// carries one commit of its own, every file it writes new.
 function scanFixture({ failing = false, issue } = {}) {
   const f = fixture({ issue });
   const branch = (name, files) => {
@@ -718,10 +779,14 @@ function scanFixture({ failing = false, issue } = {}) {
   };
   branch("feature/x", ["tests/pull.test.mjs", "docs/notes.md"]);
   branch("fix/31", ["plugin/scripts/pull.mjs"]);
+  git(f.repo, "push", "-q", "origin", "fix/31:refs/pull/31/head");
+  const other = "diff --git a/plugin/scripts/other.mjs b/plugin/scripts/other.mjs\nnew file mode 100644\n--- /dev/null\n+++ b/plugin/scripts/other.mjs\n@@ -0,0 +1 @@\n+feat/7\n";
   f.ghRules([
     { match: "^pr list ", out: JSON.stringify([{ number: 31, headRefName: "fix/31" }, { number: 7, headRefName: "feat/7" }]) },
     { match: "^pr diff 31 --name-only$", out: "plugin/scripts/pull.mjs\nREADME\n" },
+    { match: "^pr diff 31$", out: `${git(f.repo, "diff", "--src-prefix=a/", "--dst-prefix=b/", "origin/main...fix/31")}\n` },
     { match: "^pr diff 7 --name-only$", ...(failing ? { exit: 1, err: "boom" } : { out: "plugin/scripts/other.mjs\n" }) },
+    { match: "^pr diff 7$", out: other },
   ]);
   return f;
 }
@@ -739,31 +804,41 @@ const collisionLines = (stdout) => {
   return lines;
 };
 
-test("Q3 scans every open PR and live worktree branch against the brief's paths and prints one line per overlap", () => {
+test("Q3 scans every open PR and live worktree branch against the brief's paths and prints one line per overlap, its shared files' hunks under it", () => {
   const f = scanFixture();
   const r = toCollision(f);
   assert.deepEqual(collisionLines(r.stdout), [
     "paths scanned: plugin/scripts/pull.mjs tests/pull.test.mjs",
     "PR #31: plugin/scripts/pull.mjs",
+    "  plugin/scripts/pull.mjs @@ -0,0 @@ (new file)",
     "branch feature/x: tests/pull.test.mjs",
+    "  tests/pull.test.mjs @@ -0,0 @@ (new file)",
     "branch fix/31 (PR #31): plugin/scripts/pull.mjs",
+    "  plugin/scripts/pull.mjs @@ -0,0 @@ (new file)",
     "behind-issue candidates (Out of scope): (none)",
   ]);
   assert.deepEqual(ghCalls(f, /^pr /).map((c) => c.args), [
     ["pr", "list", "--state", "open", "--limit", "200", "--json", "number,headRefName"],
     ["pr", "diff", "7", "--name-only"],
     ["pr", "diff", "31", "--name-only"],
-  ]);
+    ["pr", "diff", "31"],
+  ], "only a PR sharing a file has its full diff read");
   const diffs = f.state().commands.filter((c) => c.cmd[0] === "git" && c.cmd[1] === "diff").map((c) => c.cmd.slice(1));
-  assert.deepEqual(diffs, [["diff", "--name-only", "-z", "origin/main...feature/x", "--"], ["diff", "--name-only", "-z", "origin/main...fix/31", "--"]], "every branch but main is diffed");
+  const full = (b) => ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", `origin/main...${b}`, "--"];
+  assert.deepEqual(diffs, [
+    ["diff", "--name-only", "-z", "origin/main...feature/x", "--"], full("feature/x"),
+    ["diff", "--name-only", "-z", "origin/main...fix/31", "--"], full("fix/31"),
+  ], "every branch but main is diffed, and one sharing a file in full");
+  assert.deepEqual(f.state().commands.filter((c) => c.cmd[0] === "git" && ["fetch", "merge-base", "cat-file"].includes(c.cmd[1])), [], "no base is read for a file new in the diff, nor for one that is not Markdown");
   assert.equal(f.calls("claim-ticket").length, 0, "nothing is claimed before Q3 is answered");
   const [scan] = f.state().scans;
   assert.deepEqual(scan.paths, ["plugin/scripts/pull.mjs", "tests/pull.test.mjs"]);
   assert.deepEqual(scan.overlaps, [
-    { pr: 31, paths: ["plugin/scripts/pull.mjs"] },
-    { branch: "feature/x", pr: null, paths: ["tests/pull.test.mjs"] },
-    { branch: "fix/31", pr: 31, paths: ["plugin/scripts/pull.mjs"] },
+    { pr: 31, paths: ["plugin/scripts/pull.mjs"], evidence: ["  plugin/scripts/pull.mjs @@ -0,0 @@ (new file)"] },
+    { branch: "feature/x", pr: null, paths: ["tests/pull.test.mjs"], evidence: ["  tests/pull.test.mjs @@ -0,0 @@ (new file)"] },
+    { branch: "fix/31", pr: 31, paths: ["plugin/scripts/pull.mjs"], evidence: ["  plugin/scripts/pull.mjs @@ -0,0 @@ (new file)"] },
   ]);
+  assert.deepEqual(scan.lineRefs, []);
   assert.deepEqual(scan.unread, []);
   assert.match(scan.at, NOW);
 });
@@ -776,18 +851,27 @@ test("Q3 `paths <p>…` adds paths, scans again and asks again: the intersection
   assert.deepEqual(collisionLines(r.stdout), [
     "paths scanned: plugin/scripts/pull.mjs tests/pull.test.mjs plugin/scripts/other.mjs docs/notes.md",
     "PR #7: plugin/scripts/other.mjs",
+    "  plugin/scripts/other.mjs @@ -0,0 @@ (new file)",
     "PR #31: plugin/scripts/pull.mjs",
+    "  plugin/scripts/pull.mjs @@ -0,0 @@ (new file)",
     "branch feature/x: tests/pull.test.mjs docs/notes.md",
+    "  docs/notes.md @@ -0,0 @@ (new file)",
+    "  tests/pull.test.mjs @@ -0,0 @@ (new file)",
     "branch fix/31 (PR #31): plugin/scripts/pull.mjs",
+    "  plugin/scripts/pull.mjs @@ -0,0 @@ (new file)",
     "behind-issue candidates (Out of scope): (none)",
   ]);
   const again = f.answer(12, "collision", "paths", "docs/notes.md", "README");
   assert.equal(again.status, 10, again.stdout + again.err);
   assert.equal(collisionLines(again.stdout)[0], "paths scanned: plugin/scripts/pull.mjs tests/pull.test.mjs plugin/scripts/other.mjs docs/notes.md README", "a path given twice is scanned once");
-  assert.equal(collisionLines(again.stdout)[2], "PR #31: plugin/scripts/pull.mjs README");
+  assert.deepEqual(collisionLines(again.stdout).slice(3, 6), [
+    "PR #31: plugin/scripts/pull.mjs README",
+    "  plugin/scripts/pull.mjs @@ -0,0 @@ (new file)",
+    "  README: no hunk in the diff",
+  ], "a file the name-only listing shares but the full diff holds no hunk for says so");
   const st = f.state();
   assert.equal(st.scans.length, 3);
-  assert.deepEqual(st.scans[1].overlaps[0], { pr: 7, paths: ["plugin/scripts/other.mjs"] });
+  assert.deepEqual(st.scans[1].overlaps[0], { pr: 7, paths: ["plugin/scripts/other.mjs"], evidence: ["  plugin/scripts/other.mjs @@ -0,0 @@ (new file)"] });
   assert.deepEqual(st.answers.filter((a) => a.qid === "collision").map((a) => [a.token, a.text]), [["paths", "plugin/scripts/other.mjs docs/notes.md"], ["paths", "docs/notes.md README"]]);
   assert.equal(st.questions.filter((q) => q.qid === "collision").length, 3, "each scan asks again");
   assert.equal(f.answer(12, "collision", "clear").status, 0, "and the question still takes an answer that ends it");
@@ -885,9 +969,13 @@ test("Q3: a path the brief spells as a bare name or as a directory matches the c
   assert.deepEqual(lines, [
     "paths scanned: pull.mjs plugin/scripts/ docs/",
     "PR #7: plugin/scripts/",
+    "  plugin/scripts/other.mjs @@ -0,0 @@ (new file)",
     "PR #31: pull.mjs plugin/scripts/",
+    "  plugin/scripts/pull.mjs @@ -0,0 @@ (new file)",
     "branch feature/x: docs/",
+    "  docs/notes.md @@ -0,0 @@ (new file)",
     "branch fix/31 (PR #31): pull.mjs plugin/scripts/",
+    "  plugin/scripts/pull.mjs @@ -0,0 @@ (new file)",
     "behind-issue candidates (Out of scope): (none)",
   ]);
   // A directory is a whole path segment, not a prefix of a name: `plugin/script` names no directory here.
@@ -906,7 +994,7 @@ test("Q3: a branch that changes a non-ASCII path is scanned by the path's own na
   git(wt, "add", ".");
   git(wt, "commit", "-q", "-m", "uni");
   const lines = collisionLines(toCollision(f).stdout);
-  assert.deepEqual(lines, ["paths scanned: docs/é.md", "branch uni: docs/é.md", "behind-issue candidates (Out of scope): (none)"]);
+  assert.deepEqual(lines, ["paths scanned: docs/é.md", "branch uni: docs/é.md", "  docs/é.md @@ -0,0 @@ (new file)", "behind-issue candidates (Out of scope): (none)"], "the full diff's quoted name is read as the file's own");
 });
 
 test("Q3 skips a worktree branch whose upstream is gone and scans one whose upstream stands", () => {
@@ -928,8 +1016,112 @@ test("Q3 skips a worktree branch whose upstream is gone and scans one whose upst
   assert.deepEqual(lines, [
     "paths scanned: plugin/scripts/pull.mjs tests/pull.test.mjs",
     "branch live/1: plugin/scripts/pull.mjs",
+    "  plugin/scripts/pull.mjs @@ -0,0 @@ (new file)",
     "behind-issue candidates (Out of scope): (none)",
   ]);
+});
+
+test("Q3: a path the brief names only in its Out of scope section is not scanned", () => {
+  const f = scanFixture({ issue: { ...ISSUE, body: "## What to build\n\nChange `docs/notes.md`.\n\n## Out of scope\n\n- `plugin/scripts/pull.mjs` and `tests/pull.test.mjs`.\n" } });
+  assert.deepEqual(collisionLines(toCollision(f).stdout), [
+    "paths scanned: docs/notes.md",
+    "branch feature/x: docs/notes.md",
+    "  docs/notes.md @@ -0,0 @@ (new file)",
+    "behind-issue candidates (Out of scope): (none)",
+  ]);
+  assert.deepEqual(ghCalls(f, /^pr diff \d+$/), [], "no PR's full diff is read");
+  const g = scanFixture({ issue: { ...ISSUE, body: "## What to build\n\nChange the scan.\n\n## Out of scope\n\n- `plugin/scripts/pull.mjs`\n" } });
+  assert.deepEqual(collisionLines(toCollision(g).stdout), ["paths scanned: (none)", "no overlap", "behind-issue candidates (Out of scope): (none)"]);
+});
+
+// The shape the scan was ruled on: tickets editing one heavily shared Markdown
+// file in far-apart sections. SKILL_MD holds sections A to E, 30 lines each
+// (headings at lines 3, 34, 65, 96, 127). PR #40, its head pushed as origin's
+// `pull/40/head` and no worktree of its own, edits line 106 in D; `fix/41`,
+// #41's head and a live worktree, edits line 147 in E, and origin has no
+// `pull/41/head`. origin/main has since gained 40 lines at the top (headings
+// now at 43, 74, 105, 136, 167), so a hunk finds its heading only in the file
+// at the merge-base.
+const SKILL_MD = "plugin/skills/run-team/SKILL.md";
+function incidentFixture(body) {
+  const f = fixture({ issue: { ...ISSUE, body } });
+  const lines = ["# Run team", ""];
+  for (const s of ["A", "B", "C", "D", "E"]) lines.push(`## ${s}`, ...Array.from({ length: 30 }, (_, i) => `${s.toLowerCase()}${i + 1}`));
+  const write = (dir, text) => {
+    mkdirSync(join(dir, SKILL_MD, ".."), { recursive: true });
+    writeFileSync(join(dir, SKILL_MD), `${text.join("\n")}\n`);
+  };
+  const commit = (dir, msg) => {
+    git(dir, "add", SKILL_MD);
+    git(dir, "commit", "-q", "-m", msg);
+  };
+  write(f.repo, lines);
+  commit(f.repo, "skill");
+  git(f.repo, "push", "-q", "origin", "main");
+  const edit = (name, line) => {
+    const wt = join(f.dir, name.replace("/", "-"));
+    git(f.repo, "worktree", "add", "-q", "-b", name, wt);
+    write(wt, lines.map((l, i) => (i + 1 === line ? `${l} edited` : l)));
+    commit(wt, name);
+    return wt;
+  };
+  git(f.repo, "worktree", "remove", "--force", edit("feat/40", 106));
+  git(f.repo, "push", "-q", "origin", "feat/40:refs/pull/40/head");
+  edit("fix/41", 147);
+  write(f.repo, [lines[0], ...Array.from({ length: 40 }, (_, i) => `x${i + 1}`), ...lines.slice(1)]);
+  commit(f.repo, "main moves on");
+  git(f.repo, "push", "-q", "origin", "main");
+  const diff = (b) => `${git(f.repo, "diff", "--src-prefix=a/", "--dst-prefix=b/", `origin/main...${b}`)}\n`;
+  f.ghRules([
+    { match: "^pr list ", out: JSON.stringify([{ number: 40, headRefName: "feat/40" }, { number: 41, headRefName: "fix/41" }]) },
+    { match: "^pr diff 40 --name-only$", out: `${SKILL_MD}\n` },
+    { match: "^pr diff 40$", out: diff("feat/40") },
+    { match: "^pr diff 41 --name-only$", out: `${SKILL_MD}\n` },
+    { match: "^pr diff 41$", out: diff("fix/41") },
+  ]);
+  return f;
+}
+
+// The `base not read` line, its git error text left out.
+const baseNotRead = (lines) => lines.map((l) => l.replace(/: base not read \((git fetch origin pull\/\d+\/head): .*\)$/, ": base not read ($1: …)"));
+
+test("Q3 on one shared Markdown file edited in far-apart sections: every hunk and the brief's line reference print their headings, and they share none", () => {
+  const f = incidentFixture("## What to build\n\nRewrite the step at `run-team/SKILL.md:80`.\n\n## Out of scope\n\n- Anything else under `plugin/`.\n");
+  const lines = baseNotRead(collisionLines(toCollision(f).stdout));
+  assert.deepEqual(lines, [
+    "paths scanned: run-team/SKILL.md:80",
+    "PR #40: run-team/SKILL.md:80",
+    `  ${SKILL_MD} @@ -103,7 @@ ## D`,
+    "PR #41: run-team/SKILL.md:80",
+    `  ${SKILL_MD}: base not read (git fetch origin pull/41/head: …)`,
+    `  ${SKILL_MD} @@ -144,7 @@`,
+    "branch fix/41 (PR #41): run-team/SKILL.md:80",
+    `  ${SKILL_MD} @@ -144,7 @@ ## E`,
+    `brief ref run-team/SKILL.md:80 (${SKILL_MD} on origin/main): ## B`,
+    "behind-issue candidates (Out of scope): (none)",
+  ]);
+  const git_ = f.state().commands.filter((c) => c.cmd[0] === "git" && ["fetch", "cat-file"].includes(c.cmd[1])).map((c) => c.cmd.slice(1));
+  assert.deepEqual(git_.filter((c) => c[0] === "fetch"), [["fetch", "-q", "origin", "pull/40/head"], ["fetch", "-q", "origin", "pull/41/head"]], "a PR's head is fetched for its base");
+  assert.equal(git_.filter((c) => c[0] === "cat-file").at(-1)[2], `origin/main:${SKILL_MD}`, "the brief's reference is read on origin/main");
+  const end = f.answer(12, "collision", "clear");
+  assert.equal(end.status, 0, end.stdout + end.err);
+  assert.deepEqual(f.ledgerRows().filter((r) => /#4[01]|fix\/41/.test(r)), [], "the admitted ticket's row names no overlap partner");
+});
+
+test("Q3: a brief line reference inside a colliding hunk's section prints that section beside the hunk's, and behind-pr takes it", () => {
+  const f = incidentFixture("## What to build\n\nRewrite the step at `run-team/SKILL.md:80`.\n");
+  toCollision(f);
+  const r = f.answer(12, "collision", "paths", `${SKILL_MD}:140-141`);
+  assert.equal(r.status, 10, r.stdout + r.err);
+  const lines = collisionLines(r.stdout);
+  assert.ok(lines.includes(`  ${SKILL_MD} @@ -103,7 @@ ## D`), lines.join("\n"));
+  assert.deepEqual(lines.filter((l) => l.startsWith("brief ref ")), [
+    `brief ref run-team/SKILL.md:80 (${SKILL_MD} on origin/main): ## B`,
+    `brief ref ${SKILL_MD}:140-141 (${SKILL_MD} on origin/main): ## D`,
+  ]);
+  const end = f.answer(12, "collision", "behind-pr:#40");
+  assert.equal(end.status, 1, end.stdout + end.err);
+  assert.deepEqual(f.ledgerRows(), ["#12 excluded · behind-pr:#40"]);
 });
 
 test("Q3: a pull.json from before the scan resumes and scans, unless a collision question stands on it", () => {
@@ -1489,7 +1681,7 @@ test("references/pull.md steps 4 and 5 answer Q3 off the printed scan and the Ou
   for (const phrase of [
     "`pull.mjs` runs it before Q3",
     "`no overlap` when none, and `could not look: <which>`",
-    "Answer Q3 off those lines: an overlap → `behind-pr:#M`, a branch with no PR yet by its name",
+    "Answer Q3 off those lines: `behind-pr:#M`, a branch with no PR yet by its name",
     "`paths <p>…`, which scans again and asks again",
     "`behind-pr` on it is taken",
     "the `#N` refs of the brief's `Out of scope` section are printed beside Q3 as the candidates",
