@@ -66,17 +66,17 @@
 //                 per PR or branch sharing a path, then, from its full diff
 //                 (`gh pr diff <M>`, or `git diff origin/main...<branch>`),
 //                 each shared file's hunks by base-side range, each with the
-//                 Markdown headings it sits under in the file at the
-//                 merge-base (a PR's head fetched as `pull/<M>/head`); ranges
-//                 only for a file that is not Markdown or whose base could not
-//                 be read. Each brief path with a line reference in a shared
-//                 file follows, with its headings on origin/main. `no overlap`
-//                 when none, and `could not look: <which>` for one that could
-//                 not be read; the `#N` refs of the brief's Out of scope
-//                 section are printed as the behind-issue candidates. Then
-//                 `clear`, `behind-pr:#M`, `behind-issue:#M`, or `paths <p>…`,
-//                 which scans again and asks again. An exclusion is a ledger
-//                 row.
+//                 Markdown headings its changed lines sit under in the file
+//                 at the merge-base (a PR's head fetched as `pull/<M>/head`);
+//                 ranges only for a file that is not Markdown or whose base
+//                 could not be read. Each brief path with a line reference
+//                 in a shared file follows, with its headings on origin/main.
+//                 `no overlap` when none, and `could not look: <which>` for
+//                 one that could not be read; the `#N` refs of the brief's
+//                 Out of scope section are printed as the behind-issue
+//                 candidates. Then `clear`, `behind-pr:#M`, `behind-issue:#M`,
+//                 or `paths <p>…`, which scans again and asks again. An
+//                 exclusion is a ledger row.
 //   6  claim      `claim-ticket.sh <N> impl-<N> implementer --apply`.
 //   7  route      `ticket-router.mjs route …`; a router that refuses releases
 //                 the claim, and a release that fails is exit 2 with the claim
@@ -264,19 +264,31 @@ function diffSide(s, prefix) {
 /**
  * Every file of a unified git diff, `{ old, new, hunks }`: `old` the base-side
  * path and `new` the other, null for `/dev/null`, and each hunk its base-side
- * range `{ a, b }` from `@@ -a,b`. A hunk's own lines are counted off its
- * header, so a removed `-- x` line is never read as a file header.
+ * range `{ a, b }` from `@@ -a,b` with `from`..`to`, the base-side lines its
+ * changes touch — a removed line its own, an added line the one it follows, 0
+ * before the first — so its context lines are no part of it. A hunk's own
+ * lines are counted off its header, so a removed `-- x` line is never read as
+ * a file header.
  */
 export function diffHunks(text) {
   const files = [];
   let file = null;
+  let hunk = null;
   let left = 0;
   let right = 0;
+  let at = 0;
   for (const line of text.split("\n")) {
     if (left > 0 || right > 0) {
-      if (line.startsWith("-")) left--;
-      else if (line.startsWith("+")) right--;
-      else if (!line.startsWith("\\")) {
+      if (line.startsWith("-")) {
+        hunk.from ??= at;
+        hunk.to = at++;
+        left--;
+      } else if (line.startsWith("+")) {
+        hunk.from ??= at - 1;
+        hunk.to = at - 1;
+        right--;
+      } else if (!line.startsWith("\\")) {
+        at++;
         left--;
         right--;
       }
@@ -292,9 +304,12 @@ export function diffHunks(text) {
     if (h !== null) {
       const a = Number(h[1]);
       const b = h[2] === undefined ? 1 : Number(h[2]);
-      file.hunks.push({ a, b });
+      hunk = { a, b, from: null, to: null };
+      file.hunks.push(hunk);
       left = b;
       right = h[3] === undefined ? 1 : Number(h[3]);
+      // An empty base range `-a,0` sits after line a, not on it.
+      at = b === 0 ? a + 1 : a;
     } else if (line.startsWith("--- ")) file.old = diffSide(line.slice(4), "a/");
     else if (line.startsWith("+++ ")) file.new = diffSide(line.slice(4), "b/");
   }
@@ -693,8 +708,8 @@ class Pull {
   }
 
   // Each shared file's hunks in `diff`, by base-side range, each with the
-  // headings it sits under in the base file `base()` names — ranges only for a
-  // file that is not Markdown or whose base could not be read.
+  // headings its changed lines sit under in the base file `base()` names —
+  // ranges only for a file that is not Markdown or whose base could not be read.
   hunkLines(files, diff, base) {
     const parsed = diffHunks(diff);
     const lines = [];
@@ -712,8 +727,8 @@ class Pull {
         if (read.text === undefined) lines.push(`  ${f}: base not read (${read.why})`);
         else hs = headings(read.text);
       }
-      for (const { a, b } of d.hunks) {
-        const where = d.old === null ? " (new file)" : hs === null ? "" : ` ${sectionsOf(hs, a, a + b - 1)}`;
+      for (const { a, b, from, to } of d.hunks) {
+        const where = d.old === null ? " (new file)" : hs === null ? "" : ` ${sectionsOf(hs, from, to)}`;
         lines.push(`  ${f} @@ -${a},${b} @@${where}`);
       }
     }

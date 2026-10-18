@@ -185,19 +185,19 @@ terminating in exactly one dispatch or an empty shortlist:
    a path with the brief, `no overlap` when none, and `could not look: <which>`
    for one it could not read. A path the brief names only in its `Out of scope`
    section is no target and is not scanned. Under each line come the shared
-   files' hunks, each by its base-side range with the Markdown headings it sits
-   under, then each brief `path:line` reference in a shared file with its
-   headings on `origin/main`. A shared file is evidence, not a verdict. Answer
-   Q3 off those lines: `behind-pr:#M`, a branch with no PR yet by its name, only
-   when a construct the brief names, or a brief `path:line` reference, lands in
-   or next to a hunk of `#M`'s diff in a shared file — next to is the same
-   Markdown section, under the nearest heading above, or, in a file with no
-   headings, within 20 lines of the hunk; with no such evidence the ticket does
-   not collide, whatever files it shares. A target file the brief does not spell
-   as a path → `paths <p>…`, which scans again and asks again. A PR the scan
-   could not read is still yours to judge, and `behind-pr` on it is taken.
-   `pr-overlap.mjs` is **PR-vs-PR only** — it runs `gh pr diff` on both args and
-   errors on an issue number, so never run it on a ticket here.
+   files' hunks, each by its base-side range with the Markdown headings its
+   changed lines sit under, then each brief `path:line` reference in a shared
+   file with its headings on `origin/main`. A shared file is evidence, not a
+   verdict. Answer Q3 off those lines: `behind-pr:#M`, a branch with no PR yet
+   by its name, only when a construct the brief names, or a brief `path:line`
+   reference, lands in or next to a hunk of `#M`'s diff in a shared file — next
+   to is the same Markdown section, under the nearest heading above, or, in a
+   file with no headings, within 20 lines of the hunk; with no such evidence the
+   ticket does not collide, whatever files it shares. A target file the brief
+   does not spell as a path → `paths <p>…`, which scans again and asks again. A
+   PR the scan could not read is still yours to judge, and `behind-pr` on it is
+   taken. `pr-overlap.mjs` is **PR-vs-PR only** — it runs `gh pr diff` on both
+   args and errors on an issue number, so never run it on a ticket here.
 5. **Sequence check** — the `#N` refs of the brief's `Out of scope` section are
    printed beside Q3 as the candidates: one naming an open ticket this one
    sequences after → `behind-issue:#M`. No overlap and no such ticket →

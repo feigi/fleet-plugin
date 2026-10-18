@@ -390,18 +390,19 @@ test("pathHits: a brief path names its file from below the repository root, and 
   ]) assert.equal(pathHits(p, f), false, `${p} names no ${f}`);
 });
 
-test("diffHunks reads each file's base-side hunk ranges, counting a hunk's lines so a removed `-- x` line is no header", () => {
+test("diffHunks reads each file's base-side hunk ranges and the lines their changes touch, counting a hunk's lines so a removed `-- x` line is no header", () => {
   const diff = [
     "diff --git a/x.md b/x.md", "index 1..2 100644", "--- a/x.md", "+++ b/x.md",
     "@@ -3,3 +3,3 @@ ## stale funcname", " a", "--- b", "+--- c", " d",
     "@@ -20 +20,0 @@", "-q",
+    "@@ -30,3 +30,4 @@", " k", "+new", " l", " m",
     "diff --git \"a/docs/\\303\\251.md\" \"b/docs/\\303\\251.md\"", "new file mode 100644", "--- /dev/null", "+++ \"b/docs/\\303\\251.md\"", "@@ -0,0 +1 @@", "+x",
     "diff --git a/gone.md b/gone.md", "deleted file mode 100644", "--- a/gone.md", "+++ /dev/null", "@@ -1,2 +0,0 @@", "-a", "-b",
   ].join("\n");
   assert.deepEqual(diffHunks(diff), [
-    { old: "x.md", new: "x.md", hunks: [{ a: 3, b: 3 }, { a: 20, b: 1 }] },
-    { old: null, new: "docs/é.md", hunks: [{ a: 0, b: 0 }] },
-    { old: "gone.md", new: null, hunks: [{ a: 1, b: 2 }] },
+    { old: "x.md", new: "x.md", hunks: [{ a: 3, b: 3, from: 4, to: 4 }, { a: 20, b: 1, from: 20, to: 20 }, { a: 30, b: 3, from: 30, to: 30 }] },
+    { old: null, new: "docs/é.md", hunks: [{ a: 0, b: 0, from: 0, to: 0 }] },
+    { old: "gone.md", new: null, hunks: [{ a: 1, b: 2, from: 1, to: 2 }] },
   ]);
 });
 
@@ -1037,13 +1038,13 @@ test("Q3: a path the brief names only in its Out of scope section is not scanned
 // The shape the scan was ruled on: tickets editing one heavily shared Markdown
 // file in far-apart sections. SKILL_MD holds sections A to E, 30 lines each
 // (headings at lines 3, 34, 65, 96, 127). PR #40, its head pushed as origin's
-// `pull/40/head` and no worktree of its own, edits line 106 in D; `fix/41`,
-// #41's head and a live worktree, edits line 147 in E, and origin has no
-// `pull/41/head`. origin/main has since gained 40 lines at the top (headings
-// now at 43, 74, 105, 136, 167), so a hunk finds its heading only in the file
-// at the merge-base.
+// `pull/40/head` and no worktree of its own, edits line 106 in D unless told
+// otherwise; `fix/41`, #41's head and a live worktree, edits line 147 in E
+// unless told otherwise, and origin has no `pull/41/head`. origin/main has
+// since gained 40 lines at the top (headings now at 43, 74, 105, 136, 167), so
+// a hunk finds its heading only in the file at the merge-base.
 const SKILL_MD = "plugin/skills/run-team/SKILL.md";
-function incidentFixture(body) {
+function incidentFixture(body, { pr = 106, branch = 147 } = {}) {
   const f = fixture({ issue: { ...ISSUE, body } });
   const lines = ["# Run team", ""];
   for (const s of ["A", "B", "C", "D", "E"]) lines.push(`## ${s}`, ...Array.from({ length: 30 }, (_, i) => `${s.toLowerCase()}${i + 1}`));
@@ -1065,9 +1066,9 @@ function incidentFixture(body) {
     commit(wt, name);
     return wt;
   };
-  git(f.repo, "worktree", "remove", "--force", edit("feat/40", 106));
+  git(f.repo, "worktree", "remove", "--force", edit("feat/40", pr));
   git(f.repo, "push", "-q", "origin", "feat/40:refs/pull/40/head");
-  edit("fix/41", 147);
+  edit("fix/41", branch);
   write(f.repo, [lines[0], ...Array.from({ length: 40 }, (_, i) => `x${i + 1}`), ...lines.slice(1)]);
   commit(f.repo, "main moves on");
   git(f.repo, "push", "-q", "origin", "main");
@@ -1122,6 +1123,18 @@ test("Q3: a brief line reference inside a colliding hunk's section prints that s
   const end = f.answer(12, "collision", "behind-pr:#40");
   assert.equal(end.status, 1, end.stdout + end.err);
   assert.deepEqual(f.ledgerRows(), ["#12 excluded · behind-pr:#40"]);
+});
+
+test("Q3: a hunk's headings are the ones its changed lines sit under, never those its context lines cross", () => {
+  // Line 126 is D's last and 128 E's first: each hunk's 3 lines of context
+  // reach across the `## E` heading at 127, and its change does not.
+  const f = incidentFixture("## What to build\n\nRewrite the step at `run-team/SKILL.md:80`.\n", { pr: 126, branch: 128 });
+  const lines = collisionLines(toCollision(f).stdout);
+  assert.deepEqual(lines.filter((l) => l.includes(" @@ ")), [
+    `  ${SKILL_MD} @@ -123,7 @@ ## D`,
+    `  ${SKILL_MD} @@ -125,7 @@`,
+    `  ${SKILL_MD} @@ -125,7 @@ ## E`,
+  ], lines.join("\n"));
 });
 
 test("Q3: a pull.json from before the scan resumes and scans, unless a collision question stands on it", () => {
