@@ -2112,7 +2112,8 @@ Read the depth off the tick and never derive it by hand: act on the row it print
 
 - **shortlist** — `.fleet/shortlist.json`'s entries with no `impl-` row and no
   live `excluded` row: admissible, not yet pulled. The tick's `unclaimed=`.
-  A head whose Pull ended this run is not counted.
+  Not after a refresh at unclaimed < B (below). A head whose Pull ended this
+  run is not counted.
 - **supply** — `scanned`, the open `ready-for-agent` tickets `shortlist.mjs`'s
   candidate scan returned, before any filter. Only a Pull's full read judges
   decided?, so a shortlist of undecided tickets is supply that every Pull
@@ -2174,7 +2175,8 @@ consult under a merge-side event storm, and that is how implementers reached
 0/target with one approved ticket waiting and ~57 `ready-for-agent` in supply while nobody
 noticed (#3). What follows stays here as the explanation of what the script decides —
 never as a second, hand-run copy of it. The table's shortlist counts no head
-whose Pull ended this run.
+whose Pull ended this run. A refresh at unclaimed < B leaves `unclaimed=` at
+that count, so `SUGGEST /triage` can print it above 0.
 
 | shortlist (unclaimed) | implementer row prints |
 |---|---|

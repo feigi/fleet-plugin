@@ -114,6 +114,11 @@ test("§ Queue depth defines In flight and the In-flight bound, and documents th
   // it holds back the refresh that would fill its slot.
   assert.match(s, Pin.phrase("The table's shortlist counts no head whose Pull ended this run"));
   assert.match(s, Pin.phrase("Unclaimed there counts no head whose Pull ended this run"));
+  // After a refresh at unclaimed < B the row prints the trigger's count, not the
+  // refreshed file's, so the idle row can carry a count above 0.
+  assert.match(s, Pin.phrase("A refresh at unclaimed < B leaves `unclaimed=` at that count, so `SUGGEST /triage` can print it above 0"));
+  const shortlist = RUN_TEAM.bullet("- **shortlist**", "- **supply**", "shortlist definition").text;
+  assert.match(shortlist, Pin.phrase("The tick's `unclaimed=`. Not after a refresh at unclaimed < B (below)."));
 });
 
 test("phase 0 runs tier-roles.mjs --check --in-flight <B> and says its notice never holds", () => {
@@ -432,6 +437,13 @@ test("the ask-by-name paragraph reads a missing message off the tick's SETTLE an
 // list item so a sibling row's words cannot satisfy it. The rows' full text is
 // in references/tick-rows.md; SKILL.md keeps one line for each.
 const TICK_ROWS = Pin.file(join(REPO, "skills", "run-team", "references", "tick-rows.md"));
+
+test("the REFRESHED and SUGGEST /triage tick rows leave an ended head out of the count, and the row keeps the trigger's count", () => {
+  const refreshed = TICK_ROWS.bullet("- `REFRESHED shortlist: <n> entries; <k> lifted`", "- `SUGGEST /triage, hold idle`", "tick-rows REFRESHED row").text;
+  assert.match(refreshed, Pin.phrase("a head whose Pull ended this run not counted, the implementer row's `unclaimed=` prints that same `<u>`, not the refreshed file's count"));
+  const suggest = TICK_ROWS.bullet("- `SUGGEST /triage, hold idle`", "- `specs-dropped=#<N>", "tick-rows SUGGEST row").text;
+  assert.match(suggest, Pin.phrase("A head whose Pull already ended in this run is not counted toward the refresh, so a shortlist of only such heads triggers the refresh before this row prints"));
+});
 
 test("the UNRECORDED tick row names its remedy: record the dispatch on the ledger, or confirm it is a stranger's member", () => {
   const row = TICK_ROWS.bullet("- `UNRECORDED <stem> (transcript exists, no ledger token)`", "- `NO-TRANSCRIPT <member>", "tick-rows UNRECORDED row").text;

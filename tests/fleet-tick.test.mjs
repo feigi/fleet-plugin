@@ -5145,7 +5145,7 @@ test("CLI: a receipt whose session is empty names no session, so a record is rea
 // The short-queue refresh counts only the heads a PULL row could name: a head
 // whose Pull ended in this run's session is no such head. Ticks at
 // `--in-flight <bound>` over the shortlist `file`, the refresh writing
-// `refresh`, with a `left` record in this run's session for each of `ended`
+// `refresh`, with a `left` record in this run's session for each of `ended`,
 // and `records` (pullScratch's shape) beside them.
 const LEFT = (n) => ({ record: pullRecord(n, { status: "left", outcome: { exit: 1, reason: "taken" } }) });
 const endedTicks = ({ file, refresh, ended = [], records = {}, bound = 3, again = 0, receipt, ...fixture }) => {
@@ -5157,9 +5157,9 @@ const endedTicks = ({ file, refresh, ended = [], records = {}, bound = 3, again 
     rmSync(root, { recursive: true, force: true });
   }
 };
-// The count in a tick's short-queue trigger text, or null when that trigger did not refresh.
+// The count in a tick's `REFRESHED` short-queue trigger text, or null when the tick has none.
 const triggerCount = (stdout) => {
-  const m = /^shortlist {4}→ REFRESH(?:ED|[ ]FAILED)[^\n]*\(unclaimed (\d+) < in-flight bound \d+/m.exec(stdout);
+  const m = /^shortlist {4}→ REFRESHED [^\n]*\(unclaimed (\d+) < in-flight bound \d+/m.exec(stdout);
   return m === null ? null : Number(m[1]);
 };
 // Every `unclaimed=` the implementer rows of a tick print.

@@ -284,7 +284,7 @@ function pullAction(n, p) {
 
 // The heads a PULL row could name: a head whose Pull ended in this run takes
 // no slot, and the next head takes it. Order kept, so the slots fill oldest first.
-export function pullable(heads, pulls) {
+function pullable(heads, pulls) {
   return heads.filter((n) => pulls?.get(n)?.kind !== "ended");
 }
 
