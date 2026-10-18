@@ -163,7 +163,8 @@ esac
 case "$*" in
   *closedByPullRequestsReferences*) ;;
   *"--json labels"*) printf '%s\\n' "\${GH_LABELS-in-progress}" ;;
-  *"pr list"*) printf '[]\\n' ;;
+  *"pr list"*"--jq"*) printf '%s\\n' "\${GH_PRS-}" ;;
+  *"pr list"*) printf '%s\\n' "\${GH_PRS-[]}" ;;
 esac
 exit 0
 `,
@@ -860,6 +861,71 @@ test("a pushed branch blocks on its own", (t) => {
   assert.match(json.blockers[0], /exists on origin/);
   assert.equal(code, 1);
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
+/** A claim whose work was pushed: the branch is on origin, at the tip the local one holds. */
+function pushedClaim(r) {
+  const c = claim(r.w, 9, "release-ticket");
+  commit(c.wt, "work", "work\n");
+  git(c.wt, "push", "-q", "origin", c.branch);
+  return c;
+}
+
+test("a pushed branch whose only PR is CLOSED unmerged releases, its remote branch with it", (t) => {
+  const r = repo(t);
+  const c = pushedClaim(r);
+  const env = { GH_PRS: "12:CLOSED" };
+
+  const dry = release(r, c, { apply: false, env });
+  assert.deepEqual([dry.code, dry.json.released, dry.json.applied, dry.json.blockers], [0, true, false, []], dry.stderr);
+  assert.ok(dry.stderr.includes(`would: git push origin --delete refs/heads/${c.branch} `), `the dry run must list the remote delete: ${dry.stderr}`);
+  assert.ok(dry.stderr.includes("PR states on"), `the dry run must list the PR states: ${dry.stderr}`);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "a dry run deletes nothing");
+  assert.notEqual(git(r.w, "ls-remote", "--heads", "origin", c.branch), "", "nor the remote branch");
+
+  const { code, json } = release(r, c, { env });
+  assert.equal(code, 0);
+  assert.deepEqual([json.released, json.applied, json.blockers], [true, true, []]);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+  assert.equal(git(r.w, "ls-remote", "--heads", "origin", c.branch), "", "the remote branch is gone");
+  assert.ok(r.calls().some((l) => l.includes("--remove-label in-progress")), "and the label drops");
+});
+
+test("a pushed branch with a PR that is not CLOSED unmerged blocks, and nothing is deleted", (t) => {
+  for (const prs of ["12:OPEN", "12:MERGED", "12:CLOSED 13:OPEN"]) {
+    const r = repo(t);
+    const c = pushedClaim(r);
+    const { code, json } = release(r, c, { env: { GH_PRS: prs } });
+    assert.equal(code, 1, prs);
+    assert.match(json.blockers[0], /not closed unmerged/, prs);
+    assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, `${prs}: nothing may be deleted`);
+    assert.notEqual(git(r.w, "ls-remote", "--heads", "origin", c.branch), "", `${prs}: the remote branch stays`);
+  }
+});
+
+test("a pushed branch no PR names blocks, and so does a PR list that cannot be read", (t) => {
+  const r = repo(t);
+  const c = pushedClaim(r);
+
+  const none = release(r, c);
+  assert.equal(none.code, 1, none.stderr);
+  assert.match(none.json.blockers[0], /no PR names it/);
+
+  const failed = release(r, c, { env: { GH_RC: "1" } });
+  assert.equal(failed.code, 2, failed.stderr);
+  assert.match(failed.stderr, /gh pr list failed/);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be deleted");
+});
+
+test("a CLOSED PR does not release a branch carrying a commit origin lacks", (t) => {
+  const r = repo(t);
+  const c = pushedClaim(r);
+  commit(c.wt, "unpushed", "more\n");
+
+  const { code, json } = release(r, c, { env: { GH_PRS: "12:CLOSED" } });
+  assert.equal(code, 1);
+  assert.match(json.blockers[0], /not at the tip origin holds/);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "unpushed work must survive");
 });
 
 test("a blocked claim reports its blocker without asking GitHub", (t) => {

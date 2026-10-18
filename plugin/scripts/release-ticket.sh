@@ -1,9 +1,17 @@
 #!/bin/sh
-# Release a claim that was never dispatched: drop the in-progress label, remove
-# the worktree, delete the branch — but only when the claim provably carries no
-# work. The inverse of claim-ticket.sh.
+# Release a claim: drop the in-progress label, remove the worktree, delete the
+# branch — but only when the claim provably carries no work. The inverse of
+# claim-ticket.sh. Two claim shapes release, told apart by the branch on origin:
 #
-# Dry-run by default; --apply mutates the tracker and the filesystem.
+# - Never dispatched: no branch on origin. The branch must carry no commit
+#   beyond origin/main and no commit unique to it.
+# - Closed unmerged: the branch is on origin, and every PR whose head is that
+#   branch reads CLOSED — none OPEN, none MERGED, at least one present. The
+#   local branch must sit at the tip origin holds, and that remote branch is
+#   deleted (leased on that tip) before the label drops. A branch on origin
+#   with no PR, or with a PR list that cannot be read, blocks.
+#
+# Dry-run by default; --apply mutates the tracker, the remote and the filesystem.
 #
 # reap.sh will not do this: no merge happened, so no remote branch was ever
 # deleted, so the branch is not [gone] and reap's for-each-ref filter never
@@ -854,6 +862,65 @@ if [ -z "$wt" ] && [ -n "$stray" ]; then
   fi
 fi
 
+# A pushed branch — work that survives the local delete and that a PR may
+# already point at. Live query, so this one cannot be stale; a failure here is
+# an unknown answer, never a "no".
+# stderr stays on stderr, never folded into the value: the emptiness of $remote
+# IS the answer, so an SSH host-key notice on a successful query used to read as
+# a branch that exists. git's own message is more useful on the terminal anyway.
+# 30s: `ls-remote` moves refs and no objects, so this is generous for the work,
+# and it is the budget inflight.sh's own `ls-remote` runs on. `FLEET_NET_TIMEOUT`
+# is the shorten-only override this lookup shares with the fleet's fetches — but
+# NOT with inflight.sh's `ls-remote`, which reads `INFLIGHT_LS_REMOTE_TIMEOUT`
+# and nothing else, so shortening this one does not shorten that one. The rule
+# is net_budget's, in net.sh.
+ls_budget=$(net_budget 30 "${FLEET_NET_TIMEOUT:-}")
+ls_rc=0
+remote=$(net_git "" "$ls_budget" ls-remote --heads origin "refs/heads/$branch") || ls_rc=$?
+if [ "$ls_rc" -ne 0 ]; then
+  # A killed lookup and a refused one are different facts and get different
+  # words. Both leave the same verdict — the answer is unknown, so nothing is
+  # released — but only one of them names a cause this script observed.
+  if net_stalled "$ls_rc"; then
+    die "git ls-remote did not finish within ${ls_budget}s and was killed, so whether $branch was pushed is unknown"
+  fi
+  die "git ls-remote failed, so whether $branch was pushed is unknown"
+fi
+
+# The one pushed branch that releases: every PR whose head is $branch reads
+# CLOSED, and there is at least one. Read live, and failing closed — a PR list
+# that cannot be read is an unknown answer, as the lookup above is. Any other
+# pushed branch blocks, as it always did.
+closed_pr=false
+remote_sha=
+pr_seen=
+if [ -n "$remote" ]; then
+  remote_sha=${remote%%[[:space:]]*}
+  [ "${remote#*[[:space:]]}" = "refs/heads/$branch" ] ||
+    die "git ls-remote did not answer with refs/heads/$branch for $branch, so whether it was pushed is unknown"
+  # One `number:state` token per PR, so the loop below needs no JSON parser.
+  # --limit 1000: gh's default page of 30 would hide a later OPEN PR.
+  prs=$(gh pr list --state all --head "$branch" --limit 1000 --json number,state --jq '.[] | "\(.number):\(.state)"') ||
+    die "gh pr list failed for $branch, so whether its PR closed unmerged is unknown"
+  pr_n=0
+  pr_bad=
+  for pr in $prs; do
+    pr_n=$((pr_n + 1))
+    pr_seen="$pr_seen #${pr%%:*} ${pr#*:};"
+    case ${pr#*:} in
+      CLOSED) ;;
+      *) pr_bad="$pr_bad #${pr%%:*} ${pr#*:};" ;;
+    esac
+  done
+  if [ "$pr_n" -eq 0 ]; then
+    block "branch $branch exists on origin and no PR names it"
+  elif [ -n "$pr_bad" ]; then
+    block "branch $branch exists on origin and its PR(s) are not closed unmerged:$pr_bad"
+  else
+    closed_pr=true
+  fi
+fi
+
 # An Orphaned worktree directory: this claim's directory still on disk with its
 # registration already cleared. `stray` cannot see it BY CONSTRUCTION — it is
 # awk over git's registry, and there is no registration left to match — so the
@@ -893,7 +960,10 @@ if [ -z "$wt" ] && [ -z "$stray" ]; then
     block "worktree directory $orphan is this claim's and has no registration — inspect it and remove the directory by hand"
   elif ! gone "$orphan"; then
     block "cannot tell whether an orphaned worktree directory is at $orphan, so whether #$issue can be released is unknown"
-  elif [ "$has_branch" = false ] && [ -z "$blockers" ]; then
+  elif [ "$has_branch" = false ] && [ -z "$blockers" ] && [ -z "$remote" ]; then
+    # A branch of this name on origin proves the slug right, so the die below
+    # does not fire: a closed-PR claim whose local branch is already gone
+    # releases from the remote alone.
     # A mistyped <slug>/<type> names a branch that does not exist, and without
     # this die the run would drop the label off a ticket whose real claim is
     # untouched — invisible to candidates.mjs and still in-flight. Refuse
@@ -927,7 +997,16 @@ if [ -z "$wt" ] && [ -z "$stray" ]; then
   fi
 fi
 
-if [ "$has_branch" = true ]; then
+# A closed PR's commits are the branch's whole content, so `ahead` and the
+# `git cherry` count below would refuse every one. The local branch must sit at
+# the tip origin holds instead: any commit it carries beyond that is unpushed,
+# and the local delete would take it with the branch.
+if [ "$has_branch" = true ] && [ "$closed_pr" = true ]; then
+  local_tip=$(git rev-parse --verify --quiet "refs/heads/$branch") ||
+    die "cannot read $branch's tip, so whether it matches origin's is unknown"
+  [ "$local_tip" = "$remote_sha" ] ||
+    block "$branch is not at the tip origin holds — unpushed work would be lost"
+elif [ "$has_branch" = true ]; then
   # Commits ahead — a member that did work. Measured on the branch ref rather
   # than the worktree's HEAD: the worktree above was located BY that ref, so the
   # two agree, and this still runs when the worktree is already gone.
@@ -951,31 +1030,6 @@ if [ "$has_branch" = true ]; then
   [ "$uniq" -eq 0 ] || block "$uniq commit(s) unique to $branch (git cherry)"
 fi
 
-# A pushed branch — work that survives the local delete and that a PR may
-# already point at. Live query, so this one cannot be stale; a failure here is
-# an unknown answer, never a "no".
-# stderr stays on stderr, never folded into the value: the emptiness of $remote
-# IS the answer, so an SSH host-key notice on a successful query used to read as
-# a branch that exists. git's own message is more useful on the terminal anyway.
-# 30s: `ls-remote` moves refs and no objects, so this is generous for the work,
-# and it is the budget inflight.sh's own `ls-remote` runs on. `FLEET_NET_TIMEOUT`
-# is the shorten-only override this lookup shares with the fleet's fetches — but
-# NOT with inflight.sh's `ls-remote`, which reads `INFLIGHT_LS_REMOTE_TIMEOUT`
-# and nothing else, so shortening this one does not shorten that one. The rule
-# is net_budget's, in net.sh.
-ls_budget=$(net_budget 30 "${FLEET_NET_TIMEOUT:-}")
-ls_rc=0
-remote=$(net_git "" "$ls_budget" ls-remote --heads origin "refs/heads/$branch") || ls_rc=$?
-if [ "$ls_rc" -ne 0 ]; then
-  # A killed lookup and a refused one are different facts and get different
-  # words. Both leave the same verdict — the answer is unknown, so nothing is
-  # released — but only one of them names a cause this script observed.
-  if net_stalled "$ls_rc"; then
-    die "git ls-remote did not finish within ${ls_budget}s and was killed, so whether $branch was pushed is unknown"
-  fi
-  die "git ls-remote failed, so whether $branch was pushed is unknown"
-fi
-[ -z "$remote" ] || block "branch $branch exists on origin"
 
 # `-d`, because a directory that is not there holds no uncommitted work. Deleted
 # by hand, a worktree leaves its admin files registered, so `worktree list
@@ -1242,6 +1296,10 @@ if [ "$apply" = false ]; then
   [ "$has_label" = true ] && echo "    would: gh issue edit $issue --remove-label in-progress" >&2
   [ -n "$wt" ] && printf '    would: git worktree remove %s\n' "$wt" >&2
   [ "$has_branch" = true ] && echo "    would: git update-ref -d refs/heads/$branch <its current tip>" >&2
+  if [ "$closed_pr" = true ]; then
+    echo "    PR states on $branch:$pr_seen" >&2
+    echo "    would: git push origin --delete refs/heads/$branch (origin read at $remote_sha)" >&2
+  fi
 else
   # Label LAST. The two local deletes are the ones that refuse — that refusal is
   # the dirty check recomputed by git at the moment of the delete, so it is
@@ -1294,8 +1352,27 @@ else
       halt "cannot read $branch's tip at the delete"
     n=$(git rev-list --count "$base_rev..$tip") ||
       halt "cannot recount commits on $branch against $base at the delete"
-    [ "$n" -eq 0 ] ||
-      halt "$branch gained $n commit(s) since the checks — not deleted"
+    if [ "$closed_pr" != true ]; then
+      [ "$n" -eq 0 ] ||
+        halt "$branch gained $n commit(s) since the checks — not deleted"
+    fi
+    if [ "$closed_pr" = true ]; then
+      # A closed PR's commits are the whole content of the branch, so the
+      # recount above refuses every one of them. What holds instead: the local
+      # tip has not moved off the tip origin held when the checks read it.
+      [ "$tip" = "$remote_sha" ] ||
+        halt "$branch is no longer at the tip origin holds — not deleted"
+      # Origin is read again before anything is deleted, so a push that landed
+      # since the checks halts the release here rather than being deleted with
+      # the branch. This narrows the gap before the remote delete; it does not
+      # close it (see that delete below).
+      recheck_rc=0
+      recheck=$(net_git "" "$ls_budget" ls-remote --heads origin "refs/heads/$branch") || recheck_rc=$?
+      [ "$recheck_rc" -eq 0 ] ||
+        halt "cannot re-read origin's $branch before the delete — not deleted"
+      [ "${recheck%%[[:space:]]*}" = "$remote_sha" ] ||
+        halt "origin's $branch moved since the checks — not deleted"
+    fi
 
     # What the CAS does not give back: `git update-ref` is ref-only plumbing
     # and, unlike `-D`, consults no worktree at all — so the one guard the CAS
@@ -1368,6 +1445,21 @@ else
         ;;
       *) halt "$branch $wt_restore_why — branch restored, not deleted" ;;
     esac
+    done_branch=true
+  fi
+
+  # Closed mode only: the remote branch goes after the local one and before the
+  # label drops, for the same reason as the local deletes above. Origin's tip was
+  # re-read before the local delete. The delete itself is a plain one: a push
+  # landing in the gap between that re-read and this call is deleted with the
+  # branch. A lease would close that gap, but this file spells no form of
+  # force, so the gap stays.
+  if [ "$closed_pr" = true ]; then
+    echo "\$ git push origin --delete refs/heads/$branch" >&2
+    push_budget=$(net_budget 30 "${FLEET_NET_TIMEOUT:-}")
+    push_rc=0
+    net_git "" "$push_budget" push origin --delete "refs/heads/$branch" >&2 || push_rc=$?
+    [ "$push_rc" -eq 0 ] || halt "git push --delete refused $branch on origin (rc $push_rc)"
     done_branch=true
   fi
 
