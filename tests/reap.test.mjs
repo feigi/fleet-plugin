@@ -768,7 +768,7 @@ test("a successful --apply run still reaps, still prunes, and exits 0 unchanged"
 
   assert.equal(code, 0);
   assert.deepEqual(json.reaped, ["feature/merged"]);
-  assert.deepEqual(json.kept, []);
+  assert.deepEqual(json.kept, [{ branch: "scratch/stale", reason: "no upstream — never selected" }]);
   assert.ok(!listedNames(w).includes("stale-wt"), "the prune must still run and clear the stale registration");
 });
 
@@ -1973,15 +1973,17 @@ test("a refusal that CLEARED the registration is reported as a partial removal, 
 
   assert.equal(code, 0, "a refusal is a finding, not a script failure");
   assert.deepEqual(json.reaped, []);
-  assert.equal(json.kept.length, 1);
-  assert.equal(json.kept[0].branch, "feature/merged");
+  assert.equal(json.kept.length, 2, "the sibling has no upstream, so it is kept as well");
+  assert.deepEqual(json.kept.find((k) => k.branch === "scratch/sibling"), { branch: "scratch/sibling", reason: "no upstream — never selected" });
+  const [kept] = json.kept.filter((k) => k.branch === "feature/merged");
+  assert.equal(kept.branch, "feature/merged");
   assert.match(
-    json.kept[0].reason,
+    kept.reason,
     /registration cleared/,
-    `a refusal that unregistered the worktree must not read as a no-op: ${json.kept[0].reason}`,
+    `a refusal that unregistered the worktree must not read as a no-op: ${kept.reason}`,
   );
-  assert.match(json.kept[0].reason, /Not a directory/, "git's own diagnosis must reach the payload");
-  assert.doesNotMatch(json.kept[0].reason, /\n/, "git's stderr is multi-line; the reason must be flattened");
+  assert.match(kept.reason, /Not a directory/, "git's own diagnosis must reach the payload");
+  assert.doesNotMatch(kept.reason, /\n/, "git's stderr is multi-line; the reason must be flattened");
   assert.match(stderr, /KEEP feature\/merged — worktree remove refused/);
 
   // The registration really is gone — the state the reason claims, measured.
@@ -3763,7 +3765,7 @@ test("a bare repo in the registry is not diagnosed as an unresolvable HEAD (#381
   const { code, json } = runReap(bare, ["--apply"]);
 
   assert.equal(code, 0);
-  assert.deepEqual(json.kept, [], `the bare root is not a finding: ${JSON.stringify(json.kept)}`);
+  assert.deepEqual(json.kept, [{ branch: "main", reason: "no upstream — never selected" }], `the bare root is not a finding; its branch with no upstream is kept: ${JSON.stringify(json.kept)}`);
   assert.deepEqual(json.worktreesRemoved, [wt], "and the detached worktree beside it is still swept");
 });
 

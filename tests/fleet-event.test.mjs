@@ -241,11 +241,12 @@ const eventLine = (r) => r.out.find((l) => l.startsWith("event: "));
 
 test("impl-report settles from the report under the receipt's scratch, then ticks with --apply and the receipt's bound; a second run only ticks", () => {
   const f = fixture({ rows: ["#412 impl-412"] });
+  f.report(implReport("impl-412"));
   f.control("settle", { "impl-412": { outcome: "PR#88" } });
   const first = f.run(["impl-report", "impl-412"]);
   assert.equal(first.status, 0, first.err + first.stdout);
   assert.deepEqual(first.order, [`settle impl-412 --from-report --reports ${join(f.scratch, "reports")}`, TICK]);
-  assert.match(eventLine(first), /^event: impl-report: settled impl-412=PR#88$/);
+  assert.match(eventLine(first), /^event: impl-report: settled impl-412=PR#88(; .+)?$/);
   assert.equal(first.out.at(-1), "TICK ROWS", "the tick's output comes after the event line, verbatim");
   assert.equal(first.out.indexOf(eventLine(first)), first.out.length - 2);
   assert.deepEqual(f.rows(), ["#412 impl-412=PR#88"]);
@@ -612,6 +613,7 @@ test("a settle that exits 0 with no receipt on stdout is refused with exit 2, na
 
 test("a settle's own stderr on success is passed through", () => {
   const f = fixture({ rows: ["#412 impl-412"] });
+  f.report(implReport("impl-412"));
   f.control("settle", { "impl-412": { raw: true, out: JSON.stringify({ outcome: "PR#88" }), err: "ledger: warning: a note\n" } });
   const r = f.run(["impl-report", "impl-412"]);
   assert.equal(r.status, 0, r.err + r.stdout);
