@@ -16,10 +16,11 @@
 // rows the next drain finds already there, so a second run changes nothing.
 // A pending file that is empty, or blank lines only, is removed with its own
 // line: an append created it and never wrote.
-// Only the run's controller appends to the pending file and drains it, and it
-// does both serially, so nothing appends between the read and either unlink.
-// The drain takes no lock by design: a second controller on one checkout is
-// refused at phase 0.
+// The drain takes no lock by design: it assumes only the run's controller
+// appends to the pending file and drains it, serially, so nothing appends
+// between the read and either unlink. One controller per checkout is the
+// rule, but phase 0 refuses a second one at its ledger rotation, which runs
+// after its drain step, so a second controller's drain is not guarded.
 //
 // COST GUARD. `pr-cost.mjs --guard` rewrites `.fleet/cost-guard.json`, which
 // the router reads and fails closed without. It needs all three metrics TSVs;
