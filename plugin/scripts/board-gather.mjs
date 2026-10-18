@@ -34,7 +34,7 @@ import {
 import { readReceipt } from "./phase0-receipt.mjs";
 import { RECEIPT } from "./ledger-grammar.mjs";
 import { NAME, warnOnce, execRead } from "./board-common.mjs";
-import { mergedReadPrs, closedRowIssues } from "./compute-board.mjs";
+import { mergedReadPrs, issuesOfPrs } from "./compute-board.mjs";
 // The heartbeat's liveness mark and the controller record beside it, read here
 // and never written: the heartbeat is the mark's only writer and
 // `ledger.mjs rotate` the record's. stallOwner() reads the process table to
@@ -155,70 +155,60 @@ function hitLimit(parsed, limit) {
   return Array.isArray(parsed) && parsed.length >= limit;
 }
 
-// Which of `prNums` gh calls MERGED, in ONE `gh api graphql` query —
-// one aliased `pullRequest(number:)` field per PR, on the cwd's repository
-// (gh's own `{owner}`/`{repo}` placeholders, the repo every other read here
-// resolves) — so a PR merged at any age is found, and ten PRs cost what one
-// does. It replaced `gh pr list --state merged --limit 100`, the repo's 100
-// most recent merges: about six days on 2026-09-25, so a row PR merged
-// before that and never seen MERGED rendered REVIEW, turned stale and
-// counted as claimed. Measured 2026-09-26: 400 aliases answer in one call.
+// The merged and closed states of `prNums`, and the CLOSED-ness of `issueNums`,
+// in ONE `gh api graphql` query — one aliased `pullRequest(number:)` field per
+// PR and one `issue(number:)` field per issue, on the cwd's repository (gh's own
+// `{owner}`/`{repo}` placeholders, the repo every other read here resolves) — so
+// a PR merged at any age is found, and ten PRs cost what one does. It replaced
+// `gh pr list --state merged --limit 100`, the repo's 100 most recent merges: about
+// six days on 2026-09-25, so a row PR merged before that and never seen MERGED
+// rendered REVIEW, turned stale and counted as claimed. Measured 2026-09-26: 400
+// aliases answer in one call.
 //
-// An empty `prNums` makes no read at all. `state` is checked, so an entry gh
-// does not call MERGED never makes a card MERGED on its own account.
+// An empty `prNums` makes no read at all. `state` is checked per alias, so an
+// entry gh does not call MERGED is never merged, and one it does not call CLOSED
+// is never closed; an issue not CLOSED is not CLOSED.
 //
 // A body with an object `data.repository` IS an answer even at exit 1:
-// GitHub resolves every alias it can and nulls the rest — a number that is
-// not a PR (or, for the issue read, not an issue) comes back null beside a
+// GitHub resolves every alias it can and nulls the rest — a number that is not
+// a PR (or, for an issue alias, not an issue) comes back null beside a
 // NOT_FOUND error, and gh exits 1 with the whole body on stdout (measured
-// 2026-09-26, gh 2.101.0, which also names the number on stderr). Refusing
-// that body would let one such row — a typo, or a row with no impl token keyed
-// by an issue number — put every other row PR back in REVIEW on every tick. A
-// null alias reads as not merged and not closed, which is what a failed read
-// means for that one number.
+// 2026-09-26, gh 2.101.0, which also names the number on stderr). Refusing that
+// body would let one such row — a typo, or a row with no impl token keyed by an
+// issue number — put every other row PR back in REVIEW on every tick. A null
+// alias reads as not merged and not closed, which is what a failed read means
+// for that one number.
 //
-// Real GitHub always answers EVERY requested alias, null or an object — never
-// omits one — so an object naming NONE of the numbers is not a shape the API
+// Real GitHub always answers EVERY requested PR alias, null or an object — never
+// omits one — so an object naming NONE of the PR numbers is not a shape the API
 // produces, only a corrupted or truncated one; `isJsonObject` alone cannot tell
 // that apart from a genuine "checked, nothing matched" answer, so it is checked
-// for too. Anything else is a failed read: `null`, and the callers read it as
-// an empty list, which computeBoard()'s carry-forward rule takes it from there.
-async function readStates(prefix, field, nums, what) {
-  const fields = nums.map((n) => `${prefix}${n}:${field}(number:${n}){state}`).join(" ");
+// for too. Anything else is a failed read: every list empty, and
+// computeBoard()'s carry-forward rule takes it from there.
+async function readStates(prNums, issueNums) {
+  const none = { merged: [], closed: [], closedIssues: [] };
+  if (!prNums.length) return none;
+  const fields = [
+    ...prNums.map((n) => `p${n}:pullRequest(number:${n}){state}`),
+    ...issueNums.map((n) => `i${n}:issue(number:${n}){state}`),
+  ].join(" ");
   const r = await execRead("gh", ["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}",
     "-f", `query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${fields}}}`]);
   let repo;
   try { repo = JSON.parse(r.stdout)?.data?.repository; } catch {}
-  if (!isJsonObject(repo) || !nums.some((n) => Object.prototype.hasOwnProperty.call(repo, `${prefix}${n}`))) {
+  if (!isJsonObject(repo) || !prNums.some((n) => Object.prototype.hasOwnProperty.call(repo, `p${n}`))) {
     // `how` as runCiState() spells it; never r.error.message, which repeats
     // the whole query — one field per number — into every failed tick's line.
     const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
-    console.error(`${NAME}: gh api graphql ${what} failed (${how}) with no usable answer`);
-    return null;
+    const n = prNums.length;
+    console.error(`${NAME}: gh api graphql merged read (${n} PR${n === 1 ? "" : "s"}) failed (${how}) with no usable answer`);
+    return none;
   }
-  return repo;
-}
-
-// `state` is checked per alias, so an entry gh does not call MERGED is never
-// merged, and one it does not call CLOSED is never closed.
-async function readPrStates(prNums) {
-  const none = { merged: [], closed: [] };
-  if (!prNums.length) return none;
-  const repo = await readStates("p", "pullRequest", prNums, `merged read (${prNums.length} PR${prNums.length === 1 ? "" : "s"})`);
-  if (!repo) return none;
   return {
     merged: prNums.filter((n) => repo[`p${n}`]?.state === "MERGED"),
     closed: prNums.filter((n) => repo[`p${n}`]?.state === "CLOSED"),
+    closedIssues: issueNums.filter((n) => repo[`i${n}`]?.state === "CLOSED"),
   };
-}
-
-// The CLOSED issues among `issueNums`. A failed read answers none, which reads
-// as not CLOSED, the way closedTickets() reads its own failed probe.
-async function readClosedIssues(issueNums) {
-  if (!issueNums.length) return [];
-  const repo = await readStates("i", "issue", issueNums, `issue read (${issueNums.length} issue${issueNums.length === 1 ? "" : "s"})`);
-  if (!repo) return [];
-  return issueNums.filter((n) => repo[`i${n}`]?.state === "CLOSED");
 }
 
 // labels: gh emits an array of {name,...} objects, but a malformed row can
@@ -827,16 +817,12 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   // <sha>`, and the open list above drops a PR the moment it merges. It is
   // asked only about mergedReadPrs()'s set — row PRs absent from the open
   // list, with no token, not carried forward — in one batched read
-  // that answers whatever their merge age; see readPrStates(). A failed read
+  // that answers whatever their merge age; see readStates(). A failed read
   // is `[]`, and the carry-forward in computeBoard() covers exactly the
   // PRs this set leaves out, so a failure costs only a PR never yet seen
   // MERGED, which reads REVIEW.
-  const prStates = await readPrStates(mergedReadPrs({ ledger, prs, prev }));
-  const merged = prStates.merged;
-  const closed = prStates.closed;
-  // The issues of the CLOSED PRs' rows, read for state only when a row names
-  // one: a pr-closed flag needs its issue not CLOSED (computeBoard()).
-  const closedIssues = await readClosedIssues(closedRowIssues({ ledger, closed }));
+  const asked = mergedReadPrs({ ledger, prs, prev });
+  const { merged, closed, closedIssues } = await readStates(asked, issuesOfPrs({ ledger, prs: asked }));
 
   // CI per open PR. On failure, carry the previous board's value for that PR.
   const prevCi = new Map((prev?.tickets || []).filter((t) => t.pr != null).map((t) => [t.pr, t.ci]));

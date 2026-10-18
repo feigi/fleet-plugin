@@ -103,7 +103,7 @@ test("deriveFlags: cause tokens surface as flags", () => {
   assert.ok(f.includes("killed"));
 });
 
-import { computeBoard, mergedReadPrs, closedRowIssues } from "../plugin/scripts/compute-board.mjs";
+import { computeBoard, mergedReadPrs, issuesOfPrs } from "../plugin/scripts/compute-board.mjs";
 import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
 
 const baseInputs = () => ({
@@ -1334,8 +1334,8 @@ test("parseRow: implPr is the latest settled impl PR, null while a later impl is
   assert.equal(parseRow("#341 impl-341").implPr, null);
 });
 
-test("closedRowIssues: the issues whose latest settled impl PR is closed, sorted, once each", () => {
+test("issuesOfPrs: the issues whose latest settled impl PR is one of prs, sorted, once each", () => {
   const rows = ["#362 impl-362=PR#361", "#360 impl-360=PR#361", "#341 impl-341=PR#342", "#363 impl-363=PR#361 · impl-363-b"];
-  assert.deepEqual(closedRowIssues({ ledger: { rows }, closed: [361] }), [360, 362]);
-  assert.deepEqual(closedRowIssues({ ledger: { rows }, closed: [] }), []);
+  assert.deepEqual(issuesOfPrs({ ledger: { rows }, prs: [361] }), [360, 362]);
+  assert.deepEqual(issuesOfPrs({ ledger: { rows }, prs: [] }), []);
 });

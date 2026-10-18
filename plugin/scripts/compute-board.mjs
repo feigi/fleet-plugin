@@ -437,14 +437,13 @@ export function mergedReadPrs({ ledger, prs, prev }) {
   return [...need].sort((a, b) => a - b);
 }
 
-// The ticket issues whose row's latest settled impl PR is in `closed`, the PRs
-// gather() read as CLOSED. gather() asks gh for each such issue's state, which
-// computeBoard()'s `closedIssues` carries back. An Exclusion or a row with no
-// settled impl PR is none of them.
-export function closedRowIssues({ ledger, closed }) {
-  const prs = new Set(closed);
+// The ticket issues whose row's latest settled impl PR is one of `prs`, sorted
+// and once each. gather() reads their state in the same call as the PR read;
+// computeBoard() takes the CLOSED ones as `closedIssues`. An Exclusion is none.
+export function issuesOfPrs({ ledger, prs }) {
+  const set = new Set(prs);
   const issues = (ledger.rows || []).map(parseRow).filter(Boolean)
-    .filter((p) => !p.excluded && p.implPr != null && prs.has(p.implPr))
+    .filter((p) => !p.excluded && p.implPr != null && set.has(p.implPr))
     .map((p) => p.issue);
   return [...new Set(issues)].sort((a, b) => a - b);
 }
@@ -459,7 +458,7 @@ export function closedRowIssues({ ledger, closed }) {
 // `merged`" branch below ever consults it. gather() asks gh only about
 // mergedReadPrs()'s set, so `merged` never lists more than that.
 // `closed` is the same read's CLOSED PRs, and `closedIssues` the CLOSED issues
-// among closedRowIssues(). A pr-closed flag needs both: a missing `closed`
+// among issuesOfPrs(). A pr-closed flag needs both: a missing `closed`
 // flags nothing, and a failed issue read reads as not CLOSED, as closedTickets()
 // reads its own failed probe.
 export function computeBoard(inputs) {
