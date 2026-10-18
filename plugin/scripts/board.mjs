@@ -148,11 +148,20 @@ function argSpendSince() {
 // degrades per tick through gatherSpend's catch and hides the panel; it never
 // renders zeroes and never dies.
 //
-// `undefined` for an absent flag, not the `null` argPort()/argInterval()/
-// argSpendSince() return, so `spendDir ?? receiptSpendDir(...)` at each
-// caller falls through to the receipt on absence alone.
+// `null` for an absent flag, like argPort()/argInterval()/argSpendSince().
 function argSpendDir() {
-  return arg("spend-dir") ?? undefined;
+  return arg("spend-dir");
+}
+
+// What gather() reads the spend panel from: the operator's --spend-dir, else
+// the session the phase-0 receipt in `stateDir` records, read on every call
+// and never held. `spendDirExplicit` is decided here, beside the choice it
+// describes, so build and every serve tick cannot tell the two apart
+// differently.
+function spendSource(spendDir, stateDir) {
+  return spendDir != null
+    ? { spendDir, spendDirExplicit: true }
+    : { spendDir: receiptSpendDir(stateDir), spendDirExplicit: false };
 }
 
 async function main() {
@@ -289,7 +298,7 @@ async function main() {
       // there.
       stateFile: stateFileIn(instance.stateDir),
       workspace: instance.workspace, port: instance.port,
-      interval, spendDir: spendDir ?? receiptSpendDir(instance.stateDir), spendDirExplicit: spendDir != null, spendSince,
+      interval, ...spendSource(spendDir, instance.stateDir), spendSince,
     }));
     console.log(JSON.stringify(model, null, 2));
     return;
@@ -380,7 +389,7 @@ async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
         workspace, port: served,
         // The operator's --spend-dir, else the receipt as it stands at this
         // tick, read from the same state directory as the ledger and heartbeat.
-        spendDir: spendDir ?? receiptSpendDir(stateDir), spendDirExplicit: spendDir != null, spendSince,
+        ...spendSource(spendDir, stateDir), spendSince,
       }));
       const tmp = `${jsonPath}.tmp`;
       writeFileSync(tmp, JSON.stringify(model));   // atomic: write tmp, rename over target

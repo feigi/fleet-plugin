@@ -133,9 +133,13 @@
    next run's receipt. Until that directory exists and holds a member transcript
    the panel stays hidden; with no receipt, or one recording no session, it says
    `no session recorded — run phase 0 or pass --spend-dir`. Passing
-   `--spend-dir <path>` to phase 0 overrides the receipt outright —
+   `--spend-dir <path>` to phase 0 overrides the receipt —
    `~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>` (the directory, never
-   the `.jsonl` file of the same name beside it).
+   the `.jsonl` file of the same name beside it) — but only on the launch that
+   starts the server. A phase 0 that finds this workspace's cockpit already
+   running leaves it reading what it read, flag or not. To put a running
+   cockpit on `--spend-dir`, stop it first: SIGTERM to the pid phase 0's
+   `cockpit` line printed when it launched that server.
 
    **Rotate the ledger before the fold-in below and before shortlisting —
    every run, whatever way the previous one ended.** One ledger per run:

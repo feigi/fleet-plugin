@@ -24,7 +24,7 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeProjectDir } from "../plugin/scripts/member-record.mjs";
-import { RECEIPT } from "../plugin/scripts/ledger-grammar.mjs";
+import { writeReceipt } from "./support/board-rig.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
 const BOARD = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
@@ -71,22 +71,16 @@ function runBoard(sinceArgs, ledgerFile, seed = seedDefault) {
   });
 }
 
-// The cwd is no git checkout, so the board's state directory is the cwd's own
-// `.fleet`, and the receipt goes there.
-function recordSession(cwd, session) {
-  mkdirSync(join(cwd, ".fleet"), { recursive: true });
-  writeFileSync(join(cwd, ".fleet", RECEIPT), JSON.stringify({ run: null, session, scratch: "/scratch", inFlight: 5, steps: {} }));
-}
-
 // The session sits where omp would write it for this cwd — encodeProjectDir
 // is the real function, not a hand-rolled path — under an `<ISO>_<uuid>`
-// name, and the receipt records it.
+// name, and the receipt records it. The cwd is no git checkout, so the
+// board's state directory is the cwd's own `.fleet`, and the receipt goes there.
 function seedDefault(home, cwd) {
   const dir = join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home }),
     "2026-08-25T09-00-00-000Z_01a08126-ee04-7095-a695-14e3249f1127");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "default-agent.jsonl"), ompTurn(1000));
-  recordSession(cwd, dir);
+  writeReceipt(join(cwd, ".fleet"), dir);
 }
 
 test("--spend-since rejects a seconds-magnitude epoch — the mistake its own comment names", () => {
@@ -244,7 +238,7 @@ test("build: the panel comes from this workspace's own omp session, with its too
   // The default path, no flag: the receipt records the session omp laid out,
   // its main-session FILE beside it.
   const r = runBoard([], undefined, (home, cwd) => {
-    recordSession(cwd, ompSessionAt(join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home }))));
+    writeReceipt(join(cwd, ".fleet"), ompSessionAt(join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home }))));
   });
   assert.equal(r.status, 0, r.stderr);
   const spend = JSON.parse(r.stdout).spend;

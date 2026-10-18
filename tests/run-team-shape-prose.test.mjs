@@ -513,7 +513,7 @@ const CHANGED = [
   ],
   [
     "Run `~/.fleet/bin/fleet-run phase0.mjs --session <session-dir>` from this main checkout, `<session-dir>` being this run's own session directory.",
-    "Run phase 0 from a Python eval cell in this main checkout, without `--session`: `subprocess.run([os.path.expanduser(\"~/.fleet/bin/fleet-run\"), \"phase0.mjs\", …])`."
+    "Run phase 0 from a Python eval cell in this main checkout, without `--session`: `subprocess.run([os.path.expanduser(\"~/.fleet/bin/fleet-run\"), \"phase0.mjs\", …], stderr=subprocess.STDOUT)`."
   ]
 ];
 

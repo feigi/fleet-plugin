@@ -476,12 +476,13 @@ function main() {
   // to its Python eval kernel and that kernel's children — not to the bash
   // tool. Never a guess at the newest session for this cwd: a concurrent
   // session in the same cwd can be newer.
+  const given = F.arg("session");
   const fromEnv = process.env.PI_ARTIFACTS_DIR || null;
-  if (absent("session") && fromEnv === null) {
+  if (given === null && fromEnv === null) {
     die("no session directory: pass --session <dir>, or run phase 0 from a Python eval cell (PI_ARTIFACTS_DIR); the bash tool's environment carries none");
   }
-  const source = absent("session") ? "PI_ARTIFACTS_DIR" : "--session";
-  const session = resolve(absent("session") ? fromEnv : F.arg("session"));
+  const source = given === null ? "PI_ARTIFACTS_DIR" : "--session";
+  const session = resolve(given ?? fromEnv);
   // An existing directory, or `<session>.jsonl` beside a path that does not
   // exist yet: omp creates the directory when the session's first subagent
   // writes there.

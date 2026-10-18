@@ -10,12 +10,11 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { RECEIPT } from "../plugin/scripts/ledger-grammar.mjs";
 import { faultText } from "../plugin/scripts/board.mjs";
 import { encodeProjectDir } from "../plugin/scripts/member-record.mjs";
 import { stripComments } from "./support/strip-comments.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
-import { TURN, serveArgs, serveOpts, withTimeout } from "./support/board-rig.mjs";
+import { TURN, serveArgs, serveOpts, writeReceipt } from "./support/board-rig.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
 
@@ -50,10 +49,7 @@ test("CLI: a live serve reads the receipt's session on every tick — never the 
   writeFileSync(join(theirs, "session-b.jsonl"), turn);
   // The cwd is no git checkout, so the cockpit's state directory is the
   // cwd's own `.fleet` — the receipt goes beside the board.json it writes.
-  const receipt = (session) => {
-    mkdirSync(join(cwd, ".fleet"), { recursive: true });
-    writeFileSync(join(cwd, ".fleet", RECEIPT), JSON.stringify({ run: null, session, scratch: "/scratch", inFlight: 5, steps: {} }));
-  };
+  const receipt = (session) => writeReceipt(join(cwd, ".fleet"), session);
   receipt(mine);
 
   const p = spawn(process.execPath, serveArgs(["--port", "0", "--interval", "1"]), {
@@ -64,14 +60,20 @@ test("CLI: a live serve reads the receipt's session on every tick — never the 
   p.stderr.on("data", (d) => { stderr += d; });
   try {
     const jsonPath = join(cwd, ".fleet", "board.json");
-    const until = (pred, what) => withTimeout((async () => {
+    // The deadline is checked INSIDE the loop, so the loop ends with the wait:
+    // a race against a timer would reject and leave this loop polling, and
+    // the test file would then hang until an outside timeout instead of
+    // reporting the failing assertion.
+    const until = async (pred, what) => {
+      const deadline = Date.now() + 20000;
       for (;;) {
         let b = null;
         try { b = JSON.parse(readFileSync(jsonPath, "utf8")); } catch { /* not written yet, or mid-rename */ }
         if (b && pred(b)) return b;
+        if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
         await new Promise((r) => setTimeout(r, 50));
       }
-    })(), 20000, what);
+    };
 
     const first = await until((b) => b.spend?.ok, "the first tick that reads a transcript");
     assert.equal(first.spend.top[0].label, "session-a", "the receipt's session is read, not the sibling with the newer transcript");
@@ -337,8 +339,7 @@ test("CLI: serve --spend-dir reads the named directory's spend into every tick, 
   const recorded = join(root, "2026-08-24T09-00-00-000Z_abcdef12-3456-7890-abcd-ef1234567891");
   mkdirSync(recorded, { recursive: true });
   writeFileSync(join(recorded, "recorded.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
-  mkdirSync(join(opts.cwd, ".fleet"), { recursive: true });
-  writeFileSync(join(opts.cwd, ".fleet", RECEIPT), JSON.stringify({ run: null, session: recorded, scratch: "/scratch", inFlight: 5, steps: {} }));
+  writeReceipt(join(opts.cwd, ".fleet"), recorded);
   const r = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600", "--spend-dir", dir]), { ...opts, timeout: 2000 });
   assert.notEqual(r.status, 2, r.stderr);
   const body = JSON.parse(readFileSync(join(opts.cwd, ".fleet", "board.json"), "utf8"));

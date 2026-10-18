@@ -10,7 +10,7 @@
 // stderr is read off this process's stream while it runs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, utimesSync, readFileSync, symlinkSync } from "node:fs";
+import { mkdirSync, writeFileSync, utimesSync, readFileSync, symlinkSync, chmodSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,7 @@ import { RECEIPT } from "../plugin/scripts/ledger-grammar.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { encodeProjectDir, readOmpMember } from "../plugin/scripts/member-record.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
-import { TURN, fixture, withStderr } from "./support/board-rig.mjs";
+import { TURN, fixture, withStderr, writeReceipt } from "./support/board-rig.mjs";
 
 const GATHER = fileURLToPath(new URL("../plugin/scripts/board-gather.mjs", import.meta.url));
 
@@ -1022,11 +1022,6 @@ test("an omp session whose only transcript is a live write's torn first line is 
 // the session the run's phase-0 receipt records, never the newest one in the
 // tree. Each test here builds a project dir where a sibling session holds the
 // NEWER transcripts, so a newest-mtime pick would read the wrong one.
-const writeRunReceipt = (stateDir, session) => {
-  mkdirSync(stateDir, { recursive: true });
-  writeFileSync(join(stateDir, RECEIPT), JSON.stringify({ run: null, session, scratch: "/scratch", inFlight: 5, steps: {} }));
-};
-
 const BILLED = [{ input: 1, output: 1, cacheRead: 1, cacheWrite: 10 }];
 function twoSessions() {
   const { proj } = ompHome();
@@ -1037,7 +1032,7 @@ function twoSessions() {
 
 test("the receipt's session is read, even when a sibling session in the same project dir holds newer transcripts", () => {
   const { mine, stateDir } = twoSessions();
-  writeRunReceipt(stateDir, mine);
+  writeReceipt(stateDir, mine);
   assert.equal(receiptSpendDir(stateDir), mine);
   const s = gatherSpend({ dir: receiptSpendDir(stateDir) });
   assert.equal(s.ok, true, JSON.stringify(s));
@@ -1046,16 +1041,16 @@ test("the receipt's session is read, even when a sibling session in the same pro
 
 test("a receipt rewritten between two reads is followed on the second — nothing is held", () => {
   const { mine, theirs, stateDir } = twoSessions();
-  writeRunReceipt(stateDir, theirs);
+  writeReceipt(stateDir, theirs);
   assert.deepEqual(gatherSpend({ dir: receiptSpendDir(stateDir) }).top.map((t) => t.label), ["impl-theirs"]);
-  writeRunReceipt(stateDir, mine);
+  writeReceipt(stateDir, mine);
   assert.deepEqual(gatherSpend({ dir: receiptSpendDir(stateDir) }).top.map((t) => t.label), ["impl-mine"]);
 });
 
 test("a recorded session whose directory does not exist yet, or holds no transcripts, is the quiet null", () => {
   const { proj, stateDir } = twoSessions();
   const notYet = join(proj, "2026-10-01T00-00-00-000Z_cccccccc-cccc-cccc-cccc-cccccccccccc");
-  writeRunReceipt(stateDir, notYet);
+  writeReceipt(stateDir, notYet);
   let s;
   const errs = withStderr(() => { s = gatherSpend({ dir: receiptSpendDir(stateDir) }); });
   assert.equal(s, null, JSON.stringify(s));
@@ -1067,11 +1062,42 @@ test("a recorded session whose directory does not exist yet, or holds no transcr
   assert.deepEqual(errs2, [], "no `holds no agent transcripts` line for a session with no member yet");
 });
 
+test("a receipt recording the encoded-cwd PROJECT directory, not its <ISO>_<uuid> child, is refused — never booked as this run's agents", () => {
+  // phase0.mjs accepts any existing directory as the session, so this path
+  // can reach the receipt; read as a session, it books every session under
+  // it — the sibling's members and each main-session file — as agents.
+  const { proj, stateDir } = twoSessions();
+  writeReceipt(stateDir, proj);
+  let s;
+  const errs = withStderr(() => { s = gatherSpend({ dir: receiptSpendDir(stateDir) }); });
+  assert.equal(s.ok, false, JSON.stringify(s));
+  assert.match(s.error, /records .* which is not an omp <ISO>_<uuid> session directory$/);
+  assert.equal(s.totals, undefined, "a refused session must not report spend at all");
+  assert.equal(errs.length, 1, "the refusal reaches stderr: " + JSON.stringify(errs));
+});
+
+test("a recorded session the cockpit cannot stat — EACCES on an ancestor — is a panel saying so, not the quiet null", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root searches every directory");
+  const { proj, stateDir } = twoSessions();
+  const locked = join(proj, "locked");
+  const session = join(locked, "2026-10-01T00-00-00-000Z_dddddddd-dddd-dddd-dddd-dddddddddddd");
+  mkdirSync(session, { recursive: true });
+  writeReceipt(stateDir, session);
+  chmodSync(locked, 0o000);
+  let s;
+  try {
+    withStderr(() => { s = gatherSpend({ dir: receiptSpendDir(stateDir) }); });
+  } finally { chmodSync(locked, 0o755); }
+  assert.notEqual(s, null, "an unreadable session hid the panel as if it were not created yet");
+  assert.equal(s.ok, false, JSON.stringify(s));
+  assert.match(s.error, /EACCES/);
+});
+
 test("no receipt, or one recording no session, is a panel saying so — never a guessed session", () => {
   const { stateDir } = twoSessions();
   const none = "no session recorded — run phase 0 or pass --spend-dir";
   assert.deepEqual(receiptSpendDir(stateDir), { error: none });
-  writeRunReceipt(stateDir, "");
+  writeReceipt(stateDir, "");
   assert.deepEqual(receiptSpendDir(stateDir), { error: none });
   let s;
   withStderr(() => { s = gatherSpend({ dir: receiptSpendDir(stateDir) }); });

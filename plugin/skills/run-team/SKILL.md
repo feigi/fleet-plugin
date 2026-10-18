@@ -43,12 +43,13 @@ phase, or in any later one, asks the maintainer which tickets to take.
 0. **Once per run, before anything else.** Run phase 0 from a Python eval
    cell in this main checkout, without `--session`:
    `subprocess.run([os.path.expanduser("~/.fleet/bin/fleet-run"),
-   "phase0.mjs", …])`. That kernel's environment carries
+   "phase0.mjs", …], stderr=subprocess.STDOUT)`. That kernel's environment carries
    `PI_ARTIFACTS_DIR`, this run's own session directory, which phase 0
-   records in its receipt; the bash tool's does not, so from there
-   `phase0.mjs` exits 2 and says so. `expanduser` is required: a literal `~/…`
-   in the argument list fails with `FileNotFoundError`. `--session <dir>`
-   overrides the variable. Add `--in-flight <n>` when
+   records in its receipt; the bash tool's does not, so there
+   phase 0 exits 2. `expanduser` is required: a literal `~/…` fails
+   with `FileNotFoundError`. So is the `stderr` redirect: the cell never
+   shows a child's stderr. `--session <dir>` overrides the variable.
+   Add `--in-flight <n>` when
    `$ARGUMENTS` gave one, `--plugin-checkout
    <dir>` when this workspace tracks no `plugin/…` of its own, `--spend-dir
    <dir>` to name the directory the cockpit's spend panel reads, and

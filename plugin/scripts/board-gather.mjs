@@ -398,13 +398,22 @@ export function mapCi(ciJson, pr) {
 // keep showing the previous run's spend once the next run's receipt lands.
 //
 // A receipt with no session to give is `{ error }`, which the panel shows:
-// the board names no session rather than guessing one. A recorded directory
-// that does not exist yet is not an error — that is gatherSpend()'s quiet
-// `null`, below.
+// the board names no session rather than guessing one. So is a recorded
+// session whose NAME is not an omp `<ISO>_<uuid>` session directory:
+// phase0.mjs accepts any existing directory as the session, so a `--session`
+// naming the encoded-cwd project dir instead of its own session child lands in
+// the receipt, and readOmpSpend would book every session under it — the
+// controller's own main-session transcript included — as this run's agents.
+// A recorded directory that does not exist yet is not an error — that is
+// gatherSpend()'s quiet `null`, below.
 export function receiptSpendDir(stateDir) {
   const path = join(stateDir, RECEIPT);
   const read = readReceipt(path);
-  if (read.state === "ok" && read.receipt.session !== "") return read.receipt.session;
+  if (read.state === "ok" && read.receipt.session !== "") {
+    const session = read.receipt.session;
+    if (isOmpSessionDirName(basename(session))) return session;
+    return { error: `phase-0 receipt ${path} records ${session}, which is not an omp <ISO>_<uuid> session directory` };
+  }
   const none = "no session recorded — run phase 0 or pass --spend-dir";
   return { error: read.state === "unreadable" ? `${none} (phase-0 receipt ${path} unreadable: ${read.why})` : none };
 }
@@ -480,13 +489,20 @@ export function gatherSpend({ dir, sinceMs = null, topN = 8, explicit = false } 
     if (!dir) return null;
     // A recorded session whose directory does not exist yet: omp creates it
     // when the session's first subagent writes there, and the cockpit
-    // launches in phase 0, before that. The normal state at launch, so quiet.
+    // launches in phase 0, before that. The normal state at launch, so quiet
+    // — but only ENOENT is that state. Any other failure to stat it (EACCES
+    // or ENOTDIR on an ancestor) is a session the cockpit cannot read, and
+    // goes to the catch's loud path below rather than hiding the panel.
     // An explicit --spend-dir that does not exist still takes the catch's
-    // loud path below: an operator who named a directory hears about a typo.
-    if (!explicit && !existsSync(dir)) return null;
-    // Only for an EXPLICIT --spend-dir — the receipt's directory already
-    // passed phase0.mjs's own session check, and a second, stricter rule
-    // here would refuse a session phase 0 accepted. Without this check
+    // loud path too: an operator who named a directory hears about a typo.
+    if (!explicit) {
+      try { statSync(dir); } catch (e) {
+        if (e.code === "ENOENT") return null;
+        throw e;
+      }
+    }
+    // Here only for an EXPLICIT --spend-dir — receiptSpendDir() already holds
+    // the receipt's session to this same name rule. Without this check
     // the mis-levelled path this same function's comments already name (the
     // encoded-cwd project dir instead of its own <ISO>_<uuid> child) walked
     // straight into readOmpSpend below, which recurses over every nested

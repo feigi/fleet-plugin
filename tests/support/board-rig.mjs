@@ -1,11 +1,12 @@
 // The rig the board test files share: a one-assistant-turn omp transcript and
-// the fixture directory that holds it, stderr capture for the in-process
-// callers that report through console.error, the offline `serve` spawn
-// arguments, and a deadline for an awaited process.
+// the fixture directory that holds it, a phase-0 receipt recording a session,
+// stderr capture for the in-process callers that report through console.error,
+// the offline `serve` spawn arguments, and a deadline for an awaited process.
 
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { RECEIPT } from "../../plugin/scripts/ledger-grammar.mjs";
 import { tempDir } from "./temp-dir.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../plugin/scripts/board.mjs", import.meta.url));
@@ -23,6 +24,13 @@ export function fixture(lines) {
   const dir = tempDir("spend-");
   writeFileSync(join(dir, "agent-x.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
   return dir;
+}
+
+// The phase-0 receipt the cockpit reads its spend session from, in the state
+// directory `stateDir` (a `.fleet` directory), recording `session`.
+export function writeReceipt(stateDir, session) {
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, RECEIPT), JSON.stringify({ run: null, session, scratch: "/scratch", inFlight: 5, steps: {} }));
 }
 
 // gatherSpend reports through stderr, so read console.error rather than spawning
