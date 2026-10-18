@@ -179,3 +179,25 @@ test("the tests dimension's catalog prompt is the one the rendered prompt carrie
   const tests = DEFAULT_DIMENSIONS.find((d) => d.key === "tests");
   assert.ok(holds(tests.prompt, KILL));
 });
+
+// The `tests` specialist has two modes, and its catalog prompt and its agent
+// definition must describe the same two. The no-test-file duty is the one a
+// production diff with source and no test file selects it for; without it the
+// specialist has nothing to do there.
+test("the tests prompt and the tests agent definition each state the no-test-file coverage-gap duty", () => {
+  const prompt = DEFAULT_DIMENSIONS.find((d) => d.key === "tests").prompt;
+  for (const [where, text] of [["the tests dimension's catalog prompt", prompt], ["agents/fleet-review-tests.agent.md", agent("fleet-review-tests")]]) {
+    for (const clause of [
+      "touches no test file",
+      "apply a mutation to that changed source",
+      "no existing test kills",
+      "mutant that survives, with a valid green on the unmutated tree, is a finding",
+    ]) assert.ok(holds(text, clause), `${where} lost the coverage-gap clause: "${clause}"`);
+  }
+  assert.ok(holds(agent("fleet-review-tests"), "A claim you reasoned to without executing it belongs at severity `suggestion`"));
+});
+
+test("review-and-fix.md no longer says tests is dropped for source with no test file", () => {
+  assert.doesNotMatch(flat(REVIEW_AND_FIX), /drop fleet-review-tests with no test changes/);
+  assert.ok(holds(REVIEW_AND_FIX, "also for a `production`-profile diff that changes source and touches no test file"));
+});

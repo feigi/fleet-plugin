@@ -43,14 +43,38 @@ test("a tests-only diff drops types, silent-failure and simplify", () => {
   assert.deepEqual(dimensionKeys([f("scripts/foo.test.mjs")]), ["correctness", "tests", "comments"]);
 });
 
-test("a production diff runs everything, less `tests` when the diff has none", () => {
+test("a production diff with tests runs everything", () => {
   const withTests = [f("scripts/review-core.mjs", 100, 50), f("scripts/a.test.mjs", 30, 10)];
   assert.equal(dimensionKeys(withTests).length, 6);
+});
 
+// The coverage-gap duty: `tests` is what asks whether changed source is
+// exercised by any EXISTING test, and with no test file in the diff it used to
+// be dropped, so nobody asked.
+test("a production diff with source and no test file keeps tests", () => {
   const noTests = [f("scripts/review-core.mjs", 100, 50), f("scripts/b.mjs", 40, 20)];
-  const keys = dimensionKeys(noTests);
-  assert.equal(keys.length, 5);
-  assert.ok(!keys.includes("tests"));
+  const stats = computeStats(noTests);
+  assert.deepEqual([stats.profile, stats.hasSrc, stats.hasTests, stats.hasConfig], ["production", true, false, false]);
+  assert.deepEqual(dimensionKeys(noTests), DEFAULT_DIMENSIONS.map((d) => d.key));
+});
+
+// The row above is driven through the real classifier, which only ever produces
+// whole blobs. These are the blobs it cannot: each field the rule keys on, alone.
+test("the tests filter keys on (production, hasSrc, hasTests) together", () => {
+  const keys = (stats) => selectDimensions(DEFAULT_DIMENSIONS, { docsOnly: false, hasConfig: false, ...stats }).map((d) => d.key);
+  // Kept: production source with no test file.
+  assert.deepEqual(keys({ profile: "production", hasSrc: true, hasTests: false }), DEFAULT_DIMENSIONS.map((d) => d.key));
+  // Dropped: no source, so there is no changed behaviour to mutate.
+  assert.ok(!keys({ profile: "production", hasSrc: false, hasTests: false }).includes("tests"));
+  // The size-tier floor is unchanged: neither tier keeps `tests` without a test file.
+  for (const profile of ["single-file", "small"])
+    assert.ok(!keys({ profile, hasSrc: true, hasTests: false }).includes("tests"), profile);
+  // A blob that lost `hasSrc` must not narrow coverage below what a blob that
+  // names it gets.
+  assert.ok(keys({ profile: "production", hasTests: false }).includes("tests"));
+  // Nor one that lost `hasTests`: above the size tier, only an explicit
+  // `hasTests: false` drops `tests`, even with no source to hunt in.
+  assert.ok(keys({ profile: "production", hasSrc: false }).includes("tests"));
 });
 
 // --- Size tier. `profile` is assigned through an else-if chain in computeStats,

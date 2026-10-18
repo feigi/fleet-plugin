@@ -209,7 +209,7 @@ export const DEFAULT_DIMENSIONS = [
   {
     key: "tests",
     agentType: "fleet-review-tests",
-    prompt: `whether each test DISCRIMINATES: apply the mutation it should catch and confirm a kill, revert, then apply one it should NOT catch and confirm the named test stays green. Vary the syntactic form — a guard catching \`// whole-line\` may let \`code; // trailing\` through. \`<testCmd>\` is the \`command\` your Tests paragraph names, run only in your own copy of the snapshot. A kill is scored by these rules and nothing else:
+    prompt: `whether tests DISCRIMINATE, in whichever of two modes the diff puts you in. **The diff touches or adds a test file:** for each such test, apply the mutation it should catch and confirm a kill, revert, then apply one it should NOT catch and confirm the named test stays green. Vary the syntactic form — a guard catching \`// whole-line\` may let \`code; // trailing\` through. **The diff changes source and touches no test file:** hunt coverage gaps instead. For each piece of behaviour the diff adds or changes in source, apply a mutation to that changed source, run \`<testCmd>\`, and report changed behaviour that no existing test kills: a mutant that survives, with a valid green on the unmutated tree, is a finding. \`<testCmd>\` is the \`command\` your Tests paragraph names, run only in your own copy of the snapshot. A kill is scored by these rules and nothing else:
 
 ${KILL_RULES}
 
@@ -376,7 +376,13 @@ export function selectDimensions(all, stats) {
     return docsOnlyDims;
   }
   let dims = all;
-  if (stats.hasTests === false) dims = dims.filter((d) => d.key !== "tests");
+  // `tests` has two jobs (see its prompt): discriminate the tests a diff touches,
+  // or — when the diff has source but no test — find changed behaviour no
+  // existing test kills. Only the second survives `hasTests === false`, and only
+  // above the size tier: a production-profile diff with source keeps it. The
+  // `!== false` on `hasSrc` keeps a blob that lost the field from narrowing.
+  const keepsCoverageGap = stats.profile === "production" && stats.hasSrc !== false;
+  if (stats.hasTests === false && !keepsCoverageGap) dims = dims.filter((d) => d.key !== "tests");
   if (stats.hasSrc === false) {
     const keepsSilentFailure =
       SIZE_TIER_PROFILES.has(stats.profile) ||

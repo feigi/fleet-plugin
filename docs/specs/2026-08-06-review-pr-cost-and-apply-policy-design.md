@@ -295,7 +295,7 @@ comments, types, simplify]`):
 | `small`, src + test | ~~correctness, silent-failure, tests~~ **Superseded by #218:** correctness, silent-failure, tests, comments | ~~3~~ **4** |
 | `small`, `kinds` missing from the blob | correctness, silent-failure, comments | 3 |
 | `production`, has tests | all | 6 |
-| `production`, no tests | all but tests | 5 |
+| `production`, no tests | ~~all but tests~~ **Superseded by #3476:** all — with source in the diff, `tests` stays to hunt changed behaviour no existing test kills | ~~5~~ **6** |
 
 **Superseded by #218:** the four size-tier rows without `comments` above were the
 rows the docs-file carve-out did not reach. `comments` is now on the size-tier
