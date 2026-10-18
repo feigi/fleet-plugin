@@ -601,6 +601,10 @@ function main() {
       issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard: readGuard(readJson(guardPath)), table,
     });
     const pending = F.arg("pending") ?? join(dirname(guardPath), "ticket-features.pending.tsv");
+    // The header decision and the append are not atomic and take no lock. That is
+    // safe only while the run's controller is the only process that routes or
+    // drains on a checkout, doing both serially: one controller per checkout is
+    // the rule, and neither this append nor the drain checks it.
     try {
       mkdirSync(dirname(pending), { recursive: true });
       const header = statSync(pending, { throwIfNoEntry: false })?.size > 0 ? "" : `${COLUMNS.join("\t")}\n`;
