@@ -34,7 +34,7 @@ import {
 import { readReceipt } from "./phase0-receipt.mjs";
 import { RECEIPT } from "./ledger-grammar.mjs";
 import { NAME, warnOnce, execRead } from "./board-common.mjs";
-import { mergedReadPrs } from "./compute-board.mjs";
+import { mergedReadPrs, closedRowIssues } from "./compute-board.mjs";
 // The heartbeat's liveness mark and the controller record beside it, read here
 // and never written: the heartbeat is the mark's only writer and
 // `ledger.mjs rotate` the record's. stallOwner() reads the process table to
@@ -48,7 +48,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 // The "is this a plain JSON object" predicate and its kind word, one
 // copy for the reads in this file that reject a parsed-but-wrong payload
 // WHOLE — gather's `--prev` payload, gather's per-entry `tickets[i]` check,
-// and readMerged()'s `data.repository`. Each carried its own inline
+// and readStates()'s `data.repository`. Each carried its own inline
 // copy of both halves before, which is three places for one policy to drift in.
 //
 // TWO functions and not one, because `typeof` alone cannot name the fault the
@@ -169,34 +169,56 @@ function hitLimit(parsed, limit) {
 //
 // A body with an object `data.repository` IS an answer even at exit 1:
 // GitHub resolves every alias it can and nulls the rest — a number that is
-// not a PR comes back null beside a NOT_FOUND error, and gh exits 1 with the
-// whole body on stdout (measured 2026-09-26, gh 2.101.0, which also names
-// the number on stderr). Refusing that body would let one such row — a
-// typo, or a row with no impl token keyed by an issue number — put every other
-// row PR back in REVIEW on every tick. A null alias reads as not merged,
-// which is what a failed read means for that one PR.
+// not a PR (or, for the issue read, not an issue) comes back null beside a
+// NOT_FOUND error, and gh exits 1 with the whole body on stdout (measured
+// 2026-09-26, gh 2.101.0, which also names the number on stderr). Refusing
+// that body would let one such row — a typo, or a row with no impl token keyed
+// by an issue number — put every other row PR back in REVIEW on every tick. A
+// null alias reads as not merged and not closed, which is what a failed read
+// means for that one number.
 //
-// Real GitHub always answers EVERY requested `p<N>` alias, null or an
-// object — never omits one — so an object naming NONE of `prNums` is not a
-// shape the API produces, only a corrupted or truncated one; `isJsonObject`
-// alone cannot tell that apart from a genuine "checked, nothing merged"
-// answer, so it is checked for too. Anything else is a failed read: `[]`,
-// and computeBoard()'s carry-forward rule takes it from there.
-async function readMerged(prNums) {
-  if (!prNums.length) return [];
-  const fields = prNums.map((n) => `p${n}:pullRequest(number:${n}){state}`).join(" ");
+// Real GitHub always answers EVERY requested alias, null or an object — never
+// omits one — so an object naming NONE of the numbers is not a shape the API
+// produces, only a corrupted or truncated one; `isJsonObject` alone cannot tell
+// that apart from a genuine "checked, nothing matched" answer, so it is checked
+// for too. Anything else is a failed read: `null`, and the callers read it as
+// an empty list, which computeBoard()'s carry-forward rule takes it from there.
+async function readStates(prefix, field, nums, what) {
+  const fields = nums.map((n) => `${prefix}${n}:${field}(number:${n}){state}`).join(" ");
   const r = await execRead("gh", ["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}",
     "-f", `query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${fields}}}`]);
   let repo;
   try { repo = JSON.parse(r.stdout)?.data?.repository; } catch {}
-  if (!isJsonObject(repo) || !prNums.some((n) => Object.prototype.hasOwnProperty.call(repo, `p${n}`))) {
+  if (!isJsonObject(repo) || !nums.some((n) => Object.prototype.hasOwnProperty.call(repo, `${prefix}${n}`))) {
     // `how` as runCiState() spells it; never r.error.message, which repeats
-    // the whole query — one field per PR — into every failed tick's line.
+    // the whole query — one field per number — into every failed tick's line.
     const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
-    console.error(`${NAME}: gh api graphql merged read (${prNums.length} PR${prNums.length === 1 ? "" : "s"}) failed (${how}) with no usable answer; they read as not merged`);
-    return [];
+    console.error(`${NAME}: gh api graphql ${what} read (${nums.length}) failed (${how}) with no usable answer`);
+    return null;
   }
-  return prNums.filter((n) => repo[`p${n}`]?.state === "MERGED");
+  return repo;
+}
+
+// `state` is checked per alias, so an entry gh does not call MERGED is never
+// merged, and one it does not call CLOSED is never closed.
+async function readPrStates(prNums) {
+  const none = { merged: [], closed: [] };
+  if (!prNums.length) return none;
+  const repo = await readStates("p", "pullRequest", prNums, "PR state");
+  if (!repo) return none;
+  return {
+    merged: prNums.filter((n) => repo[`p${n}`]?.state === "MERGED"),
+    closed: prNums.filter((n) => repo[`p${n}`]?.state === "CLOSED"),
+  };
+}
+
+// The CLOSED issues among `issueNums`. A failed read answers none, which reads
+// as not CLOSED, the way closedTickets() reads its own failed probe.
+async function readClosedIssues(issueNums) {
+  if (!issueNums.length) return [];
+  const repo = await readStates("i", "issue", issueNums, "issue state");
+  if (!repo) return [];
+  return issueNums.filter((n) => repo[`i${n}`]?.state === "CLOSED");
 }
 
 // labels: gh emits an array of {name,...} objects, but a malformed row can
@@ -692,7 +714,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
       // JSON.parse SUCCEEDS on `null`, a bare number, a string and an array,
       // none of which is a board; `null` in particular is absent, not an
       // object, and `typeof null` alone would let it through. Same check and
-      // same wording as readMerged()'s `data.repository` read, which is this
+      // same wording as readStates()'s `data.repository` read, which is this
       // repo's precedent for rejecting a parsed-but-wrong payload at its own
       // read — literally the same, both calling the shared predicate.
       const p = JSON.parse(readFileSync(prevFile, "utf8"));
@@ -711,7 +733,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
         // (drop the bad entry, keep the rest) would make this a new, fourth policy for
         // one payload class in this file — mapCi's null-only guard and tryParse's
         // unguarded read are the other two — rather than the reject-whole-payload
-        // policy this guard already shares with readMerged()'s own read.
+        // policy this guard already shares with readStates()'s own read.
         const bad = p.tickets.findIndex((t) => !isJsonObject(t));
         if (bad !== -1)
           throw new TypeError(`expected tickets[${bad}] to be a JSON object, got ${jsonKind(p.tickets[bad])}`);
@@ -805,11 +827,16 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   // <sha>`, and the open list above drops a PR the moment it merges. It is
   // asked only about mergedReadPrs()'s set — row PRs absent from the open
   // list, with no token, not carried forward — in one batched read
-  // that answers whatever their merge age; see readMerged(). A failed read
+  // that answers whatever their merge age; see readPrStates(). A failed read
   // is `[]`, and the carry-forward in computeBoard() covers exactly the
   // PRs this set leaves out, so a failure costs only a PR never yet seen
   // MERGED, which reads REVIEW.
-  const merged = await readMerged(mergedReadPrs({ ledger, prs, prev }));
+  const prStates = await readPrStates(mergedReadPrs({ ledger, prs, prev }));
+  const merged = prStates.merged;
+  const closed = prStates.closed;
+  // The issues of the CLOSED PRs' rows, read for state only when a row names
+  // one: a pr-closed flag needs its issue not CLOSED (computeBoard()).
+  const closedIssues = await readClosedIssues(closedRowIssues({ ledger, closed }));
 
   // CI per open PR. On failure, carry the previous board's value for that PR.
   const prevCi = new Map((prev?.tickets || []).filter((t) => t.pr != null).map((t) => [t.pr, t.ci]));
@@ -869,7 +896,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   // stalled, so a healthy board reads none. computeBoard() words it.
   const now = Date.now();
   const stallOwnerOf = isStalled(assessBeat({ beat, ticked, acted, controller, now })) ? stallOwner(controller, NAME) : null;
-  return { ledger, issues, prs, merged, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
+  return { ledger, issues, prs, merged, closed, closedIssues, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, acted, controller, stallOwner: stallOwnerOf, poolOk,
     poolCapped, prsCapped,
     now, interval };
 }

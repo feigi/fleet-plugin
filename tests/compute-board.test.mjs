@@ -103,7 +103,7 @@ test("deriveFlags: cause tokens surface as flags", () => {
   assert.ok(f.includes("killed"));
 });
 
-import { computeBoard, mergedReadPrs } from "../plugin/scripts/compute-board.mjs";
+import { computeBoard, mergedReadPrs, closedRowIssues } from "../plugin/scripts/compute-board.mjs";
 import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
 
 const baseInputs = () => ({
@@ -1269,4 +1269,73 @@ test("#1820 amendment 2a: on the same PR-signaled row text, the cockpit's PR is 
   // Keyed only by an exact `#N` first word, as fleet-tick.mjs keys it.
   assert.equal(parseRow("#1237: fix-pr-1237").pr, null);
   assert.ok(!tickKeysTo("#1237: fix-pr-1237", 1237));
+});
+
+// A row whose impl PR #361 is no longer in the open list: the card reads REVIEW,
+// and `closed` and `closedIssues` decide whether it is flagged pr-closed.
+const closedInputs = (over = {}) => ({
+  ...baseInputs(),
+  ledger: { rows: ["#360 impl-360=PR#361"], filed: [], ruled: [] },
+  issues: [],
+  prs: [],
+  merged: [],
+  closed: [361],
+  closedIssues: [],
+  ci: {},
+  now: 1000,
+  ...over,
+});
+const cardOf = (b, n) => b.tickets.find((t) => t.issue === n);
+
+test("computeBoard: a REVIEW card whose PR closed unmerged reads pr-closed, never stale", () => {
+  const inp = closedInputs();
+  const first = computeBoard(inp);
+  const later = computeBoard({ ...inp, prev: first, now: 1000 + 60 * MIN });
+  const t = cardOf(later, 360);
+  assert.equal(t.column, "REVIEW");
+  assert.ok(t.flags.includes("pr-closed"));
+  assert.ok(!t.flags.includes("stale"));
+  // The same dwell on a PR still open reads stale, so the dwell is real here.
+  const open = { ...inp, closed: [], prs: [{ number: 361, state: "OPEN", labels: [], title: "impl 360" }], prev: first, now: 1000 + 60 * MIN };
+  assert.ok(cardOf(computeBoard(open), 360).flags.includes("stale"));
+});
+
+test("computeBoard: with no closed input nothing is flagged, and nothing throws", () => {
+  const inp = closedInputs();
+  delete inp.closed;
+  delete inp.closedIssues;
+  const t = cardOf(computeBoard(inp), 360);
+  assert.equal(t.column, "REVIEW");
+  assert.ok(!t.flags.includes("pr-closed"));
+});
+
+test("computeBoard: a CLOSED issue, or a merged PR, reads no pr-closed", () => {
+  assert.ok(!cardOf(computeBoard(closedInputs({ closedIssues: [360] })), 360).flags.includes("pr-closed"));
+  const t = cardOf(computeBoard(closedInputs({ merged: [361] })), 360);
+  assert.equal(t.column, "MERGED");
+  assert.ok(!t.flags.includes("pr-closed"));
+});
+
+test("computeBoard: a newer live impl, or a newer open PR, supersedes the closed one", () => {
+  const live = closedInputs({ ledger: { rows: ["#360 impl-360=PR#361 · impl-360-b"], filed: [], ruled: [] } });
+  assert.ok(!cardOf(computeBoard(live), 360).flags.includes("pr-closed"));
+  const reopened = closedInputs({
+    ledger: { rows: ["#360 impl-360=PR#361 · impl-360-b=PR#362"], filed: [], ruled: [] },
+    prs: [{ number: 362, state: "OPEN", labels: [], title: "impl 360 b" }],
+  });
+  const t = cardOf(computeBoard(reopened), 360);
+  assert.equal(t.pr, 362);
+  assert.ok(!t.flags.includes("pr-closed"));
+});
+
+test("parseRow: implPr is the latest settled impl PR, null while a later impl is live", () => {
+  assert.equal(parseRow("#360 impl-360=PR#361 → PR#361").implPr, 361);
+  assert.equal(parseRow("#360 impl-360=PR#361 · impl-360-b").implPr, null);
+  assert.equal(parseRow("#341 impl-341").implPr, null);
+});
+
+test("closedRowIssues: the issues whose latest settled impl PR is closed, sorted, once each", () => {
+  const rows = ["#362 impl-362=PR#361", "#360 impl-360=PR#361", "#341 impl-341=PR#342", "#363 impl-363=PR#361 · impl-363-b"];
+  assert.deepEqual(closedRowIssues({ ledger: { rows }, closed: [361] }), [360, 362]);
+  assert.deepEqual(closedRowIssues({ ledger: { rows }, closed: [] }), []);
 });
