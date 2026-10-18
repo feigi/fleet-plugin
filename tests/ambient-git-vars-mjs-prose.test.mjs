@@ -157,6 +157,13 @@ const COVERED_MJS = {
   "staleness.mjs": 1,
   // ONE spawn primitive, `trackedBasenameCounts()`'s own `git ls-files -z`.
   "pr-overlap.mjs": 1,
+  // ONE git-invoking primitive, the step-2 probe `rev-parse --resolve-git-dir`
+  // in resolveWorkspace(), scrubbed with `gitEnv()`. The count is 2 because
+  // countGitEnvCalls() also matches the export's own `gitEnv(` declaration.
+  // Measured in git-env.test.mjs, "an ambient GIT_DIR naming another repository
+  // does not move the step-2 probe": under GIT_DIR the probe answers the path
+  // it is given, so the scrub is defensive rather than load-bearing.
+  "git-env.mjs": 2,
   // TWO git-invoking primitives. `fleetFile()`'s `rev-parse --git-common-dir`
   // is the probe behind every `.fleet/`-rooted file a run keeps: the ledger,
   // the heartbeat's state, the shortlist, the cost guard and the cockpit's

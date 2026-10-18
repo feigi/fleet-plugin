@@ -5,7 +5,8 @@
 //
 // `~/.fleet/scratch/<repo-key>/`, computed by fleet-dir.mjs's scratchRoot() —
 // the same path from the main checkout and from any linked worktree, a
-// different one for a second clone with the same folder name. Nothing is
+// different one for each workspace — a second clone, a bare repository, a
+// submodule — even where folder names collide. Nothing is
 // written to `.fleet/` or anywhere else to record it: the controller (and any
 // standalone entry point with no dispatcher) runs this again and gets the same
 // answer. The controller writes the printed path, absolute, into the prompt of

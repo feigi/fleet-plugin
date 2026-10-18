@@ -81,7 +81,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
-import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { WorkspaceProbeFailed, gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 
 const NAME = "merge-gate";
 
@@ -226,7 +226,11 @@ const CHILD = { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] };
 // `root` is returned too: main-gain.mjs reads the same main checkout.
 function readInstruments() {
   const common = spawnSync("git", ["rev-parse", "--git-common-dir"], { ...CHILD, env: gitEnv() });
-  const root = common.error || common.status !== 0 ? null : workspaceDirFromGitCommonDir(common.stdout);
+  let root = null;
+  if (!common.error && common.status === 0) {
+    try { root = workspaceDirFromGitCommonDir(common.stdout); }
+    catch (e) { if (!(e instanceof WorkspaceProbeFailed)) throw e; }
+  }
   if (root === null) return { exit: null, digest: null, root };
   const r = spawnSync("sh", [join(SCRIPT_DIR, "instruments.sh"), "--repo", root], CHILD);
   const digest = (r.stdout ?? "").trim().split("\n")[0] || null;

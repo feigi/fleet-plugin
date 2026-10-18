@@ -17,8 +17,10 @@
 # specialists). Two independent readers is what drifts.
 #
 # THE CACHE is `<workspace>/.fleet/recipe.json`, where <workspace> is the
-# directory holding the repository's COMMON git dir — the main checkout, the
-# same place the ledger and the heartbeat live — so a claimed worktree and a
+# directory git-env.mjs's resolveWorkspace() names for the repository: a
+# checkout's `.git` holder, or the common git dir itself where no checkout's
+# `.git` holds it (a bare repository, a submodule). That is the same place the
+# ledger and the heartbeat live — so a claimed worktree and a
 # review worktree read the one cache the main checkout holds rather than a
 # private copy each. A single JSON object:
 #
@@ -158,15 +160,41 @@ if [ -n "$rev" ]; then
     || die "--at '$rev' does not resolve to a commit in $repo"
 fi
 
-# `--path-format=absolute` so the workspace is a real directory whatever the
-# caller's cwd; the workspace is the common dir's parent, the same rule
-# git-env.mjs's workspaceDirFromGitCommonDir() applies for the ledger.
+# `--path-format=absolute` so the common dir is a real path whatever the
+# caller's cwd. The workspace it names is git-env.mjs's resolveWorkspace() rule,
+# written out below in shell.
 common=$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>&1) || {
   gitrc=$?
   case $gitrc in 128) die "cannot resolve the common git dir of $repo — $common" ;; esac
   unrunnable "git did not resolve the common git dir of $repo (exit $gitrc), so the Recipe cache was not read${common:+ — $common}"
 }
-cache="${common%/*}/.fleet/recipe.json"
+# The workspace is the rule in git-env.mjs's resolveWorkspace(), written out in
+# shell rather than asked of node: the interpreter probe below must stay the
+# first node call, since its refusals are pinned in that order. A common dir
+# named `.git` belongs to its parent checkout. Otherwise the parent's `.git`,
+# a symlink or a gitfile, that resolves to the common dir makes the parent the
+# workspace. Otherwise the common dir is the workspace itself (a bare
+# repository, a submodule's git dir).
+real=$(cd -P "$common" 2>/dev/null && pwd -P) || real=$common
+parent=${common%/*}
+case ${real##*/} in
+  .git) ws=$parent ;;
+  *)
+    ws=$common
+    link=${real%/*}/.git
+    if [ -f "$link" ]; then
+      IFS= read -r gl < "$link" || :
+      gl=${gl#gitdir: }
+      case $gl in /*) ;; *) gl=${real%/*}/$gl ;; esac
+      target=$gl
+    else
+      target=$link
+    fi
+    named=$(cd -P "$target" 2>/dev/null && pwd -P) || named=
+    if [ -n "$named" ] && [ "$named" = "$real" ]; then ws=$parent; fi
+    ;;
+esac
+cache="$ws/.fleet/recipe.json"
 
 # Absent is its own refusal, ahead of the interpreter probe: it is the one
 # state every fresh repository starts in, and its message must name the step

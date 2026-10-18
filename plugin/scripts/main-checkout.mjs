@@ -122,7 +122,7 @@ import { lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, writeFile
 import { join } from "node:path";
 import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
-import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { WorkspaceProbeFailed, gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 
 export const BASELINE_FILE = "main-checkout.sha";
 export const RECORD_COMMAND = "~/.fleet/bin/fleet-run main-checkout.mjs --record";
@@ -157,7 +157,9 @@ function git(what, args, cwd, env) {
 export function resolveMainCheckout(cwd = process.cwd(), env = process.env) {
   const r = git("git rev-parse --git-common-dir", ["rev-parse", "--git-common-dir"], cwd, env);
   if (!r.ok) return r;
-  const root = workspaceDirFromGitCommonDir(r.stdout, cwd);
+  let root;
+  try { root = workspaceDirFromGitCommonDir(r.stdout, cwd); }
+  catch (e) { if (!(e instanceof WorkspaceProbeFailed)) throw e; return { ok: false, why: e.message }; }
   return root === null ? { ok: false, why: "git rev-parse --git-common-dir answered nothing" } : { ok: true, root };
 }
 

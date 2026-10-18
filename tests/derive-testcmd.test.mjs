@@ -93,6 +93,31 @@ test("an absent cache refuses, naming the derivation step — never an inference
   assert.match(r.err, NAMES_STEP);
 });
 
+test("the Recipe cache sits where the workspace rule names: a bare repository, a .bare layout, a separate git dir", () => {
+  // The absent-cache refusal names the exact path the reader would open, so it
+  // shows where each layout's cache lives without a cache having to exist.
+  const top = tempDir("derive-layouts-");
+  const bare = join(top, "x.git");
+  execFileSync("git", ["init", "-q", "--bare", bare], { stdio: "pipe", env: FIXTURE_ENV });
+  const rb = derive(bare);
+  assert.equal(rb.status, 1, rb.err);
+  assert.match(rb.err, /no Recipe cache at .*\/x\.git\/\.fleet\/recipe\.json/);
+
+  const proj = join(top, "p");
+  mkdirSync(proj);
+  execFileSync("git", ["init", "-q", "--bare", join(proj, ".bare")], { stdio: "pipe", env: FIXTURE_ENV });
+  writeFileSync(join(proj, ".git"), "gitdir: ./.bare\n");
+  const rp = derive(proj);
+  assert.equal(rp.status, 1, rp.err);
+  assert.match(rp.err, /no Recipe cache at .*\/p\/\.fleet\/recipe\.json/);
+
+  const checkout = join(top, "q");
+  execFileSync("git", ["init", "-q", "--separate-git-dir", join(top, "a.git"), checkout], { stdio: "pipe", env: FIXTURE_ENV });
+  const rs = derive(checkout);
+  assert.equal(rs.status, 1, rs.err);
+  assert.match(rs.err, /no Recipe cache at .*\/a\.git\/\.fleet\/recipe\.json/);
+});
+
 test("a linked worktree reads the main checkout's cache, not a private one", () => {
   // The two consumers both hand a WORKTREE in: review-core's snapshot agent
   // passes the PR's worktree, and a claim's tree is one. The cache lives

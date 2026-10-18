@@ -12,10 +12,11 @@
 // every OTHER thing in this process that reads it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, symlinkSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gitEnv, workspaceDirFromGitCommonDir } from "../plugin/scripts/git-env.mjs";
+import { execFileSync } from "node:child_process";
+import { gitEnv, resolveWorkspace, workspaceDirFromGitCommonDir } from "../plugin/scripts/git-env.mjs";
 
 test("GIT_DIR and GIT_WORK_TREE are absent from the result, even when the base carries them", () => {
   const base = { GIT_DIR: "/somewhere/.git", GIT_WORK_TREE: "/somewhere", PATH: "/bin" };
@@ -146,4 +147,24 @@ test("canonicalise: true on a directory that does not exist answers the uncanoni
     workspaceDirFromGitCommonDir("/no-such-root-1658/repo/.git", "/", { canonicalise: true }),
     "/no-such-root-1658/repo",
   );
+});
+
+test("an ambient GIT_DIR naming another repository does not move the step-2 probe", () => {
+  // Measured: `git rev-parse --resolve-git-dir` answers the path it is given
+  // whatever GIT_DIR names, so the scrub in the probe is defensive. This pins
+  // the answer a `.bare` layout gets while GIT_DIR points elsewhere.
+  const top = mkdtempSync(join(tmpdir(), "git-env-ambient-"));
+  const proj = join(top, "p");
+  mkdirSync(proj);
+  execFileSync("git", ["init", "-q", "--bare", join(proj, ".bare")], { stdio: "pipe" });
+  writeFileSync(join(proj, ".git"), "gitdir: ./.bare\n");
+  execFileSync("git", ["init", "-q", "--bare", join(top, "other.git")], { stdio: "pipe" });
+  const had = "GIT_DIR" in process.env;
+  const prev = process.env.GIT_DIR;
+  process.env.GIT_DIR = join(top, "other.git");
+  try {
+    assert.deepEqual(resolveWorkspace(join(proj, ".bare"), proj), { dir: proj, gitDir: false });
+  } finally {
+    if (had) process.env.GIT_DIR = prev; else delete process.env.GIT_DIR;
+  }
 });

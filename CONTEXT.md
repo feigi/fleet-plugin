@@ -352,7 +352,7 @@ _Avoid_: resume, re-task
 **Scratch root**:
 The one directory per repository that every fleet member's throwaway files live
 under — `~/.fleet/scratch/<repo-key>/`, `<repo-key>` being the workspace's folder
-name, a dash and the first 8 hex characters of the sha256 of its realpath.
+name (a trailing `.git` dropped from a git dir's name), a dash and the first 8 hex characters of the sha256 of its realpath.
 Computed by `scratch-root.mjs`, never recorded and never injected by a harness:
 the controller writes an absolute path under it into every Dispatch, and a
 member never builds a root of its own.

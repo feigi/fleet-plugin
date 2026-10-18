@@ -5,6 +5,7 @@ on #2194, against the measurements below. Replaces the ticket's triage
 recommendation (`.fleet/scratch/` inside the checkout plus a recorded
 `mktemp -d`), which this ADR reverses. Builds on the partition rule recorded in
 `plugin/skills/run-team/references/isolation.md`, which it does not change.
+Amended by #3091: the workspace is the common git dir itself unless its parent's `.git` resolves to it; `.fleet/` and the scratch root follow.
 
 ## Context
 
@@ -38,10 +39,12 @@ Measured 2026-10-11 against `main` at `84b05f78`, as recorded in the ruling comm
    `$TMPDIR` or `local://`. A compacted, re-invoked or resumed controller
    computes the same path again.
 2. **`<repo-key>` is `<basename>-<8 hex>`.** `<basename>` is the folder name of
-   the workspace — the directory holding the **common** git dir, the same
-   lookup `fleet-dir.mjs`'s `fleetFile()` uses — and the hex is the first 8
-   characters of the sha256 of that directory's realpath. Worktrees map to
-   their main checkout, and two clones with the same name get different roots.
+   the workspace `fleetFile()` resolves — the directory holding a checkout's
+   `.git`, or the common git dir itself where no checkout's `.git` holds it (a
+   bare repository, a submodule's git dir, a `--separate-git-dir` clone), with a
+   trailing `.git` dropped from a git dir's name. The hex is the first 8
+   characters of the sha256 of that workspace's realpath. Worktrees map to their
+   main checkout, and two clones with the same name get different roots.
 3. **Derivation.** `fleet-dir.mjs` exports `scratchRoot()`. A new CLI,
    `plugin/scripts/scratch-root.mjs` (run through
    `~/.fleet/bin/fleet-run`), runs `mkdir -p` and prints the absolute path.
