@@ -24,6 +24,7 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeProjectDir } from "../plugin/scripts/member-record.mjs";
+import { RECEIPT } from "../plugin/scripts/ledger-grammar.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
 const BOARD = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
@@ -46,13 +47,14 @@ const ompTurn = (cacheWrite) => [
 // `ledgerFile` overrides the missing-ledger default the --spend-since and
 // --interval cases want: those die before the read matters, while the #807
 // case below needs a real one the read has to carry back whole. `seed` lays
-// the transcript tree into the fake $HOME for the child's cwd.
+// a session's transcripts into the fake $HOME and records it in the phase-0
+// receipt the child's board reads its spend session from.
 function runBoard(sinceArgs, ledgerFile, seed = seedDefault) {
   const home = tempDir("since-home-");
   // realpath, not the bare mkdtemp path: on darwin $TMPDIR is under /var, which
   // is a symlink to /private/var, and the child's process.cwd() reports the
   // RESOLVED form. Encoding the unresolved one puts the fixture at a path
-  // findSubagentsDir never looks in, and the panel comes back { error }.
+  // omp would never write for this cwd.
   const cwd = realpathSync(tempDir("since-cwd-"));
   const bin = tempDir("since-bin-");
   writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
@@ -69,16 +71,22 @@ function runBoard(sinceArgs, ledgerFile, seed = seedDefault) {
   });
 }
 
-// findSubagentsDir() defaults to $HOME and cwd, so the fixture has to sit
-// where the encoding puts it — encodeProjectDir is the real function, not a
-// hand-rolled path, so this cannot drift from it. Named after an
-// `<ISO>_<uuid>` directory so the heuristic's own directory-name filter
-// finds it.
+// The cwd is no git checkout, so the board's state directory is the cwd's own
+// `.fleet`, and the receipt goes there.
+function recordSession(cwd, session) {
+  mkdirSync(join(cwd, ".fleet"), { recursive: true });
+  writeFileSync(join(cwd, ".fleet", RECEIPT), JSON.stringify({ run: null, session, scratch: "/scratch", inFlight: 5, steps: {} }));
+}
+
+// The session sits where omp would write it for this cwd — encodeProjectDir
+// is the real function, not a hand-rolled path — under an `<ISO>_<uuid>`
+// name, and the receipt records it.
 function seedDefault(home, cwd) {
   const dir = join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home }),
     "2026-08-25T09-00-00-000Z_01a08126-ee04-7095-a695-14e3249f1127");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "default-agent.jsonl"), ompTurn(1000));
+  recordSession(cwd, dir);
 }
 
 test("--spend-since rejects a seconds-magnitude epoch — the mistake its own comment names", () => {
@@ -147,14 +155,13 @@ test("no --spend-since at all is not an error — the panel is simply unscoped",
 
 // ── #1583: --spend-dir on the one-shot path ──────────────────────────────────
 //
-// `build` is one gather per process, so it takes the OVERRIDE without needing
-// the pin serve() carries — the same split --spend-since already has, and the
-// reason the read sits in gather()'s default rather than only in serve().
+// `build` is one gather per process, and takes the same OVERRIDE every serve
+// tick does — the same split --spend-since already has.
 //
-// This rig is what makes "overrode" observable: runBoard()'s $HOME always holds
-// a resolvable session at the encoded cwd, so the heuristic has a real answer
+// This rig is what makes "overrode" observable: runBoard()'s default seed
+// records a readable session in the receipt, so the board has a real answer
 // of its own and a flag that did nothing would still produce a panel.
-test("build: --spend-dir reads the named directory instead of the session the heuristic picks", () => {
+test("build: --spend-dir reads the named directory instead of the session the receipt records", () => {
   const root = tempDir("since-named-");
   const dir = join(root, "2026-08-25T09-00-00-000Z_abcdef12-3456-7890-abcd-ef1234567890");
   mkdirSync(dir, { recursive: true });
@@ -163,20 +170,27 @@ test("build: --spend-dir reads the named directory instead of the session the he
   assert.equal(r.status, 0, r.stderr);
   const spend = JSON.parse(r.stdout).spend;
   assert.equal(spend.ok, true, r.stderr);
-  assert.equal(spend.totals.cacheWrite, 2000, "the panel came from the heuristic's session, not the named one");
+  assert.equal(spend.totals.cacheWrite, 2000, "the panel came from the receipt's session, not the named one");
   assert.equal(spend.top[0].label, "named");
 });
 
-test("build: with no --spend-dir the panel still comes from the heuristic, unchanged by this flag existing", () => {
+test("build: with no --spend-dir the panel comes from the session the receipt records", () => {
   // The other half of the same guard, and the one that catches the plausible
   // wiring slip: a `spendDir` defaulted to `null` rather than left absent
-  // reads as "resolved, no session yet" and blanks this panel on every
-  // subcommand at once, with nothing on stderr to say so.
+  // skips the receipt and blanks this panel on every subcommand at once,
+  // with nothing on stderr to say so.
   const r = runBoard([]);
   assert.equal(r.status, 0, r.stderr);
   const spend = JSON.parse(r.stdout).spend;
   assert.equal(spend.ok, true, r.stderr);
   assert.equal(spend.totals.cacheWrite, 1000);
+});
+
+test("build: with no --spend-dir and no receipt the panel says so, naming both ways out", () => {
+  const r = runBoard([], undefined, () => {});
+  assert.equal(r.status, 0, r.stderr);
+  const spend = JSON.parse(r.stdout).spend;
+  assert.deepEqual(spend, { ok: false, error: "no session recorded — run phase 0 or pass --spend-dir" });
 });
 
 test("build: --spend-dir naming a directory that does not exist yet is accepted, not refused", () => {
@@ -190,7 +204,7 @@ test("build: --spend-dir naming a directory that does not exist yet is accepted,
   const spend = JSON.parse(r.stdout).spend;
   assert.equal(spend.ok, false, "an unreadable named directory must not report spend");
   assert.equal(spend.totals, undefined, "and must not render a zeroed total in its place");
-  // The override really did override: the heuristic's session is still sitting
+  // The override really did override: the receipt's session is still sitting
   // there readable, and a fallback to it would have produced a panel.
   assert.doesNotMatch(r.stdout, /"cacheWrite":1000/);
 });
@@ -227,11 +241,10 @@ function ompSessionAt(proj) {
 }
 
 test("build: the panel comes from this workspace's own omp session, with its tool table intact", () => {
-  // The default path, no flag: the child's cwd sits OUTSIDE HOME, so this
-  // also drives encodeProjectDir's realpath-wrapped form through the real
-  // process.cwd().
+  // The default path, no flag: the receipt records the session omp laid out,
+  // its main-session FILE beside it.
   const r = runBoard([], undefined, (home, cwd) => {
-    ompSessionAt(join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home })));
+    recordSession(cwd, ompSessionAt(join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home }))));
   });
   assert.equal(r.status, 0, r.stderr);
   const spend = JSON.parse(r.stdout).spend;
@@ -242,9 +255,9 @@ test("build: the panel comes from this workspace's own omp session, with its too
   assert.equal(spend.attributedPct, 100);
 });
 
-test("build: --spend-dir accepts a session directory over a heuristic that resolves elsewhere", () => {
-  // runBoard's default seed gives the heuristic a session of its own (1000),
-  // so these numbers can only arrive through the named directory.
+test("build: --spend-dir accepts a session directory over a receipt that records another", () => {
+  // runBoard's default seed records a session of its own (1000), so these
+  // numbers can only arrive through the named directory.
   const dir = ompSessionAt(tempDir("since-omp-"));
   const r = runBoard(["--spend-dir", dir]);
   assert.equal(r.status, 0, r.stderr);
@@ -253,7 +266,6 @@ test("build: --spend-dir accepts a session directory over a heuristic that resol
   assert.equal(spend.totals.cacheWrite, 3000);
   assert.equal(spend.top[0].label, "impl-7");
 });
-
 
 // #366: the --interval read on `build`, where the value reaches the payload
 // rather than a timer — distinct from serve()'s (pinned in board.test.mjs).

@@ -1,9 +1,16 @@
 #!/usr/bin/env node
 // Phase 0 as one command: the run's start sequence, in order, with a receipt.
 //
-//   phase0.mjs --session <dir> [--in-flight n] [--plugin-checkout <dir>]
+//   phase0.mjs [--session <dir>] [--in-flight n] [--plugin-checkout <dir>]
 //              [--spend-dir <dir>]
 //              [--workflow <name> | --declare-no-ci]
+//
+// The session directory is `--session`, else `PI_ARTIFACTS_DIR`, which omp
+// exports to its Python eval kernel and the processes that kernel starts (the
+// bash tool's environment does not carry it); with neither, exit 2. It is
+// accepted when it is an existing directory, or when `<dir>.jsonl` exists
+// beside it — omp creates the directory when the session's first subagent
+// writes there.
 //
 // Reached through the Resolver and run from the MAIN checkout (a linked
 // worktree refuses: the checks below judge the checkout the controller reads
@@ -70,13 +77,13 @@
 // a pending step. Every step name is always present: one not yet run is
 // `pending`. `run` is the `at` that `ledger.mjs rotate` wrote into the
 // controller record in `.fleet/heartbeat.json`, null until the rotation has
-// run. `session` is `--session`, the one place the controller states its
-// session directory. `scratch` is what `scratch-root.mjs` prints. `inFlight`
+// run. `session` is the session directory, from `--session` or
+// `PI_ARTIFACTS_DIR`. `scratch` is what `scratch-root.mjs` prints. `inFlight`
 // is the In-flight bound this run used — `--in-flight`, or its default.
 //
 // RESUMABLE. A re-run reads the receipt. It continues it — skipping every `ok`
 // step and re-running the rest — only when its `run` equals the `at` the
-// controller record holds now AND its `session` equals `--session`. That
+// controller record holds now AND its `session` equals this run's session. That
 // comparison alone does not separate two runs before the new run's rotation:
 // the record still carries the previous run's `at` until `ledger.mjs rotate`
 // writes the next, so the previous run's receipt still matches it, and a
@@ -108,7 +115,8 @@
 // to it: they are checked against each other here and recorded in the
 // `preflight` step's output.
 //
-// One `phase0: <step>: <status> …` line per step on stdout, a step's further
+// A `session <dir> (from --session|PI_ARTIFACTS_DIR)` line first on stdout,
+// then one `phase0: <step>: <status> …` line per step, a step's further
 // output indented under it when there is any, and the `NEED` lines last.
 // Exit 0 every step ok, or `drift`/`unanswered` — advice the run goes on past;
 // 2 a usage error; 3 a step failed, or the run could not start or record itself
@@ -464,13 +472,25 @@ function main() {
   F.sweep();
   F.stray();
   const absent = (name) => F.arg(name) === null;
-  if (absent("session")) die("--session is required: the controller's session directory, `~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>`");
-  const session = resolve(F.arg("session"));
+  // The session directory: --session, else PI_ARTIFACTS_DIR, which omp exports
+  // to its Python eval kernel and that kernel's children — not to the bash
+  // tool. Never a guess at the newest session for this cwd: a concurrent
+  // session in the same cwd can be newer.
+  const fromEnv = process.env.PI_ARTIFACTS_DIR || null;
+  if (absent("session") && fromEnv === null) {
+    die("no session directory: pass --session <dir>, or run phase 0 from a Python eval cell (PI_ARTIFACTS_DIR); the bash tool's environment carries none");
+  }
+  const source = absent("session") ? "PI_ARTIFACTS_DIR" : "--session";
+  const session = resolve(absent("session") ? fromEnv : F.arg("session"));
+  // An existing directory, or `<session>.jsonl` beside a path that does not
+  // exist yet: omp creates the directory when the session's first subagent
+  // writes there.
   try {
-    if (!statSync(session).isDirectory()) die(`--session ${session} is not a directory`);
+    if (!statSync(session).isDirectory()) die(`${source} ${session} is not a directory`);
   } catch (e) {
     if (e.code === undefined) throw e;
-    die(`--session ${session} is not readable (${e.code})`);
+    if (e.code !== "ENOENT") die(`${source} ${session} is not readable (${e.code})`);
+    if (!existsSync(`${session}.jsonl`)) die(`${source} ${session} does not exist, and no ${session}.jsonl beside it names a session`);
   }
   const positive = (name) => {
     const n = F.numArg(name);
@@ -549,6 +569,7 @@ function main() {
 
   const ctx = { cwd, fleetDir, held, receipt, receiptPath, scratch, pluginCheckout, spendDir, ci };
   const say = (line) => process.stdout.write(`${line}\n`);
+  say(`session ${session} (from ${source})`);
   let stop = null;
   for (const name of STEP_NAMES) {
     if (receipt.steps[name].status === "ok") {

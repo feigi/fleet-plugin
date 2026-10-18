@@ -146,12 +146,12 @@ free port in its range when the derived one is already held by something
 else — either way it gets its own board, just not always on the port its
 hash predicts.
 
-The spend panel reads this workspace's own `~/.omp/agent/sessions` tree,
-and is pinned to whichever session first writes a transcript on this
-cockpit's own watch: it will not follow a workspace that
-already had another session's transcripts sitting there at launch. If the
-panel is reading someone else's numbers, relaunch with `--spend-dir <path>`
-naming this run's own session directory to override the heuristic outright —
+The spend panel reads the session directory this run's phase-0 receipt
+records, re-read on every tick, so a cockpit that outlives a run follows the
+next run's receipt. Until that directory exists and holds a member transcript
+the panel stays hidden; with no receipt, or one recording no session, it says
+`no session recorded — run phase 0 or pass --spend-dir`. Passing
+`--spend-dir <path>` to phase 0 overrides the receipt outright —
 `~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>` (the directory, never
 the `.jsonl` file of the same name beside it).
 

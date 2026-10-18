@@ -8,13 +8,13 @@
 // The board never depends on the controller feeding it.
 //
 // What stays here is what neither half owns: argv parsing, the build/serve
-// dispatch, the tick loop with its overlap guard and spend pin, and the fault
-// path.
+// dispatch, the tick loop with its overlap guard and per-tick spend source, and
+// the fault path.
 
 import { writeFileSync, renameSync, writeSync } from "node:fs";
 import { defineFlags } from "./arg.mjs";
 import { NAME, die, warnOnce } from "./board-common.mjs";
-import { gather, spendDirPin } from "./board-gather.mjs";
+import { gather, receiptSpendDir } from "./board-gather.mjs";
 import { serve, resolveCockpitInstance, cockpitWorkspace } from "./board-server.mjs";
 // The heartbeat's liveness mark path, taken from the module that owns the
 // filename rather than spelling `heartbeat.json` a second time. The PATH
@@ -126,8 +126,9 @@ function argSpendSince() {
   return sinceMs;
 }
 
-// The operator's override for the session heuristic (findSubagentsDir() in
-// board-gather.mjs). A PATH, so there is no range or magnitude to check the way
+// The operator's override for the session the phase-0 receipt records
+// (receiptSpendDir() in board-gather.mjs). A PATH, so there is no range or
+// magnitude to check the way
 // --spend-since and --interval have one — every malformed SHAPE this flag can
 // take is already arg()'s: a trailing `--spend-dir`, an empty or whitespace
 // value, a following flag eaten as the value, and the `--spend-dir=` form.
@@ -148,9 +149,8 @@ function argSpendSince() {
 // renders zeroes and never dies.
 //
 // `undefined` for an absent flag, not the `null` argPort()/argInterval()/
-// argSpendSince() return: `null` is a transcript-directory RESOLUTION
-// ("resolved, no session yet" — findSubagentsDir() in board-gather.mjs), and the
-// absence of an override must not read as one.
+// argSpendSince() return, so `spendDir ?? receiptSpendDir(...)` at each
+// caller falls through to the receipt on absence alone.
 function argSpendDir() {
   return arg("spend-dir") ?? undefined;
 }
@@ -239,7 +239,7 @@ async function main() {
   const spendSince = argSpendSince();
   // `--spend-dir` joins them for the same two reasons, from the day it
   // ships rather than one ticket later — it reaches both subcommands (gather()
-  // on build, the tick loop's pin on serve), and a trailing
+  // on build, every tick on serve), and a trailing
   // `--spend-dir` ahead of a stray positional has to name itself instead of
   // the token behind it.
   const spendDir = argSpendDir();
@@ -289,7 +289,7 @@ async function main() {
       // there.
       stateFile: stateFileIn(instance.stateDir),
       workspace: instance.workspace, port: instance.port,
-      interval, spendDir, spendDirExplicit: spendDir != null, spendSince,
+      interval, spendDir: spendDir ?? receiptSpendDir(instance.stateDir), spendDirExplicit: spendDir != null, spendSince,
     }));
     console.log(JSON.stringify(model, null, 2));
     return;
@@ -308,13 +308,11 @@ async function main() {
 // owns the socket, the timer and the identity handshake; what a tick reads and
 // writes is owned here.
 //
-// The pin is built HERE, once, and read by every tick. Outside the returned
-// tick for the obvious reason — a pin rebuilt per tick is a pin in name only —
-// and ahead of serve()'s port loop because it costs nothing to carry:
-// spendDirPin() touches no filesystem until its first call, so the reuse and
-// degrade arms that exit before ticking pay nothing for it.
+// The spend source is settled per TICK, never held across ticks: with no
+// --spend-dir, every tick reads the session the phase-0 receipt records now.
+// A cockpit outlives the run that launched it — a phase-0 relaunch reuses a
+// running server — so it has to follow the next run's receipt.
 async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
-  const spendPin = spendDirPin(spendDir);
   const { computeBoard } = await import("./compute-board.mjs");
   // One tick at a time, and the flag is load-bearing rather than defensive.
   // The timer's callback used to be synchronous, so node could not start
@@ -380,10 +378,9 @@ async function boardTick({ ledgerFile, interval, spendDir, spendSince }) {
         // the ledger default: a pure join on a directory settled at bind time.
         stateFile: stateFileIn(stateDir),
         workspace, port: served,
-        // The pinned transcript directory, not a fresh lookup: every tick after
-        // the first gets the SAME answer, which is what stops the panel
-        // alternating between two sessions under one project directory.
-        spendDir: spendPin(), spendDirExplicit: spendDir != null, spendSince,
+        // The operator's --spend-dir, else the receipt as it stands at this
+        // tick, read from the same state directory as the ledger and heartbeat.
+        spendDir: spendDir ?? receiptSpendDir(stateDir), spendDirExplicit: spendDir != null, spendSince,
       }));
       const tmp = `${jsonPath}.tmp`;
       writeFileSync(tmp, JSON.stringify(model));   // atomic: write tmp, rename over target

@@ -26,8 +26,8 @@ export function fixture(lines) {
 }
 
 // gatherSpend reports through stderr, so read console.error rather than spawning
-// the CLI — the transcript tree the CLI resolves lives under $HOME, and these
-// fixtures do not.
+// the CLI — the CLI reads its session from a phase-0 receipt, and these
+// fixtures write none.
 export function withStderr(fn) {
   const lines = [];
   const real = console.error;

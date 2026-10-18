@@ -87,9 +87,8 @@ const withTimeout = (pr, ms, what) => Promise.race([
   new Promise((_, rej) => setTimeout(() => rej(new Error(`timed out waiting for ${what}`)), ms).unref()),
 ]);
 
-// HOME is redirected at every child: gatherSpend() scans $HOME for this cwd's
-// omp session transcripts, and an empty directory keeps these runs off the
-// machine's real session tree.
+// HOME is redirected at every child to an empty directory, so nothing a child
+// reads under $HOME is the machine's own.
 const childEnv = (bin, home) => ({ ...process.env, PATH: bin, HOME: home });
 
 function serveProcess(cwd, bin, home) {

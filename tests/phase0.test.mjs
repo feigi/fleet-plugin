@@ -27,6 +27,9 @@ const GIT_ENV = { ...process.env };
 delete GIT_ENV.GIT_DIR;
 delete GIT_ENV.GIT_WORK_TREE;
 delete GIT_ENV.GH_REPO;
+// phase0.mjs falls back to it when --session is absent, and a suite run from
+// an omp Python eval cell inherits the real session's.
+delete GIT_ENV.PI_ARTIFACTS_DIR;
 const git = (cwd, ...args) => {
   const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8", env: GIT_ENV });
   assert.equal(r.status, 0, `git ${args.join(" ")}: ${r.stderr}`);
@@ -983,10 +986,10 @@ const refuses = (f, args, shows) => {
 test("usage: every malformed command line exits 2 before a step runs", () => {
   const f = fixture();
   const s = ["--session", f.session];
-  refuses(f, [], /--session is required/);
+  refuses(f, [], /no session directory: pass --session <dir>, or run phase 0 from a Python eval cell \(PI_ARTIFACTS_DIR\)/);
   refuses(f, [...s, "--bogus"], /--bogus/);
   refuses(f, ["--session"], /--session needs a value/);
-  refuses(f, ["--session", join(f.dir, "missing")], /not readable/);
+  refuses(f, ["--session", join(f.dir, "missing")], /--session .*missing does not exist, and no .*missing\.jsonl beside it/);
   refuses(f, ["--session", join(f.repo, "README")], /not a directory/);
   refuses(f, [...s, "--implementer-cap", "3"], /--implementer-cap/);
   refuses(f, [...s, "--reviewer-cap", "4"], /--reviewer-cap/);
@@ -997,6 +1000,60 @@ test("usage: every malformed command line exits 2 before a step runs", () => {
   refuses(f, [...s, "--workflow", "CI", "--declare-no-ci"], /alternatives/);
   refuses(f, [...s, "--declare-no-ci=1"], /boolean flag/);
   refuses(f, [...s, "stray"], /unexpected argument 'stray'/);
+});
+
+// The session directory: --session, else the PI_ARTIFACTS_DIR omp's Python
+// eval kernel exports, else a refusal naming both. Never a guess.
+test("session: --session beats PI_ARTIFACTS_DIR, and stdout names the source", () => {
+  const f = fixture();
+  const other = join(f.dir, "other-session");
+  mkdirSync(other);
+  const r = f.run(["--session", f.session], { env: { PI_ARTIFACTS_DIR: other } });
+  assert.equal(r.status, 0, r.err);
+  assert.equal(f.receipt().session, f.session);
+  assert.equal(r.out[0], `session ${f.session} (from --session)`);
+});
+
+test("session: with no --session, PI_ARTIFACTS_DIR is the session, and stdout names the source", () => {
+  const f = fixture();
+  const r = f.run([], { env: { PI_ARTIFACTS_DIR: f.session } });
+  assert.equal(r.status, 0, r.err);
+  assert.equal(f.receipt().session, f.session);
+  assert.equal(r.out[0], `session ${f.session} (from PI_ARTIFACTS_DIR)`);
+});
+
+test("session: neither --session nor PI_ARTIFACTS_DIR exits 2 naming both, and an empty PI_ARTIFACTS_DIR is no session", () => {
+  const f = fixture();
+  for (const env of [{}, { PI_ARTIFACTS_DIR: "" }]) {
+    const r = f.run([], { env });
+    assert.equal(r.status, 2, `${JSON.stringify(env)} → ${r.status}\n${r.stdout}${r.err}`);
+    assert.match(r.err, /--session/);
+    assert.match(r.err, /PI_ARTIFACTS_DIR/);
+    assert.deepEqual(f.order(), [], "a refused command line ran nothing");
+    assert.equal(existsSync(f.receiptPath), false, "nor wrote a receipt");
+  }
+});
+
+test("session: a PI_ARTIFACTS_DIR that does not exist yet is accepted when its .jsonl is beside it", () => {
+  // omp creates a session's directory when its first subagent writes there;
+  // the session's own transcript, `<dir>.jsonl`, exists from the start.
+  const f = fixture();
+  const pending = join(f.dir, "pending-session");
+  writeFileSync(`${pending}.jsonl`, "");
+  const r = f.run([], { env: { PI_ARTIFACTS_DIR: pending } });
+  assert.equal(r.status, 0, r.err);
+  assert.equal(f.receipt().session, pending);
+  assert.equal(r.out[0], `session ${pending} (from PI_ARTIFACTS_DIR)`);
+});
+
+test("session: a PI_ARTIFACTS_DIR with neither a directory nor a .jsonl beside it exits 2, naming the variable", () => {
+  const f = fixture();
+  const gone = join(f.dir, "gone-session");
+  const r = f.run([], { env: { PI_ARTIFACTS_DIR: gone } });
+  assert.equal(r.status, 2, `${r.stdout}${r.err}`);
+  assert.match(r.err, /PI_ARTIFACTS_DIR .*gone-session does not exist, and no .*gone-session\.jsonl beside it/);
+  assert.deepEqual(f.order(), [], "a refused session ran nothing");
+  assert.equal(existsSync(f.receiptPath), false, "nor wrote a receipt");
 });
 
 test("usage: a linked worktree refuses, because the checks judge the main checkout", () => {

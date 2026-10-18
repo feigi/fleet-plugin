@@ -21,7 +21,7 @@ the same encoded-cwd directory also holds this cwd's own top-level session
 transcripts as loose FILES sibling to the per-session directories, and a
 glob without it would try to scrape one of those as if it were a session.
 
-**Do not narrow this to "this run's session" with `findSubagentsDir`.** That helper
+**Do not narrow this to "this run's session" with the newest session for this cwd.** That
 answers a different question — the session with the NEWEST transcript for this cwd,
 which is not the same as the one you are in. Any other session sharing this cwd —
 a second terminal, a second controller run — can hold a newer transcript than

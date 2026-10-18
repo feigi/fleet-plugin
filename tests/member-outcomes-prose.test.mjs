@@ -49,16 +49,17 @@ test("the ruling step carries a RUNNABLE scraper invocation, not a mention of on
 });
 
 test("the ruling step scrapes EVERY session for the cwd, not one guessed session", () => {
-  // findSubagentsDir answers "newest transcript for this cwd", which is not
-  // "this run" — any other session sharing this cwd can hold a newer
-  // transcript at the moment this step runs, so the wrong-session pick is
-  // routine, silent, and exits 0.
+  // The newest session for this cwd is not "this run" — any other session
+  // sharing this cwd can hold a newer transcript at the moment this step
+  // runs, so the wrong-session pick is routine, silent, and exits 0. Narrowed
+  // to the one session the phase-0 receipt or PI_ARTIFACTS_DIR names, the
+  // scrape is still one session where the step owes every one.
   const slice = SLICE();
   assert.match(slice, /for d in .*\*\/;/, "the scrape must loop every session dir");
   // Banned from the COMMAND, not from the prose — the paragraph that explains
-  // why the single-session helper is wrong has to be able to name it.
+  // why one session is wrong has to be able to name the ways of picking it.
   const block = /```bash\n([\s\S]*?)```/.exec(slice)[1];
-  assert.doesNotMatch(block, /findSubagentsDir/, "the single-session helper is the defect, not the fix");
+  assert.doesNotMatch(block, /PI_ARTIFACTS_DIR|phase0\.json/, "a single session is the defect, not the fix");
 });
 
 test("the ruling step does NOT ask the controller to hand-write member rows", () => {
