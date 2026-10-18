@@ -39,6 +39,7 @@
 //         `NEED hand-release #<N> <blocker>` and is never forced.
 //         Dropping `in-progress` is the load-bearing half: phase 1 applied it and `candidates.mjs` excludes it, so leaving it makes the ticket invisible to the controller's scans and the maintainer's. It does not loop; it disappears.
 //         `reap.sh` declines a claim that never became a PR, so the release of a bailed claim is `release-ticket.sh`'s.
+//       A `PR#M` outcome also sets the claim branch's upstream when it has none: `reap.sh` keeps a branch with no upstream, and only an upstream's `[gone]` state makes it reapable. It writes `branch.<b>.remote` and `branch.<b>.merge` only while the merge key is unset, and prints `NEED upstream <b> — <why>` when a write fails.
 //       A `fixed` bail takes no label. Its `bailDetail` is `<sha> — <how>`,
 //       and `verify-sha.sh main <sha>` decides: exit 0 closes N, `gh issue
 //       close <N> --comment` with the kind `fixed` render (`--detail`, the
@@ -512,8 +513,47 @@ function blocker(r) {
   return said(r);
 }
 
+// The claim branch's upstream, set once a PR is opened from it. Only the merge
+// key being unset triggers the write, so a configured upstream is never touched.
+function claimUpstream(ev, member) {
+  const read = ev.report(member);
+  if (read.state !== "ok") {
+    ev.need(`upstream of ${member}'s claim branch — its report ${read.path} is ${read.state}: set the upstream by hand`);
+    return;
+  }
+  const b = read.report.branch;
+  const want = `run git config branch.${b}.remote origin && git config branch.${b}.merge refs/heads/${b}`;
+  const exists = run("git", ["show-ref", "--verify", "--quiet", `refs/heads/${b}`]);
+  if (exists.status === 1) {
+    ev.note(`upstream ${b} not set: no local branch`);
+    return;
+  }
+  if (exists.status !== 0) {
+    ev.need(`upstream ${b} — ${said(exists)}; ${want}`);
+    return;
+  }
+  const merge = run("git", ["config", "--get", `branch.${b}.merge`]);
+  if (merge.status === 0) {
+    ev.note(`upstream ${b} already set`);
+    return;
+  }
+  if (merge.status !== 1) {
+    ev.need(`upstream ${b} — ${said(merge)}; ${want}`);
+    return;
+  }
+  const remote = run("git", ["config", `branch.${b}.remote`, "origin"]);
+  const set = remote.status === 0 ? run("git", ["config", `branch.${b}.merge`, `refs/heads/${b}`]) : remote;
+  if (set.status !== 0) {
+    ev.need(`upstream ${b} — ${said(set)}; ${want}`);
+    return;
+  }
+  ev.note(`upstream ${b} set`);
+}
+
 function implReport(ev, member) {
-  if (ev.settle(member) === "bailed") bailed(ev, member);
+  const outcome = ev.settle(member);
+  if (outcome === "bailed") bailed(ev, member);
+  else if (typeof outcome === "string" && outcome.startsWith("PR#")) claimUpstream(ev, member);
 }
 
 function fixReport(ev, member) {

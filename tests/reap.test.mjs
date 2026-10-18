@@ -3378,8 +3378,8 @@ test("the dry run reports the detached worktree it would remove, removes nothing
 
 test("an attached worktree is never touched by the branchless sweep (#381)", (t) => {
   // The accept side of the enumeration itself. A worktree on a branch carries a
-  // `branch` line, so the sweep must not see it at all — including one on a
-  // live branch that is not `[gone]`, which nothing in this script may remove.
+  // `branch` line, so this sweep must not see it at all. The branch sweep does
+  // see its branch, and reports it kept because this one has no upstream.
   const w = repo(t);
   git(w, "worktree", "add", "-q", join(w, ".worktrees", "live"), "-b", "feature/live", "main");
   const live = join(w, ".worktrees", "live");
@@ -3387,10 +3387,60 @@ test("an attached worktree is never touched by the branchless sweep (#381)", (t)
   const { code, json, stderr } = runReap(w, ["--apply"]);
 
   assert.equal(code, 0);
-  assert.deepEqual(json, { applied: true, reaped: [], worktreesRemoved: [], kept: [], warnings: [] });
-  assert.doesNotMatch(stderr, /KEEP/, "a worktree on a live branch is not a finding");
+  assert.deepEqual(json, { applied: true, reaped: [], worktreesRemoved: [], kept: [{ branch: "feature/live", reason: "no upstream — never selected" }], warnings: [] });
+  assert.ok(stderr.includes("KEEP feature/live"), "a branch with no upstream is reported; its worktree is not touched");
   assert.equal(existsSync(live), true);
   assert.equal(branchExists(w, "feature/live"), true);
+});
+
+test("a merged claim branch with no upstream is kept and reported, never omitted, until its upstream is written", (t) => {
+  const w = repo(t);
+  const b = "implementer/9-x";
+  git(w, "checkout", "-q", "-b", b, "main");
+  commit(w, "claim work");
+  git(w, "push", "-q", "origin", b);
+  git(w, "checkout", "-q", "main");
+  git(w, "merge", "-q", "--no-ff", "-m", "merge claim", b);
+  git(w, "push", "-q", "origin", "main");
+  git(w, "push", "-q", "origin", "--delete", b);
+  git(w, "fetch", "-q", "--prune", "origin");
+
+  const dry = runReap(w, []);
+  assert.equal(dry.code, 0);
+  assert.deepEqual(dry.json.kept, [{ branch: b, reason: "no upstream — never selected" }]);
+
+  const kept = runReap(w, ["--apply"]);
+  assert.equal(kept.code, 0);
+  assert.deepEqual(kept.json.kept, [{ branch: b, reason: "no upstream — never selected" }]);
+  assert.deepEqual(kept.json.reaped, []);
+  assert.equal(branchExists(w, b), true);
+
+  git(w, "config", `branch.${b}.remote`, "origin");
+  git(w, "config", `branch.${b}.merge`, `refs/heads/${b}`);
+  const reaped = runReap(w, ["--apply"]);
+  assert.equal(reaped.code, 0);
+  assert.deepEqual(reaped.json.reaped, [b]);
+  assert.equal(branchExists(w, b), false);
+});
+
+test("a merged claim branch with no upstream held by a worktree is kept once, and the worktree is left alone", (t) => {
+  const w = repo(t);
+  const b = "implementer/9-y";
+  const wt = join(w, ".worktrees", "claim");
+  git(w, "worktree", "add", "-q", wt, "-b", b, "main");
+  commit(wt, "claim work");
+  git(wt, "push", "-q", "origin", b);
+  git(w, "merge", "-q", "--no-ff", "-m", "merge claim", b);
+  git(w, "push", "-q", "origin", "main");
+  git(w, "push", "-q", "origin", "--delete", b);
+  git(w, "fetch", "-q", "--prune", "origin");
+
+  const { code, json } = runReap(w, ["--apply"]);
+  assert.equal(code, 0);
+  assert.deepEqual(json.kept.filter((k) => k.branch === b), [{ branch: b, reason: "no upstream — never selected" }]);
+  assert.deepEqual(json.worktreesRemoved, []);
+  assert.equal(existsSync(wt), true);
+  assert.equal(branchExists(w, b), true);
 });
 
 test("a locked detached worktree is kept, its registration reported intact and its path named (#381)", (t) => {
