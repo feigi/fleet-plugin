@@ -133,8 +133,11 @@ function cause(...candidates) {
 // two stalled probes TIE `gh`'s own 20 s bound and three exceed it, and even
 // one stall can EXCEED it — up to GIT_TIMEOUT_MS + 20 s — when `gh` still
 // runs (measured). `check`'s worst case is the sum of whichever of its
-// children actually stall — three children, four in those layouts — not a
-// single fixed term.
+// children actually stall, not a single fixed term. That is three children
+// normally; in those layouts it is three git children, and `gh` is a fourth
+// only where the ledger's repository still has a work tree (a submodule) —
+// in the `.bare`, bare and `--separate-git-dir` layouts repoCheck() fails
+// and `gh` never runs (measured).
 //
 // `LEDGER_GIT_TIMEOUT` is this script's OWN override, in seconds, and it can
 // only ever SHORTEN. The rule and the reasons for it are net_budget's, in
