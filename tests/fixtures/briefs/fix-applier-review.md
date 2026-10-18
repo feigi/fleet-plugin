@@ -32,6 +32,13 @@ claim, never your patch.
 `<your name>` the `fix-pr-3293[-x]` you were dispatched as — the record the controller checks with
 `dispositions-check.mjs` before it dispatches any finisher.
 
+**A red `CHECKCMD-1` is yours to judge.** Read what it reports and fix every
+finding in a file the PR changes, including lines you did not edit — CI checks
+whole files. Never edit a file the PR does not otherwise change: a finding there
+is a stale base, not your code, so rebase onto `origin/main` and re-run; still
+red → push nothing and report that cause. No fix command is recorded; the Check
+step only reports.
+
 Your report is a file, `/abs/scratch-fix/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape
 `~/.fleet/bin/fleet-run report-schema.mjs print fix-pr` prints. Write it

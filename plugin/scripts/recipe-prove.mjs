@@ -2,7 +2,7 @@
 // Prove a repository's Recipe — its Install step, Check step and Test entrypoint —
 // and write the Recipe cache only if the proof holds. This is the Recipe
 // derivation step's proof, and the ONE writer of the cache derive-testcmd.sh
-// reads: the deriving agent chooses both commands by reading the repository,
+// reads: the deriving agent chooses all three commands by reading the repository,
 // and this script is what turns that choice into a cache, or refuses to.
 //
 //   recipe-prove.mjs <repo> --install <cmd> --check <cmd|true> --test <cmd> --uncovered <json>
@@ -32,7 +32,9 @@
 //      step that is red on origin/main is left out of `check` and listed in
 //      `uncovered`. Its mutation proof: `--check-mutate` must change a tracked
 //      file, and the Check step must then go red (exit not 126/127, and not 0);
-//      the tree is restored to HEAD after the run. `--check true` needs none.
+//      the tree is then restored to HEAD — tracked files reset, untracked ones
+//      removed, ignored ones kept — so nothing the mutation or the red run left
+//      behind reaches the Test entrypoint. `--check true` needs none.
 //   3. The Test entrypoint runs and must RUN — 126/127 is the shell's "cannot
 //      execute"/"not found". A red suite is not a failed proof by itself.
 //   4. Real tests must be shown to have executed, by at least one of:
@@ -54,11 +56,11 @@
 //   With neither, nothing is proven: the refusal still names where the test
 //   run's output is, so the caller can read the count line off it.
 //
-// Each of those commands — the Install step, both Test runs, the mutation —
-// runs under a time bound of its own, 20 minutes, that RECIPE_PROVE_TIMEOUT
-// (whole seconds) can shorten and never lengthen. A command still running at
-// the bound is killed, and the proof is NOT PROVEN for it, the refusal naming
-// the bound and the command's log.
+// Each of those commands — the Install step, both Check runs and the check
+// mutation, both Test runs, the mutation — runs under a time bound of its own,
+// 20 minutes, that RECIPE_PROVE_TIMEOUT (whole seconds) can shorten and never
+// lengthen. A command still running at the bound is killed, and the proof is
+// NOT PROVEN for it, the refusal naming the bound and the command's log.
 //
 // On proof, the cache is written atomically to <workspace>/.fleet/recipe.json
 // — <workspace> being the directory workspaceDirFromGitCommonDir() names for the repository,
@@ -161,7 +163,7 @@ function parseArgs(argv) {
   for (const f of ["--install", "--test"]) {
     if (!a[f] || !a[f].trim()) throw cannot(`${f} needs a non-empty command — ${USAGE}`);
   }
-  if (!("--uncovered" in a)) throw cannot(`--uncovered is required: the CI test steps the Test entrypoint leaves out, as one JSON array, \`[]\` for none — ${USAGE}`);
+  if (!("--uncovered" in a)) throw cannot(`--uncovered is required: the merge-gating CI steps neither the Test entrypoint nor the Check step runs, as one JSON array, \`[]\` for none — ${USAGE}`);
   const uncovered = parseUncovered(a["--uncovered"]);
   if (("--count-line" in a) !== ("--test-count" in a)) throw cannot("--count-line and --test-count go together");
   if ("--test-count" in a && !isDigits(a["--test-count"])) {
@@ -288,17 +290,22 @@ const didNotRun = (rc) => rc === 126 || rc === 127;
 // install creates dirties the tree as surely as a rewrite, and the untracked
 // mode is config — under status.showUntrackedFiles=no it is invisible unless
 // pinned.
-function treeChanges(wt, log) {
+function treeChanges(wt, where) {
   const s = git(["status", "--porcelain", "-uall"], wt);
-  if (!s.ok) throw notProven(`could not read the tree state in the throwaway worktree: ${s.err}; install output: ${log}`);
+  if (!s.ok) throw notProven(`could not read the tree state in the throwaway worktree: ${s.err}; ${where}`);
   return s.out;
 }
 
 // Puts the throwaway worktree back to HEAD after a mutation, so the next run
-// starts from the clean tree the proof requires.
+// starts from the clean tree the proof requires: a reset puts every tracked
+// file back, and only a clean removes the untracked files a mutation or the
+// run it turned red created. No `-x`: ignored files — the Install step's
+// output among them — stay, as they stay through every other step.
 function restoreTree(wt, why, log) {
   const r = git(["reset", "--hard", "-q", "HEAD"], wt);
   if (!r.ok) throw notProven(`could not restore the tree ${why}: ${r.err}; output: ${log}`);
+  const c = git(["clean", "-fdq"], wt);
+  if (!c.ok) throw notProven(`could not remove the untracked files ${why}: ${c.err}; output: ${log}`);
 }
 
 function prove(o, wt, logs) {
@@ -309,16 +316,16 @@ function prove(o, wt, logs) {
     throw notProven(`the Install step '${o.install}' did not run (exit ${irc}: not executable or not found); install output: ${installLog}`);
   }
   if (irc !== 0) throw notProven(`the Install step '${o.install}' failed (exit ${irc}); install output: ${installLog}`);
-  const dirty = treeChanges(wt, installLog);
+  const dirty = treeChanges(wt, `install output: ${installLog}`);
   if (dirty) {
     throw notProven(`the Install step changed the tree (first: ${dirty.split("\n")[0]}); it must leave every file as checked out; install output: ${installLog}`);
   }
 
   // The Check step: the merge-gating CI checks that are not tests. It must run
   // and be green on origin/main, leave the tree as it found it, and turn red
-  // under one mutation of a tracked file — the mutate-then-restore the Test
-  // entrypoint's proof uses below, run here before the Test entrypoint so that
-  // nothing the Check step or its mutation left behind reaches the Test run.
+  // under one mutation of a tracked file. It runs before the Test entrypoint,
+  // and restoreTree puts the tree back to HEAD after its mutation, so nothing
+  // the mutation or the mutated run left in the tree reaches the Test run.
   if (o.check !== "true") {
     const checkLog = join(logs, "check.log");
     const crc = sh(o.check, wt, checkLog);
@@ -328,7 +335,7 @@ function prove(o, wt, logs) {
     if (crc !== 0) {
       throw notProven(`the Check step '${o.check}' is red on origin/main (exit ${crc}) — a merge-gating step that is red there belongs in \`uncovered\` with reason \`red on origin/main\`, not in \`check\`; check output: ${checkLog}`);
     }
-    const checkDirty = treeChanges(wt, checkLog);
+    const checkDirty = treeChanges(wt, `check output: ${checkLog}`);
     if (checkDirty) {
       throw notProven(`the Check step changed the tree (first: ${checkDirty.split("\n")[0]}); it must only read the tree; check output: ${checkLog}`);
     }

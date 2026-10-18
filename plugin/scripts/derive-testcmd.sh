@@ -28,7 +28,8 @@
 #
 #   install       string  the Install step, a shell command run from the root
 #   check         string  the Check step, a shell command run from the root, or
-#                         `true` when the repository has no non-test merge-gating step
+#                 | true  the JSON boolean `true` (never the string) when the
+#                         repository has no non-test merge-gating step
 #   test          string  the Test entrypoint, a shell command run from the root
 #   derivedAt     string  the full commit id (40 or 64 hex) it was proven at
 #   installClean  true    the Install step left `git status --porcelain` empty
@@ -255,10 +256,12 @@ try { r = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { bad(`it does 
 if (r === null || typeof r !== "object" || Array.isArray(r)) bad("it is not a JSON object");
 for (const k of ["install", "test"])
   if (typeof r[k] !== "string" || !r[k].trim() || r[k].includes("\0")) bad(`\`${k}\` is not a non-empty command string`);
-if (r.check !== true && (typeof r.check !== "string" || !r.check.trim() || r.check.includes("\0")))
-  bad("`check` is neither `true` nor a non-empty command string — re-derive the Recipe so it names the Check step");
-if (r.check !== true && (typeof r.checkMutation !== "string" || !r.checkMutation.trim()))
-  bad("`check` is not `true` but `checkMutation` is missing — the change that turned the Check step red");
+if (r.check !== true) {
+  if (typeof r.check !== "string" || !r.check.trim() || r.check.includes("\0"))
+    bad("`check` is neither `true` nor a non-empty command string — re-derive the Recipe so it names the Check step");
+  if (typeof r.checkMutation !== "string" || !r.checkMutation.trim())
+    bad("`check` is not `true` but `checkMutation` is missing — the change that turned the Check step red");
+}
 if (typeof r.derivedAt !== "string" || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(r.derivedAt))
   bad("`derivedAt` is not a full commit id");
 if (r.installClean !== true) bad("`installClean` is not true — the Install step was never proven to leave the tree clean");

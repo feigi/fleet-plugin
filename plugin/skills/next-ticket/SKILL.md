@@ -90,14 +90,20 @@ Come back here. The sizing path hands off; this step always follows.
 
 ```bash
 git fetch origin && git rebase origin/main   # rebase, never merge main in
-<check command>                             # the Recipe's Check step; re-run after rebasing
 <test command>                              # the Recipe's Test entrypoint; re-run after rebasing
+<check command>                             # the Recipe's Check step; re-run after rebasing
 git push --force-with-lease -u origin HEAD
 gh pr create --base main --body "…
 
 Closes #N"
 gh pr edit --add-label <patch|minor|major>   # own command, own exit status
 ```
+
+**A red Check step is yours to judge.** Read what it reports and fix every
+finding in a file the PR changes, including lines you did not edit — CI checks
+whole files. Never edit a file the PR does not otherwise change: a finding there
+is a stale base, not your code, so rebase and re-run; still red → bail with that
+cause. No fix command is recorded; the Check step only reports.
 
 **In a detached worktree, push by refspec.** `run-team`'s runbook re-creates an
 already-open PR's worktree with `git worktree add --detach <path> origin/<branch>`,

@@ -161,7 +161,7 @@ test("a Maven-shaped repo gets a proven cache: the count proof, derivedAt, insta
   assert.deepEqual([read(dir, "install").out, read(dir, "test").out, read(dir, "uncovered").out], ["mvn -q dependency:go-offline", "mvn -q test", "[]"]);
 });
 
-// The steps CI gates merges on that the Test entrypoint leaves out are written
+// The merge-gating CI steps neither the Test entrypoint nor the Check step runs are written
 // as given — reasons carrying a `#` word, a trailing `;` and a multi-byte
 // character included, all refused in a command — and read back as the same
 // compact JSON, whatever whitespace the flag's value carried.
@@ -1465,5 +1465,37 @@ test("a Check step that changes the tree is refused, since it must only read it"
   ]);
   assert.equal(r.status, 1, r.err);
   assert.match(r.err, /the Check step changed the tree/);
+  assert.equal(existsSync(cachePath(dir)), false);
+});
+
+// The run the Check step's mutation turned red, or the mutation itself, can
+// leave a file the tree does not track: the restore after it must remove that
+// too, or the Test run proves against a tree that is not origin/main's.
+test("an untracked file the check mutation creates does not reach the Test run", () => {
+  const { dir } = repo({
+    ...CHECK_FILES,
+    "run-tests.sh": "#!/bin/sh\nif [ -e leak.txt ]; then echo 'LEAK SEEN'; exit 1; fi\necho 'Tests run: 1, Failures: 0'\n",
+  });
+  const r = prove(dir, [
+    ...TEST_PROOF,
+    "--check", "sh ./check.sh",
+    "--check-mutate", "printf 'dirty\\n' > status.txt && : > leak.txt",
+    "--check-mutation", "the lint step fails on a dirty status",
+  ]);
+  assert.equal(r.status, 0, r.err);
+  assert.match(JSON.parse(readFileSync(cachePath(dir), "utf8")).checkMutation, /changed status\.txt$/);
+});
+
+test("a tree that cannot be read after the Check step names the check output, not the install output", () => {
+  const { dir } = repo(CHECK_FILES);
+  const r = prove(dir, [
+    ...TEST_PROOF,
+    "--check", "rm -f .git",
+    "--check-mutate", "printf 'dirty\\n' > status.txt",
+    "--check-mutation", "the lint step fails on a dirty status",
+  ]);
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /could not read the tree state in the throwaway worktree: .*; check output: \S*check\.log/);
+  assert.doesNotMatch(r.err, /install output/);
   assert.equal(existsSync(cachePath(dir)), false);
 });

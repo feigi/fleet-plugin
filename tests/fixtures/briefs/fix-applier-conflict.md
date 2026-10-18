@@ -10,6 +10,13 @@ Run `CHECKCMD-2` and `TESTCMD-2` from the worktree before you push, then push wi
 `~/.fleet/bin/fleet-run push-sync.mjs --branch conflict-branch`. Report the new head, or that no conflict was
 left.
 
+**A red `CHECKCMD-2` is yours to judge.** Read what it reports and fix every
+finding in a file the PR changes, including lines you did not edit — CI checks
+whole files. Never edit a file the PR does not otherwise change: a finding there
+is a stale base, not your code, so rebase onto `origin/main` and re-run; still
+red → push nothing and report that cause. No fix command is recorded; the Check
+step only reports.
+
 Your report is a file, `/abs/scratch-conflict/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape
 `~/.fleet/bin/fleet-run report-schema.mjs print fix-pr` prints. Write it

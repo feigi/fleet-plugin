@@ -32,8 +32,8 @@ these pages use.
 
 - [CI State](ci-state.md) — the one script every gate asks whether a PR's
   CI is genuinely green.
-- [Recipe](recipe.md) — deriving a consumer repo's install step and test
-  entrypoint by reasoning, not a lookup table.
+- [Recipe](recipe.md) — deriving a consumer repo's install step, check step
+  and test entrypoint by reasoning, not a lookup table.
 - [Reaping & Liveness](reaping-and-liveness.md) — cleaning up claims after
   they end, and the heartbeat that keeps a drained queue from stalling
   silently.

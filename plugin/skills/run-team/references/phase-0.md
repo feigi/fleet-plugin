@@ -320,15 +320,18 @@ claim before it lands. `<repo>` is this main checkout's absolute path and
 `<scratch>` is the absolute path `scratch-root.mjs` prints (SKILL.md's **The
 scratch root is computed**); the renderer refuses a relative one. The member
 reads the repository,
-proposes both commands and proves them with `recipe-prove.mjs` in a
+proposes all three commands — the Install step, the Check step and the Test
+entrypoint — and proves them with `recipe-prove.mjs` in a
 throwaway worktree of `origin/main`: the Install step must leave the tree
-clean, and the Test entrypoint must be shown to run real tests — the
+clean, a Check step other than `true` must be green there and turn red under
+a deliberate mutation of a tracked file, and the Test entrypoint must be shown to run real tests — the
 runner's own non-zero count, or a deliberate mutation of one test that
 turns the run red. Only a proof writes the cache, with `derivedAt` (the
 `origin/main` commit it ran against) and the proof itself. **`RECIPE
 PROVEN`** → re-run both reads above (`derive-testcmd.sh . install` and
-`derive-testcmd.sh . test --at origin/main`); their output is the
-Recipe this run uses. **`RECIPE NOT PROVEN`** → stall, below.
+`derive-testcmd.sh . test --at origin/main`) and the Check step's read
+below; their output is the Recipe this run uses. **`RECIPE NOT PROVEN`** →
+stall, below.
 
 **Where `checkCmd` comes from:** the repository's Check step, out of the same Recipe cache — `~/.fleet/bin/fleet-run derive-testcmd.sh . check` prints it. Pass it to the fix-applier beside `testCmd`; the review does not run it.
 

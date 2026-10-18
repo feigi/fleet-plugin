@@ -268,8 +268,8 @@ test("either proof alone is accepted, and so is a 64-hex commit id", () => {
   }
 });
 
-// `uncovered` is what the Test entrypoint leaves out of CI's merge-gating test
-// steps. The reader prints it as one line of compact JSON inside the same
+// `uncovered` is the merge-gating CI steps neither the Test entrypoint nor the
+// Check step runs. The reader prints it as one line of compact JSON inside the same
 // frame, and it is data, not a command: none of the command checks apply to
 // it, so a reason holding a `#` word, a trailing `;` or a multi-byte
 // character — all refused in a command — is accepted here.
@@ -320,6 +320,8 @@ test("`check` prints `true` or its command, and a cache that cannot say what it 
   assert.equal(cmd.out, "sh ./lint.sh");
   for (const [body, why] of [
     [recipe(head, { check: "sh ./lint.sh" }), /`check` is not `true` but `checkMutation` is missing — the change that turned the Check step red/],
+    [recipe(head, { check: "sh ./lint.sh", checkMutation: " \t" }), /`check` is not `true` but `checkMutation` is missing — the change that turned the Check step red/],
+    [recipe(head, { check: "sh ./a\0b", checkMutation: "x" }), /`check` is neither `true` nor a non-empty command string/],
     [recipe(head, { check: "" }), /`check` is neither `true` nor a non-empty command string/],
     [recipe(head, { check: undefined }), /`check` is neither `true` nor a non-empty command string/],
   ]) {

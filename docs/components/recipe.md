@@ -16,9 +16,10 @@ The reading side shipped with #2117 and the deriving side with #2118.
 1. **Derive.** The
    [`fleet-recipe-deriver`](../../plugin/agents/fleet-recipe-deriver.agent.md)
    agent reads the repo (README, build files, CI workflow) and chooses the
-   Install step and the Test entrypoint. The run-team controller dispatches
-   it in phase 0 when the cache is missing or invalid; a standalone
-   `next-ticket` or `review-and-fix` session dispatches it the same way.
+   Install step, the Check step and the Test entrypoint. The run-team
+   controller dispatches it in phase 0 when the cache is missing or invalid;
+   a standalone `next-ticket` or `review-and-fix` session dispatches it the
+   same way.
 2. **Prove.** [`recipe-prove.mjs`](../../plugin/scripts/recipe-prove.mjs)
    runs all three commands in a throwaway worktree of `origin/main`. The Install
    step must leave the tree clean; the Check step must run green and a deliberate
