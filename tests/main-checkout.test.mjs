@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
-  appendFileSync, chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync,
+  appendFileSync, chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -802,32 +802,88 @@ test("a baseline commit an amend and gc pruned is its own unknown: examine HEAD 
   assert.equal(check(dir).state, "clean");
 });
 
-test("a baseline commit whose cat-file read fails for another reason than absence stays could-not-look", (t) => {
+test("a baseline commit whose probe read fails for another reason than absence stays could-not-look", (t) => {
   const dir = repo(t);
   writeFileSync(join(dir, "tracked.txt"), "local\n");
   git(dir, "commit", "-qam", "local");
-  record(dir);
+  const recorded = record(dir).head.oid;
   git(dir, "commit", "-q", "--amend", "-m", "amended");
   git(dir, "reflog", "expire", "--expire=now", "--all");
   git(dir, "gc", "-q", "--prune=now");
-  // Control: real git answers exit 1 for the absent commit.
+  // Control: real git answers exit 1 with nothing on stderr for the absent commit.
   assert.equal(check(dir).cause, "missing");
-  // A git first on PATH that fails `cat-file` with 128, as a broken one would,
-  // and runs everything else as the real git.
+  // A git first on PATH that fails the probe's `rev-parse` of the baseline
+  // commit with 128, as a broken one would, and runs everything else as the
+  // real git, `originMain`'s `rev-parse` included.
   const shim = join(dir, ".fleet", "shim");
   mkdirSync(shim, { recursive: true });
   writeFileSync(join(shim, "git"), [
     "#!/bin/sh",
-    'if [ "$1" = cat-file ]; then echo "fatal: injected" >&2; exit 128; fi',
+    'if [ "$1" = rev-parse ]; then for a in "$@"; do',
+    '  if [ "$a" = "$BASELINE_OID^{commit}" ]; then echo "fatal: injected" >&2; exit 128; fi',
+    "done; fi",
     'PATH="$REAL_PATH" exec git "$@"',
     "",
   ].join("\n"));
   chmodSync(join(shim, "git"), 0o755);
-  const env = { ...process.env, PATH: `${shim}:${process.env.PATH}`, REAL_PATH: process.env.PATH };
+  const env = { ...process.env, PATH: `${shim}:${process.env.PATH}`, REAL_PATH: process.env.PATH, BASELINE_OID: recorded };
   const c = check(dir, env);
   assert.equal(c.state, "unknown");
   assert.equal(c.cause, "read");
   assert.match(c.why, /^git merge-base --is-ancestor exited 128/);
+});
+
+test("a baseline commit present but unreadable under a chmod 000 fan-out dir is could-not-look, never missing", { skip: ROOT }, (t) => {
+  const dir = repo(t);
+  // Re-commit until the baseline commit's fan-out dir holds its object alone:
+  // any other object there is read before the ancestry read, and would fail
+  // the check earlier with another `why`.
+  let recorded, fanout;
+  for (let i = 0; ; i++) {
+    // Unpushed, so `origin/main` never reads it: only the ancestry read does.
+    writeFileSync(join(dir, "tracked.txt"), `local ${i}\n`);
+    git(dir, "commit", "-qam", "local");
+    recorded = record(dir).head.oid;
+    writeFileSync(join(dir, "tracked.txt"), `next ${i}\n`);
+    git(dir, "commit", "-qam", "next");
+    fanout = join(dir, ".git", "objects", recorded.slice(0, 2));
+    if (readdirSync(fanout).join() === recorded.slice(2)) break;
+    // Drop this round's loose objects: reachable ones go into a pack.
+    git(dir, "reset", "-q", "--hard", "origin/main");
+    git(dir, "reflog", "expire", "--expire=now", "--all");
+    git(dir, "gc", "-q", "--prune=now");
+  }
+  chmodSync(fanout, 0o000);
+  let c;
+  try { c = check(dir); } finally { chmodSync(fanout, 0o755); }
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "read");
+  assert.match(c.why, /^git rev-parse --verify exited 1: error: unable to open loose object/);
+  assert.match(describe(c, []), /NEVER re-baseline over it/);
+});
+
+test("a baseline commit present only in an alternate that has moved away is could-not-look, never missing", (t) => {
+  const dir = repo(t);
+  // Unpushed, so `origin/main` never reads it: only the ancestry read does.
+  writeFileSync(join(dir, "tracked.txt"), "local\n");
+  git(dir, "commit", "-qam", "local");
+  const recorded = record(dir).head.oid;
+  // Only the baseline's loose commit object moves into the alternate; HEAD,
+  // `origin/main` and the worktree stay in local objects.
+  const alt = join(dir, ".fleet", "alt");
+  mkdirSync(join(alt, "objects", recorded.slice(0, 2)), { recursive: true });
+  renameSync(
+    join(dir, ".git", "objects", recorded.slice(0, 2), recorded.slice(2)),
+    join(alt, "objects", recorded.slice(0, 2), recorded.slice(2)),
+  );
+  writeFileSync(join(dir, ".git", "objects", "info", "alternates"), `${join(alt, "objects")}\n`);
+  writeFileSync(join(dir, "tracked.txt"), "two\n");
+  git(dir, "commit", "-qam", "next");
+  renameSync(alt, join(dir, ".fleet", "alt-gone"));
+  const c = check(dir);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "read");
+  assert.match(c.why, /^git rev-parse --verify exited 1: error: unable to normalize alternate/);
 });
 
 test("a baseline commit present but corrupt stays could-not-look: only an absent object is the missing cause", (t) => {
