@@ -22,7 +22,10 @@
 //      readers — a member with no assistant turn yet still resolves off its
 //      dispatch-time `session_init` record, never treated as absent). An
 //      entry that names neither a `session` nor a `transcript` takes the
-//      `session` the phase-0 receipt `.fleet/phase0.json` records, and is
+//      `session` the phase-0 receipt `.fleet/phase0.json` records — the
+//      receipt of the workspace the ledger in use belongs to (`--ledger`'s
+//      directory, or the cwd's when `--ledger` is omitted), never the cwd's
+//      when `--ledger` names another workspace's — and is
 //      exit 2 naming the receipt when it records none. That session is taken
 //      as the receipt stands: whether the receipt is this run's is judged by
 //      fleet-tick.mjs's phase-0 gate, not here, and a message about it names
@@ -84,7 +87,7 @@
 
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join, dirname, isAbsolute } from "node:path";
+import { join, dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
@@ -328,6 +331,21 @@ function sessionLacksTranscript(repoRoot, sessionPath, member) {
 // tier can still be judged.
 const NO_TRANSCRIPT_OUTCOMES = new Set(["killed", "released"]);
 
+// Where the phase-0 receipt is read from: the workspace the ledger in use
+// belongs to, so a `--ledger` naming another workspace's judges that
+// workspace's transcripts, not the cwd's. `--ledger` takes any path, not
+// always one under a `.fleet/` — so the workspace is the one git names for
+// the ledger's directory (its nearest existing ancestor: the directory may
+// not exist before the run's first write), the same answer ledger.mjs's own
+// default gives from the cwd. A ledger under no repository has no workspace
+// and so no receipt: sessionFromReceipt refuses naming why. Omitted, the cwd's.
+function receiptOpts(ledgerFile) {
+  if (!ledgerFile) return undefined;
+  let cwd = dirname(resolve(ledgerFile));
+  while (!existsSync(cwd) && dirname(cwd) !== cwd) cwd = dirname(cwd);
+  return { cwd };
+}
+
 function runLedger(ledgerFile, args, what) {
   try {
     return execFileSync(process.execPath, [LEDGER_SCRIPT, ...(ledgerFile ? ["--file", ledgerFile] : []), ...args], { encoding: "utf8" });
@@ -480,7 +498,7 @@ function main() {
         // session directory the phase-0 receipt records — read once per
         // batch — and refuses naming the receipt when it records none. A
         // given one always wins.
-        const session = raw.session ?? (raw.transcript ? undefined : (receiptSession ??= sessionFromReceipt()));
+        const session = raw.session ?? (raw.transcript ? undefined : (receiptSession ??= sessionFromReceipt(receiptOpts(ledgerFile))));
         // Said as the caller's flag only when the caller gave it.
         const where = raw.session ? `--session ${session}` : `the phase-0 receipt's session ${session}`;
         if (session) {
