@@ -5100,7 +5100,7 @@ function setLine(path, n, text) {
 
 /**
  * A claim the merge bot rebased server-side. The claim's commit(s) change lines
- * that sit three lines below a line `main` then changes, so the rebased commit
+ * whose diff context includes a line `main` then changes, so the rebased commit
  * has different context and a different patch id: `git cherry origin/main <tip>`
  * prints `+` for a branch that is fully merged. The remote branch is then
  * deleted and pruned, which is what makes it `[gone]`.
@@ -5130,8 +5130,8 @@ function serverRebasedClaim(w, name, { commits = 1, local = 0, tipAt = null } = 
   git(wt, "push", "-q", "-u", "origin", name);
   const before = pushed[pushed.length - 1];
 
-  // `main` moves under the claim, three lines above its first change: inside
-  // that change's context, with two untouched lines between so nothing conflicts.
+  // `main` moves under the claim, on a line inside its first change's diff
+  // context, with unchanged lines between so nothing conflicts.
   setLine(file, 3, "line three, reworded");
   git(w, "commit", "-q", "-am", `reword ${slug}`);
   git(w, "cherry-pick", ...pushed);
