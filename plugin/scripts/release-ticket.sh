@@ -5,11 +5,14 @@
 #
 # - Never dispatched: no branch on origin. The branch must carry no commit
 #   beyond origin/main and no commit unique to it.
-# - Closed unmerged: the branch is on origin, and every PR whose head is that
-#   branch reads CLOSED — none OPEN, none MERGED, at least one present. The
-#   local branch must sit at the tip origin holds, and that remote branch is
-#   deleted (leased on that tip) before the label drops. A branch on origin
-#   with no PR, or with a PR list that cannot be read, blocks.
+# - Closed unmerged: the branch is on origin, and every PR of this repository
+#   whose head is that branch reads CLOSED — none OPEN, none MERGED, at least
+#   one present. The local branch must sit at the tip origin holds. Under
+#   --apply origin's tip is read again right before the remote branch is
+#   deleted, and that delete runs before the label drops. It is a plain one,
+#   not leased on the tip: a push landing between the re-read and the delete
+#   goes with the branch. A branch on origin with no PR, or with a PR list that
+#   cannot be read, blocks.
 #
 # Dry-run by default; --apply mutates the tracker, the remote and the filesystem.
 #
@@ -23,8 +26,10 @@
 # Every precondition is recomputed inside THIS invocation rather than trusted
 # from an earlier tool call, for the reason reap.sh gives: the dangerous
 # direction is a worktree that gained work after it was checked. Two of them are
-# recomputed a second time at the moment of the delete, which is why both
-# deletes run before the label is dropped rather than after.
+# recomputed a second time at the moment of the delete, and in closed mode
+# origin's tip is re-read at the remote delete as well, which is why every
+# delete — the remote one included — runs before the label is dropped rather
+# than after.
 #
 # The dirty check's second opinion is git's own — that is what `worktree remove`
 # without --force is for. It covers the live-directory case ONLY: `worktree
@@ -35,7 +40,8 @@
 #
 # The commit check's is this script's own: the compare-and-swap delete refuses
 # only a ref that moved, so the `ahead` count is re-run against $base right
-# before it. Why not `-d`, and what that recount does and does not cover, is
+# before it — in closed mode, a compare of the local tip against the tip origin
+# held instead. Why not `-d`, and what that recount does and does not cover, is
 # argued once at the delete site below — don't restate it here.
 set -eu
 
@@ -887,38 +893,17 @@ if [ "$ls_rc" -ne 0 ]; then
   die "git ls-remote failed, so whether $branch was pushed is unknown"
 fi
 
-# The one pushed branch that releases: every PR whose head is $branch reads
-# CLOSED, and there is at least one. Read live, and failing closed — a PR list
-# that cannot be read is an unknown answer, as the lookup above is. Any other
-# pushed branch blocks, as it always did.
-closed_pr=false
+# The tip origin holds, split off ls-remote's `<sha><TAB><ref>` line on the tab
+# itself rather than on a `[:space:]` class, which would put a locale-sensitive
+# construct under the `export LC_ALL=C` paragraph above that says there is none.
+# Whether this pushed branch is the one that releases is a tracker question,
+# asked below once nothing local blocks.
+tab=$(printf '\t')
 remote_sha=
-pr_seen=
 if [ -n "$remote" ]; then
-  remote_sha=${remote%%[[:space:]]*}
-  [ "${remote#*[[:space:]]}" = "refs/heads/$branch" ] ||
+  remote_sha=${remote%%"$tab"*}
+  [ "${remote#*"$tab"}" = "refs/heads/$branch" ] ||
     die "git ls-remote did not answer with refs/heads/$branch for $branch, so whether it was pushed is unknown"
-  # One `number:state` token per PR, so the loop below needs no JSON parser.
-  # --limit 1000: gh's default page of 30 would hide a later OPEN PR.
-  prs=$(gh pr list --state all --head "$branch" --limit 1000 --json number,state --jq '.[] | "\(.number):\(.state)"') ||
-    die "gh pr list failed for $branch, so whether its PR closed unmerged is unknown"
-  pr_n=0
-  pr_bad=
-  for pr in $prs; do
-    pr_n=$((pr_n + 1))
-    pr_seen="$pr_seen #${pr%%:*} ${pr#*:};"
-    case ${pr#*:} in
-      CLOSED) ;;
-      *) pr_bad="$pr_bad #${pr%%:*} ${pr#*:};" ;;
-    esac
-  done
-  if [ "$pr_n" -eq 0 ]; then
-    block "branch $branch exists on origin and no PR names it"
-  elif [ -n "$pr_bad" ]; then
-    block "branch $branch exists on origin and its PR(s) are not closed unmerged:$pr_bad"
-  else
-    closed_pr=true
-  fi
 fi
 
 # An Orphaned worktree directory: this claim's directory still on disk with its
@@ -997,12 +982,14 @@ if [ -z "$wt" ] && [ -z "$stray" ]; then
   fi
 fi
 
-# A closed PR's commits are the branch's whole content, so `ahead` and the
-# `git cherry` count below would refuse every one. The local branch must sit at
-# the tip origin holds instead: any commit it carries beyond that is unpushed,
-# and the local delete would take it with the branch.
-if [ "$has_branch" = true ] && [ "$closed_pr" = true ]; then
-  local_tip=$(git rev-parse --verify --quiet "refs/heads/$branch") ||
+# A closed PR's commits are the branch's whole content, so `ahead` and the `git
+# cherry` count below would refuse every one — and the PR states that tell a
+# closed-PR claim from any other pushed branch are not read until the blockers
+# below are known. So a branch on origin is held to one check here: the local
+# branch must sit at the tip origin holds. Any commit it carries beyond that is
+# unpushed, and the local delete would take it with the branch.
+if [ "$has_branch" = true ] && [ -n "$remote" ]; then
+  local_tip=$(git rev-parse --verify "refs/heads/$branch") ||
     die "cannot read $branch's tip, so whether it matches origin's is unknown"
   [ "$local_tip" = "$remote_sha" ] ||
     block "$branch is not at the tip origin holds — unpushed work would be lost"
@@ -1029,7 +1016,6 @@ elif [ "$has_branch" = true ]; then
   uniq=$(printf '%s' "$cherry" | grep -c '^+' || true)
   [ "$uniq" -eq 0 ] || block "$uniq commit(s) unique to $branch (git cherry)"
 fi
-
 
 # `-d`, because a directory that is not there holds no uncommitted work. Deleted
 # by hand, a worktree leaves its admin files registered, so `worktree list
@@ -1251,10 +1237,52 @@ if [ -n "$wt" ]; then
   fi
 fi
 
-# Report the blockers before asking GitHub anything. The answer cannot change —
-# every artefact stays put either way — and reaching for the tracker first turns
-# an offline blocked claim into an unanswerable one, burying the finding the
-# caller actually needs. "label":null says it was never read.
+# The one pushed branch that releases: every PR of this repository whose head
+# is $branch reads CLOSED, and there is at least one. Read live, and failing
+# closed — a PR list that cannot be read is an unknown answer, as the lookup
+# above is. Any other pushed branch blocks, as it always did.
+#
+# Asked only once every local check has had its say and none blocked, for the
+# reason the report below gives: a claim already blocked is answered, and a
+# tracker that cannot be reached must not turn it into an exit 2 with no
+# receipt. Such a claim names its pushed branch as one more blocker instead,
+# without the PR states nothing asked for.
+closed_pr=false
+pr_seen=
+if [ -n "$remote" ] && [ -n "$blockers" ]; then
+  block "branch $branch exists on origin"
+elif [ -n "$remote" ]; then
+  # One `number:state` token per PR, so the loop below needs no JSON parser.
+  # --limit 1000: gh's default page of 30 would hide a later OPEN PR.
+  # `--head` matches a head branch NAME, from any fork, so a fork's PR whose
+  # branch shares this one's name is dropped before it is counted — the filter
+  # delete-merged-branch.sh applies to its own `--head` lookup. Without it, a
+  # fork's closed PR would read as this branch's and release a branch no PR of
+  # ours names.
+  prs=$(gh pr list --state all --head "$branch" --limit 1000 --json number,state,isCrossRepository \
+    --jq '.[] | select(.isCrossRepository | not) | "\(.number):\(.state)"') ||
+    die "gh pr list failed for $branch, so whether its PR closed unmerged is unknown"
+  pr_bad=
+  for pr in $prs; do
+    pr_seen="$pr_seen #${pr%%:*} ${pr#*:};"
+    case ${pr#*:} in
+      CLOSED) ;;
+      *) pr_bad="$pr_bad #${pr%%:*} ${pr#*:};" ;;
+    esac
+  done
+  if [ -z "$pr_seen" ]; then
+    block "branch $branch exists on origin and no PR names it"
+  elif [ -n "$pr_bad" ]; then
+    block "branch $branch exists on origin and its PR(s) are not closed unmerged:$pr_bad"
+  else
+    closed_pr=true
+  fi
+fi
+
+# Report the blockers before asking GitHub anything more. The answer cannot
+# change — every artefact stays put either way — and reaching for the tracker
+# first turns an offline blocked claim into an unanswerable one, burying the
+# finding the caller actually needs. "label":null says it was never read.
 if [ -n "$blockers" ]; then
   echo "$NAME: #$issue NOT released — nothing was touched" >&2
   printf '{"issue":%s,"branch":"%s","branchRewritten":%s,"worktree":"%s","worktreeRewritten":%s,"label":null,"released":false,"applied":%s,"blockers":[%s]}\n' \
@@ -1307,7 +1335,10 @@ else
   # left in-progress already gone: with the worktree still standing the ticket
   # read free to candidates.mjs while re-claiming failed on the existing branch.
   # Run them first and a refusal leaves the claim exactly as it was, label and
-  # all, which reads as still taken — the direction that costs nothing.
+  # all, which reads as still taken — the direction that costs nothing. Closed
+  # mode's remote delete runs after them, and ahead of the label for the same
+  # reason.
+
   if [ -n "$wt" ]; then
     # No --force, ever. A refusal is a finding to report, never something to
     # force past. Quote git's own reason: this fires precisely when something
@@ -1355,23 +1386,12 @@ else
     if [ "$closed_pr" != true ]; then
       [ "$n" -eq 0 ] ||
         halt "$branch gained $n commit(s) since the checks — not deleted"
-    fi
-    if [ "$closed_pr" = true ]; then
+    else
       # A closed PR's commits are the whole content of the branch, so the
       # recount above refuses every one of them. What holds instead: the local
       # tip has not moved off the tip origin held when the checks read it.
       [ "$tip" = "$remote_sha" ] ||
         halt "$branch is no longer at the tip origin holds — not deleted"
-      # Origin is read again before anything is deleted, so a push that landed
-      # since the checks halts the release here rather than being deleted with
-      # the branch. This narrows the gap before the remote delete; it does not
-      # close it (see that delete below).
-      recheck_rc=0
-      recheck=$(net_git "" "$ls_budget" ls-remote --heads origin "refs/heads/$branch") || recheck_rc=$?
-      [ "$recheck_rc" -eq 0 ] ||
-        halt "cannot re-read origin's $branch before the delete — not deleted"
-      [ "${recheck%%[[:space:]]*}" = "$remote_sha" ] ||
-        halt "origin's $branch moved since the checks — not deleted"
     fi
 
     # What the CAS does not give back: `git update-ref` is ref-only plumbing
@@ -1449,17 +1469,43 @@ else
   fi
 
   # Closed mode only: the remote branch goes after the local one and before the
-  # label drops, for the same reason as the local deletes above. Origin's tip was
-  # re-read before the local delete. The delete itself is a plain one: a push
-  # landing in the gap between that re-read and this call is deleted with the
-  # branch. A lease would close that gap, but this file spells no form of
+  # label drops, for the same reason as the local deletes above.
+  #
+  # Origin is read again first, so a push that landed since the checks halts
+  # the release here rather than going with the branch. Here, beside the remote
+  # delete, and not inside the local branch delete: a closed-PR claim whose
+  # local branch is already gone releases from the remote alone, and has no
+  # local delete to hang the re-read on. The delete itself is a plain one: a
+  # push landing in the gap between that re-read and this call is deleted with
+  # the branch. A lease would close that gap, but this file spells no form of
   # force, so the gap stays.
+  #
+  # A non-zero rc does not say the delete failed to land: the watchdog can kill
+  # the push after origin applied it. So a failed push is followed by a read of
+  # origin, as delete-merged-branch.sh does, and the halt names what origin
+  # holds rather than calling every non-zero rc a refusal. A branch already gone
+  # from origin is the outcome this step exists for, whoever removed it.
   if [ "$closed_pr" = true ]; then
+    recheck=$(net_git "" "$ls_budget" ls-remote --heads origin "refs/heads/$branch") ||
+      halt "cannot re-read origin's $branch before the delete — not deleted"
+    [ "${recheck%%"$tab"*}" = "$remote_sha" ] ||
+      halt "origin's $branch moved since the checks — not deleted"
+
+    # $ls_budget: a ref-only `push --delete` moves no objects either, so it
+    # shares the lookup's budget, as delete-merged-branch.sh's own push does.
     echo "\$ git push origin --delete refs/heads/$branch" >&2
-    push_budget=$(net_budget 30 "${FLEET_NET_TIMEOUT:-}")
     push_rc=0
-    net_git "" "$push_budget" push origin --delete "refs/heads/$branch" >&2 || push_rc=$?
-    [ "$push_rc" -eq 0 ] || halt "git push --delete refused $branch on origin (rc $push_rc)"
+    net_git "" "$ls_budget" push origin --delete "refs/heads/$branch" >&2 || push_rc=$?
+    if [ "$push_rc" -ne 0 ]; then
+      echo "\$ git ls-remote --heads origin refs/heads/$branch" >&2
+      back=$(net_git "" "$ls_budget" ls-remote --heads origin "refs/heads/$branch") ||
+        halt "git push --delete exited $push_rc and origin could not be read back, so whether origin still holds $branch is unknown"
+      if [ -n "$back" ] && net_stalled "$push_rc"; then
+        halt "git push --delete did not finish within ${ls_budget}s and was killed — origin still holds $branch"
+      elif [ -n "$back" ]; then
+        halt "git push --delete refused $branch on origin (rc $push_rc) — origin still holds it"
+      fi
+    fi
     done_branch=true
   fi
 
