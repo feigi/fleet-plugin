@@ -77,9 +77,8 @@ function gitRepo(prefix) {
   return dir;
 }
 
-// HOME is redirected at every child: gatherSpend() scans $HOME for this cwd's
-// omp session transcripts, and pointing it at an empty directory keeps these
-// runs off the machine's real session tree.
+// HOME is redirected at every child to an empty directory, so nothing a child
+// reads under $HOME is the machine's own.
 function runBuild(cwd, bin) {
   const home = tempDir("board-id-home-");
   const r = spawnSync(process.execPath, [SCRIPT, "build"], {

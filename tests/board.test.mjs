@@ -1,7 +1,8 @@
 // board.mjs as composition: what only makes sense once gather(), computeBoard()
 // and board-server are wired together — the argv refusals in main(), the tick
-// loop serve() is handed (what it threads into every tick, and the spend pin it
-// holds across ticks), the fault path, and the script's exit codes.
+// loop serve() is handed (what it threads into every tick, and the receipt it
+// reads the spend session from on each), the fault path, and the script's exit
+// codes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, utimesSync, readFileSync, realpathSync } from "node:fs";
@@ -9,35 +10,28 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { findSubagentsDir } from "../plugin/scripts/board-gather.mjs";
 import { faultText } from "../plugin/scripts/board.mjs";
 import { encodeProjectDir } from "../plugin/scripts/member-record.mjs";
 import { stripComments } from "./support/strip-comments.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
-import { TURN, serveArgs, serveOpts, withTimeout } from "./support/board-rig.mjs";
+import { TURN, serveArgs, serveOpts, writeReceipt } from "./support/board-rig.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
 
-// The acceptance criterion end to end, and the only row here that can fail on
-// serve() dropping the pin between the resolution and the tick: every
-// assertion in board-gather.test.mjs is reachable with `spendDir:` never
-// threaded into gather() at all. A REAL server, two sessions under one project
-// directory, and the second one writing between two ticks — the exact shape the
-// panel used to alternate on, at the interval it used to alternate at.
-//
-// #1679: both fixture sessions predate the server's own launch (ancient
-// synthetic mtimes), the same shape as a workspace that already had
-// unrelated sessions sitting there when this `serve` started — neither is
-// trustworthy to latch on sight any more. So the session that WRITES first
-// ON THIS SERVER'S WATCH is what latches, not whichever the heuristic
-// happened to already prefer between two equally-untrusted candidates.
-test("CLI: a live serve keeps the panel on the session that wrote first on its watch, even as another writes later", async () => {
+// The acceptance criterion end to end, through serve()'s own tick loop: every
+// assertion in board-gather.test.mjs is reachable with the receipt never read
+// per tick at all. A REAL server, two sessions under one project directory,
+// the sibling holding the NEWER transcripts — the shape a newest-mtime pick
+// gets wrong. With no --spend-dir each tick reads the session the phase-0
+// receipt records, and a receipt rewritten between ticks is followed: a
+// cockpit outlives the run that launched it.
+test("CLI: a live serve reads the receipt's session on every tick — never the newest sibling — and follows a rewritten receipt", async () => {
   // realpath, not the bare mkdtemp path: on darwin $TMPDIR is under /var, a
   // symlink to /private/var, and the child's process.cwd() reports the RESOLVED
   // form — encoding the unresolved one puts the fixture where nothing looks.
-  const cwd = realpathSync(tempDir("spend-pin-cwd-"));
-  const home = tempDir("spend-pin-home-");
-  const bin = tempDir("spend-pin-bin-");
+  const cwd = realpathSync(tempDir("spend-receipt-cwd-"));
+  const home = tempDir("spend-receipt-home-");
+  const bin = tempDir("spend-receipt-bin-");
   // gh fails on every call and the reads degrade, so this stays offline and off
   // this repo's live issue list. Prepended rather than replacing PATH: gather()
   // shells out to `node` for the ledger read.
@@ -51,48 +45,47 @@ test("CLI: a live serve keeps the panel on the session that wrote first on its w
   // board itself names which session it read — no second fixture needed for it.
   const turn = TURN.map((l) => JSON.stringify(l)).join("\n") + "\n";
   writeFileSync(join(mine, "session-a.jsonl"), turn);
-  utimesSync(join(mine, "session-a.jsonl"), new Date(9000), new Date(9000));
+  utimesSync(join(mine, "session-a.jsonl"), new Date(1000), new Date(1000));
   writeFileSync(join(theirs, "session-b.jsonl"), turn);
-  utimesSync(join(theirs, "session-b.jsonl"), new Date(1000), new Date(1000));
+  // The cwd is no git checkout, so the cockpit's state directory is the
+  // cwd's own `.fleet` — the receipt goes beside the board.json it writes.
+  const receipt = (session) => writeReceipt(join(cwd, ".fleet"), session);
+  receipt(mine);
 
   const p = spawn(process.execPath, serveArgs(["--port", "0", "--interval", "1"]), {
     cwd, stdio: ["ignore", "ignore", "pipe"],
     env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },
   });
+  let stderr = "";
+  p.stderr.on("data", (d) => { stderr += d; });
   try {
     const jsonPath = join(cwd, ".fleet", "board.json");
-    const until = (pred, what) => withTimeout((async () => {
+    // The deadline is checked INSIDE the loop, so the loop ends with the wait:
+    // a race against a timer would reject and leave this loop polling, and
+    // the test file would then hang until an outside timeout instead of
+    // reporting the failing assertion.
+    const until = async (pred, what) => {
+      const deadline = Date.now() + 20000;
       for (;;) {
         let b = null;
         try { b = JSON.parse(readFileSync(jsonPath, "utf8")); } catch { /* not written yet, or mid-rename */ }
         if (b && pred(b)) return b;
+        if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
         await new Promise((r) => setTimeout(r, 50));
       }
-    })(), 20000, what);
+    };
 
-    // Wait for the server to have ticked at least once before touching either
-    // fixture's mtime — this pins spendDirPin()'s launchMs strictly before the
-    // touch below, which is the only way the touch can land ON its watch.
-    await until((b) => b.spend?.ok, "the first tick that reads a transcript");
+    const first = await until((b) => b.spend?.ok, "the first tick that reads a transcript");
+    assert.equal(first.spend.top[0].label, "session-a", "the receipt's session is read, not the sibling with the newer transcript");
 
-    // `mine` writes on this server's watch: this is what latches it, per
-    // #1679's rule — not merely being the heuristic's current favorite.
-    utimesSync(join(mine, "session-a.jsonl"), new Date(), new Date());
-    const minedAt = Date.now();
-    const first = await until((b) => b.spend?.ok && b.generatedAt > minedAt, "a tick generated after session-a writes on this server's watch");
-    assert.equal(first.spend.top[0].label, "session-a", "the session that wrote on this server's watch is read");
+    // The next run's receipt lands while this cockpit keeps running.
+    receipt(theirs);
+    await until((b) => b.spend?.ok && b.spend.top[0].label === "session-b", "a tick that follows the rewritten receipt");
 
-    // The other session writes later: a second run starting, an agent landing.
-    utimesSync(join(theirs, "session-b.jsonl"), new Date(), new Date());
-    const flippedAt = Date.now();
-    assert.equal(findSubagentsDir(home, cwd), theirs,
-      "the fixture no longer flips the heuristic — this test would prove nothing");
-
-    // Strictly a board GENERATED after the flip, not merely a different one: a
-    // tick that started before it could answer "session-a" for the old reason.
-    const later = await until((b) => b.spend?.ok && b.generatedAt > flippedAt, "a tick generated after the flip");
-    assert.equal(later.spend.top[0].label, "session-a",
-      "a later tick re-picked the newest session instead of answering from the pin");
+    // A recorded session whose directory does not exist yet: the quiet null.
+    receipt(join(proj, "2026-10-01T00-00-00-000Z_cccccccc-cccc-cccc-cccc-cccccccccccc"));
+    await until((b) => b.spend === null, "a tick over a recorded session not created yet");
+    assert.doesNotMatch(stderr, /spend read failed|holds no agent transcripts/);
   } finally { p.kill("SIGKILL"); }
 });
 
@@ -330,8 +323,9 @@ test("CLI: serve refuses an out-of-range or non-integer --port", () => {
 
 // #1679: every other argv-read option `serve` takes has both an in-process
 // override AND a CLI test driving it end to end; --spend-dir had neither
-// until now — every existing --spend-dir test drove `build` (one gather per
-// process, no pin) or spendDirPin() directly, never `serve`'s own tick loop.
+// until then — every --spend-dir test drove `build` (one gather per
+// process), never `serve`'s own tick loop. A receipt naming another session
+// sits beside the board, so the override wins over a real alternative.
 test("CLI: serve --spend-dir reads the named directory's spend into every tick, not just build", () => {
   const opts = serveOpts();
   // A real `<ISO>_<uuid>` leaf name: gatherSpend's `explicit` path now
@@ -342,18 +336,22 @@ test("CLI: serve --spend-dir reads the named directory's spend into every tick, 
   const dir = join(root, "2026-08-25T09-00-00-000Z_abcdef12-3456-7890-abcd-ef1234567890");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "named.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const recorded = join(root, "2026-08-24T09-00-00-000Z_abcdef12-3456-7890-abcd-ef1234567891");
+  mkdirSync(recorded, { recursive: true });
+  writeFileSync(join(recorded, "recorded.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  writeReceipt(join(opts.cwd, ".fleet"), recorded);
   const r = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600", "--spend-dir", dir]), { ...opts, timeout: 2000 });
   assert.notEqual(r.status, 2, r.stderr);
   const body = JSON.parse(readFileSync(join(opts.cwd, ".fleet", "board.json"), "utf8"));
   assert.equal(body.spend.ok, true, r.stderr);
-  assert.equal(body.spend.totals.cacheWrite, 1000, "the served panel must come from the named directory, not the (absent) heuristic");
+  assert.equal(body.spend.totals.cacheWrite, 1000, "the served panel must come from the named directory");
   assert.equal(body.spend.top[0].label, "named");
 });
 
 // main() resolves --spend-since, --interval and whether --spend-dir was named,
 // and hands them to the tick serve() runs; gather() reads none of them from
 // argv. A tick built without one of them still serves a board — with
-// `since` null, the default interval, or a heuristic panel in place of a
+// `since` null, the default interval, or the receipt's panel in place of a
 // refusal — so each is pinned here by the value the served board.json carries.
 test("CLI: serve threads --spend-since, --interval and an explicit --spend-dir into every tick", () => {
   const since = 1789300000000;

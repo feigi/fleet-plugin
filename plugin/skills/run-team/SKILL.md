@@ -40,22 +40,21 @@ refreshes the Shortlist itself, and every admission is a **Pull** — one ticket
 into one free implementer slot, the moment it frees (phase 1). Nothing in this
 phase, or in any later one, asks the maintainer which tickets to take.
 
-0. **Once per run, before anything else.** Run `~/.fleet/bin/fleet-run
-   phase0.mjs --session <session-dir>` from this main checkout, `<session-dir>`
-   being this run's own session directory. Add `--in-flight <n>` when
-   `$ARGUMENTS` gave one, `--plugin-checkout
-   <dir>` when this workspace tracks no `plugin/…` of its own, `--spend-dir
-   <dir>` to name the directory the cockpit's spend panel reads, and
-   `--workflow <name>` or `--declare-no-ci` when the repository has no workflow
-   named CI. It runs the start sequence in its fixed order — branch,
-   fast-forward, pin, baseline, preflight, ruleset, tier-roles, metrics,
-   cockpit, rotate, reclaim, recipe, fold-in, stranded, shortlist — prints one
-   `phase0: <step>: <status>` line per step with the `NEED` lines last, and
-   records each step in `.fleet/phase0.json`, which the tick reads: it prints
-   `PHASE0-INCOMPLETE` and holds every dispatching row until the receipt is whole.
-   Dispatch nothing before it exits 0. Exit 3 is a step that failed: its line
-   carries the refusal, so fix the cause and run it again. Exit 4 is a step
-   that needs you: act on each `NEED` line below, then run it again. Once
+0. **Once per run, before anything else.** Run phase 0 from a Python eval
+   cell in this main checkout, without `--session`:
+   `subprocess.run([os.path.expanduser("~/.fleet/bin/fleet-run"),
+   "phase0.mjs", …], stderr=subprocess.STDOUT)`. Add `--in-flight <n>` when
+   `$ARGUMENTS` gave one, `--plugin-checkout <dir>` when this workspace tracks
+   no `plugin/…` of its own, `--spend-dir <dir>` to name the directory the
+   cockpit's spend panel reads, and `--workflow <name>` or `--declare-no-ci`
+   when the repository has no workflow named CI. It runs the start sequence in
+   its fixed order — branch, fast-forward, pin, baseline, preflight, ruleset,
+   tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded,
+   shortlist — prints one `phase0: <step>: <status>` line per step with the
+   `NEED` lines last, and records each step in `.fleet/phase0.json`, which the
+   tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row
+   until the receipt is whole. Dispatch nothing before it exits 0. Exit 4 is a
+   step that needs you: act on each `NEED` line below, then run it again. Once
    `rotate` has run, a re-run skips every `ok` step and resumes where the last
    one stopped; before it, a re-run runs every step again.
 

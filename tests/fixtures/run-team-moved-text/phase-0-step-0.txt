@@ -128,14 +128,18 @@
    else — either way it gets its own board, just not always on the port its
    hash predicts.
 
-   The spend panel reads this workspace's own `~/.omp/agent/sessions` tree,
-   and is pinned to whichever session first writes a transcript on this
-   cockpit's own watch: it will not follow a workspace that
-   already had another session's transcripts sitting there at launch. If the
-   panel is reading someone else's numbers, relaunch with `--spend-dir <path>`
-   naming this run's own session directory to override the heuristic outright —
+   The spend panel reads the session directory this run's phase-0 receipt
+   records, re-read on every tick, so a cockpit that outlives a run follows the
+   next run's receipt. Until that directory exists and holds a member transcript
+   the panel stays hidden; with no receipt, or one recording no session, it says
+   `no session recorded — run phase 0 or pass --spend-dir`. Passing
+   `--spend-dir <path>` to phase 0 overrides the receipt —
    `~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>` (the directory, never
-   the `.jsonl` file of the same name beside it).
+   the `.jsonl` file of the same name beside it) — but only on the launch that
+   starts the server. A phase 0 that finds this workspace's cockpit already
+   running leaves it reading what it read, flag or not. To put a running
+   cockpit on `--spend-dir`, stop it first: SIGTERM to the pid phase 0's
+   `cockpit` line printed when it launched that server.
 
    **Rotate the ledger before the fold-in below and before shortlisting —
    every run, whatever way the previous one ended.** One ledger per run:

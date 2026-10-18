@@ -510,6 +510,10 @@ const CHANGED = [
   [
     "**`ledger.mjs drain \"<reason>\"`** — the one drain marker per run; supply stops, the review and merge sides keep going.",
     "**`ledger.mjs drain \"<reason>\"`** — at most one standing drain marker; supply stops, the review and merge sides keep going."
+  ],
+  [
+    "Run `~/.fleet/bin/fleet-run phase0.mjs --session <session-dir>` from this main checkout, `<session-dir>` being this run's own session directory.",
+    "Run phase 0 from a Python eval cell in this main checkout, without `--session`: `subprocess.run([os.path.expanduser(\"~/.fleet/bin/fleet-run\"), \"phase0.mjs\", …], stderr=subprocess.STDOUT)`."
   ]
 ];
 

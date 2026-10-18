@@ -69,7 +69,7 @@ const PHASE0 = Pin.file(join(REPO, "skills", "run-team", "references", "phase-0.
 
 // The whole paragraph, bounded by its own blank line — the bound
 // `instrument-check-prose.test.mjs` uses on the pin paragraph above it in phase-0.md.
-const LAUNCH_STEP = () => PHASE0.paragraph("**Launch the cockpit.**", "phase-0 cockpit-launch paragraph", "The spend panel reads this workspace's").text;
+const LAUNCH_STEP = () => PHASE0.paragraph("**Launch the cockpit.**", "phase-0 cockpit-launch paragraph", "The spend panel reads the session directory").text;
 
 test("phase 0 runs the cockpit launch on every pass, not just the first", () => {
   const step = LAUNCH_STEP();

@@ -19,30 +19,20 @@
 // `spend`, never change a ticket's stage.
 //
 // That transcript tree is keyed by PROJECT DIRECTORY, not by session, and one
-// directory can hold several sessions at once. `serve` therefore resolves ONE
-// session's transcript directory and keeps it for its whole life — see
-// spendDirPin() below — rather than re-picking the newest on every tick and
-// alternating between two live runs' numbers in silence.
-//
-// LIMITATION, stated rather than solved: the session it keeps is whichever
-// FIRST writes a transcript at or after the pin's own construction.
-// Before that, a session that was already active when the pin was built —
-// this run's own, mid-EACCES-fault, or a genuinely previous run's — is never
-// latched; the pin keeps re-asking findSubagentsDir() every tick instead,
-// which is what lets a transient fault or a stale session recover instead of
-// freezing the panel for the server's whole life. What is not solved: two
-// sessions that BOTH start writing after the pin exists, in the same project
-// directory, are still indistinguishable — the board is scoped to a
-// workspace and a workspace does not know that — so the first of them
-// to pass the newest-transcript check wins and keeps winning. `--spend-dir
-// <path>` is how an operator names the right one: it overrides the
-// heuristic outright.
+// directory can hold several sessions at once, so nothing in the tree says
+// which session is this run's. The run says it: phase 0 records the
+// controller's own session directory in its receipt, `.fleet/phase0.json`,
+// and receiptSpendDir() below reads it back on every tick — never latched,
+// because a cockpit outlives the run that launched it and has to follow the
+// next run's receipt. `--spend-dir <path>` overrides the receipt outright.
 
-import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
 import {
-  encodeProjectDir, isOmpSessionDirName, ompSessionTranscripts, foldOmpTranscript, ompMemberRecord,
+  isOmpSessionDirName, ompSessionTranscripts, foldOmpTranscript, ompMemberRecord,
 } from "./member-record.mjs";
+import { readReceipt } from "./phase0-receipt.mjs";
+import { RECEIPT } from "./ledger-grammar.mjs";
 import { NAME, warnOnce, execRead } from "./board-common.mjs";
 import { mergedReadPrs } from "./compute-board.mjs";
 // The heartbeat's liveness mark and the controller record beside it, read here
@@ -398,161 +388,46 @@ export function mapCi(ciJson, pr) {
   return "unknown";
 }
 
-// Where this session's member transcripts live:
-//   ~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>/
+// The session directory this run's phase-0 receipt records, for a panel with
+// no --spend-dir: `.fleet/phase0.json` in the cockpit's own state directory —
+// the directory its ledger and heartbeat come from, so the three cannot
+// disagree about which run they belong to — through phase0-receipt.mjs's
+// readReceipt, the one reading of that file. The caller reads it on EVERY
+// tick and keeps nothing: a cockpit survives across runs (a phase-0 relaunch
+// reuses a running server), so a session held from an earlier tick would
+// keep showing the previous run's spend once the next run's receipt lands.
 //
-// The session uuid is not knowable from here, so take the most recently
-// active one. Rank on the newest TRANSCRIPT mtime, not on the session
-// directory's own: a directory's mtime moves when an entry is created or
-// removed, never when a file inside it is appended to. Ranking on the
-// directory therefore tracked the last agent SPAWN rather than the last
-// agent activity — and since the cockpit launches in run-team phase 0,
-// before the first agent spawns, the live session has no transcript yet and
-// a PREVIOUS session won. The board would render a prior run's spend as
-// this run's, then silently switch when the first agent landed. That is the
-// one failure mode here that produces confidently wrong numbers rather than
-// no numbers.
-//
-// Returns { error } when there is no project dir for this cwd — a bug that
-// never fixes itself — and null when one resolves but holds no sessions
-// yet, which is normal at run start. Collapsing those two into one bare
-// null is what hid the encoding bug above. A listing that THROWS is
-// { error } too.
-export function findSubagentsDir(home = process.env.HOME, cwd = process.cwd()) {
-  try {
-    const tree = sessionDirs(home, cwd);
-    if (tree.dirs === null) {
-      return { error: `no transcript dir for cwd ${cwd} (looked in ${tree.root})` };
-    }
-    const cands = tree.dirs
-      .map((d) => ({ d, m: newestTranscriptMs(d) }))
-      .sort((a, b) => b.m - a.m);
-    return cands.length ? cands[0].d : null;
-  } catch (e) { return { error: `transcript lookup failed: ${e.message}` }; }
-}
-
-// The candidate session directories for this cwd. `dirs: null` means there
-// is no project dir here at all; `[]` means there is one holding no session
-// yet. `root` is where it looked, for the error above.
-//
-// `encodeProjectDir` realpath-resolves a cwd outside $HOME, which throws
-// ENOENT when that cwd does not exist. No omp session can be keyed on such a
-// cwd, so THAT is this tree's absence — not a lookup fault. Any OTHER error
-// (EACCES on an ancestor directory, say) is a real fault, not an absence,
-// and must not be relabelled as one: swallowing it here would crash
-// silently with no signal anything went wrong. It is rethrown, uncaught,
-// into findSubagentsDir's own catch — the same fate a listing failure below
-// already gets, deliberately.
-function sessionDirs(home, cwd) {
-  const sessions = join(home, ".omp", "agent", "sessions");
-  let root;
-  try {
-    root = join(sessions, encodeProjectDir(cwd, { home }));
-  } catch (e) {
-    if (e.code !== "ENOENT") throw e;
-    return { root: sessions, dirs: null };
+// A receipt with no session to give is `{ error }`, which the panel shows:
+// the board names no session rather than guessing one. So is a recorded
+// session whose NAME is not an omp `<ISO>_<uuid>` session directory:
+// phase0.mjs accepts any existing directory as the session, so a `--session`
+// naming the encoded-cwd project dir instead of its own session child lands in
+// the receipt, and readOmpSpend would book every session under it — the
+// controller's own main-session transcript included — as this run's agents.
+// A recorded directory that does not exist yet is not an error — that is
+// gatherSpend()'s quiet `null`, below.
+export function receiptSpendDir(stateDir) {
+  const path = join(stateDir, RECEIPT);
+  const read = readReceipt(path);
+  if (read.state === "ok" && read.receipt.session !== "") {
+    const session = read.receipt.session;
+    if (isOmpSessionDirName(basename(session))) return session;
+    return { error: `phase-0 receipt ${path} records ${session}, which is not an omp <ISO>_<uuid> session directory` };
   }
-  if (!existsSync(root)) return { root, dirs: null };
-  const dirs = readdirSync(root, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && isOmpSessionDirName(e.name))
-    .map((e) => join(root, e.name));
-  return { root, dirs };
-}
-
-// Newest *.jsonl mtime anywhere under a session's transcript dir, 0 if it
-// holds none. Recursive: a nested member (a dispatcher's own further
-// fan-out, one directory level down — the same walk ompSessionTranscripts
-// does to book their spend) can be the only fresh activity in an otherwise
-// idle-looking session, and a scan bounded to the top level would score
-// that session 0 and lose it to a genuinely stale sibling.
-//
-// A dir whose transcripts are all unreadable loses to one that is readable,
-// which is the behaviour we want when picking "the live session".
-//
-// The scan is wrapped for the same reason the per-file stat below is. This runs
-// once per CANDIDATE, so an uncaught throw here does not just lose one dir — it
-// escapes findSubagentsDir's try and turns the whole lookup into { error },
-// blacking out every readable session over one bad sibling. Scoring 0 is what
-// the comment above already promises: a dir we cannot read simply loses.
-function newestTranscriptMs(dir) {
-  let names;
-  try { names = readdirSync(dir, { recursive: true }); } catch { return 0; }
-  let newest = 0;
-  for (const f of names) {
-    if (!f.endsWith(".jsonl")) continue;
-    try { newest = Math.max(newest, statSync(join(dir, f)).mtimeMs); } catch { /* raced away */ }
-  }
-  return newest;
-}
-
-// The transcript directory a `serve` process is bound to, resolved
-// once it can be trusted and reused by every tick after it. findSubagentsDir()
-// above ranks sessions by newest transcript mtime and gather() reached it
-// through gatherSpend() on EVERY tick (~15s by default), so two sessions live
-// under one project directory took turns winning: the panel alternated
-// between two runs' numbers with nothing on the page or on stderr to say it
-// had switched.
-//
-// The pin holds the first answer that COULD BE THIS RUN'S, not the first
-// non-null answer and not the first call. findSubagentsDir() has
-// three returns and none of them is safe to latch on sight: a directory
-// resolved at pin-construction time can be a PREVIOUS run's session — newer
-// than nothing else that exists yet, so it wins the ranking, but not this
-// run's — and `{ error }` can be a transient fault (EACCES on a directory
-// mid-permission-change, EMFILE, EIO) recovering on the very next tick just
-// as easily as it can be the truly unresolvable "bug that never fixes
-// itself" the ticket originally reasoned about. Latching either one turns
-// the self-correcting degradation this file's header describes into a
-// permanent one: measured, a chmod'd-then-restored session tree left
-// the OLD `??=` pin stuck on `{ error }` forever while the unpinned lookup
-// recovered on its very next tick, and a prior run's session dir
-// present at launch left the old pin on yesterday's numbers for the whole of
-// today's run, even once today's first agent had written its own transcript.
-//
-// So `launchMs`, captured once at construction, is the boundary: `null` (no
-// session anywhere yet) and `{ error }` (unresolvable OR transiently
-// unreadable — indistinguishable from here, so neither is trusted) both keep
-// re-asking, same one scan per tick the `null` case always cost. A resolved
-// directory whose own newest transcript predates `launchMs` is treated the
-// same way — returned as this tick's best-effort answer, so the panel still
-// renders it, but not cached — because a transcript that stopped moving
-// before this pin existed cannot be evidence of THIS run's activity. Only a
-// directory whose newest transcript is at or after `launchMs` latches, which
-// is the one fact available here that says "something is writing to this
-// session on my watch", never a previous run's signature.
-//
-// An explicit directory skips the heuristic entirely — never resolved, never
-// re-picked, and findSubagentsDir() is never called at all, so a tree it could
-// not read cannot degrade a panel the operator has already named the source
-// for. `home`/`cwd` are captured HERE rather than read per call for the same
-// reason the resolution is: a pin that could answer for a different workspace
-// later is not a pin.
-//
-// The limitation this leaves is stated at the top of this file: two sessions
-// that both start writing after the pin exists are still indistinguishable.
-// --spend-dir is the way out.
-export function spendDirPin(explicit, home = process.env.HOME, cwd = process.cwd()) {
-  if (explicit != null) return () => explicit;
-  const launchMs = Date.now();
-  let pinned = null;
-  return () => {
-    if (pinned !== null) return pinned;
-    const answer = findSubagentsDir(home, cwd);
-    if (typeof answer !== "string") return answer; // null or { error }: neither is a trustworthy answer to latch
-    if (newestTranscriptMs(answer) < launchMs) return answer; // predates this pin — could be a previous run's
-    return (pinned = answer);
-  };
+  const none = "no session recorded — run phase 0 or pass --spend-dir";
+  return { error: read.state === "unreadable" ? `${none} (phase-0 receipt ${path} unreadable: ${read.why})` : none };
 }
 
 // The `no-spend-dir` gate warns at most once per process PER DISTINCT ERROR.
-// `dir.error` is not constant — findSubagentsDir words an unresolvable project
-// dir differently from a lookup that threw — so it is keyed on the message
+// `dir.error` is not constant — receiptSpendDir words an unreadable receipt
+// differently from a missing one — so it is keyed on the message
 // itself, not the empty string this gate used to key on: an empty key
 // collapsed both wordings onto the one `no-spend-dir\0` slot, so whichever
 // fault landed first for a process consumed the slot and a later, genuinely
 // different fault never reached stderr again for the rest of the run. Keying
-// on `dir.error` fixes that without losing the steady-state behaviour: `cwd`
-// and `HOME` are fixed for the life of `serve`, so a repeating identical fault
+// on `dir.error` fixes that without losing the steady-state behaviour: a
+// receipt that stays missing is worded the same way on every tick, so a
+// repeating identical fault
 // still costs one line, not one per tick. Either way this gate only ever
 // controlled the repeated stderr LINE — a fault that differs still reaches the
 // browser on the tick it happens, through the `{ error }` gatherSpend returns
@@ -597,31 +472,38 @@ export function spendDirPin(explicit, home = process.env.HOME, cwd = process.cwd
 // truthiness check returning, because nothing in the data says which field is
 // the tag. This follows `ledger.mjs`'s `tracker`: a boolean checked before any
 // success-only field is read.
-export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8, explicit = false } = {}) {
+export function gatherSpend({ dir, sinceMs = null, topN = 8, explicit = false } = {}) {
   try {
-    // A caller-supplied `null` is a RESOLUTION from one that owns a pin
-    // (spendDirPin() above) — the project directory is there and holds no
-    // session yet — and must not run the heuristic a second time; only an
-    // omitted `dir` (every gatherSpend test driver, and `build`, which is one
-    // gather per process and so needs no pin) defaults to it. A default
-    // parameter fires on `undefined` alone, never `null`, which is exactly
-    // that distinction — the hand-rolled `if (dir === undefined) dir =
-    // findSubagentsDir();` this used to spell out is redundant with it.
+    // `dir` is the caller's resolution, never one made here: the operator's
+    // --spend-dir, or the session the phase-0 receipt records
+    // (receiptSpendDir() above), or that read's `{ error }`. `null` or an
+    // omitted `dir` is a caller with no session to read, and hides the panel.
     //
     // `explicit` is true only when `dir` came from the operator's
-    // own --spend-dir, never from the heuristic or an unresolved pin — see
-    // its one use below, at the empty-directory branch.
+    // own --spend-dir, never from the receipt — see its uses below.
     const dirError = dir?.error;
     if (dirError) {
       warnOnce("no-spend-dir", dirError, dirError);
       return { ok: false, error: dirError };
     }
-    if (!dir) return null; // resolved, but this session has spawned no agents yet
-    // Only for an EXPLICIT --spend-dir — the heuristic's own
-    // findSubagentsDir() already dispatches on isOmpSessionDirName, so a
-    // resolved-but-non-heuristic `dir` here only ever arrives from the
-    // operator naming a directory directly. Without this check the
-    // mis-levelled path this same function's comments already name (the
+    if (!dir) return null;
+    // A recorded session whose directory does not exist yet: omp creates it
+    // when the session's first subagent writes there, and the cockpit
+    // launches in phase 0, before that. The normal state at launch, so quiet
+    // — but only ENOENT is that state. Any other failure to stat it (EACCES
+    // or ENOTDIR on an ancestor) is a session the cockpit cannot read, and
+    // goes to the catch's loud path below rather than hiding the panel.
+    // An explicit --spend-dir that does not exist still takes the catch's
+    // loud path too: an operator who named a directory hears about a typo.
+    if (!explicit) {
+      try { statSync(dir); } catch (e) {
+        if (e.code === "ENOENT") return null;
+        throw e;
+      }
+    }
+    // Here only for an EXPLICIT --spend-dir — receiptSpendDir() already holds
+    // the receipt's session to this same name rule. Without this check
+    // the mis-levelled path this same function's comments already name (the
     // encoded-cwd project dir instead of its own <ISO>_<uuid> child) walked
     // straight into readOmpSpend below, which recurses over every nested
     // .jsonl with no name check of its own, and booked every session's
@@ -657,9 +539,9 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
         return { ok: false, error: `no agent turn readable: ${lost.join("; ")}` };
       }
       if (skipped) return { ok: false, error: `all ${skipped} transcripts unreadable` };
-      // Only for an EXPLICIT override — never the heuristic's own
-      // "resolved, no session yet" `null` case two arms up, which is the
-      // normal state at launch and must stay silent. An operator who named
+      // Only for an EXPLICIT override — never the receipt's session holding
+      // no transcripts yet, which is the normal state at launch and must
+      // stay silent. An operator who named
       // this exact directory has a panel that just went quiet with nothing
       // saying whether that is the normal "not written yet" wait or a typo'd
       // / mis-levelled path (e.g. the encoded-cwd directory instead of its
@@ -772,20 +654,16 @@ function readOmpSpend(dir, sinceMs) {
 // the fields.
 //
 // `spendDir` is the caller's transcript directory and is the one
-// parameter here whose ABSENCE is not a default to fill in: the tick loop hands
-// the same pin's answer to every tick, and its three shapes — a directory, `null`
-// for "resolved, no session yet", `{ error }` for unresolvable — all have to
-// reach gatherSpend() as themselves. `build` is one gather per process, so it
-// needs the --spend-dir override but never a pin, and passes the override or
-// nothing; with neither the pin nor the flag, gatherSpend() resolves for itself.
+// parameter here whose ABSENCE is not a default to fill in: the caller hands
+// in the operator's --spend-dir or, with none, the receipt's answer for this
+// tick — a directory or `{ error }` — and either has to reach gatherSpend() as
+// itself. Nothing in here reads the receipt.
 //
-// `spendDirExplicit` is passed separately from `spendDir` itself: the tick
-// loop always passes a resolved `spendDir` (the pin's answer), never leaving it
-// to default, so `spendDir`'s own presence cannot say whether an operator named
-// it. Whether --spend-dir was given is a fact about argv, unrelated to which of
-// gatherSpend's three shapes the pin currently holds. It, `spendSince` and
-// `interval` are argv's answers, resolved by the caller: nothing in here reads
-// argv.
+// `spendDirExplicit` is passed separately from `spendDir` itself: `spendDir`
+// always arrives resolved, so its own presence cannot say whether an operator
+// named it. Whether --spend-dir was given is a fact about argv. It,
+// `spendSince` and `interval` are argv's answers, resolved by the caller:
+// nothing in here reads argv.
 // Async, because every child read below is. The event loop this frees
 // belongs to serve()'s HTTP server, which shares this process — see execRead's
 // note in board-common.mjs for what the synchronous version cost. `build` awaits it and is

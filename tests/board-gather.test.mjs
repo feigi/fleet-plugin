@@ -1,6 +1,6 @@
 // board-gather.mjs's raw-input half, in process: the `gh` row-shape guards, the
 // per-PR CI read and its warn-once gate, the batched merged-PR query, mapCi(),
-// and the member-spend layer under it (the transcript-tree lookup, the pin, and
+// and the member-spend layer under it (the phase-0 receipt's session, and
 // gatherSpend()).
 //
 // gather() takes every argv answer as a parameter, so the drivers below call it
@@ -10,16 +10,16 @@
 // stderr is read off this process's stream while it runs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, utimesSync, statSync, chmodSync, readFileSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, utimesSync, readFileSync, symlinkSync, chmodSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mapCi, findSubagentsDir, spendDirPin, gatherSpend, gather } from "../plugin/scripts/board-gather.mjs";
+import { mapCi, receiptSpendDir, gatherSpend, gather } from "../plugin/scripts/board-gather.mjs";
+import { RECEIPT } from "../plugin/scripts/ledger-grammar.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { encodeProjectDir, readOmpMember } from "../plugin/scripts/member-record.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
-import { TURN, fixture, withStderr } from "./support/board-rig.mjs";
+import { TURN, fixture, withStderr, writeReceipt } from "./support/board-rig.mjs";
 
 const GATHER = fileURLToPath(new URL("../plugin/scripts/board-gather.mjs", import.meta.url));
 
@@ -777,84 +777,6 @@ test("gather: a malformed element inside labels is dropped, not the whole row", 
 // both live in the I/O that feeds them: a wrong path and a wrong summation. Each
 // failed silently as "panel hidden" or "plausible but 3x too big".
 
-test("findSubagentsDir picks the session with the newest transcript", () => {
-  const home = tempDir("spend-home-");
-  const proj = join(home, ".omp", "agent", "sessions", "-x");
-  const older = join(proj, "2026-09-08T13-13-27-300Z_11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-  const newer = join(proj, "2026-09-09T02-00-00-000Z_22222222-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
-  mkdirSync(older, { recursive: true });
-  mkdirSync(newer, { recursive: true });
-  // Ranking reads the newest *.jsonl mtime, so stamp the TRANSCRIPTS, not the
-  // dirs. Stamp both explicitly rather than sleeping for a clock tick: both are
-  // created inside the same millisecond on a fast filesystem, `mtimeMs` ties,
-  // and the sort is stable — a tie would resolve to readdir order and the
-  // OLDER directory would win on name.
-  writeFileSync(join(older, "agent-a.jsonl"), "");
-  utimesSync(join(older, "agent-a.jsonl"), new Date(1000), new Date(1000));
-  writeFileSync(join(newer, "agent-b.jsonl"), "");
-  utimesSync(join(newer, "agent-b.jsonl"), new Date(9000), new Date(9000));
-
-  assert.equal(findSubagentsDir(home, join(home, "x")), newer);
-  // Unresolvable path is a bug, not an empty run — it must be distinguishable.
-  assert.ok(findSubagentsDir(home, "/nonexistent").error);
-});
-
-test("session ranking uses transcript mtime, not directory mtime", () => {
-  // Regression: a directory's mtime moves when an entry is CREATED, never when a
-  // file inside it is appended to. Ranking on it tracked the last agent spawn,
-  // so a session that spawned all its agents early lost to a newer, idle one —
-  // and since the cockpit starts before the first agent spawns, that was the
-  // common case at run start. The board would show a PREVIOUS run's spend.
-  //
-  // The two rankings only disagree when the newest DIRECTORY is not the one
-  // holding the newest TRANSCRIPT, so the fixture has to build exactly that and
-  // nothing weaker. Creating the busy dir's transcript LAST — the shape this
-  // test had before — bumps that dir's own mtime as a side effect, so both
-  // rankings then pick `busy` for different reasons and the test stayed green
-  // with the fix fully reverted. Stamp all four times explicitly, files before
-  // dirs: creating a file is the one operation that moves its parent's mtime,
-  // and rewriting an existing file's mtime does not.
-  const home = tempDir("spend-home-");
-  const proj = join(home, ".omp", "agent", "sessions", "-x");
-  const busy = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");   // spawned its agents early, still appending
-  const idle = join(proj, "2026-09-09T02-00-00-000Z_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");   // spawned one last agent, then went quiet
-  mkdirSync(busy, { recursive: true });
-  mkdirSync(idle, { recursive: true });
-  writeFileSync(join(busy, "agent-b.jsonl"), "");
-  writeFileSync(join(idle, "agent-i.jsonl"), "");
-  utimesSync(join(busy, "agent-b.jsonl"), new Date(9000), new Date(9000)); // newest TRANSCRIPT
-  utimesSync(join(idle, "agent-i.jsonl"), new Date(1000), new Date(1000));
-  utimesSync(busy, new Date(1000), new Date(1000));
-  utimesSync(idle, new Date(9000), new Date(9000));                        // newest DIRECTORY
-
-  assert.equal(findSubagentsDir(home, join(home, "x")), busy);
-});
-
-test("one unreadable session directory loses the ranking instead of sinking the lookup", () => {
-  // Regression: newestTranscriptMs' readdirSync sat outside its per-file try and
-  // inside findSubagentsDir's, so one bad sibling turned the WHOLE lookup into
-  // { error } and the board rendered "spend unavailable" over a perfectly
-  // readable live session — a blackout where the per-file catch beside it
-  // already chose degradation. A candidate we cannot read must score 0 and lose.
-  //
-  // The bad sibling is a regular FILE where a directory is expected: EISDIR/
-  // ENOTDIR is the same uncaught throw and, unlike a permission bit, it still
-  // throws when the suite runs as root.
-  const home = tempDir("spend-home-");
-  const proj = join(home, ".omp", "agent", "sessions", "-x");
-  const good = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-  mkdirSync(good, { recursive: true });
-  writeFileSync(join(good, "agent-a.jsonl"), "");
-  const badName = "2026-09-09T02-00-00-000Z_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
-  mkdirSync(join(proj, badName, "nested"), { recursive: true });
-  chmodSync(join(proj, badName), 0o000);
-  try {
-    assert.equal(findSubagentsDir(home, join(home, "x")), good);
-  } finally {
-    chmodSync(join(proj, badName), 0o755);
-  }
-});
-
 // ── #1716: the omp tree ───────────────────────────────────────────────────────
 // Shaped like the real ~/.omp/agent/sessions/<encoded-cwd>/ (the same shape
 // member-record.test.mjs's real-tree fixture pins): each session's MAIN
@@ -891,7 +813,7 @@ function ompHome() {
 // One session: its member transcripts (a `/` in a name nests it, the way a
 // member's own members are laid out) stamped `mtime`, and its main-session
 // file beside the directory, stamped NOW so it is the newest transcript in
-// the whole tree — a lookup or a gather that reads it cannot pass.
+// the whole tree — a gather that reads it cannot pass.
 function ompSession(proj, name, members, mtime) {
   const dir = join(proj, name);
   mkdirSync(dir, { recursive: true });
@@ -904,77 +826,6 @@ function ompSession(proj, name, members, mtime) {
   writeFileSync(join(proj, `${name}.jsonl`), ompTranscript({ turns: [{ input: 1, output: 1, cacheRead: 1, cacheWrite: 999_999 }] }));
   return dir;
 }
-
-test("findSubagentsDir on omp picks this workspace's newest session DIRECTORY — never the main-session file beside it, never a stray dir", () => {
-  const { home, cwd, proj } = ompHome();
-  const older = ompSession(proj, OMP_A, { "impl-1": ompTranscript() }, 1000);
-  const newer = ompSession(proj, OMP_B, { "impl-2": ompTranscript() }, 9000);
-  // Not `<ISO>_<uuid>`, and holding the newest member-shaped transcript of all.
-  mkdirSync(join(proj, "notes"));
-  writeFileSync(join(proj, "notes", "x.jsonl"), "");
-  utimesSync(join(proj, "notes", "x.jsonl"), new Date(20000), new Date(20000));
-
-  // No session tree at all yet: resolves cleanly, does not error.
-  assert.equal(findSubagentsDir(home, cwd), newer);
-  utimesSync(join(older, "impl-1.jsonl"), new Date(30000), new Date(30000));
-  assert.equal(findSubagentsDir(home, cwd), older, "the ranking reads member transcripts, so it follows them");
-});
-
-test("findSubagentsDir on omp follows a NESTED member's mtime, not just the session dir's top-level files", () => {
-  // #1867 review: a session whose only fresh activity is a member ONE LEVEL
-  // DOWN (its own further fan-out — a dispatcher blocked on its task tool
-  // while its specialists run) must still outrank a stale sibling session.
-  // Regression for a scan bounded to a session dir's direct children only.
-  const { home, cwd, proj } = ompHome();
-  const liveViaNested = ompSession(proj, OMP_A, { "impl-1": ompTranscript() }, 1000);
-  const staleSibling = ompSession(proj, OMP_B, { "impl-2": ompTranscript() }, 5000);
-  const nestedFile = join(liveViaNested, "review-pr-9", "Security.jsonl");
-  mkdirSync(dirname(nestedFile), { recursive: true });
-  writeFileSync(nestedFile, ompTranscript({ agent: "fleet-review-correctness" }));
-  utimesSync(nestedFile, new Date(90000), new Date(90000));
-
-  assert.equal(findSubagentsDir(home, cwd), liveViaNested,
-    "the nested member's fresher mtime must win the ranking, not lose to staleSibling's stale top-level file");
-});
-
-test("findSubagentsDir: an EACCES resolving the omp encoding (not ENOENT) surfaces as an error", () => {
-  // #1867 review: ompSessionDirs's catch around encodeProjectDir must only
-  // swallow ENOENT ("this cwd doesn't exist" — the documented case). Any
-  // other error (EACCES on an ancestor, here) is a real fault and must
-  // propagate, never be silently relabelled as "no omp session".
-  const home = tempDir("spend-eacces-home-");
-  const outer = tempDir("spend-eacces-outer-");
-  const blocked = join(outer, "blocked");
-  mkdirSync(blocked);
-  const cwd = join(blocked, "sub", "repo");
-  mkdirSync(cwd, { recursive: true });
-  chmodSync(blocked, 0o000);
-  try {
-    const result = findSubagentsDir(home, cwd);
-    assert.ok(result && typeof result === "object" && "error" in result, "it must surface as a lookup error, the same as any other real fault");
-  } finally {
-    chmodSync(blocked, 0o755);
-  }
-});
-
-test("with no session tree present the lookup is an error that names where it looked", () => {
-  const home = tempDir("spend-omp-home-");
-  const r = findSubagentsDir(home, join(home, "dev", "repo"));
-  assert.match(r.error, /\.omp[\\/]agent[\\/]sessions/);
-});
-
-test("the pin's launchMs gate holds on an omp tree: a session predating launch is followed, the first to write on its watch latches", () => {
-  const { home, cwd, proj } = ompHome();
-  const mine = ompSession(proj, OMP_A, { "impl-1": ompTranscript() }, Date.now() - 100000);
-  const theirs = ompSession(proj, OMP_B, { "impl-2": ompTranscript() }, Date.now() - 200000);
-  const pin = spendDirPin(undefined, home, cwd);
-  assert.equal(pin(), mine, "before anything writes on this pin's watch, it answers from the heuristic's newest");
-  utimesSync(join(theirs, "impl-2.jsonl"), new Date(Date.now() + 1000), new Date(Date.now() + 1000));
-  assert.equal(pin(), theirs, "and re-picks — neither was trustworthy to cache yet");
-  utimesSync(join(mine, "impl-1.jsonl"), new Date(Date.now() + 50000), new Date(Date.now() + 50000));
-  assert.equal(pin(), theirs, "and holds, because theirs was first to write on this pin's watch");
-  assert.equal(findSubagentsDir(home, cwd), mine, "the fixture really did flip — this test proves nothing otherwise");
-});
 
 test("an omp session's per-member rows carry exactly readOmpMember's totals, model and role", () => {
   const { proj } = ompHome();
@@ -1101,7 +952,7 @@ test("one bad transcript in an omp session is skipped and named, not a blackout 
 // the only thing that says the directory held a transcript at all, and the
 // `!agents.length` branch used to read `skipped` alone: an --spend-dir
 // operator was told the directory "holds no agent transcripts", and the
-// heuristic's panel simply hid — a destroyed session rendered as one that had
+// default panel simply hid — a destroyed session rendered as one that had
 // not started.
 test("an omp session whose only transcript is wholly corrupt reports the damage, not an empty directory (#1894)", () => {
   const { proj } = ompHome();
@@ -1113,7 +964,7 @@ test("an omp session whose only transcript is wholly corrupt reports the damage,
   assert.match(s.error, /3 damaged transcript lines/);
   assert.deepEqual(errs.filter((e) => /holds no agent transcripts/.test(e)), [], "the directory holds a transcript; saying otherwise is the defect");
   // Its header parses and only the line its spend lives on is lost — the
-  // same null from ompMemberRecord, reached from the heuristic, which used to
+  // same null from ompMemberRecord, reached without --spend-dir, which used to
   // return the silent `null` that hides the panel.
   const initOnly = JSON.stringify({ type: "session_init", id: "i1", parentId: null, timestamp: "2026-09-08T15:11:49.495Z", task: "t", agent: "fleet-implementer" });
   const headerIntact = ompSession(proj, OMP_B, { "impl-8": `${initOnly}\n{"type":"message","message":{"role":"ass\n` });
@@ -1125,8 +976,8 @@ test("an omp session whose only transcript is wholly corrupt reports the damage,
 test("--spend-dir naming the encoded-cwd PROJECT directory is refused, not silently scraped whole (#1302-style)", () => {
   // gatherSpend's `explicit` path hands readOmpSpend one directory, which
   // ompSessionTranscripts then walks recursively with no name check of its
-  // own — so naming the project dir (the parent `-dev-repo` directory
-  // findSubagentsDir resolves FROM, never the thing itself) instead of one
+  // own — so naming the project dir (the parent `-dev-repo` directory, the
+  // encoded-cwd directory every session lives under) instead of one
   // of its `<ISO>_<uuid>` session children used to be silently accepted
   // whole: every session under it booked as "agents", including the
   // project's own main-session transcript.
@@ -1165,225 +1016,110 @@ test("an omp session whose only transcript is a live write's torn first line is 
   assert.equal(gatherSpend({ dir }), null);
 });
 
-// ── #1583/#1679: the pin ──────────────────────────────────────────────────────
+// ── #3127: the phase-0 receipt names the session ──────────────────────────────
 //
-// Two sessions under ONE project directory is the mode this whole ticket is
-// about, and no test above drives it across TIME: every findSubagentsDir() case
-// builds its fixture, asks once, and stops. The lookup ran inside gatherSpend()
-// on every tick (~15s), so the second session merely had to write to take the
-// panel over, with nothing on the page or on stderr saying it had.
-//
-// #1679 narrowed what counts as a trustworthy first answer: a directory whose
-// own newest transcript PREDATES the pin's construction can be a previous
-// run's session, so it is never latched, only followed — the tests below now
-// drive that distinction directly instead of assuming "the first non-null
-// answer" was always safe to cache.
-test("the pin does not latch a session that predates it — it keeps following the heuristic until one writes on its watch", () => {
-  const home = tempDir("spend-home-");
-  const proj = join(home, ".omp", "agent", "sessions", "-x");
-  const mine = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-  const theirs = join(proj, "2026-09-09T02-00-00-000Z_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
-  mkdirSync(mine, { recursive: true });
-  mkdirSync(theirs, { recursive: true });
-  writeFileSync(join(mine, "agent-a.jsonl"), "");
-  writeFileSync(join(theirs, "agent-b.jsonl"), "");
-  // Both predate the pin below — stamped well in the past, the same as a
-  // session that was already running before this server launched.
-  utimesSync(join(mine, "agent-a.jsonl"), new Date(Date.now() - 100000), new Date(Date.now() - 100000));
-  utimesSync(join(theirs, "agent-b.jsonl"), new Date(Date.now() - 200000), new Date(Date.now() - 200000));
+// One project directory can hold several sessions at once, so the panel reads
+// the session the run's phase-0 receipt records, never the newest one in the
+// tree. Each test here builds a project dir where a sibling session holds the
+// NEWER transcripts, so a newest-mtime pick would read the wrong one.
+const BILLED = [{ input: 1, output: 1, cacheRead: 1, cacheWrite: 10 }];
+function twoSessions() {
+  const { proj } = ompHome();
+  const mine = ompSession(proj, OMP_A, { "impl-mine": ompTranscript({ turns: BILLED }) }, 1000);
+  const theirs = ompSession(proj, OMP_B, { "impl-theirs": ompTranscript({ turns: BILLED }) }, Date.now() + 60_000);
+  return { proj, mine, theirs, stateDir: join(tempDir("spend-state-"), ".fleet") };
+}
 
-  const pin = spendDirPin(undefined, home, join(home, "x"));
-  assert.equal(pin(), mine, "before anything writes on this pin's watch, it still answers from the heuristic's newest");
-
-  // `theirs` writes AFTER the pin exists — real activity "on my watch", the
-  // one signal the old `??=` pin had no way to ask for.
-  utimesSync(join(theirs, "agent-b.jsonl"), new Date(), new Date());
-  assert.equal(pin(), theirs, "and re-picks, because neither candidate was trustworthy to cache yet");
-
-  // Now it must hold — touching `mine` again, even to a later mtime than
-  // `theirs`, must not flip the pin back: `theirs` was the first to clear
-  // the bar and that is what latches, not "whichever is newest this tick".
-  utimesSync(join(mine, "agent-a.jsonl"), new Date(Date.now() + 50000), new Date(Date.now() + 50000));
-  assert.equal(pin(), theirs, "and now holds, because theirs was first to write on this pin's watch");
-  assert.equal(findSubagentsDir(home, join(home, "x")), mine, "the fixture really did flip — this test proves nothing otherwise");
+test("the receipt's session is read, even when a sibling session in the same project dir holds newer transcripts", () => {
+  const { mine, stateDir } = twoSessions();
+  writeReceipt(stateDir, mine);
+  assert.equal(receiptSpendDir(stateDir), mine);
+  const s = gatherSpend({ dir: receiptSpendDir(stateDir) });
+  assert.equal(s.ok, true, JSON.stringify(s));
+  assert.deepEqual(s.top.map((t) => t.label), ["impl-mine"]);
 });
 
-test("no session at launch is not an answer to pin — the first one to write on this pin's watch wins, and then holds", () => {
-  // The launch path this script actually has: the cockpit starts in run-team
-  // phase 0, BEFORE the first agent spawns, so the project directory routinely
-  // holds no subagents directory at all. Pinning that `null` would hide the
-  // spend panel for the entire run — the existing degradation is "hidden until
-  // agents land", not "hidden for good", and this is the assertion that keeps
-  // the pin from being written as "whatever the first call returned".
-  const home = tempDir("spend-home-");
-  const proj = join(home, ".omp", "agent", "sessions", "-x");
-  mkdirSync(proj, { recursive: true });
-  const pin = spendDirPin(undefined, home, join(home, "x"));
-  assert.equal(pin(), null, "no session yet is the normal state at run start, not a fault");
-
-  const first = join(proj, "2026-09-08T13-13-27-300Z_11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-  mkdirSync(first, { recursive: true });
-  // Written after the pin already exists — this run's own first activity,
-  // not a stale fixture mtime from before launch. The mtime is SET, not left
-  // to the write: Linux stamps it from the kernel's coarse clock, so a file
-  // written right after spendDirPin() read Date.now() can carry an mtime
-  // BEFORE that launchMs and never latch — measured 2026-09-23 in node:26 on
-  // Linux, 2378/5000 writes stamped earlier than a Date.now() taken just
-  // before them (the flake in CI runs 35834153934 and 35834344502).
-  // utimesSync from a later Date.now() cannot land below launchMs.
-  writeFileSync(join(first, "agent-a.jsonl"), "");
-  utimesSync(join(first, "agent-a.jsonl"), new Date(), new Date());
-  assert.equal(pin(), first, "the first real answer, once it postdates launch, latches");
-
-  const second = join(proj, "2026-09-09T02-00-00-000Z_22222222-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
-  mkdirSync(second, { recursive: true });
-  writeFileSync(join(second, "agent-b.jsonl"), "");
-  utimesSync(join(second, "agent-b.jsonl"), new Date(Date.now() + 50000), new Date(Date.now() + 50000));
-  assert.equal(pin(), first, "and holds against a newer session exactly as a launch-time pin does");
+test("a receipt rewritten between two reads is followed on the second — nothing is held", () => {
+  const { mine, theirs, stateDir } = twoSessions();
+  writeReceipt(stateDir, theirs);
+  assert.deepEqual(gatherSpend({ dir: receiptSpendDir(stateDir) }).top.map((t) => t.label), ["impl-theirs"]);
+  writeReceipt(stateDir, mine);
+  assert.deepEqual(gatherSpend({ dir: receiptSpendDir(stateDir) }).top.map((t) => t.label), ["impl-mine"]);
 });
 
-test("a transcript stamped a few ms before launchMs is followed, never latched — the pin latches on the first write at or after launchMs itself", (t) => {
-  // #1729: every test above stamps mtimes far from launchMs — 100s before it,
-  // or from a Date.now() taken after it (#1722) — so nothing pinned what
-  // spendDirPin() does a few milliseconds either side of it. The window is
-  // real: a transcript written just ahead of this server's launch lands
-  // there, and so can one written just AFTER it, because Linux stamps mtimes
-  // from the kernel's coarse clock (#1722 measured writes reading back
-  // earlier than a Date.now() taken before them). The rule is a strict
-  // `newest < launchMs` with no skew allowance: such a session is still
-  // ANSWERED — the panel renders it that tick — but not cached, so it is
-  // followed tick by tick and latches on its first write stamped at or
-  // after launchMs, which a live session's next append provides.
-  //
-  // launchMs is one Date.now() read inside spendDirPin(), so the clock is
-  // mocked for that read alone: launchMs becomes a known constant and every
-  // stamp below is an exact offset from it, with no wall clock anywhere. The
-  // stamp AT launchMs must read back as exactly launchMs — one that landed a
-  // fraction above it would let a `<=` mutant through — so that is asserted
-  // rather than trusted. Node 26 round-trips millisecond stamps exactly on
-  // APFS and Linux overlayfs alike (measured, #1729); a whole second is a
-  // free hedge, leaving no fractional part for a seconds conversion to lose.
-  const launchMs = Date.UTC(2026, 0, 1);
-  const stamp = (f, ms) => utimesSync(f, new Date(ms), new Date(ms));
-  const home = tempDir("spend-home-");
-  const proj = join(home, ".omp", "agent", "sessions", "-x");
-  const mine = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-  const theirs = join(proj, "2026-09-09T02-00-00-000Z_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
-  mkdirSync(mine, { recursive: true });
-  mkdirSync(theirs, { recursive: true });
-  const mineLog = join(mine, "agent-a.jsonl");
-  const theirsLog = join(theirs, "agent-b.jsonl");
-  writeFileSync(mineLog, "");
-  writeFileSync(theirsLog, "");
-  stamp(mineLog, launchMs - 5);
-  stamp(theirsLog, launchMs - 60000);
+test("a recorded session whose directory does not exist yet, or holds no transcripts, is the quiet null", () => {
+  const { proj, stateDir } = twoSessions();
+  const notYet = join(proj, "2026-10-01T00-00-00-000Z_cccccccc-cccc-cccc-cccc-cccccccccccc");
+  writeReceipt(stateDir, notYet);
+  let s;
+  const errs = withStderr(() => { s = gatherSpend({ dir: receiptSpendDir(stateDir) }); });
+  assert.equal(s, null, JSON.stringify(s));
+  assert.deepEqual(errs, [], "no `spend read failed` line for a session not created yet");
 
-  const clock = t.mock.method(Date, "now", () => launchMs);
-  const pin = spendDirPin(undefined, home, join(home, "x"));
-  clock.mock.restore();
-
-  assert.equal(pin(), mine, "5 ms before launch is still this tick's answer — the panel renders it");
-
-  // A second session overtakes it while still 1 ms short of launchMs. A pin
-  // that had latched `mine` would ignore this; one that only followed it
-  // re-picks, and re-picking at 1 ms is the proof there is no skew allowance
-  // either — any tolerance of 1 ms or more would latch `theirs` right here.
-  stamp(theirsLog, launchMs - 1);
-  assert.equal(pin(), theirs, "and was never cached: a session 1 ms before launch takes the answer over");
-
-  // `mine` appends again, stamped exactly ON launchMs: "at or after" is the
-  // latch condition, so this is the write that latches. It is also the
-  // heuristic's newest, so this tick alone cannot tell latched from
-  // followed — the next assertion is what does.
-  stamp(mineLog, launchMs);
-  assert.equal(statSync(mineLog).mtimeMs, launchMs, "the stamp sits exactly on launchMs — `<` vs `<=` is untested otherwise");
-  assert.equal(pin(), mine, "the write at launchMs makes it the answer again");
-
-  stamp(theirsLog, launchMs + 50000);
-  assert.equal(pin(), mine, "and holds against a newer session, which only a latch at launchMs itself explains");
-  assert.equal(findSubagentsDir(home, join(home, "x")), theirs, "the fixture really did flip — this test proves nothing otherwise");
+  mkdirSync(notYet);
+  const errs2 = withStderr(() => { s = gatherSpend({ dir: receiptSpendDir(stateDir) }); });
+  assert.equal(s, null, JSON.stringify(s));
+  assert.deepEqual(errs2, [], "no `holds no agent transcripts` line for a session with no member yet");
 });
 
-test("an unresolvable transcript tree is never pinned — one stderr line across ticks either way, panel hidden and never zeroed", () => {
-  // #1679: `{ error }` is no longer latched (see the recovery test below), so
-  // the one-line-per-fault promise can no longer come from caching upstream —
-  // it comes from gatherSpend's own warnOnce gate, keyed on the message,
-  // which needs nothing cached above it to hold.
-  const home = tempDir("spend-home-");
-  const pin = spendDirPin(undefined, home, "/nonexistent");
+test("a receipt recording the encoded-cwd PROJECT directory, not its <ISO>_<uuid> child, is refused — never booked as this run's agents", () => {
+  // phase0.mjs accepts any existing directory as the session, so this path
+  // can reach the receipt; read as a session, it books every session under
+  // it — the sibling's members and each main-session file — as agents.
+  const { proj, stateDir } = twoSessions();
+  writeReceipt(stateDir, proj);
+  let s;
+  const errs = withStderr(() => { s = gatherSpend({ dir: receiptSpendDir(stateDir) }); });
+  assert.equal(s.ok, false, JSON.stringify(s));
+  assert.match(s.error, /records .* which is not an omp <ISO>_<uuid> session directory$/);
+  assert.equal(s.totals, undefined, "a refused session must not report spend at all");
+  assert.equal(errs.length, 1, "the refusal reaches stderr: " + JSON.stringify(errs));
+});
 
+test("a recorded session the cockpit cannot stat — EACCES on an ancestor — is a panel saying so, not the quiet null", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root searches every directory");
+  const { proj, stateDir } = twoSessions();
+  const locked = join(proj, "locked");
+  const session = join(locked, "2026-10-01T00-00-00-000Z_dddddddd-dddd-dddd-dddd-dddddddddddd");
+  mkdirSync(session, { recursive: true });
+  writeReceipt(stateDir, session);
+  chmodSync(locked, 0o000);
+  let s;
+  try {
+    withStderr(() => { s = gatherSpend({ dir: receiptSpendDir(stateDir) }); });
+  } finally { chmodSync(locked, 0o755); }
+  assert.notEqual(s, null, "an unreadable session hid the panel as if it were not created yet");
+  assert.equal(s.ok, false, JSON.stringify(s));
+  assert.match(s.error, /EACCES/);
+});
+
+test("no receipt, or one recording no session, is a panel saying so — never a guessed session", () => {
+  const { stateDir } = twoSessions();
+  const none = "no session recorded — run phase 0 or pass --spend-dir";
+  assert.deepEqual(receiptSpendDir(stateDir), { error: none });
+  writeReceipt(stateDir, "");
+  assert.deepEqual(receiptSpendDir(stateDir), { error: none });
+  let s;
+  withStderr(() => { s = gatherSpend({ dir: receiptSpendDir(stateDir) }); });
+  assert.deepEqual(s, { ok: false, error: none });
+});
+
+test("an unreadable receipt is a panel naming the receipt, one stderr line across ticks, never zeroed", () => {
+  const { stateDir } = twoSessions();
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(join(stateDir, RECEIPT), "{not json");
   let first, second;
   const errs = withStderr(() => {
-    first = gatherSpend({ dir: pin() });
-    second = gatherSpend({ dir: pin() });
+    first = gatherSpend({ dir: receiptSpendDir(stateDir) });
+    second = gatherSpend({ dir: receiptSpendDir(stateDir) });
   });
   assert.equal(errs.length, 1, "expected one line across two ticks, got " + JSON.stringify(errs));
   for (const s of [first, second]) {
-    assert.equal(s.ok, false, "the tag the page hides on");
-    assert.ok(s.error, "and a reason, never a zeroed total");
-    assert.equal(s.totals, undefined, "an unresolvable directory must not report spend at all");
+    assert.equal(s.ok, false, "the tag the page routes on");
+    assert.match(s.error, /^no session recorded — run phase 0 or pass --spend-dir \(phase-0 receipt .*phase0\.json unreadable: not JSON/);
+    assert.equal(s.totals, undefined, "an unreadable receipt must not report spend at all");
   }
 });
-
-test("an unresolvable transcript tree recovers on its very next tick, because { error } is never latched", () => {
-  // The bug #1679 fixed: the old `pinned ??= findSubagentsDir(...)` treated
-  // `{ error }` as a permanent answer, so a TRANSIENT fault (EACCES on a
-  // directory mid permission-change, EMFILE, EIO — not just the "project dir
-  // absent" case the original comment reasoned about) hid the panel forever
-  // even once the tree became readable again.
-  const home = tempDir("spend-home-");
-  const proj = join(home, ".omp", "agent", "sessions", "-x");
-  const sess = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-  mkdirSync(sess, { recursive: true });
-  writeFileSync(join(sess, "agent-a.jsonl"), "");
-  chmodSync(proj, 0o000);
-  try {
-    const pin = spendDirPin(undefined, home, join(home, "x"));
-    const faulted = pin();
-    assert.ok(faulted.error, "a scandir EACCES is exactly the 'unresolvable' shape the old pin latched forever");
-    chmodSync(proj, 0o755);
-    assert.equal(pin(), sess, "the very next tick recovers, because the fault was never cached");
-  } finally {
-    chmodSync(proj, 0o755);
-  }
-});
-
-test("--spend-dir's directory replaces the heuristic outright, including one the heuristic could resolve", () => {
-  // The override half of the flag: named explicitly, the session ranking is not
-  // a tie-breaker, a fallback, or a second opinion. The fixture gives the
-  // heuristic a perfectly resolvable session to pick so that "the explicit one
-  // wins" is a real preference and not the absence of an alternative.
-  const home = tempDir("spend-home-");
-  const heuristic = join(home, ".omp", "agent", "sessions", "-x", "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-  mkdirSync(heuristic, { recursive: true });
-  writeFileSync(join(heuristic, "agent-a.jsonl"), "");
-  const named = tempDir("spend-named-");
-
-  assert.equal(findSubagentsDir(home, join(home, "x")), heuristic, "the heuristic has an answer of its own here");
-  const pin = spendDirPin(named, home, join(home, "x"));
-  assert.equal(pin(), named);
-  assert.equal(pin(), named, "and is not re-decided on a later tick either");
-});
-
-test("gatherSpend reads a handed-in null as a resolution, not as an absent argument", () => {
-  // `dir ?? findSubagentsDir()` could not tell "my caller resolved this and
-  // there is no session yet" from "nobody resolved it", so a pinned null ran
-  // the lookup a second time inside the same tick — and answered from it,
-  // which is the unpinned source this ticket exists to remove. The fixture
-  // makes that observable: $HOME here DOES hold a resolvable session, so a
-  // re-resolve would return a panel instead of nothing.
-  const home = tempDir("spend-home-");
-  const live = join(home, ".omp", "agent", "sessions", encodeProjectDir(process.cwd(), { home }), "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-  mkdirSync(live, { recursive: true });
-  writeFileSync(join(live, "agent-x.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
-  const realHome = process.env.HOME;
-  process.env.HOME = home;
-  try {
-    assert.ok(gatherSpend({}).ok, "the control: with no dir argument at all, that session IS found");
-    assert.equal(gatherSpend({ dir: null }), null, "a resolved-to-nothing caller must not be re-resolved");
-  } finally { process.env.HOME = realHome; }
-});
-
 
 test("one unreadable transcript does not take the whole panel down", () => {
   const dir = fixture(TURN);
@@ -1489,8 +1225,8 @@ test("a torn LAST line stays silent — the tear every tick legitimately produce
 // full path (`file`) — leaving the message's `${file}` untouched — passes
 // every one of them: the message still names the right file, and nothing
 // above ever gives two DIFFERENT full paths the SAME basename. It is exactly
-// the shape a long-lived `serve` process hits in practice: findSubagentsDir()
-// re-resolves to a new session directory as fleet runs start and finish, and
+// the shape a long-lived `serve` process hits in practice: the receipt it
+// reads names a new session directory as fleet runs start and finish, and
 // two sessions whose agents both land on a generic transcript name (here
 // "agent-x.jsonl", same as every fixture above) are a basename collision
 // waiting to happen. Measured: with the key narrowed from `file` to `f`,
@@ -1665,10 +1401,13 @@ test("the no-spend-dir gate keys on the message, so a second, different fault al
   assert.deepEqual(withStderr(() => gatherSpend({ dir: b })), [], "repeating the second fault stays quiet");
 });
 
-test("an unreadable dir reports an error rather than posing as an empty run", () => {
+test("an unreadable --spend-dir reports an error rather than posing as an empty run", () => {
   // The distinction that hid the path bug: a hidden panel meant both "nothing
-  // yet" and "this is broken", so the broken case never surfaced.
-  const s = gatherSpend({ dir: join(tmpdir(), "definitely-not-here-12345") });
+  // yet" and "this is broken", so the broken case never surfaced. Explicit
+  // only: a receipt's session not created yet is the quiet null (above).
+  const absent = join(tempDir("spend-absent-"), "2026-08-26T09-00-00-000Z_01a08126-ee04-7095-a695-14e3249f1128");
+  let s;
+  withStderr(() => { s = gatherSpend({ dir: absent, explicit: true }); }); // it warns; the warning is not what is under test
   assert.ok(s.error, "expected an error object, got " + JSON.stringify(s));
   // The TAG, not the message: the page routes on `ok` alone (#959), so a
   // producer that stops emitting it hides the panel no matter what `error` says.
@@ -1679,7 +1418,7 @@ test("every gatherSpend return carries the tag the page routes on (#959)", () =>
   // One test over all four returns, because the defect was a MISSING tag on one
   // of them, and a per-return test is what leaves the next one untagged.
   // The unresolvable-dir return.
-  assert.equal(gatherSpend({ dir: { error: "no session directory for this cwd" } }).ok, false);
+  assert.equal(gatherSpend({ dir: { error: "no session recorded for this test" } }).ok, false);
   // The all-unreadable return: a dir holding only a transcript that cannot be read.
   const allBad = tempDir("spend-");
   mkdirSync(join(allBad, "agent-trap.jsonl")); // a directory where a file is expected
