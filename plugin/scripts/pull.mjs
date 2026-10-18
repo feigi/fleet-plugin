@@ -215,6 +215,8 @@ export function issueRefs(section) {
 // A brief path's trailing line reference, `:N` or `:N-M`.
 const LINE_REF = /:(\d+)(?:-(\d+))?$/;
 const MARKDOWN = /\.(md|markdown|mdx)$/i;
+// The byte each one-letter escape of a C-quoted diff path stands for.
+const ESC = { n: 10, t: 9, '"': 34, "\\": 92, a: 7, b: 8, f: 12, r: 13, v: 11 };
 
 /**
  * Whether brief path `p` names changed file `f`, once a trailing `:N` or `:N-M`
@@ -238,7 +240,6 @@ export function pathHits(p, f) {
 function diffPath(s) {
   const raw = s.replace(/\t$/, "");
   if (!raw.startsWith('"') || !raw.endsWith('"')) return raw;
-  const ESC = { n: 10, t: 9, '"': 34, "\\": 92, a: 7, b: 8, f: 12, r: 13, v: 11 };
   const bytes = [];
   for (let i = 1; i < raw.length - 1; i++) {
     if (raw[i] !== "\\") {
