@@ -81,7 +81,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
-import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { gitEnv, mainCheckoutDirFromGitCommonDir } from "./git-env.mjs";
 
 const NAME = "merge-gate";
 
@@ -214,8 +214,9 @@ const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v)
 const CHILD = { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] };
 
 // --- instruments.sh -------------------------------------------------------
-// `--repo` is the directory holding the git COMMON dir — the main checkout,
-// where the run's baseline `.fleet/instruments.sha` lives — never the cwd's
+// `--repo` is the main checkout — the directory holding the git COMMON dir,
+// git-env.mjs's `mainCheckoutDirFromGitCommonDir` — where the run's baseline
+// `.fleet/instruments.sha` lives, never the cwd's
 // own top level: from a worktree that has no baseline, and instruments.sh
 // exits 2 on a missing baseline instead of comparing anything. gitEnv():
 // an ambient GIT_DIR would otherwise answer `--git-common-dir` for a
@@ -226,7 +227,7 @@ const CHILD = { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] };
 // `root` is returned too: main-gain.mjs reads the same main checkout.
 function readInstruments() {
   const common = spawnSync("git", ["rev-parse", "--git-common-dir"], { ...CHILD, env: gitEnv() });
-  const root = common.error || common.status !== 0 ? null : workspaceDirFromGitCommonDir(common.stdout);
+  const root = !common.error && common.status === 0 ? mainCheckoutDirFromGitCommonDir(common.stdout) : null;
   if (root === null) return { exit: null, digest: null, root };
   const r = spawnSync("sh", [join(SCRIPT_DIR, "instruments.sh"), "--repo", root], CHILD);
   const digest = (r.stdout ?? "").trim().split("\n")[0] || null;

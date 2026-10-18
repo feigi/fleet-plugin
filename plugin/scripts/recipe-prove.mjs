@@ -53,7 +53,7 @@
 // the bound and the command's log.
 //
 // On proof, the cache is written atomically to <workspace>/.fleet/recipe.json
-// — <workspace> being the directory holding the repository's common git dir,
+// — <workspace> being the directory workspaceDirFromGitCommonDir() names for the repository,
 // the place derive-testcmd.sh reads it from — and then read back through
 // derive-testcmd.sh for every field, `uncovered` byte for byte as the compact
 // JSON of the list given, the Test entrypoint against `derivedAt`'s
@@ -87,7 +87,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isCLI } from "./is-cli.mjs";
-import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { WorkspaceProbeFailed, gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 import { isDigits } from "./arg.mjs";
 
 const NAME = "recipe-prove";
@@ -454,7 +454,11 @@ function main(argv) {
   const gitDir = git(["rev-parse", "--git-dir"], o.repo);
   if (!gitDir.ok) throw cannot(`${o.repo} is not a git repository: ${gitDir.err}`);
   const common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], o.repo);
-  const workspace = common.ok ? workspaceDirFromGitCommonDir(common.out, o.repo) : null;
+  let workspace = null;
+  if (common.ok) {
+    try { workspace = workspaceDirFromGitCommonDir(common.out, o.repo); }
+    catch (e) { if (!(e instanceof WorkspaceProbeFailed)) throw e; throw cannot(`cannot resolve the common git dir of ${o.repo}: ${e.message}`); }
+  }
   if (!workspace) throw cannot(`cannot resolve the common git dir of ${o.repo}: ${common.err}`);
   const sha = git(["rev-parse", "--verify", "origin/main^{commit}"], o.repo);
   if (!sha.ok) throw cannot(`origin/main does not resolve to a commit (${sha.err}) — fetch it; the proof runs against it`);

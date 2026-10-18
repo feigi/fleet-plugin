@@ -159,8 +159,8 @@ function workspaceHash(key) {
 //
 // A non-empty string, and nothing more: no trim(). A wholly-whitespace
 // answer to `--git-common-dir` is already refused one layer down, by
-// git-env.mjs's workspaceDirFromGitCommonDir() inside fleet-dir.mjs's
-// fleetFile(), so no identity reaching either call site can be whitespace —
+// git-env.mjs's resolveWorkspace() inside fleet-dir.mjs's fleetFile(), so no
+// identity reaching either call site can be whitespace —
 // the construction side gets the workspace fleetFile() resolved and the
 // parsing side gets a payload some process wrote from it. A second whitespace
 // rule here would be one more guard of exactly the kind this predicate exists

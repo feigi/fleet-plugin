@@ -7,11 +7,13 @@
 // private copy of it.
 //
 // The answer is git's: `rev-parse --git-common-dir` names the common git dir
-// every worktree of one repository shares, and git-env.mjs's
-// workspaceDirFromGitCommonDir() turns that answer into the workspace
-// holding it. This module is the spawn around that function — the scrubbed
-// env, the bound, the join onto `.fleet/` — so a new `.fleet/`-rooted file is
-// one `fleetFile("name")` call rather than another hand-spelled probe.
+// every worktree of one repository shares, and git-env.mjs's resolveWorkspace()
+// turns that answer into the workspace it names: the common git dir's parent
+// when the common dir is named `.git` or that parent's own `.git` resolves to
+// it, otherwise the common git dir itself. This module is the spawn around
+// that function — the scrubbed env, the bound, the join onto `.fleet/` — so a
+// new `.fleet/`-rooted file is one `fleetFile("name")` call rather than
+// another hand-spelled probe.
 //
 // One error policy: anything that leaves no workspace THROWS
 // FleetDirUnresolvable, never a null or an empty path. What a caller does
@@ -32,13 +34,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
-
-// A `rev-parse` answers in milliseconds; this bound exists so a git that
-// never answers cannot hang its caller, not to time a healthy one. A caller
-// with an override of its own (ledger.mjs's LEDGER_GIT_TIMEOUT) passes the
-// value it settled on as `timeoutMs`.
-const DEFAULT_GIT_TIMEOUT_MS = 10_000;
+import { DEFAULT_GIT_TIMEOUT_MS, WorkspaceProbeFailed, gitEnv, resolveWorkspace } from "./git-env.mjs";
 
 // The cause reaches stderr inside a single warning line, so it is capped,
 // keeping the END — the part of a child's stderr that says why it stopped.
@@ -73,6 +69,33 @@ function ended(r) {
   return r.status === null ? "" : `exit ${r.status}`;
 }
 
+// The probe every `.fleet/` answer and the scratch root share: git's common
+// dir, then the workspace it names. Every failure throws FleetDirUnresolvable
+// with git's own reason.
+function workspaceOf(cwd, timeoutMs, canonicalise) {
+  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], {
+    cwd, encoding: "utf8", timeout: timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS, env: gitEnv(),
+  });
+  // No separate `r.status === 0` gate: every failure mode (no repository, an
+  // unresolvable GIT_DIR, a permission-denied `.git`, a corrupt worktree
+  // pointer, a missing `git` binary, a timed-out probe) leaves `r.stdout`
+  // empty, which resolveWorkspace() reads as `null` on its own.
+  let found;
+  try {
+    found = resolveWorkspace(r.stdout, cwd, { canonicalise, timeoutMs });
+  } catch (e) {
+    // `--git-common-dir` answered; the rule's own probe is what failed, and
+    // its message names that probe.
+    if (!(e instanceof WorkspaceProbeFailed)) throw e;
+    throw new FleetDirUnresolvable(`could not resolve the workspace: ${e.message}`);
+  }
+  if (found === null) {
+    const why = cause(r.error && r.error.message, r.stderr) || ended(r);
+    throw new FleetDirUnresolvable(`could not resolve --git-common-dir${why ? `: ${why}` : ""}`);
+  }
+  return found;
+}
+
 /**
  * The absolute path of `name` under the run's `.fleet/` directory, resolved
  * from `cwd` — or the `.fleet/` directory itself when `name` is null.
@@ -81,7 +104,7 @@ function ended(r) {
  * makes `--git-common-dir` answer for a DIFFERENT repository, which would put
  * the run's file in someone else's workspace, silently, at exit 0.
  *
- * `canonicalise` is workspaceDirFromGitCommonDir()'s opt-in, passed through:
+ * `canonicalise` is git-env.mjs's resolveWorkspace() opt-in, passed through:
  * only a caller that keys something on the path (the cockpit's port) takes
  * it. Everyone else prints the path it resolves, and realpath would change
  * that spelling without changing which file it names.
@@ -91,19 +114,8 @@ function ended(r) {
  * `timeoutMs` — with git's own reason in the message.
  */
 export function fleetFile(name, { cwd = process.cwd(), timeoutMs, canonicalise = false } = {}) {
-  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], {
-    cwd, encoding: "utf8", timeout: timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS, env: gitEnv(),
-  });
-  // No separate `r.status === 0` gate: every failure mode (no repository, an
-  // unresolvable GIT_DIR, a permission-denied `.git`, a corrupt worktree
-  // pointer, a missing `git` binary, a timed-out probe) leaves `r.stdout`
-  // empty, which workspaceDirFromGitCommonDir() reads as `null` on its own.
-  const workspace = workspaceDirFromGitCommonDir(r.stdout, cwd, { canonicalise });
-  if (workspace === null) {
-    const why = cause(r.error && r.error.message, r.stderr) || ended(r);
-    throw new FleetDirUnresolvable(`could not resolve --git-common-dir${why ? `: ${why}` : ""}`);
-  }
-  return name === null ? join(workspace, ".fleet") : join(workspace, ".fleet", name);
+  const { dir } = workspaceOf(cwd, timeoutMs, canonicalise);
+  return name === null ? join(dir, ".fleet") : join(dir, ".fleet", name);
 }
 
 /**
@@ -113,8 +125,9 @@ export function fleetFile(name, { cwd = process.cwd(), timeoutMs, canonicalise =
  * point that has no dispatcher to name one.
  *
  * `<repo-key>` is `<basename>-<8 hex>`. `<basename>` is the folder name of the
- * workspace — the directory holding the COMMON git dir, the same lookup
- * fleetFile() makes, so a linked worktree maps to its main checkout — and the
+ * workspace fleetFile() resolves — a checkout's directory, so a linked worktree
+ * maps to its main checkout, or a bare repository's or submodule's git dir
+ * (a trailing `.git` on that name is dropped) — and the
  * hex is the first 8 characters of the sha256 of that directory's realpath,
  * so two clones that share a name get different roots. Both come from the
  * canonical form, so a symlinked route to one workspace is not a second root.
@@ -123,9 +136,10 @@ export function fleetFile(name, { cwd = process.cwd(), timeoutMs, canonicalise =
  * FleetDirUnresolvable exactly as fleetFile() does.
  */
 export function scratchRoot({ cwd = process.cwd(), timeoutMs, home = homedir() } = {}) {
-  const workspace = dirname(fleetFile(null, { cwd, timeoutMs, canonicalise: true }));
-  const hex = createHash("sha256").update(workspace).digest("hex").slice(0, 8);
-  return join(scratchParent(home), `${basename(workspace)}-${hex}`);
+  const { dir, gitDir } = workspaceOf(cwd, timeoutMs, true);
+  const folder = basename(dir);
+  const hex = createHash("sha256").update(dir).digest("hex").slice(0, 8);
+  return join(scratchParent(home), `${gitDir ? folder.replace(/\.git$/, "") : folder}-${hex}`);
 }
 
 /** The directory every run's scratch root sits directly in: `<home>/.fleet/scratch`. */

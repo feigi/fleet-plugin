@@ -10,7 +10,7 @@
 //
 // THE BASELINE. Recorded once per run, in Phase 0 beside `instruments.sh
 // --pin` (after the fast-forward, before anything reads), at
-// `<workspace>/.fleet/main-checkout.sha` — instruments.sh's own
+// `<main checkout>/.fleet/main-checkout.sha` (ROOT below) — instruments.sh's own
 // `.fleet/instruments.sha` precedent. It holds the main checkout's
 // `git status --porcelain -uall` entries AND a content hash of every path
 // they name, so the maintainer's own uncommitted work at run start is allowed
@@ -102,10 +102,11 @@
 // any ancestry read.
 //
 // ROOT. The main checkout is the parent of `git rev-parse --git-common-dir`
-// (git-env.mjs's `workspaceDirFromGitCommonDir`, as fleet-tick.mjs resolves
-// the shortlist) — never `--show-toplevel`, which answers a WORKTREE's root
-// from inside one — and every git child gets `gitEnv()`, so an ambient
-// GIT_DIR/GIT_WORK_TREE cannot answer for another repository.
+// (git-env.mjs's `mainCheckoutDirFromGitCommonDir`) — the work tree, which a
+// symlinked `.git` does not move, never git-env.mjs's store rule — and never
+// `--show-toplevel`, which answers a WORKTREE's root from inside one. Every
+// git child gets `gitEnv()`, so an ambient GIT_DIR/GIT_WORK_TREE cannot answer
+// for another repository.
 //
 // CLI:
 //   main-checkout.mjs --record   write the baseline (Phase 0; or the
@@ -122,7 +123,7 @@ import { lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, writeFile
 import { join } from "node:path";
 import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
-import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { gitEnv, mainCheckoutDirFromGitCommonDir } from "./git-env.mjs";
 
 export const BASELINE_FILE = "main-checkout.sha";
 export const RECORD_COMMAND = "~/.fleet/bin/fleet-run main-checkout.mjs --record";
@@ -157,7 +158,7 @@ function git(what, args, cwd, env) {
 export function resolveMainCheckout(cwd = process.cwd(), env = process.env) {
   const r = git("git rev-parse --git-common-dir", ["rev-parse", "--git-common-dir"], cwd, env);
   if (!r.ok) return r;
-  const root = workspaceDirFromGitCommonDir(r.stdout, cwd);
+  const root = mainCheckoutDirFromGitCommonDir(r.stdout, cwd);
   return root === null ? { ok: false, why: "git rev-parse --git-common-dir answered nothing" } : { ok: true, root };
 }
 
