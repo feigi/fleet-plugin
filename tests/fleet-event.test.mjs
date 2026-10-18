@@ -1051,6 +1051,25 @@ test("drain prints a claim closeout could not release as its NEED line, exits 4,
   assert.equal(r.out.at(-1), "TICK ROWS");
 });
 
+test("undrain runs closeout.mjs reopen with the reason, which clears the marker, then ticks", () => {
+  const f = fixture({ rows: ["#412 impl-412"] });
+  assert.equal(f.run(["drain", "--reason", "end of the night"]).status, 0);
+  const r = f.run(["undrain", "--reason", "drained by mistake"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.equal(r.order.at(-1), TICK);
+  assert.match(eventLine(r), /^event: undrain: undrain reopened$/);
+  assert.doesNotMatch(f.ledger(), /end of the night/);
+});
+
+test("undrain with no drain marker refuses with exit 2 and writes nothing", () => {
+  const f = fixture({ rows: ["#412 impl-412"] });
+  const before = f.ledger();
+  const r = f.run(["undrain", "--reason", "mistake"]);
+  assert.equal(r.status, 2, r.err + r.stdout);
+  assert.match(r.err + r.stdout, /nothing to undrain/);
+  assert.equal(f.ledger(), before);
+});
+
 // ── usage ────────────────────────────────────────────────────────────────────
 
 test("usage refusals exit 2 before any write or tick: no kind, an unknown kind, a wrong arity, a member of another family, a launch already =failed", () => {
@@ -1063,9 +1082,10 @@ test("usage refusals exit 2 before any write or tick: no kind, an unknown kind, 
     [["conflict", "0"], /^fleet-event: conflict: '0' is not a PR number/m],
     [["heartbeat", "88"], /^fleet-event: heartbeat takes no arguments/m],
     [["drain"], /^fleet-event: drain takes --reason/m],
+    [["undrain"], /^fleet-event: undrain takes --reason/m],
     [["drain", "--reason", "  "], /^fleet-event: --reason needs a value/m],
     [["drain", "now", "--reason", "r"], /^fleet-event: drain takes no arguments/m],
-    [["label", "88", "--reason", "r"], /^fleet-event: --reason belongs to drain, not label/m],
+    [["label", "88", "--reason", "r"], /^fleet-event: --reason belongs to drain and undrain, not label/m],
     [["impl-report"], /^fleet-event: impl-report takes <member>/m],
     [["impl-report", "fix-pr-88"], /^fleet-event: impl-report takes a member of the impl family, not 'fix-pr-88'/m],
     [["review-result", "x", "/p"], /^fleet-event: review-result: 'x' is not a PR number/m],

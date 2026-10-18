@@ -903,3 +903,68 @@ require("node:module").syncBuiltinESMExports();
   assert.match(r.stderr, /could not archive .*closeout\.json -> .*closeout\..+\.json: EXDEV: injected/);
   assert.equal(existsSync(f.receiptPath), true, "the receipt is left where it was");
 });
+
+// ── reopen ───────────────────────────────────────────────────────────────────
+
+test("reopen: refuses with exit 2 once a finish step is ok, and changes neither the receipt nor the marker", () => {
+  const f = fixture();
+  assert.equal(f.run("begin", ["--reason", "wrap up"]).status, 0);
+  const receipt = f.receipt();
+  receipt.steps.tick = { status: "ok", at: new Date().toISOString(), output: "" };
+  writeFileSync(f.receiptPath, JSON.stringify(receipt));
+  const before = readFileSync(f.receiptPath, "utf8");
+  const r = f.run("reopen", ["--reason", "mistake"]);
+  assert.equal(r.status, 2, r.err + r.stdout);
+  assert.match(r.err, /reopen refused: finish step tick is already ok/);
+  assert.equal(readFileSync(f.receiptPath, "utf8"), before);
+  assert.equal(f.ledgerRead().drain, "wrap up");
+});
+
+test("reopen: a finish whose tick failed blocks nothing; the marker clears and begin's two steps go back to pending", () => {
+  const f = fixture();
+  f.setLedger(["#12 impl-12"]);
+  assert.equal(f.run("begin", ["--reason", "wrap up"]).status, 0);
+  f.control("fleet-tick", { out: "" });
+  assert.equal(f.run("finish", ["--reason", "wrap up"]).status, 3);
+  assert.equal(f.receipt().steps.tick.status, "failed");
+  const r = f.run("reopen", ["--reason", "mistake"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.match(r.stdout, /^closeout: reopen: ok$/m);
+  assert.equal(f.ledgerRead().drain, null);
+  const receipt = f.receipt();
+  assert.deepEqual(statusOf(receipt, BEGIN_STEPS), { drain: "pending", release: "pending" });
+  assert.equal(receipt.begun, null);
+  assert.equal(receipt.steps.tick.status, "failed", "a finish step is left as it was");
+});
+
+test("reopen: a second begin drains again and releases the claim a re-dispatched member took under its retry name", () => {
+  const f = fixture();
+  f.setLedger(["#12 impl-12"]);
+  assert.equal(f.run("begin", ["--reason", "first"]).status, 0);
+  assert.equal(f.run("reopen", ["--reason", "mistake"]).status, 0);
+  f.setLedger(["#12 impl-12-b"]);
+  const r = f.run("begin", ["--reason", "second"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(statusOf(f.receipt(), BEGIN_STEPS), allOk(BEGIN_STEPS));
+  assert.equal(f.ledgerRead().drain, "second");
+  assert.deepEqual(f.ledgerRows(), ["#12 impl-12-b=released"]);
+  assert.equal(f.order().filter((l) => l.startsWith("release-ticket")).length, 2);
+});
+
+test("reopen: with no marker set, refuses with exit 2 and writes no receipt", () => {
+  const f = fixture();
+  const r = f.run("reopen", ["--reason", "mistake"]);
+  assert.equal(r.status, 2, r.err + r.stdout);
+  assert.match(r.err, /nothing to undrain/);
+  assert.equal(existsSync(f.receiptPath), false);
+});
+
+test("reopen: with no closeout receipt, a bare ledger drain is undrained and no receipt is written", () => {
+  const f = fixture();
+  const drain = spawnSync(process.execPath, [join(SCRIPTS, "ledger.mjs"), "drain", "bare"], { cwd: f.repo, encoding: "utf8", env: { ...GIT_ENV, CLOSEOUT_STUBS: f.stubs } });
+  assert.equal(drain.status, 0, drain.stderr);
+  const r = f.run("reopen", ["--reason", "mistake"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.equal(f.ledgerRead().drain, null);
+  assert.equal(existsSync(f.receiptPath), false);
+});
