@@ -517,7 +517,7 @@ const CHANGED = [
   ],
   [
     "| 1 `LEFT #N: excluded · behind-…` | `collision` answered `behind-pr:#M` or `behind-issue:#M` | next entry |",
-    "| 1 `LEFT #N: excluded …` | `collision` answered `behind-pr:#M` or `behind-issue:#M`; or `next --head <N>` starting a Pull found a ledger `excluded` row for `#N` naming no premise, or one whose premise still stands (a premise `gh` cannot be asked about stands) | next entry |"
+    "| 1 `LEFT #N: excluded …` | `collision` answered `behind-pr:#M` or `behind-issue:#M`, or its ledger exclusion stands | next entry |"
   ]
 ];
 
