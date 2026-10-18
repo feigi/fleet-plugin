@@ -92,10 +92,10 @@ Percentiles interpolate linearly, as in `baseline-efficiency-derive.py`.
 
 ## Population (as read)
 
-- Query: `GET /repos/feigi/fleet-plugin/pulls?state=closed&sort=created&direction=desc&per_page=100&page=1..2` → 200 closed PRs, 200 merged, 0 closed-unmerged dropped; population = the first 200 merged.
+- Query: `GET /repos/feigi/fleet-plugin/pulls?state=closed&sort=created&direction=desc&per_page=100&page=1..5` → 296 closed PRs, 296 merged, 0 closed-unmerged dropped inside the population's span; population = the first 200 merged.
 - PRs #2302–#2865 (numbers are not contiguous: issues interleave), created 2026-10-01T10:10:06.000Z → 2026-10-04T20:55:15.000Z, merged 2026-10-01T11:43:22.000Z → 2026-10-04T21:43:18.000Z.
-- Open PRs at read time (`GET /pulls?state=open`): 0 — no still-open PR from the window is missing from the depth count.
-- Buffer (100 merged PRs older than the population, #2028–#2298: 0 left over past the population on its last listing page, 1 older page read): 6 of them were still open when the population's first PR arrived; counting them moves 8 PRs to a deeper bucket (sensitivity only; every table below uses the ticket's definition).
+- Open PRs created inside the population's span (`GET /pulls?state=open`, listing fetched 2026-10-18T09:48:50.511Z): 0 — no still-open PR from the window is missing from the depth count.
+- Buffer (196 merged PRs older than the population, #1831–#2298: 96 left over past the population on its last listing page, 1 older page read): 6 of them were still open when the population's first PR arrived; counting them moves 8 PRs to a deeper bucket (sensitivity only; every table below uses the ticket's definition).
 - Arrivals per UTC day: 2026-10-01: 8, 2026-10-02: 35, 2026-10-03: 65, 2026-10-04: 92.
 - Depth at arrival (population PRs open at each PR's creation): median 6, p75 9, p90 10, max 14, SD 3.33; buckets 0-2: 30, 3-5: 54, 6-9: 80, 10+: 36. Same-day arrivals SD 24.7; arrivals within ±1 h median 7, SD 4.18.
 - Linked issues: 192 PRs name `Closes #m` (4 name more than one); 8 name none. Claim (`labeled in-progress` on the linked issue before the PR opened) found for 190.
@@ -376,7 +376,7 @@ it would not speed up a review side that already runs faster at depth.
 The map's Measured premises were read off the 400 most recently merged PRs,
 PRs #1826–#2865. Re-running the same script with `--population 400` (the
 same PRs #1826–#2865, created 2026-09-25T18:58:33Z → 2026-10-04T20:55:15Z,
-ten UTC days, 0 closed-unmerged dropped, 0 open at read time) reproduces the charting
+ten UTC days, 0 closed-unmerged dropped and 0 still open in the population's span) reproduces the charting
 read's cycle medians — 1.16 h / 1.27 h / 1.62 h / 1.82 h against its 1.1 /
 1.3 / 1.6 / 1.8 — and gives the stage and regression results the four-day
 window is too short for. The tables below are that run's output; the full
@@ -637,7 +637,7 @@ Smaller caveats, in the order the note meets them:
 - **Depth is population-relative.** PRs older than the population that were
   still open at an arrival are not counted by the ticket's definition; one
   older page as a buffer finds 6 such PRs, moving 8 of 200 PRs one bucket
-  deeper. 0 PRs were open at read time, so nothing newer is missing.
+  deeper. No PR created inside the population's span was still open when the listing was fetched, so none is missing from depth.
 - **The fleet changed under the window.** The plugin ships daily; the 400
   window's early days show a different (b) regime. Stage *definitions* are
   stable across it; the machinery they measure is not.
@@ -650,9 +650,11 @@ Smaller caveats, in the order the note meets them:
 
 ```
 cd /path/to/fleet-plugin
-node docs/research/in-flight-cycle-time-stages-derive.mjs --repo feigi/fleet-plugin --population 200
-node docs/research/in-flight-cycle-time-stages-derive.mjs --repo feigi/fleet-plugin --population 400   # the charting read's window
+node docs/research/in-flight-cycle-time-stages-derive.mjs --repo feigi/fleet-plugin --population 200 --until 2026-10-04T20:55:16Z
+node docs/research/in-flight-cycle-time-stages-derive.mjs --repo feigi/fleet-plugin --population 400 --until 2026-10-04T20:55:16Z   # the charting read's window
 ```
+
+The Query and Buffer lines report pages read, so their counts grow as newer PRs push the window down the listing; the population and the 200 window's buffer result (6 still open, 8 PRs deeper) do not change.
 
 Zero dependencies; Node ≥ 18. Transport: `gh api` when `gh auth status`
 succeeds, else `curl` (with `Authorization: Bearer $GITHUB_TOKEN` when set).

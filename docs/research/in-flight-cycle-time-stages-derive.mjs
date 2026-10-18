@@ -143,10 +143,12 @@ async function api(p) {
 // Every page must be an array; a page of PER_PAGE items means another page
 // follows; a shorter one is the last. Anything else is a refusal, never a
 // short list.
-async function pagedList(p) {
+async function pagedList(p, files = null) {
   const all = [];
   for (let page = 1; ; page++) {
-    const d = await api(`${p}${p.includes("?") ? "&" : "?"}per_page=${PER_PAGE}&page=${page}`);
+    const q = `${p}${p.includes("?") ? "&" : "?"}per_page=${PER_PAGE}&page=${page}`;
+    if (files) files.push(cacheFile(q));
+    const d = await api(q);
     if (!Array.isArray(d)) die(`${p} page ${page}: not an array (${JSON.stringify(d).slice(0, 120)})`);
     all.push(...d);
     if (d.length < PER_PAGE) return all;
@@ -195,7 +197,6 @@ const inWindow = closed.filter((x) => T(x.created_at) >= SINCE);
 const mergedAll = inWindow.filter((x) => x.merged_at);
 if (mergedAll.length < N) die(`only ${mergedAll.length} merged PRs exist among ${inWindow.length} closed in the window; cannot build a population of ${N}`, 1);
 const pop = mergedAll.slice(0, N).map((p) => ({ n: p.number, created: T(p.created_at), merged: T(p.merged_at), body: p.body || "" }));
-const droppedUnmerged = inWindow.length - mergedAll.length;
 // Buffer (depth sensitivity only): merged PRs older than the population. The
 // pages read for the population already hold some — what is left past the
 // first --population in the window, and any created before --since — then
@@ -212,9 +213,17 @@ for (let b = 1; b <= BUFFER_PAGES && !exhausted; b++) {
   buffer.push(...d.filter((x) => x.merged_at).map(asBuf));
   if (d.length < PER_PAGE) break;
 }
-const openNow = await pagedList("pulls?state=open");
+const openFiles = [];
+const openNow = await pagedList("pulls?state=open", openFiles);
 pop.sort((a, b) => a.created - b.created);
 const first = pop[0], last = pop[pop.length - 1];
+// A PR created outside first..last cannot be missing from any population PR's depth.
+const inSpan = (created) => { const t = T(created); return t >= first.created && t <= last.created; };
+const droppedUnmerged = inWindow.filter((x) => !x.merged_at && inSpan(x.created_at)).length;
+const droppedOutside = inWindow.length - mergedAll.length - droppedUnmerged;
+const openInSpan = openNow.filter((x) => inSpan(x.created_at));
+// api() writes then renames, so each page file's mtime is when that page was fetched (live, or by an earlier run).
+const openFetched = Math.min(...openFiles.map((f) => fs.statSync(f).mtimeMs));
 
 // ----------------------------------------------------------- per-PR reads ----
 let done = 0;
@@ -387,9 +396,9 @@ const meanMin = (xs, f) => { const v = xs.map(f).filter((x) => x !== null); retu
 
 P(`## Population (as read)`);
 P();
-P(`- Query: \`GET /repos/${REPO}/pulls?state=closed&sort=created&direction=desc&per_page=${PER_PAGE}&page=1..${pages}\` → ${closed.length} closed PRs${closed.length > inWindow.length ? ` (${closed.length - inWindow.length} created before --since, not counted below)` : ""}, ${mergedAll.length} merged, ${droppedUnmerged} closed-unmerged dropped; population = the first ${pop.length} merged.`);
+P(`- Query: \`GET /repos/${REPO}/pulls?state=closed&sort=created&direction=desc&per_page=${PER_PAGE}&page=1..${pages}\` → ${closed.length} closed PRs${closed.length > inWindow.length ? ` (${closed.length - inWindow.length} created before --since, not counted below)` : ""}, ${mergedAll.length} merged, ${droppedUnmerged} closed-unmerged dropped inside the population's span${droppedOutside ? `, ${droppedOutside} outside it` : ""}; population = the first ${pop.length} merged.`);
 P(`- PRs #${first.n}–#${last.n} (numbers are not contiguous: issues interleave), created ${new Date(first.created).toISOString()} → ${new Date(last.created).toISOString()}, merged ${new Date(Math.min(...pop.map((p) => p.merged))).toISOString()} → ${new Date(Math.max(...pop.map((p) => p.merged))).toISOString()}.`);
-P(`- Open PRs at read time (\`GET /pulls?state=open\`): ${openNow.length}${openNow.length ? ` (#${openNow.map((p) => p.number).join(", #")})` : " — no still-open PR from the window is missing from the depth count"}.`);
+P(`- Open PRs created inside the population's span (\`GET /pulls?state=open\`, listing fetched ${new Date(openFetched).toISOString()}): ${openInSpan.length}${openInSpan.length ? ` (#${openInSpan.map((p) => p.number).join(", #")})` : " — no still-open PR from the window is missing from the depth count"}.`);
 P(`- Buffer (${buffer.length} merged PRs older than the population${buffer.length ? `, #${Math.min(...buffer.map((b) => b.n))}–#${Math.max(...buffer.map((b) => b.n))}` : ""}: ${leftover} left over past the population on its last listing page, ${bufferPagesRead} older page${bufferPagesRead === 1 ? "" : "s"} read): ${buffer.filter((b) => b.merged > first.created).length} of them were still open when the population's first PR arrived; counting them moves ${pop.filter((p) => bucketOf(p.depthBuf) !== p.bucket).length} PRs to a deeper bucket (sensitivity only; every table below uses the ticket's definition).`);
 P(`- Arrivals per UTC day: ${[...new Set(pop.map((p) => p.day))].sort().map((d) => `${d}: ${pop.filter((p) => p.day === d).length}`).join(", ")}.`);
 P(`- Depth at arrival (population PRs open at each PR's creation): median ${median(pop.map((p) => p.depth))}, p75 ${pct(pop.map((p) => p.depth), 0.75)}, p90 ${pct(pop.map((p) => p.depth), 0.9)}, max ${Math.max(...pop.map((p) => p.depth))}, SD ${sd(pop.map((p) => p.depth)).toFixed(2)}; buckets ${BUCKETS.map((b) => `${b}: ${byBucket(b).length}`).join(", ")}. Same-day arrivals SD ${sd(pop.map((p) => p.sameDay)).toFixed(1)}; arrivals within ±1 h median ${median(pop.map((p) => p.nearby))}, SD ${sd(pop.map((p) => p.nearby)).toFixed(2)}.`);
