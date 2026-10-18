@@ -777,6 +777,26 @@ for (const c of KILLED_GIT) {
   });
 }
 
+// The workspace rule's own probe: a `--separate-git-dir` clone's git dir is
+// not named `.git`, so resolving its workspace asks `--resolve-git-dir` of
+// that dir's parent. Killed there, the proof has no workspace to put its
+// cache under, and refuses with no verdict, naming that probe.
+test("a git killed on the workspace rule's own probe refuses with no verdict, naming that probe", () => {
+  const dir = tempDir("recipe-prove-sep-");
+  const gitDir = join(tempDir("recipe-prove-sep-gd-"), "g");
+  git(dir, "init", "-q", "--separate-git-dir", gitDir);
+  git(dir, "config", "user.email", "t@t");
+  git(dir, "config", "user.name", "t");
+  write(dir, MAVEN_FILES);
+  git(dir, "add", "-A");
+  git(dir, "commit", "-q", "-m", "files");
+  git(dir, "update-ref", "refs/remotes/origin/main", "HEAD");
+  const r = prove(dir, COUNT_PROOF, { env: { PATH: fakeGit("*--resolve-git-dir*", "kill -9 $$") } });
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /^recipe-prove: cannot resolve the common git dir of .*: could not resolve .*\/\.git: killed by SIGKILL$/m);
+  assert.doesNotMatch(r.err, /NOT PROVEN/);
+});
+
 // The control: a git that ran and exited non-zero is quoted as it wrote, with
 // no kill named.
 test("a git that exits non-zero is refused with exactly its stderr, naming no signal", () => {

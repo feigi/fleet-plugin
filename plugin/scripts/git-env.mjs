@@ -1,9 +1,11 @@
-// Shared by every `.mjs` script under this directory that shells out to git —
-// two exports, one per half of the same spawn. `gitEnv()` builds the env the
-// git child is given; `workspaceDirFromGitCommonDir()` turns what the most
-// common of those children answers with, `rev-parse --git-common-dir`, into
-// the workspace directory a run's files live under. The first half's
-// reasoning is below; the second's sits beside its own function.
+// Shared by every `.mjs` script under this directory that shells out to git.
+// `gitEnv()` builds the env a git child is given. The rest turns what the
+// most common of those children answers with, `rev-parse --git-common-dir`,
+// into a directory: `resolveWorkspace()` (and `workspaceDirFromGitCommonDir()`,
+// its directory alone) names where a run's files live, spawning one more
+// probe of its own when the answer needs it; `mainCheckoutDirFromGitCommonDir()`
+// names the main checkout's work tree. `gitEnv()`'s reasoning is below; the
+// rest sits beside its own functions.
 //
 // GIT_DIR and GIT_WORK_TREE outrank both the child's cwd and an explicit `-C`
 // argument — measured directly: a `git rev-parse`/`ls-files` call
@@ -57,19 +59,24 @@ export function gitEnv(overrides = {}, base = process.env) {
 // the controller running from the checkout root agree about the run's single
 // ledger, its single heartbeat and its single board.
 //
-// The workspace is the directory holding a checkout's `.git`, which is the
-// common dir's parent. A common dir that is NOT a checkout's `.git` is its own
-// workspace — a bare repository's, a submodule's or a `--separate-git-dir`
-// clone's git dir — so two such dirs sharing a parent do not collapse onto
-// one workspace. The `.bare` layout is the exception that keeps the parent.
-// The rule's full statement sits beside `resolveWorkspace()` below.
+// The workspace is the common dir's parent when the common dir is named
+// `.git` or when that parent's own `.git` resolves to it (the `.bare`
+// layout's gitfile); otherwise it is the common dir itself — a bare
+// repository's, a submodule's or a `--separate-git-dir` clone's git dir — so
+// two such dirs sharing a parent do not collapse onto one workspace. The
+// rule's full statement sits beside `resolveWorkspace()` below. The main
+// checkout's work tree is a separate question with its own answer,
+// `mainCheckoutDirFromGitCommonDir()`: a `.git` symlinked to a git dir
+// elsewhere moves the workspace out of the checkout, never the work tree.
 //
 // For a run's `.fleet/` files the question is asked in one place,
-// fleet-dir.mjs's fleetFile(), which spawns the probe and hands its answer to
-// this module. What is NOT shared is the part each caller owns: the
+// fleet-dir.mjs's private workspaceOf(), which spawns `--git-common-dir`,
+// hands the answer to `resolveWorkspace()` and serves both fleetFile() and
+// scratchRoot(). What is NOT shared is the part each caller owns: the
 // filename it joins on, the wording of the warning it degrades with, and what
-// its own degraded answer is. Hence the seam: this module answers the
-// directory or `null`, and every caller composes the rest around it.
+// its own degraded answer is. Hence the seam: this module answers
+// `{dir, gitDir}` or `null`, or throws WorkspaceProbeFailed, and every caller
+// composes the rest around it.
 
 import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
@@ -100,11 +107,12 @@ function canonicalPath(path) {
 }
 
 // Why a probe that did not answer did not: the spawn error, the signal that
-// killed it, or its stderr.
+// killed it, or its stderr. Its caller reaches it only for a spawn error or a
+// probe with no exit status, so no exit code is ever left to name.
 function probeWhy(r) {
   if (r.error && r.error.message) return r.error.message;
   if (r.signal) return `killed by ${r.signal}`;
-  return String(r.stderr ?? "").trim() || (r.status === null ? "no answer" : `exit ${r.status}`);
+  return String(r.stderr ?? "").trim() || "no answer";
 }
 
 // Does `<parent>/.git` name `gitDir` (a realpath)? `--resolve-git-dir` follows
@@ -159,13 +167,41 @@ export function resolveWorkspace(gitCommonDir, cwd = process.cwd(), { canonicali
   if (!common) return null;
   const spelled = resolve(cwd, common);
   const real = canonicalPath(spelled);
-  const parentDir = () => (canonicalise ? dirname(real) : dirname(spelled));
-  if (basename(real) === ".git") return { dir: parentDir(), gitDir: false };
-  if (parentGitDirNames(dirname(real), real, cwd, timeoutMs)) return { dir: parentDir(), gitDir: false };
-  return { dir: canonicalise ? real : spelled, gitDir: true };
+  const chosen = canonicalise ? real : spelled;
+  if (basename(real) === ".git" || parentGitDirNames(dirname(real), real, cwd, timeoutMs)) {
+    return { dir: dirname(chosen), gitDir: false };
+  }
+  return { dir: chosen, gitDir: true };
 }
 
 /** `resolveWorkspace()`'s directory, without its shape. Same rule, same throw. */
 export function workspaceDirFromGitCommonDir(gitCommonDir, cwd = process.cwd(), options = {}) {
   return resolveWorkspace(gitCommonDir, cwd, options)?.dir ?? null;
+}
+
+/**
+ * The main checkout's WORK TREE a `git rev-parse --git-common-dir` answer
+ * names: the answer's parent, resolved against `cwd`. `null` when the answer
+ * is empty. No spawn, no throw.
+ *
+ * This is a different question from `resolveWorkspace()`'s, which asks where
+ * a repository's stores live, and the two answers part for a `.git`
+ * symlinked to a git dir elsewhere: asked from that checkout, git spells the
+ * common dir through the link (`.git`, `../.git`), so this answers the
+ * folder holding the link, while the store rule follows the link out of the
+ * checkout. A caller that runs `git status` in the main checkout, hashes its
+ * files or guards writes into it asks this one. From a linked worktree of
+ * such a checkout git answers with the link's target instead, so its parent
+ * is not the checkout — a known limit of this formula. In a bare, submodule
+ * or `--separate-git-dir` layout the parent is not a work tree at all;
+ * running a run from one of those is not supported.
+ *
+ * `canonicalise: true` returns the realpath form, or the path as resolved
+ * when it does not resolve.
+ */
+export function mainCheckoutDirFromGitCommonDir(gitCommonDir, cwd = process.cwd(), { canonicalise = false } = {}) {
+  const common = String(gitCommonDir ?? "").trim();
+  if (!common) return null;
+  const dir = dirname(resolve(cwd, common));
+  return canonicalise ? realpathOr(dir) : dir;
 }

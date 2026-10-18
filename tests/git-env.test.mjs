@@ -1,8 +1,10 @@
-// This file covers both of git-env.mjs's exports. `gitEnv()` is the one place
-// the scrub #1599 asks every `.mjs` git caller to route through;
-// `workspaceDirFromGitCommonDir()` is the one place #1658 asks every caller
-// that turns a `--git-common-dir` answer into a workspace directory to route
-// through — see git-env.mjs's own header for why each is a helper rather than
+// This file covers git-env.mjs's exports. `gitEnv()` is the one place the
+// scrub #1599 asks every `.mjs` git caller to route through;
+// `resolveWorkspace()` (with `workspaceDirFromGitCommonDir()`, its directory
+// alone) is the one place #1658 asks every caller that turns a
+// `--git-common-dir` answer into the run's workspace to route through, and
+// `mainCheckoutDirFromGitCommonDir()` the one for the main checkout's work
+// tree — see git-env.mjs's own header for why each is a helper rather than
 // one more hand-spelled copy.
 //
 // What matters for gitEnv() is observable: the two names are gone from what
@@ -12,11 +14,11 @@
 // every OTHER thing in this process that reads it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, symlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, renameSync, symlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { gitEnv, resolveWorkspace, workspaceDirFromGitCommonDir } from "../plugin/scripts/git-env.mjs";
+import { WorkspaceProbeFailed, gitEnv, mainCheckoutDirFromGitCommonDir, resolveWorkspace, workspaceDirFromGitCommonDir } from "../plugin/scripts/git-env.mjs";
 
 test("GIT_DIR and GIT_WORK_TREE are absent from the result, even when the base carries them", () => {
   const base = { GIT_DIR: "/somewhere/.git", GIT_WORK_TREE: "/somewhere", PATH: "/bin" };
@@ -73,13 +75,14 @@ test("with no base given, process.env itself is read — not a frozen or empty s
 });
 
 // ---------------------------------------------------------------------------
-// workspaceDirFromGitCommonDir() — the resolution the three callers of #1658
-// used to hand-spell one apiece (ledger.mjs, fleet-state.mjs, board.mjs), now
-// reached through fleet-dir.mjs's fleetFile() for every `.fleet/` file.
-// What is observable: which directory a given `--git-common-dir` answer
-// names, that an answer carrying nothing is `null` rather than a
-// plausible-looking path, and that canonicalisation is an opt-in only the
-// cockpit among those callers takes.
+// resolveWorkspace() and workspaceDirFromGitCommonDir() — the resolution the
+// three callers of #1658 used to hand-spell one apiece (ledger.mjs,
+// fleet-state.mjs, board.mjs), now reached through fleet-dir.mjs's
+// fleetFile() for every `.fleet/` file. What is observable: which directory a
+// given `--git-common-dir` answer names, that an answer carrying nothing is
+// `null` rather than a plausible-looking path, that canonicalisation is an
+// opt-in only the cockpit among those callers takes, and that a step-2 probe
+// which cannot answer throws rather than guessing.
 
 test("an absolute --git-common-dir names the directory holding it", () => {
   assert.equal(workspaceDirFromGitCommonDir("/w/repo/.git", "/elsewhere"), "/w/repo");
@@ -166,5 +169,58 @@ test("an ambient GIT_DIR naming another repository does not move the step-2 prob
     assert.deepEqual(resolveWorkspace(join(proj, ".bare"), proj), { dir: proj, gitDir: false });
   } finally {
     if (had) process.env.GIT_DIR = prev; else delete process.env.GIT_DIR;
+  }
+});
+
+// A `git` first on PATH that is killed on the step-2 probe and is the real
+// git for everything else, so that probe is the only thing that fails.
+function withStep2ProbeKilled(top, fn) {
+  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  const bin = join(top, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "git"), `#!/bin/sh\ncase "$*" in *--resolve-git-dir*) kill -9 $$ ;; esac\nexec '${realGit}' "$@"\n`);
+  chmodSync(join(bin, "git"), 0o755);
+  const prev = process.env.PATH;
+  process.env.PATH = `${bin}:${prev}`;
+  try {
+    return fn();
+  } finally {
+    process.env.PATH = prev;
+  }
+}
+
+test("a step-2 probe that cannot answer throws WorkspaceProbeFailed naming the probe, never a guessed workspace", () => {
+  const top = realpathSync(mkdtempSync(join(tmpdir(), "git-env-probe-")));
+  try {
+    const bare = join(top, "x.git");
+    execFileSync("git", ["init", "-q", "--bare", bare], { stdio: "pipe" });
+    withStep2ProbeKilled(top, () => {
+      assert.throws(() => resolveWorkspace(bare, top), (e) => {
+        assert.ok(e instanceof WorkspaceProbeFailed, `expected WorkspaceProbeFailed, got ${e}`);
+        assert.equal(e.message, `could not resolve ${join(top, ".git")}: killed by SIGKILL`);
+        return true;
+      });
+    });
+    // The control: the same answer with the real git is a workspace, not a throw.
+    assert.deepEqual(resolveWorkspace(bare, top), { dir: bare, gitDir: true });
+  } finally {
+    rmSync(top, { recursive: true, force: true });
+  }
+});
+
+test("a .git symlinked to a git dir elsewhere: the workspace follows the link, the main checkout's work tree stays", () => {
+  const top = realpathSync(mkdtempSync(join(tmpdir(), "git-env-symgit-")));
+  try {
+    const proj = join(top, "proj");
+    const gitDir = join(top, "g.git");
+    execFileSync("git", ["init", "-q", proj], { stdio: "pipe", env: gitEnv() });
+    renameSync(join(proj, ".git"), gitDir);
+    symlinkSync(gitDir, join(proj, ".git"));
+    const answer = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: proj, encoding: "utf8", env: gitEnv() });
+    assert.equal(mainCheckoutDirFromGitCommonDir(answer, proj), proj);
+    assert.equal(mainCheckoutDirFromGitCommonDir(answer, proj, { canonicalise: true }), proj);
+    assert.equal(workspaceDirFromGitCommonDir(answer, proj, { canonicalise: true }), gitDir);
+  } finally {
+    rmSync(top, { recursive: true, force: true });
   }
 });

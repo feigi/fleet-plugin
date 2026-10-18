@@ -62,6 +62,21 @@ test("a clean tree recorded and left alone is clean", (t) => {
   assert.equal(check(dir).state, "clean");
 });
 
+// The run's stores follow a symlinked `.git` into the git dir it points at;
+// the checkout `git status` must run in is still the folder holding the link.
+test("a checkout whose .git is a symlink to a git dir elsewhere records and checks its own work tree", (t) => {
+  const dir = repo(t);
+  const gitDir = realpathSync(mkdtempSync(join(tmpdir(), "main-checkout-symgit-")));
+  t.after(() => rmSync(gitDir, { recursive: true, force: true }));
+  rmSync(gitDir, { recursive: true });
+  renameSync(join(dir, ".git"), gitDir);
+  symlinkSync(gitDir, join(dir, ".git"));
+  record(dir);
+  assert.equal(check(dir).state, "clean");
+  writeFileSync(join(dir, "stray.txt"), "x\n");
+  assert.equal(check(dir).state, "dirty");
+});
+
 test("uncommitted work present at run start is in the baseline and holds nothing", (t) => {
   const dir = repo(t);
   writeFileSync(join(dir, "tracked.txt"), "mine, uncommitted\n");

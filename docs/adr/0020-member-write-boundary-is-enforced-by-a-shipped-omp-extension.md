@@ -79,10 +79,12 @@ Three routes were weighed.
    repository".
 6. **The main-checkout root** is the parent of `git rev-parse
    --git-common-dir`, via `git-env.mjs`'s `gitEnv()` and
-   `workspaceDirFromGitCommonDir()`, as `fleet-tick.mjs` resolves the run's
-   workspace. It is never `--show-toplevel`, which answers a worktree's own
-   root from inside one, and never an unscrubbed env (#1599). Paths are
-   compared after symlink resolution.
+   `mainCheckoutDirFromGitCommonDir()`: the work tree, which a symlinked
+   `.git` does not move. (Amended by #3091: it is no longer the rule
+   `fleet-tick.mjs` resolves the run's workspace with, which follows a
+   symlinked `.git` to its git dir.) It is never `--show-toplevel`, which
+   answers a worktree's own root from inside one, and never an unscrubbed
+   env (#1599). Paths are compared after symlink resolution.
 7. **Distribution.** `plugin/package.json` carries `"name": "@feigi/fleet-ctl"`
    and `"omp": {"extensions": ["scripts/member-write-guard.mjs"]}`. Every
    install places the plugin at the scope's

@@ -164,10 +164,11 @@ const COVERED_MJS = {
   // does not move the step-2 probe": under GIT_DIR the probe answers the path
   // it is given, so the scrub is defensive rather than load-bearing.
   "git-env.mjs": 2,
-  // TWO git-invoking primitives. `fleetFile()`'s `rev-parse --git-common-dir`
-  // is the probe behind every `.fleet/`-rooted file a run keeps: the ledger,
-  // the heartbeat's state, the shortlist, the cost guard and the cockpit's
-  // state directory. An ambient GIT_DIR answers it for a DIFFERENT
+  // TWO git-invoking primitives. `workspaceOf()`'s `rev-parse
+  // --git-common-dir`, reached through `fleetFile()` and `scratchRoot()`, is
+  // the probe behind every `.fleet/`-rooted file a run keeps and its scratch
+  // root: the ledger, the heartbeat's state, the shortlist, the cost guard and
+  // the cockpit's state directory. An ambient GIT_DIR answers it for a DIFFERENT
   // repository, which would put the run's file in that repository's
   // workspace, silently, at exit 0. Measured in fleet-dir.test.mjs, "an
   // ambient GIT_DIR naming another repository does not move the answer".

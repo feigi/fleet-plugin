@@ -39,12 +39,14 @@ Measured 2026-10-11 against `main` at `84b05f78`, as recorded in the ruling comm
    `$TMPDIR` or `local://`. A compacted, re-invoked or resumed controller
    computes the same path again.
 2. **`<repo-key>` is `<basename>-<8 hex>`.** `<basename>` is the folder name of
-   the workspace `fleetFile()` resolves — the directory holding a checkout's
-   `.git`, or the common git dir itself where no checkout's `.git` holds it (a
-   bare repository, a submodule's git dir, a `--separate-git-dir` clone), with a
+   the workspace `fleetFile()` resolves: the common git dir's parent when the
+   common dir is named `.git` or when that parent's own `.git` resolves to it
+   (the `.bare` layout's gitfile); otherwise the common git dir itself (a bare
+   repository, a submodule's git dir, a `--separate-git-dir` clone), with a
    trailing `.git` dropped from a git dir's name. The hex is the first 8
-   characters of the sha256 of that workspace's realpath. Worktrees map to their
-   main checkout, and two clones with the same name get different roots.
+   characters of the sha256 of that workspace's realpath. A linked worktree
+   maps to its repository's workspace, and two clones with the same name get
+   different roots.
 3. **Derivation.** `fleet-dir.mjs` exports `scratchRoot()`. A new CLI,
    `plugin/scripts/scratch-root.mjs` (run through
    `~/.fleet/bin/fleet-run`), runs `mkdir -p` and prints the absolute path.

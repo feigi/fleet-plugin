@@ -8,11 +8,12 @@
 //
 // The answer is git's: `rev-parse --git-common-dir` names the common git dir
 // every worktree of one repository shares, and git-env.mjs's resolveWorkspace()
-// turns that answer into the workspace it names: the directory holding a
-// checkout's `.git`, or the common git dir itself when no checkout's `.git`
-// holds it. This module is the spawn around that function — the scrubbed
-// env, the bound, the join onto `.fleet/` — so a new `.fleet/`-rooted file is
-// one `fleetFile("name")` call rather than another hand-spelled probe.
+// turns that answer into the workspace it names: the common git dir's parent
+// when the common dir is named `.git` or that parent's own `.git` resolves to
+// it, otherwise the common git dir itself. This module is the spawn around
+// that function — the scrubbed env, the bound, the join onto `.fleet/` — so a
+// new `.fleet/`-rooted file is one `fleetFile("name")` call rather than
+// another hand-spelled probe.
 //
 // One error policy: anything that leaves no workspace THROWS
 // FleetDirUnresolvable, never a null or an empty path. What a caller does
@@ -83,8 +84,10 @@ function workspaceOf(cwd, timeoutMs, canonicalise) {
   try {
     found = resolveWorkspace(r.stdout, cwd, { canonicalise, timeoutMs });
   } catch (e) {
+    // `--git-common-dir` answered; the rule's own probe is what failed, and
+    // its message names that probe.
     if (!(e instanceof WorkspaceProbeFailed)) throw e;
-    throw new FleetDirUnresolvable(`could not resolve --git-common-dir: ${e.message}`);
+    throw new FleetDirUnresolvable(`could not resolve the workspace: ${e.message}`);
   }
   if (found === null) {
     const why = cause(r.error && r.error.message, r.stderr) || ended(r);
@@ -101,7 +104,7 @@ function workspaceOf(cwd, timeoutMs, canonicalise) {
  * makes `--git-common-dir` answer for a DIFFERENT repository, which would put
  * the run's file in someone else's workspace, silently, at exit 0.
  *
- * `canonicalise` is workspaceDirFromGitCommonDir()'s opt-in, passed through:
+ * `canonicalise` is git-env.mjs's resolveWorkspace() opt-in, passed through:
  * only a caller that keys something on the path (the cockpit's port) takes
  * it. Everyone else prints the path it resolves, and realpath would change
  * that spelling without changing which file it names.

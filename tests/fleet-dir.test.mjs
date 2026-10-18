@@ -11,7 +11,7 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, w
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
-import { fleetFile, FleetDirUnresolvable } from "../plugin/scripts/fleet-dir.mjs";
+import { fleetFile, FleetDirUnresolvable, scratchRoot } from "../plugin/scripts/fleet-dir.mjs";
 
 // realpath'd: on macOS tmpdir() sits under /var, a symlink to /private/var,
 // and git answers a linked worktree's `--git-common-dir` in the resolved form
@@ -207,4 +207,28 @@ test("with no timeoutMs a git that never answers is still killed, by the default
   const e = unresolvable(bin, {});
   assert.match(e.message, /ETIMEDOUT/, "the default bound must fire and name itself");
   assert.ok(Date.now() - started < 18_000, "the default bound did not hold the probe");
+});
+
+// `--git-common-dir` answers; the rule's second probe, `--resolve-git-dir`,
+// is the one that dies. A bare repository's common dir is not named `.git`,
+// so that probe runs. Both stores refuse, naming that probe — never the
+// common dir as a guessed workspace.
+test("a step-2 probe that cannot answer leaves fleetFile() and scratchRoot() unresolvable, naming that probe", (t) => {
+  const top = tempDir(t, "fleet-dir-step2-");
+  const bare = join(top, "x.git");
+  git(top, "init", "-q", "--bare", bare);
+  const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  const bin = shimGit(t, "fleet-dir-step2-bin-", `case "$*" in *--resolve-git-dir*) kill -9 $$ ;; esac\nexec '${realGit}' "$@"`);
+  const want = `could not resolve the workspace: could not resolve ${join(top, ".git")}: killed by SIGKILL`;
+  withEnv({ PATH: `${bin}:${process.env.PATH}` }, () => {
+    for (const [what, call] of [["fleetFile()", () => fleetFile(null, { cwd: bare })], ["scratchRoot()", () => scratchRoot({ cwd: bare, home: top })]]) {
+      assert.throws(call, (e) => {
+        assert.ok(e instanceof FleetDirUnresolvable, `${what}: expected FleetDirUnresolvable, got ${e}`);
+        assert.equal(e.message, want, `${what}'s refusal`);
+        return true;
+      });
+    }
+  });
+  // The control: the real git answers, and the workspace is the bare dir.
+  assert.equal(fleetFile(null, { cwd: bare }), join(bare, ".fleet"));
 });

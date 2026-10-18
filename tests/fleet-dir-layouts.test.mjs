@@ -49,11 +49,6 @@ function sha8(path) {
   return createHash("sha256").update(path).digest("hex").slice(0, 8);
 }
 
-// The scratch key a workspace must produce: `<name>-<8 hex of its realpath>`.
-function scratchKeyOf(root) {
-  return basename(root);
-}
-
 test("two submodules of one superproject resolve to disjoint workspaces; a linked worktree of one shares its stores", (t) => {
   const d = tempDir(t, "fleet-layout-sub-");
   const modA = repo(join(d, "mod-a"));
@@ -72,7 +67,7 @@ test("two submodules of one superproject resolve to disjoint workspaces; a linke
     "two submodules of one superproject must not share a .fleet/ directory");
   assert.notEqual(scratchRoot({ cwd: a, home }), scratchRoot({ cwd: b, home }),
     "two submodules of one superproject must not share a scratch root");
-  assert.match(scratchKeyOf(scratchRoot({ cwd: a, home })), /^a-[0-9a-f]{8}$/);
+  assert.match(basename(scratchRoot({ cwd: a, home })), /^a-[0-9a-f]{8}$/);
 
   const wt = join(d, "a-wt");
   git(a, "worktree", "add", "-q", "--detach", wt);
@@ -101,7 +96,7 @@ test("two bare repositories in one parent are disjoint, and each bare dir agrees
     "a linked worktree of a bare repository shares its .fleet/");
   assert.notEqual(scratchRoot({ cwd: x, home }), scratchRoot({ cwd: y, home }));
   assert.equal(scratchRoot({ cwd: wx, home }), scratchRoot({ cwd: x, home }));
-  assert.match(scratchKeyOf(scratchRoot({ cwd: x, home })), /^x-[0-9a-f]{8}$/,
+  assert.match(basename(scratchRoot({ cwd: x, home })), /^x-[0-9a-f]{8}$/,
     "the .git suffix of a bare repository's directory name is not part of its key");
 });
 
@@ -144,7 +139,7 @@ test("a .git symlinked to an external git dir: the checkout and its linked workt
   assert.equal(fleetFile(null, { cwd: wt, canonicalise: true }), join(d, "g.git", ".fleet"),
     "a linked worktree of a symlinked .git must name the same .fleet/ as its checkout");
   assert.equal(scratchRoot({ cwd: wt, home }), scratchRoot({ cwd: proj, home }));
-  assert.match(scratchKeyOf(scratchRoot({ cwd: proj, home })), /^g-[0-9a-f]{8}$/);
+  assert.match(basename(scratchRoot({ cwd: proj, home })), /^g-[0-9a-f]{8}$/);
 });
 
 test("the layouts that did not collide keep the keys the pre-#3091 formula produced", (t) => {
@@ -191,5 +186,5 @@ test("a plain clone in a folder whose name ends in .git keeps its key: only a gi
   const home = tempDir(t, "fleet-layout-home-");
   const main = repo(join(d, "x.git"));
   assert.equal(fleetFile(null, { cwd: main }), join(main, ".fleet"));
-  assert.match(scratchKeyOf(scratchRoot({ cwd: main, home })), /^x\.git-[0-9a-f]{8}$/);
+  assert.match(basename(scratchRoot({ cwd: main, home })), /^x\.git-[0-9a-f]{8}$/);
 });

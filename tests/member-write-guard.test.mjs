@@ -18,7 +18,7 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
@@ -221,4 +221,16 @@ test("a symlinked route into the main checkout is the main checkout", async () =
   await refused(IMPL, "write", { path: "plugin/tool.mjs" }, link, "relative write from a symlinked cwd");
   await refused(IMPL, "write", { path: join(link, "plugin", "tool.mjs") }, ROOT, "absolute write through the symlink");
   await allowed(IMPL, "write", { path: join(link, ".worktrees", "42-slug", "a.mjs") }, ROOT, "worktree write through the symlink");
+});
+
+// The run's stores follow a symlinked `.git` into the git dir it points at;
+// the checkout a member must not write into is still the folder holding the link.
+test("a checkout whose .git is a symlink to a git dir elsewhere is still the main checkout", async () => {
+  const proj = repo(join(BASE, "symproj"));
+  const gitDir = join(BASE, "symproj-g.git");
+  renameSync(join(proj, ".git"), gitDir);
+  symlinkSync(gitDir, join(proj, ".git"));
+  await refused(IMPL, "write", { path: "plugin/tool.mjs" }, proj, "relative write into a symlinked-.git checkout");
+  await refused(IMPL, "bash", { command: "true" }, proj, "implementer bash from a symlinked-.git checkout");
+  await allowed(IMPL, "write", { path: ".fleet/ledger.md" }, proj, "gitignored .fleet/ in a symlinked-.git checkout");
 });

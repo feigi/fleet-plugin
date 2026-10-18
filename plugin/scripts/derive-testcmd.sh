@@ -17,9 +17,10 @@
 # specialists). Two independent readers is what drifts.
 #
 # THE CACHE is `<workspace>/.fleet/recipe.json`, where <workspace> is the
-# directory git-env.mjs's resolveWorkspace() names for the repository: a
-# checkout's `.git` holder, or the common git dir itself where no checkout's
-# `.git` holds it (a bare repository, a submodule). That is the same place the
+# directory git-env.mjs's resolveWorkspace() names for the repository: the
+# common git dir's parent when the common dir is named `.git` or that parent's
+# own `.git` resolves to it, otherwise the common git dir itself (a bare
+# repository, a submodule). That is the same place the
 # ledger and the heartbeat live — so a claimed worktree and a
 # review worktree read the one cache the main checkout holds rather than a
 # private copy each. A single JSON object:
@@ -181,17 +182,14 @@ case ${real##*/} in
   .git) ws=$parent ;;
   *)
     ws=$common
-    link=${real%/*}/.git
-    if [ -f "$link" ]; then
-      IFS= read -r gl < "$link" || :
+    target=${real%/*}/.git
+    if [ -f "$target" ]; then
+      IFS= read -r gl < "$target" || :
       gl=${gl#gitdir: }
-      case $gl in /*) ;; *) gl=${real%/*}/$gl ;; esac
-      target=$gl
-    else
-      target=$link
+      case $gl in /*) target=$gl ;; *) target=${real%/*}/$gl ;; esac
     fi
     named=$(cd -P "$target" 2>/dev/null && pwd -P) || named=
-    if [ -n "$named" ] && [ "$named" = "$real" ]; then ws=$parent; fi
+    if [ "$named" = "$real" ]; then ws=$parent; fi
     ;;
 esac
 cache="$ws/.fleet/recipe.json"

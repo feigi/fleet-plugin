@@ -57,10 +57,10 @@
 // `decide()` is the whole policy and touches nothing: the handler resolves the
 // main checkout, then hands it and a `check-ignore` probe in. The main
 // checkout is the parent of `git rev-parse --git-common-dir` (git-env.mjs's
-// `workspaceDirFromGitCommonDir`, as `fleet-tick.mjs` resolves the run's
-// workspace) — never `--show-toplevel`, which answers a WORKTREE's root from
-// inside one — and every git child gets `gitEnv()`, so an ambient GIT_DIR
-// cannot answer for another repository.
+// `mainCheckoutDirFromGitCommonDir`) — the work tree, which a symlinked `.git`
+// does not move, never git-env.mjs's store rule — and never `--show-toplevel`,
+// which answers a WORKTREE's root from inside one. Every git child gets
+// `gitEnv()`, so an ambient GIT_DIR cannot answer for another repository.
 //
 // Zero deps: node builtins and sibling scripts only.
 
@@ -69,7 +69,7 @@ import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { WorkspaceProbeFailed, gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { gitEnv, mainCheckoutDirFromGitCommonDir } from "./git-env.mjs";
 import { CELL_DEF } from "./ledger-grammar.mjs";
 
 /** The task names the controller gives fleet members; a subagent whose parent carries one is a member's child, and a member whose own id matches this is caught directly, whatever definition name its dispatch gave it. */
@@ -238,10 +238,8 @@ async function resolveMainRoot(cwd) {
   // by the dead path rather than "(or any …": that is a broken repo, and blocks.
   if (!r.error && r.status !== 0 && /not a git repository \(or any/i.test(r.stderr)) return null;
   if (r.error || r.status !== 0) return new Error(failure(r, "git rev-parse --git-common-dir"));
-  let root;
-  try { root = workspaceDirFromGitCommonDir(r.stdout, cwd, { canonicalise: true }); }
-  catch (e) { if (!(e instanceof WorkspaceProbeFailed)) throw e; return e; }
-  return root ?? new Error("git rev-parse --git-common-dir answered nothing");
+  return mainCheckoutDirFromGitCommonDir(r.stdout, cwd, { canonicalise: true })
+    ?? new Error("git rev-parse --git-common-dir answered nothing");
 }
 
 /** `git check-ignore` from `mainRoot`: true ignored, false not; rejects on anything else. */

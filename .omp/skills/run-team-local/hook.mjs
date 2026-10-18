@@ -35,7 +35,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "../../../plugin/scripts/arg.mjs";
-import { gitEnv, workspaceDirFromGitCommonDir } from "../../../plugin/scripts/git-env.mjs";
+import { gitEnv, mainCheckoutDirFromGitCommonDir } from "../../../plugin/scripts/git-env.mjs";
 import { CELL } from "../../../plugin/scripts/ledger-grammar.mjs";
 import { parseFeatures } from "../../../plugin/scripts/pr-cost.mjs";
 import { stoppingRule } from "../../../plugin/scripts/cell-readout.mjs";
@@ -252,7 +252,7 @@ function main() {
   let repo = F.arg("repo") === null ? null : resolve(F.arg("repo"));
   if (repo === null) {
     const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", env: gitEnv() });
-    repo = r.status === 0 ? workspaceDirFromGitCommonDir(r.stdout) : null;
+    repo = r.status === 0 ? mainCheckoutDirFromGitCommonDir(r.stdout) : null;
     if (repo === null) die("the cwd is not in a git repository — pass --repo <dir>");
   }
   const agentsDir = F.arg("agents") ?? join(repo, "plugin", "agents");
