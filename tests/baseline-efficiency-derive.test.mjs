@@ -4,7 +4,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { tempDir } from "./support/temp-dir.mjs";
-import { COLUMNS, parseTsv } from "../plugin/scripts/member-outcomes.mjs";
+import { COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
 
 // docs/research/baseline-efficiency-derive.py reads the TSV that
 // plugin/scripts/member-outcomes.mjs writes, through its own copy of the
@@ -30,27 +30,19 @@ function python(body, args) {
   return JSON.parse(r.stdout);
 }
 
-test("the derive script's COLUMNS is member-outcomes.mjs's COLUMNS, name for name", (t) => {
-  if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
-  assert.deepEqual(python("print(json.dumps(mod.COLUMNS))", []), COLUMNS);
-});
-
 // scrape_member_outcomes() runs the scraper into a fixed TSV path, then reads
 // that file. Here `subprocess.run` writes a fixture to the `--file` it was
 // handed and `Path` points the fixed path into this test's own directory.
-// A row whose cell count is not len(COLUMNS) is DROPPED, and nothing reports
-// it: this test pins that, and pins it against parseTsv, which refuses the
-// same row outright.
-test("scrape_member_outcomes() keys a full-width row by COLUMNS and silently drops a short one", (t) => {
+// The fixture holds one full-width row and nothing else: what the script does
+// with a row of any other width is #3465's to decide, so this test pins none.
+test("the derive script's COLUMNS is member-outcomes.mjs's COLUMNS, and scrape_member_outcomes() keys a full-width row by it", (t) => {
   if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  assert.deepEqual(python("print(json.dumps(mod.COLUMNS))", []), COLUMNS);
+
   const dir = tempDir("derive-columns-");
   const full = COLUMNS.map((c) => `v-${c}`).join("\t");
-  const short = COLUMNS.slice(0, -1).map((c) => `s-${c}`).join("\t");
   const fixture = join(dir, "fixture.tsv");
-  writeFileSync(fixture, `# ${COLUMNS.join("\t")}\n${full}\n${short}\n`);
-
-  assert.equal(parseTsv(`${full}\n`).length, 1, "the full-width row is one the scraper's own reader accepts");
-  assert.throws(() => parseTsv(`${short}\n`), /malformed row/);
+  writeFileSync(fixture, `# ${COLUMNS.join("\t")}\n${full}\n`);
 
   const rows = python(`
 import shutil

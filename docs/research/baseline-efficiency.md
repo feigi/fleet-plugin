@@ -86,6 +86,12 @@ review/fix/finish/merge work rather than fresh implementer dispatch, which
 is exactly the shape of inefficiency the wayfinder map's destination
 (off-turn reviews, dispatch-on-label merging) targets.
 
+The 0.906 above no longer reproduces from the committed script, which
+prints only the invocation-to-invocation figure, not the 0.867 variant.
+Re-run on 2026-10-18 with the script as fixed in § "2026-10-18 — runbook
+diet D6" below, it counted 85 implementer-role members in this session,
+not 58, and printed 0.878. Why the count moved was not investigated.
+
 ### Signal 4 detail — review start latency
 
 "Review dispatched" is the ticket's "workflow start": the earliest
@@ -255,8 +261,9 @@ script needed two fixes to run on today's tree: `COLUMNS` now lists the 20
 columns `plugin/scripts/member-outcomes.mjs` writes (it parsed 0 rows
 against 15), and `gh pr list --limit 400` no longer reached #1600 (now
 5000). With both, the unchanged before session again gave n = 75,
-10,029,018 and 133,720; the same run printed signal 3 as 0.878, not the
-0.906 above, a difference not investigated here.
+10,029,018 and 133,720. The same run printed signal 3 as 0.878, not the
+0.906 above, and counted 85 implementer-role members where the Signal 3
+detail counted 58; that detail now says the 0.906 no longer reproduces.
 
 ### `ready-for-human` tickets filed per run whose title names a skipped duty
 
