@@ -218,9 +218,11 @@ def main():
         r"^review(?:correctness|silent-failure|tests|comments|types|simplify)(?:-\d+)?$")
     review_pr_name = re.compile(r"^review-pr-(\d+)$")
     # The subject, read off each prompt's own PR interpolation: the snapshot
-    # prompt's `gh pr diff ${pr} > "$RUN"/pr.diff` line, and the specialist
-    # prompt's opening `Review PR #${pr} (branch ${branch}) for: `.
-    snapshot_subject = re.compile(r"^\s*gh pr diff (\d+) >", re.M)
+    # prompt's `gh pr diff ${pr} …` line — `> "$RUN"/pr.diff` before #3494,
+    # `-R "$REPO" > "$RUN"/pr.diff` since, so the number is matched up to
+    # whitespace and either form keys — and the specialist prompt's opening
+    # `Review PR #${pr} (branch ${branch}) for: `.
+    snapshot_subject = re.compile(r"^\s*gh pr diff (\d+)\s", re.M)
     specialist_subject = re.compile(r"^Review PR #(\d+) \(branch ", re.M)
 
     def dispatch_task(member):

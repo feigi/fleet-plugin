@@ -131,8 +131,8 @@ export function computeStats(files, changedFiles) {
 // --- CLI (runs only when executed directly, never on import) ---------------
 
 // die()/numArg() shared with the other fleet scripts — see arg.mjs for the
-// fail-open and pipe-safety rationale. `--pr` is
-// the only flag read here, and numArg() rather than arg() because this file
+// fail-open and pipe-safety rationale. `--pr` is the numeric flag read here
+// (`--repo` is the other, a plain string for gh's own `-R`), and numArg() rather than arg() because this file
 // was the live half of a defect: the `if (!pr)` below caught a trailing
 // `--pr` — `undefined` is falsy — but never a non-numeric one, so `--pr abc`
 // reached `gh pr view abc` and printed `{"pr":null,…}` at exit 0. Measured
@@ -140,7 +140,7 @@ export function computeStats(files, changedFiles) {
 // it resolves as a BRANCH, so the stats underneath were genuine and about
 // whatever PR that branch heads, reported under a null id.
 const die = makeDie(NAME);
-const { numArg, sweep, stray } = defineFlags(die, { flags: { pr: "value" } });
+const { arg, numArg, sweep, stray } = defineFlags(die, { flags: { pr: "value", repo: "value" } });
 
 // The one truncation rule for the raw gh value this script quotes into a
 // refusal: clip behind a visible marker, and only when the value was really
@@ -211,7 +211,17 @@ function main() {
   // required, where gh answers it truthfully as no such PR. Absent is this
   // file's own refusal and malformed is numArg()'s, per arg.mjs.
   const pr = numArg("pr");
-  if (pr === null) die("usage: diff-stats.mjs --pr <number>");
+  if (pr === null) die("usage: diff-stats.mjs --pr <number> [--repo <[HOST/]OWNER/REPO | url>]");
+  // Which repository the PR is in. Absent, `gh` resolves it from this process's
+  // working directory — the right answer for a human at their own checkout and
+  // the wrong one for review-core.mjs's snapshot agent, which starts in the
+  // controller's checkout while the PR belongs to the worktree's repository: a
+  // PR in the cwd's repository that shares the number answers instead, exit 0,
+  // a well-formed `files` array and a profile that sizes another change.
+  // `arg()` refuses an empty or flag-shaped value, so a caller whose repository
+  // came back empty gets a refusal here, never the cwd fallback an empty `-R ""`
+  // would be.
+  const repo = arg("repo");
   // The misspelled-flag sweep, weaker here for the same reason as pr-overlap.mjs: `--pr` is
   // required, so a misspelled `--prr 5` already fell through to the usage die
   // above. What was silently ignored at exit 0 is a stray riding along with a
@@ -234,7 +244,7 @@ function main() {
   // fail-closed rule as run() above: a broken response is not an empty diff.
   // `changedFiles` rides the same query for free and is the only thing that
   // reveals the 100-file cap on `files` — see computeStats.
-  const raw = run("gh", ["pr", "view", String(pr), "--json", "files,changedFiles"]);
+  const raw = run("gh", ["pr", "view", String(pr), "--json", "files,changedFiles", ...(repo === null ? [] : ["-R", repo])]);
   let info;
   try {
     info = JSON.parse(raw);

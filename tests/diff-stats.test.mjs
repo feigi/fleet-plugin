@@ -329,6 +329,61 @@ test("CLI: a well-formed --pr value is accepted and the CLI succeeds", () => {
   assert.equal(payload.profile, "single-file");
 });
 
+// #3494: `--repo` names the repository the PR is in, so the sizing reads the
+// worktree's PR rather than the same-numbered one in the caller's cwd. The gh
+// stub logs every call's args; an absent `--repo` must leave the invocation as
+// it was — no `-R` at all — because every other caller still resolves from cwd.
+const runWithRepoArgs = (extra, ghScript = 'echo \'{"files":[{"path":"a.ts","additions":1,"deletions":0}],"changedFiles":1}\'\n') => {
+  const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
+  const log = join(bin, "gh.log");
+  writeExecStub(join(bin, "gh"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${log}"\n${ghScript}`);
+  const r = spawnSync(process.execPath, [SCRIPT, "--pr", "5", ...extra], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  let calls = [];
+  try {
+    calls = readFileSync(log, "utf8").split("\n").filter(Boolean);
+  } catch {}
+  rmSync(bin, { recursive: true, force: true });
+  return { r, calls };
+};
+
+test("CLI: --repo is handed to gh as -R, and the PR read is otherwise unchanged", () => {
+  const { r, calls } = runWithRepoArgs(["--repo", "bmw.ghe.com/CoCo/agent-brain"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(calls, ["pr view 5 --json files,changedFiles -R bmw.ghe.com/CoCo/agent-brain"]);
+});
+
+test("CLI: without --repo gh gets no -R, so the current invocation still resolves from cwd", () => {
+  const { r, calls } = runWithRepoArgs([]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(calls, ["pr view 5 --json files,changedFiles"]);
+});
+
+test("CLI: --repo with no or an empty value dies (exit 2) and never reaches gh — an empty -R would be the cwd fallback", () => {
+  for (const extra of [["--repo"], ["--repo", ""]]) {
+    const { r, calls } = runWithRepoArgs(extra);
+    assert.equal(r.status, 2, `${JSON.stringify(extra)}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /--repo needs a value/);
+    assert.deepEqual(calls, [], "gh ran with no repository named");
+  }
+});
+
+// The usage line is what a caller reads when it gets the invocation wrong, so
+// it advertises `--repo` alongside `--pr`.
+test("CLI: the usage refusal names the optional --repo", () => {
+  const r = spawnSync(process.execPath, [SCRIPT], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /usage: diff-stats\.mjs --pr <number> \[--repo [^\]]+\]/);
+});
+
+test("CLI: a gh that cannot read the named repository's PR still fails closed with --repo", () => {
+  const { r } = runWithRepoArgs(["--repo", "o/r"], "exit 1\n");
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.equal(r.stdout.trim(), "", "exit 2 emits no payload");
+});
+
 // #932: the non-JSON die above quoted `raw.trim().slice(0, 120)` with NO
 // marker, so a 269 KB portal page and a 90-character one rendered identically —
 // a reader could not tell gh's whole output from this script's clip of it. The
