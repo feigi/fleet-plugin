@@ -69,14 +69,16 @@
 //                 Markdown headings its changed lines sit under in the file
 //                 at the merge-base (a PR's head fetched as `pull/<M>/head`);
 //                 ranges only for a file that is not Markdown or whose base
-//                 could not be read. Each brief path with a line reference
-//                 in a shared file follows, with its headings on origin/main.
-//                 `no overlap` when none, and `could not look: <which>` for
-//                 one that could not be read; the `#N` refs of the brief's
-//                 Out of scope section are printed as the behind-issue
-//                 candidates. Then `clear`, `behind-pr:#M`, `behind-issue:#M`,
-//                 or `paths <p>…`, which scans again and asks again. An
-//                 exclusion is a ledger row.
+//                 could not be read, `(new file)` beside each range of a file
+//                 new in the diff, and `no hunk in the diff` for a shared file
+//                 the diff holds no hunk for. Each brief path with a line
+//                 reference in a shared file follows, with its headings on
+//                 origin/main. `no overlap` when none, and `could not look:
+//                 <which>` for one that could not be read; the `#N` refs of
+//                 the brief's Out of scope section are printed as the
+//                 behind-issue candidates. Then `clear`, `behind-pr:#M`,
+//                 `behind-issue:#M`, or `paths <p>…`, which scans again and
+//                 asks again. An exclusion is a ledger row.
 //   6  claim      `claim-ticket.sh <N> impl-<N> implementer --apply`.
 //   7  route      `ticket-router.mjs route …`; a router that refuses releases
 //                 the claim, and a release that fails is exit 2 with the claim
@@ -316,15 +318,20 @@ export function diffHunks(text) {
   return files;
 }
 
-/** The ATX headings of Markdown `text`, `{ line, text }`, 1-based, fenced code skipped. */
+/**
+ * The ATX headings of Markdown `text`, `{ line, text }`, 1-based, fenced code
+ * skipped. A fence closes only on a run of its own character at least as long
+ * with nothing after it but whitespace: a fence line carrying an info string
+ * inside a fence is code.
+ */
 export function headings(text) {
   const out = [];
   let fence = null;
   text.split("\n").forEach((l, i) => {
-    const f = /^ {0,3}(`{3,}|~{3,})/.exec(l);
+    const f = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(l);
     if (f !== null) {
       if (fence === null) fence = f[1];
-      else if (f[1][0] === fence[0] && f[1].length >= fence.length) fence = null;
+      else if (f[1][0] === fence[0] && f[1].length >= fence.length && f[2].trim() === "") fence = null;
       return;
     }
     if (fence === null && /^ {0,3}#{1,6}(\s|$)/.test(l)) out.push({ line: i + 1, text: l.trim() });
@@ -709,7 +716,9 @@ class Pull {
 
   // Each shared file's hunks in `diff`, by base-side range, each with the
   // headings its changed lines sit under in the base file `base()` names —
-  // ranges only for a file that is not Markdown or whose base could not be read.
+  // ranges only for a file that is not Markdown or whose base could not be
+  // read, and `(new file)` beside each range of a file new in the diff. A
+  // shared file the diff holds no hunk for prints `no hunk in the diff`.
   hunkLines(files, diff, base) {
     const parsed = diffHunks(diff);
     const lines = [];

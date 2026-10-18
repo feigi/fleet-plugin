@@ -409,6 +409,7 @@ test("diffHunks reads each file's base-side hunk ranges and the lines their chan
 test("headings skips fenced code; sectionsOf names the heading a range starts under and each it crosses", () => {
   const hs = headings("# T\n\n```sh\n# a comment\n```\n## A\nx\n  ### B\ny\n~~~\n## not\n~~~\n");
   assert.deepEqual(hs, [{ line: 1, text: "# T" }, { line: 6, text: "## A" }, { line: 8, text: "### B" }]);
+  assert.deepEqual(headings("# Top\n```\nnot\n```js\n# in code\n```\n## Real\ntext"), [{ line: 1, text: "# Top" }, { line: 7, text: "## Real" }], "a fence line with an info string does not close a fence");
   assert.equal(sectionsOf(hs, 7, 7), "## A");
   assert.equal(sectionsOf(hs, 6, 9), "## A → ### B");
   assert.equal(sectionsOf(hs, 0, -1), "(no heading above)");
