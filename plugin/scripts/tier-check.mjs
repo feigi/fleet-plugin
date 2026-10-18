@@ -22,11 +22,10 @@
 //      readers — a member with no assistant turn yet still resolves off its
 //      dispatch-time `session_init` record, never treated as absent). An
 //      entry that names neither a `session` nor a `transcript` takes the
-//      `session` the phase-0 receipt `.fleet/phase0.json` records — the
-//      receipt of the workspace the ledger in use belongs to (`--ledger`'s
-//      directory, or the cwd's when `--ledger` is omitted), never the cwd's
-//      when `--ledger` names another workspace's — and is
-//      exit 2 naming the receipt when it records none. That session is taken
+//      `session` the phase-0 receipt `.fleet/phase0.json` records — the one
+//      in the workspace holding `--ledger`, or the cwd's when `--ledger` is
+//      omitted, resolved the same way the default ledger is — and is exit 2
+//      naming the receipt when it records none. That session is taken
 //      as the receipt stands: whether the receipt is this run's is judged by
 //      fleet-tick.mjs's phase-0 gate, not here, and a message about it names
 //      the receipt's session where it would name `--session`.
@@ -80,8 +79,10 @@
 // LIVE member may yet write one; a member settled `PR#M`, `bailed`, `blocked`
 // or `tier-mismatch` ran, so its transcript exists and the `session` is the
 // wrong directory; a `session` that is empty, missing or not a directory,
-// or omitted with none in the phase-0 receipt, is exit 2 whether the member
-// is live or settled; and a session
+// or omitted with none in the phase-0 receipt — a `--ledger` outside any
+// repository or in a directory that does not exist among them, since no
+// workspace holds it and so there is no receipt to read — is exit 2 whether
+// the member is live or settled; and a session
 // directory that cannot be searched (EACCES) is exit 2 naming the errno,
 // never read as holding no transcript.
 
@@ -335,15 +336,13 @@ const NO_TRANSCRIPT_OUTCOMES = new Set(["killed", "released"]);
 // belongs to, so a `--ledger` naming another workspace's judges that
 // workspace's transcripts, not the cwd's. `--ledger` takes any path, not
 // always one under a `.fleet/` — so the workspace is the one git names for
-// the ledger's directory (its nearest existing ancestor: the directory may
-// not exist before the run's first write), the same answer ledger.mjs's own
-// default gives from the cwd. A ledger under no repository has no workspace
-// and so no receipt: sessionFromReceipt refuses naming why. Omitted, the cwd's.
+// the ledger's directory, the same answer ledger.mjs's own default gives
+// from the cwd. A ledger under no repository, or in a directory that does not
+// exist, has no workspace and so no receipt: sessionFromReceipt refuses
+// naming why, and the whole batch is exit 2 with nothing written. Omitted,
+// the cwd's.
 function receiptOpts(ledgerFile) {
-  if (!ledgerFile) return undefined;
-  let cwd = dirname(resolve(ledgerFile));
-  while (!existsSync(cwd) && dirname(cwd) !== cwd) cwd = dirname(cwd);
-  return { cwd };
+  return ledgerFile ? { cwd: dirname(resolve(ledgerFile)) } : undefined;
 }
 
 function runLedger(ledgerFile, args, what) {

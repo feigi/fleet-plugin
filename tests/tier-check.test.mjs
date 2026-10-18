@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, readFileSync, chmodSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { rendering } from "./support/rendered-brief.mjs";
 
@@ -598,17 +598,19 @@ test("session: an entry that gives a transcript, or a non-implementer with a ful
 });
 
 // The receipt is the ledger's workspace's, not the cwd's: a second git
-// workspace A, with a receipt of its own, is the cwd; the ledger, the batch
-// and the transcript live in workspace B.
-function foreignCwd(w) {
-  const a = dir();
+// workspace A, with a receipt of its own, is the cwd; the batch and the
+// transcript live in workspace B, and so does the ledger unless `run` is
+// handed another.
+function foreignCwd(w, a = dir()) {
+  mkdirSync(a, { recursive: true });
   execFileSync("git", ["init", "-q"], { cwd: a });
   mkdirSync(join(a, ".fleet"), { recursive: true });
   mkdirSync(join(a, "sessA"));
   writeFileSync(join(a, ".fleet", "phase0.json"), JSON.stringify(receiptFor(join(a, "sessA"))));
   writeFileSync(join(w.d, "batch.json"), JSON.stringify([{ member: "impl-7" }]));
-  const argv = ["--batch", join(w.d, "batch.json"), "--repo", w.d, "--ledger", w.ledger, "--model-roles", modelRolesFile(w.d)];
-  return { a, run: () => runCli(argv, a) };
+  const run = (ledger = w.ledger) =>
+    runCli(["--batch", join(w.d, "batch.json"), "--repo", w.d, "--ledger", ledger, "--model-roles", modelRolesFile(w.d)], a);
+  return { a, run };
 }
 
 test("receipt: --ledger naming another workspace takes that workspace's receipt, not the cwd's", () => {
@@ -631,17 +633,27 @@ test("receipt: --ledger naming another workspace with no receipt of its own refu
   assert.equal(readFileSync(w.ledger, "utf8"), before, "the ledger changed");
 });
 
-test("receipt: a ledger in a directory that does not exist yet reads the receipt of the workspace its nearest existing ancestor belongs to", () => {
+// A relative --ledger is the caller's path from the cwd. The cwd is nested
+// deeper than --repo, so the same string resolved against --repo names a
+// different file.
+test("receipt: a relative --ledger is resolved against the cwd, not against --repo, before the receipt lookup", () => {
   const w = implWorld();
-  const check = withReceipt(w, receiptFor(join(w.d, "session")));
-  writeFileSync(join(w.d, "agents", "fleet-reviewer.agent.md"), agentMd("@slow:high"));
-  writeFileSync(join(w.d, "session", "SomeWordPair.jsonl"), ompTranscript("anthropic/claude-opus-5", "high", { agent: "fleet-reviewer" }));
-  const ledger = join(w.d, "fresh", "sub", "ledger.md");
-  writeFileSync(join(w.d, "batch.json"), JSON.stringify([{ member: "SomeWordPair", agentFile: "agents/fleet-reviewer.agent.md", resolvedModel: "anthropic/claude-opus-5" }]));
-  const r = runCli(["--batch", join(w.d, "batch.json"), "--repo", w.d, "--ledger", ledger, "--model-roles", modelRolesFile(w.d)], dir());
+  withReceipt(w, receiptFor(join(w.d, "session")));
+  const { a, run } = foreignCwd(w, join(dir(), "deep", "er"));
+  const ledger = relative(a, w.ledger);
+  assert.ok(!isAbsolute(ledger) && ledger.startsWith(".."), ledger);
+  const r = run(ledger);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.equal(existsSync(ledger), false, "a passing check wrote a ledger");
-  assert.equal(check([{ member: "impl-7" }]).status, 0, "the workspace's own receipt is still read from its own cwd");
+  assert.equal(w.row(), "#7 impl-7 · class=routine · tier-ok=impl-7:fleet-implementer-slow-high");
+});
+
+test("receipt: a --ledger in a directory that does not exist refuses through the unreadable-receipt path — exit 2, nothing written", () => {
+  const w = implWorld();
+  withReceipt(w, receiptFor(join(w.d, "session")));
+  const r = foreignCwd(w).run(join(w.d, "fresh", "sub", "ledger.md"));
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /impl-7: no session given and none in the phase-0 receipt .*\(unreadable: /);
+  assert.equal(existsSync(join(w.d, "fresh")), false, "a refused check created the ledger's directory");
 });
 
 test("receipt: a --ledger under no repository has no workspace and so no receipt — exit 2, even beside a cwd receipt", () => {
