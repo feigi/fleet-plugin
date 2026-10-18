@@ -697,10 +697,10 @@ class Pull {
     ];
   }
 
-  // A file as it stands at `rev`, `{ text }`, or `{ why }` it could not be read.
-  fileAt(rev, path) {
+  // A Markdown file's headings as it stands at `rev`, `{ hs }`, or `{ why }` it could not be read.
+  headingsAt(rev, path) {
     const r = this.exec("collision", "git", "git", [], ["cat-file", "blob", `${rev}:${path}`], { raw: true }, sized);
-    return r.status === 0 ? { text: r.stdout } : { why: `git cat-file blob ${rev}:${path}: ${failure(r)}` };
+    return r.status === 0 ? { hs: headings(r.stdout) } : { why: `git cat-file blob ${rev}:${path}: ${failure(r)}` };
   }
 
   // The merge-base of origin/main and `rev`, `{ rev }`, or `{ why }` there is none.
@@ -733,9 +733,9 @@ class Pull {
       let hs = null;
       if (d.old !== null && MARKDOWN.test(d.old)) {
         at ??= base();
-        const read = at.rev === undefined ? at : this.fileAt(at.rev, d.old);
-        if (read.text === undefined) lines.push(`  ${f}: base not read (${read.why})`);
-        else hs = headings(read.text);
+        const read = at.rev === undefined ? at : this.headingsAt(at.rev, d.old);
+        if (read.hs === undefined) lines.push(`  ${f}: base not read (${read.why})`);
+        else hs = read.hs;
       }
       for (const { a, b, from, to } of d.hunks) {
         const where = d.old === null ? " (new file)" : hs === null ? "" : ` ${sectionsOf(hs, from, to)}`;
@@ -879,9 +879,9 @@ class Pull {
       for (const f of [...sharedFiles].filter((x) => pathHits(p, x))) {
         let where = "(not Markdown)";
         if (MARKDOWN.test(f)) {
-          if (!onMain.has(f)) onMain.set(f, this.fileAt("origin/main", f));
+          if (!onMain.has(f)) onMain.set(f, this.headingsAt("origin/main", f));
           const read = onMain.get(f);
-          where = read.text === undefined ? `(not read: ${read.why})` : sectionsOf(headings(read.text), Number(ref[1]), Number(ref[2] ?? ref[1]));
+          where = read.hs === undefined ? `(not read: ${read.why})` : sectionsOf(read.hs, Number(ref[1]), Number(ref[2] ?? ref[1]));
         }
         lineRefs.push(`brief ref ${p} (${f} on origin/main): ${where}`);
       }
