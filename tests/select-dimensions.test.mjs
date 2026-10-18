@@ -63,8 +63,7 @@ test("a production diff with source and no test file keeps tests", () => {
 test("the tests filter keys on (production, hasSrc, hasTests) together", () => {
   const keys = (stats) => selectDimensions(DEFAULT_DIMENSIONS, { docsOnly: false, hasConfig: false, ...stats }).map((d) => d.key);
   // Kept: production source with no test file.
-  assert.ok(keys({ profile: "production", hasSrc: true, hasTests: false }).includes("tests"));
-  assert.equal(keys({ profile: "production", hasSrc: true, hasTests: false }).length, 6);
+  assert.deepEqual(keys({ profile: "production", hasSrc: true, hasTests: false }), DEFAULT_DIMENSIONS.map((d) => d.key));
   // Dropped: no source, so there is no changed behaviour to mutate.
   assert.ok(!keys({ profile: "production", hasSrc: false, hasTests: false }).includes("tests"));
   // The size-tier floor is unchanged: neither tier keeps `tests` without a test file.
@@ -73,6 +72,9 @@ test("the tests filter keys on (production, hasSrc, hasTests) together", () => {
   // A blob that lost `hasSrc` must not narrow coverage below what a blob that
   // names it gets.
   assert.ok(keys({ profile: "production", hasTests: false }).includes("tests"));
+  // Nor one that lost `hasTests`: above the size tier, only an explicit
+  // `hasTests: false` drops `tests`, even with no source to hunt in.
+  assert.ok(keys({ profile: "production", hasSrc: false }).includes("tests"));
 });
 
 // --- Size tier. `profile` is assigned through an else-if chain in computeStats,
