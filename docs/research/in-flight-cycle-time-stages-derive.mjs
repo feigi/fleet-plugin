@@ -25,6 +25,8 @@
 // a truncated page is never counted as a short (final) one. The merged PRs the
 // population pages held beyond the population, and --buffer-pages older pages
 // fetched on top, are used only for the depth sensitivity line.
+// A PR number is counted once across all closed pages read (first occurrence in
+// listing order wins); dropped duplicates are reported on stderr, see below.
 //
 // Per PR, five more reads (and one per linked issue):
 //   GET /issues/<n>/events      labeled/unlabeled (label name), head_ref_force_pushed, merged
@@ -182,13 +184,27 @@ const RTM = "ready-to-merge";
 const table = (head, rows) => [`| ${head.join(" | ")} |`, `|${head.map(() => "---").join("|")}|`, ...rows.map((r) => `| ${r.join(" | ")} |`)].join("\n");
 
 // ------------------------------------------------------------ population ----
+// The closed listing is read page by page and every page is cached forever, so
+// a deeper run can take pages 1..k from an earlier fill and later pages live.
+// If PRs were created in between, the listing has shifted and one PR can end a
+// cached page and start the next live one; a PR created while one run reads the
+// pages live shifts it the same way, --refresh or not. A PR number enters the
+// closed list, the population and the buffer at most once; the first occurrence
+// in listing order wins, and the duplicates dropped are counted for one stderr line.
+const seen = new Set();
+let duplicatesDropped = 0;
+const fresh = (rows) => rows.filter((x) => {
+  if (seen.has(x.number)) { duplicatesDropped++; return false; }
+  seen.add(x.number);
+  return true;
+});
 const closed = [];
 let pages = 0, exhausted = false;   // exhausted: the listing has no older page left
 for (;;) {
   pages++;
   const d = await api(`pulls?state=closed&sort=created&direction=desc&per_page=${PER_PAGE}&page=${pages}`);
   if (!Array.isArray(d)) die(`pulls page ${pages}: not an array`);
-  closed.push(...d.filter((x) => T(x.created_at) < UNTIL));
+  closed.push(...fresh(d).filter((x) => T(x.created_at) < UNTIL));
   if (d.length < PER_PAGE) { exhausted = true; break; }
   if (T(d[d.length - 1].created_at) < SINCE) break;   // the window is covered; older pages still exist, for the buffer
   if (closed.filter((x) => x.merged_at && T(x.created_at) >= SINCE).length >= N) break;
@@ -210,9 +226,13 @@ for (let b = 1; b <= BUFFER_PAGES && !exhausted; b++) {
   const d = await api(`pulls?state=closed&sort=created&direction=desc&per_page=${PER_PAGE}&page=${pages + b}`);
   if (!Array.isArray(d)) die(`pulls buffer page ${pages + b}: not an array`);
   bufferPagesRead++;
-  buffer.push(...d.filter((x) => x.merged_at).map(asBuf));
+  buffer.push(...fresh(d).filter((x) => x.merged_at).map(asBuf));
   if (d.length < PER_PAGE) break;
 }
+const shift = REFRESH
+  ? "it shifted while its pages were read live (a PR created mid-run)"
+  : "it shifted between page reads (pages from different cache fills, or a PR created mid-run)";
+if (duplicatesDropped) console.error(`in-flight-cycle-time-stages: dropped ${duplicatesDropped} duplicate PR${duplicatesDropped === 1 ? "" : "s"} from the closed listing: ${shift}; re-run with --refresh to read every page live`);
 const openFiles = [];
 const openNow = await pagedList("pulls?state=open", openFiles);
 pop.sort((a, b) => a.created - b.created);
