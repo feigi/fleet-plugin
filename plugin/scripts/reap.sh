@@ -683,12 +683,15 @@ null_head_why() {
 # away from them. %(refname) is always refs/heads/<name>, so the strip yields
 # the bare name for every branch, ambiguous or not.
 #
-# The $2=="[gone]" field test is deliberately untouched, and it still selects
-# the same branches: a space is not legal in a branch name (measured — git
-# refuses `has space` as invalid), so the name is always the whole of $1, and a
-# branch with no upstream leaves $2 empty rather than matching. The tracking
-# forms that DO carry a space, `[ahead 1]` and its siblings, split so that $2
-# holds `[ahead` — not `[gone]` either way.
+# The [gone] test reads $3 and the no-upstream test reads $2: a space is not
+# legal in a branch name (measured — git refuses `has space` as invalid), so
+# the name is always the whole of $1, and $2 is `upstream=` followed by
+# %(upstream)'s ref — exactly `upstream=` when the branch has none. The
+# tracking forms that DO carry a space, `[ahead 1]` and its siblings, split so
+# that $3 holds `[ahead` — not `[gone]` either way. That layout holds only
+# while the upstream ref carries no whitespace: %(upstream) is built from the
+# branch.<b>.merge value, which git does not validate, and a space there moves
+# the track out of $3 (measured, git 2.50.1).
 # A command substitution inside a `for ... in` word list discards its own
 # exit status entirely, in every shell measured here (bash, dash, macOS
 # /bin/sh): `for x in $(false); do …; done` completes at the loop's own end,

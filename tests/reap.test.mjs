@@ -3425,7 +3425,7 @@ test("a merged claim branch with no upstream is kept and reported, never omitted
   assert.equal(branchExists(w, b), false);
 });
 
-test("a merged claim branch with no upstream held by a worktree is kept once, and the worktree is left alone", (t) => {
+test("a merged claim branch with no upstream held by a worktree is kept once, and the worktree is left alone until its upstream is written", (t) => {
   const w = repo(t);
   const b = "implementer/9-y";
   const wt = join(w, ".worktrees", "claim");
@@ -3443,6 +3443,15 @@ test("a merged claim branch with no upstream held by a worktree is kept once, an
   assert.deepEqual(json.worktreesRemoved, []);
   assert.equal(existsSync(wt), true);
   assert.equal(branchExists(w, b), true);
+
+  git(w, "config", `branch.${b}.remote`, "origin");
+  git(w, "config", `branch.${b}.merge`, `refs/heads/${b}`);
+  const reaped = runReap(w, ["--apply"]);
+  assert.equal(reaped.code, 0);
+  assert.deepEqual(reaped.json.reaped, [b]);
+  assert.deepEqual(reaped.json.worktreesRemoved, [wt]);
+  assert.equal(existsSync(wt), false);
+  assert.equal(branchExists(w, b), false);
 });
 
 test("a locked detached worktree is kept, its registration reported intact and its path named (#381)", (t) => {
@@ -4135,6 +4144,31 @@ test("an unenumerable [gone] sweep is kept, not silently read as a clean no-op (
   assert.match(stderr, /KEEP \(no branch\) — could not enumerate \[gone\] branches/);
   assert.equal(branchExists(w, "feature/merged"), true, "a genuinely merged branch survives an enumeration that could not see it");
   assertToolShimFired(bin, "awk", "the awk shim must actually have fired for this fixture");
+});
+
+test("an unenumerable no-upstream sweep is kept, and the [gone] sweep beside it still reaps", (t) => {
+  // The no-upstream awk program is the only one carrying `upstream=`, so the
+  // shim fails that scan alone and the [gone] scan over the same capture runs.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const bin = toolFailShim(
+    t,
+    "awk",
+    REAL_AWK,
+    `case "$1" in *'upstream='*) : ;; *) false ;; esac`,
+    ["awk: multibyte conversion failure"],
+    2,
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0, "an unanswerable enumeration is a finding, not a script failure");
+  assert.equal(json.kept.length, 1, JSON.stringify(json.kept));
+  assert.equal(json.kept[0].branch, null, "no branch was ever named, so none can be blamed");
+  assert.match(json.kept[0].reason, /^could not enumerate branches with no upstream/);
+  assert.match(stderr, /KEEP \(no branch\) — could not enumerate branches with no upstream/);
+  assert.deepEqual(json.reaped, ["feature/merged"], "the [gone] scan does not depend on the no-upstream one");
+  assertToolShimFired(bin, "awk", "the awk shim must actually have fired for this fixture", /upstream=/);
 });
 
 test("a `git for-each-ref` that dies is kept, never read as a clean no-op that just found nothing (#789)", (t) => {

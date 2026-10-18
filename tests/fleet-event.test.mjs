@@ -287,6 +287,18 @@ test("impl-report on a PR outcome sets the claim branch's upstream when none is 
   assert.ok(!second.stdout.includes("NEED"), second.stdout);
 });
 
+test("impl-report for a member already settled as a PR still sets the claim branch's upstream when none is configured", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88"] });
+  git(f.repo, "branch", CLAIM);
+  f.report(implReport("impl-412"));
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(r.order, [TICK], "an already-settled member is not settled again");
+  assert.match(eventLine(r), /impl-412=PR#88 already settled/);
+  assert.equal(configOf(f, "remote"), "origin");
+  assert.equal(configOf(f, "merge"), `refs/heads/${CLAIM}`);
+});
+
 test("impl-report on a PR outcome leaves a configured upstream as it is", () => {
   const f = fixture({ rows: ["#412 impl-412"] });
   git(f.repo, "branch", CLAIM);
@@ -323,6 +335,16 @@ test("impl-report on a bail writes no upstream for the claim branch", () => {
   assert.equal(configOf(f, "merge"), null);
 });
 
+test("impl-report for a member already settled to an outcome that is neither a PR nor a bail writes no upstream", () => {
+  const f = fixture({ rows: ["#412 impl-412=released"] });
+  git(f.repo, "branch", CLAIM);
+  f.report(implReport("impl-412"));
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.equal(configOf(f, "remote"), null);
+  assert.equal(configOf(f, "merge"), null);
+});
+
 test("impl-report whose upstream write fails prints a NEED naming the commands, still ticks, and never refuses the event", () => {
   const f = fixture({ rows: ["#412 impl-412"] });
   git(f.repo, "branch", CLAIM);
@@ -336,6 +358,73 @@ test("impl-report whose upstream write fails prints a NEED naming the commands, 
   assert.ok(r.stdout.includes(`git config branch.${CLAIM}.remote origin && git config branch.${CLAIM}.merge refs/heads/${CLAIM}`), r.stdout);
   assert.equal(r.order.at(-1), TICK);
   assert.equal(configOf(f, "remote"), null);
+});
+
+test("impl-report's NEED hint for a branch carrying shell metacharacters runs as written and sets that branch's upstream", () => {
+  const f = fixture({ rows: ["#412 impl-412"] });
+  const b = "implementer/412-x;touch${IFS}PWNED;'y";
+  git(f.repo, "branch", b);
+  const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  writeExecStub(join(f.dir, "bin", "git"), `#!/bin/sh\ncase "$1 $2" in\n"config branch."*) echo "fatal: injected config failure" >&2; exit 255;;\nesac\nexec ${realGit} "$@"\n`);
+  f.report(implReport("impl-412", { branch: b }));
+  f.control("settle", { "impl-412": { outcome: "PR#88" } });
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 4, r.err + r.stdout);
+  const hint = r.stdout.split("\n").find((l) => l.includes(`NEED upstream ${b} — `))?.split("; run ").at(-1);
+  assert.ok(hint, r.stdout);
+  const pasted = spawnSync("sh", ["-c", hint], { cwd: f.repo, encoding: "utf8", env: GIT_ENV });
+  assert.equal(pasted.status, 0, pasted.stderr);
+  assert.equal(existsSync(join(f.repo, "PWNED")), false, "the pasted hint ran no command the branch name smuggled in");
+  const get = (key) => spawnSync("git", ["config", "--get", `branch.${b}.${key}`], { cwd: f.repo, encoding: "utf8", env: GIT_ENV }).stdout.trim();
+  assert.equal(get("remote"), "origin");
+  assert.equal(get("merge"), `refs/heads/${b}`);
+});
+
+test("impl-report whose branch lookup fails with a status other than 1 prints a NEED, writes nothing, and never refuses the event", () => {
+  const f = fixture({ rows: ["#412 impl-412"] });
+  git(f.repo, "branch", CLAIM);
+  const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  writeExecStub(join(f.dir, "bin", "git"), `#!/bin/sh\ncase "$1" in\nshow-ref) echo "fatal: injected show-ref failure" >&2; exit 128;;\nesac\nexec ${realGit} "$@"\n`);
+  f.report(implReport("impl-412"));
+  f.control("settle", { "impl-412": { outcome: "PR#88" } });
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 4, r.err + r.stdout);
+  assert.ok(r.stdout.includes(`NEED upstream ${CLAIM} — `), r.stdout);
+  assert.ok(r.stdout.includes("injected show-ref failure"), r.stdout);
+  assert.equal(r.order.at(-1), TICK);
+  assert.equal(configOf(f, "remote"), null);
+  assert.equal(configOf(f, "merge"), null);
+});
+
+test("impl-report whose remote write fails leaves the merge key unset", () => {
+  const f = fixture({ rows: ["#412 impl-412"] });
+  git(f.repo, "branch", CLAIM);
+  const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  writeExecStub(join(f.dir, "bin", "git"), `#!/bin/sh\ncase "$1 $2" in\n"config branch."*.remote) echo "fatal: injected remote write failure" >&2; exit 255;;\nesac\nexec ${realGit} "$@"\n`);
+  f.report(implReport("impl-412"));
+  f.control("settle", { "impl-412": { outcome: "PR#88" } });
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 4, r.err + r.stdout);
+  assert.ok(r.stdout.includes(`NEED upstream ${CLAIM} — `), r.stdout);
+  assert.ok(r.stdout.includes("injected remote write failure"), r.stdout);
+  assert.equal(configOf(f, "remote"), null);
+  assert.equal(configOf(f, "merge"), null);
+});
+
+test("impl-report whose merge-key read fails with a status other than 1 prints a NEED, writes nothing, and never refuses the event", () => {
+  const f = fixture({ rows: ["#412 impl-412"] });
+  git(f.repo, "branch", CLAIM);
+  const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  writeExecStub(join(f.dir, "bin", "git"), `#!/bin/sh\ncase "$1 $2" in\n"config --get") echo "fatal: injected config-read failure" >&2; exit 128;;\nesac\nexec ${realGit} "$@"\n`);
+  f.report(implReport("impl-412"));
+  f.control("settle", { "impl-412": { outcome: "PR#88" } });
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 4, r.err + r.stdout);
+  assert.ok(r.stdout.includes(`NEED upstream ${CLAIM} — `), r.stdout);
+  assert.ok(r.stdout.includes("injected config-read failure"), r.stdout);
+  assert.equal(r.order.at(-1), TICK);
+  assert.equal(configOf(f, "remote"), null);
+  assert.equal(configOf(f, "merge"), null);
 });
 
 test("impl-report's git and tick children run with GIT_DIR scrubbed, so an ambient one cannot move the upstream to another repository", () => {
