@@ -540,6 +540,29 @@ test("`next --head` over an ended record whose premise cannot be read leaves tha
   assert.equal(f.state(50).outcome.reason, "taken");
 });
 
+test("`next --head` for an excluded row naming no premise leaves it with the row's own text as the reason", () => {
+  const f = fixture({ shortlist: [50] });
+  f.ledgerRow(50, "excluded · needs a human ruling");
+  const r = f.next("--head", "50");
+  assert.equal(r.status, 1, r.stdout + r.err);
+  assert.equal(r.stdout, "LEFT #50: excluded · needs a human ruling — next entry\n");
+  assert.equal(f.state(50).status, "left");
+  assert.deepEqual(ghCalls(f, /--json state$/), [], "no premise to probe");
+  assert.deepEqual(f.calls("inflight"), []);
+});
+
+test("`next --head` for a premise whose `gh` answer holds no state is exit 2 with no record", () => {
+  for (const out of ["{}", '{"state":null}', '{"state":7}', '{"state":""}']) {
+    const f = fixture({ shortlist: [50] });
+    f.ledgerRow(50, "excluded · behind-issue:#9");
+    f.ghRules([{ match: "^issue view 9 --json state$", out }]);
+    const r = f.next("--head", "50");
+    assert.equal(r.status, 2, `${out}: ${r.stdout}${r.err}`);
+    assert.match(r.err, /#50: the premise of its exclusion could not be read, so the exclusion stands: gh issue view 9 \(printed no JSON state\)/, out);
+    assert.equal(existsSync(f.statePath(50)), false, out);
+  }
+});
+
 test("`next --head` for a ticket whose exclusion premise is lifted or whose row is no exclusion starts the Pull", () => {
   for (const state of ["CLOSED", "MERGED"]) {
     const f = fixture({ shortlist: [50] });
@@ -553,6 +576,13 @@ test("`next --head` for a ticket whose exclusion premise is lifted or whose row 
   const none = g.next("--head", "50");
   assert.match(none.stdout, /^PULL #50: started/m, "no row");
   assert.deepEqual(ghCalls(g, /--json state$/), [], "no premise to probe");
+
+  // Plain `next` checked the head it picked on the way there, so it probes that premise once, not twice.
+  const h = fixture({ shortlist: [50] });
+  h.ledgerRow(50, "excluded · behind-issue:#9");
+  h.ghRules([{ match: "^issue view 9 --json state$", out: '{"state":"CLOSED"}' }]);
+  assert.match(h.next().stdout, /^PULL #50: started/m);
+  assert.equal(ghCalls(h, /--json state$/).length, 1);
 });
 
 test("`next --head` for a Pull in progress or dispatched reads no ledger and probes no premise", () => {

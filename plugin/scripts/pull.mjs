@@ -19,8 +19,8 @@
 //   1   the ticket left the Pull — taken, relabelled elsewhere, closed,
 //       relabelled by cause, excluded — with the reason printed; take the next
 //       entry. An empty shortlist is this exit too. `next --head <N>` starting
-//       a Pull for a ticket whose ledger row is an exclusion whose premise still
-//       stands is this exit as well.
+//       a Pull for a ticket whose ledger row is an exclusion naming no premise,
+//       or one whose premise still stands, is this exit as well.
 //   2   could not look, named on stderr: a probe that did not answer, a write
 //       that failed, a router that refused. `next --head <N>` runs a step that
 //       failed again; when the failure came from applying an answer, the
@@ -43,12 +43,14 @@
 //   0  hold-out   Only `next --head <N>` starting a Pull (no record, or one that
 //                 is `left`, `released` or another session's) runs it; resuming
 //                 a running Pull or reprinting a dispatched one does not. The
-//                 ledger row for `#<N>`, when it reads `excluded` with premises,
-//                 has them checked as `next` without `--head` checks them: one
-//                 still standing ends the Pull, reason `excluded · <premise>
-//                 <STATE>`, with the record saved and nothing else run, one `gh`
-//                 could not read is exit 2 with nothing recorded, and a lifted
-//                 one lets step 1 run.
+//                 ledger row for `#<N>`, when it reads `excluded`, has its
+//                 premises checked as `next` without `--head` checks them. One
+//                 still standing ends the Pull, reason `excluded ·
+//                 behind-<kind>:#<target> <STATE>` (no STATE when `gh` was not
+//                 asked), and a row naming no premise ends it too, reason the
+//                 row's own text; either way the record is saved and nothing
+//                 else run. A premise `gh` could not read is exit 2 with nothing
+//                 recorded, and every premise lifted lets step 1 run.
 //   1  inflight   `inflight.sh <N>`: anything but exit 0 is taken.
 //   2  issue      `gh issue view <N> --json title,body,comments,labels,createdAt`
 //                 written to `<scratch>/impl-<N>/issue.json`. Without the
@@ -1111,8 +1113,8 @@ class Pull {
 
 // The first of an exclusion's premises that still stands, or null when every one is lifted. A premise `gh` cannot
 // be asked about, or whose state could not be read, stands, as the shortlist's refresh reads it: `token` is the
-// premise as the ledger row writes it (null for a row naming none), `state` what `gh` answered (null when it was
-// not asked or did not answer), `unread` what could not be read (null when nothing went unread).
+// premise normalised to `behind-<kind>:#<target>` (null for a row naming none), `state` what `gh` answered (null
+// when it was not asked or answered no state), `unread` what could not be read (null when nothing went unread).
 function standingPremise(premises, cwd) {
   if (premises.length === 0) return { token: null, state: null, unread: null };
   for (const { kind, target } of premises) {
@@ -1126,24 +1128,18 @@ function standingPremise(premises, cwd) {
     try {
       ({ state } = JSON.parse(r.stdout));
     } catch {
+      // Unparseable: `state` stays undefined and is read as no state, as the shortlist's refresh reads it.
+    }
+    if (typeof state !== "string" || state === "") {
       return { token, state: null, unread: `gh ${kind} view ${target} (printed no JSON state)` };
     }
-    if (!LIFTED.has(state)) return { token, state: typeof state === "string" ? state : null, unread: null };
+    if (!LIFTED.has(state)) return { token, state, unread: null };
   }
   return null;
 }
 
-// Whether an exclusion's premises still hold. Each premise nobody could read is added to `unreadable`, so that a
-// shortlist emptied by premises nobody could read is told apart from an empty one.
-function exclusionLive(premises, cwd, unreadable) {
-  const standing = standingPremise(premises, cwd);
-  if (standing === null) return false;
-  if (standing.unread !== null) unreadable.push(standing.unread);
-  return true;
-}
-
 // The rows of the ledger, read through `ledger.mjs read`.
-function ledgerRows(p) {
+function readLedgerRows(p) {
   const led = spawn(process.execPath, [join(SCRIPTS, "ledger.mjs"), "read"], { cwd: p.cwd });
   let rows;
   try {
@@ -1163,7 +1159,7 @@ function ledgerRows(p) {
  * could not read is a refusal (exit 2) that says the exclusion stands.
  */
 function heldOut(p, n) {
-  const row = ledgerRows(p).find((r) => rowKey(r) === `#${n}`);
+  const row = readLedgerRows(p).find((r) => rowKey(r) === `#${n}`);
   const premises = row === undefined ? null : premisesOf(row);
   if (premises === null) return null;
   const standing = standingPremise(premises, p.cwd);
@@ -1197,13 +1193,19 @@ function shortlistHead(p, run) {
   if (!Array.isArray(list?.shortlist) || !list.shortlist.every((e) => Number.isInteger(e?.n))) {
     throw new Refusal(`${p.shortlist} holds no shortlist[] of {n}`);
   }
-  const rows = ledgerRows(p);
+  const rows = readLedgerRows(p);
+  // Each premise nobody could read, so that a shortlist emptied by premises nobody could read is told apart from an
+  // empty one.
   const unreadable = [];
   for (const { n } of list.shortlist) {
     const row = rows.find((r) => rowKey(r) === `#${n}`);
     if (row !== undefined && isImplRow(row)) continue;
     const premises = row === undefined ? null : premisesOf(row);
-    if (premises !== null && exclusionLive(premises, p.cwd, unreadable)) continue;
+    const standing = premises === null ? null : standingPremise(premises, p.cwd);
+    if (standing !== null) {
+      if (standing.unread !== null) unreadable.push(standing.unread);
+      continue;
+    }
     const ended = readPull(p.statePath(n));
     if (ended !== null && (ended.status === "left" || ended.status === "released") && (run === null || ended.session === run)) continue;
     return n;
@@ -1274,12 +1276,12 @@ function next(args) {
   const first = st === null;
   if (first) st = fresh(n, run);
   const pull = pullFor(base, st);
-  if (first) pull.save();
   if (held !== null) {
     const r = pull.leave(held);
     pull.save();
     return r;
   }
+  if (first) pull.save();
   const r = pull.advance();
   return { ...r, out: [first ? `PULL #${n}: started, state in ${base.statePath(n)}` : `PULL #${n}: resumed at ${st.pending === null ? st.stage : `question ${st.pending.qid}`}`, ...pull.log, ...r.out] };
 }

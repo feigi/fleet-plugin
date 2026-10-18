@@ -395,7 +395,7 @@ worktree re-created for an already-open PR is in references/isolation.md.
 | 1 `LEFT #N: relabelled elsewhere` | no longer labelled `ready-for-agent` | next entry |
 | 1 `LEFT #N: closed: fixed by …` | `close` answered `yes` | next entry |
 | 1 `LEFT #N: relabelled <label>: …` | `decided` answered with a cause | next entry |
-| 1 `LEFT #N: excluded · behind-…` | `collision` answered `behind-pr:#M` or `behind-issue:#M`; or `next --head <N>` starting a Pull found a ledger `excluded` row for `#N` whose premise still stands (a premise `gh` cannot be asked about stands) | next entry |
+| 1 `LEFT #N: excluded …` | `collision` answered `behind-pr:#M` or `behind-issue:#M`; or `next --head <N>` starting a Pull found a ledger `excluded` row for `#N` naming no premise, or one whose premise still stands (a premise `gh` cannot be asked about stands) | next entry |
 | 1 `EMPTY` | the shortlist holds no entry to pull | run `shortlist.mjs` once and Pull again; still empty, hold the slot idle until the next refresh trigger |
 | 2 | could not look, named on stderr | as the entry paragraph says |
 | 3 | a usage mistake, or a token the question does not take | correct it; nothing was recorded |
