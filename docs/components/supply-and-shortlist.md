@@ -26,7 +26,8 @@ human curates this list — admission is fully automatic
    start; after that,
    [`fleet-tick.mjs`](../../plugin/scripts/fleet-tick.mjs) refreshes it
    (`REFRESHED shortlist: <n> entries; <k> lifted`) whenever unclaimed
-   entries fall below the In-flight bound,
+   entries fall below the In-flight bound (a head whose Pull already ended
+   in this run not counted),
    the file is missing/empty,
    an exclusion's premise has lifted, or a branch-named `behind-pr` or a
    `behind-issue` exclusion that has not lifted names a ticket the file
@@ -34,8 +35,11 @@ human curates this list — admission is fully automatic
    trigger fires while the bound holds (ADR 0031,
    [`docs/adr/`](../adr/)): a refresh then cannot feed a Pull.
 
-**Shortlist** entries (no live `impl-` row, no live `excluded` row) are
-what the tick prints as `unclaimed=`; its `dropped` is what the tick prints
+**Shortlist** entries (no live `impl-` row, no live `excluded` row), less
+any head whose Pull already ended in this run, are
+what the tick prints as `unclaimed=` — on a tick that refreshed because that
+count fell below the bound, the count the refresh's trigger names; its
+`dropped` is what the tick prints
 as `specs-dropped=#<N> (to-spec: User Stories heading)` on every tick, so a
 shortlist the to-spec filter emptied never reads as no work. A ticket
 [Pull & Claim](pull-and-claim.md) can't admit is relabelled by cause and

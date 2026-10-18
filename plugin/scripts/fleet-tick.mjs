@@ -104,16 +104,20 @@
 //             up; a member with no schema is never checked against one.
 //   pulls     `<scratch>/impl-<N>/pull.json`, pull.mjs's record of a Pull, for
 //             every head on the shortlist, `<scratch>` as for the report
-//             files. A question standing prints `PULL #<N> (Q<n> pending —
-//             pull.mjs answer <N> <qid> …)` in place of the fresh row, with
-//             ` (stale)` once the file is older than `--pull-stale-minutes`; a
-//             Pull that dispatched with the head still holding no `impl-` row
-//             prints `(dispatched, row missing — ledger.mjs row …)`. A Pull
-//             that ended in this run's session (the ticket left, or its claim
-//             was released) names no row: `pull.mjs next` skips it, `next
-//             --head` would start the ticket over, so the next head fills the
-//             slot. A record from another phase-0 session, or one unreadable
-//             or absent, is the fresh row: `pull.mjs next` starts or resumes it.
+//             files: read before the refresh is judged, and again for the
+//             heads a refresh replaced them with. A question standing prints
+//             `PULL #<N> (Q<n> pending — pull.mjs answer <N> <qid> …)` in
+//             place of the fresh row, with ` (stale)` once the file is older
+//             than `--pull-stale-minutes`; a Pull that dispatched with the
+//             head still holding no `impl-` row prints `(dispatched, row
+//             missing — ledger.mjs row …)`. A Pull that ended in this run's
+//             session (the ticket left, or its claim was released) names no
+//             row: `pull.mjs next` skips it, `next --head` would start the
+//             ticket over, so the next head fills the slot. Nor is it counted
+//             in `unclaimed=` or toward the short-queue refresh, so a
+//             shortlist of ended heads refreshes. A record from another
+//             phase-0 session, or one unreadable or absent, is the fresh row:
+//             `pull.mjs next` starts or resumes it.
 //   session   The listing of the session directory omp writes one
 //             `<member>.jsonl` transcript into per dispatched member: this
 //             run's phase-0 receipt's `session`, else `--session`; with
@@ -278,12 +282,23 @@ function pullAction(n, p) {
   return `PULL #${n} — pull.mjs next --head ${n}`;
 }
 
+// The heads a PULL row could name: a head whose Pull ended in this run takes
+// no slot, and the next head takes it. Order kept, so the slots fill oldest first.
+export function pullable(heads, pulls) {
+  return heads.filter((n) => pulls?.get(n)?.kind !== "ended");
+}
+
 // The implementer rows: one per head a free slot Pulls, else the one row
-// saying why none is pulled.
+// saying why none is pulled. `unclaimed=` counts the heads a PULL row could
+// name. A refresh whose trigger text names a count carries it as `unclaimed`,
+// and the row prints that count, not the refreshed file's: one tick never
+// prints two different counts.
 function implementers(s) {
   const dropped = specsDropped(s.dropped);
+  const heads = pullable(s.heads, s.pulls);
+  const counted = s.refresh?.unclaimed ?? heads.length;
   const one = mkRow("implementers", s.inFlight, s.bound,
-    `implementers=${s.inFlightImpl} prs=${s.inFlightPrs} unclaimed=${s.heads.length} supply=${s.supply ?? "?"}`
+    `implementers=${s.inFlightImpl} prs=${s.inFlightPrs} unclaimed=${counted} supply=${s.supply ?? "?"}`
     + (s.shortlistStatus === "ok" ? "" : ` shortlist=${s.shortlistStatus}`)
     + (dropped ? ` ${dropped}` : ""));
   const row = (...a) => [one(...a)];
@@ -323,9 +338,7 @@ function implementers(s) {
     return s.owedCounted.length ? row(hold, { acts: true, extra: replaceStep(s.owedCounted, s.implNames) }) : row(hold);
   }
 
-  // A head whose Pull ended in this run takes no slot: the next head does.
-  const pullable = s.heads.filter((n) => s.pulls?.get(n)?.kind !== "ended");
-  if (pullable.length) return pullable.slice(0, s.bound - s.inFlight).map((n) => one(pullAction(n, s.pulls?.get(n)), { acts: true }));
+  if (heads.length) return heads.slice(0, s.bound - s.inFlight).map((n) => one(pullAction(n, s.pulls?.get(n)), { acts: true }));
 
   // Nothing to Pull even after a refresh: no unclaimed head, or only heads
   // whose Pull ended in this run, which `pull.mjs next` skips. `SUGGEST /triage` asks a
@@ -1138,7 +1151,9 @@ export function parseShortlist(text) {
   };
 }
 
-// Why this tick refreshes the shortlist, or null. The premise-lifted
+// Why this tick refreshes the shortlist, or null. `unclaimed` counts the
+// heads a PULL row could name, so a head whose Pull ended in this run is not
+// in it. The premise-lifted
 // trigger costs gh calls, so main() asks it only when these answer null.
 // Nothing refreshes while the bound holds (`held`, n ≥ B, whichever HOLD row
 // prints): a refresh then cannot feed a Pull, and the first tick back under
@@ -1147,8 +1162,13 @@ export function refreshWhy({ draining, held, status, entries, unclaimed: k, boun
   if (draining !== null || held) return null;
   if (status !== "ok") return `shortlist ${status}`;
   if (entries === 0) return "shortlist empty";
-  if (k < bound) return `unclaimed ${k} < in-flight bound ${bound}`;
+  if (k < bound) return shortQueue(k, bound);
   return null;
+}
+
+// The short-queue trigger's text, the one trigger that names a count.
+function shortQueue(k, bound) {
+  return `unclaimed ${k} < in-flight bound ${bound}`;
 }
 
 // How long, in minutes, a live token of each family may run before the tick
@@ -2046,39 +2066,6 @@ function main() {
     if (unchecked.length && applyTierChecks(unchecked, phase0.session)) run = readRun(prs);
   }
 
-  // Pull from the current file first; refresh when it is short, absent, an
-  // exclusion has lifted, or a branch-named or issue one still names a ticket on it.
-  // A refresh that succeeds replaces the heads outright: the PULL is read off
-  // what shortlist.mjs just probed, never merged with the file's own heads,
-  // or a ticket the refresh dropped would be pulled anyway.
-  let heads = unclaimed(current.entries, run);
-  let supply = current.scanned;
-  let dropped = current.dropped;
-  let fresh = null;
-  // While the bound holds a refresh cannot feed a Pull, so none of its
-  // triggers runs: the first tick back under the bound refreshes and Pulls in
-  // the same tick.
-  const held = run.inFlight >= caps.bound;
-  const trigger = refreshWhy({ draining: run.draining, held, status: current.status, entries: current.entries.length,
-    unclaimed: heads.length, bound: caps.bound })
-    ?? (run.draining === null && !held ? liftedPremise(run.excluded, current.entries, prs) : null);
-  if (trigger) {
-    const r = refresh();
-    if (r.ok) {
-      const excludedSet = new Set(run.excluded.map((x) => x.n));
-      heads = unclaimed(r.entries, run);
-      supply = r.scanned;
-      dropped = r.dropped;
-      fresh = {
-        ok: true, trigger, entries: r.entries.length,
-        lifted: r.entries.filter((e) => excludedSet.has(e.n)).length,
-        changed: r.entries.map((e) => e.n).join(",") !== current.entries.map((e) => e.n).join(","),
-      };
-    } else {
-      fresh = { ok: false, trigger, why: r.why };
-    }
-  }
-
   // The scratch root of the report files and the Pull records alike.
   const scratch = reportsScratch(receipt, scratchFlag);
   if (scratch === null) console.error(`${NAME}: report files and Pull records not checked — no scratch in the phase-0 receipt and no --scratch`);
@@ -2087,8 +2074,50 @@ function main() {
   // can fill one. The session it is judged against is the receipt's, as
   // pull.mjs judges it.
   const runSession = receipt.read.state === "ok" && receipt.read.receipt.session !== "" ? receipt.read.receipt.session : null;
-  const pulls = scratch === null ? new Map()
-    : readPulls(scratch.root, heads, { session: runSession, now: Date.now(), staleMinutes: pullStaleMinutes });
+  const pullsOf = (hs) => scratch === null ? new Map()
+    : readPulls(scratch.root, hs, { session: runSession, now: Date.now(), staleMinutes: pullStaleMinutes });
+
+  // Pull from the current file first; refresh when it is short, absent, an
+  // exclusion has lifted, or a branch-named or issue one still names a ticket on it.
+  // A refresh that succeeds replaces the heads outright: the PULL is read off
+  // what shortlist.mjs just probed, never merged with the file's own heads,
+  // or a ticket the refresh dropped would be pulled anyway.
+  let heads = unclaimed(current.entries, run);
+  let pulls = pullsOf(heads);
+  let supply = current.scanned;
+  let dropped = current.dropped;
+  let fresh = null;
+  // Short means fewer heads than B that a PULL row could name: `pull.mjs next`
+  // skips a head whose Pull ended in this run, so counting it would hold back
+  // the refresh that finds the head to take its slot.
+  const counted = pullable(heads, pulls).length;
+  // While the bound holds a refresh cannot feed a Pull, so none of its
+  // triggers runs: the first tick back under the bound refreshes and Pulls in
+  // the same tick.
+  const held = run.inFlight >= caps.bound;
+  const trigger = refreshWhy({ draining: run.draining, held, status: current.status, entries: current.entries.length,
+    unclaimed: counted, bound: caps.bound })
+    ?? (run.draining === null && !held ? liftedPremise(run.excluded, current.entries, prs) : null);
+  if (trigger) {
+    const r = refresh();
+    if (r.ok) {
+      const excludedSet = new Set(run.excluded.map((x) => x.n));
+      heads = unclaimed(r.entries, run);
+      pulls = pullsOf(heads);
+      supply = r.scanned;
+      dropped = r.dropped;
+      fresh = {
+        ok: true, trigger, entries: r.entries.length,
+        lifted: r.entries.filter((e) => excludedSet.has(e.n)).length,
+        changed: r.entries.map((e) => e.n).join(",") !== current.entries.map((e) => e.n).join(","),
+        // The count this trigger's text names, which the implementer row prints in place of the refreshed file's.
+        ...(trigger === shortQueue(counted, caps.bound) ? { unclaimed: counted } : {}),
+      };
+    } else {
+      fresh = { ok: false, trigger, why: r.why };
+    }
+  }
+
   const rows = reconcile({
     ...caps, ...run, heads, supply, dropped, shortlistStatus: current.status, refresh: fresh, mainCheckout, phase0, router, pulls,
   });

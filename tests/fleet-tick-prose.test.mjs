@@ -110,6 +110,10 @@ test("§ Queue depth defines In flight and the In-flight bound, and documents th
   assert.match(s, Pin.phrase("implementers=<i> prs=<p> unclaimed=<k> supply=<s>"));
   assert.match(s, Pin.phrase("The reviewer row reads `<units>/<B>`"));
   assert.match(s, Pin.phrase("never while the bound holds"));
+  // A head whose Pull ended this run is no head a PULL row can name: counted,
+  // it holds back the refresh that would fill its slot.
+  assert.match(s, Pin.phrase("The table's shortlist counts no head whose Pull ended this run"));
+  assert.match(s, Pin.phrase("Unclaimed there counts no head whose Pull ended this run"));
 });
 
 test("phase 0 runs tier-roles.mjs --check --in-flight <B> and says its notice never holds", () => {
