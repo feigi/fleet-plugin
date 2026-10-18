@@ -852,7 +852,7 @@ if (cmd === "read") {
   if (rest.length) die("usage: ledger.mjs rotate");
   runRotate();
 } else {
-  die(`unknown subcommand '${cmd}' — expected row, token, filed, ruled, check, read, dispatch, settle, review, drain or rotate`);
+  die(`unknown subcommand '${cmd}' — expected row, token, filed, ruled, check, read, dispatch, settle, review, drain, undrain or rotate`);
 }
 
 // Reached only by an arm that did not die, so every write subcommand that did

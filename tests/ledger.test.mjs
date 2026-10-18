@@ -12,6 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, readdirSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -3226,6 +3227,10 @@ test("undrain clears the marker and reports what it cleared; a dispatch the drai
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout), { undrained: "wrap up", reason: "drained by mistake" });
   assert.equal(JSON.parse(cli(["--file", file, "read"]).stdout).drain, null);
+  const briefText = "# rendered brief for impl-5-b\n";
+  mkdirSync(join(dir, "briefs"), { recursive: true });
+  writeFileSync(join(dir, "briefs", "impl-5-b.md"), briefText);
+  writeFileSync(join(dir, "briefs", "impl-5-b.json"), JSON.stringify({ role: "implementer", sha256: createHash("sha256").update(briefText).digest("hex") }));
   const again = cli(["--file", file, "dispatch", "5", "impl-5-b"]);
   assert.equal(again.status, 0, again.stderr);
 });
