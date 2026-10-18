@@ -105,9 +105,15 @@ and a member sent into one is on `## HEAD (no branch)`, where the push above exi
 the cause, so no `-u`/force combination reaches it: the unqualified `HEAD`
 destination is, and plain `git push origin HEAD` fails the same way while a bare
 `git push` exits 128 (`fatal: You are not currently on a branch`). Name the branch
-instead — `git push --force-with-lease origin HEAD:<branch>` (measured 2026-09-18,
-git 2.50.1: exit 0). A worktree `claim-ticket.sh` claimed is on its branch, where
-the push above is the correct one.
+instead, through the helper — `~/.fleet/bin/fleet-run push-sync.mjs --branch <branch> --force-with-lease`.
+A refspec push alone moves origin's ref and leaves the claim worktree's
+`refs/heads/<branch>` at its old tip; the helper pushes `HEAD:refs/heads/<branch>`,
+then moves the worktree holding `<branch>` to the pushed SHA with `reset --keep`,
+only when that worktree is clean and its branch was origin's head or an ancestor
+of the push. Exit 3 is pushed but not synced, its refusal named; exit 2 refused
+before pushing anything; any other non-zero is the push's own failure, nothing
+synced. A worktree `claim-ticket.sh` claimed is on its branch, where the push
+above is the correct one.
 
 `--force-with-lease` matters only on a re-push: step 7 rebases immediately before pushing, so re-entering step 7 after an earlier push needs the force to land the rebased commits. On a re-push the force is load-bearing: stop and report the denial, never retry with a plain `--force`; a denial on a branch that has never been pushed is safe to route around with a plain `git push -u origin HEAD` instead.
 

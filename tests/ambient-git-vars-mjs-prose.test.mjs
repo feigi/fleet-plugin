@@ -240,6 +240,14 @@ const COVERED_MJS = {
   // main-gain.test.mjs, "an ambient GIT_DIR naming another repository cannot
   // move the check there".
   "main-gain.mjs": 1,
+  // ONE spawn primitive, `git(args, opts)`, behind every git call the push
+  // helper makes — HEAD, the ls-remote, the push, the worktree listing, the
+  // holder's status, the ancestry check and the `reset --keep`. An ambient
+  // GIT_DIR would answer all of them for another repository: push its HEAD to
+  // its origin and look for the holder among its worktrees. Measured in
+  // push-sync.test.mjs, "an ambient GIT_DIR and GIT_WORK_TREE naming another
+  // repository do not move the push or the sync".
+  "push-sync.mjs": 1,
   // TWO scrubbed envs. `gitEnv(env)` in `run()` is behind every child the
   // script starts that it waits for: its own git calls (the branch, the fetch,
   // the fast-forward), the `gh pr list` of the fold-in, which also blanks

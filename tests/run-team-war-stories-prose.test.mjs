@@ -69,6 +69,10 @@ const CORRECTIONS = [
   ["tree every member can write to** above)", "tree every member can write to** in SKILL.md)"],
   ["so the killed row above does not", "so the killed row of SKILL.md's Failure handling table does not"],
   ["Member unaccounted row above, never", "Member unaccounted row of that table, never"],
+  [
+    "so `git push origin \"HEAD:$(git branch --show-current)\"` exits 128 on `fatal: invalid refspec 'HEAD:'`.",
+    "so `~/.fleet/bin/fleet-run push-sync.mjs --branch \"$(git branch --show-current)\"` is handed an empty branch and exits 2 before pushing anything.",
+  ],
 ];
 
 // The removed text as its blocks — paragraphs, a table, a code block — each

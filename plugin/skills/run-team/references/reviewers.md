@@ -92,7 +92,7 @@ reads gates and never injects a fault.
 the worktree from. Pass it as `--branch`, because
 the member cannot read it off git: references/isolation.md creates an already-open PR's worktree
 with `--detach`, and there `git branch --show-current` prints nothing and exits 0
-(measured 2026-09-18, git 2.50.1), so `git push origin
-"HEAD:$(git branch --show-current)"` exits 128 on `fatal: invalid refspec
-'HEAD:'`. A brief rendered without it would leave the push no destination at
-all, which is why the renderer requires it.
+(measured 2026-09-18, git 2.50.1), so `~/.fleet/bin/fleet-run push-sync.mjs
+--branch "$(git branch --show-current)"` is handed an empty branch and exits 2
+before pushing anything. A brief rendered without it would leave the push no
+destination at all, which is why the renderer requires it.

@@ -327,7 +327,8 @@ whose `ledger.mjs filed` failed twice, which the controller's settle records —
 send the one line your brief gives, `<your name>: <outcome> <path>`, and exit.
 **Deferring everything is a normal
 outcome, not a stall:** nothing is then staged, `git commit` refuses an empty
-index, `git push origin HEAD:<branch>` prints `Everything up-to-date`, and your
+index, `~/.fleet/bin/fleet-run push-sync.mjs --branch <branch>` prints git's
+`Everything up-to-date`, and your
 report's `outcome` is `no-op`, its `head` the unchanged SHA. Say it
 explicitly — silence there is indistinguishable from a member that died. Never
 manufacture a commit to make CI fire.

@@ -7,7 +7,7 @@ specialists.
 Bring `conflict-branch` current with `origin/main`, resolving every conflict by the
 **No-undo audit** in `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md`.
 Run `TESTCMD-2` from the worktree before you push, then push with
-`git push origin HEAD:conflict-branch`. Report the new head, or that no conflict was
+`~/.fleet/bin/fleet-run push-sync.mjs --branch conflict-branch`. Report the new head, or that no conflict was
 left.
 
 Your report is a file, `/abs/scratch-conflict/reports/<your name>.json`, `<your name>` the

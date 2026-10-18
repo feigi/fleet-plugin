@@ -149,13 +149,17 @@ const DIGEST_PROJECTION_RETIRED = [
 // to it "as above" pointed at nothing in the brief: the sentence now points
 // at the agent definition instead.
 const DUTY3_POINTER_RETIRED = ["Duty 3's script decides whether the label is on, as above."];
+// Every detached push goes through push-sync.mjs, which also moves the
+// worktree holding the branch, so the conflict kind's bare refspec push is
+// replaced, not lost.
+const PUSH_HELPER_RETIRED = ["Run `<testCmd>` from the worktree before you push, then push with `git push origin HEAD:<branch>`."];
 // The placeholder each argument fills, per role — the arguments are values no
 // other argument shares, so a swapped substitution cannot pass.
 const PAIRS = [
   { role: "fix-applier", kind: "review", fixture: "fix-applier-review.md", retired: [...REPORT_FILE_RETIRED, ...DIGEST_PROJECTION_RETIRED],
     args: { worktree: "/abs/wt-fix", branch: "fix-branch", testCmd: "TESTCMD-1", scratch: "/abs/scratch-fix", pr: "3293", run: "run-AbCd1234" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch", pr: "pr", run: "run" } },
-  { role: "fix-applier", kind: "conflict", fixture: "fix-applier-conflict.md",
+  { role: "fix-applier", kind: "conflict", fixture: "fix-applier-conflict.md", retired: PUSH_HELPER_RETIRED,
     args: { worktree: "/abs/wt-conflict", branch: "conflict-branch", testCmd: "TESTCMD-2", scratch: "/abs/scratch-conflict" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch" } },
   { role: "fix-applier", kind: "dispositions-retry", fixture: "fix-applier-dispositions-retry.md", retired: [...REPORT_FILE_RETIRED, ...DIGEST_PROJECTION_RETIRED],
