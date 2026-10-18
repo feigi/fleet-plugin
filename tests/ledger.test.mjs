@@ -15,7 +15,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, readdirSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { rendering } from "./support/rendered-brief.mjs";
@@ -1407,8 +1407,9 @@ test("the documented flow on a FRESH clone — no --file, .fleet/ not created ye
 // tree"), and the repository probe used to read that refusal as "no
 // repository", so `check` never reached `gh` and answered `unverified` on
 // every call. `run()` above only builds a plain clone, so these fixtures are
-// built here, and each runs the DOCUMENTED flow (no --file, cwd inside the
-// layout) so the ledger location is fleetFile()'s own answer.
+// built here and `run()` is pointed into them through `procCwd`; each layout
+// test runs the DOCUMENTED flow (no --file, cwd inside the layout) so the
+// ledger location is fleetFile()'s own answer.
 // ---------------------------------------------------------------------------
 
 // Every fixture git call is scrubbed of ambient git vars, as run()'s are, and
@@ -1464,42 +1465,11 @@ function buildLayout(layout, base) {
   throw new Error(`unknown layout ${layout}`);
 }
 
-// Runs `check` against a stubbed `gh` from `cwd`, with `fileArgs` naming the
-// ledger explicitly or empty for the documented flow.
-function runInLayout(base, { cwd, fileArgs = [], subject = "some distinctive subject words entirely" }) {
-  const bin = join(base, "bin");
-  mkdirSync(bin, { recursive: true });
-  symlinkSync(REAL_GIT, join(bin, "git"));
-  writeExecStub(join(bin, "gh"), GH_STUB);
-  const fixture = join(base, "hits.json");
-  writeFileSync(fixture, "[]");
-  const argsFile = join(base, "gh-argv");
-  const cwdFile = join(base, "gh-cwd");
-  const r = spawnSync(process.execPath, [SCRIPT, ...fileArgs, "check", subject], {
-    encoding: "utf8",
-    cwd,
-    env: layoutEnv({
-      PATH: bin,
-      GH_FIXTURE: fixture,
-      GH_ARGS_FILE: argsFile,
-      GH_CWD_FILE: cwdFile,
-      GH_ENV_FILE: join(base, "gh-env"),
-    }),
-  });
-  let json = null;
-  try {
-    json = JSON.parse(r.stdout);
-  } catch {
-    /* asserted on by the caller */
-  }
-  return {
-    status: r.status,
-    stderr: r.stderr,
-    json,
-    ghRan: existsSync(argsFile),
-    ghCwd: existsSync(cwdFile) ? readFileSync(cwdFile, "utf8").trim() : null,
-  };
-}
+// What run() needs to run `check` from inside a layout built above: no fixture
+// repository or `--file` of its own, and the same global-config scrub the
+// fixtures' own git calls get from layoutEnv().
+const IN_LAYOUT = { noFile: true, gitRepo: false, spawnEnv: { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } };
+const LAYOUT_SUBJECT = "some distinctive subject words entirely";
 
 for (const layout of ["bare", "dot-bare", "dot-bare-worktree", "separate-git-dir"]) {
   test(`${layout}: the documented flow queries the tracker, bound to the ledger's repository (#3487)`, () => {
@@ -1508,14 +1478,14 @@ for (const layout of ["bare", "dot-bare", "dot-bare-worktree", "separate-git-dir
       const fx = buildLayout(layout, base);
       // The fixture really is the failing shape: the ledger's own directory
       // has no work tree, or this test cannot tell the fix from the bug.
-      const mkdirLedger = join(fx.ledger, "..");
-      mkdirSync(mkdirLedger, { recursive: true });
-      const probe = spawnSync("git", ["-C", mkdirLedger, "rev-parse", "--show-toplevel"], { encoding: "utf8", env: layoutEnv() });
+      const ledgerDir = dirname(fx.ledger);
+      mkdirSync(ledgerDir, { recursive: true });
+      const probe = spawnSync("git", ["-C", ledgerDir, "rev-parse", "--show-toplevel"], { encoding: "utf8", env: layoutEnv() });
       assert.notEqual(probe.status, 0, "sanity: --show-toplevel must fail at the ledger's directory in this layout");
       assert.match(probe.stderr, /must be run in a work tree/);
-      rmSync(mkdirLedger, { recursive: true, force: true });
+      rmSync(ledgerDir, { recursive: true, force: true });
 
-      const r = runInLayout(base, { cwd: fx.cwd });
+      const r = run(LAYOUT_SUBJECT, { ...IN_LAYOUT, procCwd: fx.cwd });
       assert.equal(r.status, 0);
       assert.equal(r.ghRan, true, "no work tree must not mean no tracker query");
       assert.equal(r.json.tracker.ok, true);
@@ -1544,9 +1514,9 @@ test("an explicit --file in a bare repository queries THAT repository, never the
     const caller = join(callerSide, "caller");
     mkdirSync(caller);
     gitIn(caller, "init", "-q");
-    mkdirSync(join(target.commonDir, ".fleet"), { recursive: true });
+    mkdirSync(dirname(target.ledger), { recursive: true });
     writeFileSync(target.ledger, ledgerText([]));
-    const r = runInLayout(base, { cwd: caller, fileArgs: ["--file", target.ledger] });
+    const r = run(LAYOUT_SUBJECT, { ...IN_LAYOUT, procCwd: caller, args: ["--file", target.ledger] });
     assert.equal(r.ghRan, true);
     assert.equal(r.json.tracker.ok, true);
     assert.equal(r.json.verdict, "clean");
@@ -1557,22 +1527,82 @@ test("an explicit --file in a bare repository queries THAT repository, never the
   }
 });
 
-test("a ledger directory in no repository at all still reports the tracker unchecked, work-tree-less layouts or not (#3487)", () => {
-  // The false-positive pin: the no-work-tree treatment must not widen to "not
-  // a git repository", which is a different refusal from the same probe.
-  const base = realpathSync(mkdtempSync(join(tmpdir(), "ledger-layout-")));
-  try {
-    const outside = join(base, "outside");
-    mkdirSync(outside);
-    const r = runInLayout(base, { cwd: outside, fileArgs: ["--file", join(outside, "ledger.md")] });
-    assert.equal(r.ghRan, false);
+// The false-positive pins: the no-work-tree treatment belongs to ONE refusal,
+// git's "must be run in a work tree" at exit 128, read under LC_ALL=C. Every
+// stub here answers `--git-common-dir` with a directory that exists, so a
+// guard widened past that refusal reaches gh, and the case reds on `ghRan`.
+const gitRefusesToplevel = (status, message) => `#!/bin/sh
+case " $* " in
+  *" --show-toplevel "*) printf '%s\\n' '${message}' >&2; exit ${status} ;;
+  *" --git-common-dir "*) printf '%s\\n' '__DIR__'; exit 0 ;;
+esac
+exit 0
+`;
+// A translated git: the same refusal, in English only under LC_ALL=C.
+const GIT_TRANSLATED = `#!/bin/sh
+case " $* " in
+  *" --show-toplevel "*)
+    if [ "\${LC_ALL-}" = C ]; then echo 'fatal: this operation must be run in a work tree' >&2
+    else echo 'fatal: cette operation doit etre effectuee dans un arbre de travail' >&2; fi
+    exit 128 ;;
+  *" --git-common-dir "*) printf '%s\\n' '__DIR__'; exit 0 ;;
+esac
+exit 0
+`;
+// The real git, recording every argv it is handed.
+const GIT_RECORDS = `#!/bin/sh
+printf '%s\\n' "$*" >> "$LEDGER_TEST_GIT_ARGV"
+exec '${REAL_GIT}' "$@"
+`;
+
+test("a ledger directory in no repository at all stays unchecked, and never asks for a common git dir (#3487)", (t) => {
+  const logDir = mkdtempSync(join(tmpdir(), "ledger-gitargv-"));
+  t.after(() => rmSync(logDir, { recursive: true, force: true }));
+  const argv = join(logDir, "argv");
+  const r = gitFixture(t, GIT_RECORDS)(LAYOUT_SUBJECT, { extraEnv: { LEDGER_TEST_GIT_ARGV: argv } });
+  assert.equal(r.status, 0);
+  assert.equal(r.ghRan, false);
+  assert.equal(r.json.tracker.ok, false);
+  assert.equal(r.json.verdict, "unverified");
+  assert.match(r.json.tracker.error, /cannot resolve the ledger's repository/);
+  assert.match(r.json.tracker.error, /not a git repository/);
+  const calls = readFileSync(argv, "utf8");
+  assert.match(calls, /--show-toplevel/, "sanity: the recorder saw the probe");
+  assert.doesNotMatch(calls, /--git-common-dir/, "\"not a git repository\" is not the no-work-tree refusal");
+});
+
+test("only git's no-work-tree refusal at exit 128 binds gh to the common git dir (#3487)", (t) => {
+  const workTreeRefusal = "fatal: this operation must be run in a work tree";
+  const bound = gitFixture(t, gitRefusesToplevel(128, workTreeRefusal))(LAYOUT_SUBJECT);
+  assert.equal(bound.ghRan, true, "sanity: the stub's refusal is the one that gets the common git dir");
+  assert.equal(bound.json.verdict, "clean");
+  for (const [status, message] of [
+    [128, "fatal: not a git repository (or any of the parent directories): .git"],
+    [128, "fatal: detected dubious ownership in repository at /elsewhere"],
+    [1, workTreeRefusal],
+  ]) {
+    const r = gitFixture(t, gitRefusesToplevel(status, message))(LAYOUT_SUBJECT);
+    assert.equal(r.ghRan, false, `exit ${status} "${message}" must stay on the failure branch`);
     assert.equal(r.json.tracker.ok, false);
     assert.equal(r.json.verdict, "unverified");
-    assert.match(r.json.tracker.error, /cannot resolve the ledger's repository/);
-    assert.match(r.json.tracker.error, /not a git repository/);
-  } finally {
-    rmSync(base, { recursive: true, force: true });
   }
+});
+
+test("the no-work-tree refusal is read under LC_ALL=C, whatever locale the caller runs in (#3487)", (t) => {
+  const r = gitFixture(t, GIT_TRANSLATED)(LAYOUT_SUBJECT, { extraEnv: { LC_ALL: "fr_FR.UTF-8" } });
+  assert.equal(r.ghRan, true, "a translated refusal must not read as no repository");
+  assert.equal(r.json.tracker.ok, true);
+});
+
+test("git missing from PATH leaves the tracker unchecked, never a crash (#3487)", () => {
+  // spawnSync leaves `stdout` undefined when git cannot be spawned at all, so
+  // a probe answer read before its status check throws here instead.
+  const r = run(LAYOUT_SUBJECT, { spawnEnv: { PATH: join(tmpdir(), "ledger-no-such-bin") } });
+  assert.equal(r.status, 0, `an unspawnable git degrades like every other probe failure: ${r.stderr}`);
+  assert.equal(r.json.tracker.ok, false);
+  assert.equal(r.json.verdict, "unverified");
+  assert.match(r.json.tracker.error, /cannot resolve the ledger's repository/);
+  assert.match(r.json.tracker.error, /ENOENT/);
 });
 
 test("an inherited GIT_DIR or GH_REPO cannot retarget the query away from the ledger's repository", () => {

@@ -1199,7 +1199,6 @@ function runCheck() {
     // git would otherwise spell differently. gh keeps `queryEnv` untouched.
     const probeEnv = { ...queryEnv, LC_ALL: "C" };
     let repoCheck = spawnSync("git", ["-C", ledgerDir, "rev-parse", "--show-toplevel"], { encoding: "utf8", env: probeEnv, timeout: GIT_TIMEOUT_MS });
-    let ghCwd = repoCheck.stdout.trim();
     // A repository with no work tree — the `.bare` layout and its linked
     // worktrees, a bare repository, a `--separate-git-dir` clone — is where
     // fleetFile() puts the ledger INSIDE the git dir or beside it, and git
@@ -1212,14 +1211,11 @@ function runCheck() {
     // gets this: "not a git repository", git missing, a dubious-ownership
     // refusal, an unreadable gitfile and a probe killed at its bound all stay
     // on the failure branch below, and so does a second probe that fails.
-    if (repoCheck.status === 128 && NO_WORK_TREE.test(repoCheck.stderr)) {
+    const noWorkTree = repoCheck.status === 128 && NO_WORK_TREE.test(repoCheck.stderr);
+    if (noWorkTree) {
       repoCheck = spawnSync("git", ["-C", ledgerDir, "rev-parse", "--git-common-dir"], { encoding: "utf8", env: probeEnv, timeout: GIT_TIMEOUT_MS });
-      // `--git-common-dir` answers relative to the directory it ran in.
-      ghCwd = resolve(ledgerDir, repoCheck.stdout.trim());
     }
     if (repoCheck.status !== 0) {
-      // The no-work-tree refusal does not land here — see above. A second
-      // probe that failed does, carrying ITS OWN reason.
       // More than one cause lands here: a ledger path genuinely outside any
       // repository, but also git missing entirely (spawn ENOENT, so `status`
       // is null and `null !== 0`), a dubious-ownership refusal, an unreadable
@@ -1262,8 +1258,13 @@ function runCheck() {
       const why = cause(repoCheck.error && repoCheck.error.message, repoCheck.stderr);
       tracker = { ok: false, query, error: `cannot resolve the ledger's repository (${ledgerDir})${why ? `: ${why}` : ""}` };
     } else {
-      // ghCwd was bound above: the work tree's root, or the common git dir
-      // where the repository has no work tree.
+      // The work tree's root, or the common git dir where the repository has
+      // no work tree. `--git-common-dir` may answer relative to the directory
+      // it ran in (`.` when that is the git dir itself) or absolute, and
+      // resolve() takes either. Read only past the status check above: a
+      // probe that never spawned (git missing) leaves `stdout` undefined.
+      const probed = repoCheck.stdout.trim();
+      const ghCwd = noWorkTree ? resolve(ledgerDir, probed) : probed;
       try {
         const out = execFileSync(
           "gh",
