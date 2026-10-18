@@ -279,16 +279,17 @@ const COVERED_MJS = {
   // another repository does not change what any step reads or runs". Its other
   // git call is `fleetFile()`'s, counted under fleet-dir.mjs.
   "closeout.mjs": 1,
-  // TWO scrubbed envs. `worktrees()`'s `worktree list` names which claims have
+  // THREE scrubbed envs. `worktrees()`'s `worktree list` names which claims have
   // a worktree in this checkout; an ambient GIT_DIR would list another
   // repository's, and a claim to resume would read as one to report. Measured
   // in stranded.test.mjs, "an ambient GIT_DIR naming another repository does
   // not change the answer". `ghList()` is the ONE primitive behind both
-  // `gh … list` children, and scrubs GH_REPO too: either ambient would list
-  // another repository's tracker. Measured in stranded.test.mjs, "gh is run
-  // with no ambient GIT_DIR or GH_REPO…". Its second git call is
+  // `gh … list` children, and `closedHeadPr()` is the claim branch's
+  // `gh pr list --head` probe; both scrub GH_REPO too: either ambient would
+  // list another repository's tracker. Measured in stranded.test.mjs, "gh is
+  // run with no ambient GIT_DIR or GH_REPO…". Its other git call is
   // `fleetFile()`'s, counted under fleet-dir.mjs.
-  "stranded.mjs": 2,
+  "stranded.mjs": 3,
   // TWO scrubbed envs. The sweep's gh read, `gitEnv({ GH_REPO: "" })`, is
   // measured in reclaim-scratch.test.mjs, "gh is asked with GH_REPO empty
   // however the parent's environment names a repository". Its git read,

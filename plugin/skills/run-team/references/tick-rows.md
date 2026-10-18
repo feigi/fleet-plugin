@@ -60,6 +60,35 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   and flag it for a human; write no hold and dispatch no fix-applier. Not
   actionable; it repeats while the PR reads CONFLICTING and clears once it
   stops, closes or merges.
+- `ESCALATE pr-closed #<N> PR#<M>` — PR M, ticket N's latest PR (the latest
+  `impl-<N>…=PR#<M>` on the row), is CLOSED unmerged while issue #N is not
+  read CLOSED (an issue gh cannot read counts as open), and no
+  `impl-<N>-<x>` after it is live or settled `released`. An unmerged
+  close is unknown intent, so the line is the maintainer's and not
+  actionable: tell the maintainer once per ticket per run, dispatch nothing
+  for #N, and post no GitHub comment. It prints beside the implementer row,
+  never in it, takes no implementer slot and counts toward no bound. While a
+  member on PR M is live — `fix-pr-<M>…`, `finisher-pr-<M>…`, or a live
+  `merge-bot-<n>` while M's latest finisher settled `labelled` — the line
+  ends ` — <member> live`. Reopening PR M, or closing #N, clears it by
+  itself on the next tick. Act only on the maintainer's `replace #N` or
+  `release #N`, and only once the line names no live member:
+  - `replace #N` — the `NEED resume` procedure (phase 0): `impl-<N>-b`, or
+    one letter past the highest `impl-<N>-<x>` the ticket has used, in the
+    existing worktree and branch, never `claim-ticket.sh`. Its new PR settles
+    onto the same row, and that two-PR row is a legitimate shape: the tick
+    keys the row on the newer PR from then on.
+  - `release #N` — `release-ticket.sh <N> impl-<N> implementer --apply`,
+    which runs its closed-PR mode on a branch whose PRs all read CLOSED, then
+    settle `released`: `ledger.mjs row <N> "<text> · impl-<N>-<x>"`, the next
+    letter, and `ledger.mjs settle impl-<N>-<x> released`, which ends the
+    line.
+
+  A replacement that settles `bailed` or `killed` brings the line back on M,
+  and one whose own PR M′ closes unmerged prints it on M′.
+- `ESCALATE pr-unchecked #<N> PR#<M>` — the same ticket, but `gh pr view
+  <M>` could not answer, so whether M closed is unknown. The maintainer's on
+  the same terms as `pr-closed`; the next tick probes again.
 - `HOLD (…)` — the row is held and says why: draining, a tier mismatch, an
   unchecked tier, the In-flight bound reached (`HOLD (in-flight <n>/<B>)` —
   nothing to do unless its detail names a replacement to dispatch, else a

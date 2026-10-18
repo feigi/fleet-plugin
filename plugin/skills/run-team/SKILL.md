@@ -74,13 +74,14 @@ phase, or in any later one, asks the maintainer which tickets to take.
      run `phase0.mjs` again. `RECIPE NOT PROVEN` → stall: report `STALL —
      Recipe not proven: <cause>` to the maintainer with the deriver's reason
      verbatim, and claim, Pull and review nothing.
-   - `NEED resume #<n> <worktree> <branch>` — a dead run's claim with no PR.
+   - `NEED resume #<n> <worktree> <branch>` — a dead run's claim that never opened a PR.
      Dispatch a stranded `impl-<n>-b` the ordinary way (record it with
      `ledger.mjs row`, render its brief, `ledger.mjs dispatch`, the `task`
      call, the tier check), in that worktree and branch, and never with
      `claim-ticket.sh`: the claim stands. A re-run finds the need met once its
      row is written. A `report #<n> — <why>` line is the maintainer's and
      nothing else, and a `carried` line is a live token to reconcile first.
+     A closed-unmerged PR's `report` takes `replace`/`release #<n>`.
    - `NEED review PR#<pr> (closes no issue)` — an open PR a prior run left
      that no row can queue. Advice, never an exit status: hand-dispatch its
      review exactly as ticket work, or leave it.
@@ -273,6 +274,7 @@ depth** guard table applied in code. Act on each line as it reads:
 - `ESCALATE unlabelled PR#<M> …` — a second finisher settled `labelled` and the label is still off: not actionable, the maintainer's.
 - `CONFLICT PR#<M> …` — record the hold with `fleet-event.mjs conflict <M>`, never with the `ledger.mjs row` form; the tick then prints `DISPATCH fix-pr`.
 - `ESCALATE conflict PR#<M> …` — PR M reads CONFLICTING again after two conflict fix-appliers: comment on the PR and flag it for a human, write no hold, dispatch no fix-applier.
+- `ESCALATE pr-closed #<N> PR#<M>`, `… pr-unchecked …` — the maintainer's: tell them once per ticket per run; no dispatch or comment for #N. Reopening M or closing #N clears it. Only `replace #N` (`NEED resume`, same row) or `release #N` (closed-PR `release-ticket.sh --apply`, settle `released`) acts, once no live member names M.
 - `HOLD (…)` — the row is held and its detail names the clearing step: dispatch nothing on that row until it clears; a tier mismatch is yours to clear by dispatching the replacement.
 - `AT CAP`, `IDLE OK` — nothing to do on that row.
 - `MAIN-CHECKOUT-DIRTY …` — dispatch nothing new and tell the maintainer; once they have resolved the paths, `main-checkout.mjs --record`; never revert the paths or re-baseline over them yourself.
@@ -1218,13 +1220,8 @@ Names follow the unit of work: `impl-<issue#>`, `fix-pr-<pr#>`,
 `review-pr-<pr#>`, `finisher-pr-<pr#>`, `merge-bot-<n>`. See
 references/member-lifecycle.md.
 
-**Fresh context per member.** One member, one unit of work, gone. Never
-re-task a finished member — waking it drags the old ticket back in. Refill =
-**new** member, **new** name. Sending is still right for pinging a live
-member for a report it owes, or resuming a truncated reply — never for
-handing a finished member the next ticket.
-
-`hub send` to an idle peer wakes it into its old transcript the same way; re-dispatching under the same name does not reset it — omp auto-suffixes a fresh peer (`name-2`) instead.
+**Fresh context per member.** One member, one unit of work, gone. Refill =
+**new** member, **new** name.
 
 See references/member-lifecycle.md.
 

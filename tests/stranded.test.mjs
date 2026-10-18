@@ -34,7 +34,14 @@ printf '%s\\n' "$*" >> "$GH_LOG"
 [ -z "$GH_ENV_LOG" ] || printf 'GIT_DIR=%s GH_REPO=%s\\n' "\${GIT_DIR-}" "\${GH_REPO-}" >> "$GH_ENV_LOG"
 case "$1 $2" in
   "issue list") [ -z "$GH_ISSUE_FAIL" ] || { echo "issue list boom" >&2; exit 1; }; cat "$FIXTURE_ISSUES" ;;
-  "pr list") [ -z "$GH_PR_FAIL" ] || { echo "pr list boom" >&2; exit 1; }; cat "$FIXTURE_PRS" ;;
+  "pr list")
+    head=""; prev=""
+    for a in "$@"; do [ "$prev" = "--head" ] && head="$a"; prev="$a"; done
+    if [ -n "$head" ]; then
+      [ -z "$GH_HEAD_FAIL" ] || { echo "head list boom" >&2; exit 1; }
+      jq -c --arg b "$head" '.[$b] // []' "$FIXTURE_HEADS"; exit 0
+    fi
+    [ -z "$GH_PR_FAIL" ] || { echo "pr list boom" >&2; exit 1; }; cat "$FIXTURE_PRS" ;;
   *) echo "unexpected gh $*" >&2; exit 3 ;;
 esac
 `;
@@ -76,14 +83,17 @@ function fixture(t, { controller = null, heartbeat, worktrees = [] } = {}) {
   writeFileSync(tableFile, JSON.stringify(TABLE));
   const ghLog = join(dir, "gh.log");
   writeFileSync(ghLog, "");
-  const run = ({ issues = [], prs = [], env = {}, cwd = repo, script = SCRIPT } = {}) => {
+  // `heads` maps a branch to what `gh pr list --state all --head <branch>`
+  // answers for it: `[{number, state}]`, none for a branch not named.
+  const run = ({ issues = [], prs = [], heads = {}, env = {}, cwd = repo, script = SCRIPT } = {}) => {
     writeFileSync(join(dir, "issues.json"), JSON.stringify(issues));
     writeFileSync(join(dir, "prs.json"), JSON.stringify(prs));
+    writeFileSync(join(dir, "heads.json"), JSON.stringify(heads));
     const r = spawnSync(process.execPath, [script], {
       cwd, encoding: "utf8",
       env: {
         ...process.env, PATH: `${bin}:${process.env.PATH}`, FLEET_PROC_TABLE: tableFile, GH_LOG: ghLog,
-        FIXTURE_ISSUES: join(dir, "issues.json"), FIXTURE_PRS: join(dir, "prs.json"), ...env,
+        FIXTURE_ISSUES: join(dir, "issues.json"), FIXTURE_PRS: join(dir, "prs.json"), FIXTURE_HEADS: join(dir, "heads.json"), ...env,
       },
     });
     r.gh = readFileSync(ghLog, "utf8").split("\n").filter(Boolean);
@@ -305,6 +315,61 @@ test("a list that did not answer, or came back at its cap, is a refusal — exit
   assert.match(prsAtCap.stderr, /cap/);
 });
 
+test("prior dead + a claim whose branch's PR closed unmerged, none open → report naming the PR, in place of the resume", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12", "13-impl-13", "14-impl-14"] });
+  const r = f.run({
+    issues: [issue(12), issue(13), issue(14)],
+    heads: {
+      "implementer/12-impl-12": [{ number: 40, state: "CLOSED" }],
+      "implementer/13-impl-13": [{ number: 41, state: "CLOSED" }, { number: 44, state: "CLOSED" }],
+      "implementer/14-impl-14": [{ number: 42, state: "MERGED" }],
+    },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims, [
+    { n: 12, t: "ticket 12", action: "report", worktree: wt(f, "12-impl-12"), branch: "implementer/12-impl-12", why: "PR #40 closed unmerged" },
+    { n: 13, t: "ticket 13", action: "report", worktree: wt(f, "13-impl-13"), branch: "implementer/13-impl-13", why: "PR #44 closed unmerged" },
+    { n: 14, t: "ticket 14", action: "resume", worktree: wt(f, "14-impl-14"), branch: "implementer/14-impl-14", why: "its worktree is in this checkout" },
+  ]);
+  // One probe per claim with a branch, every state, after the two lists.
+  assert.deepEqual(r.gh.slice(2), [12, 13, 14].map((n) => `pr list --state all --head implementer/${n}-impl-${n} --json number,state --limit 1000`));
+});
+
+test("prior dead + a claim whose branch never opened a PR still resumes; one whose closed PR has an open sibling is not a closed-PR report", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12", "13-impl-13"] });
+  const r = f.run({
+    issues: [issue(12), issue(13)],
+    heads: { "implementer/13-impl-13": [{ number: 41, state: "CLOSED" }, { number: 45, state: "OPEN" }] },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.why]), [
+    [12, "resume", "its worktree is in this checkout"],
+    [13, "resume", "its worktree is in this checkout"],
+  ]);
+});
+
+test("prior dead + a branch probe that does not answer → report, never resume — and never a refusal of the step", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  const failed = f.run({ issues: [issue(12)], env: { GH_HEAD_FAIL: "1" } });
+  assert.equal(failed.status, 0, failed.stderr);
+  assert.deepEqual(failed.out.claims.map((c) => [c.n, c.action, c.worktree]), [[12, "report", wt(f, "12-impl-12")]]);
+  assert.match(failed.out.claims[0].why, /^gh pr list --head implementer\/12-impl-12 did not answer \(exit 1: head list boom\) — whether its branch opened a PR is unknown, so nothing is resumed$/);
+  for (const [what, answer] of [["a PR with no state", [{ number: 40 }]], ["not a list", { number: 40, state: "CLOSED" }]]) {
+    const r = f.run({ issues: [issue(12)], heads: { "implementer/12-impl-12": answer } });
+    assert.equal(r.status, 0, `${what}: ${r.stderr}`);
+    assert.deepEqual(r.out.claims.map((c) => [c.n, c.action]), [[12, "report"]], what);
+    assert.match(r.out.claims[0].why, /did not answer \(not a list of \{number, state\}\)/, what);
+  }
+});
+
+test("prior none never probes a branch: nothing resumes, so there is nothing to tell apart", (t) => {
+  const f = fixture(t, { controller: RECORD("none"), worktrees: ["12-impl-12"] });
+  const r = f.run({ issues: [issue(12)], heads: { "implementer/12-impl-12": [{ number: 40, state: "CLOSED" }] } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.why]), [[12, "report", "no record proves the previous run dead, so nothing is resumed"]]);
+  assert.equal(r.gh.length, 2);
+});
+
 test("stranded.mjs takes no stray argument", (t) => {
   const f = fixture(t, { controller: RECORD("dead") });
   const r = spawnSync(process.execPath, [SCRIPT, "--resume"], { cwd: f.repo, encoding: "utf8" });
@@ -329,7 +394,8 @@ test("gh is run with no ambient GIT_DIR or GH_REPO, which would answer for anoth
   const envLog = join(f.dir, "gh-env.log");
   const r = f.run({ issues: [issue(12)], env: { GIT_DIR: join(f.dir, "nowhere", ".git"), GH_REPO: "other/repo", GH_ENV_LOG: envLog } });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(readFileSync(envLog, "utf8").trim().split("\n"), ["GIT_DIR= GH_REPO=", "GIT_DIR= GH_REPO="]);
+  assert.deepEqual(readFileSync(envLog, "utf8").trim().split("\n"), ["GIT_DIR= GH_REPO=", "GIT_DIR= GH_REPO=", "GIT_DIR= GH_REPO="],
+    "the issue list, the open-PR list and the claim's branch probe");
 });
 
 // `ledger.mjs read` is the ledger's own parser, so its stdout is only wrong
