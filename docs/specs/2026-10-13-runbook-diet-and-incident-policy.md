@@ -41,11 +41,11 @@ list:
 Unblocked at filing: #3185, #3186, #3187, #3189, #3190, #3191, #3192, #3193.
 
 Order: 1 and 3 first, in parallel; 2 beside them; 4 after 2 and 3; 5 after
-1; 6 after all. Specs 1, 4, 5 and 6 edit SKILL.md heavily, so the fleet's
-own collision scan serializes their tickets as `behind-pr`; carve those
-tickets by section where two must run together. A seventh item, an
-external wake for an idle controller on omp, is a research ticket, not a
-spec, until it is measured.
+1; 6 after all. Specs 1, 3, 4, 5 and 6 edit SKILL.md heavily. Specs 1 and
+3 ran in parallel on it: #3194 and #3196 had SKILL.md PRs open together,
+and neither was held `behind-pr`. A seventh item, an external wake for
+an idle controller on omp, is a research ticket, not a spec, until it is
+measured.
 
 ## Problem Statement
 
