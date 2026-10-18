@@ -145,10 +145,11 @@ const die = makeDie(NAME);
 // reaches the network. In a partial clone a missing baseline commit then
 // answers `missing` instead of being fetched from the promisor remote; with
 // lazy fetch on, the ancestry read fetches it and answers `moved`, and a
-// fetch that fails there but succeeds for the probe turns `missing` into
-// `read`. Git before 2.45 ignores the variable and still lazy-fetches; that
-// is accepted, not fixed — the `--no-lazy-fetch` flag would instead fail
-// every call there, since such a git rejects it as an unknown option.
+// fetch that fails in the `merge-base` call but succeeds in the `rev-parse`
+// probe turns `missing` into `read`. Git before 2.45 ignores the variable and
+// still lazy-fetches; that is accepted, not fixed — the `--no-lazy-fetch` flag
+// would instead fail every call there, since such a git rejects it as an
+// unknown option.
 // `what` names the call in a failure, since `why` is printed to the operator.
 function git(what, args, cwd, env) {
   const r = spawnSync("git", args, {

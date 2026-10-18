@@ -817,12 +817,13 @@ test("a baseline commit an amend and gc pruned is its own unknown: examine HEAD 
   assert.equal(check(dir).state, "clean");
 });
 
-// GIT_NO_LAZY_FETCH, which the check sets on every git call, is read from git 2.45 on.
-const GIT_VERSION = (spawnSync("git", ["--version"], { encoding: "utf8" }).stdout.match(/(\d+)\.(\d+)/) ?? []).slice(1).map(Number);
-const NO_LAZY_FETCH = GIT_VERSION[0] > 2 || (GIT_VERSION[0] === 2 && GIT_VERSION[1] >= 45);
+// GIT_NO_LAZY_FETCH, which the check sets on every git call, is read from git
+// 2.45 on — the release that added `--no-lazy-fetch`, so a git that accepts the
+// flag reads the variable.
+const NO_LAZY_FETCH = spawnSync("git", ["--no-lazy-fetch", "version"]).status === 0;
 
 test("a partial clone's pruned baseline commit is missing, never fetched from origin and read as dirty", {
-  skip: !NO_LAZY_FETCH && `git ${GIT_VERSION.join(".")} predates 2.45, which ignores GIT_NO_LAZY_FETCH and lazy-fetches the pruned commit`,
+  skip: !NO_LAZY_FETCH && "this git rejects --no-lazy-fetch, so it predates 2.45, ignores GIT_NO_LAZY_FETCH and lazy-fetches the pruned commit",
 }, (t) => {
   const origin = originOf(repo(t));
   git(origin, "config", "uploadpack.allowFilter", "true");
@@ -831,12 +832,11 @@ test("a partial clone's pruned baseline commit is missing, never fetched from or
   git(dir, "clone", "-q", "--filter=blob:none", `file://${origin}`, ".");
   writeFileSync(join(dir, "tracked.txt"), "pushed\n");
   git(dir, "commit", "-qam", "pushed");
-  // On origin, so a lazy fetch could bring it back once it is pruned here.
-  git(dir, "push", "-q", "origin", "HEAD:refs/heads/pushed");
+  // On origin, so a lazy fetch could bring it back once it is pruned here, and
+  // outside refs/heads/, so the push writes no tracking ref that would keep it.
+  git(dir, "push", "-q", "origin", "HEAD:refs/keep/pushed");
   const recorded = record(dir).head.oid;
   git(dir, "commit", "-q", "--amend", "-m", "amended");
-  // The tracking ref the push wrote keeps the commit reachable, so gc would keep it.
-  git(dir, "update-ref", "-d", "refs/remotes/origin/pushed");
   git(dir, "reflog", "expire", "--expire-unreachable=now", "--all");
   git(dir, "gc", "-q", "--prune=now");
   const absent = () => spawnSync("git", ["cat-file", "-e", recorded], { cwd: dir, env: { ...process.env, GIT_NO_LAZY_FETCH: "1" } }).status;
