@@ -49,7 +49,7 @@ TOP_JSONL = SESSION_DIR.parent / f"{SESSION_NAME}.jsonl"
 
 COLUMNS = ["session", "run_date", "role", "member", "model", "effort", "ticket", "pr",
            "tokens_cache_create", "tokens_out", "wall_s", "turns", "agent", "harness",
-           "subagent_type"]
+           "subagent_type", "report", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost"]
 
 
 def parse_ts(s):
@@ -81,7 +81,7 @@ def scrape_member_outcomes():
 
 def fetch_merged_prs():
     p = subprocess.run(
-        ["gh", "pr", "list", "--state", "merged", "--limit", "400",
+        ["gh", "pr", "list", "--state", "merged", "--limit", "5000",
          "--json", "number,mergedAt,createdAt"],
         check=True, capture_output=True, text=True,
     )
