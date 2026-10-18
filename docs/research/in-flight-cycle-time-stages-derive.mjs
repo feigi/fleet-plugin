@@ -187,9 +187,10 @@ const table = (head, rows) => [`| ${head.join(" | ")} |`, `|${head.map(() => "--
 // The closed listing is read page by page and every page is cached forever, so
 // a deeper run can take pages 1..k from an earlier fill and later pages live.
 // If PRs were created in between, the listing has shifted and one PR can end a
-// cached page and start the next live one. A PR number enters the closed list,
-// the population and the buffer at most once; the first occurrence in listing
-// order wins, and the duplicates dropped are counted for one stderr line.
+// cached page and start the next live one; a PR created while one run reads the
+// pages live shifts it the same way, --refresh or not. A PR number enters the
+// closed list, the population and the buffer at most once; the first occurrence
+// in listing order wins, and the duplicates dropped are counted for one stderr line.
 const seen = new Set();
 let duplicatesDropped = 0;
 const fresh = (rows) => rows.filter((x) => {
@@ -228,7 +229,10 @@ for (let b = 1; b <= BUFFER_PAGES && !exhausted; b++) {
   buffer.push(...fresh(d).filter((x) => x.merged_at).map(asBuf));
   if (d.length < PER_PAGE) break;
 }
-if (duplicatesDropped) console.error(`in-flight-cycle-time-stages: dropped ${duplicatesDropped} duplicate PR${duplicatesDropped === 1 ? "" : "s"} from the closed listing: its pages come from different cache fills (the listing shifted between them); pass --refresh to read a single-fill listing`);
+const shift = REFRESH
+  ? "it shifted while its pages were read live (a PR created mid-run)"
+  : "it shifted between page reads (pages from different cache fills, or a PR created mid-run)";
+if (duplicatesDropped) console.error(`in-flight-cycle-time-stages: dropped ${duplicatesDropped} duplicate PR${duplicatesDropped === 1 ? "" : "s"} from the closed listing: ${shift}; re-run with --refresh to read every page live`);
 const openFiles = [];
 const openNow = await pagedList("pulls?state=open", openFiles);
 pop.sort((a, b) => a.created - b.created);

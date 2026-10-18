@@ -25,7 +25,8 @@ const T0 = Date.parse("2026-09-01T00:00:00Z");
 const iso = (ms) => new Date(ms).toISOString();
 
 // Request paths as the script builds them (api() and pagedList()).
-const CLOSED = `pulls?state=closed&sort=created&direction=desc&per_page=${PER_PAGE}&page=1`;
+const CLOSED_PAGE = (n) => `pulls?state=closed&sort=created&direction=desc&per_page=${PER_PAGE}&page=${n}`;
+const CLOSED = CLOSED_PAGE(1);
 const OPEN_1 = `pulls?state=open&per_page=${PER_PAGE}&page=1`;
 const OPEN_2 = `pulls?state=open&per_page=${PER_PAGE}&page=2`;
 // cacheFile() in the script: the repo, then the request path with every character
@@ -197,8 +198,8 @@ test("the Query line counts closed-unmerged PRs inside the span apart from those
 // A deeper run takes closed pages 1..k from an earlier fill and later pages live.
 // If the listing shifted between the fills, a PR ends a cached page and starts the
 // next live one. Page 1 is pre-seeded into the cache, as that earlier fill left it;
-// page 2 is served by the stub, as the live fill.
-const CLOSED_PAGE = (n) => `pulls?state=closed&sort=created&direction=desc&per_page=${PER_PAGE}&page=${n}`;
+// page 2 is served by the stub, as the live fill. The --refresh case serves both
+// pages live, as a listing that shifted while one run read it.
 const filler = (count) => Array.from({ length: count }, (_, i) => unmerged(3000 + i, T0 + 30 * DAY - i * 60_000));
 const olderMerged = (number, daysBefore) => ({ number, created_at: iso(T0 - daysBefore * DAY), merged_at: iso(T0 - daysBefore * DAY + 3600_000), body: "" });
 const requested = (s, needle) => requests(s).filter((u) => u.includes(needle)).length;
@@ -213,14 +214,15 @@ function setupPages(page1, page2) {
 }
 const withoutOpenLine = (out) => out.split("\n").filter((l) => !l.startsWith(OPEN_PREFIX)).join("\n");
 const rowCount = (out, n) => out.split("\n").filter((l) => l.startsWith(`| #${n} |`)).length;
-const DUP_NOTICE = /dropped 1 duplicate PR from the closed listing: its pages come from different cache fills.*--refresh/;
+const DUP_NOTICE = /dropped 1 duplicate PR from the closed listing: it shifted between page reads \(pages from different cache fills, or a PR created mid-run\); re-run with --refresh/;
+// Page 1 holds #1112…#1106 (with closed-unmerged #1150 between #1107 and #1106);
+// the rest of the listing is #1105…#1101.
+const PAGE1_ENDS_1106 = [...filler(92), ...[11, 10, 9, 8, 7, 6].map(merged), unmerged(1150, T0 + 5.5 * DAY), merged(5)];
+const REST_1105 = [4, 3, 2, 1, 0].map(merged);
 
 test("a PR ending a cached closed page and starting the next live one is counted once in the population, the Query line and the per-PR rows", () => {
-  // Page 1 holds #1112…#1106 (with closed-unmerged #1150 between #1107 and #1106),
-  // page 2 starts with #1106 again, then #1105…#1101.
-  const page1 = [...filler(92), ...[11, 10, 9, 8, 7, 6].map(merged), unmerged(1150, T0 + 5.5 * DAY), merged(5)];
-  const rest = [4, 3, 2, 1, 0].map(merged);
-  const s = setupPages(page1, [merged(5), ...rest]);
+  // Page 2 starts with #1106 again.
+  const s = setupPages(PAGE1_ENDS_1106, [merged(5), ...REST_1105]);
   const r = run(s);
   assert.equal(
     line(r.stdout, QUERY_PREFIX),
@@ -234,9 +236,37 @@ test("a PR ending a cached closed page and starting the next live one is counted
   assert.ok(line(r.stdout, "- Buffer (").startsWith("- Buffer (0 merged PRs older than the population"), "no population PR is in the buffer");
 
   // The same listing from a single fill: no notice, and a report equal but for the listing's fetch time.
-  const rc = run(setupPages(page1, rest));
+  const rc = run(setupPages(PAGE1_ENDS_1106, REST_1105));
   assert.ok(!/duplicate/.test(rc.stderr), `no notice without a duplicate: ${rc.stderr}`);
   assert.equal(withoutOpenLine(r.stdout), withoutOpenLine(rc.stdout));
+});
+
+test("when the two copies of a duplicate differ, the first in listing order is the one counted", () => {
+  // The live copy of #1106 merged a day later than the cached one says. The cached
+  // copy comes first in the listing, so the report is the one the cached copy alone gives.
+  const later = { ...merged(5), merged_at: iso(POP_MERGED_AT(5) + DAY) };
+  const r = run(setupPages(PAGE1_ENDS_1106, [later, ...REST_1105]));
+  const rc = run(setupPages(PAGE1_ENDS_1106, REST_1105));
+  assert.equal(withoutOpenLine(r.stdout), withoutOpenLine(rc.stdout));
+});
+
+test("with --refresh, a duplicate across two live page reads is reported as a mid-run shift", () => {
+  const s = setupPages(PAGE1_ENDS_1106, [merged(5), ...REST_1105]);
+  const live = JSON.parse(readFileSync(join(s.dir, "responses.json"), "utf8"));
+  writeFileSync(join(s.dir, "responses.json"), JSON.stringify({ ...live, [CLOSED_PAGE(1)]: PAGE1_ENDS_1106 }));
+  const r = run(s, ["--refresh"]);
+  assert.equal(requested(s, CLOSED_PAGE(1)), 1, "closed page 1 was read live");
+  assert.equal(rowCount(r.stdout, 1106), 1, "#1106 has one per-PR row");
+  assert.match(r.stderr, /dropped 1 duplicate PR from the closed listing: it shifted while its pages were read live \(a PR created mid-run\); re-run with --refresh/);
+});
+
+test("two duplicates are counted in a plural notice", () => {
+  // Page 1 ends with #1106 and #1105; page 2 starts with both again.
+  const page1 = [...filler(92), ...[11, 10, 9, 8, 7, 6, 5, 4].map(merged)];
+  const r = run(setupPages(page1, [5, 4, 3, 2, 1, 0].map(merged)));
+  assert.equal(rowCount(r.stdout, 1106), 1, "#1106 has one per-PR row");
+  assert.equal(rowCount(r.stdout, 1105), 1, "#1105 has one per-PR row");
+  assert.match(r.stderr, /dropped 2 duplicate PRs from the closed listing: /);
 });
 
 test("a duplicate that lands only in the buffer pages is counted once in the buffer", () => {
@@ -253,7 +283,7 @@ test("a duplicate that lands only in the buffer pages is counted once in the buf
   assert.match(line(r.stdout, "- Buffer ("), /: 2 left over past the population on its last listing page, 1 older page read\)/);
   assert.match(r.stderr, DUP_NOTICE);
   const rc = run(setupPages(page1, rest));
-  assert.ok(!/duplicate/.test(rc.stderr), `no notice without a duplicate: ${rc.stderr}`);
+  assert.equal(rc.stderr.split("\n").filter((l) => !l.startsWith("transport:") && l.trim()).length, 0, `stderr is only the transport line: ${rc.stderr}`);
   assert.equal(withoutOpenLine(r.stdout), withoutOpenLine(rc.stdout));
 });
 
@@ -270,11 +300,4 @@ test("a population PR repeated at the start of a buffer page is not added to the
   assert.equal(rowCount(r.stdout, 1101), 1);
   assert.equal(requested(s, "issues/1101/events"), 1, "#1101 is read once");
   assert.match(r.stderr, DUP_NOTICE);
-});
-
-test("on a listing with no duplicate, nothing is dropped and no notice is printed", () => {
-  const page1 = [...filler(86), ...[11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0].map(merged), olderMerged(1096, 2), olderMerged(1095, 3)];
-  const r = run(setupPages(page1, [olderMerged(1094, 4), olderMerged(1093, 5)]));
-  assert.ok(!/duplicate/.test(r.stderr), r.stderr);
-  assert.equal(r.stderr.split("\n").filter((l) => !l.startsWith("transport:") && l.trim()).length, 0, `stderr is only the transport line: ${r.stderr}`);
 });
