@@ -890,9 +890,9 @@ test("a baseline commit whose probe is killed by a signal stays could-not-look, 
   // Control: real git answers exit 1 with nothing on stderr for the absent commit.
   assert.equal(check(dir).cause, "missing");
   // A git first on PATH that kills itself with SIGKILL for the probe's
-  // `rev-parse` of the baseline commit, which the module sees as status null
-  // and an empty stderr, and runs everything else as the real git,
-  // `originMain`'s `rev-parse` included.
+  // `rev-parse` of the baseline commit (the module sees status null and an
+  // empty stderr) and runs everything else as the real git, `originMain`'s
+  // `rev-parse` included.
   const shim = join(dir, ".fleet", "shim");
   mkdirSync(shim, { recursive: true });
   writeFileSync(join(shim, "git"), [
