@@ -1297,7 +1297,7 @@ owes beyond its call:
   nothing the tick did not name.
 - **Finisher reports halted** → the per-cause rule (**Resolving a finisher
   halt**, above).
-- **A finisher failed or was killed** → the **Member confirmed dead or never dispatched** wake (`member-died finisher-pr-<M>`), which settles it `failed` or `killed` from its session markers; no label, and the tick prints no dispatch for it. Resolve it by hand (**Resolving a finisher that died**, above).
+- **A finisher failed or was killed** → the **Member confirmed dead or never dispatched** wake (`member-died finisher-pr-<M>`), which settles it `failed` or `killed`; no label, and the tick prints no dispatch for it. The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, above), then run the tick.
 - **Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>`; the causes and the issue action each takes are under **Relabel causes**.
 - **A review result lands** → see the result file written (by you or by the
   runner — **Reviewers** says which, per harness), then
@@ -2606,8 +2606,8 @@ Match the failure to its row in the table below and run that response; where the
 | Merge bot's CI wait reaches its per-PR time bound with the run's `status` still not `completed` | The bot skips that PR and reports `ci-wait-timeout-#<pr>` with the run id and its status. PR stays queued, label untouched |
 | Member silent or truncated | Send to ping or resume — same unit of work; see the state machine below |
 | Member idle with work outstanding | Read the PR first, *then* ping. Idle ≠ done |
-| Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then new member, new name, prompt carries inherited state |
-| Member **unaccounted** (a live token the tick flags `CHECK-LIVENESS`, or any live token nothing has reported on) | Registry census first: `read history://` once. A row other than `running` → `read agent://<member>` and the artifacts (PR head, worktree, labels), settle the real outcome with the existing vocabulary, and resume a `parked` member with `write agent://<member>` when its work is worth continuing. A `running` row → the mtime discriminator below, two polls: moved means BLOCKED and alive; frozen at both polls **and** no artifact movement → `write proc://<member>/kill`, `ledger.mjs settle <member> killed`, fresh name. Three independent alive-signals — the first poll, the second poll, the artifacts — must all be silent before a kill; the tick settles and kills nothing |
+| Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then run the **Member confirmed dead or never dispatched** wake, then new member, new name, prompt carries inherited state |
+| Member **unaccounted** (a live token the tick flags `CHECK-LIVENESS`, or any live token nothing has reported on) | Registry census first: `read history://` once. A row other than `running` → `read agent://<member>` and the artifacts (PR head, worktree, labels), settle the real outcome with the existing vocabulary, and resume a `parked` member with `write agent://<member>` when its work is worth continuing. A `running` row → the mtime discriminator below, two polls: moved means BLOCKED and alive; frozen at both polls **and** no artifact movement → `write proc://<member>/kill`, the **Member confirmed dead or never dispatched** wake, fresh name. Three independent alive-signals — the first poll, the second poll, the artifacts — must all be silent before a kill; the tick settles and kills nothing |
 
 ### Recovery
 
@@ -2619,8 +2619,6 @@ Settle outcome and liveness are different facts, not the same table with two
 spellings. Recovery is a fresh member, fresh name (`impl-<N>-b`,
 `fix-pr-<M>-b`, and for a reviewer the next letter PR M's rows do not carry
 yet) whose prompt states what it inherits.
-
-`hub cancel` leaves a peer hard-aborted and unmessageable, but a `failed` job's peer can stay `idle` and answer normally. No distinct truncated state exists.
 
 Reviewers that went idle on CI recover as a **finisher, not a re-review** once
 commits are pushed. See references/member-lifecycle.md.

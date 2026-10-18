@@ -20,11 +20,12 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { foldLedger } from "../plugin/scripts/fleet-tick.mjs";
-import { BAILS } from "../plugin/scripts/fleet-event.mjs";
+import { BAILS, reportKind } from "../plugin/scripts/fleet-event.mjs";
+import { MEMBER_FAMILIES } from "../plugin/scripts/ledger-grammar.mjs";
 import { SCHEMAS } from "../plugin/scripts/report-schema.mjs";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
@@ -1217,10 +1218,39 @@ test("member-died with a stamp under five minutes and no transcript refuses: the
   assertRefused(f, ["fix-pr-88", "--session", dir], /first seen 2 min ago/);
 });
 
+test("member-died's five-minute bound is inclusive: a stamp exactly five minutes old refuses, one a millisecond older settles", () => {
+  const now = 1_800_000_000_000;
+  for (const [age, settles] of [[5 * 60_000, false], [5 * 60_000 + 1, true]]) {
+    const f = fixture(liveFor("fix-pr-88"));
+    const dir = sessionDir(f, [], { "fix-pr-88": now - age });
+    // The child's clock, frozen, so the bound is measured to the millisecond.
+    const clock = join(f.dir, "clock.mjs");
+    writeFileSync(clock, `Date.now = () => ${now};\n`);
+    const ledger = f.ledger();
+    const r = f.run(["member-died", "fix-pr-88", "--session", dir], { env: { NODE_OPTIONS: `--import ${pathToFileURL(clock).href}` } });
+    if (settles) {
+      assert.equal(r.status, 0, r.err + r.stdout);
+      assert.deepEqual(r.order, ["ledger settle fix-pr-88 killed", TICK]);
+    } else {
+      assert.equal(r.status, 2, r.err + r.stdout);
+      assert.match(r.err, /first seen 5 min ago, not yet past the 5-minute no-transcript bound/);
+      assert.deepEqual(writes(r.order), []);
+      assert.equal(f.ledger(), ledger);
+    }
+  }
+});
+
 test("member-died with no first-seen stamp and no transcript refuses: the tick never saw the token live", () => {
   const f = fixture(liveFor("fix-pr-88"));
   const dir = sessionDir(f, [], {});
   assertRefused(f, ["fix-pr-88", "--session", dir], /no first-seen stamp/);
+});
+
+test("member-died with no transcript and a heartbeat.json that is not JSON refuses on the file itself: its lost stamps are no missing stamp", () => {
+  const f = fixture(liveFor("fix-pr-88"));
+  const dir = sessionDir(f);
+  writeFileSync(join(f.fleet, "heartbeat.json"), "{not json");
+  assertRefused(f, ["fix-pr-88", "--session", dir], /^fleet-event: member-died fix-pr-88: \S*heartbeat\.json is not JSON — nothing written$/m);
 });
 
 test("member-died on a member with a transcript and no marker refuses: running or parked, so census, kill, then rerun", () => {
@@ -1235,19 +1265,48 @@ test("member-died on an impl with a .md and no tombstone refuses, naming agent:/
   assertRefused(f, ["impl-412", "--session", dir], /agent:\/\/impl-412/);
 });
 
-for (const [member, file, kind] of [
-  ["impl-412", "impl-412.json", "impl-report impl-412"],
-  ["finisher-pr-88", "finisher-pr-88.json", "finisher-report finisher-pr-88"],
+for (const [member, build, kind] of [
+  ["impl-412", implReport, "impl-report"],
+  ["finisher-pr-88", finisherReport, "finisher-report"],
 ]) {
-  test(`member-died on ${member} with its report on disk refuses, naming ${kind}`, () => {
+  test(`member-died on ${member} with its report on disk refuses, naming ${kind} ${member}`, () => {
     const f = fixture(liveFor(member));
     const dir = sessionDir(f, [`${member}.md`]);
-    if (member.startsWith("impl-")) f.report(implReport(member));
-    else f.report(finisherReport(member));
-    assert.ok(existsSync(join(f.scratch, "reports", file)));
-    assertRefused(f, [member, "--session", dir], new RegExp(kind));
+    f.report(build(member));
+    assert.ok(existsSync(join(f.scratch, "reports", `${member}.json`)));
+    assertRefused(f, [member, "--session", dir], new RegExp(`${kind} ${member} settles it`));
   });
 }
+
+test("every member family the ledger grammar parses has a report kind, so member-died's report-on-disk refusal never names undefined", () => {
+  for (const family of MEMBER_FAMILIES) assert.ok(reportKind(family) !== undefined, `no fleet-event.mjs kind settles the ${family} family's report`);
+  assert.equal(reportKind("fix-pr"), "fix-report");
+});
+
+test("member-died on a member the ledger already holds settled notes it and ticks, even with its report on disk: the settled note runs ahead of the report refusal", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88"] });
+  const dir = sessionDir(f, ["impl-412.md"]);
+  f.report(implReport("impl-412"));
+  const ledger = f.ledger();
+  const r = f.run(["member-died", "impl-412", "--session", dir]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(r.order, [TICK]);
+  assert.match(eventLine(r), /impl-412=PR#88 already settled/);
+  assert.equal(f.ledger(), ledger);
+});
+
+test("member-died on a member whose report on disk is invalid refuses, naming the violation: its report kind cannot settle from it either", () => {
+  const f = fixture(liveFor("fix-pr-88"));
+  const dir = sessionDir(f, ["fix-pr-88.md"]);
+  writeFileSync(join(f.scratch, "reports", "fix-pr-88.json"), "{not json");
+  assertRefused(f, ["fix-pr-88", "--session", dir], /fix-report cannot settle from it \(\$: not JSON/);
+});
+
+test("member-died with its report on disk and no session directory refuses naming the report kind: the report refuses ahead of the session lookup", () => {
+  const f = fixture(liveFor("finisher-pr-88"));
+  f.report(finisherReport("finisher-pr-88"));
+  assertRefused(f, ["finisher-pr-88"], /finisher-report finisher-pr-88 settles it/);
+});
 
 test("member-died on a review runner refuses, naming review-failed for its PR and launch", () => {
   const f = fixture();
@@ -1274,14 +1333,33 @@ test("member-died with an outcome argument is a usage error: the outcome comes f
   assert.deepEqual(writes(r.order), []);
 });
 
-test("member-died takes the receipt's session over --session when the receipt names one", () => {
+test("member-died takes the receipt's session over --session when the receipt names one, and says on stderr which --session it did not read", () => {
   const receipt = join(tempDir("fleet-event-sess-"), "receipt");
   mkdirSync(receipt, { recursive: true });
   writeFileSync(join(receipt, "impl-412.jsonl.tombstone"), "");
   const f = fixture({ rows: ["#412 impl-412"], session: receipt });
-  const r = f.run(["member-died", "impl-412", "--session", join(tempDir("fleet-event-sess-"), "unused")]);
+  const unused = join(tempDir("fleet-event-sess-"), "unused");
+  const r = f.run(["member-died", "impl-412", "--session", unused]);
   assert.equal(r.status, 0, r.err + r.stdout);
   assert.deepEqual(r.order, ["ledger settle impl-412 killed", TICK]);
+  assert.ok(r.err.includes(`reads ${receipt}, this run's phase-0 receipt's session, not --session ${unused}`), r.err);
+
+  // The same directory both ways is no override, and nothing is said.
+  const g = fixture({ rows: ["#412 impl-412"], session: receipt });
+  const same = g.run(["member-died", "impl-412", "--session", receipt]);
+  assert.equal(same.status, 0, same.err + same.stdout);
+  assert.ok(!same.err.includes("not --session"), same.err);
+});
+
+test("member-died takes no session from another run's receipt: --session is the directory read, as the tick reads it", () => {
+  const stale = join(tempDir("fleet-event-sess-"), "stale");
+  mkdirSync(stale, { recursive: true });
+  const f = fixture({ rows: ["#412 impl-412"], session: stale });
+  // Run 1999's receipt, and no controller record naming that run.
+  const receipt = JSON.parse(readFileSync(join(f.fleet, "phase0.json"), "utf8"));
+  writeFileSync(join(f.fleet, "phase0.json"), JSON.stringify({ ...receipt, run: 1999 }));
+  const dir = sessionDir(f, ["impl-412.jsonl"], { "impl-412": minutesAgo(30) });
+  assertRefused(f, ["impl-412", "--session", dir], /has a transcript and no marker/);
 });
 
 test("member-died with a receipt session whose directory does not exist yet reads it as empty, as the tick does", () => {
@@ -1291,6 +1369,12 @@ test("member-died with a receipt session whose directory does not exist yet read
   const r = f.run(["member-died", "impl-412"]);
   assert.equal(r.status, 0, r.err + r.stdout);
   assert.deepEqual(r.order, ["ledger settle impl-412 killed", TICK]);
+});
+
+test("member-died with --session naming a directory that does not exist, and no receipt session, refuses even with an old stamp: a mistyped path is not an empty session", () => {
+  const f = fixture({ rows: ["#412 impl-412"] });
+  writeFileSync(join(f.fleet, "heartbeat.json"), JSON.stringify({ seen: { "impl-412": minutesAgo(9) } }));
+  assertRefused(f, ["impl-412", "--session", join(f.dir, "no-such-session")], /cannot list the session directory .*no-such-session \(ENOENT\)/);
 });
 
 test("--session belongs to member-died: another kind refuses it as a usage error", () => {

@@ -75,6 +75,9 @@ second run finds its writes already made and re-ticks.
 | `drain` | `--reason` | `closeout.mjs begin` (spec 3) |
 | `member-died` | `<member>` | the session's markers name the outcome: a `.jsonl.tombstone` is `killed`; a `.md` is `failed` for `fix-pr` and `finisher-pr`, `killed` for `merge-bot`, and refused for `impl`; a transcript with no marker, a report on disk or a review runner refuses; no transcript is `killed` once the first-seen stamp is over five minutes old, and refused before that. Then `ledger.mjs settle <member>=<outcome>` |
 
+`member-died` takes no outcome argument: its outcome is read from the
+session directory's listing, never passed.
+
 **D2. `ledger.mjs token <key> <token>…`.** Appends tokens to a row and
 keeps every token already there; refuses a member token (those are
 `dispatch`/`settle`'s), a review token (`review`'s), a word shaped like a

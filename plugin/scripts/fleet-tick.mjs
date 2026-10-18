@@ -1295,6 +1295,10 @@ export function unrecordedLines({ stems, recorded }) {
   });
 }
 
+// The `--no-transcript-after` default, in minutes: its one definition, which
+// fleet-event.mjs's member-died reads as its own no-transcript bound.
+export const NO_TRANSCRIPT_AFTER_DEFAULT = 5;
+
 // The NO-TRANSCRIPT lines: one per live member token in `live` whose `seen`
 // stamp is more than `after` minutes old and whose `<member>.jsonl` is not
 // among `stems`, as `{kind, name, line, key}` — a ledger token whose `task` call
@@ -1481,7 +1485,7 @@ const OPTIONS = {
   session: { type: "string", default: "" },
   // Minutes a live member token may go with no transcript in the session
   // directory before NO-TRANSCRIPT names it.
-  "no-transcript-after": { type: "string", default: "5" },
+  "no-transcript-after": { type: "string", default: String(NO_TRANSCRIPT_AFTER_DEFAULT) },
   // Minutes a Pull's question may stand, its `pull.json` unwritten, before the
   // PULL row naming it says `(stale)`.
   "pull-stale-minutes": { type: "string", default: "120" },
@@ -1867,15 +1871,16 @@ function claimed() {
 
 // What the controller record's process is now, for the phase-0 gate: `none`
 // with no record, else judgeRecord()'s answer. A process table that cannot
-// be read is `unreadable`, said on stderr: a controller nobody could judge
-// is not one whose receipt this tick may take as this run's.
-function controllerState(controller) {
+// be read is `unreadable`, said on stderr under the caller's `name`: a
+// controller nobody could judge is not one whose receipt may be taken as
+// this run's.
+export function controllerState(controller, name = NAME) {
   if (controller === null) return "none";
   try {
     return judgeRecord(controller);
   } catch (e) {
     if (!(e instanceof ProcUnreadable)) throw e;
-    console.error(`${NAME}: WARNING ${e.message} — the recorded controller pid ${controller.pid} cannot be judged, so the phase-0 receipt is held`);
+    console.error(`${name}: WARNING ${e.message} — the recorded controller pid ${controller.pid} cannot be judged, so the phase-0 receipt is held`);
     return "unreadable";
   }
 }

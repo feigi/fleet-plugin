@@ -522,6 +522,22 @@ const CHANGED = [
   [
     "An entry that names neither `session` nor `transcript` takes the session directory phase 0's receipt `.fleet/phase0.json` records, and is exit 2 naming the receipt when it records none; the check reads the member's own `<session>/<member>.jsonl` directly, so a member with no assistant turn yet still resolves off its dispatch-time record.",
     "An entry that names neither `session` nor `transcript` takes the session directory phase 0's receipt `.fleet/phase0.json` of `--ledger`'s workspace (else the cwd's, resolved as the default ledger is) records, and is exit 2 naming the receipt when it records none; the check reads `<session>/<member>.jsonl`, so a member with no assistant turn yet still resolves off its dispatch-time record."
+  ],
+  [
+    "**A finisher failed or was killed** → `ledger.mjs settle finisher-pr-<M>=failed` for a finisher that crashed or gave up, `=killed` for one that was killed; no label, and the tick prints no dispatch for it.",
+    "**A finisher failed or was killed** → the **Member confirmed dead or never dispatched** wake (`member-died finisher-pr-<M>`), which settles it `failed` or `killed`; no label, and the tick prints no dispatch for it."
+  ],
+  [
+    "Make the `task` call, or settle the token `killed`.",
+    "Make the `task` call, or run the **Member confirmed dead or never dispatched** wake (`fleet-event.mjs member-died <member>`), which settles the token `killed` once the first-seen stamp is past five minutes."
+  ],
+  [
+    "| Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then new member, new name, prompt carries inherited state |",
+    "| Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then run the **Member confirmed dead or never dispatched** wake, then new member, new name, prompt carries inherited state |"
+  ],
+  [
+    "A `running` row → the mtime discriminator below, two polls: moved means BLOCKED and alive; frozen at both polls **and** no artifact movement → `write proc://<member>/kill`, `ledger.mjs settle <member> killed`, fresh name.",
+    "A `running` row → the mtime discriminator below, two polls: moved means BLOCKED and alive; frozen at both polls **and** no artifact movement → `write proc://<member>/kill`, the **Member confirmed dead or never dispatched** wake, fresh name."
   ]
 ];
 
@@ -538,6 +554,10 @@ const DELETED = [
   [
     "The same causes relabel an unclaimed ticket at the Pull (phase 1), where there is no `in-progress` to drop — the causes and labels are one table, applied at whichever point the ticket fails them.",
     "references/pull.md's Pull table and **Relabel by cause**, which carry the Pull's own relabels and its close of a fixed ticket; the bail table gained `fixed` and `covered`, which the Pull does not apply"
+  ],
+  [
+    "`hub cancel` leaves a peer hard-aborted and unmessageable, but a `failed` job's peer can stay `idle` and answer normally.",
+    "references/member-lifecycle.md's two-axes paragraph, which says the same — `hub cancel` → `cancelled`, the peer hard-aborted and unmessageable, and a `failed` job's peer can stay `idle` and resumable — and which SKILL.md's Recovery section points at"
   ]
 ];
 

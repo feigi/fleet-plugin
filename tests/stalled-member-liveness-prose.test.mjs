@@ -193,8 +193,8 @@ const failureTable = () =>
 test("the killed row gates on confirming death, not on a frozen transcript", () => {
   assert.match(
     failureTable(),
-    Pin.phrase("| Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then new member, new name, prompt carries inherited state |"),
-    `${SKILL}'s killed row lost a half. The GATE half — confirm it is dead first, a frozen transcript does not establish that — is what keeps the row from answering a frozen transcript, where the controller replaces a member it never established was gone, discarding work in flight and colliding with its own claim and worktree. The RESPONSE half — new member, new name, prompt carries inherited state — is what a CONFIRMED death must still reach; a gate with no response behind it strands the case this clause exists to let through.`,
+    Pin.phrase("| Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then run the **Member confirmed dead or never dispatched** wake, then new member, new name, prompt carries inherited state |"),
+    `${SKILL}'s killed row lost a half. The GATE half — confirm it is dead first, a frozen transcript does not establish that — is what keeps the row from answering a frozen transcript, where the controller replaces a member it never established was gone, discarding work in flight and colliding with its own claim and worktree. The RESPONSE half — the member-died wake, then new member, new name, prompt carries inherited state — is what a CONFIRMED death must still reach; a gate with no response behind it strands the case this clause exists to let through.`,
   );
 });
 
@@ -215,7 +215,7 @@ test("nothing in the failure table beside the killed row's own gate mentions the
   const table = failureTable();
   const killedRow = table.match(
     Pin.phrase(
-      "| Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then new member, new name, prompt carries inherited state |",
+      "| Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then run the **Member confirmed dead or never dispatched** wake, then new member, new name, prompt carries inherited state |",
     ),
   );
   assert.ok(
@@ -241,7 +241,7 @@ const UNACCOUNTED_ROW = [
   "| Member **unaccounted** (a live token the tick flags `CHECK-LIVENESS`, or any live token nothing has reported on) |",
   "Registry census first: `read history://` once.",
   "A row other than `running` → `read agent://<member>` and the artifacts (PR head, worktree, labels), settle the real outcome with the existing vocabulary, and resume a `parked` member with `write agent://<member>` when its work is worth continuing.",
-  "A `running` row → the mtime discriminator below, two polls: moved means BLOCKED and alive; frozen at both polls **and** no artifact movement → `write proc://<member>/kill`, `ledger.mjs settle <member> killed`, fresh name.",
+  "A `running` row → the mtime discriminator below, two polls: moved means BLOCKED and alive; frozen at both polls **and** no artifact movement → `write proc://<member>/kill`, the **Member confirmed dead or never dispatched** wake, fresh name.",
   "Three independent alive-signals — the first poll, the second poll, the artifacts — must all be silent before a kill; the tick settles and kills nothing |",
 ].join(" ");
 
