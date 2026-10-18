@@ -14,6 +14,15 @@ its PR exists, and reap.sh reports a branch with no upstream as kept instead
 of omitting it; "nothing is lost" still holds. Point 5's "the only reader is
 reap.sh's candidate selection" was already false: pull.mjs's collision scan
 also excludes [gone] branches.
+Amended by #3438: `reap.sh`'s branch sweep gains a second proof beside `git
+cherry`, which keeps a claim whose PR was rebased server-side onto a `main`
+that changed its context lines (a different patch id reads `+`). A tip that
+equals a head GitHub recorded for the branch's merged PR — its `headRefOid`
+or the `beforeCommit` of a force-push on it — or is an ancestor of one this
+clone has, was pushed and then replaced, so nothing on it is local-only. It
+runs only for a branch `git cherry` keeps, on the same `$tip`, fails closed
+per branch, and leaves the compare-and-swap, the holder check and
+`wt_recheck_delete` as they are.
 
 ## Context
 

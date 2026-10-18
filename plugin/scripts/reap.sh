@@ -434,11 +434,15 @@ keep() {
 # subshell before `gp_rc=$?` or the printf below ever run, and `gp_raw` comes
 # back empty — silently, at the one moment this function exists to not be
 # silent (measured on this exact shape).
+#
+# The capture is `probe`, over any command; `git_probe` is `probe git`.
+# pr_load's gh call below is the one other caller: its stdout fields are
+# refnames, numbers, object ids and fixed words, none of which can hold 0x02.
 gp_sep=$(printf '\002')
-git_probe() {
+probe() {
   gp_raw=$(
     {
-      if gp_o=$(git "$@" 2>&3); then gp_rc=0; else gp_rc=$?; fi
+      if gp_o=$("$@" 2>&3); then gp_rc=0; else gp_rc=$?; fi
       printf '%s' "$gp_sep$gp_o$gp_sep$gp_rc"
     } 3>&1
   )
@@ -448,6 +452,7 @@ git_probe() {
   gp_rc=${gp_raw#*"$gp_sep"}
   return "$gp_rc"
 }
+git_probe() { probe git "$@"; }
 
 # True when git's stderr says the directory walk was CUT SHORT — entries are
 # missing from $gp_out — as opposed to git merely having said something.
@@ -669,6 +674,296 @@ null_head_why() {
   return 0
 }
 
+# THE SECOND MERGE PROOF. `git cherry` answers one question — is each of this
+# branch's commits patch-equivalent to something on $base — and answers it
+# wrongly for a claim the merge bot rebased server-side onto a `main` that had
+# changed the claim's own context lines: the rebased commit carries different
+# context, so a different patch id, and the original reads `+` although
+# everything on it was merged. (A `+` is therefore not always "a commit that
+# exists nowhere else"; the keep it produces is safe but leaky.) Measured on
+# this repository's own [gone] branches, most of the stranded tips are not the
+# bot's doing at all: a member that pushes `HEAD:<branch>` from a detached
+# worktree replaces the remote branch and never moves the local ref, so the
+# local tip is a head the PR's remote branch once held.
+#
+# That is the fact this proof reads, and only GitHub records it: the PR's
+# `headRefOid` and the `beforeCommit` of every force-push on it are the heads
+# its branch held. A tip that equals one, or is an ancestor of one this clone
+# has, was pushed to the PR's remote branch and then replaced by its owner's
+# force-push — nothing on it was ever local-only. Equality or ancestry is
+# enough; no range-diff pairing, which was measured to reap none of the
+# stranded tips (every branch has a `!` pair, context drift again) and which,
+# if it accepted `!`, would also reap a local amend that was never pushed.
+#
+# It is additive. It runs only for a branch `git cherry` already keeps, after
+# that verdict, and only ever turns that keep into a reap: the cherry proof,
+# the worktree guards, the holder re-check, the compare-and-swap on the tip
+# read once and `wt_recheck_delete` are all unchanged, and the tie is computed
+# on that same frozen tip. There is no name filter.
+#
+# One lookup per branch, by head name, MERGED PRs only, and a KEEP with its
+# reason unless ALL of: exactly one PR matches (a reused name can match
+# several); its timeline of force-pushes has no next page, because the tie
+# would then be read off a partial list; its base is the branch BASE_REF
+# names; it is not cross-repository; its `headRefOid` is a commit present
+# here and an ancestor of $base_rev — the ancestry is asked of git, not
+# trusted from the API; and the tip equals one of the PR's recorded heads or
+# is an ancestor of one present here. A squash merge's head is not on $base,
+# so it stays kept.
+#
+# One aliased `gh api graphql` lookup per run, one call per $pr_chunk branches
+# and issued the first time a branch needs it, covers every [gone] branch (a
+# superset of the ones waiting: which will need it is only known branch by
+# branch). Branch names go in as GraphQL VARIABLES, never spliced into the
+# query text — `"` is legal in a refname.
+# Output is captured, never piped, and the call runs under a watchdog. Each of
+# these keeps every affected branch with its own reason and the run carries on:
+# gh missing, a non-zero exit with no complete body (a non-zero exit that DID
+# print a complete body — gh does so when the response also carries an
+# `errors` array — is read, and any alias without an entry keeps, with gh's
+# exit status and stderr in its reason), output that is not the shape the
+# script's own `--jq` produces, and a timeline with a next page. Nothing is
+# cached between runs, so an untied branch is asked about again on every pass.
+#
+# It does not apply — and the reason stays the bare `unmerged commits` — where
+# the repository has no GitHub identity to ask about: $base is not a
+# remote-tracking ref of `origin`, or `remote.origin.url` is not a
+# `host/owner/repo` URL (a local path, say). That is not a failure of the
+# proof, there is simply nobody to put the question to. `git config`, never
+# `git remote get-url`: the latter applies `insteadOf` rewrites, which would
+# name the transport rather than the repository.
+#
+# No `[a-z]`-style range anywhere in this block, and no tool whose result
+# depends on the locale: the pin above is a global, and its inventory is
+# enforced by a test.
+case "$base" in
+  origin/*) pr_base=${base#origin/} ;;
+  refs/remotes/origin/*) pr_base=${base#refs/remotes/origin/} ;;
+  *) pr_base= ;;
+esac
+pr_loaded=false
+pr_off=false
+pr_all_why=
+pr_rows=
+pr_why=
+pr_part_why=
+pr_us=$(printf '\037')
+
+# Reads `remote.origin.url` into $pr_owner, $pr_name and $pr_host. Returns 1
+# where it names no `host/owner/repo` — a local path, or a shape with no owner.
+pr_identity() {
+  pi_url=$(git config --get remote.origin.url 2>/dev/null) || return 1
+  case "$pi_url" in
+    /* | ./* | ../* | file://*) return 1 ;;
+    *://*)
+      pi_rest=${pi_url#*://}
+      pi_host=${pi_rest%%/*}
+      pi_path=${pi_rest#*/}
+      ;;
+    *:*)
+      pi_host=${pi_url%%:*}
+      pi_path=${pi_url#*:}
+      ;;
+    *) return 1 ;;
+  esac
+  pi_host=${pi_host##*@}
+  pi_host=${pi_host%%:*}
+  pi_path=${pi_path%/}
+  pi_path=${pi_path%.git}
+  pr_owner=${pi_path%%/*}
+  pr_name=${pi_path#*/}
+  pr_host=$pi_host
+  [ -n "$pr_host" ] && [ -n "$pr_owner" ] && [ "$pr_name" != "$pi_path" ] && [ -n "$pr_name" ] || return 1
+  case "$pr_name" in */*) return 1 ;; esac
+  return 0
+}
+
+# `gh "$@"`, neither prompting nor outliving <budget> seconds: the bounded-call
+# shape net_git has for git, over the same kill walk. It lives here and not in
+# net.sh because this is the one gh call in the fleet that is bounded; net.sh
+# records why the others are not. stdout is gh's, stderr is gh's, and the
+# status is gh's own — 143 or 137 when the watchdog fired (net_stalled). The
+# watchdog closes fd 3, pr_load's stderr capture: where net_kill_tree cannot
+# read `ps`, its sleep outlives the call, and holding that pipe open would
+# stall even a fast answer for the whole budget.
+gh_bounded() {
+  (
+  gb_budget=$1
+  shift
+  GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 gh "$@" </dev/null &
+  gb_pid=$!
+  { sleep "$gb_budget"; net_kill_tree "$gb_pid"; } >/dev/null 2>&1 3>&- &
+  gb_wd=$!
+  gb_status=0
+  wait "$gb_pid" 2>/dev/null || gb_status=$?
+  net_kill_tree "$gb_wd"
+  exit "$gb_status"
+  )
+}
+
+# One run's lookup. Sets $pr_off (the proof does not apply here), $pr_all_why
+# (it could not be read, for every branch) or $pr_rows (the answer).
+#
+# At most $pr_chunk aliases per call: GitHub refuses the whole query with
+# `Resource limits for this query exceeded` somewhere between 850 aliases
+# (answered) and 1000 (refused), measured against this repository, which would
+# keep every `+` branch on every run once the [gone] backlog grew that far.
+# Alias numbers stay global across calls, so pr_tie reads `b<N>` the same way
+# however many calls the answer took; any call that fails fails them all.
+pr_chunk=500
+pr_load() {
+  pr_loaded=true
+  [ -n "$pr_base" ] || { pr_off=true; return 0; }
+  pr_identity || { pr_off=true; return 0; }
+  if ! command -v gh >/dev/null 2>&1; then
+    pr_all_why="gh is not installed, so GitHub's record of this tip could not be read"
+    return 0
+  fi
+  # One line per alias, `\037`-joined and closed by a lone `.`, so a short or
+  # long row cannot be mistaken for a whole one: the same separator, and the
+  # same reason for it, as delete-merged-branch.sh's `gh pr view` read.
+  pl_jq='.data.repository | to_entries[] | .key as $k | (.value.nodes // []) as $n
+    | [$k, (if .value == null then "null" else ($n | length | tostring) end),
+       ($n[0] // {} | ((.number // "" | tostring), (.baseRefName // ""), (.isCrossRepository | tostring), (.headRefOid // ""),
+                      (.timelineItems.pageInfo.hasNextPage | tostring), ([.timelineItems.nodes[]? | .beforeCommit.oid? // empty] | join(",")))),
+       "."] | join("\u001f")'
+  pl_budget=$(net_budget 60 "${FLEET_NET_TIMEOUT:-}")
+  pl_n=0
+  for pl_b in $gone_branches; do pl_n=$((pl_n + 1)); done
+  pl_lo=0
+  while [ "$pl_lo" -lt "$pl_n" ]; do
+    pl_hi=$((pl_lo + pr_chunk))
+    pl_decl='$owner:String!,$name:String!'
+    pl_sel=
+    set -- -f "owner=$pr_owner" -f "name=$pr_name"
+    pl_i=0
+    for pl_b in $gone_branches; do
+      if [ "$pl_i" -ge "$pl_lo" ] && [ "$pl_i" -lt "$pl_hi" ]; then
+        pl_decl="$pl_decl,\$h$pl_i:String!"
+        pl_sel="${pl_sel}b$pl_i:pullRequests(headRefName:\$h$pl_i,states:MERGED,first:2){nodes{number baseRefName isCrossRepository headRefOid timelineItems(itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT],first:100){pageInfo{hasNextPage} nodes{... on HeadRefForcePushedEvent{beforeCommit{oid}}}}}} "
+        set -- "$@" -f "h$pl_i=$pl_b"
+      fi
+      pl_i=$((pl_i + 1))
+    done
+    pl_query="query($pl_decl){repository(owner:\$owner,name:\$name){$pl_sel}}"
+    # `--hostname` always, github.com included: without it gh asks GH_HOST, or
+    # its own default, rather than the host origin names.
+    set -- api graphql --hostname "$pr_host" -f "query=$pl_query" "$@" --jq "$pl_jq"
+    pl_to=$pl_hi
+    [ "$pl_to" -le "$pl_n" ] || pl_to=$pl_n
+    echo "\$ gh api graphql (merged PRs by head branch, [gone] branches $((pl_lo + 1))-$pl_to of $pl_n)" >&2
+    if probe gh_bounded "$pl_budget" "$@"; then pl_rc=0; else pl_rc=$?; fi
+    pl_o=$gp_out
+    pl_err=$gp_err
+    # Every line must be a whole row; one that is not makes the body unusable.
+    pl_ok=false
+    if [ -n "$pl_o" ]; then
+      pl_ok=true
+      while IFS=$pr_us read -r pk pcnt pnum pbase pcross poid phn pbef pend; do
+        case "${pk#b}" in '' | *[!0123456789]*) pl_ok=false ;; esac
+        [ "$pk" != "${pk#b}" ] || pl_ok=false
+        [ "$pend" = . ] || pl_ok=false
+      done <<EOF
+$pl_o
+EOF
+    fi
+    if [ "$pl_ok" = true ]; then
+      pr_rows=${pr_rows:+$pr_rows
+}$pl_o
+      [ "$pl_rc" = 0 ] || pr_part_why="$pr_part_why (gh exited $pl_rc$(gp_why "$pl_err"))"
+    else
+      if [ "$pl_rc" = 0 ]; then
+        pr_all_why="gh answered with unparseable output, so GitHub's record of this tip could not be read"
+      elif net_stalled "$pl_rc"; then
+        pr_all_why="gh did not finish within ${pl_budget}s and was killed, so GitHub's record of this tip could not be read"
+      else
+        pr_all_why="gh failed (exit $pl_rc)$(gp_why "$pl_err"), so GitHub's record of this tip could not be read"
+      fi
+      pr_rows=
+      return 0
+    fi
+    pl_lo=$pl_hi
+  done
+  return 0
+}
+
+# Does GitHub's record tie branch $1, at frozen tip $2, to a head its merged PR
+# held? Returns 0 when it does; otherwise 1, with the reason in $pr_why.
+pr_tie() {
+  pt_b=$1
+  pt_tip=$2
+  pt_i=0
+  for pt_x in $gone_branches; do
+    [ "$pt_x" != "$pt_b" ] || break
+    pt_i=$((pt_i + 1))
+  done
+  pt_row=false
+  while IFS=$pr_us read -r pk pcnt pnum pbase pcross poid phn pbef pend; do
+    if [ "$pk" = "b$pt_i" ]; then pt_row=true; break; fi
+  done <<EOF
+$pr_rows
+EOF
+  if [ "$pt_row" != true ]; then
+    pr_why="GitHub's answer has no entry for $pt_b$pr_part_why"
+    return 1
+  fi
+  case "$pcnt" in
+    0) pr_why="no merged PR has the head branch $pt_b"; return 1 ;;
+    1) ;;
+    '' | null | *[!0123456789]*) pr_why="GitHub returned no usable PR list for $pt_b$pr_part_why"; return 1 ;;
+    *) pr_why="several merged PRs have the head branch $pt_b"; return 1 ;;
+  esac
+  case "$pnum" in '' | *[!0123456789]*) pnum="?" ;; esac
+  if [ "$phn" != false ]; then
+    pr_why="PR #$pnum has more force-pushes than one page of its timeline returned, so its recorded heads are incomplete"
+    return 1
+  fi
+  if [ "$pbase" != "$pr_base" ]; then
+    pr_why="PR #$pnum is based on $pbase, not $pr_base"
+    return 1
+  fi
+  if [ "$pcross" != false ]; then
+    pr_why="PR #$pnum comes from another repository"
+    return 1
+  fi
+  case "$poid" in '' | *[!0123456789abcdef]*)
+    pr_why="PR #$pnum has a headRefOid that is not a commit id: '$poid'"
+    return 1
+    ;;
+  esac
+  if ! git_probe cat-file -e "$poid^{commit}"; then
+    pr_why="PR #$pnum's headRefOid $poid is not a commit present locally"
+    return 1
+  fi
+  if git_probe merge-base --is-ancestor "$poid" "$base_rev"; then :; else
+    if [ "$?" -eq 1 ]; then
+      pr_why="PR #$pnum's headRefOid $poid is not an ancestor of $base, so it did not merge by a rebase or a merge commit onto it"
+    else
+      pr_why="cannot tell whether PR #$pnum's headRefOid $poid is an ancestor of $base$(gp_why)"
+    fi
+    return 1
+  fi
+  # The recorded heads: the head the PR ended on, then every force-pushed-over one.
+  pt_unsure=false
+  pt_unsure_why=
+  pt_rest="$poid,$pbef"
+  while [ -n "$pt_rest" ]; do
+    pt_h=${pt_rest%%,*}
+    case "$pt_rest" in *,*) pt_rest=${pt_rest#*,} ;; *) pt_rest= ;; esac
+    case "$pt_h" in '' | *[!0123456789abcdef]*) continue ;; esac
+    if [ "$pt_h" = "$pt_tip" ]; then return 0; fi
+    git_probe cat-file -e "$pt_h^{commit}" || continue
+    if git_probe merge-base --is-ancestor "$pt_tip" "$pt_h"; then return 0; else pt_rc=$?; fi
+    if [ "$pt_rc" -ne 1 ]; then pt_unsure=true; pt_unsure_why=$(gp_why); fi
+  done
+  if [ "$pt_unsure" = true ]; then
+    pr_why="cannot tell whether the tip is an ancestor of a head the PR recorded$pt_unsure_why"
+    return 1
+  fi
+  pr_why="the tip $pt_tip is not a head the PR recorded, nor an ancestor of one present locally"
+  return 1
+}
+
 # %(upstream:track) emits exactly [gone] as its own field — nothing to
 # pattern-match, and no -v/-vv trap.
 #
@@ -769,8 +1064,9 @@ for b in $gone_branches; do
   tip=$gp_out
 
   # git cherry against origin/main, not a local main: a local main never
-  # fast-forwarded reads every merged branch as unmerged. Any + line is a commit
-  # that exists nowhere else.
+  # fast-forwarded reads every merged branch as unmerged. A + line is a commit
+  # with no patch-equivalent upstream: usually one that exists nowhere else, but
+  # not always — see the second merge proof above the loop.
   #
   # Captured, not piped: `cmd | grep -q` takes grep's exit status, never cmd's,
   # so a `git cherry` that dies (exit 128 — one unreadable loose object is
@@ -833,8 +1129,22 @@ for b in $gone_branches; do
     keep "$b" "cherry scan failed — cannot tell if merged$(gp_why "$gq_err")"
     continue
   elif [ "$gq_rc" -eq 0 ]; then
-    keep "$b" "unmerged commits"
-    continue
+    # `+` is a keep unless the second proof (its header is above the loop)
+    # ties this very `$tip` to a head the branch's merged PR held. Everything
+    # after this block — the worktree guards, the holder re-check, the
+    # compare-and-swap on `$tip` — runs exactly as it does for a branch the
+    # cherry cleared.
+    [ "$pr_loaded" = true ] || pr_load
+    if [ "$pr_off" = true ]; then
+      keep "$b" "unmerged commits"
+      continue
+    elif [ -n "$pr_all_why" ]; then
+      keep "$b" "unmerged commits — $pr_all_why"
+      continue
+    elif ! pr_tie "$b" "$tip"; then
+      keep "$b" "unmerged commits — $pr_why"
+      continue
+    fi
   fi
 
   # The listing is read per branch, through worktree.sh's `wt_counts`, which
