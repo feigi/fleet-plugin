@@ -130,7 +130,7 @@ function installedRepo(t, { install = DEPS_INSTALL } = {}) {
   git(dir, "add", "-A");
   git(dir, "-c", "user.name=fixture", "-c", "user.email=fixture@invalid", "commit", "-q", "-m", "recipe");
   mkdirSync(join(dir, ".fleet"), { recursive: true });
-  const recipe = { install: "sh ./install.sh", test: "sh ./check.sh", derivedAt: git(dir, "rev-parse", "HEAD"), installClean: true, testCount: 1, uncovered: [] };
+  const recipe = { install: "sh ./install.sh", check: true, test: "sh ./check.sh", derivedAt: git(dir, "rev-parse", "HEAD"), installClean: true, testCount: 1, uncovered: [] };
   writeFileSync(join(dir, ".fleet", "recipe.json"), `${JSON.stringify(recipe)}\n`);
   return dir;
 }

@@ -1,7 +1,8 @@
 #!/bin/sh
 # Read one field of a repository's proven Recipe out of its Recipe cache:
-# `install` (the Install step), `test` (the Test entrypoint) or `uncovered`
-# (the CI test steps the Test entrypoint leaves out).
+# `install` (the Install step), `check` (the Check step: the merge-gating CI
+# checks that are not tests), `test` (the Test entrypoint) or `uncovered` (the
+# merge-gating CI steps neither the Test entrypoint nor the Check step runs).
 #
 # The fleet keeps no table of technologies. A Recipe is DERIVED by an agent
 # reasoning over the repository and PROVEN before it is written — the Install
@@ -26,19 +27,24 @@
 # private copy each. A single JSON object:
 #
 #   install       string  the Install step, a shell command run from the root
+#   check         string  the Check step, a shell command run from the root, or
+#                 | true  the JSON boolean `true` (never the string) when the
+#                         repository has no non-test merge-gating step
 #   test          string  the Test entrypoint, a shell command run from the root
 #   derivedAt     string  the full commit id (40 or 64 hex) it was proven at
 #   installClean  true    the Install step left `git status --porcelain` empty
 #   testCount     integer >0, the test count the proving run reported, and/or
-#   mutation      string  the deliberate failing mutation that turned it red
-#   uncovered     array   every test step of the merge-gating CI jobs the Test
-#                         entrypoint does not run, `[]` when it runs them all:
-#                         each entry `{ "step": <string>, "reason": <string> }`,
-#                         both non-empty
+#   checkMutation string  when `check` is not `true`: the deliberate change that
+#                         turned the Check step red (one line)
+#   mutation      string  the deliberate failing mutation that turned the Test entrypoint red
+#   uncovered     array   every merge-gating CI step neither the Test entrypoint nor the
+#                         Check step runs, `[]` when they run them all: each entry
+#                         `{ "step": <string>, "reason": <string> }`, both non-empty
 #
 # At least one of testCount/mutation is the proof; a cache carrying neither,
-# `installClean` anything but `true`, or no well-formed `uncovered`, is an
-# UNPROVEN Recipe and refused like an absent one. Written only by
+# `installClean` anything but `true`, no well-formed `check`, or no well-formed
+# `uncovered` is an UNPROVEN Recipe and refused like an absent one. A `check`
+# other than `true` needs its `checkMutation`. Written only by
 # recipe-prove.mjs, the derivation step's proof, and only once that proof
 # holds; this script never writes it.
 #
@@ -126,7 +132,7 @@ derive="run the Recipe derivation step (run-team phase 0, before the first claim
 # the checkout still lists the old layout until someone updates it. Without
 # `--at` the probe reads <repo>'s own index, as for a caller that runs the
 # command in <repo> itself. Three arguments is neither shape: a refusal.
-usage="usage: derive-testcmd.sh <repo> <install|test|uncovered> [--at <rev>]"
+usage="usage: derive-testcmd.sh <repo> <install|check|test|uncovered> [--at <rev>]"
 rev=
 case $# in
   2) ;;
@@ -149,8 +155,8 @@ gitout=$(git -C "$repo" rev-parse --git-dir 2>&1) || {
 }
 
 case $field in
-  install|test|uncovered) ;;
-  *) die "unknown Recipe field '$field' — expected install, test or uncovered" ;;
+  install|check|test|uncovered) ;;
+  *) die "unknown Recipe field '$field' — expected install, check, test or uncovered" ;;
 esac
 
 # A <rev> is only ever consulted by the probe, which only the Test entrypoint
@@ -197,7 +203,7 @@ cache="$ws/.fleet/recipe.json"
 # Absent is its own refusal, ahead of the interpreter probe: it is the one
 # state every fresh repository starts in, and its message must name the step
 # that ends it rather than anything about a parser.
-[ -e "$cache" ] || die "no Recipe cache at $cache — refusing to infer an Install step or a Test entrypoint; $derive"
+[ -e "$cache" ] || die "no Recipe cache at $cache — refusing to infer an Install step, a Check step or a Test entrypoint; $derive"
 
 # An INVOCATION, not a name lookup: a version-manager shim satisfies
 # `command -v node` and then fails, and its stderr would arrive below under the
@@ -250,13 +256,19 @@ try { r = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { bad(`it does 
 if (r === null || typeof r !== "object" || Array.isArray(r)) bad("it is not a JSON object");
 for (const k of ["install", "test"])
   if (typeof r[k] !== "string" || !r[k].trim() || r[k].includes("\0")) bad(`\`${k}\` is not a non-empty command string`);
+if (r.check !== true) {
+  if (typeof r.check !== "string" || !r.check.trim() || r.check.includes("\0"))
+    bad("`check` is neither `true` nor a non-empty command string — re-derive the Recipe so it names the Check step");
+  if (typeof r.checkMutation !== "string" || !r.checkMutation.trim())
+    bad("`check` is not `true` but `checkMutation` is missing — the change that turned the Check step red");
+}
 if (typeof r.derivedAt !== "string" || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(r.derivedAt))
   bad("`derivedAt` is not a full commit id");
 if (r.installClean !== true) bad("`installClean` is not true — the Install step was never proven to leave the tree clean");
 const counted = Number.isInteger(r.testCount) && r.testCount > 0;
 const mutated = typeof r.mutation === "string" && r.mutation.trim() !== "";
 if (!counted && !mutated) bad("it carries no proof of real tests — neither a positive `testCount` nor a `mutation`");
-if (!Array.isArray(r.uncovered)) bad("`uncovered` is not a list of { step, reason } entries — the CI test steps the Test entrypoint leaves out, `[]` for none");
+if (!Array.isArray(r.uncovered)) bad("`uncovered` is not a list of { step, reason } entries — the merge-gating CI steps neither the Test entrypoint nor the Check step runs, `[]` for none");
 const filled = (s) => typeof s === "string" && s.trim() !== "";
 r.uncovered.forEach((u, i) => {
   if (u === null || typeof u !== "object" || Array.isArray(u) || !filled(u.step) || !filled(u.reason))

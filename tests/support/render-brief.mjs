@@ -46,10 +46,10 @@ export const PIN = "0123456789abcdef0123456789abcdef01234567";
 // disagrees with it, and the renderer's own refusal says so.
 export const CASES = [
   { role: "implementer", kind: null, args: { ticket: "4120", worktree: "/abs/wt-impl", branch: "impl-branch", scratch: "/abs/scratch-impl", brief: "BRIEF-TEXT-1", staleness: "STALE-NOTE-1" } },
-  { role: "fix-applier", kind: "review", args: { worktree: "/abs/wt-fix", branch: "fix-branch", testCmd: "TESTCMD-1", scratch: "/abs/scratch-fix", pr: "3293", run: "run-AbCd1234" } },
-  { role: "fix-applier", kind: "conflict", args: { worktree: "/abs/wt-conflict", branch: "conflict-branch", testCmd: "TESTCMD-2", scratch: "/abs/scratch-conflict" } },
-  { role: "fix-applier", kind: "dispositions-retry", args: { worktree: "/abs/wt-retry", branch: "retry-branch", testCmd: "TESTCMD-3", scratch: "/abs/scratch-retry", pr: "3294", run: "run-ZyXw9876", "mismatched-record": "/abs/scratch-retry/dispositions-fix-pr-3294.json", violations: "VIOLATION-LIST-1" } },
-  { role: "fix-applier", kind: "red-check", args: { worktree: "/abs/wt-red", branch: "red-branch", testCmd: "TESTCMD-7", scratch: "/abs/scratch-red" } },
+  { role: "fix-applier", kind: "review", args: { worktree: "/abs/wt-fix", branch: "fix-branch", checkCmd: "CHECKCMD-1", testCmd: "TESTCMD-1", scratch: "/abs/scratch-fix", pr: "3293", run: "run-AbCd1234" } },
+  { role: "fix-applier", kind: "conflict", args: { worktree: "/abs/wt-conflict", branch: "conflict-branch", checkCmd: "CHECKCMD-2", testCmd: "TESTCMD-2", scratch: "/abs/scratch-conflict" } },
+  { role: "fix-applier", kind: "dispositions-retry", args: { worktree: "/abs/wt-retry", branch: "retry-branch", checkCmd: "CHECKCMD-3", testCmd: "TESTCMD-3", scratch: "/abs/scratch-retry", pr: "3294", run: "run-ZyXw9876", "mismatched-record": "/abs/scratch-retry/dispositions-fix-pr-3294.json", violations: "VIOLATION-LIST-1" } },
+  { role: "fix-applier", kind: "red-check", args: { worktree: "/abs/wt-red", branch: "red-branch", checkCmd: "CHECKCMD-7", testCmd: "TESTCMD-7", scratch: "/abs/scratch-red" } },
   { role: "finisher", kind: "fresh", args: { worktree: "/abs/wt-fin", pin: PIN, pr: "3295", testCmd: "TESTCMD-4", scratch: "/abs/scratch-fin" } },
   { role: "finisher", kind: "repair", args: { worktree: "/abs/wt-fin-r", pin: PIN, pr: "3296", testCmd: "TESTCMD-5", scratch: "/abs/scratch-fin-r" } },
   { role: "merge-bot", kind: null, args: { n: "17", scratch: "/abs/scratch-bot" } },

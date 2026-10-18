@@ -1,19 +1,20 @@
 #!/usr/bin/env node
-// Prove a repository's Recipe — its Install step and Test entrypoint — and
-// write the Recipe cache only if the proof holds. This is the Recipe
+// Prove a repository's Recipe — its Install step, Check step and Test entrypoint —
+// and write the Recipe cache only if the proof holds. This is the Recipe
 // derivation step's proof, and the ONE writer of the cache derive-testcmd.sh
-// reads: the deriving agent chooses both commands by reading the repository,
+// reads: the deriving agent chooses all three commands by reading the repository,
 // and this script is what turns that choice into a cache, or refuses to.
 //
-//   recipe-prove.mjs <repo> --install <cmd> --test <cmd> --uncovered <json>
+//   recipe-prove.mjs <repo> --install <cmd> --check <cmd|true> --test <cmd> --uncovered <json>
 //                    [--count-line <literal> --test-count <n>]
 //                    [--mutate <cmd> --mutation <description>]
+//                    [--check-mutate <cmd> --check-mutation <description>]
 //
-// `--uncovered` is one JSON array, `[]` when the Test entrypoint runs every
-// test step of the merge-gating CI jobs, and otherwise one
-// `{ "step": <string>, "reason": <string> }` per step it leaves out, both
-// non-empty. It is not proven — nothing here can run CI — but required, so a
-// cache never stays silent about a step the Test entrypoint skips; it is
+// `--uncovered` is one JSON array, `[]` when the Test entrypoint and the Check
+// step together run every merge-gating CI step that is not a test, and
+// otherwise one `{ "step": <string>, "reason": <string> }` per such step that
+// neither runs, both non-empty. It is not proven — nothing here can run CI — but
+// required, so a cache never stays silent about a CI step left unrun; it is
 // written as given, as the cache's `uncovered`.
 //
 // Every check runs in a throwaway worktree of `origin/main`, detached and
@@ -25,9 +26,18 @@
 //      that rewrites a tracked file, or creates one the tree neither tracks
 //      nor ignores, corrupts every worktree it later runs in. That is the
 //      same check, in the same form, a claim re-asserts on every Install.
-//   2. The Test entrypoint runs and must RUN — 126/127 is the shell's "cannot
+//   2. The Check step, unless `--check true`, runs and must RUN, as the Test
+//      entrypoint must, and must be green on origin/main. It must leave the tree
+//      as it found it. A red Check step is not proven: a merge-gating non-test
+//      step that is red on origin/main is left out of `check` and listed in
+//      `uncovered`. Its mutation proof: `--check-mutate` must change a tracked
+//      file, and the Check step must then go red (exit not 126/127, and not 0);
+//      the tree is then restored to HEAD — tracked files reset, untracked ones
+//      removed, ignored ones kept — so nothing the mutation or the red run left
+//      behind reaches the Test entrypoint. `--check true` needs none.
+//   3. The Test entrypoint runs and must RUN — 126/127 is the shell's "cannot
 //      execute"/"not found". A red suite is not a failed proof by itself.
-//   3. Real tests must be shown to have executed, by at least one of:
+//   4. Real tests must be shown to have executed, by at least one of:
 //      - the count proof: `--count-line` is a literal the run's own output
 //        must contain (text off the runner's summary line, read off a
 //        previous run), carrying `--test-count`, a positive integer no larger
@@ -46,11 +56,11 @@
 //   With neither, nothing is proven: the refusal still names where the test
 //   run's output is, so the caller can read the count line off it.
 //
-// Each of those commands — the Install step, both Test runs, the mutation —
-// runs under a time bound of its own, 20 minutes, that RECIPE_PROVE_TIMEOUT
-// (whole seconds) can shorten and never lengthen. A command still running at
-// the bound is killed, and the proof is NOT PROVEN for it, the refusal naming
-// the bound and the command's log.
+// Each of those commands — the Install step, both Check runs and the check
+// mutation, both Test runs, the mutation — runs under a time bound of its own,
+// 20 minutes, that RECIPE_PROVE_TIMEOUT (whole seconds) can shorten and never
+// lengthen. A command still running at the bound is killed, and the proof is
+// NOT PROVEN for it, the refusal naming the bound and the command's log.
 //
 // On proof, the cache is written atomically to <workspace>/.fleet/recipe.json
 // — <workspace> being the directory workspaceDirFromGitCommonDir() names for the repository,
@@ -92,7 +102,7 @@ import { isDigits } from "./arg.mjs";
 
 const NAME = "recipe-prove";
 const USAGE =
-  "usage: recipe-prove.mjs <repo> --install <cmd> --test <cmd> --uncovered <json> [--count-line <literal> --test-count <n>] [--mutate <cmd> --mutation <description>]";
+  "usage: recipe-prove.mjs <repo> --install <cmd> --check <cmd|true> --test <cmd> --uncovered <json> [--count-line <literal> --test-count <n>] [--mutate <cmd> --mutation <description>] [--check-mutate <cmd> --check-mutation <description>]";
 const READER = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh");
 
 // Scrubbed once, for every child: an ambient GIT_DIR or GIT_WORK_TREE — set
@@ -140,7 +150,7 @@ const READER_COULD_NOT_RUN = 3;
 function parseArgs(argv) {
   const [repo, ...rest] = argv;
   if (!repo || repo.startsWith("--")) throw cannot(USAGE);
-  const flags = new Set(["--install", "--test", "--uncovered", "--count-line", "--test-count", "--mutate", "--mutation"]);
+  const flags = new Set(["--install", "--check", "--test", "--uncovered", "--count-line", "--test-count", "--mutate", "--mutation", "--check-mutate", "--check-mutation"]);
   const a = {};
   for (let i = 0; i < rest.length; i += 2) {
     const [flag, value] = [rest[i], rest[i + 1]];
@@ -153,7 +163,7 @@ function parseArgs(argv) {
   for (const f of ["--install", "--test"]) {
     if (!a[f] || !a[f].trim()) throw cannot(`${f} needs a non-empty command — ${USAGE}`);
   }
-  if (!("--uncovered" in a)) throw cannot(`--uncovered is required: the CI test steps the Test entrypoint leaves out, as one JSON array, \`[]\` for none — ${USAGE}`);
+  if (!("--uncovered" in a)) throw cannot(`--uncovered is required: the merge-gating CI steps neither the Test entrypoint nor the Check step runs, as one JSON array, \`[]\` for none — ${USAGE}`);
   const uncovered = parseUncovered(a["--uncovered"]);
   if (("--count-line" in a) !== ("--test-count" in a)) throw cannot("--count-line and --test-count go together");
   if ("--test-count" in a && !isDigits(a["--test-count"])) {
@@ -165,6 +175,15 @@ function parseArgs(argv) {
     throw cannot(`--test-count must be at most ${Number.MAX_SAFE_INTEGER}, got '${a["--test-count"]}'`);
   }
   if (("--mutate" in a) !== ("--mutation" in a)) throw cannot("--mutate and --mutation go together");
+  if (!("--check" in a)) throw cannot(`--check is required: the merge-gating CI checks that are not tests, as one command, or \`true\` when the CI has none — ${USAGE}`);
+  if (!a["--check"].trim()) throw cannot(`--check needs a non-empty command, or \`true\` — ${USAGE}`);
+  if (a["--check"] === "true") {
+    if (("--check-mutate" in a) || ("--check-mutation" in a)) throw cannot("--check-mutate and --check-mutation belong to a Check step other than `true`, which is not run here");
+  } else {
+    if (("--check-mutate" in a) !== ("--check-mutation" in a)) throw cannot("--check-mutate and --check-mutation go together");
+    if (!("--check-mutate" in a) || !a["--check-mutate"].trim()) throw cannot(`a Check step other than \`true\` needs --check-mutate, the command that turns it red — ${USAGE}`);
+    if (!a["--check-mutation"].trim()) throw cannot("--check-mutation needs a non-empty description");
+  }
   return {
     repo,
     install: a["--install"],
@@ -173,6 +192,9 @@ function parseArgs(argv) {
     testCount: a["--test-count"],
     mutate: a["--mutate"],
     mutation: a["--mutation"],
+    check: a["--check"],
+    checkMutate: a["--check-mutate"],
+    checkMutation: a["--check-mutation"],
     uncovered,
   };
 }
@@ -268,22 +290,68 @@ const didNotRun = (rc) => rc === 126 || rc === 127;
 // install creates dirties the tree as surely as a rewrite, and the untracked
 // mode is config — under status.showUntrackedFiles=no it is invisible unless
 // pinned.
-function treeChanges(wt, log) {
+function treeChanges(wt, where) {
   const s = git(["status", "--porcelain", "-uall"], wt);
-  if (!s.ok) throw notProven(`could not read the tree state in the throwaway worktree: ${s.err}; install output: ${log}`);
+  if (!s.ok) throw notProven(`could not read the tree state in the throwaway worktree: ${s.err}; ${where}`);
   return s.out;
 }
 
+// Puts the throwaway worktree back to HEAD after a mutation, so the next run
+// starts from the clean tree the proof requires: a reset puts every tracked
+// file back, and only a clean removes the untracked files a mutation or the
+// run it turned red created. No `-x`: ignored files — the Install step's
+// output among them — stay, as they stay through every other step.
+function restoreTree(wt, why, log) {
+  const r = git(["reset", "--hard", "-q", "HEAD"], wt);
+  if (!r.ok) throw notProven(`could not restore the tree ${why}: ${r.err}; output: ${log}`);
+  const c = git(["clean", "-fdq"], wt);
+  if (!c.ok) throw notProven(`could not remove the untracked files ${why}: ${c.err}; output: ${log}`);
+}
+
 function prove(o, wt, logs) {
+  const proof = {};
   const installLog = join(logs, "install.log");
   const irc = sh(o.install, wt, installLog);
   if (didNotRun(irc)) {
     throw notProven(`the Install step '${o.install}' did not run (exit ${irc}: not executable or not found); install output: ${installLog}`);
   }
   if (irc !== 0) throw notProven(`the Install step '${o.install}' failed (exit ${irc}); install output: ${installLog}`);
-  const dirty = treeChanges(wt, installLog);
+  const dirty = treeChanges(wt, `install output: ${installLog}`);
   if (dirty) {
     throw notProven(`the Install step changed the tree (first: ${dirty.split("\n")[0]}); it must leave every file as checked out; install output: ${installLog}`);
+  }
+
+  // The Check step: the merge-gating CI checks that are not tests. It must run
+  // and be green on origin/main, leave the tree as it found it, and turn red
+  // under one mutation of a tracked file. It runs before the Test entrypoint,
+  // and restoreTree puts the tree back to HEAD after its mutation, so nothing
+  // the mutation or the mutated run left in the tree reaches the Test run.
+  if (o.check !== "true") {
+    const checkLog = join(logs, "check.log");
+    const crc = sh(o.check, wt, checkLog);
+    if (didNotRun(crc)) {
+      throw notProven(`the Check step '${o.check}' did not run (exit ${crc}: not executable or not found); check output: ${checkLog}`);
+    }
+    if (crc !== 0) {
+      throw notProven(`the Check step '${o.check}' is red on origin/main (exit ${crc}) — a merge-gating step that is red there belongs in \`uncovered\` with reason \`red on origin/main\`, not in \`check\`; check output: ${checkLog}`);
+    }
+    const checkDirty = treeChanges(wt, `check output: ${checkLog}`);
+    if (checkDirty) {
+      throw notProven(`the Check step changed the tree (first: ${checkDirty.split("\n")[0]}); it must only read the tree; check output: ${checkLog}`);
+    }
+    restoreTree(wt, "before the check mutation", checkLog);
+    const checkMutateLog = join(logs, "check-mutate.log");
+    const mrc = sh(o.checkMutate, wt, checkMutateLog);
+    if (mrc !== 0) throw notProven(`the check mutation command '${o.checkMutate}' failed (exit ${mrc}); its output: ${checkMutateLog}`);
+    const changed = git(["diff", "HEAD", "--name-only"], wt);
+    if (!changed.ok) throw notProven(`could not read what the check mutation changed: ${changed.err}; its output: ${checkMutateLog}`);
+    if (!changed.out) throw notProven(`the check mutation (${o.checkMutation}) changed no tracked file — mutate a file the Check step reads; its output: ${checkMutateLog}`);
+    const checkRedLog = join(logs, "check-mutated.log");
+    const red = sh(o.check, wt, checkRedLog);
+    if (didNotRun(red)) throw notProven(`the Check step did not run on the mutated tree (exit ${red}); check output: ${checkRedLog}`);
+    if (red === 0) throw notProven(`vacuous: the check mutation (${o.checkMutation}) did not turn the Check step red — the Check step does not read the file it changed; check output: ${checkRedLog}`);
+    restoreTree(wt, "after the check mutation", checkRedLog);
+    proof.checkMutation = `${o.checkMutation} — turned the Check step red (exit ${red}); changed ${changed.out.split("\n").join(", ")}`;
   }
 
   const testLog = join(logs, "test.log");
@@ -296,7 +364,6 @@ function prove(o, wt, logs) {
     throw notProven(`no proof given — pass --count-line/--test-count or --mutate/--mutation (the run exited ${trc}); ${where}`);
   }
 
-  const proof = {};
   if (o.countLine !== undefined) {
     const n = Number(o.testCount);
     if (n === 0) throw notProven(`vacuous: a test count of 0 is a run that executed no tests; ${where}`);
@@ -374,9 +441,9 @@ function writeCache(cache, recipe, repo) {
     rmSync(tmp, { force: true });
     throw e;
   }
-  for (const field of ["install", "test", "uncovered"]) {
+  for (const field of ["install", "check", "test", "uncovered"]) {
     const r = spawnSync("sh", [READER, repo, field, ...(field === "test" ? ["--at", recipe.derivedAt] : [])], { env: ENV, encoding: "utf8" });
-    const expected = field === "uncovered" ? JSON.stringify(recipe.uncovered) : recipe[field];
+    const expected = field === "uncovered" ? JSON.stringify(recipe.uncovered) : String(recipe[field]);
     const got = r.status === 0 ? r.stdout.replace(/\n$/, "") : null;
     if (got === expected) continue;
     if (prior === null) unlinkSync(cache);
@@ -477,7 +544,7 @@ function main(argv) {
       removeWorktree(wt, o.repo);
     }
 
-    recipe = { install: o.install, test: o.test, derivedAt: sha.out, installClean: true, ...proof, uncovered: o.uncovered };
+    recipe = { install: o.install, check: o.check === "true" ? true : o.check, test: o.test, derivedAt: sha.out, installClean: true, ...proof, uncovered: o.uncovered };
     writeCache(cache, recipe, o.repo);
   } catch (e) {
     if (!(e instanceof Refusal && e.message.includes(logs))) removeLogs(logs);

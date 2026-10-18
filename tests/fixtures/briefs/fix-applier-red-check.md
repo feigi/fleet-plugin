@@ -4,12 +4,19 @@ it. Do NOT create another worktree. There is no review file: the PR's `check`
 job is red on its current head and you are here to fix it — do not review, do
 not dispatch specialists.
 
-Read the failing job's log and fix the cause. Run `TESTCMD-7` from the
-worktree before you push, then push with `~/.fleet/bin/fleet-run push-sync.mjs --branch red-branch`.
+Read the failing job's log and fix the cause. Run `CHECKCMD-7` and `TESTCMD-7`
+from the worktree before you push, then push with `~/.fleet/bin/fleet-run push-sync.mjs --branch red-branch`.
 Report the new head and **stop**: do not watch, poll or wait for CI — the
 controller owns the next run on the pushed head. A red that is not yours to
 fix — a flake that passes on rerun, or staleness — gets nothing pushed: report
 that instead.
+
+**A red `CHECKCMD-7` is yours to judge.** Read what it reports and fix every
+finding in a file the PR changes, including lines you did not edit — CI checks
+whole files. Never edit a file the PR does not otherwise change: a finding there
+is a stale base, not your code, so rebase onto `origin/main` and re-run; still
+red → push nothing and report that cause. No fix command is recorded; the Check
+step only reports.
 
 Your report is a file, `/abs/scratch-red/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape

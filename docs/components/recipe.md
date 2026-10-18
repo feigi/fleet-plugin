@@ -2,10 +2,11 @@
 
 ## What it is for
 
-The pair of commands the fleet needs to work in any consumer repo: an
-**Install step** that materializes dependencies, and a **Test
+The set of commands the fleet needs to work in any consumer repo: an
+**Install step** that materializes dependencies, a **Check step** that runs the
+merge-gating CI checks that are not tests, and a **Test
 entrypoint** that covers every test step in the merge-gating CI jobs that
-can run in a fresh worktree on the host. Both are derived by agent
+can run in a fresh worktree on the host. All three are derived by agent
 reasoning over the repo, never guessed from a hardcoded table of
 technologies
 ([ADR 0015](../adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md)).
@@ -15,18 +16,20 @@ The reading side shipped with #2117 and the deriving side with #2118.
 1. **Derive.** The
    [`fleet-recipe-deriver`](../../plugin/agents/fleet-recipe-deriver.agent.md)
    agent reads the repo (README, build files, CI workflow) and chooses the
-   Install step and the Test entrypoint. The run-team controller dispatches
-   it in phase 0 when the cache is missing or invalid; a standalone
-   `next-ticket` or `review-and-fix` session dispatches it the same way.
+   Install step, the Check step and the Test entrypoint. The run-team
+   controller dispatches it in phase 0 when the cache is missing or invalid;
+   a standalone `next-ticket` or `review-and-fix` session dispatches it the
+   same way.
 2. **Prove.** [`recipe-prove.mjs`](../../plugin/scripts/recipe-prove.mjs)
-   runs both commands in a throwaway worktree of `origin/main`. The Install
-   step must leave the tree clean; the Test entrypoint must be shown to
-   execute real tests — the runner's own non-zero count, or a deliberate
-   mutation turning the run red.
+   runs all three commands in a throwaway worktree of `origin/main`. The Install
+   step must leave the tree clean; the Check step must run green and a deliberate
+   mutation must turn it red, unless the repository has no such step; the Test
+   entrypoint must be shown to execute real tests — the runner's own non-zero
+   count, or a deliberate mutation turning the run red.
 3. **Cache.** A proven Recipe lives in the **Recipe cache**,
    `<workspace>/.fleet/recipe.json` in the main checkout, carrying the
-   commit it was derived at, the proof, and `uncovered` — the CI test
-   steps the Test entrypoint leaves out, each with its reason, `[]` for
+   commit it was derived at, the proof, the Check step, and `uncovered` — the
+   merge-gating CI steps neither the Test entrypoint nor the Check step runs, each with its reason, `[]` for
    none. `recipe-prove.mjs` is its only writer, and writes only once the
    proof holds.
 4. **Read (shipped, #2117).**

@@ -103,8 +103,8 @@ _Avoid_: worktree check, registry guard, linkage check helper
 ### Consumer repo
 
 **Recipe**:
-The pair of commands the fleet needs about the repository it works on — its Install
-step and its Test entrypoint — derived by agent reasoning over that repository, never
+The commands the fleet needs about the repository it works on — its Install step,
+its Check step and its Test entrypoint — derived by agent reasoning over that repository, never
 by a table of technologies the plugin knows (ADR 0015).
 _Avoid_: config, manifest, detection, project type
 
@@ -112,6 +112,13 @@ _Avoid_: config, manifest, detection, project type
 The command that materialises the repository's dependencies in a fresh worktree.
 Usable only once it has run there and left every tracked file unchanged.
 _Avoid_: install, setup, bootstrap
+
+**Check step**:
+The command that runs the repository's merge-gating CI checks that are not tests, as
+one step. Usable only once it has run green there and a deliberate mutation turns it
+red; `true` when the repository's CI has no such check, which needs no proof of its
+own. A check red on `origin/main` is not part of it.
+_Avoid_: lint, format, static checks
 
 **Test entrypoint**:
 The command that runs the repository's own suite. Usable only once it has been run

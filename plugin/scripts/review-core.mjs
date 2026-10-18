@@ -122,8 +122,8 @@ export const SNAPSHOT_SCHEMA = {
     prHead: { type: "string" },
     testCmd: { type: "string" },
     testCmdError: { type: "string" },
-    // The Recipe's `uncovered` as derive-testcmd.sh printed it: the CI test
-    // steps the Test entrypoint leaves out, one line of JSON, `[]` for none.
+    // The Recipe's `uncovered` as derive-testcmd.sh printed it: the merge-gating
+    // CI steps neither the Test entrypoint nor the Check step runs, one line of JSON, `[]` for none.
     // `uncoveredError` carries the reader's refusal instead when it could not
     // be read, so an unread list never reads as an empty one.
     uncovered: { type: "string" },
@@ -515,8 +515,8 @@ export function environmentNote(snap) {
   return note;
 }
 
-// The CI test steps the Recipe's Test entrypoint leaves out, as the snapshot
-// agent read them through the cache's one reader, ride on the end as one line
+// The merge-gating CI steps that neither the Recipe's Test entrypoint nor its Check step runs,
+// as the snapshot agent read them through the cache's one reader, ride on the end as one line
 // naming each step and why: a green run here says nothing about them, and no
 // specialist runs them. An empty list adds nothing. A list the agent could
 // not read, or reported in another shape, is said so — never left to read as
@@ -533,12 +533,12 @@ function uncoveredNote(snap) {
   }
   if (Array.isArray(list) && list.every((u) => u && typeof u.step === "string" && typeof u.reason === "string")) {
     if (!list.length) return "";
-    return `\nThe Recipe's Test entrypoint does not run these merge-gating CI test steps, and nothing in this review ran them: ${list.map((u) => `${oneLine(u.step)} (${oneLine(u.reason)})`).join("; ")}.`;
+    return `\nThe Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: ${list.map((u) => `${oneLine(u.step)} (${oneLine(u.reason)})`).join("; ")}.`;
   }
   const why =
     (snap && typeof snap.uncoveredError === "string" && snap.uncoveredError.trim() && oneLine(snap.uncoveredError)) ||
     (snap && typeof snap.uncovered === "string" ? `it reported ${JSON.stringify(oneLine(snap.uncovered))}, not a list of steps` : "the snapshot agent reported nothing for it");
-  return `\nWhich merge-gating CI test steps the Recipe's Test entrypoint leaves out could not be read (${why}), so a passing run here is not known to cover them.`;
+  return `\nWhich merge-gating CI steps neither the Recipe's Test entrypoint nor its Check step runs could not be read (${why}), so a passing run here is not known to cover them.`;
 }
 
 function repoNote(snap) {
@@ -1111,8 +1111,8 @@ guess a command yourself: a refusal about the cache names the step that
 derives it; an exit-3 refusal names an environment fault, and the caller fixes
 that instead of deriving.
 
-Then read, out of the same cache, the merge-gating CI test steps that Test
-entrypoint leaves out:
+Then read, out of the same cache, the merge-gating CI steps that neither the
+Test entrypoint nor the Check step runs:
 
     ~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} uncovered
 

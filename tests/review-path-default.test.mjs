@@ -415,7 +415,7 @@ test("the in-scope-suggestion refuter carries its anti-rubber-stamp clause, in b
   // so the RUNNING clause is the whole mechanism, not decoration. Both files
   // carry it because different agents read each: the fix-applier gets run-team's
   // prompt, a standalone reviewer gets review-and-fix's step 2 and nothing else.
-  const step2 = REVIEW_AND_FIX.between("2. Plan the actions", "\n3. **Run `testCmd`", "review-and-fix step 2").text;
+  const step2 = REVIEW_AND_FIX.between("2. Plan the actions", "\n3. **Run `checkCmd` and `testCmd`", "review-and-fix step 2").text;
   for (const [label, slice] of [["review-and-fix step 2", step2], ["the fix-applier prompt", fixApplierPrompt()]]) {
     // The instruction text alone does not pin that a refuter is DISPATCHED.
     // Measured GREEN on review-and-fix step 2 under "In scope → apply it
@@ -451,7 +451,7 @@ test("the fix commit is gated on a test run, in both files", () => {
   // own rule gutted. Proven, not assumed: neutering step 3's testCmd clause
   // while planting an unrelated comment mentioning the same phrase at EOF left
   // the file-wide version at `pass 7 / fail 0` — green with the gate removed.
-  const step3 = REVIEW_AND_FIX.between("3. **Run `testCmd`", "\n4. **Under the fleet", "review-and-fix step 3").text;
+  const step3 = REVIEW_AND_FIX.between("3. **Run `checkCmd` and `testCmd`", "\n4. **Under the fleet", "review-and-fix step 3").text;
   // A proximity gap (`testCmd ⟨gap⟩ before committing`) is blind to a negation
   // prepended before `testCmd` — the gap survives untouched and the loose match
   // still fires. Pin the literal contiguous phrase instead.
@@ -496,7 +496,7 @@ test("the fix commit is gated on a test run, in both files", () => {
   // sentence forbids picking.
   assert.match(
     step3,
-    /standalone[\s\S]{0,80}repo's own test command/i,
+    /standalone[\s\S]{0,80}repo's own Check step and Test entrypoint/i,
     "step 3 no longer defines `testCmd` for the standalone path, where no dispatcher hands one over",
   );
 
@@ -550,7 +550,7 @@ test("the fix commit is gated on a test run, in both files", () => {
 // Nothing covered review-and-fix.md's copy at all. So the assertions here are
 // semantic, and they are what a revert has to get past.
 test("the fix commit pushes by refspec, in both files, to a branch the prompt binds", () => {
-  const step3 = REVIEW_AND_FIX.between("3. **Run `testCmd`", "\n4. **Under the fleet", "review-and-fix step 3").text;
+  const step3 = REVIEW_AND_FIX.between("3. **Run `checkCmd` and `testCmd`", "\n4. **Under the fleet", "review-and-fix step 3").text;
   // The prompt's gutter is stripped before matching, never the command doc's:
   // `phrase`'s `\s+` joins do not span a `>`, so every pinned span below would
   // red on the prompt's wrap points rather than on its meaning — a false red on

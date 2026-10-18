@@ -538,7 +538,7 @@ and dispatch it with the
 row's `tier=` — read it off that output, never recall it. Its `conflict` brief carries the
 same worktree and branch identity paragraph, but in place of the review paragraphs:
 bring `<branch>` current with `origin/main`, resolving every conflict by
-`run-merge-bot.md`'s **No-undo audit**, run `<testCmd>`, push, report the new
+`run-merge-bot.md`'s **No-undo audit**, run `<checkCmd>`/`<testCmd>`, push, report the new
 head. Settle it `applied:<head>` — `no-op` if no conflict was left — which is
 what lifts the tick's merge hold; a dispatched-but-live one does not, and
 `failed`/`killed` leave the PR fix-due for a replacement. It answers the
@@ -580,7 +580,7 @@ before the call, and dispatch it with the `agent` that command printed
 (`fleet-fix-applier`, as for a review fix-applier), in the PR's
 existing worktree. Its `red-check` brief carries the same worktree and branch
 identity paragraph, but in place of the review paragraphs: read the failing job's
-log, fix the cause, run `<testCmd>`, push, report the new head, and **stop**.
+log, fix the cause, run `<checkCmd>`/`<testCmd>`, push, report the new head, and **stop**.
 It is told outright not to watch, poll or wait for CI: your persistent Monitor
 owns the next run on the pushed head, and the finisher gate — review returned
 AND fix-applier report sent — applies to this member the same way. Settle it
@@ -599,7 +599,7 @@ dispositions record and the report rules — is the body of
 prompt, so none of it is pasted. The brief carries what varies, and the
 renderer prints it: `~/.fleet/bin/fleet-run dispatch-prompt.mjs render
 fix-applier --kind <review|conflict|dispositions-retry|red-check> --member <name>
---worktree <abs-path> --branch <branch> --testCmd <testCmd> --scratch <scratch>`,
+--worktree <abs-path> --branch <branch> --testCmd <testCmd> --checkCmd <checkCmd> --scratch <scratch>`,
 plus `--pr <pr#> --run <run>` for a review or a dispositions retry and
 `--mismatched-record <path> --violations <list>` for a retry. Then
 `ledger.mjs dispatch <pr#> <name>` records it before the call.

@@ -28,7 +28,7 @@ const CHECK = Pin.file(join(REPO, "scripts", "dispositions-check.mjs"));
 
 // Step 2's record paragraph: one line, bounded by step 3's opener.
 const recordStep = () =>
-  REVIEW_AND_FIX.between("**Write every ruling to `<scratch>/dispositions-<your name>.json`", "\n3. **Run `testCmd`", "review-and-fix.md").text;
+  REVIEW_AND_FIX.between("**Write every ruling to `<scratch>/dispositions-<your name>.json`", "\n3. **Run `checkCmd` and `testCmd`", "review-and-fix.md").text;
 const gate = () => SKILL.paragraph("That `dispatch` refuses a finisher", "run-team/SKILL.md", "**It refuses a finisher, too, while the PR sits on a conflict hold").text;
 
 test("step 2 names the record's file, one per fix-applier, and that the check judges it before any finisher", () => {

@@ -68,7 +68,7 @@ function fixture(t) {
   // the checkout's own `.fleet/`, which is where derive-testcmd.sh reads it.
   execFileSync("mkdir", ["-p", join(w, ".fleet")]);
   writeFileSync(join(w, ".fleet", "recipe.json"), JSON.stringify({
-    install: "true", test: "true", derivedAt: git(w, "rev-parse", "HEAD"), installClean: true, testCount: 1, uncovered: [],
+    install: "true", check: true, test: "true", derivedAt: git(w, "rev-parse", "HEAD"), installClean: true, testCount: 1, uncovered: [],
   }));
   return { root, origin, w, env, git };
 }

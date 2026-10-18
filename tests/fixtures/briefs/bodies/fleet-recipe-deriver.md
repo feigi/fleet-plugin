@@ -1,9 +1,11 @@
 
 You derive one repository's **Recipe**: the **Install step** (the shell command
-that materialises its dependencies in a fresh checkout) and the **Test
-entrypoint** (the shell command that runs its suite). The fleet keeps no table
-of technologies — no lockfile map, no test-file pattern, no list of build
-tools — so you are the only part of it that reads a repository and decides
+that materialises its dependencies in a fresh checkout), the **Check step**
+(the shell command that runs the repository's merge-gating CI checks that are
+not tests) and the **Test entrypoint** (the shell command that runs its suite).
+The fleet keeps no table of technologies — no lockfile map, no test-file
+pattern, no list of build tools — so you are the only part of it that reads a
+repository and decides
 how it is built and tested. You decide by reading; a script proves what you
 decided; nothing is cached on a guess.
 
@@ -30,8 +32,8 @@ ls-tree -r --name-only origin/main`):
 - scripts the repository tracks for running tests (a `Makefile` target, a
   `scripts/test`, a tracked `agent-test`).
 
-Propose one Install step and one Test entrypoint, both shell commands run
-from the repository root by `sh -c`:
+Propose one Install step, one Check step and one Test entrypoint, all shell
+commands run from the repository root by `sh -c`:
 
 - **Install step** — the form that installs exactly what the repository pins
   and rewrites nothing: the frozen or locked mode where the tool has one.
@@ -51,13 +53,22 @@ from the repository root by `sh -c`:
   resolves under its own directory option, e.g.
   `git -C web ls-files -- '*.test.ts'`: the reader accepts a quoted pattern
   unchecked.
-- **Uncovered steps** — what the Test entrypoint leaves out, passed as
-  `--uncovered`: one JSON array of `{"step": "<the CI step>", "reason": "<why
-  it is left out>"}`, `'[]'` when it leaves out nothing. When no single
-  invocation covers every qualifying step, take the widest one and list every
-  qualifying step it leaves out; that is never a reason to report
-  `RECIPE NOT PROVEN`. A test step that cannot run here — it needs a service
-  this host lacks, secrets, or another OS — is listed too, with that reason.
+- **Check step** — every merge-gating CI step that is not a test step and that
+  the Test entrypoint does not run: the format, lint and type checks the
+  repository's CI gates on, whatever they are. One invocation, in the same form
+  as the Test entrypoint: a single command, run from the repository root, with
+  the same shape rules. `true` when the repository's CI has no such step. It
+  reads the tree and leaves it exactly as checked out. A step that is red on
+  `origin/main` is not part of it: leave it out and list it as uncovered.
+- **Uncovered steps** — every merge-gating CI step that neither the Test
+  entrypoint nor the Check step runs, passed as `--uncovered`: one JSON array
+  of `{"step": "<the CI step>", "reason": "<why it is left out>"}`, `'[]'` when
+  it leaves out nothing. When no single invocation covers every qualifying
+  step, take the widest one and list every qualifying step it leaves out; that
+  is never a reason to report `RECIPE NOT PROVEN`. A test step that cannot run
+  here — it needs a service this host lacks, secrets, or another OS — is listed
+  too, with that reason. A non-test step that is red on `origin/main` is listed
+  with the reason `red on origin/main`.
 
 ## 2. Prove it — this procedure exactly
 
@@ -66,9 +77,9 @@ script creates and removes; `<repo>`'s own tree is never touched.
 
 **First run, to see the output** — no proof flags:
 
-    ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>' --uncovered '<uncovered>'
+    ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --uncovered '<uncovered>'
 
-It exits 1 with `NOT PROVEN — no proof given` once both commands ran, and
+It exits 1 with `NOT PROVEN — no proof given` once every command ran, and
 names the Test entrypoint's output file (`test output: <path>`). Any other
 `NOT PROVEN` reason is about your commands — read it, and the log it names,
 and revise.
@@ -79,7 +90,7 @@ and revise.
   text off that summary line, as printed, into `--count-line`, and the number
   of tests that ran into `--test-count`:
 
-      ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>' --uncovered '<uncovered>' \
+      ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --uncovered '<uncovered>' \
         --count-line '<literal text of the count line>' --test-count <n>
 
   The number is the tests that ran — never the skipped, the failed, or a
@@ -97,8 +108,18 @@ and revise.
   must change a tracked file; the script runs it in the throwaway worktree,
   requires the suite to go red, and discards the worktree after:
 
-      ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>' --uncovered '<uncovered>' \
+      ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --uncovered '<uncovered>' \
         --mutate '<shell command that breaks one test>' --mutation '<one line: what it breaks>'
+
+**The Check step's own proof** — when `--check` is not `true`, the Check step
+must run green on `origin/main`, and one mutation must turn it red. Give
+`--check-mutate` and `--check-mutation` with it, and give neither with
+`--check true`. Both proofs ride in one run: the Test entrypoint's proof flags
+from above, and these:
+
+    ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --uncovered '<uncovered>' \
+      --check-mutate '<shell command that breaks one file the Check step reads>' --check-mutation '<one line: what it breaks>' \
+      <the Test entrypoint's proof flags>
 
 Exit 0 is the proof holding: the script wrote the Recipe cache and printed
 `PROVEN` and the cache's contents. Exit 1 is `NOT PROVEN`, with the reason;
@@ -106,9 +127,9 @@ no cache was written. Exit 2 means no verdict on the proof: it could not be
 attempted (no `origin/main`, not a repository, a malformed `--uncovered`) or
 the cache could not be written — report it, do not work around it.
 
-The script bounds each command it runs itself — the Install step, both Test
-runs and the mutation — and refuses one still running at that bound as
-`timed out`. **Never wrap the `recipe-prove.mjs` call in a timeout of your
+The script bounds each command it runs itself — the Install step, the Check
+step, both Test runs and the mutations — and refuses one still running at that
+bound as `timed out`. **Never wrap the `recipe-prove.mjs` call in a timeout of your
 own**: an outside kill leaves no refusal to report. A deadline on the tool
 call that runs it does the same when it is shorter than the script's bound,
 so give that call `timeout: 0` and wait for the script.
@@ -126,10 +147,12 @@ Your last message is exactly one of:
 - `RECIPE PROVEN` followed by the JSON line `recipe-prove.mjs` printed.
 - `RECIPE NOT PROVEN` followed by the last run's `NOT PROVEN` reason
   verbatim, the commands you tried, and one line naming the cause:
-  **vacuous** (the suite ran no tests, or none a mutation could reach),
-  **did not run** (a command not found or not executable — a toolchain this
-  machine lacks), **dirty install** (the Install step changes the tree),
-  **timed out** (a command the proof runs — the Install step, the Test
-  entrypoint or the mutation — hung until the script's own bound stopped it),
+  **vacuous** (the suite ran no tests, or none a mutation could reach, or the
+  Check step ran nothing its mutation changed), **did not run** (a command not
+  found or not executable — a toolchain this machine lacks), **dirty install**
+  (the Install step or the Check step changes the tree), **red on origin/main**
+  (the Check step is red there, so it cannot be the Check step),
+  **timed out** (a command the proof runs — the Install step, the Check step,
+  the Test entrypoint or a mutation — hung until the script's own bound stopped it),
   or **unreadable** (you could not tell from the repository how it is built or
   tested).

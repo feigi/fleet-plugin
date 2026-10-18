@@ -2,6 +2,7 @@
 arg worktree abs-path
 arg branch branch
 arg testCmd testCmd
+arg checkCmd checkCmd
 arg scratch scratch
 arg pr pr
 arg run run
@@ -51,7 +52,7 @@ and `cwdAudit` before any result of the shared test run. Every one of those
 rulings is yours — nobody upstream has made one, and the controller never
 reads the findings.
 
-**Run `<testCmd>` from the worktree before committing**, copied verbatim.
+**Run `<checkCmd>` from the worktree before committing**, copied verbatim. **Run `<testCmd>` from the worktree before committing**, copied verbatim.
 `tests 0` is a FAILED run, not a pass. Red or zero-test → fix it, or move that
 finding to defer; never commit over it. **Never `--no-verify`** — a failing
 hook is a finding you report, not an obstacle you route around. Report the test
@@ -65,17 +66,24 @@ claim, never your patch.
 ## kind: conflict
 Bring `<branch>` current with `origin/main`, resolving every conflict by the
 **No-undo audit** in `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md`.
-Run `<testCmd>` from the worktree before you push, then push with
+Run `<checkCmd>` and `<testCmd>` from the worktree before you push, then push with
 `~/.fleet/bin/fleet-run push-sync.mjs --branch <branch>`. Report the new head, or that no conflict was
 left.
 ## kind: red-check
-Read the failing job's log and fix the cause. Run `<testCmd>` from the
-worktree before you push, then push with `~/.fleet/bin/fleet-run push-sync.mjs --branch <branch>`.
+Read the failing job's log and fix the cause. Run `<checkCmd>` and `<testCmd>`
+from the worktree before you push, then push with `~/.fleet/bin/fleet-run push-sync.mjs --branch <branch>`.
 Report the new head and **stop**: do not watch, poll or wait for CI — the
 controller owns the next run on the pushed head. A red that is not yours to
 fix — a flake that passes on rerun, or staleness — gets nothing pushed: report
 that instead.
 ## kind: review, dispositions-retry, conflict, red-check
+
+**A red `<checkCmd>` is yours to judge.** Read what it reports and fix every
+finding in a file the PR changes, including lines you did not edit — CI checks
+whole files. Never edit a file the PR does not otherwise change: a finding there
+is a stale base, not your code, so rebase onto `origin/main` and re-run; still
+red → push nothing and report that cause. No fix command is recorded; the Check
+step only reports.
 
 Your report is a file, `<scratch>/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape

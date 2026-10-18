@@ -41,8 +41,9 @@ export const SNAP = {
   // goes ahead; a case about a failed or unread install names its own.
   installCmd: "sh ./install.sh",
   installExit: 0,
-  // The Recipe's Test entrypoint runs every CI test step; a case about one it
-  // leaves out, or about a list the agent could not read, names its own.
+  // The Recipe's Test entrypoint and Check step run every merge-gating CI step;
+  // a case about one they leave out, or about a list the agent could not read,
+  // names its own.
   uncovered: "[]",
 };
 // #2315. The shared test run's agent report — the `test-run` dispatch every

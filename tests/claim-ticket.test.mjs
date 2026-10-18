@@ -50,6 +50,7 @@ function repo(files, local = {}, recipe = {}) {
     writeFileSync(join(dir, ".fleet", "recipe.json"), JSON.stringify({
       install: "true",
       test: "true",
+      check: true,
       derivedAt: git("rev-parse", "HEAD").trim(),
       installClean: true,
       testCount: 1,

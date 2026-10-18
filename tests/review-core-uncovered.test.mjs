@@ -1,5 +1,5 @@
-// The Recipe cache records `uncovered`: the merge-gating CI test steps its
-// Test entrypoint leaves out. The review's snapshot agent reads it through
+// The Recipe cache records `uncovered`: the merge-gating CI steps neither its
+// Test entrypoint nor its Check step runs. The review's snapshot agent reads it through
 // derive-testcmd.sh beside the `install` and `test` reads, and the payload's
 // `testEnvironment` — the same note every specialist and refuter prompt
 // carries — names each step with its reason on one line, so a green review
@@ -23,19 +23,19 @@ const LIST = [
   { step: "test:hooks", reason: "a second runner config;\nno one invocation runs both" },
 ];
 const LEFT_OUT = { ...SNAP, uncovered: JSON.stringify(LIST) };
-const linesAbout = (note) => note.split("\n").filter((l) => /CI test steps/.test(l));
+const linesAbout = (note) => note.split("\n").filter((l) => /merge-gating CI steps/.test(l));
 
 test("environmentNote renders a non-empty list as one line naming every step and its reason", () => {
   const lines = linesAbout(environmentNote(LEFT_OUT));
   assert.equal(lines.length, 1, "the uncovered steps are not on exactly one line");
   const [line] = lines;
-  assert.match(line, /^The Recipe's Test entrypoint does not run these merge-gating CI test steps, and nothing in this review ran them: /);
+  assert.match(line, /^The Recipe's Test entrypoint and Check step do not run these merge-gating CI steps, and nothing in this review ran them: /);
   assert.ok(line.includes("integration-docker (needs a Docker daemon this host lacks)"), line);
   assert.ok(line.includes("test:hooks (a second runner config; no one invocation runs both)"), `a reason's own newline split the line: ${line}`);
 });
 
-// The accept case: a Test entrypoint that runs every CI test step adds
-// nothing, so the note reads exactly as it did before the field existed.
+// The accept case: a Test entrypoint and Check step that run every merge-gating
+// CI step add nothing, so the note reads exactly as it did before the field existed.
 test("environmentNote appends nothing for an empty list", () => {
   const note = environmentNote({ repoVerified: true, uncovered: "[]" });
   assert.deepEqual(linesAbout(note), []);
@@ -45,7 +45,7 @@ test("environmentNote appends nothing for an empty list", () => {
 test("environmentNote says when the list could not be read, never reading it as empty", () => {
   const refused = environmentNote({ repoVerified: true, uncoveredError: "derive-testcmd: the Recipe cache at /r/.fleet/recipe.json is unusable:\n`uncovered` is not a list" });
   assert.deepEqual(linesAbout(refused), [
-    "Which merge-gating CI test steps the Recipe's Test entrypoint leaves out could not be read (derive-testcmd: the Recipe cache at /r/.fleet/recipe.json is unusable: `uncovered` is not a list), so a passing run here is not known to cover them.",
+    "Which merge-gating CI steps neither the Recipe's Test entrypoint nor its Check step runs could not be read (derive-testcmd: the Recipe cache at /r/.fleet/recipe.json is unusable: `uncovered` is not a list), so a passing run here is not known to cover them.",
   ]);
   for (const [snap, why] of [
     [{ repoVerified: true }, /could not be read \(the snapshot agent reported nothing for it\)/],
