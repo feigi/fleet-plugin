@@ -780,14 +780,16 @@ for (const c of KILLED_GIT) {
   });
 }
 
-// The workspace rule's own probe: a `--separate-git-dir` clone's git dir is
-// not named `.git`, so resolving its workspace asks `--resolve-git-dir` of
-// that dir's parent. Killed there, the proof has no workspace to put its
-// cache under, and refuses with no verdict, naming that probe.
+// The workspace rule's own probe: a git dir not named `.git` that has a
+// `.git` beside it (a separate git dir in the `.bare` layout) makes the rule
+// ask `--resolve-git-dir` of that `.git`. Killed there, the proof has no
+// workspace to put its cache under, and refuses with no verdict, naming that
+// probe.
 test("a git killed on the workspace rule's own probe refuses with no verdict, naming that probe", () => {
   const dir = tempDir("recipe-prove-sep-");
-  const gitDir = join(tempDir("recipe-prove-sep-gd-"), "g");
-  git(dir, "init", "-q", "--separate-git-dir", gitDir);
+  const holder = tempDir("recipe-prove-sep-gd-");
+  git(dir, "init", "-q", "--separate-git-dir", join(holder, ".bare"));
+  writeFileSync(join(holder, ".git"), "gitdir: ./.bare\n");
   git(dir, "config", "user.email", "t@t");
   git(dir, "config", "user.name", "t");
   write(dir, MAVEN_FILES);

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, symlinkSync, chmodSync, readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, symlinkSync, chmodSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join, dirname } from "node:path";
@@ -117,6 +117,72 @@ test("the Recipe cache sits where the workspace rule names: a bare repository, a
   const rs = derive(checkout);
   assert.equal(rs.status, 1, rs.err);
   assert.match(rs.err, /no Recipe cache at .*\/a\.git\/\.fleet\/recipe\.json/);
+});
+
+// A `.bare` project with one linked worktree: the git dir is `p/.bare`, `p/.git`
+// is the gitfile naming it, and the worktree is `p/w`. Realpath'd: the script
+// names the paths it resolves, and tmpdir() sits under a symlink on macOS.
+function bareProject() {
+  const top = realpathSync(tempDir("derive-bare-wt-"));
+  const git = (cwd, ...a) => execFileSync("git", a, { cwd, stdio: "pipe", env: FIXTURE_ENV, encoding: "utf8" });
+  const src = join(top, "src");
+  mkdirSync(src);
+  git(src, "init", "-q");
+  git(src, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
+  const proj = join(top, "p");
+  mkdirSync(proj);
+  git(top, "clone", "-q", "--bare", src, join(proj, ".bare"));
+  writeFileSync(join(proj, ".git"), "gitdir: ./.bare\n");
+  const wt = join(proj, "w");
+  git(proj, "worktree", "add", "-q", "--detach", wt);
+  return { proj, wt };
+}
+
+test("a healthy .bare linked worktree's absent-cache refusal names the project's cache, never .bare's", () => {
+  const { proj, wt } = bareProject();
+  const r = derive(wt);
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, new RegExp(`no Recipe cache at ${proj.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/\\.fleet/recipe\\.json`));
+  assert.doesNotMatch(r.err, /\.bare\/\.fleet/);
+});
+
+for (const [kind, breakIt] of [
+  ["dangling", (file) => writeFileSync(file, "gitdir: ./nonexistent\n")],
+  ["garbage", (file) => writeFileSync(file, "this is not a gitfile\n")],
+  ["chmod 000", (file) => chmodSync(file, 0o000)],
+]) {
+  const skip = kind === "chmod 000" && process.getuid?.() === 0 ? "running as root" : false;
+  test(`a ${kind} p/.git refuses at exit 1, naming p/.git and git's reason, and never re-keys the cache to .bare`, { skip }, () => {
+    const { proj, wt } = bareProject();
+    const gitfile = join(proj, ".git");
+    breakIt(gitfile);
+    const why = spawnSync("git", ["rev-parse", "--resolve-git-dir", gitfile], { cwd: wt, encoding: "utf8", env: FIXTURE_ENV }).stderr.trim();
+    assert.notEqual(why, "", "test setup: git must refuse the broken .git");
+    const r = derive(wt);
+    assert.equal(r.status, 1, r.err);
+    assert.equal(r.out, "");
+    assert.ok(r.err.includes(`cannot resolve the workspace of ${wt}: ${gitfile} — ${why}`), r.err);
+    assert.doesNotMatch(r.out + r.err, /\.bare\/\.fleet/);
+  });
+}
+
+test("a git that cannot run the workspace probe exits 3, not 1", () => {
+  const { wt } = bareProject();
+  const r = derive(wt, "test", fakeGit("/.git", "echo killed >&2; exit 137"));
+  assert.equal(r.status, 3, r.err);
+  assert.match(r.err, /git did not resolve .*\/p\/\.git \(exit 137\), so the Recipe cache was not read — killed/);
+});
+
+test("a plain repository with a nested bare clone: git exits 0 naming another dir, and each keeps its own cache", () => {
+  const dir = realpathSync(repo().dir);
+  const nested = join(dir, "foo.git");
+  execFileSync("git", ["clone", "-q", "--bare", dir, nested], { stdio: "pipe", env: FIXTURE_ENV });
+  const rn = derive(nested);
+  assert.equal(rn.status, 1, rn.err);
+  assert.ok(rn.err.includes(`no Recipe cache at ${nested}/.fleet/recipe.json`), rn.err);
+  const rq = derive(dir);
+  assert.equal(rq.status, 1, rq.err);
+  assert.ok(rq.err.includes(`no Recipe cache at ${dir}/.fleet/recipe.json`), rq.err);
 });
 
 test("a linked worktree reads the main checkout's cache, not a private one", () => {
