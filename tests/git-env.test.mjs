@@ -14,12 +14,13 @@
 // every OTHER thing in this process that reads it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, mkdirSync, renameSync, symlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, renameSync, symlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { FleetDirUnresolvable, fleetFile, scratchRoot } from "../plugin/scripts/fleet-dir.mjs";
 import { WorkspaceProbeFailed, gitEnv, mainCheckoutDirFromGitCommonDir, resolveWorkspace, workspaceDirFromGitCommonDir } from "../plugin/scripts/git-env.mjs";
+import { BROKEN_GITFILES, bareProject, gitsReason } from "./support/bare-project.mjs";
 
 test("GIT_DIR and GIT_WORK_TREE are absent from the result, even when the base carries them", () => {
   const base = { GIT_DIR: "/somewhere/.git", GIT_WORK_TREE: "/somewhere", PATH: "/bin" };
@@ -204,22 +205,6 @@ function repo(dir) {
   return dir;
 }
 
-// A `.bare` project: the git dir is `p/.bare`, `p/.git` is the gitfile naming
-// it, and two linked worktrees hang off it.
-function bareProject(top) {
-  const src = repo(join(top, "src"));
-  const proj = join(top, "p");
-  mkdirSync(proj);
-  git(top, "clone", "-q", "--bare", src, join(proj, ".bare"));
-  writeFileSync(join(proj, ".git"), "gitdir: ./.bare\n");
-  const worktrees = ["w1", "w2"].map((name) => {
-    const wt = join(proj, name);
-    git(proj, "worktree", "add", "-q", "--detach", wt);
-    return wt;
-  });
-  return { proj, worktrees };
-}
-
 function commonDirOf(cwd) {
   return git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").trim();
 }
@@ -227,7 +212,7 @@ function commonDirOf(cwd) {
 test("a step-2 probe that cannot answer throws WorkspaceProbeFailed naming the probe, never a guessed workspace", () => {
   const top = realpathSync(mkdtempSync(join(tmpdir(), "git-env-probe-")));
   try {
-    const { proj } = bareProject(top);
+    const { proj } = bareProject(top, gitEnv());
     const bare = join(proj, ".bare");
     withStep2Probe(top, "kill -9 $$", () => {
       assert.throws(() => resolveWorkspace(bare, top), (e) => {
@@ -246,7 +231,7 @@ test("a step-2 probe that cannot answer throws WorkspaceProbeFailed naming the p
 test("a step-2 probe that exits non-zero with nothing on stderr names its exit status", () => {
   const top = realpathSync(mkdtempSync(join(tmpdir(), "git-env-silent-")));
   try {
-    const { proj } = bareProject(top);
+    const { proj } = bareProject(top, gitEnv());
     withStep2Probe(top, "exit 7", () => {
       assert.throws(() => resolveWorkspace(join(proj, ".bare"), top), (e) => {
         assert.ok(e instanceof WorkspaceProbeFailed, `expected WorkspaceProbeFailed, got ${e}`);
@@ -268,7 +253,7 @@ test("an absent <parent>/.git is no, and git is never spawned for it", () => {
     withStep2Probe(top, `: > '${marker}'; exit 9`, () => {
       assert.deepEqual(resolveWorkspace(bare, top), { dir: bare, gitDir: true });
     });
-    assert.throws(() => realpathSync(marker), "the probe must not have been spawned");
+    assert.equal(existsSync(marker), false, "the probe must not have been spawned");
   } finally {
     rmSync(top, { recursive: true, force: true });
   }
@@ -297,7 +282,7 @@ test("a <parent>/.git that cannot be examined throws WorkspaceProbeFailed naming
 test("a .bare project gives the same stores from the root and from two linked worktrees", () => {
   const top = realpathSync(mkdtempSync(join(tmpdir(), "git-env-bare-")));
   try {
-    const { proj, worktrees } = bareProject(top);
+    const { proj, worktrees } = bareProject(top, gitEnv());
     const cwds = [proj, ...worktrees];
     for (const cwd of cwds) {
       assert.deepEqual(resolveWorkspace(commonDirOf(cwd), cwd), { dir: proj, gitDir: false }, `from ${cwd}`);
@@ -309,26 +294,15 @@ test("a .bare project gives the same stores from the root and from two linked wo
   }
 });
 
-// git's own reason for the same refusal, asked the way the module asks.
-function gitsReason(cwd, gitfile) {
-  const r = spawnSync("git", ["rev-parse", "--resolve-git-dir", gitfile], { cwd, encoding: "utf8", env: gitEnv() });
-  assert.notEqual(r.status, 0, `test setup: git accepted ${gitfile}`);
-  return r.stderr.trim();
-}
-
-for (const [kind, breakIt] of [
-  ["dangling", (file) => writeFileSync(file, "gitdir: ./nonexistent\n")],
-  ["garbage", (file) => writeFileSync(file, "this is not a gitfile\n")],
-  ["chmod 000", (file) => chmodSync(file, 0o000)],
-]) {
+for (const [kind, breakIt] of BROKEN_GITFILES) {
   const skip = kind === "chmod 000" && process.getuid?.() === 0 ? "running as root" : false;
   test(`a ${kind} p/.git from a linked worktree throws, naming .git and git's reason, never resolving to .bare`, { skip }, () => {
     const top = realpathSync(mkdtempSync(join(tmpdir(), "git-env-broken-")));
     try {
-      const { proj, worktrees } = bareProject(top);
+      const { proj, worktrees } = bareProject(top, gitEnv());
       const gitfile = join(proj, ".git");
       breakIt(gitfile);
-      const reason = `could not resolve ${gitfile}: ${gitsReason(worktrees[0], gitfile)}`;
+      const reason = `could not resolve ${gitfile}: ${gitsReason(gitEnv(), worktrees[0], gitfile)}`;
       for (const wt of worktrees) {
         assert.throws(() => resolveWorkspace(commonDirOf(wt), wt), (e) => {
           assert.ok(e instanceof WorkspaceProbeFailed, `expected WorkspaceProbeFailed, got ${e}`);

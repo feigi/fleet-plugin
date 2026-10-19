@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { fleetFile, FleetDirUnresolvable, scratchRoot } from "../plugin/scripts/fleet-dir.mjs";
+import { BROKEN_GITFILES, bareProject, gitsReason } from "./support/bare-project.mjs";
 
 // realpath'd: on macOS tmpdir() sits under /var, a symlink to /private/var,
 // and git answers a linked worktree's `--git-common-dir` in the resolved form
@@ -214,7 +215,8 @@ test("with no timeoutMs a git that never answers is still killed, by the default
 // and the `.git` beside it exists, so that probe runs. Both stores refuse,
 // naming that probe — never the common dir as a guessed workspace.
 test("a step-2 probe that cannot answer leaves fleetFile() and scratchRoot() unresolvable, naming that probe", (t) => {
-  const { top, proj } = bareProject(t, "fleet-dir-step2-");
+  const top = tempDir(t, "fleet-dir-step2-");
+  const { proj } = bareProject(top, gitEnv());
   const bare = join(proj, ".bare");
   const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
   const bin = shimGit(t, "fleet-dir-step2-bin-", `case "$*" in *--resolve-git-dir*) kill -9 $$ ;; esac\nexec '${realGit}' "$@"`);
@@ -232,26 +234,9 @@ test("a step-2 probe that cannot answer leaves fleetFile() and scratchRoot() unr
   assert.equal(fleetFile(null, { cwd: bare }), join(proj, ".fleet"));
 });
 
-// A `.bare` project: the git dir is `p/.bare`, `p/.git` is the gitfile naming
-// it, and two linked worktrees hang off it. The workspace of every one of
-// them, and of the project root, is `p`.
-function bareProject(t, prefix) {
-  const top = tempDir(t, prefix);
-  const src = repo(join(top, "src"));
-  const proj = join(top, "p");
-  mkdirSync(proj);
-  git(top, "clone", "-q", "--bare", src, join(proj, ".bare"));
-  writeFileSync(join(proj, ".git"), "gitdir: ./.bare\n");
-  const worktrees = ["w1", "w2"].map((name) => {
-    const wt = join(proj, name);
-    git(proj, "worktree", "add", "-q", "--detach", wt);
-    return wt;
-  });
-  return { top, proj, worktrees };
-}
-
 test("a .bare project gives the same stores from the root and from two linked worktrees", (t) => {
-  const { top, proj, worktrees } = bareProject(t, "fleet-dir-bare-");
+  const top = tempDir(t, "fleet-dir-bare-");
+  const { proj, worktrees } = bareProject(top, gitEnv());
   const cwds = [proj, ...worktrees];
   const files = cwds.map((cwd) => fleetFile(null, { cwd }));
   assert.deepEqual(files, cwds.map(() => join(proj, ".fleet")), "every cwd of one project names the project's one .fleet/");
@@ -260,26 +245,15 @@ test("a .bare project gives the same stores from the root and from two linked wo
   assert.match(roots[0], /\/p-[0-9a-f]{8}$/, "the key is the project's folder, never `.bare`");
 });
 
-// What git itself says about the same refusal, asked the way the module asks.
-function gitsReason(cwd, gitfile) {
-  const r = spawnSync("git", ["rev-parse", "--resolve-git-dir", gitfile], { cwd, encoding: "utf8", env: gitEnv() });
-  assert.notEqual(r.status, 0, `test setup: git accepted ${gitfile}`);
-  return r.stderr.trim();
-}
-
-const BROKEN_GITFILES = [
-  ["dangling", (file) => writeFileSync(file, "gitdir: ./nonexistent\n")],
-  ["garbage", (file) => writeFileSync(file, "this is not a gitfile\n")],
-  ["chmod 000", (file) => chmodSync(file, 0o000)],
-];
-
 for (const [kind, breakIt] of BROKEN_GITFILES) {
   // A root reads a file any mode away; there is no refusal to observe.
   const skip = kind === "chmod 000" && process.getuid?.() === 0 ? "running as root" : false;
   test(`a ${kind} p/.git fails a linked worktree's stores closed, never onto .bare`, { skip }, (t) => {
-    const { top, proj, worktrees } = bareProject(t, "fleet-dir-broken-");
-    breakIt(join(proj, ".git"));
-    const want = `could not resolve the workspace: could not resolve ${join(proj, ".git")}: ${gitsReason(worktrees[0], join(proj, ".git"))}`;
+    const top = tempDir(t, "fleet-dir-broken-");
+    const { proj, worktrees } = bareProject(top, gitEnv());
+    const gitfile = join(proj, ".git");
+    breakIt(gitfile);
+    const want = `could not resolve the workspace: could not resolve ${gitfile}: ${gitsReason(gitEnv(), worktrees[0], gitfile)}`;
     for (const wt of worktrees) {
       for (const [what, call] of [["fleetFile()", () => fleetFile(null, { cwd: wt })], ["scratchRoot()", () => scratchRoot({ cwd: wt, home: top })]]) {
         assert.throws(call, (e) => {

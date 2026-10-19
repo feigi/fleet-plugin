@@ -189,7 +189,10 @@ common=$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>&1) 
 # submodule's git dir). git prints the realpath for a gitfile but the path as
 # spelled for a `.git` directory, so its answer is canonicalised before the
 # compare; `$target` stays absolute, since a relative operand is answered
-# relative to the cwd.
+# relative to the cwd. Only git's stdout is the answer: anything it writes to
+# stderr on a success would otherwise land inside the path and fail the
+# compare, re-keying the cache in silence. A refusal asks once more for the
+# reason, its stderr alone.
 real=$(cd -P "$common" 2>/dev/null && pwd -P) || real=$common
 parent=${common%/*}
 case ${real##*/} in
@@ -198,10 +201,11 @@ case ${real##*/} in
     ws=$common
     target=${real%/*}/.git
     if [ -e "$target" ] || [ -L "$target" ]; then
-      named=$(git rev-parse --resolve-git-dir "$target" 2>&1) || {
+      named=$(git rev-parse --resolve-git-dir "$target" 2>/dev/null) || {
         gitrc=$?
-        case $gitrc in 128) die "cannot resolve the workspace of $repo: $target — $named" ;; esac
-        unrunnable "git did not resolve $target (exit $gitrc), so the Recipe cache was not read${named:+ — $named}"
+        why=$(git rev-parse --resolve-git-dir "$target" 2>&1 >/dev/null) || :
+        case $gitrc in 128) die "cannot resolve the workspace of $repo: $target — $why" ;; esac
+        unrunnable "git did not resolve $target (exit $gitrc), so the Recipe cache was not read${why:+ — $why}"
       }
       named=$(cd -P "$named" 2>/dev/null && pwd -P) || named=
       if [ "$named" = "$real" ]; then ws=$parent; fi

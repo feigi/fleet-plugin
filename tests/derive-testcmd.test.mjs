@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join, dirname } from "node:path";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { BROKEN_GITFILES, bareProject, gitsReason } from "./support/bare-project.mjs";
 
 // derive-testcmd.sh is the ONE reader of a repository's Recipe cache (ADR
 // 0015) — reused by claim-ticket.sh and review-core.mjs's snapshot agent. It
@@ -119,44 +120,37 @@ test("the Recipe cache sits where the workspace rule names: a bare repository, a
   assert.match(rs.err, /no Recipe cache at .*\/a\.git\/\.fleet\/recipe\.json/);
 });
 
-// A `.bare` project with one linked worktree: the git dir is `p/.bare`, `p/.git`
-// is the gitfile naming it, and the worktree is `p/w`. Realpath'd: the script
-// names the paths it resolves, and tmpdir() sits under a symlink on macOS.
-function bareProject() {
-  const top = realpathSync(tempDir("derive-bare-wt-"));
-  const git = (cwd, ...a) => execFileSync("git", a, { cwd, stdio: "pipe", env: FIXTURE_ENV, encoding: "utf8" });
-  const src = join(top, "src");
-  mkdirSync(src);
-  git(src, "init", "-q");
-  git(src, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
-  const proj = join(top, "p");
-  mkdirSync(proj);
-  git(top, "clone", "-q", "--bare", src, join(proj, ".bare"));
-  writeFileSync(join(proj, ".git"), "gitdir: ./.bare\n");
-  const wt = join(proj, "w");
-  git(proj, "worktree", "add", "-q", "--detach", wt);
-  return { proj, wt };
+// A `.bare` project with one linked worktree, `p/w` (support/bare-project.mjs).
+// Realpath'd: the script names the paths it resolves, and tmpdir() sits under
+// a symlink on macOS.
+function bareWorktree() {
+  const { proj, worktrees } = bareProject(realpathSync(tempDir("derive-bare-wt-")), FIXTURE_ENV, ["w"]);
+  return { proj, wt: worktrees[0] };
 }
 
 test("a healthy .bare linked worktree's absent-cache refusal names the project's cache, never .bare's", () => {
-  const { proj, wt } = bareProject();
+  const { proj, wt } = bareWorktree();
   const r = derive(wt);
   assert.equal(r.status, 1, r.err);
-  assert.match(r.err, new RegExp(`no Recipe cache at ${proj.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/\\.fleet/recipe\\.json`));
+  assert.ok(r.err.includes(`no Recipe cache at ${proj}/.fleet/recipe.json`), r.err);
   assert.doesNotMatch(r.err, /\.bare\/\.fleet/);
 });
 
-for (const [kind, breakIt] of [
-  ["dangling", (file) => writeFileSync(file, "gitdir: ./nonexistent\n")],
-  ["garbage", (file) => writeFileSync(file, "this is not a gitfile\n")],
-  ["chmod 000", (file) => chmodSync(file, 0o000)],
-]) {
+test("a git that writes to stderr while it answers the workspace probe still names the project's cache, never .bare's", () => {
+  const { proj, wt } = bareWorktree();
+  const r = derive(wt, "test", fakeGit("/.git", "echo 'warning: something benign' >&2"));
+  assert.equal(r.status, 1, r.err);
+  assert.ok(r.err.includes(`no Recipe cache at ${proj}/.fleet/recipe.json`), r.err);
+  assert.doesNotMatch(r.err, /\.bare\/\.fleet/);
+});
+
+for (const [kind, breakIt] of BROKEN_GITFILES) {
   const skip = kind === "chmod 000" && process.getuid?.() === 0 ? "running as root" : false;
   test(`a ${kind} p/.git refuses at exit 1, naming p/.git and git's reason, and never re-keys the cache to .bare`, { skip }, () => {
-    const { proj, wt } = bareProject();
+    const { proj, wt } = bareWorktree();
     const gitfile = join(proj, ".git");
     breakIt(gitfile);
-    const why = spawnSync("git", ["rev-parse", "--resolve-git-dir", gitfile], { cwd: wt, encoding: "utf8", env: FIXTURE_ENV }).stderr.trim();
+    const why = gitsReason(FIXTURE_ENV, wt, gitfile);
     assert.notEqual(why, "", "test setup: git must refuse the broken .git");
     const r = derive(wt);
     assert.equal(r.status, 1, r.err);
@@ -167,7 +161,7 @@ for (const [kind, breakIt] of [
 }
 
 test("a git that cannot run the workspace probe exits 3, not 1", () => {
-  const { wt } = bareProject();
+  const { wt } = bareWorktree();
   const r = derive(wt, "test", fakeGit("/.git", "echo killed >&2; exit 137"));
   assert.equal(r.status, 3, r.err);
   assert.match(r.err, /git did not resolve .*\/p\/\.git \(exit 137\), so the Recipe cache was not read — killed/);

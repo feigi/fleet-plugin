@@ -781,7 +781,8 @@ for (const c of KILLED_GIT) {
 }
 
 // The workspace rule's own probe: a git dir not named `.git` that has a
-// `.git` beside it (a separate git dir in the `.bare` layout) makes the rule
+// `.git` beside it (a `--separate-git-dir` git dir named `.bare` with a
+// hand-written `.git` gitfile beside it) makes the rule
 // ask `--resolve-git-dir` of that `.git`. Killed there, the proof has no
 // workspace to put its cache under, and refuses with no verdict, naming that
 // probe.
