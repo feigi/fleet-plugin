@@ -313,10 +313,9 @@ a `git archive` snapshot, a `cp -R` subset — has no `./agent-test`
 unless the repository tracks its own, and a member told to run one
 stalls on a missing script (observed with a rebase-resolver in a
 prior-run worktree). There, tell the member the runner is absent and to
-run docker-free suites directly — the Recipe's Test entrypoint
+run the Recipe's Test entrypoint directly
 (`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test --at origin/main` prints
-it) only when it brings up no shared stack to collide on, else that
-repo's own stack-free command.
+it).
 
 **A reused worktree may also be on the wrong COMMIT.** `git worktree add <path>
 <branch>` checks out the existing LOCAL branch and never consults the remote, so

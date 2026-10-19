@@ -107,12 +107,30 @@ test("the deriver is told to quote a pattern a program resolves under its own di
 // covers beside the rest, or one this host cannot run — is recorded with its
 // reason, and is never a refusal.
 test("the deriver is told the coverage rule, the widest-invocation fallback, and to record what it leaves out", () => {
-  assert.match(DERIVER, Pin.phrase("**Test entrypoint** — every test step in the merge-gating CI jobs that can run in a fresh worktree on this host."));
+  assert.match(DERIVER, Pin.phrase("**Test entrypoint** — every test step in the merge-gating CI jobs that can run in a fresh worktree without a running service."));
   assert.match(DERIVER, Pin.phrase("so it is one invocation: an `&&` chain hands those arguments to its last command alone."));
   assert.match(DERIVER, Pin.phrase("When no single invocation covers every qualifying step, take the widest one and list every qualifying step it leaves out; that is never a reason to report `RECIPE NOT PROVEN`."));
-  assert.match(DERIVER, Pin.phrase("A test step that cannot run here — it needs a service this host lacks, secrets, or another OS — is listed too, with that reason."));
+  assert.match(DERIVER, Pin.phrase("A test step or a non-test step that needs a running service is always listed too, with that reason, whether or not the service is up while you derive; so is a test step that needs another OS."));
+  assert.doesNotMatch(DERIVER, /on this host|this host lacks/, "the deriver's coverage is host-relative again");
   assert.match(DERIVER, Pin.phrase("~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --uncovered '<uncovered>'"));
   assert.doesNotMatch(DERIVER, /the whole suite, the way CI runs it/);
+});
+
+test("the deriver is told what a running service is, that the Test entrypoint and Check step never need one, and to refuse when no test step qualifies", () => {
+  assert.match(DERIVER, Pin.phrase("**The Test entrypoint and the Check step need no running service — including one the command starts itself.**"));
+  assert.match(DERIVER, Pin.phrase("A *running service* is anything a command needs that it does not start as its own child process: a Docker daemon (so any container, compose stack or testcontainers use), a database or other server installed on the host, a host daemon, secrets or credentials in the environment."));
+  assert.match(DERIVER, Pin.phrase("Whether that service happens to be up while you derive never changes the answer."));
+  assert.match(DERIVER, Pin.phrase("every merge-gating CI step that is not a test step, that the Test entrypoint does not run, and that needs no running service"));
+  assert.match(DERIVER, Pin.phrase("When no merge-gating test step runs without a running service, there is nothing to prove: report `RECIPE NOT PROVEN` with the cause **needs a running service**, never an entrypoint that needs one. That is not the case above of no single invocation covering every qualifying step."));
+  assert.match(DERIVER, Pin.phrase("**needs a running service** (every merge-gating test step needs one)"));
+  assert.match(DERIVER, Pin.phrase("With **needs a running service** no run happened: give each merge-gating test step and the service it needs in place of the reason and the commands."));
+});
+
+// The accept side: what the running-service rule must NOT refuse.
+test("the deriver's running-service rule admits a test's own child server, network access and the Install step", () => {
+  assert.match(DERIVER, Pin.phrase("A test that spawns its own server process as a child needs none."));
+  assert.match(DERIVER, Pin.phrase("Network reachability is not a service: the fleet machine is assumed online."));
+  assert.match(DERIVER, Pin.phrase("The Install step is exempt."));
 });
 
 test("every flag the deriver's procedure passes is one recipe-prove.mjs accepts", () => {

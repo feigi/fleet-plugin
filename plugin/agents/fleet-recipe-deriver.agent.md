@@ -38,7 +38,17 @@ ls-tree -r --name-only origin/main`):
   `scripts/test`, a tracked `agent-test`).
 
 Propose one Install step, one Check step and one Test entrypoint, all shell
-commands run from the repository root by `sh -c`:
+commands run from the repository root by `sh -c`.
+
+**The Test entrypoint and the Check step need no running service — including
+one the command starts itself.** A *running service* is anything a command
+needs that it does not start as its own child process: a Docker daemon (so any
+container, compose stack or testcontainers use), a database or other server
+installed on the host, a host daemon, secrets or credentials in the
+environment. A test that spawns its own server process as a child needs none.
+Network reachability is not a service: the fleet machine is assumed online.
+The Install step is exempt. Whether that service happens to be up while you
+derive never changes the answer.
 
 - **Install step** — the form that installs exactly what the repository pins
   and rewrites nothing: the frozen or locked mode where the tool has one.
@@ -48,7 +58,7 @@ commands run from the repository root by `sh -c`:
   the frozen or locked mode in the command; never rely on the environment to
   imply it.
 - **Test entrypoint** — every test step in the merge-gating CI jobs that can
-  run in a fresh worktree on this host. Which steps qualify is yours to
+  run in a fresh worktree without a running service. Which steps qualify is yours to
   decide, by reading CI and the repository. Members run it with their own
   arguments appended (`sh -c '<test> "$@"'`), so it is one invocation: an
   `&&` chain hands those arguments to its last command alone. Prefer a form
@@ -61,8 +71,8 @@ commands run from the repository root by `sh -c`:
   resolves under its own directory option, e.g.
   `git -C web ls-files -- '*.test.ts'`: the reader accepts a quoted pattern
   unchecked.
-- **Check step** — every merge-gating CI step that is not a test step and that
-  the Test entrypoint does not run: the format, lint and type checks the
+- **Check step** — every merge-gating CI step that is not a test step, that
+  the Test entrypoint does not run, and that needs no running service: the format, lint and type checks the
   repository's CI gates on, whatever they are. One invocation, in the same form
   as the Test entrypoint: a single command, run from the repository root, with
   the same shape rules. `true` when the repository's CI has no such step. It
@@ -73,10 +83,15 @@ commands run from the repository root by `sh -c`:
   of `{"step": "<the CI step>", "reason": "<why it is left out>"}`, `'[]'` when
   it leaves out nothing. When no single invocation covers every qualifying
   step, take the widest one and list every qualifying step it leaves out; that
-  is never a reason to report `RECIPE NOT PROVEN`. A test step that cannot run
-  here — it needs a service this host lacks, secrets, or another OS — is listed
-  too, with that reason. A non-test step that is red on `origin/main` is listed
-  with the reason `red on origin/main`.
+  is never a reason to report `RECIPE NOT PROVEN`. A test step or a non-test
+  step that needs a running service is always listed too, with that reason,
+  whether or not the service is up while you derive; so is a test step that
+  needs another OS. A non-test step that is red on `origin/main` is listed
+  with the reason `red on origin/main`. When no merge-gating test step runs
+  without a running service, there is nothing to prove: report `RECIPE NOT
+  PROVEN` with the cause **needs a running service**, never an entrypoint
+  that needs one. That is not the case above of no single invocation covering
+  every qualifying step.
 
 ## 2. Prove it — this procedure exactly
 
@@ -162,5 +177,8 @@ Your last message is exactly one of:
   (the Check step is red there, so it cannot be the Check step),
   **timed out** (a command the proof runs — the Install step, the Check step,
   the Test entrypoint or a mutation — hung until the script's own bound stopped it),
-  or **unreadable** (you could not tell from the repository how it is built or
-  tested).
+  **unreadable** (you could not tell from the repository how it is built or
+  tested), or **needs a running service** (every merge-gating test step needs
+  one). With **needs a running service** no run happened: give each
+  merge-gating test step and the service it needs in place of the reason and
+  the commands.
