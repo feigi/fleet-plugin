@@ -94,14 +94,24 @@ Come back here. The sizing path hands off; this step always follows.
 
 ```bash
 git fetch origin && git rebase origin/main   # rebase, never merge main in
-<test command>                              # the Recipe's Test entrypoint; re-run after rebasing
-<check command>                             # the Recipe's Check step; re-run after rebasing
+~/.fleet/bin/fleet-run recipe-check.mjs --member <your name> --testCmd "<test command>" --reports <scratch>/reports   # re-run after any content change or rebase
 git push --force-with-lease -u origin HEAD
 gh pr create --base main --body "…
 
 Closes #N"
 gh pr edit --add-label <patch|minor|major>   # own command, own exit status
 ```
+
+`recipe-check.mjs` runs the Recipe's Check step, then `<test command>` — the
+Recipe's Test entrypoint, as you were handed it, which runs through the suite
+slot already — against the staged tree, and records both results beside your
+report; the controller refuses a report whose head's tree has no green record.
+`<your name>` is the `impl-<N>[-x]` you were dispatched as. The record is keyed
+to the tree, so run it after `git add` and before you commit, and again after
+any content change or rebase: a message-only amend keeps it valid, a changed
+tree does not. A non-zero exit is not a pass, and exit 75 is no test result —
+no slot was free and nothing ran, so run it again. A solo session has no report
+to settle against: it runs the Check step and the Test entrypoint themselves.
 
 **A red Check step is yours to judge.** Read what it reports and fix every
 finding in a file the PR changes, including lines you did not edit — CI checks

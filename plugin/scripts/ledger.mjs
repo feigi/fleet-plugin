@@ -56,7 +56,7 @@ import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD } from "./f
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
 import { attemptLock, releaseLockFile, reapPathOf } from "./pid-lock.mjs";
-import { readReportIn, reportsDir, reportFamily, defaultScratch } from "./report-files.mjs";
+import { readCheckRecordIn, readReportIn, reportsDir, reportFamily, defaultScratch } from "./report-files.mjs";
 
 const NAME = "ledger";
 // The plugin's own agent definitions — the directory tier-check.mjs reads
@@ -2250,9 +2250,12 @@ function recordFiled(id, subject) {
 // checked before anything is written:
 //
 //   impl-N=PR#M               verify-sha.sh <branch> <head> exits 0; PR M
-//                             reads OPEN and its closingIssuesReferences name N
+//                             reads OPEN and its closingIssuesReferences name N;
+//                             the Check-step record (below) holds for <head>
 //   impl-N=bailed             bailCause is not null; the receipt names it
-//   fix-pr-M=applied:<head>   origin's refs/heads/<branch> is <head>
+//   fix-pr-M=applied:<head>   origin's refs/heads/<branch> is <head>, fetched
+//                             by verify-sha.sh; the Check-step record (below)
+//                             holds for <head>
 //   fix-pr-M=no-op            origin's refs/heads/<branch> is the head PR M's
 //                             latest reviewed= names, as the tick folds it
 //   finisher-pr-M=labelled    PR M's labels carry ready-to-merge, and so does
@@ -2260,6 +2263,16 @@ function recordFiled(id, subject) {
 //   finisher-pr-M=halted:<c>  cause is in the halted:<cause> vocabulary and
 //                             evidence is not empty
 //   merge-bot-n=done          every merged[].pr reads MERGED
+//
+// THE CHECK-STEP RECORD, for `impl-N=PR#M` and `fix-pr-M=applied:<head>`:
+// recipe-check.mjs writes `<reports>/<member>.check.json` on the member's
+// staged tree, and settle requires that it exists and parses, that the Check
+// step and the Test entrypoint both exited 0 in it, and that its `tree` is
+// `<head>^{tree}`, so a message-only amend keeps it valid while any content
+// change or rebase does not. Settle runs neither command: the record is the
+// member's word, at the trust level of its report. A repository whose Recipe
+// cache derive-testcmd.sh refuses has no gate. A `<head>^{tree}` git cannot
+// read is "could not look", never a tree mismatch.
 //
 // A `failed` report claims no state, so it settles `=failed` unchecked. A
 // fix-applier's `refuted` deferral claims one more thing: that its disposition
@@ -2298,6 +2311,7 @@ function mismatch(msg) {
 async function runSettleFromReport() {
   const usage = "usage: ledger.mjs settle <member> --from-report [--reports <dir>]";
   const verifySha = join(dirname(fileURLToPath(import.meta.url)), "verify-sha.sh");
+  const deriveTestcmd = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh");
   const ready = "ready-to-merge";
   // The bound on each child a check runs: generous, because verify-sha.sh
   // fetches, and still a bound, because the child may never answer at all.
@@ -2370,6 +2384,7 @@ async function runSettleFromReport() {
     }
     return r;
   };
+  const verifyShaOf = (branch, sha) => look(`verify-sha.sh ${branch} ${sha}`, "sh", [verifySha, branch, sha], [0, 1]);
   // A `gh pr view --json <fields>` answer: an object whose every requested
   // field has the type that field has. Anything else was not what was asked
   // for, so it could not look.
@@ -2405,6 +2420,32 @@ async function runSettleFromReport() {
     checks.push({ name, ok });
     return ok;
   };
+  // The Recipe gate, for the two reports that name a pushed head: the member's
+  // Check-step record must show the Recipe's Check step and the Test
+  // entrypoint both exited 0 against the very tree `head` holds. Nothing here
+  // runs either command — the record is the member's word, at the trust level
+  // of its report. A repository whose Recipe cache derive-testcmd.sh refuses
+  // (exit 1: absent, unproven, invalid) has no Check step to have run, so no
+  // gate applies; any other answer from it could not look. `head`'s commit
+  // object must be local when the tree is read: `fetchHead`, when given, puts
+  // it there, and runs only once a gate applies.
+  const recipeGate = (head, fetchHead) => {
+    for (const field of ["check", "test"]) {
+      if (look(`derive-testcmd.sh . ${field}`, "sh", [deriveTestcmd, repoDir(), field], [0, 1]).status === 1) return;
+    }
+    const rec = readCheckRecordIn(reports, member);
+    const label = rec.state === "absent" ? `a Check-step record exists at ${rec.path}`
+      : rec.state === "ok" ? `Check-step record ${rec.path} exists and parses`
+      : `Check-step record ${rec.path} parses: ${rec.violation}`;
+    if (!check(label, rec.state === "ok")) return;
+    const { check: step, test, tree } = rec.record;
+    const exited = (c) => (c.exitCode === null ? "not run" : `exit ${c.exitCode}`);
+    check(`the recorded Check step exited 0 (recorded: ${exited(step)})`, step.exitCode === 0);
+    check(`the recorded Test entrypoint exited 0 (recorded: ${exited(test)})`, test.exitCode === 0);
+    fetchHead?.();
+    const headTree = look(`git rev-parse --verify ${head}^{tree}`, "git", ["rev-parse", "--verify", `${head}^{tree}`]).stdout.trim();
+    check(`the recorded tree ${tree} is ${head}'s tree ${headTree}`, tree === headTree);
+  };
   const ruledLines = [];
   let outcome;
   if (live.family === "impl") {
@@ -2412,8 +2453,9 @@ async function runSettleFromReport() {
       if (report.pr === null) invalid('$.pr: null is not a PR number, with outcome "pr"');
       if (report.head === null) invalid('$.head: null, with outcome "pr"');
       outcome = `PR#${report.pr}`;
-      const sha = look(`verify-sha.sh ${report.branch} ${report.head}`, "sh", [verifySha, report.branch, report.head], [0, 1]);
+      const sha = verifyShaOf(report.branch, report.head);
       check(`verify-sha.sh ${report.branch} ${report.head} exits 0`, sha.status === 0);
+      recipeGate(report.head);
       const pr = prView(report.pr, "state,closingIssuesReferences");
       check(`PR #${report.pr} reads OPEN`, pr.state === "OPEN");
       check(`PR #${report.pr} closes #${live.number}`, pr.closingIssuesReferences.some((c) => c?.number === live.number));
@@ -2426,6 +2468,12 @@ async function runSettleFromReport() {
       outcome = `applied:${report.head}`;
       const head = remoteHead(report.branch);
       check(`origin refs/heads/${report.branch} is ${report.head}`, head === report.head);
+      if (head === report.head) {
+        // verify-sha.sh is the fetch that puts the head's commit object here,
+        // which the tree read needs; its exit 2 is a fetch that failed or an
+        // object that is not there, so it could not look.
+        recipeGate(report.head, () => verifyShaOf(report.branch, report.head));
+      }
     } else if (report.outcome === "no-op") {
       outcome = "no-op";
       let fold;

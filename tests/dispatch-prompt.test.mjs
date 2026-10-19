@@ -257,7 +257,7 @@ test("a value is inserted verbatim, whatever replacement syntax it holds", () =>
   const fix = CASES.find((c) => c.role === "fix-applier" && c.kind === "conflict");
   const r = render(argvOf({ ...fix, args: { ...fix.args, testCmd: "echo $& $1 $$ $`" } }));
   assert.equal(r.status, 0, r.err);
-  assert.ok(r.out.includes("and `echo $& $1 $$ $`` from the worktree before you push"), r.out);
+  assert.ok(r.out.includes('--testCmd "echo $& $1 $$ $`" --reports'), r.out);
 });
 
 // --- the golden briefs -----------------------------------------------------

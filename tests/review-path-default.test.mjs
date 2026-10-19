@@ -519,8 +519,8 @@ test("the fix commit is gated on a test run, in both files", () => {
   );
   assert.match(
     prompt,
-    /`TESTCMD-1` from the worktree before committing/i,
-    "the fix-applier's rendered prompt no longer carries the test command it was handed",
+    /recipe-check\.mjs --member <your name> --testCmd "TESTCMD-1" --reports /,
+    "the fix-applier's rendered prompt no longer carries the test command it was handed, through recipe-check.mjs",
   );
   assert.match(prompt, /never `--no-verify`/i, "the fix-applier prompt no longer forbids --no-verify");
 });

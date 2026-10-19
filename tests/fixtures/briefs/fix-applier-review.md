@@ -20,7 +20,7 @@ and `cwdAudit` before any result of the shared test run. Every one of those
 rulings is yours — nobody upstream has made one, and the controller never
 reads the findings.
 
-**Run `CHECKCMD-1` from the worktree before committing**, copied verbatim. **Run `TESTCMD-1` from the worktree before committing**, copied verbatim.
+**Run `recipe-check.mjs` (below) from the worktree before committing.**
 `tests 0` is a FAILED run, not a pass. Red or zero-test → fix it, or move that
 finding to defer; never commit over it. **Never `--no-verify`** on a commit you push, or on the push — a failing
 hook is a finding you report, not an obstacle you route around. Report the test
@@ -42,6 +42,16 @@ is the same stale base. Stage every change of your own before the commit that
 runs the hook, so every change still unstaged after it is the hook's alone:
 never stage those, `git restore -- <that path>` for each such path alone, then
 rebase and re-run.
+
+**`recipe-check.mjs` is how you run `CHECKCMD-1` and `TESTCMD-1`:**
+`~/.fleet/bin/fleet-run recipe-check.mjs --member <your name> --testCmd "TESTCMD-1" --reports /abs/scratch-fix/reports`,
+from the worktree, after `git add` and before the commit — `TESTCMD-1` copied
+verbatim as the one quoted argument. It runs the Recipe's Check step,
+`CHECKCMD-1`, then `TESTCMD-1`, against the staged tree and records both beside
+your report. Run it again after any content change or rebase: the controller
+refuses an `applied` report whose head's tree has no green record, and a
+message-only amend keeps the record valid. Exit 1 is red; exit 75 is no test
+result — no slot was free and nothing ran — so run it again.
 
 Your report is a file, `/abs/scratch-fix/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape
