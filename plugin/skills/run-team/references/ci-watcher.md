@@ -61,11 +61,11 @@ reserve. 4 is the most one call spends on this bucket for a repo with at most 10
 workflows: 0 with no CI, 2 with no run on the PR's head, 4 otherwise. The
 dropped-required-jobs path adds only reported-bucket calls, and the workflow-name
 lookup pages 100 workflows per page, so a repo with more pays more per call. The
-bucket is account-wide, not per
-repository: probes on three unrelated repositories drew one countdown and one
-reset epoch (measured 2026-10-19), so another run on the same token, or any
-`gh run` use, spends it, and its DEGRADED line can fire with few open PRs on
-this repository. It has its own global latch (`hidden_out`) and its DEGRADED and
+bucket is account-wide, not per repository: probes on three unrelated
+repositories drew one countdown and one reset epoch (measured 2026-10-19), so
+another run on the same token, or any `gh run` use, spends it, and its
+DEGRADED line can fire with few open PRs on this repository. It has its own
+global latch (`hidden_out`) and its DEGRADED and
 RECOVERED lines name it, so a pause on this bucket is not misread as the
 reported budget running low. An unreadable header is an outage here exactly as a
 non-numeric `rate_limit` read is. The probe runs only when the reported-bucket
