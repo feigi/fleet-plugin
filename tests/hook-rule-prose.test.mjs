@@ -3,11 +3,12 @@
 // recipe-prove.test.mjs and snapshot-repo.test.mjs execute that half). This file
 // pins what the member rules say once a hook DOES run:
 //
-//   - one no-bypass rule, worded the same wherever it appears: never
-//     `--no-verify` on a commit you push, or on the push itself. The
+//   - one no-bypass rule, carrying the same qualifier wherever it appears:
+//     never `--no-verify` on a commit you push, or on the push. The
 //     qualifier is the point — an unqualified "never" collides with the WIP
 //     commit that stands in for `git stash`, whose exemption
-//     stash-prohibition-prose.test.mjs pins;
+//     stash-prohibition-prose.test.mjs pins. The fix-applier runs
+//     review-and-fix.md's step 3, so that step carries it too;
 //   - a hook that rewrites a file the PR does not otherwise change is a stale
 //     base, and the member stages every change of its own BEFORE the commit
 //     that runs the hook, so what is still unstaged after it is the hook's
@@ -69,6 +70,16 @@ test("the fix-applier brief qualifies its --no-verify rule to a commit it pushes
     "the fix-applier brief's --no-verify rule lost its qualifier",
   );
   assert.doesNotMatch(FIX_APPLIER_BRIEF, /Never `--no-verify` —/, "the unqualified rule is back");
+});
+
+const REVIEW_AND_FIX = flatten(read("commands", "review-and-fix.md"));
+
+test("review-and-fix step 3, which the fix-applier runs, qualifies its --no-verify rule and never states it bare", () => {
+  const step3 = Pin.of(REVIEW_AND_FIX, "review-and-fix.md").between("3. Run `checkCmd` and `testCmd`", "4. Under the fleet", "step 3").text;
+  assert.match(step3, Pin.phrase(RULE), "review-and-fix step 3 lost its no-bypass rule, or the qualifier");
+  for (const at of [...REVIEW_AND_FIX.matchAll(/Never `--no-verify`/g)].map((m) => m.index)) {
+    assert.equal(REVIEW_AND_FIX.slice(at, at + RULE.length), RULE, `an unqualified --no-verify rule: ${REVIEW_AND_FIX.slice(at, at + 80)}`);
+  }
 });
 
 // Accept side. The rule forbids the bypass on what reaches the branch and
