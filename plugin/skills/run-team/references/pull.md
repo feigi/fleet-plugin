@@ -242,6 +242,7 @@ does:
 |---|---|
 | in-flight hit, or an in-flight check that could not answer | drop, next entry |
 | no longer labelled `ready-for-agent` | drop, next entry |
+| a stranded ruling: a `## Ruling` or `## Triage` comment newer than the last `## Agent Brief`, or on a ticket with none | relabel `ready-for-human`, next entry |
 | `staleness.mjs` exit 1 — provably fixed | close citing the commit, next entry |
 | brief names no *what* | relabel `needs-triage`, next entry |
 | genuine fork — options named, none ruled | relabel `ready-for-human`, next entry |
@@ -266,8 +267,11 @@ that trusted a list built before the relabel landed would hand a ticket the
 fleet has already judged unimplementable straight to the next member.
 
 **Relabel by cause.** An unclaimed ticket is yours to reclassify at the Pull —
-three causes, two labels: `ready-for-human` for hands or a fork;
-`needs-triage` for a brief that names no *what*.
+`ready-for-human` for hands or a fork; `needs-triage` for a brief that names no
+*what*. A stranded ruling relabels to `ready-for-human` as well, but it is never
+yours to judge: `pull.mjs` finds it at step 3 and posts its own comment naming
+the stranded comment's heading line and URL, which is not one of the
+`briefs/relabel.md` comments.
 `gh issue edit <N> --remove-label ready-for-agent --add-label <label>` (no
 `in-progress` to drop — it was never claimed), preceded by exactly one comment,
 the one `~/.fleet/bin/fleet-run dispatch-prompt.mjs render relabel --kind <kind> …`
@@ -280,8 +284,9 @@ live in `briefs/relabel.md`; `pull.mjs` posts its own one-line copy of the same
 words when a Pull answer relabels, so a change to either is a change to both.
 
 Neither label invokes anything: `/triage` is maintainer-run, and both labels
-only stop the ticket costing a read per scan. These comments are the only
-writes the fleet makes to a ticket it did not claim.
+only stop the ticket costing a read per scan. These comments, the
+stranded-ruling comment and the comment closing a provably fixed ticket are the
+only writes the fleet makes to a ticket it did not claim.
 
 **Exclusion is a ticket row with a premise.** `ledger.mjs row <N> "excluded ·
 behind-pr:#M"` or `ledger.mjs row <N> "excluded · behind-issue:#M"` — `#M` is

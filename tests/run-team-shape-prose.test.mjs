@@ -503,6 +503,14 @@ const CHANGED = [
     "| 1 `LEFT #N: excluded …` | `collision` answered `behind-pr:#M` or `behind-issue:#M`, or its ledger exclusion stands | next entry |"
   ],
   [
+    "| 1 `LEFT #N: relabelled <label>: …` | `decided` answered with a cause | next entry |",
+    "| 1 `LEFT #N: relabelled <label>: …` | `decided` answered with a cause, or a stranded ruling | next entry |"
+  ],
+  [
+    "The deficit is then *computed, not remembered*, which is the whole point: a table you must remember to consult is one you will not consult under a merge-side event storm, and that is how implementers reached 0/target with one approved ticket waiting and ~57 `ready-for-agent` in supply while nobody noticed (#3).",
+    "The deficit is then *computed, not remembered*, which is the whole point: a table you must remember to consult is one you will not consult under a merge-side event storm, and that is how implementers reached 0/target with ~57 `ready-for-agent` in supply while nobody noticed (#3)."
+  ],
+  [
     "An entry that names neither `session` nor `transcript` takes the session directory phase 0's receipt `.fleet/phase0.json` records, and is exit 2 naming the receipt when it records none; the check reads the member's own `<session>/<member>.jsonl` directly, so a member with no assistant turn yet still resolves off its dispatch-time record.",
     "An entry that names neither `session` nor `transcript` takes the session directory phase 0's receipt `.fleet/phase0.json` of `--ledger`'s workspace (else the cwd's, resolved as the default ledger is) records, and is exit 2 naming the receipt when it records none; the check reads `<session>/<member>.jsonl`, so a member with no assistant turn yet still resolves off its dispatch-time record."
   ],

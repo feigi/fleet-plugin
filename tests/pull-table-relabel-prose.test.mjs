@@ -1,11 +1,11 @@
 // #1804's Pull table (ADR 0013 Decision 2 and 4) states, for each verdict a
-// Pull can reach, the one action that verdict takes — and for the three
+// Pull can reach, the one action that verdict takes — and for the four
 // relabel rows, which of the two relabel-by-cause labels applies. Nothing
 // tied a cause to its label: confirmed live, swapping `needs-triage` <->
 // `ready-for-human` on the "brief names no *what*" row left every run-team
 // prose test green, because no test read the table's own text at all.
 //
-// WHAT IS PINNED. The three relabel rows, each as one bounded phrase running
+// WHAT IS PINNED. The four relabel rows, each as one bounded phrase running
 // cause through label through "next entry" — so a swap on any one row, in
 // either direction, breaks its own row's pin and no other row's. Everything
 // else the table states (the drop rows, the close row, the exclude rows, the
@@ -14,7 +14,7 @@
 //
 // THE SLICE ANCHOR IS WHAT ANCHORS. `pullTable()` bounds the table between its
 // own opening sentence and the paragraph that follows it, never the whole
-// document — a positive match over `RUN_TEAM` wholesale would be satisfiable
+// document — a positive match over `PULL_MD` wholesale would be satisfiable
 // from the "Relabel by cause" paragraph, which restates the
 // same two labels in prose and would launder a table-row swap as a pass.
 //
@@ -38,7 +38,7 @@ const pullTable = () =>
     "references/pull.md Pull table",
   ).text;
 
-test("run-team/SKILL.md: the Pull table ties each relabel cause to its own label", () => {
+test("references/pull.md: the Pull table ties each relabel cause to its own label", () => {
   const table = pullTable();
   assert.match(
     table,
@@ -56,5 +56,12 @@ test("run-team/SKILL.md: the Pull table ties each relabel cause to its own label
       "| needs human hands — external access, manual testing, judgment during the work | relabel `ready-for-human`, next entry |",
     ),
     "needing human hands no longer relabels to `ready-for-human` in the Pull table",
+  );
+  assert.match(
+    table,
+    Pin.phrase(
+      "| a stranded ruling: a `## Ruling` or `## Triage` comment newer than the last `## Agent Brief`, or on a ticket with none | relabel `ready-for-human`, next entry |",
+    ),
+    "a stranded ruling no longer relabels to `ready-for-human` in the Pull table",
   );
 });
