@@ -4147,7 +4147,7 @@ test("an unenumerable [gone] sweep is kept, not silently read as a clean no-op (
 });
 
 test("an unenumerable no-upstream sweep is kept, and the [gone] sweep beside it still reaps", (t) => {
-  // The no-upstream awk program is the only one carrying `upstream=`, so the
+  // The no-upstream awk program is the only one carrying `no-upstream`, so the
   // shim fails that scan alone and the [gone] scan over the same capture runs.
   const w = repo(t);
   mergedGoneBranch(w, "feature/merged", "merged work");
@@ -4155,7 +4155,7 @@ test("an unenumerable no-upstream sweep is kept, and the [gone] sweep beside it 
     t,
     "awk",
     REAL_AWK,
-    `case "$1" in *'upstream='*) : ;; *) false ;; esac`,
+    `case "$1" in *'no-upstream'*) : ;; *) false ;; esac`,
     ["awk: multibyte conversion failure"],
     2,
   );
@@ -4168,8 +4168,42 @@ test("an unenumerable no-upstream sweep is kept, and the [gone] sweep beside it 
   assert.match(json.kept[0].reason, /^could not enumerate branches with no upstream/);
   assert.match(stderr, /KEEP \(no branch\) — could not enumerate branches with no upstream/);
   assert.deepEqual(json.reaped, ["feature/merged"], "the [gone] scan does not depend on the no-upstream one");
-  assertToolShimFired(bin, "awk", "the awk shim must actually have fired for this fixture", /upstream=/);
+  assertToolShimFired(bin, "awk", "the awk shim must actually have fired for this fixture", /no-upstream/);
 });
+
+// `branch.<b>.merge` is config, and git does not validate its bytes, so the
+// enumeration must never print it: a space or a tab there splits the line
+// into an extra field, a newline splits it into two lines, and a raw 0x02
+// cuts git_probe's capture short.
+for (const [label, merge] of [
+  ["a space", "refs/heads/a b"],
+  ["a tab", "refs/heads/a\tb"],
+  ["a newline", "refs/heads/a\nb"],
+  ["a 0x02 byte", "refs/heads/a\x02b"],
+]) {
+  test(`a merged [gone] branch whose branch.<b>.merge holds ${label} is still reaped, beside a normal one`, (t) => {
+    const w = repo(t);
+    mergedGoneBranch(w, "feature/merged", "merged work");
+    mergedGoneBranch(w, "feature/odd", "odd work");
+    git(w, "config", "branch.feature/odd.merge", merge);
+    git(w, "branch", "--no-track", "scratch/local", "main");
+    assert.match(
+      git(w, "for-each-ref", "--format=%(upstream:track)", "refs/heads/feature/odd"),
+      /^\[gone\]$/,
+      "the fixture must still read [gone] under its edited merge value",
+    );
+
+    const { code, json, stderr } = runReap(w, ["--apply"]);
+
+    assert.equal(code, 0, stderr);
+    assert.ok(json, `reap.sh must still print its payload: ${stderr}`);
+    assert.deepEqual(json.reaped, ["feature/merged", "feature/odd"]);
+    assert.deepEqual(json.kept, [{ branch: "scratch/local", reason: "no upstream — never selected" }]);
+    assert.equal(branchExists(w, "feature/odd"), false);
+    assert.equal(branchExists(w, "feature/merged"), false);
+    assert.equal(branchExists(w, "scratch/local"), true);
+  });
+}
 
 test("a `git for-each-ref` that dies is kept, never read as a clean no-op that just found nothing (#789)", (t) => {
   // The awk-only guard above catches awk's own failure, but the pipeline has
