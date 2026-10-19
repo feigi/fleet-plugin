@@ -80,6 +80,8 @@ gh issue edit <N> --add-label in-progress
 
 Infer branch/worktree convention from `git worktree list` / `git branch -r` — commonly `feat|fix|refactor/<N>-slug` and `.worktrees/<N>-slug`. Branch off fresh `origin/main`, run the Install step, run the Check step, run the Test entrypoint as the baseline — the repo's **Recipe**, read from its Recipe cache: `~/.fleet/bin/fleet-run derive-testcmd.sh . install`, `… . check` and `… . test --at origin/main` print them. **No usable cache (any of the three exits 1) → run the Recipe derivation step first:** dispatch a `task` member, agent `fleet-recipe-deriver`, its prompt naming the main checkout's absolute path as `<repo>` and `<scratch>/derive-recipe/` as its scratch directory, `<scratch>` the output of `~/.fleet/bin/fleet-run scratch-root.mjs`; it reads the repo, proves all three commands in a throwaway worktree and writes the cache only on proof. `RECIPE NOT PROVEN` → stop and give the maintainer its reason; never pick a command yourself. Exit 3 is no verdict on the cache — the reader could not run a tool it needs — so fix that environment fault and re-run instead of deriving.
 
+**Run the Install step with `CI` removed**, from the new worktree's root: `env -u CI sh -c "<install>"`, `<install>` the output of `derive-testcmd.sh . install`. A setup script that skips under `CI` installs no git hooks there, and you would then commit with the repository's commit-time checks silently absent. Only the Install step loses `CI`; the Check step and the Test entrypoint baseline run in your shell's own environment.
+
 Abandoned before PR opens → remove `in-progress`.
 
 ## 6. Size the ticket, then pick a path

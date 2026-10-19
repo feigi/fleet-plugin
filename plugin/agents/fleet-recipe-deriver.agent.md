@@ -43,9 +43,10 @@ commands run from the repository root by `sh -c`:
 - **Install step** — the form that installs exactly what the repository pins
   and rewrites nothing: the frozen or locked mode where the tool has one.
   `true` when nothing needs installing. It must leave every file exactly as
-  checked out; build output the repository ignores is fine. The fleet runs the
-  Install step with `CI` unset, so spell the frozen or locked mode in the
-  command; never rely on the environment to imply it.
+  checked out; build output the repository ignores is fine. The fleet and a
+  standalone next-ticket session run the Install step with `CI` unset, so spell
+  the frozen or locked mode in the command; never rely on the environment to
+  imply it.
 - **Test entrypoint** — every test step in the merge-gating CI jobs that can
   run in a fresh worktree on this host. Which steps qualify is yours to
   decide, by reading CI and the repository. Members run it with their own
