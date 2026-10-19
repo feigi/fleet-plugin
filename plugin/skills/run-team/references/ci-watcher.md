@@ -47,14 +47,25 @@ bill a second one that `rate_limit` does not report; the boundary is per route,
 so `actions/runs/<id>/jobs` is on the reported counter. Every response says
 `X-Ratelimit-Resource: core`, so only the reset epoch and the used sequence tell
 the two apart, and the unreported bucket's remaining count is readable only from
-the `X-Ratelimit-Remaining` header of a call that bills it. **A second pass gate
-therefore probes it too**: one `gh api -i` read of
+the `X-Ratelimit-Remaining` header of a call that bills it. GitHub's REST
+rate-limit documentation does not describe this bucket (it says `core` covers
+"all non-search-related resources in the REST API"), so the gate rests on
+measurement (2026-10-13 and 2026-10-19), not on documentation. **A second pass
+gate therefore probes it too**: one `gh api -i` read of
 `actions/workflows?per_page=1` per tick, 1 unit of that bucket (measured
 2026-10-13: its remaining count fell by 1 per call while `rate_limit` stood
 still, and its reset epoch differed from `rate_limit`'s). A `ci-state` call
 spends 4 units of it on the common path — one `gh run list` and one `gh run view`
 cost 2 each (measured the same day) — so it is held to the same `200 + 4 × count`
-reserve. It has its own global latch (`hidden_out`) and its DEGRADED and
+reserve. 4 is the most one call spends on this bucket for a repo with at most 100
+workflows: 0 with no CI, 2 with no run on the PR's head, 4 otherwise. The
+dropped-required-jobs path adds only reported-bucket calls, and the workflow-name
+lookup pages 100 workflows per page, so a repo with more pays more per call. The
+bucket is account-wide, not per
+repository: probes on three unrelated repositories drew one countdown and one
+reset epoch (measured 2026-10-19), so another run on the same token, or any
+`gh run` use, spends it, and its DEGRADED line can fire with few open PRs on
+this repository. It has its own global latch (`hidden_out`) and its DEGRADED and
 RECOVERED lines name it, so a pause on this bucket is not misread as the
 reported budget running low. An unreadable header is an outage here exactly as a
 non-numeric `rate_limit` read is. The probe runs only when the reported-bucket
