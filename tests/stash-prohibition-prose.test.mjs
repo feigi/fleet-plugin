@@ -92,7 +92,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Pin } from "./support/prose-pin.mjs";
-import { memberPrompt } from "./support/render-brief.mjs";
+import { agentBody, agentNames, memberPrompt } from "./support/render-brief.mjs";
 
 // Both copies live in the agent body each harness injects as the member's
 // system prompt — the implementer's and the fix-applier's — and SKILL.md
@@ -250,6 +250,40 @@ test("the fix-applier's stash rule says nothing partitions the stack, so the pro
     Pin.phrase("Nothing partitions the stack; this prohibition is the whole of the protection."),
     "the fix-applier block no longer says nothing partitions the stack or drops the whole-protection close",
   );
+});
+
+// The WIP exemption (#3445): the stash substitute is a `git commit -m wip`,
+// and a rule that forbids `--no-verify` on everything that reaches the branch
+// must not forbid it there. The exemption is pinned to "never pushed" — the
+// clause that makes it safe — and to the commit that IS pushed running the
+// hooks, so a bare "a WIP commit may take `--no-verify`" cannot stand in. It
+// lives in the stash block of all five implementer bodies and the fix-applier's.
+const WIP_EXEMPTION =
+  "A WIP commit may take `--no-verify` — it is never pushed: the amend or the real commit after `git reset --soft HEAD^` runs the repository's hooks, and that commit is the one you push.";
+
+test("the implementer's and the fix-applier's stash blocks carry the WIP exemption", () => {
+  assert.match(implementerStashBlock(), Pin.phrase(WIP_EXEMPTION), "the implementer's stash block lost the WIP exemption, or it left the block");
+  assert.match(fixApplierStashBlock(), Pin.phrase(WIP_EXEMPTION), "the fix-applier's stash block lost the WIP exemption, or it left the block");
+});
+
+test("every implementer body and the fix-applier's body carries the WIP exemption, pinned to never pushed", () => {
+  const names = agentNames().filter((n) => /^fleet-implementer-/.test(n) || n === "fleet-fix-applier");
+  assert.equal(names.filter((n) => n.startsWith("fleet-implementer-")).length > 0, true, "no implementer body was found");
+  assert.ok(names.includes("fleet-fix-applier"), "the fix-applier body was not found");
+  for (const n of names) {
+    assert.match(flatten(agentBody(n)), Pin.phrase(WIP_EXEMPTION), `${n}: the WIP exemption is missing or no longer says the commit is never pushed`);
+  }
+});
+
+// What the exemption must NOT become: a body that lets the commit you push
+// skip hooks. The unqualified rule is in the next-ticket skill and the
+// fix-applier's brief (hook-rule-prose.test.mjs); here it is the exemption's
+// own scope — a WIP commit and no other — that is held.
+test("the WIP exemption names the WIP commit alone, not every commit", () => {
+  for (const b of [implementerStashBlock(), fixApplierStashBlock()]) {
+    assert.equal(b.split("`--no-verify`").length - 1, 1, "the stash block mentions --no-verify more than once, so the exemption may have widened");
+    assert.doesNotMatch(b, /any commit may take `--no-verify`|every commit may take `--no-verify`/);
+  }
 });
 
 // ACCEPT side, mirroring `dispatch-block-pins-prose.test.mjs`'s own rewrap

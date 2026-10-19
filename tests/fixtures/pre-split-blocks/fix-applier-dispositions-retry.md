@@ -217,7 +217,7 @@ rebase. What it buys you is knowing the red was never solely staleness.
 
 **Run `<testCmd>` from the worktree before committing**, copied verbatim.
 `tests 0` is a FAILED run, not a pass. Red or zero-test → fix it, or move that
-finding to defer; never commit over it. **Never `--no-verify`** — a failing
+finding to defer; never commit over it. **Never `--no-verify`** on a commit you push, or on the push — a failing
 hook is a finding you report, not an obstacle you route around. Report the test
 result with your SHA. Nothing re-reviews this commit: the review ran against a
 snapshot cut before your edits existed, and a refuter checked the finding's

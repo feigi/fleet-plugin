@@ -13,6 +13,7 @@ path scratch
 path mismatched-record
 literal your name
 literal outcome
+literal that path
 ---
 ## kind: review, dispositions-retry
 You are ALREADY in worktree `<abs-path>`, whose PR branch is `<branch>` — the
@@ -54,7 +55,7 @@ reads the findings.
 
 **Run `<checkCmd>` from the worktree before committing**, copied verbatim. **Run `<testCmd>` from the worktree before committing**, copied verbatim.
 `tests 0` is a FAILED run, not a pass. Red or zero-test → fix it, or move that
-finding to defer; never commit over it. **Never `--no-verify`** — a failing
+finding to defer; never commit over it. **Never `--no-verify`** on a commit you push, or on the push — a failing
 hook is a finding you report, not an obstacle you route around. Report the test
 result with your SHA. Nothing re-reviews this commit: the review ran against a
 snapshot cut before your edits existed, and a refuter checked the finding's
@@ -83,7 +84,11 @@ finding in a file the PR changes, including lines you did not edit — CI checks
 whole files. Never edit a file the PR does not otherwise change: a finding there
 is a stale base, not your code, so rebase onto `origin/main` and re-run; still
 red → push nothing and report that cause. No fix command is recorded; the Check
-step only reports.
+step only reports. A hook that rewrites a file the PR does not otherwise change
+is the same stale base. Stage every change of your own before the commit that
+runs the hook, so every change still unstaged after it is the hook's alone:
+never stage those, `git restore -- <that path>` for each such path alone, then
+rebase and re-run.
 
 Your report is a file, `<scratch>/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape

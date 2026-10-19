@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./support/temp-dir.mjs";
-import { writeExecStub } from "./support/exec-stub.mjs";
+import { NPM_PREPARE_STUB, writeExecStub } from "./support/exec-stub.mjs";
 import { commandBudget } from "../plugin/scripts/recipe-prove.mjs";
 
 // recipe-prove.mjs is the Recipe derivation step's proof and the ONE writer of
@@ -1497,5 +1497,61 @@ test("a tree that cannot be read after the Check step names the check output, no
   assert.equal(r.status, 1, r.err);
   assert.match(r.err, /could not read the tree state in the throwaway worktree: .*; check output: \S*check\.log/);
   assert.doesNotMatch(r.err, /install output/);
+  assert.equal(existsSync(cachePath(dir)), false);
+});
+
+// The omp agent shell sets `CI=true` (#3445), and a setup script that skips under `CI`
+// installs no git hooks in a fresh worktree. The Install step runs without
+// `CI`; git, the Check step and the Test entrypoint keep it. The fixtures
+// stand in for a package manager whose `prepare` script skips under CI: a
+// stub `npm` runs the `prepare` string out of package.json, so the suite needs
+// no real one.
+const prepareFiles = (prepare, extra = {}) => ({
+  "package.json": `${JSON.stringify({ scripts: { prepare } })}\n`,
+  ".gitignore": ".hooks/\n",
+  ...extra,
+});
+const HOOKS_PREPARE = 'test -z "$CI" && mkdir -p .hooks && echo installed > .hooks/marker || true';
+const npmDir = tempDir("recipe-prove-npm-");
+writeExecStub(join(npmDir, "npm"), NPM_PREPARE_STUB);
+const CI_ENV = { PATH: `${npmDir}:${BIN}:${process.env.PATH}`, CI: "true" };
+
+test("an Install step that skips under CI still installs when the proof runs under CI=true", () => {
+  const { dir } = repo(prepareFiles(HOOKS_PREPARE, { "run-tests.sh": "#!/bin/sh\ntest -f .hooks/marker || { echo 'no hooks marker'; exit 1; }\necho 'Tests run: 1, Failures: 0'\n" }));
+  const proof = ["--install", "npm run prepare", "--test", "sh ./run-tests.sh", "--count-line", "Tests run: 1,", "--test-count", "1"];
+  const r = prove(dir, proof, { env: CI_ENV });
+  assert.equal(r.status, 0, `the install saw CI, so the marker it writes only without CI is missing: ${r.err}`);
+  assert.equal(read(dir, "install").out, "npm run prepare");
+});
+
+test("CI stays visible to the Check step and the Test entrypoint, and only the Install step loses it", () => {
+  const files = {
+    ...CHECK_FILES,
+    "run-tests.sh": '#!/bin/sh\ntest "$CI" = true || { echo "CI is [$CI] in the Test entrypoint"; exit 1; }\necho \'Tests run: 1, Failures: 0\'\n',
+    "check.sh": '#!/bin/sh\ntest "$CI" = true || { echo "CI is [$CI] in the Check step"; exit 1; }\ngrep -q clean status.txt\n',
+  };
+  const { dir } = repo(files);
+  const r = prove(dir, [...TEST_PROOF, ...CHECK_PROOF], { env: CI_ENV });
+  assert.equal(r.status, 0, `a step that needs CI=true did not get it: ${r.err}`);
+  // The controls, one per step, each proven without CI in the environment and
+  // refused — so the pass above is the environment's CI, not a step that never
+  // reads it. Each fixture lets the other step pass without CI, so the refusal
+  // can only come from the step it targets, and it names that step.
+  const noCI = { ...CI_ENV, CI: undefined };
+  const checkOnly = repo({ ...files, "run-tests.sh": CHECK_FILES["run-tests.sh"] });
+  const checkRefused = prove(checkOnly.dir, [...TEST_PROOF, ...CHECK_PROOF], { env: noCI });
+  assert.notEqual(checkRefused.status, 0, "the Check step passes without CI, so the case above proves nothing");
+  assert.match(checkRefused.err, /the Check step 'sh \.\/check\.sh' is red on origin\/main/);
+  const testOnly = repo({ ...files, "check.sh": CHECK_FILES["check.sh"] });
+  const testRefused = prove(testOnly.dir, [...TEST_PROOF, ...CHECK_PROOF], { env: noCI });
+  assert.notEqual(testRefused.status, 0, "the Test entrypoint passes without CI, so the case above proves nothing");
+  assert.match(testRefused.err, /the Test entrypoint's output does not contain the count line/);
+});
+
+test("an Install step that rewrites a tracked file only when CI is unset is refused by the clean-tree check", () => {
+  const { dir } = repo(prepareFiles('test -z "$CI" && echo changed > lock.txt || true', { "lock.txt": "pinned\n" }));
+  const r = prove(dir, ["--install", "npm run prepare", "--test", "true", "--count-line", "x 1", "--test-count", "1"], { env: CI_ENV });
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /the Install step changed the tree \(first:  M lock\.txt\)/);
   assert.equal(existsSync(cachePath(dir)), false);
 });

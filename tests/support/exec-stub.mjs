@@ -91,3 +91,13 @@ export function writeExecStub(path, body) {
   rmSync(path, { force: true });
   linkSync(trampoline, path);
 }
+
+/**
+ * Body for a stub `npm` that runs the `scripts.<name>` string out of the
+ * package.json in its cwd for `npm run <name>`, and does nothing for any other
+ * subcommand — a package manager stand-in that needs no real one.
+ */
+export const NPM_PREPARE_STUB = `#!/bin/sh
+[ "$1" = run ] || exit 0
+exec sh -c "$(${JSON.stringify(process.execPath)} -p "require('./package.json').scripts['$2']")"
+`;

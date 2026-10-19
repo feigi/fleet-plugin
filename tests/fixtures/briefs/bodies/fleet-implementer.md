@@ -93,7 +93,10 @@ tree only — so the hazard is entirely on the pop side: yours can take a
 sibling's entry, or a sibling's pop can take yours. Nothing partitions the
 stack the way the scratch root below is partitioned — one `refs/stash` per
 repository, with no per-member address for it — so this prohibition is the
-whole of the protection, not a stopgap standing in for one.
+whole of the protection, not a stopgap standing in for one. A WIP commit may
+take `--no-verify` — it is never pushed: the amend or the real commit after
+`git reset --soft HEAD^` runs the repository's hooks, and that commit is the
+one you push.
 
 **Every scratch file, fixture or mutation copy you create goes under
 `<scratch>/impl-<N>/`, never into the scratch root by itself.** Your dispatch

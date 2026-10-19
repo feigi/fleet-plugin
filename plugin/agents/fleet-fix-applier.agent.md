@@ -276,7 +276,10 @@ on top, from any worktree, silently — rc 0, no error — when the tree
 receiving it is clean on the affected paths, and refuses only when that
 tree is already dirty there. A bare `git stash` (push) does not reach into
 a sibling's tree, so that half is not the risk — the pop is. Nothing
-partitions the stack; this prohibition is the whole of the protection.
+partitions the stack; this prohibition is the whole of the protection. A WIP
+commit may take `--no-verify` — it is never pushed: the amend or the real
+commit after `git reset --soft HEAD^` runs the repository's hooks, and that
+commit is the one you push.
 
 **Report LAST, and only once nothing can still change.** A report you have
 sent **pins that SHA** for the controller, which dispatches a finisher against

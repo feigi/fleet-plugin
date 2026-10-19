@@ -16,7 +16,11 @@ finding in a file the PR changes, including lines you did not edit — CI checks
 whole files. Never edit a file the PR does not otherwise change: a finding there
 is a stale base, not your code, so rebase onto `origin/main` and re-run; still
 red → push nothing and report that cause. No fix command is recorded; the Check
-step only reports.
+step only reports. A hook that rewrites a file the PR does not otherwise change
+is the same stale base. Stage every change of your own before the commit that
+runs the hook, so every change still unstaged after it is the hook's alone:
+never stage those, `git restore -- <that path>` for each such path alone, then
+rebase and re-run.
 
 Your report is a file, `/abs/scratch-red/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape

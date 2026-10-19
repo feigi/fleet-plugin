@@ -1024,6 +1024,41 @@ test("an Install step that writes an ignored dependency directory other than nod
   assert.notEqual(runSuite(control.snap), 0, "the suite passes in a snapshot no Install step ran in — the fixture does not need its install, so the case above proves nothing");
 });
 
+// The omp agent shell sets `CI=true` (#3445), and an install script that skips under it
+// installs no git hooks in a fresh worktree. The block runs the Install step
+// with `CI` unset, in the subshell that runs it and nowhere else. EXECUTED: the
+// fixture's Install step writes a marker only when `CI` is empty, the block is
+// cut with `CI=true` exported, and the marker has to be there. The control runs
+// the same Install step under the same `CI=true` outside the block, where the
+// marker must NOT appear, and once more with `CI` unset, where it must — a
+// fixture whose marker did not turn on `CI` would prove nothing. The emitted
+// command text is pinned too: that is the line a snapshot agent runs.
+test("the Install step runs with CI unset: an install that skips under CI still writes its marker when the block is cut under CI=true", (t) => {
+  const install = `${DEPS_INSTALL} && { test -z "$CI" && echo hooks > .deps/hook-marker || true; }`;
+  const worktree = installedRepo(t, { install });
+  const lines = render(SOURCES[0][1], worktree);
+  const installLine = lines.split("\n").find((l) => l.includes('sh -c "$INSTALL"'));
+  assert.ok(installLine, "the block has no line that runs the Install step");
+  assert.match(installLine, /\bunset CI\b[^\n]*sh -c "\$INSTALL"/, `the emitted Install line does not unset CI before it runs the Install step: ${installLine}`);
+
+  // A line after the block reads `CI` back: the unset is the Install subshell's
+  // own, so the block's shell still holds the inherited value once it has run.
+  const { snap, out } = cut(t, `${lines}\necho "CI_AFTER_BLOCK=\${CI-unset}"`, { env: { ...ENV, CI: "true" } });
+  assert.match(out, /^SNAPSHOT_INSTALL_EXIT=0$/m, `the Install step did not run to exit 0 in the snapshot: ${out}`);
+  assert.ok(existsSync(join(snap, ".deps", "hook-marker")), "the Install step saw CI under the block, so the install that skips under CI skipped");
+  assert.match(out, /^CI_AFTER_BLOCK=true$/m, `the block unset CI outside the Install subshell — a later command in the block no longer sees it: ${out}`);
+
+  const control = scratch(t, "snapshot-repo-ci-control-");
+  const runInstall = (cwd, ci) => spawnSync("sh", ["-c", `mkdir -p .deps && ${install}`], { cwd, env: { ...ENV, CI: ci }, encoding: "utf8" });
+  const underCi = runInstall(control, "true");
+  assert.equal(underCi.status, 0, `the control's Install step did not run to exit 0, so it controls nothing: ${underCi.stderr}`);
+  assert.ok(!existsSync(join(control, ".deps", "hook-marker")), "the fixture's Install step writes its marker under CI=true, so the case above proves nothing");
+  const unset = scratch(t, "snapshot-repo-ci-unset-");
+  const withoutCi = runInstall(unset, undefined);
+  assert.equal(withoutCi.status, 0, `the Install step did not run to exit 0 with CI unset: ${withoutCi.stderr}`);
+  assert.ok(existsSync(join(unset, ".deps", "hook-marker")), "the fixture's Install step writes no marker even with CI unset, so the marker is not conditional on CI and the case above proves nothing");
+});
+
 // What the repository's own ignore rules leave untracked after the Install
 // step is a fact about the repository: the block names it on a line of its
 // own, which the snapshot agent reports as `untracked` and the payload carries
