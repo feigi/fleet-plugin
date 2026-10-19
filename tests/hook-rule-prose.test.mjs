@@ -124,8 +124,9 @@ test("the Recipe deriver is told the Install step runs with CI unset, so it spel
 });
 
 // The standalone claim runs the Install step by hand in the agent's own shell,
-// where the harness's `CI` is set and a bare `unset CI` does not reach the
-// command, so the step names `env -u CI` and nothing else as the way.
+// where the harness's `CI` is set and an `unset CI` there, bare or in a
+// subshell, can leave `CI` set for the command, so the step names `env -u CI`
+// and nothing else as the way.
 const claimStep = () => Pin.of(NEXT_TICKET, "the next-ticket skill").between("## 5. Claim it", "## 6. Size the ticket", "step 5").text;
 
 test("the next-ticket claim step runs the Install step as env -u CI sh -c, and only the Install step loses CI", () => {
@@ -142,7 +143,7 @@ test("the next-ticket claim step runs the Install step as env -u CI sh -c, and o
 });
 
 // Reject side: neither a bare `unset CI` nor the subshell form may come back,
-// since both are no-ops in the agent shell.
+// since in the agent shell either can leave `CI` set for the command.
 test("the next-ticket claim step never tells the agent to unset CI in its shell", () => {
   assert.doesNotMatch(claimStep(), /unset\s+(?:-v\s+)?CI\b/, "step 5 tells the agent to unset CI in its own shell");
   assert.doesNotMatch(claimStep(), /\(\s*unset\b/, "step 5 carries the subshell unset form");
