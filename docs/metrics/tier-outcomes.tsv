@@ -534,3 +534,11 @@
 2026-10-17	3429	3403		smol-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
 2026-10-17	3432	3086		slow-high	yes	no	2026-10-17 run: merged, closed its own ticket; diff audited for false prose, none found				
 2026-10-17	3399	3378		smol-high	yes	yes	2026-10-17 run: agent-test comment says a regular file named .worktrees is printed by the -type f term; the diff's own find prints it through the prune arm				
+2026-10-19	3533	3507		slow-high	yes	no	merged; no false-claim finding in review or fix-applier dispositions (controller did not audit prose independently)				
+2026-10-19	3534	3517		slow-high	yes	no	merged; no false-claim finding in review or fix-applier dispositions (controller did not audit prose independently)				
+2026-10-19	3535	3267		task-high	yes	no	merged; no false-claim finding in review or fix-applier dispositions (controller did not audit prose independently)				
+2026-10-19	3537	3291		smol-high	yes	no	merged; no false-claim finding in review or fix-applier dispositions (controller did not audit prose independently)				
+2026-10-19	3547	3536		smol-high	yes	no	merged; no false-claim finding in review or fix-applier dispositions (controller did not audit prose independently)				
+2026-10-19	3548	3430		slow-high	yes	no	merged; no false-claim finding in review or fix-applier dispositions (controller did not audit prose independently)				
+2026-10-19	3551	3428		task-high	yes	no	merged; no false-claim finding in review or fix-applier dispositions (controller did not audit prose independently)				
+2026-10-19	3553	3445		task-high	yes	no	merged; no false-claim finding in review or fix-applier dispositions (controller did not audit prose independently)				
