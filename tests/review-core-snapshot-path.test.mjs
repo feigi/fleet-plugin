@@ -583,8 +583,8 @@ test("the snapshot block mints a per-run destination, then extracts, probes, com
       "the Install step is no longer read off the Recipe cache through derive-testcmd.sh — pointed at the snapshot it refuses, since the snapshot holds no cache, and nothing else may guess the command",
     ],
     [
-      /\( cd "\$SNAP" && sh -c "\$INSTALL" \) >"\$RUN\/install\.log" 2>&1; echo SNAPSHOT_INSTALL_EXIT=\$\?/,
-      "the Install step no longer runs in the snapshot from its root with its exit printed — the shared test run measures a tree with none of its dependencies, and every review of a repo that has any reads red",
+      /\( cd "\$SNAP" && unset CI && sh -c "\$INSTALL" \) >"\$RUN\/install\.log" 2>&1; echo SNAPSHOT_INSTALL_EXIT=\$\?/,
+      "the Install step no longer runs in the snapshot from its root, with CI unset and its exit printed — the shared test run measures a tree with none of its dependencies, or one whose setup script skipped under the harness's CI, and every review of a repo that has any reads red",
     ],
     [
       /if \[ -d "\$SNAP\/\.git" \] && git -C "\$SNAP" status --porcelain --untracked-files=all >"\$RUN\/status\.txt"; then head -n 20 "\$RUN\/status\.txt" \| sed 's\/\^\/SNAPSHOT_UNTRACKED=\/'; echo SNAPSHOT_UNTRACKED_COUNT=/,

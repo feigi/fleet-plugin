@@ -110,7 +110,8 @@ _Avoid_: config, manifest, detection, project type
 
 **Install step**:
 The command that materialises the repository's dependencies in a fresh worktree.
-Usable only once it has run there and left every tracked file unchanged.
+Usable only once it has run there and left every tracked file unchanged. The fleet
+runs it with `CI` unset, so a setup script that skips under `CI` still installs.
 _Avoid_: install, setup, bootstrap
 
 **Check step**:
