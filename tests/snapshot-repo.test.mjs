@@ -1039,9 +1039,9 @@ test("the Install step runs with CI unset: an install that skips under CI still 
   const lines = render(SOURCES[0][1], worktree);
   const installLine = lines.split("\n").find((l) => l.includes('sh -c "$INSTALL"'));
   assert.ok(installLine, "the block has no line that runs the Install step");
-  assert.match(installLine, /\bunset CI\b[^\n]*sh -c "\$INSTALL"/, `the emitted Install line does not unset CI before it runs the Install step: ${installLine}`);
+  assert.match(installLine, /env -u CI sh -c "\$INSTALL"/, `the emitted Install line does not run the Install step with CI removed from its environment: ${installLine}`);
 
-  // A line after the block reads `CI` back: the unset is the Install subshell's
+  // A line after the block reads `CI` back: the `env -u` is the Install step's
   // own, so the block's shell still holds the inherited value once it has run.
   const { snap, out } = cut(t, `${lines}\necho "CI_AFTER_BLOCK=\${CI-unset}"`, { env: { ...ENV, CI: "true" } });
   assert.match(out, /^SNAPSHOT_INSTALL_EXIT=0$/m, `the Install step did not run to exit 0 in the snapshot: ${out}`);
