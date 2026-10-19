@@ -6,6 +6,7 @@ recommendation (`.fleet/scratch/` inside the checkout plus a recorded
 `mktemp -d`), which this ADR reverses. Builds on the partition rule recorded in
 `plugin/skills/run-team/references/isolation.md`, which it does not change.
 Amended by #3091: the workspace is the common git dir itself unless its parent's `.git` resolves to it; `.fleet/` and the scratch root follow.
+Amended by #3453: only an absent `<parent>/.git` is "not this parent"; one that exists but that `--resolve-git-dir` refuses (dangling, invalid, unreadable) fails the workspace closed, so a linked worktree never re-keys to the common dir.
 
 ## Context
 

@@ -210,16 +210,15 @@ test("with no timeoutMs a git that never answers is still killed, by the default
 });
 
 // `--git-common-dir` answers; the rule's second probe, `--resolve-git-dir`,
-// is the one that dies. A bare repository's common dir is not named `.git`,
-// so that probe runs. Both stores refuse, naming that probe — never the
-// common dir as a guessed workspace.
+// is the one that dies. A `.bare` project's common dir is not named `.git`
+// and the `.git` beside it exists, so that probe runs. Both stores refuse,
+// naming that probe — never the common dir as a guessed workspace.
 test("a step-2 probe that cannot answer leaves fleetFile() and scratchRoot() unresolvable, naming that probe", (t) => {
-  const top = tempDir(t, "fleet-dir-step2-");
-  const bare = join(top, "x.git");
-  git(top, "init", "-q", "--bare", bare);
+  const { top, proj } = bareProject(t, "fleet-dir-step2-");
+  const bare = join(proj, ".bare");
   const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
   const bin = shimGit(t, "fleet-dir-step2-bin-", `case "$*" in *--resolve-git-dir*) kill -9 $$ ;; esac\nexec '${realGit}' "$@"`);
-  const want = `could not resolve the workspace: could not resolve ${join(top, ".git")}: killed by SIGKILL`;
+  const want = `could not resolve the workspace: could not resolve ${join(proj, ".git")}: killed by SIGKILL`;
   withEnv({ PATH: `${bin}:${process.env.PATH}` }, () => {
     for (const [what, call] of [["fleetFile()", () => fleetFile(null, { cwd: bare })], ["scratchRoot()", () => scratchRoot({ cwd: bare, home: top })]]) {
       assert.throws(call, (e) => {
@@ -229,6 +228,122 @@ test("a step-2 probe that cannot answer leaves fleetFile() and scratchRoot() unr
       });
     }
   });
-  // The control: the real git answers, and the workspace is the bare dir.
-  assert.equal(fleetFile(null, { cwd: bare }), join(bare, ".fleet"));
+  // The control: the real git answers, and the workspace is the project.
+  assert.equal(fleetFile(null, { cwd: bare }), join(proj, ".fleet"));
+});
+
+// A `.bare` project: the git dir is `p/.bare`, `p/.git` is the gitfile naming
+// it, and two linked worktrees hang off it. The workspace of every one of
+// them, and of the project root, is `p`.
+function bareProject(t, prefix) {
+  const top = tempDir(t, prefix);
+  const src = repo(join(top, "src"));
+  const proj = join(top, "p");
+  mkdirSync(proj);
+  git(top, "clone", "-q", "--bare", src, join(proj, ".bare"));
+  writeFileSync(join(proj, ".git"), "gitdir: ./.bare\n");
+  const worktrees = ["w1", "w2"].map((name) => {
+    const wt = join(proj, name);
+    git(proj, "worktree", "add", "-q", "--detach", wt);
+    return wt;
+  });
+  return { top, proj, worktrees };
+}
+
+test("a .bare project gives the same stores from the root and from two linked worktrees", (t) => {
+  const { top, proj, worktrees } = bareProject(t, "fleet-dir-bare-");
+  const cwds = [proj, ...worktrees];
+  const files = cwds.map((cwd) => fleetFile(null, { cwd }));
+  assert.deepEqual(files, cwds.map(() => join(proj, ".fleet")), "every cwd of one project names the project's one .fleet/");
+  const roots = cwds.map((cwd) => scratchRoot({ cwd, home: top }));
+  assert.equal(new Set(roots).size, 1, `every cwd of one project names one scratch root, got ${roots}`);
+  assert.match(roots[0], /\/p-[0-9a-f]{8}$/, "the key is the project's folder, never `.bare`");
+});
+
+// What git itself says about the same refusal, asked the way the module asks.
+function gitsReason(cwd, gitfile) {
+  const r = spawnSync("git", ["rev-parse", "--resolve-git-dir", gitfile], { cwd, encoding: "utf8", env: gitEnv() });
+  assert.notEqual(r.status, 0, `test setup: git accepted ${gitfile}`);
+  return r.stderr.trim();
+}
+
+const BROKEN_GITFILES = [
+  ["dangling", (file) => writeFileSync(file, "gitdir: ./nonexistent\n")],
+  ["garbage", (file) => writeFileSync(file, "this is not a gitfile\n")],
+  ["chmod 000", (file) => chmodSync(file, 0o000)],
+];
+
+for (const [kind, breakIt] of BROKEN_GITFILES) {
+  // A root reads a file any mode away; there is no refusal to observe.
+  const skip = kind === "chmod 000" && process.getuid?.() === 0 ? "running as root" : false;
+  test(`a ${kind} p/.git fails a linked worktree's stores closed, never onto .bare`, { skip }, (t) => {
+    const { top, proj, worktrees } = bareProject(t, "fleet-dir-broken-");
+    breakIt(join(proj, ".git"));
+    const want = `could not resolve the workspace: could not resolve ${join(proj, ".git")}: ${gitsReason(worktrees[0], join(proj, ".git"))}`;
+    for (const wt of worktrees) {
+      for (const [what, call] of [["fleetFile()", () => fleetFile(null, { cwd: wt })], ["scratchRoot()", () => scratchRoot({ cwd: wt, home: top })]]) {
+        assert.throws(call, (e) => {
+          assert.ok(e instanceof FleetDirUnresolvable, `${what}: expected FleetDirUnresolvable, got ${e}`);
+          assert.equal(e.message, want, `${what}'s refusal`);
+          assert.doesNotMatch(e.message, /\.bare\/\.fleet/);
+          return true;
+        });
+      }
+    }
+  });
+}
+
+// The other half: what the guard must ACCEPT. Each layout below has a git dir
+// not named `.git`, and none has a `.git` beside it that git refuses.
+test("two bare repositories sharing a parent with no .git beside them each resolve to their own git dir", (t) => {
+  const top = tempDir(t, "fleet-dir-two-bare-");
+  const a = join(top, "a.git");
+  const b = join(top, "b.git");
+  git(top, "init", "-q", "--bare", a);
+  git(top, "init", "-q", "--bare", b);
+  assert.equal(fleetFile(null, { cwd: a }), join(a, ".fleet"));
+  assert.equal(fleetFile(null, { cwd: b }), join(b, ".fleet"));
+  assert.notEqual(scratchRoot({ cwd: a, home: top }), scratchRoot({ cwd: b, home: top }));
+});
+
+test("two submodules of one superproject each resolve to their own git dir", (t) => {
+  const top = tempDir(t, "fleet-dir-submodules-");
+  const sub = (name) => repo(join(top, "origin-" + name));
+  const [a, b] = [sub("a"), sub("b")];
+  const parent = repo(join(top, "parent"));
+  for (const [name, origin] of [["a", a], ["b", b]]) {
+    git(parent, "-c", "protocol.file.allow=always", "submodule", "add", "-q", origin, name);
+  }
+  const gitDirOf = (name) => realpathSync(join(parent, ".git", "modules", name));
+  const roots = new Set();
+  for (const name of ["a", "b"]) {
+    const cwd = join(parent, name);
+    assert.equal(fleetFile(null, { cwd }), join(gitDirOf(name), ".fleet"));
+    roots.add(scratchRoot({ cwd, home: top }));
+  }
+  assert.equal(roots.size, 2, "the two submodules keep disjoint scratch roots");
+});
+
+test("two --separate-git-dir siblings each resolve to their own git dir", (t) => {
+  const top = tempDir(t, "fleet-dir-separate-");
+  const roots = new Set();
+  for (const name of ["one", "two"]) {
+    const work = join(top, `w-${name}`);
+    const gitDir = join(top, `g-${name}`);
+    mkdirSync(work);
+    git(work, "init", "-q", "--separate-git-dir", gitDir);
+    assert.equal(fleetFile(null, { cwd: work }), join(gitDir, ".fleet"));
+    roots.add(scratchRoot({ cwd: work, home: top }));
+  }
+  assert.equal(roots.size, 2);
+});
+
+test("a plain repository with a nested clone keeps disjoint stores: git exits 0 naming another dir", (t) => {
+  const top = tempDir(t, "fleet-dir-nested-");
+  const q = repo(join(top, "Q"));
+  const nested = join(q, "foo.git");
+  git(top, "clone", "-q", "--bare", q, nested);
+  assert.equal(fleetFile(null, { cwd: q }), join(q, ".fleet"));
+  assert.equal(fleetFile(null, { cwd: nested }), join(nested, ".fleet"));
+  assert.notEqual(scratchRoot({ cwd: q, home: top }), scratchRoot({ cwd: nested, home: top }));
 });
