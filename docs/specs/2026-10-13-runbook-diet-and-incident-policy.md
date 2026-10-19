@@ -98,9 +98,10 @@ when the test landed, so the ceiling started at that size rounded up to the
 next 1,000 (187,000). The ceiling only ever comes down toward the target,
 and it is held tight: the file must be at most the ceiling and less than
 1,000 bytes under it, so a change that shrinks the file lowers the constant
-in the same change. The test's header records the ratio re-measured with
-`omp -p --mode json` after the rewrite. The test also asserts the file contains no
-line matching `^\s*>` and no occurrence of
+in the same change. The ratio is re-measured with `omp -p --mode json`
+when D2's rewrite compresses the file, and the test's header records it.
+The test also asserts the file contains no line matching `^\s*>` and no
+occurrence of
 `Measured` outside a `See references/` pointer. `references/*.md` have no
 budget. `review-and-fix.md` and `run-merge-bot.md` get their own ceilings
 at their post-spec-1 sizes plus ten percent, so they stop growing too.

@@ -95,7 +95,14 @@ test("the slack rule reds a trim that leaves the ceiling, and names the ceiling 
   assert.match(msg, /^plugin\/skills\/run-team\/SKILL\.md: 1001 bytes of slack/);
   assert.ok(msg.includes("ceiling 187000 bytes, current size 185999 bytes"), msg);
   assert.ok(msg.endsWith("lower the ceiling to 186000"), msg);
+  // Exactly SLACK under is already too much: the rule is "less than", not "at most".
+  assert.match(
+    budgetProblem(SKILL, 187_000, 186_000, true),
+    /^plugin\/skills\/run-team\/SKILL\.md: 1000 bytes of slack/,
+  );
   assert.equal(budgetProblem(SKILL, 187_000, 180_100, true).endsWith("lower the ceiling to 181000"), true);
+  // A size already on a 1,000 boundary is its own next ceiling, never one more.
+  assert.ok(budgetProblem(SKILL, 187_000, 185_000, true).endsWith("lower the ceiling to 185000"));
 });
 
 test("the over-ceiling rule reds padding past the ceiling, with the move-to-references message", () => {
@@ -114,6 +121,13 @@ test("the slack rule accepts what it must not refuse", () => {
   assert.equal(budgetProblem(SKILL, 187_000, 186_001, true), null);
   assert.equal(budgetProblem(SKILL, 186_000, 186_000, true), null);
   assert.equal(budgetProblem("plugin/commands/review-and-fix.md", 66_332, 1_000, false), null);
+});
+
+test(`the ${SKILL} entry in CEILINGS carries the slack rule`, () => {
+  // Fed through the real entry, so dropping its tight flag reds here and not
+  // only once the file happens to sit far enough under its ceiling.
+  const [rel, ceiling, tight] = CEILINGS.find(([r]) => r === SKILL);
+  assert.notEqual(budgetProblem(rel, ceiling, ceiling - SLACK, tight), null);
 });
 
 test(`${SKILL} carries no blockquote line and no Measured line without a See references/ pointer`, () => {
