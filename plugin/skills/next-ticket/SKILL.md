@@ -9,6 +9,8 @@ Suggest ready tickets, maintainer picks, mark in-progress, implement at depth ti
 
 **Never grab ticket unilaterally.** Labels and git state record only some claims; others live in maintainer's head or another agent session.
 
+**Never `--no-verify` on a commit you push, or on the push itself.** A failing hook is a finding to fix or report, not an obstacle to route around.
+
 ## 1. Candidates
 
 ```bash
@@ -103,7 +105,11 @@ gh pr edit --add-label <patch|minor|major>   # own command, own exit status
 finding in a file the PR changes, including lines you did not edit — CI checks
 whole files. Never edit a file the PR does not otherwise change: a finding there
 is a stale base, not your code, so rebase and re-run; still red → bail with that
-cause. No fix command is recorded; the Check step only reports.
+cause. No fix command is recorded; the Check step only reports. A hook that
+rewrites a file the PR does not otherwise change is the same stale base. Stage
+every change of your own before the commit that runs the hook, so every change
+still unstaged after it is the hook's alone: never stage those, `git restore --
+<that path>` for each such path alone, then rebase and re-run.
 
 **In a detached worktree, push by refspec.** `run-team`'s runbook re-creates an
 already-open PR's worktree with `git worktree add --detach <path> origin/<branch>`,
