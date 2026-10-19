@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { renderBrief } from "./support/render-brief.mjs";
-import { briefPaths, issueMetrics, outOfScope } from "../plugin/scripts/ticket-router.mjs";
+import { briefPaths, briefText, issueMetrics, outOfScope, strandedRuling } from "../plugin/scripts/ticket-router.mjs";
 import { chainHead, defang, diffHunks, headings, implRow, parseAnswer, pathHits, relabel, sectionsOf } from "../plugin/scripts/pull.mjs";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
@@ -346,6 +346,162 @@ test("the paths printed are the router's own extractor's, and it is exported", (
   assert.deepEqual(briefPaths(brief), ["a/b.mjs", "c.sh"]);
   const m = issueMetrics({ ...ISSUE, body: brief });
   assert.equal(m.paths, "2", "the router's own metric counts what the extractor finds");
+});
+
+// ── step 2: a ruling or triage comment newer than the brief ──────────────────
+
+const commentUrl = (n) => `https://github.com/o/r/issues/12#issuecomment-${n}`;
+const said = (n, body) => ({ author: { login: "m" }, body, url: commentUrl(n) });
+const BRIEF_COMMENT = "## Agent Brief — ruling\n\nChange `plugin/scripts/pull.mjs` only.\n";
+const RULING = "## Ruling — 2026-10-18 grilling\n\nBuild the narrow fix.\n";
+const TRIAGE_HEADINGS = ["## Triage Brief — 2026-10-01", "## Triage Notes", "## Triage — needs a decision"];
+// An Agent Brief whose heading is not the comment's first line, folding in a ruling.
+const PREAMBLE_BRIEF = "Folding the ruling into the brief.\n\n## Agent Brief\n\nChange `plugin/scripts/pull.mjs`.\n\n## Ruling — folded in\n\nDecided.\n";
+
+// Every case the check is written for: the comments, the comment it finds
+// stranded (null for none), and the brief `briefText` takes.
+const STRANDED_CASES = [
+  { name: "a Ruling after the last Agent Brief", comments: [said(1, BRIEF_COMMENT), said(2, RULING), said(3, "thanks")], stranded: 2, brief: BRIEF_COMMENT },
+  { name: "a Ruling and no Agent Brief", comments: [said(1, "## Ruling — first pass\n\nOlder.\n"), said(2, RULING)], stranded: 2, brief: ISSUE.body },
+  ...TRIAGE_HEADINGS.flatMap((h) => [
+    { name: `${h} after the last Agent Brief`, comments: [said(1, RULING), said(2, BRIEF_COMMENT), said(3, `${h}\n\nNotes.\n`)], stranded: 3, brief: BRIEF_COMMENT },
+    { name: `${h} and no Agent Brief`, comments: [said(1, `${h}\n\nNotes.\n`)], stranded: 1, brief: ISSUE.body },
+  ]),
+  { name: "an Agent Brief newer than every Ruling and Triage", comments: [said(1, RULING), said(2, "## Triage Notes\n\nx\n"), said(3, BRIEF_COMMENT)], stranded: null, brief: BRIEF_COMMENT },
+  { name: "one comment with an Agent Brief and a Ruling line", comments: [said(1, RULING), said(2, "## Agent Brief\n\nChange `plugin/scripts/pull.mjs`.\n\n## Ruling — folded in\n\nDecided.\n")], stranded: null, brief: "## Agent Brief\n\nChange `plugin/scripts/pull.mjs`.\n\n## Ruling — folded in\n\nDecided.\n" },
+  { name: "an Agent Brief heading below a preamble line, with a Ruling line", comments: [said(1, RULING), said(2, PREAMBLE_BRIEF)], stranded: null, brief: PREAMBLE_BRIEF },
+  { name: "no comments", comments: [], stranded: null, brief: ISSUE.body },
+  { name: "comments without a Ruling or Triage heading line", comments: [said(1, "### Ruling\n\nh3"), said(2, "**Ruling:** bold"), said(3, "see ## Ruling inline"), said(4, "## Amendment\n\nx\n")], stranded: null, brief: ISSUE.body },
+];
+const strandedCase = (name) => STRANDED_CASES.find((c) => c.name === name);
+const withComments = (comments) => ({ ...ISSUE, comments });
+
+// The refusal: one comment naming the stranded comment's heading line and
+// URL, `ready-for-agent` swapped for `ready-for-human`, and nothing else run.
+function assertStranded(f, heading, url) {
+  const r = f.next("--head", "12");
+  assert.equal(r.status, 1, r.stdout + r.err);
+  assert.match(r.stdout, /^LEFT #12: relabelled ready-for-human: stranded-ruling — next entry$/m);
+  assert.doesNotMatch(r.stdout, /QUESTION|BRIEF:/, "no brief printed, no question asked");
+  const comments = ghCalls(f, /^issue comment/);
+  assert.equal(comments.length, 1, "exactly one comment");
+  assert.deepEqual(comments[0].args.slice(0, 4), ["issue", "comment", "12", "--body"]);
+  const body = comments[0].args[4];
+  assert.ok(body.startsWith("*Relabelled by the fleet controller.*"), body);
+  assert.ok(body.includes(`"${heading}"`), `names the heading line: ${body}`);
+  assert.ok(body.includes(url), `names the URL: ${body}`);
+  assert.ok(body.includes("rename its heading to `## Agent Brief — ruling`"), body);
+  assert.ok(body.includes("or delete it"), body);
+  assert.ok(body.includes("restore `ready-for-agent`"), body);
+  assert.doesNotMatch(body, /^## /m, "the comment carries no heading line of its own");
+  assert.deepEqual(ghCalls(f, /^issue edit/).map((c) => c.args), [["issue", "edit", "12", "--remove-label", "ready-for-agent", "--add-label", "ready-for-human"]]);
+  assert.deepEqual(f.order().filter((n) => n !== "gh"), ["inflight"], "no staleness probe, no claim, no router");
+  assert.equal(f.ledgerRows().length, 0);
+  assert.equal(f.state().status, "left");
+}
+
+// The Pull as it runs today: the brief printed, every question asked, and a dispatch.
+function assertPullsAsToday(f, brief) {
+  const first = f.next("--head", "12");
+  assert.equal(first.status, 10, first.stdout + first.err);
+  assert.match(first.stdout, /^QUESTION staleness:/m);
+  const lines = first.stdout.split("\n");
+  const at = lines.indexOf("BRIEF:");
+  const want = brief.trim().split("\n");
+  assert.deepEqual(lines.slice(at + 1, at + 1 + want.length), want);
+  assert.equal(f.answer(12, "staleness", "done").status, 10);
+  assert.equal(f.answer(12, "decided", "decided").status, 10);
+  const end = f.answer(12, "collision", "clear");
+  assert.equal(end.status, 0, end.stdout + end.err);
+  assert.equal(ghCalls(f, /^issue (comment|edit)/).length, 0, "nothing posted, no label moved");
+  const render = f.calls("dispatch-prompt")[0].args;
+  assert.ok(render[render.indexOf("--brief") + 1].startsWith(`Title: ${ISSUE.title}\n\n${brief.trim()}`));
+  assert.equal(f.state().status, "dispatched");
+}
+
+test("a `## Ruling` comment newer than the last `## Agent Brief` comment is not dispatched: one comment naming it, relabelled ready-for-human", () => {
+  const c = strandedCase("a Ruling after the last Agent Brief");
+  assertStranded(fixture({ issue: withComments(c.comments) }), "## Ruling — 2026-10-18 grilling", commentUrl(2));
+});
+
+test("a `## Ruling` comment on a ticket with no `## Agent Brief` comment is not dispatched, and the newest one is named", () => {
+  const c = strandedCase("a Ruling and no Agent Brief");
+  const f = fixture({ issue: withComments(c.comments) });
+  assertStranded(f, "## Ruling — 2026-10-18 grilling", commentUrl(2));
+  assert.equal(ghCalls(f, /^issue comment/)[0].args[4].includes(commentUrl(1)), false, "the older ruling is not the one named");
+});
+
+test("a `## Triage Brief`, `## Triage Notes` or `## Triage —` comment newer than the last Agent Brief, or on a ticket with none, is not dispatched", () => {
+  for (const h of TRIAGE_HEADINGS) {
+    for (const name of [`${h} after the last Agent Brief`, `${h} and no Agent Brief`]) {
+      const c = strandedCase(name);
+      assertStranded(fixture({ issue: withComments(c.comments) }), h, commentUrl(c.stranded));
+    }
+  }
+});
+
+test("an `## Agent Brief — ruling` comment newer than every Ruling and Triage comment Pulls as it does without them", () => {
+  const c = strandedCase("an Agent Brief newer than every Ruling and Triage");
+  assertPullsAsToday(fixture({ issue: withComments(c.comments) }), c.brief);
+});
+
+test("a comment with both an `## Agent Brief` and a `## Ruling` line is the brief, not a stranded ruling, wherever in the comment its Agent Brief heading sits", () => {
+  for (const name of ["one comment with an Agent Brief and a Ruling line", "an Agent Brief heading below a preamble line, with a Ruling line"]) {
+    const c = strandedCase(name);
+    assertPullsAsToday(fixture({ issue: withComments(c.comments) }), c.brief);
+  }
+});
+
+test("a ticket with no comments, or only comments with no `## Ruling` or `## Triage` heading line, Pulls as it does today", () => {
+  for (const name of ["no comments", "comments without a Ruling or Triage heading line"]) {
+    const c = strandedCase(name);
+    assertPullsAsToday(fixture({ issue: withComments(c.comments) }), c.brief);
+  }
+});
+
+test("a stranded-ruling relabel whose edit failed after its comment landed is run again without a second comment", () => {
+  const c = strandedCase("a Ruling after the last Agent Brief");
+  const f = fixture({ issue: withComments(c.comments) });
+  f.ghRules([{ match: "^issue edit", exit: 1, err: "gh: rate limited" }]);
+  const r = f.next("--head", "12");
+  assert.equal(r.status, 2, r.stdout + r.err);
+  assert.match(r.err, /gh issue edit failed \(exit 1\) — the comment is posted/);
+  const posted = ghCalls(f, /^issue comment/)[0].args[4];
+  // The ticket as gh now reads it: the comment that landed is its newest.
+  f.issue = withComments([...c.comments, said(4, posted)]);
+  f.ghRules();
+  const again = f.next("--head", "12");
+  assert.equal(again.status, 1, again.stdout + again.err);
+  assert.match(again.stdout, /^LEFT #12: relabelled ready-for-human: stranded-ruling — next entry$/m);
+  assert.equal(ghCalls(f, /^issue comment/).length, 1, "no second comment");
+  assert.equal(ghCalls(f, /^issue edit/).length, 2);
+});
+
+test("a stranded comment `gh` printed with no url stops the Pull at exit 2: nothing posted, no label moved", () => {
+  const f = fixture({ issue: withComments([said(1, BRIEF_COMMENT), { author: { login: "m" }, body: RULING }]) });
+  const r = f.next("--head", "12");
+  assert.equal(r.status, 2, r.stdout + r.err);
+  assert.match(r.err, /gh issue view printed a ruling comment with no url: "## Ruling — 2026-10-18 grilling"/);
+  assert.equal(ghCalls(f, /^issue (comment|edit)/).length, 0, "nothing posted, no label moved");
+});
+
+test("strandedRuling reads a missing or non-array comments field, or a null comment, as no comment, and returns the heading line and url of the one it finds", () => {
+  assert.equal(strandedRuling({}), null);
+  assert.equal(strandedRuling({ comments: { length: 1, 0: said(1, RULING) } }), null, "an array-like object is not a comment list");
+  assert.equal(strandedRuling({ comments: [null] }), null);
+  assert.deepEqual(strandedRuling({ comments: [said(1, RULING), null] }), { heading: "## Ruling — 2026-10-18 grilling", url: commentUrl(1) });
+});
+
+test("briefText and the router's brief metrics are unchanged by a ruling or triage comment, in every case above", () => {
+  const isRuling = (x) => /^## (Ruling|Triage)/m.test(x.body) && !/^## Agent Brief/m.test(x.body);
+  for (const c of STRANDED_CASES) {
+    const issue = withComments(c.comments);
+    assert.equal(briefText(issue), c.brief, c.name);
+    const without = withComments(c.comments.filter((x) => !isRuling(x)));
+    assert.deepEqual(issueMetrics(issue, 0), { ...issueMetrics(without, 0), comments: String(c.comments.length) }, c.name);
+    const found = strandedRuling(issue);
+    assert.equal(found === null ? null : found.url, c.stranded === null ? null : commentUrl(c.stranded), c.name);
+  }
 });
 
 test("outOfScope: the section from its heading to the next heading of its level or above; none when absent", () => {
