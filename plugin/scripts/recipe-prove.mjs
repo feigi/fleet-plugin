@@ -112,8 +112,8 @@ const READER = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh"
 const ENV = gitEnv();
 // The Install step's own env: ENV without `CI`, and without anything else. A
 // setup script that skips under `CI` installs no git hooks in a fresh worktree,
-// and the omp agent shell sets `CI` (#3445). A copy, so ENV — what git, the
-// Check step and the Test entrypoint run under — keeps `CI`.
+// and the omp agent shell sets `CI`. A copy, so ENV — what git, the Check step
+// and the Test entrypoint run under — keeps `CI`.
 const { CI: _ci, ...INSTALL_ENV } = ENV;
 
 // The bound on each Recipe command. A command that never returns — a stalled

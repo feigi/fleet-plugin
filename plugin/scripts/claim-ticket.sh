@@ -309,9 +309,8 @@ else
   # that; any other non-zero is the install itself failing, reported as such.
   #
   # `unset CI`, in this subshell only: an install script that skips under `CI`
-  # installs no git hooks in a fresh worktree, and the omp agent shell sets `CI`
-  # (#3445). Only `CI` goes; git, the Check step and the Test entrypoint keep
-  # their env.
+  # installs no git hooks in a fresh worktree, and the omp agent shell sets `CI`.
+  # Only `CI` goes; git, the Check step and the Test entrypoint keep their env.
   irc=0
   (cd "$wt" && unset CI && sh -c "$install" >/dev/null 2>&1) || irc=$?
   case $irc in
