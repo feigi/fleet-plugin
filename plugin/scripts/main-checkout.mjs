@@ -446,10 +446,14 @@ export function describe(check, live = null) {
   switch (check.state) {
     case "clean":
       return null;
-    case "dirty":
-      // The HEAD entry is text, not a path: quoting it would blur it.
+    case "dirty": {
+      // The HEAD entry is text, not a path: quoting it would blur it, and
+      // ignoring cannot clear it, so only a path entry names the ignore remedy.
+      const hasPath = check.changed.some((p) => p !== check.headMove);
       return `MAIN-CHECKOUT-DIRTY ${check.changed.map((p) => (p === check.headMove ? p : shown(p))).join(" ")} — changed since the run's baseline${members}`
-        + ` — dispatch held: resolve the stray paths FIRST, then re-baseline with ${RECORD_COMMAND} (it overwrites, it does not compare)`;
+        + ` — dispatch held: resolve the stray paths FIRST, then re-baseline with ${RECORD_COMMAND} (it overwrites, it does not compare)`
+        + (hasPath ? " — or the maintainer may instead ignore the paths, in .git/info/exclude or the global excludes file: an ignored path clears on the next check, with no re-baseline" : "");
+    }
     case "absent":
       return `MAIN-CHECKOUT-NO-BASELINE no baseline at ${check.baseline} — dispatch held: record it at run start with ${RECORD_COMMAND}`;
     default:

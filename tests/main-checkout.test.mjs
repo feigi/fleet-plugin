@@ -508,6 +508,44 @@ test("CLI: --record then --check, with the exit codes the header names", (t) => 
   assert.match(r.stderr, /--recrod/, "a misspelt flag must be refused by name, never run as a check");
 });
 
+// The maintainer's "ignore it" remedy: an ignored path never reaches `git
+// status --porcelain`, so an exclude added while the hold is active clears it
+// on the next check, with no re-baseline. The fixture ignores `.fleet/` only.
+test("CLI: a stray path the maintainer excludes clears on the next check, with no re-record", (t) => {
+  const dir = repo(t);
+  const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: "utf8" });
+  let r = run("--record");
+  assert.equal(r.status, 0, r.stderr);
+  mkdirSync(join(dir, ".scratch-x"));
+  writeFileSync(join(dir, ".scratch-x", "a"), "x\n");
+  r = run("--check");
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^MAIN-CHECKOUT-DIRTY \.scratch-x\/a /m);
+  mkdirSync(join(dir, ".git", "info"), { recursive: true });
+  appendFileSync(join(dir, ".git", "info", "exclude"), ".scratch-x/\n");
+  r = run("--check");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^main-checkout: clean against /);
+});
+
+test("CLI: the same exclude in a global excludes file clears the hold with no re-record", (t) => {
+  const dir = repo(t);
+  const globalDir = realpathSync(mkdtempSync(join(tmpdir(), "main-checkout-global-")));
+  t.after(() => rmSync(globalDir, { recursive: true, force: true }));
+  const excludes = join(globalDir, "ignore");
+  git(dir, "config", "core.excludesFile", excludes);
+  const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: "utf8" });
+  let r = run("--record");
+  assert.equal(r.status, 0, r.stderr);
+  mkdirSync(join(dir, ".scratch-x"));
+  writeFileSync(join(dir, ".scratch-x", "a"), "x\n");
+  r = run("--check");
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  writeFileSync(excludes, ".scratch-x/\n");
+  r = run("--check");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
 // ---------------------------------------------------------------------------
 // HEAD is part of the protected set: the symbolic ref and the commit.
 // ---------------------------------------------------------------------------
