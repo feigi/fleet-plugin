@@ -90,6 +90,24 @@ export function briefText(issue) {
   return String(issue.body ?? "");
 }
 
+/** A ruling or triage heading line: what a decision posted outside an `## Agent Brief` comment is headed with. */
+export const RULING_HEADING = /^## (?:Ruling|Triage).*$/m;
+
+/**
+ * The newest comment with a ruling or triage heading line and no `## Agent
+ * Brief` heading line that comes after the last comment `briefText` takes the
+ * brief from, or after none when there is no such comment; null when none is.
+ */
+export function strandedRuling(issue) {
+  const comments = Array.isArray(issue.comments) ? issue.comments : [];
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const body = String(comments[i]?.body ?? "");
+    if (/^## Agent Brief/m.test(body)) return null;
+    if (RULING_HEADING.test(body)) return comments[i];
+  }
+  return null;
+}
+
 /** The line span `[at, end)` of `lines`' `Out of scope` section, heading to the next heading of its level or above; null when there is none. */
 function outOfScopeSpan(lines) {
   const at = lines.findIndex((l) => /^#{1,6}\s*out of scope\b/i.test(l));

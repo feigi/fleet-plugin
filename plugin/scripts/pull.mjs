@@ -54,9 +54,14 @@
 //   1  inflight   `inflight.sh <N>`: anything but exit 0 is taken.
 //   2  issue      `gh issue view <N> --json title,body,comments,labels,createdAt`
 //                 written to `<scratch>/impl-<N>/issue.json`. Without the
-//                 `ready-for-agent` label the ticket is gone. The distilled
-//                 brief and the paths the router's extractor finds in it are
-//                 printed.
+//                 `ready-for-agent` label the ticket is gone. A comment with a
+//                 `## Ruling` or `## Triage` heading line and no `## Agent
+//                 Brief` one, newer than the last comment that has one or on a
+//                 ticket with none, is a stranded ruling: the newest is named,
+//                 with its URL, in a comment, and the label replaces
+//                 `ready-for-agent` with `ready-for-human`, as a Q2 cause does.
+//                 Otherwise the distilled brief and the paths the router's
+//                 extractor finds in it are printed.
 //   3  Q1 staleness   `gone` / `present` (each with `--path <p>` and the string
 //                 as the text) run `staleness.mjs --path <p> --gone|--present --
 //                 <string>`; `none <why>` and `done` end the question. Exit 1
@@ -127,7 +132,7 @@ import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { memberTokens, premisesOf, tierValues } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
-import { briefPaths, briefText, outOfScope } from "./ticket-router.mjs";
+import { briefPaths, briefText, outOfScope, RULING_HEADING, strandedRuling } from "./ticket-router.mjs";
 
 const NAME = "pull";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -169,8 +174,18 @@ function handsParts(text) {
   return { cause: null, line: "" };
 }
 
-/** The comment, and the label that replaces `ready-for-agent`, for a Q2 answer other than `decided`. */
+/**
+ * The comment, and the label that replaces `ready-for-agent`, for a Q2 answer
+ * other than `decided` — or, for `stranded-ruling`, for a ruling or triage
+ * comment newer than the brief, `text` naming its heading line and its URL.
+ */
 export function relabel(token, text) {
+  if (token === "stranded-ruling") {
+    return {
+      label: HUMAN,
+      comment: `${RELABELLED} a ruling or triage comment is newer than the brief, and the Pull does not read it: ${text}. To make it the brief, rename its heading to \`## Agent Brief — ruling\` and drop anything that is not decided scope, or delete it; then restore \`${READY}\`.`,
+    };
+  }
   if (token === "needs-triage") {
     return {
       label: TRIAGE,
@@ -802,6 +817,8 @@ class Pull {
       return this.stop(`cannot write ${this.p.issue}: ${e.message}`);
     }
     if (!issue.labels.some((l) => l?.name === READY)) return this.leave("relabelled elsewhere");
+    const stranded = strandedRuling(issue);
+    if (stranded !== null) return this.relabelled("stranded-ruling", `"${RULING_HEADING.exec(stranded.body)[0]}" ${stranded.url}`);
     this.log.push(...this.brief());
     st.stage = "staleness";
     return null;
@@ -1078,9 +1095,15 @@ class Pull {
       st.stage = "collision";
       return null;
     }
+    return this.relabelled(token, text);
+  }
+
+  // Posts the cause's comment and swaps `ready-for-agent` for its label. One
+  // comment per cause: an edit that failed after its comment landed is run
+  // again without a second comment.
+  relabelled(token, text) {
+    const { st } = this;
     const { label, comment } = relabel(token, text);
-    // One comment per cause: an edit that failed after its comment landed is
-    // answered again without a second comment.
     if (st.commented !== comment) {
       const c = this.gh("relabel", ["issue", "comment", String(st.ticket), "--body", comment]);
       if (c.status !== 0) return this.stop(withText(`gh issue comment failed (${c.how})`, c));

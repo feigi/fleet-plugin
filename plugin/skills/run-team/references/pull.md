@@ -52,6 +52,20 @@ terminating in exactly one dispatch or an empty shortlist:
    scope` sequencing wherever that section is found. Then judge **decided?**
    — never size.
 
+   **A ruling the brief does not carry stops the Pull first.** The brief is
+   the last `## Agent Brief` comment, else the issue body, so a decision posted
+   under another heading never reaches any question the Pull asks. A comment
+   with a `## Ruling` or `## Triage` heading line and no `## Agent Brief`
+   heading line that is newer than the last `## Agent Brief` comment, or on a
+   ticket with none, is a stranded ruling. `pull.mjs` checks for one right
+   after the `ready-for-agent` label check, before printing the brief or
+   asking anything. On a hit it posts one comment naming the newest stranded
+   comment's heading line and URL, which says to rename that heading to
+   `## Agent Brief — ruling` and drop anything that is not decided scope, or
+   to delete the comment, then restore `ready-for-agent`. It then swaps
+   `ready-for-agent` for `ready-for-human` and leaves with `LEFT #N:
+   relabelled ready-for-human: stranded-ruling`.
+
    **Still live?** A backlog ticket's claims rot. Before `decided?`, settle the
    ticket's central claim against `origin/main` — never the working tree, never
    the ticket's own line numbers, which drift. One `git show origin/main:<file>`
