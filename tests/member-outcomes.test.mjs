@@ -540,8 +540,8 @@ test("importing the module never runs the CLI, even from a file whose name ends 
 
 test("the documented bare form works — no --file needed", () => {
   // `member-outcomes.mjs <session-dir>` is the form the spec, the backfill loop
-  // and run-team's phase-3 instruction all use. It exited 2 for every input
-  // until the filter stopped treating `fileIdx + 1` as a real index when
+  // and run-team's close-out scrape instruction all use. It exited 2 for every
+  // input until the filter stopped treating `fileIdx + 1` as a real index when
   // --file is absent.
   const dir = fixture([["impl-580", [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")]]]);
   const cwd = tempDir("mo-cwd-");

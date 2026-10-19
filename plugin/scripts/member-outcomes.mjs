@@ -131,7 +131,7 @@ const field = (c) => FIELD[c] ?? c;
 // member's stem is derived from its name and so repeats across sessions.
 const key = (r) => `${r.session}\0${r.agent}`;
 
-// Replace-by-key, not append. This is what makes a phase-3 re-run and a full
+// Replace-by-key, not append. This is what makes a close-out re-run and a full
 // regeneration both safe, and it is the reason no backfill-only code path is
 // needed: the idempotency backfill wants is the idempotency a re-run wants.
 export function mergeRows(existing, incoming) {
@@ -196,7 +196,7 @@ if (isCLI(import.meta.url)) {
   // fileIdx is -1 when --file is absent, which makes fileIdx + 1 equal 0 — the
   // FIRST positional argument, not a real index into argv. Without the
   // fileIdx < 0 guard this filters out the session dir itself, and the bare
-  // form (the one the spec, the backfill loop and run-team's phase-3
+  // form (the one the spec, the backfill loop and run-team's close-out scrape
   // instruction all use) always exits 2. `--scratch`'s value is skipped the
   // same way.
   const valueOf = (idx) => (i) => idx >= 0 && i === idx + 1;
