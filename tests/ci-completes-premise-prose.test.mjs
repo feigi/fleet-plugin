@@ -46,7 +46,7 @@ const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"),
 // copy of the false premise surviving in either file is the whole defect back.
 const ALL_PROSE = `${RUN_TEAM.text}\n${REVIEW_AND_FIX}`;
 
-// One bullet each. The phase-3 loop is a flat list of `- **...**` items and
+// One bullet each. The finisher gate's **The tests** is a flat list of `- **...**` items and
 // `finisher`, `dispatch`, `push` and `report` all recur through every one of
 // them, so a slice spanning two bullets is satisfied by either — which is
 // exactly the false green the pair-coherence test below has to deny.

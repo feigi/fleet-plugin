@@ -17,8 +17,8 @@
 //
 // WHERE IT GOES, and that is half the ticket. The rule sits in `## Failure
 // handling`, between the table row that acts on a dead member and the
-// Settle/liveness pair that says how to ask each harness — not in Phase 3's
-// narrative, which is about reacting to artifacts rather than judging death.
+// Settle/liveness pair that says how to ask each harness — not in the wake
+// table's narrative, which is about reacting to artifacts rather than judging death.
 // The killed row itself carries the gate in one clause, because a controller
 // scanning the table acts off the row. The clause's paragraph, with the
 // measurement that produced it, moved to references/failure-handling.md;

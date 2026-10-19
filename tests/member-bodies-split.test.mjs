@@ -153,6 +153,13 @@ const DUTY3_POINTER_RETIRED = ["Duty 3's script decides whether the label is on,
 // worktree holding the branch, so the conflict kind's bare refspec push is
 // replaced, not lost.
 const PUSH_HELPER_RETIRED = ["Run `<testCmd>` from the worktree before you push, then push with `git push origin HEAD:<branch>`."];
+// `## Phase 3 — event loop` left run-team's SKILL.md (#3540), so the merge
+// bot's copy of the shell traps names **Own the CI waits**, the section that
+// now holds the watcher block and the probe rule, instead of Phase 3.
+const PHASE_3_POINTERS_RETIRED = [
+  "The inline `$(printf '%s\\n' \"$prs\")` form splits correctly too and is what Phase 3's block uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can.",
+  "**A probe that could not look emits an event; it never `continue`s.** Stated in full at *A probe that cannot read is a transition event, not silence* in Phase 3, and it binds every watcher in this file rather than that one block: the third value beside pass and fail is what turns a broken loop into a loud failure instead of a quiet one.",
+];
 // The placeholder each argument fills, per role — the arguments are values no
 // other argument shares, so a swapped substitution cannot pass.
 const PAIRS = [
@@ -171,7 +178,7 @@ const PAIRS = [
   { role: "finisher", kind: "repair", fixture: "finisher-repair.md", retired: DUTY3_POINTER_RETIRED,
     args: { worktree: "/abs/wt-fin-r", pin: PIN, pr: "3296", testCmd: "TESTCMD-5", scratch: "/abs/scratch-fin-r" },
     fills: { "abs-path": "worktree", "your dispatch pin": "pin", M: "pr", testCmd: "testCmd", scratch: "scratch" } },
-  { role: "merge-bot", kind: null, fixture: "merge-bot.md",
+  { role: "merge-bot", kind: null, fixture: "merge-bot.md", retired: PHASE_3_POINTERS_RETIRED,
     args: { n: "17", scratch: "/abs/scratch-bot" },
     fills: { n: "n", scratch: "scratch" } },
 ];

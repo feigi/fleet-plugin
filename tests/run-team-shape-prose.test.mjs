@@ -17,7 +17,9 @@
 //     whole SKILL.md as it read before the rewrite, owned by this test, and
 //     every sentence of it is found in SKILL.md or across references/ as often
 //     as it was said, but for the sentences CHANGED and DELETED below, each
-//     named with what stands in its place;
+//     named with what stands in its place, a CHANGED sentence's old half said
+//     nowhere now and a DELETED one said fewer times than the fixture said it,
+//     by at least the times it is listed;
 //   - the three blocks the rewrite moved whole — Shell traps, the invariants'
 //     full statements, the tick rows' full text — are found across references/
 //     as often as they were said, and not at all in SKILL.md.
@@ -390,7 +392,7 @@ const CHANGED = [
   ],
   [
     "Stated in full at *A probe that cannot read is a transition event, not silence* in Phase 3, and it binds every watcher in this file rather than that one block: the third value beside pass and fail is what turns a broken loop into a loud failure instead of a quiet one.",
-    "Stated in full at *A probe that cannot read is a transition event, not silence* in Phase 3, and it binds every watcher in SKILL.md rather than that one block: the third value beside pass and fail is what turns a broken loop into a loud failure instead of a quiet one."
+    "Stated in full at *A probe that cannot read is a transition event, not silence* under **Own the CI waits**, and it binds every watcher in SKILL.md rather than that one block: the third value beside pass and fail is what turns a broken loop into a loud failure instead of a quiet one."
   ],
   [
     "Listed first because it is the only wake with no trigger — every other row above arrives; this one is the absence of one.",
@@ -594,6 +596,24 @@ test("every sentence of the pre-rewrite SKILL.md is in SKILL.md or across refere
   const missing = CHANGED.filter(([, to]) => (now.get(to) ?? 0) < 1).map(([from]) => from);
   assert.deepEqual(missing, [], "changed sentences whose replacement is not in SKILL.md or across references/");
   for (const [from] of [...CHANGED, ...DELETED]) assert.ok(was.has(from), `a changed or deleted sentence the fixture never said: ${from}`);
+});
+
+// The changed and the deleted are only excused above, which says nothing about
+// one coming back. A changed sentence's pre-rewrite half is said nowhere now. A
+// deleted sentence is said at most as often as the fixture said it, less once
+// for each time it is listed deleted, so a pointer dropped at one site while
+// other sites keep saying it still counts.
+test("no changed sentence's pre-rewrite half is in SKILL.md or across references/, and no deleted sentence is said as often as before", () => {
+  const was = oldSentences();
+  const now = newSentences();
+  const back = [];
+  for (const [from] of CHANGED) if ((now.get(from) ?? 0) > 0) back.push(`changed, still said ${now.get(from)}×: ${from}`);
+  const listed = counted(DELETED.map(([from]) => from));
+  for (const [from, k] of listed) {
+    const allowed = (was.get(from) ?? 0) - k;
+    if ((now.get(from) ?? 0) > allowed) back.push(`deleted, said ${now.get(from)}× (fixture ${was.get(from)}×, listed ${k}×): ${from}`);
+  }
+  assert.deepEqual(back, [], "changed or deleted sentences said again");
 });
 
 // --- the three blocks that moved whole ----------------------------------------

@@ -63,6 +63,18 @@
     [
       "`ci=<run-id>:<attempt>:<conclusion>` and `held-behind:#<lower>` are row tokens the same way (Phase 3), and so is `conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md` step 1), or by you off the tick's `CONFLICT` line, naming the row's own PR.",
       "`ci=<run-id>:<attempt>:<conclusion>` and `held-behind:#<lower>` are row tokens the same way, and so is `conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md` step 1), or by you off the tick's `CONFLICT` line, naming the row's own PR."
+    ],
+    [
+      "Phase 3's monitor paragraph points here instead of restating any of it.",
+      "**Own the CI waits**'s monitor paragraph points here instead of restating any of it."
+    ],
+    [
+      "The merge bot's agent body is the one place this block is copied whole (see **Merge bot**); the other deliberate copy is named at the end.",
+      "The merge bot's agent body is the one place this block is copied whole (see **The merge bot**); the other deliberate copy is named at the end."
+    ],
+    [
+      "The inline `$(printf '%s\\n' \"$prs\")` form splits correctly too and is what Phase 3's block uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can.",
+      "The inline `$(printf '%s\\n' \"$prs\")` form splits correctly too and is what the watcher block under **Own the CI waits** uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can."
     ]
   ],
   "deleted": [
@@ -457,6 +469,14 @@
     [
       "Any one of them failing → it touches nothing and names the blocker.",
       "release-ticket.sh's header and tests/release-ticket.test.mjs, and references/reaping.md's **Why reap declines a claim that was never dispatched**; the Failure handling row for a claim abandoned mid-run keeps the controller's part"
+    ],
+    [
+      "The rest show *stale green* until something re-triggers, then flip to `rebase-check: FAILURE` with the slow jobs skipped.",
+      "references/ci-and-staleness.md's **Stale green: every merge invalidates every other open PR**, which says the rest show stale green, flip to `rebase-check: FAILURE`, and that one rebase per PR at merge time is enough"
+    ],
+    [
+      "The bot establishes currency once, when the PR is the merge candidate; requiring it earlier costs a full CI cycle per sibling merge.",
+      "references/ci-and-staleness.md's **Stale green: every merge invalidates every other open PR**, which says the rest show stale green, flip to `rebase-check: FAILURE`, and that one rebase per PR at merge time is enough"
     ]
   ]
 }

@@ -16,7 +16,7 @@ import { pipeline, parallel, ARGS, SNAP, review, finding, vote, scriptedHost } f
 // runs, and no specialist's report ever has to be relayed or retrieved by hand.
 //
 // All of that rots silently. A default demoted back to a preference still reads
-// as documented; relay prose left in the Phase 3 event loop reads as an
+// as documented; relay prose left in the wake table reads as an
 // obligation on every run, on a path where no relay can ever occur.
 // Neither shows up as an error.
 // THE CEILING EVERY PIN IN THIS FILE SHARES. These prove a phrase is PRESENT.

@@ -212,7 +212,8 @@ test("the CI-terminal wake runs the tick", () => {
 
 // The queue-depth table's own slice, ending at the `/triage` note that follows
 // it. Anchored to the section heading instead, the pointer would be satisfied
-// by the Phase 3 block above, which lives in the same file.
+// by the section's review-backlog bullets, which name `fleet-tick.mjs` before
+// the table does.
 const queueDepthTable = () =>
   RUN_TEAM.between("**Do not re-derive this by hand", "`/triage` is user-invoked only", "queue-depth table").text;
 

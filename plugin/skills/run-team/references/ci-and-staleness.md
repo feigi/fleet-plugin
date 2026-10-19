@@ -96,12 +96,6 @@ time enough: reviewers label on own green without requiring currency, and
 requiring it earlier costs full CI cycle per sibling merge — six wasted cycles
 in one run. Any behind-count you hand bot expired on arrival.
 
-The rest show *stale
-green* until something re-triggers, then flip to `rebase-check: FAILURE` with the
-slow jobs skipped. The bot establishes currency once, when the
-PR is the merge candidate; requiring it earlier costs a full CI cycle per sibling
-merge.
-
 ## Beat when there is nothing to do, and never end your turn on a drained queue
 
 **Beat when there is nothing to do, and never end your turn on a drained

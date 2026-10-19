@@ -73,6 +73,7 @@ const CORRECTIONS = [
     "so `git push origin \"HEAD:$(git branch --show-current)\"` exits 128 on `fatal: invalid refspec 'HEAD:'`.",
     "so `~/.fleet/bin/fleet-run push-sync.mjs --branch \"$(git branch --show-current)\"` is handed an empty branch and exits 2 before pushing anything.",
   ],
+  ["is what Phase 3's block uses", "is what the watcher block under **Own the CI waits** uses"],
 ];
 
 // The removed text as its blocks — paragraphs, a table, a code block — each
@@ -123,7 +124,7 @@ const MOVED = [
   ["member-lifecycle.md", "A member runs its test suite in the foreground and blocks on it", "**A member runs its test suite in the foreground and blocks on it.**", "Backgrounding a suite and polling for it makes the member's own progress depend on a wake-up nothing in the fleet guarantees,"],
   ["shell-traps.md", "zsh splits a command substitution, never an unquoted parameter expansion", "**zsh word-splits an unquoted command substitution's result; it does NOT split an unquoted parameter expansion.**", "That one difference is the whole rule, and the hazard is the **assigned-variable** form, never `$(…)`."],
   ["shell-traps.md", "Word the rule against the first row", "**Word the rule against the first row.**", "A warning spelled *never `for x in $(…)`* names the safe form as the hazard,"],
-  ["shell-traps.md", "The inline `$(printf …)` form splits on every whitespace character", "The inline `$(printf '%s\\n' \"$prs\")` form splits correctly too and is what Phase 3's block uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can.", "Measured on a two-line list whose first value is `two words`:"],
+  ["shell-traps.md", "The inline `$(printf …)` form splits on every whitespace character", "it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can.", "Measured on a two-line list whose first value is `two words`:"],
   ["shell-traps.md", "`</dev/null` every command inside a `while read` loop", "**`</dev/null` every command inside a `while read` loop.**", "The loop's stdin *is* the list, and any inner command that reads stdin eats the rest of it."],
   ["shell-traps.md", "`status` is a read-only variable in zsh", "**`status` is a READ-ONLY variable in zsh**, an alias for `$?`.", "So the obvious bash idiom for reading the payload — `status=$(jq -r '.status' ci.json)` — aborts with `read-only variable: status`.", "Name the variable anything else (`ci_status`)."],
   ["pull.md", "Every 5th Pull goes at an exploration cell", "**Every 5th Pull by ledger count goes at an exploration cell.**", "Count the `impl-` rows in `.fleet/ledger.md` at Pull time;"],
@@ -145,7 +146,7 @@ const MOVED = [
   // The finisher's duty-2 rules left SKILL.md with its event loop (#3540): each
   // is stated in agents/fleet-finisher.agent.md, the finisher's system prompt,
   // and pinned there by finisher-own-tree-prose and dedupe-guard-prose, so
-  // SKILL.md keeps no clause of them, only phase 2's pointer to this file.
+  // SKILL.md keeps no clause of them, only phase 2's pointer to references/finisher.md.
   ["finisher.md", "Duty 2: every deferral, and every claimed APPLY, has a home that outlives the merge", null, "The test is a durable home, not a tracker number:"],
   ["finisher.md", "`origin/main...HEAD` is right for the positive check and wrong for a negative one", null, "Measured on one PR: a controller wrote \"neither document was touched\" against `origin/main...HEAD`"],
   ["finisher.md", "Whatever you verify by running, run in a tree nobody else owns", null, "Measured once: a finisher was inside that worktree at the instant the fix-applier announced one more clause to land,"],
