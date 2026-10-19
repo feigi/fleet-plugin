@@ -159,18 +159,42 @@ test("an ambient GIT_DIR naming another repository does not move the step-2 prob
   // whatever GIT_DIR names, so the scrub in the probe is defensive. This pins
   // the answer a `.bare` layout gets while GIT_DIR points elsewhere.
   const top = mkdtempSync(join(tmpdir(), "git-env-ambient-"));
-  const proj = join(top, "p");
-  mkdirSync(proj);
-  execFileSync("git", ["init", "-q", "--bare", join(proj, ".bare")], { stdio: "pipe" });
-  writeFileSync(join(proj, ".git"), "gitdir: ./.bare\n");
-  execFileSync("git", ["init", "-q", "--bare", join(top, "other.git")], { stdio: "pipe" });
-  const had = "GIT_DIR" in process.env;
-  const prev = process.env.GIT_DIR;
-  process.env.GIT_DIR = join(top, "other.git");
   try {
-    assert.deepEqual(resolveWorkspace(join(proj, ".bare"), proj), { dir: proj, gitDir: false });
+    const proj = join(top, "p");
+    mkdirSync(proj);
+    execFileSync("git", ["init", "-q", "--bare", join(proj, ".bare")], { stdio: "pipe" });
+    writeFileSync(join(proj, ".git"), "gitdir: ./.bare\n");
+    execFileSync("git", ["init", "-q", "--bare", join(top, "other.git")], { stdio: "pipe" });
+    const had = "GIT_DIR" in process.env;
+    const prev = process.env.GIT_DIR;
+    process.env.GIT_DIR = join(top, "other.git");
+    try {
+      assert.deepEqual(resolveWorkspace(join(proj, ".bare"), proj), { dir: proj, gitDir: false });
+    } finally {
+      if (had) process.env.GIT_DIR = prev; else delete process.env.GIT_DIR;
+    }
   } finally {
-    if (had) process.env.GIT_DIR = prev; else delete process.env.GIT_DIR;
+    rmSync(top, { recursive: true, force: true });
+  }
+});
+
+// A `.bare` project reached through a symlinked parent that the test spells
+// itself, so step 2's probe is pinned whatever `os.tmpdir()` is. Handed the
+// spelled gitDir instead of its realpath, the probe's answer never matches
+// and the workspace re-keys to the spelled `.bare` with `gitDir: true`.
+test("a .bare project reached through a symlinked parent resolves to the spelled route, canonical only on request", () => {
+  const top = realpathSync(mkdtempSync(join(tmpdir(), "git-env-link-")));
+  try {
+    const proj = join(top, "p");
+    mkdirSync(proj);
+    execFileSync("git", ["init", "-q", "--bare", join(proj, ".bare")], { stdio: "pipe", env: gitEnv() });
+    writeFileSync(join(proj, ".git"), "gitdir: ./.bare\n");
+    const link = join(top, "link");
+    symlinkSync(proj, link);
+    assert.deepEqual(resolveWorkspace(join(link, ".bare"), link), { dir: link, gitDir: false });
+    assert.deepEqual(resolveWorkspace(join(link, ".bare"), link, { canonicalise: true }), { dir: proj, gitDir: false });
+  } finally {
+    rmSync(top, { recursive: true, force: true });
   }
 });
 
