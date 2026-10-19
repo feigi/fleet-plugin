@@ -16,16 +16,17 @@ import { EVENT_HEADER } from "./support/fleet-event-header.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+const CI_AND_STALENESS = Pin.file(join(REPO, "skills", "run-team", "references", "ci-and-staleness.md"));
 
 // SLICE SIZE is what does the anchoring. A regex over a whole section is
 // satisfied by incidental prose elsewhere in it, and an unbounded slice runs to
 // EOF where the red-flag list restates half of this vocabulary — enough to keep
 // every assertion below green with the section deleted outright.
-// The tick instruction only, ending where the next standing instruction
-// begins. Widened to the whole Phase 3 loop it would be satisfied by the wake
-// bullets' own mentions of the tick, which say nothing about the script.
+// The tick instruction only, ending where the tick's list of rows begins.
+// Widened to the wake table it would be satisfied by the wake bullets' own
+// mentions of the tick, which say nothing about the script.
 const tickBlock = () =>
-  RUN_TEAM.between("**In one line, every wake is one `fleet-event.mjs` call, which ends in the tick.**", "**Own the CI waits.**", "run-team tick block").text;
+  RUN_TEAM.between("**In one line, every wake is one `fleet-event.mjs` call, which ends in the tick.**", "It prints `actual/target`", "run-team tick block").text;
 
 // The six counts a caller used to state (#1803 deleted them, spec 2026-09-24
 // § 6 §1). Any one of them back in the block is a controller told to supply a
@@ -73,16 +74,17 @@ test("the tick block says the tick reads the run itself, and nobody states a cou
   assert.doesNotMatch(s, /refuses rather than\s+defaulting them/, "the block still says the live counts are the controller's to state");
 });
 
-// The rule itself, bounded to its own paragraph.
-const inFlightPair = () =>
-  RUN_TEAM.paragraph("**`--in-flight <B>`**", "run-team --in-flight rule", "**Why every wake.** A merge cascade is a firehose").text;
+// The rule lives in two retained places: the tick block passes `--in-flight`
+// only when `$ARGUMENTS` set it, and phase 2's tier check says omp's semaphore
+// is not the bound and its line is a notice.
+const tierRolesParagraph = () =>
+  RUN_TEAM.between("`task.maxConcurrency` is not the bound", "\n\n", "run-team phase 2 maxConcurrency rule").text;
 
 test("--in-flight is the run's bound, omp leaves it at its default, and the semaphore is a notice, never a hold", () => {
-  const region = inFlightPair();
-  assert.match(region, Pin.phrase("leave it at its default"));
-  assert.match(region, Pin.phrase("task.maxConcurrency"));
-  assert.match(region, Pin.phrase("never a hold"));
-  assert.doesNotMatch(region, /--in-flight \d/, "the rule now hard-codes a numeric bound — the point of leaving it at its default is that no caller passes one");
+  const tick = tickBlock();
+  assert.match(tick, Pin.phrase("pass `--in-flight` on every tick when `$ARGUMENTS` set it, and never otherwise"));
+  assert.doesNotMatch(tick, /--in-flight \d/, "the rule now hard-codes a numeric bound — the point of leaving it at its default is that no caller passes one");
+  assert.match(tierRolesParagraph(), Pin.phrase("prints a notice line and still"));
 });
 
 // The Defaults paragraph moved, with its measurements, to references/pull.md;
@@ -139,7 +141,7 @@ test("the wake table names every wake, each with its fleet-event.mjs command", (
   // nothing and so is invisible to the tick, which reads only the ledger. What
   // each command records is in fleet-event.mjs's header, which
   // fleet-event-wake-table.test.mjs pins; here each wake is pinned to its command.
-  const table = RUN_TEAM.paragraph("| Wake | Command |", "wake table", "### Nothing to do: arm the beat").text;
+  const table = RUN_TEAM.paragraph("| Wake | Command |", "wake table", "### What a wake owes beyond its call").text;
   const rows = table.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Wake"));
   const WAKES = [
     ["Implementer report", "`fleet-event.mjs impl-report impl-<N>`"],
@@ -171,13 +173,16 @@ test("the wake table names every wake, each with its fleet-event.mjs command", (
   assert.match(RUN_TEAM.between("| Drain |", "\n- **", "after the table").text, Pin.phrase("arm the beat"));
 });
 
-test("the tick block admits no wake covers a drained queue, and says whose case that is", () => {
+test("the tick on every wake admits no wake covers a drained queue, and says whose case that is", () => {
   // A reader who takes the wakes for the whole cure stops looking for the
   // drained-queue case they cannot reach. The pointer is the part that must not
-  // rot — an admission with nowhere to go is how #3 lost item 2.
-  const s = tickBlock();
-  assert.match(s, /none\s+covers a fully drained queue/);
-  assert.match(s, /fleet-heartbeat\.mjs/);
+  // rot — an admission with nowhere to go is how #3 lost item 2. The why moved
+  // to references/ci-and-staleness.md; the wake table's rule points there.
+  const why = CI_AND_STALENESS.section("## Tick on every wake", "references/ci-and-staleness.md").text;
+  assert.match(why, /none\s+covers a fully drained queue/);
+  assert.match(why, Pin.phrase("That state is the heartbeat's."));
+  const rule = RUN_TEAM.paragraph("**Rule: record, tick, act, beat.**", "run-team record-tick rule", "Run each as").text;
+  assert.match(rule, Pin.phrase("See references/ci-and-staleness.md."));
 });
 
 // Both merge-side wakes, each sliced to its own bullet — the shared vocabulary
@@ -194,12 +199,10 @@ test("the tick block runs the tick with --apply", () => {
   assert.match(tickBlock(), /fleet-tick\.mjs --apply/);
 });
 
-test("phase 2's tier check and the tier guards say tick --apply runs the check", () => {
+test("phase 2's tier check says tick --apply runs the check", () => {
   const phase2 = RUN_TEAM.paragraph("**After every Pull's dispatch, the tier check runs", "run-team phase 2 tier check paragraph", "**The tick holds the next Pull until that verdict exists.**").text;
   assert.match(phase2, /`tick --apply` runs it itself/);
   assert.match(phase2, Pin.phrase("HOLD (tier unchecked impl-<N>)"));
-  const guards = RUN_TEAM.paragraph("**Tier guards under Pull.**", "run-team tier guards paragraph", "**`--in-flight <B>`**").text;
-  assert.match(guards, /run by `tick --apply`/);
 });
 
 test("the CI-terminal wake runs the tick", () => {
@@ -209,7 +212,8 @@ test("the CI-terminal wake runs the tick", () => {
 
 // The queue-depth table's own slice, ending at the `/triage` note that follows
 // it. Anchored to the section heading instead, the pointer would be satisfied
-// by the Phase 3 block above, which lives in the same file.
+// by the section's review-backlog bullets, which name `fleet-tick.mjs` before
+// the table does.
 const queueDepthTable = () =>
   RUN_TEAM.between("**Do not re-derive this by hand", "`/triage` is user-invoked only", "queue-depth table").text;
 
@@ -317,15 +321,15 @@ test("the fold-in block says inherited PRs are queued before shortlisting, as or
 // The heartbeat's prose — #357. It belongs in this file for the reason the
 // header gives: these pins exist because a reconcile nothing invokes is #3 with
 // an extra file, and on a drained queue the heartbeat is the ONLY thing that
-// invokes it. The slice is the standing instruction, ending where the CI-wait
-// instruction begins.
+// invokes it. The slice is the standing instruction, ending where the tick's
+// rows begin.
 const heartbeatBlock = () =>
-  RUN_TEAM.between("**Beat when there is nothing to do", "**Own the CI waits.**", "run-team heartbeat block").text;
+  RUN_TEAM.between("**Beat when there is nothing to do", "## The tick's rows", "run-team heartbeat block").text;
 
 test("the event loop tells the controller to arm the beat instead of ending its turn", () => {
   // The entry point. Every word of the block below is unreachable if the loop
   // never says to run it, which is exactly how item 2 of #3 went missing.
-  const bullet = RUN_TEAM.between("- **Nothing to do right now**", "- **Implementer report**",
+  const bullet = RUN_TEAM.bullet("- **Nothing to do right now**", "**Beat when there is nothing to do",
     "nothing-to-do event").text;
   assert.match(bullet, /do not end your turn/);
 });
@@ -341,12 +345,14 @@ test("the heartbeat block names the script and the re-issue protocol", () => {
   assert.match(s, /one blocking call per turn/);
 });
 
-test("the heartbeat block says why the ceiling is bounded", () => {
+test("the heartbeat block bounds the ceiling, and the reference says why", () => {
   // Without the reason, 20 minutes reads as arbitrary and the next reader
   // raises it to an hour — reintroducing #3's blindness at a slower rate, which
   // is the one failure this design can still be tuned into.
-  assert.match(heartbeatBlock(), /supply grows from OUTSIDE the fleet/);
-  assert.match(heartbeatBlock(), /Do not raise it past 30\s+minutes/);
+  assert.match(heartbeatBlock(), Pin.phrase("**Do not raise `--ceiling` past 30 minutes.** See references/ci-and-staleness.md."));
+  const why = CI_AND_STALENESS.section("## The beat's ceiling is a real bound", "references/ci-and-staleness.md").text;
+  assert.match(why, /supply grows from OUTSIDE the fleet/);
+  assert.match(why, /Do not raise it past 30\s+minutes/);
 });
 
 test("the heartbeat block forbids stopping on an idle queue", () => {
@@ -372,16 +378,11 @@ test("the heartbeat block gives the command for a deliberate stop", () => {
 });
 
 test("the heartbeat block says whose stall a line is and names what is stranded", () => {
-  // Both halves are load-bearing and neither is obvious. A line judged off
-  // the previous run's marks is a controller reporting itself dead — the shape
-  // that gets a healthy run abandoned. And a stall whose stranded
-  // tickets go unmentioned is read as an obituary rather than as work: those
-  // tickets keep the claim label the candidate scan excludes, so nothing else
-  // in the run will ever surface them again.
+  // A stall whose stranded tickets go unmentioned is read as an obituary
+  // rather than as work. Which marks the stall is judged off is the tick's
+  // own (fleet-state.mjs's stallReport(), pinned by fleet-state.test.mjs);
+  // what the controller does with each wording is pinned here.
   const s = heartbeatBlock();
-  assert.match(s, Pin.phrase("A beat, tick or ledger write older than the controller record rotate wrote is the previous run's and counts for nothing."));
-  assert.match(s, /in-progress/);
-  assert.match(s, /EXCLUDES that label/);
   // One entry per wording fleet-state.mjs's stallReport() can lead with, each
   // saying what follows from it: a gone controller's claims come back, a live
   // one's do not, and no record decides nothing.

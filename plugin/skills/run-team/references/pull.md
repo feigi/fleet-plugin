@@ -232,7 +232,7 @@ terminating in exactly one dispatch or an empty shortlist:
    `tier=<CELL>` exactly when `DRAW` is not `-`; then phase 2 at once: claim
    what you are about to dispatch; dispatch what you have just claimed. Router
    exit 2 → no row and no dispatch: release the claim (`release-ticket.sh`, SKILL.md's
-   **Release the claims that never became PRs**) and emit an event, a probe that could not look — a table the router
+   Failure handling row for a claim abandoned mid-run) and emit an event, a probe that could not look — a table the router
    refuses refuses every Pull.
 
 **The Pull table** — every verdict a Pull can reach, and the one thing each
@@ -259,7 +259,7 @@ dispatch.
 ## Relabels and exclusions
 
 **A Pull never re-admits a ticket already relabelled.** The shortlist file can
-be older than a relabel — this run's own Pulls, or a demotion in phase 3 — so
+be older than a relabel — this run's own Pulls, or a bail's relabel under **Relabel causes** — so
 read the ticket's labels in step 3's full read (`--json
 title,body,comments,labels`) and drop it when `ready-for-agent` is gone. A Pull
 that trusted a list built before the relabel landed would hand a ticket the
@@ -324,8 +324,8 @@ its re-derive-once rule.
 
 **Materialize the isolation envelope as a file, not a briefing.** The claim
 writes the runner, `agent-test`, into the fresh worktree it creates: an exec of
-the Recipe's Test entrypoint, through the suite-slot wrapper (see SKILL.md's **The
-suite slot bound**), that exports one port triple derived from `<N>`
+the Recipe's Test entrypoint, through the suite-slot wrapper (see `suite-slot.mjs`'s
+header), that exports one port triple derived from `<N>`
 (so collisions stay impossible), kept out of `git status` through the
 repository's exclude file. A repository that tracks its own `agent-test` keeps
 it byte-identical, with whatever isolation that repository built, and takes the

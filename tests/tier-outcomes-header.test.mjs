@@ -36,7 +36,10 @@ const HEADER = headerLines.join("\n");
 // satisfiable from outside the paragraph it guards, and this file is 2700 lines
 // of prose about exactly these words. One definition, because three hand-rolled
 // copies of one slice is how two of them end up bounded differently.
-const rulingStep = () => RUN_TEAM.between("**Guard: accumulate per PR", "The member-facts scrape, the drain of the pending ticket-features rows", "phase 3's ruling step").text;
+// Anchored on the guard's own bold sentence: End of run, in the wake table above
+// it, cites the guard by its short name, so the short name alone would start the
+// slice there.
+const rulingStep = () => RUN_TEAM.between("**Guard: accumulate per PR, never conclude inside one run.**", "The member-facts scrape, the drain of the pending ticket-features rows", "the tier outcomes guard's ruling step").text;
 // The sizing-verdict paragraph, with its measurement, moved to
 // references/reviewers.md; the ruling step keeps its rule beside the pointer.
 const REVIEWERS_MD = Pin.file(join(REPO, "plugin", "skills", "run-team", "references", "reviewers.md"));

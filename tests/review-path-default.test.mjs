@@ -16,7 +16,7 @@ import { pipeline, parallel, ARGS, SNAP, review, finding, vote, scriptedHost } f
 // runs, and no specialist's report ever has to be relayed or retrieved by hand.
 //
 // All of that rots silently. A default demoted back to a preference still reads
-// as documented; relay prose left in the Phase 3 event loop reads as an
+// as documented; relay prose left in the wake table reads as an
 // obligation on every run, on a path where no relay can ever occur.
 // Neither shows up as an error.
 // THE CEILING EVERY PIN IN THIS FILE SHARES. These prove a phrase is PRESENT.
@@ -117,12 +117,16 @@ test("objectKeys reads fields by depth, not by line, and ignores brackets/commas
   assert.deepEqual(objectKeys('label: "a, {b}", next: 1,'), ["label", "next"]);
 });
 
-// The Reviewers prose is in two places now: the dispatch paragraphs under Phase
-// 2, and the review mechanics under Phase 3's Reviewers.
+// The Reviewers prose is in four places now: the dispatch paragraphs under
+// Phase 2, the digest reading under the wake table's **Reading a review
+// result**, the failed-review retry under Failure handling's Recovery, and the
+// review's row tokens under Run ledger.
 const reviewersSection = () =>
   [
     RUN_TEAM.between("### The reviewer", "### The tier check", "run-team Phase 2 reviewer dispatch").text,
-    RUN_TEAM.between("### Reviewers", "### Merge bot", "run-team Reviewers").text,
+    RUN_TEAM.between("### Reading a review result", "### Nothing to do: arm the beat", "run-team Reading a review result").text,
+    RUN_TEAM.between("**A throw, an empty return, or a notification whose status is not `completed`", "## Guards", "run-team review retry").text,
+    RUN_TEAM.paragraph("A PR's review is not a member", "run-team review row tokens", "`review` holds a PR's review record to these rules").text,
   ].join("\n\n");
 // The fix-applier's prompt is what the member reads: its agent body, then the
 // brief the renderer prints for a review fix-applier. SKILL.md carries neither.
@@ -241,18 +245,10 @@ test("the controller keeps the rules the workflow's return shape needs", () => {
     "run-team no longer warns that `unverified` is not a passed verification",
   );
   // #1773 §3: review units are counted, never capped — an in-flight review
-  // is one, each fix-applier is one — derived from the ledger. The retired
-  // "one review workflow at a time" left the review uncounted.
-  assert.match(
-    dflt,
-    /Review units are counted, never capped/,
-    "run-team no longer says review units are counted and never capped — an in-flight review is a unit, not a free slot",
-  );
-  assert.match(
-    dflt,
-    /cannot\s+answer\s+keeps\s+the\s+unit\s+counted/,
-    "run-team no longer keeps a review unit counted when the MERGED-or-CLOSED probe cannot answer",
-  );
+  // is one, each fix-applier is one — derived from the ledger. The count and
+  // its MERGED-or-CLOSED probe are the tick's own: fleet-tick.test.mjs's
+  // review-unit cases (a PR gh still calls OPEN, a hung probe) are its check,
+  // and SKILL.md keeps only the ledger derivation below.
   assert.match(
     dflt,
     /`review=` and no `reviewed=`/,
@@ -265,25 +261,25 @@ test("the controller keeps the rules the workflow's return shape needs", () => {
   );
 });
 
-test("the Phase 3 event loop carries no relay obligation", () => {
-  const loop = RUN_TEAM.between("## Phase 3", "### Reviewers", "run-team Phase 3").text;
+test("the wake list carries no relay obligation", () => {
+  const loop = RUN_TEAM.between("### What a wake owes beyond its call", "### Reading a review result", "run-team wake list").text;
   // This slice's only other assertion is a doesNotMatch, which a slice that has
   // degenerated to its own heading satisfies trivially. Prove it reached the
   // bullet list first.
-  assert.match(loop, /A review result lands/, "the Phase 3 slice no longer contains the event loop");
+  assert.match(loop, /A review result lands/, "the wake-list slice no longer contains the wake bullets");
   assert.match(
     loop,
     /no-op/,
-    "the event loop lost the no-push branch — no push means no CI run, and the Monitor is edge-keyed, so the finisher is never dispatched and a clean PR is never labelled",
+    "the wake list lost the no-push branch — no push means no CI run, and the Monitor is edge-keyed, so the finisher is never dispatched and a clean PR is never labelled",
   );
   assert.doesNotMatch(
     loop,
     /relay/i,
-    "the Phase 3 event loop still carries a relay obligation — the review's `agent()` returns into the script, so no relay ever occurs",
+    "the wake list still carries a relay obligation — the review's `agent()` returns into the script, so no relay ever occurs",
   );
 });
 
-test("the Phase 3 finisher edges gate on a ruling the controller still owes", () => {
+test("the finisher-gate edges gate on a ruling the controller still owes", () => {
   // The rule also lives in the narrative finisher section below, but the
   // controller ACTS from these two bullets, and that is the site that produced
   // the failure: a ruling handed over after the finisher was already dispatched
@@ -667,7 +663,7 @@ test("the fix-applier's self-retrieval is scoped to its own refuters, on a premi
   );
 });
 
-test("run-team's documented return shape is exactly review-core.mjs's actual return", async () => {
+test("run-team's digest read names only fields review-core.mjs actually returns", async () => {
   // The one claim in this file pinned against review-core.mjs's own return
   // value — the board-parser test below holds this file's other machine. A
   // prose pin cannot catch this: the sentence stays well-formed while the
@@ -681,9 +677,10 @@ test("run-team's documented return shape is exactly review-core.mjs's actual ret
   // Cross-checked, not transcribed: a literal field list here would be one
   // more copy to drift. Reading review-core.mjs's own RETURNED OBJECT — run
   // through a real `runReview()` call via review-host-fixture.mjs's scripted
-  // host, never source text — means the pin fails in EITHER direction: a
-  // field added to the function and not the prose, or a name dropped from
-  // the prose and not the function.
+  // host, never source text. SKILL.md no longer restates the whole return
+  // shape; what it keeps is the controller's digest read, a `jq` over the
+  // result file, so every field that read names must be one the function
+  // returns, or the controller reads a `null` it takes for an answer.
   const { host } = scriptedHost({
     snapshot: [SNAP],
     "review:correctness": [review([finding("critical")])],
@@ -692,16 +689,15 @@ test("run-team's documented return shape is exactly review-core.mjs's actual ret
   const result = await runReview({ ...host, pipeline, parallel }, ARGS);
   const returned = Object.keys(result);
   assert.ok(returned.length, "runReview's returned object is empty — update this test");
-  const documented = RUN_TEAM.between("It returns `{", "}`", "run-team return shape").text
-    .replace("It returns `{", "")
+  const documented = RUN_TEAM.between("`jq '{", "}'", "run-team digest read").text
+    .replace("`jq '{", "")
     .split(",")
     .map((f) => f.trim());
-  // Compared as SETS. Field order carries no instruction, and a pin that fires
-  // on a reorder is a pin the next reflow teaches people to edit around.
+  assert.ok(documented.length >= 5, `the digest read names ${documented.length} fields — the slice is broken`);
   assert.deepEqual(
-    [...documented].sort(),
-    [...returned].sort(),
-    "run-team's `It returns …` field list has drifted from review-core.mjs's actual return",
+    documented.filter((f) => !returned.includes(f)),
+    [],
+    "run-team's digest read names a field review-core.mjs does not return",
   );
 });
 

@@ -42,7 +42,7 @@ const MOVE = "move text to references/, do not raise the ceiling";
 // [path, ceiling in bytes, whether the ceiling must also be tight].
 const SLACK = 1_000;
 const CEILINGS = [
-  [SKILL, 187_000, true],
+  [SKILL, 164_000, true],
   ["plugin/commands/review-and-fix.md", 66_332, false],
   ["plugin/commands/run-merge-bot.md", 79_384, false],
 ];

@@ -22,51 +22,54 @@ import { HALT_CAUSES } from "../plugin/scripts/ledger-grammar.mjs";
 // independent verification the gate exists for) — so this file pins the
 // mutation as much as the isolation.
 //
-// Slice-scoped, not whole-file: a bare presence check anywhere in this
-// 1900+ line SKILL.md stays green even when the text moves somewhere its
-// reader never reaches (measured before in this same file, #172).
+// Slice-scoped, not whole-file: a bare presence check anywhere in the
+// finisher's agent body stays green even when the text moves somewhere its
+// reader never reaches (measured before in this same file, #172). The duties
+// are stated in that body, which the harness injects as the finisher's system
+// prompt; run-team's SKILL.md no longer restates them.
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const FINISHER_BODY = readFileSync(join(REPO, "agents", "fleet-finisher.agent.md"), "utf8");
 
 // The gate belongs to the finisher's duty 2 — verifying a claim by RUNNING is
 // the same duty as verifying it by reading the diff, and duty 2 is where the
-// finisher already reads. Anchored on the two duties' own opening text, so a
-// renumber or a move out of the duty list reds rather than passing vacuously.
-const DUTY1_START = "1. **Audit the worktree**";
-const DUTY2_START = "2. **Confirm every deferral";
-const DUTY2_END = "3. Add `ready-to-merge`";
+// finisher already reads. Anchored on the duties' own opening text, so a
+// move out of the duty's block reds rather than passing vacuously.
+const DUTY1_START = "**Duty 1 is one script, and its exit code is your verdict.**";
+const DUTY1_END = "**Re-check the instrument set";
+const DUTY2_START = "**Confirm every deferral";
+const DUTY2_END = "**Duty 3 is one script";
 
 // Markdown hard-wraps at ~80 columns and this text is a list continuation, so
 // every phrase can split across a line with leading indent re-injected at the
 // wrap point. Flattening makes the wrap invisible to a phrase match — so a
 // pure rewrap, words untouched, cannot red a pin here. Every match in this
-// file goes through it; a raw-RUN_TEAM assertion is reflow-brittle and reds
+// file goes through it; a raw-body assertion is reflow-brittle and reds
 // with a message implying the prose was weakened when nothing was.
 const flat = (s) => s.replace(/\n[ \t]*/g, " ");
 
 function between(start, end) {
-  const at = RUN_TEAM.indexOf(start);
+  const at = FINISHER_BODY.indexOf(start);
   assert.notEqual(at, -1, `finisher duty opener ('${start}') moved — update this test`);
-  const to = RUN_TEAM.indexOf(end, at);
+  const to = FINISHER_BODY.indexOf(end, at);
   assert.notEqual(to, -1, `finisher duty opener ('${end}') moved — update this test`);
-  return flat(RUN_TEAM.slice(at, to));
+  return flat(FINISHER_BODY.slice(at, to));
 }
 
-const duty1Text = () => between(DUTY1_START, DUTY2_START);
+const duty1Text = () => between(DUTY1_START, DUTY1_END);
 const duty2Text = () => between(DUTY2_START, DUTY2_END);
 
-// The gate's two paragraphs moved, with their war stories, to
-// references/finisher.md; duty 2 keeps each rule beside the pointer, so the
-// gate is still duty 2's, and the reference file carries the gate itself.
+// The gate's two paragraphs' war stories are in references/finisher.md; the
+// agent body states each rule, so the gate is still duty 2's, and the
+// reference file carries the evidence for it.
 const FINISHER_MD = Pin.of(readFileSync(join(REPO, "skills", "run-team", "references", "finisher.md"), "utf8"), "references/finisher.md");
 const OWN_TREE = "## Whatever you verify by running, run in a tree nobody else owns";
 const REMOVE_IT = "## Remove the verification worktree on every path";
 const gateText = () => flat(FINISHER_MD.section(OWN_TREE, "references/finisher.md").text + FINISHER_MD.section(REMOVE_IT, "references/finisher.md").text);
 
-test("duty 2 keeps the gate's two rules, each beside its pointer to references/finisher.md", () => {
+test("duty 2 states the gate's two rules in the finisher's agent body", () => {
   const text = duty2Text();
-  assert.match(text, Pin.phrase("**Whatever you verify by RUNNING, run in a tree nobody else owns.** See references/finisher.md."));
-  assert.match(text, Pin.phrase("**Remove it on every path, the failing ones included** — a mutant that comes back green, a suite that will not start, your own halt at any duty. See references/finisher.md."));
+  assert.match(text, Pin.phrase("**Whatever you verify by RUNNING, run in a tree nobody else owns.**"));
+  assert.match(text, Pin.phrase("**Remove it on every path, the failing ones included** — a mutant that comes back green, a suite that will not start, your own halt at any duty."));
 });
 
 test("the mutation gate runs in a worktree the finisher adds itself, at its dispatch pin", () => {
@@ -185,17 +188,8 @@ test("independent re-verification survives — the gate still mutates and runs t
   // A placeholder nobody substitutes is not a gate. `<testCmd>` reaches the
   // finisher only through its brief — the agent body names the value, never
   // carries one — and the renderer refuses a finisher brief rendered without
-  // `--testCmd`, so the controller's instruction to pass it is pinned beside
-  // the brief that carries it.
-  //
-  // The instruction and its reason in ONE sentence, `sentences()`'s (#1940).
-  // The first-period `[^.]*` gap this replaces refused a valid rewording with
-  // an "e.g." or a filename between the two, and ran on past a `?` or `!` —
-  // the latter nearly inert here, since both phrases must be verbatim anyway.
-  assert.ok(
-    Pin.sentences(duty1Text()).some((s) => /Pass `--testCmd` too.*duty 2's mutation gate runs it/.test(s)),
-    "the controller is no longer told to pass the finisher a `--testCmd` — duty 2's placeholders reach it unsubstituted and the gate has no command to run",
-  );
+  // `--testCmd` (dispatch-prompt.test.mjs), so the brief carrying it is
+  // pinned here.
   assert.match(renderBrief("finisher", "fresh"), /^testCmd: TESTCMD-4$/m, "the finisher's brief no longer carries the test command duty 2's gate runs");
 });
 
@@ -215,30 +209,15 @@ test("independent re-verification survives — the gate still mutates and runs t
 test("duty 1 is one script, called through the Resolver with both flags, its exit code the verdict", () => {
   const said = (re) => Pin.sentences(duty1Text()).some((s) => re.test(s));
   assert.ok(
-    said(/\*\*Audit the worktree\*\* by running one script, `finisher-audit\.mjs`/),
-    "duty 1 no longer opens by running `finisher-audit.mjs` — it is back to being steps a finisher follows by hand",
+    said(/\*\*Duty 1 is one script, and its exit code is your verdict\.\*\*/),
+    "duty 1 no longer opens by running one script whose exit code is the verdict — it is back to being steps a finisher follows by hand",
   );
   assert.ok(
-    said(/`~\/\.fleet\/bin\/fleet-run finisher-audit\.mjs --worktree <abs-path> --pin <your dispatch pin>`, the path the one you were dispatched with, however it was spelled, and the pin the full SHA/),
+    said(/`~\/\.fleet\/bin\/fleet-run finisher-audit\.mjs --worktree <abs-path> --pin <your dispatch pin>` \(the path you were dispatched with, and the full SHA\)/),
     "duty 1 no longer gives the script's call with the dispatched path as --worktree and the full dispatch SHA as --pin",
   );
   assert.ok(
-    said(/Its exit code is the verdict of this duty/),
-    "duty 1 no longer says the script's exit code is the verdict — a finisher reads the JSON and decides for itself",
-  );
-  // The three things the script settles that a finisher used to settle by eye,
-  // each named so that deleting one reds. Hand instructions for any of them
-  // are the by-hand path back, and are excluded below.
-  assert.ok(
-    said(/finds this worktree's row by its `realpath`, so a spelling reached through a symlink still finds a healthy worktree's row/),
-    "duty 1 no longer says the row is matched by realpath — a symlinked spelling finds no row and halts a healthy tree as *worktree absent*",
-  );
-  assert.ok(
-    said(/it reads dirty from the row and from `git status --porcelain -unormal`/),
-    "duty 1 no longer names the dirty check's two instruments — the row's `dirty` field and `git status --porcelain -unormal`",
-  );
-  assert.ok(
-    said(/it compares the worktree's `HEAD` to your dispatch pin/),
+    said(/compares the worktree's `HEAD` to your pin/),
     "duty 1 no longer says diverged is the worktree's HEAD against the dispatch pin — neither the audit nor git status can see a clean tree that moved past it",
   );
   assert.doesNotMatch(
@@ -251,23 +230,22 @@ test("duty 1 is one script, called through the Resolver with both flags, its exi
 test("duty 1's exit codes: 0 alone is clean, 1 names a cause from the ledger's vocabulary, 2 halts as `other`", () => {
   const said = (re) => Pin.sentences(duty1Text()).some((s) => re.test(s));
   assert.ok(
-    said(/Exit 0, `cause` null, is the only result that means the worktree is clean at your pin/),
+    said(/Exit 0, with `cause` null, is the only code that means the worktree is clean at your pin/),
     "duty 1 no longer says exit 0 with a null cause is the only clean result",
   );
   const causes = `${HALT_CAUSES.slice(0, -1).map((c) => `\`${c}\``).join(", ")} or \`${HALT_CAUSES.at(-1)}\``;
   assert.ok(
-    said(new RegExp(`Exit 1 means \`cause\` names why not — ${causes.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} — and exit 2 means the script could not look`)),
-    "duty 1's exit 1 causes are no longer the ledger's `halted:<cause>` vocabulary, or exit 2 is no longer named — the ledger refuses a word it does not know",
+    said(new RegExp(`\`cause\` is the word you name — ${causes.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)),
+    "duty 1's exit 1 causes are no longer the ledger's `halted:<cause>` vocabulary — the ledger refuses a word it does not know",
   );
   // The halt itself. Every non-zero exit, and so every cause and the could-not-
-  // look exit, halts *here* before the label; an exit 2 is not a pass with an
-  // empty verdict.
+  // look exit, halts; an exit 2 is not a pass with an empty verdict.
   assert.ok(
-    said(/Every non-zero exit halts the finisher \*here\*, before the label: it reports the verdict as printed and labels nothing, and an exit 2 is cause `other` with the line the script printed on stderr as its evidence/),
-    "duty 1 no longer halts the finisher *here*, before the label, on every non-zero exit — check it was not weakened",
+    said(/Exit 2 means the script could not look: you are halted with cause `other`, with the line it printed on stderr as the evidence/),
+    "duty 1 no longer halts an exit 2 as cause `other` with the script's stderr as evidence — check it was not weakened",
   );
   assert.ok(
-    said(/none of the script's steps is run by hand to get past a halt/),
+    said(/You do not run any of the script's steps by hand to get past a halt/),
     "duty 1 no longer forbids running the script's steps by hand to get past a halt",
   );
 });

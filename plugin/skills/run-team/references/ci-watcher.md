@@ -1,6 +1,6 @@
 # The CI watcher: why its block is shaped the way it is
 
-Evidence for the rules SKILL.md states beside Phase 3's watcher block, keyed by the rule each justifies.
+Evidence for the rules SKILL.md states beside its watcher block, under **Own the CI waits**, keyed by the rule each justifies.
 
 ## The pass is budgeted at 4 core REST units per listed PR
 
@@ -97,3 +97,42 @@ fixed interval stalls the fleet longer than the outage itself would have. A
 retry-and-wait loop is what turns a 60s outage into a stalled member. Report it,
 keep the local work moving (git, tests and mutation runs are all unaffected),
 re-probe.
+
+## A probe that cannot read is a transition event, not silence
+
+The natural
+watcher shape — `st=$(ci-state.mjs --pr "$pr" 2>/dev/null) || continue` — fails
+closed correctly and then throws the failure away, so a rate-limited probe emits
+NOTHING and "no event" becomes indistinguishable from "not green yet". Every
+open PR stalls unlabelled while the run reads as merely quiet; observed live
+twice.
+
+## It has to latch
+
+An unlatched line at a 120s poll gets the Monitor
+auto-stopped for volume during even a two-minute outage, reintroducing the same
+blindness by another route.
+
+## Guard every probe, not just the ones with a verdict field
+
+The block makes
+several API calls, and `gh pr list` is the one that looks like
+plumbing rather than a probe. A non-quota failure there (secondary/abuse limit,
+5xx, network blip, expired token) does not lower `.resources.core.remaining`, so
+the budget gate clears, and an unguarded `for pr in $(gh pr list …)` then
+iterates zero times over the empty substitution: no error, no latch, no DEGRADED
+line — total silence per tick, which is exactly what this section exists to
+remove.
+
+## A readable list can still be a short one
+
+`gh pr list` stops at its
+`--limit` — 30 when the flag is absent — with exit 0 and no warning, so a list
+that fills its limit reads exactly like one that happens to be that long, and
+every open PR past it goes unwatched without a line.
+
+## Judge `ci-state` on its payload, never its exit code
+
+`not-green` is an
+ordinary, frequent state that exits non-zero, so a watcher treating any non-zero
+exit as an outage misfires constantly on PRs that are merely in progress.

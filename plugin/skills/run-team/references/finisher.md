@@ -1,6 +1,6 @@
 # The finisher: why its gate and duties are shaped the way they are
 
-Evidence for the finisher rules SKILL.md states in **Reviewers**, keyed by the rule each justifies.
+Evidence for the finisher rules the finisher's agent body, `agents/fleet-finisher.agent.md`, and SKILL.md's **The finisher gate** state, keyed by the rule each justifies.
 
 ## An unanswered question from the member is an outbox item
 
@@ -107,3 +107,15 @@ to the fleet's worktree home, so a tree under `<scratch>` is a `kept` entry
 it reports and never collects. No claim built the tree you added, so it has
 `./agent-test` only if the repository tracks one — run that or `<testCmd>`
 in it, per `references/isolation.md`, **A reused worktree may lack the runner**.
+
+## Take the label off before you approve any push
+
+The label is a
+verdict on the tree the finisher read, and a GitHub label does not follow the
+branch — on one PR it survived a push and came to sit on a commit nobody had
+audited. The token is how the tick tells your
+removal from a finisher that never labelled — a tick run between a removal and
+its token re-dispatches a finisher into your take-off window. The label goes
+before the approval because removing the artifact the merge bot gates on is
+the reliable stop, where messaging the bot races it, and a label has been
+observed holding until after an abort message arrived.

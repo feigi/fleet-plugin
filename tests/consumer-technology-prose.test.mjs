@@ -118,7 +118,7 @@ test("run-team: a tree with no runner gets the Recipe's Test entrypoint only whe
 });
 
 test("run-team: testCmd comes from the Recipe cache and names no repository's own command", () => {
-  const p = RUN_TEAM.paragraph("**Where `testCmd` comes from:**", "run-team/SKILL.md testCmd source paragraph", "**Where `<branch>` comes from:**").text;
+  const p = RUN_TEAM.paragraph("**Where `testCmd` comes from:**", "run-team/SKILL.md testCmd source paragraph", "The review wraps its own one run").text;
   assert.match(p, Pin.phrase("the repository's Test entrypoint, out of the Recipe cache phase 0's Recipe derivation step proved — `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main` prints it — and the one you hand specialists"));
   assert.doesNotMatch(p, /node --test/, "the testCmd source paragraph names this repository's own test command again");
 });
@@ -134,9 +134,9 @@ test("run-team: the quick-install red flag points at the Recipe's Install step, 
   assert.match(flag, Pin.phrase("the claim already ran the Recipe's Install step; any other install can rewrite the lockfile for the whole repo."));
 });
 
-test("a merged branch's stale worktree is said to keep its installed dependencies, in SKILL.md and in reaping.md", () => {
-  const skill = RUN_TEAM.paragraph("The merge bot deletes the remote branch after each merge", "run-team/SKILL.md reap paragraph", "`~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition").text;
-  assert.match(skill, Pin.phrase("with its worktree — and its installed dependencies — still on disk."));
+test("a merged branch's stale worktree is said to keep its installed dependencies, in reaping.md, which SKILL.md's merge-pass wake points at", () => {
+  const skill = RUN_TEAM.bullet("- **Merge-bot pass reports done**", "- **The run ends", "run-team/SKILL.md merge-pass wake").text;
+  assert.match(skill, Pin.phrase("See references/reaping.md."));
   const evidence = REAPING.paragraph("Merge deletes remote branch, leaves local branch", "reaping.md reap-after-each-merge paragraph", "## Why `commit-commands:clean_gone` is disqualified").text;
   assert.match(evidence, Pin.phrase("with worktree — and its installed dependencies — still on disk."));
 });

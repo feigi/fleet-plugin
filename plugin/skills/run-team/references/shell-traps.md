@@ -6,9 +6,9 @@ Monitor and Bash commands run under **zsh**, and the shell in SKILL.md is
 prescriptive — copied verbatim into a watcher or into the merge bot's agent
 body. So every trap here is a zsh-vs-bash difference that ships as a
 green-looking gate: correct in the shell you tested in, silently wrong in the
-one it runs in. Phase 3's monitor paragraph points here instead of restating
-any of it. The merge bot's agent body is the one place this block is copied
-whole (see **Merge bot**); the other deliberate copy is named at the end.
+one it runs in. **Own the CI waits**'s monitor paragraph points here instead of
+restating any of it. The merge bot's agent body is the one place this block is
+copied whole (see **The merge bot**); the other deliberate copy is named at the end.
 
 **zsh word-splits an unquoted command substitution's result; it does NOT split an unquoted parameter expansion.**
 
@@ -26,12 +26,12 @@ $prs
 EOF
 ```
 
-The inline `$(printf '%s\n' "$prs")` form splits correctly too and is what Phase 3's block uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can.
+The inline `$(printf '%s\n' "$prs")` form splits correctly too and is what the watcher block under **Own the CI waits** uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can.
 
 **`</dev/null` every command inside a `while read` loop.**
 
 **A probe that could not look emits an event; it never `continue`s.** Stated in
-full at *A probe that cannot read is a transition event, not silence* in Phase 3,
+full at *A probe that cannot read is a transition event, not silence* under **Own the CI waits**,
 and it binds every watcher in SKILL.md rather than that one block: the third
 value beside pass and fail is what turns a broken loop into a loud failure
 instead of a quiet one. A guard that drops an unreadable probe — `[ -n "$json" ]

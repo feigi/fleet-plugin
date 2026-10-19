@@ -17,7 +17,9 @@
 //     whole SKILL.md as it read before the rewrite, owned by this test, and
 //     every sentence of it is found in SKILL.md or across references/ as often
 //     as it was said, but for the sentences CHANGED and DELETED below, each
-//     named with what stands in its place;
+//     named with what stands in its place, a CHANGED sentence's old half said
+//     nowhere now and a DELETED one said fewer times than the fixture said it,
+//     by at least the times it is listed;
 //   - the three blocks the rewrite moved whole — Shell traps, the invariants'
 //     full statements, the tick rows' full text — are found across references/
 //     as often as they were said, and not at all in SKILL.md.
@@ -139,7 +141,6 @@ const TICKET_ORDER = [
 // and the failure table, in the order the file had it.
 const STANDING = [
   "## Rules that fail silently",
-  "## Phase 3 — event loop",
   "## Worktree and claim model",
   "## Queue depth",
   "## Tier outcomes guard",
@@ -232,7 +233,7 @@ export const firstParagraph = ({ blocks }) => blocks.find((b) => b.kind !== "hea
 
 test("every `## ` section opens with a paragraph that states what the controller does and when it is done", () => {
   const sections = sectionsOf(SKILL);
-  assert.ok(sections.length >= 20, `${sections.length} sections read — the splitter is broken`);
+  assert.ok(sections.length >= 19, `${sections.length} sections read — the splitter is broken`);
   for (const section of sections) {
     const first = firstParagraph(section);
     assert.ok(first !== undefined && first.kind === "para", `${section.heading} does not open with a paragraph`);
@@ -367,7 +368,16 @@ test("references/tick-rows.md names every row the tick's list names", () => {
 // stands in SKILL.md (or the reference file named) now. A positional pointer
 // whose target moved names where the target is; a sentence a split paragraph
 // left dangling is finished; a lead-in whose block moved says so.
+//
+// The cut that removed `## Phase 3 — event loop` (#3540) keeps its own pairs in
+// tests/fixtures/run-team-moved-text/phase-3-dispositions.json, `changed` and
+// `deleted` in this file's shape: a pointer retargeted at the section that now
+// owns its wake, and each sentence that restated a script, or that a
+// references/ file or an agent body already carries, named with what stands
+// in its place.
+const PHASE_3 = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "run-team-moved-text", "phase-3-dispositions.json"), "utf8"));
 const CHANGED = [
+  ...PHASE_3.changed,
   [
     "**Pin once**, at phase 0 step 0 below, from the main checkout you are running this from — never from a member's worktree, which is gitignored and carries no baseline: `~/.fleet/bin/fleet-run instruments.sh --pin`.",
     "**Pin once**, at phase 0 step 0 above, from the main checkout you are running this from — never from a member's worktree, which is gitignored and carries no baseline: `~/.fleet/bin/fleet-run instruments.sh --pin`."
@@ -382,23 +392,11 @@ const CHANGED = [
   ],
   [
     "Stated in full at *A probe that cannot read is a transition event, not silence* in Phase 3, and it binds every watcher in this file rather than that one block: the third value beside pass and fail is what turns a broken loop into a loud failure instead of a quiet one.",
-    "Stated in full at *A probe that cannot read is a transition event, not silence* in Phase 3, and it binds every watcher in SKILL.md rather than that one block: the third value beside pass and fail is what turns a broken loop into a loud failure instead of a quiet one."
+    "Stated in full at *A probe that cannot read is a transition event, not silence* under **Own the CI waits**, and it binds every watcher in SKILL.md rather than that one block: the third value beside pass and fail is what turns a broken loop into a loud failure instead of a quiet one."
   ],
   [
     "Listed first because it is the only wake with no trigger — every other row above arrives; this one is the absence of one.",
     "Listed on its own because it is the only wake with no trigger — every other row above arrives; this one is the absence of one."
-  ],
-  [
-    "**Finisher reports halted** → the per-cause rule (**Resolving a finisher halt**, below).",
-    "**Finisher reports halted** → the per-cause rule (**Resolving a finisher halt**, above)."
-  ],
-  [
-    "The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, below), then run the tick.",
-    "The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, above), then run the tick."
-  ],
-  [
-    "No survived or unverified finding and nothing to file → skip the fix-applier and dispatch the **finisher** directly — or, when that head's bound conclusion is red and not solely staleness, the red-check fixer instead (**Then dispatch a red-check fixer**, below): no member will touch that PR, so no push is coming and nothing will wake you.",
-    "No survived or unverified finding and nothing to file → skip the fix-applier and dispatch the **finisher** directly — or, when that head's bound conclusion is red and not solely staleness, the red-check fixer instead (**Then dispatch a red-check fixer**, above): no member will touch that PR, so no push is coming and nothing will wake you."
   ],
   [
     "The diff-validating `check` job green with no heavy job (the diff-validating suites, not the `rebase-check` currency gate) in `failure` → a finisher CANDIDATE (gated below), a `check` **failure** that is not solely staleness → the **red-check fixer** (**Then dispatch a red-check fixer**, below), behind the same review-returned and fix-applier-reported gate as a finisher.",
@@ -419,10 +417,6 @@ const CHANGED = [
   [
     "Its four duties are a checklist — audit the worktree, confirm every deferral has a tracker home and re-run the acceptance mutation, apply one release label, report — and the merge gate downstream still catches whatever it gets wrong, the same argument that puts the merge bot on the same tier below.",
     "Its four duties are a checklist — audit the worktree, confirm every deferral has a tracker home and re-run the acceptance mutation, apply one release label, report — and the merge gate downstream still catches whatever it gets wrong, the same argument that puts the merge bot on the same tier above."
-  ],
-  [
-    "Its duties, in this order:",
-    "The finisher's duties, in this order:"
   ],
   [
     "The instrument-set rule is stated once, at the top of this file, which no finisher is dispatched to read, so it reaches one through that body.",
@@ -449,14 +443,6 @@ const CHANGED = [
     "The report's `evidence.replay` reads `pure` only when `git range-diff origin/main <pin> HEAD` pairs every pinned commit with an unchanged one; `changed` (a commit dropped, edited or added, or a stale `origin/main`) or `unknown` means read `evidence.rangeDiff` before acting, and `evidence.remote.state` says whether that head is on the PR."
   ],
   [
-    "A duty 1 halt's report carries the verdict as printed, the JSON line, so a `rebase` halt's report carries the output of `git cherry <pin> HEAD origin/main` that its `evidence` holds.",
-    "A duty 1 halt's report carries the verdict as printed, the JSON line, so a `rebase` halt's report carries `replay`, `rangeDiff` and `remote` from its `evidence`."
-  ],
-  [
-    "It returns `{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts, snapshot, survived, refuted, unverified}` — the **digest** first, then the snapshot and the findings — and it lands as one artefact, `<scratch>/pr<pr>/<run>/review.json`, holding that bare object.",
-    "It returns `{pr, head, resume, testEnvironment, suiteVerdict, dimensionsRun, dimensionsUnrun, cwdAudit, counts, snapshot, survived, refuted, unverified}` — the **digest** first, then the snapshot and the findings — and it lands as one artefact, `<scratch>/pr<pr>/<run>/review.json`, holding that bare object."
-  ],
-  [
     "`jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/pr<pr>/<run>/review.json` is the whole of your read, and it is what you record: `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, off `head`, `counts` and the run root's name — the runner's `ledger` field — on the PR's row, with `ledger.mjs review <pr>`.",
     "`jq '{pr, head, resume, testEnvironment, suiteVerdict, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/pr<pr>/<run>/review.json` is the whole of your read, and it is what you record: `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, off `head`, `counts` and the run root's name — the runner's `ledger` field — on the PR's row, with `ledger.mjs review <pr>`."
   ],
@@ -473,12 +459,8 @@ const CHANGED = [
     "In a review it makes `suiteVerdict` not usable, `suiteVerdict.reason` beginning \"no suite slot within <n> s — the host is at its suite bound; not a test failure\", with no retry inside the run: read that `reason` off the digest and re-review it under the next runner letter (`review-pr-<pr#>-b` after a first runner), as for a runner that reported `failed`."
   ],
   [
-    "**`impl-<N>/`** goes once issue #N is CLOSED, or when it is OPEN, no live `impl-<N>` token names it and nothing under it has changed in 7 days.",
-    "**`impl-<N>/`** goes once issue #N is CLOSED, or when it is OPEN, no live `impl-<N>` token names it, no claim worktree under `.worktrees/` still stands for it, and nothing under it has changed in 7 days."
-  ],
-  [
     "No ledger refuses this call (exit 2, nothing removed): mid-run there is always one, so its absence is a fault to look at, never permission.",
-    "Without `--after-rotate` — the per-pass sweep **Reclaim scratch after each merge pass** runs — no ledger refuses the call (exit 2, nothing removed): mid-run there is always one, so its absence is a fault to look at, never permission."
+    "Without `--after-rotate` — the per-pass sweep `tick --apply` runs after each merge pass — no ledger refuses the call (exit 2, nothing removed): mid-run there is always one, so its absence is a fault to look at, never permission."
   ],
   [
     "**Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>` settles `impl-<N>=bailed` and demotes by cause:",
@@ -506,7 +488,7 @@ const CHANGED = [
   ],
   [
     "| Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands or leaves a fork open; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |",
-    "| Implementer bails before implementing | Act by the report's `bailCause` as the **Relabel causes** table says, then refill (phase 3) |"
+    "| Implementer bails before implementing | Act by the report's `bailCause` as the **Relabel causes** table says, then refill (**What a wake owes beyond its call**) |"
   ],
   [
     "**`ledger.mjs drain \"<reason>\"`** — the one drain marker per run; supply stops, the review and merge sides keep going.",
@@ -560,9 +542,26 @@ const CHANGED = [
 
 // Sentences deleted outright, each named with what stands in its place.
 const DELETED = [
+  ...PHASE_3.deleted,
+  [
+    "**`impl-<N>/`** goes once issue #N is CLOSED, or when it is OPEN, no live `impl-<N>` token names it and nothing under it has changed in 7 days.",
+    "reclaim-scratch.mjs's header, which `tick --apply` runs after the reap, and tests/reclaim-scratch.test.mjs"
+  ],
+  [
+    "A duty 1 halt's report carries the verdict as printed, the JSON line, so a `rebase` halt's report carries the output of `git cherry <pin> HEAD origin/main` that its `evidence` holds.",
+    "agents/fleet-finisher.agent.md's report paragraph, which has a duty 1 halt's `evidence` carry the verdict as printed, `replay`, `rangeDiff` and `remote` included"
+  ],
   [
     "See references/shell-traps.md.",
     "nothing: each Shell traps rule now sits in references/shell-traps.md, with its evidence under its own heading there, so the pointer named the file it was in"
+  ],
+  [
+    "Its duties, in this order:",
+    "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt; phase 2's **The finisher** points at references/finisher.md"
+  ],
+  [
+    "It returns `{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts, snapshot, survived, refuted, unverified}` — the **digest** first, then the snapshot and the findings — and it lands as one artefact, `<scratch>/pr<pr>/<run>/review.json`, holding that bare object.",
+    "review-core.mjs's result file, whose fields **Reading a review result**'s `jq` read names and tests/review-path-default.test.mjs checks against the function's actual return"
   ],
   [
     "`needs-triage` routes back to `/triage`, which can return it as `ready-for-agent`; `ready-for-human` for hands or a fork; `needs-triage` for a brief that names no *what*.",
@@ -597,6 +596,24 @@ test("every sentence of the pre-rewrite SKILL.md is in SKILL.md or across refere
   const missing = CHANGED.filter(([, to]) => (now.get(to) ?? 0) < 1).map(([from]) => from);
   assert.deepEqual(missing, [], "changed sentences whose replacement is not in SKILL.md or across references/");
   for (const [from] of [...CHANGED, ...DELETED]) assert.ok(was.has(from), `a changed or deleted sentence the fixture never said: ${from}`);
+});
+
+// The changed and the deleted are only excused above, which says nothing about
+// one coming back. A changed sentence's pre-rewrite half is said nowhere now. A
+// deleted sentence is said at most as often as the fixture said it, less once
+// for each time it is listed deleted, so a pointer dropped at one site while
+// other sites keep saying it still counts.
+test("no changed sentence's pre-rewrite half is in SKILL.md or across references/, and no deleted sentence is said as often as before", () => {
+  const was = oldSentences();
+  const now = newSentences();
+  const back = [];
+  for (const [from] of CHANGED) if ((now.get(from) ?? 0) > 0) back.push(`changed, still said ${now.get(from)}×: ${from}`);
+  const listed = counted(DELETED.map(([from]) => from));
+  for (const [from, k] of listed) {
+    const allowed = (was.get(from) ?? 0) - k;
+    if ((now.get(from) ?? 0) > allowed) back.push(`deleted, said ${now.get(from)}× (fixture ${was.get(from)}×, listed ${k}×): ${from}`);
+  }
+  assert.deepEqual(back, [], "changed or deleted sentences said again");
 });
 
 // --- the three blocks that moved whole ----------------------------------------

@@ -34,8 +34,10 @@ const step7 = () =>
 // takes, for the same reason.
 const memberBlocks = () => read("agents", "fleet-implementer-slow-high.agent.md").text.split("---").slice(2).join("---");
 
+// Duty 3 is stated in the finisher's agent body, which the harness injects as
+// its system prompt; run-team's SKILL.md no longer restates it.
 const finisherLabelDuty = () =>
-  RUN_TEAM.between("Add `ready-to-merge`", "4. Report you the label", "run-team finisher duty 3").text;
+  Pin.of(memberPrompt("finisher", "fresh"), "the finisher's member prompt").between("**Duty 3 is one script, and its exit code is your verdict.**", "Report to the controller in the report file your brief names", "finisher duty-3 block").text;
 
 test("next-ticket's step 7 writes the label with a command of its own, not a flag on the create", () => {
   const s = step7();
@@ -120,50 +122,33 @@ test("the finisher refuses a PR with zero or more than one release label, and sa
   );
   assert.match(
     duty,
-    /naming which|says which|report(s|ing)? which/,
+    /naming which|names which|says which|report(s|ing)? which/,
     "the finisher may halt without naming what it found, which is the bare-SHA-mismatch failure shape this file's neighbours already record",
   );
 });
 
-test("the finisher's assertion accepts a normally-labelled PR — it counts release labels, not labels", () => {
-  const duty = finisherLabelDuty();
-
-  // The wrongly-REFUSE half. The finisher is about to add `ready-to-merge`,
-  // which is itself a label, and PRs carry others; an assertion reading
-  // "exactly one label" halts every correctly-created PR in the fleet.
-  assert.match(
-    duty,
-    Pin.phrase("counts only those three"),
-    "the finisher's assertion is no longer scoped to the release labels — any other label on the PR now trips it",
-  );
-  assert.match(
-    duty,
-    Pin.phrase("passes unchanged"),
-    "the finisher no longer states that a PR carrying one release label beside its other labels passes",
-  );
-});
+// The wrongly-REFUSE half — a PR carrying one release label beside its other
+// labels passes — is the script's own: finisher-label.test.mjs's "other labels
+// beside the one release label do not trip the count" is its check.
 
 // #2331: duty 3 read as one item let two finishers stop at the release-label
 // check and report `labelled` with no `ready-to-merge` on the PR. The check and
 // the add are now one script the finisher runs, whose exit code is its
 // verdict, so neither can be run alone — and the finisher's prose no longer
 // spells the commands that were each read as the whole duty. The duty is
-// stated twice: in the controller's duty list, and in the finisher's member
-// prompt, where its agent body carries the block the member reads.
-test("duty 3 is one script — named in the duty list and the member prompt, with no gh commands spelled", () => {
-  const item = RUN_TEAM.between("3. Add `ready-to-merge` by running one script", "4. Report you the label", "finisher duty 3").text;
-  const block = Pin.of(memberPrompt("finisher", "fresh"), "the finisher's member prompt").between("**Duty 3 is one script, and its exit code is your verdict.**", "Report to the controller in the report file your brief names", "finisher duty-3 block").text;
-  for (const [text, where] of [[item, "the duty list"], [block, "the member prompt's duty 3 block"]]) {
-    assert.match(text, Pin.phrase("finisher-label.mjs --pr"), `${where} no longer runs the script`);
-    assert.match(text, Pin.phrase("fleet-run finisher-label.mjs"), `${where} reaches the script by something other than the Resolver`);
-    assert.doesNotMatch(text, /gh pr (view|comment|edit)/, `${where} spells a gh command again — the steps are separable by hand once more`);
-    assert.match(text, Pin.phrase("exit code"), `${where} does not say the exit code is the verdict`);
-  }
+// stated in the finisher's member prompt, where its agent body carries the
+// block the member reads.
+test("duty 3 is one script — named in the member prompt, with no gh commands spelled", () => {
+  const block = finisherLabelDuty();
+  assert.match(block, Pin.phrase("finisher-label.mjs --pr"), "the member prompt's duty 3 block no longer runs the script");
+  assert.match(block, Pin.phrase("fleet-run finisher-label.mjs"), "the member prompt's duty 3 block reaches the script by something other than the Resolver");
+  assert.doesNotMatch(block, /gh pr (view|comment|edit)/, "the member prompt's duty 3 block spells a gh command again — the steps are separable by hand once more");
+  assert.match(block, Pin.phrase("exit code"), "the member prompt's duty 3 block does not say the exit code is the verdict");
   assert.match(block, Pin.phrase("Exit 0 is the only code that means the label is on"), "the block no longer says only exit 0 is a label");
   assert.match(block, Pin.phrase("Every non-zero exit halts you"), "the block lets a non-zero exit go on");
   assert.match(block, Pin.phrase("its steps by hand to get past it"), "the block no longer forbids replaying the steps by hand");
-  assert.match(RUN_TEAM.bullet("4. Report you the label", "**Once the label is on, take it off before you approve any push.**", "finisher duty 4").text, Pin.phrase("the script's receipt, the JSON line it printed, as printed"),
-    "duty 4 no longer reports the script's receipt");
+  assert.match(block, Pin.phrase("Put the receipt, the JSON line it printed, in your report as printed"),
+    "the block no longer reports the script's receipt");
 });
 
 test("the solo labelling step gates on the release label too — the fleet finisher is not its only writer", () => {

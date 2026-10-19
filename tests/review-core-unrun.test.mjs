@@ -485,7 +485,7 @@ test("run-team's Reviewers section documents dimensionsUnrun and suiteVerdict, n
 // back, and in the lowercase paraphrase a `phrase` pin on `NOT` walks past.
 test("run-team claims a review RETURNED from a key's absence from dimensionsUnrun, never that it is covered", () => {
   const doc = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
-  const para = Pin.of(doc, "doc").between("**`dimensionsRun` is the dispatch", "The rule this replaces", "run-team/SKILL.md").text;
+  const para = Pin.of(doc, "doc").paragraph("**`dimensionsRun` is the dispatch", "run-team/SKILL.md", "**`suiteVerdict` is the review's one judgement").text;
   assert.match(
     para,
     Pin.phrase("and NOT in `dimensionsUnrun` returned a review;"),

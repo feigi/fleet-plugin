@@ -1,0 +1,482 @@
+{
+  "changed": [
+    [
+      "**Only an explicit bail report — the member itself naming the cause — reaches Implementer bails before implementing** (phase 3, below); a died or merely-quiet member's silence never does.",
+      "**Only an explicit bail report — the member itself naming the cause — reaches Implementer bails before implementing** (**What a wake owes beyond its call**, above); a died or merely-quiet member's silence never does."
+    ],
+    [
+      "The member-facts scrape, the drain of the pending ticket-features rows and the commit of the metrics files are steps of `closeout.mjs finish`, which **End of run** (Phase 3) drives.",
+      "The member-facts scrape, the drain of the pending ticket-features rows and the commit of the metrics files are steps of `closeout.mjs finish`, which **End of run** (**What a wake owes beyond its call**) drives."
+    ],
+    [
+      "**A review result lands** → see the result file written (by you or by the runner — **Reviewers** says which, per harness), then `fleet-event.mjs review-result <pr> <path>`: a PR with survived or unverified findings prints as `DISPATCH fix-pr PR#<M>`.",
+      "**A review result lands** → see the result file written (by you or by the runner — **The reviewer** says which, per harness), then `fleet-event.mjs review-result <pr> <path>`: a PR with survived or unverified findings prints as `DISPATCH fix-pr PR#<M>`."
+    ],
+    [
+      "A review that failed is not a result — **Reviewers** says who retries it and what takes over.",
+      "A review that failed is not a result — **Recovery** says who retries it and what takes over."
+    ],
+    [
+      "**Monitor: `ready-to-merge` appears** → `fleet-event.mjs label <pr>`, and on `DISPATCH merge-bot` dispatch the next `merge-bot-<n>` (**Merge bot**).",
+      "**Monitor: `ready-to-merge` appears** → `fleet-event.mjs label <pr>`, and on `DISPATCH merge-bot` dispatch the next `merge-bot-<n>` (**The merge bot**)."
+    ],
+    [
+      "A `rebase-fallback-#<pr>` on a conflict needs no record from you — the bot already appended `conflict-hold:#<pr>` to that PR's row, and the tick turns it into `DISPATCH fix-pr PR#<pr>` (**Reviewers**).",
+      "A `rebase-fallback-#<pr>` on a conflict needs no record from you — the bot already appended `conflict-hold:#<pr>` to that PR's row, and the tick turns it into `DISPATCH fix-pr PR#<pr>` (**The fix-applier**)."
+    ],
+    [
+      "`~/.fleet/bin/fleet-run fleet-event.mjs drain --reason \"<reason>\"` — runs `closeout.mjs begin --reason \"<reason>\"` (**Release the claims that never became PRs**), then the tick.",
+      "`~/.fleet/bin/fleet-run fleet-event.mjs drain --reason \"<reason>\"` — runs `closeout.mjs begin --reason \"<reason>\"` (references/reaping.md), then the tick."
+    ],
+    [
+      "`DISPATCH fix-pr PR#<M> …` — a fix-applier per PR, for a review's survived or unverified findings, a dispositions mismatch no retry has answered, or a `conflict-hold:#<M>` — the merge bot's, or one you recorded off a `CONFLICT` line (**Reviewers**).",
+      "`DISPATCH fix-pr PR#<M> …` — a fix-applier per PR, for a review's survived or unverified findings, a dispositions mismatch no retry has answered, or a `conflict-hold:#<M>` — the merge bot's, or one you recorded off a `CONFLICT` line (**The fix-applier**)."
+    ],
+    [
+      "`DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn (**Reviewers**).",
+      "`DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn (**The reviewer**)."
+    ],
+    [
+      "`DISPATCH merge-bot` — the next `merge-bot-<n>` (**Merge bot**).",
+      "`DISPATCH merge-bot` — the next `merge-bot-<n>` (**The merge bot**)."
+    ],
+    [
+      "Apply the finisher gate (**Reviewers**: the `check` job green on the current head), then dispatch the next-suffix finisher at that head, one letter past the highest the PR has used: render its brief with `dispatch-prompt.mjs render finisher --kind repair --member finisher-pr-<M>-<x> …`, then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`.",
+      "Apply the finisher gate (**The finisher gate**: the `check` job green on the current head), then dispatch the next-suffix finisher at that head, one letter past the highest the PR has used: render its brief with `dispatch-prompt.mjs render finisher --kind repair --member finisher-pr-<M>-<x> …`, then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`."
+    ],
+    [
+      "test --at origin/main` prints it — and the one you hand specialists per **Give specialists a stack-free test command** above.",
+      "test --at origin/main` prints it — and the one you hand specialists per `review-and-fix.md`'s **Give specialists a stack-free test command**."
+    ],
+    [
+      "`claim-ticket.sh`, `release-ticket.sh`, `reap.sh` and `inflight.sh` are git-native and operate on the single shared ref store every worktree and the main checkout read and write directly (**Phase 1**, **Reap after each merge pass**, **Release the claims that never became PRs** above); nothing in omp's `task` model touches that store, so none of the four scripts carries a dialect branch.",
+      "`claim-ticket.sh`, `release-ticket.sh`, `reap.sh` and `inflight.sh` are git-native and operate on the single shared ref store every worktree and the main checkout read and write directly (**Phase 1**, the tick's reap, and `release-ticket.sh` under **Failure handling**); nothing in omp's `task` model touches that store, so none of the four scripts carries a dialect branch."
+    ],
+    [
+      "One invocation prints per-role `actual/target` and an explicit ACTION with the backlog gate above and every row of the table below already applied; every wake in Phase 3 ends in it.",
+      "One invocation prints per-role `actual/target` and an explicit ACTION with the backlog gate above and every row of the table below already applied; every wake ends in it."
+    ],
+    [
+      "A PR's review is not a member, so it carries its own pair of row tokens, written with `review` onto the PR's row (**Reviewers**): `review=wf:<runId>` | `review=member:<name>` at launch, `<name>` being `review-pr-<n>` for the PR's first runner and the next letter its rows do not carry yet (`review-pr-<n>-b`, `-c`, …) for every later one, settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` when the result lands, `<run>` the review's `run-XXXXXXXX` run root under `<scratch>/pr<n>/`, which holds its `review.json`.",
+      "A PR's review is not a member, so it carries its own pair of row tokens, written with `review` onto the PR's row (**The reviewer**): `review=wf:<runId>` | `review=member:<name>` at launch, `<name>` being `review-pr-<n>` for the PR's first runner and the next letter its rows do not carry yet (`review-pr-<n>-b`, `-c`, …) for every later one, settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` when the result lands, `<run>` the review's `run-XXXXXXXX` run root under `<scratch>/pr<n>/`, which holds its `review.json`."
+    ],
+    [
+      "`ci=<run-id>:<attempt>:<conclusion>` and `held-behind:#<lower>` are row tokens the same way (Phase 3), and so is `conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md` step 1), or by you off the tick's `CONFLICT` line, naming the row's own PR.",
+      "`ci=<run-id>:<attempt>:<conclusion>` and `held-behind:#<lower>` are row tokens the same way, and so is `conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md` step 1), or by you off the tick's `CONFLICT` line, naming the row's own PR."
+    ],
+    [
+      "Phase 3's monitor paragraph points here instead of restating any of it.",
+      "**Own the CI waits**'s monitor paragraph points here instead of restating any of it."
+    ],
+    [
+      "The merge bot's agent body is the one place this block is copied whole (see **Merge bot**); the other deliberate copy is named at the end.",
+      "The merge bot's agent body is the one place this block is copied whole (see **The merge bot**); the other deliberate copy is named at the end."
+    ],
+    [
+      "The inline `$(printf '%s\\n' \"$prs\")` form splits correctly too and is what Phase 3's block uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can.",
+      "The inline `$(printf '%s\\n' \"$prs\")` form splits correctly too and is what the watcher block under **Own the CI waits** uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can."
+    ]
+  ],
+  "deleted": [
+    [
+      "**Tier guards under Pull.**",
+      "phase 2's **The tier check**, which says `tick --apply` runs the per-dispatch check and names both holds; `fleet-tick.mjs` and `tier-check.mjs`, whose own tests are tests/fleet-tick.test.mjs and tests/tier-check.test.mjs"
+    ],
+    [
+      "The per-dispatch `tier-check.mjs --batch` is phase 2's own step, run by `tick --apply`: a mismatch it finds is the `HOLD (tier mismatch impl-<N>)` above, and a member it has no verdict on is the `HOLD (tier unchecked impl-<N>)`.",
+      "phase 2's **The tier check**, which says `tick --apply` runs the per-dispatch check and names both holds; `fleet-tick.mjs` and `tier-check.mjs`, whose own tests are tests/fleet-tick.test.mjs and tests/tier-check.test.mjs"
+    ],
+    [
+      "Nothing else in the loop owns it.",
+      "phase 2's **The tier check**, which says `tick --apply` runs the per-dispatch check and names both holds; `fleet-tick.mjs` and `tier-check.mjs`, whose own tests are tests/fleet-tick.test.mjs and tests/tier-check.test.mjs"
+    ],
+    [
+      "**`--in-flight <B>`** is the run's In-flight bound: leave it at its default unless `$ARGUMENTS` set it.",
+      "**The tick's rows**, which passes `--in-flight` only when `$ARGUMENTS` set it, and phase 2's **The tier check**, which says `task.maxConcurrency` is not the bound and its line is a notice"
+    ],
+    [
+      "omp's `task.maxConcurrency` is not the bound (**Phase 2** gives the reasons) — below 2·B+2 it is a notice, never a hold.",
+      "**The tick's rows**, which passes `--in-flight` only when `$ARGUMENTS` set it, and phase 2's **The tier check**, which says `task.maxConcurrency` is not the bound and its line is a notice"
+    ],
+    [
+      "**`--fold-unchanged` belongs to the heartbeat alone** — `fleet-event.mjs heartbeat` passes it, no other kind does.",
+      "`fleet-tick.mjs --fold-unchanged`, which `fleet-event.mjs heartbeat` passes and tests/fleet-tick.test.mjs runs"
+    ],
+    [
+      "It prints one line instead of the rows when a tick asks for nothing AND says exactly what the last one said, which is what makes an unattended night affordable; a tick on any other wake is read by a controller that just acted and needs the rows.",
+      "`fleet-tick.mjs --fold-unchanged`, which `fleet-event.mjs heartbeat` passes and tests/fleet-tick.test.mjs runs"
+    ],
+    [
+      "An unchanged `PULL` or `DISPATCH` is never folded — unclaimed work always prints in full, because folding it would hide the stall behind this ticket's own remedy.",
+      "`fleet-tick.mjs --fold-unchanged`, which `fleet-event.mjs heartbeat` passes and tests/fleet-tick.test.mjs runs"
+    ],
+    [
+      "A dirty or unknown main checkout still folds — clearing it is the maintainer's, so it is nothing for you to act on — but the folded line names it (`…; HOLD (main checkout dirty) persists — …`) for as long as it holds dispatch.",
+      "`fleet-tick.mjs --fold-unchanged`, which `fleet-event.mjs heartbeat` passes and tests/fleet-tick.test.mjs runs"
+    ],
+    [
+      "A live member past its family's threshold folds the same way — it is advice, so nothing for the heartbeat to act on by itself — and the folded line names each such member (`…; CHECK-LIVENESS fix-pr-5 persists — …`) for as long as it stays live past the threshold.",
+      "`fleet-tick.mjs --fold-unchanged`, which `fleet-event.mjs heartbeat` passes and tests/fleet-tick.test.mjs runs"
+    ],
+    [
+      "To-spec drops fold the same way, and the folded line names them (`…; specs-dropped=#<N> (to-spec: User Stories heading) persists — …`) for as long as the shortlist carries them.",
+      "`fleet-tick.mjs --fold-unchanged`, which `fleet-event.mjs heartbeat` passes and tests/fleet-tick.test.mjs runs"
+    ],
+    [
+      "`fleet-tick` prints it before its own rows when this run has gone quiet: its beat overdue against the interval it recorded with no tick or ledger write inside the 40-minute window either — or, with no beat yet, its latest tick, ledger write or controller record past that window.",
+      "fleet-state.mjs's stall report, which the tick prints and tests/fleet-state.test.mjs runs; **Nothing to do: arm the beat** keeps what each opening wording asks of the controller"
+    ],
+    [
+      "A beat, tick or ledger write older than the controller record rotate wrote is the previous run's and counts for nothing.",
+      "fleet-state.mjs's stall report, which the tick prints and tests/fleet-state.test.mjs runs; **Nothing to do: arm the beat** keeps what each opening wording asks of the controller"
+    ],
+    [
+      "The cockpit shows the same line while it is up.",
+      "fleet-state.mjs's stall report, which the tick prints and tests/fleet-state.test.mjs runs; **Nothing to do: arm the beat** keeps what each opening wording asks of the controller"
+    ],
+    [
+      "It names when this run was last seen, how overdue that is, how many tickets are still claimed and in flight, and how much supply the last read found — because the claimed ones keep the `in-progress` label, the candidate scan EXCLUDES that label, and those tickets are therefore invisible to your own shortlist and to the maintainer's.",
+      "fleet-state.mjs's stall report, which the tick prints and tests/fleet-state.test.mjs runs; **Nothing to do: arm the beat** keeps what each opening wording asks of the controller"
+    ],
+    [
+      "**Review units are counted, never capped.**",
+      "fleet-tick.mjs's review-unit count, run by tests/fleet-tick.test.mjs; **Run ledger** keeps that a row with `review=` and no `reviewed=` is a review in flight"
+    ],
+    [
+      "A review in flight — a `review-pr-<pr#>` member still running — is one; each `fix-pr-<pr#>` is one; a finisher and a CI wait are zero; and a PR holds at most one unit at a time.",
+      "fleet-tick.mjs's review-unit count, run by tests/fleet-tick.test.mjs; **Run ledger** keeps that a row with `review=` and no `reviewed=` is a review in flight"
+    ],
+    [
+      "In-flight reviews are derived, never remembered: a row with `review=` and no `reviewed=` is one, which is why the token goes on before anything else.",
+      "fleet-tick.mjs's review-unit count, run by tests/fleet-tick.test.mjs; **Run ledger** keeps that a row with `review=` and no `reviewed=` is a review in flight"
+    ],
+    [
+      "A review whose PR has left the open list is probed: when `gh pr view` reports that PR MERGED or CLOSED, the tick drops the review, since none runs against a finished PR, and a probe that cannot answer keeps the unit counted.",
+      "fleet-tick.mjs's review-unit count, run by tests/fleet-tick.test.mjs; **Run ledger** keeps that a row with `review=` and no `reviewed=` is a review in flight"
+    ],
+    [
+      "A unit is not the agents a review fans out to — 1 snapshot + up to 6 specialists + 2 refuters per critical/important finding.",
+      "fleet-tick.mjs's review-unit count, run by tests/fleet-tick.test.mjs; **Run ledger** keeps that a row with `review=` and no `reviewed=` is a review in flight"
+    ],
+    [
+      "`<run>` is the review's own `run-XXXXXXXX` run root, the one its snapshot sits in, so a second review of the PR — at the same head or another — writes a file of its own and never replaces the first.",
+      "review-core.mjs's result file and `fleet-event.mjs review-result`, which records `reviewed=` off it; **Reading a review result** keeps the path built from that token"
+    ],
+    [
+      "The `review-pr-<pr#>` runner writes it and reports the digest, the path and the `reviewed=` token naming that run.",
+      "review-core.mjs's result file and `fleet-event.mjs review-result`, which records `reviewed=` off it; **Reading a review result** keeps the path built from that token"
+    ],
+    [
+      "Settle the dead review by appending `=failed` to its `review=` token, then append `review=member:<that name>` after it, both in one `ledger.mjs review <pr> review=<dead launch>=failed review=member:<that name>` call — `review` settles the dead launch in place, and refuses a new launch while the dead one still reads open, and the tick takes the last `review=` token on a row as the one in flight, so that order is what keeps the retry counted as the live review unit.",
+      "the wake table's **Review launch failed** row, `fleet-event.mjs review-failed`, which settles the dead launch, and phase 2's **The reviewer**, which records the next launch before its dispatch"
+    ],
+    [
+      "**The suite slot bound.**",
+      "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
+    ],
+    [
+      "At most `FLEET_SUITE_SLOTS` full suite runs execute on a host at once — 2 by default, whatever the member caps count — because each run already spreads over most of the host's cores.",
+      "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
+    ],
+    [
+      "The bound is a wrapper, `suite-slot.mjs`, reached through the Resolver: `~/.fleet/bin/fleet-run suite-slot.mjs '<entrypoint>' [args…]` runs the entrypoint under `sh -c` with the arguments after it.",
+      "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
+    ],
+    [
+      "It decides by arity.",
+      "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
+    ],
+    [
+      "No appended arguments is a full run, and waits for a free slot.",
+      "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
+    ],
+    [
+      "Appended arguments are a narrowed run, which takes none, so a verifier's `<testCmd> <args>` never queues behind a full run — only its fall-back to the full command does.",
+      "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
+    ],
+    [
+      "A wrapper that finds `FLEET_SUITE_SLOT` set, which a slot holder exports to its child, is nested inside a held slot and runs straight through, so a wrapped command inside a wrapped command is one run, not a deadlock.",
+      "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
+    ],
+    [
+      "A slot is a pid-stamped lock file in `~/.fleet/suite-slots/` — under the host's `~/.fleet/` and not a workspace's, because the bound is host-wide and a review's snapshot is no repository.",
+      "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
+    ],
+    [
+      "Each seat that runs the full suite is wrapped where its command is written.",
+      "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
+    ],
+    [
+      "A claim's runner execs the Test entrypoint through the wrapper.",
+      "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
+    ],
+    [
+      "A repository that tracks its own runner wraps it itself, as this repository's `agent-test` does for a bare run.",
+      "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
+    ],
+    [
+      "The wait is capped and never counts against the run: `FLEET_SUITE_WAIT_S` seconds, 1800 by default, then exit **75** with `suite-slot: no slot after <n>s` on stderr, having launched nothing.",
+      "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
+    ],
+    [
+      "On getting a slot the wrapper prints `SUITE_SLOT_WAIT_MS=<n>` — the wait in milliseconds — to stderr, which the review's test-run block captures into its log and the test-run agent reports as `slotWaitMs`.",
+      "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
+    ],
+    [
+      "The implementer, fix-applier and finisher briefs carry the one-line rule: *Exit 75 from the suite is not a test result; run the command again.*",
+      "the briefs themselves, which tests/suite-slot-prose.test.mjs pins against every rendered implementer, fix-applier and finisher brief"
+    ],
+    [
+      "A slot holder killed without releasing is taken over by the next waiter under the same `.reap` discipline as the ledger's lock; the wedges that discipline cannot clear are in the runbook under **Writer policy**.",
+      "suite-slot.mjs's header and tests/suite-slot.test.mjs; **The test command every gate runs** keeps the wrapped string the controller hands out, and **Reading a review result** what a no-slot review asks"
+    ],
+    [
+      "See references/finisher.md.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "**Audit the worktree** by running one script, `finisher-audit.mjs` — the row lookup, the dirty check, the head-equality check and the cause derivation are one command, because each of them alone reads like the whole duty.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "Its exit code is the verdict of this duty: `~/.fleet/bin/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`, the path the one you were dispatched with, however it was spelled, and the pin the full SHA.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "It runs `worktree-audit.sh` itself and finds this worktree's row by its `realpath`, so a spelling reached through a symlink still finds a healthy worktree's row; it reads dirty from the row and from `git status --porcelain -unormal`; it compares the worktree's `HEAD` to your dispatch pin; and when the head differs from the pin it derives the cause from the reflog.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "It prints one JSON verdict, `{worktree, realpath, pin, head, cause, evidence}`.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "Exit 0, `cause` null, is the only result that means the worktree is clean at your pin.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "Exit 1 means `cause` names why not — `live-editor`, `rebase`, `past-pin`, `unreadable`, `missing`, `absent` or `other` — and exit 2 means the script could not look.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "Every non-zero exit halts the finisher *here*, before the label: it reports the verdict as printed and labels nothing, and an exit 2 is cause `other` with the line the script printed on stderr as its evidence.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "A finisher that cannot see the tree it labels cannot vouch for it, so none of the script's steps is run by hand to get past a halt.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "A finisher that verifies the dirt is harmless and labels anyway has substituted the rule's purpose for the rule, and you find out at merge time.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "The halt-cause block in `agents/fleet-finisher.agent.md` holds the script call and what each exit means, and a bare SHA mismatch names no cause.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "**Pass `--testCmd` too** — the same string you passed the workflow and the fix-applier — because duty 2's mutation gate runs it and nothing else hands the finisher one; the renderer refuses a finisher brief rendered without it.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "**A fix-applier's \"applied\" is a claim like any other**, and nothing else checks it — the review ran against a snapshot cut before those edits existed.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "Confirm `git diff origin/main...HEAD` actually contains what it reported applying.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "Two finishers in one run extended duty 2 this way unprompted, and one found five applies where the controller's hand-written list named three: a controller's list of what to verify is itself a claim.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "**None of this licenses a write to the owned worktree.**",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "Duty 1 is a read; you never restore that tree, because you never wrote to it.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "A controller instruction to restore mutated paths there is an instruction to perform the silent-destruction ordering above — report it back, do not run it.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "One finisher refused exactly that instruction live, on the grounds it could not prove the diff was its own; that was judgement, and this is the rule.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "Add `ready-to-merge` by running one script, `finisher-label.mjs` — the release-label check and the label write are one command, because the check reads like the whole duty.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "Its exit code is the finisher's verdict: `~/.fleet/bin/fleet-run finisher-label.mjs --pr <pr> --pin <your dispatch pin>`, the pin the full SHA.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "In order, it finds **exactly one** release label, `patch`/`minor`/`major` — zero or more than one is exit 3 before anything is written, naming which it found; then it records the head you audited as a PR comment, which the merge bot reads as the head the label was applied to; then it adds the label and reads the labels back, and exits 0 only when that read-back carries `ready-to-merge`.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "A failed call is exit 2 and the read-back without the label is exit 4; no step after a failed one runs.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "The count is the backstop for a label lost wherever it was lost, a hand-created PR included: a `gh pr create` that outran its caller's tool timeout leaves the PR open with the flag unapplied and no exit status anywhere to notice, and nothing downstream re-derives the release label.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "It counts only those three — the PR carries other labels, `ready-to-merge` itself among them once the script adds it, so a PR wearing one release label beside them passes unchanged.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "A repo that defines none of the three does not gate on one — the script settles that from the repo's own label list and says `undefined-in-repo` in its receipt.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "Two finishers in one run stopped at the release-label check and reported `labelled` on PRs that sat out of the merge queue.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "Report you the label (the script's receipt, the JSON line it printed, as printed), the deferral issue numbers — a `filed: #N <subject>` line for every issue duty 2 created, and `unrecorded: #N <subject>` for one whose `filed` failed twice — and anything it halted on — cause and evidence, below, never a bare \"head moved\".",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "The cause is one word of the ledger's `halted:<cause>` vocabulary: `live-editor`, `rebase`, `past-pin`, `unreadable`, `missing` or `absent` as duty 1's verdict names it, and `other` for every other halt — that verdict's own `other`, and a halt at duty 2, duty 3, the instrument re-check or the CI gate.",
+      "agents/fleet-finisher.agent.md, which states each duty and is the finisher's system prompt, with finisher-audit.mjs and finisher-label.mjs (tests/finisher-audit.test.mjs, tests/finisher-label.test.mjs); phase 2's **The finisher** points at references/finisher.md"
+    ],
+    [
+      "**Its merge gate is one script, run twice.**",
+      "merge-gate.mjs and tests/merge-gate.test.mjs, and `run-merge-bot.md` step 3, which the merge bot reads"
+    ],
+    [
+      "Step 3 of `run-merge-bot.md` is `merge-gate.mjs --pr <n> --pre <sha> [--post <sha>]`: read-only, it runs the instrument re-check, the label and review-decision read and a run-bound `ci-state`, and answers their conjunction — exit 0 mergeable, 1 blocked (the bot reports `<reason>-#<pr>`), 2 could not evaluate.",
+      "merge-gate.mjs and tests/merge-gate.test.mjs, and `run-merge-bot.md` step 3, which the merge bot reads"
+    ],
+    [
+      "The bot runs it once before any CI wait and again immediately before `gh pr merge`, and merges only on that second exit 0.",
+      "merge-gate.mjs and tests/merge-gate.test.mjs, and `run-merge-bot.md` step 3, which the merge bot reads"
+    ],
+    [
+      "Nothing but the gate reads `ci-state` on the merge path, so a bot's report names the gate's `reason`, never a field it read by hand.",
+      "merge-gate.mjs and tests/merge-gate.test.mjs, and `run-merge-bot.md` step 3, which the merge bot reads"
+    ],
+    [
+      "`run-merge-bot.md` carries the mechanics — intra-pass re-checks, run-binding, the ancestry proof, post-rebase red triage.",
+      "`run-merge-bot.md`, which the merge bot reads; SKILL.md restates none of its mechanics"
+    ],
+    [
+      "Do not restate them here.",
+      "`run-merge-bot.md`, which the merge bot reads; SKILL.md restates none of its mechanics"
+    ],
+    [
+      "The merge bot deletes the remote branch after each merge (`delete-merged-branch.sh`, in `run-merge-bot.md` step 4), leaving the local branch `[gone]` with its worktree — and its installed dependencies — still on disk.",
+      "reap.sh, which `tick --apply` runs for every `merge-bot-<n>=done` (fleet-event.mjs's header; tests/reap.test.mjs), and references/reaping.md, which carries why; the **Merge-bot pass reports done** wake keeps the controller's part"
+    ],
+    [
+      "Reap after **each** merge pass, not once at the end: a stale worktree still answers `git worktree list`, so the in-flight probe (`inflight.sh`, run by the Shortlist and by every Pull) reads an already-merged ticket as taken and the queue quietly shrinks.",
+      "reap.sh, which `tick --apply` runs for every `merge-bot-<n>=done` (fleet-event.mjs's header; tests/reap.test.mjs), and references/reaping.md, which carries why; the **Merge-bot pass reports done** wake keeps the controller's part"
+    ],
+    [
+      "The trigger is the bot's `merge-bot-<n>=done`, and `tick --apply` reaps once for every one — a pass that merged nothing included (phase 3, **Merge-bot pass reports done**).",
+      "reap.sh, which `tick --apply` runs for every `merge-bot-<n>=done` (fleet-event.mjs's header; tests/reap.test.mjs), and references/reaping.md, which carries why; the **Merge-bot pass reports done** wake keeps the controller's part"
+    ],
+    [
+      "See references/reaping.md.",
+      "reap.sh, which `tick --apply` runs for every `merge-bot-<n>=done` (fleet-event.mjs's header; tests/reap.test.mjs), and references/reaping.md, which carries why; the **Merge-bot pass reports done** wake keeps the controller's part"
+    ],
+    [
+      "`~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition inside the same invocation as the delete — `for-each-ref` for `[gone]`, `git cherry origin/main` to authorize the `git update-ref -d` delete (plus a fresh check that no worktree holds the branch), worktree removal without `--force` — and reports reaped and kept-with-reason counts.",
+      "reap.sh, which `tick --apply` runs for every `merge-bot-<n>=done` (fleet-event.mjs's header; tests/reap.test.mjs), and references/reaping.md, which carries why; the **Merge-bot pass reports done** wake keeps the controller's part"
+    ],
+    [
+      "**It sweeps detached worktrees too — the shape a `[gone]` walk structurally cannot see.**",
+      "reap.sh, which `tick --apply` runs for every `merge-bot-<n>=done` (fleet-event.mjs's header; tests/reap.test.mjs), and references/reaping.md, which carries why; the **Merge-bot pass reports done** wake keeps the controller's part"
+    ],
+    [
+      "Bounded to `.worktrees/`, so a checkout of yours outside it is reported, never removed.",
+      "reap.sh, which `tick --apply` runs for every `merge-bot-<n>=done` (fleet-event.mjs's header; tests/reap.test.mjs), and references/reaping.md, which carries why; the **Merge-bot pass reports done** wake keeps the controller's part"
+    ],
+    [
+      "It runs `git branch -D` and `git worktree remove --force` with no merged check at all — nothing there stops it deleting a branch, or discarding a member's uncommitted work, that exists nowhere else.",
+      "reap.sh, which `tick --apply` runs for every `merge-bot-<n>=done` (fleet-event.mjs's header; tests/reap.test.mjs), and references/reaping.md, which carries why; the **Merge-bot pass reports done** wake keeps the controller's part"
+    ],
+    [
+      "`tick --apply` runs it right after `reap.sh --apply`, every pass: `~/.fleet/bin/fleet-run reclaim-scratch.mjs --root <scratch> --apply`, `<scratch>` the path `scratch-root.mjs` prints.",
+      "reclaim-scratch.mjs's header, which `tick --apply` runs after the reap, and tests/reclaim-scratch.test.mjs"
+    ],
+    [
+      "Reap authorizes on git's evidence and never removes scratch; Reclaim authorizes on GitHub state and age, reading which members are live off `.fleet/ledger.md`:",
+      "reclaim-scratch.mjs's header, which `tick --apply` runs after the reap, and tests/reclaim-scratch.test.mjs"
+    ],
+    [
+      "**`pr<M>/` and `dispositions-fix-pr-<M>*.json`** go once PR #M is MERGED or CLOSED and no live `review-pr-<M>`, `fix-pr-<M>` or `finisher-pr-<M>` token names it.",
+      "reclaim-scratch.mjs's header, which `tick --apply` runs after the reap, and tests/reclaim-scratch.test.mjs"
+    ],
+    [
+      "A live `merge-bot-<n>` holds every one of them for that sweep — its token names no PR.",
+      "reclaim-scratch.mjs's header, which `tick --apply` runs after the reap, and tests/reclaim-scratch.test.mjs"
+    ],
+    [
+      "An OPEN PR's `pr<M>/` stays, all but its `run-*` roots idle past 7 days.",
+      "reclaim-scratch.mjs's header, which `tick --apply` runs after the reap, and tests/reclaim-scratch.test.mjs"
+    ],
+    [
+      "**Anything else at the root** — your own ad-hoc files included — goes once nothing under it has changed in 7 days and no live token's name appears in its name.",
+      "reclaim-scratch.mjs's header, which `tick --apply` runs after the reap, and tests/reclaim-scratch.test.mjs"
+    ],
+    [
+      "The review snapshot runs the same script as `--pr <N>` on its own PR's stale `run-*` roots.",
+      "reclaim-scratch.mjs's header, which `tick --apply` runs after the reap, and tests/reclaim-scratch.test.mjs"
+    ],
+    [
+      "Phase 1 is serial and claims ahead of dispatch, so a ticket can be legitimately claimed and then never sent: a collision surfaces after the claim, or the maintainer says drain.",
+      "release-ticket.sh's header and tests/release-ticket.test.mjs, and references/reaping.md's **Why reap declines a claim that was never dispatched**; the Failure handling row for a claim abandoned mid-run keeps the controller's part"
+    ],
+    [
+      "The claim still holds the `in-progress` label, a worktree and a branch, and **`reap.sh` will not take them** — the branch is not `[gone]` and has no unique commits, so it is correctly not reapable.",
+      "release-ticket.sh's header and tests/release-ticket.test.mjs, and references/reaping.md's **Why reap declines a claim that was never dispatched**; the Failure handling row for a claim abandoned mid-run keeps the controller's part"
+    ],
+    [
+      "Reaping fires after each merge pass and nothing fires at end of run, so the claim survives it and the in-flight probe reads a free ticket as taken next run.",
+      "release-ticket.sh's header and tests/release-ticket.test.mjs, and references/reaping.md's **Why reap declines a claim that was never dispatched**; the Failure handling row for a claim abandoned mid-run keeps the controller's part"
+    ],
+    [
+      "Same silent queue shrink as a stale merged worktree, from the opposite end.",
+      "release-ticket.sh's header and tests/release-ticket.test.mjs, and references/reaping.md's **Why reap declines a claim that was never dispatched**; the Failure handling row for a claim abandoned mid-run keeps the controller's part"
+    ],
+    [
+      "`~/.fleet/bin/fleet-run release-ticket.sh <N> impl-<N> implementer --apply` — the pair the claim took, so the two name the same branch and worktree — is the inverse of the claim, and recomputes its preconditions inside the same invocation as the delete: 0 commits ahead of `origin/main`, no unique commits (`git cherry`), no branch on `origin`, and — whenever the worktree directory is there to read — a clean worktree.",
+      "release-ticket.sh's header and tests/release-ticket.test.mjs, and references/reaping.md's **Why reap declines a claim that was never dispatched**; the Failure handling row for a claim abandoned mid-run keeps the controller's part"
+    ],
+    [
+      "Where that directory is established absent the dirty check does not run at all, and `git worktree remove` is no backstop for it: it gates its own clean check on the same `stat`, so the script's absence measurement is sole arbiter there.",
+      "release-ticket.sh's header and tests/release-ticket.test.mjs, and references/reaping.md's **Why reap declines a claim that was never dispatched**; the Failure handling row for a claim abandoned mid-run keeps the controller's part"
+    ],
+    [
+      "Two of the four are recomputed a second time at the delete itself: the dirty check by git, which is what `worktree remove` without `--force` is; and the ahead count, re-run against `origin/main` immediately before the branch delete, because a commit can land across the `gh issue view` between the checks and the delete.",
+      "release-ticket.sh's header and tests/release-ticket.test.mjs, and references/reaping.md's **Why reap declines a claim that was never dispatched**; the Failure handling row for a claim abandoned mid-run keeps the controller's part"
+    ],
+    [
+      "The `git cherry` and pushed-branch checks are **not** re-run there — a commit landing in that window is ahead of `origin/main` by construction, so the recount covers it.",
+      "release-ticket.sh's header and tests/release-ticket.test.mjs, and references/reaping.md's **Why reap declines a claim that was never dispatched**; the Failure handling row for a claim abandoned mid-run keeps the controller's part"
+    ],
+    [
+      "All clear → drops the label, removes the worktree without `--force`, deletes the branch with `git update-ref -d` on the tip it read once before the recount — a compare-and-swap that refuses if the branch has moved off that tip — authorized by those two commit checks, the recount and a fresh check that no worktree holds the branch, and by nothing else (not `git branch -d`: it measures against local HEAD, and a claim has no upstream, so it refuses a pristine claim whenever local `main` is behind `origin/main`).",
+      "release-ticket.sh's header and tests/release-ticket.test.mjs, and references/reaping.md's **Why reap declines a claim that was never dispatched**; the Failure handling row for a claim abandoned mid-run keeps the controller's part"
+    ],
+    [
+      "Any one of them failing → it touches nothing and names the blocker.",
+      "release-ticket.sh's header and tests/release-ticket.test.mjs, and references/reaping.md's **Why reap declines a claim that was never dispatched**; the Failure handling row for a claim abandoned mid-run keeps the controller's part"
+    ],
+    [
+      "The rest show *stale green* until something re-triggers, then flip to `rebase-check: FAILURE` with the slow jobs skipped.",
+      "references/ci-and-staleness.md's **Stale green: every merge invalidates every other open PR**, which says the rest show stale green, flip to `rebase-check: FAILURE`, and that one rebase per PR at merge time is enough"
+    ],
+    [
+      "The bot establishes currency once, when the PR is the merge candidate; requiring it earlier costs a full CI cycle per sibling merge.",
+      "references/ci-and-staleness.md's **Stale green: every merge invalidates every other open PR**, which says the rest show stale green, flip to `rebase-check: FAILURE`, and that one rebase per PR at merge time is enough"
+    ]
+  ]
+}

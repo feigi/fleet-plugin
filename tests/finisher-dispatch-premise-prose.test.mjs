@@ -1,7 +1,7 @@
 // #1499. #1053 corrected one falsified premise — that the finisher edge fires
 // on the fix-applier's own push, so green alone licenses a dispatch — at three
-// sites. Two are pinned by `ci-completes-premise-prose.test.mjs` (the phase-3
-// **Monitor: CI run completes** bullet and the narrative finisher paragraph,
+// sites. Two are pinned by `ci-completes-premise-prose.test.mjs` (the finisher
+// gate's **Monitor: CI run completes** bullet and the narrative finisher paragraph,
 // both in `skills/run-team/SKILL.md`). The third is this file's subject:
 // `commands/review-and-fix.md` step 4, the copy a fix-applier actually reads.
 // That sibling's own comment already says its slices do not reach here, and

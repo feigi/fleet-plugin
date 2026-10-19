@@ -2,12 +2,12 @@
 // verified suite run, and without one nobody labels — was stated at four sites
 // across three documents and pinned in none of them. What already exists pins a
 // different clause of the same bullet: review-path-default.test.mjs anchors the
-// Phase 3 no-ci edge's outstanding-ruling condition (`never while you still owe
+// finisher gate's no-ci test's outstanding-ruling condition (`never while you still owe
 // it a ruling`). The gate itself was free to rot in any of the four.
 //
 // Three sites remain, and they word it differently ON PURPOSE, so this pins the
 // invariant each one must keep rather than a shared sentence:
-//   - run-team/SKILL.md Phase 3 edge — the CONTROLLER's dispatch condition.
+//   - run-team/SKILL.md no-ci bullet under **The tests** — the CONTROLLER's dispatch condition.
 //   - run-team/SKILL.md finisher gate — the FINISHER's own two-facts verdict.
 //   - review-and-fix.md step 6 — the REVIEWER's attestation, off its own step 3.
 // All three can refuse to label, so all three carry the refusal half. The
@@ -57,8 +57,8 @@ function paragraphSaying(text, anchor, label) {
   return hits[0];
 }
 
-// SKILL.md's Phase 3 edge cannot use paragraphSaying: the whole event-loop
-// bullet list is one blank-line-free paragraph (~3.6k chars), and a regex over
+// SKILL.md's no-ci bullet cannot use paragraphSaying: the finisher gate's
+// **The tests** bullet list is one blank-line-free paragraph, and a regex over
 // that is satisfied by a neighbouring edge — vacuous. It gets prose-pin.mjs's
 // `bullet` instead, on the SAME anchor pair review-path-default.test.mjs already
 // uses for this bullet, so this file adds no new anchor to that document. That
@@ -68,7 +68,7 @@ function paragraphSaying(text, anchor, label) {
 
 const SITES = [
   [
-    "run-team Phase 3 no-ci edge",
+    "run-team finisher-gate no-ci test",
     () => flat(RUN_TEAM.bullet('- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "Gate on the `check` job, **not** on `ci-state --quiet` exit 0", "run-team no-ci edge").text),
     /label off the reviewer's (own )?verified suite run/i,
     /without it, do not label/i,

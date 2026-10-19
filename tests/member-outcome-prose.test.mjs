@@ -11,7 +11,7 @@
 // is merely quiet. Collapsing either into "the member bailed" would demote a
 // ticket its member never judged. Only an explicit bail report — the member
 // naming the cause itself — may reach `Implementer bails before implementing`
-// and its demote-by-cause table (phase 3). What changed is only where the
+// and its demote-by-cause table (**Relabel causes**). What changed is only where the
 // status arrives from: under Pull each member's job status arrives as its own,
 // where a pool settled once on its whole drain.
 //

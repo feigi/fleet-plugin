@@ -362,23 +362,29 @@ test("an unanswered member question blocks finisher dispatch, with the same weig
 // The recovery the ticket asks to keep in the runbook, at the moment it
 // applies: the label is already on and the controller is about to approve a
 // push. Sliced to that paragraph — `ready-to-merge` and `finisher` are
-// everywhere in this file.
+// everywhere in this file. The why moved to references/finisher.md, beside
+// the pointer the paragraph ends on.
 const labelRecovery = () =>
-  RUN_TEAM.between(
+  RUN_TEAM.paragraph(
     "**Once the label is on, take it off before you approve any push.**",
-    "**Every implementer body carries the claim discipline",
-    "run-team/SKILL.md",
+    "run-team/SKILL.md label recovery paragraph",
+    "### Own the CI waits",
   ).text;
+const labelRecoveryWhy = () =>
+  FINISHER_REFERENCE.section("## Take the label off before you approve any push", "references/finisher.md").text;
 
 test("the recovery removes the label before approving, and says why messaging the bot is not the stop", () => {
   const s = labelRecovery();
-  assert.match(s, Pin.phrase("removing the artifact the merge bot gates on is the reliable stop"));
-  assert.match(s, Pin.phrase("a label has been observed holding until after an abort message arrived"));
+  assert.match(s, Pin.phrase("then remove `ready-to-merge`, then approve"));
   assert.match(s, Pin.phrase("dispatch a **fresh** finisher against the new head"));
+  assert.match(s, Pin.phrase("See references/finisher.md."));
+  const why = labelRecoveryWhy();
+  assert.match(why, Pin.phrase("removing the artifact the merge bot gates on is the reliable stop"));
+  assert.match(why, Pin.phrase("a label has been observed holding until after an abort message arrived"));
 });
 
 // #2945, the writing half: the record is only as good as every path that adds
-// named in its duty list and in the finisher's member prompt) and
+// named in the finisher's member prompt) and
 // `review-and-fix` step 6 standalone. Each must post the record BEFORE the
 // label, so a merge bot dispatched the moment the label appears finds the
 // record already there, and must name the head it audited, not whatever the
@@ -400,7 +406,6 @@ const FINISHER_LABEL = stripComments(readFileSync(join(REPO, "scripts", "finishe
 
 test("every writer of ready-to-merge records the audited head before the label", () => {
   for (const [slice, where] of [
-    [RUN_TEAM.between("3. Add `ready-to-merge` by running one script", "4. Report you the label", "finisher duty 3").text, "finisher duty 3"],
     [
       Pin.of(memberPrompt("finisher", "fresh"), "the finisher's member prompt").between("**Duty 3 is one script, and its exit code is your verdict.**", "Report to the controller in the report file your brief names", "finisher duty-3 block").text,
       "the finisher's duty-3 block in its member prompt",

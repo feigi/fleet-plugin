@@ -17,8 +17,8 @@
 //
 // WHERE IT GOES, and that is half the ticket. The rule sits in `## Failure
 // handling`, between the table row that acts on a dead member and the
-// Settle/liveness pair that says how to ask each harness — not in Phase 3's
-// narrative, which is about reacting to artifacts rather than judging death.
+// Settle/liveness pair that says how to ask each harness — not in the wake
+// table's narrative, which is about reacting to artifacts rather than judging death.
 // The killed row itself carries the gate in one clause, because a controller
 // scanning the table acts off the row. The clause's paragraph, with the
 // measurement that produced it, moved to references/failure-handling.md;
@@ -265,22 +265,17 @@ test("the clause keeps the asymmetry that makes every alive-signal a preconditio
   assert.match(clause(), Pin.phrase(ASYMMETRY), `${REFERENCE}'s stalled-member clause lost its cost asymmetry — the reason a kill waits for every alive-signal to be silent.`);
 });
 
-// The two other sentences this change put in SKILL.md that the controller acts
-// on: the Run-ledger line that sends a resumed controller to the census before
-// it trusts a live token, and the fold paragraph's naming of the folded
-// CHECK-LIVENESS suffix. Each is read inside its own paragraph, so the same
-// words elsewhere in the file cannot satisfy it.
+// The other sentence this change put in SKILL.md that the controller acts on:
+// the Run-ledger line that sends a resumed controller to the census before it
+// trusts a live token. It is read inside its own paragraph, so the same words
+// elsewhere in the file cannot satisfy it. The fold sentence that named a
+// folded CHECK-LIVENESS member restated what `fleet-tick.mjs --fold-unchanged`
+// prints and left SKILL.md with its event loop; fleet-tick.test.mjs's
+// `--fold-unchanged` CHECK-LIVENESS case is its check.
 const RESUME_CENSUS =
   "Compaction parks every in-flight member and nothing reports it, so on resume take the registry census first (**Member unaccounted**, in **Failure handling**) before you trust a live token.";
-const FOLD_SUFFIX =
-  "A live member past its family's threshold folds the same way — it is advice, so nothing for the heartbeat to act on by itself — and the folded line names each such member (`…; CHECK-LIVENESS fix-pr-5 persists — …`) for as long as it stays live past the threshold.";
 
 test("the Run-ledger paragraph tells a resumed controller to take the registry census before trusting a live token", () => {
   const block = read().paragraph("Compaction parks every in-flight member", `${SKILL}'s Run-ledger resume sentence`, "**The file lives one run.**").text;
   assert.match(block, Pin.phrase(RESUME_CENSUS), `${SKILL}'s Run-ledger paragraph lost the census-first-on-resume sentence.`);
-});
-
-test("the fold paragraph names a folded CHECK-LIVENESS member", () => {
-  const block = read().paragraph("A live member past its family's threshold folds the same way", `${SKILL}'s fold sentence`, "**When you stop on purpose, say why").text;
-  assert.match(block, Pin.phrase(FOLD_SUFFIX), `${SKILL}'s fold prose lost the sentence naming a folded CHECK-LIVENESS member.`);
 });

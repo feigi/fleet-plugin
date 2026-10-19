@@ -1,8 +1,9 @@
 # CI reading and staleness
 
 Why green not verdict, why absence is its own verdict, why conclusion not
-stable, why behind-count only honest signal. Assertions live in SKILL.md
-Phase 3 event loop + Merge bot sections; evidence here.
+stable, why behind-count only honest signal, why the tick runs on every wake
+and why the beat is shaped as it is. Assertions live in SKILL.md's wake table,
+**Nothing to do: arm the beat** and **Own the CI waits**; evidence here.
 
 ## Own the CI waits — members cannot hold across a run
 
@@ -12,6 +13,9 @@ could not read. So controller arms second persistent Monitor over open PRs'
 latest runs, keyed `<run-id>:<attempt>:<conclusion>` so each terminal state
 fires once, emits behind-count with it: `success` on branch 8 behind not
 actionable, that distinction most of traffic.
+
+Members are turn-based and cannot hold across a ten-minute
+run — they rebase, push, stop.
 
 ## Run-binding: take the whole row from one read
 
@@ -100,3 +104,33 @@ agent — measured twice, see **A member runs its test suite in the foreground**
 roughly two hours — and `run-merge-bot.md`'s CI gate states the general rule:
 "whatever wakes you is external and may never come". So hold the wait yourself,
 exactly the way that gate does:
+
+## Tick on every wake
+
+**Why every wake.** A merge cascade is a firehose of merges, CI greens and
+rebases that holds your attention on the merge side while the implementer side
+drains to 0 and stays there — 0 implementers emit no completion event, so a
+refill that waited for one would never fire. A tick on every wake you are
+already handling is what makes that drain visible. **Every wake is still an
+edge, so none covers a fully drained queue**: no members and no open PRs is no
+event at all, and the tick goes unrun. That state is the heartbeat's.
+
+## The beat's ceiling is a real bound
+
+The interval doubles while the fleet asks for nothing and stops at `--ceiling`,
+so a quiet night costs ~26 wakes instead of ~96. **The ceiling is a real bound,
+not a formality**: supply grows from OUTSIDE the fleet — a ticket you triage,
+one a reviewer filed `needs-triage` included — and that arrival emits no
+event either, so the ceiling is your worst-case latency for noticing it.
+Do not raise it past 30 minutes.
+
+## When you stop on purpose, say why
+
+The beat leaves a dated mark on every hold, so a run
+that dies abruptly (a crashed harness, a closed terminal, an OOM kill) is
+detected by its mark going stale. A run that stops KNOWINGLY can do better
+than being detected, and nothing else can write the reason afterwards:
+
+```bash
+~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop "budget exhausted"
+```
