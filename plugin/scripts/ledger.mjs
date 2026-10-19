@@ -2406,7 +2406,7 @@ async function runSettleFromReport() {
   let outcome;
   if (live.family === "impl") {
     if (report.outcome === "pr") {
-      if (report.pr === null || report.pr < 1) invalid(`$.pr: ${JSON.stringify(report.pr)} is not a PR number, with outcome "pr"`);
+      if (report.pr === null) invalid('$.pr: null is not a PR number, with outcome "pr"');
       if (report.head === null) invalid('$.head: null, with outcome "pr"');
       outcome = `PR#${report.pr}`;
       const sha = look(`verify-sha.sh ${report.branch} ${report.head}`, "sh", [verifySha, report.branch, report.head], [0, 1]);

@@ -111,7 +111,7 @@ export const SCHEMAS = {
   impl: report({
     member: str,
     outcome: { type: "string", enum: ["pr", "bailed"] },
-    pr: { type: ["integer", "null"], minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+    pr: { ...id, type: ["integer", "null"] },
     head: { type: ["string", "null"], pattern: HEX },
     branch: str,
     sizing: obj(

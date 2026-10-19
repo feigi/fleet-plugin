@@ -310,21 +310,25 @@ test("validate passes a nullable impl pr that is null", () => {
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
-test("print states the bounds on every integer node", () => {
+// An id is a PR or issue number: a `pr`, `issue`, `behind` or `by` field, or
+// a `conflictHold` item. It is held to 1; every other integer to the safe range.
+test("print states the bounds on every integer node, minimum 1 on an id and the safe range elsewhere", () => {
+  const IDS = new Set(["pr", "issue", "behind", "by", "conflictHold"]);
   const nodes = [];
-  const walk = (node) => {
-    if ([].concat(node.type ?? []).includes("integer")) nodes.push(node);
-    for (const sub of Object.values(node.properties ?? {})) walk(sub);
-    if (node.items !== undefined) walk(node.items);
+  // `name` is the property a node sits under; an array's items keep it.
+  const walk = (node, path, name) => {
+    if ([].concat(node.type ?? []).includes("integer")) nodes.push({ node, path, id: IDS.has(name) });
+    for (const [key, sub] of Object.entries(node.properties ?? {})) walk(sub, `${path}.${key}`, key);
+    if (node.items !== undefined) walk(node.items, `${path}[]`, name);
   };
   for (const family of FAMILIES) {
     const printed = JSON.parse(run("print", family).stdout);
-    walk(printed);
+    walk(printed, `${family}:$`, null);
   }
-  assert.ok(nodes.length > 0);
-  for (const n of nodes) {
-    assert.equal(n.maximum, Number.MAX_SAFE_INTEGER);
-    assert.ok(n.minimum === 1 || n.minimum === -Number.MAX_SAFE_INTEGER, JSON.stringify(n));
+  assert.ok(nodes.some((n) => n.id) && nodes.some((n) => !n.id));
+  for (const { node, path, id } of nodes) {
+    assert.equal(node.maximum, Number.MAX_SAFE_INTEGER, path);
+    assert.equal(node.minimum, id ? 1 : -Number.MAX_SAFE_INTEGER, path);
   }
 });
 
