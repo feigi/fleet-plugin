@@ -294,6 +294,22 @@ test("a .bare project gives the same stores from the root and from two linked wo
   }
 });
 
+// git answers `--resolve-git-dir p/.git` as spelled, `p/.git`, when `.git` is
+// a symlink to `.bare`: only step 2's realpath of that answer matches it to
+// the git dir, so without it the workspace would re-key to `p/.bare`.
+test("a .git symlinked to a sibling .bare resolves to the project, not the git dir", () => {
+  const top = realpathSync(mkdtempSync(join(tmpdir(), "git-env-bare-symlink-")));
+  try {
+    const proj = join(top, "p");
+    mkdirSync(proj);
+    git(proj, "init", "-q", "--bare", join(proj, ".bare"));
+    symlinkSync(".bare", join(proj, ".git"));
+    assert.deepEqual(resolveWorkspace(realpathSync(join(proj, ".bare")), proj), { dir: proj, gitDir: false });
+  } finally {
+    rmSync(top, { recursive: true, force: true });
+  }
+});
+
 for (const [kind, breakIt] of BROKEN_GITFILES) {
   const skip = kind === "chmod 000" && process.getuid?.() === 0 ? "running as root" : false;
   test(`a ${kind} p/.git from a linked worktree throws, naming .git and git's reason, never resolving to .bare`, { skip }, () => {
