@@ -1789,6 +1789,11 @@ test("unclaimed: a still-open behind-pr exclusion blocks its ticket even if it a
   assert.deepEqual(unclaimed([1, 9].map((n) => ({ n, t: `t${n}` })), r), [1]);
 });
 
+test("unclaimed: an exclusion naming no premise has nothing to lift, so it blocks its ticket even if it appears in entries", () => {
+  const r = run({ rows: ["#9 excluded · needs a human ruling"] });
+  assert.deepEqual(unclaimed([1, 9].map((n) => ({ n, t: `t${n}` })), r), [1]);
+});
+
 test("parseShortlist: shortlist.mjs's payload reads; anything else is unparsable, never a refusal", () => {
   assert.deepEqual(parseShortlist('{"scanned":3,"shortlist":[{"n":7,"t":"a"}],"dropped":[{"n":5,"reason":"to-spec: x"}]}'),
     { status: "ok", scanned: 3, entries: [{ n: 7, t: "a" }], dropped: [{ n: 5, reason: "to-spec: x" }] });
@@ -5401,6 +5406,114 @@ test("CLI: draining, or held at the bound, with ended heads — no refresh, the 
   assert.equal(draining.status, 0, draining.stderr);
   assert.doesNotMatch(draining.stdout, /REFRESH/);
   assert.deepEqual(pullLines(draining.stdout), ["implementers 0/3 → HOLD (draining)   (implementers=0 prs=0 unclaimed=2 supply=3)"]);
+});
+
+// A Pull that left on an exclusion carries the reason `excluded · …`, and is no
+// end once the premise lifts: the head is counted and Pulled again. `left` is
+// the reason each of `heads` carries, in this run's session, and `fixture`
+// the rest of the run.
+const EXCLUDED_LEFT = (n, reason) => ({ record: pullRecord(n, { status: "left", outcome: { exit: 1, reason } }) });
+const exclusionTick = ({ file, refresh = file, left, bound = 3, ...fixture }) => {
+  const root = pullScratch(Object.fromEntries(Object.entries(left).map(([n, reason]) => [n, EXCLUDED_LEFT(Number(n), reason)])));
+  try {
+    return runCli(["--in-flight", String(bound)], {
+      shortlist: shortlistText(file), refresh: shortlistText(refresh), phase0: (r) => ({ ...r, scratch: root, session: PULL_SESSION }), ...fixture,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+const pullNs = (stdout) => pullLines(stdout).map(actionOf);
+
+test("CLI: heads whose Pull left on a behind-pr exclusion, the PR no longer open, are counted and Pulled again — no SUGGEST /triage", () => {
+  const r = exclusionTick({
+    file: [50, 51], left: { 50: "excluded · behind-pr:#44 OPEN", 51: "excluded · behind-pr:#44 OPEN" },
+    ledger: { rows: ["#50 excluded · behind-pr:#44", "#51 excluded · behind-pr:#44"] }, prs: [],
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(pullNs(r.stdout), [50, 51].map((n) => `PULL #${n} — pull.mjs next --head ${n}`));
+  assert.deepEqual(rowCounts(r.stdout), [2, 2], "unclaimed= counts both");
+  assert.doesNotMatch(r.stdout, /SUGGEST \/triage/);
+  assert.deepEqual(r.issueViews, [], "the tick probes nothing for a behind-pr premise");
+});
+
+test("CLI: the same Pull ended with the premise still standing — PR open — names no PULL row, as before", () => {
+  const r = exclusionTick({
+    file: [1, 2, 3, 50], left: { 50: "excluded · behind-pr:#44 OPEN" },
+    ledger: { rows: ["#50 excluded · behind-pr:#44"] }, prs: [pr(44)], bound: 5,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(pullNs(r.stdout), [1, 2, 3].map((n) => `PULL #${n} — pull.mjs next --head ${n}`));
+  const only = exclusionTick({ file: [50], left: { 50: "excluded · behind-pr:#44 OPEN" }, ledger: { rows: ["#50 excluded · behind-pr:#44"] }, prs: [pr(44)] });
+  assert.deepEqual(pullNs(only.stdout), ["SUGGEST /triage, hold idle"]);
+});
+
+test("CLI: a behind-issue exclusion's Pull is Pulled again once the refreshed shortlist holds the ticket, and the tick probes no issue for it", () => {
+  const ledger = { rows: ["#50 excluded · behind-issue:#9"] };
+  const left = { 50: "excluded · behind-issue:#9 OPEN" };
+  // The refresh that runs for the short queue does not hold #50: nothing to Pull for it.
+  const before = exclusionTick({ file: [1, 2], refresh: [1, 2], left, ledger, issueStates: { 9: "CLOSED" } });
+  assert.equal(before.status, 0, before.stderr);
+  assert.deepEqual(pullNs(before.stdout), [1, 2].map((n) => `PULL #${n} — pull.mjs next --head ${n}`));
+  assert.deepEqual(before.issueViews, [], "no gh call from the tick");
+  // Once the refresh holds it, the head is Pulled with a slot free, and the idle row is not printed.
+  const after = exclusionTick({ file: [1, 2], refresh: [1, 2, 50], left, ledger, issueStates: { 9: "CLOSED" } });
+  assert.equal(after.status, 0, after.stderr);
+  assert.deepEqual(pullNs(after.stdout), [1, 2, 50].map((n) => `PULL #${n} — pull.mjs next --head ${n}`));
+  assert.deepEqual(after.issueViews, [], "no gh call from the tick");
+  const alone = exclusionTick({ file: [50], refresh: [50], left, ledger, issueStates: { 9: "CLOSED" } });
+  assert.deepEqual(pullNs(alone.stdout), ["PULL #50 — pull.mjs next --head 50"]);
+  assert.doesNotMatch(alone.stdout, /SUGGEST \/triage/);
+  assert.deepEqual(rowCounts(alone.stdout), [triggerCount(alone.stdout)], "unclaimed= is the trigger's count within one tick");
+});
+
+test("CLI: a behind-issue exclusion whose issue is still open, held out by the refresh, names no PULL row", () => {
+  const r = exclusionTick({
+    file: [1, 2, 50], refresh: [1, 2], left: { 50: "excluded · behind-issue:#9 OPEN" },
+    ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "OPEN" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(pullNs(r.stdout), [1, 2].map((n) => `PULL #${n} — pull.mjs next --head ${n}`));
+});
+
+test("CLI: an exclusion naming no premise never lifts — its head stays out whatever the Pull's reason carries", () => {
+  const r = exclusionTick({
+    file: [50], left: { 50: "excluded · needs a human ruling" }, ledger: { rows: ["#50 excluded · needs a human ruling"] }, prs: [],
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(pullNs(r.stdout), ["SUGGEST /triage, hold idle"]);
+});
+
+test("CLI: a Pull that left for any other reason, or was released, stays ended and uncounted even beside a lifted exclusion's row", () => {
+  for (const reason of ["taken", "relabelled elsewhere", "relabelled needs-triage: decided", "closed: fixed by abc1234: subject"]) {
+    const r = exclusionTick({
+      file: [50, 51], left: { 50: reason, 51: reason },
+      ledger: { rows: ["#50 excluded · behind-pr:#44", "#51 excluded · behind-pr:#44"] }, prs: [],
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(pullNs(r.stdout), ["SUGGEST /triage, hold idle"], reason);
+  }
+  const root = pullScratch({ 50: { record: pullRecord(50, { status: "released", outcome: { exit: 2, reason: "excluded · behind-pr:#44 OPEN" } }) } });
+  try {
+    const r = runCli(["--in-flight", "3"], {
+      shortlist: shortlistText([50]), refresh: shortlistText([50]), phase0: (x) => ({ ...x, scratch: root, session: PULL_SESSION }),
+      ledger: { rows: ["#50 excluded · behind-pr:#44"] }, prs: [],
+    });
+    assert.deepEqual(pullNs(r.stdout), ["SUGGEST /triage, hold idle"], "a released claim is ended whatever the reason says");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("pullOf: a Pull that left on an exclusion is the fresh row, a left Pull of any other reason or none is ended", () => {
+  const left = (reason) => pullRecord(7, { status: "left", outcome: reason === undefined ? null : { exit: 1, reason } });
+  assert.equal(pullOf(left("excluded · behind-pr:#44 OPEN"), pullOpts()), null);
+  assert.equal(pullOf(left("excluded · behind-issue:#9"), pullOpts({ session: null })), null);
+  for (const reason of ["taken", "relabelled elsewhere", "excluded", "excludedx · y", "taken excluded · x", undefined]) {
+    assert.deepEqual(pullOf(left(reason), pullOpts()), { kind: "ended" }, String(reason));
+  }
+  assert.deepEqual(pullOf(pullRecord(7, { status: "released", outcome: { exit: 2, reason: "excluded · x" } }), pullOpts()), { kind: "ended" });
+  assert.equal(pullOf(pullRecord(7, { status: "left", session: "/another", outcome: { exit: 1, reason: "taken" } }), pullOpts()), null);
 });
 
 // The age-based checks a degraded heartbeat file silences: its `seen` stamps

@@ -46,7 +46,10 @@ head it names: a standing question prints `PULL #N (Q<n> pending —
 pull.mjs answer N <qid> …)` in place of `PULL #N — pull.mjs next --head
 N`, so a controller that lost its place never asks it twice. A head whose
 Pull already ended in this run names no row, since `next --head` would
-start that ticket over and the next head fills the slot.
+start that ticket over and the next head fills the slot. A Pull that ended
+on an exclusion, reason `excluded · …`, is the exception: once the premise
+has lifted the tick counts the head and names its row again, and `next`
+without `--head` takes it.
 
 ## Opinionated choices
 

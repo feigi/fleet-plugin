@@ -27,7 +27,7 @@ human curates this list — admission is fully automatic
    [`fleet-tick.mjs`](../../plugin/scripts/fleet-tick.mjs) refreshes it
    (`REFRESHED shortlist: <n> entries; <k> lifted`) whenever unclaimed
    entries fall below the In-flight bound (a head whose Pull already ended
-   in this run not counted),
+   in this run not counted, unless it ended on a lifted exclusion),
    the file is missing/empty,
    an exclusion's premise has lifted, or a branch-named `behind-pr` or a
    `behind-issue` exclusion that has not lifted names a ticket the file
@@ -36,7 +36,8 @@ human curates this list — admission is fully automatic
    [`docs/adr/`](../adr/)): a refresh then cannot feed a Pull.
 
 **Shortlist** entries (no live `impl-` row, no live `excluded` row), less
-any head whose Pull already ended in this run, are
+any head whose Pull already ended in this run (a Pull that ended on an
+exclusion whose premise has lifted does not count as ended), are
 what the tick prints as `unclaimed=` — on a tick that refreshed because that
 count fell below the bound, the count the refresh's trigger names; its
 `dropped` is what the tick prints

@@ -8,7 +8,9 @@
 // Reached through the Resolver and run from the MAIN checkout (a linked
 // worktree refuses). `next` starts a Pull on the shortlist head — `--head`, else
 // the first `.fleet/shortlist.json` entry with no `impl-` row, no live
-// `excluded` row and no Pull of its own already ended in this phase-0 session — or resumes the
+// `excluded` row and no Pull of its own already ended in this phase-0 session
+// (a Pull that ended on an exclusion whose premise has since lifted is not
+// ended in this sense, and its head is taken again) — or resumes the
 // one in progress for `--head`; `answer` records one answer and resumes. Both
 // run until the next question or the end of the Pull, and both are safe to
 // run again: the state is on disk after every step.
@@ -132,7 +134,7 @@ import { isDigits, makeDie } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { memberTokens, premisesOf, tierValues } from "./ledger-grammar.mjs";
+import { EXCLUDED_REASON, exclusionEnded, memberTokens, premisesOf, tierValues } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
 import { briefPaths, briefText, outOfScope, strandedRuling } from "./ticket-router.mjs";
 
@@ -1133,7 +1135,7 @@ class Pull {
     }
     const r = this.script("exclude", "ledger.mjs", ["row", String(st.ticket), `excluded · ${token}`]);
     if (r.status !== 0) return this.stop(withText(`ledger.mjs row failed (${r.how})`, r));
-    return this.leave(`excluded · ${token}`);
+    return this.leave(`${EXCLUDED_REASON} ${token}`);
   }
 }
 
@@ -1196,7 +1198,7 @@ function heldOut(p, n) {
     throw new Refusal(`#${n}: the premise of its exclusion could not be read, so the exclusion stands: ${standing.unread} — run again once gh answers`);
   }
   if (standing.token === null) return row.slice(rowKey(row).length).trim();
-  return `excluded · ${standing.token}${standing.state === null ? "" : ` ${standing.state}`}`;
+  return `${EXCLUDED_REASON} ${standing.token}${standing.state === null ? "" : ` ${standing.state}`}`;
 }
 
 // The phase-0 session names the run a Pull belongs to: the persistent scratch
@@ -1235,7 +1237,9 @@ function shortlistHead(p, run) {
       continue;
     }
     const ended = readPull(p.statePath(n));
-    if (ended !== null && (ended.status === "left" || ended.status === "released") && (run === null || ended.session === run)) continue;
+    // A Pull that left on an exclusion whose premise has lifted — checked above — is not an end: the head is taken again.
+    const ends = ended !== null && (ended.status === "released" || (ended.status === "left" && !exclusionEnded(ended.outcome?.reason)));
+    if (ends && (run === null || ended.session === run)) continue;
     return n;
   }
   if (unreadable.length > 0) {

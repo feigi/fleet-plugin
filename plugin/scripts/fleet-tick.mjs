@@ -118,7 +118,10 @@
 //             row: `pull.mjs next` skips it, `next --head` would start the
 //             ticket over, so the next head fills the slot. Nor is it counted
 //             in `unclaimed=` or toward the short-queue refresh, so a
-//             shortlist of ended heads refreshes. A record from another
+//             shortlist of ended heads refreshes. A Pull that left on an
+//             exclusion (its reason starts `excluded ·`) is no such end: its
+//             head is counted and Pulled again once the exclusion lifts. A
+//             record from another
 //             phase-0 session, or one unreadable or absent, is the fresh row:
 //             `pull.mjs next` starts or resumes it.
 //   session   The listing of the session directory omp writes one
@@ -139,7 +142,7 @@
 // the ledger; main() does the I/O. Split so the guard table and the reading are
 // both unit-testable without a network.
 
-import { parseMember, parseToken, premisesOf, rowNums, nextRetry, readRetired, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, premisesOf, rowNums, nextRetry, readRetired, exclusionEnded, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
 
 // The implementer and reviewer rows' TARGET is the In-flight bound; the merge
 // bot's is 1. Availability of work belongs in the ACTION, not the target: a
@@ -273,8 +276,10 @@ const QUESTION_NUMBERS = { staleness: "Q1", close: "Q1b", decided: "Q2", collisi
  * PULL row: `{kind: "pending", qid, stale}`, `{kind: "dispatched", text}` with
  * the text the Pull's own `ledger.mjs row` wrote (null when it recorded none),
  * `{kind: "ended"}` for a Pull that left or was released, or null for the
- * fresh row. `since` is the file's mtime and `session` this run's phase-0
- * session, null when the receipt names none.
+ * fresh row. A Pull that left on an Exclusion (its reason starts `excluded ·`)
+ * is the fresh row too: it is no end, since the head claims a PULL row again
+ * once the tick's own lift logic admits it. `since` is the file's mtime and
+ * `session` this run's phase-0 session, null when the receipt names none.
  */
 export function pullOf(record, { session, since, now, staleMinutes }) {
   if (record === null || typeof record !== "object" || Array.isArray(record)) return null;
@@ -282,7 +287,11 @@ export function pullOf(record, { session, since, now, staleMinutes }) {
   // starts the ticket afresh.
   if (session !== null && record.session !== session) return null;
   // pull.mjs's `next` skips a Pull that ended in this run, and `next --head`
-  // would start the ticket over: the head is no one for a PULL row to name.
+  // would start the ticket over: the head is no one for a PULL row to name. A
+  // Pull that ended on an Exclusion is the exception: while the premise
+  // stands, the ledger claims the head and it never reaches here; once the
+  // premise lifts, `next` takes it again.
+  if (record.status === "left" && exclusionEnded(record.outcome?.reason)) return null;
   if (record.status === "left" || record.status === "released") return { kind: "ended" };
   if (record.status === "running" && typeof record.pending?.qid === "string") {
     return { kind: "pending", qid: record.pending.qid, stale: now - since > staleMinutes * 60_000 };
@@ -1195,10 +1204,12 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
 // `behind-issue` or branch-named premise) is different: its row is rewritten
 // only when a Pull dispatches the ticket (shortlist.mjs's own header, §3),
 // never on its own, so once shortlist.mjs's live probe has re-admitted the
-// ticket to these entries, that stale row no longer blocks it.
+// ticket to these entries, that stale row no longer blocks it. A row naming no
+// premise has nothing to lift: it claims its ticket for good, as `pull.mjs
+// next` and shortlist.mjs read it.
 export function unclaimed(entries, run) {
   const unverifiable = new Set(run.excluded
-    .filter((e) => e.premises.every(({ kind, target }) => kind !== "pr" || !isDigits(target)))
+    .filter((e) => e.premises.length > 0 && e.premises.every(({ kind, target }) => kind !== "pr" || !isDigits(target)))
     .map((e) => e.n));
   return entries.map((e) => e.n).filter((n) => !run.claimed.has(n) || unverifiable.has(n));
 }

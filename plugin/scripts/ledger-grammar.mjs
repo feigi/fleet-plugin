@@ -609,6 +609,14 @@ export function premisesOf(row) {
   return [...m[1].matchAll(PREMISE)].map(([, kind, target]) => ({ kind, target }));
 }
 
+/** The prefix of the `outcome.reason` of a Pull that ended on an Exclusion. pull.mjs writes it on every path that
+ * ends a Pull that way, and the fleet tick and `pull.mjs next` read it to tell such a Pull from one that ended
+ * for good: taken, relabelled, closed or released. */
+export const EXCLUDED_REASON = "excluded ·";
+
+/** Whether a Pull's `outcome.reason` says it ended on an Exclusion. */
+export const exclusionEnded = (reason) => typeof reason === "string" && reason.startsWith(EXCLUDED_REASON);
+
 export const ROWS = "## Rows";
 export const DISPATCHED = "## Dispatched";
 export const FILED = "## Filed";

@@ -149,7 +149,7 @@ phase, or in any later one, asks the maintainer which tickets to take.
    MERGED or CLOSED, or a `behind-issue` exclusion whose issue is not yet
    closed, names a ticket the file still carries, and prints
    `REFRESHED shortlist: <n> entries; <k> lifted`. A head whose Pull ended
-   this run is not counted. Phase 0 runs it by hand
+   this run is not counted, unless on a lifted exclusion. Phase 0 runs it by hand
    once because a dead run's shortlist is stale by definition.
    None of those triggers runs while `HOLD (in-flight <n>/<B>)` stands
    (**Queue depth**).
@@ -452,7 +452,7 @@ unclaimed count is below the In-flight bound, when the file is missing or
 empty, when an Exclusion's premise has lifted, or when a branch-named
 `behind-pr` or a `behind-issue` Exclusion still not lifted names a ticket the
 file carries — never while the bound holds; the open PRs come off `gh`. A
-head whose Pull ended this run is not counted. A
+head whose Pull ended this run is not counted, unless on a lifted exclusion. A
 ledger token it
 cannot read, it refuses rather than guessing — a member counted live or gone on
 a guess is the over- or under-dispatch it exists to prevent — so correct that
@@ -583,7 +583,7 @@ Pull, and each head a free slot Pulls gets its own row, read off that head's
 A head whose Pull already ended in this run — the ticket left, or the router
 refused it and its claim was released — gets no row: `next` without `--head`
 skips it, `next --head <N>` would start the ticket over, and the next head
-fills the slot.
+fills the slot, except a lifted exclusion's head (reason `excluded ·`): it is counted and Pulled again.
 
 **A Pull never re-admits a ticket already relabelled**: the issue step reads the
 labels fresh and exits 1 `relabelled elsewhere` once `ready-for-agent` is gone.
@@ -1718,7 +1718,7 @@ Read the depth off the tick and never derive it by hand: act on the row it print
 - **shortlist** — `.fleet/shortlist.json`'s entries with no `impl-` row and no
   live `excluded` row: admissible, not yet pulled. The tick's `unclaimed=`.
   Not after a refresh at unclaimed < B (below). A head whose Pull ended this
-  run is not counted.
+  run is not counted, unless on a lifted exclusion.
 - **supply** — `scanned`, the open `ready-for-agent` tickets `shortlist.mjs`'s
   candidate scan returned, before any filter. Only a Pull's full read judges
   decided?, so a shortlist of undecided tickets is supply that every Pull
@@ -1774,7 +1774,7 @@ consult under a merge-side event storm, and that is how implementers reached
 0/target with ~57 `ready-for-agent` in supply while nobody
 noticed (#3). What follows stays here as the explanation of what the script decides —
 never as a second, hand-run copy of it. The table's shortlist counts no head
-whose Pull ended this run. A refresh at unclaimed < B leaves `unclaimed=` at
+whose Pull ended this run, unless on a lifted exclusion. A refresh at unclaimed < B leaves `unclaimed=` at
 that count, so `SUGGEST /triage` can print it above 0.
 
 | shortlist (unclaimed) | implementer row prints |
@@ -1792,7 +1792,7 @@ awaiting to-tickets, so an empty shortlist carrying one is not "no work".
 The refresh runs at unclaimed < B and, with every other refresh trigger, never
 while the bound holds: a refresh then cannot feed a Pull, and the first tick
 back under the bound refreshes and Pulls in the same tick. Unclaimed there
-counts no head whose Pull ended this run.
+counts no head whose Pull ended this run, unless on a lifted exclusion.
 
 Four holds outrank every row: `HOLD (draining)` once `ledger.mjs drain` has
 recorded the drain, `HOLD (tier mismatch impl-<N>)` until a replacement is
