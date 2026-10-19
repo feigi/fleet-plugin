@@ -162,7 +162,7 @@ label or a premise the maintainer can read.
 
 ## The wake table
 
-A wake is done when its one `fleet-event.mjs` call has run and you have acted on every line it printed, the tick's last; with nothing left to act on, arm the heartbeat and hold rather than end your turn. What a wake owes beyond its call is under **Phase 3 — event loop**.
+A wake is done when its one `fleet-event.mjs` call has run and you have acted on every line it printed, the tick's last; with nothing left to act on, arm the heartbeat and hold rather than end your turn. What a wake owes beyond its call is under **What a wake owes beyond its call**, below. The loop has no exit but the run's own end: drain the run when it ends (**End of run**).
 
 React to events; never block on one.
 
@@ -187,6 +187,7 @@ refill or dispatch edges left. Record first, because the tick reads the run off
 one it cannot see, and it names the same dispatch again. Every record goes
 through `ledger.mjs` (**Run ledger**), which `fleet-event.mjs` drives — never a
 hand edit. What each kind writes is in the header comment of `fleet-event.mjs`.
+See references/ci-and-staleness.md.
 
 Run each as `~/.fleet/bin/fleet-run fleet-event.mjs <kind> <args>`, from the main checkout:
 
@@ -205,6 +206,163 @@ Run each as `~/.fleet/bin/fleet-run fleet-event.mjs <kind> <args>`, from the mai
 | Drain | `fleet-event.mjs drain --reason "<reason>"` |
 | Undrain | `fleet-event.mjs undrain --reason "<reason>"` |
 | Member confirmed dead or never dispatched | `fleet-event.mjs member-died <member>` |
+
+### What a wake owes beyond its call
+
+Act on every line the call prints, the tick's last, and arm the beat. What a wake
+owes beyond its call:
+
+- **Implementer report** → the PR is owed a review from here on:
+  the tick names it as `DISPATCH review PR#<M>`, and it names the next
+  shortlist head whenever the In-flight count is below the bound. Pull
+  nothing the tick did not name.
+- **Finisher reports halted** → the per-cause rule (**Resolving a finisher
+  halt**, below).
+- **A finisher failed or was killed** → the **Member confirmed dead or never dispatched** wake (`member-died finisher-pr-<M>`), which settles it `failed` or `killed`; no label, and the tick prints no dispatch for it. The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, below), then run the tick.
+- **Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>`; the causes and the issue action each takes are under **Relabel causes**.
+- **A review result lands** → see the result file written (by you or by the
+  runner — **The reviewer** says which, per harness), then
+  `fleet-event.mjs review-result <pr> <path>`: a PR with survived or unverified findings prints as
+  `DISPATCH fix-pr PR#<M>`. No survived or unverified finding and nothing to file → skip the
+  fix-applier and dispatch the **finisher** directly — or, when that head's
+  bound conclusion is red and not solely staleness, the red-check fixer
+  instead (**Then dispatch a red-check fixer**, below): no member will touch that
+  PR, so no push is coming and nothing will wake you. A review that failed is
+  not a result — **Recovery** says who retries it and what takes over.
+  Read the digest as **Reading a review result** says.
+- **Monitor: `ready-to-merge` appears** → `fleet-event.mjs label <pr>`, and
+  on `DISPATCH merge-bot` dispatch the next `merge-bot-<n>` (**The merge bot**).
+  Catches hand-added labels as well as a finisher's own. The bot does not wait
+  for that finisher's report: its rebase is server-side,
+  `gh pr update-branch --rebase`, so nothing on the finisher's worktree has to
+  happen first. **You own the watcher, not the bot.** Arm one yourself,
+  `persistent: true`, seeded before the loop so handled PRs do not re-fire.
+  **One rebase per PR, at merge time.** Any behind-count you hand a bot is
+  expired on arrival; say so. See references/ci-and-staleness.md.
+- **Merge-bot pass reports done** → `fleet-event.mjs merge-bot-report merge-bot-<n>`. A label that
+  landed at the last moment reads `DISPATCH
+  merge-bot` again: dispatch the next bot straight away. A `rebase-fallback-#<pr>`
+  on a conflict needs no record from you — the bot already appended
+  `conflict-hold:#<pr>` to that PR's row, and the tick turns it into `DISPATCH
+  fix-pr PR#<pr>` (**The fix-applier**). The tick's `--apply` reaps after the
+  pass. Read `worktreesRemoved` alongside `reaped`: a pass that
+  reaps branches and removes no worktrees is a finding, not a quiet success.
+  Update the reaped tickets' ledger rows in the same step.
+  **Do not invoke `commit-commands:clean_gone`.** The skill is the maintainer's
+  to fix; do the reap yourself. **Never reap a branch a live member is on.**
+  Cross-check `.fleet/ledger.md` first:
+  a row without a terminal state means someone may still be in that worktree, and
+  the dirty check does not see a member that committed but has not pushed.
+  See references/reaping.md.
+- **The run ends, or the maintainer says drain** → `fleet-event.mjs drain --reason "<reason>"`
+  first (below). The marker is on disk, so the tick
+  holds the implementer row at `HOLD (draining)` from then on — for a
+  replacement controller too — and keeps the review, fix-applier and merge rows
+  firing until the open PRs merge. The drain starts the end of the run; it does
+  not end it. **End of run**, in this order:
+  1. `~/.fleet/bin/fleet-run fleet-event.mjs drain --reason "<reason>"` — runs
+     `closeout.mjs begin --reason "<reason>"` (references/reaping.md), then the tick. A claim it refuses prints `NEED hand-release #<N> <blocker>`: that
+     refusal is the finding, so run `worktree-audit.sh` and decide by hand.
+     `begin` selects a claim with no PR and a live or `bailed` implementer token
+     on every run, so a claim you keep leaves `begin` at exit 4 on every run:
+     release the rest by hand and run `begin` again.
+  2. Act on the review, fix-applier and merge rows until the tick prints
+     `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`, which it does
+     once the run is draining with no open PR and no live implementer.
+  3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason "<reason>"` — scrapes
+     the run's member facts, checks the tier-outcomes rows, refreshes the
+     metrics, commits the three metrics files and opens their PR, sets the
+     phase-0 receipt aside as `.fleet/phase0.previous.json`, then records
+     `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded
+     stop as the end of the run. A `NEED tier-outcomes append <pr>` is a PR
+     the ledger marks reviewed with no verdict row: append it with the verdict
+     you rule (**Guard: accumulate per PR**) and run `finish` again. A step it
+     fails is explained in references/close-out.md. Exit 0 is the run closed.
+  Drain only when a documented trigger fired, and name the trigger in `--reason`.
+  **Undrain** only when the maintainer asks, never a drain that budget or
+  context exhaustion caused (references/close-out.md).
+- **The finisher-gate wakes** — a CI run reaching a terminal state, a fix-applier reporting `no-op`, a `no-ci` verdict → each is a bullet of **The finisher gate**.
+
+### Reading a review result
+
+**You read the digest; the findings are the fix-applier's.**
+`jq '{pr, head, resume, testEnvironment, suiteVerdict, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/pr<pr>/<run>/review.json`
+is the whole of your read, and it is what you record: `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`,
+off `head`, `counts` and the run root's name — the runner's `ledger` field — on
+the PR's row, with `ledger.mjs review <pr>`. Every later path to the review is built from that token, before a
+restart or after one: `<scratch>/pr<pr>/<run>/review.json`, `<run>` off the PR's
+latest `reviewed=`. Findings never enter your context —
+a result runs 26-61 KB, 7-15k tokens that used to land in yours and then again,
+up to ~10k characters, in every fix-applier prompt you wrote. The fix-applier
+reads every one off the file and makes every ruling on them
+(`review-and-fix.md`'s **The review result file**). What the digest tells you:
+
+**`testEnvironment` says what the review's shared test run is evidence about**,
+and it is present on a healthy run as well as a degraded one, so there is
+nothing to notice by its absence. The
+fix-applier reads it before acting on any count from the shared test run; you
+read it so a degraded review never passes for a clean one. See references/reviewers.md.
+`unverified` is *not* "checked and cleared" — a `suggestion` skips the pass by
+policy, and a finding whose refuters all crashed or abstained lands there too.
+All go to the fix-applier with the rest, in the file; never rule on them yourself.
+**`refutersDispatched`, carried on every finding, is what tells the skip
+apart** — zero is the policy skip, above zero with no deciding vote is a
+refuter pass that decided nothing — and `refutersInconclusive` splits that
+one: the refuters it counts abstained, every other one dispatched crashed. So
+the population is read off those fields rather than off severity,
+which records only how much a finding would matter if true. `resume` is
+non-null exactly when a specialist or a refuter pair crashed again after the
+review's own in-run retry, and **resume beats handing a crash-heavy review
+on**: a deferred crash is a finding nobody ever looked at.
+No replay exists for a review that ran in a runner's own kernel — `resume` is reported, not acted on, and the fix-applier defers what it names.
+`refuted` comes back deliberately as well — a refutation is itself a claim, and
+one has been reversed on new evidence. The fix-applier may reverse one; it
+records each reversal as a `refuted` entry in its disposition record, the
+evidence in `reason`, and you copy those entries to the ledger's `ruled` line by
+running `fleet-event.mjs fix-report`, whose `settle --from-report` records each
+refutation the report defers.
+
+**`dimensionsRun` is the dispatch; `dimensionsUnrun` is what names a gap.** A
+specialist that dies contributes zero findings while its key stays in
+`dimensionsRun`. So read the two together. A key
+in `dimensionsRun` and NOT in `dimensionsUnrun` returned a review; every
+`dimensionsUnrun` entry is `{dimension, reason}` naming a specialist that
+returned nothing, its `reason` the crash.
+The review already re-dispatched each crashed specialist once, so what
+`dimensionsUnrun` still names is residue: the fix-applier names it unrun in its
+report and re-runs nothing — an absence of findings is not coverage.
+
+**`suiteVerdict` is the review's one judgement on its shared test run:
+`{usable, reason}`, always present.** The review runs the test command once,
+and every specialist reads that run instead of running its own. `{usable: true,
+reason: null}` says the run executed real tests and its exit status is
+explained by its counts; usable is not green, so a usable run can have failing
+tests. `usable: false` carries `reason`, including a run that never started
+(install skipped, no suite slot). The verdict says nothing about whether a
+dimension reviewed: a specialist that returned reviewed, its findings verified
+as usual, whatever the suite verdict. With `usable: false` the
+fix-applier names `shared test run not usable: <reason>` in its final verdict
+and does nothing more — its own `<testCmd>` run and CI cover the suite.
+**Exit 75 is not a test result.** In a review it makes
+`suiteVerdict` not usable, `suiteVerdict.reason` beginning "no suite slot within
+<n> s — the host is at its suite bound; not a test failure", with no retry
+inside the run: read that `reason` off the digest and re-review it
+under the next runner letter (`review-pr-<pr#>-b` after a first runner), as for
+a runner that reported `failed`.
+
+**`cwdAudit` is the specialist's own inherited-checkout audit, one entry per
+dispatched dimension: `{dimension, state, line}`, `state` one of**
+`clean`/`dirty`/`unrepo`/`missing`. The prompt asks every specialist to run
+`git status --porcelain -uall` against the directory it inherited before
+returning and fold the result into a `CWD-AUDIT:` line — a convention, not
+schema, so a specialist that never emits it or misspells it still validates
+clean. This field is the runtime backstop that reads for the line regardless:
+`missing` is exactly as loud as `dirty`, and both name a checkout you should
+treat as a live scratch write until you have checked it.
+
+**Know the trim before you rely on it — it is wider than `docsOnly` suggests.** See references/reviewers.md.
+
+**A refutation resting on an injection nothing proved landed is not a refutation — it is a cell that never ran.** See references/reviewers.md.
 
 ### Nothing to do: arm the beat
 
@@ -230,6 +388,48 @@ It blocks, then prints one line. Which line it is, is the whole protocol:
   command blocks for a whole interval (omp backgrounds one at 60s, which is
   why the CI gate holds its wait in one `eval` cell polling `gh run view`).
   Issue it again. That is still one blocking call per turn, never an idle turn.
+
+**Do not raise `--ceiling` past 30 minutes.** See references/ci-and-staleness.md.
+
+**The beat does not stop on idleness.** An empty shortlist and an empty supply are
+not a reason to end the run; they are the state a newly triaged ticket arrives
+into. The run ends when you drain it, when the budget goes, or when this
+context does — not because there was briefly nothing to do.
+
+**When you stop on purpose, say why — one command, and it is the last thing
+you owe the next run.** See references/ci-and-staleness.md.
+
+```bash
+~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop "budget exhausted"
+```
+
+It holds nothing and returns at once. Use it when the budget goes, or when
+you can see the context ceiling coming. A drained run records it as the last
+step of **End of run** (above), never at the drain itself.
+Skipping it is not fatal — the next reader still reports the stop, it just
+reports that the beat stopped *without a recorded reason*, which is all it can
+honestly say about a death that named nothing.
+
+**A stall line names whose stall it is.** Its opening words come off the controller
+record:
+
+- `heartbeat STALLED, controller gone` — the run that stranded them is dead.
+  Its claims without a PR come back through the next run's phase 0
+  stranded-claim step (references/phase-0.md, "Resume the claims a dead run
+  left without a PR"), and its open PRs through the fold-in.
+- `heartbeat not beating, controller alive (pid N)` — a controller that
+  stopped beating and kept going. Nothing died, so nothing is resumed; when
+  that controller is you, the fix is to tick on every wake and beat when there
+  is nothing to do.
+- `heartbeat STALLED` alone — no record says whether that controller lives.
+  The line is detection only.
+
+Your first tick may print `previous run stopped deliberately at <time> (<age>
+ago) — recorded reason: <reason>` instead: the stop the previous run recorded.
+It is that run's end, not a verdict on yours, and no later tick prints it.
+
+Read the line and carry on; nothing in the fleet releases, relabels or
+reaps the stranded tickets for you, and nothing restarts the run that stranded them.
 
 ## The tick's rows
 
@@ -466,7 +666,7 @@ so demoting its ticket on its silence demotes a ticket its member never got the
 chance to judge. Confirm death first, exactly as the Member-killed row does
 (Failure handling, below) — its mtime discriminator, never silence alone.
 **Only an explicit bail report — the member itself naming the cause — reaches
-Implementer bails before implementing** (phase 3, below); a died or
+Implementer bails before implementing** (**What a wake owes beyond its call**, above); a died or
 merely-quiet member's silence never does. A confirmed-dead member recovers
 exactly as the Member-killed row says — new member, new name, the SAME ticket —
 never a demotion.
@@ -484,7 +684,7 @@ spend classifier and `member-outcomes.mjs` read it.
 
 ### The reviewer
 
-**Dispatch the review, never wait on it, and act when its result lands. That is the default path.**
+**Dispatch the review, never wait on it, and act when its result lands. That is the default path.** See references/reviewers.md.
 The tick names every PR owed one — `DISPATCH review PR#<M>`, oldest first —
 and each gets one review, once per PR:
 
@@ -618,7 +818,7 @@ the PR, the worktree, the dispatch pin, `<testCmd>` and the scratch root:
 `~/.fleet/bin/fleet-run dispatch-prompt.mjs render finisher --kind <fresh|repair>
 --member finisher-pr-<pr#> --pr <pr#> --pin <sha> --worktree <abs-path>
 --testCmd <testCmd> --scratch <scratch>`, which `ledger.mjs dispatch <pr#>
-finisher-pr-<pr#>` records.
+finisher-pr-<pr#>` records. See references/finisher.md.
 
 ### The merge bot
 
@@ -889,6 +1089,28 @@ didn't parse from one that succeeded (`unread`/`unparsed`/`read`) —
 `spend` in the same payload carries its own error the same way. Zeroes
 on the cockpit are not yet proof the pipeline is idle.
 
+### The test command every gate runs
+
+**Where `testCmd` comes from:** the repository's Test entrypoint, out of the
+Recipe cache phase 0's Recipe derivation step proved —
+`~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main` prints it — and the one you
+hand specialists per `review-and-fix.md`'s **Give specialists a stack-free test command**. Pass
+the same command to the review, to the fix-applier, and to the finisher — whose
+duty-2 mutation
+gate runs it too — so every gate runs one command. Omit it from the review args
+and the review (`review-core.mjs`, in a runner) reads the same cache itself,
+refusing outright when there is none; the fix-applier has no such fallback, so
+substituting `<testCmd>` with nothing leaves it no gate at all.
+
+The review wraps its own one run, so its args carry the bare
+command; a wrapped string handed to it anyway is harmless, the inner wrapper
+being the nested case. The fix-applier and the finisher run what you hand them,
+so hand them the wrapped string as `<testCmd>` —
+`~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command
+written `'\''` — and it is still one command for every gate.
+
+**Where `<branch>` comes from:** the PR's head branch — `gh pr view <N> --json headRefName -q .headRefName`, or the same branch you cut the worktree from. See references/reviewers.md.
+
 ## The finisher gate
 
 Dispatch a finisher only when every test here passes at once — the review returned, the fix-applier's report arrived, your outbox to it is empty and no ruling is owed; hold otherwise, and on a repo with no CI and no declaration report it and add no label.
@@ -1077,6 +1299,190 @@ cycling mutants through the worktree when the finisher audited it. Both finisher
 correctly halted. Note what that costs to detect: two reads of the same worktree
 a minute apart showed *different* mutants, so a member's report and any single
 `git status` are each valid only at their instant.
+
+**The standing CI facts are in the fix-applier body, not in per-event messages** —
+otherwise you send "your red is staleness, do not rebase" once per member per
+merge. `review-and-fix.md` states them; the body says they apply.
+
+**Once the label is on, take it off before you approve any push.** Write `label-off=<latest finisher attempt>` onto the PR's row first
+(`ledger.mjs token <PR number> label-off=<latest finisher attempt>`, which keeps
+every token the row already has — **Run ledger**), then
+remove `ready-to-merge`, then approve. Then
+dispatch a **fresh** finisher against the new head; the first audit does not
+transfer, since it verified a different tree. The merge bot refuses that head on
+its own (`run-merge-bot.md`, **The labelled head**), so this is not the only
+guard — but its refusal costs a pass and leaves the label lying, which is yours
+to clear either way, the same way: `label-off=` first, then the removal.
+See references/finisher.md.
+
+### Own the CI waits
+
+**Own the CI waits.** Arm a second persistent Monitor over open PRs'
+latest runs, keyed `<run-id>:<attempt>:<conclusion>` so each terminal state fires once, and
+emit the behind-count and the per-job conclusions with it: a `success` on a branch
+8 behind is not actionable, and `check`-green-with-heavy-skipped is the staleness
+board you must not confuse with a red. Do not reinvent that read: one
+`~/.fleet/bin/fleet-run ci-state.mjs --pr <N>` per open PR already emits
+run id, attempt, conclusion, behind-count and per-job conclusions, branch derived
+from the PR — including the `gh api --hostname <host>` a GHE compare call needs,
+without which the probe 404s and `behind` comes back `null`, never 0, so every
+event reads as unknown-behind. Call it **without `--quiet`** — that flag drops
+`jobs`, `missing` and `dropped`.
+
+A monitor event is a wake-up, never a verdict; members re-query at labelling
+time. See references/ci-and-staleness.md.
+
+**A conclusion is not stable, even for a fixed run id on an unchanged head.** Never cache a conclusion, and test any fallback you write against `""`, `null` AND a real conclusion. See references/ci-and-staleness.md.
+
+**Every merge invalidates every other open PR, silently.** Behind-count is the
+only honest signal. See references/ci-and-staleness.md.
+
+**A probe that cannot read is a transition event, not silence.** So check the REST budget *before* polling — `gh api rate_limit` is itself
+unmetered (`gh api rate_limit --jq '.resources.core.remaining'`, re-confirmed
+2026-09-08) — and give an unreadable `ci-state` payload the same treatment one
+level down. The shape is **one outer tick loop with an inner pass over the open
+PRs**, because the two causes live at different levels — the budget is one
+account, the payload is one PR:
+
+```sh
+budget_out= hidden_out= list_out= cap_out= blind= # seed the latches: set -u reads each below before tick 1 ever assigns one
+pr_cap=200                                   # the open-PR read's --limit; gh stops there with exit 0 and no warning
+while :; do                                   # one tick
+  rl=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo ERR)
+  case "$rl" in ''|*[!0-9]*) rl=ERR;; esac    # a non-numeric read is an outage, not a budget
+  if [ "$rl" = ERR ] || [ "$rl" -lt 200 ]; then
+    if [ -z "$budget_out" ]; then             # ONE global latch: a quota outage hits every PR
+      echo "WATCHER DEGRADED: core REST budget=$rl — CI polling paused, silence is NOT green"
+      budget_out=1
+    fi
+  else                                        # every RECOVERED waits for the pass gates below
+    prs=$(gh pr list --state open --limit "$pr_cap" --json number --jq '.[].number' 2>/dev/null) || prs=ERR
+    if [ "$prs" = ERR ]; then
+      if [ -z "$list_out" ]; then             # global latch: this cause is account-level too
+        echo "WATCHER DEGRADED: cannot list open PRs — CI polling paused, silence is NOT green"
+        list_out=1
+      fi
+    else                                      # a list or cap RECOVERED waits for the pass gates too
+      count=$(printf '%s\n' "$prs" | grep -c .) || : # grep -c exits 1 on zero matches; set -e must not take it
+      if [ "$count" -ge "$pr_cap" ] && [ -z "$cap_out" ]; then # global latch: a full page may have been cut there
+        echo "WATCHER DEGRADED: open-PR list hit its --limit $pr_cap — PRs past it are NOT watched, silence on them is NOT green"
+        cap_out=1
+      fi
+      # gh pr list is GraphQL, so $rl still holds. The pass is budgeted at 4 core
+      # REST units per listed PR on top of the 200 floor. See references/ci-watcher.md.
+      # A shortfall here, or at the Actions-bucket gate below, pauses this tick's pass.
+      if [ "$rl" -lt $((200 + 4 * count)) ]; then
+        if [ -z "$budget_out" ]; then
+          echo "WATCHER DEGRADED: core REST budget=$rl < $((200 + 4 * count)) needed for $count PRs — CI polling paused, silence is NOT green"
+          budget_out=1
+        fi
+      else
+        # The workflow and run lookups bill a second core bucket that
+        # `rate_limit` does not report. Its count is only in the response
+        # headers of a lookup that bills it: one 1-unit read per tick, 4 units
+        # per listed PR on the same 200 floor. Recovery for every global latch
+        # waits until this gate clears too, so no line says polling resumed
+        # while this one still pauses it.
+        hrl=$(gh api -i 'repos/{owner}/{repo}/actions/workflows?per_page=1' 2>/dev/null | awk 'tolower($1)=="x-ratelimit-remaining:" {sub(/\r$/, "", $2); print $2; exit}')
+        case "$hrl" in ''|*[!0-9]*) hrl=ERR;; esac # a missing header is an outage, not a budget
+        if [ "$hrl" = ERR ] || [ "$hrl" -lt $((200 + 4 * count)) ]; then
+          if [ -z "$hidden_out" ]; then
+            need=; [ "$hrl" = ERR ] || need=" < $((200 + 4 * count)) needed for $count PRs" # an unreadable header has no amount to compare
+            echo "WATCHER DEGRADED: unreported Actions core REST bucket=$hrl$need — CI polling paused, silence is NOT green"
+            hidden_out=1
+          fi
+        else
+          if [ -n "$list_out" ]; then
+            echo "WATCHER RECOVERED: open-PR list readable again — CI polling resumed"
+            list_out=
+          fi
+          if [ -n "$cap_out" ] && [ "$count" -lt "$pr_cap" ]; then
+            echo "WATCHER RECOVERED: open-PR list under its --limit $pr_cap — every open PR watched again"
+            cap_out=
+          fi
+          if [ -n "$budget_out" ]; then
+            echo "WATCHER RECOVERED: core budget=$rl — CI polling resumed"
+            budget_out=
+          fi
+          if [ -n "$hidden_out" ]; then
+            echo "WATCHER RECOVERED: unreported Actions core REST bucket=$hrl — CI polling resumed"
+            hidden_out=
+          fi
+          for pr in $(printf '%s\n' "$prs"); do # inline $(...): `for pr in $prs` is ONE iteration under zsh
+            st=$(~/.fleet/bin/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
+            if ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
+              case " $blind " in *" $pr "*) ;; *) # latch keyed BY PR: this cause is per-PR
+                echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
+                blind="$blind $pr" ;;
+              esac
+              continue                        # inner continue — still reaches the tick sleep
+            fi
+            case " $blind " in *" $pr "*)
+              echo "WATCHER RECOVERED: ci-state reading #$pr again — CI polling resumed"
+              keep=; for b in $(printf '%s\n' "$blind"); do [ "$b" = "$pr" ] || keep="$keep $b"; done; blind=$keep ;;
+            esac
+            : # your normal handling of $st for this PR; a run at a terminal state is the CI wake: fleet-event.mjs ci "$pr"
+          done
+        fi
+      fi
+    fi
+  fi
+  sleep 120                                   # the block's only pacing, once per tick
+done
+```
+
+**One gate, not a gate plus a caveat.** See references/ci-watcher.md.
+
+**It has to latch** — one line entering the degraded state, one leaving it,
+never one per tick. **Latch each cause at the level its cause lives
+at**: the budget, the unreported Actions bucket, the open-PR list and that
+list's cap are one global flag each — all account-level — but the payload latch is keyed by PR, and a
+shared scalar for those is an unlatched line wearing a latch's clothes — one
+persistently blind PR alongside one healthy PR re-clears the flag on every tick,
+emitting a DEGRADED and a false RECOVERED pair forever. The recovery line is
+what says the watch is alive again, so emit it on the first good pass even when
+nothing about the CI state changed; without it a reader cannot tell a recovered
+watcher from a dead one. See references/ci-watcher.md.
+
+**All pacing in exactly one place — the tick loop's own tail `sleep`.** See references/ci-watcher.md.
+
+**Guard every probe, not just the ones with a verdict field.** Capture its status (`prs=$(…) || prs=ERR`), latch it globally, and fall
+through to the same tail sleep. **Then iterate with the inline `$(printf '%s\n'
+"$prs")` form, never a bare `for pr in $prs`** — the assigned-variable trap in
+**Shell traps**, in references/shell-traps.md, which carries the mechanism and its
+measurements. It
+applies to **every** loop in this block, the `blind`-latch removal included:
+under a bare `for b in $blind` a recovered PR never leaves the list and the block
+emits a fresh RECOVERED every tick thereafter — the per-tick volume the latch
+exists to prevent, wearing a latch's clothes again. See references/ci-watcher.md.
+
+**A readable list can still be a short one.** Pass an explicit `--limit`
+(`pr_cap`: one variable for the flag and the check, so the two cannot drift)
+and treat a full page as its own degraded cause — the "no silent caps" rule
+`candidates.mjs`'s `refuseIfCapped()` and `fleet-tick.mjs`'s `PR_LIMIT` already
+enforce. It latches globally like the list failure but does not pause polling:
+the PRs it did return are real, so the pass still watches them, and the
+DEGRADED line names the rest as unwatched until a pass comes back under the cap.
+See references/ci-watcher.md.
+
+**The budget is gated at the floor and again at the pass, and only the pass gates announce recovery.** See references/ci-watcher.md.
+
+**Judge `ci-state` on its payload, never its exit code** — the same rule as
+`merge-gate.mjs` applies on the merge path, applied to the watcher. Empty
+or unparseable output is the degraded case; parseable JSON reading
+`verdict: "not-green"` is normal. An exhausted quota may also name itself,
+`verdict: "rate-limited"` on stdout — likewise degraded, and likewise not a
+reading, which is why the gate above tests the verdict rather than mere
+parseability: that payload is perfectly good JSON. See references/ci-watcher.md.
+
+**Do not back off and wait.** See references/ci-watcher.md.
+
+**While the budget is exhausted, `ledger.mjs check` reads
+`verdict: "unverified"`** — the ledger was read and the tracker was not. That is
+correct behaviour, but `unverified` exits **0**, the same as `clean`, so a
+member treating exit 0 as "safe to file" files blind during exactly this window.
+Say so when you flag the outage: members read `verdict` explicitly until you
+report recovery, never the exit code alone.
 
 ## Judgement rules the drivers stop for
 
@@ -1279,802 +1685,6 @@ implementer's `<scratch>/impl-<N>/`, the recipe deriver's
 root itself. A member whose prompt names no path asks you by name and never
 makes one up.
 
-## Phase 3 — event loop
-
-The loop has no exit but the run's own end: act on each wake as the wake table gives it, keep the standing duties below between wakes, and drain the run when it ends (**End of run**).
-
-### What a wake owes beyond its call
-
-Act on every line the call prints, the tick's last, and arm the beat. What a wake
-owes beyond its call:
-
-- **Implementer report** → the PR is owed a review from here on:
-  the tick names it as `DISPATCH review PR#<M>`, and it names the next
-  shortlist head whenever the In-flight count is below the bound. Pull
-  nothing the tick did not name.
-- **Finisher reports halted** → the per-cause rule (**Resolving a finisher
-  halt**, above).
-- **A finisher failed or was killed** → the **Member confirmed dead or never dispatched** wake (`member-died finisher-pr-<M>`), which settles it `failed` or `killed`; no label, and the tick prints no dispatch for it. The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, above), then run the tick.
-- **Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>`; the causes and the issue action each takes are under **Relabel causes**.
-- **A review result lands** → see the result file written (by you or by the
-  runner — **Reviewers** says which, per harness), then
-  `fleet-event.mjs review-result <pr> <path>`: a PR with survived or unverified findings prints as
-  `DISPATCH fix-pr PR#<M>`. No survived or unverified finding and nothing to file → skip the
-  fix-applier and dispatch the **finisher** directly — or, when that head's
-  bound conclusion is red and not solely staleness, the red-check fixer
-  instead (**Then dispatch a red-check fixer**, above): no member will touch that
-  PR, so no push is coming and nothing will wake you. A review that failed is
-  not a result — **Reviewers** says who retries it and what takes over.
-- **Monitor: `ready-to-merge` appears** → `fleet-event.mjs label <pr>`, and
-  on `DISPATCH merge-bot` dispatch the next `merge-bot-<n>` (**Merge bot**).
-  Catches hand-added labels as well as a finisher's own. The bot does not wait
-  for that finisher's report: its rebase is server-side,
-  `gh pr update-branch --rebase`, so nothing on the finisher's worktree has to
-  happen first.
-- **Merge-bot pass reports done** → `fleet-event.mjs merge-bot-report merge-bot-<n>`. A label that
-  landed at the last moment reads `DISPATCH
-  merge-bot` again: dispatch the next bot straight away. A `rebase-fallback-#<pr>`
-  on a conflict needs no record from you — the bot already appended
-  `conflict-hold:#<pr>` to that PR's row, and the tick turns it into `DISPATCH
-  fix-pr PR#<pr>` (**Reviewers**).
-- **The run ends, or the maintainer says drain** → `fleet-event.mjs drain --reason "<reason>"`
-  first (below). The marker is on disk, so the tick
-  holds the implementer row at `HOLD (draining)` from then on — for a
-  replacement controller too — and keeps the review, fix-applier and merge rows
-  firing until the open PRs merge. The drain starts the end of the run; it does
-  not end it. **End of run**, in this order:
-  1. `~/.fleet/bin/fleet-run fleet-event.mjs drain --reason "<reason>"` — runs
-     `closeout.mjs begin --reason "<reason>"` (**Release the claims that never became
-     PRs**), then the tick. A claim it refuses prints `NEED hand-release #<N> <blocker>`: that
-     refusal is the finding, so run `worktree-audit.sh` and decide by hand.
-     `begin` selects a claim with no PR and a live or `bailed` implementer token
-     on every run, so a claim you keep leaves `begin` at exit 4 on every run:
-     release the rest by hand and run `begin` again.
-  2. Act on the review, fix-applier and merge rows until the tick prints
-     `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`, which it does
-     once the run is draining with no open PR and no live implementer.
-  3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason "<reason>"` — scrapes
-     the run's member facts, checks the tier-outcomes rows, refreshes the
-     metrics, commits the three metrics files and opens their PR, sets the
-     phase-0 receipt aside as `.fleet/phase0.previous.json`, then records
-     `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded
-     stop as the end of the run. A `NEED tier-outcomes append <pr>` is a PR
-     the ledger marks reviewed with no verdict row: append it with the verdict
-     you rule (**Guard: accumulate per PR**) and run `finish` again. A step it
-     fails is explained in references/close-out.md. Exit 0 is the run closed.
-  Drain only when a documented trigger fired, and name the trigger in `--reason`.
-  **Undrain** only when the maintainer asks, never a drain that budget or
-  context exhaustion caused (references/close-out.md).
-- **The finisher-gate wakes** — a CI run reaching a terminal state, a fix-applier reporting `no-op`, a `no-ci` verdict → each is a bullet of **The finisher gate**.
-
-### Tick notes
-
-**Tier guards under Pull.** The per-dispatch `tier-check.mjs --batch` is
-phase 2's own step, run by `tick --apply`: a mismatch it finds is the
-`HOLD (tier mismatch impl-<N>)` above, and a member it has no verdict on is
-the `HOLD (tier unchecked impl-<N>)`. Nothing else in the loop owns it.
-
-**`--in-flight <B>`** is the run's In-flight bound: leave it at its default
-unless `$ARGUMENTS` set it. omp's `task.maxConcurrency` is not the bound
-(**Phase 2** gives the reasons) — below 2·B+2 it is a notice, never a hold.
-
-**Why every wake.** A merge cascade is a firehose of merges, CI greens and
-rebases that holds your attention on the merge side while the implementer side
-drains to 0 and stays there — 0 implementers emit no completion event, so a
-refill that waited for one would never fire. A tick on every wake you are
-already handling is what makes that drain visible. **Every wake is still an
-edge, so none covers a fully drained queue**: no members and no open PRs is no
-event at all, and the tick goes unrun. That state is the heartbeat's.
-
-### The beat's standing rules
-
-The interval doubles while the fleet asks for nothing and stops at `--ceiling`,
-so a quiet night costs ~26 wakes instead of ~96. **The ceiling is a real bound,
-not a formality**: supply grows from OUTSIDE the fleet — a ticket you triage,
-one a reviewer filed `needs-triage` included — and that arrival emits no
-event either, so the ceiling is your worst-case latency for noticing it.
-Do not raise it past 30 minutes.
-
-**The beat does not stop on idleness.** An empty shortlist and an empty supply are
-not a reason to end the run; they are the state a newly triaged ticket arrives
-into. The run ends when you drain it, when the budget goes, or when this
-context does — not because there was briefly nothing to do.
-
-**`--fold-unchanged` belongs to the heartbeat alone** — `fleet-event.mjs heartbeat` passes it, no other kind does.
-It prints one line instead of the rows when a tick asks for nothing AND says
-exactly what the last one said, which is what makes an unattended night
-affordable; a tick on any other wake is read by a controller that just acted and
-needs the rows. An unchanged `PULL` or `DISPATCH` is never folded — unclaimed work
-always prints in full, because folding it would hide the stall behind this
-ticket's own remedy. A dirty or unknown main checkout still folds — clearing it
-is the maintainer's, so it is nothing for you to act on — but the folded line
-names it (`…; HOLD (main checkout dirty) persists — …`) for as long as it holds
-dispatch.
-A live member past its family's threshold folds the same way — it is advice, so
-nothing for the heartbeat to act on by itself — and the folded line names each
-such member (`…; CHECK-LIVENESS fix-pr-5 persists — …`) for as long as it stays
-live past the threshold.
-To-spec drops fold the same way, and the folded line names them
-(`…; specs-dropped=#<N> (to-spec: User Stories heading) persists — …`) for as
-long as the shortlist carries them.
-
-**When you stop on purpose, say why — one command, and it is the last thing
-you owe the next run.** The beat leaves a dated mark on every hold, so a run
-that dies abruptly (a crashed harness, a closed terminal, an OOM kill) is
-detected by its mark going stale. A run that stops KNOWINGLY can do better
-than being detected, and nothing else can write the reason afterwards:
-
-```bash
-~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop "budget exhausted"
-```
-
-It holds nothing and returns at once. Use it when the budget goes, or when
-you can see the context ceiling coming. A drained run records it as the last
-step of **End of run** (above), never at the drain itself.
-Skipping it is not fatal — the next reader still reports the stop, it just
-reports that the beat stopped *without a recorded reason*, which is all it can
-honestly say about a death that named nothing.
-
-**A stall line names whose stall it is.** `fleet-tick`
-prints it before its own rows when this run has gone quiet: its beat overdue
-against the interval it recorded with no tick or ledger write inside the
-40-minute window either — or, with no beat yet, its latest tick, ledger write
-or controller record past that window. A beat, tick or ledger write older than
-the controller record rotate wrote is the previous run's and counts for
-nothing. The cockpit shows the same line while it is up. It names when this
-run was last seen, how overdue that is, how many
-tickets are still claimed and in flight, and how much supply the last read found
-— because the claimed ones keep the `in-progress` label, the candidate scan
-EXCLUDES that label, and those tickets are therefore invisible to your own
-shortlist and to the maintainer's. Its opening words come off the controller
-record:
-
-- `heartbeat STALLED, controller gone` — the run that stranded them is dead.
-  Its claims without a PR come back through the next run's phase 0
-  stranded-claim step (references/phase-0.md, "Resume the claims a dead run
-  left without a PR"), and its open PRs through the fold-in.
-- `heartbeat not beating, controller alive (pid N)` — a controller that
-  stopped beating and kept going. Nothing died, so nothing is resumed; when
-  that controller is you, the fix is to tick on every wake and beat when there
-  is nothing to do.
-- `heartbeat STALLED` alone — no record says whether that controller lives.
-  The line is detection only.
-
-Your first tick may print `previous run stopped deliberately at <time> (<age>
-ago) — recorded reason: <reason>` instead: the stop the previous run recorded.
-It is that run's end, not a verdict on yours, and no later tick prints it.
-
-Read the line and carry on; nothing in the fleet releases, relabels or
-reaps the stranded tickets for you, and nothing restarts the run that stranded them.
-
-### Own the CI waits
-
-**Own the CI waits.** Members are turn-based and cannot hold across a ten-minute
-run — they rebase, push, stop. Arm a second persistent Monitor over open PRs'
-latest runs, keyed `<run-id>:<attempt>:<conclusion>` so each terminal state fires once, and
-emit the behind-count and the per-job conclusions with it: a `success` on a branch
-8 behind is not actionable, and `check`-green-with-heavy-skipped is the staleness
-board you must not confuse with a red. Do not reinvent that read: one
-`~/.fleet/bin/fleet-run ci-state.mjs --pr <N>` per open PR already emits
-run id, attempt, conclusion, behind-count and per-job conclusions, branch derived
-from the PR — including the `gh api --hostname <host>` a GHE compare call needs,
-without which the probe 404s and `behind` comes back `null`, never 0, so every
-event reads as unknown-behind. Call it **without `--quiet`** — that flag drops
-`jobs`, `missing` and `dropped`.
-
-A monitor event is a wake-up, never a verdict; members re-query at labelling
-time. See references/ci-and-staleness.md.
-
-**A conclusion is not stable, even for a fixed run id on an unchanged head.** Never cache a conclusion, and test any fallback you write against `""`, `null` AND a real conclusion. See references/ci-and-staleness.md.
-
-**A probe that cannot read is a transition event, not silence.** The natural
-watcher shape — `st=$(ci-state.mjs --pr "$pr" 2>/dev/null) || continue` — fails
-closed correctly and then throws the failure away, so a rate-limited probe emits
-NOTHING and "no event" becomes indistinguishable from "not green yet". Every
-open PR stalls unlabelled while the run reads as merely quiet; observed live
-twice. So check the REST budget *before* polling — `gh api rate_limit` is itself
-unmetered (`gh api rate_limit --jq '.resources.core.remaining'`, re-confirmed
-2026-09-08) — and give an unreadable `ci-state` payload the same treatment one
-level down. The shape is **one outer tick loop with an inner pass over the open
-PRs**, because the two causes live at different levels — the budget is one
-account, the payload is one PR:
-
-```sh
-budget_out= hidden_out= list_out= cap_out= blind= # seed the latches: set -u reads each below before tick 1 ever assigns one
-pr_cap=200                                   # the open-PR read's --limit; gh stops there with exit 0 and no warning
-while :; do                                   # one tick
-  rl=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo ERR)
-  case "$rl" in ''|*[!0-9]*) rl=ERR;; esac    # a non-numeric read is an outage, not a budget
-  if [ "$rl" = ERR ] || [ "$rl" -lt 200 ]; then
-    if [ -z "$budget_out" ]; then             # ONE global latch: a quota outage hits every PR
-      echo "WATCHER DEGRADED: core REST budget=$rl — CI polling paused, silence is NOT green"
-      budget_out=1
-    fi
-  else                                        # every RECOVERED waits for the pass gates below
-    prs=$(gh pr list --state open --limit "$pr_cap" --json number --jq '.[].number' 2>/dev/null) || prs=ERR
-    if [ "$prs" = ERR ]; then
-      if [ -z "$list_out" ]; then             # global latch: this cause is account-level too
-        echo "WATCHER DEGRADED: cannot list open PRs — CI polling paused, silence is NOT green"
-        list_out=1
-      fi
-    else                                      # a list or cap RECOVERED waits for the pass gates too
-      count=$(printf '%s\n' "$prs" | grep -c .) || : # grep -c exits 1 on zero matches; set -e must not take it
-      if [ "$count" -ge "$pr_cap" ] && [ -z "$cap_out" ]; then # global latch: a full page may have been cut there
-        echo "WATCHER DEGRADED: open-PR list hit its --limit $pr_cap — PRs past it are NOT watched, silence on them is NOT green"
-        cap_out=1
-      fi
-      # gh pr list is GraphQL, so $rl still holds. The pass is budgeted at 4 core
-      # REST units per listed PR on top of the 200 floor. See references/ci-watcher.md.
-      # A shortfall here, or at the Actions-bucket gate below, pauses this tick's pass.
-      if [ "$rl" -lt $((200 + 4 * count)) ]; then
-        if [ -z "$budget_out" ]; then
-          echo "WATCHER DEGRADED: core REST budget=$rl < $((200 + 4 * count)) needed for $count PRs — CI polling paused, silence is NOT green"
-          budget_out=1
-        fi
-      else
-        # The workflow and run lookups bill a second core bucket that
-        # `rate_limit` does not report. Its count is only in the response
-        # headers of a lookup that bills it: one 1-unit read per tick, 4 units
-        # per listed PR on the same 200 floor. Recovery for every global latch
-        # waits until this gate clears too, so no line says polling resumed
-        # while this one still pauses it.
-        hrl=$(gh api -i 'repos/{owner}/{repo}/actions/workflows?per_page=1' 2>/dev/null | awk 'tolower($1)=="x-ratelimit-remaining:" {sub(/\r$/, "", $2); print $2; exit}')
-        case "$hrl" in ''|*[!0-9]*) hrl=ERR;; esac # a missing header is an outage, not a budget
-        if [ "$hrl" = ERR ] || [ "$hrl" -lt $((200 + 4 * count)) ]; then
-          if [ -z "$hidden_out" ]; then
-            need=; [ "$hrl" = ERR ] || need=" < $((200 + 4 * count)) needed for $count PRs" # an unreadable header has no amount to compare
-            echo "WATCHER DEGRADED: unreported Actions core REST bucket=$hrl$need — CI polling paused, silence is NOT green"
-            hidden_out=1
-          fi
-        else
-          if [ -n "$list_out" ]; then
-            echo "WATCHER RECOVERED: open-PR list readable again — CI polling resumed"
-            list_out=
-          fi
-          if [ -n "$cap_out" ] && [ "$count" -lt "$pr_cap" ]; then
-            echo "WATCHER RECOVERED: open-PR list under its --limit $pr_cap — every open PR watched again"
-            cap_out=
-          fi
-          if [ -n "$budget_out" ]; then
-            echo "WATCHER RECOVERED: core budget=$rl — CI polling resumed"
-            budget_out=
-          fi
-          if [ -n "$hidden_out" ]; then
-            echo "WATCHER RECOVERED: unreported Actions core REST bucket=$hrl — CI polling resumed"
-            hidden_out=
-          fi
-          for pr in $(printf '%s\n' "$prs"); do # inline $(...): `for pr in $prs` is ONE iteration under zsh
-            st=$(~/.fleet/bin/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
-            if ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
-              case " $blind " in *" $pr "*) ;; *) # latch keyed BY PR: this cause is per-PR
-                echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
-                blind="$blind $pr" ;;
-              esac
-              continue                        # inner continue — still reaches the tick sleep
-            fi
-            case " $blind " in *" $pr "*)
-              echo "WATCHER RECOVERED: ci-state reading #$pr again — CI polling resumed"
-              keep=; for b in $(printf '%s\n' "$blind"); do [ "$b" = "$pr" ] || keep="$keep $b"; done; blind=$keep ;;
-            esac
-            : # your normal handling of $st for this PR; a run at a terminal state is the CI wake: fleet-event.mjs ci "$pr"
-          done
-        fi
-      fi
-    fi
-  fi
-  sleep 120                                   # the block's only pacing, once per tick
-done
-```
-
-**One gate, not a gate plus a caveat.** See references/ci-watcher.md.
-
-**It has to latch** — one line entering the degraded state, one leaving it,
-never one per tick. An unlatched line at a 120s poll gets the Monitor
-auto-stopped for volume during even a two-minute outage, reintroducing the same
-blindness by another route. **Latch each cause at the level its cause lives
-at**: the budget, the unreported Actions bucket, the open-PR list and that
-list's cap are one global flag each — all account-level — but the payload latch is keyed by PR, and a
-shared scalar for those is an unlatched line wearing a latch's clothes — one
-persistently blind PR alongside one healthy PR re-clears the flag on every tick,
-emitting a DEGRADED and a false RECOVERED pair forever. The recovery line is
-what says the watch is alive again, so emit it on the first good pass even when
-nothing about the CI state changed; without it a reader cannot tell a recovered
-watcher from a dead one.
-
-**All pacing in exactly one place — the tick loop's own tail `sleep`.** See references/ci-watcher.md.
-
-**Guard every probe, not just the ones with a verdict field.** The block makes
-several API calls, and `gh pr list` is the one that looks like
-plumbing rather than a probe. A non-quota failure there (secondary/abuse limit,
-5xx, network blip, expired token) does not lower `.resources.core.remaining`, so
-the budget gate clears, and an unguarded `for pr in $(gh pr list …)` then
-iterates zero times over the empty substitution: no error, no latch, no DEGRADED
-line — total silence per tick, which is exactly what this section exists to
-remove. Capture its status (`prs=$(…) || prs=ERR`), latch it globally, and fall
-through to the same tail sleep. **Then iterate with the inline `$(printf '%s\n'
-"$prs")` form, never a bare `for pr in $prs`** — the assigned-variable trap in
-**Shell traps**, in references/shell-traps.md, which carries the mechanism and its
-measurements. It
-applies to **every** loop in this block, the `blind`-latch removal included:
-under a bare `for b in $blind` a recovered PR never leaves the list and the block
-emits a fresh RECOVERED every tick thereafter — the per-tick volume the latch
-exists to prevent, wearing a latch's clothes again.
-
-**A readable list can still be a short one.** `gh pr list` stops at its
-`--limit` — 30 when the flag is absent — with exit 0 and no warning, so a list
-that fills its limit reads exactly like one that happens to be that long, and
-every open PR past it goes unwatched without a line. Pass an explicit `--limit`
-(`pr_cap`: one variable for the flag and the check, so the two cannot drift)
-and treat a full page as its own degraded cause — the "no silent caps" rule
-`candidates.mjs`'s `refuseIfCapped()` and `fleet-tick.mjs`'s `PR_LIMIT` already
-enforce. It latches globally like the list failure but does not pause polling:
-the PRs it did return are real, so the pass still watches them, and the
-DEGRADED line names the rest as unwatched until a pass comes back under the cap.
-
-**The budget is gated at the floor and again at the pass, and only the pass gates announce recovery.** See references/ci-watcher.md.
-
-**Judge `ci-state` on its payload, never its exit code** — the same rule as
-`merge-gate.mjs` applies on the merge path, applied to the watcher. `not-green` is an
-ordinary, frequent state that exits non-zero, so a watcher treating any non-zero
-exit as an outage misfires constantly on PRs that are merely in progress. Empty
-or unparseable output is the degraded case; parseable JSON reading
-`verdict: "not-green"` is normal. An exhausted quota may also name itself,
-`verdict: "rate-limited"` on stdout — likewise degraded, and likewise not a
-reading, which is why the gate above tests the verdict rather than mere
-parseability: that payload is perfectly good JSON.
-
-**Do not back off and wait.** See references/ci-watcher.md.
-
-**While the budget is exhausted, `ledger.mjs check` reads
-`verdict: "unverified"`** — the ledger was read and the tracker was not. That is
-correct behaviour, but `unverified` exits **0**, the same as `clean`, so a
-member treating exit 0 as "safe to file" files blind during exactly this window.
-Say so when you flag the outage: members read `verdict` explicitly until you
-report recovery, never the exit code alone.
-
-### Reviewers
-
-**`selectDimensions` sizes the fan-out to the diff and the verify budget
-follows severity.** It cuts one immutable
-snapshot, verifies every critical/important finding adversarially,
-re-dispatches each crashed specialist and each crashed refuter pair once before
-it assembles the result, and has `agent()` return **into the script**, so no
-report can go undelivered and you relay nothing — the delivery failure that
-cost one fleet five reports on one PR and four on another. None of it runs on
-your turn: a review takes 20-40 minutes, and a controller that held its turn
-for each one, one at a time, was what left implementer slots empty.
-
-**Know the trim before you rely on it — it is wider than `docsOnly` suggests.** See references/reviewers.md.
-
-**Review units are counted, never capped.** A review in flight — a
-`review-pr-<pr#>` member still running — is one; each
-`fix-pr-<pr#>` is one; a finisher and a CI wait are zero; and a PR holds at most
-one unit at a time. In-flight reviews are derived, never remembered: a row with
-`review=` and no `reviewed=` is one, which is why the token goes on before
-anything else. A review whose PR has left the open list is probed: when
-`gh pr view` reports that PR MERGED or CLOSED, the tick drops the review,
-since none runs against a finished PR, and a probe that
-cannot answer keeps the unit counted. A unit is not the agents a review fans
-out to — 1 snapshot + up to 6 specialists + 2 refuters per critical/important finding.
-
-It returns `{pr, head, resume, testEnvironment, suiteVerdict, dimensionsRun, dimensionsUnrun, cwdAudit, counts, snapshot, survived, refuted, unverified}` —
-the **digest** first, then the snapshot and the findings — and it lands as
-one artefact, `<scratch>/pr<pr>/<run>/review.json`, holding that bare object.
-`<run>` is the review's own `run-XXXXXXXX` run root, the one its snapshot sits
-in, so a second review of the PR — at the same head or another — writes a file
-of its own and never replaces the first. The `review-pr-<pr#>` runner writes it
-and reports the digest, the path and the `reviewed=` token naming that run.
-
-**You read the digest; the findings are the fix-applier's.**
-`jq '{pr, head, resume, testEnvironment, suiteVerdict, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/pr<pr>/<run>/review.json`
-is the whole of your read, and it is what you record: `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`,
-off `head`, `counts` and the run root's name — the runner's `ledger` field — on
-the PR's row, with `ledger.mjs review <pr>`. Every later path to the review is built from that token, before a
-restart or after one: `<scratch>/pr<pr>/<run>/review.json`, `<run>` off the PR's
-latest `reviewed=`. Findings never enter your context —
-a result runs 26-61 KB, 7-15k tokens that used to land in yours and then again,
-up to ~10k characters, in every fix-applier prompt you wrote. The fix-applier
-reads every one off the file and makes every ruling on them
-(`review-and-fix.md`'s **The review result file**). What the digest tells you:
-
-**`testEnvironment` says what the review's shared test run is evidence about**,
-and it is present on a healthy run as well as a degraded one, so there is
-nothing to notice by its absence. The snapshot is `git archive`d and then
-`git init`ed with one commit, and the block that cuts it compares that commit's
-tree hash against the reviewed commit's: verified, a suite run in the
-snapshot collects and runs what a checkout does, and a red is a fact about the
-tree. UNVERIFIED, it is not — tests that ask git what ships decline or fail for
-the environment, and this field carries which line of the cut failed. The
-fix-applier reads it before acting on any count from the shared test run; you
-read it so a degraded review never passes for a clean one.
-`unverified` is *not* "checked and cleared" — a `suggestion` skips the pass by
-policy, and a finding whose refuters all crashed or abstained lands there too.
-All go to the fix-applier with the rest, in the file; never rule on them yourself.
-**`refutersDispatched`, carried on every finding, is what tells the skip
-apart** — zero is the policy skip, above zero with no deciding vote is a
-refuter pass that decided nothing — and `refutersInconclusive` splits that
-one: the refuters it counts abstained, every other one dispatched crashed. So
-the population is read off those fields rather than off severity,
-which records only how much a finding would matter if true. `resume` is
-non-null exactly when a specialist or a refuter pair crashed again after the
-review's own in-run retry, and **resume beats handing a crash-heavy review
-on**: a deferred crash is a finding nobody ever looked at.
-No replay exists for a review that ran in a runner's own kernel — `resume` is reported, not acted on, and the fix-applier defers what it names.
-`refuted` comes back deliberately as well — a refutation is itself a claim, and
-one has been reversed on new evidence. The fix-applier may reverse one; it
-records each reversal as a `refuted` entry in its disposition record, the
-evidence in `reason`, and you copy those entries to the ledger's `ruled` line by
-running `fleet-event.mjs fix-report`, whose `settle --from-report` records each
-refutation the report defers.
-
-**`dimensionsRun` is the dispatch; `dimensionsUnrun` is what names a gap.** A
-specialist that dies contributes zero findings while its key stays in
-`dimensionsRun`. So read the two together. A key
-in `dimensionsRun` and NOT in `dimensionsUnrun` returned a review; every
-`dimensionsUnrun` entry is `{dimension, reason}` naming a specialist that
-returned nothing, its `reason` the crash.
-The review already re-dispatched each crashed specialist once, so what
-`dimensionsUnrun` still names is residue: the fix-applier names it unrun in its
-report and re-runs nothing — an absence of findings is not coverage.
-
-**`suiteVerdict` is the review's one judgement on its shared test run:
-`{usable, reason}`, always present.** The review runs the test command once,
-and every specialist reads that run instead of running its own. `{usable: true,
-reason: null}` says the run executed real tests and its exit status is
-explained by its counts; usable is not green, so a usable run can have failing
-tests. `usable: false` carries `reason`, including a run that never started
-(install skipped, no suite slot). The verdict says nothing about whether a
-dimension reviewed: a specialist that returned reviewed, its findings verified
-as usual, whatever the suite verdict. With `usable: false` the
-fix-applier names `shared test run not usable: <reason>` in its final verdict
-and does nothing more — its own `<testCmd>` run and CI cover the suite.
-
-The rule this replaces — treat any dimension with nothing in
-`survived`/`refuted`/`unverified` as unrun — was the workaround for having no
-such field, and it over-refuses in the direction that costs work: a dimension
-that ran clean has nothing in those three either.
-
-**`cwdAudit` is the specialist's own inherited-checkout audit, one entry per
-dispatched dimension: `{dimension, state, line}`, `state` one of**
-`clean`/`dirty`/`unrepo`/`missing`. The prompt asks every specialist to run
-`git status --porcelain -uall` against the directory it inherited before
-returning and fold the result into a `CWD-AUDIT:` line — a convention, not
-schema, so a specialist that never emits it or misspells it still validates
-clean. This field is the runtime backstop that reads for the line regardless:
-`missing` is exactly as loud as `dirty`, and both name a checkout you should
-treat as a live scratch write until you have checked it.
-
-**A throw, an empty return, or a notification whose status is not `completed`
-is a failure event, not a clean review.** The review throws on missing
-`args.pr`/`args.worktree` and on a snapshot agent that returned no tree, and a
-failure surfaces mid-loop, where "react, never block" makes it easy to log and
-carry on — leaving a PR that *reads* as reviewed and is not. **Retry once
-under the next runner letter, then stop:** the `review-pr-<pr#>` runner
-already retried once inside its cell and reports `failed` with both errors, so
-the retry is a second runner under the next letter the PR's rows do not carry
-yet — `review-pr-<pr#>-b` after a first runner — recorded as
-`review=member:<that name>`. A second failure is reported, and the PR stays at
-review-due. Settle the dead review by appending `=failed` to its `review=`
-token, then append `review=member:<that name>` after it, both in one
-`ledger.mjs review <pr> review=<dead launch>=failed review=member:<that name>`
-call — `review` settles the dead launch in place, and refuses a new launch
-while the dead one still reads open, and the tick takes the last `review=`
-token on a row as the one in flight, so that order is what keeps the retry
-counted as the live review unit. A
-runner member that is killed rather than failed follows **Failure
-handling** (fresh name, inherited state stated).
-
-**A refutation resting on an injection nothing proved landed is not a refutation — it is a cell that never ran.** See references/reviewers.md.
-
-**The suite slot bound.** At most `FLEET_SUITE_SLOTS` full suite runs execute on
-a host at once — 2 by default, whatever the member caps count — because each run
-already spreads over most of the host's cores. The bound is a wrapper,
-`suite-slot.mjs`, reached through the Resolver:
-`~/.fleet/bin/fleet-run suite-slot.mjs '<entrypoint>' [args…]` runs the
-entrypoint under `sh -c` with the arguments after it. It decides by arity. No
-appended arguments is a full run, and waits for a free slot. Appended arguments
-are a narrowed run, which takes none, so a verifier's `<testCmd> <args>` never
-queues behind a full run — only its fall-back to the full command does. A
-wrapper that finds `FLEET_SUITE_SLOT` set, which a slot holder exports to its
-child, is nested inside a held slot and runs straight through, so a wrapped
-command inside a wrapped command is one run, not a deadlock. A slot is a
-pid-stamped lock file in `~/.fleet/suite-slots/` — under the host's `~/.fleet/`
-and not a workspace's, because the bound is host-wide and a review's snapshot is
-no repository.
-
-Each seat that runs the full suite is wrapped where its command is written. A
-claim's runner execs the Test entrypoint through the wrapper. A repository that
-tracks its own runner wraps it itself, as this repository's `agent-test` does
-for a bare run. The review wraps its own one run, so its args carry the bare
-command; a wrapped string handed to it anyway is harmless, the inner wrapper
-being the nested case. The fix-applier and the finisher run what you hand them,
-so hand them the wrapped string as `<testCmd>` —
-`~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command
-written `'\''` — and it is still one command for every gate.
-
-The wait is capped and never counts against the run: `FLEET_SUITE_WAIT_S`
-seconds, 1800 by default, then exit **75** with `suite-slot: no slot after <n>s`
-on stderr, having launched nothing. On getting a slot the wrapper prints
-`SUITE_SLOT_WAIT_MS=<n>` — the wait in milliseconds — to stderr, which the
-review's test-run block captures into its log and the test-run agent reports as
-`slotWaitMs`. **Exit 75 is not a test result.** In a review it makes
-`suiteVerdict` not usable, `suiteVerdict.reason` beginning "no suite slot within
-<n> s — the host is at its suite bound; not a test failure", with no retry
-inside the run: read that `reason` off the digest and re-review it
-under the next runner letter (`review-pr-<pr#>-b` after a first runner), as for
-a runner that reported `failed`. The implementer, fix-applier and finisher briefs
-carry the one-line rule: *Exit 75 from the suite is not a test result; run the
-command again.*
-
-A slot holder killed without releasing is taken over by the next waiter under
-the same `.reap` discipline as the ledger's lock; the wedges that discipline
-cannot clear are in the runbook under **Writer policy**.
-
-**Where `testCmd` comes from:** the repository's Test entrypoint, out of the
-Recipe cache phase 0's Recipe derivation step proved —
-`~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main` prints it — and the one you
-hand specialists per **Give specialists a stack-free test command** above. Pass
-the same command to the review, to the fix-applier, and to the finisher — whose
-duty-2 mutation
-gate runs it too — so every gate runs one command. Omit it from the review args
-and the review (`review-core.mjs`, in a runner) reads the same cache itself,
-refusing outright when there is none; the fix-applier has no such fallback, so
-substituting `<testCmd>` with nothing leaves it no gate at all.
-
-**Where `<branch>` comes from:** the PR's head branch — `gh pr view <N> --json headRefName -q .headRefName`, or the same branch you cut the worktree from. See references/reviewers.md.
-
-**The standing CI facts are in the fix-applier body, not in per-event messages** —
-otherwise you send "your red is staleness, do not rebase" once per member per
-merge. `review-and-fix.md` states them; the body says they apply.
-
-The finisher's duties, in this order:
-
-1. **Audit the worktree** by running one script, `finisher-audit.mjs` — the row
-   lookup, the dirty check, the head-equality check and the cause derivation
-   are one command, because each of them alone reads like the whole duty. Its
-   exit code is the verdict of this duty:
-   `~/.fleet/bin/fleet-run finisher-audit.mjs --worktree <abs-path> --pin <your dispatch pin>`,
-   the path the one you were dispatched with, however it was spelled, and the
-   pin the full SHA. It runs `worktree-audit.sh` itself and finds this
-   worktree's row by its `realpath`, so a spelling reached through a symlink
-   still finds a healthy worktree's row; it reads dirty from the row and from
-   `git status --porcelain -unormal`; it compares the worktree's `HEAD` to your
-   dispatch pin; and when the head differs from the pin it derives the cause
-   from the reflog. It prints one JSON verdict,
-   `{worktree, realpath, pin, head, cause, evidence}`. Exit 0, `cause` null, is
-   the only result that means the worktree is clean at your pin. Exit 1 means
-   `cause` names why not — `live-editor`, `rebase`, `past-pin`, `unreadable`,
-   `missing`, `absent` or `other` — and exit 2 means the script could not
-   look. Every non-zero exit halts the finisher *here*, before the label: it
-   reports the verdict as printed and labels nothing, and an exit 2 is cause
-   `other` with the line the script printed on stderr as its evidence. A
-   finisher that cannot see the tree it labels cannot vouch for it, so none of
-   the script's steps is run by hand to get past a halt. A finisher that
-   verifies the dirt is harmless and labels anyway has substituted the rule's
-purpose for the rule, and you find out at merge time. The halt-cause block in
-`agents/fleet-finisher.agent.md` holds the script call and what each exit
-means, and a bare SHA mismatch names no cause. **Pass `--testCmd` too** —
-the same string you passed the workflow and the fix-applier — because duty
-2's mutation gate runs it and nothing else hands the finisher one; the renderer
-refuses a finisher brief rendered without it.
-2. **Confirm every deferral — and every claimed APPLY — has a home that outlives the merge.** See references/finisher.md.
-
-   **A fix-applier's "applied" is a claim like any other**, and nothing else
-   checks it — the review ran against a snapshot cut before those edits existed.
-   Confirm `git diff origin/main...HEAD` actually contains what it reported
-   applying. Two finishers in one run extended duty 2 this way unprompted, and
-   one found five applies where the controller's hand-written list named three:
-   a controller's list of what to verify is itself a claim.
-
-   **That range is right for the positive check and wrong for a negative one.** See references/finisher.md.
-
-   **Whatever you verify by RUNNING, run in a tree nobody else owns.** See references/finisher.md.
-
-   **Remove it on every path, the failing ones included** — a mutant that comes back green, a suite that will not start, your own halt at any duty. See references/finisher.md.
-
-   **None of this licenses a write to the owned worktree.** Duty 1 is a read;
-   you never restore that tree, because you never wrote to it. A controller
-   instruction to restore mutated paths there is an instruction to perform the
-   silent-destruction ordering above — report it back, do not run it. One
-   finisher refused exactly that instruction live, on the grounds it could not
-   prove the diff was its own; that was judgement, and this is the rule.
-3. Add `ready-to-merge` by running one script, `finisher-label.mjs` — the
-   release-label check and the label write are one command, because the check
-   reads like the whole duty. Its exit code is the finisher's verdict:
-   `~/.fleet/bin/fleet-run finisher-label.mjs --pr <pr> --pin <your dispatch pin>`,
-   the pin the full SHA. In order, it finds **exactly one** release label,
-   `patch`/`minor`/`major` — zero or more than one is exit 3 before anything is
-   written, naming which it found; then it records the head you audited as a PR
-   comment, which the merge bot reads as the head the label was applied to;
-   then it adds the label and reads the labels back, and exits 0 only when that
-   read-back carries `ready-to-merge`. A failed call is exit 2 and the read-back
-   without the label is exit 4; no step after a failed one runs. The count is
-   the backstop for a label lost wherever it was lost, a hand-created PR
-   included: a `gh pr create` that outran its caller's tool timeout leaves the
-   PR open with the flag unapplied and no exit status anywhere to notice, and
-   nothing downstream re-derives the release label. It counts only those three
-   — the PR carries other labels, `ready-to-merge` itself among them once the
-   script adds it, so a PR wearing one release label beside them passes
-   unchanged. A repo that defines none of the three does not gate on one — the
-   script settles that from the repo's own label list and says
-   `undefined-in-repo` in its receipt. Two finishers in one run stopped at the
-   release-label check and reported `labelled` on PRs that sat out of the merge
-   queue.
-4. Report you the label (the script's receipt, the JSON line it printed, as
-   printed), the deferral issue numbers — a `filed: #N <subject>` line for
-   every issue duty 2 created, and `unrecorded: #N <subject>` for one whose
-   `filed` failed twice — and anything
-   it halted on — cause and evidence, below, never a bare "head moved". The
-   cause is one word of the ledger's `halted:<cause>` vocabulary:
-   `live-editor`, `rebase`, `past-pin`, `unreadable`, `missing` or `absent` as
-   duty 1's verdict names it, and `other` for every other halt — that
-   verdict's own `other`, and a halt at duty 2, duty 3, the instrument
-   re-check or the CI gate. A duty 1 halt's report carries the verdict as
-   printed, the JSON line, so a `rebase` halt's report carries `replay`,
-   `rangeDiff` and `remote` from its `evidence`.
-
-**Once the label is on, take it off before you approve any push.** The label is a
-verdict on the tree the finisher read, and a GitHub label does not follow the
-branch — on one PR it survived a push and came to sit on a commit nobody had
-audited. Write `label-off=<latest finisher attempt>` onto the PR's row first
-(`ledger.mjs token <PR number> label-off=<latest finisher attempt>`, which keeps
-every token the row already has — **Run ledger**), then
-remove `ready-to-merge`, then approve. The token is how the tick tells your
-removal from a finisher that never labelled — a tick run between a removal and
-its token re-dispatches a finisher into your take-off window. The label goes
-before the approval because removing the artifact the merge bot gates on is
-the reliable stop, where messaging the bot races it, and a label has been
-observed holding until after an abort message arrived. Then
-dispatch a **fresh** finisher against the new head; the first audit does not
-transfer, since it verified a different tree. The merge bot refuses that head on
-its own (`run-merge-bot.md`, **The labelled head**), so this is not the only
-guard — but its refusal costs a pass and leaves the label lying, which is yours
-to clear either way, the same way: `label-off=` first, then the removal.
-
-**Every implementer body carries the claim discipline, because tickets that restate facts ship new wrong claims** — inherited from the ticket, and minted in prose nobody asked for. See references/correction-tickets.md.
-
-**The settling command for "which files read X" must never be a literal-path
-grep.** The path is assembled in more than one spelling here, one of them behind
-a local `read` helper, so a grep for the path string answers with the files that
-merely *name* it — comments included — and misses the files that build it.
-Replace the file with `MUTATED` in a throwaway copy, run the suite, and read off
-which suites red: that answers which ones **depend on its contents**, which is
-the question a coverage claim actually needs, and it returns a different set
-from any spelling of the grep.
-
-**A settling command over literal text uses `grep -F`, and its zero counts only after the same command finds a line known to match.** See references/correction-tickets.md.
-
-### Merge bot
-
-**Its merge gate is one script, run twice.** Step 3 of `run-merge-bot.md` is
-`merge-gate.mjs --pr <n> --pre <sha> [--post <sha>]`: read-only, it runs the
-instrument re-check, the label and review-decision read and a run-bound
-`ci-state`, and answers their conjunction — exit 0 mergeable, 1 blocked (the
-bot reports `<reason>-#<pr>`), 2 could not evaluate. The bot runs it once
-before any CI wait and again immediately before `gh pr merge`, and merges only
-on that second exit 0. Nothing but the gate reads `ci-state` on the merge path,
-so a bot's report names the gate's `reason`, never a field it read by hand.
-
-**You own the watcher, not the bot.** A dying member takes a watcher down with it
-and the queue stops silently. Arm one yourself, `persistent: true`, seeded before
-the loop so handled PRs do not re-fire.
-
-**Every merge invalidates every other open PR, silently.** The rest show *stale
-green* until something re-triggers, then flip to `rebase-check: FAILURE` with the
-slow jobs skipped. Behind-count is the only honest signal.
-See references/ci-and-staleness.md.
-
-**One rebase per PR, at merge time.** The bot establishes currency once, when the
-PR is the merge candidate; requiring it earlier costs a full CI cycle per sibling
-merge. Any behind-count you hand a bot is expired on arrival; say so. See
-references/ci-and-staleness.md.
-
-`run-merge-bot.md` carries the mechanics — intra-pass re-checks, run-binding, the
-ancestry proof, post-rebase red triage. Do not restate them here.
-
-### Reap after each merge pass
-
-The merge bot deletes the remote branch after each merge (`delete-merged-branch.sh`,
-in `run-merge-bot.md` step 4), leaving the local branch `[gone]` with its
-worktree — and its installed dependencies — still on disk. Reap after **each** merge pass,
-not once at the end: a stale worktree still answers `git worktree list`, so the
-in-flight probe (`inflight.sh`, run by the Shortlist and by every Pull) reads an
-already-merged ticket as taken and the queue quietly shrinks. The trigger is the
-bot's `merge-bot-<n>=done`, and `tick --apply` reaps once for every one — a pass
-that merged nothing included (phase 3, **Merge-bot pass reports done**). See
-references/reaping.md.
-
-`~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition
-inside the same invocation as the delete — `for-each-ref` for `[gone]`, `git
-cherry origin/main` to authorize the `git update-ref -d` delete (plus a fresh
-check that no worktree holds the branch), worktree removal without `--force` —
-and reports reaped and kept-with-reason counts. Update the reaped tickets' ledger
-rows in the same step. See references/reaping.md.
-
-**It sweeps detached worktrees too — the shape a `[gone]` walk structurally
-cannot see.** Bounded to `.worktrees/`, so a checkout of yours outside it is
-reported, never removed. Read `worktreesRemoved` alongside `reaped`: a pass that
-reaps branches and removes no worktrees is a finding, not a quiet success.
-See references/reaping.md.
-
-**Do not invoke `commit-commands:clean_gone`.** It runs `git branch -D` and
-`git worktree remove --force` with no merged check at all — nothing there stops it
-deleting a branch, or discarding a member's uncommitted work, that exists nowhere
-else. The skill is the maintainer's to fix; do the reap yourself.
-See references/reaping.md.
-
-**Never reap a branch a live member is on.** Cross-check `.fleet/ledger.md` first:
-a row without a terminal state means someone may still be in that worktree, and
-the dirty check does not see a member that committed but has not pushed.
-See references/reaping.md.
-
-### Reclaim scratch after each merge pass
-
-`tick --apply` runs it right after `reap.sh --apply`, every pass:
-`~/.fleet/bin/fleet-run reclaim-scratch.mjs --root <scratch> --apply`,
-`<scratch>` the path `scratch-root.mjs` prints. Reap authorizes on git's
-evidence and never removes scratch; Reclaim authorizes on GitHub state and
-age, reading which members are live off `.fleet/ledger.md`:
-
-- **`pr<M>/` and `dispositions-fix-pr-<M>*.json`** go once PR #M is MERGED
-  or CLOSED and no live `review-pr-<M>`, `fix-pr-<M>` or `finisher-pr-<M>`
-  token names it. A live `merge-bot-<n>` holds every one of them for that
-  sweep — its token names no PR. An OPEN PR's `pr<M>/` stays, all but its
-  `run-*` roots idle past 7 days.
-- **`impl-<N>/`** goes once issue #N is CLOSED, or when it is OPEN, no live
-  `impl-<N>` token names it, no claim worktree under `.worktrees/` still stands
-  for it, and nothing under it has changed in 7 days.
-- **Anything else at the root** — your own ad-hoc files included — goes
-  once nothing under it has changed in 7 days and no live token's name
-  appears in its name.
-
-The review snapshot runs the same script as `--pr <N>` on its own PR's stale
-`run-*` roots. What this sweep does with no ledger, or with a `gh` that cannot
-answer, is in references/phase-0.md, under **Reclaim scratch**.
-
-### Release the claims that never became PRs — at end of run, and on drain
-
-Phase 1 is serial and claims ahead of dispatch, so a ticket can be legitimately
-claimed and then never sent: a collision surfaces after the claim, or the
-maintainer says drain. The claim still holds the `in-progress`
-label, a worktree and a branch, and **`reap.sh` will not take them** — the branch
-is not `[gone]` and has no unique commits, so it is correctly not reapable. Reaping
-fires after each merge pass and nothing fires at end of run, so the claim survives
-it and the in-flight probe reads a free ticket as taken next run. Same silent queue
-shrink as a stale merged worktree, from the opposite end.
-
-`~/.fleet/bin/fleet-run release-ticket.sh <N> impl-<N> implementer --apply` —
-the pair the claim took, so the two name the same branch and worktree — is the
-inverse of the claim, and recomputes its preconditions inside the same
-invocation as the delete: 0 commits ahead of `origin/main`, no unique commits
-(`git cherry`), no branch on `origin`, and — whenever the worktree directory is
-there to read — a clean worktree. Where that directory is established absent the
-dirty check does not run at all, and `git worktree remove` is no backstop for it:
-it gates its own clean check on the same `stat`, so the script's absence
-measurement is sole arbiter there. Two of the four are recomputed a second time
-at the delete itself: the dirty check by git, which is what `worktree remove`
-without `--force` is; and the ahead count, re-run against `origin/main`
-immediately before the branch delete, because a commit can land across the
-`gh issue view` between the checks and the delete. The `git cherry` and
-pushed-branch checks are **not** re-run there — a commit landing in that window
-is ahead of `origin/main` by construction, so the recount covers it. All clear →
-drops the label, removes the worktree without `--force`, deletes the branch with
-`git update-ref -d` on the tip it read once before the recount — a
-compare-and-swap that refuses if the branch has moved off that tip — authorized
-by those two commit checks, the recount and a fresh check that no worktree holds
-the branch, and by nothing else (not `git branch -d`: it measures against local
-HEAD, and a claim has no upstream, so it refuses a pristine claim whenever local
-`main` is behind `origin/main`). Any one of
-them failing → it touches nothing and names the blocker. **That refusal is the
-finding, never an obstacle**: a claim carrying commits or a pushed branch is not
-auto-released, ever — run `worktree-audit.sh` (it audits every worktree; find
-this claim's row in the output) and decide by hand.
-
-Run it over every claimed ticket with no PR when the run ends or the maintainer
-drains, and on the spot for a claim abandoned mid-run (a bail before
-implementing, a collision found after the claim). Update the released tickets'
-ledger rows in the same step. See references/reaping.md.
-
 ## Worktree and claim model
 
 Run none of this by hand: act through `claim-ticket.sh`, `release-ticket.sh`, `reap.sh` and `inflight.sh` as their phases say, and dispatch every member into its claimed worktree by absolute path.
@@ -2082,8 +1692,8 @@ Run none of this by hand: act through `claim-ticket.sh`, `release-ticket.sh`, `r
 **Claim, release and reap are unchanged on omp.** `claim-ticket.sh`,
 `release-ticket.sh`, `reap.sh` and `inflight.sh` are git-native and operate on
 the single shared ref store every worktree and the main checkout read and
-write directly (**Phase 1**, **Reap after each merge pass**, **Release the claims
-that never became PRs** above); nothing in omp's `task` model touches that
+write directly (**Phase 1**, the tick's reap, and `release-ticket.sh` under
+**Failure handling**); nothing in omp's `task` model touches that
 store, so none of the four scripts carries a dialect branch.
 
 **A fleet member is never dispatched with omp's `isolated: true`.** See references/isolation.md.
@@ -2157,7 +1767,7 @@ See references/pull.md.
 
 **Do not re-derive this by hand — `fleet-tick.mjs` computes it.** One invocation
 prints per-role `actual/target` and an explicit ACTION with the backlog gate
-above and every row of the table below already applied; every wake in Phase 3
+above and every row of the table below already applied; every wake
 ends in it. The deficit is then *computed, not remembered*, which is
 the whole point: a table you must remember to consult is one you will not
 consult under a merge-side event storm, and that is how implementers reached
@@ -2244,7 +1854,7 @@ has to travel in the member's report rather than being something you already hol
 
 The member-facts scrape, the drain of the pending ticket-features rows and the
 commit of the metrics files are steps of `closeout.mjs finish`, which **End of
-run** (Phase 3) drives. See references/close-out.md.
+run** (**What a wake owes beyond its call**) drives. See references/close-out.md.
 
 **Why not decide inside one run.** A run holds 2-3 implementer PRs, and ticket
 difficulty swamps the tier effect — a gojq parity harness and a two-statement
@@ -2508,7 +2118,7 @@ behind-pr:#M | behind-issue:#M` is an Exclusion (phase 1) — a ticket row like
 any other, never a section of its own.
 
 A PR's review is not a member, so it carries its own pair of row tokens,
-written with `review` onto the PR's row (**Reviewers**): `review=wf:<runId>` |
+written with `review` onto the PR's row (**The reviewer**): `review=wf:<runId>` |
 `review=member:<name>` at launch, `<name>` being
 `review-pr-<n>` for the PR's first runner and the next letter its rows do not
 carry yet (`review-pr-<n>-b`, `-c`, …) for every later one,
@@ -2517,7 +2127,7 @@ when the result lands, `<run>` the review's `run-XXXXXXXX` run root under
 `<scratch>/pr<n>/`, which holds its `review.json`. A row with `review=` and no `reviewed=` is a review in
 flight, and the tick counts it as a live review unit unless gh reports its PR
 MERGED or CLOSED. `ci=<run-id>:<attempt>:<conclusion>`
-and `held-behind:#<lower>` are row tokens the same way (Phase 3), and so is
+and `held-behind:#<lower>` are row tokens the same way, and so is
 `conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md`
 step 1), or by you off the tick's `CONFLICT` line, naming the row's own PR. It
 is not an Exclusion: that gates a ticket's claim, this a PR's merge. `label-off=<finisher-pr-M[-x]>`
@@ -2591,7 +2201,7 @@ Match the failure to its row in the table below and run that response; where the
 | Failure | Response |
 |---|---|
 | SHA not on expected branch | Flag, do not enqueue, report |
-| Implementer bails before implementing | Act by the report's `bailCause` as the **Relabel causes** table says, then refill (phase 3) |
+| Implementer bails before implementing | Act by the report's `bailCause` as the **Relabel causes** table says, then refill (**What a wake owes beyond its call**) |
 | Implementer blocked or ambiguous *mid-implementation* | Free the slot, `ledger.mjs settle impl-<N> blocked`, leave `in-progress`, report — the ticket is not In flight and waits for a human; the row above is the pre-code bail, not this one |
 | `review-pr` workflow throws or returns no tree | Retry once under the next letter (`review-pr-<pr#>-b`); still failing, report and leave the PR at review-due. Never enqueue the PR as reviewed — the workflow is not a member, so no other row here covers it |
 | Reviewer, fix-applier or red-check fixer cannot reach green | Report, leave the PR unlabeled, free the slot — a fix-applier or red-check fixer settles `failed` |
@@ -2605,6 +2215,7 @@ Match the failure to its row in the table below and run that response; where the
 | Member idle with work outstanding | Read the PR first, *then* ping. Idle ≠ done |
 | Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then run the **Member confirmed dead or never dispatched** wake, then new member, new name, prompt carries inherited state |
 | Member **unaccounted** (a live token the tick flags `CHECK-LIVENESS`, or any live token nothing has reported on) | Registry census first: `read history://` once. A row other than `running` → `read agent://<member>` and the artifacts (PR head, worktree, labels), settle the real outcome with the existing vocabulary, and resume a `parked` member with `write agent://<member>` when its work is worth continuing. A `running` row → the mtime discriminator below, two polls: moved means BLOCKED and alive; frozen at both polls **and** no artifact movement → `write proc://<member>/kill`, the **Member confirmed dead or never dispatched** wake, fresh name. Three independent alive-signals — the first poll, the second poll, the artifacts — must all be silent before a kill; the tick settles and kills nothing |
+| A claim abandoned mid-run (a collision found after the claim) | `~/.fleet/bin/fleet-run release-ticket.sh <N> impl-<N> implementer --apply`, the pair the claim took. Run it over every claimed ticket with no PR when the run ends or the maintainer drains, and on the spot for a claim abandoned mid-run (a bail before implementing, a collision found after the claim). **That refusal is the finding, never an obstacle**: a claim carrying commits or a pushed branch is not auto-released, ever — run `worktree-audit.sh` (it audits every worktree; find this claim's row in the output) and decide by hand. Update the released tickets' ledger rows in the same step. See references/reaping.md |
 
 ### Recovery
 
@@ -2624,6 +2235,17 @@ Audit every worktree before dispatching replacements with
 `~/.fleet/bin/fleet-run worktree-audit.sh` — it reports each worktree's
 ahead-count and uncommitted files, the committed-vs-uncommitted distinction that
 decides whether a replacement redoes or destroys work.
+
+**A throw, an empty return, or a notification whose status is not `completed`
+is a failure event, not a clean review.** **Retry once
+under the next runner letter, then stop:** the `review-pr-<pr#>` runner
+already retried once inside its cell and reports `failed` with both errors, so
+the retry is a second runner under the next letter the PR's rows do not carry
+yet — `review-pr-<pr#>-b` after a first runner — recorded as
+`review=member:<that name>`. A second failure is reported, and the PR stays at
+review-due. A
+runner member that is killed rather than failed follows **Failure
+handling** (fresh name, inherited state stated).
 
 ## Guards
 
@@ -2741,6 +2363,13 @@ failures arrive as *wrong findings*, not errors:
   tree's filenames, so a sibling's throwaway mutation reads exactly like a live
   worktree's error.
   See references/isolation.md.
+- **Every implementer body carries the claim discipline, because tickets that restate facts ship new wrong claims** — inherited from the ticket, and minted in prose nobody asked for. See references/correction-tickets.md.
+- **The settling command for "which files read X" must never be a literal-path
+  grep.** Replace the file with `MUTATED` in a throwaway copy, run the suite, and read off
+  which suites red: that answers which ones **depend on its contents**, which is
+  the question a coverage claim actually needs, and it returns a different set
+  from any spelling of the grep. See references/correction-tickets.md.
+- **A settling command over literal text uses `grep -F`, and its zero counts only after the same command finds a line known to match.** See references/correction-tickets.md.
 
 Suspect a neighbour before a member's own diff — for unexplained failures, and
 equally for any **finding** that came from reading source.

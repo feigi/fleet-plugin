@@ -18,6 +18,9 @@ import { Pin } from "./support/prose-pin.mjs";
 import { HALT_CAUSES } from "../plugin/scripts/ledger-grammar.mjs";
 
 const RUN_TEAM = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"));
+// The finisher's report contract is in its agent body; run-team's SKILL.md no
+// longer restates it.
+const FINISHER_BODY = Pin.file(join(import.meta.dirname, "..", "plugin", "agents", "fleet-finisher.agent.md"));
 const flat = (s) => s.replace(/\s+/g, " ");
 
 const RESOLVING = "**Resolving a finisher halt.**";
@@ -91,18 +94,18 @@ test("the tick paragraph says why past-pin cannot use the dead-review path, and 
   assert.match(para, /A head that moved past `reviewed=` with no such halt — a fix-applier's push — stays not due: duty 2 verifies what it applied\./);
 });
 
-test("finisher duty 4 names the cause in the ledger's vocabulary, and a duty 1 halt reports the verdict as printed", () => {
-  const duty = flat(RUN_TEAM.bullet("4. Report you the label", "**Once the label is on, take it off before you approve any push.**", "finisher duty 4").text);
+test("the finisher's report names the cause in the ledger's vocabulary, and a duty 1 halt reports the verdict as printed", () => {
+  const duty = flat(FINISHER_BODY.between("Report to the controller in the report file your brief names", "Then send the one line your brief gives", "finisher report").text);
   const vocab = Pin.sentences(duty).find((x) => x.includes("vocabulary")) ?? "";
-  for (const c of HALT_CAUSES) assert.match(vocab, new RegExp(`\`${c}\``), `duty 4 no longer names \`${c}\``);
+  for (const c of HALT_CAUSES) assert.match(vocab, new RegExp(`\`${c}\``), `the report no longer names \`${c}\``);
   assert.match(vocab, /`other` for every other halt/);
   // The range-diff replay is the script's evidence now, not a command the
   // finisher runs: the report carries the verdict, and a rebase verdict's
   // evidence holds the replay the resolution table's rebase row asks for.
   assert.match(
     duty,
-    Pin.phrase("A duty 1 halt's report carries the verdict as printed, the JSON line, so a `rebase` halt's report carries `replay`, `rangeDiff` and `remote` from its `evidence`."),
-    "duty 4 no longer has a duty 1 halt report the script's verdict as printed — a rebase halt reaches the controller without the replay evidence the resolution table escalates on",
+    Pin.phrase("A duty 1 halt's `evidence` carries the verdict as printed, the JSON line, so a `rebase` halt's carries `replay`, `rangeDiff` and `remote`."),
+    "the report no longer has a duty 1 halt carry the script's verdict as printed — a rebase halt reaches the controller without the replay evidence the resolution table escalates on",
   );
 });
 

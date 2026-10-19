@@ -26,9 +26,12 @@
 // backstop fail on the same inputs — and why the guard establishes absence
 // instead of inferring it from a failed `-e`.
 //
-// Pinned in all four places the claim is made, because a correction applied to
-// one document is the one a reader does not reach: SKILL.md asserts, reaping.md
-// carries the evidence, and release-ticket.sh's own comment sits at the check.
+// Pinned where the claim is made, because a correction applied to one
+// document is the one a reader does not reach: reaping.md carries the
+// evidence, and release-ticket.sh's own comment sits at the check. SKILL.md
+// no longer restates the release's or the reap's preconditions — its event
+// loop left it — so it keeps only the by-hand fallback a refusal sends the
+// controller to, pinned below.
 // The script's header (release-ticket.sh) already carried the corrected
 // wording when this was filed; the comment at the dirty check did not.
 //
@@ -88,86 +91,7 @@ test("reaping.md: the rc-0 deregistration of an unstattable worktree is measured
   );
 });
 
-test("run-team/SKILL.md: the release-claims section carries the same limitation", () => {
-  // The assertion doc is where a controller actually reads this. Corrected in
-  // reaping.md alone, it is corrected in the document nobody opens mid-run.
-  const section = RUN_TEAM.between(
-    "### Release the claims that never became PRs",
-    // Short of a wrap point: SKILL.md hard-wraps this sentence mid-phrase.
-    "**That refusal is the",
-    "run-team/SKILL.md",
-  ).text;
-  assert.match(
-    section,
-    /whenever\s+the\s+worktree\s+directory\s+is\s+there\s+to\s+read.{0,200}established\s+absent.{0,120}no\s+backstop.{0,200}sole\s+arbiter/s,
-    "SKILL.md is back to promising all four preconditions are recomputed at the delete — the dirty check does not run when the directory is established absent, and `worktree remove` does not stand in for it",
-  );
-});
-
-test("run-team/SKILL.md: the release deletes the branch with update-ref's compare-and-swap, not `-D`", () => {
-  // release-ticket.sh deletes with `git update-ref -d refs/heads/<branch> <tip>`
-  // on a tip read once, which refuses if the ref moved off that tip. SKILL.md
-  // kept saying `-D` after the script stopped using it, so a controller read
-  // the release as a force-delete of whatever the ref held at that moment.
-  const section = RUN_TEAM.between(
-    "### Release the claims that never became PRs",
-    "**That refusal is the",
-    "run-team/SKILL.md",
-  ).text;
-  assert.match(
-    section,
-    Pin.phrase("deletes the branch with `git update-ref -d` on the tip it read once"),
-    "SKILL.md's release section no longer names `git update-ref -d` on a tip read once as the branch delete",
-  );
-  assert.match(
-    section,
-    Pin.phrase("compare-and-swap that refuses if the branch has moved off that tip"),
-    "SKILL.md's release section no longer says the update-ref delete is a compare-and-swap that refuses if the branch has moved off the tip",
-  );
-  assert.doesNotMatch(
-    section,
-    /(?:deletes?|deleted)\s+(?:the\s+branch\s+)?(?:is\s+)?with\s+`(?:git\s+branch\s+)?-D`/,
-    "SKILL.md's release section says the branch is deleted with `-D` — release-ticket.sh deletes it with `git update-ref -d`",
-  );
-});
-
-// The reap paragraph's twin of the release pin above. reap.sh deletes a
-// `[gone]` branch with `git update-ref --no-deref -d refs/heads/<b> <tip>`,
-// never `-D`, and keeps a branch the cherry check cleared whenever a fresh
-// worktree check finds it held — so naming `-D`, or the cherry check as the
-// delete's only authorizer, is false as written.
-const reapParagraph = () =>
-  RUN_TEAM.paragraph("`~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition", "run-team/SKILL.md's reap paragraph", "**It sweeps detached worktrees too —").text;
-
-test("run-team/SKILL.md: reap's cherry check authorizes the update-ref delete, with the fresh worktree check beside it", () => {
-  const p = reapParagraph();
-  assert.match(
-    p,
-    Pin.phrase("`git cherry origin/main` to authorize the `git update-ref -d` delete"),
-    "SKILL.md's reap paragraph no longer names the cherry check as authorizing the `git update-ref -d` delete",
-  );
-  assert.match(
-    p,
-    Pin.phrase("a fresh check that no worktree holds the branch"),
-    "SKILL.md's reap paragraph no longer names the fresh worktree check — reap.sh keeps a branch the cherry check cleared whenever a worktree holds it",
-  );
-  assert.doesNotMatch(p, /(?:^|[\s`])(?:git\s+branch\s+)?-D\b/, "SKILL.md's reap paragraph names `-D` — reap.sh deletes with `git update-ref -d`");
-  assert.doesNotMatch(
-    p,
-    /\bonly\s+by\b|\bnothing\s+else\b|\bsolely\b|\balone\b/i,
-    "SKILL.md's reap paragraph makes one check the delete's only authorizer — reap.sh's worktree check stops that delete too",
-  );
-});
-
-test("run-team/SKILL.md: the reap paragraph keeps the preconditions it already named", () => {
-  // Input the assertions above must ACCEPT: the corrected clause sits in a
-  // list whose other entries stay as they were.
-  const p = reapParagraph();
-  assert.match(p, Pin.phrase("`for-each-ref` for `[gone]`"));
-  assert.match(p, Pin.phrase("worktree removal without `--force`"));
-});
-
-test("reap.sh: the worktree check the reap paragraph names runs before the delete", () => {
+test("reap.sh: its worktree check runs before the delete", () => {
   // Live lines only: both names recur in comments, and a comment hit would
   // read as the code.
   const lines = readFileSync(join(REPO, "scripts", "reap.sh"), "utf8")
@@ -191,11 +115,10 @@ test("run-team/SKILL.md: the by-hand fallback names worktree-audit.sh's no-argum
   // #525's guard it was worse, a full audit of every OTHER worktree at exit 0
   // with the main checkout as the first row, read as if it were this claim's.
   //
-  // Slice starts at the wrap point the section-scoped test above ENDS on, so
-  // the two spans abut rather than overlap and neither can satisfy the other.
+  // The slice is the Failure handling row's own sentence about the refusal.
   const fallback = RUN_TEAM.between(
     "**That refusal is the",
-    "Run it over every claimed ticket",
+    "Update the released tickets' ledger rows",
     "run-team/SKILL.md",
   ).text;
   // ONE contiguous phrase: the no-argument half and the row-lookup half are

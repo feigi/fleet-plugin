@@ -72,7 +72,7 @@ walks the run from "could not look" to "certified clean" in one step, so
 `--record` itself refuses over a baseline it cannot read, over one a newer
 plugin wrote, and on any git read that fails. The exceptions are an
 older-version baseline and a baseline whose commit is missing from the
-repository; Phase 3's tick lines say how each is cleared.
+repository; the tick's rows say how each is cleared.
 `main-checkout.mjs --check` prints the same answer
 without a tick.
 On `MAIN-CHECKOUT-DIRTY` the maintainer may instead ignore a stray path that is untracked and new since the baseline: an entry in `.git/info/exclude` or in the global excludes file hides it from the check, and the hold clears on the next tick with no re-record. Ignoring never clears a tracked or staged file's change, which `git status` reports whatever the excludes say, nor a pattern that also matches a path the baseline holds, which then reads as changed. Ignoring is the maintainer's decision, never the controller's: the controller never writes an exclude or a `.gitignore` entry. Keep the pattern narrow, because an ignored path is invisible to this check, so a later member write that matches it is never seen.
@@ -273,15 +273,15 @@ Before the rotation, `phase0.mjs` puts the held-aside receipt (`phase0.previous.
 `~/.fleet/bin/fleet-run reclaim-scratch.mjs --root <scratch>
 --after-rotate --apply`, `<scratch>` the path `scratch-root.mjs` prints,
 so a run that merges nothing still reclaims the previous run's leftovers
-(**Reclaim scratch after each merge pass** says what it removes).
+(`reclaim-scratch.mjs`'s header says what it removes).
 `--after-rotate` goes on this call always and on no other: rotate leaves
 no ledger behind when it carried nothing, and the flag reads that absence
 as "no live token" — rotate's own verdict — where without it the script
 refuses. A ledger rotate did write is read as usual. Record nothing on the
 ledger and act on nothing in its receipt.
 
-Without `--after-rotate` — the per-pass sweep **Reclaim scratch after each
-merge pass** runs — no ledger refuses the call (exit 2, nothing removed):
+Without `--after-rotate` — the per-pass sweep `tick --apply` runs after each
+merge pass — no ledger refuses the call (exit 2, nothing removed):
 mid-run there is always one, so its absence is a fault to look at, never
 permission. A `gh` that cannot answer keeps every PR- and ticket-keyed entry.
 It prints one JSON receipt — `removed`, `kept` and `failed`, each entry with
@@ -342,8 +342,8 @@ invalid — a command that no longer runs, or an Install step that changed
 the tree — is the one mid-run trigger: dispatch `derive-recipe` again
 exactly as above, then retry what refused. The Install step's refusals
 fire after the claim has labelled the ticket and created its worktree, so
-release that claim with `release-ticket.sh` first (**Release the claims
-that never became PRs**). A red suite never triggers it: a failing test is
+release that claim with `release-ticket.sh` first (SKILL.md's Failure handling
+row for a claim abandoned mid-run). A red suite never triggers it: a failing test is
 a finding, not a stale Recipe. **Stall:** `RECIPE NOT PROVEN` from any
 derivation, or a second invalid-cache refusal after this run's one
 re-derivation, halts the run — no Pull, no claim, no review dispatch — and

@@ -1,6 +1,6 @@
 # Landing a change on main
 
-Evidence for the rule SKILL.md states in **Fix the tooling mid-run**, keyed by the rule it justifies.
+Evidence for the rules SKILL.md states in **Fix the tooling mid-run** and in the `ready-to-merge` wake, keyed by the rule each justifies.
 
 ## A mid-run tooling fix lands through a PR
 
@@ -12,3 +12,8 @@ end of a 7-PR run. A mid-run tooling fix goes through a PR like every other
 change, and that PR faces every required check any other PR faces — the set
 `.github/rulesets/main.json` declares — so it carries a release label too.
 Plan it as a PR the run's own merge queue lands, never as an edit-and-continue.
+
+## You own the merge watcher, not the bot
+
+A dying member takes a watcher down with it
+and the queue stops silently.

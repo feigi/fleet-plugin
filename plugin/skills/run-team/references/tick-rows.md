@@ -21,14 +21,14 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   filter kept out of `supply`, read off the shortlist's `dropped`. Never
   actionable. Log them as specs awaiting to-tickets (phase 0), not as no work.
 - `DISPATCH fix-pr PR#<M> …` — a fix-applier per PR, for a review's survived or unverified findings,
-  a dispositions mismatch no retry has answered, or a `conflict-hold:#<M>` — the merge bot's, or one you recorded off a `CONFLICT` line (**Reviewers**). Printed
+  a dispositions mismatch no retry has answered, or a `conflict-hold:#<M>` — the merge bot's, or one you recorded off a `CONFLICT` line (**The fix-applier**). Printed
   ahead of reviews on purpose: finishing what is started beats starting more.
 - `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn
-  (**Reviewers**).
-- `DISPATCH merge-bot` — the next `merge-bot-<n>` (**Merge bot**).
+  (**The reviewer**).
+- `DISPATCH merge-bot` — the next `merge-bot-<n>` (**The merge bot**).
 - `DISPATCH finisher PR#<M> …` — a finisher settled `labelled`, yet the open
   list shows PR M without `ready-to-merge`, and no `label-off=` (**Run ledger**)
-  accounts for the removal. Apply the finisher gate (**Reviewers**: the
+  accounts for the removal. Apply the finisher gate (**The finisher gate**: the
   `check` job green on the current head), then dispatch the next-suffix
   finisher at that head, one letter past the highest the PR has used: render
   its brief with `dispatch-prompt.mjs render finisher --kind repair --member

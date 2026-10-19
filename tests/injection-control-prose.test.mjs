@@ -209,14 +209,14 @@ for (const [name, getSeat] of SEATS) {
 // assertion. Since the fix-applier took over every ruling on the findings
 // (spec 2026-09-24 § 3 §4), the reader it justifies the rule to is the one
 // admitting a refutation — the fix-applier, whose prompt carries the rule. The
-// justification moved, with its reproduction, from SKILL.md's Reviewers prose
-// to references/reviewers.md; Reviewers keeps the rule beside the pointer.
+// justification moved, with its reproduction, from SKILL.md's review prose
+// to references/reviewers.md; **Reading a review result** keeps the rule beside the pointer.
 const REVIEWERS_MD = Pin.file(join(REPO, "skills", "run-team", "references", "reviewers.md"));
 const justification = () => REVIEWERS_MD.section("## A refutation needs its positive control", "references/reviewers.md").text;
 
-test("Reviewers keeps the refutation rule beside its pointer to references/reviewers.md", () => {
+test("Reading a review result keeps the refutation rule beside its pointer to references/reviewers.md", () => {
   assert.match(
-    RUN_TEAM.section("### Reviewers", "run-team/SKILL.md Reviewers").text,
+    RUN_TEAM.section("### Reading a review result", "run-team/SKILL.md Reading a review result").text,
     Pin.phrase("**A refutation resting on an injection nothing proved landed is not a refutation — it is a cell that never ran.** See references/reviewers.md."),
   );
 });

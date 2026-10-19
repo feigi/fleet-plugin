@@ -1,8 +1,9 @@
 // The suite slot bound reaches its readers through prose: the controller reads
 // run-team/SKILL.md to hand a fix-applier and a finisher the wrapped command,
-// tell a member what exit 75 is, and clear a wedged slot by hand; a reader of
-// CONTEXT.md meets the term. What the wrapper DOES is pinned by
-// suite-slot.test.mjs, and each clause below states a behaviour that file runs.
+// tell a no-slot review from a red one, and clear a wedged slot by hand; a
+// reader of CONTEXT.md meets the term. What the wrapper DOES — the bound, the
+// arity rule, the nested run, the capped wait and exit 75 — is pinned by
+// suite-slot.test.mjs, and SKILL.md no longer restates it.
 // A clause here goes red when its sentence is reworded or gutted; the span
 // convention is tests/support/prose-pin.mjs's.
 import { test } from "node:test";
@@ -15,28 +16,16 @@ const ROOT = join(import.meta.dirname, "..");
 const RUN_TEAM = Pin.file(join(ROOT, "plugin", "skills", "run-team", "SKILL.md"));
 const CONTEXT = Pin.file(join(ROOT, "CONTEXT.md"));
 
-test("SKILL.md says a full run takes a slot, a narrowed one takes none, and a nested wrapper takes no second", () => {
-  const p = RUN_TEAM.paragraph("**The suite slot bound.**", "run-team/SKILL.md suite slot bound paragraph", "Each seat that runs the full suite is wrapped").text;
-  assert.match(p, Pin.phrase("It decides by arity. No appended arguments is a full run, and waits for a free slot. Appended arguments are a narrowed run, which takes none"),
-    "the bound no longer says it is decided by arity, with a narrowed run taking none");
-  assert.match(p, Pin.phrase("A wrapper that finds `FLEET_SUITE_SLOT` set, which a slot holder exports to its child, is nested inside a held slot and runs straight through"),
-    "the bound no longer says a nested wrapper runs straight through");
-  assert.match(p, Pin.phrase("At most `FLEET_SUITE_SLOTS` full suite runs execute on a host at once"),
-    "the bound no longer names its override");
-});
-
 test("SKILL.md tells the controller to hand the fix-applier and the finisher the wrapped string as <testCmd>", () => {
-  const p = RUN_TEAM.paragraph("Each seat that runs the full suite is wrapped", "run-team/SKILL.md suite slot hand-out paragraph", "The wait is capped and never counts against the run").text;
+  const p = RUN_TEAM.paragraph("The review wraps its own one run", "run-team/SKILL.md suite slot hand-out paragraph", "**Where `<branch>` comes from:**").text;
   assert.match(p, Pin.phrase("The fix-applier and the finisher run what you hand them, so hand them the wrapped string as `<testCmd>` — `~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command written `'\\''`"),
     "the hand-out no longer gives the fix-applier and the finisher the wrapped string — their gate then runs unbounded");
-  assert.match(p, Pin.phrase("A repository that tracks its own runner wraps it itself"),
-    "the hand-out no longer says a repository's own runner is its own to wrap");
+  assert.match(p, Pin.phrase("a wrapped string handed to it anyway is harmless"),
+    "the hand-out no longer says the review's own wrapper makes a wrapped string harmless");
 });
 
-test("SKILL.md says the wait is capped, exit 75 is not a test result, and what each seat does about it", () => {
-  const p = RUN_TEAM.paragraph("The wait is capped and never counts against the run", "run-team/SKILL.md suite slot wait paragraph", "A slot holder killed without releasing").text;
-  assert.match(p, Pin.phrase("`FLEET_SUITE_WAIT_S` seconds, 1800 by default, then exit **75** with `suite-slot: no slot after <n>s` on stderr, having launched nothing"),
-    "the wait cap, its exit status or its message changed");
+test("SKILL.md says exit 75 is not a test result, and what a no-slot review asks of the controller", () => {
+  const p = RUN_TEAM.paragraph("**`suiteVerdict` is the review's one judgement", "run-team/SKILL.md suiteVerdict paragraph", "**`cwdAudit` is the specialist's own").text;
   assert.match(p, Pin.phrase("**Exit 75 is not a test result.**"), "the prose no longer says exit 75 is not a test result");
   // #3048: the controller recognises a no-slot review by the verdict's reason,
   // which begins "no suite slot" — not by an entry in `dimensionsUnrun`, which
@@ -44,8 +33,6 @@ test("SKILL.md says the wait is capped, exit 75 is not a test result, and what e
   assert.match(p, Pin.phrase("it makes `suiteVerdict` not usable, `suiteVerdict.reason` beginning \"no suite slot within <n> s"), "the prose no longer tells the controller to read the no-slot verdict off suiteVerdict.reason");
   assert.match(p, Pin.phrase("re-review it under the next runner letter"), "the prose no longer sends a no-slot review to the next runner letter");
   assert.doesNotMatch(p, /every\s+dimension\s+unrun/i, "the prose says an exit 75 leaves every dimension unrun");
-  assert.match(p, Pin.phrase("The implementer, fix-applier and finisher briefs carry the one-line rule: *Exit 75 from the suite is not a test result; run the command again.*"),
-    "the prose no longer says the briefs carry the exit-75 line");
 });
 
 // The sentence above is a claim about the templates, so it is pinned against what

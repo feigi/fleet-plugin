@@ -97,12 +97,13 @@ test("step 5 files every issue needs-triage, a confirmed defect with an open rem
 });
 
 // Duty 2's paragraph moved, with its war story, to references/finisher.md; the
-// duty list keeps the rule beside the pointer.
+// finisher's agent body states the rule, and run-team's SKILL.md no longer
+// restates it.
 const FINISHER_MD = read("skills", "run-team", "references", "finisher.md");
 test("finisher duty 2 files the way step 5 does, needs-triage, and lands a duplicate as a comment", () => {
   assert.match(
-    flat(RUN_TEAM.between("2. **Confirm every deferral", "**A fix-applier's \"applied\" is a claim like any other**", "run-team finisher duty 2").text),
-    Pin.phrase("2. **Confirm every deferral — and every claimed APPLY — has a home that outlives the merge.** See references/finisher.md."),
+    read("agents", "fleet-finisher.agent.md").text,
+    Pin.phrase("**Confirm every deferral — and every claimed APPLY — has a home that outlives the merge.**"),
   );
   const d = flat(FINISHER_MD.section("## Duty 2: every deferral, and every claimed APPLY, has a home that outlives the merge", "references/finisher.md duty 2").text);
   assert.match(d, Pin.phrase("labelled `needs-triage` as every issue the plugin creates is"), "finisher duty 2 no longer files `needs-triage`");

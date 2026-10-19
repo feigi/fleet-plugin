@@ -63,7 +63,7 @@ const SIZING = readFileSync(join(REPO, "skills", "sizing-a-ticket", "SKILL.md"),
 // SKILL.md's phase 2 carries neither.
 const memberBlocks = () => memberPrompt("implementer");
 const memberProse = () => Pin.of(memberBlocks(), "memberBlocks()").stripGutter(">").text;
-const phase2 = () => RUN_TEAM.text.slice(RUN_TEAM.anchorAt("## Phase 2", "run-team phase 2"), RUN_TEAM.anchorAt("## Phase 3", "run-team phase 3"));
+const phase2 = () => RUN_TEAM.text.slice(RUN_TEAM.anchorAt("## Phase 2", "run-team phase 2"), RUN_TEAM.anchorAt("## Worktree and claim model", "run-team worktree and claim model"));
 
 test("every member-facing rule sits in the agent body the harness injects, not in the controller's phase 2", () => {
   assert.ok(memberBlocks().trim().length > 0, "the implementer agent body is empty — the member receives no rules at all");

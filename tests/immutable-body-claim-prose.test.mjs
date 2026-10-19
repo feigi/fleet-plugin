@@ -61,7 +61,7 @@ const flatten = (s) =>
     .trim();
 
 const FROM = "Every implementer body carries the";
-const TO = "### Merge bot";
+const TO = "Suspect a neighbour before a member's own diff";
 const rule = () => flatten(RUN_TEAM.between(FROM, TO, "the claim-discipline rationale and settling-command rules").text);
 
 // The rationale and the `-F` paragraph, as references/correction-tickets.md
@@ -98,11 +98,13 @@ test("the literal-path grep is forbidden AND the method that replaces it is give
   );
   // Why the grep fails, in both directions. One direction alone reads as a
   // precision problem a tighter pattern would fix, which is the refinement the
-  // issue measured returning a second wrong answer.
+  // issue measured returning a second wrong answer. That why moved to
+  // references/correction-tickets.md, beside which the rule keeps its pointer.
+  assert.match(r, Pin.phrase("from any spelling of the grep. See references/correction-tickets.md."));
   assert.match(
-    r,
+    flatten(CORRECTION_TICKETS.section("## The settling command for \"which files read X\" is never a literal-path grep", "references/correction-tickets.md").text),
     /merely \*name\* it — comments included — and misses the files that build it/,
-    "the rule no longer says a path grep both over-reports mentions and misses assembled paths — one direction alone reads as a pattern that needs tightening",
+    "the reference no longer says a path grep both over-reports mentions and misses assembled paths — one direction alone reads as a pattern that needs tightening",
   );
   // The question the mutation actually answers, which is narrower than "reads".
   assert.match(

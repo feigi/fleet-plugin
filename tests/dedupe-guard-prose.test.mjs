@@ -49,10 +49,13 @@ const flat = (s) => s.replace(/\s+/g, " ");
 // reddened test 4 while 80/120/140 stayed green, i.e. the class is present in
 // all five step-5 pins and line width merely samples which one fires.
 const step5 = () => flat(REVIEW_AND_FIX.between("5. File each deferred finding", "\n6. Diff-check green", "review-and-fix step 5").text);
+// Duty 2 and the report are stated in the finisher's agent body, which the
+// harness injects as its system prompt; run-team's SKILL.md no longer restates them.
+const finisherBody = () => Pin.of(memberPrompt("finisher", "fresh"), "the finisher's member prompt");
 const finisherDeferrals = () =>
-  flat(RUN_TEAM.between("**Confirm every deferral — and every claimed APPLY —", "Add `ready-to-merge`", "run-team finisher duty 2").text);
+  flat(finisherBody().between("**Confirm every deferral — and every claimed APPLY —", "**Duty 3 is one script", "finisher duty 2").text);
 // Duty 2's own paragraph — the file-it branch — moved, with its war story, to
-// references/finisher.md; the duty list keeps the rule beside the pointer.
+// references/finisher.md; the finisher's agent body states the rule.
 const FINISHER_MD = Pin.file(join(REPO, "skills", "run-team", "references", "finisher.md"));
 const finisherFileIt = () =>
   flat(FINISHER_MD.section("## Duty 2: every deferral, and every claimed APPLY, has a home that outlives the merge", "references/finisher.md duty 2").text);
@@ -189,7 +192,7 @@ test("the finisher files its own deferrals through the same guard", () => {
 // a second kind of writer exist; these pin the instruction half of it.
 const runLedger = () => flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
 const finisherReport = () =>
-  flat(RUN_TEAM.between("4. Report you the label", "**Once the label is on, take it off before you approve any push.**", "run-team finisher duty 4").text);
+  flat(finisherBody().between("Report to the controller in the report file your brief names", "Then send the one line your brief gives", "finisher report line").text);
 // The fix-applier's report line is in its agent body, which the member reads
 // with the brief the renderer prints; SKILL.md carries no copy of it.
 const fixApplierReport = () =>
@@ -221,10 +224,9 @@ test("a failed `filed` is retried once, then reported unrecorded — never a sec
 test("both report contracts carry the issues filed and the `unrecorded` fallback", () => {
   assert.match(fixApplierReport(), /`filed` for every issue step 5 created, and `unrecorded` for one whose `ledger\.mjs filed` failed twice/,
     "fix-applier report no longer carries the filed issues and the unrecorded fallback");
-  for (const [where, s] of [["finisher duty 4", finisherReport()], ["step 5", step5()]]) {
-    assert.match(s, /`filed: #N <subject>`/, `${where} no longer returns the issues it filed`);
-  }
-  assert.match(finisherReport(), /`unrecorded: #N <subject>`/, "finisher duty 4 no longer carries the unrecorded fallback");
+  assert.match(finisherReport(), /`filed` for every issue duty 2 created, and `unrecorded` for one whose `filed` failed twice/,
+    "finisher report no longer carries the filed issues and the unrecorded fallback");
+  assert.match(step5(), /`filed: #N <subject>`/, "step 5 no longer returns the issues it filed");
 });
 
 test("the controller records every filing a filer reported unrecorded", () => {

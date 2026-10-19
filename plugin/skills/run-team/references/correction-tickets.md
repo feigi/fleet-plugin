@@ -61,3 +61,9 @@ benign-looking answer. Measured once: `grep -c 'settled by:\s+x'` answers
 an absence counts only after the same command, with the same flags, finds a
 line known to match: a command that cannot find a match settles nothing, and
 under `Verified:` its zero reads as a checked absence.
+
+## The settling command for "which files read X" is never a literal-path grep
+
+The path is assembled in more than one spelling here, one of them behind
+a local `read` helper, so a grep for the path string answers with the files that
+merely *name* it — comments included — and misses the files that build it.

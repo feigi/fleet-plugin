@@ -1,6 +1,6 @@
 # Reviewers: the evidence behind the review-side rules
 
-Evidence for rules SKILL.md states in Phase 2 and **Reviewers**, keyed by the rule each justifies.
+Evidence for rules SKILL.md states in Phase 2 and **Reading a review result**, keyed by the rule each justifies.
 
 ## A sizing verdict is a measurement only if it post-dates the run that produced it
 
@@ -96,3 +96,38 @@ with `--detach`, and there `git branch --show-current` prints nothing and exits 
 --branch "$(git branch --show-current)"` is handed an empty branch and exits 2
 before pushing anything. A brief rendered without it would leave the push no
 destination at all, which is why the renderer requires it.
+
+## A review runs off your turn and relays nothing
+
+**`selectDimensions` sizes the fan-out to the diff and the verify budget
+follows severity.** It cuts one immutable
+snapshot, verifies every critical/important finding adversarially,
+re-dispatches each crashed specialist and each crashed refuter pair once before
+it assembles the result, and has `agent()` return **into the script**, so no
+report can go undelivered and you relay nothing — the delivery failure that
+cost one fleet five reports on one PR and four on another. None of it runs on
+your turn: a review takes 20-40 minutes, and a controller that held its turn
+for each one, one at a time, was what left implementer slots empty.
+
+## `testEnvironment` says what the shared test run is evidence about
+
+The snapshot is `git archive`d and then
+`git init`ed with one commit, and the block that cuts it compares that commit's
+tree hash against the reviewed commit's: verified, a suite run in the
+snapshot collects and runs what a checkout does, and a red is a fact about the
+tree. UNVERIFIED, it is not — tests that ask git what ships decline or fail for
+the environment, and this field carries which line of the cut failed.
+
+## `dimensionsUnrun` names a gap; an empty dimension does not
+
+The rule this replaces — treat any dimension with nothing in
+`survived`/`refuted`/`unverified` as unrun — was the workaround for having no
+such field, and it over-refuses in the direction that costs work: a dimension
+that ran clean has nothing in those three either.
+
+## A failed review is a failure event, not a clean review
+
+The review throws on missing `args.pr`/`args.worktree` and on a snapshot agent
+that returned no tree, and a failure surfaces mid-loop, where "react, never
+block" makes it easy to log and carry on — leaving a PR that *reads* as
+reviewed and is not.

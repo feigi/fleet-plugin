@@ -52,7 +52,7 @@
    `--record` itself refuses over a baseline it cannot read, over one a newer
    plugin wrote, and on any git read that fails. The exceptions are an
    older-version baseline and a baseline whose commit is missing from the
-   repository; Phase 3's tick lines say how each is cleared.
+   repository; the tick's rows say how each is cleared.
    `main-checkout.mjs --check` prints the same answer
    without a tick.
 
@@ -233,7 +233,7 @@
    `~/.fleet/bin/fleet-run reclaim-scratch.mjs --root <scratch>
    --after-rotate --apply`, `<scratch>` the path `scratch-root.mjs` prints,
    so a run that merges nothing still reclaims the previous run's leftovers
-   (**Reclaim scratch after each merge pass** says what it removes).
+   (`reclaim-scratch.mjs`'s header says what it removes).
    `--after-rotate` goes on this call always and on no other: rotate leaves
    no ledger behind when it carried nothing, and the flag reads that absence
    as "no live token" — rotate's own verdict — where without it the script
@@ -283,8 +283,8 @@
    the tree — is the one mid-run trigger: dispatch `derive-recipe` again
    exactly as above, then retry what refused. The Install step's refusals
    fire after the claim has labelled the ticket and created its worktree, so
-   release that claim with `release-ticket.sh` first (**Release the claims
-   that never became PRs**). A red suite never triggers it: a failing test is
+   release that claim with `release-ticket.sh` first (SKILL.md's Failure handling
+   row for a claim abandoned mid-run). A red suite never triggers it: a failing test is
    a finding, not a stale Recipe. **Stall:** `RECIPE NOT PROVEN` from any
    derivation, or a second invalid-cache refusal after this run's one
    re-derivation, halts the run — no Pull, no claim, no review dispatch — and
