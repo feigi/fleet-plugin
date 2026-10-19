@@ -14,7 +14,7 @@
 //
 // THE SLICE ANCHOR IS WHAT ANCHORS. `pullTable()` bounds the table between its
 // own opening sentence and the paragraph that follows it, never the whole
-// document — a positive match over `RUN_TEAM` wholesale would be satisfiable
+// document — a positive match over `PULL_MD` wholesale would be satisfiable
 // from the "Relabel by cause" paragraph, which restates the
 // same two labels in prose and would launder a table-row swap as a pass.
 //
@@ -38,7 +38,7 @@ const pullTable = () =>
     "references/pull.md Pull table",
   ).text;
 
-test("run-team/SKILL.md: the Pull table ties each relabel cause to its own label", () => {
+test("references/pull.md: the Pull table ties each relabel cause to its own label", () => {
   const table = pullTable();
   assert.match(
     table,
