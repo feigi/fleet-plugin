@@ -74,7 +74,7 @@ test("requirements 2.3 describes the Recipe derivation: any technology, what it 
   const reads = Pin.of(section, "section").bullet("- **What the derivation reads:**", "- **What the proof requires:**", "requirements.md 2.3 derivation bullet").text;
   assert.match(reads, Pin.phrase("nothing checks for a particular manifest or lockfile."));
   const proof = Pin.of(section, "section").bullet("- **What the proof requires:**", "- **The cache:**", "requirements.md 2.3 proof bullet").text;
-  assert.match(proof, Pin.phrase("the Check step runs green on `origin/main` and one deliberate mutation turns it red — `true`, when your CI has no non-test merge-gating check, needs no proof, and a non-test check red on `origin/main` is left out of the Check step and listed in `uncovered`"));
+  assert.match(proof, Pin.phrase("the Check step runs green on `origin/main`, leaving the tree clean, and one deliberate mutation turns it red — `true`, when your CI has no non-test merge-gating check, needs no proof, and a non-test check red on `origin/main` is left out of the Check step and listed in `uncovered`"));
   assert.match(proof, Pin.phrase("`RECIPE NOT PROVEN` writes no cache and halts the run."));
   const cache = Pin.of(section, "section").bullet("- **The cache:**", "Hard rules for any technology:", "requirements.md 2.3 cache bullet").text;
   assert.match(cache, Pin.phrase("carrying the `origin/main` commit it was derived at, the proof, the Check step and `uncovered`."));
