@@ -1,5 +1,5 @@
 // #3445. A consumer's commit-time hooks now run for a member, because the
-// Install step no longer runs under the harness's `CI` (claim-ticket.test.mjs,
+// Install step no longer runs under the agent shell's `CI` (claim-ticket.test.mjs,
 // recipe-prove.test.mjs and snapshot-repo.test.mjs execute that half). This file
 // pins what the member rules say once a hook DOES run:
 //
@@ -18,7 +18,8 @@
 // THE CEILING: these are presence-and-order pins. A sentence appended after a
 // pinned span that carves an exception into it stays green here;
 // dispatch-block-golden-prose.test.mjs holds the fix-applier's whole block and
-// body to a golden fixture, which an appended carve-out reds.
+// body to a golden fixture, which an appended carve-out reds. The next-ticket
+// skill and review-and-fix.md have no golden fixture behind this file's pins.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -48,16 +49,16 @@ const HOOK_REWRITE =
 const NEXT_TICKET = flatten(read("skills", "next-ticket", "SKILL.md"));
 
 test("the next-ticket skill's no-bypass rule sits before step 5 and carries the on-a-commit-you-push qualifier", () => {
-  assert.match(NEXT_TICKET, Pin.phrase(RULE), "the skill lost its no-bypass rule, or the qualifier");
   const rule = NEXT_TICKET.indexOf(RULE);
+  assert.notEqual(rule, -1, "the skill lost its no-bypass rule, or the qualifier");
   const claim = NEXT_TICKET.indexOf("## 5. Claim it");
   assert.ok(claim !== -1, "the skill's step 5 heading moved — move this pin with it");
   assert.ok(rule < claim, "the no-bypass rule no longer sits before step 5, so it does not cover every commit and push the skill drives");
 });
 
 test("the next-ticket skill never states --no-verify without the qualifier", () => {
-  for (const at of [...NEXT_TICKET.matchAll(/Never `--no-verify`/g)].map((m) => m.index)) {
-    assert.equal(NEXT_TICKET.slice(at, at + RULE.length), RULE, `an unqualified --no-verify rule: ${NEXT_TICKET.slice(at, at + 80)}`);
+  for (const { index: at } of NEXT_TICKET.matchAll(/Never `--no-verify`/g)) {
+    assert.ok(NEXT_TICKET.startsWith(RULE, at), `an unqualified --no-verify rule: ${NEXT_TICKET.slice(at, at + 80)}`);
   }
 });
 
@@ -89,10 +90,14 @@ test("the review snapshot's fleet-internal commit still takes --no-verify", () =
   assert.match(read("scripts", "review-core.mjs"), /git -c user\.name=fleet -c user\.email=fleet@invalid commit -q --no-verify -m "review snapshot of \$SHA"/);
 });
 
-test("the hook-rewrite sentence is in the next-ticket red-Check paragraph, staging before the restore", () => {
-  const p = Pin.of(NEXT_TICKET, "the next-ticket skill").between("A red Check step is yours to judge.", "In a detached worktree, push by refspec.", "the red Check step paragraph").text;
+const assertHookRewrite = (p) => {
   assert.match(p, Pin.phrase(HOOK_REWRITE), "the red Check step paragraph lost the hook-rewrite sentence");
   assert.ok(p.indexOf("Stage every change of your own before the commit that runs the hook") < p.indexOf("`git restore -- <that path>`"), "the restore comes before the staging");
+};
+
+test("the hook-rewrite sentence is in the next-ticket red-Check paragraph, staging before the restore", () => {
+  const p = Pin.of(NEXT_TICKET, "the next-ticket skill").between("A red Check step is yours to judge.", "In a detached worktree, push by refspec.", "the red Check step paragraph").text;
+  assertHookRewrite(p);
 });
 
 for (const kind of ["review", "conflict"]) {
@@ -102,8 +107,7 @@ for (const kind of ["review", "conflict"]) {
       "Your report is a file",
       "the red Check step paragraph",
     ).text;
-    assert.match(p, Pin.phrase(HOOK_REWRITE), "the red Check step paragraph lost the hook-rewrite sentence");
-    assert.ok(p.indexOf("Stage every change of your own before the commit that runs the hook") < p.indexOf("`git restore -- <that path>`"), "the restore comes before the staging");
+    assertHookRewrite(p);
   });
 }
 
