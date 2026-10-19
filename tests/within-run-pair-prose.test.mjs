@@ -19,23 +19,21 @@ const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 // Phase 1's step paragraphs moved into references/pull.md.
 const PULL_MD = Pin.file(join(REPO, "skills", "run-team", "references", "pull.md"));
 
-// Paragraph-tight, and deliberately NARROWER than the dispatch slice in
-// implementer-model-tier.test.mjs: widened to the phase, the tier-guard
-// paragraphs below would satisfy half of these pins on their own.
-const dispatch = () =>
-  RUN_TEAM.between("**Dispatch every implementer", "The raw split still favours the top tier", "run-team phase 2 dispatch rule").text;
+// The controller's per-member dispatch rules. Deliberately NARROWER than the
+// whole Pull: widened to the Pull, the tier-guard paragraphs below would
+// satisfy half of these pins on their own.
+const dispatch = () => RUN_TEAM.section("### Dispatching the Pull's member", "run-team dispatch section").text;
 
-// The every-5th-Pull paragraph moved, with its measurement, to
-// references/pull.md; phase 2 keeps the rule beside the pointer.
+// references/pull.md; the dispatch section keeps the rule beside the pointer.
 const exploration = () => PULL_MD.section("## Every 5th Pull goes at an exploration cell", "run-team references/pull.md exploration cell").text;
 
 test("phase 2 keeps the every-5th-Pull rule beside its pointer to references/pull.md", () => {
   assert.match(dispatch(), Pin.phrase("**Every 5th Pull by ledger count goes at an exploration cell.** See references/pull.md."));
 });
 
-test("phase 2 dispatches an exploration cell's implementer on every 5th Pull", () => {
-  const slice = dispatch();
-  assert.match(slice, /fleet-implementer-<cell>/, "phase 2 no longer dispatches an exploration cell at all");
+test("the exploration section dispatches an exploration cell's implementer on every 5th Pull", () => {
+  const slice = exploration();
+  assert.match(slice, /fleet-implementer-<cell>/, "the exploration section no longer dispatches an exploration cell at all");
   // The RATE, not just the existence. "Dispatch some at an exploration cell"
   // reproduces the block design the pairing exists to replace.
   //
@@ -75,7 +73,7 @@ test("phase 2 does not tell the exploration member it is a control", () => {
   );
 });
 
-test("phase 2 does NOT ask the controller to label the control", () => {
+test("the dispatch section does NOT ask the controller to label the control", () => {
   // A hand-set control column would not survive the metrics file's
   // regeneration, and one derived against today's declared tiers would
   // mislabel every historical row. The pairing is a QUERY over
@@ -86,21 +84,16 @@ test("phase 2 does NOT ask the controller to label the control", () => {
     /control=yes|mark .{0,20}control/i,
     "phase 2 asks for a hand-set control label — it cannot survive a regeneration",
   );
-  assert.match(
-    slice,
-    /member-outcomes\.tsv/,
-    "phase 2 no longer says where the pairing is recovered from, so the label comes back",
-  );
 });
 
-test("phase 2 says why the pairing is within-run and not week-by-week", () => {
+test("the within-run rationale says why the pairing is within-run and not week-by-week", () => {
   // Without the reason, the every-5th-Pull rate reads as arbitrary overhead and the next
   // cost-trimming pass converts it back into a block design — which is the
   // state #864 documents.
   assert.match(
-    dispatch(),
-    /confounded with calendar date|confounded with the calendar/i,
-    "phase 2 no longer says what within-run pairing buys — the rate reads as arbitrary cost",
+  PULL_MD.section("## Why the exploration pairing is within-run", "run-team references/pull.md within-run rationale").text,
+  /confounded with calendar date|confounded with the calendar/i,
+  "the within-run rationale no longer says what within-run pairing buys — the rate reads as arbitrary cost",
   );
 });
 
@@ -177,7 +170,7 @@ test("Pull step 7 routes through ticket-router.mjs and writes tier= exactly when
 });
 
 const routerArgs = () =>
-  RUN_TEAM.between("**The router's arguments, and nothing past its line.**", "**Count the rate against the ledger", "run-team router's arguments").text;
+  PULL_MD.between("**The router's arguments, and nothing past its line.**", "**The Pull table**", "run-team references/pull.md router arguments").text;
 
 test("the router's arguments paragraph pins the roll, the arm parity and the single source of CELL", () => {
   const slice = routerArgs();
@@ -189,10 +182,10 @@ test("the router's arguments paragraph pins the roll, the arm parity and the sin
   assert.match(slice, /`REASON`\s+other\s+than\s+`ok`\s+goes\s+on\s+the\s+row\s+as\s+`route=<REASON>`/, "REASON no longer lands on the row as route=");
 });
 
-// The difficulty caveat lives in the counter-evidence section, past this file's
-// dispatch slice, so it needs its own anchor pair.
+// The difficulty caveat lives in pull.md's rate rationale, past the dispatch
+// section, so it needs its own anchor pair.
 const counterEvidence = () =>
-  RUN_TEAM.between("within-run pairing above**", "`minted_false_claim`", "run-team tier-guard counter-evidence").text;
+  PULL_MD.between("within-run pairing above**", "`minted_false_claim` **discriminates", "run-team references/pull.md counter-evidence").text;
 
 test("the orthogonality claim is scoped — date only, not difficulty", () => {
   // The claim itself is literally true and narrowly scoped, so this is not a

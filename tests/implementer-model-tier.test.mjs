@@ -22,73 +22,81 @@ const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 // here, several paragraphs on, so a neighbouring paragraph can satisfy a pin
 // read over them. A failure here means the text was deleted OR relocated —
 // check the rest of the file before assuming deletion.
+const MEMBER_LIFECYCLE = Pin.file(join(REPO, "skills", "run-team", "references", "member-lifecycle.md"));
+const TICK_ROWS = Pin.file(join(REPO, "skills", "run-team", "references", "tick-rows.md"));
 const dispatch = () =>
-  RUN_TEAM.between("**Dispatch every implementer", "**Guard: accumulate per PR", "run-team phase 2 dispatch rule").text;
+  RUN_TEAM.section("### Dispatching the Pull's member", "run-team dispatch section").text;
+const memberLifecycleTier = () =>
+  MEMBER_LIFECYCLE.between("## The implementer's tier is the definition's", "## The merge bot's tier", "member-lifecycle implementer-tier section").text;
+const memberTickRows = () => TICK_ROWS.text;
 const guard = () =>
   RUN_TEAM.between("**Guard: accumulate per PR", "Why the agent body carries what it does", "run-team phase 2 tier guard").text;
-// Paragraph-tight: the dispatch rule alone, ending where the tier check opens.
+// Paragraph-tight: the implementer bullet alone, ending where the tier check opens.
 // The paragraphs past it recount historical rows by vendor model name, so an
 // absence pin read over `dispatch()` would refuse the file as it stands.
 const dispatchRule = () =>
-  RUN_TEAM.between("**Dispatch every implementer", "**After every Pull's dispatch", "run-team phase 2 dispatch rule paragraph").text;
+  RUN_TEAM.bullet("- **The implementer.**", "- **The tier check.**", "run-team implementer dispatch bullet").text;
 
 test("phase 2 dispatches every implementer at its definition's tier, and says so with a mechanism", () => {
   const slice = dispatch();
+  const tier = memberLifecycleTier();
 
   // Anchored to the omission, not the word "inherit": the tier is obtained by
   // NOT passing `model`, and "implementers run at the session tier" with no
   // mechanism is exactly the instruction-names-no-mechanism defect the skill's
-  // own tooling-fix triggers list calls out.
+  // own tooling-fix triggers list calls out. The mechanism is explained in
+  // references/member-lifecycle.md; the retained dispatch rule keeps the omission.
   assert.match(
     slice,
-    /dispatched with `model` set does not get the declared\s+tier back/,
+    /omit `model`/,
     "phase 2 no longer says HOW the declared tier is obtained — omitting `model` is still the mechanism",
+  );
+  assert.match(
+    tier,
+    /dispatched with `model` set does not get the declared\s+tier back/,
+    "member-lifecycle no longer says a `model` value overrides the declared tier",
   );
   // The omission resolves to the DEFINITION's tier first and the session's only
   // after. Stated without that ordering, "omit `model`" reads as "inherit the
   // session", which is what the declaration was written to stop being true.
   assert.match(
-    slice,
+    tier,
     /session's tier applies only when the definition\s+names none/,
-    "phase 2 states the omission mechanism without saying the definition's tier wins first",
+    "member-lifecycle states the omission mechanism without saying the definition's tier wins first",
   );
   // The dispatch rule has to name WHERE the definition comes from, or the
   // tier is declared somewhere the reader of this phase can neither find nor
-  // audit. Since #2208 that is the `agent` `ledger.mjs dispatch` prints — a
-  // name recalled from this prose is exactly what a compaction dropped (#2208
-  // counts 11 implementers dispatched as generic `task`).
+  // audit. That is the `agent` `ledger.mjs dispatch` prints — a name recalled
+  // from this prose is exactly what a compaction dropped (#2208 counts 11
+  // implementers dispatched as generic `task`).
   assert.match(
     slice,
-    /Dispatch every implementer with the `agent` that `ledger\.mjs dispatch`\s+printed/,
+    /Dispatch with the printed `agent`/,
     "phase 2 no longer dispatches the agent ledger.mjs dispatch printed",
   );
   assert.match(
-    slice,
+    tier,
     /agents\/fleet-implementer-<cell>\.agent\.md/,
-    "phase 2 no longer says WHERE the declared tier lives",
+    "member-lifecycle no longer says WHERE the declared tier lives",
   );
   // `name` is orthogonal to `agent` and is what confers team membership —
   // the ledger token and the hub address; both the spend classifier and
   // member-outcomes.mjs read it. A rewrite that swaps the name for the
   // agent silently unmakes the member.
   assert.match(
-    slice,
+    tier,
     /Keep `name: impl-<N>`/,
-    "phase 2 no longer keeps the impl-<N> name alongside the dispatched agent",
+    "member-lifecycle no longer keeps the impl-<N> name alongside the dispatched agent",
   );
+  assert.match(slice, /keep `name: impl-<N>`/, "phase 2 no longer keeps the impl-<N> name");
   // `row` REPLACES the line (ledger.mjs's `data.rows = after`, `line` in place
-  // of the old row). Replaying a two-token literal over a row carrying KILLED or
-  // → PR# drops those tokens, so the paragraph says so and points a token
-  // addition at `token`.
+  // of the old row). The `token` addition is the script's own behaviour, pinned
+  // in tests/ledger.test.mjs ("token appends to the row and keeps every token
+  // already there, in order"); the replace-not-append rule is in tick-rows.md.
   assert.match(
-    slice,
+    memberTickRows(),
     /replaces the whole line/,
-    "phase 2 shows a ledger literal without saying `row` replaces rather than appends",
-  );
-  assert.match(
-    slice,
-    Pin.phrase("run `ledger.mjs token <key> <token>…`, which keeps every token already on the row"),
-    "phase 2 no longer sends a token addition to `token`, so a controller re-types the row with `row` and drops its tokens",
+    "tick-rows.md no longer says `row` replaces the whole line rather than appending",
   );
 });
 

@@ -191,7 +191,7 @@ terminating in exactly one dispatch or an empty shortlist:
    without a positive and a negative control misattributes causes rather than
    merely missing defects — one such check needed a purpose-built fixture plus
    both. A ticket no single string settles is a `could not check`: admitted,
-   annotated in the dispatch prompt (phase 2), never quietly dropped.
+   annotated in the dispatch prompt (the Pull's dispatch), never quietly dropped.
 
    **This is a consumption gate**, priced for the seat where implementer
    divergence costs a claim, a worktree and a dispatch; at filing time every
@@ -199,7 +199,7 @@ terminating in exactly one dispatch or an empty shortlist:
    `ready-for-agent`.
 
    No sizing agent here. `sizing-a-ticket` picks the *process path*, and that is
-   phase 2's call, after the ticket is claimed.
+   the dispatch's call, after the ticket is claimed.
 4. **Collision scan against open PRs and live branches** — `pull.mjs` runs it
    before Q3 and prints one line per open PR or live worktree branch that shares
    a path with the brief, `no overlap` when none, and `could not look: <which>`
@@ -227,13 +227,25 @@ terminating in exactly one dispatch or an empty shortlist:
 7. **Route, row, then dispatch** — `~/.fleet/bin/fleet-run ticket-router.mjs route
    --session <session> --ticket <N> --arm <A|B> --impl-row <k>[ --chain-head] --issue
    <scratch>/impl-<N>/issue.json --guard .fleet/cost-guard.json` prints
-   `POLICY=… CELL=… DRAW=… STRATUM=… REASON=…` (phase 2's exploration rule
+   `POLICY=… CELL=… DRAW=… STRATUM=… REASON=…` (the router's arguments paragraph below the list
    says what each argument is); then `ledger.mjs row <N> "impl-<N>[ · tier=<CELL>][ · route=<REASON>]"`,
-   `tier=<CELL>` exactly when `DRAW` is not `-`; then phase 2 at once: claim
+   `tier=<CELL>` exactly when `DRAW` is not `-`; then the dispatch at once: claim
    what you are about to dispatch; dispatch what you have just claimed. Router
    exit 2 → no row and no dispatch: release the claim (`release-ticket.sh`, SKILL.md's
    Failure handling row for a claim abandoned mid-run) and emit an event, a probe that could not look — a table the router
    refuses refuses every Pull.
+
+**The router's arguments, and nothing past its line.** `--impl-row` is the
+row count the Pull creates — or, while an assignment is rolling (the latest
+row 5k and every row after it carry no `tier=`), that row's number;
+`--chain-head` marks a ticket another open ticket sequences after, which is
+what rolls it. `--arm` is `A` for an even ticket number and `B` for an odd
+one; a B Pull routes exactly as an A one until the table opens arm B.
+`--session` is this run's own session directory. The printed line is the
+whole routing decision — never re-derive `CELL` from the table, the guard or
+this paragraph. A missing or unreadable `.fleet/cost-guard.json` routes the
+default cell only (`REASON=guard-missing`), burn-in included, and `REASON`
+other than `ok` goes on the row as `route=<REASON>`, nowhere else.
 
 **The Pull table** — every verdict a Pull can reach, and the one thing each
 does:
@@ -250,7 +262,7 @@ does:
 | a construct the brief names, or a brief `path:line` reference, lands in or next to a hunk of an open PR or a live branch | exclude `behind-pr:#M`, next entry |
 | `Out of scope` sequences it after an open ticket | exclude `behind-issue:#M`, next entry |
 | `claim-ticket.sh` exit 2 | taken, next entry |
-| decided, live, free, claimed | row, then dispatch (phase 2) |
+| decided, live, free, claimed | row, then dispatch |
 
 **The shortlist runs out → run `shortlist.mjs` once and Pull again; still
 empty → hold the slot idle until the next refresh trigger.** Within a turn,
@@ -467,3 +479,17 @@ whatever woke you: a member finishing, a member bailing before implementing, a
 merge landing. An edge-triggered loop that only Pulls on completion stalls
 silently the moment the shortlist empties, because 0 implementers emit no
 completion event.
+
+## The rate counts Pulls, not members
+
+**Count the rate against the ledger, because a Pull is the dispatch unit.** One Pull is one member, so a rate counted per Pull is a rate counted per member — one implementer in five, however the Pulls fall across the run — and the ledger, not your memory, is what still holds the count after a compaction.
+
+## Why the exploration pairing is within-run
+
+**Why one in five within the run, not a week of one tier then a week of the other:** tier would then be confounded with calendar date and therefore with prompt evolution, which is exactly the state the rows already on disk are in, and why they cannot answer the question they were collected for.
+
+The raw split still favours the top tier — 3 failures in 11 `routine`/`sonnet` rows against 3 in 55 `routine`/`opus`. **Do not read that as a tier result.** Tier remains largely confounded with calendar date and therefore with prompt evolution: 8 of the 11 `sonnet` rows fall on 2026-08-13 to 08-17, before the window in which 54 of the 55 `opus` rows were run, and the dispatch prompts gained rules throughout. The confound is **weakened, not resolved.** Three `sonnet` rows now break it rather than one — a maintainer-authorized deliberate control (2026-08-20) and two more (2026-08-21) — all three run against prompts of the same vintage as the `opus` rows, and **all three passed**, which is the direction opposite the raw split. Three is still not a result. **What replaces this argument going forward is the within-run pairing above**: one implementer in five at the alternate tier makes tier orthogonal to date by construction, so the question stops depending on whichever rows history happened to leave. **Orthogonal to date, and to nothing else** — the alternate member is whichever ticket the 5th Pull draws, rolling past every ticket another open one sequences after, while the top tier absorbs all of those, so the pairing trades the calendar confound for a difficulty one that runs in a known direction. That is why the four covariates exist: condition a pair comparison on `sizing`/`profile`/`loc`/`files` before reading it as a tier result, never on the raw split.
+
+## What minted_false_claim reads
+
+`minted_false_claim` **discriminates and no longer reads "always yes"** — 20 of the 66 `routine` rows carry `no`, 18 at `opus` and 2 at `sonnet`. Read it as a property of the TICKET before the tier: a pure code simplification need not add prose, while a correction ticket adds prose by construction. The honest summary is unchanged and is the reason this paragraph exists: the guard fired on the criterion the maintainer chose in advance, not on a demonstration that the cheaper tier is worse.

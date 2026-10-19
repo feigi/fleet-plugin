@@ -3,7 +3,7 @@
 The full text of each row `fleet-tick.mjs` prints and what it asks of the controller. SKILL.md's **The tick's rows** carries one line for each.
 
 - `PULL #<N> …` — one Pull per named ticket, in the order printed: phase 1's
-  read, then phase 2's dispatch. A ticket that fails the read is relabelled or
+  read, then the dispatch. A ticket that fails the read is relabelled or
   excluded (phase 1), and the next tick names the next head.
 - `REFRESHED shortlist: <n> entries; <k> lifted` — the tick refreshed the
   shortlist itself, and its `PULL` row already reads the result. `REFRESH
@@ -28,7 +28,7 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   ahead of reviews on purpose: finishing what is started beats starting more.
 - `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn
   (**The reviewer**).
-- `DISPATCH merge-bot` — the next `merge-bot-<n>` (**The merge bot**).
+- `DISPATCH merge-bot` — the next `merge-bot-<n>` (**The merge bot**). The `<scratch>` its brief takes is the absolute `scratch-root.mjs` output, and the bot writes only under `<scratch>/pr<N>/merge-bot-<n>/`.
 - `DISPATCH finisher PR#<M> …` — a finisher settled `labelled`, yet the open
   list shows PR M without `ready-to-merge`, and no `label-off=` (**Run ledger**)
   accounts for the removal. Apply the finisher gate (**The finisher gate**: the
@@ -107,7 +107,7 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   the hold stays while the check writes no verdict (its `tier-ok=`, or
   `tier-unverifiable=` for a member settled `killed` or `released` with no
   transcript, clears it); a mismatch is yours to clear, by dispatching the
-  replacement at the right tier (phase 2). Each prints its clearing step in
+  replacement at the right tier. Each prints its clearing step in
   the row's detail. For a mismatch that is the replacement's name —
   `impl-<N>-b` on a first retry, else one letter past the highest the ticket
   has used, or that no retry letter is left. For an unchecked tier, which

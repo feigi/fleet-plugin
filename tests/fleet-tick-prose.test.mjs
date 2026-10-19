@@ -75,16 +75,16 @@ test("the tick block says the tick reads the run itself, and nobody states a cou
 });
 
 // The rule lives in two retained places: the tick block passes `--in-flight`
-// only when `$ARGUMENTS` set it, and phase 2's tier check says omp's semaphore
-// is not the bound and its line is a notice.
+// only when `$ARGUMENTS` set it, and the phase-0 `tier-roles` step says omp's
+// `task.maxConcurrency` line is a notice in the step's output and never a hold.
 const tierRolesParagraph = () =>
-  RUN_TEAM.between("`task.maxConcurrency` is not the bound", "\n\n", "run-team phase 2 maxConcurrency rule").text;
+  RUN_TEAM.between("The `tier-roles` step runs", "\n\n", "run-team phase 0 tier-roles step").text;
 
 test("--in-flight is the run's bound, omp leaves it at its default, and the semaphore is a notice, never a hold", () => {
   const tick = tickBlock();
   assert.match(tick, Pin.phrase("pass `--in-flight` on every tick when `$ARGUMENTS` set it, and never otherwise"));
   assert.doesNotMatch(tick, /--in-flight \d/, "the rule now hard-codes a numeric bound — the point of leaving it at its default is that no caller passes one");
-  assert.match(tierRolesParagraph(), Pin.phrase("prints a notice line and still"));
+  assert.match(tierRolesParagraph(), Pin.phrase("is a notice in the step's output and never holds"));
 });
 
 // The Defaults paragraph moved, with its measurements, to references/pull.md;
@@ -200,10 +200,11 @@ test("the tick block runs the tick with --apply", () => {
   assert.match(tickBlock(), /fleet-tick\.mjs --apply/);
 });
 
-test("phase 2's tier check says tick --apply runs the check", () => {
-  const phase2 = RUN_TEAM.paragraph("**After every Pull's dispatch, the tier check runs", "run-team phase 2 tier check paragraph", "**The tick holds the next Pull until that verdict exists.**").text;
-  assert.match(phase2, /`tick --apply` runs it itself/);
-  assert.match(phase2, Pin.phrase("HOLD (tier unchecked impl-<N>)"));
+test("the tier check bullet says tick --apply runs the check, and the holds paragraph names the tier-unchecked HOLD", () => {
+  const bullet = RUN_TEAM.bullet("- **The tier check.**", "- **The exploration rule.**", "run-team tier-check bullet").text;
+  assert.match(bullet, /`tick --apply`/);
+  const holds = RUN_TEAM.between("Four holds outrank every row", "\n\n", "run-team four holds paragraph").text;
+  assert.match(holds, Pin.phrase("HOLD (tier unchecked impl-<N>)"));
 });
 
 test("the CI-terminal wake runs the tick", () => {

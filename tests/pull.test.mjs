@@ -2030,7 +2030,7 @@ test("a ticket that spells a placeholder the implementer template declares reach
 });
 
 test("SKILL.md Phase 1 names `pull.mjs next` as the Pull's entry, and its step paragraphs stay in references/pull.md", () => {
-  const phase1 = SKILL.slice(SKILL.indexOf("## Phase 1 — Pull"), SKILL.indexOf("## Phase 2 — dispatch"));
+  const phase1 = SKILL.slice(SKILL.indexOf("## Phase 1 — Pull"), SKILL.indexOf("### Dispatching the Pull's member"));
   assert.ok(phase1.length > 1000, "Phase 1 is found");
   const flat = phase1.replace(/\s+/g, " ");
   assert.ok(flat.includes("A Pull's entry is `~/.fleet/bin/fleet-run pull.mjs next --head <N>`"), "Phase 1 names pull.mjs next as the entry");

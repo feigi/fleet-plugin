@@ -44,14 +44,17 @@ test("run-team names scratch-root.mjs where it first defines <scratch>, and in e
   const pull = flat(read("skills", "run-team", "references", "pull.md"));
   // The finisher's own-tree paragraph moved with its war story to the finisher reference file.
   const finisher = flat(read("skills", "run-team", "references", "finisher.md"));
+  const reviewers = flat(read("skills", "run-team", "references", "reviewers.md"));
+  // The merge bot's dispatch row moved with phase 2 to the tick-rows reference file.
+  const tickRows = flat(read("skills", "run-team", "references", "tick-rows.md"));
   assert.match(skill, /\*\*The scratch root is computed, never invented and never recorded\.\*\*/);
   for (const [what, doc, file, needle] of [
     ["recipe deriver", phase0, "references/phase-0.md", "`<scratch>` is the absolute path `scratch-root.mjs` prints"],
     ["implementer", pull, "references/pull.md", "`<scratch>` as `scratch-root.mjs` printed it"],
-    ["review runner", skill, "SKILL.md", "the absolute path `scratch-root.mjs` prints, never the review side's"],
+    ["review runner", reviewers, "references/reviewers.md", "the absolute path `scratch-root.mjs` prints, never the review side's"],
     ["fix-applier", skill, "SKILL.md", "Every `<scratch>` in that brief is the absolute path `scratch-root.mjs` printed"],
     ["finisher", finisher, "references/finisher.md", "`<scratch>` is the absolute root your dispatch prompt names"],
-    ["merge bot", skill, "SKILL.md", "`<scratch>` the absolute `scratch-root.mjs` output"],
+    ["merge bot", tickRows, "references/tick-rows.md", "the absolute `scratch-root.mjs` output, and the bot writes only under"],
   ]) {
     assert.ok(doc.includes(needle), `run-team/${file}: the ${what} dispatch no longer says where <scratch> comes from`);
   }

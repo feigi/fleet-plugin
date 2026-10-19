@@ -60,12 +60,12 @@ const SIZING = readFileSync(join(REPO, "skills", "sizing-a-ticket", "SKILL.md"),
 // agent definition, which each harness injects as the member's system prompt
 // (byte-identical in every `fleet-implementer-<cell>` file, so one stands for
 // all), followed by the brief `dispatch-prompt.mjs render implementer` prints.
-// SKILL.md's phase 2 carries neither.
+// SKILL.md carries neither.
 const memberBlocks = () => memberPrompt("implementer");
 const memberProse = () => Pin.of(memberBlocks(), "memberBlocks()").stripGutter(">").text;
-const phase2 = () => RUN_TEAM.text.slice(RUN_TEAM.anchorAt("## Phase 2", "run-team phase 2"), RUN_TEAM.anchorAt("## Worktree and claim model", "run-team worktree and claim model"));
+const controllerSkill = () => RUN_TEAM.text;
 
-test("every member-facing rule sits in the agent body the harness injects, not in the controller's phase 2", () => {
+test("every member-facing rule sits in the agent body the harness injects, not in the controller's SKILL", () => {
   assert.ok(memberBlocks().trim().length > 0, "the implementer agent body is empty — the member receives no rules at all");
   // The location defect, restated for the new carrier. A rule the controller
   // reads in phase 2 reaches the member only if the controller retypes it,
@@ -73,7 +73,7 @@ test("every member-facing rule sits in the agent body the harness injects, not i
   // is the other half: two sources free to drift, one of which no member reads.
   for (const opener of ["**You are an unattended fleet member.**", "Run `sizing-a-ticket`", "`next-ticket` **step 7**"]) {
     assert.match(memberProse(), Pin.phrase(opener), `the implementer agent body no longer carries "${opener}"`);
-    assert.doesNotMatch(phase2(), Pin.phrase(opener), `run-team/SKILL.md's phase 2 carries "${opener}" again — the member reads the agent body, so this copy is either dead or a second source to drift`);
+    assert.doesNotMatch(controllerSkill(), Pin.phrase(opener), `run-team/SKILL.md carries "${opener}" again — the member reads the agent body, so this copy is either dead or a second source to drift`);
   }
 });
 

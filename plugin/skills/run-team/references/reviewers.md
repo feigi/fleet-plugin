@@ -1,6 +1,6 @@
 # Reviewers: the evidence behind the review-side rules
 
-Evidence for rules SKILL.md states in Phase 2 and **Reading a review result**, keyed by the rule each justifies.
+Evidence for rules SKILL.md states in **Dispatching the Pull's member**, **Dispatching the members a wake names** and **Reading a review result**, keyed by the rule each justifies.
 
 ## A sizing verdict is a measurement only if it post-dates the run that produced it
 
@@ -131,3 +131,7 @@ The review throws on missing `args.pr`/`args.worktree` and on a snapshot agent
 that returned no tree, and a failure surfaces mid-loop, where "react, never
 block" makes it easy to log and carry on — leaving a PR that *reads* as
 reviewed and is not.
+
+## The review's scratch is the scratch root, not its partition
+
+**`scratch` is the scratch root itself, the absolute path `scratch-root.mjs` prints, never the review side's `<scratch>/pr<N>` partition:** the review creates `pr<N>/` under it, so a `pr<N>` passed in nests every run root at `pr<N>/pr<N>/`, and the review refuses a `scratch` whose last component is `pr` plus digits before dispatching anything.

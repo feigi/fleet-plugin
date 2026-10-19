@@ -99,3 +99,49 @@ warning is the only reason it did not repeat the stall. Its
 the poll it was waiting on was structurally incapable of firing. This file is
 yours, not theirs: the implementer, fix-applier and finisher briefs carry the
 rule, as the line `A member runs its test suite in the foreground and blocks on it.`
+
+## No workpool, and no kernel-resident handle
+
+A pool's only refill virtue — handing a queued item to a freed worker without a controller turn — is exactly what a Pull forbids, and its completions never arrive per member. `eval`'s `agent()` is not the omp call either: a kernel-resident handle dies with the kernel and needs a `wait`, while a `task` job is process-level and its report auto-delivers on its own, like every other member's.
+
+## One claim, one dispatch, no queue
+
+The In-flight bound is the fleet's own accounting rather than anything the runtime enforces, and the member is fresh and never a wake of one that already ran. Admission is per slot and never batched, so there is nothing to hand a freed slot its next ticket but the next Pull.
+
+## The prompt pastes the Pull's own read
+
+The prompt pastes the Pull's own read of the ticket rather than telling the member to re-fetch it, and this still costs one `gh issue view` per ticket, never one per member. The fresh-context design's isolation rationale — "every implementer re-reads its Agent Brief... from scratch" — is about a member never inheriting another ticket's context, not about where the bytes come from. Pasting the Pull's own read into the prompt keeps that: the member still gets the brief verbatim and re-derives nothing from a sibling. What it drops is the unconditional re-fetch of an issue the controller already has open, on every dispatch — the fetch the agent body still carries is the backstop for a brief that turns out to be insufficient, not the default path.
+
+## A member settling with nothing is not a bail
+
+Each member's outcome arrives as its own job status. Settle (CONTEXT.md § Coordination) is three states on omp — `completed`, `failed`, `cancelled` — and reading `failed`/`cancelled` the same as a `completed` turn that had nothing to report is the exact collapse this line blocks: a member that died never chose to bail, so demoting its ticket on its silence demotes a ticket its member never got the chance to judge. Confirm death first, exactly as the Member-killed row does (Failure handling in SKILL.md) — its mtime discriminator, never silence alone.
+
+## The implementer's tier is the definition's
+
+The tier lives in that definition's frontmatter (`agents/fleet-implementer-<cell>.agent.md`; `slow-high`, the policy cell, for a row with no `tier=`), which is what an omitted `model` takes first — the session's tier applies only when the definition names none, and a member dispatched with `model` set does not get the declared tier back. Omitting `model` is therefore still the mechanism; what changed is that the tier it resolves to is now declared and pinned rather than inherited by accident. Keep `name: impl-<N>`: the name is what makes a member, and both the spend classifier and `member-outcomes.mjs` read it.
+
+## The merge bot's tier buys nothing its backstop does not cover
+
+Rebase, wait for green, check the label, merge is checklist work, and a bad merge still needs the label and the per-job CI state to have been read correctly, which is exactly what a wrong merge later surfaces and a human resolves; `no-undo-audit.sh` is the deterministic, script-driven backstop run before every push specifically to catch a wrongly-resolved conflict, so the tier buys nothing that backstop doesn't already cover.
+
+## The red-check fixer's three edges
+
+The Monitor is edge-keyed on `<run-id>:<attempt>:<conclusion>`, so a red that fired before the review never fires again, and with no push there is no new run — the other edges are the only route there, so do not wait for an event. Edit one of the three finisher-gate edges without the others and what strands is exactly the red-only PR.
+
+Take the common case, the implementer's own first CI firing turning red before any review exists: the review is still dispatched against that head as normal, because a red suite is review evidence and not a blocker.
+
+## The tier check judges the dispatch-time tier
+
+The check reads the installed definition and the live `modelRoles` at check time, not at dispatch time, so a late check judges a member against a tier it was never dispatched under.
+
+## The tier check after a /resume
+
+A live implementer rotate carried forward with no verdict on its row is unchecked, and once this session has been reopened with `/resume` its transcript sits under the earlier session's directory: the check given this run's `session` finds no `<member>.jsonl` and exits 2, writing nothing.
+
+## Dispatching on an unchecked member multiplies the damage
+
+Dispatching the next member on top of an unchecked or mismatched dispatch multiplies whatever silently degraded.
+
+## Ledger reads and their buffer
+
+`board.mjs` reads `ledger.mjs read` with an explicit `maxBuffer`, so a payload past node's default is carried rather than killed mid-flight and reported as an unreachable tool — which is how the blind cockpit came back at HTTP 200 even after the pipe cut was gone.

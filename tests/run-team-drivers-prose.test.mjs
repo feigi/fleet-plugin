@@ -286,7 +286,7 @@ const BASELINE = heading("Record the main-checkout baseline");
 const ROTATE = heading("Rotate the ledger");
 
 test("the carried-token reconciliation after /resume is sent to the stranded-claim section's ancestor branch, which holds it", () => {
-  const para = SKILL.paragraph("**After `/resume`, a carried implementer can hold the whole tick.**", "run-team after-/resume paragraph", "**Run the check right after the dispatch");
+  const para = SKILL.bullet("- **The tier check.**", "- **The exploration rule.**", "run-team after-/resume bullet");
   assert.match(para.text, Pin.phrase(`follow the carried token's reconciliation in references/phase-0.md, the "${STRANDED}" section, under its \`prior: ancestor\` branch: \`proc://\` reads \`running\` → wait; dead → the Member-killed row.`));
   const branch = Pin.of(PHASE0, "phase-0.md").section(`## ${STRANDED}`, "phase-0 stranded-claim section").text;
   assert.match(branch, Pin.phrase("- `prior: ancestor` — this session's own earlier run"), "the section no longer has the branch the pointer names");

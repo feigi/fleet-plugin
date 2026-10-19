@@ -356,7 +356,7 @@
    A `resume` follows the Member-killed row across the run boundary: a new
    member under a new name — `impl-<N>-b`, or one letter past the highest
    `impl-<N>-<x>` in the archive that rotate printed the path of — on the same
-   ticket, in the printed worktree and branch, its prompt the phase 2 prompt
+   ticket, in the printed worktree and branch, its prompt the dispatch prompt
    off a fresh read of the issue plus what it inherits (`git -C <worktree> log
    --oneline origin/main..HEAD`, `git -C <worktree> status --short`, and the
    files under `<scratch>/impl-<N>/`). Record it the ordinary way —

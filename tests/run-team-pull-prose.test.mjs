@@ -58,8 +58,7 @@ const section = (from, to) => {
   assert.equal(SKILL.indexOf(from, at + 1), -1, `${from} occurs twice`);
   return SKILL.slice(at, end);
 };
-const phase1 = () => section("## Phase 1 — Pull", "## Phase 2 — dispatch");
-const phase2 = () => section("## Phase 2 — dispatch", "## The finisher gate");
+const phase1 = () => section("## Phase 1 — Pull", "### Dispatching the Pull's member");
 
 // --- nothing the move took out is lost ----------------------------------------
 
@@ -232,19 +231,3 @@ test("the exit table names every exit pull.mjs's header lists", () => {
   for (const e of exits) assert.match(table, new RegExp(`^\\| ${e}\\b`, "m"), `the exit table has no row for exit ${e}`);
 });
 
-// --- phase 2's reduced paragraphs -----------------------------------------
-
-for (const [lead, step] of [
-  ["**Claim what you are about to dispatch, and dispatch it at once**", "`pull.mjs`'s claim step"],
-  ["**The dispatch is recorded before you make it**", "`pull.mjs`'s row step"],
-  ["**The prompt carries only what varies**", "`pull.mjs`'s render step"],
-]) {
-  test(`phase 2's paragraph ${lead} is one sentence naming ${step}`, () => {
-    const p2 = phase2();
-    const at = p2.indexOf(lead);
-    assert.notEqual(at, -1, `phase 2 lost ${lead}`);
-    const paragraph = flat(p2.slice(at, p2.indexOf("\n\n", at)));
-    assert.equal(Pin.sentences(paragraph).filter((s) => s !== "").length, 1, `not one sentence: ${paragraph}`);
-    assert.ok(paragraph.includes(step), `${lead} does not name ${step}`);
-  });
-}

@@ -153,16 +153,3 @@ test("run-team's digest paragraph tells the controller the fix-applier reads tes
     "the digest paragraph no longer says the fix-applier reads testEnvironment before acting on a count from the shared test run",
   );
 });
-
-test("run-team's fix-applier dispatch hands it testEnvironment and cwdAudit before any result of the shared test run", () => {
-  const p = RUN_TEAM.between(
-    "\n**Then dispatch a fix-applier** — on `DISPATCH fix-pr PR#<M>`",
-    "\n**A `DISPATCH fix-pr PR#<M>` on a conflict hold**",
-    "run-team/SKILL.md's fix-applier dispatch paragraph",
-  ).text;
-  assert.match(
-    p,
-    Pin.phrase("`testEnvironment`/`cwdAudit` before any result of the shared test run."),
-    "the fix-applier dispatch paragraph no longer says to read testEnvironment/cwdAudit before a result of the shared test run",
-  );
-});

@@ -36,14 +36,10 @@ import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+const MEMBER_LIFECYCLE = Pin.file(join(REPO, "skills", "run-team", "references", "member-lifecycle.md"));
 
 const outcomeParagraph = () =>
-  RUN_TEAM.section("## Phase 2 — dispatch every member", "run-team/SKILL.md ## Phase 2").paragraph(
-    "A member settling with nothing is not, by itself, a bail.",
-    "run-team/SKILL.md member outcome-classification paragraph",
-    "**Dispatch every implementer with the `agent`",
-  ).text;
+  MEMBER_LIFECYCLE.section("## A member settling with nothing is not a bail", "references/member-lifecycle.md ## A member settling with nothing is not a bail").text;
 
 // The relabel-safety paragraph and the Pull's step paragraphs moved from
 // phase 1 into references/pull.md; phase 1 states the check as the script's exit.
@@ -81,24 +77,30 @@ test("run-team/SKILL.md: the outcome paragraph names the failed/cancelled-vs-com
 // #1591's core acceptance, table-driven: each of the three outcome shapes gets
 // its OWN reading, distinct text a reader cannot satisfy by pointing at either
 // of the other two rows.
+// The two sentences about a silent or bailing member sit in the wake table's
+// Implementer bails bullet, which is where SKILL.md now says them.
+const SKILL = Pin.file(join(REPO, "skills", "run-team", "SKILL.md")).text;
+const bailBullet = () => SKILL.split("\n").find((l) => l.startsWith("- **Implementer bails before implementing**")) ?? "";
+const implementerBullet = () => SKILL.split("\n").find((l) => l.startsWith("- **The implementer.**")) ?? "";
 const OUTCOME_SHAPES = [
-  { name: "died (failed/cancelled settle)", pin: Pin.phrase("a member that died never chose to bail") },
-  { name: "completed with nothing (alive, merely quiet)", pin: Pin.phrase("a died or merely-quiet member's silence never does") },
+  { name: "died (failed/cancelled settle)", text: outcomeParagraph, pin: Pin.phrase("a member that died never chose to bail") },
+  { name: "completed with nothing (alive, merely quiet)", text: bailBullet, pin: Pin.phrase("a died or merely-quiet member's silence never does") },
   {
     name: "explicit bail report",
+    text: bailBullet,
     pin: Pin.phrase("Only an explicit bail report — the member itself naming the cause — reaches Implementer bails before implementing"),
   },
 ];
 for (const shape of OUTCOME_SHAPES) {
   test(`run-team/SKILL.md: the outcome paragraph gives "${shape.name}" its own reading`, () => {
-    assert.match(outcomeParagraph(), shape.pin);
+    assert.match(shape.text(), shape.pin);
   });
 }
 
 test("run-team/SKILL.md: a dead member recovers exactly as the Member-killed row does, never as a demotion", () => {
   assert.match(outcomeParagraph(), Pin.phrase("Confirm death first, exactly as the Member-killed row does"));
   assert.match(
-    outcomeParagraph(),
+    implementerBullet(),
     Pin.phrase("A confirmed-dead member recovers exactly as the Member-killed row says — new member, new name, the SAME ticket — never a demotion"),
   );
 });

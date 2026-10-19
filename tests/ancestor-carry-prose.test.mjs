@@ -17,8 +17,7 @@ const PHASE0 = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run
 const rotateStep = () => PHASE0.between("**Rotate the ledger before the fold-in below", "**The guard is the", "phase-0 rotate step").text;
 const foldIn = () => PHASE0.between("**Fold in every PR a prior run left open", "**Resume the claims a dead run left", "phase-0 fold-in step").text;
 const ancestor = () => PHASE0.bullet("- `prior: ancestor` — this session's own earlier run", "- `prior: none`", "phase-0 stranded-claim ancestor branch").text;
-const resumeHold = () => RUN_TEAM.paragraph("**After `/resume`, a carried implementer can hold the whole tick.**",
-  "run-team tier-check /resume limitation", "**Run the check right after the dispatch").text;
+const resumeHold = () => RUN_TEAM.bullet("- **The tier check.**", "- **The exploration rule.**", "run-team tier-check /resume limitation").text;
 
 test("the rotate step says what an ancestor rotate carries, and that dead and none carry nothing", () => {
   const s = rotateStep();

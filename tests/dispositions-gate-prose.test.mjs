@@ -71,10 +71,8 @@ test("the gate refuses a finisher unless the verdict answering the latest review
 });
 
 test("the tick prints DISPATCH fix-pr for a review counting survived or unverified findings no review fix-applier has answered", () => {
-  const s = SKILL.paragraph("Then dispatch a fix-applier — on `DISPATCH fix-pr PR#<M>`", "run-team/SKILL.md", "A `DISPATCH fix-pr PR#<M>` on a conflict hold", { emphasisTolerant: true }).text;
-  assert.match(s, Pin.phrase(
-    "which the tick prints for a PR whose `reviewed=` counts survived or unverified findings that no review fix-applier has landed `applied:`/`no-op` on since, with no fix-applier live on it",
-  ));
+  const s = SKILL.bullet("- **The fix-applier.**", "- **The conflict hold.**", "run-team/SKILL.md fix-applier bullet").text;
+  assert.match(s, Pin.phrase("`DISPATCH fix-pr PR#<M>` on a `reviewed=` count that survived or unverified findings, with no fix-applier live"));
 });
 
 test("the gate says what each refusal asks of the controller", () => {

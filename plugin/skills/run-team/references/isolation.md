@@ -200,7 +200,7 @@ kernel — is a session setting a child inherits, not something one dispatch can
 set for one member. Isolating a member's kernel is an omp-side change, so
 discipline is the whole of the remedy here — unlike the missing `cwd` field
 above, which `member-write-guard` enforces for `write`/`edit`/`ast_edit` and
-`eval` bypasses. **Phase 2** carries all three rules to every member.
+`eval` bypasses. **Dispatching the Pull's member** carries all three rules to every member.
 
 ## `release-ticket.sh` is not a no-op on omp, and a running member hides nothing from `inflight.sh`
 
