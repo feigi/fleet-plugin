@@ -90,12 +90,16 @@ with prose only where the action is a judgement.
 ## Implementation Decisions
 
 **D1. The budget.** `tests/skill-budget.test.mjs` holds
-`plugin/skills/run-team/SKILL.md` to a byte ceiling. The target is 41,000
-bytes (≈15k tokens at the 2.76 B/token #2929 measured on this file); the
-file measured 186,100 bytes when the test landed, so the ceiling is that size
-rounded up to the next 1,000 (187,000) and only ever comes down toward the
-target. The test's header records the ratio re-measured with `omp -p
---mode json` after the rewrite. The test also asserts the file contains no
+`plugin/skills/run-team/SKILL.md` to a byte ceiling. The target is 75,000
+bytes (≈28k tokens at the 2.69 B/token the test header records), because
+D2's retained sections plus the wake-time judgement they absorb from the
+dropped sections come to about that size; the file measured 186,100 bytes
+when the test landed, so the ceiling started at that size rounded up to the
+next 1,000 (187,000). The ceiling only ever comes down toward the target,
+and it is held tight: the file must be at most the ceiling and less than
+1,000 bytes under it, so a change that shrinks the file lowers the constant
+in the same change. The test's header records the ratio re-measured with
+`omp -p --mode json` after the rewrite. The test also asserts the file contains no
 line matching `^\s*>` and no occurrence of
 `Measured` outside a `See references/` pointer. `references/*.md` have no
 budget. `review-and-fix.md` and `run-merge-bot.md` get their own ceilings
