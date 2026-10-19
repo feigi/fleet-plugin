@@ -1024,6 +1024,32 @@ test("an Install step that writes an ignored dependency directory other than nod
   assert.notEqual(runSuite(control.snap), 0, "the suite passes in a snapshot no Install step ran in — the fixture does not need its install, so the case above proves nothing");
 });
 
+// The harness's shell sets `CI=true`, and an install script that skips under it
+// installs no git hooks in a fresh worktree. The block runs the Install step
+// with `CI` unset, in the subshell that runs it and nowhere else. EXECUTED: the
+// fixture's Install step writes a marker only when `CI` is empty, the block is
+// cut with `CI=true` exported, and the marker has to be there. The control runs
+// the same Install step under the same `CI=true` outside the block, where the
+// marker must NOT appear — a fixture that wrote it regardless would prove
+// nothing. The emitted command text is pinned too: that is the line a snapshot
+// agent runs.
+test("the Install step runs with CI unset: an install that skips under CI still writes its marker when the block is cut under CI=true", (t) => {
+  const install = `${DEPS_INSTALL} && { test -z "$CI" && echo hooks > .deps/hook-marker || true; }`;
+  const worktree = installedRepo(t, { install });
+  const lines = render(SOURCES[0][1], worktree);
+  const installLine = lines.split("\n").find((l) => l.includes('sh -c "$INSTALL"'));
+  assert.ok(installLine, "the block has no line that runs the Install step");
+  assert.match(installLine, /\bunset CI\b[^\n]*sh -c "\$INSTALL"/, `the emitted Install line does not unset CI before it runs the Install step: ${installLine}`);
+
+  const { snap, out } = cut(t, lines, { env: { ...ENV, CI: "true" } });
+  assert.match(out, /^SNAPSHOT_INSTALL_EXIT=0$/m, `the Install step did not run to exit 0 in the snapshot: ${out}`);
+  assert.ok(existsSync(join(snap, ".deps", "hook-marker")), "the Install step saw CI under the block, so the install that skips under CI skipped");
+
+  const control = scratch(t, "snapshot-repo-ci-control-");
+  spawnSync("sh", ["-c", `mkdir -p .deps && ${install}`], { cwd: control, env: { ...ENV, CI: "true" } });
+  assert.ok(!existsSync(join(control, ".deps", "hook-marker")), "the fixture's Install step writes its marker under CI=true, so the case above proves nothing");
+});
+
 // What the repository's own ignore rules leave untracked after the Install
 // step is a fact about the repository: the block names it on a line of its
 // own, which the snapshot agent reports as `untracked` and the payload carries
