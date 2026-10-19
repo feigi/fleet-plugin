@@ -4172,10 +4172,13 @@ test("an unenumerable no-upstream sweep is kept, and the [gone] sweep beside it 
 });
 
 // `branch.<b>.merge` is config, and git does not validate its bytes, so the
-// enumeration must never print it: a space there splits the line into an
-// extra field, and a raw 0x02 cuts git_probe's capture short.
+// enumeration must never print it: a space or a tab there splits the line
+// into an extra field, a newline splits it into two lines, and a raw 0x02
+// cuts git_probe's capture short.
 for (const [label, merge] of [
   ["a space", "refs/heads/a b"],
+  ["a tab", "refs/heads/a\tb"],
+  ["a newline", "refs/heads/a\nb"],
   ["a 0x02 byte", "refs/heads/a\x02b"],
 ]) {
   test(`a merged [gone] branch whose branch.<b>.merge holds ${label} is still reaped, beside a normal one`, (t) => {
