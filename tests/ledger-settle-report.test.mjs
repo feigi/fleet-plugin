@@ -408,7 +408,7 @@ test("an unrecorded filing with no issue number is exit 2 before anything is loo
   f.ok("dispatch", "6", "finisher-pr-6");
   for (const issue of [-3, 0]) {
     f.report("finisher-pr-6", finisherReport(f, { outcome: "halted", cause: "other", evidence: "e", labelsReadBack: [], unrecorded: [{ issue, subject: "neg" }] }));
-    f.refused("finisher-pr-6", 2, new RegExp(`\\$\\.unrecorded\\[0\\]\\.issue: ${issue} is not an issue number; nothing written`));
+    f.refused("finisher-pr-6", 2, new RegExp(`\\$\\.unrecorded\\[0\\]\\.issue: ${issue} is below minimum 1; nothing written`));
   }
   assert.equal(existsSync(join(f.root, "gh.log")), false, "no gh call came first");
 });

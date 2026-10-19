@@ -35,6 +35,16 @@ test("reportStatus: `-` needs no scratch root at all, a covered member reads its
   assert.throws(() => readReport(scratch, "review-pr-88"), /no report schema/);
 });
 
+test("a report that repeats a key reads invalid, naming the duplicate before any schema check", () => {
+  const scratch = tempDir("rf-");
+  put(scratch, "merge-bot-1.json", '{"member":"merge-bot-1","merged":[],"held":[],"conflictHold":[],"refused":[],"branchKept":[],"merged":[5]}');
+  const read = readReport(scratch, "merge-bot-1");
+  assert.equal(read.state, "invalid");
+  assert.equal(read.violation, '$.merged: duplicate key "merged"');
+  put(scratch, "impl-2.json", "not json");
+  assert.match(readReport(scratch, "impl-2").violation, /^\$: not JSON \(/);
+});
+
 test("latestImplReport: the highest letter wins, the unlettered name ranks lowest, and only this ticket's digits match", () => {
   const scratch = tempDir("rf-");
   assert.equal(latestImplReport(scratch, "10"), null, "no reports/ directory");

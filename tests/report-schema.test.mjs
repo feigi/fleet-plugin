@@ -277,8 +277,95 @@ test("validate of an unreadable file is exit 2, naming the file", () => {
   assert.ok(d.stderr.includes(`report-schema: cannot read ${dir}`), d.stderr);
 });
 
+// Integers. Every id is a positive safe integer; the other integers are only
+// held to the safe range, so a truthful negative `exit` stays valid.
+const MAX = "9007199254740991";
+const withText = (family, changes, from, to) => JSON.stringify(variant(family, changes)).replace(from, to);
+
+test("validate fails an integer above the safe range, naming the parsed value", () => {
+  const text = withText("impl", {}, '"pr":3300', '"pr":9007199254740993');
+  assertInvalid(run("validate", "impl", file(text)), "$.pr: 9007199254740992 is above maximum 9007199254740991");
+  const huge = withText("impl", {}, '"pr":3300', '"pr":12345678901234567890123');
+  assertInvalid(run("validate", "impl", file(huge)), "$.pr: 1.2345678901234568e+22 is above maximum 9007199254740991");
+});
+
+test("validate bounds the safe range exactly, on both sides", () => {
+  const top = withText("impl", {}, '"pr":3300', `"pr":${MAX}`);
+  assert.equal(run("validate", "impl", file(top)).status, 0);
+  const exit = (n) => withText("fix-pr", {}, '"exit":0', `"exit":${n}`);
+  assert.equal(run("validate", "fix-pr", file(exit(`-${MAX}`))).status, 0);
+  assertInvalid(run("validate", "fix-pr", file(exit("-9007199254740993"))), "$.testRun.exit: -9007199254740992 is below minimum -9007199254740991");
+});
+
+test("validate holds an id to at least 1 and leaves the other integers their zero and negatives", () => {
+  assertInvalid(check("finisher", variant("finisher", { unrecorded: [{ issue: 0, subject: "s" }] })), "$.unrecorded[0].issue: 0 is below minimum 1");
+  assertInvalid(check("finisher", variant("finisher", { unrecorded: [{ issue: -3, subject: "s" }] })), "$.unrecorded[0].issue: -3 is below minimum 1");
+  assertInvalid(check("merge-bot", variant("merge-bot", { conflictHold: [0] })), "$.conflictHold[0]: 0 is below minimum 1");
+  const ok = check("fix-pr", variant("fix-pr", { applied: [{ bucket: "apply", index: 0 }], testRun: { cmd: "c", exit: -1, tests: 0, cancelled: 0 } }));
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+});
+
+test("validate passes a nullable impl pr that is null", () => {
+  const r = check("impl", variant("impl", { outcome: "bailed", pr: null, head: null, sizing: null, bailCause: "hands", bailDetail: "d" }));
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
+test("print states the bounds on every integer node", () => {
+  const nodes = [];
+  const walk = (node) => {
+    if ([].concat(node.type ?? []).includes("integer")) nodes.push(node);
+    for (const sub of Object.values(node.properties ?? {})) walk(sub);
+    if (node.items !== undefined) walk(node.items);
+  };
+  for (const family of FAMILIES) {
+    const printed = JSON.parse(run("print", family).stdout);
+    walk(printed);
+  }
+  assert.ok(nodes.length > 0);
+  for (const n of nodes) {
+    assert.equal(n.maximum, Number.MAX_SAFE_INTEGER);
+    assert.ok(n.minimum === 1 || n.minimum === -Number.MAX_SAFE_INTEGER, JSON.stringify(n));
+  }
+});
+
+// Duplicate keys: JSON.parse keeps the last, so the text is scanned for them.
+test("validate names a top-level duplicate key before any schema check, though its second value is also wrong", () => {
+  const text = '{"member":"merge-bot-1","merged":[],"held":[],"conflictHold":[],"refused":[],"branchKept":[],"merged":[5]}';
+  assertInvalid(run("validate", "merge-bot", file(text)), '$.merged: duplicate key "merged"');
+  const first = '{"pr":"oops","pr":42}';
+  assertInvalid(run("validate", "impl", file(first)), '$.pr: duplicate key "pr"');
+});
+
+test("validate names a nested duplicate key by its full path", () => {
+  const text = `{"member":"merge-bot-1","merged":[{"pr":1,"sha":"${SHA}"},{"pr":2,"sha":"${SHA}","sha":"${OTHER}"}],"held":[],"conflictHold":[],"refused":[],"branchKept":[]}`;
+  assertInvalid(run("validate", "merge-bot", file(text)), '$.merged[1].sha: duplicate key "sha"');
+  const deep = '{"a":{"b":[[{"c":1,"c":2}]]}}';
+  assertInvalid(run("validate", "impl", file(deep)), '$.a.b[0][0].c: duplicate key "c"');
+});
+
+test("validate compares keys decoded, so an escaped spelling of a key collides with the plain one", () => {
+  assertInvalid(run("validate", "impl", file('{"a":1,"\\u0061":2}')), '$.a: duplicate key "a"');
+  assertInvalid(run("validate", "impl", file('{"\\u0061":1,"a":2}')), '$.a: duplicate key "a"');
+  assertInvalid(run("validate", "impl", file('{"x":{"q\\"":1,"q\\u0022":2}}')), '$.x.q": duplicate key "q\\""');
+});
+
+test("validate does not call the same key in two sibling or nested objects a duplicate", () => {
+  const text = `{"member":"merge-bot-1","merged":[{"pr":1,"sha":"${SHA}"},{"pr":2,"sha":"${SHA}"}],"held":[{"pr":3,"behind":1}],"conflictHold":[],"refused":[{"pr":4,"reason":"r"}],"branchKept":[{"pr":1,"by":2}]}`;
+  const r = run("validate", "merge-bot", file(text));
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  // A key whose value is a string that looks like a key is no key.
+  const looks = check("impl", variant("impl", { confirmation: ['"member":', '{"x":1,"x":2}'] }));
+  assert.equal(looks.status, 0, looks.stdout + looks.stderr);
+});
+
+test("validate reads text that is not JSON as `not JSON`, whether or not it also repeats a key", () => {
+  const r = run("validate", "impl", file('{"a":1,"a":2'));
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stdout, /^invalid: \$: not JSON \(.+\)\n$/);
+});
+
 test("SCHEMAS uses only the keywords validate() implements", () => {
-  const supported = new Set(["type", "enum", "pattern", "required", "properties", "additionalProperties", "items"]);
+  const supported = new Set(["type", "enum", "pattern", "minimum", "maximum", "required", "properties", "additionalProperties", "items"]);
   let seen = 0;
   const walk = (node, at) => {
     for (const key of Object.keys(node)) {
