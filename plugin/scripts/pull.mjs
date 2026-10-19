@@ -59,7 +59,9 @@
 //                 Brief` one, newer than the last comment that has one or on a
 //                 ticket with none, is a stranded ruling: the newest is named,
 //                 with its URL, in a comment, and the label replaces
-//                 `ready-for-agent` with `ready-for-human`, as a Q2 cause does.
+//                 `ready-for-agent` with `ready-for-human`, as a Q2 cause does;
+//                 a newest one `gh` printed with no URL is exit 2, nothing
+//                 posted.
 //                 Otherwise the distilled brief and the paths the router's
 //                 extractor finds in it are printed.
 //   3  Q1 staleness   `gone` / `present` (each with `--path <p>` and the string
@@ -132,7 +134,7 @@ import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { memberTokens, premisesOf, tierValues } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
-import { briefPaths, briefText, outOfScope, RULING_HEADING, strandedRuling } from "./ticket-router.mjs";
+import { briefPaths, briefText, outOfScope, strandedRuling } from "./ticket-router.mjs";
 
 const NAME = "pull";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -818,7 +820,10 @@ class Pull {
     }
     if (!issue.labels.some((l) => l?.name === READY)) return this.leave("relabelled elsewhere");
     const stranded = strandedRuling(issue);
-    if (stranded !== null) return this.relabelled("stranded-ruling", `"${RULING_HEADING.exec(stranded.body)[0]}" ${stranded.url}`);
+    if (stranded !== null) {
+      if (typeof stranded.url !== "string") return this.stop(`gh issue view printed a ruling comment with no url: "${stranded.heading}"`);
+      return this.relabelled("stranded-ruling", `"${stranded.heading}" ${stranded.url}`);
+    }
     this.log.push(...this.brief());
     st.stage = "staleness";
     return null;

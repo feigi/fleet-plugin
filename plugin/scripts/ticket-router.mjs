@@ -80,30 +80,35 @@ const DAY_MS = 86_400_000;
 // metrics — every one free, deterministic and known before dispatch
 // ---------------------------------------------------------------------------
 
+/** An `## Agent Brief` heading line: what marks the comment the brief is taken from. */
+const AGENT_BRIEF = /^## Agent Brief/m;
+
 /** The brief: the last comment carrying an `## Agent Brief` heading line, else the body. */
 export function briefText(issue) {
   const comments = Array.isArray(issue.comments) ? issue.comments : [];
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = String(comments[i]?.body ?? "");
-    if (/^## Agent Brief/m.test(body)) return body;
+    if (AGENT_BRIEF.test(body)) return body;
   }
   return String(issue.body ?? "");
 }
 
 /** A ruling or triage heading line: what a decision posted outside an `## Agent Brief` comment is headed with. */
-export const RULING_HEADING = /^## (?:Ruling|Triage).*$/m;
+const RULING_HEADING = /^## (?:Ruling|Triage).*$/m;
 
 /**
  * The newest comment with a ruling or triage heading line and no `## Agent
  * Brief` heading line that comes after the last comment `briefText` takes the
- * brief from, or after none when there is no such comment; null when none is.
+ * brief from, or after none when there is no such comment, as its first ruling
+ * or triage heading line and its `url`; null when none is.
  */
 export function strandedRuling(issue) {
   const comments = Array.isArray(issue.comments) ? issue.comments : [];
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = String(comments[i]?.body ?? "");
-    if (/^## Agent Brief/m.test(body)) return null;
-    if (RULING_HEADING.test(body)) return comments[i];
+    if (AGENT_BRIEF.test(body)) return null;
+    const heading = RULING_HEADING.exec(body);
+    if (heading !== null) return { heading: heading[0], url: comments[i].url };
   }
   return null;
 }
