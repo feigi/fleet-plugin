@@ -554,7 +554,7 @@ const CHANGED = [
   ],
   [
     "`NEED resume #<n> <worktree> <branch>` — a dead run's claim with no PR.",
-    "`NEED resume #<n> <worktree> <branch>` — a dead run's claim that never opened a PR."
+    "`NEED resume #<n> <worktree> <branch>` — a dead run's claim: no PR, or not only `CLOSED` ones."
   ]
 ];
 

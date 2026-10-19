@@ -391,8 +391,10 @@ token, row}]}`:
   an open PR is the fold-in's): `resume` when exactly one worktree for it
   sits under this checkout's `.worktrees/`, `report` otherwise. That
   worktree's branch is asked `gh pr list --state all --head <branch>` first:
-  a PR CLOSED unmerged with none OPEN makes it `report` with `why` `PR #<M>
-  closed unmerged`, and so does a list that does not answer, never `resume`.
+  PRs that all read CLOSED unmerged — none OPEN, none MERGED — make it
+  `report` with `why` `PR #<M> closed unmerged`, and so does a list that
+  does not answer, or a detached worktree whose branch cannot be asked
+  about, never `resume`.
 - `prior: ancestor` — this session's own earlier run: no claim is listed.
   `carried` lists every live token rotate carried — its member or runner
   `name` (a `review=wf:` launch's runId), the `token` as the ledger holds

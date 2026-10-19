@@ -335,17 +335,34 @@ test("prior dead + a claim whose branch's PR closed unmerged, none open → repo
   assert.deepEqual(r.gh.slice(2), [12, 13, 14].map((n) => `pr list --state all --head implementer/${n}-impl-${n} --json number,state --limit 1000`));
 });
 
-test("prior dead + a claim whose branch never opened a PR still resumes; one whose closed PR has an open sibling is not a closed-PR report", (t) => {
-  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12", "13-impl-13"] });
+test("prior dead + a claim whose branch never opened a PR still resumes; one whose closed PR has an open or a merged sibling is not a closed-PR report", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12", "13-impl-13", "14-impl-14"] });
   const r = f.run({
-    issues: [issue(12), issue(13)],
-    heads: { "implementer/13-impl-13": [{ number: 41, state: "CLOSED" }, { number: 45, state: "OPEN" }] },
+    issues: [issue(12), issue(13), issue(14)],
+    heads: {
+      "implementer/13-impl-13": [{ number: 41, state: "CLOSED" }, { number: 45, state: "OPEN" }],
+      "implementer/14-impl-14": [{ number: 43, state: "CLOSED" }, { number: 46, state: "MERGED" }],
+    },
   });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.why]), [
     [12, "resume", "its worktree is in this checkout"],
     [13, "resume", "its worktree is in this checkout"],
+    [14, "resume", "its worktree is in this checkout"],
   ]);
+});
+
+test("prior dead + a claim whose worktree is detached → report, never resume: its branch cannot be asked about", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  git(wt(f, "12-impl-12"), "checkout", "-q", "--detach");
+  const r = f.run({ issues: [issue(12)] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims, [{
+    n: 12, t: "ticket 12", action: "report", worktree: wt(f, "12-impl-12"), branch: null,
+    why: "its worktree is detached, so whether its branch opened a PR cannot be told — nothing is resumed",
+  }]);
+  // No branch, so no head probe: only the two lists.
+  assert.equal(r.gh.length, 2);
 });
 
 test("prior dead + a branch probe that does not answer → report, never resume — and never a refusal of the step", (t) => {
@@ -354,12 +371,27 @@ test("prior dead + a branch probe that does not answer → report, never resume 
   assert.equal(failed.status, 0, failed.stderr);
   assert.deepEqual(failed.out.claims.map((c) => [c.n, c.action, c.worktree]), [[12, "report", wt(f, "12-impl-12")]]);
   assert.match(failed.out.claims[0].why, /^gh pr list --head implementer\/12-impl-12 did not answer \(exit 1: head list boom\) — whether its branch opened a PR is unknown, so nothing is resumed$/);
-  for (const [what, answer] of [["a PR with no state", [{ number: 40 }]], ["not a list", { number: 40, state: "CLOSED" }]]) {
+  for (const [what, answer] of [
+    ["a PR with no state", [{ number: 40 }]],
+    ["a PR with no number", [{ state: "CLOSED" }]],
+    ["a PR whose number is a string", [{ number: "40", state: "CLOSED" }]],
+    ["not a list", { number: 40, state: "CLOSED" }],
+  ]) {
     const r = f.run({ issues: [issue(12)], heads: { "implementer/12-impl-12": answer } });
     assert.equal(r.status, 0, `${what}: ${r.stderr}`);
     assert.deepEqual(r.out.claims.map((c) => [c.n, c.action]), [[12, "report"]], what);
     assert.match(r.out.claims[0].why, /did not answer \(not a list of \{number, state\}\)/, what);
   }
+  // A list at its cap may hold an OPEN PR it did not show; one short of it is
+  // a whole answer.
+  const closedRows = (n) => Array.from({ length: n }, (_, i) => ({ number: i + 1, state: "CLOSED" }));
+  const atCap = f.run({ issues: [issue(12)], heads: { "implementer/12-impl-12": closedRows(1000) } });
+  assert.equal(atCap.status, 0, atCap.stderr);
+  assert.deepEqual(atCap.out.claims.map((c) => [c.n, c.action]), [[12, "report"]]);
+  assert.match(atCap.out.claims[0].why, /did not answer \(at its cap of 1000\)/);
+  const underCap = f.run({ issues: [issue(12)], heads: { "implementer/12-impl-12": closedRows(999) } });
+  assert.equal(underCap.status, 0, underCap.stderr);
+  assert.deepEqual(underCap.out.claims.map((c) => [c.n, c.action, c.why]), [[12, "report", "PR #999 closed unmerged"]]);
 });
 
 test("prior none never probes a branch: nothing resumes, so there is nothing to tell apart", (t) => {

@@ -74,14 +74,14 @@ phase, or in any later one, asks the maintainer which tickets to take.
      run `phase0.mjs` again. `RECIPE NOT PROVEN` → stall: report `STALL —
      Recipe not proven: <cause>` to the maintainer with the deriver's reason
      verbatim, and claim, Pull and review nothing.
-   - `NEED resume #<n> <worktree> <branch>` — a dead run's claim that never opened a PR.
+   - `NEED resume #<n> <worktree> <branch>` — a dead run's claim: no PR, or not only `CLOSED` ones.
      Dispatch a stranded `impl-<n>-b` the ordinary way (record it with
      `ledger.mjs row`, render its brief, `ledger.mjs dispatch`, the `task`
      call, the tier check), in that worktree and branch, and never with
      `claim-ticket.sh`: the claim stands. A re-run finds the need met once its
      row is written. A `report #<n> — <why>` line is the maintainer's and
      nothing else, and a `carried` line is a live token to reconcile first.
-     A closed-unmerged PR's `report` takes `replace`/`release #<n>`.
+     A closed-PR `report` takes `replace`/`release #<n>`.
    - `NEED review PR#<pr> (closes no issue)` — an open PR a prior run left
      that no row can queue. Advice, never an exit status: hand-dispatch its
      review exactly as ticket work, or leave it.

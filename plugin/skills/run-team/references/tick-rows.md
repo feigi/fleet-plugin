@@ -69,10 +69,11 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   for #N, and post no GitHub comment. It prints beside the implementer row,
   never in it, takes no implementer slot and counts toward no bound. While a
   member on PR M is live — `fix-pr-<M>…`, `finisher-pr-<M>…`, or a live
-  `merge-bot-<n>` while M's latest finisher settled `labelled` — the line
-  ends ` — <member> live`. Reopening PR M, or closing #N, clears it by
-  itself on the next tick. Act only on the maintainer's `replace #N` or
-  `release #N`, and only once the line names no live member:
+  `merge-bot-<n>` while M's latest finisher settled `labelled` with no
+  `label-off=` after it — the line ends ` — <member> live`. Reopening PR M,
+  or closing #N, clears it by itself on the next tick. Act only on the
+  maintainer's `replace #N` or `release #N`, and only once the line names no
+  live member:
   - `replace #N` — the `NEED resume` procedure (phase 0): `impl-<N>-b`, or
     one letter past the highest `impl-<N>-<x>` the ticket has used, in the
     existing worktree and branch, never `claim-ticket.sh`. Its new PR settles
@@ -84,8 +85,13 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
     letter, and `ledger.mjs settle impl-<N>-<x> released`, which ends the
     line.
 
-  A replacement that settles `bailed` or `killed` brings the line back on M,
-  and one whose own PR M′ closes unmerged prints it on M′.
+  A replacement that settles `bailed`, `blocked` or `killed` brings the line
+  back on M, and one whose own PR M′ closes unmerged prints it on M′. One the
+  implementer row holds on a tier mismatch (`HOLD (tier mismatch …)`) keeps
+  the line off while that row asks for the next replacement — the `replace`
+  carried on at the right tier — and once that one settles, the line reads it
+  the same way. A tier mismatch on the member that settled `PR#<M>` itself
+  replaces nothing, so the line stands beside that hold.
 - `ESCALATE pr-unchecked #<N> PR#<M>` — the same ticket, but `gh pr view
   <M>` could not answer, so whether M closed is unknown. The maintainer's on
   the same terms as `pr-closed`; the next tick probes again.

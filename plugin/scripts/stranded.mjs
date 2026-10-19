@@ -19,11 +19,12 @@
 //   dead      every open in-progress issue with no open PR: `resume` when
 //             exactly one worktree for it sits under this checkout's
 //             `.worktrees/` and its directory is there, `report` otherwise.
-//             That worktree's branch is listed first, every PR state: one
-//             CLOSED unmerged with none OPEN is `report` with `why` `PR #<M>
-//             closed unmerged` — an unmerged close is the maintainer's to
-//             rule on — and a list that does not answer is `report` too,
-//             never `resume`.
+//             That worktree's branch is listed first, every PR state: every
+//             one CLOSED unmerged — none OPEN, none MERGED — is `report` with
+//             `why` `PR #<M> closed unmerged` — an unmerged close is the
+//             maintainer's to rule on — and a list that does not answer, or a
+//             detached worktree whose branch cannot be asked about, is
+//             `report` too, never `resume`.
 //   ancestor  this session's earlier run: no claim listed — its members may
 //             still be live, and rotate carried their tokens forward;
 //             `carried` lists them instead, for the controller to reconcile
@@ -101,9 +102,10 @@ function ghList(what, args) {
 }
 
 // The PRs a claim's branch opened, every state: `{closed}`, the highest PR
-// number among those CLOSED unmerged when none is OPEN, else null; or
-// `{failed}`, why the list did not answer. Never a refusal of the step: an
-// unanswered list leaves this one claim unresumed, and the others classify.
+// number when every one of them is CLOSED unmerged — none OPEN, none MERGED,
+// at least one — else null; or `{failed}`, why the list did not answer. Never
+// a refusal of the step: an unanswered list leaves this one claim unresumed,
+// and the others classify.
 function closedHeadPr(branch) {
   const r = spawnSync("gh", ["pr", "list", "--state", "all", "--head", branch, "--json", "number,state", "--limit", String(LIMIT)], {
     encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }),
@@ -119,8 +121,8 @@ function closedHeadPr(branch) {
     return { failed: "not a list of {number, state}" };
   }
   if (rows.length >= LIMIT) return { failed: `at its cap of ${LIMIT}` };
-  const closed = rows.filter((p) => p.state === "CLOSED").map((p) => p.number);
-  return { closed: closed.length > 0 && !rows.some((p) => p.state === "OPEN") ? Math.max(...closed) : null };
+  const closed = rows.length > 0 && rows.every((p) => p.state === "CLOSED");
+  return { closed: closed ? Math.max(...rows.map((p) => p.number)) : null };
 }
 
 // Every registered worktree: its path, branch (null when detached) and
@@ -233,19 +235,21 @@ function main() {
     const inside = mine.filter((w) => real(dirname(w.path)) === home);
     const outside = mine.filter((w) => !inside.includes(w));
     const one = inside.length === 1 ? inside[0] : null;
+    // A dead claim's branch that opened a PR: every one CLOSED unmerged is
+    // reported in place of the resume, and so is a branch whose PRs cannot be
+    // listed — or cannot be asked about at all, its worktree detached. A
+    // branch that never opened one resumes as before.
+    const head = prior === "dead" && one?.branch ? closedHeadPr(one.branch) : null;
     let why;
     if (prior !== "dead") why = "no record proves the previous run dead, so nothing is resumed";
+    else if (one && !one.branch) why = "its worktree is detached, so whether its branch opened a PR cannot be told — nothing is resumed";
+    else if (head?.failed) why = `gh pr list --head ${one.branch} did not answer (${head.failed}) — whether its branch opened a PR is unknown, so nothing is resumed`;
+    else if (head?.closed) why = `PR #${head.closed} closed unmerged`;
     else if (one) why = "its worktree is in this checkout";
     else if (inside.length > 1) why = `several worktrees for it in this checkout: ${inside.map((w) => w.path).join(", ")}`;
     else if (outside.length > 0) why = `its worktree is outside this checkout's .worktrees/: ${outside.map((w) => w.path).join(", ")}`;
     else why = "no worktree for it in this checkout";
-    // A dead claim's branch that opened a PR: one CLOSED unmerged, with none
-    // OPEN, is reported in place of the resume, and so is a branch whose PRs
-    // cannot be listed. A branch that never opened one resumes as before.
-    const head = prior === "dead" && one?.branch ? closedHeadPr(one.branch) : null;
-    if (head?.failed) why = `gh pr list --head ${one.branch} did not answer (${head.failed}) — whether its branch opened a PR is unknown, so nothing is resumed`;
-    else if (head?.closed) why = `PR #${head.closed} closed unmerged`;
-    const action = prior === "dead" && one && mentioned.length === 0 && !head?.failed && !head?.closed ? "resume" : "report";
+    const action = prior === "dead" && one?.branch && mentioned.length === 0 && !head?.failed && !head?.closed ? "resume" : "report";
     // Not taken for its PR — but never resumed past one that might be.
     if (mentioned.length > 0) why += `; ${mentioned.join(", ")} carries the number outside the ticket position, so check whether it is this claim's`;
     claims.push({ n: issue.number, t: issue.title, action, worktree: one?.path ?? null, branch: one?.branch ?? null, why });
