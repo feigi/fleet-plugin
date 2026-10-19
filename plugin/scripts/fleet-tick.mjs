@@ -118,7 +118,10 @@
 //             row: `pull.mjs next` skips it, `next --head` would start the
 //             ticket over, so the next head fills the slot. Nor is it counted
 //             in `unclaimed=` or toward the short-queue refresh, so a
-//             shortlist of ended heads refreshes. A record from another
+//             shortlist of ended heads refreshes. A Pull that left on an
+//             exclusion (its reason starts `excluded ·`) is no such end: its
+//             head is counted and Pulled again once the exclusion lifts. A
+//             record from another
 //             phase-0 session, or one unreadable or absent, is the fresh row:
 //             `pull.mjs next` starts or resumes it.
 //   session   The listing of the session directory omp writes one
@@ -139,7 +142,7 @@
 // the ledger; main() does the I/O. Split so the guard table and the reading are
 // both unit-testable without a network.
 
-import { parseMember, parseToken, premisesOf, rowNums, nextRetry, readRetired, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, premisesOf, rowNums, nextRetry, readRetired, pullEnded, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
 
 // The implementer and reviewer rows' TARGET is the In-flight bound; the merge
 // bot's is 1. Availability of work belongs in the ACTION, not the target: a
@@ -273,8 +276,10 @@ const QUESTION_NUMBERS = { staleness: "Q1", close: "Q1b", decided: "Q2", collisi
  * PULL row: `{kind: "pending", qid, stale}`, `{kind: "dispatched", text}` with
  * the text the Pull's own `ledger.mjs row` wrote (null when it recorded none),
  * `{kind: "ended"}` for a Pull that left or was released, or null for the
- * fresh row. `since` is the file's mtime and `session` this run's phase-0
- * session, null when the receipt names none.
+ * fresh row. A Pull that left on an Exclusion (its reason starts `excluded ·`)
+ * is the fresh row too: it is no end, since the head claims a PULL row again
+ * once the tick's own lift logic admits it. `since` is the file's mtime and
+ * `session` this run's phase-0 session, null when the receipt names none.
  */
 export function pullOf(record, { session, since, now, staleMinutes }) {
   if (record === null || typeof record !== "object" || Array.isArray(record)) return null;
@@ -283,7 +288,14 @@ export function pullOf(record, { session, since, now, staleMinutes }) {
   if (session !== null && record.session !== session) return null;
   // pull.mjs's `next` skips a Pull that ended in this run, and `next --head`
   // would start the ticket over: the head is no one for a PULL row to name.
-  if (record.status === "left" || record.status === "released") return { kind: "ended" };
+  // `pullEnded` is the one test both read. A Pull that left on an Exclusion is
+  // no such end, so it falls through to the fresh row. While a `behind-pr:#M`
+  // premise stands, the ledger claims the head and it never reaches here; a
+  // `behind-issue` or branch-named premise only the refreshed shortlist keeps
+  // out, by dropping its ticket (unclaimed), so after a failed refresh the
+  // head can get a PULL row that `pull.mjs` leaves again. Once the premise
+  // lifts, `next` takes it again.
+  if (pullEnded(record)) return { kind: "ended" };
   if (record.status === "running" && typeof record.pending?.qid === "string") {
     return { kind: "pending", qid: record.pending.qid, stale: now - since > staleMinutes * 60_000 };
   }
@@ -308,7 +320,8 @@ function pullAction(n, p) {
 }
 
 // The heads a PULL row could name: a head whose Pull ended in this run takes
-// no slot, and the next head takes it. Order kept, so the slots fill oldest first.
+// no slot, and the next head takes it. A Pull that left on an Exclusion is no
+// such end (pullOf). Order kept, so the slots fill oldest first.
 function pullable(heads, pulls) {
   return heads.filter((n) => pulls?.get(n)?.kind !== "ended");
 }
@@ -366,7 +379,8 @@ function implementers(s) {
   if (heads.length) return heads.slice(0, s.bound - s.inFlight).map((n) => one(pullAction(n, s.pulls?.get(n)), { acts: true }));
 
   // Nothing to Pull even after a refresh: no unclaimed head, or only heads
-  // whose Pull ended in this run, which `pull.mjs next` skips. `SUGGEST /triage` asks a
+  // whose Pull ended in this run, which `pull.mjs next` skips — a Pull that
+  // left on an Exclusion is no such end (pullOf). `SUGGEST /triage` asks a
   // MAINTAINER to tick tickets, and on the unattended night the heartbeat
   // exists for there is nobody to ask — so it prints (the fold shows it once)
   // but is not actionable, or it would pin the interval at the base all night.
@@ -1195,10 +1209,12 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
 // `behind-issue` or branch-named premise) is different: its row is rewritten
 // only when a Pull dispatches the ticket (shortlist.mjs's own header, §3),
 // never on its own, so once shortlist.mjs's live probe has re-admitted the
-// ticket to these entries, that stale row no longer blocks it.
+// ticket to these entries, that stale row no longer blocks it. A row naming no
+// premise has nothing to lift: it claims its ticket for good, as `pull.mjs
+// next` and shortlist.mjs read it.
 export function unclaimed(entries, run) {
   const unverifiable = new Set(run.excluded
-    .filter((e) => e.premises.every(({ kind, target }) => kind !== "pr" || !isDigits(target)))
+    .filter((e) => e.premises.length > 0 && e.premises.every(({ kind, target }) => kind !== "pr" || !isDigits(target)))
     .map((e) => e.n));
   return entries.map((e) => e.n).filter((n) => !run.claimed.has(n) || unverifiable.has(n));
 }
@@ -1226,8 +1242,9 @@ export function parseShortlist(text) {
 
 // Why this tick refreshes the shortlist, or null. `unclaimed` counts the
 // heads a PULL row could name, so a head whose Pull ended in this run is not
-// in it. The premise-lifted
-// trigger costs gh calls, so main() asks it only when these answer null.
+// in it — a Pull that left on an Exclusion is no such end (pullOf). The
+// premise-lifted trigger costs gh calls, so main() asks it only when these
+// answer null.
 // Nothing refreshes while the bound holds (`held`, n ≥ B, whichever HOLD row
 // prints): a refresh then cannot feed a Pull, and the first tick back under
 // the bound refreshes and Pulls in the same tick, so nothing is lost.
@@ -2168,8 +2185,8 @@ function main() {
   if (scratch === null) console.error(`${NAME}: report files and Pull records not checked — no scratch in the phase-0 receipt and no --scratch`);
   // Each head's Pull record read, not only the heads a free slot names: a head
   // whose Pull ended gives its slot to the next, so the heads past the slots
-  // can fill one. The session it is judged against is the receipt's, as
-  // pull.mjs judges it.
+  // can fill one. A Pull that left on an Exclusion is no such end (pullOf). The
+  // session it is judged against is the receipt's, as pull.mjs judges it.
   const runSession = receipt.read.state === "ok" && receipt.read.receipt.session !== "" ? receipt.read.receipt.session : null;
   const pullsOf = (hs) => scratch === null ? new Map()
     : readPulls(scratch.root, hs, { session: runSession, now: Date.now(), staleMinutes: pullStaleMinutes });
@@ -2186,7 +2203,8 @@ function main() {
   let fresh = null;
   // Short means fewer heads than B that a PULL row could name: `pull.mjs next`
   // skips a head whose Pull ended in this run, so counting it would hold back
-  // the refresh that finds the head to take its slot.
+  // the refresh that finds the head to take its slot. A Pull that left on an
+  // Exclusion is no such end (pullOf).
   const counted = pullable(heads, pulls).length;
   // While the bound holds a refresh cannot feed a Pull, so none of its
   // triggers runs: the first tick back under the bound refreshes and Pulls in

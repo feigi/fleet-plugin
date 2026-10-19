@@ -113,9 +113,10 @@ test("§ Queue depth defines In flight and the In-flight bound, and documents th
   assert.match(s, Pin.phrase("The reviewer row reads `<units>/<B>`"));
   assert.match(s, Pin.phrase("never while the bound holds"));
   // A head whose Pull ended this run is no head a PULL row can name: counted,
-  // it holds back the refresh that would fill its slot.
-  assert.match(s, Pin.phrase("The table's shortlist counts no head whose Pull ended this run"));
-  assert.match(s, Pin.phrase("Unclaimed there counts no head whose Pull ended this run"));
+  // it holds back the refresh that would fill its slot. Except a Pull that
+  // ended on an exclusion whose premise has lifted, which a PULL row names again.
+  assert.match(s, Pin.phrase("The table's shortlist counts no head whose Pull ended this run, unless on a lifted exclusion"));
+  assert.match(s, Pin.phrase("Unclaimed there counts no head whose Pull ended this run, unless on a lifted exclusion"));
   // After a refresh at unclaimed < B the row prints the trigger's count, not the
   // refreshed file's, so the idle row can carry a count above 0.
   assert.match(s, Pin.phrase("A refresh at unclaimed < B leaves `unclaimed=` at that count, so `SUGGEST /triage` can print it above 0"));
@@ -442,9 +443,16 @@ const TICK_ROWS = Pin.file(join(REPO, "skills", "run-team", "references", "tick-
 
 test("the REFRESHED and SUGGEST /triage tick rows leave an ended head out of the count, and the row keeps the trigger's count", () => {
   const refreshed = TICK_ROWS.bullet("- `REFRESHED shortlist: <n> entries; <k> lifted`", "- `SUGGEST /triage, hold idle`", "tick-rows REFRESHED row").text;
-  assert.match(refreshed, Pin.phrase("a head whose Pull ended this run not counted, the implementer row's `unclaimed=` prints that same `<u>`, not the refreshed file's count"));
+  assert.match(refreshed, Pin.phrase("a head whose Pull ended this run not counted (unless it ended on an exclusion whose premise has lifted), the implementer row's `unclaimed=` prints that same `<u>`, not the refreshed file's count"));
   const suggest = TICK_ROWS.bullet("- `SUGGEST /triage, hold idle`", "- `specs-dropped=#<N>", "tick-rows SUGGEST row").text;
   assert.match(suggest, Pin.phrase("A head whose Pull already ended in this run is not counted toward the refresh, so a shortlist of only such heads triggers the refresh before this row prints"));
+  assert.match(suggest, Pin.phrase("It is not printed while the refreshed shortlist holds a head whose Pull ended only on an exclusion whose premise has lifted and a slot is free: that head gets its `PULL` row"));
+});
+
+test("How a Pull ends: an ended head gets no row, and a Pull that ended on an exclusion is the exception once its premise has lifted", () => {
+  const s = RUN_TEAM.paragraph("A head whose Pull already ended in this run", "run-team How a Pull ends paragraph", "**A Pull never re-admits").text;
+  assert.match(s, Pin.phrase("gets no row: `next` without `--head` skips it, `next --head <N>` would start the ticket over, and the next head fills the slot"));
+  assert.match(s, Pin.phrase("A lifted exclusion's head (reason `excluded ·`) is the exception: it is counted and Pulled again"));
 });
 
 test("the UNRECORDED tick row names its remedy: record the dispatch on the ledger, or confirm it is a stranger's member", () => {
