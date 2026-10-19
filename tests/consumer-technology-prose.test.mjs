@@ -70,13 +70,18 @@ test("the claim step runs the Recipe's Install step in the worktree, read from t
 
 test("requirements 2.3 describes the Recipe derivation: any technology, what it reads, what proves it, what it caches", () => {
   const section = REQUIREMENTS.section("### 2.3 Installable and testable — HARD", "requirements.md section 2.3").text;
-  assert.match(section, Pin.phrase("Any technology. Fleet derives your repo's Recipe (Install step + Test entrypoint) by agent reasoning"));
+  assert.match(section, Pin.phrase("Any technology. Fleet derives your repo's Recipe (Install step, Check step and Test entrypoint) by agent reasoning, proves it in a throwaway worktree"));
   const reads = Pin.of(section, "section").bullet("- **What the derivation reads:**", "- **What the proof requires:**", "requirements.md 2.3 derivation bullet").text;
   assert.match(reads, Pin.phrase("nothing checks for a particular manifest or lockfile."));
   const proof = Pin.of(section, "section").bullet("- **What the proof requires:**", "- **The cache:**", "requirements.md 2.3 proof bullet").text;
+  assert.match(proof, Pin.phrase("the Check step runs green on `origin/main`, leaving the tree clean, and one deliberate mutation turns it red — `true`, when your CI has no non-test merge-gating check, needs no proof, and a non-test check red on `origin/main` is left out of the Check step and listed in `uncovered`"));
   assert.match(proof, Pin.phrase("`RECIPE NOT PROVEN` writes no cache and halts the run."));
   const cache = Pin.of(section, "section").bullet("- **The cache:**", "Hard rules for any technology:", "requirements.md 2.3 cache bullet").text;
-  assert.match(cache, Pin.phrase("Every claim reads both commands from it and every review its Test entrypoint; a missing or unproven cache is a refusal naming the derivation step, never a guess."));
+  assert.match(cache, Pin.phrase("carrying the `origin/main` commit it was derived at, the proof, the Check step and `uncovered`."));
+  assert.match(cache, Pin.phrase("Every claim reads its Install step and Test entrypoint from it and every review its Install step, Test entrypoint and `uncovered`; members run its Check step before pushing, the review does not."));
+  assert.match(cache, Pin.phrase("A missing or unproven cache, or one without a well-formed Check step, is a refusal naming the derivation step, never a guess."));
+  assert.match(section, Pin.phrase("4. All three commands run in a fresh worktree with no ambient environment"));
+  assert.doesNotMatch(section, /proves both|Both commands|both commands/, "2.3 describes a two-command Recipe again");
   // Ends at the line's end: the fence line is the whole command, so a longer ref (`origin/main-old`) or a trailing `&& …` is a different command.
   assert.match(section, new RegExp(`${Pin.phrase("~/.fleet/bin/fleet-run derive-testcmd.sh . install && ~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main").source}[ \\t]*$`, "m"));
 });

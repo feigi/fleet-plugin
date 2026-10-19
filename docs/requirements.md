@@ -58,17 +58,17 @@ Remote: `origin`. Integration branch: `main` (all rebases, cherry-picks, stalene
 Check: `git remote get-url origin && git rev-parse --verify origin/main`
 
 ### 2.3 Installable and testable — HARD
-**[ADR 0015](adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md):** Any technology. Fleet derives your repo's Recipe (Install step + Test entrypoint) by agent reasoning, proves both in a throwaway worktree, caches under `.fleet/` ([Recipe](components/recipe.md)).
+**[ADR 0015](adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md):** Any technology. Fleet derives your repo's Recipe (Install step, Check step and Test entrypoint) by agent reasoning, proves it in a throwaway worktree, caches under `.fleet/` ([Recipe](components/recipe.md)).
 
 - **What the derivation reads:** your README, build files and CI workflow. The deriving agent keeps no table of technologies; nothing checks for a particular manifest or lockfile.
-- **What the proof requires:** the Install step leaves the tree clean; the Test entrypoint is shown to run real tests — the runner's own non-zero count, or a deliberate mutation of one test turning the run red. `RECIPE NOT PROVEN` writes no cache and halts the run.
-- **The cache:** `.fleet/recipe.json` in the main checkout, carrying the `origin/main` commit it was derived at and the proof. Every claim reads both commands from it and every review its Test entrypoint; a missing or unproven cache is a refusal naming the derivation step, never a guess.
+- **What the proof requires:** the Install step leaves the tree clean; the Check step runs green on `origin/main`, leaving the tree clean, and one deliberate mutation turns it red — `true`, when your CI has no non-test merge-gating check, needs no proof, and a non-test check red on `origin/main` is left out of the Check step and listed in `uncovered`; the Test entrypoint is shown to run real tests — the runner's own non-zero count, or a deliberate mutation of one test turning the run red. `RECIPE NOT PROVEN` writes no cache and halts the run.
+- **The cache:** `.fleet/recipe.json` in the main checkout, carrying the `origin/main` commit it was derived at, the proof, the Check step and `uncovered`. Every claim reads its Install step and Test entrypoint from it and every review its Install step, Test entrypoint and `uncovered`; members run its Check step before pushing, the review does not. A missing or unproven cache, or one without a well-formed Check step, is a refusal naming the derivation step, never a guess.
 
 Hard rules for any technology:
 1. Repo is learnable (README or build file documents install + test).
 2. Test runs non-vacuously (non-zero count, or deliberate failure turns it red).
 3. Install leaves tracked files unchanged (commit a frozen lockfile).
-4. Both commands run in a fresh worktree with no ambient environment (no shared databases, compose stacks, or env vars).
+4. All three commands run in a fresh worktree with no ambient environment (no shared databases, compose stacks, or env vars).
 5. Binaries the Recipe runs must be on `PATH` on the fleet machine (§1.1 lists only fleet-plugin dependencies).
 
 Check, once a run's phase 0 has derived the Recipe:
