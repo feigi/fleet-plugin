@@ -4,7 +4,7 @@ it. Do NOT create another worktree. There is no review file: the PR's `check`
 job is red on its current head and you are here to fix it — do not review, do
 not dispatch specialists.
 
-Read the failing job's log and fix the cause. Run `CHECKCMD-7` and `TESTCMD-7`
+Read the failing job's log and fix the cause. Run `recipe-check.mjs` (below)
 from the worktree before you push, then push with `~/.fleet/bin/fleet-run push-sync.mjs --branch red-branch`.
 Report the new head and **stop**: do not watch, poll or wait for CI — the
 controller owns the next run on the pushed head. A red that is not yours to
@@ -21,6 +21,16 @@ is the same stale base. Stage every change of your own before the commit that
 runs the hook, so every change still unstaged after it is the hook's alone:
 never stage those, `git restore -- <that path>` for each such path alone, then
 rebase and re-run.
+
+**`recipe-check.mjs` is how you run `CHECKCMD-7` and `TESTCMD-7`:**
+`~/.fleet/bin/fleet-run recipe-check.mjs --member <your name> --testCmd "TESTCMD-7" --reports /abs/scratch-red/reports`,
+from the worktree, after `git add` and before the commit — `TESTCMD-7` copied
+verbatim as the one quoted argument. It runs the Recipe's Check step,
+`CHECKCMD-7`, then `TESTCMD-7`, against the staged tree and records both beside
+your report. Run it again after any content change or rebase: the controller
+refuses an `applied` report whose head's tree has no green record, and a
+message-only amend keeps the record valid. Exit 1 is red; exit 75 is no test
+result — no slot was free and nothing ran — so run it again.
 
 Your report is a file, `/abs/scratch-red/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape

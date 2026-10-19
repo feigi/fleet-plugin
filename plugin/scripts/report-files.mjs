@@ -9,6 +9,10 @@
 // SCHEMAS. The review runner and every member outside those four families
 // have no schema, so no file to look up.
 //
+// The Check-step record beside a report, `<reports>/<member>.check.json`, is
+// looked up here the same way: recipe-check.mjs writes it, and this module
+// only names where it lives and reads it back.
+//
 // This module only looks files up: it writes none, and creates no scratch
 // root.
 
@@ -31,6 +35,60 @@ export function reportFamily(member) {
 export const reportsDir = (scratch) => join(scratch, "reports");
 
 export const reportPath = (scratch, member) => join(reportsDir(scratch), `${member}.json`);
+
+/** Where `member`'s Check-step record sits in reports directory `dir`: the
+ * sibling of its report, `<dir>/<member>.check.json`. recipe-check.mjs writes
+ * it, `ledger.mjs settle --from-report` reads it. */
+export const checkRecordPathIn = (dir, member) => join(dir, `${member}.check.json`);
+
+const HEX_TREE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+// One command's half of a record: the command string, whether it ran (a Check
+// step of `true` is recorded as green without running), the exit status it
+// ended with — null when it never ran because an earlier one failed — and
+// the pass/fail counts its output printed, null where the runner printed none.
+function commandViolation(path, c) {
+  if (!isObject(c)) return `${path}: not an object`;
+  if (typeof c.command !== "string" || c.command === "") return `${path}.command: not a non-empty string`;
+  if (typeof c.ran !== "boolean") return `${path}.ran: not a boolean`;
+  if (c.exitCode !== null && !Number.isInteger(c.exitCode)) return `${path}.exitCode: not an integer or null`;
+  for (const k of ["pass", "fail"]) {
+    if (c[k] !== null && !(Number.isInteger(c[k]) && c[k] >= 0)) return `${path}.${k}: not a non-negative integer or null`;
+  }
+  return null;
+}
+
+/** The Check-step record of `member` in reports directory `dir`, the way
+ * readReportIn() answers for a report: `{state: "ok", path, record}`,
+ * `{state: "invalid", path, violation}` for a file that exists and is
+ * unreadable, not JSON, or the wrong shape, or `{state: "absent", path}`.
+ * The record is `{member, tree, check, test}`, `tree` the `git write-tree`
+ * of the index the two commands ran against and `check`/`test` each
+ * `{command, ran, exitCode, pass, fail}`. */
+export function readCheckRecordIn(dir, member) {
+  const path = checkRecordPathIn(dir, member);
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT" || e.code === "ENOTDIR") return { state: "absent", path };
+    return { state: "invalid", path, violation: `$: unreadable (${e.code ?? e.message})` };
+  }
+  let record;
+  try {
+    record = JSON.parse(text);
+  } catch (e) {
+    return { state: "invalid", path, violation: `$: not JSON (${e.message})` };
+  }
+  if (!isObject(record)) return { state: "invalid", path, violation: "$: not an object" };
+  if (record.member !== member) return { state: "invalid", path, violation: `$.member: ${JSON.stringify(record.member)} is not ${member}` };
+  if (typeof record.tree !== "string" || !HEX_TREE.test(record.tree)) {
+    return { state: "invalid", path, violation: "$.tree: not a full lowercase hex tree id" };
+  }
+  const violation = commandViolation("$.check", record.check) ?? commandViolation("$.test", record.test);
+  return violation === null ? { state: "ok", path, record } : { state: "invalid", path, violation };
+}
 
 /** The report file of `member` under `scratch`, read and checked against its
  * family's schema: `{state: "ok", path, report}`, `{state: "invalid", path,

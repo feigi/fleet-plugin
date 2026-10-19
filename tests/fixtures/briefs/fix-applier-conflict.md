@@ -6,7 +6,7 @@ specialists.
 
 Bring `conflict-branch` current with `origin/main`, resolving every conflict by the
 **No-undo audit** in `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md`.
-Run `CHECKCMD-2` and `TESTCMD-2` from the worktree before you push, then push with
+Run `recipe-check.mjs` (below) from the worktree before you push, then push with
 `~/.fleet/bin/fleet-run push-sync.mjs --branch conflict-branch`. Report the new head, or that no conflict was
 left.
 
@@ -20,6 +20,16 @@ is the same stale base. Stage every change of your own before the commit that
 runs the hook, so every change still unstaged after it is the hook's alone:
 never stage those, `git restore -- <that path>` for each such path alone, then
 rebase and re-run.
+
+**`recipe-check.mjs` is how you run `CHECKCMD-2` and `TESTCMD-2`:**
+`~/.fleet/bin/fleet-run recipe-check.mjs --member <your name> --testCmd "TESTCMD-2" --reports /abs/scratch-conflict/reports`,
+from the worktree, after `git add` and before the commit — `TESTCMD-2` copied
+verbatim as the one quoted argument. It runs the Recipe's Check step,
+`CHECKCMD-2`, then `TESTCMD-2`, against the staged tree and records both beside
+your report. Run it again after any content change or rebase: the controller
+refuses an `applied` report whose head's tree has no green record, and a
+message-only amend keeps the record valid. Exit 1 is red; exit 75 is no test
+result — no slot was free and nothing ran — so run it again.
 
 Your report is a file, `/abs/scratch-conflict/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape

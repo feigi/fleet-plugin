@@ -321,6 +321,14 @@ const COVERED_MJS = {
   // fleet-event.test.mjs, "gh runs with GIT_DIR scrubbed…" and "impl-report's
   // git and tick children run with GIT_DIR scrubbed…".
   "fleet-event.mjs": 2,
+  // ONE scrubbed env, built once and handed to every child — `git rev-parse
+  // --show-toplevel` and `git write-tree`, the `derive-testcmd.sh` reads, and
+  // the Check step and Test entrypoint the member's own shell runs. An ambient
+  // GIT_DIR would answer `write-tree` for another repository's index, so the
+  // record would name that repository's tree at exit 0. Measured in
+  // recipe-check.test.mjs, "an ambient GIT_DIR naming another repository does
+  // not change the tree the record names".
+  "recipe-check.mjs": 1,
 };
 
 // The exemption list #1599's second design question answers with — two names

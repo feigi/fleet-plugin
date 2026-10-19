@@ -135,6 +135,14 @@ the proof. Read by scripts, written only by the agent that proved it; absent mea
 "derive", never "infer". Invalid when a command fails to run, not when tests fail.
 _Avoid_: declaration file, fleet.json, lockfile
 
+**Check-step record**:
+A member's own record, written by `recipe-check.mjs` beside its report, that the Check
+step and the Test entrypoint both exited 0 on the tree it staged. Keyed to the tree,
+not the commit, so a message-only amend keeps it and a content change or rebase does
+not. Settle requires it of an implementer's and a fix-applier's report. The member
+produced it, so it is a claim, not an attestation.
+_Avoid_: test receipt, green stamp, CI record
+
 **Valid green**:
 A test run that completed — the command returned on its own, with no signal and no
 timeout, deadline or kill having fired — with exit 0, `tests` above 0 and `cancelled` 0.

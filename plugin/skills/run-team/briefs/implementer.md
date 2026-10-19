@@ -22,6 +22,14 @@ The ticket, pasted verbatim from the controller's own read — its title, the
 
 The controller's staleness probe: <staleness>
 
+Before you commit and push, run
+`~/.fleet/bin/fleet-run recipe-check.mjs --member <your name> --testCmd ./agent-test --reports <scratch>/reports`
+from the worktree, after `git add`: it runs the Recipe's Check step, then
+`./agent-test`, against the staged tree and records both beside your report.
+Run it again after any content change or rebase. The controller refuses a
+report whose head's tree has no green record, and exit 75 from it is no test
+result — run it again.
+
 Your report is a file, `<scratch>/reports/<your name>.json`, `<your name>` the
 `impl-<N>[-x]` you were dispatched as, in the shape
 `~/.fleet/bin/fleet-run report-schema.mjs print impl` prints. Write it before

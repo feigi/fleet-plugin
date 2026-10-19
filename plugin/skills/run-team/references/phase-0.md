@@ -334,7 +334,7 @@ PROVEN`** → re-run both reads above (`derive-testcmd.sh . install` and
 below; their output is the Recipe this run uses. **`RECIPE NOT PROVEN`** →
 stall, below.
 
-**Where `checkCmd` comes from:** the repository's Check step, out of the same Recipe cache — `~/.fleet/bin/fleet-run derive-testcmd.sh . check` prints it. Pass it to the fix-applier beside `testCmd`; the review does not run it.
+**Where `checkCmd` comes from:** the repository's Check step, out of the same Recipe cache — `~/.fleet/bin/fleet-run derive-testcmd.sh . check` prints it. Pass it to the fix-applier beside `testCmd`; the review does not run it. Neither member runs the two by hand: `recipe-check.mjs` runs the Check step it reads off that cache, then the `testCmd` it is handed, on the member's staged tree, and writes the record `ledger.mjs settle --from-report` requires of an implementer's and a fix-applier's report.
 
 **Mid-run, a cache that stops running is re-derived once, then the run
 stalls.** A claim or a review that refuses because the Recipe cache is

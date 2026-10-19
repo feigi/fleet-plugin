@@ -216,3 +216,14 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   one that names its own member and fails its family's schema, with the first
   violation. A review runner has no report schema and files none, so none of
   these lines names one.
+  **The settle of an implementer's `PR#M` and of a fix-applier's
+  `applied:<head>` also checks the Check-step record** beside the report,
+  `<scratch>/reports/<member>.check.json`, which the member writes with
+  `recipe-check.mjs`: the Recipe's Check step, then the Test entrypoint it was
+  handed, run against its staged tree. The settle requires that the record
+  exists and parses, that both commands exited 0 in it, and that its tree is
+  the reported head's tree — so a message-only amend keeps it valid, and a
+  content change or a rebase does not. A head whose tree git cannot read is
+  could-not-look (exit 2), never a mismatch. The settle runs neither command,
+  and a repository whose Recipe cache is absent or refused has no gate; the
+  record is the member's own word, at the trust level of its report.

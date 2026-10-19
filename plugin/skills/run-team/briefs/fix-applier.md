@@ -53,7 +53,7 @@ and `cwdAudit` before any result of the shared test run. Every one of those
 rulings is yours — nobody upstream has made one, and the controller never
 reads the findings.
 
-**Run `<checkCmd>` from the worktree before committing**, copied verbatim. **Run `<testCmd>` from the worktree before committing**, copied verbatim.
+**Run `recipe-check.mjs` (below) from the worktree before committing.**
 `tests 0` is a FAILED run, not a pass. Red or zero-test → fix it, or move that
 finding to defer; never commit over it. **Never `--no-verify`** on a commit you push, or on the push — a failing
 hook is a finding you report, not an obstacle you route around. Report the test
@@ -67,11 +67,11 @@ claim, never your patch.
 ## kind: conflict
 Bring `<branch>` current with `origin/main`, resolving every conflict by the
 **No-undo audit** in `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md`.
-Run `<checkCmd>` and `<testCmd>` from the worktree before you push, then push with
+Run `recipe-check.mjs` (below) from the worktree before you push, then push with
 `~/.fleet/bin/fleet-run push-sync.mjs --branch <branch>`. Report the new head, or that no conflict was
 left.
 ## kind: red-check
-Read the failing job's log and fix the cause. Run `<checkCmd>` and `<testCmd>`
+Read the failing job's log and fix the cause. Run `recipe-check.mjs` (below)
 from the worktree before you push, then push with `~/.fleet/bin/fleet-run push-sync.mjs --branch <branch>`.
 Report the new head and **stop**: do not watch, poll or wait for CI — the
 controller owns the next run on the pushed head. A red that is not yours to
@@ -89,6 +89,16 @@ is the same stale base. Stage every change of your own before the commit that
 runs the hook, so every change still unstaged after it is the hook's alone:
 never stage those, `git restore -- <that path>` for each such path alone, then
 rebase and re-run.
+
+**`recipe-check.mjs` is how you run `<checkCmd>` and `<testCmd>`:**
+`~/.fleet/bin/fleet-run recipe-check.mjs --member <your name> --testCmd "<testCmd>" --reports <scratch>/reports`,
+from the worktree, after `git add` and before the commit — `<testCmd>` copied
+verbatim as the one quoted argument. It runs the Recipe's Check step,
+`<checkCmd>`, then `<testCmd>`, against the staged tree and records both beside
+your report. Run it again after any content change or rebase: the controller
+refuses an `applied` report whose head's tree has no green record, and a
+message-only amend keeps the record valid. Exit 1 is red; exit 75 is no test
+result — no slot was free and nothing ran — so run it again.
 
 Your report is a file, `<scratch>/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape

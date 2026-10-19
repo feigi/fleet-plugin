@@ -153,6 +153,10 @@ const DUTY3_POINTER_RETIRED = ["Duty 3's script decides whether the label is on,
 // worktree holding the branch, so the conflict kind's bare refspec push is
 // replaced, not lost.
 const PUSH_HELPER_RETIRED = ["Run `<testCmd>` from the worktree before you push, then push with `git push origin HEAD:<branch>`."];
+// The fix commit's test run goes through recipe-check.mjs, which records the
+// run the controller's settle requires, so the sentence that had the
+// fix-applier run `<testCmd>` by hand is replaced, not lost.
+const RECIPE_CHECK_RETIRED = ["**Run `<testCmd>` from the worktree before committing**, copied verbatim."];
 // `## Phase 3 — event loop` left run-team's SKILL.md (#3540), so the merge
 // bot's copy of the shell traps names **Own the CI waits**, the section that
 // now holds the watcher block and the probe rule, instead of Phase 3.
@@ -163,13 +167,13 @@ const PHASE_3_POINTERS_RETIRED = [
 // The placeholder each argument fills, per role — the arguments are values no
 // other argument shares, so a swapped substitution cannot pass.
 const PAIRS = [
-  { role: "fix-applier", kind: "review", fixture: "fix-applier-review.md", retired: [...REPORT_FILE_RETIRED, ...DIGEST_PROJECTION_RETIRED],
+  { role: "fix-applier", kind: "review", fixture: "fix-applier-review.md", retired: [...REPORT_FILE_RETIRED, ...DIGEST_PROJECTION_RETIRED, ...RECIPE_CHECK_RETIRED],
     args: { worktree: "/abs/wt-fix", branch: "fix-branch", testCmd: "TESTCMD-1", scratch: "/abs/scratch-fix", pr: "3293", run: "run-AbCd1234" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch", pr: "pr", run: "run" } },
   { role: "fix-applier", kind: "conflict", fixture: "fix-applier-conflict.md", retired: PUSH_HELPER_RETIRED,
     args: { worktree: "/abs/wt-conflict", branch: "conflict-branch", testCmd: "TESTCMD-2", scratch: "/abs/scratch-conflict" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch" } },
-  { role: "fix-applier", kind: "dispositions-retry", fixture: "fix-applier-dispositions-retry.md", retired: [...REPORT_FILE_RETIRED, ...DIGEST_PROJECTION_RETIRED],
+  { role: "fix-applier", kind: "dispositions-retry", fixture: "fix-applier-dispositions-retry.md", retired: [...REPORT_FILE_RETIRED, ...DIGEST_PROJECTION_RETIRED, ...RECIPE_CHECK_RETIRED],
     args: { worktree: "/abs/wt-retry", branch: "retry-branch", testCmd: "TESTCMD-3", scratch: "/abs/scratch-retry", pr: "3294", run: "run-ZyXw9876", "mismatched-record": "/abs/scratch-retry/dispositions-fix-pr-3294.json", violations: "VIOLATION-LIST-1" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch", pr: "pr", run: "run", "mismatched record": "mismatched-record", violations: "violations" } },
   { role: "finisher", kind: "fresh", fixture: "finisher-fresh.md",
