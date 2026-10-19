@@ -120,6 +120,20 @@ test("the Recipe cache sits where the workspace rule names: a bare repository, a
   assert.match(rs.err, /no Recipe cache at .*\/a\.git\/\.fleet\/recipe\.json/);
 });
 
+// git answers `--resolve-git-dir p/.git` as spelled, `p/.git`, when `.git` is
+// a symlink to `.bare`: only step 2's `cd -P` of that answer matches it to the
+// git dir, so without it the cache would re-key to `p/.bare/.fleet`.
+test("a .git symlinked to a sibling .bare names the project's cache, never .bare's", () => {
+  const proj = join(realpathSync(tempDir("derive-bare-symlink-")), "p");
+  mkdirSync(proj);
+  execFileSync("git", ["init", "-q", "--bare", join(proj, ".bare")], { stdio: "pipe", env: FIXTURE_ENV });
+  symlinkSync(".bare", join(proj, ".git"));
+  const r = derive(proj);
+  assert.equal(r.status, 1, r.err);
+  assert.ok(r.err.includes(`no Recipe cache at ${proj}/.fleet/recipe.json`), r.err);
+  assert.doesNotMatch(r.err, /\.bare\/\.fleet/);
+});
+
 // A `.bare` project with one linked worktree, `p/w` (support/bare-project.mjs).
 // Realpath'd: the script names the paths it resolves, and tmpdir() sits under
 // a symlink on macOS.
