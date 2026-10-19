@@ -14,7 +14,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { SCHEMAS, validate } from "./report-schema.mjs";
+import { SCHEMAS, parseReport, validate } from "./report-schema.mjs";
 import { parseMember } from "./ledger-grammar.mjs";
 import { scratchRoot } from "./fleet-dir.mjs";
 
@@ -53,14 +53,9 @@ export function readReportIn(dir, member) {
     if (e.code === "ENOENT" || e.code === "ENOTDIR") return { state: "absent", path };
     return { state: "invalid", path, violation: `$: unreadable (${e.code ?? e.message})` };
   }
-  let report;
-  try {
-    report = JSON.parse(text);
-  } catch (e) {
-    return { state: "invalid", path, violation: `$: not JSON (${e.message})` };
-  }
-  const violation = validate(SCHEMAS[family], report);
-  return violation === null ? { state: "ok", path, report } : { state: "invalid", path, violation };
+  const parsed = parseReport(text);
+  const violation = parsed.violation ?? validate(SCHEMAS[family], parsed.value);
+  return violation === null ? { state: "ok", path, report: parsed.value } : { state: "invalid", path, violation };
 }
 
 /** `ok`, `invalid`, `absent`, or `-` when no schema covers the member. */

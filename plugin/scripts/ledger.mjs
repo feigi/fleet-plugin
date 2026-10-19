@@ -2337,11 +2337,6 @@ async function runSettleFromReport() {
   const report = read.report;
   const invalid = (violation) => die(`${where}: ${read.path} is not a ${reportFamily(member)} report — ${violation}; nothing written`);
   if (report.member !== member) invalid(`$.member: ${JSON.stringify(report.member)} is not ${member}`);
-  // An issue number is a positive integer. A negative id writes a row `#-3 …`
-  // that `filed` refuses and `check`'s subjectOf() cannot strip.
-  for (const [k, { issue }] of (report.unrecorded ?? []).entries()) {
-    if (!Number.isInteger(issue) || issue < 1) invalid(`$.unrecorded[${k}].issue: ${JSON.stringify(issue)} is not an issue number`);
-  }
 
   // Every child runs from the ledger's repository with runCheck()'s
   // environment, for runCheck()'s reasons: GH_REPO would point gh at another
@@ -2411,7 +2406,7 @@ async function runSettleFromReport() {
   let outcome;
   if (live.family === "impl") {
     if (report.outcome === "pr") {
-      if (report.pr === null || report.pr < 1) invalid(`$.pr: ${JSON.stringify(report.pr)} is not a PR number, with outcome "pr"`);
+      if (report.pr === null) invalid('$.pr: null is not a PR number, with outcome "pr"');
       if (report.head === null) invalid('$.head: null, with outcome "pr"');
       outcome = `PR#${report.pr}`;
       const sha = look(`verify-sha.sh ${report.branch} ${report.head}`, "sh", [verifySha, report.branch, report.head], [0, 1]);

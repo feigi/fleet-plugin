@@ -17,7 +17,8 @@
 //
 //   0  print: the schema is on stdout. validate: `valid` on stdout
 //   1  validate: `invalid: <violation>` on stdout, naming the FIRST violation;
-//      a file that is not JSON is invalid too, as `$: not JSON (...)`
+//      a file that is not JSON is invalid too, as `$: not JSON (...)`, and so
+//      is one that repeats a key, as `$.merged: duplicate key "merged"`
 //   2  usage: no or unknown subcommand, a wrong argument count, an unknown
 //      family, any flag; or <file> could not be read; or print could not
 //      write the schema to stdout. Refused on stderr, nothing on stdout
@@ -31,16 +32,21 @@
 // their schema names.
 //
 // The validator below is hand-written and covers exactly the keywords these
-// schemas use: `type` (one or a list; `integer` is a whole number), `enum`,
-// `required`, `properties`, `additionalProperties: false`, `items` and
-// `pattern`. A keyword it does not know is not checked, so a schema here
-// that starts using one needs the validator to learn it first. It walks in a
-// fixed order, which is what makes "the first violation" one answer: at
-// each value `type`, then `enum`, then `pattern`; in an object every
-// `required` field in the schema's order, then any unexpected field in the
-// report's order, then each property in the schema's order; in an array each
-// item in turn. A violation is named by its path from the report's root, `$`,
-// as `$.merged[1].sha`.
+// schemas use: `type` (one or a list), `enum`, `pattern`, `minimum` and
+// `maximum` (numbers only: a value that is not a number, `null` included,
+// passes them), `required`, `properties`, `additionalProperties: false` and
+// `items`. A keyword it does not know is not checked, so a schema here that
+// starts using one needs the validator to learn it first. An integer is
+// bounded by the schema, not by `type`: ids by 1 and the largest safe
+// integer, the other integers by the safe range, beyond which JSON.parse has
+// already rounded the number. A duplicate key, compared decoded and at any
+// depth, is a violation named before any schema check. The walk is in a
+// fixed order, which is what makes "the first violation" one answer: at each
+// value `type`, then `enum`, then `pattern`, then `minimum`, then `maximum`;
+// in an object every `required` field in the schema's order, then any
+// unexpected field in the report's order, then each property in the schema's
+// order; in an array each item in turn. A violation is named by its path
+// from the report's root, `$`, as `$.merged[1].sha`.
 //
 // Strict mode. A `task` call can carry this schema as `outputSchema` with
 // `schemaMode: "strict"`. Measured 2026-10-14 under omp/18.10.3, and only on
@@ -85,7 +91,10 @@ const USAGE = "usage: report-schema.mjs print <family> | validate <family> <file
 
 const HEX = "^[0-9a-f]{40}$";
 const str = { type: "string" };
-const int = { type: "integer" };
+// An id is a positive safe integer; a negative one writes a ledger row `#-3 …` that `filed` refuses and `check`'s subjectOf() cannot strip.
+const id = { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER };
+// A position or a count: the safe range only, so a truthful negative `exit` stays valid.
+const int = { type: "integer", minimum: -Number.MAX_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER };
 const sha = { type: "string", pattern: HEX };
 const strings = { type: "array", items: str };
 
@@ -96,13 +105,13 @@ const listOf = (properties) => ({ type: "array", items: obj(properties) });
 // A family's top level: every field required, nothing else allowed.
 const report = (properties) => ({ ...obj(properties), additionalProperties: false });
 
-const issues = listOf({ issue: int, subject: str });
+const issues = listOf({ issue: id, subject: str });
 
 export const SCHEMAS = {
   impl: report({
     member: str,
     outcome: { type: "string", enum: ["pr", "bailed"] },
-    pr: { type: ["integer", "null"] },
+    pr: { ...id, type: ["integer", "null"] },
     head: { type: ["string", "null"], pattern: HEX },
     branch: str,
     sizing: obj(
@@ -119,7 +128,7 @@ export const SCHEMAS = {
     head: sha,
     branch: str,
     applied: listOf({ bucket: str, index: int }),
-    deferred: listOf({ bucket: str, index: int, issue: int }),
+    deferred: listOf({ bucket: str, index: int, issue: id }),
     filed: issues,
     unrecorded: issues,
     dispositionsRecord: { type: "string", pattern: "^/" },
@@ -141,11 +150,11 @@ export const SCHEMAS = {
   }),
   "merge-bot": report({
     member: str,
-    merged: listOf({ pr: int, sha }),
-    held: listOf({ pr: int, behind: int }),
-    conflictHold: { type: "array", items: int },
-    refused: listOf({ pr: int, reason: str }),
-    branchKept: listOf({ pr: int, by: int }),
+    merged: listOf({ pr: id, sha }),
+    held: listOf({ pr: id, behind: id }),
+    conflictHold: { type: "array", items: id },
+    refused: listOf({ pr: id, reason: str }),
+    branchKept: listOf({ pr: id, by: id }),
   }),
 };
 
@@ -172,6 +181,10 @@ export function validate(schema, value, path = "$") {
   if (typeof value === "string" && schema.pattern !== undefined && !new RegExp(schema.pattern).test(value)) {
     return `${path}: ${show(value)} does not match ${schema.pattern}`;
   }
+  if (typeof value === "number") {
+    if (schema.minimum !== undefined && value < schema.minimum) return `${path}: ${show(value)} is below minimum ${schema.minimum}`;
+    if (schema.maximum !== undefined && value > schema.maximum) return `${path}: ${show(value)} is above maximum ${schema.maximum}`;
+  }
   if (isObject(value)) {
     for (const key of schema.required ?? []) {
       if (!Object.hasOwn(value, key)) return `${path}: missing required field ${show(key)}`;
@@ -194,6 +207,57 @@ export function validate(schema, value, path = "$") {
     }
   }
   return null;
+}
+
+// The first duplicate key of `text` in text order, as `<path>: duplicate key
+// "<key>"`, or null. `text` is well-formed JSON, so nothing here can meet a
+// malformed token. Keys are compared decoded, as JSON.parse collides them.
+function firstDuplicateKey(text) {
+  // One frame per open container: an object's keys so far, an array's index.
+  const open = [];
+  let next = "$"; // the path of the value that starts next
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    const top = open[open.length - 1];
+    if (c === "{") {
+      open.push({ path: next, keys: new Set(), wantKey: true });
+    } else if (c === "[") {
+      open.push({ path: next, index: 0 });
+      next = `${next}[0]`;
+    } else if (c === "}" || c === "]") {
+      open.pop();
+    } else if (c === ",") {
+      if (top.keys === undefined) next = `${top.path}[${++top.index}]`;
+      else top.wantKey = true;
+    } else if (c === '"') {
+      let end = i + 1;
+      while (text[end] !== '"') end += text[end] === "\\" ? 2 : 1;
+      if (top?.wantKey) {
+        const key = JSON.parse(text.slice(i, end + 1));
+        next = `${top.path}.${key}`;
+        if (top.keys.has(key)) return `${next}: duplicate key ${show(key)}`;
+        top.keys.add(key);
+        top.wantKey = false;
+      }
+      i = end;
+    }
+    i++;
+  }
+  return null;
+}
+
+/** `text` read as a report: `{ value }`, or `{ violation }` for text that is
+ * not JSON or that repeats a key in any object at any depth. */
+export function parseReport(text) {
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch (e) {
+    return { violation: `$: not JSON (${e.message})` };
+  }
+  const violation = firstDuplicateKey(text);
+  return violation === null ? { value } : { violation };
 }
 
 function familyOf(name) {
@@ -222,14 +286,8 @@ function main() {
   } catch (e) {
     die(`cannot read ${path}: ${e.code ?? e.message}`);
   }
-  let value;
-  try {
-    value = JSON.parse(text);
-  } catch (e) {
-    writeAll(1, `invalid: $: not JSON (${e.message})\n`);
-    process.exit(1);
-  }
-  const violation = validate(schema, value);
+  const parsed = parseReport(text);
+  const violation = parsed.violation ?? validate(schema, parsed.value);
   if (violation !== null) {
     writeAll(1, `invalid: ${violation}\n`);
     process.exit(1);
