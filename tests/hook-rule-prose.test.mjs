@@ -13,7 +13,9 @@
 //     base, and the member stages every change of its own BEFORE the commit
 //     that runs the hook, so what is still unstaged after it is the hook's
 //     alone and the restore touches nothing of the member's;
-//   - the Recipe deriver is told the Install step runs with `CI` unset.
+//   - the Recipe deriver is told the Install step runs with `CI` unset;
+//   - the next-ticket claim step runs the Install step as `env -u CI sh -c`,
+//     and never as a bare or subshell `unset CI`.
 //
 // THE CEILING: these are presence-and-order pins. A sentence appended after a
 // pinned span that carves an exception into it stays green here;
@@ -116,7 +118,32 @@ test("the Recipe deriver is told the Install step runs with CI unset, so it spel
   const bullet = Pin.of(body, "the deriver body").between("- Install step —", "- Test entrypoint —", "the Install step bullet").text;
   assert.match(
     bullet,
-    Pin.phrase("The fleet runs the Install step with `CI` unset, so spell the frozen or locked mode in the command; never rely on the environment to imply it."),
+    Pin.phrase("The fleet and a standalone next-ticket session run the Install step with `CI` unset, so spell the frozen or locked mode in the command; never rely on the environment to imply it."),
     "the deriver's Install step bullet lost the CI-unset clause",
   );
+});
+
+// The standalone claim runs the Install step by hand in the agent's own shell,
+// where the harness's `CI` is set and a bare `unset CI` does not reach the
+// command, so the step names `env -u CI` and nothing else as the way.
+const claimStep = () => Pin.of(NEXT_TICKET, "the next-ticket skill").between("## 5. Claim it", "## 6. Size the ticket", "step 5").text;
+
+test("the next-ticket claim step runs the Install step as env -u CI sh -c, and only the Install step loses CI", () => {
+  assert.match(
+    claimStep(),
+    Pin.phrase('Run the Install step with `CI` removed, from the new worktree\'s root: `env -u CI sh -c "<install>"`'),
+    "step 5 lost the env -u CI form of the Install step",
+  );
+  assert.match(
+    claimStep(),
+    Pin.phrase("Only the Install step loses `CI`; the Check step and the Test entrypoint baseline run in your shell's own environment."),
+    "step 5 lost the clause scoping the CI removal to the Install step",
+  );
+});
+
+// Reject side: neither a bare `unset CI` nor the subshell form may come back,
+// since both are no-ops in the agent shell.
+test("the next-ticket claim step never tells the agent to unset CI in its shell", () => {
+  assert.doesNotMatch(claimStep(), /unset\s+(?:-v\s+)?CI\b/, "step 5 tells the agent to unset CI in its own shell");
+  assert.doesNotMatch(claimStep(), /\(\s*unset\b/, "step 5 carries the subshell unset form");
 });
