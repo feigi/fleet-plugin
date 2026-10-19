@@ -1039,9 +1039,10 @@ test("an Install step that writes an ignored dependency directory other than nod
 // clear `CI` in the child, so the marker is written for either form and a
 // revert to `unset CI` leaves it green. The hazard is in the agent's bash
 // tool, where one `unset CI` exposes an inherited `CI=true` and `env -u CI`
-// does not. The regex pin on the emitted Install line is therefore the only
-// guard against that revert, and it must stay exact. The tool's shell is not
-// modelled here, and no `bash` is spawned.
+// does not. The text pins on the emitted Install line, this regex and the
+// ones in review-core-testcmd.test.mjs and review-core-snapshot-path.test.mjs,
+// are therefore the only guard against that revert, and they must stay exact.
+// The tool's shell is not modelled here, and no `bash` is spawned.
 test("the Install step runs with CI unset: an install that skips under CI still writes its marker when the block is cut under CI=true", (t) => {
   const install = `${DEPS_INSTALL} && { test -z "$CI" && echo hooks > .deps/hook-marker || true; }`;
   const worktree = installedRepo(t, { install });
