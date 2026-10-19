@@ -59,6 +59,17 @@ function commandViolation(path, c) {
   return null;
 }
 
+// A file's text as `{text}`, or the answer both readers below give for a file
+// that is not there (`absent`) or cannot be read (`invalid`).
+function readAt(path) {
+  try {
+    return { text: readFileSync(path, "utf8") };
+  } catch (e) {
+    if (e.code === "ENOENT" || e.code === "ENOTDIR") return { state: "absent", path };
+    return { state: "invalid", path, violation: `$: unreadable (${e.code ?? e.message})` };
+  }
+}
+
 /** The Check-step record of `member` in reports directory `dir`, the way
  * readReportIn() answers for a report: `{state: "ok", path, record}`,
  * `{state: "invalid", path, violation}` for a file that exists and is
@@ -68,16 +79,11 @@ function commandViolation(path, c) {
  * `{command, ran, exitCode, pass, fail}`. */
 export function readCheckRecordIn(dir, member) {
   const path = checkRecordPathIn(dir, member);
-  let text;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch (e) {
-    if (e.code === "ENOENT" || e.code === "ENOTDIR") return { state: "absent", path };
-    return { state: "invalid", path, violation: `$: unreadable (${e.code ?? e.message})` };
-  }
+  const read = readAt(path);
+  if (read.text === undefined) return read;
   let record;
   try {
-    record = JSON.parse(text);
+    record = JSON.parse(read.text);
   } catch (e) {
     return { state: "invalid", path, violation: `$: not JSON (${e.message})` };
   }
@@ -104,14 +110,9 @@ export function readReportIn(dir, member) {
   const family = reportFamily(member);
   if (family === null) throw new Error(`no report schema for '${member}'`);
   const path = join(dir, `${member}.json`);
-  let text;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch (e) {
-    if (e.code === "ENOENT" || e.code === "ENOTDIR") return { state: "absent", path };
-    return { state: "invalid", path, violation: `$: unreadable (${e.code ?? e.message})` };
-  }
-  const parsed = parseReport(text);
+  const read = readAt(path);
+  if (read.text === undefined) return read;
+  const parsed = parseReport(read.text);
   const violation = parsed.violation ?? validate(SCHEMAS[family], parsed.value);
   return violation === null ? { state: "ok", path, report: parsed.value } : { state: "invalid", path, violation };
 }

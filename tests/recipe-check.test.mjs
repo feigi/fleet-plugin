@@ -1,12 +1,13 @@
 // `recipe-check.mjs` records that the Recipe's Check step and the Test
 // entrypoint passed on the staged tree, and `ledger.mjs settle --from-report`
 // refuses an implementer's or a fix-applier's report whose head has no such
-// record. Every case runs the real scripts against a throwaway origin + clone
-// holding a Recipe cache, with a `gh` stub on PATH for the PR reads.
+// record. Every record and settle case runs the real scripts against a
+// throwaway origin + clone holding a Recipe cache, with a `gh` stub on PATH for
+// the PR reads.
 //
 // The Check step and the Test entrypoint are two tracked scripts that append
-// to an untracked `ran.log`, so a case can tell which command ran and how often:
-// `check.fail` / `test.fail` files make the matching one exit 1.
+// to an ignored `ran.log`, so a case can tell which command ran and how often:
+// ignored `check.fail` / `test.fail` files make the matching one exit 1.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -33,13 +34,6 @@ const GIT_ENV = {
 
 const TEST_CMD = "sh ./t.sh";
 
-function cloneOf(root, env, origin, name) {
-  const git = (cwd, ...args) => execFileSync("git", args, { cwd, env, encoding: "utf8" }).trim();
-  const dir = join(root, name);
-  git(root, "clone", "-q", origin, dir);
-  return dir;
-}
-
 function fixture({ check = "sh ./check.sh" } = {}) {
   const root = tempDir("recipe-check-");
   const env = { ...process.env, ...GIT_ENV };
@@ -52,6 +46,9 @@ function fixture({ check = "sh ./check.sh" } = {}) {
   git(work, "symbolic-ref", "HEAD", "refs/heads/main");
   writeFileSync(join(work, "check.sh"), "[ -f check.fail ] && { echo 'check red'; exit 1; }\necho check >> ran.log\n");
   writeFileSync(join(work, "t.sh"), "[ -f test.fail ] && { printf '# tests 3\\n# pass 2\\n# fail 1\\n'; exit 1; }\necho test >> ran.log\nprintf '# tests 3\\n# pass 3\\n# fail 0\\n'\n");
+  // What a case leaves untracked in the worktree — the Recipe cache, the run
+  // log, the failure markers — is ignored, as a real checkout ignores `.fleet/`.
+  writeFileSync(join(work, ".gitignore"), ".fleet/\nran.log\n*.fail\n");
   git(work, "add", "-A");
   git(work, "commit", "-q", "-m", "root");
   git(work, "push", "-q", "-u", "origin", "main");
@@ -143,7 +140,11 @@ exec '${realGit}' "$@"
   return {
     root, env, work, origin, main, reports, git, writeRecipe, cli, ledger, settle, settled, refused, record, recordFile,
     readRecord, ran, implReport, fixReport, stage, commitAndPush, bin, file,
-    clone: (name) => cloneOf(root, env, origin, name),
+    clone: (name) => {
+      const dir = join(root, name);
+      git(root, "clone", "-q", origin, dir);
+      return dir;
+    },
     dispatch: (n, member) => {
       const r = cli("dispatch", n, member);
       assert.equal(r.status, 0, `dispatch ${member}: ${r.stderr}`);
@@ -183,16 +184,35 @@ test("a green run records the staged tree, both commands and the counts, and exi
   assert.deepEqual(f.ran(), ["check", "test"]);
 });
 
-test("the tree is the staged index's: an unstaged edit and an untracked file are no part of it", () => {
+test("an unstaged edit or an untracked file is a refusal that runs nothing and writes nothing", () => {
   const f = fixture();
   f.stage();
-  const staged = f.git(f.work, "write-tree");
-  writeFileSync(join(f.work, "check.sh"), `${readFileSync(join(f.work, "check.sh"), "utf8")}# edited, never staged\n`);
+  const checkSh = join(f.work, "check.sh");
+  const original = readFileSync(checkSh, "utf8");
+  writeFileSync(checkSh, `${original}# edited, never staged\n`);
+  const unstaged = f.record("impl-5");
+  assert.equal(unstaged.status, 2, unstaged.stderr);
+  assert.match(unstaged.stderr, /the working tree is not the staged tree — unstaged or untracked: check\.sh\. /);
+  writeFileSync(checkSh, original);
   writeFileSync(join(f.work, "untracked.txt"), "x\n");
-  assert.equal(f.record("impl-5").status, 0);
-  assert.equal(f.readRecord("impl-5").tree, staged);
-  f.git(f.work, "commit", "-q", "-m", "w");
-  assert.equal(f.git(f.work, "rev-parse", "HEAD^{tree}"), staged);
+  const untracked = f.record("impl-5");
+  assert.equal(untracked.status, 2, untracked.stderr);
+  assert.match(untracked.stderr, /the working tree is not the staged tree — unstaged or untracked: untracked\.txt\. /);
+  assert.equal(existsSync(f.recordFile("impl-5")), false);
+  assert.deepEqual(f.ran(), []);
+  rmSync(join(f.work, "untracked.txt"));
+  assert.equal(f.record("impl-5").status, 0, "an ignored file is no stray");
+});
+
+test("a reports directory that cannot be created is a refusal before anything runs", () => {
+  const f = fixture();
+  f.stage();
+  const blocker = join(f.root, "afile");
+  writeFileSync(blocker, "");
+  const r = spawnSync(process.execPath, [RECIPE_CHECK, "--member", "impl-5", "--testCmd", TEST_CMD, "--reports", join(blocker, "sub")], { cwd: f.work, env: f.env, encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /recipe-check: could not create .*afile\/sub: ENOTDIR; nothing run, nothing written/);
+  assert.deepEqual(f.ran(), []);
 });
 
 test("an ambient GIT_DIR naming another repository does not change the tree the record names", () => {
@@ -253,6 +273,24 @@ test("a failing Test entrypoint exits 1 and records it red with its counts", () 
   assert.deepEqual(f.readRecord("impl-5").test, { command: TEST_CMD, ran: true, exitCode: 1, pass: 2, fail: 1 });
 });
 
+test("a Test entrypoint killed by a signal records 128 plus the signal number", () => {
+  const f = fixture();
+  f.stage();
+  const r = f.record("impl-5", { testCmd: "kill -TERM $$" });
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(f.readRecord("impl-5").test.exitCode, 143);
+});
+
+test("a reader that closes the output early stops only the passthrough: the record is still written", () => {
+  const f = fixture();
+  f.stage();
+  const testCmd = "yes y | head -c 200000; sh ./t.sh";
+  const piped = `'${process.execPath}' '${RECIPE_CHECK}' --member impl-5 --testCmd '${testCmd}' --reports '${f.reports}' | head -c 1 >/dev/null`;
+  const r = spawnSync("sh", ["-c", piped], { cwd: f.work, env: f.env, encoding: "utf8" });
+  assert.doesNotMatch(r.stderr, /EPIPE/);
+  assert.deepEqual(f.readRecord("impl-5").test, { command: testCmd, ran: true, exitCode: 0, pass: 3, fail: 0 });
+});
+
 test("a red run replaces an older green record", () => {
   const f = fixture();
   f.stage();
@@ -273,6 +311,15 @@ test("a Test entrypoint that exits 75 exits 75 and writes nothing, leaving an ol
   const before = readFileSync(f.recordFile("impl-5"), "utf8");
   assert.equal(f.record("impl-5", { testCmd: "exit 75" }).status, 75);
   assert.equal(readFileSync(f.recordFile("impl-5"), "utf8"), before);
+});
+
+test("a Test entrypoint printing more than the kept tail still has its closing summary's counts recorded", () => {
+  const f = fixture();
+  f.stage();
+  const testCmd = "head -c 400000 /dev/zero | tr '\\000' x; printf '\\n# tests 9\\n# pass 8\\n# fail 1\\n'";
+  const r = f.record("impl-5", { testCmd });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(f.readRecord("impl-5").test, { command: testCmd, ran: true, exitCode: 0, pass: 8, fail: 1 });
 });
 
 test("the command's own output passes through", () => {

@@ -2311,6 +2311,7 @@ function mismatch(msg) {
 async function runSettleFromReport() {
   const usage = "usage: ledger.mjs settle <member> --from-report [--reports <dir>]";
   const verifySha = join(dirname(fileURLToPath(import.meta.url)), "verify-sha.sh");
+  const deriveTestcmd = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh");
   const ready = "ready-to-merge";
   // The bound on each child a check runs: generous, because verify-sha.sh
   // fetches, and still a bound, because the child may never answer at all.
@@ -2383,6 +2384,7 @@ async function runSettleFromReport() {
     }
     return r;
   };
+  const verifyShaOf = (branch, sha) => look(`verify-sha.sh ${branch} ${sha}`, "sh", [verifySha, branch, sha], [0, 1]);
   // A `gh pr view --json <fields>` answer: an object whose every requested
   // field has the type that field has. Anything else was not what was asked
   // for, so it could not look.
@@ -2427,22 +2429,20 @@ async function runSettleFromReport() {
   // gate applies; any other answer from it could not look. `head`'s commit
   // object must be local when the tree is read: `fetchHead`, when given, puts
   // it there, and runs only once a gate applies.
-  const recipeGate = (head, fetchHead = null) => {
-    const derive = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh");
+  const recipeGate = (head, fetchHead) => {
     for (const field of ["check", "test"]) {
-      if (look(`derive-testcmd.sh . ${field}`, "sh", [derive, repoDir(), field], [0, 1]).status === 1) return;
+      if (look(`derive-testcmd.sh . ${field}`, "sh", [deriveTestcmd, repoDir(), field], [0, 1]).status === 1) return;
     }
     const rec = readCheckRecordIn(reports, member);
-    const found = rec.state === "ok";
-    check(rec.state === "absent" ? `a Check-step record exists at ${rec.path}`
-      : found ? `Check-step record ${rec.path} exists and parses`
-      : `Check-step record ${rec.path} parses: ${rec.violation}`, found);
-    if (!found) return;
+    const label = rec.state === "absent" ? `a Check-step record exists at ${rec.path}`
+      : rec.state === "ok" ? `Check-step record ${rec.path} exists and parses`
+      : `Check-step record ${rec.path} parses: ${rec.violation}`;
+    if (!check(label, rec.state === "ok")) return;
     const { check: step, test, tree } = rec.record;
     const exited = (c) => (c.exitCode === null ? "not run" : `exit ${c.exitCode}`);
     check(`the recorded Check step exited 0 (recorded: ${exited(step)})`, step.exitCode === 0);
     check(`the recorded Test entrypoint exited 0 (recorded: ${exited(test)})`, test.exitCode === 0);
-    if (fetchHead !== null) fetchHead();
+    fetchHead?.();
     const headTree = look(`git rev-parse --verify ${head}^{tree}`, "git", ["rev-parse", "--verify", `${head}^{tree}`]).stdout.trim();
     check(`the recorded tree ${tree} is ${head}'s tree ${headTree}`, tree === headTree);
   };
@@ -2453,7 +2453,7 @@ async function runSettleFromReport() {
       if (report.pr === null) invalid('$.pr: null is not a PR number, with outcome "pr"');
       if (report.head === null) invalid('$.head: null, with outcome "pr"');
       outcome = `PR#${report.pr}`;
-      const sha = look(`verify-sha.sh ${report.branch} ${report.head}`, "sh", [verifySha, report.branch, report.head], [0, 1]);
+      const sha = verifyShaOf(report.branch, report.head);
       check(`verify-sha.sh ${report.branch} ${report.head} exits 0`, sha.status === 0);
       recipeGate(report.head);
       const pr = prView(report.pr, "state,closingIssuesReferences");
@@ -2472,7 +2472,7 @@ async function runSettleFromReport() {
         // verify-sha.sh is the fetch that puts the head's commit object here,
         // which the tree read needs; its exit 2 is a fetch that failed or an
         // object that is not there, so it could not look.
-        recipeGate(report.head, () => look(`verify-sha.sh ${report.branch} ${report.head}`, "sh", [verifySha, report.branch, report.head], [0, 1]));
+        recipeGate(report.head, () => verifyShaOf(report.branch, report.head));
       }
     } else if (report.outcome === "no-op") {
       outcome = "no-op";

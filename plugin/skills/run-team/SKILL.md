@@ -2063,7 +2063,9 @@ live count from it, so nobody states one. Write neither by hand:
   that head; `no-op`: origin's branch at the head the PR's latest
   `reviewed=` names; `labelled`: `ready-to-merge` on the PR and in the
   read-back; `halted:<cause>`: a cause and non-empty evidence; `done`: every
-  PR the bot merged reads MERGED. It then records each `unrecorded` filing in
+  PR the bot merged reads MERGED. `PR#M` and `applied:<head>` also need the
+  member's green Check-step record for that head's tree (`recipe-check.mjs`;
+  references/tick-rows.md, `SETTLE`). It then records each `unrecorded` filing in
   **filed** and, for a fix-applier, each refutation the report defers in
   **ruled**, once however often it runs, and prints `{member, outcome,
   checks, filed, ruled}`. Exit 3: a check failed — the member's claim and the

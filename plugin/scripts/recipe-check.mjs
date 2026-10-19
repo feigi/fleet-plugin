@@ -22,11 +22,16 @@
 // Steps, in this order:
 //
 //   1  read the Check step and the Test entrypoint off the Recipe cache. A
-//      repository with no usable Recipe has no Check step to run: exit 2,
-//      nothing run, nothing written. Settle applies no gate to such a
-//      repository either.
-//   2  `git write-tree`: the tree id of the staged index. The working tree
-//      is never hashed, so an untracked or unstaged file is no part of the key.
+//      worktree with no usable Recipe has no Check step to run: exit 2,
+//      nothing run, nothing written. Settle reads the same cache from the
+//      ledger's repository, where derive-testcmd.sh's probes of the Test
+//      entrypoint can answer otherwise, so it skips its gate only where its
+//      own read refuses.
+//   2  `git write-tree`: the tree id of the staged index. The commands run in
+//      the working tree, so it must hold exactly that tree: an unstaged change
+//      to a tracked file, or an untracked file no ignore rule covers, is a
+//      refusal, exit 2 — a green record would otherwise name a tree that never
+//      ran. Then the reports directory is created, before anything runs.
 //   3  the Check step, `sh -c` from the worktree root. A Check step of
 //      `true` is recorded as green without being run.
 //   4  the Test entrypoint, the same way — only when the Check step passed.
@@ -59,9 +64,10 @@
 // Exit status: 0 both commands passed and the record is written; 1 a command
 // failed — the record says which, and the script's stderr names it; 2 a
 // refusal that ran nothing and wrote nothing (usage, no usable Recipe, git
-// could not be read); 75 the Test entrypoint printed exit 75 — the suite
-// wrapper found no slot and launched nothing, which is no test result — so
-// nothing is written, and the same command is to be run again.
+// could not be read, a working tree that is not the staged tree, a reports
+// directory that could not be created); 75 the Test entrypoint printed exit
+// 75 — the suite wrapper found no slot and launched nothing, which is no test
+// result — so no record is written, and the same command is to be run again.
 
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -129,13 +135,15 @@ async function cli() {
   }
 
   const env = gitEnv();
-  const git = (args) => spawnSync("git", args, { encoding: "utf8", env, timeout: GIT_TIMEOUT_MS });
+  // A reader that did not answer: the refusal names it, its exit status and
+  // its own reason.
+  const noAnswer = (what, r) => {
+    const why = (r.error?.message ?? r.stderr ?? "").trim();
+    die(`${what} did not answer${r.status === null ? "" : ` (exit ${r.status})`}${why ? `: ${why}` : ""}; nothing run, nothing written`);
+  };
   const gitOut = (what, args) => {
-    const r = git(args);
-    if (r.status !== 0) {
-      const why = (r.error?.message ?? r.stderr ?? "").trim();
-      die(`${what} did not answer${r.status === null ? "" : ` (exit ${r.status})`}${why ? `: ${why}` : ""}; nothing run, nothing written`);
-    }
+    const r = spawnSync("git", args, { encoding: "utf8", env, timeout: GIT_TIMEOUT_MS });
+    if (r.status !== 0) noAnswer(what, r);
     return r.stdout.trim();
   };
   const top = gitOut("git rev-parse --show-toplevel", ["rev-parse", "--show-toplevel"]);
@@ -145,19 +153,38 @@ async function cli() {
   const field = (name) => {
     const r = spawnSync("sh", [DERIVE, top, name], { encoding: "utf8", env, timeout: GIT_TIMEOUT_MS });
     if (r.status === 0) return r.stdout.replace(/\n$/, "");
-    const why = (r.error?.message ?? r.stderr ?? "").trim();
     if (r.status === 1) {
-      die(`this repository has no usable Recipe, so there is no Check step to run and settle applies no gate to it; nothing run, nothing written — ${why}`);
+      die(`this worktree has no usable Recipe, so there is no Check step to run; settle reads the Recipe from the ledger's repository and gates the report wherever that read finds one; nothing run, nothing written — ${(r.stderr ?? "").trim()}`);
     }
-    die(`derive-testcmd.sh ${name} did not answer${r.status === null ? "" : ` (exit ${r.status})`}${why ? `: ${why}` : ""}; nothing run, nothing written`);
+    noAnswer(`derive-testcmd.sh ${name}`, r);
   };
   const checkCmd = field("check");
   field("test");
 
-  // 2: the staged tree.
+  // 2: the staged tree, and a working tree that holds exactly it.
   const tree = gitOut("git write-tree", ["write-tree"]);
+  const strays = [
+    ...gitOut("git diff --name-only", ["-C", top, "diff", "--name-only"]).split("\n"),
+    ...gitOut("git ls-files --others --exclude-standard", ["-C", top, "ls-files", "--others", "--exclude-standard", "--directory"]).split("\n"),
+  ].filter((p) => p !== "");
+  if (strays.length > 0) {
+    const shown = strays.slice(0, 10).join(", ") + (strays.length > 10 ? `, and ${strays.length - 10} more` : "");
+    die(`the working tree is not the staged tree — unstaged or untracked: ${shown}. The commands run in the working tree and the record names the staged tree, so stage, remove or ignore these first; nothing run, nothing written`);
+  }
+  try {
+    mkdirSync(reports, { recursive: true });
+  } catch (e) {
+    die(`could not create ${reports}: ${e.code ?? e.message}; nothing run, nothing written`);
+  }
 
-  // 3 and 4: the commands.
+  // 3 and 4: the commands. A reader that closes this script's stdout or
+  // stderr early stops only the passthrough: the commands still run to their
+  // end and the record is still written. Any other stream error stays fatal.
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on("error", (e) => {
+      if (e.code !== "EPIPE") throw e;
+    });
+  }
   const check = checkCmd.trim() === "true"
     ? { command: checkCmd, ran: false, exitCode: 0, pass: null, fail: null }
     : await runCommand(checkCmd, top, env);
@@ -169,12 +196,11 @@ async function cli() {
   // draining through async pipe writes, and exit discards what is queued.
   const say = (line) => writeAll(2, `\n${NAME}: ${line}\n`);
   if (test.exitCode === NO_SLOT) {
-    say(`the Test entrypoint exited ${NO_SLOT}: no suite slot was free and nothing was launched — run the same command again; nothing written`);
+    say(`the Test entrypoint exited ${NO_SLOT}: no suite slot was free and nothing was launched — run the same command again; no record written`);
     process.exitCode = NO_SLOT;
     return;
   }
 
-  mkdirSync(reports, { recursive: true });
   const path = checkRecordPathIn(reports, member);
   const tmp = `${path}.${process.pid}.tmp`;
   try {
@@ -207,8 +233,7 @@ function runCommand(command, cwd, env) {
       tail = (tail + chunk).slice(-TAIL_BYTES);
     };
     const child = spawn("sh", ["-c", command], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
-    const forward = (sig) => () => child.kill(sig);
-    const handlers = ["SIGTERM", "SIGINT", "SIGHUP"].map((sig) => [sig, forward(sig)]);
+    const handlers = ["SIGTERM", "SIGINT", "SIGHUP"].map((sig) => [sig, () => child.kill(sig)]);
     for (const [sig, h] of handlers) process.on(sig, h);
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
