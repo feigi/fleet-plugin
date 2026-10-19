@@ -20,6 +20,8 @@ const ISOLATION = readPlugin("skills/run-team/references/isolation.md");
 const REVIEW_AND_FIX = readPlugin("commands/review-and-fix.md");
 const REQUIREMENTS = readRoot("docs/requirements.md");
 const PULL_AND_CLAIM = readRoot("docs/components/pull-and-claim.md");
+const RECIPE = readRoot("docs/components/recipe.md");
+const ADR_0015 = readRoot("docs/adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md");
 const EXTERNAL = readRoot("docs/research/external-assumptions.md");
 
 // A Node-consumer assumption: a lockfile or `node_modules` named as the
@@ -80,10 +82,26 @@ test("requirements 2.3 describes the Recipe derivation: any technology, what it 
   assert.match(cache, Pin.phrase("carrying the `origin/main` commit it was derived at, the proof, the Check step and `uncovered`."));
   assert.match(cache, Pin.phrase("Every claim reads its Install step and Test entrypoint from it and every review its Install step, Test entrypoint and `uncovered`; members run its Check step before pushing, the review does not."));
   assert.match(cache, Pin.phrase("A missing or unproven cache, or one without a well-formed Check step, is a refusal naming the derivation step, never a guess."));
-  assert.match(section, Pin.phrase("4. All three commands run in a fresh worktree with no ambient environment"));
+  assert.match(section, Pin.phrase("4. All three commands run in a fresh worktree. The Check step and the Test entrypoint need no running service, including one the command starts itself"));
+  assert.match(section, Pin.phrase("A merge-gating step that needs one is listed in `uncovered` whether or not the service is up when the Recipe is derived; with no service-free test step the derivation reports `RECIPE NOT PROVEN`."));
+  assert.match(section, Pin.phrase("The rule forces no re-derivation: delete a Recipe cache derived with a service up under the earlier rule by hand, once (`<main checkout>/.fleet/recipe.json`), and the next derivation follows this rule."));
+  assert.doesNotMatch(section, /no\s+ambient\s+environment/, "rule 4 names only shared services again");
   assert.doesNotMatch(section, /proves both|Both commands|both commands/, "2.3 describes a two-command Recipe again");
   // Ends at the line's end: the fence line is the whole command, so a longer ref (`origin/main-old`) or a trailing `&& …` is a different command.
   assert.match(section, new RegExp(`${Pin.phrase("~/.fleet/bin/fleet-run derive-testcmd.sh . install && ~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main").source}[ \\t]*$`, "m"));
+});
+
+test("the Recipe component doc states the running-service rule the deriver follows", () => {
+  const purpose = RECIPE.section("## What it is for", "recipe.md What it is for").text;
+  assert.match(purpose, Pin.phrase("that covers every test step in the merge-gating CI jobs that can run in a fresh worktree without a running service"));
+  assert.match(purpose, Pin.phrase("anything a command needs that it does not start as its own child process"));
+  assert.match(purpose, Pin.phrase("Neither the Test entrypoint nor the Check step ever needs one, including one the command starts itself, whether or not it is up while the Recipe is derived: a step that needs one is listed in `uncovered`, and a repository with no service-free test step is `RECIPE NOT PROVEN`."));
+  assert.doesNotMatch(purpose, /fresh\s+worktree\s+on\s+the\s+host/, "recipe.md's coverage is host-relative again");
+});
+
+test("ADR 0015's Status line carries the #3490 running-service amendment", () => {
+  const status = ADR_0015.paragraph("**Status:**", "ADR 0015 Status", "## Context").text;
+  assert.match(status, Pin.phrase("Amended by #3490: the Test entrypoint and Check step need no running service, self-started included; such steps are always uncovered, and a repository with no service-free test step is RECIPE NOT PROVEN."));
 });
 
 test("requirements 1.1 adds whatever the Recipe runs to the tool floor", () => {
@@ -112,9 +130,10 @@ test("review-and-fix's git archive bullet runs the Install step in the copy, rea
   assert.match(archive, Pin.phrase("run the Install step in the copy (read it off the worktree or main checkout, `derive-testcmd.sh <worktree or main checkout> install`; pointed at the copy it refuses, since a copy holds no Recipe cache)"));
 });
 
-test("run-team: a tree with no runner gets the Recipe's Test entrypoint only when it brings up no shared stack", () => {
+test("run-team: a tree with no runner gets the Recipe's Test entrypoint, with no shared-stack carve-out", () => {
   const p = ISOLATION.paragraph("**A reused worktree may lack the runner.**", "references/isolation.md reused-worktree runner paragraph", "**A reused worktree may also be").text;
-  assert.match(p, Pin.phrase("the Recipe's Test entrypoint (`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test --at origin/main` prints it) only when it brings up no shared stack to collide on, else that repo's own stack-free command."));
+  assert.match(p, Pin.phrase("tell the member the runner is absent and to run the Recipe's Test entrypoint directly (`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test --at origin/main` prints it)."));
+  assert.doesNotMatch(p, /shared stack|stack-free|docker-free/, "the reused-worktree paragraph carves the Test entrypoint out for a stack again");
 });
 
 test("run-team: testCmd comes from the Recipe cache and names no repository's own command", () => {

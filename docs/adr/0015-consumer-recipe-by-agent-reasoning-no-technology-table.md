@@ -6,6 +6,7 @@
 Install step, in the snapshot and in every specialist copy; the node_modules
 symlink is removed.
 Amended by #3157: the Recipe gains a Check step, derived by agent reasoning and proven by script like the Install step and Test entrypoint.
+Amended by #3490: the Test entrypoint and Check step need no running service, self-started included; such steps are always uncovered, and a repository with no service-free test step is RECIPE NOT PROVEN.
 
 ## Context
 

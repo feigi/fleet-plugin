@@ -6,7 +6,14 @@ The set of commands the fleet needs to work in any consumer repo: an
 **Install step** that materializes dependencies, a **Check step** that runs the
 merge-gating CI checks that are not tests, and a **Test
 entrypoint** that covers every test step in the merge-gating CI jobs that
-can run in a fresh worktree on the host. All three are derived by agent
+can run in a fresh worktree without a running service — anything a command
+needs that it does not start as its own child process, such as a Docker
+daemon, a database or other server installed on the host, a host daemon, or
+secrets in the environment. Neither the Test entrypoint nor the Check step
+ever needs one, including one the command starts itself, whether or not it is
+up while the Recipe is derived: a step that needs one is listed in
+`uncovered`, and a repository with no service-free test step is `RECIPE NOT
+PROVEN`. All three are derived by agent
 reasoning over the repo, never guessed from a hardcoded table of
 technologies
 ([ADR 0015](../adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md)).

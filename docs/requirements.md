@@ -68,7 +68,7 @@ Hard rules for any technology:
 1. Repo is learnable (README or build file documents install + test).
 2. Test runs non-vacuously (non-zero count, or deliberate failure turns it red).
 3. Install leaves tracked files unchanged (commit a frozen lockfile).
-4. All three commands run in a fresh worktree with no ambient environment (no shared databases, compose stacks, or env vars).
+4. All three commands run in a fresh worktree. The Check step and the Test entrypoint need no running service, including one the command starts itself — a running service is anything a command needs that it does not start as its own child process: a Docker daemon (so any container, compose stack or testcontainers use), a database or other server installed on the host, a host daemon, secrets or credentials in the environment. A test that spawns its own server as a child process is fine, network reachability is not a service, and the Install step is exempt. A merge-gating step that needs one is listed in `uncovered` whether or not the service is up when the Recipe is derived; with no service-free test step the derivation reports `RECIPE NOT PROVEN`. The rule forces no re-derivation: delete a Recipe cache derived with a service up under the earlier rule by hand, once (`<main checkout>/.fleet/recipe.json`), and the next derivation follows this rule.
 5. Binaries the Recipe runs must be on `PATH` on the fleet machine (§1.1 lists only fleet-plugin dependencies).
 
 Check, once a run's phase 0 has derived the Recipe:
