@@ -506,6 +506,40 @@ test("an Install step that modifies a tracked file refuses as an invalid cache",
   assert.doesNotMatch(r.stdout, /"applied":true/);
 });
 
+// The harness's shell sets `CI=true`, and a setup script that skips under `CI`
+// installs no git hooks in a fresh worktree. The claim runs the Install step
+// with `CI` unset, in the subshell that runs it. The fixture stands in for a
+// package manager whose `prepare` script skips under CI: a stub `npm` runs the
+// `prepare` string out of package.json, so the suite needs no real one.
+function applyUnderCi(prepare, files = {}) {
+  const dir = repo({
+    [TESTS]: "",
+    ".gitignore": ".hooks/\n",
+    "package.json": `${JSON.stringify({ scripts: { prepare } })}\n`,
+    ...files,
+  }, {}, { install: "npm run prepare" });
+  const bin = tempDir("claim-bin-");
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 0\n");
+  writeExecStub(join(bin, "npm"), `#!/bin/sh\n[ "$1" = run ] || exit 0\nexec sh -c "$(${JSON.stringify(process.execPath)} -p "require('./package.json').scripts['$2']")"\n`);
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CI: "true" },
+  });
+  return { dir, r, wt: join(dir, ".worktrees", "42-slug") };
+}
+
+test("an Install step that skips under CI still installs in the claimed worktree when CI=true is exported", () => {
+  const { r, wt } = applyUnderCi('test -z "$CI" && mkdir -p .hooks && echo installed > .hooks/marker || true');
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(existsSync(join(wt, ".hooks", "marker")), "the Install step saw CI, so the marker it writes only without CI is missing");
+});
+
+test("an Install step that rewrites a tracked file only when CI is unset is refused as a changed tree, not accepted", () => {
+  const { r } = applyUnderCi('test -z "$CI" && echo changed > lock.txt || true', { "lock.txt": "pinned\n" });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /the Install step 'npm run prepare' changed the tree in \.worktrees\/42-slug \(first: +M lock\.txt\)/);
+  assert.doesNotMatch(r.stdout, /"applied":true/);
+});
+
 // The must-ACCEPT half of the whole-tree guard, which is where it can go
 // wrong: an install writing only what the repository IGNORES (a dependency
 // directory, a build output) leaves `git status --porcelain` empty — the proof
