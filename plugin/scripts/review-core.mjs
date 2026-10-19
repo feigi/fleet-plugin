@@ -1021,7 +1021,7 @@ export async function runReview(host, args) {
     SNAPTREE=$(git -C "$SNAP" rev-parse 'HEAD^{tree}' 2>/dev/null); SRCTREE=$(git -C ${worktree} rev-parse 'HEAD^{tree}')
     { [ -d "$SNAP/.git" ] && [ -n "$SNAPTREE" ] && [ "$SNAPTREE" = "$SRCTREE" ]; } && echo SNAPSHOT_TREE_MATCH || echo SNAPSHOT_TREE_MISMATCH="snapshot $SNAPTREE vs commit $SRCTREE"
     INSTALL=$(~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} install) && echo SNAPSHOT_INSTALL_STEP="$INSTALL" || { INSTALL=; echo SNAPSHOT_INSTALL_UNREAD; }
-    [ -z "$INSTALL" ] || { ( cd "$SNAP" && unset CI && sh -c "$INSTALL" ) >"$RUN/install.log" 2>&1; echo SNAPSHOT_INSTALL_EXIT=$?; }
+    [ -z "$INSTALL" ] || { ( cd "$SNAP" && env -u CI sh -c "$INSTALL" ) >"$RUN/install.log" 2>&1; echo SNAPSHOT_INSTALL_EXIT=$?; }
     if [ -d "$SNAP/.git" ] && git -C "$SNAP" status --porcelain --untracked-files=all >"$RUN/status.txt"; then head -n 20 "$RUN/status.txt" | sed 's/^/SNAPSHOT_UNTRACKED=/'; echo SNAPSHOT_UNTRACKED_COUNT=$(wc -l <"$RUN/status.txt" | tr -d ' '); else echo SNAPSHOT_STATUS_FAILED; fi
 
 The Install step can take minutes: run the block as ONE blocking foreground

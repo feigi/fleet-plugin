@@ -139,7 +139,7 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
   );
   assert.match(
     snapshot,
-    /\( cd "\$SNAP" && unset CI && sh -c "\$INSTALL" \)/,
+    /\( cd "\$SNAP" && env -u CI sh -c "\$INSTALL" \)/,
     "the Install step no longer runs from the snapshot's own root with CI unset — a suite needing an installed dependency cannot run in it",
   );
   // These names live inside a template literal, so each backtick is a
