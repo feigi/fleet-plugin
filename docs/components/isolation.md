@@ -51,6 +51,7 @@ store.
    The `docs/metrics/` tables the controller itself writes mid-run
    (tier-outcomes, member-outcomes and ticket-features) are left out of the
    comparison.
+   Ignoring is a third remedy for `MAIN-CHECKOUT-DIRTY`, next to re-baselining and removing: the maintainer may add a stray path that is untracked and new since the baseline to `.git/info/exclude` or the global excludes file, and the hold clears on the next check with no re-baseline. Ignoring never clears a tracked or staged file's change, which `git status` reports whatever the excludes say, nor a pattern that also matches a path the baseline holds, which then reads as changed. The controller never writes an exclude or a `.gitignore` entry, and the pattern is kept narrow, because an ignored path is invisible to this check.
 
 ## Opinionated choices
 
