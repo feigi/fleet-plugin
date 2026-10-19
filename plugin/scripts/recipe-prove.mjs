@@ -21,7 +21,7 @@
 // removed afterwards, so neither the caller's checkout nor its uncommitted
 // state takes part — `derivedAt` is the commit the proof ran against:
 //
-//   1. The Install step runs (`sh -c`, from the worktree root) and must exit
+//   1. The Install step runs (`sh -c`, from the worktree root, with `CI` unset) and must exit
 //      0, then `git status --porcelain -uall` must print nothing: an install
 //      that rewrites a tracked file, or creates one the tree neither tracks
 //      nor ignores, corrupts every worktree it later runs in. That is the
@@ -110,6 +110,11 @@ const READER = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh"
 // calls below at another repository, and the Install step and Test entrypoint
 // at that repository's tree, while the cache still landed here.
 const ENV = gitEnv();
+// The Install step's own env: ENV without `CI`, and without anything else. A
+// setup script that skips under `CI` installs no git hooks in a fresh worktree,
+// and the harness sets `CI`. A copy, so ENV — what git, the Check step and the
+// Test entrypoint run under — keeps `CI`.
+const { CI: _ci, ...INSTALL_ENV } = ENV;
 
 // The bound on each Recipe command. A command that never returns — a stalled
 // fetch, a watch-mode runner — would otherwise hang the Recipe derivation,
@@ -267,11 +272,11 @@ function errorCause(error) {
 // the log, which is opened for append. Only the `sh` itself is killed:
 // spawnSync cannot kill a process tree, so a child the command started may
 // outlive the refusal.
-function sh(cmd, cwd, log) {
+function sh(cmd, cwd, log, env = ENV) {
   const fd = openSync(log, "a");
   try {
     const r = spawnSync("sh", ["-c", cmd], {
-      cwd, env: ENV, stdio: ["ignore", fd, fd], timeout: COMMAND_TIMEOUT_MS, killSignal: "SIGKILL",
+      cwd, env, stdio: ["ignore", fd, fd], timeout: COMMAND_TIMEOUT_MS, killSignal: "SIGKILL",
     });
     if (r.error?.code === "ETIMEDOUT") {
       throw notProven(`'${cmd}' timed out: still running after ${COMMAND_TIMEOUT_MS / 1000}s, the bound on each Recipe command, so it was stopped; output: ${log}`);
@@ -311,7 +316,7 @@ function restoreTree(wt, why, log) {
 function prove(o, wt, logs) {
   const proof = {};
   const installLog = join(logs, "install.log");
-  const irc = sh(o.install, wt, installLog);
+  const irc = sh(o.install, wt, installLog, INSTALL_ENV);
   if (didNotRun(irc)) {
     throw notProven(`the Install step '${o.install}' did not run (exit ${irc}: not executable or not found); install output: ${installLog}`);
   }
