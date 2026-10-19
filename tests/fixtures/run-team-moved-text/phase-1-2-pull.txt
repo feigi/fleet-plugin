@@ -222,6 +222,7 @@ does:
 |---|---|
 | in-flight hit, or an in-flight check that could not answer | drop, next entry |
 | no longer labelled `ready-for-agent` | drop, next entry |
+| a stranded ruling: a `## Ruling` or `## Triage` comment newer than the last `## Agent Brief`, or on a ticket with none | relabel `ready-for-human`, next entry |
 | `staleness.mjs` exit 1 — provably fixed | close citing the commit, next entry |
 | brief names no *what* | relabel `needs-triage`, next entry |
 | genuine fork — options named, none ruled | relabel `ready-for-human`, next entry |
