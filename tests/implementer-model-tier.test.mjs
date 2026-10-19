@@ -30,14 +30,14 @@ const memberLifecycleTier = () =>
   MEMBER_LIFECYCLE.between("## The implementer's tier is the definition's", "## The merge bot's tier", "member-lifecycle implementer-tier section").text;
 const memberTickRows = () => TICK_ROWS.text;
 const guard = () =>
-  RUN_TEAM.between("**Guard: accumulate per PR", "Why the agent body carries what it does", "run-team phase 2 tier guard").text;
+  RUN_TEAM.between("**Guard: accumulate per PR", "Why the agent body carries what it does", "run-team tier outcomes guard").text;
 // Paragraph-tight: the implementer bullet alone, ending where the tier check opens.
 // The paragraphs past it recount historical rows by vendor model name, so an
 // absence pin read over `dispatch()` would refuse the file as it stands.
 const dispatchRule = () =>
   RUN_TEAM.bullet("- **The implementer.**", "- **The tier check.**", "run-team implementer dispatch bullet").text;
 
-test("phase 2 dispatches every implementer at its definition's tier, and says so with a mechanism", () => {
+test("the dispatch section dispatches every implementer at its definition's tier, and says so with a mechanism", () => {
   const slice = dispatch();
   const tier = memberLifecycleTier();
 
@@ -49,7 +49,7 @@ test("phase 2 dispatches every implementer at its definition's tier, and says so
   assert.match(
     slice,
     /omit `model`/,
-    "phase 2 no longer says HOW the declared tier is obtained — omitting `model` is still the mechanism",
+    "the dispatch section no longer says HOW the declared tier is obtained — omitting `model` is still the mechanism",
   );
   assert.match(
     tier,
@@ -65,14 +65,14 @@ test("phase 2 dispatches every implementer at its definition's tier, and says so
     "member-lifecycle states the omission mechanism without saying the definition's tier wins first",
   );
   // The dispatch rule has to name WHERE the definition comes from, or the
-  // tier is declared somewhere the reader of this phase can neither find nor
+  // tier is declared somewhere the reader of this section can neither find nor
   // audit. That is the `agent` `ledger.mjs dispatch` prints — a name recalled
   // from this prose is exactly what a compaction dropped (#2208 counts 11
   // implementers dispatched as generic `task`).
   assert.match(
     slice,
     /Dispatch with the printed `agent`/,
-    "phase 2 no longer dispatches the agent ledger.mjs dispatch printed",
+    "the dispatch section no longer dispatches the agent ledger.mjs dispatch printed",
   );
   assert.match(
     tier,
@@ -88,15 +88,21 @@ test("phase 2 dispatches every implementer at its definition's tier, and says so
     /Keep `name: impl-<N>`/,
     "member-lifecycle no longer keeps the impl-<N> name alongside the dispatched agent",
   );
-  assert.match(slice, /keep `name: impl-<N>`/, "phase 2 no longer keeps the impl-<N> name");
+  assert.match(slice, /keep `name: impl-<N>`/, "the dispatch section no longer keeps the impl-<N> name");
   // `row` REPLACES the line (ledger.mjs's `data.rows = after`, `line` in place
   // of the old row). The `token` addition is the script's own behaviour, pinned
   // in tests/ledger.test.mjs ("token appends to the row and keeps every token
-  // already there, in order"); the replace-not-append rule is in tick-rows.md.
+  // already there, in order"); the replace-not-append rule is in tick-rows.md,
+  // and the controller's rule sending a token addition to `token` is Run ledger's.
   assert.match(
     memberTickRows(),
     /replaces the whole line/,
     "tick-rows.md no longer says `row` replaces the whole line rather than appending",
+  );
+  assert.match(
+    RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text,
+    Pin.phrase("`ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row"),
+    "Run ledger no longer sends a token addition to `token`, so a controller re-types the row with `row` and drops its tokens",
   );
 });
 
@@ -107,21 +113,21 @@ test("phase 2 dispatches every implementer at its definition's tier, and says so
 // before `Keep `name: impl-<N>``, full suite green. The paragraph's own
 // "`model` set" and "omit `model`" are what these must accept: neither puts a
 // colon after the word.
-test("phase 2's dispatch rule binds no model value to any ticket", () => {
+test("the dispatch section's implementer rule binds no model value to any ticket", () => {
   const slice = dispatchRule();
   assert.doesNotMatch(
     slice,
     /\bmodel\b`?:\s*\S/,
-    "phase 2's dispatch rule now passes a `model` value — the declared tier is obtained by omitting it",
+    "the dispatch section's implementer rule now passes a `model` value — the declared tier is obtained by omitting it",
   );
   assert.doesNotMatch(
     slice,
     /\b(?:sonnet|opus|haiku)\b/i,
-    "phase 2's dispatch rule now names a vendor model — the tier lives in the definition's frontmatter, as a route",
+    "the dispatch section's implementer rule now names a vendor model — the tier lives in the definition's frontmatter, as a route",
   );
 });
 
-test("phase 2's append duty is mandatory and per PR", () => {
+test("the tier outcomes guard's append duty is mandatory and per PR", () => {
   const slice = guard();
 
   // The unit. Supply is one Pull per free slot (ADR 0013), so no batch of

@@ -70,7 +70,7 @@ test("the gate refuses a finisher unless the verdict answering the latest review
   ));
 });
 
-test("the tick prints DISPATCH fix-pr for a review counting survived or unverified findings no review fix-applier has answered", () => {
+test("the fix-applier bullet dispatches on DISPATCH fix-pr for a review counting survived or unverified findings, with no fix-applier live", () => {
   const s = SKILL.bullet("- **The fix-applier.**", "- **The conflict hold.**", "run-team/SKILL.md fix-applier bullet").text;
   assert.match(s, Pin.phrase("`DISPATCH fix-pr PR#<M>` on a `reviewed=` count that survived or unverified findings, with no fix-applier live"));
 });

@@ -11,6 +11,10 @@
     [
       "An unchecked tier is `tick --apply`'s to check, and the hold stays while the check writes no verdict (its `tier-ok=`, or `tier-unverifiable=` for a member settled `killed` or `released` with no transcript, clears it); a mismatch is yours to clear, by dispatching the replacement at the right tier (phase 2).",
       "An unchecked tier is `tick --apply`'s to check, and the hold stays while the check writes no verdict (its `tier-ok=`, or `tier-unverifiable=` for a member settled `killed` or `released` with no transcript, clears it); a mismatch is yours to clear, by dispatching the replacement at the right tier."
+    ],
+    [
+      "One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`):",
+      "One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`; `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row):"
     ]
   ],
   "deleted": [
@@ -103,18 +107,6 @@
       "scripts/tier-check.mjs's header: no transcript is read by the tick"
     ],
     [
-      "**The batch file is a JSON array, one entry per dispatched member** — under Pull, a batch of one, the member just dispatched: `{member}`.",
-      "scripts/tier-check.mjs's header: the `--batch` file"
-    ],
-    [
-      "`member` is the AgentId the dispatch returns (`impl-<N>`).",
-      "scripts/ledger.mjs's header: the dispatch returns the AgentId"
-    ],
-    [
-      "The agent type an implementer was dispatched as lives only in its transcript.",
-      "scripts/tier-check.mjs's header: the agent type lives in the transcript"
-    ],
-    [
       "**The declaration is `model: \"@<role>:<level>\"` — a fleet tier route, never a vendor id.**",
       "scripts/tier-roles.mjs's header: the `@<role>:<level>` route"
     ],
@@ -128,7 +120,7 @@
     ],
     [
       "`ledger.mjs read` is safe on a pipe as well as a redirect: its payload used to be abandoned at the pipe buffer and still exit 0, which is what left `board.mjs` reporting `ledger read parse failed` and serving a blind cockpit for a whole run.",
-      "scripts/board.mjs's header: `ledger.mjs read` on a pipe"
+      "scripts/ledger.mjs's comment above its subcommand chain, which says no payload subcommand calls `process.exit()` on a pipe, and board-gather.mjs reads `read` through that pipe"
     ],
     [
       "`check` reaches a pipe whole at both of its exits too.",
@@ -136,19 +128,15 @@
     ],
     [
       "So trust that payload — and read `verdict`, because a searched-and-clean tracker and one that was never read share exit 0.",
-      "scripts/board.mjs's header: the verdict read"
+      "SKILL.md's **While the budget is exhausted** paragraph, which has members read `verdict` and not the exit code alone; review-and-fix.md step 5's `verdict` read"
     ],
     [
       "The consumer side raised its cliff rather than removing it.",
-      "scripts/board.mjs's header: the consumer side"
+      "references/member-lifecycle.md's `## Ledger reads and their buffer`, which says `board.mjs` reads `ledger.mjs read` with an explicit `maxBuffer`; board-common.mjs's READ_OPTS"
     ],
     [
       "That cap is deliberately bounded, so a payload past it lands in the same blind cockpit — and so does a ledger that cannot be read at all, at any size.",
-      "scripts/board.mjs's header: the payload cap"
-    ],
-    [
-      "Zeroes on the cockpit are not yet proof the pipeline is idle.",
-      "scripts/board.mjs's header: zeroes on the cockpit"
+      "scripts/board-gather.mjs, whose ledger read fails open to state `unread` or `unparsed` and whose comment on overrunning READ_OPTS.maxBuffer names the cap"
     ],
     [
       "`row` refuses a write that adds a review token (one the row holds is carried), drops an open launch, names a member twice on the line, or makes a PR map to a second row.",
@@ -223,22 +211,6 @@
       "tier-check.mjs (tests/tier-check.test.mjs)"
     ],
     [
-      "A `session` the entry gives wins over the receipt's; a caller already holding the exact transcript path may give `transcript` instead.",
-      "tier-check.mjs (tests/tier-check.test.mjs)"
-    ],
-    [
-      "`resolvedModel` **and** `resolvedThinkingLevel` together — the dispatch's own job record — may ride beside it and are preferred for the model and level.",
-      "tier-check.mjs (tests/tier-check.test.mjs)"
-    ],
-    [
-      "An `impl-` entry carries no `agentFile`: its definition is the row's, never the caller's.",
-      "tier-check.mjs (tests/tier-check.test.mjs)"
-    ],
-    [
-      "`transcript`/`session` resolve relative to `--repo` (defaults to the plugin's own root), and the check reads and writes the run's own ledger unless `--ledger` names another.",
-      "tier-check.mjs (tests/tier-check.test.mjs)"
-    ],
-    [
       "`@slow`, `@task`, `@smol` resolve through the operator's `modelRoles`, so an install with no Anthropic model still runs the fleet at whatever each role points at; the explicit `:<level>` suffix wins over the role's baked one, and the tier check judges a member against the role's own target (`modelRoles.<role>`), never a model family.",
       "tier-roles.mjs (tests/tier-roles.test.mjs)"
     ],
@@ -264,7 +236,7 @@
     ],
     [
       "To add a token to a row that exists — `ci=`, `held-behind:#M`, `conflict-hold:#M`, `label-off=`, `ports=` — run `ledger.mjs token <key> <token>…`, which keeps every token already on the row and takes a PR's number as the key.",
-      "ledger.mjs token grammar (tests/ledger.test.mjs)"
+      "SKILL.md's **Run ledger**, whose row line sends a token addition to `ledger.mjs token <key> <token>…`; ledger.mjs token grammar (tests/ledger.test.mjs)"
     ],
     [
       "Every use above is a recovery path, so a payload that arrives short lands exactly where a settled `ruled:` is unrecoverable — which is why the script's own suite pins that `read`, `row`, `filed` and `ruled` each reach a pipe whole.",
@@ -304,7 +276,7 @@
     ],
     [
       "**Then dispatch a fix-applier** — on `DISPATCH fix-pr PR#<M>`, which the tick prints for a PR whose `reviewed=` counts survived or unverified findings that no review fix-applier has landed `applied:`/`no-op` on since, with no fix-applier live on it — one named member per PR, `fix-pr-<pr#>` (the next suffix when that name is already on record), never the PR's implementer, its brief rendered with `dispatch-prompt.mjs render fix-applier --kind review --member fix-pr-<pr#> …` and then recorded with `ledger.mjs dispatch <pr#> fix-pr-<pr#>` before the call.",
-      "SKILL: **The fix-applier.** bullet under Dispatching the members a wake names"
+      "SKILL: **The fix-applier.** bullet under Dispatching the members a wake names, which keeps the dispatch rule; the clause on findings no review fix-applier has answered since is fleet-tick.mjs's `fixDue` condition"
     ],
     [
       "Every `<scratch>` in that brief is the absolute path `scratch-root.mjs` printed, the `dispositions-<its name>.json` record's included.",

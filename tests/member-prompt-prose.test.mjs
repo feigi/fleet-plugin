@@ -6,7 +6,8 @@ import { Pin } from "./support/prose-pin.mjs";
 import { memberPrompt } from "./support/render-brief.mjs";
 
 // #172. A fleet member learns what it is, and what to run, only from the blocks
-// run-team phase 2 carries VERBATIM. Everything else in that section is
+// run-team's dispatch prose carried VERBATIM, now the agent body and brief
+// below. Everything else in SKILL.md is
 // controller-facing prose the member sees only if the controller paraphrases it
 // — and `sizing-a-ticket`'s fleet entry point is CONDITIONED on the reader being
 // an unattended fleet member. Take that condition's evidence away and the member
@@ -68,7 +69,7 @@ const controllerSkill = () => RUN_TEAM.text;
 test("every member-facing rule sits in the agent body the harness injects, not in the controller's SKILL", () => {
   assert.ok(memberBlocks().trim().length > 0, "the implementer agent body is empty — the member receives no rules at all");
   // The location defect, restated for the new carrier. A rule the controller
-  // reads in phase 2 reaches the member only if the controller retypes it,
+  // reads in SKILL.md reaches the member only if the controller retypes it,
   // and a controller that drops it emits no error. A copy left there as well
   // is the other half: two sources free to drift, one of which no member reads.
   for (const opener of ["**You are an unattended fleet member.**", "Run `sizing-a-ticket`", "`next-ticket` **step 7**"]) {

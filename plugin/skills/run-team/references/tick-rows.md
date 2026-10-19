@@ -115,6 +115,24 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   by hand when the tick ran without `--apply` or the check wrote no verdict,
   with a batch entry per member it names (fill in `<file>`; `<session>` too
   when no receipt of this run records one).
+  **The batch file is a JSON array, one entry per dispatched member** — under
+  Pull, a batch of one, the member just dispatched: `{member}`.
+  `member` is the AgentId the dispatch returns (`impl-<N>`). An entry that
+  names neither `session` nor `transcript` takes the session directory phase
+  0's receipt `.fleet/phase0.json` of `--ledger`'s workspace (else the cwd's,
+  resolved as the default ledger is) records, and is exit 2 naming the receipt
+  when it records none; the check reads `<session>/<member>.jsonl`, so a
+  member with no assistant turn yet still resolves off its dispatch-time
+  record. A `session` the entry gives
+  wins over the receipt's; a caller already holding the exact transcript path
+  may give `transcript` instead. The agent type an implementer was dispatched
+  as lives only in its transcript. `resolvedModel`
+  **and** `resolvedThinkingLevel` together — the dispatch's own job record —
+  may ride beside it and are preferred for the model and level. An `impl-`
+  entry carries no `agentFile`: its definition is the row's, never the
+  caller's. `transcript`/`session` resolve relative to `--repo` (defaults to
+  the plugin's own root), and the check reads and writes the run's own ledger
+  unless `--ledger` names another.
 - `AT CAP`, `IDLE OK` — nothing to do on that row.
 - `MAIN-CHECKOUT-DIRTY <paths> …`, printed above the rows, with every
   dispatching row (implementers, reviewers, merge-bot) reading
