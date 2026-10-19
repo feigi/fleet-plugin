@@ -371,10 +371,10 @@ keep() {
 # at, by two DIFFERENT rules for two DIFFERENT groups. Three call sites below
 # read `status --porcelain` (`-uall`, or `-unormal --ignored`) and are safe
 # because git quotes PATHS; a fourth, added after this comment was first
-# written, reads `for-each-ref --format='%(refname)
-# %(upstream:track)'` and is safe for an unrelated reason — a REFNAME,
-# unlike a path, can never contain the byte at all. Nothing in the body
-# checks either invariant.
+# written, reads `for-each-ref` with a format that prints only refnames and
+# fixed words, and is safe for an unrelated reason — a REFNAME, unlike a
+# path, can never contain the byte at all, and a fixed word is text git
+# itself prints. Nothing in the body checks either invariant.
 #
 # The path-reading three: both halves of git's answer put a control byte in
 # a path beyond reach of the split, by two DIFFERENT rules — measured on git
@@ -394,13 +394,19 @@ keep() {
 #   0x02 there either.
 #
 # The ref-reading fourth: no PATH-quoting rule is doing the work, because no
-# quoting is needed — git refuses to CREATE the ref at all. Measured, git
-# 2.50.1 (Apple Git-155): `git branch "$(printf 'a\002b')"` fails outright —
-# `fatal: 'a?b' is not a valid branch name` — and so does `git update-ref
-# refs/heads/"$(printf 'a\002b')" HEAD` — `refusing to update ref with bad
-# name`. `%(refname)` and `%(upstream:track)` can only ever answer with
-# bytes that already survived `check-ref-format` on the way in, so a raw
-# 0x02 can never reach either field to begin with. A fifth call site joins
+# quoting is needed — every field its format prints is either a validated
+# refname or a fixed word git prints. git refuses to CREATE a ref whose name
+# holds the byte at all. Measured, git 2.50.1 (Apple Git-155): `git branch
+# "$(printf 'a\002b')"` fails outright — `fatal: 'a?b' is not a valid branch
+# name` — and so does `git update-ref refs/heads/"$(printf 'a\002b')" HEAD`
+# — `refusing to update ref with bad name`. `%(refname)` can only ever
+# answer with bytes that already survived `check-ref-format` on the way in.
+# The other two fields are fixed words: the `%(if)%(upstream)` test prints
+# `upstream` or `no-upstream` out of the format itself, and
+# `%(upstream:track)` prints git's own tracking words — `[gone]`, `[ahead N]`
+# and their siblings. `%(upstream)`'s own text is never printed: it is built
+# from the branch.<b>.merge value, which git does not validate, and a raw
+# 0x02 written there reaches it (measured, git 2.50.1). A fifth call site joins
 # this ref group: `rev-parse --verify refs/heads/<b>`, where
 # `<b>` is a name the `for-each-ref` call site produced. Its stdout is an
 # object id in hex, and what it can put on stderr is git's own fixed prose
@@ -416,10 +422,10 @@ keep() {
 # -uall -z` carries the raw 0x02 straight through, `-z` being the
 # machine-readable form that drops the quoting, and so does any command
 # emitting CONTENT rather than paths or refnames (`log --format=%s`, `show
-# <rev>:<path>`, both measured). The ref group has no equivalent flag —
-# `for-each-ref` cannot be asked to emit an unvalidated refname — so this
-# warning is really aimed at the path group and at any THIRD kind of call
-# site a future caller might add.
+# <rev>:<path>`, both measured). The ref group stays out of reach only while
+# its format prints no atom built from config, such as `%(upstream)` — so
+# this warning is aimed at the path group, at that format, and at any THIRD
+# kind of call site a future caller might add.
 #
 # Left unguarded anyway, deliberately: every call site is shaped
 # `if ! git_probe …; then keep …`, so a garbled $gp_rc can never come back 0
@@ -980,13 +986,14 @@ EOF
 #
 # The [gone] test reads $3 and the no-upstream test reads $2: a space is not
 # legal in a branch name (measured — git refuses `has space` as invalid), so
-# the name is always the whole of $1, and $2 is `upstream=` followed by
-# %(upstream)'s ref — exactly `upstream=` when the branch has none. The
-# tracking forms that DO carry a space, `[ahead 1]` and its siblings, split so
-# that $3 holds `[ahead` — not `[gone]` either way. That layout holds only
-# while the upstream ref carries no whitespace: %(upstream) is built from the
-# branch.<b>.merge value, which git does not validate, and a space there moves
-# the track out of $3 (measured, git 2.50.1).
+# the name is always the whole of $1. $2 is a fixed word the format itself
+# prints — `upstream` when the branch has one, `no-upstream` when it has
+# none — so an unset upstream still fills $2 rather than leaving the
+# whitespace split to drop an empty field. $3 is %(upstream:track). The
+# tracking forms that DO carry a space, `[ahead 1]` and its siblings, split
+# so that $3 holds `[ahead` — not `[gone]` either way. No field prints
+# %(upstream)'s own text, which git builds from the unvalidated
+# branch.<b>.merge value.
 # A command substitution inside a `for ... in` word list discards its own
 # exit status entirely, in every shell measured here (bash, dash, macOS
 # /bin/sh): `for x in $(false); do …; done` completes at the loop's own end,
@@ -1011,10 +1018,7 @@ EOF
 # the same reason — dying here would also abort the second sweep and the
 # final `worktree prune`, neither of which this enumeration failing has
 # anything to do with, over a failure that only defers reaping to a later pass.
-# `upstream=` makes an unset %(upstream) a field of its own. Without it the
-# whitespace split drops the empty field, and `$2` reads the track instead, so
-# `$2=="upstream="` is exactly the no-upstream case and `$3` the [gone] test.
-if ! git_probe for-each-ref --format='%(refname) upstream=%(upstream) %(upstream:track)' refs/heads; then
+if ! git_probe for-each-ref --format='%(refname) %(if)%(upstream)%(then)upstream%(else)no-upstream%(end) %(upstream:track)' refs/heads; then
   keep "" "could not enumerate [gone] branches — none reaped, and none reported reapable either$(gp_why)"
   gone_branches=""
   no_upstream=""
@@ -1032,7 +1036,7 @@ else
     keep "" "could not enumerate [gone] branches — none reaped, and none reported reapable either"
     gone_branches=""
   fi
-  if ! no_upstream=$(printf '%s\n' "$gp_out" | awk '$2=="upstream="{sub(/^refs\/heads\//,"",$1); print $1}'); then
+  if ! no_upstream=$(printf '%s\n' "$gp_out" | awk '$2=="no-upstream"{sub(/^refs\/heads\//,"",$1); print $1}'); then
     keep "" "could not enumerate branches with no upstream — none reported kept"
     no_upstream=""
   fi
