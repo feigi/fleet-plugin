@@ -10,13 +10,16 @@
 // every worktree of one repository shares, and git-env.mjs's resolveWorkspace()
 // turns that answer into the workspace it names: the common git dir's parent
 // when the common dir is named `.git` or that parent's own `.git` resolves to
-// it, otherwise the common git dir itself. This module is the spawn around
-// that function — the scrubbed env, the bound, the join onto `.fleet/` — so a
-// new `.fleet/`-rooted file is one `fleetFile("name")` call rather than
-// another hand-spelled probe. The bound is per git child, not per call: when
-// the common git dir is not named `.git`, resolveWorkspace() runs a second
-// `rev-parse` after this module's own, with a bound of its own, so one call's
-// worst case approaches twice `timeoutMs`.
+// it, otherwise the common git dir itself. Only an absent `<parent>/.git` is
+// "not this parent"; one that exists and that git refuses fails the probe, so
+// a linked worktree never re-keys to the common dir. This module is the spawn
+// around that function — the scrubbed env, the bound, the join onto `.fleet/`
+// — so a new `.fleet/`-rooted file is one `fleetFile("name")` call rather
+// than another hand-spelled probe. The bound is per git child, not per call:
+// when the common git dir is not named `.git` and the parent's `.git`
+// exists, resolveWorkspace() runs a second `rev-parse` after this module's
+// own, with a bound of its own, so one call's worst case approaches twice
+// `timeoutMs`.
 //
 // One error policy: anything that leaves no workspace THROWS
 // FleetDirUnresolvable, never a null or an empty path. What a caller does
@@ -115,15 +118,16 @@ function workspaceOf(cwd, timeoutMs, canonicalise) {
  * that spelling without changing which file it names.
  *
  * `timeoutMs` (default git-env.mjs's DEFAULT_GIT_TIMEOUT_MS) bounds each git
- * child, not the call. When the common git dir is not named `.git` (the
- * `.bare` layout, a bare repository, a submodule, a `--separate-git-dir`
- * clone), resolveWorkspace() runs a second probe after `--git-common-dir`,
- * with its own full `timeoutMs`, so one call's worst case approaches twice
- * `timeoutMs`.
+ * child, not the call. When the common git dir is not named `.git` and the
+ * `.git` in its parent exists (the `.bare` layout, or any other git dir that
+ * shares a parent with a `.git`), resolveWorkspace()
+ * runs a second probe after `--git-common-dir`, with its own full `timeoutMs`,
+ * so one call's worst case approaches twice `timeoutMs`.
  *
  * Throws FleetDirUnresolvable for every probe that leaves no workspace — no
- * repository, an unreadable `.git`, git missing, a probe killed at
- * `timeoutMs` — with git's own reason in the message.
+ * repository, an unreadable `.git`, a parent's `.git` that git refuses, git
+ * missing, a probe killed at `timeoutMs` — with git's own reason in the
+ * message.
  */
 export function fleetFile(name, { cwd = process.cwd(), timeoutMs, canonicalise = false } = {}) {
   const { dir } = workspaceOf(cwd, timeoutMs, canonicalise);
@@ -146,9 +150,9 @@ export function fleetFile(name, { cwd = process.cwd(), timeoutMs, canonicalise =
  *
  * `home` exists for tests; it defaults to the user's home directory.
  * `timeoutMs` bounds each git child exactly as in fleetFile(): two may run in
- * sequence when the common git dir is not named `.git`, so one call's worst
- * case approaches twice `timeoutMs`. Throws FleetDirUnresolvable exactly as
- * fleetFile() does.
+ * sequence when the common git dir is not named `.git` and its parent's `.git`
+ * exists, so one call's worst case approaches twice `timeoutMs`. Throws
+ * FleetDirUnresolvable exactly as fleetFile() does.
  */
 export function scratchRoot({ cwd = process.cwd(), timeoutMs, home = homedir() } = {}) {
   const { dir, gitDir } = workspaceOf(cwd, timeoutMs, true);

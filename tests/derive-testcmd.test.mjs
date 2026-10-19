@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, symlinkSync, chmodSync, readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, symlinkSync, chmodSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join, dirname } from "node:path";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { BROKEN_GITFILES, bareProject, gitsReason } from "./support/bare-project.mjs";
 
 // derive-testcmd.sh is the ONE reader of a repository's Recipe cache (ADR
 // 0015) — reused by claim-ticket.sh and review-core.mjs's snapshot agent. It
@@ -117,6 +118,65 @@ test("the Recipe cache sits where the workspace rule names: a bare repository, a
   const rs = derive(checkout);
   assert.equal(rs.status, 1, rs.err);
   assert.match(rs.err, /no Recipe cache at .*\/a\.git\/\.fleet\/recipe\.json/);
+});
+
+// A `.bare` project with one linked worktree, `p/w` (support/bare-project.mjs).
+// Realpath'd: the script names the paths it resolves, and tmpdir() sits under
+// a symlink on macOS.
+function bareWorktree() {
+  const { proj, worktrees } = bareProject(realpathSync(tempDir("derive-bare-wt-")), FIXTURE_ENV, ["w"]);
+  return { proj, wt: worktrees[0] };
+}
+
+test("a healthy .bare linked worktree's absent-cache refusal names the project's cache, never .bare's", () => {
+  const { proj, wt } = bareWorktree();
+  const r = derive(wt);
+  assert.equal(r.status, 1, r.err);
+  assert.ok(r.err.includes(`no Recipe cache at ${proj}/.fleet/recipe.json`), r.err);
+  assert.doesNotMatch(r.err, /\.bare\/\.fleet/);
+});
+
+test("a git that writes to stderr while it answers the workspace probe still names the project's cache, never .bare's", () => {
+  const { proj, wt } = bareWorktree();
+  const r = derive(wt, "test", fakeGit("/.git", "echo 'warning: something benign' >&2"));
+  assert.equal(r.status, 1, r.err);
+  assert.ok(r.err.includes(`no Recipe cache at ${proj}/.fleet/recipe.json`), r.err);
+  assert.doesNotMatch(r.err, /\.bare\/\.fleet/);
+});
+
+for (const [kind, breakIt] of BROKEN_GITFILES) {
+  const skip = kind === "chmod 000" && process.getuid?.() === 0 ? "running as root" : false;
+  test(`a ${kind} p/.git refuses at exit 1, naming p/.git and git's reason, and never re-keys the cache to .bare`, { skip }, () => {
+    const { proj, wt } = bareWorktree();
+    const gitfile = join(proj, ".git");
+    breakIt(gitfile);
+    const why = gitsReason(FIXTURE_ENV, wt, gitfile);
+    assert.notEqual(why, "", "test setup: git must refuse the broken .git");
+    const r = derive(wt);
+    assert.equal(r.status, 1, r.err);
+    assert.equal(r.out, "");
+    assert.ok(r.err.includes(`cannot resolve the workspace of ${wt}: ${gitfile} — ${why}`), r.err);
+    assert.doesNotMatch(r.out + r.err, /\.bare\/\.fleet/);
+  });
+}
+
+test("a git that cannot run the workspace probe exits 3, not 1", () => {
+  const { wt } = bareWorktree();
+  const r = derive(wt, "test", fakeGit("/.git", "echo killed >&2; exit 137"));
+  assert.equal(r.status, 3, r.err);
+  assert.match(r.err, /git did not resolve .*\/p\/\.git \(exit 137\), so the Recipe cache was not read — killed/);
+});
+
+test("a plain repository with a nested bare clone: git exits 0 naming another dir, and each keeps its own cache", () => {
+  const dir = realpathSync(repo().dir);
+  const nested = join(dir, "foo.git");
+  execFileSync("git", ["clone", "-q", "--bare", dir, nested], { stdio: "pipe", env: FIXTURE_ENV });
+  const rn = derive(nested);
+  assert.equal(rn.status, 1, rn.err);
+  assert.ok(rn.err.includes(`no Recipe cache at ${nested}/.fleet/recipe.json`), rn.err);
+  const rq = derive(dir);
+  assert.equal(rq.status, 1, rq.err);
+  assert.ok(rq.err.includes(`no Recipe cache at ${dir}/.fleet/recipe.json`), rq.err);
 });
 
 test("a linked worktree reads the main checkout's cache, not a private one", () => {

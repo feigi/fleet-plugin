@@ -21,8 +21,10 @@
 # directory git-env.mjs's resolveWorkspace() names for the repository: the
 # common git dir's parent when the common dir is named `.git` or that parent's
 # own `.git` resolves to it, otherwise the common git dir itself (a bare
-# repository, a submodule). That is the same place the
-# ledger and the heartbeat live — so a claimed worktree and a
+# repository, a submodule). Only an absent `<parent>/.git` is "not this
+# parent"; one that exists and that git refuses fails the probe, so a linked
+# worktree never re-keys the cache to the common dir. The ledger and the
+# heartbeat live in that same place — so a claimed worktree and a
 # review worktree read the one cache the main checkout holds rather than a
 # private copy each. A single JSON object:
 #
@@ -179,9 +181,18 @@ common=$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>&1) 
 # shell rather than asked of node: the interpreter probe below must stay the
 # first node call, since its refusals are pinned in that order. A common dir
 # named `.git` belongs to its parent checkout. Otherwise the parent's `.git`,
-# a symlink or a gitfile, that resolves to the common dir makes the parent the
-# workspace. Otherwise the common dir is the workspace itself (a bare
-# repository, a submodule's git dir).
+# a symlink, a gitfile or a directory, that git resolves to the common dir
+# makes the parent the workspace. Only an absent `<parent>/.git` is "not this
+# parent": one that exists and that git refuses (a dangling or invalid gitfile,
+# an unreadable one) fails the probe, never re-keys the cache to the common dir.
+# Otherwise the common dir is the workspace itself (a bare repository, a
+# submodule's git dir). git prints the realpath for a gitfile but the path as
+# spelled for a `.git` directory, so its answer is canonicalised before the
+# compare; `$target` stays absolute, since a relative operand is answered
+# relative to the cwd. Only git's stdout is the answer: anything it writes to
+# stderr on a success would otherwise land inside the path and fail the
+# compare, re-keying the cache in silence. A refusal asks once more for the
+# reason, its stderr alone.
 real=$(cd -P "$common" 2>/dev/null && pwd -P) || real=$common
 parent=${common%/*}
 case ${real##*/} in
@@ -189,13 +200,16 @@ case ${real##*/} in
   *)
     ws=$common
     target=${real%/*}/.git
-    if [ -f "$target" ]; then
-      IFS= read -r gl < "$target" || :
-      gl=${gl#gitdir: }
-      case $gl in /*) target=$gl ;; *) target=${real%/*}/$gl ;; esac
+    if [ -e "$target" ] || [ -L "$target" ]; then
+      named=$(git rev-parse --resolve-git-dir "$target" 2>/dev/null) || {
+        gitrc=$?
+        why=$(git rev-parse --resolve-git-dir "$target" 2>&1 >/dev/null) || :
+        case $gitrc in 128) die "cannot resolve the workspace of $repo: $target — $why" ;; esac
+        unrunnable "git did not resolve $target (exit $gitrc), so the Recipe cache was not read${why:+ — $why}"
+      }
+      named=$(cd -P "$named" 2>/dev/null && pwd -P) || named=
+      if [ "$named" = "$real" ]; then ws=$parent; fi
     fi
-    named=$(cd -P "$target" 2>/dev/null && pwd -P) || named=
-    if [ "$named" = "$real" ]; then ws=$parent; fi
     ;;
 esac
 cache="$ws/.fleet/recipe.json"

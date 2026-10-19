@@ -126,20 +126,23 @@ function cause(...candidates) {
 // though "dominant" overstates that relationship: a normal invocation
 // without `--file` can pay this same budget TWICE in sequence, once here and
 // once more in repoCheck() below, before ever reaching `gh` at all — and
-// THREE times in layouts whose common git dir is not named `.git` (the
-// `.bare` layout, a bare repository, a submodule, a `--separate-git-dir`
-// clone), where fleetFile() runs a second probe with its own full budget:
+// THREE times where the common git dir is not named `.git` and its parent
+// holds a `.git` (the `.bare` layout, or any other git dir sharing a parent
+// with a `.git`), where fleetFile() runs a second probe with its own full budget:
 // fleetFile()'s bound is per git child, not per call. At default settings
 // two stalled probes TIE `gh`'s own 20 s bound and three exceed it, and even
 // one stall can EXCEED it — up to GIT_TIMEOUT_MS + 20 s — when `gh` still
 // runs (measured). `check`'s worst case is the sum of whichever of its
 // children actually stall, not a single fixed term. That is three children
-// normally; in those layouts it is three git children and `gh` is a fourth.
+// normally; in the `.bare` layout it is three git children and `gh` is a fourth.
+// A bare repository, a submodule or a `--separate-git-dir` clone has no `.git`
+// beside its git dir, so fleetFile() runs no second probe there.
 // Where the ledger's repository has no work tree (the `.bare` layout, a bare
 // repository, a `--separate-git-dir` clone; not a submodule) repoCheck()'s
 // `--show-toplevel` is refused and it asks the same directory for
-// `--git-common-dir` to bind `gh` to, so there it is four git children and
-// `gh` a fifth. `gh` runs in every one of those layouts. With `--file` the
+// `--git-common-dir` to bind `gh` to: four git children and `gh` a fifth in
+// the `.bare` layout, three and `gh` a fourth in the other two. `gh` runs in
+// every one of those layouts. With `--file` the
 // fleetFile() children drop out: two children normally, three where the
 // repository has no work tree.
 //

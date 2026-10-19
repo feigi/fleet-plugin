@@ -63,8 +63,10 @@ export function gitEnv(overrides = {}, base = process.env) {
 // `.git` or when that parent's own `.git` resolves to it (the `.bare`
 // layout's gitfile); otherwise it is the common dir itself — a bare
 // repository's, a submodule's or a `--separate-git-dir` clone's git dir — so
-// two such dirs sharing a parent do not collapse onto one workspace. The
-// rule's full statement sits beside `resolveWorkspace()` below. The main
+// two such dirs sharing a parent do not collapse onto one workspace. Only an
+// absent `<parent>/.git` is "not this parent"; one that git refuses fails the
+// probe, so a linked worktree never re-keys to the common dir. The rule's
+// full statement sits beside `resolveWorkspace()` below. The main
 // checkout's work tree is a separate question with its own answer,
 // `mainCheckoutDirFromGitCommonDir()`: a `.git` symlinked to a git dir
 // elsewhere moves the workspace out of the checkout, never the work tree.
@@ -79,7 +81,7 @@ export function gitEnv(overrides = {}, base = process.env) {
 // composes the rest around it.
 
 import { spawnSync } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 // A `rev-parse` answers in milliseconds; this bound exists so a git that never
@@ -87,8 +89,10 @@ import { basename, dirname, join, resolve } from "node:path";
 export const DEFAULT_GIT_TIMEOUT_MS = 10_000;
 
 // Thrown when the one probe the rule needs beyond `--git-common-dir` could not
-// run to an answer: git missing, or killed at its bound. Not thrown for a git
-// that ran and refused — that is an answer, and the rule reads it as "no".
+// run to an answer: git missing, killed at its bound, or a `<parent>/.git`
+// that exists and that git refuses. Only an absent `<parent>/.git` is "no";
+// one git refuses fails the probe, so a linked worktree never re-keys to the
+// common dir.
 export class WorkspaceProbeFailed extends Error {
   constructor(message) {
     super(message);
@@ -107,25 +111,32 @@ function canonicalPath(path) {
 }
 
 // Why a probe that did not answer did not: the spawn error, the signal that
-// killed it, or its stderr. Its caller reaches it only for a spawn error or a
-// probe with no exit status, so no exit code is ever left to name.
+// killed it, its stderr, or its exit status when stderr says nothing.
 function probeWhy(r) {
   if (r.error && r.error.message) return r.error.message;
   if (r.signal) return `killed by ${r.signal}`;
-  return String(r.stderr ?? "").trim() || "no answer";
+  return String(r.stderr ?? "").trim() || `git exited ${r.status}`;
 }
 
 // Does `<parent>/.git` name `gitDir` (a realpath)? `--resolve-git-dir` follows
-// a gitfile, so the `.bare` layout's `.git` file answers with `.bare`.
+// a gitfile, so the `.bare` layout's `.git` file answers with `.bare`. Only an
+// absent `<parent>/.git` is no, without a spawn; one that exists and that git
+// refuses (a dangling or invalid gitfile, an unreadable one) fails the probe.
+// Git's stderr is only quoted, never read: its text depends on the locale.
 function parentGitDirNames(parent, gitDir, cwd, timeoutMs) {
   const candidate = join(parent, ".git");
+  try {
+    lstatSync(candidate);
+  } catch (e) {
+    if (e.code === "ENOENT") return false;
+    throw new WorkspaceProbeFailed(`could not resolve ${candidate}: ${e.message}`);
+  }
   const r = spawnSync("git", ["rev-parse", "--resolve-git-dir", candidate], {
     cwd, encoding: "utf8", timeout: timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS, env: gitEnv(),
   });
-  if (r.error || r.status === null) {
+  if (r.error || r.status !== 0) {
     throw new WorkspaceProbeFailed(`could not resolve ${candidate}: ${probeWhy(r)}`);
   }
-  if (r.status !== 0) return false;
   return realpathOr(resolve(parent, r.stdout.trim())) === gitDir;
 }
 
@@ -138,8 +149,9 @@ function parentGitDirNames(parent, gitDir, cwd, timeoutMs) {
  * The rule, on the common dir `C` (the realpath of the answer):
  *   1. `C` is named `.git`: the workspace is its parent. No spawn.
  *   2. Otherwise `<parent of C>/.git` is probed with `--resolve-git-dir`. If it
- *      names `C`, the workspace is that parent (the `.bare` layout). A git that
- *      refuses, or names something else, is "no".
+ *      names `C`, the workspace is that parent (the `.bare` layout). A
+ *      `.git` that is absent, or that git names as something else, is "no".
+ *      A `.git` that exists and that git refuses fails the probe.
  *   3. Otherwise the workspace is `C` itself, with `gitDir: true`.
  *
  * `gitDir` is what the scratch root's key reads: a git dir's `.git` suffix
@@ -160,12 +172,13 @@ function parentGitDirNames(parent, gitDir, cwd, timeoutMs) {
  * uncanonicalised path.
  *
  * `timeoutMs` (default DEFAULT_GIT_TIMEOUT_MS) bounds this function's own
- * step-2 probe only, the one spawn it makes. The caller's `--git-common-dir`
+ * step-2 probe only, the one spawn it can make. The caller's `--git-common-dir`
  * probe that produced `gitCommonDir` is the caller's to bound, so a caller
  * passing the same `timeoutMs` to both can wait close to twice that in all.
  *
- * Throws WorkspaceProbeFailed only when the step-2 probe could not run to an
- * answer.
+ * Throws WorkspaceProbeFailed when the step-2 probe could not run to an
+ * answer: git missing or killed at its bound, or a `<parent of C>/.git` that
+ * exists and that git refuses.
  */
 export function resolveWorkspace(gitCommonDir, cwd = process.cwd(), { canonicalise = false, timeoutMs } = {}) {
   const common = String(gitCommonDir ?? "").trim();
