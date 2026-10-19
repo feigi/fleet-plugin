@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The reconcile tick. run-team's Phase 3 is an event loop, and implementer
+// The reconcile tick. run-team's wake table is an event loop, and implementer
 // refill was wired as an EDGE — "a member finished → refill its slot". That
 // edge dies the moment live implementers reach 0, because 0 implementers emit
 // no completion event, and "free capacity + a non-empty pool" is a LEVEL
