@@ -709,7 +709,8 @@ test("`next --head` for an excluded row naming no premise leaves it with the row
 });
 
 // The fleet tick reads an `excluded ·` reason prefix off a Pull that left, and re-admits that head once the
-// premise lifts. Every path that ends a Pull on an exclusion writes it, and the tick's own reader agrees.
+// premise lifts. Every path that ends a Pull on an exclusion naming a premise writes it, and the tick's own reader
+// agrees; a row naming no premise passes its own text on, which here starts `excluded ·` because the row does.
 test("every path ending a Pull on an exclusion writes a reason starting `excluded ·`, which the tick reads as no end", () => {
   const records = [];
   const held = (row, ghMatch) => {
@@ -741,7 +742,7 @@ test("every path ending a Pull on an exclusion writes a reason starting `exclude
   }
 });
 
-test("bare `next` takes a head whose Pull left on an exclusion once the premise lifts, and still skips one that left for any other reason", () => {
+test("bare `next` takes a head whose Pull left on an exclusion once the premise lifts, and still skips one that left for any other reason or was released", () => {
   const f = fixture({ shortlist: [50, 51, 52] });
   f.ledgerRow(50, "excluded · behind-issue:#9");
   f.ghRules([{ match: "^issue view 9 --json state$", out: '{"state":"OPEN"}' }]);
@@ -754,6 +755,16 @@ test("bare `next` takes a head whose Pull left on an exclusion once the premise 
   const lifted = f.next();
   assert.match(lifted.stdout, /^PULL #50: started/m, "the premise is lifted: the exclusion-ended head is pullable again");
   assert.equal(JSON.parse(readFileSync(join(f.scratch(), "impl-50", "pull.previous.json"), "utf8")).status, "left", "the ended Pull is kept beside the new one");
+
+  // A released Pull is an end whatever its reason carries, the exclusion prefix included.
+  const g = fixture({ shortlist: [50, 51] });
+  g.ledgerRow(50, "excluded · behind-issue:#9");
+  g.ghRules([{ match: "^issue view 9 --json state$", out: '{"state":"OPEN"}' }]);
+  assert.equal(g.next("--head", "50").status, 1);
+  writeFileSync(g.statePath(50), `${JSON.stringify({ ...g.state(50), status: "released" }, null, 2)}\n`);
+  assert.ok(g.state(50).outcome.reason.startsWith("excluded ·"), g.state(50).outcome.reason);
+  g.ghRules([{ match: "^issue view 9 --json state$", out: '{"state":"CLOSED"}' }]);
+  assert.match(g.next().stdout, /^PULL #51: started/m, "50's Pull was released: the premise is lifted, and the head is still 51");
 });
 
 test("`next --head` for a premise whose `gh` answer holds no state is exit 2 with no record", () => {

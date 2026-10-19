@@ -583,7 +583,7 @@ Pull, and each head a free slot Pulls gets its own row, read off that head's
 A head whose Pull already ended in this run — the ticket left, or the router
 refused it and its claim was released — gets no row: `next` without `--head`
 skips it, `next --head <N>` would start the ticket over, and the next head
-fills the slot, except a lifted exclusion's head (reason `excluded ·`): it is counted and Pulled again.
+fills the slot. A lifted exclusion's head (reason `excluded ·`) is the exception: it is counted and Pulled again.
 
 **A Pull never re-admits a ticket already relabelled**: the issue step reads the
 labels fresh and exits 1 `relabelled elsewhere` once `ready-for-agent` is gone.

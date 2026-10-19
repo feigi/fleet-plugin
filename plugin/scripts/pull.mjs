@@ -134,7 +134,7 @@ import { isDigits, makeDie } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { EXCLUDED_REASON, exclusionEnded, memberTokens, premisesOf, tierValues } from "./ledger-grammar.mjs";
+import { EXCLUDED_REASON, memberTokens, premisesOf, pullEnded, tierValues } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
 import { briefPaths, briefText, outOfScope, strandedRuling } from "./ticket-router.mjs";
 
@@ -1238,8 +1238,7 @@ function shortlistHead(p, run) {
     }
     const ended = readPull(p.statePath(n));
     // A Pull that left on an exclusion whose premise has lifted — checked above — is not an end: the head is taken again.
-    const ends = ended !== null && (ended.status === "released" || (ended.status === "left" && !exclusionEnded(ended.outcome?.reason)));
-    if (ends && (run === null || ended.session === run)) continue;
+    if (ended !== null && pullEnded(ended) && (run === null || ended.session === run)) continue;
     return n;
   }
   if (unreadable.length > 0) {

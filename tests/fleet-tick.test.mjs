@@ -5409,12 +5409,12 @@ test("CLI: draining, or held at the bound, with ended heads — no refresh, the 
 });
 
 // A Pull that left on an exclusion carries the reason `excluded · …`, and is no
-// end once the premise lifts: the head is counted and Pulled again. `left` is
-// the reason each of `heads` carries, in this run's session, and `fixture`
-// the rest of the run.
+// end once the premise lifts: the head is counted and Pulled again. `left` maps
+// each head to the reason its Pull left with, in this run's session, `pulls`
+// each head to a ready-made Pull record, and `fixture` is the rest of the run.
 const EXCLUDED_LEFT = (n, reason) => ({ record: pullRecord(n, { status: "left", outcome: { exit: 1, reason } }) });
-const exclusionTick = ({ file, refresh = file, left, bound = 3, ...fixture }) => {
-  const root = pullScratch(Object.fromEntries(Object.entries(left).map(([n, reason]) => [n, EXCLUDED_LEFT(Number(n), reason)])));
+const exclusionTick = ({ file, refresh = file, left = {}, pulls = {}, bound = 3, ...fixture }) => {
+  const root = pullScratch({ ...Object.fromEntries(Object.entries(left).map(([n, reason]) => [n, EXCLUDED_LEFT(Number(n), reason)])), ...pulls });
   try {
     return runCli(["--in-flight", String(bound)], {
       shortlist: shortlistText(file), refresh: shortlistText(refresh), phase0: (r) => ({ ...r, scratch: root, session: PULL_SESSION }), ...fixture,
@@ -5493,16 +5493,11 @@ test("CLI: a Pull that left for any other reason, or was released, stays ended a
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(pullNs(r.stdout), ["SUGGEST /triage, hold idle"], reason);
   }
-  const root = pullScratch({ 50: { record: pullRecord(50, { status: "released", outcome: { exit: 2, reason: "excluded · behind-pr:#44 OPEN" } }) } });
-  try {
-    const r = runCli(["--in-flight", "3"], {
-      shortlist: shortlistText([50]), refresh: shortlistText([50]), phase0: (x) => ({ ...x, scratch: root, session: PULL_SESSION }),
-      ledger: { rows: ["#50 excluded · behind-pr:#44"] }, prs: [],
-    });
-    assert.deepEqual(pullNs(r.stdout), ["SUGGEST /triage, hold idle"], "a released claim is ended whatever the reason says");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+  const released = exclusionTick({
+    file: [50], pulls: { 50: { record: pullRecord(50, { status: "released", outcome: { exit: 2, reason: "excluded · behind-pr:#44 OPEN" } }) } },
+    ledger: { rows: ["#50 excluded · behind-pr:#44"] }, prs: [],
+  });
+  assert.deepEqual(pullNs(released.stdout), ["SUGGEST /triage, hold idle"], "a released claim is ended whatever the reason says");
 });
 
 test("pullOf: a Pull that left on an exclusion is the fresh row, a left Pull of any other reason or none is ended", () => {

@@ -452,7 +452,7 @@ test("the REFRESHED and SUGGEST /triage tick rows leave an ended head out of the
 test("How a Pull ends: an ended head gets no row, and a Pull that ended on an exclusion is the exception once its premise has lifted", () => {
   const s = RUN_TEAM.paragraph("A head whose Pull already ended in this run", "run-team How a Pull ends paragraph", "**A Pull never re-admits").text;
   assert.match(s, Pin.phrase("gets no row: `next` without `--head` skips it, `next --head <N>` would start the ticket over, and the next head fills the slot"));
-  assert.match(s, Pin.phrase("except a lifted exclusion's head (reason `excluded ·`): it is counted and Pulled again"));
+  assert.match(s, Pin.phrase("A lifted exclusion's head (reason `excluded ·`) is the exception: it is counted and Pulled again"));
 });
 
 test("the UNRECORDED tick row names its remedy: record the dispatch on the ledger, or confirm it is a stranger's member", () => {
