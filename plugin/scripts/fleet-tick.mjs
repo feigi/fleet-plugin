@@ -51,14 +51,17 @@
 //             GitHub's `mergeable` — the merge queue, which PRs are owed a
 //             review, which conflict, and the PR half of the In-flight count:
 //             every open PR that closes an issue, whoever opened it and
-//             whatever its state. Also, for each ticket holding the
-//             implementer row on a tier mismatch or owed a replacement,
-//             whether its issue is CLOSED (`gh issue view`): a closed
-//             ticket's mismatch holds nothing and its owed replacement is not
-//             in flight. And, for each in-flight `review=` token whose PR
-//             the open list does not carry, whether that PR is MERGED or
-//             CLOSED (`gh pr view`): a review cannot be running against a
-//             finished PR, so its dangling token is not a review unit.
+//             whatever its state. Also, for each in-flight `review=` token
+//             whose PR the open list does not carry, and for each ticket's
+//             latest settled `impl-*=PR#<M>` PR the open list does not carry,
+//             that PR's state (`gh pr view`, once per PR): a review cannot
+//             be running against a finished PR, so its dangling token is not
+//             a review unit, and a PR CLOSED unmerged prints an ESCALATE line
+//             for its ticket. And, for each ticket holding the implementer
+//             row on a tier mismatch, owed a replacement, or whose keyed PR
+//             read CLOSED or unread, whether its issue is CLOSED (`gh issue
+//             view`): a closed ticket's mismatch holds nothing, its owed
+//             replacement is not in flight, and its PR prints no line.
 //   main      The main checkout against the run-start baseline
 //             `.fleet/main-checkout.sha`, through main-checkout.mjs.
 //             Anything but `clean` — dirty, unknown, no baseline — prints one
@@ -146,13 +149,35 @@ export function reconcile(s) {
   const rev = reviewers(s);
   // The conflict rows only ask the controller to write a record — never to
   // dispatch — so they stand outside the dispatch hold: the fix-applier a
-  // conflict hold leads to obeys the hold through its own role's row.
+  // conflict hold leads to obeys the hold through its own role's row. The
+  // closed-PR rows dispatch nothing either.
   return [
     ...dispatchHold(s, [...implementers(s), ...rev.rows]),
     ...rev.conflictRows,
+    ...prClosedRows(s),
     ...dispatchHold(s, [mergeBot(s)]),
     ...shortlistRows(s),
     ...routerRows(s),
+  ];
+}
+
+// A ticket whose PR closed unmerged while its issue stays open: unknown
+// intent, so the line is the maintainer's and not actionable. One line per
+// ticket, beside the implementer row and never in it — it takes no slot and
+// counts toward no bound. While a member on PR M is live the line names it:
+// nothing resolves the ticket until that member settles. A state probe that
+// could not answer prints its own line, and the next tick probes again.
+function prClosedRows(s) {
+  const live = (k) => (k.live.length ? ` — ${k.live.join(", ")} live` : "");
+  return [
+    ...s.prClosed.map((k) => ({
+      role: "tickets", action: `ESCALATE pr-closed #${k.n} PR#${k.pr}${live(k)}`, acts: false,
+      detail: `PR#${k.pr} closed unmerged and #${k.n} is open: the maintainer's — dispatch nothing for #${k.n}`,
+    })),
+    ...s.prUnchecked.map((k) => ({
+      role: "tickets", action: `ESCALATE pr-unchecked #${k.n} PR#${k.pr}`, acts: false,
+      detail: `gh could not read PR#${k.pr}'s state; read again next tick`,
+    })),
   ];
 }
 
@@ -919,7 +944,10 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
 export const pastPinDue = (st, head) => st !== undefined && st.pastPinHalt && !st.inFlight && st.reviewedHead !== null
   && !String(head).toLowerCase().startsWith(st.reviewedHead);
 
-export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed = new Set(), finished = new Set()) {
+// The states `gh pr view --json state` answers: anything else is no answer.
+const PR_STATES = ["OPEN", "MERGED", "CLOSED"];
+
+export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed = new Set(), prStates = new Map()) {
   const open = new Set(prs.map((p) => p.number));
   const { members, byPr, verdicts, claimed, excluded } = foldLedger({ rows, dispatched }, open);
   // `## Retired` lines as every reader reads them: a line's name before its
@@ -951,6 +979,41 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
   // A still-open ticket keeps its hold.
   const mismatched = (m) => m.outcome === "tier-mismatch" || verdicts.mismatch.has(m.name);
   const tierMismatch = newest.filter((m) => mismatched(m) && !closed.has(m.number)).map((m) => m.name);
+  // A ticket whose PR closed unmerged. Each ticket is keyed on its LATEST impl
+  // member settled `PR#<M>`, walked the way `newest` is — never on rowPr(),
+  // which stays first-wins for the per-PR fold — and left alone while an impl
+  // member after that one is live (a replacement is running) or once one
+  // after it settled `released` (the claim was released). A later `bailed`,
+  // `blocked` or `killed` leaves the key on M. So does a later
+  // `tier-mismatch`, but the ticket says nothing while the implementer row
+  // holds on that mismatch: the row owes the replacement at its tier — the
+  // maintainer's `replace` carried on — and holds every Pull until it is
+  // dispatched, so a line saying to dispatch nothing for the ticket would
+  // stall it. Once that replacement settles the walk reads it like any other.
+  // A mismatch on the keyed member itself is no replacement of M and still
+  // prints. A keyed PR the open list carries is normal flow; one it does not
+  // is named in `prKeyed` for the caller's state probe, `prStates` its
+  // answers (null for a probe that could not answer, none by default).
+  // CLOSED escalates, an unanswered probe escalates as unchecked, OPEN and
+  // MERGED say nothing, and a ticket whose issue the caller found CLOSED
+  // (`closed`) says nothing either way.
+  const settledPr = (m) => (m.outcome?.startsWith("PR#") ? Number(m.outcome.slice("PR#".length)) : null);
+  const supersedes = (o) => settledPr(o) !== null || o.outcome === null || o.outcome === "released";
+  const latestPr = impls.filter((m, i) => settledPr(m) !== null
+    && !impls.some((o, j) => j > i && o.number === m.number && supersedes(o)));
+  const keyed = new Set(latestPr.map((m) => m.name));
+  const replacementHeld = new Set(newest.filter((m) => tierMismatch.includes(m.name) && !keyed.has(m.name)).map((m) => m.number));
+  const prKeyed = latestPr.filter((m) => !replacementHeld.has(m.number)).map((m) => ({ n: m.number, pr: settledPr(m) }))
+    .filter((k) => !open.has(k.pr)).sort((a, b) => a.n - b.n);
+  const prSurfaced = prKeyed.filter((k) => !closed.has(k.n));
+  // Who on PR M is live: an unsettled fix-applier or finisher bound to it, and
+  // a live merge bot when M's latest finisher attempt settled `labelled` with
+  // no `label-off=` after it — the ledger's reading of M in the merge queue.
+  const queuedOnLedger = new Set(latestFinisherAttempts({ rows, dispatched }, new Set(prSurfaced.map((k) => k.pr)))
+    .filter((u) => u.outcome === "labelled").map((u) => u.pr));
+  const liveOn = (pr) => all.filter((m) => m.outcome === null
+    && (((m.family === "fix-pr" || m.family === "finisher-pr") && m.number === pr) || (m.family === "merge-bot" && queuedOnLedger.has(pr))))
+    .map((m) => m.name).sort();
   const cleared = (m) => verdicts.ok.has(m.name) || verdicts.unverifiable.has(m.name);
   const tierUnchecked = newest.filter((m) => !mismatched(m) && !cleared(m)).map((m) => m.name);
   // The In-flight count: tickets between a Claim and their PR's merge. Read off
@@ -1005,12 +1068,13 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
   // A `review=` token with no `reviewed=` after it reads as in flight, and the
   // ledger alone never says otherwise: a review whose own `reviewed=` write
   // never landed stays in flight after its PR merges, counting as a review unit
-  // for good. `finished` is the PR numbers the caller has found MERGED or
-  // CLOSED, and a finished PR has no review running against it. A PR on the
-  // open list is open whatever `finished` says, and none is the default, so a
+  // for good. A PR the caller's probe found MERGED or CLOSED (`prStates`) is
+  // finished, and a finished PR has no review running against it. A PR on the
+  // open list is open whatever the probe says, and none is the default, so a
   // PR nobody has asked about keeps its review live.
   const reviewing = [...byPr.entries()].filter(([, st]) => st.inFlight);
-  const liveReviews = reviewing.filter(([n]) => open.has(n) || !finished.has(n));
+  const finished = (n) => prStates.get(n) === "MERGED" || prStates.get(n) === "CLOSED";
+  const liveReviews = reviewing.filter(([n]) => open.has(n) || !finished(n));
   const unsettled = all.filter((m) => m.outcome === null).map((m) => m.name);
   return {
     implLive: live("impl"),
@@ -1019,6 +1083,15 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
     inFlightPrs: prsIn.length,
     owedReplacement,
     owedCounted,
+    // Each ticket's keyed PR the open list does not carry, `{n, pr}` ascending
+    // by ticket: the PRs the caller probes the state of.
+    prKeyed,
+    // The tickets whose keyed PR the probe read CLOSED, each with `live`, the
+    // members on PR M still unsettled; and those whose probe did not answer.
+    // Additive lines beside the implementer row: neither counts toward
+    // anything above.
+    prClosed: prSurfaced.filter((k) => prStates.get(k.pr) === "CLOSED").map((k) => ({ ...k, live: liveOn(k.pr) })),
+    prUnchecked: prSurfaced.filter((k) => !PR_STATES.includes(prStates.get(k.pr))),
     fixLive: live("fix-pr"),
     mergeBotLive,
     // The number of every merge bot settled `done`: each is a merge pass
@@ -1026,7 +1099,7 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
     mergeBotDone: all.filter((m) => m.family === "merge-bot" && m.outcome === "done").map((m) => m.number).sort(asc),
     reviewsLive: liveReviews.length,
     // The in-flight reviews of PRs the open list does not carry: the ones
-    // `finished` could retire, so the caller asks gh about these and no others.
+    // the probe could retire, so the caller asks gh about these and no others.
     reviewsOffList: reviewing.filter(([n]) => !open.has(n)).map(([n]) => n).sort(asc),
     // A returned review whose survived or unverified findings no review
     // fix-applier has answered — `ledger.mjs dispatch` refuses a finisher
@@ -1687,21 +1760,27 @@ function liftedPremise(excluded, entries, prs) {
 }
 
 // The tickets whose issue is CLOSED, of those the tick would otherwise keep
-// counting or holding on: every ticket holding the implementer row on a tier
-// mismatch, and every ticket owed a replacement. One live read deriveRun needs
-// to lift a hold, and uncount a ticket, whose replacement has nothing left to
-// replace. One `gh issue view` per ticket, deduped (a tier-mismatch outcome is
+// counting, holding on or escalating: every ticket holding the implementer row
+// on a tier mismatch, every ticket owed a replacement, and every ticket whose
+// keyed PR the state probe read CLOSED or could not read (`surfacing`). One
+// live read deriveRun needs to lift a hold, uncount a ticket whose replacement
+// has nothing left to replace, and drop a closed-PR line for a ticket that is
+// done. One `gh issue view` per ticket, deduped (a tier-mismatch outcome is
 // both), and none when nothing is owed. A probe that cannot answer — a nonzero
 // exit, or a reply carrying no issue state — is disclosed, and the ticket
-// stays counted and its hold stands: an unreadable state never uncounts.
-function closedTickets(mismatched, owed) {
+// stays counted, its hold stands and its line prints: an unreadable state
+// never uncounts.
+function closedTickets(mismatched, owed, surfacing) {
   const closed = new Set();
   const mismatchedNumbers = new Set(mismatched.map((name) => parseMember(name).number));
-  const numbers = new Set([...mismatchedNumbers, ...owed.map((name) => parseMember(name).number)]);
+  const owedNumbers = new Set(owed.map((name) => parseMember(name).number));
+  const numbers = new Set([...mismatchedNumbers, ...owedNumbers, ...surfacing]);
   for (const number of numbers) {
     const unconfirmed = mismatchedNumbers.has(number)
       ? `tier mismatch on #${number} unconfirmed closed, hold stands`
-      : `replacement owed on #${number} unconfirmed closed, ticket stays counted`;
+      : owedNumbers.has(number)
+        ? `replacement owed on #${number} unconfirmed closed, ticket stays counted`
+        : `#${number} unconfirmed closed, its closed-PR line stands`;
     const r = spawnSync("gh", ["issue", "view", String(number), "--json", "state"], { encoding: "utf8", timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }) });
     if (r.error || r.status !== 0) {
       console.error(`${NAME}: ${failure(r, `gh issue view ${number}`)} — ${unconfirmed}`);
@@ -1719,29 +1798,36 @@ function closedTickets(mismatched, owed) {
   return closed;
 }
 
-// The PRs, of those whose review the ledger reads as in flight yet the open
-// list does not carry, that gh says are MERGED or CLOSED. A review cannot be
-// running against a finished PR, so the ledger's dangling `review=` token must
-// not count as a review unit for good. A probe that cannot answer — a nonzero
-// exit, a reply carrying no state, a state that is none of the three — is
-// disclosed and the review keeps its unit: an unreadable state is never read
-// as finished. A PR gh calls OPEN keeps it quietly.
-function finishedReviewPrs(offList) {
-  const finished = new Set();
-  for (const number of offList) {
+// The state of each PR the tick asks gh about, one `gh pr view --json state`
+// per PR however many readings need it: `reviews`, the PRs whose review the
+// ledger reads as in flight yet the open list does not carry, and `keyed`,
+// each ticket's keyed PR the open list does not carry (deriveRun's
+// `prKeyed`). The answer is OPEN, MERGED or CLOSED, or null for a probe that
+// could not answer — a nonzero exit, a reply carrying no state, a state that
+// is none of the three — which is disclosed with what it leaves standing.
+function prStates(reviews, keyed) {
+  const states = new Map();
+  const reviewed = new Set(reviews);
+  // Two tickets can be keyed on one PR: each is named, on its one probe.
+  const ticketsOf = new Map();
+  for (const k of keyed) ticketsOf.set(k.pr, [...(ticketsOf.get(k.pr) ?? []), k.n]);
+  for (const number of [...new Set([...reviews, ...ticketsOf.keys()])].sort((a, b) => a - b)) {
+    const unconfirmed = [
+      ...(reviewed.has(number) ? [`review on PR#${number} unconfirmed finished, its unit stands`] : []),
+      ...(ticketsOf.get(number) ?? []).map((n) => `#${n}'s PR#${number} unconfirmed closed, printed as pr-unchecked`),
+    ].join("; ");
+    states.set(number, null);
     const r = spawnSync("gh", ["pr", "view", String(number), "--json", "state"], { encoding: "utf8", timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }) });
     if (r.error || r.status !== 0) {
-      console.error(`${NAME}: ${failure(r, `gh pr view ${number}`)} — review on PR#${number} unconfirmed finished, its unit stands`);
+      console.error(`${NAME}: ${failure(r, `gh pr view ${number}`)} — ${unconfirmed}`);
       continue;
     }
     let st = null;
     try { st = JSON.parse(r.stdout).state; } catch { /* no state: disclosed below */ }
-    if (st === "MERGED" || st === "CLOSED") finished.add(number);
-    else if (st !== "OPEN") {
-      console.error(`${NAME}: gh pr view ${number} printed no PR state — review on PR#${number} unconfirmed finished, its unit stands`);
-    }
+    if (PR_STATES.includes(st)) states.set(number, st);
+    else console.error(`${NAME}: gh pr view ${number} printed no PR state — ${unconfirmed}`);
   }
-  return finished;
+  return states;
 }
 
 // shortlist.mjs, run by the tick itself. Its per-ticket stderr is
@@ -1885,15 +1971,21 @@ export function controllerState(controller, name = NAME) {
   }
 }
 
-// The run off the ledger, with the closed tickets and finished reviews gh
-// says the ledger cannot. A ledger it cannot read refuses the tick.
+// The run off the ledger, with the closed tickets, finished reviews and keyed
+// PR states gh says the ledger cannot. A review cannot be running against a
+// MERGED or CLOSED PR, so its dangling `review=` token stops counting as a
+// review unit; an unread state is never read as finished. The issue probe asks
+// only about the tickets whose keyed PR read CLOSED or could not be read: OPEN
+// and MERGED print nothing whatever the issue says. A ledger it cannot read
+// refuses the tick.
 function readRun(prs) {
   try {
     const ledger = readLedger();
     const run = deriveRun(ledger, prs);
-    const closed = closedTickets(run.tierMismatch, run.owedReplacement);
-    const finished = finishedReviewPrs(run.reviewsOffList);
-    return closed.size || finished.size ? deriveRun(ledger, prs, closed, finished) : run;
+    const states = prStates(run.reviewsOffList, run.prKeyed);
+    const surfacing = run.prKeyed.filter((k) => states.get(k.pr) !== "OPEN" && states.get(k.pr) !== "MERGED").map((k) => k.n);
+    const closed = closedTickets(run.tierMismatch, run.owedReplacement, surfacing);
+    return deriveRun(ledger, prs, closed, states);
   } catch (e) {
     if (e instanceof LedgerError) die(e.message);
     throw e;

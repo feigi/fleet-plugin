@@ -326,6 +326,7 @@ const ROW_NAMES = [
   "`ESCALATE unlabelled PR#<M> …`",
   "`CONFLICT PR#<M> …`",
   "`ESCALATE conflict PR#<M> …`",
+  "`ESCALATE pr-closed #<N> PR#<M>`, `… pr-unchecked …`",
   "`HOLD (…)`",
   "`AT CAP`, `IDLE OK`",
   "`MAIN-CHECKOUT-DIRTY …`",
@@ -550,6 +551,10 @@ const CHANGED = [
   [
     "The brief carries what varies, and the renderer prints it: `~/.fleet/bin/fleet-run dispatch-prompt.mjs render fix-applier --kind <review|conflict|dispositions-retry|red-check> --member <name> --worktree <abs-path> --branch <branch> --testCmd <testCmd> --scratch <scratch>`, plus `--pr <pr#> --run <run>` for a review or a dispositions retry and `--mismatched-record <path> --violations <list>` for a retry.",
     "The brief carries what varies, and the renderer prints it: `~/.fleet/bin/fleet-run dispatch-prompt.mjs render fix-applier --kind <review|conflict|dispositions-retry|red-check> --member <name> --worktree <abs-path> --branch <branch> --testCmd <testCmd> --checkCmd <checkCmd> --scratch <scratch>`, plus `--pr <pr#> --run <run>` for a review or a dispositions retry and `--mismatched-record <path> --violations <list>` for a retry."
+  ],
+  [
+    "`NEED resume #<n> <worktree> <branch>` — a dead run's claim with no PR.",
+    "`NEED resume #<n> <worktree> <branch>` — a dead run's claim: no PR, or not only `CLOSED` ones."
   ]
 ];
 

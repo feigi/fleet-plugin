@@ -17,6 +17,7 @@ const state = (over = {}) => ({
   draining: null, tierMismatch: [], tierUnchecked: [], implNames: [],
   heads: [], supply: 0, shortlistStatus: "ok", refresh: null, dropped: [], pulls: new Map(),
   reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [], unlabelled: [], conflicts: [], conflictEscalate: [],
+  prClosed: [], prUnchecked: [],
   mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeConflictHeld: 0,
   mainCheckout: { state: "clean" }, phase0: { held: false, line: null, session: null },
   ...over,
@@ -603,7 +604,7 @@ const pr = (number, labels = [], closes = [number + 1000], headRefOid = HEAD_B, 
   closingIssuesReferences: closes.map((n) => ({ number: n })),
   headRefOid, mergeable,
 });
-const run = (ledger, prs = [], closed, finished) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs, closed, finished);
+const run = (ledger, prs = [], closed, prStates) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs, closed, prStates);
 
 test("deriveRun: live implementers are the unsettled impl- tokens — the #1692 shape, read rather than recited", () => {
   // #1692 was two sources disagreeing about the same fleet. There is one
@@ -675,24 +676,130 @@ test("deriveRun: reviewsOffList is ascending whatever order the ledger rows arri
 });
 
 test("deriveRun: a review in flight on a PR the caller found merged or closed is not live", () => {
-  const r = run({ rows: ZOMBIE_ROWS }, [pr(21)], undefined, new Set([20, 22]));
+  const r = run({ rows: ZOMBIE_ROWS }, [pr(21)], undefined, new Map([[20, "MERGED"], [22, "CLOSED"]]));
   assert.equal(r.reviewsLive, 1, "only PR 21's review, on the open list, is live");
   assert.deepEqual(r.live, ["review:PR#21"]);
 });
 
-test("deriveRun: a review in flight on an OPEN PR is live whatever the finished set says", () => {
+test("deriveRun: a review in flight on an OPEN PR is live whatever the probe says", () => {
   // A probe answer that contradicts the open list is not trusted to retire a
   // review: the open list is the fold's own read of which PRs are open.
-  const r = run({ rows: ZOMBIE_ROWS }, [pr(20), pr(21), pr(22)], undefined, new Set([20, 21, 22]));
+  const r = run({ rows: ZOMBIE_ROWS }, [pr(20), pr(21), pr(22)], undefined, new Map([[20, "MERGED"], [21, "CLOSED"], [22, "MERGED"]]));
   assert.equal(r.reviewsLive, 3);
   assert.deepEqual(r.reviewsOffList, []);
 });
 
 test("deriveRun: a finished PR's returned review and settled members read as before", () => {
   const rows = [...ZOMBIE_ROWS, "#40 impl-40=PR#50 → PR#50 · review=member:review-pr-50 reviewed=abc1234:0/0/0:run-abc1234r"];
-  const r = run({ rows }, [], undefined, new Set([20, 21, 22, 50]));
+  const r = run({ rows }, [], undefined, new Map([[20, "MERGED"], [21, "CLOSED"], [22, "MERGED"], [50, "MERGED"]]));
   assert.deepEqual([r.reviewsLive, r.reviewsOffList, r.live], [0, [20, 21, 22], []]);
   assert.deepEqual(r.reviewed.map((x) => x.pr), [50], "the returned review is still on record");
+});
+
+// A ticket whose PR closed unmerged while its issue stays open. The fold keys
+// each ticket on its latest impl member settled `PR#<M>`, the caller probes M
+// when the open list does not carry it, and the line it reads is printed
+// beside the implementer row — read here at the deriveRun/output seam.
+const ROW12 = "#12 impl-12=PR#40 → PR#40";
+const states = (o) => new Map(Object.entries(o).map(([k, v]) => [Number(k), v]));
+const ticketsRows = (r) => rowsOf(state(r), "tickets").map((x) => x.action);
+const closedPrLines = (ledger, prs, closed, prStates) => ticketsRows(run(ledger, prs, closed, prStates));
+
+test("deriveRun: the closed-PR transition table — escalate on M, nothing while a replacement runs or its PR is open, again once it gives up, on M′ once it closes", () => {
+  const first = { rows: [ROW12], dispatched: ["impl-12=PR#40"] };
+  assert.deepEqual(run(first).prKeyed, [{ n: 12, pr: 40 }], "M off the open list is named for the probe");
+  assert.deepEqual(closedPrLines(first, [], undefined, states({ 40: "CLOSED" })), ["ESCALATE pr-closed #12 PR#40"]);
+
+  const replacing = { rows: [`${ROW12} · impl-12-b`], dispatched: ["impl-12=PR#40", "impl-12-b"] };
+  assert.deepEqual(run(replacing).prKeyed, [], "a live impl-12-b: the replacement is running, nothing is probed");
+  assert.deepEqual(closedPrLines(replacing, [], undefined, states({ 40: "CLOSED" })), []);
+
+  const replaced = { rows: [`${ROW12} · impl-12-b=PR#41`], dispatched: ["impl-12=PR#40", "impl-12-b=PR#41"] };
+  assert.deepEqual(run(replaced, [pr(41)]).prKeyed, [], "keyed on M′, which the open list carries; M is never probed");
+  assert.deepEqual(closedPrLines(replaced, [pr(41)], undefined, states({ 40: "CLOSED" })), []);
+
+  const released = { rows: [`${ROW12} · impl-12-b=released`], dispatched: ["impl-12=PR#40", "impl-12-b=released"] };
+  assert.deepEqual(run(released).prKeyed, [], "a `release #12` recorded as impl-12-b=released ends it");
+  assert.deepEqual(closedPrLines(released, [], undefined, states({ 40: "CLOSED" })), []);
+
+  for (const outcome of ["bailed", "blocked", "killed"]) {
+    const gaveUp = { rows: [`${ROW12} · impl-12-b=${outcome}`], dispatched: ["impl-12=PR#40", `impl-12-b=${outcome}`] };
+    assert.deepEqual(run(gaveUp).prKeyed, [{ n: 12, pr: 40 }], outcome);
+    assert.deepEqual(closedPrLines(gaveUp, [], undefined, states({ 40: "CLOSED" })), ["ESCALATE pr-closed #12 PR#40"], outcome);
+  }
+
+  // A replacement held on a tier mismatch owes the next one at its tier, and
+  // the implementer row asks for it: nothing here says otherwise until that
+  // one settles. A mismatch on the keyed member itself replaces nothing.
+  for (const [what, tail] of [["settled tier-mismatch", "impl-12-b=tier-mismatch"], ["bailed with a mismatch verdict", "impl-12-b=bailed tier-mismatch=impl-12-b:fleet-implementer"]]) {
+    const held = { rows: [`${ROW12} · ${tail}`], dispatched: ["impl-12=PR#40", tail.split(" ")[0]] };
+    const r = run(held, [], undefined, states({ 40: "CLOSED" }));
+    assert.deepEqual([r.tierMismatch, r.prKeyed, ticketsRows(r)], [["impl-12-b"], [], []], what);
+  }
+  const heldThenBailed = { rows: [`${ROW12} · impl-12-b=tier-mismatch · impl-12-c=bailed`], dispatched: ["impl-12=PR#40", "impl-12-b=tier-mismatch", "impl-12-c=bailed"] };
+  assert.deepEqual(closedPrLines(heldThenBailed, [], undefined, states({ 40: "CLOSED" })), ["ESCALATE pr-closed #12 PR#40"], "the tier replacement gave up: back on M");
+  const selfMismatched = { rows: [`${ROW12} · tier-mismatch=impl-12:fleet-implementer`], dispatched: ["impl-12=PR#40"] };
+  const self = run(selfMismatched, [], undefined, states({ 40: "CLOSED" }));
+  assert.deepEqual([self.tierMismatch, ticketsRows(self)], [["impl-12"], ["ESCALATE pr-closed #12 PR#40"]]);
+
+  assert.deepEqual(run(replaced).prKeyed, [{ n: 12, pr: 41 }], "the latest settled PR, never the row's first");
+  assert.deepEqual(closedPrLines(replaced, [], undefined, states({ 40: "CLOSED", 41: "CLOSED" })), ["ESCALATE pr-closed #12 PR#41"]);
+});
+
+test("deriveRun: keyed tickets come out ascending by ticket whatever the ledger's row order, and so do their lines", () => {
+  const l = { rows: ["#13 impl-13=PR#41 → PR#41", ROW12], dispatched: ["impl-13=PR#41", "impl-12=PR#40"] };
+  assert.deepEqual(run(l).prKeyed, [{ n: 12, pr: 40 }, { n: 13, pr: 41 }]);
+  assert.deepEqual(closedPrLines(l, [], undefined, states({ 40: "CLOSED", 41: "CLOSED" })), ["ESCALATE pr-closed #12 PR#40", "ESCALATE pr-closed #13 PR#41"]);
+});
+
+test("deriveRun: no closed-PR line for a CLOSED issue, a MERGED or OPEN PR, or a PR on the open list; pr-unchecked for a probe with no answer", () => {
+  const l = { rows: [ROW12], dispatched: ["impl-12=PR#40"] };
+  assert.deepEqual(closedPrLines(l, [], new Set([12]), states({ 40: "CLOSED" })), [], "#12 CLOSED: the ticket is done");
+  assert.deepEqual(closedPrLines(l, [], undefined, states({ 40: "MERGED" })), []);
+  assert.deepEqual(closedPrLines(l, [], undefined, states({ 40: "OPEN" })), []);
+  assert.deepEqual(closedPrLines(l, [pr(40)], undefined, states({ 40: "CLOSED" })), [], "the open list outranks a probe");
+  assert.deepEqual(run(l, [pr(40)]).prKeyed, []);
+  assert.deepEqual(closedPrLines(l, [], undefined, states({ 40: null })), ["ESCALATE pr-unchecked #12 PR#40"]);
+  assert.deepEqual(closedPrLines(l, [], undefined, new Map()), ["ESCALATE pr-unchecked #12 PR#40"], "a PR nobody probed is never read as answered");
+  assert.deepEqual(closedPrLines(l, [], new Set([12]), states({ 40: null })), [], "#12 CLOSED silences an unanswered PR too");
+  assert.deepEqual(closedPrLines({ rows: ["#12 impl-12"], dispatched: ["impl-12"] }, [], undefined, new Map()), [],
+    "a live implementer has settled nothing to key on");
+});
+
+test("deriveRun: a pr-closed line names every live member on PR M, and only M's", () => {
+  const at = (tail, dispatched, prs = []) => closedPrLines({ rows: [`${ROW12} · ${tail}`], dispatched: ["impl-12=PR#40", ...dispatched] },
+    prs, undefined, states({ 40: "CLOSED" }));
+  assert.deepEqual(at("fix-pr-40", ["fix-pr-40"]), ["ESCALATE pr-closed #12 PR#40 — fix-pr-40 live"]);
+  assert.deepEqual(at("fix-pr-40=no-op finisher-pr-40", ["fix-pr-40=no-op", "finisher-pr-40"]), ["ESCALATE pr-closed #12 PR#40 — finisher-pr-40 live"]);
+  assert.deepEqual(at("fix-pr-40-b finisher-pr-40", ["fix-pr-40-b", "finisher-pr-40"]),
+    ["ESCALATE pr-closed #12 PR#40 — finisher-pr-40, fix-pr-40-b live"]);
+  // A merge bot holds M when the ledger reads M queued: its latest finisher
+  // attempt settled `labelled`, with no `label-off=` after it.
+  assert.deepEqual(at("finisher-pr-40=labelled", ["finisher-pr-40=labelled", "merge-bot-1"]), ["ESCALATE pr-closed #12 PR#40 — merge-bot-1 live"]);
+  assert.deepEqual(at("finisher-pr-40=labelled", ["finisher-pr-40=labelled", "merge-bot-1=done"]), ["ESCALATE pr-closed #12 PR#40"]);
+  assert.deepEqual(at("finisher-pr-40=failed", ["finisher-pr-40=failed", "merge-bot-1"]), ["ESCALATE pr-closed #12 PR#40"],
+    "M never queued: a live merge bot holds nothing of M's");
+  assert.deepEqual(at("finisher-pr-40=labelled label-off=finisher-pr-40", ["finisher-pr-40=labelled", "merge-bot-1"]), ["ESCALATE pr-closed #12 PR#40"],
+    "the label taken off on purpose: M left the queue");
+  assert.deepEqual(at("fix-pr-40=no-op", ["fix-pr-40=no-op", "fix-pr-41"]), ["ESCALATE pr-closed #12 PR#40"], "a settled member, or one on another PR, is not M's");
+});
+
+test("deriveRun: a closed-PR line is additive — the implementer row, the In-flight count and every other row read the same", () => {
+  const l = { rows: [ROW12, "#13 impl-13", "#14 impl-14=PR#42 → PR#42"], dispatched: ["impl-12=PR#40", "impl-13", "impl-14=PR#42"] };
+  const quiet = run(l, [pr(42, [], [14])], undefined, states({ 40: "MERGED" }));
+  const loud = run(l, [pr(42, [], [14])], undefined, states({ 40: "CLOSED" }));
+  assert.deepEqual([loud.inFlight, loud.inFlightImpl, loud.inFlightPrs, loud.implLive], [quiet.inFlight, quiet.inFlightImpl, quiet.inFlightPrs, quiet.implLive]);
+  assert.deepEqual([loud.inFlight, loud.inFlightImpl], [2, 1], "#12 is in flight on no account: its PR is gone and its member settled");
+  for (const heads of [[], [77]]) {
+    const before = reconcile(state({ ...quiet, heads, supply: heads.length }));
+    const after = reconcile(state({ ...loud, heads, supply: heads.length }));
+    assert.deepEqual(after.filter((x) => x.role !== "tickets"), before, `heads ${heads}`);
+    assert.deepEqual(after.filter((x) => x.role === "tickets").map((x) => [x.action, x.acts]), [["ESCALATE pr-closed #12 PR#40", false]]);
+    assert.equal(actionable(after), actionable(before), "not actionable: the maintainer's, so the beat backs off on it");
+  }
+  const held = reconcile(state({ ...loud, mainCheckout: { state: "dirty", changed: ["x"] } }));
+  assert.deepEqual(held.filter((x) => x.role === "tickets").map((x) => x.action), ["ESCALATE pr-closed #12 PR#40"], "it dispatches nothing, so no hold rewrites it");
+  assert.match(formatLines(reconcile(state(loud))).find((x) => x.startsWith("tickets")), /^tickets +→ ESCALATE pr-closed #12 PR#40 {3}\(PR#40 closed unmerged and #12 is open/);
 });
 
 test("deriveRun: fix-pr is due on a returned review with survived or unverified findings and no fix-applier since", () => {
@@ -2871,6 +2978,48 @@ test("CLI: a CLOSED PR's dangling review is no review unit either", () => {
   });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^reviewers +0\/2 → DISPATCH review PR#500/m);
+});
+
+test("CLI: a ticket's PR closed unmerged prints ESCALATE pr-closed off the review's own probe; a closed issue or a merged PR prints nothing", () => {
+  const tick = (over) => runCli([], { shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows([101]) }, ...over });
+  const closed = tick({ prStates: { 101: "CLOSED" }, issueStates: { 11: "OPEN" } });
+  assert.equal(closed.status, 0, closed.stderr);
+  assert.deepEqual(closed.prViews, ["101"], "one probe per PR per tick: the review's and the ticket's are the same call");
+  assert.deepEqual(closed.issueViews, ["11"]);
+  assert.match(closed.stdout, /^tickets +→ ESCALATE pr-closed #11 PR#101 {3}\(/m);
+
+  const done = tick({ prStates: { 101: "CLOSED" }, issueStates: { 11: "CLOSED" } });
+  assert.equal(done.status, 0, done.stderr);
+  assert.doesNotMatch(done.stdout, /ESCALATE pr-/);
+
+  const merged = tick({ prStates: { 101: "MERGED" } });
+  assert.equal(merged.status, 0, merged.stderr);
+  assert.deepEqual([merged.prViews, merged.issueViews], [["101"], []], "a MERGED PR asks nothing of the issue");
+  assert.doesNotMatch(merged.stdout, /ESCALATE pr-/);
+  const implRow = (r) => r.stdout.split("\n").find((x) => x.startsWith("implementers"));
+  assert.equal(implRow(closed), implRow(merged), "the implementer row prints the same either way");
+
+  const unread = tick({ prStates: { 101: "CLOSED" }, issueStates: { 11: "OPEN" }, env: { PR_VIEW_FAIL: "1" } });
+  assert.equal(unread.status, 0, unread.stderr);
+  assert.match(unread.stdout, /^tickets +→ ESCALATE pr-unchecked #11 PR#101 {3}\(/m);
+  assert.match(unread.stderr, /gh pr view 101 exited 1: gh: pr view failed — review on PR#101 unconfirmed finished, its unit stands; #11's PR#101 unconfirmed closed, printed as pr-unchecked/);
+
+  const issueUnread = tick({ prStates: { 101: "CLOSED" }, env: { ISSUE_VIEW_FAIL: "1" } });
+  assert.equal(issueUnread.status, 0, issueUnread.stderr);
+  assert.match(issueUnread.stdout, /^tickets +→ ESCALATE pr-closed #11 PR#101/m, "an unread issue is never read as closed");
+  assert.match(issueUnread.stderr, /#11 unconfirmed closed, its closed-PR line stands/);
+});
+
+test("CLI: two tickets keyed on one PR share its one probe, and a probe that cannot answer names both", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([]), prs: [REVIEW_DUE], env: { PR_VIEW_FAIL: "1" },
+    ledger: { rows: ["#12 impl-12=PR#40 → PR#40", "#13 impl-13=PR#40 → PR#40"], dispatched: ["impl-12=PR#40", "impl-13=PR#40"] },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.prViews, ["40"]);
+  assert.match(r.stdout, /^tickets +→ ESCALATE pr-unchecked #12 PR#40 {3}\(/m);
+  assert.match(r.stdout, /^tickets +→ ESCALATE pr-unchecked #13 PR#40 {3}\(/m);
+  assert.match(r.stderr, /gh pr view 40 exited 1: gh: pr view failed — #12's PR#40 unconfirmed closed, printed as pr-unchecked; #13's PR#40 unconfirmed closed, printed as pr-unchecked/);
 });
 
 test("CLI: an in-flight review on an open PR counts as a unit and is never probed", () => {

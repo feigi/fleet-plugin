@@ -467,6 +467,19 @@ test("the NO-TRANSCRIPT tick row says a heartbeat file that cannot be used silen
   assert.match(row, Pin.phrase("The tick says so with one stderr line, `fleet-tick: CHECK-LIVENESS and NO-TRANSCRIPT not checked — <file> <cause>, so first-seen ages are unavailable`, naming only the checks that would have run that tick."));
 });
 
+test("the ESCALATE pr-closed tick row is the maintainer's: no dispatch, no comment, and only replace or release once no member on the PR is live", () => {
+  const row = TICK_ROWS.bullet("- `ESCALATE pr-closed #<N> PR#<M>`", "- `ESCALATE pr-unchecked #<N> PR#<M>`", "tick-rows pr-closed row").text;
+  assert.match(row, Pin.phrase("tell the maintainer once per ticket per run, dispatch nothing for #N, and post no GitHub comment."));
+  assert.match(row, Pin.phrase("Reopening PR M, or closing #N, clears it by itself on the next tick."));
+  assert.match(row, Pin.phrase("Act only on the maintainer's `replace #N` or `release #N`, and only once the line names no live member"));
+  assert.match(row, Pin.phrase("Its new PR settles onto the same row, and that two-PR row is a legitimate shape"));
+  assert.match(row, Pin.phrase("`ledger.mjs settle impl-<N>-<x> released`, which ends the line."));
+  const list = RUN_TEAM.bullet("- `ESCALATE pr-closed #<N> PR#<M>`, `… pr-unchecked …`", "- `HOLD (…)`", "SKILL.md pr-closed line").text;
+  assert.match(list, Pin.phrase("tell them once per ticket per run; no dispatch or comment for #N."));
+  assert.match(list, Pin.phrase("Reopening M or closing #N clears it."));
+  assert.match(list, Pin.phrase("Only `replace #N` (`NEED resume`, same row) or `release #N` (closed-PR `release-ticket.sh --apply`, settle `released`) acts, once no live member names M."));
+});
+
 test("ADR 0028's Status line records that the tick now reads the session directory's listing, and still no transcript's contents", () => {
   const adr = Pin.file(join(import.meta.dirname, "..", "docs", "adr", "0028-a-live-token-past-its-p99-points-the-controller-at-the-registry-census.md"));
   const status = adr.paragraph("**Status:**", "ADR 0028 Status line", "## Context").text;

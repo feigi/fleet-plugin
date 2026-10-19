@@ -389,7 +389,12 @@ token, row}]}`:
 
 - `prior: dead` — every open `in-progress` issue with no open PR (one with
   an open PR is the fold-in's): `resume` when exactly one worktree for it
-  sits under this checkout's `.worktrees/`, `report` otherwise.
+  sits under this checkout's `.worktrees/`, `report` otherwise. That
+  worktree's branch is asked `gh pr list --state all --head <branch>` first:
+  PRs that all read CLOSED unmerged — none OPEN, none MERGED — make it
+  `report` with `why` `PR #<M> closed unmerged`, and so does a list that
+  does not answer, or a detached worktree whose branch cannot be asked
+  about, never `resume`.
 - `prior: ancestor` — this session's own earlier run: no claim is listed.
   `carried` lists every live token rotate carried — its member or runner
   `name` (a `review=wf:` launch's runId), the `token` as the ledger holds
@@ -428,7 +433,10 @@ impl-<N>-b …`, then `ledger.mjs dispatch <N> impl-<N>-b`, then the `task`
 call naming the `agent` it printed, then the tier check — and never
 `claim-ticket.sh`: the claim already stands. A `report` goes to the
 maintainer as `#<N> — <why>` and nothing else: no dispatch, no label change,
-no release. Exit 2 is a list that did not answer — a `gh` or `git`
+no release. One whose `why` reads `PR #<M> closed unmerged` waits on the
+maintainer's `replace #<N>` or `release #<N>`, the two words the tick's
+`ESCALATE pr-closed` line takes (references/tick-rows.md), and on nothing
+else. Exit 2 is a list that did not answer — a `gh` or `git`
 failure, a list at its cap, a worktree whose presence cannot be told, or,
 after `ancestor`, a ledger that cannot be read — and is never nothing
 stranded.
