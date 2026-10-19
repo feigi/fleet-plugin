@@ -129,7 +129,7 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   checkout and the close-out commit's round trip through a branch; **Fix the
   tooling mid-run** and the commit section of references/close-out.md say how
   each is cleared.
-  The maintainer may instead ignore the stray paths: an entry in `.git/info/exclude` or in the global excludes file hides them from the check, and the hold clears on the next tick with no re-baseline. Ignoring is the maintainer's decision; the controller never writes an exclude or a `.gitignore` entry. Keep the pattern narrow, because an ignored path is invisible to this check, so a member write that matches it is never seen.
+  The maintainer may instead ignore a stray path that is untracked and new since the baseline: an entry in `.git/info/exclude` or in the global excludes file hides it from the check, and the hold clears on the next tick with no re-baseline. Ignoring never clears a tracked or staged file's change, which `git status` reports whatever the excludes say, nor a pattern that also matches a path the baseline holds, which then reads as changed. Ignoring is the maintainer's decision; the controller never writes an exclude or a `.gitignore` entry. Keep the pattern narrow, because an ignored path is invisible to this check, so a member write that matches it is never seen.
 - `MAIN-CHECKOUT-UNKNOWN …` with `HOLD (main checkout unknown)` — the tick
   could not look: a git or hash read failed (`could not look:`), or the
   baseline exists but cannot be read (`baseline unreadable:`). Never clean,

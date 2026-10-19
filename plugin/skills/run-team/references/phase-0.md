@@ -75,7 +75,7 @@ older-version baseline and a baseline whose commit is missing from the
 repository; Phase 3's tick lines say how each is cleared.
 `main-checkout.mjs --check` prints the same answer
 without a tick.
-On `MAIN-CHECKOUT-DIRTY` the maintainer may instead ignore the stray paths: an entry in `.git/info/exclude` or in the global excludes file hides them from the check, and the hold clears on the next tick with no re-record. Ignoring is the maintainer's decision, never the controller's: the controller never writes an exclude or a `.gitignore` entry. Keep the pattern narrow, because an ignored path is invisible to this check, so a later member write that matches it is never seen.
+On `MAIN-CHECKOUT-DIRTY` the maintainer may instead ignore a stray path that is untracked and new since the baseline: an entry in `.git/info/exclude` or in the global excludes file hides it from the check, and the hold clears on the next tick with no re-record. Ignoring never clears a tracked or staged file's change, which `git status` reports whatever the excludes say, nor a pattern that also matches a path the baseline holds, which then reads as changed. Ignoring is the maintainer's decision, never the controller's: the controller never writes an exclude or a `.gitignore` entry. Keep the pattern narrow, because an ignored path is invisible to this check, so a later member write that matches it is never seen.
 
 ## Run the pre-flight
 

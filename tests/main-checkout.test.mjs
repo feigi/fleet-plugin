@@ -12,7 +12,7 @@ import {
   appendFileSync, chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkMainCheckout, recordBaseline, baselinePath, describe } from "../plugin/scripts/main-checkout.mjs";
 
@@ -508,43 +508,42 @@ test("CLI: --record then --check, with the exit codes the header names", (t) => 
   assert.match(r.stderr, /--recrod/, "a misspelt flag must be refused by name, never run as a check");
 });
 
-// The maintainer's "ignore it" remedy: an ignored path never reaches `git
-// status --porcelain`, so an exclude added while the hold is active clears it
-// on the next check, with no re-baseline. The fixture ignores `.fleet/` only.
-test("CLI: a stray path the maintainer excludes clears on the next check, with no re-record", (t) => {
-  const dir = repo(t);
-  const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: "utf8" });
-  let r = run("--record");
-  assert.equal(r.status, 0, r.stderr);
-  mkdirSync(join(dir, ".scratch-x"));
-  writeFileSync(join(dir, ".scratch-x", "a"), "x\n");
-  r = run("--check");
-  assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.match(r.stdout, /^MAIN-CHECKOUT-DIRTY \.scratch-x\/a /m);
-  mkdirSync(join(dir, ".git", "info"), { recursive: true });
-  appendFileSync(join(dir, ".git", "info", "exclude"), ".scratch-x/\n");
-  r = run("--check");
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^main-checkout: clean against /);
-});
-
-test("CLI: the same exclude in a global excludes file clears the hold with no re-record", (t) => {
-  const dir = repo(t);
-  const globalDir = realpathSync(mkdtempSync(join(tmpdir(), "main-checkout-global-")));
-  t.after(() => rmSync(globalDir, { recursive: true, force: true }));
-  const excludes = join(globalDir, "ignore");
-  git(dir, "config", "core.excludesFile", excludes);
-  const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: "utf8" });
-  let r = run("--record");
-  assert.equal(r.status, 0, r.stderr);
-  mkdirSync(join(dir, ".scratch-x"));
-  writeFileSync(join(dir, ".scratch-x", "a"), "x\n");
-  r = run("--check");
-  assert.equal(r.status, 1, r.stdout + r.stderr);
-  writeFileSync(excludes, ".scratch-x/\n");
-  r = run("--check");
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-});
+// The maintainer's "ignore it" remedy: an ignored untracked path never reaches
+// `git status --porcelain`, so an exclude added while the hold is active clears
+// it on the next check, with no re-baseline. The global placement is a real
+// global-scope config, `GIT_CONFIG_GLOBAL`, handed to the CLI alone, so the
+// fixture repository's own config carries no `core.excludesFile`.
+const excludePlacements = [
+  [".git/info/exclude", (t, dir) => ({ file: join(dir, ".git", "info", "exclude"), env: process.env })],
+  ["a global excludes file", (t) => {
+    const globalDir = realpathSync(mkdtempSync(join(tmpdir(), "main-checkout-global-")));
+    t.after(() => rmSync(globalDir, { recursive: true, force: true }));
+    const file = join(globalDir, "ignore");
+    const config = join(globalDir, "gitconfig");
+    writeFileSync(config, `[core]\n\texcludesFile = ${file}\n`);
+    return { file, env: { ...process.env, GIT_CONFIG_GLOBAL: config } };
+  }],
+];
+for (const [where, place] of excludePlacements) {
+  test(`CLI: a stray path excluded in ${where} clears on the next check, with no re-record`, (t) => {
+    const dir = repo(t);
+    const { file, env } = place(t, dir);
+    const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, env, encoding: "utf8" });
+    let r = run("--record");
+    assert.equal(r.status, 0, r.stderr);
+    mkdirSync(join(dir, ".scratch-x"));
+    writeFileSync(join(dir, ".scratch-x", "a"), "x\n");
+    r = run("--check");
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout, /^MAIN-CHECKOUT-DIRTY \.scratch-x\/a /m);
+    assert.match(r.stdout, /\.git\/info\/exclude/, "a path entry names the ignore remedy");
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, ".scratch-x/\n");
+    r = run("--check");
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /^main-checkout: clean against /);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // HEAD is part of the protected set: the symbolic ref and the commit.
@@ -600,6 +599,7 @@ test("a stray commit, a branch switch, a detach, a reset and an amend each move 
     assert.equal(c.changed.length, 1, `${name}: ${JSON.stringify(c.changed)}`);
     assert.equal(c.headMove, c.changed[0], name);
     assert.match(describe(c, []), /^MAIN-CHECKOUT-DIRTY HEAD refs\/heads\/main@[0-9a-f]{7} → \S+@[0-9a-f]{7} — changed since the run's baseline/, name);
+    assert.doesNotMatch(describe(c, []), /\.git\/info\/exclude/, `${name}: ignoring cannot clear a HEAD entry, so a HEAD-only line names no exclude`);
     assert.ok(c.changed[0].startsWith(`HEAD refs/heads/main@${was} → `), `${name}: ${c.changed[0]}`);
   }
 });
