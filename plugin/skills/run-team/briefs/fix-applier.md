@@ -13,6 +13,7 @@ path scratch
 path mismatched-record
 literal your name
 literal outcome
+literal that path
 ---
 ## kind: review, dispositions-retry
 You are ALREADY in worktree `<abs-path>`, whose PR branch is `<branch>` — the
