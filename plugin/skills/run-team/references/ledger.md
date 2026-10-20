@@ -78,7 +78,7 @@ A member that dies between spawn and write is invisible — and members die in b
 
 ## filed and ruled
 
-`filed` is checked with `ledger.mjs check <subject>` before every `gh issue create`, so a finding already recorded this run is not filed twice. That is not a guarantee against duplicates at large; the tracker query below is what covers those.
+`filed` is checked with `ledger.mjs check <subject>` before every `gh issue create`, so a finding already recorded this run is not filed twice. That is not a guarantee against duplicates at large; the tracker query, described under `check`'s exits and its `verdict` above, is what covers those.
 
 `ruled` records PR + decision + one-line reason, so a replacement controller does not re-litigate a settled call.
 
@@ -94,10 +94,10 @@ A PR's review is not a member, so it carries its own pair of row tokens, written
 
 ## The ledger's readability field: `ledger.ok`
 
-The ledger half reports its own readability as its own field, `ledger.ok`, the peer of `tracker.ok`: false when the file did not exist, and false too when the path led to something that did not parse as a ledger — which is what tells a ledger that was read and held nothing filed from one there was nothing to read. The absent case is the normal one for a run's first `check` — `.fleet/` is git-ignored and created lazily by the first write — so it stays `clean` at exit 0, and `ledger.ok` is the field that says why rather than the verdict moving. The stderr warning is deliberately narrower than the field: it fires on a path with no file, so a `--file` that landed on the wrong existing file is a silent `ok:false` with nothing on stderr. Gate on the field, not on the warning.
+The ledger half reports its own readability as its own field, `ledger.ok`, the peer of `tracker.ok`: false when the file did not exist, and false too when the path led to something that did not parse as a ledger — which is what tells a ledger that was read and held nothing filed from one there was nothing to read. The absent case is the normal one for a run's first `check` — `.fleet/` is git-ignored and created lazily by the first write — so it stays `clean` at exit 0, and `ledger.ok` is the field that says why rather than the verdict moving. The stderr warning is deliberately narrower than the field: it fires on a path with no file, so a `--file` that landed on the wrong existing file is a silent `ok:false` with nothing on stderr.
 
 ## Suite slots
 
 **The suite slots wedge the same ways, and clear the same way.**
 
-`~/.fleet/suite-slots/<i>.lock` is built on the ledger's lock primitive, so an empty or unparseable `<i>.lock` and a leftover `<i>.lock.reap` are permanent, a zombie holder is transient, and a dead holder is taken over. A wait that expired with exit 75 names each wedged file — remove it by hand once no suite run is running, the way references/ledger.md removes `<file>.lock`.
+`~/.fleet/suite-slots/<i>.lock` is built on the ledger's lock primitive, so an empty or unparseable `<i>.lock` and a leftover `<i>.lock.reap` are permanent, a zombie holder is transient, and a dead holder is taken over. A wait that expired with exit 75 names each wedged file — remove it by hand once no suite run is running, the way the Writer policy section above removes `<file>.lock`.

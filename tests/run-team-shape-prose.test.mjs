@@ -523,6 +523,16 @@ const CHANGED = [
   [
     "`NEED resume #<n> <worktree> <branch>` — a dead run's claim with no PR.",
     "`NEED resume #<n> <worktree> <branch>` — a dead run's claim: no PR, or not only `CLOSED` ones."
+  ],
+  ["Never rotate mid-run: it is phase 0's step alone.", "Never rotate the ledger mid-run: it is phase 0's step alone."],
+  ["Gate on the field, not on the warning.", "Gate on the `ledger.ok` field of `check`, not on the stderr warning."],
+  [
+    "That is not a guarantee against duplicates at large; the tracker query below is what covers those.",
+    "That is not a guarantee against duplicates at large; the tracker query, described under `check`'s exits and its `verdict` above, is what covers those."
+  ],
+  [
+    "A wait that expired with exit 75 names each wedged file — remove it by hand once no suite run is running, the way references/ledger.md removes `<file>.lock`.",
+    "A wait that expired with exit 75 names each wedged file — remove it by hand once no suite run is running, the way the Writer policy section above removes `<file>.lock`."
   ]
 ];
 
@@ -619,7 +629,6 @@ const DELETED = [
   ["It refuses a member whose `briefs/<member>.json` beside the ledger is missing, names another role or carries no sha256, a brief file beside it that is missing or does not hash to that sha256, a name this session already used — on the ledger or in its `## Retired` — and names the replacement (`-b`, `-c` …), a second live member on one ticket or PR, any implementer once the run is draining, an implementer whose row's `tier=` names no single definition or one with no file under `agents/`, and a finisher on a ledger the tick itself refuses.", "ledger.mjs dispatch; tests/ledger-dispatch.test.mjs"],
   ["It refuses a write that adds a `review=`/`reviewed=` token (one the row already holds is carried), and one after which a PR maps to more than one row when it did not before — `row <M>` creating `#M` for a PR a ticket row maps, or a rewrite adding a `PR#M` mention to another row — naming the PR's row (`settle impl-N=PR#M` applies the same rule after its fold).", "ledger.mjs row and review; tests/ledger-row-review.test.mjs"],
   ["It then records each `unrecorded` filing in **filed** and, for a fix-applier, each refutation the report defers in **ruled**, once however often it runs, and prints `{member, outcome, checks, filed, ruled}`.", "ledger.mjs filed and ruled; references/ledger.md"],
-  ["Never rotate mid-run: it is phase 0's step alone.", "references/phase-0.md's Rotate the ledger"],
   ["No launch appears while an earlier one is open — unanswered and not `=failed`.", "ledger.mjs review; tests/ledger-row-review.test.mjs"],
   ["One git-ignored `.fleet/ledger.md` per run, updated at **every** state change via `~/.fleet/bin/fleet-run ledger.mjs` subcommands (`row`, `filed`, `ruled`, `check`, `read`, `dispatch`, `settle`, `review`, `drain`, `rotate`).", "references/ledger.md; ledger.mjs"],
   ["Outcomes: `impl-N` = `PR#M | bailed | released | killed | tier-mismatch | blocked`; `fix-pr-M` = `applied:<head> | no-op | failed | killed`; `finisher-pr-M` = `labelled | failed | killed | halted:<cause>`, `<cause>` one of `live-editor | rebase | past-pin | unreadable | missing | absent | other` (**Resolving a finisher halt**); `merge-bot-n` = `done | killed`.", "ledger-grammar.mjs's outcome vocabulary; tests/ledger-grammar.test.mjs"],

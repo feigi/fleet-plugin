@@ -1546,7 +1546,7 @@ Match the failure to its row in the table below and run that response; where the
 | A second review launch refused for an open one | Wait for that one's `reviewed=`, or, once the **Member killed** row has confirmed its runner dead, settle it `=failed` in the same `ledger.mjs review` call as the new launch. |
 | `ledger.mjs settle <member> --from-report` exits 3 | A check failed: the member's claim and the world disagree, and nothing is written. You rule. |
 | `ledger.mjs settle <member> --from-report` exits 2 | The report is absent or invalid, or a check could not look; nothing is written. A check that could not look is run again once `gh` and `git` answer. |
-| A suite wait exits 75 naming a wedged `~/.fleet/suite-slots/<i>.lock` | Exit 75 is not a result. Remove each named file by hand once no suite run is running, the way references/ledger.md removes `<file>.lock`, then run the suite again. |
+| A suite wait exits 75 naming a wedged `~/.fleet/suite-slots/<i>.lock` | Remove each named file by hand once no suite run is running, the way references/ledger.md removes `<file>.lock`, then run the suite again. |
 
 ### Recovery
 
