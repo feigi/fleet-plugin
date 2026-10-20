@@ -1341,6 +1341,8 @@ the step. Cut before you append.
 
 Why the agent body carries what it does — read this before editing any `fleet-implementer-<cell>` file, and keep every cell's body byte-identical. See references/pull.md.
 
+Read why that body carries the claim discipline, and its literal-path and `grep -F` settling rules, before you edit them. See references/correction-tickets.md.
+
 **Then.** **Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh
 --pin`. See references/instruments.md. Then the ledger line, save the
 rationale, one line to the maintainer. **Then land it from the main checkout,

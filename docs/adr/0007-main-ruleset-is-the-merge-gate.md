@@ -77,7 +77,7 @@ unless the live object matches. Every field below is a choice, not a default:
 | `required_approving_review_count` | `0` | 33 merges/day is not a human-review throughput. Review is `review-pr.js`'s six dimensions, which is not GitHub-approval-shaped |
 | `required_review_thread_resolution` | `true` | The realistic operator intervention: costs nothing when nobody comments, hard-stops the merge when someone does. Chosen instead of raising the approval floor |
 | `require_extra_approval_for_unattributed_changes` | `false` | Was `true`, against a 0-approval floor — so most PRs needed nobody and some agent-authored PRs silently needed one human. A conditional approval requirement on a repo requiring no review is an undiagnosable stall of exactly the shape #111 and #68 describe |
-| `bypass_actors` | `[]` | No exemption, including for the maintainer. "I need to push a tooling fix fast" is precisely when the gate is load-bearing; `run-team/SKILL.md`'s `## Fix the tooling mid-run` now says so |
+| `bypass_actors` | `[]` | No exemption, including for the maintainer. "I need to push a tooling fix fast" is precisely when the gate is load-bearing; `run-team/SKILL.md`'s **A mid-run tooling fix** (in `## Failure handling`) now says so |
 | `deletion`, `pull_request` | on | Unchanged |
 
 `rebase-check` stays required even though `strict: true` subsumes its merge-base
@@ -196,7 +196,7 @@ whose failure condition a PR head could have been checked against first.
 - `main` cannot be pushed to directly by anyone. Mid-run tooling fixes go through
   a PR, carry a release label, and face the same required checks the table above
   lists.
-  `run-team/SKILL.md`'s `## Fix the tooling mid-run` records this.
+  `run-team/SKILL.md`'s **A mid-run tooling fix** (in `## Failure handling`) records this.
 - A behind PR is refused at the merge button rather than by a check that may be
   stale. The 30% of `main` advances that the refresh workflow failed to propagate
   no longer let a stale-green PR through.

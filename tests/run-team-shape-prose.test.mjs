@@ -698,6 +698,7 @@ const MOVED_RATIONALE_POINTERS = [
   ["A member whose prompt names no path asks you by name and never makes one up.", "isolation.md", "## The scratch root is computed, never invented and never recorded"],
   ["**The controller's own cwd stays the main checkout, unchanged.**", "isolation.md", "## The controller's own cwd stays the main checkout"],
   ["**Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh --pin`.", "instruments.md", "## Re-pin first after a mid-run tooling fix"],
+  ["and its literal-path and `grep -F` settling rules, before you edit them.", "correction-tickets.md", "## Every implementer body carries the claim discipline"],
 ];
 for (const [rule, file, heading] of MOVED_RATIONALE_POINTERS) {
   test(`SKILL.md keeps "${rule.slice(0, 50)}…" with See references/${file} beside it`, () => {

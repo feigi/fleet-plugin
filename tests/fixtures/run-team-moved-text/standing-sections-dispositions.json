@@ -68,10 +68,6 @@
     ],
     [
       "See references/correction-tickets.md.",
-      "the pointer beside the claim-discipline rule: references/correction-tickets.md's Every implementer body carries the claim discipline states it alone"
-    ],
-    [
-      "See references/correction-tickets.md.",
       "the pointer beside the grep -F rule: references/correction-tickets.md's A settling command over literal text uses grep -F states it alone"
     ]
   ]
