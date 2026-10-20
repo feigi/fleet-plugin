@@ -1321,3 +1321,89 @@ test("a dispatch refused for a cause of its own names that cause, not the missin
   f.ok("dispatch", "6", "fix-pr-6");
   refusedBare(f, ["dispatch", "6", "fix-pr-6"], /fix-pr-6 was already dispatched this session/);
 });
+
+// A member's report under `<scratch>/reports` is the last run's claim about
+// that member. Dispatch clears it, so a stale report cannot be read as the new
+// run's. The scratch is read from the brief's sidecar, where dispatch-prompt.mjs
+// records the arguments it rendered with.
+const reportAt = (scratch, member) => join(scratch, "reports", `${member}.json`);
+const staleReport = (scratch, member) => {
+  mkdirSync(join(scratch, "reports"), { recursive: true });
+  writeFileSync(reportAt(scratch, member), `{"member":"${member}","stale":true}\n`);
+};
+
+test("dispatch clears the member's stale report, whatever the family", (t) => {
+  const f = fixture(t);
+  const scratch = join(f.dir, "scratch");
+  for (const [member, ...args] of [["impl-412", "412", "impl-412"], ["fix-pr-413", "413", "fix-pr-413"], ["finisher-pr-414", "414", "finisher-pr-414"], ["merge-bot-1", "merge-bot"]]) {
+    renderBrief(f.dir, member, { sidecar: { args: { scratch } } });
+    staleReport(scratch, member);
+    assert.equal(f.ok("dispatch", ...args).member, member);
+    assert.equal(existsSync(reportAt(scratch, member)), false, `${member}'s stale report survived its dispatch`);
+  }
+});
+
+test("a dispatch with no prior report is accepted, and a refused dispatch clears nothing", (t) => {
+  const f = fixture(t);
+  const scratch = join(f.dir, "scratch");
+  renderBrief(f.dir, "impl-412", { sidecar: { args: { scratch } } });
+  f.ok("dispatch", "412", "impl-412");
+  staleReport(scratch, "impl-412");
+  f.refused(["dispatch", "412", "impl-412"], /impl-412 was already dispatched this session/);
+  assert.equal(existsSync(reportAt(scratch, "impl-412")), true);
+});
+
+test("a brief that does not hash to its sidecar refuses the dispatch and clears no report", (t) => {
+  const f = fixture(t);
+  const scratch = join(f.dir, "scratch");
+  const b = renderBrief(f.dir, "impl-412", { sidecar: { args: { scratch } } });
+  writeFileSync(b.path, "tampered\n");
+  staleReport(scratch, "impl-412");
+  f.refused(["dispatch", "412", "impl-412"], /hashes to/);
+  assert.equal(existsSync(reportAt(scratch, "impl-412")), true);
+});
+
+test("a report that cannot be cleared refuses the dispatch, naming the path, and writes nothing", (t) => {
+  const f = fixture(t);
+  const scratch = join(f.dir, "scratch");
+  renderBrief(f.dir, "impl-412", { sidecar: { args: { scratch } } });
+  // A non-empty directory where the report file should be: unlink refuses it.
+  mkdirSync(reportAt(scratch, "impl-412"), { recursive: true });
+  writeFileSync(join(reportAt(scratch, "impl-412"), "kept"), "x");
+  f.refused(["dispatch", "412", "impl-412"], /cannot clear .*reports\/impl-412\.json/);
+});
+
+test("a brief whose sidecar names no scratch dispatches, says on stderr that the prior report was not cleared, and leaves it", (t) => {
+  const f = fixture(t);
+  const scratch = join(f.dir, "scratch");
+  renderBrief(f.dir, "impl-412");
+  staleReport(scratch, "impl-412");
+  const r = f.cli("dispatch", "412", "impl-412");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /impl-412's brief sidecar names no scratch, so its prior report was not cleared/);
+  assert.equal(existsSync(reportAt(scratch, "impl-412")), true);
+});
+
+// The ledger runs with the fixture's directory as its cwd, so a relative
+// `scratch` there would resolve onto the very report staleReport writes.
+test("a sidecar scratch that is not an absolute path clears nothing, and dispatch says so", (t) => {
+  const f = fixture(t);
+  const scratch = join(f.dir, "scratch");
+  for (const [key, member, value] of [["412", "impl-412", "scratch"], ["413", "impl-413", 123]]) {
+    renderBrief(f.dir, member, { sidecar: { args: { scratch: value } } });
+    staleReport(scratch, member);
+    const r = f.cli("dispatch", key, member);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, new RegExp(`${member}'s brief sidecar .*prior report was not cleared`));
+    assert.equal(existsSync(reportAt(scratch, member)), true, `${member}'s report was removed`);
+  }
+});
+
+test("a non-directory where `reports` would be holds no report, so dispatch proceeds", (t) => {
+  const f = fixture(t);
+  const scratch = join(f.dir, "scratch");
+  renderBrief(f.dir, "impl-412", { sidecar: { args: { scratch } } });
+  mkdirSync(scratch);
+  writeFileSync(join(scratch, "reports"), "not a directory\n");
+  assert.equal(f.ok("dispatch", "412", "impl-412").member, "impl-412");
+});
