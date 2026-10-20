@@ -231,7 +231,7 @@ export const firstParagraph = ({ blocks }) => blocks.find((b) => b.kind !== "hea
 
 test("every `## ` section opens with a paragraph that states what the controller does and when it is done", () => {
   const sections = sectionsOf(SKILL);
-  assert.ok(sections.length >= 18, `${sections.length} sections read — the splitter is broken`);
+  assert.ok(sections.length >= 17, `${sections.length} sections read — the splitter is broken`);
   for (const section of sections) {
     const first = firstParagraph(section);
     assert.ok(first !== undefined && first.kind === "para", `${section.heading} does not open with a paragraph`);

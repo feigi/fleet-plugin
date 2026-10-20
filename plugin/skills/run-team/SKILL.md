@@ -291,7 +291,7 @@ Token additions go through `ledger.mjs token`. `ledger.mjs token <key> <token>â€
 
 Never rotate the ledger mid-run: it is phase 0's step alone.
 
-Record each ruling with `ledger.mjs ruled <pr> <decision>`, one line with its reason. Gate on the `ledger.ok` field of `check`, not on the stderr warning. The writer policy and the lock are in references/ledger.md.
+Record each ruling with `ledger.mjs ruled <pr> <decision>`, one line with its reason. Gate on the `ledger.ok` field of `check`, not on the stderr warning. The writer policy, the gap the lock does not close, and `check`'s exits: See references/ledger.md.
 
 **Write the ledger line before dispatching, not after.** Record the member with `ledger.mjs dispatch`, or `review` for a review, before its `task` call.
 
