@@ -52,9 +52,12 @@ const SCRIPT = read("scripts", "verify-sha.sh").text;
 
 // Bounded at both ends and small: the guard, not the Failure handling section's
 // Recovery subsection around it. A slice wide enough to reach its neighbours is
-// satisfied by their vocabulary.
+// satisfied by their vocabulary. The guard's full text, with its why, moved to
+// references/failure-handling.md (#3545); SKILL.md's Recovery keeps the rule
+// with a pointer, pinned by the last test below.
+const FAILURE_MD = read("skills", "run-team", "references", "failure-handling.md");
 const guard = () =>
-  RUN_TEAM.between("**Verify every reported SHA.**", "**Never `--delete-branch`", "run-team/SKILL.md").text;
+  FAILURE_MD.between("**Verify every reported SHA.**", "## Never force a rebase to start", "references/failure-handling.md").text;
 
 // Bold moves, and these pins must not care. `**` is allowed at ANY word
 // boundary inside a pinned phrase: markdown emphasis slides around a sentence
@@ -266,4 +269,11 @@ test("verify-sha.sh still declares the exit codes the guard quotes", () => {
     1,
     "verify-sha.sh grew a second way to exit 2 — the guard's single rule covers every cause only because `die()` is the sole one",
   );
+});
+
+test("SKILL.md's Recovery keeps the guard as a rule, both branches, with its pointer", () => {
+  const rule = RUN_TEAM.paragraph("**Verify every reported SHA**", "run-team verify-SHA rule", "**Never `--delete-branch`").text;
+  assert.match(rule, Pin.phrase("Exit 1, not reachable → flag, do not enqueue, do not return the ticket to the shortlist until the maintainer rules."));
+  assert.match(rule, Pin.phrase("**Exit 2 is not a verdict**: read its stderr, fix what it names and re-run;"));
+  assert.match(rule, Pin.phrase("never read it as `not reachable` or record it as a stray commit. See references/failure-handling.md."));
 });

@@ -2,6 +2,139 @@
 
 Evidence for the finisher rules the finisher's agent body, `agents/fleet-finisher.agent.md`, and SKILL.md's **The finisher gate** state, keyed by the rule each justifies.
 
+## The fix-applier pushes and exits; the finisher is dispatched fresh
+
+**The fix-applier pushes and exits — it does not hold the CI wait.** You own the
+persistent Monitor; a turn-based member re-reading `gh pr checks` each idle cycle
+rebuilds a 100k-token context for nothing the Monitor lacks. The body
+carries the report-last rule and the brief says to push, write the report and exit; you do not have to restate either. When the
+diff-validating `check` job is green **and no
+heavy job is in `failure`** (the heavy diff-validating suites — not the
+`rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and
+fine — **solely** off that count, which is a condition to establish rather than
+infer, see the five-condition note in the fix-applier body) — or
+`ci-state.mjs` reads `verdict: "no-ci"`, its bullet in **The finisher gate's
+tests, in full** — **and once the PR's review
+has returned and its fix-applier, if one was dispatched, has sent its report,
+which the CI-completes edge in that section states in full** — dispatch a
+**finisher** — a fresh small agent, not the fix-applier resumed. Render its brief
+with `dispatch-prompt.mjs render finisher --kind fresh --member finisher-pr-<pr#> …`
+(`--kind repair` once an earlier finisher reported `labelled` without the label landing), record it with
+`ledger.mjs dispatch <pr#> finisher-pr-<pr#>` before the call, then **dispatch
+it with the `agent` that command printed and omit `model` on the call** — the
+tier lives in that definition's frontmatter, `agents/fleet-finisher.agent.md`,
+as the `@smol:low` route, which resolves through the operator's `modelRoles`.
+Its four duties are a checklist — audit the
+worktree, confirm every deferral has a tracker home and re-run the acceptance
+mutation, apply one release label, report — and the
+merge gate downstream still catches whatever it gets wrong. **Never dispatch
+one while you still owe the fix-applier a ruling**: the pinned SHA is only as good
+as the guarantee nothing else is inbound. **The test is your OUTBOX, not the
+member's last message** — anything you have decided that it has not received,
+including a ruling you have since **withdrawn or reversed**. **That is the test
+of THIS condition only**: an empty outbox says nothing is inbound from you, and
+nothing about whether the member considers itself finished, which is what the
+report condition above is for. A withdrawal you
+recorded only in the ledger is undelivered: the member still holds the original
+and will act on it. Relay everything — reversals too — then dispatch.
+
+## The finisher gate's tests, in full
+
+- **Monitor: CI run completes** → `fleet-event.mjs ci <pr>`, which binds the run
+  (`ci-state.mjs --pr <N>`) and **records it as
+  `ci=<run-id>:<attempt>:<conclusion>`, not just "CI green"** — in the
+  ticket's ledger row, which outlives your context. The key is what the sibling
+  bullet below turns on: it tells an edge already spent from one that never
+  fired. The whole key, never the conclusion alone: **a
+  conclusion is not stable** (references/ci-and-staleness.md), because a rerun rewrites the run in
+  place. The diff-validating `check` job green with no heavy job (the
+  diff-validating suites, not the `rebase-check` currency gate) in `failure`
+  → a finisher CANDIDATE (gated by *The fix-applier pushes and exits; the
+  finisher is dispatched fresh*), a `check`
+  **failure** that is not solely staleness → the **red-check fixer** (SKILL.md's
+  **Then dispatch a red-check fixer**), behind the same review-returned and
+  fix-applier-reported gate as a finisher. A `check`-green board whose heavy jobs are merely
+  `skipped` (behind-count staleness, the normal case after a merge) still labels — do NOT
+  gate on `ci-state --quiet` exit 0, which a behind PR never reaches. **This
+  edge fires for every CI run the PR produces, and the implementer's own
+  firing comes first for every PR** — `ci.yml` triggers on `pull_request`, so
+  opening the PR at the end of `next-ticket` step 7 starts a run within seconds,
+  while the review returns 20-40 minutes later. That first firing is
+  the ordinary case for every PR, not a rarity, and no review has run at all
+  when it arrives. **Green is therefore not the gate: dispatch a finisher only
+  once the PR's review has returned AND its fix-applier, if one was dispatched,
+  has sent its report — pushed is not reported**, and a push before that report
+  is mid-work on a SHA the member may still move, which its own prompt tells it
+  not to hand over. A push is therefore not an exit, and a report that has not
+  arrived is asked for by name rather than read as one. Neither shape is caught
+  by an empty outbox: on the implementer's firing there is no fix-applier to owe
+  anything to, so the outbox is *vacuously* empty, and on a fix-applier's
+  mid-work push nothing has been sent since the dispatch, so it is *genuinely*
+  empty. **The outbox is the last test, not the only one, and it stands wherever
+  a fix-applier exists** — that is exactly where a ruling you still owe it is
+  outstanding, so never dispatch off it while you do. Empty your outbox to it
+  first — including any ruling you have withdrawn or reversed — then dispatch
+  (*The fix-applier pushes and exits; the finisher is dispatched fresh*); a final report is not proof it stopped. A PR that needs nothing fixed
+  reaches a finisher through the **fix-applier reports `no-op`** bullet below,
+  never by waiting for a second CI event this head will never produce. The
+  same goes for a red one: a red that fired before the review never fires
+  again, so the **fix-applier reports `no-op`** and **review result lands**
+  bullets are also the only routes to the red-check fixer there.
+  Then run the tick. These edges dispatch it, each the finisher's own: **Monitor: CI run completes** binding a red on a head whose review has returned and whose fix-applier, if any, has reported; **A fix-applier reports `no-op`**, or a SHA you have already bound, when that head's bound conclusion is red; and **A review result lands** with no finding and nothing to file, when that head's bound conclusion is red.
+- **A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch
+  the finisher **now**, against the existing head — when that head's bound
+  conclusion is red, the red-check fixer instead (SKILL.md's **Then dispatch a
+  red-check fixer**), never a finisher and never a wait. No push means no new run, and
+  the Monitor above is edge-keyed on `<run-id>:<attempt>:<conclusion>` — that
+  head's terminal state already fired once and will never fire again, so waiting
+  for the CI event waits forever. This stays a common outcome on a clean PR:
+  `suggestion` is the band a clean diff produces, and every out-of-scope or
+  refuted one is filed as an issue rather than committed. An edge-only label path
+  therefore strands exactly the PRs with nothing wrong with them. **Reconcile, do
+  not wait for an event** governs here too, not only the implementer row. **This
+  bullet and the one above are a pair, and on a clean PR this one carries the
+  whole route to a finisher**: a `no-op` report satisfies the gate above by
+  itself — the review has returned, because a fix-applier exists only after it
+  did, and the member has reported — so nothing further is owed and no further
+  event is coming. Edit either bullet without the other and what strands is exactly the PR that needed no fixes. Edit one of these bullets without the others and what strands is exactly the red-only PR.
+- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`** → no workflow run will ever
+  complete for this repo, so the CI-run-completion edge above never fires and
+  waiting for it stalls the whole PR — the same silent-stall shape reported
+  before this verdict existed. Dispatch the finisher off the reviewer's final
+  verdict instead, the moment it lands — and, same as above, never while you still
+  owe it a ruling — or hold anything else it has not received, a ruling you have
+  withdrawn or reversed included. The finisher's gate is then the
+  `--declare-no-ci` declaration, not a `check` job: with it, label off the
+  reviewer's verified suite run; **without it, do not label** — report that this
+  repo has no CI configured and no declaration, and stop. Absence never reads as
+  pass. See `review-and-fix.md` step 6.
+
+Gate on the `check` job, **not** on `ci-state --quiet` exit 0: a behind PR never
+reaches full green, so an exit-0 gate strands it unlabelled. The finisher reads
+per-job state (`ci-state.mjs` without `--quiet`, or its `jobs`), since `--quiet`
+drops `jobs`, `missing` and `dropped`. Normal path, not only kill-recovery.
+
+**`ci-state.mjs` reads `verdict: "no-ci"`** — no `check` job exists in this repo
+to gate on, and that is not a third way to skip the wait. **The
+`--declare-no-ci` declaration is caller-side, and reading it back out of the
+payload verifies nothing**: the flag is echoed into `reasons` and flips the exit
+code, so re-running with it and finding it there confirms only that you passed
+it. Passing it yourself is not a second opinion. Check the two facts it stands
+for instead:
+
+1. `ci-state.mjs` **without** the flag still reads `verdict: "no-ci"`. A repo
+   whose CI is merely misconfigured — workflow files present under other names,
+   or `.github/workflows/` not a directory — exits 2 there rather than reading no-ci,
+   so this is the check that separates real absence from misconfiguration, the
+   case that must never ship silently.
+2. The reviewer's own final verdict reports a green `testCmd` run on the SHA it
+   pushed. `review-and-fix.md` step 3 requires it to, and that run is the only
+   gate this repo actually has.
+
+Both → add the label, and say it rests on the reviewer's suite run, not on CI.
+Either missing → halt here, same as a dirty worktree: report `no CI configured,
+no verified suite run on record` and add no label.
+
 ## An unanswered question from the member is an outbox item
 
 **An unanswered question from the member is an outbox item, and it blocks
@@ -119,3 +252,55 @@ its token re-dispatches a finisher into your take-off window. The label goes
 before the approval because removing the artifact the merge bot gates on is
 the reliable stop, where messaging the bot races it, and a label has been
 observed holding until after an abort message arrived.
+
+## A final report is not proof the member stopped
+
+**A final report is not proof the member stopped.** Observed twice: a ruling
+relayed after dispatch produced a new commit mid-audit, and a fix-applier that
+reported "nothing outstanding" resumed on a ledger-only withdrawal and was
+cycling mutants through the worktree when the finisher audited it. Both finishers
+correctly halted. Note what that costs to detect: two reads of the same worktree
+a minute apart showed *different* mutants, so a member's report and any single
+`git status` are each valid only at their instant.
+
+## The standing CI facts are in the fix-applier body
+
+**The standing CI facts are in the fix-applier body, not in per-event messages** —
+otherwise you send "your red is staleness, do not rebase" once per member per
+merge. `review-and-fix.md` states them; the body says they apply.
+
+## A halt's cause comes from one script
+
+A halt at duty 1 reads identical from a bare SHA mismatch whatever caused it,
+and the causes `finisher-audit.mjs` names are the ones seen so far, not a
+closed list; the finisher's agent body gives it the cause from one script
+instead of asking anyone.
+
+## Why a `past-pin` halt needs the tick
+
+`past-pin` needs the tick because the dead-review path cannot reach it: once a
+review has **returned**, its `reviewed=` token holds the PR out of `review-due=`,
+and settling that review `=failed` re-queues nothing — that path covers only a
+review that died before returning. A head that moved past `reviewed=` with no
+such halt — a fix-applier's push — stays not due: duty 2 verifies what it
+applied. **A rebase never gets a `reviewed=`:** the earlier review still
+counts, because dispositions verdicts are tied to its head. Never write a
+`reviewed=` you did not read off a review result file.
+
+## Resolving a finisher that died
+
+**Resolving a finisher that died.** A finisher settled `failed` or `killed` left
+its PR without `ready-to-merge`, and nothing else notices: the PR is out of the
+merge queue, and the tick dispatches no finisher for it. The cockpit flags a
+REVIEW-column open PR without the label, whose latest finisher attempt settled
+so, `finisher:failed` or `finisher:killed` at severity 4 — one token per
+outcome, neither the implementer's bare `killed` flag nor `unlabelled`. You
+resolve it by hand: investigate why the finisher died, or dispatch the
+next-suffix finisher after the finisher gate: render its brief with
+`dispatch-prompt.mjs render finisher --kind fresh --member finisher-pr-<M>-<x>
+…` (`--kind repair` once an earlier finisher reported `labelled` without the
+label landing), then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`. The flag
+clears when a later attempt settles — `labelled`
+(then `unlabelled` takes over while the label is still off), `halted:<cause>`,
+or a live `-b` — or when the PR carries `ready-to-merge`, merges or closes.
+You never add the label yourself, and the tick does not retry.

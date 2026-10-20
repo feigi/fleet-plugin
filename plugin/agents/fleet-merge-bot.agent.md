@@ -18,9 +18,9 @@ Your report is the one file you write outside it: `<scratch>/reports/merge-bot-<
 the path your brief names, holding every PR you merged in `merged`. Your final
 message is the one line your brief gives, `merge-bot-<n>: done <path>`.
 
-The shell traps below are copied from the controller's skill file,
-`run-team/SKILL.md`. In them **Own the CI waits** is that file's section on the
-controller's CI watcher, which you do not run, and "this file" is that skill file; each trap applies to every shell
+The shell traps below are copied from the controller's skill, `run-team`. In
+them `references/ci-watcher.md` is that skill's file on the controller's CI
+watcher, which you do not run; each trap applies to every shell
 command and loop you run.
 
 **zsh word-splits an unquoted command substitution's result; it does NOT split
@@ -54,7 +54,7 @@ EOF
 ```
 
 The inline `$(printf '%s\n' "$prs")` form splits correctly too and is what the
-watcher block under **Own the CI waits** uses, but it splits on *every* whitespace character, so it is safe only
+watcher block in `references/ci-watcher.md` uses, but it splits on *every* whitespace character, so it is safe only
 for values that cannot contain one — PR numbers cannot, branch names and paths
 can. Measured on a two-line list whose first value is `two words`: three
 iterations through `$(printf …)`, two through `while IFS= read -r`. On an empty
@@ -70,8 +70,8 @@ word-split bug, so a correct heredoc fix missing this half looks exactly like no
 fix at all, and reads as one.
 
 **A probe that could not look emits an event; it never `continue`s.** Stated in
-full at *A probe that cannot read is a transition event, not silence* under **Own the CI waits**,
-and it binds every watcher in this file rather than that one block: the third
+full at *A probe that cannot read is a transition event, not silence* in `references/ci-watcher.md`,
+and it binds every watcher rather than that one block: the third
 value beside pass and fail is what turns a broken loop into a loud failure
 instead of a quiet one. A guard that drops an unreadable probe — `[ -n "$json" ]
 || continue` — makes *could not look* indistinguishable from *nothing to report*.

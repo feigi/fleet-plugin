@@ -1,4 +1,4 @@
-// #784. The degraded-watcher snippet in `run-team/SKILL.md` is prescriptive
+// #784. The degraded-watcher snippet, `run-team/references/ci-watcher.md`'s block, is prescriptive
 // shell a controller copies verbatim, and it has now shipped a defect that its
 // OWN surrounding prose already ruled out — three times. So this pin RUNS the
 // block rather than matching strings in it: it lifts the fenced snippet out of
@@ -32,11 +32,11 @@ try {
   throw new Error("jq is required to exercise the watcher block; install it before running this suite");
 }
 
-const SKILL = readFileSync(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"), "utf8");
+const DOC = readFileSync(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "references", "ci-watcher.md"), "utf8");
 
 // Anchored on what the block CONTAINS, never on its ordinal: a fence inserted
 // ahead of it would re-rot an index. Exactly one block may say WATCHER DEGRADED.
-const blocks = [...SKILL.matchAll(/```sh\n([\s\S]*?)```/g)]
+const blocks = [...DOC.matchAll(/```sh\n([\s\S]*?)```/g)]
   .map((m) => m[1])
   .filter((b) => b.includes("WATCHER DEGRADED"));
 assert.equal(blocks.length, 1, `expected exactly one sh block emitting WATCHER DEGRADED, found ${blocks.length} — update this test`);

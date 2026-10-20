@@ -199,10 +199,12 @@ for (const [rel, from, to] of RULE_FILES) {
 }
 
 // The controller is the other reader, and it meets the return shape rather than
-// the apply rule. A field nobody is told to read is a field nobody reads.
+// the apply rule. A field nobody is told to read is a field nobody reads. Each
+// digest field in full is references/reviewers.md's, which SKILL.md's digest
+// reading points at.
 test("run-team's digest reading documents the discriminant and the resume path", () => {
-  const doc = readFileSync(join(REPO, "skills/run-team/SKILL.md"), "utf8");
-  const shape = Pin.of(doc, "doc").between("**`testEnvironment` says what the review's shared test run is evidence about**", "**`dimensionsRun` is the dispatch", "run-team/SKILL.md").text;
-  assert.match(shape, Pin.phrase("refutersDispatched"), "run-team/SKILL.md reads a digest whose two unverified populations still read alike");
-  assert.match(shape, Pin.phrase("resume"), "run-team/SKILL.md reads the crashed band without the recovery it has");
+  const doc = readFileSync(join(REPO, "skills/run-team/references/reviewers.md"), "utf8");
+  const shape = Pin.of(doc, "doc").between("**`testEnvironment` says what the review's shared test run is evidence about**", "**`dimensionsRun` is the dispatch", "run-team/references/reviewers.md").text;
+  assert.match(shape, Pin.phrase("refutersDispatched"), "run-team/references/reviewers.md reads a digest whose two unverified populations still read alike");
+  assert.match(shape, Pin.phrase("resume"), "run-team/references/reviewers.md reads the crashed band without the recovery it has");
 });

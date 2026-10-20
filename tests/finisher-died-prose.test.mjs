@@ -11,14 +11,26 @@ import { Pin } from "./support/prose-pin.mjs";
 
 const RUN_TEAM = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"));
 const flat = (s) => s.replace(/\s+/g, " ");
+// The resolution's full text, cockpit flag included, is in the finisher
+// reference; SKILL.md keeps the by-hand rule and a pointer to it.
+const FINISHER_REF = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "references", "finisher.md"));
 
 test("a finisher that died is flagged by the cockpit and resolved by hand — no automatic retry, no label from the controller", () => {
-  const para = flat(RUN_TEAM.paragraph("**Resolving a finisher that died.**", "died-finisher resolution", "### Dispositions escalation").text);
+  const para = flat(FINISHER_REF.paragraph("**Resolving a finisher that died.**", "died-finisher resolution", Pin.END).text);
   assert.match(para, /`finisher:failed` or `finisher:killed` at severity 4/);
   assert.match(para, /neither the implementer's bare `killed` flag nor `unlabelled`/);
   assert.match(para, /the tick dispatches no finisher for it/);
   assert.match(para, /You resolve it by hand: investigate why the finisher died, or dispatch the next-suffix finisher after the finisher gate/);
   assert.match(para, /You never add the label yourself, and the tick does not retry\./);
+});
+
+// The cockpit-flag pin reads the reference alone, so SKILL.md's own copy of the
+// rule — the one a controller resolving the flag reads — needs a pin of its own.
+test("SKILL.md's died-finisher resolution keeps the by-hand rule beside its pointer: no retry, no label from the controller", () => {
+  const para = flat(RUN_TEAM.paragraph("**Resolving a finisher that died.**", "SKILL.md died-finisher resolution", "### Dispositions escalation").text);
+  assert.match(para, /the tick does not retry\. Resolve it by hand:/);
+  assert.match(para, /You never add the label yourself\./);
+  assert.match(para, /See references\/finisher\.md\./);
 });
 
 test("the finisher-died wake bullet records failed and killed through member-died and points at the by-hand resolution", () => {

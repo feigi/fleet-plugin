@@ -482,20 +482,24 @@ test("run-team's Reviewers section documents dimensionsUnrun and suiteVerdict, n
 // IS THEREFORE COVERED` — which a pin on the anchor alone reads as still present.
 // The exclusion then has nothing left to guess at, so it stays whole-doc and
 // case-insensitive: the retracted claim is caught wherever in the file it comes
-// back, and in the lowercase paraphrase a `phrase` pin on `NOT` walks past.
+// back, and in the lowercase paraphrase a `phrase` pin on `NOT` walks past. The
+// digest's field-by-field reading moved to references/reviewers.md, so the
+// positive pin reads it there and the exclusion reads SKILL.md as well.
 test("run-team claims a review RETURNED from a key's absence from dimensionsUnrun, never that it is covered", () => {
-  const doc = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
-  const para = Pin.of(doc, "doc").paragraph("**`dimensionsRun` is the dispatch", "run-team/SKILL.md", "**`suiteVerdict` is the review's one judgement").text;
+  const ref = readFileSync(join(REPO, "skills", "run-team", "references", "reviewers.md"), "utf8");
+  const para = Pin.of(ref, "ref").paragraph("**`dimensionsRun` is the dispatch", "run-team/references/reviewers.md", "**`suiteVerdict` is the review's one judgement").text;
   assert.match(
     para,
     Pin.phrase("and NOT in `dimensionsUnrun` returned a review;"),
-    "run-team/SKILL.md no longer says a key absent from dimensionsUnrun returned a review, full stop",
+    "run-team/references/reviewers.md no longer says a key absent from dimensionsUnrun returned a review, full stop",
   );
-  assert.doesNotMatch(
-    doc,
-    /in\s+`dimensionsUnrun`\s+is\s+covered/i,
-    "run-team/SKILL.md reads a key's absence from dimensionsUnrun as coverage — nothing checked what the specialist covered",
-  );
+  for (const [name, doc] of [["run-team/SKILL.md", readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8")], ["run-team/references/reviewers.md", ref]]) {
+    assert.doesNotMatch(
+      doc,
+      /in\s+`dimensionsUnrun`\s+is\s+covered/i,
+      `${name} reads a key's absence from dimensionsUnrun as coverage — nothing checked what the specialist covered`,
+    );
+  }
 });
 
 // The same claim on the OTHER surface, and the half nothing was watching. The

@@ -492,7 +492,7 @@ every five Pulls by construction.
 The last guard fired with n=1 on the control side. The pre-cell pair query
 counted pairs that are no cell's comparisons, and the query before that one
 counted every session whose implementers merely differed, so it cleared the
-cell floor SKILL.md's **Report** states — at least ten comparisons across five
+cell floor **Do not read a cell early** states — at least ten comparisons across five
 or more distinct `run_date`s — by an order of magnitude while the controlled
 comparison did not exist yet.
 
@@ -576,3 +576,38 @@ The raw split still favours the top tier — 3 failures in 11 `routine`/`sonnet`
 ## What minted_false_claim reads
 
 `minted_false_claim` **discriminates and no longer reads "always yes"** — 20 of the 66 `routine` rows carry `no`, 18 at `opus` and 2 at `sonnet`. Read it as a property of the TICKET before the tier: a pure code simplification need not add prose, while a correction ticket adds prose by construction. The honest summary is unchanged and is the reason this paragraph exists: the guard fired on the criterion the maintainer chose in advance, not on a demonstration that the cheaper tier is worse.
+
+## Do not read a cell early
+
+**Do not read a cell early.** A cell's
+comparison is one session holding an admissible row at that cell — its tier
+check passed and its resolved effort is the cell's level — and one at
+`slow-high` whose resolved model and effort differ. Count them per cell, never
+pooled across cells, and stop until
+there are at least ten of them across five or more distinct `run_date`s; below
+that, a comparison count is a number, not evidence. SKILL.md's **Report**
+reports the count `cell-readout.mjs` prints, which holds a cell below that
+floor to a count on stderr.
+
+## A Pull's entry and exits, in full
+
+A Pull's entry is `~/.fleet/bin/fleet-run pull.mjs next --head <N>`, run from the
+main checkout (without `--head`, the next shortlist entry). It runs the
+mechanical steps in order and stops at each judgement with a `QUESTION
+<qid>:` block and exit 10; `pull.mjs answer <N> <qid> <token> [--path <p>] [--]
+[<text>…]` records the answer and resumes it. Exit 0 prints `DISPATCH {name,
+agent, brief}`, the `task` call that the dispatch makes; exit 1 means the ticket left the
+Pull, so take the next entry; exit 2 names what could not be looked at —
+`next --head <N>` again retries a step that failed, the same `answer` again
+retries one that failed while applying an answer (the question stands), and
+after a router refusal `next --head <N>` starts the ticket over; exit 3 is a
+usage mistake, or an answer the question does not take, and records nothing.
+The record is `<scratch>/impl-<N>/pull.json`.
+
+## No multi-select, no maintainer tick
+
+**No multi-select, no maintainer tick.** Selection and ordering are batched —
+one scan, oldest first; admission never is. The invariant this replaces — one
+human decision per batch of admissions, zero unilateral grabs — is retired
+is retired: zero human decisions per admission, and every non-admission is a
+label or a premise the maintainer can read.

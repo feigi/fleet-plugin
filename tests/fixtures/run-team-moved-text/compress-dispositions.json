@@ -1,0 +1,66 @@
+{
+  "changed": [
+    [
+      "It runs the start sequence in its fixed order — branch, fast-forward, pin, baseline, preflight, ruleset, tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded, shortlist — prints one `phase0: <step>: <status>` line per step with the `NEED` lines last, and records each step in `.fleet/phase0.json`, which the tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row until the receipt is whole.",
+      "`phase0.mjs` runs the start sequence in its fixed order — branch, fast-forward, pin, baseline, preflight, ruleset, tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded, shortlist — prints one `phase0: <step>: <status>` line per step with the `NEED` lines last, and records each step in `.fleet/phase0.json`, which the tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row until the receipt is whole."
+    ],
+    [
+      "Arm the heartbeat below.",
+      "Arm the heartbeat (SKILL.md's **Nothing to do: arm the beat**)."
+    ],
+    [
+      "A turn that ends on a drained queue is #3's stall itself: nothing external will wake you, and the level-check you are one command away from never runs.",
+      "A turn that ends on a drained queue is the stall itself: nothing external will wake you, and the level-check you are one command away from never runs."
+    ],
+    [
+      "Catches hand-added labels as well as a finisher's own.",
+      "The `ready-to-merge` Monitor catches hand-added labels as well as a finisher's own."
+    ],
+    [
+      "Arm a second persistent Monitor over open PRs' latest runs, keyed `<run-id>:<attempt>:<conclusion>` so each terminal state fires once, and emit the behind-count and the per-job conclusions with it: a `success` on a branch 8 behind is not actionable, and `check`-green-with-heavy-skipped is the staleness board you must not confuse with a red.",
+      "Arm a second persistent Monitor over open PRs' latest runs from the block in references/ci-watcher.md, verbatim, keyed `<run-id>:<attempt>:<conclusion>` so each terminal state fires once: one `~/.fleet/bin/fleet-run ci-state.mjs --pr <N>` per open PR emits run id, attempt, conclusion, behind-count and per-job conclusions."
+    ],
+    [
+      "The fix-applier reads every one off the file and makes every ruling on them (`review-and-fix.md`'s **The review result file**).",
+      "The fix-applier reads every one off the file and makes every ruling on them (`review-and-fix.md`'s **The review result file**); never rule on one yourself."
+    ],
+    [
+      "**Do not invoke `commit-commands:clean_gone`.**",
+      "**Do not invoke `commit-commands:clean_gone`**: do the reap yourself."
+    ],
+    [
+      "The whole key, never the conclusion alone: **a conclusion is not stable** (below), because a rerun rewrites the run in place.",
+      "The whole key, never the conclusion alone: **a conclusion is not stable** (references/ci-and-staleness.md), because a rerun rewrites the run in place."
+    ],
+    [
+      "Empty your outbox to it first — including any ruling you have withdrawn or reversed — then dispatch (below); a final report is not proof it stopped.",
+      "Empty your outbox to it first — including any ruling you have withdrawn or reversed — then dispatch (*The fix-applier pushes and exits; the finisher is dispatched fresh*); a final report is not proof it stopped."
+    ],
+    [
+      "**Never reap a branch a live member is on.**",
+      "**Never reap a branch a live member is on** — cross-check `.fleet/ledger.md` first for a row without a terminal state."
+    ],
+    [
+      "Run it over every claimed ticket with no PR when the run ends or the maintainer drains, and on the spot for a claim abandoned mid-run (a bail before implementing, a collision found after the claim).",
+      "| A claim abandoned mid-run (a collision found after the claim) | `~/.fleet/bin/fleet-run release-ticket.sh <N> impl-<N> implementer --apply`, the pair the claim took, on the spot — and over every claimed ticket with no PR when the run ends or the maintainer drains."
+    ]
+  ],
+  "deleted": [
+    [
+      "Do not reinvent that read: one `~/.fleet/bin/fleet-run ci-state.mjs --pr <N>` per open PR already emits run id, attempt, conclusion, behind-count and per-job conclusions, branch derived from the PR — including the `gh api --hostname <host>` a GHE compare call needs, without which the probe 404s and `behind` comes back `null`, never 0, so every event reads as unknown-behind.",
+      "SKILL.md's **Own the CI waits**, which names the one `ci-state.mjs --pr <N>` call per open PR and what it emits; ci-state.mjs passes `--hostname` itself, and its header comment says why (the GHE 404)"
+    ],
+    [
+      "The skill is the maintainer's to fix; do the reap yourself.",
+      "SKILL.md's reap bullet, which keeps `do the reap yourself` beside the `clean_gone` ban; references/reaping.md's `Skill is maintainer's to fix.` carries the why"
+    ],
+    [
+      "Cross-check `.fleet/ledger.md` first: a row without a terminal state means someone may still be in that worktree, and the dirty check does not see a member that committed but has not pushed.",
+      "SKILL.md's reap bullet, which keeps the ledger cross-check for a row without a terminal state; references/reaping.md's `Dirty check does not see member that committed but not pushed.` carries the why"
+    ],
+    [
+      "See references/ci-watcher.md.",
+      "the watcher block comment's pointer: the block now lives in references/ci-watcher.md, where a pointer to its own file sends the reader nowhere"
+    ]
+  ]
+}

@@ -253,3 +253,38 @@ the whole point: a table you must remember to consult is one you will not
 consult under a merge-side event storm, and that is how implementers reached
 0/target with ~57 `ready-for-agent` in supply while nobody
 noticed.
+
+## What the tick reads
+
+It reads the run itself, and nobody states a count. The In-flight count —
+every open PR that closes an issue off `gh`, plus every claimed ticket whose
+newest implementer is live or owed a replacement and has no such PR yet, off
+the ledger — sits beside the live review units (in-flight `review=` tokens
+plus unsettled `fix-pr-` ones), the merge bot, merge holds, tier mismatches
+and the drain marker, all off `.fleet/ledger.md`; the unclaimed heads and the
+supply come off `.fleet/shortlist.json`, which it refreshes itself when the
+unclaimed count is below the In-flight bound, when the file is missing or
+empty, when an Exclusion's premise has lifted, or when a branch-named
+`behind-pr` or a `behind-issue` Exclusion still not lifted names a ticket the
+file carries — never while the bound holds; the open PRs come off `gh`. A
+head whose Pull ended this run is not counted, unless on a lifted exclusion. A
+ledger token it
+cannot read, it refuses rather than guessing — a member counted live or gone on
+a guess is the over- or under-dispatch it exists to prevent — so correct that
+row with `ledger.mjs row` and tick again. The In-flight bound defaults to 5
+and is fixed for the run: pass `--in-flight` on every tick when `$ARGUMENTS`
+set it, and never otherwise.
+
+## Refresh is the tick's
+
+2. **Refresh is the tick's from here on.** `fleet-tick.mjs` runs
+   `shortlist.mjs` itself when unclaimed entries fall below the In-flight
+   bound, when the file is missing or empty, when an `excluded` premise has
+   lifted, and when a branch-named `behind-pr` exclusion whose PR is not yet
+   MERGED or CLOSED, or a `behind-issue` exclusion whose issue is not yet
+   closed, names a ticket the file still carries, and prints
+   `REFRESHED shortlist: <n> entries; <k> lifted`. A head whose Pull ended
+   this run is not counted, unless on a lifted exclusion. Phase 0 runs it by hand
+   once because a dead run's shortlist is stale by definition.
+   None of those triggers runs while `HOLD (in-flight <n>/<B>)` stands.
+

@@ -276,6 +276,6 @@ const RESUME_CENSUS =
   "Compaction parks every in-flight member and nothing reports it, so on resume take the registry census first (**Member unaccounted**, in **Failure handling**) before you trust a live token.";
 
 test("the wake-section paragraph tells a resumed controller to take the registry census before trusting a live token", () => {
-  const block = read().paragraph("Compaction parks every in-flight member", `${SKILL}'s wake-section resume sentence`, "Token additions go through").text;
+  const block = read().paragraph("Compaction parks every in-flight member", `${SKILL}'s wake-section resume sentence`, "`ledger.mjs token <key> <token>…` adds a token").text;
   assert.match(block, Pin.phrase(RESUME_CENSUS), `${SKILL}'s wake-section paragraph lost the census-first-on-resume sentence.`);
 });

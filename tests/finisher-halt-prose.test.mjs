@@ -21,11 +21,14 @@ const RUN_TEAM = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "r
 // The finisher's report contract is in its agent body; run-team's SKILL.md no
 // longer restates it.
 const FINISHER_BODY = Pin.file(join(import.meta.dirname, "..", "plugin", "agents", "fleet-finisher.agent.md"));
+// Why `past-pin` needs the tick is rationale, so it lives in the finisher
+// reference; SKILL.md keeps the rule and a pointer to it.
+const FINISHER_REF = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "references", "finisher.md"));
 const flat = (s) => s.replace(/\s+/g, " ");
 
 const RESOLVING = "**Resolving a finisher halt.**";
 const resolutionRows = () => {
-  const table = RUN_TEAM.paragraph("| Cause | Resolution |", "halt resolution table", "### Why a `past-pin` halt needs the tick").text;
+  const table = RUN_TEAM.paragraph("| Cause | Resolution |", "halt resolution table", "### Resolving a finisher that died").text;
   return table.split("\n").filter((l) => l.startsWith("| `"));
 };
 // A row's first-cell backticked causes, in order — shared by rowFor's
@@ -89,7 +92,7 @@ test("every halt escalates on the PR itself — a comment that outlives the run 
 });
 
 test("the tick paragraph says why past-pin cannot use the dead-review path, and that a fix-applier push stays not due", () => {
-  const para = flat(RUN_TEAM.paragraph("`past-pin` needs the tick because", "past-pin tick rationale", "### Resolving a finisher that died").text);
+  const para = flat(FINISHER_REF.paragraph("`past-pin` needs the tick because", "past-pin tick rationale", "## Resolving a finisher that died").text);
   assert.match(para, /settling that review `=failed` re-queues nothing — that path covers only a review that died before returning\./);
   assert.match(para, /A head that moved past `reviewed=` with no such halt — a fix-applier's push — stays not due: duty 2 verifies what it applied\./);
 });

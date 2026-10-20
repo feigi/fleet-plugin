@@ -12,6 +12,14 @@ child's stderr. `--session <dir>` overrides the variable.
 Exit 3 is a step that failed: its line carries the refusal, so fix the cause
 and run it again.
 
+`phase0.mjs` runs the start sequence in
+its fixed order — branch, fast-forward, pin, baseline, preflight, ruleset,
+tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded,
+shortlist — prints one `phase0: <step>: <status>` line per step with the
+`NEED` lines last, and records each step in `.fleet/phase0.json`, which the
+tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row
+until the receipt is whole.
+
 ## Fast-forward the checkout
 
 **Fast-forward the checkout before you trust these rules — you are reading
@@ -441,3 +449,45 @@ else. Exit 2 is a list that did not answer — a `gh` or `git`
 failure, a list at its cap, a worktree whose presence cannot be told, or,
 after `ancestor`, a ledger that cannot be read — and is never nothing
 stranded.
+
+## Build the Shortlist
+
+1. **Build the Shortlist** — `~/.fleet/bin/fleet-run shortlist.mjs`, then read
+   `.fleet/shortlist.json`. The script runs the cheap filters and nothing else
+   — no ticket body is read here, because a Pull reads one ticket in full at
+   the moment it admits it:
+
+   - **Candidate scan** — `candidates.mjs --require-label ready-for-agent
+     --with-dropped`, oldest-first, never re-ranked. Its row count is
+     `scanned`, the supply; the rows its to-spec filter removed are
+     `dropped`, counted nowhere.
+   - **Dependency scan**, `next-ticket` step 2, on each row's `d` array. Open
+     blocker → drop.
+   - **Live Exclusions** — a ticket whose ledger row reads `excluded ·
+     behind-pr:#M` or `excluded · behind-issue:#M` stays out while its premise
+     holds (references/pull.md, **Exclusion**).
+   - **In-flight check** — `inflight.sh <N>` per survivor. Exit 1 is taken, and
+     any other non-zero exit is a check that could not answer, which is never
+     free. Both drop the ticket, logged by number.
+
+   It writes the survivors, in order, to `.fleet/shortlist.json` —
+   `{scanned, shortlist: [{n, t}], dropped: [{n, reason}]}` — resolved against the git common dir by
+   `fleet-dir.mjs`, the one locator `ledger.mjs` resolves `.fleet/ledger.md`
+   with too, so you, the tick and a member in its own worktree all name one
+   file. **Exit 0 is the file written,
+   an empty shortlist included** — the empty queue is an answer. **Exit 2 is a
+   refusal**: the scan, the ledger read or the write did not answer, and the
+   previous file stands untouched, because an empty file written then would
+   read as "no work". Never read 2 as empty.
+
+   Every probe fails CLOSED: an unreadable blocker counts as open, an
+   unreadable premise leaves its exclusion standing, an unanswered in-flight
+   check counts as taken. A ticket dropped wrongly waits one refresh; a ticket
+   admitted wrongly costs a Pull's full read at best and two members on one
+   ticket at worst.
+
+   **`--require-label ready-for-agent` mandatory, no fallback** — the script
+   fixes it, and you never run `candidates.mjs --allow-fallback` by hand to
+   widen the list: `ready-for-human` needs a human to brainstorm first and you
+   have no channel to one mid-flight.
+

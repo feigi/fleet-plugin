@@ -134,3 +134,50 @@ than being detected, and nothing else can write the reason afterwards:
 ```bash
 ~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop "budget exhausted"
 ```
+
+Skipping it is not fatal — the next reader still reports the stop, it just
+reports that the beat stopped *without a recorded reason*, which is all it can
+honestly say about a death that named nothing.
+
+## Nothing to do: why the beat, and what its lines mean
+
+- **Nothing to do right now** → **do not end your turn.** Arm the heartbeat
+  (SKILL.md's **Nothing to do: arm the beat**). A turn that ends on a drained
+  queue is the stall itself: nothing external will wake you, and the
+  level-check you are one command away from never runs. Listed on its own
+  because it is the only wake with no trigger — every other row of SKILL.md's
+  wake list arrives; this one is the absence of one.
+
+- `… Ns of Ms remain → re-issue this command now, do not end your turn` — no
+  command blocks for a whole interval (omp backgrounds one at 60s, which is
+  why the CI gate holds its wait in one `eval` cell polling `gh run view`).
+  Issue it again. That is still one blocking call per turn, never an idle turn.
+
+**The beat does not stop on idleness.** An empty shortlist and an empty supply are
+not a reason to end the run; they are the state a newly triaged ticket arrives
+into. The run ends when you drain it, when the budget goes, or when this
+context does — not because there was briefly nothing to do.
+Zeroes on the cockpit are not yet proof the pipeline is idle.
+
+## Rule: record, tick, act, beat
+
+**Rule: record, tick, act, beat.** Every wake — a member report, a review
+notification, a label, a CI run reaching a terminal state, a `CONFLICT` line, a
+heartbeat, the maintainer's drain — is one `fleet-event.mjs` call, which makes
+the wake's writes and ends in one `fleet-tick.mjs` invocation, and you do what
+it prints. There are no hand-run
+refill or dispatch edges left. Record first, because the tick reads the run off
+`.fleet/ledger.md` and nothing else of yours: a wake you have not written down is
+one it cannot see, and it names the same dispatch again. Every record goes
+through `ledger.mjs` (references/ledger.md), which `fleet-event.mjs` drives — never a
+hand edit. What each kind writes is in the header comment of `fleet-event.mjs`.
+
+## The merge bot does not wait for the finisher's report
+
+The `ready-to-merge` Monitor catches hand-added labels as well as a finisher's
+own. The bot does not wait for that finisher's report: its rebase is
+server-side, `gh pr update-branch --rebase`, so nothing on the finisher's
+worktree has to happen first. **You own the watcher, not the bot.** Arm one
+yourself, `persistent: true`, seeded before the loop so handled PRs do not
+re-fire. **One rebase per PR, at merge time.** Any behind-count you hand a bot
+is expired on arrival; say so.

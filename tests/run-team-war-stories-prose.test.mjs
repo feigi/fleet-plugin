@@ -62,7 +62,7 @@ const CORRECTIONS = [
     "**A member runs its test suite in the foreground** above, where `fix-pr-1184`",
     "**A member runs its test suite in the foreground** in references/member-lifecycle.md, where `fix-pr-<M>`",
   ],
-  ["Every degraded branch above falls through", "Every degraded branch of SKILL.md's watcher block falls through"],
+  ["Every degraded branch above falls through", "Every degraded branch of this file's watcher block falls through"],
   ["`fix-pr-983` nearly reported", "one fix-applier nearly reported"],
   ["while `fix-pr-1153` nearly retired", "while another nearly retired"],
   ["the test-run verdict rule below", "the test-run verdict rule in SKILL.md"],
@@ -74,7 +74,7 @@ const CORRECTIONS = [
     "so `git push origin \"HEAD:$(git branch --show-current)\"` exits 128 on `fatal: invalid refspec 'HEAD:'`.",
     "so `~/.fleet/bin/fleet-run push-sync.mjs --branch \"$(git branch --show-current)\"` is handed an empty branch and exits 2 before pushing anything.",
   ],
-  ["is what Phase 3's block uses", "is what the watcher block under **Own the CI waits** uses"],
+  ["is what Phase 3's block uses", "is what the watcher block in references/ci-watcher.md uses"],
 ];
 
 // The removed text as its blocks — paragraphs, a table, a code block — each
@@ -107,8 +107,9 @@ const sentencesOf = (f) =>
     .filter((s) => s !== "" && !/^\d+\.$/.test(s));
 
 // The watcher block's comment kept its rule sentence in place; only the
-// measured sentence after it moved, so this clause is SKILL.md's, not the
-// fixture's.
+// measured sentence after it moved, so this clause is the block's, not the
+// fixture's. The block itself now lives in references/ci-watcher.md, so the
+// clause sits there with no pointer, as a Shell traps rule does.
 const WATCHER_COMMENT_CLAUSE = "REST units per listed PR on top of the 200 floor.";
 
 // Each moved paragraph: the reference file it moved to; the heading it sits
@@ -227,8 +228,8 @@ const keptCount = (text, clause, file) => (text.match(new RegExp(Pin.phrase(`${c
 
 // The Shell traps section moved whole into references/shell-traps.md, and none
 // of its rules has a pointer beside it: each clause appears there exactly once,
-// with no pointer after it.
-const SHELL_TRAPS_MD = reference("shell-traps.md");
+// with no pointer after it. The watcher block's comment clause is held the
+// same way in references/ci-watcher.md.
 
 for (const [file, heading, clause, opening, imperative] of MOVED) {
   test(`references/${file} carries the paragraph under "## ${heading}"`, () => {
@@ -237,11 +238,12 @@ for (const [file, heading, clause, opening, imperative] of MOVED) {
   });
   if (clause === null) continue;
   const kept = imperative === undefined ? clause : `${clause} ${imperative}`;
-  if (file === "shell-traps.md") {
+  if (file === "shell-traps.md" || clause === WATCHER_COMMENT_CLAUSE) {
     const clauseCount = (text, c) => (text.match(new RegExp(Pin.phrase(c).source, "g")) ?? []).length;
     test(`references/${file} keeps "${kept.slice(0, 60)}…" with no pointer`, () => {
-      assert.equal(clauseCount(SHELL_TRAPS_MD, kept), 1);
-      assert.equal(keptCount(SHELL_TRAPS_MD, kept, file), 0, `references/${file} points this rule at itself`);
+      const text = reference(file);
+      assert.equal(clauseCount(text, kept), 1);
+      assert.equal(keptCount(text, kept, file), 0, `references/${file} points this rule at itself`);
     });
   } else {
     test(`SKILL.md keeps "${kept.slice(0, 60)}…" with See references/${file} beside it`, () => {

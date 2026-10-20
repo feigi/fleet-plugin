@@ -2,6 +2,34 @@
 
 `closeout.mjs finish` runs the scrape, the tier-outcomes check, the metrics refresh, the commit of the metrics files, and the phase-0 receipt move, and SKILL.md's **End of run** says how to drive it. This file is how each of those works, for the controller to read when a step refuses, and how `closeout.mjs reopen` undoes a drain. The verdict rules — what `closed_own_ticket` and `minted_false_claim` mean, and that a value not in hand is left blank — stay in SKILL.md under **Guard: accumulate per PR**, because the controller still rules them.
 
+- **The run ends, or the maintainer says drain** → `fleet-event.mjs drain --reason "<reason>"`
+  first (below). The marker is on disk, so the tick
+  holds the implementer row at `HOLD (draining)` from then on — for a
+  replacement controller too — and keeps the review, fix-applier and merge rows
+  firing until the open PRs merge. The drain starts the end of the run; it does
+  not end it. **End of run**, in this order:
+  1. `~/.fleet/bin/fleet-run fleet-event.mjs drain --reason "<reason>"` — runs
+     `closeout.mjs begin --reason "<reason>"` (references/reaping.md), then the tick. A claim it refuses prints `NEED hand-release #<N> <blocker>`: that
+     refusal is the finding, so run `worktree-audit.sh` and decide by hand.
+     `begin` selects a claim with no PR and a live or `bailed` implementer token
+     on every run, so a claim you keep leaves `begin` at exit 4 on every run:
+     release the rest by hand and run `begin` again.
+  2. Act on the review, fix-applier and merge rows until the tick prints
+     `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`, which it does
+     once the run is draining with no open PR and no live implementer.
+  3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason "<reason>"` — scrapes
+     the run's member facts, checks the tier-outcomes rows, refreshes the
+     metrics, commits the three metrics files and opens their PR, sets the
+     phase-0 receipt aside as `.fleet/phase0.previous.json`, then records
+     `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded
+     stop as the end of the run. A `NEED tier-outcomes append <pr>` is a PR
+     the ledger marks reviewed with no verdict row: append it with the verdict
+     you rule (**Guard: accumulate per PR**) and run `finish` again. A step it
+     fails is explained in references/close-out.md. Exit 0 is the run closed.
+  Drain only when a documented trigger fired, and name the trigger in `--reason`.
+  **Undrain** only when the maintainer asks, never a drain that budget or
+  context exhaustion caused (references/close-out.md).
+
 ## Scrape the member facts and check the tier rows
 
 **Then record the run's member facts — do not author them.** Scrape EVERY session

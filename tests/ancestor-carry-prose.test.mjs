@@ -17,7 +17,10 @@ const PHASE0 = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run
 const rotateStep = () => PHASE0.between("**Rotate the ledger before the fold-in below", "**The guard is the", "phase-0 rotate step").text;
 const foldIn = () => PHASE0.between("**Fold in every PR a prior run left open", "**Resume the claims a dead run left", "phase-0 fold-in step").text;
 const ancestor = () => PHASE0.bullet("- `prior: ancestor` — this session's own earlier run", "- `prior: none`", "phase-0 stranded-claim ancestor branch").text;
-const resumeHold = () => RUN_TEAM.bullet("- **The tier check.**", "- **The exploration rule.**", "run-team tier-check /resume limitation").text;
+// The after-/resume hold's full text moved to references/member-lifecycle.md
+// (#3545); SKILL.md's tier-check bullet keeps the rule and points there.
+const MEMBER_LIFECYCLE = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "references", "member-lifecycle.md"));
+const resumeHold = () => MEMBER_LIFECYCLE.section("## A carried implementer after `/resume` holds the whole tick", "member-lifecycle after-/resume section").text;
 
 test("the rotate step says what an ancestor rotate carries, and that dead and none carry nothing", () => {
   const s = rotateStep();

@@ -310,3 +310,13 @@ by the member rather than by the controller's guesswork.
 It owns the object-store rule, the two-tree split, snapshot provisioning, and
 which suites a snapshot cannot validly run. Your only duty is to *not*
 contradict it.
+
+## Every brief carries the absolute scratch path
+
+`<scratch>` in this file is the path it prints, resolved before you send anything: every
+brief that carries one carries the absolute path you passed it — an
+implementer's `<scratch>/impl-<N>/`, the recipe deriver's
+`<scratch>/derive-recipe/`, a fix-applier's, a finisher's and a merge bot's
+`<scratch>/pr<N>/…`, and a review runner's `scratch` argument, which is the
+root itself. A member whose prompt names no path asks you by name and never
+makes one up.

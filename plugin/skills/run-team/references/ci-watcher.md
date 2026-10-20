@@ -1,6 +1,141 @@
-# The CI watcher: why its block is shaped the way it is
+# The CI watcher: its block, and why it is shaped the way it is
 
-Evidence for the rules SKILL.md states beside its watcher block, under **Own the CI waits**, keyed by the rule each justifies.
+SKILL.md's **Own the CI waits** arms the persistent Monitor from the block
+below, verbatim. The rules beside the block follow it; the evidence for each
+rule is under the heading naming it.
+
+## The block
+
+**A probe that cannot read is a transition event, not silence.** So check the REST budget *before* polling — `gh api rate_limit` is itself
+unmetered (`gh api rate_limit --jq '.resources.core.remaining'`, re-confirmed
+2026-09-08) — and give an unreadable `ci-state` payload the same treatment one
+level down. The shape is **one outer tick loop with an inner pass over the open
+PRs**, because the two causes live at different levels — the budget is one
+account, the payload is one PR:
+
+```sh
+budget_out= hidden_out= list_out= cap_out= blind= # seed the latches: set -u reads each below before tick 1 ever assigns one
+pr_cap=200                                   # the open-PR read's --limit; gh stops there with exit 0 and no warning
+while :; do                                   # one tick
+  rl=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo ERR)
+  case "$rl" in ''|*[!0-9]*) rl=ERR;; esac    # a non-numeric read is an outage, not a budget
+  if [ "$rl" = ERR ] || [ "$rl" -lt 200 ]; then
+    if [ -z "$budget_out" ]; then             # ONE global latch: a quota outage hits every PR
+      echo "WATCHER DEGRADED: core REST budget=$rl — CI polling paused, silence is NOT green"
+      budget_out=1
+    fi
+  else                                        # every RECOVERED waits for the pass gates below
+    prs=$(gh pr list --state open --limit "$pr_cap" --json number --jq '.[].number' 2>/dev/null) || prs=ERR
+    if [ "$prs" = ERR ]; then
+      if [ -z "$list_out" ]; then             # global latch: this cause is account-level too
+        echo "WATCHER DEGRADED: cannot list open PRs — CI polling paused, silence is NOT green"
+        list_out=1
+      fi
+    else                                      # a list or cap RECOVERED waits for the pass gates too
+      count=$(printf '%s\n' "$prs" | grep -c .) || : # grep -c exits 1 on zero matches; set -e must not take it
+      if [ "$count" -ge "$pr_cap" ] && [ -z "$cap_out" ]; then # global latch: a full page may have been cut there
+        echo "WATCHER DEGRADED: open-PR list hit its --limit $pr_cap — PRs past it are NOT watched, silence on them is NOT green"
+        cap_out=1
+      fi
+      # gh pr list is GraphQL, so $rl still holds. The pass is budgeted at 4 core
+      # REST units per listed PR on top of the 200 floor.
+      # A shortfall here, or at the Actions-bucket gate below, pauses this tick's pass.
+      if [ "$rl" -lt $((200 + 4 * count)) ]; then
+        if [ -z "$budget_out" ]; then
+          echo "WATCHER DEGRADED: core REST budget=$rl < $((200 + 4 * count)) needed for $count PRs — CI polling paused, silence is NOT green"
+          budget_out=1
+        fi
+      else
+        # The workflow and run lookups bill a second core bucket that
+        # `rate_limit` does not report. Its count is only in the response
+        # headers of a lookup that bills it: one 1-unit read per tick, 4 units
+        # per listed PR on the same 200 floor. Recovery for every global latch
+        # waits until this gate clears too, so no line says polling resumed
+        # while this one still pauses it.
+        hrl=$(gh api -i 'repos/{owner}/{repo}/actions/workflows?per_page=1' 2>/dev/null | awk 'tolower($1)=="x-ratelimit-remaining:" {sub(/\r$/, "", $2); print $2; exit}')
+        case "$hrl" in ''|*[!0-9]*) hrl=ERR;; esac # a missing header is an outage, not a budget
+        if [ "$hrl" = ERR ] || [ "$hrl" -lt $((200 + 4 * count)) ]; then
+          if [ -z "$hidden_out" ]; then
+            need=; [ "$hrl" = ERR ] || need=" < $((200 + 4 * count)) needed for $count PRs" # an unreadable header has no amount to compare
+            echo "WATCHER DEGRADED: unreported Actions core REST bucket=$hrl$need — CI polling paused, silence is NOT green"
+            hidden_out=1
+          fi
+        else
+          if [ -n "$list_out" ]; then
+            echo "WATCHER RECOVERED: open-PR list readable again — CI polling resumed"
+            list_out=
+          fi
+          if [ -n "$cap_out" ] && [ "$count" -lt "$pr_cap" ]; then
+            echo "WATCHER RECOVERED: open-PR list under its --limit $pr_cap — every open PR watched again"
+            cap_out=
+          fi
+          if [ -n "$budget_out" ]; then
+            echo "WATCHER RECOVERED: core budget=$rl — CI polling resumed"
+            budget_out=
+          fi
+          if [ -n "$hidden_out" ]; then
+            echo "WATCHER RECOVERED: unreported Actions core REST bucket=$hrl — CI polling resumed"
+            hidden_out=
+          fi
+          for pr in $(printf '%s\n' "$prs"); do # inline $(...): `for pr in $prs` is ONE iteration under zsh
+            st=$(~/.fleet/bin/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
+            if ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
+              case " $blind " in *" $pr "*) ;; *) # latch keyed BY PR: this cause is per-PR
+                echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
+                blind="$blind $pr" ;;
+              esac
+              continue                        # inner continue — still reaches the tick sleep
+            fi
+            case " $blind " in *" $pr "*)
+              echo "WATCHER RECOVERED: ci-state reading #$pr again — CI polling resumed"
+              keep=; for b in $(printf '%s\n' "$blind"); do [ "$b" = "$pr" ] || keep="$keep $b"; done; blind=$keep ;;
+            esac
+            : # your normal handling of $st for this PR; a run at a terminal state is the CI wake: fleet-event.mjs ci "$pr"
+          done
+        fi
+      fi
+    fi
+  fi
+  sleep 120                                   # the block's only pacing, once per tick
+done
+```
+
+**It has to latch** — one line entering the degraded state, one leaving it,
+never one per tick. **Latch each cause at the level its cause lives
+at**: the budget, the unreported Actions bucket, the open-PR list and that
+list's cap are one global flag each — all account-level — but the payload latch is keyed by PR, and a
+shared scalar for those is an unlatched line wearing a latch's clothes — one
+persistently blind PR alongside one healthy PR re-clears the flag on every tick,
+emitting a DEGRADED and a false RECOVERED pair forever. The recovery line is
+what says the watch is alive again, so emit it on the first good pass even when
+nothing about the CI state changed; without it a reader cannot tell a recovered
+watcher from a dead one.
+
+**Guard every probe, not just the ones with a verdict field.** Capture its status (`prs=$(…) || prs=ERR`), latch it globally, and fall
+through to the same tail sleep. **Then iterate with the inline `$(printf '%s\n'
+"$prs")` form, never a bare `for pr in $prs`** — the assigned-variable trap in
+**Shell traps**, in references/shell-traps.md, which carries the mechanism and its
+measurements. It
+applies to **every** loop in this block, the `blind`-latch removal included:
+under a bare `for b in $blind` a recovered PR never leaves the list and the block
+emits a fresh RECOVERED every tick thereafter — the per-tick volume the latch
+exists to prevent, wearing a latch's clothes again.
+
+**A readable list can still be a short one.** Pass an explicit `--limit`
+(`pr_cap`: one variable for the flag and the check, so the two cannot drift)
+and treat a full page as its own degraded cause — the "no silent caps" rule
+`candidates.mjs`'s `refuseIfCapped()` and `fleet-tick.mjs`'s `PR_LIMIT` already
+enforce. It latches globally like the list failure but does not pause polling:
+the PRs it did return are real, so the pass still watches them, and the
+DEGRADED line names the rest as unwatched until a pass comes back under the cap.
+
+**Judge `ci-state` on its payload, never its exit code** — the same rule as
+`merge-gate.mjs` applies on the merge path, applied to the watcher. Empty
+or unparseable output is the degraded case; parseable JSON reading
+`verdict: "not-green"` is normal. An exhausted quota may also name itself,
+`verdict: "rate-limited"` on stdout — likewise degraded, and likewise not a
+reading, which is why the gate above tests the verdict rather than mere
+parseability: that payload is perfectly good JSON.
 
 ## The pass is budgeted at 4 core REST units per listed PR
 
@@ -28,7 +163,7 @@ as a CI reading. Require the field, then compare it.
 inside the per-PR pass multiplies by the number of open PRs (8 open PRs → 960s
 of pause per tick, against the 24s outage reset measured below), and a degraded
 branch that `continue`s the *outer* loop skips the tail sleep and busy-spins
-probe pairs during exactly the outage it is reporting. Every degraded branch of SKILL.md's watcher block falls through to the same single sleep instead.
+probe pairs during exactly the outage it is reporting. Every degraded branch of this file's watcher block falls through to the same single sleep instead.
 
 ## The budget is gated at the floor and again at the pass
 

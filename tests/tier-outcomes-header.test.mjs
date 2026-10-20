@@ -19,6 +19,8 @@ import { COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
 const REPO = join(import.meta.dirname, "..");
 const TSV = readFileSync(join(REPO, "docs", "metrics", "tier-outcomes.tsv"), "utf8");
 const RUN_TEAM = Pin.file(join(REPO, "plugin", "skills", "run-team", "SKILL.md"));
+// The per-cell floor's numbers moved with **Do not read a cell early** (#3545).
+const PULL_MD = Pin.file(join(REPO, "plugin", "skills", "run-team", "references", "pull.md"));
 
 // The header is the LEADING comment block. Slicing it — rather than grepping
 // `#` lines from anywhere — is what stops a stray comment among the data rows
@@ -39,7 +41,13 @@ const HEADER = headerLines.join("\n");
 // Anchored on the guard's own bold sentence: End of run, in the wake table above
 // it, cites the guard by its short name, so the short name alone would start the
 // slice there.
-const rulingStep = () => RUN_TEAM.between("**Guard: accumulate per PR, never conclude inside one run.**", "### Nothing to do: arm the beat", "the tier outcomes guard's ruling step").text;
+// The difficulty fields' paragraph moved to references/reviewers.md (#3545), so
+// the ruling step is the guard's slice in SKILL.md plus that section.
+const rulingStep = () =>
+  [
+    RUN_TEAM.between("**Guard: accumulate per PR, never conclude inside one run.**", "### Nothing to do: arm the beat", "the tier outcomes guard's ruling step").text,
+    REVIEWERS_MD.section("## The tier-outcomes row's difficulty fields", "references/reviewers.md").text,
+  ].join("\n\n");
 // The sizing-verdict paragraph, with its measurement, moved to
 // references/reviewers.md; the ruling step keeps its rule beside the pointer.
 const REVIEWERS_MD = Pin.file(join(REPO, "plugin", "skills", "run-team", "references", "reviewers.md"));
@@ -529,9 +537,9 @@ test("the header's `run_date` source claims still hold against the readout, the 
   // does not own; a threshold changed in SKILL.md or in the readout alone
   // leaves this header quietly citing the old one.
   assert.match(
-    Pin.unemphasized(RUN_TEAM.text),
+    Pin.unemphasized(PULL_MD.text),
     Pin.phrase("there are at least ten of them across five or more distinct `run_date`s"),
-    "SKILL.md's per-cell floor is no longer ten comparisons across five dates — the header quotes those numbers",
+    "references/pull.md's per-cell floor is no longer ten comparisons across five dates — the header quotes those numbers",
   );
   assert.deepEqual({ ...GATE }, { comparisons: 10, runDates: 5 }, "cell-readout.mjs's gate is no longer ten across five — the header quotes those numbers");
   assert.match(

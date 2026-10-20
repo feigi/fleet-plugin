@@ -376,34 +376,39 @@ const QUEUE_TIER_GUARDS = JSON.parse(readFileSync(join(import.meta.dirname, "fix
 // tooling mid-run` keeps its own pairs in
 // tests/fixtures/run-team-moved-text/standing-sections-dispositions.json, in the same shape.
 const STANDING_SECTIONS = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "run-team-moved-text", "standing-sections-dispositions.json"), "utf8"));
+// The compression of the retained sections toward the 75,000-byte target (#3545)
+// keeps its own pairs in
+// tests/fixtures/run-team-moved-text/compress-dispositions.json, in the same shape.
+const COMPRESS = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "run-team-moved-text", "compress-dispositions.json"), "utf8"));
 const CHANGED = [
   ...PHASE_2.changed,
   ...PHASE_3.changed,
   ...QUEUE_TIER_GUARDS.changed,
   ...STANDING_SECTIONS.changed,
+  ...COMPRESS.changed,
   [
     "No harness supplies a scratch directory to a member, so a member left to name its own invents one — and the liveness read below, which looks at the files under the directory a member's own prompt assigned it, then watches a directory nobody else can find.",
     "No harness supplies a scratch directory to a member, so a member left to name its own invents one — and the liveness read in **The tick's rows**, which looks at the files under the directory a member's own prompt assigned it, then watches a directory nobody else can find."
   ],
   [
     "Monitor and Bash commands run under **zsh**, and the shell in this file is prescriptive — copied verbatim into a watcher or into the merge bot's agent body.",
-    "Monitor and Bash commands run under **zsh**, and the shell in SKILL.md is prescriptive — copied verbatim into a watcher or into the merge bot's agent body."
+    "Monitor and Bash commands run under **zsh**, and the shell in references/ci-watcher.md is prescriptive — copied verbatim into a watcher or into the merge bot's agent body."
   ],
   [
     "Stated in full at *A probe that cannot read is a transition event, not silence* in Phase 3, and it binds every watcher in this file rather than that one block: the third value beside pass and fail is what turns a broken loop into a loud failure instead of a quiet one.",
-    "Stated in full at *A probe that cannot read is a transition event, not silence* under **Own the CI waits**, and it binds every watcher in SKILL.md rather than that one block: the third value beside pass and fail is what turns a broken loop into a loud failure instead of a quiet one."
+    "Stated in full at *A probe that cannot read is a transition event, not silence* in references/ci-watcher.md, and it binds every watcher rather than that one block: the third value beside pass and fail is what turns a broken loop into a loud failure instead of a quiet one."
   ],
   [
     "Listed first because it is the only wake with no trigger — every other row above arrives; this one is the absence of one.",
-    "Listed on its own because it is the only wake with no trigger — every other row above arrives; this one is the absence of one."
+    "Listed on its own because it is the only wake with no trigger — every other row of SKILL.md's wake list arrives; this one is the absence of one."
   ],
   [
     "The diff-validating `check` job green with no heavy job (the diff-validating suites, not the `rebase-check` currency gate) in `failure` → a finisher CANDIDATE (gated below), a `check` **failure** that is not solely staleness → the **red-check fixer** (**Then dispatch a red-check fixer**, below), behind the same review-returned and fix-applier-reported gate as a finisher.",
-    "The diff-validating `check` job green with no heavy job (the diff-validating suites, not the `rebase-check` currency gate) in `failure` → a finisher CANDIDATE (gated below), a `check` **failure** that is not solely staleness → the **red-check fixer** (**Then dispatch a red-check fixer**, above), behind the same review-returned and fix-applier-reported gate as a finisher."
+    "The diff-validating `check` job green with no heavy job (the diff-validating suites, not the `rebase-check` currency gate) in `failure` → a finisher CANDIDATE (gated by *The fix-applier pushes and exits; the finisher is dispatched fresh*), a `check` **failure** that is not solely staleness → the **red-check fixer** (SKILL.md's **Then dispatch a red-check fixer**), behind the same review-returned and fix-applier-reported gate as a finisher."
   ],
   [
     "**A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch the finisher **now**, against the existing head — when that head's bound conclusion is red, the red-check fixer instead (**Then dispatch a red-check fixer**, below), never a finisher and never a wait.",
-    "**A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch the finisher **now**, against the existing head — when that head's bound conclusion is red, the red-check fixer instead (**Then dispatch a red-check fixer**, above), never a finisher and never a wait."
+    "**A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch the finisher **now**, against the existing head — when that head's bound conclusion is red, the red-check fixer instead (SKILL.md's **Then dispatch a red-check fixer**), never a finisher and never a wait."
   ],
   [
     "**Then iterate with the inline `$(printf '%s\\n' \"$prs\")` form, never a bare `for pr in $prs`** — the assigned-variable trap in **Shell traps**, which carries the mechanism, with its measurements in references/shell-traps.md.",
@@ -411,11 +416,11 @@ const CHANGED = [
   ],
   [
     "When the diff-validating `check` job is green **and no heavy job is in `failure`** (the heavy diff-validating suites — not the `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and fine — **solely** off that count, which is a condition to establish rather than infer, see the five-condition note in the fix-applier body) — or `ci-state.mjs` reads `verdict: \"no-ci\"`, see below — **and once the PR's review has returned and its fix-applier, if one was dispatched, has sent its report, which the CI-completes edge above states in full** — dispatch a **finisher** — a fresh small agent, not the fix-applier resumed.",
-    "When the diff-validating `check` job is green **and no heavy job is in `failure`** (the heavy diff-validating suites — not the `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and fine — **solely** off that count, which is a condition to establish rather than infer, see the five-condition note in the fix-applier body) — or `ci-state.mjs` reads `verdict: \"no-ci\"`, see above — **and once the PR's review has returned and its fix-applier, if one was dispatched, has sent its report, which the CI-completes edge above states in full** — dispatch a **finisher** — a fresh small agent, not the fix-applier resumed."
+    "When the diff-validating `check` job is green **and no heavy job is in `failure`** (the heavy diff-validating suites — not the `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and fine — **solely** off that count, which is a condition to establish rather than infer, see the five-condition note in the fix-applier body) — or `ci-state.mjs` reads `verdict: \"no-ci\"`, its bullet in **The finisher gate's tests, in full** — **and once the PR's review has returned and its fix-applier, if one was dispatched, has sent its report, which the CI-completes edge in that section states in full** — dispatch a **finisher** — a fresh small agent, not the fix-applier resumed."
   ],
   [
     "Its four duties are a checklist — audit the worktree, confirm every deferral has a tracker home and re-run the acceptance mutation, apply one release label, report — and the merge gate downstream still catches whatever it gets wrong, the same argument that puts the merge bot on the same tier below.",
-    "Its four duties are a checklist — audit the worktree, confirm every deferral has a tracker home and re-run the acceptance mutation, apply one release label, report — and the merge gate downstream still catches whatever it gets wrong, the same argument that puts the merge bot on the same tier above."
+    "Its four duties are a checklist — audit the worktree, confirm every deferral has a tracker home and re-run the acceptance mutation, apply one release label, report — and the merge gate downstream still catches whatever it gets wrong."
   ],
   [
     "A bot already looping cannot be corrected — the loop consumes the turns a correction would land in — so `agents/fleet-merge-bot.agent.md` carries **every entry in Shell traps**, each written out in full: the rules in that section with the measurements from `references/shell-traps.md` beside them, and the bot has them before its first turn.",
@@ -539,6 +544,7 @@ const DELETED = [
   ...PHASE_3.deleted,
   ...QUEUE_TIER_GUARDS.deleted,
   ...STANDING_SECTIONS.deleted,
+  ...COMPRESS.deleted,
   [
     "**`impl-<N>/`** goes once issue #N is CLOSED, or when it is OPEN, no live `impl-<N>` token names it and nothing under it has changed in 7 days.",
     "reclaim-scratch.mjs's header, which `tick --apply` runs after the reap, and tests/reclaim-scratch.test.mjs"
