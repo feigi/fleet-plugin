@@ -1,0 +1,242 @@
+{
+  "changed": [
+    [
+      "The `tier-roles` step runs `~/.fleet/bin/fleet-run tier-roles.mjs --check --in-flight <B>`, `<B>` being the `--in-flight` given, else the default **Defaults** (**Queue depth**) states.",
+      "The `tier-roles` step runs `~/.fleet/bin/fleet-run tier-roles.mjs --check --in-flight <B>`, `<B>` being the `--in-flight` given, else the default."
+    ],
+    [
+      "None of those triggers runs while `HOLD (in-flight <n>/<B>)` stands (**Queue depth**).",
+      "None of those triggers runs while `HOLD (in-flight <n>/<B>)` stands."
+    ],
+    [
+      "Count them per cell, never pooled across cells, and stop until there are at least ten of them across five or more distinct `run_date`s; below that, a comparison count is a number, not evidence, and the last guard fired with n=1 on the control side.",
+      "Count them per cell, never pooled across cells, and stop until there are at least ten of them across five or more distinct `run_date`s; below that, a comparison count is a number, not evidence."
+    ],
+    [
+      "It prints `actual/target` and a named ACTION per role, with the whole **Queue depth** guard table applied in code.",
+      "It prints `actual/target` and a named ACTION per role."
+    ],
+    [
+      "Suggest, never run (**Queue depth**).",
+      "Suggest, never run."
+    ],
+    [
+      "With the shortlist empty the table below governs — refresh, and never Pull a ticket the shortlist does not hold.",
+      "With the shortlist empty the tick's rows govern — refresh, and never Pull a ticket the shortlist does not hold."
+    ],
+    [
+      "**Never relay a diagnostic without reproducing it in that member's specific worktree** (re-run the check that raised it from there): probe copies carry the real tree's filenames, so a sibling's throwaway mutation reads exactly like a live worktree's error.",
+      "**Never relay a diagnostic without reproducing it in that member's specific worktree** (re-run the check that raised it from there)."
+    ],
+    [
+      "The pre-cell pair query counted pairs that are no cell's comparisons, and the query before that one counted every session whose implementers merely differed, so it cleared this floor by an order of magnitude while the controlled comparison did not exist yet.",
+      "The pre-cell pair query counted pairs that are no cell's comparisons, and the query before that one counted every session whose implementers merely differed, so it cleared the cell floor SKILL.md's **Report** states — at least ten comparisons across five or more distinct `run_date`s — by an order of magnitude while the controlled comparison did not exist yet."
+    ],
+    [
+      "In that incident the controller reasoned from dispatch scope to \"almost certainly `impl-<N>`\" and told the maintainer so; the named member then proved it was not the victim (it had never invoked those files standalone, and its mutation baselines post-dated the window).",
+      "In the `pkill -f` incident \"A pattern kill reaches siblings\" measures, the controller reasoned from dispatch scope to \"almost certainly `impl-<N>`\" and told the maintainer so; the named member then proved it was not the victim (it had never invoked those files standalone, and its mutation baselines post-dated the window)."
+    ],
+    [
+      "The same incident: the controller's warning DID reach the member, which re-ran, found nothing changed, and said nothing — correctly reading \"send once, never re-send\" as covering it.",
+      "The same `pkill -f` incident: the controller's warning DID reach the member, which re-ran, found nothing changed, and said nothing — correctly reading \"send once, never re-send\" as covering it."
+    ]
+  ],
+  "deleted": [
+    [
+      "A PR that already has a row is left untouched, so re-running it is safe.",
+      "tier-outcomes.mjs append, which leaves a PR's existing row untouched; tests/tier-outcomes.test.mjs"
+    ],
+    [
+      "See references/close-out.md.",
+      "End of run step 3 in SKILL.md's wake section, which names closeout.mjs finish's steps and sends a failed step to references/close-out.md"
+    ],
+    [
+      "The counter-evidence paragraph earlier in this section carries the split and the three rows that cut against it.",
+      "the paragraph it named was no longer in the section; references/pull.md's tier-outcomes section carries the recount"
+    ],
+    [
+      "**shortlist** — `.fleet/shortlist.json`'s entries with no `impl-` row and no live `excluded` row: admissible, not yet pulled.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **Shortlist**"
+    ],
+    [
+      "The tick's `unclaimed=`.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **Shortlist**"
+    ],
+    [
+      "**supply** — `scanned`, the open `ready-for-agent` tickets `shortlist.mjs`'s candidate scan returned, before any filter.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; supply stays defined in SKILL.md phase 0's candidate scan (`scanned`, the supply)"
+    ],
+    [
+      "Only a Pull's full read judges decided?, so a shortlist of undecided tickets is supply that every Pull relabels away — and relabelling is what stops it being counted next scan.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; supply stays defined in SKILL.md phase 0's candidate scan (`scanned`, the supply)"
+    ],
+    [
+      "**review backlog** — PRs owed a review.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the review backlog is the tick's `review-due=` count, which fleet-tick.mjs computes"
+    ],
+    [
+      "`fleet-tick.mjs` counts every open PR without `ready-to-merge` **that closes an issue** and carries no `review=` token on the ledger — one settled `=failed` is owed a review again, and so is one whose latest finisher halted `past-pin` past its latest `reviewed=` head (**Resolving a finisher halt**) — and it prints them as `review-due=`.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the review backlog is the tick's `review-due=` count, which fleet-tick.mjs computes"
+    ],
+    [
+      "Exact, not a wider read: the ledger records which PRs are under review or reviewed, so nothing about it is guesswork.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the review backlog is the tick's `review-due=` count, which fleet-tick.mjs computes"
+    ],
+    [
+      "The closing-issue test is what keeps it from widening: a PR that closes no issue — one you author yourself, for instance — is left unlabelled for the maintainer, so no member of the fleet will ever review it, and counting it floors the backlog at a depth nothing in the run can drain — the reviewer row would then report a review owed for the rest of the run.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the review backlog is the tick's `review-due=` count, which fleet-tick.mjs computes"
+    ],
+    [
+      "GitHub's own linked-issue set decides that, not a keyword regex over the body.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the review backlog is the tick's `review-due=` count, which fleet-tick.mjs computes"
+    ],
+    [
+      "**In flight** — a ticket between its Claim and its PR's merge: an implementer live or owed a replacement on it, or an open PR closing it.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **In flight**"
+    ],
+    [
+      "A PR closing nothing is never in flight, and a ticket whose newest implementer settled `blocked` is not either.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **In flight**"
+    ],
+    [
+      "The tick's `n`; the implementer row's counts read it as `implementers=<i> prs=<p>`, n being i + p.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **In flight**"
+    ],
+    [
+      "**In-flight bound** — the most tickets a run lets be In flight at once, fixed for the run, set by `/run-team`'s one argument.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **In-flight bound**"
+    ],
+    [
+      "Reaching it holds every Pull until a merge brings the count below it; reviewers, finishers and the merge bot never slow for it.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **In-flight bound**"
+    ],
+    [
+      "The tick's `B`.",
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **In-flight bound**"
+    ],
+    [
+      "**That exemption is for a PR THIS run authors, never one a PRIOR run left open** — step 0 folds those into this run's review queue, so count one when you reason about backlog BY HAND.",
+      "phase 0 step 0's `NEED review PR#<pr> (closes no issue)` row in SKILL.md, which hand-dispatches that review"
+    ],
+    [
+      "**The `fleet-tick.mjs` number still excludes it**: nothing in its filter distinguishes an inherited PR from this run's own, since a PR closing no issue fails the closing-issue test either way — folding one in cannot reach the count.",
+      "phase 0 step 0's `NEED review PR#<pr> (closes no issue)` row in SKILL.md, which hand-dispatches that review"
+    ],
+    [
+      "So the by-hand judgement and the script's output differ here, and such a PR's review is dispatched by hand.",
+      "phase 0 step 0's `NEED review PR#<pr> (closes no issue)` row in SKILL.md, which hand-dispatches that review"
+    ],
+    [
+      "What follows stays here as the explanation of what the script decides — never as a second, hand-run copy of it.",
+      "the section it introduced; fleet-tick.mjs computes the rows, references/tick-rows.md carries them"
+    ],
+    [
+      "| shortlist (unclaimed) | implementer row prints |",
+      "fleet-tick.mjs's implementer row; references/tick-rows.md's PULL, REFRESHED and SUGGEST rows; tests/fleet-tick.test.mjs"
+    ],
+    [
+      "| ≥ 1 | `PULL #N …`, one head per free slot — a Pull each (phase 1) |",
+      "fleet-tick.mjs's implementer row; references/tick-rows.md's PULL, REFRESHED and SUGGEST rows; tests/fleet-tick.test.mjs"
+    ],
+    [
+      "| below the In-flight bound, missing or empty | the tick refreshes first — `REFRESHED shortlist: n entries; k lifted` — and Pulls from what it found |",
+      "fleet-tick.mjs's implementer row; references/tick-rows.md's PULL, REFRESHED and SUGGEST rows; tests/fleet-tick.test.mjs"
+    ],
+    [
+      "| 0 after that refresh | `SUGGEST /triage, hold idle` |",
+      "fleet-tick.mjs's implementer row; references/tick-rows.md's PULL, REFRESHED and SUGGEST rows; tests/fleet-tick.test.mjs"
+    ],
+    [
+      "Whatever the row prints, a `specs-dropped=#<N> (…)` at the end of its counts names the tickets the to-spec filter kept out of the shortlist — specs awaiting to-tickets, so an empty shortlist carrying one is not \"no work\".",
+      "SKILL.md's `specs-dropped=#<N> …` tick row; references/tick-rows.md"
+    ],
+    [
+      "The refresh runs at unclaimed < B and, with every other refresh trigger, never while the bound holds: a refresh then cannot feed a Pull, and the first tick back under the bound refreshes and Pulls in the same tick.",
+      "fleet-tick.mjs; SKILL.md's `HOLD (…)` and `MAIN-CHECKOUT-*` tick rows; references/tick-rows.md; tests/fleet-tick.test.mjs"
+    ],
+    [
+      "Four holds outrank every row: `HOLD (draining)` once `ledger.mjs drain` has recorded the drain, `HOLD (tier mismatch impl-<N>)` until a replacement is dispatched at the right tier, `HOLD (tier unchecked impl-<N>)` until `tier-check.mjs` has written its verdict on the newest implementer — `tier-ok=`, `tier-mismatch=` or `tier-unverifiable=` — and `HOLD (in-flight <n>/<B>)` when n tickets are between Claim and merge and n ≥ B — refreshing to enable a Pull you are holding buys nothing.",
+      "fleet-tick.mjs; SKILL.md's `HOLD (…)` and `MAIN-CHECKOUT-*` tick rows; references/tick-rows.md; tests/fleet-tick.test.mjs"
+    ],
+    [
+      "`HOLD (in-flight <n>/<B>)` ranks last of the four: the other three print in its place.",
+      "fleet-tick.mjs; SKILL.md's `HOLD (…)` and `MAIN-CHECKOUT-*` tick rows; references/tick-rows.md; tests/fleet-tick.test.mjs"
+    ],
+    [
+      "Its detail is the implementer row's counts, `implementers=<i> prs=<p> unclaimed=<k> supply=<s>`.",
+      "fleet-tick.mjs; SKILL.md's `HOLD (…)` and `MAIN-CHECKOUT-*` tick rows; references/tick-rows.md; tests/fleet-tick.test.mjs"
+    ],
+    [
+      "It is quiet — a merge brings n below B and the next tick Pulls — except for a ticket whose newest implementer settled `killed` or `tier-mismatch`: it counts as In flight with no PR that could merge, so the row asks for the replacement's dispatch and names it in the detail.",
+      "fleet-tick.mjs; SKILL.md's `HOLD (…)` and `MAIN-CHECKOUT-*` tick rows; references/tick-rows.md; tests/fleet-tick.test.mjs"
+    ],
+    [
+      "The reviewer row reads `<units>/<B>`, its live review units against the same bound, and never holds on it.",
+      "fleet-tick.mjs; SKILL.md's `HOLD (…)` and `MAIN-CHECKOUT-*` tick rows; references/tick-rows.md; tests/fleet-tick.test.mjs"
+    ],
+    [
+      "A main checkout that is not `clean` against its Phase 0 baseline outranks all of them, and every dispatching row besides: `HOLD (main checkout dirty)`, `HOLD (main checkout unknown)` or `HOLD (main checkout no baseline)` on the implementer, reviewer and merge-bot rows alike, beside the `MAIN-CHECKOUT-*` line that says why.",
+      "fleet-tick.mjs; SKILL.md's `HOLD (…)` and `MAIN-CHECKOUT-*` tick rows; references/tick-rows.md; tests/fleet-tick.test.mjs"
+    ],
+    [
+      "`/triage` is user-invoked only — suggest, never run.",
+      "SKILL.md's `SUGGEST /triage, hold idle` tick row: suggest `/triage` in the report, never run it"
+    ],
+    [
+      "Counts come from cheap `gh issue list --search`, no bodies.",
+      "shortlist.mjs; tests/shortlist.test.mjs"
+    ],
+    [
+      "After the merge, `delete-merged-branch.sh <pr>` deletes the branch from `origin` and reads the deletion back; `reap.sh` takes the `[gone]` local branch and its worktree.",
+      "delete-merged-branch.sh and reap.sh; tests/delete-merged-branch.test.mjs, tests/reap.test.mjs; run-merge-bot.md step 4"
+    ],
+    [
+      "No repo setting is relied on to do it.",
+      "delete-merged-branch.sh and reap.sh; tests/delete-merged-branch.test.mjs, tests/reap.test.mjs; run-merge-bot.md step 4"
+    ],
+    [
+      "A branch another open PR still uses as its head or base is kept instead — `branch-kept-#<that PR>` in the bot's report, a deliberate keep and not a failure.",
+      "delete-merged-branch.sh and reap.sh; tests/delete-merged-branch.test.mjs, tests/reap.test.mjs; run-merge-bot.md step 4"
+    ],
+    [
+      "The branch-delete step also releases the claim label: it drops `in-progress` from every issue the PR closes.",
+      "delete-merged-branch.sh and reap.sh; tests/delete-merged-branch.test.mjs, tests/reap.test.mjs; run-merge-bot.md step 4"
+    ],
+    [
+      "A private copy of the tree and a test command solve different problems; the compose project name comes from the environment, not the working directory, so three agents on three snapshots still collide on one postgres.",
+      "references/isolation.md's Filesystem isolation is not stack isolation section"
+    ],
+    [
+      "Which command depends on the audience: a member in a worktree uses `./agent-test`; a specialist on a snapshot does not, and takes the one `review-and-fix.md` hands out.",
+      "references/isolation.md's Filesystem isolation is not stack isolation section"
+    ],
+    [
+      "An implementer partitions at `<scratch>/impl-<N>/`; the review side's partition is `<scratch>/pr<N>/…`, which the review core creates itself, so a review runner is handed the scratch root, never that partition; any member that dispatches a child writes an absolute directory under its own partition into that child's prompt, one per child and never shared, and a child never derives its own.",
+      "references/isolation.md's Scratchpad paths section"
+    ],
+    [
+      "Finding ids restart at 1 every review, so two fix-appliers on different PRs both reach for `unv1`; one agent overwrote a sibling's `package.json`, and a probe built a git repo at the *checkout root*.",
+      "references/isolation.md's Scratchpad paths section"
+    ],
+    [
+      "Read from the object store at a pinned ref, write only under your own path.",
+      "references/isolation.md's Scratchpad paths section"
+    ],
+    [
+      "**IDE/harness diagnostics attribute by bare filename, with no path.**",
+      "references/isolation.md's IDE/harness diagnostics section"
+    ],
+    [
+      "\"I'm on my own copy\" is exactly the intuition that skips the command — say both, every time.",
+      "references/isolation.md's Filesystem isolation is not stack isolation section; SKILL.md's red flag \"I'm on my own copy, so I'm isolated\""
+    ],
+    [
+      "The member-facts scrape, the drain of the pending ticket-features rows and the commit of the metrics files are steps of `closeout.mjs finish`, which **End of run** (Phase 3) drives.",
+      "End of run step 3 in SKILL.md's wake section, which names closeout.mjs finish's steps and sends a failed step to references/close-out.md"
+    ],
+    [
+      "One invocation prints per-role `actual/target` and an explicit ACTION with the backlog gate above and every row of the table below already applied; every wake in Phase 3 ends in it.",
+      "fleet-tick.mjs; tests/fleet-tick.test.mjs"
+    ]
+  ]
+}

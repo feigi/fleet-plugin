@@ -1,6 +1,6 @@
 # Isolation: filesystem vs stack
 
-Why isolation envelope file not briefing, why private filesystem not private stack. Assertions these justify live in references/pull.md Claiming section and SKILL.md Guards section; evidence here.
+Why isolation envelope file not briefing, why private filesystem not private stack. Assertions these justify live in references/pull.md Claiming section and SKILL.md Failure handling section; evidence here.
 
 ## Materialize the isolation envelope as a file, not a briefing
 
@@ -262,3 +262,29 @@ get is not yours to choose — members are briefed on `./agent-test` with the
 arguments the Test entrypoint takes, and the runner hands them on exactly as
 its caller's shell expanded them. Clearing your own leftover process needs its
 PID, not a pattern.
+
+## Do not guess the victim — the blast radius is the machine, not the Pull
+
+In the `pkill -f` incident "A pattern kill reaches siblings" measures, the controller reasoned from dispatch scope to "almost
+certainly `impl-<N>`" and told the maintainer so; the named member then proved
+it was not the victim (it had never invoked those files standalone, and its
+mutation baselines post-dated the window). Idle members of *previous* runs,
+other omp sessions on the same machine, and the maintainer's own shell are
+all `pkill -f` targets and none of them appear in your ledger.
+
+## A warning acted on silently is indistinguishable from one that never arrived
+
+The same `pkill -f` incident: the controller's warning DID reach the member,
+which re-ran, found nothing changed, and said nothing — correctly reading
+"send once, never re-send" as covering it. The controller then had to spend a
+round trip asking whether its own outbox was lossy. So the briefs say that
+**confirmation state includes warnings received and acted on, even
+when the outcome is no change** — one line, in the report the member already
+owes. That is the cheap half of the *never read silence as assent* rule, paid
+by the member rather than by the controller's guesswork.
+
+## Specialist tree isolation is `review-and-fix.md`'s job
+
+It owns the object-store rule, the two-tree split, snapshot provisioning, and
+which suites a snapshot cannot validly run. Your only duty is to *not*
+contradict it.

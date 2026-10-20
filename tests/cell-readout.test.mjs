@@ -326,7 +326,7 @@ test("equal per-model counts in a mixed cell list models alphabetically", () => 
 const RUN_TEAM = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"));
 
 test("SKILL.md's floor names the script that prints a cell's count, and that script exists", () => {
-  const floor = Pin.unemphasized(RUN_TEAM.paragraph("**Report the count the per-cell readout prints", "run-team's per-cell floor", "## Why the implementer body carries what it does").text);
+  const floor = Pin.unemphasized(RUN_TEAM.paragraph("**Report the count the per-cell readout prints", "run-team's per-cell floor", Pin.END).text);
   const named = /`~\/\.fleet\/bin\/fleet-run (\S+\.mjs)`/.exec(floor)?.[1];
   assert.ok(named, "the floor no longer tells the controller which script to run");
   assert.equal(named, "cell-readout.mjs");

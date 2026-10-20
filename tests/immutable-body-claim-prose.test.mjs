@@ -61,7 +61,7 @@ const flatten = (s) =>
     .trim();
 
 const FROM = "Every implementer body carries the";
-const TO = "Suspect a neighbour before a member's own diff";
+const TO = "**Prose-first** and **wrongly-REFUSE**";
 const rule = () => flatten(RUN_TEAM.between(FROM, TO, "the claim-discipline rationale and settling-command rules").text);
 
 // The rationale and the `-F` paragraph, as references/correction-tickets.md

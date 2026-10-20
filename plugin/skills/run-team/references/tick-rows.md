@@ -14,7 +14,7 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   lifted), the implementer row's `unclaimed=` prints that same
   `<u>`, not the refreshed file's count.
 - `SUGGEST /triage, hold idle` — nothing is admissible after the refresh.
-  Suggest, never run (**Queue depth**). A head whose Pull already ended in
+  Suggest, never run. A head whose Pull already ended in
   this run is not counted toward the refresh, so a shortlist of only such
   heads triggers the refresh before this row prints. It is not printed while the
   refreshed shortlist holds a head whose Pull ended only on an exclusion whose
@@ -245,3 +245,11 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   could-not-look (exit 2), never a mismatch. The settle runs neither command,
   and a repository whose Recipe cache is absent or refused has no gate; the
   record is the member's own word, at the trust level of its report.
+
+## Read the depth off the tick, never derive it by hand
+
+**Do not re-derive this by hand — `fleet-tick.mjs` computes it.** The deficit is then *computed, not remembered*, which is
+the whole point: a table you must remember to consult is one you will not
+consult under a merge-side event storm, and that is how implementers reached
+0/target with ~57 `ready-for-agent` in supply while nobody
+noticed.

@@ -39,7 +39,7 @@ const HEADER = headerLines.join("\n");
 // Anchored on the guard's own bold sentence: End of run, in the wake table above
 // it, cites the guard by its short name, so the short name alone would start the
 // slice there.
-const rulingStep = () => RUN_TEAM.between("**Guard: accumulate per PR, never conclude inside one run.**", "The member-facts scrape, the drain of the pending ticket-features rows", "the tier outcomes guard's ruling step").text;
+const rulingStep = () => RUN_TEAM.between("**Guard: accumulate per PR, never conclude inside one run.**", "### Nothing to do: arm the beat", "the tier outcomes guard's ruling step").text;
 // The sizing-verdict paragraph, with its measurement, moved to
 // references/reviewers.md; the ruling step keeps its rule beside the pointer.
 const REVIEWERS_MD = Pin.file(join(REPO, "plugin", "skills", "run-team", "references", "reviewers.md"));

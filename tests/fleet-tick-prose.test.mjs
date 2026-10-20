@@ -88,40 +88,16 @@ test("--in-flight is the run's bound, omp leaves it at its default, and the sema
 });
 
 // The Defaults paragraph moved, with its measurements, to references/pull.md;
-// SKILL.md keeps the default beside the pointer.
+// SKILL.md keeps the default beside the pointer, in phase 0's tier-roles step.
 const PULL_MD = Pin.file(join(REPO, "skills", "run-team", "references", "pull.md"));
 test("the Defaults paragraph states the bound's default with its rationale and the re-derive rule, and the retired sizing note is gone", () => {
-  const kept = RUN_TEAM.paragraph("**Default: In-flight bound 5, fixed for the run.**", "run-team Defaults paragraph", "**The review backlog never gates").text;
+  const kept = RUN_TEAM.paragraph("**Default: In-flight bound 5, fixed for the run.**", "run-team Defaults paragraph", "- `NEED derive-recipe`").text;
   assert.match(kept, Pin.phrase("**Default: In-flight bound 5, fixed for the run.** See references/pull.md."));
   const def = PULL_MD.section("## Default: In-flight bound 5", "references/pull.md Defaults section").text;
   assert.match(def, Pin.phrase("fixed for the run"));
   assert.match(def, Pin.phrase("set by load, not throughput"));
   assert.match(def, Pin.phrase("once 20 or more PRs have merged under it, never from one run's rows"));
   assert.doesNotMatch(`${kept}\n${def}`, /1\.95/, "the Defaults paragraph still carries the retired reviewer sizing note");
-});
-
-test("§ Queue depth defines In flight and the In-flight bound, and documents the hold's rank, detail and refresh rule", () => {
-  const inFlight = RUN_TEAM.bullet("- **In flight**", "- **In-flight bound**", "In flight definition").text;
-  assert.match(inFlight, Pin.phrase("a ticket between its Claim and its PR's merge"));
-  assert.match(inFlight, Pin.phrase("A PR closing nothing is never in flight"));
-  const bound = RUN_TEAM.bullet("- **In-flight bound**", "**Default: In-flight bound 5", "In-flight bound definition").text;
-  assert.match(bound, Pin.phrase("reviewers, finishers and the merge bot never slow for it"));
-  const s = queueDepthTable();
-  assert.match(s, Pin.phrase("`HOLD (in-flight <n>/<B>)` when n tickets are between Claim and merge and n ≥ B"));
-  assert.match(s, Pin.phrase("`HOLD (in-flight <n>/<B>)` ranks last of the four"));
-  assert.match(s, Pin.phrase("implementers=<i> prs=<p> unclaimed=<k> supply=<s>"));
-  assert.match(s, Pin.phrase("The reviewer row reads `<units>/<B>`"));
-  assert.match(s, Pin.phrase("never while the bound holds"));
-  // A head whose Pull ended this run is no head a PULL row can name: counted,
-  // it holds back the refresh that would fill its slot. Except a Pull that
-  // ended on an exclusion whose premise has lifted, which a PULL row names again.
-  assert.match(s, Pin.phrase("The table's shortlist counts no head whose Pull ended this run, unless on a lifted exclusion"));
-  assert.match(s, Pin.phrase("Unclaimed there counts no head whose Pull ended this run, unless on a lifted exclusion"));
-  // After a refresh at unclaimed < B the row prints the trigger's count, not the
-  // refreshed file's, so the idle row can carry a count above 0.
-  assert.match(s, Pin.phrase("A refresh at unclaimed < B leaves `unclaimed=` at that count, so `SUGGEST /triage` can print it above 0"));
-  const shortlist = RUN_TEAM.bullet("- **shortlist**", "- **supply**", "shortlist definition").text;
-  assert.match(shortlist, Pin.phrase("The tick's `unclaimed=`. Not after a refresh at unclaimed < B (below)."));
 });
 
 test("phase 0 runs tier-roles.mjs --check --in-flight <B> and says its notice never holds", () => {
@@ -199,11 +175,9 @@ test("the tick block runs the tick with --apply", () => {
   assert.match(tickBlock(), /fleet-tick\.mjs --apply/);
 });
 
-test("the tier check bullet says tick --apply runs the check, and the holds paragraph names the tier-unchecked HOLD", () => {
+test("the tier check bullet says tick --apply runs the check", () => {
   const bullet = RUN_TEAM.bullet("- **The tier check.**", "- **The exploration rule.**", "run-team tier-check bullet").text;
   assert.match(bullet, /`tick --apply`/);
-  const holds = RUN_TEAM.between("Four holds outrank every row", "\n\n", "run-team four holds paragraph").text;
-  assert.match(holds, Pin.phrase("HOLD (tier unchecked impl-<N>)"));
 });
 
 test("the CI-terminal wake runs the tick", () => {
@@ -211,86 +185,33 @@ test("the CI-terminal wake runs the tick", () => {
   assert.match(bullet, /run the tick/);
 });
 
-// The queue-depth table's own slice, ending at the `/triage` note that follows
-// it. Anchored to the section heading instead, the pointer would be satisfied
-// by the section's review-backlog bullets, which name `fleet-tick.mjs` before
-// the table does.
-const queueDepthTable = () =>
-  RUN_TEAM.between("**Do not re-derive this by hand", "`/triage` is user-invoked only", "queue-depth table").text;
+// The rationale for reading the depth off the tick moved to references/tick-rows.md;
+// SKILL.md's tick's rows keep the rule beside the pointer.
 
-test("the queue-depth table points at the executable reconcile", () => {
-  const s = queueDepthTable();
+test("reading the depth off the tick points at the executable reconcile", () => {
+  const s = TICK_ROWS.section("## Read the depth off the tick, never derive it by hand", "references/tick-rows.md depth section").text;
   assert.match(s, /fleet-tick\.mjs/);
   assert.match(s, /computed, not remembered/);
+  assert.match(RUN_TEAM.text, Pin.phrase("Read the depth off the tick and never derive it by hand: act on the row it prints"));
 });
 
-test("the queue-depth table keeps the implementer row's four holds above its rows", () => {
-  // The one ordering the script encodes that the table cannot show: implementers()
-  // returns a HOLD for a drain, a tier mismatch, an unchecked tier or the
-  // In-flight bound before it ever reaches a PULL. A table read as authoritative
-  // without them Pulls under a hold. All four, each by the ACTION string the tick
-  // prints.
-  const s = queueDepthTable();
-  assert.match(s, /Four\s+holds\s+outrank\s+every\s+row/);
-  for (const hold of ["`HOLD (draining)`", "`HOLD (tier mismatch impl-<N>)`", "`HOLD (tier unchecked impl-<N>)`", "`HOLD (in-flight <n>/<B>)`"]) {
-    assert.ok(s.includes(hold), `the queue-depth table no longer names ${hold} above its rows`);
-  }
-});
-
-test("the queue-depth table's empty row suggests /triage and asks nobody to tick (#1804)", () => {
-  // Supply is automatic (ADR 0013): the old pool-0 rows asked the maintainer to
-  // tick a multi-select that no longer exists. Exactly one row answers an empty
-  // shortlist after the tick's own refresh, and it is the tick's own string.
-  const s = queueDepthTable();
-  assert.match(s, /\|\s*0 after that refresh\s*\|\s*`SUGGEST \/triage, hold idle`\s*\|/);
-  assert.doesNotMatch(s, /ask the maintainer to tick/, "the queue-depth table asks the maintainer to tick — phase 0's multi-select is retired (ADR 0013)");
-});
-
-test("the queue-depth table says a specs-dropped tail on the row is not \"no work\"", () => {
+test("the specs-dropped row says a specs-dropped tail is not \"no work\"", () => {
   // The tick names candidates.mjs's to-spec drops on the implementer row
   // whatever its ACTION; an empty shortlist carrying one read as no work is
   // the stall the tail exists to end.
-  const s = queueDepthTable();
-  assert.match(s, Pin.phrase("a `specs-dropped=#<N> (…)` at the end of its counts names the tickets the to-spec filter kept out of the shortlist"));
-  assert.match(s, Pin.phrase("an empty shortlist carrying one is not \"no work\""));
+  const row = RUN_TEAM.text.split("\n").find((l) => l.startsWith("- `specs-dropped=#<N> …` — "));
+  assert.ok(row, "the tick's rows no longer carry the specs-dropped row");
+  assert.match(row, Pin.phrase("log those tickets as specs awaiting to-tickets, not as no work"));
 });
 
-test("the review-backlog definition states what the script actually counts", () => {
-  // The gate's input. Left as the narrow definition alone, a controller reading
-  // a HOLD cannot tell an over-count from a real review-bound pipeline.
-  const def = RUN_TEAM.bullet("- **review backlog**", "- **In flight**", "review-backlog definition").text;
-  assert.match(def, /open PR without `ready-to-merge`/);
-  // The review state now lives on the ledger (spec 2026-09-24 § 3 §7), so the
-  // count is exact rather than a wider read held "earlier, never later": a PR
-  // with a `review=` token is under review or reviewed, and one settled
-  // `=failed` is owed a review again.
-  assert.match(def, /no\s+`review=`\s+token/);
-  assert.match(def, /`=failed`/);
-  assert.doesNotMatch(def, /lives in your head/, "the definition still says per-PR review state lives in the controller's head — the ledger records it");
-  // Both halves of the closing-issue clause. The predicate alone is a rule a
-  // reader can only obey; the reason is what stops the next narrowing pass
-  // from dropping it as a stray filter, since a PR nothing will ever review
-  // floors the gate's input permanently rather than transiently.
-  assert.match(def, /that closes an\s+issue/);
-  assert.match(def, /nothing in the run can drain/);
-  // The exemption is scoped to the chore PR THIS run authors. Unscoped, a reader
-  // applies it to an INHERITED chore PR too — which step 0 queues for review, so
-  // a reader counts it BY HAND. The reviewBacklog number excludes it either way:
-  // a PR closing no issue fails the closing-issue test whichever run left it
-  // open, so nothing here is a claim about the script's output. That under-read
-  // is the opposite error from #590's over-read, and the narrow phrase separates
-  // them.
-  //
-  // Finding 2: \s+ between every pinned word, matching this file's own
-  // convention above. The pinned clause spans a line break in SKILL.md, so
-  // literal spaces red on a whitespace-only reflow — a false failure naming a
-  // regression that did not happen.
-  assert.match(def, /never\s+one\s+a\s+PRIOR\s+run\s+left\s+open/);
-  // The corrected half: the prose must keep saying the mechanical number
-  // excludes such a PR, or the by-hand reading silently becomes a claim about
-  // fleet-tick.mjs again.
-  assert.match(def, /number\s+still\s+excludes\s+it/);
-  assert.match(def, /BY\s+HAND/);
+test("the SUGGEST /triage row says suggest, never run, and asks nobody to tick", () => {
+  // `/triage` is user-invoked: the controller reports the suggestion and never
+  // blocks on it. Supply is automatic (ADR 0013), so the row never asks the
+  // maintainer to tick the multi-select phase 0 no longer has.
+  const row = RUN_TEAM.text.split("\n").find((l) => l.startsWith("- `SUGGEST /triage, hold idle` — "));
+  assert.ok(row, "the tick's rows no longer carry the SUGGEST /triage row");
+  assert.match(row, Pin.phrase("suggest `/triage` in the report, never run it. The suggestion is a report, not a blocking prompt."));
+  assert.doesNotMatch(row, /ask the maintainer to tick/i, "the SUGGEST /triage row asks the maintainer to tick — phase 0's multi-select is retired (ADR 0013)");
 });
 
 // The step-0 fold-in section only, in the phase-0 reference file. Widened to

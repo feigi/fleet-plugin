@@ -27,6 +27,10 @@ in-between width cannot be told apart from a shifted one. The `note` field is
 free text and sits before those four, so the script refuses a tab or newline in
 it: one tab would shift all four for that row alone.
 
+**Phase 0 does not size anything** — it shortlists, a Pull claims, and
+the sizing run happens inside the member after both, which is why the verdict
+has to travel in the member's report rather than being something you already hold.
+
 ## Know the trim before you rely on it
 
 **Know the trim before you rely on it — it is wider than `docsOnly` suggests.**
@@ -135,3 +139,12 @@ reviewed and is not.
 ## The review's scratch is the scratch root, not its partition
 
 **`scratch` is the scratch root itself, the absolute path `scratch-root.mjs` prints, never the review side's `<scratch>/pr<N>` partition:** the review creates `pr<N>/` under it, so a `pr<N>` passed in nests every run root at `pr<N>/pr<N>/`, and the review refuses a `scratch` whose last component is `pr` plus digits before dispatching anything.
+
+## Cross-check what members report, and distrust negative claims hardest
+
+Wrong often enough
+to matter, and a confident wrong report from a reviewer flips a verdict.
+
+"Nothing else references this", "the sweep
+is clean" — most likely false, least likely checked: a grep that found nothing
+looks like a grep never run.

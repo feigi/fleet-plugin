@@ -30,7 +30,11 @@ const memberLifecycleTier = () =>
   MEMBER_LIFECYCLE.between("## The implementer's tier is the definition's", "## The merge bot's tier", "member-lifecycle implementer-tier section").text;
 const memberTickRows = () => TICK_ROWS.text;
 const guard = () =>
-  RUN_TEAM.between("**Guard: accumulate per PR", "Why the agent body carries what it does", "run-team tier outcomes guard").text;
+  RUN_TEAM.between("**Guard: accumulate per PR", "**A verdict is a measurement only if it post-dates", "run-team tier outcomes guard").text;
+// Why the unit is the PR moved with the guard's rationale to references/pull.md.
+const PULL_MD = Pin.file(join(REPO, "skills", "run-team", "references", "pull.md"));
+const guardRationale = () =>
+  PULL_MD.section("## Accumulate per PR, never conclude a tier result inside one run", "references/pull.md tier-outcomes section").text;
 // Paragraph-tight: the implementer bullet alone, ending where the tier check opens.
 // The paragraphs past it recount historical rows by vendor model name, so an
 // absence pin read over `dispatch()` would refuse the file as it stands.
@@ -133,9 +137,9 @@ test("the tier outcomes guard's append duty is mandatory and per PR", () => {
   // The unit. Supply is one Pull per free slot (ADR 0013), so no batch of
   // implementers exists to compare — the original rule compared one staged set
   // of implementers against the set before it, two sets nobody can enumerate.
-  assert.match(slice, /unit is the PR/, "the guard's unit is no longer the PR");
+  assert.match(guardRationale(), /unit is the PR/, "the guard's unit is no longer the PR");
   assert.match(
-    slice,
+    guardRationale(),
     /no implementer batches/,
     "the guard no longer says why a batch is not a usable unit — it comes back otherwise",
   );
