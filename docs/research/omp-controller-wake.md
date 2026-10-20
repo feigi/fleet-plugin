@@ -295,11 +295,16 @@ Sources:
   2026-10-20T09:33:50Z. The first 18.12.3 entry is at 09:34:07Z, after a
   `session_exit` ("dispose") entry at 09:33:50Z, so candidate 3 (09:41Z) ran under
   18.12.3. The main checkout was at `8a8bbf22` from 2026-10-19T13:57:15Z (its
-  reflog) until its HEAD next moved at 2026-10-20T10:54:42Z, after the run; the
-  alarm's default helper path is `<cwd>/plugin/scripts`. The version of the
-  installed `@feigi/fleet-ctl` plugin is **not known**: the transcript records no
-  plugin version, and the install under `~/.omp/plugins/node_modules` was rewritten
-  at 2026-10-20T11:17Z, so its present contents say nothing about the run.
+  reflog) until its HEAD next moved at 2026-10-20T10:54:42Z, after the run. The
+  alarm imports `fleet-dir.mjs` and `fleet-state.mjs` from `$FLEET_SCRIPTS`, or
+  from `<cwd>/plugin/scripts` when that is unset. None of the sources above
+  records whether `FLEET_SCRIPTS` was set at launch, so `8a8bbf22` pins those two
+  helpers only if the default applied. Every `~/.fleet/bin/fleet-run` call, the
+  alarm turns' ticks among them, ran from the installed `@feigi/fleet-ctl` plugin,
+  which `fleet-run` resolves under `~/.omp/plugins/node_modules`. That plugin's
+  version is **not known**: the transcript records no plugin version, and the
+  install was rewritten at 2026-10-20T11:17Z, so its present contents say nothing
+  about the run.
 
 | Check | Result |
 |---|---|
@@ -402,9 +407,6 @@ The long tail comes from the controller being busy, and has these causes:
   test run (09:30:02Z). A controller that hands its turn back, as the design ruled
   for spec 7 (#3485) has it do, does not have the problem; one that blocks in
   `wait` or in a CI-poll loop still does.
-- **Alarm turns that start work.** A turn that dispatches a member and then waits
-  on its result is busy for the member's whole run, so the next due fire waits
-  with it.
 - **The 8419 s fire was the first fire, and the controller's first turn.** The
   controller transcript has no assistant message that ended a turn (a
   `stopReason` other than `toolUse`) between session start (15:04:42Z) and
@@ -414,6 +416,13 @@ The long tail comes from the controller being busy, and has these causes:
   and one `eval` loop of 484 s (17:14:30Z) polled PR checks. The gate could not
   pass until the turn ended at 18:08:10Z. The fire came at 18:08:18Z with
   `beat.at=15:42:59.077Z interval=300s`, so it was 8419 s past `beat.at + 300 s`.
+
+Alarm turns that start work are not among these causes. A turn that
+dispatches a member and then waits on its result would be busy for the member's
+whole run, and the next due fire would wait with it. No alarm turn in this run
+did that: none called `wait`, every `task` call in them returned within 0.3 s,
+and their longest tool call took 25.8 s. None of the calls over 240 s listed
+above ran in an alarm turn.
 
 The laptop did not sleep during the run, so sleep is not among these causes.
 `pmset -g log` records its last `Sleep` and `Wake` events at 2026-10-19 10:57:48
