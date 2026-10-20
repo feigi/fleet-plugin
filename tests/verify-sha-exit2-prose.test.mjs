@@ -50,8 +50,9 @@ const read = (...p) => Pin.file(join(REPO, ...p));
 const RUN_TEAM = read("skills", "run-team", "SKILL.md");
 const SCRIPT = read("scripts", "verify-sha.sh").text;
 
-// Bounded at both ends and small: the guard, not the `## Guards` section. A
-// slice wide enough to reach its neighbours is satisfied by their vocabulary.
+// Bounded at both ends and small: the guard, not the Failure handling section's
+// Recovery subsection around it. A slice wide enough to reach its neighbours is
+// satisfied by their vocabulary.
 const guard = () =>
   RUN_TEAM.between("**Verify every reported SHA.**", "**Never `--delete-branch`", "run-team/SKILL.md").text;
 

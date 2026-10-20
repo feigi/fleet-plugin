@@ -429,7 +429,9 @@ effort, because a deliberate dispatch whose two sides resolve to the same model
 ## Accumulate per PR, never conclude a tier result inside one run
 
 The unit is the PR —
-supply is one Pull per free slot, so there are no implementer batches.
+supply is one Pull per free slot, so there are no implementer batches. The
+guard this section speaks of is SKILL.md's **Guard: accumulate per PR, never
+conclude inside one run**, under **Reading a review result**.
 
 **Why not decide inside one run.** A run holds 2-3 implementer PRs, and ticket
 difficulty swamps the tier effect — a gojq parity harness and a two-statement
@@ -482,10 +484,12 @@ deliberate control it used to require is no longer something anyone has to
 authorize one ticket at a time: the exploration draw above produces one in
 every five Pulls by construction.
 
-The last guard fired with n=1 on the control side. The pre-cell pair query counted pairs that are no cell's comparisons, and the
-query before that one counted every session whose implementers merely
-differed, so it cleared this floor by an order of magnitude while the
-controlled comparison did not exist yet.
+The last guard fired with n=1 on the control side. The pre-cell pair query
+counted pairs that are no cell's comparisons, and the query before that one
+counted every session whose implementers merely differed, so it cleared the
+cell floor SKILL.md's **Report** states — at least ten comparisons across five
+or more distinct `run_date`s — by an order of magnitude while the controlled
+comparison did not exist yet.
 
 ## Why the implementer body carries enumerate-and-declare
 

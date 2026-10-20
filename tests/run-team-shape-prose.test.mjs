@@ -689,6 +689,24 @@ test("no changed sentence's pre-rewrite half is in SKILL.md or across references
   assert.deepEqual(back, [], "changed or deleted sentences said again");
 });
 
+// A rationale moved to references/ leaves its rule in SKILL.md with a pointer
+// beside it, so a reader of the rule can still reach the why. Each row is the
+// rule's closing words, its pointer, and the reference section the rationale
+// now lives under; the pointer pin holds once, the heading holds the target.
+const MOVED_RATIONALE_POINTERS = [
+  ["That append is the whole duty.", "pull.md", "## Accumulate per PR, never conclude a tier result inside one run"],
+  ["re-check measurements by timestamp rather than by who you think was running.", "isolation.md", "## Do not guess the victim — the blast radius is the machine, not the Pull"],
+  ["a `mixed (…)` models column means the cell's history spans more than one model behind its role.", "pull.md", "## Accumulate per PR, never conclude a tier result inside one run"],
+];
+for (const [rule, file, heading] of MOVED_RATIONALE_POINTERS) {
+  test(`SKILL.md keeps "${rule.slice(0, 50)}…" with See references/${file} beside it`, () => {
+    const pinned = SKILL.match(new RegExp(Pin.phrase(`${rule} See references/${file}.`).source, "g")) ?? [];
+    assert.equal(pinned.length, 1, `SKILL.md does not say "${rule}" once with See references/${file} beside it`);
+    const target = readFileSync(join(REFERENCES, file), "utf8").split("\n");
+    assert.ok(target.includes(heading), `references/${file} no longer has the section the pointer sends the reader to: ${heading}`);
+  });
+}
+
 // --- the three blocks that moved whole ----------------------------------------
 
 const fixtureText = () => readFileSync(FIXTURE, "utf8");

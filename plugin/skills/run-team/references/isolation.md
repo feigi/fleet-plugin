@@ -265,7 +265,7 @@ PID, not a pattern.
 
 ## Do not guess the victim — the blast radius is the machine, not the Pull
 
-In that incident the controller reasoned from dispatch scope to "almost
+In the `pkill -f` incident "A pattern kill reaches siblings" measures, the controller reasoned from dispatch scope to "almost
 certainly `impl-<N>`" and told the maintainer so; the named member then proved
 it was not the victim (it had never invoked those files standalone, and its
 mutation baselines post-dated the window). Idle members of *previous* runs,
@@ -274,7 +274,7 @@ all `pkill -f` targets and none of them appear in your ledger.
 
 ## A warning acted on silently is indistinguishable from one that never arrived
 
-The same incident: the controller's warning DID reach the member,
+The same `pkill -f` incident: the controller's warning DID reach the member,
 which re-ran, found nothing changed, and said nothing — correctly reading
 "send once, never re-send" as covering it. The controller then had to spend a
 round trip asking whether its own outbox was lossy. So the briefs say that

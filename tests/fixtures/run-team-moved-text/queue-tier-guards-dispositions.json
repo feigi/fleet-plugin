@@ -27,6 +27,18 @@
     [
       "**Never relay a diagnostic without reproducing it in that member's specific worktree** (re-run the check that raised it from there): probe copies carry the real tree's filenames, so a sibling's throwaway mutation reads exactly like a live worktree's error.",
       "**Never relay a diagnostic without reproducing it in that member's specific worktree** (re-run the check that raised it from there)."
+    ],
+    [
+      "The pre-cell pair query counted pairs that are no cell's comparisons, and the query before that one counted every session whose implementers merely differed, so it cleared this floor by an order of magnitude while the controlled comparison did not exist yet.",
+      "The pre-cell pair query counted pairs that are no cell's comparisons, and the query before that one counted every session whose implementers merely differed, so it cleared the cell floor SKILL.md's **Report** states — at least ten comparisons across five or more distinct `run_date`s — by an order of magnitude while the controlled comparison did not exist yet."
+    ],
+    [
+      "In that incident the controller reasoned from dispatch scope to \"almost certainly `impl-<N>`\" and told the maintainer so; the named member then proved it was not the victim (it had never invoked those files standalone, and its mutation baselines post-dated the window).",
+      "In the `pkill -f` incident \"A pattern kill reaches siblings\" measures, the controller reasoned from dispatch scope to \"almost certainly `impl-<N>`\" and told the maintainer so; the named member then proved it was not the victim (it had never invoked those files standalone, and its mutation baselines post-dated the window)."
+    ],
+    [
+      "The same incident: the controller's warning DID reach the member, which re-ran, found nothing changed, and said nothing — correctly reading \"send once, never re-send\" as covering it.",
+      "The same `pkill -f` incident: the controller's warning DID reach the member, which re-ran, found nothing changed, and said nothing — correctly reading \"send once, never re-send\" as covering it."
     ]
   ],
   "deleted": [
@@ -44,63 +56,63 @@
     ],
     [
       "**shortlist** — `.fleet/shortlist.json`'s entries with no `impl-` row and no live `excluded` row: admissible, not yet pulled.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **Shortlist**"
     ],
     [
       "The tick's `unclaimed=`.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **Shortlist**"
     ],
     [
       "**supply** — `scanned`, the open `ready-for-agent` tickets `shortlist.mjs`'s candidate scan returned, before any filter.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; supply stays defined in SKILL.md phase 0's candidate scan (`scanned`, the supply)"
     ],
     [
       "Only a Pull's full read judges decided?, so a shortlist of undecided tickets is supply that every Pull relabels away — and relabelling is what stops it being counted next scan.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; supply stays defined in SKILL.md phase 0's candidate scan (`scanned`, the supply)"
     ],
     [
       "**review backlog** — PRs owed a review.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the review backlog is the tick's `review-due=` count, which fleet-tick.mjs computes"
     ],
     [
       "`fleet-tick.mjs` counts every open PR without `ready-to-merge` **that closes an issue** and carries no `review=` token on the ledger — one settled `=failed` is owed a review again, and so is one whose latest finisher halted `past-pin` past its latest `reviewed=` head (**Resolving a finisher halt**) — and it prints them as `review-due=`.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the review backlog is the tick's `review-due=` count, which fleet-tick.mjs computes"
     ],
     [
       "Exact, not a wider read: the ledger records which PRs are under review or reviewed, so nothing about it is guesswork.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the review backlog is the tick's `review-due=` count, which fleet-tick.mjs computes"
     ],
     [
       "The closing-issue test is what keeps it from widening: a PR that closes no issue — one you author yourself, for instance — is left unlabelled for the maintainer, so no member of the fleet will ever review it, and counting it floors the backlog at a depth nothing in the run can drain — the reviewer row would then report a review owed for the rest of the run.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the review backlog is the tick's `review-due=` count, which fleet-tick.mjs computes"
     ],
     [
       "GitHub's own linked-issue set decides that, not a keyword regex over the body.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the review backlog is the tick's `review-due=` count, which fleet-tick.mjs computes"
     ],
     [
       "**In flight** — a ticket between its Claim and its PR's merge: an implementer live or owed a replacement on it, or an open PR closing it.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **In flight**"
     ],
     [
       "A PR closing nothing is never in flight, and a ticket whose newest implementer settled `blocked` is not either.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **In flight**"
     ],
     [
       "The tick's `n`; the implementer row's counts read it as `implementers=<i> prs=<p>`, n being i + p.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **In flight**"
     ],
     [
       "**In-flight bound** — the most tickets a run lets be In flight at once, fixed for the run, set by `/run-team`'s one argument.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **In-flight bound**"
     ],
     [
       "Reaching it holds every Pull until a merge brings the count below it; reviewers, finishers and the merge bot never slow for it.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **In-flight bound**"
     ],
     [
       "The tick's `B`.",
-      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the terms are CONTEXT.md's"
+      "fleet-tick.mjs's implementer and reviewer rows; tests/fleet-tick.test.mjs; the term is CONTEXT.md's **In-flight bound**"
     ],
     [
       "**That exemption is for a PR THIS run authors, never one a PRIOR run left open** — step 0 folds those into this run's review queue, so count one when you reason about backlog BY HAND.",

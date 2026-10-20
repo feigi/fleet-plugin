@@ -394,7 +394,7 @@ ran, off the implementer's `tier-ok=` ledger verdict or else its one
 member-outcomes row (a `tier-unverifiable=` member has no ledger verdict, so
 its one member-outcomes row decides), and BLANK with a WARNING naming why
 when neither settles
-it; never type a tier in over that. That append is the whole duty.
+it; never type a tier in over that. That append is the whole duty. See references/pull.md.
 
 The row's last four fields are the ticket's difficulty, and they are what lets a
 tier comparison condition on the thing that swamps it. `sizing` is the
@@ -1391,6 +1391,32 @@ Match the failure to its row in the table below and run that response; where the
 
 A red PR never silently becomes `ready-to-merge`.
 
+**A frozen transcript does not establish that a member is dead — the discriminator is its scratch dir.** See references/failure-handling.md.
+
+Settle outcome and liveness are different facts, not the same table with two
+spellings. Recovery is a fresh member, fresh name (`impl-<N>-b`,
+`fix-pr-<M>-b`, and for a reviewer the next letter PR M's rows do not carry
+yet) whose prompt states what it inherits.
+
+Reviewers that went idle on CI recover as a **finisher, not a re-review** once
+commits are pushed. See references/member-lifecycle.md.
+
+Audit every worktree before dispatching replacements with
+`~/.fleet/bin/fleet-run worktree-audit.sh` — it reports each worktree's
+ahead-count and uncommitted files, the committed-vs-uncommitted distinction that
+decides whether a replacement redoes or destroys work.
+
+**A throw, an empty return, or a notification whose status is not `completed`
+is a failure event, not a clean review.** **Retry once
+under the next runner letter, then stop:** the `review-pr-<pr#>` runner
+already retried once inside its cell and reports `failed` with both errors, so
+the retry is a second runner under the next letter the PR's rows do not carry
+yet — `review-pr-<pr#>-b` after a first runner — recorded as
+`review=member:<that name>`. A second failure is reported, and the PR stays at
+review-due. A
+runner member that is killed rather than failed follows **Failure
+handling** (fresh name, inherited state stated).
+
 **Verify every reported SHA.** `~/.fleet/bin/fleet-run verify-sha.sh
 <branch> <sha>` before enqueueing — a member can commit in a nested worktree,
 leaving the SHA on a stray branch while its report reads normally. Exit codes as
@@ -1436,7 +1462,7 @@ failures arrive as *wrong findings*, not errors:
   **Do not guess the victim — the blast radius is the machine, not the Pull.**
   Warn every live
   member, record the incident as unattributed, and re-check measurements by
-  timestamp rather than by who you think was running.
+  timestamp rather than by who you think was running. See references/isolation.md.
 
 - **A warning acted on silently is indistinguishable from one that never
   arrived.** See references/isolation.md.
@@ -1446,32 +1472,6 @@ failures arrive as *wrong findings*, not errors:
   directory per child it dispatches — and nothing outside them.** See references/isolation.md.
 - **Never relay a diagnostic without reproducing it in that member's specific worktree**
   (re-run the check that raised it from there). See references/isolation.md.
-
-**A frozen transcript does not establish that a member is dead — the discriminator is its scratch dir.** See references/failure-handling.md.
-
-Settle outcome and liveness are different facts, not the same table with two
-spellings. Recovery is a fresh member, fresh name (`impl-<N>-b`,
-`fix-pr-<M>-b`, and for a reviewer the next letter PR M's rows do not carry
-yet) whose prompt states what it inherits.
-
-Reviewers that went idle on CI recover as a **finisher, not a re-review** once
-commits are pushed. See references/member-lifecycle.md.
-
-Audit every worktree before dispatching replacements with
-`~/.fleet/bin/fleet-run worktree-audit.sh` — it reports each worktree's
-ahead-count and uncommitted files, the committed-vs-uncommitted distinction that
-decides whether a replacement redoes or destroys work.
-
-**A throw, an empty return, or a notification whose status is not `completed`
-is a failure event, not a clean review.** **Retry once
-under the next runner letter, then stop:** the `review-pr-<pr#>` runner
-already retried once inside its cell and reports `failed` with both errors, so
-the retry is a second runner under the next letter the PR's rows do not carry
-yet — `review-pr-<pr#>-b` after a first runner — recorded as
-`review=member:<that name>`. A second failure is reported, and the PR stays at
-review-due. A
-runner member that is killed rather than failed follows **Failure
-handling** (fresh name, inherited state stated).
 
 ## Red flags
 
@@ -1531,4 +1531,4 @@ that, a comparison count is a number, not evidence. **Report the count the per-c
 never one from any other query:** `~/.fleet/bin/fleet-run cell-readout.mjs`
 prints `<cell> <comparisons> <run_dates> <resolved models>` for each cell past
 that floor and a cell below it only as a count on stderr; a `mixed (…)` models
-column means the cell's history spans more than one model behind its role.
+column means the cell's history spans more than one model behind its role. See references/pull.md.

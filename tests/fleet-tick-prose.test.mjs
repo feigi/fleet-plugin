@@ -204,6 +204,16 @@ test("the specs-dropped row says a specs-dropped tail is not \"no work\"", () =>
   assert.match(row, Pin.phrase("log those tickets as specs awaiting to-tickets, not as no work"));
 });
 
+test("the SUGGEST /triage row says suggest, never run, and asks nobody to tick", () => {
+  // `/triage` is user-invoked: the controller reports the suggestion and never
+  // blocks on it. Supply is automatic (ADR 0013), so the row never asks the
+  // maintainer to tick the multi-select phase 0 no longer has.
+  const row = RUN_TEAM.text.split("\n").find((l) => l.startsWith("- `SUGGEST /triage, hold idle` — "));
+  assert.ok(row, "the tick's rows no longer carry the SUGGEST /triage row");
+  assert.match(row, Pin.phrase("suggest `/triage` in the report, never run it. The suggestion is a report, not a blocking prompt."));
+  assert.doesNotMatch(row, /ask the maintainer to tick/i, "the SUGGEST /triage row asks the maintainer to tick — phase 0's multi-select is retired (ADR 0013)");
+});
+
 // The step-0 fold-in section only, in the phase-0 reference file. Widened to
 // the whole of phase 0 it would be satisfied by the candidate-scan and
 // in-flight bullets, which talk about queueing and review without saying

@@ -1,9 +1,10 @@
 // #141. `review-and-fix.md` establishes that `./agent-test` is not the command
 // to hand a specialist in a review snapshot. The "filesystem isolation is not
-// stack isolation" guard in both run-team documents said the opposite — it
-// paired the snapshot with `./agent-test` and closed with "say both, every
-// time", handing a specialist on a snapshot a command that collides with every
-// sibling's.
+// stack isolation" guard — then in both run-team documents, now only in
+// references/isolation.md, with run-team/SKILL.md keeping its lead and a
+// pointer — said the opposite: it paired the snapshot with `./agent-test` and
+// closed with "say both, every time", handing a specialist on a snapshot a
+// command that collides with every sibling's.
 //
 // Why it is the wrong command depends on which runner the worktree holds, and
 // the guard names both. The runner `claim-ticket.sh` writes into a fresh
@@ -21,19 +22,20 @@
 // to use it, so a sweep that strips `./agent-test` from the guard is the
 // opposite failure and has to redden too.
 //
-// Why point rather than restate: the bullet immediately above this guard in
-// run-team/SKILL.md reserves specialist tree isolation — snapshot provisioning
-// included — to `review-and-fix.md`, so naming the specialist's command here
-// would trade one contradiction for a duplicate that can drift. But a pointer
-// outlives its target silently — measured, deleting review-and-fix.md's
-// specialist-command bullet reddened nothing — so the third pin below holds the
-// TARGET present instead of copying it.
+// Why point rather than restate: specialist tree isolation — snapshot
+// provisioning included — is reserved to `review-and-fix.md`, by the bullet
+// directly above the guard's lead in run-team/SKILL.md and by isolation.md's own
+// "Specialist tree isolation" section, so naming the specialist's command in
+// the guard would trade one contradiction for a duplicate that can drift. But a
+// pointer outlives its target silently — measured, deleting review-and-fix.md's
+// specialist-command bullet reddened nothing — so the pin on review-and-fix.md
+// below holds the TARGET present instead of copying it.
 //
 // THE CEILING, same as agent-test-dir-prose.test.mjs: PRESENCE pins over a
 // bounded slice. A later sentence re-pairing the snapshot with the runner stays
 // green. Reflow stays green by design — `phrase()` matches across any run of
-// whitespace, so run-team/SKILL.md's hard-wrapped copy and isolation.md's long
-// lines take the same regexes.
+// whitespace, so isolation.md's long lines and any re-wrap of them take the
+// same regexes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -72,13 +74,13 @@ for (const [name, slice] of slices) {
   });
 }
 
-// Both pins above POINT at review-and-fix.md rather than restate it, so the
+// The guard's pin above POINTS at review-and-fix.md rather than restating it, so the
 // target's presence needs its own pin or the pointer orphans in silence. The end
 // anchor is the generic next-bullet marker, not the following bullet's wording,
 // which would make an unrelated rewrite of that bullet a boundary failure here.
 // Bounded to the bullet so that a copy of the phrase anywhere else in the file
 // cannot keep the pin satisfied with this bullet deleted.
-test("review-and-fix.md still hands specialists the command both guards point at", () => {
+test("review-and-fix.md still hands specialists the command the isolation.md guard points at", () => {
   const bullet = REVIEW_AND_FIX.between("Give specialists a stack-free test command", "\n- **", "review-and-fix.md").text;
   assert.match(bullet, Pin.phrase("the Test entrypoint, read off the Recipe cache"));
   assert.match(bullet, Pin.phrase("`derive-testcmd.sh <worktree or main checkout> test` prints it"));
