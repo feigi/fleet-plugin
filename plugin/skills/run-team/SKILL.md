@@ -307,9 +307,7 @@ it; never type a tier in over that. That append is the whole duty. See reference
 
 ### Nothing to do: mark the beat and end your turn
 
-- **Nothing to do right now** → mark the beat, then end your turn. The alarm,
-  which phase 0 checked is armed in this session, starts the next turn once the
-  beat falls due. See references/ci-and-staleness.md.
+- **Nothing to do right now** → mark the beat, then end your turn.
 
 **Mark the beat when there is nothing to do, and end your turn.** See references/ci-and-staleness.md.
 
@@ -321,12 +319,11 @@ it; never type a tier in over that. That append is the whole duty. See reference
 It returns at once and prints one line. Which line it is, is the whole protocol:
 
 - `… beat marked, alarm due in <N>s (quiet=<n>) → end your turn` — the mark is
-  recorded. End your turn. The alarm's turn arrives as a user message that
+  recorded. The alarm's turn arrives as a user message that
   starts `[fleet-alarm]` and names `fleet-event.mjs heartbeat`: run that
   command and act on what the tick it ends in prints. Then mark the beat again.
 - `… beat NOT marked …` — this beat arms no alarm you can count on, so ending
-  your turn could be the stall. Fix what the line names and run the command
-  again.
+  your turn could be the stall. Fix what it names; rerun.
 
 **Do not raise `--ceiling` past 30 minutes.** See references/ci-and-staleness.md.
 
