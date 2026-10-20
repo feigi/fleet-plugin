@@ -31,7 +31,7 @@
 // `bodyDigest`), or null with `head` when gh could not be read, `rebaseCarry`
 // naming the labelled head and the head accepted as carrying it (`{labelled,
 // accepted}`), or null when no carry was proven, `mainGain` echoing
-// main-gain.mjs's own payload — hits, acknowledged removals and unchecked
+// main-gain.mjs's own payload — hits, acknowledged removals, edited lines and unchecked
 // files — or null when it did not run or printed no JSON object; an unusable
 // payload is still echoed. Stderr: the children's own diagnostics, passed
 // straight through and never folded into stdout.
@@ -298,7 +298,7 @@ function readMainGain(root, prView) {
   const payload = isObject(v) ? v : null;
   const read = (usable) => ({ usable, exit: r.status, payload });
   if (r.error || r.signal || payload === null || payload.head !== prView.headRefOid) return read(false);
-  if (![payload.hits, payload.acknowledged, payload.unchecked].every(Array.isArray)) return read(false);
+  if (![payload.hits, payload.acknowledged, payload.edited, payload.unchecked].every(Array.isArray)) return read(false);
   if (!payload.hits.every((h) => isObject(h) && typeof h.path === "string" && h.path !== "")) return read(false);
   return read((r.status === 0 && payload.hits.length === 0) || (r.status === 1 && payload.hits.length > 0));
 }

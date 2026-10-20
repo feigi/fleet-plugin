@@ -15,6 +15,7 @@ account, so the standing signal is the park on the PR's row, which the tick
 prints as `HOLD (parked …)` when nothing else queued is dispatchable, rather
 than a report repeated every tick. The label is still left alone and no
 agent restores lines.
+Amended by #3609: a removed line edited in place that keeps every token is not a hit, and each hit line carries `kind` (`modified` or `deleted`).
 
 ## Context
 

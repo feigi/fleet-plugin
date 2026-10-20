@@ -153,9 +153,9 @@ test("AC1: a deletion written into a branch commit by an earlier rewrite, replay
   assert.equal(hit.path, "tests.txt");
   assert.equal(hit.key, "#7");
   assert.deepEqual(hit.lines, [
-    { line: 4, text: "new1" },
-    { line: 5, text: "new2" },
-    { line: 6, text: "new3" },
+    { line: 4, text: "new1", kind: "deleted" },
+    { line: 5, text: "new2", kind: "deleted" },
+    { line: 6, text: "new3", kind: "deleted" },
   ]);
   assert.equal(hit.ack, "main-gain-removal: tests.txt #7 - <why>");
   assert.deepEqual(r.json.acknowledged, []);
@@ -169,13 +169,42 @@ test("AC5: rebased onto the merge that added the block, and only then deleting i
   assert.equal(r.json.hits[0].lines.length, 3);
 });
 
-test("a removed line replaced by different text counts as removed", (t) => {
+test("a removed line rewritten into text that drops one of its tokens is a modified hit", (t) => {
   const { w } = world(t);
   rewriteAt(4, w, "rebase", "-q", "origin/main");
   write(w, "tests.txt", OLD + "new1\nREWRITTEN\nnew3\n");
   const r = run(w, commitFeat(w, 5));
   expect(r, 1);
-  assert.deepEqual(r.json.hits[0].lines, [{ line: 5, text: "new2" }]);
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 5, text: "new2", kind: "modified" }]);
+});
+
+test("a removed line edited in place, keeping every token, is not a hit", (t) => {
+  const { w } = world(t);
+  rewriteAt(4, w, "rebase", "-q", "origin/main");
+  write(w, "tests.txt", OLD + "new1\nnew2 extra\nnew3\n");
+  const r = run(w, commitFeat(w, 5));
+  expect(r, 0);
+  assert.deepEqual(r.json.hits, []);
+  assert.deepEqual(r.json.edited, [{ path: "tests.txt", line: 5, text: "new2", replacement: "new2 extra" }]);
+});
+
+test("one added line holding the tokens of two removed lines covers only the first", (t) => {
+  const { w } = world(t);
+  rewriteAt(4, w, "rebase", "-q", "origin/main");
+  write(w, "tests.txt", OLD + "new1\nnew2 new3 extra\n");
+  const r = run(w, commitFeat(w, 5));
+  expect(r, 1);
+  assert.deepEqual(r.json.edited, [{ path: "tests.txt", line: 5, text: "new2", replacement: "new2 new3 extra" }]);
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 6, text: "new3", kind: "modified" }]);
+});
+
+test("a modified hit is acknowledged like any other", (t) => {
+  const { w } = world(t);
+  rewriteAt(4, w, "rebase", "-q", "origin/main");
+  write(w, "tests.txt", OLD + "new1\nREWRITTEN\nnew3\n");
+  const r = run(w, commitFeat(w, 5), { body: "main-gain-removal: tests.txt #7 - reworded on purpose\n" });
+  expect(r, 0);
+  assert.equal(r.json.acknowledged[0].lines[0].kind, "modified");
 });
 
 test("a whole-file deletion of fresh main work -> a hit on that file", (t) => {
@@ -188,6 +217,7 @@ test("a whole-file deletion of fresh main work -> a hit on that file", (t) => {
   expect(r, 1);
   assert.equal(r.json.reason, "main-gain-removed:fresh.txt");
   assert.deepEqual(r.json.hits.map((h) => [h.path, h.key, h.lines.length]), [["fresh.txt", "#9", 2]]);
+  assert.deepEqual(r.json.hits[0].lines.map((l) => l.kind), ["deleted", "deleted"]);
 });
 
 test("a landing commit without GitHub's merge subject is keyed by its 12-character SHA, and acknowledgeable by that key", (t) => {
@@ -451,7 +481,7 @@ test("removals in two hunks of one file each carry their own line number", (t) =
   write(w, "long.txt", `${lines.filter((l) => l !== "l2" && l !== "l19").join("\n")}\n`);
   const r = run(w, commitFeat(w, 7));
   expect(r, 1);
-  assert.deepEqual(r.json.hits.map((h) => [h.path, h.lines]), [["long.txt", [{ line: 2, text: "l2" }, { line: 19, text: "l19" }]]]);
+  assert.deepEqual(r.json.hits.map((h) => [h.path, h.lines]), [["long.txt", [{ line: 2, text: "l2", kind: "deleted" }, { line: 19, text: "l19", kind: "deleted" }]]]);
 });
 
 test("a line text added back once covers only one removal of that text", (t) => {
@@ -464,7 +494,7 @@ test("a line text added back once covers only one removal of that text", (t) => 
   write(w, "dup.txt", "a\nb\ndup\nc\nd\n");
   const r = run(w, commitFeat(w, 7));
   expect(r, 1);
-  assert.deepEqual(r.json.hits.map((h) => [h.path, h.lines]), [["dup.txt", [{ line: 6, text: "dup" }]]]);
+  assert.deepEqual(r.json.hits.map((h) => [h.path, h.lines]), [["dup.txt", [{ line: 6, text: "dup", kind: "deleted" }]]]);
 });
 
 test("a submodule is listed in unchecked[], never read line by line", (t) => {

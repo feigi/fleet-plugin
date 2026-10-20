@@ -260,6 +260,7 @@ pre-merge conjunction, not the **Merge gate** ruleset — refuses it as
 acknowledged in the PR body as `main-gain-removal: <path> <key> - <why>`, a
 second sign-off scoped to one file and one landing source (ADR 0023). The
 post-rebase counterpart of the **No-undo audit**.
+A hit's removed lines each carry a `kind`: `modified` when the hunk that removed them also adds lines, `deleted` when it only removes them. A removed line edited in place that keeps every token of its text is not a hit.
 _Avoid_: lost work, reverted lines, regression
 
 **Rebase-carry**:

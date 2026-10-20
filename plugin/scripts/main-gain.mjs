@@ -29,12 +29,16 @@
 // Removed lines are read off the merge the head would actually produce:
 // `git merge-tree --write-tree <base> <head>`, diffed against `<base>` with
 // rename detection on. That is right for a head that is behind `<base>` too,
-// where a three-dot diff is not. Every removed line is a candidate, including
-// one replaced by other text, and every line of a deleted file is. A removed
-// line whose exact text is added back in the same file is a move, not a
-// candidate. Binary files cannot be read line by line and are listed in
-// `unchecked[]` instead of blocking. A merge-tree that reports conflicts is a
-// head that cannot merge as it stands, which is no answer about its content.
+// where a three-dot diff is not. Every removed line is a candidate, and every
+// line of a deleted file is, except a move: a removed line whose exact text is
+// added back in the same file. A candidate edited in place is not a hit: an
+// added line of the same hunk that still holds every token of it claims it, and
+// each added line claims at most one. A token is a run of letters, digits or
+// underscores, or else one other character that is not whitespace, so
+// appending a name to an import is an in-place edit and dropping one is not.
+// Binary files cannot be read line by line and are listed in `unchecked[]`
+// instead of blocking. A merge-tree that reports conflicts is a head that
+// cannot merge as it stands, which is no answer about its content.
 //
 // Each hit carries a landing key: `#<n>` when the landing commit's subject is
 // GitHub's merge subject for PR n, otherwise that commit's 12-character
@@ -43,10 +47,15 @@
 // with an empty reason does not count. Acknowledged hits move from `hits[]`
 // to `acknowledged[]` and both are reported.
 //
-// Stdout: one JSON line, `{head, base, since, hits, acknowledged, unchecked,
-// reason}`, `since` being R as an ISO timestamp. Each hit is `{path, key,
-// landed, lines: [{line, text}], ack}`, `path` the file's name on `<base>` and
-// `ack` the body line to copy, reason left for the author to write.
+// Stdout: one JSON line, `{head, base, since, hits, acknowledged, edited,
+// unchecked, reason}`, `since` being R as an ISO timestamp. Each hit is `{path,
+// key, landed, lines: [{line, text, kind}], ack}`, `path` the file's name on
+// `<base>` and `ack` the body line to copy, reason left for the author to
+// write. `kind` is `modified` when the hunk that removed the line also adds
+// lines, and `deleted` when it only removes them. `edited` lists the gained
+// lines an in-place edit kept, as `{path, line, text, replacement}`, the
+// `replacement` being the added line that holds their tokens. An edited line is
+// not a hit and needs no acknowledgement.
 //
 //   0  clean, or every hit acknowledged
 //   1  at least one unacknowledged hit             reason main-gain-removed:<first path>
@@ -130,33 +139,69 @@ function changedPaths(tree) {
   return out;
 }
 
-// Removed lines `[{line, text}]` and added texts, or `binary`, for one path.
+// The hunks of one path, `{removed: [{line, text}], added: [text]}` each, in
+// diff order, or `binary`. Removed lines are numbered on `<base>`.
 function fileDiff(tree, oldPath, newPath) {
   const paths = oldPath === newPath ? [oldPath] : [oldPath, newPath];
   const r = git(["diff-tree", "-r", "-M", "-p", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", baseRev, tree, "--", ...paths]);
   if (r === null) unanswerable(`diff-unreadable:${oldPath}`);
-  const removed = [];
-  const added = [];
-  let inHunk = false;
+  const hunks = [];
+  let hunk = null;
   let oldLine = 0;
   for (const line of r.stdout.split("\n")) {
     if (line.startsWith("diff --git ")) {
-      inHunk = false;
+      hunk = null;
       continue;
     }
     const h = /^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/.exec(line);
     if (h) {
-      inHunk = true;
+      hunk = { removed: [], added: [] };
+      hunks.push(hunk);
       oldLine = Number(h[1]);
-    } else if (!inHunk) {
+    } else if (hunk === null) {
       if (line.startsWith("Binary files ")) return { binary: true };
     } else if (line.startsWith("-")) {
-      removed.push({ line: oldLine++, text: line.slice(1) });
+      hunk.removed.push({ line: oldLine++, text: line.slice(1) });
     } else if (line.startsWith("+")) {
-      added.push(line.slice(1));
+      hunk.added.push(line.slice(1));
     }
   }
-  return { binary: false, removed, added };
+  return { binary: false, hunks };
+}
+
+// The tokens an in-place edit keeps: a run of letters, digits or underscores is
+// one token, and each other character that is not whitespace is one.
+const TOKEN = /[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu;
+function tokensOf(text) {
+  const counts = new Map();
+  for (const t of text.match(TOKEN) ?? []) counts.set(t, (counts.get(t) ?? 0) + 1);
+  return counts;
+}
+
+// Each unclaimed added line of one hunk claims at most one removed line of that
+// hunk: the first one still holding every token of it. Removed lines with the
+// most tokens choose first, so a long line is not taken by a short one. The
+// rarest token of a removed line bounds the added lines tried for it.
+function claimInPlace(removed, added) {
+  const index = new Map();
+  for (const a of added) {
+    if (a.claimed) continue;
+    a.tokens = tokensOf(a.text);
+    for (const t of a.tokens.keys()) {
+      if (!index.has(t)) index.set(t, []);
+      index.get(t).push(a);
+    }
+  }
+  const size = (counts) => [...counts.values()].reduce((s, n) => s + n, 0);
+  for (const c of [...removed].sort((x, y) => size(y.tokens) - size(x.tokens))) {
+    if (c.tokens.size === 0) continue;
+    const pool = [...c.tokens.keys()].map((t) => index.get(t) ?? []).reduce((best, l) => (l.length < best.length ? l : best));
+    const a = pool.find((x) => !x.claimed && [...c.tokens].every(([t, n]) => (x.tokens.get(t) ?? 0) >= n));
+    if (a) {
+      a.claimed = true;
+      c.replacement = a.text;
+    }
+  }
 }
 
 // line number on `<base>` → {sha, time, summary} for the requested lines,
@@ -221,6 +266,7 @@ function check() {
 
   const hits = [];
   const unchecked = [];
+  const edited = [];
   // No commits of its own: the head is already on `<base>` and merges nothing.
   if (since !== null) {
     for (const { oldMode, status, oldPath, newPath } of changedPaths(tree)) {
@@ -234,25 +280,47 @@ function check() {
         unchecked.push(oldPath);
         continue;
       }
-      const addedBack = new Map();
-      for (const t of d.added) addedBack.set(t, (addedBack.get(t) ?? 0) + 1);
-      const candidates = d.removed.filter(({ text }) => {
-        const n = addedBack.get(text) ?? 0;
-        if (n === 0) return true;
-        addedBack.set(text, n - 1);
-        return false;
+      // A removed line whose exact text is added back in the same file is a
+      // move, and the added line is spent on it.
+      const addsByHunk = d.hunks.map(() => []);
+      const twins = new Map();
+      d.hunks.forEach((h, hunk) => {
+        for (const text of h.added) {
+          const a = { text, claimed: false, tokens: null };
+          addsByHunk[hunk].push(a);
+          if (!twins.has(text)) twins.set(text, []);
+          twins.get(text).push(a);
+        }
       });
-      if (candidates.length === 0) continue;
-      const blamed = blame(oldPath, candidates);
+      const candsByHunk = d.hunks.map(() => []);
+      d.hunks.forEach((h, hunk) => {
+        for (const { line, text } of h.removed) {
+          const spare = twins.get(text);
+          if (spare?.length) {
+            spare.pop().claimed = true;
+            continue;
+          }
+          const kind = h.added.length > 0 ? "modified" : "deleted";
+          candsByHunk[hunk].push({ line, text, kind, tokens: tokensOf(text), replacement: null });
+        }
+      });
+      d.hunks.forEach((_, hunk) => claimInPlace(candsByHunk[hunk], addsByHunk[hunk]));
+      const cands = candsByHunk.flat();
+      if (cands.length === 0) continue;
+      const blamed = blame(oldPath, cands);
       const byKey = new Map();
-      for (const c of candidates) {
+      for (const c of cands) {
         const b = blamed.get(c.line);
         if (b.time <= since) continue;
+        if (c.replacement !== null) {
+          edited.push({ path: oldPath, line: c.line, text: c.text, replacement: c.replacement });
+          continue;
+        }
         const key = landingKey(b.sha, b.summary);
         if (!byKey.has(key)) {
           byKey.set(key, { path: oldPath, key, landed: b.sha, lines: [], ack: `main-gain-removal: ${oldPath} ${key} - <why>` });
         }
-        byKey.get(key).lines.push(c);
+        byKey.get(key).lines.push({ line: c.line, text: c.text, kind: c.kind });
       }
       hits.push(...byKey.values());
     }
@@ -270,6 +338,7 @@ function check() {
     since: since === null ? null : new Date(since * 1000).toISOString(),
     hits: open,
     acknowledged,
+    edited,
     unchecked,
     reason: open.length ? `main-gain-removed:${open[0].path}` : null,
   };
@@ -282,7 +351,7 @@ try {
   result = check();
 } catch (e) {
   if (!(e instanceof Unanswerable)) die(`check failed: ${e.code ?? e.message} — could not evaluate`);
-  result = { since: null, hits: [], acknowledged: [], unchecked: [], reason: e.message, unknown: true };
+  result = { since: null, hits: [], acknowledged: [], edited: [], unchecked: [], reason: e.message, unknown: true };
 }
 const { unknown, ...payload } = result;
 writeAll(1, `${JSON.stringify({ head, base, ...payload })}\n`);
