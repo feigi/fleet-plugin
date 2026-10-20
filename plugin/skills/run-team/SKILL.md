@@ -202,30 +202,23 @@ owes beyond its call:
   a row without a terminal state means someone may still be in that worktree, and
   the dirty check does not see a member that committed but has not pushed.
   See references/reaping.md.
-- **The run ends, or the maintainer says drain** → `fleet-event.mjs drain --reason "<reason>"`
-  first (below). The marker is on disk, so the tick
-  holds the implementer row at `HOLD (draining)` from then on — for a
-  replacement controller too — and keeps the review, fix-applier and merge rows
-  firing until the open PRs merge. The drain starts the end of the run; it does
-  not end it. **End of run**, in this order:
+- **The run ends, or the maintainer says drain** → **End of run**, in this
+  order; the drain starts the end of the run, it does not end it:
   1. `~/.fleet/bin/fleet-run fleet-event.mjs drain --reason "<reason>"` — runs
-     `closeout.mjs begin --reason "<reason>"` (references/reaping.md), then the tick. A claim it refuses prints `NEED hand-release #<N> <blocker>`: that
-     refusal is the finding, so run `worktree-audit.sh` and decide by hand.
-     `begin` selects a claim with no PR and a live or `bailed` implementer token
-     on every run, so a claim you keep leaves `begin` at exit 4 on every run:
-     release the rest by hand and run `begin` again.
+     `closeout.mjs begin --reason "<reason>"` (references/reaping.md), then the
+     tick, which holds the implementer row at `HOLD (draining)` from then on. A
+     claim it refuses prints `NEED hand-release #<N> <blocker>`: that refusal is
+     the finding, so run `worktree-audit.sh` and decide by hand. A claim you
+     keep leaves `begin` at exit 4 on every run: release the rest by hand and
+     run `begin` again.
   2. Act on the review, fix-applier and merge rows until the tick prints
-     `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`, which it does
-     once the run is draining with no open PR and no live implementer.
-  3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason "<reason>"` — scrapes
-     the run's member facts, checks the tier-outcomes rows, refreshes the
-     metrics, commits the three metrics files and opens their PR, sets the
-     phase-0 receipt aside as `.fleet/phase0.previous.json`, then records
-     `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded
-     stop as the end of the run. A `NEED tier-outcomes append <pr>` is a PR
-     the ledger marks reviewed with no verdict row: append it with the verdict
-     you rule (**Guard: accumulate per PR**) and run `finish` again. A step it
-     fails is explained in references/close-out.md. Exit 0 is the run closed.
+     `ACTION: run over → fleet-heartbeat.mjs --stop "<reason>"`.
+  3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason "<reason>"`, which
+     records `fleet-heartbeat.mjs --stop` last. A `NEED tier-outcomes append
+     <pr>` is a PR the ledger marks reviewed with no verdict row: append it with
+     the verdict you rule (**Guard: accumulate per PR**) and run `finish` again.
+     A step it fails is explained in references/close-out.md. Exit 0 is the run
+     closed.
   Drain only when a documented trigger fired, and name the trigger in `--reason`.
   **Undrain** only when the maintainer asks, never a drain that budget or
   context exhaustion caused (references/close-out.md).
@@ -235,7 +228,7 @@ Write each state change through `ledger.mjs` before you act on it, never by hand
 
 Compaction parks every in-flight member and nothing reports it, so on resume take the registry census first (**Member unaccounted**, in **Failure handling**) before you trust a live token.
 
-Token additions go through `ledger.mjs token`. `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row. Re-typing the row with `row` replaces the whole line, so it drops the tokens you do not restate. Write member tokens and `review=` tokens only through `ledger.mjs`, never by hand.
+Add a token with `ledger.mjs token <key> <token>…`, which keeps every token already on the row; re-typing the row with `row` drops the tokens you do not restate. Write member tokens and `review=` tokens only through `ledger.mjs`, never by hand.
 
 Never rotate the ledger mid-run: it is phase 0's step alone.
 

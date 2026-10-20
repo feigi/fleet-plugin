@@ -101,3 +101,7 @@ The ledger half reports its own readability as its own field, `ledger.ok`, the p
 **The suite slots wedge the same ways, and clear the same way.**
 
 `~/.fleet/suite-slots/<i>.lock` is built on the ledger's lock primitive, so an empty or unparseable `<i>.lock` and a leftover `<i>.lock.reap` are permanent, a zombie holder is transient, and a dead holder is taken over. A wait that expired with exit 75 names each wedged file — remove it by hand once no suite run is running, the way the Writer policy section above removes `<file>.lock`.
+
+## Adding a token
+
+Token additions go through `ledger.mjs token`. `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row. Re-typing the row with `row` replaces the whole line, so it drops the tokens you do not restate.
