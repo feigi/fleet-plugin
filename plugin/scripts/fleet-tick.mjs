@@ -54,13 +54,13 @@
 //             whatever its state. Also, for each in-flight `review=` token
 //             whose PR the open list does not carry, and for each ticket's
 //             latest settled `impl-*=PR#<M>` PR the open list does not carry,
-//             that PR's state (`gh pr view`, once per PR): a review cannot
-//             be running against a finished PR, so its dangling token is not
-//             a review unit, and a PR CLOSED unmerged prints an ESCALATE line
-//             for its ticket. And, for each ticket holding the implementer
-//             row on a tier mismatch, owed a replacement, or whose keyed PR
-//             read CLOSED or unread, whether its issue is CLOSED (`gh issue
-//             view`): a closed ticket's mismatch holds nothing, its owed
+//             that PR's state (one `gh api graphql` read per hundred PRs): a
+//             review cannot be running against a finished PR, so its dangling
+//             token is not a review unit, and a PR CLOSED unmerged prints an
+//             ESCALATE line for its ticket. And, for each ticket holding the
+//             implementer row on a tier mismatch, owed a replacement, or whose
+//             keyed PR read CLOSED or unread, whether its issue is CLOSED (`gh
+//             issue view`): a closed ticket's mismatch holds nothing, its owed
 //             replacement is not in flight, and its PR prints no line.
 //   main      The main checkout against the run-start baseline
 //             `.fleet/main-checkout.sha`, through main-checkout.mjs.
@@ -958,7 +958,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
 export const pastPinDue = (st, head) => st !== undefined && st.pastPinHalt && !st.inFlight && st.reviewedHead !== null
   && !String(head).toLowerCase().startsWith(st.reviewedHead);
 
-// The states `gh pr view --json state` answers: anything else is no answer.
+// The states a PR-state probe answers: anything else is no answer.
 const PR_STATES = ["OPEN", "MERGED", "CLOSED"];
 
 export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed = new Set(), prStates = new Map()) {
@@ -1493,6 +1493,7 @@ import { isCLI } from "./is-cli.mjs";
 import { parseArgs } from "node:util";
 import { makeDie, isDigits } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
+import { ghAliasedRead } from "./gh-aliased-read.mjs";
 import { fleetFile, FleetDirUnresolvable, scratchRoot } from "./fleet-dir.mjs";
 import { statePath, readState, writeState, assessBeat, isStalled, isReported, stallReport, stallOwner } from "./fleet-state.mjs";
 import { checkMainCheckout, describe } from "./main-checkout.mjs";
@@ -1815,34 +1816,36 @@ function closedTickets(mismatched, owed, surfacing) {
   return closed;
 }
 
-// The state of each PR the tick asks gh about, one `gh pr view --json state`
-// per PR however many readings need it: `reviews`, the PRs whose review the
-// ledger reads as in flight yet the open list does not carry, and `keyed`,
-// each ticket's keyed PR the open list does not carry (deriveRun's
+// The state of each PR the tick asks gh about, one aliased `gh api graphql`
+// read per hundred PRs however many readings need them: `reviews`, the PRs
+// whose review the ledger reads as in flight yet the open list does not carry,
+// and `keyed`, each ticket's keyed PR the open list does not carry (deriveRun's
 // `prKeyed`). The answer is OPEN, MERGED or CLOSED, or null for a probe that
-// could not answer — a nonzero exit, a reply carrying no state, a state that
-// is none of the three — which is disclosed with what it leaves standing.
+// could not answer — a failed call, an alias GitHub errored on or answered
+// with nothing, a node carrying no state, a state that is none of the three —
+// which is disclosed, per PR, with what it leaves standing.
 function prStates(reviews, keyed) {
   const states = new Map();
   const reviewed = new Set(reviews);
   // Two tickets can be keyed on one PR: each is named, on its one probe.
   const ticketsOf = new Map();
   for (const k of keyed) ticketsOf.set(k.pr, [...(ticketsOf.get(k.pr) ?? []), k.n]);
-  for (const number of [...new Set([...reviews, ...ticketsOf.keys()])].sort((a, b) => a - b)) {
+  const numbers = [...new Set([...reviews, ...ticketsOf.keys()])].sort((a, b) => a - b);
+  const read = ghAliasedRead(numbers, { field: "pullRequest", selection: "{state}", timeoutMs: GH_TIMEOUT_MS });
+  for (const number of numbers) {
     const unconfirmed = [
       ...(reviewed.has(number) ? [`review on PR#${number} unconfirmed finished, its unit stands`] : []),
       ...(ticketsOf.get(number) ?? []).map((n) => `#${n}'s PR#${number} unconfirmed closed, printed as pr-unchecked`),
     ].join("; ");
-    states.set(number, null);
-    const r = spawnSync("gh", ["pr", "view", String(number), "--json", "state"], { encoding: "utf8", timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }) });
-    if (r.error || r.status !== 0) {
-      console.error(`${NAME}: ${failure(r, `gh pr view ${number}`)} — ${unconfirmed}`);
+    const r = read.get(number);
+    const st = r.node?.state;
+    if (PR_STATES.includes(st)) {
+      states.set(number, st);
       continue;
     }
-    let st = null;
-    try { st = JSON.parse(r.stdout).state; } catch { /* no state: disclosed below */ }
-    if (PR_STATES.includes(st)) states.set(number, st);
-    else console.error(`${NAME}: gh pr view ${number} printed no PR state — ${unconfirmed}`);
+    states.set(number, null);
+    const why = r.unreachable ?? (r.notFound ? "no such pull request" : "no PR state");
+    console.error(`${NAME}: gh api graphql gave no answer for PR#${number} (${why}) — ${unconfirmed}`);
   }
   return states;
 }

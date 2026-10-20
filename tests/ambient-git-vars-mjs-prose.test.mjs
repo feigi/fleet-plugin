@@ -290,14 +290,17 @@ const COVERED_MJS = {
   // run with no ambient GIT_DIR or GH_REPO…". Its other git call is
   // `fleetFile()`'s, counted under fleet-dir.mjs.
   "stranded.mjs": 3,
-  // TWO scrubbed envs. The sweep's gh read, `gitEnv({ GH_REPO: "" })`, is
-  // measured in reclaim-scratch.test.mjs, "gh is asked with GH_REPO empty
-  // however the parent's environment names a repository". Its git read,
-  // `worktreeListing()`'s `worktree list`, decides whether an OPEN ticket's
-  // impl-<N>/ is kept; an ambient GIT_DIR would list another repository's
-  // worktrees. Measured in reclaim-scratch.test.mjs, "an ambient GIT_DIR naming
-  // another repository does not change which claim worktree stands for impl-<N>/".
-  "reclaim-scratch.mjs": 2,
+  // ONE scrubbed env, for `worktreeListing()`'s `worktree list`, which decides
+  // whether an OPEN ticket's impl-<N>/ is kept; an ambient GIT_DIR would list
+  // another repository's worktrees. Measured in reclaim-scratch.test.mjs, "an
+  // ambient GIT_DIR naming another repository does not change which claim
+  // worktree stands for impl-<N>/". The sweep's gh read, `gitEnv({ GH_REPO: ""
+  // })`, lives in gh-aliased-read.mjs, which spawns no git and so is not
+  // counted here; it is measured in reclaim-scratch.test.mjs, "gh is asked
+  // with GH_REPO empty however the parent's environment names a repository",
+  // and in fleet-tick.test.mjs, "an inherited GIT_DIR or GH_REPO cannot
+  // retarget the merged-PR review probe".
+  "reclaim-scratch.mjs": 1,
   // ONE spawn primitive, `gitBeside(path, args)`, behind both of the fit's git
   // reads — `rev-parse --verify` of the commit and `show <sha>:./<file>`. An
   // ambient GIT_DIR would answer both for another repository, and an ambient
