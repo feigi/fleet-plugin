@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { COLUMNS, LEGACY_WIDTH, RulingError, TIER_SWITCH_DATE, lastPullByTicket, parseTierOutcomes, rulingFor, rulingsByTicket } from "../plugin/scripts/tier-outcomes.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
@@ -616,6 +616,37 @@ test("check --live: warns on each reviewed PR with no row, and the warning alone
   assert.equal(r.code, 0, r.stderr);
   const warned = [...r.stderr.matchAll(/WARNING PR #(\d+) carries reviewed=/g)].map((m) => Number(m[1]));
   assert.deepEqual(warned, [23, 30], "a reviewed PR with a row, or an unreviewed one, was warned about");
+});
+
+// A PR that closes no issue can never get a row (append keys on exactly one
+// ticket), so the close-out must not be asked for one.
+test("check --live: a reviewed PR that closes no issue is noted, never warned about", (t) => {
+  const f = fixture(t, {
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+    tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" })],
+    closes: [],
+    ledger: { rows: ["#13 impl-13=PR#23 · reviewed=abcdef2:1/0/0:run-abcdef2r"], dispatched: ["impl-13=PR#23"] },
+  });
+  const r = f.run("check", "--live");
+  assert.equal(r.code, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /WARNING PR #23/);
+  assert.match(r.stderr, /note PR #23 carries reviewed= on the ledger and closes no issue/);
+  assert.deepEqual(f.ghCalls(), ["pr view 23 --json closingIssuesReferences"]);
+});
+
+// The skip is only for a read that answered "no issue": a read that failed says
+// nothing, so the PR keeps its warning.
+test("check --live: a PR whose closing references cannot be read keeps its warning", (t) => {
+  const f = fixture(t, {
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+    tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" })],
+    ledger: { rows: ["#13 impl-13=PR#23 · reviewed=abcdef2:1/0/0:run-abcdef2r"], dispatched: ["impl-13=PR#23"] },
+  });
+  writeExecStub(join(dirname(f.ghLog), "bin", "gh"), "#!/bin/sh\nexit 1\n");
+  const r = f.run("check", "--live");
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stderr, /WARNING PR #23 carries reviewed=/);
+  assert.doesNotMatch(r.stderr, /note PR #23/);
 });
 
 test("check --live: a run ledger that does not exist is refused, not read as empty", (t) => {

@@ -443,7 +443,8 @@ test("finish: exits 4 naming each reviewed= PR without a tier-outcomes row, and 
   assert.equal(r.status, 4, r.err + r.stdout);
   assert.deepEqual(r.out.filter((l) => l.startsWith("NEED ")), ["NEED tier-outcomes append 23", "NEED tier-outcomes append 30"]);
   assert.match(r.stdout, /^closeout: tier-outcomes: pending$/m);
-  assert.deepEqual(f.order(), ["fleet-tick", "member-outcomes"], "the metrics refresh and everything after it waits");
+  assert.deepEqual(f.order().filter((n) => n !== "gh"), ["fleet-tick", "member-outcomes"], "the metrics refresh and everything after it waits");
+  assert.deepEqual(f.ghCalls().filter((l) => !l.startsWith("pr view ")), [], "the step only reads PRs; nothing was created or edited");
   assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), { tick: "ok", scrape: "ok", "tier-outcomes": "pending", metrics: "pending", "commit-and-pr": "pending", "phase0-receipt": "pending", "heartbeat-stop": "pending" });
 
   writeFileSync(join(f.repo, METRICS[2]), HEADER + [tierRow(20, 10), tierRow(23, 13), tierRow(30, 30)].join("\n") + "\n");

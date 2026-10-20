@@ -20,7 +20,10 @@
 //     lack a member row (nothing from that run was checked). `--live`
 //     (a run in progress; CI never passes it) adds a WARNING, never a
 //     failure, per PR whose run-ledger row carries `reviewed=` but which has
-//     no row here. `--ledger <path>` names another ledger than the run's own.
+//     no row here, except a PR that closes no issue: `append` keys a row on
+//     exactly one ticket and refuses it, so it is named in a `note` line and
+//     never warned about. A read of that PR that does not answer keeps the
+//     warning. `--ledger <path>` names another ledger than the run's own.
 //
 // `tier` resolution, in order (never tie-broken by `run_date`: the two files'
 // `run_date`s mean different things — this file's header measures 92 of 267
@@ -534,6 +537,19 @@ function append(pr, paths) {
   console.log(line);
 }
 
+// True only when `gh` answered and the PR's closingIssuesReferences is an empty
+// array. Any other outcome (gh failing, unreadable JSON, a non-array) is false:
+// a PR whose closing references cannot be read keeps its warning.
+function closesNoIssue(pr) {
+  try {
+    const raw = execFileSync("gh", ["pr", "view", String(pr), "--json", "closingIssuesReferences"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const refs = JSON.parse(raw).closingIssuesReferences;
+    return Array.isArray(refs) && refs.length === 0;
+  } catch {
+    return false;
+  }
+}
+
 function check(paths) {
   for (const flag of Object.keys(APPEND_FLAGS)) {
     if (arg(flag) !== null) die(`--${flag} is an append flag`);
@@ -546,6 +562,10 @@ function check(paths) {
   if (has("live")) {
     const ledger = readLedger(paths.ledger, true);
     for (const pr of unrecordedReviewedPrs(ledger, rows)) {
+      if (closesNoIssue(pr)) {
+        console.error(`${NAME}: note PR #${pr} carries reviewed= on the ledger and closes no issue, so it takes no row in ${paths.file}`);
+        continue;
+      }
       console.error(`${NAME}: WARNING PR #${pr} carries reviewed= on the ledger but has no row in ${paths.file} — run \`tier-outcomes.mjs append ${pr}\` if it is an implementer PR`);
     }
   }

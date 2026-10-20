@@ -24,8 +24,10 @@
      `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded
      stop as the end of the run. A `NEED tier-outcomes append <pr>` is a PR
      the ledger marks reviewed with no verdict row: append it with the verdict
-     you rule (**Guard: accumulate per PR**) and run `finish` again. A step it
-     fails is explained in references/close-out.md. Exit 0 is the run closed.
+     you rule (**Guard: accumulate per PR**) and run `finish` again. A reviewed
+     PR that closes no issue, a `Refs`-only step for instance, takes no row: the
+     check names it in a `note` line and never asks for one. A step it fails is
+     explained in references/close-out.md. Exit 0 is the run closed.
   Drain only when a documented trigger fired, and name the trigger in `--reason`.
   **Undrain** only when the maintainer asks, never a drain that budget or
   context exhaustion caused (references/close-out.md).
