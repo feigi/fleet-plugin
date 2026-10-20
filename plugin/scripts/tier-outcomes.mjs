@@ -92,7 +92,8 @@ const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
 // ---------------------------------------------------------------------------
 
 // APPENDED TO, never inserted into: every awk read-out in the file's header
-// and in run-team/SKILL.md indexes by position.
+// and in run-team/references/pull.md (**Accumulate per PR, never conclude a
+// tier result inside one run**) indexes by position.
 export const COLUMNS = Object.freeze([
   "run_date", "pr", "ticket", "class", "tier", "closed_own_ticket",
   "minted_false_claim", "note", "sizing", "profile", "loc", "files",

@@ -167,8 +167,8 @@ function roleFromNamePatterns(hay) {
   // dispatch against an ALREADY-OPEN PR, not new ticket work — measured
   // meta.json descriptions "Resolve conflict on PR <n>" and "Rebase and
   // resolve conflicts for PR #<n>", the same rebase/conflict-resolver shape
-  // `run-team/SKILL.md` calls "a rebase-resolver" sent into an open PR's
-  // worktree. It carries no ticket, no dispatch counter and no new-work verb —
+  // `run-team/references/isolation.md` calls "a rebase-resolver" in a prior-run
+  // worktree, here sent into an open PR's worktree. It carries no ticket, no dispatch counter and no new-work verb —
   // only a PR number — so it is remediation on that PR's path to merge,
   // exactly the category `fix-pr-<n>`'s applier already occupies here. It is
   // NOT `merge-bot`: that bucket's number is a per-run dispatch counter, never

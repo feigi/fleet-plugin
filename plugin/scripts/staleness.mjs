@@ -125,8 +125,8 @@ if (!path) die("--path <path> is required");
 // both would refuse, the more specific wording wins, and nothing above here
 // has run a git call.
 //
-// One consequence the caller has to be told about, so run-team/SKILL.md says
-// it too: a needle that starts with `--`, given BARE, never reaches this
+// One consequence the caller has to be told about, so run-team/references/pull.md
+// says it too: a needle that starts with `--`, given BARE, never reaches this
 // script's question — `arg()` refuses it as a missing value, at exit 2, which
 // is the verdict that keeps the ticket in the queue. `--gone -- '<value>'`
 // (separatedNeedles() above) is the opt-in past that, one flag at a time.

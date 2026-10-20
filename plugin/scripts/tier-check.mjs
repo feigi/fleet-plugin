@@ -5,7 +5,7 @@
 // what omp's own record says it RESOLVED, for every member dispatched by
 // named definition. Not a lint — a refusal, run after every Pull's dispatch,
 // whose verdict on an implementer lands on the ledger, where fleet-tick.mjs
-// holds the next Pull until there is one (run-team/SKILL.md's phase 2).
+// holds the next Pull until there is one (run-team/SKILL.md, **The tier check**).
 //
 // Declared is the definition's own frontmatter — `model: "@<role>:<level>"`,
 // a fleet tier route, never a vendor id. Resolved is read back
@@ -48,10 +48,11 @@
 // A batch file, not one member: `--batch` takes a JSON array, and the
 // failure line — `member: declared <m>/<l> resolved <m>/<l>` — is printed
 // once per member that mismatched, not once per invocation. Under Pull,
-// run-team's phase 2 calls this after every Pull's dispatch with a batch of
-// one, the member just dispatched. See run-team/SKILL.md's phase-2 dispatch
-// paragraph for the batch file's exact entry shape and how the controller
-// obtains each field.
+// run-team runs this after every Pull's dispatch with a batch of one, the
+// member just dispatched (run-team/SKILL.md, **The tier check**). The batch
+// file's exact entry shape and how the controller obtains each field are under
+// **The batch file is a JSON array, one entry per dispatched member** in
+// run-team/references/tick-rows.md.
 //
 // An implementer (`impl-<N>`, ledger-grammar.mjs's name) is judged on the
 // ledger's terms, not the caller's: the definition it should have
@@ -195,8 +196,9 @@ export function formatOmpExpectation(r) {
 // (ledger.mjs's `data.rows[i] = line`) and a bare mismatch note would drop
 // `class=`, `KILLED` or `→ PR#` tokens a prior `row` call wrote for the same
 // ticket. Idempotent on the identical note: the documented loop is check,
-// fix, re-check (SKILL.md's "fix the definition or the dispatch and re-run
-// the check before continuing"), and a member that still mismatches for the
+// fix, re-check (run-team/SKILL.md, **The tier check**: "Clear a mismatch by
+// fixing the definition or the dispatch and dispatching the replacement at the
+// right tier"), and a member that still mismatches for the
 // SAME reason on a later run must not grow the row a second time — a
 // DIFFERENT note (a changed pair) still appends, since that is new
 // information the row does not carry yet.
