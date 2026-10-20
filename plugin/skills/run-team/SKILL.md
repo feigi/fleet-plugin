@@ -47,13 +47,8 @@ phase, or in any later one, asks the maintainer which tickets to take.
    `$ARGUMENTS` gave one, `--plugin-checkout <dir>` when this workspace tracks
    no `plugin/…` of its own, `--spend-dir <dir>` to name the directory the
    cockpit's spend panel reads, and `--workflow <name>` or `--declare-no-ci`
-   when the repository has no workflow named CI. It runs the start sequence in
-   its fixed order — branch, fast-forward, pin, baseline, preflight, ruleset,
-   tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded,
-   shortlist — prints one `phase0: <step>: <status>` line per step with the
-   `NEED` lines last, and records each step in `.fleet/phase0.json`, which the
-   tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row
-   until the receipt is whole. Dispatch nothing before it exits 0. Exit 4 is a
+   when the repository has no workflow named CI. Its steps and receipt: See
+   references/phase-0.md. Dispatch nothing before it exits 0. Exit 4 is a
    step that needs you: act on each `NEED` line below, then run it again. Once
    `rotate` has run, a re-run skips every `ok` step and resumes where the last
    one stopped; before it, a re-run runs every step again.
@@ -90,43 +85,11 @@ phase, or in any later one, asks the maintainer which tickets to take.
    go on. See references/phase-0.md.
 
 1. **Build the Shortlist** — `~/.fleet/bin/fleet-run shortlist.mjs`, then read
-   `.fleet/shortlist.json`. The script runs the cheap filters and nothing else
-   — no ticket body is read here, because a Pull reads one ticket in full at
-   the moment it admits it:
-
-   - **Candidate scan** — `candidates.mjs --require-label ready-for-agent
-     --with-dropped`, oldest-first, never re-ranked. Its row count is
-     `scanned`, the supply; the rows its to-spec filter removed are
-     `dropped`, counted nowhere.
-   - **Dependency scan**, `next-ticket` step 2, on each row's `d` array. Open
-     blocker → drop.
-   - **Live Exclusions** — a ticket whose ledger row reads `excluded ·
-     behind-pr:#M` or `excluded · behind-issue:#M` stays out while its premise
-     holds (references/pull.md, **Exclusion**).
-   - **In-flight check** — `inflight.sh <N>` per survivor. Exit 1 is taken, and
-     any other non-zero exit is a check that could not answer, which is never
-     free. Both drop the ticket, logged by number.
-
-   It writes the survivors, in order, to `.fleet/shortlist.json` —
-   `{scanned, shortlist: [{n, t}], dropped: [{n, reason}]}` — resolved against the git common dir by
-   `fleet-dir.mjs`, the one locator `ledger.mjs` resolves `.fleet/ledger.md`
-   with too, so you, the tick and a member in its own worktree all name one
-   file. **Exit 0 is the file written,
-   an empty shortlist included** — the empty queue is an answer. **Exit 2 is a
-   refusal**: the scan, the ledger read or the write did not answer, and the
-   previous file stands untouched, because an empty file written then would
-   read as "no work". Never read 2 as empty.
-
-   Every probe fails CLOSED: an unreadable blocker counts as open, an
-   unreadable premise leaves its exclusion standing, an unanswered in-flight
-   check counts as taken. A ticket dropped wrongly waits one refresh; a ticket
-   admitted wrongly costs a Pull's full read at best and two members on one
-   ticket at worst.
-
-   **`--require-label ready-for-agent` mandatory, no fallback** — the script
-   fixes it, and you never run `candidates.mjs --allow-fallback` by hand to
-   widen the list: `ready-for-human` needs a human to brainstorm first and you
-   have no channel to one mid-flight.
+   `.fleet/shortlist.json`: the survivors of its cheap filters, every probe
+   failing CLOSED (references/phase-0.md, **Build the Shortlist**). Exit 0 is
+   the file written, an empty shortlist included; exit 2 is a refusal and the
+   previous file stands — never read 2 as empty. Never run
+   `candidates.mjs --allow-fallback` by hand to widen the list.
 
    `candidates.mjs`'s exit 3 reaches you as an empty shortlist whose `dropped`
    names every ticket the to-spec filter took, by number and reason — and the
@@ -142,22 +105,8 @@ phase, or in any later one, asks the maintainer which tickets to take.
    `--allow-fallback`, whose second pass is unfiltered and so reaches the
    `ready-for-human` and untriaged work you have no channel for. A partial
    drop, survivors and specs together, is named the same way.
-2. **Refresh is the tick's from here on.** `fleet-tick.mjs` runs
-   `shortlist.mjs` itself when unclaimed entries fall below the In-flight
-   bound, when the file is missing or empty, when an `excluded` premise has
-   lifted, and when a branch-named `behind-pr` exclusion whose PR is not yet
-   MERGED or CLOSED, or a `behind-issue` exclusion whose issue is not yet
-   closed, names a ticket the file still carries, and prints
-   `REFRESHED shortlist: <n> entries; <k> lifted`. A head whose Pull ended
-   this run is not counted, unless on a lifted exclusion. Phase 0 runs it by hand
-   once because a dead run's shortlist is stale by definition.
-   None of those triggers runs while `HOLD (in-flight <n>/<B>)` stands.
-
-**No multi-select, no maintainer tick.** Selection and ordering are batched —
-one scan, oldest first; admission never is. The invariant this replaces — one
-human decision per batch of admissions, zero unilateral grabs — is retired
-is retired: zero human decisions per admission, and every non-admission is a
-label or a premise the maintainer can read.
+2. **Refresh is the tick's from here on**: it prints `REFRESHED shortlist: <n>
+   entries; <k> lifted` (references/phase-0.md, **Refresh is the tick's**).
 
 ## The wake table
 
