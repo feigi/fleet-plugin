@@ -82,7 +82,7 @@ const argv = process.argv.slice(2);
 appendFileSync(process.env.CALL_LOG, "main-gain.mjs " + argv.join(" ") + " (cwd " + process.cwd() + ")\\n");
 writeFileSync(process.env.MG_STDIN_FILE, readFileSync(0));
 const head = argv[argv.indexOf("--head") + 1];
-process.stdout.write(" ".repeat(Number(process.env.MG_PAD ?? 0)) + (process.env.MG_STDOUT ?? JSON.stringify({ head, base: "origin/main", since: null, hits: [], acknowledged: [], unchecked: [], reason: null })) + "\\n");
+process.stdout.write(" ".repeat(Number(process.env.MG_PAD ?? 0)) + (process.env.MG_STDOUT ?? JSON.stringify({ head, base: "origin/main", since: null, hits: [], acknowledged: [], edited: [], unchecked: [], reason: null })) + "\\n");
 process.exitCode = Number(process.env.MG_EXIT);
 `;
 
@@ -226,7 +226,7 @@ function assertRow(r, code, verdict, reason) {
 
 // --- exit 0 ----------------------------------------------------------------
 
-const MG_CLEAN = { head: PRE, base: "origin/main", since: null, hits: [], acknowledged: [], unchecked: [], reason: null };
+const MG_CLEAN = { head: PRE, base: "origin/main", since: null, hits: [], acknowledged: [], edited: [], unchecked: [], reason: null };
 
 test("every check holds → 0 mergeable, one JSON line with every field, four read-only calls in spec order", (t) => {
   const r = gate(t);
@@ -866,7 +866,7 @@ const HIT = {
   path: "tests/gate.test.mjs",
   key: "#7",
   landed: "f".repeat(40),
-  lines: [{ line: 12, text: "test('kept', () => {});" }],
+  lines: [{ line: 12, text: "test('kept', () => {});", kind: "deleted" }],
   ack: "main-gain-removal: tests/gate.test.mjs #7 - <why>",
 };
 const mg = (patch) => JSON.stringify({ ...MG_CLEAN, ...patch });
@@ -894,6 +894,13 @@ test("main-gain-removed wins over ci: and behind:, and loses to head-moved-after
 
 test("main-gain exit 0 with acknowledged removals → 0 mergeable, the acknowledgements echoed in mainGain", (t) => {
   const payload = mg({ acknowledged: [{ ...HIT, reason: "superseded by the new suite" }], unchecked: ["logo.png"] });
+  const r = gate(t, { mgOut: payload });
+  assertRow(r, 0, "mergeable", null);
+  assert.deepEqual(r.json.mainGain, JSON.parse(payload));
+});
+
+test("main-gain exit 0 with an in-place edit → 0 mergeable, the edited line echoed in mainGain", (t) => {
+  const payload = mg({ edited: [{ path: "tests/gate.test.mjs", line: 12, text: "a", replacement: "a b" }] });
   const r = gate(t, { mgOut: payload });
   assertRow(r, 0, "mergeable", null);
   assert.deepEqual(r.json.mainGain, JSON.parse(payload));
@@ -929,6 +936,7 @@ test("a main-gain payload its exit code does not back → 2 main-gain-unanswerab
     ["exit 0, about another head", mg({ head: POST }), 0],
     ["exit 0, hits missing", JSON.stringify({ ...MG_CLEAN, hits: undefined }), 0],
     ["exit 0, unchecked missing", JSON.stringify({ ...MG_CLEAN, unchecked: undefined }), 0],
+    ["exit 0, edited missing", JSON.stringify({ ...MG_CLEAN, edited: undefined }), 0],
   ];
   for (const [what, mgOut, mgExit] of shapes) {
     const r = gate(t, { mgOut, mgExit });
