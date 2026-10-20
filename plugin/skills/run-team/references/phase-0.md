@@ -12,6 +12,14 @@ child's stderr. `--session <dir>` overrides the variable.
 Exit 3 is a step that failed: its line carries the refusal, so fix the cause
 and run it again.
 
+`phase0.mjs` runs the start sequence in
+its fixed order — branch, fast-forward, pin, baseline, preflight, ruleset,
+tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded,
+shortlist — prints one `phase0: <step>: <status>` line per step with the
+`NEED` lines last, and records each step in `.fleet/phase0.json`, which the
+tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row
+until the receipt is whole.
+
 ## Fast-forward the checkout
 
 **Fast-forward the checkout before you trust these rules — you are reading
@@ -442,16 +450,6 @@ failure, a list at its cap, a worktree whose presence cannot be told, or,
 after `ancestor`, a ledger that cannot be read — and is never nothing
 stranded.
 
-## The start sequence and its receipt
-
-`phase0.mjs` runs the start sequence in
-its fixed order — branch, fast-forward, pin, baseline, preflight, ruleset,
-tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded,
-shortlist — prints one `phase0: <step>: <status>` line per step with the
-`NEED` lines last, and records each step in `.fleet/phase0.json`, which the
-tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row
-until the receipt is whole.
-
 ## Build the Shortlist
 
 1. **Build the Shortlist** — `~/.fleet/bin/fleet-run shortlist.mjs`, then read
@@ -493,23 +491,3 @@ until the receipt is whole.
    widen the list: `ready-for-human` needs a human to brainstorm first and you
    have no channel to one mid-flight.
 
-## Refresh is the tick's
-
-2. **Refresh is the tick's from here on.** `fleet-tick.mjs` runs
-   `shortlist.mjs` itself when unclaimed entries fall below the In-flight
-   bound, when the file is missing or empty, when an `excluded` premise has
-   lifted, and when a branch-named `behind-pr` exclusion whose PR is not yet
-   MERGED or CLOSED, or a `behind-issue` exclusion whose issue is not yet
-   closed, names a ticket the file still carries, and prints
-   `REFRESHED shortlist: <n> entries; <k> lifted`. A head whose Pull ended
-   this run is not counted, unless on a lifted exclusion. Phase 0 runs it by hand
-   once because a dead run's shortlist is stale by definition.
-   None of those triggers runs while `HOLD (in-flight <n>/<B>)` stands.
-
-## No multi-select, no maintainer tick
-
-**No multi-select, no maintainer tick.** Selection and ordering are batched —
-one scan, oldest first; admission never is. The invariant this replaces — one
-human decision per batch of admissions, zero unilateral grabs — is retired
-is retired: zero human decisions per admission, and every non-admission is a
-label or a premise the maintainer can read.

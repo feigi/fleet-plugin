@@ -605,3 +605,10 @@ usage mistake, or an answer the question does not take, and records nothing.
 The record is `<scratch>/impl-<N>/pull.json`. See references/pull.md for what
 each step does, and why.
 
+## No multi-select, no maintainer tick
+
+**No multi-select, no maintainer tick.** Selection and ordering are batched —
+one scan, oldest first; admission never is. The invariant this replaces — one
+human decision per batch of admissions, zero unilateral grabs — is retired
+is retired: zero human decisions per admission, and every non-admission is a
+label or a premise the maintainer can read.

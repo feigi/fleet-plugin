@@ -2,8 +2,6 @@
 
 `closeout.mjs finish` runs the scrape, the tier-outcomes check, the metrics refresh, the commit of the metrics files, and the phase-0 receipt move, and SKILL.md's **End of run** says how to drive it. This file is how each of those works, for the controller to read when a step refuses, and how `closeout.mjs reopen` undoes a drain. The verdict rules — what `closed_own_ticket` and `minted_false_claim` mean, and that a value not in hand is left blank — stay in SKILL.md under **Guard: accumulate per PR**, because the controller still rules them.
 
-## End of run, in full
-
 - **The run ends, or the maintainer says drain** → `fleet-event.mjs drain --reason "<reason>"`
   first (below). The marker is on disk, so the tick
   holds the implementer row at `HOLD (draining)` from then on — for a

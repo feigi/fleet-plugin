@@ -55,8 +55,11 @@ function causeText() {
 // `paragraph` refuses a duplicated or missing anchor rather than widening to
 // the whole file, which is the only way a "no closed count anywhere" assertion
 // could pass by looking at nothing.
+// The lead-in is rationale, so it lives in the finisher reference, ahead of the
+// past-pin section that follows it there.
+const FINISHER_REF = Pin.file(join(REPO, "skills", "run-team", "references", "finisher.md"));
 const LEAD_ANCHOR = "A halt at duty 1 reads identical from a bare SHA mismatch";
-const leadIn = () => RUN_TEAM.paragraph(LEAD_ANCHOR, "run-team halt-cause lead-in", "**Resolving a finisher halt.**").text;
+const leadIn = () => FINISHER_REF.paragraph(LEAD_ANCHOR, "run-team halt-cause lead-in", "## Why a `past-pin` halt needs the tick").text;
 
 const list = (words) => `${words.slice(0, -1).map((w) => `\`${w}\``).join(", ")} or \`${words.at(-1)}\``;
 

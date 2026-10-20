@@ -113,7 +113,8 @@ test("a mismatch is retried once by the next suffix, whose prompt carries the vi
 });
 
 test("a reversed refutation reaches the ledger from the disposition record", () => {
-  assert.match(SKILL.paragraph("`refuted` comes back deliberately as well", "run-team/SKILL.md", "**`dimensionsRun` is the dispatch; `dimensionsUnrun` is").text, Pin.phrase(
+  const reviewers = Pin.file(join(REPO, "skills", "run-team", "references", "reviewers.md"));
+  assert.match(reviewers.paragraph("`refuted` comes back deliberately as well", "references/reviewers.md", "**`dimensionsRun` is the dispatch; `dimensionsUnrun` is").text, Pin.phrase(
     "The fix-applier may reverse one; it records each reversal as a `refuted` entry in its disposition record, the evidence in `reason`, and you copy those entries to the ledger's `ruled` line",
   ));
 });

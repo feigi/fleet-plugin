@@ -120,13 +120,15 @@ test("objectKeys reads fields by depth, not by line, and ignores brackets/commas
 
 // The Reviewers prose is in three places now: the dispatch paragraphs under
 // Phase 2, the digest reading under the wake table's **Reading a review
-// result**, and the failed-review retry under Failure handling's Recovery. The
-// review's row tokens are the wake section's.
+// result**, and the failed-review retry, which moved with its rationale to
+// references/failure-handling.md (#3545). The review's row tokens are the wake
+// section's.
+const FAILURE_MD = Pin.file(join(REPO, "skills", "run-team", "references", "failure-handling.md"));
 const reviewersSection = () =>
   [
     RUN_TEAM.between("### Dispatching the members a wake names", "### Reading a review result", "run-team wake dispatch: reviewer").text,
     RUN_TEAM.between("### Reading a review result", "### Nothing to do: arm the beat", "run-team Reading a review result").text,
-    RUN_TEAM.between("**A throw, an empty return, or a notification whose status is not `completed`", "**Verify every reported SHA.**", "run-team review retry").text,
+    FAILURE_MD.between("**A throw, an empty return, or a notification whose status is not `completed`", "**Verify every reported SHA.**", "run-team review retry").text,
   ].join("\n\n");
 // The fix-applier's prompt is what the member reads: its agent body, then the
 // brief the renderer prints for a review fix-applier. SKILL.md carries neither.

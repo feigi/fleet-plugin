@@ -274,3 +274,17 @@ a guess is the over- or under-dispatch it exists to prevent — so correct that
 row with `ledger.mjs row` and tick again. The In-flight bound defaults to 5
 and is fixed for the run: pass `--in-flight` on every tick when `$ARGUMENTS`
 set it, and never otherwise.
+
+## Refresh is the tick's
+
+2. **Refresh is the tick's from here on.** `fleet-tick.mjs` runs
+   `shortlist.mjs` itself when unclaimed entries fall below the In-flight
+   bound, when the file is missing or empty, when an `excluded` premise has
+   lifted, and when a branch-named `behind-pr` exclusion whose PR is not yet
+   MERGED or CLOSED, or a `behind-issue` exclusion whose issue is not yet
+   closed, names a ticket the file still carries, and prints
+   `REFRESHED shortlist: <n> entries; <k> lifted`. A head whose Pull ended
+   this run is not counted, unless on a lifted exclusion. Phase 0 runs it by hand
+   once because a dead run's shortlist is stale by definition.
+   None of those triggers runs while `HOLD (in-flight <n>/<B>)` stands.
+

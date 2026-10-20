@@ -227,6 +227,7 @@ test("phase-0.md has one heading per moved step, in the order phase0.mjs runs th
     "## Derive the Recipe",
     "## Fold in every PR a prior run left open",
     "## Resume the claims a dead run left without a PR",
+    "## Build the Shortlist",
   ]);
 });
 
@@ -286,7 +287,13 @@ const BASELINE = heading("Record the main-checkout baseline");
 const ROTATE = heading("Rotate the ledger");
 
 test("the carried-token reconciliation after /resume is sent to the stranded-claim section's ancestor branch, which holds it", () => {
-  const para = SKILL.bullet("- **The tier check.**", "- **The exploration rule.**", "run-team after-/resume bullet");
+  // The reconciliation's full sentence moved to references/member-lifecycle.md
+  // with the rest of the after-/resume rationale (#3545); SKILL.md's tier-check
+  // bullet keeps the rule and points there.
+  const bullet = SKILL.bullet("- **The tier check.**", "- **The exploration rule.**", "run-team after-/resume bullet");
+  assert.match(bullet.text, Pin.phrase("**After `/resume`, a carried implementer can hold the whole tick**"));
+  assert.match(bullet.text, Pin.phrase("See references/member-lifecycle.md."));
+  const para = Pin.file(join(REFERENCES, "member-lifecycle.md")).section("## A carried implementer after `/resume` holds the whole tick", "member-lifecycle after-/resume section");
   assert.match(para.text, Pin.phrase(`follow the carried token's reconciliation in references/phase-0.md, the "${STRANDED}" section, under its \`prior: ancestor\` branch: \`proc://\` reads \`running\` → wait; dead → the Member-killed row.`));
   const branch = Pin.of(PHASE0, "phase-0.md").section(`## ${STRANDED}`, "phase-0 stranded-claim section").text;
   assert.match(branch, Pin.phrase("- `prior: ancestor` — this session's own earlier run"), "the section no longer has the branch the pointer names");

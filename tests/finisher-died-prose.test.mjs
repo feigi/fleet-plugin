@@ -11,9 +11,12 @@ import { Pin } from "./support/prose-pin.mjs";
 
 const RUN_TEAM = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"));
 const flat = (s) => s.replace(/\s+/g, " ");
+// The resolution's full text, cockpit flag included, is in the finisher
+// reference; SKILL.md keeps the by-hand rule and a pointer to it.
+const FINISHER_REF = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "references", "finisher.md"));
 
 test("a finisher that died is flagged by the cockpit and resolved by hand — no automatic retry, no label from the controller", () => {
-  const para = flat(RUN_TEAM.paragraph("**Resolving a finisher that died.**", "died-finisher resolution", "### Dispositions escalation").text);
+  const para = flat(FINISHER_REF.paragraph("**Resolving a finisher that died.**", "died-finisher resolution", Pin.END).text);
   assert.match(para, /`finisher:failed` or `finisher:killed` at severity 4/);
   assert.match(para, /neither the implementer's bare `killed` flag nor `unlabelled`/);
   assert.match(para, /the tick dispatches no finisher for it/);
