@@ -52,7 +52,7 @@ function fixture(t, { ledger = LEDGER, mark = null, controller = null, table = O
   if (ledger !== null) writeFileSync(file, ledger);
   const beatFile = join(dir, "heartbeat.json");
   if (mark !== null || controller !== null) {
-    writeFileSync(beatFile, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", ...extra, ...mark, ...(controller ? { controller } : {}) }));
+    writeFileSync(beatFile, JSON.stringify({ quiet: 0, digest: "", ...extra, ...mark, ...(controller ? { controller } : {}) }));
   }
   const tableFile = join(dir, "proc-table.json");
   writeFileSync(tableFile, JSON.stringify(table));
@@ -459,7 +459,7 @@ test("rotate records the NEAREST omp ancestor — argv[0] or argv[1] named exact
 });
 
 test("rotate with no omp ancestor removes an older record, and every other key in the file survives", (t) => {
-  const extra = { quiet: 3, elapsed: 40, digest: "d1", note: "not ours" };
+  const extra = { quiet: 3, digest: "d1", note: "not ours" };
   const mark = STALE;
   const f = fixture(t, { table: NO_OMP, mark, extra, controller: { pid: deadPid(), lstart: "x", prior: "none" } });
   const r = f.cli(["rotate"]);
@@ -857,7 +857,7 @@ test("two ancestor rotates in a row carry a still-live token twice, and retired 
   // two rotates inside one second cannot collide on it.
   const [first] = f.archives();
   renameSync(join(f.dir, first), join(f.dir, "ledger.first.md"));
-  writeFileSync(join(f.dir, "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller: ANCESTOR }));
+  writeFileSync(join(f.dir, "heartbeat.json"), JSON.stringify({ quiet: 0, digest: "", controller: ANCESTOR }));
   const again = f.cli(["rotate"]);
   assert.equal(again.status, 0, again.stderr);
   const rows = LIVE_ROWS.filter((r) => !r.startsWith("#12 "));
@@ -875,7 +875,7 @@ test("a dead rotate after an ancestor one drops ## Retired with everything else"
   assert.deepEqual(read(f).retired, RETIRED);
   const [first] = f.archives();
   renameSync(join(f.dir, first), join(f.dir, "ledger.first.md"));
-  writeFileSync(join(f.dir, "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller: { pid: deadPid(), lstart: "x", prior: "ancestor" } }));
+  writeFileSync(join(f.dir, "heartbeat.json"), JSON.stringify({ quiet: 0, digest: "", controller: { pid: deadPid(), lstart: "x", prior: "ancestor" } }));
   const r = f.cli(["rotate"]);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout), { rotated: true, archive: join(f.dir, f.archives()[0]), ...NOTHING_CARRIED });

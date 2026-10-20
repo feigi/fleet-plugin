@@ -19,9 +19,9 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
-import { heartbeatLink, KILL_PATTERN } from "./support/heartbeat-link.mjs";
 
 const BOARD = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
+const HEARTBEAT = fileURLToPath(new URL("../plugin/scripts/fleet-heartbeat.mjs", import.meta.url));
 const HTML = readFileSync(new URL("../plugin/scripts/board.html", import.meta.url), "utf8");
 
 // ── the liveness banner (#1597) ──────────────────────────────────────────────
@@ -94,11 +94,7 @@ test("a mark written by the real heartbeat reaches the real board (#1597)", () =
   // a live beat would have to be backdated by hand — and backdating means
   // writing the file this test is trying to prove nobody has to write by hand.
   // No --state either, on purpose: the default resolution IS the subject.
-  // Through a link, so a controller's `pkill -f fleet-heartbeat.mjs` cannot
-  // SIGTERM this child mid-run (#2787; see tests/support/heartbeat-link.mjs).
-  const stopArgs = [heartbeatLink(), "--stop", "budget exhausted"];
-  assert.doesNotMatch(stopArgs.join(" "), KILL_PATTERN);
-  const stop = spawnSync(process.execPath, stopArgs,
+  const stop = spawnSync(process.execPath, [HEARTBEAT, "--stop", "budget exhausted"],
     { cwd: repo, encoding: "utf8", env });
   assert.equal(stop.status, 0, stop.stderr);
   assert.equal(existsSync(join(repo, ".fleet", "heartbeat.json")), true,
@@ -141,7 +137,7 @@ test("the real board names whether a stalled run's recorded controller is alive 
   const beatAt = Date.now() - 90 * 60_000;
   const build = (controller) => {
     writeFileSync(join(repo, ".fleet", "heartbeat.json"), JSON.stringify({
-      quiet: 0, elapsed: 0, digest: "", beat: { at: beatAt, interval: 1200, stopped: "" },
+      quiet: 0, digest: "", beat: { at: beatAt, interval: 1200, stopped: "" },
       controller: { ...controller, at: beatAt - 60_000 },
     }));
     const r = spawnSync(process.execPath, [BOARD, "build"], { cwd: repo, encoding: "utf8", env });
@@ -167,7 +163,7 @@ test("the real board does not judge the controller of a healthy run", () => {
   mkdirSync(join(repo, ".fleet"), { recursive: true });
   const now = Date.now();
   writeFileSync(join(repo, ".fleet", "heartbeat.json"), JSON.stringify({
-    quiet: 0, elapsed: 0, digest: "", beat: { at: now, interval: 1200, stopped: "" },
+    quiet: 0, digest: "", beat: { at: now, interval: 1200, stopped: "" },
     controller: { pid: process.pid, lstart: "x", prior: "dead", at: now - 60_000 },
   }));
   const r = spawnSync(process.execPath, [BOARD, "build"], { cwd: repo, encoding: "utf8", env });
@@ -194,7 +190,7 @@ test("the real board reads the ledger's `acted` stamp off the state file", () =>
   const now = Date.now();
   const liveness = (extra) => {
     writeFileSync(join(repo, ".fleet", "heartbeat.json"), JSON.stringify({
-      quiet: 0, elapsed: 0, digest: "",
+      quiet: 0, digest: "",
       controller: { pid: process.pid, lstart: "runner-start", prior: "dead", at: now - 3 * 60 * 60_000 },
       ...extra,
     }));

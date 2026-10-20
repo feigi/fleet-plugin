@@ -3,7 +3,7 @@
 Why green not verdict, why absence is its own verdict, why conclusion not
 stable, why behind-count only honest signal, why the tick runs on every wake
 and why the beat is shaped as it is. Assertions live in SKILL.md's wake table,
-**Nothing to do: arm the beat** and **Own the CI waits**; evidence here.
+**Nothing to do: mark the beat and end your turn** and **Own the CI waits**; evidence here.
 
 ## Own the CI waits — members cannot hold across a run
 
@@ -96,14 +96,17 @@ time enough: reviewers label on own green without requiring currency, and
 requiring it earlier costs full CI cycle per sibling merge — six wasted cycles
 in one run. Any behind-count you hand bot expired on arrival.
 
-## Beat when there is nothing to do, and never end your turn on a drained queue
+## Mark the beat when there is nothing to do, and end your turn
 
-**Beat when there is nothing to do, and never end your turn on a drained
-queue.** You cannot be woken. A backgrounded Monitor does not wake an idle
+**Mark the beat when there is nothing to do, and end your turn.** Nothing
+outside your own process can start a turn in an idle session. A backgrounded
+Monitor does not wake an idle
 agent — measured twice, see **A member runs its test suite in the foreground** in references/member-lifecycle.md, where `fix-pr-<M>` backgrounded a suite plus a Monitor and sat idle for
 roughly two hours — and `run-merge-bot.md`'s CI gate states the general rule:
-"whatever wakes you is external and may never come". So hold the wait yourself,
-exactly the way that gate does:
+"whatever wakes you is external and may never come". So the wake-up is not a
+watcher and not a cron entry. It is an omp extension loaded into your own
+session, the alarm, which polls from inside the process and starts a turn once
+the beat has fallen due.
 
 ## Tick on every wake
 
@@ -126,7 +129,7 @@ Do not raise it past 30 minutes.
 
 ## When you stop on purpose, say why
 
-The beat leaves a dated mark on every hold, so a run
+The beat leaves a dated mark on every call, so a run
 that dies abruptly (a crashed harness, a closed terminal, an OOM kill) is
 detected by its mark going stale. A run that stops KNOWINGLY can do better
 than being detected, and nothing else can write the reason afterwards:
@@ -141,17 +144,17 @@ honestly say about a death that named nothing.
 
 ## Nothing to do: why the beat, and what its lines mean
 
-- **Nothing to do right now** → **do not end your turn.** Arm the heartbeat
-  (SKILL.md's **Nothing to do: arm the beat**). A turn that ends on a drained
-  queue is the stall itself: nothing external will wake you, and the
-  level-check you are one command away from never runs. Listed on its own
-  because it is the only wake with no trigger — every other row of SKILL.md's
-  wake list arrives; this one is the absence of one.
+- **Nothing to do right now** → mark the beat and end your turn (SKILL.md's
+  **Nothing to do: mark the beat and end your turn**). The beat is what the
+  alarm reads: with no recorded mark its gate never passes, so a turn that
+  ends without one is the stall itself — the level-check you are one command
+  away from never runs. Listed on its own because it is the only wake that is
+  not an event — every other row of SKILL.md's wake list reports something
+  that happened; this one is the beat falling due.
 
-- `… Ns of Ms remain → re-issue this command now, do not end your turn` — no
-  command blocks for a whole interval (omp backgrounds one at 60s, which is
-  why the CI gate holds its wait in one `eval` cell polling `gh run view`).
-  Issue it again. That is still one blocking call per turn, never an idle turn.
+- `… beat NOT marked …` — the write did not land, or the file is degraded and
+  was left as it is. No alarm is armed, so do not take the line as a beat;
+  fix what it names and run the command again.
 
 **The beat does not stop on idleness.** An empty shortlist and an empty supply are
 not a reason to end the run; they are the state a newly triaged ticket arrives

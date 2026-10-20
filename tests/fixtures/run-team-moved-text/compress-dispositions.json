@@ -10,11 +10,11 @@
     ],
     [
       "Arm the heartbeat below.",
-      "Arm the heartbeat (SKILL.md's **Nothing to do: arm the beat**)."
+      "**Nothing to do right now** → mark the beat and end your turn (SKILL.md's **Nothing to do: mark the beat and end your turn**)."
     ],
     [
       "A turn that ends on a drained queue is #3's stall itself: nothing external will wake you, and the level-check you are one command away from never runs.",
-      "A turn that ends on a drained queue is the stall itself: nothing external will wake you, and the level-check you are one command away from never runs."
+      "The beat is what the alarm reads: with no recorded mark its gate never passes, so a turn that ends without one is the stall itself — the level-check you are one command away from never runs."
     ],
     [
       "Catches hand-added labels as well as a finisher's own.",

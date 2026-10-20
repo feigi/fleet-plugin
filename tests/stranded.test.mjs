@@ -75,7 +75,7 @@ function fixture(t, { controller = null, heartbeat, worktrees = [] } = {}) {
   mkdirSync(join(repo, ".fleet"), { recursive: true });
   const beatFile = join(repo, ".fleet", "heartbeat.json");
   if (heartbeat !== undefined) writeFileSync(beatFile, heartbeat);
-  else if (controller !== null) writeFileSync(beatFile, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller }));
+  else if (controller !== null) writeFileSync(beatFile, JSON.stringify({ quiet: 0, digest: "", controller }));
   const bin = join(dir, "bin");
   mkdirSync(bin);
   writeExecStub(join(bin, "gh"), GH_STUB);

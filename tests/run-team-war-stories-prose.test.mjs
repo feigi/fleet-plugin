@@ -49,8 +49,9 @@ const occurrences = (haystack, needle) => {
   return n;
 };
 
-// What the move changed in the text it carried, each applied to the fixture
-// before its sentences are looked for in references/. A tracker number does not
+// What the move changed in the text it carried, and what later edits changed in
+// it, each applied to the fixture before its sentences are looked for in
+// references/. A tracker number does not
 // ship (plugin/skills ships), so a member named by its PR number is named by
 // placeholder; a positional pointer whose target stayed in SKILL.md would point
 // at nothing in the reference file, so it names where the target is.
@@ -75,6 +76,16 @@ const CORRECTIONS = [
     "so `~/.fleet/bin/fleet-run push-sync.mjs --branch \"$(git branch --show-current)\"` is handed an empty branch and exits 2 before pushing anything.",
   ],
   ["is what Phase 3's block uses", "is what the watcher block in references/ci-watcher.md uses"],
+  // The controller ends its turn on a drained queue and an alarm wakes it, so
+  // the paragraph no longer says it cannot be woken or that the wait is held.
+  [
+    "**Beat when there is nothing to do, and never end your turn on a drained queue.** You cannot be woken.",
+    "**Mark the beat when there is nothing to do, and end your turn.** Nothing outside your own process can start a turn in an idle session.",
+  ],
+  [
+    "So hold the wait yourself, exactly the way that gate does:",
+    "So the wake-up is not a watcher and not a cron entry. It is an omp extension loaded into your own session, the alarm, which polls from inside the process and starts a turn once the beat has fallen due.",
+  ],
 ];
 
 // The removed text as its blocks — paragraphs, a table, a code block — each
@@ -138,7 +149,7 @@ const MOVED = [
   ["pull.md", "The readout counts deliberate comparisons", "**The readout counts DELIBERATE comparisons.**", "An earlier rule asked only for a `session`+`role` carrying more than one distinct `model`,"],
   ["reviewers.md", "A sizing verdict is a measurement only if it post-dates the run that produced it", "**A verdict is a measurement only if it post-dates the run that produced it.**", "A `Sizing:` line typed in before the skill ever ran is byte-identical to one the skill produced,"],
   ["pull.md", "Why the implementer body carries enumerate-and-declare", "Why the agent body carries what it does — read this before editing any `fleet-implementer-<cell>` file, and keep every cell's body byte-identical.", "**Enumerate-and-declare** answers a signature measured four times in one run:"],
-  ["ci-and-staleness.md", "Beat when there is nothing to do, and never end your turn on a drained queue", "**Beat when there is nothing to do, and never end your turn on a drained queue.**", "You cannot be woken."],
+  ["ci-and-staleness.md", "Mark the beat when there is nothing to do, and end your turn", "**Mark the beat when there is nothing to do, and end your turn.**", "Nothing outside your own process can start a turn in an idle session."],
   ["ci-and-staleness.md", "A conclusion is not stable, even for a fixed run id on an unchanged head", "**A conclusion is not stable, even for a fixed run id on an unchanged head.**", "**Building that key with jq's `//` is the same bug in the opposite direction**:", "Never cache a conclusion, and test any fallback you write against `\"\"`, `null` AND a real conclusion."],
   // A code comment in the watcher block: its measured sentence moved, the code stayed.
   ["ci-watcher.md", "The pass is budgeted at 4 core REST units per listed PR", WATCHER_COMMENT_CLAUSE, "The 4 is the measured ceiling of one ci-state.mjs call on the counter `gh api rate_limit` reports,"],
@@ -214,7 +225,7 @@ test("no sentence the move took out is still in SKILL.md, but a kept rule clause
 test("the fixture is the removed text: from the first Measured paragraph to the last, and every kept clause is its own words", () => {
   // Anchors on its first and last sentence and on each moved paragraph's
   // kept clause, so a fixture trimmed to make the test pass is caught here.
-  const f = fixtureText();
+  const f = corrected();
   assert.ok(f.startsWith("**But a missing report is NOT evidence the member failed to send one"), "the fixture lost its first paragraph");
   assert.ok(f.endsWith("from one that was never read and from one whose rows you have to read yourself."), "the fixture lost its last paragraph");
   for (const [, , clause] of MOVED) {

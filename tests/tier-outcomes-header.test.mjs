@@ -45,7 +45,7 @@ const HEADER = headerLines.join("\n");
 // the ruling step is the guard's slice in SKILL.md plus that section.
 const rulingStep = () =>
   [
-    RUN_TEAM.between("**Guard: accumulate per PR, never conclude inside one run.**", "### Nothing to do: arm the beat", "the tier outcomes guard's ruling step").text,
+    RUN_TEAM.between("**Guard: accumulate per PR, never conclude inside one run.**", "### Nothing to do: mark the beat and end your turn", "the tier outcomes guard's ruling step").text,
     REVIEWERS_MD.section("## The tier-outcomes row's difficulty fields", "references/reviewers.md").text,
   ].join("\n\n");
 // The sizing-verdict paragraph, with its measurement, moved to

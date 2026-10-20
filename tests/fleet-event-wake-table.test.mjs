@@ -88,8 +88,19 @@ for (const kept of [
   });
 }
 
-test("SKILL.md states that every wake is one fleet-event.mjs call ending in the tick, and the heartbeat bullet names the command", () => {
+test("SKILL.md states that every wake is one fleet-event.mjs call ending in the tick", () => {
   assert.ok(SKILL_FLAT.includes("every wake is one `fleet-event.mjs` call, which ends in the tick"));
   assert.ok(!SKILL_FLAT.includes("Every wake ends in the tick"));
-  assert.ok(SKILL_FLAT.includes("`… interval elapsed (quiet=<n>) → run fleet-event.mjs heartbeat`"));
+});
+
+test("the one row for the heartbeat kind is the alarm's, and no other row names that command", () => {
+  const rows = wakeTable().filter(([, command]) => command === "`fleet-event.mjs heartbeat`");
+  assert.equal(rows.length, 1, "exactly one row for fleet-event.mjs heartbeat");
+  assert.equal(rows[0][0], "Alarm (a [fleet-alarm] turn)");
+  assert.ok(!wakeTable().some(([wake]) => /^Heartbeat$/.test(wake)), "the old Heartbeat row is gone");
+});
+
+test("SKILL.md names the line a marked beat prints, and the old interval line is gone", () => {
+  assert.ok(SKILL_FLAT.includes("`… beat marked, alarm due in <N>s (quiet=<n>) → end your turn`"));
+  assert.ok(!SKILL_FLAT.includes("interval elapsed"));
 });

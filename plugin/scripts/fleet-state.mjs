@@ -11,9 +11,6 @@
 //            nothing. Drives the back-off interval.
 //   digest   fleet-tick only. The last tick's own output, so an unchanged
 //            quiet tick can fold to one line instead of three.
-//   elapsed  fleet-heartbeat only. Seconds already held toward the current
-//            interval, because no harness lets one command block long enough
-//            to serve a twenty-minute interval in a single call.
 //   beat     fleet-heartbeat only. The liveness mark: when the beat
 //            was last seen, the interval that was in effect when it was, and
 //            a deliberate stop's reason if one was recorded. Written by the
@@ -87,7 +84,7 @@ export function stateFileIn(fleetDir) {
 // There is ONE heartbeat per run and its state lives in the main checkout.
 // Members run from their own worktrees, where a cwd-relative `.fleet/` does not
 // exist, so a cwd-relative path would give every worktree a private back-off
-// streak and a private elapsed total — the run's beat would be whichever
+// streak — the run's beat would be whichever
 // worktree happened to call last. fleet-dir.mjs's fleetFile() resolves it the
 // way it resolves the ledger, scrubbed and bounded: a `git` that never answers
 // is killed rather than holding the beat. Only the warning and the fallback
@@ -134,7 +131,7 @@ export function readState(path, name, warn = console.error) {
   // to judge and nothing to report. A zeroed mark would date the beat to the
   // epoch and read as decades overdue on a run that has simply not started
   // one — the cry-wolf direction this key must never fail in.
-  const fresh = { quiet: 0, elapsed: 0, digest: "", beat: null, ticked: null, acted: null, controller: null, seen: {}, applied: null, rest: {} };
+  const fresh = { quiet: 0, digest: "", beat: null, ticked: null, acted: null, controller: null, seen: {}, applied: null, rest: {} };
   // The same state, flagged: the file EXISTS and could not be used. A caller
   // that acts on the absence of a record — ledger.mjs rotate — must tell this
   // from `fresh`, which is a run that has simply not written one yet. The
@@ -149,7 +146,7 @@ export function readState(path, name, warn = console.error) {
     // fault: a fresh run legitimately has no file yet. Every other errno is a
     // file that EXISTS and could not be read — EACCES on a chmod'ed state
     // file, EISDIR on a path something else claimed, EIO on a bad disk — and
-    // each of those discards a real back-off streak and a real elapsed total.
+    // each of those discards a real back-off streak.
     // Swallowing them with the same bare catch the absent case uses is a
     // degraded read reported as a fresh run, which is the failure class this
     // whole ticket exists to close.
@@ -171,13 +168,13 @@ export function readState(path, name, warn = console.error) {
     return makeDegraded("is not a JSON object");
   }
   // Per-field validation, not all-or-nothing: a file carrying a good `quiet`
-  // and a junk `elapsed` keeps the streak instead of losing both to one key.
+  // and a junk `digest` keeps the streak instead of losing both to one key.
   // The exception is `controller`, below: a record that cannot be judged
   // flags the whole file, because a write that dropped it is the loss.
   const num = (v) => (typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : 0);
   // `rest` is strictly what lies OUTSIDE the schema, which is what makes the
   // patch write below a patch rather than a laundering step. A raw copy of
-  // quiet/elapsed/digest in here would be written straight back by whichever
+  // quiet/digest in here would be written straight back by whichever
   // script does not own the key, so a junk value would survive every write
   // that sanitized it in memory — validation that only ever holds inside one
   // process is not validation of the file.
@@ -253,7 +250,7 @@ export function readState(path, name, warn = console.error) {
     if (!(Number.isInteger(v.run) && v.run > 0)) return null;
     return { run: v.run, reapAfter: v.reapAfter.filter((n) => Number.isInteger(n) && n > 0) };
   };
-  const { quiet, elapsed, digest, beat, ticked, acted, controller, seen, applied, ...rest } = parsed;
+  const { quiet, digest, beat, ticked, acted, controller, seen, applied, ...rest } = parsed;
   // A controller key that ctl() rejects is a record someone wrote and nobody
   // can judge, not the absence of one — announced like the other degraded
   // causes, and flagged.
@@ -264,7 +261,6 @@ export function readState(path, name, warn = console.error) {
   }
   return {
     quiet: num(quiet),
-    elapsed: num(elapsed),
     digest: typeof digest === "string" ? digest : "",
     beat: mark(beat),
     ticked: tick(ticked),
@@ -284,11 +280,9 @@ export function readState(path, name, warn = console.error) {
 // A failed write is reported and SURVIVED, never fatal, for the same reason a
 // failed read is. But survived is not the same as ignored: it returns whether
 // the write landed, because the two cases call for different behaviour from
-// the caller and only the caller can act. An unpersisted `elapsed` means the
-// next invocation re-reads the same total, holds again and reports the same
-// remainder — an interval that can never complete — so fleet-heartbeat treats
-// a failed write as a fire instead of counting progress that nothing is
-// keeping.
+// the caller and only the caller can act. An unpersisted `beat` means the
+// alarm's gate never passes, so fleet-heartbeat says no alarm is armed
+// instead of telling the controller to end its turn.
 //
 // The write is a sibling temp file renamed over the target, ledger.mjs save()'s
 // convention, because the readers do not hold still for it. A plain
@@ -307,16 +301,16 @@ export function writeState(path, name, prev, patch) {
   // from the raw parse: see `rest` in readState above.
   const next = {
     ...(prev.rest ?? {}),
-    quiet: prev.quiet, elapsed: prev.elapsed, digest: prev.digest,
-    // Carried like the other three, and omitted rather than written as
+    quiet: prev.quiet, digest: prev.digest,
+    // Carried like the other two, and omitted rather than written as
     // `null` when there is none: fleet-tick patches `quiet`/`digest` on every
     // tick and would otherwise erase the heartbeat's mark on the first tick
     // after it was written — one script deleting another's key, which is the
     // failure the ownership rule exists to prevent and which no reader could
     // tell from a run that never beat.
     ...(prev.beat ? { beat: prev.beat } : {}),
-    // Same reason, same shape: fleet-heartbeat patches `elapsed`/`beat` on
-    // every hold and would otherwise erase fleet-tick's `ticked` the first
+    // Same reason, same shape: fleet-heartbeat patches `beat` on
+    // every call and would otherwise erase fleet-tick's `ticked` the first
     // time a heartbeat lands after a busy stretch.
     ...(prev.ticked ? { ticked: prev.ticked } : {}),
     // And again for ledger.mjs's `controller` and `acted`, which both scripts
@@ -371,10 +365,10 @@ export function writeState(path, name, prev, patch) {
 //
 // The grace multiplier is the only constant, and it is a multiplier ON the
 // recorded interval rather than a duration added to it, so it scales with the
-// promise instead of drowning it. One whole extra interval of silence: a beat
-// is served by SEVERAL holds (see fleet-heartbeat.mjs's heldThisCall), the
-// controller's own turn sits between the last hold and the next invocation,
-// and neither is bounded tightly enough to call a run dead the second one
+// promise instead of drowning it. One whole extra interval of silence: the
+// alarm only fires once the controller is idle, so the controller's own turn
+// sits between the beat falling due and the next invocation, and that turn is
+// not bounded tightly enough to call a run dead the second one
 // interval lapses. It is the same shape board.html already uses to call its
 // own data stale (`interval * 1000 * 2`), kept deliberately: an operator
 // reading two "stale" verdicts on one page should not have to learn two rules.
@@ -499,16 +493,16 @@ export function isReported(verdict) {
 
 // Whole minutes, floored, because the numbers here are tens of minutes to
 // hours and a seconds-precise age in a stall line is false precision: the
-// mark is written once per hold, so its resolution is minutes anyway. That
+// mark is written once per idle, so its resolution is minutes anyway. That
 // holds for production (--base 300, --ceiling 1200 — SKILL.md's only
 // documented values) but not for every value the CLI guard actually accepts:
 // fleet-heartbeat.mjs's own guard refuses `--ceiling < --base` the same way
 // this file refuses other invalid shapes, and mirroring that refusal onto
 // sub-60s `--base`/`--ceiling` was the first fix tried for the "0m" floor —
 // until the heartbeat's own test suite turned out to lean on 2s/3s/8s/9s/64s intervals
-// throughout, deliberately, to keep its real `Atomics.wait` holds fast. A
-// CLI-level refusal would force that whole suite onto minute-plus real
-// holds for no behavioural gain, so the fix lives here instead: a value
+// throughout, deliberately, to keep its time-travelled marks small. A
+// CLI-level refusal would force that whole suite onto minute-plus
+// intervals for no behavioural gain, so the fix lives here instead: a value
 // under a minute is still a real value, not an invalid one, and flooring it
 // to "0m" is what read as a division-by-zero defect, not the sub-minute
 // input itself.

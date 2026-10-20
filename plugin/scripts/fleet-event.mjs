@@ -126,8 +126,8 @@
 //   heartbeat
 //       No write: the tick runs with `--fold-unchanged`, which prints one line
 //       instead of the rows when the tick asks for nothing and says what the
-//       last one said. The hold itself stays `fleet-heartbeat.mjs`, whose
-//       interval-elapsed line names this command.
+//       last one said. The alarm turn that runs it is started by
+//       `controller-alarm.mjs`, once the beat `fleet-heartbeat.mjs` marked falls due.
 //   drain --reason "<reason>"
 //       `closeout.mjs begin --reason "<reason>"`, its output printed as it
 //       stands, then the tick.

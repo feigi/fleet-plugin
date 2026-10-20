@@ -838,7 +838,7 @@ const REAL_TABLE = { [process.pid]: { ppid: OMP, argv: [process.execPath, "--tes
 function rotateFixture() {
   const f = fixture();
   // The recorded controller is this test runner: alive, started when recorded, and an ancestor of the rotation.
-  writeFileSync(join(f.fleet, "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller: { pid: process.pid, lstart: "runner-start", prior: "dead", at: RUN_AT } }));
+  writeFileSync(join(f.fleet, "heartbeat.json"), JSON.stringify({ quiet: 0, digest: "", controller: { pid: process.pid, lstart: "runner-start", prior: "dead", at: RUN_AT } }));
   const table = join(f.dir, "proc-table.json");
   writeFileSync(table, JSON.stringify(REAL_TABLE));
   const rotate = () => spawnSync(process.execPath, [join(REAL_SCRIPTS, "ledger.mjs"), "rotate"], {

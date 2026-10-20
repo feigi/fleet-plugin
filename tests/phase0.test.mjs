@@ -76,7 +76,7 @@ export function rotate() {
   if (c.noRecord) process.exit(0);
   mkdirSync(fleet, { recursive: true });
   writeFileSync(join(fleet, "heartbeat.json"), JSON.stringify({
-    quiet: 0, elapsed: 0, digest: "", controller: { pid: 4242, lstart: "fixture", prior: "dead", at: c.at ?? ${RUN_AT} },
+    quiet: 0, digest: "", controller: { pid: 4242, lstart: "fixture", prior: "dead", at: c.at ?? ${RUN_AT} },
   }));
   process.exit(0);
 }
@@ -190,7 +190,7 @@ function fixture({ spec = false } = {}) {
     },
     setRecord: (at) => {
       mkdirSync(fleet, { recursive: true });
-      writeFileSync(join(fleet, "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller: { pid: 4242, lstart: "fixture", prior: "dead", at } }));
+      writeFileSync(join(fleet, "heartbeat.json"), JSON.stringify({ quiet: 0, digest: "", controller: { pid: 4242, lstart: "fixture", prior: "dead", at } }));
     },
     asides: () => readdirSync(fleet).filter((n) => /^phase0\.\d.+\.json$/.test(n)),
     ledgerRow: (key, text) => {
@@ -930,7 +930,7 @@ function rotateFixture() {
   const f = fixture();
   mkdirSync(join(f.repo, ".fleet"), { recursive: true });
   // The recorded controller is this test runner: alive, started when recorded, and an ancestor of the rotation.
-  writeFileSync(join(f.repo, ".fleet", "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller: { pid: process.pid, lstart: "runner-start", prior: "dead", at: RUN_AT } }));
+  writeFileSync(join(f.repo, ".fleet", "heartbeat.json"), JSON.stringify({ quiet: 0, digest: "", controller: { pid: process.pid, lstart: "runner-start", prior: "dead", at: RUN_AT } }));
   const rotate = () => spawnSync(process.execPath, [join(REAL_SCRIPTS, "ledger.mjs"), "rotate"], {
     cwd: f.repo, encoding: "utf8", env: { ...GIT_ENV, FLEET_PROC_TABLE: f.procTable },
   });

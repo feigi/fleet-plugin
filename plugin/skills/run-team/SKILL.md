@@ -111,7 +111,7 @@ phase, or in any later one, asks the maintainer which tickets to take.
 
 ## The wake table
 
-A wake is done when its one `fleet-event.mjs` call has run and you have acted on every line it printed, the tick's last; with nothing left to act on, arm the heartbeat and hold rather than end your turn. What a wake owes beyond its call is under **What a wake owes beyond its call**, below. The loop has no exit but the run's own end: drain the run when it ends (**End of run**).
+A wake is done when its one `fleet-event.mjs` call has run and you have acted on every line it printed, the tick's last; with nothing left to act on, mark the beat and end your turn. What a wake owes beyond its call is under **What a wake owes beyond its call**, below. The loop has no exit but the run's own end: drain the run when it ends (**End of run**).
 
 React to events; never block on one.
 
@@ -146,14 +146,14 @@ Run each as `~/.fleet/bin/fleet-run fleet-event.mjs <kind> <args>`, from the mai
 | CI run terminal | `fleet-event.mjs ci <pr>` |
 | Label seen (persistent Monitor) | `fleet-event.mjs label <pr>` |
 | `CONFLICT` line | `fleet-event.mjs conflict <pr>` |
-| Heartbeat | `fleet-event.mjs heartbeat` |
+| Alarm (a [fleet-alarm] turn) | `fleet-event.mjs heartbeat` |
 | Drain | `fleet-event.mjs drain --reason "<reason>"` |
 | Undrain | `fleet-event.mjs undrain --reason "<reason>"` |
 | Member confirmed dead or never dispatched | `fleet-event.mjs member-died <member>` |
 
 ### What a wake owes beyond its call
 
-Act on every line the call prints, the tick's last, and arm the beat. What a wake
+Act on every line the call prints, the tick's last, and mark the beat. What a wake
 owes beyond its call:
 
 - **Implementer report** → the PR is owed a review from here on:
@@ -305,25 +305,28 @@ it; never type a tier in over that. That append is the whole duty. See reference
 
 **A verdict is a measurement only if it post-dates the run that produced it.** See references/reviewers.md.
 
-### Nothing to do: arm the beat
+### Nothing to do: mark the beat and end your turn
 
-- **Nothing to do right now** → **do not end your turn.** Arm the heartbeat
-  below: nothing external will wake you. See references/ci-and-staleness.md.
+- **Nothing to do right now** → mark the beat, then end your turn. The alarm,
+  which phase 0 checked is armed in this session, starts the next turn once the
+  beat falls due. See references/ci-and-staleness.md.
 
-**Beat when there is nothing to do, and never end your turn on a drained queue.** See references/ci-and-staleness.md.
+**Mark the beat when there is nothing to do, and end your turn.** See references/ci-and-staleness.md.
 
 ```bash
 ~/.fleet/bin/fleet-run fleet-heartbeat.mjs \
-  [--base 300] [--ceiling 1200] [--multiplier 2] [--hold 240]
+  [--base 300] [--ceiling 1200] [--multiplier 2]
 ```
 
-It blocks, then prints one line. Which line it is, is the whole protocol:
+It returns at once and prints one line. Which line it is, is the whole protocol:
 
-- `… interval elapsed (quiet=<n>) → run fleet-event.mjs heartbeat` — the level-check
-  is due. Run that command and act on what the tick it ends in prints.
-  Then arm the beat again.
-- `… Ns of Ms remain → re-issue this command now, do not end your turn` —
-  issue it again: still one blocking call per turn, never an idle turn.
+- `… beat marked, alarm due in <N>s (quiet=<n>) → end your turn` — the mark is
+  recorded. End your turn. The alarm's turn arrives as a user message that
+  starts `[fleet-alarm]` and names `fleet-event.mjs heartbeat`: run that
+  command and act on what the tick it ends in prints. Then mark the beat again.
+- `… beat NOT marked …` — no mark is on disk, so no alarm is armed and ending
+  your turn would be the stall. Fix what the line names and run the command
+  again.
 
 **Do not raise `--ceiling` past 30 minutes.** See references/ci-and-staleness.md.
 
