@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { readReceipt, phase0Gate, sessionFromReceipt, STEP_NAMES } from "../plugin/scripts/phase0-receipt.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 
-const STEPS = ["branch", "fast-forward", "pin", "baseline", "preflight", "ruleset", "tier-roles", "metrics",
+const STEPS = ["alarm", "branch", "fast-forward", "pin", "baseline", "preflight", "ruleset", "tier-roles", "metrics",
   "cockpit", "rotate", "reclaim", "recipe", "fold-in", "stranded", "shortlist"];
 const receipt = ({ run = 5, session = "/s/run", steps = {} } = {}) => ({
   run, session, scratch: "/scratch",

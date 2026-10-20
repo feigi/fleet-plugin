@@ -18,7 +18,7 @@ const isRecord = (x) => x !== null && typeof x === "object" && !Array.isArray(x)
 // a step not yet run being `pending`. A receipt missing one was not written
 // by a finished phase 0.
 export const STEP_NAMES = Object.freeze([
-  "branch", "fast-forward", "pin", "baseline", "preflight", "ruleset", "tier-roles", "metrics",
+  "alarm", "branch", "fast-forward", "pin", "baseline", "preflight", "ruleset", "tier-roles", "metrics",
   "cockpit", "rotate", "reclaim", "recipe", "fold-in", "stranded", "shortlist",
 ]);
 
