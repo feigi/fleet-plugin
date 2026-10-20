@@ -53,19 +53,26 @@ derive never changes the answer.
   the frozen or locked mode in the command; never rely on the environment to
   imply it.
 - **Test entrypoint** — every test step in the merge-gating CI jobs that can
-  run in a fresh worktree without a running service. Which steps qualify is yours to
-  decide, by reading CI and the repository. Members run it with their own
-  arguments appended (`sh -c '<test> "$@"'`), so it is one invocation: an
-  `&&` chain hands those arguments to its last command alone. Prefer a form
-  where an appended test file or test name lands as an argument to the test
-  runner. The cache reader refuses a command whose first word does not
-  resolve from the repository root (a builtin, a `PATH` entry, or an
-  executable path), one ending in `;`, `&` or a newline, one containing a
-  word that starts with `#`, and one with an unquoted pattern that matches no
-  file tracked from the repository root. Quote a pattern that a program
-  resolves under its own directory option, e.g.
-  `git -C web ls-files -- '*.test.ts'`: the reader accepts a quoted pattern
-  unchecked.
+  run in a fresh worktree without a running service. Which steps qualify is
+  yours to decide, by reading CI and the repository. It is ONE simple command:
+  the reader refuses an unquoted `&&`, `||`, `;`, `|`, a `&` that is not part
+  of a redirection, or a `(`…`)` group. Members run it with their own arguments
+  appended (`sh -c '<test> "$@"'`), and a join or group hands those arguments
+  to its last command alone or breaks the run. `2>&1` and `>&2` stay accepted.
+  A chain is accepted only quoted as the script of `sh -c`, and that form
+  forwards the appended arguments only through `"$@"`:
+  `sh -c 'cd web && npm test -- "$@"' sh`. A suite in a subdirectory uses its
+  runner's directory option, not `cd`: `npm --prefix web test`,
+  `pnpm -C web test`, `make -C web test`, `go -C web test`,
+  `mvn -f web/pom.xml test`, `gradle -p web test`. Prefer a form where an
+  appended test file or test name lands as an argument to the test runner. The
+  cache reader refuses a command whose first word does not resolve from the
+  repository root (a builtin, a `PATH` entry, or an executable path), one
+  ending in `;`, `&` or a newline, one containing a word that starts with `#`,
+  and one with an unquoted pattern that matches no file tracked from the
+  repository root. Quote a pattern that a program resolves under its own
+  directory option, e.g. `git -C web ls-files -- '*.test.ts'`: the reader
+  accepts a quoted pattern unchecked.
 - **Check step** — every merge-gating CI step that is not a test step, that
   the Test entrypoint does not run, and that needs no running service: the format, lint and type checks the
   repository's CI gates on, whatever they are. One invocation, in the same form
@@ -87,6 +94,22 @@ derive never changes the answer.
   PROVEN` with the cause **needs a running service**, never an entrypoint
   that needs one. That is not the case above of no single invocation covering
   every qualifying step.
+- **Covered steps** — every merge-gating CI step the Test entrypoint or the
+  Check step runs, passed as `--covered`: one JSON array of
+  `{"step": "<the CI step>", "by": "test" | "check"}`, one entry per step,
+  `by` naming which of the two runs it. At least one entry is `by: "test"`,
+  and `by: "check"` is refused while the Check step is `true`. A step is in
+  `--covered` or in `--uncovered`, never both: the two lists are compared on
+  the step name exactly, after trimming and collapsing internal whitespace, so
+  write a step the same way in both.
+- **The ledger** — before you propose, classify every test step and every
+  non-test step of every merge-gating CI job: run by the Test entrypoint
+  (`by: "test"`), run by the Check step (`by: "check"`), or uncovered with a
+  reason. Leave none unclassified. A step the Test entrypoint or the Check step
+  runs never goes in `uncovered`; a merge-gating step that needs a running
+  service, or another OS, always does. Which steps qualify is your judgement:
+  no script checks it, so a step left out of both lists (a Docker-gated step
+  omitted from `uncovered`, for example) is the one error nothing here catches.
 
 ## 2. Prove it — this procedure exactly
 
@@ -95,7 +118,7 @@ script creates and removes; `<repo>`'s own tree is never touched.
 
 **First run, to see the output** — no proof flags:
 
-    ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --uncovered '<uncovered>'
+    ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>'
 
 It exits 1 with `NOT PROVEN — no proof given` once every command ran, and
 names the Test entrypoint's output file (`test output: <path>`). Any other
@@ -108,7 +131,7 @@ and revise.
   text off that summary line, as printed, into `--count-line`, and the number
   of tests that ran into `--test-count`:
 
-      ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --uncovered '<uncovered>' \
+      ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>' \
         --count-line '<literal text of the count line>' --test-count <n>
 
   The number is the tests that ran — never the skipped, the failed, or a
@@ -126,7 +149,7 @@ and revise.
   must change a tracked file; the script runs it in the throwaway worktree,
   requires the suite to go red, and discards the worktree after:
 
-      ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --uncovered '<uncovered>' \
+      ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>' \
         --mutate '<shell command that breaks one test>' --mutation '<one line: what it breaks>'
 
 **The Check step's own proof** — when `--check` is not `true`, the Check step
@@ -135,15 +158,17 @@ must run green on `origin/main`, and one mutation must turn it red. Give
 `--check true`. Both proofs ride in one run: the Test entrypoint's proof flags
 from above, and these:
 
-    ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --uncovered '<uncovered>' \
+    ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>' \
       --check-mutate '<shell command that breaks one file the Check step reads>' --check-mutation '<one line: what it breaks>' \
       <the Test entrypoint's proof flags>
 
 Exit 0 is the proof holding: the script wrote the Recipe cache and printed
 `PROVEN` and the cache's contents. Exit 1 is `NOT PROVEN`, with the reason;
-no cache was written. Exit 2 means no verdict on the proof: it could not be
-attempted (no `origin/main`, not a repository, a malformed `--uncovered`) or
-the cache could not be written — report it, do not work around it.
+no cache was written. A Test entrypoint, Install step or Check step whose shape
+the reader refuses is `NOT PROVEN` before any command runs. Exit 2 means no
+verdict on the proof: it could not be attempted (no `origin/main`, not a
+repository, a missing or malformed `--covered` or `--uncovered`) or the cache
+could not be written — report it, do not work around it.
 
 The script bounds each command it runs itself — the Install step, the Check
 step, both Test runs and the mutations — and refuses one still running at that

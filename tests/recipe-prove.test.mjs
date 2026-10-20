@@ -111,14 +111,17 @@ function withoutTests(files) {
 
 const cachePath = (dir) => join(dir, ".fleet", "recipe.json");
 
-// Every proof states what its Test entrypoint and Check step leave out of CI; a case that is
-// not about `--uncovered` passes `[]`, and one that is passes its own — or
-// `bare`, to pass none at all. A case not about `--check` passes `--check true`
-// by default, unless it passes its own `--check`.
+// Every proof states what its Test entrypoint and Check step leave out of CI, and
+// what they run: a case that is not about `--uncovered` passes `[]`, and one that
+// is passes its own — or `bare`, to pass none at all. A case not about `--covered`
+// passes one step the Test entrypoint runs, and a case not about `--check` passes
+// `--check true` by default, unless it passes its own `--check`.
+const COVERED = JSON.stringify([{ step: "unit", by: "test" }]);
 function prove(dir, args, { env = {}, cwd = dir, bare = false } = {}) {
   const tmp = tempDir("recipe-prove-tmp-");
   const checked = bare || args.includes("--check") ? args : [...args, "--check", "true"];
-  const full = bare || args.includes("--uncovered") ? checked : [...checked, "--uncovered", "[]"];
+  const listed = bare || args.includes("--uncovered") ? checked : [...checked, "--uncovered", "[]"];
+  const full = bare || args.includes("--covered") ? listed : [...listed, "--covered", COVERED];
   const r = spawnSync(process.execPath, [SCRIPT, dir, ...full], {
     encoding: "utf8",
     cwd,
@@ -213,6 +216,108 @@ test("a proof with no `--uncovered`, or a malformed one, cannot be attempted —
   }
   assert.equal(worktrees(dir), 1, "a refusal at the argument boundary creates no worktree");
   assert.equal(existsSync(cachePath(dir)), false);
+});
+
+// `--covered` is the ledger of CI steps the Test entrypoint or the Check step
+// runs. Its shape is checked before any command runs: a refusal here runs no
+// command, creates no worktree and writes no cache.
+test("a proof whose `--covered` is absent or malformed cannot be attempted — exit 2, nothing run (#3491)", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const marker = join(tempDir("recipe-prove-marker-"), "ran");
+  const proof = ["--install", `touch ${marker}`, "--test", "mvn -q test", "--check", "true", "--uncovered", "[]"];
+  const none = prove(dir, proof, { bare: true });
+  assert.equal(none.status, 2, none.err);
+  assert.match(none.err, /^recipe-prove: --covered is required: /m);
+  for (const [value, why] of [
+    ["{not json", /--covered is not JSON/],
+    ['{"step":"unit","by":"test"}', /--covered is not a JSON array/],
+    ['["unit"]', /--covered entry 1 is not an object with a non-empty `step` and a `by`/],
+    ['[{"step":"unit"}]', /--covered entry 1 is not an object with a non-empty `step` and a `by`/],
+    ['[{"step":"unit","by":"both"}]', /--covered entry 1 is not an object with a non-empty `step` and a `by`/],
+    ['[{"step":" ","by":"test"}]', /--covered entry 1 is not an object with a non-empty `step` and a `by`/],
+  ]) {
+    const r = prove(dir, [...proof, "--covered", value], { bare: true });
+    assert.equal(r.status, 2, `${value}: ${r.err}`);
+    assert.match(r.err, why, value);
+  }
+  assert.equal(existsSync(marker), false, "a refusal at the argument boundary ran a command");
+  assert.equal(worktrees(dir), 1, "a refusal at the argument boundary creates no worktree");
+  assert.equal(existsSync(cachePath(dir)), false);
+});
+
+test("a proof whose `--covered` names no step the Test entrypoint runs cannot be attempted — exit 2, nothing run (#3491)", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const marker = join(tempDir("recipe-prove-marker-"), "ran");
+  const proof = ["--install", `touch ${marker}`, "--test", "mvn -q test", "--check", "true", "--uncovered", "[]"];
+  const r = prove(dir, [...proof, "--covered", "[]"], { bare: true });
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /^recipe-prove: --covered names no step with by "test"/m);
+  assert.equal(existsSync(marker), false, "a refusal at the argument boundary ran a command");
+  assert.equal(worktrees(dir), 1, "a refusal at the argument boundary creates no worktree");
+  assert.equal(existsSync(cachePath(dir)), false);
+});
+
+test("a proof whose `--covered` names a Check-step step while `--check` is `true` cannot be attempted — exit 2, nothing run (#3491)", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const marker = join(tempDir("recipe-prove-marker-"), "ran");
+  const proof = ["--install", `touch ${marker}`, "--test", "mvn -q test", "--check", "true", "--uncovered", "[]"];
+  const covered = JSON.stringify([{ step: "lint", by: "check" }, { step: "unit", by: "test" }]);
+  const r = prove(dir, [...proof, "--covered", covered], { bare: true });
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /^recipe-prove: --covered names a step with by "check", but --check is true/m);
+  assert.equal(existsSync(marker), false, "a refusal at the argument boundary ran a command");
+  assert.equal(worktrees(dir), 1, "a refusal at the argument boundary creates no worktree");
+  assert.equal(existsSync(cachePath(dir)), false);
+});
+
+test("a step in both `--covered` and `--uncovered` cannot be attempted — exit 2, nothing run, whatever the internal whitespace (#3491)", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const marker = join(tempDir("recipe-prove-marker-"), "ran");
+  const proof = ["--install", `touch ${marker}`, "--test", "mvn -q test", "--check", "true"];
+  // The run-0 case: a step the Test entrypoint runs, listed as uncovered too.
+  const step = "proc-macos job (node --test tests/proc.test.mjs on macOS)";
+  const spaced = "proc-macos job  (node --test tests/proc.test.mjs  on macOS)";
+  for (const [coveredStep, uncoveredStep] of [[step, step], [step, spaced], [spaced, step]]) {
+    const r = prove(dir, [
+      ...proof,
+      "--covered", JSON.stringify([{ step: "unit", by: "test" }, { step: coveredStep, by: "test" }]),
+      "--uncovered", JSON.stringify([{ step: uncoveredStep, reason: "runs on a macOS runner only" }]),
+    ], { bare: true });
+    assert.equal(r.status, 2, `${coveredStep} / ${uncoveredStep}: ${r.err}`);
+    assert.match(r.err, /^recipe-prove: the step '.*' is in both --covered and --uncovered/m);
+  }
+  assert.equal(existsSync(marker), false, "a refusal at the argument boundary ran a command");
+  assert.equal(worktrees(dir), 1, "a refusal at the argument boundary creates no worktree");
+  assert.equal(existsSync(cachePath(dir)), false);
+});
+
+// The Test entrypoint is one simple command: a join is refused by the reader
+// before the proof, so the Install step never runs and no worktree exists.
+test("a test command that joins commands is refused before the proof — NOT PROVEN, no marker, no worktree, no command run (#3491)", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const marker = join(tempDir("recipe-prove-marker-"), "ran");
+  const r = prove(dir, ["--install", `touch ${marker}`, "--test", "true && true", "--uncovered", "[]", "--covered", COVERED]);
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /^recipe-prove: NOT PROVEN — derive-testcmd: the proposed test command 'true && true' has an unquoted /m);
+  assert.match(r.err, /no command was run/);
+  assert.equal(existsSync(marker), false, "the Install step ran");
+  assert.equal(worktrees(dir), 1, "a worktree was created");
+  assert.equal(existsSync(cachePath(dir)), false);
+});
+
+// An install is not a Test entrypoint: a join there is still run by `sh`, so it
+// is accepted, and the `--covered` ledger that names every step it runs is too.
+test("a `--covered` ledger that names only steps the Test entrypoint runs, with a joined install, is accepted (#3491)", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, [
+    "--install", "true && true",
+    "--test", "mvn -q test",
+    "--count-line", "Tests run: 1,", "--test-count", "1",
+    "--covered", JSON.stringify([{ step: "unit", by: "test" }, { step: "lint", by: "test" }]),
+    "--uncovered", "[]",
+  ]);
+  assert.equal(r.status, 0, r.err);
+  assert.equal(JSON.parse(readFileSync(cachePath(dir), "utf8")).install, "true && true");
 });
 
 test("a Go-shaped repo gets a proven cache through the mutation proof, which records what turned the run red", () => {
@@ -354,10 +459,10 @@ test("an Install step or Test entrypoint that does not RUN is named as such", ()
   const { dir } = repo(MAVEN_FILES);
   const i = prove(dir, ["--install", "no-such-installer-xyz", ...MAVEN_PROOF.slice(2)]);
   assert.equal(i.status, 1);
-  assert.match(i.err, /NOT PROVEN — the Install step 'no-such-installer-xyz' did not run \(exit 127: not executable or not found\)/);
+  assert.match(i.err, /NOT PROVEN — derive-testcmd: the proposed install command 'no-such-installer-xyz' is not found or not executable from /);
   const t = prove(dir, ["--install", "true", "--test", "no-such-runner-xyz", "--count-line", "x 1", "--test-count", "1"]);
   assert.equal(t.status, 1);
-  assert.match(t.err, /NOT PROVEN — the Test entrypoint 'no-such-runner-xyz' did not run \(exit 127/);
+  assert.match(t.err, /NOT PROVEN — derive-testcmd: the proposed test command 'no-such-runner-xyz' is not found or not executable from /);
   assert.equal(existsSync(cachePath(dir)), false);
 });
 
@@ -370,7 +475,7 @@ test("an Install step that fails is not proven", () => {
 
 test("the mutation proof refuses a red baseline: a mutation turning a red run red proves nothing", () => {
   const { dir } = repo(GO_FILES);
-  const r = prove(dir, ["--install", "true", "--test", "go test ./... && exit 1", ...GO_PROOF.slice(4)]);
+  const r = prove(dir, ["--install", "true", "--test", "sh -c 'go test ./... && exit 1' sh", ...GO_PROOF.slice(4)]);
   assert.equal(r.status, 1);
   assert.match(r.err, /the unmutated run is already red \(exit 1\), so a mutation turning it red proves nothing — use the count proof/);
 });
@@ -421,21 +526,21 @@ test("a failed proof leaves an existing cache byte-identical — it never writes
   assert.equal(readFileSync(cachePath(dir), "utf8"), "prior bytes");
 });
 
-test("a cache the reader would refuse is not left behind: it is rolled back to what stood before", () => {
+test("a trailing `;` is refused before any cache is touched: the prior cache stands, and none is made", () => {
   // `mvn -q test;` runs fine under sh -c, but a trailing `;` would let a
-  // runner-appended argument run as its own command, so the reader refuses it.
+  // runner-appended argument run as its own command, so the shape check refuses it.
   const { dir } = repo(MAVEN_FILES);
   mkdirSync(join(dir, ".fleet"));
   writeFileSync(cachePath(dir), "prior bytes");
   const r = prove(dir, ["--install", "true", "--test", "mvn -q test;", "--count-line", "Tests run: 1,", "--test-count", "1"]);
   assert.equal(r.status, 1, r.err);
-  assert.match(r.err, /NOT PROVEN — the Recipe cache reader refuses what was proven: .*ends in ';'/);
+  assert.match(r.err, /NOT PROVEN — derive-testcmd: the proposed test command .*';'/);
   assert.equal(readFileSync(cachePath(dir), "utf8"), "prior bytes");
 
   const { dir: fresh } = repo(MAVEN_FILES);
   const f = prove(fresh, ["--install", "true", "--test", "mvn -q test;", "--count-line", "Tests run: 1,", "--test-count", "1"]);
   assert.equal(f.status, 1);
-  assert.equal(existsSync(cachePath(fresh)), false, "no prior cache: the refused one is removed, not left");
+  assert.equal(existsSync(cachePath(fresh)), false, "no prior cache: the refused one is never made");
 });
 
 // The suite moved on origin/main and the main checkout was never updated: its
@@ -452,7 +557,7 @@ function movedLayout() {
 }
 // `true` ignores its arguments, so the run passes whatever the glob selects and
 // only the reader's check of the glob can tell the two trees apart.
-const GLOB_PROOF = (glob) => ["--install", "true", "--test", `printf 'Tests run: 1, Failures: 0\\n' && true ${glob}`, "--count-line", "Tests run: 1,", "--test-count", "1"];
+const GLOB_PROOF = (glob) => ["--install", "true", "--test", `sh -c "printf 'Tests run: 1, Failures: 0\\n'" sh ${glob}`, "--count-line", "Tests run: 1,", "--test-count", "1"];
 
 test("a Recipe proven at origin/main is read back against that tree, so a checkout still on the old layout does not refuse it", () => {
   const dir = movedLayout();
@@ -469,7 +574,7 @@ test("a Test entrypoint whose glob matches nothing at origin/main is not proven,
   const dir = movedLayout();
   const r = prove(dir, GLOB_PROOF("old/*.txt"));
   assert.equal(r.status, 1, r.err);
-  assert.match(r.err, /NOT PROVEN — the Recipe cache reader refuses what was proven: .*matches no file tracked in .* at /);
+  assert.match(r.err, /NOT PROVEN — derive-testcmd: .*matches no file tracked in .* at /);
   assert.equal(existsSync(cachePath(dir)), false);
 });
 
@@ -502,7 +607,7 @@ test("an ambient GIT_DIR naming another repository does not change the answer", 
 test("a proof that cannot be attempted exits 2, distinct from a Recipe that is not proven", () => {
   const usage = spawnSync(process.execPath, [SCRIPT], { encoding: "utf8", env: FIXTURE_ENV });
   assert.equal(usage.status, 2);
-  assert.match(usage.stderr, /usage: recipe-prove\.mjs <repo> --install <cmd> --check <cmd\|true> --test <cmd> --uncovered <json>/);
+  assert.match(usage.stderr, /usage: recipe-prove\.mjs <repo> --install <cmd> --check <cmd\|true> --test <cmd> --covered <json> --uncovered <json>/);
 
   const notRepo = prove(tempDir("recipe-prove-norepo-"), MAVEN_PROOF);
   assert.equal(notRepo.status, 2);
@@ -639,12 +744,12 @@ for (const c of KEPT_REFUSALS) {
 }
 
 test("a refusal that names no log leaves no log directory behind", () => {
-  // The Recipe cache reader refuses a Test entrypoint ending in `;` after the
-  // proof held, so no log in the directory is what the refusal is about.
+  // The shape check refuses a Test entrypoint ending in `;` before any log
+  // directory is made, so no log in the directory is what the refusal is about.
   const { dir } = repo(MAVEN_FILES);
   const r = prove(dir, ["--install", "true", "--test", "mvn -q test;", "--count-line", "Tests run: 1,", "--test-count", "1"]);
   assert.equal(r.status, 1, r.err);
-  assert.match(r.err, /the Recipe cache reader refuses what was proven/);
+  assert.match(r.err, /NOT PROVEN — derive-testcmd: the proposed test command/);
   assert.deepEqual(logDirs(r.tmp), []);
 });
 
@@ -671,11 +776,8 @@ test("a git that cannot be started is named as such, not reported as a missing r
 // step can take git away by deleting it: every later git call then
 // fails to start, in the proof and in the worktree cleanup alike.
 test("a git that stops starting during the Install step is no verdict, never NOT PROVEN — and the worktree is still removed", () => {
-  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
   const { dir } = repo(MAVEN_FILES);
-  const bin = tempDir("recipe-prove-path-");
-  writeExecStub(join(bin, "git"), `#!/bin/sh\nexec '${realGit}' "$@"\n`);
-  symlinkSync("/bin/sh", join(bin, "sh"));
+  const bin = readerPath();
   const install = `'${process.execPath}' -e 'require("fs").rmSync(process.argv[1])' '${join(bin, "git")}'`;
   const r = prove(dir, ["--install", install, "--test", "true", "--count-line", "x 1", "--test-count", "1"], { env: { PATH: bin } });
   assert.equal(r.status, 2, r.err);
@@ -702,7 +804,13 @@ test("a git whose output outgrows the spawn buffer is a failed command, not a gi
 const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 // The body of a `git` stub: runs `act` when the arguments match the sh `case`
 // pattern `when`, and otherwise execs the real git.
-const gitStub = (when, act) => `case "$*" in ${when}) ${act} ;; esac\nexec '${REAL_GIT}' "$@"`;
+// A call the shape check makes (its parent is `derive-testcmd.sh --propose`) is
+// left alone, so a fault meets only the read-back.
+const gitStub = (when, act) => `case "$*" in ${when}) case "$(ps -o args= -p $PPID)" in *" --propose "*) ;; *) ${act} ;; esac ;; esac\nexec '${REAL_GIT}' "$@"`;
+// A Test entrypoint that runs a chain is written as one quoted `sh -c`, the one
+// simple-command shape the Test field accepts. The body takes no `"` and no `$`
+// that the outer shell should expand.
+const oneCommand = (body) => `sh -c "${body}" sh`;
 // A `git` first on PATH with that body.
 function fakeGit(when, act) {
   const bin = tempDir("recipe-prove-path-");
@@ -863,10 +971,9 @@ test("a git killed removing the throwaway worktree still leaves it deleted", () 
 test("a git that stops starting during cleanup does not replace the proof's own NOT PROVEN", () => {
   const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
   const { dir } = repo(MAVEN_FILES);
-  const bin = tempDir("recipe-prove-path-");
+  const bin = readerPath();
   const stub = join(bin, "git");
   writeExecStub(stub, `#!/bin/sh\n'${realGit}' "$@"\nrc=$?\nif [ "$2" = remove ]; then /bin/rm -f '${stub}'; fi\nexit $rc\n`);
-  symlinkSync("/bin/sh", join(bin, "sh"));
   const r = prove(dir, ["--install", "false", "--test", "true", "--count-line", "x 1", "--test-count", "1"], { env: { PATH: bin } });
   assert.equal(r.status, 1, r.err);
   assert.match(r.err, /NOT PROVEN/);
@@ -901,7 +1008,7 @@ test("a git that stops starting before the cache is read back is no verdict, nev
   mkdirSync(join(dir, ".fleet"));
   writeFileSync(cachePath(dir), "prior bytes");
   const bin = readerPath();
-  const r = prove(dir, ["--install", "true", "--test", `rm '${join(bin, "git")}'; echo 'tests 1'`, "--count-line", "tests 1", "--test-count", "1"], { env: { PATH: bin } });
+  const r = prove(dir, ["--install", "true", "--test", oneCommand(`rm '${join(bin, "git")}'; echo 'tests 1'`), "--count-line", "tests 1", "--test-count", "1"], { env: { PATH: bin } });
   assert.equal(r.status, 2, r.err);
   assert.match(r.err, /^recipe-prove: derive-testcmd: git did not answer whether .* is a git repository \(exit 127\), so the Recipe cache was not read(?: — .*)? — the Recipe cache reader could not run a tool it needs, so its refusal is no verdict on what was proven$/m);
   assert.doesNotMatch(r.err, /NOT PROVEN/);
@@ -965,7 +1072,7 @@ for (const c of GIT_THAT_CANNOT_RUN) {
   test(`a git that starts but ${c.name} before the cache is read back is no verdict, never NOT PROVEN — and the prior cache is restored`, () => {
     const body = join(tempDir("recipe-prove-git-body-"), "git");
     writeFileSync(body, `#!/bin/sh\n${c.body}\n`);
-    const breakGit = (bin) => ["--install", "true", "--test", `cat '${body}' > '${join(bin, ".stub-git")}'; echo 'tests 1'`, "--count-line", "tests 1", "--test-count", "1"];
+    const breakGit = (bin) => ["--install", "true", "--test", oneCommand(`cat '${body}' > '${join(bin, ".stub-git")}'; echo 'tests 1'`), "--count-line", "tests 1", "--test-count", "1"];
 
     const { dir } = repo(MAVEN_FILES);
     mkdirSync(join(dir, ".fleet"));
@@ -996,7 +1103,7 @@ for (const c of GIT_THAT_CANNOT_RUN) {
 test("an sh that stops starting before the cache is read back is no verdict, never NOT PROVEN — and no cache is left", () => {
   const { dir } = repo(MAVEN_FILES);
   const bin = readerPath();
-  const r = prove(dir, ["--install", "true", "--test", `rm '${join(bin, "sh")}'; echo 'tests 1'`, "--count-line", "tests 1", "--test-count", "1"], { env: { PATH: bin } });
+  const r = prove(dir, ["--install", "true", "--test", oneCommand(`rm '${join(bin, "sh")}'; echo 'tests 1'`), "--count-line", "tests 1", "--test-count", "1"], { env: { PATH: bin } });
   assert.equal(r.status, 2, r.err);
   assert.match(r.err, /^recipe-prove: could not start sh to read the Recipe cache back: .*ENOENT/m);
   assert.doesNotMatch(r.err, /NOT PROVEN/);
@@ -1009,7 +1116,7 @@ test("an sh that stops starting before the cache is read back is no verdict, nev
 function fakeReaderSh(act) {
   const realSh = execFileSync("sh", ["-c", "command -v sh"], { encoding: "utf8" }).trim();
   const bin = tempDir("recipe-prove-path-");
-  writeExecStub(join(bin, "sh"), `#!/bin/sh\ncase "$1" in *derive-testcmd.sh) ${act} ;; esac\nexec '${realSh}' "$@"\n`);
+  writeExecStub(join(bin, "sh"), `#!/bin/sh\ncase "$1" in *derive-testcmd.sh) case "$2" in --propose) ;; *) ${act} ;; esac ;; esac\nexec '${realSh}' "$@"\n`);
   return `${bin}:${BIN}:${process.env.PATH}`;
 }
 
@@ -1106,7 +1213,7 @@ for (const c of READER_TOOLS) {
     mkdirSync(join(dir, ".fleet"));
     writeFileSync(cachePath(dir), "prior bytes");
     const bin = readerPath();
-    const r = prove(dir, args(`rm '${join(bin, c.tool)}'; echo 'tests 1'`), { env: { PATH: bin } });
+    const r = prove(dir, args(oneCommand(`rm '${join(bin, c.tool)}'; echo 'tests 1'`)), { env: { PATH: bin } });
     assert.equal(r.status, 2, r.err);
     assert.match(r.err, c.reason);
     assert.match(r.err, /the Recipe cache reader could not run a tool it needs, so its refusal is no verdict/);
@@ -1119,8 +1226,8 @@ for (const c of READER_TOOLS) {
 test("an rm that stops starting before the cache is read back leaves the proof standing — the reader's verdict never depended on it", () => {
   const { dir } = repo(MAVEN_FILES);
   const bin = readerPath();
-  // `echo` leads the command: the reader refuses a Test entrypoint whose first word does not resolve, and `rm` would not once the PATH link is gone.
-  const r = prove(dir, ["--install", "true", "--test", `echo 'tests 1'; rm '${join(bin, "rm")}'`, "--count-line", "tests 1", "--test-count", "1"], { env: { PATH: bin } });
+  // The chain runs inside one `sh -c`, so `rm` is the shell's own call. The reader's verdict never depended on it.
+  const r = prove(dir, ["--install", "true", "--test", oneCommand(`echo 'tests 1'; rm '${join(bin, "rm")}'`), "--count-line", "tests 1", "--test-count", "1"], { env: { PATH: bin } });
   assert.equal(r.status, 0, r.err);
   assert.match(r.out, /^recipe-prove: PROVEN/);
   assert.equal(existsSync(cachePath(dir)), true);
@@ -1172,18 +1279,18 @@ test("a cache that cannot be written is exit 2 with its reason, never a stack tr
 test("a command killed by a signal is refused, never counted as a red or a green run", () => {
   // The count proof: the output carries the count line, then the run dies.
   const { dir } = repo(MAVEN_FILES);
-  const t = prove(dir, ["--install", "true", "--test", "echo 'tests 3'; kill -9 $$", "--count-line", "tests 3", "--test-count", "3"]);
+  const t = prove(dir, ["--install", "true", "--test", oneCommand(`echo 'tests 3'; kill -9 \\$\\$`), "--count-line", "tests 3", "--test-count", "3"]);
   assert.equal(t.status, 1, t.err);
-  assert.match(t.err, /NOT PROVEN — 'echo 'tests 3'; kill -9 \$\$' was killed by SIGKILL/);
+  assert.match(t.err, /NOT PROVEN — .* was killed by SIGKILL/);
   assert.equal(existsSync(cachePath(dir)), false);
 
   // The mutation proof: the unmutated run is green, the mutated one dies — a
   // crash is not a test failing.
   const { dir: go } = repo(GO_FILES);
-  const dies = "if grep -q 'a - b' calc.go; then kill -9 $$; else go test ./...; fi";
+  const dies = oneCommand("if grep -q 'a - b' calc.go; then kill -9 \\$\\$; else go test ./...; fi");
   const m = prove(go, ["--install", "true", "--test", dies, ...GO_PROOF.slice(4)]);
   assert.equal(m.status, 1, m.err);
-  assert.match(m.err, /NOT PROVEN — '.*kill -9 \$\$.*' was killed by SIGKILL/);
+  assert.match(m.err, /NOT PROVEN — .* was killed by SIGKILL/);
   assert.equal(existsSync(cachePath(go)), false);
 });
 
@@ -1218,7 +1325,7 @@ test("the Install step and the Test entrypoint run against their own worktree wh
   // Each command asks git where it is: with an ambient GIT_DIR/GIT_WORK_TREE
   // reaching the `sh -c` child, the answer is the other repository.
   const here = 'test "$(git rev-parse --show-toplevel)" = "$(pwd -P)"';
-  const args = ["--install", here, "--test", `${here} && mvn -q test`, "--count-line", "Tests run: 1,", "--test-count", "1"];
+  const args = ["--install", here, "--test", `sh -c '${here} && mvn -q test' sh`, "--count-line", "Tests run: 1,", "--test-count", "1"];
   const { dir } = repo(MAVEN_FILES);
   const control = prove(dir, args);
   assert.equal(control.status, 0, `the commands pass without an ambient GIT_DIR: ${control.err}`);
@@ -1229,15 +1336,17 @@ test("the Install step and the Test entrypoint run against their own worktree wh
   assert.equal(r.status, 0, r.err);
 });
 
-test("exit 126 and 127 both mean a command did not RUN, in the Install step and in the Test entrypoint", () => {
+test("a Test entrypoint or an Install step that is found but not executable is refused before any command runs", () => {
   const { dir } = repo({ ...MAVEN_FILES, "t.sh": "echo 'Tests run: 1,'\n" });
-  // t.sh is committed 0644: `sh -c ./t.sh` exits 126, "found but not executable".
+  // t.sh is committed 0644, so the shape check refuses it as not executable before anything runs.
   const i = prove(dir, ["--install", "./t.sh", ...MAVEN_PROOF.slice(2)]);
   assert.equal(i.status, 1);
-  assert.match(i.err, /the Install step '\.\/t\.sh' did not run \(exit 126/);
+  assert.match(i.err, /the proposed install command '\.\/t\.sh' is not found or not executable from /);
+  assert.equal(existsSync(cachePath(dir)), false);
   const t = prove(dir, ["--install", "true", "--test", "./t.sh", "--count-line", "Tests run: 1,", "--test-count", "1"]);
   assert.equal(t.status, 1);
-  assert.match(t.err, /the Test entrypoint '\.\/t\.sh' did not run \(exit 126/);
+  assert.match(t.err, /the proposed test command '\.\/t\.sh' is not found or not executable from /);
+  assert.equal(existsSync(cachePath(dir)), false);
 });
 
 test("a mutation command that fails, or that leaves nothing runnable, or that breaks git itself, is refused for that reason", () => {
@@ -1251,6 +1360,7 @@ test("a mutation command that fails, or that leaves nothing runnable, or that br
   const { dir: tool } = repo({ tool: "#!/bin/sh\necho 'Tests run: 1,'\n" });
   git(tool, "update-index", "--chmod=+x", "tool");
   git(tool, "commit", "-q", "--amend", "--no-edit");
+  execFileSync("chmod", ["+x", join(tool, "tool")]);
   git(tool, "update-ref", "refs/remotes/origin/main", "HEAD");
   const gone = prove(tool, ["--install", "true", "--test", "./tool", "--mutate", "rm tool", "--mutation", "delete the runner"]);
   assert.equal(gone.status, 1);
@@ -1302,7 +1412,7 @@ const HANGS = [
     name: "a Test entrypoint",
     files: MAVEN_FILES,
     seconds: 1,
-    hung: "echo 'Tests run: 1,'; exec sleep 30",
+    hung: oneCommand("echo 'Tests run: 1,'; exec sleep 30"),
     args: (hung) => ["--install", "true", "--test", hung, "--count-line", "Tests run: 1,", "--test-count", "1"],
     log: "test.log",
     output: /Tests run: 1,/,
@@ -1321,7 +1431,7 @@ const HANGS = [
     name: "a mutated Test run",
     files: GO_FILES,
     seconds: 3,
-    hung: "if grep -q 'a - b' calc.go; then echo mutated; exec sleep 30; else go test ./...; fi",
+    hung: oneCommand("if grep -q 'a - b' calc.go; then echo mutated; exec sleep 30; else go test ./...; fi"),
     args: (hung) => ["--install", "true", "--test", hung, ...GO_PROOF.slice(4)],
     log: "test-mutated.log",
     output: /mutated/,
@@ -1358,7 +1468,7 @@ for (const c of HANGS) {
 // waits on it forever. The bound must not depend on the command's consent.
 test("a command that ignores SIGTERM is still refused at the bound, not waited on", () => {
   const { dir } = repo(MAVEN_FILES);
-  const hung = "trap '' TERM; while :; do sleep 1; done";
+  const hung = oneCommand("trap '' TERM; while :; do sleep 1; done");
   const start = Date.now();
   const r = prove(dir, ["--install", "true", "--test", hung, "--count-line", "x", "--test-count", "1"], { env: { RECIPE_PROVE_TIMEOUT: "1" } });
   const elapsed = Date.now() - start;
@@ -1373,7 +1483,7 @@ test("a command that ignores SIGTERM is still refused at the bound, not waited o
 // commands each under it, together over it, still prove.
 test("commands that each finish inside the bound still prove, whatever their total", () => {
   const { dir } = repo(MAVEN_FILES);
-  const r = prove(dir, ["--install", "sleep 3", "--test", "sleep 3; mvn -q test", ...MAVEN_PROOF.slice(4)], { env: { RECIPE_PROVE_TIMEOUT: "5" } });
+  const r = prove(dir, ["--install", "sleep 3", "--test", oneCommand("sleep 3; mvn -q test"), ...MAVEN_PROOF.slice(4)], { env: { RECIPE_PROVE_TIMEOUT: "5" } });
   assert.equal(r.status, 0, r.err);
   assert.equal(JSON.parse(readFileSync(cachePath(dir), "utf8")).testCount, 1);
 });
@@ -1450,12 +1560,13 @@ test("`--check true` proves with no Check mutation, and the cache records the st
   assert.equal(read(dir, "check").out, "true");
 });
 
-test("a Check step that does not run is refused, and the reason names it", () => {
+test("a Check step that is not found or not executable is refused before any command runs, and the reason names it", () => {
   const { dir } = repo(CHECK_FILES);
   const r = prove(dir, [...TEST_PROOF, ...CHECK_PROOF.slice(0, 1), "no-such-check-xyz", ...CHECK_PROOF.slice(2)]);
   assert.equal(r.status, 1, r.err);
-  assert.match(r.err, /the Check step 'no-such-check-xyz' did not run/);
+  assert.match(r.err, /the proposed check command 'no-such-check-xyz' is not found or not executable from /);
   assert.equal(existsSync(cachePath(dir)), false);
+  assert.match(r.err, /no command was run/);
 });
 
 test("a Check step that changes the tree is refused, since it must only read it", () => {

@@ -109,12 +109,24 @@ test("the deriver is told to quote a pattern a program resolves under its own di
 // never a refusal.
 test("the deriver is told the coverage rule, the widest-invocation fallback, and to record what it leaves out", () => {
   assert.match(DERIVER, Pin.phrase("**Test entrypoint** — every test step in the merge-gating CI jobs that can run in a fresh worktree without a running service."));
-  assert.match(DERIVER, Pin.phrase("so it is one invocation: an `&&` chain hands those arguments to its last command alone."));
+  assert.match(DERIVER, Pin.phrase("It is ONE simple command: the reader refuses an unquoted `&&`, `||`, `;`, `|`, a `&` that is not part of a redirection, or a `(`…`)` group."));
+  assert.match(DERIVER, Pin.phrase("forwards the appended arguments only through `\"$@\"`"));
   assert.match(DERIVER, Pin.phrase("When no single invocation covers every qualifying step, take the widest one and list every qualifying step it leaves out; that is never a reason to report `RECIPE NOT PROVEN`."));
   assert.match(DERIVER, Pin.phrase("A test step or a non-test step that needs a running service is always listed too, with that reason, whether or not the service is up while you derive; so is a test step that needs another OS."));
   assert.doesNotMatch(DERIVER, /on\s+this\s+host|this\s+host\s+lacks/, "the deriver's coverage is host-relative again");
-  assert.match(DERIVER, Pin.phrase("~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --uncovered '<uncovered>'"));
+  assert.match(DERIVER, Pin.phrase("~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --check '<check>' --test '<test>' --covered '<covered>' --uncovered '<uncovered>'"));
   assert.doesNotMatch(DERIVER, /the whole suite, the way CI runs it/);
+});
+
+test("the deriver is told the covered ledger, its shape, and that a covered step never goes in uncovered", () => {
+  assert.match(DERIVER, Pin.phrase("**Covered steps** — every merge-gating CI step the Test entrypoint or the Check step runs, passed as `--covered`"));
+  assert.match(DERIVER, Pin.phrase("`{\"step\": \"<the CI step>\", \"by\": \"test\" | \"check\"}`"));
+  assert.match(DERIVER, Pin.phrase("`by: \"check\"` is refused while the Check step is `true`"));
+  assert.match(DERIVER, Pin.phrase("A step is in `--covered` or in `--uncovered`, never both:"));
+  assert.match(DERIVER, Pin.phrase("A step the Test entrypoint or the Check step runs never goes in `uncovered`"));
+  assert.match(DERIVER, Pin.phrase("**The ledger** — before you propose, classify every test step and every non-test step of every merge-gating CI job"));
+  assert.match(DERIVER, Pin.phrase("Which steps qualify is your judgement: no script checks it"));
+  assert.match(DERIVER, Pin.phrase("a missing or malformed `--covered` or `--uncovered`"));
 });
 
 test("the deriver is told what a running service is, that the Test entrypoint and Check step never need one, and to refuse when no test step qualifies", () => {

@@ -452,7 +452,7 @@ test("a runnable command is accepted, however it is spelled — and a failing su
     "sh ./run-tests.sh",
     "false",
     "FOO=1 BAR=x ./run.sh --flag",
-    "cd sub && make test",
+    `sh -c 'cd sub && make test -- "$@"' sh`,
     `"./my tests.sh"`,
     "$HOME/bin/runner",
     "node --test plugin/scripts/*.test.mjs",
@@ -477,26 +477,20 @@ test("a test command whose glob matches no tracked file refuses as a stale Recip
     ["node --test plugin/scripts/*.test.mjs", "plugin/scripts/*.test.mjs"],
     ["node --test *.test.mjs", "*.test.mjs"],
     ["node --test tests/*.test.mjs gone/*.test.mjs", "gone/*.test.mjs"],
-    ["true && node --test t?sts/[!a].test.mjs", "t?sts/[!a].test.mjs"],
+    ["node --test t?sts/[!a].test.mjs", "t?sts/[!a].test.mjs"],
     ["node --test gone/*/", "gone/*/"],
-    // A shell operator glued to the pattern is still an operator, so the
-    // pattern beside it is a word of its own, probed like any other — and the
-    // piece after an operator is no option's value.
-    ["node --test nope/*.js;echo", "nope/*.js"],
-    ["(node --test gone/*.test.mjs)", "gone/*.test.mjs"],
-    ["node --test gone/*.test.mjs|cat", "gone/*.test.mjs"],
-    ["node --test -x;gone*", "gone*"],
+    // A redirection glued to the pattern is an operator too, so the pattern
+    // before it is a word of its own, probed like any other.
+    ["node --test nope/*.js>/dev/null", "nope/*.js"],
+    ["node --test gone/*.test.mjs>x", "gone/*.test.mjs"],
+    ["node --test tests/a.test.mjs>/dev/null gone*", "gone*"],
     // A quoted word between an option and the pattern is not that option's
     // value, so the pattern after it is probed like any other.
     ['node --test --grep "x" gone*', "gone*"],
-    // A glob glued to an operator is judged whether the word around it carries
-    // quoting or an expansion or not: the operator splits it, unless it sits
-    // inside the quoted region.
-    ["node --test gone/*.js&&$RUNNER", "gone/*.js"],
-    ['node --test gone/*.js;"x"', "gone/*.js"],
-    ["node --test gone/*.js||echo$X", "gone/*.js"],
-    ["node --test $X&&gone/*.js", "gone/*.js"],
-    ['node --test "x";gone/*.js', "gone/*.js"],
+    // A glob glued to a redirection is judged whether the word around it carries
+    // quoting or an expansion or not: the redirection splits it.
+    ["node --test gone/*.js>$RUNNER", "gone/*.js"],
+    ['node --test gone/*.js>"x"', "gone/*.js"],
     // The substitution ends where the shell ends it: a quoted `)` or `}` in it
     // closes nothing, so the pattern after it is a word of its own.
     ['node --test $(echo ")") gone/*.js', "gone/*.js"],
@@ -518,14 +512,15 @@ test("a test command whose glob matches no tracked file refuses as a stale Recip
 
 // The same refusal, after a word that is itself accepted: a pattern that does
 // match is no cover for the stale one beside it.
-test("a stale glob after a quoted or expansion-bearing word and an operator is refused", () => {
+test("a stale glob after a quoted or expansion-bearing word is refused", () => {
   const { dir, head } = repo({ "tests/unit/a.test.mjs": "" });
   for (const cmd of [
-    "node --test tests/unit/*.test.mjs 'x';gone/*.js",
-    "node --test tests/unit/*.test.mjs $X;gone/*.js",
-    "node --test tests/unit/*.test.mjs `x`;gone/*.js",
-    "node --test tests/unit/*.test.mjs {x};gone/*.js",
-    "node --test tests/unit/*.test.mjs ~;gone/*.js",
+    "node --test tests/unit/*.test.mjs 'x' gone/*.js",
+    "node --test tests/unit/*.test.mjs $X gone/*.js",
+    "node --test tests/unit/*.test.mjs `x` gone/*.js",
+    "node --test tests/unit/*.test.mjs {x} gone/*.js",
+    "node --test tests/unit/*.test.mjs ~ gone/*.js",
+    "node --test tests/unit/*.test.mjs 'x'>/dev/null gone/*.js",
   ]) {
     cache(dir, recipe(head, { test: cmd }));
     const r = derive(dir);
@@ -545,7 +540,7 @@ test("a test command with an unbalanced quote, backtick or substitution refuses 
     "node --test `unbalanced tests/unit/*.test.mjs",
     "node --test $(unbalanced tests/unit/*.test.mjs",
     "node --test ${unbalanced tests/unit/*.test.mjs",
-    "cd tests && node --test 'unbalanced",
+    "node --test tests/unit/a.test.mjs 'unbalanced",
   ]) {
     cache(dir, recipe(head, { test: cmd }));
     const r = derive(dir);
@@ -685,20 +680,6 @@ test("a test command whose glob matches a tracked file, or that the tree cannot 
     "node --test -x*.js",
     "node --test dist/*.test.js",
     "node --test src/*.gen.test.js",
-    "[ -d tests ] && node --test tests/unit/*.test.mjs",
-    "cd tests/unit && node --test *.test.mjs",
-    "(cd tests/unit && node --test *.test.mjs)",
-    "true;cd tests/unit && node --test *.test.mjs",
-    "true&&cd tests/unit&&node --test *.test.mjs",
-    "true|cd tests/unit && node --test *.test.mjs",
-    "true&cd tests/unit && node --test *.test.mjs",
-    "echo 'x';cd tests/unit && node --test *.test.mjs",
-    "(cd tests/unit && node --test *.test.mjs )",
-    "true;pushd tests/unit && node --test *.test.mjs",
-    // Led by `true`, not `pushd`: pushd is a bash builtin, absent from dash
-    // (Ubuntu's /bin/sh), where a command led by it cannot run at all and is
-    // refused by the leading-word probe before the scan is reached.
-    "true && pushd tests/unit && node --test *.test.mjs",
     "node --test ../shared/*.test.mjs",
     "node --test /opt/suite/*.test.mjs",
     // A redirection's target is a file the command writes or reads, not a
@@ -724,7 +705,6 @@ test("a test command whose glob matches a tracked file, or that the tree cannot 
     // `cd` inside a quoted region is no `cd` piece of the command, and the
     // glob after it in the same region is not probed from <repo> either.
     "sh -c 'cd tests/unit && node --test *.test.mjs | cat'",
-    "sh -c 'cd tests/unit && node --test *.test.mjs | cat'; node --test tests/unit/*.test.mjs",
   ]) {
     cache(dir, recipe(head, { test: cmd }));
     const r = derive(dir);
@@ -1401,4 +1381,106 @@ test("the framed read hands on the exact value, an embedded newline included (#2
   const t = derive(dir, "test");
   assert.equal(t.status, 0, t.err);
   assert.equal(t.out, "sh ./run-tests.sh\n: second line");
+});
+
+// The chain rule (#3491). A Test entrypoint is ONE simple command: a runner
+// appends its arguments after the whole string, so an unquoted join or group
+// hands them to the last command alone, and the earlier commands run without.
+const CHAIN_TEST_COMMANDS = [
+  "npx vitest run --config vitest.hooks.config.ts && npx vitest run --config vitest.ci.config.ts",
+  "true && true",
+  "true &&true",
+  "true || true",
+  "true; true",
+  "true;true",
+  "true | cat",
+  "true & true",
+  "(true)",
+  "cd web && npm test",
+];
+for (const cmd of CHAIN_TEST_COMMANDS) {
+  test(`a test command with an unquoted join or group refuses, naming the appended-argument hazard: ${cmd}`, () => {
+    const { dir, head } = repo();
+    cache(dir, recipe(head, { test: cmd }));
+    const r = derive(dir, "test");
+    assert.equal(r.status, 1, r.err);
+    assert.equal(r.out, "", "nothing reaches the caller");
+    assert.match(r.err, /its test command .* has an unquoted /);
+    assert.match(r.err, /appended/);
+    assert.match(r.err, NAMES_STEP);
+  });
+}
+
+// The must-ACCEPT half of the chain rule: operators that the shell does not
+// read as joins or groups — quoted, inside `$(…)`, or in a redirection.
+const ACCEPTED_TEST_COMMANDS = [
+  `sh -c 'cd web && printf "%s\\n" "$@"' sh`,
+  `sh -c 'echo a && echo b' 2>&1`,
+  `echo 'a && b' "c;d" 'e|f' '(g)'`,
+  `echo $(true && true)`,
+  `true >&2`,
+  `true <&0`,
+  `true 2>&1 >/dev/null`,
+];
+for (const cmd of ACCEPTED_TEST_COMMANDS) {
+  test(`a test command that carries operators only quoted, in $(), or in a redirection is accepted: ${cmd}`, () => {
+    const { dir, head } = repo({ "web/x": "" });
+    cache(dir, recipe(head, { test: cmd }));
+    const r = derive(dir, "test");
+    assert.equal(r.status, 0, r.err);
+    assert.equal(r.out, cmd);
+  });
+}
+
+// The run-1 shape's fix: the directory option or the forwarding wrapper keeps
+// the runner's appended arguments on the one command that takes them.
+test("sh -c 'cd web && … \"$@\"' sh forwards a runner-appended argument to the inner command (#3491)", () => {
+  const { dir, head } = repo({ "web/x": "" });
+  const value = `sh -c 'cd web && printf "%s\\n" "$@"' sh`;
+  cache(dir, recipe(head, { test: value }));
+  const t = derive(dir, "test");
+  assert.equal(t.status, 0, t.err);
+  // claim-ticket.sh's exec shape: the reader's string, then the runner's "$@".
+  const r = spawnSync("sh", ["-c", `${t.out} "$@"`, "agent-test", "ARG"], { encoding: "utf8", cwd: dir });
+  assert.equal(r.stdout, "ARG\n", "the appended argument reaches the inner runner");
+});
+
+test("install and check keep their chains: the join rule is for the Test entrypoint alone (#3491)", () => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head, { install: "true && true", check: "true && true", checkMutation: "echo broken >> ci.txt" }));
+  const i = derive(dir, "install");
+  assert.equal(i.status, 0, i.err);
+  assert.equal(i.out, "true && true");
+  const c = derive(dir, "check");
+  assert.equal(c.status, 0, c.err);
+  assert.equal(c.out, "true && true");
+});
+
+// --propose checks a command the caller has not yet recorded: no cache is read,
+// and a refusal is a verdict on the proposal, never on a cache.
+test("--propose refuses a chained test command as a proposal, reading no cache (#3491)", () => {
+  const { dir } = repo({ "run-tests.sh": "" });
+  const r = run(["--propose", dir, "test", "true && true"]);
+  assert.equal(r.status, 1, r.err);
+  assert.equal(r.out, "");
+  assert.match(r.err, /^derive-testcmd: the proposed test command 'true && true' has an unquoted /);
+  assert.match(r.err, /no command was run/);
+  assert.doesNotMatch(r.err, /cache/);
+});
+
+test("--propose accepts a single command and prints it verbatim, with --at honored (#3491)", () => {
+  const { dir, head } = repo({ "run-tests.sh": "" });
+  const ok = run(["--propose", dir, "test", "sh ./run-tests.sh"]);
+  assert.equal(ok.status, 0, ok.err);
+  assert.equal(ok.out, "sh ./run-tests.sh");
+  const at = run(["--propose", dir, "test", "sh ./run-tests.sh", "--at", head]);
+  assert.equal(at.status, 0, at.err);
+  assert.equal(at.out, "sh ./run-tests.sh");
+});
+
+test("--propose names only install, check or test, never uncovered (#3491)", () => {
+  const { dir } = repo();
+  const r = run(["--propose", dir, "uncovered", "true"]);
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /--propose takes an install, check or test command, not 'uncovered'/);
 });
