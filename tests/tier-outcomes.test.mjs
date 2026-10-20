@@ -39,8 +39,9 @@ function ledgerText(rows = [], dispatched = []) {
 }
 
 // `clock` pins the child's `new Date()` to that instant and `tz` its TZ, so a
-// date `append` stamps is independent of the host's clock and zone.
-function fixture(t, { members = [], tierRows = [], ledger = null, closes = [10], clock = null, tz = null } = {}) {
+// date `append` stamps is independent of the host's clock and zone. `env` is
+// laid over the child's environment.
+function fixture(t, { members = [], tierRows = [], ledger = null, closes = [10], clock = null, tz = null, env = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "tier-outcomes-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const bin = join(dir, "bin");
@@ -51,6 +52,7 @@ function fixture(t, { members = [], tierRows = [], ledger = null, closes = [10],
     members: join(dir, "member-outcomes.tsv"),
     ledger: join(dir, "ledger.md"),
     ghLog: join(dir, "gh.log"),
+    bin,
     scratch: join(dir, "scratch"),
   };
   writeFileSync(f.tier, HEADER + tierRows.map((r) => `${r}\n`).join(""));
@@ -73,6 +75,7 @@ globalThis.Date = class extends Real {
       encoding: "utf8",
       env: {
         ...process.env,
+        ...env,
         ...(tz ? { TZ: tz } : {}),
         PATH: `${bin}:${process.env.PATH}`,
         GH_LOG: f.ghLog,
@@ -616,6 +619,77 @@ test("check --live: warns on each reviewed PR with no row, and the warning alone
   assert.equal(r.code, 0, r.stderr);
   const warned = [...r.stderr.matchAll(/WARNING PR #(\d+) carries reviewed=/g)].map((m) => Number(m[1]));
   assert.deepEqual(warned, [23, 30], "a reviewed PR with a row, or an unreviewed one, was warned about");
+});
+
+// A PR that closes no issue can never get a row (append keys on exactly one
+// ticket), so the close-out must not be asked for one.
+test("check --live: a reviewed PR that closes no issue is noted, never warned about", (t) => {
+  const f = fixture(t, {
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+    tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" })],
+    closes: [],
+    ledger: { rows: ["#13 impl-13=PR#23 · reviewed=abcdef2:1/0/0:run-abcdef2r"], dispatched: ["impl-13=PR#23"] },
+  });
+  const r = f.run("check", "--live");
+  assert.equal(r.code, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /WARNING PR #23/);
+  assert.match(r.stderr, /note PR #23 carries reviewed= on the ledger and closes no issue/);
+  assert.deepEqual(f.ghCalls(), ["pr view 23 --json closingIssuesReferences"]);
+});
+
+// The skip is only for a read that answered "no issue": a read that failed says
+// nothing, so the PR keeps its warning, after a line naming why the read failed.
+test("check --live: a PR whose closing references cannot be read keeps its warning, and says why", (t) => {
+  const f = fixture(t, {
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+    tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" })],
+    ledger: { rows: ["#13 impl-13=PR#23 · reviewed=abcdef2:1/0/0:run-abcdef2r"], dispatched: ["impl-13=PR#23"] },
+  });
+  writeExecStub(join(f.bin, "gh"), "#!/bin/sh\necho 'HTTP 401: Bad credentials' >&2\nexit 1\n");
+  const r = f.run("check", "--live");
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stderr, /WARNING PR #23 carries reviewed=/);
+  assert.match(r.stderr, /could not read the closing references of PR #23: gh pr view 23 failed: HTTP 401: Bad credentials/);
+  assert.doesNotMatch(r.stderr, /note PR #23/);
+});
+
+// An answer that is not an array is no "closes no issue" either, whatever its
+// length reads as.
+test("check --live: a closingIssuesReferences that is not an array keeps the warning", (t) => {
+  const f = fixture(t, {
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+    tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" })],
+    ledger: { rows: ["#13 impl-13=PR#23 · reviewed=abcdef2:1/0/0:run-abcdef2r"], dispatched: ["impl-13=PR#23"] },
+  });
+  writeExecStub(join(f.bin, "gh"), "#!/bin/sh\nprintf '%s\\n' '{\"closingIssuesReferences\":\"\"}'\n");
+  const r = f.run("check", "--live");
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stderr, /WARNING PR #23 carries reviewed=/);
+  assert.match(r.stderr, /could not read the closing references of PR #23: gh pr view 23 returned no closingIssuesReferences array/);
+  assert.doesNotMatch(r.stderr, /note PR #23/);
+});
+
+// An ambient GH_REPO naming another repository must not decide which PR either
+// read of closing references asks about: `gh` sees it blanked.
+test("append and check --live read closing references with an ambient GH_REPO blanked", (t) => {
+  const logRepo = "#!/bin/sh\nprintf '%s GH_REPO=[%s]\\n' \"$*\" \"${GH_REPO-unset}\" >> \"$GH_LOG\"\nprintf '%s\\n' \"$GH_JSON\"\n";
+  const live = fixture(t, {
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+    tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" })],
+    closes: [],
+    ledger: { rows: ["#13 impl-13=PR#23 · reviewed=abcdef2:1/0/0:run-abcdef2r"], dispatched: ["impl-13=PR#23"] },
+    env: { GH_REPO: "someone/else" },
+  });
+  writeExecStub(join(live.bin, "gh"), logRepo);
+  const r = live.run("check", "--live");
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(live.ghCalls(), ["pr view 23 --json closingIssuesReferences GH_REPO=[]"]);
+
+  const appended = fixture(t, { members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }], env: { GH_REPO: "someone/else" } });
+  writeExecStub(join(appended.bin, "gh"), logRepo);
+  const a = appended.append();
+  assert.equal(a.code, 0, a.stderr);
+  assert.deepEqual(appended.ghCalls(), ["pr view 20 --json closingIssuesReferences GH_REPO=[]"]);
 });
 
 test("check --live: a run ledger that does not exist is refused, not read as empty", (t) => {
