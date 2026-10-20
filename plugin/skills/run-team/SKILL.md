@@ -59,8 +59,8 @@ phase, or in any later one, asks the maintainer which tickets to take.
    one stopped; before it, a re-run runs every step again.
 
    The `tier-roles` step runs `~/.fleet/bin/fleet-run tier-roles.mjs --check
-   --in-flight <B>`, `<B>` being the `--in-flight` given, else the default
-   **Defaults** (**Queue depth**) states. What it checks is in the header of `scripts/tier-roles.mjs`, under
+   --in-flight <B>`, `<B>` being the `--in-flight` given, else the default.
+   **Default: In-flight bound 5, fixed for the run.** See references/pull.md. What it checks is in the header of `scripts/tier-roles.mjs`, under
    the tier routes. A line it prints on a pass about omp's `task.maxConcurrency`
    is a notice in the step's output and never holds: read it, report it, and
    go on — the fleet never writes that setting.
@@ -151,8 +151,7 @@ phase, or in any later one, asks the maintainer which tickets to take.
    `REFRESHED shortlist: <n> entries; <k> lifted`. A head whose Pull ended
    this run is not counted, unless on a lifted exclusion. Phase 0 runs it by hand
    once because a dead run's shortlist is stale by definition.
-   None of those triggers runs while `HOLD (in-flight <n>/<B>)` stands
-   (**Queue depth**).
+   None of those triggers runs while `HOLD (in-flight <n>/<B>)` stands.
 
 **No multi-select, no maintainer tick.** Selection and ordering are batched —
 one scan, oldest first; admission never is. The invariant this replaces — one
@@ -386,6 +385,29 @@ treat as a live scratch write until you have checked it.
 
 **A refutation resting on an injection nothing proved landed is not a refutation — it is a cell that never ran.** See references/reviewers.md.
 
+**Guard: accumulate per PR, never conclude inside one run.** **Append one row to
+`docs/metrics/tier-outcomes.tsv` when you rule each PR's review, with
+`~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note "<text>"`,
+never by hand** (that file's header carries the column meanings). The script
+fills `run_date`, `pr`, `ticket` and `tier` itself — `tier` from what actually
+ran, off the implementer's `tier-ok=` ledger verdict or else its one
+member-outcomes row (a `tier-unverifiable=` member has no ledger verdict, so
+its one member-outcomes row decides), and BLANK with a WARNING naming why
+when neither settles
+it; never type a tier in over that. That append is the whole duty.
+
+The row's last four fields are the ticket's difficulty, and they are what lets a
+tier comparison condition on the thing that swamps it. `sizing` is the
+**member's** own `light`/`heavy` verdict from its dispatched `sizing-a-ticket`
+run, which `append` reads itself off the member's report file
+(`<scratch>/reports/impl-<ticket>[-x].json`, its `sizing.verdict`, the highest
+retry letter's when there are several), so you pass no `--sizing`; the member
+also puts it in the PR body's `Sizing:` line, with the signal it turned on;
+`profile`, `loc` and `files` all come from `diff-stats.mjs` over the merged
+diff.
+
+**A verdict is a measurement only if it post-dates the run that produced it.** See references/reviewers.md.
+
 ### Nothing to do: arm the beat
 
 - **Nothing to do right now** → **do not end your turn.** Arm the heartbeat
@@ -463,6 +485,18 @@ Act on each line the tick prints as its row reads here, then stop: the next wake
 ~/.fleet/bin/fleet-run fleet-tick.mjs --apply [--in-flight <n>]
 ```
 
+Read the depth off the tick and never derive it by hand: act on the row it prints, and when it prints `SUGGEST /triage, hold idle`, hold the implementer row idle and suggest `/triage` in the report. See references/tick-rows.md.
+
+**The review backlog never gates, and the merge-queue depth is still no
+signal.** The only gate on a Pull is the In-flight count. A deep backlog is a
+`DISPATCH review` on the same tick, never a reason to idle an implementer.
+A starved implementer queue never stalls the review or merge side.
+For the merge queue, see references/pull.md.
+
+**Reconcile, do not wait for an event.** With the shortlist empty the tick's rows
+govern — refresh, and never Pull a ticket the shortlist does not hold.
+See references/pull.md.
+
 It reads the run itself, and nobody states a count. The In-flight count —
 every open PR that closes an issue off `gh`, plus every claimed ticket whose
 newest implementer is live or owed a replacement and has no such PR yet, off
@@ -482,12 +516,11 @@ row with `ledger.mjs row` and tick again. The In-flight bound defaults to 5
 and is fixed for the run: pass `--in-flight` on every tick when `$ARGUMENTS`
 set it, and never otherwise.
 
-It prints `actual/target` and a named ACTION per role, with the whole **Queue
-depth** guard table applied in code. Act on each line as it reads:
+It prints `actual/target` and a named ACTION per role. Act on each line as it reads:
 
 - `PULL #<N> …` — one Pull per named ticket, in the order printed: `pull.mjs next --head <N>`, or the `pull.mjs answer` the row names (phase 1), then the dispatch under **Dispatching the Pull's member**.
 - `REFRESHED shortlist: <n> entries; <k> lifted` — the tick refreshed the shortlist itself, and its `PULL` row already reads the result; `REFRESH FAILED` is yours, since `shortlist.mjs` could not run.
-- `SUGGEST /triage, hold idle` — nothing is admissible after the refresh: suggest `/triage` in the report, never run it.
+- `SUGGEST /triage, hold idle` — nothing is admissible after the refresh: suggest `/triage` in the report, never run it. The suggestion is a report, not a blocking prompt.
 - `specs-dropped=#<N> …` — never actionable: log those tickets as specs awaiting to-tickets, not as no work.
 - `DISPATCH fix-pr PR#<M> …` — a fix-applier for that PR (review findings, a dispositions mismatch no retry has answered, or a conflict hold): render its brief with `dispatch-prompt.mjs render fix-applier --kind <kind>`, `ledger.mjs dispatch <M> fix-pr-<M>` (the next suffix when that name is already on record), then the `task` call.
 - `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn: record `review=member:review-pr-<M>` with `ledger.mjs review <M> …`, then dispatch `review-pr-<M>`.
@@ -1019,6 +1052,16 @@ report recovery, never the exit code alone.
 
 Each rule here is a judgement a driver stops for: answer it by the cause it names, then run the tick, and report to the maintainer what the evidence cannot settle.
 
+### A member's claims
+
+**Cross-check what members report about their environment.**
+
+**Distrust negative claims hardest.** Make members state their search scope. Negative claim
+vs specific finding with paths → paths win. See references/reviewers.md.
+
+Suspect a neighbour before a member's own diff — for unexplained failures, and
+equally for any **finding** that came from reading source.
+
 ### Relabel causes
 
 - **Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>`
@@ -1244,223 +1287,19 @@ this section's dispatch recipe — the cwd recipe above, the isolated-workspace
 measurement, or the teardown scoping — moves
 where the controller itself runs from.
 
-## Queue depth
-
-Read the depth off the tick and never derive it by hand: act on the row it prints, and when it prints `SUGGEST /triage, hold idle`, hold the implementer row idle and suggest `/triage` in the report.
-
-- **shortlist** — `.fleet/shortlist.json`'s entries with no `impl-` row and no
-  live `excluded` row: admissible, not yet pulled. The tick's `unclaimed=`.
-  Not after a refresh at unclaimed < B (below). A head whose Pull ended this
-  run is not counted, unless on a lifted exclusion.
-- **supply** — `scanned`, the open `ready-for-agent` tickets `shortlist.mjs`'s
-  candidate scan returned, before any filter. Only a Pull's full read judges
-  decided?, so a shortlist of undecided tickets is supply that every Pull
-  relabels away — and relabelling is what stops it being counted next scan.
-- **review backlog** — PRs owed a review. `fleet-tick.mjs` counts every
-  open PR without `ready-to-merge` **that closes an issue** and carries no `review=`
-  token on the ledger — one settled `=failed` is owed a review again, and so is
-  one whose latest finisher halted `past-pin` past its latest `reviewed=` head
-  (**Resolving a finisher halt**) — and it
-  prints them as `review-due=`. Exact, not a wider read: the ledger records
-  which PRs are under review or reviewed, so nothing about it is guesswork. The
-  closing-issue test is what keeps it from widening: a PR that closes no issue
-  — one you author yourself, for instance — is left unlabelled for the
-  maintainer, so no member of the fleet will ever review it, and counting it
-  floors the backlog at a depth nothing in the run can drain — the reviewer
-  row would then report a review owed for the rest of the run.
-  GitHub's own linked-issue set decides that, not a keyword regex over the body.
-  **That exemption is for a PR THIS run authors, never one a PRIOR run left
-  open** — step 0 folds those into this run's review queue, so count one when
-  you reason about backlog BY HAND. **The `fleet-tick.mjs` number still
-  excludes it**: nothing in its filter distinguishes an inherited PR from this
-  run's own, since a PR closing no issue fails the closing-issue test either
-  way — folding one in cannot reach the count. So the by-hand judgement and
-  the script's output differ here, and such a PR's review is dispatched by
-  hand.
-- **In flight** — a ticket between its Claim and its PR's merge: an implementer
-  live or owed a replacement on it, or an open PR closing it. A PR closing
-  nothing is never in flight, and a ticket whose newest implementer settled
-  `blocked` is not either. The tick's `n`; the implementer row's counts read it
-  as `implementers=<i> prs=<p>`, n being i + p.
-- **In-flight bound** — the most tickets a run lets be In flight at once, fixed
-  for the run, set by `/run-team`'s one argument. Reaching it holds every Pull
-  until a merge brings the count below it; reviewers, finishers and the merge
-  bot never slow for it. The tick's `B`.
-
-**Default: In-flight bound 5, fixed for the run.** See references/pull.md.
-
-**The review backlog never gates, and the merge-queue depth is still no
-signal.** The only gate on a Pull is the In-flight count. A deep backlog is a
-`DISPATCH review` on the same tick, never a reason to idle an implementer.
-For the merge queue, see references/pull.md.
-
-**Reconcile, do not wait for an event.** With the shortlist empty the table
-below governs — refresh, and never Pull a ticket the shortlist does not hold.
-See references/pull.md.
-
-**Do not re-derive this by hand — `fleet-tick.mjs` computes it.** One invocation
-prints per-role `actual/target` and an explicit ACTION with the backlog gate
-above and every row of the table below already applied; every wake
-ends in it. The deficit is then *computed, not remembered*, which is
-the whole point: a table you must remember to consult is one you will not
-consult under a merge-side event storm, and that is how implementers reached
-0/target with ~57 `ready-for-agent` in supply while nobody
-noticed (#3). What follows stays here as the explanation of what the script decides —
-never as a second, hand-run copy of it. The table's shortlist counts no head
-whose Pull ended this run, unless on a lifted exclusion. A refresh at unclaimed < B leaves `unclaimed=` at
-that count, so `SUGGEST /triage` can print it above 0.
-
-| shortlist (unclaimed) | implementer row prints |
-|---|---|
-| ≥ 1 | `PULL #N …`, one head per free slot — a Pull each (phase 1) |
-| below the In-flight bound, missing or empty | the tick refreshes first — `REFRESHED shortlist: n entries; k lifted` — and Pulls from what it found |
-| 0 after that refresh | `SUGGEST /triage, hold idle` |
-
-### Specs, the refresh bound and the holds
-
-Whatever the row prints, a `specs-dropped=#<N> (…)` at the end of its counts
-names the tickets the to-spec filter kept out of the shortlist — specs
-awaiting to-tickets, so an empty shortlist carrying one is not "no work".
-
-The refresh runs at unclaimed < B and, with every other refresh trigger, never
-while the bound holds: a refresh then cannot feed a Pull, and the first tick
-back under the bound refreshes and Pulls in the same tick. Unclaimed there
-counts no head whose Pull ended this run, unless on a lifted exclusion.
-
-Four holds outrank every row: `HOLD (draining)` once `ledger.mjs drain` has
-recorded the drain, `HOLD (tier mismatch impl-<N>)` until a replacement is
-dispatched at the right tier, `HOLD (tier unchecked impl-<N>)` until
-`tier-check.mjs` has written its verdict on the newest implementer —
-`tier-ok=`, `tier-mismatch=` or `tier-unverifiable=` — and
-`HOLD (in-flight <n>/<B>)` when n tickets are between Claim and merge and
-n ≥ B — refreshing to enable a Pull you are holding buys nothing.
-
-`HOLD (in-flight <n>/<B>)` ranks last of the four: the other three print in
-its place. Its detail is the implementer row's counts, `implementers=<i>
-prs=<p> unclaimed=<k> supply=<s>`. It is quiet — a merge brings n below B and
-the next tick Pulls — except for a ticket whose newest implementer settled
-`killed` or `tier-mismatch`: it counts as In flight with no PR that could
-merge, so the row asks for the replacement's dispatch and names it in the
-detail. The reviewer row reads `<units>/<B>`, its live review units against
-the same bound, and never holds on it.
-
-A main checkout that is not `clean` against its Phase 0 baseline outranks all
-of them, and every dispatching row besides: `HOLD (main checkout dirty)`,
-`HOLD (main checkout unknown)` or `HOLD (main checkout no baseline)` on the
-implementer, reviewer and merge-bot rows alike, beside the `MAIN-CHECKOUT-*`
-line that says why.
-
-`/triage` is user-invoked only — suggest, never run. The suggestion is a report,
-not a blocking prompt. Counts come from cheap `gh issue list --search`, no bodies.
-A starved implementer queue never stalls the review or merge side.
-
-## Tier outcomes guard
-
-This guard is done when you have run `tier-outcomes.mjs append` once for each PR whose review you rule; never conclude a tier result inside one run.
-
-**Guard: accumulate per PR, never conclude inside one run.** The unit is the PR —
-supply is one Pull per free slot, so there are no implementer batches. **Append one row to
-`docs/metrics/tier-outcomes.tsv` when you rule each PR's review, with
-`~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note "<text>"`,
-never by hand** (that file's header carries the column meanings). The script
-fills `run_date`, `pr`, `ticket` and `tier` itself — `tier` from what actually
-ran, off the implementer's `tier-ok=` ledger verdict or else its one
-member-outcomes row (a `tier-unverifiable=` member has no ledger verdict, so
-its one member-outcomes row decides), and BLANK with a WARNING naming why
-when neither settles
-it; never type a tier in over that. A PR that already has a row is left
-untouched, so re-running it is safe. That append is the whole duty.
-
-The row's last four fields are the ticket's difficulty, and they are what lets a
-tier comparison condition on the thing that swamps it. `sizing` is the
-**member's** own `light`/`heavy` verdict from its dispatched `sizing-a-ticket`
-run, which `append` reads itself off the member's report file
-(`<scratch>/reports/impl-<ticket>[-x].json`, its `sizing.verdict`, the highest
-retry letter's when there are several), so you pass no `--sizing`; the member
-also puts it in the PR body's `Sizing:` line, with the signal it turned on;
-`profile`, `loc` and `files` all come from `diff-stats.mjs` over the merged
-diff. **Phase 0 does not size anything** — it shortlists, a Pull claims, and
-the sizing run happens inside the member after both, which is why the verdict
-has to travel in the member's report rather than being something you already hold.
-
-**A verdict is a measurement only if it post-dates the run that produced it.** See references/reviewers.md.
-
-The member-facts scrape, the drain of the pending ticket-features rows and the
-commit of the metrics files are steps of `closeout.mjs finish`, which **End of
-run** (**What a wake owes beyond its call**) drives. See references/close-out.md.
-
-**Why not decide inside one run.** A run holds 2-3 implementer PRs, and ticket
-difficulty swamps the tier effect — a gojq parity harness and a two-statement
-shell reorder are not comparable units. Finding-counts are not comparable either:
-`selectDimensions` trims the fan-out by diff profile, so one PR fields 29 agents
-over six dimensions and its sibling fields 8 over three. And the fleet is not
-stationary — this prompt gets edited mid-run when a defect earns it. Hence a
-binary outcome per PR, accumulating, rather than a per-run verdict.
-
-**Why the rows this guard fired on could not answer the tier question, and this
-is the load-bearing part.** Until the 2026-08-16 revert, `class` and `tier` were
-perfectly confounded: routine always ran `sonnet`, correction always ran top
-tier. So the comparison the file invites — routine-at-sonnet against
-correction-at-top-tier — measures **class, not tier**, because those classes fail
-in different ways by construction: corrections ship false claims in prose,
-routines ship incomplete or regressing code. A run that "mixes both" does not fix
-it. **Only a same-class comparison across tiers is informative**, and the old
-rule could not produce one, since no routine ticket ever ran at top tier.
-
-**That last sentence is no longer true, and this is the part to re-read.** Since
-the revert every routine ticket runs at top tier, so the file now holds 55
-`routine`/`opus` rows against 11 `routine`/`sonnet` (as of 2026-08-28, 103 rows
-— recount before citing). The same-class comparison the paragraph above calls
-the only informative one therefore EXISTS now. It is still not clean: the two
-groups are split almost entirely by calendar date, so it measures prompt
-evolution at least as much as tier. The counter-evidence paragraph earlier in
-this section carries the split and the three rows that cut against it. Recount
-both, and every other figure in this section, with:
-
-```bash
-grep -vc '^#' docs/metrics/tier-outcomes.tsv
-awk -F'\t' '!/^#/ && $4=="routine" {n++; d[$1]=1; if($6=="no") no++} \
-  END{print n, length(d), no+0}' docs/metrics/tier-outcomes.tsv
-awk -F'\t' '!/^#/ && $4=="routine" {t[$5]++; if($6=="no") f[$5]++} \
-  END{for(k in t) print k, t[k], f[k]+0}' docs/metrics/tier-outcomes.tsv
-```
-
-**These rows are the historical corpus, and nothing appended to them fixes the
-confound.** What fixes it is the exploration draw in the dispatch rule above:
-one implementer in every five — every one, during burn-in — runs at a drawn
-cell beside the policy cell's, against the same prompts on the same day, so
-the comparison stops depending on which tier history happened to leave in
-which week. Read each cell's comparisons, not the whole-file split, once there
-are enough of them.
-
-**So read what the guard actually established: routine tickets sometimes fail to
-close their own ticket. Not that `sonnet` caused it.** The revert is the
-pre-committed rule being honoured, not a measurement. Restoring a cheap tier is
-still the maintainer's call and still a change to the dispatch rule — but the
-deliberate control it used to require is no longer something anyone has to
-authorize one ticket at a time: the exploration draw above produces one in
-every five Pulls by construction. **Do not read a cell early.** A cell's
-comparison is one session holding an admissible row at that cell — its tier
-check passed and its resolved effort is the cell's level — and one at
-`slow-high` whose resolved model and effort differ. Count them per cell, never
-pooled across cells, and stop until
-there are at least ten of them across five or more distinct `run_date`s; below
-that, a comparison count is a number, not evidence, and the last guard fired
-with n=1 on the control side. **Report the count the per-cell readout prints,
-never one from any other query:** `~/.fleet/bin/fleet-run cell-readout.mjs`
-prints `<cell> <comparisons> <run_dates> <resolved models>` for each cell past
-that floor and a cell below it only as a count on stderr; a `mixed (…)` models
-column means the cell's history spans more than one model behind its role.
-The pre-cell pair query counted pairs that are no cell's comparisons, and the
-query before that one counted every session whose implementers merely
-differed, so it cleared this floor by an order of magnitude while the
-controlled comparison did not exist yet.
-
 ## Why the implementer body carries what it does
 
 Read this before you edit any `fleet-implementer-<cell>` file, and stop editing when every cell's body is byte-identical again.
 
 Why the agent body carries what it does — read this before editing any `fleet-implementer-<cell>` file, and keep every cell's body byte-identical. See references/pull.md.
+
+- **Every implementer body carries the claim discipline, because tickets that restate facts ship new wrong claims** — inherited from the ticket, and minted in prose nobody asked for. See references/correction-tickets.md.
+- **The settling command for "which files read X" must never be a literal-path
+  grep.** Replace the file with `MUTATED` in a throwaway copy, run the suite, and read off
+  which suites red: that answers which ones **depend on its contents**, which is
+  the question a coverage claim actually needs, and it returns a different set
+  from any spelling of the grep. See references/correction-tickets.md.
+- **A settling command over literal text uses `grep -F`, and its zero counts only after the same command finds a line known to match.** See references/correction-tickets.md.
 
 **Prose-first** and **wrongly-REFUSE** are not padding — they are the case
 which shipped with **enumerate-and-declare** already in its prompt. It missed a
@@ -1552,6 +1391,62 @@ Match the failure to its row in the table below and run that response; where the
 
 A red PR never silently becomes `ready-to-merge`.
 
+**Verify every reported SHA.** `~/.fleet/bin/fleet-run verify-sha.sh
+<branch> <sha>` before enqueueing — a member can commit in a nested worktree,
+leaving the SHA on a stray branch while its report reads normally. Exit codes as
+`inflight.sh`: `# 0 reachable, 1 not reachable, 2 unanswerable`. Not reachable
+(exit 1) → flag, do not enqueue, do not return the ticket to the shortlist until the
+maintainer rules. **Exit 2 is not a verdict** — the question could not be
+answered, and every cause of it reaches you as one shape: no JSON on stdout at
+all, the cause on stderr alone. Read that stderr, fix what it names and re-run;
+escalate if it repeats. Never read exit 2 as `not reachable`, and never record it
+as a stray commit — the flag and the maintainer's ruling above are what exit 1
+earns, and spending them on a probe that never answered costs a member its
+ticket over a failure a re-run would have cleared.
+
+**Never `--delete-branch` — the merge bot deletes the head branch itself.**
+`gh pr merge <n> --merge` alone: the flag's local cleanup errors on a `main`
+held by another worktree, or strands the feature worktree on `main`.
+
+**Never force a rebase to start.** No `git clean`, `git checkout .`,
+`git reset --hard`, `git stash`. Uncommitted changes may exist nowhere else.
+Non-empty `git status --porcelain -unormal` → stop and report — the explicit
+mode, never bare `--porcelain`, or `status.showUntrackedFiles = no` reads an
+empty answer here and licenses the rebase over work this check exists to
+protect. Stashing empties it either way, so that check and
+`no-undo-audit.sh` both go quiet on work nothing else holds.
+
+**Members share one filesystem, one docker stack and one process table**, and the
+failures arrive as *wrong findings*, not errors:
+
+- **A pattern kill reaches siblings — the implementer, fix-applier and finisher briefs forbid it.** See references/isolation.md.
+
+  **What the victim's output looks like depends on the signal — and one of the cases is a clean green.** See references/isolation.md.
+
+  So **a complete summary block proves the runner survived, not that the run was
+  uncontaminated.** Scrutinize reds, short counts *and* greens from inside the
+  incident window; a killed **baseline** compared against a clean mutant is a
+  wrong measurement that reads exactly like a real result.
+
+  **The command line is no partition either — not reliably.** See references/isolation.md.
+
+  Members report a stalled run to the controller instead of pattern-killing it,
+  and the controller re-checks any measurement taken in the window.
+
+  **Do not guess the victim — the blast radius is the machine, not the Pull.**
+  Warn every live
+  member, record the incident as unattributed, and re-check measurements by
+  timestamp rather than by who you think was running.
+
+- **A warning acted on silently is indistinguishable from one that never
+  arrived.** See references/isolation.md.
+- **Specialist tree isolation is `review-and-fix.md`'s job — do not restate it.** See references/isolation.md.
+- **Filesystem isolation is not stack isolation.** See references/isolation.md.
+- **Scratchpad paths need two levels — the member's own partition, then one
+  directory per child it dispatches — and nothing outside them.** See references/isolation.md.
+- **Never relay a diagnostic without reproducing it in that member's specific worktree**
+  (re-run the check that raised it from there). See references/isolation.md.
+
 **A frozen transcript does not establish that a member is dead — the discriminator is its scratch dir.** See references/failure-handling.md.
 
 Settle outcome and liveness are different facts, not the same table with two
@@ -1577,133 +1472,6 @@ yet — `review-pr-<pr#>-b` after a first runner — recorded as
 review-due. A
 runner member that is killed rather than failed follows **Failure
 handling** (fresh name, inherited state stated).
-
-## Guards
-
-Each guard here is a check to run before the step it guards: run it, and where it fails, stop and report rather than go on.
-
-**Verify every reported SHA.** `~/.fleet/bin/fleet-run verify-sha.sh
-<branch> <sha>` before enqueueing — a member can commit in a nested worktree,
-leaving the SHA on a stray branch while its report reads normally. Exit codes as
-`inflight.sh`: `# 0 reachable, 1 not reachable, 2 unanswerable`. Not reachable
-(exit 1) → flag, do not enqueue, do not return the ticket to the shortlist until the
-maintainer rules. **Exit 2 is not a verdict** — the question could not be
-answered, and every cause of it reaches you as one shape: no JSON on stdout at
-all, the cause on stderr alone. Read that stderr, fix what it names and re-run;
-escalate if it repeats. Never read exit 2 as `not reachable`, and never record it
-as a stray commit — the flag and the maintainer's ruling above are what exit 1
-earns, and spending them on a probe that never answered costs a member its
-ticket over a failure a re-run would have cleared.
-
-**Never `--delete-branch` — the merge bot deletes the head branch itself.**
-`gh pr merge <n> --merge` alone: the flag's local cleanup errors on a `main`
-held by another worktree, or strands the feature worktree on `main`. After the
-merge, `delete-merged-branch.sh <pr>` deletes the branch from `origin` and reads
-the deletion back; `reap.sh` takes the `[gone]` local branch and its worktree.
-No repo setting is relied on to do it. A branch another open PR still
-uses as its head or base is kept instead — `branch-kept-#<that PR>` in the bot's
-report, a deliberate keep and not a failure.
-The branch-delete step also releases the claim label: it drops `in-progress` from
-every issue the PR closes.
-
-**Never force a rebase to start.** No `git clean`, `git checkout .`,
-`git reset --hard`, `git stash`. Uncommitted changes may exist nowhere else.
-Non-empty `git status --porcelain -unormal` → stop and report — the explicit
-mode, never bare `--porcelain`, or `status.showUntrackedFiles = no` reads an
-empty answer here and licenses the rebase over work this check exists to
-protect. Stashing empties it either way, so that check and
-`no-undo-audit.sh` both go quiet on work nothing else holds.
-
-**Cross-check what members report about their environment.** Wrong often enough
-to matter, and a confident wrong report from a reviewer flips a verdict.
-
-**Distrust negative claims hardest.** "Nothing else references this", "the sweep
-is clean" — most likely false, least likely checked: a grep that found nothing
-looks like a grep never run. Make members state their search scope. Negative claim
-vs specific finding with paths → paths win.
-
-**Members share one filesystem, one docker stack and one process table**, and the
-failures arrive as *wrong findings*, not errors:
-
-- **A pattern kill reaches siblings — the implementer, fix-applier and finisher briefs forbid it.** See references/isolation.md.
-
-  **What the victim's output looks like depends on the signal — and one of the cases is a clean green.** See references/isolation.md.
-
-  So **a complete summary block proves the runner survived, not that the run was
-  uncontaminated.** Scrutinize reds, short counts *and* greens from inside the
-  incident window; a killed **baseline** compared against a clean mutant is a
-  wrong measurement that reads exactly like a real result.
-
-  **The command line is no partition either — not reliably.** See references/isolation.md.
-
-  Members report a stalled run to the controller instead of pattern-killing it,
-  and the controller re-checks any measurement taken in the window.
-
-  **Do not guess the victim — the blast radius is the machine, not the Pull.**
-  In that incident the controller reasoned from dispatch scope to "almost
-  certainly `impl-<N>`" and told the maintainer so; the named member then proved
-  it was not the victim (it had never invoked those files standalone, and its
-  mutation baselines post-dated the window). Idle members of *previous* runs,
-  other omp sessions on the same machine, and the maintainer's own shell are
-  all `pkill -f` targets and none of them appear in your ledger. Warn every live
-  member, record the incident as unattributed, and re-check measurements by
-  timestamp rather than by who you think was running.
-
-- **A warning acted on silently is indistinguishable from one that never
-  arrived.** The same incident: the controller's warning DID reach the member,
-  which re-ran, found nothing changed, and said nothing — correctly reading
-  "send once, never re-send" as covering it. The controller then had to spend a
-  round trip asking whether its own outbox was lossy. So the briefs say that
-  **confirmation state includes warnings received and acted on, even
-  when the outcome is no change** — one line, in the report the member already
-  owes. That is the cheap half of the *never read silence as assent* rule, paid
-  by the member rather than by the controller's guesswork.
-
-- **Specialist tree isolation is `review-and-fix.md`'s job — do not restate it.**
-  It owns the object-store rule, the two-tree split, snapshot provisioning, and
-  which suites a snapshot cannot validly run. Your only duty is to *not*
-  contradict it.
-- **Filesystem isolation is not stack isolation.** A private copy of the
-  tree and a test command solve different problems; the compose project
-  name comes from the environment, not the working directory, so three
-  agents on three snapshots still collide on one postgres. "I'm on my own
-  copy" is exactly the intuition that skips the command — say both, every
-  time. Which command depends on the audience: a member in a worktree
-  uses `./agent-test`; a specialist on a snapshot does not, and takes the
-  one `review-and-fix.md` hands out. Which runner the worktree holds
-  decides why: the runner a claim writes is untracked, so a `git archive`
-  snapshot never carries it; one the repository tracks does ride along,
-  but no claim exported ports into it — its isolation is whatever that
-  repository built, not one triple per snapshot. See
-  references/isolation.md.
-- **Scratchpad paths need two levels — the member's own partition, then one
-  directory per child it dispatches — and nothing outside them.** An
-  implementer partitions at `<scratch>/impl-<N>/`; the review side's partition
-  is `<scratch>/pr<N>/…`, which the review core creates itself, so a review
-  runner is handed the scratch root, never that partition; any member that
-  dispatches a child writes an absolute directory under its own partition into
-  that child's prompt, one per child and never shared, and a child never
-  derives its own. Finding ids restart at 1 every review, so two fix-appliers
-  on different PRs both reach for `unv1`; one
-  agent overwrote a sibling's `package.json`, and a probe built a git repo at
-  the *checkout root*. Read from the object store at a pinned ref, write only
-  under your own path. See references/isolation.md.
-- **IDE/harness diagnostics attribute by bare filename, with no path.** **Never
-  relay a diagnostic without reproducing it in that member's specific worktree**
-  (re-run the check that raised it from there): probe copies carry the real
-  tree's filenames, so a sibling's throwaway mutation reads exactly like a live
-  worktree's error.
-  See references/isolation.md.
-- **Every implementer body carries the claim discipline, because tickets that restate facts ship new wrong claims** — inherited from the ticket, and minted in prose nobody asked for. See references/correction-tickets.md.
-- **The settling command for "which files read X" must never be a literal-path
-  grep.** Replace the file with `MUTATED` in a throwaway copy, run the suite, and read off
-  which suites red: that answers which ones **depend on its contents**, which is
-  the question a coverage claim actually needs, and it returns a different set
-  from any spelling of the grep. See references/correction-tickets.md.
-- **A settling command over literal text uses `grep -F`, and its zero counts only after the same command finds a line known to match.** See references/correction-tickets.md.
-
-Suspect a neighbour before a member's own diff — for unexplained failures, and
-equally for any **finding** that came from reading source.
 
 ## Red flags
 
@@ -1752,3 +1520,15 @@ One running table, updated as events land:
 ```
 
 Plus a queue-depth line: shortlist, supply, whether triage was suggested.
+
+**Do not read a cell early.** A cell's
+comparison is one session holding an admissible row at that cell — its tier
+check passed and its resolved effort is the cell's level — and one at
+`slow-high` whose resolved model and effort differ. Count them per cell, never
+pooled across cells, and stop until
+there are at least ten of them across five or more distinct `run_date`s; below
+that, a comparison count is a number, not evidence. **Report the count the per-cell readout prints,
+never one from any other query:** `~/.fleet/bin/fleet-run cell-readout.mjs`
+prints `<cell> <comparisons> <run_dates> <resolved models>` for each cell past
+that floor and a cell below it only as a count on stderr; a `mixed (…)` models
+column means the cell's history spans more than one model behind its role.

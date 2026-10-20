@@ -426,6 +426,67 @@ is not enough either: the two rows must actually have RUN a different model or
 effort, because a deliberate dispatch whose two sides resolve to the same model
 (a `modelRoles` override, measured on omp 2026-09-12) controls nothing.
 
+## Accumulate per PR, never conclude a tier result inside one run
+
+The unit is the PR —
+supply is one Pull per free slot, so there are no implementer batches.
+
+**Why not decide inside one run.** A run holds 2-3 implementer PRs, and ticket
+difficulty swamps the tier effect — a gojq parity harness and a two-statement
+shell reorder are not comparable units. Finding-counts are not comparable either:
+`selectDimensions` trims the fan-out by diff profile, so one PR fields 29 agents
+over six dimensions and its sibling fields 8 over three. And the fleet is not
+stationary — this prompt gets edited mid-run when a defect earns it. Hence a
+binary outcome per PR, accumulating, rather than a per-run verdict.
+
+**Why the rows this guard fired on could not answer the tier question, and this
+is the load-bearing part.** Until the 2026-08-16 revert, `class` and `tier` were
+perfectly confounded: routine always ran `sonnet`, correction always ran top
+tier. So the comparison the file invites — routine-at-sonnet against
+correction-at-top-tier — measures **class, not tier**, because those classes fail
+in different ways by construction: corrections ship false claims in prose,
+routines ship incomplete or regressing code. A run that "mixes both" does not fix
+it. **Only a same-class comparison across tiers is informative**, and the old
+rule could not produce one, since no routine ticket ever ran at top tier.
+
+**That last sentence is no longer true, and this is the part to re-read.** Since
+the revert every routine ticket runs at top tier, so the file now holds 55
+`routine`/`opus` rows against 11 `routine`/`sonnet` (as of 2026-08-28, 103 rows
+— recount before citing). The same-class comparison the paragraph above calls
+the only informative one therefore EXISTS now. It is still not clean: the two
+groups are split almost entirely by calendar date, so it measures prompt
+evolution at least as much as tier. Recount
+both, and every other figure in this section, with:
+
+```bash
+grep -vc '^#' docs/metrics/tier-outcomes.tsv
+awk -F'\t' '!/^#/ && $4=="routine" {n++; d[$1]=1; if($6=="no") no++} \
+  END{print n, length(d), no+0}' docs/metrics/tier-outcomes.tsv
+awk -F'\t' '!/^#/ && $4=="routine" {t[$5]++; if($6=="no") f[$5]++} \
+  END{for(k in t) print k, t[k], f[k]+0}' docs/metrics/tier-outcomes.tsv
+```
+
+**These rows are the historical corpus, and nothing appended to them fixes the
+confound.** What fixes it is the exploration draw in the dispatch rule above:
+one implementer in every five — every one, during burn-in — runs at a drawn
+cell beside the policy cell's, against the same prompts on the same day, so
+the comparison stops depending on which tier history happened to leave in
+which week. Read each cell's comparisons, not the whole-file split, once there
+are enough of them.
+
+**So read what the guard actually established: routine tickets sometimes fail to
+close their own ticket. Not that `sonnet` caused it.** The revert is the
+pre-committed rule being honoured, not a measurement. Restoring a cheap tier is
+still the maintainer's call and still a change to the dispatch rule — but the
+deliberate control it used to require is no longer something anyone has to
+authorize one ticket at a time: the exploration draw above produces one in
+every five Pulls by construction.
+
+The last guard fired with n=1 on the control side. The pre-cell pair query counted pairs that are no cell's comparisons, and the
+query before that one counted every session whose implementers merely
+differed, so it cleared this floor by an order of magnitude while the
+controlled comparison did not exist yet.
+
 ## Why the implementer body carries enumerate-and-declare
 
 Why the agent body carries what it does — read this before editing any
