@@ -59,13 +59,15 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { processSource } from "./proc.mjs";
 
 export const POLL_MS = 30_000;
 export const ALARM_LINE = "[fleet-alarm] run ~/.fleet/bin/fleet-run fleet-event.mjs heartbeat";
+// Where the extension running as `pid` records that its timer is armed; phase 0 reads it there.
+export const alarmFile = (pid) => join(homedir(), ".fleet", "alarm", `${pid}.json`);
 
 /**
  * Whether the alarm fires now. `beat` is `{ at, interval, stopped }` (`at` in
@@ -132,7 +134,7 @@ function arm(pi, ctx) {
     // An unreadable process table is an unreadable start time.
   }
   if (typeof lstart !== "string" || lstart === "") return;
-  const dir = join(homedir(), ".fleet", "alarm");
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `${process.pid}.json`), `${JSON.stringify({ pid: process.pid, lstart, fleet: fleetDir })}\n`);
+  const file = alarmFile(process.pid);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify({ pid: process.pid, lstart, fleet: fleetDir })}\n`);
 }

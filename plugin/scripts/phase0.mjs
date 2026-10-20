@@ -85,19 +85,21 @@
 // is the In-flight bound this run used — `--in-flight`, or its default.
 //
 // RESUMABLE. A re-run reads the receipt. It continues it — skipping every `ok`
-// step and re-running the rest — only when its `run` equals the `at` the
-// controller record holds now AND its `session` equals this run's session. That
-// comparison alone does not separate two runs before the new run's rotation:
-// the record still carries the previous run's `at` until `ledger.mjs rotate`
-// writes the next, so the previous run's receipt still matches it, and a
-// re-run that trusted `run` alone would skip `rotate`. The session rule closes
-// a new session. A receipt of any other run (a `run` that is set and does not
-// match, or a different session) is held as `phase0.previous.json`, where
-// `closeout.mjs finish` also leaves a finished run's receipt, and the
-// script starts at `branch`; this run's own receipt is written at
-// `phase0.json` after every step. A receipt whose rotation has not run is
-// simply overwritten: every step before `rotate` is idempotent and is re-run
-// on every invocation until the rotation has run.
+// step but `alarm` and re-running the rest — only when its `run` equals the
+// `at` the controller record holds now AND its `session` equals this run's
+// session. That comparison alone does not separate two runs before the new
+// run's rotation: the record still carries the previous run's `at` until
+// `ledger.mjs rotate` writes the next, so the previous run's receipt still
+// matches it, and a re-run that trusted `run` alone would skip `rotate`. The
+// session rule closes a new session. `alarm` is re-run on every invocation,
+// `ok` or not: it proves something about the omp running this invocation, and
+// a resumed receipt may have been written under another. A receipt of any
+// other run (a `run` that is set and does not match, or a different session)
+// is held as `phase0.previous.json`, where `closeout.mjs finish` also leaves a
+// finished run's receipt, and the script starts at `alarm`; this run's own
+// receipt is written at `phase0.json` after every step. A receipt whose
+// rotation has not run is simply overwritten: every step before `rotate` is
+// idempotent and is re-run on every invocation until the rotation has run.
 //
 // THE ROTATION FILES THE PREVIOUS RUN'S RECEIPT. The `rotate` step takes this
 // run's partial receipt off disk, puts the held one back at `phase0.json` and
@@ -135,8 +137,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { homedir } from "node:os";
 import { makeDie, defineFlags, isDigits } from "./arg.mjs";
+import { alarmFile } from "./controller-alarm.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { gitEnv } from "./git-env.mjs";
@@ -148,6 +150,7 @@ import { IN_FLIGHT_DEFAULT } from "./phase0-receipt.mjs";
 const NAME = "phase0";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
 const MAX_BUFFER = 64 * 1024 * 1024;
+const isRecord = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
 const NETWORK_TIMEOUT_MS = 120_000;
 const PR_LIMIT = 1000;
 // The tail of a child's output is the part that says why it stopped.
@@ -439,7 +442,7 @@ function alarm({ fleetDir }) {
     return failed(`${e.message}${tail}`);
   }
   if (controller === null) return failed(`no omp process above phase 0: the controller alarm cannot be checked${tail}`);
-  const path = join(homedir(), ".fleet", "alarm", `${controller.pid}.json`);
+  const path = alarmFile(controller.pid);
   let text;
   try {
     text = readFileSync(path, "utf8");
@@ -453,7 +456,7 @@ function alarm({ fleetDir }) {
   } catch (e) {
     return failed(`controller alarm file ${path} is not JSON (${e.message})${tail}`);
   }
-  if (rec === null || typeof rec !== "object" || Array.isArray(rec)) return failed(`controller alarm file ${path} is not an object${tail}`);
+  if (!isRecord(rec)) return failed(`controller alarm file ${path} is not an object${tail}`);
   const missing = ["pid", "lstart", "fleet"].filter((k) => !Object.hasOwn(rec, k));
   if (missing.length > 0) return failed(`controller alarm file ${path} lacks ${missing.join(", ")}${tail}`);
   if (rec.pid !== controller.pid) return failed(`controller alarm file ${path} names pid ${rec.pid}, but this omp is pid ${controller.pid}${tail}`);
@@ -488,8 +491,7 @@ function readReceipt(path) {
   } catch (e) {
     throw new Error(`the receipt ${path} is not JSON (${e.message}) — move it aside and re-run`);
   }
-  const record = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
-  if (!(record(r) && record(r.steps) && Object.hasOwn(r, "run") && typeof r.session === "string")) {
+  if (!(isRecord(r) && isRecord(r.steps) && Object.hasOwn(r, "run") && typeof r.session === "string")) {
     throw new Error(`the receipt ${path} has no steps, run and session — move it aside and re-run`);
   }
   return r;
@@ -607,7 +609,8 @@ function main() {
 
   const receipt = { run: resumed ? previous.run : null, session, scratch, inFlight, steps: {} };
   for (const name of STEP_NAMES) {
-    const was = resumed ? previous.steps[name] : undefined;
+    // `alarm` checks the omp running this invocation, so its `ok` is never carried.
+    const was = resumed && name !== "alarm" ? previous.steps[name] : undefined;
     receipt.steps[name] = was?.status === "ok" ? was : { status: "pending", at: now, output: "not run" };
   }
 

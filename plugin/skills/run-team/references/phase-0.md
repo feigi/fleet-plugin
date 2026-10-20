@@ -22,7 +22,7 @@ until the receipt is whole.
 
 ## Check the controller alarm
 
-**Check the controller alarm first. Phase 0 refuses before anything else when this omp's timer is not armed.** The `alarm` step reads `~/.fleet/alarm/<pid>.json`, where `<pid>` is the omp process above the script, and checks that the file names that pid, that process's start time, and this checkout's `.fleet/`. A file that is missing, not JSON, or names something else, and no omp process above the script, each fail the step with exit 3 and a message ending `restart omp`. Restart omp, then run phase 0 again: the step is re-run, not skipped. Every later step stays `pending` until it passes.
+**Check the controller alarm first. Phase 0's first step refuses when this omp's timer is not armed.** The `alarm` step reads `~/.fleet/alarm/<pid>.json`, where `<pid>` is the omp process above the script, and checks that the file names that pid, that process's start time, and this checkout's `.fleet/`. A file that is missing, not JSON, or names something else, and no omp process above the script, each fail the step with exit 3 and a message ending `restart omp`. Restart omp, then run phase 0 again. The step runs on every run of phase 0, one its receipt records `ok` included, because it checks the omp running that run; nothing after it runs until it passes.
 
 ## Fast-forward the checkout
 

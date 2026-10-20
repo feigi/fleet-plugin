@@ -128,8 +128,11 @@ cat "$PH0_STUBS/gh.json"
 `;
 
 // The omp the controller alarm is armed for. Phase 0 runs as a child of the
-// test process, and the test process runs under this omp (see `procTable`).
+// test process, and the test process runs under this omp (see `REAL_TABLE`).
 const OMP = 2_000_000_002;
+// The proc table: phase 0 is a child of this test process, which runs under
+// the omp, so the walk up from phase 0 finds the omp as its controller.
+const REAL_TABLE = { [process.pid]: { ppid: OMP, argv: [process.execPath, "--test"], lstart: "runner-start" }, [OMP]: { ppid: 1, argv: ["bun", "/home/u/.bun/bin/omp"], lstart: "omp-start" } };
 // Every external step the script reaches, in the order it reaches them, per
 // step: the stub names its work shows up under in `order.log`.
 const STEPS = [
@@ -170,17 +173,12 @@ function fixture({ spec = false } = {}) {
     writeFileSync(join(repo, ".github", "rulesets", "main.json"), "{}");
     writeFileSync(join(repo, ".github", "scripts", "apply-ruleset.sh"), `#!/bin/sh\nexec node "${STUBBED}" ruleset "$@"\n`);
   }
-  // The proc table: phase 0 is a child of this test process, which runs under
-  // the omp, so the walk up from phase 0 finds the omp as its controller.
   const procTable = join(dir, "proc-table.json");
-  writeFileSync(procTable, JSON.stringify({
-    [process.pid]: { ppid: OMP, argv: [process.execPath, "--test"], lstart: "runner-start" },
-    [OMP]: { ppid: 1, argv: ["bun", "/home/u/.bun/bin/omp"], lstart: "omp-start" },
-  }));
+  writeFileSync(procTable, JSON.stringify(REAL_TABLE));
   const fleet = join(repo, ".fleet");
   const receiptPath = join(fleet, "phase0.json");
   const f = {
-    dir, repo, home, stubs, session, origin,
+    dir, repo, home, stubs, session, origin, procTable,
     control: (name, value) => writeFileSync(join(stubs, `${name}.json`), JSON.stringify(value)),
     calls: (name) => (existsSync(join(stubs, `${name}.calls`)) ? readFileSync(join(stubs, `${name}.calls`), "utf8").trim().split("\n").map((l) => JSON.parse(l)) : []),
     order: () => (existsSync(join(stubs, "order.log")) ? readFileSync(join(stubs, "order.log"), "utf8").trim().split("\n") : []),
@@ -204,7 +202,8 @@ function fixture({ spec = false } = {}) {
       assert.equal(r.status, 0, r.stderr);
       return JSON.parse(r.stdout).rows;
     },
-    alarm: (value) => {
+    // The matching record by default: this omp's pid and start time, and this `.fleet/`.
+    alarm: (value = { pid: OMP, lstart: "omp-start", fleet }) => {
       mkdirSync(join(home, ".fleet", "alarm"), { recursive: true });
       writeFileSync(join(home, ".fleet", "alarm", `${OMP}.json`), typeof value === "string" ? value : JSON.stringify(value));
     },
@@ -218,7 +217,7 @@ function fixture({ spec = false } = {}) {
       return { status: r.status, out, err: r.stderr, stdout: r.stdout };
     },
   };
-  f.alarm({ pid: OMP, lstart: "omp-start", fleet: join(repo, ".fleet") });
+  f.alarm();
   return f;
 }
 
@@ -369,9 +368,11 @@ const REFUSALS = [
   ["alarm", (f) => f.alarm({ pid: OMP, lstart: "omp-start" }), /lacks fleet.*restart omp$/m],
   ["alarm", (f) => f.alarm({ pid: OMP + 1, lstart: "omp-start", fleet: join(f.repo, ".fleet") }), /names pid .*restart omp$/m],
   ["alarm", (f) => f.alarm({ pid: OMP, lstart: "a-previous-omp", fleet: join(f.repo, ".fleet") }), /started at .*restart omp$/m],
+  ["alarm", (f) => f.alarm({ pid: String(OMP), lstart: "omp-start", fleet: join(f.repo, ".fleet") }), /names pid (\d+), but this omp is pid \1 .*restart omp$/m],
+  ["alarm", (f) => f.alarm([]), /\.json is not an object.*restart omp$/m],
   ["alarm", (f) => f.alarm({ pid: OMP, lstart: "omp-start", fleet: join(f.dir, "elsewhere", ".fleet") }), /names fleet .*restart omp$/m],
-  ["alarm", (f) => writeFileSync(join(f.dir, "proc-table.json"), JSON.stringify({ [process.pid]: { ppid: 1, argv: [process.execPath, "--test"], lstart: "runner-start" } })), /no omp process above phase 0.*restart omp$/m],
-  ["alarm", (f) => writeFileSync(join(f.dir, "proc-table.json"), "not json"), /cannot read the process table.*restart omp$/m],
+  ["alarm", (f) => writeFileSync(f.procTable, JSON.stringify({ [process.pid]: { ppid: 1, argv: [process.execPath, "--test"], lstart: "runner-start" } })), /no omp process above phase 0.*restart omp$/m],
+  ["alarm", (f) => writeFileSync(f.procTable, "not json"), /cannot read the process table.*restart omp$/m],
   ["branch", (f) => git(f.repo, "switch", "-q", "-c", "other"), /HEAD is refs\/heads\/other, not refs\/heads\/main/],
   ["fast-forward", (f) => git(f.repo, "remote", "set-url", "origin", join(f.dir, "no-such-origin.git")), /git fetch origin failed/],
   ["pin", (f) => f.control("instruments", { exit: 1, err: "instruments: nothing to certify" }), /instruments: nothing to certify/],
@@ -421,12 +422,26 @@ test("alarm: a refusal the file's appearance clears is re-run by the next run, n
   const refused = f.run();
   assert.equal(refused.status, 3, refused.stdout + refused.err);
   assert.equal(f.receipt().steps.alarm.status, "failed");
-  f.alarm({ pid: OMP, lstart: "omp-start", fleet: join(f.repo, ".fleet") });
+  f.alarm();
   const again = f.run();
   assert.equal(again.status, 0, again.stdout + again.err);
   assert.match(again.stdout, /^phase0: alarm: ok/m);
   assert.equal(again.stdout.includes("alarm: ok (done earlier in this run)"), false);
   assert.deepEqual(statuses(f.receipt()), allOk);
+});
+
+test("alarm: a resumed run re-checks the alarm, an ok one included, and refuses when this omp's file is gone", () => {
+  const f = fixture();
+  f.control("derive-testcmd", { by: { ". install": { exit: 1, err: "no Recipe cache" }, ". test --at origin/main": {} } });
+  assert.equal(f.run().status, 4);
+  assert.equal(f.receipt().steps.alarm.status, "ok");
+  f.disarm();
+  f.control("derive-testcmd", { by: { ". install": { out: "npm ci" }, ". test --at origin/main": { out: "./agent-test" } } });
+  const again = f.run();
+  assert.equal(again.status, 3, again.stdout + again.err);
+  assert.match(again.stdout, /^phase0: alarm: failed — controller alarm is not armed/m);
+  assert.equal(f.receipt().steps.alarm.status, "failed");
+  assert.equal(f.calls("rotate").length, 1, "the resumed run stopped at the alarm");
 });
 
 test("a failed preflight prints every FAIL line on stdout and none of the passing ones", () => {
@@ -704,7 +719,7 @@ test("a receipt whose run and session both match resumes: its ok steps are skipp
   assert.equal(f.receipt().steps.pin.output, "from the previous run", "a skipped step keeps what it recorded");
 });
 
-test("a same-session run after `closeout.mjs finish` starts at branch and rotates again, and skips nothing as done earlier", () => {
+test("a same-session run after `closeout.mjs finish` starts at alarm and rotates again, and skips nothing as done earlier", () => {
   const f = fixture({ spec: true });
   assert.equal(f.run().status, 0);
   assert.equal(f.calls("rotate").length, 1);
@@ -911,17 +926,13 @@ globalThis.Date = class extends R { constructor(...a) { super(...(a.length ? a :
 
 // ── the rotation archives the receipt ────────────────────────────────────────
 
-const REAL_TABLE = { [process.pid]: { ppid: OMP, argv: [process.execPath, "--test"], lstart: "runner-start" }, [OMP]: { ppid: 1, argv: ["bun", "/home/u/.bun/bin/omp"], lstart: "omp-start" } };
-
 function rotateFixture() {
   const f = fixture();
   mkdirSync(join(f.repo, ".fleet"), { recursive: true });
   // The recorded controller is this test runner: alive, started when recorded, and an ancestor of the rotation.
   writeFileSync(join(f.repo, ".fleet", "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller: { pid: process.pid, lstart: "runner-start", prior: "dead", at: RUN_AT } }));
-  const table = join(f.dir, "proc-table.json");
-  writeFileSync(table, JSON.stringify(REAL_TABLE));
   const rotate = () => spawnSync(process.execPath, [join(REAL_SCRIPTS, "ledger.mjs"), "rotate"], {
-    cwd: f.repo, encoding: "utf8", env: { ...GIT_ENV, FLEET_PROC_TABLE: table },
+    cwd: f.repo, encoding: "utf8", env: { ...GIT_ENV, FLEET_PROC_TABLE: f.procTable },
   });
   return { f, rotate };
 }
@@ -1015,7 +1026,7 @@ fs.renameSync = (from, to) => {
 require("node:module").syncBuiltinESMExports();
 `);
   const r = spawnSync(process.execPath, ["--require", preload, join(REAL_SCRIPTS, "ledger.mjs"), "rotate"], {
-    cwd: f.repo, encoding: "utf8", env: { ...GIT_ENV, FLEET_PROC_TABLE: join(f.dir, "proc-table.json") },
+    cwd: f.repo, encoding: "utf8", env: { ...GIT_ENV, FLEET_PROC_TABLE: f.procTable },
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stderr, /could not archive .*phase0\.json -> .*phase0\..+\.json: EXDEV: injected/);

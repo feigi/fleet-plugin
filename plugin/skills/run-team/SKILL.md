@@ -50,8 +50,8 @@ phase, or in any later one, asks the maintainer which tickets to take.
    when the repository has no workflow named CI. Its steps and receipt: See
    references/phase-0.md. Dispatch nothing before it exits 0. Exit 4 is a
    step that needs you: act on each `NEED` line below, then run it again. Once
-   `rotate` has run, a re-run skips every `ok` step and resumes where the last
-   one stopped; before it, a re-run runs every step again.
+   `rotate` has run, a re-run skips every `ok` step but `alarm` and resumes
+   where the last one stopped; before it, a re-run runs every step again.
 
    The `tier-roles` step runs `~/.fleet/bin/fleet-run tier-roles.mjs --check
    --in-flight <B>`, `<B>` being the `--in-flight` given, else the default.

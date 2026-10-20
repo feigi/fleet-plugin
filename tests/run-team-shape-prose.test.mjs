@@ -540,6 +540,11 @@ const CHANGED = [
   [
     "PR stays queued, label untouched, nothing written to the ledger, and no member is dispatched to restore the lines — the removal may be deliberate.",
     "PR stays queued, label untouched, and no member is dispatched to restore the lines — the removal may be deliberate."
+  ],
+  // Phase 0's `alarm` step is re-run on every invocation, an `ok` one included.
+  [
+    "Once `rotate` has run, a re-run skips every `ok` step and resumes where the last one stopped; before it, a re-run runs every step again.",
+    "Once `rotate` has run, a re-run skips every `ok` step but `alarm` and resumes where the last one stopped; before it, a re-run runs every step again."
   ]
 ];
 

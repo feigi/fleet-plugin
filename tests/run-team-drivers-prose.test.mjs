@@ -202,7 +202,7 @@ test("the stranded and fold-in paragraphs name their remedies: a stranded impl-<
 test("step 0 says to run phase0.mjs again until it exits 0 and to dispatch nothing before then", () => {
   const s = step0();
   assert.match(s, Pin.phrase("Dispatch nothing before it exits 0."));
-  assert.match(s, Pin.phrase("Once `rotate` has run, a re-run skips every `ok` step and resumes where the last one stopped; before it, a re-run runs every step again."));
+  assert.match(s, Pin.phrase("Once `rotate` has run, a re-run skips every `ok` step but `alarm` and resumes where the last one stopped; before it, a re-run runs every step again."));
 });
 
 test("the PHASE0-INCOMPLETE tick row names its remedy: run phase0.mjs again, which resumes at the step that stopped", () => {
