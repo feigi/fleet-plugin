@@ -43,7 +43,7 @@ test("the double-scripts/ form (the mistake this pins against) does not exist", 
 const SITES = [
   { path: ["scripts", "review-eval.mjs"], what: "review-eval.mjs's own usage comment" },
   { path: ["commands", "review-and-fix.md"], what: "review-and-fix.md's OMP invocation line" },
-  { path: ["skills", "run-team", "SKILL.md"], what: "SKILL.md's OMP invocation line" },
+  { path: ["agents", "fleet-review-runner.agent.md"], what: "fleet-review-runner.agent.md's OMP invocation line" },
 ];
 
 for (const { path, what } of SITES) {

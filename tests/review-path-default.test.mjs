@@ -123,7 +123,7 @@ test("objectKeys reads fields by depth, not by line, and ignores brackets/commas
 // review's row tokens under Run ledger.
 const reviewersSection = () =>
   [
-    RUN_TEAM.between("### The reviewer", "### The tier check", "run-team Phase 2 reviewer dispatch").text,
+    RUN_TEAM.between("### Dispatching the members a wake names", "### Reading a review result", "run-team wake dispatch: reviewer").text,
     RUN_TEAM.between("### Reading a review result", "### Nothing to do: arm the beat", "run-team Reading a review result").text,
     RUN_TEAM.between("**A throw, an empty return, or a notification whose status is not `completed`", "## Guards", "run-team review retry").text,
     RUN_TEAM.paragraph("A PR's review is not a member", "run-team review row tokens", "`review` holds a PR's review record to these rules").text,
@@ -137,7 +137,7 @@ const fixApplierPrompt = () => memberPrompt("fix-applier", "review");
 // satisfied by any mention elsewhere, so the substitution duty could be deleted
 // with the pin still green; that is the whole failure mode being pinned.
 const fixApplierLeadIn = () =>
-  Pin.of(reviewersSection(), "reviewersSection()").between("**Then dispatch a fix-applier**", "**A `DISPATCH fix-pr PR#<M>` on a conflict hold**", "run-team fix-applier lead-in").text;
+  Pin.of(reviewersSection(), "reviewersSection()").between("- **The fix-applier.**", "- **The conflict hold.**", "run-team fix-applier lead-in").text;
 
 // Review1816: both `doesNotMatch` guards below were closed enumerations of
 // specific historical bad-phrasings — a syntactically different restatement
@@ -262,7 +262,7 @@ test("the controller keeps the rules the workflow's return shape needs", () => {
 });
 
 test("the wake list carries no relay obligation", () => {
-  const loop = RUN_TEAM.between("### What a wake owes beyond its call", "### Reading a review result", "run-team wake list").text;
+  const loop = RUN_TEAM.between("### What a wake owes beyond its call", "### Dispatching the members a wake names", "run-team wake list").text;
   // This slice's only other assertion is a doesNotMatch, which a slice that has
   // degenerated to its own heading satisfies trivially. Prove it reached the
   // bullet list first.

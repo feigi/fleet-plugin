@@ -1,6 +1,6 @@
 ---
 name: fleet-implementer-task-high
-description: A `/skill:run-team` implementer at cell task-high. Dispatched by the controller in phase 2, never invoked directly; the body is byte-identical across every fleet-implementer-* definition.
+description: A `/skill:run-team` implementer at cell task-high. Dispatched by the controller at the Pull's dispatch, never invoked directly; the body is byte-identical across every fleet-implementer-* definition.
 model: "@task:high"
 ---
 

@@ -171,7 +171,7 @@ terminating in exactly one dispatch or an empty shortlist:
    without a positive and a negative control misattributes causes rather than
    merely missing defects — one such check needed a purpose-built fixture plus
    both. A ticket no single string settles is a `could not check`: admitted,
-   annotated in the dispatch prompt (phase 2), never quietly dropped.
+   annotated in the dispatch prompt (the Pull's dispatch), never quietly dropped.
 
    **This is a consumption gate**, priced for the seat where implementer
    divergence costs a claim, a worktree and a dispatch; at filing time every
@@ -179,7 +179,7 @@ terminating in exactly one dispatch or an empty shortlist:
    `ready-for-agent`.
 
    No sizing agent here. `sizing-a-ticket` picks the *process path*, and that is
-   phase 2's call, after the ticket is claimed.
+   the dispatch's call, after the ticket is claimed.
 4. **Collision scan against open PRs and live branches** — `pull.mjs` runs it
    before Q3 and prints one line per open PR or live worktree branch that shares
    a path with the brief, `no overlap` when none, and `could not look: <which>`
@@ -207,9 +207,9 @@ terminating in exactly one dispatch or an empty shortlist:
 7. **Route, row, then dispatch** — `~/.fleet/bin/fleet-run ticket-router.mjs route
    --session <session> --ticket <N> --arm <A|B> --impl-row <k>[ --chain-head] --issue
    <scratch>/impl-<N>/issue.json --guard .fleet/cost-guard.json` prints
-   `POLICY=… CELL=… DRAW=… STRATUM=… REASON=…` (phase 2's exploration rule
+   `POLICY=… CELL=… DRAW=… STRATUM=… REASON=…` (the router's arguments paragraph below the list
    says what each argument is); then `ledger.mjs row <N> "impl-<N>[ · tier=<CELL>][ · route=<REASON>]"`,
-   `tier=<CELL>` exactly when `DRAW` is not `-`; then phase 2 at once: claim
+   `tier=<CELL>` exactly when `DRAW` is not `-`; then the dispatch at once: claim
    what you are about to dispatch; dispatch what you have just claimed. Router
    exit 2 → no row and no dispatch: release the claim (`release-ticket.sh`, SKILL.md's
    Failure handling row for a claim abandoned mid-run) and emit an event, a probe that could not look — a table the router
@@ -230,7 +230,7 @@ does:
 | a construct the brief names, or a brief `path:line` reference, lands in or next to a hunk of an open PR or a live branch | exclude `behind-pr:#M`, next entry |
 | `Out of scope` sequences it after an open ticket | exclude `behind-issue:#M`, next entry |
 | `claim-ticket.sh` exit 2 | taken, next entry |
-| decided, live, free, claimed | row, then dispatch (phase 2) |
+| decided, live, free, claimed | row, then dispatch |
 
 **The shortlist runs out → run `shortlist.mjs` once and Pull again; still
 empty → hold the slot idle until the next refresh trigger.** Within a turn,

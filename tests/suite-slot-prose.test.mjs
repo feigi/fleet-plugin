@@ -17,7 +17,7 @@ const RUN_TEAM = Pin.file(join(ROOT, "plugin", "skills", "run-team", "SKILL.md")
 const CONTEXT = Pin.file(join(ROOT, "CONTEXT.md"));
 
 test("SKILL.md tells the controller to hand the fix-applier and the finisher the wrapped string as <testCmd>", () => {
-  const p = RUN_TEAM.paragraph("The review wraps its own one run", "run-team/SKILL.md suite slot hand-out paragraph", "**Where `<branch>` comes from:**").text;
+  const p = RUN_TEAM.paragraph("**The test command every gate runs.**", "run-team/SKILL.md suite slot hand-out paragraph", "**Where `<branch>` comes from:**").text;
   assert.match(p, Pin.phrase("The fix-applier and the finisher run what you hand them, so hand them the wrapped string as `<testCmd>` — `~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command written `'\\''`"),
     "the hand-out no longer gives the fix-applier and the finisher the wrapped string — their gate then runs unbounded");
   assert.match(p, Pin.phrase("a wrapped string handed to it anyway is harmless"),

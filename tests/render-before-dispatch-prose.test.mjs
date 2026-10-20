@@ -24,12 +24,12 @@ test("phase 2 renders the implementer's brief, then records the dispatch, and th
 });
 
 test("each fix-applier kind renders its brief before ledger.mjs dispatch records it", () => {
-  const review = RUN_TEAM.paragraph("**Then dispatch a fix-applier** — on `DISPATCH fix-pr PR#<M>`", "review fix-applier paragraph", "**A `DISPATCH fix-pr PR#<M>` on a conflict hold**").text;
-  assert.match(review, Pin.phrase("its brief rendered with `dispatch-prompt.mjs render fix-applier --kind review --member fix-pr-<pr#> …` and then recorded with `ledger.mjs dispatch <pr#> fix-pr-<pr#>` before the call."));
-  const conflict = RUN_TEAM.paragraph("**A `DISPATCH fix-pr PR#<M>` on a conflict hold** — the row carries an", "conflict fix-applier paragraph", "**Then dispatch a red-check fixer**").text;
-  assert.match(conflict, Pin.phrase("render its brief with `dispatch-prompt.mjs render fix-applier --kind conflict --member <name> …`, and dispatch it with the `agent` that `ledger.mjs dispatch` printed"));
-  const red = RUN_TEAM.paragraph("Name it `fix-pr-<M>`, or the next free suffix", "red-check fixer paragraph", "**What a fix-applier receives.**").text;
-  assert.match(red, Pin.phrase("render its brief with `dispatch-prompt.mjs render fix-applier --kind red-check --member <name> …`, record it with `ledger.mjs dispatch <pr#> <name>` before the call"));
+  const review = RUN_TEAM.bullet("- **The fix-applier.**", "- **The conflict hold.**", "review fix-applier bullet").text;
+  assert.match(review, Pin.phrase("render with `dispatch-prompt.mjs render fix-applier --kind review --member fix-pr-<pr#> …`, then record `ledger.mjs dispatch <pr#> fix-pr-<pr#>` before the call."));
+  const conflict = RUN_TEAM.bullet("- **The conflict hold.**", "- **Then dispatch a red-check fixer**", "conflict fix-applier bullet").text;
+  assert.match(conflict, Pin.phrase("render with `dispatch-prompt.mjs render fix-applier --kind conflict --member <name> …`; dispatch with the `agent` `ledger.mjs dispatch` printed"));
+  const red = RUN_TEAM.bullet("- **Then dispatch a red-check fixer**", "- **The merge bot.**", "red-check fixer bullet").text;
+  assert.match(red, Pin.phrase("render with `dispatch-prompt.mjs render fix-applier --kind red-check --member <name> …`, record with `ledger.mjs dispatch <pr#> <name>` before the call"));
   const retry = RUN_TEAM.paragraph("**A `DISPATCH fix-pr PR#<M>` on a dispositions mismatch**", "dispositions retry paragraph", "### The main-gain hit").text;
   assert.match(retry, Pin.phrase("dispatched like the first, its brief rendered with `--kind dispositions-retry`."));
 });
@@ -44,11 +44,6 @@ test("a replacement finisher's brief is rendered before ledger.mjs dispatch reco
   assert.match(moved, Pin.phrase("render its brief with `dispatch-prompt.mjs render finisher --kind repair --member finisher-pr-<M>-<x> …`, then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`."));
   const died = RUN_TEAM.paragraph("**Resolving a finisher that died.**", "finisher-died paragraph", "### Dispositions escalation").text;
   assert.match(died, Pin.phrase("render its brief with `dispatch-prompt.mjs render finisher --kind fresh --member finisher-pr-<M>-<x> …` (`--kind repair` once an earlier finisher reported `labelled` without the label landing), then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`."));
-});
-
-test("the merge bot's refusal names the bot whose brief to render, and dispatch merge-bot runs again after it", () => {
-  const p = RUN_TEAM.paragraph("Per pass, named `merge-bot-<n>`, never two at once.", "merge bot dispatch paragraph", "Rebase, wait for green, check the").text;
-  assert.match(p, Pin.phrase("With no brief rendered for that name it refuses, naming the bot and the `dispatch-prompt.mjs render merge-bot --member merge-bot-<n> …` to run — render it, then run `ledger.mjs dispatch merge-bot` again."));
 });
 
 test("the ledger reference says what dispatch records of the brief, prints, and refuses", () => {

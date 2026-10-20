@@ -3,7 +3,7 @@
 The full text of each row `fleet-tick.mjs` prints and what it asks of the controller. SKILL.md's **The tick's rows** carries one line for each.
 
 - `PULL #<N> …` — one Pull per named ticket, in the order printed: phase 1's
-  read, then phase 2's dispatch. A ticket that fails the read is relabelled or
+  read, then the dispatch. A ticket that fails the read is relabelled or
   excluded (phase 1), and the next tick names the next head.
 - `REFRESHED shortlist: <n> entries; <k> lifted` — the tick refreshed the
   shortlist itself, and its `PULL` row already reads the result. `REFRESH
@@ -28,7 +28,7 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   ahead of reviews on purpose: finishing what is started beats starting more.
 - `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn
   (**The reviewer**).
-- `DISPATCH merge-bot` — the next `merge-bot-<n>` (**The merge bot**).
+- `DISPATCH merge-bot` — the next `merge-bot-<n>` (**The merge bot**). The `<scratch>` its brief takes is the absolute `scratch-root.mjs` output, and the bot writes only under `<scratch>/pr<N>/merge-bot-<n>/`.
 - `DISPATCH finisher PR#<M> …` — a finisher settled `labelled`, yet the open
   list shows PR M without `ready-to-merge`, and no `label-off=` (**Run ledger**)
   accounts for the removal. Apply the finisher gate (**The finisher gate**: the
@@ -107,7 +107,7 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   the hold stays while the check writes no verdict (its `tier-ok=`, or
   `tier-unverifiable=` for a member settled `killed` or `released` with no
   transcript, clears it); a mismatch is yours to clear, by dispatching the
-  replacement at the right tier (phase 2). Each prints its clearing step in
+  replacement at the right tier. Each prints its clearing step in
   the row's detail. For a mismatch that is the replacement's name —
   `impl-<N>-b` on a first retry, else one letter past the highest the ticket
   has used, or that no retry letter is left. For an unchecked tier, which
@@ -115,6 +115,24 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   by hand when the tick ran without `--apply` or the check wrote no verdict,
   with a batch entry per member it names (fill in `<file>`; `<session>` too
   when no receipt of this run records one).
+  **The batch file is a JSON array, one entry per dispatched member** — under
+  Pull, a batch of one, the member just dispatched: `{member}`.
+  `member` is the AgentId the dispatch returns (`impl-<N>`). An entry that
+  names neither `session` nor `transcript` takes the session directory phase
+  0's receipt `.fleet/phase0.json` of `--ledger`'s workspace (else the cwd's,
+  resolved as the default ledger is) records, and is exit 2 naming the receipt
+  when it records none; the check reads `<session>/<member>.jsonl`, so a
+  member with no assistant turn yet still resolves off its dispatch-time
+  record. A `session` the entry gives
+  wins over the receipt's; a caller already holding the exact transcript path
+  may give `transcript` instead. The agent type an implementer was dispatched
+  as lives only in its transcript. `resolvedModel`
+  **and** `resolvedThinkingLevel` together — the dispatch's own job record —
+  may ride beside it and are preferred for the model and level. An `impl-`
+  entry carries no `agentFile`: its definition is the row's, never the
+  caller's. `transcript`/`session` resolve relative to `--repo` (defaults to
+  the plugin's own root), and the check reads and writes the run's own ledger
+  unless `--ledger` names another.
 - `AT CAP`, `IDLE OK` — nothing to do on that row.
 - `MAIN-CHECKOUT-DIRTY <paths> …`, printed above the rows, with every
   dispatching row (implementers, reviewers, merge-bot) reading

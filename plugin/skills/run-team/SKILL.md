@@ -60,8 +60,8 @@ phase, or in any later one, asks the maintainer which tickets to take.
 
    The `tier-roles` step runs `~/.fleet/bin/fleet-run tier-roles.mjs --check
    --in-flight <B>`, `<B>` being the `--in-flight` given, else the default
-   **Defaults** (**Queue depth**) states. What it checks is under **Phase 2**'s
-   tier routes. A line it prints on a pass about omp's `task.maxConcurrency`
+   **Defaults** (**Queue depth**) states. What it checks is in the header of `scripts/tier-roles.mjs`, under
+   the tier routes. A line it prints on a pass about omp's `task.maxConcurrency`
    is a notice in the step's output and never holds: read it, report it, and
    go on — the fleet never writes that setting.
 
@@ -219,7 +219,7 @@ owes beyond its call:
 - **Finisher reports halted** → the per-cause rule (**Resolving a finisher
   halt**, below).
 - **A finisher failed or was killed** → the **Member confirmed dead or never dispatched** wake (`member-died finisher-pr-<M>`), which settles it `failed` or `killed`; no label, and the tick prints no dispatch for it. The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, below), then run the tick.
-- **Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>`; the causes and the issue action each takes are under **Relabel causes**.
+- **Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>`; the causes and the issue action each takes are under **Relabel causes**. **Only an explicit bail report — the member itself naming the cause — reaches Implementer bails before implementing**; a died or merely-quiet member's silence never does.
 - **A review result lands** → see the result file written (by you or by the
   runner — **The reviewer** says which, per harness), then
   `fleet-event.mjs review-result <pr> <path>`: a PR with survived or unverified findings prints as
@@ -282,6 +282,15 @@ owes beyond its call:
   **Undrain** only when the maintainer asks, never a drain that budget or
   context exhaustion caused (references/close-out.md).
 - **The finisher-gate wakes** — a CI run reaching a terminal state, a fix-applier reporting `no-op`, a `no-ci` verdict → each is a bullet of **The finisher gate**.
+
+### Dispatching the members a wake names
+
+- **The reviewer.** **Dispatch the review, never wait on it, and act when its result lands. That is the default path.** `DISPATCH review PR#<M>`: a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the five args `pr`, `branch`, `worktree`, `testCmd` and `scratch`. Record `review=member:review-pr-<pr#>` on the PR's row before the call. `scratch` is the scratch root itself, never a `pr<N>` partition (`references/reviewers.md`). Write the `review=` token with `ledger.mjs review <pr> <token>`; `ledger.mjs` refuses a bad grammar. The tick names every PR owed one, oldest first, and each gets one review, once per PR. The tick counts in-flight reviews off the ledger and nowhere else, so a review you launched and never recorded is one it names again. The runner writes the result file and reports its path and `reviewed=` token.
+- **The fix-applier.** `DISPATCH fix-pr PR#<M>` on a `reviewed=` count that survived or unverified findings, with no fix-applier live: name `fix-pr-<pr#>` (the next suffix if that name is on record), never the PR's implementer; render with `dispatch-prompt.mjs render fix-applier --kind review --member fix-pr-<pr#> …`, then record `ledger.mjs dispatch <pr#> fix-pr-<pr#>` before the call. Its brief carries the PR number, the worktree abs path, the PR's branch, the same `testCmd` you passed the review, and the **path** `<scratch>/pr<pr>/<run>/review.json`, `<run>` off the PR's latest `reviewed=` — never the findings. Every `<scratch>` in that brief is the absolute path `scratch-root.mjs` printed. Its rulings are the fix-applier body's (`agents/fleet-fix-applier.agent.md`); you hold none. It holds every finding and you hold none, so there is nothing for you to rank, relay or pre-rule — and a report from a refuter it spawns that surfaces to you is its to retrieve, never yours to scan or pass on. It answers the hold and nothing else: survived or unverified findings of a returned review the row also carries stay unanswered through its settle, so the tick prints `DISPATCH fix-pr PR#<M>` again once it lands, and that one is a review fix-applier, dispatched as above. On a PR carrying `ready-to-merge`, the push moves the head after the label, so the next merge bot refuses it `head-moved-after-label-#<M>`: a fresh finisher, per **Failure handling**.
+- **The conflict hold.** `DISPATCH fix-pr PR#<M>` on a conflict hold: the row carries an unresolved `conflict-hold:#<M>`, the merge bot's or one you recorded off the tick's `CONFLICT` line. It is the same slot with a different job, and no review file to hand over. Name it `fix-pr-<M>`, or the next suffix (`-b`, `-c` …) when that name is on record; render with `dispatch-prompt.mjs render fix-applier --kind conflict --member <name> …`; dispatch with the `agent` `ledger.mjs dispatch` printed, in the PR's existing worktree. Read the definition off that output (`fleet-fix-applier` whatever the row's `tier=`), never recall it. Settle `applied:<head>`, or `no-op` if no conflict was left, which lifts the merge hold; a dispatched-but-live one does not, and `failed`/`killed` leave the PR fix-due for a replacement.
+- **Then dispatch a red-check fixer** — on a `check`-job `failure` bound to the PR's current head that is not **solely** staleness: a `rebase-check` red, or heavy jobs `skipped`, that comes only off the behind-count gets no fixer (the five-condition note in `agents/fleet-fix-applier.agent.md` establishes that). Name `fix-pr-<M>`, or the next free suffix; render with `dispatch-prompt.mjs render fix-applier --kind red-check --member <name> …`, record with `ledger.mjs dispatch <pr#> <name>` before the call, and dispatch with the printed `agent` in the PR's existing worktree. While a review or a review fix-applier on the PR is live or still owes its report — a dispositions mismatch awaiting its retry and a conflict hold awaiting its fix-applier included — the red-check fixer does not fire: their push starts a new run, and a fixer racing them would work on a SHA that is still moving. The common case, the implementer's own first CI firing turning red before any review exists, still dispatches the review against that head as normal. The tick prints no `DISPATCH` for it, so you reconcile it yourself, and it always goes after the review, never before. It is told outright not to watch, poll or wait for CI: your persistent Monitor owns the next run on the pushed head, and the finisher gate — review returned AND fix-applier report sent — applies to this member the same way. Settle it `applied:<head>` once a fix is pushed. Settle it `no-op` only when the red turns out not to be this member's to fix — a flake that passes on rerun, or staleness — with nothing pushed; `no-op` counts as landed, so it never stands for "could not fix". Settle it `failed` when it cannot reach green, which the **Failure handling** row "Reviewer, fix-applier or red-check fixer cannot reach green" covers. Its three dispatch edges are under **The finisher gate**; their rationale is in `references/member-lifecycle.md` (The red-check fixer's three edges).
+- **The merge bot.** Named `merge-bot-<n>`; `ledger.mjs dispatch merge-bot` numbers it. Never two at once. Render `--member merge-bot-<n> --n <n> --scratch <scratch>`. Dispatch with the printed agent, omit `model`, and dispatch on the first `ready-to-merge` label without waiting for the finisher report.
+- **The finisher.** Its render and receives are in `references/finisher.md`.
 
 ### Reading a review result
 
@@ -463,7 +472,7 @@ set it, and never otherwise.
 It prints `actual/target` and a named ACTION per role, with the whole **Queue
 depth** guard table applied in code. Act on each line as it reads:
 
-- `PULL #<N> …` — one Pull per named ticket, in the order printed: `pull.mjs next --head <N>`, or the `pull.mjs answer` the row names (phase 1), then phase 2's dispatch.
+- `PULL #<N> …` — one Pull per named ticket, in the order printed: `pull.mjs next --head <N>`, or the `pull.mjs answer` the row names (phase 1), then the dispatch under **Dispatching the Pull's member**.
 - `REFRESHED shortlist: <n> entries; <k> lifted` — the tick refreshed the shortlist itself, and its `PULL` row already reads the result; `REFRESH FAILED` is yours, since `shortlist.mjs` could not run.
 - `SUGGEST /triage, hold idle` — nothing is admissible after the refresh: suggest `/triage` in the report, never run it.
 - `specs-dropped=#<N> …` — never actionable: log those tickets as specs awaiting to-tickets, not as no work.
@@ -488,7 +497,7 @@ depth** guard table applied in code. Act on each line as it reads:
 
 ## Phase 1 — Pull: judge, then claim or relabel
 
-A Pull is done when `pull.mjs next` exits 0 with its `DISPATCH` line, which phase 2 acts on, or exits 1 with the ticket gone from the Pull: answer each question it stops at, and take the next entry after an exit 1.
+A Pull is done when `pull.mjs next` exits 0 with its `DISPATCH` line, which the dispatch under **Dispatching the Pull's member** acts on, or exits 1 with the ticket gone from the Pull: answer each question it stops at, and take the next entry after an exit 1.
 
 Serial, main checkout, one Pull at a time. Never parallel, never inside a member —
 concurrent `worktree add` and label writes race.
@@ -498,7 +507,7 @@ main checkout (without `--head`, the next shortlist entry). It runs the
 mechanical steps in order and stops at each judgement with a `QUESTION
 <qid>:` block and exit 10; `pull.mjs answer <N> <qid> <token> [--path <p>] [--]
 [<text>…]` records the answer and resumes it. Exit 0 prints `DISPATCH {name,
-agent, brief}`, the `task` call phase 2 makes; exit 1 means the ticket left the
+agent, brief}`, the `task` call that the dispatch makes; exit 1 means the ticket left the
 Pull, so take the next entry; exit 2 names what could not be looked at —
 `next --head <N>` again retries a step that failed, the same `answer` again
 retries one that failed while applying an answer (the question stands), and
@@ -595,7 +604,7 @@ worktree re-created for an already-open PR is in references/isolation.md.
 
 | `pull.mjs` | At the Pull | Then |
 |---|---|---|
-| 0 `DISPATCH {…}` | decided, live, free, claimed, routed; row, brief and dispatch recorded | the `task` call (phase 2) |
+| 0 `DISPATCH {…}` | decided, live, free, claimed, routed; row, brief and dispatch recorded | the `task` call (**Dispatching the Pull's member**) |
 | 1 `LEFT #N: taken …` | in-flight hit, an in-flight check that could not answer, or `claim-ticket.sh` exit 2 | next entry |
 | 1 `LEFT #N: relabelled elsewhere` | no longer labelled `ready-for-agent` | next entry |
 | 1 `LEFT #N: closed: fixed by …` | `close` answered `yes` | next entry |
@@ -606,508 +615,18 @@ worktree re-created for an already-open PR is in references/isolation.md.
 | 3 | a usage mistake, or a token the question does not take | correct it; nothing was recorded |
 | 10 `QUESTION <qid>:` | a question pending | answer it |
 
-## Phase 2 — dispatch every member
+### Dispatching the Pull's member
 
 A dispatch is done when its `task` call is made, in the background, with the `agent` and the name `ledger.mjs dispatch` printed, and — for an implementer — the tier check has written its verdict: dispatch nothing on top of an unchecked one.
 
-### The implementer
+- **One claim, one dispatch, no queue.** Make one claim and then one dispatch of a new member under a name no member has held; nothing holds a queue. Claim what you dispatch and dispatch at once. Record `ledger.mjs dispatch` before the call.
+- **The implementer.** Dispatch with the printed `agent`, omit `model`, keep `name: impl-<N>`. **No per-call tier or effort anywhere on this path**: tier stays the agent definition's own frontmatter, whichever `fleet-implementer-<cell>` definition the Pull names, and a member's Resolved tier stays readable from its transcript. The prompt carries only what varies, and the Pull's own read of the ticket is pasted, never a request to re-fetch. A member settling with nothing is not a bail. Confirm death first, exactly as the Member-killed row does (Failure handling, below) — its mtime discriminator, never silence alone. Only the member's own bail report counts. A confirmed-dead member recovers exactly as the Member-killed row says — new member, new name, the SAME ticket — never a demotion.
+- **The tier check.** **Run the check right after the dispatch, and never reinstall the plugin or change `modelRoles` while any member is unchecked.** `tick --apply`, or `tier-check.mjs --batch <path>`, runs it. Dispatch nothing on top of an unchecked or mismatched member. **The tick holds the next Pull until that verdict exists.** Clear a mismatch by fixing the definition or the dispatch and dispatching the replacement at the right tier. A mismatch on a ticket whose issue is already CLOSED holds nothing: the tick probes that issue and drops it, since there is nothing left to replace. **After `/resume`, a carried implementer can hold the whole tick.** It holds when the check given this run's `session` finds no `<member>.jsonl` and exits 2, writing nothing. `HOLD (tier unchecked impl-<N>)` then stops the whole tick, not only that member's ticket. It clears once the member settles: one settled `killed` or `released` gets `tier-unverifiable=` from the same check, and one settled any other way ran, so pass the directory that dispatched it, as above. Until it settles, follow the carried token's reconciliation in references/phase-0.md, the "Resume the claims a dead run left without a PR" section, under its `prior: ancestor` branch: `proc://` reads `running` → wait; dead → the Member-killed row.
+- **The exploration rule.** **Every 5th Pull by ledger count goes at an exploration cell.** See references/pull.md. The printed CELL line is the whole routing decision: never re-derive `CELL`, never label a cell by hand. **Do not label it anywhere — the dispatch record already carries it.** **The readout counts DELIBERATE comparisons.** See references/pull.md.
 
-**A Pull is one claim followed by one dispatch of a new member under a name no
-member has held; nothing holds a queue.** The In-flight bound is the fleet's
-own accounting rather than anything the runtime enforces, and the member is
-fresh and never a wake of one that already ran. Admission is per slot and
-never batched, so there is nothing to hand a freed slot its next ticket but
-the next Pull.
+Pointers: the `/resume` rules are in `references/phase-0.md`; the tick HOLD tier rules are in `references/tick-rows.md`; shell traps are in `references/shell-traps.md`; the fix-applier's per-PR rulings are in `agents/fleet-fix-applier.agent.md`. Rationale for these rules: `references/member-lifecycle.md`.
 
-a Pull dispatches its member with one more `task` call — `agent` the definition `ledger.mjs dispatch` printed for it (below); name `impl-<N>`; in the background, so its report arrives on its own.
-
-**No workpool, and no kernel-resident handle.** A pool's only refill virtue —
-handing a queued item to a freed worker without a controller turn — is exactly
-what a Pull forbids, and its completions never arrive per member. `eval`'s
-`agent()` is not the omp call either: a kernel-resident handle dies with the
-kernel and needs a `wait`, while a `task` job is process-level and its report
-auto-delivers on its own, like every other member's.
-
-**No per-call tier or effort anywhere on this path**: tier stays the agent
-definition's own frontmatter, whichever `fleet-implementer-<cell>`
-definition the Pull names, and a member's Resolved tier stays readable from its transcript.
-
-**Claim what you are about to dispatch, and dispatch it at once**: `pull.mjs`'s
-claim step runs `claim-ticket.sh`, its route, row, render and dispatch steps
-follow in the same command, and your `task` call follows its `DISPATCH` line.
-
-**The dispatch is recorded before you make it**: `pull.mjs`'s row step writes the
-row, its render step renders the brief and its dispatch step runs `ledger.mjs
-dispatch`, whose `agent` and `brief.path` its `DISPATCH` line prints as `agent`
-and `brief`.
-
-**The prompt carries only what varies**: `pull.mjs`'s render step fills the
-implementer brief's placeholders from the Pull's own read, and the agent body
-carries everything shared, so never re-paste it.
-
-**The prompt pastes the Pull's own read of the ticket rather than telling the
-member to re-fetch it, and this still costs one `gh issue view` per ticket,
-never one per member.** The fresh-context design's isolation rationale — "every
-implementer re-reads its Agent Brief... from scratch"
-— is about a member
-never inheriting another ticket's context, not about where the bytes come from.
-Pasting the Pull's own read into the prompt keeps that: the member still gets the
-brief verbatim and re-derives nothing from a sibling. What it drops is the
-unconditional re-fetch of an issue the controller already has open, on every
-dispatch — the fetch the agent body still carries is the backstop for a brief
-that turns out to be insufficient, not the default path.
-
-**A member settling with nothing is not, by itself, a bail.** Each member's
-outcome arrives as its own job status. Settle (CONTEXT.md § Coordination) is
-three states on omp — `completed`, `failed`, `cancelled` — and reading
-`failed`/`cancelled` the same as a `completed` turn that had nothing to report
-is the exact collapse this line blocks: a member that died never chose to bail,
-so demoting its ticket on its silence demotes a ticket its member never got the
-chance to judge. Confirm death first, exactly as the Member-killed row does
-(Failure handling, below) — its mtime discriminator, never silence alone.
-**Only an explicit bail report — the member itself naming the cause — reaches
-Implementer bails before implementing** (**What a wake owes beyond its call**, above); a died or
-merely-quiet member's silence never does. A confirmed-dead member recovers
-exactly as the Member-killed row says — new member, new name, the SAME ticket —
-never a demotion.
-
-**Dispatch every implementer with the `agent` that `ledger.mjs dispatch`
-printed, and still omit `model` on the `task` call.** The
-tier lives in that definition's frontmatter (`agents/fleet-implementer-<cell>.agent.md`;
-`slow-high`, the policy cell, for a row with no `tier=`), which is what an
-omitted `model` takes first — the session's tier applies only when the definition
-names none, and a member dispatched with `model` set does not get the declared
-tier back. Omitting `model` is therefore still the mechanism; what changed is
-that the tier it resolves to is now declared and pinned rather than inherited by
-accident. Keep `name: impl-<N>`: the name is what makes a member, and both the
-spend classifier and `member-outcomes.mjs` read it.
-
-### The reviewer
-
-**Dispatch the review, never wait on it, and act when its result lands. That is the default path.** See references/reviewers.md.
-The tick names every PR owed one — `DISPATCH review PR#<M>`, oldest first —
-and each gets one review, once per PR:
-
-a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the five args `pr`, `branch`, `worktree`, `testCmd` and `scratch` — it loads `review-eval.mjs` through the Resolver (`~/.fleet/bin/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file into the review's own run root and reports its path and `reviewed=` token; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call. **`scratch` is the scratch root itself, the absolute path `scratch-root.mjs` prints, never the review side's `<scratch>/pr<N>` partition:** the review creates `pr<N>/` under it, so a `pr<N>` passed in nests every run root at `pr<N>/pr<N>/`, and the review refuses a `scratch` whose last component is `pr` plus digits before dispatching anything.
-
-Write the `review=` token with `ledger.mjs review <pr> <token>`, which appends
-it to the **PR's row** — the ticket row once `settle impl-<N>=PR#M` has run,
-else `#M`, created when neither exists — and prints that row's key. `review`
-is the only writer of `review=`/`reviewed=` tokens, so a PR's tokens sit on
-one row in the order you wrote them. The tick counts in-flight reviews off the
-ledger and nowhere else, so a review you launched and never recorded is one it
-names again. `review` reads the PR's review record across every row that maps
-to the PR, in ledger order, and refuses a write that adds a `reviewed=` with no
-open launch before it, a launch identity the PR already used, a second launch
-while one is open, or an unparseable `review=`/`reviewed=` (the ledger's token
-grammar, below), or any token that is not a review token. `row` refuses a
-write that adds a review token (one the row holds is carried), drops an open
-launch, names a member twice on the line, or makes a PR map to a second row. A
-bad token the ledger already holds is carried, never re-judged.
-
-### The fix-applier
-
-**Then dispatch a fix-applier** — on `DISPATCH fix-pr PR#<M>`, which the tick
-prints for a PR whose `reviewed=` counts survived or unverified findings that
-no review fix-applier
-has landed `applied:`/`no-op` on since, with no fix-applier live on it — one
-named member per PR, `fix-pr-<pr#>` (the next suffix when that name is already
-on record), never the PR's
-implementer, its brief rendered with `dispatch-prompt.mjs render fix-applier
---kind review --member fix-pr-<pr#> …` and then recorded with `ledger.mjs
-dispatch <pr#> fix-pr-<pr#>` before the call. Its brief carries the PR number, the worktree abs path, the PR's branch,
-the same `testCmd` you passed the review, and the **path** `<scratch>/pr<pr>/<run>/review.json`,
-`<run>` off the PR's latest `reviewed=` — never the findings. Every `<scratch>`
-in that brief is the absolute path `scratch-root.mjs` printed, the
-`dispositions-<its name>.json` record's included. The fix-applier owns every per-PR ruling you once made
-before dispatch: both mutual-exclusion scans, the suggested-fix re-derivation,
-`refuted=false` ≠ apply, per-site measurement for a sibling-site extension, and
-`testEnvironment`/`cwdAudit` before any result of the shared test run. It
-holds every finding and you hold none, so there is nothing for you to rank,
-relay or pre-rule — and a report from a refuter it spawns that surfaces to you
-is its to retrieve, never yours to scan or pass on.
-
-**A `DISPATCH fix-pr PR#<M>` on a conflict hold** — the row carries an
-unresolved `conflict-hold:#<M>`, the merge bot's (`run-merge-bot.md` step 1's
-fallback) or one you recorded off the tick's `CONFLICT` line —
-is the same slot with a different job, and no review file to hand
-over. Name it `fix-pr-<M>`, or the next suffix (`-b`, `-c` …) when that name is
-already on record — `dispatch` refuses a reused one — render its brief with
-`dispatch-prompt.mjs render fix-applier --kind conflict --member <name> …`,
-and dispatch it with the
-`agent` that `ledger.mjs dispatch` printed, in the PR's existing worktree.
-`dispatch` prints this member's definition, `fleet-fix-applier` whatever the
-row's `tier=` — read it off that output, never recall it. Its `conflict` brief carries the
-same worktree and branch identity paragraph, but in place of the review paragraphs:
-bring `<branch>` current with `origin/main`, resolving every conflict by
-`run-merge-bot.md`'s **No-undo audit**, run `<checkCmd>`/`<testCmd>`, push, report the new
-head. Settle it `applied:<head>` — `no-op` if no conflict was left — which is
-what lifts the tick's merge hold; a dispatched-but-live one does not, and
-`failed`/`killed` leave the PR fix-due for a replacement. It answers the
-hold and nothing else: survived or unverified findings of a returned review the row also carries
-stay unanswered through its settle, so the tick prints `DISPATCH fix-pr
-PR#<M>` again once it lands, and that one is a review fix-applier, dispatched
-as above. On a PR carrying
-`ready-to-merge`, the push moves the head after the label, so the next merge
-bot refuses it `head-moved-after-label-#<M>`: a fresh finisher, per **Failure
-handling**.
-
-**Then dispatch a red-check fixer** — on a `check`-job `failure` bound to the
-PR's current head that is not **solely** staleness: a `rebase-check` red, or
-heavy jobs `skipped`, that comes only off the behind-count gets no fixer (the
-five-condition note in the fix-applier body states how to establish
-that). The tick prints no `DISPATCH` for it, so you reconcile it yourself, and
-it always goes after the review, never before. Take the common case, the
-implementer's own first CI firing turning red before any review exists: the
-review is still dispatched against that head as normal, because a red suite is
-review evidence and not a blocker. While a review or a review fix-applier on
-the PR is live or still owes its report — a dispositions mismatch awaiting its
-retry and a conflict hold awaiting its fix-applier included — the red-check
-fixer does not fire: their push starts a new run, and a fixer racing them
-would work on a SHA that is still moving. These edges dispatch it, each the
-finisher's own: **Monitor: CI run completes** binding a red on a head
-whose review has returned and whose fix-applier, if any, has reported;
-**A fix-applier reports `no-op`**, or a SHA you have already bound, when that
-head's bound conclusion is red; and **A review result lands** with no finding
-and nothing to file, when that head's bound conclusion is red. The Monitor is
-edge-keyed on `<run-id>:<attempt>:<conclusion>`, so a red that fired before the
-review never fires again, and with no push there is no new run — the other
-edges are the only route there, so do not wait for an event. Edit one of these
-bullets without the others and what strands is exactly the red-only PR.
-
-Name it `fix-pr-<M>`, or the next free suffix (`-b`, `-c` …) — `dispatch`
-refuses a reused name — render its brief with `dispatch-prompt.mjs render
-fix-applier --kind red-check --member <name> …`, record it with `ledger.mjs dispatch <pr#> <name>`
-before the call, and dispatch it with the `agent` that command printed
-(`fleet-fix-applier`, as for a review fix-applier), in the PR's
-existing worktree. Its `red-check` brief carries the same worktree and branch
-identity paragraph, but in place of the review paragraphs: read the failing job's
-log, fix the cause, run `<checkCmd>`/`<testCmd>`, push, report the new head, and **stop**.
-It is told outright not to watch, poll or wait for CI: your persistent Monitor
-owns the next run on the pushed head, and the finisher gate — review returned
-AND fix-applier report sent — applies to this member the same way. Settle it
-`applied:<head>` once a fix is pushed. Settle it `no-op` only when the red
-turns out not to be this member's to fix — a flake that passes on rerun, or
-staleness — with nothing pushed; `no-op` counts as landed, so it never stands
-for "could not fix". Settle it `failed` when it cannot reach green, which the
-**Failure handling** row "Reviewer, fix-applier or red-check fixer cannot
-reach green" covers.
-
-**What a fix-applier receives.** Its standing text — the worktree and
-session-root discipline, the review result file and every ruling on it, the
-claim discipline, the refuter prompt, the kill rule, the stash prohibition, the
-dispositions record and the report rules — is the body of
-`agents/fleet-fix-applier.agent.md`, which the harness injects as its system
-prompt, so none of it is pasted. The brief carries what varies, and the
-renderer prints it: `~/.fleet/bin/fleet-run dispatch-prompt.mjs render
-fix-applier --kind <review|conflict|dispositions-retry|red-check> --member <name>
---worktree <abs-path> --branch <branch> --testCmd <testCmd> --checkCmd <checkCmd> --scratch <scratch>`,
-plus `--pr <pr#> --run <run>` for a review or a dispositions retry and
-`--mismatched-record <path> --violations <list>` for a retry. Then
-`ledger.mjs dispatch <pr#> <name>` records it before the call.
-
-### The finisher
-
-**What a finisher receives.** The instrument re-check, the test-run verdict
-rule, duty 1's audit script and what each of its exits means, duty 3's script
-and the halt-cause rule are the body of `agents/fleet-finisher.agent.md`, which
-the harness injects as its system prompt; none of them is pasted. The
-instrument-set rule is stated once, in **Rules that fail silently**, which no finisher
-is dispatched to read, so it reaches one through that body. The brief carries
-the PR, the worktree, the dispatch pin, `<testCmd>` and the scratch root:
-`~/.fleet/bin/fleet-run dispatch-prompt.mjs render finisher --kind <fresh|repair>
---member finisher-pr-<pr#> --pr <pr#> --pin <sha> --worktree <abs-path>
---testCmd <testCmd> --scratch <scratch>`, which `ledger.mjs dispatch <pr#>
-finisher-pr-<pr#>` records. See references/finisher.md.
-
-### The merge bot
-
-Per pass, named `merge-bot-<n>`, never two at once. `ledger.mjs dispatch
-merge-bot` names it before the dispatch call — `n` is 1 + the highest
-`merge-bot-<n>` the session holds, in the ledger's `## Dispatched` list, on a
-row or in `## Retired`, so it restarts at 1 only when none was carried or
-retired (a `dead` or `none` rotate, or a fresh start), a replacement for a
-dead bot takes the next `n`, and nobody counts. With no brief rendered for
-that name it refuses, naming the bot and the `dispatch-prompt.mjs render
-merge-bot --member merge-bot-<n> …` to run — render it, then run `ledger.mjs
-dispatch merge-bot` again. Dispatch
-it on the tick's `DISPATCH merge-bot`: the first `ready-to-merge` label is
-enough, and it never waits for the finisher's report. Its body
-(`agents/fleet-merge-bot.agent.md`) tells it to read
-`$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md` and run **one**
-pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace
-for late labels, then report once and exit — and that you dispatched it,
-which is what makes it hold that grace instead of arming its own watcher. Its
-brief is `~/.fleet/bin/fleet-run dispatch-prompt.mjs render merge-bot --member
-merge-bot-<n> --n <n> --scratch <scratch>`, `<scratch>` the absolute
-`scratch-root.mjs` output: the bot writes only under `<scratch>/pr<N>/merge-bot-<n>/`. **Dispatch
-it with the `agent` that `ledger.mjs dispatch merge-bot` printed and omit
-`model` on the call** — the tier lives in that definition's frontmatter,
-`agents/fleet-merge-bot.agent.md`, as the `@smol:low` route, which resolves
-through the operator's `modelRoles`.
-
-Rebase, wait for green, check the
-label, merge is checklist work, and a bad merge still needs the label and the
-per-job CI state to have been read correctly, which is exactly what a wrong
-merge later surfaces and a human resolves; `no-undo-audit.sh` is the
-deterministic, script-driven backstop run before every push specifically to
-catch a wrongly-resolved conflict, so the tier buys nothing that backstop
-doesn't already cover.
-
-**The shell traps live in the merge bot's agent body, not in its brief and not
-in a follow-up message.** A bot already looping cannot be corrected — the loop
-consumes the turns a correction would land in — so
-`agents/fleet-merge-bot.agent.md` carries **every entry in
-`references/shell-traps.md`'s Shell traps**, each written out in full: the rules
-with the measurements from that file beside them, and the bot has them before its first
-turn. The bot reads an exit code off `gh pr update-branch`, `merge-gate.mjs` and
-`prove-merge.sh`, which is the `PIPESTATUS` and read-only-`status` pair, and its
-grace poll captures `gh pr list` output and loops over it, which is the
-assigned-variable trap. Its brief names the bot and `<scratch>`, plus the
-one-line no-acknowledgement notice; do not paste the traps there. An edit to
-`references/shell-traps.md` lands in that body in the same change.
-
-### The tier check
-
-**After every Pull's dispatch, the tier check runs — a scripted step, never a
-prose reminder.** `tick --apply` runs it itself, a batch of one apiece, on every
-implementer it would print `HOLD (tier unchecked impl-<N>)` for, `session` off
-the phase-0 receipt, and prints `APPLIED tier-check impl-<N>: <verdict>`. By
-hand it is `~/.fleet/bin/fleet-run tier-check.mjs --batch <path-to-batch.json>`,
-which judges the implementer just dispatched on the ledger's terms. The definition it
-should have run under comes off its ticket row's `tier=` token: none means the
-policy cell, `fleet-implementer-slow-high`; `tier=<cell>` means
-`fleet-implementer-<cell>` — the same mapping `ledger.mjs dispatch` prints its
-`agent` from, so a call that names the printed `agent` passes this half. It
-fails the member two ways, one line each —
-`member: dispatched <agent>, expected <definition>` when its transcript says
-it was dispatched as anything else (a generic `task` dispatch fails even when
-its model happens to match), and `member: declared <m>/<l> resolved <m>/<l>`
-when the harness resolved a different model or level than that definition
-declares. The verdict lands on the ledger either way, written by the check
-itself: exit 0 appends `tier-ok=impl-<N>:<definition>` to the row, once
-however often it runs; exit 1 runs `ledger.mjs settle impl-<N> tier-mismatch`
-— or, for a member already settled another way, which `settle` will not
-re-settle, appends `tier-mismatch=impl-<N>:<definition>` instead. Exit 3 is
-the third verdict, `tier-unverifiable=impl-<N>:no-transcript`, appended once
-for a member settled `killed` or `released` anywhere on the ledger — a row
-or `## Dispatched` — whose `session` names an existing directory holding no
-`<member>.jsonl`: a dispatch that failed before a transcript was written. It
-says nothing about the tier and only clears the unchecked hold. Exit 2
-writes nothing — a usage error, which includes a LIVE member with no
-transcript; a member settled `PR#M`, `bailed` or `tier-mismatch` with none,
-which ran, so the `session` is the wrong directory — pass the one that
-dispatched it; a session directory that cannot be searched; and a `session`
-that is omitted, empty, or not an existing directory, live member or settled.
-A batch holding both a mismatch and an unverifiable member exits 1.
-
-**The tick holds the next Pull until that verdict exists.** Dispatching the
-next member on top of an unchecked or mismatched dispatch multiplies whatever
-silently degraded. The tick prints `HOLD (tier unchecked impl-<N>)` for the
-newest `impl-` member of a ticket whose row carries none of the three
-verdicts, whether that member is still running or already settled `bailed`,
-`killed`, `released` or `blocked`, and `HOLD (tier mismatch impl-<N>)` for a mismatched
-one. Only the newest member counts, so a replacement (`impl-<N>-b`) is what
-clears a mismatch — and is then owed its own check. A mismatch on a ticket
-whose issue is already CLOSED holds nothing: the tick probes that issue and
-drops it, since there is nothing left to replace. The tick reads no transcript
-itself: `tick --apply` runs the check, and an unchecked hold it leaves is
-cleared by running the check on that member by hand. A
-settled member's check works only when its transcript exists;
-without one, the verdict is `tier-unverifiable` for a member settled `killed`
-or `released`, and exit 2 naming the wrong session for any other. Clear a
-mismatch by fixing the definition or the dispatch and dispatching the
-replacement at the right tier.
-
-**After `/resume`, a carried implementer can hold the whole tick.** A live
-implementer rotate carried forward with no verdict on its row is unchecked,
-and once this session has been reopened with `/resume` its transcript sits
-under the earlier session's directory: the check given this run's `session`
-finds no `<member>.jsonl` and exits 2, writing nothing. `HOLD (tier unchecked
-impl-<N>)` then stops the whole tick, not only that member's ticket. It
-clears once the member settles: one settled `killed` or `released` gets
-`tier-unverifiable=` from the same check, and one settled any other way ran,
-so pass the directory that dispatched it, as above. Until it settles,
-follow the carried token's reconciliation in references/phase-0.md, the
-"Resume the claims a dead run left without a PR" section, under its
-`prior: ancestor` branch: `proc://` reads `running` → wait; dead → the
-Member-killed row.
-
-**Run the check right after the dispatch, and never reinstall the plugin or
-change `modelRoles` while any member is unchecked.** The check reads the
-installed definition and the live `modelRoles` at check time, not at
-dispatch time, so a late check judges a member against a tier it was never
-dispatched under.
-
-**The batch file is a JSON array, one entry per dispatched member** — under
-Pull, a batch of one, the member just dispatched: `{member}`.
-`member` is the AgentId the dispatch returns (`impl-<N>`). An entry that
-names neither `session` nor `transcript` takes the session directory phase
-0's receipt `.fleet/phase0.json` of `--ledger`'s workspace (else the cwd's,
-resolved as the default ledger is) records, and is exit 2 naming the receipt
-when it records none; the check reads `<session>/<member>.jsonl`, so a
-member with no assistant turn yet still resolves off its dispatch-time
-record. A `session` the entry gives
-wins over the receipt's; a caller already holding the exact transcript path
-may give `transcript` instead. The agent type an implementer was dispatched
-as lives only in its transcript. `resolvedModel`
-**and** `resolvedThinkingLevel` together — the dispatch's own job record —
-may ride beside it and are preferred for the model and level. An `impl-`
-entry carries no `agentFile`: its definition is the row's, never the
-caller's. `transcript`/`session` resolve relative to `--repo` (defaults to
-the plugin's own root), and the check reads and writes the run's own ledger
-unless `--ledger` names another.
-
-**The declaration is `model: "@<role>:<level>"` — a fleet tier route, never
-a vendor id.** `@slow`, `@task`, `@smol` resolve through the operator's
-`modelRoles`, so an install with no Anthropic model still runs the fleet
-at whatever each role points at; the explicit `:<level>` suffix wins over
-the role's baked one, and the tier check judges a member against the
-role's own target (`modelRoles.<role>`), never a model family.
-
-Before the run's first dispatch run `~/.fleet/bin/fleet-run tier-roles.mjs
---check --in-flight <B>`, `<B>` the run's In-flight bound (phase 0's
-`tier-roles` step runs it); exit 1 names every definition whose `model:` is not a route,
-every unset `modelRoles.<role>` a definition needs, every definition whose
-`:<level>` its role's target does not run at (omp's model catalog — omp
-would clamp it silently), except an implementer definition whose cell the
-router never selects (not in `router-table.json`'s `cells` or `rows` values,
-and not the policy cell), which is a notice and never stops the run; every
-`task.agentModelOverrides` entry that would shadow a fleet definition, and
-an `--agents` directory holding no `*.agent.md` definition,
-prints the exact remedy, and **stops the run** before any member is
-dispatched — the fleet reads that config and never writes it. omp's
-`task.maxConcurrency` is not the bound (it counts live members, not tickets,
-queues at its ceiling rather than refusing, and is session-wide): below
-2·B+2, or when it cannot be read, the check prints a notice line and still
-exits 0, so the notice is the operator's to read and report, never a reason to
-stop the run.
-
-### The exploration rule
-
-**Every 5th Pull by ledger count goes at an exploration cell.** See references/pull.md.
-
-**The router's arguments, and nothing past its line.** `--impl-row` is the
-row count the Pull creates — or, while an assignment is rolling (the latest
-row 5k and every row after it carry no `tier=`), that row's number;
-`--chain-head` marks a ticket another open ticket sequences after, which is
-what rolls it. `--arm` is `A` for an even ticket number and `B` for an odd
-one; a B Pull routes exactly as an A one until the table opens arm B.
-`--session` is this run's own session directory. The printed line is the
-whole routing decision — never re-derive `CELL` from the table, the guard or
-this paragraph. A missing or unreadable `.fleet/cost-guard.json` routes the
-default cell only (`REASON=guard-missing`), burn-in included, and `REASON`
-other than `ok` goes on the row as `route=<REASON>`, nowhere else.
-
-**Count the rate against the ledger, because a Pull is the dispatch unit.** One
-Pull is one member, so a rate counted per Pull is a rate counted per member —
-one implementer in five, however the Pulls fall across the run — and the
-ledger, not your memory, is what still holds the count after a compaction.
-
-**Do not label it anywhere — the dispatch record already carries it.** A
-cell's comparisons are a query, and `cell-readout.mjs` is that query: it joins
-`docs/metrics/ticket-features.tsv`, whose `chosen_cell` names the cell the
-router chose, to `docs/metrics/member-outcomes.tsv` on `session`+`agent`, and
-admits a row only when its `subagent_type` is that cell's
-`fleet-implementer-<cell>` definition and its `effort` is the cell's level.
-That column is the record of what each member was dispatched AS, scraped like
-every other column, so it survives the file's regeneration and mislabels no
-historical row — the pre-cutover `fleet-implementer` and
-`fleet-implementer-alt` rows are no cell's, and the readout never admits them.
-A hand-set column would fail both of those tests, and one derived against
-today's declared tiers would mislabel every historical row.
-
-**The readout counts DELIBERATE comparisons.** See references/pull.md.
-
-**Why one in five within the run, not a week of one tier then a week of the other:**
-tier would then be confounded with calendar date and therefore with prompt
-evolution, which is exactly the state the rows already on disk are in, and why
-they cannot answer the question they were collected for.
-
-The raw split still favours the top tier — 3 failures in 11 `routine`/`sonnet`
-rows against 3 in 55 `routine`/`opus`. **Do not read that as a tier result.**
-Tier remains largely confounded with calendar date and therefore with prompt
-evolution: 8 of the 11 `sonnet` rows fall on 2026-08-13 to 08-17, before the
-window in which 54 of the 55 `opus` rows were run, and the dispatch prompts
-gained rules throughout. The confound is **weakened, not resolved.** Three
-`sonnet` rows now break it rather than one — a maintainer-authorized
-deliberate control (2026-08-20) and two more (2026-08-21) —
-all three run against prompts of the same vintage as the `opus`
-rows, and **all three passed**, which is the direction opposite the raw split.
-Three is still not a result. **What replaces this argument going forward is the
-within-run pairing above**: one implementer in five at the alternate tier makes
-tier orthogonal to date by construction, so the question stops depending on
-whichever rows history happened to leave. **Orthogonal to date, and to nothing
-else** — the alternate member is whichever ticket the 5th Pull draws, rolling
-past every ticket another open one sequences after, while
-the top tier absorbs all of those, so the pairing trades the calendar confound
-for a difficulty one that runs in a known direction. That is why the four covariates
-exist: condition a pair comparison on `sizing`/`profile`/`loc`/`files` before
-reading it as a tier result, never on the raw split.
-
-`minted_false_claim` **discriminates and no longer reads "always yes"** — 20 of
-the 66 `routine` rows carry `no`, 18 at `opus` and 2 at `sonnet`.
-Read it as a property of the TICKET before the tier: a pure code simplification
-need not add prose, while a correction ticket adds prose by construction. The
-honest summary is unchanged and is the reason this paragraph exists: the guard
-fired on the criterion the maintainer chose in advance, not on a demonstration
-that the cheaper tier is worse.
-
-`row` **replaces the whole line**, it does not append. To add a token to a row
-that exists — `ci=`, `held-behind:#M`, `conflict-hold:#M`, `label-off=`, `ports=`
-— run `ledger.mjs token <key> <token>…`, which keeps every token already on the
-row and takes a PR's number as the key. A `row` over a row that already carries
-`KILLED`, `ports=` or `→ PR#` must repeat those tokens or they are gone, and its
-stderr, `rewrote row #N; dropped: <token>…`, names each token it lost.
-
-`ledger.mjs read` is safe on a pipe as well as a redirect: its payload used to
-be abandoned at the pipe buffer and still exit 0, which is what left `board.mjs`
-reporting `ledger read parse failed` and serving a blind cockpit for a whole run.
-Every use above is a recovery path, so a payload that arrives short
-lands exactly where a settled `ruled:` is unrecoverable — which is why the
-script's own suite pins that `read`, `row`, `filed` and `ruled` each reach a
-pipe whole.
-
-`check` reaches a pipe whole at both of its exits too. Its ALREADY FILED exit
-sits mid-branch, where falling through would run the near-miss ranking and the
-tracker search that exit exists to skip — so `check`'s branch is a function now,
-where `process.exitCode` carries the code and a `return` is what skips them.
-No payload this script prints is abandoned to `process.exit()` any more,
-and the suite drives both of `check`'s arms through a pipe on a payload the
-ledger sizes rather than argv. So trust that payload — and read `verdict`,
-because a searched-and-clean tracker and one that was never read share exit 0.
-
-The consumer side raised its cliff rather than removing it. `board.mjs` reads
-`ledger.mjs read` with an explicit `maxBuffer`, so a payload past node's
-default is carried rather than killed mid-flight and reported as an
-unreachable tool — which is how the blind cockpit came back at HTTP 200 even
-after the pipe cut was gone. That cap is deliberately bounded, so a
-payload past it lands in the same blind cockpit — and so does a ledger that
-cannot be read at all, at any size. The read fails open to an empty ledger, and
-`board.json`'s `ledgerState` field now distinguishes a read that failed or
-didn't parse from one that succeeded (`unread`/`unparsed`/`read`) —
-`spend` in the same payload carries its own error the same way. Zeroes
-on the cockpit are not yet proof the pipeline is idle.
-
-### The test command every gate runs
-
-**Where `testCmd` comes from:** the repository's Test entrypoint, out of the
-Recipe cache phase 0's Recipe derivation step proved —
-`~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main` prints it — and the one you
-hand specialists per `review-and-fix.md`'s **Give specialists a stack-free test command**. Pass
-the same command to the review, to the fix-applier, and to the finisher — whose
-duty-2 mutation
-gate runs it too — so every gate runs one command. Omit it from the review args
-and the review (`review-core.mjs`, in a runner) reads the same cache itself,
-refusing outright when there is none; the fix-applier has no such fallback, so
-substituting `<testCmd>` with nothing leaves it no gate at all.
-
-The review wraps its own one run, so its args carry the bare
-command; a wrapped string handed to it anyway is harmless, the inner wrapper
-being the nested case. The fix-applier and the finisher run what you hand them,
-so hand them the wrapped string as `<testCmd>` —
-`~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command
-written `'\''` — and it is still one command for every gate.
+**The test command every gate runs.** Pass the same command to the review, to the fix-applier, and to the finisher — whose duty-2 mutation gate runs it too — so every gate runs one command. The fix-applier and the finisher run what you hand them, so hand them the wrapped string as `<testCmd>` — `~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command written `'\''` — and it is still one command for every gate. The review wraps its own one run, so its args carry the bare command; a wrapped string handed to it anyway is harmless, the inner wrapper being the nested case. Omit it from the review args and the review (`review-core.mjs`, in a runner) reads the same cache itself, refusing outright when there is none; the fix-applier has no such fallback, so substituting `<testCmd>` with nothing leaves it no gate at all. See `references/isolation.md` (the stack-free test command).
 
 **Where `<branch>` comes from:** the PR's head branch — `gh pr view <N> --json headRefName -q .headRefName`, or the same branch you cut the worktree from. See references/reviewers.md.
 
@@ -1156,7 +675,7 @@ Dispatch a finisher only when every test here passes at once — the review retu
   same goes for a red one: a red that fired before the review never fires
   again, so the **fix-applier reports `no-op`** and **review result lands**
   bullets are also the only routes to the red-check fixer there.
-  Then run the tick.
+  Then run the tick. These edges dispatch it, each the finisher's own: **Monitor: CI run completes** binding a red on a head whose review has returned and whose fix-applier, if any, has reported; **A fix-applier reports `no-op`**, or a SHA you have already bound, when that head's bound conclusion is red; and **A review result lands** with no finding and nothing to file, when that head's bound conclusion is red.
 - **A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch
   the finisher **now**, against the existing head — when that head's bound
   conclusion is red, the red-check fixer instead (**Then dispatch a red-check
@@ -1172,8 +691,7 @@ Dispatch a finisher only when every test here passes at once — the review retu
   whole route to a finisher**: a `no-op` report satisfies the gate above by
   itself — the review has returned, because a fix-applier exists only after it
   did, and the member has reported — so nothing further is owed and no further
-  event is coming. Edit either bullet without the other and what strands is
-  exactly the PR that needed no fixes.
+  event is coming. Edit either bullet without the other and what strands is exactly the PR that needed no fixes. Edit one of these bullets without the others and what strands is exactly the red-only PR.
 - **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`** → no workflow run will ever
   complete for this repo, so the CI-run-completion edge above never fires and
   waiting for it stalls the whole PR — the same silent-stall shape reported
@@ -1586,6 +1104,8 @@ and flag the PR for a human. A new review of the PR counts again from none.
 
 These rules fail silently when they are skipped: check each before you act on a member's silence, and stop reading silence as a report or as assent.
 
+Zeroes on the cockpit are not yet proof the pipeline is idle.
+
 **A report is delivered, not implied by ending a turn.** Every member owes
 the controller one report naming its outcome before it exits — including a
 member whose prompt carries no explicit report line. The "report the SHA",
@@ -1840,7 +1360,7 @@ untouched, so re-running it is safe. That append is the whole duty.
 
 The row's last four fields are the ticket's difficulty, and they are what lets a
 tier comparison condition on the thing that swamps it. `sizing` is the
-**member's** own `light`/`heavy` verdict from its phase-2 `sizing-a-ticket`
+**member's** own `light`/`heavy` verdict from its dispatched `sizing-a-ticket`
 run, which `append` reads itself off the member's report file
 (`<scratch>/reports/impl-<ticket>[-x].json`, its `sizing.verdict`, the highest
 retry letter's when there are several), so you pass no `--sizing`; the member
@@ -2009,7 +1529,7 @@ own, a row still carrying a live token, which rotate carries forward with
 its live `## Dispatched` entries (phase 0). Never rotate mid-run: it is
 phase 0's step alone.
 
-One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`):
+One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`; `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row):
 
 ```
 #<t1> impl-<t1>=PR#<p1> → PR#<p1> → MERGED 73b356de
@@ -2029,7 +1549,7 @@ live count from it, so nobody states one. Write neither by hand:
   merge-bot` names the next bot itself. It prints `{member, agent, ticket,
   line, created, total, brief}`, `brief` the `{path, sha256}` of the rendered
   brief the `task` call is handed; `agent` is the definition the `task` call names — an
-  implementer's comes off its row's `tier=` (phase 2's tier check states the
+  implementer's comes off its row's `tier=` (the tier check under **Dispatching the Pull's member** states the
   mapping), a finisher's and a merge bot's are their own definitions, and a
   fix-applier's is `fleet-fix-applier` for every kind of work. It
   refuses a member whose `briefs/<member>.json` beside the ledger is missing,
@@ -2114,7 +1634,7 @@ row maps, or a rewrite adding a `PR#M` mention to another row — naming the
 PR's row (`settle impl-N=PR#M` applies the same rule after its fold).
 
 `→ PR#M` stays as the human-readable arrow; the tick reads only the `=`
-tokens. `tier=<cell>` marks an Exploration Pull's cell and `route=<REASON>` a router fallback (phase 2), and `excluded ·
+tokens. `tier=<cell>` marks an Exploration Pull's cell and `route=<REASON>` a router fallback (the dispatch's CELL line), and `excluded ·
 behind-pr:#M | behind-issue:#M` is an Exclusion (phase 1) — a ticket row like
 any other, never a section of its own.
 

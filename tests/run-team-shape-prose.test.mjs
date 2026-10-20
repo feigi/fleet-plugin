@@ -128,7 +128,6 @@ const TICKET_ORDER = [
   "## The wake table",
   "## The tick's rows",
   "## Phase 1 — Pull: judge, then claim or relabel",
-  "## Phase 2 — dispatch every member",
   "## The finisher gate",
   "## Judgement rules the drivers stop for",
   "## Failure handling",
@@ -233,7 +232,7 @@ export const firstParagraph = ({ blocks }) => blocks.find((b) => b.kind !== "hea
 
 test("every `## ` section opens with a paragraph that states what the controller does and when it is done", () => {
   const sections = sectionsOf(SKILL);
-  assert.ok(sections.length >= 19, `${sections.length} sections read — the splitter is broken`);
+  assert.ok(sections.length >= 18, `${sections.length} sections read — the splitter is broken`);
   for (const section of sections) {
     const first = firstParagraph(section);
     assert.ok(first !== undefined && first.kind === "para", `${section.heading} does not open with a paragraph`);
@@ -376,7 +375,11 @@ test("references/tick-rows.md names every row the tick's list names", () => {
 // references/ file or an agent body already carries, named with what stands
 // in its place.
 const PHASE_3 = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "run-team-moved-text", "phase-3-dispositions.json"), "utf8"));
+// The cut that removed `## Phase 2 — dispatch every member` keeps its own pairs in
+// tests/fixtures/run-team-moved-text/phase-2-dispositions.json, in the same shape.
+const PHASE_2 = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "run-team-moved-text", "phase-2-dispositions.json"), "utf8"));
 const CHANGED = [
+  ...PHASE_2.changed,
   ...PHASE_3.changed,
   [
     "**Pin once**, at phase 0 step 0 below, from the main checkout you are running this from — never from a member's worktree, which is gitignored and carries no baseline: `~/.fleet/bin/fleet-run instruments.sh --pin`.",
@@ -417,10 +420,6 @@ const CHANGED = [
   [
     "Its four duties are a checklist — audit the worktree, confirm every deferral has a tracker home and re-run the acceptance mutation, apply one release label, report — and the merge gate downstream still catches whatever it gets wrong, the same argument that puts the merge bot on the same tier below.",
     "Its four duties are a checklist — audit the worktree, confirm every deferral has a tracker home and re-run the acceptance mutation, apply one release label, report — and the merge gate downstream still catches whatever it gets wrong, the same argument that puts the merge bot on the same tier above."
-  ],
-  [
-    "The instrument-set rule is stated once, at the top of this file, which no finisher is dispatched to read, so it reaches one through that body.",
-    "The instrument-set rule is stated once, in **Rules that fail silently**, which no finisher is dispatched to read, so it reaches one through that body."
   ],
   [
     "A bot already looping cannot be corrected — the loop consumes the turns a correction would land in — so `agents/fleet-merge-bot.agent.md` carries **every entry in Shell traps**, each written out in full: the rules in that section with the measurements from `references/shell-traps.md` beside them, and the bot has them before its first turn.",
@@ -511,10 +510,6 @@ const CHANGED = [
     "The deficit is then *computed, not remembered*, which is the whole point: a table you must remember to consult is one you will not consult under a merge-side event storm, and that is how implementers reached 0/target with ~57 `ready-for-agent` in supply while nobody noticed (#3)."
   ],
   [
-    "An entry that names neither `session` nor `transcript` takes the session directory phase 0's receipt `.fleet/phase0.json` records, and is exit 2 naming the receipt when it records none; the check reads the member's own `<session>/<member>.jsonl` directly, so a member with no assistant turn yet still resolves off its dispatch-time record.",
-    "An entry that names neither `session` nor `transcript` takes the session directory phase 0's receipt `.fleet/phase0.json` of `--ledger`'s workspace (else the cwd's, resolved as the default ledger is) records, and is exit 2 naming the receipt when it records none; the check reads `<session>/<member>.jsonl`, so a member with no assistant turn yet still resolves off its dispatch-time record."
-  ],
-  [
     "**A finisher failed or was killed** → `ledger.mjs settle finisher-pr-<M>=failed` for a finisher that crashed or gave up, `=killed` for one that was killed; no label, and the tick prints no dispatch for it.",
     "**A finisher failed or was killed** → the **Member confirmed dead or never dispatched** wake (`member-died finisher-pr-<M>`), which settles it `failed` or `killed`; no label, and the tick prints no dispatch for it."
   ],
@@ -531,18 +526,6 @@ const CHANGED = [
     "A `running` row → the mtime discriminator below, two polls: moved means BLOCKED and alive; frozen at both polls **and** no artifact movement → `write proc://<member>/kill`, the **Member confirmed dead or never dispatched** wake, fresh name."
   ],
   [
-    "Its `conflict` brief carries the same worktree and branch identity paragraph, but in place of the review paragraphs: bring `<branch>` current with `origin/main`, resolving every conflict by `run-merge-bot.md`'s **No-undo audit**, run `<testCmd>`, push, report the new head.",
-    "Its `conflict` brief carries the same worktree and branch identity paragraph, but in place of the review paragraphs: bring `<branch>` current with `origin/main`, resolving every conflict by `run-merge-bot.md`'s **No-undo audit**, run `<checkCmd>`/`<testCmd>`, push, report the new head."
-  ],
-  [
-    "Its `red-check` brief carries the same worktree and branch identity paragraph, but in place of the review paragraphs: read the failing job's log, fix the cause, run `<testCmd>`, push, report the new head, and **stop**.",
-    "Its `red-check` brief carries the same worktree and branch identity paragraph, but in place of the review paragraphs: read the failing job's log, fix the cause, run `<checkCmd>`/`<testCmd>`, push, report the new head, and **stop**."
-  ],
-  [
-    "The brief carries what varies, and the renderer prints it: `~/.fleet/bin/fleet-run dispatch-prompt.mjs render fix-applier --kind <review|conflict|dispositions-retry|red-check> --member <name> --worktree <abs-path> --branch <branch> --testCmd <testCmd> --scratch <scratch>`, plus `--pr <pr#> --run <run>` for a review or a dispositions retry and `--mismatched-record <path> --violations <list>` for a retry.",
-    "The brief carries what varies, and the renderer prints it: `~/.fleet/bin/fleet-run dispatch-prompt.mjs render fix-applier --kind <review|conflict|dispositions-retry|red-check> --member <name> --worktree <abs-path> --branch <branch> --testCmd <testCmd> --checkCmd <checkCmd> --scratch <scratch>`, plus `--pr <pr#> --run <run>` for a review or a dispositions retry and `--mismatched-record <path> --violations <list>` for a retry."
-  ],
-  [
     "`NEED resume #<n> <worktree> <branch>` — a dead run's claim with no PR.",
     "`NEED resume #<n> <worktree> <branch>` — a dead run's claim: no PR, or not only `CLOSED` ones."
   ]
@@ -550,6 +533,7 @@ const CHANGED = [
 
 // Sentences deleted outright, each named with what stands in its place.
 const DELETED = [
+  ...PHASE_2.deleted,
   ...PHASE_3.deleted,
   [
     "**`impl-<N>/`** goes once issue #N is CLOSED, or when it is OPEN, no live `impl-<N>` token names it and nothing under it has changed in 7 days.",
@@ -582,6 +566,30 @@ const DELETED = [
   [
     "`hub cancel` leaves a peer hard-aborted and unmessageable, but a `failed` job's peer can stay `idle` and answer normally.",
     "references/member-lifecycle.md's two-axes paragraph, which says the same — `hub cancel` → `cancelled`, the peer hard-aborted and unmessageable, and a `failed` job's peer can stay `idle` and resumable — and which SKILL.md's Recovery section points at"
+  ],
+  [
+    "The instrument-set rule is stated once, at the top of this file, which no finisher is dispatched to read, so it reaches one through that body.",
+    "agents/fleet-finisher.agent.md, which carries the instrument-set rule a finisher reads"
+  ],
+  [
+    "An entry that names neither `session` nor `transcript` takes the session directory phase 0's receipt `.fleet/phase0.json` records, and is exit 2 naming the receipt when it records none; the check reads the member's own `<session>/<member>.jsonl` directly, so a member with no assistant turn yet still resolves off its dispatch-time record.",
+    "closeout.mjs's transcript lookup, which tests/closeout.test.mjs pins"
+  ],
+  [
+    "Its `conflict` brief carries the same worktree and branch identity paragraph, but in place of the review paragraphs: bring `<branch>` current with `origin/main`, resolving every conflict by `run-merge-bot.md`'s **No-undo audit**, run `<testCmd>`, push, report the new head.",
+    "dispatch-prompt.mjs's `conflict` kind, which renders the identity paragraph; tests/dispatch-prompt.test.mjs pins the render"
+  ],
+  [
+    "Its `red-check` brief carries the same worktree and branch identity paragraph, but in place of the review paragraphs: read the failing job's log, fix the cause, run `<testCmd>`, push, report the new head, and **stop**.",
+    "dispatch-prompt.mjs's `red-check` kind, which renders the identity paragraph; tests/dispatch-prompt.test.mjs pins the render"
+  ],
+  [
+    "The brief carries what varies, and the renderer prints it: `~/.fleet/bin/fleet-run dispatch-prompt.mjs render fix-applier --kind <review|conflict|dispositions-retry|red-check> --member <name> --worktree <abs-path> --branch <branch> --testCmd <testCmd> --scratch <scratch>`, plus `--pr <pr#> --run <run>` for a review or a dispositions retry and `--mismatched-record <path> --violations <list>` for a retry.",
+    "dispatch-prompt.mjs's render flags, printed by its usage; tests/dispatch-prompt.test.mjs pins the render"
+  ],
+  [
+    "test --at origin/main` prints it — and the one you hand specialists per **Give specialists a stack-free test command** above.",
+    "plugin/commands/review-and-fix.md's **Give specialists a stack-free test command**, which carries the rule"
   ]
 ];
 

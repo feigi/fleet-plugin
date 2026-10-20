@@ -156,12 +156,13 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
     /No\s+per-dispatch\s+knob\s+turns\s+any\s+of\s+this\s+off[\s\S]{0,50}no\s+kernel,\s+executor\s+or\s+cwd\s+field[\s\S]{0,180}session\s+setting\s+a\s+child\s+inherits,\s+not\s+something\s+one\s+dispatch\s+can[\s\S]{0,30}set\s+for\s+one\s+member/,
     "the section no longer records that no per-dispatch knob isolates a member's kernel, or drops the inherited-session-setting reason behind it",
   );
-  // The measurement is only worth recording if it reaches members. Phase 2 is
-  // where the rules are carried verbatim, so the pointer is pinned with it.
+  // The measurement is only worth recording if it reaches members. The
+  // dispatch section is where the rules are carried verbatim, so the pointer is
+  // pinned with it.
   assert.match(
     probes(),
-    Pin.phrase("**Phase 2** carries all three rules to every member"),
-    "the section no longer points at the phase that actually delivers these rules to a member",
+    Pin.phrase("**Dispatching the Pull's member** carries all three rules to every member"),
+    "the section no longer points at the dispatch section that delivers these rules to a member",
   );
 });
 

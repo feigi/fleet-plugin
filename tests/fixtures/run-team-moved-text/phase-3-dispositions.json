@@ -2,7 +2,7 @@
   "changed": [
     [
       "**Only an explicit bail report — the member itself naming the cause — reaches Implementer bails before implementing** (phase 3, below); a died or merely-quiet member's silence never does.",
-      "**Only an explicit bail report — the member itself naming the cause — reaches Implementer bails before implementing** (**What a wake owes beyond its call**, above); a died or merely-quiet member's silence never does."
+      "**Only an explicit bail report — the member itself naming the cause — reaches Implementer bails before implementing**; a died or merely-quiet member's silence never does."
     ],
     [
       "The member-facts scrape, the drain of the pending ticket-features rows and the commit of the metrics files are steps of `closeout.mjs finish`, which **End of run** (Phase 3) drives.",
@@ -43,10 +43,6 @@
     [
       "Apply the finisher gate (**Reviewers**: the `check` job green on the current head), then dispatch the next-suffix finisher at that head, one letter past the highest the PR has used: render its brief with `dispatch-prompt.mjs render finisher --kind repair --member finisher-pr-<M>-<x> …`, then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`.",
       "Apply the finisher gate (**The finisher gate**: the `check` job green on the current head), then dispatch the next-suffix finisher at that head, one letter past the highest the PR has used: render its brief with `dispatch-prompt.mjs render finisher --kind repair --member finisher-pr-<M>-<x> …`, then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`."
-    ],
-    [
-      "test --at origin/main` prints it — and the one you hand specialists per **Give specialists a stack-free test command** above.",
-      "test --at origin/main` prints it — and the one you hand specialists per `review-and-fix.md`'s **Give specialists a stack-free test command**."
     ],
     [
       "`claim-ticket.sh`, `release-ticket.sh`, `reap.sh` and `inflight.sh` are git-native and operate on the single shared ref store every worktree and the main checkout read and write directly (**Phase 1**, **Reap after each merge pass**, **Release the claims that never became PRs** above); nothing in omp's `task` model touches that store, so none of the four scripts carries a dialect branch.",

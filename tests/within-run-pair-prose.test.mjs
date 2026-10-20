@@ -19,23 +19,22 @@ const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 // Phase 1's step paragraphs moved into references/pull.md.
 const PULL_MD = Pin.file(join(REPO, "skills", "run-team", "references", "pull.md"));
 
-// Paragraph-tight, and deliberately NARROWER than the dispatch slice in
-// implementer-model-tier.test.mjs: widened to the phase, the tier-guard
-// paragraphs below would satisfy half of these pins on their own.
-const dispatch = () =>
-  RUN_TEAM.between("**Dispatch every implementer", "The raw split still favours the top tier", "run-team phase 2 dispatch rule").text;
+// The controller's per-member dispatch rules: the `### Dispatching the Pull's
+// member` subsection alone, so the absence pins below read the dispatch rules
+// and nothing else of the Pull.
+const dispatch = () => RUN_TEAM.section("### Dispatching the Pull's member", "run-team dispatch section").text;
 
-// The every-5th-Pull paragraph moved, with its measurement, to
-// references/pull.md; phase 2 keeps the rule beside the pointer.
+// The exploration rule's text lives in references/pull.md; the dispatch
+// section keeps the rule beside the pointer.
 const exploration = () => PULL_MD.section("## Every 5th Pull goes at an exploration cell", "run-team references/pull.md exploration cell").text;
 
-test("phase 2 keeps the every-5th-Pull rule beside its pointer to references/pull.md", () => {
+test("the dispatch section keeps the every-5th-Pull rule beside its pointer to references/pull.md", () => {
   assert.match(dispatch(), Pin.phrase("**Every 5th Pull by ledger count goes at an exploration cell.** See references/pull.md."));
 });
 
-test("phase 2 dispatches an exploration cell's implementer on every 5th Pull", () => {
-  const slice = dispatch();
-  assert.match(slice, /fleet-implementer-<cell>/, "phase 2 no longer dispatches an exploration cell at all");
+test("the exploration section dispatches an exploration cell's implementer on every 5th Pull", () => {
+  const slice = exploration();
+  assert.match(slice, /fleet-implementer-<cell>/, "the exploration section no longer dispatches an exploration cell at all");
   // The RATE, not just the existence. "Dispatch some at an exploration cell"
   // reproduces the block design the pairing exists to replace.
   //
@@ -47,7 +46,7 @@ test("phase 2 dispatches an exploration cell's implementer on every 5th Pull", (
   assert.match(
     slice,
     /every 5th Pull[^.]{0,60}exploration cell|exploration cell[^.]{0,60}every 5th Pull/i,
-    "phase 2 no longer orders the rate — every 5th Pull is what makes the pair within-run",
+    "the exploration section no longer orders the rate — every 5th Pull is what makes the pair within-run",
   );
 });
 
@@ -57,25 +56,25 @@ test("phase 2 dispatches an exploration cell's implementer on every 5th Pull", (
 // green through every existing run-team prose test, because nothing reads
 // the concrete row-count claim — only the "every 5th Pull" phrase two
 // sentences above it.
-test("phase 2 counts the exploration cell by ledger row 5, 10, 15 …, not by any other cadence", () => {
+test("the exploration section counts the exploration cell by ledger row 5, 10, 15 …, not by any other cadence", () => {
   const slice = exploration();
   assert.match(
     slice,
     /the Pull that creates row 5, 10, 15 …/,
-    "phase 2 no longer names row 5, 10, 15 … as the concrete exploration-cell cadence",
+    "the exploration section no longer names row 5, 10, 15 … as the concrete exploration-cell cadence",
   );
 });
 
-test("phase 2 does not tell the exploration member it is a control", () => {
+test("the exploration section does not tell the exploration member it is a control", () => {
   // A member that knows it is being measured is not measuring the same thing.
   assert.match(
     exploration(),
     /do not tell the member it is a control/i,
-    "phase 2 no longer withholds the control status from the member",
+    "the exploration section no longer withholds the control status from the member",
   );
 });
 
-test("phase 2 does NOT ask the controller to label the control", () => {
+test("the dispatch section does NOT ask the controller to label the control", () => {
   // A hand-set control column would not survive the metrics file's
   // regeneration, and one derived against today's declared tiers would
   // mislabel every historical row. The pairing is a QUERY over
@@ -84,23 +83,18 @@ test("phase 2 does NOT ask the controller to label the control", () => {
   assert.doesNotMatch(
     slice,
     /control=yes|mark .{0,20}control/i,
-    "phase 2 asks for a hand-set control label — it cannot survive a regeneration",
-  );
-  assert.match(
-    slice,
-    /member-outcomes\.tsv/,
-    "phase 2 no longer says where the pairing is recovered from, so the label comes back",
+    "the dispatch section asks for a hand-set control label — it cannot survive a regeneration",
   );
 });
 
-test("phase 2 says why the pairing is within-run and not week-by-week", () => {
+test("the within-run rationale says why the pairing is within-run and not week-by-week", () => {
   // Without the reason, the every-5th-Pull rate reads as arbitrary overhead and the next
   // cost-trimming pass converts it back into a block design — which is the
   // state #864 documents.
   assert.match(
-    dispatch(),
-    /confounded with calendar date|confounded with the calendar/i,
-    "phase 2 no longer says what within-run pairing buys — the rate reads as arbitrary cost",
+  PULL_MD.section("## Why the exploration pairing is within-run", "run-team references/pull.md within-run rationale").text,
+  /confounded with calendar date|confounded with the calendar/i,
+  "the within-run rationale no longer says what within-run pairing buys — the rate reads as arbitrary cost",
   );
 });
 
@@ -111,7 +105,7 @@ test("phase 2 says why the pairing is within-run and not week-by-week", () => {
 // ROLE ONLY) went with the pair: the grid varies role, level, or both by
 // design (spec 2026-09-28 § 2).
 
-test("phase 2 counts the rate off the ledger's impl- rows, and a replacement does not count again", () => {
+test("the exploration section counts the rate off the ledger's impl- rows, and a replacement does not count again", () => {
   // The pin above binds the WORDS, not a countable rule — the same gap the old
   // one-per-staged-set rate had, measured then: appending either explicit
   // resolution of its wording left every assertion GREEN while the two readings
@@ -127,22 +121,22 @@ test("phase 2 counts the rate off the ledger's impl- rows, and a replacement doe
   assert.match(
     slice,
     /Count\s+the\s+`impl-`\s+rows\s+in\s+`\.fleet\/ledger\.md`\s+at\s+Pull\s+time/,
-    "phase 2 no longer says what the every-5th count is counted over — the rate is ambiguous again",
+    "the exploration section no longer says what the every-5th count is counted over — the rate is ambiguous again",
   );
   assert.match(
     slice,
     /records\s+`tier=<cell>`\s+in\s+the\s+row,\s+and\s+a\s+replacement\s+inherits\s+the\s+row's\s+tier/,
-    "phase 2 no longer records the cell on the row, or no longer says a replacement inherits it rather than counting as a Pull",
+    "the exploration section no longer records the cell on the row, or no longer says a replacement inherits it rather than counting as a Pull",
   );
   // The cell is the router's draw, never one this prose names: a cell
   // written here is a second copy of the routing, free to disagree with the
   // table the router reads.
-  assert.match(slice, /the\s+router\s+draws\s+its\s+cell/, "phase 2 no longer says the router draws the exploration cell");
-  assert.doesNotMatch(`${dispatch()}\n${slice}`, /Until\s+the\s+router\s+draws/, "phase 2 names a stand-in exploration cell again");
+  assert.match(slice, /the\s+router\s+draws\s+its\s+cell/, "the exploration section no longer says the router draws the exploration cell");
+  assert.doesNotMatch(`${dispatch()}\n${slice}`, /Until\s+the\s+router\s+draws/, "the dispatch or exploration section names a stand-in exploration cell again");
   assert.match(
     slice,
     /While\s+the\s+table's\s+`burn_in`\s+is\s+true\s+every\s+Pull\s+draws,\s+over\s+every\s+cell,\s+the\s+policy\s+cell\s+included/,
-    "phase 2 no longer says burn-in draws on every Pull, over every cell",
+    "the exploration section no longer says burn-in draws on every Pull, over every cell",
   );
   // The roll: a Pull that lands on a chain head passes the exploration cell to
   // the next Pull rather than skipping it, which is the rule ADR 0013 §6 states
@@ -150,7 +144,7 @@ test("phase 2 counts the rate off the ledger's impl- rows, and a replacement doe
   assert.match(
     slice,
     /assignment\s+rolls\s+to\s+the\s+next\s+Pull\s+when\s+another\s+open\s+ticket\s+sequences\s+after\s+it/,
-    "phase 2 no longer rolls the exploration cell past chain heads",
+    "the exploration section no longer rolls the exploration cell past chain heads",
   );
 });
 
@@ -177,7 +171,7 @@ test("Pull step 7 routes through ticket-router.mjs and writes tier= exactly when
 });
 
 const routerArgs = () =>
-  RUN_TEAM.between("**The router's arguments, and nothing past its line.**", "**Count the rate against the ledger", "run-team router's arguments").text;
+  PULL_MD.between("**The router's arguments, and nothing past its line.**", "**The Pull table**", "run-team references/pull.md router arguments").text;
 
 test("the router's arguments paragraph pins the roll, the arm parity and the single source of CELL", () => {
   const slice = routerArgs();
@@ -189,10 +183,10 @@ test("the router's arguments paragraph pins the roll, the arm parity and the sin
   assert.match(slice, /`REASON`\s+other\s+than\s+`ok`\s+goes\s+on\s+the\s+row\s+as\s+`route=<REASON>`/, "REASON no longer lands on the row as route=");
 });
 
-// The difficulty caveat lives in the counter-evidence section, past this file's
-// dispatch slice, so it needs its own anchor pair.
+// The difficulty caveat lives in pull.md's rate rationale, past the dispatch
+// section, so it needs its own anchor pair.
 const counterEvidence = () =>
-  RUN_TEAM.between("within-run pairing above**", "`minted_false_claim`", "run-team tier-guard counter-evidence").text;
+  PULL_MD.between("within-run pairing above**", "`minted_false_claim` **discriminates", "run-team references/pull.md counter-evidence").text;
 
 test("the orthogonality claim is scoped — date only, not difficulty", () => {
   // The claim itself is literally true and narrowly scoped, so this is not a

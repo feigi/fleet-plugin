@@ -136,12 +136,6 @@ test("run-team: a tree with no runner gets the Recipe's Test entrypoint, with no
   assert.doesNotMatch(p, /shared stack|stack-free|docker-free/, "the reused-worktree paragraph carves the Test entrypoint out for a stack again");
 });
 
-test("run-team: testCmd comes from the Recipe cache and names no repository's own command", () => {
-  const p = RUN_TEAM.paragraph("**Where `testCmd` comes from:**", "run-team/SKILL.md testCmd source paragraph", "The review wraps its own one run").text;
-  assert.match(p, Pin.phrase("the repository's Test entrypoint, out of the Recipe cache phase 0's Recipe derivation step proved — `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main` prints it — and the one you hand specialists"));
-  assert.doesNotMatch(p, /node --test/, "the testCmd source paragraph names this repository's own test command again");
-});
-
 test("run-team: checkCmd comes from the Recipe cache, and the review does not run it", () => {
   const p = readPlugin("skills/run-team/references/phase-0.md").paragraph("**Where `checkCmd` comes from:**", "references/phase-0.md checkCmd source paragraph", "**Mid-run, a cache that stops running").text;
   assert.match(p, Pin.phrase("`~/.fleet/bin/fleet-run derive-testcmd.sh . check` prints it"));

@@ -10,6 +10,8 @@ one it runs in. **Own the CI waits**'s monitor paragraph points here instead of
 restating any of it. The merge bot's agent body is the one place this block is
 copied whole (see **The merge bot**); the other deliberate copy is named at the end.
 
+A bot already looping cannot be corrected — the loop consumes the turns a correction would land in — so `agents/fleet-merge-bot.agent.md` carries **every entry in `references/shell-traps.md`'s Shell traps**, each written out in full: the rules with the measurements from that file beside them, and the bot has them before its first turn. An edit to `references/shell-traps.md` lands in that body in the same change.
+
 **zsh word-splits an unquoted command substitution's result; it does NOT split an unquoted parameter expansion.**
 
 **Word the rule against the first row.**

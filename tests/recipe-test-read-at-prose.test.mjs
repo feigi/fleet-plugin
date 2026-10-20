@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 // Every read of the Recipe's Test entrypoint that run-team and next-ticket
@@ -11,8 +11,12 @@ import { join } from "node:path";
 // merged since then reads as matching nothing, and a Recipe that holds refuses.
 // The Install step reads probe no glob and stay as they are.
 const PLUGIN = join(import.meta.dirname, "..", "plugin");
+const RUN_TEAM = join(PLUGIN, "skills", "run-team");
+const runTeam = ["SKILL.md", ...readdirSync(join(RUN_TEAM, "references")).map((f) => `references/${f}`)]
+  .map((f) => readFileSync(join(RUN_TEAM, f), "utf8"))
+  .join("\n");
 const SKILLS = {
-  "run-team": readFileSync(join(PLUGIN, "skills/run-team/SKILL.md"), "utf8"),
+  "run-team": runTeam,
   "next-ticket": readFileSync(join(PLUGIN, "skills/next-ticket/SKILL.md"), "utf8"),
 };
 
@@ -69,8 +73,8 @@ test("the Test entrypoint read scanner finds flagged, quoted and substituted rep
 for (const [name, text] of Object.entries(SKILLS)) {
   test(`${name}: every read of the Recipe's Test entrypoint carries --at origin/main`, () => {
     const reads = testReads(text);
-    assert.ok(reads.length > 0, `${name}/SKILL.md names no Test entrypoint read, so this pin checks nothing`);
+    assert.ok(reads.length > 0, `${name} names no Test entrypoint read, so this pin checks nothing`);
     const bare = reads.filter((r) => !r.atOriginMain).map((r) => r.read);
-    assert.deepEqual(bare, [], `${name}/SKILL.md reads the Test entrypoint against the main checkout's index, not origin/main`);
+    assert.deepEqual(bare, [], `${name} reads the Test entrypoint against the main checkout's index, not origin/main`);
   });
 }
