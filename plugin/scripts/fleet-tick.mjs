@@ -1007,7 +1007,7 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
   // A mismatch on the keyed member itself is no replacement of M and still
   // prints. A keyed PR the open list carries is normal flow; one it does not
   // is named in `prKeyed` for the caller's state probe, `prStates` its
-  // answers (null for a probe that could not answer, none by default).
+  // answers (none for a PR whose probe could not answer, as by default).
   // CLOSED escalates, an unanswered probe escalates as unchecked, OPEN and
   // MERGED say nothing, and a ticket whose issue the caller found CLOSED
   // (`closed`) says nothing either way.
@@ -1820,10 +1820,11 @@ function closedTickets(mismatched, owed, surfacing) {
 // read per hundred PRs however many readings need them: `reviews`, the PRs
 // whose review the ledger reads as in flight yet the open list does not carry,
 // and `keyed`, each ticket's keyed PR the open list does not carry (deriveRun's
-// `prKeyed`). The answer is OPEN, MERGED or CLOSED, or null for a probe that
-// could not answer — a failed call, an alias GitHub errored on or answered
-// with nothing, a node carrying no state, a state that is none of the three —
-// which is disclosed, per PR, with what it leaves standing.
+// `prKeyed`). The answer is OPEN, MERGED or CLOSED. A probe that could not
+// answer — a failed call, an alias GitHub errored on or answered with nothing,
+// a node carrying no state, a state that is none of the three — leaves its PR
+// out of the map and is disclosed, per PR, with what it leaves standing; a
+// call killed at GH_TIMEOUT_MS is disclosed with that bound.
 function prStates(reviews, keyed) {
   const states = new Map();
   const reviewed = new Set(reviews);
@@ -1833,18 +1834,17 @@ function prStates(reviews, keyed) {
   const numbers = [...new Set([...reviews, ...ticketsOf.keys()])].sort((a, b) => a - b);
   const read = ghAliasedRead(numbers, { field: "pullRequest", selection: "{state}", timeoutMs: GH_TIMEOUT_MS });
   for (const number of numbers) {
-    const unconfirmed = [
-      ...(reviewed.has(number) ? [`review on PR#${number} unconfirmed finished, its unit stands`] : []),
-      ...(ticketsOf.get(number) ?? []).map((n) => `#${n}'s PR#${number} unconfirmed closed, printed as pr-unchecked`),
-    ].join("; ");
     const r = read.get(number);
     const st = r.node?.state;
     if (PR_STATES.includes(st)) {
       states.set(number, st);
       continue;
     }
-    states.set(number, null);
-    const why = r.unreachable ?? (r.notFound ? "no such pull request" : "no PR state");
+    const unconfirmed = [
+      ...(reviewed.has(number) ? [`review on PR#${number} unconfirmed finished, its unit stands`] : []),
+      ...(ticketsOf.get(number) ?? []).map((n) => `#${n}'s PR#${number} unconfirmed closed, printed as pr-unchecked`),
+    ].join("; ");
+    const why = r.unreachable === "ETIMEDOUT" ? TIMED_OUT : r.unreachable ?? (r.notFound ? "no such pull request" : "no PR state");
     console.error(`${NAME}: gh api graphql gave no answer for PR#${number} (${why}) — ${unconfirmed}`);
   }
   return states;

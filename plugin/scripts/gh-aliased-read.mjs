@@ -19,7 +19,7 @@
 import { spawnSync } from "node:child_process";
 import { gitEnv } from "./git-env.mjs";
 
-export const BATCH = 100;
+const BATCH = 100;
 const MAX_BUFFER = 64 * 1024 * 1024;
 
 /** A child that did not answer, as one short reason. */

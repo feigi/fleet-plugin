@@ -1914,17 +1914,20 @@ case "$1 $2" in
     [ -n "$PR_VIEW_FAIL" ] && { echo "gh: pr view failed" >&2; exit 1; }
     [ -n "$PR_VIEW_BODY" ] && { printf '%s\n' "$PR_VIEW_BODY"; exit 0; }
     # Real gh answers for the repository an inherited GIT_DIR or GH_REPO names;
-    # this one answers MERGED for every PR there, so a probe that forgot to
-    # scrub them retires a review the case's own repository still holds.
+    # this one answers MERGED for every PR there, so a premise probe that forgot
+    # to scrub them lifts an exclusion the case's own repository still holds.
     [ -n "$GIT_DIR$GIT_WORK_TREE$GH_REPO" ] && { echo '{"state":"MERGED"}'; exit 0; }
     exec jq -c --arg n "$3" '{state: (.[$n] // error("no such pull request"))}' "$FIXTURE_PR_STATES" ;;
   "api graphql")
     # One call asks every PR of its chunk as an aliased pullRequest(number:N)
-    # field. Each call is logged as the space-separated numbers it asked.
+    # field selecting {state}; a query asking anything else fails the call, so
+    # the query text the tick builds is pinned. Each call is logged as the
+    # space-separated numbers it asked.
     # Answers a PR the fixture names with its state and any other with null
     # and a NOT_FOUND error naming the alias, then exits 1 with the whole body
     # when any alias errored, as real gh does. GRAPHQL_FAIL prints no body;
     # GRAPHQL_BODY prints its own, exiting GRAPHQL_EXIT (default 0).
+    case "$*" in *'pullRequest(number:'*'{state}'*) ;; *) echo "gh: query asks no pullRequest(number:N){state}" >&2; exit 1 ;; esac
     nums=$(printf '%s' "$*" | grep -o 'number:[0-9]*' | cut -d: -f2 | tr '\\n' ' ')
     echo "$nums" >> "$GRAPHQL_LOG"
     [ -n "$GRAPHQL_FAIL" ] && { echo "gh: graphql failed" >&2; exit 1; }
@@ -3088,6 +3091,7 @@ test("CLI: a PR gh cannot answer for is not read as merged - the unit stays coun
     ["a state that is not MERGED or CLOSED", { GRAPHQL_BODY: JSON.stringify({ data: { repository: { n101: { state: "merged" } } } }) }, /gh api graphql gave no answer for PR#101 \(no PR state\)/],
     ["a PR that does not exist", { GRAPHQL_BODY: JSON.stringify({ data: { repository: { n101: null } }, errors: [{ type: "NOT_FOUND", path: ["repository", "n101"], message: "gone" }] }), GRAPHQL_EXIT: "1" }, /gh api graphql gave no answer for PR#101 \(no such pull request\)/],
     ["an error on the alias", { GRAPHQL_BODY: JSON.stringify({ data: { repository: { n101: null } }, errors: [{ type: "FORBIDDEN", path: ["repository", "n101"], message: "no" }] }), GRAPHQL_EXIT: "1" }, /gh api graphql gave no answer for PR#101 \(FORBIDDEN: no\)/],
+    ["an error naming no alias", { GRAPHQL_BODY: JSON.stringify({ data: { repository: { n101: { state: "MERGED" } } }, errors: [{ message: "x" }] }) }, /gh api graphql gave no answer for PR#101 \(error: x\)/],
   ];
   for (const [what, env, shown] of cases) {
     const r = runCli([], {
@@ -3114,6 +3118,23 @@ test("CLI: N keyed PRs off the open list, all MERGED, cost ceil(N/100) gh api gr
   assert.deepEqual(r.prViews, []);
   assert.doesNotMatch(r.stdout, /ESCALATE pr-/);
   assert.doesNotMatch(r.stderr, /no answer/);
+});
+
+test("CLI: the PRs a tick asks gh about go in ascending order, whatever order its readings name them in", () => {
+  // Ticket #1 is keyed on PR#150 and #2 on PR#120: ticket order is not PR order.
+  const unordered = runCli([], {
+    shortlist: shortlistText([]), prStates: mergedStates([120, 150]),
+    ledger: { rows: ["#1 impl-1=PR#150 → PR#150", "#2 impl-2=PR#120 → PR#120"], dispatched: ["impl-1=PR#150", "impl-2=PR#120"] },
+  });
+  assert.equal(unordered.status, 0, unordered.stderr);
+  assert.deepEqual(unordered.graphqlCalls, [[120, 150]]);
+  // A review PR numbered above a keyed PR: the reviews come first in the reading.
+  const reviewAbove = runCli([], {
+    shortlist: shortlistText([]), prs: [REVIEW_DUE], prStates: mergedStates([120, 300]),
+    ledger: { rows: [...zombieRows([300]), ...keyedOff([120]).rows], dispatched: keyedOff([120]).dispatched },
+  });
+  assert.equal(reviewAbove.status, 0, reviewAbove.stderr);
+  assert.deepEqual(reviewAbove.graphqlCalls, [[120, 300]]);
 });
 
 test("CLI: --apply's reread after a tier verdict asks the same bounded count again", () => {
@@ -4249,7 +4270,7 @@ test("CLI: a hung probe of a PR off the open list is disclosed at the bound and 
     env: hang("api graphql"),
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stderr, /fleet-tick: gh api graphql gave no answer for PR#101 \(ETIMEDOUT\) — review on PR#101 unconfirmed finished, its unit stands/);
+  assert.match(r.stderr, /fleet-tick: gh api graphql gave no answer for PR#101 \(timed out after 1s\) — review on PR#101 unconfirmed finished, its unit stands/);
   assert.match(r.stdout, /^reviewers +1\/2 → DISPATCH review PR#500/m);
 });
 
