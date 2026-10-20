@@ -93,16 +93,16 @@ test("the dispatch section dispatches every implementer at its definition's tier
   // of the old row). The `token` addition is the script's own behaviour, pinned
   // in tests/ledger.test.mjs ("token appends to the row and keeps every token
   // already there, in order"); the replace-not-append rule is in tick-rows.md,
-  // and the controller's rule sending a token addition to `token` is Run ledger's.
+  // and the controller's rule sending a token addition to `token` is the wake section's.
   assert.match(
     memberTickRows(),
     /replaces the whole line/,
     "tick-rows.md no longer says `row` replaces the whole line rather than appending",
   );
   assert.match(
-    RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text,
+    RUN_TEAM.section("### What a wake owes beyond its call", "run-team wake section").text,
     Pin.phrase("`ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row"),
-    "Run ledger no longer sends a token addition to `token`, so a controller re-types the row with `row` and drops its tokens",
+    "The wake section no longer sends a token addition to `token`, so a controller re-types the row with `row` and drops its tokens",
   );
 });
 

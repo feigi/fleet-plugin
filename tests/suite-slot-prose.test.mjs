@@ -14,6 +14,7 @@ import { CASES, label, renderBrief } from "./support/render-brief.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
 const RUN_TEAM = Pin.file(join(ROOT, "plugin", "skills", "run-team", "SKILL.md"));
+const LEDGER = Pin.file(join(ROOT, "plugin", "skills", "run-team", "references", "ledger.md"));
 const CONTEXT = Pin.file(join(ROOT, "CONTEXT.md"));
 
 test("SKILL.md tells the controller to hand the fix-applier and the finisher the wrapped string as <testCmd>", () => {
@@ -47,7 +48,7 @@ test("every implementer, fix-applier and finisher brief carries the exit-75 line
 });
 
 test("the runbook names the slot directory and the files its takeover cannot clear", () => {
-  const p = RUN_TEAM.paragraph("**The suite slots wedge the same ways, and clear the same way.**", "run-team/SKILL.md suite slots runbook paragraph", "**The gap the lock does not close:**").text;
+  const p = LEDGER.section("## Suite slots", "references/ledger.md suite slots section").text;
   assert.match(p, Pin.phrase("`~/.fleet/suite-slots/<i>.lock` is built on the ledger's lock primitive, so an empty or unparseable `<i>.lock` and a leftover `<i>.lock.reap` are permanent"),
     "the runbook no longer names the two slot files that wedge");
   assert.match(p, Pin.phrase("remove it by hand once no suite run is running"), "the runbook no longer says to remove a wedged slot by hand");

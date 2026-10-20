@@ -287,7 +287,7 @@ Write each state change through `ledger.mjs` before you act on it, never by hand
 
 Compaction parks every in-flight member and nothing reports it, so on resume take the registry census first (**Member unaccounted**, in **Failure handling**) before you trust a live token.
 
-Token additions go through `ledger.mjs token <key> <token>…`: `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row. Re-typing the row with `row` replaces the whole line, so it drops the tokens you do not restate. Write member tokens and `review=` tokens only through `ledger.mjs`, never by hand.
+Token additions go through `ledger.mjs token`. `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row. Re-typing the row with `row` replaces the whole line, so it drops the tokens you do not restate. Write member tokens and `review=` tokens only through `ledger.mjs`, never by hand.
 
 Never rotate the ledger mid-run: it is phase 0's step alone.
 

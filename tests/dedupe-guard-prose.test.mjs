@@ -34,7 +34,6 @@ import { memberPrompt } from "./support/render-brief.mjs";
 import { EVENT_HEADER } from "./support/fleet-event-header.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 const REVIEW_AND_FIX = Pin.file(join(REPO, "commands", "review-and-fix.md"));
 
 // run-team's finisher duties are an indented ordered list, so a hard wrap puts
@@ -59,8 +58,8 @@ const finisherDeferrals = () =>
 const FINISHER_MD = Pin.file(join(REPO, "skills", "run-team", "references", "finisher.md"));
 const finisherFileIt = () =>
   flat(FINISHER_MD.section("## Duty 2: every deferral, and every claimed APPLY, has a home that outlives the merge", "references/finisher.md duty 2").text);
-// The Run ledger section keeps `check`'s exit codes beside a pointer; the
-// paragraph spelling the exits out and the verdicts moved to references/ledger.md.
+// check's exit codes and verdicts live in references/ledger.md, which step 5 and
+// the wake section point at; the checkExits section below is what these tests read.
 const LEDGER_MD = Pin.file(join(REPO, "skills", "run-team", "references", "ledger.md"));
 const checkExits = () => flat(LEDGER_MD.section("## `check`'s exits and its `verdict`", "references/ledger.md check section").text);
 
@@ -111,18 +110,11 @@ test("step 5 does not let the guard turn a deferral into a drop", () => {
   assert.match(s, /never a dropped finding/i, "step 5 no longer says a duplicate is a comment rather than a dropped deferral");
 });
 
-test("step 5 cites a Run ledger section that exists in run-team", () => {
+test("step 5 cites references/ledger.md, and the section it cites enumerates the verdicts", () => {
   // Step 5 defers the full exit-code and `verdict` semantics rather than
-  // restating them — a cross-file citation that rots silently if the section
-  // is renamed, since neither file's prose fails on its own.
-  assert.match(step5(), /\*\*Run ledger\*\*/, "step 5 no longer defers the exit-code semantics to run-team's Run ledger section");
-  assert.match(RUN_TEAM.text, /^## Run ledger$/m, "run-team no longer has a `## Run ledger` section for step 5 to cite");
-  // And that section has to still carry what step 5 sends a reader there for.
-  // Flattened like the sibling below: the slice is hard-wrapped Markdown, so an
-  // un-flattened match reds on a pure reflow — the one thing the header at the
-  // top of this file promises stays green.
-  const runLedger = flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
-  assert.match(runLedger, /read those and decide\. See references\/ledger\.md\./, "the cited section no longer sends its reader on to references/ledger.md for check's exits");
+  // restating them — a cross-file citation that rots silently if the file or
+  // its section is renamed, since neither file's prose fails on its own.
+  assert.match(step5(), /references\/ledger\.md/, "step 5 no longer defers the exit-code semantics to references/ledger.md");
   assert.match(checkExits(), /`verdict` is `already-filed`, `tracker-hit`, `clean`, `soft-hit` or `unverified`/, "the cited section no longer enumerates the verdict values");
 });
 
@@ -134,14 +126,14 @@ test("step 5's exit-code readings agree with the section it cites", () => {
   // coherent while an agent reading one acts on the other's contract. So the
   // numbers are pinned on BOTH sides — renumbering in either file alone reddens
   // the suite, which is the only signal the split produces. One test per side,
-  // though, and this is not the one holding step 5: it reads RUN_TEAM only, and
+  // though, and this is not the one holding step 5: it reads references/ledger.md only, and
   // the step-5 side is pinned by "step 5 tells exit 1 from exit 3" above.
   // Measured: `exit **3**` → `exit **4**` in review-and-fix.md alone reds that
   // test and leaves this one green; the same edit in run-team alone inverts it.
-  const runLedger = flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
-  assert.match(runLedger, /\*\*1\*\* already in this run's filed list/, "run-team no longer reads exit 1 as already filed this run — step 5 still does");
-  assert.match(runLedger, /\*\*2\*\* usage\s+error/, "run-team no longer reads exit 2 as a usage error — step 5 still does");
-  assert.match(runLedger, /\*\*3\*\* the ledger is clean but open or closed tracker issues match/, "run-team no longer reads exit 3 as a tracker hit — step 5 still does");
+  const exits = checkExits();
+  assert.match(exits, /\*\*1\*\* already in this run's filed list/, "ledger.md no longer reads exit 1 as already filed this run — step 5 still does");
+  assert.match(exits, /\*\*2\*\* usage\s+error/, "ledger.md no longer reads exit 2 as a usage error — step 5 still does");
+  assert.match(exits, /\*\*3\*\* the ledger is clean but open or closed tracker issues match/, "ledger.md no longer reads exit 3 as a tracker hit — step 5 still does");
   // The exit-0 hazard is the one both files must state, not merely agree on:
   // it is the code that reads as permission.
   assert.match(checkExits(), /Exit 0 is not\s+automatically "safe to file"/, "the cited section no longer warns that exit 0 can mean unverified");
@@ -190,7 +182,6 @@ test("the finisher files its own deferrals through the same guard", () => {
 // which owned every ledger write, never files. So the arm had never held a row.
 // The fix is the filer recording its own filing, under a ledger lock that lets
 // a second kind of writer exist; these pin the instruction half of it.
-const runLedger = () => flat(RUN_TEAM.section("## Run ledger", "run-team Run ledger section").text);
 const finisherReport = () =>
   flat(finisherBody().between("Report to the controller in the report file your brief names", "Then send the one line your brief gives", "finisher report line").text);
 // The fix-applier's report line is in its agent body, which the member reads
@@ -240,21 +231,18 @@ test("the controller records every filing a filer reported unrecorded", () => {
   assert.match(EVENT_HEADER, Pin.phrase("finisher-report <finisher-pr-M[-x]> `settle --from-report`."));
   assert.match(EVENT_HEADER, Pin.phrase("settle it `ledger.mjs settle finisher-pr-<M>=labelled` as reported, and `ledger.mjs filed <N> \"<subject>\"` for each `unrecorded` entry"),
     "the finisher settled by hand past its exit 3 no longer has its unrecorded filings recorded");
-  assert.match(runLedger(), /reports `unrecorded: #N <subject>` instead — an `unrecorded` entry of\s+its report file — and `settle <member> --from-report` runs `filed` for it/,
-    "the Run ledger section no longer hands unrecorded filings to the settle");
 });
 
-test("the Run ledger section states the writer policy and the check→create gap; step 5 states the gap too", () => {
-  const r = runLedger();
+test("references/ledger.md states the writer policy and the check→create gap", () => {
+  const writer = flat(LEDGER_MD.section("## Writer policy: every write is serialized by `<file>.lock`", "references/ledger.md writer policy").text);
   assert.match(
-    r,
+    writer,
     /the controller owns run state \(`row`\/`token`\/`settle`\/`dispatch`\/`review`\/`drain`\/`ruled`\); filers append filings with `filed`; all writes are serialized by `<file>\.lock`/,
-    "the Run ledger section no longer states who writes what, and that the lock serializes it",
+    "references/ledger.md no longer states who writes what, and that the lock serializes it",
   );
-  // The lock covers each command alone. Stated at the section and at the
-  // filing site, so neither reader takes the lock for a reservation.
-  for (const [where, s] of [["Run ledger", r], ["step 5", step5()]]) {
-    assert.match(s, /`check` → `gh issue create` → `filed` is three commands/, `${where} no longer states the check→create gap`);
-    assert.match(s, /both read `clean`/, `${where} no longer says what the gap lets through`);
-  }
+  // The lock covers each command alone. Step 5 cites this file for the gap, so
+  // the gap is pinned at the section that states it.
+  const gap = flat(LEDGER_MD.section("## The gap the lock does not close", "references/ledger.md gap section").text);
+  assert.match(gap, /`check` → `gh issue create` → `filed` is three commands/, "references/ledger.md no longer states the check→create gap");
+  assert.match(gap, /both read `clean`/, "references/ledger.md no longer says what the gap lets through");
 });
