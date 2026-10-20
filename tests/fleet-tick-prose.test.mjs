@@ -264,7 +264,7 @@ test("the heartbeat block names the script and the one-line protocol", () => {
   // who learns only the first ends its turn over a mark that never landed, and
   // the alarm's gate never passes on a run with no recorded beat.
   assert.match(s, Pin.phrase("`… beat marked, alarm due in <N>s (quiet=<n>) → end your turn`"));
-  assert.match(s, Pin.phrase("`… beat NOT marked …` — no mark is on disk, so no alarm is armed and ending your turn would be the stall."));
+  assert.match(s, Pin.phrase("`… beat NOT marked …` — this beat arms no alarm you can count on, so ending your turn could be the stall."));
 });
 
 test("the heartbeat block says an alarm turn arrives and what it runs", () => {

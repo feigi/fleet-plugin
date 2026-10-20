@@ -90,14 +90,22 @@ export function stateFileIn(fleetDir) {
 // is killed rather than holding the beat. Only the warning and the fallback
 // below are this caller's own.
 export function statePath(name) {
+  return resolveStatePath(name).path;
+}
+
+// The same resolution, saying whether it fell back. fleet-heartbeat needs the
+// flag: a beat marked in the cwd-relative file is one the alarm, which resolves
+// the run's `.fleet` for itself, may never read, so that beat must not tell the
+// controller to end its turn.
+export function resolveStatePath(name) {
   try {
-    return stateFileIn(fleetFile(null));
+    return { path: stateFileIn(fleetFile(null)), fellBack: false };
   } catch (e) {
     if (!(e instanceof FleetDirUnresolvable)) throw e;
     // Announced, never silent: a cwd-relative fallback re-opens exactly the
     // per-worktree split this resolution exists to close.
     console.error(`${name}: WARNING ${e.message}; using cwd-relative .fleet/heartbeat.json`);
-    return stateFileIn(".fleet");
+    return { path: stateFileIn(".fleet"), fellBack: true };
   }
 }
 
@@ -280,9 +288,9 @@ export function readState(path, name, warn = console.error) {
 // A failed write is reported and SURVIVED, never fatal, for the same reason a
 // failed read is. But survived is not the same as ignored: it returns whether
 // the write landed, because the two cases call for different behaviour from
-// the caller and only the caller can act. An unpersisted `beat` means the
-// alarm's gate never passes, so fleet-heartbeat says no alarm is armed
-// instead of telling the controller to end its turn.
+// the caller and only the caller can act. An unpersisted `beat` is one the
+// alarm's gate never passes on, so fleet-heartbeat says no alarm is armed for
+// it instead of telling the controller to end its turn.
 //
 // The write is a sibling temp file renamed over the target, ledger.mjs save()'s
 // convention, because the readers do not hold still for it. A plain

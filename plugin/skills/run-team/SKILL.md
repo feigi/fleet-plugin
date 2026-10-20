@@ -324,8 +324,8 @@ It returns at once and prints one line. Which line it is, is the whole protocol:
   recorded. End your turn. The alarm's turn arrives as a user message that
   starts `[fleet-alarm]` and names `fleet-event.mjs heartbeat`: run that
   command and act on what the tick it ends in prints. Then mark the beat again.
-- `… beat NOT marked …` — no mark is on disk, so no alarm is armed and ending
-  your turn would be the stall. Fix what the line names and run the command
+- `… beat NOT marked …` — this beat arms no alarm you can count on, so ending
+  your turn could be the stall. Fix what the line names and run the command
   again.
 
 **Do not raise `--ceiling` past 30 minutes.** See references/ci-and-staleness.md.

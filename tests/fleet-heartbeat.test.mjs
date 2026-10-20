@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,11 +66,14 @@ test("interval: a quiet streak long enough to overflow still clamps, never NaN",
 
 test("CLI: a plain call returns at once with one line that says to end the turn, and the mark is on disk", () => {
   // `--base 600` was a blocking call for 240s when this script held; a call
-  // that returns inside the bound below is not holding.
+  // that returns inside the bound below is not holding. The bound alone lets
+  // a hold shorter than itself through, so the script must also carry no
+  // Atomics, the primitive the removed hold blocked in.
+  assert.doesNotMatch(readFileSync(SCRIPT, "utf8"), /\bAtomics\b/, "the heartbeat blocks in nothing");
   const started = Date.now();
   const r = run(["--base", "600", "--ceiling", "1200"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(Date.now() - started < 30_000, "a plain call must not block");
+  assert.ok(Date.now() - started < 5_000, "a plain call must not block");
   assert.equal(r.stdout.trim().split("\n").length, 1, "one line, never zero and never two");
   assert.match(r.stdout, /heartbeat: beat marked, alarm due in 600s \(quiet=0\) → end your turn/);
   assert.deepEqual(Object.keys(r.state.beat).sort(), ["at", "interval", "stopped"]);
@@ -274,7 +277,9 @@ test("CLI: a state write that cannot land says no alarm is armed, never to end t
         { encoding: "utf8" });
       assert.equal(r.status, 0);
       assert.match(r.stderr, /WARNING could not write/, `${nth}: a failed write is announced, never silent`);
-      assert.match(r.stdout, /beat NOT marked .*could not be written.*no alarm is armed/, `${nth}: the line names the failure`);
+      // "for this beat": an earlier mark still on disk keeps the alarm's gate
+      // passing, so the line must not say no alarm at all is armed.
+      assert.match(r.stdout, /beat NOT marked .*could not be written.*no alarm is armed for this beat/, `${nth}: the line names the failure`);
       assert.doesNotMatch(r.stdout, END_TURN, `${nth}: an unrecorded mark never says to end the turn`);
       assert.equal(existsSync(join(dir, "heartbeat.json")), false);
     }
@@ -305,6 +310,26 @@ test("CLI: with no --state, and with an empty one, it resolves the run's shared 
     assert.equal(JSON.parse(readFileSync(expected, "utf8")).beat.interval, 2);
   }
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("CLI: a mark that took the cwd-relative fallback never says to end the turn", () => {
+  // The alarm resolves the run's `.fleet` for itself, so a beat written to a
+  // cwd-relative file may be one it never reads — outside any repository it
+  // arms no timer at all. Saying `→ end your turn` over that mark is the stall.
+  // A ceiling at the fixture's parent, so a temp directory that happens to sit
+  // inside some repository cannot answer for it.
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "fleet-heartbeat-norepo-")));
+  try {
+    const cwd = join(parent, "bare");
+    mkdirSync(cwd);
+    const r = spawnSync(process.execPath, [SCRIPT, "--base", "2", "--ceiling", "8"],
+      { cwd, encoding: "utf8", env: { ...process.env, GIT_CEILING_DIRECTORIES: parent } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /using cwd-relative \.fleet\/heartbeat\.json/, "the fallback was taken");
+    assert.equal(JSON.parse(readFileSync(join(cwd, ".fleet", "heartbeat.json"), "utf8")).beat.interval, 2);
+    assert.match(r.stdout, /beat NOT marked .*could not be resolved.*cwd-relative/);
+    assert.doesNotMatch(r.stdout, END_TURN);
+  } finally { rmSync(parent, { recursive: true, force: true }); }
 });
 
 test("CLI: an ambient GIT_DIR cannot relocate the run's one state file", () => {

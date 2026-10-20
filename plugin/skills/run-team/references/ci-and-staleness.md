@@ -152,9 +152,12 @@ honestly say about a death that named nothing.
   not an event — every other row of SKILL.md's wake list reports something
   that happened; this one is the beat falling due.
 
-- `… beat NOT marked …` — the write did not land, or the file is degraded and
-  was left as it is. No alarm is armed, so do not take the line as a beat;
-  fix what it names and run the command again.
+- `… beat NOT marked …` — the write did not land, the file is degraded and
+  was left as it is, or the run's `.fleet` directory could not be resolved and
+  the mark went to a cwd-relative file the alarm may not read. No alarm is
+  armed for this beat (an earlier mark still on disk is all the alarm can fire
+  on), so do not take the line as a beat; fix what it names and run the
+  command again.
 
 **The beat does not stop on idleness.** An empty shortlist and an empty supply are
 not a reason to end the run; they are the state a newly triaged ticket arrives

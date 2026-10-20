@@ -67,7 +67,7 @@ export function interval({ quiet, base, ceiling, multiplier }) {
 import { isCLI } from "./is-cli.mjs";
 import { parseArgs } from "node:util";
 import { makeDie, isDigits } from "./arg.mjs";
-import { statePath, readState, writeState, DEFAULT_CEILING_S } from "./fleet-state.mjs";
+import { resolveStatePath, readState, writeState, DEFAULT_CEILING_S } from "./fleet-state.mjs";
 
 const NAME = "fleet-heartbeat";
 const die = makeDie(NAME);
@@ -138,7 +138,8 @@ function args() {
   if (values.stop !== undefined && values.stop.trim() === "") {
     die("--stop must carry the reason the run is stopping, e.g. --stop 'budget exhausted'");
   }
-  return { base, ceiling, multiplier, stop: values.stop?.trim(), state: values.state || statePath(NAME) };
+  const { path: state, fellBack } = values.state ? { path: values.state, fellBack: false } : resolveStatePath(NAME);
+  return { base, ceiling, multiplier, stop: values.stop?.trim(), state, fellBack };
 }
 
 // The mark: when this beat was seen and the interval that was in effect
@@ -154,7 +155,7 @@ function mark(target, stopped) {
 }
 
 function main() {
-  const { base, ceiling, multiplier, stop, state: path } = args();
+  const { base, ceiling, multiplier, stop, state: path, fellBack } = args();
   const state = readState(path, NAME);
   const target = interval({ quiet: state.quiet, base, ceiling, multiplier });
 
@@ -195,21 +196,27 @@ function main() {
   // "indistinguishable from a working one" the member-idle measurement names.
   //
   // The line that tells the controller to end its turn is printed ONLY when
-  // the mark is on disk. The alarm's gate reads `beat`; with none recorded it
-  // never passes, so that line would send the controller idle into a session
-  // nothing will wake — the drained-queue stall, reached through a line that
-  // reads like a working heartbeat. A mark that failed to land says so, says
-  // no alarm is armed, and exits 0 like the stop path: writeState has already
-  // said so on stderr, and the controller can repair the file and beat again.
+  // the mark is on disk where the alarm reads. The alarm's gate reads `beat`;
+  // with none recorded it never passes, so that line would send the controller
+  // idle into a session nothing will wake — the drained-queue stall, reached
+  // through a line that reads like a working heartbeat. A mark that failed to
+  // land says so, says no alarm is armed for it (an earlier mark still on disk
+  // is all the alarm can fire on), and exits 0 like the stop path: writeState
+  // has already said so on stderr, and the controller can repair the file and
+  // beat again. A mark written through statePath's cwd-relative fallback is
+  // treated the same way: the alarm resolves the run's `.fleet` for itself and
+  // may never read that file.
   //
   // `quiet=` is the streak the interval was DERIVED from, printed beside the
   // number it explains.
-  if (persisted) {
+  if (persisted && fellBack) {
+    console.log(`heartbeat: WARNING beat NOT marked in a resolved heartbeat file — the run's .fleet directory could not be resolved, so the mark went to a cwd-relative .fleet/heartbeat.json the alarm may not read; fix the resolution and run this again`);
+  } else if (persisted) {
     console.log(`heartbeat: beat marked, alarm due in ${target}s (quiet=${state.quiet}) → end your turn`);
   } else if (state.degraded) {
     console.log(`heartbeat: WARNING beat NOT marked — the heartbeat file is degraded and was left as it is, so no alarm is armed; repair the file and run this again`);
   } else {
-    console.log(`heartbeat: WARNING beat NOT marked — the heartbeat file could not be written, so no alarm is armed; fix the write and run this again`);
+    console.log(`heartbeat: WARNING beat NOT marked — the heartbeat file could not be written, so no alarm is armed for this beat; fix the write and run this again`);
   }
 }
 
