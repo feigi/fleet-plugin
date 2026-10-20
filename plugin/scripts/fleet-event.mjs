@@ -75,8 +75,10 @@
 //       of the report the PR's rows do not already carry, then `ledger.mjs
 //       token <pr> parked=<head>:<body digest>:<reason>` for each `refused[]`
 //       entry whose reason is `main-gain-removed:<path>`, bound to the head
-//       and body `gh pr view <pr>` answers, unless the rows already carry it
-//       (no answer is a NEED, nothing written), then `settle --from-report`.
+//       and body digest the bot's gate reading `<scratch>/pr<pr>/<merge-bot-n>/ci.json`
+//       records it refused, unless the rows already carry it (a reading that
+//       is missing or is not that refusal is a NEED, nothing written), then
+//       `settle --from-report`.
 //       Every other refusal reason writes nothing. The reap and the reclaim
 //       run under the tick's `--apply`.
 //       The verdict moves no label and leaves nothing in the repo, so the row is the only place the tick can read a `held-behind` from.
@@ -640,29 +642,35 @@ function mergeBotReport(ev, member) {
     if (r.status === 0) ev.note(`#${pr} ${tok}`);
     else ev.refuse(`token #${pr} ${tok}`, r);
   }
-  for (const { pr, reason } of read.state === "ok" ? read.report.refused ?? [] : []) {
-    if (PARKS.test(reason)) park(ev, pr, reason);
+  for (const { pr, reason } of read.state === "ok" ? read.report.refused : []) {
+    if (PARKS.test(reason)) park(ev, member, pr, reason);
   }
   ev.settle(member);
 }
 
 // `ledger.mjs token <pr> parked=<head>:<body digest>:<reason>` for a refusal
-// only a human edit clears, bound to the head and body gh reads for the PR
-// now, skipped when the PR's rows already carry that token. A PR gh cannot
-// read is a NEED, nothing written: a park bound to no head would never lift.
-function park(ev, pr, reason) {
-  const r = gh(["pr", "view", String(pr), "--json", "headRefOid,body"]);
-  let v = null;
-  if (r.status === 0) {
-    try {
-      v = JSON.parse(r.stdout);
-    } catch {
-      // Falls through to the NEED below.
-    }
+// only a human edit clears, bound to the head and body the gate refused: the
+// bot's own gate reading, `<scratch>/pr<pr>/<member>/ci.json` (run-merge-bot.md
+// step 3's `--out`), never a read taken now, so a push or a body edit landing
+// after the refusal is never what gets parked. Skipped when the PR's rows
+// already carry that token. A reading that cannot be read, is not JSON, is not
+// this refusal, or carries no full head and body digest is a NEED naming
+// which, nothing written: a park bound to no refused head would never lift.
+function park(ev, member, pr, reason) {
+  const file = join(ev.scratch, `pr${pr}`, member, "ci.json");
+  let g;
+  try {
+    g = JSON.parse(readFileSync(file, "utf8"));
+  } catch (e) {
+    ev.need(`park PR #${pr} ${reason} — the gate reading ${file} ${e instanceof SyntaxError ? "is not JSON" : `cannot be read (${e.code ?? e.message})`}; nothing parked`);
+    return;
   }
-  const tok = v !== null && typeof v.body === "string" ? parkedToken(v.headRefOid, v.body, reason) : null;
+  const off = g === null || typeof g !== "object" ? "is not a JSON object"
+    : g.pr !== pr || g.verdict !== "blocked" || g.reason !== reason ? `is not this refusal (pr ${g.pr}, verdict ${g.verdict}, reason ${g.reason})`
+    : null;
+  const tok = off === null ? parkedToken(g.head, g.bodyDigest, reason) : null;
   if (tok === null) {
-    ev.need(`park PR #${pr} ${reason} — gh pr view ${pr} did not answer with a head and a body (${r.status === 0 ? "no head and body" : said(r)})`);
+    ev.need(`park PR #${pr} ${reason} — the gate reading ${file} ${off ?? `carries no full head and body digest (head ${g.head}, bodyDigest ${g.bodyDigest})`}; nothing parked`);
     return;
   }
   if (prWords(ev.ledger, pr).includes(tok)) {

@@ -581,29 +581,32 @@ export const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
 // The durable record that a merge bot refused a PR on a main-gain hit — a
 // refusal only a human edit clears — written onto the PR's own row by
 // `fleet-event.mjs merge-bot-report`: `parked=<head>:<body digest>:<reason>`,
-// the head and the body digest those the PR had when the park was recorded,
-// the reason the gate's `main-gain-removed:<path>` with the path's spaces and
-// non-ASCII percent-encoded so the token stays one word. It parks the PR only
-// while its head and body still match: a new head or an edited body lifts it,
-// with no write.
+// the head and the body digest those the merge gate read when it refused, and
+// the reason the gate's `main-gain-removed:<path>` percent-encoded with
+// encodeURI, and `#` as `%23`, so the token stays one word and carries no
+// `#<n>` a row would read as a PR mention. It parks the PR only while its head
+// and body still match: a new head or an edited body lifts it, with no write.
 export const PARKED = /^parked=([0-9a-f]{40}):([0-9a-f]{12}):(main-gain-removed:\S+)$/;
 // The only gate reason that parks: every other refusal clears without a
-// human edit to the PR.
-export const PARKS = /^main-gain-removed:./;
+// human edit to the PR. A path is any non-empty text, a newline included.
+export const PARKS = /^main-gain-removed:./s;
 // The digest a park binds a PR body by: gh's `body` string, as gh prints it.
+// merge-gate.mjs computes the same digest of the body it read into its
+// payload's `bodyDigest`, which is where a park's digest comes from.
 export const bodyDigest = (body) => createHash("sha256").update(body).digest("hex").slice(0, 12);
-// The park token for a refusal `reason` at `head` with `body`, or null when
-// the reason does not park or the head is not a full commit SHA.
-export function parkedToken(head, body, reason) {
+// The park token for a refusal `reason` at `head` with body digest `digest`,
+// or null when the reason does not park, the head is not a full commit SHA or
+// the digest is not a body digest.
+export function parkedToken(head, digest, reason) {
   if (!PARKS.test(reason)) return null;
-  const tok = `parked=${String(head).toLowerCase()}:${bodyDigest(body)}:${encodeURI(reason)}`;
+  const tok = `parked=${String(head).toLowerCase()}:${digest}:${encodeURI(reason).replaceAll("#", "%23")}`;
   return PARKED.test(tok) ? tok : null;
 }
 // A park token's reason as the gate printed it; a hand-written one that does
 // not decode is shown as written.
 function parkedReason(encoded) {
   try {
-    return decodeURI(encoded);
+    return decodeURIComponent(encoded);
   } catch {
     return encoded;
   }
@@ -1099,6 +1102,7 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
   const state = (n) => byPr.get(n);
   const heldBehind = (st) => (st?.held ?? []).some((n) => open.has(n));
   const conflictHeld = (st) => st !== undefined && st.conflictOpen;
+  const mergeHeldOn = (p) => heldBehind(state(p.number)) || conflictHeld(state(p.number));
   // The latest park on a queued PR whose head and body still match it, or
   // undefined: a new head or an edited body lifts every earlier park.
   const parkOn = (p) => {
@@ -1199,13 +1203,15 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
     // MERGED or CLOSED, the same lift rule as a `behind-pr` Exclusion. A
     // conflict hold lifts only once a fix-applier after it has SETTLED
     // `applied:`/`no-op` — never on dispatch alone.
-    mergeHeld: queued.filter((p) => heldBehind(state(p.number)) || conflictHeld(state(p.number))).length,
+    mergeHeld: queued.filter(mergeHeldOn).length,
     // How many of those are conflict holds — the HOLD row's wording, no field.
     mergeConflictHeld: queued.filter((p) => conflictHeld(state(p.number))).length,
     // Each queued PR no hold counts that a park still matches, `{pr, reason}`
     // ascending: the merge bot would only refuse it again.
-    mergeParked: queued.filter((p) => !heldBehind(state(p.number)) && !conflictHeld(state(p.number)) && parkOn(p) !== undefined)
-      .map((p) => ({ pr: p.number, reason: parkOn(p).reason })).sort((a, b) => a.pr - b.pr),
+    mergeParked: queued.flatMap((p) => {
+      const k = mergeHeldOn(p) ? undefined : parkOn(p);
+      return k === undefined ? [] : [{ pr: p.number, reason: k.reason }];
+    }).sort((a, b) => a.pr - b.pr),
     // Finishers settled `labelled` on an open PR without the label.
     unlabelled: unlabelledFinishers({ rows, dispatched },
       new Set(prs.filter((p) => !isQueued(p)).map((p) => p.number))),

@@ -1127,34 +1127,51 @@ test("deriveRun: a queued PR under a conflict hold is merge-held until its fix-a
 });
 
 // #3608: the park `fleet-event.mjs merge-bot-report` writes off a main-gain
-// refusal, bound to the head and body the PR had then.
-const PARK = parkedToken(HEAD_B, "", MG);
+// refusal, bound to the head and body digest the gate refused.
+const EMPTY_BODY = bodyDigest("");
+const PARK = parkedToken(HEAD_B, EMPTY_BODY, MG);
 const PARK_ROW = (n, tail = PARK) => `#${n - 30} impl-${n - 30}=PR#${n} → PR#${n} · ${tail}`;
 
-test("parkedToken: only a main-gain-removed reason at a full head parks, and the token is one word the grammar reads back", () => {
-  assert.equal(PARK, `parked=${HEAD_B}:${bodyDigest("")}:${MG}`);
+test("parkedToken: only a main-gain-removed reason at a full head and a body digest parks, and the token is one word the grammar reads back", () => {
+  assert.equal(PARK, `parked=${HEAD_B}:${EMPTY_BODY}:${MG}`);
   assert.match(PARK, PARKED);
-  assert.equal(parkedToken(HEAD_B.toUpperCase(), "", MG), PARK, "gh's head is matched case-blind");
+  assert.equal(parkedToken(HEAD_B.toUpperCase(), EMPTY_BODY, MG), PARK, "gh's head is matched case-blind");
   for (const reason of ["behind:2", "ci:failure", "instrument-set-changed", "main-gain-unanswerable", "head-moved-after-label", "main-gain-removed:"]) {
-    assert.equal(parkedToken(HEAD_B, "", reason), null, reason);
+    assert.equal(parkedToken(HEAD_B, EMPTY_BODY, reason), null, reason);
   }
-  assert.equal(parkedToken("abc1234", "", MG), null, "a short head is no binding");
-  const spaced = parkedToken(HEAD_B, "", "main-gain-removed:docs/a b.md");
-  assert.equal(spaced, `parked=${HEAD_B}:${bodyDigest("")}:main-gain-removed:docs/a%20b.md`);
+  assert.equal(parkedToken("abc1234", EMPTY_BODY, MG), null, "a short head is no binding");
+  assert.equal(parkedToken(HEAD_B, EMPTY_BODY, "main-gain-removed:\nfoo"), `parked=${HEAD_B}:${EMPTY_BODY}:main-gain-removed:%0Afoo`, "a path that starts with a newline still parks");
+  for (const digest of [undefined, null, "", EMPTY_BODY.slice(1), `${EMPTY_BODY}0`]) {
+    assert.equal(parkedToken(HEAD_B, digest, MG), null, `digest ${digest} is no binding`);
+  }
+  const spaced = parkedToken(HEAD_B, EMPTY_BODY, "main-gain-removed:docs/a b.md");
+  assert.equal(spaced, `parked=${HEAD_B}:${EMPTY_BODY}:main-gain-removed:docs/a%20b.md`);
   const r = run({ rows: [PARK_ROW(40, spaced)] }, [pr(40, ["ready-to-merge"])]);
   assert.deepEqual(r.mergeParked, [{ pr: 40, reason: "main-gain-removed:docs/a b.md" }], "the row prints the path as the gate did");
+  // A `#<n>` in the path would read as a PR mention and re-key a PR's own
+  // row to PR n, losing the park; encoded, the row stays the PR's.
+  const hashed = parkedToken(HEAD_B, EMPTY_BODY, "main-gain-removed:docs/PR#5.md");
+  assert.equal(hashed, `parked=${HEAD_B}:${EMPTY_BODY}:main-gain-removed:docs/PR%235.md`);
+  const own = run({ rows: [`#346 · ${hashed}`] }, [pr(346, ["ready-to-merge"])]);
+  assert.deepEqual(own.mergeParked, [{ pr: 346, reason: "main-gain-removed:docs/PR#5.md" }], "a `#` in the path stays in the reason, not on the row");
   assert.notEqual(bodyDigest("a"), bodyDigest("a "), "any body edit changes the digest");
 });
 
 test("deriveRun: a parked queued PR leaves the dispatchable queue while its head and body match, and a new head or an edited body lifts it", () => {
   const parked = run({ rows: [PARK_ROW(40)] }, [pr(40, ["ready-to-merge"])]);
   assert.deepEqual([parked.mergeQueue, parked.mergeHeld, parked.mergeParked], [1, 0, [{ pr: 40, reason: MG }]]);
+  const upper = run({ rows: [PARK_ROW(40)] }, [pr(40, ["ready-to-merge"], undefined, HEAD_B.toUpperCase())]);
+  assert.deepEqual(upper.mergeParked, [{ pr: 40, reason: MG }], "gh's head is matched against the park case-blind");
+  const two = run({ rows: [PARK_ROW(41), PARK_ROW(40)] }, [pr(41, ["ready-to-merge"]), pr(40, ["ready-to-merge"])]);
+  assert.deepEqual(two.mergeParked.map((p) => p.pr), [40, 41], "ascending by PR, whatever order gh lists them in");
+  const later = run({ rows: [PARK_ROW(40, `${PARK} · ${parkedToken(HEAD_B, EMPTY_BODY, "main-gain-removed:b.md")}`)] }, [pr(40, ["ready-to-merge"])]);
+  assert.deepEqual(later.mergeParked, [{ pr: 40, reason: "main-gain-removed:b.md" }], "of two parks that both match, the later one names the reason");
   const moved = run({ rows: [PARK_ROW(40)] }, [pr(40, ["ready-to-merge"], undefined, HEAD_A)]);
   assert.deepEqual([moved.mergeQueue, moved.mergeParked], [1, []], "a new head lifts the park");
   const edited = run({ rows: [PARK_ROW(40)] }, [pr(40, ["ready-to-merge"], undefined, HEAD_B, "MERGEABLE", "main-gain-removal: tests/gate.test.mjs #7 - moved")]);
   assert.deepEqual([edited.mergeQueue, edited.mergeParked], [1, []], "an edited body lifts the park");
   // A later park at the new head parks it again; the stale one still matches nothing.
-  const again = run({ rows: [PARK_ROW(40, `${PARK} · ${parkedToken(HEAD_A, "", "main-gain-removed:b.md")}`)] }, [pr(40, ["ready-to-merge"], undefined, HEAD_A)]);
+  const again = run({ rows: [PARK_ROW(40, `${PARK} · ${parkedToken(HEAD_A, EMPTY_BODY, "main-gain-removed:b.md")}`)] }, [pr(40, ["ready-to-merge"], undefined, HEAD_A)]);
   assert.deepEqual(again.mergeParked, [{ pr: 40, reason: "main-gain-removed:b.md" }]);
 });
 

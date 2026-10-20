@@ -6,10 +6,15 @@ rewritten into fresh commits (`git reset --soft` + commit, or an
 author-resetting squash); see the "R misses two windows" paragraph of the
 `plugin/scripts/main-gain.mjs` header.
 Amended by #3608: a human-gated main-gain refusal writes a parked record the tick reads.
-Decision 5's "A hit leaves the label and the ledger alone" and the
-Consequences' "Left out: … ledger hold tokens" are superseded by this
-amendment as far as the ledger goes, not rewritten: the label is still left
-alone and no agent restores lines.
+Decision 5's "A hit leaves the label and the ledger alone" and
+"repeated skip-and-report is the signal until the PR is fixed or
+acknowledged", and the Consequences' "Left out: … ledger hold tokens", are
+superseded by this amendment as far as the ledger goes, not rewritten: while
+the park matches the PR's head and body, no merge bot is dispatched on its
+account, so the standing signal is the park on the PR's row, which the tick
+prints as `HOLD (parked …)` when nothing else queued is dispatchable, rather
+than a report repeated every tick. The label is still left alone and no
+agent restores lines.
 
 ## Context
 

@@ -26,6 +26,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, realpathSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { bodyDigest } from "../plugin/scripts/fleet-tick.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/merge-gate.mjs", import.meta.url));
 // Every non-builtin module the copied gate imports. An unlisted one is a
@@ -236,6 +237,7 @@ test("every check holds → 0 mergeable, one JSON line with every field, four re
     verdict: "mergeable",
     reason: null,
     head: PRE,
+    bodyDigest: bodyDigest(""),
     pre: PRE,
     post: null,
     rebaseCarry: null,
@@ -832,6 +834,7 @@ test("gh pr view exits non-zero → 2 pr-unreadable", (t) => {
   const r = gate(t, { prView: "", prViewExit: 1 });
   assertRow(r, 2, "unknown", "pr-unreadable");
   assert.equal(r.json.head, null);
+  assert.equal(r.json.bodyDigest, null);
 });
 
 test("gh pr view misparses → 2 pr-unreadable", (t) => {
@@ -868,11 +871,13 @@ const HIT = {
 };
 const mg = (patch) => JSON.stringify({ ...MG_CLEAN, ...patch });
 
-test("main-gain exit 1 → 1 main-gain-removed:<first path>, the hit list echoed in mainGain", (t) => {
+test("main-gain exit 1 → 1 main-gain-removed:<first path>, the hit list echoed in mainGain, at the head and body digest a park binds", (t) => {
   const payload = mg({ hits: [HIT, { ...HIT, path: "second.txt" }], reason: "main-gain-removed:tests/gate.test.mjs" });
-  const r = gate(t, { mgOut: payload, mgExit: 1 });
+  const body = "Closes #7\r\n\r\nmain-gain-removal: other.txt #7 - moved";
+  const r = gate(t, { mgOut: payload, mgExit: 1, prView: JSON.stringify({ ...PR_VIEW, body }) });
   assertRow(r, 1, "blocked", "main-gain-removed:tests/gate.test.mjs");
   assert.deepEqual(r.json.mainGain, JSON.parse(payload));
+  assert.deepEqual([r.json.head, r.json.bodyDigest], [PRE, bodyDigest(body)], "fleet-tick.mjs's digest of the body gh read");
 });
 
 test("main-gain-removed wins over ci: and behind:, and loses to head-moved-after-label", (t) => {
