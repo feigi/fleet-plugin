@@ -198,6 +198,83 @@ test("one added line holding the tokens of two removed lines covers only the fir
   assert.deepEqual(r.json.hits[0].lines, [{ line: 6, text: "new3", kind: "modified" }]);
 });
 
+/** Lands `path` holding `landed` through #9 after R, then the PR rewrites it to `edited`. */
+function rewriteLanded(t, path, landed, edited) {
+  const { w } = world(t);
+  landPr(w, 4, 9, { [path]: landed });
+  git(w, "checkout", "-q", "feat");
+  rewriteAt(6, w, "rebase", "-q", "origin/main");
+  write(w, path, edited);
+  return run(w, commitFeat(w, 7));
+}
+
+const IMPORT = 'import { a, b } from "./m.mjs";';
+
+test("a name appended to a gained import line is an in-place edit, not a hit", (t) => {
+  const r = rewriteLanded(t, "i.mjs", `${IMPORT}\n`, 'import { a, b, c } from "./m.mjs";\n');
+  expect(r, 0);
+  assert.deepEqual(r.json.hits, []);
+  assert.deepEqual(r.json.edited, [{ path: "i.mjs", line: 1, text: IMPORT, replacement: 'import { a, b, c } from "./m.mjs";' }]);
+});
+
+test("an in-place edit reports both lines verbatim, indentation included", (t) => {
+  const r = rewriteLanded(t, "g.mjs", "if (ok) {\n  run(a);\n}\n", "if (ok) {\n  run(a, b);\n}\n");
+  expect(r, 0);
+  assert.deepEqual(r.json.edited, [{ path: "g.mjs", line: 2, text: "  run(a);", replacement: "  run(a, b);" }]);
+});
+
+test("a name dropped from a gained import line is a modified hit", (t) => {
+  const r = rewriteLanded(t, "i.mjs", `${IMPORT}\n`, 'import { a } from "./m.mjs";\n');
+  expect(r, 1);
+  assert.equal(r.json.reason, "main-gain-removed:i.mjs");
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 1, text: IMPORT, kind: "modified" }]);
+  assert.deepEqual(r.json.edited, []);
+});
+
+// A name is one token, so a rewrite that keeps its characters but not the name
+// is a modified hit. `renamed` lands `use(max);` and puts `to` in place of `max`.
+const renamed = (t, to) => rewriteLanded(t, "u.mjs", "use(max);\n", `use(${to});\n`);
+
+test("a name is one token: reordering its letters is a modified hit", (t) => {
+  const r = renamed(t, "xam");
+  expect(r, 1);
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 1, text: "use(max);", kind: "modified" }]);
+});
+
+test("an underscore joins a name: extending one with _len is a modified hit", (t) => {
+  const r = renamed(t, "max_len");
+  expect(r, 1);
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 1, text: "use(max);", kind: "modified" }]);
+});
+
+test("a non-ASCII letter joins a name: extending one with é is a modified hit", (t) => {
+  const r = renamed(t, "maxé");
+  expect(r, 1);
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 1, text: "use(max);", kind: "modified" }]);
+});
+
+test("a token the removed line repeats must survive as often: an added line holding it once is a modified hit", (t) => {
+  const r = rewriteLanded(t, "f.mjs", "f(a, a);\n", "f(a, b);\n");
+  expect(r, 1);
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 1, text: "f(a, a);", kind: "modified" }]);
+  assert.deepEqual(r.json.edited, []);
+});
+
+test("a gained blank line replaced by text is a modified hit, not an unanswerable run", (t) => {
+  const r = rewriteLanded(t, "b.txt", "x1\n\nx3\n", "x1\nX\nx3\n");
+  expect(r, 1);
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 2, text: "", kind: "modified" }]);
+});
+
+test("a long removed line claims an added line holding its tokens before a short one does", (t) => {
+  // The short line comes first in the diff, so only the most-tokens-first
+  // order hands the added line to the long one.
+  const r = rewriteLanded(t, "s.txt", "a\na b c\n", "a b c d\n");
+  expect(r, 1);
+  assert.deepEqual(r.json.edited, [{ path: "s.txt", line: 2, text: "a b c", replacement: "a b c d" }]);
+  assert.deepEqual(r.json.hits[0].lines, [{ line: 1, text: "a", kind: "modified" }]);
+});
+
 test("a modified hit is acknowledged like any other", (t) => {
   const { w } = world(t);
   rewriteAt(4, w, "rebase", "-q", "origin/main");

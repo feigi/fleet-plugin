@@ -179,9 +179,12 @@ function tokensOf(text) {
 }
 
 // Each unclaimed added line of one hunk claims at most one removed line of that
-// hunk: the first one still holding every token of it. Removed lines with the
-// most tokens choose first, so a long line is not taken by a short one. The
-// rarest token of a removed line bounds the added lines tried for it.
+// hunk. Removed lines choose in turn, most tokens first so a short line does not
+// take the added line a long one needs, and each takes the first unclaimed added
+// line still holding every token of it. That is greedy: a removed line can stay
+// a hit where another pairing would have matched every line, an error toward
+// blocking. The rarest token of a removed line bounds the added lines tried for
+// it.
 function claimInPlace(removed, added) {
   const index = new Map();
   for (const a of added) {
