@@ -6,7 +6,7 @@
 //   - the section order, by heading text, and the shape of the section list
 //     the ticket names: invariants, phase 0, the wake table, the tick's rows,
 //     the Pull, dispatch, the finisher gate, the judgement rules, then the
-//     failure table, guards, red flags and the report;
+//     failure table, red flags and the report;
 //   - every `## ` section's first paragraph states what the controller does and
 //     when it is done with the section, and no section's table is followed by
 //     prose;
@@ -131,7 +131,6 @@ const TICKET_ORDER = [
   "## The finisher gate",
   "## Judgement rules the drivers stop for",
   "## Failure handling",
-  "## Guards",
   "## Red flags",
   "## Report",
 ];
@@ -141,8 +140,6 @@ const TICKET_ORDER = [
 const STANDING = [
   "## Rules that fail silently",
   "## Worktree and claim model",
-  "## Queue depth",
-  "## Tier outcomes guard",
   "## Why the implementer body carries what it does",
   "## Fix the tooling mid-run",
 ];
@@ -231,7 +228,7 @@ export const firstParagraph = ({ blocks }) => blocks.find((b) => b.kind !== "hea
 
 test("every `## ` section opens with a paragraph that states what the controller does and when it is done", () => {
   const sections = sectionsOf(SKILL);
-  assert.ok(sections.length >= 17, `${sections.length} sections read — the splitter is broken`);
+  assert.ok(sections.length >= 14, `${sections.length} sections read — the splitter is broken`);
   for (const section of sections) {
     const first = firstParagraph(section);
     assert.ok(first !== undefined && first.kind === "para", `${section.heading} does not open with a paragraph`);
@@ -377,9 +374,14 @@ const PHASE_3 = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "r
 // The cut that removed `## Phase 2 — dispatch every member` keeps its own pairs in
 // tests/fixtures/run-team-moved-text/phase-2-dispositions.json, in the same shape.
 const PHASE_2 = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "run-team-moved-text", "phase-2-dispositions.json"), "utf8"));
+// The cut that removed `## Queue depth`, `## Tier outcomes guard` and `## Guards`
+// keeps its own pairs in
+// tests/fixtures/run-team-moved-text/queue-tier-guards-dispositions.json, in the same shape.
+const QUEUE_TIER_GUARDS = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "run-team-moved-text", "queue-tier-guards-dispositions.json"), "utf8"));
 const CHANGED = [
   ...PHASE_2.changed,
   ...PHASE_3.changed,
+  ...QUEUE_TIER_GUARDS.changed,
   [
     "**Pin once**, at phase 0 step 0 below, from the main checkout you are running this from — never from a member's worktree, which is gitignored and carries no baseline: `~/.fleet/bin/fleet-run instruments.sh --pin`.",
     "**Pin once**, at phase 0 step 0 above, from the main checkout you are running this from — never from a member's worktree, which is gitignored and carries no baseline: `~/.fleet/bin/fleet-run instruments.sh --pin`."
@@ -502,7 +504,7 @@ const CHANGED = [
   ],
   [
     "The deficit is then *computed, not remembered*, which is the whole point: a table you must remember to consult is one you will not consult under a merge-side event storm, and that is how implementers reached 0/target with one approved ticket waiting and ~57 `ready-for-agent` in supply while nobody noticed (#3).",
-    "The deficit is then *computed, not remembered*, which is the whole point: a table you must remember to consult is one you will not consult under a merge-side event storm, and that is how implementers reached 0/target with ~57 `ready-for-agent` in supply while nobody noticed (#3)."
+    "The deficit is then *computed, not remembered*, which is the whole point: a table you must remember to consult is one you will not consult under a merge-side event storm, and that is how implementers reached 0/target with ~57 `ready-for-agent` in supply while nobody noticed."
   ],
   [
     "**A finisher failed or was killed** → `ledger.mjs settle finisher-pr-<M>=failed` for a finisher that crashed or gave up, `=killed` for one that was killed; no label, and the tick prints no dispatch for it.",
@@ -540,6 +542,7 @@ const CHANGED = [
 const DELETED = [
   ...PHASE_2.deleted,
   ...PHASE_3.deleted,
+  ...QUEUE_TIER_GUARDS.deleted,
   [
     "**`impl-<N>/`** goes once issue #N is CLOSED, or when it is OPEN, no live `impl-<N>` token names it and nothing under it has changed in 7 days.",
     "reclaim-scratch.mjs's header, which `tick --apply` runs after the reap, and tests/reclaim-scratch.test.mjs"

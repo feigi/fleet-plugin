@@ -42,14 +42,15 @@ import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const read = (...p) => Pin.file(join(REPO, ...p));
-const RUN_TEAM = read("skills", "run-team", "SKILL.md");
 const ISOLATION = read("skills", "run-team", "references", "isolation.md");
 const REVIEW_AND_FIX = read("commands", "review-and-fix.md");
 
+// run-team/SKILL.md keeps only the guard's lead beside its pointer to
+// references/isolation.md, which carries the guard's body.
+//
 // Each row carries its label once: the row name is also the slice's `what`,
 // so the test name and the doc named in a drift failure cannot disagree.
 const slices = [
-  ["run-team/SKILL.md", () => RUN_TEAM.between("Filesystem isolation is not stack isolation", "Scratchpad paths need two levels", "run-team/SKILL.md").text],
   ["references/isolation.md", () => ISOLATION.section("## Filesystem isolation is not stack isolation", "references/isolation.md").text],
 ];
 

@@ -2,8 +2,8 @@
 // "any member that dispatches a child writes an absolute directory under its
 // own partition into that child's prompt, one per child and never shared, and
 // a child never derives its own" (run-team/SKILL.md's "Scratchpad paths need
-// two levels" bullet) and its twin in references/isolation.md's "The axis is
-// two-sided" paragraph — shipped with NO test coverage for either sentence.
+// two levels" bullet, since moved behind its pointer to references/isolation.md)
+// and its twin in references/isolation.md's "The axis is two-sided" paragraph — shipped with NO test coverage for either sentence.
 // Measured directly: `grep -rn "and a child never derives its own\|any member
 // that dispatches a child writes" plugin/scripts` found zero matches before
 // this file, and inverting the rule in a scratch copy ("a member that
@@ -31,26 +31,7 @@ import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const read = (...p) => Pin.file(join(REPO, ...p));
-const RUN_TEAM = read("skills", "run-team", "SKILL.md");
 const ISOLATION = read("skills", "run-team", "references", "isolation.md");
-
-const SKILL_BULLET = () =>
-  RUN_TEAM.between(
-    "**Scratchpad paths need two levels",
-    "**IDE/harness diagnostics attribute",
-    "run-team/SKILL.md's scratchpad-paths bullet",
-  ).text;
-
-const SKILL_CLAUSE =
-  "any member that dispatches a child writes an absolute directory under its own partition into that child's prompt, one per child and never shared, and a child never derives its own";
-
-test("run-team/SKILL.md's scratchpad-paths bullet pins the parent-writes, child-never-derives rule", () => {
-  assert.match(
-    SKILL_BULLET(),
-    Pin.phrase(SKILL_CLAUSE),
-    "the bullet no longer states that any member dispatching a child writes an absolute directory into that child's prompt, one per child and never shared, with the child never deriving its own — the exact rule #1150 exists to establish, and inverting it left the diff-touched suite green before this pin existed",
-  );
-});
 
 const ISOLATION_PARAGRAPH = () =>
   ISOLATION.between(

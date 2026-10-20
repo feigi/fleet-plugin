@@ -791,17 +791,6 @@ test("run-team scopes the diverged-worktree row to the fallback, not to every me
   );
 });
 
-// The run-team skill's merge-path paragraph says the branch-delete step also
-// releases the claim label — the runbook pins above read run-merge-bot.md, so
-// without this the skill's own statement of it can be deleted with the suite
-// green. Sliced to that one paragraph, and the span is one contiguous clause.
-test("run-team's never-`--delete-branch` paragraph says the branch-delete step also releases the claim label", () => {
-  const para = RUN_TEAM.paragraph("Never `--delete-branch` — the merge bot deletes the head branch itself.", "run-team/SKILL.md's never-`--delete-branch` paragraph", "**Never force a rebase to start.**", {
-    emphasisTolerant: true,
-  }).text;
-  assert.match(para, Pin.phrase("The branch-delete step also releases the claim label: it drops `in-progress` from every issue the PR closes."));
-});
-
 // #903: the poll read `gh pr view <pr> --json headRefOid` — the one field that
 // desyncs from the branch it is meant to be watching. Measured on this repo:
 // `gh pr update-branch --rebase` landed and moved the ref to 221f4e9 while

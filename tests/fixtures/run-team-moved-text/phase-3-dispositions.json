@@ -5,10 +5,6 @@
       "**Only an explicit bail report — the member itself naming the cause — reaches Implementer bails before implementing**; a died or merely-quiet member's silence never does."
     ],
     [
-      "The member-facts scrape, the drain of the pending ticket-features rows and the commit of the metrics files are steps of `closeout.mjs finish`, which **End of run** (Phase 3) drives.",
-      "The member-facts scrape, the drain of the pending ticket-features rows and the commit of the metrics files are steps of `closeout.mjs finish`, which **End of run** (**What a wake owes beyond its call**) drives."
-    ],
-    [
       "**A review result lands** → see the result file written (by you or by the runner — **Reviewers** says which, per harness), then `fleet-event.mjs review-result <pr> <path>`: a PR with survived or unverified findings prints as `DISPATCH fix-pr PR#<M>`.",
       "**A review result lands** → see the result file written (by you or by the runner — **The reviewer** says which, per harness), then `fleet-event.mjs review-result <pr> <path>`: a PR with survived or unverified findings prints as `DISPATCH fix-pr PR#<M>`."
     ],
@@ -47,10 +43,6 @@
     [
       "`claim-ticket.sh`, `release-ticket.sh`, `reap.sh` and `inflight.sh` are git-native and operate on the single shared ref store every worktree and the main checkout read and write directly (**Phase 1**, **Reap after each merge pass**, **Release the claims that never became PRs** above); nothing in omp's `task` model touches that store, so none of the four scripts carries a dialect branch.",
       "`claim-ticket.sh`, `release-ticket.sh`, `reap.sh` and `inflight.sh` are git-native and operate on the single shared ref store every worktree and the main checkout read and write directly (**Phase 1**, the tick's reap, and `release-ticket.sh` under **Failure handling**); nothing in omp's `task` model touches that store, so none of the four scripts carries a dialect branch."
-    ],
-    [
-      "One invocation prints per-role `actual/target` and an explicit ACTION with the backlog gate above and every row of the table below already applied; every wake in Phase 3 ends in it.",
-      "One invocation prints per-role `actual/target` and an explicit ACTION with the backlog gate above and every row of the table below already applied; every wake ends in it."
     ],
     [
       "A PR's review is not a member, so it carries its own pair of row tokens, written with `review` onto the PR's row (**Reviewers**): `review=wf:<runId>` | `review=member:<name>` at launch, `<name>` being `review-pr-<n>` for the PR's first runner and the next letter its rows do not carry yet (`review-pr-<n>-b`, `-c`, …) for every later one, settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` when the result lands, `<run>` the review's `run-XXXXXXXX` run root under `<scratch>/pr<n>/`, which holds its `review.json`.",

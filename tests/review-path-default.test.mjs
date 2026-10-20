@@ -126,7 +126,7 @@ const reviewersSection = () =>
   [
     RUN_TEAM.between("### Dispatching the members a wake names", "### Reading a review result", "run-team wake dispatch: reviewer").text,
     RUN_TEAM.between("### Reading a review result", "### Nothing to do: arm the beat", "run-team Reading a review result").text,
-    RUN_TEAM.between("**A throw, an empty return, or a notification whose status is not `completed`", "## Guards", "run-team review retry").text,
+    RUN_TEAM.between("**A throw, an empty return, or a notification whose status is not `completed`", "## Red flags", "run-team review retry").text,
   ].join("\n\n");
 // The fix-applier's prompt is what the member reads: its agent body, then the
 // brief the renderer prints for a review fix-applier. SKILL.md carries neither.

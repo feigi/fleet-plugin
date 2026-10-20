@@ -14,9 +14,9 @@ const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 const SLICE = () => CLOSE_OUT.section("## Scrape the member facts and check the tier rows", "member-outcomes scrape section").text;
 
 // The paragraph where the controller still rules each PR's review: it stays in
-// the skill file, and its end anchor is the paragraph that hands the scrape
-// over to the close-out reference.
-const RULING = () => RUN_TEAM.between("**Guard: accumulate per PR", "The member-facts scrape, the drain", "tier-outcomes ruling paragraph").text;
+// the skill file, and its end anchor is the subsection that follows it in the
+// wake section.
+const RULING = () => RUN_TEAM.between("**Guard: accumulate per PR", "### Nothing to do: arm the beat", "tier-outcomes ruling paragraph").text;
 
 // Everything the instruction needs in order to RUN. Matching only the filename
 // was mutation-proven vacuous: the pin stayed green both when the command was
