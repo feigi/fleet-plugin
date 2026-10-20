@@ -859,10 +859,9 @@ A member that bails demotes nothing itself; demotion by cause is yours
 
 ### Resolving a finisher halt
 
-A halt at duty 1 reads identical from a bare SHA mismatch whatever caused it,
-and the causes `finisher-audit.mjs` names are the ones seen so far, not a
-closed list; the finisher's agent body gives it the cause from one script
-instead of asking anyone.
+**A rebase never gets a `reviewed=`**, and never write a `reviewed=` you did
+not read off a review result file. Why `past-pin` needs the tick: See
+references/finisher.md.
 
 **Resolving a finisher halt.** A halt is the finisher working correctly — it
 refused to label — so it is never `failed`, which stays for a finisher that
@@ -881,34 +880,17 @@ decides the rest — two resolve automatically, every other one escalates:
 | `rebase` | **Escalate** — comment and flag, nothing more. The report's `evidence.replay` reads `pure` only when `git range-diff origin/main <pin> HEAD` pairs every pinned commit with an unchanged one; `changed` (a commit dropped, edited or added, or a stale `origin/main`) or `unknown` means read `evidence.rangeDiff` before acting, and `evidence.remote.state` says whether that head is on the PR. No automatic rule until a live halt shows the case recurring. |
 | `unreadable`, `missing`, `absent`, `other` | **Escalate** — comment and flag, no automatic retry. |
 
-### Why a `past-pin` halt needs the tick
-
-`past-pin` needs the tick because the dead-review path cannot reach it: once a
-review has **returned**, its `reviewed=` token holds the PR out of `review-due=`,
-and settling that review `=failed` re-queues nothing — that path covers only a
-review that died before returning. A head that moved past `reviewed=` with no
-such halt — a fix-applier's push — stays not due: duty 2 verifies what it
-applied. **A rebase never gets a `reviewed=`:** the earlier review still
-counts, because dispositions verdicts are tied to its head. Never write a
-`reviewed=` you did not read off a review result file.
-
 ### Resolving a finisher that died
 
-**Resolving a finisher that died.** A finisher settled `failed` or `killed` left
-its PR without `ready-to-merge`, and nothing else notices: the PR is out of the
-merge queue, and the tick dispatches no finisher for it. The cockpit flags a
-REVIEW-column open PR without the label, whose latest finisher attempt settled
-so, `finisher:failed` or `finisher:killed` at severity 4 — one token per
-outcome, neither the implementer's bare `killed` flag nor `unlabelled`. You
-resolve it by hand: investigate why the finisher died, or dispatch the
-next-suffix finisher after the finisher gate: render its brief with
-`dispatch-prompt.mjs render finisher --kind fresh --member finisher-pr-<M>-<x>
-…` (`--kind repair` once an earlier finisher reported `labelled` without the
-label landing), then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`. The flag
-clears when a later attempt settles — `labelled`
-(then `unlabelled` takes over while the label is still off), `halted:<cause>`,
-or a live `-b` — or when the PR carries `ready-to-merge`, merges or closes.
-You never add the label yourself, and the tick does not retry.
+**Resolving a finisher that died.** A finisher settled `failed` or `killed`
+leaves its PR without `ready-to-merge`; the cockpit flags it
+`finisher:failed` or `finisher:killed`, and the tick does not retry. Resolve
+it by hand: investigate why the finisher died, or dispatch the next-suffix
+finisher after the finisher gate, rendered with `dispatch-prompt.mjs render
+finisher --kind fresh --member finisher-pr-<M>-<x> …` (`--kind repair` once an
+earlier finisher reported `labelled` without the label landing), then
+`ledger.mjs dispatch <M> finisher-pr-<M>-<x>`. You never add the label
+yourself. When the flag clears: See references/finisher.md.
 
 ### Dispositions escalation
 
