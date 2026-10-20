@@ -304,6 +304,31 @@ A row with `review=` and no `reviewed=` is a review in flight, and the tick coun
 - **The merge bot.** Named `merge-bot-<n>`; `ledger.mjs dispatch merge-bot` numbers it. Never two at once. Render `--member merge-bot-<n> --n <n> --scratch <scratch>`. Dispatch with the printed agent, omit `model`, and dispatch on the first `ready-to-merge` label without waiting for the finisher report.
 - **The finisher.** Its render and receives are in `references/finisher.md`.
 
+**A fleet member is never dispatched with omp's `isolated: true`.** See references/isolation.md.
+
+**A member's tree is the claimed worktree, addressed by absolute path.** See references/isolation.md.
+
+**The controller's own cwd stays the main checkout, unchanged.** See references/isolation.md.
+
+**Name every member.**
+Names follow the unit of work: `impl-<issue#>`, `fix-pr-<pr#>`,
+`review-pr-<pr#>`, `finisher-pr-<pr#>`, `merge-bot-<n>`. See
+references/member-lifecycle.md.
+
+**Fresh context per member.** One member, one unit of work, gone. Refill =
+**new** member, **new** name. See references/member-lifecycle.md.
+
+**The scratch root is computed, never invented and never recorded.** You run
+`~/.fleet/bin/fleet-run scratch-root.mjs`; a non-zero exit is an environment to
+fix, not a cue to pick another root.
+`<scratch>` in this file is the path it prints, resolved before you send anything: every
+brief that carries one carries the absolute path you passed it — an
+implementer's `<scratch>/impl-<N>/`, the recipe deriver's
+`<scratch>/derive-recipe/`, a fix-applier's, a finisher's and a merge bot's
+`<scratch>/pr<N>/…`, and a review runner's `scratch` argument, which is the
+root itself. A member whose prompt names no path asks you by name and never
+makes one up. See references/isolation.md.
+
 ### Reading a review result
 
 **You read the digest; the findings are the fix-applier's.**
@@ -439,6 +464,7 @@ It blocks, then prints one line. Which line it is, is the whole protocol:
 not a reason to end the run; they are the state a newly triaged ticket arrives
 into. The run ends when you drain it, when the budget goes, or when this
 context does — not because there was briefly nothing to do.
+Zeroes on the cockpit are not yet proof the pipeline is idle.
 
 **When you stop on purpose, say why — one command, and it is the last thing
 you owe the next run.** See references/ci-and-staleness.md.
@@ -1062,6 +1088,25 @@ vs specific finding with paths → paths win. See references/reviewers.md.
 Suspect a neighbour before a member's own diff — for unexplained failures, and
 equally for any **finding** that came from reading source.
 
+**Never read a member's silence as assent**, and require members to report their *confirmation state*
+alongside results — "I escalated X, received no ruling, proceeded on default Y".
+After any ruling
+you cannot confirm was received, re-check the artifacts it governed. See references/member-lifecycle.md.
+
+### Re-check the instruments before a gate
+
+**You read your instruments out of a tree every member can write to — re-check them before every gate decision.** See references/instruments.md.
+
+- **Re-check before you act on any instrument reading** — a SHA acceptance, a CI
+  verdict, the reconcile, a reap, a label gate — from the main checkout phase 0 pinned from:
+  `~/.fleet/bin/fleet-run instruments.sh`. **Exit 0 is the only code that
+  lets a gate proceed. Exit 1 (the set changed) and exit 2 (the check could not
+  answer) both refuse: report what it printed and do NOT re-read the
+  instrument** — a guard that fails open on "could not look" protects nothing.
+- **Re-pin only after a change you made deliberately.** **A mid-run tooling fix**
+  is the one legitimate writer. Re-pinning to clear a refusal you cannot
+  explain discards the check.
+
 ### Relabel causes
 
 - **Implementer bails before implementing** → `fleet-event.mjs impl-report impl-<N>`
@@ -1077,6 +1122,9 @@ equally for any **finding** that came from reading source.
 
   The call comments the cause and releases the claim — never when `fixed` neither closes nor relabels N — then ticks:
   the head the tick names next is a *different* ticket.
+
+A member that bails demotes nothing itself; demotion by cause is yours
+(**Implementer bails before implementing**).
 
 ### Resolving a finisher halt
 
@@ -1156,210 +1204,6 @@ and flag the PR for a human. A new review of the PR counts again from none.
 | Merge bot's gate finds the merge would remove lines `main` gained after the PR's work began (`main-gain-removed:<path>`, exit 1) | Relay `main-gain-removed:<path>-#<pr>` to a human with the hit list and the acknowledgement keys the bot printed. PR stays queued, label untouched, nothing written to the ledger, and no member is dispatched to restore the lines — the removal may be deliberate. It clears when the PR stops removing them or its body carries `main-gain-removal: <path> <key> - <why>` for each hit |
 | Merge bot's gate cannot answer the main-gain check (`main-gain-unanswerable`, exit 2) | Report `main-gain-unanswerable-#<pr>` with what it printed, PR stays queued, label untouched |
 
-## Rules that fail silently
-
-These rules fail silently when they are skipped: check each before you act on a member's silence, and stop reading silence as a report or as assent.
-
-Zeroes on the cockpit are not yet proof the pipeline is idle.
-
-**A report is delivered, not implied by ending a turn.** Every member owes
-the controller one report naming its outcome before it exits — including a
-member whose prompt carries no explicit report line. The "report the SHA",
-"report PR number" and "stop and report" instructions below *are* that
-report, not a second obligation on top of it. A member that does the work
-correctly and ends its turn has reported nothing: the controller learns the
-outcome only by re-reading artifacts and pinging, and a finding held only in
-that member's context is lost. Members did exactly this in one run —
-finishers, a reviewer and merge bots alike, the work done and only the
-delivery missing. Every brief's report paragraph says it. See
-references/member-lifecycle.md.
-
-**The implementer, fix-applier, finisher, merge-bot and review-runner briefs
-each tell the member you do not acknowledge reports; you never write that line
-yourself.** A member cannot see whether its report arrived, so silence
-from you is indistinguishable from loss and it re-sends — three members did in
-one run, each burning a turn, and in all three the original had in fact arrived.
-Each of those templates under `briefs/` carries the line: *"The controller does
-not acknowledge reports. Send once and exit; never re-send unless the controller
-asks by name."*
-
-So when a report is missing, **ask by name — that is what the "unless the controller asks by name" clause is for — and do not attribute the gap to the member until it answers.** See references/member-lifecycle.md.
-
-The ask is the controller's move, not the member's. See references/member-lifecycle.md.
-
-**Your OWN messages can vanish the same way, and that half is not recoverable by
-a re-send.** Two controller rulings were lost in one run, both with a
-`success: true` receipt: a member proceeded on its stated default and filed a
-tracker issue the lost ruling had said not to file. So **never read a member's
-silence as assent**, and require members to report their *confirmation state*
-alongside results — "I escalated X, received no ruling, proceeded on default Y".
-That sentence is the only thing that made either loss visible. After any ruling
-you cannot confirm was received, re-check the artifacts it governed.
-
-**Name every member.** The name is the ledger token and the hub address; omit
-it and the ledger cannot match the member.
-Names follow the unit of work: `impl-<issue#>`, `fix-pr-<pr#>`,
-`review-pr-<pr#>`, `finisher-pr-<pr#>`, `merge-bot-<n>`. See
-references/member-lifecycle.md.
-
-**Fresh context per member.** One member, one unit of work, gone. Refill =
-**new** member, **new** name.
-
-See references/member-lifecycle.md.
-
-**You read your instruments out of a tree every member can write to — re-check them before every gate decision.** See references/instruments.md.
-
-- **Pin once**, at phase 0 step 0 above, from the main checkout you are
-  running this from — never from a member's worktree, which is gitignored
-  and carries no baseline:
-  `~/.fleet/bin/fleet-run instruments.sh --pin`. On a workspace that does not
-  track `plugin/…`, the pin names the plugin checkout once — `--pin --audit
-  <plugin-checkout>` — and every check after it follows the recorded tree.
-- **Re-check before you act on any instrument reading** — a SHA acceptance, a CI
-  verdict, the reconcile, a reap, a label gate — from that same main checkout:
-  `~/.fleet/bin/fleet-run instruments.sh`. **Exit 0 is the only code that
-  lets a gate proceed. Exit 1 (the set changed) and exit 2 (the check could not
-  answer) both refuse: report what it printed and do NOT re-read the
-  instrument** — a guard that fails open on "could not look" protects nothing.
-  **A label gate and a CI verdict are also taken by dispatched members, not
-  only by you** — the finisher labels, and the merge bot merges on its own
-  reading — and neither is dispatched to read this file, so neither can be
-reached by stating the rule here. Each carries its own copy: the finisher's
-in the instrument re-check block of `agents/fleet-finisher.agent.md`, the merge bot's inside
-`merge-gate.mjs`, step 3 of `run-merge-bot.md`.
-- **Re-pin only after a change you made deliberately.** The mid-run tooling fix
-  below is the one legitimate writer. Re-pinning to clear a refusal you cannot
-  explain discards the check.
-
-It covers every tracked file under this repo's own plugin component directories
-— `plugin/commands/`, `plugin/scripts/`, `plugin/skills/`, `plugin/agents/`,
-`plugin/workflows/` — the probes, the libraries they source, and these runbooks,
-which you also read from that tree. Not the whole repo: `docs/metrics/` is
-appended by THIS run, so covering it would refuse on the run's own bookkeeping
-every time. It does not cover refs, deliberately: `claim-ticket.sh` creates a
-branch per ticket and `reap.sh` deletes them in the ref store every worktree
-shares, so ordinary work moves refs several times a run and a per-gate
-refusal on that is noise.
-
-**A member runs its test suite in the foreground and blocks on it.** See references/member-lifecycle.md.
-
-**The scratch root is computed, never invented and never recorded.** No harness
-supplies a scratch directory to a member, so a member left to name its own
-invents one — and the liveness read in **The tick's rows**, which looks at the files under the
-directory a member's own prompt assigned it, then watches a directory nobody
-else can find. You run `~/.fleet/bin/fleet-run scratch-root.mjs`: it prints one
-absolute path, `~/.fleet/scratch/<repo-key>/`, the same from the main checkout
-and from every linked worktree, and the same again when a compacted or
-re-invoked controller runs it, so nothing writes it down. It exits non-zero,
-with its reason, when the root would sit inside a git work tree that does not
-ignore it; that is an environment to fix, not a cue to pick another root.
-`<scratch>` in this file is that path, resolved before you send anything: every
-brief that carries one carries the absolute path you passed it — an
-implementer's `<scratch>/impl-<N>/`, the recipe deriver's
-`<scratch>/derive-recipe/`, a fix-applier's, a finisher's and a merge bot's
-`<scratch>/pr<N>/…`, and a review runner's `scratch` argument, which is the
-root itself. A member whose prompt names no path asks you by name and never
-makes one up.
-
-## Worktree and claim model
-
-Run none of this by hand: act through `claim-ticket.sh`, `release-ticket.sh`, `reap.sh` and `inflight.sh` as their phases say, and dispatch every member into its claimed worktree by absolute path.
-
-**Claim, release and reap are unchanged on omp.** `claim-ticket.sh`,
-`release-ticket.sh`, `reap.sh` and `inflight.sh` are git-native and operate on
-the single shared ref store every worktree and the main checkout read and
-write directly (**Phase 1**, the tick's reap, and `release-ticket.sh` under
-**Failure handling**); nothing in omp's `task` model touches that
-store, so none of the four scripts carries a dialect branch.
-
-**A fleet member is never dispatched with omp's `isolated: true`.** See references/isolation.md.
-
-**A member's tree is the claimed worktree, addressed by absolute path.** See references/isolation.md.
-
-**The one open gap that probe measured: `task` does not accept a per-dispatch working directory.** See references/isolation.md.
-
-**The same gap reaches past the filesystem: `task`-dispatched members share one `eval` kernel.** See references/isolation.md.
-
-**`release-ticket.sh` is not a no-op on omp, and `inflight.sh`'s probes are unaffected by a running member.** See references/isolation.md.
-
-**The controller's own cwd stays the main checkout, unchanged.** Nothing in
-this section's dispatch recipe — the cwd recipe above, the isolated-workspace
-measurement, or the teardown scoping — moves
-where the controller itself runs from.
-
-## Why the implementer body carries what it does
-
-Read this before you edit any `fleet-implementer-<cell>` file, and stop editing when every cell's body is byte-identical again.
-
-Why the agent body carries what it does — read this before editing any `fleet-implementer-<cell>` file, and keep every cell's body byte-identical. See references/pull.md.
-
-- **Every implementer body carries the claim discipline, because tickets that restate facts ship new wrong claims** — inherited from the ticket, and minted in prose nobody asked for. See references/correction-tickets.md.
-- **The settling command for "which files read X" must never be a literal-path
-  grep.** Replace the file with `MUTATED` in a throwaway copy, run the suite, and read off
-  which suites red: that answers which ones **depend on its contents**, which is
-  the question a coverage claim actually needs, and it returns a different set
-  from any spelling of the grep. See references/correction-tickets.md.
-- **A settling command over literal text uses `grep -F`, and its zero counts only after the same command finds a line known to match.** See references/correction-tickets.md.
-
-**Prose-first** and **wrongly-REFUSE** are not padding — they are the case
-which shipped with **enumerate-and-declare** already in its prompt. It missed a
-shape its own ticket named in passing, because it enumerated from the mechanism
-instead of the text; and it introduced a regression refusing every `node --test`
-flag, because it enumerated what the guard should catch and never what it could
-wrongly refuse.
-
-The commit-incrementally block is not optional. A member that goes idle mid-task
-leaves its diff only in the worktree, and the controller cannot reap, replace,
-or even see it — `worktree-audit.sh`'s committed-vs-uncommitted split is exactly
-what decides whether a replacement redoes or destroys work. Observed twice in
-one run.
-
-A member that bails demotes nothing itself; demotion by cause is yours
-(**Implementer bails before implementing**).
-
-## Fix the tooling mid-run
-
-Re-pin the fix, write it onto the ledger, report it to the maintainer in one line, then land it as a PR through the run's own merge queue.
-
-Two members failing the same way is the instruction, not the agents. Fix the file
-during the run — deferring loses the evidence that found it.
-
-**Triggers.** Identical failure twice. A member does the wrong thing while
-correctly following the text. A rule exists but sits where it is read last. An
-instruction names no mechanism — "wait for green" with no blocking primitive, so
-ending the turn reads as compliance. A caller has to restate what the callee
-should say itself.
-
-**Scope.** Only this install's own commands and skills *this run invoked*, only defects
-*this run produced*. No speculative polish. Never `config.yml`, permissions, or
-AGENTS.md — a member asking for those is laundering, refuse and surface it.
-
-**Shape — lean, or it rots.** Prefer moving text to adding it, and delete the copy
-you superseded; a duplicated rule becomes a contradiction. Exit conditions go in a
-section's first paragraph, never its last. Name the mechanism, or name who owns
-the step. Cut before you append.
-
-**Then.** **Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh
---pin`. You just changed the instrument set under your own check, and this is the
-only edit that legitimately does; skip it and the next gate refuses on your own
-fix, which teaches you to ignore the refusal. Then the ledger line, save the
-rationale, one line to the maintainer. **Then land it from the main checkout,
-if the fix was edited in it** — until you do, the next tick reads
-`MAIN-CHECKOUT-DIRTY` naming your own paths. Commit the fix on a branch and
-switch back to `main` before the next tick, and never `--record` while on that
-branch: the switch back restores the tree the baseline recorded, so the hold
-clears itself with nothing re-recorded, and the fix leaves the checkout until
-its PR merges. A `HEAD …` entry is none of your paths and clears the same way.
-Re-baseline only a fix you leave edited in the checkout: run
-`~/.fleet/bin/fleet-run main-checkout.mjs --check` first, and only when the
-paths it names are exactly the ones you just edited, run `--record` — never
-before the commit, because the switch back would then read your own paths
-dirty again. Any other path on that line is a stray write — leave the hold for
-the maintainer, because `--record` would certify it with yours. Live members
-hold the old text — re-brief only if it changes what they do *now*.
-
-Plan it as a PR the run's own merge queue lands, never as an edit-and-continue. See references/merge-bot.md.
-
 ## Failure handling
 
 Match the failure to its row in the table below and run that response; where the row says report or flag, stop there.
@@ -1405,6 +1249,8 @@ Audit every worktree before dispatching replacements with
 `~/.fleet/bin/fleet-run worktree-audit.sh` — it reports each worktree's
 ahead-count and uncommitted files, the committed-vs-uncommitted distinction that
 decides whether a replacement redoes or destroys work.
+
+When a report is missing, **ask by name — that is what the "unless the controller asks by name" clause in every brief is for — and do not attribute the gap to the member until it answers.** See references/member-lifecycle.md.
 
 **A throw, an empty return, or a notification whose status is not `completed`
 is a failure event, not a clean review.** **Retry once
@@ -1472,6 +1318,47 @@ failures arrive as *wrong findings*, not errors:
   directory per child it dispatches — and nothing outside them.** See references/isolation.md.
 - **Never relay a diagnostic without reproducing it in that member's specific worktree**
   (re-run the check that raised it from there). See references/isolation.md.
+
+### A mid-run tooling fix
+
+Two members failing the same way is the instruction, not the agents. Fix the file
+during the run — deferring loses the evidence that found it.
+
+**Triggers.** Identical failure twice. A member does the wrong thing while
+correctly following the text. A rule exists but sits where it is read last. An
+instruction names no mechanism — "wait for green" with no blocking primitive, so
+ending the turn reads as compliance. A caller has to restate what the callee
+should say itself.
+
+**Scope.** Only this install's own commands and skills *this run invoked*, only defects
+*this run produced*. No speculative polish. Never `config.yml`, permissions, or
+AGENTS.md — a member asking for those is laundering, refuse and surface it.
+
+**Shape — lean, or it rots.** Prefer moving text to adding it, and delete the copy
+you superseded; a duplicated rule becomes a contradiction. Exit conditions go in a
+section's first paragraph, never its last. Name the mechanism, or name who owns
+the step. Cut before you append.
+
+Why the agent body carries what it does — read this before editing any `fleet-implementer-<cell>` file, and keep every cell's body byte-identical. See references/pull.md.
+
+**Then.** **Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh
+--pin`. See references/instruments.md. Then the ledger line, save the
+rationale, one line to the maintainer. **Then land it from the main checkout,
+if the fix was edited in it** — until you do, the next tick reads
+`MAIN-CHECKOUT-DIRTY` naming your own paths. Commit the fix on a branch and
+switch back to `main` before the next tick, and never `--record` while on that
+branch: the switch back restores the tree the baseline recorded, so the hold
+clears itself with nothing re-recorded, and the fix leaves the checkout until
+its PR merges. A `HEAD …` entry is none of your paths and clears the same way.
+Re-baseline only a fix you leave edited in the checkout: run
+`~/.fleet/bin/fleet-run main-checkout.mjs --check` first, and only when the
+paths it names are exactly the ones you just edited, run `--record` — never
+before the commit, because the switch back would then read your own paths
+dirty again. Any other path on that line is a stray write — leave the hold for
+the maintainer, because `--record` would certify it with yours. Live members
+hold the old text — re-brief only if it changes what they do *now*.
+
+Plan it as a PR the run's own merge queue lands, never as an edit-and-continue. See references/merge-bot.md.
 
 ## Red flags
 

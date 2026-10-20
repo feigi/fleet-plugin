@@ -2,23 +2,22 @@
 // re-run at the commit that ships it, written inline beside it, because a
 // pushed body cannot be edited and none of the diff-scoped rules reach it. The
 // rule itself and the literal-text `-F` rule live in the claim-discipline block
-// every implementer agent body carries; run-team's SKILL.md keeps the
-// literal-path grep paragraph, and the rationale paragraph and the `-F`
-// paragraph each as its rule beside a pointer — both paragraphs moved, with
-// their measurements, to references/correction-tickets.md. This file pins
-// every home. The same block's anti-count rule is pinned in
+// every implementer agent body carries. The rationale paragraph, the `-F`
+// paragraph and the literal-path grep paragraph live, with their measurements,
+// in references/correction-tickets.md, each under its own heading; run-team's
+// SKILL.md keeps none of them since its implementer-body section left (#3544).
+// This file pins every home. The same block's anti-count rule is pinned in
 // `fix-applier-correction-rules-prose.test.mjs`, as one ordered span.
 //
 // Measured against `origin/main` before this file existed: no test read the
 // words `commit body` in `run-team/SKILL.md` at all, so the whole rule could be
 // deleted with the suite green.
 //
-// SHAPE. The SKILL.md slice runs from the rationale paragraph to the
-// `### Merge bot` heading that follows the settling-command paragraphs —
-// bounded at both ends, so a presence check inside it says something about
-// these paragraphs and not about the rest of the Reviewers section. The agent
-// body's block is sliced from its own lead to the commit-incrementally block
-// that follows it.
+// SHAPE. Each reference slice is one `## ` section of
+// references/correction-tickets.md, bounded by the next heading, so a presence
+// check inside it says something about that paragraph and not about the rest
+// of the file. The agent body's block is sliced from its own lead to the
+// commit-incrementally block that follows it.
 //
 // THE CEILING, the same one `dispatch-block-pins-prose.test.mjs` records:
 // these are pins on text being PRESENT. A sentence APPENDED after a pinned one
@@ -36,7 +35,6 @@ import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
-const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
 // `**` emphasis is stripped and whitespace collapsed before matching, so a
 // pinned span may cross a bold boundary or a hard wrap and neither an emphasis
@@ -60,21 +58,23 @@ const flatten = (s) =>
     .join(" ")
     .trim();
 
-const FROM = "Every implementer body carries the";
-const TO = "**Prose-first** and **wrongly-REFUSE**";
-const rule = () => flatten(RUN_TEAM.between(FROM, TO, "the claim-discipline rationale and settling-command rules").text);
+// The literal-path grep paragraph, under its own heading in
+// references/correction-tickets.md, with the why after the rule.
+const CORRECTION_TICKETS = Pin.file(join(REPO, "skills", "run-team", "references", "correction-tickets.md"));
+const LITERAL_PATH = '## The settling command for "which files read X" is never a literal-path grep';
+const literalPathFrom = (pin) => flatten(pin.section(LITERAL_PATH, "references/correction-tickets.md").text);
+const rule = () => literalPathFrom(CORRECTION_TICKETS);
 
 // The rationale and the `-F` paragraph, as references/correction-tickets.md
 // carries them under their headings.
-const CORRECTION_TICKETS = Pin.file(join(REPO, "skills", "run-team", "references", "correction-tickets.md"));
 const MOVED_SECTIONS = ["## Every implementer body carries the claim discipline", "## A settling command over literal text uses `grep -F`"];
 const movedFrom = (pin) => flatten(MOVED_SECTIONS.map((h) => pin.section(h, "references/correction-tickets.md").text).join("\n"));
 const moved = () => movedFrom(CORRECTION_TICKETS);
 
-test("SKILL.md keeps the rationale's rule and the -F rule, each beside its pointer to references/correction-tickets.md", () => {
-  const r = rule();
-  assert.match(r, Pin.phrase("Every implementer body carries the claim discipline, because tickets that restate facts ship new wrong claims — inherited from the ticket, and minted in prose nobody asked for. See references/correction-tickets.md."));
-  assert.match(r, Pin.phrase("A settling command over literal text uses `grep -F`, and its zero counts only after the same command finds a line known to match. See references/correction-tickets.md."));
+test("references/correction-tickets.md opens the rationale and the -F section each with its rule", () => {
+  const r = moved();
+  assert.match(r, Pin.phrase("Every implementer body carries the claim discipline, because tickets that restate facts ship new wrong claims — inherited from the ticket, and minted in prose nobody asked for."));
+  assert.match(r, Pin.phrase("A settling command over literal text uses `grep -F`, and its zero counts only after the same command finds a line known to match."));
 });
 
 // The claim-discipline block of the implementer agent body — the hand-over
@@ -98,11 +98,11 @@ test("the literal-path grep is forbidden AND the method that replaces it is give
   );
   // Why the grep fails, in both directions. One direction alone reads as a
   // precision problem a tighter pattern would fix, which is the refinement the
-  // issue measured returning a second wrong answer. That why moved to
-  // references/correction-tickets.md, beside which the rule keeps its pointer.
-  assert.match(r, Pin.phrase("from any spelling of the grep. See references/correction-tickets.md."));
+  // issue measured returning a second wrong answer. The why follows the rule
+  // in the same section.
+  assert.match(r, Pin.phrase("from any spelling of the grep."));
   assert.match(
-    flatten(CORRECTION_TICKETS.section("## The settling command for \"which files read X\" is never a literal-path grep", "references/correction-tickets.md").text),
+    r,
     /merely \*name\* it — comments included — and misses the files that build it/,
     "the reference no longer says a path grep both over-reports mentions and misses assembled paths — one direction alone reads as a pattern that needs tightening",
   );
@@ -221,9 +221,9 @@ test("a rewrapped rule still matches — these pins refuse drift, not reflow", (
   assert.match(flat, Pin.phrase("A settling command over literal text uses `grep -F`"));
 });
 
-test("a rewrapped SKILL.md slice still matches — the literal-path grep paragraph that stayed", () => {
-  const raw = RUN_TEAM.between(FROM, TO, "the claim-discipline rationale and settling-command rules").text;
-  const body = raw.replace(/\n*#*\s*$/, "");
+test("a rewrapped literal-path paragraph still matches", () => {
+  const raw = CORRECTION_TICKETS.section(LITERAL_PATH, "references/correction-tickets.md").text;
+  const body = raw.slice(LITERAL_PATH.length).trim();
   const words = body.split(/\s+/).filter(Boolean);
   const lines = words.reduce((acc, w) => {
     const last = acc[acc.length - 1];
@@ -233,7 +233,7 @@ test("a rewrapped SKILL.md slice still matches — the literal-path grep paragra
   }, []);
   const narrow = lines.join("\n");
   assert.notEqual(narrow, body, "the rewrap fixture no longer changes the rule's wrapping — update it");
-  const flat = flatten(Pin.of(RUN_TEAM.text.replace(raw, () => narrow), "the fixture").between(FROM, TO, "rewrapped rule").text);
+  const flat = literalPathFrom(Pin.of(CORRECTION_TICKETS.text.replace(body, () => narrow), "the fixture"));
   assert.match(flat, Pin.phrase("that answers which ones depend on its contents"));
-  assert.match(flat, Pin.phrase("A settling command over literal text uses `grep -F`"));
+  assert.match(flat, Pin.phrase("must never be a literal-path grep"));
 });

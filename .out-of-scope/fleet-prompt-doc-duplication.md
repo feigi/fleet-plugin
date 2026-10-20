@@ -56,8 +56,8 @@ worked example — its subject is "the refuter's one instruction that makes it a
 was in one file only", and it closed that gap by adding the missing copy to the second
 file, in the same commit, rather than by collapsing the two.
 
-Both lines also sit under `## Fix the tooling mid-run`, whose **Scope** paragraph limits
-that section to defects *this run produced* in commands and skills *this run invoked*.
+Both lines also sit under run-team's **A mid-run tooling fix** (in `## Failure handling`), whose **Scope** paragraph limits
+that fix to defects *this run produced* in commands and skills *this run invoked*.
 That does not exempt these two files — the fleet invokes both — but it does make the
 Trigger a prompt to diagnose a live failure, not a standing audit criterion to re-derive
 this finding from.

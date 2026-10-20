@@ -1,0 +1,78 @@
+{
+  "changed": [
+    [
+      "So **never read a member's silence as assent**, and require members to report their *confirmation state* alongside results — \"I escalated X, received no ruling, proceeded on default Y\".",
+      "**Never read a member's silence as assent**, and require members to report their *confirmation state* alongside results — \"I escalated X, received no ruling, proceeded on default Y\"."
+    ],
+    [
+      "That sentence is the only thing that made either loss visible.",
+      "The confirmation-state sentence SKILL.md's **A member's claims** requires is the only thing that made either loss visible."
+    ],
+    [
+      "**Re-check before you act on any instrument reading** — a SHA acceptance, a CI verdict, the reconcile, a reap, a label gate — from that same main checkout: `~/.fleet/bin/fleet-run instruments.sh`.",
+      "**Re-check before you act on any instrument reading** — a SHA acceptance, a CI verdict, the reconcile, a reap, a label gate — from the main checkout phase 0 pinned from: `~/.fleet/bin/fleet-run instruments.sh`."
+    ],
+    [
+      "**A label gate and a CI verdict are also taken by dispatched members, not only by you** — the finisher labels, and the merge bot merges on its own reading — and neither is dispatched to read this file, so neither can be reached by stating the rule here.",
+      "**A label gate and a CI verdict are also taken by dispatched members, not only by you** — the finisher labels, and the merge bot merges on its own reading — and neither is dispatched to read SKILL.md, so neither can be reached by stating the rule there."
+    ],
+    [
+      "The mid-run tooling fix below is the one legitimate writer.",
+      "**A mid-run tooling fix** is the one legitimate writer."
+    ],
+    [
+      "You run `~/.fleet/bin/fleet-run scratch-root.mjs`: it prints one absolute path, `~/.fleet/scratch/<repo-key>/`, the same from the main checkout and from every linked worktree, and the same again when a compacted or re-invoked controller runs it, so nothing writes it down.",
+      "You run `~/.fleet/bin/fleet-run scratch-root.mjs`; a non-zero exit is an environment to fix, not a cue to pick another root."
+    ],
+    [
+      "`<scratch>` in this file is that path, resolved before you send anything: every brief that carries one carries the absolute path you passed it — an implementer's `<scratch>/impl-<N>/`, the recipe deriver's `<scratch>/derive-recipe/`, a fix-applier's, a finisher's and a merge bot's `<scratch>/pr<N>/…`, and a review runner's `scratch` argument, which is the root itself.",
+      "`<scratch>` in this file is the path it prints, resolved before you send anything: every brief that carries one carries the absolute path you passed it — an implementer's `<scratch>/impl-<N>/`, the recipe deriver's `<scratch>/derive-recipe/`, a fix-applier's, a finisher's and a merge bot's `<scratch>/pr<N>/…`, and a review runner's `scratch` argument, which is the root itself."
+    ],
+    [
+      "Nothing in this section's dispatch recipe — the cwd recipe above, the isolated-workspace measurement, or the teardown scoping — moves where the controller itself runs from.",
+      "Nothing in the dispatch recipe above — the cwd recipe, the isolated-workspace measurement, or the teardown scoping — moves where the controller itself runs from."
+    ],
+    [
+      "The changes of yours that trip it are a mid-run tooling fix edited in this checkout and the close-out commit's round trip through a branch; **Fix the tooling mid-run** and the commit section of references/close-out.md say how each is cleared.",
+      "The changes of yours that trip it are a mid-run tooling fix edited in this checkout and the close-out commit's round trip through a branch; SKILL.md's **A mid-run tooling fix** and the commit section of references/close-out.md say how each is cleared."
+    ]
+  ],
+  "deleted": [
+    [
+      "The \"report the SHA\", \"report PR number\" and \"stop and report\" instructions below *are* that report, not a second obligation on top of it.",
+      "no instruction it pointed at is in SKILL.md or in any briefs/ template; each brief's report paragraph is the report, which references/member-lifecycle.md's report-delivered section says"
+    ],
+    [
+      "**Pin once**, at phase 0 step 0 below, from the main checkout you are running this from — never from a member's worktree, which is gitignored and carries no baseline: `~/.fleet/bin/fleet-run instruments.sh --pin`.",
+      "phase0.mjs's pin step (phase 0 step 0), and references/phase-0.md's Pin the instruments, which pins from this main checkout"
+    ],
+    [
+      "On a workspace that does not track `plugin/…`, the pin names the plugin checkout once — `--pin --audit <plugin-checkout>` — and every check after it follows the recorded tree.",
+      "references/phase-0.md's Pin the instruments, which carries the `--pin --audit <plugin-checkout>` form, and phase 0 step 0's `--plugin-checkout <dir>`"
+    ],
+    [
+      "The name is the ledger token and the hub address; omit it and the ledger cannot match the member.",
+      "references/member-lifecycle.md's Every member is named, which says it with the hub addresses, and Red flags' The name is cosmetic line"
+    ],
+    [
+      "It exits non-zero, with its reason, when the root would sit inside a git work tree that does not ignore it; that is an environment to fix, not a cue to pick another root.",
+      "scratch-root.mjs's refusal of a root inside an unignoring work tree; tests/scratch-root.test.mjs. SKILL.md's scratch-root paragraph keeps the environment-to-fix ruling"
+    ],
+    [
+      "See references/member-lifecycle.md.",
+      "the pointer beside The ask is the controller's move: references/member-lifecycle.md's missing-report section states that rule alone"
+    ],
+    [
+      "See references/member-lifecycle.md.",
+      "the pointer beside A member runs its test suite in the foreground: every implementer, fix-applier and finisher brief carries the line, and references/member-lifecycle.md its section"
+    ],
+    [
+      "See references/correction-tickets.md.",
+      "the pointer beside the claim-discipline rule: references/correction-tickets.md's Every implementer body carries the claim discipline states it alone"
+    ],
+    [
+      "See references/correction-tickets.md.",
+      "the pointer beside the grep -F rule: references/correction-tickets.md's A settling command over literal text uses grep -F states it alone"
+    ]
+  ]
+}
