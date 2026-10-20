@@ -155,7 +155,9 @@ export const SCHEMAS = {
     merged: listOf({ pr: id, sha }),
     held: listOf({ pr: id, behind: id }),
     conflictHold: { type: "array", items: id },
-    refused: listOf({ pr: id, reason: str }),
+    // A refusal is a verdict only with a reason: the reason is the record
+    // `## Ruled` gets, so one with no text but whitespace is invalid.
+    refused: listOf({ pr: id, reason: { type: "string", pattern: "\\S" } }),
     branchKept: listOf({ pr: id, by: id }),
   }),
 };

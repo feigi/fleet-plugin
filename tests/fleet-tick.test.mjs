@@ -2431,7 +2431,7 @@ test("CLI: a merge bot's queued= entry and its refusals in ## Ruled leave the me
   const prs = [pr(40, ["ready-to-merge"])];
   const plain = runCli([], { ledger: { dispatched: ["merge-bot-1=done"] }, shortlist: shortlistText([]), prs });
   const recorded = runCli([], {
-    ledger: { dispatched: ["merge-bot-1=done brief=bbbbbbbb queued=40"], ruled: ["#40 refused by merge-bot-1: ci-wait-timeout"] },
+    ledger: { dispatched: ["merge-bot-1=done brief=bbbbbbbb queued=40"], ruled: ["merge-bot-1 refused #40: ci-wait-timeout"] },
     shortlist: shortlistText([]), prs,
   });
   assert.equal(recorded.status, 0, recorded.stderr);

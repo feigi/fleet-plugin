@@ -122,8 +122,7 @@ export function memberRole(family) {
 // the open `ready-to-merge` PRs `dispatch` read when it dispatched the bot,
 // which its report is judged against at `settle --from-report`. `settle`
 // rewrites the token and keeps the words beside it.
-const BRIEF_WORD = /^brief=([0-9a-f]{8})$/;
-const QUEUED_WORD = /^queued=(none|[1-9][0-9]*(?:,[1-9][0-9]*)*)$/;
+const DISPATCHED_ENTRY = /^([^ ]*) brief=([0-9a-f]{8})(?: queued=(none|[1-9][0-9]*(?:,[1-9][0-9]*)*))?$/;
 
 /**
  * `{token, brief, queued}` for one `## Dispatched` entry: the member token,
@@ -135,14 +134,10 @@ const QUEUED_WORD = /^queued=(none|[1-9][0-9]*(?:,[1-9][0-9]*)*)$/;
  * cannot parse.
  */
 export function parseDispatchedEntry(entry) {
-  const words = entry.split(" ");
-  const whole = { token: entry, brief: null, queued: null };
-  if (words.length < 2 || words.length > 3 || parseToken(words[0]) === null) return whole;
-  const m = BRIEF_WORD.exec(words[1]);
-  const q = words.length === 3 ? QUEUED_WORD.exec(words[2]) : null;
-  if (m === null || (words.length === 3 && q === null)) return whole;
-  const queued = q === null ? null : q[1] === "none" ? [] : q[1].split(",").map(Number);
-  return { token: words[0], brief: m[1], queued };
+  const m = DISPATCHED_ENTRY.exec(entry);
+  if (m === null || parseToken(m[1]) === null) return { token: entry, brief: null, queued: null };
+  const queued = m[3] === undefined ? null : m[3] === "none" ? [] : m[3].split(",").map(Number);
+  return { token: m[1], brief: m[2], queued };
 }
 
 /**
@@ -151,7 +146,8 @@ export function parseDispatchedEntry(entry) {
  */
 export function dispatchedEntry(token, brief, queued = null) {
   if (brief === null) return token;
-  return queued === null ? `${token} brief=${brief}` : `${token} brief=${brief} queued=${queued.length === 0 ? "none" : queued.join(",")}`;
+  const entry = `${token} brief=${brief}`;
+  return queued === null ? entry : `${entry} queued=${queued.join(",") || "none"}`;
 }
 
 // `PR#<n>` as a word of a row's text, `PR #<n>` too.

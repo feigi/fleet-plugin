@@ -1699,7 +1699,7 @@ function runRotate() {
   // Nothing to carry writes nothing, so the next write starts the skeleton
   // exactly as after any other verdict.
   if (carrying) {
-    save({ rows: carry.rows, dispatched: carry.dispatched, briefs: carry.briefs, queued: carry.queued, filed: [], ruled: [], drain: null, retired: carry.retired });
+    save({ ...carry, filed: [], ruled: [], drain: null });
   }
   if (archive !== null) console.error(`    rotated ${file} -> ${archive}`);
   for (const { line, why } of carry.skipped) {
@@ -1910,7 +1910,7 @@ function queueSnapshot() {
   const refuse = (why) => die(`dispatch merge-bot: could not read the queue to record — ${what}${why}; nothing written`);
   if (r.status !== 0) {
     const why = cause(r.error && r.error.message, r.stderr);
-    refuse(`${r.status === null ? "" : ` exited ${r.status}`}${why ? `: ${why}` : ""}`);
+    refuse(`${r.error ? "" : r.signal ? ` killed by ${r.signal}` : ` exited ${r.status}`}${why ? `: ${why}` : ""}`);
   }
   let list = null;
   try {
@@ -2097,12 +2097,12 @@ function runDispatch() {
   data.briefs[member.name] = brief.sha256.slice(0, 8);
   // A merge bot's queue is recorded here, beside its brief, where nothing in
   // its report can reach: `settle --from-report` judges the report against it.
-  if (member.bound === null) data.queued[member.name] = QUEUED;
+  if (QUEUED !== null) data.queued[member.name] = QUEUED;
   save(data);
   console.error(`    dispatched ${member.name}`);
   console.log(JSON.stringify({
     member: member.name, agent, ticket: line === null ? null : rowKey(line), line, created, total: data.dispatched.length, brief,
-    queued: member.bound === null ? QUEUED : null,
+    queued: QUEUED,
   }));
 }
 
@@ -2367,11 +2367,14 @@ function recordFiled(id, subject) {
 // Filed` the way `filed` records one, for a fix-applier every `deferred`
 // entry in the `refuted` bucket goes to `## Ruled` as `#M reversed refutation
 // <index>: <reason>`, and for a merge bot every `refused` entry goes to `##
-// Ruled` as `#<pr> refused by merge-bot-n: <reason>` — a record, which moves
-// no label and writes no row token. A line already there is not written
-// again, so a second run of the same settle writes nothing. The receipt on
-// stdout is `{member, outcome, checks: [{name, ok}], filed, ruled}`, `filed`
-// and `ruled` the lines this call added.
+// Ruled` as `merge-bot-n refused #<pr>: <reason>`, the reason trimmed — a
+// record, which moves no label and writes no row token. It is led by the bot,
+// never by `#<pr>`: compute-board.mjs reads a `## Ruled` line led by `#<n>` as
+// the controller's ruling on PR n, the last such line winning, so a refusal
+// led by its PR would replace that ruling on the board. A line already there
+// is not written again, so a second run of the same settle writes nothing.
+// The receipt on stdout is `{member, outcome, checks: [{name, ok}], filed,
+// ruled}`, `filed` and `ruled` the lines this call added.
 //
 // The checks run before the write lock is taken, against the ledger as read
 // without it, because they are network calls and every other writer waits
@@ -2624,7 +2627,7 @@ async function runSettleFromReport() {
       const left = v.state !== "OPEN" || !v.labels.some((l) => l?.name === ready);
       check(`PR #${pr}, queued at dispatch, has a verdict in merged, held, conflictHold or refused, or has left the queue`, left);
     }
-    for (const { pr, reason } of report.refused) ruledLines.push(`#${pr} refused by ${member}: ${reason}`);
+    for (const { pr, reason } of report.refused) ruledLines.push(`${member} refused #${pr}: ${reason.trim()}`);
   }
 
   const failed = checks.filter((c) => !c.ok);

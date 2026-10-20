@@ -18,6 +18,7 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { rendering, renderBrief } from "./support/rendered-brief.mjs";
 import { scratchRoot } from "../plugin/scripts/fleet-dir.mjs";
+import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -402,6 +403,7 @@ test("merge-bot-n=done: a report giving every queued PR one verdict settles, eac
   f.queue(6, 7, 8, 9, 10);
   assert.deepEqual(f.ok("dispatch", "merge-bot").queued, [6, 7, 8, 9, 10]);
   f.ok("row", "10", "PR#10 · patch");
+  f.ok("ruled", "10", "kept: reviewer finding 3 rejected");
   const rows = f.ok("read").rows;
   f.report("merge-bot-1", botReport(f, {
     held: [{ pr: 8, behind: 6 }], conflictHold: [9], refused: [{ pr: 10, reason: "main-gain-removed:plugin/a.md" }],
@@ -410,12 +412,42 @@ test("merge-bot-n=done: a report giving every queued PR one verdict settles, eac
   f.pr(7, { state: "MERGED" });
   const receipt = f.settled("merge-bot-1");
   assert.deepEqual(receipt.checks, [{ name: "PR #6 reads MERGED", ok: true }, { name: "PR #7 reads MERGED", ok: true }]);
-  assert.deepEqual(receipt.ruled, ["#10 refused by merge-bot-1: main-gain-removed:plugin/a.md"]);
+  assert.deepEqual(receipt.ruled, ["merge-bot-1 refused #10: main-gain-removed:plugin/a.md"]);
   const l = f.ok("read");
-  assert.deepEqual(l.ruled, ["#10 refused by merge-bot-1: main-gain-removed:plugin/a.md"]);
+  assert.deepEqual(l.ruled, ["#10 kept: reviewer finding 3 rejected", "merge-bot-1 refused #10: main-gain-removed:plugin/a.md"]);
   assert.deepEqual(l.rows, rows, "a refusal writes no row token");
   const calls = readFileSync(join(f.root, "gh.log"), "utf8");
   assert.doesNotMatch(calls, /^pr (edit|view (8|9|10)) /m, "a PR given a verdict is not looked up, and no label moves");
+  // The board takes a `## Ruled` line led by `#<n>` as the controller's
+  // ruling on PR n, the last one winning: the refusal leaves that ruling
+  // on the PR's card.
+  const board = computeBoard({ ledger: l, issues: [], prs: [{ number: 10, state: "OPEN", labels: [] }], ci: {}, prev: null, now: 0 });
+  assert.equal(board.tickets.find((t) => t.pr === 10).ruling, "kept: reviewer finding 3 rejected");
+});
+
+// The reason is ruled trimmed, so the line a reload reads back is the line a
+// second settle would write: it is not written twice.
+test("merge-bot-n=done: a refused reason padded with whitespace is ruled trimmed, and a second settle writes nothing", () => {
+  const f = fixture();
+  f.queue(6, 7, 10);
+  f.ok("dispatch", "merge-bot");
+  f.report("merge-bot-1", botReport(f, { refused: [{ pr: 10, reason: "  ci-wait-timeout \t" }] }));
+  f.pr(6, { state: "MERGED" });
+  f.pr(7, { state: "MERGED" });
+  assert.deepEqual(f.settled("merge-bot-1").ruled, ["merge-bot-1 refused #10: ci-wait-timeout"]);
+  const before = f.bytes();
+  assert.deepEqual(f.settled("merge-bot-1").ruled, []);
+  assert.equal(f.bytes(), before, "a second run of the same settle writes nothing");
+});
+
+test("merge-bot-n=done: a refusal with no reason, empty or only whitespace, is exit 2 and gives its PR no verdict", () => {
+  const f = fixture();
+  f.queue(6, 7, 10);
+  f.ok("dispatch", "merge-bot");
+  for (const reason of ["", "  "]) {
+    f.report("merge-bot-1", botReport(f, { refused: [{ pr: 10, reason }] }));
+    f.refused("merge-bot-1", 2, /is not a merge-bot report — \$\.refused\[0\]\.reason: .* does not match \\S; nothing written/);
+  }
 });
 
 test("merge-bot-n=done: a queued PR still queued with no verdict is exit 3 naming it, however the report leaves it out", () => {
@@ -436,7 +468,7 @@ test("merge-bot-n=done: a queued PR still queued with no verdict is exit 3 namin
   f.report("merge-bot-1", botReport(f, { held: [{ pr: 9, behind: 6 }] }));
   f.refused("merge-bot-1", 3, /failed: PR #8, queued at dispatch/);
   f.report("merge-bot-1", botReport(f, { held: [{ pr: 9, behind: 6 }], refused: [{ pr: 8, reason: "ci-wait-timeout" }] }));
-  assert.deepEqual(f.settled("merge-bot-1").ruled, ["#8 refused by merge-bot-1: ci-wait-timeout"]);
+  assert.deepEqual(f.settled("merge-bot-1").ruled, ["merge-bot-1 refused #8: ci-wait-timeout"]);
 });
 
 test("merge-bot-n=done: a queued PR that left the queue before the settle, or a PR labelled after dispatch, fails nothing", () => {

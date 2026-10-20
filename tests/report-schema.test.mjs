@@ -187,6 +187,18 @@ test("validate fails a relative fix-pr dispositionsRecord, naming it", () => {
   assertInvalid(check("fix-pr", variant("fix-pr", { dispositionsRecord: "relative/path.json" })), '$.dispositionsRecord: "relative/path.json" does not match ^/');
 });
 
+// A refusal's reason is the record `## Ruled` gets, so a refusal with none is
+// no verdict: empty or whitespace-only, it is invalid, and any text is valid.
+test("validate fails a merge-bot refusal whose reason is empty or only whitespace, naming it", () => {
+  for (const reason of ["", " ", "\t\n"]) {
+    assertInvalid(
+      check("merge-bot", variant("merge-bot", { refused: [{ pr: 3310, reason }] })),
+      `$.refused[0].reason: ${JSON.stringify(reason)} does not match \\S`,
+    );
+  }
+  assert.equal(check("merge-bot", variant("merge-bot", { refused: [{ pr: 3310, reason: " behind:2 " }] })).status, 0);
+});
+
 test("validate fails a wrong type, naming the expected and the given", () => {
   assertInvalid(check("impl", variant("impl", { pr: "3300" })), "$.pr: expected integer or null, got string");
   assertInvalid(check("impl", variant("impl", { pr: 3300.5 })), "$.pr: expected integer or null, got number");

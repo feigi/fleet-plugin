@@ -79,7 +79,7 @@ function fixture(t, body = null) {
     path: join(dir, "briefs", `${member}.md`),
     sha256: JSON.parse(readFileSync(join(dir, "briefs", `${member}.json`), "utf8")).sha256,
   });
-  return { dir, file, bin, bare, cli, ok, read, bytes, refused, put, briefOf };
+  return { dir, file, bin, env, bare, cli, ok, read, bytes, refused, put, briefOf };
 }
 
 test("dispatch appends a live member row and records the dispatch in ## Dispatched", (t) => {
@@ -204,12 +204,25 @@ test("dispatch merge-bot records the ready-to-merge queue gh lists on its ## Dis
   assert.deepEqual(read().queued, { "merge-bot-1": [12, 30], "merge-bot-2": [] });
 });
 
+test("dispatch merge-bot lists the queue with GIT_DIR and GIT_WORK_TREE scrubbed from gh's environment", (t) => {
+  const { ok, bin, dir, env } = fixture(t);
+  const log = join(dir, "gh-env.log");
+  writeExecStub(join(bin, "gh"), `#!/bin/sh\nprintf '%s|%s\\n' "\${GIT_DIR-unset}" "\${GIT_WORK_TREE-unset}" > '${log}'\nprintf '[]\\n'\n`);
+  env.GIT_DIR = join(dir, "elsewhere.git");
+  env.GIT_WORK_TREE = join(dir, "elsewhere");
+  assert.equal(ok("dispatch", "merge-bot").member, "merge-bot-1");
+  assert.equal(readFileSync(log, "utf8"), "unset|unset\n");
+});
+
 test("dispatch merge-bot refuses, writing nothing, when gh does not give it the whole queue", (t) => {
   const { refused, bin } = fixture(t);
   for (const [body, why] of [
     ["#!/bin/sh\nprintf 'gh: not logged in\\n' >&2\nexit 4\n", /could not read the queue to record — gh pr list --state open --label ready-to-merge --limit 1000 --json number exited 4: gh: not logged in; nothing written/],
+    ["#!/bin/sh\nkill -9 $$\n", /could not read the queue to record — gh pr list --state open --label ready-to-merge --limit 1000 --json number killed by SIGKILL; nothing written/],
     ["#!/bin/sh\nprintf 'not json\\n'\n", /printed no list of PR numbers: not json/],
     ["#!/bin/sh\nprintf '[{\"number\":\"7\"}]\\n'\n", /printed no list of PR numbers/],
+    ["#!/bin/sh\nprintf '[{\"number\":0}]\\n'\n", /printed no list of PR numbers/],
+    ["#!/bin/sh\nprintf '[{\"number\":-3}]\\n'\n", /printed no list of PR numbers/],
   ]) {
     writeExecStub(join(bin, "gh"), body);
     refused(["dispatch", "merge-bot"], why);
