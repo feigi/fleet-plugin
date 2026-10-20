@@ -6,7 +6,8 @@ Research for `feigi/fleet-plugin` issue #3183, the seventh item of the
 bun 1.4.3, darwin arm64). Source citations are `file:line` under that
 package's `src/`. Probes ran in throwaway interactive TUI sessions
 (haiku-5.5, `--no-extensions -e <probe>`), not in a live `/skill:run-team`
-session: that live run is stage 2, a separate maintainer ticket.
+session. That live run is stage 2 (#3484), a separate maintainer ticket,
+recorded in §7.
 
 ## TL;DR
 
@@ -29,12 +30,12 @@ so it never hits that path.
 | 1. `hub send` from a detached timer process | **No.** Ruled out by source, not run | in-process only, self-send forbidden (§1) |
 | 1b. collab relay guest (found during research) | **Possible, rejected** | needs a global write-capable room, the relay, a hand-written guest (§1) |
 | 2. Plugin omp extension with a timer | **Yes** for the mechanism | probes 1–3 (§2–§4) |
-| 3. Background `task` that sleeps and reports | **Not a retirement path**; measure in stage 2 | it is the hold renamed (§5) |
+| 3. Background `task` that sleeps and reports | **Not a retirement path**; measured once in stage 2 (§7) | it is the hold renamed (§5); whether `ctx.isIdle()` holds while it sleeps is still open (§7) |
 | (found) `/loop` | **Rejected** | a human must enable it per session (§1) |
 
 The ruling built on this is in the issue's `## Agent Brief — ruling` comment.
-Stage 2 (a maintainer's live run) gates the spec. This file records only the
-measurements.
+Stage 2, a maintainer's live run (§7), gates the spec. This file records only
+the measurements.
 
 ## 1. Paths from outside the session
 
@@ -246,9 +247,9 @@ work is pending (:4797-4800). So a sleeping task may keep the session from
 ever becoming idle, and its report would then be ADR 0008 decision 3's
 in-turn mechanism rather than an idle wake. Either way, the controller must
 start a new sleeper before every turn ends, which is "never end your turn" in
-another form. It cannot retire the rule. Stage 2 measures it once, with the
-maintainer confirming the TUI was at the prompt while the task slept, to test
-ADR 0008 decision 3's unmeasured claim.
+another form. It cannot retire the rule. Stage 2 measured it once (§7), with
+the maintainer at the TUI while the task slept, to test ADR 0008 decision 3's
+unmeasured claim.
 
 ## 6. What the heartbeat state allows
 
@@ -262,18 +263,142 @@ ADR 0008 decision 3's unmeasured claim.
 - `fleet-heartbeat.mjs` writes `beat: mark(target, "")` on **every** call, in
   the same write as `elapsed` (:248). So `--hold 1`, the minimum
   (`int("hold", 1)`), already leaves the mark an alarm would read without
-  holding the turn. Stage 2 can run on current main.
+  holding the turn. Stage 2 therefore needed no plugin change.
 - The stall rule (`fleet-state.mjs:460-470`) is stale when
   `now > max(beat.at + 2 × beat.interval, ticked/acted/controller.at + 2400 s)`.
   The hold refreshes `beat.at` every 240 s while idle. A mark written once at
   turn end flags a dead controller up to one interval later. The busy-turn case
   is unchanged: the hold never refreshed `beat` during a busy turn either.
 
+## 7. Stage 2: the live run
+
+Measured 2026-10-19 to 2026-10-20 in one real `/skill:run-team` session on this
+repository (#3484), with the throwaway alarm from that ticket loaded through
+`-e`. The session ran about 18 hours of wall clock, part of it with the laptop
+asleep, and merged 18 PRs of its own plus one folded in by hand. The alarm
+logged every poll decision to `/tmp/fleet-alarm/alarm.log`; the figures below
+are counts over that log.
+
+| Check | Result |
+|---|---|
+| Armed | one `armed pid=37611` line at session start; the `.fleet/heartbeat.json` `controller.pid` written by phase 0 equals it |
+| Pid gate | one `not controller (controller.pid=<old>)` skip, before phase 0 wrote the pid; none after |
+| Sub-agent sessions | 457 `inert: kind=sub` lines: the extension loads in every member's session and stays inert there |
+| (a) a turn is injected | 94 `FIRE` lines, each followed by `EVENT agent_start` and a `[fleet-alarm]` user turn; the `EVENT` line is the controller's by timing alone (see below) |
+| (b) the turn runs the tick | every alarm turn ran `fleet-event.mjs heartbeat` and acted on its rows |
+| (c) the tick leads to acting | alarm turns printed `PULL` rows and the controller pulled and dispatched from them (for example #3576, #3580, #3581) |
+| Interval ceiling | fires at 300 s: 75, at 600 s: 12, at 1200 s: 7 |
+| Auto-compaction | 44 `session_compact` events, none typed by the maintainer; the alarm kept firing after every one. The log does not say which session compacted (see below) |
+| Once per interval for a `beat.at` | 9 `already fired for this beat` skips. The guard holds a repeat fire for one interval, not for good: a `beat.at` the controller never re-marks fires again every interval, as #3485's ruling 2 specifies. Each skip is a poll after an alarm turn that ended without re-marking the beat. This count does not show whether any `beat.at` fired twice |
+| Lateness (`late=`) | median 14 s, 90th percentile 221 s, 10 fires over 120 s, maximum 8419 s |
+
+Poll decisions besides the fires and the `stopped` skips: 1260 `not due`,
+773 `busy`, 9 `already fired`, 1 `not controller`.
+
+**Which session wrote a line.** The alarm registers its `EVENT` handlers
+before its `kind` check and logs them with no pid. omp emits `agent_start`,
+`session_compact` and `session_shutdown` to each session's own extensions,
+sub-agent sessions included (`agent-session.ts`, `session-maintenance.ts`,
+read at 18.12.3). So every sub-agent session counted above writes `EVENT`
+lines in the same form as the controller. Only `armed`, `poll:` and `FIRE`
+lines come from the main session alone. An `EVENT agent_start` within
+milliseconds of a `FIRE` is the injected turn by timing; the `session_compact`
+count takes in any member session's compaction too, so this log cannot say
+whether any of them was the controller's.
+
+### What the lateness says
+
+The long tail has two causes, both visible in the log:
+
+- **A busy controller is never alarmed.** The gate checks `ctx.isIdle()` first.
+  A controller blocked in a long `wait` for a background job stays busy, so the
+  log shows `poll: skip busy` for minutes on end and the fire lands only when the
+  turn ends. The 8419 s fire is a stretch of this kind, with the laptop asleep
+  for part of it. A controller that hands its turn back, as the design ruled
+  for spec 7 (#3485) has it do, does not have the problem; one that blocks in
+  `wait` still does.
+- **Alarm turns that start work.** A turn that dispatches a member and then waits
+  on its result is busy for the member's whole run, so the next due fire waits
+  with it.
+
+In the ordinary idle case the fire landed within a poll or two of `beat.at +
+beat.interval`: the median is 14 s against a 30 s poll.
+
+### The stop (#3484 step 8)
+
+At the end of the run `fleet-heartbeat.mjs --stop "<reason>"` set `beat.stopped`
+in `.fleet/heartbeat.json`. The alarm's gate evaluates `ctx.isIdle()` before it
+reads `beat.stopped`, so every poll that landed during the controller's own
+closing turn logged `poll: skip busy`, and the stop could only show on a poll
+that found the controller idle. The first such poll logged:
+
+```
+2026-10-20T09:00:51.505Z poll: skip stopped: run drained; closeout finish blocked at tier-outcomes by #3611 (reviewed PR #3606 closes no issue)
+```
+
+The log holds 44 such lines (the maintainer's read at 09:20:51 was the latest),
+and the last `FIRE` of the run (08:47:51) precedes the stop, so the stop silenced
+the alarm: no fire followed it. The controller could not observe the line from
+inside its own turn; it had only confirmed the gate's decision expression offline
+against the real state file, and the maintainer read the log.
+
+### Notes for the design
+
+- The `quiet` back-off reached the 1200 s ceiling and stayed there while the
+  fleet had only long members running; every member report reset it to the base.
+  The ceiling therefore bounds idle latency only for a fleet that is truly quiet.
+- An alarm turn and a member-report turn are the same kind of turn to the
+  controller; the log records only the alarm side of the interleaving, so this
+  run does not measure interference between the two.
+
+### Candidate 3, measured once (#3484 step 7)
+
+After the run drained, with `beat.stopped` set so the alarm was silent, and with
+nothing else running, the controller dispatched one background `task` member
+that slept 300 s and reported, and ended its turn. In that process the alarm
+extension was not loaded, so no alarm poll could interfere.
+
+| Event | Time (UTC, 2026-10-20) |
+|---|---|
+| controller dispatches the task and ends its turn | 09:41:52 |
+| member starts its sleep | 09:42:03 |
+| member writes its end timestamp (5 min 04 s of sleep) | 09:47:07 |
+| first command of the controller's new turn | 09:47:13 |
+
+- The report started a new turn about 6 s after the member finished, with no
+  other work pending.
+- The maintainer, at the TUI during the sleep, could type: the session accepted
+  input while the task was pending.
+
+What this does not show: whether `ctx.isIdle()` was true during the sleep. The
+alarm gate tests `isIdle()`, and the alarm was not loaded, so nothing polled it.
+"The TUI accepted typing" and "`isIdle()` is true" are different claims, and
+section 5's reading of `#hasPendingAsyncWake` (a pending sleeper may keep the
+session from settling) is neither confirmed nor refuted here. The conclusion of
+section 5 is unchanged: the controller must start a new sleeper before every
+turn ends, so this is "never end your turn" in another form and cannot retire
+the rule.
+
+### Against the ticket's Outcomes
+
+| #3484 check | This run |
+|---|---|
+| Pid check | passes: the `armed` pid equals `controller.pid` (the Armed row) |
+| (a), (b), (c) | as their rows above record; (a)'s `EVENT agent_start` is the controller's by timing alone |
+| Ceiling stretch | reached: fires at 1200 s (the Interval ceiling row) |
+| Auto-compaction | not attributable to the controller from the log (see "Which session wrote a line") |
+
+#3484's Outcomes count auto-compaction not observed alongside the passes.
+Whether these results unblock #3485 or amend ADR 0008 is the maintainer's
+call on #3484.
+
 ## Not measured here
 
-- The live `/skill:run-team` run: a wake leads to a tick, which leads to
-  acting on a `PULL` row. The full sequence was not run.
-- Auto-compaction triggered during a turn.
-- Idle stretches longer than about 2 minutes, in particular one at the 1200 s ceiling.
+- The log also shows an `EVENT session_shutdown` while the controller was
+  closing out. This run did not establish what caused it or whether the timer
+  survives one. A sub-agent session's disposal writes the same line (see
+  "Which session wrote a line" above), so it is one candidate cause.
+- Whether `ctx.isIdle()` is true while a background `task` is pending (see the
+  candidate 3 measurement above).
 - RPC and print modes. `ctx.setInterval` is unref'd, so a mode where
   nothing else keeps the event loop alive would not keep the process up.
