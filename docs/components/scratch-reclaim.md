@@ -29,12 +29,17 @@ work in flight rather than every run's history.
    member's report file, `reports/<member>.json`, goes with the entry its
    member belongs to: a `fix-pr-<M>`, `finisher-pr-<M>` or `review-pr-<M>`
    report with `pr<M>/` (whether or not that directory exists), an
-   `impl-<N>` report with `impl-<N>/`. `reports/` itself is never removed;
-   each file in it is judged on its own.
+   `impl-<N>` report with `impl-<N>/`. The Check-step record written beside
+   it, `reports/<member>.check.json`, goes with its report under the same
+   verdict and the same live-token holds; only the single `.check` infix
+   counts, so `<member>.check.check.json` and `<member>.checkx.json` fall to
+   age. `reports/` itself is never removed; each file in it is judged on its
+   own.
 3. **Everything else is judged on age.** An entry goes when nothing anywhere
    under it has changed in 7 days and no live token's name appears in its
    name. A keyed name whose number is the other type, or nothing, falls here,
-   and so does a `merge-bot-<n>` report, which names no PR and no ticket.
+   and so does a `merge-bot-<n>` report or check record, which names no PR and
+   no ticket.
 4. **The review snapshot prunes its own PR.** `review-core.mjs` runs
    `reclaim-scratch.mjs --pr <N>`, which removes only `pr<N>/run-*` roots idle
    past 7 days — no ledger, no `gh` — and prints `SNAPSHOT_PRUNE_FAILED` when

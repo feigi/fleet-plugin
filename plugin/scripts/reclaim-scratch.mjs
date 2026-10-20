@@ -39,17 +39,20 @@
 //            A claim worktree that cannot be checked — `git worktree list`
 //            failing, a .worktrees/ that cannot be read, or a directory there
 //            named for N that git does not list — keeps it, with that reason.
-//   reports/<member>.json
-//            a member's report file. `reports/` itself is never removed, and
-//            is not aged out whole: each file is judged on its own, by the
-//            entry it goes with. A fix-pr-<M>[-x], finisher-pr-<M>[-x] or
-//            review-pr-<M>[-x] report goes with pr<M>/ — the same verdict,
-//            the same live-token holds, though no pr<M>/ need exist; an
-//            impl-<N>[-x] report goes with impl-<N>/ the same way; any other
-//            file in it (a merge-bot-<n> report, which names no PR and no
-//            ticket) is judged as "anything else" below, so it is removed
-//            only when idle past the retention and its member's token is not
-//            live.
+//   reports/<member>.json, reports/<member>.check.json
+//            a member's report file, and the Check-step record written beside
+//            it. `reports/` itself is never removed, and is not aged out
+//            whole: each file is judged on its own, by the entry it goes
+//            with. A fix-pr-<M>[-x], finisher-pr-<M>[-x] or review-pr-<M>[-x]
+//            report goes with pr<M>/ — the same verdict, the same live-token
+//            holds, though no pr<M>/ need exist; an impl-<N>[-x] report goes
+//            with impl-<N>/ the same way; the <member>.check.json record is
+//            judged exactly as <member>.json is (one `.check` infix only:
+//            <member>.check.check.json and <member>.checkx.json are "anything
+//            else"); any other file in it (a merge-bot-<n> report or record,
+//            which names no PR and no ticket) is judged as "anything else"
+//            below, so it is removed only when idle past the retention and
+//            its member's token is not live.
 //   anything else, and a keyed name whose number GitHub resolves to the
 //   other type (a pr<N> that is an issue, an impl-<N> that is a PR) or to
 //   nothing
@@ -140,11 +143,12 @@ const REMOVE = [
 const PR_ENTRY = /^pr([1-9][0-9]*)$/;
 const IMPL_ENTRY = /^impl-([1-9][0-9]*)$/;
 const DISPOSITIONS_ENTRY = /^dispositions-fix-pr-([1-9][0-9]*)(?:-[a-z])?\.json$/;
-// A member's report file, `reports/<member>.json`: one that names a PR goes
-// with that PR's entries, one that names a ticket with that ticket's.
+// A member's report file, `reports/<member>.json`, and its Check-step record,
+// `reports/<member>.check.json`: one that names a PR goes with that PR's
+// entries, one that names a ticket with that ticket's.
 const REPORTS_DIR = "reports";
-const REPORT_PR_ENTRY = /^(?:fix-pr|finisher-pr|review-pr)-([1-9][0-9]*)(?:-[a-z])?\.json$/;
-const REPORT_IMPL_ENTRY = /^impl-([1-9][0-9]*)(?:-[a-z])?\.json$/;
+const REPORT_PR_ENTRY = /^(?:fix-pr|finisher-pr|review-pr)-([1-9][0-9]*)(?:-[a-z])?(?:\.check)?\.json$/;
+const REPORT_IMPL_ENTRY = /^impl-([1-9][0-9]*)(?:-[a-z])?(?:\.check)?\.json$/;
 const RUN_ROOT = /^run-/;
 
 function how(r) {

@@ -1024,6 +1024,132 @@ test("(10) a lookup GitHub could not answer keeps the reports that name that num
   assert.deepEqual(paths(r.out.removed), [unkeyed], "the age rule still runs on an unkeyed file");
 });
 
+// ---------------------------------------------------------------------------
+// reports/<member>.check.json goes with <member>.json, under the same verdict
+// ---------------------------------------------------------------------------
+
+test("(10) a member's check record goes with its report: PR check records with pr<M>/, impl check records with impl-<N>/", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 5: PR("MERGED"), 6: PR("OPEN"), 7: PR("CLOSED"), 30: ISSUE("CLOSED"), 31: ISSUE("OPEN") });
+  const rep = (name, days = 1) => f.file(`reports/${name}`, days);
+  const gone = [
+    rep("fix-pr-5.json"), rep("fix-pr-5.check.json"), rep("fix-pr-5-b.check.json"),
+    rep("finisher-pr-5.check.json"), rep("review-pr-5.check.json"), rep("finisher-pr-7.check.json"),
+    rep("impl-30.json"), rep("impl-30.check.json"), rep("impl-30-b.check.json"),
+  ];
+  const stays = [
+    rep("fix-pr-6.check.json", 8), // PR #6 is OPEN, however old the record is
+    rep("impl-31.check.json"), // issue #31 is OPEN and the record is young
+  ];
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [...gone].sort());
+  for (const p of gone) assert.ok(!existsSync(p), `${p} survived`);
+  for (const p of stays) assert.ok(existsSync(p), `${p} was removed`);
+  assert.equal(reasonOf(r.out.removed, join(f.root, "reports", "fix-pr-5.check.json")), "PR #5 is MERGED");
+  assert.equal(reasonOf(r.out.removed, join(f.root, "reports", "impl-30.check.json")), "issue #30 is CLOSED");
+  assert.match(reasonOf(r.out.kept, join(f.root, "reports", "fix-pr-6.check.json")), /PR #6 is OPEN/);
+  assert.match(reasonOf(r.out.kept, join(f.root, "reports", "impl-31.check.json")), /issue #31 is OPEN; modified within 7 days/);
+});
+
+test("(10) a live token keeps its member's check record as it keeps its report", (t) => {
+  const f = fixture(t);
+  f.ledger(
+    ["#40 impl-40=PR#41 → PR#41 · fix-pr-41", "#50 impl-50-b", "#60 impl-60=PR#61 → PR#61 · review=member:review-pr-61"],
+    ["impl-40=PR#41", "fix-pr-41", "impl-50-b", "impl-60=PR#61"],
+  );
+  f.states({ 41: PR("MERGED"), 61: PR("CLOSED"), 50: ISSUE("OPEN"), 70: ISSUE("OPEN") });
+  const held = {
+    "fix-pr-41.check.json": /live fix-pr-41/,
+    "review-pr-61.check.json": /live review-pr-61/,
+    "impl-50.check.json": /issue #50 is OPEN and live impl-50-b/,
+    "impl-50-b.check.json": /issue #50 is OPEN and live impl-50-b/,
+  };
+  for (const name of Object.keys(held)) f.file(`reports/${name}`, 8);
+  // The same records with no live member: gone, so the holds above are what kept them.
+  const idleImpl = f.file("reports/impl-70.check.json", 8);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  for (const [name, why] of Object.entries(held)) {
+    const p = join(f.root, "reports", name);
+    assert.ok(existsSync(p), `${name} was removed while its member is live`);
+    assert.match(reasonOf(r.out.kept, p), why);
+  }
+  assert.deepEqual(paths(r.out.removed), [idleImpl]);
+});
+
+test("(10) a live merge-bot holds every PR-bound check record, and a lookup GitHub could not answer keeps it", (t) => {
+  const bot = fixture(t);
+  bot.ledger([], ["merge-bot-2"]);
+  bot.states({ 5: PR("MERGED"), 30: ISSUE("CLOSED") });
+  const pr = bot.file("reports/fix-pr-5.check.json");
+  const impl = bot.file("reports/impl-30.check.json");
+
+  const r = bot.run(["--root", bot.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(reasonOf(r.out.kept, pr), "live merge-bot-2 holds every pr<N>");
+  assert.ok(existsSync(pr));
+  assert.deepEqual(paths(r.out.removed), [impl], "a live merge bot holds pr<N> reclamation only");
+
+  const down = fixture(t);
+  down.ledger();
+  down.states({ 5: { error: { message: "boom" } }, 30: { error: { message: "boom" } } });
+  const kept = [down.file("reports/fix-pr-5.check.json", 8), down.file("reports/impl-30.check.json", 8)];
+
+  const d = down.run(["--root", down.root, "--apply"]);
+
+  assert.equal(d.status, 0, d.stderr);
+  for (const p of kept) assert.ok(existsSync(p), "a check record was removed on a lookup that gave no answer");
+});
+
+test("(10) a check record is judged on the resolved type of its number, as its report is", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  f.states({ 5: ISSUE("CLOSED"), 30: PR("OPEN") });
+  const prAsIssue = f.file("reports/fix-pr-5.check.json", 8);
+  const implAsPr = f.file("reports/impl-30.check.json", 8);
+  const youngPrAsIssue = f.file("reports/finisher-pr-5.check.json", 1);
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [prAsIssue, implAsPr].sort(), "a mistyped number falls to age");
+  assert.ok(existsSync(youngPrAsIssue));
+  assert.match(reasonOf(r.out.kept, youngPrAsIssue), /#5 is a Issue, not a pull request; modified within 7 days/);
+});
+
+test("(10) merge-bot and unkeyed check records, and names with another or a repeated infix, are judged by age alone", (t) => {
+  const f = fixture(t);
+  f.ledger();
+  // PR #5 is OPEN, so a keyed verdict would keep its idle files; age alone removes them. Issue #30
+  // is CLOSED, so a keyed verdict would remove its young files; age alone keeps them.
+  f.states({ 5: PR("OPEN"), 30: ISSUE("CLOSED") });
+  const gone = [
+    f.file("reports/merge-bot-9.check.json", 8),
+    f.file("reports/notes.check.json", 8),
+    f.file("reports/fix-pr-5.check.check.json", 8),
+    f.file("reports/fix-pr-5.checkx.json", 8),
+  ];
+  const stays = [
+    f.file("reports/merge-bot-10.check.json", 1),
+    f.file("reports/impl-30.check.check.json", 1),
+    f.file("reports/impl-30.checkx.json", 1),
+  ];
+
+  const r = f.run(["--root", f.root, "--apply"]);
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(paths(r.out.removed), [...gone].sort());
+  for (const p of stays) assert.ok(existsSync(p), `${p} was removed`);
+  assert.match(reasonOf(r.out.kept, join(f.root, "reports", "merge-bot-10.check.json")), /modified within 7 days/);
+});
+
 test("(10) a `reports` that is a file, not a directory, is judged as any other entry", (t) => {
   const f = fixture(t);
   f.ledger();
