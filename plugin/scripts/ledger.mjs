@@ -293,15 +293,16 @@ if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|token|file
 // the documented convention IS one quoted argument, and `check` is the only
 // subcommand where it is: every caller that instructs running it spells it
 // `ledger.mjs check "<subject>"` (the finisher's deferred-finding filing duty,
-// review-and-fix's filing step), while run-team/SKILL.md's ledger section
-// spells the other three `filed <issue> <subject>`, `row <ticket> <text>` and
-// `ruled <pr> <decision>` — a bare multi-word tail, as did this file's own
-// usage strings for them. Applied there, the rule refused what the docs
-// prescribe: measured on the tree ahead of this narrowing, `filed 999 the
+// review-and-fix's filing step), while run-team/SKILL.md, as it stood when
+// this was measured, spelled the other three `filed <issue> <subject>`,
+// `row <ticket> <text>` and `ruled <pr> <decision>` — a bare multi-word tail,
+// as did this file's own usage strings for them. Applied there, the rule
+// refused what the docs prescribed: measured on the tree ahead of this
+// narrowing, `filed 999 the
 // --basee flag is unread`, `row 42 the --basee flag is unread` and `ruled 77
 // the --basee flag is unread` each exited 2, where the tree before this guard
 // existed answered all three at exit 0. The guard was ruled back to
-// `check` rather than respelling three conventions SKILL.md carries, two
+// `check` rather than respelling three conventions SKILL.md then carried, two
 // other tickets holding that file open.
 //
 // Stated here and nowhere else. This paragraph is the one copy of why
@@ -329,9 +330,9 @@ if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|token|file
 // 2 now. Quoting the subject accepts it unchanged. The trade taken
 // is that this refusal is loud and recoverable where the wrong-subject
 // answer it replaces was silent. One residual of that trade is not this
-// file's to close: SKILL.md's ledger section spells `check <subject>`
-// unquoted inside the same entry that spells `filed <issue> <subject>`, where
-// the instructions that tell a caller to RUN it quote the subject.
+// file's to close: run-team/references/ledger.md's `filed and ruled` section
+// spells `check <subject>` unquoted, where the instructions that tell a caller
+// to RUN it quote the subject.
 //
 // Narrowed on `check` too, not closed: a lone stray with no subject beside it
 // is a one-element tail, so it is still taken as the subject and answered at
@@ -652,15 +653,15 @@ async function acquireLock() {
       // indistinguishable at this instant from a live reaper mid-takeover.
       // Naming the pid alone points an operator at a process that no longer
       // exists; naming `${REAP}` is what lets them find the file
-      // `run-team/SKILL.md`'s runbook tells them to remove by hand, once
-      // nothing is writing.
+      // run-team/references/ledger.md's Writer policy section tells them to
+      // remove by hand, once nothing is writing.
       if (dead) {
         die(`cannot lock ${file} — held by pid ${pid}, which is dead; ${REAP} is blocking its takeover — if nothing is currently writing, remove it by hand`);
       }
       // No pid at all is the other permanent wedge pid-lock.mjs's header describes: an
       // empty or partial `${LOCK}` whose writer died before writing its pid,
       // read as live forever by design. There is no process to point at, so
-      // name `${LOCK}` itself — the file the same runbook says to remove.
+      // name `${LOCK}` itself — the file the same Writer policy section says to remove.
       if (pid === null) {
         die(`cannot lock ${file} — ${LOCK} holds ${JSON.stringify(holder)}, not a pid, so it is never taken over — if nothing is currently writing, remove it by hand`);
       }
@@ -2087,8 +2088,9 @@ function runDispatch() {
     line = `#${member.number} ${member.name}`;
     data.rows.push(line);
   } else if (i !== -1) {
-    // A row `row` already wrote the live token into (SKILL.md's phase 2
-    // does) keeps it as it is rather than gaining a second copy.
+    // A row `row` already wrote the live token into (run-team/SKILL.md's
+    // `NEED resume` bullet records the row with `ledger.mjs row` before
+    // `ledger.mjs dispatch`) keeps it as it is rather than gaining a second copy.
     const row = data.rows[i];
     line = carries(row, member.name, true) ? row : `${row} · ${member.name}`;
     data.rows[i] = line;

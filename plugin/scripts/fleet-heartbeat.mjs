@@ -13,7 +13,7 @@
 // WHY A HOLD AND NOT A WATCHER — the ruling, measured before it was made:
 //
 //   A backgrounded watcher does not wake an idle agent. Measured twice in one
-//   run (run-team/SKILL.md, "A member runs its test suite in the foreground"):
+//   run (run-team/references/member-lifecycle.md, "A member runs its test suite in the foreground"):
 //   `fix-pr-1184` backgrounded its suite plus a Monitor and sat idle for
 //   roughly two hours; neither ever woke it. run-merge-bot.md's CI gate states
 //   the same rule as a rule — "whatever wakes you is external and may never
@@ -28,7 +28,7 @@
 //   do.
 //
 // WHY IT TAKES NO CONTROLLER STATE — every flag below has a default. A monitor
-// event is a wake-up, never a verdict (SKILL.md's Monitor rules), so this
+// event is a wake-up, never a verdict (run-team/SKILL.md, "A monitor event is a wake-up, never a verdict"), so this
 // script never reads or reports fleet state: counts captured before a
 // twenty-minute hold and printed after it are a stale verdict, and a stale
 // verdict is how a reconcile prints an ACTION nobody can take. The controller
