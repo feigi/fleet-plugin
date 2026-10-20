@@ -13,7 +13,9 @@
 // every liveness count from this file alone, rather than from row text a
 // controller typed by hand: `dispatch` writes a member's live token onto its
 // row and appends it to `## Dispatched` with `brief=<hash>`, the brief it
-// refuses to dispatch without; when that brief's sidecar names an absolute
+// refuses to dispatch without — and, for a merge bot, `queued=<pr>,…`, the
+// open `ready-to-merge` PRs gh lists at dispatch, which its report must give
+// a verdict each; when that brief's sidecar names an absolute
 // scratch, it also clears the member's report file there, so a prior run's
 // report is not read as this run's; `settle` rewrites that token to
 // `<member>=<outcome>` in both places (an implementer's settle to `PR#M` also
@@ -59,6 +61,7 @@ import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./flee
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
 import { attemptLock, releaseLockFile, reapPathOf } from "./pid-lock.mjs";
 import { readCheckRecordIn, readReportIn, reportsDir, reportFamily, defaultScratch, reportPath } from "./report-files.mjs";
+import { mergeBotVerdicts } from "./report-schema.mjs";
 
 const NAME = "ledger";
 // The plugin's own agent definitions — the directory tier-check.mjs reads
@@ -494,7 +497,7 @@ function sectionOf(text, name) {
 }
 
 function load() {
-  if (!existsSync(file)) return { rows: [], filed: [], ruled: [], dispatched: [], briefs: {}, drain: null, retired: [] };
+  if (!existsSync(file)) return { rows: [], filed: [], ruled: [], dispatched: [], briefs: {}, queued: {}, drain: null, retired: [] };
   let text;
   try {
     text = readFileSync(file, "utf8");
@@ -526,15 +529,14 @@ function load() {
 }
 
 // `## Dispatched` held as its tokens, which is what every reader of `read`
-// parses, and `briefs`, each member's `brief=` hash by name: one token per
-// member name for the session, so a settle that rewrites the token keeps the
-// name its brief is filed under. save() joins them back.
+// parses, `briefs`, each member's `brief=` hash by name, and `queued`, each
+// merge bot's `queued=` PR numbers by name: one token per member name for
+// the session, so a settle that rewrites the token keeps the name its brief
+// and its queue are filed under. save() joins them back.
 function dispatchedOf(entries) {
   const parsed = entries.map(parseDispatchedEntry);
-  return {
-    dispatched: parsed.map((p) => p.token),
-    briefs: Object.fromEntries(parsed.filter((p) => p.brief !== null).map((p) => [parseToken(p.token).name, p.brief])),
-  };
+  const byName = (field) => Object.fromEntries(parsed.filter((p) => p[field] !== null).map((p) => [parseToken(p.token).name, p[field]]));
+  return { dispatched: parsed.map((p) => p.token), briefs: byName("brief"), queued: byName("queued") };
 }
 
 // `## Drain` is written only once there is a marker to hold: an empty section
@@ -547,7 +549,10 @@ function save(d) {
   const list = (entries) => entries.map((r) => `- ${escapeText(r)}`).join("\n");
   const out =
     `# Fleet run ledger\n\n${ROWS}\n\n` + list(d.rows) +
-    `\n\n${DISPATCHED}\n\n` + list(d.dispatched.map((t) => dispatchedEntry(t, d.briefs[parseToken(t)?.name] ?? null))) +
+    `\n\n${DISPATCHED}\n\n` + list(d.dispatched.map((t) => {
+      const name = parseToken(t)?.name;
+      return dispatchedEntry(t, d.briefs[name] ?? null, d.queued[name] ?? null);
+    })) +
     `\n\n${FILED}\n\n` + list(d.filed) +
     `\n\n${RULED}\n\n` + list(d.ruled) +
     (d.drain === null ? "" : `\n\n${DRAIN}\n\n` + list([d.drain])) +
@@ -694,6 +699,9 @@ const WRITE_COMMANDS = new Set(["row", "token", "filed", "ruled", "dispatch", "s
 // `settle --from-report` takes the lock itself, once its checks have run —
 // see runSettleFromReport().
 const FROM_REPORT = cmd === "settle" && rest.includes("--from-report");
+// A merge bot's dispatch reads the queue it records before the lock, for the
+// same reason: a gh call held under the lock stalls every other writer.
+const QUEUED = cmd === "dispatch" && rest.length === 1 && /^merge-bot(-[0-9]+)?$/.test(rest[0]) ? queueSnapshot() : null;
 if (WRITE_COMMANDS.has(cmd) && !FROM_REPORT) await acquireLock();
 // `rotate` never load()s: a ledger load() would refuse is still the previous
 // run's record, and it is archived as-is — and read line by line when it
@@ -1630,7 +1638,7 @@ function runRotate() {
   }
   // Read before anything moves: a ledger whose live tokens cannot be read is
   // refused with nothing moved, never archived with those tokens dropped.
-  let carry = { rows: [], dispatched: [], briefs: {}, retired: [], skipped: [] };
+  let carry = { rows: [], dispatched: [], briefs: {}, queued: {}, retired: [], skipped: [] };
   if (prior === "ancestor" && exists) {
     let text;
     try {
@@ -1691,7 +1699,7 @@ function runRotate() {
   // Nothing to carry writes nothing, so the next write starts the skeleton
   // exactly as after any other verdict.
   if (carrying) {
-    save({ rows: carry.rows, dispatched: carry.dispatched, briefs: carry.briefs, filed: [], ruled: [], drain: null, retired: carry.retired });
+    save({ ...carry, filed: [], ruled: [], drain: null });
   }
   if (archive !== null) console.error(`    rotated ${file} -> ${archive}`);
   for (const { line, why } of carry.skipped) {
@@ -1751,10 +1759,11 @@ function carryOf(text) {
       return false;
     }
   });
-  // An entry's `brief=` travels with it: save() writes a brief only beside
-  // the token it writes, so a carried member's record still names the brief
-  // it was dispatched with and a dropped member's does not.
-  const { dispatched: allDispatched, briefs: allBriefs } = dispatchedOf(sectionOf(text, DISPATCHED));
+  // An entry's `brief=` and `queued=` travel with it: save() writes them only
+  // beside the token it writes, so a carried member's record still names the
+  // brief it was dispatched with — and a carried merge bot the queue it is
+  // judged against — and a dropped member's does not.
+  const { dispatched: allDispatched, briefs: allBriefs, queued: allQueued } = dispatchedOf(sectionOf(text, DISPATCHED));
   const dispatched = allDispatched.filter((e) => {
     const t = parseToken(e);
     if (t !== null && t.error === null) return true;
@@ -1777,7 +1786,7 @@ function carryOf(text) {
   const live = liveOnLedger(rows, dispatched);
   const carried = { rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched };
   const retired = retiredOnLedger([...rows, ...skippedRows], allDispatched, archivedRetired, carried);
-  return { ...carried, briefs: allBriefs, retired, skipped };
+  return { ...carried, briefs: allBriefs, queued: allQueued, retired, skipped };
 }
 
 // ── dispatch / settle ────────────────────────────────────────────────────────
@@ -1882,6 +1891,37 @@ function dispositionsRefusal(pr, review) {
       + "--scratch <scratch> names each escalated finding or violating entry by bucket and index, for the PR comment that hands it to a human";
   }
   return null;
+}
+
+// The open `ready-to-merge` PRs, ascending, as gh answers from the ledger's
+// own directory with runCheck()'s environment: the queue a merge bot is
+// dispatched against, recorded on its `## Dispatched` entry. Anything but a
+// JSON array of PR numbers, or an answer filling the limit — gh stops there
+// at exit 0 — could not read the queue: refused, nothing written.
+function queueSnapshot() {
+  const limit = 1000;
+  const what = `gh pr list --state open --label ready-to-merge --limit ${limit} --json number`;
+  const env = { ...process.env, GH_REPO: "" };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  let dir = dirname(resolve(file));
+  while (!existsSync(dir) && dirname(dir) !== dir) dir = dirname(dir);
+  const r = spawnSync("gh", what.split(" ").slice(1), { encoding: "utf8", cwd: dir, env, timeout: 60_000, stdio: ["ignore", "pipe", "pipe"] });
+  const refuse = (why) => die(`dispatch merge-bot: could not read the queue to record — ${what}${why}; nothing written`);
+  if (r.status !== 0) {
+    const why = cause(r.error && r.error.message, r.stderr);
+    refuse(`${r.error ? "" : r.signal ? ` killed by ${r.signal}` : ` exited ${r.status}`}${why ? `: ${why}` : ""}`);
+  }
+  let list = null;
+  try {
+    list = JSON.parse(r.stdout);
+  } catch {
+    // Refused below.
+  }
+  const prs = Array.isArray(list) ? list.map((p) => p?.number) : null;
+  if (prs === null || !prs.every((n) => Number.isSafeInteger(n) && n > 0)) refuse(` printed no list of PR numbers: ${cause(r.stdout)}`);
+  if (prs.length >= limit) refuse(` answered ${prs.length} PRs, the limit, so the queue may be longer`);
+  return [...new Set(prs)].sort((a, b) => a - b);
 }
 
 function runDispatch() {
@@ -2055,10 +2095,14 @@ function runDispatch() {
   }
   data.dispatched.push(member.name);
   data.briefs[member.name] = brief.sha256.slice(0, 8);
+  // A merge bot's queue is recorded here, beside its brief, where nothing in
+  // its report can reach: `settle --from-report` judges the report against it.
+  if (QUEUED !== null) data.queued[member.name] = QUEUED;
   save(data);
   console.error(`    dispatched ${member.name}`);
   console.log(JSON.stringify({
     member: member.name, agent, ticket: line === null ? null : rowKey(line), line, created, total: data.dispatched.length, brief,
+    queued: QUEUED,
   }));
 }
 
@@ -2292,7 +2336,11 @@ function recordFiled(id, subject) {
 //                             the report's labelsReadBack
 //   finisher-pr-M=halted:<c>  cause is in the halted:<cause> vocabulary and
 //                             evidence is not empty
-//   merge-bot-n=done          every merged[].pr reads MERGED
+//   merge-bot-n=done          every merged[].pr reads MERGED; every PR the
+//                             bot's `## Dispatched` entry records as queued=
+//                             at dispatch has a verdict in merged, held,
+//                             conflictHold or refused, or no longer reads
+//                             OPEN with ready-to-merge
 //
 // THE CHECK-STEP RECORD, for `impl-N=PR#M` and `fix-pr-M=applied:<head>`:
 // recipe-check.mjs writes `<reports>/<member>.check.json` on the member's
@@ -2312,15 +2360,21 @@ function recordFiled(id, subject) {
 // stderr names each failed check; nothing written. Exit 2: the report is
 // absent, unreadable or invalid, a check could not look (a `gh`, `git` or
 // verify-sha.sh call that failed, printed what it was not asked for, or never
-// finished), or a refusal the bare form makes; nothing written either.
+// finished), a merge bot's `## Dispatched` entry records no queued=, or a
+// refusal the bare form makes; nothing written either.
 //
 // After the settle, in the same write: every `unrecorded` entry goes to `##
-// Filed` the way `filed` records one, and for a fix-applier every `deferred`
+// Filed` the way `filed` records one, for a fix-applier every `deferred`
 // entry in the `refuted` bucket goes to `## Ruled` as `#M reversed refutation
-// <index>: <reason>`. A line already there is not written again, so a second
-// run of the same settle writes nothing. The receipt on stdout is `{member,
-// outcome, checks: [{name, ok}], filed, ruled}`, `filed` and `ruled` the
-// lines this call added.
+// <index>: <reason>`, and for a merge bot every `refused` entry goes to `##
+// Ruled` as `merge-bot-n refused #<pr>: <reason>`, the reason trimmed — a
+// record, which moves no label and writes no row token. It is led by the bot,
+// never by `#<pr>`: compute-board.mjs reads a `## Ruled` line led by `#<n>` as
+// the controller's ruling on PR n, the last such line winning, so a refusal
+// led by its PR would replace that ruling on the board. A line already there
+// is not written again, so a second run of the same settle writes nothing.
+// The receipt on stdout is `{member, outcome, checks: [{name, ok}], filed,
+// ruled}`, `filed` and `ruled` the lines this call added.
 //
 // The checks run before the write lock is taken, against the ledger as read
 // without it, because they are network calls and every other writer waits
@@ -2558,6 +2612,22 @@ async function runSettleFromReport() {
   } else {
     outcome = "done";
     for (const { pr } of report.merged) check(`PR #${pr} reads MERGED`, prView(pr, "state").state === "MERGED");
+    // Every PR queued when the bot was dispatched has a verdict, unless it has
+    // left the queue since — merged by someone else, closed or unlabelled. The
+    // queue is the one `dispatch` recorded, never one the report names, so a
+    // PR the report leaves out cannot shrink it; a PR labelled after dispatch
+    // is not in it.
+    const queued = data.queued[member];
+    if (queued === undefined) {
+      die(`${where}: ## Dispatched records no queued= for ${member}, so whether its report gives every PR queued at dispatch a verdict cannot be judged — settle it by hand; nothing written`);
+    }
+    const given = new Set(mergeBotVerdicts(report).map((v) => v.pr));
+    for (const pr of queued.filter((n) => !given.has(n))) {
+      const v = prView(pr, "state,labels");
+      const left = v.state !== "OPEN" || !v.labels.some((l) => l?.name === ready);
+      check(`PR #${pr}, queued at dispatch, has a verdict in merged, held, conflictHold or refused, or has left the queue`, left);
+    }
+    for (const { pr, reason } of report.refused) ruledLines.push(`${member} refused #${pr}: ${reason.trim()}`);
   }
 
   const failed = checks.filter((c) => !c.ok);

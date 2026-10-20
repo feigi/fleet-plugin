@@ -76,11 +76,13 @@ One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`; `ledg
 
 A member that dies between spawn and write is invisible — and members die in batches.
 
+`dispatch merge-bot` also records the queue the bot is dispatched against: its `## Dispatched` entry carries `queued=<pr>,<pr>…` (`queued=none` for an empty queue), the open `ready-to-merge` PRs gh lists at that moment. A gh that cannot answer refuses the dispatch, nothing written. `settle merge-bot-<n> --from-report` judges the bot's report against that queue, not against anything the report names: a PR from it that is still open and carries the label, with no verdict in `merged`, `held`, `conflictHold` or `refused`, fails the settle at exit 3, naming the PR, and an entry without `queued=` cannot be judged (exit 2) — settle that bot by hand.
+
 ## filed and ruled
 
 `filed` is checked with `ledger.mjs check <subject>` before every `gh issue create`, so a finding already recorded this run is not filed twice. That is not a guarantee against duplicates at large; the tracker query, described under `check`'s exits and its `verdict` above, is what covers those.
 
-`ruled` records PR + decision + one-line reason, so a replacement controller does not re-litigate a settled call.
+`ruled` records PR + decision + one-line reason, so a replacement controller does not re-litigate a settled call. A merge bot's settle adds one line per `refused[]` entry of its report, `merge-bot-<n> refused #<pr>: <reason>`: a record of the refusal and nothing more — no label moves and no row token is written. It is led by the bot, not by `#<pr>`, because the board reads a `#<pr>`-led line as your ruling on that PR, the last one winning, and a refusal must not replace it.
 
 ## Label-off and conflict holds
 

@@ -117,27 +117,37 @@ export function memberRole(family) {
 
 // A `## Dispatched` entry is a member token, followed by `brief=<hash>` when
 // `ledger.mjs dispatch` recorded the brief the member was dispatched with:
-// the first 8 hex of the sha256 the brief's sidecar carries. `settle`
-// rewrites the token and keeps the word beside it.
-const BRIEF_WORD = /^brief=([0-9a-f]{8})$/;
+// the first 8 hex of the sha256 the brief's sidecar carries. A merge bot's
+// entry then carries `queued=<pr>,<pr>…` — `queued=none` for an empty queue —
+// the open `ready-to-merge` PRs `dispatch` read when it dispatched the bot,
+// which its report is judged against at `settle --from-report`. `settle`
+// rewrites the token and keeps the words beside it.
+const DISPATCHED_ENTRY = /^([^ ]*) brief=([0-9a-f]{8})(?: queued=(none|[1-9][0-9]*(?:,[1-9][0-9]*)*))?$/;
 
 /**
- * `{token, brief}` for one `## Dispatched` entry: the member token and the
- * brief's hash, or null for an entry without one. An entry that is not a
- * member token plus one well-formed `brief=` word is returned whole as
- * `token`, so a reader parsing it with parseToken() refuses it exactly as it
- * refuses any other entry this grammar cannot parse.
+ * `{token, brief, queued}` for one `## Dispatched` entry: the member token,
+ * the brief's hash or null, and the PR numbers of its `queued=` word or null
+ * for an entry without one. An entry that is not a member token plus a
+ * well-formed `brief=` word, optionally followed by a well-formed `queued=`
+ * word, is returned whole as `token`, so a reader parsing it with
+ * parseToken() refuses it exactly as it refuses any other entry this grammar
+ * cannot parse.
  */
 export function parseDispatchedEntry(entry) {
-  const words = entry.split(" ");
-  const m = words.length === 2 ? BRIEF_WORD.exec(words[1]) : null;
-  if (m === null || parseToken(words[0]) === null) return { token: entry, brief: null };
-  return { token: words[0], brief: m[1] };
+  const m = DISPATCHED_ENTRY.exec(entry);
+  if (m === null || parseToken(m[1]) === null) return { token: entry, brief: null, queued: null };
+  const queued = m[3] === undefined ? null : m[3] === "none" ? [] : m[3].split(",").map(Number);
+  return { token: m[1], brief: m[2], queued };
 }
 
-/** The `## Dispatched` entry for `token`, with `brief=<brief>` unless brief is null. */
-export function dispatchedEntry(token, brief) {
-  return brief === null ? token : `${token} brief=${brief}`;
+/**
+ * The `## Dispatched` entry for `token`, with `brief=<brief>` unless brief is
+ * null and, after it, `queued=…` unless queued is null.
+ */
+export function dispatchedEntry(token, brief, queued = null) {
+  if (brief === null) return token;
+  const entry = `${token} brief=${brief}`;
+  return queued === null ? entry : `${entry} queued=${queued.join(",") || "none"}`;
 }
 
 // `PR#<n>` as a word of a row's text, `PR #<n>` too.

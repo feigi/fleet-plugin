@@ -6,8 +6,9 @@
 // (flat: no per-run directory), `<member>` being its ledger name (`impl-412`,
 // `impl-412-b`, `fix-pr-88`, `finisher-pr-88`, `merge-bot-3`). The file is
 // checked against the schema of the member's family, report-schema.mjs's
-// SCHEMAS. The review runner and every member outside those four families
-// have no schema, so no file to look up.
+// SCHEMAS, and the rule reportViolation() adds to it. The review runner and
+// every member outside those four families have no schema, so no file to
+// look up.
 //
 // The Check-step record beside a report, `<reports>/<member>.check.json`, is
 // looked up here the same way: recipe-check.mjs writes it, and this module
@@ -18,7 +19,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { SCHEMAS, parseReport, validate } from "./report-schema.mjs";
+import { parseReport, reportViolation } from "./report-schema.mjs";
 import { parseMember } from "./ledger-grammar.mjs";
 import { scratchRoot } from "./fleet-dir.mjs";
 
@@ -113,7 +114,7 @@ export function readReportIn(dir, member) {
   const read = readAt(path);
   if (read.text === undefined) return read;
   const parsed = parseReport(read.text);
-  const violation = parsed.violation ?? validate(SCHEMAS[family], parsed.value);
+  const violation = parsed.violation ?? reportViolation(family, parsed.value);
   return violation === null ? { state: "ok", path, report: parsed.value } : { state: "invalid", path, violation };
 }
 

@@ -10,7 +10,9 @@ Your scratch directory is `<scratch>/`; you write only under
 `<scratch>/pr<N>/merge-bot-<n>/`.
 
 Your report is the one file you write outside it: `<scratch>/reports/merge-bot-<n>.json`,
-the path your brief names, holding every PR you merged in `merged`. Your final
+the path your brief names, giving every PR queued when you were dispatched
+exactly one verdict — `merged`, `held`, `conflictHold` or `refused` — as
+run-merge-bot.md's **One verdict per queued PR** says. Your final
 message is the one line your brief gives, `merge-bot-<n>: done <path>`.
 
 The shell traps below are copied from the controller's skill, `run-team`. In

@@ -18,6 +18,8 @@ import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { deriveRun, LedgerError } from "../plugin/scripts/fleet-tick.mjs";
 import { rowPr } from "../plugin/scripts/ledger-grammar.mjs";
 import { rendering, renderBrief } from "./support/rendered-brief.mjs";
+import { writeQueueGh } from "./support/queue-gh.mjs";
+import { writeExecStub } from "./support/exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -26,10 +28,12 @@ function fixture(t, body = null) {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const file = join(dir, "ledger.md");
   if (body !== null) writeFileSync(file, body);
-  // PATH is an empty directory: none of these subcommands may reach gh or
-  // git, and with `--file` given nothing else in ledger.mjs does either.
+  // PATH is a directory holding one gh stub: only `dispatch merge-bot` may
+  // reach gh, to record the queue it lists — empty unless a test rewrites the
+  // stub — and with `--file` given nothing in ledger.mjs reaches git.
   const bin = join(dir, "bin");
   mkdirSync(bin);
+  writeQueueGh(bin);
   const env = { ...process.env, PATH: bin };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
@@ -75,14 +79,14 @@ function fixture(t, body = null) {
     path: join(dir, "briefs", `${member}.md`),
     sha256: JSON.parse(readFileSync(join(dir, "briefs", `${member}.json`), "utf8")).sha256,
   });
-  return { dir, file, bare, cli, ok, read, bytes, refused, put, briefOf };
+  return { dir, file, bin, env, bare, cli, ok, read, bytes, refused, put, briefOf };
 }
 
 test("dispatch appends a live member row and records the dispatch in ## Dispatched", (t) => {
   const { ok, read, bytes, briefOf } = fixture(t);
   const out = ok("dispatch", "412", "impl-412");
   assert.deepEqual(out, {
-    member: "impl-412", agent: "fleet-implementer-slow-high", ticket: "#412", line: "#412 impl-412", created: true, total: 1, brief: briefOf("impl-412"),
+    member: "impl-412", agent: "fleet-implementer-slow-high", ticket: "#412", line: "#412 impl-412", created: true, total: 1, brief: briefOf("impl-412"), queued: null,
   });
   const l = read();
   assert.deepEqual(l.rows, ["#412 impl-412"]);
@@ -98,7 +102,7 @@ test("dispatch keeps an existing row's text, appending the token only where it i
   ok("row", "412", "impl-412 · class=routine");
   ok("row", "415", "claimed · class=correction");
   assert.deepEqual(ok("dispatch", "412", "impl-412"), {
-    member: "impl-412", agent: "fleet-implementer-slow-high", ticket: "#412", line: "#412 impl-412 · class=routine", created: false, total: 1, brief: briefOf("impl-412"),
+    member: "impl-412", agent: "fleet-implementer-slow-high", ticket: "#412", line: "#412 impl-412 · class=routine", created: false, total: 1, brief: briefOf("impl-412"), queued: null,
   });
   assert.equal(ok("dispatch", "#415", "impl-415").line, "#415 claimed · class=correction · impl-415");
   assert.deepEqual(read().dispatched, ["impl-412", "impl-415"]);
@@ -110,7 +114,7 @@ test("a PR-bound member lands on the row carrying its PR, named by PR or by tick
   ok("settle", "impl-324", "PR#346");
   // By the PR number: found through the implementer's own settled token.
   assert.deepEqual(ok("dispatch", "346", "fix-pr-346"), {
-    member: "fix-pr-346", agent: "fleet-fix-applier", ticket: "#324", line: "#324 impl-324=PR#346 · fix-pr-346", created: false, total: 2, brief: briefOf("fix-pr-346"),
+    member: "fix-pr-346", agent: "fleet-fix-applier", ticket: "#324", line: "#324 impl-324=PR#346 · fix-pr-346", created: false, total: 2, brief: briefOf("fix-pr-346"), queued: null,
   });
   // By the ticket number whose row carries that PR.
   assert.equal(ok("dispatch", "324", "finisher-pr-346").line, "#324 impl-324=PR#346 · fix-pr-346 · finisher-pr-346");
@@ -124,7 +128,7 @@ test("a PR-bound member lands on the row carrying its PR, named by PR or by tick
   assert.equal(ok("dispatch", "351", "fix-pr-351").ticket, "#351");
   // A PR no row carries gets a row of its own.
   assert.deepEqual(ok("dispatch", "777", "fix-pr-777"), {
-    member: "fix-pr-777", agent: "fleet-fix-applier", ticket: "#777", line: "#777 fix-pr-777", created: true, total: 6, brief: briefOf("fix-pr-777"),
+    member: "fix-pr-777", agent: "fleet-fix-applier", ticket: "#777", line: "#777 fix-pr-777", created: true, total: 6, brief: briefOf("fix-pr-777"), queued: null,
   });
   assert.equal(read().rows.length, 5);
 });
@@ -162,7 +166,7 @@ test("a member is dispatched once; its replacement takes a name of its own", (t)
 
 test("merge-bot-<n> counts the ## Dispatched merge-bot entries, and a new ledger starts again at 1", (t) => {
   const { ok, read, refused, briefOf } = fixture(t);
-  assert.deepEqual(ok("dispatch", "merge-bot"), { member: "merge-bot-1", agent: "fleet-merge-bot", ticket: null, line: null, created: false, total: 1, brief: briefOf("merge-bot-1") });
+  assert.deepEqual(ok("dispatch", "merge-bot"), { member: "merge-bot-1", agent: "fleet-merge-bot", ticket: null, line: null, created: false, total: 1, brief: briefOf("merge-bot-1"), queued: [] });
   ok("dispatch", "412", "impl-412");
   ok("settle", "merge-bot-1", "done");
   // A settled bot still counts: its replacement gets a new n.
@@ -177,6 +181,54 @@ test("merge-bot-<n> counts the ## Dispatched merge-bot entries, and a new ledger
 
   const fresh = fixture(t);
   assert.equal(fresh.ok("dispatch", "merge-bot").member, "merge-bot-1");
+});
+
+// A merge bot's report is judged at its settle against the queue its
+// dispatch recorded, so that queue is gh's answer at dispatch, written beside
+// the bot's brief where no report field reaches it, and a settle keeps it.
+test("dispatch merge-bot records the ready-to-merge queue gh lists on its ## Dispatched entry, and settle keeps it", (t) => {
+  const { ok, read, bytes, bin } = fixture(t);
+  writeQueueGh(bin, [30, 12, 30]);
+  assert.deepEqual(ok("dispatch", "merge-bot").queued, [12, 30]);
+  assert.match(bytes(), /^- merge-bot-1 brief=[0-9a-f]{8} queued=12,30$/m);
+  ok("settle", "merge-bot-1", "done");
+  assert.match(bytes(), /^- merge-bot-1=done brief=[0-9a-f]{8} queued=12,30$/m);
+  writeQueueGh(bin);
+  assert.deepEqual(ok("dispatch", "merge-bot").queued, []);
+  assert.match(bytes(), /^- merge-bot-2 brief=[0-9a-f]{8} queued=none$/m);
+  assert.deepEqual(read().queued, { "merge-bot-1": [12, 30], "merge-bot-2": [] });
+  // No other member's dispatch reads the queue: a gh that fails every call
+  // stops none of them.
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  assert.equal(ok("dispatch", "412", "impl-412").queued, null);
+  assert.deepEqual(read().queued, { "merge-bot-1": [12, 30], "merge-bot-2": [] });
+});
+
+test("dispatch merge-bot lists the queue with GIT_DIR and GIT_WORK_TREE scrubbed from gh's environment", (t) => {
+  const { ok, bin, dir, env } = fixture(t);
+  const log = join(dir, "gh-env.log");
+  writeExecStub(join(bin, "gh"), `#!/bin/sh\nprintf '%s|%s\\n' "\${GIT_DIR-unset}" "\${GIT_WORK_TREE-unset}" > '${log}'\nprintf '[]\\n'\n`);
+  env.GIT_DIR = join(dir, "elsewhere.git");
+  env.GIT_WORK_TREE = join(dir, "elsewhere");
+  assert.equal(ok("dispatch", "merge-bot").member, "merge-bot-1");
+  assert.equal(readFileSync(log, "utf8"), "unset|unset\n");
+});
+
+test("dispatch merge-bot refuses, writing nothing, when gh does not give it the whole queue", (t) => {
+  const { refused, bin } = fixture(t);
+  for (const [body, why] of [
+    ["#!/bin/sh\nprintf 'gh: not logged in\\n' >&2\nexit 4\n", /could not read the queue to record — gh pr list --state open --label ready-to-merge --limit 1000 --json number exited 4: gh: not logged in; nothing written/],
+    ["#!/bin/sh\nkill -9 $$\n", /could not read the queue to record — gh pr list --state open --label ready-to-merge --limit 1000 --json number killed by SIGKILL; nothing written/],
+    ["#!/bin/sh\nprintf 'not json\\n'\n", /printed no list of PR numbers: not json/],
+    ["#!/bin/sh\nprintf '[{\"number\":\"7\"}]\\n'\n", /printed no list of PR numbers/],
+    ["#!/bin/sh\nprintf '[{\"number\":0}]\\n'\n", /printed no list of PR numbers/],
+    ["#!/bin/sh\nprintf '[{\"number\":-3}]\\n'\n", /printed no list of PR numbers/],
+  ]) {
+    writeExecStub(join(bin, "gh"), body);
+    refused(["dispatch", "merge-bot"], why);
+  }
+  writeQueueGh(bin, Array.from({ length: 1000 }, (_, i) => i + 1));
+  refused(["dispatch", "merge-bot"], /answered 1000 PRs, the limit, so the queue may be longer/);
 });
 
 test("merge-bot-<n> numbers past a settled merge-bot token a row holds that ## Dispatched never saw", (t) => {
@@ -903,9 +955,9 @@ test("drain needs a reason", (t) => {
 test("a ledger written before ## Dispatched existed reads as none dispatched, none retired and not draining, and survives a dispatch", (t) => {
   const { ok, read, briefOf } = fixture(t, "# Fleet run ledger\n\n## Rows\n\n- #7 impl-7 · class=routine\n\n## Filed\n\n- #8 a filed subject\n\n## Ruled\n\n- #9 MERGE · green\n");
   const legacy = { rows: ["#7 impl-7 · class=routine"], filed: ["#8 a filed subject"], ruled: ["#9 MERGE · green"] };
-  assert.deepEqual(read(), { ...legacy, dispatched: [], briefs: {}, drain: null, retired: [] });
+  assert.deepEqual(read(), { ...legacy, dispatched: [], briefs: {}, queued: {}, drain: null, retired: [] });
   assert.equal(ok("dispatch", "merge-bot").member, "merge-bot-1");
-  assert.deepEqual(read(), { ...legacy, dispatched: ["merge-bot-1"], briefs: { "merge-bot-1": briefOf("merge-bot-1").sha256.slice(0, 8) }, drain: null, retired: [] });
+  assert.deepEqual(read(), { ...legacy, dispatched: ["merge-bot-1"], briefs: { "merge-bot-1": briefOf("merge-bot-1").sha256.slice(0, 8) }, queued: { "merge-bot-1": [] }, drain: null, retired: [] });
 });
 
 // #1799 fix-applier follow-up: a `## Dispatched` entry this grammar cannot
