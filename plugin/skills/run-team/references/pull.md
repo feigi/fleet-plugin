@@ -588,3 +588,20 @@ there are at least ten of them across five or more distinct `run_date`s; below
 that, a comparison count is a number, not evidence. SKILL.md's **Report**
 reports the count `cell-readout.mjs` prints, which holds a cell below that
 floor to a count on stderr.
+
+## A Pull's entry and exits, in full
+
+A Pull's entry is `~/.fleet/bin/fleet-run pull.mjs next --head <N>`, run from the
+main checkout (without `--head`, the next shortlist entry). It runs the
+mechanical steps in order and stops at each judgement with a `QUESTION
+<qid>:` block and exit 10; `pull.mjs answer <N> <qid> <token> [--path <p>] [--]
+[<text>…]` records the answer and resumes it. Exit 0 prints `DISPATCH {name,
+agent, brief}`, the `task` call that the dispatch makes; exit 1 means the ticket left the
+Pull, so take the next entry; exit 2 names what could not be looked at —
+`next --head <N>` again retries a step that failed, the same `answer` again
+retries one that failed while applying an answer (the question stands), and
+after a router refusal `next --head <N>` starts the ticket over; exit 3 is a
+usage mistake, or an answer the question does not take, and records nothing.
+The record is `<scratch>/impl-<N>/pull.json`. See references/pull.md for what
+each step does, and why.
+

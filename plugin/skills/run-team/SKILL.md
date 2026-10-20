@@ -418,19 +418,15 @@ A Pull is done when `pull.mjs next` exits 0 with its `DISPATCH` line, which the 
 Serial, main checkout, one Pull at a time. Never parallel, never inside a member —
 concurrent `worktree add` and label writes race.
 
-A Pull's entry is `~/.fleet/bin/fleet-run pull.mjs next --head <N>`, run from the
-main checkout (without `--head`, the next shortlist entry). It runs the
-mechanical steps in order and stops at each judgement with a `QUESTION
-<qid>:` block and exit 10; `pull.mjs answer <N> <qid> <token> [--path <p>] [--]
-[<text>…]` records the answer and resumes it. Exit 0 prints `DISPATCH {name,
-agent, brief}`, the `task` call that the dispatch makes; exit 1 means the ticket left the
-Pull, so take the next entry; exit 2 names what could not be looked at —
-`next --head <N>` again retries a step that failed, the same `answer` again
-retries one that failed while applying an answer (the question stands), and
-after a router refusal `next --head <N>` starts the ticket over; exit 3 is a
-usage mistake, or an answer the question does not take, and records nothing.
-The record is `<scratch>/impl-<N>/pull.json`. See references/pull.md for what
-each step does, and why.
+A Pull's entry is `~/.fleet/bin/fleet-run pull.mjs next --head <N>`, run from
+the main checkout (without `--head`, the next shortlist entry). It stops at
+each judgement with a `QUESTION <qid>:` block and exit 10; `pull.mjs answer <N>
+<qid> <token> [--path <p>] [--] [<text>…]` records the answer and resumes it.
+Exit 2 names what could not be looked at: `next --head <N>` again retries a
+failed step, the same `answer` again one that failed while applying an answer,
+and after a router refusal `next --head <N>` starts the ticket over. Every
+other exit is in **The exit table**; the record is
+`<scratch>/impl-<N>/pull.json`. See references/pull.md.
 
 ### The tick's PULL rows
 
@@ -854,7 +850,7 @@ Match the failure to its row in the table below and run that response; where the
 | Member idle with work outstanding | Read the PR first, *then* ping. Idle ≠ done |
 | Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then run the **Member confirmed dead or never dispatched** wake, then new member, new name, prompt carries inherited state |
 | Member **unaccounted** (a live token the tick flags `CHECK-LIVENESS`, or any live token nothing has reported on) | Registry census first: `read history://` once. A row other than `running` → `read agent://<member>` and the artifacts (PR head, worktree, labels), settle the real outcome with the existing vocabulary, and resume a `parked` member with `write agent://<member>` when its work is worth continuing. A `running` row → the mtime discriminator below, two polls: moved means BLOCKED and alive; frozen at both polls **and** no artifact movement → `write proc://<member>/kill`, the **Member confirmed dead or never dispatched** wake, fresh name. Three independent alive-signals — the first poll, the second poll, the artifacts — must all be silent before a kill; the tick settles and kills nothing |
-| A claim abandoned mid-run (a collision found after the claim) | `~/.fleet/bin/fleet-run release-ticket.sh <N> impl-<N> implementer --apply`, the pair the claim took. Run it over every claimed ticket with no PR when the run ends or the maintainer drains, and on the spot for a claim abandoned mid-run (a bail before implementing, a collision found after the claim). **That refusal is the finding, never an obstacle**: a claim carrying commits or a pushed branch is not auto-released, ever — run `worktree-audit.sh` (it audits every worktree; find this claim's row in the output) and decide by hand. Update the released tickets' ledger rows in the same step. See references/reaping.md |
+| A claim abandoned mid-run (a collision found after the claim) | `~/.fleet/bin/fleet-run release-ticket.sh <N> impl-<N> implementer --apply`, the pair the claim took, on the spot — and over every claimed ticket with no PR when the run ends or the maintainer drains. **That refusal is the finding, never an obstacle**: a claim carrying commits or a pushed branch is not auto-released, ever — run `worktree-audit.sh` and decide by hand. Update the released tickets' ledger rows in the same step. See references/reaping.md |
 | A second review launch refused for an open one | Wait for that one's `reviewed=`, or, once the **Member killed** row has confirmed its runner dead, settle it `=failed` in the same `ledger.mjs review` call as the new launch. |
 | `ledger.mjs settle <member> --from-report` exits 3 | A check failed: the member's claim and the world disagree, and nothing is written. You rule. |
 | `ledger.mjs settle <member> --from-report` exits 2 | The report is absent or invalid, or a check could not look; nothing is written. A check that could not look is run again once `gh` and `git` answer. |
