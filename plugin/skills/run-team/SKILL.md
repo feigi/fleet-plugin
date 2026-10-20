@@ -324,10 +324,7 @@ it; never type a tier in over that. That append is the whole duty. See reference
 ### Nothing to do: arm the beat
 
 - **Nothing to do right now** → **do not end your turn.** Arm the heartbeat
-  below. A turn that ends on a drained queue is #3's stall itself: nothing
-  external will wake you, and the level-check you are one command away from
-  never runs. Listed on its own because it is the only wake with no trigger —
-  every other row above arrives; this one is the absence of one.
+  below: nothing external will wake you. See references/ci-and-staleness.md.
 
 **Beat when there is nothing to do, and never end your turn on a drained queue.** See references/ci-and-staleness.md.
 
@@ -341,18 +338,14 @@ It blocks, then prints one line. Which line it is, is the whole protocol:
 - `… interval elapsed (quiet=<n>) → run fleet-event.mjs heartbeat` — the level-check
   is due. Run that command and act on what the tick it ends in prints.
   Then arm the beat again.
-- `… Ns of Ms remain → re-issue this command now, do not end your turn` — no
-  command blocks for a whole interval (omp backgrounds one at 60s, which is
-  why the CI gate holds its wait in one `eval` cell polling `gh run view`).
-  Issue it again. That is still one blocking call per turn, never an idle turn.
+- `… Ns of Ms remain → re-issue this command now, do not end your turn` —
+  issue it again: still one blocking call per turn, never an idle turn.
 
 **Do not raise `--ceiling` past 30 minutes.** See references/ci-and-staleness.md.
 
-**The beat does not stop on idleness.** An empty shortlist and an empty supply are
-not a reason to end the run; they are the state a newly triaged ticket arrives
-into. The run ends when you drain it, when the budget goes, or when this
-context does — not because there was briefly nothing to do.
-Zeroes on the cockpit are not yet proof the pipeline is idle.
+**The beat does not stop on idleness**: the run ends when you drain it, when
+the budget goes, or when this context does, and zeroes on the cockpit are not
+proof the pipeline is idle. See references/ci-and-staleness.md.
 
 **When you stop on purpose, say why — one command, and it is the last thing
 you owe the next run.** See references/ci-and-staleness.md.
@@ -364,9 +357,6 @@ you owe the next run.** See references/ci-and-staleness.md.
 It holds nothing and returns at once. Use it when the budget goes, or when
 you can see the context ceiling coming. A drained run records it as the last
 step of **End of run** (above), never at the drain itself.
-Skipping it is not fatal — the next reader still reports the stop, it just
-reports that the beat stopped *without a recorded reason*, which is all it can
-honestly say about a death that named nothing.
 
 **A stall line names whose stall it is.** Its opening words come off the controller
 record:

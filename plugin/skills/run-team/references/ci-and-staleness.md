@@ -134,3 +134,26 @@ than being detected, and nothing else can write the reason afterwards:
 ```bash
 ~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop "budget exhausted"
 ```
+
+## Nothing to do: why the beat, and what its lines mean
+
+- **Nothing to do right now** → **do not end your turn.** Arm the heartbeat
+  below. A turn that ends on a drained queue is #3's stall itself: nothing
+  external will wake you, and the level-check you are one command away from
+  never runs. Listed on its own because it is the only wake with no trigger —
+  every other row above arrives; this one is the absence of one.
+
+- `… Ns of Ms remain → re-issue this command now, do not end your turn` — no
+  command blocks for a whole interval (omp backgrounds one at 60s, which is
+  why the CI gate holds its wait in one `eval` cell polling `gh run view`).
+  Issue it again. That is still one blocking call per turn, never an idle turn.
+
+**The beat does not stop on idleness.** An empty shortlist and an empty supply are
+not a reason to end the run; they are the state a newly triaged ticket arrives
+into. The run ends when you drain it, when the budget goes, or when this
+context does — not because there was briefly nothing to do.
+Zeroes on the cockpit are not yet proof the pipeline is idle.
+
+Skipping it is not fatal — the next reader still reports the stop, it just
+reports that the beat stopped *without a recorded reason*, which is all it can
+honestly say about a death that named nothing.
