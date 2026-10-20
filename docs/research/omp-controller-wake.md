@@ -326,7 +326,10 @@ beat.interval`: the median is 14 s against a 30 s poll.
   stopped` line can appear only on a poll that lands while the controller is
   idle. Every poll after the stop landed while the controller was still in its
   closing turn and logged `busy`; no idle poll was observed. The gate order is
-  the evidence, not a log line.
+  the evidence, not a log line. Evaluating the gate's decision expression
+  offline against the real state file, with `isIdle()` forced true and the pid
+  check assumed to pass, returned `stopped: <the --stop reason>`, so an idle poll
+  would log `poll: skip stopped: …`. That tests the logic, not the log.
 - The log also shows an `EVENT session_shutdown` while the controller was
   closing out. This run did not establish what caused it or whether the timer
   survives one.
