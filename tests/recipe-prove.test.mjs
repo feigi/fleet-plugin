@@ -1295,9 +1295,14 @@ test("a cache that cannot be written is exit 2 with its reason, never a stack tr
 });
 
 test("a command killed by a signal is refused, never counted as a red or a green run", () => {
+  // The kill targets the proof's own shell, whose pid `$$` passes in as `$1`:
+  // a shell that forks its one command rather than exec it reads that
+  // command's SIGKILL as exit 137, a status, so a `kill -9 $$` inside the
+  // inner `sh -c` would reach the proof as a run that exited, never a signal.
+  const killsProofShell = (body) => `${oneCommand(body)} $$`;
   // The count proof: the output carries the count line, then the run dies.
   const { dir } = repo(MAVEN_FILES);
-  const t = prove(dir, ["--install", "true", "--test", oneCommand(`echo 'tests 3'; kill -9 \\$\\$`), "--count-line", "tests 3", "--test-count", "3"]);
+  const t = prove(dir, ["--install", "true", "--test", killsProofShell(`echo 'tests 3'; kill -9 \\$1`), "--count-line", "tests 3", "--test-count", "3"]);
   assert.equal(t.status, 1, t.err);
   assert.match(t.err, /NOT PROVEN — .* was killed by SIGKILL/);
   assert.equal(existsSync(cachePath(dir)), false);
@@ -1305,7 +1310,7 @@ test("a command killed by a signal is refused, never counted as a red or a green
   // The mutation proof: the unmutated run is green, the mutated one dies — a
   // crash is not a test failing.
   const { dir: go } = repo(GO_FILES);
-  const dies = oneCommand("if grep -q 'a - b' calc.go; then kill -9 \\$\\$; else go test ./...; fi");
+  const dies = killsProofShell("if grep -q 'a - b' calc.go; then kill -9 \\$1; else go test ./...; fi");
   const m = prove(go, ["--install", "true", "--test", dies, ...GO_PROOF.slice(4)]);
   assert.equal(m.status, 1, m.err);
   assert.match(m.err, /NOT PROVEN — .* was killed by SIGKILL/);
