@@ -109,6 +109,7 @@ import { fileURLToPath } from "node:url";
 import { defineFlags, isDigits, makeDie, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable, SCRATCH_KEY_SHAPE, scratchRoot } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
+import { ghAliasedRead, how } from "./gh-aliased-read.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { liveOnLedger, parseMember, REVIEWER } from "./ledger-grammar.mjs";
 
@@ -116,7 +117,6 @@ const NAME = "reclaim-scratch";
 const die = makeDie(NAME);
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const RETENTION_MS = 7 * DAY_MS;
-const BATCH = 100;
 const GH_TIMEOUT_MS = 30_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
 
@@ -150,13 +150,6 @@ const REPORTS_DIR = "reports";
 const REPORT_PR_ENTRY = /^(?:fix-pr|finisher-pr|review-pr)-([1-9][0-9]*)(?:-[a-z])?(?:\.check)?\.json$/;
 const REPORT_IMPL_ENTRY = /^impl-([1-9][0-9]*)(?:-[a-z])?(?:\.check)?\.json$/;
 const RUN_ROOT = /^run-/;
-
-function how(r) {
-  if (r.error) return r.error.code ?? r.error.message;
-  if (r.signal) return `killed by ${r.signal}`;
-  const said = String(r.stderr ?? "").trim().split("\n").at(-1);
-  return said ? `exit ${r.status}: ${said}` : `exit ${r.status}`;
-}
 
 /** The path of something under `path` (itself included) modified at or after
  * `cutoff`, or null when everything is older. Symlinks are not followed. A
@@ -302,59 +295,18 @@ function claimWorktree(listing, n) {
 
 // `{type, state}` per number GitHub answered (type "Issue" or "PullRequest",
 // or null for a number that names nothing), or `{unreachable}` for a number
-// that has no usable answer. GitHub resolves every alias it can and nulls the
-// rest, and gh exits 1 with the whole body, so a body carrying an object
-// `data.repository` is read alias by alias at any exit status. An alias is
-// answered by a node, or by null with a NOT_FOUND error naming it — GitHub's
-// own "this number names nothing". Any other error naming an alias, a null
-// no NOT_FOUND explains, and an error naming no alias (it may belong to any
-// of the batch) leave the number unreachable: a failed lookup is not an
-// answer.
+// that has no usable answer. What counts as an answer is gh-aliased-read.mjs's:
+// a number GitHub nulls with NOT_FOUND names nothing, and a failed lookup is
+// not an answer.
 function githubStates(numbers) {
   const out = new Map();
-  for (let i = 0; i < numbers.length; i += BATCH) {
-    const batch = numbers.slice(i, i + BATCH);
-    const fields = batch.map((n) => `n${n}:issueOrPullRequest(number:${n}){__typename ... on Issue{state} ... on PullRequest{state}}`).join(" ");
-    const r = spawnSync("gh", ["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}",
-      "-f", `query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${fields}}}`], {
-      encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }),
-    });
-    let body;
-    let unparseable;
-    try {
-      body = JSON.parse(r.stdout);
-    } catch (e) {
-      body = undefined;
-      if (r.status === 0) unparseable = e.message;
-    }
-    const repo = body?.data?.repository;
-    const errors = body?.errors ?? [];
-    const answered = repo !== null && typeof repo === "object" && !Array.isArray(repo) && Array.isArray(errors);
-    const nothing = new Set();
-    const refused = new Map();
-    let batchWide;
-    if (answered) {
-      for (const e of errors) {
-        const path = e?.path;
-        const alias = Array.isArray(path) && path[0] === "repository" && typeof path[1] === "string" ? path[1] : null;
-        const said = `${e?.type ?? "error"}${e?.message ? `: ${e.message}` : ""}`;
-        if (alias === null) batchWide ??= said;
-        else if (e.type === "NOT_FOUND" && path.length === 2) nothing.add(alias);
-        else refused.set(alias, said);
-      }
-    }
-    for (const n of batch) {
-      const alias = `n${n}`;
-      const gone = (why) => out.set(n, { unreachable: `gh api graphql gave no answer for #${n} (${why})` });
-      if (!answered) gone(unparseable === undefined ? how(r) : `${how(r)}: unparseable body: ${unparseable}`);
-      else if (refused.has(alias)) gone(refused.get(alias));
-      else if (batchWide !== undefined) gone(batchWide);
-      else if (!Object.hasOwn(repo, alias)) gone(how(r));
-      else if (repo[alias] === null) {
-        if (nothing.has(alias)) out.set(n, { type: null });
-        else gone("null with no NOT_FOUND error");
-      } else out.set(n, { type: repo[alias].__typename, state: String(repo[alias].state).toUpperCase() });
-    }
+  const read = ghAliasedRead(numbers, {
+    field: "issueOrPullRequest", selection: "{__typename ... on Issue{state} ... on PullRequest{state}}", timeoutMs: GH_TIMEOUT_MS,
+  });
+  for (const [n, r] of read) {
+    if (r.unreachable !== undefined) out.set(n, { unreachable: `gh api graphql gave no answer for #${n} (${r.unreachable})` });
+    else if (r.notFound) out.set(n, { type: null });
+    else out.set(n, { type: r.node.__typename, state: String(r.node.state).toUpperCase() });
   }
   return out;
 }

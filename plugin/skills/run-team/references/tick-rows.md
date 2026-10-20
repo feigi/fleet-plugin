@@ -95,8 +95,8 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   carried on at the right tier — and once that one settles, the line reads it
   the same way. A tier mismatch on the member that settled `PR#<M>` itself
   replaces nothing, so the line stands beside that hold.
-- `ESCALATE pr-unchecked #<N> PR#<M>` — the same ticket, but `gh pr view
-  <M>` could not answer, so whether M closed is unknown. The maintainer's on
+- `ESCALATE pr-unchecked #<N> PR#<M>` — the same ticket, but gh could not
+  answer for PR M, so whether M closed is unknown. The maintainer's on
   the same terms as `pr-closed`; the next tick probes again.
 - `HOLD (…)` — the row is held and says why: draining, a tier mismatch, an
   unchecked tier, the In-flight bound reached (`HOLD (in-flight <n>/<B>)` —

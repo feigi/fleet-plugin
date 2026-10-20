@@ -1842,7 +1842,7 @@ const SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-tick.mjs", import.
 // or transitive — and ledger.mjs with its own, because the tick reads the
 // ledger through `ledger.mjs read`. An unlisted sibling is a module-not-found
 // at startup: exit 1, a shape no case below expects.
-const SIBLING_MODULES = ["arg.mjs", "fleet-dir.mjs", "fleet-state.mjs", "git-env.mjs", "is-cli.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs", "report-files.mjs", "report-schema.mjs"].map(
+const SIBLING_MODULES = ["arg.mjs", "fleet-dir.mjs", "fleet-state.mjs", "gh-aliased-read.mjs", "git-env.mjs", "is-cli.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs", "report-files.mjs", "report-schema.mjs"].map(
   (m) => [m, fileURLToPath(new URL(`../plugin/scripts/${m}`, import.meta.url))],
 );
 
@@ -1886,10 +1886,12 @@ test("CLI: every synchronous spawn in this file goes through spawnBounded (#2320
 });
 
 // `pr list` for the open PRs, `issue view` for a behind-issue premise's state,
-// `pr view` for the state of a PR an in-flight review names that is no longer
-// on the open list, `issue list --label in-progress` for the stall report's
-// claimed count, and `issue list --search` for candidates.mjs's query when a
-// case runs the real shortlist.mjs. `GH_HANG` names one of those (`pr list`, `issue view`, …) to
+// `pr view` for the state of a branch-named behind-pr premise, `api graphql`
+// for the state of every PR an in-flight review or a ticket's keyed PR names
+// that is no longer on the open list, `issue list --label in-progress` for the
+// stall report's claimed count, and `issue list --search` for candidates.mjs's
+// query when a case runs the real shortlist.mjs. `GH_HANG` names one of those
+// (`pr list`, `issue view`, `api graphql`, …) to
 // stall for `GH_HANG_S` seconds before answering as usual, so a tick that waits
 // a hang out still reads a normal reply. The sleep holds none of the stub's
 // pipes: killed at the tick's bound, the stub leaves no child keeping the
@@ -1912,10 +1914,36 @@ case "$1 $2" in
     [ -n "$PR_VIEW_FAIL" ] && { echo "gh: pr view failed" >&2; exit 1; }
     [ -n "$PR_VIEW_BODY" ] && { printf '%s\n' "$PR_VIEW_BODY"; exit 0; }
     # Real gh answers for the repository an inherited GIT_DIR or GH_REPO names;
-    # this one answers MERGED for every PR there, so a probe that forgot to
-    # scrub them retires a review the case's own repository still holds.
+    # this one answers MERGED for every PR there, so a premise probe that forgot
+    # to scrub them lifts an exclusion the case's own repository still holds.
     [ -n "$GIT_DIR$GIT_WORK_TREE$GH_REPO" ] && { echo '{"state":"MERGED"}'; exit 0; }
     exec jq -c --arg n "$3" '{state: (.[$n] // error("no such pull request"))}' "$FIXTURE_PR_STATES" ;;
+  "api graphql")
+    # One call asks every PR of its chunk as an aliased pullRequest(number:N)
+    # field selecting {state}; a query asking anything else fails the call, so
+    # the query text the tick builds is pinned. Each call is logged as the
+    # space-separated numbers it asked.
+    # Answers a PR the fixture names with its state and any other with null
+    # and a NOT_FOUND error naming the alias, then exits 1 with the whole body
+    # when any alias errored, as real gh does. GRAPHQL_FAIL prints no body;
+    # GRAPHQL_BODY prints its own, exiting GRAPHQL_EXIT (default 0).
+    case "$*" in *'pullRequest(number:'*'{state}'*) ;; *) echo "gh: query asks no pullRequest(number:N){state}" >&2; exit 1 ;; esac
+    nums=$(printf '%s' "$*" | grep -o 'number:[0-9]*' | cut -d: -f2 | tr '\\n' ' ')
+    echo "$nums" >> "$GRAPHQL_LOG"
+    [ -n "$GRAPHQL_FAIL" ] && { echo "gh: graphql failed" >&2; exit 1; }
+    [ -n "$GRAPHQL_BODY" ] && { printf '%s\\n' "$GRAPHQL_BODY"; exit "\${GRAPHQL_EXIT:-0}"; }
+    # Real gh answers for the repository an inherited GIT_DIR or GH_REPO names;
+    # this one answers MERGED for every PR there, so a read that forgot to
+    # scrub them retires a review the case's own repository still holds.
+    leak=""
+    [ -n "$GIT_DIR$GIT_WORK_TREE$GH_REPO" ] && leak=1
+    body=$(printf '%s' "$nums" | jq -R -c --arg leak "$leak" --slurpfile st "$FIXTURE_PR_STATES" '
+      split(" ") | map(select(. != "")) as $ns
+      | ($ns | map(select($leak == "" and ($st[0][.] == null)))) as $gone
+      | {data: {repository: ($ns | map({key: ("n" + .), value: (if $leak != "" then {state: "MERGED"} elif $st[0][.] == null then null else {state: $st[0][.]} end)}) | from_entries)}}
+        + (if ($gone | length) > 0 then {errors: ($gone | map({type: "NOT_FOUND", path: ["repository", ("n" + .)], message: "Could not resolve to a PullRequest"}))} else {} end)')
+    printf '%s\\n' "$body"
+    printf '%s' "$body" | jq -e 'has("errors") | not' >/dev/null || exit 1 ;;
   "issue list")
     [ -n "$CLAIMED_FAIL" ] && { echo "boom" >&2; exit 1; }
     expr=""
@@ -2053,6 +2081,7 @@ function runCli(args = [], {
     const refreshLog = fx("refresh.log", "");
     const issueViewLog = fx("issue-view.log", "");
     const prViewLog = fx("pr-view.log", "");
+    const graphqlLog = fx("graphql.log", "");
     // Every case gets its own state file unless it names one: the default path
     // resolves against the git common dir, and a shared streak and digest would
     // make the fold cases order-dependent. `defaultState` opts out for the case
@@ -2069,7 +2098,7 @@ function runCli(args = [], {
         FIXTURE_ISSUE_STATES: fx("issue-states.json", JSON.stringify(issueStates)),
         FIXTURE_PR_STATES: fx("pr-states.json", JSON.stringify(prStates)),
         FIXTURE_REFRESH: fx("refresh.json", refresh),
-        REFRESH_LOG: refreshLog, ISSUE_VIEW_LOG: issueViewLog, PR_VIEW_LOG: prViewLog,
+        REFRESH_LOG: refreshLog, ISSUE_VIEW_LOG: issueViewLog, PR_VIEW_LOG: prViewLog, GRAPHQL_LOG: graphqlLog,
         ...(refreshFail ? { REFRESH_FAIL: "1" } : {}),
         ...extraEnv,
       },
@@ -2077,6 +2106,7 @@ function runCli(args = [], {
     r.refreshed = readFileSync(refreshLog, "utf8").split("\n").filter(Boolean).length;
     r.issueViews = readFileSync(issueViewLog, "utf8").split("\n").filter(Boolean);
     r.prViews = readFileSync(prViewLog, "utf8").split("\n").filter(Boolean);
+    r.graphqlCalls = readFileSync(graphqlLog, "utf8").split("\n").filter(Boolean).map((l) => l.trim().split(" ").map(Number));
     r.repo = repo;
     r.dir = dir;
     returned = true;
@@ -2973,7 +3003,8 @@ test("CLI: dangling in-flight reviews of merged PRs are no review units, and dis
     prStates: Object.fromEntries(ZOMBIES.map((n) => [n, "MERGED"])),
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.prViews.map(Number).sort((a, b) => a - b), ZOMBIES, "each off-list PR is asked about");
+  assert.deepEqual(r.graphqlCalls, [ZOMBIES], "each off-list PR is asked about, in one call");
+  assert.deepEqual(r.prViews, []);
   assert.match(r.stdout, /^reviewers +0\/2 → DISPATCH review PR#500/m);
 });
 
@@ -2989,7 +3020,7 @@ test("CLI: a ticket's PR closed unmerged prints ESCALATE pr-closed off the revie
   const tick = (over) => runCli([], { shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows([101]) }, ...over });
   const closed = tick({ prStates: { 101: "CLOSED" }, issueStates: { 11: "OPEN" } });
   assert.equal(closed.status, 0, closed.stderr);
-  assert.deepEqual(closed.prViews, ["101"], "one probe per PR per tick: the review's and the ticket's are the same call");
+  assert.deepEqual(closed.graphqlCalls, [[101]], "one probe per PR per tick: the review's and the ticket's are the same call");
   assert.deepEqual(closed.issueViews, ["11"]);
   assert.match(closed.stdout, /^tickets +→ ESCALATE pr-closed #11 PR#101 {3}\(/m);
 
@@ -2999,15 +3030,15 @@ test("CLI: a ticket's PR closed unmerged prints ESCALATE pr-closed off the revie
 
   const merged = tick({ prStates: { 101: "MERGED" } });
   assert.equal(merged.status, 0, merged.stderr);
-  assert.deepEqual([merged.prViews, merged.issueViews], [["101"], []], "a MERGED PR asks nothing of the issue");
+  assert.deepEqual([merged.graphqlCalls, merged.issueViews], [[[101]], []], "a MERGED PR asks nothing of the issue");
   assert.doesNotMatch(merged.stdout, /ESCALATE pr-/);
   const implRow = (r) => r.stdout.split("\n").find((x) => x.startsWith("implementers"));
   assert.equal(implRow(closed), implRow(merged), "the implementer row prints the same either way");
 
-  const unread = tick({ prStates: { 101: "CLOSED" }, issueStates: { 11: "OPEN" }, env: { PR_VIEW_FAIL: "1" } });
+  const unread = tick({ prStates: { 101: "CLOSED" }, issueStates: { 11: "OPEN" }, env: { GRAPHQL_FAIL: "1" } });
   assert.equal(unread.status, 0, unread.stderr);
   assert.match(unread.stdout, /^tickets +→ ESCALATE pr-unchecked #11 PR#101 {3}\(/m);
-  assert.match(unread.stderr, /gh pr view 101 exited 1: gh: pr view failed — review on PR#101 unconfirmed finished, its unit stands; #11's PR#101 unconfirmed closed, printed as pr-unchecked/);
+  assert.match(unread.stderr, /gh api graphql gave no answer for PR#101 \(exit 1: gh: graphql failed\) — review on PR#101 unconfirmed finished, its unit stands; #11's PR#101 unconfirmed closed, printed as pr-unchecked/);
 
   const issueUnread = tick({ prStates: { 101: "CLOSED" }, env: { ISSUE_VIEW_FAIL: "1" } });
   assert.equal(issueUnread.status, 0, issueUnread.stderr);
@@ -3017,14 +3048,14 @@ test("CLI: a ticket's PR closed unmerged prints ESCALATE pr-closed off the revie
 
 test("CLI: two tickets keyed on one PR share its one probe, and a probe that cannot answer names both", () => {
   const r = runCli([], {
-    shortlist: shortlistText([]), prs: [REVIEW_DUE], env: { PR_VIEW_FAIL: "1" },
+    shortlist: shortlistText([]), prs: [REVIEW_DUE], env: { GRAPHQL_FAIL: "1" },
     ledger: { rows: ["#12 impl-12=PR#40 → PR#40", "#13 impl-13=PR#40 → PR#40"], dispatched: ["impl-12=PR#40", "impl-13=PR#40"] },
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.prViews, ["40"]);
+  assert.deepEqual(r.graphqlCalls, [[40]]);
   assert.match(r.stdout, /^tickets +→ ESCALATE pr-unchecked #12 PR#40 {3}\(/m);
   assert.match(r.stdout, /^tickets +→ ESCALATE pr-unchecked #13 PR#40 {3}\(/m);
-  assert.match(r.stderr, /gh pr view 40 exited 1: gh: pr view failed — #12's PR#40 unconfirmed closed, printed as pr-unchecked; #13's PR#40 unconfirmed closed, printed as pr-unchecked/);
+  assert.match(r.stderr, /gh api graphql gave no answer for PR#40 \(exit 1: gh: graphql failed\) — #12's PR#40 unconfirmed closed, printed as pr-unchecked; #13's PR#40 unconfirmed closed, printed as pr-unchecked/);
 });
 
 test("CLI: an in-flight review on an open PR counts as a unit and is never probed", () => {
@@ -3032,8 +3063,14 @@ test("CLI: an in-flight review on an open PR counts as a unit and is never probe
     shortlist: shortlistText([]), prs: [pr(101, [], [1101]), REVIEW_DUE], ledger: { rows: zombieRows([101]) },
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.prViews, [], "an open PR needs no probe");
+  assert.deepEqual([r.prViews, r.graphqlCalls], [[], []], "an open PR needs no probe");
   assert.match(r.stdout, /^reviewers +1\/2 → DISPATCH review PR#500/m, "the unit counts, and the due review is still dispatched: no cap");
+});
+
+test("CLI: a tick with no keyed or dangling-review PR off the open list makes no PR-state call", () => {
+  const r = runCli([], { shortlist: shortlistText([]), prs: [REVIEW_DUE] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.prViews, r.graphqlCalls], [[], []]);
 });
 
 test("CLI: a PR off the open list that gh still calls OPEN keeps its review counted as a unit", () => {
@@ -3041,15 +3078,20 @@ test("CLI: a PR off the open list that gh still calls OPEN keeps its review coun
     shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows([101]) }, prStates: { 101: "OPEN" },
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.prViews, ["101"]);
+  assert.deepEqual(r.graphqlCalls, [[101]]);
   assert.match(r.stdout, /^reviewers +1\/2 → DISPATCH review PR#500/m);
 });
 
 test("CLI: a PR gh cannot answer for is not read as merged - the unit stays counted and the failure disclosed", () => {
   const cases = [
-    ["a nonzero exit", { PR_VIEW_FAIL: "1" }, /gh pr view 101 exited 1: gh: pr view failed/],
-    ["a reply with no state", { PR_VIEW_BODY: "<html>proxy error</html>" }, /gh pr view 101 printed no PR state/],
-    ["a state that is not MERGED or CLOSED", { PR_VIEW_BODY: JSON.stringify({ state: "merged" }) }, /gh pr view 101 printed no PR state/],
+    ["a failed call", { GRAPHQL_FAIL: "1" }, /gh api graphql gave no answer for PR#101 \(exit 1: gh: graphql failed\) — review on PR#101 unconfirmed finished, its unit stands/],
+    ["an unparseable reply", { GRAPHQL_BODY: "<html>proxy error</html>" }, /gh api graphql gave no answer for PR#101 \(exit 0: unparseable body: /],
+    ["a reply with no repository", { GRAPHQL_BODY: JSON.stringify({ data: {} }) }, /gh api graphql gave no answer for PR#101 \(exit 0\)/],
+    ["a node with no state", { GRAPHQL_BODY: JSON.stringify({ data: { repository: { n101: {} } } }) }, /gh api graphql gave no answer for PR#101 \(no PR state\)/],
+    ["a state that is not MERGED or CLOSED", { GRAPHQL_BODY: JSON.stringify({ data: { repository: { n101: { state: "merged" } } } }) }, /gh api graphql gave no answer for PR#101 \(no PR state\)/],
+    ["a PR that does not exist", { GRAPHQL_BODY: JSON.stringify({ data: { repository: { n101: null } }, errors: [{ type: "NOT_FOUND", path: ["repository", "n101"], message: "gone" }] }), GRAPHQL_EXIT: "1" }, /gh api graphql gave no answer for PR#101 \(no such pull request\)/],
+    ["an error on the alias", { GRAPHQL_BODY: JSON.stringify({ data: { repository: { n101: null } }, errors: [{ type: "FORBIDDEN", path: ["repository", "n101"], message: "no" }] }), GRAPHQL_EXIT: "1" }, /gh api graphql gave no answer for PR#101 \(FORBIDDEN: no\)/],
+    ["an error naming no alias", { GRAPHQL_BODY: JSON.stringify({ data: { repository: { n101: { state: "MERGED" } } }, errors: [{ message: "x" }] }) }, /gh api graphql gave no answer for PR#101 \(error: x\)/],
   ];
   for (const [what, env, shown] of cases) {
     const r = runCli([], {
@@ -3061,7 +3103,93 @@ test("CLI: a PR gh cannot answer for is not read as merged - the unit stays coun
   }
 });
 
-test("CLI: an inherited GIT_DIR cannot retarget the merged-PR review probe", (t) => {
+// Ticket n is keyed on PR n + 100, each settled in the ledger, none on the open list.
+const keyedOff = (prNumbers) => ({
+  rows: prNumbers.map((m) => `#${m - 100} impl-${m - 100}=PR#${m} → PR#${m}`),
+  dispatched: prNumbers.map((m) => `impl-${m - 100}=PR#${m}`),
+});
+const KEYED_101 = Array.from({ length: 101 }, (_, i) => 200 + i);
+const mergedStates = (ns) => Object.fromEntries(ns.map((n) => [n, "MERGED"]));
+
+test("CLI: N keyed PRs off the open list, all MERGED, cost ceil(N/100) gh api graphql calls and no gh pr view", () => {
+  const r = runCli([], { shortlist: shortlistText([]), ledger: keyedOff(KEYED_101), prStates: mergedStates(KEYED_101) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.graphqlCalls, [KEYED_101.slice(0, 100), KEYED_101.slice(100)], "100 to a call, in order");
+  assert.deepEqual(r.prViews, []);
+  assert.doesNotMatch(r.stdout, /ESCALATE pr-/);
+  assert.doesNotMatch(r.stderr, /no answer/);
+});
+
+test("CLI: the PRs a tick asks gh about go in ascending order, whatever order its readings name them in", () => {
+  // Ticket #1 is keyed on PR#150 and #2 on PR#120: ticket order is not PR order.
+  const unordered = runCli([], {
+    shortlist: shortlistText([]), prStates: mergedStates([120, 150]),
+    ledger: { rows: ["#1 impl-1=PR#150 → PR#150", "#2 impl-2=PR#120 → PR#120"], dispatched: ["impl-1=PR#150", "impl-2=PR#120"] },
+  });
+  assert.equal(unordered.status, 0, unordered.stderr);
+  assert.deepEqual(unordered.graphqlCalls, [[120, 150]]);
+  // A review PR numbered above a keyed PR: the reviews come first in the reading.
+  const reviewAbove = runCli([], {
+    shortlist: shortlistText([]), prs: [REVIEW_DUE], prStates: mergedStates([120, 300]),
+    ledger: { rows: [...zombieRows([300]), ...keyedOff([120]).rows], dispatched: keyedOff([120]).dispatched },
+  });
+  assert.equal(reviewAbove.status, 0, reviewAbove.stderr);
+  assert.deepEqual(reviewAbove.graphqlCalls, [[120, 300]]);
+});
+
+test("CLI: --apply's reread after a tier verdict asks the same bounded count again", () => {
+  const ledger = keyedOff(KEYED_101);
+  ledger.rows.push("#412 impl-412");
+  ledger.dispatched.push("impl-412");
+  const r = runCli(["--apply"], {
+    shortlist: shortlistText([420]), refresh: shortlistText([420]), ledger, prStates: mergedStates(KEYED_101),
+    beforeRun: (repo) => writeFileSync(join(repo, "..", "bin", "tier-check.mjs"), TIER_STUB),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^APPLIED tier-check impl-412: tier-ok$/m, "the verdict landed, so the run was read again");
+  assert.deepEqual(r.graphqlCalls.map((c) => c.length), [100, 1, 100, 1]);
+  assert.deepEqual(r.prViews, []);
+});
+
+test("CLI: one batch that answers some PRs and errors another reads each as it was answered", () => {
+  const body = {
+    data: { repository: { n101: { state: "CLOSED" }, n102: null, n103: { state: "MERGED" } } },
+    errors: [{ type: "FORBIDDEN", path: ["repository", "n102"], message: "no access" }],
+  };
+  const r = runCli([], {
+    shortlist: shortlistText([]), ledger: keyedOff([101, 102, 103]), issueStates: { 1: "OPEN", 2: "OPEN", 3: "OPEN" },
+    env: { GRAPHQL_BODY: JSON.stringify(body), GRAPHQL_EXIT: "1" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.graphqlCalls, [[101, 102, 103]]);
+  assert.match(r.stdout, /^tickets +→ ESCALATE pr-closed #1 PR#101 {3}\(/m);
+  assert.match(r.stdout, /^tickets +→ ESCALATE pr-unchecked #2 PR#102 {3}\(/m);
+  assert.doesNotMatch(r.stdout, /PR#103/, "an answered MERGED PR prints nothing");
+  assert.match(r.stderr, /gh api graphql gave no answer for PR#102 \(FORBIDDEN: no access\) — #2's PR#102 unconfirmed closed, printed as pr-unchecked/);
+  assert.doesNotMatch(r.stderr, /PR#10[13]/);
+});
+
+test("CLI: a PR the fixture does not know is NOT_FOUND in the stub's own partial body, and reads as unanswered", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([]), ledger: keyedOff([101, 102]), prStates: { 101: "MERGED" }, issueStates: { 2: "OPEN" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^tickets +→ ESCALATE pr-unchecked #2 PR#102 {3}\(/m);
+  assert.doesNotMatch(r.stdout, /PR#101/);
+  assert.match(r.stderr, /gh api graphql gave no answer for PR#102 \(no such pull request\) — #2's PR#102 unconfirmed closed, printed as pr-unchecked/);
+});
+
+test("CLI: a call that fails whole discloses every PR of the chunk", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([]), ledger: keyedOff([101, 102]), prStates: mergedStates([101, 102]), env: { GRAPHQL_FAIL: "1" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  for (const m of [101, 102]) {
+    assert.match(r.stderr, new RegExp(`gh api graphql gave no answer for PR#${m} \\(exit 1: gh: graphql failed\\) — #${m - 100}'s PR#${m} unconfirmed closed, printed as pr-unchecked`));
+  }
+});
+
+test("CLI: an inherited GIT_DIR or GH_REPO cannot retarget the merged-PR review probe", (t) => {
   const decoy = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-decoy-pr-")));
   t.after(() => rmSync(decoy, { recursive: true, force: true }));
   spawnBounded("git", ["init", "-q", decoy]);
@@ -3070,7 +3198,7 @@ test("CLI: an inherited GIT_DIR cannot retarget the merged-PR review probe", (t)
     env: { GIT_DIR: join(decoy, ".git"), GH_REPO: "someone/else" },
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.prViews, ["101"], "the probe must still run");
+  assert.deepEqual(r.graphqlCalls, [[101]], "the probe must still run");
   assert.match(r.stdout, /^reviewers +1\/2 → DISPATCH review PR#500/m, "101 is OPEN in the case's own repository - its review stays a counted unit");
 });
 
@@ -3450,6 +3578,7 @@ function applyTicks(fixture, ticks) {
           FIXTURE_ISSUE_STATES: join(first.dir, "issue-states.json"), FIXTURE_PR_STATES: join(first.dir, "pr-states.json"),
           FIXTURE_REFRESH: join(first.dir, "refresh.json"), REFRESH_LOG: join(first.dir, "refresh.log"),
           ISSUE_VIEW_LOG: join(first.dir, "issue-view.log"), PR_VIEW_LOG: join(first.dir, "pr-view.log"),
+          GRAPHQL_LOG: join(first.dir, "graphql.log"),
           ...(t.env ?? {}),
         },
       });
@@ -4138,10 +4267,10 @@ test("CLI: a hung behind-issue probe is disclosed at the bound and the exclusion
 test("CLI: a hung probe of a PR off the open list is disclosed at the bound and its review stays a counted unit", () => {
   const r = runCli([], {
     shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows([101]) }, prStates: { 101: "MERGED" },
-    env: hang("pr view"),
+    env: hang("api graphql"),
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stderr, /fleet-tick: gh pr view 101 timed out after 1s — review on PR#101 unconfirmed finished, its unit stands/);
+  assert.match(r.stderr, /fleet-tick: gh api graphql gave no answer for PR#101 \(timed out after 1s\) — review on PR#101 unconfirmed finished, its unit stands/);
   assert.match(r.stdout, /^reviewers +1\/2 → DISPATCH review PR#500/m);
 });
 
@@ -4414,6 +4543,7 @@ const ticksOver = (args, fixture, again = 1, between = () => {}) => {
           FIXTURE_ISSUE_STATES: join(first.dir, "issue-states.json"), FIXTURE_PR_STATES: join(first.dir, "pr-states.json"),
           FIXTURE_REFRESH: join(first.dir, "refresh.json"),
           REFRESH_LOG: join(first.dir, "refresh.log"), ISSUE_VIEW_LOG: join(first.dir, "issue-view.log"), PR_VIEW_LOG: join(first.dir, "pr-view.log"),
+          GRAPHQL_LOG: join(first.dir, "graphql.log"),
         },
       });
       out.push({ stdout: t.stdout, status: t.status, stderr: t.stderr, state: stateOf(first) });
