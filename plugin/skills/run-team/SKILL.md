@@ -958,48 +958,29 @@ yet) whose prompt states what it inherits.
 Reviewers that went idle on CI recover as a **finisher, not a re-review** once
 commits are pushed. See references/member-lifecycle.md.
 
-Audit every worktree before dispatching replacements with
-`~/.fleet/bin/fleet-run worktree-audit.sh` — it reports each worktree's
-ahead-count and uncommitted files, the committed-vs-uncommitted distinction that
-decides whether a replacement redoes or destroys work.
+**Audit every worktree before dispatching replacements**, with
+`~/.fleet/bin/fleet-run worktree-audit.sh`. See references/failure-handling.md.
 
 When a report is missing, **ask by name — that is what the "unless the controller asks by name" clause in every brief is for — and do not attribute the gap to the member until it answers.** See references/member-lifecycle.md.
 
-**A throw, an empty return, or a notification whose status is not `completed`
-is a failure event, not a clean review.** **Retry once
-under the next runner letter, then stop:** the `review-pr-<pr#>` runner
-already retried once inside its cell and reports `failed` with both errors, so
-the retry is a second runner under the next letter the PR's rows do not carry
-yet — `review-pr-<pr#>-b` after a first runner — recorded as
-`review=member:<that name>`. A second failure is reported, and the PR stays at
-review-due. A
-runner member that is killed rather than failed follows **Failure
-handling** (fresh name, inherited state stated).
+A review that throws, returns empty or notifies a status not `completed` is a
+failure event, not a clean review: retry it as the **Failure handling** row for
+it says. See references/failure-handling.md.
 
-**Verify every reported SHA.** `~/.fleet/bin/fleet-run verify-sha.sh
-<branch> <sha>` before enqueueing — a member can commit in a nested worktree,
-leaving the SHA on a stray branch while its report reads normally. Exit codes as
-`inflight.sh`: `# 0 reachable, 1 not reachable, 2 unanswerable`. Not reachable
-(exit 1) → flag, do not enqueue, do not return the ticket to the shortlist until the
-maintainer rules. **Exit 2 is not a verdict** — the question could not be
-answered, and every cause of it reaches you as one shape: no JSON on stdout at
-all, the cause on stderr alone. Read that stderr, fix what it names and re-run;
-escalate if it repeats. Never read exit 2 as `not reachable`, and never record it
-as a stray commit — the flag and the maintainer's ruling above are what exit 1
-earns, and spending them on a probe that never answered costs a member its
-ticket over a failure a re-run would have cleared.
+**Verify every reported SHA** with `~/.fleet/bin/fleet-run verify-sha.sh
+<branch> <sha>` before enqueueing. Exit 1, not reachable → flag, do not
+enqueue, do not return the ticket to the shortlist until the maintainer rules.
+**Exit 2 is not a verdict**: read its stderr, fix what it names and re-run;
+escalate if it repeats, and never read it as `not reachable` or record it as a
+stray commit. See references/failure-handling.md.
 
 **Never `--delete-branch` — the merge bot deletes the head branch itself.**
 `gh pr merge <n> --merge` alone: the flag's local cleanup errors on a `main`
 held by another worktree, or strands the feature worktree on `main`.
 
 **Never force a rebase to start.** No `git clean`, `git checkout .`,
-`git reset --hard`, `git stash`. Uncommitted changes may exist nowhere else.
-Non-empty `git status --porcelain -unormal` → stop and report — the explicit
-mode, never bare `--porcelain`, or `status.showUntrackedFiles = no` reads an
-empty answer here and licenses the rebase over work this check exists to
-protect. Stashing empties it either way, so that check and
-`no-undo-audit.sh` both go quiet on work nothing else holds.
+`git reset --hard`, `git stash`. Non-empty `git status --porcelain -unormal` →
+stop and report, never off bare `--porcelain`. See references/failure-handling.md.
 
 **Members share one filesystem, one docker stack and one process table**, and the
 failures arrive as *wrong findings*, not errors:
