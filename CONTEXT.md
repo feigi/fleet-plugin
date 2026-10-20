@@ -367,6 +367,14 @@ finished member gets a new member under a new name, never a Wake back into
 its old one.
 _Avoid_: resume, re-task
 
+**Alarm**:
+The turn an in-process omp extension starts in an idle controller when its beat
+falls due: an ordinary user message marked `[fleet-alarm]` that tells the
+controller to run `fleet-event.mjs heartbeat`. It fires only when the session is
+idle, never queues, and is inert in a member's session. Not a Wake, which
+resumes a finished member.
+_Avoid_: ping, timer
+
 **Scratch root**:
 The one directory per repository that every fleet member's throwaway files live
 under — `~/.fleet/scratch/<repo-key>/`, `<repo-key>` being the workspace's folder
