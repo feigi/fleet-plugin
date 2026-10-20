@@ -476,25 +476,38 @@ test("token accepts every non-member, non-review token family a row carries, eac
 
 test("a ## Dispatched entry's brief= word is parsed off its member token, live or settled, and written back beside it", () => {
   for (const token of ["impl-412", "impl-412-b=PR#420", "fix-pr-346=applied:73b356de", "finisher-pr-346=halted:past-pin", "merge-bot-2=done"]) {
-    assert.deepEqual(parseDispatchedEntry(`${token} brief=0123abcd`), { token, brief: "0123abcd" });
+    assert.deepEqual(parseDispatchedEntry(`${token} brief=0123abcd`), { token, brief: "0123abcd", queued: null });
     assert.equal(dispatchedEntry(token, "0123abcd"), `${token} brief=0123abcd`);
     // An entry from before the brief was recorded is its token alone.
-    assert.deepEqual(parseDispatchedEntry(token), { token, brief: null });
+    assert.deepEqual(parseDispatchedEntry(token), { token, brief: null, queued: null });
     assert.equal(dispatchedEntry(token, null), token);
   }
 });
 
-test("an entry that is not a member token plus one well-formed brief= word is kept whole, for parseToken to refuse", () => {
+test("a merge bot's queued= word follows its brief= word, a list of PR numbers or none, and is written back the same way", () => {
+  for (const token of ["merge-bot-2", "merge-bot-2=done"]) {
+    for (const [word, queued] of [["queued=12,30", [12, 30]], ["queued=7", [7]], ["queued=none", []]]) {
+      assert.deepEqual(parseDispatchedEntry(`${token} brief=0123abcd ${word}`), { token, brief: "0123abcd", queued });
+      assert.equal(dispatchedEntry(token, "0123abcd", queued), `${token} brief=0123abcd ${word}`);
+    }
+  }
+});
+
+test("an entry that is not a member token plus one well-formed brief= word, then at most one well-formed queued= word, is kept whole, for parseToken to refuse", () => {
   for (const entry of [
     "impl-412 brief=0123abc", "impl-412 brief=0123abcde", "impl-412 brief=0123ABCD", "impl-412 brief=",
     "impl-412 brief=0123abcd brief=0123abcd", "impl-412  brief=0123abcd", "impl-412 sha=0123abcd",
     "review-pr-5 brief=0123abcd", "brief=0123abcd",
+    "merge-bot-1 queued=12", "merge-bot-1 queued=12 brief=0123abcd", "merge-bot-1 brief=0123abcd queued=",
+    "merge-bot-1 brief=0123abcd queued=0", "merge-bot-1 brief=0123abcd queued=012", "merge-bot-1 brief=0123abcd queued=12,",
+    "merge-bot-1 brief=0123abcd queued=#12", "merge-bot-1 brief=0123abcd queued=none,12",
+    "merge-bot-1 brief=0123abcd queued=12 queued=12",
   ]) {
-    assert.deepEqual(parseDispatchedEntry(entry), { token: entry, brief: null }, entry);
+    assert.deepEqual(parseDispatchedEntry(entry), { token: entry, brief: null, queued: null }, entry);
     assert.equal(parseToken(entry), null, `${entry}: kept whole, it parses as no member token`);
   }
   // An outcome outside the family's vocabulary is the token's own error, not the brief's.
-  assert.deepEqual(parseDispatchedEntry("impl-412=bogus brief=0123abcd"), { token: "impl-412=bogus", brief: "0123abcd" });
+  assert.deepEqual(parseDispatchedEntry("impl-412=bogus brief=0123abcd"), { token: "impl-412=bogus", brief: "0123abcd", queued: null });
 });
 
 test("each ledger family renders from its own dispatch-prompt.mjs role", () => {

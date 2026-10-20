@@ -937,10 +937,11 @@ test("merge-bot-report parks a main-gain-removed refusal at the head and body di
   f.setGh({ issue: {}, pr: { 89: { labels: ["ready-to-merge"], comments: [] } } });
   f.report(mergeBotReport("merge-bot-1", [], [
     { pr: 89, reason: MG },
+    // One verdict per PR: each other reason refuses a PR of its own.
     { pr: 90, reason: "behind:2" },
-    { pr: 90, reason: "ci:failure" },
-    { pr: 90, reason: "instrument-set-changed" },
-    { pr: 90, reason: "main-gain-unanswerable" },
+    { pr: 91, reason: "ci:failure" },
+    { pr: 92, reason: "instrument-set-changed" },
+    { pr: 93, reason: "main-gain-unanswerable" },
   ]));
   gateReading(f);
   f.control("settle", { "merge-bot-1": { outcome: "done" } });

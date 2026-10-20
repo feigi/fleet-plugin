@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stallsAt } from "../plugin/scripts/fleet-state.mjs";
 import { rendering, renderBrief } from "./support/rendered-brief.mjs";
+import { writeQueueGh } from "./support/queue-gh.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
@@ -55,8 +56,11 @@ function fixture(t, { ledger = LEDGER, mark = null, controller = null, table = O
   }
   const tableFile = join(dir, "proc-table.json");
   writeFileSync(tableFile, JSON.stringify(table));
+  // The one program on PATH: the gh `dispatch merge-bot` lists the queue
+  // with, answering an empty one.
   const bin = join(dir, "bin");
   mkdirSync(bin);
+  writeQueueGh(bin);
   const env = { ...process.env, PATH: bin, FLEET_PROC_TABLE: tableFile };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
@@ -112,7 +116,7 @@ test("rotate with no heartbeat mark moves the ledger byte-identical to ledger.<U
 
   const w = f.cli(["row", "12", "impl-12"]);
   assert.equal(w.status, 0, w.stderr);
-  assert.deepEqual(JSON.parse(f.cli(["read"]).stdout), { rows: ["#12 impl-12"], filed: [], ruled: [], dispatched: [], briefs: {}, drain: null, retired: [] });
+  assert.deepEqual(JSON.parse(f.cli(["read"]).stdout), { rows: ["#12 impl-12"], filed: [], ruled: [], dispatched: [], briefs: {}, queued: {}, drain: null, retired: [] });
   assert.equal(readFileSync(join(f.dir, archive), "utf8"), LEDGER, "a later write must not land in the archive");
 });
 
@@ -581,7 +585,7 @@ test("an ancestor rotate archives the ledger as-is, carries every live row whole
   assert.deepEqual(f.ctl(), { ...OURS, prior: "ancestor" });
   // The tokens riding on a carried row come with it: tier verdicts,
   // `reviewed=`, dispositions, conflict and merge holds.
-  assert.deepEqual(read(f), { rows: LIVE_ROWS, dispatched: CARRIED.dispatched, briefs: {}, filed: [], ruled: [], drain: null, retired: RETIRED });
+  assert.deepEqual(read(f), { rows: LIVE_ROWS, dispatched: CARRIED.dispatched, briefs: {}, queued: {}, filed: [], ruled: [], drain: null, retired: RETIRED });
 });
 
 test("dead and none carry nothing from the same ledger — unchanged", (t) => {
@@ -859,7 +863,7 @@ test("two ancestor rotates in a row carry a still-live token twice, and retired 
   const rows = LIVE_ROWS.filter((r) => !r.startsWith("#12 "));
   const dispatched = CARRIED.dispatched.filter((e) => e !== "impl-12");
   assert.deepEqual(JSON.parse(again.stdout).carried, { rows, dispatched });
-  assert.deepEqual(read(f), { rows, dispatched, briefs: {}, filed: [], ruled: [], drain: null, retired: [...RETIRED, "impl-12", "merge-bot-2"] });
+  assert.deepEqual(read(f), { rows, dispatched, briefs: {}, queued: {}, filed: [], ruled: [], drain: null, retired: [...RETIRED, "impl-12", "merge-bot-2"] });
   const next = f.cli(["dispatch", "merge-bot"]);
   assert.equal(next.status, 0, next.stderr);
   assert.equal(JSON.parse(next.stdout).member, "merge-bot-3");
@@ -888,7 +892,7 @@ test("an ancestor rotate of a ledger with nothing live leaves only ## Retired be
   assert.deepEqual(f.ctl(), { ...OURS, prior: "ancestor" });
   const retired = [...SETTLED_DISPATCHED.map((e) => e.split("=")[0]), "review-pr-15"];
   assert.deepEqual(JSON.parse(r.stdout), { rotated: true, archive: join(f.dir, f.archives()[0]), carried: { rows: [], dispatched: [] }, retired, skipped: [] });
-  assert.deepEqual(read(f), { rows: [], dispatched: [], briefs: {}, filed: [], ruled: [], drain: null, retired });
+  assert.deepEqual(read(f), { rows: [], dispatched: [], briefs: {}, queued: {}, filed: [], ruled: [], drain: null, retired });
   assert.match(readFileSync(f.file, "utf8"), /\n## Retired\n\n- impl-3\n/);
 });
 
@@ -982,10 +986,10 @@ test("an ancestor rotate retires a name whose token has an empty outcome, in ## 
 
 // ── the briefs a run dispatched with ─────────────────────────────────────────
 
-test("an ancestor rotate carries a live entry with its brief=, retires a settled one's name as any other, and archives briefs/ under the archive's stamp", (t) => {
+test("an ancestor rotate carries a live entry with its brief= and a live bot's queued=, retires a settled one's name as any other, and archives briefs/ under the archive's stamp", (t) => {
   const ledger = ledgerOf({
     rows: [LIVE_ROWS[3], SETTLED_ROWS[1], LIVE_ROWS[4]],
-    dispatched: ["impl-11=bailed brief=11111111", "impl-12 brief=12121212", "merge-bot-1 brief=bbbbbbbb", "fix-pr-14"],
+    dispatched: ["impl-11=bailed brief=11111111", "impl-12 brief=12121212", "merge-bot-1 brief=bbbbbbbb queued=5,9", "fix-pr-14"],
   });
   const f = fixture(t, { ledger, controller: ANCESTOR });
   const rendered = renderBrief(f.dir, "impl-12");
@@ -1003,7 +1007,8 @@ test("an ancestor rotate carries a live entry with its brief=, retires a settled
   const l = read(f);
   assert.deepEqual(l.dispatched, ["impl-12", "merge-bot-1", "fix-pr-14"]);
   assert.deepEqual(l.briefs, { "impl-12": "12121212", "merge-bot-1": "bbbbbbbb" }, "an entry without a brief= is carried without one");
-  assert.match(readFileSync(f.file, "utf8"), /\n## Dispatched\n\n- impl-12 brief=12121212\n- merge-bot-1 brief=bbbbbbbb\n- fix-pr-14\n/);
+  assert.deepEqual(l.queued, { "merge-bot-1": [5, 9] }, "the queue a carried bot's report is judged against travels with it");
+  assert.match(readFileSync(f.file, "utf8"), /\n## Dispatched\n\n- impl-12 brief=12121212\n- merge-bot-1 brief=bbbbbbbb queued=5,9\n- fix-pr-14\n/);
   // The carried member's late result settles its token and keeps its brief.
   const s = f.cli(["settle", "impl-12", "PR#30"]);
   assert.equal(s.status, 0, s.stderr);

@@ -64,8 +64,14 @@ function fixture() {
   mkdirSync(ghDir);
   const bin = join(root, "bin");
   mkdirSync(bin);
+  // `gh pr list` is `dispatch merge-bot` reading the queue it records:
+  // `queue.json` when a case wrote one, else an empty queue.
   writeExecStub(join(bin, "gh"), `#!/bin/sh
 printf '%s\\n' "$*" >> '${join(root, "gh.log")}'
+if [ "$1 $2" = "pr list" ]; then
+  if [ -r '${join(ghDir, "queue.json")}' ]; then cat '${join(ghDir, "queue.json")}'; else echo '[]'; fi
+  exit 0
+fi
 [ "$1 $2" = "pr view" ] || { echo "gh stub: unexpected gh $*" >&2; exit 64; }
 f='${ghDir}'/"$3.json"
 [ -r "$f" ] || { echo "gh stub: no PR $3" >&2; exit 1; }
@@ -83,6 +89,8 @@ cat "$f"
   const bytes = () => (existsSync(file) ? readFileSync(file, "utf8") : null);
   const report = (member, body) => writeFileSync(join(reports, `${member}.json`), JSON.stringify(body));
   const pr = (n, body) => writeFileSync(join(ghDir, `${n}.json`), JSON.stringify(body));
+  // The open ready-to-merge PRs the next `dispatch merge-bot` records.
+  const queue = (...prs) => writeFileSync(join(ghDir, "queue.json"), JSON.stringify(prs.map((number) => ({ number }))));
   const settle = (member, more = []) => run("settle", member, "--from-report", "--reports", reports, ...more);
   // A settle that must pass: its receipt.
   const settled = (member) => {
@@ -100,7 +108,7 @@ cat "$f"
     assert.equal(bytes(), before, "a refusal must not touch the ledger");
     return r;
   };
-  return { root, work, fleet, file, reports, env, git, head, stray, run, cli, ok, bytes, report, pr, settle, settled, refused };
+  return { root, work, fleet, file, reports, env, git, head, stray, run, cli, ok, bytes, report, pr, queue, settle, settled, refused };
 }
 
 const implReport = (f, over = {}) => ({
@@ -377,11 +385,93 @@ test("merge-bot-n=done: a merged PR that does not read MERGED is exit 3", () => 
   f.refused("merge-bot-1", 3, /failed: PR #7 reads MERGED/);
 });
 
-test("merge-bot-n=done: a pass that merged nothing settles with no check", () => {
+test("merge-bot-n=done: a pass dispatched with nothing queued and giving no verdict settles with no check and rules nothing", () => {
+  const f = fixture();
+  assert.deepEqual(f.ok("dispatch", "merge-bot").queued, []);
+  f.report("merge-bot-1", botReport(f, { merged: [] }));
+  const receipt = f.settled("merge-bot-1");
+  assert.deepEqual(receipt.checks, []);
+  assert.deepEqual(receipt.ruled, []);
+  assert.deepEqual(f.ok("read").ruled, []);
+});
+
+// The queue a report is judged against is the one `dispatch merge-bot`
+// recorded, so the PR a bot leaves out of its report is still in it.
+test("merge-bot-n=done: a report giving every queued PR one verdict settles, each refused entry ruled with its reason and nothing else written", () => {
+  const f = fixture();
+  f.queue(6, 7, 8, 9, 10);
+  assert.deepEqual(f.ok("dispatch", "merge-bot").queued, [6, 7, 8, 9, 10]);
+  f.ok("row", "10", "PR#10 · patch");
+  const rows = f.ok("read").rows;
+  f.report("merge-bot-1", botReport(f, {
+    held: [{ pr: 8, behind: 6 }], conflictHold: [9], refused: [{ pr: 10, reason: "main-gain-removed:plugin/a.md" }],
+  }));
+  f.pr(6, { state: "MERGED" });
+  f.pr(7, { state: "MERGED" });
+  const receipt = f.settled("merge-bot-1");
+  assert.deepEqual(receipt.checks, [{ name: "PR #6 reads MERGED", ok: true }, { name: "PR #7 reads MERGED", ok: true }]);
+  assert.deepEqual(receipt.ruled, ["#10 refused by merge-bot-1: main-gain-removed:plugin/a.md"]);
+  const l = f.ok("read");
+  assert.deepEqual(l.ruled, ["#10 refused by merge-bot-1: main-gain-removed:plugin/a.md"]);
+  assert.deepEqual(l.rows, rows, "a refusal writes no row token");
+  const calls = readFileSync(join(f.root, "gh.log"), "utf8");
+  assert.doesNotMatch(calls, /^pr (edit|view (8|9|10)) /m, "a PR given a verdict is not looked up, and no label moves");
+});
+
+test("merge-bot-n=done: a queued PR still queued with no verdict is exit 3 naming it, however the report leaves it out", () => {
+  const f = fixture();
+  f.queue(6, 7, 8, 9);
+  f.ok("dispatch", "merge-bot");
+  f.pr(6, { state: "MERGED" });
+  f.pr(7, { state: "MERGED" });
+  f.pr(8, { state: "OPEN", labels: [{ name: "patch" }, { name: "ready-to-merge" }] });
+  f.pr(9, { state: "OPEN", labels: [{ name: "ready-to-merge" }] });
+  f.report("merge-bot-1", botReport(f, { held: [{ pr: 9, behind: 6 }] }));
+  f.refused("merge-bot-1", 3, /failed: PR #8, queued at dispatch, has a verdict in merged, held, conflictHold or refused, or has left the queue; nothing written/);
+  // A report cannot carry a queue of its own to be judged against instead.
+  f.report("merge-bot-1", { ...botReport(f, { held: [{ pr: 9, behind: 6 }] }), queued: [6, 7, 9] });
+  f.refused("merge-bot-1", 2, /is not a merge-bot report — \$: unexpected field "queued"; nothing written/);
+  // Nor does a later queue count: the one dispatch recorded is the one judged.
+  f.queue(6, 7, 9);
+  f.report("merge-bot-1", botReport(f, { held: [{ pr: 9, behind: 6 }] }));
+  f.refused("merge-bot-1", 3, /failed: PR #8, queued at dispatch/);
+  f.report("merge-bot-1", botReport(f, { held: [{ pr: 9, behind: 6 }], refused: [{ pr: 8, reason: "ci-wait-timeout" }] }));
+  assert.deepEqual(f.settled("merge-bot-1").ruled, ["#8 refused by merge-bot-1: ci-wait-timeout"]);
+});
+
+test("merge-bot-n=done: a queued PR that left the queue before the settle, or a PR labelled after dispatch, fails nothing", () => {
+  const f = fixture();
+  f.queue(6, 7, 8, 9);
+  f.ok("dispatch", "merge-bot");
+  f.pr(6, { state: "MERGED" });
+  f.pr(7, { state: "MERGED" });
+  f.pr(8, { state: "MERGED", labels: [{ name: "ready-to-merge" }] });
+  f.pr(9, { state: "OPEN", labels: [{ name: "patch" }] });
+  f.queue(6, 7, 11);
+  f.report("merge-bot-1", botReport(f));
+  const receipt = f.settled("merge-bot-1");
+  assert.deepEqual(receipt.checks.slice(2), [
+    { name: "PR #8, queued at dispatch, has a verdict in merged, held, conflictHold or refused, or has left the queue", ok: true },
+    { name: "PR #9, queued at dispatch, has a verdict in merged, held, conflictHold or refused, or has left the queue", ok: true },
+  ]);
+  assert.doesNotMatch(readFileSync(join(f.root, "gh.log"), "utf8"), /^pr view 11 /m, "a PR labelled after dispatch is never looked up");
+});
+
+test("merge-bot-n=done: a PR given two verdicts, in two lists or in one, is exit 2 naming both entries", () => {
   const f = fixture();
   f.ok("dispatch", "merge-bot");
+  f.report("merge-bot-1", botReport(f, { refused: [{ pr: 7, reason: "behind:3" }] }));
+  f.refused("merge-bot-1", 2, /is not a merge-bot report — \$\.refused\[0\]\.pr: PR #7 already has a verdict at \$\.merged\[1\]\.pr; nothing written/);
+  f.report("merge-bot-1", botReport(f, { merged: [], conflictHold: [9, 9] }));
+  f.refused("merge-bot-1", 2, /\$\.conflictHold\[1\]: PR #9 already has a verdict at \$\.conflictHold\[0\]/);
+});
+
+test("merge-bot-n=done: a bot whose ## Dispatched entry records no queued= is exit 2, since its report cannot be judged", () => {
+  const f = fixture();
+  f.ok("dispatch", "merge-bot");
+  writeFileSync(f.file, f.bytes().replace(/ queued=none$/m, ""));
   f.report("merge-bot-1", botReport(f, { merged: [] }));
-  assert.deepEqual(f.settled("merge-bot-1").checks, []);
+  f.refused("merge-bot-1", 2, /## Dispatched records no queued= for merge-bot-1, so whether its report gives every PR queued at dispatch a verdict cannot be judged — settle it by hand; nothing written/);
 });
 
 // -- the report itself --------------------------------------------------------

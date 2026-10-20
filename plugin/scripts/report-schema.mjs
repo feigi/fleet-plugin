@@ -18,7 +18,9 @@
 //   0  print: the schema is on stdout. validate: `valid` on stdout
 //   1  validate: `invalid: <violation>` on stdout, naming the FIRST violation;
 //      a file that is not JSON is invalid too, as `$: not JSON (...)`, and so
-//      is one that repeats a key, as `$.merged: duplicate key "merged"`
+//      is one that repeats a key, as `$.merged: duplicate key "merged"`, and
+//      a merge-bot report giving one PR two verdicts, as
+//      `$.refused[0].pr: PR #<pr> already has a verdict at $.merged[0].pr`
 //   2  usage: no or unknown subcommand, a wrong argument count, an unknown
 //      family, any flag; or <file> could not be read; or print could not
 //      write the schema to stdout. Refused on stderr, nothing on stdout
@@ -158,6 +160,34 @@ export const SCHEMAS = {
   }),
 };
 
+// Every verdict a merge-bot report gives, as `{pr, path}`, `path` the entry's
+// PR field: `merged`, `held`, `conflictHold`, then `refused`, each in report
+// order. `branchKept` gives none: it names a merged PR's branch and the open
+// PR keeping it.
+export function mergeBotVerdicts(report) {
+  return [
+    ...["merged", "held"].flatMap((k) => report[k].map((e, i) => ({ pr: e.pr, path: `$.${k}[${i}].pr` }))),
+    ...report.conflictHold.map((pr, i) => ({ pr, path: `$.conflictHold[${i}]` })),
+    ...report.refused.map((e, i) => ({ pr: e.pr, path: `$.refused[${i}].pr` })),
+  ];
+}
+
+// The first violation of `family`'s schema by `value`, or null; for a
+// merge-bot report then the rule no schema keyword states: each PR gets one
+// verdict — merged, held, conflict-held or refused — the last it reached in
+// the pass, so a PR named twice, in one list or in two, is a violation at
+// its second entry.
+export function reportViolation(family, value) {
+  const found = validate(SCHEMAS[family], value);
+  if (found !== null || family !== "merge-bot") return found;
+  const first = new Map();
+  for (const { pr, path } of mergeBotVerdicts(value)) {
+    if (first.has(pr)) return `${path}: PR #${pr} already has a verdict at ${first.get(pr)}`;
+    first.set(pr, path);
+  }
+  return null;
+}
+
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
 function typeOf(v) {
@@ -279,7 +309,7 @@ function main() {
   }
   if (cmd !== "validate" || path === undefined) die(USAGE);
 
-  const schema = familyOf(family);
+  familyOf(family);
   let text;
   try {
     text = readFileSync(path, "utf8");
@@ -287,7 +317,7 @@ function main() {
     die(`cannot read ${path}: ${e.code ?? e.message}`);
   }
   const parsed = parseReport(text);
-  const violation = parsed.violation ?? validate(schema, parsed.value);
+  const violation = parsed.violation ?? reportViolation(family, parsed.value);
   if (violation !== null) {
     writeAll(1, `invalid: ${violation}\n`);
     process.exit(1);

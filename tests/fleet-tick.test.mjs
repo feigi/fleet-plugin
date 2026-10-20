@@ -2063,9 +2063,9 @@ console.log(JSON.stringify({ file, ...JSON.parse(payload) }));
 `;
 
 // The ledger on disk, in the layout ledger.mjs's save() writes.
-const ledgerText = ({ rows = [], dispatched = [], drain = null, retired = [] } = {}) => {
+const ledgerText = ({ rows = [], dispatched = [], ruled = [], drain = null, retired = [] } = {}) => {
   const list = (xs) => xs.map((x) => `- ${x}`).join("\n");
-  return `# Fleet run ledger\n\n## Rows\n\n${list(rows)}\n\n## Dispatched\n\n${list(dispatched)}\n\n## Filed\n\n\n\n## Ruled\n\n`
+  return `# Fleet run ledger\n\n## Rows\n\n${list(rows)}\n\n## Dispatched\n\n${list(dispatched)}\n\n## Filed\n\n\n\n## Ruled\n\n${list(ruled)}`
     + (drain === null ? "" : `\n\n## Drain\n\n- ${drain}`)
     + (retired.length === 0 ? "" : `\n\n## Retired\n\n${list(retired)}`) + "\n";
 };
@@ -2422,6 +2422,22 @@ test("CLI: merge-bot liveness and holds come off the ledger", () => {
     shortlist: shortlistText([]), prs: [pr(40, ["ready-to-merge"])],
   });
   assert.match(lifted.stdout, /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=1 held=0\)/m);
+});
+
+// A merge bot's settle records each refusal as a `## Ruled` line, and the
+// bot's `## Dispatched` entry carries the queue it was judged against:
+// neither is a hold, so the merge-bot row reads as it would without them.
+test("CLI: a merge bot's queued= entry and its refusals in ## Ruled leave the merge-bot row as it was", () => {
+  const prs = [pr(40, ["ready-to-merge"])];
+  const plain = runCli([], { ledger: { dispatched: ["merge-bot-1=done"] }, shortlist: shortlistText([]), prs });
+  const recorded = runCli([], {
+    ledger: { dispatched: ["merge-bot-1=done brief=bbbbbbbb queued=40"], ruled: ["#40 refused by merge-bot-1: ci-wait-timeout"] },
+    shortlist: shortlistText([]), prs,
+  });
+  assert.equal(recorded.status, 0, recorded.stderr);
+  const row = (out) => out.match(/^merge-bot .*$/m)?.[0];
+  assert.match(row(plain.stdout), /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=1 held=0\)$/);
+  assert.equal(row(recorded.stdout), row(plain.stdout));
 });
 
 // #3608: a refused labelled PR with no park still dispatches a bot each tick,

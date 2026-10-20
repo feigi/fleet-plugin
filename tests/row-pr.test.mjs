@@ -77,7 +77,7 @@ for (const { row, own, keyed, board } of FIXTURES) {
       const { brief, ...out } = cli("dispatch", String(other), `fix-pr-${other}`);
       assert.equal(typeof brief?.sha256, "string");
       assert.deepEqual(out, {
-        member: `fix-pr-${other}`, agent: "fleet-fix-applier", ticket: `#${other}`, line: `#${other} fix-pr-${other}`, created: true, total: 2,
+        member: `fix-pr-${other}`, agent: "fleet-fix-applier", ticket: `#${other}`, line: `#${other} fix-pr-${other}`, created: true, total: 2, queued: null,
       }, `PR#${other} is not this row's PR`);
     }
   });

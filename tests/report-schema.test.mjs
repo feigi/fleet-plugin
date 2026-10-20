@@ -14,7 +14,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
-import { SCHEMAS, validate } from "../plugin/scripts/report-schema.mjs";
+import { SCHEMAS, validate, reportViolation } from "../plugin/scripts/report-schema.mjs";
 import { HALT_CAUSES } from "../plugin/scripts/ledger-grammar.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/report-schema.mjs", import.meta.url));
@@ -232,6 +232,27 @@ test("validate fails a file that is not JSON", () => {
 test("validate() answers null for a valid report and the violation text otherwise", () => {
   assert.equal(validate(SCHEMAS.impl, VALID.impl), null);
   assert.equal(validate(SCHEMAS.impl, variant("impl", { outcome: "x" })), '$.outcome: "x" is not one of "pr", "bailed"');
+});
+
+// One verdict per PR is a rule no schema keyword states, so validate() alone
+// passes a PR named twice; `validate` and reportViolation() refuse it at its
+// second entry. `branchKept` names a merged PR without giving it a verdict.
+test("validate refuses a merge-bot report giving one PR two verdicts, in two lists or in one, and accepts one verdict each", () => {
+  for (const [changes, said] of [
+    [{ refused: [{ pr: 3300, reason: "behind:2" }] }, "$.refused[0].pr: PR #3300 already has a verdict at $.merged[0].pr"],
+    [{ conflictHold: [3304] }, "$.conflictHold[0]: PR #3304 already has a verdict at $.held[0].pr"],
+    [{ held: [{ pr: 3305, behind: 3300 }] }, "$.conflictHold[0]: PR #3305 already has a verdict at $.held[0].pr"],
+    [{ merged: [{ pr: 3300, sha: SHA }, { pr: 3300, sha: SHA }] }, "$.merged[1].pr: PR #3300 already has a verdict at $.merged[0].pr"],
+    [{ refused: [{ pr: 3306, reason: "a" }, { pr: 3306, reason: "b" }] }, "$.refused[1].pr: PR #3306 already has a verdict at $.refused[0].pr"],
+  ]) {
+    const report = variant("merge-bot", changes);
+    assert.equal(validate(SCHEMAS["merge-bot"], report), null, said);
+    assert.equal(reportViolation("merge-bot", report), said);
+    assertInvalid(check("merge-bot", report), said);
+  }
+  assert.equal(reportViolation("merge-bot", VALID["merge-bot"]), null);
+  assert.equal(check("merge-bot", VALID["merge-bot"]).status, 0, "one verdict each, a merged PR's branchKept entry beside it, is valid");
+  assert.equal(reportViolation("impl", VALID.impl), null);
 });
 
 // Exit 2: the invocation or the file, never the report.
