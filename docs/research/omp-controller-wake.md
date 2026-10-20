@@ -309,6 +309,24 @@ The long tail has two causes, both visible in the log:
 In the ordinary idle case the fire landed within a poll or two of `beat.at +
 beat.interval`: the median is 14 s against a 30 s poll.
 
+### The stop (#3484 step 8)
+
+At the end of the run `fleet-heartbeat.mjs --stop "<reason>"` set `beat.stopped`
+in `.fleet/heartbeat.json`. The alarm's gate evaluates `ctx.isIdle()` before it
+reads `beat.stopped`, so every poll that landed during the controller's own
+closing turn logged `poll: skip busy`, and the stop could only show on a poll
+that found the controller idle. The first such poll logged:
+
+```
+2026-10-20T09:00:51.505Z poll: skip stopped: run drained; closeout finish blocked at tier-outcomes by #3611 (reviewed PR #3606 closes no issue)
+```
+
+The log holds 44 such lines (the maintainer's read at 09:20:51 was the latest),
+and the last `FIRE` of the run (08:47:51) precedes the stop, so the stop silenced
+the alarm: no fire followed it. The controller could not observe the line from
+inside its own turn; it had only confirmed the gate's decision expression offline
+against the real state file, and the maintainer read the log.
+
 ### Notes for the design
 
 - The `quiet` back-off reached the 1200 s ceiling and stayed there while the
@@ -320,16 +338,6 @@ beat.interval`: the median is 14 s against a 30 s poll.
 
 ## Not measured here
 
-- Whether `--stop` silences the alarm, as a logged line. At the end of the run
-  `fleet-heartbeat.mjs --stop` set `beat.stopped` in `.fleet/heartbeat.json`, and
-  the alarm's gate reads `beat.stopped` after `ctx.isIdle()`, so a `poll: skip
-  stopped` line can appear only on a poll that lands while the controller is
-  idle. Every poll after the stop landed while the controller was still in its
-  closing turn and logged `busy`; no idle poll was observed. The gate order is
-  the evidence, not a log line. Evaluating the gate's decision expression
-  offline against the real state file, with `isIdle()` forced true and the pid
-  check assumed to pass, returned `stopped: <the --stop reason>`, so an idle poll
-  would log `poll: skip stopped: …`. That tests the logic, not the log.
 - The log also shows an `EVENT session_shutdown` while the controller was
   closing out. This run did not establish what caused it or whether the timer
   survives one.
