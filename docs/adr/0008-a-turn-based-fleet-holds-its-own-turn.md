@@ -3,6 +3,7 @@
 **Status:** Accepted. Ruled 2026-09-18 on #357 (item 2 of #3), against the measurements below. Amended by ADR 0012: §1 reads "records, then ticks" — the ledger now records dispatch and settlement, so the tick derives its counts and the controller states none; §2–§8 unchanged. Amended by ADR 0014: the dual-harness comparison measurements (periodic-hook absence on either harness, the block-duration asymmetry between them, and omp-only background-wake behavior) are retired as moot under one harness; the ruling and the remaining measurements stand. Amended by ADR 0025: the restart question the Failure mode leaves open is ruled — nothing restarts a dead run, and the next run's phase 0 resumes its stranded claims; §8 gains the `controller` key, owned by phase 0's rotation step; the Liveness mark gates rotation only where no controller record exists, and gates no other action.
 Amended by ADR 0028: §8 gains the `seen` key, owned by `fleet-tick` — when the tick first saw each live ledger token, pruned to the live set every tick — which `fleet-heartbeat` and the rotation step carry without writing.
 Amended by #2968: §8 gains the `acted` key, owned by `ledger.mjs` — the time of the latest ledger write, stamped by every write subcommand and by rotate in the same write as `controller` — which `fleet-tick` and `fleet-heartbeat` carry without writing.
+Amended by ADR 0033: on omp an in-process extension alarm wakes an idle controller; decisions 1 and 3 retired.
 
 ## Context
 
