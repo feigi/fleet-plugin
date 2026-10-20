@@ -336,12 +336,40 @@ against the real state file, and the maintainer read the log.
   controller; the log records only the alarm side of the interleaving, so this
   run does not measure interference between the two.
 
+### Candidate 3, measured once (#3484 step 7)
+
+After the run drained, with `beat.stopped` set so the alarm was silent, and with
+nothing else running, the controller dispatched one background `task` member
+that slept 300 s and reported, and ended its turn. In that process the alarm
+extension was not loaded, so no alarm poll could interfere.
+
+| Event | Time (UTC, 2026-10-20) |
+|---|---|
+| controller dispatches the task and ends its turn | 09:41:52 |
+| member starts its sleep | 09:42:03 |
+| member writes its end timestamp (5 min 04 s of sleep) | 09:47:07 |
+| first command of the controller's new turn | 09:47:13 |
+
+- The report started a new turn about 6 s after the member finished, with no
+  other work pending.
+- The maintainer, at the TUI during the sleep, could type: the session accepted
+  input while the task was pending.
+
+What this does not show: whether `ctx.isIdle()` was true during the sleep. The
+alarm gate tests `isIdle()`, and the alarm was not loaded, so nothing polled it.
+"The TUI accepted typing" and "`isIdle()` is true" are different claims, and
+section 5's reading of `#hasPendingAsyncWake` (a pending sleeper may keep the
+session from settling) is neither confirmed nor refuted here. The conclusion of
+section 5 is unchanged: the controller must start a new sleeper before every
+turn ends, so this is "never end your turn" in another form and cannot retire
+the rule.
+
 ## Not measured here
 
 - The log also shows an `EVENT session_shutdown` while the controller was
   closing out. This run did not establish what caused it or whether the timer
   survives one.
-- Candidate 3 (a sleeping background `task` as the wake) was not measured in
-  this run. Stage 2's side-measure was left undone.
+- Whether `ctx.isIdle()` is true while a background `task` is pending (see the
+  candidate 3 measurement above).
 - RPC and print modes. `ctx.setInterval` is unref'd, so a mode where
   nothing else keeps the event loop alive would not keep the process up.
