@@ -23,7 +23,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
-import { foldLedger } from "../plugin/scripts/fleet-tick.mjs";
+import { bodyDigest, foldLedger, parkedToken } from "../plugin/scripts/fleet-tick.mjs";
 import { BAILS, reportKind } from "../plugin/scripts/fleet-event.mjs";
 import { MEMBER_FAMILIES } from "../plugin/scripts/ledger-grammar.mjs";
 import { SCHEMAS } from "../plugin/scripts/report-schema.mjs";
@@ -185,7 +185,7 @@ const finisherReport = (member, over = {}) => ({
   member, outcome: "labelled", cause: null, evidence: null, pin: HEAD, labelsReadBack: ["ready-to-merge", "patch"],
   kill: null, filed: [], unrecorded: [], confirmation: [], ...over,
 });
-const mergeBotReport = (member, held) => ({ member, merged: [], held, conflictHold: [], refused: [], branchKept: [] });
+const mergeBotReport = (member, held, refused = []) => ({ member, merged: [], held, conflictHold: [], refused, branchKept: [] });
 
 // A main checkout with a fixture ledger, a phase-0 receipt naming the scratch
 // root, caps 3 and 5 and In-flight bound 7, and the gh stub on PATH.
@@ -916,6 +916,76 @@ test("merge-bot-report writes a held-behind token onto each held PR's row, then 
   assert.equal(second.status, 0, second.err);
   assert.deepEqual(second.order, [TICK]);
   assert.equal(f.ledger(), ledger);
+});
+
+// #3608: a main-gain refusal parks the PR, bound to the head and body digest
+// the bot's gate reading records it refused — never to a gh read taken when
+// the report is settled; every other refusal reason writes nothing.
+const MG = "main-gain-removed:tests/gate.test.mjs";
+const BODY = "Closes #413\r\n";
+const gateReadingPath = (f) => join(f.scratch, "pr89", "merge-bot-1", "ci.json");
+// merge-gate.mjs's `--out` line for its refusal of PR 89, each field of
+// `over` replacing its own; a string is written as it stands.
+function gateReading(f, over = {}) {
+  mkdirSync(join(f.scratch, "pr89", "merge-bot-1"), { recursive: true });
+  writeFileSync(gateReadingPath(f), typeof over === "string" ? over
+    : JSON.stringify({ pr: 89, verdict: "blocked", reason: MG, head: HEAD, bodyDigest: bodyDigest(BODY), ...over }));
+}
+
+test("merge-bot-report parks a main-gain-removed refusal at the head and body digest its gate reading refused, reads no gh, ignores every other reason, then settles and ticks; a second run writes nothing", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88", "#413 impl-413=PR#89", "#414 impl-414=PR#90"], dispatched: ["merge-bot-1"] });
+  f.setGh({ issue: {}, pr: { 89: { labels: ["ready-to-merge"], comments: [] } } });
+  f.report(mergeBotReport("merge-bot-1", [], [
+    { pr: 89, reason: MG },
+    { pr: 90, reason: "behind:2" },
+    { pr: 90, reason: "ci:failure" },
+    { pr: 90, reason: "instrument-set-changed" },
+    { pr: 90, reason: "main-gain-unanswerable" },
+  ]));
+  gateReading(f);
+  f.control("settle", { "merge-bot-1": { outcome: "done" } });
+  const park = parkedToken(HEAD, bodyDigest(BODY), MG);
+  assert.match(park, /^parked=a{40}:[0-9a-f]{12}:main-gain-removed:tests\/gate\.test\.mjs$/);
+  const first = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(first.status, 0, first.err + first.stdout);
+  assert.deepEqual(first.order, [
+    `ledger token 89 ${park}`,
+    `settle merge-bot-1 --from-report --reports ${join(f.scratch, "reports")}`,
+    TICK,
+  ]);
+  assert.deepEqual(f.rows(), ["#412 impl-412=PR#88", `#413 impl-413=PR#89 · ${park}`, "#414 impl-414=PR#90"]);
+  assert.deepEqual(f.gh().pr[89].labels, ["ready-to-merge"], "the park moves no label");
+  assert.deepEqual(f.ghCalls(), [], "no gh read: a head pushed or a body edited after the refusal is never what the park binds");
+
+  const ledger = f.ledger();
+  const second = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(second.status, 0, second.err);
+  assert.deepEqual(writes(second.order), []);
+  assert.equal(f.ledger(), ledger);
+});
+
+test("merge-bot-report whose gate reading cannot bind a main-gain park prints a NEED naming why, parks nothing, and still settles and ticks", () => {
+  for (const [reading, why] of [
+    [null, "cannot be read (ENOENT)"],
+    ["{", "is not JSON"],
+    ["null", "is not a JSON object"],
+    [{ pr: 90 }, "is not this refusal"],
+    [{ verdict: "mergeable" }, "is not this refusal"],
+    [{ reason: "main-gain-removed:other.md" }, "is not this refusal"],
+    [{ bodyDigest: null }, "carries no full head and body digest"],
+    [{ bodyDigest: "not-a-digest" }, "carries no full head and body digest"],
+    [{ head: "abc1234" }, "carries no full head and body digest"],
+  ]) {
+    const f = fixture({ rows: ["#413 impl-413=PR#89"], dispatched: ["merge-bot-1"] });
+    f.report(mergeBotReport("merge-bot-1", [], [{ pr: 89, reason: MG }]));
+    if (reading !== null) gateReading(f, reading);
+    f.control("settle", { "merge-bot-1": { outcome: "done" } });
+    const r = f.run(["merge-bot-report", "merge-bot-1"]);
+    assert.equal(r.status, 4, `${why}: ${r.err}${r.stdout}`);
+    assert.ok(r.stdout.includes(`NEED park PR #89 ${MG} — the gate reading ${gateReadingPath(f)} ${why}`), r.stdout);
+    assert.deepEqual(writes(r.order), [`settle merge-bot-1 --from-report --reports ${join(f.scratch, "reports")}`], why);
+    assert.deepEqual(f.rows(), ["#413 impl-413=PR#89"], why);
+  }
 });
 
 // ── review-result ────────────────────────────────────────────────────────────

@@ -535,6 +535,11 @@ const CHANGED = [
   [
     "A wait that expired with exit 75 names each wedged file — remove it by hand once no suite run is running, the way references/ledger.md removes `<file>.lock`.",
     "A wait that expired with exit 75 names each wedged file — remove it by hand once no suite run is running, the way the Writer policy section above removes `<file>.lock`."
+  ],
+  // #3608: a main-gain refusal now writes a park onto the PR's row.
+  [
+    "PR stays queued, label untouched, nothing written to the ledger, and no member is dispatched to restore the lines — the removal may be deliberate.",
+    "PR stays queued, label untouched, and no member is dispatched to restore the lines — the removal may be deliberate."
   ]
 ];
 

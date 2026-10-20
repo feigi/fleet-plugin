@@ -54,7 +54,7 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, unescapeText, nextReviewerName } from "./ledger-grammar.mjs";
-import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD } from "./fleet-tick.mjs";
+import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD, PARKED } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
 import { attemptLock, releaseLockFile, reapPathOf } from "./pid-lock.mjs";
@@ -2674,9 +2674,9 @@ function badLabelOff(words) {
 // ` · ` separator are no token. A member token is `dispatch`'s or `settle`'s,
 // a review token `review`'s. A word shaped like a member that the grammar
 // cannot parse, a `tier=` that is not a cell, a `tier=` naming a second tier
-// on a row that already has one, a `held-behind` or `conflict-hold` token the
-// tick cannot read, and a lone `→` — an arrow with no PR beside it points at
-// nothing — are refused. Every other word is a freeform token.
+// on a row that already has one, a `held-behind`, `conflict-hold` or `parked`
+// token the tick cannot read, and a lone `→` — an arrow with no PR beside it
+// points at nothing — are refused. Every other word is a freeform token.
 function tokenRefusal(tok, rowText) {
   if (tok === "" || /\s/.test(tok)) {
     return "is not one token — pass each token as its own argument, with no space in it";
@@ -2696,6 +2696,9 @@ function tokenRefusal(tok, rowText) {
     if (tok.startsWith(prefix) && !shape.test(tok)) {
       return `is not ${prefix}:#<M> — the tick reads only ${prefix}:#<number> and would ignore this one`;
     }
+  }
+  if (tok.startsWith("parked=") && !PARKED.test(tok)) {
+    return "is not parked=<head>:<body digest>:main-gain-removed:<path> — the tick reads only a 40-hex head, a 12-hex body digest and a main-gain-removed reason, and would ignore this one";
   }
   const [tier] = tierValues(tok);
   if (tier !== undefined) {

@@ -23,14 +23,18 @@
 // member number only the bot knows, so the bot passes it and this script never
 // guesses it.
 //
-// Stdout: exactly one JSON line, `{pr, verdict, reason, head, pre, post,
-// rebaseCarry, behind, instruments, mainGain, ci}`, `rebaseCarry` naming the
-// labelled head and the head accepted as carrying it (`{labelled, accepted}`),
-// or null when no carry was proven, `mainGain` echoing main-gain.mjs's own
-// payload — hits, acknowledged removals and unchecked files — or null when
-// it did not run or printed no JSON object; an unusable payload is still
-// echoed. Stderr: the children's own diagnostics, passed straight through
-// and never folded into stdout.
+// Stdout: exactly one JSON line, `{pr, verdict, reason, head, bodyDigest, pre,
+// post, rebaseCarry, behind, instruments, mainGain, ci}`, `bodyDigest` the
+// first 12 hex of the sha256 of the body gh read (fleet-tick.mjs's
+// `bodyDigest`, the digest a `parked=` token binds — `fleet-event.mjs
+// merge-bot-report` parks a `main-gain-removed` refusal at this `head` and
+// `bodyDigest`), or null with `head` when gh could not be read, `rebaseCarry`
+// naming the labelled head and the head accepted as carrying it (`{labelled,
+// accepted}`), or null when no carry was proven, `mainGain` echoing
+// main-gain.mjs's own payload — hits, acknowledged removals and unchecked
+// files — or null when it did not run or printed no JSON object; an unusable
+// payload is still echoed. Stderr: the children's own diagnostics, passed
+// straight through and never folded into stdout.
 //
 // Exit vocabulary — the same three-way contract as inflight.sh, prove-merge.sh
 // and staleness.mjs:
@@ -77,6 +81,7 @@
 // no carry, and the head row blocks exactly as it does for any other moved head.
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -390,6 +395,7 @@ try {
     verdict,
     reason,
     head: prView?.headRefOid ?? null,
+    bodyDigest: prView === null ? null : createHash("sha256").update(prView.body).digest("hex").slice(0, 12),
     pre,
     post,
     rebaseCarry,

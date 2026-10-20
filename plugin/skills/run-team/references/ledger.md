@@ -88,6 +88,8 @@ A member that dies between spawn and write is invisible — and members die in b
 
 `ci=<run-id>:<attempt>:<conclusion>` and `held-behind:#<lower>` are row tokens the same way, and so is `conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md` step 1), or by you off the tick's `CONFLICT` line, naming the row's own PR. It is not an Exclusion: that gates a ticket's claim, this a PR's merge.
 
+`parked=<head>:<body digest>:main-gain-removed:<path>` is a row token too, written by `fleet-event.mjs merge-bot-report` off a merge bot's `main-gain-removed` refusal, binding the head and a digest of the body the bot's gate refused, read from its gate reading `<scratch>/pr<N>/merge-bot-<n>/ci.json`: while both still match, the tick counts the PR parked beside the held ones, so it alone never prints `DISPATCH merge-bot`, and a new head or an edited body lifts it with no write. No other refusal reason parks.
+
 ## The review pair on a PR's row
 
 A PR's review is not a member, so it carries its own pair of row tokens, written with `review` onto the PR's row (**The reviewer**): `review=wf:<runId>` | `review=member:<name>` at launch, `<name>` being `review-pr-<n>` for the PR's first runner and the next letter its rows do not carry yet (`review-pr-<n>-b`, `-c`, …) for every later one, settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` when the result lands, `<run>` the review's `run-XXXXXXXX` run root under `<scratch>/pr<n>/`, which holds its `review.json`.

@@ -83,6 +83,17 @@ test("deriveFlags: held-behind carries the blocker number", () => {
   assert.ok(f.includes("held-behind:#313"));
 });
 
+// #3608: the park `fleet-event.mjs merge-bot-report` writes is a row token the
+// board reads past, never a refusal of the row.
+test("parseRow and deriveFlags: a parked= token leaves the row read as it was", () => {
+  const row = "#324 impl-324=PR#346 → PR#346 · held-behind:#313";
+  const park = `parked=${"a".repeat(40)}:0123456789ab:main-gain-removed:tests/gate.test.mjs`;
+  const p = parseRow(`${row} · ${park}`);
+  assert.deepEqual(p, parseRow(row));
+  const ctx = { ci: "green", column: "REVIEW", sinceEnteredStage: null, now: 0 };
+  assert.deepEqual(deriveFlags(p, ctx), deriveFlags(parseRow(row), ctx));
+});
+
 test("deriveFlags: stale when dwell exceeds the column threshold", () => {
   const p = parseRow("#340 impl-340");
   const now = 100 * MIN;

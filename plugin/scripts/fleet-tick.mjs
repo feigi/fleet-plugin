@@ -30,7 +30,9 @@
 //             unsettled `fix-pr-`), the merge bot (`## Dispatched`), merge
 //             holds (`held-behind:#M`, and `conflict-hold:#<pr>`, written by
 //             the merge bot or by the controller off a `CONFLICT` line),
-//             tier mismatches and the drain marker
+//             merge parks (`parked=<head>:<body digest>:<reason>`, written by
+//             `fleet-event.mjs merge-bot-report`), tier mismatches and the
+//             drain marker
 //             all come off it, and so does the ledger half of the In-flight
 //             count: every claimed ticket whose newest `impl-` member is live,
 //             or settled `killed`/`tier-mismatch` and so owed a replacement,
@@ -47,9 +49,11 @@
 //             nothing. Missing or unparsable is depth 0 and a
 //             refresh, never a refusal: the depth only ever bounds PULLs
 //             downward. A file with no `dropped` names no drops.
-//   gh        The open PRs, by label, by whether they close an issue and by
-//             GitHub's `mergeable` — the merge queue, which PRs are owed a
-//             review, which conflict, and the PR half of the In-flight count:
+//   gh        The open PRs, by label, by whether they close an issue, by
+//             GitHub's `mergeable`, and by head and body — the merge queue,
+//             which PRs are owed a review, which conflict, which queued PR
+//             still matches the head and body it was parked at, and the PR
+//             half of the In-flight count:
 //             every open PR that closes an issue, whoever opened it and
 //             whatever its state. Also, for each in-flight `review=` token
 //             whose PR the open list does not carry, and for each ticket's
@@ -445,14 +449,23 @@ function reviewers(s) {
 
 function mergeBot(s) {
   // Cap is 1 by invariant, not by configuration.
-  const row = mkRow("merge-bot", s.mergeBotLive, 1, `merge-queue=${s.mergeQueue} held=${s.mergeHeld}`);
+  const parked = s.mergeParked;
+  const row = mkRow("merge-bot", s.mergeBotLive, 1,
+    `merge-queue=${s.mergeQueue} held=${s.mergeHeld}${parked.length > 0 ? ` parked=${parked.length}` : ""}`);
   if (s.mergeBotLive >= 1) return row("AT CAP");
   if (s.mergeQueue === 0) return row("IDLE OK");
   // `ready-to-merge` is the author's sign-off and nothing more. A bot
   // dispatched against a queue whose candidates are all held — behind a lower
-  // open PR, or on a conflict merge-bot already refused to force —
-  // spends a whole member re-deriving a verdict already recorded.
-  if (s.mergeQueue - s.mergeHeld <= 0) {
+  // open PR, or on a conflict merge-bot already refused to force — or parked
+  // on a refusal only a human edit clears spends a whole member re-deriving a
+  // verdict already recorded.
+  if (s.mergeQueue - s.mergeHeld - parked.length <= 0) {
+    if (parked.length > 0) {
+      return row(`HOLD (parked ${parked.map((p) => `#${p.pr} ${p.reason}`).join(", ")})`, {
+        extra: "a park clears on a PR-body acknowledgement `main-gain-removal: <path> <key> - <why>` or a new head"
+          + (s.mergeHeld > 0 ? `; ${s.mergeHeld} more held` : ""),
+      });
+    }
     const why = s.mergeConflictHeld ? "behind a lower PR or on a merge conflict no fix-pr has cleared" : "behind a lower PR";
     return row("HOLD", { extra: `every queued candidate is held ${why}` });
   }
@@ -565,6 +578,39 @@ export const HELD = /^held-behind[:-]#?(\d+)$/;
 // spelled like `held-behind` so the two read alike. Distinct from an
 // Exclusion, which gates a ticket's claim; this gates a PR's merge.
 export const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
+// The durable record that a merge bot refused a PR on a main-gain hit — a
+// refusal only a human edit clears — written onto the PR's own row by
+// `fleet-event.mjs merge-bot-report`: `parked=<head>:<body digest>:<reason>`,
+// the head and the body digest those the merge gate read when it refused, and
+// the reason the gate's `main-gain-removed:<path>` percent-encoded with
+// encodeURI, and `#` as `%23`, so the token stays one word and carries no
+// `#<n>` a row would read as a PR mention. It parks the PR only while its head
+// and body still match: a new head or an edited body lifts it, with no write.
+export const PARKED = /^parked=([0-9a-f]{40}):([0-9a-f]{12}):(main-gain-removed:\S+)$/;
+// The only gate reason that parks: every other refusal clears without a
+// human edit to the PR. A path is any non-empty text, a newline included.
+export const PARKS = /^main-gain-removed:./s;
+// The digest a park binds a PR body by: gh's `body` string, as gh prints it.
+// merge-gate.mjs computes the same digest of the body it read into its
+// payload's `bodyDigest`, which is where a park's digest comes from.
+export const bodyDigest = (body) => createHash("sha256").update(body).digest("hex").slice(0, 12);
+// The park token for a refusal `reason` at `head` with body digest `digest`,
+// or null when the reason does not park, the head is not a full commit SHA or
+// the digest is not a body digest.
+export function parkedToken(head, digest, reason) {
+  if (!PARKS.test(reason)) return null;
+  const tok = `parked=${String(head).toLowerCase()}:${digest}:${encodeURI(reason).replaceAll("#", "%23")}`;
+  return PARKED.test(tok) ? tok : null;
+}
+// A park token's reason as the gate printed it; a hand-written one that does
+// not decode is shown as written.
+function parkedReason(encoded) {
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return encoded;
+  }
+}
 // tier-check.mjs's verdict on an implementer, `tier-ok=<member>:<def>`
 // or `tier-mismatch=<member>:<def>` — or `tier-unverifiable=<member>:no-transcript`
 // for a settled member whose transcript was never written.
@@ -803,7 +849,7 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
       inFlight: false, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
       fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(), held: [],
       conflictOpen: false, reviewedHead: null, reviewedRun: null, pastPinHalt: false, dispositions: [], workers: new Set(),
-      finishers: new Set(),
+      finishers: new Set(), parked: [],
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
     // retry suffix ("" < "b" < "c" …) — never by row-text position. A
@@ -906,6 +952,10 @@ export function foldLedger({ rows, dispatched }, open, { lenient = false } = {})
       } else {
         const h = HELD.exec(tok);
         if (h) st.held.push(Number(h[1]));
+        // Every park the PR's rows carry: the tick matches each against the
+        // PR's current head and body, so a stale one is never cleared here.
+        const k = PARKED.exec(tok);
+        if (k) st.parked.push({ head: k[1], digest: k[2], reason: parkedReason(k[3]) });
         const c = CONFLICT_HOLD.exec(tok);
         if (c) {
           // Bound to the row's own PR: a hold naming another PR is a
@@ -1052,6 +1102,15 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
   const state = (n) => byPr.get(n);
   const heldBehind = (st) => (st?.held ?? []).some((n) => open.has(n));
   const conflictHeld = (st) => st !== undefined && st.conflictOpen;
+  const mergeHeldOn = (p) => heldBehind(state(p.number)) || conflictHeld(state(p.number));
+  // The latest park on a queued PR whose head and body still match it, or
+  // undefined: a new head or an edited body lifts every earlier park.
+  const parkOn = (p) => {
+    const parks = state(p.number)?.parked ?? [];
+    if (parks.length === 0) return undefined;
+    const digest = bodyDigest(p.body);
+    return parks.findLast((k) => k.head === p.headRefOid.toLowerCase() && k.digest === digest);
+  };
   const anyLive = (names) => [...names].some((n) => members.get(n).outcome === null);
   const fixRunning = (st) => anyLive(st.fixMembers);
   // An open PR the ledger tracks that GitHub reads CONFLICTING — no other
@@ -1144,9 +1203,15 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
     // MERGED or CLOSED, the same lift rule as a `behind-pr` Exclusion. A
     // conflict hold lifts only once a fix-applier after it has SETTLED
     // `applied:`/`no-op` — never on dispatch alone.
-    mergeHeld: queued.filter((p) => heldBehind(state(p.number)) || conflictHeld(state(p.number))).length,
+    mergeHeld: queued.filter(mergeHeldOn).length,
     // How many of those are conflict holds — the HOLD row's wording, no field.
     mergeConflictHeld: queued.filter((p) => conflictHeld(state(p.number))).length,
+    // Each queued PR no hold counts that a park still matches, `{pr, reason}`
+    // ascending: the merge bot would only refuse it again.
+    mergeParked: queued.flatMap((p) => {
+      const k = mergeHeldOn(p) ? undefined : parkOn(p);
+      return k === undefined ? [] : [{ pr: p.number, reason: k.reason }];
+    }).sort((a, b) => a.pr - b.pr),
     // Finishers settled `labelled` on an open PR without the label.
     unlabelled: unlabelledFinishers({ rows, dispatched },
       new Set(prs.filter((p) => !isQueued(p)).map((p) => p.number))),
@@ -1622,7 +1687,7 @@ function openPrs() {
   let out;
   try {
     out = execFileSync("gh", ["pr", "list", "--state", "open", "--limit", String(PR_LIMIT),
-      "--json", "number,labels,closingIssuesReferences,headRefOid,mergeable"], { encoding: "utf8", timeout: GH_TIMEOUT_MS });
+      "--json", "number,labels,closingIssuesReferences,headRefOid,mergeable,body"], { encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS });
   } catch (e) {
     // Never interpolates e.stderr or e.message: execFileSync already forwarded
     // the child's stderr to ours, and Node builds e.message out of it, so
@@ -1642,12 +1707,12 @@ function openPrs() {
   // would leave that ticket's implementer counted twice. headRefOid likewise
   // — absent, a `halted:past-pin` PR would read as moved forever — and
   // mergeable: absent or outside GitHub's MergeableState enum, no PR would ever
-  // read CONFLICTING.
+  // read CONFLICTING. body too: absent, no park could ever be matched or lifted.
   if (!Array.isArray(prs) || prs.some((p) => !p || typeof p.number !== "number"
     || !Array.isArray(p.labels) || !Array.isArray(p.closingIssuesReferences)
     || !p.closingIssuesReferences.every((r) => r && Number.isInteger(r.number))
-    || typeof p.headRefOid !== "string" || !MERGEABLE_STATES.includes(p.mergeable))) {
-    die("gh pr list did not return {number,labels,closingIssuesReferences[{number}],headRefOid,mergeable} rows, mergeable one of MERGEABLE, CONFLICTING, UNKNOWN");
+    || typeof p.headRefOid !== "string" || !MERGEABLE_STATES.includes(p.mergeable) || typeof p.body !== "string")) {
+    die("gh pr list did not return {number,labels,closingIssuesReferences[{number}],headRefOid,mergeable,body} rows, mergeable one of MERGEABLE, CONFLICTING, UNKNOWN");
   }
   if (prs.length === PR_LIMIT) {
     die(`exactly ${PR_LIMIT} open PRs — the list is capped and may be truncated. Raise PR_LIMIT; a backlog that silently drops PRs is not a reconcile.`);
