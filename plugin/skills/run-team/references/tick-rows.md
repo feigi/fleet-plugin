@@ -53,8 +53,8 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   row` form the row's detail prints: `row` replaces the whole line. The call
   refuses a PR whose row already carries a hold no fix-applier has answered.
   The tick then reads the hold as `DISPATCH fix-pr
-  PR#<M>`, a conflict fix-applier (**A `DISPATCH fix-pr PR#<M>` on a conflict
-  hold**), and that row obeys every hold. A review in flight does not stop the
+  PR#<M>`, a conflict fix-applier (**The conflict hold**), and that row obeys
+  every hold. A review in flight does not stop the
   line: `fix-due` waits for the review to return. It prints under a
   main-checkout hold and a drain too, since it writes a record and dispatches
   nothing.
