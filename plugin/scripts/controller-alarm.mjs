@@ -29,10 +29,13 @@
 // to stderr on any poll: `readState` is handed a sink that drops its warnings,
 // because the default would repeat the same line in the TUI every 30 s.
 //
-// IT NEVER QUEUES. The message goes out only when the session is idle, with no
-// `deliverAs`. A queued follow-up is lost when the maintainer presses Esc, and
-// a steer backgrounds the controller's running bash call. A busy controller is
-// skipped until the next poll, and nothing is held for it.
+// IT NEVER ASKS TO QUEUE. The message goes out only when the session is idle at
+// the check, with no `deliverAs`. A queued follow-up is lost when the
+// maintainer presses Esc, and a steer backgrounds the controller's running bash
+// call. A busy controller is skipped until the next poll, and nothing is held
+// for it. omp's `sendUserMessage` still awaits before it dispatches, and a turn
+// that starts in that gap takes the line as a steer: idle at the check narrows
+// that window and does not close it.
 //
 // IT ONLY READS `beat`. `fleet-heartbeat.mjs` is the one writer of the mark and
 // the one place the back-off is computed; this file never marks, never stops
@@ -42,14 +45,15 @@
 // THE PROOF IT IS ARMED. At `session_start`, for the main session only, and
 // only AFTER the timer is set, it writes `~/.fleet/alarm/<pid>.json` holding
 // `{ pid, lstart, fleet }`: this process's pid, its start time as `proc.mjs`
-// reads it (the reader phase 0 compares it with), and the `.fleet/` path it
-// resolved. A session that set no timer writes no file, so the file proves the
-// timer is armed against that repository's `.fleet/` and not only that the
-// extension loaded. A start time that cannot be read writes no file, the safe
-// direction: the reader then refuses. The `.fleet/` path is resolved once, from
-// `ctx.cwd`; outside a git repository, or where git fails or times out, no
-// timer is set and no file is written. A leftover file from a dead session is
-// harmless — its start time never matches a live process.
+// reads it, and the `.fleet/` path it resolved. The file is for run-team's
+// phase 0 to check, and nothing reads it yet: this file only writes it. A
+// session that set no timer writes no file, so the file proves the timer is
+// armed against that repository's `.fleet/` and not only that the extension
+// loaded. A start time that cannot be read writes no file, the safe direction:
+// a missing file can only read as a timer not armed. The `.fleet/` path is
+// resolved once, from `ctx.cwd`; outside a git repository, or where git fails
+// or times out, no timer is set and no file is written. A leftover file from a
+// dead session is harmless — its start time never matches a live process.
 //
 // Zero deps: node builtins and sibling scripts only.
 

@@ -31,6 +31,8 @@ test("alarmDue: an idle main session whose controller beat has fallen due fires"
 
 test("alarmDue: each gate condition negated alone does not fire", () => {
   assert.equal(due({ idle: false }), false, "busy");
+  assert.equal(due({ idle: undefined }), false, "idle unknown (undefined)");
+  assert.equal(due({ idle: null }), false, "idle unknown (null)");
   assert.equal(due({ kind: "sub" }), false, "a subagent");
   assert.equal(due({ controller: { pid: 4243 } }), false, "another session's pid");
   assert.equal(due({ controller: null }), false, "no controller recorded");
