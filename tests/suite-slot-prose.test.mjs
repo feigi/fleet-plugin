@@ -15,18 +15,24 @@ import { CASES, label, renderBrief } from "./support/render-brief.mjs";
 const ROOT = join(import.meta.dirname, "..");
 const RUN_TEAM = Pin.file(join(ROOT, "plugin", "skills", "run-team", "SKILL.md"));
 const LEDGER = Pin.file(join(ROOT, "plugin", "skills", "run-team", "references", "ledger.md"));
+const MEMBER_LIFECYCLE = Pin.file(join(ROOT, "plugin", "skills", "run-team", "references", "member-lifecycle.md"));
 const CONTEXT = Pin.file(join(ROOT, "CONTEXT.md"));
 
+// SKILL.md keeps the hand-out as the rule; references/member-lifecycle.md
+// carries the paragraph in full, the review's harmless-wrap clause with it.
 test("SKILL.md tells the controller to hand the fix-applier and the finisher the wrapped string as <testCmd>", () => {
   const p = RUN_TEAM.paragraph("**The test command every gate runs.**", "run-team/SKILL.md suite slot hand-out paragraph", "**Where `<branch>` comes from:**").text;
-  assert.match(p, Pin.phrase("The fix-applier and the finisher run what you hand them, so hand them the wrapped string as `<testCmd>` — `~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command written `'\\''`"),
+  assert.match(p, Pin.phrase("the fix-applier and the finisher get the wrapped string as `<testCmd>` — `~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command written `'\\''`"),
     "the hand-out no longer gives the fix-applier and the finisher the wrapped string — their gate then runs unbounded");
-  assert.match(p, Pin.phrase("a wrapped string handed to it anyway is harmless"),
+  const full = MEMBER_LIFECYCLE.section("## The test command every gate runs", "references/member-lifecycle.md test command section").text;
+  assert.match(full, Pin.phrase("The fix-applier and the finisher run what you hand them, so hand them the wrapped string as `<testCmd>` — `~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command written `'\\''`"),
+    "references/member-lifecycle.md no longer gives the fix-applier and the finisher the wrapped string");
+  assert.match(full, Pin.phrase("a wrapped string handed to it anyway is harmless"),
     "the hand-out no longer says the review's own wrapper makes a wrapped string harmless");
 });
 
 test("SKILL.md says exit 75 is not a test result, and what a no-slot review asks of the controller", () => {
-  const p = RUN_TEAM.paragraph("**`suiteVerdict` is the review's one judgement", "run-team/SKILL.md suiteVerdict paragraph", "**`cwdAudit` is the specialist's own").text;
+  const p = RUN_TEAM.between("- **`suiteVerdict`** —", "- **`cwdAudit`**", "run-team/SKILL.md suiteVerdict digest bullet").text;
   assert.match(p, Pin.phrase("**Exit 75 is not a test result.**"), "the prose no longer says exit 75 is not a test result");
   // #3048: the controller recognises a no-slot review by the verdict's reason,
   // which begins "no suite slot" — not by an entry in `dimensionsUnrun`, which

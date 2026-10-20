@@ -319,4 +319,4 @@ implementer's `<scratch>/impl-<N>/`, the recipe deriver's
 `<scratch>/derive-recipe/`, a fix-applier's, a finisher's and a merge bot's
 `<scratch>/pr<N>/…`, and a review runner's `scratch` argument, which is the
 root itself. A member whose prompt names no path asks you by name and never
-makes one up. See references/isolation.md.
+makes one up.

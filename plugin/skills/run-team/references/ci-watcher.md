@@ -38,7 +38,7 @@ while :; do                                   # one tick
         cap_out=1
       fi
       # gh pr list is GraphQL, so $rl still holds. The pass is budgeted at 4 core
-      # REST units per listed PR on top of the 200 floor. See references/ci-watcher.md.
+      # REST units per listed PR on top of the 200 floor.
       # A shortfall here, or at the Actions-bucket gate below, pauses this tick's pass.
       if [ "$rl" -lt $((200 + 4 * count)) ]; then
         if [ -z "$budget_out" ]; then
@@ -163,7 +163,7 @@ as a CI reading. Require the field, then compare it.
 inside the per-PR pass multiplies by the number of open PRs (8 open PRs → 960s
 of pause per tick, against the 24s outage reset measured below), and a degraded
 branch that `continue`s the *outer* loop skips the tail sleep and busy-spins
-probe pairs during exactly the outage it is reporting. Every degraded branch of SKILL.md's watcher block falls through to the same single sleep instead.
+probe pairs during exactly the outage it is reporting. Every degraded branch of this file's watcher block falls through to the same single sleep instead.
 
 ## The budget is gated at the floor and again at the pass
 

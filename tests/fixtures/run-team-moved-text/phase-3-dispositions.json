@@ -54,7 +54,7 @@
     ],
     [
       "Phase 3's monitor paragraph points here instead of restating any of it.",
-      "**Own the CI waits**'s monitor paragraph points here instead of restating any of it."
+      "references/ci-watcher.md's monitor paragraph points here instead of restating any of it."
     ],
     [
       "The merge bot's agent body is the one place this block is copied whole (see **Merge bot**); the other deliberate copy is named at the end.",
@@ -62,7 +62,7 @@
     ],
     [
       "The inline `$(printf '%s\\n' \"$prs\")` form splits correctly too and is what Phase 3's block uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can.",
-      "The inline `$(printf '%s\\n' \"$prs\")` form splits correctly too and is what the watcher block under **Own the CI waits** uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can."
+      "The inline `$(printf '%s\\n' \"$prs\")` form splits correctly too and is what the watcher block in references/ci-watcher.md uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can."
     ]
   ],
   "deleted": [

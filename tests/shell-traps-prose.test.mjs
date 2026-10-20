@@ -34,6 +34,9 @@ import { writeExecStub } from "./support/exec-stub.mjs";
 
 const SKILLS = join(import.meta.dirname, "..", "plugin", "skills");
 const SKILL = Pin.file(join(SKILLS, "run-team", "SKILL.md"));
+// The CI watcher's block and the paragraphs beside it, which SKILL.md's
+// **Own the CI waits** arms the Monitor from.
+const CI_WATCHER = Pin.file(join(SKILLS, "run-team", "references", "ci-watcher.md"));
 const MERGE_BOT = Pin.file(join(import.meta.dirname, "..", "plugin", "commands", "run-merge-bot.md")).text;
 // The merge bot's agent definition: where its copy of the traps lives.
 const MERGE_BOT_AGENT = Pin.file(join(import.meta.dirname, "..", "plugin", "agents", "fleet-merge-bot.agent.md")).text;
@@ -94,17 +97,17 @@ test("the section exists and is the only place the zsh loop family is stated, in
   );
 });
 
-test("phase 3's monitor paragraph reaches the section instead of restating it", () => {
-  // Phase 3 writes the CI watcher's loop. The ticket's ruling is that it carries
+test("the CI watcher's monitor paragraph reaches the section instead of restating it", () => {
+  // The watcher block writes the CI watcher's loop. The ticket's ruling is that it carries
   // no copy of the mechanism of its own, so it has to name the section.
-  const watcherPara = SKILL.paragraph("**Guard every probe, not just the ones with a verdict field.**", "phase 3's monitor paragraph", "**A readable list can still be a short one.**").text;
+  const watcherPara = CI_WATCHER.paragraph("**Guard every probe, not just the ones with a verdict field.**", "references/ci-watcher.md's monitor paragraph", "**A readable list can still be a short one.**").text;
   // The citation is the section NAME, in whatever emphasis the sentence wants.
   // Pinning `**Shell traps**` exactly would fail on a bold span that opens
   // earlier in the clause, which is a rewording rather than a lost pointer.
   assert.match(
     watcherPara,
     /\bShell traps\b/,
-    "phase 3's monitor paragraph no longer points at Shell traps — it either lost the pointer or grew its own copy of the mechanism",
+    "the CI watcher's monitor paragraph no longer points at Shell traps — it either lost the pointer or grew its own copy of the mechanism",
   );
 });
 
@@ -320,8 +323,8 @@ test("no prescriptive loop in either document iterates a bare parameter", () => 
   // runbook — so the shape gets an assertion that needs no shell at all.
   const blocks = [
     ["run-merge-bot.md's stay-armed monitor", MONITOR],
-    ["run-team/SKILL.md's degraded-watcher block", (() => {
-      const b = [...SKILL.text.matchAll(/```sh\n([\s\S]*?)```/g)].map((m) => m[1]).filter((x) => x.includes("WATCHER DEGRADED"));
+    ["run-team/references/ci-watcher.md's degraded-watcher block", (() => {
+      const b = [...CI_WATCHER.text.matchAll(/```sh\n([\s\S]*?)```/g)].map((m) => m[1]).filter((x) => x.includes("WATCHER DEGRADED"));
       assert.equal(b.length, 1, `expected exactly one sh block emitting WATCHER DEGRADED, found ${b.length} — update this test`);
       return b[0];
     })()],

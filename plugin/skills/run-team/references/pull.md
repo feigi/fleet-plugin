@@ -492,7 +492,7 @@ every five Pulls by construction.
 The last guard fired with n=1 on the control side. The pre-cell pair query
 counted pairs that are no cell's comparisons, and the query before that one
 counted every session whose implementers merely differed, so it cleared the
-cell floor SKILL.md's **Report** states — at least ten comparisons across five
+cell floor **Do not read a cell early** states — at least ten comparisons across five
 or more distinct `run_date`s — by an order of magnitude while the controlled
 comparison did not exist yet.
 
@@ -602,8 +602,7 @@ Pull, so take the next entry; exit 2 names what could not be looked at —
 retries one that failed while applying an answer (the question stands), and
 after a router refusal `next --head <N>` starts the ticket over; exit 3 is a
 usage mistake, or an answer the question does not take, and records nothing.
-The record is `<scratch>/impl-<N>/pull.json`. See references/pull.md for what
-each step does, and why.
+The record is `<scratch>/impl-<N>/pull.json`.
 
 ## No multi-select, no maintainer tick
 

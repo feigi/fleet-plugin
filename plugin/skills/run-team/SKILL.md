@@ -248,8 +248,7 @@ A row with `review=` and no `reviewed=` is a review in flight, and the tick coun
 
 **Name every member.**
 Names follow the unit of work: `impl-<issue#>`, `fix-pr-<pr#>`,
-`review-pr-<pr#>`, `finisher-pr-<pr#>`, `merge-bot-<n>`. See
-references/member-lifecycle.md.
+`review-pr-<pr#>`, `finisher-pr-<pr#>`, `merge-bot-<n>`.
 
 **Fresh context per member.** One member, one unit of work, gone. Refill =
 **new** member, **new** name. See references/member-lifecycle.md.
@@ -544,7 +543,7 @@ A dispatch is done when its `task` call is made, in the background, with the `ag
 
 Pointers: the `/resume` rules are in `references/phase-0.md`; the tick HOLD tier rules are in `references/tick-rows.md`; shell traps are in `references/shell-traps.md`; the fix-applier's per-PR rulings are in `agents/fleet-fix-applier.agent.md`. Rationale for these rules: `references/member-lifecycle.md`.
 
-**The test command every gate runs.** Pass the same command to the review, to the fix-applier, and to the finisher — whose duty-2 mutation gate runs it too — so every gate runs one command: the fix-applier and the finisher get the wrapped string as `<testCmd>` — `~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command written `'\''` — and the review's args the bare command. Never substitute `<testCmd>` with nothing. See references/member-lifecycle.md.
+**The test command every gate runs.** Pass the same command to the review, to the fix-applier, and to the finisher — whose duty-2 mutation gate runs it too — so every gate runs one command: the fix-applier and the finisher get the wrapped string as `<testCmd>` — `~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command written `'\''` — and the review's args the bare command. Never substitute `<testCmd>` with nothing.
 
 **Where `<branch>` comes from:** the PR's head branch — `gh pr view <N> --json headRefName -q .headRefName`, or the same branch you cut the worktree from. See references/reviewers.md.
 
@@ -674,9 +673,8 @@ finisher again.
 
 **An unanswered question from the member is an outbox item, and it blocks dispatch with the same weight as a ruling you have already made.** See references/finisher.md.
 
-**A final report is not proof the member stopped.** See references/finisher.md.
-
-**The standing CI facts are in the fix-applier body, not in per-event messages.** See references/finisher.md.
+**A final report is not proof the member stopped.** **The standing CI facts are
+in the fix-applier body, not in per-event messages.**
 
 **Once the label is on, take it off before you approve any push.** Write `label-off=<latest finisher attempt>` onto the PR's row first
 (`ledger.mjs token <PR number> label-off=<latest finisher attempt>`, which keeps

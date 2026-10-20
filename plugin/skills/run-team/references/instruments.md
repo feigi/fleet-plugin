@@ -45,8 +45,8 @@ fix, which teaches you to ignore the refusal.
 
 ## Landing a mid-run tooling fix from the main checkout
 
-**Then.** **Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh
---pin`. See references/instruments.md. Then the ledger line, save the
+**Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh
+--pin`. Then the ledger line, save the
 rationale, one line to the maintainer. **Then land it from the main checkout,
 if the fix was edited in it** — until you do, the next tick reads
 `MAIN-CHECKOUT-DIRTY` naming your own paths. Commit the fix on a branch and

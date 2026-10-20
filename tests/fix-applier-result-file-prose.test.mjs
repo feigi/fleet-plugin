@@ -141,7 +141,8 @@ test("the fix-applier names an unusable shared test run in its verdict and does 
 // were reworded off the specialists' retired `test_run` field (#2374), and
 // nothing read either one. They go with the rest of the SKILL.md copies (§ 8).
 // The digest paragraph moved whole to references/reviewers.md (#3545); SKILL.md
-// keeps the controller's half of it, one bullet per field.
+// keeps the controller's half of it as bullets under "What the digest asks of
+// you", only for the fields the controller acts on.
 test("run-team's digest paragraph tells the controller the fix-applier reads testEnvironment before acting on any count from the shared test run", () => {
   const p = Pin.file(join(REPO, "skills", "run-team", "references", "reviewers.md")).paragraph(
     "`testEnvironment` says what the review's shared test run is evidence about",

@@ -13,9 +13,10 @@ heavy job is in `failure`** (the heavy diff-validating suites — not the
 `rebase-check` currency gate; a `skipped` heavy job is behind-count staleness and
 fine — **solely** off that count, which is a condition to establish rather than
 infer, see the five-condition note in the fix-applier body) — or
-`ci-state.mjs` reads `verdict: "no-ci"`, see above — **and once the PR's review
+`ci-state.mjs` reads `verdict: "no-ci"`, its bullet in **The finisher gate's
+tests, in full** — **and once the PR's review
 has returned and its fix-applier, if one was dispatched, has sent its report,
-which the CI-completes edge above states in full** — dispatch a
+which the CI-completes edge in that section states in full** — dispatch a
 **finisher** — a fresh small agent, not the fix-applier resumed. Render its brief
 with `dispatch-prompt.mjs render finisher --kind fresh --member finisher-pr-<pr#> …`
 (`--kind repair` once an earlier finisher reported `labelled` without the label landing), record it with
@@ -26,8 +27,7 @@ as the `@smol:low` route, which resolves through the operator's `modelRoles`.
 Its four duties are a checklist — audit the
 worktree, confirm every deferral has a tracker home and re-run the acceptance
 mutation, apply one release label, report — and the
-merge gate downstream still catches whatever it gets wrong, the same argument
-that puts the merge bot on the same tier above. **Never dispatch
+merge gate downstream still catches whatever it gets wrong. **Never dispatch
 one while you still owe the fix-applier a ruling**: the pinned SHA is only as good
 as the guarantee nothing else is inbound. **The test is your OUTBOX, not the
 member's last message** — anything you have decided that it has not received,
@@ -46,12 +46,13 @@ and will act on it. Relay everything — reversals too — then dispatch.
   ticket's ledger row, which outlives your context. The key is what the sibling
   bullet below turns on: it tells an edge already spent from one that never
   fired. The whole key, never the conclusion alone: **a
-  conclusion is not stable** (below), because a rerun rewrites the run in
+  conclusion is not stable** (references/ci-and-staleness.md), because a rerun rewrites the run in
   place. The diff-validating `check` job green with no heavy job (the
   diff-validating suites, not the `rebase-check` currency gate) in `failure`
-  → a finisher CANDIDATE (gated below), a `check`
-  **failure** that is not solely staleness → the **red-check fixer** (**Then
-  dispatch a red-check fixer**, above), behind the same review-returned and
+  → a finisher CANDIDATE (gated by *The fix-applier pushes and exits; the
+  finisher is dispatched fresh*), a `check`
+  **failure** that is not solely staleness → the **red-check fixer** (SKILL.md's
+  **Then dispatch a red-check fixer**), behind the same review-returned and
   fix-applier-reported gate as a finisher. A `check`-green board whose heavy jobs are merely
   `skipped` (behind-count staleness, the normal case after a merge) still labels — do NOT
   gate on `ci-state --quiet` exit 0, which a behind PR never reaches. **This
@@ -73,7 +74,7 @@ and will act on it. Relay everything — reversals too — then dispatch.
   a fix-applier exists** — that is exactly where a ruling you still owe it is
   outstanding, so never dispatch off it while you do. Empty your outbox to it
   first — including any ruling you have withdrawn or reversed — then dispatch
-  (below); a final report is not proof it stopped. A PR that needs nothing fixed
+  (*The fix-applier pushes and exits; the finisher is dispatched fresh*); a final report is not proof it stopped. A PR that needs nothing fixed
   reaches a finisher through the **fix-applier reports `no-op`** bullet below,
   never by waiting for a second CI event this head will never produce. The
   same goes for a red one: a red that fired before the review never fires
@@ -82,8 +83,8 @@ and will act on it. Relay everything — reversals too — then dispatch.
   Then run the tick. These edges dispatch it, each the finisher's own: **Monitor: CI run completes** binding a red on a head whose review has returned and whose fix-applier, if any, has reported; **A fix-applier reports `no-op`**, or a SHA you have already bound, when that head's bound conclusion is red; and **A review result lands** with no finding and nothing to file, when that head's bound conclusion is red.
 - **A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch
   the finisher **now**, against the existing head — when that head's bound
-  conclusion is red, the red-check fixer instead (**Then dispatch a red-check
-  fixer**, above), never a finisher and never a wait. No push means no new run, and
+  conclusion is red, the red-check fixer instead (SKILL.md's **Then dispatch a
+  red-check fixer**), never a finisher and never a wait. No push means no new run, and
   the Monitor above is edge-keyed on `<run-id>:<attempt>:<conclusion>` — that
   head's terminal state already fired once and will never fire again, so waiting
   for the CI event waits forever. This stays a common outcome on a clean PR:

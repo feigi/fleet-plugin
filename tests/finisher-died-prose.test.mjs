@@ -24,6 +24,15 @@ test("a finisher that died is flagged by the cockpit and resolved by hand — no
   assert.match(para, /You never add the label yourself, and the tick does not retry\./);
 });
 
+// The cockpit-flag pin reads the reference alone, so SKILL.md's own copy of the
+// rule — the one a controller resolving the flag reads — needs a pin of its own.
+test("SKILL.md's died-finisher resolution keeps the by-hand rule beside its pointer: no retry, no label from the controller", () => {
+  const para = flat(RUN_TEAM.paragraph("**Resolving a finisher that died.**", "SKILL.md died-finisher resolution", "### Dispositions escalation").text);
+  assert.match(para, /the tick does not retry\. Resolve it by hand:/);
+  assert.match(para, /You never add the label yourself\./);
+  assert.match(para, /See references\/finisher\.md\./);
+});
+
 test("the finisher-died wake bullet records failed and killed through member-died and points at the by-hand resolution", () => {
   const row = flat(RUN_TEAM.bullet("- **A finisher failed or was killed**", "- **Implementer bails before implementing**", "finisher-died wake").text);
   assert.match(row, /the \*\*Member confirmed dead or never dispatched\*\* wake \(`member-died finisher-pr-<M>`\), which settles it `failed` or `killed`/);

@@ -2,12 +2,13 @@
 
 ## Shell traps
 
-Monitor and Bash commands run under **zsh**, and the shell in SKILL.md is
-prescriptive — copied verbatim into a watcher or into the merge bot's agent
-body. So every trap here is a zsh-vs-bash difference that ships as a
-green-looking gate: correct in the shell you tested in, silently wrong in the
-one it runs in. **Own the CI waits**'s monitor paragraph points here instead of
-restating any of it. The merge bot's agent body is the one place this block is
+Monitor and Bash commands run under **zsh**, and the shell in
+references/ci-watcher.md is prescriptive — copied verbatim into a watcher or
+into the merge bot's agent body. So every trap here is a zsh-vs-bash difference
+that ships as a green-looking gate: correct in the shell you tested in,
+silently wrong in the one it runs in. references/ci-watcher.md's monitor
+paragraph points here instead of restating any of it. The merge bot's agent
+body is the one place this block is
 copied whole (see **The merge bot**); the other deliberate copy is named at the end.
 
 A bot already looping cannot be corrected — the loop consumes the turns a correction would land in — so `agents/fleet-merge-bot.agent.md` carries **every entry in `references/shell-traps.md`'s Shell traps**, each written out in full: the rules with the measurements from that file beside them, and the bot has them before its first turn. An edit to `references/shell-traps.md` lands in that body in the same change.
@@ -28,13 +29,13 @@ $prs
 EOF
 ```
 
-The inline `$(printf '%s\n' "$prs")` form splits correctly too and is what the watcher block under **Own the CI waits** uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can.
+The inline `$(printf '%s\n' "$prs")` form splits correctly too and is what the watcher block in references/ci-watcher.md uses, but it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can.
 
 **`</dev/null` every command inside a `while read` loop.**
 
 **A probe that could not look emits an event; it never `continue`s.** Stated in
-full at *A probe that cannot read is a transition event, not silence* under **Own the CI waits**,
-and it binds every watcher in SKILL.md rather than that one block: the third
+full at *A probe that cannot read is a transition event, not silence* in references/ci-watcher.md,
+and it binds every watcher rather than that one block: the third
 value beside pass and fail is what turns a broken loop into a loud failure
 instead of a quiet one. A guard that drops an unreadable probe — `[ -n "$json" ]
 || continue` — makes *could not look* indistinguishable from *nothing to report*.

@@ -159,7 +159,7 @@ up to ~10k characters, in every fix-applier prompt you wrote. What the digest te
 and it is present on a healthy run as well as a degraded one, so there is
 nothing to notice by its absence. The
 fix-applier reads it before acting on any count from the shared test run; you
-read it so a degraded review never passes for a clean one. See references/reviewers.md.
+read it so a degraded review never passes for a clean one.
 `unverified` is *not* "checked and cleared" — a `suggestion` skips the pass by
 policy, and a finding whose refuters all crashed or abstained lands there too.
 All go to the fix-applier with the rest, in the file; never rule on them yourself.

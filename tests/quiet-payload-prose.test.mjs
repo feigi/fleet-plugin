@@ -24,7 +24,8 @@
 // TWO BOUNDS, each measured against the mutation it exists to catch, in the
 // manner of `staleness-qualifier-prose.test.mjs`:
 //
-// - The PARAGRAPH bound. SKILL.md carries two of the four statements, so
+// - The PARAGRAPH bound. SKILL.md carried two of the four statements (the
+//   finisher-duty one now lives in references/finisher.md), so
 //   matched over the whole file each is the other's false green: measured, with
 //   the finisher-duty clause gutted a file-wide variant went green off the
 //   CI-Monitor copy alone, and stayed green with a decoy line appended too.
@@ -108,6 +109,7 @@ const read = (p) => Pin.file(join(REPO, ...p.split("/")));
 
 const CI_STATE_PATH = "scripts/ci-state.mjs";
 const SKILL = "skills/run-team/SKILL.md";
+const FINISHER_REF = "skills/run-team/references/finisher.md";
 const REVIEW_AND_FIX = "commands/review-and-fix.md";
 
 // The one assignment `--quiet` gates the payload on — now also gated on
@@ -186,7 +188,7 @@ function dropsClause(name, anchor, next) {
 
 const SITES = [
   [SKILL, "**Own the CI waits.**", "the CI-Monitor read", "A monitor event is a wake-up, never a verdict;"],
-  [SKILL, "Gate on the `check` job", "the finisher-duty read", "**`ci-state.mjs` reads `verdict: \"no-ci\"`** — no `check` job"],
+  [FINISHER_REF, "Gate on the `check` job", "the finisher-duty read", "**`ci-state.mjs` reads `verdict: \"no-ci\"`** — no `check` job"],
   [REVIEW_AND_FIX, "6. Diff-check green", "step 6's finisher read", "**`verdict: \"no-ci\"` — this repo has no"],
   [CI_STATE_PATH, `const quiet = has("quiet");`, "the source-comment read"],
 ];

@@ -202,9 +202,13 @@ const STEP_6 = "6. Diff-check green";
 
 const STEP_6_NEXT = "**`verdict: \"no-ci\"` — this repo has no";
 
+// SKILL.md's finisher-dispatch paragraph moved in full to references/finisher.md,
+// which is CLAUSE's twin site now; SKILL.md keeps the rule in its own shorter
+// words, pinned by the "finisher dispatch keeps the benign `skipped` heavy job"
+// test.
 const DOCS = [
   [REVIEW_AND_FIX, STEP_6, STEP_6_NEXT],
-  ["skills/run-team/SKILL.md", "**The fix-applier pushes and exits", "**That `dispatch` refuses a finisher — exit 2,"],
+  ["skills/run-team/references/finisher.md", "**The fix-applier pushes and exits", "## The finisher gate's tests, in full"],
 ];
 
 for (const [name, anchor, next] of DOCS) {
@@ -216,6 +220,14 @@ for (const [name, anchor, next] of DOCS) {
     );
   });
 }
+
+test("skills/run-team/SKILL.md's finisher dispatch keeps the benign `skipped` heavy job to the behind-count alone", () => {
+  assert.match(
+    rule("skills/run-team/SKILL.md", "**The fix-applier pushes and exits", "**That `dispatch` refuses a finisher — exit 2,"),
+    Pin.phrase("a `skipped` one is fine only when **solely** off the behind-count"),
+    "skills/run-team/SKILL.md's finisher dispatch no longer ties a benign `skipped` heavy job to the behind-count alone — bare \"skipped is fine\" is the drop #196 restored.",
+  );
+});
 
 test(`${REVIEW_AND_FIX} step 6 keeps the mechanism behind "a behind PR never reaches" exit-0 green`, () => {
   assert.match(
