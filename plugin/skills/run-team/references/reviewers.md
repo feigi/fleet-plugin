@@ -148,3 +148,84 @@ to matter, and a confident wrong report from a reviewer flips a verdict.
 "Nothing else references this", "the sweep
 is clean" — most likely false, least likely checked: a grep that found nothing
 looks like a grep never run.
+
+## Reading a review result's digest, field by field
+
+Findings never enter your context —
+a result runs 26-61 KB, 7-15k tokens that used to land in yours and then again,
+up to ~10k characters, in every fix-applier prompt you wrote. What the digest tells you:
+
+**`testEnvironment` says what the review's shared test run is evidence about**,
+and it is present on a healthy run as well as a degraded one, so there is
+nothing to notice by its absence. The
+fix-applier reads it before acting on any count from the shared test run; you
+read it so a degraded review never passes for a clean one. See references/reviewers.md.
+`unverified` is *not* "checked and cleared" — a `suggestion` skips the pass by
+policy, and a finding whose refuters all crashed or abstained lands there too.
+All go to the fix-applier with the rest, in the file; never rule on them yourself.
+**`refutersDispatched`, carried on every finding, is what tells the skip
+apart** — zero is the policy skip, above zero with no deciding vote is a
+refuter pass that decided nothing — and `refutersInconclusive` splits that
+one: the refuters it counts abstained, every other one dispatched crashed. So
+the population is read off those fields rather than off severity,
+which records only how much a finding would matter if true. `resume` is
+non-null exactly when a specialist or a refuter pair crashed again after the
+review's own in-run retry, and **resume beats handing a crash-heavy review
+on**: a deferred crash is a finding nobody ever looked at.
+No replay exists for a review that ran in a runner's own kernel — `resume` is reported, not acted on, and the fix-applier defers what it names.
+`refuted` comes back deliberately as well — a refutation is itself a claim, and
+one has been reversed on new evidence. The fix-applier may reverse one; it
+records each reversal as a `refuted` entry in its disposition record, the
+evidence in `reason`, and you copy those entries to the ledger's `ruled` line by
+running `fleet-event.mjs fix-report`, whose `settle --from-report` records each
+refutation the report defers.
+
+**`dimensionsRun` is the dispatch; `dimensionsUnrun` is what names a gap.** A
+specialist that dies contributes zero findings while its key stays in
+`dimensionsRun`. So read the two together. A key
+in `dimensionsRun` and NOT in `dimensionsUnrun` returned a review; every
+`dimensionsUnrun` entry is `{dimension, reason}` naming a specialist that
+returned nothing, its `reason` the crash.
+The review already re-dispatched each crashed specialist once, so what
+`dimensionsUnrun` still names is residue: the fix-applier names it unrun in its
+report and re-runs nothing — an absence of findings is not coverage.
+
+**`suiteVerdict` is the review's one judgement on its shared test run:
+`{usable, reason}`, always present.** The review runs the test command once,
+and every specialist reads that run instead of running its own. `{usable: true,
+reason: null}` says the run executed real tests and its exit status is
+explained by its counts; usable is not green, so a usable run can have failing
+tests. `usable: false` carries `reason`, including a run that never started
+(install skipped, no suite slot). The verdict says nothing about whether a
+dimension reviewed: a specialist that returned reviewed, its findings verified
+as usual, whatever the suite verdict. With `usable: false` the
+fix-applier names `shared test run not usable: <reason>` in its final verdict
+and does nothing more — its own `<testCmd>` run and CI cover the suite.
+**Exit 75 is not a test result.** In a review it makes
+`suiteVerdict` not usable, `suiteVerdict.reason` beginning "no suite slot within
+<n> s — the host is at its suite bound; not a test failure", with no retry
+inside the run: read that `reason` off the digest and re-review it
+under the next runner letter (`review-pr-<pr#>-b` after a first runner), as for
+a runner that reported `failed`.
+
+**`cwdAudit` is the specialist's own inherited-checkout audit, one entry per
+dispatched dimension: `{dimension, state, line}`, `state` one of**
+`clean`/`dirty`/`unrepo`/`missing`. The prompt asks every specialist to run
+`git status --porcelain -uall` against the directory it inherited before
+returning and fold the result into a `CWD-AUDIT:` line — a convention, not
+schema, so a specialist that never emits it or misspells it still validates
+clean. This field is the runtime backstop that reads for the line regardless:
+`missing` is exactly as loud as `dirty`, and both name a checkout you should
+treat as a live scratch write until you have checked it.
+
+## The tier-outcomes row's difficulty fields
+
+The row's last four fields are the ticket's difficulty, and they are what lets a
+tier comparison condition on the thing that swamps it. `sizing` is the
+**member's** own `light`/`heavy` verdict from its dispatched `sizing-a-ticket`
+run, which `append` reads itself off the member's report file
+(`<scratch>/reports/impl-<ticket>[-x].json`, its `sizing.verdict`, the highest
+retry letter's when there are several), so you pass no `--sizing`; the member
+also puts it in the PR body's `Sizing:` line, with the signal it turned on;
+`profile`, `loc` and `files` all come from `diff-stats.mjs` over the merged
+diff.
