@@ -176,3 +176,13 @@ Dispatching the next member on top of an unchecked or mismatched dispatch multip
 ## Ledger reads and their buffer
 
 `board.mjs` reads `ledger.mjs read` with an explicit `maxBuffer`, so a payload past node's default is carried rather than killed mid-flight and reported as an unreachable tool — which is how the blind cockpit came back at HTTP 200 even after the pipe cut was gone.
+
+## A carried implementer after `/resume` holds the whole tick
+
+**After `/resume`, a carried implementer can hold the whole tick.** It holds when the check given this run's `session` finds no `<member>.jsonl` and exits 2, writing nothing. `HOLD (tier unchecked impl-<N>)` then stops the whole tick, not only that member's ticket. It clears once the member settles: one settled `killed` or `released` gets `tier-unverifiable=` from the same check, and one settled any other way ran, so pass the directory that dispatched it, as above. Until it settles, follow the carried token's reconciliation in references/phase-0.md, the "Resume the claims a dead run left without a PR" section, under its `prior: ancestor` branch: `proc://` reads `running` → wait; dead → the Member-killed row.
+
+A mismatch on a ticket whose issue is already CLOSED holds nothing: the tick probes that issue and drops it, since there is nothing left to replace.
+
+## The test command every gate runs
+
+**The test command every gate runs.** Pass the same command to the review, to the fix-applier, and to the finisher — whose duty-2 mutation gate runs it too — so every gate runs one command. The fix-applier and the finisher run what you hand them, so hand them the wrapped string as `<testCmd>` — `~/.fleet/bin/fleet-run suite-slot.mjs '<command>'`, each `'` inside the command written `'\''` — and it is still one command for every gate. The review wraps its own one run, so its args carry the bare command; a wrapped string handed to it anyway is harmless, the inner wrapper being the nested case. Omit it from the review args and the review (`review-core.mjs`, in a runner) reads the same cache itself, refusing outright when there is none; the fix-applier has no such fallback, so substituting `<testCmd>` with nothing leaves it no gate at all. See `references/isolation.md` (the stack-free test command).
