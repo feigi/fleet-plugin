@@ -42,6 +42,67 @@ test("readState: `rest` is what lies outside the schema, never a second copy of 
   assert.deepEqual(state.rest, { note: "not ours" });
 });
 
+// A degraded file of each kind readState announces: not JSON, not an object, a
+// controller record that cannot be judged, and a path that exists but cannot be
+// read as a file.
+function degradedFiles(dir) {
+  const files = {
+    "not JSON": "{nope",
+    "not an object": "[]",
+    "an unjudgeable controller": JSON.stringify({ controller: { pid: "x" } }),
+  };
+  const out = {};
+  for (const [label, body] of Object.entries(files)) {
+    out[label] = join(dir, `${label.replace(/\W+/g, "-")}.json`);
+    writeFileSync(out[label], body);
+  }
+  out["unreadable"] = join(dir, "a-directory");
+  mkdirSync(out["unreadable"]);
+  return out;
+}
+
+test("readState: with no sink, every degraded read still warns on console.error", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-warn-"));
+  const err = console.error;
+  const lines = [];
+  console.error = (m) => lines.push(m);
+  try {
+    for (const [label, path] of Object.entries(degradedFiles(dir))) {
+      lines.length = 0;
+      const state = readState(path, "sink-test");
+      assert.ok(state.degraded, label);
+      assert.equal(lines.length, 1, label);
+      assert.match(lines[0], /^sink-test: WARNING /, label);
+    }
+  } finally {
+    console.error = err;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readState: a supplied sink receives the warning and console.error does not", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-sink-"));
+  const err = console.error;
+  const stderrLines = [];
+  console.error = (m) => stderrLines.push(m);
+  try {
+    for (const [label, path] of Object.entries(degradedFiles(dir))) {
+      const sunk = [];
+      const state = readState(path, "sink-test", (m) => sunk.push(m));
+      assert.ok(state.degraded, label);
+      assert.equal(sunk.length, 1, label);
+      assert.match(sunk[0], /^sink-test: WARNING /, label);
+    }
+    const sunk = [];
+    readState(join(dir, "absent.json"), "sink-test", (m) => sunk.push(m));
+    assert.deepEqual(sunk, [], "an absent file is no fault and reaches no sink");
+    assert.deepEqual(stderrLines, []);
+  } finally {
+    console.error = err;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("statePath: an ambient GIT_COMMON_DIR is not canonicalised — this caller does not opt in (#1658)", () => {
   // git-env.mjs's own docstring: `canonicalise` is board-server.mjs's opt-in alone
   // (#1582, a symlinked cockpit route deriving a second port); ledger.mjs and

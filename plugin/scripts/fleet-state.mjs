@@ -123,7 +123,12 @@ const PRIORS = ["dead", "ancestor", "none"];
 // below accepts: it reads as no record, and the next write would drop the
 // key. All of them come back flagged `degraded`, for the one caller that
 // must not read them as a file with nothing in it.
-export function readState(path, name) {
+//
+// `warn` is where those announcements go, `console.error` by default so every
+// caller that passes nothing is unchanged. A caller that polls on a timer and
+// must not repeat a degraded read on a screen every few seconds passes its own
+// sink instead of copying the validation below.
+export function readState(path, name, warn = console.error) {
   // `beat: null` is the absent MARK, and it is not the same value as a mark
   // whose fields are zero: nothing has been seen beating, so there is nothing
   // to judge and nothing to report. A zeroed mark would date the beat to the
@@ -149,7 +154,7 @@ export function readState(path, name) {
     // degraded read reported as a fresh run, which is the failure class this
     // whole ticket exists to close.
     if (e.code !== "ENOENT") {
-      console.error(`${name}: WARNING could not read ${path} (${e.message}) — restarting at the base interval`);
+      warn(`${name}: WARNING could not read ${path} (${e.message}) — restarting at the base interval`);
       return makeDegraded("exists but cannot be read");
     }
     return fresh;
@@ -158,11 +163,11 @@ export function readState(path, name) {
   try {
     parsed = JSON.parse(raw);
   } catch (e) {
-    console.error(`${name}: WARNING ${path} is not JSON (${e.message}) — restarting at the base interval`);
+    warn(`${name}: WARNING ${path} is not JSON (${e.message}) — restarting at the base interval`);
     return makeDegraded("is not JSON");
   }
   if (!isRecord(parsed)) {
-    console.error(`${name}: WARNING ${path} is not an object — restarting at the base interval`);
+    warn(`${name}: WARNING ${path} is not an object — restarting at the base interval`);
     return makeDegraded("is not a JSON object");
   }
   // Per-field validation, not all-or-nothing: a file carrying a good `quiet`
@@ -254,7 +259,7 @@ export function readState(path, name) {
   // causes, and flagged.
   const record = ctl(controller);
   if ("controller" in parsed && record === null) {
-    console.error(`${name}: WARNING ${path} holds a controller record that cannot be judged — restarting at the base interval`);
+    warn(`${name}: WARNING ${path} holds a controller record that cannot be judged — restarting at the base interval`);
     return makeDegraded("holds a controller record that cannot be judged");
   }
   return {

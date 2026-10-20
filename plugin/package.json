@@ -18,6 +18,6 @@
     "NOTICE"
   ],
   "omp": {
-    "extensions": ["scripts/member-write-guard.mjs"]
+    "extensions": ["scripts/member-write-guard.mjs", "scripts/controller-alarm.mjs"]
   }
 }
