@@ -215,6 +215,7 @@ test("the PHASE0-INCOMPLETE tick row names its remedy: run phase0.mjs again, whi
 test("phase-0.md has one heading per moved step, in the order phase0.mjs runs them", () => {
   const headings = PHASE0.split("\n").filter((l) => /^## /.test(l));
   assert.deepEqual(headings, [
+    "## Check the controller alarm",
     "## Fast-forward the checkout",
     "## Pin the instruments",
     "## Record the main-checkout baseline",

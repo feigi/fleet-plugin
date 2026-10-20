@@ -45,8 +45,8 @@
 // THE PROOF IT IS ARMED. At `session_start`, for the main session only, and
 // only AFTER the timer is set, it writes `~/.fleet/alarm/<pid>.json` holding
 // `{ pid, lstart, fleet }`: this process's pid, its start time as `proc.mjs`
-// reads it, and the `.fleet/` path it resolved. The file is for run-team's
-// phase 0 to check, and nothing reads it yet: this file only writes it. A
+// reads it, and the `.fleet/` path it resolved. Phase 0's `alarm` step reads
+// the file and refuses unless it names this omp and this `.fleet/`. A
 // session that set no timer writes no file, so the file proves the timer is
 // armed against that repository's `.fleet/` and not only that the extension
 // loaded. A start time that cannot be read writes no file, the safe direction:

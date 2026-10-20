@@ -13,12 +13,16 @@ Exit 3 is a step that failed: its line carries the refusal, so fix the cause
 and run it again.
 
 `phase0.mjs` runs the start sequence in
-its fixed order — branch, fast-forward, pin, baseline, preflight, ruleset,
+its fixed order — alarm, branch, fast-forward, pin, baseline, preflight, ruleset,
 tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded,
 shortlist — prints one `phase0: <step>: <status>` line per step with the
 `NEED` lines last, and records each step in `.fleet/phase0.json`, which the
 tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row
 until the receipt is whole.
+
+## Check the controller alarm
+
+**Check the controller alarm first. Phase 0 refuses before anything else when this omp's timer is not armed.** The `alarm` step reads `~/.fleet/alarm/<pid>.json`, where `<pid>` is the omp process above the script, and checks that the file names that pid, that process's start time, and this checkout's `.fleet/`. A file that is missing, not JSON, or names something else, and no omp process above the script, each fail the step with exit 3 and a message ending `restart omp`. Restart omp, then run phase 0 again: the step is re-run, not skipped. Every later step stays `pending` until it passes.
 
 ## Fast-forward the checkout
 

@@ -20,6 +20,9 @@
 // reclaim straight after the rotation, the metrics refresh before the first
 // Pull is routed:
 //
+//   alarm         `~/.fleet/alarm/<pid>.json` names this omp's pid and start time
+//                 and this `.fleet/`. Missing, malformed or mismatched, or no omp
+//                 above the script, refuses: restart omp.
 //   branch        `git symbolic-ref -q HEAD` is refs/heads/main. A checkout left
 //                 on a branch whose PR has merged would fast-forward that branch
 //                 and the baseline would record it as the run's ref.
@@ -101,10 +104,10 @@
 // runs `ledger.mjs rotate`, which archives it as `phase0.<UTC stamp>.json`
 // beside `ledger.<UTC stamp>.md`, one stamp for both. A rotation that refused
 // leaves it held for the next attempt; one that archived the ledger and not
-// the receipt files it under a stamp of this script's own. With no omp process
-// above the run the rotation writes no controller record and `run` stays
-// null; a receipt whose `rotate` step is `ok` is then resumed on the session
-// alone.
+// the receipt files it under a stamp of this script's own. A rotation that
+// writes no controller record (the ledger finds no omp above itself) leaves
+// `run` null; a receipt whose `rotate` step is `ok` is then resumed on the
+// session alone.
 //
 // A step that fails stops the script; so does a pending one — nothing after
 // the recipe may run before it is proven, and the shortlist waits for the
@@ -132,12 +135,14 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 import { makeDie, defineFlags, isDigits } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
+import { ancestry, controllerOf, processSource, ProcUnreadable } from "./proc.mjs";
 import { IN_FLIGHT_DEFAULT } from "./phase0-receipt.mjs";
 
 const NAME = "phase0";
@@ -419,8 +424,46 @@ function shortlist({ cwd }) {
   return ok("shortlist built");
 }
 
+// The controller alarm: this omp's own record that its timer is armed against
+// this checkout's `.fleet/` (controller-alarm.mjs writes it at session_start).
+// The record is read, not trusted: it must name this omp's pid and start time
+// and this `.fleet/`.
+function alarm({ fleetDir }) {
+  const tail = " — restart omp";
+  let controller;
+  try {
+    const source = processSource();
+    controller = controllerOf(source, ancestry(source));
+  } catch (e) {
+    if (!(e instanceof ProcUnreadable)) throw e;
+    return failed(`${e.message}${tail}`);
+  }
+  if (controller === null) return failed(`no omp process above phase 0: the controller alarm cannot be checked${tail}`);
+  const path = join(homedir(), ".fleet", "alarm", `${controller.pid}.json`);
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") return failed(`controller alarm is not armed: ${path} does not exist${tail}`);
+    return failed(`controller alarm file ${path} cannot be read (${e.code ?? e.message})${tail}`);
+  }
+  let rec;
+  try {
+    rec = JSON.parse(text);
+  } catch (e) {
+    return failed(`controller alarm file ${path} is not JSON (${e.message})${tail}`);
+  }
+  if (rec === null || typeof rec !== "object" || Array.isArray(rec)) return failed(`controller alarm file ${path} is not an object${tail}`);
+  const missing = ["pid", "lstart", "fleet"].filter((k) => !Object.hasOwn(rec, k));
+  if (missing.length > 0) return failed(`controller alarm file ${path} lacks ${missing.join(", ")}${tail}`);
+  if (rec.pid !== controller.pid) return failed(`controller alarm file ${path} names pid ${rec.pid}, but this omp is pid ${controller.pid}${tail}`);
+  if (rec.lstart !== controller.lstart) return failed(`controller alarm file ${path} was written by a process started at "${rec.lstart}", but this omp started at "${controller.lstart}"${tail}`);
+  if (rec.fleet !== fleetDir) return failed(`controller alarm file ${path} names fleet "${rec.fleet}", not ${fleetDir}${tail}`);
+  return ok(`controller alarm armed: pid ${controller.pid}, ${fleetDir}`);
+}
+
 const STEPS = {
-  "branch": branch, "fast-forward": fastForward, "pin": pin, "baseline": baseline, "preflight": preflight,
+  "alarm": alarm, "branch": branch, "fast-forward": fastForward, "pin": pin, "baseline": baseline, "preflight": preflight,
   "ruleset": ruleset, "tier-roles": tierRoles, "metrics": metrics, "cockpit": cockpit, "rotate": rotate,
   "reclaim": reclaim, "recipe": recipe, "fold-in": foldIn, "stranded": stranded, "shortlist": shortlist,
 };
@@ -548,9 +591,9 @@ function main() {
     return;
   }
   // A receipt belongs to a rotated run when the rotation wrote a controller
-  // record it can be keyed on, or, with no omp process above the run to write
-  // one, when its rotation is recorded `ok`. Either way it is this run's only
-  // if the record now holds the `at` it names and the session is the same.
+  // record it can be keyed on, or, when it wrote none, when its rotation is
+  // recorded `ok`. Either way it is this run's only if the record now holds
+  // the `at` it names and the session is the same.
   const rotated = previous !== null && (previous.run !== null || previous.steps.rotate?.status === "ok");
   const resumed = rotated && previous.run === (record?.at ?? null) && previous.session === session;
   if (rotated && !resumed) {

@@ -127,9 +127,13 @@ if [ -f "$PH0_STUBS/gh.fail" ]; then echo "gh boom" >&2; exit 1; fi
 cat "$PH0_STUBS/gh.json"
 `;
 
+// The omp the controller alarm is armed for. Phase 0 runs as a child of the
+// test process, and the test process runs under this omp (see `procTable`).
+const OMP = 2_000_000_002;
 // Every external step the script reaches, in the order it reaches them, per
 // step: the stub names its work shows up under in `order.log`.
 const STEPS = [
+  ["alarm", []],
   ["branch", []], ["fast-forward", []], ["pin", ["instruments"]], ["baseline", ["main-checkout"]],
   ["preflight", ["preflight"]], ["ruleset", ["ruleset"]], ["tier-roles", ["tier-roles"]],
   ["metrics", ["metrics-refresh"]], ["cockpit", ["board"]], ["rotate", ["rotate"]],
@@ -166,6 +170,13 @@ function fixture({ spec = false } = {}) {
     writeFileSync(join(repo, ".github", "rulesets", "main.json"), "{}");
     writeFileSync(join(repo, ".github", "scripts", "apply-ruleset.sh"), `#!/bin/sh\nexec node "${STUBBED}" ruleset "$@"\n`);
   }
+  // The proc table: phase 0 is a child of this test process, which runs under
+  // the omp, so the walk up from phase 0 finds the omp as its controller.
+  const procTable = join(dir, "proc-table.json");
+  writeFileSync(procTable, JSON.stringify({
+    [process.pid]: { ppid: OMP, argv: [process.execPath, "--test"], lstart: "runner-start" },
+    [OMP]: { ppid: 1, argv: ["bun", "/home/u/.bun/bin/omp"], lstart: "omp-start" },
+  }));
   const fleet = join(repo, ".fleet");
   const receiptPath = join(fleet, "phase0.json");
   const f = {
@@ -193,15 +204,21 @@ function fixture({ spec = false } = {}) {
       assert.equal(r.status, 0, r.stderr);
       return JSON.parse(r.stdout).rows;
     },
+    alarm: (value) => {
+      mkdirSync(join(home, ".fleet", "alarm"), { recursive: true });
+      writeFileSync(join(home, ".fleet", "alarm", `${OMP}.json`), typeof value === "string" ? value : JSON.stringify(value));
+    },
+    disarm: () => rmSync(join(home, ".fleet", "alarm"), { recursive: true, force: true }),
     run: (args = null, { env = {}, cwd = repo, script = SCRIPT } = {}) => {
       const r = spawnSync(process.execPath, [script, ...(args ?? ["--session", session])], {
         cwd, encoding: "utf8",
-        env: { ...GIT_ENV, HOME: home, PATH: `${bin}:${process.env.PATH}`, PH0_STUBS: stubs, ...env },
+        env: { ...GIT_ENV, HOME: home, PATH: `${bin}:${process.env.PATH}`, PH0_STUBS: stubs, FLEET_PROC_TABLE: procTable, ...env },
       });
       const out = r.stdout.split("\n").filter(Boolean);
       return { status: r.status, out, err: r.stderr, stdout: r.stdout };
     },
   };
+  f.alarm({ pid: OMP, lstart: "omp-start", fleet: join(repo, ".fleet") });
   return f;
 }
 
@@ -346,6 +363,15 @@ test("tier-roles: a notice printed on a pass reaches the step's output and stdou
 // step's own output, every step before it is ok and every step after it is
 // pending and was never run.
 const REFUSALS = [
+  ["alarm", (f) => f.disarm(), /controller alarm is not armed.*restart omp$/m],
+  ["alarm", (f) => f.alarm("{not json"), /is not JSON.*restart omp$/m],
+  ["alarm", (f) => f.alarm("null"), /is not an object.*restart omp$/m],
+  ["alarm", (f) => f.alarm({ pid: OMP, lstart: "omp-start" }), /lacks fleet.*restart omp$/m],
+  ["alarm", (f) => f.alarm({ pid: OMP + 1, lstart: "omp-start", fleet: join(f.repo, ".fleet") }), /names pid .*restart omp$/m],
+  ["alarm", (f) => f.alarm({ pid: OMP, lstart: "a-previous-omp", fleet: join(f.repo, ".fleet") }), /started at .*restart omp$/m],
+  ["alarm", (f) => f.alarm({ pid: OMP, lstart: "omp-start", fleet: join(f.dir, "elsewhere", ".fleet") }), /names fleet .*restart omp$/m],
+  ["alarm", (f) => writeFileSync(join(f.dir, "proc-table.json"), JSON.stringify({ [process.pid]: { ppid: 1, argv: [process.execPath, "--test"], lstart: "runner-start" } })), /no omp process above phase 0.*restart omp$/m],
+  ["alarm", (f) => writeFileSync(join(f.dir, "proc-table.json"), "not json"), /cannot read the process table.*restart omp$/m],
   ["branch", (f) => git(f.repo, "switch", "-q", "-c", "other"), /HEAD is refs\/heads\/other, not refs\/heads\/main/],
   ["fast-forward", (f) => git(f.repo, "remote", "set-url", "origin", join(f.dir, "no-such-origin.git")), /git fetch origin failed/],
   ["pin", (f) => f.control("instruments", { exit: 1, err: "instruments: nothing to certify" }), /instruments: nothing to certify/],
@@ -378,6 +404,30 @@ for (const [step, arrange, shows] of REFUSALS) {
     assert.deepEqual(f.order().filter((n) => n !== "board" && !reached.has(n)), [], "a stub after the failed step ran");
   });
 }
+
+test("alarm: a matching file passes, the step is first and ok, and the run goes on to branch", () => {
+  const f = fixture();
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.deepEqual(stepLines(r.out).slice(0, 2).map((l) => l.split(": ")[1]), ["alarm", "branch"]);
+  assert.match(r.stdout, /^phase0: alarm: ok/m);
+  assert.equal(f.receipt().steps.alarm.status, "ok");
+  assert.equal(f.receipt().steps.alarm.output, `controller alarm armed: pid ${OMP}, ${join(f.repo, ".fleet")}`);
+});
+
+test("alarm: a refusal the file's appearance clears is re-run by the next run, not skipped as ok", () => {
+  const f = fixture();
+  f.disarm();
+  const refused = f.run();
+  assert.equal(refused.status, 3, refused.stdout + refused.err);
+  assert.equal(f.receipt().steps.alarm.status, "failed");
+  f.alarm({ pid: OMP, lstart: "omp-start", fleet: join(f.repo, ".fleet") });
+  const again = f.run();
+  assert.equal(again.status, 0, again.stdout + again.err);
+  assert.match(again.stdout, /^phase0: alarm: ok/m);
+  assert.equal(again.stdout.includes("alarm: ok (done earlier in this run)"), false);
+  assert.deepEqual(statuses(f.receipt()), allOk);
+});
 
 test("a failed preflight prints every FAIL line on stdout and none of the passing ones", () => {
   const f = fixture();
@@ -735,7 +785,7 @@ test("a receipt that is there and cannot be used refuses with exit 3, naming the
   assert.deepEqual(f.order(), []);
 });
 
-test("with no omp process above the run the rotation writes no record: a re-run in the same session resumes past it, a new session starts over", () => {
+test("a rotation that writes no controller record leaves the run null: a re-run in the same session resumes past it, a new session starts over", () => {
   const f = fixture();
   f.control("rotate", { noRecord: true });
   f.control("stranded", { out: JSON.stringify({ prior: "dead", claims: [{ n: 21, t: "x", action: "resume", worktree: "/w/21", branch: "b21", why: "w" }], carried: [] }) });
@@ -791,9 +841,9 @@ test("the real rotation files the previous run's receipt under the ledger archiv
   f.setRecord(RUN_AT);
   f.setReceipt(stale(f, { run: RUN_AT - 5 }));
   f.ledgerRow(5, "impl-5=PR#6");
-  const noOmp = join(f.dir, "no-omp.json");
-  writeFileSync(noOmp, "{}");
-  const r = f.run(null, { env: { PH0_REAL_ROTATE: "1", FLEET_PROC_TABLE: noOmp } });
+  // The ledger walks up from phase 0, which the table does not list, so it
+  // finds no controller and writes no record, as it did before the alarm step.
+  const r = f.run(null, { env: { PH0_REAL_ROTATE: "1" } });
   assert.equal(r.status, 0, r.stdout + r.err);
   const fleet = join(f.repo, ".fleet");
   const names = readdirSync(fleet);
@@ -861,7 +911,6 @@ globalThis.Date = class extends R { constructor(...a) { super(...(a.length ? a :
 
 // ── the rotation archives the receipt ────────────────────────────────────────
 
-const OMP = 2_000_000_002;
 const REAL_TABLE = { [process.pid]: { ppid: OMP, argv: [process.execPath, "--test"], lstart: "runner-start" }, [OMP]: { ppid: 1, argv: ["bun", "/home/u/.bun/bin/omp"], lstart: "omp-start" } };
 
 function rotateFixture() {
