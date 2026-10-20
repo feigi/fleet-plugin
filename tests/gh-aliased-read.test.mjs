@@ -3,8 +3,8 @@
 // answers the way GitHub does; these cases call it directly against a `gh`
 // stub on PATH that prints a per-case body verbatim, for the replies those
 // stubs never give: a repository that is not an object, an `errors` that is
-// not an array, an alias the body leaves out, a reply past node's default
-// spawnSync buffer, and the argv the read hands gh.
+// not an array or is null, an alias the body leaves out, a reply past node's
+// default spawnSync buffer, and the argv the read hands gh.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -14,12 +14,14 @@ import { join } from "node:path";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { ghAliasedRead } from "../plugin/scripts/gh-aliased-read.mjs";
 
-// Prints STUB_BODY's file to stdout, logs its argv to STUB_ARGV, and exits
-// STUB_EXIT. exitCode, not exit(): a large body on a pipe must drain first.
+// Prints STUB_BODY's file to stdout and STUB_STDERR to stderr, logs its argv
+// to STUB_ARGV, and exits STUB_EXIT. exitCode, not exit(): a large body on a
+// pipe must drain first.
 const GH_STUB = `#!${process.execPath}
 const fs = require("fs");
 fs.writeFileSync(process.env.STUB_ARGV, JSON.stringify(process.argv.slice(2)));
 process.stdout.write(fs.readFileSync(process.env.STUB_BODY, "utf8"));
+process.stderr.write(process.env.STUB_STDERR);
 process.exitCode = Number(process.env.STUB_EXIT);
 `;
 
@@ -30,9 +32,10 @@ process.env.PATH = `${dir}:${process.env.PATH}`;
 process.env.STUB_ARGV = join(dir, "argv.json");
 process.env.STUB_BODY = join(dir, "body.json");
 
-const read = (numbers, body, exit = 0) => {
+const read = (numbers, body, exit = 0, stderr = "") => {
   writeFileSync(process.env.STUB_BODY, typeof body === "string" ? body : JSON.stringify(body));
   process.env.STUB_EXIT = String(exit);
+  process.env.STUB_STDERR = stderr;
   return ghAliasedRead(numbers, { field: "pullRequest", selection: "{state}", timeoutMs: 10_000 });
 };
 
@@ -42,8 +45,28 @@ test("a repository that is an array answers nothing, though an error names the a
 });
 
 test("an `errors` that is not an array answers nothing and throws nothing", () => {
-  const r = read([1], { data: { repository: { n1: { state: "OPEN" } } }, errors: { message: "boom" } });
+  for (const errors of [{ message: "boom" }, "boom", 7, false]) {
+    const r = read([1, 2], { data: { repository: { n1: { state: "OPEN" } } }, errors });
+    assert.deepEqual(r.get(1), { unreachable: "malformed errors: exit 0" }, JSON.stringify(errors));
+    assert.deepEqual(r.get(2), { unreachable: "malformed errors: exit 0" }, JSON.stringify(errors));
+  }
+});
+
+test("a malformed `errors` keeps the process status and gh's last stderr line", () => {
+  const r = read([1], { data: { repository: { n1: { state: "OPEN" } } }, errors: "boom" }, 1, "gh: partial\n");
+  assert.deepEqual(r.get(1), { unreachable: "malformed errors: exit 1: gh: partial" });
+});
+
+test("a repository that is not an object outranks a malformed `errors`: the reason stays the bare exit status", () => {
+  const r = read([1], { data: { repository: null }, errors: "boom" });
   assert.deepEqual(r.get(1), { unreachable: "exit 0" });
+});
+
+test("an `errors` that is null or absent reads as no errors", () => {
+  for (const body of [{ data: { repository: { n1: { state: "OPEN" } } }, errors: null }, { data: { repository: { n1: { state: "OPEN" } } } }]) {
+    const r = read([1], body);
+    assert.deepEqual(r.get(1), { node: { state: "OPEN" } }, JSON.stringify(body));
+  }
 });
 
 test("an alias the body leaves out is unreachable while its sibling is answered", () => {

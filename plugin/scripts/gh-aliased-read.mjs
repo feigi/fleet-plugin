@@ -9,7 +9,10 @@
 // body, `data.repository` holding every alias GitHub answered and `errors[]`
 // naming each failed one by `path: ["repository", "<alias>"]`. So a body that
 // carries an object `data.repository` is read alias by alias at any exit
-// status, never as "the whole call failed".
+// status, never as "the whole call failed". An `errors` that is present and
+// not an array names no alias to trust or blame, so beside an object
+// `data.repository` it leaves the whole batch unreachable as "malformed
+// errors"; absent or null, it is no errors.
 //
 // `-F owner={owner} -F name={repo}` is filled in from the environment gh sees:
 // an inherited GH_REPO outranks the repository the cwd is bound to, and a
@@ -39,9 +42,10 @@ export function how(r) {
  *   `{ unreachable }`  — no usable answer, with the reason. Any other error
  *                        naming an alias, an error naming no alias (it may
  *                        belong to any of the batch), a null no NOT_FOUND
- *                        explains, a missing alias, and an unparseable or
- *                        absent body all land here: a failed lookup is not an
- *                        answer.
+ *                        explains, a missing alias, an `errors` that is not
+ *                        an array beside an object repository ("malformed
+ *                        errors"), and an unparseable or absent body all land
+ *                        here: a failed lookup is not an answer.
  *
  * `field` and `selection` build each alias, `n<N>:<field>(number:<N>)<selection>`;
  * `timeoutMs` bounds each `gh` call.
@@ -64,7 +68,8 @@ export function ghAliasedRead(numbers, { field, selection, timeoutMs }) {
     }
     const repo = body?.data?.repository;
     const errors = body?.errors ?? [];
-    const answered = repo !== null && typeof repo === "object" && !Array.isArray(repo) && Array.isArray(errors);
+    const isRepo = repo !== null && typeof repo === "object" && !Array.isArray(repo);
+    const answered = isRepo && Array.isArray(errors);
     const nothing = new Set();
     const refused = new Map();
     let batchWide;
@@ -81,7 +86,8 @@ export function ghAliasedRead(numbers, { field, selection, timeoutMs }) {
     for (const n of batch) {
       const alias = `n${n}`;
       const gone = (why) => out.set(n, { unreachable: why });
-      if (!answered) gone(unparseable === undefined ? how(r) : `${how(r)}: unparseable body: ${unparseable}`);
+      if (!isRepo) gone(unparseable === undefined ? how(r) : `${how(r)}: unparseable body: ${unparseable}`);
+      else if (!answered) gone(`malformed errors: ${how(r)}`);
       else if (refused.has(alias)) gone(refused.get(alias));
       else if (batchWide !== undefined) gone(batchWide);
       else if (!Object.hasOwn(repo, alias)) gone(how(r));
