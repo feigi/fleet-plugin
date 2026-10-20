@@ -171,8 +171,8 @@ test("runner: the Test entrypoint's own exit status is the runner's", () => {
 
 // The Test entrypoint is a shell command, and the runner must not reinterpret
 // it: a single quote survives the runner's own quoting, nothing in it expands
-// at write time, and a compound command keeps its meaning with the runner's
-// arguments appended to its last simple command.
+// at write time, and a compound command, quoted as the script of sh -c, keeps
+// its meaning with the runner's arguments appended after it.
 test("runner: a quoted or compound Test entrypoint runs exactly as written", () => {
   const quoted = apply({}, SCRIPT, { test: `echo "it's \\$HOME's"` });
   assert.match(quoted.text, /^exec "\$HOME\/\.fleet\/bin\/fleet-run" suite-slot\.mjs '/m);
@@ -180,7 +180,7 @@ test("runner: a quoted or compound Test entrypoint runs exactly as written", () 
   assert.equal(q.status, 0, q.stderr);
   assert.equal(q.stdout, "it's $HOME's x\n");
 
-  const compound = apply({ "sub/t.sh": ECHO_TESTS }, SCRIPT, { test: "cd sub && sh ./t.sh" });
+  const compound = apply({ "sub/t.sh": ECHO_TESTS }, SCRIPT, { test: "sh -c 'cd sub && sh ./t.sh \"$@\"' sh" });
   const c = compound.run("y");
   assert.equal(c.status, 0, c.stderr);
   assert.match(c.stdout, /^arg:y\n/);

@@ -61,8 +61,20 @@
 # tree that probe reads instead of <repo>'s own index, for a caller that runs
 # the command in a worktree cut from a ref.
 #
+# A Test entrypoint is ONE simple command: a join or a group (an unquoted
+# newline, or an unquoted `;`, `&`, `|`, `(` or `)` outside a redirection) is
+# refused, because the runner appends a run's arguments to its last simple
+# command and a join hands them to the wrong one. A chain stays usable quoted
+# as the script of `sh -c`, for example `sh -c 'cd web && npm test -- "$@"' sh`.
+#
+# `--propose <repo> <install|check|test> <command> [--at <rev>]` runs the same
+# checks on a command that is in no cache: it reads no cache and runs nothing.
+# Its refusals are verdicts on the proposal. On success it prints the command
+# back and exits 0.
+#
 # Exit status: 0 the field is printed, `uncovered` as one line of compact
-# JSON; 1 a refusal about the cache, the repository or the arguments; 3 a
+# JSON, or a proposal that passes is printed back; 1 a refusal about the cache,
+# the repository, the arguments or a proposal; 3 a
 # tool this script needs to read the cache
 # (git, node, mktemp, cat) could not be started, mktemp could not create its
 # temp file, git did not run to an answer, node died mid-read, or node exited
@@ -134,17 +146,28 @@ derive="run the Recipe derivation step (run-team phase 0, before the first claim
 # the checkout still lists the old layout until someone updates it. Without
 # `--at` the probe reads <repo>'s own index, as for a caller that runs the
 # command in <repo> itself. Three arguments is neither shape: a refusal.
-usage="usage: derive-testcmd.sh <repo> <install|check|test|uncovered> [--at <rev>]"
+usage="usage: derive-testcmd.sh <repo> <install|check|test|uncovered> [--at <rev>]
+       derive-testcmd.sh --propose <repo> <install|check|test> <command> [--at <rev>]"
+propose=
+if [ "${1-}" = --propose ]; then
+  [ $# -ge 4 ] || die "$usage"
+  repo=$2
+  field=$3
+  propose=$4
+  [ -n "$propose" ] || die "--propose needs the command to check, got an empty one — $usage"
+  shift 4
+else
+  [ $# -ge 2 ] || die "$usage"
+  repo=$1
+  field=$2
+  shift 2
+fi
 rev=
-case $# in
-  2) ;;
-  4) [ "$3" = --at ] || die "$usage"
-     rev=$4
-     case $rev in ''|-*) die "--at needs a commit, got '$rev' — $usage" ;; esac ;;
-  *) die "$usage" ;;
-esac
-repo=$1
-field=$2
+if [ $# -gt 0 ]; then
+  [ $# -eq 2 ] && [ "$1" = --at ] || die "$usage"
+  rev=$2
+  case $rev in ''|-*) die "--at needs a commit, got '$rev' — $usage" ;; esac
+fi
 
 # git's own fatal — no repository there, or no such directory — exits 128, the
 # one status that is a verdict on the repository. Any other non-zero status is
@@ -157,7 +180,8 @@ gitout=$(git -C "$repo" rev-parse --git-dir 2>&1) || {
 }
 
 case $field in
-  install|check|test|uncovered) ;;
+  install|check|test) ;;
+  uncovered) [ -z "$propose" ] || die "--propose takes an install, check or test command, not '$field' — $usage" ;;
   *) die "unknown Recipe field '$field' — expected install, check, test or uncovered" ;;
 esac
 
@@ -168,6 +192,21 @@ if [ -n "$rev" ]; then
   revc=$(git -C "$repo" rev-parse --verify "$rev^{commit}") \
     || die "--at '$rev' does not resolve to a commit in $repo"
 fi
+
+# A proposed command is checked, never read: the checks below run on it as
+# they run on a cache's field, but nothing is read from the cache and nothing
+# is run. Its refusals are verdicts on the proposal, and say so.
+if [ -n "$propose" ]; then
+  subj="the proposed"
+  tail="no command was run — propose a command that passes these checks"
+  stale="a command that cannot run is refused before any command runs"
+  stale5="so it is refused before any command runs"
+  value=$propose
+  errf=$(mktemp) || unrunnable "cannot create a temporary file to check the proposed $field command"
+  trap 'rc=$?; rm -f "$errf" "$errf.idx" 2>/dev/null || :; exit $rc' EXIT
+else
+# The cache read, for the three fields a Recipe holds. The checks below the
+# `fi` that closes it run on the value it leaves in `value`.
 
 # `--path-format=absolute` so the common dir is a real path whatever the
 # caller's cwd. The workspace it names is git-env.mjs's resolveWorkspace() rule,
@@ -356,6 +395,10 @@ esac
 [ "${#framed}" -eq "$framedlen" ] || die "$carriedmsg"
 value=${framed#"$open"}
 value=${value%"$close"}
+subj="the Recipe cache at $cache is invalid: its"
+tail=$derive
+stale="a Recipe that cannot run is stale, not a finding"
+stale5="so the Recipe is stale, not a finding"
 
 # `uncovered` is data, not a command: nothing runs it and nothing appends to
 # it, so none of the command checks below apply. JSON.stringify above made it
@@ -363,6 +406,7 @@ value=${value%"$close"}
 if [ "$field" = uncovered ]; then
   printf '%s\n' "$value"
   exit 0
+fi
 fi
 
 # claim-ticket.sh appends the runner's own arguments after this string
@@ -383,7 +427,7 @@ fi
 # neither hazard is about whether the command resolves.
 case $value in
   *';'|*'&'|*'
-') die "the Recipe cache at $cache is invalid: its $field command '$value' ends in ';', '&', or a newline — a runner-appended argument after it would run as an unrelated command instead of reaching the Test entrypoint; $derive" ;;
+') die "$subj $field command '$value' ends in ';', '&', or a newline — a runner-appended argument after it would run as an unrelated command instead of reaching the Test entrypoint; $tail" ;;
 esac
 set -f
 IFS=' 	
@@ -391,7 +435,7 @@ IFS='
 # shellcheck disable=SC2086 # field splitting is the point: scanning every word
 for word in $value; do
   case $word in
-    '#'*) set +f; die "the Recipe cache at $cache is invalid: its $field command '$value' contains a '#' word — a runner-appended argument would be swallowed as a comment rather than reaching the Test entrypoint; $derive" ;;
+    '#'*) set +f; die "$subj $field command '$value' contains a '#' word — a runner-appended argument would be swallowed as a comment rather than reaching the Test entrypoint; $tail" ;;
   esac
 done
 set +f
@@ -418,7 +462,7 @@ while [ $# -gt 0 ]; do
     *) break ;;
   esac
 done
-[ $# -gt 0 ] || die "the Recipe cache at $cache is invalid: its $field command names no command, only assignments — $derive"
+[ $# -gt 0 ] || die "$subj $field command names no command, only assignments — $tail"
 case $1 in
   *[\'\"\\\$\`\(\)\{\}\<\>\|\&\;\*\?\[\~]*) ;;
   *)
@@ -431,7 +475,7 @@ case $1 in
     # or a PATH match) has no path to test and is left to `command -v`.
     (cd "$repo" && command -v -- "$1" || exit 1
       case $1 in */*) [ -x "$1" ] || exit 1 ;; esac) >/dev/null 2>&1 \
-      || die "the Recipe cache at $cache is invalid: its $field command '$1' is not found or not executable from $repo — a Recipe that cannot run is stale, not a finding; $derive"
+      || die "$subj $field command '$1' is not found or not executable from $repo — $stale; $tail"
     ;;
 esac
 
@@ -457,8 +501,8 @@ esac
 # that cannot run. An option, an `=`
 # assignment or value, a path outside <repo>, or the target of a `<` or `>`
 # redirection is the program's own to read, or selects no test, and is
-# accepted unprobed too. The scan stops judging at a `cd` or `pushd` piece,
-# past which a pattern no longer resolves from <repo>.
+# accepted unprobed too. A join or a group, an unquoted newline included, is
+# refused as soon as the scan reaches it, so no piece after one is judged.
 # A program's own directory option,
 # such as `git -C`, does not stop it: whether that option moves where the
 # program resolves a pattern is the program's to say, so a Recipe must quote a
@@ -482,7 +526,9 @@ esac
 # private index file, and the symlink and submodule test reads that tree
 # too; the ignore rules are still <repo>'s working copy's, the one place git
 # reads them from. The resolvability probe of the command's leading word
-# above stays <repo>'s own.
+# above stays <repo>'s own. A git call of the probe that fails is git not
+# running to an answer, exit 3: no verdict on the cache or on a proposal, so
+# recipe-prove.mjs never reads it as NOT PROVEN.
 if [ "$field" = test ]; then
   # An ambient index would answer `ls-files` for whatever repository or commit
   # the caller is in the middle of, not for <repo>'s tracked files.
@@ -493,7 +539,7 @@ if [ "$field" = test ]; then
     export GIT_INDEX_FILE="$errf.idx"
     git -C "$repo" read-tree "$revc" 2>"$errf" || {
       listed=$?
-      die "cannot read the tree of $rev in $repo (git read-tree exit $listed): $(cat "$errf" 2>/dev/null)"
+      unrunnable "cannot read the tree of $rev in $repo (git read-tree exit $listed): $(cat "$errf" 2>/dev/null)"
     }
   fi
   # Whether <path> is a directory git lists as ONE entry and never beneath: a
@@ -518,14 +564,12 @@ if [ "$field" = test ]; then
   # written) or `Q` (quoted or expansion-bearing: opaque), $2 the piece. Dies
   # on a stale pattern; otherwise returns 0 having accepted the piece.
   judge() {
-    [ -z "$stop" ] || return 0
     piece=$2
     was=$before
     before=$piece
     if [ -n "$redir" ]; then redir=; return 0; fi
     [ "$1" = P ] || return 0
     case $piece in
-      cd|pushd) stop=1; return 0 ;;
       -*|*=*|/*|*..*) return 0 ;;
       *'*'*|*'?'*|*'['*']'*) ;;
       *) return 0 ;;
@@ -539,7 +583,7 @@ if [ "$field" = test ]; then
     # the prefix of the files beneath it.
     tracked=$(git -C "$repo" ls-files -- ":(glob)$piece" ":(glob)${piece%/}/**" 2>"$errf") || {
       listed=$?
-      die "cannot list the files tracked in $where to check its test command's pattern '$piece' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)"
+      unrunnable "cannot list the files tracked in $where to check its test command's pattern '$piece' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)"
     }
     [ -z "$tracked" ] || return 0
     lead=${piece%%[*?[]*}
@@ -550,15 +594,15 @@ if [ "$field" = test ]; then
       case $opq in
         0) return 0 ;;
         1) ;;
-        *) die "cannot ask git whether '$lead' is a symlink or a submodule in $where, to check its test command's pattern '$piece' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)" ;;
+        *) unrunnable "cannot ask git whether '$lead' is a symlink or a submodule in $where, to check its test command's pattern '$piece' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)" ;;
       esac
     done
     ignored=0
     git -C "$repo" check-ignore -q --no-index -- "$piece" 2>"$errf" || ignored=$?
     case $ignored in
       0) ;;
-      1) die "the Recipe cache at $cache is invalid: its test command's pattern '$piece' matches no file tracked in $where — a Test entrypoint that selects no tests passes having run nothing, so the Recipe is stale, not a finding; a pattern that a program resolves under its own directory option, such as git -C, must be quoted; $derive" ;;
-      *) die "cannot ask git whether $repo ignores its test command's pattern '$piece' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
+      1) die "$subj test command's pattern '$piece' matches no file tracked in $where — a Test entrypoint that selects no tests passes having run nothing, $stale5; a pattern that a program resolves under its own directory option, such as git -C, must be quoted; $tail" ;;
+      *) unrunnable "cannot ask git whether $repo ignores its test command's pattern '$piece' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
     esac
   }
   # End the piece being read, if there is one, and judge it.
@@ -567,11 +611,14 @@ if [ "$field" = test ]; then
     scan_piece=
     scan_kind=P
   }
+  # Refuse the Test entrypoint for the unquoted join or group $1 names.
+  joined() {
+    die "$subj $field command '$value' has an unquoted $1, which joins or groups commands — a runner-appended argument would land after the last one, not reach the Test entrypoint; write one invocation with no unquoted operator or newline (a directory option such as npm --prefix web test, pnpm -C web, make -C web, go -C web, mvn -f web, gradle -p web, or a tracked script; or sh -c 'cd web && npm test -- \"\$@\"' sh so the appended arguments reach the inner command), and list any other step in uncovered; $tail"
+  }
   nl='
 '
   before=
   redir=
-  stop=
   scan_rest=$value
   scan_piece=
   scan_kind=P
@@ -650,9 +697,22 @@ if [ "$field" = test ]; then
         scan_piece=$scan_piece$scan_c
         scan_dollar ;;
       '{'|'}'|'~') scan_kind=Q; scan_piece=$scan_piece$scan_c ;;
-      ' '|'	'|"$nl") flush ;;
+      ' '|'	') flush ;;
+      # A join or a group is refused on the Test entrypoint: a runner appends
+      # its arguments after the whole string, so they reach only the last
+      # command. An unquoted newline ends a command as `;` does. A
+      # redirection's own `&`, and the `<` or `>` itself, are not.
+      "$nl")
+        flush
+        joined newline ;;
       ';'|'&'|'|'|'('|')'|'<'|'>')
         flush
+        if [ -z "$redir" ]; then
+          case $scan_c in
+            '<'|'>') ;;
+            *) joined "'$scan_c'" ;;
+          esac
+        fi
         before=
         case $scan_c in '<'|'>') redir=1 ;; esac ;;
       *) scan_piece=$scan_piece$scan_c ;;
@@ -660,7 +720,7 @@ if [ "$field" = test ]; then
   done
   flush
   if [ -n "$scan_sq" ] || [ -n "$scan_ctx" ]; then
-    die "the Recipe cache at $cache is invalid: its test command leaves a quote, a backtick, a \$( or a \${ open, so sh cannot run it — a Recipe that cannot run is stale, not a finding; $derive"
+    die "$subj test command leaves a quote, a backtick, a \$( or a \${ open, so sh cannot run it — $stale; $tail"
   fi
 fi
 

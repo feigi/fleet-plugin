@@ -5,7 +5,7 @@
 // reads: the deriving agent chooses all three commands by reading the repository,
 // and this script is what turns that choice into a cache, or refuses to.
 //
-//   recipe-prove.mjs <repo> --install <cmd> --check <cmd|true> --test <cmd> --uncovered <json>
+//   recipe-prove.mjs <repo> --install <cmd> --check <cmd|true> --test <cmd> --covered <json> --uncovered <json>
 //                    [--count-line <literal> --test-count <n>]
 //                    [--mutate <cmd> --mutation <description>]
 //                    [--check-mutate <cmd> --check-mutation <description>]
@@ -16,6 +16,14 @@
 // neither runs, both non-empty. It is not proven — nothing here can run CI — but
 // required, so a cache never stays silent about a CI step left unrun; it is
 // written as given, as the cache's `uncovered`.
+//
+// `--covered` is one JSON array of `{ "step": <string>, "by": "test" | "check" }`,
+// one per merge-gating CI step that the Test entrypoint or the Check step runs:
+// "test" for a step the Test entrypoint runs, "check" for one the Check step
+// runs. At least one entry is "test"; "check" is never used with `--check true`;
+// and no step is in both `--covered` and `--uncovered`. Its shape is checked
+// before any command runs, and it is never written to the cache: nothing here
+// can check which steps a command runs.
 //
 // Every check runs in a throwaway worktree of `origin/main`, detached and
 // removed afterwards, so neither the caller's checkout nor its uncommitted
@@ -102,7 +110,7 @@ import { isDigits } from "./arg.mjs";
 
 const NAME = "recipe-prove";
 const USAGE =
-  "usage: recipe-prove.mjs <repo> --install <cmd> --check <cmd|true> --test <cmd> --uncovered <json> [--count-line <literal> --test-count <n>] [--mutate <cmd> --mutation <description>] [--check-mutate <cmd> --check-mutation <description>]";
+  "usage: recipe-prove.mjs <repo> --install <cmd> --check <cmd|true> --test <cmd> --covered <json> --uncovered <json> [--count-line <literal> --test-count <n>] [--mutate <cmd> --mutation <description>] [--check-mutate <cmd> --check-mutation <description>]";
 const READER = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh");
 
 // Scrubbed once, for every child: an ambient GIT_DIR or GIT_WORK_TREE — set
@@ -155,7 +163,7 @@ const READER_COULD_NOT_RUN = 3;
 function parseArgs(argv) {
   const [repo, ...rest] = argv;
   if (!repo || repo.startsWith("--")) throw cannot(USAGE);
-  const flags = new Set(["--install", "--check", "--test", "--uncovered", "--count-line", "--test-count", "--mutate", "--mutation", "--check-mutate", "--check-mutation"]);
+  const flags = new Set(["--install", "--check", "--test", "--covered", "--uncovered", "--count-line", "--test-count", "--mutate", "--mutation", "--check-mutate", "--check-mutation"]);
   const a = {};
   for (let i = 0; i < rest.length; i += 2) {
     const [flag, value] = [rest[i], rest[i + 1]];
@@ -169,6 +177,7 @@ function parseArgs(argv) {
     if (!a[f] || !a[f].trim()) throw cannot(`${f} needs a non-empty command — ${USAGE}`);
   }
   if (!("--uncovered" in a)) throw cannot(`--uncovered is required: the merge-gating CI steps neither the Test entrypoint nor the Check step runs, as one JSON array, \`[]\` for none — ${USAGE}`);
+  if (!("--covered" in a)) throw cannot(`--covered is required: the merge-gating CI steps the Test entrypoint or the Check step runs, one JSON array of { step, by } with by "test" or "check" — ${USAGE}`);
   const uncovered = parseUncovered(a["--uncovered"]);
   if (("--count-line" in a) !== ("--test-count" in a)) throw cannot("--count-line and --test-count go together");
   if ("--test-count" in a && !isDigits(a["--test-count"])) {
@@ -189,6 +198,7 @@ function parseArgs(argv) {
     if (!("--check-mutate" in a) || !a["--check-mutate"].trim()) throw cannot(`a Check step other than \`true\` needs --check-mutate, the command that turns it red — ${USAGE}`);
     if (!a["--check-mutation"].trim()) throw cannot("--check-mutation needs a non-empty description");
   }
+  checkCovered(a["--covered"], uncovered, a["--check"]);
   return {
     repo,
     install: a["--install"],
@@ -204,24 +214,63 @@ function parseArgs(argv) {
   };
 }
 
+function parseFlagJson(flag, json) {
+  try {
+    return JSON.parse(json);
+  } catch (e) {
+    throw cannot(`${flag} is not JSON: ${e.message}`);
+  }
+}
+
 // The same rule derive-testcmd.sh holds the cache to, applied before any
 // command runs, so a malformed list is a usage error rather than a proof that
 // held and a cache the reader then refuses.
 function parseUncovered(json) {
-  let list;
-  try {
-    list = JSON.parse(json);
-  } catch (e) {
-    throw cannot(`--uncovered is not JSON: ${e.message}`);
-  }
+  const list = parseFlagJson("--uncovered", json);
   if (!Array.isArray(list)) throw cannot("--uncovered is not a JSON array of { step, reason } entries, `[]` for none");
-  const filled = (s) => typeof s === "string" && s.trim() !== "";
   list.forEach((u, i) => {
     if (u === null || typeof u !== "object" || Array.isArray(u) || !filled(u.step) || !filled(u.reason)) {
       throw cannot(`--uncovered entry ${i + 1} is not an object with a non-empty \`step\` and \`reason\``);
     }
   });
   return list;
+}
+
+const filled = (s) => typeof s === "string" && s.trim() !== "";
+const normStep = (s) => s.trim().replace(/\s+/g, " ");
+
+// The ledger of CI steps the Test entrypoint or the Check step runs: a JSON
+// array of { step, by }, `by` exactly "test" or "check". Checked here, before
+// any command runs, and never written to the cache: nothing can check which
+// steps a command runs, only that the ledger is well-formed and agrees with
+// `uncovered` about what it leaves out.
+function checkCovered(json, uncovered, check) {
+  const list = parseFlagJson("--covered", json);
+  if (!Array.isArray(list)) throw cannot(`--covered is not a JSON array of { step, by } entries — ${USAGE}`);
+  list.forEach((c, i) => {
+    if (c === null || typeof c !== "object" || Array.isArray(c) || !filled(c.step) || (c.by !== "test" && c.by !== "check")) {
+      throw cannot(`--covered entry ${i + 1} is not an object with a non-empty \`step\` and a \`by\` of exactly "test" or "check"`);
+    }
+  });
+  if (!list.some((c) => c.by === "test")) throw cannot(`--covered names no step with by "test": the Test entrypoint runs at least one merge-gating CI step, or there is nothing to prove`);
+  if (check === "true" && list.some((c) => c.by === "check")) throw cannot(`--covered names a step with by "check", but --check is true, so no Check step runs`);
+  const listed = new Set(uncovered.map((u) => normStep(u.step)));
+  const both = list.find((c) => listed.has(normStep(c.step)));
+  if (both) throw cannot(`the step '${both.step}' is in both --covered and --uncovered: a step that runs is never listed as uncovered`);
+}
+
+// The reader's shape check, before any command runs: `--propose` holds a
+// proposed command to the rules the cache is held to, with no cache read and no
+// command run, so one the cache would refuse is refused before the proof.
+function preflight(field, command, repo, at) {
+  const args = [READER, "--propose", repo, field, command, ...(field === "test" ? ["--at", at] : [])];
+  const r = spawnSync("sh", args, { env: ENV, encoding: "utf8" });
+  if (r.error && !r.pid) throw cannot(`could not start sh to check the ${field} command: ${r.error.message}`);
+  if (r.signal) throw cannot(`the reader's sh was killed by ${r.signal}${errorCause(r.error)}, so the ${field} command was not checked`);
+  if (r.status === 0) return;
+  if (r.status === READER_COULD_NOT_RUN) throw cannot(`${r.stderr.trim()} — the reader could not run a tool it needs, so the ${field} command was not checked`);
+  if (r.status === 1) throw notProven(r.stderr.trim() || `the reader refused the ${field} command and said nothing`);
+  throw cannot(`the reader exited ${r.status} checking the ${field} command: ${r.stderr.trim()}`);
 }
 
 // A git that cannot be started is no verdict, as for `sh` below: read as a
@@ -534,6 +583,9 @@ function main(argv) {
   if (!workspace) throw cannot(`cannot resolve the common git dir of ${o.repo}: ${common.err}`);
   const sha = git(["rev-parse", "--verify", "origin/main^{commit}"], o.repo);
   if (!sha.ok) throw cannot(`origin/main does not resolve to a commit (${sha.err}) — fetch it; the proof runs against it`);
+  // Each command's shape is checked before any command runs, and before the
+  // proof's worktree exists: a command the cache reader would refuse is refused here.
+  for (const field of ["install", "check", "test"]) preflight(field, o[field], o.repo, sha.out);
 
   const logs = mkdtempSync(join(tmpdir(), `${NAME}-`));
   const cache = join(workspace, ".fleet", "recipe.json");
