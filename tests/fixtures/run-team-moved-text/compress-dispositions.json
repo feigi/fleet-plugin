@@ -1,6 +1,10 @@
 {
   "changed": [
     [
+      "It clears once the member settles: one settled `killed` or `released` gets `tier-unverifiable=` from the same check, and one settled any other way ran, so pass the directory that dispatched it, as above.",
+      "It clears once the member settles: one settled `killed` or `released` gets `tier-unverifiable=` from the same check, and one settled any other way ran, so its transcript exists and the `session` given is the wrong directory: pass the session directory that dispatched it, the one the exit-2 refusal in `scripts/tier-check.mjs` asks for."
+    ],
+    [
       "It runs the start sequence in its fixed order — branch, fast-forward, pin, baseline, preflight, ruleset, tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded, shortlist — prints one `phase0: <step>: <status>` line per step with the `NEED` lines last, and records each step in `.fleet/phase0.json`, which the tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row until the receipt is whole.",
       "`phase0.mjs` runs the start sequence in its fixed order — branch, fast-forward, pin, baseline, preflight, ruleset, tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded, shortlist — prints one `phase0: <step>: <status>` line per step with the `NEED` lines last, and records each step in `.fleet/phase0.json`, which the tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row until the receipt is whole."
     ],
