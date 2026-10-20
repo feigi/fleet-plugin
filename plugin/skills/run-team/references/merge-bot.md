@@ -1,6 +1,6 @@
 # Landing a change on main
 
-Evidence for the rules SKILL.md states in **Fix the tooling mid-run** and in the `ready-to-merge` wake, keyed by the rule each justifies.
+Evidence for the rules SKILL.md states in **A mid-run tooling fix** and in the `ready-to-merge` wake, keyed by the rule each justifies.
 
 ## A mid-run tooling fix lands through a PR
 

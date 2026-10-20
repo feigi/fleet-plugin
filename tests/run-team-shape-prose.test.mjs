@@ -135,19 +135,12 @@ const TICKET_ORDER = [
   "## Report",
 ];
 
-// What the ticket does not name stays in the file, between the judgement rules
-// and the failure table, in the order the file had it.
-const STANDING = [
-  "## Rules that fail silently",
-  "## Worktree and claim model",
-  "## Why the implementer body carries what it does",
-  "## Fix the tooling mid-run",
-];
-
-test("the sections run in the order the ticket names, the standing sections between the judgement rules and the failure table", () => {
-  const judge = TICKET_ORDER.indexOf("## Judgement rules the drivers stop for");
-  const expected = [...TICKET_ORDER.slice(0, judge + 1), ...STANDING, ...TICKET_ORDER.slice(judge + 1)];
-  assert.deepEqual(headingsOf(SKILL), expected);
+// The four standing sections the ticket did not name — Rules that fail silently,
+// Worktree and claim model, Why the implementer body carries what it does, Fix
+// the tooling mid-run — left the file (#3544), so the ticket's ten are the whole
+// list.
+test("the sections run in the order the ticket names, and no other `## ` section stands between them", () => {
+  assert.deepEqual(headingsOf(SKILL), TICKET_ORDER);
 });
 
 test("no `## ` heading is a section this file did not have a reason to keep: Shell traps live in references/", () => {
@@ -228,7 +221,7 @@ export const firstParagraph = ({ blocks }) => blocks.find((b) => b.kind !== "hea
 
 test("every `## ` section opens with a paragraph that states what the controller does and when it is done", () => {
   const sections = sectionsOf(SKILL);
-  assert.ok(sections.length >= 14, `${sections.length} sections read — the splitter is broken`);
+  assert.ok(sections.length >= 10, `${sections.length} sections read — the splitter is broken`);
   for (const section of sections) {
     const first = firstParagraph(section);
     assert.ok(first !== undefined && first.kind === "para", `${section.heading} does not open with a paragraph`);
@@ -378,14 +371,16 @@ const PHASE_2 = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "r
 // keeps its own pairs in
 // tests/fixtures/run-team-moved-text/queue-tier-guards-dispositions.json, in the same shape.
 const QUEUE_TIER_GUARDS = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "run-team-moved-text", "queue-tier-guards-dispositions.json"), "utf8"));
+// The cut that removed `## Rules that fail silently`, `## Worktree and claim
+// model`, `## Why the implementer body carries what it does` and `## Fix the
+// tooling mid-run` keeps its own pairs in
+// tests/fixtures/run-team-moved-text/standing-sections-dispositions.json, in the same shape.
+const STANDING_SECTIONS = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures", "run-team-moved-text", "standing-sections-dispositions.json"), "utf8"));
 const CHANGED = [
   ...PHASE_2.changed,
   ...PHASE_3.changed,
   ...QUEUE_TIER_GUARDS.changed,
-  [
-    "**Pin once**, at phase 0 step 0 below, from the main checkout you are running this from — never from a member's worktree, which is gitignored and carries no baseline: `~/.fleet/bin/fleet-run instruments.sh --pin`.",
-    "**Pin once**, at phase 0 step 0 above, from the main checkout you are running this from — never from a member's worktree, which is gitignored and carries no baseline: `~/.fleet/bin/fleet-run instruments.sh --pin`."
-  ],
+  ...STANDING_SECTIONS.changed,
   [
     "No harness supplies a scratch directory to a member, so a member left to name its own invents one — and the liveness read below, which looks at the files under the directory a member's own prompt assigned it, then watches a directory nobody else can find.",
     "No harness supplies a scratch directory to a member, so a member left to name its own invents one — and the liveness read in **The tick's rows**, which looks at the files under the directory a member's own prompt assigned it, then watches a directory nobody else can find."
@@ -543,6 +538,7 @@ const DELETED = [
   ...PHASE_2.deleted,
   ...PHASE_3.deleted,
   ...QUEUE_TIER_GUARDS.deleted,
+  ...STANDING_SECTIONS.deleted,
   [
     "**`impl-<N>/`** goes once issue #N is CLOSED, or when it is OPEN, no live `impl-<N>` token names it and nothing under it has changed in 7 days.",
     "reclaim-scratch.mjs's header, which `tick --apply` runs after the reap, and tests/reclaim-scratch.test.mjs"
@@ -697,6 +693,12 @@ const MOVED_RATIONALE_POINTERS = [
   ["That append is the whole duty.", "pull.md", "## Accumulate per PR, never conclude a tier result inside one run"],
   ["re-check measurements by timestamp rather than by who you think was running.", "isolation.md", "## Do not guess the victim — the blast radius is the machine, not the Pull"],
   ["a `mixed (…)` models column means the cell's history spans more than one model behind its role.", "pull.md", "## Accumulate per PR, never conclude a tier result inside one run"],
+  ["and do not attribute the gap to the member until it answers.**", "member-lifecycle.md", "## A missing report is not evidence the member failed to send one"],
+  ["After any ruling you cannot confirm was received, re-check the artifacts it governed.", "member-lifecycle.md", "## Never read a member's silence as assent"],
+  ["A member whose prompt names no path asks you by name and never makes one up.", "isolation.md", "## The scratch root is computed, never invented and never recorded"],
+  ["**The controller's own cwd stays the main checkout, unchanged.**", "isolation.md", "## The controller's own cwd stays the main checkout"],
+  ["**Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh --pin`.", "instruments.md", "## Re-pin first after a mid-run tooling fix"],
+  ["and its literal-path and `grep -F` settling rules, before you edit them.", "correction-tickets.md", "## Every implementer body carries the claim discipline"],
 ];
 for (const [rule, file, heading] of MOVED_RATIONALE_POINTERS) {
   test(`SKILL.md keeps "${rule.slice(0, 50)}…" with See references/${file} beside it`, () => {

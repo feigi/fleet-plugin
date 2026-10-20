@@ -517,6 +517,19 @@ mention of the controller is not a statement that the reader is one of its
 members. That skill keeps its condition, so a solo session still runs the
 interactive path; this block is what puts a member on the fleet side of it.
 
+**Prose-first** and **wrongly-REFUSE** are not padding — they are the case
+which shipped with **enumerate-and-declare** already in its prompt. It missed a
+shape its own ticket named in passing, because it enumerated from the mechanism
+instead of the text; and it introduced a regression refusing every `node --test`
+flag, because it enumerated what the guard should catch and never what it could
+wrongly refuse.
+
+The commit-incrementally block is not optional. A member that goes idle mid-task
+leaves its diff only in the worktree, and the controller cannot reap, replace,
+or even see it — `worktree-audit.sh`'s committed-vs-uncommitted split is exactly
+what decides whether a replacement redoes or destroys work. Observed twice in
+one run.
+
 ## Default: In-flight bound 5
 
 **Default: In-flight bound 5, fixed for the run.** The level is set by load, not

@@ -119,10 +119,15 @@ const WATCHER_COMMENT_CLAUSE = "REST units per listed PR on top of the 200 floor
 // imperative SKILL.md keeps between the clause and the pointer, written for
 // SKILL.md rather than moved.
 const MOVED = [
-  ["member-lifecycle.md", "A missing report is not evidence the member failed to send one", 'So when a report is missing, **ask by name — that is what the "unless the controller asks by name" clause is for — and do not attribute the gap to the member until it answers.**', "**But a missing report is NOT evidence the member failed to send one — the inbound direction drops AND delays messages.**"],
-  ["member-lifecycle.md", "A missing report is not evidence the member failed to send one", "The ask is the controller's move, not the member's.", "Note this cuts against the paragraph above only in appearance: the default stays *send once*, because unprompted re-sends were measured 2-to-1 false."],
+  // The standing sections left SKILL.md (#3544). The missing-report ask is
+  // reworded for its new home in Failure handling's Recovery (pinned in
+  // run-team-shape-prose), and the controller's-move, foreground-suite,
+  // claim-discipline, grep -F, task-cwd, eval-kernel and release-ticket rules
+  // are stated in their reference file alone, so SKILL.md keeps no clause of them.
+  ["member-lifecycle.md", "A missing report is not evidence the member failed to send one", null, "**But a missing report is NOT evidence the member failed to send one — the inbound direction drops AND delays messages.**"],
+  ["member-lifecycle.md", "A missing report is not evidence the member failed to send one", null, "Note this cuts against the paragraph above only in appearance: the default stays *send once*, because unprompted re-sends were measured 2-to-1 false."],
   ["instruments.md", "Re-check your instruments before every gate decision", "**You read your instruments out of a tree every member can write to — re-check them before every gate decision.**", "Per-member worktrees and `./agent-test`'s port derivation protect members from each other;"],
-  ["member-lifecycle.md", "A member runs its test suite in the foreground and blocks on it", "**A member runs its test suite in the foreground and blocks on it.**", "Backgrounding a suite and polling for it makes the member's own progress depend on a wake-up nothing in the fleet guarantees,"],
+  ["member-lifecycle.md", "A member runs its test suite in the foreground and blocks on it", null, "Backgrounding a suite and polling for it makes the member's own progress depend on a wake-up nothing in the fleet guarantees,"],
   ["shell-traps.md", "zsh splits a command substitution, never an unquoted parameter expansion", "**zsh word-splits an unquoted command substitution's result; it does NOT split an unquoted parameter expansion.**", "That one difference is the whole rule, and the hazard is the **assigned-variable** form, never `$(…)`."],
   ["shell-traps.md", "Word the rule against the first row", "**Word the rule against the first row.**", "A warning spelled *never `for x in $(…)`* names the safe form as the hazard,"],
   ["shell-traps.md", "The inline `$(printf …)` form splits on every whitespace character", "it splits on *every* whitespace character, so it is safe only for values that cannot contain one — PR numbers cannot, branch names and paths can.", "Measured on a two-line list whose first value is `two words`:"],
@@ -152,15 +157,15 @@ const MOVED = [
   ["finisher.md", "`origin/main...HEAD` is right for the positive check and wrong for a negative one", null, "Measured on one PR: a controller wrote \"neither document was touched\" against `origin/main...HEAD`"],
   ["finisher.md", "Whatever you verify by running, run in a tree nobody else owns", null, "Measured once: a finisher was inside that worktree at the instant the fix-applier announced one more clause to land,"],
   ["finisher.md", "Remove the verification worktree on every path", null, "(`contains modified or untracked files`, rc 128, directory left on disk — measured, git 2.50.1)"],
-  ["correction-tickets.md", "Every implementer body carries the claim discipline", "**Every implementer body carries the claim discipline, because tickets that restate facts ship new wrong claims** — inherited from the ticket, and minted in prose nobody asked for.", "It was measured on tickets that would have been judged routine too:"],
-  ["correction-tickets.md", "A settling command over literal text uses `grep -F`", "**A settling command over literal text uses `grep -F`, and its zero counts only after the same command finds a line known to match.**", "Measured once: `grep -c 'settled by:\\s+x'` answers 0 against a file holding that exact line, and `grep -cF` answers 1."],
+  ["correction-tickets.md", "Every implementer body carries the claim discipline", null, "It was measured on tickets that would have been judged routine too:"],
+  ["correction-tickets.md", "A settling command over literal text uses `grep -F`", null, "Measured once: `grep -c 'settled by:\\s+x'` answers 0 against a file holding that exact line, and `grep -cF` answers 1."],
   // The section's provenance line: it stated no rule, so nothing stayed behind.
   ["isolation.md", "Where the omp probes ran", null, "Measured 2026-09-09 in a throwaway clone (`/tmp/fleet-probe`) that never touched the real checkout."],
   ["isolation.md", "A fleet member is never dispatched with omp's `isolated: true`", "**A fleet member is never dispatched with omp's `isolated: true`.**", "Measured: an isolated spawn builds its workspace under `~/.omp/wt/<hash>/m`"],
   ["isolation.md", "A member's tree is the claimed worktree, addressed by absolute path", "**A member's tree is the claimed worktree, addressed by absolute path.**", "(**You read your instruments out of a tree every member can write to** in SKILL.md)"],
-  ["isolation.md", "`task` does not accept a per-dispatch working directory", "**The one open gap that probe measured: `task` does not accept a per-dispatch working directory.**", "`omp://tools/task.md` documents non-isolated spawns as running `runSubprocess(...)` \"directly with parent cwd\""],
-  ["isolation.md", "`task`-dispatched members share one `eval` kernel", "**The same gap reaches past the filesystem: `task`-dispatched members share one `eval` kernel.**", "Measured 2026-09-21, in a live run rather than a probe clone:"],
-  ["isolation.md", "`release-ticket.sh` is not a no-op on omp, and a running member hides nothing from `inflight.sh`", "**`release-ticket.sh` is not a no-op on omp, and `inflight.sh`'s probes are unaffected by a running member.**", "Measured against a hand-built claim (a branch plus a `git worktree add`) with a member sleeping inside it:"],
+  ["isolation.md", "`task` does not accept a per-dispatch working directory", null, "`omp://tools/task.md` documents non-isolated spawns as running `runSubprocess(...)` \"directly with parent cwd\""],
+  ["isolation.md", "`task`-dispatched members share one `eval` kernel", null, "Measured 2026-09-21, in a live run rather than a probe clone:"],
+  ["isolation.md", "`release-ticket.sh` is not a no-op on omp, and a running member hides nothing from `inflight.sh`", null, "Measured against a hand-built claim (a branch plus a `git worktree add`) with a member sleeping inside it:"],
   ["pull.md", "Default: In-flight bound 5", "**Default: In-flight bound 5, fixed for the run.**", "5 keeps worst-case review concurrency below the former reviewer count of 6 and sits near the measured mean In flight of 5.6."],
   ["isolation.md", "A pattern kill reaches siblings", "**A pattern kill reaches siblings — the implementer, fix-applier and finisher briefs forbid it.**", "Measured: an implementer chasing its own stalled run issued a `pkill -f` on its test file's name"],
   ["isolation.md", "What a killed run's output looks like depends on the signal", "**What the victim's output looks like depends on the signal — and one of the cases is a clean green.**", "Each measured on node v26.8.1/darwin against a purpose-spawned fixture killed by its own PID."],
@@ -175,11 +180,9 @@ const MOVED = [
   ["ledger.md", "`check`'s exits and its `verdict`", null, "and every measured stop over those was survived only by a reader who overrode it and searched the tracker by hand"],
 ];
 
-// The one line still saying `measured` — a kept rule clause whose own words
-// carry it, beside its pointer.
-const MEASURED_LINES = [
-  "**The one open gap that probe measured: `task` does not accept a per-dispatch working directory.** See references/isolation.md.",
-];
+// No line of SKILL.md says `measured` any more: the last one, the task-cwd
+// gap's kept clause, left with the Worktree and claim model section (#3544).
+const MEASURED_LINES = [];
 
 // --- nothing the move took out is lost -----------------------------------------
 

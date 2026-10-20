@@ -34,13 +34,13 @@ const PHASE0 = Pin.file(join(REPO, "skills", "run-team", "references", "phase-0.
 
 // Bounded at both ends, and the slices are small on purpose: the file names
 // `instruments.sh` in three separate places, so a slice running to EOF is
-// satisfied by whichever of the other two survived.
+// satisfied by whichever of the other two survived. The rule is its own
+// subsection of the judgement rules, so the subsection is the bound.
 const RULE = () =>
-  RUN_TEAM.between(
-    "**You read your instruments out of a tree every member can write to",
-    "\n**A member runs its test suite in the foreground and blocks on it.**",
-    "run-team instrument rule",
-  ).text;
+  RUN_TEAM.section("### Re-check the instruments before a gate", "run-team instrument rule").text;
+// What the set covers, and the re-pin's consequence, moved to the
+// instruments reference beside the rule's rationale.
+const INSTRUMENTS_MD = Pin.file(join(REPO, "skills", "run-team", "references", "instruments.md"));
 
 // The END bound is THIS paragraph's own blank line, via `paragraph()`. It was a
 // literal `between()` end anchor on the heading of the NEXT, unrelated phase-0
@@ -72,7 +72,7 @@ const GATES = () =>
   ).text;
 
 const TOOLING_FIX = () =>
-  RUN_TEAM.section("## Fix the tooling mid-run", "run-team tooling fix").text;
+  RUN_TEAM.section("### A mid-run tooling fix", "run-team tooling fix").text;
 
 test("the rule states that BOTH non-zero codes refuse, not just the changed one", () => {
   const rule = RULE();
@@ -116,7 +116,7 @@ test("the rule records that refs are out of the digest, and why", () => {
   // the next reader will ask. Without the reason, "add refs to the digest" is
   // an obvious-looking improvement that fires on ordinary work several times a
   // fleet run — which is the noise #436's third acceptance criterion rules out.
-  const rule = RULE();
+  const rule = INSTRUMENTS_MD.section("## What the instrument set covers", "references/instruments.md coverage").text;
   assert.match(rule, Pin.phrase("It does not cover refs, deliberately"));
   assert.match(rule, Pin.phrase("a per-gate refusal on that is noise"));
 });
@@ -215,9 +215,12 @@ test("the mid-run tooling fix re-pins — the one legitimate writer to the set",
   const fix = TOOLING_FIX();
   assert.match(fix, Pin.phrase("Re-pin first"));
   assert.match(fix, Pin.phrase("instruments.sh"));
+  assert.match(fix, Pin.phrase("--pin`. See references/instruments.md."));
   // The consequence, spelled out, is what stops the step being dropped as
   // ceremony: skipping it makes the controller's own fix look like tampering.
-  assert.match(fix, Pin.phrase("the next gate refuses on your own fix"));
+  // It sits in the reference the step's pointer names.
+  const why = INSTRUMENTS_MD.section("## Re-pin first after a mid-run tooling fix", "references/instruments.md re-pin").text;
+  assert.match(why, Pin.phrase("the next gate refuses on your own fix"));
 });
 
 test("the path the prose tells the controller to run is a real executable", () => {

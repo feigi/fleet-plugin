@@ -64,6 +64,12 @@ under `Verified:` its zero reads as a checked absence.
 
 ## The settling command for "which files read X" is never a literal-path grep
 
+**The settling command for "which files read X" must never be a literal-path
+grep.** Replace the file with `MUTATED` in a throwaway copy, run the suite, and read off
+which suites red: that answers which ones **depend on its contents**, which is
+the question a coverage claim actually needs, and it returns a different set
+from any spelling of the grep.
+
 The path is assembled in more than one spelling here, one of them behind
 a local `read` helper, so a grep for the path string answers with the files that
 merely *name* it — comments included — and misses the files that build it.

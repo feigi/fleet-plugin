@@ -75,7 +75,7 @@ test("the incident definition carries the four shapes, each with its tracker exa
   const def = PAGE.section("## What a member-reliability incident is", "the definition section");
   const shapes = [
     ["**A duty skipped.**", "#2331"],
-    ["**A report lost.**", "**Rules that fail silently**"],
+    ["**A report lost.**", "`plugin/skills/run-team/references/member-lifecycle.md`"],
     ["**A step run out of order or twice.**", "#3047"],
     ["**A brief missing, or contradicting, a line.**", "#2884"],
   ];

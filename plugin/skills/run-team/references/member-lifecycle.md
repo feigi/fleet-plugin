@@ -1,6 +1,6 @@
 # Member lifecycle: naming, fresh context, recovery
 
-Why member name load-bearing, why every member single-use, how a member's job outcome (`completed`/`failed`/`cancelled`) and peer liveness (`running`/`idle`/`parked`) decide its recovery. Assertions these justify live in SKILL.md's "Rules that fail silently", wake table, Reading a review result, Failure handling sections; evidence here.
+Why member name load-bearing, why every member single-use, how a member's job outcome (`completed`/`failed`/`cancelled`) and peer liveness (`running`/`idle`/`parked`) decide its recovery. Assertions these justify live in SKILL.md's wake table, Dispatching the members a wake names, Reading a review result, A member's claims, Failure handling sections; evidence here.
 
 ## Every member is named
 
@@ -58,6 +58,28 @@ Reviewers go idle waiting on CI, won't resume alone — rebased, pushed, stopped
 
 Liveness says nothing: `idle` means "not currently executing", not "done"; finished member's finding may never arrive. In one run every member that looked dead had its work in git or on PR — pushed commits, self-removed label, applied ruling. Read `gh pr view`, `gh run view`, `git -C <worktree> status` before messaging: one command settles what round-trip usually doesn't, and member that ignored one ping tends to ignore second. When you message, send specific next action, never "what is your status".
 
+## A report is delivered, not implied by ending a turn
+
+**A report is delivered, not implied by ending a turn.** Every member owes
+the controller one report naming its outcome before it exits — including a
+member whose prompt carries no explicit report line. A member that does the work
+correctly and ends its turn has reported nothing: the controller learns the
+outcome only by re-reading artifacts and pinging, and a finding held only in
+that member's context is lost. Members did exactly this in one run —
+finishers, a reviewer and merge bots alike, the work done and only the
+delivery missing. Every brief's report paragraph says it.
+
+## You never write the do-not-acknowledge line yourself
+
+**The implementer, fix-applier, finisher, merge-bot and review-runner briefs
+each tell the member you do not acknowledge reports; you never write that line
+yourself.** A member cannot see whether its report arrived, so silence
+from you is indistinguishable from loss and it re-sends — three members did in
+one run, each burning a turn, and in all three the original had in fact arrived.
+Each of those templates under `briefs/` carries the line: *"The controller does
+not acknowledge reports. Send once and exit; never re-send unless the controller
+asks by name."*
+
 ## A missing report is not evidence the member failed to send one
 
 **But a missing report is NOT evidence the member failed to send one — the
@@ -83,6 +105,15 @@ pinged.
 Note this cuts against the paragraph above only in appearance: the default stays
 *send once*, because unprompted re-sends were measured 2-to-1 false. The ask is
 the controller's move, not the member's.
+
+## Never read a member's silence as assent
+
+**Your OWN messages can vanish the same way, and that half is not recoverable by
+a re-send.** Two controller rulings were lost in one run, both with a
+`success: true` receipt: a member proceeded on its stated default and filed a
+tracker issue the lost ruling had said not to file. The confirmation-state
+sentence SKILL.md's **A member's claims** requires is the only thing that made
+either loss visible.
 
 ## A member runs its test suite in the foreground and blocks on it
 

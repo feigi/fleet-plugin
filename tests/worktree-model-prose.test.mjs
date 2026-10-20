@@ -1,4 +1,4 @@
-// #1344, ruled on #1315. The worktree/claim model section documents five
+// #1344, ruled on #1315. The worktree/claim model section documented five
 // rulings: claim, release and reap are git-native and unchanged on omp;
 // `isolated: true` is never used for a fleet member, because it
 // patch-applies into the CALLING SESSION's cwd on completion rather than
@@ -35,36 +35,36 @@ import { Pin } from "./support/prose-pin.mjs";
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
 
-// Nested inside the section (never `RUN_TEAM` directly), so a sibling
-// ticket's own prose elsewhere in the file cannot satisfy or break these
-// anchors.
+// The Worktree and claim model section left SKILL.md (#3544). The two rules a
+// dispatch acts on — never `isolated: true`, the claimed worktree by absolute
+// path — and the controller's own cwd stand in the wake section's dispatch
+// subsection, each beside its pointer; that subsection is the slice (never
+// `RUN_TEAM` directly), so a sibling ticket's own prose elsewhere in the file
+// cannot satisfy or break these anchors.
 //
-// The section's measured paragraphs — the isolated spill, the cwd recipe, the
-// missing cwd field, the shared eval kernel, the release/inflight probe —
-// moved, with the probes' provenance, to references/isolation.md; the section
-// keeps each rule beside its pointer. Their pins read the reference file's
-// probe sections, bounded at both ends for the same reason.
+// The measured paragraphs — the isolated spill, the cwd recipe, the missing cwd
+// field, the shared eval kernel, the release/inflight probe — and the
+// unchanged-on-omp ruling live in references/isolation.md, with the probes'
+// provenance. Their pins read the reference file's probe sections, bounded at
+// both ends for the same reason.
+const dispatch = () => RUN_TEAM.section("### Dispatching the members a wake names", "run-team/SKILL.md dispatch").text;
 const ISOLATION = Pin.file(join(REPO, "skills", "run-team", "references", "isolation.md"));
 const probes = () => ISOLATION.between("## Where the omp probes ran", "## A pattern kill reaches siblings", "references/isolation.md omp probe sections").text;
 const cwdRecipe = () =>
   ISOLATION.section("## A member's tree is the claimed worktree, addressed by absolute path", "references/isolation.md cwd recipe").text;
 
-test("run-team/SKILL.md: the section keeps each moved rule beside its pointer to references/isolation.md", () => {
-  const section = RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text;
+test("run-team/SKILL.md: the dispatch subsection keeps each dispatch rule beside its pointer to references/isolation.md", () => {
   for (const rule of [
     "**A fleet member is never dispatched with omp's `isolated: true`.**",
     "**A member's tree is the claimed worktree, addressed by absolute path.**",
-    "**The one open gap that probe measured: `task` does not accept a per-dispatch working directory.**",
-    "**The same gap reaches past the filesystem: `task`-dispatched members share one `eval` kernel.**",
-    "**`release-ticket.sh` is not a no-op on omp, and `inflight.sh`'s probes are unaffected by a running member.**",
   ]) {
-    assert.match(section, Pin.phrase(`${rule} See references/isolation.md.`), `the section lost, or lost the pointer beside: ${rule}`);
+    assert.match(dispatch(), Pin.phrase(`${rule} See references/isolation.md.`), `the dispatch subsection lost, or lost the pointer beside: ${rule}`);
   }
 });
 
-test("run-team/SKILL.md: claim, release and reap are named unchanged on omp, with no dialect branch", () => {
+test("references/isolation.md: claim, release and reap are named unchanged on omp, with no dialect branch", () => {
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    ISOLATION.section("## Claim, release and reap are unchanged on omp", "references/isolation.md").text,
     /Claim,\s+release\s+and\s+reap\s+are\s+unchanged\s+on\s+omp[\s\S]{0,400}none\s+of\s+the\s+four\s+scripts\s+carries\s+a\s+dialect\s+branch/,
     "the four scripts (claim/release/reap/inflight) are no longer named as unchanged and dialect-branch-free on omp",
   );
@@ -168,7 +168,7 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
 
 test("run-team/SKILL.md: absolute-path addressing is stated as the shared contract", () => {
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
+    dispatch(),
     /member's\s+tree\s+is\s+the\s+claimed\s+worktree,\s+addressed\s+by\s+absolute\s+path/,
     "the absolute-path rule is no longer stated",
   );
@@ -219,11 +219,10 @@ test("run-team/SKILL.md: release-ticket.sh is not a no-op on omp and inflight.sh
 });
 
 test("run-team/SKILL.md: the controller's own cwd staying the main checkout gets its own stated ruling", () => {
-  // Ruling 4 on its own, not folded as a trailing clause onto the
-  // release/inflight paragraph above it.
+  // Ruling 4 on its own, not folded as a trailing clause onto another rule.
   assert.match(
-    RUN_TEAM.section("## Worktree and claim model", "run-team/SKILL.md").text,
-    Pin.phrase("The controller's own cwd stays the main checkout, unchanged"),
+    dispatch(),
+    Pin.phrase("**The controller's own cwd stays the main checkout, unchanged.** See references/isolation.md."),
     "ruling 4 (the controller's own cwd is unchanged) no longer has its own stated sentence",
   );
 });

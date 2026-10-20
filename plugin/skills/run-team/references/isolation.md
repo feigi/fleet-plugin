@@ -120,6 +120,13 @@ One flat namespace, generic filenames (`b.min.js`, `probe.mjs`) — one agent ov
 
 The axis is two-sided: the member partitions, and the parent assigns each child's path. `<scratch>` itself is assigned, never invented: the controller resolves it with `scratch-root.mjs` and writes the absolute path into each member's prompt. A member owns one directory — `<scratch>/impl-<N>/` for an implementer, `<scratch>/pr<N>/…` on the review side — and every agent it dispatches gets a directory under that one, unique to that child and never shared, written into the child's prompt as an absolute path; a child never derives its own. The review side is already laid out this way: `review-core.mjs` makes the run root `<scratch>/pr<N>/run-XXXXXXXX/` with `mktemp` — it appends `pr<N>/` to the scratch root it is handed and refuses a scratch already ending in one, so a review runner is given the root, never `<scratch>/pr<N>` — then writes `<run>/<dim>/` into each specialist's prompt and `<run>/verify-<dim>/f<i>-l<j>/` into each refuter's. A fix-applier makes its own run root the same way — `<scratch>/pr<N>/fix-XXXXXXXX/` with `mktemp` — then resolves `<run>/<finding>/` to an absolute path for the refuter it dispatches on a suggestion; the bare `<scratch>/pr<N>/<finding>/` is not that path, since finding ids restart at 1 each fix-applier round too, and a later round on the same PR would reach for the same directory a prior round's refuter left fixtures in. An implementer's child gets `<scratch>/impl-<N>/<childName>/`, named after its dispatch name. Refuters are grandchildren, not members, which is why the member partition alone is not the rule: the agents that actually collided were ones no member rule reaches, and a parent-assigned path is what reaches them. Read from the object store at a pinned ref, write only under own path.
 
+## The scratch root is computed, never invented and never recorded
+
+No harness supplies a scratch directory to a member, so a member left to name its own
+invents one — and the liveness read in **The tick's rows**, which looks at the files under the
+directory a member's own prompt assigned it, then watches a directory nobody
+else can find.
+
 ## IDE/harness diagnostics attribute by bare filename, with no path
 
 Probe copies carry same filenames as real tree, so specialist's throwaway mutation surfaces as errors that read exactly like live worktree's — and line numbers can plausibly line up with real in-flight edits. Never relay diagnostic without reproducing it in that member's specific worktree (re-run the check that raised it — the typechecker, the linter — from there). Ran twice in one session: clean first time (sibling's probe), genuinely broken second. Telling implementer to chase phantom in file it is mid-rewrite on is expensive failure.
@@ -128,6 +135,15 @@ Probe copies carry same filenames as real tree, so specialist's throwaway mutati
 
 Measured 2026-09-09 in a throwaway clone (`/tmp/fleet-probe`)
 that never touched the real checkout.
+
+## Claim, release and reap are unchanged on omp
+
+**Claim, release and reap are unchanged on omp.** `claim-ticket.sh`,
+`release-ticket.sh`, `reap.sh` and `inflight.sh` are git-native and operate on
+the single shared ref store every worktree and the main checkout read and
+write directly (**Phase 1**, the tick's reap, and `release-ticket.sh` under
+**Failure handling**); nothing in omp's `task` model touches that
+store, so none of the four scripts carries a dialect branch.
 
 ## A fleet member is never dispatched with omp's `isolated: true`
 
@@ -219,6 +235,12 @@ is therefore still necessary. With the member live inside
 the worktree, `git worktree list` and `git branch --list` from the main
 checkout reported the claim unchanged before, during and after — `inflight.sh`
 hides nothing from omp.
+
+## The controller's own cwd stays the main checkout
+
+Nothing in the dispatch recipe above — the cwd recipe, the
+isolated-workspace measurement, or the teardown scoping — moves
+where the controller itself runs from.
 
 ## A pattern kill reaches siblings
 

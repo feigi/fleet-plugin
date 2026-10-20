@@ -14,8 +14,9 @@ example each:
 - **A duty skipped.** #2331: `fleet-finisher` skipped duty 3 (adding
   `ready-to-merge`) and reported `labelled` anyway, in two of five PRs of one
   pass.
-- **A report lost.** The measurement in `plugin/skills/run-team/SKILL.md`'s
-  **Rules that fail silently**: a finisher completed every duty, labelled the
+- **A report lost.** The measurement in
+  `plugin/skills/run-team/references/member-lifecycle.md`'s **A missing report
+  is not evidence the member failed to send one**: a finisher completed every duty, labelled the
   PR and sent its report; the send was accepted with a msg_id and never
   arrived, and the controller read the silence as the member ending its turn
   without reporting.
