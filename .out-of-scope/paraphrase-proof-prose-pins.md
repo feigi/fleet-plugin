@@ -65,3 +65,4 @@ merits.
 ## Prior requests
 
 - #1478 — "ancestry-check-position-prose pin is blind to a paraphrased re-attachment of the #814 defect" (deferred from PR #1475 review; blindness reproduced at triage, 5 of 5 pins green under the paraphrase)
+- #3566 — "next-ticket step 5 reject pins let other CI-clearing forms through (unset FOO CI, export -n CI, CI= sh -c)" (the reject regexes miss `unset FOO CI`, `export -n CI`, and the `CI=` forms, none of which appears in step 5; a negative pin is not widened against wordings nobody has written, and a form joins the literal ban once observed in the tree)
