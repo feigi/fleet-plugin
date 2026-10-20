@@ -30,6 +30,7 @@ import { pipeline, parallel, ARGS, SNAP, review, finding, vote, scriptedHost } f
 // contradicted it) was exactly that, and was invisible to all of them.
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = Pin.file(join(REPO, "skills", "run-team", "SKILL.md"));
+const LEDGER_MD = Pin.file(join(REPO, "skills", "run-team", "references", "ledger.md"));
 const REVIEW_AND_FIX = Pin.file(join(REPO, "commands", "review-and-fix.md"));
 
 // Slice by named anchors, and fail loudly when one moves. SLICE SIZE is what
@@ -117,16 +118,15 @@ test("objectKeys reads fields by depth, not by line, and ignores brackets/commas
   assert.deepEqual(objectKeys('label: "a, {b}", next: 1,'), ["label", "next"]);
 });
 
-// The Reviewers prose is in four places now: the dispatch paragraphs under
+// The Reviewers prose is in three places now: the dispatch paragraphs under
 // Phase 2, the digest reading under the wake table's **Reading a review
-// result**, the failed-review retry under Failure handling's Recovery, and the
-// review's row tokens under Run ledger.
+// result**, and the failed-review retry under Failure handling's Recovery. The
+// review's row tokens are the wake section's.
 const reviewersSection = () =>
   [
     RUN_TEAM.between("### Dispatching the members a wake names", "### Reading a review result", "run-team wake dispatch: reviewer").text,
     RUN_TEAM.between("### Reading a review result", "### Nothing to do: arm the beat", "run-team Reading a review result").text,
     RUN_TEAM.between("**A throw, an empty return, or a notification whose status is not `completed`", "## Guards", "run-team review retry").text,
-    RUN_TEAM.paragraph("A PR's review is not a member", "run-team review row tokens", "`review` holds a PR's review record to these rules").text,
   ].join("\n\n");
 // The fix-applier's prompt is what the member reads: its agent body, then the
 // brief the renderer prints for a review fix-applier. SKILL.md carries neither.
@@ -746,7 +746,7 @@ test("the per-PR member is the fix-applier, in the Report example and through th
   // both directions: revert the example to a reviewer runner and the extracted
   // name is the runner's; stop reading `fix-pr-<M>` as a member and nothing
   // is extracted at all.
-  const ledger = RUN_TEAM.between("One line per ticket, rewritten in place", "\nPlus two append-only lists", "run-team ledger example").text;
+  const ledger = LEDGER_MD.between("## One line per ticket", "## Writing before dispatch", "ledger.md example block").text;
   // The doc's example rows carry placeholders (`#<t1>`, `PR#<p1>`) rather than
   // real tracker numbers, so give each a concrete number before the parser sees
   // it — the shape under test is the member token, not the digits.

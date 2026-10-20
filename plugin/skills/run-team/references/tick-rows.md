@@ -30,7 +30,7 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   (**The reviewer**).
 - `DISPATCH merge-bot` — the next `merge-bot-<n>` (**The merge bot**). The `<scratch>` its brief takes is the absolute `scratch-root.mjs` output, and the bot writes only under `<scratch>/pr<N>/merge-bot-<n>/`.
 - `DISPATCH finisher PR#<M> …` — a finisher settled `labelled`, yet the open
-  list shows PR M without `ready-to-merge`, and no `label-off=` (**Run ledger**)
+  list shows PR M without `ready-to-merge`, and no `label-off=` (references/ledger.md)
   accounts for the removal. Apply the finisher gate (**The finisher gate**: the
   `check` job green on the current head), then dispatch the next-suffix
   finisher at that head, one letter past the highest the PR has used: render

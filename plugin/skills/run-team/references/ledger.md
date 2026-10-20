@@ -1,6 +1,6 @@
 # The run ledger: the evidence behind its rules
 
-Evidence for the rules SKILL.md states in **Run ledger**, keyed by the rule each justifies.
+Evidence for the rules SKILL.md's wake and dispatch sections state, keyed by the rule each justifies.
 
 ## Writer policy: every write is serialized by `<file>.lock`
 
@@ -55,3 +55,49 @@ them before filing. The stdout JSON names all of that in one field:
 `unverified`. Only `already-filed` and `tracker-hit` carry a non-zero code, so
 `verdict` is the only thing that tells a searched-and-clean tracker from one
 that was never read and from one whose rows you have to read yourself.
+
+## Why the ledger outlives your context
+
+One git-ignored `.fleet/ledger.md` per run is updated at every state change through the `~/.fleet/bin/fleet-run ledger.mjs` subcommands (`row`, `filed`, `ruled`, `check`, `read`, `dispatch`, `settle`, `review`, `drain`, `rotate`). Your context is the least durable thing in the run: it compacts, and a controller that loses the dispatch map or the filed list redoes finished work. Two duplicate tickets shipped in one run from exactly that.
+
+## One line per ticket
+
+One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`; `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row):
+
+```
+#<t1> impl-<t1>=PR#<p1> → PR#<p1> → MERGED 73b356de
+#<t2> impl-<t2>=PR#<p2> → PR#<p2> · fix-pr-<p2> · ports=16<t2> · ruled:6-applies · held-behind:#<t3>
+#<t3> impl-<t3> · tier=task-high
+#<t4> excluded · behind-pr:#<p2>
+#<t5> excluded · behind-issue:#<t3>
+```
+
+## Writing before dispatch
+
+A member that dies between spawn and write is invisible — and members die in batches.
+
+## filed and ruled
+
+`filed` is checked with `ledger.mjs check <subject>` before every `gh issue create`, so a finding already recorded this run is not filed twice. That is not a guarantee against duplicates at large; the tracker query, described under `check`'s exits and its `verdict` above, is what covers those.
+
+`ruled` records PR + decision + one-line reason, so a replacement controller does not re-litigate a settled call.
+
+## Label-off and conflict holds
+
+`label-off=<finisher-pr-M[-x]>` is written before you take `ready-to-merge` off PR M on purpose (taking it off before you approve a push, or clearing one left on a moved head), naming that PR's latest finisher attempt: the tick reads a missing label as a finisher's miss only after the last attempt a `label-off=` names, so without it your own removal reads as one.
+
+`ci=<run-id>:<attempt>:<conclusion>` and `held-behind:#<lower>` are row tokens the same way, and so is `conflict-hold:#<pr>` — written by the merge bot itself (`run-merge-bot.md` step 1), or by you off the tick's `CONFLICT` line, naming the row's own PR. It is not an Exclusion: that gates a ticket's claim, this a PR's merge.
+
+## The review pair on a PR's row
+
+A PR's review is not a member, so it carries its own pair of row tokens, written with `review` onto the PR's row (**The reviewer**): `review=wf:<runId>` | `review=member:<name>` at launch, `<name>` being `review-pr-<n>` for the PR's first runner and the next letter its rows do not carry yet (`review-pr-<n>-b`, `-c`, …) for every later one, settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>` when the result lands, `<run>` the review's `run-XXXXXXXX` run root under `<scratch>/pr<n>/`, which holds its `review.json`.
+
+## The ledger's readability field: `ledger.ok`
+
+The ledger half reports its own readability as its own field, `ledger.ok`, the peer of `tracker.ok`: false when the file did not exist, and false too when the path led to something that did not parse as a ledger — which is what tells a ledger that was read and held nothing filed from one there was nothing to read. The absent case is the normal one for a run's first `check` — `.fleet/` is git-ignored and created lazily by the first write — so it stays `clean` at exit 0, and `ledger.ok` is the field that says why rather than the verdict moving. The stderr warning is deliberately narrower than the field: it fires on a path with no file, so a `--file` that landed on the wrong existing file is a silent `ok:false` with nothing on stderr.
+
+## Suite slots
+
+**The suite slots wedge the same ways, and clear the same way.**
+
+`~/.fleet/suite-slots/<i>.lock` is built on the ledger's lock primitive, so an empty or unparseable `<i>.lock` and a leftover `<i>.lock.reap` are permanent, a zombie holder is transient, and a dead holder is taken over. A wait that expired with exit 75 names each wedged file — remove it by hand once no suite run is running, the way the Writer policy section above removes `<file>.lock`.

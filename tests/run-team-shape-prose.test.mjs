@@ -145,7 +145,6 @@ const STANDING = [
   "## Tier outcomes guard",
   "## Why the implementer body carries what it does",
   "## Fix the tooling mid-run",
-  "## Run ledger",
 ];
 
 test("the sections run in the order the ticket names, the standing sections between the judgement rules and the failure table", () => {
@@ -232,7 +231,7 @@ export const firstParagraph = ({ blocks }) => blocks.find((b) => b.kind !== "hea
 
 test("every `## ` section opens with a paragraph that states what the controller does and when it is done", () => {
   const sections = sectionsOf(SKILL);
-  assert.ok(sections.length >= 18, `${sections.length} sections read — the splitter is broken`);
+  assert.ok(sections.length >= 17, `${sections.length} sections read — the splitter is broken`);
   for (const section of sections) {
     const first = firstParagraph(section);
     assert.ok(first !== undefined && first.kind === "para", `${section.heading} does not open with a paragraph`);
@@ -490,10 +489,6 @@ const CHANGED = [
     "| Implementer bails before implementing | Act by the report's `bailCause` as the **Relabel causes** table says, then refill (**What a wake owes beyond its call**) |"
   ],
   [
-    "**`ledger.mjs drain \"<reason>\"`** — the one drain marker per run; supply stops, the review and merge sides keep going.",
-    "**`ledger.mjs drain \"<reason>\"`** — at most one standing drain marker; supply stops, the review and merge sides keep going."
-  ],
-  [
     "Run `~/.fleet/bin/fleet-run phase0.mjs --session <session-dir>` from this main checkout, `<session-dir>` being this run's own session directory.",
     "Run phase 0 from a Python eval cell in this main checkout, without `--session`: `subprocess.run([os.path.expanduser(\"~/.fleet/bin/fleet-run\"), \"phase0.mjs\", …], stderr=subprocess.STDOUT)`."
   ],
@@ -528,6 +523,16 @@ const CHANGED = [
   [
     "`NEED resume #<n> <worktree> <branch>` — a dead run's claim with no PR.",
     "`NEED resume #<n> <worktree> <branch>` — a dead run's claim: no PR, or not only `CLOSED` ones."
+  ],
+  ["Never rotate mid-run: it is phase 0's step alone.", "Never rotate the ledger mid-run: it is phase 0's step alone."],
+  ["Gate on the field, not on the warning.", "Gate on the `ledger.ok` field of `check`, not on the stderr warning."],
+  [
+    "That is not a guarantee against duplicates at large; the tracker query below is what covers those.",
+    "That is not a guarantee against duplicates at large; the tracker query, described under `check`'s exits and its `verdict` above, is what covers those."
+  ],
+  [
+    "A wait that expired with exit 75 names each wedged file — remove it by hand once no suite run is running, the way references/ledger.md removes `<file>.lock`.",
+    "A wait that expired with exit 75 names each wedged file — remove it by hand once no suite run is running, the way the Writer policy section above removes `<file>.lock`."
   ]
 ];
 
@@ -590,7 +595,56 @@ const DELETED = [
   [
     "test --at origin/main` prints it — and the one you hand specialists per **Give specialists a stack-free test command** above.",
     "plugin/commands/review-and-fix.md's **Give specialists a stack-free test command**, which carries the rule"
-  ]
+  ],
+  ["`→ PR#M` stays as the human-readable arrow; the tick reads only the `=` tokens.", "ledger.mjs's token grammar, ledger-grammar.mjs"],
+  ["`DISPATCH finisher PR#<M> …` — a finisher settled `labelled`, yet the open list shows PR M without `ready-to-merge`, and no `label-off=` (**Run ledger**) accounts for the removal.", "fleet-tick.mjs's printed line; references/tick-rows.md"],
+  ["`dispatch merge-bot` names the next bot itself.", "ledger.mjs dispatch merge-bot; tests/ledger-dispatch.test.mjs"],
+  ["`label-off=<finisher-pr-M[-x]>` is yours, written before you take `ready-to-merge` off PR M on purpose (taking it off before you approve a push, or clearing one left on a moved head), naming that PR's latest finisher attempt: the tick reads a missing label as a finisher's miss only after the last attempt a `label-off=` names, so without it your own removal reads as one.", "references/ledger.md's label-off section; SKILL.md's wake section"],
+  ["**`ledger.mjs dispatch <ticket|pr> <member>`** — before the dispatch call, marks the member live on its row and appends it to `## Dispatched` with `brief=<first 8 hex of its brief's sha256>`.", "ledger.mjs dispatch; tests/ledger-dispatch.test.mjs"],
+  ["**`ledger.mjs review <pr> <token>…`** — the only writer of `review=` and `reviewed=` (below): appends each to the PR's row — the ticket row once `settle impl-<N>=PR#M` has run, else `#M`, created when neither exists — and prints `{pr, row, line, created, next}`, `row` the key written and `next` the runner name the PR's next launch takes, null with every letter taken.", "ledger.mjs review; tests/ledger-row-review.test.mjs"],
+  ["**`ledger.mjs rotate`** — phase 0's first ledger write, every run: moves the file as-is to `ledger.<UTC YYYY-MM-DDTHHMMSSZ>.md` beside it under the same `<file>.lock`, and the next write starts the empty skeleton — unless the previous run was this session's own, when it first writes the rows and `## Dispatched` entries still live into a new ledger, and every other settled name, or name given an out-of-vocabulary outcome, into its `## Retired` (references/phase-0.md, \"Rotate the ledger\", says which).", "ledger.mjs rotate; tests/ledger-rotate.test.mjs; references/phase-0.md's Rotate the ledger"],
+  ["**`ledger.mjs settle <member> <outcome>`** — rewrites the token to `<member>=<outcome>` in both places.", "ledger.mjs settle; tests/ledger-settle-report.test.mjs"],
+  ["**`ledger.mjs settle <member> --from-report [--reports <dir>]`** — the settle for a member that wrote a report: reads `<dir>/<member>.json` (`<dir>` defaults to `<scratch>/reports`), derives the outcome from it and, before writing, checks what that outcome claims — `PR#M`: `verify-sha.sh` on the report's branch and head, and PR M OPEN and closing N; `bailed`: a `bailCause`, which the receipt names; `applied:<head>`: origin's branch at that head; `no-op`: origin's branch at the head the PR's latest `reviewed=` names; `labelled`: `ready-to-merge` on the PR and in the read-back; `halted:<cause>`: a cause and non-empty evidence; `done`: every PR the bot merged reads MERGED.", "ledger.mjs settle --from-report; tests/ledger-settle-report.test.mjs"],
+  ["`review` holds a PR's review record to these rules, read across every row that maps to the PR — its settled `impl-<N>=PR#<M>` token, else its first `PR#` mention, else its key — in ledger order.", "ledger.mjs review; tests/ledger-row-review.test.mjs"],
+  ["`row` and `token` refuse a `label-off=` naming no `finisher-pr` member that `## Dispatched` or some row already carries.", "ledger.mjs row and token; tests/ledger.test.mjs"],
+  ["`row` holds the rest: a launch open before the write is still on one of the PR's rows after it, `=failed` allowed, and a member name appears once on the line, whatever its outcome.", "ledger.mjs row; tests/ledger.test.mjs"],
+  ["`row` refuses a malformed member token anywhere in its text — one whose outcome is outside the vocabulary above, e.g. `merge-bot-1=dispatched` — at exit 2, naming the token and writing nothing, because every reader would take it as a permanent settle.", "ledger-grammar.mjs; tests/ledger-grammar.test.mjs"],
+  ["`settle impl-N=PR#M` also folds a `#M` row a PR-bound dispatch or a `review` made before the settle into `#N`'s row, so the PR's row is the one row naming each PR from then on — but only when `#N`'s row named no PR before this write (a second `PR#` on it would misattribute the fold, or bury `#N`'s own fresher `review=` state under an older one) and no implementer claims `#M`'s row as its own.", "ledger.mjs settle; tests/ledger-settle-report.test.mjs"],
+  ["`settle impl-N=PR#M` refuses a settle after which a PR maps to more than one row when it did not before, judged after the fold — a PR has one row, the PR's row; a split already on disk is carried.", "ledger.mjs settle; tests/ledger-settle-report.test.mjs"],
+  ["A `review=<launch>=failed` whose `review=<launch>` the row holds settles that launch in place, alone or with the next launch in the same call.", "ledger.mjs review; tests/ledger-row-review.test.mjs"],
+  ["A filer whose `filed` failed twice reports `unrecorded: #N <subject>` instead — an `unrecorded` entry of its report file — and `settle <member> --from-report` runs `filed` for it.", "ledger.mjs settle --from-report; tests/ledger-settle-report.test.mjs"],
+  ["A launch identity (a workflow's runId, or a runner's name, `=failed` aside) appears once, and no launch takes a runner name the ledger's `## Retired` holds — an earlier run of this session launched it — naming the next free reviewer name instead.", "ledger.mjs review's launch check; tests/ledger-row-review.test.mjs"],
+  ["**A member's token is `<member>` while it is live and `<member>=<outcome>` once it settles** — the grammar is `ledger-grammar.mjs`'s, and the tick derives every live count from it, so nobody states one.", "ledger-grammar.mjs; tests/ledger-grammar.test.mjs"],
+  ["Any other token is refused.", "ledger-grammar.mjs; tests/ledger-grammar.test.mjs"],
+  ["A second launch refused for an open one waits for that one's `reviewed=`, or — once the Member-killed row confirms its runner dead — settles it `=failed` in the same `review` call as the new launch.", "ledger.mjs review; tests/ledger-row-review.test.mjs"],
+  ["A settled member stays settled.", "ledger.mjs settle; tests/ledger.test.mjs"],
+  ["A write that adds a violation is refused, exit 2, nothing written; one already on the ledger and carried forward is not.", "ledger.mjs; tests/ledger.test.mjs"],
+  ["Every `review=`/`reviewed=` parses.", "ledger-grammar.mjs; tests/ledger-grammar.test.mjs"],
+  ["Every `reviewed=` answers the nearest earlier launch that is neither answered nor `=failed`.", "ledger.mjs review; tests/ledger-row-review.test.mjs"],
+  ["Every record goes through `ledger.mjs` (**Run ledger**), which `fleet-event.mjs` drives — never a hand edit.", "SKILL.md's wake section; ledger.mjs; tests/ledger.test.mjs"],
+  ["Exit 2: the report is absent or invalid, or a check could not look, and nothing is written; a check that could not look is run again once `gh` and `git` answer.", "ledger.mjs settle --from-report; SKILL.md's failure table"],
+  ["Exit 3: a check failed — the member's claim and the world disagree — and nothing is written; you rule.", "ledger.mjs settle --from-report; SKILL.md's failure table"],
+  ["**filed** (`ledger.mjs filed <issue> <subject>`, checked with `ledger.mjs check <subject>` before every `gh issue create`) — so a finding already recorded this run is not filed twice.", "references/ledger.md's filed-and-ruled section; ledger.mjs filed"],
+  ["It lives in this run's ledger, so the next run's rotation retires it with everything else.", "references/phase-0.md's Rotate the ledger"],
+  ["It refuses a member whose `briefs/<member>.json` beside the ledger is missing, names another role or carries no sha256, a brief file beside it that is missing or does not hash to that sha256, a name this session already used — on the ledger or in its `## Retired` — and names the replacement (`-b`, `-c` …), a second live member on one ticket or PR, any implementer once the run is draining, an implementer whose row's `tier=` names no single definition or one with no file under `agents/`, and a finisher on a ledger the tick itself refuses.", "ledger.mjs dispatch; tests/ledger-dispatch.test.mjs"],
+  ["It refuses a write that adds a `review=`/`reviewed=` token (one the row already holds is carried), and one after which a PR maps to more than one row when it did not before — `row <M>` creating `#M` for a PR a ticket row maps, or a rewrite adding a `PR#M` mention to another row — naming the PR's row (`settle impl-N=PR#M` applies the same rule after its fold).", "ledger.mjs row and review; tests/ledger-row-review.test.mjs"],
+  ["It then records each `unrecorded` filing in **filed** and, for a fix-applier, each refutation the report defers in **ruled**, once however often it runs, and prints `{member, outcome, checks, filed, ruled}`.", "ledger.mjs filed and ruled; references/ledger.md"],
+  ["No launch appears while an earlier one is open — unanswered and not `=failed`.", "ledger.mjs review; tests/ledger-row-review.test.mjs"],
+  ["One git-ignored `.fleet/ledger.md` per run, updated at **every** state change via `~/.fleet/bin/fleet-run ledger.mjs` subcommands (`row`, `filed`, `ruled`, `check`, `read`, `dispatch`, `settle`, `review`, `drain`, `rotate`).", "references/ledger.md; ledger.mjs"],
+  ["Outcomes: `impl-N` = `PR#M | bailed | released | killed | tier-mismatch | blocked`; `fix-pr-M` = `applied:<head> | no-op | failed | killed`; `finisher-pr-M` = `labelled | failed | killed | halted:<cause>`, `<cause>` one of `live-editor | rebase | past-pin | unreadable | missing | absent | other` (**Resolving a finisher halt**); `merge-bot-n` = `done | killed`.", "ledger-grammar.mjs's outcome vocabulary; tests/ledger-grammar.test.mjs"],
+  ["Phase 0 rotates it before anything reads it, so no exclusion, filing, ruling or drain marker outlives the run that wrote it, and no row does either — except, when the previous run was this session's own, a row still carrying a live token, which rotate carries forward with its live `## Dispatched` entries (phase 0).", "references/phase-0.md's Rotate the ledger"],
+  ["Plus two append-only lists:", "ledger.mjs rotate; tests/ledger-rotate.test.mjs"],
+  ["Refused while the recorded controller is alive and not this run's ancestor, ledger or none — or, with no record and a ledger to move, while the heartbeat mark is still beating, or a tick or ledger write is inside its window with no beat — or when the archive name already exists, the process table cannot be read, or `.fleet/heartbeat.json` exists but cannot be used (unreadable, not JSON, not an object, or a `controller` it cannot judge); with no ledger and no such refusal it moves nothing and exits 0.", "ledger.mjs rotate; tests/ledger-rotate.test.mjs"],
+  ["**ruled** (`ledger.mjs ruled <pr> <decision>`) — PR + decision + one-line reason, so a replacement controller does not re-litigate a settled call.", "references/ledger.md's filed-and-ruled section; ledger.mjs ruled"],
+  ["The bare form above, for an outcome a report carries, warns `settled without --from-report` on stderr.", "ledger.mjs settle; tests/ledger-settle-report.test.mjs"],
+  ["The FILER writes this one, not you: `review-and-fix.md` step 5 and finisher duty 2 each run `filed` immediately after their own `gh issue create`, with the subject they passed to `check`, and report `filed: #N <subject>`.", "review-and-fix.md step 5; finisher duty 2"],
+  ["The guard is stated in references/phase-0.md, \"Rotate the ledger\".", "references/phase-0.md's Rotate the ledger"],
+  ["Then it records this run's controller in `.fleet/heartbeat.json`.", "references/phase-0.md's Rotate the ledger"],
+  ["Write `label-off=<latest finisher attempt>` onto the PR's row first (`ledger.mjs token <PR number> label-off=<latest finisher attempt>`, which keeps every token the row already has — **Run ledger**), then remove `ready-to-merge`, then approve.", "SKILL.md's wake section (Once the label is on)"],
+  ["Write neither by hand:", "references/ledger.md's writer policy"],
+  ["**`ledger.mjs drain \"<reason>\"`** — the one drain marker per run; supply stops, the review and merge sides keep going.", "ledger.mjs drain; tests/ledger-dispatch.test.mjs"],
+  ["**The file lives one run.**", "references/ledger.md's one git-ignored `.fleet/ledger.md` per run sentence"],
+  ["See references/ledger.md.", "the pointers now inline in SKILL.md's wake section and failure table"]
 ];
 
 const oldSentences = () => counted(sentencesOf(readFileSync(FIXTURE, "utf8")));

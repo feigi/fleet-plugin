@@ -300,10 +300,7 @@ test("the no-baseline remedy runs main-checkout.mjs --record and names the basel
   assert.doesNotMatch(row, /phase0\.mjs/, "a re-run skips the `ok` baseline step, so it records nothing");
 });
 
-test("rotate's retired-name rule and its guard are sent to the rotate section, which holds both", () => {
-  const rotate = SKILL.bullet("- **`ledger.mjs rotate`**", "`row` refuses a malformed member token", "run-team ledger rotate bullet").text;
-  assert.match(rotate, Pin.phrase(`into its \`## Retired\` (references/phase-0.md, "${ROTATE}", says which).`));
-  assert.match(rotate, Pin.phrase(`The guard is stated in references/phase-0.md, "${ROTATE}".`));
+test("rotate's retired-name rule and its guard are stated in the rotate section of references/phase-0.md, which holds both", () => {
   const section = Pin.of(PHASE0, "phase-0.md").section(`## ${ROTATE}`, "phase-0 rotate section").text;
   assert.match(section, Pin.phrase("goes into the new ledger's `## Retired` as a bare name"), "the section no longer says which names retire");
   assert.match(section, Pin.phrase("**The guard is the controller record**"), "the section no longer states the guard");

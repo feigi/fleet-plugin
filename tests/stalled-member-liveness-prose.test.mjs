@@ -266,7 +266,7 @@ test("the clause keeps the asymmetry that makes every alive-signal a preconditio
 });
 
 // The other sentence this change put in SKILL.md that the controller acts on:
-// the Run-ledger line that sends a resumed controller to the census before it
+// the wake-section line that sends a resumed controller to the census before it
 // trusts a live token. It is read inside its own paragraph, so the same words
 // elsewhere in the file cannot satisfy it. The fold sentence that named a
 // folded CHECK-LIVENESS member restated what `fleet-tick.mjs --fold-unchanged`
@@ -275,7 +275,7 @@ test("the clause keeps the asymmetry that makes every alive-signal a preconditio
 const RESUME_CENSUS =
   "Compaction parks every in-flight member and nothing reports it, so on resume take the registry census first (**Member unaccounted**, in **Failure handling**) before you trust a live token.";
 
-test("the Run-ledger paragraph tells a resumed controller to take the registry census before trusting a live token", () => {
-  const block = read().paragraph("Compaction parks every in-flight member", `${SKILL}'s Run-ledger resume sentence`, "**The file lives one run.**").text;
-  assert.match(block, Pin.phrase(RESUME_CENSUS), `${SKILL}'s Run-ledger paragraph lost the census-first-on-resume sentence.`);
+test("the wake-section paragraph tells a resumed controller to take the registry census before trusting a live token", () => {
+  const block = read().paragraph("Compaction parks every in-flight member", `${SKILL}'s wake-section resume sentence`, "Token additions go through").text;
+  assert.match(block, Pin.phrase(RESUME_CENSUS), `${SKILL}'s wake-section paragraph lost the census-first-on-resume sentence.`);
 });

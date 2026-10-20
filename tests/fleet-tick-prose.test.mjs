@@ -130,11 +130,10 @@ test("phase 0 runs tier-roles.mjs --check --in-flight <B> and says its notice ne
   assert.match(step, Pin.phrase("is a notice in the step's output and never holds"));
 });
 
-test("the failure-handling row and the settle-outcomes list name blocked", () => {
+test("the failure-handling row names blocked", () => {
   const row = RUN_TEAM.between("| Implementer blocked or ambiguous *mid-implementation* |", "\n| `review-pr` workflow throws or returns no tree", "failure-handling blocked row").text;
   assert.match(row, Pin.phrase("`ledger.mjs settle impl-<N> blocked`"));
   assert.match(row, Pin.phrase("the ticket is not In flight"));
-  assert.match(RUN_TEAM.between("Outcomes: `impl-N` = `PR#M | bailed |", "`fix-pr-M` = `applied:<head>", "settle-outcomes list").text, Pin.phrase("tier-mismatch | blocked"));
 });
 
 test("the wake table names every wake, each with its fleet-event.mjs command", () => {

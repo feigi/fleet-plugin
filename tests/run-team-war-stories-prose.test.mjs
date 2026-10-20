@@ -167,9 +167,12 @@ const MOVED = [
   ["isolation.md", "The command line is no partition either", "**The command line is no partition either — not reliably.**", "Measured with `ps -Ao pid,ppid,args -ww`"],
   ["merge-bot.md", "A mid-run tooling fix lands through a PR", "Plan it as a PR the run's own merge queue lands, never as an edit-and-continue.", "measured 2026-08-10 by a controller that tried exactly that at the end of a 7-PR run."],
   ["failure-handling.md", "A frozen transcript does not establish that a member is dead", "**A frozen transcript does not establish that a member is dead — the discriminator is its scratch dir.**", "Measured once: a refuter wedged forever on `until grep -q` for a marker `node --test` never writes,"],
-  ["ledger.md", "Writer policy: every write is serialized by `<file>.lock`", "**Writer policy: the controller owns run state (`row`/`token`/`settle`/`dispatch`/`review`/`drain`/`ruled`); filers append filings with `filed`; all writes are serialized by `<file>.lock`.**", "measured, 8 concurrent `filed` kept 2–5 of 8 rows."],
-  ["ledger.md", "The gap the lock does not close", "**The gap the lock does not close:** `check` → `gh issue create` → `filed` is three commands, and the lock covers each one alone, so two filers can both read `clean` in the seconds before either records.", "Accepted — the measured same-run accidental duplicate was filed minutes apart —"],
-  ["ledger.md", "`check`'s exits and its `verdict`", "`check` exits **0** clean, **1** already in this run's filed list, **2** usage error (no JSON on stdout), **3** the ledger is clean but open or closed tracker issues match — read those and decide.", "and every measured stop over those was survived only by a reader who overrode it and searched the tracker by hand"],
+  // The Run ledger section left SKILL.md (#3542): these three rules are stated
+  // in references/ledger.md alone, and SKILL.md keeps no clause of them, only
+  // the wake section's LEDGER_POINTER below.
+  ["ledger.md", "Writer policy: every write is serialized by `<file>.lock`", null, "measured, 8 concurrent `filed` kept 2–5 of 8 rows."],
+  ["ledger.md", "The gap the lock does not close", null, "Accepted — the measured same-run accidental duplicate was filed minutes apart —"],
+  ["ledger.md", "`check`'s exits and its `verdict`", null, "and every measured stop over those was survived only by a reader who overrode it and searched the tracker by hand"],
 ];
 
 // The one line still saying `measured` — a kept rule clause whose own words
@@ -253,6 +256,13 @@ test("a kept rule wrapped across lines still sits beside its pointer", () => {
   const wrapped = SKILL.replace(line, () => `${clause}\nSee references/ci-watcher.md.`);
   assert.notEqual(wrapped, SKILL);
   assert.equal(keptCount(wrapped, clause, "ci-watcher.md"), 1);
+});
+
+// The ledger rows above keep no clause in SKILL.md; the pointer that names
+// them is what stays, in the wake section.
+const LEDGER_POINTER = "The writer policy, the gap the lock does not close, and `check`'s exits:";
+test("SKILL.md points at references/ledger.md for the ledger rules it no longer states", () => {
+  assert.equal(keptCount(SKILL, LEDGER_POINTER, "ledger.md"), 1, "SKILL.md lost its pointer to references/ledger.md for the writer policy, the lock's gap and `check`'s exits");
 });
 
 test("SKILL.md says `measured` only on a line carrying a See references/ pointer, and these are all of them", () => {
