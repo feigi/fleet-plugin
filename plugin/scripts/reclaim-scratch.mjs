@@ -41,19 +41,18 @@
 //            named for N that git does not list — keeps it, with that reason.
 //   reports/<member>.json, reports/<member>.check.json
 //            a member's report file, and the Check-step record written beside
-//            it. `reports/` itself is never removed, and
-//            is not aged out whole: each file is judged on its own, by the
-//            entry it goes with. A fix-pr-<M>[-x], finisher-pr-<M>[-x] or
-//            review-pr-<M>[-x] report goes with pr<M>/ — the same verdict,
-//            the same live-token holds, though no pr<M>/ need exist; an
-//            impl-<N>[-x] report goes with impl-<N>/ the same way; the
-//            <member>.check.json record is judged exactly as <member>.json
-//            is (one `.check` infix only: <member>.check.check.json and
-//            <member>.checkx.json are "anything else"); any other
-//            file in it (a merge-bot-<n> report or record, which names no PR
-//            and no ticket) is judged as "anything else" below, so it is
-//            removed only when idle past the retention and its member's
-//            token is not live.
+//            it. `reports/` itself is never removed, and is not aged out
+//            whole: each file is judged on its own, by the entry it goes
+//            with. A fix-pr-<M>[-x], finisher-pr-<M>[-x] or review-pr-<M>[-x]
+//            report goes with pr<M>/ — the same verdict, the same live-token
+//            holds, though no pr<M>/ need exist; an impl-<N>[-x] report goes
+//            with impl-<N>/ the same way; the <member>.check.json record is
+//            judged exactly as <member>.json is (one `.check` infix only:
+//            <member>.check.check.json and <member>.checkx.json are "anything
+//            else"); any other file in it (a merge-bot-<n> report or record,
+//            which names no PR and no ticket) is judged as "anything else"
+//            below, so it is removed only when idle past the retention and
+//            its member's token is not live.
 //   anything else, and a keyed name whose number GitHub resolves to the
 //   other type (a pr<N> that is an issue, an impl-<N> that is a PR) or to
 //   nothing

@@ -1061,7 +1061,7 @@ test("(10) a live token keeps its member's check record as it keeps its report",
     ["#40 impl-40=PR#41 → PR#41 · fix-pr-41", "#50 impl-50-b", "#60 impl-60=PR#61 → PR#61 · review=member:review-pr-61"],
     ["impl-40=PR#41", "fix-pr-41", "impl-50-b", "impl-60=PR#61"],
   );
-  f.states({ 41: PR("MERGED"), 51: PR("MERGED"), 61: PR("CLOSED"), 50: ISSUE("OPEN"), 70: ISSUE("OPEN") });
+  f.states({ 41: PR("MERGED"), 61: PR("CLOSED"), 50: ISSUE("OPEN"), 70: ISSUE("OPEN") });
   const held = {
     "fix-pr-41.check.json": /live fix-pr-41/,
     "review-pr-61.check.json": /live review-pr-61/,
@@ -1127,20 +1127,19 @@ test("(10) a check record is judged on the resolved type of its number, as its r
 test("(10) merge-bot and unkeyed check records, and names with another or a repeated infix, are judged by age alone", (t) => {
   const f = fixture(t);
   f.ledger();
-  // Every number is OPEN, so a keyed verdict would keep each file; age alone removes the idle ones.
-  f.states({ 5: PR("OPEN"), 30: ISSUE("OPEN") });
+  // PR #5 is OPEN, so a keyed verdict would keep its idle files; age alone removes them. Issue #30
+  // is CLOSED, so a keyed verdict would remove its young files; age alone keeps them.
+  f.states({ 5: PR("OPEN"), 30: ISSUE("CLOSED") });
   const gone = [
     f.file("reports/merge-bot-9.check.json", 8),
     f.file("reports/notes.check.json", 8),
     f.file("reports/fix-pr-5.check.check.json", 8),
     f.file("reports/fix-pr-5.checkx.json", 8),
-    f.file("reports/impl-30.check.check.json", 8),
-    f.file("reports/impl-30.checkx.json", 8),
   ];
   const stays = [
     f.file("reports/merge-bot-10.check.json", 1),
-    f.file("reports/fix-pr-5.check.check.young.json", 1),
-    f.file("reports/fix-pr-5.checkx.young.json", 1),
+    f.file("reports/impl-30.check.check.json", 1),
+    f.file("reports/impl-30.checkx.json", 1),
   ];
 
   const r = f.run(["--root", f.root, "--apply"]);
