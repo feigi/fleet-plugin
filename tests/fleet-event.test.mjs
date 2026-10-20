@@ -23,7 +23,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
-import { foldLedger } from "../plugin/scripts/fleet-tick.mjs";
+import { foldLedger, parkedToken } from "../plugin/scripts/fleet-tick.mjs";
 import { BAILS, reportKind } from "../plugin/scripts/fleet-event.mjs";
 import { MEMBER_FAMILIES } from "../plugin/scripts/ledger-grammar.mjs";
 import { SCHEMAS } from "../plugin/scripts/report-schema.mjs";
@@ -154,7 +154,7 @@ const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "
 const item = (state[noun][n] ??= { labels: [], comments: [] });
 const values = (flag) => args.flatMap((a, i) => (a === flag ? [args[i + 1]] : []));
 if (verb === "view") {
-  process.stdout.write(JSON.stringify({ labels: item.labels.map((name) => ({ name })), comments: item.comments.map((body) => ({ body })), state: item.state ?? "OPEN" }));
+  process.stdout.write(JSON.stringify({ labels: item.labels.map((name) => ({ name })), comments: item.comments.map((body) => ({ body })), state: item.state ?? "OPEN", headRefOid: item.headRefOid ?? null, body: item.body ?? null }));
 } else if (verb === "close") {
   item.state = "CLOSED";
   for (const body of values("--comment")) item.comments.push(body);
@@ -185,7 +185,7 @@ const finisherReport = (member, over = {}) => ({
   member, outcome: "labelled", cause: null, evidence: null, pin: HEAD, labelsReadBack: ["ready-to-merge", "patch"],
   kill: null, filed: [], unrecorded: [], confirmation: [], ...over,
 });
-const mergeBotReport = (member, held) => ({ member, merged: [], held, conflictHold: [], refused: [], branchKept: [] });
+const mergeBotReport = (member, held, refused = []) => ({ member, merged: [], held, conflictHold: [], refused, branchKept: [] });
 
 // A main checkout with a fixture ledger, a phase-0 receipt naming the scratch
 // root, caps 3 and 5 and In-flight bound 7, and the gh stub on PATH.
@@ -916,6 +916,55 @@ test("merge-bot-report writes a held-behind token onto each held PR's row, then 
   assert.equal(second.status, 0, second.err);
   assert.deepEqual(second.order, [TICK]);
   assert.equal(f.ledger(), ledger);
+});
+
+// #3608: a main-gain refusal parks the PR, bound to the head and body gh
+// answers; every other refusal reason writes nothing.
+const MG = "main-gain-removed:tests/gate.test.mjs";
+const BODY = "Closes #413\r\n";
+
+test("merge-bot-report parks a main-gain-removed refusal at the PR's head and body, ignores every other reason, then settles and ticks; a second run writes nothing", () => {
+  const f = fixture({ rows: ["#412 impl-412=PR#88", "#413 impl-413=PR#89", "#414 impl-414=PR#90"], dispatched: ["merge-bot-1"] });
+  f.setGh({ issue: {}, pr: { 89: { labels: ["ready-to-merge"], comments: [], headRefOid: HEAD, body: BODY } } });
+  f.report(mergeBotReport("merge-bot-1", [], [
+    { pr: 89, reason: MG },
+    { pr: 90, reason: "behind:2" },
+    { pr: 90, reason: "ci:failure" },
+    { pr: 90, reason: "instrument-set-changed" },
+    { pr: 90, reason: "main-gain-unanswerable" },
+  ]));
+  f.control("settle", { "merge-bot-1": { outcome: "done" } });
+  const park = parkedToken(HEAD, BODY, MG);
+  assert.match(park, /^parked=a{40}:[0-9a-f]{12}:main-gain-removed:tests\/gate\.test\.mjs$/);
+  const first = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(first.status, 0, first.err + first.stdout);
+  assert.deepEqual(first.order, [
+    "gh pr view 89",
+    `ledger token 89 ${park}`,
+    `settle merge-bot-1 --from-report --reports ${join(f.scratch, "reports")}`,
+    TICK,
+  ], "one gh read, for the main-gain PR alone");
+  assert.deepEqual(f.rows(), ["#412 impl-412=PR#88", `#413 impl-413=PR#89 · ${park}`, "#414 impl-414=PR#90"]);
+  assert.deepEqual(f.gh().pr[89].labels, ["ready-to-merge"], "the park moves no label");
+  assert.deepEqual(f.ghCalls().map((c) => c.args.slice(0, 2).join(" ")), ["pr view"], "no label edit, no comment");
+
+  const ledger = f.ledger();
+  const second = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(second.status, 0, second.err);
+  assert.deepEqual(writes(second.order), []);
+  assert.equal(f.ledger(), ledger);
+});
+
+test("merge-bot-report whose gh read of a main-gain PR fails prints a NEED and parks nothing, and still settles and ticks", () => {
+  const f = fixture({ rows: ["#413 impl-413=PR#89"], dispatched: ["merge-bot-1"] });
+  writeFileSync(join(f.stubs, "gh-fail.json"), JSON.stringify(["pr view"]));
+  f.report(mergeBotReport("merge-bot-1", [], [{ pr: 89, reason: MG }]));
+  f.control("settle", { "merge-bot-1": { outcome: "done" } });
+  const r = f.run(["merge-bot-report", "merge-bot-1"]);
+  assert.equal(r.status, 4, r.err + r.stdout);
+  assert.ok(r.stdout.includes(`NEED park PR #89 ${MG} — gh pr view 89 did not answer`), r.stdout);
+  assert.deepEqual(writes(r.order), [`settle merge-bot-1 --from-report --reports ${join(f.scratch, "reports")}`]);
+  assert.deepEqual(f.rows(), ["#413 impl-413=PR#89"]);
 });
 
 // ── review-result ────────────────────────────────────────────────────────────

@@ -5,6 +5,11 @@ Amends ADR 0012 (Decision 3). Amended by #2904: R also misses a branch
 rewritten into fresh commits (`git reset --soft` + commit, or an
 author-resetting squash); see the "R misses two windows" paragraph of the
 `plugin/scripts/main-gain.mjs` header.
+Amended by #3608: a human-gated main-gain refusal writes a parked record the tick reads.
+Decision 5's "A hit leaves the label and the ledger alone" and the
+Consequences' "Left out: … ledger hold tokens" are superseded by this
+amendment as far as the ledger goes, not rewritten: the label is still left
+alone and no agent restores lines.
 
 ## Context
 

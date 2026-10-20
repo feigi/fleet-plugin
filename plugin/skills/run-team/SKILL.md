@@ -831,7 +831,7 @@ and flag the PR for a human. A new review of the PR counts again from none.
 
 | Failure | Response |
 |---|---|
-| Merge bot's gate finds the merge would remove lines `main` gained after the PR's work began (`main-gain-removed:<path>`, exit 1) | Relay `main-gain-removed:<path>-#<pr>` to a human with the hit list and the acknowledgement keys the bot printed. PR stays queued, label untouched, nothing written to the ledger, and no member is dispatched to restore the lines — the removal may be deliberate. It clears when the PR stops removing them or its body carries `main-gain-removal: <path> <key> - <why>` for each hit |
+| Merge bot's gate finds the merge would remove lines `main` gained after the PR's work began (`main-gain-removed:<path>`, exit 1) | Relay `main-gain-removed:<path>-#<pr>` to a human with the hit list and the acknowledgement keys the bot printed. PR stays queued, label untouched, and no member is dispatched to restore the lines — the removal may be deliberate. `fleet-event.mjs merge-bot-report` parks it: a `parked=<head>:<body digest>:<reason>` token on its row, and the tick prints `HOLD (parked #<pr> <reason>)` rather than dispatch a bot that would refuse it again; a new head or an edited body lifts the park with no write. It clears when the PR stops removing them or its body carries `main-gain-removal: <path> <key> - <why>` for each hit |
 | Merge bot's gate cannot answer the main-gain check (`main-gain-unanswerable`, exit 2) | Report `main-gain-unanswerable-#<pr>` with what it printed, PR stays queued, label untouched |
 
 ## Failure handling

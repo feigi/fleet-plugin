@@ -3824,6 +3824,29 @@ test("token refuses a held-behind or conflict-hold token the tick cannot read, a
   assert.match(rows()[0], /^#5 impl-5 · held-behind:#3 · conflict-hold:#9$/);
 });
 
+// #3608: the park `fleet-event.mjs merge-bot-report` writes off a main-gain
+// refusal. A word only starting `parked` is freeform, as before.
+test("token refuses a parked= token the tick cannot read, and takes the one it reads and a freeform word that merely starts parked", (t) => {
+  const { run, refused, rows } = tokenFixture(t, ["#5 impl-5"]);
+  const head = "a".repeat(40);
+  const digest = "0123456789ab";
+  for (const tok of [
+    `parked=${"a".repeat(12)}:${digest}:main-gain-removed:x.md`,
+    `parked=${head}:${digest.slice(1)}:main-gain-removed:x.md`,
+    `parked=${head.toUpperCase()}:${digest}:main-gain-removed:x.md`,
+    `parked=${head}:${digest}:behind:2`,
+    `parked=${head}:${digest}:main-gain-unanswerable`,
+    `parked=${head}:${digest}:main-gain-removed:`,
+    "parked=",
+  ]) {
+    refused(["token", "5", tok], /is not parked=<head>:<body digest>:main-gain-removed:<path> .*would ignore this one/);
+  }
+  const tok = `parked=${head}:${digest}:main-gain-removed:docs/a%20b.md`;
+  run("token", "5", tok);
+  run("token", "5", "parked-by-hand");
+  assert.equal(rows()[0], `#5 impl-5 · ${tok} · parked-by-hand`);
+});
+
 test("token refuses a freeform PR#<n> that would split one PR across two rows, and one that would crowd a PR with a second open launch", (t) => {
   const split = tokenFixture(t, ["#5 impl-5=PR#9", "#6 class=routine"]);
   split.refused(["token", "6", "PR#9"], /PR #9 would map to more than one row — its PR's row is #5/);

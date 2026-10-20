@@ -72,9 +72,13 @@
 //       A settle that refuses on `ready-to-merge` — missing from the PR or from the read-back — is the case the tick's `DISPATCH finisher PR#<M>` catches next: settle it `ledger.mjs settle finisher-pr-<M>=labelled` as reported, and `ledger.mjs filed <N> "<subject>"` for each `unrecorded` entry.
 //   merge-bot-report <merge-bot-n>
 //       `ledger.mjs token <pr> held-behind:#<behind>` for each `held[]` entry
-//       of the report the PR's rows do not already carry, then `settle
-//       --from-report`. The reap and the reclaim run under the tick's
-//       `--apply`.
+//       of the report the PR's rows do not already carry, then `ledger.mjs
+//       token <pr> parked=<head>:<body digest>:<reason>` for each `refused[]`
+//       entry whose reason is `main-gain-removed:<path>`, bound to the head
+//       and body `gh pr view <pr>` answers, unless the rows already carry it
+//       (no answer is a NEED, nothing written), then `settle --from-report`.
+//       Every other refusal reason writes nothing. The reap and the reclaim
+//       run under the tick's `--apply`.
 //       The verdict moves no label and leaves nothing in the repo, so the row is the only place the tick can read a `held-behind` from.
 //       The reap and the reclaim run once for every merge bot settled `done`, always, even when the pass merged nothing, and again on the next tick after an `APPLY FAILED` line, and on every tick while this run has no controller record to remember the pass by.
 //       The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in the same pass, before reporting: a token the bot wrote in that pass, never one `reap.sh` writes.
@@ -188,7 +192,7 @@ import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { BRIEFS, REVIEW, REVIEWED, REVIEWER, memberTokens, nextReviewerName, parseDispatchedEntry, parseMember, parseToken, readRetired, rowNums } from "./ledger-grammar.mjs";
-import { NO_TRANSCRIPT_AFTER_DEFAULT, controllerState, dispositionsToken, foldLedger } from "./fleet-tick.mjs";
+import { NO_TRANSCRIPT_AFTER_DEFAULT, PARKS, controllerState, dispositionsToken, foldLedger, parkedToken } from "./fleet-tick.mjs";
 import { phase0Gate, readRunReceipt, tickCaps } from "./phase0-receipt.mjs";
 import { defaultScratch, readReportIn, reportsDir } from "./report-files.mjs";
 import { readState, statePath } from "./fleet-state.mjs";
@@ -636,7 +640,38 @@ function mergeBotReport(ev, member) {
     if (r.status === 0) ev.note(`#${pr} ${tok}`);
     else ev.refuse(`token #${pr} ${tok}`, r);
   }
+  for (const { pr, reason } of read.state === "ok" ? read.report.refused ?? [] : []) {
+    if (PARKS.test(reason)) park(ev, pr, reason);
+  }
   ev.settle(member);
+}
+
+// `ledger.mjs token <pr> parked=<head>:<body digest>:<reason>` for a refusal
+// only a human edit clears, bound to the head and body gh reads for the PR
+// now, skipped when the PR's rows already carry that token. A PR gh cannot
+// read is a NEED, nothing written: a park bound to no head would never lift.
+function park(ev, pr, reason) {
+  const r = gh(["pr", "view", String(pr), "--json", "headRefOid,body"]);
+  let v = null;
+  if (r.status === 0) {
+    try {
+      v = JSON.parse(r.stdout);
+    } catch {
+      // Falls through to the NEED below.
+    }
+  }
+  const tok = v !== null && typeof v.body === "string" ? parkedToken(v.headRefOid, v.body, reason) : null;
+  if (tok === null) {
+    ev.need(`park PR #${pr} ${reason} — gh pr view ${pr} did not answer with a head and a body (${r.status === 0 ? "no head and body" : said(r)})`);
+    return;
+  }
+  if (prWords(ev.ledger, pr).includes(tok)) {
+    ev.note(`#${pr} already ${tok}`);
+    return;
+  }
+  const w = node("ledger.mjs", ["token", String(pr), tok]);
+  if (w.status === 0) ev.note(`#${pr} ${tok}`);
+  else ev.refuse(`token #${pr} ${tok}`, w);
 }
 
 // `p` with its symlinks resolved, or as written when it does not exist yet.

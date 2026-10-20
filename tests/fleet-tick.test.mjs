@@ -8,7 +8,7 @@
 // settled member live, has to go red here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reconcile, formatLines, actionable, deriveRun, LedgerError, parseShortlist, unclaimed, refreshWhy, dispositionsToken, currentDispositions, reapDue, reapedAfter, reapSummary, reclaimSummary } from "../plugin/scripts/fleet-tick.mjs";
+import { reconcile, formatLines, actionable, deriveRun, LedgerError, parseShortlist, unclaimed, refreshWhy, dispositionsToken, currentDispositions, reapDue, reapedAfter, reapSummary, reclaimSummary, parkedToken, bodyDigest, PARKED } from "../plugin/scripts/fleet-tick.mjs";
 
 // Every field named, so a test that cares about one number still states the
 // rest — a defaulted field is a guard nobody is pinning.
@@ -18,7 +18,7 @@ const state = (over = {}) => ({
   heads: [], supply: 0, shortlistStatus: "ok", refresh: null, dropped: [], pulls: new Map(),
   reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [], unlabelled: [], conflicts: [], conflictEscalate: [],
   prClosed: [], prUnchecked: [],
-  mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeConflictHeld: 0,
+  mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeConflictHeld: 0, mergeParked: [],
   mainCheckout: { state: "clean" }, phase0: { held: false, line: null, session: null },
   ...over,
 });
@@ -355,6 +355,29 @@ test("merge-bot: never a second bot, an empty queue is idle, a fully held queue 
   assert.equal(row(state({ mergeQueue: 3, mergeHeld: 2 }), "merge-bot").action, "DISPATCH merge-bot");
 });
 
+// #3608: a PR the merge bot refused on a main-gain hit is parked until a human
+// edits its head or body; a new bot could only repeat the refusal.
+const MG = "main-gain-removed:tests/gate.test.mjs";
+
+test("merge-bot: every queued candidate held or parked holds, naming each park and what clears it", () => {
+  const parked = row(state({ mergeQueue: 1, mergeParked: [{ pr: 40, reason: MG }] }), "merge-bot");
+  assert.equal(parked.action, `HOLD (parked #40 ${MG})`);
+  assert.equal(parked.acts, false);
+  assert.equal(parked.detail,
+    "merge-queue=1 held=0 parked=1 — a park clears on a PR-body acknowledgement `main-gain-removal: <path> <key> - <why>` or a new head");
+  const both = row(state({ mergeQueue: 3, mergeHeld: 1, mergeParked: [{ pr: 40, reason: MG }, { pr: 41, reason: "main-gain-removed:a.md" }] }), "merge-bot");
+  assert.equal(both.action, `HOLD (parked #40 ${MG}, #41 main-gain-removed:a.md)`);
+  assert.match(both.detail, /^merge-queue=3 held=1 parked=2 — .*; 1 more held$/);
+});
+
+test("merge-bot: a queue with one parked and one unparked, unheld PR still dispatches", () => {
+  const mixed = row(state({ mergeQueue: 2, mergeParked: [{ pr: 40, reason: MG }] }), "merge-bot");
+  assert.equal(mixed.action, "DISPATCH merge-bot");
+  assert.equal(mixed.acts, true);
+  assert.equal(mixed.detail, "merge-queue=2 held=0 parked=1");
+  assert.equal(row(state({ mergeBotLive: 1, mergeQueue: 1, mergeParked: [{ pr: 40, reason: MG }] }), "merge-bot").action, "AT CAP");
+});
+
 // ---------------------------------------------------------------------------
 // The shortlist row.
 
@@ -599,10 +622,10 @@ test("phase 0: a gate that gave no answer holds, never reads as finished", () =>
 
 const HEAD_A = "abc1234" + "0".repeat(33);
 const HEAD_B = "def5678" + "0".repeat(33);
-const pr = (number, labels = [], closes = [number + 1000], headRefOid = HEAD_B, mergeable = "MERGEABLE") => ({
+const pr = (number, labels = [], closes = [number + 1000], headRefOid = HEAD_B, mergeable = "MERGEABLE", body = "") => ({
   number, labels: labels.map((name) => ({ name })),
   closingIssuesReferences: closes.map((n) => ({ number: n })),
-  headRefOid, mergeable,
+  headRefOid, mergeable, body,
 });
 const run = (ledger, prs = [], closed, prStates) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs, closed, prStates);
 
@@ -1101,6 +1124,48 @@ test("deriveRun: a queued PR under a conflict hold is merge-held until its fix-a
   // Both sources on one PR count it once.
   const both = run({ rows: [HOLD_ROW(40, "held-behind:#38 · conflict-hold:#40")] }, [pr(38), pr(40, ["ready-to-merge"])]);
   assert.equal(both.mergeHeld, 1);
+});
+
+// #3608: the park `fleet-event.mjs merge-bot-report` writes off a main-gain
+// refusal, bound to the head and body the PR had then.
+const PARK = parkedToken(HEAD_B, "", MG);
+const PARK_ROW = (n, tail = PARK) => `#${n - 30} impl-${n - 30}=PR#${n} → PR#${n} · ${tail}`;
+
+test("parkedToken: only a main-gain-removed reason at a full head parks, and the token is one word the grammar reads back", () => {
+  assert.equal(PARK, `parked=${HEAD_B}:${bodyDigest("")}:${MG}`);
+  assert.match(PARK, PARKED);
+  assert.equal(parkedToken(HEAD_B.toUpperCase(), "", MG), PARK, "gh's head is matched case-blind");
+  for (const reason of ["behind:2", "ci:failure", "instrument-set-changed", "main-gain-unanswerable", "head-moved-after-label", "main-gain-removed:"]) {
+    assert.equal(parkedToken(HEAD_B, "", reason), null, reason);
+  }
+  assert.equal(parkedToken("abc1234", "", MG), null, "a short head is no binding");
+  const spaced = parkedToken(HEAD_B, "", "main-gain-removed:docs/a b.md");
+  assert.equal(spaced, `parked=${HEAD_B}:${bodyDigest("")}:main-gain-removed:docs/a%20b.md`);
+  const r = run({ rows: [PARK_ROW(40, spaced)] }, [pr(40, ["ready-to-merge"])]);
+  assert.deepEqual(r.mergeParked, [{ pr: 40, reason: "main-gain-removed:docs/a b.md" }], "the row prints the path as the gate did");
+  assert.notEqual(bodyDigest("a"), bodyDigest("a "), "any body edit changes the digest");
+});
+
+test("deriveRun: a parked queued PR leaves the dispatchable queue while its head and body match, and a new head or an edited body lifts it", () => {
+  const parked = run({ rows: [PARK_ROW(40)] }, [pr(40, ["ready-to-merge"])]);
+  assert.deepEqual([parked.mergeQueue, parked.mergeHeld, parked.mergeParked], [1, 0, [{ pr: 40, reason: MG }]]);
+  const moved = run({ rows: [PARK_ROW(40)] }, [pr(40, ["ready-to-merge"], undefined, HEAD_A)]);
+  assert.deepEqual([moved.mergeQueue, moved.mergeParked], [1, []], "a new head lifts the park");
+  const edited = run({ rows: [PARK_ROW(40)] }, [pr(40, ["ready-to-merge"], undefined, HEAD_B, "MERGEABLE", "main-gain-removal: tests/gate.test.mjs #7 - moved")]);
+  assert.deepEqual([edited.mergeQueue, edited.mergeParked], [1, []], "an edited body lifts the park");
+  // A later park at the new head parks it again; the stale one still matches nothing.
+  const again = run({ rows: [PARK_ROW(40, `${PARK} · ${parkedToken(HEAD_A, "", "main-gain-removed:b.md")}`)] }, [pr(40, ["ready-to-merge"], undefined, HEAD_A)]);
+  assert.deepEqual(again.mergeParked, [{ pr: 40, reason: "main-gain-removed:b.md" }]);
+});
+
+test("deriveRun: a park never blocks the queue once its PR is unlabelled, merged or closed, and a held PR counts once, as held", () => {
+  assert.deepEqual(run({ rows: [PARK_ROW(40)] }, [pr(40)]).mergeParked, [], "no label, not queued");
+  const gone = run({ rows: [PARK_ROW(40)] }, [pr(41, ["ready-to-merge"])]);
+  assert.deepEqual([gone.mergeQueue, gone.mergeParked], [1, []], "a merged or closed PR leaves the open list and the queue");
+  const both = run({ rows: [PARK_ROW(40, `held-behind:#38 · ${PARK}`)] }, [pr(38), pr(40, ["ready-to-merge"])]);
+  assert.deepEqual([both.mergeQueue, both.mergeHeld, both.mergeParked], [1, 1, []]);
+  const mixed = run({ rows: [PARK_ROW(40)] }, [pr(40, ["ready-to-merge"]), pr(41, ["ready-to-merge"])]);
+  assert.deepEqual([mixed.mergeQueue, mixed.mergeHeld, mixed.mergeParked], [2, 0, [{ pr: 40, reason: MG }]]);
 });
 
 test("deriveRun: a conflict hold with a live review= in flight is not re-offered either — the merge hold still counts it", () => {
@@ -2342,6 +2407,28 @@ test("CLI: merge-bot liveness and holds come off the ledger", () => {
   assert.match(lifted.stdout, /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=1 held=0\)/m);
 });
 
+// #3608: a refused labelled PR with no park still dispatches a bot each tick,
+// as above; with the park `merge-bot-report` writes, the row holds instead —
+// until the head or the body changes, with no write by anyone.
+test("CLI: a main-gain park holds the merge-bot row until the PR's head or body changes, and the tick writes nothing", (t) => {
+  const ledger = { rows: [PARK_ROW(40)], dispatched: ["merge-bot-1=done"] };
+  const tick = (prs) => {
+    const r = runCli([], { ledger, shortlist: shortlistText([]), prs, keep: true });
+    t.after(() => rmSync(r.dir, { recursive: true, force: true }));
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(join(r.repo, ".fleet", "ledger.md"), "utf8"), ledgerText(ledger), "the tick writes no ledger");
+    return r.stdout;
+  };
+  assert.match(tick([pr(40, ["ready-to-merge"])]),
+    /^merge-bot {4}0\/1 → HOLD \(parked #40 main-gain-removed:tests\/gate\.test\.mjs\) {3}\(merge-queue=1 held=0 parked=1 — a park clears on a PR-body acknowledgement `main-gain-removal: <path> <key> - <why>` or a new head\)$/m);
+  assert.match(tick([pr(40, ["ready-to-merge"]), pr(41, ["ready-to-merge"])]),
+    /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=2 held=0 parked=1\)$/m);
+  assert.match(tick([pr(40, ["ready-to-merge"], undefined, HEAD_A)]),
+    /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=1 held=0\)$/m, "a new head lifts the park");
+  assert.match(tick([pr(40, ["ready-to-merge"], undefined, HEAD_B, "MERGEABLE", "main-gain-removal: tests/gate.test.mjs #7 - moved")]),
+    /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=1 held=0\)$/m, "an edited body lifts the park");
+});
+
 test("CLI: a merge hold accepts both the held-behind:#M and held-behind-#M spellings", () => {
   const colon = runCli([], {
     ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · held-behind:#38"], dispatched: ["merge-bot-1=done"] },
@@ -2882,6 +2969,20 @@ test("CLI: a gh row missing headRefOid refuses rather than reading every past-pi
   assert.equal(r.status, 2);
   assert.equal(r.stdout.trim(), "");
   assert.match(r.stderr, /headRefOid/);
+});
+
+test("CLI: a gh row missing body refuses rather than reading every park as unmatchable, and the list asks gh for it", (t) => {
+  const { body, ...bodiless } = pr(1);
+  const r = runCli([], { prs: [bodiless], shortlist: shortlistText([]) });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /mergeable,body\}/);
+  const logDir = mkdtempSync(join(tmpdir(), "fleet-tick-prlist-"));
+  t.after(() => rmSync(logDir, { recursive: true, force: true }));
+  const log = join(logDir, "pr-list.log");
+  const ok = runCli([], { prs: [pr(1)], shortlist: shortlistText([]), env: { PR_LIST_LOG: log } });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(readFileSync(log, "utf8"), /--json \S*\bbody\b/);
 });
 
 test("CLI: a gh row with no mergeable, or one outside GitHub's enum, refuses rather than reading every conflict as absent", () => {
