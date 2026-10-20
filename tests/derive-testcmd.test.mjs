@@ -784,9 +784,11 @@ test("a test command whose glob goes into a submodule is accepted, with and with
 });
 
 // Each of the probe's git calls has a refusal for git itself failing, in
-// the script's own words with git's reason appended. The stub fails one
-// subcommand and hands every other call to the real git, so the cache read
-// before the probe is unaffected and only the call under test breaks.
+// the script's own words with git's reason appended. It exits 3, never 1: a
+// git that did not run to an answer is no verdict on the cache, nor on a
+// proposal (#3491). The stub fails one subcommand and hands every other call
+// to the real git, so the cache read before the probe is unaffected and only
+// the call under test breaks.
 function gitFailing(subcommand) {
   const bin = tempDir("derive-testcmd-git-");
   const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
@@ -800,7 +802,7 @@ test("a git that cannot list the tracked files refuses, naming its exit status a
   const control = derive(dir);
   assert.equal(control.status, 0, `fixture: without the stub the pattern is accepted: ${control.err}`);
   const r = derive(dir, "test", gitFailing("ls-files"));
-  assert.equal(r.status, 1, r.err);
+  assert.equal(r.status, 3, r.err);
   assert.equal(r.out, "", "nothing may reach the caller");
   assert.match(r.err, /^derive-testcmd: cannot list the files tracked in .* to check its test command's pattern 'tests\/\*\.test\.mjs' \(git ls-files exit 128\): git: injected ls-files failure$/m);
 });
@@ -812,7 +814,7 @@ test("a git that cannot say whether a path is ignored refuses, naming its exit s
   assert.equal(control.status, 1, "fixture: without the stub the pattern is refused as stale");
   assert.ok(control.err.includes("matches no file tracked in"), control.err);
   const r = derive(dir, "test", gitFailing("check-ignore"));
-  assert.equal(r.status, 1, r.err);
+  assert.equal(r.status, 3, r.err);
   assert.equal(r.out, "", "nothing may reach the caller");
   assert.match(r.err, /^derive-testcmd: cannot ask git whether .* ignores its test command's pattern 'gone\/\*\.test\.mjs' \(git check-ignore exit 128\): git: injected check-ignore failure$/m);
 });
@@ -826,7 +828,7 @@ test("a git that cannot say whether a leading directory is a symlink or a submod
   assert.equal(control.status, 1, "fixture: without the stub the pattern is refused as stale");
   assert.ok(control.err.includes("matches no file tracked in"), control.err);
   const r = derive(dir, "test", gitFailing("-s"));
-  assert.equal(r.status, 1, r.err);
+  assert.equal(r.status, 3, r.err);
   assert.equal(r.out, "", "nothing may reach the caller");
   assert.match(r.err, /^derive-testcmd: cannot ask git whether 'gone' is a symlink or a submodule in .*, to check its test command's pattern 'gone\/\*\.test\.mjs' \(git ls-files exit 128\): git: injected -s failure$/m);
   assert.doesNotMatch(r.err, /matches no file tracked/, "a git that cannot answer is not a stale Recipe");
@@ -961,7 +963,7 @@ test("--at refuses what it cannot read: an unresolvable rev, a non-test field, a
   assert.equal(flag.status, 1, flag.err);
   assert.match(flag.err, /usage: derive-testcmd\.sh <repo> <install\|check\|test\|uncovered>/);
   const broken = deriveAt(dir, "moved", gitFailing("read-tree"));
-  assert.equal(broken.status, 1, broken.err);
+  assert.equal(broken.status, 3, broken.err);
   assert.equal(broken.out, "");
   assert.match(broken.err, /^derive-testcmd: cannot read the tree of moved in .* \(git read-tree exit 128\): git: injected read-tree failure$/m);
 });
@@ -1371,16 +1373,17 @@ test("stdout chatter around the Recipe value refuses, blaming node's output and 
 });
 
 // The must-ACCEPT half: with no stub the frame is invisible, and a value with
-// an embedded newline crosses it byte for byte.
+// an embedded newline crosses it byte for byte. The Test entrypoint's newline
+// is quoted: an unquoted one joins commands, which the chain rule refuses.
 test("the framed read hands on the exact value, an embedded newline included (#2217)", () => {
   const { dir, head } = repo();
-  cache(dir, recipe(head, { install: "true\ntrue", test: "sh ./run-tests.sh\n: second line" }));
+  cache(dir, recipe(head, { install: "true\ntrue", test: "sh -c 'true\n: second line'" }));
   const i = derive(dir, "install");
   assert.equal(i.status, 0, i.err);
   assert.equal(i.out, "true\ntrue");
   const t = derive(dir, "test");
   assert.equal(t.status, 0, t.err);
-  assert.equal(t.out, "sh ./run-tests.sh\n: second line");
+  assert.equal(t.out, "sh -c 'true\n: second line'");
 });
 
 // The chain rule (#3491). A Test entrypoint is ONE simple command: a runner
@@ -1408,6 +1411,32 @@ for (const cmd of CHAIN_TEST_COMMANDS) {
     assert.match(r.err, /its test command .* has an unquoted /);
     assert.match(r.err, /appended/);
     assert.match(r.err, NAMES_STEP);
+  });
+}
+
+// An unquoted newline ends a command as `;` does, so it is a join too (#3491):
+// a runner's appended arguments reach only the last line, and a group spelled
+// across lines breaks the narrowed run outright. Refused on the cache read and
+// on a proposal alike.
+const NEWLINE_JOINED_TEST_COMMANDS = [
+  "node --test tests/a.test.mjs\nnode --test tests/b.test.mjs",
+  "true\ntrue",
+  "true >/dev/null\ntrue",
+  "{ true\n}",
+  "if true\nthen true\nfi",
+];
+for (const cmd of NEWLINE_JOINED_TEST_COMMANDS) {
+  test(`a test command with an unquoted newline refuses as a join: ${JSON.stringify(cmd)}`, () => {
+    const { dir, head } = repo();
+    cache(dir, recipe(head, { test: cmd }));
+    const r = derive(dir, "test");
+    assert.equal(r.status, 1, r.err);
+    assert.equal(r.out, "", "nothing reaches the caller");
+    assert.ok(r.err.includes(`its test command '${cmd}' has an unquoted newline, which joins or groups commands`), r.err);
+    assert.match(r.err, NAMES_STEP);
+    const p = run(["--propose", dir, "test", cmd]);
+    assert.equal(p.status, 1, p.err);
+    assert.ok(p.err.includes(`the proposed test command '${cmd}' has an unquoted newline`), p.err);
   });
 }
 

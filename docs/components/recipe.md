@@ -32,9 +32,9 @@ The reading side shipped with #2117 and the deriving side with #2118.
    anything: each of the Install step, the Check step and the Test entrypoint
    must pass the reader's `--propose` check (found and executable, and no
    refused form). The Test entrypoint must be one simple command: an unquoted
-   `;`, `&&`, `||`, `|`, a `&` outside a redirection, or a `( … )` group is
-   refused, because a runner-appended argument would land after the last one
-   and never reach the Test entrypoint. A directory option (`npm --prefix web
+   newline, `;`, `&&`, `||`, `|`, a `&` outside a redirection, or a `( … )`
+   group is refused, because a runner-appended argument would land after the
+   last one and never reach the Test entrypoint. A directory option (`npm --prefix web
    test`) or `sh -c 'cd web && npm test -- "$@"' sh` is the accepted form.
    The prover requires `--covered <json>`, the ledger of merge-gating CI steps
    the Test entrypoint or the Check step covers. The ledger is validated for

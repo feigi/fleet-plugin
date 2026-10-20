@@ -61,11 +61,11 @@
 # tree that probe reads instead of <repo>'s own index, for a caller that runs
 # the command in a worktree cut from a ref.
 #
-# A Test entrypoint is ONE simple command: a join or a group (an unquoted `;`,
-# `&`, `|`, `(` or `)` outside a redirection) is refused, because the runner
-# appends a run's arguments to its last simple command and a join hands them to
-# the wrong one. A chain stays usable quoted as the script of `sh -c`, for
-# example `sh -c 'cd web && npm test -- "$@"' sh`.
+# A Test entrypoint is ONE simple command: a join or a group (an unquoted
+# newline, or an unquoted `;`, `&`, `|`, `(` or `)` outside a redirection) is
+# refused, because the runner appends a run's arguments to its last simple
+# command and a join hands them to the wrong one. A chain stays usable quoted
+# as the script of `sh -c`, for example `sh -c 'cd web && npm test -- "$@"' sh`.
 #
 # `--propose <repo> <install|check|test> <command> [--at <rev>]` runs the same
 # checks on a command that is in no cache: it reads no cache and runs nothing.
@@ -180,15 +180,10 @@ gitout=$(git -C "$repo" rev-parse --git-dir 2>&1) || {
 }
 
 case $field in
-  install|check|test|uncovered) ;;
+  install|check|test) ;;
+  uncovered) [ -z "$propose" ] || die "--propose takes an install, check or test command, not '$field' — $usage" ;;
   *) die "unknown Recipe field '$field' — expected install, check, test or uncovered" ;;
 esac
-if [ -n "$propose" ]; then
-  case $field in
-    install|check|test) ;;
-    *) die "--propose takes an install, check or test command, not '$field' — $usage" ;;
-  esac
-fi
 
 # A <rev> is only ever consulted by the probe, which only the Test entrypoint
 # has; accepting it for the Install step would answer a question nothing asked.
@@ -506,8 +501,8 @@ esac
 # that cannot run. An option, an `=`
 # assignment or value, a path outside <repo>, or the target of a `<` or `>`
 # redirection is the program's own to read, or selects no test, and is
-# accepted unprobed too. A join or a group is refused before a piece is judged,
-# so the judge never reads past one.
+# accepted unprobed too. A join or a group, an unquoted newline included, is
+# refused as soon as the scan reaches it, so no piece after one is judged.
 # A program's own directory option,
 # such as `git -C`, does not stop it: whether that option moves where the
 # program resolves a pattern is the program's to say, so a Recipe must quote a
@@ -531,7 +526,9 @@ esac
 # private index file, and the symlink and submodule test reads that tree
 # too; the ignore rules are still <repo>'s working copy's, the one place git
 # reads them from. The resolvability probe of the command's leading word
-# above stays <repo>'s own.
+# above stays <repo>'s own. A git call of the probe that fails is git not
+# running to an answer, exit 3: no verdict on the cache or on a proposal, so
+# recipe-prove.mjs never reads it as NOT PROVEN.
 if [ "$field" = test ]; then
   # An ambient index would answer `ls-files` for whatever repository or commit
   # the caller is in the middle of, not for <repo>'s tracked files.
@@ -542,7 +539,7 @@ if [ "$field" = test ]; then
     export GIT_INDEX_FILE="$errf.idx"
     git -C "$repo" read-tree "$revc" 2>"$errf" || {
       listed=$?
-      die "cannot read the tree of $rev in $repo (git read-tree exit $listed): $(cat "$errf" 2>/dev/null)"
+      unrunnable "cannot read the tree of $rev in $repo (git read-tree exit $listed): $(cat "$errf" 2>/dev/null)"
     }
   fi
   # Whether <path> is a directory git lists as ONE entry and never beneath: a
@@ -586,7 +583,7 @@ if [ "$field" = test ]; then
     # the prefix of the files beneath it.
     tracked=$(git -C "$repo" ls-files -- ":(glob)$piece" ":(glob)${piece%/}/**" 2>"$errf") || {
       listed=$?
-      die "cannot list the files tracked in $where to check its test command's pattern '$piece' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)"
+      unrunnable "cannot list the files tracked in $where to check its test command's pattern '$piece' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)"
     }
     [ -z "$tracked" ] || return 0
     lead=${piece%%[*?[]*}
@@ -597,7 +594,7 @@ if [ "$field" = test ]; then
       case $opq in
         0) return 0 ;;
         1) ;;
-        *) die "cannot ask git whether '$lead' is a symlink or a submodule in $where, to check its test command's pattern '$piece' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)" ;;
+        *) unrunnable "cannot ask git whether '$lead' is a symlink or a submodule in $where, to check its test command's pattern '$piece' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)" ;;
       esac
     done
     ignored=0
@@ -605,7 +602,7 @@ if [ "$field" = test ]; then
     case $ignored in
       0) ;;
       1) die "$subj test command's pattern '$piece' matches no file tracked in $where — a Test entrypoint that selects no tests passes having run nothing, $stale5; a pattern that a program resolves under its own directory option, such as git -C, must be quoted; $tail" ;;
-      *) die "cannot ask git whether $repo ignores its test command's pattern '$piece' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
+      *) unrunnable "cannot ask git whether $repo ignores its test command's pattern '$piece' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
     esac
   }
   # End the piece being read, if there is one, and judge it.
@@ -613,6 +610,10 @@ if [ "$field" = test ]; then
     if [ -n "$scan_piece" ]; then judge "$scan_kind" "$scan_piece"; fi
     scan_piece=
     scan_kind=P
+  }
+  # Refuse the Test entrypoint for the unquoted join or group $1 names.
+  joined() {
+    die "$subj $field command '$value' has an unquoted $1, which joins or groups commands — a runner-appended argument would land after the last one, not reach the Test entrypoint; write one invocation with no unquoted operator or newline (a directory option such as npm --prefix web test, pnpm -C web, make -C web, go -C web, mvn -f web, gradle -p web, or a tracked script; or sh -c 'cd web && npm test -- \"\$@\"' sh so the appended arguments reach the inner command), and list any other step in uncovered; $tail"
   }
   nl='
 '
@@ -696,16 +697,20 @@ if [ "$field" = test ]; then
         scan_piece=$scan_piece$scan_c
         scan_dollar ;;
       '{'|'}'|'~') scan_kind=Q; scan_piece=$scan_piece$scan_c ;;
-      ' '|'	'|"$nl") flush ;;
+      ' '|'	') flush ;;
+      # A join or a group is refused on the Test entrypoint: a runner appends
+      # its arguments after the whole string, so they reach only the last
+      # command. An unquoted newline ends a command as `;` does. A
+      # redirection's own `&`, and the `<` or `>` itself, are not.
+      "$nl")
+        flush
+        joined newline ;;
       ';'|'&'|'|'|'('|')'|'<'|'>')
         flush
-        # A join or a group is refused on the Test entrypoint: a runner appends
-        # its arguments after the whole string, so they reach only the last
-        # command. A redirection's own `&`, and the `<` or `>` itself, are not.
-        if [ "$field" = test ] && [ -z "$redir" ]; then
+        if [ -z "$redir" ]; then
           case $scan_c in
             '<'|'>') ;;
-            *) die "$subj $field command '$value' has an unquoted '$scan_c', which joins or groups commands — a runner-appended argument would land after the last one, not reach the Test entrypoint; write one invocation with no unquoted operator (a directory option such as npm --prefix web test, pnpm -C web, make -C web, go -C web, mvn -f web, gradle -p web, or a tracked script; or sh -c 'cd web && npm test -- \"\$@\"' sh so the appended arguments reach the inner command), and list any other step in uncovered; $tail" ;;
+            *) joined "'$scan_c'" ;;
           esac
         fi
         before=

@@ -63,7 +63,8 @@ derive never changes the answer.
   the reader refuses an unquoted `&&`, `||`, `;`, `|`, a `&` that is not part
   of a redirection, or a `(`…`)` group. Members run it with their own arguments
   appended (`sh -c '<test> "$@"'`), and a join or group hands those arguments
-  to its last command alone or breaks the run. `2>&1` and `>&2` stay accepted.
+  to its last command alone or breaks the run. An unquoted newline ends a
+  command as `;` does, so it is refused too. `2>&1` and `>&2` stay accepted.
   A chain is accepted only quoted as the script of `sh -c`, and that form
   forwards the appended arguments only through `"$@"`:
   `sh -c 'cd web && npm test -- "$@"' sh`. A suite in a subdirectory uses its

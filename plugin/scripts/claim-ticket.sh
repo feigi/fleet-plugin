@@ -199,9 +199,11 @@ testcmd=$("$script_dir/derive-testcmd.sh" . test --at origin/main 2>&1) || die "
 echo "    test entrypoint → $testcmd" >&2
 
 # The Test entrypoint is a shell COMMAND, not an argv: the runner hands it to
-# the suite-slot wrapper, which hands it to `sh -c`, so a compound one
-# (`cd sub && make test`) keeps its meaning, with the
-# runner's own arguments appended as "$@". It reaches the runner's source
+# the suite-slot wrapper, which hands it to `sh -c`, so a compound one keeps
+# its meaning, with the runner's own arguments appended as "$@". A compound
+# one reaches here only quoted, as the script of an inner `sh -c`
+# (`sh -c 'cd sub && make test -- "$@"' sh`): derive-testcmd.sh refuses an
+# unquoted join. It reaches the runner's source
 # single-quoted — each embedded `'` closed, escaped and reopened — so nothing
 # in it expands at write time. `LC_ALL=C` so sed reads the command as bytes.
 # Derived here, ahead of every mutation, so a failure refuses before

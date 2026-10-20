@@ -214,16 +214,19 @@ function parseArgs(argv) {
   };
 }
 
+function parseFlagJson(flag, json) {
+  try {
+    return JSON.parse(json);
+  } catch (e) {
+    throw cannot(`${flag} is not JSON: ${e.message}`);
+  }
+}
+
 // The same rule derive-testcmd.sh holds the cache to, applied before any
 // command runs, so a malformed list is a usage error rather than a proof that
 // held and a cache the reader then refuses.
 function parseUncovered(json) {
-  let list;
-  try {
-    list = JSON.parse(json);
-  } catch (e) {
-    throw cannot(`--uncovered is not JSON: ${e.message}`);
-  }
+  const list = parseFlagJson("--uncovered", json);
   if (!Array.isArray(list)) throw cannot("--uncovered is not a JSON array of { step, reason } entries, `[]` for none");
   list.forEach((u, i) => {
     if (u === null || typeof u !== "object" || Array.isArray(u) || !filled(u.step) || !filled(u.reason)) {
@@ -242,12 +245,7 @@ const normStep = (s) => s.trim().replace(/\s+/g, " ");
 // steps a command runs, only that the ledger is well-formed and agrees with
 // `uncovered` about what it leaves out.
 function checkCovered(json, uncovered, check) {
-  let list;
-  try {
-    list = JSON.parse(json);
-  } catch (e) {
-    throw cannot(`--covered is not JSON: ${e.message}`);
-  }
+  const list = parseFlagJson("--covered", json);
   if (!Array.isArray(list)) throw cannot(`--covered is not a JSON array of { step, by } entries — ${USAGE}`);
   list.forEach((c, i) => {
     if (c === null || typeof c !== "object" || Array.isArray(c) || !filled(c.step) || (c.by !== "test" && c.by !== "check")) {
@@ -265,7 +263,7 @@ function checkCovered(json, uncovered, check) {
 // proposed command to the rules the cache is held to, with no cache read and no
 // command run, so one the cache would refuse is refused before the proof.
 function preflight(field, command, repo, at) {
-  const args = [READER, "--propose", repo, field, command, ...(at ? ["--at", at] : [])];
+  const args = [READER, "--propose", repo, field, command, ...(field === "test" ? ["--at", at] : [])];
   const r = spawnSync("sh", args, { env: ENV, encoding: "utf8" });
   if (r.error && !r.pid) throw cannot(`could not start sh to check the ${field} command: ${r.error.message}`);
   if (r.signal) throw cannot(`the reader's sh was killed by ${r.signal}${errorCause(r.error)}, so the ${field} command was not checked`);
@@ -587,9 +585,7 @@ function main(argv) {
   if (!sha.ok) throw cannot(`origin/main does not resolve to a commit (${sha.err}) — fetch it; the proof runs against it`);
   // Each command's shape is checked before any command runs, and before the
   // proof's worktree exists: a command the cache reader would refuse is refused here.
-  preflight("install", o.install, o.repo, null);
-  preflight("check", o.check, o.repo, null);
-  preflight("test", o.test, o.repo, sha.out);
+  for (const field of ["install", "check", "test"]) preflight(field, o[field], o.repo, sha.out);
 
   const logs = mkdtempSync(join(tmpdir(), `${NAME}-`));
   const cache = join(workspace, ".fleet", "recipe.json");

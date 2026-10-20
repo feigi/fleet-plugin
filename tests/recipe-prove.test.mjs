@@ -555,8 +555,8 @@ function movedLayout() {
   git(dir, "reset", "-q", "--hard", "HEAD~1");
   return dir;
 }
-// `true` ignores its arguments, so the run passes whatever the glob selects and
-// only the reader's check of the glob can tell the two trees apart.
+// The `sh -c` script ignores its arguments, so the run passes whatever the glob
+// selects and only the reader's check of the glob can tell the two trees apart.
 const GLOB_PROOF = (glob) => ["--install", "true", "--test", `sh -c "printf 'Tests run: 1, Failures: 0\\n'" sh ${glob}`, "--count-line", "Tests run: 1,", "--test-count", "1"];
 
 test("a Recipe proven at origin/main is read back against that tree, so a checkout still on the old layout does not refuse it", () => {
@@ -887,6 +887,24 @@ for (const c of KILLED_GIT) {
     if (c.status === 2) assert.doesNotMatch(r.err, /NOT PROVEN/);
   });
 }
+
+// The shape check's own git: a git that runs but fails while the reader probes
+// the Test entrypoint's pattern is no verdict on the proposal, so the proof
+// cannot be attempted (exit 2), never NOT PROVEN (#3491). The stub fails
+// `ls-files` only under `derive-testcmd.sh --propose`, the shape check.
+test("a git that fails while the shape check probes the Test entrypoint's pattern is no verdict, never NOT PROVEN (#3491)", () => {
+  const { dir: control } = repo({ "tests/a.txt": "1\n" });
+  const ok = prove(control, GLOB_PROOF("tests/*.txt"));
+  assert.equal(ok.status, 0, `fixture: without the stub the proof holds: ${ok.err}`);
+  const bin = tempDir("recipe-prove-path-");
+  writeExecStub(join(bin, "git"), `#!/bin/sh\ncase "$*" in *" ls-files "*) case "$(ps -o args= -p $PPID)" in *" --propose "*) echo 'git: injected ls-files failure' >&2; exit 128 ;; esac ;; esac\nexec '${REAL_GIT}' "$@"\n`);
+  const { dir } = repo({ "tests/a.txt": "1\n" });
+  const r = prove(dir, GLOB_PROOF("tests/*.txt"), { env: { PATH: `${bin}:${BIN}:${process.env.PATH}` } });
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /^recipe-prove: derive-testcmd: cannot list the files tracked in .* to check its test command's pattern 'tests\/\*\.txt' \(git ls-files exit 128\): git: injected ls-files failure — the reader could not run a tool it needs, so the test command was not checked$/m);
+  assert.doesNotMatch(r.err, /NOT PROVEN/);
+  assert.equal(existsSync(cachePath(dir)), false);
+});
 
 // The workspace rule's own probe: a git dir not named `.git` that has a
 // `.git` beside it (a `--separate-git-dir` git dir named `.bare` with a
