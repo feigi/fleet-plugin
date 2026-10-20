@@ -1040,19 +1040,12 @@ Read why that body carries the claim discipline, and its literal-path and `grep 
 **Then.** **Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh
 --pin`. See references/instruments.md. Then the ledger line, save the
 rationale, one line to the maintainer. **Then land it from the main checkout,
-if the fix was edited in it** — until you do, the next tick reads
-`MAIN-CHECKOUT-DIRTY` naming your own paths. Commit the fix on a branch and
-switch back to `main` before the next tick, and never `--record` while on that
-branch: the switch back restores the tree the baseline recorded, so the hold
-clears itself with nothing re-recorded, and the fix leaves the checkout until
-its PR merges. A `HEAD …` entry is none of your paths and clears the same way.
-Re-baseline only a fix you leave edited in the checkout: run
-`~/.fleet/bin/fleet-run main-checkout.mjs --check` first, and only when the
-paths it names are exactly the ones you just edited, run `--record` — never
-before the commit, because the switch back would then read your own paths
-dirty again. Any other path on that line is a stray write — leave the hold for
-the maintainer, because `--record` would certify it with yours. Live members
-hold the old text — re-brief only if it changes what they do *now*.
+if the fix was edited in it**: commit it on a branch and switch back to `main`
+before the next tick, never `--record` on that branch. Re-baseline only a fix
+you leave edited in the checkout, after the commit, and only when
+`main-checkout.mjs --check` names exactly your paths; any other path is a stray
+write whose hold is the maintainer's. Re-brief live members only if the fix
+changes what they do *now*. See references/instruments.md.
 
 Plan it as a PR the run's own merge queue lands, never as an edit-and-continue. See references/merge-bot.md.
 
@@ -1104,13 +1097,8 @@ One running table, updated as events land:
 
 Plus a queue-depth line: shortlist, supply, whether triage was suggested.
 
-**Do not read a cell early.** A cell's
-comparison is one session holding an admissible row at that cell — its tier
-check passed and its resolved effort is the cell's level — and one at
-`slow-high` whose resolved model and effort differ. Count them per cell, never
-pooled across cells, and stop until
-there are at least ten of them across five or more distinct `run_date`s; below
-that, a comparison count is a number, not evidence. **Report the count the per-cell readout prints,
+**Do not read a cell early** (references/pull.md, **Do not read a cell
+early**). **Report the count the per-cell readout prints,
 never one from any other query:** `~/.fleet/bin/fleet-run cell-readout.mjs`
 prints `<cell> <comparisons> <run_dates> <resolved models>` for each cell past
 that floor and a cell below it only as a count on stderr; a `mixed (…)` models

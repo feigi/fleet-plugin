@@ -42,3 +42,23 @@ refusal on that is noise.
 You just changed the instrument set under your own check, and this is the
 only edit that legitimately does; skip it and the next gate refuses on your own
 fix, which teaches you to ignore the refusal.
+
+## Landing a mid-run tooling fix from the main checkout
+
+**Then.** **Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh
+--pin`. See references/instruments.md. Then the ledger line, save the
+rationale, one line to the maintainer. **Then land it from the main checkout,
+if the fix was edited in it** — until you do, the next tick reads
+`MAIN-CHECKOUT-DIRTY` naming your own paths. Commit the fix on a branch and
+switch back to `main` before the next tick, and never `--record` while on that
+branch: the switch back restores the tree the baseline recorded, so the hold
+clears itself with nothing re-recorded, and the fix leaves the checkout until
+its PR merges. A `HEAD …` entry is none of your paths and clears the same way.
+Re-baseline only a fix you leave edited in the checkout: run
+`~/.fleet/bin/fleet-run main-checkout.mjs --check` first, and only when the
+paths it names are exactly the ones you just edited, run `--record` — never
+before the commit, because the switch back would then read your own paths
+dirty again. Any other path on that line is a stray write — leave the hold for
+the maintainer, because `--record` would certify it with yours. Live members
+hold the old text — re-brief only if it changes what they do *now*.
+
