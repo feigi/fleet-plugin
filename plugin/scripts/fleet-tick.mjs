@@ -239,8 +239,9 @@ const mkRow = (role, actual, target, detail) => (action, { acts = false, extra =
 // transcript; the session directory is the phase-0 receipt's, which
 // tier-check.mjs reads itself when an entry omits it. Without a receipt of
 // this run, `<session>` stays a placeholder the controller fills in, as
-// `<file>` does — one batch file, one entry per held member (run-team/SKILL.md,
-// **The tier check**).
+// `<file>` does — one batch file, one entry per held member, the shape under
+// **The batch file is a JSON array, one entry per dispatched member** in
+// run-team/references/tick-rows.md.
 const tierCheckStep = (members, session) => "run ~/.fleet/bin/fleet-run tier-check.mjs --batch <file> with "
   + JSON.stringify(members.map((member) => (session ? { member } : { member, session: "<session>" })));
 

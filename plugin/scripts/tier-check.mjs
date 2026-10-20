@@ -195,13 +195,14 @@ export function formatOmpExpectation(r) {
 // held rather than replacing it, since `row` rewrites the whole line
 // (ledger.mjs's `data.rows[i] = line`) and a bare mismatch note would drop
 // `class=`, `KILLED` or `→ PR#` tokens a prior `row` call wrote for the same
-// ticket. Idempotent on the identical note: the documented loop is check,
-// fix, re-check (run-team/SKILL.md, **The tier check**: "Clear a mismatch by
-// fixing the definition or the dispatch and dispatching the replacement at the
-// right tier"), and a member that still mismatches for the
-// SAME reason on a later run must not grow the row a second time — a
-// DIFFERENT note (a changed pair) still appends, since that is new
-// information the row does not carry yet.
+// ticket. Idempotent on the identical note: the check can run again for a
+// member it already judged, while what clears a mismatch is a new member
+// (run-team/SKILL.md, **The tier check**: "Clear a mismatch by fixing the
+// definition or the dispatch and dispatching the replacement at the right
+// tier"), so a re-run that finds the SAME pair for the SAME member adds
+// nothing and must not grow the row a second time — a DIFFERENT note (a
+// changed pair, or the replacement's own line, which names the replacement)
+// still appends, since that is new information the row does not carry yet.
 export function appendedLedgerText(existingText, mismatchNote) {
   const trimmed = String(existingText ?? "").trim();
   if (!trimmed) return mismatchNote;
