@@ -23,7 +23,9 @@
 //     no row here, except a PR that closes no issue: `append` keys a row on
 //     exactly one ticket and refuses it, so it is named in a `note` line and
 //     never warned about. A read of that PR that does not answer keeps the
-//     warning. `--ledger <path>` names another ledger than the run's own.
+//     warning, after a line naming why the read failed. Both reads of a PR's
+//     closing references ignore an ambient GH_REPO and give `gh` 60s.
+//     `--ledger <path>` names another ledger than the run's own.
 //
 // `tier` resolution, in order (never tie-broken by `run_date`: the two files'
 // `run_date`s mean different things — this file's header measures 92 of 267
@@ -448,20 +450,37 @@ function readLedger(ledgerFile, requireFile) {
   }
 }
 
-function closingTicket(pr) {
+// A PR's closingIssuesReferences array, or an Error naming why it could not be
+// read. GH_REPO is blanked so an ambient one naming another repository never
+// decides which PR is read; the timeout keeps a hung `gh` from stalling
+// `append` or a close-out's `check --live`.
+const GH_TIMEOUT_MS = 60_000;
+function closingRefs(pr) {
   let raw;
   try {
-    raw = execFileSync("gh", ["pr", "view", pr, "--json", "closingIssuesReferences"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    raw = execFileSync("gh", ["pr", "view", String(pr), "--json", "closingIssuesReferences"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GH_REPO: "" }, timeout: GH_TIMEOUT_MS,
+    });
   } catch (e) {
-    die(`gh pr view ${pr} failed: ${e.stderr?.trim() || e.message}`);
+    throw new Error(`gh pr view ${pr} failed: ${e.stderr?.trim() || e.message}`);
   }
   let refs;
   try {
     refs = JSON.parse(raw).closingIssuesReferences;
   } catch (e) {
-    die(`gh pr view ${pr} returned unreadable JSON: ${e.message}`);
+    throw new Error(`gh pr view ${pr} returned unreadable JSON: ${e.message}`);
   }
-  if (!Array.isArray(refs)) die(`gh pr view ${pr} returned no closingIssuesReferences array`);
+  if (!Array.isArray(refs)) throw new Error(`gh pr view ${pr} returned no closingIssuesReferences array`);
+  return refs;
+}
+
+function closingTicket(pr) {
+  let refs;
+  try {
+    refs = closingRefs(pr);
+  } catch (e) {
+    die(e.message);
+  }
   const numbers = [...new Set(refs.map((r) => r?.number))];
   if (numbers.length !== 1 || !Number.isInteger(numbers[0])) {
     die(`PR #${pr} closes ${numbers.length === 0 ? "no issue" : `${numbers.length} issues (${numbers.map((n) => `#${n}`).join(", ")})`} per GitHub's closingIssuesReferences — a tier-outcomes row keys on exactly one ticket`);
@@ -538,14 +557,15 @@ function append(pr, paths) {
 }
 
 // True only when `gh` answered and the PR's closingIssuesReferences is an empty
-// array. Any other outcome (gh failing, unreadable JSON, a non-array) is false:
-// a PR whose closing references cannot be read keeps its warning.
+// array. Any other outcome (gh failing, unreadable JSON, a non-array) is false
+// after a line naming why: a PR whose closing references cannot be read keeps
+// its warning. That line never reads `WARNING PR #`, which closeout.mjs turns
+// into a NEED.
 function closesNoIssue(pr) {
   try {
-    const raw = execFileSync("gh", ["pr", "view", String(pr), "--json", "closingIssuesReferences"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-    const refs = JSON.parse(raw).closingIssuesReferences;
-    return Array.isArray(refs) && refs.length === 0;
-  } catch {
+    return closingRefs(pr).length === 0;
+  } catch (e) {
+    console.error(`${NAME}: could not read the closing references of PR #${pr}: ${e.message}`);
     return false;
   }
 }

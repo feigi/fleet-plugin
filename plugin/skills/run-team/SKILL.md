@@ -211,6 +211,7 @@ owes beyond its call:
      a recorded stop as the end of the run. A `NEED tier-outcomes append
      <pr>` is a PR the ledger marks reviewed with no verdict row: append it with
      the verdict you rule (**Guard: accumulate per PR**) and run `finish` again.
+     A reviewed PR that closes no issue takes no row and is never a NEED.
      A step it fails is explained in references/close-out.md. Exit 0 is the run
      closed.
   Drain only when a documented trigger fired, and name the trigger in `--reason`.

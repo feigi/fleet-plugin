@@ -455,6 +455,22 @@ test("finish: exits 4 naming each reviewed= PR without a tier-outcomes row, and 
   assert.deepEqual(f.calls("metrics-refresh").length, 1);
 });
 
+// #3611: a reviewed PR that closes no issue (a `Refs`-only step) can take no
+// tier-outcomes row, so it never holds the close-out up.
+test("finish: reviewed= PRs that close no issue need no tier-outcomes row, and the run closes", () => {
+  const f = fixture();
+  writeFileSync(join(f.repo, METRICS[2]), HEADER + tierRow(20, 10) + "\n");
+  git(f.repo, "commit", "-q", "-am", "a row");
+  git(f.repo, "push", "-q");
+  f.setLedger(REVIEWED);
+  writeFileSync(join(f.stubs, "gh.json"), '{"closingIssuesReferences":[]}\n');
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(r.out.filter((l) => l.startsWith("NEED ")), []);
+  assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), allOk(FINISH_STEPS));
+  assert.deepEqual(f.ghCalls().filter((l) => l.startsWith("pr view ")).map((l) => l.split(" GH_REPO=")[0]), ["pr view 23 --json closingIssuesReferences", "pr view 30 --json closingIssuesReferences"]);
+});
+
 test("finish: a tier-outcomes table the check refuses fails the step and prints what it said", () => {
   const f = fixture();
   writeFileSync(join(f.repo, METRICS[2]), HEADER + "not\ta row\n");

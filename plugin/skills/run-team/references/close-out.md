@@ -85,7 +85,10 @@ and none could be compared, so nothing from that run was checked: append the
 run's member rows if they are missing, or blank each named row's `tier` and say
 why in `note`.
 Each WARNING names a PR this run's ledger marks `reviewed=` that has no row yet
-— append it before committing if it is an implementer PR.
+— append it before committing if it is an implementer PR. A reviewed PR that
+closes no issue is named in a `note` line instead: it takes no row. A line
+saying the PR's closing references could not be read comes before that PR's
+WARNING and says why.
 
 ## Drain the pending ticket-features rows and refresh the cost guard
 
