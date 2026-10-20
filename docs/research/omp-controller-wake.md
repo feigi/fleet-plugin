@@ -7,7 +7,7 @@ bun 1.4.3, darwin arm64). Source citations are `file:line` under that
 package's `src/`. Probes ran in throwaway interactive TUI sessions
 (haiku-5.5, `--no-extensions -e <probe>`), not in a live `/skill:run-team`
 session. That live run is stage 2 (#3484), a separate maintainer ticket,
-recorded in §7.
+recorded in §7 under its own versions (omp 18.12.2; 18.12.3 for candidate 3).
 
 ## TL;DR
 
@@ -274,23 +274,47 @@ unmeasured claim.
 
 Measured 2026-10-19 to 2026-10-20 in one real `/skill:run-team` session on this
 repository (#3484), with the throwaway alarm from that ticket loaded through
-`-e`. The session ran about 18 hours of wall clock, part of it with the laptop
-asleep, and merged 18 PRs of its own plus one folded in by hand. The alarm
-logged every poll decision to `/tmp/fleet-alarm/alarm.log`; the figures below
-are counts over that log.
+`-e`. The session ran about 18 hours of wall clock and merged 18 PRs of its own
+plus one folded in by hand. The alarm logged every poll decision to
+`/tmp/fleet-alarm/alarm.log`. That file no longer exists. Each log count below is
+one the controller printed from it during the session (the totals at
+2026-10-20T08:53:35Z, the stop lines at 09:23:25Z), and the printed result is an
+entry in the controller's transcript. The transcript supplies the rest.
+
+Sources:
+
+- **The controller transcript**,
+  `2026-10-19T15-04-42-871Z_01a154b1-8677-70f5-aac4-f0220c978651.jsonl` (session
+  `01a154b1-8677-70f5-aac4-f0220c978651`). Its entries carry millisecond
+  timestamps: the `[fleet-alarm]` user entries, tool calls and tool results.
+- **The member transcripts**: the 526 `.jsonl` files in the directory of the same
+  name, one per member session.
+- **`pmset -g log`**, for power events.
+- **Versions.** The alarm run used omp 18.12.2: `runtime.version` is 18.12.2 on
+  every controller-transcript entry from 2026-10-19T15:04:42Z to
+  2026-10-20T09:33:50Z. The first 18.12.3 entry is at 09:34:07Z, after a
+  `session_exit` ("dispose") entry at 09:33:50Z, so candidate 3 (09:41Z) ran under
+  18.12.3. The main checkout was at `8a8bbf22` from 2026-10-19T13:57:15Z (its
+  reflog) until its HEAD next moved at 2026-10-20T10:54:42Z, after the run; the
+  alarm's default helper path is `<cwd>/plugin/scripts`. The version of the
+  installed `@feigi/fleet-ctl` plugin is **not known**: the transcript records no
+  plugin version, and the install under `~/.omp/plugins/node_modules` was rewritten
+  at 2026-10-20T11:17Z, so its present contents say nothing about the run.
 
 | Check | Result |
 |---|---|
 | Armed | one `armed pid=37611` line at session start; the `.fleet/heartbeat.json` `controller.pid` written by phase 0 equals it |
 | Pid gate | one `not controller (controller.pid=<old>)` skip, before phase 0 wrote the pid; none after |
 | Sub-agent sessions | 457 `inert: kind=sub` lines: the extension loads in every member's session and stays inert there |
-| (a) a turn is injected | 94 `FIRE` lines, each followed by `EVENT agent_start` and a `[fleet-alarm]` user turn; the `EVENT` line is the controller's by timing alone (see below) |
-| (b) the turn runs the tick | every alarm turn ran `fleet-event.mjs heartbeat` and acted on its rows |
-| (c) the tick leads to acting | alarm turns printed `PULL` rows and the controller pulled and dispatched from them (for example #3576, #3580, #3581) |
+| (a) a turn is injected | 94 `FIRE` lines. The controller transcript holds 94 `[fleet-alarm]` user entries, the first at 18:08:18Z and the last at 2026-10-20T08:47:51Z. For each of the seven fires whose log line survives, the entry's `message.timestamp` equals the `FIRE` time to within 1 ms. Excerpts: "A fire, in the log and the transcript" |
+| (b) the turn runs the tick | all 94 alarm turns ran `fleet-event.mjs heartbeat` in a `bash` call; the first started at 18:08:21.037Z and returned at 18:08:28.695Z. The model then acted on its rows, as (c) shows |
+| (c) the tick leads to acting | alarm turns printed `PULL` rows and the controller pulled and dispatched from them. `PULL #3576` printed at 20:21:38Z, then `pull.mjs next --head 3576` and a `task` dispatch of `impl-3576` at 20:22:09Z. `PULL #3580` printed at 21:41:11Z (`impl-3580` dispatched at 21:42:14Z) and `PULL #3581` at 22:29:11Z (`impl-3581` at 22:29:53Z). Each `PULL` row is a `bash` tool result inside an alarm turn |
 | Interval ceiling | fires at 300 s: 75, at 600 s: 12, at 1200 s: 7 |
-| Auto-compaction | 44 `session_compact` events, none typed by the maintainer; the alarm kept firing after every one. The log does not say which session compacted (see below) |
+| Auto-compaction | 44 `session_compact` events in the log, none typed by the maintainer. None was the controller's: its transcript has 0 `"type":"compaction"` entries, and the member transcripts have 44 (see "Whose compactions"). For the controller the case is **not observed**. A fire followed every one of the 44: the last compaction entry is at 2026-10-20T08:06:08Z, the last fire at 08:47:51Z |
 | Once per interval for a `beat.at` | 9 `already fired for this beat` skips. The guard holds a repeat fire for one interval, not for good: a `beat.at` the controller never re-marks fires again every interval, as #3485's ruling 2 specifies. Each skip is a poll after an alarm turn that ended without re-marking the beat. This count does not show whether any `beat.at` fired twice |
 | Lateness (`late=`) | median 14 s, 90th percentile 221 s, 10 fires over 120 s, maximum 8419 s |
+| Fire to tick | over all 94 alarm turns, from the fire (the user entry's `message.timestamp`) to the `fleet-event.mjs heartbeat` `bash` call: starts after min 2.7 s, median 4.4 s, 90th percentile 6.8 s, max 20.3 s; returns after min 8.2 s, median 16.3 s, 90th percentile 21.9 s, max 29.6 s (90th percentile by nearest rank). The `[fleet-alarm]` entry is written 0.48 to 3.56 s after the fire, median 0.61 s |
+| `--hold 240` relapse | none: three default-hold heartbeat calls, all before the first alarm turn; every call after it used `--hold 1`. The standing instruction was never typed. See "The `--hold 240` relapse check" |
 
 Poll decisions besides the fires and the `stopped` skips: 1260 `not due`,
 773 `busy`, 9 `already fired`, 1 `not controller`.
@@ -301,28 +325,121 @@ before its `kind` check and logs them with no pid. omp emits `agent_start`,
 sub-agent sessions included (`agent-session.ts`, `session-maintenance.ts`,
 read at 18.12.3). So every sub-agent session counted above writes `EVENT`
 lines in the same form as the controller. Only `armed`, `poll:` and `FIRE`
-lines come from the main session alone. An `EVENT agent_start` within
-milliseconds of a `FIRE` is the injected turn by timing; the `session_compact`
-count takes in any member session's compaction too, so this log cannot say
-whether any of them was the controller's.
+lines come from the main session alone. An `EVENT agent_start` after a `FIRE` is
+the injected turn by timing. In the two pairs that survive it precedes the
+controller's entry write by 4 ms (18:08:18.853Z against 18:08:18.857Z) and by
+28 ms (18:18:51.464Z against 18:18:51.492Z); the other 92 `EVENT agent_start` lines
+after fires are not recoverable. The `session_compact` count took in every member
+session's compaction; the transcripts attribute all 44 to members (see "Whose
+compactions").
+
+### A fire, in the log and the transcript
+
+One fire per interval, with the log lines that survive and the controller
+transcript's entries. The surviving log lines are the ones the controller printed
+into tool results; it grepped the 600 s and 1200 s fires for `FIRE` only, so no
+`EVENT` line survives for them. The `[fleet-alarm]` text is shortened. The fire
+time is the user entry's `message.timestamp`; "written" is the entry's own
+`timestamp`. All on 2026-10-19, UTC.
+
+```
+300 s, the first fire of the run
+alarm.log   2026-10-19T18:08:18.151Z FIRE beat.at=2026-10-19T15:42:59.077Z interval=300s late=8419s
+alarm.log   2026-10-19T18:08:18.853Z EVENT agent_start
+transcript  user  "[fleet-alarm] run … fleet-event.mjs heartbeat …"  fire 18:08:18.151Z, written 18:08:18.857Z
+transcript  bash  fleet-event.mjs heartbeat  started 18:08:21.037Z (+2.9 s), result 18:08:28.695Z (+10.5 s)
+
+300 s
+alarm.log   2026-10-19T18:18:48.172Z FIRE beat.at=2026-10-19T18:13:44.988Z interval=300s late=3s
+alarm.log   2026-10-19T18:18:51.464Z EVENT agent_start
+transcript  user  "[fleet-alarm] run … fleet-event.mjs heartbeat …"  fire 18:18:48.173Z, written 18:18:51.492Z
+transcript  bash  fleet-event.mjs heartbeat  started 18:18:54.737Z (+6.6 s), result 18:19:09.215Z (+21.0 s)
+
+600 s
+alarm.log   2026-10-19T18:40:18.234Z FIRE beat.at=2026-10-19T18:30:04.288Z interval=600s late=14s
+transcript  user  "[fleet-alarm] run … fleet-event.mjs heartbeat …"  fire 18:40:18.234Z, written 18:40:19.237Z
+transcript  bash  fleet-event.mjs heartbeat  started 18:40:21.793Z (+3.6 s), result 18:40:30.009Z (+11.8 s)
+
+1200 s
+alarm.log   2026-10-19T19:25:48.424Z FIRE beat.at=2026-10-19T19:02:07.226Z interval=1200s late=221s
+transcript  user  "[fleet-alarm] run … fleet-event.mjs heartbeat …"  fire 19:25:48.425Z, written 19:25:49.054Z
+transcript  bash  fleet-event.mjs heartbeat  started 19:25:51.414Z (+3.0 s), result 19:25:59.710Z (+11.3 s)
+```
+
+The fire does not start the turn within milliseconds in this run. Across all 94
+alarm turns the entry is written 0.48 to 3.56 s after the fire (median 0.61 s),
+and in the two surviving pairs `agent_start` followed the fire by 0.70 s and
+3.29 s. §2's 0–3 ms was measured in an idle throwaway probe session, a different
+measurement. The Checks table's "Fire to tick" row gives the delay to the tick.
+
+### Whose compactions
+
+The controller transcript has 0 `"type":"compaction"` entries. The member
+transcripts hold 44, in nine files: `impl-3541` (10), `impl-3542` (10),
+`impl-3541-b` (9), `impl-3541-c` (8), `impl-3554` (2), `impl-3581-b` (2) and
+`merge-bot-1`, `merge-bot-7`, `merge-bot-13` (1 each). That equals the log's 44
+`session_compact` events. The first eight `session_compact` lines the controller
+printed at 07:25Z (15:44:50.065Z to 18:42:54.099Z) match the member entries'
+timestamps (15:44:50.064Z to 18:42:54.098Z) to within 5 ms. None of the 44 was the
+controller's.
 
 ### What the lateness says
 
-The long tail has two causes, both visible in the log:
+The long tail comes from the controller being busy, and has these causes:
 
 - **A busy controller is never alarmed.** The gate checks `ctx.isIdle()` first.
-  A controller blocked in a long `wait` for a background job stays busy, so the
-  log shows `poll: skip busy` for minutes on end and the fire lands only when the
-  turn ends. The 8419 s fire is a stretch of this kind, with the laptop asleep
-  for part of it. A controller that hands its turn back, as the design ruled
-  for spec 7 (#3485) has it do, does not have the problem; one that blocks in
-  `wait` still does.
+  A controller blocked inside one tool call stays busy, so the log shows
+  `poll: skip busy` for minutes on end and the fire lands only when the turn
+  ends. The transcript shows two kinds of in-turn block, not one. It has 29 tool
+  calls over 240 s: 11 `wait` calls on background jobs (two ran the full 1800 s,
+  starting 15:11:55Z and 17:26:51Z), 17 `eval` loops waiting on PR checks (each
+  checks the PR, then `time.sleep(30)`, for 36 to 50 rounds, titled for example
+  "Wait for check on 3560/3561"), and one 245 s `bash` call (09:30:02Z, a test
+  run). A controller that hands its turn back, as the design ruled for spec 7
+  (#3485) has it do, does not have the problem; one that blocks in `wait` or in a
+  CI-poll loop still does.
 - **Alarm turns that start work.** A turn that dispatches a member and then waits
   on its result is busy for the member's whole run, so the next due fire waits
   with it.
+- **The 8419 s fire was the first fire, and the controller's first turn.** The
+  controller transcript has no assistant message that ended a turn (a
+  `stopReason` other than `toolUse`) between session start (15:04:42Z) and
+  18:08:10Z. The maintainer's two messages in between (15:05:45Z and 18:06:23Z)
+  arrived mid-turn. That turn ran 11007 s (3 h 3 min) in 105 tool calls: 62 `bash`,
+  20 `wait`, 16 `task`, 6 `eval` and 1 `read`. The `wait` calls held 9717 s of it,
+  and one `eval` loop of 484 s (17:14:30Z) polled PR checks. The gate could not
+  pass until the turn ended at 18:08:10Z. The fire came at 18:08:18Z with
+  `beat.at=15:42:59.077Z interval=300s`, so it was 8419 s past `beat.at + 300 s`.
+- **The laptop did not sleep during the run.** `pmset -g log` records its last
+  `Sleep` and `Wake` events at 2026-10-19 10:57:48 and 10:58:01 CEST, six hours
+  before the run began (17:04 CEST), and none after, through 2026-10-20 14:26 CEST,
+  where the log ends. No gap between consecutive controller-transcript entries
+  exceeds 1800 s, and both 1800 s `wait` timeouts ran 1800.0 s.
 
 In the ordinary idle case the fire landed within a poll or two of `beat.at +
 beat.interval`: the median is 14 s against a 30 s poll.
+
+### The `--hold 240` relapse check (#3484 step 3)
+
+Step 3 asked for a standing instruction to use `--hold 1` in place of SKILL.md's
+240 s hold, and the run to show whether the controller relapsed to the 240 s hold.
+From the controller transcript:
+
+- **Default-hold calls: 3.** `fleet-heartbeat.mjs` without `--hold` holds up to
+  240 s. It ran at 15:07:47Z (returned at once, `held 0s`), 15:07:54Z and 15:41:58Z
+  (both moved to the background at 60 s). All three precede the first
+  `[fleet-alarm]` turn at 18:08:18Z, inside the first-turn stretch above. They were
+  not what held that turn: the 15:41:58Z call returned to the model at 15:42:58Z,
+  2 h 25 min before the turn ended.
+- **After the first alarm turn, every heartbeat call used `--hold 1`.** There are
+  123 such `bash` calls (first 18:08:31Z, last 08:48:12Z), and no `--hold` value
+  other than 1 appears in any `bash` call of the session. No busy stretch after
+  18:08:18Z followed a 240 s hold.
+- **The standing instruction was never typed.** The maintainer typed 21 messages,
+  and none is the step-3 instruction. The first, at 15:05:45Z, was `fyi, alarm.mjs
+  is armed (issue://3484)`. The controller got `--hold 1` from the alarm's own
+  line, which carries it (`… run ~/.fleet/bin/fleet-run fleet-heartbeat.mjs --hold 1
+  and end your turn …`); the first `--hold 1` call came 14 s after the first fire.
 
 ### The stop (#3484 step 8)
 
@@ -336,11 +453,16 @@ that found the controller idle. The first such poll logged:
 2026-10-20T09:00:51.505Z poll: skip stopped: run drained; closeout finish blocked at tier-outcomes by #3611 (reviewed PR #3606 closes no issue)
 ```
 
-The log holds 44 such lines (the maintainer's read at 09:20:51 was the latest),
-and the last `FIRE` of the run (08:47:51) precedes the stop, so the stop silenced
-the alarm: no fire followed it. The controller could not observe the line from
-inside its own turn; it had only confirmed the gate's decision expression offline
-against the real state file, and the maintainer read the log.
+The log held 44 such lines when the controller counted them at 09:23:25 (an
+`eval` whose result is in the controller transcript): one per poll from 09:00:51 to
+about 09:22:21, while the controller sat idle. The controller transcript has no
+entry between 09:00:38Z and the maintainer's message at 09:22:50. That message
+started a turn, and polls after it logged `skip busy`. The line the maintainer had
+quoted, 09:20:51, was the 41st. The last `FIRE` of the run (08:47:51) precedes the
+stop, and the same `eval` found no `FIRE` after the first `skip stopped` line, so
+the stop silenced the alarm: no fire followed it. The controller could not observe
+the line from inside its own turn; it had only confirmed the gate's decision
+expression offline against the real state file, and the maintainer read the log.
 
 ### Notes for the design
 
@@ -384,9 +506,9 @@ the rule.
 | #3484 check | This run |
 |---|---|
 | Pid check | passes: the `armed` pid equals `controller.pid` (the Armed row) |
-| (a), (b), (c) | as their rows above record; (a)'s `EVENT agent_start` is the controller's by timing alone |
+| (a), (b), (c) | as their rows above record; (a)'s `EVENT agent_start` is the controller's by timing: 4 ms and 28 ms before its entry write in the two surviving pairs |
 | Ceiling stretch | reached: fires at 1200 s (the Interval ceiling row) |
-| Auto-compaction | not attributable to the controller from the log (see "Which session wrote a line") |
+| Auto-compaction | not observed for the controller: its transcript has 0 compaction entries; all 44 `session_compact` events were member sessions' (see "Whose compactions") |
 
 #3484's Outcomes count auto-compaction not observed alongside the passes.
 Whether these results unblock #3485 or amend ADR 0008 is the maintainer's
@@ -402,3 +524,10 @@ call on #3484.
   candidate 3 measurement above).
 - RPC and print modes. `ctx.setInterval` is unref'd, so a mode where
   nothing else keeps the event loop alive would not keep the process up.
+- A compaction of the controller's own session. None occurred (see "Whose
+  compactions"), so whether the alarm fires after one was not exercised.
+- Log lines the controller did not print into the transcript. The log file is gone,
+  so any figure here that is not a printed result or a transcript entry cannot be
+  rechecked.
+- The installed `@feigi/fleet-ctl` plugin's version during the run (see
+  "Sources").
