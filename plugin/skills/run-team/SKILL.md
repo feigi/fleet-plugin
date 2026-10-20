@@ -411,24 +411,10 @@ For the merge queue, see references/pull.md.
 govern — refresh, and never Pull a ticket the shortlist does not hold.
 See references/pull.md.
 
-It reads the run itself, and nobody states a count. The In-flight count —
-every open PR that closes an issue off `gh`, plus every claimed ticket whose
-newest implementer is live or owed a replacement and has no such PR yet, off
-the ledger — sits beside the live review units (in-flight `review=` tokens
-plus unsettled `fix-pr-` ones), the merge bot, merge holds, tier mismatches
-and the drain marker, all off `.fleet/ledger.md`; the unclaimed heads and the
-supply come off `.fleet/shortlist.json`, which it refreshes itself when the
-unclaimed count is below the In-flight bound, when the file is missing or
-empty, when an Exclusion's premise has lifted, or when a branch-named
-`behind-pr` or a `behind-issue` Exclusion still not lifted names a ticket the
-file carries — never while the bound holds; the open PRs come off `gh`. A
-head whose Pull ended this run is not counted, unless on a lifted exclusion. A
-ledger token it
-cannot read, it refuses rather than guessing — a member counted live or gone on
-a guess is the over- or under-dispatch it exists to prevent — so correct that
-row with `ledger.mjs row` and tick again. The In-flight bound defaults to 5
-and is fixed for the run: pass `--in-flight` on every tick when `$ARGUMENTS`
-set it, and never otherwise.
+The tick reads the run itself; nobody states a count (references/tick-rows.md,
+**What the tick reads**). A ledger token it cannot read, it refuses: correct
+that row with `ledger.mjs row` and tick again. Pass `--in-flight` on every tick
+when `$ARGUMENTS` set it, and never otherwise.
 
 It prints `actual/target` and a named ACTION per role. Act on each line as it reads:
 
@@ -770,17 +756,9 @@ finisher again.
 
 **An unanswered question from the member is an outbox item, and it blocks dispatch with the same weight as a ruling you have already made.** See references/finisher.md.
 
-**A final report is not proof the member stopped.** Observed twice: a ruling
-relayed after dispatch produced a new commit mid-audit, and a fix-applier that
-reported "nothing outstanding" resumed on a ledger-only withdrawal and was
-cycling mutants through the worktree when the finisher audited it. Both finishers
-correctly halted. Note what that costs to detect: two reads of the same worktree
-a minute apart showed *different* mutants, so a member's report and any single
-`git status` are each valid only at their instant.
+**A final report is not proof the member stopped.** See references/finisher.md.
 
-**The standing CI facts are in the fix-applier body, not in per-event messages** —
-otherwise you send "your red is staleness, do not rebase" once per member per
-merge. `review-and-fix.md` states them; the body says they apply.
+**The standing CI facts are in the fix-applier body, not in per-event messages.** See references/finisher.md.
 
 **Once the label is on, take it off before you approve any push.** Write `label-off=<latest finisher attempt>` onto the PR's row first
 (`ledger.mjs token <PR number> label-off=<latest finisher attempt>`, which keeps

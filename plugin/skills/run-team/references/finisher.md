@@ -119,3 +119,19 @@ its token re-dispatches a finisher into your take-off window. The label goes
 before the approval because removing the artifact the merge bot gates on is
 the reliable stop, where messaging the bot races it, and a label has been
 observed holding until after an abort message arrived.
+
+## A final report is not proof the member stopped
+
+**A final report is not proof the member stopped.** Observed twice: a ruling
+relayed after dispatch produced a new commit mid-audit, and a fix-applier that
+reported "nothing outstanding" resumed on a ledger-only withdrawal and was
+cycling mutants through the worktree when the finisher audited it. Both finishers
+correctly halted. Note what that costs to detect: two reads of the same worktree
+a minute apart showed *different* mutants, so a member's report and any single
+`git status` are each valid only at their instant.
+
+## The standing CI facts are in the fix-applier body
+
+**The standing CI facts are in the fix-applier body, not in per-event messages** —
+otherwise you send "your red is staleness, do not rebase" once per member per
+merge. `review-and-fix.md` states them; the body says they apply.
