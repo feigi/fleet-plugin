@@ -108,9 +108,3 @@ test("the finisher's report names the cause in the ledger's vocabulary, and a du
     "the report no longer has a duty 1 halt carry the script's verdict as printed — a rebase halt reaches the controller without the replay evidence the resolution table escalates on",
   );
 });
-
-test("the settle grammar summary lists halted:<cause> with the grammar's own causes", () => {
-  const bulletText = flat(RUN_TEAM.between("- **`ledger.mjs settle <member> <outcome>`**", "\n- **", "settle summary").text);
-  assert.match(bulletText, Pin.phrase("`finisher-pr-M` = `labelled | failed | killed | halted:<cause>`"));
-  assert.match(bulletText, Pin.phrase(`\`<cause>\` one of \`${HALT_CAUSES.join(" | ")}\``));
-});

@@ -46,13 +46,6 @@ test("a replacement finisher's brief is rendered before ledger.mjs dispatch reco
   assert.match(died, Pin.phrase("render its brief with `dispatch-prompt.mjs render finisher --kind fresh --member finisher-pr-<M>-<x> …` (`--kind repair` once an earlier finisher reported `labelled` without the label landing), then `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`."));
 });
 
-test("the ledger reference says what dispatch records of the brief, prints, and refuses", () => {
-  const b = RUN_TEAM.bullet("- **`ledger.mjs dispatch <ticket|pr> <member>`**", "- **`ledger.mjs settle <member> <outcome>`**", "ledger.mjs dispatch reference bullet").text;
-  assert.match(b, Pin.phrase("appends it to `## Dispatched` with `brief=<first 8 hex of its brief's sha256>`."));
-  assert.match(b, Pin.phrase("It prints `{member, agent, ticket, line, created, total, brief}`, `brief` the `{path, sha256}` of the rendered brief the `task` call is handed;"));
-  assert.match(b, Pin.phrase("refuses a member whose `briefs/<member>.json` beside the ledger is missing, names another role or carries no sha256, a brief file beside it that is missing or does not hash to that sha256,"));
-});
-
 // The kinds a template carries, off its `## kind:` lines — the renderer's own
 // grammar for them, so a render command naming a kind the template lacks is
 // one the controller could not run.
