@@ -129,13 +129,8 @@ evidence cannot settle**.
 notification, a label, a CI run reaching a terminal state, a `CONFLICT` line, a
 heartbeat, the maintainer's drain — is one `fleet-event.mjs` call, which makes
 the wake's writes and ends in one `fleet-tick.mjs` invocation, and you do what
-it prints. There are no hand-run
-refill or dispatch edges left. Record first, because the tick reads the run off
-`.fleet/ledger.md` and nothing else of yours: a wake you have not written down is
-one it cannot see, and it names the same dispatch again. Every record goes
-through `ledger.mjs` (references/ledger.md), which `fleet-event.mjs` drives — never a
-hand edit. What each kind writes is in the header comment of `fleet-event.mjs`.
-See references/ci-and-staleness.md.
+it prints. There are no hand-run refill or dispatch edges left, and no hand
+edit of the ledger. See references/ci-and-staleness.md.
 
 Run each as `~/.fleet/bin/fleet-run fleet-event.mjs <kind> <args>`, from the main checkout:
 
@@ -180,10 +175,7 @@ owes beyond its call:
   Read the digest as **Reading a review result** says.
 - **Monitor: `ready-to-merge` appears** → `fleet-event.mjs label <pr>`, and
   on `DISPATCH merge-bot` dispatch the next `merge-bot-<n>` (**The merge bot**).
-  Catches hand-added labels as well as a finisher's own. The bot does not wait
-  for that finisher's report: its rebase is server-side,
-  `gh pr update-branch --rebase`, so nothing on the finisher's worktree has to
-  happen first. **You own the watcher, not the bot.** Arm one yourself,
+  **You own the watcher, not the bot.** Arm one yourself,
   `persistent: true`, seeded before the loop so handled PRs do not re-fire.
   **One rebase per PR, at merge time.** Any behind-count you hand a bot is
   expired on arrival; say so. See references/ci-and-staleness.md.
@@ -196,11 +188,9 @@ owes beyond its call:
   pass. Read `worktreesRemoved` alongside `reaped`: a pass that
   reaps branches and removes no worktrees is a finding, not a quiet success.
   Update the reaped tickets' ledger rows in the same step.
-  **Do not invoke `commit-commands:clean_gone`.** The skill is the maintainer's
-  to fix; do the reap yourself. **Never reap a branch a live member is on.**
-  Cross-check `.fleet/ledger.md` first:
-  a row without a terminal state means someone may still be in that worktree, and
-  the dirty check does not see a member that committed but has not pushed.
+  **Do not invoke `commit-commands:clean_gone`**: do the reap yourself. **Never
+  reap a branch a live member is on** — cross-check `.fleet/ledger.md` first
+  for a row without a terminal state.
   See references/reaping.md.
 - **The run ends, or the maintainer says drain** → **End of run**, in this
   order; the drain starts the end of the run, it does not end it:
@@ -263,13 +253,10 @@ references/member-lifecycle.md.
 **The scratch root is computed, never invented and never recorded.** You run
 `~/.fleet/bin/fleet-run scratch-root.mjs`; a non-zero exit is an environment to
 fix, not a cue to pick another root.
-`<scratch>` in this file is the path it prints, resolved before you send anything: every
-brief that carries one carries the absolute path you passed it — an
-implementer's `<scratch>/impl-<N>/`, the recipe deriver's
-`<scratch>/derive-recipe/`, a fix-applier's, a finisher's and a merge bot's
-`<scratch>/pr<N>/…`, and a review runner's `scratch` argument, which is the
-root itself. A member whose prompt names no path asks you by name and never
-makes one up. See references/isolation.md.
+`<scratch>` in this file is the path it prints, resolved before you send
+anything: every brief that carries one carries the absolute path. A member
+whose prompt names no path asks you by name and never makes one up. See
+references/isolation.md.
 
 ### Reading a review result
 

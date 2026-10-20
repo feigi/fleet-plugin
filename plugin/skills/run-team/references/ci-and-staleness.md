@@ -157,3 +157,24 @@ Zeroes on the cockpit are not yet proof the pipeline is idle.
 Skipping it is not fatal — the next reader still reports the stop, it just
 reports that the beat stopped *without a recorded reason*, which is all it can
 honestly say about a death that named nothing.
+
+## Rule: record, tick, act, beat
+
+**Rule: record, tick, act, beat.** Every wake — a member report, a review
+notification, a label, a CI run reaching a terminal state, a `CONFLICT` line, a
+heartbeat, the maintainer's drain — is one `fleet-event.mjs` call, which makes
+the wake's writes and ends in one `fleet-tick.mjs` invocation, and you do what
+it prints. There are no hand-run
+refill or dispatch edges left. Record first, because the tick reads the run off
+`.fleet/ledger.md` and nothing else of yours: a wake you have not written down is
+one it cannot see, and it names the same dispatch again. Every record goes
+through `ledger.mjs` (references/ledger.md), which `fleet-event.mjs` drives — never a
+hand edit. What each kind writes is in the header comment of `fleet-event.mjs`.
+See references/ci-and-staleness.md.
+
+## The merge bot does not wait for the finisher's report
+
+  Catches hand-added labels as well as a finisher's own. The bot does not wait
+  for that finisher's report: its rebase is server-side,
+  `gh pr update-branch --rebase`, so nothing on the finisher's worktree has to
+  happen first. **You own the watcher, not the bot.** Arm one yourself,
