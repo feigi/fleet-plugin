@@ -60,7 +60,6 @@ export function ghAliasedRead(numbers, { field, selection, timeoutMs }) {
     try {
       body = JSON.parse(r.stdout);
     } catch (e) {
-      body = undefined;
       if (r.status === 0) unparseable = e.message;
     }
     const repo = body?.data?.repository;
