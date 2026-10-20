@@ -13,7 +13,9 @@
 // every liveness count from this file alone, rather than from row text a
 // controller typed by hand: `dispatch` writes a member's live token onto its
 // row and appends it to `## Dispatched` with `brief=<hash>`, the brief it
-// refuses to dispatch without, `settle` rewrites that token to
+// refuses to dispatch without; when that brief's sidecar names an absolute
+// scratch, it also clears the member's report file there, so a prior run's
+// report is not read as this run's; `settle` rewrites that token to
 // `<member>=<outcome>` in both places (an implementer's settle to `PR#M` also
 // folds the PR's own `#M` row into its ticket's) — with `--from-report`, the
 // outcome derived from the member's report file and checked against git and
@@ -46,7 +48,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, unlinkSync, linkSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, resolve, join, basename } from "node:path";
+import { dirname, resolve, join, basename, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
@@ -56,7 +58,7 @@ import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD } from "./f
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
 import { attemptLock, releaseLockFile, reapPathOf } from "./pid-lock.mjs";
-import { readCheckRecordIn, readReportIn, reportsDir, reportFamily, defaultScratch } from "./report-files.mjs";
+import { readCheckRecordIn, readReportIn, reportsDir, reportFamily, defaultScratch, reportPath } from "./report-files.mjs";
 
 const NAME = "ledger";
 // The plugin's own agent definitions — the directory tier-check.mjs reads
@@ -2032,7 +2034,12 @@ function runDispatch() {
 
   // Last, so every refusal above still names its own cause first, and before
   // anything is written.
-  const brief = renderedBrief(member.name, memberRole(member.family));
+  const { brief, scratch } = renderedBrief(member.name, memberRole(member.family));
+
+  // The report a prior run left for this member is that run's last claim.
+  // Cleared here, after every refusal above, so settle --from-report and the
+  // tick's SETTLE row cannot read it as this run's.
+  clearReport(scratch, member.name);
 
   let line = null;
   const created = member.bound !== null && i === -1;
@@ -2059,9 +2066,11 @@ function runDispatch() {
 // --member <name>` left it in the briefs directory beside the ledger: the
 // sidecar `<name>.json` must exist, name `role` — the template of the
 // member's family — and carry the brief's sha256, and the brief file beside
-// it, `<name>.md`, must exist and hash to it. `{path, sha256}` comes back,
-// `path` that file, so the controller hands the `task` call its content from
-// the path printed. Refused, nothing is written.
+// it, `<name>.md`, must exist and hash to it. `{brief: {path, sha256},
+// scratch}` comes back, `path` that file, so the controller hands the `task`
+// call its content from the path printed, and `scratch` the sidecar's
+// `args.scratch` when it is an absolute path, else null. Refused, nothing is
+// written.
 function renderedBrief(name, role) {
   const dir = resolve(dirname(file), BRIEFS);
   const sidecar = join(dir, `${name}.json`);
@@ -2098,7 +2107,28 @@ function renderedBrief(name, role) {
   if (actual !== s.sha256) {
     die(`${path} hashes to ${actual}, but ${sidecar} carries ${s.sha256} — ${render}`);
   }
-  return { path, sha256: s.sha256 };
+  const scratch = typeof s.args?.scratch === "string" && isAbsolute(s.args.scratch) ? s.args.scratch : null;
+  return { brief: { path, sha256: s.sha256 }, scratch };
+}
+
+// Removes `name`'s report under `scratch`, the last run's claim about the
+// member, if one is there. A null `scratch` — the brief's sidecar named none —
+// clears nothing and says so, since the report's location is then unknown.
+function clearReport(scratch, name) {
+  if (scratch === null) {
+    console.error(`${NAME}: WARNING ${name}'s brief sidecar names no scratch, so its prior report was not cleared`);
+    return;
+  }
+  const path = reportPath(scratch, name);
+  try {
+    unlinkSync(path);
+  } catch (e) {
+    // ENOTDIR: something other than a directory sits where `reports` would
+    // be, so no report is there either — readReportIn and the tick's
+    // readReports read it as absent too.
+    if (e.code === "ENOENT" || e.code === "ENOTDIR") return;
+    die(`cannot clear ${path}: ${e.message} — not dispatching ${name}`);
+  }
 }
 
 // Whether `outcome` is one whose claim a member's report carries and `settle

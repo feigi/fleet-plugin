@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
-import { rendering } from "./support/rendered-brief.mjs";
+import { rendering, renderBrief } from "./support/rendered-brief.mjs";
 import { scratchRoot } from "../plugin/scripts/fleet-dir.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
@@ -100,7 +100,7 @@ cat "$f"
     assert.equal(bytes(), before, "a refusal must not touch the ledger");
     return r;
   };
-  return { root, work, file, reports, env, git, head, stray, run, cli, ok, bytes, report, pr, settle, settled, refused };
+  return { root, work, fleet, file, reports, env, git, head, stray, run, cli, ok, bytes, report, pr, settle, settled, refused };
 }
 
 const implReport = (f, over = {}) => ({
@@ -571,4 +571,18 @@ test("the bare form still settles, and warns only for an outcome a report would 
   const killed = f.run("settle", "impl-7", "killed");
   assert.equal(killed.status, 0, killed.stderr);
   assert.doesNotMatch(killed.stderr, /without --from-report/);
+});
+
+// A prior run's report is cleared by the dispatch that starts the member's new
+// run: `settle --from-report` refuses it, and the new run's own report settles.
+test("dispatch clears a prior run's report, so settle refuses it, and the new run's report settles", () => {
+  const f = fixture();
+  f.report("impl-5", implReport(f));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [{ number: 5 }] });
+  renderBrief(f.fleet, "impl-5", { sidecar: { args: { scratch: f.root } } });
+  f.ok("dispatch", "5", "impl-5");
+  assert.equal(existsSync(join(f.reports, "impl-5.json")), false);
+  f.refused("impl-5", 2, /no report at/);
+  f.report("impl-5", implReport(f));
+  assert.equal(f.settled("impl-5").member, "impl-5");
 });

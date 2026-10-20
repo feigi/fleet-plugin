@@ -375,7 +375,12 @@ the `render` command to run first, and refuses once the
 run is draining: drain stops supply. It also refuses a row whose `tier=`
 names no single definition — two different values, or one that is not a
 definition suffix — or names one with no `agents/<definition>.agent.md`,
-before the member is live; fix the row with `row` first.
+before the member is live; fix the row with `row` first. Once every refusal
+has passed, `dispatch` deletes the member's prior report,
+`<scratch>/reports/<member>.json`, when its brief's sidecar names an absolute
+`scratch`, so a prior run's report cannot settle this one. A sidecar naming
+none clears nothing and says so on stderr; a report it cannot remove refuses
+the dispatch.
 
 **The prompt carries only what varies.** Everything shared — the
 unattended-member block, the `edit`/`read` absolute-path rule, the
