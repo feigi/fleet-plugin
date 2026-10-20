@@ -269,11 +269,68 @@ ADR 0008 decision 3's unmeasured claim.
   turn end flags a dead controller up to one interval later. The busy-turn case
   is unchanged: the hold never refreshed `beat` during a busy turn either.
 
+## 7. Stage 2: the live run
+
+Measured 2026-10-19 to 2026-10-20 in one real `/skill:run-team` session on this
+repository (#3484), with the throwaway alarm from that ticket loaded through
+`-e`. The session ran about 18 hours of wall clock, part of it with the laptop
+asleep, and merged 18 PRs of its own plus one folded in by hand. The alarm logged every poll decision to
+`/tmp/fleet-alarm/alarm.log`; the figures below are counts over that log.
+
+| Check | Result |
+|---|---|
+| Armed | one `armed pid=37611` line at session start; the `.fleet/heartbeat.json` `controller.pid` written by phase 0 equals it |
+| Pid gate | one `not controller (controller.pid=<old>)` skip, before phase 0 wrote the pid; none after |
+| Sub-agent sessions | 457 `inert: kind=sub` lines: the extension loads in every member's session and stays inert there |
+| (a) a turn is injected | 94 `FIRE` lines, each followed by `EVENT agent_start` and a `[fleet-alarm]` user turn |
+| (b) the turn runs the tick | every alarm turn ran `fleet-event.mjs heartbeat` and acted on its rows |
+| (c) the tick leads to acting | alarm turns printed `PULL` rows and the controller pulled and dispatched from them (for example #3576, #3580, #3581) |
+| Interval ceiling | fires at 300 s: 75, at 600 s: 12, at 1200 s: 7 |
+| Auto-compaction | 44 `session_compact` events, none typed by the maintainer; the alarm kept firing after every one |
+| Once per beat | 9 `already fired for this beat` skips; no two `FIRE` lines share a timestamp |
+| Lateness (`late=`) | median 14 s, 90th percentile 221 s, 10 fires over 120 s, maximum 8419 s |
+
+Poll decisions overall: 1260 `not due`, 773 `busy`, 9 `already fired`, 1 `not controller`.
+
+### What the lateness says
+
+The long tail has two causes, both visible in the log:
+
+- **A busy controller is never alarmed.** The gate checks `ctx.isIdle()` first.
+  A controller blocked in a long `wait` for a background job stays busy, so the
+  log shows `poll: skip busy` for minutes on end and the fire lands only when the
+  turn ends. The 8419 s fire is a stretch of this kind, with the laptop asleep
+  for part of it. A controller that hands its turn back, as the spec-7 design
+  has it do, does not have the problem; one that blocks in `wait` still does.
+- **Alarm turns that start work.** A turn that dispatches a member and then waits
+  on its result is busy for the member's whole run, so the next due fire waits
+  with it.
+
+In the ordinary idle case the fire landed within a poll or two of `beat.at +
+beat.interval`: the median is 14 s against a 30 s poll.
+
+### Notes for the design
+
+- The `quiet` back-off reached the 1200 s ceiling and stayed there while the
+  fleet had only long members running; every member report reset it to the base.
+  The ceiling therefore bounds idle latency only for a fleet that is truly quiet.
+- An alarm turn and a member-report turn are the same kind of turn to the
+  controller; the log records only the alarm side of the interleaving, so this
+  run does not measure interference between the two.
+
 ## Not measured here
 
-- The live `/skill:run-team` run: a wake leads to a tick, which leads to
-  acting on a `PULL` row. The full sequence was not run.
-- Auto-compaction triggered during a turn.
-- Idle stretches longer than about 2 minutes, in particular one at the 1200 s ceiling.
+- Whether `--stop` silences the alarm, as a logged line. At the end of the run
+  `fleet-heartbeat.mjs --stop` set `beat.stopped` in `.fleet/heartbeat.json`, and
+  the alarm's gate reads `beat.stopped` after `ctx.isIdle()`, so a `poll: skip
+  stopped` line can appear only on a poll that lands while the controller is
+  idle. Every poll after the stop landed while the controller was still in its
+  closing turn and logged `busy`; no idle poll was observed. The gate order is
+  the evidence, not a log line.
+- The log also shows an `EVENT session_shutdown` while the controller was
+  closing out. This run did not establish what caused it or whether the timer
+  survives one.
+- Candidate 3 (a sleeping background `task` as the wake) was not measured in
+  this run. Stage 2's side-measure was left undone.
 - RPC and print modes. `ctx.setInterval` is unref'd, so a mode where
   nothing else keeps the event loop alive would not keep the process up.
