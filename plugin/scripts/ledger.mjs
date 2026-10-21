@@ -1894,34 +1894,38 @@ function dispositionsRefusal(pr, review) {
   return null;
 }
 
-// Why PR `pr`'s finisher waits on its ruling, or null when it does not: the
-// PR is an implementer's — a settled `impl-<N>=PR#<pr>` token on a row names
-// it, the token tier-outcomes.mjs `append` resolves a ticket from — and the
-// main checkout's tier-outcomes.tsv has no row whose `pr` is it. Any row
-// passes, whatever its date or verdicts, so a replacement finisher is never
-// held once the first passed. The ledger lives in the main checkout's
-// `.fleet/` (fleet-dir.mjs), so the file is found beside that directory —
-// no git, no gh. A missing file is no row (`append` creates it); one that
-// cannot be read or parsed refuses, naming it, and is never a pass.
+// PR `pr`'s ruling, as `{tickets, ruling, tsv, refusal}`: `tickets` the
+// tickets a settled `impl-<N>=PR#<pr>` token on a row names — the token
+// tier-outcomes.mjs `append` resolves a ticket from — and `ruling` the PR's
+// latest row in `tsv`, the main checkout's tier-outcomes.tsv, or null when
+// `refusal` is set or `tickets` is empty. `refusal` says why the
+// finisher waits, or is null when it does not: the PR is an implementer's and
+// the file has no row whose `pr` is it. Any row passes, whatever its date or
+// verdicts, so a replacement finisher is never held once the first passed.
+// The ledger lives in the main checkout's `.fleet/` (fleet-dir.mjs), so the
+// file is found beside that directory — no git, no gh. A missing file is no
+// row (`append` creates it); one that cannot be read or parsed refuses,
+// naming it, and is never a pass.
 // tier-outcomes.mjs is imported here, not at the top: its import graph is
 // several modules no other subcommand loads.
-async function rulingRefusal(pr) {
+async function rulingOf(pr) {
   const { parseTierOutcomes, implementerClaims } = await import("./tier-outcomes.mjs");
   const tickets = [...new Set(implementerClaims(data, pr).map((c) => c.ticket))];
-  if (tickets.length === 0) return null;
+  if (tickets.length === 0) return { tickets, ruling: null, refusal: null };
   const tsv = join(dirname(dirname(resolve(file))), "docs", "metrics", "tier-outcomes.tsv");
   if (existsSync(tsv)) {
     let rows;
     try {
       rows = parseTierOutcomes(readFileSync(tsv, "utf8"));
     } catch (e) {
-      return `cannot read the PR's ruling off ${tsv}: ${e.code ?? e.message} — fix the file, then dispatch the finisher again`;
+      return { tickets, ruling: null, refusal: `cannot read the PR's ruling off ${tsv}: ${e.code ?? e.message} — fix the file, then dispatch the finisher again` };
     }
-    if (rows.some((r) => r.pr === String(pr))) return null;
+    const ruling = rows.findLast((r) => r.pr === String(pr));
+    if (ruling !== undefined) return { tickets, ruling, tsv, refusal: null };
   }
-  return `PR #${pr}, the implementer PR of ${tickets.length === 1 ? "ticket" : "tickets"} ${tickets.map((n) => `#${n}`).join(", ")}, has no ruling — `
+  return { tickets, ruling: null, refusal: `PR #${pr}, the implementer PR of ${tickets.length === 1 ? "ticket" : "tickets"} ${tickets.map((n) => `#${n}`).join(", ")}, has no ruling — `
     + `${tsv} has no row for it; rule its review with \`~/.fleet/bin/fleet-run tier-outcomes.mjs append ${pr} --closed-own-ticket yes|no `
-    + `--minted-false-claim yes|no --note "<text>"\`, then dispatch the finisher again`;
+    + `--minted-false-claim yes|no --note "<text>"\`, then dispatch the finisher again` };
 }
 
 // The reads a check makes of GitHub and git, shared by settle --from-report
@@ -1962,19 +1966,23 @@ function checkReaders(where) {
     return r;
   };
   const verifyShaOf = (branch, sha) => look(`verify-sha.sh ${branch} ${sha}`, "sh", [verifySha, branch, sha], [0, 1]);
+  // A gh answer, parsed: `v` the JSON it printed, or null when it printed
+  // none, beside the answer `r` itself for the caller's refusal.
+  const lookJson = (what, args) => {
+    const r = look(what, "gh", args);
+    try {
+      return { r, v: JSON.parse(r.stdout) };
+    } catch {
+      return { r, v: null };
+    }
+  };
   // A `gh pr view --json <fields>` answer: an object whose every requested
   // field has the type that field has. Anything else was not what was asked
   // for, so it could not look.
   const prFieldOk = { state: (v) => typeof v === "string", labels: Array.isArray, closingIssuesReferences: Array.isArray };
   const prView = (pr, fields) => {
     const what = `gh pr view ${pr} --json ${fields}`;
-    const r = look(what, "gh", ["pr", "view", String(pr), "--json", fields]);
-    let v = null;
-    try {
-      v = JSON.parse(r.stdout);
-    } catch {
-      // Falls through to the refusal below.
-    }
+    const { r, v } = lookJson(what, ["pr", "view", String(pr), "--json", fields]);
     if (v === null || typeof v !== "object") {
       die(`${where}: could not look — ${what} printed no JSON object: ${cause(r.stdout)}; nothing written`);
     }
@@ -1987,46 +1995,37 @@ function checkReaders(where) {
   // The title of issue `n`, as `gh issue view <n> --json title` answers it.
   const issueTitle = (n) => {
     const what = `gh issue view ${n} --json title`;
-    const r = look(what, "gh", ["issue", "view", String(n), "--json", "title"]);
-    let v = null;
-    try {
-      v = JSON.parse(r.stdout);
-    } catch {
-      // Falls through to the refusal below.
-    }
+    const { r, v } = lookJson(what, ["issue", "view", String(n), "--json", "title"]);
     if (v === null || typeof v !== "object" || typeof v.title !== "string") {
       die(`${where}: could not look — ${what} printed no title: ${cause(r.stdout)}; nothing written`);
     }
     return v.title;
   };
-  return { env, repoDir, look, verifyShaOf, prView, issueTitle };
+  return { repoDir, look, verifyShaOf, prView, issueTitle };
 }
 
 // The finisher gate's closing-reference checks for the PR `member` finishes,
 // read off the PR's closingIssuesReferences and the titles of the issues it
-// names. Check 1, when a settled implementer's token names the PR: each ticket
-// it names is closed by the body when the PR's ruling is closed_own_ticket=yes,
-// and is not when the ruling is no. Check 2, for every PR: no reference may be
-// the suggestion-band record of this PR's review. Returns one line per failure.
-// A read the checks need dies, naming the read, and writes nothing.
-async function closingRefusals(member) {
+// names; its second argument is rulingOf()'s answer, which let the PR
+// through. Check 1, when a settled implementer's token names the PR: each
+// ticket it names is closed by the body when the PR's ruling is
+// closed_own_ticket=yes, and is not when the ruling is no. Check 2, for every
+// PR: no reference may be the suggestion-band record of this PR's review — an
+// issue whose title, trimmed, is recordTitle(), as dispositions-check.mjs
+// finds the record. Returns one line per failure. A read the checks need
+// dies, naming the read, and writes nothing.
+async function closingRefusals(member, { tickets, ruling, tsv }) {
   const pr = member.number;
   const where = `dispatch ${member.name}`;
-  const { implementerClaims, parseTierOutcomes } = await import("./tier-outcomes.mjs");
   const { recordTitle } = await import("./dispositions-check.mjs");
   const { prView, issueTitle } = checkReaders(where);
-  const tickets = [...new Set(implementerClaims(data, pr).map((c) => c.ticket))];
-  const refs = prView(pr, "closingIssuesReferences").closingIssuesReferences.map((r) => r?.number);
+  const refs = [...new Set(prView(pr, "closingIssuesReferences").closingIssuesReferences.map((r) => r?.number))];
   if (!refs.every(Number.isInteger)) {
     die(`${where}: could not look — gh pr view ${pr} --json closingIssuesReferences answered a reference with no issue number; nothing written`);
   }
   const failures = [];
   if (tickets.length > 0) {
-    // rulingRefusal() has read this file and let the PR through, so it parses
-    // and holds the PR's row.
-    const tsv = join(dirname(dirname(resolve(file))), "docs", "metrics", "tier-outcomes.tsv");
-    const ruling = parseTierOutcomes(readFileSync(tsv, "utf8")).findLast((r) => r.pr === String(pr));
-    const verdict = ruling?.closed_own_ticket ?? "";
+    const verdict = ruling.closed_own_ticket;
     if (verdict === "") {
       failures.push(`PR #${pr}'s row in ${tsv} has no closed_own_ticket verdict, so its closing references cannot be checked — set the verdict in that row, then dispatch the finisher again`);
     } else if (verdict === "yes") {
@@ -2039,8 +2038,9 @@ async function closingRefusals(member) {
       }
     }
   }
+  const own = recordTitle(pr);
   for (const n of refs) {
-    if (issueTitle(n) === recordTitle(pr)) failures.push(`PR #${pr} closes #${n}, its own suggestion-band record — rephrase the mention as "Refs #${n}" or "issue #${n}"`);
+    if (issueTitle(n).trim() === own) failures.push(`PR #${pr} closes #${n}, its own suggestion-band record — rephrase the mention as "Refs #${n}" or "issue #${n}"`);
   }
   return failures;
 }
@@ -2200,9 +2200,11 @@ async function runDispatch() {
   // nothing for a fix-applier to rule on, and one never reviewed has no
   // review file: neither is gated on a verdict. Then an implementer's PR
   // waits on its ruling, its tier-outcomes row, written while the PR is open
-  // and its review evidence still in scratch; see rulingRefusal(). Refused
-  // here, before anything is written, so no check can be skipped by
-  // forgetting to run it.
+  // and its review evidence still in scratch; see rulingOf(). Last, the
+  // PR's closing references must match that ruling and exclude its own
+  // suggestion-band record, read off gh from the ledger's repository; see
+  // closingRefusals(). Refused here, before anything is written, so no check
+  // can be skipped by forgetting to run it.
   if (member.family === "finisher-pr") {
     const fold = tickFold("conflict hold and dispositions verdict");
     if (fold.conflictHeld.includes(member.number)) {
@@ -2210,9 +2212,11 @@ async function runDispatch() {
         + `and let it settle applied:/no-op, then dispatch the finisher again — not dispatching ${member.name}`);
     }
     const review = fold.reviewed.find((r) => r.pr === member.number);
-    const refusal = dispositionsRefusal(member.number, review) ?? await rulingRefusal(member.number);
-    if (refusal !== null) die(`${member.name}: ${refusal} — not dispatching ${member.name}`);
-    const closing = await closingRefusals(member);
+    const disposed = dispositionsRefusal(member.number, review);
+    if (disposed !== null) die(`${member.name}: ${disposed} — not dispatching ${member.name}`);
+    const ruled = await rulingOf(member.number);
+    if (ruled.refusal !== null) die(`${member.name}: ${ruled.refusal} — not dispatching ${member.name}`);
+    const closing = await closingRefusals(member, ruled);
     if (closing.length > 0) die(`${member.name}: ${closing.join("; ")} — not dispatching ${member.name}`);
   }
   // Every error caught here carries its own cause and remedy — a row's `tier=`

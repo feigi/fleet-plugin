@@ -16,6 +16,7 @@
 // the list the check enforces, so the two cannot drift apart silently.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 import { CASES, memberPrompt, renderBrief } from "./support/render-brief.mjs";
@@ -238,4 +239,17 @@ test("a finding verified correct is deferred false-rationale onto the suggestion
   for (const [where, slice] of [["header", headerDeferRule], ["step 2", recordStep], ["fix-applier block", fixApplierRecord]]) {
     assert.match(slice(), Pin.phrase(VERIFIED_CORRECT), `${where} no longer says how a verified-correct finding is recorded`);
   }
+});
+
+// The suggestion-band record is named by its title, never as a "closed" one.
+// The sweep joins hard-wrapped lines first — a `//` or `#` comment marker and
+// the whitespace around a line break read as one space — since a single-line
+// grep misses the phrase wrapped across two comment lines.
+test("nothing under plugin/ calls the suggestion-band record a closed one, across line wraps", () => {
+  const files = readdirSync(REPO, { recursive: true })
+    .filter((rel) => /\.(md|mjs|sh)$/.test(rel) && !rel.split("/").includes("node_modules"));
+  assert.ok(files.includes(join("scripts", "dispositions-check.mjs")), "the sweep no longer reaches dispositions-check.mjs");
+  const hits = files.filter((rel) =>
+    /\bclosed\s+suggestion-band\s+record\b/i.test(readFileSync(join(REPO, rel), "utf8").replace(/\s*\n\s*(?:\/\/|#)?\s*/g, " ")));
+  assert.deepEqual(hits, [], "a file under plugin/ still calls the suggestion-band record a closed one");
 });

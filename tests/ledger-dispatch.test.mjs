@@ -1473,6 +1473,31 @@ test("a blank closing-reference verdict, with a ticket claiming the PR, refuses 
   assert.deepEqual(f.read().dispatched, []);
 });
 
+test("the PR's latest tier-outcomes row is its ruling, so a re-ruling replaces an earlier row's verdict", (t) => {
+  // An earlier blank verdict, ruled yes later: the body closing the ticket passes.
+  const blankThenYes = fixture(t);
+  blankThenYes.put("3545", RULED_ROW);
+  mkdirSync(dirname(blankThenYes.tierOutcomes), { recursive: true });
+  writeFileSync(blankThenYes.tierOutcomes, "2026-10-20\t3606\t3545\troutine\tslow-high\t\t\tnote\n");
+  blankThenYes.rule(3606, "3545", "yes", [3545]);
+  assert.equal(blankThenYes.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+  // An earlier yes, ruled no later: the body closing nothing passes.
+  const yesThenNo = fixture(t);
+  yesThenNo.put("3545", RULED_ROW);
+  yesThenNo.rule(3606, "3545", "yes");
+  yesThenNo.rule(3606, "3545", "no");
+  assert.equal(yesThenNo.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+});
+
+test("a closing reference titled the PR's own record past surrounding whitespace still refuses the finisher", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545", "yes", [3545, 3637]);
+  titled(f.bin, 3637, "  PR #3606 review: the suggestion band, checked ");
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 closes #3637, its own suggestion-band record — rephrase the mention as "Refs #3637" or "issue #3637"/);
+  assert.deepEqual(f.read().dispatched, []);
+});
+
 test("a gh pr view that fails refuses the finisher, naming the read, and writes nothing", (t) => {
   const f = fixture(t);
   f.put("3545", RULED_ROW);

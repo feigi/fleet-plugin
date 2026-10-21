@@ -121,12 +121,12 @@
 //     or row-8 deferral is held to no reason and escalates nothing, whatever
 //     its severity. An open home carries exactly one triage label, its row's or
 //     a stronger one: every open row is filed `needs-triage`, and
-//     `ready-for-agent`, which only triage sets, answers one too. The closed
-//     suggestion-band record is the closed issue titled `PR #<pr> review:
-//     the suggestion band, checked`, labelled `wontfix`. `claimKind` is
-//     trusted: the script never judges whether a claim is about shape. A
-//     deferral no row holds — a reversed refutation whose claim is about
-//     behavior — is a mismatch naming no filing-table row.
+//     `ready-for-agent`, which only triage sets, answers one too. The
+//     suggestion-band record is the issue titled `PR #<pr> review: the
+//     suggestion band, checked`, already closed and labelled `wontfix`.
+//     `claimKind` is trusted: the script never judges whether a claim is
+//     about shape. A deferral no row holds — a reversed refutation whose
+//     claim is about behavior — is a mismatch naming no filing-table row.
 //
 // Unchecked: `gh` unreachable, or a deferral's issue it cannot read, leaves
 // that entry's filing unjudged. With no rule broken and nothing escalated the

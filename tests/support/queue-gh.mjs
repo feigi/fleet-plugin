@@ -2,9 +2,10 @@
 // open `ready-to-merge` queue `dispatch merge-bot` records. A finisher dispatch
 // reads two more answers: `gh pr view <n> --json closingIssuesReferences` and
 // `gh issue view <n> --json title`. Both default to a PR that closes nothing,
-// and an issue with no title (a failed read); `closes`, `titled` and `failsOn`
-// set them per test. Any other gh call fails loudly. Every call is appended to
-// `<bin>/calls`, so a test can assert that a refusal made none.
+// and an issue titled `issue <n>`; `closes` and `titled` set them per test,
+// and `failsOn` makes either read fail. Any other gh call fails loudly. Every
+// call is appended to `<bin>/calls`, so a test can assert that a refusal made
+// none.
 //
 // Shell builtins plus one link: the finisher gate resolves the ledger's repository through git, so the stub bin holds the real git too.
 //
@@ -15,7 +16,11 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { writeExecStub } from "./exec-stub.mjs";
 
-/** Writes `<bin>/gh` answering `gh pr list` with the PR numbers `prs`. */
+/**
+ * Writes `<bin>/gh` answering `gh pr list` with the PR numbers `prs`, plus
+ * `gh pr view` and `gh issue view` as described above, and links the real git
+ * into `<bin>`.
+ */
 export function writeQueueGh(bin, prs = []) {
   const git = spawnSync("/bin/sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
   if (!existsSync(join(bin, "git"))) symlinkSync(git, join(bin, "git"));
