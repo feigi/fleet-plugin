@@ -569,3 +569,11 @@ exported `stoppingRule`, run by the repo-local hook) count. Whether the
 Resolved tier matched the Declared tier is the run ledger's check; the readout
 never makes it.
 _Avoid_: verified row, valid row
+
+**Ruling**:
+The controller's verdict on one implementer PR, kept as that PR's row in
+`docs/metrics/tier-outcomes.tsv`: whether the work closed its own ticket and
+whether it minted a false claim. The Router counts a ticket as merged only
+through its Ruling; a decision on an issue, or a reply owed to a member, is
+not one.
+_Avoid_: verdict, verdict row, tier outcome
