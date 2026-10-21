@@ -15,8 +15,9 @@ import { Pin } from "./support/prose-pin.mjs";
 // trailing clause or a period inside their emphasis.
 //
 // Two families, each DERIVED from the files rather than listed here:
-//   1. `(**X**` in a run-team references file (and in SKILL.md itself) — resolves
-//      to a target in SKILL.md or any references file.
+//   1. `(**X**` in a run-team references file — resolves to a target in
+//      SKILL.md or any references file. SKILL.md is a target pool only: its own
+//      `(**X**` pointers are not checked (see where the pointers are gathered).
 //   2. A cite of `run-team/SKILL.md`, `run-team/references/<f>.md`, `run-team
 //      references/<f>.md`, or (command files only) `references/<f>.md`, in a
 //      shipped script comment or command file. The cited file must exist, and
@@ -180,13 +181,13 @@ for (const [file, src] of RUN_TEAM_TEXT) {
 }
 
 // Bump deliberately, only when a pointer is genuinely retired from the tree;
-// never to silence a red. Measured when #3627 was implemented: nine pointers
-// across the references directory and SKILL.md itself.
+// never to silence a red. Measured when #3627 was implemented: nine pointers,
+// all in the references directory (SKILL.md's own are not counted).
 const PINNED_REFERENCE_POINTERS = 9;
-test("every `(**X**` pointer in the run-team skill is still recognised", () => {
+test("every `(**X**` pointer in the run-team references is still recognised", () => {
   assert.ok(
     refPointers.length >= PINNED_REFERENCE_POINTERS,
-    `the run-team skill yields ${refPointers.length} \`(**X**\` pointers, expected at least ${PINNED_REFERENCE_POINTERS} — a drop means a pointer was reworded OUT of the \`(**X**\` shape rather than removed, so its check below stopped running instead of failing. Restore the shape, or lower PINNED_REFERENCE_POINTERS only once the pointer is gone for good.`,
+    `the run-team references yield ${refPointers.length} \`(**X**\` pointers, expected at least ${PINNED_REFERENCE_POINTERS} — a drop means a pointer was reworded OUT of the \`(**X**\` shape rather than removed, so its check below stopped running instead of failing. Restore the shape, or lower PINNED_REFERENCE_POINTERS only once the pointer is gone for good.`,
   );
 });
 
@@ -346,6 +347,7 @@ test("a name matches a target that carries more text after it, and nothing that 
   assert.equal(nameMatches("Phase 1", "Phase 10 — later"), false, "a longer number is another block");
   assert.equal(nameMatches("The reviewer", "The reviewers"), false, "a longer word is another block");
   assert.equal(nameMatches("The reviewer", "Not the reviewer."), false, "the name leads the target, it does not merely occur in it");
+  assert.equal(nameMatches("Phase 1", "x Phase 1 — y"), false, "the name occurring later in the target, followed by a non-word character, is not a match");
 });
 
 test("a target is a block lead: paragraph, list item after its marker, or heading — never a mid-paragraph bold", () => {
@@ -361,13 +363,15 @@ test("a target is a block lead: paragraph, list item after its marker, or headin
     "Wrapped paragraph whose second line",
     "**starts bold** after the wrap.",
     "",
+    "    # Indented four spaces, a code block",
+    "",
     "## Section — with a dash",
   ].join("\n");
   const names = targetsOf(doc).map((t) => t.text);
   for (const want of ["Top heading", "Paragraph lead.", "Bullet lead.", "Nested lead.", "Numbered lead.", "Section — with a dash"]) {
     assert.ok(names.includes(want), `${want} is a target, got ${JSON.stringify(names)}`);
   }
-  for (const refuse of ["inside span", "starts bold"]) {
+  for (const refuse of ["inside span", "starts bold", "Indented four spaces, a code block"]) {
     assert.ok(!names.includes(refuse), `${refuse} is not block-leading and must not be a target`);
   }
 });
@@ -403,6 +407,19 @@ test("a bold wrapped across `//` and `#` comment lines is found, and a cite join
   assert.equal(b.file, join(REFS_DIR, "pull.md"));
 });
 
+test("a trailing comment after code is not read; only a whole-line comment is", () => {
+  const js = ["const x = 1; // run-team/references/pull.md, **Trailing**", "// run-team/references/ledger.md, **Whole line**"].join("\n");
+  const sh = ["echo hi # run-team/SKILL.md, **Trailing**", "# run-team/references/ledger.md, **Whole line**"].join("\n");
+  for (const [src, marker] of [[js, "//"], [sh, "#"]]) {
+    const found = citesIn(commentSegments(src, marker, `${marker} fixture`), { bare: false });
+    assert.deepEqual(
+      found.map((c) => [c.file, c.names]),
+      [[join(REFS_DIR, "ledger.md"), ["Whole line"]]],
+      `a \`${marker}\` comment after code on its own line must not be scanned`,
+    );
+  }
+});
+
 test("every cite shape ties the name written with it, and only that name", () => {
   const md = [
     "(run-team/SKILL.md, **The tier check**)",
@@ -410,13 +427,20 @@ test("every cite shape ties the name written with it, and only that name", () =>
     "`$(root)/skills/run-team/SKILL.md`'s **The reviewer** bullet owns it, and `references/reviewers.md` (**A review runs**) says more.",
     "",
     "A cite with no name run-team/references/ledger.md and a later (see **Elsewhere**) aside.",
+    "",
+    "(see run-team/references/pull.md, and also **Not adjacent**)",
+    "",
+    "(run-team/references/pull.md and run-team/references/ledger.md, and also **Nearest the second**)",
   ].join("\n");
-  const [skill, skill2, reviewers, ledger] = citesIn(markdownSegments(md), { bare: true });
+  const [skill, skill2, reviewers, ledger, inParen, firstOfTwo, secondOfTwo] = citesIn(markdownSegments(md), { bare: true });
   assert.deepEqual(skill.names, ["The tier check"]);
   assert.deepEqual(skill2.names, ["The reviewer"]);
   assert.equal(reviewers.file, join(REFS_DIR, "reviewers.md"));
   assert.deepEqual(reviewers.names, ["A review runs"]);
   assert.deepEqual(ledger.names, [], "a bold in a LATER parenthetical is not tied to a cite outside one");
+  assert.deepEqual(inParen.names, ["Not adjacent"], "a bold anywhere in the cite's own parenthetical is tied to it");
+  assert.deepEqual(firstOfTwo.names, [], "a bold after a second cite in the same parenthetical belongs to that second cite");
+  assert.deepEqual(secondOfTwo.names, ["Nearest the second"]);
 });
 
 test("a bare `references/<f>.md` is a cite only inside a command file", () => {
