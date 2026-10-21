@@ -25,8 +25,10 @@
      stop as the end of the run. A `NEED tier-outcomes append <pr>` is a PR
      the ledger marks reviewed with no verdict row: append it with the verdict
      you rule (**Guard: accumulate per PR**) and run `finish` again. A reviewed
-     PR that closes no issue, a `Refs`-only step for instance, takes no row: the
-     check names it in a `note` line and never asks for one. A step it fails is
+     PR that closes no issue, or several, with no settled `impl-<N>=PR#<pr>`
+     token naming it takes no row: the check names it in a `note` line and
+     never asks for one. With such a token it is a NEED, and `append` takes the
+     ticket from the token. A step it fails is
      explained in references/close-out.md. Exit 0 is the run closed.
   Drain only when a documented trigger fired, and name the trigger in `--reason`.
   **Undrain** only when the maintainer asks, never a drain that budget or
@@ -86,7 +88,8 @@ run's member rows if they are missing, or blank each named row's `tier` and say
 why in `note`.
 Each WARNING names a PR this run's ledger marks `reviewed=` that has no row yet
 — append it before committing if it is an implementer PR. A reviewed PR that
-closes no issue is named in a `note` line instead: it takes no row. A line
+closes no issue, or several, and that no settled `impl-<N>=PR#<pr>` token
+names, is named in a `note` line instead: it takes no row. A line
 saying the PR's closing references could not be read comes before that PR's
 WARNING and says why.
 

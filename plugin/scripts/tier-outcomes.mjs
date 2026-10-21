@@ -8,8 +8,10 @@
 //   append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no
 //          --note <text> [--sizing light|heavy] [--profile <p>] [--loc <n>] [--files <n>]
 //          [--scratch <dir>]
-//     Fills `run_date` (today's UTC date, the ruling date), `pr`, `ticket` (off
-//     `gh pr view --json closingIssuesReferences`), `tier` and, unless
+//     Fills `run_date` (today's UTC date, the ruling date), `pr`, `ticket` (the
+//     PR's one `gh pr view --json closingIssuesReferences` issue; when the PR
+//     closes zero or several, the N of its one settled `impl-<N>=PR#<pr>` token
+//     in the run ledger), `tier` and, unless
 //     `--sizing` names it, `sizing` (see below). Idempotent by
 //     PR: a row already present is named and nothing is written, exit 0.
 //   check [--live]
@@ -20,12 +22,12 @@
 //     lack a member row (nothing from that run was checked). `--live`
 //     (a run in progress; CI never passes it) adds a WARNING, never a
 //     failure, per PR whose run-ledger row carries `reviewed=` but which has
-//     no row here, except a PR that closes no issue: `append` keys a row on
-//     exactly one ticket and refuses it, so it is named in a `note` line and
-//     never warned about. A read of that PR that does not answer keeps the
-//     warning, after a line naming why the read failed. Both reads of a PR's
-//     closing references ignore an ambient GH_REPO and give `gh` 60s.
-//     `--ledger <path>` names another ledger than the run's own.
+//     no row here. A PR whose closing references are not exactly one, and that
+//     no settled `impl-` token names, is named in a `note` line and never
+//     warned about: `append` has no ticket to key a row on. A read of that PR
+//     that does not answer keeps the warning, after a line naming why the read
+//     failed. Both reads of a PR's closing references ignore an ambient GH_REPO
+//     and give `gh` 60s. `--ledger <path>` names another ledger than the run's own.
 //
 // `tier` resolution, in order (never tie-broken by `run_date`: the two files'
 // `run_date`s mean different things — this file's header measures 92 of 267
@@ -475,18 +477,45 @@ function closingRefs(pr) {
   return refs;
 }
 
-function closingTicket(pr) {
-  let refs;
+// The unique issue numbers of a PR's closing references, in GitHub's order.
+function closingNumbers(pr) {
   try {
-    refs = closingRefs(pr);
+    return [...new Set(closingRefs(pr).map((r) => r?.number))];
   } catch (e) {
     die(e.message);
   }
-  const numbers = [...new Set(refs.map((r) => r?.number))];
-  if (numbers.length !== 1 || !Number.isInteger(numbers[0])) {
-    die(`PR #${pr} closes ${numbers.length === 0 ? "no issue" : `${numbers.length} issues (${numbers.map((n) => `#${n}`).join(", ")})`} per GitHub's closingIssuesReferences — a tier-outcomes row keys on exactly one ticket`);
+}
+
+// Every settled `impl-<N>=PR#<pr>` token in the run ledger's rows, each with the
+// row that carries it and its ticket N. The dispatched list is not read.
+function implementerClaims(ledger, pr) {
+  const claims = [];
+  for (const text of ledger?.rows ?? []) {
+    const key = text.split(/\s/)[0];
+    for (const t of memberTokens(text)) {
+      if (t.family === "impl" && t.error === null && t.outcome === `PR#${pr}`) claims.push({ key, ticket: t.number });
+    }
   }
-  return String(numbers[0]);
+  return claims;
+}
+
+// The ticket of a PR whose closing references are not exactly one: the N of its
+// one settled impl token. Dies when there is no such token, when there are
+// several, or when several closing issues do not include the token's N.
+function ticketFor(pr, numbers, ledger) {
+  const claims = implementerClaims(ledger, pr);
+  const closes = numbers.length === 0 ? "closes no issue" : `closes ${numbers.length} issues (${numbers.map((n) => `#${n}`).join(", ")})`;
+  if (claims.length === 0) {
+    die(`PR #${pr} ${closes} per GitHub's closingIssuesReferences, and no run-ledger row carries a settled impl-N=PR#${pr} token to name its ticket — a tier-outcomes row keys on exactly one ticket`);
+  }
+  if (claims.length > 1) {
+    die(`PR #${pr} ${closes} per GitHub's closingIssuesReferences, and ${claims.length} run-ledger rows carry a settled impl-N=PR#${pr} token (${claims.map((c) => c.key).join(", ")}) — a tier-outcomes row keys on exactly one ticket`);
+  }
+  const [{ key, ticket }] = claims;
+  if (numbers.length > 1 && !numbers.includes(ticket)) {
+    die(`PR #${pr} ${closes} per GitHub's closingIssuesReferences, and its settled impl-${ticket}=PR#${pr} token in ${key} names #${ticket}, which is not among them`);
+  }
+  return String(ticket);
 }
 
 // The UTC date, the convention of a session id's date and so of every Pull's
@@ -525,8 +554,9 @@ function append(pr, paths) {
     return;
   }
 
-  const ticket = closingTicket(pr);
   const ledger = readLedger(paths.ledger, false);
+  const numbers = closingNumbers(pr);
+  const ticket = numbers.length === 1 && Number.isInteger(numbers[0]) ? String(numbers[0]) : ticketFor(pr, numbers, ledger);
   const memberRows = readMemberRows(paths.members);
   const resolved = resolveTier({ ledger, memberRows, ticket, pr });
   if (resolved.warning) console.error(`${NAME}: WARNING tier left blank for PR #${pr} (ticket #${ticket}): ${resolved.warning}`);
@@ -557,17 +587,15 @@ function append(pr, paths) {
   console.log(line);
 }
 
-// True only when `gh` answered and the PR's closingIssuesReferences is an empty
-// array. Any other outcome (gh failing, unreadable JSON, a non-array) is false
-// after a line naming why: a PR whose closing references cannot be read keeps
-// its warning. That line never reads `WARNING PR #`, which closeout.mjs turns
-// into a NEED.
-function closesNoIssue(pr) {
+// The unique issue numbers of a PR's closing references, or null after a line
+// naming why they could not be read. That line never reads `WARNING PR #`,
+// which closeout.mjs turns into a NEED; a PR whose read failed keeps its warning.
+function closingNumbersOrNull(pr) {
   try {
-    return closingRefs(pr).length === 0;
+    return [...new Set(closingRefs(pr).map((r) => r?.number))];
   } catch (e) {
     console.error(`${NAME}: could not read the closing references of PR #${pr}: ${e.message}`);
-    return false;
+    return null;
   }
 }
 
@@ -583,8 +611,10 @@ function check(paths) {
   if (has("live")) {
     const ledger = readLedger(paths.ledger, true);
     for (const pr of unrecordedReviewedPrs(ledger, rows)) {
-      if (closesNoIssue(pr)) {
-        console.error(`${NAME}: note PR #${pr} carries reviewed= on the ledger and closes no issue, so it takes no row in ${paths.file}`);
+      const numbers = closingNumbersOrNull(pr);
+      if (numbers !== null && numbers.length !== 1 && implementerClaims(ledger, pr).length === 0) {
+        const closes = numbers.length === 0 ? "closes no issue" : `closes ${numbers.length} issues`;
+        console.error(`${NAME}: note PR #${pr} carries reviewed= on the ledger and ${closes}, and no implementer row names it, so it takes no row in ${paths.file}`);
         continue;
       }
       console.error(`${NAME}: WARNING PR #${pr} carries reviewed= on the ledger but has no row in ${paths.file} — run \`tier-outcomes.mjs append ${pr}\` if it is an implementer PR`);
