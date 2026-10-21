@@ -78,6 +78,13 @@ So nothing in the run cleans it up. Next run, the in-flight probe's local-worktr
 
 Check: the script's own test suite — real throwaway repos, no mocked git history, one case per precondition proving it blocks on its own.
 
+## A conflict on the merge pass needs no record from you
+
+A `rebase-fallback-#<pr>`
+on a conflict needs no record from you — the bot already appended
+`conflict-hold:#<pr>` to that PR's row, and the tick turns it into `DISPATCH
+fix-pr PR#<pr>` (**The fix-applier**).
+
 ## Never reap a branch a live member is on
 
 Cross-check `.fleet/ledger.md` before running: row without terminal state means someone may still be in that worktree — merged PR can still have reviewer filing follow-ups. Dirty check does not see member that committed but not pushed. Update reaped tickets' ledger rows in same step, report reaped and kept counts. Kept-with-reason is half worth reading.

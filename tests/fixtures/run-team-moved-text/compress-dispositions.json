@@ -65,6 +65,10 @@
     [
       "See references/ci-watcher.md.",
       "the watcher block comment's pointer: the block now lives in references/ci-watcher.md, where a pointer to its own file sends the reader nowhere"
+    ],
+    [
+      "One running table, updated as events land:",
+      "SKILL.md's Report opening paragraph, which says the running table once"
     ]
   ]
 }

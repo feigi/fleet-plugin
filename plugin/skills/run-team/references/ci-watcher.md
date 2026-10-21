@@ -233,6 +233,15 @@ retry-and-wait loop is what turns a 60s outage into a stalled member. Report it,
 keep the local work moving (git, tests and mutation runs are all unaffected),
 re-probe.
 
+## While the budget is exhausted, `ledger.mjs check` reads unverified
+
+**While the budget is exhausted, `ledger.mjs check` reads
+`verdict: "unverified"`** — the ledger was read and the tracker was not. That is
+correct behaviour, but `unverified` exits **0**, the same as `clean`, so a
+member treating exit 0 as "safe to file" files blind during exactly this window.
+Say so when you flag the outage: members read `verdict` explicitly until you
+report recovery, never the exit code alone.
+
 ## A probe that cannot read is a transition event, not silence
 
 The natural

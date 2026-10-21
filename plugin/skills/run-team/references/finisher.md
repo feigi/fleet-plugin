@@ -253,6 +253,11 @@ before the approval because removing the artifact the merge bot gates on is
 the reliable stop, where messaging the bot races it, and a label has been
 observed holding until after an abort message arrived.
 
+The merge bot refuses that head on
+its own (`run-merge-bot.md`, **The labelled head**), so this is not the only
+guard — but its refusal costs a pass and leaves the label lying, which is yours
+to clear either way, the same way: `label-off=` first, then the removal.
+
 ## A final report is not proof the member stopped
 
 **A final report is not proof the member stopped.** Observed twice: a ruling

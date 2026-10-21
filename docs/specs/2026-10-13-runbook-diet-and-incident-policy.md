@@ -98,8 +98,9 @@ when the test landed, so the ceiling started at that size rounded up to the
 next 1,000 (187,000). The ceiling only ever comes down toward the target,
 and it is held tight: the file must be at most the ceiling and less than
 1,000 bytes under it, so a change that shrinks the file lowers the constant
-in the same change. The ratio is re-measured with `omp -p --mode json`
-when D2's rewrite compresses the file, and the test's header records it.
+in the same change. The ratio was re-measured with `omp -p --mode json`
+once D2's rewrite compressed the file to the target: 2.69 B/token again
+(74,811 bytes, 27,812 tokens), and the test's header records it.
 The test also asserts the file contains no line matching `^\s*>` and no
 occurrence of
 `Measured` outside a `See references/` pointer. `references/*.md` have no
