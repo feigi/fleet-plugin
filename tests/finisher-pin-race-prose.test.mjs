@@ -213,7 +213,7 @@ test("the lead-in names the script the member's body runs", () => {
 
 test("the reply-owed gate for the fix-applier is still in the dispatch rules", () => {
   // The rule that the controller never dispatches a finisher while it still
-  // owes the fix-applier a ruling is its own sentence, independent of the
+  // owes the fix-applier a reply is its own sentence, independent of the
   // halt-cause block above; this pins that it wasn't clipped or reworded.
   assert.match(
     RUN_TEAM.text,

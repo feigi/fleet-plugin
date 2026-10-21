@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,8 +37,7 @@ function fixture(t, body = null) {
   // waits on: `ticket` and the verdicts are any a ruling can carry.
   const rule = (pr, ticket = "1") => {
     mkdirSync(dirname(tierOutcomes), { recursive: true });
-    const text = existsSync(tierOutcomes) ? readFileSync(tierOutcomes, "utf8") : "";
-    writeFileSync(tierOutcomes, `${text}2026-10-21\t${pr}\t${ticket}\troutine\tslow-high\tyes\tno\truled\n`);
+    appendFileSync(tierOutcomes, `2026-10-21\t${pr}\t${ticket}\troutine\tslow-high\tyes\tno\truled\n`);
   };
   // PATH is a directory holding one gh stub: only `dispatch merge-bot` may
   // reach gh, to record the queue it lists — empty unless a test rewrites the
@@ -1349,6 +1348,19 @@ test("a finisher for a PR no settled impl token names is not gated on a ruling",
   assert.equal(f.ok("dispatch", "3701", "finisher-pr-3701").agent, "fleet-finisher");
   assert.deepEqual(f.read().dispatched, ["finisher-pr-3631", "finisher-pr-3701"]);
   assert.equal(existsSync(f.tierOutcomes), false);
+});
+
+test("the ruling refusal names every ticket claiming the PR once, in the plural", (t) => {
+  const f = noGh(fixture(t));
+  f.put("3545", RULED_ROW);
+  f.put("3546", `impl-3546=PR#3606 · reviewed=${GATE_HEAD}:0/0/0:${GATE_RUN}`);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606, the implementer PR of tickets #3545, #3546, has no ruling — /);
+});
+
+test("the ruling refusal names a ticket claiming the PR twice once, in the singular", (t) => {
+  const f = noGh(fixture(t));
+  f.put("3545", `${RULED_ROW} · impl-3545-b=PR#3606`);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606, the implementer PR of ticket #3545, has no ruling — /);
 });
 
 test("a conflict hold and a dispositions refusal are each still the one printed for an unruled implementer PR", (t) => {

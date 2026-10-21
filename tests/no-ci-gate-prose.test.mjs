@@ -2,8 +2,8 @@
 // verified suite run, and without one nobody labels — was stated at four sites
 // across three documents and pinned in none of them. What already exists pins a
 // different clause of the same bullet: review-path-default.test.mjs anchors the
-// finisher gate's no-ci test's outstanding-ruling condition (`never while you still owe
-// it a ruling`). The gate itself was free to rot in any of the four.
+// finisher gate's no-ci test's outstanding-reply condition (`never while you still owe
+// it a reply`). The gate itself was free to rot in any of the four.
 //
 // Three sites remain, and they word it differently ON PURPOSE, so this pins the
 // invariant each one must keep rather than a shared sentence:

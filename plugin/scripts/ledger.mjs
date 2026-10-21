@@ -1907,7 +1907,7 @@ function dispositionsRefusal(pr, review) {
 // several modules no other subcommand loads.
 async function rulingRefusal(pr) {
   const { parseTierOutcomes, implementerClaims } = await import("./tier-outcomes.mjs");
-  const tickets = [...new Set(implementerClaims({ rows: data.rows }, pr).map((c) => c.ticket))];
+  const tickets = [...new Set(implementerClaims(data, pr).map((c) => c.ticket))];
   if (tickets.length === 0) return null;
   const tsv = join(dirname(dirname(resolve(file))), "docs", "metrics", "tier-outcomes.tsv");
   if (existsSync(tsv)) {
