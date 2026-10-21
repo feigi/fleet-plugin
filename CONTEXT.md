@@ -551,6 +551,15 @@ agent definition exists; sizing a ticket for the table is one `judge()`
 call in the controller's own eval.
 _Avoid_: fleet-router, sizer
 
+**Spend**:
+What a Pull cost: the recorded `cost` of every member booked to it — each
+implementer dispatched under it, at any cell, the review, fix and finisher
+members of its PR, and every member nested under one of those. Merge-bot,
+memory and advisor members and the Router's own sizing are no Pull's spend:
+they cost the same whatever the Cell. A Pull with a booked member whose cost
+went unrecorded is unpriced, never free.
+_Avoid_: price, usd, cost (a member's figure, not a Pull's)
+
 **Admissible row**:
 A member-outcomes row whose `subagent_type` is `fleet-implementer-<cell>` for
 the cell its Pull drew (`chosen_cell`), whose recorded effort equals that
