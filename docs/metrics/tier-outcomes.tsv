@@ -560,3 +560,18 @@
 2026-10-20	3599	3542		slow-high	yes	no	merged and closed its own ticket; no false-claim signal in its commit headlines or the ledger-recorded review round (review artifacts reclaimed after merge; controller did not audit prose independently); tier overridden by the controller to slow-high after smol-high members ran out of request budget or for a heavy refactor, not a clean router draw				
 2026-10-20	3603	3544		slow-high	yes	no	merged and closed its own ticket; no false-claim signal in its commit headlines or the ledger-recorded review round (review artifacts reclaimed after merge; controller did not audit prose independently); tier overridden by the controller to slow-high after smol-high members ran out of request budget or for a heavy refactor, not a clean router draw				
 2026-10-20	3613	3611			yes	no	controller-authored chore PR (fix for #3611), no implementer member; merged and closed its ticket; tier blank by construction				
+2026-10-21	3624	3593		slow-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3625	3592		task-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3626	3485		task-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3629	3588		task-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3638	3594		smol-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3639	3531		task-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3641	3608		slow-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3644	3609		smol-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3647	3621		task-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3649	3610		slow-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3650	3622		smol-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3654	3623		task-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3658	3634		smol-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3659	3627		task-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3660	3643		slow-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
