@@ -1,7 +1,7 @@
 {
-  "window_start": null,
-  "fitted_commit": null,
-  "n_rows": 0,
+  "window_start": "2026-10-03",
+  "fitted_commit": "3a52b3c4511a43f863f8ba990766cca99e516e61",
+  "n_rows": 128,
   "stage": 1,
   "cells": [
     "slow-high",
@@ -10,15 +10,99 @@
   ],
   "burn_in": true,
   "rows": {
-    "*": "slow-high"
+    "*": "smol-high",
+    "heavy": "smol-high"
   },
   "classifier": {
     "b": null,
     "tau": null
   },
-  "estimates": {},
+  "estimates": {
+    "*": {
+      "slow-high": {
+        "n": 39,
+        "merged": 17,
+        "usd_per_merged": 17.6608,
+        "fail_rate": 0,
+        "fix_rounds": 1.1765,
+        "review_findings": null
+      },
+      "smol-high": {
+        "n": 43,
+        "merged": 19,
+        "usd_per_merged": 11.2648,
+        "fail_rate": 0.1053,
+        "fix_rounds": 1.2632,
+        "review_findings": null
+      },
+      "task-high": {
+        "n": 46,
+        "merged": 20,
+        "usd_per_merged": 11.5615,
+        "fail_rate": 0.05,
+        "fix_rounds": 1.15,
+        "review_findings": null
+      }
+    },
+    "heavy": {
+      "slow-high": {
+        "n": 23,
+        "merged": 12,
+        "usd_per_merged": 14.196,
+        "fail_rate": 0,
+        "fix_rounds": 1.25,
+        "review_findings": null
+      },
+      "smol-high": {
+        "n": 20,
+        "merged": 9,
+        "usd_per_merged": 10.2404,
+        "fail_rate": 0.2222,
+        "fix_rounds": 1.4444,
+        "review_findings": null
+      },
+      "task-high": {
+        "n": 26,
+        "merged": 14,
+        "usd_per_merged": 11.3452,
+        "fail_rate": 0.0714,
+        "fix_rounds": 1.2143,
+        "review_findings": null
+      }
+    },
+    "light": {
+      "slow-high": {
+        "n": 16,
+        "merged": 5,
+        "usd_per_merged": 25.9762,
+        "fail_rate": 0,
+        "fix_rounds": 1,
+        "review_findings": null
+      },
+      "smol-high": {
+        "n": 23,
+        "merged": 10,
+        "usd_per_merged": 12.1867,
+        "fail_rate": 0,
+        "fix_rounds": 1.1,
+        "review_findings": null
+      },
+      "task-high": {
+        "n": 20,
+        "merged": 6,
+        "usd_per_merged": 12.0661,
+        "fail_rate": 0,
+        "fix_rounds": 1,
+        "review_findings": null
+      }
+    }
+  },
   "guard": {
     "tripped": [],
-    "n": {}
+    "n": {
+      "slow-high": 17,
+      "smol-high": 17,
+      "task-high": 20
+    }
   }
 }
