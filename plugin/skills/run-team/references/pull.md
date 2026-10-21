@@ -434,7 +434,10 @@ true every Pull draws, over every cell, the policy cell included. An
 Exploration Pull records `tier=<cell>` in the row, and a replacement inherits the row's tier —
 written at the Pull's row step, ahead of `ledger.mjs dispatch`, which reads it
 and prints `fleet-implementer-<cell>` as the `agent` to dispatch; a row with
-no `tier=` runs the policy cell. The
+no `tier=` runs the policy cell. The Pull's cell binds its first implementer:
+`ledger.mjs row` and `ledger.mjs token` refuse a write that changes it until that implementer has
+settled. Once it has, a replacement may run at another cell, set with
+`ledger.mjs token <N> tier=<cell>`. The
 assignment rolls to the next Pull when another open ticket sequences after
 it — a ticket the rest of the run
 depends on; `class` is not read. Do not tell the member it is a control: a member that

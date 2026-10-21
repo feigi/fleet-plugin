@@ -5,7 +5,8 @@
 // that.
 //
 // Rows are rewritten in place, one per ticket: `row` replaces a whole line
-// and `token` appends tokens to one. `filed` and `ruled` are
+// and `token` appends tokens to one, or replaces its `tier=` once the row's
+// implementer has settled. `filed` and `ruled` are
 // append-only, because their whole purpose is to outlive the reasoning that
 // produced them; `filed` appends at most one row per issue.
 //
@@ -55,7 +56,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, unescapeText, nextReviewerName } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, unescapeText, nextReviewerName } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD, PARKED } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -760,6 +761,10 @@ if (cmd === "read") {
   // only be refused later, by `dispatch`, after the claim.
   const badTier = tierValues(line).find((v) => !CELL.test(v));
   if (badTier !== undefined) die(`row ${key}: 'tier=${badTier}' is not tier=<cell> — a cell is <slow|task|smol>-<level>`);
+  // A Pull's cell binds its implementer until that member settles; see
+  // cellChangeRefusal(). A new row binds nothing yet.
+  const cellWhy = cellChangeRefusal(data.rows.find((r) => rowKey(r) === key) ?? null, line);
+  if (cellWhy !== null) die(`row ${key}: ${cellWhy}`);
   // `label-off=<attempt>` tells the tick a missing `ready-to-merge` is
   // the controller's own removal, not a finisher's miss — so one naming no
   // finisher-pr member this run has would mask a real miss behind a record of
@@ -2845,17 +2850,77 @@ function badLabelOff(words) {
   });
 }
 
-// Why `token` may not write `tok` onto a row whose text is `rowText` (the row
-// as it stands plus the call's earlier tokens), or null when it may. A token
-// is one word: an empty argument, one with a space in it (prose, which would
-// split into words the row's own words then dedupe against), and the row's
-// ` · ` separator are no token. A member token is `dispatch`'s or `settle`'s,
-// a review token `review`'s. A word shaped like a member that the grammar
-// cannot parse, a `tier=` that is not a cell, a `tier=` naming a second tier
-// on a row that already has one, a `held-behind`, `conflict-hold` or `parked`
-// token the tick cannot read, and a lone `→` — an arrow with no PR beside it
-// points at nothing — are refused. Every other word is a freeform token.
-function tokenRefusal(tok, rowText) {
+// The cell a row's implementer runs at — its `tier=`, or POLICY_CELL on a row
+// with none — read the way `dispatch` reads it: null for a row whose `tier=`
+// values conflict or name no agents/<definition>.agent.md, which `dispatch`
+// refuses, so such a row has no draw to bind.
+function runnableCell(rowText) {
+  let definition;
+  try {
+    definition = expectedDefinition(rowText);
+  } catch {
+    return null;
+  }
+  if (!existsSync(join(AGENTS_DIR, `${definition}.agent.md`))) return null;
+  return tierValues(rowText)[0] ?? POLICY_CELL;
+}
+
+// The member a row's cell binds, while it has not settled, else null: the
+// newest implementer for the row's ticket, on the row or in `## Dispatched`,
+// newest by retry suffix as nextRetry() orders them. That is the Pull's first
+// implementer on an ordinary row, and a resumed or re-Pulled row's latest.
+// Not settled is live and not yet dispatched alike: a bare token on the row
+// binds as a bare `## Dispatched` entry does.
+function unsettledImplementer(rowText) {
+  const ticket = Number(rowKey(rowText).slice(1));
+  const newest = [...memberTokens(rowText), ...data.dispatched.map(parseToken)]
+    .filter((t) => t !== null && t.error === null && t.family === "impl" && t.number === ticket)
+    .map((t) => ({ name: t.name, attempt: t.retry ?? "a" }))
+    .sort((a, b) => (a.attempt < b.attempt ? -1 : a.attempt > b.attempt ? 1 : 0))
+    .at(-1);
+  if (newest === undefined || settledOnLedger(data.rows, data.dispatched).has(newest.name)) return null;
+  return newest.name;
+}
+
+// Why a write turning row `oldLine` into `line` may not land, or null when it
+// may: a Pull's cell binds its implementer, so a write that changes the
+// row's cell is refused until that member has settled, when a replacement
+// may run at another cell. A new row, a row with no runnable definition and
+// a write that leaves the cell as it was bind nothing.
+function cellChangeRefusal(oldLine, line) {
+  if (oldLine === null) return null;
+  const cell = runnableCell(oldLine);
+  if (cell === null) return null;
+  const tiers = [...new Set(tierValues(line))];
+  const to = tiers.length === 0 ? POLICY_CELL : tiers.join(" and ");
+  if (to === cell) return null;
+  const member = unsettledImplementer(oldLine);
+  if (member === null) return null;
+  return `changes the Pull's cell from ${cell} to ${to} while ${member} has not settled — the cell binds its implementer; once ${member} has settled, \`ledger.mjs token ${rowKey(oldLine).slice(1)} tier=<cell>\` sets a replacement's cell`;
+}
+
+// `line` with `tok` in place of its first `tier=` word, every other `tier=`
+// word dropped with the ` · ` before it.
+function withTier(line, tok) {
+  let placed = false;
+  return line.replace(/(\s+·)?\s+tier=\S*/g, (m) => {
+    if (placed) return "";
+    placed = true;
+    return m.replace(/tier=\S*$/, () => tok);
+  });
+}
+
+// Why `token` may not write `tok`, or null when it may; `earlier` is the
+// call's tokens before it. A token is one word: an empty argument, one with
+// a space in it (prose, which would split into words the row's own words
+// then dedupe against), and the row's ` · ` separator are no token. A member
+// token is `dispatch`'s or `settle`'s, a review token `review`'s. A word
+// shaped like a member that the grammar cannot parse, a `tier=` that is not
+// a cell, a `tier=` naming a second tier in one call, a `held-behind`,
+// `conflict-hold` or `parked` token the tick cannot read, and a lone `→` — an
+// arrow with no PR beside it points at nothing — are refused. Every other
+// word is a freeform token.
+function tokenRefusal(tok, earlier) {
   if (tok === "" || /\s/.test(tok)) {
     return "is not one token — pass each token as its own argument, with no space in it";
   }
@@ -2881,9 +2946,9 @@ function tokenRefusal(tok, rowText) {
   const [tier] = tierValues(tok);
   if (tier !== undefined) {
     if (!CELL.test(tier)) return "is not tier=<cell> — a cell is <slow|task|smol>-<level>";
-    const other = tierValues(rowText).find((v) => v !== tier);
+    const other = tierValues(earlier).find((v) => v !== tier);
     if (other !== undefined) {
-      return `names a second tier — the row already carries tier=${other}, and a row names one; replacing it takes ledger.mjs row, which rewrites the whole line`;
+      return `names a second tier — this call already names tier=${other}, and a row names one`;
     }
   }
   if (tok === "→") return "is the row's arrow, which is written with the PR it points at — ledger.mjs row writes the whole line";
@@ -2895,8 +2960,11 @@ function tokenRefusal(tok, rowText) {
 // — the PR's row for a PR key, the ticket row once `settle impl-<N>=PR#M` has
 // run, else `#M`, created when neither exists: `review`'s lookup — keeping
 // every token already there, in order, as ` · <token>`. A token the row
-// already carries is a no-op. Every refusal is judged before anything is
-// written, whole call alike, under the lock.
+// already carries is a no-op. A `tier=` replaces the row's: in place of its
+// first `tier=`, dropping any other, refused by cellChangeRefusal() while the
+// row's implementer has not settled; it is a no-op only on a row whose one
+// tier it already is. Every refusal is judged before anything is written,
+// whole call alike, under the lock.
 function runToken() {
   const usage = "usage: ledger.mjs token <ticket|pr> <token>…";
   const [keyArg, ...tokens] = rest;
@@ -2905,20 +2973,23 @@ function runToken() {
   const i = prRowIndex(num);
   const created = i === -1;
   const oldLine = created ? null : data.rows[i];
-  let carried = oldLine ?? "";
+  let earlier = "";
   for (const tok of tokens) {
-    const why = tokenRefusal(tok, carried);
+    const why = tokenRefusal(tok, earlier);
     if (why !== null) die(`token #${num}: '${tok}' ${why}`);
-    carried += ` ${tok}`;
+    earlier += ` ${tok}`;
   }
   const key = created ? `#${num}` : rowKey(oldLine);
   const have = new Set(created ? [] : rowTokens(oldLine));
+  let tiers = [...new Set(tierValues(oldLine))];
   const appended = [];
   for (const tok of tokens) {
-    if (have.has(tok)) {
+    const [tier] = tierValues(tok);
+    if (tier === undefined ? have.has(tok) : tiers.length === 1 && tiers[0] === tier) {
       console.error(`    already present on row ${key}: ${tok}`);
     } else {
       have.add(tok);
+      if (tier !== undefined) tiers = [tier];
       appended.push(tok);
     }
   }
@@ -2926,7 +2997,13 @@ function runToken() {
     console.log(JSON.stringify({ key, line: oldLine, added: appended }));
     return;
   }
-  const line = created ? `${key} ${appended.join(" · ")}` : `${oldLine} · ${appended.join(" · ")}`;
+  const tierTok = appended.find((tok) => tierValues(tok).length > 0);
+  const replaced = created || tierTok === undefined ? [] : tierValues(oldLine).map((v) => `tier=${v}`);
+  const line = created
+    ? `${key} ${appended.join(" · ")}`
+    : appended.reduce((l, tok) => (tok === tierTok && replaced.length > 0 ? withTier(l, tok) : `${l} · ${tok}`), oldLine);
+  const cellWhy = cellChangeRefusal(oldLine, line);
+  if (cellWhy !== null) die(`token ${key}: ${cellWhy}`);
   const after = created ? [...data.rows, line] : data.rows.with(i, line);
   // A freeform token can still move the PR a row maps to (a `PR#<n>` mention
   // on a row with no implementer), or split one PR across two rows.
@@ -2940,6 +3017,8 @@ function runToken() {
   if (refusal !== null) die(`token ${key}: ${refusal}`);
   data.rows = after;
   save(data);
-  console.error(`    appended ${appended.join(" ")} to row ${key}`);
+  const others = appended.filter((tok) => !(tok === tierTok && replaced.length > 0));
+  if (replaced.length > 0) console.error(`    replaced ${replaced.join(" ")} with ${tierTok} on row ${key}`);
+  if (others.length > 0) console.error(`    appended ${others.join(" ")} to row ${key}`);
   console.log(JSON.stringify({ key, line, added: appended }));
 }

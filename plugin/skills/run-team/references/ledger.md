@@ -62,7 +62,7 @@ One git-ignored `.fleet/ledger.md` per run is updated at every state change thro
 
 ## One line per ticket
 
-One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`; `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row):
+One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`; `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row, and replaces the row's `tier=` once its implementer has settled):
 
 ```
 #<t1> impl-<t1>=PR#<p1> → PR#<p1> → MERGED 73b356de
@@ -108,4 +108,4 @@ The ledger half reports its own readability as its own field, `ledger.ok`, the p
 
 ## Adding a token
 
-Token additions go through `ledger.mjs token`. `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row. Re-typing the row with `row` replaces the whole line, so it drops the tokens you do not restate.
+Token additions go through `ledger.mjs token`. `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row. A `tier=` replaces the row's `tier=` instead, once the row's implementer has settled, and keeps every other token; while that implementer has not settled, `token` and `row` both refuse a write that changes the row's cell. Re-typing the row with `row` replaces the whole line, so it drops the tokens you do not restate.
