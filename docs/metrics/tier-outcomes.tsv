@@ -575,3 +575,5 @@
 2026-10-21	3658	3634		smol-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
 2026-10-21	3659	3627		task-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
 2026-10-21	3660	3643		slow-high	yes	no	merged via fleet run; review ruled by fix-applier, no false claim minted				
+2026-10-21	3631	3614			yes	no	research fold-in, no implementer member; its Closes lines name three deferral issues (#3614, #3615, #3616), ticket keyed on the first; tier blank by construction; written by hand because append refuses a multi-issue PR (#3664)				
+2026-10-21	3633	3491		smol-high	yes	no	merged via fleet run; PR also closed #3637 (a deferral its own fix-applier filed), ticket keyed on #3491, the implemented one; tier from the run ledger tier-ok token; written by hand because append refuses a multi-issue PR (#3664)				
