@@ -24,10 +24,12 @@
 //     failure, per PR whose run-ledger row carries `reviewed=` but which has
 //     no row here. A PR whose closing references are not exactly one, and that
 //     no settled `impl-` token names, is named in a `note` line and never
-//     warned about: `append` has no ticket to key a row on. A read of that PR
-//     that does not answer keeps the warning, after a line naming why the read
-//     failed. Both reads of a PR's closing references ignore an ambient GH_REPO
-//     and give `gh` 60s. `--ledger <path>` names another ledger than the run's own.
+//     warned about: `append` has no ticket to key a row on. Where such tokens
+//     do name it but `append` would still refuse it, its WARNING says why. A
+//     read of that PR that does not answer keeps the warning, after a line
+//     naming why the read failed. Both reads of a PR's closing references
+//     ignore an ambient GH_REPO and give `gh` 60s. `--ledger <path>` names
+//     another ledger than the run's own.
 //
 // `tier` resolution, in order (never tie-broken by `run_date`: the two files'
 // `run_date`s mean different things — this file's header measures 92 of 267
@@ -453,12 +455,13 @@ function readLedger(ledgerFile, requireFile) {
   }
 }
 
-// A PR's closingIssuesReferences array, or an Error naming why it could not be
-// read. GH_REPO is blanked so an ambient one naming another repository never
-// decides which PR is read; the timeout keeps a hung `gh` from stalling
-// `append` or a close-out's `check --live`.
+// The unique issue numbers of a PR's closingIssuesReferences, in GitHub's
+// order, or an Error naming why they could not be read — a reference with no
+// integer issue number among the reasons. GH_REPO is blanked so an ambient one
+// naming another repository never decides which PR is read; the timeout keeps
+// a hung `gh` from stalling `append` or a close-out's `check --live`.
 const GH_TIMEOUT_MS = 60_000;
-function closingRefs(pr) {
+function closingIssueNumbers(pr) {
   let raw;
   try {
     raw = execFileSync("gh", ["pr", "view", String(pr), "--json", "closingIssuesReferences"], {
@@ -474,13 +477,17 @@ function closingRefs(pr) {
     throw new Error(`gh pr view ${pr} returned unreadable JSON: ${e.message}`);
   }
   if (!Array.isArray(refs)) throw new Error(`gh pr view ${pr} returned no closingIssuesReferences array`);
-  return refs;
+  const numbers = [...new Set(refs.map((r) => r?.number))];
+  const unreadable = numbers.filter((n) => !Number.isInteger(n));
+  if (unreadable.length > 0) {
+    throw new Error(`gh pr view ${pr} returned a closing reference with no issue number (${unreadable.map((n) => JSON.stringify(n) ?? "undefined").join(", ")})`);
+  }
+  return numbers;
 }
 
-// The unique issue numbers of a PR's closing references, in GitHub's order.
 function closingNumbers(pr) {
   try {
-    return [...new Set(closingRefs(pr).map((r) => r?.number))];
+    return closingIssueNumbers(pr);
   } catch (e) {
     die(e.message);
   }
@@ -499,23 +506,27 @@ function implementerClaims(ledger, pr) {
   return claims;
 }
 
-// The ticket of a PR whose closing references are not exactly one: the N of its
-// one settled impl token. Dies when there is no such token, when there are
-// several, or when several closing issues do not include the token's N.
+// The ticket a PR's row keys on: its one closing issue, else the N of its one
+// settled impl token. Otherwise `refusal` says why there is none, and `claims`
+// counts the settled impl tokens naming the PR — none is a PR no implementer
+// names. Refused: no such token, several, or several closing issues that do not
+// include the token's N.
 function ticketFor(pr, numbers, ledger) {
+  if (numbers.length === 1) return { ticket: String(numbers[0]) };
   const claims = implementerClaims(ledger, pr);
   const closes = numbers.length === 0 ? "closes no issue" : `closes ${numbers.length} issues (${numbers.map((n) => `#${n}`).join(", ")})`;
+  const refused = (why) => ({ claims: claims.length, refusal: `PR #${pr} ${closes} per GitHub's closingIssuesReferences, and ${why}` });
   if (claims.length === 0) {
-    die(`PR #${pr} ${closes} per GitHub's closingIssuesReferences, and no run-ledger row carries a settled impl-N=PR#${pr} token to name its ticket — a tier-outcomes row keys on exactly one ticket`);
+    return refused(`no run-ledger row carries a settled impl-N=PR#${pr} token to name its ticket — a tier-outcomes row keys on exactly one ticket`);
   }
   if (claims.length > 1) {
-    die(`PR #${pr} ${closes} per GitHub's closingIssuesReferences, and ${claims.length} run-ledger rows carry a settled impl-N=PR#${pr} token (${claims.map((c) => c.key).join(", ")}) — a tier-outcomes row keys on exactly one ticket`);
+    return refused(`${claims.length} run-ledger rows carry a settled impl-N=PR#${pr} token (${claims.map((c) => c.key).join(", ")}) — a tier-outcomes row keys on exactly one ticket`);
   }
   const [{ key, ticket }] = claims;
   if (numbers.length > 1 && !numbers.includes(ticket)) {
-    die(`PR #${pr} ${closes} per GitHub's closingIssuesReferences, and its settled impl-${ticket}=PR#${pr} token in ${key} names #${ticket}, which is not among them`);
+    return refused(`its settled impl-${ticket}=PR#${pr} token in ${key} names #${ticket}, which is not among them`);
   }
-  return String(ticket);
+  return { ticket: String(ticket) };
 }
 
 // The UTC date, the convention of a session id's date and so of every Pull's
@@ -555,8 +566,8 @@ function append(pr, paths) {
   }
 
   const ledger = readLedger(paths.ledger, false);
-  const numbers = closingNumbers(pr);
-  const ticket = numbers.length === 1 && Number.isInteger(numbers[0]) ? String(numbers[0]) : ticketFor(pr, numbers, ledger);
+  const { ticket, refusal } = ticketFor(pr, closingNumbers(pr), ledger);
+  if (refusal) die(refusal);
   const memberRows = readMemberRows(paths.members);
   const resolved = resolveTier({ ledger, memberRows, ticket, pr });
   if (resolved.warning) console.error(`${NAME}: WARNING tier left blank for PR #${pr} (ticket #${ticket}): ${resolved.warning}`);
@@ -587,12 +598,12 @@ function append(pr, paths) {
   console.log(line);
 }
 
-// The unique issue numbers of a PR's closing references, or null after a line
-// naming why they could not be read. That line never reads `WARNING PR #`,
-// which closeout.mjs turns into a NEED; a PR whose read failed keeps its warning.
+// A PR's closing issue numbers, or null after a line naming why they could not
+// be read. That line never reads `WARNING PR #`, which closeout.mjs turns into
+// a NEED; a PR whose read failed keeps its warning.
 function closingNumbersOrNull(pr) {
   try {
-    return [...new Set(closingRefs(pr).map((r) => r?.number))];
+    return closingIssueNumbers(pr);
   } catch (e) {
     console.error(`${NAME}: could not read the closing references of PR #${pr}: ${e.message}`);
     return null;
@@ -612,12 +623,14 @@ function check(paths) {
     const ledger = readLedger(paths.ledger, true);
     for (const pr of unrecordedReviewedPrs(ledger, rows)) {
       const numbers = closingNumbersOrNull(pr);
-      if (numbers !== null && numbers.length !== 1 && implementerClaims(ledger, pr).length === 0) {
+      const { refusal, claims } = numbers === null ? {} : ticketFor(pr, numbers, ledger);
+      if (refusal && claims === 0) {
         const closes = numbers.length === 0 ? "closes no issue" : `closes ${numbers.length} issues`;
-        console.error(`${NAME}: note PR #${pr} carries reviewed= on the ledger and ${closes}, and no implementer row names it, so it takes no row in ${paths.file}`);
+        console.error(`${NAME}: note PR #${pr} carries reviewed= on the ledger and ${closes}, and no settled impl token names it, so it takes no row in ${paths.file}`);
         continue;
       }
-      console.error(`${NAME}: WARNING PR #${pr} carries reviewed= on the ledger but has no row in ${paths.file} — run \`tier-outcomes.mjs append ${pr}\` if it is an implementer PR`);
+      const next = refusal ? `\`tier-outcomes.mjs append ${pr}\` refuses it: ${refusal}` : `run \`tier-outcomes.mjs append ${pr}\` if it is an implementer PR`;
+      console.error(`${NAME}: WARNING PR #${pr} carries reviewed= on the ledger but has no row in ${paths.file} — ${next}`);
     }
   }
 

@@ -27,8 +27,10 @@
      you rule (**Guard: accumulate per PR**) and run `finish` again. A reviewed
      PR that closes no issue, or several, with no settled `impl-<N>=PR#<pr>`
      token naming it takes no row: the check names it in a `note` line and
-     never asks for one. With such a token it is a NEED, and `append` takes the
-     ticket from the token. A step it fails is
+     never asks for one. With such a token it is a NEED: `append` takes the
+     ticket from the token when exactly one row carries it and, for several
+     closing issues, it is among them; otherwise the WARNING behind the NEED
+     says why `append` refuses it. A step it fails is
      explained in references/close-out.md. Exit 0 is the run closed.
   Drain only when a documented trigger fired, and name the trigger in `--reason`.
   **Undrain** only when the maintainer asks, never a drain that budget or
@@ -89,9 +91,10 @@ why in `note`.
 Each WARNING names a PR this run's ledger marks `reviewed=` that has no row yet
 — append it before committing if it is an implementer PR. A reviewed PR that
 closes no issue, or several, and that no settled `impl-<N>=PR#<pr>` token
-names, is named in a `note` line instead: it takes no row. A line
-saying the PR's closing references could not be read comes before that PR's
-WARNING and says why.
+names, is named in a `note` line instead: it takes no row. A WARNING for a PR
+that such tokens name but that `append` would refuse says why. A line
+saying the PR's closing references could not be read — a reference with no
+issue number among the reasons — comes before that PR's WARNING and says why.
 
 ## Drain the pending ticket-features rows and refresh the cost guard
 
