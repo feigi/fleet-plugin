@@ -12,7 +12,9 @@
 // status, never as "the whole call failed". An `errors` that is present and
 // not an array names no alias to trust or blame, so beside an object
 // `data.repository` it leaves the whole batch unreachable as "malformed
-// errors"; absent or null, it is no errors.
+// errors" with the value's JSON, cut to 80 characters — unless the call was
+// killed or timed out, which keeps its bare reason; absent or null, it is no
+// errors.
 //
 // `-F owner={owner} -F name={repo}` is filled in from the environment gh sees:
 // an inherited GH_REPO outranks the repository the cwd is bound to, and a
@@ -44,7 +46,8 @@ export function how(r) {
  *                        belong to any of the batch), a null no NOT_FOUND
  *                        explains, a missing alias, an `errors` that is not
  *                        an array beside an object repository ("malformed
- *                        errors"), and an unparseable or absent body all land
+ *                        errors" and the value, or a killed call's bare
+ *                        reason), and an unparseable or absent body all land
  *                        here: a failed lookup is not an answer.
  *
  * `field` and `selection` build each alias, `n<N>:<field>(number:<N>)<selection>`;
@@ -87,7 +90,7 @@ export function ghAliasedRead(numbers, { field, selection, timeoutMs }) {
       const alias = `n${n}`;
       const gone = (why) => out.set(n, { unreachable: why });
       if (!isRepo) gone(unparseable === undefined ? how(r) : `${how(r)}: unparseable body: ${unparseable}`);
-      else if (!answered) gone(`malformed errors: ${how(r)}`);
+      else if (!answered) gone(r.error || r.signal ? how(r) : `malformed errors: ${JSON.stringify(errors).slice(0, 80)}: ${how(r)}`);
       else if (refused.has(alias)) gone(refused.get(alias));
       else if (batchWide !== undefined) gone(batchWide);
       else if (!Object.hasOwn(repo, alias)) gone(how(r));

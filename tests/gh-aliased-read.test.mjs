@@ -15,14 +15,18 @@ import { writeExecStub } from "./support/exec-stub.mjs";
 import { ghAliasedRead } from "../plugin/scripts/gh-aliased-read.mjs";
 
 // Prints STUB_BODY's file to stdout and STUB_STDERR to stderr, logs its argv
-// to STUB_ARGV, and exits STUB_EXIT. exitCode, not exit(): a large body on a
-// pipe must drain first.
+// to STUB_ARGV, lingers STUB_SLEEP ms and exits STUB_EXIT — unless, once the
+// body is out, it kills itself with the signal STUB_KILL names. exitCode, not
+// exit(): a large body on a pipe must drain first.
 const GH_STUB = `#!${process.execPath}
 const fs = require("fs");
 fs.writeFileSync(process.env.STUB_ARGV, JSON.stringify(process.argv.slice(2)));
-process.stdout.write(fs.readFileSync(process.env.STUB_BODY, "utf8"));
+process.stdout.write(fs.readFileSync(process.env.STUB_BODY, "utf8"), () => {
+  if (process.env.STUB_KILL) process.kill(process.pid, process.env.STUB_KILL);
+});
 process.stderr.write(process.env.STUB_STDERR);
 process.exitCode = Number(process.env.STUB_EXIT);
+setTimeout(() => {}, Number(process.env.STUB_SLEEP));
 `;
 
 const dir = realpathSync(mkdtempSync(join(tmpdir(), "gh-aliased-read-")));
@@ -32,11 +36,13 @@ process.env.PATH = `${dir}:${process.env.PATH}`;
 process.env.STUB_ARGV = join(dir, "argv.json");
 process.env.STUB_BODY = join(dir, "body.json");
 
-const read = (numbers, body, exit = 0, stderr = "") => {
+const read = (numbers, body, exit = 0, stderr = "", { kill = "", sleepMs = 0, timeoutMs = 10_000 } = {}) => {
   writeFileSync(process.env.STUB_BODY, typeof body === "string" ? body : JSON.stringify(body));
   process.env.STUB_EXIT = String(exit);
   process.env.STUB_STDERR = stderr;
-  return ghAliasedRead(numbers, { field: "pullRequest", selection: "{state}", timeoutMs: 10_000 });
+  process.env.STUB_KILL = kill;
+  process.env.STUB_SLEEP = String(sleepMs);
+  return ghAliasedRead(numbers, { field: "pullRequest", selection: "{state}", timeoutMs });
 };
 
 test("a repository that is an array answers nothing, though an error names the alias", () => {
@@ -47,14 +53,29 @@ test("a repository that is an array answers nothing, though an error names the a
 test("an `errors` that is not an array answers nothing and throws nothing", () => {
   for (const errors of [{ message: "boom" }, "boom", 7, false]) {
     const r = read([1, 2], { data: { repository: { n1: { state: "OPEN" } } }, errors });
-    assert.deepEqual(r.get(1), { unreachable: "malformed errors: exit 0" }, JSON.stringify(errors));
-    assert.deepEqual(r.get(2), { unreachable: "malformed errors: exit 0" }, JSON.stringify(errors));
+    assert.deepEqual(r.get(1), { unreachable: `malformed errors: ${JSON.stringify(errors)}: exit 0` }, JSON.stringify(errors));
+    assert.deepEqual(r.get(2), { unreachable: `malformed errors: ${JSON.stringify(errors)}: exit 0` }, JSON.stringify(errors));
   }
 });
 
 test("a malformed `errors` keeps the process status and gh's last stderr line", () => {
   const r = read([1], { data: { repository: { n1: { state: "OPEN" } } }, errors: "boom" }, 1, "gh: partial\n");
-  assert.deepEqual(r.get(1), { unreachable: "malformed errors: exit 1: gh: partial" });
+  assert.deepEqual(r.get(1), { unreachable: 'malformed errors: "boom": exit 1: gh: partial' });
+});
+
+test("a malformed `errors` is quoted in the reason as JSON cut to 80 characters", () => {
+  const r = read([1], { data: { repository: { n1: { state: "OPEN" } } }, errors: "x".repeat(500) });
+  assert.deepEqual(r.get(1), { unreachable: `malformed errors: "${"x".repeat(79)}: exit 0` });
+});
+
+test("a call that timed out keeps its bare reason, though it printed a malformed `errors` first", () => {
+  const r = read([1], { data: { repository: { n1: { state: "OPEN" } } }, errors: "boom" }, 0, "", { sleepMs: 30_000, timeoutMs: 1_000 });
+  assert.deepEqual(r.get(1), { unreachable: "ETIMEDOUT" });
+});
+
+test("a call killed by a signal keeps its bare reason, though it printed a malformed `errors` first", () => {
+  const r = read([1], { data: { repository: { n1: { state: "OPEN" } } }, errors: "boom" }, 0, "", { kill: "SIGKILL" });
+  assert.deepEqual(r.get(1), { unreachable: "killed by SIGKILL" });
 });
 
 test("a repository that is not an object outranks a malformed `errors`: the reason stays the bare exit status", () => {

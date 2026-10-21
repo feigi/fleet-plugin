@@ -3226,7 +3226,7 @@ test("CLI: a PR gh cannot answer for is not read as merged - the unit stays coun
     ["a PR that does not exist", { GRAPHQL_BODY: JSON.stringify({ data: { repository: { n101: null } }, errors: [{ type: "NOT_FOUND", path: ["repository", "n101"], message: "gone" }] }), GRAPHQL_EXIT: "1" }, /gh api graphql gave no answer for PR#101 \(no such pull request\)/],
     ["an error on the alias", { GRAPHQL_BODY: JSON.stringify({ data: { repository: { n101: null } }, errors: [{ type: "FORBIDDEN", path: ["repository", "n101"], message: "no" }] }), GRAPHQL_EXIT: "1" }, /gh api graphql gave no answer for PR#101 \(FORBIDDEN: no\)/],
     ["an error naming no alias", { GRAPHQL_BODY: JSON.stringify({ data: { repository: { n101: { state: "MERGED" } } }, errors: [{ message: "x" }] }) }, /gh api graphql gave no answer for PR#101 \(error: x\)/],
-    ["an errors that is not an array", { GRAPHQL_BODY: JSON.stringify({ data: { repository: { n101: { state: "MERGED" } } }, errors: "x" }) }, /gh api graphql gave no answer for PR#101 \(malformed errors: exit 0\)/],
+    ["an errors that is not an array", { GRAPHQL_BODY: JSON.stringify({ data: { repository: { n101: { state: "MERGED" } } }, errors: "x" }) }, /gh api graphql gave no answer for PR#101 \(malformed errors: "x": exit 0\)/],
   ];
   for (const [what, env, shown] of cases) {
     const r = runCli([], {
