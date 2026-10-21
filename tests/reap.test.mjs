@@ -3966,8 +3966,9 @@ test("an unrecognised git rev-parse --show-toplevel failure fails the whole run 
 
 // #1441 (finding 2). Both cwd-delete guards compared `$wt` to `$self_wt` by
 // EXACT equality, so they missed the ANCESTOR case: cwd nested inside a
-// worktree slated for removal (SKILL.md:2407 — "a member can commit in a
-// nested worktree" — is the same real shape). `--apply` used to remove the
+// worktree slated for removal (run-team references/failure-handling.md, under
+// **Verify every reported SHA.** — "a member can commit in a nested
+// worktree" — is the same real shape). `--apply` used to remove the
 // outer worktree, deleting the cwd, taking the nested worktree's uncommitted
 // file with it. `.gitignore` excludes the nested path so the outer worktree's
 // own dirty check (line 649/1004 above) does not see it — mirroring the
