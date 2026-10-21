@@ -386,6 +386,38 @@ const CHANGED = [
   ...QUEUE_TIER_GUARDS.changed,
   ...STANDING_SECTIONS.changed,
   ...COMPRESS.changed,
+  // The finisher's dispatch refuses an implementer's PR until its tier-outcomes
+  // row exists, so the guard appends that row before the finisher and a NEED
+  // at close-out is one that never reached it; in the finisher gate a "ruling"
+  // is only that row, and the answer owed to a fix-applier is a reply.
+  [
+    "**Append one row to `docs/metrics/tier-outcomes.tsv` when you rule each PR's review, with `~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note \"<text>\"`, never by hand** (that file's header carries the column meanings).",
+    "**Append one row to `docs/metrics/tier-outcomes.tsv` when you rule each PR's review, before its finisher, with `~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note \"<text>\"`, never by hand** (that file's header carries the column meanings).",
+  ],
+  [
+    "A `NEED tier-outcomes append <pr>` is a PR the ledger marks reviewed with no verdict row: append it with the verdict you rule (**Guard: accumulate per PR**) and run `finish` again.",
+    "A `NEED tier-outcomes append <pr>` is a reviewed PR with no verdict row — for an implementer's, one that never reached its finisher: append it with the verdict you rule (**Guard: accumulate per PR**) and run `finish` again.",
+  ],
+  [
+    "**The outbox is the last test, not the only one, and it stands wherever a fix-applier exists** — that is exactly where a ruling you still owe it is outstanding, so never dispatch off it while you do.",
+    "**The outbox is the last test, not the only one, and it stands wherever a fix-applier exists** — that is exactly where a reply you still owe it is outstanding, so never dispatch off it while you do.",
+  ],
+  [
+    "Dispatch the finisher off the reviewer's final verdict instead, the moment it lands — and, same as above, never while you still owe it a ruling — or hold anything else it has not received, a ruling you have withdrawn or reversed included.",
+    "Dispatch the finisher off the reviewer's final verdict instead, the moment it lands — and, same as above, never while you still owe it a reply — or hold anything else it has not received, a reply you have withdrawn or reversed included.",
+  ],
+  [
+    "**Never dispatch one while you still owe the fix-applier a ruling**: the pinned SHA is only as good as the guarantee nothing else is inbound.",
+    "**Never dispatch one while you still owe the fix-applier a reply**: the pinned SHA is only as good as the guarantee nothing else is inbound.",
+  ],
+  [
+    "**The test is your OUTBOX, not the member's last message** — anything you have decided that it has not received, including a ruling you have since **withdrawn or reversed**.",
+    "**The test is your OUTBOX, not the member's last message** — anything you have decided that it has not received, including a reply you have since **withdrawn or reversed**.",
+  ],
+  [
+    "**An unanswered question from the member is an outbox item, and it blocks dispatch with the same weight as a ruling you have already made.**",
+    "**An unanswered question from the member is an outbox item, and it blocks dispatch with the same weight as a reply you have already decided on.**",
+  ],
   [
     "No harness supplies a scratch directory to a member, so a member left to name its own invents one — and the liveness read below, which looks at the files under the directory a member's own prompt assigned it, then watches a directory nobody else can find.",
     "No harness supplies a scratch directory to a member, so a member left to name its own invents one — and the liveness read in **The tick's rows**, which looks at the files under the directory a member's own prompt assigned it, then watches a directory nobody else can find."

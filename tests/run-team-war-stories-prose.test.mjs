@@ -86,6 +86,12 @@ const CORRECTIONS = [
     "So hold the wait yourself, exactly the way that gate does:",
     "So the wake-up is not a watcher and not a cron entry. It is an omp extension loaded into your own session, the alarm, which polls from inside the process and starts a turn once the beat has fallen due.",
   ],
+  // In the finisher gate a "ruling" is only the PR's tier-outcomes row; the
+  // answer owed to a fix-applier is a reply.
+  [
+    "with the same weight as a ruling you have already made.**",
+    "with the same weight as a reply you have already decided on.**",
+  ],
 ];
 
 // The removed text as its blocks — paragraphs, a table, a code block — each
@@ -160,7 +166,7 @@ const MOVED = [
   ["reviewers.md", "Know the trim before you rely on it", "**Know the trim before you rely on it — it is wider than `docsOnly` suggests.**", "Measured: a docs PR that also adds one test file is profile `tests-only` and runs **three** (correctness+tests+comments), not six;"],
   ["reviewers.md", "A refutation needs its positive control", "**A refutation resting on an injection nothing proved landed is not a refutation — it is a cell that never ran.**", "So a negative result is admitted only together with its **positive control**"],
   ["reviewers.md", "Where `<branch>` comes from", "**Where `<branch>` comes from:** the PR's head branch — `gh pr view <N> --json headRefName -q .headRefName`, or the same branch you cut the worktree from.", "(measured 2026-09-18, git 2.50.1)"],
-  ["finisher.md", "An unanswered question from the member is an outbox item", "**An unanswered question from the member is an outbox item, and it blocks dispatch with the same weight as a ruling you have already made.**", "That worked because the controller chose to hold, not because a rule required it."],
+  ["finisher.md", "An unanswered question from the member is an outbox item", "**An unanswered question from the member is an outbox item, and it blocks dispatch with the same weight as a reply you have already decided on.**", "That worked because the controller chose to hold, not because a rule required it."],
   // The finisher's duty-2 rules left SKILL.md with its event loop (#3540): each
   // is stated in agents/fleet-finisher.agent.md, the finisher's system prompt,
   // and pinned there by finisher-own-tree-prose and dedupe-guard-prose, so

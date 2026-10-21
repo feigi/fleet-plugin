@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { deriveRun, LedgerError } from "../plugin/scripts/fleet-tick.mjs";
@@ -24,10 +24,22 @@ import { writeExecStub } from "./support/exec-stub.mjs";
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
 function fixture(t, body = null) {
-  const dir = mkdtempSync(join(tmpdir(), "ledger-dispatch-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // The ledger sits in `<root>/.fleet/`, as it does in a main checkout, so the
+  // tier-outcomes file a finisher dispatch reads is `<root>/docs/metrics/`'s.
+  const root = mkdtempSync(join(tmpdir(), "ledger-dispatch-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const dir = join(root, ".fleet");
+  mkdirSync(dir);
   const file = join(dir, "ledger.md");
   if (body !== null) writeFileSync(file, body);
+  const tierOutcomes = join(root, "docs", "metrics", "tier-outcomes.tsv");
+  // PR `pr`'s ruling, the row a finisher dispatch for an implementer's PR
+  // waits on: `ticket` and the verdicts are any a ruling can carry.
+  const rule = (pr, ticket = "1") => {
+    mkdirSync(dirname(tierOutcomes), { recursive: true });
+    const text = existsSync(tierOutcomes) ? readFileSync(tierOutcomes, "utf8") : "";
+    writeFileSync(tierOutcomes, `${text}2026-10-21\t${pr}\t${ticket}\troutine\tslow-high\tyes\tno\truled\n`);
+  };
   // PATH is a directory holding one gh stub: only `dispatch merge-bot` may
   // reach gh, to record the queue it lists — empty unless a test rewrites the
   // stub — and with `--file` given nothing in ledger.mjs reaches git.
@@ -79,7 +91,7 @@ function fixture(t, body = null) {
     path: join(dir, "briefs", `${member}.md`),
     sha256: JSON.parse(readFileSync(join(dir, "briefs", `${member}.json`), "utf8")).sha256,
   });
-  return { dir, file, bin, env, bare, cli, ok, read, bytes, refused, put, briefOf };
+  return { dir, file, bin, env, bare, cli, ok, read, bytes, refused, put, briefOf, tierOutcomes, rule };
 }
 
 test("dispatch appends a live member row and records the dispatch in ## Dispatched", (t) => {
@@ -109,7 +121,8 @@ test("dispatch keeps an existing row's text, appending the token only where it i
 });
 
 test("a PR-bound member lands on the row carrying its PR, named by PR or by ticket", (t) => {
-  const { ok, read, briefOf } = fixture(t);
+  const { ok, read, briefOf, rule } = fixture(t);
+  rule(346);
   ok("dispatch", "324", "impl-324");
   ok("settle", "impl-324", "PR#346");
   // By the PR number: found through the implementer's own settled token.
@@ -256,7 +269,8 @@ test("a refused name's replacement climbs past every letter the session holds, w
 // an implementer's follows its row's `tier=` the way tier-check.mjs reads it:
 // none is the policy cell, `slow-high`.
 test("dispatch prints the agent definition the call names: the row's tier for an implementer, fixed for a fix-applier, finisher and merge bot", (t) => {
-  const { ok } = fixture(t);
+  const { ok, rule } = fixture(t);
+  rule(70);
   assert.equal(ok("dispatch", "7", "impl-7").agent, "fleet-implementer-slow-high");
   ok("row", "8", "impl-8 · class=routine · tier=task-high");
   assert.equal(ok("dispatch", "8", "impl-8").agent, "fleet-implementer-task-high");
@@ -320,7 +334,8 @@ test("row refuses a tier= that is not a cell token, and accepts every cell token
 // definition does not come off `tier=` must still be dispatchable on such a
 // row, or one bad token would strand the PR's finisher and fix-applier.
 test("a malformed tier= on a row does not refuse a member whose definition ignores it", (t) => {
-  const { ok } = fixture(t);
+  const { ok, rule } = fixture(t);
+  rule(70);
   ok("row", "7", "impl-7=PR#70 · tier=task-high · tier=slow-high");
   assert.equal(ok("dispatch", "70", "fix-pr-70").agent, "fleet-fix-applier");
   assert.equal(ok("dispatch", "7", "finisher-pr-70").agent, "fleet-finisher");
@@ -370,7 +385,8 @@ test("dispatch refuses a finisher on a ledger the tick refuses, before marking i
 });
 
 test("settle rewrites the member's token in its row and in ## Dispatched, and nothing else", (t) => {
-  const { ok, read } = fixture(t);
+  const { ok, read, rule } = fixture(t);
+  rule(420);
   ok("row", "412", "impl-412 · class=routine · ports=16412");
   ok("dispatch", "412", "impl-412");
   assert.deepEqual(ok("settle", "impl-412", "PR#420"), {
@@ -510,7 +526,8 @@ test("row still writes well-formed member tokens and non-member keys", (t) => {
 // of nothing, so `row` refuses it — locally, off `## Dispatched` and the rows'
 // member tokens, the same two places dispatch's live-sibling check reads.
 test("row refuses a label-off naming no finisher this run has, writing nothing", (t) => {
-  const { ok, read, refused } = fixture(t);
+  const { ok, read, refused, rule } = fixture(t);
+  rule(40); rule(41);
   ok("dispatch", "10", "impl-10");
   ok("settle", "impl-10", "PR#40");
   ok("dispatch", "40", "finisher-pr-40");
@@ -530,7 +547,8 @@ test("row refuses a label-off naming no finisher this run has, writing nothing",
 });
 
 test("row accepts a label-off naming a finisher in ## Dispatched or on any row, settled or live", (t) => {
-  const { ok, read } = fixture(t);
+  const { ok, read, rule } = fixture(t);
+  rule(40); rule(50);
   ok("dispatch", "10", "impl-10");
   ok("settle", "impl-10", "PR#40");
   ok("dispatch", "40", "finisher-pr-40");
@@ -556,7 +574,8 @@ test("row accepts a label-off naming a finisher in ## Dispatched or on any row, 
 // the cockpit drew two REVIEW cards and the tick's `byPr`, first-row-wins until
 // #2283, lost the live review. The settle folds the PR-keyed row into the ticket row.
 test("settle impl-N=PR#M folds the PR-keyed row a pre-settle dispatch created into the ticket row", (t) => {
-  const { ok, read } = fixture(t);
+  const { ok, read, rule } = fixture(t);
+  rule(1301);
   ok("dispatch", "1300", "impl-1300");
   assert.equal(ok("dispatch", "1301", "fix-pr-1301").line, "#1301 fix-pr-1301");
   assert.equal(ok("review", "1301", "review=member:review-pr-1301").row, "#1301");
@@ -785,7 +804,8 @@ const boardOf = (ledger, prs) => computeBoard({
 });
 
 test("a ticket row retried under a second PR is one board card on the latest PR, with that PR's own state", (t) => {
-  const { ok, read } = fixture(t);
+  const { ok, read, rule } = fixture(t);
+  rule(724);
   ok("dispatch", "659", "impl-659");
   ok("settle", "impl-659", "PR#800");
   ok("dispatch", "659", "impl-659-b");
@@ -1013,7 +1033,8 @@ const gateRow = (counts, ...tokens) =>
   ["impl-10=PR#40 → PR#40", `review=member:review-pr-40 reviewed=${GATE_HEAD.slice(0, 7)}:${counts}:${GATE_RUN}`, "fix-pr-40=applied:def5678", ...tokens].join(" · ");
 
 test("a finisher is refused on a dispositions mismatch and recorded on a dispositions ok", (t) => {
-  const { ok, read, refused, put } = fixture(t);
+  const { ok, read, refused, put, rule } = fixture(t);
+  rule(40);
   put("10", gateRow("1/0/0", `dispositions-mismatch=fix-pr-40:${GATE_RUN}`));
   refused(["dispatch", "40", "finisher-pr-40"],
     /finisher-pr-40: dispositions mismatch — fix-pr-40's disposition record fails the check against review run-Gate0001; .*dispositions-check\.mjs/);
@@ -1048,7 +1069,8 @@ test("a finisher is refused as unchecked while no verdict answers the latest rev
 });
 
 test("a finisher is refused as unchecked on a dispositions-unchecked verdict answering the latest review's run, until a re-run writes ok", (t) => {
-  const { ok, refused, put } = fixture(t);
+  const { ok, refused, put, rule } = fixture(t);
+  rule(40);
   put("10", gateRow("1/0/0", `dispositions-unchecked=fix-pr-40:${GATE_RUN}`));
   refused(["dispatch", "40", "finisher-pr-40"],
     /finisher-pr-40: dispositions unchecked — fix-pr-40's check of review run-Gate0001 could not read where a deferral was filed .* an issue that does not exist is unreadable too, and no re-run answers that one.* run dispositions-check\.mjs --member fix-pr-40 --scratch <scratch> again once gh answers/);
@@ -1057,7 +1079,8 @@ test("a finisher is refused as unchecked on a dispositions-unchecked verdict ans
 });
 
 test("a PR whose latest review counts no survived and no unverified finding dispatches a finisher with no verdict", (t) => {
-  const { ok, read, put } = fixture(t);
+  const { ok, read, put, rule } = fixture(t);
+  rule(40); rule(41);
   put("10", `impl-10=PR#40 → PR#40 · review=member:review-pr-40 reviewed=${GATE_HEAD}:0/3/0:${GATE_RUN}`);
   assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
   // A PR never reviewed is outside the gate as well: no review file, no record.
@@ -1070,7 +1093,8 @@ test("a PR whose latest review counts no survived and no unverified finding disp
 // only unverified findings (pinned in fleet-tick.test.mjs), and its `no-op`
 // with an ok verdict is what opens this gate.
 test("a PR whose latest review counts only unverified findings dispatches a finisher once a no-op fix-applier's verdict is ok", (t) => {
-  const { ok, read, refused, put } = fixture(t);
+  const { ok, read, refused, put, rule } = fixture(t);
+  rule(40);
   put("10", `impl-10=PR#40 → PR#40 · review=member:review-pr-40 reviewed=${GATE_HEAD.slice(0, 7)}:0/2/6:${GATE_RUN}`);
   refused(["dispatch", "40", "finisher-pr-40"], /dispositions unchecked/);
   ok("dispatch", "40", "fix-pr-40");
@@ -1081,7 +1105,8 @@ test("a PR whose latest review counts only unverified findings dispatches a fini
 });
 
 test("the current verdict is the highest-suffixed fix-applier's, in either text order", (t) => {
-  const { ok, read, refused, put } = fixture(t);
+  const { ok, read, refused, put, rule } = fixture(t);
+  rule(40);
   const a = `dispositions-mismatch=fix-pr-40:${GATE_RUN}`;
   const b = `dispositions-ok=fix-pr-40-b:${GATE_RUN}`;
   for (const [i, tokens] of [[a, b], [b, a]].entries()) {
@@ -1099,7 +1124,8 @@ test("the current verdict is the highest-suffixed fix-applier's, in either text 
 });
 
 test("a mismatch is retried by the next fix-applier suffix: ok from it ends the refusal, escalate from it never does", (t) => {
-  const { ok, read, refused, put } = fixture(t);
+  const { ok, read, refused, put, rule } = fixture(t);
+  rule(40);
   put("10", gateRow("1/0/0", `dispositions-mismatch=fix-pr-40:${GATE_RUN}`));
   refused(["dispatch", "40", "finisher-pr-40"], /dispositions mismatch/);
   // The retry is dispatched under the next suffix; the first name is spent.
@@ -1131,7 +1157,8 @@ test("the retry of a dispositions mismatch is dispatched as fleet-fix-applier, t
 });
 
 test("a later fix-applier that writes no verdict neither satisfies nor resets the gate", (t) => {
-  const { ok, refused, put } = fixture(t);
+  const { ok, refused, put, rule } = fixture(t);
+  rule(40); rule(41);
   // A conflict-hold fix-applier after the review one: no review file, no token.
   put("10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`, "conflict-hold:#40", "fix-pr-40-b=no-op"));
   assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
@@ -1143,7 +1170,8 @@ test("a later fix-applier that writes no verdict neither satisfies nor resets th
 // A finisher labels its PR; one known to conflict would be labelled for a merge
 // that cannot happen, or race the fix-applier rebasing it.
 test("a finisher is refused while its PR sits on a conflict hold no fix-applier has cleared, and accepted on the same PR without one", (t) => {
-  const { ok, read, refused, put } = fixture(t);
+  const { ok, read, refused, put, rule } = fixture(t);
+  rule(40);
   const held = "impl-10=PR#40 → PR#40 · conflict-hold:#40 (conflict: mergeable=CONFLICTING)";
   ok("row", "10", held);
   refused(["dispatch", "40", "finisher-pr-40"],
@@ -1178,7 +1206,8 @@ test("a finisher is refused on a dispositions escalate, naming it, and nothing r
 });
 
 test("an escalate is the current verdict only until a higher-suffixed fix-applier's own verdict answers the review, and outranks a mismatch of the same member", (t) => {
-  const { ok, refused, put } = fixture(t);
+  const { ok, refused, put, rule } = fixture(t);
+  rule(40);
   const esc = `dispositions-escalate=fix-pr-40:${GATE_RUN}`;
   const okB = `dispositions-ok=fix-pr-40-b:${GATE_RUN}`;
   for (const [i, tokens] of [[esc, okB], [okB, esc]].entries()) {
@@ -1202,7 +1231,8 @@ test("one fix-applier carrying both verdicts for the same review reads as a mism
 });
 
 test("only a fix-applier's well-formed verdict answers the gate: another family's, a head's, a short run's or a non-verdict's never does", (t) => {
-  const { ok, read, refused, put } = fixture(t);
+  const { ok, read, refused, put, rule } = fixture(t);
+  rule(40);
   const unchecked = /finisher-pr-40: dispositions unchecked/;
   for (const token of [
     `dispositions-ok=finisher-pr-40:${GATE_RUN}`, // a finisher writes no disposition record
@@ -1223,7 +1253,8 @@ test("only a fix-applier's well-formed verdict answers the gate: another family'
 // #2886: a second review at the same head is a second run, and round 1's ok
 // answered round 1's findings only.
 test("a finisher is refused after a same-head re-review whose run no verdict answers, even with round 1's ok on the row", (t) => {
-  const { ok, read, refused, put } = fixture(t);
+  const { ok, read, refused, put, rule } = fixture(t);
+  rule(40); rule(41);
   put("10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`, `review=member:review-pr-40-b reviewed=${GATE_HEAD.slice(0, 7)}:2/0/0:${ROUND2_RUN}`));
   refused(["dispatch", "40", "finisher-pr-40"], new RegExp(`finisher-pr-40: dispositions unchecked — .* latest review, ${ROUND2_RUN} at ${GATE_HEAD.slice(0, 7)};`));
   // Control: before the re-review returned, round 1's ok opened the gate.
@@ -1234,7 +1265,8 @@ test("a finisher is refused after a same-head re-review whose run no verdict ans
 });
 
 test("a finisher is refused while a fix-applier on the PR is live, even with an earlier ok answering an earlier review at the same head", (t) => {
-  const { ok, read, refused, put } = fixture(t);
+  const { ok, read, refused, put, rule } = fixture(t);
+  rule(40); rule(41);
   // A re-review at the same head: fix-pr-40 answered the first round, and
   // fix-pr-40-b, answering the second, is still working.
   put("10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`, `review=member:review-pr-40-b reviewed=${GATE_HEAD.slice(0, 7)}:3/0/2:${ROUND2_RUN}`, "fix-pr-40-b"));
@@ -1247,6 +1279,98 @@ test("a finisher is refused while a fix-applier on the PR is live, even with an 
     "fix-pr-40-b=applied:fedcba9", `dispositions-ok=fix-pr-40-b:${ROUND2_RUN}`));
   assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
   assert.deepEqual(read().dispatched, ["finisher-pr-40"]);
+});
+
+// The ruling gate. An implementer's PR — one a settled `impl-<N>=PR#<M>` token
+// names — gets its finisher only once the main checkout's tier-outcomes.tsv
+// has a row for it, so the ruling is written while the PR's review evidence
+// is still in scratch. Every case runs with no `gh` on PATH: the gate reads
+// the ledger and that file alone.
+const RULED_ROW = `impl-3545=PR#3606 · tier-ok=impl-3545:fleet-implementer-slow-high · reviewed=${GATE_HEAD}:0/0/0:${GATE_RUN}`;
+const UNRULED = /finisher-pr-3606: PR #3606, the implementer PR of ticket #3545, has no ruling — \S+\/docs\/metrics\/tier-outcomes\.tsv has no row for it; rule its review with `~\/\.fleet\/bin\/fleet-run tier-outcomes\.mjs append 3606 --closed-own-ticket yes\|no --minted-false-claim yes\|no --note "<text>"`, then dispatch the finisher again — not dispatching finisher-pr-3606/;
+
+function noGh(f) {
+  rmSync(join(f.bin, "gh"));
+  return f;
+}
+
+test("a finisher for an implementer's PR is refused until the PR has a tier-outcomes row, then recorded, and so is its replacement", (t) => {
+  const f = noGh(fixture(t));
+  f.put("3545", RULED_ROW);
+  // No tier-outcomes file at all is no row.
+  assert.equal(existsSync(f.tierOutcomes), false);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], UNRULED);
+  // A file whose rows rule other PRs only.
+  f.rule(3600, "3540");
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], UNRULED);
+  assert.deepEqual(f.read().dispatched, []);
+
+  f.rule(3606, "3545");
+  const out = f.ok("dispatch", "3606", "finisher-pr-3606");
+  assert.equal(out.agent, "fleet-finisher");
+  assert.equal(out.line, `#3545 ${RULED_ROW} · finisher-pr-3606`);
+  assert.deepEqual(f.read().dispatched, ["finisher-pr-3606"]);
+  f.ok("settle", "finisher-pr-3606", "failed");
+  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606-b").agent, "fleet-finisher");
+  assert.deepEqual(f.read().dispatched, ["finisher-pr-3606=failed", "finisher-pr-3606-b"]);
+});
+
+test("any row for the PR passes, whatever its verdicts, its date or its width", (t) => {
+  const f = noGh(fixture(t));
+  f.put("3545", RULED_ROW);
+  mkdirSync(dirname(f.tierOutcomes), { recursive: true });
+  // A header, then a row of the full width whose verdicts were never ruled.
+  writeFileSync(f.tierOutcomes, "# run_date\tpr\n2026-01-01\t3606\t3545\troutine\t\t\t\t\t\t\t\t\n");
+  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+});
+
+test("a tier-outcomes file that cannot be parsed or read refuses the finisher, naming the file, and is never a pass", (t) => {
+  const f = noGh(fixture(t));
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545");
+  // A row for the PR, behind a row with a tab too many.
+  writeFileSync(f.tierOutcomes, `2026-10-21\t3600\t3540\troutine\tslow-high\tyes\tno\tnote\textra\n${readFileSync(f.tierOutcomes, "utf8")}`);
+  const where = f.tierOutcomes.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const unreadable = new RegExp(`finisher-pr-3606: cannot read the PR's ruling off ${where}: .*malformed row.* — not dispatching finisher-pr-3606`);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], unreadable);
+  // A path that is no file to read.
+  rmSync(f.tierOutcomes);
+  mkdirSync(f.tierOutcomes);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], new RegExp(`finisher-pr-3606: cannot read the PR's ruling off ${where}: EISDIR`));
+  assert.deepEqual(f.read().dispatched, []);
+});
+
+test("a finisher for a PR no settled impl token names is not gated on a ruling", (t) => {
+  const f = noGh(fixture(t));
+  f.put("3631", `review=member:review-pr-3631 · reviewed=${GATE_HEAD}:0/0/0:${GATE_RUN}`);
+  assert.equal(f.ok("dispatch", "3631", "finisher-pr-3631").agent, "fleet-finisher");
+  // A live implementer's arrow is no settled token either.
+  f.ok("row", "3700", "impl-3700 → PR#3701");
+  assert.equal(f.ok("dispatch", "3701", "finisher-pr-3701").agent, "fleet-finisher");
+  assert.deepEqual(f.read().dispatched, ["finisher-pr-3631", "finisher-pr-3701"]);
+  assert.equal(existsSync(f.tierOutcomes), false);
+});
+
+test("a conflict hold and a dispositions refusal are each still the one printed for an unruled implementer PR", (t) => {
+  const f = noGh(fixture(t));
+  f.put("3545", `${RULED_ROW} · conflict-hold:#3606`);
+  // The only line on stderr, so the ruling's refusal is not printed after it.
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /^\nledger: finisher-pr-3606: PR #3606 is on a conflict hold no fix-applier has cleared — [^\n]*\n$/);
+  f.put("3545", `impl-3545=PR#3606 · reviewed=${GATE_HEAD}:1/0/0:${GATE_RUN} · fix-pr-3606=applied:def5678 · dispositions-mismatch=fix-pr-3606:${GATE_RUN}`);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /^\nledger: finisher-pr-3606: dispositions mismatch — [^\n]*\n$/);
+});
+
+test("implementer, fix-applier and merge-bot dispatches are not gated on a ruling", (t) => {
+  const f = noGh(fixture(t));
+  f.put("3545", RULED_ROW);
+  f.ok("dispatch", "3550", "impl-3550");
+  f.ok("settle", "impl-3550", "PR#3610");
+  assert.equal(f.ok("dispatch", "3606", "fix-pr-3606").agent, "fleet-fix-applier");
+  assert.equal(f.ok("dispatch", "3610", "fix-pr-3610").agent, "fleet-fix-applier");
+  // The merge bot reads its queue off gh, so it gets the stub back.
+  writeQueueGh(f.bin);
+  assert.equal(f.ok("dispatch", "merge-bot").member, "merge-bot-1");
+  assert.equal(existsSync(f.tierOutcomes), false);
 });
 
 // ── the rendered brief ───────────────────────────────────────────────────────
@@ -1270,6 +1394,7 @@ function refusedBare(f, args, why) {
 
 test("dispatch refuses a member with no rendered brief, naming the render command for its family, and writes nothing", (t) => {
   const f = fixture(t);
+  f.rule(346);
   f.ok("dispatch", "324", "impl-324");
   f.ok("settle", "impl-324", "PR#346");
   for (const [args, member, role] of [

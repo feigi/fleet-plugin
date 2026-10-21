@@ -281,7 +281,7 @@ test("the wake list carries no relay obligation", () => {
   );
 });
 
-test("the finisher-gate edges gate on a ruling the controller still owes", () => {
+test("the finisher-gate edges gate on a reply the controller still owes", () => {
   // The rule also lives in the narrative finisher section below, but the
   // controller ACTS from these two bullets, and that is the site that produced
   // the failure: a ruling handed over after the finisher was already dispatched
@@ -306,8 +306,8 @@ test("the finisher-gate edges gate on a ruling the controller still owes", () =>
   const noCiEdge = flat(RUN_TEAM.bullet('- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "Gate on the `check` job, **not** on `ci-state --quiet` exit 0", "run-team no-ci edge").text);
   assert.match(
     noCiEdge,
-    /never while you still owe it a ruling/i,
-    "the no-ci edge lost the outstanding-ruling gate — it dispatches off the reviewer's verdict, with the same window open",
+    /never while you still owe it a reply/i,
+    "the no-ci edge lost the outstanding-reply gate — it dispatches off the reviewer's verdict, with the same window open",
   );
 });
 

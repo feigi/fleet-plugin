@@ -28,10 +28,10 @@ Its four duties are a checklist — audit the
 worktree, confirm every deferral has a tracker home and re-run the acceptance
 mutation, apply one release label, report — and the
 merge gate downstream still catches whatever it gets wrong. **Never dispatch
-one while you still owe the fix-applier a ruling**: the pinned SHA is only as good
+one while you still owe the fix-applier a reply**: the pinned SHA is only as good
 as the guarantee nothing else is inbound. **The test is your OUTBOX, not the
 member's last message** — anything you have decided that it has not received,
-including a ruling you have since **withdrawn or reversed**. **That is the test
+including a reply you have since **withdrawn or reversed**. **That is the test
 of THIS condition only**: an empty outbox says nothing is inbound from you, and
 nothing about whether the member considers itself finished, which is what the
 report condition above is for. A withdrawal you
@@ -71,9 +71,9 @@ and will act on it. Relay everything — reversals too — then dispatch.
   anything to, so the outbox is *vacuously* empty, and on a fix-applier's
   mid-work push nothing has been sent since the dispatch, so it is *genuinely*
   empty. **The outbox is the last test, not the only one, and it stands wherever
-  a fix-applier exists** — that is exactly where a ruling you still owe it is
+  a fix-applier exists** — that is exactly where a reply you still owe it is
   outstanding, so never dispatch off it while you do. Empty your outbox to it
-  first — including any ruling you have withdrawn or reversed — then dispatch
+  first — including any reply you have withdrawn or reversed — then dispatch
   (*The fix-applier pushes and exits; the finisher is dispatched fresh*); a final report is not proof it stopped. A PR that needs nothing fixed
   reaches a finisher through the **fix-applier reports `no-op`** bullet below,
   never by waiting for a second CI event this head will never produce. The
@@ -102,12 +102,21 @@ and will act on it. Relay everything — reversals too — then dispatch.
   waiting for it stalls the whole PR — the same silent-stall shape reported
   before this verdict existed. Dispatch the finisher off the reviewer's final
   verdict instead, the moment it lands — and, same as above, never while you still
-  owe it a ruling — or hold anything else it has not received, a ruling you have
+  owe it a reply — or hold anything else it has not received, a reply you have
   withdrawn or reversed included. The finisher's gate is then the
   `--declare-no-ci` declaration, not a `check` job: with it, label off the
   reviewer's verified suite run; **without it, do not label** — report that this
   repo has no CI configured and no declaration, and stop. Absence never reads as
   pass. See `review-and-fix.md` step 6.
+- **The PR's ruling is recorded** → an implementer's PR, one a settled
+  `impl-<N>=PR#<M>` token on the ledger names, gets its finisher only once the
+  main checkout's `docs/metrics/tier-outcomes.tsv` has a row for it, appended
+  when you rule its review (SKILL.md's **Guard: accumulate per PR**).
+  `ledger.mjs dispatch` refuses the finisher until that row exists, after its
+  conflict-hold and dispositions refusals, and prints the `tier-outcomes.mjs
+  append` command to run. Any row for the PR passes, so a replacement finisher
+  is never held once the first passed; a PR no such token names is not gated.
+  No flag skips it: a PR `append` refuses is fixed on the ledger, as at close-out.
 
 Gate on the `check` job, **not** on `ci-state --quiet` exit 0: a behind PR never
 reaches full green, so an exit-0 gate strands it unlabelled. The finisher reads
@@ -138,7 +147,7 @@ no verified suite run on record` and add no label.
 ## An unanswered question from the member is an outbox item
 
 **An unanswered question from the member is an outbox item, and it blocks
-dispatch with the same weight as a ruling you have already made.** It does not
+dispatch with the same weight as a reply you have already decided on.** It does not
 feel like one — you have decided nothing yet, so the outbox reads empty — but a
 member waiting on you is a member that will push once you answer, and the SHA
 you are about to pin is exactly what that push moves. Measured on one run:

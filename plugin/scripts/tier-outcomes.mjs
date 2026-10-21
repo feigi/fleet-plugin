@@ -495,7 +495,8 @@ function closingNumbers(pr) {
 
 // Every settled `impl-<N>=PR#<pr>` token in the run ledger's rows, each with the
 // row that carries it and its ticket N. The dispatched list is not read.
-function implementerClaims(ledger, pr) {
+// Exported for ledger.mjs's finisher dispatch, which gates the same PRs.
+export function implementerClaims(ledger, pr) {
   const claims = [];
   for (const text of ledger?.rows ?? []) {
     const key = text.split(/\s/)[0];

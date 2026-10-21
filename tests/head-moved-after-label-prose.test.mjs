@@ -338,18 +338,18 @@ const FINISHER_REFERENCE = Pin.file(join(REPO, "skills", "run-team", "references
 const outboxQuestion = () =>
   FINISHER_REFERENCE.section("## An unanswered question from the member is an outbox item", "references/finisher.md").text;
 
-test("an unanswered member question blocks finisher dispatch, with the same weight as an owed ruling", () => {
+test("an unanswered member question blocks finisher dispatch, with the same weight as an owed reply", () => {
   assert.match(
     dispatchGate(),
     Pin.phrase(
-      "**An unanswered question from the member is an outbox item, and it blocks dispatch with the same weight as a ruling you have already made.** See references/finisher.md.",
+      "**An unanswered question from the member is an outbox item, and it blocks dispatch with the same weight as a reply you have already decided on.** See references/finisher.md.",
     ),
   );
   const s = outboxQuestion();
   assert.match(
     s,
     Pin.phrase(
-      "An unanswered question from the member is an outbox item, and it blocks dispatch with the same weight as a ruling you have already made",
+      "An unanswered question from the member is an outbox item, and it blocks dispatch with the same weight as a reply you have already decided on",
     ),
   );
   // WHY it does not feel like one is what stops it being read as a restatement

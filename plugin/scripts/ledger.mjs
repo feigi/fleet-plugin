@@ -846,7 +846,7 @@ if (cmd === "read") {
 } else if (cmd === "check") {
   runCheck();
 } else if (cmd === "dispatch") {
-  runDispatch();
+  await runDispatch();
 } else if (cmd === "settle") {
   if (FROM_REPORT) await runSettleFromReport();
   else runSettle();
@@ -1894,6 +1894,36 @@ function dispositionsRefusal(pr, review) {
   return null;
 }
 
+// Why PR `pr`'s finisher waits on its ruling, or null when it does not: the
+// PR is an implementer's — a settled `impl-<N>=PR#<pr>` token on a row names
+// it, the token tier-outcomes.mjs `append` resolves a ticket from — and the
+// main checkout's tier-outcomes.tsv has no row whose `pr` is it. Any row
+// passes, whatever its date or verdicts, so a replacement finisher is never
+// held once the first passed. The ledger lives in the main checkout's
+// `.fleet/` (fleet-dir.mjs), so the file is found beside that directory —
+// no git, no gh. A missing file is no row (`append` creates it); one that
+// cannot be read or parsed refuses, naming it, and is never a pass.
+// tier-outcomes.mjs is imported here, not at the top: its import graph is
+// several modules no other subcommand loads.
+async function rulingRefusal(pr) {
+  const { parseTierOutcomes, implementerClaims } = await import("./tier-outcomes.mjs");
+  const tickets = [...new Set(implementerClaims({ rows: data.rows }, pr).map((c) => c.ticket))];
+  if (tickets.length === 0) return null;
+  const tsv = join(dirname(dirname(resolve(file))), "docs", "metrics", "tier-outcomes.tsv");
+  if (existsSync(tsv)) {
+    let rows;
+    try {
+      rows = parseTierOutcomes(readFileSync(tsv, "utf8"));
+    } catch (e) {
+      return `cannot read the PR's ruling off ${tsv}: ${e.code ?? e.message} — fix the file, then dispatch the finisher again`;
+    }
+    if (rows.some((r) => r.pr === String(pr))) return null;
+  }
+  return `PR #${pr}, the implementer PR of ${tickets.length === 1 ? "ticket" : "tickets"} ${tickets.map((n) => `#${n}`).join(", ")}, has no ruling — `
+    + `${tsv} has no row for it; rule its review with \`~/.fleet/bin/fleet-run tier-outcomes.mjs append ${pr} --closed-own-ticket yes|no `
+    + `--minted-false-claim yes|no --note "<text>"\`, then dispatch the finisher again`;
+}
+
 // The open `ready-to-merge` PRs, ascending, as gh answers from the ledger's
 // own directory with runCheck()'s environment: the queue a merge bot is
 // dispatched against, recorded on its `## Dispatched` entry. Anything but a
@@ -1925,7 +1955,7 @@ function queueSnapshot() {
   return [...new Set(prs)].sort((a, b) => a - b);
 }
 
-function runDispatch() {
+async function runDispatch() {
   const usage = "usage: ledger.mjs dispatch <ticket|pr> <member>, or dispatch merge-bot";
   if (rest.length === 0 || rest.length > 2) die(usage);
   const [key, name] = rest.length === 2 ? rest : [null, rest[0]];
@@ -2047,8 +2077,11 @@ function runDispatch() {
   // run the tick reads — and no fix-applier on the PR is still live. A PR
   // whose latest review counts no survived and no unverified finding had
   // nothing for a fix-applier to rule on, and one never reviewed has no
-  // review file: neither is gated on a verdict. Refused here, before anything
-  // is written, so the check cannot be skipped by forgetting to run it.
+  // review file: neither is gated on a verdict. Then an implementer's PR
+  // waits on its ruling, its tier-outcomes row, written while the PR is open
+  // and its review evidence still in scratch; see rulingRefusal(). Refused
+  // here, before anything is written, so no check can be skipped by
+  // forgetting to run it.
   if (member.family === "finisher-pr") {
     const fold = tickFold("conflict hold and dispositions verdict");
     if (fold.conflictHeld.includes(member.number)) {
@@ -2056,7 +2089,7 @@ function runDispatch() {
         + `and let it settle applied:/no-op, then dispatch the finisher again — not dispatching ${member.name}`);
     }
     const review = fold.reviewed.find((r) => r.pr === member.number);
-    const refusal = dispositionsRefusal(member.number, review);
+    const refusal = dispositionsRefusal(member.number, review) ?? await rulingRefusal(member.number);
     if (refusal !== null) die(`${member.name}: ${refusal} — not dispatching ${member.name}`);
   }
   // Every error caught here carries its own cause and remedy — a row's `tier=`

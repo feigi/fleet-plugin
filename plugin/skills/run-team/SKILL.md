@@ -195,9 +195,9 @@ owes beyond its call:
      once the run is draining with no open PR and no live implementer.
   3. `~/.fleet/bin/fleet-run closeout.mjs finish --reason "<reason>"`, which
      then records `fleet-heartbeat.mjs --stop` last, because every reader takes
-     a recorded stop as the end of the run. A `NEED tier-outcomes append
-     <pr>` is a PR the ledger marks reviewed with no verdict row: append it with
-     the verdict you rule (**Guard: accumulate per PR**) and run `finish` again.
+     a recorded stop as the end of the run. A `NEED tier-outcomes append <pr>`
+     is a reviewed PR with no verdict row — for an implementer's, one that never
+     reached its finisher: append it with the verdict you rule (**Guard: accumulate per PR**) and run `finish` again.
      A PR closing none or several: a row only if an impl token names it.
      A step it fails is explained in references/close-out.md. Exit 0 is the run
      closed.
@@ -280,10 +280,10 @@ digest asks of you:
 **A refutation resting on an injection nothing proved landed is not a refutation — it is a cell that never ran.** See references/reviewers.md.
 
 **Guard: accumulate per PR, never conclude inside one run.** **Append one row to
-`docs/metrics/tier-outcomes.tsv` when you rule each PR's review, with
+`docs/metrics/tier-outcomes.tsv` when you rule each PR's review, before its finisher, with
 `~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note "<text>"`,
 never by hand** (that file's header carries the column meanings). The script
-fills `tier` itself; never type one in. That append is the whole duty. See references/pull.md.
+fills `tier` itself; never type one in. `ledger.mjs dispatch` refuses the finisher until the row exists. That append is the whole duty. See references/pull.md.
 
 **A verdict is a measurement only if it post-dates the run that produced it.** See references/reviewers.md.
 
@@ -520,7 +520,7 @@ Pointers: the `/resume` rules are in `references/phase-0.md`; the tick HOLD tier
 
 ## The finisher gate
 
-Dispatch a finisher only when every test here passes at once — the review returned, the fix-applier's report arrived, your outbox to it is empty and no ruling is owed; hold otherwise, and on a repo with no CI and no declaration report it and add no label.
+Dispatch a finisher only when every test here passes at once — the review returned, the fix-applier's report arrived, your outbox to it is empty, no reply is owed and the PR's ruling is recorded; hold otherwise, and on a repo with no CI and no declaration report it and add no label.
 
 ### The tests
 
@@ -542,8 +542,8 @@ Dispatch a finisher only when every test here passes at once — the review retu
   by name. An empty outbox catches neither — *vacuously* empty on the
   implementer's firing, *genuinely* empty on a mid-work push. **The outbox is
   the last test, not the only one, and it stands wherever a fix-applier
-  exists**, so never dispatch off it while you do owe it a ruling: empty it
-  first — including any ruling you have withdrawn or reversed — then dispatch
+  exists**, so never dispatch off it while you do owe it a reply: empty it
+  first — including any reply you have withdrawn or reversed — then dispatch
   (below); a final report is not proof it stopped. A PR that needs nothing fixed
   reaches a finisher through the **fix-applier reports `no-op`** bullet below,
   never by waiting for a second CI event; a red that fired before the review
@@ -560,7 +560,7 @@ Dispatch a finisher only when every test here passes at once — the review retu
   itself, so nothing further is owed and no further event is coming. Edit either bullet without the other and what strands is exactly the PR that needed no fixes.
 - **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`** → the CI edge never
   fires: dispatch the finisher off the reviewer's final verdict the moment it
-  lands, never while you still owe it a ruling. Its gate is then the
+  lands, never while you still owe it a reply. Its gate is then the
   `--declare-no-ci` declaration, not a `check` job: with it, label off the
   reviewer's verified suite run; **without it, do not label** — report that this
   repo has no CI configured and no declaration, and stop. See `review-and-fix.md` step 6.
@@ -593,9 +593,9 @@ with `dispatch-prompt.mjs render finisher --kind fresh --member finisher-pr-<pr#
 (`--kind repair` once an earlier finisher reported `labelled` without the label landing), record it with
 `ledger.mjs dispatch <pr#> finisher-pr-<pr#>` before the call, then **dispatch
 it with the `agent` that command printed and omit `model` on the call**. **Never dispatch
-one while you still owe the fix-applier a ruling. The test is your OUTBOX, not the
+one while you still owe the fix-applier a reply. The test is your OUTBOX, not the
 member's last message** — anything you have decided that it has not received,
-including a ruling you have since **withdrawn or reversed**, a withdrawal
+including a reply you have since **withdrawn or reversed**, a withdrawal
 recorded only in the ledger included. **That is the test of THIS condition
 only**: the report condition above is the other. Relay everything — reversals
 too — then dispatch. See references/finisher.md.
@@ -642,7 +642,7 @@ merge, and a finisher on it would race the conflict fix-applier rebasing it.
 Dispatch that fix-applier, let it settle `applied:`/`no-op`, then dispatch the
 finisher again.
 
-**An unanswered question from the member is an outbox item, and it blocks dispatch with the same weight as a ruling you have already made.** See references/finisher.md.
+**An unanswered question from the member is an outbox item, and it blocks dispatch with the same weight as a reply you have already decided on.** See references/finisher.md.
 
 **A final report is not proof the member stopped.** **The standing CI facts are
 in the fix-applier body, not in per-event messages.**

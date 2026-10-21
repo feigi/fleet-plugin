@@ -22,8 +22,10 @@
      metrics, commits the three metrics files and opens their PR, sets the
      phase-0 receipt aside as `.fleet/phase0.previous.json`, then records
      `fleet-heartbeat.mjs --stop` last, because every reader takes a recorded
-     stop as the end of the run. A `NEED tier-outcomes append <pr>` is a PR
-     the ledger marks reviewed with no verdict row: append it with the verdict
+     stop as the end of the run. A `NEED tier-outcomes append <pr>` is a
+     reviewed PR with no verdict row — for an implementer's PR, one that never
+     reached its finisher, since `ledger.mjs dispatch` refuses that finisher
+     until the row exists: append it with the verdict
      you rule (**Guard: accumulate per PR**) and run `finish` again. A reviewed
      PR that closes no issue, or several, with no settled `impl-<N>=PR#<pr>`
      token naming it takes no row: the check names it in a `note` line and
