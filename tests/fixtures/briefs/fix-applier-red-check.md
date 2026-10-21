@@ -24,7 +24,8 @@ rebase and re-run. An untracked path no ignore rule covers, still present after
 that commit, is the hook's alone too, since your own new files were staged with
 the rest: never stage it, `git clean -fd -- <that path>` for each such path
 alone, a directory as `recipe-check.mjs` lists it (`dir/`), then rebase and
-re-run. That command deletes only the path it names and never an ignored file.
+re-run. That command never deletes an ignored file. A path the re-run still
+refuses after that clean → push nothing and report that cause.
 
 **`recipe-check.mjs` is how you run `CHECKCMD-7` and `TESTCMD-7`:**
 `~/.fleet/bin/fleet-run recipe-check.mjs --member <your name> --testCmd "TESTCMD-7" --reports /abs/scratch-red/reports`,

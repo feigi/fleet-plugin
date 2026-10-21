@@ -142,8 +142,9 @@ still unstaged after it is the hook's alone: never stage those, `git restore --
 no ignore rule covers, still present after that commit, is the hook's alone too,
 since your own new files were staged with the rest: never stage it, `git clean
 -fd -- <that path>` for each such path alone, a directory as `recipe-check.mjs`
-lists it (`dir/`), then rebase and re-run. That command deletes only the path it
-names and never an ignored file.
+lists it (`dir/`), then rebase and re-run. That command never deletes an
+ignored file. A path the re-run still refuses after that clean → bail with that
+cause.
 
 **In a detached worktree, push by refspec.** `run-team`'s runbook re-creates an
 already-open PR's worktree with `git worktree add --detach <path> origin/<branch>`,
