@@ -17,7 +17,7 @@ import { reportFamily, reportStatus, defaultScratch } from "./report-files.mjs";
 import { FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { BAILS, FIXED_SHA } from "./fleet-event.mjs";
+import { FIXED_SHA } from "./fleet-event.mjs";
 import { parseReport, reportViolation } from "./report-schema.mjs";
 
 export { normalizeModel, parseMemberName };
@@ -129,8 +129,10 @@ export function withReports(rows, scratch) {
 // suffix): blank there means "not an implementer row", not unknown. `unknown`
 // is where the transcript cannot say: a malformed line, no transcript, or a
 // fixed sha origin/main cannot answer. Precedence, first that applies wins:
-//   pr            the row's pr is named, or the last report claims a PR an
-//                 earlier same-ticket implementer opened in this session;
+//   pr            the row's pr is named, the member's own `gh pr create`
+//                 opened one (more than one leaves the pr column blank), or
+//                 the last report claims a PR an earlier same-ticket
+//                 implementer opened in this session;
 //   bail:<cause>  the last report bails (`fixed` is checked against main);
 //   provider      a model fell back, or the last turn errored;
 //   budget        a budget notice reached the member;
@@ -144,9 +146,11 @@ export function endingOf({ member, pr, signals = null, earlierPrs = new Set(), v
   if (!isImplementer(member)) return "";
   if (pr) return "pr";
   if (!signals || signals.malformedNonLastLines > 0) return "unknown";
-  const last = lastReport(signals.reports, member.split("/").pop());
+  if (signals.openedPrs.length > 0) return "pr";
+  const last = lastReport(signals.reportWrites, member.split("/").pop());
   if (last?.outcome === "pr" && earlierPrs.has(String(last.pr))) return "pr";
-  if (last && last.bailCause !== null && Object.hasOwn(BAILS, last.bailCause)) return bailEnding(last, verifyMain);
+  // lastReport passed the impl schema, whose bailCause is a BAILS key or null.
+  if (last?.bailCause) return bailEnding(last, verifyMain);
   if (signals.providerFallback || signals.lastStopReason === "error") return "provider";
   if (signals.budgetNotice) return "budget";
   if (signals.lastStopReason === "aborted") return "abort";
@@ -169,7 +173,7 @@ function lastReport(reportWrites, leaf) {
 // reaches the sha its detail opens with.
 function bailEnding(report, verifyMain) {
   if (report.bailCause !== "fixed") return `bail:${report.bailCause}`;
-  const m = FIXED_SHA.exec(report.bailDetail ?? "");
+  const m = FIXED_SHA.exec((report.bailDetail ?? "").trim());
   if (!m) return "unknown";
   const status = verifyMain(m[1]);
   if (status === 0) return "bail:fixed";
@@ -179,28 +183,36 @@ function bailEnding(report, verifyMain) {
 
 // Each record's ending. `earlierPrs` is the set of PRs the same-ticket
 // implementers opened before this one started, so a continuation's report can
-// name its predecessor's PR and still read `pr`.
+// name its predecessor's PR and still read `pr`. A record never joins itself:
+// its own start is not before its own start. An `impl-<ticket>` record's `pr`
+// is blank or its one opened PR, so `openedPrs` alone holds every PR it opened.
 function endingsOf(recs, verifyMain) {
   return recs.map((r) => {
     const earlierPrs = new Set();
-    if (r.transcript && r.ticket && isImplementer(r.member)) {
+    if (r.ticket && isImplementer(r.member)) {
       for (const o of recs) {
-        if (o === r || !o.transcript || o.ticket !== r.ticket || !isImplementer(o.member)) continue;
+        if (o.ticket !== r.ticket || !isImplementer(o.member)) continue;
         if (!(o.transcript.startedAt < r.transcript.startedAt)) continue;
-        for (const n of [o.pr, ...o.transcript.openedPrs]) if (n) earlierPrs.add(String(n));
+        for (const n of o.transcript.openedPrs) earlierPrs.add(String(n));
       }
     }
-    return endingOf({ member: r.member, pr: r.pr, signals: r.transcript ?? null, earlierPrs, verifyMain });
+    return endingOf({ member: r.member, pr: r.pr, signals: r.transcript, earlierPrs, verifyMain });
   });
 }
 
 // The verifier the `fixed` bail calls: `verify-sha.sh main <sha>` answers
 // 0 when origin/main reaches the sha, 1 when it does not, and 2 when it could
-// not say (its exit status, or none when the script did not run at all).
+// not say (its exit status, or none when the script did not run at all). A
+// verifier that could not say leaves the bail `unknown`, so its own diagnosis
+// goes to stderr: without it an offline scrape and a broken script both read
+// as a bare `unknown`.
 const VERIFY_SHA = fileURLToPath(new URL("./verify-sha.sh", import.meta.url));
 function verifyMainWithGit(sha) {
   const r = spawnSync("sh", [VERIFY_SHA, "main", sha], { encoding: "utf8" });
-  return r.status ?? 2;
+  if (r.status === 0 || r.status === 1) return r.status;
+  const why = r.error ? r.error.message : (r.stderr ?? "").trim() || `exit ${r.status ?? r.signal}`;
+  process.stderr.write(`${NAME}: verify-sha.sh main ${sha} could not answer, so its fixed bail reads unknown: ${why}\n`);
+  return 2;
 }
 
 // Row objects use camelCase; the file uses snake_case. One map, one direction
@@ -221,9 +233,22 @@ const key = (r) => `${r.session}\0${r.agent}`;
 // Replace-by-key, not append. This is what makes a close-out re-run and a full
 // regeneration both safe, and it is the reason no backfill-only code path is
 // needed: the idempotency backfill wants is the idempotency a re-run wants.
-export function mergeRows(existing, incoming) {
+//
+// One cell is the exception: an incoming `unknown` ending keeps the ending the
+// replaced row recorded. `unknown` is this scrape failing to say (a verifier
+// that is offline, a transcript gone unreadable), not a reading, so it never
+// overwrites one: a recorded `bail:fixed` would otherwise flip to `unknown`
+// on any re-scrape run without network. `stats.endingsKept` counts them.
+export function mergeRows(existing, incoming, stats = {}) {
   const by = new Map((existing ?? []).map((r) => [key(r), r]));
-  for (const r of incoming ?? []) by.set(key(r), r);
+  stats.endingsKept = 0;
+  for (const r of incoming ?? []) {
+    const old = by.get(key(r));
+    if (r.ending === "unknown" && old?.ending && old.ending !== "unknown") {
+      by.set(key(r), { ...r, ending: old.ending });
+      stats.endingsKept++;
+    } else by.set(key(r), r);
+  }
   return [...by.values()].sort((a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0);
 }
 
@@ -355,7 +380,7 @@ if (isCLI(import.meta.url)) {
   }
 
   const stats = {};
-  const merged = mergeRows(existing, withReports(rowsForSession(sessionDir, stats), scratch));
+  const merged = mergeRows(existing, withReports(rowsForSession(sessionDir, stats), scratch), stats);
   // Write-then-rename: writeFileSync truncates before it writes, so an interrupt
   // over the committed corpus left a torn file that the NEXT scrape read, merged
   // and rewrote — losing every other session's rows for good.
@@ -365,8 +390,9 @@ if (isCLI(import.meta.url)) {
   // so a session where every member dropped printed the same reassuring line as
   // a healthy one — 0-of-2 was indistinguishable from full success.
   const torn = stats.torn ? `, ${stats.torn} torn mid-write` : "";
+  const kept = stats.endingsKept ? `, ${stats.endingsKept} read unknown and kept the ending already recorded` : "";
   process.stderr.write(
     `${NAME}: scraped ${stats.seen - stats.dropped} of ${stats.seen} members ` +
-    `(${stats.dropped} dropped${torn}); ${file} now holds ${merged.length} rows\n`,
+    `(${stats.dropped} dropped${torn}${kept}); ${file} now holds ${merged.length} rows\n`,
   );
 }

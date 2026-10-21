@@ -448,27 +448,28 @@ export function foldOmpTranscript(jsonlText, filePath) {
     malformedNonLastLines,
     openedPrs: [...openedPrs],
     startedAt: firstTs,
-    reportWrites: reportWrites.map((r) => ({ file: basename(r.path), content: r.content })),
+    reportWrites,
     lastStopReason, providerFallback, sessionExit, budgetNotice,
   };
 }
 
-// The report files one transcript tool call writes, as { path, content }: the
-// `write` tool's arguments, or each `cat > <path> <<'EOF'` heredoc a `bash`
-// call carries. Only a path under a `reports/` directory counts.
+// The report files one transcript tool call writes, as { file, content } with
+// `file` the written path's basename: the `write` tool's arguments, or each
+// `cat > <path> <<'EOF'` heredoc a `bash` call carries. Only a path under a
+// `reports/` directory counts.
 const HEREDOC_RE = /cat\s*>\s*(\S+)\s*<<\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?[^\n]*\n([\s\S]*?)\n\2[ \t]*(?=\n|$)/g;
 const REPORT_PATH_RE = /\/reports\/[^/\s]+\.json$/;
 function reportWritesOf(c) {
   if (c?.type !== "toolCall") return [];
   const a = c.arguments ?? {};
   if (c.name === "write" && typeof a.path === "string" && typeof a.content === "string") {
-    return REPORT_PATH_RE.test(a.path) ? [{ path: a.path, content: a.content }] : [];
+    return REPORT_PATH_RE.test(a.path) ? [{ file: basename(a.path), content: a.content }] : [];
   }
   if (c.name === "bash" && typeof a.command === "string") {
     const out = [];
     for (const m of a.command.matchAll(HEREDOC_RE)) {
       const path = m[1].replace(/^["']|["']$/g, "");
-      if (REPORT_PATH_RE.test(path)) out.push({ path, content: m[3] });
+      if (REPORT_PATH_RE.test(path)) out.push({ file: basename(path), content: m[3] });
     }
     return out;
   }
@@ -620,7 +621,7 @@ export function ompSessionTranscripts(sessionDir) {
 
 // Walks one omp session directory into records, via the walk above.
 //
-// Deliberately NOT wrapped in a blanket try/catch around readOmpMember: the
+// Deliberately NOT wrapped in a blanket try/catch around foldOmpTranscript: the
 // wrong-shape refusal (assertOmpShaped, inside foldOmpTranscript) must
 // propagate all the way out of readMembers, uncaught. Only the directory
 // listing and the raw file read are given the ordinary per-member tolerance.
@@ -641,7 +642,7 @@ export function readOmpSession(sessionDir) {
     // the fold's end-of-transcript signals, and whether the member wrote its
     // yield sidecar beside the transcript.
     rows.push({ ...rec, session, agent, transcript: {
-      startedAt: folded.startedAt, reports: folded.reportWrites, openedPrs: folded.openedPrs,
+      startedAt: folded.startedAt, reportWrites: folded.reportWrites, openedPrs: folded.openedPrs,
       lastStopReason: folded.lastStopReason, providerFallback: folded.providerFallback,
       sessionExit: folded.sessionExit, budgetNotice: folded.budgetNotice,
       malformedNonLastLines: folded.malformedNonLastLines,
