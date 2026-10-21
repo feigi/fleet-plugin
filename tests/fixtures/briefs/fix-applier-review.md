@@ -50,8 +50,17 @@ verbatim as the one quoted argument. It runs the Recipe's Check step,
 `CHECKCMD-1`, then `TESTCMD-1`, against the staged tree and records both beside
 your report. Run it again after any content change or rebase: the controller
 refuses an `applied` report whose head's tree has no green record, and a
-message-only amend keeps the record valid. Exit 1 is red; exit 75 is no test
-result — no slot was free and nothing ran — so run it again.
+message-only amend keeps the record valid. After the commit, and before you
+push or report, compare `git rev-parse 'HEAD^{tree}'` with the `tree` field of
+your record, `/abs/scratch-fix/reports/<your name>.check.json`. A commit hook that
+rewrote and re-staged files after the record was written makes the two differ;
+when they do, run `recipe-check.mjs` again with the same arguments. Right after
+the commit the index holds the committed tree, so the re-run runs both commands
+on that tree and records it, leaving the head's sha as it is. Equal trees need
+no re-run. The stale-base rule for a hook that rewrites a file the PR does not
+otherwise change still applies, and runs first: `recipe-check.mjs` refuses a
+working tree with unstaged changes. Exit 1 is red; exit 75 is no test result —
+no slot was free and nothing ran — so run it again.
 
 Your report is a file, `/abs/scratch-fix/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape

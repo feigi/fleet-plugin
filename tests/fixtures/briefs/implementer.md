@@ -14,9 +14,15 @@ Before you commit and push, run
 `~/.fleet/bin/fleet-run recipe-check.mjs --member <your name> --testCmd ./agent-test --reports /abs/scratch-impl/reports`
 from the worktree, after `git add`: it runs the Recipe's Check step, then
 `./agent-test`, against the staged tree and records both beside your report.
-Run it again after any content change or rebase. The controller refuses a
-report whose head's tree has no green record, and exit 75 from it is no test
-result — run it again.
+Run it again after any content change or rebase. After the commit, and before
+you push or report, compare `git rev-parse 'HEAD^{tree}'` with the `tree` field
+of your record, `/abs/scratch-impl/reports/<your name>.check.json`. A commit hook that
+rewrote and re-staged files after the record was written makes the two differ;
+when they do, run `recipe-check.mjs` again with the same arguments. Right after
+the commit the index holds the committed tree, so the re-run runs both commands
+on that tree and records it, leaving the head's sha as it is. Equal trees need
+no re-run. The controller refuses a report whose head's tree has no green
+record, and exit 75 from it is no test result — run it again.
 
 Your report is a file, `/abs/scratch-impl/reports/<your name>.json`, `<your name>` the
 `impl-4120[-x]` you were dispatched as, in the shape
