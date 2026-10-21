@@ -455,9 +455,40 @@ test("finish: exits 4 naming each reviewed= PR without a tier-outcomes row, and 
   assert.deepEqual(f.calls("metrics-refresh").length, 1);
 });
 
-// #3611: a reviewed PR that closes no issue (a `Refs`-only step) can take no
-// tier-outcomes row, so it never holds the close-out up.
-test("finish: reviewed= PRs that close no issue need no tier-outcomes row, and the run closes", () => {
+// #3611: a reviewed PR that closes no issue and that no settled impl token names
+// (a `Refs`-only step) takes no tier-outcomes row, so it never holds the close-out up.
+test("finish: reviewed= PRs that close no issue and name no implementer need no tier-outcomes row, and the run closes", () => {
+  const f = fixture();
+  writeFileSync(join(f.repo, METRICS[2]), HEADER + tierRow(20, 10) + "\n");
+  git(f.repo, "commit", "-q", "-am", "a row");
+  git(f.repo, "push", "-q");
+  f.setLedger([REVIEWED[0], "#13 PR#23 · reviewed=abcdef2:1/0/0:run-abcdef2r", REVIEWED[2]]);
+  writeFileSync(join(f.stubs, "gh.json"), '{"closingIssuesReferences":[]}\n');
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(r.out.filter((l) => l.startsWith("NEED ")), []);
+  assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), allOk(FINISH_STEPS));
+  assert.deepEqual(f.ghCalls().filter((l) => l.startsWith("pr view ")).map((l) => l.split(" GH_REPO=")[0]), ["pr view 23 --json closingIssuesReferences", "pr view 30 --json closingIssuesReferences"]);
+});
+
+// #3664: a reviewed PR that closes several issues and that no settled impl token
+// names (a fold-in of review deferrals) takes no row either, and the run closes.
+test("finish: reviewed= PRs that close several issues and name no implementer need no tier-outcomes row, and the run closes", () => {
+  const f = fixture();
+  writeFileSync(join(f.repo, METRICS[2]), HEADER + tierRow(20, 10) + "\n");
+  git(f.repo, "commit", "-q", "-am", "a row");
+  git(f.repo, "push", "-q");
+  f.setLedger([REVIEWED[0], "#13 PR#23 · reviewed=abcdef2:1/0/0:run-abcdef2r", REVIEWED[2]]);
+  writeFileSync(join(f.stubs, "gh.json"), '{"closingIssuesReferences":[{"number":14},{"number":15}]}\n');
+  const r = f.run("finish", ["--reason", "wrap up"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(r.out.filter((l) => l.startsWith("NEED ")), []);
+  assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), allOk(FINISH_STEPS));
+});
+
+// A PR that closes no issue but that a settled impl token names is asked for a row:
+// append takes its ticket from that token.
+test("finish: a reviewed= PR that closes no issue and that a settled impl token names is a NEED", () => {
   const f = fixture();
   writeFileSync(join(f.repo, METRICS[2]), HEADER + tierRow(20, 10) + "\n");
   git(f.repo, "commit", "-q", "-am", "a row");
@@ -465,10 +496,8 @@ test("finish: reviewed= PRs that close no issue need no tier-outcomes row, and t
   f.setLedger(REVIEWED);
   writeFileSync(join(f.stubs, "gh.json"), '{"closingIssuesReferences":[]}\n');
   const r = f.run("finish", ["--reason", "wrap up"]);
-  assert.equal(r.status, 0, r.err + r.stdout);
-  assert.deepEqual(r.out.filter((l) => l.startsWith("NEED ")), []);
-  assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), allOk(FINISH_STEPS));
-  assert.deepEqual(f.ghCalls().filter((l) => l.startsWith("pr view ")).map((l) => l.split(" GH_REPO=")[0]), ["pr view 23 --json closingIssuesReferences", "pr view 30 --json closingIssuesReferences"]);
+  assert.equal(r.status, 4, r.err + r.stdout);
+  assert.deepEqual(r.out.filter((l) => l.startsWith("NEED ")), ["NEED tier-outcomes append 23"]);
 });
 
 test("finish: a tier-outcomes table the check refuses fails the step and prints what it said", () => {

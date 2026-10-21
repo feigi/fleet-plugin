@@ -313,13 +313,195 @@ test("append: a newline or carriage return in a flag value is refused, the same 
   assert.equal(readFileSync(f.tier, "utf8"), before);
 });
 
-test("append: a PR closing no issue is refused, not written with a blank ticket", (t) => {
+// A PR whose closing references are not exactly one takes its ticket from the
+// one settled `impl-<N>=PR#<pr>` token in the run ledger, and from no other row.
+test("append: a PR closing no issue takes its ticket from the settled impl token, with either verdict", (t) => {
+  for (const closed of ["yes", "no"]) {
+    const f = fixture(t, {
+      closes: [],
+      members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+      ledger: {
+        rows: ["#10 impl-10=PR#20 · tier-ok=impl-10:fleet-implementer-alt · reviewed=abcdef1:0/0/0:run-abcdef1r", "#11 PR #20 review: a fold note"],
+        dispatched: ["impl-10=PR#20"],
+      },
+    });
+    const r = f.run("append", "20", "--closed-own-ticket", closed, "--minted-false-claim", "no", "--note", "a note", "--scratch", f.scratch);
+    assert.equal(r.code, 0, r.stderr);
+    const rows = f.dataRows();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0][col("ticket")], "10");
+    assert.equal(rows[0][col("closed_own_ticket")], closed);
+    assert.equal(rows[0][col("tier")], "alt");
+  }
+});
+
+test("append and check --live: several closing references take the settled impl token's ticket and that row's tier", (t) => {
+  const f = fixture(t, {
+    closes: [10, 37],
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer-smol-high" }],
+    ledger: {
+      rows: ["#10 impl-10=PR#20 · tier-ok=impl-10:fleet-implementer-smol-high · reviewed=abcdef1:0/0/0:run-abcdef1r"],
+      dispatched: ["impl-10=PR#20"],
+    },
+  });
+  const before = f.run("check", "--live");
+  assert.equal(before.code, 0, before.stderr);
+  assert.match(before.stderr, /WARNING PR #20 carries reviewed=/);
+  const r = f.append();
+  assert.equal(r.code, 0, r.stderr);
+  const rows = f.dataRows();
+  assert.equal(rows[0][col("ticket")], "10");
+  assert.equal(rows[0][col("tier")], "smol-high");
+  const after = f.run("check", "--live");
+  assert.doesNotMatch(after.stderr, /WARNING PR #20/);
+});
+
+// The token's N decides, not GitHub's order: here it is not the first closing issue.
+test("append: several closing references take the settled impl token's ticket wherever it sits among them", (t) => {
+  const f = fixture(t, {
+    closes: [37, 10],
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+    ledger: { rows: ["#10 impl-10=PR#20 · reviewed=abcdef1:0/0/0:run-abcdef1r"], dispatched: ["impl-10=PR#20"] },
+  });
+  const r = f.append();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(f.dataRows()[0][col("ticket")], "10");
+});
+
+test("check --live and append: several closing references with no settled impl token are noted, and append refuses them", (t) => {
+  const f = fixture(t, {
+    closes: [14, 15, 16],
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+    tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" })],
+    ledger: { rows: ["#31 review=member:review-pr-31 · reviewed=abcdef3:0/1/0:run-abcdef3r"] },
+  });
+  const before = readFileSync(f.tier, "utf8");
+  const c = f.run("check", "--live");
+  assert.equal(c.code, 0, c.stderr);
+  assert.doesNotMatch(c.stderr, /WARNING PR #31/);
+  assert.match(c.stderr, /note PR #31 carries reviewed= on the ledger and closes 3 issues, and no settled impl token names it/);
+  const r = f.append("31");
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /no run-ledger row carries a settled impl-N=PR#31 token/);
+  assert.equal(readFileSync(f.tier, "utf8"), before);
+});
+
+test("check --live and append: a PR closing no issue with no impl token is noted, and append refuses it", (t) => {
+  const f = fixture(t, { closes: [], ledger: { rows: ["#13 PR#23 · reviewed=abcdef2:1/0/0:run-abcdef2r"] } });
+  const c = f.run("check", "--live");
+  assert.equal(c.code, 0, c.stderr);
+  assert.doesNotMatch(c.stderr, /WARNING PR #23/);
+  assert.match(c.stderr, /note PR #23 carries reviewed= on the ledger and closes no issue, and no settled impl token names it/);
+  const r = f.append("23");
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /closes no issue/);
+  assert.equal(f.dataRows().length, 0);
+});
+
+test("check --live and append: a PR closing no issue, with a settled impl token naming it, is warned about and takes that ticket", (t) => {
+  const f = fixture(t, {
+    closes: [],
+    members: [{ member: "impl-13", ticket: 13, type: "fleet-implementer" }],
+    ledger: { rows: ["#13 impl-13=PR#23 · reviewed=abcdef2:1/0/0:run-abcdef2r"], dispatched: ["impl-13=PR#23"] },
+  });
+  const c = f.run("check", "--live");
+  assert.equal(c.code, 0, c.stderr);
+  assert.match(c.stderr, /WARNING PR #23 carries reviewed=/);
+  assert.doesNotMatch(c.stderr, /note PR #23/);
+  const r = f.append("23");
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(f.dataRows()[0][col("ticket")], "13");
+});
+
+test("append: no ledger row carrying a settled impl token for the PR is refused, with zero closing references", (t) => {
+  const f = fixture(t, { closes: [], ledger: { rows: ["#10 impl-10=PR#21 · reviewed=abcdef1:0/0/0:run-abcdef1r"] } });
+  const before = readFileSync(f.tier, "utf8");
+  const r = f.append("20");
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /no run-ledger row carries a settled impl-N=PR#20 token/);
+  assert.equal(readFileSync(f.tier, "utf8"), before);
+});
+
+test("append: a settled impl token naming a longer PR number that starts with this one's is not a claim", (t) => {
+  const f = fixture(t, { closes: [], ledger: { rows: ["#10 impl-10=PR#200 · reviewed=abcdef1:0/0/0:run-abcdef1r"] } });
+  const before = readFileSync(f.tier, "utf8");
+  const r = f.append("20");
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /no run-ledger row carries a settled impl-N=PR#20 token/);
+  assert.equal(readFileSync(f.tier, "utf8"), before);
+});
+
+test("append: two rows with a settled impl token for the PR are refused, naming both rows, with zero or several closing references", (t) => {
+  for (const closes of [[], [10, 11]]) {
+    const f = fixture(t, {
+      closes,
+      ledger: { rows: ["#10 impl-10=PR#20 · reviewed=abcdef1:0/0/0:run-abcdef1r", "#12 impl-12=PR#20 · reviewed=abcdef2:0/0/0:run-abcdef2r"] },
+    });
+    const r = f.append();
+    assert.equal(r.code, 2, r.stderr);
+    assert.match(r.stderr, /#10, #12/);
+    assert.equal(f.dataRows().length, 0);
+  }
+});
+
+test("append: several closing references that do not include the settled impl token's ticket are refused, naming both", (t) => {
+  const f = fixture(t, { closes: [10, 11], ledger: { rows: ["#12 impl-12=PR#20 · reviewed=abcdef2:0/0/0:run-abcdef2r"] } });
+  const r = f.append();
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /#12/);
+  assert.match(r.stderr, /closes 2 issues \(#10, #11\)/);
+  assert.equal(f.dataRows().length, 0);
+});
+
+// A PR that settled impl tokens name but that append still refuses stays a NEED,
+// and its warning carries append's reason, so the close-out is told what to fix.
+test("check --live: a PR whose settled impl tokens append refuses keeps its warning, and says why append refuses it", (t) => {
+  for (const [closes, rows, why] of [
+    [[10, 11], ["#10 impl-10=PR#20 · reviewed=abcdef1:0/0/0:run-abcdef1r", "#12 impl-12=PR#20 · reviewed=abcdef2:0/0/0:run-abcdef2r"], /2 run-ledger rows carry a settled impl-N=PR#20 token \(#10, #12\)/],
+    [[10, 11], ["#12 impl-12=PR#20 · reviewed=abcdef2:0/0/0:run-abcdef2r"], /names #12, which is not among them/],
+  ]) {
+    const f = fixture(t, { closes, ledger: { rows } });
+    const r = f.run("check", "--live");
+    assert.equal(r.code, 0, r.stderr);
+    const warning = r.stderr.split("\n").find((l) => l.includes("WARNING PR #20 carries reviewed="));
+    assert.ok(warning, r.stderr);
+    assert.match(warning, /`tier-outcomes\.mjs append 20` refuses it: PR #20 closes 2 issues \(#10, #11\)/);
+    assert.match(warning, why);
+    assert.doesNotMatch(r.stderr, /note PR #20/);
+  }
+});
+
+test("append: exactly one closing issue is the ticket, whatever the ledger says", (t) => {
+  const f = fixture(t, { closes: [10], ledger: { rows: ["#12 impl-12=PR#20 · reviewed=abcdef2:0/0/0:run-abcdef2r"] } });
+  const r = f.append();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(f.dataRows()[0][col("ticket")], "10");
+});
+
+test("append: a PR closing no issue and no ledger is refused, not written with a blank ticket", (t) => {
   const f = fixture(t, { closes: [] });
   const before = readFileSync(f.tier, "utf8");
   const r = f.append();
   assert.equal(r.code, 2);
   assert.match(r.stderr, /closes no issue/);
   assert.equal(readFileSync(f.tier, "utf8"), before);
+});
+
+// A closing reference with no integer issue number is a read that did not
+// answer: append refuses it rather than taking a ticket from the ledger, and
+// check --live keeps the PR's warning after naming why.
+test("append and check --live: a closing reference with no integer issue number is refused and warned about, whatever the ledger says", (t) => {
+  for (const [closes, shown] of [[[undefined], "undefined"], [[null], "null"], [["10"], '"10"'], [[null, 10], "null"]]) {
+    const f = fixture(t, { closes, ledger: { rows: ["#10 impl-10=PR#20 · reviewed=abcdef1:0/0/0:run-abcdef1r"], dispatched: ["impl-10=PR#20"] } });
+    const r = f.append();
+    assert.equal(r.code, 2, r.stderr);
+    assert.ok(r.stderr.includes(`a closing reference with no issue number (${shown})`), r.stderr);
+    assert.equal(f.dataRows().length, 0);
+    const c = f.run("check", "--live");
+    assert.equal(c.code, 0, c.stderr);
+    assert.match(c.stderr, /could not read the closing references of PR #20: .*no issue number/);
+    assert.match(c.stderr, /WARNING PR #20 carries reviewed=/);
+  }
 });
 
 test("append: --class is refused as an unknown flag before anything is written", (t) => {
@@ -621,9 +803,26 @@ test("check --live: warns on each reviewed PR with no row, and the warning alone
   assert.deepEqual(warned, [23, 30], "a reviewed PR with a row, or an unreviewed one, was warned about");
 });
 
-// A PR that closes no issue can never get a row (append keys on exactly one
-// ticket), so the close-out must not be asked for one.
-test("check --live: a reviewed PR that closes no issue is noted, never warned about", (t) => {
+// A PR that closes no issue, or several, and that no settled impl token names,
+// has no ticket append can key a row on, so the close-out must not be asked for
+// one: it is noted, never warned about.
+test("check --live: a reviewed PR that closes no issue and names no implementer is noted, never warned about", (t) => {
+  const f = fixture(t, {
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+    tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" })],
+    closes: [],
+    ledger: { rows: ["#13 PR#23 · reviewed=abcdef2:1/0/0:run-abcdef2r"] },
+  });
+  const r = f.run("check", "--live");
+  assert.equal(r.code, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /WARNING PR #23/);
+  assert.match(r.stderr, /note PR #23 carries reviewed= on the ledger and closes no issue, and no settled impl token names it/);
+  assert.deepEqual(f.ghCalls(), ["pr view 23 --json closingIssuesReferences"]);
+});
+
+// A settled impl token naming the PR makes it an implementer PR whose ticket
+// append can read, so a PR that closes no issue then keeps its warning.
+test("check --live: a reviewed PR that closes no issue but has a settled impl token keeps its warning", (t) => {
   const f = fixture(t, {
     members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
     tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" })],
@@ -632,13 +831,12 @@ test("check --live: a reviewed PR that closes no issue is noted, never warned ab
   });
   const r = f.run("check", "--live");
   assert.equal(r.code, 0, r.stderr);
-  assert.doesNotMatch(r.stderr, /WARNING PR #23/);
-  assert.match(r.stderr, /note PR #23 carries reviewed= on the ledger and closes no issue/);
-  assert.deepEqual(f.ghCalls(), ["pr view 23 --json closingIssuesReferences"]);
+  assert.match(r.stderr, /WARNING PR #23 carries reviewed=/);
+  assert.doesNotMatch(r.stderr, /note PR #23/);
 });
 
-// The skip is only for a read that answered "no issue": a read that failed says
-// nothing, so the PR keeps its warning, after a line naming why the read failed.
+// The skip is only for a read that answered "no issue" or "several": a read that
+// failed says nothing, so the PR keeps its warning, after a line naming why the read failed.
 test("check --live: a PR whose closing references cannot be read keeps its warning, and says why", (t) => {
   const f = fixture(t, {
     members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
@@ -653,8 +851,8 @@ test("check --live: a PR whose closing references cannot be read keeps its warni
   assert.doesNotMatch(r.stderr, /note PR #23/);
 });
 
-// An answer that is not an array is no "closes no issue" either, whatever its
-// length reads as.
+// An answer that is not an array is no answer of "no issue" or "several" either,
+// whatever its length reads as.
 test("check --live: a closingIssuesReferences that is not an array keeps the warning", (t) => {
   const f = fixture(t, {
     members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
