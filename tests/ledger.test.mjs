@@ -19,6 +19,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { rendering } from "./support/rendered-brief.mjs";
+import { writeQueueGh } from "./support/queue-gh.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 // #155's fix resolves the ledger's own repository with a real `git`
@@ -3682,9 +3683,19 @@ test("LEDGER_LOCK_TIMEOUT_MS cannot lengthen the bound past 10 s, only shorten i
 // ---- token: append to a row, never rewrite it ----
 //
 // Every call is its own process against one ledger file; a refusal is exit 2
-// with the file byte-identical. PATH holds no `gh`: `token` is local only.
-function tokenFixture(t, initial = []) {
+// with the file byte-identical. PATH holds no `gh` unless a test asks for one with
+// `dispatch`: `token` is local only, and only a dispatch reads the tracker.
+function tokenFixture(t, initial = [], { dispatch = false } = {}) {
   const { dir, cli } = cliFixture(t);
+  if (dispatch) {
+    // A finisher dispatch reads the PR's closing references from gh and the
+    // ledger's repository from git, so the fixture supplies both.
+    writeQueueGh(join(dir, "bin"));
+    const gitEnv = { ...process.env };
+    delete gitEnv.GIT_DIR;
+    delete gitEnv.GIT_WORK_TREE;
+    assert.equal(spawnSync("git", ["init", "-q"], { cwd: dir, env: gitEnv }).status, 0);
+  }
   const file = join(dir, "ledger.md");
   writeFileSync(file, `# Fleet run ledger\n\n## Rows\n\n${initial.map((r) => `- ${r}\n`).join("")}\n## Filed\n\n## Ruled\n\n`);
   const call = rendering(dir, (...args) => cli(["--file", file, ...args]));
@@ -3771,7 +3782,7 @@ test("token accepts a label-off= naming a finisher the ledger knows, whether on 
   // `dispatch` puts the finisher on the row as well, so the row would vouch for
   // it; a `row` rewrite that drops the member token leaves ## Dispatched alone
   // knowing it.
-  const d = tokenFixture(t, ["#9 fix-pr-9"]);
+  const d = tokenFixture(t, ["#9 fix-pr-9"], { dispatch: true });
   d.run("dispatch", "9", "finisher-pr-9");
   d.run("row", "9", "fix-pr-9");
   assert.doesNotMatch(d.rows()[0], /finisher-pr-9/, "the fixture's row no longer names the finisher");

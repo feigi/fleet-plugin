@@ -169,7 +169,7 @@ const planStep = () =>
 test("step 2 runs the claim bar first out of scope, then checks every other suggestion with one refuter, in scope or out", () => {
   const s = planStep();
   assert.match(s, Pin.phrase(
-    "a suggestion whose claim is about shape — step 5's worth-a-claim bar, recorded `claimKind: shape` — gets no refuter and goes to the closed `PR #<pr> review: the suggestion band, checked` record, and every other out-of-scope suggestion gets the same refuter an in-scope one does, dispatched the same way, before it is filed.",
+    "a suggestion whose claim is about shape — step 5's worth-a-claim bar, recorded `claimKind: shape` — gets no refuter and goes to the `PR #<pr> review: the suggestion band, checked` record, and every other out-of-scope suggestion gets the same refuter an in-scope one does, dispatched the same way, before it is filed.",
   ));
   assert.match(s, Pin.phrase("In scope → dispatch one refuter against it, biased to refuse"));
 });
@@ -177,7 +177,7 @@ test("step 2 runs the claim bar first out of scope, then checks every other sugg
 test("step 2 files a refuted out-of-scope suggestion on the closed record and any other open needs-triage, and step 4 reports the dispatch count", () => {
   const s = planStep();
   assert.match(s, Pin.phrase(
-    "Refuted → the closed `PR #<pr> review: the suggestion band, checked` record, never an open issue. Survived, or its refuter crashed or abstained → its own open issue labelled `needs-triage`, citing the verdict, or the run that crashed, in the body.",
+    "Refuted → the `PR #<pr> review: the suggestion band, checked` record, never an open issue. Survived, or its refuter crashed or abstained → its own open issue labelled `needs-triage`, citing the verdict, or the run that crashed, in the body.",
   ));
   assert.match(REVIEW_AND_FIX.text, Pin.phrase(
     "your apply/defer adjudication + how many refuters you dispatched against out-of-scope suggestions + the pushed SHA",
@@ -222,7 +222,7 @@ const fixApplierRecord = () =>
 const REFUTED_ENTRY =
   "A `refuted` entry carries `scope`, `claimKind` and `disposition` like every other entry, and a non-empty `reason` holding the evidence that reverses it; a missing or blank `reason` is a mismatch.";
 const VERIFIED_CORRECT =
-  "`disposition` has no `dismiss`: an in-scope `survived` finding verified correct, needing no change, is deferred with `reason` `false-rationale` and filed on the closed suggestion-band record";
+  "`disposition` has no `dismiss`: an in-scope `survived` finding verified correct, needing no change, is deferred with `reason` `false-rationale` and filed on the suggestion-band record";
 
 test("a refuted entry needs scope, claimKind, disposition and a non-empty reason, in the header, step 2 and the fix-applier block", () => {
   for (const [where, slice] of [["header", headerRecord], ["step 2", recordStep], ["fix-applier block", fixApplierRecord]]) {
@@ -234,7 +234,7 @@ test("the header's schema line says a refuted entry requires a non-empty reason"
   assert.match(headerRecord(), Pin.phrase("required, non-empty, on a `refuted` entry"), "the header's reason field annotation no longer says a refuted entry requires a non-empty reason");
 });
 
-test("a finding verified correct is deferred false-rationale onto the closed suggestion-band record, in the header, step 2 and the fix-applier block", () => {
+test("a finding verified correct is deferred false-rationale onto the suggestion-band record, in the header, step 2 and the fix-applier block", () => {
   for (const [where, slice] of [["header", headerDeferRule], ["step 2", recordStep], ["fix-applier block", fixApplierRecord]]) {
     assert.match(slice(), Pin.phrase(VERIFIED_CORRECT), `${where} no longer says how a verified-correct finding is recorded`);
   }

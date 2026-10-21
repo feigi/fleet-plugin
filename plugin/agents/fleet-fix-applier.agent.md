@@ -48,7 +48,7 @@ it.** For each one, first decide scope: is it inside the scope of the PR's own
 ticket, or a different piece of work? **Out of scope → defer and file, never
 apply** — but the claim bar runs first: an out-of-scope suggestion whose
 claim is about shape (`claimKind: shape`) gets no refuter and goes to the
-closed suggestion-band record, and every other one gets the same refuter an
+suggestion-band record, and every other one gets the same refuter an
 in-scope one does, dispatched the same way, before it is filed.
 **In scope → dispatch ONE refuter** against the finding before
 touching the tree, biased to refuse, and hand it the prompt below with one
@@ -152,7 +152,7 @@ refuter you never hear from leaves the finding exactly as unchecked as it
 arrived, so it defers like a refuted one.
 
 **Out of scope, the refuter decides only where the suggestion is filed — it
-defers either way, never applied.** Refuted → the closed suggestion-band
+defers either way, never applied.** Refuted → the suggestion-band
 record, never an open issue. Survived, or its refuter crashed or abstained →
 its own open issue labelled `needs-triage`, citing the verdict, or the run
 that crashed, in the body. There is no cap on these refuters: your
@@ -323,7 +323,7 @@ PR to a human instead of passing. Any
 other reason, none, or a `survived` or `unverified` finding with no entry is
 a mismatch, and the PR gets no finisher. `disposition` has no `dismiss`: an
 in-scope `survived` finding verified correct, needing no change, is deferred
-with `reason` `false-rationale` and filed on the closed suggestion-band
+with `reason` `false-rationale` and filed on the suggestion-band
 record.
 
 Then write your report to the file your brief names,

@@ -195,6 +195,7 @@ test("could not look: a gh that answers something other than JSON is exit 2", ()
 test("could not look: a gh answer lacking a field it was asked for is exit 2, not a failed check", () => {
   const f = fixture();
   f.ok("dispatch", "5", "impl-5");
+  f.pr(6, { closingIssuesReferences: [] });
   f.ok("dispatch", "6", "finisher-pr-6");
   f.ok("dispatch", "merge-bot");
   f.report("impl-5", implReport(f));
@@ -305,6 +306,7 @@ test("fix-pr-M=no-op: a PR with no reviewed= is exit 3", () => {
 
 test("finisher-pr-M=labelled: the label on the PR and in the read-back settles", () => {
   const f = fixture();
+  f.pr(6, { closingIssuesReferences: [] });
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f));
   f.pr(6, { labels: [{ name: "patch" }, { name: "ready-to-merge" }] });
@@ -319,6 +321,7 @@ test("finisher-pr-M=labelled: the label on the PR and in the read-back settles",
 
 test("finisher-pr-M=labelled: a PR without ready-to-merge is exit 3", () => {
   const f = fixture();
+  f.pr(6, { closingIssuesReferences: [] });
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f));
   f.pr(6, { labels: [{ name: "patch" }] });
@@ -327,6 +330,7 @@ test("finisher-pr-M=labelled: a PR without ready-to-merge is exit 3", () => {
 
 test("finisher-pr-M=labelled: a read-back without ready-to-merge is exit 3", () => {
   const f = fixture();
+  f.pr(6, { closingIssuesReferences: [] });
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f, { labelsReadBack: ["patch"] }));
   f.pr(6, { labels: [{ name: "patch" }, { name: "ready-to-merge" }] });
@@ -337,6 +341,7 @@ test("finisher-pr-M=labelled: a read-back without ready-to-merge is exit 3", () 
 
 test("finisher-pr-M=halted:<cause>: a cause and its evidence settle, and unrecorded filings reach ## Filed", () => {
   const f = fixture();
+  f.pr(6, { closingIssuesReferences: [] });
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f, {
     outcome: "halted", cause: "rebase", evidence: "+ abc123 a commit main lacks", labelsReadBack: [],
@@ -351,6 +356,7 @@ test("finisher-pr-M=halted:<cause>: a cause and its evidence settle, and unrecor
 
 test("finisher-pr-M=halted:<cause>: a null cause is exit 3", () => {
   const f = fixture();
+  f.pr(6, { closingIssuesReferences: [] });
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f, { outcome: "halted", cause: null, evidence: "something", labelsReadBack: [] }));
   f.refused("finisher-pr-6", 3, /failed: cause null is in the halted:<cause> vocabulary/);
@@ -358,6 +364,7 @@ test("finisher-pr-M=halted:<cause>: a null cause is exit 3", () => {
 
 test("finisher-pr-M=halted:<cause>: empty evidence is exit 3", () => {
   const f = fixture();
+  f.pr(6, { closingIssuesReferences: [] });
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f, { outcome: "halted", cause: "other", evidence: "  ", labelsReadBack: [] }));
   f.refused("finisher-pr-6", 3, /failed: evidence is not empty/);
@@ -512,6 +519,7 @@ test("an invalid report is exit 2 naming the violation, one family at a time", (
   const f = fixture();
   f.ok("dispatch", "5", "impl-5");
   f.ok("dispatch", "6", "fix-pr-6");
+  f.pr(6, { closingIssuesReferences: [] });
   f.ok("dispatch", "6", "finisher-pr-6");
   f.ok("dispatch", "merge-bot");
   const { sizing: _, ...noSizing } = implReport(f);
@@ -527,12 +535,14 @@ test("an invalid report is exit 2 naming the violation, one family at a time", (
 
 test("an unrecorded filing with no issue number is exit 2 before anything is looked up", () => {
   const f = fixture();
+  f.pr(6, { closingIssuesReferences: [] });
   f.ok("dispatch", "6", "finisher-pr-6");
+  const ghBefore = readFileSync(join(f.root, "gh.log"), "utf8");
   for (const issue of [-3, 0]) {
     f.report("finisher-pr-6", finisherReport(f, { outcome: "halted", cause: "other", evidence: "e", labelsReadBack: [], unrecorded: [{ issue, subject: "neg" }] }));
     f.refused("finisher-pr-6", 2, new RegExp(`\\$\\.unrecorded\\[0\\]\\.issue: ${issue} is below minimum 1; nothing written`));
   }
-  assert.equal(existsSync(join(f.root, "gh.log")), false, "no gh call came first");
+  assert.equal(readFileSync(join(f.root, "gh.log"), "utf8"), ghBefore, "no gh call came after the dispatch");
 });
 
 test("a report that is absent, not JSON, or names another member is exit 2", () => {
@@ -641,6 +651,7 @@ test("a refuted deferral whose disposition record cannot be read is exit 2", () 
 
 test("a failed report settles =failed with no check", () => {
   const f = fixture();
+  f.pr(6, { closingIssuesReferences: [] });
   f.ok("dispatch", "6", "finisher-pr-6");
   f.report("finisher-pr-6", finisherReport(f, { outcome: "failed", labelsReadBack: [] }));
   assert.deepEqual(f.settled("finisher-pr-6"), { member: "finisher-pr-6", outcome: "failed", checks: [], filed: [], ruled: [] });

@@ -5,7 +5,7 @@
 // Every CLI case runs against a real git repository built in a temp dir —
 // `origin/main` a ref, the PR head one commit past it — so the touched lines
 // are git's own answer, not a fixture's restatement of one. The tracker is a
-// `gh` stub first on PATH, answering `issue view` from a JSON file the
+// `gh` stub first on PATH, answering `issue view` and `pr view` from JSON files the
 // fixture writes: no case reaches the network.
 
 import { test } from "node:test";
@@ -24,18 +24,25 @@ import { rendering } from "./support/rendered-brief.mjs";
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/dispositions-check.mjs", import.meta.url));
 const LEDGER = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
-// The `gh` stub: `issue view <n> --json labels,state,title` answered from
-// FAKE_GH_ISSUES, an issue it does not hold answered the way gh answers one
-// that does not exist. FAKE_GH_DOWN answers every call as an unreachable API.
-// FAKE_GH_LOG, when set, gets one line per call: its argv, cwd and GIT_DIR.
+// The `gh` stub: `issue view <n> --json labels,state,title` (or `--json title`)
+// answered from FAKE_GH_ISSUES, an issue it does not hold answered the way gh
+// answers one that does not exist. `pr view <n> --json closingIssuesReferences`
+// answered from FAKE_GH_PRS, a PR it does not hold with no references.
+// FAKE_GH_DOWN answers every call as an unreachable API. FAKE_GH_LOG, when set,
+// gets one line per call: its argv, cwd and GIT_DIR.
 const GH_STUB = `#!${process.execPath}
 const fs = require("node:fs");
 const argv = process.argv.slice(2);
-const { FAKE_GH_ISSUES, FAKE_GH_DOWN, FAKE_GH_LOG } = process.env;
+const { FAKE_GH_ISSUES, FAKE_GH_DOWN, FAKE_GH_LOG, FAKE_GH_PRS } = process.env;
 if (FAKE_GH_LOG) fs.appendFileSync(FAKE_GH_LOG, JSON.stringify({ argv, cwd: process.cwd(), GIT_DIR: process.env.GIT_DIR ?? null }) + "\\n");
 if (FAKE_GH_DOWN) { process.stderr.write("error connecting to api.github.com\\n"); process.exit(1); }
 const [cmd, sub, n, flag, fields] = argv;
-if (argv.length !== 5 || cmd !== "issue" || sub !== "view" || flag !== "--json" || fields !== "labels,state,title") {
+if (argv.length === 5 && cmd === "pr" && sub === "view" && flag === "--json" && fields === "closingIssuesReferences") {
+  const prs = JSON.parse(fs.readFileSync(FAKE_GH_PRS, "utf8"));
+  process.stdout.write(JSON.stringify({ closingIssuesReferences: prs[n]?.closingIssuesReferences ?? [] }));
+  process.exit(0);
+}
+if (argv.length !== 5 || cmd !== "issue" || sub !== "view" || flag !== "--json" || (fields !== "labels,state,title" && fields !== "title")) {
   process.stderr.write("gh stub: unexpected call " + JSON.stringify(argv) + "\\n");
   process.exit(2);
 }
@@ -44,7 +51,7 @@ if (!issue) {
   process.stderr.write("GraphQL: Could not resolve to an issue or pull request with the number of " + n + ". (repository.issue)\\n");
   process.exit(1);
 }
-process.stdout.write(JSON.stringify({ labels: issue.labels.map((name) => ({ name })), state: issue.state, title: issue.title }));
+process.stdout.write(JSON.stringify(fields === "title" ? { title: issue.title } : { labels: issue.labels.map((name) => ({ name })), state: issue.state, title: issue.title }));
 `;
 const openIssue = (label) => ({ state: "OPEN", title: "a deferred finding", labels: [label] });
 const bandRecord = (pr = 40) => ({ state: "CLOSED", title: recordTitle(pr), labels: ["wontfix"] });
@@ -75,6 +82,8 @@ function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "dispositions-check-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const dir = join(root, "run");
+  mkdirSync(dir);
+  git(dir, "init", "-q");
   mkdirSync(join(root, "docs", "metrics"), { recursive: true });
   writeFileSync(join(root, "docs", "metrics", "tier-outcomes.tsv"), "2026-10-21\t40\t10\troutine\tslow-high\tyes\tno\truled\n");
   const repo = join(dir, "repo");
@@ -96,7 +105,12 @@ function fixture(t) {
   const scratch = join(dir, "scratch");
   mkdirSync(scratch);
   const ledger = join(dir, "ledger.md");
-  const ledgerCli = rendering(dir, (...args) => spawnSync(process.execPath, [LEDGER, "--file", ledger, ...args], { encoding: "utf8", env: cleanEnv() }));
+  const bin = join(dir, "bin");
+  const issuesFile = join(dir, "issues.json");
+  const prsFile = join(dir, "prs.json");
+  // The `gh` stub first on PATH, and the tracker files it answers from.
+  const stubEnv = (base) => ({ ...base, PATH: `${bin}:${base.PATH ?? ""}`, FAKE_GH_ISSUES: issuesFile, FAKE_GH_PRS: prsFile });
+  const ledgerCli = rendering(dir, (...args) => spawnSync(process.execPath, [LEDGER, "--file", ledger, ...args], { encoding: "utf8", env: stubEnv(cleanEnv()) }));
   const okLedger = (...args) => {
     const r = ledgerCli(...args);
     assert.equal(r.status, 0, `ledger ${args.join(" ")}: exit ${r.status}\n${r.stderr}`);
@@ -135,20 +149,20 @@ function fixture(t) {
     writeFileSync(recordPath(member), JSON.stringify({ head: recHead, run: recRun, entries }));
 
   // The tracker the `gh` stub answers from, issue number → {state, title, labels}.
-  const bin = join(dir, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "gh"), GH_STUB, { mode: 0o755 });
-  const issuesFile = join(dir, "issues.json");
   // 77 is the base record's row-6b home; 81 the row-1 home a deferred survivor
   // in these cases is filed to.
-  const issues = { 77: openIssue("needs-triage"), 81: openIssue("ready-for-agent") };
+  const issues = { 10: openIssue("ready-for-agent"), 77: openIssue("needs-triage"), 81: openIssue("ready-for-agent") };
+  // PR 40 closes its ticket 10 by default; a test that needs otherwise rewrites this file.
+  writeFileSync(prsFile, JSON.stringify({ 40: { closingIssuesReferences: [{ number: 10 }] } }));
   const setIssues = (more) => {
     Object.assign(issues, more);
     writeFileSync(issuesFile, JSON.stringify(issues));
   };
   setIssues({});
   // Any env, with the stub first on PATH.
-  const env = (base = cleanEnv(), extra = {}) => ({ ...base, PATH: `${bin}:${base.PATH ?? ""}`, FAKE_GH_ISSUES: issuesFile, ...extra });
+  const env = (base = cleanEnv(), extra = {}) => ({ ...stubEnv(base), ...extra });
   // A refuter verdict under the fix-applier's run root, as step 2 writes it;
   // `value` an object written as JSON, or a string written as it stands.
   const writeVerdict = (value, finding = "1", runRoot = join(scratch, "pr40", "fix-Ab12Cd34")) => {

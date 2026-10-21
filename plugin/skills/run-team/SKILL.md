@@ -558,6 +558,7 @@ Dispatch a finisher only when every test here passes at once — the review retu
   bullet and the one above are a pair, and on a clean PR this one carries the
   whole route to a finisher**: a `no-op` report satisfies the gate above by
   itself, so nothing further is owed and no further event is coming. Edit either bullet without the other and what strands is exactly the PR that needed no fixes.
+- **The PR's closing references match its ruling and exclude its own suggestion-band record** → `ledger.mjs dispatch` reads the PR's closing references from `gh pr view <M>` before it dispatches any finisher. When the ruled row says `closed_own_ticket=yes`, each ticket a settled `impl-<N>=PR#<M>` token names must be closed by the body; when it says `no`, none may be, and no reference may be the PR's own suggestion-band record. A refusal names the PR and the ticket; repair the body yourself with `gh pr edit <M> --body-file <file>`, then dispatch the finisher again.
 - **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`** → the CI edge never
   fires: dispatch the finisher off the reviewer's final verdict the moment it
   lands, never while you still owe it a reply. Its gate is then the
@@ -567,18 +568,6 @@ Dispatch a finisher only when every test here passes at once — the review retu
 
 Gate on the `check` job, **not** on `ci-state --quiet` exit 0, which a behind
 PR never reaches; the finisher reads per-job state, without `--quiet`.
-
-**The `--declare-no-ci` declaration is caller-side, and reading it back out of
-the payload verifies nothing.** Check the two facts it stands for instead:
-
-1. `ci-state.mjs` **without** the flag still reads `verdict: "no-ci"`; a merely
-   misconfigured CI exits 2 there.
-2. The reviewer's own final verdict reports a green `testCmd` run on the SHA it
-   pushed.
-
-Both → add the label, and say it rests on the reviewer's suite run, not on CI.
-Either missing → halt here, same as a dirty worktree: report `no CI configured,
-no verified suite run on record` and add no label.
 
 ### The dispatch and its refusals
 
