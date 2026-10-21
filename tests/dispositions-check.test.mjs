@@ -69,8 +69,14 @@ const lines = (n, tag) => Array.from({ length: n }, (_, i) => `${tag} ${i + 1}`)
 // and whose PR head rewrites src/a.js lines 5-6 and appends line 21. Lines
 // 1-4 and 7-20 are untouched; src/b.js is not in the diff at all.
 function fixture(t) {
-  const dir = mkdtempSync(join(tmpdir(), "dispositions-check-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // `dir` sits in `root` as a run's `.fleet/` sits in its main checkout, so
+  // the ledger in `dir` reads `root`'s tier-outcomes file, which holds PR 40's
+  // ruling: every finisher dispatched here turns on its dispositions verdict.
+  const root = mkdtempSync(join(tmpdir(), "dispositions-check-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const dir = join(root, "run");
+  mkdirSync(join(root, "docs", "metrics"), { recursive: true });
+  writeFileSync(join(root, "docs", "metrics", "tier-outcomes.tsv"), "2026-10-21\t40\t10\troutine\tslow-high\tyes\tno\truled\n");
   const repo = join(dir, "repo");
   mkdirSync(join(repo, "src"), { recursive: true });
   git(repo, "init", "-q", "-b", "main");

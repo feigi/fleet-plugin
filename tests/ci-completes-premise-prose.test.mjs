@@ -170,9 +170,9 @@ test("the outbox rule survives, as the last test rather than the only one", () =
   assert.match(
     s,
     Pin.phrase("never dispatch off it while you do"),
-    "the CI-completes edge lost the outstanding-ruling gate itself, not just its premise",
+    "the CI-completes edge lost the outstanding-reply gate itself, not just its premise",
   );
-  assert.match(s, Pin.phrase("including any ruling you have withdrawn or reversed"));
+  assert.match(s, Pin.phrase("including any reply you have withdrawn or reversed"));
   assert.match(s, Pin.phrase("a final report is not proof it stopped"));
 });
 
@@ -248,7 +248,7 @@ test("the narrative dispatch site states the same gate as the bullet", () => {
     Pin.phrase("That is the test of THIS condition only"),
     "the outbox test is unscoped again, so it reads as ruling the member's report out of the gate",
   );
-  assert.match(s, /Never dispatch\s*\n?one while you still owe the fix-applier a ruling/);
+  assert.match(s, /Never dispatch\s*\n?one while you still owe the fix-applier a reply/);
 });
 
 test("the CI-edge slice is one bullet — a drifted end anchor would satisfy the pair test from inside it", () => {

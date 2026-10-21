@@ -76,7 +76,7 @@ for (const sentence of MOVED) {
 }
 
 // Judgement the skill keeps: the finisher gate's outbox test, never dispatch
-// while a ruling is owed, the no-op pair, the no-ci case.
+// while a reply is owed, the no-op pair, the no-ci case.
 for (const kept of [
   "**The outbox is the last test, not the only one, and it stands wherever a fix-applier exists**",
   "so never dispatch off it while you do",

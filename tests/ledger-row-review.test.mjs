@@ -29,8 +29,12 @@ import { rendering } from "./support/rendered-brief.mjs";
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
 function fixture(t, rows = null) {
-  const dir = mkdtempSync(join(tmpdir(), "ledger-row-review-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // The ledger's directory sits in `root`, as `.fleet/` sits in a main
+  // checkout, so a finisher dispatch reads `root`'s tier-outcomes file.
+  const root = mkdtempSync(join(tmpdir(), "ledger-row-review-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const dir = join(root, ".fleet");
+  mkdirSync(dir);
   const file = join(dir, "ledger.md");
   if (rows !== null) {
     writeFileSync(file, `# Fleet run ledger\n\n## Rows\n\n${rows.map((r) => `- ${r}\n`).join("")}\n## Filed\n\n## Ruled\n\n`);
@@ -62,7 +66,12 @@ function fixture(t, rows = null) {
   const review = (pr, ...tokens) => run("review", pr, ...tokens);
   const reviewRefused = (pr, tokens, ...whys) => refusedCall(["review", pr, ...tokens], whys);
   const read = () => JSON.parse(cli("read").stdout);
-  return { run, ok, refused, review, reviewRefused, refusedCall, read, rows: () => read().rows, file };
+  // PR `pr`'s ruling, the row a finisher dispatch for an implementer's PR waits on.
+  const rule = (pr) => {
+    mkdirSync(join(root, "docs", "metrics"), { recursive: true });
+    writeFileSync(join(root, "docs", "metrics", "tier-outcomes.tsv"), `2026-10-21\t${pr}\t1\troutine\tslow-high\tyes\tno\truled\n`);
+  };
+  return { run, ok, refused, review, reviewRefused, refusedCall, read, rows: () => read().rows, file, rule };
 }
 
 const A = "review=member:review-pr-482";
@@ -450,6 +459,7 @@ test("#2288: a fix applied after the review it answers ends fixDue, and a newer 
 
 test("#2288: a finisher halted past-pin after the fix re-queues the review", (t) => {
   const f = fixture(t);
+  f.rule(724);
   reviewedAndFixed(f);
   // The fix-applier's dispositions verdict, as dispositions-check.mjs records it.
   const [row] = f.rows();

@@ -154,7 +154,7 @@ test("End of run runs closeout.mjs begin, the ordinary loop, then closeout.mjs f
   const loop = s.indexOf("until the tick prints `ACTION: run over");
   const finish = s.indexOf("closeout.mjs finish --reason");
   assert.ok(begin !== -1 && begin < loop && loop < finish, `begin at ${begin}, the tick's last line at ${loop}, finish at ${finish}`);
-  assert.match(endOfRun(), Pin.phrase("A `NEED tier-outcomes append <pr>` is a PR the ledger marks reviewed with no verdict row: append it with the verdict you rule (**Guard: accumulate per PR**) and run `finish` again."));
+  assert.match(endOfRun(), Pin.phrase("A `NEED tier-outcomes append <pr>` is a reviewed PR with no verdict row — for an implementer's, one that never reached its finisher: append it with the verdict you rule (**Guard: accumulate per PR**) and run `finish` again."));
   assert.match(endOfRun(), Pin.phrase("A claim it refuses prints `NEED hand-release #<N> <blocker>`"));
   assert.match(endOfRun(), Pin.phrase("so a claim you keep leaves `begin` at exit 4 on every run"));
 });
