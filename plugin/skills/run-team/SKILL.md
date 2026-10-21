@@ -198,9 +198,9 @@ owes beyond its call:
      a recorded stop as the end of the run. A `NEED tier-outcomes append <pr>`
      is a reviewed PR with no verdict row — for an implementer's, one that never
      reached its finisher: append it with the verdict you rule (**Guard: accumulate per PR**) and run `finish` again.
-     A PR closing none or several: a row only if an impl token names it.
-     A step it fails is explained in references/close-out.md. Exit 0 is the run
-     closed.
+     A PR closing none or several: a NEED if a settled `impl-<N>=PR#<pr>` token
+     names it, else a note. A step it fails is explained in
+     references/close-out.md. Exit 0 is the run closed.
   Drain only when a documented trigger fired, and name the trigger in `--reason`.
   **Undrain** only when the maintainer asks, never a drain that budget or
   context exhaustion caused (references/close-out.md).
