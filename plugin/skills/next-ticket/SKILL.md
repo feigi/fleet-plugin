@@ -109,9 +109,26 @@ report; the controller refuses a report whose head's tree has no green record.
 `<your name>` is the `impl-<N>[-x]` you were dispatched as. The record is keyed
 to the tree, so run it after `git add` and before you commit, and again after
 any content change or rebase: a message-only amend keeps it valid, a changed
-tree does not. A non-zero exit is not a pass, and exit 75 is no test result —
-no slot was free and nothing ran, so run it again. A solo session has no report
-to settle against: it runs the Check step and the Test entrypoint themselves.
+tree does not. After the commit, and before you push or report, compare
+`git rev-parse 'HEAD^{tree}'` with the `tree` field of your record,
+`<scratch>/reports/<your name>.check.json`. A commit hook that rewrote and
+re-staged files after the record was written makes the two differ. When they
+do, list the paths it changed,
+`git diff --name-only "$(jq -r .tree <scratch>/reports/<your name>.check.json)" HEAD`.
+If the PR changes every listed path anyway, run `recipe-check.mjs` again with
+the same arguments: right after the commit the index holds the committed tree,
+so the re-run runs both commands on that tree and records it, leaving the
+head's sha as it is. A listed path the PR does not otherwise change is a stale
+base the hook staged rather than left unstaged, and a re-run would record it
+green: `git fetch origin && git rebase origin/main`, take the commit back with
+`git reset --soft HEAD^`, put each such path alone back with
+`git restore --source=HEAD --staged --worktree -- <that path>`, run
+`recipe-check.mjs`, then `git commit -C ORIG_HEAD` and compare again. A hook
+that stages such a path again on the rebased base → bail with that cause.
+Equal trees need no re-run. A non-zero exit is not a pass, and exit 75
+is no test result — no slot was free and nothing ran, so run it again. A solo
+session has no report to settle against: it runs the Check step and the Test
+entrypoint themselves.
 
 **A red Check step is yours to judge.** Read what it reports and fix every
 finding in a file the PR changes, including lines you did not edit — CI checks
