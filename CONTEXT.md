@@ -576,4 +576,4 @@ The controller's verdict on one implementer PR, kept as that PR's row in
 whether it minted a false claim. The Router counts a ticket as merged only
 through its Ruling; a decision on an issue, or a reply owed to a member, is
 not one.
-_Avoid_: verdict, verdict row, tier outcome
+_Avoid_: verdict row, tier outcome
