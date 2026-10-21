@@ -1436,8 +1436,9 @@ for b in $gone_branches; do
     # delete would refuse a branch checked out in a surviving worktree anyway.
     #
     # Ancestor match, not exact equality: a worktree nested inside `$wt`
-    # (a real, documented shape — SKILL.md names a member committing from a
-    # nested worktree) has `$wt` as an ancestor on disk, so removing `$wt`
+    # (a real, documented shape — run-team references/failure-handling.md,
+    # **Verify every reported SHA.**, names a member committing in a nested
+    # worktree) has `$wt` as an ancestor on disk, so removing `$wt`
     # removes the nested one's files too — taking any uncommitted work in it
     # along, the same cwd deletion this guard exists for, one path further
     # out — even though `$wt` itself never equals `$self_wt` in that shape.
