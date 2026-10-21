@@ -161,12 +161,17 @@ test("End of run runs closeout.mjs begin, the ordinary loop, then closeout.mjs f
 
 // `check --live` notes a reviewed PR closing no issue, or several, that no
 // settled `impl-<N>=PR#<pr>` token names, and warns about one that such a token
-// names; closeout.mjs turns only the warning into a NEED. The runbook and the
-// reference say that one rule, and neither may say a bare "impl token", which
-// reads as the live member token.
+// names; closeout.mjs turns only the warning into a NEED. The runbook says that
+// one rule, and so does the reference, in its opening steps and again under
+// "Scrape the member facts and check the tier rows"; none of them may say an
+// "impl token" that no "settled" qualifies, which reads as the live member token.
 test("End of run and references/close-out.md: a PR closing none or several is a NEED only if a settled impl token names it, else a note", () => {
+  const bareImplToken = /(?<!settled\s+)\bimpl[-\s]+tokens?\b/i;
   assert.match(endOfRun(), Pin.phrase("A PR closing none or several: a NEED if a settled `impl-<N>=PR#<pr>` token names it, else a note."));
+  assert.doesNotMatch(endOfRun(), bareImplToken);
   assert.match(CLOSE_OUT, Pin.phrase("with no settled `impl-<N>=PR#<pr>` token naming it takes no row: the check names it in a `note` line and never asks for one. With such a token it is a NEED"));
+  assert.match(CLOSE_OUT, Pin.phrase("and that no settled `impl-<N>=PR#<pr>` token names, is named in a `note` line instead: it takes no row."));
+  assert.doesNotMatch(CLOSE_OUT, bareImplToken);
 });
 
 test("the verdict rules stay in the guard, where the controller rules each PR; the BLANK rule's paragraph is in references/reviewers.md", () => {
