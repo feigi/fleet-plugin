@@ -13,6 +13,10 @@
 //     base, and the member stages every change of its own BEFORE the commit
 //     that runs the hook, so what is still unstaged after it is the hook's
 //     alone and the restore touches nothing of the member's;
+//   - an untracked path no ignore rule covers, still there after that commit,
+//     is the hook's alone the same way (#3698): never staged, removed one path
+//     at a time with `git clean -fd`, never `-x`/`-X`, so every ignored file
+//     survives;
 //   - the Recipe deriver is told the Install step runs with `CI` unset;
 //   - the next-ticket claim step runs the Install step as `env -u CI sh -c`,
 //     and never as a bare or subshell `unset CI`.
@@ -47,6 +51,8 @@ const flatten = (s) =>
 const RULE = "Never `--no-verify` on a commit you push, or on the push itself.";
 const HOOK_REWRITE =
   "A hook that rewrites a file the PR does not otherwise change is the same stale base. Stage every change of your own before the commit that runs the hook, so every change still unstaged after it is the hook's alone: never stage those, `git restore -- <that path>` for each such path alone, then rebase and re-run.";
+const HOOK_UNTRACKED =
+  "An untracked path no ignore rule covers, still present after that commit, is the hook's alone too, since your own new files were staged with the rest: never stage it, `git clean -fd -- <that path>` for each such path alone, a directory as `recipe-check.mjs` lists it (`dir/`), then rebase and re-run. That command deletes only the path it names and never an ignored file.";
 
 const NEXT_TICKET = flatten(read("skills", "next-ticket", "SKILL.md"));
 
@@ -95,6 +101,11 @@ test("the review snapshot's fleet-internal commit still takes --no-verify", () =
 const assertHookRewrite = (p) => {
   assert.match(p, Pin.phrase(HOOK_REWRITE), "the red Check step paragraph lost the hook-rewrite sentence");
   assert.ok(p.indexOf("Stage every change of your own before the commit that runs the hook") < p.indexOf("`git restore -- <that path>`"), "the restore comes before the staging");
+  assert.match(p, Pin.phrase(HOOK_UNTRACKED), "the red Check step paragraph lost the untracked-hook-path clause");
+  assert.ok(p.indexOf("`git restore -- <that path>`") < p.indexOf("`git clean -fd -- <that path>`"), "the untracked clause comes before the unstaged rule it extends");
+  // Reject side: a clean that also takes ignored files (`-x`, `-X`) would
+  // delete what the refusal never named, so no `git clean` here may carry one.
+  assert.doesNotMatch(p, /git clean -[a-zA-Z]*[xX]/, "the red Check step paragraph names a git clean that deletes ignored files");
 };
 
 test("the hook-rewrite sentence is in the next-ticket red-Check paragraph, staging before the restore", () => {

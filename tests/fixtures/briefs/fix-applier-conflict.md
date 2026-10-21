@@ -19,7 +19,11 @@ step only reports. A hook that rewrites a file the PR does not otherwise change
 is the same stale base. Stage every change of your own before the commit that
 runs the hook, so every change still unstaged after it is the hook's alone:
 never stage those, `git restore -- <that path>` for each such path alone, then
-rebase and re-run.
+rebase and re-run. An untracked path no ignore rule covers, still present after
+that commit, is the hook's alone too, since your own new files were staged with
+the rest: never stage it, `git clean -fd -- <that path>` for each such path
+alone, a directory as `recipe-check.mjs` lists it (`dir/`), then rebase and
+re-run. That command deletes only the path it names and never an ignored file.
 
 **`recipe-check.mjs` is how you run `CHECKCMD-2` and `TESTCMD-2`:**
 `~/.fleet/bin/fleet-run recipe-check.mjs --member <your name> --testCmd "TESTCMD-2" --reports /abs/scratch-conflict/reports`,
