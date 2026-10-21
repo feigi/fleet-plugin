@@ -3971,9 +3971,9 @@ test("an unrecognised git rev-parse --show-toplevel failure fails the whole run 
 // worktree" — is the same real shape). `--apply` used to remove the
 // outer worktree, deleting the cwd, taking the nested worktree's uncommitted
 // file with it. `.gitignore` excludes the nested path so the outer worktree's
-// own dirty check (line 649/1004 above) does not see it — mirroring the
-// fleet's real layout, where a linked worktree's home is itself gitignored by
-// the enclosing checkout.
+// own dirty check (reap.sh's `git status --porcelain -uall` gate, in both
+// sweeps) does not see it — mirroring the fleet's real layout, where a linked
+// worktree's home is itself gitignored by the enclosing checkout.
 function ignoreNestedWorktrees(w) {
   writeFileSync(join(w, ".gitignore"), "nested/\n");
   git(w, "add", ".gitignore");
