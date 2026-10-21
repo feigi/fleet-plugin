@@ -463,7 +463,7 @@ supply is one Pull per free slot, so there are no implementer batches. The
 guard this section speaks of is SKILL.md's **Guard: accumulate per PR, never
 conclude inside one run**, under **Reading a review result**.
 
-The script
+`tier-outcomes.mjs append`
 fills `run_date`, `pr`, `ticket` and `tier` itself — `tier` from what actually
 ran, off the implementer's `tier-ok=` ledger verdict or else its one
 member-outcomes row (a `tier-unverifiable=` member has no ledger verdict, so

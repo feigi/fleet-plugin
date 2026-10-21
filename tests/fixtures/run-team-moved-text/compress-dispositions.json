@@ -47,6 +47,14 @@
     [
       "Run it over every claimed ticket with no PR when the run ends or the maintainer drains, and on the spot for a claim abandoned mid-run (a bail before implementing, a collision found after the claim).",
       "| A claim abandoned mid-run (a collision found after the claim) | `~/.fleet/bin/fleet-run release-ticket.sh <N> impl-<N> implementer --apply`, the pair the claim took, on the spot — and over every claimed ticket with no PR when the run ends or the maintainer drains."
+    ],
+    [
+      "The merge bot refuses that head on its own (`run-merge-bot.md`, **The labelled head**), so this is not the only guard — but its refusal costs a pass and leaves the label lying, which is yours to clear either way, the same way: `label-off=` first, then the removal.",
+      "When a push moves the PR off its labelled head, the merge bot refuses the new head on its own (`run-merge-bot.md`, **The labelled head**), so your take-off is not the only guard — but its refusal costs a pass and leaves the label lying, which is yours to clear either way, the same way: `label-off=` first, then the removal."
+    ],
+    [
+      "The script fills `run_date`, `pr`, `ticket` and `tier` itself — `tier` from what actually ran, off the implementer's `tier-ok=` ledger verdict or else its one member-outcomes row (a `tier-unverifiable=` member has no ledger verdict, so its one member-outcomes row decides), and BLANK with a WARNING naming why when neither settles it; never type a tier in over that.",
+      "`tier-outcomes.mjs append` fills `run_date`, `pr`, `ticket` and `tier` itself — `tier` from what actually ran, off the implementer's `tier-ok=` ledger verdict or else its one member-outcomes row (a `tier-unverifiable=` member has no ledger verdict, so its one member-outcomes row decides), and BLANK with a WARNING naming why when neither settles it; never type a tier in over that."
     ]
   ],
   "deleted": [
