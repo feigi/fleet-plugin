@@ -514,7 +514,7 @@ test("the header's `run_date` source claims still hold against the readout, the 
   // otherwise satisfy `assert.match` over MEMBER_SRC as a whole through
   // unrelated text elsewhere.
   const rowsForSessionSrc = MEMBER_SRC.between(
-    "export function rowsForSession(sessionDir, stats = {}) {",
+    "export function rowsForSession(sessionDir, stats = {}, { verifyMain = verifyMainWithGit } = {}) {",
     "export const COLUMNS",
     "member-outcomes.mjs's rowsForSession",
   ).text;

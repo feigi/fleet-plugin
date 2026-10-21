@@ -49,7 +49,7 @@ TOP_JSONL = SESSION_DIR.parent / f"{SESSION_NAME}.jsonl"
 
 COLUMNS = ["session", "run_date", "role", "member", "model", "effort", "ticket", "pr",
            "tokens_cache_create", "tokens_out", "wall_s", "turns", "agent", "harness",
-           "subagent_type", "report", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost"]
+           "subagent_type", "report", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost", "ending"]
 
 
 def parse_ts(s):

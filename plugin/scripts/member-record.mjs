@@ -22,7 +22,7 @@
 // the transcript carried no `session_init` agent to read (no such line, or
 // one without a string `agent`). An untyped `task` dispatch is not that
 // shape: the omp reader records the generic `task` for it.
-import { readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, basename, relative, isAbsolute, sep } from "node:path";
 
 import { classifyRole, canonicalMemberName, CANONICAL_MEMBER_NAME_PREFIXES } from "./compute-spend.mjs";
@@ -361,6 +361,12 @@ export function foldOmpTranscript(jsonlText, filePath) {
   let input = 0, cacheWrite = 0, cacheWrite1h = 0, cacheRead = 0, output = 0, cost = 0, turns = 0;
   let sawCost = false, unsplit = false;
   let malformedNonLastLines = 0;
+  // What the transcript's END says, read for the `ending` column: the last
+  // assistant turn's stopReason, whether a model fell back, whether the
+  // session exited cleanly, whether a budget notice reached the member, and
+  // the report files the member wrote (last write wins, read by the caller).
+  let lastStopReason = null, providerFallback = false, sessionExit = false, budgetNotice = false;
+  const reportWrites = [];
   const entries = [];
   const createCallIds = new Set();
   const openedPrs = new Set();
@@ -379,6 +385,8 @@ export function foldOmpTranscript(jsonlText, filePath) {
     assertOmpShaped(d, filePath);
     if (typeof d.timestamp === "string") { firstTs ??= d.timestamp; lastTs = d.timestamp; }
     if (d.type === "thinking_level_change" && typeof d.thinkingLevel === "string") thinking = d.thinkingLevel;
+    if (d.type === "model_change" && d.resolvedModelIsFallback === true) providerFallback = true;
+    if (d.type === "custom" && d.customType === "session_exit") sessionExit = true;
     if (d.type === "session_init") {
       if (typeof d.task === "string") task = d.task;
       if (typeof d.resolvedModelIdentity === "string") resolvedModelIdentity = d.resolvedModelIdentity;
@@ -388,9 +396,11 @@ export function foldOmpTranscript(jsonlText, filePath) {
     const m = d.message;
     if (d.type === "message" && m?.role === "assistant") {
       const blocks = Array.isArray(m.content) ? m.content : [];
+      lastStopReason = typeof m.stopReason === "string" ? m.stopReason : null;
       for (const c of blocks) {
         if (c?.type === "toolCall" && c.name === "bash" && typeof c.arguments?.command === "string"
           && GH_PR_CREATE_RE.test(c.arguments.command)) createCallIds.add(c.id);
+        reportWrites.push(...reportWritesOf(c));
       }
       if (m.usage) {
         const u = m.usage;
@@ -419,6 +429,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
         for (const n of createdPrNumbers(text)) openedPrs.add(n);
       }
     }
+    if (d.type === "message" && m?.role === "user" && messageText(m).trimStart().startsWith("[budget notice]")) budgetNotice = true;
   }
   const span = firstTs && lastTs ? (Date.parse(lastTs) - Date.parse(firstTs)) / 1000 : 0;
   return {
@@ -436,7 +447,39 @@ export function foldOmpTranscript(jsonlText, filePath) {
     entries,
     malformedNonLastLines,
     openedPrs: [...openedPrs],
+    startedAt: firstTs,
+    reportWrites: reportWrites.map((r) => ({ file: basename(r.path), content: r.content })),
+    lastStopReason, providerFallback, sessionExit, budgetNotice,
   };
+}
+
+// The report files one transcript tool call writes, as { path, content }: the
+// `write` tool's arguments, or each `cat > <path> <<'EOF'` heredoc a `bash`
+// call carries. Only a path under a `reports/` directory counts.
+const HEREDOC_RE = /cat\s*>\s*(\S+)\s*<<\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?[^\n]*\n([\s\S]*?)\n\2[ \t]*(?=\n|$)/g;
+const REPORT_PATH_RE = /\/reports\/[^/\s]+\.json$/;
+function reportWritesOf(c) {
+  if (c?.type !== "toolCall") return [];
+  const a = c.arguments ?? {};
+  if (c.name === "write" && typeof a.path === "string" && typeof a.content === "string") {
+    return REPORT_PATH_RE.test(a.path) ? [{ path: a.path, content: a.content }] : [];
+  }
+  if (c.name === "bash" && typeof a.command === "string") {
+    const out = [];
+    for (const m of a.command.matchAll(HEREDOC_RE)) {
+      const path = m[1].replace(/^["']|["']$/g, "");
+      if (REPORT_PATH_RE.test(path)) out.push({ path, content: m[3] });
+    }
+    return out;
+  }
+  return [];
+}
+
+// The text a transcript message carries: a bare string, or its text blocks.
+function messageText(m) {
+  if (typeof m?.content === "string") return m.content;
+  if (!Array.isArray(m?.content)) return "";
+  return m.content.map((b) => (b?.type === "text" && typeof b.text === "string" ? b.text : "")).join("\n");
 }
 
 // One member record from one omp transcript's fold. `member` is the AgentId
@@ -591,9 +634,19 @@ export function readOmpSession(sessionDir) {
     let text;
     try { text = readFileSync(file, "utf8"); }
     catch { continue; }
-    const rec = readOmpMember(text, file, agent, spawnDepth); // may throw — see comment above
+    const folded = foldOmpTranscript(text, file); // may throw — see comment above
+    const rec = ompMemberRecord(folded, agent, spawnDepth);
     if (!rec) continue;
-    rows.push({ ...rec, session, agent });
+    // How the transcript ENDED, for the `ending` column (member-outcomes.mjs):
+    // the fold's end-of-transcript signals, and whether the member wrote its
+    // yield sidecar beside the transcript.
+    rows.push({ ...rec, session, agent, transcript: {
+      startedAt: folded.startedAt, reports: folded.reportWrites, openedPrs: folded.openedPrs,
+      lastStopReason: folded.lastStopReason, providerFallback: folded.providerFallback,
+      sessionExit: folded.sessionExit, budgetNotice: folded.budgetNotice,
+      malformedNonLastLines: folded.malformedNonLastLines,
+      hasYield: existsSync(file.replace(/\.jsonl$/, ".md")),
+    } });
   }
   return rows;
 }

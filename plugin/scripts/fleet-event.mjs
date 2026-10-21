@@ -237,7 +237,7 @@ export const BAILS = {
   fixed: { kind: "fixed", flag: "detail" },
 };
 // The commit a `fixed` bail's detail opens with.
-const FIXED_SHA = /^([0-9a-f]{7,40})(?![0-9A-Za-z])/;
+export const FIXED_SHA = /^([0-9a-f]{7,40})(?![0-9A-Za-z])/;
 // The causes a `hands` detail opens with — the Pull's answer grammar — and the
 // words each puts in the comment.
 const HANDS = { "external access": "external access", "manual testing": "manual testing", judgment: "judgment during the work" };

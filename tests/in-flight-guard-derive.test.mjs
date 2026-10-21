@@ -359,7 +359,7 @@ process.exit(1);
 }
 
 const MEMBER_HEADER = "# synthetic member-outcomes\n";
-const tsvRow = (r) => [r.session, "2026-10-01", r.role, r.member, "m", "high", r.ticket ?? "", r.pr ?? "", r.cache, "0", "0", "0", r.agent, "omp", "", "-", "", "", "", "1"].join("\t");
+const tsvRow = (r) => [r.session, "2026-10-01", r.role, r.member, "m", "high", r.ticket ?? "", r.pr ?? "", r.cache, "0", "0", "0", r.agent, "omp", "", "-", "", "", "", "1", ""].join("\t");
 
 /**
  * One synthetic world: PR i (0-based) is created at T0 + i h as #(100+i), merged

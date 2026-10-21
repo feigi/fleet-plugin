@@ -15,6 +15,10 @@ import { join, basename } from "node:path";
 import { readOmpSession, normalizeModel, parseMemberName, isOmpSessionDirName } from "./member-record.mjs";
 import { reportFamily, reportStatus, defaultScratch } from "./report-files.mjs";
 import { FleetDirUnresolvable } from "./fleet-dir.mjs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { BAILS, FIXED_SHA } from "./fleet-event.mjs";
+import { parseReport, reportViolation } from "./report-schema.mjs";
 
 export { normalizeModel, parseMemberName };
 
@@ -61,7 +65,7 @@ export { normalizeModel, parseMemberName };
 // run_date comes from the newest transcript's mtime rather than a clock
 // read, so a backfill run in December still dates an August session in
 // August.
-export function rowsForSession(sessionDir, stats = {}) {
+export function rowsForSession(sessionDir, stats = {}, { verifyMain = verifyMainWithGit } = {}) {
   let names;
   try { names = readdirSync(sessionDir, { recursive: true }); }
   catch { names = []; }
@@ -76,7 +80,8 @@ export function rowsForSession(sessionDir, stats = {}) {
   stats.torn = 0;
   const session = basename(sessionDir);
   const run_date = newest ? new Date(newest).toISOString().slice(0, 10) : "";
-  return recs.map((r) => ({
+  const endings = endingsOf(recs, verifyMain);
+  return recs.map((r, i) => ({
     session, run_date,
     harness: r.harness, role: r.role, member: r.member, model: r.model,
     effort: r.thinking === "-" ? "" : r.thinking, ticket: r.ticket, pr: r.pr,
@@ -85,6 +90,7 @@ export function rowsForSession(sessionDir, stats = {}) {
     subagentType: r.subagent_type,
     tokensIn: r.tokens_in, tokensCacheRead: r.tokens_cache_read,
     tokensCacheWrite1h: r.tokens_cache_write_1h ?? "", cost: r.cost == null ? "" : Number(r.cost.toFixed(6)),
+    ending: endings[i],
   }));
 }
 
@@ -101,6 +107,7 @@ export const COLUMNS = [
   "session", "run_date", "role", "member", "model", "effort", "ticket", "pr",
   "tokens_cache_create", "tokens_out", "wall_s", "turns", "agent", "harness",
   "subagent_type", "report", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost",
+  "ending",
 ];
 
 // `report`: what reportStatus() says of the row's member under `scratch` — a
@@ -114,6 +121,86 @@ export function withReports(rows, scratch) {
     ...r,
     report: scratch === null && reportFamily(r.member) !== null ? "" : reportStatus(scratch, r.member),
   }));
+}
+
+// The `ending` column: how an implementer's run ENDED, read off its own
+// transcript and the reports it wrote. Blank on every row that is not an
+// implementer (the member's leaf is `impl-<N>`, with an optional retry
+// suffix): blank there means "not an implementer row", not unknown. `unknown`
+// is where the transcript cannot say: a malformed line, no transcript, or a
+// fixed sha origin/main cannot answer. Precedence, first that applies wins:
+//   pr            the row's pr is named, or the last report claims a PR an
+//                 earlier same-ticket implementer opened in this session;
+//   bail:<cause>  the last report bails (`fixed` is checked against main);
+//   provider      a model fell back, or the last turn errored;
+//   budget        a budget notice reached the member;
+//   abort         the last turn was aborted;
+//   crash         the session never exited and wrote no yield sidecar;
+//   hollow        none of the above: the member stopped on its own.
+const IMPLEMENTER_LEAF = /^impl-\d+(?:-[a-z0-9]+)?$/;
+const isImplementer = (member) => IMPLEMENTER_LEAF.test(member.split("/").pop());
+
+export function endingOf({ member, pr, signals = null, earlierPrs = new Set(), verifyMain = verifyMainWithGit }) {
+  if (!isImplementer(member)) return "";
+  if (pr) return "pr";
+  if (!signals || signals.malformedNonLastLines > 0) return "unknown";
+  const last = lastReport(signals.reports, member.split("/").pop());
+  if (last?.outcome === "pr" && earlierPrs.has(String(last.pr))) return "pr";
+  if (last && last.bailCause !== null && Object.hasOwn(BAILS, last.bailCause)) return bailEnding(last, verifyMain);
+  if (signals.providerFallback || signals.lastStopReason === "error") return "provider";
+  if (signals.budgetNotice) return "budget";
+  if (signals.lastStopReason === "aborted") return "abort";
+  if (!signals.sessionExit && !signals.hasYield) return "crash";
+  return "hollow";
+}
+
+// The member's last report, when the last one it wrote is a valid impl report
+// naming this member; null when it wrote none, or the last one is malformed.
+function lastReport(reportWrites, leaf) {
+  const last = reportWrites.filter((r) => r.file === `${leaf}.json`).at(-1);
+  if (!last) return null;
+  const parsed = parseReport(last.content);
+  if ("violation" in parsed) return null;
+  if (reportViolation("impl", parsed.value) !== null) return null;
+  return parsed.value.member === leaf ? parsed.value : null;
+}
+
+// A bail's ending: its cause, except `fixed`, which holds only while origin/main
+// reaches the sha its detail opens with.
+function bailEnding(report, verifyMain) {
+  if (report.bailCause !== "fixed") return `bail:${report.bailCause}`;
+  const m = FIXED_SHA.exec(report.bailDetail ?? "");
+  if (!m) return "unknown";
+  const status = verifyMain(m[1]);
+  if (status === 0) return "bail:fixed";
+  if (status === 1) return "bail:fixed-refuted";
+  return "unknown";
+}
+
+// Each record's ending. `earlierPrs` is the set of PRs the same-ticket
+// implementers opened before this one started, so a continuation's report can
+// name its predecessor's PR and still read `pr`.
+function endingsOf(recs, verifyMain) {
+  return recs.map((r) => {
+    const earlierPrs = new Set();
+    if (r.transcript && r.ticket && isImplementer(r.member)) {
+      for (const o of recs) {
+        if (o === r || !o.transcript || o.ticket !== r.ticket || !isImplementer(o.member)) continue;
+        if (!(o.transcript.startedAt < r.transcript.startedAt)) continue;
+        for (const n of [o.pr, ...o.transcript.openedPrs]) if (n) earlierPrs.add(String(n));
+      }
+    }
+    return endingOf({ member: r.member, pr: r.pr, signals: r.transcript ?? null, earlierPrs, verifyMain });
+  });
+}
+
+// The verifier the `fixed` bail calls: `verify-sha.sh main <sha>` answers
+// 0 when origin/main reaches the sha, 1 when it does not, and 2 when it could
+// not say (its exit status, or none when the script did not run at all).
+const VERIFY_SHA = fileURLToPath(new URL("./verify-sha.sh", import.meta.url));
+function verifyMainWithGit(sha) {
+  const r = spawnSync("sh", [VERIFY_SHA, "main", sha], { encoding: "utf8" });
+  return r.status ?? 2;
 }
 
 // Row objects use camelCase; the file uses snake_case. One map, one direction
