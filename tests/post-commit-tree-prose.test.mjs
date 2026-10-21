@@ -5,16 +5,21 @@
 // the record does not name, so settle refuses a green report. Every surface
 // that tells a member to run `recipe-check.mjs` before the commit therefore
 // also tells it, after the commit and before the push or the report, to
-// compare `HEAD^{tree}` with its record's `tree` and to re-run on a mismatch:
+// compare `HEAD^{tree}` with its record's `tree`, to list the paths the hook
+// changed on a mismatch, and to re-run only when the PR changes every one of
+// them anyway:
 //
 //   - the implementer brief, rendered;
 //   - the fix-applier brief, rendered, for every kind it has;
 //   - the next-ticket skill's open-the-PR step;
 //   - review-and-fix.md's step 3, which the fix-applier runs.
 //
-// The two surfaces that carry the hook-rewrite stale-base rule (the
-// next-ticket skill and the fix-applier brief) also say that rule still
-// applies and runs first; hook-rule-prose.test.mjs pins the rule itself.
+// A listed path the PR does not otherwise change is a stale base the hook
+// staged instead of leaving unstaged: the unstaged-only stale-base rule
+// (hook-rule-prose.test.mjs) never sees it, and a bare re-run would record the
+// unrelated rewrite green and let settle pass it. So every surface also routes
+// that case to a rebase and a re-commit without the path, and none may say the
+// old unconditional "when they do, run recipe-check.mjs again".
 //
 // THE CEILING: presence pins. dispatch-block-golden-prose.test.mjs holds the
 // two briefs whole; the next-ticket skill and review-and-fix.md have no golden
@@ -43,46 +48,53 @@ const flatten = (s) =>
 
 const compare = (scratch) =>
   `After the commit, and before you push or report, compare \`git rev-parse 'HEAD^{tree}'\` with the \`tree\` field of your record, \`${scratch}/reports/<your name>.check.json\`.`;
+const listHook = (scratch) =>
+  `A commit hook that rewrote and re-staged files after the record was written makes the two differ. When they do, list the paths it changed, \`git diff --name-only "$(jq -r .tree ${scratch}/reports/<your name>.check.json)" HEAD\`.`;
 const RERUN =
-  "A commit hook that rewrote and re-staged files after the record was written makes the two differ; when they do, run `recipe-check.mjs` again with the same arguments. Right after the commit the index holds the committed tree, so the re-run runs both commands on that tree and records it, leaving the head's sha as it is. Equal trees need no re-run.";
-const COMPOSE =
-  "The stale-base rule for a hook that rewrites a file the PR does not otherwise change still applies, and runs first: `recipe-check.mjs` refuses a working tree with unstaged changes.";
+  "If the PR changes every listed path anyway, run `recipe-check.mjs` again with the same arguments: right after the commit the index holds the committed tree, so the re-run runs both commands on that tree and records it, leaving the head's sha as it is.";
+const STALE =
+  "A listed path the PR does not otherwise change is a stale base the hook staged rather than left unstaged, and a re-run would record it green: `git fetch origin && git rebase origin/main`, take the commit back with `git reset --soft HEAD^`, put each such path alone back with `git restore --source=HEAD --staged --worktree -- <that path>`, run `recipe-check.mjs`, then `git commit -C ORIG_HEAD` and compare again.";
+const AGAIN = "A hook that stages such a path again on the rebased base →";
+const UNCONDITIONAL = /when they do, run `recipe-check\.mjs` again/;
 const HOOK_REWRITE_HEAD = "A hook that rewrites a file the PR does not otherwise change is the same stale base.";
 
 const assertPostCommit = (text, scratch, what) => {
   const at = text.indexOf(compare(scratch));
   assert.notEqual(at, -1, `${what} does not tell the member to compare HEAD^{tree} with its record's tree after the commit`);
-  assert.match(text, Pin.phrase(RERUN), `${what} lost the re-run-on-mismatch sentence, or its cause, or that the head is unchanged`);
-  assert.ok(text.indexOf(RERUN) > at, `${what} states the re-run before the comparison that triggers it`);
+  const list = text.indexOf(listHook(scratch));
+  assert.ok(list > at, `${what} does not list the paths the hook changed, after the comparison that finds the mismatch`);
+  assert.match(text, Pin.phrase(RERUN), `${what} lost the re-run for a hook that changed only the PR's own paths, or its cause, or that the head is unchanged`);
+  assert.ok(text.indexOf(RERUN) > list, `${what} states the re-run before the listing that gates it`);
+  assert.match(text, Pin.phrase(STALE), `${what} lets a hook-staged path the PR does not otherwise change be re-recorded green`);
+  assert.ok(text.indexOf(AGAIN) > text.indexOf(STALE), `${what} lost what to do when the hook stages that path again on the rebased base`);
+  assert.doesNotMatch(text, UNCONDITIONAL, `${what} still re-runs on any mismatch, whatever the hook staged`);
 };
 
 const scratchOf = (role, kind) => CASES.find((c) => c.role === role && c.kind === kind).args.scratch;
 
-test("the rendered implementer brief compares HEAD^{tree} with the record after the commit and re-runs on a mismatch", () => {
+test("the rendered implementer brief compares HEAD^{tree} with the record after the commit and re-runs only over the PR's own paths", () => {
   assertPostCommit(flatten(renderBrief("implementer")), scratchOf("implementer", null), "the implementer brief");
 });
 
 for (const kind of CASES.filter((c) => c.role === "fix-applier").map((c) => c.kind)) {
-  test(`the rendered fix-applier ${kind} brief compares HEAD^{tree} with the record after the commit, re-runs on a mismatch, and keeps the hook-rewrite rule`, () => {
+  test(`the rendered fix-applier ${kind} brief compares HEAD^{tree} with the record after the commit, re-runs only over the PR's own paths, and keeps the hook-rewrite rule`, () => {
     const brief = flatten(renderBrief("fix-applier", kind));
     assertPostCommit(brief, scratchOf("fix-applier", kind), `the fix-applier ${kind} brief`);
-    assert.match(brief, Pin.phrase(COMPOSE), `the fix-applier ${kind} brief does not say the hook-rewrite stale-base rule still applies first`);
     assert.match(brief, Pin.phrase(HOOK_REWRITE_HEAD), `the fix-applier ${kind} brief lost the hook-rewrite stale-base rule`);
   });
 }
 
 const NEXT_TICKET = flatten(read("skills", "next-ticket", "SKILL.md"));
 
-test("the next-ticket open-the-PR step compares HEAD^{tree} with the record after the commit, re-runs on a mismatch, and keeps the hook-rewrite rule", () => {
+test("the next-ticket open-the-PR step compares HEAD^{tree} with the record after the commit, re-runs only over the PR's own paths, and keeps the hook-rewrite rule", () => {
   const step7 = Pin.of(NEXT_TICKET, "the next-ticket skill").between("## 7. When the sizing-a-ticket path reports done", "## Red flags", "step 7").text;
   assertPostCommit(step7, "<scratch>", "next-ticket step 7");
-  assert.match(step7, Pin.phrase(COMPOSE), "next-ticket step 7 does not say the hook-rewrite stale-base rule still applies first");
   assert.match(step7, Pin.phrase(HOOK_REWRITE_HEAD), "next-ticket step 7 lost the hook-rewrite stale-base rule");
 });
 
 const REVIEW_AND_FIX = flatten(read("commands", "review-and-fix.md"));
 
-test("review-and-fix step 3 compares HEAD^{tree} with the record after the commit and re-runs on a mismatch", () => {
+test("review-and-fix step 3 compares HEAD^{tree} with the record after the commit and re-runs only over the PR's own paths", () => {
   const step3 = Pin.of(REVIEW_AND_FIX, "review-and-fix.md").between("3. Run `checkCmd` and `testCmd`", "4. Under the fleet", "step 3").text;
   assertPostCommit(step3, "<scratch>", "review-and-fix step 3");
 });

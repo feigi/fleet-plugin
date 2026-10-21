@@ -17,12 +17,22 @@ from the worktree, after `git add`: it runs the Recipe's Check step, then
 Run it again after any content change or rebase. After the commit, and before
 you push or report, compare `git rev-parse 'HEAD^{tree}'` with the `tree` field
 of your record, `/abs/scratch-impl/reports/<your name>.check.json`. A commit hook that
-rewrote and re-staged files after the record was written makes the two differ;
-when they do, run `recipe-check.mjs` again with the same arguments. Right after
-the commit the index holds the committed tree, so the re-run runs both commands
-on that tree and records it, leaving the head's sha as it is. Equal trees need
-no re-run. The controller refuses a report whose head's tree has no green
-record, and exit 75 from it is no test result — run it again.
+rewrote and re-staged files after the record was written makes the two differ.
+When they do, list the paths it changed,
+`git diff --name-only "$(jq -r .tree /abs/scratch-impl/reports/<your name>.check.json)" HEAD`.
+If the PR changes every listed path anyway, run `recipe-check.mjs` again with
+the same arguments: right after the commit the index holds the committed tree,
+so the re-run runs both commands on that tree and records it, leaving the
+head's sha as it is. A listed path the PR does not otherwise change is a stale
+base the hook staged rather than left unstaged, and a re-run would record it
+green: `git fetch origin && git rebase origin/main`, take the commit back with
+`git reset --soft HEAD^`, put each such path alone back with
+`git restore --source=HEAD --staged --worktree -- <that path>`, run
+`recipe-check.mjs`, then `git commit -C ORIG_HEAD` and compare again. A hook
+that stages such a path again on the rebased base → push nothing and report
+that cause. Equal trees need no re-run. The controller refuses a report whose
+head's tree has no green record, and exit 75 from it is no test result — run it
+again.
 
 Your report is a file, `/abs/scratch-impl/reports/<your name>.json`, `<your name>` the
 `impl-4120[-x]` you were dispatched as, in the shape
