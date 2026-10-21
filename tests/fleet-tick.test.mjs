@@ -3512,7 +3512,7 @@ const withStep = (name, step) => (r) => ({ ...r, steps: { ...r.steps, [name]: { 
 const CONTROLLER_AT = 1_760_000_000_000;
 // A controller record in the case's own state file, the one the tick reads.
 const controllerRecord = (record = {}) => (repo) => writeFileSync(join(repo, "..", "heartbeat.json"),
-  JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller: { pid: process.pid, lstart: "runner-start", prior: "none", at: CONTROLLER_AT, ...record } }));
+  JSON.stringify({ quiet: 0, digest: "", controller: { pid: process.pid, lstart: "runner-start", prior: "none", at: CONTROLLER_AT, ...record } }));
 const withController = controllerRecord();
 // The process table the tick judges that record against: this runner is the
 // tick's parent, and the table's omp is above it.
@@ -4009,7 +4009,7 @@ test("CLI: with no --state, the tick resolves the run's shared default", (t) => 
 
 // The prior run's liveness - #1597.
 const beat = (ms, interval, stopped = "") =>
-  JSON.stringify({ quiet: 0, elapsed: 0, digest: "", beat: { at: Date.now() - ms, interval, stopped } });
+  JSON.stringify({ quiet: 0, digest: "", beat: { at: Date.now() - ms, interval, stopped } });
 
 test("CLI: a stale prior beat is reported, and reported FIRST, with the stranded claims and the supply", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stall-")));
@@ -4102,7 +4102,7 @@ test("CLI: the streak write carries the heartbeat's mark instead of erasing it, 
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   const mark = { at: Date.now() - 60_000, interval: 300, stopped: "" };
-  writeFileSync(path, JSON.stringify({ quiet: 3, elapsed: 7, digest: "old", beat: mark }));
+  writeFileSync(path, JSON.stringify({ quiet: 3, digest: "old", beat: mark }));
   const r = runCli(["--state", path], IDLE);
   assert.equal(r.status, 0, r.stderr);
   const after = JSON.parse(readFileSync(path, "utf8"));
@@ -4120,7 +4120,7 @@ test("CLI: a deliberate stop is reported with its reason, and a run that never b
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /stopped deliberately — recorded reason: context ceiling reached/);
   assert.doesNotMatch(r.stdout, /without a recorded reason/);
-  writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "" }));
+  writeFileSync(path, JSON.stringify({ quiet: 0, digest: "" }));
   assert.doesNotMatch(runCli(["--state", path], IDLE).stdout, /STALLED/);
 });
 
@@ -4131,7 +4131,7 @@ test("CLI: a busy, fully-staffed fleet is not reported STALLED just because the 
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   writeFileSync(path, JSON.stringify({
-    quiet: 0, elapsed: 0, digest: "",
+    quiet: 0, digest: "",
     beat: { at: Date.now() - 11 * 60_000, interval: 300, stopped: "" },
     ticked: { at: Date.now() - 2 * 60_000 },
   }));
@@ -4175,7 +4175,7 @@ const deadPid = () => spawnBounded(process.execPath, ["-e", ""]).pid;
 // run's last beat (the run's first tick).
 const STALL_AGO = 90 * 60_000;
 const stalledState = (controller) => JSON.stringify({
-  quiet: 0, elapsed: 0, digest: "",
+  quiet: 0, digest: "",
   beat: { at: Date.now() - STALL_AGO, interval: 1200, stopped: "" },
   ...(controller ? { controller } : {}),
 });
@@ -4241,7 +4241,7 @@ test("CLI: the previous run's recorded stop prints once, on this run's first tic
   const path = join(dir, "heartbeat.json");
   const now = Date.now();
   writeFileSync(path, JSON.stringify({
-    quiet: 0, elapsed: 0, digest: "",
+    quiet: 0, digest: "",
     beat: { at: now - 20 * 60 * 60_000, interval: 1200, stopped: "run drained, all PRs merged" },
     controller: { pid: process.pid, lstart: "runner-start", prior: "dead", at: now - 5 * 60 * 60_000 },
     acted: { at: now - 5 * 60_000 },
@@ -4270,7 +4270,7 @@ test("CLI: a tick refused by the gh or the ledger read still records `ticked`, a
     },
   };
   for (const [what, opts] of Object.entries(refusals)) {
-    writeFileSync(path, JSON.stringify({ quiet: 3, elapsed: 0, digest: "old", ticked: { at: 1_000 } }));
+    writeFileSync(path, JSON.stringify({ quiet: 3, digest: "old", ticked: { at: 1_000 } }));
     const before = Date.now();
     const r = runCli(["--state", path], opts);
     assert.equal(r.status, 2, `${what}: ${r.stderr}`);
@@ -4281,7 +4281,7 @@ test("CLI: a tick refused by the gh or the ledger read still records `ticked`, a
     assert.equal(after.digest, "old", what);
   }
   // A usage refusal never reached the state file.
-  const untouched = JSON.stringify({ quiet: 3, elapsed: 0, digest: "old", ticked: { at: 1_000 } });
+  const untouched = JSON.stringify({ quiet: 3, digest: "old", ticked: { at: 1_000 } });
   writeFileSync(path, untouched);
   const r = runCli(["--state", path, "--in-flight", "0"], IDLE);
   assert.equal(r.status, 2, r.stderr);
@@ -4313,7 +4313,7 @@ test("CLI: a tick over a heartbeat file whose controller cannot be judged warns 
   // A parseable file, so the fault is the record and not the JSON: dropping the
   // key on a write would be a lost record that nothing announced.
   for (const controller of [{ pid: "29405", lstart: "x" }, null]) {
-    const junk = JSON.stringify({ quiet: 3, elapsed: 0, digest: "old", ticked: { at: 1_000 }, controller });
+    const junk = JSON.stringify({ quiet: 3, digest: "old", ticked: { at: 1_000 }, controller });
     const label = JSON.stringify(controller);
     writeFileSync(path, junk);
     const refused = runCli(["--state", path], { ...IDLE, env: { PR_FAIL: "1" } });
@@ -4488,7 +4488,7 @@ const rotateWith = (extra, controller, ...after) => (repo) => {
   const ledger = (...args) => spawnBounded(process.execPath, [join(repo, "..", "bin", "ledger.mjs"), "--file", join(fleet, "ledger.md"), ...args], {
     cwd: repo, env: { ...process.env, FLEET_PROC_TABLE: procTable(join(repo, "..")) },
   });
-  writeFileSync(join(fleet, "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", ...extra, controller }));
+  writeFileSync(join(fleet, "heartbeat.json"), JSON.stringify({ quiet: 0, digest: "", ...extra, controller }));
   const r = ledger("rotate");
   assert.equal(r.status, 0, r.stderr);
   for (const args of after) {
@@ -4567,7 +4567,7 @@ const AGED = {
 };
 // The state file the fixture's tick reads, written before it runs: `seen`
 // stamps `agoMin` minutes old, and whatever else the case needs.
-const seedState = (extra) => (repo) => writeFileSync(join(repo, "..", "heartbeat.json"), JSON.stringify({ quiet: 0, elapsed: 0, digest: "", ...extra }));
+const seedState = (extra) => (repo) => writeFileSync(join(repo, "..", "heartbeat.json"), JSON.stringify({ quiet: 0, digest: "", ...extra }));
 const seenAgo = (ages) => ({ seen: Object.fromEntries(Object.entries(ages).map(([name, min]) => [name, Date.now() - min * MIN])) });
 const withoutLiveness = (stdout) => stdout.split("\n").filter((l) => !l.startsWith("CHECK-LIVENESS")).join("\n");
 const stateOf = (r) => JSON.parse(readFileSync(join(r.dir, "heartbeat.json"), "utf8"));
@@ -5824,7 +5824,7 @@ test("CLI: over a degraded heartbeat file the line names only the age checks tha
 });
 
 test("CLI: the not-checked line follows the state file's late re-read, not the top-of-tick one: valid then corrupt prints it, corrupt then valid does not", () => {
-  const valid = JSON.stringify({ quiet: 0, elapsed: 0, digest: "", ...seenAgo({ "impl-12": 10, "fix-pr-5": 10 }) });
+  const valid = JSON.stringify({ quiet: 0, digest: "", ...seenAgo({ "impl-12": 10, "fix-pr-5": 10 }) });
   const agelessOf = (r) => {
     assert.equal(r.status, 0, r.stderr);
     return r.stderr.split("\n").filter((l) => l.endsWith("first-seen ages are unavailable"));

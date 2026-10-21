@@ -1,23 +1,24 @@
 // Tests for the heartbeat — #357, the periodic resync that survives a drained
-// queue. The two pure functions carry the back-off arithmetic; the CLI cases
-// pin the things a reader would otherwise have to trust: that a long interval
-// really does survive being served by several short holds, and that this script
-// cannot clobber fleet-tick's half of the shared state file.
+// queue. interval() carries the back-off arithmetic; the CLI cases pin the
+// things a reader would otherwise have to trust: that a call returns at once,
+// that it never tells the controller to end its turn unless the mark it just
+// took is on disk, and that it cannot clobber fleet-tick's half of the shared
+// state file.
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { interval, heldThisCall } from "../plugin/scripts/fleet-heartbeat.mjs";
-import { HEARTBEAT, KILL_PATTERN, heartbeatLink } from "./support/heartbeat-link.mjs";
+import { interval } from "../plugin/scripts/fleet-heartbeat.mjs";
 
-// Every CLI case below spawns the script through a symlink, never by its own
-// name — see tests/support/heartbeat-link.mjs. Most CLI children live a second
-// or more, which is a wide window for a controller's `pkill -f fleet-heartbeat.mjs`.
-const SCRIPT = heartbeatLink();
+const SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-heartbeat.mjs", import.meta.url));
+
+// What a controller must never be told unless the mark is recorded.
+const END_TURN = /end your turn/;
 
 function run(args, { state } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "fleet-heartbeat-"));
@@ -63,59 +64,49 @@ test("interval: a quiet streak long enough to overflow still clamps, never NaN",
   assert.equal(got, 1200);
 });
 
-test("heldThisCall: serves the remainder of the interval, never more than the hold", () => {
-  assert.equal(heldThisCall({ elapsed: 0, target: 1200, hold: 240 }), 240);
-  assert.equal(heldThisCall({ elapsed: 1080, target: 1200, hold: 240 }), 120);
-  assert.equal(heldThisCall({ elapsed: 0, target: 60, hold: 240 }), 60);
+test("CLI: a plain call returns at once with one line that says to end the turn, and the mark is on disk", () => {
+  // `--base 600` was a blocking call for 240s when this script held; a call
+  // that returns inside the bound below is not holding. The bound alone lets
+  // a hold shorter than itself through, so the script must also carry no
+  // Atomics, the primitive the removed hold blocked in.
+  assert.doesNotMatch(readFileSync(SCRIPT, "utf8"), /\bAtomics\b/, "the heartbeat blocks in nothing");
+  const started = Date.now();
+  const r = run(["--base", "600", "--ceiling", "1200"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(Date.now() - started < 5_000, "a plain call must not block");
+  assert.equal(r.stdout.trim().split("\n").length, 1, "one line, never zero and never two");
+  assert.match(r.stdout, /heartbeat: beat marked, alarm due in 600s \(quiet=0\) → end your turn/);
+  assert.deepEqual(Object.keys(r.state.beat).sort(), ["at", "interval", "stopped"]);
+  assert.equal(r.state.beat.interval, 600);
+  assert.equal(r.state.beat.stopped, "");
+  assert.equal(typeof r.state.beat.at, "number");
 });
 
-test("heldThisCall: an elapsed total past the target holds zero, not a negative", () => {
-  // Reachable without a bug: lower --ceiling between two holds (or let a
-  // quiet-streak reset shorten the target) and the persisted elapsed can exceed
-  // it. A negative would reach Atomics.wait as a negative timeout.
-  assert.equal(heldThisCall({ elapsed: 500, target: 300, hold: 240 }), 0);
-});
-
-test("CLI: a long interval survives being served by several short holds", () => {
-  // The invariant that makes a 20-minute ceiling work at all, since neither
-  // harness lets one command block that long. First call holds and reports the
-  // remainder; the second completes the interval and resets.
-  const first = run(["--base", "2", "--ceiling", "8", "--hold", "1"]);
-  assert.equal(first.status, 0);
-  assert.match(first.stdout, /1s of 2s remain/);
-  assert.match(first.stdout, /do not end your turn/);
-  assert.equal(first.state.elapsed, 1);
-
-  const second = run(["--base", "2", "--ceiling", "8", "--hold", "1"],
-    { state: JSON.stringify({ elapsed: 1 }) });
-  assert.equal(second.status, 0);
-  assert.match(second.stdout, /interval elapsed/);
-  assert.match(second.stdout, /→ run fleet-event\.mjs heartbeat$/m, "the elapsed line names the one command that ticks");
-  assert.doesNotMatch(second.stdout, /run fleet-tick/);
-  // Reset on fire, so the next interval starts from zero rather than from a
-  // total already spent.
-  assert.equal(second.state.elapsed, 0);
+test("CLI: --hold is an unknown flag and refuses like any other", () => {
+  const r = run(["--hold", "1"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /Unknown option '--hold'/);
+  assert.match(r.stderr, /accepted: --base, --ceiling, --multiplier, --stop, --state/);
+  assert.equal(r.state, null, "a refused call writes nothing at all");
 });
 
 test("CLI: the quiet streak it reads comes from fleet-tick and lengthens the interval", () => {
-  const r = run(["--base", "2", "--ceiling", "64", "--hold", "1"],
-    { state: JSON.stringify({ quiet: 4, elapsed: 0 }) });
+  const r = run(["--base", "2", "--ceiling", "64"], { state: JSON.stringify({ quiet: 4 }) });
   assert.equal(r.status, 0);
   // 2 * 2**4 = 32, under the ceiling.
-  assert.match(r.stdout, /31s of 32s remain \(quiet=4\)/);
+  assert.match(r.stdout, /alarm due in 32s \(quiet=4\) → end your turn/);
+  assert.equal(r.state.beat.interval, 32);
 });
 
-test("CLI: writing elapsed preserves fleet-tick's keys", () => {
+test("CLI: writing the mark preserves fleet-tick's keys", () => {
   // Key ownership is what lets two scripts share one file without a lock. A
   // whole-object rewrite here would drop `digest`, which reads as "the output
   // changed" on the next tick and silently un-folds a quiet night — the
   // cheap-per-wake half of the design, lost with nothing printed about it.
-  const r = run(["--base", "9", "--hold", "1"],
-    { state: JSON.stringify({ quiet: 3, elapsed: 0, digest: "abc123" }) });
+  const r = run(["--base", "9"], { state: JSON.stringify({ quiet: 3, digest: "abc123" }) });
   assert.equal(r.status, 0);
   assert.equal(r.state.digest, "abc123");
   assert.equal(r.state.quiet, 3);
-  assert.equal(r.state.elapsed, 1);
 });
 
 test("CLI: a ceiling below the base refuses rather than silently clamping", () => {
@@ -128,47 +119,62 @@ test("CLI: a ceiling below the base refuses rather than silently clamping", () =
 
 test("CLI: an empty flag value refuses — it is not a zero", () => {
   // `--base ""` is the shape an unset shell variable produces, and Number("")
-  // is 0: read as a real zero it turns the hold into a no-op that still prints
-  // a working-looking heartbeat line.
+  // is 0: read as a real zero it turns the interval into a no-op that still
+  // prints a working-looking heartbeat line.
   const r = run(["--base", ""]);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--base must be a non-negative integer/);
 });
 
-test("CLI: a corrupt state file beats at the base interval and says so", () => {
-  // Fail-open, deliberately, and in the safe direction: dying here would stop
-  // the heartbeat, and a stopped heartbeat is the defect. More frequent level
-  // checks are the harmless error.
-  const r = run(["--base", "1", "--hold", "1"], { state: "not json" });
+test("CLI: a corrupt state file is announced, left as it is, and no alarm is armed", () => {
+  // Never `→ end your turn` here: the file holds no readable `beat`, so the
+  // alarm's gate never passes, and that line would send the controller idle
+  // into a session nothing will wake. Exit 0 all the same, like the stop path.
+  const r = run(["--base", "1"], { state: "not json" });
   assert.equal(r.status, 0);
   assert.match(r.stderr, /WARNING .* is not JSON/);
-  assert.match(r.stdout, /interval elapsed/);
+  assert.match(r.stdout, /beat NOT marked .*degraded.*no alarm is armed/);
+  assert.doesNotMatch(r.stdout, END_TURN);
 });
 
 test("CLI: a state file with a junk field keeps the fields that parsed, and a foreign key rides along", () => {
   // Per-field validation, not all-or-nothing: losing a good streak to one bad
-  // key would silently reset the back-off to the base every hold.
-  const r = run(["--base", "2", "--ceiling", "64", "--hold", "1"],
-    { state: JSON.stringify({ quiet: 4, elapsed: "nonsense", digest: "abc123", note: "not ours" }) });
+  // key would silently reset the back-off to the base on every beat.
+  const r = run(["--base", "2", "--ceiling", "64"],
+    { state: JSON.stringify({ quiet: 4, digest: 7, note: "not ours" }) });
   assert.equal(r.status, 0);
   assert.match(r.stdout, /\(quiet=4\)/);
   // And the file it leaves behind, which is the half a stdout-only assertion
   // cannot see: `note` is outside the schema and belongs to nobody here, so it
   // rides along untouched. Patch, never replace, is what lets two scripts share
   // one file without a lock, and a key this script does not know about is
-  // exactly the case that rule exists for (#1597's stage-2 keys land here).
-  // #1597 added a fourth key, and it carries a clock — so it is lifted out
-  // here and asserted on its own shape rather than pinned to a timestamp a
-  // test cannot know. The mark's own behaviour has its own cases at the foot
-  // of this file; what this one still owes is the whole-file shape around it.
-  assert.deepEqual(withoutMark(r.state), { note: "not ours", quiet: 4, elapsed: 1, digest: "abc123" });
+  // exactly the case that rule exists for.
+  // The mark carries a clock, so it is lifted out here and asserted on its own
+  // shape rather than pinned to a timestamp a test cannot know.
+  assert.deepEqual(withoutMark(r.state), { note: "not ours", quiet: 4, digest: "" });
   assert.equal(r.state.beat.stopped, "");
+});
+
+test("CLI: a state file still carrying `elapsed` is read without error and the key is not made up", () => {
+  // `elapsed` belonged to the hold. A file written before it left is read as
+  // before — the key is outside the schema now, so it rides along like any
+  // other foreign key — and a file that never had it never gets one.
+  const old = run(["--base", "2", "--ceiling", "64"],
+    { state: JSON.stringify({ quiet: 1, elapsed: 5, digest: "abc" }) });
+  assert.equal(old.status, 0, old.stderr);
+  assert.equal(old.stderr, "");
+  assert.match(old.stdout, /alarm due in 4s \(quiet=1\) → end your turn/);
+  assert.equal(old.state.elapsed, 5, "carried untouched, never advanced or reset");
+
+  const fresh = run(["--base", "2", "--ceiling", "64"], { state: JSON.stringify({ quiet: 1, digest: "abc" }) });
+  assert.equal(fresh.status, 0, fresh.stderr);
+  assert.equal("elapsed" in fresh.state, false);
 });
 
 test("CLI: the value it writes back is the SANITIZED one, not the junk it read", () => {
   // The junk has to sit in a key this script does not patch, or the assertion
-  // is vacuous: a bad `elapsed` is overwritten by the write either way, so only
-  // a bad `quiet` or `digest` can show whether the file was rebuilt from the
+  // is vacuous: `beat` is overwritten by the write either way, so only a bad
+  // `quiet` or `digest` can show whether the file was rebuilt from the
   // validated view or from the raw parse. `quiet` is fleet-tick's, and this
   // script must neither own it nor launder it.
   //
@@ -176,21 +182,22 @@ test("CLI: the value it writes back is the SANITIZED one, not the junk it read",
   // the sanitizing only ever happened in memory — so every later reader repairs
   // it again, and the one field that decides the interval stays corrupt in the
   // file for the rest of the run.
-  const r = run(["--base", "100", "--ceiling", "200", "--hold", "1"],
-    { state: JSON.stringify({ quiet: "bogus", elapsed: 5, digest: "abc123", note: "not ours" }) });
+  const r = run(["--base", "100", "--ceiling", "200"],
+    { state: JSON.stringify({ quiet: "bogus", digest: "abc123", note: "not ours" }) });
   assert.equal(r.status, 0);
   // A junk streak reads as 0, which is the base interval — the fail-open
   // direction, more level checks rather than fewer.
-  assert.match(r.stdout, /94s of 100s remain \(quiet=0\)/);
-  assert.deepEqual(withoutMark(r.state), { note: "not ours", quiet: 0, elapsed: 6, digest: "abc123" });
+  assert.match(r.stdout, /alarm due in 100s \(quiet=0\)/);
+  assert.deepEqual(withoutMark(r.state), { note: "not ours", quiet: 0, digest: "abc123" });
 });
 
-test("CLI: a JSON array state file is announced, and the file is not replaced — a fire is reported for the skipped write", () => {
+test("CLI: a JSON array state file is announced, and the file is not replaced — no alarm is armed", () => {
   const corrupt = "[1,2,3]";
-  const r = run(["--base", "1", "--hold", "1"], { state: corrupt });
+  const r = run(["--base", "1"], { state: corrupt });
   assert.equal(r.status, 0);
   assert.match(r.stderr, /WARNING .* is not an object/);
-  assert.match(r.stdout, /heartbeat: held .* interval elapsed/);
+  assert.match(r.stdout, /beat NOT marked .*no alarm is armed/);
+  assert.doesNotMatch(r.stdout, END_TURN);
   assert.deepEqual(r.state, [1, 2, 3], "degraded file should not be written, so [1,2,3] is preserved");
 });
 
@@ -219,71 +226,62 @@ test("CLI: --stop over a degraded file leaves it byte-identical and says the sto
   }
 });
 
-test("CLI: a hold over a file whose controller record cannot be judged warns, fires, and leaves the file byte-identical", () => {
+test("CLI: a beat over a file whose controller record cannot be judged warns, arms no alarm, and leaves the file byte-identical", () => {
   for (const controller of [{ pid: "29405", lstart: "x" }, null]) {
-    const state = JSON.stringify({ quiet: 3, elapsed: 0, controller });
-    const r = runBytes(["--base", "1", "--hold", "1"], state);
+    const state = JSON.stringify({ quiet: 3, controller });
+    const r = runBytes(["--base", "1"], state);
     const label = JSON.stringify(controller);
     assert.equal(r.status, 0, `${label}: ${r.stderr}`);
     assert.match(r.stderr, /WARNING .* holds a controller record that cannot be judged/, label);
-    assert.match(r.stdout, /interval elapsed .*degraded/, `${label}: a skipped write is a fire that says why`);
-    assert.equal(r.bytes, state, `${label}: the hold must not replace the record`);
+    assert.match(r.stdout, /beat NOT marked .*degraded.*no alarm is armed/, `${label}: a skipped write says why`);
+    assert.doesNotMatch(r.stdout, END_TURN, label);
+    assert.equal(r.bytes, state, `${label}: the beat must not replace the record`);
   }
 });
 
-test("CLI: a hold whose write was skipped over a degraded file fires before the interval has elapsed, rather than reporting a remainder nothing keeps", () => {
-  // `--base 5 --hold 1`: one hold cannot reach the interval, so only the
-  // skipped write can make this a fire.
-  const state = JSON.stringify({ quiet: 0, elapsed: 0, controller: null });
-  const r = runBytes(["--base", "5", "--hold", "1"], state);
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /interval elapsed/);
-  assert.doesNotMatch(r.stdout, /remain/);
-  assert.equal(r.bytes, state);
-});
-
-test("CLI: a state file it cannot READ is announced, never silently discarded", (t) => {
+test("CLI: a state file it cannot READ is announced, never silently discarded, and arms no alarm", (t) => {
   if (process.getuid?.() === 0) return t.skip("root reads every file");
   // The absent file is silent because a fresh run legitimately has none. An
   // EACCES on a file that EXISTS is a different event: it discards a real
-  // streak and a real elapsed total. Sharing the absent case's silence is a
-  // degraded read reported as a fresh run, which is the failure class this
-  // ticket exists to close — and the direction of the damage is the long way
-  // round, since quiet=15 here is a ceiling-length interval read as the base.
+  // streak. Sharing the absent case's silence is a degraded read reported as a
+  // fresh run, which is the failure class this ticket exists to close — and
+  // the file is left as it is, so no mark lands and no alarm is armed.
   const dir = mkdtempSync(join(tmpdir(), "fleet-heartbeat-unreadable-"));
   const path = join(dir, "heartbeat.json");
-  writeFileSync(path, JSON.stringify({ quiet: 15, elapsed: 10, digest: "abc" }));
+  writeFileSync(path, JSON.stringify({ quiet: 15, digest: "abc" }));
   chmodSync(path, 0o000);
   const r = spawnSync(process.execPath,
-    [SCRIPT, "--base", "2", "--ceiling", "64", "--hold", "1", "--state", path], { encoding: "utf8" });
+    [SCRIPT, "--base", "2", "--ceiling", "64", "--state", path], { encoding: "utf8" });
   chmodSync(path, 0o644);
   rmSync(dir, { recursive: true, force: true });
   assert.equal(r.status, 0);
   assert.match(r.stderr, /WARNING could not read .*heartbeat\.json .*EACCES/);
-  assert.match(r.stdout, /\(quiet=0\)/);
+  assert.match(r.stdout, /beat NOT marked .*no alarm is armed/);
+  assert.doesNotMatch(r.stdout, END_TURN);
 });
 
-test("CLI: a state write that cannot land FIRES rather than holding the same remainder forever", (t) => {
+test("CLI: a state write that cannot land says no alarm is armed, never to end the turn", (t) => {
   if (process.getuid?.() === 0) return t.skip("root writes every directory");
-  // The livelock, and the reason a failed write cannot simply be survived: the
-  // remainder is counted in a file, so with nothing persisting it every
-  // invocation reads the same total, holds the same seconds and prints the same
-  // `2s of 3s remain`. The interval never completes, fleet-tick is never run,
-  // and the controller re-issues a command that reads like a working heartbeat
-  // for the rest of the night — #357's own defect, wearing its remedy's line.
+  // The silent stall, and the reason a failed write cannot print the success
+  // line: the alarm's gate reads `beat`, and with nothing persisted it never
+  // passes. `→ end your turn` over an unwritten mark idles the controller into
+  // a session nothing will wake — #357's own defect, wearing its remedy's line.
   const dir = mkdtempSync(join(tmpdir(), "fleet-heartbeat-unwritable-"));
   chmodSync(dir, 0o555);
   try {
-    // Two invocations, because one could not tell a fire from progress. Both
-    // are fresh processes reading the same state that never landed.
+    // Two invocations, because one could not tell a stable refusal from a
+    // lucky one. Both are fresh processes reading a state that never landed.
     for (const nth of ["first", "second"]) {
       const r = spawnSync(process.execPath,
-        [SCRIPT, "--base", "3", "--ceiling", "8", "--hold", "1", "--state", join(dir, "heartbeat.json")],
+        [SCRIPT, "--base", "3", "--ceiling", "8", "--state", join(dir, "heartbeat.json")],
         { encoding: "utf8" });
       assert.equal(r.status, 0);
       assert.match(r.stderr, /WARNING could not write/, `${nth}: a failed write is announced, never silent`);
-      assert.match(r.stdout, /interval elapsed/, `${nth}: unpersisted progress fires instead of accumulating`);
-      assert.doesNotMatch(r.stdout, /remain/, `${nth}: a remainder nothing is keeping is not a remainder`);
+      // "for this beat": an earlier mark still on disk keeps the alarm's gate
+      // passing, so the line must not say no alarm at all is armed.
+      assert.match(r.stdout, /beat NOT marked .*could not be written.*no alarm is armed for this beat/, `${nth}: the line names the failure`);
+      assert.doesNotMatch(r.stdout, END_TURN, `${nth}: an unrecorded mark never says to end the turn`);
+      assert.equal(existsSync(join(dir, "heartbeat.json")), false);
     }
   } finally {
     chmodSync(dir, 0o755);
@@ -291,73 +289,47 @@ test("CLI: a state write that cannot land FIRES rather than holding the same rem
   }
 });
 
-test("CLI: a fleet-tick that runs DURING the hold is not reverted when the hold ends", () => {
-  // The hold is up to 240s by default, and fleet-tick runs on every other wake
-  // that owe this script nothing — so the file it wrote at the end of a hold is
-  // not the file it read at the start. Patching the pre-hold snapshot back
-  // reverts both of fleet-tick's keys: the streak it just reset on a busy stretch
-  // is restored, re-arming the ceiling-length interval the stretch had shortened,
-  // and the restored `digest` reads as "the output changed" on the next tick,
-  // un-folding the quiet night the digest exists to fold.
-  const dir = mkdtempSync(join(tmpdir(), "fleet-heartbeat-race-"));
-  const path = join(dir, "heartbeat.json");
-  // A long streak, so the interval is at the ceiling and one hold cannot serve
-  // it — which is the state a quiet night is in when work finally arrives.
-  writeFileSync(path, JSON.stringify({ quiet: 6, elapsed: 0, digest: "old" }));
-  // fleet-tick's write lands INSIDE the hold, from the child itself: the
-  // preload wraps Atomics.wait, which block() holds with, and writes the fresh
-  // state as the hold begins. A sleep in this process cannot place that write:
-  // a child that starts later than the sleep reads the fresh file at startup,
-  // and the pre-hold-snapshot regression then passes. If the hold stops going
-  // through Atomics.wait, nothing writes the fresh state and the assertions on
-  // it below fail.
-  const preload = `import { writeFileSync } from "node:fs";
-    const wait = Atomics.wait;
-    let held = false;
-    Atomics.wait = (...a) => {
-      if (!held) {
-        held = true;
-        writeFileSync(${JSON.stringify(path)}, ${JSON.stringify(JSON.stringify({ quiet: 0, elapsed: 0, digest: "fresh" }))});
-      }
-      return wait(...a);
-    };`;
-  const r = spawnSync(process.execPath,
-    ["--import", `data:text/javascript,${encodeURIComponent(preload)}`,
-      SCRIPT, "--base", "600", "--ceiling", "1200", "--hold", "1", "--state", path], { encoding: "utf8" });
-  const after = JSON.parse(readFileSync(path, "utf8"));
-  rmSync(dir, { recursive: true, force: true });
-  assert.equal(r.status, 0, r.stderr);
-  // The opening read saw the pre-hold file: the printed streak is the one it
-  // read before the hold.
-  assert.match(r.stdout, /\(quiet=6\)/);
-  assert.equal(after.quiet, 0, "the streak fleet-tick reset during the hold must survive the hold");
-  assert.equal(after.digest, "fresh", "the digest fleet-tick wrote during the hold must survive the hold");
-  // And this script's own key still advanced by the hold it actually served.
-  assert.equal(after.elapsed, 1);
-});
-
 test("CLI: with no --state, and with an empty one, it resolves the run's shared default", () => {
   // The path the shipped invocation actually uses — SKILL.md's block passes no
   // --state at all — and `--state ""` is the shape an unset shell variable
   // produces, which `??` would let through as a real, empty path. Every read
-  // and write against `''` then fails, which is the livelock above reached by
-  // a second route, printed as a working heartbeat.
+  // and write against `''` then fails, and the mark never lands.
   const dir = mkdtempSync(join(tmpdir(), "fleet-heartbeat-default-"));
   assert.equal(spawnSync("git", ["init", "-q", dir], { encoding: "utf8" }).status, 0);
   const expected = join(dir, ".fleet", "heartbeat.json");
   for (const extra of [[], ["--state", ""]]) {
     rmSync(join(dir, ".fleet"), { recursive: true, force: true });
     const r = spawnSync(process.execPath,
-      [SCRIPT, "--base", "2", "--ceiling", "8", "--hold", "1", ...extra], { cwd: dir, encoding: "utf8" });
+      [SCRIPT, "--base", "2", "--ceiling", "8", ...extra], { cwd: dir, encoding: "utf8" });
     assert.equal(r.status, 0, r.stderr);
     // Never through the announced cwd-relative fallback: that path is the
     // degraded one, and a case that resolved through it would be pinning the
     // degradation while looking like it pinned the resolution.
     assert.doesNotMatch(r.stderr, /WARNING/, `--state ${JSON.stringify(extra[1] ?? "(absent)")} degraded`);
-    assert.match(r.stdout, /1s of 2s remain/);
-    assert.equal(JSON.parse(readFileSync(expected, "utf8")).elapsed, 1);
+    assert.match(r.stdout, /alarm due in 2s .*→ end your turn/);
+    assert.equal(JSON.parse(readFileSync(expected, "utf8")).beat.interval, 2);
   }
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("CLI: a mark that took the cwd-relative fallback never says to end the turn", () => {
+  // The alarm resolves the run's `.fleet` for itself, so a beat written to a
+  // cwd-relative file may be one it never reads — outside any repository it
+  // arms no timer at all. Saying `→ end your turn` over that mark is the stall.
+  // A ceiling at the fixture's parent, so a temp directory that happens to sit
+  // inside some repository cannot answer for it.
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "fleet-heartbeat-norepo-")));
+  try {
+    const cwd = join(parent, "bare");
+    mkdirSync(cwd);
+    const r = spawnSync(process.execPath, [SCRIPT, "--base", "2", "--ceiling", "8"],
+      { cwd, encoding: "utf8", env: { ...process.env, GIT_CEILING_DIRECTORIES: parent } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /using cwd-relative \.fleet\/heartbeat\.json/, "the fallback was taken");
+    assert.equal(JSON.parse(readFileSync(join(cwd, ".fleet", "heartbeat.json"), "utf8")).beat.interval, 2);
+    assert.match(r.stdout, /beat NOT marked .*could not be resolved.*cwd-relative/);
+    assert.doesNotMatch(r.stdout, END_TURN);
+  } finally { rmSync(parent, { recursive: true, force: true }); }
 });
 
 test("CLI: an ambient GIT_DIR cannot relocate the run's one state file", () => {
@@ -380,10 +352,10 @@ test("CLI: an ambient GIT_DIR cannot relocate the run's one state file", () => {
   assert.equal(control.stdout.trim(), join(other, ".git"));
 
   const r = spawnSync(process.execPath,
-    [SCRIPT, "--base", "2", "--ceiling", "8", "--hold", "1"], { cwd: dir, encoding: "utf8", env });
+    [SCRIPT, "--base", "2", "--ceiling", "8"], { cwd: dir, encoding: "utf8", env });
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stderr, /WARNING/);
-  assert.equal(JSON.parse(readFileSync(join(dir, ".fleet", "heartbeat.json"), "utf8")).elapsed, 1);
+  assert.equal(JSON.parse(readFileSync(join(dir, ".fleet", "heartbeat.json"), "utf8")).beat.interval, 2);
   assert.equal(existsSync(join(other, ".fleet", "heartbeat.json")), false,
     "the state file followed an ambient GIT_DIR into another repository");
   rmSync(dir, { recursive: true, force: true });
@@ -393,8 +365,9 @@ test("CLI: an ambient GIT_DIR cannot relocate the run's one state file", () => {
 
 // --------------------------------------------------------------------------
 // The liveness mark — #1597. This script is the ONLY writer of `beat`, so
-// everything below is about what it leaves on disk for two readers it never
-// talks to: fleet-tick at the next run's start, and the cockpit every tick.
+// everything below is about what it leaves on disk for the readers it never
+// talks to: the alarm every 30s, fleet-tick at the next run's start, and the
+// cockpit every tick.
 
 test("CLI: every beat marks the time and the interval that was in effect", () => {
   // The interval travels WITH the time because it is not a constant — the
@@ -404,8 +377,8 @@ test("CLI: every beat marks the time and the interval that was in effect", () =>
   // one (2 × 2⁴ = 32, under the 64s ceiling), not the base: a mark that
   // recorded --base would be recording a promise this beat did not make.
   const before = Date.now();
-  const r = run(["--base", "2", "--ceiling", "64", "--hold", "1"],
-    { state: JSON.stringify({ quiet: 4, elapsed: 0, digest: "abc" }) });
+  const r = run(["--base", "2", "--ceiling", "64"],
+    { state: JSON.stringify({ quiet: 4, digest: "abc" }) });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.state.beat.interval, 32, "the mark must carry the interval in effect, not the base");
   assert.ok(r.state.beat.at >= before && r.state.beat.at <= Date.now(), "the mark must be dated by this beat");
@@ -416,20 +389,15 @@ test("CLI: every beat marks the time and the interval that was in effect", () =>
   assert.equal(r.state.digest, "abc");
 });
 
-test("CLI: --stop records the reason without holding or touching the back-off", () => {
-  // A deliberate stop is not a beat: nothing is held, `elapsed` is left where
-  // it was, and the invocation returns immediately. `--base 600` would be a
-  // ten-minute interval if this path held at all, so the wall clock below is
-  // the assertion that it does not.
-  const started = Date.now();
+test("CLI: --stop records the reason without touching the back-off", () => {
+  // A deliberate stop is not a beat: the streak is left where it was.
   const r = run(["--base", "600", "--ceiling", "1200", "--stop", "budget exhausted"],
-    { state: JSON.stringify({ quiet: 1, elapsed: 7, digest: "abc" }) });
+    { state: JSON.stringify({ quiet: 1, digest: "abc" }) });
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(Date.now() - started < 30_000, "--stop must not hold");
   assert.equal(r.state.beat.stopped, "budget exhausted");
-  assert.equal(r.state.elapsed, 7, "a stop is not a beat and must not spend the interval");
   assert.equal(r.state.quiet, 1);
   assert.match(r.stdout, /stop recorded \(budget exhausted\)/);
+  assert.doesNotMatch(r.stdout, END_TURN, "a stop is not an instruction to wait for an alarm");
   // The line says who will report it, because a controller that stops without
   // knowing anything reads it has to wait for the next run to find out.
   assert.match(r.stdout, /the next run's start and the cockpit will report it/);
@@ -440,8 +408,8 @@ test("CLI: a beat after a stop clears the reason rather than carrying it forward
   // surviving into a live beat has every reader announcing a death that
   // already un-happened — and since a recorded stop outranks staleness, that
   // announcement would never age out on its own.
-  const r = run(["--base", "2", "--ceiling", "4", "--hold", "1"], {
-    state: JSON.stringify({ quiet: 0, elapsed: 0, digest: "",
+  const r = run(["--base", "2", "--ceiling", "4"], {
+    state: JSON.stringify({ quiet: 0, digest: "",
       beat: { at: 1_700_000_000_000, interval: 300, stopped: "budget exhausted" } }),
   });
   assert.equal(r.status, 0, r.stderr);
@@ -459,29 +427,13 @@ test("CLI: --stop refuses an empty reason", () => {
   assert.equal(r.state, null, "a refused stop writes nothing at all");
 });
 
-test("CLI: a mark that cannot be written is announced and the heartbeat keeps beating", (t) => {
+test("CLI: a stop whose write cannot land is announced on stdout too", (t) => {
   if (process.getuid?.() === 0) return t.skip("root writes every directory");
-  // The acceptance criterion this ticket states in its own words: a liveness
-  // mark that killed the beat it measures would be #357's defect wearing a new
-  // hat. So the write is made to FAIL — an unwritable state directory, the
-  // same fixture the elapsed-write case above uses — and what is pinned is
-  // that the process survives it, says so, and still prints the line that
-  // keeps the controller's turn alive.
-  const dir = mkdtempSync(join(tmpdir(), "fleet-heartbeat-mark-unwritable-"));
+  // writeState's stderr warning names the file and not the consequence — that
+  // the next reader will see a beat which stopped with no reason recorded.
+  const dir = mkdtempSync(join(tmpdir(), "fleet-heartbeat-stop-unwritable-"));
   chmodSync(dir, 0o555);
   try {
-    const r = spawnSync(process.execPath,
-      [SCRIPT, "--base", "3", "--ceiling", "8", "--hold", "1", "--state", join(dir, "heartbeat.json")],
-      { encoding: "utf8" });
-    assert.equal(r.status, 0, "a failed mark write must never be fatal");
-    assert.match(r.stderr, /WARNING could not write/, "a failed mark write is announced, never silent");
-    assert.match(r.stdout, /→ run fleet-event\.mjs heartbeat/, "the beat goes on: the controller is still told what to do next");
-    assert.equal(existsSync(join(dir, "heartbeat.json")), false);
-
-    // The same policy on the stop path, which has no next beat to keep going:
-    // it announces on stdout as well, because writeState's stderr warning
-    // names the file and not the consequence — that the next reader will see
-    // a beat which stopped with no reason recorded.
     const s = spawnSync(process.execPath,
       [SCRIPT, "--stop", "budget exhausted", "--state", join(dir, "heartbeat.json")],
       { encoding: "utf8" });
@@ -494,48 +446,17 @@ test("CLI: a mark that cannot be written is announced and the heartbeat keeps be
   }
 });
 
-test("CLI: an unreadable mark degrades to no mark and does not stop the beat", () => {
+test("CLI: an unreadable mark degrades to no mark, is replaced by this beat's own, and the call still arms the alarm", () => {
   // A corrupt `beat` must not be a corrupt heartbeat. readState repairs the
   // key to absent, which every reader renders as "nothing to report" — loud
   // in the safe direction, since the alternative is a live run announced as
-  // dead off a field nobody can parse.
-  const r = run(["--base", "2", "--ceiling", "4", "--hold", "1"],
-    { state: JSON.stringify({ quiet: 0, elapsed: 0, digest: "", beat: "yesterday" }) });
+  // dead off a field nobody can parse. The file itself is not degraded, so the
+  // write lands and the line may say to end the turn.
+  const r = run(["--base", "2", "--ceiling", "4"],
+    { state: JSON.stringify({ quiet: 0, digest: "", beat: "yesterday" }) });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /interval elapsed|remain/);
+  assert.match(r.stdout, END_TURN);
   // Replaced by this beat's own mark, never left as the junk it read.
   assert.equal(typeof r.state.beat, "object");
   assert.equal(r.state.beat.stopped, "");
-});
-
-test("CLI: a running child's command line carries no fleet-heartbeat.mjs for a pattern kill to find", async () => {
-  // Positive control: the pattern does match the script's own path, so a
-  // command line free of it is the link's doing and not a typo in the regex.
-  assert.match(HEARTBEAT, KILL_PATTERN);
-
-  const dir = mkdtempSync(join(tmpdir(), "fleet-heartbeat-argv-"));
-  // A hold long enough that the child is alive for as long as this test needs
-  // to look at it; it is killed through its own handle once seen, so the hold
-  // is never waited out and no wall time is being raced.
-  const child = spawn(process.execPath,
-    [SCRIPT, "--base", "600", "--ceiling", "1200", "--hold", "60", "--state", join(dir, "heartbeat.json")],
-    { stdio: "ignore" });
-  const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
-  try {
-    let seen = "";
-    // Looks until `ps` reports the child's real command line, not until a
-    // deadline. An exit before that is the failure.
-    let alive = true;
-    exited.then(() => { alive = false; });
-    while (alive && !seen.includes(SCRIPT)) {
-      seen = spawnSync("ps", ["-ww", "-o", "command=", "-p", String(child.pid)], { encoding: "utf8" }).stdout;
-      if (!seen.includes(SCRIPT)) await new Promise((r) => setTimeout(r, 20));
-    }
-    assert.ok(seen.includes(SCRIPT), `the child exited before ps showed its command line: ${JSON.stringify(seen)}`);
-    assert.doesNotMatch(seen, KILL_PATTERN);
-  } finally {
-    child.kill("SIGKILL");
-    await exited;
-    rmSync(dir, { recursive: true, force: true });
-  }
 });

@@ -6,37 +6,39 @@
 // every other invocation is a wake: a member report, a label, a CI run ending.
 // A drained fleet emits no wakes at all — no implementer completions, no merge
 // activity — so nothing calls the tick and the stall is silent again. This
-// script is the level-check that needs no
-// event: it holds the controller's turn for an interval and then tells it to
-// run the tick.
+// script is the level-check that needs no event: it marks when the controller
+// went idle and how long the next level-check may wait, and the controller then
+// ends its turn. The alarm (controller-alarm.mjs, an omp extension loaded into
+// the controller's own session) starts the next turn once the mark has fallen
+// due, and that turn runs the tick.
 //
-// WHY A HOLD AND NOT A WATCHER — the ruling, measured before it was made:
+// WHY AN ALARM AND NOT A WATCHER — the ruling, measured before it was made:
 //
 //   A backgrounded watcher does not wake an idle agent. Measured twice in one
 //   run (run-team/references/member-lifecycle.md, "A member runs its test suite in the foreground"):
 //   `fix-pr-1184` backgrounded its suite plus a Monitor and sat idle for
 //   roughly two hours; neither ever woke it. run-merge-bot.md's CI gate states
 //   the same rule as a rule — "whatever wakes you is external and may never
-//   come" — and cures it the same way this file does, by holding the wait
-//   inside one blocking call.
+//   come".
 //
-//   So the heartbeat is not a Monitor, not a cron entry and not a paragraph of
+//   So the alarm is not a Monitor, not a cron entry and not a paragraph of
 //   prose. A cron entry that ran the reconcile would print its rows to nobody:
 //   the tick reads the run for itself, but only the controller can act
-//   on what it prints. An external scheduler can only WAKE the controller,
-//   which is the one thing the measurement above says it cannot be trusted to
-//   do.
+//   on what it prints. Nothing outside the omp process can start a turn in an
+//   idle session, which is the one thing the measurement above says an
+//   external watcher cannot be trusted to do — so the alarm is an in-process
+//   extension, which can.
 //
-// WHY IT TAKES NO CONTROLLER STATE — every flag below has a default. A monitor
-// event is a wake-up, never a verdict (run-team/SKILL.md, "A monitor event is a wake-up, never a verdict"), so this
-// script never reads or reports fleet state: counts captured before a
-// twenty-minute hold and printed after it are a stale verdict, and a stale
+// WHY IT TAKES NO CONTROLLER STATE — every flag below has a default. An alarm
+// turn is a wake-up, never a verdict (run-team/SKILL.md, "A monitor event is a wake-up, never a verdict"), so this
+// script never reads or reports fleet state: counts captured when the beat was
+// marked and printed twenty minutes later are a stale verdict, and a stale
 // verdict is how a reconcile prints an ACTION nobody can take. The controller
 // runs `fleet-event.mjs heartbeat` itself at wake time, which ticks and so reads the run as it stands then.
-// It also makes a late hold harmless: if a member reports at minute two and
-// the controller acts, the hold that fires afterwards is a free extra tick.
+// It also makes a late alarm harmless: if a member reports at minute two and
+// the controller acts, the alarm that fires afterwards is a free extra tick.
 //
-// The pure half is interval() and heldThisCall(); main() does the I/O.
+// The pure half is interval(); main() does the I/O.
 
 // Back-off. The interval doubles while the fleet has nothing to act on, so a
 // quiet night costs a few wakes instead of one every five minutes — and stops
@@ -58,20 +60,6 @@ export function interval({ quiet, base, ceiling, multiplier }) {
   return Math.min(base * multiplier ** quiet, ceiling);
 }
 
-// How long THIS invocation may block, which is not the same as the interval.
-//
-// Nothing lets one command block for twenty minutes. Measured: omp
-// auto-backgrounds any foreground command at 60s (`bash.autoBackground`), and
-// its command deadline defaults to 300s (the bash tool's default
-// `timeout`).
-//
-// So a long interval is served by SEVERAL holds, and the elapsed total is
-// persisted rather than counted in prose: the script says how much remains, so
-// the controller re-issues without tracking arithmetic across turns.
-export function heldThisCall({ elapsed, target, hold }) {
-  return Math.min(hold, Math.max(0, target - elapsed));
-}
-
 // --------------------------------------------------------------------------
 // I/O. Everything below runs only as a CLI — importing this file must never
 // parse argv or touch the filesystem, or the pure half stops being unit-testable.
@@ -79,7 +67,7 @@ export function heldThisCall({ elapsed, target, hold }) {
 import { isCLI } from "./is-cli.mjs";
 import { parseArgs } from "node:util";
 import { makeDie, isDigits } from "./arg.mjs";
-import { statePath, readState, writeState, DEFAULT_CEILING_S } from "./fleet-state.mjs";
+import { resolveStatePath, readState, writeState, DEFAULT_CEILING_S } from "./fleet-state.mjs";
 
 const NAME = "fleet-heartbeat";
 const die = makeDie(NAME);
@@ -95,11 +83,6 @@ const OPTIONS = {
   // header's "never a copy of it" rule exists to close.
   ceiling: { type: "string", default: String(DEFAULT_CEILING_S) },
   multiplier: { type: "string", default: "2" },
-  // Per-invocation blocking budget, under omp's defaults. 240s leaves
-  // headroom below omp's 300s command deadline, which is itself shorter than
-  // the 5-6 minute CI cycle run-merge-bot.md's CI wait rule states. Raise
-  // it only together with the tool call's own timeout.
-  hold: { type: "string", default: "240" },
   // The deliberate stop. No default and no boolean spelling: the flag
   // IS the reason, and a `--stop` that recorded an empty string would be the
   // abrupt-death case wearing a deliberate stop's clothes — a reader would
@@ -114,19 +97,8 @@ const OPTIONS = {
 };
 
 // State path, read and write all come from fleet-state.mjs, which owns the key
-// ownership rule this script depends on: it writes `elapsed` and `beat` and
-// nothing else, so fleet-tick's `quiet` and `digest` survive every hold.
-// main() re-reads the file after its hold to keep that true across the hold
-// itself, and treats a write that did not land as a fire rather than as
-// progress.
-
-// A blocking sleep, not a poll loop. Atomics.wait on a SharedArrayBuffer parks
-// the thread; `while (Date.now() < end) {}` would burn a core for the whole
-// hold, and setTimeout would need the event loop to stay alive and would let
-// anything else queued run first.
-function block(seconds) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000);
-}
+// ownership rule this script depends on: it writes `beat` and
+// nothing else, so fleet-tick's `quiet` and `digest` survive every call.
 
 function args() {
   let values;
@@ -142,7 +114,7 @@ function args() {
     const raw = String(values[name]).trim();
     // Digits, not Number(): `Number("")` is 0, so `--base ""` — the shape an
     // unset shell variable produces — would read as a real zero and turn the
-    // hold into a no-op that looks like a working heartbeat.
+    // interval into a no-op that looks like a working heartbeat.
     if (!isDigits(raw)) die(`--${name} must be a non-negative integer, got '${values[name]}'`);
     const n = Number(raw);
     if (n < min) die(`--${name} must be at least ${min}, got ${n}`);
@@ -151,7 +123,6 @@ function args() {
   const base = int("base", 1);
   const ceiling = int("ceiling", 1);
   const multiplier = int("multiplier", 1);
-  const hold = int("hold", 1);
   // A ceiling under the base is not a slow heartbeat, it is a back-off that
   // runs backwards — min() would clamp every interval to the ceiling and the
   // base would never be honoured. Refuse rather than silently reinterpret.
@@ -167,7 +138,8 @@ function args() {
   if (values.stop !== undefined && values.stop.trim() === "") {
     die("--stop must carry the reason the run is stopping, e.g. --stop 'budget exhausted'");
   }
-  return { base, ceiling, multiplier, hold, stop: values.stop?.trim(), state: values.state || statePath(NAME) };
+  const { path: state, fellBack } = values.state ? { path: values.state, fellBack: false } : resolveStatePath(NAME);
+  return { base, ceiling, multiplier, stop: values.stop?.trim(), state, fellBack };
 }
 
 // The mark: when this beat was seen and the interval that was in effect
@@ -176,26 +148,21 @@ function args() {
 //
 // The interval travels WITH the time because a reader comparing an age
 // against a fixed threshold either cries wolf on a quiet night at the ceiling
-// or misses a death during a busy one at the base. It is the target interval
-// and not the hold: the hold is this harness's blocking budget, an
-// implementation detail of how one interval gets served, while the interval
-// is the beat the run actually promised.
+// or misses a death during a busy one at the base. It is the beat the run
+// actually promised: the alarm fires once `at` plus the interval has passed.
 function mark(target, stopped) {
   return { at: Date.now(), interval: target, stopped };
 }
 
 function main() {
-  const { base, ceiling, multiplier, hold, stop, state: path } = args();
+  const { base, ceiling, multiplier, stop, state: path, fellBack } = args();
   const state = readState(path, NAME);
   const target = interval({ quiet: state.quiet, base, ceiling, multiplier });
 
   if (stop !== undefined) {
-    // No hold, and `elapsed` untouched: this invocation is not a beat, it is
-    // the run saying why there will not be another one. Leaving the partial
-    // interval where it is costs nothing — the next run reads a stopped mark
-    // and knows the streak behind it is a dead run's. Leave degraded files
-    // byte-identical, so a same-session rotate still refuses rather than
-    // judges none.
+    // This invocation is not a beat, it is the run saying why there will not
+    // be another one. Leave degraded files byte-identical, so a same-session
+    // rotate still refuses rather than judges none.
     if (state.degraded) {
       console.log(`heartbeat: stop NOT recorded (${stop}) — the heartbeat file is degraded and was left as it is, so a same-session rotate refuses on it until it is repaired`);
       return;
@@ -213,72 +180,44 @@ function main() {
     return;
   }
 
-  const held = heldThisCall({ elapsed: state.elapsed, target, hold });
-
-  block(held);
-  // Re-read AFTER the hold, and patch THAT rather than the pre-hold snapshot.
-  // fleet-tick can run while this call is blocked — up to --hold seconds, 240
-  // by default — and it owns both keys this script must not touch. Writing the
-  // snapshot back reverts them: a busy stretch that reset `quiet` to 0 would find
-  // the long interval re-armed the moment the hold ended, and a reverted
-  // `digest` reads as "the output changed" on the next tick, un-folding the
-  // quiet night the digest exists to fold. `elapsed` is still one of the keys
-  // this script writes; it is now read fresh rather than remembered across a
-  // hold long enough for the file to have moved underneath it.
-  const now = readState(path, NAME);
-  const elapsed = now.elapsed + held;
-  const reached = elapsed >= target;
-  // Reset on fire, so the next interval starts from zero rather than from a
-  // total that has already elapsed. Only `elapsed` and `beat` are written —
-  // fleet-tick owns `quiet` and `digest`, and fleet-state.mjs's patch write
-  // preserves them.
-  //
-  // The mark rides the SAME write as `elapsed`, deliberately, rather than
-  // taking one of its own. One write per invocation means a mark can never
-  // land while the progress it was taken beside did not, and the two can
-  // never disagree about which invocation they came from. It also keeps the
-  // failure story single: the warning below covers both keys at once. Leave
-  // degraded files byte-identical, so a same-session rotate still refuses
-  // rather than judges none — a skipped write reports a fire like a failed one.
+  // Leave degraded files byte-identical, so a same-session rotate still
+  // refuses rather than judges none — a skipped write is a mark that was not
+  // recorded, like a failed one.
   //
   // `stopped: ""` on every ordinary beat, never carried forward: a run that
   // recorded a stop and then kept beating is a run that did not stop, and a
   // stale reason surviving into a live beat would have the next reader
   // announcing a death that already un-happened.
-  const persisted = !now.degraded && writeState(path, NAME, now, { elapsed: reached ? 0 : elapsed, beat: mark(target, "") });
-  // A failed write is itself a fire. With nothing persisting the remainder,
-  // every invocation reads the same elapsed total, holds the same seconds and
-  // prints the same remainder: the interval can never complete, so fleet-tick
-  // is never run at all — the drained-queue stall itself, reached through a line that reads
-  // like a working heartbeat. Beating too often is the harmless direction;
-  // never beating is the one this script exists to prevent.
-  //
-  // The mark fails the same way and on purpose: writeState has already said
-  // so on stderr, this process keeps beating, and a reader that never sees a
-  // mark reports a stall it cannot explain — loud and wrong in the safe
-  // direction — rather than this script dying to protect its own telemetry.
-  // A liveness mark that killed the beat it measures would be that same stall
-  // wearing a new hat.
-  const done = reached || !persisted;
+  const persisted = !state.degraded && writeState(path, NAME, state, { beat: mark(target, "") });
 
   // One line either way, and never zero lines. Silence is the failure mode this
-  // whole ticket is about: a heartbeat that printed nothing would be
+  // whole script is about: a heartbeat that printed nothing would be
   // indistinguishable from a heartbeat that died, which is the same
   // "indistinguishable from a working one" the member-idle measurement names.
-  // The partial line says what to do next in the imperative, because the one
-  // thing that must not happen here is the controller ending its turn.
   //
-  // `quiet=` is the pre-hold streak, the one the interval was DERIVED from: a
-  // fresh streak printed beside a target computed from the old one would be two
-  // numbers that do not explain each other.
+  // The line that tells the controller to end its turn is printed ONLY when
+  // the mark is on disk where the alarm reads. The alarm's gate reads `beat`;
+  // with none recorded it never passes, so that line would send the controller
+  // idle into a session nothing will wake — the drained-queue stall, reached
+  // through a line that reads like a working heartbeat. A mark that failed to
+  // land says so, says no alarm is armed for it (an earlier mark still on disk
+  // is all the alarm can fire on), and exits 0 like the stop path: writeState
+  // has already said so on stderr, and the controller can repair the file and
+  // beat again. A mark written through statePath's cwd-relative fallback is
+  // treated the same way: the alarm resolves the run's `.fleet` for itself and
+  // may never read that file.
   //
-  // A skipped write says so, on the fire it reports: the interval did not
-  // elapse, the file could not keep its progress, and this call fires again
-  // on every hold until the file is repaired.
-  const skippedNote = now.degraded ? " — the heartbeat file is degraded and was left as it is, so interval progress is not kept and every hold fires" : "";
-  console.log(done
-    ? `heartbeat: held ${held}s, ${target}s interval elapsed (quiet=${state.quiet}) → run fleet-event.mjs heartbeat${skippedNote}`
-    : `heartbeat: held ${held}s, ${target - elapsed}s of ${target}s remain (quiet=${state.quiet}) → re-issue this command now, do not end your turn`);
+  // `quiet=` is the streak the interval was DERIVED from, printed beside the
+  // number it explains.
+  if (persisted && fellBack) {
+    console.log(`heartbeat: WARNING beat NOT marked in a resolved heartbeat file — the run's .fleet directory could not be resolved, so the mark went to a cwd-relative .fleet/heartbeat.json the alarm may not read; fix the resolution and run this again`);
+  } else if (persisted) {
+    console.log(`heartbeat: beat marked, alarm due in ${target}s (quiet=${state.quiet}) → end your turn`);
+  } else if (state.degraded) {
+    console.log(`heartbeat: WARNING beat NOT marked — the heartbeat file is degraded and was left as it is, so no alarm is armed; repair the file and run this again`);
+  } else {
+    console.log(`heartbeat: WARNING beat NOT marked — the heartbeat file could not be written, so no alarm is armed for this beat; fix the write and run this again`);
+  }
 }
 
 if (isCLI(import.meta.url)) main();

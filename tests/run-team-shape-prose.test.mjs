@@ -400,7 +400,7 @@ const CHANGED = [
   ],
   [
     "Listed first because it is the only wake with no trigger — every other row above arrives; this one is the absence of one.",
-    "Listed on its own because it is the only wake with no trigger — every other row of SKILL.md's wake list arrives; this one is the absence of one."
+    "Listed on its own because it is the only wake that is not an event — every other row of SKILL.md's wake list reports something that happened; this one is the beat falling due."
   ],
   [
     "The diff-validating `check` job green with no heavy job (the diff-validating suites, not the `rebase-check` currency gate) in `failure` → a finisher CANDIDATE (gated below), a `check` **failure** that is not solely staleness → the **red-check fixer** (**Then dispatch a red-check fixer**, below), behind the same review-returned and fix-applier-reported gate as a finisher.",
@@ -545,6 +545,48 @@ const CHANGED = [
   [
     "Once `rotate` has run, a re-run skips every `ok` step and resumes where the last one stopped; before it, a re-run runs every step again.",
     "Once `rotate` has run, a re-run skips every `ok` step but `alarm` and resumes where the last one stopped; before it, a re-run runs every step again."
+  ],
+  // The controller ends its turn on a drained queue and the alarm starts the
+  // next one: fleet-heartbeat.mjs holds nothing and returns at once.
+  [
+    "| Heartbeat | `fleet-event.mjs heartbeat` |",
+    "| Alarm (a [fleet-alarm] turn) | `fleet-event.mjs heartbeat` |"
+  ],
+  [
+    "Act on every line the call prints, the tick's last, and arm the beat.",
+    "Act on every line the call prints, the tick's last, and mark the beat."
+  ],
+  [
+    "**Nothing to do right now** → **do not end your turn.**",
+    "**Nothing to do right now** → mark the beat, then end your turn."
+  ],
+  [
+    "**Beat when there is nothing to do, and never end your turn on a drained queue.**",
+    "**Mark the beat when there is nothing to do, and end your turn.**"
+  ],
+  [
+    "```bash ~/.fleet/bin/fleet-run fleet-heartbeat.mjs \\ [--base 300] [--ceiling 1200] [--multiplier 2] [--hold 240] ```",
+    "```bash ~/.fleet/bin/fleet-run fleet-heartbeat.mjs \\ [--base 300] [--ceiling 1200] [--multiplier 2] ```"
+  ],
+  [
+    "It blocks, then prints one line.",
+    "It returns at once and prints one line."
+  ],
+  [
+    "`… interval elapsed (quiet=<n>) → run fleet-event.mjs heartbeat` — the level-check is due.",
+    "`… beat marked, alarm due in <N>s (quiet=<n>) → end your turn` — the mark is recorded."
+  ],
+  [
+    "Run that command and act on what the tick it ends in prints.",
+    "The alarm's turn arrives as a user message that starts `[fleet-alarm]` and names `fleet-event.mjs heartbeat`: run that command and act on what the tick it ends in prints."
+  ],
+  [
+    "Then arm the beat again.",
+    "Then mark the beat again."
+  ],
+  [
+    "The beat leaves a dated mark on every hold, so a run that dies abruptly (a crashed harness, a closed terminal, an OOM kill) is detected by its mark going stale.",
+    "The beat leaves a dated mark on every call, so a run that dies abruptly (a crashed harness, a closed terminal, an OOM kill) is detected by its mark going stale."
   ]
 ];
 
@@ -659,7 +701,11 @@ const DELETED = [
   ["Write neither by hand:", "references/ledger.md's writer policy"],
   ["**`ledger.mjs drain \"<reason>\"`** — the one drain marker per run; supply stops, the review and merge sides keep going.", "ledger.mjs drain; tests/ledger-dispatch.test.mjs"],
   ["**The file lives one run.**", "references/ledger.md's one git-ignored `.fleet/ledger.md` per run sentence"],
-  ["See references/ledger.md.", "the pointers now inline in SKILL.md's wake section and failure table"]
+  ["See references/ledger.md.", "the pointers now inline in SKILL.md's wake section and failure table"],
+  // The hold: fleet-heartbeat.mjs returns at once, so nothing is re-issued.
+  ["`… Ns of Ms remain → re-issue this command now, do not end your turn` — no command blocks for a whole interval (omp backgrounds one at 60s, which is why the CI gate holds its wait in one `eval` cell polling `gh run view`).", "nothing: fleet-heartbeat.mjs no longer blocks, so it has no partial line"],
+  ["Issue it again.", "nothing: fleet-heartbeat.mjs no longer blocks, so it has no partial line"],
+  ["That is still one blocking call per turn, never an idle turn.", "nothing: the controller ends its turn and the alarm starts the next one"]
 ];
 
 const oldSentences = () => counted(sentencesOf(readFileSync(FIXTURE, "utf8")));

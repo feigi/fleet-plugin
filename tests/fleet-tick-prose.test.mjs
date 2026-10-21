@@ -10,6 +10,7 @@
 // be subverted".
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pin } from "./support/prose-pin.mjs";
 import { EVENT_HEADER } from "./support/fleet-event-header.mjs";
@@ -129,7 +130,7 @@ test("the wake table names every wake, each with its fleet-event.mjs command", (
     ["CI run terminal", "`fleet-event.mjs ci <pr>`"],
     ["Label seen (persistent Monitor)", "`fleet-event.mjs label <pr>`"],
     ["`CONFLICT` line", "`fleet-event.mjs conflict <pr>`"],
-    ["Heartbeat", "`fleet-event.mjs heartbeat`"],
+    ["Alarm (a [fleet-alarm] turn)", "`fleet-event.mjs heartbeat`"],
     ["Drain", "`fleet-event.mjs drain --reason \"<reason>\"`"],
     ["Undrain", "`fleet-event.mjs undrain --reason \"<reason>\"`"],
     ["Member confirmed dead or never dispatched", "`fleet-event.mjs member-died <member>`"],
@@ -146,7 +147,7 @@ test("the wake table names every wake, each with its fleet-event.mjs command", (
   assert.match(died, Pin.phrase("(`member-died finisher-pr-<M>`)"));
   assert.match(died, Pin.phrase("**Resolving a finisher that died**"));
   // What follows the table: the call's lines acted on, the beat.
-  assert.match(RUN_TEAM.between("| Drain |", "\n- **", "after the table").text, Pin.phrase("arm the beat"));
+  assert.match(RUN_TEAM.between("| Drain |", "\n- **", "after the table").text, Pin.phrase("mark the beat"));
 });
 
 test("the tick on every wake admits no wake covers a drained queue, and says whose case that is", () => {
@@ -246,25 +247,35 @@ test("the fold-in block says inherited PRs are queued before shortlisting, as or
 // invokes it. The slice is the standing instruction, ending where the tick's
 // rows begin.
 const heartbeatBlock = () =>
-  RUN_TEAM.between("**Beat when there is nothing to do", "## The tick's rows", "run-team heartbeat block").text;
+  RUN_TEAM.between("**Mark the beat when there is nothing to do", "## The tick's rows", "run-team heartbeat block").text;
 
-test("the event loop tells the controller to arm the beat instead of ending its turn", () => {
+test("the event loop tells the controller to mark the beat and end its turn", () => {
   // The entry point. Every word of the block below is unreachable if the loop
   // never says to run it, which is exactly how item 2 of #3 went missing.
-  const bullet = RUN_TEAM.bullet("- **Nothing to do right now**", "**Beat when there is nothing to do",
+  const bullet = RUN_TEAM.bullet("- **Nothing to do right now**", "**Mark the beat when there is nothing to do",
     "nothing-to-do event").text;
-  assert.match(bullet, /do not end your turn/);
+  assert.match(bullet, /mark the beat, then end your turn/);
 });
 
-test("the heartbeat block names the script and the re-issue protocol", () => {
+test("the heartbeat block names the script and the one-line protocol", () => {
   const s = heartbeatBlock();
   assert.match(s, /fleet-heartbeat\.mjs/);
-  // The partial-hold branch IS the mechanism: nothing lets
-  // one command block a whole interval, so a reader who stops at the first line
-  // ends the turn mid-interval and the beat dies there. Prose that names the
-  // script without the re-issue rule is a heartbeat with one beat.
-  assert.match(s, /re-issue this command now, do not end your turn/);
-  assert.match(s, /one blocking call per turn/);
+  // The recorded line and the unrecorded one are the whole protocol: a reader
+  // who learns only the first ends its turn over a mark that never landed, and
+  // the alarm's gate never passes on a run with no recorded beat.
+  assert.match(s, Pin.phrase("`… beat marked, alarm due in <N>s (quiet=<n>) → end your turn`"));
+  assert.match(s, Pin.phrase("`… beat NOT marked …` — this beat arms no alarm you can count on, so ending your turn could be the stall."));
+});
+
+test("the heartbeat block says an alarm turn arrives and what it runs", () => {
+  assert.match(heartbeatBlock(), Pin.phrase("The alarm's turn arrives as a user message that starts `[fleet-alarm]` and names `fleet-event.mjs heartbeat`"));
+});
+
+test("the heartbeat block no longer tells the controller to hold its turn", () => {
+  const s = heartbeatBlock();
+  assert.doesNotMatch(s, /--hold/);
+  assert.doesNotMatch(s, /re-issue/);
+  assert.doesNotMatch(s, /blocking call/);
 });
 
 test("the heartbeat block bounds the ceiling, and the reference says why", () => {
@@ -414,4 +425,20 @@ test("ADR 0028's Status line records that the tick now reads the session directo
   const adr = Pin.file(join(import.meta.dirname, "..", "docs", "adr", "0028-a-live-token-past-its-p99-points-the-controller-at-the-registry-census.md"));
   const status = adr.paragraph("**Status:**", "ADR 0028 Status line", "## Context").text;
   assert.match(status, Pin.phrase("Amended by #3201: the tick reads the session directory's listing to reconcile ledger tokens; it still reads no transcript's contents and no registry."));
+});
+
+test("nothing under run-team/ says never to end the turn", () => {
+  // Positive control first: the scan reads the files it claims to, so a
+  // zero below is not an empty directory. The phrase it must not find is the
+  // one the hold needed; it is checked case-insensitively and with the
+  // whitespace of a wrapped line folded.
+  const dir = join(REPO, "skills", "run-team");
+  const files = readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith(".md"))
+    .map((e) => join(e.parentPath, e.name));
+  assert.ok(files.some((f) => f.endsWith("SKILL.md")), "the scan did not reach SKILL.md");
+  const flat = (f) => readFileSync(f, "utf8").replace(/\s+/g, " ").toLowerCase();
+  assert.ok(files.some((f) => flat(f).includes("end your turn")), "the scan found no `end your turn` at all");
+  const hits = files.filter((f) => flat(f).includes("never end your turn"));
+  assert.deepEqual(hits, [], "a run-team file still says never to end the turn");
 });

@@ -112,19 +112,19 @@
     ],
     [
       "`fleet-tick` prints it before its own rows when this run has gone quiet: its beat overdue against the interval it recorded with no tick or ledger write inside the 40-minute window either — or, with no beat yet, its latest tick, ledger write or controller record past that window.",
-      "fleet-state.mjs's stall report, which the tick prints and tests/fleet-state.test.mjs runs; **Nothing to do: arm the beat** keeps what each opening wording asks of the controller"
+      "fleet-state.mjs's stall report, which the tick prints and tests/fleet-state.test.mjs runs; **Nothing to do: mark the beat and end your turn** keeps what each opening wording asks of the controller"
     ],
     [
       "A beat, tick or ledger write older than the controller record rotate wrote is the previous run's and counts for nothing.",
-      "fleet-state.mjs's stall report, which the tick prints and tests/fleet-state.test.mjs runs; **Nothing to do: arm the beat** keeps what each opening wording asks of the controller"
+      "fleet-state.mjs's stall report, which the tick prints and tests/fleet-state.test.mjs runs; **Nothing to do: mark the beat and end your turn** keeps what each opening wording asks of the controller"
     ],
     [
       "The cockpit shows the same line while it is up.",
-      "fleet-state.mjs's stall report, which the tick prints and tests/fleet-state.test.mjs runs; **Nothing to do: arm the beat** keeps what each opening wording asks of the controller"
+      "fleet-state.mjs's stall report, which the tick prints and tests/fleet-state.test.mjs runs; **Nothing to do: mark the beat and end your turn** keeps what each opening wording asks of the controller"
     ],
     [
       "It names when this run was last seen, how overdue that is, how many tickets are still claimed and in flight, and how much supply the last read found — because the claimed ones keep the `in-progress` label, the candidate scan EXCLUDES that label, and those tickets are therefore invisible to your own shortlist and to the maintainer's.",
-      "fleet-state.mjs's stall report, which the tick prints and tests/fleet-state.test.mjs runs; **Nothing to do: arm the beat** keeps what each opening wording asks of the controller"
+      "fleet-state.mjs's stall report, which the tick prints and tests/fleet-state.test.mjs runs; **Nothing to do: mark the beat and end your turn** keeps what each opening wording asks of the controller"
     ],
     [
       "**Review units are counted, never capped.**",

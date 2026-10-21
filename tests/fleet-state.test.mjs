@@ -24,17 +24,41 @@ import { ProcUnreadable } from "../plugin/scripts/proc.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-state.mjs", import.meta.url));
 
+test("readState: a file still carrying `elapsed` is read without error, and writeState does not make the key up", () => {
+  // `elapsed` belonged to the heartbeat's hold and left the schema with it. A
+  // file written before then still reads: the key is outside the schema, so
+  // it lands in `rest` like any foreign key, and no `elapsed` is added to the
+  // validated view or written from it.
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-elapsed-"));
+  const path = join(dir, "heartbeat.json");
+  writeFileSync(path, JSON.stringify({ quiet: 3, elapsed: 5, digest: "abc" }));
+  const old = readState(path, "fleet-state-test");
+  assert.equal(old.degraded, undefined, "a file with `elapsed` is not degraded");
+  assert.equal(old.quiet, 3);
+  assert.equal("elapsed" in old, false);
+  assert.deepEqual(old.rest, { elapsed: 5 });
+
+  // Written from the validated view alone, nothing of `elapsed` comes back.
+  assert.equal(writeState(path, "fleet-state-test", { ...old, rest: {} }, { quiet: 4 }), true);
+  assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { quiet: 4, digest: "abc" });
+
+  // And the fresh state of a run with no file never carries one.
+  const fresh = readState(join(dir, "absent.json"), "fleet-state-test");
+  assert.equal("elapsed" in fresh, false);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("readState: `rest` is what lies outside the schema, never a second copy of it", () => {
   const dir = mkdtempSync(join(tmpdir(), "fleet-state-"));
   const path = join(dir, "heartbeat.json");
-  writeFileSync(path, JSON.stringify({ quiet: "bogus", elapsed: 5, digest: "abc", note: "not ours" }));
+  writeFileSync(path, JSON.stringify({ quiet: "bogus", digest: "abc", note: "not ours" }));
   const state = readState(path, "fleet-state-test");
   rmSync(dir, { recursive: true, force: true });
 
   // The validated view, per field: a junk `quiet` sanitizes to 0 without taking
-  // the good `elapsed` down with it.
+  // the good `digest` down with it.
   assert.equal(state.quiet, 0);
-  assert.equal(state.elapsed, 5);
+  assert.equal("elapsed" in state, false, "`elapsed` is no key of the validated view");
   assert.equal(state.digest, "abc");
   // And `rest` carries the foreign key alone. A raw `quiet: "bogus"` sitting in
   // here is the value writeState would spread back onto the disk — the script
@@ -175,7 +199,7 @@ test("readState: a half-written mark is no mark, never a stale one", () => {
   const dir = mkdtempSync(join(tmpdir(), "fleet-state-beat-"));
   const path = join(dir, "heartbeat.json");
   const read = (beat) => {
-    writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", beat }));
+    writeFileSync(path, JSON.stringify({ quiet: 0, digest: "", beat }));
     return readState(path, "fleet-state-test").beat;
   };
   assert.equal(read({ at: 1_700_000_000_000 }), null, "a time with no interval cannot be judged");
@@ -192,13 +216,13 @@ test("readState: a half-written mark is no mark, never a stale one", () => {
 });
 
 test("readState: a junk mark does not ride back to disk through `rest`", () => {
-  // The same trap the file's header names for quiet/elapsed/digest, one key
+  // The same trap the file's header names for quiet/digest, one key
   // later. If `beat` were left in `rest`, fleet-tick's streak write would
   // spread the RAW record straight back over the sanitized one, and a mark
   // this read repaired would survive every write that repaired it.
   const dir = mkdtempSync(join(tmpdir(), "fleet-state-beat-rest-"));
   const path = join(dir, "heartbeat.json");
-  writeFileSync(path, JSON.stringify({ quiet: 1, elapsed: 0, digest: "d", beat: { at: "soon" }, note: "not ours" }));
+  writeFileSync(path, JSON.stringify({ quiet: 1, digest: "d", beat: { at: "soon" }, note: "not ours" }));
   const state = readState(path, "fleet-state-test");
   assert.equal(state.beat, null);
   assert.deepEqual(state.rest, { note: "not ours" }, "`beat` must be destructured out, not left in `rest`");
@@ -239,7 +263,7 @@ test("writeState: a non-owner's patch carries the mark instead of erasing it", (
   const dir = mkdtempSync(join(tmpdir(), "fleet-state-beat-carry-"));
   const path = join(dir, "heartbeat.json");
   const beat = { at: 1_700_000_000_000, interval: 600, stopped: "" };
-  writeFileSync(path, JSON.stringify({ quiet: 2, elapsed: 5, digest: "old", beat }));
+  writeFileSync(path, JSON.stringify({ quiet: 2, digest: "old", beat }));
   const prev = readState(path, "fleet-state-test");
   assert.equal(writeState(path, "fleet-state-test", prev, { quiet: 0, digest: "new" }), true);
   const after = readState(path, "fleet-state-test");
@@ -249,7 +273,7 @@ test("writeState: a non-owner's patch carries the mark instead of erasing it", (
 
   // And the absent mark is OMITTED rather than written as an explicit null,
   // so a file that has never been beaten into stays the shape it was.
-  writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "" }));
+  writeFileSync(path, JSON.stringify({ quiet: 0, digest: "" }));
   const fresh = readState(path, "fleet-state-test");
   assert.equal(writeState(path, "fleet-state-test", fresh, { quiet: 1 }), true);
   assert.equal("beat" in JSON.parse(readFileSync(path, "utf8")), false);
@@ -258,18 +282,18 @@ test("writeState: a non-owner's patch carries the mark instead of erasing it", (
 
 test("writeState: `ticked` survives a heartbeat write the same way `beat` survives a tick write", () => {
   // The mirror of the test above, other direction: fleet-heartbeat patches
-  // elapsed/beat on every hold, so a write that dropped `ticked` would erase
+  // beat on every call, so a write that dropped `ticked` would erase
   // fleet-tick's own liveness key the first time a heartbeat lands after a
   // busy stretch — silently reopening the #1597 follow-up this key exists to
   // close.
   const dir = mkdtempSync(join(tmpdir(), "fleet-state-ticked-carry-"));
   const path = join(dir, "heartbeat.json");
   const ticked = { at: 1_700_000_500_000 };
-  writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", ticked }));
+  writeFileSync(path, JSON.stringify({ quiet: 0, digest: "", ticked }));
   const prev = readState(path, "fleet-state-test");
   assert.deepEqual(prev.ticked, ticked, "readState did not parse a well-formed ticked mark");
   const beat = { at: 1_700_000_000_000, interval: 300, stopped: "" };
-  assert.equal(writeState(path, "fleet-state-test", prev, { elapsed: 5, beat }), true);
+  assert.equal(writeState(path, "fleet-state-test", prev, { beat }), true);
   const after = readState(path, "fleet-state-test");
   assert.deepEqual(after.ticked, ticked, "fleet-heartbeat's mark write erased fleet-tick's ticked key");
   assert.deepEqual(after.beat, beat);
@@ -277,48 +301,48 @@ test("writeState: `ticked` survives a heartbeat write the same way `beat` surviv
   // A junk `ticked` degrades to absent, never to a false zero: `at: 0` is a
   // decades-old occurrence, not "no occurrence", and would falsely rescue a
   // stale beat forever.
-  writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", ticked: { at: "soon" } }));
+  writeFileSync(path, JSON.stringify({ quiet: 0, digest: "", ticked: { at: "soon" } }));
   assert.equal(readState(path, "fleet-state-test").ticked, null);
   rmSync(dir, { recursive: true, force: true });
 });
 
 test("writeState: `controller` survives a tick write and a heartbeat write, and a patch of undefined removes it", () => {
   // #2966. ledger.mjs rotate is the key's one writer; fleet-tick and
-  // fleet-heartbeat rewrite the file on every tick and hold, and a key either
+  // fleet-heartbeat rewrite the file on every tick and beat, and a key either
   // of them dropped would leave the next run judging no record at all.
   const dir = mkdtempSync(join(tmpdir(), "fleet-state-controller-"));
   const path = join(dir, "heartbeat.json");
   const controller = { pid: 29405, lstart: "Fri Oct  9 14:26:16 2026", prior: "dead", at: 1_700_000_000_000 };
-  writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", controller, note: "not ours" }));
+  writeFileSync(path, JSON.stringify({ quiet: 0, digest: "", controller, note: "not ours" }));
   const prev = readState(path, "fleet-state-test");
   assert.deepEqual(prev.controller, controller);
   assert.deepEqual(prev.rest, { note: "not ours" }, "`controller` must be destructured out, not left in `rest`");
   assert.equal(writeState(path, "fleet-state-test", prev, { quiet: 1, digest: "d" }), true);
   assert.deepEqual(readState(path, "fleet-state-test").controller, controller, "a tick write erased the controller record");
   const beat = { at: 1_700_000_000_000, interval: 300, stopped: "" };
-  assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { elapsed: 5, beat }), true);
+  assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { beat }), true);
   assert.deepEqual(readState(path, "fleet-state-test").controller, controller, "a heartbeat write erased the controller record");
 
   assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { controller: undefined }), true);
   const raw = JSON.parse(readFileSync(path, "utf8"));
   assert.equal("controller" in raw, false);
-  assert.deepEqual(raw, { note: "not ours", quiet: 1, elapsed: 5, digest: "d", beat });
+  assert.deepEqual(raw, { note: "not ours", quiet: 1, digest: "d", beat });
   rmSync(dir, { recursive: true, force: true });
 });
 
 test("writeState: `seen` survives a heartbeat write and a controller write, is read per entry, and a patch of undefined removes it", () => {
   // fleet-tick is the key's one writer; fleet-heartbeat and ledger.mjs rotate
-  // rewrite the file on every hold and every rotation, and a key either of
+  // rewrite the file on every beat and every rotation, and a key either of
   // them dropped would restart every live token's age.
   const dir = mkdtempSync(join(tmpdir(), "fleet-state-seen-"));
   const path = join(dir, "heartbeat.json");
   const seen = { "fix-pr-5": 1_700_000_000_000, "review:PR#6": 1_700_000_100_000 };
-  writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", seen, note: "not ours" }));
+  writeFileSync(path, JSON.stringify({ quiet: 0, digest: "", seen, note: "not ours" }));
   const prev = readState(path, "fleet-state-test");
   assert.deepEqual(prev.seen, seen);
   assert.deepEqual(prev.rest, { note: "not ours" }, "`seen` must be destructured out, not left in `rest`");
   const beat = { at: 1_700_000_000_000, interval: 300, stopped: "" };
-  assert.equal(writeState(path, "fleet-state-test", prev, { elapsed: 5, beat }), true);
+  assert.equal(writeState(path, "fleet-state-test", prev, { beat }), true);
   assert.deepEqual(readState(path, "fleet-state-test").seen, seen, "a heartbeat write erased `seen`");
   const controller = { pid: 29405, lstart: "Fri Oct  9 14:26:16 2026", prior: "ancestor", at: 1_700_000_000_000 };
   assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { controller }), true);
@@ -430,7 +454,7 @@ test("writeState: the file a reader already opened is replaced whole, never rewr
   const path = join(dir, "heartbeat.json");
   const held = join(dir, "held-by-reader");
   const old = { at: 1_700_000_000_000, interval: 300, stopped: "" };
-  writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", beat: old }));
+  writeFileSync(path, JSON.stringify({ quiet: 0, digest: "", beat: old }));
   linkSync(path, held);
   const beat = { at: 1_700_000_300_000, interval: 300, stopped: "" };
   assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { beat }), true);
@@ -635,8 +659,8 @@ test("stallReport: names the four facts, and says `unknown` rather than guessing
 test("stallReport: a sub-60s interval renders as seconds, not a floored 0m", () => {
   // #1735: mins() floors to whole minutes, and the CLI guard for --base/
   // --ceiling only requires >= 1 (fleet-heartbeat.test.mjs relies on that —
-  // its CLI cases use 2s/3s/8s intervals throughout to keep real
-  // Atomics.wait holds fast), so a sub-minute mark is a real, reachable
+  // its CLI cases use 2s/3s/8s intervals throughout to keep the marks
+  // small), so a sub-minute mark is a real, reachable
   // shape here, not an input this module gets to refuse. Flooring it to
   // "0m" read as a division-by-zero defect rather than the true value.
   const now = 2_000_000_000_000;

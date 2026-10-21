@@ -24,10 +24,10 @@ itself is still alive when nothing else is left to report.
    (one artefact removed before a later step refused), or
    `Indeterminate` (the probe itself couldn't measure).
 3. **Beat.** [`fleet-heartbeat.mjs`](../../plugin/scripts/fleet-heartbeat.mjs)
-   is the one trigger that survives a fully drained Shortlist: it holds
-   the controller's turn for a backing-off interval (base 300s,
-   doubling to a 1200s ceiling) and then tells it to run the tick
-   anyway.
+   is the one trigger that survives a fully drained Shortlist: the
+   controller marks the beat and ends its turn, and once the backing-off
+   interval (base 300s, doubling to a 1200s ceiling) has passed, the
+   **Alarm** starts a turn that runs the tick anyway.
 4. **Mark and report.** Each beat writes a **Liveness mark** — when it
    was last seen and the interval then in effect — to the heartbeat
    state file; a reader comparing that age against its own interval
@@ -39,10 +39,11 @@ itself is still alive when nothing else is left to report.
 
 ## Opinionated choices
 
-- **A hold-and-reissue heartbeat, never a backgrounded watcher.** A
-  backgrounded watcher does not wake an idle agent, so the heartbeat
-  blocks the controller's own turn instead
-  ([ADR 0008](../adr/0008-a-turn-based-fleet-holds-its-own-turn.md)).
+- **An alarm, never a backgrounded watcher and never a held turn.** A
+  backgrounded watcher does not wake an idle agent, so the wake-up is an
+  omp extension inside the controller's own process, which starts a turn
+  once the beat falls due
+  ([ADR 0033](../adr/0033-the-controller-ends-its-turn-an-alarm-wakes-it.md)).
 - **The backoff ceiling is a bounded worst-case, not a tuning knob.**
   20 minutes is what a quiet night costs in noticing work that arrives
   from *outside* the fleet, with no event the controller could

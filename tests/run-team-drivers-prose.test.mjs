@@ -160,7 +160,7 @@ test("End of run runs closeout.mjs begin, the ordinary loop, then closeout.mjs f
 });
 
 test("the verdict rules stay in the guard, where the controller rules each PR; the BLANK rule's paragraph is in references/reviewers.md", () => {
-  const guard = SKILL.between("**Guard: accumulate per PR", "### Nothing to do: arm the beat", "run-team guard").text;
+  const guard = SKILL.between("**Guard: accumulate per PR", "### Nothing to do: mark the beat and end your turn", "run-team guard").text;
   assert.match(guard, Pin.phrase("--closed-own-ticket yes|no --minted-false-claim yes|no"));
   assert.match(guard, Pin.phrase("**A verdict is a measurement only if it post-dates the run that produced it.** See references/reviewers.md."));
   const moved = Pin.file(join(REFERENCES, "reviewers.md")).section("## A sizing verdict is a measurement only if it post-dates the run that produced it", "references/reviewers.md").text;
