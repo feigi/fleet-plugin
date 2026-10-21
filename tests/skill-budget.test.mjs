@@ -12,6 +12,17 @@
 //     -> usage input 4 + cacheWrite 3,824 = 3,828 input tokens
 //   SKILL.md alone = 72,987 - 3,828 = 69,159 tokens, so the ratio is
 //   186,100 / 69,159 = 2.69 bytes per input token.
+// RE-MEASURED once the file reached the target (#3545): omp 18.12.5,
+// 2026-10-21, the same model, run as the invocation above plus `--model
+// anthropic/claude-opus-5-5`, from a directory outside any checkout:
+//   - prompt = SKILL.md (74,811 bytes) + "\n\nReply with the single word ok."
+//     -> usage input 4 + cacheWrite 49,717 = 49,721 input tokens
+//   - prompt = "Reply with the single word ok." alone
+//     -> usage input 4 + cacheRead 16,937 + cacheWrite 4,968 = 21,909 input
+//        tokens
+//   SKILL.md alone = 49,721 - 21,909 = 27,812 tokens, so the ratio is
+//   74,811 / 27,812 = 2.69 bytes per input token, and the 75,000-byte target
+//   is about 27,900 tokens.
 // CI has no omp, so the ceilings below are bytes; the ratio converts them.
 //
 // THE CEILINGS.
@@ -22,8 +33,8 @@
 //     1,000. It only ever comes down, and it is held tight: the file must be
 //     at most the ceiling AND less than 1,000 bytes under it. A change that
 //     shrinks the file lowers the constant in the same change, so freed
-//     headroom cannot be spent on new prose. The ratio is re-measured when
-//     the file is compressed, not here.
+//     headroom cannot be spent on new prose. The ratio was re-measured once
+//     the file reached the target, above.
 //   - review-and-fix.md and run-merge-bot.md: their size when this test
 //     landed (60,302 and 72,168 bytes) plus ten percent, rounded down. They
 //     get no slack rule.
@@ -42,7 +53,7 @@ const MOVE = "move text to references/, do not raise the ceiling";
 // [path, ceiling in bytes, whether the ceiling must also be tight].
 const SLACK = 1_000;
 const CEILINGS = [
-  [SKILL, 79_000, true],
+  [SKILL, 75_000, true],
   ["plugin/commands/review-and-fix.md", 66_332, false],
   ["plugin/commands/run-merge-bot.md", 79_384, false],
 ];

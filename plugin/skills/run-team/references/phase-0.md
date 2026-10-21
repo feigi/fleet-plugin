@@ -12,6 +12,10 @@ child's stderr. `--session <dir>` overrides the variable.
 Exit 3 is a step that failed: its line carries the refusal, so fix the cause
 and run it again.
 
+Once per run, at start. Supply is automatic after that: the tick
+refreshes the Shortlist itself, and every admission is a **Pull** — one ticket
+into one free implementer slot, the moment it frees (phase 1).
+
 `phase0.mjs` runs the start sequence in
 its fixed order — alarm, branch, fast-forward, pin, baseline, preflight, ruleset,
 tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded,
@@ -494,4 +498,19 @@ stranded.
    fixes it, and you never run `candidates.mjs --allow-fallback` by hand to
    widen the list: `ready-for-human` needs a human to brainstorm first and you
    have no channel to one mid-flight.
+
+   `candidates.mjs`'s exit 3 reaches you as an empty shortlist whose `dropped`
+   names every ticket the to-spec filter took, by number and reason — and the
+   tick prints the same list on every tick, `specs-dropped=#<N> (to-spec: User
+   Stories heading)` on the implementer row. **Exit 3 is not that empty queue, and never a reason to
+   widen the net.** It says the labeled query returned rows and the to-spec
+   filter took every one: what is queued is to-tickets' input rather than
+   claimable tickets, and a member handed one implements an entire spec as a
+   single ticket. Log it as
+   specs awaiting to-tickets, not as no work — read the numbers off
+   `dropped` or `specs-dropped=`, not off stderr, which the tick's own
+   refresh discards — and still do not pass
+   `--allow-fallback`, whose second pass is unfiltered and so reaches the
+   `ready-for-human` and untriaged work you have no channel for. A partial
+   drop, survivors and specs together, is named the same way.
 

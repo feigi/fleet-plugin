@@ -253,6 +253,9 @@ where the controller itself runs from.
   killed a `node --test` over two test files that was not
   its own.
 
+Members report a stalled run to the controller instead of pattern-killing it,
+and the controller re-checks any measurement taken in the window.
+
 ## What a killed run's output looks like depends on the signal
 
 **What the victim's output looks like depends on the signal — and one of the
@@ -271,6 +274,11 @@ run: `spawnSync` reports a SIGKILLed child as `status null`, and a test
 asserting only that the process it spawned exited non-zero —
 `assert.notEqual(r.status, 0)`, a form used across this suite, in files that
 spawn the shell scripts they cover — passes vacuously on `null`.
+
+So **a complete summary block proves the runner survived, not that the run was
+uncontaminated.** Scrutinize reds, short counts *and* greens from inside the
+incident window; a killed **baseline** compared against a clean mutant is a
+wrong measurement that reads exactly like a real result.
 
 ## The command line is no partition either
 

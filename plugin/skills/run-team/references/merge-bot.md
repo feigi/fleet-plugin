@@ -2,6 +2,19 @@
 
 Evidence for the rules SKILL.md states in **A mid-run tooling fix** and in the `ready-to-merge` wake, keyed by the rule each justifies.
 
+## When to fix the tooling mid-run, and its shape
+
+**Triggers.** Identical failure twice. A member does the wrong thing while
+correctly following the text. A rule exists but sits where it is read last. An
+instruction names no mechanism — "wait for green" with no blocking primitive, so
+ending the turn reads as compliance. A caller has to restate what the callee
+should say itself.
+
+**Shape — lean, or it rots.** Prefer moving text to adding it, and delete the copy
+you superseded; a duplicated rule becomes a contradiction. Exit conditions go in a
+section's first paragraph, never its last. Name the mechanism, or name who owns
+the step. Cut before you append.
+
 ## A mid-run tooling fix lands through a PR
 
 **Landing it.** The file being right is not the end of it. `main` carries a

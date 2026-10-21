@@ -52,6 +52,11 @@ terminating in exactly one dispatch or an empty shortlist:
    scope` sequencing wherever that section is found. Then judge **decided?**
    — never size.
 
+   **Torn → surface, never guess**: relabel it
+   `ready-for-human` as a fork naming the open decision — the label is how a
+   Pull surfaces it to the maintainer. Opposite of
+   `sizing-a-ticket`'s *torn → take the heavier row*, deliberately — see that skill.
+
    **A ruling the brief does not carry stops the Pull first.** The brief is
    the last `## Agent Brief` comment, else the issue body, so a decision posted
    under another heading never reaches any question the Pull asks. A comment
@@ -78,6 +83,16 @@ terminating in exactly one dispatch or an empty shortlist:
    before reading the failure as "unfixed". Already fixed → close it citing the
    commit, do not claim it. Partly fixed → say which acceptance criteria the
    tree already meets, and which the tree now **contradicts**.
+
+   **Grep for the ticket's ASKED-FOR CHANGE, not only its subject construct** —
+   the construct check passes on every stale pin ticket, because the construct
+   is what the pin is *about* and never went anywhere. So for a ticket asking
+   for a pin, test or assertion, grep the **test file** for the assertion it
+   wants; for one asking for exact wording, grep the **old** wording the ticket
+   quotes as wrong, never the new wording it proposes. A proposed replacement is
+   a suggestion the implementer is free to reword — an equivalent rewording
+   satisfies the ticket while failing a grep for its literal text — and the
+   quoted defect is the fact.
 
    Old string gone from `git show origin/main:<file>`
    ⇒ the fix landed, and
@@ -222,6 +237,13 @@ terminating in exactly one dispatch or an empty shortlist:
    printed beside Q3 as the candidates: one naming an open ticket this one
    sequences after → `behind-issue:#M`. No overlap and no such ticket →
    `clear`.
+
+   **`collision` (Q3)** — asked after the scan prints one line per open PR or
+   live worktree branch sharing a path with the brief (`no overlap` when none,
+   `could not look: <which>` for one it could not read) and the brief's `Out of
+   scope` `#N` refs as candidates: `clear`; `behind-pr:#M`, an open PR or a
+   branch with no PR yet by its name; `behind-issue:#M`, an open issue that
+   section sequences this one after; or `paths <p>…`, which scans again.
 6. **Claim** — `~/.fleet/bin/fleet-run claim-ticket.sh <N> impl-<N> implementer
    --apply` (below). Exit 2 → treat it as taken, next entry.
 7. **Route, row, then dispatch** — `~/.fleet/bin/fleet-run ticket-router.mjs route
@@ -418,6 +440,9 @@ it — a ticket the rest of the run
 depends on; `class` is not read. Do not tell the member it is a control: a member that
 knows it is being measured is not measuring the same thing.
 
+The cell is the one the router's printed CELL line names, the whole routing decision.
+**Do not label it anywhere — the dispatch record already carries it.**
+
 ## The readout counts deliberate comparisons
 
 **The readout counts DELIBERATE comparisons.** An earlier rule asked
@@ -437,6 +462,14 @@ The unit is the PR —
 supply is one Pull per free slot, so there are no implementer batches. The
 guard this section speaks of is SKILL.md's **Guard: accumulate per PR, never
 conclude inside one run**, under **Reading a review result**.
+
+`tier-outcomes.mjs append`
+fills `run_date`, `pr`, `ticket` and `tier` itself — `tier` from what actually
+ran, off the implementer's `tier-ok=` ledger verdict or else its one
+member-outcomes row (a `tier-unverifiable=` member has no ledger verdict, so
+its one member-outcomes row decides), and BLANK with a WARNING naming why
+when neither settles
+it; never type a tier in over that.
 
 **Why not decide inside one run.** A run holds 2-3 implementer PRs, and ticket
 difficulty swamps the tier effect — a gojq parity harness and a two-statement
@@ -537,6 +570,9 @@ one run.
 
 ## Default: In-flight bound 5
 
+`$ARGUMENTS` sets B. It becomes
+the tick's `--in-flight` and `tier-roles.mjs --check --in-flight`.
+
 **Default: In-flight bound 5, fixed for the run.** The level is set by load, not
 throughput: B caps live review units (≤ open PRs ≤ B), and the review side is
 about 84 % of cache-write tokens, fanning out to 1 snapshot + up to 6
@@ -553,6 +589,10 @@ it, never from one run's rows.
 A deep `ready-to-merge` queue adds no rebases per PR — each PR rebases exactly
 once, when it becomes the candidate — and those PRs count as In flight because
 they sit between Claim and merge, not because the queue is deep.
+
+A deep backlog is a
+`DISPATCH review` on the same tick, never a reason to idle an implementer.
+A starved implementer queue never stalls the review or merge side.
 
 ## Reconcile, do not wait for an event
 
