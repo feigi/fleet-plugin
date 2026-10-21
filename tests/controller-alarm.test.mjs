@@ -262,7 +262,7 @@ test("extension: a poll that cannot read the file is not due and writes nothing 
   assert.deepEqual(lines, []);
 });
 
-test("extension: a throwing idle probe, a throwing send and a rejecting send never escape the poll", async (t) => {
+test("extension: a throwing idle probe and a throwing send never escape the poll", async (t) => {
   world(t);
   writeBeat(dueRecord());
   const throwingIdle = session();
@@ -273,9 +273,22 @@ test("extension: a throwing idle probe, a throwing send and a rejecting send nev
   const throwingSend = session({ send: () => { throw new Error("send failed"); } });
   await throwingSend.start();
   assert.doesNotThrow(() => throwingSend.state.timers[0].fn());
+});
 
-  const rejectingSend = session({ send: () => Promise.reject(new Error("send failed")) });
-  await rejectingSend.start();
-  assert.doesNotThrow(() => rejectingSend.state.timers[0].fn());
-  await new Promise((resolve) => setImmediate(resolve));
+test("extension: a send that throws synchronously is retried on the next poll, a send that returns is not", async (t) => {
+  world(t);
+  writeBeat(dueRecord());
+  const throwing = session({ send: () => { throw new Error("send failed"); } });
+  await throwing.start();
+  const pollThrowing = throwing.state.timers[0].fn;
+  pollThrowing();
+  pollThrowing();
+  assert.equal(throwing.state.sent.length, 2, "a throw leaves the beat unfired, so the next poll sends again");
+
+  const returning = session();
+  await returning.start();
+  const pollReturning = returning.state.timers[0].fn;
+  pollReturning();
+  pollReturning();
+  assert.equal(returning.state.sent.length, 1, "a send that returned fires once for this beat");
 });

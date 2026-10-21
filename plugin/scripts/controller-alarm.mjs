@@ -118,8 +118,7 @@ function arm(pi, ctx) {
       const now = Date.now();
       const due = alarmDue({ kind: ctx.agent.kind, pid: process.pid, controller, beat, idle: ctx.isIdle(), now, firedFor });
       if (!due) return;
-      // A send that rejects later must not surface as an unhandled rejection in a session that is not ours.
-      Promise.resolve(pi.sendUserMessage(ALARM_LINE)).catch(() => {});
+      pi.sendUserMessage(ALARM_LINE);
       firedFor = { at: beat.at, firedAt: now };
     } catch {
       // Cannot read or judge: not due.
