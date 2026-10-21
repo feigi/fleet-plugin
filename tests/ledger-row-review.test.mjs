@@ -25,10 +25,11 @@ import { fileURLToPath } from "node:url";
 import { rowWriteRefusal } from "../plugin/scripts/ledger-grammar.mjs";
 import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
 import { rendering } from "./support/rendered-brief.mjs";
+import { writeQueueGh, closes } from "./support/queue-gh.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
-function fixture(t, rows = null) {
+function fixture(t, rows = null, { gh = false } = {}) {
   // The ledger's directory sits in `root`, as `.fleet/` sits in a main
   // checkout, so a finisher dispatch reads `root`'s tier-outcomes file.
   const root = mkdtempSync(join(tmpdir(), "ledger-row-review-"));
@@ -40,8 +41,14 @@ function fixture(t, rows = null) {
     writeFileSync(file, `# Fleet run ledger\n\n## Rows\n\n${rows.map((r) => `- ${r}\n`).join("")}\n## Filed\n\n## Ruled\n\n`);
   }
   // PATH is an empty directory: `row` and `review` are local only and may reach no gh.
+  // A finisher dispatch reads the PR's closing references from gh and the
+  // ledger's repository from git, so a fixture that dispatches one asks for both.
   const bin = join(dir, "bin");
   mkdirSync(bin);
+  if (gh) {
+    writeQueueGh(bin);
+    assert.equal(spawnSync("git", ["init", "-q", root]).status, 0);
+  }
   const env = { ...process.env, PATH: bin };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
@@ -71,7 +78,7 @@ function fixture(t, rows = null) {
     mkdirSync(join(root, "docs", "metrics"), { recursive: true });
     writeFileSync(join(root, "docs", "metrics", "tier-outcomes.tsv"), `2026-10-21\t${pr}\t1\troutine\tslow-high\tyes\tno\truled\n`);
   };
-  return { run, ok, refused, review, reviewRefused, refusedCall, read, rows: () => read().rows, file, rule };
+  return { run, ok, refused, review, reviewRefused, refusedCall, read, rows: () => read().rows, file, rule, bin };
 }
 
 const A = "review=member:review-pr-482";
@@ -458,8 +465,9 @@ test("#2288: a fix applied after the review it answers ends fixDue, and a newer 
 });
 
 test("#2288: a finisher halted past-pin after the fix re-queues the review", (t) => {
-  const f = fixture(t);
+  const f = fixture(t, null, { gh: true });
   f.rule(724);
+  closes(f.bin, 724, [658]);
   reviewedAndFixed(f);
   // The fix-applier's dispositions verdict, as dispositions-check.mjs records it.
   const [row] = f.rows();

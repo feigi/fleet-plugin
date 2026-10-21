@@ -1894,34 +1894,155 @@ function dispositionsRefusal(pr, review) {
   return null;
 }
 
-// Why PR `pr`'s finisher waits on its ruling, or null when it does not: the
-// PR is an implementer's — a settled `impl-<N>=PR#<pr>` token on a row names
-// it, the token tier-outcomes.mjs `append` resolves a ticket from — and the
-// main checkout's tier-outcomes.tsv has no row whose `pr` is it. Any row
-// passes, whatever its date or verdicts, so a replacement finisher is never
-// held once the first passed. The ledger lives in the main checkout's
-// `.fleet/` (fleet-dir.mjs), so the file is found beside that directory —
-// no git, no gh. A missing file is no row (`append` creates it); one that
-// cannot be read or parsed refuses, naming it, and is never a pass.
+// PR `pr`'s ruling, as `{tickets, ruling, tsv, refusal}`: `tickets` the
+// tickets a settled `impl-<N>=PR#<pr>` token on a row names — the token
+// tier-outcomes.mjs `append` resolves a ticket from — and `ruling` the PR's
+// latest row in `tsv`, the main checkout's tier-outcomes.tsv, or null when
+// `refusal` is set or `tickets` is empty. `refusal` says why the
+// finisher waits, or is null when it does not: the PR is an implementer's and
+// the file has no row whose `pr` is it. Any row passes, whatever its date or
+// verdicts, so a replacement finisher is never held once the first passed.
+// The ledger lives in the main checkout's `.fleet/` (fleet-dir.mjs), so the
+// file is found beside that directory — no git, no gh. A missing file is no
+// row (`append` creates it); one that cannot be read or parsed refuses,
+// naming it, and is never a pass.
 // tier-outcomes.mjs is imported here, not at the top: its import graph is
 // several modules no other subcommand loads.
-async function rulingRefusal(pr) {
+async function rulingOf(pr) {
   const { parseTierOutcomes, implementerClaims } = await import("./tier-outcomes.mjs");
   const tickets = [...new Set(implementerClaims(data, pr).map((c) => c.ticket))];
-  if (tickets.length === 0) return null;
+  if (tickets.length === 0) return { tickets, ruling: null, refusal: null };
   const tsv = join(dirname(dirname(resolve(file))), "docs", "metrics", "tier-outcomes.tsv");
   if (existsSync(tsv)) {
     let rows;
     try {
       rows = parseTierOutcomes(readFileSync(tsv, "utf8"));
     } catch (e) {
-      return `cannot read the PR's ruling off ${tsv}: ${e.code ?? e.message} — fix the file, then dispatch the finisher again`;
+      return { tickets, ruling: null, refusal: `cannot read the PR's ruling off ${tsv}: ${e.code ?? e.message} — fix the file, then dispatch the finisher again` };
     }
-    if (rows.some((r) => r.pr === String(pr))) return null;
+    const ruling = rows.findLast((r) => r.pr === String(pr));
+    if (ruling !== undefined) return { tickets, ruling, tsv, refusal: null };
   }
-  return `PR #${pr}, the implementer PR of ${tickets.length === 1 ? "ticket" : "tickets"} ${tickets.map((n) => `#${n}`).join(", ")}, has no ruling — `
+  return { tickets, ruling: null, refusal: `PR #${pr}, the implementer PR of ${tickets.length === 1 ? "ticket" : "tickets"} ${tickets.map((n) => `#${n}`).join(", ")}, has no ruling — `
     + `${tsv} has no row for it; rule its review with \`~/.fleet/bin/fleet-run tier-outcomes.mjs append ${pr} --closed-own-ticket yes|no `
-    + `--minted-false-claim yes|no --note "<text>"\`, then dispatch the finisher again`;
+    + `--minted-false-claim yes|no --note "<text>"\`, then dispatch the finisher again` };
+}
+
+// The reads a check makes of GitHub and git, shared by settle --from-report
+// and the finisher gate. Every child runs from the ledger's repository with
+// runCheck()'s environment, for runCheck()'s reasons: GH_REPO would point gh
+// at another tracker whatever the cwd, and GIT_DIR/GIT_WORK_TREE git at
+// another repo. A read that cannot answer dies, naming itself, so nothing is
+// written past it.
+function checkReaders(where) {
+  // The bound on each child a check runs: generous, because verify-sha.sh
+  // fetches, and still a bound, because the child may never answer at all.
+  const checkTimeoutMs = 60_000;
+  const verifySha = join(dirname(fileURLToPath(import.meta.url)), "verify-sha.sh");
+  const env = { ...process.env, GH_REPO: "" };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  let repo = null;
+  const repoDir = () => {
+    if (repo !== null) return repo;
+    let dir = dirname(resolve(file));
+    while (!existsSync(dir) && dirname(dir) !== dir) dir = dirname(dir);
+    const r = spawnSync("git", ["-C", dir, "rev-parse", "--show-toplevel"], { encoding: "utf8", env, timeout: GIT_TIMEOUT_MS });
+    if (r.status !== 0) {
+      const why = cause(r.error && r.error.message, r.stderr);
+      die(`${where}: could not look — cannot resolve the ledger's repository (${dir})${why ? `: ${why}` : ""}; nothing written`);
+    }
+    repo = r.stdout.trim();
+    return repo;
+  };
+  // A child that must answer with one of `answers`; anything else — another
+  // status, a spawn failure, a timeout — could not look.
+  const look = (what, cmd, args, answers = [0]) => {
+    const r = spawnSync(cmd, args, { encoding: "utf8", cwd: repoDir(), env, timeout: checkTimeoutMs, stdio: ["ignore", "pipe", "pipe"] });
+    if (r.status === null || !answers.includes(r.status)) {
+      const why = cause(r.error && r.error.message, r.stderr);
+      die(`${where}: could not look — ${what}${r.status === null ? "" : ` exited ${r.status}`}${why ? `: ${why}` : ""}; nothing written`);
+    }
+    return r;
+  };
+  const verifyShaOf = (branch, sha) => look(`verify-sha.sh ${branch} ${sha}`, "sh", [verifySha, branch, sha], [0, 1]);
+  // A gh answer, parsed: `v` the JSON it printed, or null when it printed
+  // none, beside the answer `r` itself for the caller's refusal.
+  const lookJson = (what, args) => {
+    const r = look(what, "gh", args);
+    try {
+      return { r, v: JSON.parse(r.stdout) };
+    } catch {
+      return { r, v: null };
+    }
+  };
+  // A `gh pr view --json <fields>` answer: an object whose every requested
+  // field has the type that field has. Anything else was not what was asked
+  // for, so it could not look.
+  const prFieldOk = { state: (v) => typeof v === "string", labels: Array.isArray, closingIssuesReferences: Array.isArray };
+  const prView = (pr, fields) => {
+    const what = `gh pr view ${pr} --json ${fields}`;
+    const { r, v } = lookJson(what, ["pr", "view", String(pr), "--json", fields]);
+    if (v === null || typeof v !== "object") {
+      die(`${where}: could not look — ${what} printed no JSON object: ${cause(r.stdout)}; nothing written`);
+    }
+    const missing = fields.split(",").filter((f) => !prFieldOk[f](v[f]));
+    if (missing.length > 0) {
+      die(`${where}: could not look — ${what} answered without a usable ${missing.join(", ")}: ${cause(r.stdout)}; nothing written`);
+    }
+    return v;
+  };
+  // The title of issue `n`, as `gh issue view <n> --json title` answers it.
+  const issueTitle = (n) => {
+    const what = `gh issue view ${n} --json title`;
+    const { r, v } = lookJson(what, ["issue", "view", String(n), "--json", "title"]);
+    if (v === null || typeof v !== "object" || typeof v.title !== "string") {
+      die(`${where}: could not look — ${what} printed no title: ${cause(r.stdout)}; nothing written`);
+    }
+    return v.title;
+  };
+  return { repoDir, look, verifyShaOf, prView, issueTitle };
+}
+
+// The finisher gate's closing-reference checks for the PR `member` finishes,
+// read off the PR's closingIssuesReferences and the titles of the issues it
+// names; its second argument is rulingOf()'s answer, which let the PR
+// through. Check 1, when a settled implementer's token names the PR: each
+// ticket it names is closed by the body when the PR's ruling is
+// closed_own_ticket=yes, and is not when the ruling is no. Check 2, for every
+// PR: no reference may be the suggestion-band record of this PR's review — an
+// issue whose title, trimmed, is recordTitle(), as dispositions-check.mjs
+// finds the record. Returns one line per failure. A read the checks need
+// dies, naming the read, and writes nothing.
+async function closingRefusals(member, { tickets, ruling, tsv }) {
+  const pr = member.number;
+  const where = `dispatch ${member.name}`;
+  const { recordTitle } = await import("./dispositions-check.mjs");
+  const { prView, issueTitle } = checkReaders(where);
+  const refs = [...new Set(prView(pr, "closingIssuesReferences").closingIssuesReferences.map((r) => r?.number))];
+  if (!refs.every(Number.isInteger)) {
+    die(`${where}: could not look — gh pr view ${pr} --json closingIssuesReferences answered a reference with no issue number; nothing written`);
+  }
+  const failures = [];
+  if (tickets.length > 0) {
+    const verdict = ruling.closed_own_ticket;
+    if (verdict === "") {
+      failures.push(`PR #${pr}'s row in ${tsv} has no closed_own_ticket verdict, so its closing references cannot be checked — set the verdict in that row, then dispatch the finisher again`);
+    } else if (verdict === "yes") {
+      for (const n of tickets) {
+        if (!refs.includes(n)) failures.push(`PR #${pr} does not close #${n}, ruled closed_own_ticket=yes — add "Closes #${n}" to its body (gh pr edit ${pr} --body-file …)`);
+      }
+    } else {
+      for (const n of tickets) {
+        if (refs.includes(n)) failures.push(`PR #${pr} closes #${n}, ruled closed_own_ticket=no — rephrase it as "Refs #${n}"`);
+      }
+    }
+  }
+  const own = recordTitle(pr);
+  for (const n of refs) {
+    if (issueTitle(n).trim() === own) failures.push(`PR #${pr} closes #${n}, its own suggestion-band record — rephrase the mention as "Refs #${n}" or "issue #${n}"`);
+  }
+  return failures;
 }
 
 // The open `ready-to-merge` PRs, ascending, as gh answers from the ledger's
@@ -2079,9 +2200,11 @@ async function runDispatch() {
   // nothing for a fix-applier to rule on, and one never reviewed has no
   // review file: neither is gated on a verdict. Then an implementer's PR
   // waits on its ruling, its tier-outcomes row, written while the PR is open
-  // and its review evidence still in scratch; see rulingRefusal(). Refused
-  // here, before anything is written, so no check can be skipped by
-  // forgetting to run it.
+  // and its review evidence still in scratch; see rulingOf(). Last, the
+  // PR's closing references must match that ruling and exclude its own
+  // suggestion-band record, read off gh from the ledger's repository; see
+  // closingRefusals(). Refused here, before anything is written, so no check
+  // can be skipped by forgetting to run it.
   if (member.family === "finisher-pr") {
     const fold = tickFold("conflict hold and dispositions verdict");
     if (fold.conflictHeld.includes(member.number)) {
@@ -2089,8 +2212,12 @@ async function runDispatch() {
         + `and let it settle applied:/no-op, then dispatch the finisher again — not dispatching ${member.name}`);
     }
     const review = fold.reviewed.find((r) => r.pr === member.number);
-    const refusal = dispositionsRefusal(member.number, review) ?? await rulingRefusal(member.number);
-    if (refusal !== null) die(`${member.name}: ${refusal} — not dispatching ${member.name}`);
+    const disposed = dispositionsRefusal(member.number, review);
+    if (disposed !== null) die(`${member.name}: ${disposed} — not dispatching ${member.name}`);
+    const ruled = await rulingOf(member.number);
+    if (ruled.refusal !== null) die(`${member.name}: ${ruled.refusal} — not dispatching ${member.name}`);
+    const closing = await closingRefusals(member, ruled);
+    if (closing.length > 0) die(`${member.name}: ${closing.join("; ")} — not dispatching ${member.name}`);
   }
   // Every error caught here carries its own cause and remedy — a row's `tier=`
   // (fix it with `ledger.mjs row`) for an implementer, a family
@@ -2429,12 +2556,8 @@ function mismatch(msg) {
 
 async function runSettleFromReport() {
   const usage = "usage: ledger.mjs settle <member> --from-report [--reports <dir>]";
-  const verifySha = join(dirname(fileURLToPath(import.meta.url)), "verify-sha.sh");
   const deriveTestcmd = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh");
   const ready = "ready-to-merge";
-  // The bound on each child a check runs: generous, because verify-sha.sh
-  // fetches, and still a bound, because the child may never answer at all.
-  const checkTimeoutMs = 60_000;
   let member;
   let reports = null;
   for (let k = 0; k < rest.length; k++) {
@@ -2474,58 +2597,8 @@ async function runSettleFromReport() {
   const invalid = (violation) => die(`${where}: ${read.path} is not a ${reportFamily(member)} report — ${violation}; nothing written`);
   if (report.member !== member) invalid(`$.member: ${JSON.stringify(report.member)} is not ${member}`);
 
-  // Every child runs from the ledger's repository with runCheck()'s
-  // environment, for runCheck()'s reasons: GH_REPO would point gh at another
-  // tracker whatever the cwd, and GIT_DIR/GIT_WORK_TREE git at another repo.
-  const env = { ...process.env, GH_REPO: "" };
-  delete env.GIT_DIR;
-  delete env.GIT_WORK_TREE;
-  let repo = null;
-  const repoDir = () => {
-    if (repo !== null) return repo;
-    let dir = dirname(resolve(file));
-    while (!existsSync(dir) && dirname(dir) !== dir) dir = dirname(dir);
-    const r = spawnSync("git", ["-C", dir, "rev-parse", "--show-toplevel"], { encoding: "utf8", env, timeout: GIT_TIMEOUT_MS });
-    if (r.status !== 0) {
-      const why = cause(r.error && r.error.message, r.stderr);
-      die(`${where}: could not look — cannot resolve the ledger's repository (${dir})${why ? `: ${why}` : ""}; nothing written`);
-    }
-    repo = r.stdout.trim();
-    return repo;
-  };
-  // A child that must answer with one of `answers`; anything else — another
-  // status, a spawn failure, a timeout — could not look.
-  const look = (what, cmd, args, answers = [0]) => {
-    const r = spawnSync(cmd, args, { encoding: "utf8", cwd: repoDir(), env, timeout: checkTimeoutMs, stdio: ["ignore", "pipe", "pipe"] });
-    if (r.status === null || !answers.includes(r.status)) {
-      const why = cause(r.error && r.error.message, r.stderr);
-      die(`${where}: could not look — ${what}${r.status === null ? "" : ` exited ${r.status}`}${why ? `: ${why}` : ""}; nothing written`);
-    }
-    return r;
-  };
-  const verifyShaOf = (branch, sha) => look(`verify-sha.sh ${branch} ${sha}`, "sh", [verifySha, branch, sha], [0, 1]);
-  // A `gh pr view --json <fields>` answer: an object whose every requested
-  // field has the type that field has. Anything else was not what was asked
-  // for, so it could not look.
-  const prFieldOk = { state: (v) => typeof v === "string", labels: Array.isArray, closingIssuesReferences: Array.isArray };
-  const prView = (pr, fields) => {
-    const what = `gh pr view ${pr} --json ${fields}`;
-    const r = look(what, "gh", ["pr", "view", String(pr), "--json", fields]);
-    let v = null;
-    try {
-      v = JSON.parse(r.stdout);
-    } catch {
-      // Falls through to the refusal below.
-    }
-    if (v === null || typeof v !== "object") {
-      die(`${where}: could not look — ${what} printed no JSON object: ${cause(r.stdout)}; nothing written`);
-    }
-    const missing = fields.split(",").filter((f) => !prFieldOk[f](v[f]));
-    if (missing.length > 0) {
-      die(`${where}: could not look — ${what} answered without a usable ${missing.join(", ")}: ${cause(r.stdout)}; nothing written`);
-    }
-    return v;
-  };
+  // The gh and git reads this check makes, shared with the finisher gate.
+  const { repoDir, look, verifyShaOf, prView } = checkReaders(where);
   // origin's head of `branch`, or null when origin has no such branch.
   const remoteHead = (branch) => {
     const ref = `refs/heads/${branch}`;

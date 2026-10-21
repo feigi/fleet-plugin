@@ -67,7 +67,7 @@
 //     of ALLOWED_DEFER. Any other reason, or none, is a mismatch.
 //     `disposition` has no `dismiss`: an in-scope `survived` finding verified
 //     correct, needing no change, is deferred with `reason` `false-rationale`
-//     and filed on the closed suggestion-band record.
+//     and filed on the suggestion-band record.
 //   - `remedy-outside-diff` passes only when `remedyFiles` names at least one
 //     file absent from the file list of `git diff <merge-base>...<head>`
 //     (renames and deletions listed on both sides, so a file the PR deleted
@@ -103,16 +103,16 @@
 //       row  finding                                             home
 //       1    survived, in scope, deferred for an allowed         open, needs-triage
 //            reason other than false-rationale
-//       2    survived, in scope, deferred false-rationale        closed suggestion-band record
+//       2    survived, in scope, deferred false-rationale        suggestion-band record
 //       3    unverified, its refuters dispatched and crashed     open, needs-triage
 //            or abstained
-//       4    in-scope suggestion, its refuter refuted it         closed suggestion-band record
+//       4    in-scope suggestion, its refuter refuted it         suggestion-band record
 //       5    in-scope suggestion, its refuter let it survive     applied, or deferred as row 1
-//       6a   out-of-scope suggestion alleging wrong behavior,    closed suggestion-band record
+//       6a   out-of-scope suggestion alleging wrong behavior,    suggestion-band record
 //            its refuter refuted it
 //       6b   out-of-scope suggestion alleging wrong behavior,    open, needs-triage
 //            its refuter let it survive, crashed or abstained
-//       7    claimKind shape, below the claim bar                closed suggestion-band record
+//       7    claimKind shape, below the claim bar                suggestion-band record
 //       8    survived, out of scope, whatever its reason         open, needs-triage
 //
 //     Row 4 outranks row 7, and row 7 every other row. A row-5 deferral is
@@ -121,12 +121,12 @@
 //     or row-8 deferral is held to no reason and escalates nothing, whatever
 //     its severity. An open home carries exactly one triage label, its row's or
 //     a stronger one: every open row is filed `needs-triage`, and
-//     `ready-for-agent`, which only triage sets, answers one too. The closed
-//     suggestion-band record is the closed issue titled `PR #<pr> review:
-//     the suggestion band, checked`, labelled `wontfix`. `claimKind` is
-//     trusted: the script never judges whether a claim is about shape. A
-//     deferral no row holds — a reversed refutation whose claim is about
-//     behavior — is a mismatch naming no filing-table row.
+//     `ready-for-agent`, which only triage sets, answers one too. The
+//     suggestion-band record is the issue titled `PR #<pr> review: the
+//     suggestion band, checked`, already closed and labelled `wontfix`.
+//     `claimKind` is trusted: the script never judges whether a claim is
+//     about shape. A deferral no row holds — a reversed refutation whose
+//     claim is about behavior — is a mismatch naming no filing-table row.
 //
 // Unchecked: `gh` unreachable, or a deferral's issue it cannot read, leaves
 // that entry's filing unjudged. With no rule broken and nothing escalated the
@@ -188,7 +188,7 @@ const BUCKETS = [...COVERED, "refuted"];
 const ENUMS = { scope: ["in", "out"], claimKind: ["behavior", "shape"], disposition: ["apply", "defer"] };
 
 // The filing table: a deferral's home by its finding's state. `record` is the
-// closed suggestion-band record; `open` the weakest triage label an open home may carry.
+// suggestion-band record; `open` the weakest triage label an open home may carry.
 export const FILING_ROWS = Object.freeze({
   1: { finding: "an in-scope survived finding deferred for an allowed reason other than false-rationale", open: "needs-triage" },
   2: { finding: "an in-scope survived finding deferred false-rationale", record: true },

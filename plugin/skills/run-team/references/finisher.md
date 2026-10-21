@@ -117,6 +117,7 @@ and will act on it. Relay everything — reversals too — then dispatch.
   append` command to run. Any row for the PR passes, so a replacement finisher
   is never held once the first passed; a PR no such token names is not gated.
   No flag skips it: a PR `append` refuses is fixed on the ledger, as at close-out.
+- **The PR's closing references match its ruling and exclude its own suggestion-band record** → `ledger.mjs dispatch` reads the PR's `closingIssuesReferences` from `gh pr view <M>` before it dispatches any finisher. When the ruled row says `closed_own_ticket=yes`, each ticket a settled `impl-<N>=PR#<M>` token names must be closed by the body (`Closes #<N>`); when it says `no`, none may be, and no reference may be the PR's own suggestion-band record. A blank verdict is refused until it is set. A refusal names the PR and the ticket. The controller repairs the body itself with `gh pr edit <M> --body-file <file>`, then dispatches the finisher again. A `gh` read that fails refuses the dispatch and writes nothing.
 
 Gate on the `check` job, **not** on `ci-state --quiet` exit 0: a behind PR never
 reaches full green, so an exit-0 gate strands it unlabelled. The finisher reads
