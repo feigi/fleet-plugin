@@ -415,8 +415,8 @@ export function mapCi(ciJson, pr) {
 // phase0.mjs refuses a directory with no `<dir>.jsonl` beside it, but a
 // receipt it wrote before that refusal, or one written by hand, can record the
 // encoded-cwd project dir instead of its own session child, and readOmpSpend
-// would book every session under it — the
-// controller's own main-session transcript included — as this run's agents.
+// would book every session under it — the controller's own main-session
+// transcript included — as this run's agents.
 // A recorded directory that does not exist yet is not an error — that is
 // gatherSpend()'s quiet `null`, below.
 export function receiptSpendDir(stateDir) {

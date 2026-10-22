@@ -1038,8 +1038,8 @@ require("node:module").syncBuiltinESMExports();
 
 // ── the command line ─────────────────────────────────────────────────────────
 
-const refuses = (f, args, shows) => {
-  const r = f.run(args);
+const refuses = (f, args, shows, opts) => {
+  const r = f.run(args, opts);
   assert.equal(r.status, 2, `${args.join(" ")} → ${r.status}\n${r.stdout}${r.err}`);
   assert.match(r.err, shows);
   assert.deepEqual(f.order(), [], "a refused command line ran nothing");
@@ -1129,11 +1129,7 @@ test("session: an existing directory with no .jsonl beside it exits 2 naming the
   mkdirSync(child, { recursive: true });
   writeFileSync(`${child}.jsonl`, "");
   refuses(f, ["--session", sessions], /--session .*sessions-dir has no .*sessions-dir\.jsonl beside it, so it names no session/);
-  const r = f.run([], { env: { PI_ARTIFACTS_DIR: sessions } });
-  assert.equal(r.status, 2, `${r.stdout}${r.err}`);
-  assert.match(r.err, /PI_ARTIFACTS_DIR .*sessions-dir has no .*sessions-dir\.jsonl beside it, so it names no session/);
-  assert.deepEqual(f.order(), [], "a refused session ran nothing");
-  assert.equal(existsSync(f.receiptPath), false, "nor wrote a receipt");
+  refuses(f, [], /PI_ARTIFACTS_DIR .*sessions-dir has no .*sessions-dir\.jsonl beside it, so it names no session/, { env: { PI_ARTIFACTS_DIR: sessions } });
 });
 
 test("session: a --session that does not exist yet is accepted when its .jsonl is beside it", () => {
