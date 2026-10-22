@@ -20,14 +20,16 @@ import {
   touchedLines, checkDispositions, withVerdict, repoPath, formatViolation, failedBefore, verdictProblem, recordTitle, FILING_ROWS,
 } from "../plugin/scripts/dispositions-check.mjs";
 import { rendering } from "./support/rendered-brief.mjs";
+import { ref, prUrl } from "./support/queue-gh.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/dispositions-check.mjs", import.meta.url));
 const LEDGER = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
 
 // The `gh` stub: `issue view <n> --json labels,state,title` (or `--json title`)
 // answered from FAKE_GH_ISSUES, an issue it does not hold answered the way gh
-// answers one that does not exist. `pr view <n> --json closingIssuesReferences`
-// answered from FAKE_GH_PRS, a PR it does not hold with no references.
+// answers one that does not exist. `pr view <n> --json closingIssuesReferences,url`
+// answered from FAKE_GH_PRS, a PR it does not hold with no references, in
+// queue-gh.mjs's own repository.
 // FAKE_GH_DOWN answers every call as an unreachable API. FAKE_GH_LOG, when set,
 // gets one line per call: its argv, cwd and GIT_DIR.
 const GH_STUB = `#!${process.execPath}
@@ -37,9 +39,9 @@ const { FAKE_GH_ISSUES, FAKE_GH_DOWN, FAKE_GH_LOG, FAKE_GH_PRS } = process.env;
 if (FAKE_GH_LOG) fs.appendFileSync(FAKE_GH_LOG, JSON.stringify({ argv, cwd: process.cwd(), GIT_DIR: process.env.GIT_DIR ?? null }) + "\\n");
 if (FAKE_GH_DOWN) { process.stderr.write("error connecting to api.github.com\\n"); process.exit(1); }
 const [cmd, sub, n, flag, fields] = argv;
-if (argv.length === 5 && cmd === "pr" && sub === "view" && flag === "--json" && fields === "closingIssuesReferences") {
+if (argv.length === 5 && cmd === "pr" && sub === "view" && flag === "--json" && fields === "closingIssuesReferences,url") {
   const prs = JSON.parse(fs.readFileSync(FAKE_GH_PRS, "utf8"));
-  process.stdout.write(JSON.stringify({ closingIssuesReferences: prs[n]?.closingIssuesReferences ?? [] }));
+  process.stdout.write(JSON.stringify({ closingIssuesReferences: prs[n]?.closingIssuesReferences ?? [], url: ${JSON.stringify(prUrl(""))} + n }));
   process.exit(0);
 }
 if (argv.length !== 5 || cmd !== "issue" || sub !== "view" || flag !== "--json" || (fields !== "labels,state,title" && fields !== "title")) {
@@ -155,7 +157,7 @@ function fixture(t) {
   // in these cases is filed to.
   const issues = { 10: openIssue("ready-for-agent"), 77: openIssue("needs-triage"), 81: openIssue("ready-for-agent") };
   // PR 40 closes its ticket 10 by default; a test that needs otherwise rewrites this file.
-  writeFileSync(prsFile, JSON.stringify({ 40: { closingIssuesReferences: [{ number: 10 }] } }));
+  writeFileSync(prsFile, JSON.stringify({ 40: { closingIssuesReferences: [ref(10)] } }));
   const setIssues = (more) => {
     Object.assign(issues, more);
     writeFileSync(issuesFile, JSON.stringify(issues));

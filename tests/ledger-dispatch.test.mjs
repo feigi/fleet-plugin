@@ -18,7 +18,7 @@ import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { deriveRun, LedgerError } from "../plugin/scripts/fleet-tick.mjs";
 import { rowPr } from "../plugin/scripts/ledger-grammar.mjs";
 import { rendering, renderBrief } from "./support/rendered-brief.mjs";
-import { writeQueueGh, closes, titled, failsOn, ghCalls } from "./support/queue-gh.mjs";
+import { writeQueueGh, closes, titled, failsOn, ghCalls, ref, prUrl } from "./support/queue-gh.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
@@ -1506,7 +1506,7 @@ test("a gh pr view that fails refuses the finisher, naming the read, and writes 
   f.put("3545", RULED_ROW);
   f.rule(3606, "3545");
   failsOn(f.bin, "pr", 3606);
-  f.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences exited 1/);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url exited 1/);
   assert.deepEqual(f.read().dispatched, []);
 });
 
@@ -1518,6 +1518,80 @@ test("a gh issue view that fails refuses the finisher, naming the read, and writ
   failsOn(f.bin, "issue", 3545);
   f.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh issue view 3545 --json title exited 1/);
   assert.deepEqual(f.read().dispatched, []);
+});
+
+// A closing reference counts only in the PR's own repository: one into another
+// repository closes that repository's issue, whatever its number.
+const FOREIGN = "other-org/other-repo";
+
+test("a PR ruled closed_own_ticket=yes whose only reference to the ticket's number is another repository's is refused", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545");
+  closes(f.bin, 3606, [ref(3545, FOREIGN)]);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"], /finisher-pr-3606: PR #3606 does not close #3545, ruled closed_own_ticket=yes/);
+  assert.deepEqual(f.read().dispatched, []);
+});
+
+test("a PR ruled closed_own_ticket=no whose reference to the ticket's number is another repository's is recorded", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545", "no");
+  closes(f.bin, 3606, [ref(3545, FOREIGN)]);
+  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+});
+
+test("another repository's reference numbered as the PR's suggestion-band record is never looked up", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545");
+  closes(f.bin, 3606, [3545, ref(3637, FOREIGN)]);
+  titled(f.bin, 3637, "PR #3606 review: the suggestion band, checked");
+  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+  assert.deepEqual(ghCalls(f.bin).filter((c) => c.startsWith("issue view")), ["issue view 3545 --json title"]);
+});
+
+test("a reference with a repository and no url is placed by its repository", (t) => {
+  const { url: _own, ...own } = ref(3545);
+  const { url: _foreign, ...foreign } = ref(3545, FOREIGN);
+  const yes = fixture(t);
+  yes.put("3545", RULED_ROW);
+  yes.rule(3606, "3545");
+  closes(yes.bin, 3606, [own]);
+  assert.equal(yes.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+  const no = fixture(t);
+  no.put("3545", RULED_ROW);
+  no.rule(3606, "3545");
+  closes(no.bin, 3606, [foreign]);
+  no.refused(["dispatch", "3606", "finisher-pr-3606"], /PR #3606 does not close #3545, ruled closed_own_ticket=yes/);
+});
+
+test("a reference that cannot be placed or numbered refuses the finisher, naming the read, and writes nothing", (t) => {
+  const { url: _url, repository: _repository, ...unplaced } = ref(3545);
+  const { number: _number, ...unnumbered } = ref(3545);
+  for (const [refs, why] of [
+    [[unplaced], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url answered a reference to #3545 with neither a url nor a repository; nothing written/],
+    [[unnumbered], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url answered a reference with no issue number; nothing written/],
+  ]) {
+    const f = fixture(t);
+    f.put("3545", RULED_ROW);
+    f.rule(3606, "3545");
+    closes(f.bin, 3606, refs);
+    f.refused(["dispatch", "3606", "finisher-pr-3606"], why);
+    assert.deepEqual(f.read().dispatched, []);
+    assert.deepEqual(ghCalls(f.bin).filter((c) => c.startsWith("issue view")), []);
+  }
+});
+
+test("a PR url that is not PR M's own refuses the finisher, naming the read, and writes nothing", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545");
+  for (const body of [{ closingIssuesReferences: [ref(3545)] }, { closingIssuesReferences: [ref(3545)], url: prUrl(3607) }]) {
+    writeFileSync(join(f.bin, "pr-3606.json"), JSON.stringify(body));
+    f.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url answered (without a usable url|url \S+\/pull\/3607, not PR #3606's)/);
+    assert.deepEqual(f.read().dispatched, []);
+  }
 });
 
 // ── the rendered brief ───────────────────────────────────────────────────────

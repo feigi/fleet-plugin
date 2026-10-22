@@ -1984,7 +1984,7 @@ function checkReaders(where) {
   // A `gh pr view --json <fields>` answer: an object whose every requested
   // field has the type that field has. Anything else was not what was asked
   // for, so it could not look.
-  const prFieldOk = { state: (v) => typeof v === "string", labels: Array.isArray, closingIssuesReferences: Array.isArray };
+  const prFieldOk = { state: (v) => typeof v === "string", labels: Array.isArray, closingIssuesReferences: Array.isArray, url: (v) => typeof v === "string" };
   const prView = (pr, fields) => {
     const what = `gh pr view ${pr} --json ${fields}`;
     const { r, v } = lookJson(what, ["pr", "view", String(pr), "--json", fields]);
@@ -1997,6 +1997,33 @@ function checkReaders(where) {
     }
     return v;
   };
+  // The issue numbers, unique, of the closing references in `view` — PR
+  // `pr`'s prView() answer to `fields`, which name closingIssuesReferences and
+  // url — that are in the PR's own repository: its url less `/pull/<pr>`. A
+  // reference is in it when its url is that repository's `/issues/<number>`,
+  // or, carrying no url, when its repository's `<owner>/<name>` ends that
+  // repository's url. A reference with no integer number, or with neither a
+  // url nor a repository to place it by, could not look: it is never taken
+  // for the PR's own repository's.
+  const ownClosingNumbers = (pr, fields, view) => {
+    const what = `gh pr view ${pr} --json ${fields}`;
+    const suffix = `/pull/${pr}`;
+    if (!view.url.endsWith(suffix)) die(`${where}: could not look — ${what} answered url ${view.url}, not PR #${pr}'s; nothing written`);
+    const own = view.url.slice(0, -suffix.length);
+    const str = (v) => typeof v === "string" && v !== "";
+    const numbers = new Set();
+    for (const ref of view.closingIssuesReferences) {
+      const n = ref?.number;
+      if (!Number.isInteger(n)) die(`${where}: could not look — ${what} answered a reference with no issue number; nothing written`);
+      const repo = ref.repository;
+      let isOwn;
+      if (str(ref.url)) isOwn = ref.url === `${own}/issues/${n}`;
+      else if (str(repo?.name) && str(repo?.owner?.login)) isOwn = own.endsWith(`/${repo.owner.login}/${repo.name}`);
+      else die(`${where}: could not look — ${what} answered a reference to #${n} with neither a url nor a repository; nothing written`);
+      if (isOwn) numbers.add(n);
+    }
+    return [...numbers];
+  };
   // The title of issue `n`, as `gh issue view <n> --json title` answers it.
   const issueTitle = (n) => {
     const what = `gh issue view ${n} --json title`;
@@ -2006,28 +2033,28 @@ function checkReaders(where) {
     }
     return v.title;
   };
-  return { repoDir, look, verifyShaOf, prView, issueTitle };
+  return { repoDir, look, verifyShaOf, prView, ownClosingNumbers, issueTitle };
 }
 
 // The finisher gate's closing-reference checks for the PR `member` finishes,
-// read off the PR's closingIssuesReferences and the titles of the issues it
-// names; its second argument is rulingOf()'s answer, which let the PR
-// through. Check 1, when a settled implementer's token names the PR: each
-// ticket it names is closed by the body when the PR's ruling is
-// closed_own_ticket=yes, and is not when the ruling is no. Check 2, for every
-// PR: no reference may be the suggestion-band record of this PR's review — an
-// issue whose title, trimmed, is recordTitle(), as dispositions-check.mjs
-// finds the record. Returns one line per failure. A read the checks need
-// dies, naming the read, and writes nothing.
+// read off the PR's closingIssuesReferences in its own repository — a
+// reference into another repository closes no issue here, whatever its
+// number — and the titles of the issues they name; its second argument is
+// rulingOf()'s answer, which let the PR through. Check 1, when a settled
+// implementer's token names the PR: each ticket it names is closed by the
+// body when the PR's ruling is closed_own_ticket=yes, and is not when the
+// ruling is no. Check 2, for every PR: no reference may be the
+// suggestion-band record of this PR's review — an issue whose title, trimmed,
+// is recordTitle(), as dispositions-check.mjs finds the record. Returns one
+// line per failure. A read the checks need dies, naming the read, and writes
+// nothing.
 async function closingRefusals(member, { tickets, ruling, tsv }) {
   const pr = member.number;
   const where = `dispatch ${member.name}`;
   const { recordTitle } = await import("./dispositions-check.mjs");
-  const { prView, issueTitle } = checkReaders(where);
-  const refs = [...new Set(prView(pr, "closingIssuesReferences").closingIssuesReferences.map((r) => r?.number))];
-  if (!refs.every(Number.isInteger)) {
-    die(`${where}: could not look — gh pr view ${pr} --json closingIssuesReferences answered a reference with no issue number; nothing written`);
-  }
+  const { prView, ownClosingNumbers, issueTitle } = checkReaders(where);
+  const fields = "closingIssuesReferences,url";
+  const refs = ownClosingNumbers(pr, fields, prView(pr, fields));
   const failures = [];
   if (tickets.length > 0) {
     const verdict = ruling.closed_own_ticket;
@@ -2491,7 +2518,8 @@ function recordFiled(id, subject) {
 // checked before anything is written:
 //
 //   impl-N=PR#M               verify-sha.sh <branch> <head> exits 0; PR M
-//                             reads OPEN and its closingIssuesReferences name N;
+//                             reads OPEN and its closingIssuesReferences in its
+//                             own repository name N;
 //                             the Check-step record (below) holds for <head>
 //   impl-N=bailed             bailCause is not null; the receipt names it
 //   fix-pr-M=applied:<head>   origin's refs/heads/<branch> is <head>, fetched
@@ -2603,7 +2631,7 @@ async function runSettleFromReport() {
   if (report.member !== member) invalid(`$.member: ${JSON.stringify(report.member)} is not ${member}`);
 
   // The gh and git reads this check makes, shared with the finisher gate.
-  const { repoDir, look, verifyShaOf, prView } = checkReaders(where);
+  const { repoDir, look, verifyShaOf, prView, ownClosingNumbers } = checkReaders(where);
   // origin's head of `branch`, or null when origin has no such branch.
   const remoteHead = (branch) => {
     const ref = `refs/heads/${branch}`;
@@ -2653,9 +2681,10 @@ async function runSettleFromReport() {
       const sha = verifyShaOf(report.branch, report.head);
       check(`verify-sha.sh ${report.branch} ${report.head} exits 0`, sha.status === 0);
       recipeGate(report.head);
-      const pr = prView(report.pr, "state,closingIssuesReferences");
+      const fields = "state,closingIssuesReferences,url";
+      const pr = prView(report.pr, fields);
       check(`PR #${report.pr} reads OPEN`, pr.state === "OPEN");
-      check(`PR #${report.pr} closes #${live.number}`, pr.closingIssuesReferences.some((c) => c?.number === live.number));
+      check(`PR #${report.pr} closes #${live.number}`, ownClosingNumbers(report.pr, fields, pr).includes(live.number));
     } else {
       outcome = "bailed";
       check(`bailCause: ${report.bailCause}`, report.bailCause !== null);

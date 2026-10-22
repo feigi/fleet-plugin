@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { rendering } from "./support/rendered-brief.mjs";
+import { ref, prUrl } from "./support/queue-gh.mjs";
 import { parseCounts } from "../plugin/scripts/recipe-check.mjs";
 
 const RECIPE_CHECK = fileURLToPath(new URL("../plugin/scripts/recipe-check.mjs", import.meta.url));
@@ -124,7 +125,7 @@ exec '${realGit}' "$@"
     applied: [], deferred: [], filed: [], unrecorded: [], dispositionsRecord: join(root, "dispositions-fix-pr-6.json"),
     testRun: { cmd: "./agent-test", exit: 0, tests: 3, cancelled: 0 }, confirmation: [], ...over,
   }));
-  writeFileSync(join(ghDir, "6.json"), JSON.stringify({ state: "OPEN", closingIssuesReferences: [{ number: 5 }] }));
+  writeFileSync(join(ghDir, "6.json"), JSON.stringify({ state: "OPEN", closingIssuesReferences: [ref(5)], url: prUrl(6) }));
 
   // The member's own steps: a branch with a staged change, ready to record.
   git(work, "checkout", "-q", "-b", "feat");
