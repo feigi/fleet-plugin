@@ -105,8 +105,8 @@ test("the dispatch section dispatches every implementer at its definition's tier
   );
   assert.match(
     RUN_TEAM.section("### What a wake owes beyond its call", "run-team wake section").text,
-    Pin.phrase("`ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row"),
-    "The wake section no longer sends a token addition to `token`, so a controller re-types the row with `row` and drops its tokens",
+    Pin.phrase("`ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row but a `tier=` it replaces"),
+    "The wake section no longer sends a token addition to `token`, or no longer says `token` replaces a `tier=`, so a controller re-types the row with `row` and drops its tokens, or expects a second `tier=` beside the first",
   );
 });
 
