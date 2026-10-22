@@ -158,6 +158,7 @@ function fixture({ spec = false } = {}) {
   const bin = join(dir, "bin");
   const session = join(dir, "session");
   for (const d of [home, stubs, bin, session]) mkdirSync(d);
+  writeFileSync(`${session}.jsonl`, "");
   git(dir, "init", "-q", "--bare", "-b", "main", origin);
   git(dir, "clone", "-q", origin, repo);
   writeFileSync(join(repo, "README"), "x\n");
@@ -815,8 +816,10 @@ test("a rotation that writes no controller record leaves the run null: a re-run 
   assert.equal(f.calls("rotate").length, 1, "the rotation is not run a second time in the same run");
   assert.equal(f.asides().length, 0);
 
-  mkdirSync(join(f.dir, "next-session"));
-  const next = f.run(["--session", join(f.dir, "next-session")]);
+  const nextSession = join(f.dir, "next-session");
+  mkdirSync(nextSession);
+  writeFileSync(`${nextSession}.jsonl`, "");
+  const next = f.run(["--session", nextSession]);
   assert.equal(next.status, 0, next.stdout + next.err);
   assert.equal(f.calls("rotate").length, 2, "another session's run rotates again");
   assert.equal(f.asides().length, 1, "and the earlier receipt is moved aside");
@@ -1035,8 +1038,8 @@ require("node:module").syncBuiltinESMExports();
 
 // ── the command line ─────────────────────────────────────────────────────────
 
-const refuses = (f, args, shows) => {
-  const r = f.run(args);
+const refuses = (f, args, shows, opts) => {
+  const r = f.run(args, opts);
   assert.equal(r.status, 2, `${args.join(" ")} → ${r.status}\n${r.stdout}${r.err}`);
   assert.match(r.err, shows);
   assert.deepEqual(f.order(), [], "a refused command line ran nothing");
@@ -1114,6 +1117,29 @@ test("session: a PI_ARTIFACTS_DIR with neither a directory nor a .jsonl beside i
   assert.match(r.err, /PI_ARTIFACTS_DIR .*gone-session does not exist, and no .*gone-session\.jsonl beside it/);
   assert.deepEqual(f.order(), [], "a refused session ran nothing");
   assert.equal(existsSync(f.receiptPath), false, "nor wrote a receipt");
+});
+
+// The directory holding every session of a checkout exists, and a session
+// child sits inside it, but no `<dir>.jsonl` sits beside it: it names no
+// session, from either source.
+test("session: an existing directory with no .jsonl beside it exits 2 naming the path and its source, from --session and PI_ARTIFACTS_DIR alike", () => {
+  const f = fixture();
+  const sessions = join(f.dir, "sessions-dir");
+  const child = join(sessions, "2026-10-17T06-37-13-170Z_01a14894-2e52-741b-a112-b6f78ae5ac8b");
+  mkdirSync(child, { recursive: true });
+  writeFileSync(`${child}.jsonl`, "");
+  refuses(f, ["--session", sessions], /--session .*sessions-dir has no .*sessions-dir\.jsonl beside it, so it names no session/);
+  refuses(f, [], /PI_ARTIFACTS_DIR .*sessions-dir has no .*sessions-dir\.jsonl beside it, so it names no session/, { env: { PI_ARTIFACTS_DIR: sessions } });
+});
+
+test("session: a --session that does not exist yet is accepted when its .jsonl is beside it", () => {
+  const f = fixture();
+  const pending = join(f.dir, "pending-session");
+  writeFileSync(`${pending}.jsonl`, "");
+  const r = f.run(["--session", pending]);
+  assert.equal(r.status, 0, r.err);
+  assert.equal(f.receipt().session, pending);
+  assert.equal(r.out[0], `session ${pending} (from --session)`);
 });
 
 test("usage: a linked worktree refuses, because the checks judge the main checkout", () => {

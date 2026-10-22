@@ -1084,9 +1084,10 @@ test("a recorded session whose directory does not exist yet, or holds no transcr
 });
 
 test("a receipt recording the encoded-cwd PROJECT directory, not its <ISO>_<uuid> child, is refused — never booked as this run's agents", () => {
-  // phase0.mjs accepts any existing directory as the session, so this path
-  // can reach the receipt; read as a session, it books every session under
-  // it — the sibling's members and each main-session file — as agents.
+  // A receipt phase0.mjs wrote before it refused a directory with no
+  // `<dir>.jsonl` beside it, or one written by hand, can record this path;
+  // read as a session, it books every session under it — the sibling's
+  // members and each main-session file — as agents.
   const { proj, stateDir } = twoSessions();
   writeReceipt(stateDir, proj);
   let s;

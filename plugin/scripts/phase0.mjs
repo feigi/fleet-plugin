@@ -8,9 +8,11 @@
 // The session directory is `--session`, else `PI_ARTIFACTS_DIR`, which omp
 // exports to its Python eval kernel and the processes that kernel starts (the
 // bash tool's environment does not carry it); with neither, exit 2. It is
-// accepted when it is an existing directory, or when `<dir>.jsonl` exists
-// beside it — omp creates the directory when the session's first subagent
-// writes there.
+// accepted when `<dir>.jsonl` exists beside it and the path is a directory or
+// does not exist yet — omp creates the directory when the session's first
+// subagent writes there. An existing directory with no `<dir>.jsonl` beside
+// it names no session (the directory holding every session of a checkout is
+// one): from either source it exits 2 naming the path, writing no receipt.
 //
 // Reached through the Resolver and run from the MAIN checkout (a linked
 // worktree refuses: the checks below judge the checkout the controller reads
@@ -528,15 +530,19 @@ function main() {
   }
   const source = given === null ? "PI_ARTIFACTS_DIR" : "--session";
   const session = resolve(given ?? fromEnv);
-  // An existing directory, or `<session>.jsonl` beside a path that does not
-  // exist yet: omp creates the directory when the session's first subagent
-  // writes there.
+  // A session is named by its transcript, `<session>.jsonl`, beside the
+  // directory: an existing directory with none beside it — the one holding
+  // every session of a checkout, say — names no session. The directory itself
+  // may not exist yet: omp creates it when the session's first subagent writes
+  // there.
+  const transcript = existsSync(`${session}.jsonl`);
   try {
     if (!statSync(session).isDirectory()) die(`${source} ${session} is not a directory`);
+    if (!transcript) die(`${source} ${session} has no ${session}.jsonl beside it, so it names no session`);
   } catch (e) {
     if (e.code === undefined) throw e;
     if (e.code !== "ENOENT") die(`${source} ${session} is not readable (${e.code})`);
-    if (!existsSync(`${session}.jsonl`)) die(`${source} ${session} does not exist, and no ${session}.jsonl beside it names a session`);
+    if (!transcript) die(`${source} ${session} does not exist, and no ${session}.jsonl beside it names a session`);
   }
   const positive = (name) => {
     const n = F.numArg(name);

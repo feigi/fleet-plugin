@@ -412,10 +412,11 @@ export function mapCi(ciJson, pr) {
 // A receipt with no session to give is `{ error }`, which the panel shows:
 // the board names no session rather than guessing one. So is a recorded
 // session whose NAME is not an omp `<ISO>_<uuid>` session directory:
-// phase0.mjs accepts any existing directory as the session, so a `--session`
-// naming the encoded-cwd project dir instead of its own session child lands in
-// the receipt, and readOmpSpend would book every session under it — the
-// controller's own main-session transcript included — as this run's agents.
+// phase0.mjs refuses a directory with no `<dir>.jsonl` beside it, but a
+// receipt it wrote before that refusal, or one written by hand, can record the
+// encoded-cwd project dir instead of its own session child, and readOmpSpend
+// would book every session under it — the controller's own main-session
+// transcript included — as this run's agents.
 // A recorded directory that does not exist yet is not an error — that is
 // gatherSpend()'s quiet `null`, below.
 export function receiptSpendDir(stateDir) {
