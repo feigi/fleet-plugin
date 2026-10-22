@@ -514,6 +514,27 @@ eligible cells on an Exploration Pull — deterministic from the session id
 and ticket number, no RNG, no seed.
 _Avoid_: random draw, coin flip
 
+**Ending**:
+How one implementer dispatch finished, read from its own transcript: a PR,
+a bail and its cause, a block mid-implementation, a released claim, a
+provider error or fallback model, an exhausted request budget, an abort, a
+crash, or a Hollow yield. A PR is the Cell's fault when it merged and was
+ruled failed; one closed unmerged counts as spend only. Of the other
+Endings, a Hollow yield, an exhausted budget and a `fixed` bail that
+origin/main refutes are the Cell's fault; any other bail, a block
+mid-implementation and a released claim are the ticket's; a provider error
+or fallback model, an abort and a crash are neither's, as is a dispatch
+that left no transcript. The ledger's settle token (`=killed`, `=bailed`)
+is not an Ending.
+_Avoid_: give-up
+
+**Hollow yield**:
+An implementer that ends its own turn with no PR, no valid bail report and
+no block mid-implementation, whatever its last message claims. The Cell's
+fault, unlike a bail, which names its cause, or a block, which is the
+ticket's.
+_Avoid_: silent bail, give-up
+
 ### Tier
 
 **Declared tier**:
