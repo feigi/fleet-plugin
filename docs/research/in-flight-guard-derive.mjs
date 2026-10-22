@@ -71,9 +71,10 @@
 // test, below the p10 for the "must not fall" one (the linear-interpolation
 // percentile the baseline's pct() uses).
 //   1   fleet cache_creation per merged PR   Σ tokens_cache_create over the
-//       member-outcomes.tsv rows booked to the window's PRs ÷ N. Booked as
-//       plugin/scripts/pr-cost.mjs books: omp rows only; merge-bot, `memory`
-//       and `__advisor` rows are booked nowhere, and so is any row whose
+//       member-outcomes.tsv rows booked to the window's PRs ÷ N. Booked by
+//       this script's own PR join, not pr-cost.mjs's Pull booking: omp rows
+//       only; a member whose name's last segment pull-attribution.mjs's
+//       EXCLUDED_MEMBER matches is booked nowhere, and so is any row whose
 //       role is `memory`; a member whose name carries the PR
 //       (parseMemberName) books to it, an implementer row books to the PR
 //       whose body closes its `ticket` (a closing keyword before `#<n>`, the
@@ -248,9 +249,10 @@ export const throughput = (win) => (win.length ? win.length / activeHours(win) :
 
 // -------------------------------------------------------------- booking ----
 /**
- * Book member-outcomes rows to PRs the way pr-cost.mjs does. Returns the rows
- * per PR number and the omp rows booked nowhere. `byTicket` maps a ticket to
- * the PR that closes it.
+ * Book member-outcomes rows to PRs: a PR-named member to its PR, an
+ * implementer to the PR closing its ticket, a nested member with its nearest
+ * booked ancestor. Returns the rows per PR number and the omp rows booked
+ * nowhere. `byTicket` maps a ticket to the PR that closes it.
  */
 export function bookRows(rows, byTicket) {
   const key = (session, agent) => `${session}\0${agent}`;

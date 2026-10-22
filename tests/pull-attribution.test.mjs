@@ -126,7 +126,7 @@ test("never merged with only the ticket's or neither's endings is left out; a ho
   assert.deepEqual(fit, guard);
 });
 
-test("a refuted `fixed` bail is one false claim in the fail rate; an unrefuted one is one claim, not failed", () => {
+test("a refuted `fixed` bail is one false claim in the fail rate; an unrefuted one is one claim, not failed, and keeps its never-merged Pull counted", () => {
   const w = world();
   w.features.push(pull(16, "slow-high"), pull(17, "slow-high"), pull(18, "slow-high"));
   w.members.push(
@@ -137,14 +137,13 @@ test("a refuted `fixed` bail is one false claim in the fail rate; an unrefuted o
   );
   const [refuted, fixed, afterHollow] = units(w);
   assert.deepEqual([refuted.status, refuted.claims, refuted.falseClaims], ["counted", 1, 1]);
-  assert.deepEqual([fixed.claims, fixed.falseClaims], [1, 0]);
-  assert.equal(fixed.status, "left-out", "a `fixed` bail is the ticket's ending, so a Pull with no other is left out");
+  assert.deepEqual([fixed.status, fixed.claims, fixed.falseClaims], ["counted", 1, 0], "a lone `fixed` bail is a claim, so its Pull is never left out");
   assert.deepEqual([afterHollow.status, afterHollow.claims, afterHollow.falseClaims], ["counted", 1, 0]);
   const p = parsed(w);
   const rep = computeReport({ ...p, prs: w.prs });
-  assert.deepEqual(rep.cells.map((c) => [c.n_claims, c.n_failed, c.fail_rate]), [[2, 1, 0.5]]);
+  assert.deepEqual(rep.cells.map((c) => [c.n_pulls, c.n_claims, c.n_failed, c.fail_rate]), [[3, 3, 1, 0.3333]]);
   const est = fitTable({ prior, features: p.features, members: p.members, verdicts: p.tiers, guard: { tripped: [], n: {}, window_start: DAY } }).estimates["*"]["slow-high"];
-  assert.deepEqual([est.claims, est.failed, est.fail_rate], [2, 1, 0.5]);
+  assert.deepEqual([est.n, est.claims, est.failed, est.fail_rate], [3, 3, 1, 0.3333]);
 });
 
 test("a merged PR ruled minted_false_claim=yes is failed; one closed unmerged is spend and never a failure", () => {
@@ -204,6 +203,73 @@ test("a claim resumed in a later session joins the ticket's latest earlier Pull,
   assert.deepEqual(units(w).map((u) => u.spend), [3, 4], "the SESSION2 row books to the SESSION Pull, the only one started before it");
 });
 
+test("a claim resumed after two earlier Pulls joins the later of them", () => {
+  const w = world();
+  const LATER = "2026-10-07T10-00-00-000Z_01a00000-0000-7000-8000-000000000002";
+  w.features.push(pull(41, "slow-high"), pull(41, "task-high", { session: SESSION2, run_date: "2026-10-05" }));
+  w.members.push(
+    impl(41, "slow-high", { ending: "hollow", cost: 1 }),
+    impl(41, "task-high", { session: SESSION2, run_date: "2026-10-05", ending: "hollow", cost: 2 }),
+    impl(41, "task-high", { agent: "impl-41-b", session: LATER, run_date: "2026-10-07", ending: "hollow", cost: 4 }),
+  );
+  assert.deepEqual(units(w).map((u) => u.spend), [1, 6], "the LATER row books to the SESSION2 Pull, the latest started before it");
+});
+
+test("an implementer row matching no Pull's agent in its own session joins that session's last Pull of its ticket", () => {
+  const w = world();
+  w.features.push(pull(42, "slow-high"), pull(42, "task-high", { agent: "impl-42-r" }));
+  w.members.push(
+    impl(42, "slow-high", { ending: "hollow", cost: 1 }),
+    impl(42, "task-high", { agent: "impl-42-r", ending: "hollow", cost: 2 }),
+    impl(42, "task-high", { agent: "impl-42-b", ending: "hollow", cost: 4 }),
+  );
+  assert.deepEqual(units(w).map((u) => u.spend), [1, 6]);
+});
+
+test("with session ids that carry no start time, a claim resumed on its Pull's own date joins that Pull", () => {
+  const w = world();
+  w.features.push(pull(46, "slow-high", { session: "sess-a" }));
+  w.members.push(
+    impl(46, "slow-high", { session: "sess-a", ending: "hollow", cost: 1 }),
+    impl(46, "slow-high", { agent: "impl-46-b", session: "sess-b", ending: "hollow", cost: 2 }),
+  );
+  assert.deepEqual(units(w).map((u) => u.spend), [3], "a same-date row is no earlier than the Pull, so it books to it");
+});
+
+test("a Ruling no candidate Pull carries goes to the last of them in features file order, unpriced; the others stay unruled", () => {
+  const w = world();
+  w.features.push(pull(43, "slow-high"), pull(43, "task-high", { session: SESSION2, run_date: "2026-10-05" }));
+  w.members.push(
+    impl(43, "slow-high", { ending: "hollow" }),
+    impl(43, "task-high", { session: SESSION2, run_date: "2026-10-05", ending: "hollow" }),
+  );
+  w.tiers.push(ruling(43, 143, { run_date: "2026-10-05" }));
+  merged(w, 143);
+  const [first, second] = units(w);
+  assert.deepEqual([first.status, first.merged, first.pr], ["counted", false, null]);
+  assert.deepEqual([second.status, second.merged, second.pr], ["unpriced", true, "143"]);
+});
+
+test("the guard holds a ruled Pull pending when its PR is missing from the PR states", () => {
+  const w = world();
+  w.features.push(pull(44, "slow-high"));
+  w.members.push(impl(44, "slow-high", { ending: "pr", pr: "144" }));
+  w.tiers.push(ruling(44, 144));
+  const [u] = units(w, []);
+  assert.deepEqual([u.status, u.merged, u.pendingPr], ["pending", false, "144"]);
+});
+
+test("a merged Pull whose every implementer ending is neither's is counted, never left out", () => {
+  const w = world();
+  w.features.push(pull(45, "slow-high"));
+  w.members.push(impl(45, "slow-high", { ending: "crash", pr: "145", cost: 3 }));
+  w.tiers.push(ruling(45, 145));
+  merged(w, 145);
+  const [u] = units(w);
+  assert.deepEqual([u.status, u.merged, u.claims], ["counted", true, 1]);
+  assert.deepEqual(figures(w).guard, { "slow-high": cell({ n: 1, merged: 1, usd: 3 }) });
+});
+
 test("a fix-applier's nested member with no pr is in its Pull's spend in both scripts", () => {
   const w = world();
   w.features.push(pull(25, "slow-high"));
@@ -252,6 +318,16 @@ test("a cost that is neither blank nor a number is refused by both scripts, nami
   w.members.push(impl(29, "slow-high", { cost: "1.2.3" }));
   const p = parsed(w);
   const named = (e) => e instanceof AttributionError && /session 2026-10-03T10-00-00-000Z_\S+ agent impl-29: cost '1\.2\.3' is not a number/.test(e.message);
+  assert.throws(() => computeReport({ ...p, prs: [] }), named);
+  assert.throws(() => fitTable({ prior, features: p.features, members: p.members, verdicts: p.tiers, guard: { tripped: [], n: {}, window_start: DAY } }), named);
+});
+
+test("a whitespace-only cost is refused by both scripts, never read as $0", () => {
+  const w = world();
+  w.features.push(pull(47, "slow-high"));
+  w.members.push(impl(47, "slow-high", { cost: "  " }));
+  const p = parsed(w);
+  const named = (e) => e instanceof AttributionError && /agent impl-47: cost ' {2}' is not a number/.test(e.message);
   assert.throws(() => computeReport({ ...p, prs: [] }), named);
   assert.throws(() => fitTable({ prior, features: p.features, members: p.members, verdicts: p.tiers, guard: { tripped: [], n: {}, window_start: DAY } }), named);
 });

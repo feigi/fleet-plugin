@@ -47,8 +47,8 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { CELL, POLICY_CELL, drawCell, parseMember } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { FEATURE_COLUMNS, attribute, parseFeatures, tally } from "./pull-attribution.mjs";
-import { parseTierOutcomes } from "./tier-outcomes.mjs";
+import { AttributionError, FEATURE_COLUMNS, attribute, parseFeatures, tally } from "./pull-attribution.mjs";
+import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
 
 const NAME = "ticket-router";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -578,9 +578,11 @@ function main() {
   };
   // The join throws on a features row it cannot date, a booked member row whose `cost` is not a number, and a
   // ruling of a windowed Pull's ticket it cannot place — for `fit` and `--check` too on a Pull the fit then skips
-  // as a live B classifier's, since every windowed Pull is booked before that skip.
+  // as a live B classifier's, since every windowed Pull is booked before that skip. Anything else it throws is a
+  // bug, never bad input, so it surfaces with its stack.
   const joined = (fit) => {
     try { return fit(); } catch (e) {
+      if (!(e instanceof RulingError || e instanceof AttributionError)) throw e;
       die(`cannot join --features ${need("features")}, --members ${need("members")} and --verdicts ${need("verdicts")}: ${e.message}`);
     }
   };

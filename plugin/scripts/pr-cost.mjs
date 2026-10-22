@@ -30,13 +30,14 @@
 // every implementer under it, its PR's review, fix and finisher members and
 // their nested members, and its merge through its Ruling — merged when that
 // PR's state is MERGED. A Pull is counted, or excluded (no Admissible row),
-// pending (its PR still open, or not in the list), left out (never merged, and
-// every ending the ticket's or neither's) or unpriced (a booked row with a
-// blank `cost`, or a Ruling whose PR none of its implementers carries); only
-// counted Pulls enter a cell's figures. A `cost` that is neither blank nor a
-// number is an input error (exit 2), as is a ticket-features `run_date` that is
-// neither blank nor YYYY-MM-DD, or a ruling of a windowed Pull's ticket whose
-// run_date is not YYYY-MM-DD or whose verdict is not yes or no.
+// pending (its PR still open, or not in the list), left out (never merged, no
+// `fixed` bail, and every ending the ticket's or neither's) or unpriced (a
+// booked row with a blank `cost`, or a Ruling whose PR none of its
+// implementers carries); only counted Pulls enter a cell's figures. A `cost`
+// that is neither blank nor a number is an input error (exit 2), as is a
+// ticket-features `run_date` that is neither blank nor YYYY-MM-DD, or a ruling
+// of a windowed Pull's ticket whose run_date is not YYYY-MM-DD or whose verdict
+// is not yes or no.
 //
 // PER CELL, over its counted Pulls: `n_pulls`; `n_merged`; `n_claims` (merged
 // PRs plus every `bail:fixed` or `bail:fixed-refuted` ending); `n_failed`
@@ -155,8 +156,7 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   }));
 
   // The guard.
-  const byCell = new Map(figures.map((f) => [f.cell, f]));
-  const b = byCell.get(BASELINE_CELL) ?? { n_merged: 0, mean_usd: null, fail_rate: null };
+  const b = figures.find((f) => f.cell === BASELINE_CELL) ?? { n_merged: 0, mean_usd: null, fail_rate: null };
   const baseline = { cell: BASELINE_CELL, n: b.n_merged, mean_usd: b.mean_usd, fail_rate: b.fail_rate };
   // The $ leg takes the unrounded means: the cent-rounded figures are for
   // display, and a trip is sticky, so a cell cheaper by under half a cent
@@ -164,9 +164,8 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   const quality = (t) => ({ n: t.claims, n_pass: t.claims - t.failed, mean_usd: meanUsd(t) });
   const tripped = [];
   if (baseline.n >= MIN_N) {
-    for (const f of figures) {
-      if (f.cell === BASELINE_CELL || f.n_merged < MIN_N) continue;
-      if (trips(quality(tallies.get(f.cell)), quality(base))) tripped.push(f.cell);
+    for (const t of tallies.values()) {
+      if (t.cell !== BASELINE_CELL && t.merged >= MIN_N && trips(quality(t), quality(base))) tripped.push(t.cell);
     }
   }
   const verdict = baseline.n < MIN_N ? "none" : tripped.length ? "tripped" : "ok";

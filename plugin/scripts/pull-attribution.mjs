@@ -8,8 +8,8 @@
 // is two units. Nothing splits across cells.
 //
 // JOINS. Only omp member rows are read, and a member whose name's last segment
-// is merge-bot, `memory` or `__advisor` is booked nowhere: its cost does not
-// vary with the cell.
+// starts with merge-bot (or mergebot), or is `memory` or `__advisor`, is booked
+// nowhere: its cost does not vary with the cell.
 //   - An implementer row (member-outcomes' implementer leaf) joins the Pull of
 //     its `ticket` in its own session. A session with no Pull of that ticket
 //     (a claim resumed in a later run) joins the ticket's latest earlier Pull.
@@ -31,8 +31,8 @@
 // STATUS, first that applies:
 //   excluded  no Admissible row among the Pull's implementer rows;
 //   pending   see above (only with PR states);
-//   left-out  never merged, and every implementer ending is the ticket's or
-//             neither's;
+//   left-out  holds no claim (never merged, no `fixed` bail), and every
+//             implementer ending is the ticket's or neither's;
 //   unpriced  a booked row's `cost` is blank, or the Pull took its Ruling
 //             without carrying its PR;
 //   counted   every other Pull: the only ones in a cell's figures.
@@ -227,7 +227,7 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
     let status = "counted";
     if (!own.some((m) => admissibleRow(m, pull.chosen_cell))) status = "excluded";
     else if (pendingPr !== null) status = "pending";
-    else if (!merged && own.every((m) => ticketsEnding(m.ending) || NEITHER_ENDINGS.has(m.ending))) status = "left-out";
+    else if (claims === 0 && own.every((m) => ticketsEnding(m.ending) || NEITHER_ENDINGS.has(m.ending))) status = "left-out";
     else if (blank || (r && !r.carried)) status = "unpriced";
     return {
       pull, cell: pull.chosen_cell, stratum: stratum(pull), status, merged, pr: r?.pr ?? null, ruling: r?.ruling ?? null,
