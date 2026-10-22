@@ -121,6 +121,32 @@ test("a report written with a bash heredoc reads its bail cause the same way", (
   assert.equal(endingOfMember(dir, "impl-31"), "bail:hands");
 });
 
+// A bash command that writes the member's undecided-bail report in a shape
+// the first scanner could not see.
+const bashReport = (member, command) => session({
+  [member]: [modelChange(), turn({ stopReason: "toolUse", blocks: [call("b1", "bash", { command })] }), exitEvt()],
+});
+
+test("a report written through a variable, tee, or <<- reads bail:undecided the same way", () => {
+  const body = reportJson("impl-51");
+  const path = `${REPORTS}/impl-51.json`;
+  const cases = {
+    variable: `R=${path}; mkdir -p "$(dirname "$R")"; cat > "$R" <<EOF\n${body}\nEOF`,
+    tee: `tee ${path} >/dev/null <<'EOF'\n${body}\nEOF`,
+    dash: `cat > ${path} <<-'EOF'\n\t${body}\n\tEOF`,
+    redirectAfter: `cat <<'EOF' > ${path}\n${body}\nEOF`,
+  };
+  for (const [shape, command] of Object.entries(cases)) {
+    assert.equal(endingOfMember(bashReport("impl-51", command), "impl-51"), "bail:undecided", shape);
+  }
+});
+
+test("a heredoc whose target cannot be resolved, or never terminates, is no report", () => {
+  const body = reportJson("impl-52");
+  assert.equal(endingOfMember(bashReport("impl-52", `cat > $R <<EOF\n${body}\nEOF`), "impl-52"), "hollow");
+  assert.equal(endingOfMember(bashReport("impl-52", `cat > ${REPORTS}/impl-52.json <<EOF\n${body}`), "impl-52"), "hollow");
+});
+
 test("a json written outside a reports/ directory is not a report, by the write tool or a heredoc", () => {
   const write = turn({ stopReason: "toolUse", blocks: [call("w1", "write", { path: "/tmp/impl-39.json", content: reportJson("impl-39") })] });
   const heredoc = turn({ stopReason: "toolUse", blocks: [call("b1", "bash", { command: `cat > /tmp/impl-39.json <<'EOF'\n${reportJson("impl-39")}\nEOF` })] });
