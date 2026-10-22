@@ -12,7 +12,8 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { COLUMNS as MEMBER_COLUMNS, formatTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, formatRow } from "../plugin/scripts/tier-outcomes.mjs";
-import { FEATURE_COLUMNS, WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
+import { WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
+import { FEATURE_COLUMNS } from "../plugin/scripts/pull-attribution.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/metrics-refresh.mjs", import.meta.url));
 const DAY = WINDOW_START;
@@ -46,12 +47,14 @@ const tier = (o) => ({
   sizing: "light", profile: "small", loc: "10", files: "1", ...o,
 });
 const corpus = () => ({ features: [], members: [], tiers: [] });
-// One ruled Pull at `cell`: its features row, its admissible member row, its verdict.
+// One ruled Pull at `cell`: its features row, its admissible member row that opened the PR, its verdict.
 function ruled(rows, { ticket, cell = "slow-high", fail = false }) {
   const [role, level] = cell.split("-");
   const agent = `impl-${ticket}`;
   rows.features.push(pull({ ticket: String(ticket), agent, chosen_cell: cell }));
-  rows.members.push(member({ agent, ticket: String(ticket), effort: level, model: MODEL_OF[role], subagentType: `fleet-implementer-${cell}` }));
+  rows.members.push(member({
+    agent, ticket: String(ticket), pr: String(ticket + 5000), effort: level, model: MODEL_OF[role], subagentType: `fleet-implementer-${cell}`,
+  }));
   rows.tiers.push(tier({ ticket: String(ticket), pr: String(ticket + 5000), minted_false_claim: fail ? "yes" : "no" }));
 }
 

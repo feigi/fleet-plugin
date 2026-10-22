@@ -12,7 +12,8 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { COLUMNS as MEMBER_COLUMNS, formatTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, formatRow } from "../plugin/scripts/tier-outcomes.mjs";
-import { FEATURE_COLUMNS, WINDOW_START } from "../plugin/scripts/pr-cost.mjs";
+import { WINDOW_START } from "../plugin/scripts/pr-cost.mjs";
+import { FEATURE_COLUMNS } from "../plugin/scripts/pull-attribution.mjs";
 import { FIT_EVERY_MERGED } from "../plugin/scripts/ticket-router.mjs";
 import { STOP } from "../plugin/scripts/cell-readout.mjs";
 
@@ -63,7 +64,9 @@ function ruled(rows, { ticket, cell = "slow-high", fail = false, date = DAY }) {
   const [role, level] = cell.split("-");
   const agent = `impl-${ticket}`;
   rows.features.push(pull({ ticket: String(ticket), agent, chosen_cell: cell, run_date: date }));
-  rows.members.push(member({ agent, ticket: String(ticket), run_date: date, effort: level, model: MODEL_OF[role], subagentType: `fleet-implementer-${cell}` }));
+  rows.members.push(member({
+    agent, ticket: String(ticket), pr: String(ticket + 5000), run_date: date, effort: level, model: MODEL_OF[role], subagentType: `fleet-implementer-${cell}`,
+  }));
   rows.tiers.push(tier({ ticket: String(ticket), pr: String(ticket + 5000), run_date: date, minted_false_claim: fail ? "yes" : "no" }));
 }
 
@@ -374,11 +377,12 @@ test("stopping rule --dry-run: a both-blank tier-outcomes row after a ticket's r
 // ---------------------------------------------------------------------------
 // the router re-fit cadence
 
-// FIT_EVERY_MERGED Pulls on main that no fitted commit holds, `n` of them ruled.
+// FIT_EVERY_MERGED Pulls on main that no fitted commit holds, each with an admissible implementer that opened its PR, `n` of them ruled.
 function merged(n) {
   const rows = corpus();
   for (let i = 1; i <= FIT_EVERY_MERGED; i++) {
     rows.features.push(pull({ ticket: String(i), agent: `impl-${i}`, run_date: "2026-10-05" }));
+    rows.members.push(member({ agent: `impl-${i}`, ticket: String(i), pr: String(500 + i), run_date: "2026-10-05", subagentType: "fleet-implementer-slow-high" }));
     if (i <= n) rows.tiers.push(tier({ ticket: String(i), pr: String(500 + i), run_date: "2026-10-05" }));
   }
   return rows;
@@ -395,7 +399,7 @@ test("router fit --dry-run: fifty merged PRs not in fitted_commit run ticket-rou
   const before = readFileSync(join(at.repo, TABLE), "utf8");
   const a = at.run(["--dry-run"]);
   assert.equal(a.status, 0, a.stderr);
-  assert.match(a.stdout, /^run-team-local: router fit: DUE=yes MERGED=50\/50 — ticket-router: fitted \d+ tickets at [0-9a-f]{8}; .*; would open a chore PR from chore\/router-fit-\d{4}-\d{2}-\d{2}$/m);
+  assert.match(a.stdout, /^run-team-local: router fit: DUE=yes MERGED=50\/50 — ticket-router: fitted \d+ Pulls at [0-9a-f]{8}; .*; would open a chore PR from chore\/router-fit-\d{4}-\d{2}-\d{2}$/m);
   assert.equal(readFileSync(join(at.repo, TABLE), "utf8"), before, "the checkout's own table is untouched");
   assert.equal(worktrees(at.repo), 1, "the throwaway checkout is gone");
   assert.equal(git(at.origin, ["branch", "--list", "chore/*"]), "", "a dry run pushes nothing");

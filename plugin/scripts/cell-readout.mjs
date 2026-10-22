@@ -76,9 +76,9 @@
 import { readFileSync } from "node:fs";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { CELL, POLICY_CELL } from "./ledger-grammar.mjs";
+import { POLICY_CELL } from "./ledger-grammar.mjs";
 import { formatTsv as formatMemberTsv, parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { parseFeatures } from "./pr-cost.mjs";
+import { admissibleRow, parseFeatures } from "./pull-attribution.mjs";
 import { DATE, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
 const NAME = "cell-readout";
@@ -86,7 +86,6 @@ export const GATE = Object.freeze({ comparisons: 10, runDates: 5 });
 export const STOP = Object.freeze({ verdicts: 10, failRate: 0.8 });
 
 const key = (session, agent) => `${session}\0${agent}`;
-const levelOf = (cell) => CELL.exec(cell)?.[2] ?? null;
 
 /**
  * `features` keyed by session+agent. A repeat naming the same `chosen_cell`
@@ -106,10 +105,7 @@ function pullsOf(features) {
 /** The join's member row for a Pull when the Pull is admissible, else null. */
 function admissibleMember(pull, members) {
   const m = members.get(key(pull.session, pull.agent));
-  if (!m) return null;
-  const level = levelOf(pull.chosen_cell);
-  if (level === null || m.subagentType !== `fleet-implementer-${pull.chosen_cell}` || m.effort !== level || !m.model) return null;
-  return m;
+  return m && admissibleRow(m, pull.chosen_cell) ? m : null;
 }
 
 // One member row per session+agent. A key repeated with different fields is

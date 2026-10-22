@@ -7,10 +7,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import {
-  COLUMNS, DEFAULT_TABLE, issueMetrics, ruleStratum, route, fitTable, readGuard, validateTable, parseFeatures, formatFeatureRow, mergedSince, resolveCommit,
+  DEFAULT_TABLE, issueMetrics, ruleStratum, route, fitTable, readGuard, validateTable, formatFeatureRow, mergedSince, resolveCommit,
 } from "../plugin/scripts/ticket-router.mjs";
+import { FEATURE_COLUMNS as COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { drawCell, CELL } from "../plugin/scripts/ledger-grammar.mjs";
-import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
+import { COLUMNS as MEMBER_COLUMNS, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as VERDICT_COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
 import { rendering } from "./support/rendered-brief.mjs";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -641,18 +642,37 @@ const featureRow = (over) => ({
   exploration_draw: "", sizing_src: "rule", sizing_pre: "", router_usd: "", brief_chars: "100", criteria: "1", comments: "0",
   age_days: "1", paths: "0", test_paths: "0", xrefs: "0", kind: "bug", ...over,
 });
-const memberRow = (over) => Object.fromEntries(MEMBER_COLUMNS.map((c) => [c, ""]).concat(Object.entries({ session: SESSION, ...over })));
+const memberRow = (over) => Object.fromEntries(MEMBER_COLUMNS.map((c) => [c, ""]).concat(Object.entries({ session: SESSION, harness: "omp", ...over })));
 const verdictRow = (over) => ({ run_date: "2026-10-01", class: "", tier: "", note: "n", sizing: "", profile: "", loc: "", files: "", closed_own_ticket: "yes", minted_false_claim: "no", ...over });
 const tsv = (cols, rows, header = false) => (header ? `${cols.join("\t")}\n` : "") + rows.map((r) => cols.map((c) => r[c] ?? "").join("\t")).join("\n") + (rows.length ? "\n" : "");
+// The Admissible implementer row of features row `f`, costing $1.
+const implementer = (f, over = {}) => ({
+  session: f.session, run_date: f.run_date, agent: f.agent, member: f.agent, ticket: f.ticket, role: "implementer",
+  subagent_type: `fleet-implementer-${f.chosen_cell}`, effort: f.chosen_cell.split("-")[1], model: "m", cost: "1", ending: "hollow", ...over,
+});
+// `members`, plus an implementer for every features row none of them is: one that opened the PR a verdict names for its ticket.
+const withImplementers = (features, verdicts, members) => [
+  ...features.filter((f) => !members.some((m) => (m.session ?? SESSION) === f.session && m.agent === f.agent)).map((f) => {
+    const v = verdicts.find((x) => String(x.ticket).split("+").includes(f.ticket));
+    return implementer(f, v ? { pr: String(v.pr), ending: "pr" } : {});
+  }),
+  ...members,
+];
+// `withImplementers`, parsed as the fit reads member-outcomes.tsv.
+const parsedMembers = (features, verdicts, members) => parseMemberTsv(tsv(MEMBER_COLUMNS, withImplementers(features, verdicts, members).map(memberRow)));
 
 function fitWorld(t, { features, members, verdicts, table = baseTable({ burn_in: true }), guard = guardFile() }) {
   const p = world(t, { table, guard });
   p.features = join(p.dir, "ticket-features.tsv");
   p.members = join(p.dir, "member-outcomes.tsv");
   p.verdicts = join(p.dir, "tier-outcomes.tsv");
-  writeFileSync(p.features, tsv(COLUMNS, features, true));
-  writeFileSync(p.members, tsv(MEMBER_COLUMNS, members.map(memberRow)));
-  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, verdicts.map(verdictRow)));
+  // Rewrites the three files, every features row given its implementer as `fitWorld` gives them.
+  p.write = ({ features: f, members: m = [], verdicts: v }) => {
+    writeFileSync(p.features, tsv(COLUMNS, f, true));
+    writeFileSync(p.members, tsv(MEMBER_COLUMNS, withImplementers(f, v, m).map(memberRow)));
+    writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, v.map(verdictRow)));
+  };
+  p.write({ features, members, verdicts });
   p.fitArgs = ["--table", p.table, "--features", p.features, "--members", p.members, "--verdicts", p.verdicts];
   // The fit reads the three TSVs as committed, so the fixture is a repository, and a test that
   // changes a file commits it with `p.commit()`, which answers the new commit's sha.
@@ -679,17 +699,17 @@ test("fit: a day-one three-TSV fixture writes an estimates-only table, and --che
     featureRow({ ticket: "2", chosen_cell: "slow-high", exploration_draw: "1/3", brief_chars: "5000" }),
     featureRow({ ticket: "3", chosen_cell: "smol-high", exploration_draw: "3/3", run_date: "2026-10-02" }),
   ];
+  // Every Pull's implementer is admissible and costs $1; ticket 1's PR took a $2 fix round, and the merge bot is no cell's.
   const members = [
-    { member: "impl-1", agent: "impl-1", ticket: "1", pr: "11", role: "implementer" },
-    { member: "fix-pr-11", agent: "fix-pr-11", pr: "11", role: "fix-applier" },
-    { member: "merge-bot-1", agent: "merge-bot-1", pr: "11", role: "merge-bot" },
+    { member: "fix-pr-11", agent: "fix-pr-11", pr: "11", role: "fix-applier", cost: "2" },
+    { member: "merge-bot-1", agent: "merge-bot-1", pr: "11", role: "merge-bot", cost: "100" },
   ];
   const verdicts = [{ pr: "11", ticket: "1" }, { pr: "12", ticket: "2+9", minted_false_claim: "yes" }];
   const p = fitWorld(t, { features, members, verdicts });
   const r = fitCli(p);
   assert.equal(r.status, 0, r.stderr);
   const sha = p.git("rev-parse", "HEAD");
-  assert.match(r.stdout, new RegExp(`fitted 3 tickets at ${sha.slice(0, 8)};`));
+  assert.match(r.stdout, new RegExp(`fitted 3 Pulls at ${sha.slice(0, 8)};.*; cells slow-high n=1 merged=1 failed=1 excluded=0 left_out=0 unpriced=0, `));
   const table = JSON.parse(readFileSync(p.table, "utf8"));
   assert.deepEqual(table.rows, { "*": "slow-high" }, "no cell has n>=20 yet, so no row is adopted");
   assert.equal(table.burn_in, true);
@@ -698,14 +718,15 @@ test("fit: a day-one three-TSV fixture writes an estimates-only table, and --che
   assert.equal(table.fitted_commit, sha, "the table records the commit the fit read, in full");
   assert.equal("fitted_through" in table, false, "no date field stays beside the commit");
   assert.equal(table.window_start, "2026-09-01", "the window comes from the guard; the fit never moves it");
-  assert.deepEqual(table.estimates["*"]["task-high"], { n: 1, merged: 1, usd_per_merged: null, fail_rate: 0, fix_rounds: 1, review_findings: null });
-  assert.deepEqual(table.estimates.heavy["slow-high"], { n: 1, merged: 1, usd_per_merged: null, fail_rate: 1, fix_rounds: 0, review_findings: null });
-  assert.equal(table.estimates.light["smol-high"].merged, 0);
+  const est = (o) => ({ claims: o.merged, failed: 0, fix_rounds: 0, review_findings: null, excluded: 0, left_out: 0, unpriced: 0, ...o });
+  assert.deepEqual(table.estimates["*"]["task-high"], est({ n: 1, merged: 1, usd_per_merged: 3, fail_rate: 0, fix_rounds: 1 }));
+  assert.deepEqual(table.estimates.heavy["slow-high"], est({ n: 1, merged: 1, failed: 1, usd_per_merged: 1, fail_rate: 1 }));
+  assert.deepEqual(table.estimates.light["smol-high"], est({ n: 1, merged: 0, usd_per_merged: null, fail_rate: null, fix_rounds: null }));
   assert.deepEqual(table.guard, { tripped: [], n: { "slow-high": 5, "smol-high": 5, "task-high": 5 } });
 
   const check = cli(["--check", ...p.fitArgs]);
   assert.equal(check.status, 0, check.stderr);
-  assert.match(check.stdout, new RegExp(`matches a re-fit of 3 tickets at ${sha.slice(0, 8)}\n`));
+  assert.match(check.stdout, new RegExp(`matches a re-fit of 3 Pulls at ${sha.slice(0, 8)}\n`));
 });
 
 test("--check fails when the checked-in table is not a re-fit of its rows", (t) => {
@@ -738,11 +759,10 @@ test("--check and --due after a fit: a features row with the fitted row's own da
   assert.equal(fitCli(p).status, 0);
   const fitted = readFileSync(p.table, "utf8");
   assert.equal(fitCli(p, ["--due"]).stdout, "DUE=no MERGED=0/50\n", "the rows the fit read are not new");
-  writeFileSync(p.features, tsv(COLUMNS, [
-    featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3" }),
-    featureRow({ ticket: "2", session: SESSION2, run_date: "2026-10-01" }),
-  ], true));
-  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [verdictRow({ pr: "11", ticket: "1" }), verdictRow({ pr: "22", ticket: "2" })]));
+  p.write({
+    features: [featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3" }), featureRow({ ticket: "2", session: SESSION2, run_date: "2026-10-01" })],
+    verdicts: [{ pr: "11", ticket: "1" }, { pr: "22", ticket: "2" }],
+  });
   p.commit();
   const check = cli(["--check", ...p.fitArgs]);
   assert.equal(check.status, 0, check.stderr);
@@ -756,11 +776,13 @@ test("--check and --due after a fit: a crashed run's row drained later, dated be
     members: [], verdicts: [{ pr: "11", ticket: "1", run_date: "2026-10-05" }],
   });
   assert.equal(fitCli(p).status, 0);
-  writeFileSync(p.features, tsv(COLUMNS, [
-    featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3", run_date: "2026-10-05" }),
-    featureRow({ ticket: "2", session: SESSION2, run_date: "2026-10-02" }),
-  ], true));
-  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [verdictRow({ pr: "11", ticket: "1", run_date: "2026-10-05" }), verdictRow({ pr: "22", ticket: "2", run_date: "2026-10-03" })]));
+  p.write({
+    features: [
+      featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3", run_date: "2026-10-05" }),
+      featureRow({ ticket: "2", session: SESSION2, run_date: "2026-10-02" }),
+    ],
+    verdicts: [{ pr: "11", ticket: "1", run_date: "2026-10-05" }, { pr: "22", ticket: "2", run_date: "2026-10-03" }],
+  });
   p.commit();
   const check = cli(["--check", ...p.fitArgs]);
   assert.equal(check.status, 0, check.stderr);
@@ -789,8 +811,8 @@ test("--check stays green when a fitted ticket's verdict is re-judged in place, 
 test("--check stays green when a member scrape re-sorts or rewrites rows after the fit", (t) => {
   const features = [featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3" })];
   const members = [
-    { agent: "impl-1", member: "impl-1", ticket: "1", pr: "11" },
-    { agent: "fix-pr-11", member: "fix-pr-11", ticket: "1", pr: "11" },
+    implementer(features[0], { pr: "11", ending: "pr" }),
+    { agent: "fix-pr-11", member: "fix-pr-11", ticket: "1", pr: "11", cost: "1" },
   ];
   const p = fitWorld(t, { features, members, verdicts: [{ pr: "11", ticket: "1" }] });
   assert.equal(fitCli(p).status, 0);
@@ -799,8 +821,8 @@ test("--check stays green when a member scrape re-sorts or rewrites rows after t
   // The scrape replaces rows by key and re-sorts the whole file: a newer row comes first, the
   // fitted rows follow in the other order, and one of them is rewritten with a later date.
   const scraped = [
-    { run_date: "2026-10-09", agent: "fix-pr-12", member: "fix-pr-12", ticket: "1", pr: "11" },
-    { run_date: "2026-10-09", agent: "fix-pr-11", member: "fix-pr-11", ticket: "1", pr: "11" },
+    { run_date: "2026-10-09", agent: "fix-pr-12", member: "fix-pr-12", ticket: "1", pr: "11", cost: "1" },
+    { run_date: "2026-10-09", agent: "fix-pr-11", member: "fix-pr-11", ticket: "1", pr: "11", cost: "1" },
     members[0],
   ];
   writeFileSync(p.members, tsv(MEMBER_COLUMNS, scraped.map(memberRow)));
@@ -926,7 +948,7 @@ test("CI's router check: with fitted_commit null it fetches nothing and --check 
   const { r, calls } = ciRouterCheck(baseTable({ burn_in: true }));
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(calls, [], "no git call at all");
-  assert.match(r.stdout, /matches a re-fit of 0 tickets at no commit/);
+  assert.match(r.stdout, /matches a re-fit of 0 Pulls at no commit/);
 });
 
 test("CI's router check: with a fitted_commit it runs `git fetch --depth=1 origin <sha>` before --check", (t) => {
@@ -937,7 +959,13 @@ test("CI's router check: with a fitted_commit it runs `git fetch --depth=1 origi
   assert.ok(r.stderr.includes(`git fetch --depth=1 origin ${sha}`), r.stderr);
 });
 
-// Twenty-plus tickets a side, so the adoption rule can decide.
+// A direct fitTable call, its member rows given their implementers and parsed as the CLI parses them.
+const direct = (input) => ({ ...input, members: parsedMembers(input.features, input.verdicts, input.members) });
+const fitDirect = (input, guard = {}) => fitTable({ prior: baseTable(), ...direct(input), guard: { tripped: [], n: {}, window_start: null, ...guard } });
+const exploring = (over) => featureRow({ exploration_draw: "1/3", ...over });
+const ruled = (ticket, pr, over) => verdictRow({ ticket: String(ticket), pr: String(pr), ...over });
+
+// Twenty-plus Pulls a side, so the adoption rule can decide: each implementer opened its PR and cost `usd`.
 function adoptionInput({ cheapFails, cheapUsd = 2, baseUsd = 10, n = 20 }) {
   const features = [];
   const members = [];
@@ -945,19 +973,20 @@ function adoptionInput({ cheapFails, cheapUsd = 2, baseUsd = 10, n = 20 }) {
   let ticket = 100;
   for (const [cell, usd, fail] of [["slow-high", baseUsd, false], ["smol-high", cheapUsd, cheapFails]]) {
     for (let i = 0; i < n; i++, ticket++) {
-      features.push(featureRow({ ticket: String(ticket), chosen_cell: cell, exploration_draw: "1/3" }));
-      members.push({ session: SESSION, agent: `impl-${ticket}`, member: `impl-${ticket}`, ticket: String(ticket), pr: String(ticket + 1000), cost: String(usd) });
-      verdicts.push({ ticket: String(ticket), pr: String(ticket + 1000), closed_own_ticket: "yes", minted_false_claim: fail ? "yes" : "no" });
+      const f = featureRow({ ticket: String(ticket), chosen_cell: cell, exploration_draw: "1/3" });
+      features.push(f);
+      members.push(implementer(f, { pr: String(ticket + 1000), cost: String(usd), ending: "pr" }));
+      verdicts.push(ruled(ticket, ticket + 1000, { minted_false_claim: fail ? "yes" : "no" }));
     }
   }
-  return { features, members, verdicts: verdicts.map(verdictRow) };
+  return { features, members, verdicts };
 }
 const atN = { tripped: [], n: { "slow-high": 20, "task-high": 20, "smol-high": 20 }, window_start: null };
 
 test("fit: adopts the cheapest cell at n>=20 under 0.75x the default's $/merged PR, and never re-tests the quality floor", () => {
   // Every smol-high PR fails the floor; the fit adopts it anyway — the guard,
   // not the fit, is the quality gate.
-  const next = fitTable({ prior: baseTable({ burn_in: true }), ...adoptionInput({ cheapFails: true }), guard: atN });
+  const next = fitTable({ prior: baseTable({ burn_in: true }), ...direct(adoptionInput({ cheapFails: true })), guard: atN });
   assert.equal(next.estimates["*"]["smol-high"].fail_rate, 1);
   assert.equal(next.rows["*"], "smol-high");
   assert.equal(next.rows.light, "smol-high", "a stratum with both sides at n>=20 gets its own row");
@@ -969,22 +998,23 @@ test("fit: adopts the cheapest cell at n>=20 under 0.75x the default's $/merged 
 });
 
 test("fit: no adoption above the 0.75x margin, for a tripped cell, or below n=20 — the default stays", () => {
-  const above = fitTable({ prior: baseTable({ burn_in: true }), ...adoptionInput({ cheapFails: false, cheapUsd: 8 }), guard: atN });
+  const above = fitTable({ prior: baseTable({ burn_in: true }), ...direct(adoptionInput({ cheapFails: false, cheapUsd: 8 })), guard: atN });
   assert.deepEqual(above.rows, { "*": "slow-high", light: "slow-high" });
   assert.equal(above.burn_in, false, "every stage-1 cell has pooled n>=20 in the guard");
   assert.equal(above.stage, 1, "no adoption and no eviction: the stage holds");
-  const tripped = fitTable({ prior: baseTable(), ...adoptionInput({ cheapFails: false }), guard: { ...atN, tripped: ["smol-high"] } });
+  const tripped = fitTable({ prior: baseTable(), ...direct(adoptionInput({ cheapFails: false })), guard: { ...atN, tripped: ["smol-high"] } });
   assert.deepEqual(tripped.rows, { "*": "slow-high" });
   assert.equal(tripped.stage, 2, "an eviction with every stage-1 cell at n advances the stage too");
   assert.deepEqual(tripped.cells, [...STAGE1, "slow-medium", "task-max"]);
-  const small = fitTable({ prior: baseTable(), ...adoptionInput({ cheapFails: false, n: 19 }), guard: atN });
+  const small = fitTable({ prior: baseTable(), ...direct(adoptionInput({ cheapFails: false, n: 19 })), guard: atN });
   assert.deepEqual(small.rows, { "*": "slow-high" });
-  // A booked row with no cost on record makes the cell's $ unknown, and unknown never adopts.
+  // A booked row with no cost on record makes its Pull unpriced: out of the cell's n, so the cell falls under n=20.
   const input = adoptionInput({ cheapFails: false });
   input.members[30].cost = "";
-  const unknown = fitTable({ prior: baseTable(), ...input, guard: atN });
-  assert.equal(unknown.estimates["*"]["smol-high"].usd_per_merged, null);
-  assert.deepEqual(unknown.rows, { "*": "slow-high" });
+  const unpriced = fitTable({ prior: baseTable(), ...direct(input), guard: atN });
+  const smol = unpriced.estimates["*"]["smol-high"];
+  assert.deepEqual([smol.n, smol.unpriced, smol.usd_per_merged], [19, 1, 2]);
+  assert.deepEqual(unpriced.rows, { "*": "slow-high" });
 });
 
 test("fit: a non-exploration row a live B classifier routed is the A/B's test set, not fit input", () => {
@@ -993,7 +1023,7 @@ test("fit: a non-exploration row a live B classifier routed is the A/B's test se
     featureRow({ ticket: "2", sizing_src: "haiku", chosen_cell: "task-high", exploration_draw: "1/2" }),
     featureRow({ ticket: "3" }),
   ];
-  const next = fitTable({ prior: baseTable(), features, members: [], verdicts: [], guard: atN });
+  const next = fitDirect({ features, members: [], verdicts: [] }, atN);
   assert.equal(next.n_rows, 2);
   assert.equal(next.estimates["*"]["task-high"].n, 1);
 });
@@ -1004,13 +1034,12 @@ test("fit --due counts merged PRs whose features rows are not in the fitted comm
   const ruledAll = (rows) => rows.map((f) => ({ ticket: f.ticket, pr: String(Number(f.ticket) + 500), run_date: f.run_date }));
   const p = fitWorld(t, { features: old, members: [], verdicts: ruledAll(old) });
   assert.equal(fitCli(p).status, 0);
-  writeFileSync(p.features, tsv(COLUMNS, [...old, ...fresh], true));
-  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, ruledAll([...old, ...fresh.slice(0, 39)]).map(verdictRow)));
+  p.write({ features: [...old, ...fresh], verdicts: ruledAll([...old, ...fresh.slice(0, 39)]) });
   p.commit();
   const before = readFileSync(p.table, "utf8");
-  assert.equal(fitCli(p, ["--due"]).stdout, "DUE=no MERGED=39/50\n", "the ten fitted tickets, ruled, are not counted");
+  assert.equal(fitCli(p, ["--due"]).stdout, "DUE=no MERGED=39/50\n", "the ten fitted Pulls, ruled, are not counted");
   assert.equal(readFileSync(p.table, "utf8"), before, "--due writes nothing");
-  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, ruledAll([...old, ...fresh]).map(verdictRow)));
+  p.write({ features: [...old, ...fresh], verdicts: ruledAll([...old, ...fresh]) });
   p.commit();
   assert.equal(fitCli(p, ["--due"]).stdout, "DUE=yes MERGED=50/50\n");
 });
@@ -1021,11 +1050,21 @@ test("fit --due before any fit counts every merged PR in the window", (t) => {
   assert.equal(fitCli(p, ["--due"]).stdout, "DUE=no MERGED=3/50\n");
 });
 
+test("fit --due counts only counted Pulls: a merged PR whose Pull has no Admissible row is not one", (t) => {
+  const features = Array.from({ length: 3 }, (_, i) => featureRow({ ticket: String(i + 1) }));
+  const verdicts = features.map((f) => ({ ticket: f.ticket, pr: String(Number(f.ticket) + 500) }));
+  const p = fitWorld(t, { features, members: [implementer(features[0], { pr: "501", ending: "pr", subagent_type: "fleet-implementer-task-high" })], verdicts });
+  assert.equal(fitCli(p, ["--due"]).stdout, "DUE=no MERGED=2/50\n");
+});
+
+// mergedSince over `features`, every row given its implementer.
+const since = ({ table = baseTable(), features, verdicts, fitted = [] }) => mergedSince({ table, features, members: parsedMembers(features, verdicts, []), verdicts, fitted });
+
 test("mergedSince: counts the rows the fitted commit's features file does not hold, matched by session and agent, on or after window_start", () => {
   const features = ["2026-09-30", "2026-10-01", "2026-10-02"].map((d, i) => featureRow({ ticket: String(i + 1), run_date: d }));
   const verdicts = features.map((f) => verdictRow({ ticket: f.ticket, pr: String(Number(f.ticket) + 500), run_date: "2026-10-03" }));
-  const count = (over, fitted = []) => mergedSince({ table: baseTable(over), features, verdicts, fitted });
-  assert.equal(count({}), 3, "nothing fitted, no window: every ruled ticket counts");
+  const count = (over, fitted = []) => since({ table: baseTable(over), features, verdicts, fitted });
+  assert.equal(count({}), 3, "nothing fitted, no window: every ruled Pull counts");
   assert.equal(count({}, [features[0]]), 2, "a row the fitted commit holds is already fitted");
   assert.equal(count({}, [{ ...features[1], run_date: "2026-01-01", ticket: "99" }]), 2, "matched by session and agent, whatever the row's date or ticket");
   assert.equal(count({}, [{ ...features[1], session: SESSION2 }]), 3, "another session's row is not this one");
@@ -1033,35 +1072,40 @@ test("mergedSince: counts the rows the fitted commit's features file does not ho
   assert.equal(count({}, features), 0, "every row fitted");
   assert.equal(count({ window_start: "2026-10-01" }), 2, "the window_start day itself is inside the window");
   assert.equal(count({ window_start: "2026-10-02" }, [features[0]]), 1, "the window bounds what the fitted commit does not hold");
-  assert.equal(mergedSince({ table: baseTable(), features, verdicts: verdicts.slice(1), fitted: [] }), 2, "a ticket with no verdict is not a merged PR");
-  const twice = [...features, featureRow({ ticket: "3", run_date: "2026-10-03" })];
-  assert.equal(mergedSince({ table: baseTable(), features: twice, verdicts, fitted: [] }), 3, "a ticket with two features rows is one merged PR");
+  assert.equal(mergedSince({ table: baseTable(), features, members: parsedMembers(features, verdicts, []), verdicts: verdicts.slice(1), fitted: [] }), 2,
+    "a Pull with no verdict is not a merged PR");
 });
 
-test("mergedSince: a ticket is merged only on a ruling dated on or after its last features row, a row with both verdict columns blank skipped", () => {
-  const features = [featureRow({ ticket: "1", run_date: "2026-10-01" }), featureRow({ ticket: "1", run_date: "2026-10-03" })];
-  const count = (verdicts) => mergedSince({ table: baseTable(), features, verdicts, fitted: [] });
-  assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-02" })]), 0, "a ruling dated before the last features row predates that Pull");
+test("mergedSince: a Pull is merged only on a ruling dated on or after it, a row with both verdict columns blank skipped", () => {
+  const features = [featureRow({ ticket: "1", run_date: "2026-10-03" })];
+  const count = (verdicts) => since({ features, verdicts });
+  assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-02" })]), 0, "a ruling dated before the Pull predates it");
   assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-03", closed_own_ticket: "", minted_false_claim: "" })]), 0, "a both-blank row was never ruled");
-  assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-03" })]), 1, "a ruling dated the day of the last features row rules it");
+  assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-03" })]), 1, "a ruling dated the day of the Pull rules it");
 });
 
-test("mergedSince: a ticket's last Pull is its last features row in file order, not its latest-dated one", () => {
-  const features = [featureRow({ ticket: "1", run_date: "2026-10-03" }), featureRow({ ticket: "1", run_date: "2026-10-01" })];
-  const count = (verdicts) => mergedSince({ table: baseTable(), features, verdicts, fitted: [] });
-  assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-02" })]), 1, "the later row in file order is older-dated, and its date is the floor the ruling clears");
-  assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-09-30" })]), 0, "a ruling dated before even that floor rules nothing");
+test("mergedSince: a ticket Pulled twice merges once, through the Pull whose implementer opened the ruled PR", () => {
+  const first = featureRow({ ticket: "1", run_date: "2026-10-01" });
+  const second = featureRow({ ticket: "1", run_date: "2026-10-03", session: SESSION2 });
+  const features = [first, second];
+  const verdicts = [verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-03" })];
+  const members = parseMemberTsv(tsv(MEMBER_COLUMNS, [implementer(first), implementer(second, { pr: "11", ending: "pr" })].map(memberRow)));
+  const count = (fitted) => mergedSince({ table: baseTable(), features, members, verdicts, fitted });
+  assert.equal(count([]), 1);
+  assert.equal(count([first]), 1, "the fitted first Pull never merged");
+  assert.equal(count([second]), 0, "the merging Pull is fitted");
 });
 
 test("mergedSince: a features row whose run_date is blank is no Pull, with neither bound set as with one set", () => {
   // route() writes a blank run_date for a session id with no date prefix.
-  const features = [featureRow({ ticket: "2", run_date: "2026-10-03" }), featureRow({ ticket: "2", run_date: "" })];
-  const count = (verdicts, over = {}) => mergedSince({ table: baseTable(over), features, verdicts, fitted: [] });
+  const features = [featureRow({ ticket: "2", run_date: "2026-10-03" }), featureRow({ ticket: "2", run_date: "", session: SESSION2 })];
+  const count = (verdicts, over = {}) => since({ table: baseTable(over), features, verdicts });
   const early = verdictRow({ ticket: "2", pr: "22", run_date: "2026-01-01", minted_false_claim: "yes" });
-  assert.equal(count([early]), 0, "a ruling dated before the last dated row predates that Pull");
+  assert.equal(count([early]), 0, "a ruling dated before the dated row predates that Pull");
   assert.equal(count([early], { window_start: "2026-01-01" }), 0, "the same with window_start set");
-  assert.equal(count([verdictRow({ ticket: "2", pr: "22", run_date: "2026-10-03" })]), 1, "a ruling on or after the last dated row still rules the ticket");
-  assert.equal(mergedSince({ table: baseTable(), features: [featureRow({ ticket: "3", run_date: "" })], verdicts: [verdictRow({ ticket: "3", pr: "33" })], fitted: [] }), 0, "a ticket whose only row is blank-dated has no Pull to rule");
+  assert.equal(count([verdictRow({ ticket: "2", pr: "22", run_date: "2026-10-03" })]), 1, "a ruling on or after the dated row still rules it");
+  assert.equal(since({ features: [featureRow({ ticket: "3", run_date: "" })], verdicts: [verdictRow({ ticket: "3", pr: "33" })] }), 0,
+    "a ticket whose only row is blank-dated has no Pull to rule");
 });
 
 test("mergedSince refuses a features row whose run_date is neither blank nor YYYY-MM-DD, with window_start set or not, rather than dropping it", () => {
@@ -1069,7 +1113,7 @@ test("mergedSince refuses a features row whose run_date is neither blank nor YYY
   for (const bad of ["10/01/2026", "2026-10-1", "2026", "abc"]) {
     for (const over of [{}, { window_start: "2026-01-01" }]) {
       assert.throws(
-        () => mergedSince({ table: baseTable(over), features: [dated, featureRow({ ticket: "5", run_date: bad })], verdicts: [], fitted: [] }),
+        () => mergedSince({ table: baseTable(over), features: [dated, featureRow({ ticket: "5", run_date: bad })], members: [], verdicts: [], fitted: [] }),
         (e) => e.message.includes("ticket #5") && e.message.includes(`run_date is '${bad}', expected YYYY-MM-DD or blank`),
         `${JSON.stringify(over)}, run_date ${bad}`,
       );
@@ -1094,55 +1138,46 @@ test("fit refuses an unreadable guard or input file at exit 2 and leaves the tab
   assert.equal(readFileSync(p.table, "utf8"), JSON.stringify(baseTable({ burn_in: true, fitted_commit: bad })));
 });
 
-// A direct fitTable call: the `cost` column is not in member-outcomes COLUMNS, so cost-bearing fixtures skip the TSV round trip.
-const fitDirect = (input, guard = {}) => fitTable({ prior: baseTable(), ...input, guard: { tripped: [], n: {}, window_start: null, ...guard } });
-const exploring = (over) => featureRow({ exploration_draw: "1/3", ...over });
-const ruled = (ticket, pr, over) => verdictRow({ ticket: String(ticket), pr: String(pr), ...over });
-
-test("fit: a ticket's verdict is its last ruling dated on or after its last input row, a row with both verdict columns blank skipped", () => {
-  // Ticket 2, in another cell, has a later row than ticket 1's last input row; it moves nothing for ticket 1.
-  const features = [
-    exploring({ ticket: "1", run_date: "2026-10-01" }),
-    exploring({ ticket: "1", run_date: "2026-10-03" }),
-    exploring({ ticket: "2", run_date: "2026-10-05", chosen_cell: "task-high" }),
-  ];
+test("fit: a Pull's verdict is its ticket's last ruling dated on or after it, a row with both verdict columns blank skipped", () => {
+  // Ticket 2, in another cell, has a later row than ticket 1's Pull; it moves nothing for ticket 1.
+  const features = [exploring({ ticket: "1", run_date: "2026-10-03" }), exploring({ ticket: "2", run_date: "2026-10-05", chosen_cell: "task-high" })];
   const fit = (verdicts) => fitDirect({ features, members: [], verdicts }).estimates["*"]["slow-high"];
   const failed = ruled(1, 11, { run_date: "2026-10-03", minted_false_claim: "yes" });
   const blank = ruled(1, 11, { run_date: "2026-10-04", closed_own_ticket: "", minted_false_claim: "" });
   assert.equal(fit([failed, blank]).fail_rate, 1, "a both-blank row after a real ruling was never ruled, so the ruling stands");
-  assert.equal(fit([blank]).merged, 0, "a ticket whose only row is both-blank has no verdict");
-  assert.equal(fit([ruled(1, 11, { run_date: "2026-10-02", minted_false_claim: "yes" })]).merged, 0, "a ruling dated before the last input row predates that Pull");
+  assert.equal(fit([blank]).merged, 0, "a Pull whose only row is both-blank has no verdict");
+  assert.equal(fit([ruled(1, 11, { run_date: "2026-10-02", minted_false_claim: "yes" })]).merged, 0, "a ruling dated before the Pull predates it");
   const pass = ruled(1, 11, { run_date: "2026-10-03" });
-  assert.deepEqual(fit([pass]), { ...fit([pass]), merged: 1, fail_rate: 0 }, "a ruling dated the day of the last input row rules it");
+  assert.deepEqual(fit([pass]), { ...fit([pass]), merged: 1, fail_rate: 0 }, "a ruling dated the day of the Pull rules it");
   assert.equal(fit([pass, ruled(1, 11, { run_date: "2026-10-05", minted_false_claim: "yes" })]).fail_rate, 1, "the last such ruling wins");
 });
 
-test("fit: a ticket's cell is its last input row in file order, not its latest-dated one, and that row's date is the ruling's floor", () => {
-  // Ticket 1's rows are in reverse date order; ticket 2, in another cell, has a later row than both.
-  const features = [
-    exploring({ ticket: "1", run_date: "2026-10-03", chosen_cell: "slow-high" }),
-    exploring({ ticket: "1", run_date: "2026-10-01", chosen_cell: "smol-high" }),
-    exploring({ ticket: "2", run_date: "2026-10-05", chosen_cell: "task-high" }),
-  ];
-  const estimates = fitDirect({ features, members: [], verdicts: [ruled(1, 11, { run_date: "2026-10-02" })] }).estimates["*"];
-  assert.equal(estimates["smol-high"]?.merged, 1, "the later row in file order is the older-dated: its cell takes the ruling, which clears only its floor");
-  assert.equal(estimates["slow-high"], undefined, "the latest-dated row does not set the ticket's cell");
+test("fit: a ticket Pulled twice is two units, each in its own row's cell and stratum, and its merge counts once", () => {
+  const first = exploring({ ticket: "1", run_date: "2026-10-01", chosen_cell: "task-high", brief_chars: "100" });
+  const second = exploring({ ticket: "1", run_date: "2026-10-03", chosen_cell: "smol-high", brief_chars: "5000", session: SESSION2 });
+  const next = fitDirect({
+    features: [first, second], members: [implementer(second, { pr: "11", ending: "pr", cost: "3" })], verdicts: [ruled(1, 11, { run_date: "2026-10-03" })],
+  });
+  assert.equal(next.n_rows, 2);
+  assert.deepEqual([next.estimates.light["task-high"].n, next.estimates.light["task-high"].merged], [1, 0]);
+  assert.deepEqual([next.estimates.heavy["smol-high"].n, next.estimates.heavy["smol-high"].merged], [1, 1]);
+  assert.equal(next.estimates["*"]["smol-high"].usd_per_merged, 3, "the hollow first Pull's $1 is task-high's spend, not smol-high's");
 });
 
 test("fit: a features row whose run_date is blank is no input row", () => {
   // route() writes a blank run_date for a session id with no date prefix; ticket 9's blank row sits in another cell.
   const features = [
     exploring({ ticket: "2", run_date: "2026-10-03" }),
-    exploring({ ticket: "2", run_date: "", chosen_cell: "smol-high" }),
+    exploring({ ticket: "2", run_date: "", chosen_cell: "smol-high", session: SESSION2 }),
     exploring({ ticket: "9", run_date: "", chosen_cell: "task-high" }),
   ];
   const early = ruled(2, 22, { run_date: "2026-01-01", minted_false_claim: "yes" });
   const fit = (verdicts) => fitDirect({ features, members: [], verdicts });
   const t = fit([early, ruled(9, 99)]);
-  assert.deepEqual(Object.keys(t.estimates["*"]), ["slow-high"], "neither blank row sets a cell or adds a ticket");
+  assert.deepEqual(Object.keys(t.estimates["*"]), ["slow-high"], "neither blank row sets a cell or adds a Pull");
   assert.equal(t.n_rows, 1);
-  assert.equal(t.estimates["*"]["slow-high"].merged, 0, "a ruling dated before the last dated row predates that Pull");
-  assert.equal(fit([ruled(2, 22, { run_date: "2026-10-03" })]).estimates["*"]["slow-high"].merged, 1, "a ruling on or after the last dated row rules the ticket");
+  assert.equal(t.estimates["*"]["slow-high"].merged, 0, "a ruling dated before the dated row predates that Pull");
+  assert.equal(fit([ruled(2, 22, { run_date: "2026-10-03" })]).estimates["*"]["slow-high"].merged, 1, "a ruling on or after the dated row rules it");
 });
 
 test("fit refuses a features row whose run_date is neither blank nor YYYY-MM-DD rather than dropping it", () => {
@@ -1165,16 +1200,31 @@ test("fit, fit --due and --check refuse at exit 2 a features row whose run_date 
   for (const args of [fitArgs, [...fitArgs, "--due"], ["--check", ...p.fitArgs]]) {
     const r = cli(args);
     assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
-    assert.match(r.stderr, /cannot join --features .* with --verdicts .*: ticket #7: a ticket-features row's run_date is '10\/01\/2026', expected YYYY-MM-DD or blank/);
+    assert.match(r.stderr, /cannot join --features .*, --members .* and --verdicts .*: ticket #7: a ticket-features row's run_date is '10\/01\/2026', expected YYYY-MM-DD or blank/);
     assert.equal(r.stdout, "");
   }
   assert.equal(readFileSync(p.table, "utf8"), before);
-  writeFileSync(p.features, tsv(COLUMNS, [exploring({ ticket: "1" }), exploring({ ticket: "7", run_date: "" })], true));
+  p.write({ features: [exploring({ ticket: "1" }), exploring({ ticket: "7", run_date: "" })], verdicts: [ruled(1, 11)] });
   p.commit();
   for (const args of [[...fitArgs, "--due"], fitArgs]) {
     const r = cli(args);
     assert.equal(r.status, 0, `${args.join(" ")}: ${r.stderr}`);
   }
+});
+
+test("fit, fit --due and --check refuse at exit 2 a booked cost that is neither blank nor a number, naming the row, and leave the table alone", (t) => {
+  const f = exploring({ ticket: "1" });
+  const p = fitWorld(t, { features: [f], members: [implementer(f, { pr: "11", ending: "pr", cost: "n/a" })], verdicts: [ruled(1, 11)] });
+  writeFileSync(p.table, JSON.stringify(baseTable({ burn_in: true, fitted_commit: p.git("rev-parse", "HEAD") })));
+  const before = readFileSync(p.table, "utf8");
+  const fitArgs = ["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD"];
+  for (const args of [fitArgs, [...fitArgs, "--due"], ["--check", ...p.fitArgs]]) {
+    const r = cli(args);
+    assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
+    assert.match(r.stderr, /: member-outcomes row session \S+ agent impl-1: cost 'n\/a' is not a number/);
+    assert.equal(r.stdout, "");
+  }
+  assert.equal(readFileSync(p.table, "utf8"), before);
 });
 
 test("fit refuses at exit 2 a ruling of an input ticket whose run_date is not YYYY-MM-DD, and leaves the table alone; one of a ticket outside the input is not refused", (t) => {
@@ -1219,14 +1269,14 @@ test("fit refuses at exit 2 a ruling of an input ticket whose run_date is not YY
   assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD"]).status, 0);
 });
 
-test("fit does not refuse a ruling whose run_date is not YYYY-MM-DD on a ticket whose last in-window row is neither an exploration row nor a rule row, though fit --due does", (t) => {
+test("fit and fit --due both refuse a ruling whose run_date is not YYYY-MM-DD on a windowed Pull the fit then skips as a live B classifier's: every windowed Pull is booked first", (t) => {
   const features = [exploring({ ticket: "1" }), featureRow({ ticket: "3", exploration_draw: "", sizing_src: "" })];
   const p = fitWorld(t, { features, members: [], verdicts: [ruled(1, 11), ruled(3, 13, { run_date: "10/01/2026" })] });
-  const due = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD", "--due"]);
-  assert.equal(due.status, 2, due.stderr);
-  assert.match(due.stderr, /ticket #3 \(PR #13\): run_date is '10\/01\/2026', expected YYYY-MM-DD/);
-  const r = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD"]);
-  assert.equal(r.status, 0, r.stderr);
+  for (const mode of [["--due"], []]) {
+    const r = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--commit", "HEAD", ...mode]);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /ticket #3 \(PR #13\): run_date is '10\/01\/2026', expected YYYY-MM-DD/);
+  }
 });
 
 test("fit: a ruling's run_date with trailing or leading junk is refused, not read as the date inside it", () => {
@@ -1260,107 +1310,87 @@ test("--check refuses at exit 2 a ruling of an input ticket whose run_date is no
   assert.equal(r.stdout, "");
 });
 
-test("fit: a ticket's cell and stratum are its last features row's", () => {
-  const features = [
-    exploring({ ticket: "1", chosen_cell: "task-high", brief_chars: "100" }),
-    exploring({ ticket: "1", chosen_cell: "smol-high", exploration_draw: "2/3", brief_chars: "5000" }),
-  ];
-  const members = [memberRow({ agent: "impl-1", member: "impl-1", ticket: "1", cost: "3" })];
-  const next = fitDirect({ features, members, verdicts: [ruled(1, 11)] });
-  assert.equal(next.n_rows, 1);
-  assert.deepEqual(Object.keys(next.estimates["*"]), ["smol-high"]);
-  assert.deepEqual(Object.keys(next.estimates.heavy), ["smol-high"]);
-  assert.equal(next.estimates.light, undefined);
+test("fit: a Pull's $ is its booked members' cost, never its router_usd", () => {
+  const f = exploring({ ticket: "1", router_usd: "0.5" });
+  const next = fitDirect({ features: [f], members: [implementer(f, { pr: "11", ending: "pr", cost: "3" })], verdicts: [ruled(1, 11)] });
+  assert.equal(next.estimates["*"]["slow-high"].usd_per_merged, 3);
 });
 
-test("fit: a ticket's $ adds the router's own spend from every one of its features rows to its members' cost", () => {
-  const features = [
-    exploring({ ticket: "1", router_usd: "0.5" }),
-    exploring({ ticket: "1", router_usd: "" }),
-    exploring({ ticket: "1", router_usd: "0.25" }),
-  ];
-  const members = [memberRow({ agent: "impl-1", member: "impl-1", ticket: "1", cost: "3" })];
-  const next = fitDirect({ features, members, verdicts: [ruled(1, 11)] });
-  assert.equal(next.estimates["*"]["slow-high"].usd_per_merged, 3.75);
-});
-
-test("fit: members whose cost does not vary with the cell are not booked against a ticket", () => {
-  const features = [exploring({ ticket: "1" })];
-  const named = (member, cost) => memberRow({ agent: member, member, ticket: "1", cost });
-  const members = [named("impl-1", "2"), named("merge-bot-9", "100"), named("memory", "200"), named("__advisor", "400")];
-  const next = fitDirect({ features, members, verdicts: [ruled(1, 11)] });
+test("fit: members whose cost does not vary with the cell are not booked against a Pull", () => {
+  const f = exploring({ ticket: "1" });
+  const named = (member, cost) => memberRow({ agent: member, member, pr: "11", cost });
+  const members = [implementer(f, { pr: "11", ending: "pr", cost: "2" }), named("merge-bot-9", "100"), named("memory", "200"), named("__advisor", "400")];
+  const next = fitDirect({ features: [f], members, verdicts: [ruled(1, 11)] });
   assert.equal(next.estimates["*"]["slow-high"].usd_per_merged, 2);
 });
 
-test("fit: a ticket whose only members are cell-independent has an unknown $, not a free one", () => {
-  const features = [exploring({ ticket: "1" })];
-  const named = (member) => memberRow({ agent: member, member, ticket: "1", cost: "1" });
-  const members = [named("merge-bot-9"), named("memory"), named("__advisor")];
-  const next = fitDirect({ features, members, verdicts: [ruled(1, 11)] });
-  assert.equal(next.estimates["*"]["slow-high"].merged, 1);
-  assert.equal(next.estimates["*"]["slow-high"].usd_per_merged, null);
-});
-
-test("fit: a member row books against a ticket by its ticket, by its session and agent, or by the ticket's ruled PR, and no other way", () => {
+test("fit: a Pull books its implementers in its session, a claim resumed in a later session, and its PR's members, and no other row", () => {
+  const LATER = "2026-10-02T10-00-00-000Z_01a0b344-33f6-7640-96a8-05f45bf847c1";
   const features = [
     exploring({ ticket: "1", chosen_cell: "slow-high" }),
     exploring({ ticket: "2", chosen_cell: "task-high" }),
     exploring({ ticket: "3", chosen_cell: "smol-high" }),
   ];
   const members = [
-    memberRow({ session: "elsewhere", agent: "impl-x1", member: "impl-x1", ticket: "1", pr: "", cost: "2" }),
-    memberRow({ session: SESSION, agent: "impl-2", member: "impl-2", ticket: "", pr: "", cost: "3" }),
-    memberRow({ session: "elsewhere", agent: "impl-x3", member: "impl-x3", ticket: "", pr: "703", cost: "5" }),
-    // The right agent in another session, and the right session under another agent, are neither of the three.
-    memberRow({ session: "elsewhere", agent: "impl-2", member: "impl-2", ticket: "", pr: "", cost: "1000" }),
-    memberRow({ session: SESSION, agent: "impl-9", member: "impl-9", ticket: "", pr: "", cost: "2000" }),
+    implementer(features[0], { pr: "701", ending: "pr", cost: "2" }),
+    // A claim resumed in a later session that holds no Pull of ticket 1.
+    implementer(features[0], { session: LATER, run_date: "2026-10-02", agent: "impl-1-b", member: "impl-1-b", subagent_type: "fleet-implementer-task-high", cost: "1" }),
+    implementer(features[1], { pr: "702", ending: "pr", cost: "3" }),
+    memberRow({ session: LATER, agent: "review-pr-702", member: "review-pr-702", pr: "702", cost: "4" }),
+    memberRow({ session: LATER, agent: "fix-pr-702/fix-pr-702.RefuteU1", member: "fix-pr-702/fix-pr-702.RefuteU1", cost: "5" }),
+    memberRow({ session: LATER, agent: "fix-pr-702", member: "fix-pr-702", pr: "702", cost: "6" }),
+    implementer(features[2], { pr: "703", ending: "pr", cost: "7" }),
+    // An implementer of a ticket with no Pull, and one in an earlier session than ticket 3's only Pull, book nowhere.
+    memberRow({ agent: "impl-9", member: "impl-9", ticket: "9", role: "implementer", cost: "1000" }),
+    implementer(features[2], { session: "2026-09-30T10-00-00-000Z_01a0b344-33f6-7640-96a8-05f45bf847c2", run_date: "2026-09-30", cost: "2000" }),
   ];
   const verdicts = [ruled(1, 701), ruled(2, 702), ruled(3, 703)];
   const est = fitDirect({ features, members, verdicts }).estimates["*"];
-  assert.equal(est["slow-high"].usd_per_merged, 2, "booked by ticket alone");
-  assert.equal(est["task-high"].usd_per_merged, 3, "booked by session and agent alone");
-  assert.equal(est["smol-high"].usd_per_merged, 5, "booked by the ticket's ruled PR alone");
+  assert.equal(est["slow-high"].usd_per_merged, 3, "the resumed claim at another cell books to the Pull's own cell");
+  assert.equal(est["task-high"].usd_per_merged, 18, "the PR's review, fix and the fix's nested member, wherever they ran");
+  assert.equal(est["smol-high"].usd_per_merged, 7);
 });
 
-test("fit: features rows dated before the window are not the fit's, whole tickets and single rows alike", () => {
-  const features = [
-    exploring({ ticket: "1", run_date: "2026-08-31" }),
-    exploring({ ticket: "2", run_date: "2026-08-31", router_usd: "5" }),
-    exploring({ ticket: "2", run_date: "2026-09-01", router_usd: "1" }),
-  ];
-  const members = [
-    memberRow({ agent: "impl-1", member: "impl-1", ticket: "1", cost: "2" }),
-    memberRow({ agent: "impl-2", member: "impl-2", ticket: "2", cost: "1" }),
-  ];
-  const next = fitDirect({ features, members, verdicts: [ruled(2, 12, { run_date: "2026-09-01" })] }, { window_start: "2026-09-01" });
+test("fit: features rows dated before the window are not the fit's", () => {
+  const features = [exploring({ ticket: "1", run_date: "2026-08-31" }), exploring({ ticket: "2", run_date: "2026-09-01", session: SESSION2 })];
+  const next = fitDirect({ features, members: [], verdicts: [ruled(2, 12, { run_date: "2026-09-01" })] }, { window_start: "2026-09-01" });
   assert.equal(next.n_rows, 1, "the window's first day is in; the day before is out");
-  const e = next.estimates["*"]["slow-high"];
-  assert.equal(e.n, 1);
-  assert.equal(e.usd_per_merged, 2, "the out-of-window row's router spend is not the ticket's");
+  assert.deepEqual([next.estimates["*"]["slow-high"].n, next.estimates["*"]["slow-high"].merged], [1, 1]);
 });
 
-// Tickets in one cell mixing ruled-pass, ruled-failure and not-yet-ruled, each booked at $2.
+// Pulls in one cell mixing ruled-pass, ruled-failure and not-yet-ruled, each implementer booked at $2.
 function unmergedMix() {
   const ids = ["1", "2", "3", "4"];
+  const features = ids.map((ticket) => exploring({ ticket }));
   return {
-    features: ids.map((ticket) => exploring({ ticket })),
-    members: ids.map((ticket) => memberRow({ agent: `impl-${ticket}`, member: `impl-${ticket}`, ticket, cost: "2" })),
+    features,
+    members: features.map((f) => implementer(f, { pr: String(Number(f.ticket) + 10), ending: "pr", cost: "2" })),
     verdicts: [ruled(1, 11), ruled(2, 12, { minted_false_claim: "yes" })],
   };
 }
 
-test("fit: a cell's fail rate is its failed PRs over its merged PRs, not over every ticket in it", () => {
+test("fit: a cell's fail rate is its false claims over its claims, not over every Pull in it", () => {
   const e = fitDirect(unmergedMix()).estimates["*"]["slow-high"];
   assert.equal(e.n, 4);
   assert.equal(e.merged, 2);
   assert.equal(e.fail_rate, 0.5);
 });
 
-test("fit: a cell's $ per merged PR spreads every ticket's cost over the merged PRs, not over every ticket", () => {
+test("fit: a cell's $ per merged PR spreads every counted Pull's spend over the merged PRs, not over every Pull", () => {
   assert.equal(fitDirect(unmergedMix()).estimates["*"]["slow-high"].usd_per_merged, 4);
 });
 
-// `[cell, usd, n]` entries: n tickets in the cell, each booked at `usd` and ruled a pass, so the cell's $ per merged PR is `usd`.
+test("fit: a Pull that never merged and ended only on the ticket's or neither's endings is left out of the cell's n and $", () => {
+  const input = unmergedMix();
+  input.members[2].ending = "bail:undecided";
+  input.members[2].pr = "";
+  input.members[3].ending = "provider";
+  input.members[3].pr = "";
+  const e = fitDirect(input).estimates["*"]["slow-high"];
+  assert.deepEqual([e.n, e.merged, e.left_out, e.usd_per_merged], [2, 2, 2, 2]);
+});
+
+// `[cell, usd, n]` entries: n Pulls in the cell, each implementer booked at `usd` and ruled a pass, so the cell's $ per merged PR is `usd`.
 function cellInput(spec) {
   const features = [];
   const members = [];
@@ -1368,8 +1398,9 @@ function cellInput(spec) {
   let ticket = 100;
   for (const [cell, usd, n = 20] of spec) {
     for (let i = 0; i < n; i++, ticket++) {
-      features.push(exploring({ ticket: String(ticket), chosen_cell: cell }));
-      members.push(memberRow({ agent: `impl-${ticket}`, member: `impl-${ticket}`, ticket: String(ticket), cost: String(usd) }));
+      const f = exploring({ ticket: String(ticket), chosen_cell: cell });
+      features.push(f);
+      members.push(implementer(f, { pr: String(ticket + 1000), ending: "pr", cost: String(usd) }));
       verdicts.push(ruled(ticket, ticket + 1000));
     }
   }
@@ -1413,11 +1444,11 @@ test("fit: a stratum whose default cell is below n=20 adopts nothing", () => {
   assert.deepEqual(next.rows, { "*": "slow-high" });
 });
 
-test("fit: a stratum whose default cell's $ is unknown adopts nothing, even from a cell that cost nothing", () => {
+test("fit: an unpriced default-cell Pull leaves the stratum below n=20, so it adopts nothing, even from a cell that cost nothing", () => {
   const input = cellInput([["slow-high", 10], ["smol-high", 0]]);
   input.members[0].cost = "";
   const next = fitDirect(input);
-  assert.equal(next.estimates["*"]["slow-high"].usd_per_merged, null);
+  assert.deepEqual([next.estimates["*"]["slow-high"].n, next.estimates["*"]["slow-high"].unpriced], [19, 1]);
   assert.equal(next.estimates["*"]["smol-high"].usd_per_merged, 0);
   assert.deepEqual(next.rows, { "*": "slow-high" });
 });
@@ -1442,7 +1473,7 @@ test("fit: stage 2 adds no effort cell on a role whose stage-1 cell is tripped",
 test("fit: stage 2 does not add an effort cell the table already holds", () => {
   const prior = baseTable({ cells: [...STAGE1, "slow-medium"] });
   const n = { ...stage1AtN, "slow-medium": 20 };
-  const next = fitTable({ prior, ...cellInput([["slow-high", 10], ["smol-high", 2]]), guard: { tripped: [], n, window_start: null } });
+  const next = fitTable({ prior, ...direct(cellInput([["slow-high", 10], ["smol-high", 2]])), guard: { tripped: [], n, window_start: null } });
   assert.equal(next.stage, 2);
   assert.deepEqual(next.cells, [...STAGE1, "slow-medium", "task-max"]);
 });
@@ -1450,7 +1481,7 @@ test("fit: stage 2 does not add an effort cell the table already holds", () => {
 test("fit: stage 2 adds no effort cell on a role the table holds no stage-1 cell for", () => {
   const prior = baseTable({ cells: ["slow-high", "smol-high"] });
   const n = { "slow-high": 20, "smol-high": 20 };
-  const next = fitTable({ prior, ...cellInput([["slow-high", 10], ["smol-high", 2]]), guard: { tripped: [], n, window_start: null } });
+  const next = fitTable({ prior, ...direct(cellInput([["slow-high", 10], ["smol-high", 2]])), guard: { tripped: [], n, window_start: null } });
   assert.equal(next.stage, 2);
   assert.deepEqual(next.cells, ["slow-high", "smol-high", "slow-medium"]);
 });

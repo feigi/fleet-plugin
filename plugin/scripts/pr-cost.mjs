@@ -25,55 +25,41 @@
 // fleet-tick's `router` row prints it today; a missing or unparseable file
 // means the default cell only, so deleting it cannot evade the guard.
 //
-// BOOKING. A Pull is a ticket-features.tsv row; its $ is the cost of the
-// member-outcomes.tsv row with the same `session` + `agent`, plus every member
-// that one dispatched (an `agent` path nested under it). A PR's $ is every
-// Pull of its ticket(s) up to the ruling — superseded re-dispatches included —
-// plus every member whose NAME carries the PR (`review-pr-<n>`, `fix-pr-<n>`,
-// the finisher spellings, the review fan-out labels; member-record.mjs's
-// parseMemberName decides), with their own nested members. `merge-bot-*`,
-// `memory` and `__advisor` are booked nowhere: their cost does not vary with
-// the implementer's cell. Only omp rows are read; a blank `cost` books 0 and
-// is counted as unpriced, and a Pull with no member row at all books 0 and is
-// listed as unbooked.
+// BOOKING is pull-attribution.mjs's, the one the router's fit reads too: each
+// Pull in the window is a unit booked as routed to its `chosen_cell`, with
+// every implementer under it, its PR's review, fix and finisher members and
+// their nested members, and its merge through its Ruling — merged when that
+// PR's state is MERGED. A Pull is counted, or excluded (no Admissible row),
+// pending (its PR still open, or not in the list), left out (never merged, and
+// every ending the ticket's or neither's) or unpriced (a booked row with a
+// blank `cost`, or a Ruling whose PR none of its implementers carries); only
+// counted Pulls enter a cell's figures. A `cost` that is neither blank nor a
+// number is an input error (exit 2), as is a ticket-features `run_date` that is
+// neither blank nor YYYY-MM-DD, or a ruling of a windowed Pull's ticket whose
+// run_date is not YYYY-MM-DD or whose verdict is not yes or no.
 //
-// A ticket's RULING is its last tier-outcomes.tsv row in file order dated on or
-// after its first Pull in the window, skipping rows with both verdict columns
-// blank, which were never ruled; that row names the PR and carries the quality
-// verdict. A PR ruling several tickets takes its verdict from the later of
-// their rulings in file order, whatever their dates. A ruling whose run_date is
-// not YYYY-MM-DD is an input error (exit 2), as is one whose verdict is not
-// yes or no. The PR's CELL is the `chosen_cell` of the last Pull booked to it
-// — tickets in the order of their first Pull, each ticket's Pulls in file
-// order, those dated on or before the ticket's ruling — cross-checked against
-// that Pull's member row: a `subagent_type` other than
-// `fleet-implementer-<cell>`, or an `effort` other than the cell's level,
-// lists the PR under `mismatch` and books it to no cell at all. A PR still
-// OPEN is pending and booked nowhere yet. A Pull with no ruling books to its
-// own `chosen_cell` as unmerged spend — unless its member opened a PR that is
-// still open, which is pending too.
-//
-// PER CELL: `n_pulls`; `n_merged`; `n_pass` (merged PRs passing the quality
-// floor — failure is `minted_false_claim=yes` or `closed_own_ticket=no`);
-// `fail_rate` = failed / merged; `mean_usd` = every $ booked to the cell —
-// merged, unmerged and superseded — / merged, so a cell that abandons work
-// carries that spend; `median_usd` over merged PRs alone, descriptive;
-// `router_usd`, the Pulls' own routing cost, summed. `usd_diff_ci95` is a
-// bootstrap 95% interval on `mean_usd` minus the baseline's — printed to be
-// read, never judged on.
+// PER CELL, over its counted Pulls: `n_pulls`; `n_merged`; `n_claims` (merged
+// PRs plus every `bail:fixed` or `bail:fixed-refuted` ending); `n_failed`
+// (merged PRs ruled `minted_false_claim=yes` or `closed_own_ticket=no`, plus
+// every `bail:fixed-refuted`); `fail_rate` = failed / claims; `mean_usd` = the
+// Pulls' spend — merged or not — / merged, so a cell that abandons work carries
+// that spend; `median_usd` over the merged Pulls alone, descriptive;
+// `router_usd`, the Pulls' own routing cost, summed and never in their spend.
+// `usd_diff_ci95` is a bootstrap 95% interval on `mean_usd` minus the
+// baseline's — printed to be read, never judged on. Then the cell's
+// `excluded`, `left_out` and `unpriced` Pull counts.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeDie, defineFlags, isDigits } from "./arg.mjs";
+import { makeDie, defineFlags } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { CELL } from "./ledger-grammar.mjs";
-import { parseMemberName } from "./member-record.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { RulingError, parseTierOutcomes, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
+import { AttributionError, attribute, parseFeatures, tally } from "./pull-attribution.mjs";
+import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
 
 const NAME = "pr-cost";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -91,38 +77,7 @@ export const TRIP_POINTS = 15;
 export const EXIT = { ok: 0, tripped: 3, none: 4 };
 export const GH_PR_LIMIT = 1000;
 
-export const FEATURE_COLUMNS = [
-  "run_date", "session", "agent", "ticket", "policy_cell", "chosen_cell", "exploration_draw",
-  "sizing_src", "sizing_pre", "router_usd", "brief_chars", "criteria", "comments", "age_days",
-  "paths", "test_paths", "xrefs", "kind",
-];
-
-// ticket-features.tsv: one bare header line naming the columns, then rows.
-// Read by header name; a row whose width differs from the header's is refused.
-export function parseFeatures(text) {
-  const lines = String(text ?? "").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
-  if (lines.length === 0) throw new Error("ticket-features.tsv has no header line");
-  const header = lines[0].split("\t");
-  const missing = FEATURE_COLUMNS.filter((c) => !header.includes(c));
-  if (missing.length) throw new Error(`ticket-features.tsv header lacks ${missing.join(", ")}`);
-  return lines.slice(1).map((l, i) => {
-    const cells = l.split("\t");
-    if (cells.length !== header.length) {
-      throw new Error(`ticket-features.tsv row ${i + 1}: ${cells.length} fields, expected ${header.length} — ${l.slice(0, 60)}`);
-    }
-    const row = Object.fromEntries(header.map((c, j) => [c, cells[j]]));
-    if (!isDigits(row.ticket)) throw new Error(`ticket-features.tsv row ${i + 1}: ticket ${JSON.stringify(row.ticket)} is not a number`);
-    if (!CELL.test(row.chosen_cell)) throw new Error(`ticket-features.tsv row ${i + 1}: chosen_cell ${JSON.stringify(row.chosen_cell)} is not a cell`);
-    return row;
-  });
-}
-
-export const EXCLUDED_MEMBER = /^(?:merge-?bot|memory$|__advisor$)/i;
-// omp nests a member's id as `<parent>/<parent>.<child>`: the child is the last segment after either separator.
-export const lastSegment = (agent) => String(agent).split(/[/.]/).at(-1);
-const usd = (r) => (r.cost === "" || r.cost === undefined ? 0 : Number(r.cost));
-const isMerged = (pr) => pr?.state === "MERGED";
-const failed = (tier) => tier.minted_false_claim === "yes" || tier.closed_own_ticket === "no";
+const routerUsd = (pull) => (pull.router_usd === "" ? 0 : Number(pull.router_usd));
 const round = (x, d = 4) => (x === null || !Number.isFinite(x) ? null : Number(x.toFixed(d)));
 
 function median(xs) {
@@ -167,7 +122,8 @@ export function bootstrapDiffCI(cellUnits, baseUnits, { iterations = 2000, seed 
 }
 
 // The trip rule, in integer counts so a 3-of-20 difference is exactly 15
-// points rather than 14.999… in floating point.
+// points rather than 14.999… in floating point. `n` is a cell's claims and
+// `n_pass` the claims among them that held.
 export function trips(cell, base) {
   const failC = cell.n - cell.n_pass, failB = base.n - base.n_pass;
   const failRise = (failC * base.n - failB * cell.n) * 100 >= TRIP_POINTS * cell.n * base.n;
@@ -175,142 +131,48 @@ export function trips(cell, base) {
 }
 
 export function computeReport({ members, tiers, features, prs, routerTable = null, pricing = null, windowStart = WINDOW_START }) {
-  const omp = members.filter((r) => r.harness === "omp");
-  const memberKey = (session, agent) => `${session}\0${agent}`;
-  const prState = new Map(prs.map((p) => [String(p.number), p]));
-
-  // Direct bookings, keyed by the member row they name.
-  const pulls = features.filter((f) => f.run_date >= windowStart);
-  const pullByKey = new Map(pulls.map((p) => [memberKey(p.session, p.agent), p]));
-  const prMemberKeys = new Map();
-  for (const r of omp) {
-    if (EXCLUDED_MEMBER.test(lastSegment(r.member))) continue;
-    if (pullByKey.has(memberKey(r.session, r.agent))) continue;
-    const { pr } = parseMemberName(r.member);
-    if (pr) prMemberKeys.set(memberKey(r.session, r.agent), pr);
-  }
-  // Every omp row books to its nearest booked ancestor (itself included).
-  const pullUsd = new Map(), prMemberUsd = new Map();
-  const memberOfPull = new Map();
-  const booked = []; // [row, pull | null, pr | null]
-  for (const r of omp) {
-    if (EXCLUDED_MEMBER.test(lastSegment(r.member))) continue;
-    const segs = String(r.agent).split("/");
-    for (let i = segs.length; i > 0; i--) {
-      const k = memberKey(r.session, segs.slice(0, i).join("/"));
-      const pull = pullByKey.get(k);
-      const pr = prMemberKeys.get(k);
-      if (!pull && !pr) continue;
-      booked.push([r, pull ?? null, pull ? null : pr]);
-      if (pull) {
-        pullUsd.set(pull, (pullUsd.get(pull) ?? 0) + usd(r));
-        if (i === segs.length) memberOfPull.set(pull, r);
-      } else prMemberUsd.set(pr, (prMemberUsd.get(pr) ?? 0) + usd(r));
-      break;
-    }
-  }
-
-  // Rulings: per ticket, `rulingFor` of the ticket's first Pull — the last
-  // ruling row in file order dated on or after it, both-blank rows skipped.
-  const rulings = rulingsByTicket(tiers);
-  const fileOrder = new Map(tiers.map((t, i) => [t, i]));
-  const pullsByTicket = new Map();
-  for (const p of pulls) {
-    if (!pullsByTicket.has(p.ticket)) pullsByTicket.set(p.ticket, []);
-    pullsByTicket.get(p.ticket).push(p);
-  }
-  const groups = new Map(); // pr -> { pr, tier, pulls[] }
-  const unruled = [];
-  for (const [ticket, ps] of pullsByTicket) {
-    const ruling = rulingFor(rulings, ticket, ps[0].run_date);
-    if (!ruling) { unruled.push(...ps); continue; }
-    const g = groups.get(ruling.pr) ?? { pr: ruling.pr, tier: ruling, pulls: [] };
-    if (fileOrder.get(ruling) > fileOrder.get(g.tier)) g.tier = ruling;
-    for (const p of ps) (p.run_date <= ruling.run_date ? g.pulls : unruled).push(p);
-    groups.set(ruling.pr, g);
-  }
-
-  const cells = new Map();
-  const cellOf = (c) => {
-    if (!cells.has(c)) {
-      cells.set(c, { cell: c, n_pulls: 0, n_merged: 0, n_pass: 0, usd: 0, router_usd: 0, merged_usd: [], units: [] });
-    }
-    return cells.get(c);
-  };
-  const routerUsd = (p) => (p.router_usd === "" ? 0 : Number(p.router_usd));
-  const mismatch = [], pending = [];
-
-  for (const g of groups.values()) {
-    if (g.pulls.length === 0) continue;
-    const carrier = g.pulls.at(-1);
-    const cell = carrier.chosen_cell;
-    const m = memberOfPull.get(carrier);
-    const level = cell.split("-").slice(1).join("-");
-    if (m && (m.subagentType !== `fleet-implementer-${cell}` || m.effort !== level)) {
-      mismatch.push({ pr: g.pr, cell, subagent_type: m.subagentType, effort: m.effort });
-      continue;
-    }
-    const state = prState.get(g.pr);
-    if (!state || state.state === "OPEN") { pending.push(g.pr); continue; }
-    const total = g.pulls.reduce((s, p) => s + (pullUsd.get(p) ?? 0), 0) + (prMemberUsd.get(g.pr) ?? 0);
-    const c = cellOf(cell);
-    for (const p of g.pulls) { cellOf(p.chosen_cell).n_pulls++; c.router_usd += routerUsd(p); }
-    c.usd += total;
-    const merged = isMerged(state) ? 1 : 0;
-    c.units.push({ usd: total, merged });
-    if (merged) {
-      c.n_merged++;
-      c.merged_usd.push(total);
-      if (!failed(g.tier)) c.n_pass++;
-    }
-  }
-  for (const p of unruled) {
-    const opened = memberOfPull.get(p)?.pr;
-    if (opened && prState.get(opened)?.state === "OPEN") { pending.push(opened); continue; }
-    const c = cellOf(p.chosen_cell);
-    c.n_pulls++;
-    c.router_usd += routerUsd(p);
-    const spent = pullUsd.get(p) ?? 0;
-    c.usd += spent;
-    c.units.push({ usd: spent, merged: 0 });
-  }
-
-  const base = cells.get(BASELINE_CELL) ?? null;
-  const meanUsd = (c) => (c.n_merged ? c.usd / c.n_merged : null);
-  const figures = [...cells.values()].sort((a, b) => a.cell.localeCompare(b.cell)).map((c) => ({
-    cell: c.cell,
-    n_pulls: c.n_pulls,
-    n_merged: c.n_merged,
-    n_pass: c.n_pass,
-    fail_rate: c.n_merged ? round((c.n_merged - c.n_pass) / c.n_merged) : null,
-    mean_usd: round(meanUsd(c), 2),
-    median_usd: round(median(c.merged_usd), 2),
-    router_usd: round(c.router_usd, 4),
-    usd_diff_ci95: c.cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(c.units, base.units),
+  const units = attribute({ features, members, tiers, prs, windowStart });
+  const counted = units.filter((u) => u.status === "counted");
+  const tallies = new Map(tally(units).map((t) => [t.cell, t]));
+  const countedIn = (cell) => counted.filter((u) => u.cell === cell);
+  const bootUnits = (cell) => countedIn(cell).map((u) => ({ usd: u.spend, merged: u.merged ? 1 : 0 }));
+  const meanUsd = (t) => (t.merged ? t.spend / t.merged : null);
+  const base = tallies.get(BASELINE_CELL) ?? null;
+  const figures = [...tallies.values()].map((t) => ({
+    cell: t.cell,
+    n_pulls: t.n,
+    n_merged: t.merged,
+    n_claims: t.claims,
+    n_failed: t.failed,
+    fail_rate: t.claims ? round(t.failed / t.claims) : null,
+    mean_usd: round(meanUsd(t), 2),
+    median_usd: round(median(countedIn(t.cell).filter((u) => u.merged).map((u) => u.spend)), 2),
+    router_usd: round(countedIn(t.cell).reduce((s, u) => s + routerUsd(u.pull), 0), 4),
+    usd_diff_ci95: t.cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(t.cell), bootUnits(BASELINE_CELL)),
+    excluded: t.excluded,
+    left_out: t.left_out,
+    unpriced: t.unpriced,
   }));
 
   // The guard.
   const byCell = new Map(figures.map((f) => [f.cell, f]));
-  const b = byCell.get(BASELINE_CELL) ?? { n_merged: 0, n_pass: 0, mean_usd: null, fail_rate: null };
+  const b = byCell.get(BASELINE_CELL) ?? { n_merged: 0, mean_usd: null, fail_rate: null };
   const baseline = { cell: BASELINE_CELL, n: b.n_merged, mean_usd: b.mean_usd, fail_rate: b.fail_rate };
+  // The $ leg takes the unrounded means: the cent-rounded figures are for
+  // display, and a trip is sticky, so a cell cheaper by under half a cent
+  // must not trip on rounding alone. The fail leg reads the claims.
+  const quality = (t) => ({ n: t.claims, n_pass: t.claims - t.failed, mean_usd: meanUsd(t) });
   const tripped = [];
   if (baseline.n >= MIN_N) {
     for (const f of figures) {
       if (f.cell === BASELINE_CELL || f.n_merged < MIN_N) continue;
-      // The $ leg takes the unrounded means: the cent-rounded figures are for
-      // display, and a trip is sticky, so a cell cheaper by under half a cent
-      // must not trip on rounding alone.
-      const c = cells.get(f.cell);
-      if (trips({ n: f.n_merged, n_pass: f.n_pass, mean_usd: meanUsd(c) }, { n: b.n_merged, n_pass: b.n_pass, mean_usd: meanUsd(base) })) tripped.push(f.cell);
+      if (trips(quality(tallies.get(f.cell)), quality(base))) tripped.push(f.cell);
     }
   }
   const verdict = baseline.n < MIN_N ? "none" : tripped.length ? "tripped" : "ok";
   // Retire: every non-default stage-1 cell tripped before any stratum adopted one.
   const adopted = Object.values(routerTable?.rows ?? {}).some((c) => c !== BASELINE_CELL);
   const retire = !adopted && STAGE_1.filter((c) => c !== BASELINE_CELL).every((c) => tripped.includes(c));
-  // The member rows this report books: every windowed Pull's, and those of
-  // PR-named members whose PR a windowed ticket was ruled on.
-  const inReport = booked.filter(([, pull, pr]) => pull || groups.has(pr)).map(([r]) => r);
 
   return {
     window_start: windowStart,
@@ -319,44 +181,40 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
     tripped,
     verdict,
     retire,
-    mismatch,
-    pending: [...new Set(pending)].sort((x, y) => Number(x) - Number(y)),
-    unpriced: inReport.filter((r) => r.cost === "").length,
-    // A Pull whose member row never reached member-outcomes.tsv books $0 into
-    // its cell's mean, which reads as a cheap run unless it is listed here.
-    unbooked_pulls: pulls.filter((p) => !pullUsd.has(p)).map((p) => p.agent),
-    ab: abReport(groups, pulls, prState, pullUsd, prMemberUsd),
-    cross_check: crossCheck(inReport, pricing),
+    pending: [...new Set(units.filter((u) => u.status === "pending").map((u) => u.pendingPr))].sort((x, y) => Number(x) - Number(y)),
+    ab: abReport(units),
+    cross_check: crossCheck(units.flatMap((u) => u.rows), pricing),
   };
 }
 
 // The reasoning test: arm A on an even ticket, B on an odd one. B has run only
-// if some odd-ticket Pull carries a `sizing_pre`.
-export function abReport(groups, pulls, prState, pullUsd, prMemberUsd) {
+// if some odd-ticket Pull carries a `sizing_pre`. An arm's $ is its counted
+// Pulls' spend plus their own `router_usd`, since the arms compare policies,
+// not cells.
+export function abReport(units) {
   const arm = (ticket) => (Number(ticket) % 2 === 0 ? "A" : "B");
-  const bPulls = pulls.filter((p) => arm(p.ticket) === "B");
+  const bPulls = units.map((u) => u.pull).filter((p) => arm(p.ticket) === "B");
   if (!bPulls.some((p) => p.sizing_pre !== "")) {
     return { status: "not-run", reason: "B not run — the table has no row a better classifier could change" };
   }
-  const arms = { A: { merged: 0, failed: 0, usd: 0 }, B: { merged: 0, failed: 0, usd: 0 } };
-  for (const g of groups.values()) {
-    if (!g.pulls.length || !isMerged(prState.get(g.pr))) continue;
-    const a = arms[arm(g.pulls.at(-1).ticket)];
-    a.merged++;
-    if (failed(g.tier)) a.failed++;
-    a.usd += g.pulls.reduce((s, p) => s + (pullUsd.get(p) ?? 0) + (p.router_usd === "" ? 0 : Number(p.router_usd)), 0)
-      + (prMemberUsd.get(g.pr) ?? 0);
+  const arms = { A: { merged: 0, claims: 0, failed: 0, usd: 0 }, B: { merged: 0, claims: 0, failed: 0, usd: 0 } };
+  for (const u of units) {
+    if (u.status !== "counted") continue;
+    const a = arms[arm(u.pull.ticket)];
+    if (u.merged) a.merged++;
+    a.claims += u.claims;
+    a.failed += u.falseClaims;
+    a.usd += u.spend + routerUsd(u.pull);
   }
   const disagree = bPulls.filter((p) => p.policy_cell !== p.chosen_cell).length;
-  const out = {
-    A: { n_merged: arms.A.merged, fail_rate: arms.A.merged ? round(arms.A.failed / arms.A.merged) : null, mean_usd: arms.A.merged ? round(arms.A.usd / arms.A.merged, 2) : null },
-    B: { n_merged: arms.B.merged, fail_rate: arms.B.merged ? round(arms.B.failed / arms.B.merged) : null, mean_usd: arms.B.merged ? round(arms.B.usd / arms.B.merged, 2) : null },
-    disagreement: bPulls.length ? round(disagree / bPulls.length) : null,
-  };
+  const side = (a) => ({
+    n_merged: a.merged, fail_rate: a.claims ? round(a.failed / a.claims) : null, mean_usd: a.merged ? round(a.usd / a.merged, 2) : null,
+  });
+  const out = { A: side(arms.A), B: side(arms.B), disagreement: bPulls.length ? round(disagree / bPulls.length) : null };
   // B can only show an effect through the Pulls where it chose differently.
   if (arms.A.merged < MIN_N || arms.B.merged < MIN_N) return { status: "insufficient", ...out };
   if (disagree < MIN_N) return { status: "underpowered", ...out };
-  const bWins = out.B.mean_usd < out.A.mean_usd && arms.B.failed * arms.A.merged <= arms.A.failed * arms.B.merged;
+  const bWins = out.B.mean_usd < out.A.mean_usd && arms.B.failed * arms.A.claims <= arms.A.failed * arms.B.claims;
   return { status: bWins ? "B-wins" : "B-off", ...out };
 }
 
@@ -381,7 +239,10 @@ export function crossCheck(rows, pricing) {
   return { rows: n, skipped, ratio: expected > 0 ? round(recorded / expected) : null };
 }
 
-const TSV_COLUMNS = ["cell", "n_pulls", "n_merged", "n_pass", "fail_rate", "mean_usd", "median_usd", "router_usd", "usd_diff_ci95", "guard"];
+const TSV_COLUMNS = [
+  "cell", "n_pulls", "n_merged", "n_claims", "n_failed", "fail_rate", "mean_usd", "median_usd", "router_usd", "usd_diff_ci95",
+  "excluded", "left_out", "unpriced", "guard",
+];
 
 export function formatReport(report) {
   const guardOf = (f) => {
@@ -394,13 +255,7 @@ export function formatReport(report) {
   for (const f of report.cells) lines.push(TSV_COLUMNS.map((c) => (c === "guard" ? guardOf(f) : cell(f[c]))).join("\t"));
   const b = report.baseline;
   lines.push(`# verdict: ${report.verdict} (baseline ${b.cell} n=${b.n}/${MIN_N}${report.tripped.length ? `; tripped ${report.tripped.join(" ")}` : ""})${report.retire ? " — retire: every non-default stage-1 cell tripped" : ""}`);
-  lines.push(`# window_start ${report.window_start}; pending PRs: ${report.pending.length ? report.pending.join(" ") : "none"}; unpriced member rows: ${report.unpriced}`);
-  if (report.mismatch.length) {
-    lines.push(`# mismatch (excluded from every cell): ${report.mismatch.map((m) => `PR#${m.pr} ${m.cell} vs ${m.subagent_type || "(none)"}/${m.effort || "(none)"}`).join("; ")}`);
-  }
-  if (report.unbooked_pulls.length) {
-    lines.push(`# unbooked Pulls (no member row, so $0 in the mean): ${report.unbooked_pulls.join(" ")}`);
-  }
+  lines.push(`# window_start ${report.window_start}; pending PRs: ${report.pending.length ? report.pending.join(" ") : "none"}`);
   const ab = report.ab;
   lines.push(ab.status === "not-run"
     ? `# A/B: ${ab.reason}`
@@ -493,7 +348,11 @@ function main() {
 
   let report;
   try { report = computeReport({ members, tiers, features, prs, routerTable, pricing }); }
-  catch (e) { if (e instanceof RulingError) die(`${tiersPath}: ${e.message}`); throw e; }
+  catch (e) {
+    if (e instanceof RulingError) die(`${tiersPath}: ${e.message}`);
+    if (e instanceof AttributionError) die(e.message);
+    throw e;
+  }
   process.stdout.write(has("json") ? JSON.stringify(report, null, 2) + "\n" : formatReport(report));
   if (!has("guard")) return;
   const file = arg("out") ?? defaultGuardPath();

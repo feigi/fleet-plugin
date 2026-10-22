@@ -47,18 +47,12 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { CELL, POLICY_CELL, drawCell, parseMember } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { DATE, lastPullByTicket, parseTierOutcomes, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
+import { FEATURE_COLUMNS, attribute, parseFeatures, tally } from "./pull-attribution.mjs";
+import { parseTierOutcomes } from "./tier-outcomes.mjs";
 
 const NAME = "ticket-router";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_TABLE = join(SCRIPT_DIR, "router-table.json");
-
-// The ticket-features row, one per Pull, in this order.
-export const COLUMNS = Object.freeze([
-  "run_date", "session", "agent", "ticket", "policy_cell", "chosen_cell",
-  "exploration_draw", "sizing_src", "sizing_pre", "router_usd", "brief_chars",
-  "criteria", "comments", "age_days", "paths", "test_paths", "xrefs", "kind",
-]);
 
 export const STRATA = Object.freeze(["light", "heavy", "unknown"]);
 // The free classifier's thresholds: heavy past the median brief length of
@@ -323,140 +317,52 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
 }
 
 export function formatFeatureRow(row) {
-  return COLUMNS.map((c) => String(row[c] ?? "").replace(/[\t\r\n]/g, " ")).join("\t");
-}
-
-/** Data rows of a ticket-features TSV as objects; throws on a missing header or a short row. */
-export function parseFeatures(text) {
-  const lines = String(text ?? "").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
-  if (lines.length === 0) throw new Error("no header line");
-  if (lines[0] !== COLUMNS.join("\t")) throw new Error(`header is not the ${COLUMNS.length} ticket-features columns`);
-  return lines.slice(1).map((l) => {
-    const cells = l.split("\t");
-    if (cells.length !== COLUMNS.length) throw new Error(`malformed row: ${cells.length} fields, expected ${COLUMNS.length} — ${l.slice(0, 60)}`);
-    return Object.fromEntries(COLUMNS.map((c, i) => [c, cells[i]]));
-  });
+  return FEATURE_COLUMNS.map((c) => String(row[c] ?? "").replace(/[\t\r\n]/g, " ")).join("\t");
 }
 
 // ---------------------------------------------------------------------------
 // fit
 // ---------------------------------------------------------------------------
 
-// Members whose cost does not vary with the implementer cell.
-const UNBOOKED = (name) => name.startsWith("merge-bot-") || name === "memory" || name === "__advisor";
 const round4 = (x) => Math.round(x * 1e4) / 1e4;
 
 /**
- * The verdict on a ticket's Pull dated `pullDate`, `{ pr, fail }`, or null: the
- * ruling `rulingFor` picks. A verdict is a ruled PR; the floor fails on a
- * minted false claim or an unclosed ticket.
+ * The fit's Pulls: pull-attribution.mjs's units over the window — booked as
+ * routed, each to its own row's cell and stratum — restricted to rows the free
+ * classifier routed plus exploration rows: a row a live B classifier routed is
+ * the A/B's test set, not the fit's. The fit sees no PR state, so a Pull with
+ * a Ruling is merged. A fit reads everything in the commit it is given: no row
+ * is cut by date, because `--check` re-reads that same commit rather than
+ * re-cutting the working tree's files.
  */
-function verdictOf(rulings, ticket, pullDate) {
-  const r = rulingFor(rulings, ticket, pullDate);
-  return r && { pr: String(r.pr ?? ""), fail: r.minted_false_claim === "yes" || r.closed_own_ticket === "no" };
+function fitPulls({ features, members, verdicts, window }) {
+  return attribute({ features, members, tiers: verdicts, windowStart: window || null, stratum: ruleStratum })
+    .filter((u) => u.pull.exploration_draw !== "" || u.pull.sizing_src === "rule");
 }
 
-/**
- * The features rows with a YYYY-MM-DD `run_date`, the rows that can be placed
- * against the window, the cut and a ruling. A blank `run_date` (route writes one
- * for a session id with no date) is no input row and is left out. Any other
- * date is a hand-edit that cannot be placed and is refused, as `rulingFor`
- * refuses a ruling's: dropping it would shrink the fit unseen.
- */
-function datedRows(features) {
-  return features.filter((r) => {
-    if (DATE.test(r.run_date)) return true;
-    if (r.run_date !== "") throw new Error(`ticket #${r.ticket}: a ticket-features row's run_date is '${r.run_date}', expected YYYY-MM-DD or blank`);
-    return false;
-  });
-}
-
-/**
- * Per-ticket input rows: the ticket's features rows inside the window,
- * attributed to its LAST row's (in file order) cell and stratum, restricted to rows the
- * free classifier routed plus exploration rows — a row a live B classifier
- * routed is the A/B's test set, not the fit's. Its verdict rules its last
- * input row. A row with a blank `run_date` (route writes one for a session id
- * with no date) is no input row: it cannot be placed against the window or
- * its ruling, and a window bound drops it anyway. A `run_date` that is
- * neither blank nor YYYY-MM-DD is refused (see `datedRows`).
- * A fit reads everything in the commit it is given: no row is cut by date,
- * because `--check` re-reads that same commit rather than re-cutting the
- * working tree's files.
- */
-function fitTickets({ features, members, verdicts, window }) {
-  const inRange = datedRows(features).filter((r) => !window || r.run_date >= window);
-  const byTicket = new Map();
-  for (const r of inRange) {
-    if (!byTicket.has(r.ticket)) byTicket.set(r.ticket, []);
-    byTicket.get(r.ticket).push(r);
-  }
-  // `rulingFor` refuses a ruling whose date is not YYYY-MM-DD when its ticket
-  // is an input ticket. An input ticket is one the fit reads — its last
-  // in-window row is an exploration row or has `sizing_src` `rule`, which the
-  // skip below keeps — not every ticket with an in-window features row.
-  // `fit --due` also refuses for a ticket the skip drops: `mergedSince` calls
-  // `verdictOf` on every ticket with an in-window row the fitted commit does
-  // not hold, with no such skip.
-  const rulings = rulingsByTicket(verdicts);
-  const lastPulls = lastPullByTicket(inRange);
-  const out = [];
-  for (const [ticket, rows] of byTicket) {
-    const last = lastPulls.get(ticket);
-    if (last.exploration_draw === "" && last.sizing_src !== "rule") continue;
-    const verdict = verdictOf(rulings, ticket, last.run_date);
-    const keys = new Set(rows.map((r) => `${r.session}\0${r.agent}`));
-    let cost = 0;
-    let costKnown = true;
-    let booked = 0;
-    let fixRounds = 0;
-    for (const mr of members) {
-      const name = String(mr.member ?? mr.agent ?? "");
-      if (UNBOOKED(name)) continue;
-      if (!(keys.has(`${mr.session}\0${mr.agent}`) || mr.ticket === ticket || (verdict && verdict.pr && mr.pr === verdict.pr))) continue;
-      booked++;
-      // `cost` is a priced member-outcomes column; a row without it makes
-      // the ticket's $ unknown, so the fit adopts nothing off a TSV that lacks the column.
-      if (mr.cost === undefined || mr.cost === "" || !Number.isFinite(Number(mr.cost))) costKnown = false;
-      else cost += Number(mr.cost);
-      if (parseMember(name)?.family === "fix-pr") fixRounds++;
-    }
-    // A ticket with no member row on record has an unknown cost, not a free one.
-    if (booked === 0) costKnown = false;
-    for (const r of rows) if (r.router_usd !== "") cost += Number(r.router_usd) || 0;
-    out.push({ ticket, cell: last.chosen_cell, stratum: ruleStratum(last), verdict, cost, costKnown, fixRounds });
-  }
-  return out;
-}
-
-function estimate(tickets) {
-  const est = {};
-  for (const t of tickets) {
-    for (const s of [t.stratum, "*"]) {
-      est[s] ??= {};
-      const e = (est[s][t.cell] ??= { n: 0, merged: 0, fails: 0, cost: 0, costKnown: true, fix: 0 });
-      e.n++;
-      e.cost += t.cost;
-      e.costKnown &&= t.costKnown;
-      if (t.verdict) {
-        e.merged++;
-        if (t.verdict.fail) e.fails++;
-        e.fix += t.fixRounds;
-      }
-    }
-  }
+// Per stratum and `*`, per cell: `n` counted Pulls, `merged`, $ per merged PR,
+// false claims over claims, fix rounds per merged PR, and the cell's excluded,
+// left-out and unpriced Pull counts.
+function estimate(units) {
   const out = {};
-  for (const s of Object.keys(est).sort()) {
+  for (const s of units.length ? [...new Set([...units.map((u) => u.stratum), "*"])].sort() : []) {
+    const mine = s === "*" ? units : units.filter((u) => u.stratum === s);
     out[s] = {};
-    for (const c of Object.keys(est[s]).sort()) {
-      const e = est[s][c];
-      out[s][c] = {
-        n: e.n,
-        merged: e.merged,
-        usd_per_merged: e.merged && e.costKnown ? round4(e.cost / e.merged) : null,
-        fail_rate: e.merged ? round4(e.fails / e.merged) : null,
-        fix_rounds: e.merged ? round4(e.fix / e.merged) : null,
+    for (const t of tally(mine)) {
+      const fix = mine.filter((u) => u.cell === t.cell && u.status === "counted" && u.merged)
+        .reduce((n, u) => n + u.rows.filter((r) => parseMember(r.member)?.family === "fix-pr").length, 0);
+      out[s][t.cell] = {
+        n: t.n,
+        merged: t.merged,
+        claims: t.claims,
+        failed: t.failed,
+        usd_per_merged: t.merged ? round4(t.spend / t.merged) : null,
+        fail_rate: t.claims ? round4(t.failed / t.claims) : null,
+        fix_rounds: t.merged ? round4(fix / t.merged) : null,
         review_findings: null,
+        excluded: t.excluded,
+        left_out: t.left_out,
+        unpriced: t.unpriced,
       };
     }
   }
@@ -487,8 +393,8 @@ function adopt(est, cells, tripped) {
  */
 export function fitTable({ prior, features, members, verdicts, guard, commit = null }) {
   const window = guard.window_start ?? prior.window_start ?? null;
-  const tickets = fitTickets({ features, members, verdicts, window });
-  const estimates = estimate(tickets);
+  const units = fitPulls({ features, members, verdicts, window });
+  const estimates = estimate(units);
   const tripped = new Set(guard.tripped);
 
   let { stage, cells } = prior;
@@ -508,7 +414,7 @@ export function fitTable({ prior, features, members, verdicts, guard, commit = n
   return {
     window_start: window,
     fitted_commit: commit,
-    n_rows: tickets.length,
+    n_rows: units.length,
     stage,
     cells,
     burn_in: !cells.every(atN),
@@ -520,16 +426,22 @@ export function fitTable({ prior, features, members, verdicts, guard, commit = n
 }
 
 /**
- * Merged PRs (tickets with a verdict on their last such row in file order)
- * among the YYYY-MM-DD-dated features rows on or after `window_start` that the
- * fitted commit's features file (`fitted`, parsed rows; empty before any fit)
- * does not hold, matched by `session` and `agent`.
+ * Merged PRs since the fit: pull-attribution.mjs's counted, merged Pulls on or
+ * after `window_start` whose features row the fitted commit's features file
+ * (`fitted`, parsed rows; empty before any fit) does not hold, matched by
+ * `session` and `agent`.
  */
-export function mergedSince({ table, features, verdicts, fitted }) {
-  const rulings = rulingsByTicket(verdicts);
+export function mergedSince({ table, features, members, verdicts, fitted }) {
   const read = new Set(fitted.map((r) => `${r.session}\0${r.agent}`));
-  const after = datedRows(features).filter((r) => (!table.window_start || r.run_date >= table.window_start) && !read.has(`${r.session}\0${r.agent}`));
-  return [...lastPullByTicket(after)].filter(([ticket, p]) => verdictOf(rulings, ticket, p.run_date)).length;
+  return attribute({ features, members, tiers: verdicts, windowStart: table.window_start || null })
+    .filter((u) => u.status === "counted" && u.merged && !read.has(`${u.pull.session}\0${u.pull.agent}`)).length;
+}
+
+// Each cell's Pull counts over every stratum, as the fit prints them.
+function cellCounts(estimates) {
+  return Object.entries(estimates["*"] ?? {})
+    .map(([c, e]) => `${c} n=${e.n} merged=${e.merged} failed=${e.failed} excluded=${e.excluded} left_out=${e.left_out} unpriced=${e.unpriced}`)
+    .join(", ") || "none";
 }
 
 // ---------------------------------------------------------------------------
@@ -630,7 +542,7 @@ function main() {
     // the rule, and neither this append nor the drain checks it.
     try {
       mkdirSync(dirname(pending), { recursive: true });
-      const header = statSync(pending, { throwIfNoEntry: false })?.size > 0 ? "" : `${COLUMNS.join("\t")}\n`;
+      const header = statSync(pending, { throwIfNoEntry: false })?.size > 0 ? "" : `${FEATURE_COLUMNS.join("\t")}\n`;
       appendFileSync(pending, `${header}${formatFeatureRow(row)}\n`);
     } catch (e) {
       process.stderr.write(`${NAME}: WARNING could not append to ${pending}: ${e.message} — this Pull's ticket-features row is not recorded\n`);
@@ -664,13 +576,13 @@ function main() {
     }
     return sha;
   };
-  // The join throws on a features row it cannot place and on a ruling of an input ticket it cannot place.
-  // For `fit` and `--check` an input ticket is one `fitTickets` reads (its last in-window row is an
-  // exploration row or has `sizing_src` `rule`), not every ticket with an in-window features row. `fit --due` also
-  // covers a ticket `fitTickets` skips, because `mergedSince` calls `verdictOf` on every ticket with an in-window
-  // row the fitted commit does not hold, with no such skip.
+  // The join throws on a features row it cannot date, a booked member row whose `cost` is not a number, and a
+  // ruling of a windowed Pull's ticket it cannot place — for `fit` and `--check` too on a Pull the fit then skips
+  // as a live B classifier's, since every windowed Pull is booked before that skip.
   const joined = (fit) => {
-    try { return fit(); } catch (e) { die(`cannot join --features ${need("features")} with --verdicts ${need("verdicts")}: ${e.message}`); }
+    try { return fit(); } catch (e) {
+      die(`cannot join --features ${need("features")}, --members ${need("members")} and --verdicts ${need("verdicts")}: ${e.message}`);
+    }
   };
 
   if (mode === "check") {
@@ -685,7 +597,7 @@ function main() {
       process.exitCode = 1;
       return;
     }
-    process.stdout.write(`${NAME}: ${tablePath} matches a re-fit of ${refit.n_rows} tickets at ${short(fitted)}\n`);
+    process.stdout.write(`${NAME}: ${tablePath} matches a re-fit of ${refit.n_rows} Pulls at ${short(fitted)}\n`);
     return;
   }
 
@@ -699,14 +611,14 @@ function main() {
   if (F.has("due")) {
     const fitted = fittedCommit();
     const read = fitted === null ? [] : fileAt(fitted, "features", parseFeatures);
-    const n = joined(() => mergedSince({ table, features, verdicts, fitted: read }));
+    const n = joined(() => mergedSince({ table, features, members, verdicts, fitted: read }));
     process.stdout.write(`DUE=${n >= FIT_EVERY_MERGED ? "yes" : "no"} MERGED=${n}/${FIT_EVERY_MERGED}\n`);
     return;
   }
   const next = joined(() => fitTable({ prior: table, features, members, verdicts, guard, commit: sha }));
   writeFileSync(`${tablePath}.tmp`, `${JSON.stringify(next, null, 2)}\n`);
   renameSync(`${tablePath}.tmp`, tablePath);
-  process.stdout.write(`${NAME}: fitted ${next.n_rows} tickets at ${short(sha)}; rows ${JSON.stringify(next.rows)}; burn_in ${next.burn_in}; stage ${next.stage}\n`);
+  process.stdout.write(`${NAME}: fitted ${next.n_rows} Pulls at ${short(sha)}; rows ${JSON.stringify(next.rows)}; burn_in ${next.burn_in}; stage ${next.stage}; cells ${cellCounts(next.estimates)}\n`);
 }
 
 if (isCLI(import.meta.url)) main();

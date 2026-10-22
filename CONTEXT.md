@@ -572,6 +572,14 @@ agent definition exists; sizing a ticket for the table is one `judge()`
 call in the controller's own eval.
 _Avoid_: fleet-router, sizer
 
+**As-routed**:
+How a Pull is booked: as one unit, to the Cell it drew (`chosen_cell`) — its merge,
+its Ruling and its Spend, every implementer dispatched under it at any Cell
+included, so a rescue at another Cell still books to the drawn one. A ticket Pulled
+twice is two units, and nothing splits across Cells. Both the cost guard and the
+Router's fit read Pulls this way, through `pull-attribution.mjs`.
+_Avoid_: as-run, rescuer's cell
+
 **Spend**:
 What a Pull cost: the recorded `cost` of every member booked to it — each
 implementer dispatched under it, at any cell, the review, fix and finisher

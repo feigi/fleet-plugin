@@ -134,7 +134,7 @@ import { makeDie, defineFlags } from "../../plugin/scripts/arg.mjs";
 import { isCLI } from "../../plugin/scripts/is-cli.mjs";
 import { parseMemberName } from "../../plugin/scripts/member-record.mjs";
 import { parseTsv as parseMemberTsv } from "../../plugin/scripts/member-outcomes.mjs";
-import { EXCLUDED_MEMBER, lastSegment } from "../../plugin/scripts/pr-cost.mjs";
+import { EXCLUDED_MEMBER, lastSegment } from "../../plugin/scripts/pull-attribution.mjs";
 import { DEFAULT_CACHE, PER_PAGE, describeTransport, openGithubRead } from "./in-flight-github-read.mjs";
 
 const NAME = "in-flight-guard";
