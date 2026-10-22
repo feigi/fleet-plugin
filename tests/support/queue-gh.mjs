@@ -1,11 +1,11 @@
 // A `gh` stub for `ledger.mjs dispatch`. `gh pr list` answers `prs` as the
 // open `ready-to-merge` queue `dispatch merge-bot` records. A finisher dispatch
-// reads two more answers: `gh pr view <n> --json closingIssuesReferences` and
-// `gh issue view <n> --json title`. Both default to a PR that closes nothing,
-// and an issue titled `issue <n>`; `closes` and `titled` set them per test,
-// and `failsOn` makes either read fail. Any other gh call fails loudly. Every
-// call is appended to `<bin>/calls`, so a test can assert that a refusal made
-// none.
+// reads two more answers: `gh pr view <n> --json closingIssuesReferences,url`
+// and `gh issue view <n> --json title`. Both default to a PR in `OWN_REPO` that
+// closes nothing, and an issue titled `issue <n>`; `closes` and `titled` set
+// them per test, and `failsOn` makes either read fail. Any other gh call fails
+// loudly. Every call is appended to `<bin>/calls`, so a test can assert that a
+// refusal made none.
 //
 // Shell builtins plus one link: the finisher gate resolves the ledger's repository through git, so the stub bin holds the real git too.
 //
@@ -15,6 +15,26 @@ import { existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { writeExecStub } from "./exec-stub.mjs";
+
+/** The repository, as `owner/name`, every PR the stub answers for is in. */
+const OWN_REPO = "fleet-test/own-repo";
+
+/** `pr`'s url, as gh answers it for a PR in `OWN_REPO`. */
+export const prUrl = (pr) => `https://github.com/${OWN_REPO}/pull/${pr}`;
+
+/**
+ * One `closingIssuesReferences` element in gh's own shape: issue `number` of
+ * `repo` (`owner/name`), with its `repository` and `url`.
+ */
+export function ref(number, repo = OWN_REPO) {
+  const [login, name] = repo.split("/");
+  return {
+    id: `I_${login}_${name}_${number}`,
+    number,
+    repository: { id: `R_${login}_${name}`, name, owner: { id: `U_${login}`, login } },
+    url: `https://github.com/${repo}/issues/${number}`,
+  };
+}
 
 /**
  * Writes `<bin>/gh` answering `gh pr list` with the PR numbers `prs`, plus
@@ -30,10 +50,10 @@ case "$1 $2" in
 "pr list")
   printf '%s\\n' '${JSON.stringify(prs.map((number) => ({ number })))}' ;;
 "pr view")
-  [ "$4 $5" = "--json closingIssuesReferences" ] || { printf 'gh stub: unexpected gh %s\\n' "$*" >&2; exit 64; }
+  [ "$4 $5" = "--json closingIssuesReferences,url" ] || { printf 'gh stub: unexpected gh %s\\n' "$*" >&2; exit 64; }
   f='${bin}/pr-'"$3"
   [ -f "$f.fail" ] && { printf 'gh stub: pr view %s failed\\n' "$3" >&2; exit 1; }
-  if [ -f "$f.json" ]; then /bin/cat "$f.json"; else printf '%s\\n' '{"closingIssuesReferences":[]}'; fi ;;
+  if [ -f "$f.json" ]; then /bin/cat "$f.json"; else printf '{"closingIssuesReferences":[],"url":"${prUrl("")}%s"}\\n' "$3"; fi ;;
 "issue view")
   [ "$4 $5" = "--json title" ] || { printf 'gh stub: unexpected gh %s\\n' "$*" >&2; exit 64; }
   f='${bin}/issue-'"$3"
@@ -44,9 +64,14 @@ esac
 `);
 }
 
-/** Answers `gh pr view <pr> --json closingIssuesReferences` with the issues `numbers`. */
-export function closes(bin, pr, numbers) {
-  writeFileSync(join(bin, `pr-${pr}.json`), JSON.stringify({ closingIssuesReferences: numbers.map((number) => ({ number })) }));
+/**
+ * Answers `gh pr view <pr> --json closingIssuesReferences,url` with the PR's
+ * url and `refs`: each an issue number in `OWN_REPO`, or a reference object
+ * as it stands — `ref(n, "other/repo")` for another repository's issue.
+ */
+export function closes(bin, pr, refs) {
+  const closing = refs.map((r) => (typeof r === "number" ? ref(r) : r));
+  writeFileSync(join(bin, `pr-${pr}.json`), JSON.stringify({ closingIssuesReferences: closing, url: prUrl(pr) }));
 }
 
 /** Answers `gh issue view <n> --json title` with `title`. */

@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { rendering, renderBrief } from "./support/rendered-brief.mjs";
+import { ref, prUrl } from "./support/queue-gh.mjs";
 import { scratchRoot } from "../plugin/scripts/fleet-dir.mjs";
 import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 
@@ -89,7 +90,9 @@ cat "$f"
   };
   const bytes = () => (existsSync(file) ? readFileSync(file, "utf8") : null);
   const report = (member, body) => writeFileSync(join(reports, `${member}.json`), JSON.stringify(body));
-  const pr = (n, body) => writeFileSync(join(ghDir, `${n}.json`), JSON.stringify(body));
+  // PR `n`'s `gh pr view` answer: `body`, with the PR's url in its own
+  // repository unless `body` names one — `url: undefined` for none.
+  const pr = (n, body) => writeFileSync(join(ghDir, `${n}.json`), JSON.stringify({ url: prUrl(n), ...body }));
   // The open ready-to-merge PRs the next `dispatch merge-bot` records.
   const queue = (...prs) => writeFileSync(join(ghDir, "queue.json"), JSON.stringify(prs.map((number) => ({ number }))));
   const settle = (member, more = []) => run("settle", member, "--from-report", "--reports", reports, ...more);
@@ -138,7 +141,7 @@ test("impl-N=PR#M: a head on the branch and an OPEN PR closing N settles", () =>
   const f = fixture();
   f.ok("dispatch", "5", "impl-5");
   f.report("impl-5", implReport(f));
-  f.pr(6, { state: "OPEN", closingIssuesReferences: [{ number: 5 }] });
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)] });
   const receipt = f.settled("impl-5");
   assert.deepEqual(receipt, {
     member: "impl-5", outcome: "PR#6", filed: [], ruled: [],
@@ -149,14 +152,14 @@ test("impl-N=PR#M: a head on the branch and an OPEN PR closing N settles", () =>
     ],
   });
   assert.equal(dispatched(f, "impl-5"), "impl-5=PR#6");
-  assert.match(readFileSync(join(f.root, "gh.log"), "utf8"), /^pr view 6 --json state,closingIssuesReferences$/m);
+  assert.match(readFileSync(join(f.root, "gh.log"), "utf8"), /^pr view 6 --json state,closingIssuesReferences,url$/m);
 });
 
 test("impl-N=PR#M: a head verify-sha.sh does not find on the branch is exit 3", () => {
   const f = fixture();
   f.ok("dispatch", "5", "impl-5");
   f.report("impl-5", implReport(f, { head: f.stray }));
-  f.pr(6, { state: "OPEN", closingIssuesReferences: [{ number: 5 }] });
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)] });
   f.refused("impl-5", 3, new RegExp(`failed: verify-sha\\.sh feat ${f.stray} exits 0`));
 });
 
@@ -164,7 +167,7 @@ test("impl-N=PR#M: a PR that is not OPEN is exit 3", () => {
   const f = fixture();
   f.ok("dispatch", "5", "impl-5");
   f.report("impl-5", implReport(f));
-  f.pr(6, { state: "CLOSED", closingIssuesReferences: [{ number: 5 }] });
+  f.pr(6, { state: "CLOSED", closingIssuesReferences: [ref(5)] });
   f.refused("impl-5", 3, /failed: PR #6 reads OPEN/);
 });
 
@@ -172,8 +175,25 @@ test("impl-N=PR#M: a PR that does not close ticket N is exit 3", () => {
   const f = fixture();
   f.ok("dispatch", "5", "impl-5");
   f.report("impl-5", implReport(f));
-  f.pr(6, { state: "OPEN", closingIssuesReferences: [{ number: 55 }] });
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(55)] });
   f.refused("impl-5", 3, /failed: PR #6 closes #5/);
+});
+
+test("impl-N=PR#M: a PR whose only reference to #N is another repository's is exit 3", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f));
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5, "other-org/other-repo")] });
+  f.refused("impl-5", 3, /failed: PR #6 closes #5/);
+});
+
+test("could not look: a closing reference with neither a url nor a repository is exit 2", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", implReport(f));
+  const { url: _url, repository: _repository, ...unplaced } = ref(5);
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [unplaced] });
+  f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences,url answered a reference to #5 with neither a url nor a repository; nothing written/);
 });
 
 test("could not look: a gh that fails is exit 2, not a failed check", () => {
@@ -181,7 +201,7 @@ test("could not look: a gh that fails is exit 2, not a failed check", () => {
   f.ok("dispatch", "5", "impl-5");
   f.report("impl-5", implReport(f));
   // No answer file for PR 6: the stub exits 1, as gh does when it cannot reach GitHub.
-  f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences exited 1: gh stub: no PR 6/);
+  f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences,url exited 1: gh stub: no PR 6/);
 });
 
 test("could not look: a gh that answers something other than JSON is exit 2", () => {
@@ -201,9 +221,9 @@ test("could not look: a gh answer lacking a field it was asked for is exit 2, no
   f.report("impl-5", implReport(f));
   f.report("finisher-pr-6", finisherReport(f));
   f.report("merge-bot-1", botReport(f, { merged: [{ pr: 7, sha: f.head }] }));
-  for (const body of [{}, { closingIssuesReferences: [{ number: 5 }] }, { state: "OPEN", closingIssuesReferences: null }, { state: "OPEN" }]) {
+  for (const body of [{}, { closingIssuesReferences: [ref(5)] }, { state: "OPEN", closingIssuesReferences: null }, { state: "OPEN" }, { state: "OPEN", closingIssuesReferences: [ref(5)], url: undefined }]) {
     f.pr(6, body);
-    f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences answered without a usable/);
+    f.refused("impl-5", 2, /could not look — gh pr view 6 --json state,closingIssuesReferences,url answered without a usable/);
   }
   f.pr(6, {});
   f.refused("finisher-pr-6", 2, /could not look — gh pr view 6 --json labels answered without a usable labels/);
@@ -625,7 +645,7 @@ test("the settle is written against the ledger as it stands under the lock, not 
   const f = fixture();
   f.ok("dispatch", "5", "impl-5");
   f.report("impl-5", implReport(f));
-  f.pr(6, { state: "OPEN", closingIssuesReferences: [{ number: 5 }] });
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)] });
   // The first gh call, which the settle makes after it read the ledger and
   // before it takes the lock, is when another writer files an issue.
   const raced = join(f.root, "raced");
@@ -711,7 +731,7 @@ test("the bare form still settles, and warns only for an outcome a report would 
 test("dispatch clears a prior run's report, so settle refuses it, and the new run's report settles", () => {
   const f = fixture();
   f.report("impl-5", implReport(f));
-  f.pr(6, { state: "OPEN", closingIssuesReferences: [{ number: 5 }] });
+  f.pr(6, { state: "OPEN", closingIssuesReferences: [ref(5)] });
   renderBrief(f.fleet, "impl-5", { sidecar: { args: { scratch: f.root } } });
   f.ok("dispatch", "5", "impl-5");
   assert.equal(existsSync(join(f.reports, "impl-5.json")), false);
