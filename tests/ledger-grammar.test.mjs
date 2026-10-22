@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -310,6 +310,11 @@ test("liveOnLedger: a PR-bound member's settled copy on another PR's row settles
   const rows = ["#7 impl-7=PR#8 · fix-pr-5=no-op", "#5 fix-pr-5"];
   assert.deepEqual(liveOnLedger(rows, []).tokens, [{ name: "fix-pr-5", token: "fix-pr-5", row: "#5" }]);
   assert.deepEqual(liveOnLedger(rows, ["fix-pr-5=no-op"]).tokens, [], "## Dispatched settles it wherever its tokens sit");
+});
+
+test("settledOnLedger: a settled copy on a row settles its member with no ## Dispatched entry, a PR-bound one only on its own PR's row", () => {
+  assert.deepEqual([...settledOnLedger(["#7 impl-7=killed", "#5 fix-pr-5=no-op"], [])], ["impl-7", "fix-pr-5"]);
+  assert.deepEqual([...settledOnLedger(["#7 impl-7=PR#8 · fix-pr-5=no-op"], [])], ["impl-7"], "fix-pr-5 settled on PR 8's row is not settled");
 });
 
 test("liveOnLedger: a launch answered on another of its PR's rows is not open", () => {

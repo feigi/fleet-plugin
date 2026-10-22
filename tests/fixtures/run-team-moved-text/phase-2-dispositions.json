@@ -14,7 +14,7 @@
     ],
     [
       "One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`):",
-      "One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`; `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row):"
+      "One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`; `ledger.mjs token <key> <token>…` adds a token and keeps every token already on the row, and replaces the row's `tier=`, refused while its implementer has not settled):"
     ],
     [
       "The tick then reads the hold as `DISPATCH fix-pr PR#<M>`, a conflict fix-applier (**A `DISPATCH fix-pr PR#<M>` on a conflict hold**), and that row obeys every hold.",

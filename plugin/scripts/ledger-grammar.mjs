@@ -430,6 +430,27 @@ export function rowWriteRefusal(before, after, oldLine, line, retired = []) {
 }
 
 /**
+ * The name of every member the ledger holds settled: a settled copy in
+ * `## Dispatched` or on a row settles it, except that a PR-bound member's
+ * settled copy counts only on its own PR's row. Malformed tokens are the
+ * caller's to have refused: one here is read as nothing.
+ */
+export function settledOnLedger(rows, dispatched) {
+  const settled = new Set();
+  for (const e of dispatched) {
+    const t = parseToken(e);
+    if (t !== null && t.error === null && t.outcome !== null) settled.add(t.name);
+  }
+  for (const text of rows) {
+    const { pr } = rowNums(text);
+    for (const t of memberTokens(text)) {
+      if (t.error === null && t.outcome !== null && (t.bound !== "pr" || t.number === pr)) settled.add(t.name);
+    }
+  }
+  return settled;
+}
+
+/**
  * What a ledger still holds live, and what must travel with it. `tokens` is
  * every unsettled member token and every open review launch, once each, in
  * ledger order, as `{name, token, row}` — the member or runner name (a
@@ -442,25 +463,14 @@ export function rowWriteRefusal(before, after, oldLine, line, retired = []) {
  * keep a bare token from reading live again. `dispatched` is every
  * `## Dispatched` entry whose member is unsettled, plus every settled entry
  * naming a member a kept row carries, for the same reason. A member is
- * settled by a settled copy in `## Dispatched` or on a row, except that a
- * PR-bound member's settled copy counts only on its own PR's row — the reading
+ * settled as settledOnLedger() reads it — the reading
  * fleet-tick.mjs folds liveness by, so nothing that fold calls live is left
  * out. A launch is open while unanswered and not `=failed`, paired across its
  * PR's rows as `rowWriteRefusal` pairs them. Malformed tokens are the caller's
  * to have refused: one here is read as nothing.
  */
 export function liveOnLedger(rows, dispatched) {
-  const settled = new Set();
-  for (const e of dispatched) {
-    const t = parseToken(e);
-    if (t !== null && t.error === null && t.outcome !== null) settled.add(t.name);
-  }
-  for (const text of rows) {
-    const { pr } = rowNums(text);
-    for (const t of memberTokens(text)) {
-      if (t.error === null && t.outcome !== null && (t.bound !== "pr" || t.number === pr)) settled.add(t.name);
-    }
-  }
+  const settled = settledOnLedger(rows, dispatched);
   const live = (t) => t !== null && t.error === null && t.outcome === null && !settled.has(t.name);
   const open = new Map();
   for (const [id, tokens] of streams(rows)) {

@@ -330,8 +330,11 @@ test("row refuses a tier= that is not a cell token, and accepts every cell token
   }
   assert.deepEqual(read().rows, []);
   const goods = ["tier=task-high", "tier=slow-high", "tier=smol-max", "tier-ok=impl-7:fleet-implementer-task-high", "x-tier=alt", "x-tier=Slow-ultra · tier=task-high"];
-  for (const good of goods) {
-    assert.equal(ok("row", "7", `impl-7 · ${good}`).line, `#7 impl-7 · ${good}`);
+  // Each on its own row: rewriting one row's cell while its implementer has
+  // not settled is refused.
+  for (const [i, good] of goods.entries()) {
+    const n = 7 + i;
+    assert.equal(ok("row", String(n), `impl-${n} · ${good}`).line, `#${n} impl-${n} · ${good}`);
   }
 });
 

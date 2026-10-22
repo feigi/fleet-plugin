@@ -79,10 +79,13 @@ second run finds its writes already made and re-ticks.
 session directory's listing, never passed.
 
 **D2. `ledger.mjs token <key> <token>…`.** Appends tokens to a row and
-keeps every token already there; refuses a member token (those are
-`dispatch`/`settle`'s), a review token (`review`'s), a word shaped like a
-member token that the grammar cannot parse, a `tier=` that is not a cell
-or that names a second tier, on the row or earlier in the same call, a
+keeps every token already there, except that a `tier=` replaces the row's
+`tier=`, refused when it changes the row's cell while the row's
+implementer has not settled; refuses a
+member token (those are `dispatch`/`settle`'s), a review token
+(`review`'s), a word shaped like a member token that the grammar cannot
+parse, a `tier=` that is not a cell or that names a second tier earlier in
+the same call, a
 `held-behind` or `conflict-hold` token the tick cannot read, a `label-off=`
 naming no
 finisher-pr member the ledger knows, the row's ` · ` separator, a lone

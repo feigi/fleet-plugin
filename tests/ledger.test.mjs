@@ -3685,7 +3685,7 @@ test("LEDGER_LOCK_TIMEOUT_MS cannot lengthen the bound past 10 s, only shorten i
 // Every call is its own process against one ledger file; a refusal is exit 2
 // with the file byte-identical. PATH holds no `gh` unless a test asks for one with
 // `dispatch`: `token` is local only, and only a dispatch reads the tracker.
-function tokenFixture(t, initial = [], { dispatch = false } = {}) {
+function tokenFixture(t, initial = [], { dispatch = false, dispatched = [] } = {}) {
   const { dir, cli } = cliFixture(t);
   if (dispatch) {
     // A finisher dispatch reads the PR's closing references from gh and the
@@ -3697,7 +3697,8 @@ function tokenFixture(t, initial = [], { dispatch = false } = {}) {
     assert.equal(spawnSync("git", ["init", "-q"], { cwd: dir, env: gitEnv }).status, 0);
   }
   const file = join(dir, "ledger.md");
-  writeFileSync(file, `# Fleet run ledger\n\n## Rows\n\n${initial.map((r) => `- ${r}\n`).join("")}\n## Filed\n\n## Ruled\n\n`);
+  const section = dispatched.length === 0 ? "" : `## Dispatched\n\n${dispatched.map((e) => `- ${e}\n`).join("")}\n`;
+  writeFileSync(file, `# Fleet run ledger\n\n## Rows\n\n${initial.map((r) => `- ${r}\n`).join("")}\n${section}## Filed\n\n## Ruled\n\n`);
   const call = rendering(dir, (...args) => cli(["--file", file, ...args]));
   const run = (...args) => {
     const r = call(...args);
@@ -3804,13 +3805,131 @@ test("token with a token the row already carries is a no-op at exit 0 and says `
   assert.deepEqual(rows(), [`${SETTLED_ROW} · held-behind:#3`]);
 });
 
-test("token refuses a second tier= on a row that has one, and in one call, but takes a first or a repeated one", (t) => {
-  const { run, refused, rows } = tokenFixture(t, ["#5 impl-5 · tier=task-low", "#6 impl-6"]);
-  refused(["token", "5", "tier=slow-high"], /names a second tier — the row already carries tier=task-low/);
-  assert.match(run("token", "5", "tier=task-low").stderr, /already present/, "the tier the row carries is a duplicate, not a conflict");
-  refused(["token", "6", "tier=slow-high", "tier=task-low"], /names a second tier — the row already carries tier=slow-high/);
+test("token refuses two different tier= in one call, and takes a first or a repeated one", (t) => {
+  const { run, refused, rows } = tokenFixture(t, ["#6 impl-6"]);
+  refused(["token", "6", "tier=slow-high", "tier=smol-high"], /names a second tier — this call already names tier=slow-high/);
   assert.equal(run("token", "6", "tier=slow-high").payload.line, "#6 impl-6 · tier=slow-high", "a row with no tier takes one");
-  assert.deepEqual(rows(), ["#5 impl-5 · tier=task-low", "#6 impl-6 · tier=slow-high"]);
+  assert.match(run("token", "6", "tier=slow-high").stderr, /already present/, "the tier the row carries is a duplicate, not a conflict");
+  assert.match(run("token", "6", "tier=slow-high", "tier=slow-high").stderr, /already present/, "a repeated tier= in one call is no second tier");
+  assert.deepEqual(rows(), ["#6 impl-6 · tier=slow-high"]);
+});
+
+// A Pull's cell is its row's `tier=`, or the policy cell on a row with none,
+// and it binds the row's newest implementer until that member settles: live
+// (in `## Dispatched`) and not yet dispatched (on the row alone) both hold it,
+// and a live member binds with no token of its own left on the row.
+test("token and row refuse a write that changes the Pull's cell while its implementer is live or not yet dispatched, naming both", (t) => {
+  const row = "#3544 impl-3544 · tier=smol-high";
+  for (const dispatched of [["impl-3544"], []]) {
+    const { refused, rows } = tokenFixture(t, [row], { dispatched });
+    const why = /from smol-high to slow-high while impl-3544 has not settled/;
+    refused(["token", "3544", "tier=slow-high"], why);
+    refused(["row", "3544", "impl-3544 · tier=slow-high"], why);
+    refused(["row", "3544", "impl-3544"], /from smol-high to slow-high while impl-3544 has not settled/);
+    refused(["row", "3544", "impl-3544 · tier=slow-high · tier=task-high"], /from smol-high to slow-high and task-high while impl-3544 has not settled/);
+    assert.deepEqual(rows(), [row]);
+  }
+  const bare = tokenFixture(t, ["#3546 impl-3546"], { dispatched: ["impl-3546"] });
+  bare.refused(["token", "3546", "tier=smol-high"], /from slow-high to smol-high while impl-3546 has not settled/);
+  bare.refused(["row", "3546", "impl-3546 · tier=smol-high"], /from slow-high to smol-high while impl-3546 has not settled/);
+  const listed = tokenFixture(t, ["#3560 tier=smol-high"], { dispatched: ["impl-3560"] });
+  listed.refused(["token", "3560", "tier=slow-high"], /from smol-high to slow-high while impl-3560 has not settled/);
+  // The newest implementer binds: a live replacement holds the cell as its
+  // settled predecessor no longer does.
+  const replaced = tokenFixture(t, ["#3545 impl-3545=killed · impl-3545-b · tier=smol-high"], { dispatched: ["impl-3545=killed", "impl-3545-b"] });
+  replaced.refused(["token", "3545", "tier=slow-high"], /from smol-high to slow-high while impl-3545-b has not settled/);
+  replaced.refused(["row", "3545", "impl-3545-c · tier=slow-high"], /while impl-3545-b has not settled/);
+  // Newest by retry suffix, not by listing order: an older settled retry
+  // listed last in `## Dispatched` does not release the newest one's hold.
+  const reordered = tokenFixture(t, ["#7 impl-7=killed · impl-7-c · tier=smol-high"], { dispatched: ["impl-7=killed", "impl-7-b=bailed"] });
+  reordered.refused(["token", "7", "tier=slow-high"], /from smol-high to slow-high while impl-7-c has not settled/);
+});
+
+test("token replaces tier= once the row's implementer has settled, whatever its outcome, keeping every other token", (t) => {
+  for (const outcome of ["killed", "bailed", "blocked", "released", "tier-mismatch", "PR#12"]) {
+    const before = `#3541 impl-3541=${outcome} · ports=163541 · tier=smol-high · class=routine`;
+    const { run, rows } = tokenFixture(t, [before], { dispatched: [`impl-3541=${outcome}`] });
+    const r = run("token", "3541", "tier=slow-high");
+    const after = `#3541 impl-3541=${outcome} · ports=163541 · tier=slow-high · class=routine`;
+    assert.deepEqual(r.payload, { key: "#3541", line: after, added: ["tier=slow-high"] }, outcome);
+    assert.match(r.stderr, /replaced tier=smol-high with tier=slow-high on row #3541/, outcome);
+    assert.deepEqual(rows(), [after], outcome);
+  }
+  // Settled in `## Dispatched` alone: a `row` rewrite left the bare token.
+  const rewritten = tokenFixture(t, ["#3543 impl-3543 · tier=smol-high"], { dispatched: ["impl-3543=killed"] });
+  rewritten.run("token", "3543", "tier=slow-high");
+  assert.deepEqual(rewritten.rows(), ["#3543 impl-3543 · tier=slow-high"]);
+  // A tier-less row gains one.
+  const bare = tokenFixture(t, ["#3542 impl-3542=bailed · ports=163542"], { dispatched: ["impl-3542=bailed"] });
+  assert.equal(bare.run("token", "3542", "tier=smol-high", "route=explore").payload.line, "#3542 impl-3542=bailed · ports=163542 · tier=smol-high · route=explore");
+});
+
+// Only an implementer binds a Pull's cell: a live fix-applier or finisher
+// whose PR number is the row's key is not the row's implementer.
+test("a live member of another family numbered as the row binds no cell", (t) => {
+  const { run, rows } = tokenFixture(t, ["#9 fix-pr-9 · tier=smol-high", "#3541 impl-3541=killed · tier=smol-high"], {
+    dispatched: ["fix-pr-9", "impl-3541=killed", "finisher-pr-3541"],
+  });
+  run("token", "9", "tier=slow-high");
+  run("token", "3541", "tier=slow-high");
+  assert.deepEqual(rows(), ["#9 fix-pr-9 · tier=slow-high", "#3541 impl-3541=killed · tier=slow-high"]);
+});
+
+// Only the row's own ticket's implementer binds its cell: another ticket's
+// live implementer, even one with a later retry suffix, holds no other row.
+test("a live implementer of another ticket binds no other row's cell", (t) => {
+  const { run, rows } = tokenFixture(t, ["#3541 impl-3541=killed · tier=smol-high", "#3560 impl-3560-b · tier=smol-high"], {
+    dispatched: ["impl-3541=killed", "impl-3560-b"],
+  });
+  run("token", "3541", "tier=slow-high");
+  assert.deepEqual(rows(), ["#3541 impl-3541=killed · tier=slow-high", "#3560 impl-3560-b · tier=smol-high"]);
+});
+
+test("a write that leaves the Pull's cell unchanged is not refused while its implementer is live", (t) => {
+  const { run, rows } = tokenFixture(t, ["#3544 impl-3544 · tier=smol-high", "#3546 impl-3546", "#3547 impl-3547"], { dispatched: ["impl-3544", "impl-3546", "impl-3547"] });
+  assert.match(run("token", "3544", "tier=smol-high").stderr, /already present/);
+  run("token", "3544", "route=explore");
+  // The row's own tier written twice names one cell, not "smol-high and smol-high".
+  run("row", "3544", "impl-3544 · tier=smol-high · tier=smol-high · route=explore");
+  run("row", "3544", "impl-3544 · tier=smol-high · route=explore · class=routine");
+  run("token", "3546", "tier=slow-high");
+  run("row", "3547", "impl-3547 · tier=slow-high");
+  assert.deepEqual(rows(), [
+    "#3544 impl-3544 · tier=smol-high · route=explore · class=routine",
+    "#3546 impl-3546 · tier=slow-high",
+    "#3547 impl-3547 · tier=slow-high",
+  ]);
+});
+
+test("a new row at the Pull's row step and a re-Pull over a settled implementer are written at any cell", (t) => {
+  const { run, rows } = tokenFixture(t, ["#3551 impl-3551=bailed · tier=smol-high"], { dispatched: ["impl-3551=bailed"] });
+  const fresh = run("row", "3550", "impl-3550 · tier=smol-high · route=explore");
+  assert.deepEqual(fresh.payload, { ticket: "#3550", line: "#3550 impl-3550 · tier=smol-high · route=explore", created: true });
+  run("row", "3551", "impl-3551-b · tier=slow-high");
+  assert.equal(run("token", "3552", "tier=task-high").payload.line, "#3552 tier=task-high", "a token call that creates the row is unchanged");
+  assert.deepEqual(rows(), ["#3551 impl-3551-b · tier=slow-high", "#3550 impl-3550 · tier=smol-high · route=explore", "#3552 tier=task-high"]);
+});
+
+// `dispatch` refuses these rows and sends the caller to `row` to fix them; a
+// row that names no runnable definition has no draw to bind.
+test("a row naming conflicting tier= values or a cell with no definition can still be corrected while its implementer is undispatched", (t) => {
+  const { run, rows } = tokenFixture(t, [
+    "#3552 impl-3552 · tier=smol-high · tier=slow-high",
+    "#3553 impl-3553 · tier=smol-high · ports=163553 · tier=slow-high",
+    "#3554 impl-3554 · tier=task-low",
+    "#3555 impl-3555 · tier=task-low",
+  ]);
+  run("row", "3552", "impl-3552 · tier=smol-high");
+  const r = run("token", "3553", "tier=smol-high");
+  assert.equal(r.payload.line, "#3553 impl-3553 · tier=smol-high · ports=163553", "a tier the conflicting row already names still replaces both");
+  run("row", "3554", "impl-3554 · tier=slow-high");
+  run("token", "3555", "tier=slow-high");
+  assert.deepEqual(rows(), [
+    "#3552 impl-3552 · tier=smol-high",
+    "#3553 impl-3553 · tier=smol-high · ports=163553",
+    "#3554 impl-3554 · tier=slow-high",
+    "#3555 impl-3555 · tier=slow-high",
+  ]);
 });
 
 test("token refuses the ` · ` separator, an arrow, and an argument that is not one word, writing nothing", (t) => {
