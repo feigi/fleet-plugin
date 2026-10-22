@@ -127,7 +127,7 @@ const bashReport = (member, command) => session({
   [member]: [modelChange(), turn({ stopReason: "toolUse", blocks: [call("b1", "bash", { command })] }), exitEvt()],
 });
 
-test("a report written through a variable, tee, or <<- reads bail:undecided the same way", () => {
+test("a report written through a variable, tee, <<- or a wrapper reads bail:undecided the same way", () => {
   const body = reportJson("impl-51");
   const path = `${REPORTS}/impl-51.json`;
   const cases = {
@@ -135,6 +135,8 @@ test("a report written through a variable, tee, or <<- reads bail:undecided the 
     tee: `tee ${path} >/dev/null <<'EOF'\n${body}\nEOF`,
     dash: `cat > ${path} <<-'EOF'\n\t${body}\n\tEOF`,
     redirectAfter: `cat <<'EOF' > ${path}\n${body}\nEOF`,
+    prefixedVariable: `D=/scratch; mkdir -p $D/reports; cat > $D/reports/impl-51.json <<'EOF'\n${body}\nEOF`,
+    wrapper: `timeout 5 cat > ${path} <<'EOF'\n${body}\nEOF`,
   };
   for (const [shape, command] of Object.entries(cases)) {
     assert.equal(endingOfMember(bashReport("impl-51", command), "impl-51"), "bail:undecided", shape);

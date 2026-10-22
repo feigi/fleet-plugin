@@ -476,141 +476,197 @@ export function reportWritesOf(c) {
 // One linear pass over a shell command, yielding { file, content } for each
 // heredoc that writes a report, in command order:
 //   cat > P <<TAG        cat <<TAG > P        tee P [>/dev/null] <<TAG
-// with `<<` or `<<-` and a bare, 'single' or "double" quoted TAG. P is a
-// literal path (quoted or not) or a whole-word `$NAME` / `${NAME}` /
-// `"$NAME"` that a literal `NAME=<value>` earlier in the same command set.
-// The body is the lines up to the first terminator line, taken verbatim (an
-// unquoted TAG does not expand it). A heredoc with no terminator writes
-// nothing — and since the shell would swallow the rest of the command into it,
-// the scan stops there. Bodies are never scanned for commands.
+//   cat <<TAG | tee P
+// with `<<` or `<<-` and a bare, 'single' or "double" quoted TAG. The command
+// may follow leading keywords and the wrappers in WRAPPERS (`env FOO=1`,
+// `sudo -u x`, `timeout 5`, …), and may sit inside a `$(…)` or be the string
+// of a `bash -c` / `sh -c`. P is a literal path (quoted or not), a whole-word
+// `$NAME` / `${NAME}` / `"$NAME"` that a `NAME=<value>` earlier in the same
+// command set, or a word whose `/reports/<name>.json` tail is literal
+// (`$D/reports/x.json`): the basename is all a report write is read for.
+// The body is the lines up to the first terminator line, a terminator line
+// being TAG with any trailing blanks or CR; under `<<-` every line is read
+// with its leading tabs stripped. The body is otherwise verbatim (an unquoted
+// TAG does not expand it). A heredoc whose stdin a later `<` or `<<<`
+// replaces writes nothing. A heredoc with no terminator writes nothing — and
+// since the shell would swallow the rest of the command into it, the scan
+// stops there. Bodies are never scanned for commands.
 const REDIR_RE = /&>>|&>|>>|>&|>\||>|<<<|<<-|<<|<&|</y;
+const PARAM_RE = /\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-]|\{[^}]*\}?)/y;
+const WHOLE_PARAM_RE = /^"?\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)\})"?$/;
 const ASSIGN_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const DECLARE_COMMANDS = new Set(["export", "local", "declare", "readonly", "typeset"]);
-const LEADING_KEYWORDS = new Set(["{", "!", "then", "do", "else", "exec", "command", "rtk", "env", "sudo", "time"]);
+const LEADING_KEYWORDS = new Set(["{", "!", "then", "do", "else", "exec", "command", "rtk", "time"]);
+// Commands that run the command after them: the single-letter options of
+// theirs that take a separate argument, and how many operands come before that
+// command. `env` and `sudo` also take NAME=value words before it.
+const WRAPPERS = new Map([
+  ["env", { args: "uCS", operands: 0 }],
+  ["sudo", { args: "ugpCUrtDRT", operands: 0 }],
+  ["timeout", { args: "sk", operands: 1 }],
+  ["nice", { args: "n", operands: 0 }],
+  ["stdbuf", { args: "ioe", operands: 0 }],
+  ["nohup", { args: "", operands: 0 }],
+]);
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 const WORD_BREAKS = " \t\r\n;&|<>()";
+// `$(…)` and `-c` strings nested deeper than this are not scanned: the rest
+// of the command reads as one word.
+const MAX_NESTING = 32;
 
-// The index after the `)` closing a `$(` whose body starts at `i`.
-function skipParen(cmd, i) {
-  const n = cmd.length;
-  let depth = 1;
-  while (i < n) {
-    const ch = cmd[i];
-    if (ch === "'" || ch === '"') {
-      let j = i + 1;
-      while (j < n && cmd[j] !== ch) j += ch === '"' && cmd[j] === "\\" ? 2 : 1;
-      i = j + 1;
-      continue;
+function heredocReportWrites(cmd) {
+  return scan(cmd, 0, false, 0).writes;
+}
+
+// The index of the command word in `words`, from `k` past leading keywords
+// and wrappers with their options, operands and assignments.
+function commandIndex(words, k) {
+  while (k < words.length) {
+    const t = words[k].text;
+    if (LEADING_KEYWORDS.has(t)) { k++; continue; }
+    const wrap = WRAPPERS.get(t);
+    if (!wrap) break;
+    k++;
+    while (k < words.length && words[k].text.startsWith("-")) {
+      const o = words[k++].text;
+      if (o === "--") break;
+      if (o.length === 2 && wrap.args.includes(o[1])) k++;
     }
-    if (ch === "(") depth++;
-    else if (ch === ")" && --depth === 0) return i + 1;
-    i++;
+    if (t === "env" || t === "sudo") while (k < words.length && ASSIGN_RE.test(words[k].raw)) k++;
+    k += wrap.operands;
   }
-  return n;
+  return k;
 }
 
 // One shell word starting at `i`: its source text, its text with quotes
-// removed, whether any `$` or backtick expansion is in it, and the end index.
-function scanWord(cmd, i) {
+// removed, whether any `$` or backtick expansion is in it, where in `text` the
+// literal tail after its last expansion starts, and the end index. A `$(…)` in
+// it is scanned as a command of its own, whose report writes go to `writes`.
+function scanWord(cmd, i, writes, depth) {
   const n = cmd.length;
-  let j = i, text = "", dynamic = false, quoted = false;
+  let j = i, text = "", dynamic = false, litFrom = 0;
+  const expansion = (e) => { text += cmd.slice(j, e); dynamic = true; litFrom = text.length; j = e; };
+  const substitution = () => {
+    if (depth >= MAX_NESTING) return expansion(n);
+    const sub = scan(cmd, j + 2, true, depth + 1);
+    for (const w of sub.writes) writes.push(w);
+    expansion(sub.end);
+  };
+  const parameter = () => {
+    PARAM_RE.lastIndex = j;
+    expansion(PARAM_RE.test(cmd) ? PARAM_RE.lastIndex : j + 1);
+  };
+  const backtick = () => {
+    const e = cmd.indexOf("`", j + 1);
+    expansion(e < 0 ? n : e + 1);
+  };
   while (j < n) {
     const ch = cmd[j];
-    if (ch === "$" && cmd[j + 1] === "(") {
-      const e = skipParen(cmd, j + 2);
-      text += cmd.slice(j, e); dynamic = true; j = e;
-    } else if (ch === "`") {
-      const e = cmd.indexOf("`", j + 1);
-      const end = e < 0 ? n : e + 1;
-      text += cmd.slice(j, end); dynamic = true; j = end;
-    } else if (ch === "\\") {
+    if (ch === "$" && cmd[j + 1] === "(") substitution();
+    else if (ch === "$") parameter();
+    else if (ch === "`") backtick();
+    else if (ch === "\\") {
       if (cmd[j + 1] === "\n") j += 2;
       else { text += cmd[j + 1] ?? ""; j += 2; }
     } else if (ch === "'") {
       const e = cmd.indexOf("'", j + 1);
-      text += cmd.slice(j + 1, e < 0 ? n : e); quoted = true; j = e < 0 ? n : e + 1;
+      text += cmd.slice(j + 1, e < 0 ? n : e); j = e < 0 ? n : e + 1;
     } else if (ch === '"') {
-      quoted = true;
       j++;
       while (j < n && cmd[j] !== '"') {
         if (cmd[j] === "\\" && j + 1 < n) { text += cmd[j + 1]; j += 2; }
-        else if (cmd[j] === "$" && cmd[j + 1] === "(") {
-          const e = skipParen(cmd, j + 2);
-          text += cmd.slice(j, e); dynamic = true; j = e;
-        } else {
-          if (cmd[j] === "$" || cmd[j] === "`") dynamic = true;
-          text += cmd[j++];
-        }
+        else if (cmd[j] === "$" && cmd[j + 1] === "(") substitution();
+        else if (cmd[j] === "$") parameter();
+        else if (cmd[j] === "`") backtick();
+        else text += cmd[j++];
       }
       j++;
     } else if (WORD_BREAKS.includes(ch)) break;
-    else {
-      if (ch === "$") dynamic = true;
-      text += ch; j++;
-    }
+    else { text += ch; j++; }
   }
   const end = Math.min(j, n);
-  return { raw: cmd.slice(i, end), text, dynamic, quoted, end };
+  return { raw: cmd.slice(i, end), text, dynamic, litFrom, end };
 }
 
 function stripTrailingBlanks(s) {
   let e = s.length;
-  while (e > 0 && (s[e - 1] === " " || s[e - 1] === "\t")) e--;
-  return e === s.length ? s : s.slice(0, e);
+  while (e > 0 && (s[e - 1] === " " || s[e - 1] === "\t" || s[e - 1] === "\r")) e--;
+  return s.slice(0, e);
 }
 
 function stripLeadingTabs(s) {
   let b = 0;
   while (b < s.length && s[b] === "\t") b++;
-  return b ? s.slice(b) : s;
+  return s.slice(b);
 }
 
-function heredocReportWrites(cmd) {
+const isReportPath = (t) => t !== null && REPORT_PATH_RE.test(t);
+const isStdin = (r) => (r.fd === null || r.fd === "0") && (r.op === "<" || r.op === "<<<" || r.op === "<&" || r.op === "<<" || r.op === "<<-");
+
+// The scan proper, from `start`. `nested` when `start` is just inside a `$(`,
+// whose unmatched `)` then ends the scan. Returns the writes and the index
+// the scan ended at (after that `)`).
+function scan(cmd, start, nested, depth) {
   const writes = [];
   const vars = new Map();
   const n = cmd.length;
-  let words = [], redirs = [], pending = [], expect = null, fd = null, i = 0;
+  let words = [], redirs = [], pending = [], expect = null, fd = null, piped = null, parens = 0, i = start;
 
-  // A word's value: its text when it has no expansion, the value of a
-  // literal-assigned NAME when it is exactly `$NAME` / `${NAME}` (quoted or
-  // not), else null.
+  // A word's value, when it is known enough to read a report path off: its
+  // text when it has no expansion, the value of an assigned NAME when it is
+  // exactly `$NAME` / `${NAME}` (quoted or not), its text when its report
+  // tail is literal, else null.
   const resolve = (w) => {
     if (!w.dynamic) return w.text;
-    const m = /^"?\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)\})"?$/.exec(w.raw);
-    return m ? (vars.get(m[1] ?? m[2]) ?? null) : null;
+    const m = WHOLE_PARAM_RE.exec(w.raw);
+    if (m) return vars.get(m[1] ?? m[2]) ?? null;
+    return REPORT_PATH_RE.test(w.text.slice(w.litFrom)) ? w.text : null;
   };
   const assign = (w) => {
     const name = w.raw.slice(0, w.raw.indexOf("="));
-    if (w.dynamic) vars.delete(name);
-    else vars.set(name, w.text.slice(name.length + 1));
+    if (!w.dynamic || REPORT_PATH_RE.test(w.text.slice(w.litFrom))) vars.set(name, w.text.slice(name.length + 1));
+    else vars.delete(name);
+  };
+  const teeTargets = (args) => {
+    if (args.some((w) => w.text === "--append" || /^-[^-]*a/.test(w.text))) return [];
+    return args.filter((w) => !w.text.startsWith("-")).map(resolve).filter(isReportPath);
   };
 
-  // One finished simple command: apply its assignments, and queue its heredocs
-  // with the report paths the last of them writes.
-  const flush = () => {
+  // One finished simple command, ended by `sep`: apply its assignments, scan
+  // its `-c` string, and queue its heredocs with the report paths the last of
+  // them writes. A plain `cat <<TAG` piped on hands its heredoc to a `tee`.
+  const flush = (sep) => {
     expect = null;
     const hd = redirs.filter((r) => r.op === "<<" || r.op === "<<-");
+    const stdin = redirs.findLast(isStdin);
+    const feeds = hd.length > 0 && stdin === hd.at(-1);
     let k = 0;
     while (k < words.length && ASSIGN_RE.test(words[k].raw)) k++;
     const leading = k;
-    while (k < words.length && LEADING_KEYWORDS.has(words[k].text)) k++;
+    k = commandIndex(words, k);
     const cmdWord = words[k];
     const name = cmdWord && !cmdWord.dynamic ? cmdWord.text.split("/").pop() : null;
-    if (!cmdWord) for (const w of words.slice(0, leading)) assign(w);
-    else if (DECLARE_COMMANDS.has(name)) for (const w of words.slice(k + 1)) if (ASSIGN_RE.test(w.raw)) assign(w);
-    let targets = [];
-    if (hd.length && name === "cat" && words.length === k + 1) {
-      const outs = redirs.filter((r) => (r.op === ">" || r.op === ">|" || r.op === "&>") && (r.fd === null || r.fd === "1"));
-      if (outs.length) targets = [resolve(outs.at(-1).word)];
-    } else if (hd.length && name === "tee") {
-      const args = words.slice(k + 1);
-      if (!args.some((w) => w.text === "--append" || /^-[^-]*a/.test(w.text))) {
-        targets = args.filter((w) => !w.text.startsWith("-")).map(resolve);
+    if (!cmdWord) {
+      for (const w of words.slice(0, leading)) assign(w);
+    } else if (DECLARE_COMMANDS.has(name)) {
+      for (const w of words.slice(k + 1)) if (ASSIGN_RE.test(w.raw)) assign(w);
+    } else if (SHELLS.has(name) && depth < MAX_NESTING) {
+      for (let x = k + 1; x < words.length && words[x].text.startsWith("-"); x++) {
+        if (!/^-[A-Za-z]*c[A-Za-z]*$/.test(words[x].text)) continue;
+        if (words[x + 1]) for (const w of scan(words[x + 1].text, 0, false, depth + 1).writes) writes.push(w);
+        break;
       }
     }
-    targets = targets.filter((t) => t !== null && REPORT_PATH_RE.test(t));
+    const plainCat = name === "cat" && words.length === k + 1;
+    const outs = redirs.filter((r) => (r.op === ">" || r.op === ">|" || r.op === "&>") && (r.fd === null || r.fd === "1"));
+    let targets = [];
+    if (feeds && plainCat && outs.length) targets = [resolve(outs.at(-1).word)].filter(isReportPath);
+    else if (feeds && name === "tee") targets = teeTargets(words.slice(k + 1));
+    else if (piped && name === "tee" && !stdin) piped.targets = teeTargets(words.slice(k + 1));
     hd.forEach((r, idx) => pending.push({
       tag: r.word.text, dash: r.op === "<<-", targets: idx === hd.length - 1 ? targets : [],
     }));
+    piped = sep === "|" && feeds && plainCat && !outs.length ? pending.at(-1) : null;
     words = []; redirs = [];
   };
 
@@ -638,24 +694,28 @@ function heredocReportWrites(cmd) {
 
   while (i < n) {
     const ch = cmd[i];
-    if (ch === "\n") { i++; flush(); if (!consume()) return writes; continue; }
+    if (ch === "\n") { i++; flush(ch); if (!consume()) return { writes, end: n }; continue; }
     if (ch === " " || ch === "\t" || ch === "\r") { i++; continue; }
     if (ch === "\\" && cmd[i + 1] === "\n") { i += 2; continue; }
     if (ch === "#") { const e = cmd.indexOf("\n", i); i = e < 0 ? n : e; continue; }
     REDIR_RE.lastIndex = i;
     const op = REDIR_RE.exec(cmd);
     if (op) { expect = { op: op[0], fd }; fd = null; i += op[0].length; continue; }
-    if (";&|()".includes(ch)) { flush(); fd = null; i++; continue; }
-    const w = scanWord(cmd, i);
+    if (ch === ")" && nested && parens === 0) { flush(ch); return { writes, end: i + 1 }; }
+    if (";&|()".includes(ch)) {
+      if (ch === "(") parens++;
+      else if (ch === ")" && parens > 0) parens--;
+      flush(ch); i++; continue;
+    }
+    const w = scanWord(cmd, i, writes, depth);
     i = w.end;
     // A file-descriptor prefix (`2>`), which the redirect that follows takes.
-    if (!w.quoted && /^[0-9]{1,2}$/.test(w.raw) && (cmd[i] === "<" || cmd[i] === ">")) { fd = w.raw; continue; }
-    fd = null;
+    if (/^[0-9]{1,2}$/.test(w.raw) && (cmd[i] === "<" || cmd[i] === ">")) { fd = w.raw; continue; }
     if (expect) { redirs.push({ ...expect, word: w }); expect = null; }
     else words.push(w);
   }
-  flush();
-  return writes;
+  flush(null);
+  return { writes, end: n };
 }
 
 // The text a transcript message carries: a bare string, or its text blocks.
