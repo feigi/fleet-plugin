@@ -598,3 +598,11 @@ whether it minted a false claim. The Router counts a ticket as merged only
 through its Ruling; a decision on an issue, or a reply owed to a member, is
 not one.
 _Avoid_: verdict row, tier outcome
+
+**Ending**:
+How an implementer's run stopped, read from its own transcript and the reports it
+wrote, never from a verdict: `pr`, `bail:<cause>`, `bail:fixed`,
+`bail:fixed-refuted`, `provider`, `budget`, `abort`, `crash`, `hollow`, or
+`unknown` (the transcript cannot say). Recorded per row in the `ending` column of
+`docs/metrics/member-outcomes.tsv`; blank on a row that is not an implementer.
+_Avoid_: outcome (bare, it collides with Release outcome), verdict, result
