@@ -60,12 +60,14 @@ shape as the tier-unchecked hold.
 
 ## Implementation Decisions
 
-**D1. `phase0.mjs`.** `~/.fleet/bin/fleet-run phase0.mjs --session <dir>
-[--implementer-cap n] [--reviewer-cap n] [--plugin-checkout <dir>] [--spend-dir <dir>]
-[--workflow <name> | --declare-no-ci]`. `--session` is required: it is the one
-place the controller states its session directory, and the receipt's resume
-rule (D2) compares against it. Steps, in this order, each a named
-entry in the receipt:
+**D1. `phase0.mjs`.** `~/.fleet/bin/fleet-run phase0.mjs [--session <dir>]
+[--in-flight n] [--plugin-checkout <dir>] [--spend-dir <dir>]
+[--workflow <name> | --declare-no-ci]`. `--session` names the controller's
+session directory, else `PI_ARTIFACTS_DIR` supplies it (omp exports it to the
+Python eval kernel, not to the bash tool), and with neither the script exits 2;
+it is the one place the controller states its session directory, and the
+receipt's resume rule (D2) compares against it. Steps, in this order, each a
+named entry in the receipt:
 
 | step | command | on failure |
 |---|---|---|
