@@ -2988,8 +2988,8 @@ function runToken() {
     if (tier === undefined ? have.has(tok) : tiers.length === 1 && tiers[0] === tier) {
       console.error(`    already present on row ${key}: ${tok}`);
     } else {
-      have.add(tok);
-      if (tier !== undefined) tiers = [tier];
+      if (tier === undefined) have.add(tok);
+      else tiers = [tier];
       appended.push(tok);
     }
   }
@@ -2998,10 +2998,13 @@ function runToken() {
     return;
   }
   const tierTok = appended.find((tok) => tierValues(tok).length > 0);
-  const replaced = created || tierTok === undefined ? [] : tierValues(oldLine).map((v) => `tier=${v}`);
+  const replaced = tierTok === undefined ? [] : tierValues(oldLine).map((v) => `tier=${v}`);
+  // `appended` holds at most one `tier=`: tokenRefusal() refuses a second
+  // tier in one call, and the loop above drops a repeat of it.
+  const others = replaced.length > 0 ? appended.filter((tok) => tok !== tierTok) : appended;
   const line = created
     ? `${key} ${appended.join(" · ")}`
-    : appended.reduce((l, tok) => (tok === tierTok && replaced.length > 0 ? withTier(l, tok) : `${l} · ${tok}`), oldLine);
+    : [replaced.length > 0 ? withTier(oldLine, tierTok) : oldLine, ...others].join(" · ");
   const cellWhy = cellChangeRefusal(oldLine, line);
   if (cellWhy !== null) die(`token ${key}: ${cellWhy}`);
   const after = created ? [...data.rows, line] : data.rows.with(i, line);
@@ -3017,7 +3020,6 @@ function runToken() {
   if (refusal !== null) die(`token ${key}: ${refusal}`);
   data.rows = after;
   save(data);
-  const others = appended.filter((tok) => !(tok === tierTok && replaced.length > 0));
   if (replaced.length > 0) console.error(`    replaced ${replaced.join(" ")} with ${tierTok} on row ${key}`);
   if (others.length > 0) console.error(`    appended ${others.join(" ")} to row ${key}`);
   console.log(JSON.stringify({ key, line, added: appended }));

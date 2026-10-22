@@ -3839,6 +3839,10 @@ test("token and row refuse a write that changes the Pull's cell while its implem
   const replaced = tokenFixture(t, ["#3545 impl-3545=killed · impl-3545-b · tier=smol-high"], { dispatched: ["impl-3545=killed", "impl-3545-b"] });
   replaced.refused(["token", "3545", "tier=slow-high"], /from smol-high to slow-high while impl-3545-b has not settled/);
   replaced.refused(["row", "3545", "impl-3545-c · tier=slow-high"], /while impl-3545-b has not settled/);
+  // Newest by retry suffix, not by listing order: an older settled retry
+  // listed last in `## Dispatched` does not release the newest one's hold.
+  const reordered = tokenFixture(t, ["#7 impl-7=killed · impl-7-c · tier=smol-high"], { dispatched: ["impl-7=killed", "impl-7-b=bailed"] });
+  reordered.refused(["token", "7", "tier=slow-high"], /from smol-high to slow-high while impl-7-c has not settled/);
 });
 
 test("token replaces tier= once the row's implementer has settled, whatever its outcome, keeping every other token", (t) => {
@@ -3885,6 +3889,8 @@ test("a write that leaves the Pull's cell unchanged is not refused while its imp
   const { run, rows } = tokenFixture(t, ["#3544 impl-3544 · tier=smol-high", "#3546 impl-3546", "#3547 impl-3547"], { dispatched: ["impl-3544", "impl-3546", "impl-3547"] });
   assert.match(run("token", "3544", "tier=smol-high").stderr, /already present/);
   run("token", "3544", "route=explore");
+  // The row's own tier written twice names one cell, not "smol-high and smol-high".
+  run("row", "3544", "impl-3544 · tier=smol-high · tier=smol-high · route=explore");
   run("row", "3544", "impl-3544 · tier=smol-high · route=explore · class=routine");
   run("token", "3546", "tier=slow-high");
   run("row", "3547", "impl-3547 · tier=slow-high");
