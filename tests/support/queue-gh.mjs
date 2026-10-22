@@ -17,10 +17,10 @@ import { join } from "node:path";
 import { writeExecStub } from "./exec-stub.mjs";
 
 /** The repository, as `owner/name`, every PR the stub answers for is in. */
-export const OWN_REPO = "fleet-test/own-repo";
+const OWN_REPO = "fleet-test/own-repo";
 
-/** `pr`'s url, as gh answers it for a PR in `repo`. */
-export const prUrl = (pr, repo = OWN_REPO) => `https://github.com/${repo}/pull/${pr}`;
+/** `pr`'s url, as gh answers it for a PR in `OWN_REPO`. */
+export const prUrl = (pr) => `https://github.com/${OWN_REPO}/pull/${pr}`;
 
 /**
  * One `closingIssuesReferences` element in gh's own shape: issue `number` of

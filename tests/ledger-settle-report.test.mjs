@@ -92,7 +92,7 @@ cat "$f"
   const report = (member, body) => writeFileSync(join(reports, `${member}.json`), JSON.stringify(body));
   // PR `n`'s `gh pr view` answer: `body`, with the PR's url in its own
   // repository unless `body` names one — `url: undefined` for none.
-  const pr = (n, body) => writeFileSync(join(ghDir, `${n}.json`), JSON.stringify("url" in body ? body : { ...body, url: prUrl(n) }));
+  const pr = (n, body) => writeFileSync(join(ghDir, `${n}.json`), JSON.stringify({ url: prUrl(n), ...body }));
   // The open ready-to-merge PRs the next `dispatch merge-bot` records.
   const queue = (...prs) => writeFileSync(join(ghDir, "queue.json"), JSON.stringify(prs.map((number) => ({ number }))));
   const settle = (member, more = []) => run("settle", member, "--from-report", "--reports", reports, ...more);

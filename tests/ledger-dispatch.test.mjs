@@ -1551,26 +1551,57 @@ test("another repository's reference numbered as the PR's suggestion-band record
   assert.deepEqual(ghCalls(f.bin).filter((c) => c.startsWith("issue view")), ["issue view 3545 --json title"]);
 });
 
-test("a reference with a repository and no url is placed by its repository", (t) => {
-  const { url: _own, ...own } = ref(3545);
-  const { url: _foreign, ...foreign } = ref(3545, FOREIGN);
-  const yes = fixture(t);
-  yes.put("3545", RULED_ROW);
-  yes.rule(3606, "3545");
-  closes(yes.bin, 3606, [own]);
-  assert.equal(yes.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
-  const no = fixture(t);
-  no.put("3545", RULED_ROW);
-  no.rule(3606, "3545");
-  closes(no.bin, 3606, [foreign]);
-  no.refused(["dispatch", "3606", "finisher-pr-3606"], /PR #3606 does not close #3545, ruled closed_own_ticket=yes/);
+test("a reference with a repository and no url, or an empty one, is placed by its repository", (t) => {
+  const urlless = (repo) => {
+    const { url: _url, ...r } = ref(3545, repo);
+    return r;
+  };
+  for (const r of [urlless(), { ...ref(3545), url: "" }]) {
+    const f = fixture(t);
+    f.put("3545", RULED_ROW);
+    f.rule(3606, "3545");
+    closes(f.bin, 3606, [r]);
+    assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+  }
+  // Another repository's: one named differently, one of the same name under
+  // another owner, and one whose owner is a proper suffix of the PR's owner.
+  for (const repo of [FOREIGN, "other-org/own-repo", "leet-test/own-repo"]) {
+    const f = fixture(t);
+    f.put("3545", RULED_ROW);
+    f.rule(3606, "3545");
+    closes(f.bin, 3606, [urlless(repo)]);
+    f.refused(["dispatch", "3606", "finisher-pr-3606"], /PR #3606 does not close #3545, ruled closed_own_ticket=yes/);
+  }
+});
+
+test("a reference whose url is not its own issue's in the PR's repository is not the PR's own", (t) => {
+  for (const url of ["https://github.com/fleet-test/own-repo/issues/9999", "https://github.com/fleet-test/own-repo-2/issues/3545"]) {
+    const f = fixture(t);
+    f.put("3545", RULED_ROW);
+    f.rule(3606, "3545");
+    closes(f.bin, 3606, [{ ...ref(3545), url }]);
+    f.refused(["dispatch", "3606", "finisher-pr-3606"], /PR #3606 does not close #3545, ruled closed_own_ticket=yes/);
+    assert.deepEqual(f.read().dispatched, []);
+  }
+});
+
+test("duplicate references to one of the PR's own issues look its title up once", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545");
+  closes(f.bin, 3606, [3545, 3545]);
+  assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+  assert.deepEqual(ghCalls(f.bin).filter((c) => c.startsWith("issue view")), ["issue view 3545 --json title"]);
 });
 
 test("a reference that cannot be placed or numbered refuses the finisher, naming the read, and writes nothing", (t) => {
   const { url: _url, repository: _repository, ...unplaced } = ref(3545);
+  const blank = { ...ref(3545), url: "", repository: { ...ref(3545).repository, name: "" } };
   const { number: _number, ...unnumbered } = ref(3545);
+  const unplacedWhy = /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url answered a reference to #3545 with neither a url nor a repository; nothing written/;
   for (const [refs, why] of [
-    [[unplaced], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url answered a reference to #3545 with neither a url nor a repository; nothing written/],
+    [[unplaced], unplacedWhy],
+    [[blank], unplacedWhy],
     [[unnumbered], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url answered a reference with no issue number; nothing written/],
   ]) {
     const f = fixture(t);
@@ -1587,9 +1618,10 @@ test("a PR url that is not PR M's own refuses the finisher, naming the read, and
   const f = fixture(t);
   f.put("3545", RULED_ROW);
   f.rule(3606, "3545");
-  for (const body of [{ closingIssuesReferences: [ref(3545)] }, { closingIssuesReferences: [ref(3545)], url: prUrl(3607) }]) {
+  const own = { closingIssuesReferences: [ref(3545)] };
+  for (const body of [own, { ...own, url: prUrl(3607) }, { ...own, url: prUrl(36060) }, { ...own, url: `${prUrl(3606)}/files` }]) {
     writeFileSync(join(f.bin, "pr-3606.json"), JSON.stringify(body));
-    f.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url answered (without a usable url|url \S+\/pull\/3607, not PR #3606's)/);
+    f.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url answered (without a usable url|url \S+\/pull\/(3607|36060|3606\/files), not PR #3606's)/);
     assert.deepEqual(f.read().dispatched, []);
   }
 });
