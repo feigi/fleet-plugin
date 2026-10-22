@@ -7,7 +7,12 @@ environment carries `PI_ARTIFACTS_DIR`, this run's own session directory,
 which phase 0 records in its receipt; the bash tool's does not, so there
 phase 0 exits 2. `expanduser` is required: a literal `~/…` fails with
 `FileNotFoundError`. So is the `stderr` redirect: the cell never shows a
-child's stderr. `--session <dir>` overrides the variable.
+child's stderr. `--session <dir>` overrides the variable. Either way the
+directory must have its transcript `<dir>.jsonl` beside it; the directory
+itself may not exist yet. An existing directory with no `<dir>.jsonl` beside
+it — `~/.omp/agent/sessions/<encoded-cwd>`, which holds every session of the
+checkout — names no session: phase 0 exits 2 naming the path and where it
+came from, and writes no receipt.
 
 Exit 3 is a step that failed: its line carries the refusal, so fix the cause
 and run it again.
