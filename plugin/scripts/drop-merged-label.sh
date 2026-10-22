@@ -19,6 +19,11 @@
 # both signals (see the commit-message scan below) so a real close is never
 # missed just because the keyword only ever lived in a commit message.
 #
+# Only a closing reference in the PR's own repository counts: the field also
+# lists another repository's issue, under that repository's number, and read
+# by number alone it would drop the label from this repository's issue of the
+# same number.
+#
 # Dry-run by default; --apply mutates the tracker. Exit 0 done (or dry run),
 # 1 one or more removals failed — REPORT THIS, never swallow it: a merged
 # ticket that keeps the label is a future invisible ticket, 2 could not even
@@ -47,9 +52,24 @@ if ! state=$(gh pr view "$pr" --json state --jq .state); then
 fi
 [ "$state" = "MERGED" ] || die "PR #$pr is not merged (state=$state) — refusing to touch its issues"
 
-echo "\$ gh pr view $pr --json closingIssuesReferences --jq '.closingIssuesReferences[].number'" >&2
-if ! issues=$(gh pr view "$pr" --json closingIssuesReferences --jq '.closingIssuesReferences[].number'); then
-  die "gh pr view $pr failed — cannot read which issues it closes"
+# The PR's own repository is its url less `/pull/<pr>`. A reference is in it
+# when its url is that repository's `/issues/<number>`, or, carrying no url,
+# when its repository's `<owner>/<name>` ends that repository's url; any other
+# is dropped here and never reaches the loop below. A url not ending
+# `/pull/<pr>`, a reference with no integer number, or one with neither a url
+# nor a repository to place it by cannot be read: the filter errors, gh exits
+# non-zero, and so does this, 2.
+own_closes='(.url | if type == "string" and endswith("/pull/'"$pr"'") then rtrimstr("/pull/'"$pr"'") else error("url \(tostring) does not end /pull/'"$pr"'") end) as $own
+  | .closingIssuesReferences | if type == "array" then .[] else error("no closingIssuesReferences array") end
+  | .number as $n | .repository as $r
+  | if ($n | type) == "number" and ($n | floor) == $n then . else error("a reference with no issue number") end
+  | if (.url | type) == "string" and .url != "" then select(.url == "\($own)/issues/\($n)")
+    elif ($r.name | type) == "string" and $r.name != "" and ($r.owner.login | type) == "string" and $r.owner.login != "" then select($own | endswith("/\($r.owner.login)/\($r.name)"))
+    else error("a reference to #\($n) with neither a url nor a repository") end
+  | $n'
+echo "\$ gh pr view $pr --json closingIssuesReferences,url --jq '$own_closes'" >&2
+if ! issues=$(gh pr view "$pr" --json closingIssuesReferences,url --jq "$own_closes"); then
+  die "gh pr view $pr failed — cannot read which issues it closes in its own repository"
 fi
 
 # The query above misses a commit-message-only close. Scan every

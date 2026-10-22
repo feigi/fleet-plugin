@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { ref, prUrl } from "./support/queue-gh.mjs";
 import { encodeProjectDir } from "../plugin/scripts/member-record.mjs";
 import { COLUMNS } from "../plugin/scripts/tier-outcomes.mjs";
 
@@ -115,10 +116,17 @@ await import("./ledger-real.mjs");
 `);
 const SCRIPT = join(SCRIPTS, "closeout.mjs");
 
+// `gh pr view <n> --json closingIssuesReferences,url` answers PR <n>'s url and
+// the references in gh.refs, when the test wrote one; every other call is
+// answered with gh.json.
 const GH_STUB = `#!/bin/sh
 printf 'gh\\n' >> "$CLOSEOUT_STUBS/order.log"
 printf '%s GH_REPO=[%s] GIT_DIR=[%s]\\n' "$(printf '%s' "$*" | tr '\\n' '|')" "\${GH_REPO-}" "\${GIT_DIR-}" >> "$CLOSEOUT_STUBS/gh.calls"
 if [ -f "$CLOSEOUT_STUBS/gh.fail" ]; then echo "gh boom" >&2; exit 1; fi
+if [ "$1 $2 $4 $5" = "pr view --json closingIssuesReferences,url" ] && [ -f "$CLOSEOUT_STUBS/gh.refs" ]; then
+  printf '{"closingIssuesReferences":%s,"url":"%s%s"}\\n' "$(cat "$CLOSEOUT_STUBS/gh.refs")" "${prUrl("")}" "$3"
+  exit 0
+fi
 cat "$CLOSEOUT_STUBS/gh.json"
 if [ -f "$CLOSEOUT_STUBS/gh.dirty" ]; then printf 'late\\n' >> docs/metrics/member-outcomes.tsv; fi
 `;
@@ -463,12 +471,12 @@ test("finish: reviewed= PRs that close no issue and name no implementer need no 
   git(f.repo, "commit", "-q", "-am", "a row");
   git(f.repo, "push", "-q");
   f.setLedger([REVIEWED[0], "#13 PR#23 · reviewed=abcdef2:1/0/0:run-abcdef2r", REVIEWED[2]]);
-  writeFileSync(join(f.stubs, "gh.json"), '{"closingIssuesReferences":[]}\n');
+  writeFileSync(join(f.stubs, "gh.refs"), "[]");
   const r = f.run("finish", ["--reason", "wrap up"]);
   assert.equal(r.status, 0, r.err + r.stdout);
   assert.deepEqual(r.out.filter((l) => l.startsWith("NEED ")), []);
   assert.deepEqual(statusOf(f.receipt(), FINISH_STEPS), allOk(FINISH_STEPS));
-  assert.deepEqual(f.ghCalls().filter((l) => l.startsWith("pr view ")).map((l) => l.split(" GH_REPO=")[0]), ["pr view 23 --json closingIssuesReferences", "pr view 30 --json closingIssuesReferences"]);
+  assert.deepEqual(f.ghCalls().filter((l) => l.startsWith("pr view ")).map((l) => l.split(" GH_REPO=")[0]), ["pr view 23 --json closingIssuesReferences,url", "pr view 30 --json closingIssuesReferences,url"]);
 });
 
 // #3664: a reviewed PR that closes several issues and that no settled impl token
@@ -479,7 +487,7 @@ test("finish: reviewed= PRs that close several issues and name no implementer ne
   git(f.repo, "commit", "-q", "-am", "a row");
   git(f.repo, "push", "-q");
   f.setLedger([REVIEWED[0], "#13 PR#23 · reviewed=abcdef2:1/0/0:run-abcdef2r", REVIEWED[2]]);
-  writeFileSync(join(f.stubs, "gh.json"), '{"closingIssuesReferences":[{"number":14},{"number":15}]}\n');
+  writeFileSync(join(f.stubs, "gh.refs"), JSON.stringify([ref(14), ref(15)]));
   const r = f.run("finish", ["--reason", "wrap up"]);
   assert.equal(r.status, 0, r.err + r.stdout);
   assert.deepEqual(r.out.filter((l) => l.startsWith("NEED ")), []);
@@ -494,7 +502,7 @@ test("finish: a reviewed= PR that closes no issue and that a settled impl token 
   git(f.repo, "commit", "-q", "-am", "a row");
   git(f.repo, "push", "-q");
   f.setLedger(REVIEWED);
-  writeFileSync(join(f.stubs, "gh.json"), '{"closingIssuesReferences":[]}\n');
+  writeFileSync(join(f.stubs, "gh.refs"), "[]");
   const r = f.run("finish", ["--reason", "wrap up"]);
   assert.equal(r.status, 4, r.err + r.stdout);
   assert.deepEqual(r.out.filter((l) => l.startsWith("NEED ")), ["NEED tier-outcomes append 23"]);

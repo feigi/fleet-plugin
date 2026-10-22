@@ -9,9 +9,9 @@
 //          --note <text> [--sizing light|heavy] [--profile <p>] [--loc <n>] [--files <n>]
 //          [--scratch <dir>]
 //     Fills `run_date` (today's UTC date, the ruling date), `pr`, `ticket` (the
-//     PR's one `gh pr view --json closingIssuesReferences` issue; when the PR
-//     closes zero or several, the N of its one settled `impl-<N>=PR#<pr>` token
-//     in the run ledger), `tier` and, unless
+//     PR's one `gh pr view --json closingIssuesReferences,url` issue in its own
+//     repository; when the PR closes zero or several there, the N of its one
+//     settled `impl-<N>=PR#<pr>` token in the run ledger), `tier` and, unless
 //     `--sizing` names it, `sizing` (see below). Idempotent by
 //     PR: a row already present is named and nothing is written, exit 0.
 //   check [--live]
@@ -84,6 +84,7 @@ import { parseMember, parseToken, memberTokens, rowPr } from "./ledger-grammar.m
 import { rowText } from "./tier-check.mjs";
 import { latestImplReport, readReport, reportsDir, defaultScratch } from "./report-files.mjs";
 import { FleetDirUnresolvable } from "./fleet-dir.mjs";
+import { ownClosingIssues } from "./closing-refs.mjs";
 
 const NAME = "tier-outcomes";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -455,34 +456,35 @@ function readLedger(ledgerFile, requireFile) {
   }
 }
 
-// The unique issue numbers of a PR's closingIssuesReferences, in GitHub's
-// order, or an Error naming why they could not be read — a reference with no
-// integer issue number among the reasons. GH_REPO is blanked so an ambient one
-// naming another repository never decides which PR is read; the timeout keeps
-// a hung `gh` from stalling `append` or a close-out's `check --live`.
+// The unique issue numbers of a PR's closingIssuesReferences in its own
+// repository, by ownClosingIssues()'s rule, in GitHub's order — another
+// repository's reference is none of them — or an Error naming why they could
+// not be read, a reference that rule cannot read among the reasons. GH_REPO is
+// blanked so an ambient one naming another repository never decides which PR
+// is read; the timeout keeps a hung `gh` from stalling `append` or a
+// close-out's `check --live`.
 const GH_TIMEOUT_MS = 60_000;
 function closingIssueNumbers(pr) {
   let raw;
   try {
-    raw = execFileSync("gh", ["pr", "view", String(pr), "--json", "closingIssuesReferences"], {
+    raw = execFileSync("gh", ["pr", "view", String(pr), "--json", "closingIssuesReferences,url"], {
       encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GH_REPO: "" }, timeout: GH_TIMEOUT_MS,
     });
   } catch (e) {
     throw new Error(`gh pr view ${pr} failed: ${e.stderr?.trim() || e.message}`);
   }
-  let refs;
+  let view;
   try {
-    refs = JSON.parse(raw).closingIssuesReferences;
+    view = JSON.parse(raw);
   } catch (e) {
     throw new Error(`gh pr view ${pr} returned unreadable JSON: ${e.message}`);
   }
-  if (!Array.isArray(refs)) throw new Error(`gh pr view ${pr} returned no closingIssuesReferences array`);
-  const numbers = [...new Set(refs.map((r) => r?.number))];
-  const unreadable = numbers.filter((n) => !Number.isInteger(n));
-  if (unreadable.length > 0) {
-    throw new Error(`gh pr view ${pr} returned a closing reference with no issue number (${unreadable.map((n) => JSON.stringify(n) ?? "undefined").join(", ")})`);
+  if (!Array.isArray(view?.closingIssuesReferences)) throw new Error(`gh pr view ${pr} returned no closingIssuesReferences array`);
+  try {
+    return ownClosingIssues(pr, view.url, view.closingIssuesReferences);
+  } catch (e) {
+    throw new Error(`gh pr view ${pr} answered ${e.message}`);
   }
-  return numbers;
 }
 
 function closingNumbers(pr) {

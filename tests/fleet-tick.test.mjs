@@ -9,6 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { reconcile, formatLines, actionable, deriveRun, LedgerError, parseShortlist, unclaimed, refreshWhy, dispositionsToken, currentDispositions, reapDue, reapedAfter, reapSummary, reclaimSummary, parkedToken, bodyDigest, PARKED } from "../plugin/scripts/fleet-tick.mjs";
+import { ref, prUrl } from "./support/queue-gh.mjs";
 
 // Every field named, so a test that cares about one number still states the
 // rest — a defaulted field is a guard nobody is pinning.
@@ -622,10 +623,14 @@ test("phase 0: a gate that gave no answer holds, never reads as finished", () =>
 
 const HEAD_A = "abc1234" + "0".repeat(33);
 const HEAD_B = "def5678" + "0".repeat(33);
+// A PR in gh's own shape: each of `closes` an issue number in its own
+// repository, or a reference object as it stands — `ref(n, "other/repo")`
+// for another repository's issue. deriveRun() reads only each reference's
+// number, so the cases that call it directly read the same.
 const pr = (number, labels = [], closes = [number + 1000], headRefOid = HEAD_B, mergeable = "MERGEABLE", body = "") => ({
   number, labels: labels.map((name) => ({ name })),
-  closingIssuesReferences: closes.map((n) => ({ number: n })),
-  headRefOid, mergeable, body,
+  closingIssuesReferences: closes.map((r) => (typeof r === "number" ? ref(r) : r)),
+  headRefOid, mergeable, body, url: prUrl(number),
 });
 const run = (ledger, prs = [], closed, prStates) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs, closed, prStates);
 
@@ -1924,7 +1929,7 @@ const SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-tick.mjs", import.
 // or transitive — and ledger.mjs with its own, because the tick reads the
 // ledger through `ledger.mjs read`. An unlisted sibling is a module-not-found
 // at startup: exit 1, a shape no case below expects.
-const SIBLING_MODULES = ["arg.mjs", "fleet-dir.mjs", "fleet-state.mjs", "gh-aliased-read.mjs", "git-env.mjs", "is-cli.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs", "report-files.mjs", "report-schema.mjs"].map(
+const SIBLING_MODULES = ["arg.mjs", "closing-refs.mjs", "fleet-dir.mjs", "fleet-state.mjs", "gh-aliased-read.mjs", "git-env.mjs", "is-cli.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs", "report-files.mjs", "report-schema.mjs"].map(
   (m) => [m, fileURLToPath(new URL(`../plugin/scripts/${m}`, import.meta.url))],
 );
 
@@ -2978,15 +2983,73 @@ test("CLI: a PR list at the limit refuses rather than serving a truncated one", 
   assert.match(r.stderr, /truncated|capped/i);
 });
 
+const ROW_SHAPE = /gh pr list did not return \{number,labels,closingIssuesReferences\[\{number,url\|repository\{name,owner\{login\}\}\}\],headRefOid,mergeable,body,url\} rows, url ending \/pull\/<number>/;
+
 test("CLI: an issue-closing reference with no integer number refuses the tick rather than miscounting it", () => {
-  for (const ref of [{}, { number: "7" }, { number: null }, { number: 7.5 }, null, { title: "no number" }]) {
-    const r = runCli([], { prs: [{ ...pr(1), closingIssuesReferences: [{ number: 1001 }, ref] }], shortlist: shortlistText([]) });
-    assert.equal(r.status, 2, JSON.stringify(ref));
-    assert.equal(r.stdout.trim(), "", JSON.stringify(ref));
-    assert.match(r.stderr, /gh pr list did not return .*closingIssuesReferences\[\{number\}\]/, JSON.stringify(ref));
+  const { number: _n, ...unnumbered } = ref(7);
+  for (const bad of [{}, unnumbered, { ...ref(7), number: "7" }, { ...ref(7), number: null }, { ...ref(7), number: 7.5 }, null, { title: "no number" }]) {
+    const r = runCli([], { prs: [pr(1, [], [1001, bad])], shortlist: shortlistText([]) });
+    assert.equal(r.status, 2, JSON.stringify(bad));
+    assert.equal(r.stdout.trim(), "", JSON.stringify(bad));
+    assert.match(r.stderr, ROW_SHAPE, JSON.stringify(bad));
+    assert.match(r.stderr, /PR #1 answered a reference with no issue number/, JSON.stringify(bad));
   }
-  const ok = runCli([], { prs: [{ ...pr(1), closingIssuesReferences: [{ number: 1001 }, { number: 1002 }] }], shortlist: shortlistText([]) });
+  const ok = runCli([], { prs: [pr(1, [], [1001, 1002])], shortlist: shortlistText([]) });
   assert.equal(ok.status, 0, ok.stderr);
+});
+
+test("CLI: an issue-closing reference with neither a url nor a repository refuses the tick, naming the shape", () => {
+  const { url: _url, repository: _repository, ...unplaced } = ref(7);
+  const blank = { ...ref(7), url: "", repository: { ...ref(7).repository, name: "" } };
+  for (const bad of [unplaced, blank, { number: 7 }]) {
+    const r = runCli([], { prs: [pr(1, [], [bad])], shortlist: shortlistText([]) });
+    assert.equal(r.status, 2, JSON.stringify(bad));
+    assert.equal(r.stdout.trim(), "", JSON.stringify(bad));
+    assert.match(r.stderr, ROW_SHAPE, JSON.stringify(bad));
+    assert.match(r.stderr, /PR #1 answered a reference to #7 with neither a url nor a repository/, JSON.stringify(bad));
+  }
+  // Placed by its repository alone, it is read.
+  const { url: _u, ...urlless } = ref(7);
+  const ok = runCli([], { prs: [pr(1, [], [urlless])], shortlist: shortlistText([]) });
+  assert.equal(ok.status, 0, ok.stderr);
+});
+
+test("CLI: a PR whose url does not end /pull/<number>, or that has none, refuses the tick, naming the shape", () => {
+  const { url: _url, ...urlless } = pr(1);
+  for (const row of [{ ...pr(1), url: prUrl(2) }, { ...pr(1), url: "https://github.com/fleet-test/own-repo" }, urlless]) {
+    const r = runCli([], { prs: [row], shortlist: shortlistText([]) });
+    assert.equal(r.status, 2, JSON.stringify(row.url));
+    assert.equal(r.stdout.trim(), "", JSON.stringify(row.url));
+    assert.match(r.stderr, ROW_SHAPE, JSON.stringify(row.url));
+  }
+  const r = runCli([], { prs: [{ ...pr(1), url: prUrl(2) }], shortlist: shortlistText([]) });
+  assert.match(r.stderr, new RegExp(`PR #1 answered url ${prUrl(2)}, not PR #1's`));
+});
+
+// Another repository's reference closes none of this repository's tickets,
+// whatever its number: an open PR whose only reference is one is in nobody's
+// slot, owes no review, and absorbs no owed replacement.
+test("CLI: an open PR whose only closing reference is another repository's #N is not in flight, not due review, and absorbs no ticket N", () => {
+  const foreign = (n) => [pr(60, [], [ref(n, "other-org/other-repo")])];
+  const base = { shortlist: shortlistText([1, 2, 3]), issueStates: { 7: "OPEN" } };
+  const killed = { rows: ["#7 impl-7=killed · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7=killed"] };
+  const owed = runCli([], { ...base, ledger: killed, prs: foreign(7) });
+  assert.equal(owed.status, 0, owed.stderr);
+  assert.match(owed.stdout, /\(implementers=1 prs=0 /m, "the killed impl-7 still owes its replacement, and the PR holds no slot");
+  assert.deepEqual(owed.issueViews, ["7"], "the owed ticket is probed: no PR closes it");
+  assert.doesNotMatch(owed.stdout, /review PR#60/);
+  // The same PR closing this repository's #7 absorbs it.
+  const absorbed = runCli([], { ...base, ledger: killed, prs: [pr(60, [], [7])] });
+  assert.match(absorbed.stdout, /\(implementers=0 prs=1 /m);
+  assert.deepEqual(absorbed.issueViews, []);
+  assert.match(absorbed.stdout, /DISPATCH review PR#60/);
+
+  const live = runCli([], { ...base, ledger: { rows: ["#7 impl-7 · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7"] }, prs: foreign(7) });
+  assert.equal(live.status, 0, live.stderr);
+  assert.match(live.stdout, /\(implementers=1 prs=0 /m);
+  assert.doesNotMatch(live.stdout, /review PR#60/);
+  const mixed = runCli([], { ...base, prs: [pr(60, [], [ref(8, "other-org/other-repo"), 9])] });
+  assert.match(mixed.stdout, /\(implementers=0 prs=1 /m, "beside its own reference, another repository's changes nothing");
 });
 
 test("CLI: a gh row missing closingIssuesReferences refuses rather than counting as no-issue", () => {
@@ -3009,7 +3072,7 @@ test("CLI: a gh row missing body refuses rather than reading every park as unmat
   const r = runCli([], { prs: [bodiless], shortlist: shortlistText([]) });
   assert.equal(r.status, 2);
   assert.equal(r.stdout.trim(), "");
-  assert.match(r.stderr, /mergeable,body\}/);
+  assert.match(r.stderr, /mergeable,body,url\}/);
   const logDir = mkdtempSync(join(tmpdir(), "fleet-tick-prlist-"));
   t.after(() => rmSync(logDir, { recursive: true, force: true }));
   const log = join(logDir, "pr-list.log");

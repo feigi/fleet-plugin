@@ -14,6 +14,7 @@ import { COLUMNS, LEGACY_WIDTH, RulingError, TIER_SWITCH_DATE, lastPullByTicket,
 import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
 import { sessionDate } from "../plugin/scripts/ticket-router.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { ref, prUrl } from "./support/queue-gh.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/tier-outcomes.mjs", import.meta.url));
 const LATER = "2026-10-03";
@@ -38,15 +39,22 @@ function ledgerText(rows = [], dispatched = []) {
   return `# Fleet run ledger\n\n## Rows\n${rows.map((r) => `- ${r}\n`).join("")}\n## Dispatched\n${dispatched.map((d) => `- ${d}\n`).join("")}\n## Filed\n\n## Ruled\n`;
 }
 
+// `gh pr view <pr> --json closingIssuesReferences,url` as the stub answers it:
+// PR <pr>'s url in the fixture's own repository and the references GH_REFS
+// holds.
+const PR_VIEW_ANSWER = "printf '{\"closingIssuesReferences\":%s,\"url\":\"%s%s\"}\\n' \"$GH_REFS\" \"$GH_PULL\" \"$3\"\n";
+
 // `clock` pins the child's `new Date()` to that instant and `tz` its TZ, so a
 // date `append` stamps is independent of the host's clock and zone. `env` is
-// laid over the child's environment.
+// laid over the child's environment. `closes` is the PR's closing references:
+// each an issue number in its own repository, or a reference object as it
+// stands — `ref(n, "other/repo")` for another repository's issue.
 function fixture(t, { members = [], tierRows = [], ledger = null, closes = [10], clock = null, tz = null, env = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "tier-outcomes-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const bin = join(dir, "bin");
   mkdirSync(bin);
-  writeExecStub(join(bin, "gh"), '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$GH_LOG"\nprintf \'%s\\n\' "$GH_JSON"\n');
+  writeExecStub(join(bin, "gh"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$GH_LOG"\n${PR_VIEW_ANSWER}`);
   const f = {
     tier: join(dir, "tier-outcomes.tsv"),
     members: join(dir, "member-outcomes.tsv"),
@@ -79,7 +87,8 @@ globalThis.Date = class extends Real {
         ...(tz ? { TZ: tz } : {}),
         PATH: `${bin}:${process.env.PATH}`,
         GH_LOG: f.ghLog,
-        GH_JSON: JSON.stringify({ closingIssuesReferences: closes.map((number) => ({ number })) }),
+        GH_REFS: JSON.stringify(closes.map((r) => (typeof r === "number" ? ref(r) : r))),
+        GH_PULL: prUrl(""),
       },
     });
     return { code: r.status, stdout: r.stdout, stderr: r.stderr };
@@ -122,7 +131,7 @@ test("append: the ledger's tier-ok token wins over member-outcomes.tsv", (t) => 
   assert.ok([before, after].includes(rows[0][col("run_date")]), `run_date ${rows[0][col("run_date")]} is not the day append ran`);
   assert.equal(rows[0][col("note")], "a note with spaces");
   assert.match(r.stderr, /tier-ok=impl-10:fleet-implementer-alt/);
-  assert.deepEqual(f.ghCalls(), ["pr view 20 --json closingIssuesReferences"]);
+  assert.deepEqual(f.ghCalls(), ["pr view 20 --json closingIssuesReferences,url"]);
 });
 
 // A Pull's `run_date` in ticket-features.tsv is the UTC date of its session
@@ -491,17 +500,62 @@ test("append: a PR closing no issue and no ledger is refused, not written with a
 // answer: append refuses it rather than taking a ticket from the ledger, and
 // check --live keeps the PR's warning after naming why.
 test("append and check --live: a closing reference with no integer issue number is refused and warned about, whatever the ledger says", (t) => {
-  for (const [closes, shown] of [[[undefined], "undefined"], [[null], "null"], [["10"], '"10"'], [[null, 10], "null"]]) {
+  const { number: _n, ...unnumbered } = ref(10);
+  for (const closes of [[unnumbered], [null], [{ ...ref(10), number: "10" }], [null, 10]]) {
     const f = fixture(t, { closes, ledger: { rows: ["#10 impl-10=PR#20 · reviewed=abcdef1:0/0/0:run-abcdef1r"], dispatched: ["impl-10=PR#20"] } });
     const r = f.append();
     assert.equal(r.code, 2, r.stderr);
-    assert.ok(r.stderr.includes(`a closing reference with no issue number (${shown})`), r.stderr);
+    assert.ok(r.stderr.includes("gh pr view 20 answered a reference with no issue number"), r.stderr);
     assert.equal(f.dataRows().length, 0);
     const c = f.run("check", "--live");
     assert.equal(c.code, 0, c.stderr);
     assert.match(c.stderr, /could not read the closing references of PR #20: .*no issue number/);
     assert.match(c.stderr, /WARNING PR #20 carries reviewed=/);
   }
+});
+
+// Another repository's reference closes none of this repository's issues,
+// whatever its number: a PR whose only reference is one closes no issue here,
+// and takes its ticket from its settled impl token or is refused.
+test("append: a PR whose only closing reference is another repository's takes its settled impl token's ticket", (t) => {
+  const f = fixture(t, {
+    closes: [ref(10, "other-org/other-repo")],
+    members: [{ member: "impl-13", ticket: 13, type: "fleet-implementer" }],
+    ledger: { rows: ["#13 impl-13=PR#20 · reviewed=abcdef2:1/0/0:run-abcdef2r"], dispatched: ["impl-13=PR#20"] },
+  });
+  const r = f.append();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(f.dataRows()[0][col("ticket")], "13");
+});
+
+test("append: a PR whose only closing reference is another repository's, with no settled impl token, is refused as closing no issue", (t) => {
+  const f = fixture(t, { closes: [ref(10, "other-org/other-repo")], ledger: { rows: ["#10 PR#20 · reviewed=abcdef1:0/0/0:run-abcdef1r"] } });
+  const before = readFileSync(f.tier, "utf8");
+  const r = f.append();
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /PR #20 closes no issue per GitHub's closingIssuesReferences, and no run-ledger row carries a settled impl-N=PR#20 token/);
+  assert.equal(readFileSync(f.tier, "utf8"), before);
+});
+
+test("append: another repository's reference beside the PR's own one leaves the own one its ticket", (t) => {
+  const f = fixture(t, { closes: [ref(11, "other-org/other-repo"), 10], members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }] });
+  const r = f.append();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(f.dataRows()[0][col("ticket")], "10");
+});
+
+test("append and check --live: a reference with neither a url nor a repository is refused and warned about", (t) => {
+  const { url: _url, repository: _repository, ...unplaced } = ref(10);
+  const f = fixture(t, { closes: [unplaced], ledger: { rows: ["#10 impl-10=PR#20 · reviewed=abcdef1:0/0/0:run-abcdef1r"], dispatched: ["impl-10=PR#20"] } });
+  const r = f.append();
+  assert.equal(r.code, 2, r.stderr);
+  assert.ok(r.stderr.includes("gh pr view 20 answered a reference to #10 with neither a url nor a repository"), r.stderr);
+  assert.equal(f.dataRows().length, 0);
+  const c = f.run("check", "--live");
+  assert.equal(c.code, 0, c.stderr);
+  assert.match(c.stderr, /could not read the closing references of PR #20: gh pr view 20 answered a reference to #10 with neither a url nor a repository/);
+  assert.match(c.stderr, /WARNING PR #20 carries reviewed=/);
+  assert.doesNotMatch(c.stderr, /note PR #20/);
 });
 
 test("append: --class is refused as an unknown flag before anything is written", (t) => {
@@ -817,7 +871,7 @@ test("check --live: a reviewed PR that closes no issue and names no implementer 
   assert.equal(r.code, 0, r.stderr);
   assert.doesNotMatch(r.stderr, /WARNING PR #23/);
   assert.match(r.stderr, /note PR #23 carries reviewed= on the ledger and closes no issue, and no settled impl token names it/);
-  assert.deepEqual(f.ghCalls(), ["pr view 23 --json closingIssuesReferences"]);
+  assert.deepEqual(f.ghCalls(), ["pr view 23 --json closingIssuesReferences,url"]);
 });
 
 // A settled impl token naming the PR makes it an implementer PR whose ticket
@@ -870,7 +924,7 @@ test("check --live: a closingIssuesReferences that is not an array keeps the war
 // An ambient GH_REPO naming another repository must not decide which PR either
 // read of closing references asks about: `gh` sees it blanked.
 test("append and check --live read closing references with an ambient GH_REPO blanked", (t) => {
-  const logRepo = "#!/bin/sh\nprintf '%s GH_REPO=[%s]\\n' \"$*\" \"${GH_REPO-unset}\" >> \"$GH_LOG\"\nprintf '%s\\n' \"$GH_JSON\"\n";
+  const logRepo = `#!/bin/sh\nprintf '%s GH_REPO=[%s]\\n' "$*" "\${GH_REPO-unset}" >> "$GH_LOG"\n${PR_VIEW_ANSWER}`;
   const live = fixture(t, {
     members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
     tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" })],
@@ -881,13 +935,13 @@ test("append and check --live read closing references with an ambient GH_REPO bl
   writeExecStub(join(live.bin, "gh"), logRepo);
   const r = live.run("check", "--live");
   assert.equal(r.code, 0, r.stderr);
-  assert.deepEqual(live.ghCalls(), ["pr view 23 --json closingIssuesReferences GH_REPO=[]"]);
+  assert.deepEqual(live.ghCalls(), ["pr view 23 --json closingIssuesReferences,url GH_REPO=[]"]);
 
   const appended = fixture(t, { members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }], env: { GH_REPO: "someone/else" } });
   writeExecStub(join(appended.bin, "gh"), logRepo);
   const a = appended.append();
   assert.equal(a.code, 0, a.stderr);
-  assert.deepEqual(appended.ghCalls(), ["pr view 20 --json closingIssuesReferences GH_REPO=[]"]);
+  assert.deepEqual(appended.ghCalls(), ["pr view 20 --json closingIssuesReferences,url GH_REPO=[]"]);
 });
 
 test("check --live: a run ledger that does not exist is refused, not read as empty", (t) => {
