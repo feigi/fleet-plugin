@@ -42,7 +42,7 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { FEATURE_COLUMNS, parseFeatures } from "./pr-cost.mjs";
+import { FEATURE_COLUMNS, parseFeatures } from "./pull-attribution.mjs";
 
 const NAME = "metrics-refresh";
 const PR_COST = fileURLToPath(new URL("./pr-cost.mjs", import.meta.url));

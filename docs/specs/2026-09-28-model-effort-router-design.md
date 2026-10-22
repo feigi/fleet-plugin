@@ -384,10 +384,11 @@ replace-by-key, so one re-scrape fills history.
 Excluded: `merge-bot-*` (cost does not vary with the implementer cell),
 `memory`, `__advisor`.
 
-**Cell key** = `ticket-features.tsv`'s `chosen_cell`, cross-checked against
-the verdict-carrying `impl-*` row's resolved `model`/`effort`; a
-disagreement is listed under `mismatch` and excluded from every cell,
-never reassigned.
+**Cell key** = `ticket-features.tsv`'s `chosen_cell`: each Pull is booked as
+routed to it by `plugin/scripts/pull-attribution.mjs`, which the guard and the
+fit both import. A Pull none of whose implementer rows is an Admissible row is
+excluded from every cell's figures and counted per cell as `excluded`, never
+reassigned.
 
 **Quality floor.** Failure = `minted_false_claim=yes` ∨
 `closed_own_ticket=no`. Corpus fact: `minted_false_claim=yes` on 151/283
@@ -398,11 +399,12 @@ Merged state is read from one `gh pr list --state all --limit 1000 --json
 number,state,mergedAt` per run (`tier-outcomes.tsv` has no `merged`
 column).
 
-**Per-cell figures:** `n_pulls`, `n_merged`, `n_pass`, `fail_rate = failed ÷
-merged`, `mean_usd` = the cell's total booked $ (merged + unmerged +
-superseded attempts) ÷ merged — the guard figure, so an abandon-happy cell
-carries its abandoned spend — `median_usd` over merged PRs only
-(descriptive), `router_usd`.
+**Per-cell figures:** `n_pulls`, `n_merged`, `n_claims`, `n_failed`,
+`fail_rate = failed ÷ claims`, `mean_usd` = the spend of the cell's counted
+Pulls (merged or not) ÷ merged — the guard figure, so an abandon-happy cell
+carries its abandoned spend — `median_usd` over merged Pulls only
+(descriptive), `router_usd`, then the `excluded`, `left_out` and `unpriced`
+Pull counts.
 
 **Guard.** See `docs/adr/0016-per-ticket-model-effort-routing.md` § Guard
 for the full, amended rule (baseline, trip margin, retire condition). New

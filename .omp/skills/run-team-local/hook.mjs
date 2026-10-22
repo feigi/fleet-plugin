@@ -37,7 +37,7 @@ import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "../../../plugin/scripts/arg.mjs";
 import { gitEnv, mainCheckoutDirFromGitCommonDir } from "../../../plugin/scripts/git-env.mjs";
 import { CELL } from "../../../plugin/scripts/ledger-grammar.mjs";
-import { parseFeatures } from "../../../plugin/scripts/pr-cost.mjs";
+import { parseFeatures } from "../../../plugin/scripts/pull-attribution.mjs";
 import { stoppingRule } from "../../../plugin/scripts/cell-readout.mjs";
 import { parseTsv as parseMemberTsv } from "../../../plugin/scripts/member-outcomes.mjs";
 import { parseTierOutcomes } from "../../../plugin/scripts/tier-outcomes.mjs";

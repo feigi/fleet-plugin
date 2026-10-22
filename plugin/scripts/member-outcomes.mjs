@@ -141,7 +141,7 @@ export function withReports(rows, scratch) {
 //   crash         the session never exited and wrote no yield sidecar;
 //   hollow        none of the above: the member stopped on its own.
 const IMPLEMENTER_LEAF = /^impl-\d+(?:-[a-z0-9]+)?$/;
-const isImplementer = (member) => IMPLEMENTER_LEAF.test(member.split("/").pop());
+export const isImplementer = (member) => IMPLEMENTER_LEAF.test(member.split("/").pop());
 
 export function endingOf({ member, pr, signals = null, earlierPrs = new Set(), verifyMain = verifyMainWithGit }) {
   if (!isImplementer(member)) return "";

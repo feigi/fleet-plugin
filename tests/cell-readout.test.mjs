@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { Pin } from "./support/prose-pin.mjs";
 import { COLUMNS, formatTsv } from "../plugin/scripts/member-outcomes.mjs";
-import { FEATURE_COLUMNS } from "../plugin/scripts/pr-cost.mjs";
+import { FEATURE_COLUMNS } from "../plugin/scripts/pull-attribution.mjs";
 import { readout, stoppingRule, GATE, STOP } from "../plugin/scripts/cell-readout.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/cell-readout.mjs", import.meta.url));

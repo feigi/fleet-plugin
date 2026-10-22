@@ -12,10 +12,8 @@ import { writeExecStub } from "./support/exec-stub.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { COLUMNS as MEMBER_COLUMNS, formatTsv, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, formatRow, parseTierOutcomes } from "../plugin/scripts/tier-outcomes.mjs";
-import {
-  computeReport, parseFeatures, trips, guardFile, formatReport, crossCheck,
-  FEATURE_COLUMNS, WINDOW_START, MIN_N,
-} from "../plugin/scripts/pr-cost.mjs";
+import { computeReport, trips, guardFile, formatReport, crossCheck, WINDOW_START, MIN_N } from "../plugin/scripts/pr-cost.mjs";
+import { FEATURE_COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { readCostGuard, routerRows } from "../plugin/scripts/fleet-tick.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/pr-cost.mjs", import.meta.url));
@@ -46,7 +44,7 @@ const tier = (o) => ({
 function addPr(w, { ticket, pr, cell, usd, fail = false, state = "MERGED", agent = `impl-${ticket}` }) {
   const level = cell.split("-")[1];
   w.features.push(pull({ ticket: String(ticket), agent, chosen_cell: cell }));
-  w.members.push(member({ agent, cost: usd, effort: level, subagentType: `fleet-implementer-${cell}`, pr: String(pr) }));
+  w.members.push(member({ agent, ticket: String(ticket), cost: usd, effort: level, subagentType: `fleet-implementer-${cell}`, pr: String(pr) }));
   w.tiers.push(tier({ pr: String(pr), ticket: String(ticket), minted_false_claim: fail ? "yes" : "no" }));
   w.prs.push({ number: pr, state, mergedAt: state === "MERGED" ? `${DAY}T12:00:00Z` : null });
 }
@@ -116,7 +114,7 @@ test("--guard: a cell exactly 15 points worse than the baseline trips, exits 3 a
   assert.deepEqual(r.guard.cells.find((c) => c.cell === "task-high"), { cell: "task-high", n: 20, mean_usd: 5, fail_rate: 0.45 });
   assert.equal(r.guard.window_start, WINDOW_START);
   assert.ok(!Number.isNaN(Date.parse(r.guard.computed_at)));
-  assert.match(r.stdout, /^task-high\t20\t20\t11\t0\.45\t5\t5\t0\t[^\t]*\ttripped$/m);
+  assert.match(r.stdout, /^task-high\t20\t20\t20\t9\t0\.45\t5\t5\t0\t[^\t]*\t0\t0\t0\ttripped$/m);
   assert.match(r.stdout, /^smol-high\t.*\tok$/m);
 });
 
@@ -319,7 +317,7 @@ test("without --guard the report prints and exits 0, writing nothing", () => {
   // One read, every state, scoped to PRs created since the window opened.
   assert.deepEqual(r.ghArgs, ["pr", "list", "--state", "all", "--search", `created:>=${WINDOW_START}`,
     "--limit", "1000", "--json", "number,state,mergedAt"]);
-  assert.match(r.stdout, /^cell\tn_pulls\tn_merged\tn_pass\tfail_rate\tmean_usd\tmedian_usd\trouter_usd\tusd_diff_ci95\tguard$/m);
+  assert.match(r.stdout, /^cell\tn_pulls\tn_merged\tn_claims\tn_failed\tfail_rate\tmean_usd\tmedian_usd\trouter_usd\tusd_diff_ci95\texcluded\tleft_out\tunpriced\tguard$/m);
   const json = JSON.parse(runCli(w, ["--json"]).stdout);
   assert.deepEqual(json.tripped, ["task-high"]);
 });
@@ -350,14 +348,13 @@ test("trips() takes the 15-point margin in counts, so 3 of 20 is exactly the mar
 // ---------------------------------------------------------------------------
 // Booking.
 
-test("a PR carries every attempt for its ticket, its PR-named members and their nested members; merge-bot and memory carry nothing", () => {
+test("a Pull books every implementer under it at any cell, its PR's named members and their nested members; merge-bot, memory and advisor book nowhere", () => {
   const w = world();
   const T = 41, P = 141;
-  // A superseded attempt in another cell, then the verdict-carrying one.
-  w.features.push(pull({ ticket: String(T), agent: `impl-${T}`, chosen_cell: "task-high" }));
-  w.members.push(member({ agent: `impl-${T}`, cost: 2, effort: "high", subagentType: "fleet-implementer-task-high" }));
-  w.features.push(pull({ ticket: String(T), agent: `impl-${T}-b`, chosen_cell: "slow-high", router_usd: "0.0002" }));
-  w.members.push(member({ agent: `impl-${T}-b`, cost: 3, effort: "high", subagentType: "fleet-implementer-slow-high" }));
+  // The first implementer ran at another cell and ran out of budget; its replacement at the drawn cell opened the PR.
+  w.features.push(pull({ ticket: String(T), agent: `impl-${T}`, chosen_cell: "slow-high", router_usd: "0.0002" }));
+  w.members.push(member({ agent: `impl-${T}`, ticket: String(T), cost: 2, subagentType: "fleet-implementer-task-high", ending: "budget" }));
+  w.members.push(member({ agent: `impl-${T}-b`, ticket: String(T), pr: String(P), cost: 3, subagentType: "fleet-implementer-slow-high", ending: "pr" }));
   w.members.push(member({ agent: `impl-${T}-b/Probe`, member: `impl-${T}-b/Probe`, cost: 0.5 }));
   for (const [agent, cost] of [[`review-pr-${P}`, 1], [`fix-pr-${P}`, 1.25], [`finisher-pr-${P}`, 0.25],
     [`reviewcorrectnesspr${P}`, 0.75], [`verifycorrectnesspr${P}-2`, 0.125], [`snapshotpr${P}`, 0.0625], [`test-runpr${P}`, 0.0625],
@@ -372,68 +369,76 @@ test("a PR carries every attempt for its ticket, its PR-named members and their 
   w.tiers.push(tier({ pr: String(P), ticket: String(T) }));
   w.prs.push({ number: P, state: "MERGED" });
   const rep = computeReport(parsed(w));
-  const slow = rep.cells.find((c) => c.cell === "slow-high");
+  assert.deepEqual(rep.cells.map((c) => c.cell), ["slow-high"], "nothing splits across cells");
+  const slow = rep.cells[0];
   assert.equal(slow.n_merged, 1);
   assert.equal(slow.mean_usd, 2 + 3 + 0.5 + 1 + 1.25 + 0.25 + 0.75 + 0.125 + 0.0625 + 0.0625 + 0.25);
-  assert.equal(slow.router_usd, 0.0002);
-  // The superseded attempt counts as a Pull of its own cell, its $ on the PR's.
-  assert.equal(rep.cells.find((c) => c.cell === "task-high").n_pulls, 1);
-  assert.equal(rep.cells.find((c) => c.cell === "task-high").mean_usd, null);
+  assert.equal(slow.router_usd, 0.0002, "printed beside the spend, never in it");
 });
 
-test("unruled and closed spend lands on its cell's mean, an open PR is pending, and a cell mismatch is excluded from every cell", () => {
+test("closed and unruled spend lands on its cell's mean, an open PR is pending, and a Pull with no Admissible row is excluded and counted per cell", () => {
   const w = world();
   addPr(w, { ticket: 1, pr: 101, cell: "slow-high", usd: 10 });
   addPr(w, { ticket: 2, pr: 102, cell: "slow-high", usd: 4, state: "CLOSED" });
   addPr(w, { ticket: 3, pr: 103, cell: "slow-high", usd: 99, state: "OPEN" });
   // A Pull with no ruling yet, whose implementer opened nothing.
   w.features.push(pull({ ticket: "4", agent: "impl-4", chosen_cell: "slow-high" }));
-  w.members.push(member({ agent: "impl-4", cost: 6, subagentType: "fleet-implementer-slow-high" }));
+  w.members.push(member({ agent: "impl-4", ticket: "4", cost: 6, subagentType: "fleet-implementer-slow-high" }));
   // A Pull with no ruling whose implementer opened a PR still open.
   w.features.push(pull({ ticket: "5", agent: "impl-5", chosen_cell: "slow-high" }));
-  w.members.push(member({ agent: "impl-5", cost: 50, pr: "105", subagentType: "fleet-implementer-slow-high" }));
+  w.members.push(member({ agent: "impl-5", ticket: "5", cost: 50, pr: "105", subagentType: "fleet-implementer-slow-high" }));
   w.prs.push({ number: 105, state: "OPEN" });
-  // Booked as smol-high, but its member ran a different definition.
+  // Drawn as smol-high, but its only implementer ran a different definition.
   addPr(w, { ticket: 6, pr: 106, cell: "smol-high", usd: 1 });
   w.members.at(-1).subagentType = "fleet-implementer-slow-high";
-  // A ticket before the window is not a Pull of this guard.
+  // A Pull before the window is not this guard's.
   w.features.push(pull({ ticket: "7", agent: "impl-7", chosen_cell: "slow-high", run_date: "2026-09-01" }));
-  w.members.push(member({ agent: "impl-7", cost: 1000 }));
+  w.members.push(member({ agent: "impl-7", ticket: "7", cost: 1000, subagentType: "fleet-implementer-slow-high" }));
 
   const rep = computeReport(parsed(w));
   const slow = rep.cells.find((c) => c.cell === "slow-high");
   assert.deepEqual({ n_pulls: slow.n_pulls, n_merged: slow.n_merged, mean_usd: slow.mean_usd, median_usd: slow.median_usd },
     { n_pulls: 3, n_merged: 1, mean_usd: 20, median_usd: 10 });
   assert.deepEqual(rep.pending, ["103", "105"]);
-  assert.deepEqual(rep.mismatch, [{ pr: "106", cell: "smol-high", subagent_type: "fleet-implementer-slow-high", effort: "high" }]);
-  assert.equal(rep.cells.find((c) => c.cell === "smol-high"), undefined);
-  assert.match(formatReport(rep), /^# mismatch \(excluded from every cell\): PR#106 smol-high vs fleet-implementer-slow-high\/high$/m);
+  const smol = rep.cells.find((c) => c.cell === "smol-high");
+  assert.deepEqual({ n_pulls: smol.n_pulls, excluded: smol.excluded }, { n_pulls: 0, excluded: 1 });
+  assert.match(formatReport(rep), /^smol-high\t0\t0\t0\t0\t\t\t\t0\t\t1\t0\t0\tn<20$/m);
+  assert.equal("mismatch" in rep, false);
 });
 
-test("a blank cost books 0 and is counted unpriced; Claude rows are outside the instrument", () => {
+test("a booked row with a blank cost makes its Pull unpriced and counted per cell, out of every figure; Claude rows are outside the instrument", () => {
   const w = world();
   addPr(w, { ticket: 1, pr: 101, cell: "slow-high", usd: "" });
   w.members.push(member({ agent: "review-pr-101", cost: 2 }));
-  w.members.push(member({ agent: "fix-pr-101", cost: 7, harness: "claude" }));
+  addPr(w, { ticket: 2, pr: 102, cell: "slow-high", usd: 3 });
+  w.members.push(member({ agent: "fix-pr-102", cost: "", harness: "claude" }));
   const rep = computeReport(parsed(w));
-  assert.equal(rep.unpriced, 1);
-  assert.equal(rep.cells[0].mean_usd, 2);
+  const slow = rep.cells[0];
+  assert.deepEqual({ n_pulls: slow.n_pulls, n_merged: slow.n_merged, unpriced: slow.unpriced, mean_usd: slow.mean_usd },
+    { n_pulls: 1, n_merged: 1, unpriced: 1, mean_usd: 3 });
+  assert.equal("unpriced" in rep, false, "the count is per cell, not a whole-report row count");
 });
 
-test("a Pull with no member row books $0 and is listed as unbooked, so its cell's mean never reads cheap unflagged", () => {
+test("a Pull with no member row has no Admissible row, so it is excluded and counted rather than read as a free run", () => {
   const w = world();
   addPr(w, { ticket: 1, pr: 101, cell: "slow-high", usd: 10 });
   addPr(w, { ticket: 2, pr: 102, cell: "slow-high", usd: 6 });
-  const lost = w.members.pop();
-  assert.equal(lost.agent, "impl-2");
+  assert.equal(w.members.pop().agent, "impl-2");
   const rep = computeReport(parsed(w));
-  assert.deepEqual(rep.unbooked_pulls, ["impl-2"]);
-  assert.equal(rep.cells.find((c) => c.cell === "slow-high").mean_usd, 5);
-  assert.match(formatReport(rep), /^# unbooked Pulls \(no member row, so \$0 in the mean\): impl-2$/m);
-  w.members.push(lost);
-  const whole = computeReport(parsed(w));
-  assert.deepEqual(whole.unbooked_pulls, []);
-  assert.doesNotMatch(formatReport(whole), /unbooked/);
+  const slow = rep.cells.find((c) => c.cell === "slow-high");
+  assert.deepEqual({ n_pulls: slow.n_pulls, excluded: slow.excluded, mean_usd: slow.mean_usd }, { n_pulls: 1, excluded: 1, mean_usd: 10 });
+  assert.equal("unbooked_pulls" in rep, false);
+});
+
+test("a cost that is neither blank nor a number is exit 2 naming the row, and writes no guard file", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 0, 10);
+  w.members[0].cost = "n/a";
+  const r = runCli(w);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /pr-cost: member-outcomes row session \S+ agent impl-\d+: cost 'n\/a' is not a number/);
+  assert.equal(r.stdout, "");
+  assert.equal(r.guard, null);
 });
 
 test("the A/B report says B has not run until a B Pull carries a sizing_pre", () => {
@@ -501,36 +506,37 @@ test("the cross-check skips a blank cost and an unpriced token kind, and prices 
     { rows: 1, skipped: 0, ratio: 1 });
 });
 
-test("a ticket's ruling is its LAST tier row: a re-ruling on a later PR decides the cell and n_pass", () => {
+test("a ticket's ruling is its LAST tier row: a re-ruling on a later PR its replacement opened decides n_failed", () => {
   const w = world();
   addPr(w, { ticket: 1, pr: 101, cell: "slow-high", usd: 10, fail: true });
+  w.members.push(member({ agent: "impl-1-b", ticket: "1", pr: "102", cost: 1, subagentType: "fleet-implementer-slow-high" }));
   w.tiers.push(tier({ pr: "102", ticket: "1" }));
   w.prs.push({ number: 102, state: "MERGED" });
   const slow = computeReport(parsed(w)).cells.find((c) => c.cell === "slow-high");
-  assert.deepEqual({ n_merged: slow.n_merged, n_pass: slow.n_pass }, { n_merged: 1, n_pass: 1 });
+  assert.deepEqual({ n_merged: slow.n_merged, n_failed: slow.n_failed }, { n_merged: 1, n_failed: 0 });
 });
 
 test("a ticket's ruling is its last tier row in file order even when an earlier row is dated later: dates only set the floor", () => {
   const w = world();
   w.features.push(pull({ ticket: "1", agent: "impl-1", chosen_cell: "slow-high" }));
-  w.members.push(member({ agent: "impl-1", cost: 1, effort: "high", subagentType: "fleet-implementer-slow-high" }));
+  w.members.push(member({ agent: "impl-1", ticket: "1", pr: "102", cost: 1, effort: "high", subagentType: "fleet-implementer-slow-high" }));
   w.tiers.push(tier({ pr: "101", ticket: "1", run_date: "2026-10-04", minted_false_claim: "yes" }), tier({ pr: "102", ticket: "1" }));
   w.prs.push({ number: 101, state: "MERGED" }, { number: 102, state: "MERGED" });
   const slow = computeReport(parsed(w)).cells.find((c) => c.cell === "slow-high");
-  assert.deepEqual({ n_merged: slow.n_merged, n_pass: slow.n_pass }, { n_merged: 1, n_pass: 1 }, "PR 102 is the later row, though the older-dated: it rules, and it passes");
+  assert.deepEqual({ n_merged: slow.n_merged, n_failed: slow.n_failed }, { n_merged: 1, n_failed: 0 }, "PR 102 is the later row, though the older-dated: it rules, and it passes");
 });
 
-// Two tickets ruled by PR 101, each Pulled once; `rows` are their two tier rows, in file order.
+// Two tickets ruled by PR 101, each Pulled once, ticket 1's implementer opening it; `rows` are their two tier rows, in file order.
 function onePrTwoTickets(rows) {
   const w = world();
   for (const t of [1, 2]) {
     w.features.push(pull({ ticket: String(t), agent: `impl-${t}`, chosen_cell: "slow-high" }));
-    w.members.push(member({ agent: `impl-${t}`, cost: 1, effort: "high", subagentType: "fleet-implementer-slow-high" }));
+    w.members.push(member({ agent: `impl-${t}`, ticket: String(t), pr: t === 1 ? "101" : "", cost: 1, effort: "high", subagentType: "fleet-implementer-slow-high" }));
   }
   w.tiers.push(...rows);
   w.prs.push({ number: 101, state: "MERGED" });
   const slow = computeReport(parsed(w)).cells.find((c) => c.cell === "slow-high");
-  return { n_merged: slow.n_merged, n_pass: slow.n_pass };
+  return { n_merged: slow.n_merged, n_failed: slow.n_failed };
 }
 
 test("two tickets ruled by one PR: the ruling later in the file carries the quality verdict, whatever the run_dates", () => {
@@ -538,43 +544,43 @@ test("two tickets ruled by one PR: the ruling later in the file carries the qual
   // The later row is the older-dated: pass, then fail.
   assert.deepEqual(
     onePrTwoTickets([tier({ pr: "101", ticket: "1", run_date: LATER }), tier({ pr: "101", ticket: "2", minted_false_claim: "yes" })]),
-    { n_merged: 1, n_pass: 0 });
+    { n_merged: 1, n_failed: 1 });
   // Fail, then pass.
   assert.deepEqual(
     onePrTwoTickets([tier({ pr: "101", ticket: "1", run_date: LATER, minted_false_claim: "yes" }), tier({ pr: "101", ticket: "2" })]),
-    { n_merged: 1, n_pass: 1 });
+    { n_merged: 1, n_failed: 0 });
 });
 
 test("two tickets ruled by one PR: the later row in the file carries the verdict even when its ticket is the one read first", () => {
   // Tickets are read in Pull order, 1 then 2, so here the later row is the ticket read FIRST.
   assert.deepEqual(
     onePrTwoTickets([tier({ pr: "101", ticket: "2", minted_false_claim: "yes" }), tier({ pr: "101", ticket: "1" })]),
-    { n_merged: 1, n_pass: 1 });
+    { n_merged: 1, n_failed: 0 });
   assert.deepEqual(
     onePrTwoTickets([tier({ pr: "101", ticket: "2" }), tier({ pr: "101", ticket: "1", minted_false_claim: "yes" })]),
-    { n_merged: 1, n_pass: 0 });
+    { n_merged: 1, n_failed: 1 });
 });
 
 test("a ticket's first Pull is the floor of its ruling: an older-dated row is skipped, one dated before its last Pull still rules", () => {
   const BEFORE = "2026-10-02", MID = "2026-10-04", LAST = "2026-10-05";
-  // One ticket Pulled on DAY and again on LAST; `rows` are its tier rows, in file order.
+  // One ticket Pulled on DAY and again on LAST, the first Pull's implementer opening PR 101; `rows` are its tier rows, in file order.
   const report = (rows) => {
     const w = world();
-    for (const [agent, run_date] of [["impl-1a", DAY], ["impl-1b", LAST]]) {
+    for (const [agent, run_date, pr] of [["impl-1", DAY, "101"], ["impl-1-b", LAST, ""]]) {
       w.features.push(pull({ ticket: "1", agent, chosen_cell: "slow-high", run_date }));
-      w.members.push(member({ agent, cost: 1, effort: "high", subagentType: "fleet-implementer-slow-high" }));
+      w.members.push(member({ agent, ticket: "1", pr, cost: 1, effort: "high", subagentType: "fleet-implementer-slow-high" }));
     }
     w.tiers.push(...rows);
     w.prs.push({ number: 101, state: "MERGED" }, { number: 102, state: "MERGED" });
     const slow = computeReport(parsed(w)).cells.find((c) => c.cell === "slow-high");
-    return { n_pulls: slow.n_pulls, n_merged: slow.n_merged, n_pass: slow.n_pass };
+    return { n_pulls: slow.n_pulls, n_merged: slow.n_merged, n_failed: slow.n_failed };
   };
   // The later row in the file predates the first Pull, so it rules nothing: the earlier row rules, and passes.
   assert.deepEqual(
     report([tier({ pr: "101", ticket: "1" }), tier({ pr: "102", ticket: "1", run_date: BEFORE, minted_false_claim: "yes" })]),
-    { n_pulls: 2, n_merged: 1, n_pass: 1 });
+    { n_pulls: 2, n_merged: 1, n_failed: 0 });
   // Dated between the two Pulls: it rules the first, and the Pull dated after it stays unruled.
-  assert.deepEqual(report([tier({ pr: "101", ticket: "1", run_date: MID, minted_false_claim: "yes" })]), { n_pulls: 2, n_merged: 1, n_pass: 0 });
+  assert.deepEqual(report([tier({ pr: "101", ticket: "1", run_date: MID, minted_false_claim: "yes" })]), { n_pulls: 2, n_merged: 1, n_failed: 1 });
 });
 
 test("a failing ruling followed by a both-blank row of the same ticket on a later PR is still the failure", () => {
@@ -583,7 +589,7 @@ test("a failing ruling followed by a both-blank row of the same ticket on a late
   w.tiers.push(tier({ pr: "102", ticket: "1", closed_own_ticket: "", minted_false_claim: "" }));
   w.prs.push({ number: 102, state: "MERGED" });
   const slow = computeReport(parsed(w)).cells.find((c) => c.cell === "slow-high");
-  assert.deepEqual({ n_merged: slow.n_merged, n_pass: slow.n_pass }, { n_merged: 1, n_pass: 0 });
+  assert.deepEqual({ n_merged: slow.n_merged, n_failed: slow.n_failed }, { n_merged: 1, n_failed: 1 });
 });
 
 test("a ticket whose only tier row is both-blank reports exactly as a ticket with no tier row", () => {
@@ -639,11 +645,10 @@ test("a bug raised while picking a ruling is a crash with its own stack, not an 
   assert.equal(r.guard, null);
 });
 
-test("a Pull whose member ran at another effort than its cell's level is a mismatch even when its subagent_type matches", () => {
+test("a Pull whose only implementer ran at another effort than its cell's level is excluded even when its subagent_type matches", () => {
   const w = world();
   addPr(w, { ticket: 1, pr: 101, cell: "slow-high", usd: 10 });
   w.members.at(-1).effort = "medium";
-  const rep = computeReport(parsed(w));
-  assert.deepEqual(rep.mismatch, [{ pr: "101", cell: "slow-high", subagent_type: "fleet-implementer-slow-high", effort: "medium" }]);
-  assert.equal(rep.cells.find((c) => c.cell === "slow-high"), undefined);
+  const slow = computeReport(parsed(w)).cells.find((c) => c.cell === "slow-high");
+  assert.deepEqual({ n_pulls: slow.n_pulls, n_merged: slow.n_merged, excluded: slow.excluded }, { n_pulls: 0, n_merged: 0, excluded: 1 });
 });
