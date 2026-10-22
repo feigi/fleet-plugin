@@ -359,7 +359,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
   let model = null, thinking = null, task = null, resolvedModelIdentity = null, agent = null;
   let firstTs = null, lastTs = null;
   let input = 0, cacheWrite = 0, cacheWrite1h = 0, cacheRead = 0, output = 0, cost = 0, turns = 0;
-  let sawCost = false, unsplit = false;
+  let sawCost = false, unsplit = false, unpriced = false;
   let malformedNonLastLines = 0;
   // What the transcript's END says, read for the `ending` column: the last
   // assistant turn's stopReason, whether a model fell back, whether the
@@ -406,13 +406,15 @@ export function foldOmpTranscript(jsonlText, filePath) {
         const u = m.usage;
         if (typeof m.model === "string" && m.model) model = m.model;
         const cw = Number(u.cacheWrite ?? 0);
-        input += Number(u.input ?? 0);
+        const tin = Number(u.input ?? 0), tread = Number(u.cacheRead ?? 0), tout = Number(u.output ?? 0);
+        input += tin;
         cacheWrite += cw;
-        cacheRead += Number(u.cacheRead ?? 0);
-        output += Number(u.output ?? 0);
+        cacheRead += tread;
+        output += tout;
         if (u.cttl && typeof u.cttl === "object") cacheWrite1h += Number(u.cttl.ephemeral1h ?? 0);
         else if (cw > 0) unsplit = true;
         if (u.cost && typeof u.cost.total === "number") { cost += u.cost.total; sawCost = true; }
+        else if (tin > 0 || cw > 0 || tread > 0 || tout > 0) unpriced = true;
         turns++;
         entries.push({
           kind: "assistant", cacheWrite: cw,
@@ -441,7 +443,10 @@ export function foldOmpTranscript(jsonlText, filePath) {
     // any turn that wrote cache recorded no `cttl`: the split was never
     // recorded for that share, and a partial sum would pass for the whole.
     cacheWrite1h: unsplit ? null : cacheWrite1h,
-    cost: sawCost ? cost : null,
+    // Unknown — `null` — on the same rule: when no turn carried a figure, or
+    // when any turn that reported tokens carried none (or a non-number), so
+    // a partial sum never passes for the member's whole cost.
+    cost: sawCost && !unpriced ? cost : null,
     turns,
     wallS: Number.isFinite(span) ? Math.round(span) : 0,
     entries,

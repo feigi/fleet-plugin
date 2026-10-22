@@ -53,6 +53,7 @@ const assistantEvt = (model, usage, ts = "2026-09-08T15:12:00.000Z") => evt({
   type: "message", id: "m1", parentId: "i1", timestamp: ts,
   message: { role: "assistant", content: [{ type: "text", text: "ok" }], model, usage },
 });
+const recOmp = (...turns) => readOmpMember([sessionEvt("/x"), thinkingEvt("high"), ...turns].join("\n"), "/fake/path.jsonl", "impl-1");
 
 function ompSessionFixture(sessionName, files) {
   const root = tempDir("mr-omp-home-");
@@ -90,26 +91,59 @@ test("readOmpMember: cost, tokens and thinking come off real usage/thinking_leve
 
 test("readOmpMember: tokens_cache_write_1h sums each turn's usage.cttl.ephemeral1h, and is unknown when cache was written with no TTL split", () => {
   const turn = (cacheWrite, cttl, ts) => assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite, ...(cttl ? { cttl } : {}), cost: { total: 0.01 } }, ts);
-  const rec = (...turns) => readOmpMember([sessionEvt("/x"), thinkingEvt("high"), ...turns].join("\n"), "/fake/path.jsonl", "impl-1");
   // Measured shapes: `{ephemeral1h:n}` and `{ephemeral5m:n}`, only on a turn that wrote cache.
-  const mixed = rec(turn(300, { ephemeral1h: 300 }), turn(0, null, "2026-09-08T15:13:00.000Z"),
+  const mixed = recOmp(turn(300, { ephemeral1h: 300 }), turn(0, null, "2026-09-08T15:13:00.000Z"),
     turn(50, { ephemeral5m: 50 }, "2026-09-08T15:14:00.000Z"), turn(20, { ephemeral1h: 20 }, "2026-09-08T15:15:00.000Z"));
   assert.equal(mixed.tokens_cache_create, 370);
   assert.equal(mixed.tokens_cache_write_1h, 320);
-  assert.equal(rec(turn(0, null)).tokens_cache_write_1h, 0, "nothing written is a real zero");
-  assert.equal(rec(turn(40, null)).tokens_cache_write_1h, null, "cache written with no recorded split is unknown, never zero");
-  assert.equal(rec(turn(300, { ephemeral1h: 300 }), turn(700, null, "2026-09-08T15:13:00.000Z")).tokens_cache_write_1h, null,
+  assert.equal(recOmp(turn(0, null)).tokens_cache_write_1h, 0, "nothing written is a real zero");
+  assert.equal(recOmp(turn(40, null)).tokens_cache_write_1h, null, "cache written with no recorded split is unknown, never zero");
+  assert.equal(recOmp(turn(300, { ephemeral1h: 300 }), turn(700, null, "2026-09-08T15:13:00.000Z")).tokens_cache_write_1h, null,
     "one cache-writing turn with no recorded split makes the whole figure unknown, never the recorded share alone");
 });
 
 test("readOmpMember: cost is null, never 0, when no turn carries usage.cost.total", () => {
-  const rec = (...turns) => readOmpMember([sessionEvt("/x"), thinkingEvt("high"), ...turns].join("\n"), "/fake/path.jsonl", "impl-1");
   const noCost = assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 });
   const priced = assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0.25 } }, "2026-09-08T15:13:00.000Z");
-  assert.equal(rec(noCost).cost, null, "no figure recorded is blank, so pr-cost counts it unpriced instead of booking a free member");
-  assert.equal(rec(noCost, noCost).cost, null);
-  assert.equal(rec(noCost).turns, 1, "the turn itself still counts");
-  assert.equal(rec(priced).cost, 0.25);
+  assert.equal(recOmp(noCost).cost, null, "no figure recorded is blank, so pr-cost counts it unpriced instead of booking a free member");
+  assert.equal(recOmp(noCost, noCost).cost, null);
+  assert.equal(recOmp(noCost).turns, 1, "the turn itself still counts");
+  assert.equal(recOmp(priced).cost, 0.25);
+});
+
+test("readOmpMember: cost is null when any token-reporting turn carries no numeric usage.cost.total — never the priced share alone (#3705)", () => {
+  const turn = (usage, ts) => assistantEvt("claude-opus-5", { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, ...usage }, ts);
+  const priced = (total, ts) => turn({ input: 1, output: 1, cost: { total } }, ts);
+  const t2 = "2026-09-08T15:13:00.000Z", t3 = "2026-09-08T15:14:00.000Z";
+
+  const mixed = recOmp(turn({ input: 3, output: 4 }), priced(0.25, t2));
+  assert.equal(mixed.cost, null, "one unpriced token-reporting turn makes the whole figure unknown");
+  assert.equal(mixed.turns, 2, "the unpriced turn still counts");
+  assert.equal(mixed.tokens_in, 4);
+  assert.equal(mixed.tokens_out, 5);
+
+  // Each token count on its own makes a turn token-reporting.
+  for (const k of ["input", "output", "cacheRead", "cacheWrite"]) {
+    assert.equal(recOmp(priced(0.25), turn({ [k]: 1 }, t2)).cost, null, `${k} alone reports tokens`);
+  }
+
+  const allPriced = recOmp(priced(0.25), priced(0.5, t2));
+  assert.equal(allPriced.cost, 0.75, "every token-reporting turn priced: the sum, as before");
+  assert.equal(allPriced.turns, 2);
+
+  const zeroTokenUnpriced = recOmp(priced(0.25), turn({}, t2), priced(0.5, t3));
+  assert.equal(zeroTokenUnpriced.cost, 0.75, "a turn reporting no tokens and no figure neither prices nor blanks the member");
+  assert.equal(zeroTokenUnpriced.turns, 3);
+  assert.equal(zeroTokenUnpriced.tokens_in, 2);
+  assert.equal(recOmp(turn({})).cost, null, "no figure anywhere stays null");
+
+  for (const total of ["0.25", null, { usd: 0.25 }]) {
+    const bad = recOmp(priced(0.25), turn({ input: 1, cost: { total } }, t2));
+    assert.equal(bad.cost, null, `cost.total ${JSON.stringify(total)} is not a number, so it counts as missing`);
+    assert.equal(bad.turns, 2);
+    assert.equal(bad.tokens_in, 2);
+  }
+  assert.equal(recOmp(priced(0.25), turn({ input: 1, cost: {} }, t2)).cost, null, "a cost object with no total is missing");
 });
 
 test("foldOmpTranscript: resolvedModelIdentity comes off session_init, present before any assistant turn (#1345)", () => {

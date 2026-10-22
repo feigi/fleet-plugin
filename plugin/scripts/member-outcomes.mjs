@@ -102,7 +102,8 @@ export function rowsForSession(sessionDir, stats = {}, { verifyMain = verifyMain
 // position-indexed read-outs name columns ahead of them. `subagent_type`
 // follows `harness`. `cost` is the provider's own per-turn `usage.cost.total`,
 // summed to the micro-dollar — the $ of record; `tokens_cache_write_1h` and
-// `cost` are blank where the transcript recorded no figure, never 0.
+// `cost` are blank where the transcript recorded no figure, never 0, and
+// `cost` is also blank when any turn that reported tokens recorded none.
 export const COLUMNS = [
   "session", "run_date", "role", "member", "model", "effort", "ticket", "pr",
   "tokens_cache_create", "tokens_out", "wall_s", "turns", "agent", "harness",
