@@ -22,7 +22,7 @@ test("another repository's references are dropped, whatever their number", () =>
 test("a reference with a url is placed by its url alone", () => {
   // Its repository says own; its url says another repository's issue, or
   // another issue than its number.
-  for (const url of ["https://github.com/other-org/other-repo/issues/3", "https://github.com/fleet-test/own-repo/issues/9999", "https://github.com/fleet-test/own-repo-2/issues/3"]) {
+  for (const url of ["https://github.com/other-org/other-repo/issues/3", "https://github.com/fleet-test/own-repo/issues/9999", "https://github.com/fleet-test/own-repo-2/issues/3", "https://github.com/fleet-test/own-repo/issues/31"]) {
     assert.deepEqual(ownClosingIssues(7, prUrl(7), [{ ...ref(3), url }]), [], url);
   }
 });

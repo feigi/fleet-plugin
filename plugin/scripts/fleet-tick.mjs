@@ -1712,7 +1712,8 @@ function openPrs() {
   // the count matches a PR to the ticket it closes by its number, and a
   // reference that cannot be placed would leave that ticket's implementer
   // counted twice, or count another repository's issue as this one's. url is
-  // the PR's own repository that rule places each reference against.
+  // required too: the PR's own repository, which that rule places each
+  // reference against, is its url less /pull/<number>.
   // headRefOid likewise — absent, a `halted:past-pin` PR would read as moved
   // forever — and mergeable: absent or outside GitHub's MergeableState enum,
   // no PR would ever read CONFLICTING. body too: absent, no park could ever be
@@ -1726,13 +1727,11 @@ function openPrs() {
     die(`exactly ${PR_LIMIT} open PRs — the list is capped and may be truncated. Raise PR_LIMIT; a backlog that silently drops PRs is not a reconcile.`);
   }
   return prs.map((p) => {
-    let own;
     try {
-      own = ownClosingIssues(p.number, p.url, p.closingIssuesReferences);
+      return { ...p, closingIssuesReferences: ownClosingIssues(p.number, p.url, p.closingIssuesReferences).map((number) => ({ number })) };
     } catch (e) {
       die(`gh pr list did not return ${PR_ROW_SHAPE}: PR #${p.number} answered ${e.message}`);
     }
-    return { ...p, closingIssuesReferences: own.map((number) => ({ number })) };
   });
 }
 

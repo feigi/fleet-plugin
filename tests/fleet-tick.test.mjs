@@ -1986,7 +1986,10 @@ test("CLI: every synchronous spawn in this file goes through spawnBounded (#2320
 const GH_STUB = `#!/bin/sh
 [ -n "$GH_HANG" ] && [ "$1 $2" = "$GH_HANG" ] && sleep "$GH_HANG_S" </dev/null >/dev/null 2>&1
 case "$1 $2" in
-  "pr list") [ -n "$PR_LIST_LOG" ] && echo "$*" >> "$PR_LIST_LOG"; [ -n "$PR_FAIL" ] && { echo "boom" >&2; exit 1; }; cat "$FIXTURE_PRS" ;;
+  "pr list")
+    # Real gh returns only the fields --json names: a list that omits url gets rows without it.
+    case ",$*," in *,url,*|*,url\\ *) ;; *) echo "gh: --json must request url" >&2; exit 1 ;; esac
+    [ -n "$PR_LIST_LOG" ] && echo "$*" >> "$PR_LIST_LOG"; [ -n "$PR_FAIL" ] && { echo "boom" >&2; exit 1; }; cat "$FIXTURE_PRS" ;;
   "issue view")
     echo "$3" >> "$ISSUE_VIEW_LOG"
     [ -n "$ISSUE_VIEW_FAIL" ] && { echo "gh: issue view failed" >&2; exit 1; }
@@ -3050,6 +3053,18 @@ test("CLI: an open PR whose only closing reference is another repository's #N is
   assert.doesNotMatch(live.stdout, /review PR#60/);
   const mixed = runCli([], { ...base, prs: [pr(60, [], [ref(8, "other-org/other-repo"), 9])] });
   assert.match(mixed.stdout, /\(implementers=0 prs=1 /m, "beside its own reference, another repository's changes nothing");
+});
+
+test("CLI: one open PR closing two of this repository's issues absorbs both owed tickets", () => {
+  const killed = { rows: ["#7 impl-7=killed · tier-ok=impl-7:fleet-implementer", "#8 impl-8=killed · tier-ok=impl-8:fleet-implementer"], dispatched: ["impl-7=killed", "impl-8=killed"] };
+  const base = { shortlist: shortlistText([1, 2, 3]), issueStates: { 7: "OPEN", 8: "OPEN" }, ledger: killed };
+  const open = runCli([], { ...base, prs: [] });
+  assert.equal(open.status, 0, open.stderr);
+  assert.match(open.stdout, /\(implementers=2 prs=0 /m, "with no PR both killed impls owe a replacement");
+  const both = runCli([], { ...base, prs: [pr(60, [], [7, 8])] });
+  assert.equal(both.status, 0, both.stderr);
+  assert.match(both.stdout, /\(implementers=0 prs=1 /m, "the one PR absorbs both tickets");
+  assert.deepEqual(both.issueViews, []);
 });
 
 test("CLI: a gh row missing closingIssuesReferences refuses rather than counting as no-issue", () => {

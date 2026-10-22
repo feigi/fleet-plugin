@@ -213,10 +213,23 @@ test("beside the PR's own reference, another repository's reaches neither the la
   assert.deepEqual(s.calls().filter((c) => c.startsWith("issue ")), ["issue view 42 --json labels --jq .labels[].name", "issue edit 42 --remove-label in-progress"]);
 });
 
+test("a url-less reference naming another repository reaches neither the label read nor the edit", (t) => {
+  const s = stub(t);
+  const { url: _u41, ...foreign } = ref(41, "other-org/other-repo");
+  const { url: _u43, ...sameName } = ref(43, "other-org/own-repo");
+  const { code, json } = run(9, {
+    apply: true,
+    env: s.env({ CLOSES_JSON: JSON.stringify([foreign, sameName]), LABELS_41: "in-progress", LABELS_43: "in-progress" }),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(json, { pr: 9, merged: true, issues: [], applied: true, failed: [] });
+  assert.ok(!s.calls().some((c) => c.startsWith("issue view") || c.startsWith("issue edit")), s.calls().join("\n"));
+});
+
 test("a closing reference that cannot be read, or a PR url not its own, halts with exit 2 before any label is touched", (t) => {
   const { url: _url, repository: _repository, ...unplaced } = ref(41);
   const { number: _number, ...unnumbered } = ref(41);
-  for (const extra of [{ CLOSES_JSON: JSON.stringify([unplaced]) }, { CLOSES_JSON: JSON.stringify([unnumbered]) }, { CLOSES: "41", PR_URL: prUrl(8) }]) {
+  for (const extra of [{ CLOSES_JSON: JSON.stringify([unplaced]) }, { CLOSES_JSON: JSON.stringify([unnumbered]) }, { CLOSES_JSON: JSON.stringify([{ ...ref(41), number: 3.5 }]) }, { CLOSES_JSON: JSON.stringify(ref(41)) }, { CLOSES: "41", PR_URL: prUrl(8) }]) {
     const s = stub(t);
     const { code, stderr } = run(9, { apply: true, env: s.env({ ...extra, LABELS_41: "in-progress" }) });
     assert.equal(code, 2, stderr);
