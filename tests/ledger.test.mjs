@@ -3816,7 +3816,8 @@ test("token refuses two different tier= in one call, and takes a first or a repe
 
 // A Pull's cell is its row's `tier=`, or the policy cell on a row with none,
 // and it binds the row's newest implementer until that member settles: live
-// (in `## Dispatched`) and not yet dispatched (on the row alone) both hold it.
+// (in `## Dispatched`) and not yet dispatched (on the row alone) both hold it,
+// and a live member binds with no token of its own left on the row.
 test("token and row refuse a write that changes the Pull's cell while its implementer is live or not yet dispatched, naming both", (t) => {
   const row = "#3544 impl-3544 · tier=smol-high";
   for (const dispatched of [["impl-3544"], []]) {
@@ -3825,11 +3826,14 @@ test("token and row refuse a write that changes the Pull's cell while its implem
     refused(["token", "3544", "tier=slow-high"], why);
     refused(["row", "3544", "impl-3544 · tier=slow-high"], why);
     refused(["row", "3544", "impl-3544"], /from smol-high to slow-high while impl-3544 has not settled/);
+    refused(["row", "3544", "impl-3544 · tier=slow-high · tier=task-high"], /from smol-high to slow-high and task-high while impl-3544 has not settled/);
     assert.deepEqual(rows(), [row]);
   }
   const bare = tokenFixture(t, ["#3546 impl-3546"], { dispatched: ["impl-3546"] });
   bare.refused(["token", "3546", "tier=smol-high"], /from slow-high to smol-high while impl-3546 has not settled/);
   bare.refused(["row", "3546", "impl-3546 · tier=smol-high"], /from slow-high to smol-high while impl-3546 has not settled/);
+  const listed = tokenFixture(t, ["#3560 tier=smol-high"], { dispatched: ["impl-3560"] });
+  listed.refused(["token", "3560", "tier=slow-high"], /from smol-high to slow-high while impl-3560 has not settled/);
   // The newest implementer binds: a live replacement holds the cell as its
   // settled predecessor no longer does.
   const replaced = tokenFixture(t, ["#3545 impl-3545=killed · impl-3545-b · tier=smol-high"], { dispatched: ["impl-3545=killed", "impl-3545-b"] });
@@ -3854,6 +3858,27 @@ test("token replaces tier= once the row's implementer has settled, whatever its 
   // A tier-less row gains one.
   const bare = tokenFixture(t, ["#3542 impl-3542=bailed · ports=163542"], { dispatched: ["impl-3542=bailed"] });
   assert.equal(bare.run("token", "3542", "tier=smol-high", "route=explore").payload.line, "#3542 impl-3542=bailed · ports=163542 · tier=smol-high · route=explore");
+});
+
+// Only an implementer binds a Pull's cell: a live fix-applier or finisher
+// whose PR number is the row's key is not the row's implementer.
+test("a live member of another family numbered as the row binds no cell", (t) => {
+  const { run, rows } = tokenFixture(t, ["#9 fix-pr-9 · tier=smol-high", "#3541 impl-3541=killed · tier=smol-high"], {
+    dispatched: ["fix-pr-9", "impl-3541=killed", "finisher-pr-3541"],
+  });
+  run("token", "9", "tier=slow-high");
+  run("token", "3541", "tier=slow-high");
+  assert.deepEqual(rows(), ["#9 fix-pr-9 · tier=slow-high", "#3541 impl-3541=killed · tier=slow-high"]);
+});
+
+// Only the row's own ticket's implementer binds its cell: another ticket's
+// live implementer, even one with a later retry suffix, holds no other row.
+test("a live implementer of another ticket binds no other row's cell", (t) => {
+  const { run, rows } = tokenFixture(t, ["#3541 impl-3541=killed · tier=smol-high", "#3560 impl-3560-b · tier=smol-high"], {
+    dispatched: ["impl-3541=killed", "impl-3560-b"],
+  });
+  run("token", "3541", "tier=slow-high");
+  assert.deepEqual(rows(), ["#3541 impl-3541=killed · tier=slow-high", "#3560 impl-3560-b · tier=smol-high"]);
 });
 
 test("a write that leaves the Pull's cell unchanged is not refused while its implementer is live", (t) => {

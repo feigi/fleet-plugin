@@ -5,8 +5,8 @@
 // that.
 //
 // Rows are rewritten in place, one per ticket: `row` replaces a whole line
-// and `token` appends tokens to one, or replaces its `tier=` once the row's
-// implementer has settled. `filed` and `ruled` are
+// and `token` appends tokens to one, or replaces its `tier=`, which it refuses
+// while the row's implementer has not settled. `filed` and `ruled` are
 // append-only, because their whole purpose is to outlive the reasoning that
 // produced them; `filed` appends at most one row per issue.
 //
@@ -763,7 +763,10 @@ if (cmd === "read") {
   if (badTier !== undefined) die(`row ${key}: 'tier=${badTier}' is not tier=<cell> — a cell is <slow|task|smol>-<level>`);
   // A Pull's cell binds its implementer until that member settles; see
   // cellChangeRefusal(). A new row binds nothing yet.
-  const cellWhy = cellChangeRefusal(data.rows.find((r) => rowKey(r) === key) ?? null, line);
+  const i = data.rows.findIndex((r) => r.split(/\s/)[0] === key);
+  const created = i === -1;
+  const oldRow = created ? null : data.rows[i];
+  const cellWhy = cellChangeRefusal(oldRow, line);
   if (cellWhy !== null) die(`row ${key}: ${cellWhy}`);
   // `label-off=<attempt>` tells the tick a missing `ready-to-merge` is
   // the controller's own removal, not a finisher's miss — so one naming no
@@ -773,9 +776,6 @@ if (cmd === "read") {
   if (badOff !== undefined) {
     die(`row ${key}: '${badOff}' ${LABEL_OFF_UNKNOWN}`);
   }
-  const i = data.rows.findIndex((r) => r.split(/\s/)[0] === key);
-  const created = i === -1;
-  const oldRow = created ? null : data.rows[i];
   const after = created ? [...data.rows, line] : data.rows.with(i, line);
   // Every review token is `review`'s to write, onto the PR's row in write
   // order, so `row` adds none; one the row already holds is carried.
