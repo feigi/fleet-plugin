@@ -60,7 +60,7 @@ shape as the tier-unchecked hold.
 
 ## Implementation Decisions
 
-**D1. `phase0.mjs`.** `~/.fleet/bin/fleet-run phase0.mjs --session <dir>
+**D1. `phase0.mjs`.** `~/.fleet/bin/fleet-run phase0.mjs [--session <dir>]
 [--in-flight n] [--plugin-checkout <dir>] [--spend-dir <dir>]
 [--workflow <name> | --declare-no-ci]`. `--session` names the controller's
 session directory, else `PI_ARTIFACTS_DIR` supplies it (omp exports it to the
