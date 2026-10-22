@@ -141,6 +141,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, isDigits } from "./arg.mjs";
 import { alarmFile } from "./controller-alarm.mjs";
+import { ownClosingIssues } from "./closing-refs.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { gitEnv } from "./git-env.mjs";
@@ -352,7 +353,7 @@ function ledgerRows(cwd) {
 const rowKey = (row) => row.split(/\s/)[0];
 
 function foldIn({ cwd }) {
-  const list = run("gh", ["pr", "list", "--state", "open", "--json", "number,closingIssuesReferences", "--limit", String(PR_LIMIT)], {
+  const list = run("gh", ["pr", "list", "--state", "open", "--json", "number,closingIssuesReferences,url", "--limit", String(PR_LIMIT)], {
     cwd, env: { GH_REPO: "" }, timeoutMs: NETWORK_TIMEOUT_MS,
   });
   if (list.status !== 0) return refusal("gh pr list failed:", list);
@@ -364,6 +365,18 @@ function foldIn({ cwd }) {
   }
   if (!Array.isArray(prs)) return failed("gh pr list did not print a JSON array");
   if (prs.length >= PR_LIMIT) return failed(`gh pr list came back at its cap of ${PR_LIMIT} — it may hold more PRs than it showed, so none is folded in`);
+  // The issues each PR closes in its own repository, by ownClosingIssues()'s
+  // rule — another repository's reference closes none of this one's — read
+  // for every PR before any row is written, so one that cannot be read folds
+  // nothing in.
+  const closing = new Map();
+  for (const pr of prs) {
+    try {
+      closing.set(pr, ownClosingIssues(pr?.number, pr?.url, pr?.closingIssuesReferences ?? []));
+    } catch (e) {
+      return failed(`gh pr list answered PR #${pr?.number} with ${e.message} — which issues it closes is unknown, so none is folded in`);
+    }
+  }
   const ledger = ledgerRows(cwd);
   if (ledger.error) return failed(`${ledger.error} — which PRs a carried row names is unknown`);
 
@@ -383,7 +396,7 @@ function foldIn({ cwd }) {
       carried += 1;
       continue;
     }
-    const issues = (pr.closingIssuesReferences ?? []).map((i) => i.number).filter(Number.isInteger);
+    const issues = closing.get(pr);
     if (issues.length === 0) {
       advice.push(`NEED review PR#${pr.number} (closes no issue)`);
       continue;

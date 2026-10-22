@@ -45,6 +45,8 @@ const HERE = fileURLToPath(new URL("../plugin/scripts", import.meta.url));
 const COPIED = ["shortlist.mjs", "candidates.mjs", "ledger.mjs", "ledger-grammar.mjs", "arg.mjs", "fleet-dir.mjs", "git-env.mjs", "is-cli.mjs",
   // ledger.mjs reads the tick's conflict hold for the finisher gate off fleet-tick.mjs's deriveRun (#2299).
   "fleet-tick.mjs", "gh-aliased-read.mjs", "fleet-state.mjs", "main-checkout.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs",
+  // ledger.mjs and fleet-tick.mjs count a PR's closing references by its rule.
+  "closing-refs.mjs",
   // ledger.mjs reads a member's report for `settle --from-report`.
   "report-files.mjs", "report-schema.mjs"];
 

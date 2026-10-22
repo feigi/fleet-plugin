@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { ref, prUrl } from "./support/queue-gh.mjs";
 import { IN_FLIGHT_DEFAULT, STEP_NAMES } from "../plugin/scripts/phase0-receipt.mjs";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
@@ -628,16 +629,22 @@ test("stranded: the live tokens a rotation carried are listed and are no NEED", 
   assert.ok(r.out.some((l) => l.includes("carried review-pr-9 review=member:review-pr-9 (row none)")), r.stdout);
 });
 
+// One `gh pr list --json number,closingIssuesReferences,url` row in gh's own
+// shape: each of `closes` an issue number in the PR's own repository, or a
+// reference object as it stands — `ref(n, "other/repo")` for another
+// repository's issue.
+const listed = (number, closes) => ({ number, closingIssuesReferences: closes.map((r) => (typeof r === "number" ? ref(r) : r)), url: prUrl(number) });
+
 test("fold-in: rows only for PRs that close an issue, a PR a carried row already names is skipped, the rest are NEED lines", () => {
   const f = fixture();
   f.ledgerRow(12, "PR#12 · inherited, held by hand");
   f.ledgerRow(7, "impl-7=PR#13 → PR#13");
   writeFileSync(join(f.stubs, "gh.json"), JSON.stringify([
-    { number: 10, closingIssuesReferences: [{ number: 3 }] },
-    { number: 11, closingIssuesReferences: [] },
-    { number: 12, closingIssuesReferences: [{ number: 4 }] },
-    { number: 13, closingIssuesReferences: [{ number: 5 }] },
-    { number: 14 },
+    listed(10, [3]),
+    listed(11, []),
+    listed(12, [4]),
+    listed(13, [5]),
+    { number: 14, url: prUrl(14) },
   ]));
   const r = f.run();
   assert.equal(r.status, 0, r.stdout + r.err);
@@ -646,7 +653,7 @@ test("fold-in: rows only for PRs that close an issue, a PR a carried row already
   assert.deepEqual(r.out.filter((l) => l.startsWith("NEED")), ["NEED review PR#11 (closes no issue)", "NEED review PR#14 (closes no issue)"]);
   assert.equal(r.out.at(-1), "NEED review PR#14 (closes no issue)", "the NEED lines come last");
   assert.equal(f.receipt().steps["fold-in"].status, "ok", "a NEED the fold-in prints is advice");
-  assert.match(readFileSync(join(f.stubs, "gh.calls"), "utf8"), /^pr list --state open --json number,closingIssuesReferences --limit \d+ GH_REPO=\[\]/);
+  assert.match(readFileSync(join(f.stubs, "gh.calls"), "utf8"), /^pr list --state open --json number,closingIssuesReferences,url --limit \d+ GH_REPO=\[\]/);
 
   // A re-run in the same run does not queue anything twice, and still prints the advice.
   const again = f.run();
@@ -655,11 +662,46 @@ test("fold-in: rows only for PRs that close an issue, a PR a carried row already
   assert.deepEqual(again.out.filter((l) => l.startsWith("NEED")).length, 2);
 });
 
+// Another repository's reference closes none of this repository's issues,
+// whatever its number.
+test("fold-in: a PR whose only closing reference is another repository's closes no issue, and a mixed one's row names only its own", () => {
+  const f = fixture();
+  writeFileSync(join(f.stubs, "gh.json"), JSON.stringify([
+    listed(10, [ref(3, "other-org/other-repo")]),
+    listed(11, [ref(4, "other-org/other-repo"), 5]),
+  ]));
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.deepEqual(f.ledgerRows(), ["#11 PR#11 · inherited (closes #5)"]);
+  assert.deepEqual(r.out.filter((l) => l.startsWith("NEED")), ["NEED review PR#10 (closes no issue)"]);
+  assert.ok(r.out.some((l) => l.includes("queued PR#11 for review (closes #5)")), r.stdout);
+});
+
+test("fold-in: a closing reference that cannot be read, or a PR url not its own, fails the step before any row is written", () => {
+  const { url: _url, repository: _repository, ...unplaced } = ref(3);
+  const { number: _number, ...unnumbered } = ref(3);
+  for (const [row, why] of [
+    [listed(11, [unplaced]), /PR #11 with a reference to #3 with neither a url nor a repository/],
+    [listed(11, [unnumbered]), /PR #11 with a reference with no issue number/],
+    [{ ...listed(11, [3]), url: prUrl(12) }, /PR #11 with url \S+\/pull\/12, not PR #11's/],
+  ]) {
+    const f = fixture();
+    // An earlier, readable PR: its row is not written either.
+    writeFileSync(join(f.stubs, "gh.json"), JSON.stringify([listed(10, [2]), row]));
+    const r = f.run();
+    assert.equal(r.status, 3, r.stdout + r.err);
+    assert.equal(f.receipt().steps["fold-in"].status, "failed");
+    assert.match(r.stdout, why);
+    assert.deepEqual(f.ledgerRows(), [], "no row is written");
+    assert.equal(f.calls("shortlist").length, 0);
+  }
+});
+
 test("fold-in: a ledger that cannot be read fails the step rather than queueing over a carried row", () => {
   const f = fixture();
   // A ledger path that is not a file: `ledger.mjs read` cannot answer for it.
   mkdirSync(join(f.repo, ".fleet", "ledger.md"), { recursive: true });
-  writeFileSync(join(f.stubs, "gh.json"), JSON.stringify([{ number: 10, closingIssuesReferences: [{ number: 3 }] }]));
+  writeFileSync(join(f.stubs, "gh.json"), JSON.stringify([listed(10, [3])]));
   const r = f.run();
   assert.equal(r.status, 3, r.stdout + r.err);
   assert.equal(f.receipt().steps["fold-in"].status, "failed");

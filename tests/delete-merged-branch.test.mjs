@@ -25,6 +25,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ref, prUrl } from "./support/queue-gh.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/delete-merged-branch.sh", import.meta.url));
 const REAP = fileURLToPath(new URL("../plugin/scripts/reap.sh", import.meta.url));
@@ -114,7 +115,9 @@ function mergedInWorktree(w, name, wtName) {
  * 1; PR_LIST_RAW_HEAD/PR_LIST_RAW_BASE replace its output verbatim at exit 0.
  * ISSUE_EDIT_FAIL is a space-separated list of issue numbers whose
  * `issue edit` exits 1; ISSUE_VIEW_FAIL names the one issue whose `issue view`
- * does.
+ * does. env()'s PR_CLOSES is the PR's closing references, whitespace-separated
+ * issue numbers in its own repository, answered in gh's own shape and piped
+ * through the real `jq` with the script's own `--jq` filter like `pr list`.
  */
 function ghStub(t, root) {
   const bin = join(root, "bin");
@@ -137,10 +140,10 @@ case "$*" in
     printf '%s\\n' "\${PR_STATE:-MERGED}"
     exit 0
     ;;
-  "pr view "*" --json closingIssuesReferences "*)
+  "pr view "*" --json closingIssuesReferences,url --jq "*)
     [ "\${CLOSES_FAIL:-0}" = 0 ] || { echo "gh: simulated closing-issues failure" >&2; exit 1; }
-    [ -z "\${PR_CLOSES:-}" ] || printf '%s\\n' "$PR_CLOSES"
-    exit 0
+    printf '{"closingIssuesReferences":%s,"url":"%s%s"}\\n' "\${PR_CLOSES_JSON:-[]}" "${prUrl("")}" "$3" | jq -r "$7"
+    exit
     ;;
   "pr view "*" --json commits "*)
     [ "\${COMMITS_FAIL:-0}" = 0 ] || { echo "gh: simulated commits failure" >&2; exit 1; }
@@ -191,7 +194,12 @@ printf '%s' "\${PR_LIST_JSON:-[]}" |
     /** Give issue `n` its labels, one per line — the state `issue view`/`issue edit` read and write. */
     setLabels: (n, ...names) => writeFileSync(join(labels, String(n)), names.map((l) => `${l}\n`).join("")),
     labelsOf: (n) => readFileSync(join(labels, String(n)), "utf8").split("\n").filter(Boolean),
-    env: (extra = {}) => ({ ...ENV, PATH: `${bin}:${ENV.PATH}`, ...extra }),
+    env: ({ PR_CLOSES, ...extra } = {}) => ({
+      ...ENV,
+      PATH: `${bin}:${ENV.PATH}`,
+      ...(PR_CLOSES === undefined ? {} : { PR_CLOSES_JSON: JSON.stringify(PR_CLOSES.split(/\s+/).filter(Boolean).map((n) => ref(Number(n)))) }),
+      ...extra,
+    }),
   };
 }
 

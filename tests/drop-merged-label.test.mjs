@@ -20,13 +20,26 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { ref, prUrl } from "./support/queue-gh.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/drop-merged-label.sh", import.meta.url));
+
+// The stub's closing-references read pipes gh's own shape through the real jq
+// with the script's own `--jq` filter, so which references it keeps is under
+// test rather than hard-coded into the fixture. Without jq every such read
+// would fail and the suite would read exit 2 everywhere — fail loudly instead.
+try {
+  execFileSync("jq", ["--version"], { stdio: "ignore" });
+} catch {
+  throw new Error("jq is required to stub `gh pr view --jq`; install it before running this suite");
+}
 
 /**
  * A `gh` stub on PATH answering the four calls this script makes, tuned per
  * test through env vars. Returns a call log and an env() builder, same shape
- * as release-ticket.test.mjs's fixture.
+ * as release-ticket.test.mjs's fixture. env()'s CLOSES is the PR's closing
+ * references as issue numbers in its own repository, whitespace-separated;
+ * CLOSES_JSON, given instead, is the references array as gh answers it.
  */
 function stub(t) {
   const root = mktemp(t);
@@ -46,13 +59,13 @@ case "$1 $2" in
         [ "\${PR_STATE_FAIL:-0}" = 0 ] || { echo "gh: simulated failure" >&2; exit 1; }
         echo "\${PR_STATE:-MERGED}"
         ;;
-      *"--json closingIssuesReferences --jq"*)
+      *"--json closingIssuesReferences,url --jq "*)
         [ "\${CLOSES_FAIL:-0}" = 0 ] || { echo "gh: simulated failure" >&2; exit 1; }
-        [ -z "\${CLOSES:-}" ] || printf '%s\\n' \${CLOSES}
+        printf '{"closingIssuesReferences":%s,"url":"%s"}\\n' "\${CLOSES_JSON:-[]}" "\${PR_URL:-${prUrl("")}\$pr}" | jq -r "$7" || exit
         ;;
       *"--json commits --jq"*)
         [ "\${COMMITS_FAIL:-0}" = 0 ] || { echo "gh: simulated failure" >&2; exit 1; }
-        # Quoted, unlike CLOSES above: commit text carries real spaces
+        # Quoted: commit text carries real spaces
         # ("Closes #1512") that unquoted word-splitting would scatter across
         # separate printf lines and break the keyword+number adjacency the
         # script's own scan depends on.
@@ -79,7 +92,12 @@ exit 0
   return {
     log,
     calls: () => readFileSync(log, "utf8").trim().split("\n").filter(Boolean),
-    env: (extra = {}) => ({ ...process.env, PATH: `${bin}:${process.env.PATH}`, ...extra }),
+    env: ({ CLOSES, ...extra } = {}) => ({
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      ...(CLOSES === undefined ? {} : { CLOSES_JSON: JSON.stringify(CLOSES.split(/\s+/).filter(Boolean).map((n) => ref(Number(n)))) }),
+      ...extra,
+    }),
   };
 }
 
@@ -171,6 +189,53 @@ test("a merged PR that closes nothing is a clean no-op", (t) => {
   const { code, json } = run(9, { apply: true, env: s.env({ CLOSES: "" }) });
   assert.equal(code, 0);
   assert.deepEqual(json, { pr: 9, merged: true, issues: [], applied: true, failed: [] });
+});
+
+// Another repository's reference closes none of this repository's issues,
+// whatever its number: its label is never looked at, let alone dropped.
+test("a merged PR whose only closing reference is another repository's touches no issue", (t) => {
+  const s = stub(t);
+  const { code, json } = run(9, { apply: true, env: s.env({ CLOSES_JSON: JSON.stringify([ref(41, "other-org/other-repo")]), LABELS_41: "in-progress" }) });
+  assert.equal(code, 0);
+  assert.deepEqual(json, { pr: 9, merged: true, issues: [], applied: true, failed: [] });
+  assert.ok(!s.calls().some((c) => c.startsWith("issue view") || c.startsWith("issue edit")), s.calls().join("\n"));
+});
+
+test("beside the PR's own reference, another repository's reaches neither the label read nor the edit", (t) => {
+  const s = stub(t);
+  const { url: _url, ...urlless } = ref(42);
+  const { code, json } = run(9, {
+    apply: true,
+    env: s.env({ CLOSES_JSON: JSON.stringify([ref(41, "other-org/other-repo"), urlless, ref(43, "other-org/own-repo")]), LABELS_41: "in-progress", LABELS_42: "in-progress", LABELS_43: "in-progress" }),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(json.issues, [{ issue: 42, hadLabel: true, removed: true }]);
+  assert.deepEqual(s.calls().filter((c) => c.startsWith("issue ")), ["issue view 42 --json labels --jq .labels[].name", "issue edit 42 --remove-label in-progress"]);
+});
+
+test("a url-less reference naming another repository reaches neither the label read nor the edit", (t) => {
+  const s = stub(t);
+  const { url: _u41, ...foreign } = ref(41, "other-org/other-repo");
+  const { url: _u43, ...sameName } = ref(43, "other-org/own-repo");
+  const { code, json } = run(9, {
+    apply: true,
+    env: s.env({ CLOSES_JSON: JSON.stringify([foreign, sameName]), LABELS_41: "in-progress", LABELS_43: "in-progress" }),
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(json, { pr: 9, merged: true, issues: [], applied: true, failed: [] });
+  assert.ok(!s.calls().some((c) => c.startsWith("issue view") || c.startsWith("issue edit")), s.calls().join("\n"));
+});
+
+test("a closing reference that cannot be read, or a PR url not its own, halts with exit 2 before any label is touched", (t) => {
+  const { url: _url, repository: _repository, ...unplaced } = ref(41);
+  const { number: _number, ...unnumbered } = ref(41);
+  for (const extra of [{ CLOSES_JSON: JSON.stringify([unplaced]) }, { CLOSES_JSON: JSON.stringify([unnumbered]) }, { CLOSES_JSON: JSON.stringify([{ ...ref(41), number: 3.5 }]) }, { CLOSES_JSON: JSON.stringify(ref(41)) }, { CLOSES: "41", PR_URL: prUrl(8) }]) {
+    const s = stub(t);
+    const { code, stderr } = run(9, { apply: true, env: s.env({ ...extra, LABELS_41: "in-progress" }) });
+    assert.equal(code, 2, stderr);
+    assert.match(stderr, /gh pr view 9 failed — cannot read which issues it closes in its own repository/);
+    assert.ok(!s.calls().some((c) => c.startsWith("issue ")), s.calls().join("\n"));
+  }
 });
 
 test("dry run reports what it would drop and touches nothing", (t) => {

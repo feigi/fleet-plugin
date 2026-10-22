@@ -1566,6 +1566,7 @@ import { checkMainCheckout, describe } from "./main-checkout.mjs";
 import { readRunReceipt, phase0Gate, IN_FLIGHT_DEFAULT } from "./phase0-receipt.mjs";
 import { judgeRecord, ProcUnreadable } from "./proc.mjs";
 import { reportFamily, readReport, reportPath, reportsDir } from "./report-files.mjs";
+import { ownClosingIssues } from "./closing-refs.mjs";
 
 const NAME = "fleet-tick";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -1681,14 +1682,18 @@ function options() {
   };
 }
 
-// The open PRs, validated. A failed read is not an empty pipeline: backlog 0 +
-// merge-queue 0 is a plausible tick, so printing it off a failed query is the
-// silent stall this script exists to end.
+// The open PRs, validated, each with its closingIssuesReferences reduced to
+// `{number}` for every issue it closes in its own repository, by
+// ownClosingIssues()'s rule: another repository's reference, whatever its
+// number, closes none of this repository's tickets. A failed read is not an
+// empty pipeline: backlog 0 + merge-queue 0 is a plausible tick, so printing
+// it off a failed query is the silent stall this script exists to end.
+const PR_ROW_SHAPE = "{number,labels,closingIssuesReferences[{number,url|repository{name,owner{login}}}],headRefOid,mergeable,body,url} rows, url ending /pull/<number>, mergeable one of MERGEABLE, CONFLICTING, UNKNOWN";
 function openPrs() {
   let out;
   try {
     out = execFileSync("gh", ["pr", "list", "--state", "open", "--limit", String(PR_LIMIT),
-      "--json", "number,labels,closingIssuesReferences,headRefOid,mergeable,body"], { encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS });
+      "--json", "number,labels,closingIssuesReferences,headRefOid,mergeable,body,url"], { encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS });
   } catch (e) {
     // Never interpolates e.stderr or e.message: execFileSync already forwarded
     // the child's stderr to ours, and Node builds e.message out of it, so
@@ -1703,22 +1708,31 @@ function openPrs() {
   }
   // closingIssuesReferences is checked, not defaulted: absent, it would read as
   // an empty list and drop every open PR from review work — and from the
-  // In-flight count. Each reference must carry an integer `number`: the count
-  // matches a PR to the ticket it closes by it, and a reference without one
-  // would leave that ticket's implementer counted twice. headRefOid likewise
-  // — absent, a `halted:past-pin` PR would read as moved forever — and
-  // mergeable: absent or outside GitHub's MergeableState enum, no PR would ever
-  // read CONFLICTING. body too: absent, no park could ever be matched or lifted.
+  // In-flight count. Each reference must be readable by ownClosingIssues():
+  // the count matches a PR to the ticket it closes by its number, and a
+  // reference that cannot be placed would leave that ticket's implementer
+  // counted twice, or count another repository's issue as this one's. url is
+  // required too: the PR's own repository, which that rule places each
+  // reference against, is its url less /pull/<number>.
+  // headRefOid likewise — absent, a `halted:past-pin` PR would read as moved
+  // forever — and mergeable: absent or outside GitHub's MergeableState enum,
+  // no PR would ever read CONFLICTING. body too: absent, no park could ever be
+  // matched or lifted.
   if (!Array.isArray(prs) || prs.some((p) => !p || typeof p.number !== "number"
-    || !Array.isArray(p.labels) || !Array.isArray(p.closingIssuesReferences)
-    || !p.closingIssuesReferences.every((r) => r && Number.isInteger(r.number))
+    || !Array.isArray(p.labels) || !Array.isArray(p.closingIssuesReferences) || typeof p.url !== "string"
     || typeof p.headRefOid !== "string" || !MERGEABLE_STATES.includes(p.mergeable) || typeof p.body !== "string")) {
-    die("gh pr list did not return {number,labels,closingIssuesReferences[{number}],headRefOid,mergeable,body} rows, mergeable one of MERGEABLE, CONFLICTING, UNKNOWN");
+    die(`gh pr list did not return ${PR_ROW_SHAPE}`);
   }
   if (prs.length === PR_LIMIT) {
     die(`exactly ${PR_LIMIT} open PRs — the list is capped and may be truncated. Raise PR_LIMIT; a backlog that silently drops PRs is not a reconcile.`);
   }
-  return prs;
+  return prs.map((p) => {
+    try {
+      return { ...p, closingIssuesReferences: ownClosingIssues(p.number, p.url, p.closingIssuesReferences).map((number) => ({ number })) };
+    } catch (e) {
+      die(`gh pr list did not return ${PR_ROW_SHAPE}: PR #${p.number} answered ${e.message}`);
+    }
+  });
 }
 
 // A child that did not exit 0, named with the last line it printed. A gh

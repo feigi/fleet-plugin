@@ -63,6 +63,7 @@ import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable 
 import { attemptLock, releaseLockFile, reapPathOf } from "./pid-lock.mjs";
 import { readCheckRecordIn, readReportIn, reportsDir, reportFamily, defaultScratch, reportPath } from "./report-files.mjs";
 import { mergeBotVerdicts } from "./report-schema.mjs";
+import { ownClosingIssues } from "./closing-refs.mjs";
 
 const NAME = "ledger";
 // The plugin's own agent definitions — the directory tier-check.mjs reads
@@ -2000,31 +2001,15 @@ function checkReaders(where) {
   };
   // PR `pr`'s prView() answer to `fields`, which name closingIssuesReferences
   // and url, as `view`, with the issue numbers, unique, of its closing
-  // references that are in the PR's own repository: its url less
-  // `/pull/<pr>`. A reference is in it when its url is that repository's
-  // `/issues/<number>`, or, carrying no url, when its repository's
-  // `<owner>/<name>` ends that repository's url. A reference with no integer
-  // number, or with neither a url nor a repository to place it by, could not
-  // look: it is never taken for the PR's own repository's.
+  // references that are in the PR's own repository, by ownClosingIssues()'s
+  // rule. A reference that rule cannot read could not look.
   const prViewClosing = (pr, fields) => {
     const view = prView(pr, fields);
-    const what = `gh pr view ${pr} --json ${fields}`;
-    const suffix = `/pull/${pr}`;
-    if (!view.url.endsWith(suffix)) die(`${where}: could not look — ${what} answered url ${view.url}, not PR #${pr}'s; nothing written`);
-    const own = view.url.slice(0, -suffix.length);
-    const str = (v) => typeof v === "string" && v !== "";
-    const numbers = new Set();
-    for (const ref of view.closingIssuesReferences) {
-      const n = ref?.number;
-      if (!Number.isInteger(n)) die(`${where}: could not look — ${what} answered a reference with no issue number; nothing written`);
-      const repo = ref.repository;
-      let isOwn;
-      if (str(ref.url)) isOwn = ref.url === `${own}/issues/${n}`;
-      else if (str(repo?.name) && str(repo?.owner?.login)) isOwn = own.endsWith(`/${repo.owner.login}/${repo.name}`);
-      else die(`${where}: could not look — ${what} answered a reference to #${n} with neither a url nor a repository; nothing written`);
-      if (isOwn) numbers.add(n);
+    try {
+      return { view, numbers: ownClosingIssues(pr, view.url, view.closingIssuesReferences) };
+    } catch (e) {
+      die(`${where}: could not look — gh pr view ${pr} --json ${fields} answered ${e.message}; nothing written`);
     }
-    return { view, numbers: [...numbers] };
   };
   // The title of issue `n`, as `gh issue view <n> --json title` answers it.
   const issueTitle = (n) => {
