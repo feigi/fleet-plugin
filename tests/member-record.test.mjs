@@ -137,6 +137,17 @@ test("readOmpMember: cost is null when any token-reporting turn carries no numer
   assert.equal(zeroTokenUnpriced.tokens_in, 2);
   assert.equal(recOmp(turn({})).cost, null, "no figure anywhere stays null");
 
+  // A figure of exactly 0 is a real figure, not a missing one.
+  assert.equal(recOmp(priced(0)).cost, 0, "a token-reporting turn priced at 0 reads 0, never null");
+  assert.equal(recOmp(priced(0), priced(0.25, t2)).cost, 0.25, "a turn priced at 0 among priced turns adds 0 and keeps the sum");
+  assert.equal(recOmp(priced(0.25), priced(0, t2)).cost, 0.25, "a priced-at-0 turn after a priced one keeps the sum too");
+
+  // A zero-token turn with no figure prices nothing and blanks nothing, wherever it falls — including first.
+  const leadingZeroToken = recOmp(turn({}), priced(0.25, t2));
+  assert.equal(leadingZeroToken.cost, 0.25, "a leading zero-token turn with no figure leaves the sum unchanged");
+  assert.equal(leadingZeroToken.turns, 2);
+  assert.equal(recOmp(turn({}), priced(0, t2)).cost, 0, "a leading zero-token turn then a priced-at-0 turn reads 0");
+
   for (const total of ["0.25", null, { usd: 0.25 }]) {
     const bad = recOmp(priced(0.25), turn({ input: 1, cost: { total } }, t2));
     assert.equal(bad.cost, null, `cost.total ${JSON.stringify(total)} is not a number, so it counts as missing`);
