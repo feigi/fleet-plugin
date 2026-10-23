@@ -1,6 +1,16 @@
 # 0016 — Per-ticket model+effort routing: go on the mechanism, hold on the table
 
 **Status:** Accepted. Ruled 2026-09-28 (map #2030, decided across #2035–#2038).
+Amended by #3678 (ruled 2026-10-23 by the maintainer, from a grilling session):
+Decision 3's "the instrument's guard (below) is what keeps a cheaper cell
+honest, not the fit" no longer holds. The fit holds the guard's quality floor
+within each stratum and on the `*` row, refusing a cell any row where its fail
+rate is 15 or more points above `slow-high`'s, and adopts a cell only at or
+under 0.75 of `slow-high`'s $ per merged PR there **and** with the bootstrap
+95% CI of the $ difference wholly below zero, its `MIN_N` counting merged PRs;
+between qualifying cells, the reliably cheaper wins, else the lower fail rate.
+The guard itself is unchanged: pooled, and its verdict still reads point
+estimates.
 
 ## Context
 
