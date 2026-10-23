@@ -3,14 +3,16 @@
 **Status:** Accepted. Ruled 2026-09-28 (map #2030, decided across #2035–#2038).
 Amended by #3678 (ruled 2026-10-23 by the maintainer, from a grilling session):
 Decision 3's "the instrument's guard (below) is what keeps a cheaper cell
-honest, not the fit" no longer holds. The fit holds the guard's quality floor
-within each stratum and on the `*` row, refusing a cell any row where its fail
-rate is 15 or more points above `slow-high`'s, and adopts a cell only at or
-under 0.75 of `slow-high`'s $ per merged PR there **and** with the bootstrap
-95% CI of the $ difference wholly below zero, its `MIN_N` counting merged PRs;
-between qualifying cells, the reliably cheaper wins, else the lower fail rate.
-The guard itself is unchanged: pooled, and its verdict still reads point
-estimates.
+honest, not the fit" is retired by the ruling, but it still describes the fit
+until #3753 implements the ruling. Once it does, the fit holds the guard's
+quality floor within each stratum and on the `*` row, refusing a cell any row
+where its fail rate is 15 or more points above `slow-high`'s, and adopts a cell
+only at or under 0.75 of `slow-high`'s $ per merged PR there **and** with the
+bootstrap 95% CI of the $ difference wholly below zero, its `MIN_N` counting
+merged PRs. Between qualifying cells, any cell another is reliably cheaper
+than drops out; among the rest the lower fail rate wins, then the lower $ per
+merged PR, then the cell name. The guard itself is unchanged: pooled, and its
+verdict still reads point estimates.
 
 ## Context
 
