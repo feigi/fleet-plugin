@@ -561,8 +561,18 @@ _Avoid_: mapping, override, translation
 An implementer routing target, `<role>-<level>` — a Declared tier scoped
 to the exploration grid and the Router below. One definition per cell
 (`plugin/agents/fleet-implementer-<cell>.agent.md`); never a vendor model
-name in any cell token, definition, or prose.
+name in any cell token, definition, or prose. Which model a Cell ran on is
+data, kept per Cell generation.
 _Avoid_: tier (bare), alt-tier, model
+
+**Cell generation**:
+One Cell on one model: the Pulls whose first Admissible row's Resolved tier
+names that model. The model is fixed at dispatch, so a fallback later in the
+run does not move it. A Cell is judged on its newest generation; an older one
+is reported beside it and never pooled with it, because each model generation
+prices and fails differently. A role that returns to an earlier model rejoins
+that generation.
+_Avoid_: model (bare), cell version, tier generation
 
 **Router**:
 The checked-in table (`router-table.json`) plus the script that reads and
