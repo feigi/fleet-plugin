@@ -28,7 +28,7 @@ function world() {
 const member = (o) => ({
   session: SESSION, run_date: DAY, role: "implementer", member: o.agent, model: "claude-opus-5",
   effort: "high", ticket: "", pr: "", tokensCacheCreate: 0, tokensOut: 0, wallS: 0, turns: 1,
-  harness: "omp", subagentType: "", tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: 0, cost: 0, ...o,
+  harness: "omp", subagentType: "", tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: 0, cost: 0, dispatchModel: o.model ?? "claude-opus-5", ...o,
 });
 const pull = (o) => ({
   run_date: DAY, session: SESSION, policy_cell: "slow-high", exploration_draw: "", sizing_src: "rule",
@@ -104,17 +104,17 @@ test("--guard: a cell exactly 15 points worse than the baseline trips, exits 3 a
   assert.equal(r.status, 3, r.stderr);
   assert.deepEqual(r.guard.tripped, ["task-high"]);
   assert.equal(r.guard.verdict, "tripped");
-  assert.deepEqual(r.guard.baseline, { cell: "slow-high", n: 20, mean_usd: 10, fail_rate: 0.3 });
+  assert.deepEqual(r.guard.baseline, { cell: "slow-high", generation: "claude-opus-5", n: 20, mean_usd: 10, fail_rate: 0.3 });
   assert.equal(r.guard.min_n, MIN_N);
   // The file is the router row's input: fleet-tick reads it as a verdict.
   const read = readCostGuard(r.guardPath);
   assert.equal(read.status, "ok");
   assert.deepEqual(routerRows({ router: read }).map((x) => [x.action, x.detail]),
     [["DEFAULT-ONLY", `cost guard: task-high $5.00 vs $10.00, fail 45% vs 30%, n=20/20; guard computed ${r.guard.computed_at}`]]);
-  assert.deepEqual(r.guard.cells.find((c) => c.cell === "task-high"), { cell: "task-high", n: 20, mean_usd: 5, fail_rate: 0.45 });
+  assert.deepEqual(r.guard.cells.find((c) => c.cell === "task-high"), { cell: "task-high", generation: "claude-opus-5", n: 20, mean_usd: 5, fail_rate: 0.45 });
   assert.equal(r.guard.window_start, WINDOW_START);
   assert.ok(!Number.isNaN(Date.parse(r.guard.computed_at)));
-  assert.match(r.stdout, /^task-high\t20\t20\t20\t9\t0\.45\t5\t5\t0\t[^\t]*\t0\t0\t0\ttripped$/m);
+  assert.match(r.stdout, /^task-high\tclaude-opus-5\t20\t20\t20\t9\t0\.45\t5\t5\t0\t[^\t]*\t0\t0\t0\ttripped$/m);
   assert.match(r.stdout, /^smol-high\t.*\tok$/m);
 });
 
@@ -317,7 +317,7 @@ test("without --guard the report prints and exits 0, writing nothing", () => {
   // One read, every state, scoped to PRs created since the window opened.
   assert.deepEqual(r.ghArgs, ["pr", "list", "--state", "all", "--search", `created:>=${WINDOW_START}`,
     "--limit", "1000", "--json", "number,state,mergedAt"]);
-  assert.match(r.stdout, /^cell\tn_pulls\tn_merged\tn_claims\tn_failed\tfail_rate\tmean_usd\tmedian_usd\trouter_usd\tusd_diff_ci95\texcluded\tleft_out\tunpriced\tguard$/m);
+  assert.match(r.stdout, /^cell\tgeneration\tn_pulls\tn_merged\tn_claims\tn_failed\tfail_rate\tmean_usd\tmedian_usd\trouter_usd\tusd_diff_ci95\texcluded\tleft_out\tunpriced\tguard$/m);
   const json = JSON.parse(runCli(w, ["--json"]).stdout);
   assert.deepEqual(json.tripped, ["task-high"]);
 });
@@ -402,7 +402,7 @@ test("closed and unruled spend lands on its cell's mean, an open PR is pending, 
   assert.deepEqual(rep.pending, ["103", "105"]);
   const smol = rep.cells.find((c) => c.cell === "smol-high");
   assert.deepEqual({ n_pulls: smol.n_pulls, excluded: smol.excluded }, { n_pulls: 0, excluded: 1 });
-  assert.match(formatReport(rep), /^smol-high\t0\t0\t0\t0\t\t\t\t0\t\t1\t0\t0\tn<20$/m);
+  assert.match(formatReport(rep), /^smol-high\t\t0\t0\t0\t0\t\t\t\t0\t\t1\t0\t0\tn<20$/m, "a cell with only excluded Pulls has no generation");
   assert.equal("mismatch" in rep, false);
 });
 
@@ -478,6 +478,18 @@ test("the table labels a non-baseline cell under MIN_N as n<MIN_N rather than ok
   addCell(w, "slow-high", MIN_N, 0, 10);
   addCell(w, "smol-high", MIN_N - 1, 0, 5);
   assert.match(formatReport(computeReport(parsed(w))), new RegExp(`^smol-high\\t.*\\tn<${MIN_N}$`, "m"));
+});
+
+test("an older generation prints on its own line after its cell's newest, with no verdict, and never trips the cell", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 0, 10);
+  // Every one of model-a's PRs fails the floor and costs twice the baseline's.
+  addCell(w, "smol-high", MIN_N, MIN_N, 20);
+  for (const m of w.members.slice(-MIN_N)) m.dispatchModel = "model-a";
+  addCell(w, "smol-high", 2, 0, 5);
+  const rep = computeReport(parsed(w));
+  assert.deepEqual([rep.tripped, rep.verdict], [[], "ok"]);
+  assert.match(formatReport(rep), new RegExp(`^smol-high\\tclaude-opus-5\\t2\\t2\\t.*\\tn<${MIN_N}\\nsmol-high\\tmodel-a\\t${MIN_N}\\t${MIN_N}\\t.*\\t\\t\\t0\\t0\\tolder$`, "m"));
 });
 
 test("the cross-check reports recorded cost against pricing.json as a ratio, never a $", () => {

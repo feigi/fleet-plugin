@@ -495,7 +495,7 @@ test("the header's `run_date` source claims still hold against the readout, the 
   const session = "s-tier-hdr";
   const pull = (agent, chosen_cell) => ({ run_date: "2026-01-01", session, agent, chosen_cell });
   const member = (agent, cell, model) => ({
-    session, agent, run_date: "2026-02-02", model, effort: "high", subagentType: `fleet-implementer-${cell}`,
+    session, agent, run_date: "2026-02-02", model, dispatchModel: model, effort: "high", subagentType: `fleet-implementer-${cell}`,
   });
   const { cells: [task] } = readout({
     features: [pull("impl-1", "task-high"), pull("impl-2", "slow-high")],

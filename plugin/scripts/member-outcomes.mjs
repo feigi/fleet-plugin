@@ -13,6 +13,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 
 import { readOmpSession, normalizeModel, parseMemberName, isOmpSessionDirName } from "./member-record.mjs";
+import { stripLevel } from "./tier-roles.mjs";
 import { reportFamily, reportStatus, defaultScratch } from "./report-files.mjs";
 import { FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { spawnSync } from "node:child_process";
@@ -91,7 +92,18 @@ export function rowsForSession(sessionDir, stats = {}, { verifyMain = verifyMain
     tokensIn: r.tokens_in, tokensCacheRead: r.tokens_cache_read,
     tokensCacheWrite1h: r.tokens_cache_write_1h ?? "", cost: r.cost == null ? "" : Number(r.cost.toFixed(6)),
     ending: endings[i],
+    dispatchModel: dispatchModel(r.resolvedModelIdentity),
   }));
+}
+
+// The `dispatch_model` column: the model fixed at dispatch, `session_init`'s
+// own model (the record's `resolvedModelIdentity`), with its provider prefix
+// and `:<level>` suffix stripped. `model` is the member's last turn, which a
+// provider fallback moves; this one does not move. Blank when the transcript
+// carries no `session_init` model: blank means unknown. Operator config is
+// never read for it.
+export function dispatchModel(identity) {
+  return stripLevel(String(identity ?? "").trim()).split("/").at(-1);
 }
 
 // A column is APPENDED, never inserted, as a rule: a read-out that indexes by
@@ -108,7 +120,7 @@ export const COLUMNS = [
   "session", "run_date", "role", "member", "model", "effort", "ticket", "pr",
   "tokens_cache_create", "tokens_out", "wall_s", "turns", "agent", "harness",
   "subagent_type", "report", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost",
-  "ending",
+  "ending", "dispatch_model",
 ];
 
 // `report`: what reportStatus() says of the row's member under `scratch` — a
@@ -221,7 +233,7 @@ function verifyMainWithGit(sha) {
 const FIELD = {
   tokens_cache_create: "tokensCacheCreate", tokens_out: "tokensOut", wall_s: "wallS",
   subagent_type: "subagentType", tokens_in: "tokensIn", tokens_cache_read: "tokensCacheRead",
-  tokens_cache_write_1h: "tokensCacheWrite1h",
+  tokens_cache_write_1h: "tokensCacheWrite1h", dispatch_model: "dispatchModel",
 };
 const field = (c) => FIELD[c] ?? c;
 // Keyed on the transcript's path-relative stem, not the member name: `member`

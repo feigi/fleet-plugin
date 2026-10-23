@@ -14,7 +14,7 @@
 // ADMISSIBLE ROW. A Pull counts only when its member row exists, was
 // dispatched as the drawn cell's own definition (`subagent_type` =
 // `fleet-implementer-<chosen_cell>`), ran at the cell's level (`effort` = the
-// cell's `<level>`) and has a resolved `model` on record. So a generic `task`
+// cell's `<level>`) and has its `dispatch_model` on record. So a generic `task`
 // dispatch, a clamped effort and every pre-cutover `fleet-implementer` /
 // `fleet-implementer-alt` row are never admissible. Whether the resolved model
 // was the role's target at dispatch is recorded in neither file; that half of
@@ -67,8 +67,12 @@
 // could move the verdict to another cell or uncount it. So is an admissible
 // Pull at X whose `run_date` is not `YYYY-MM-DD`: it cannot be placed against
 // the day X's definition was added, and dropping it would uncount its ruling.
-// X is to be withdrawn once it has at least STOP.verdicts verdicts and
-// floor failures ÷ verdicts is at least STOP.failRate.
+// X is to be withdrawn once its newest generation has at least STOP.verdicts
+// verdicts and floor failures ÷ verdicts is at least STOP.failRate. A ruling
+// counts for its carrier's generation, the carrier's `dispatch_model`; a
+// cell's newest generation is that of its latest admissible Pull, by session
+// id, then file order. An older generation's verdicts are returned beside the
+// newest's and never withdraw the cell.
 //
 // Exit 0 whatever the counts; 2 on a usage error or an unreadable or
 // malformed input, with nothing on stdout.
@@ -78,7 +82,7 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { POLICY_CELL } from "./ledger-grammar.mjs";
 import { formatTsv as formatMemberTsv, parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { admissibleRow, parseFeatures } from "./pull-attribution.mjs";
+import { admissibleRow, generations, parseFeatures } from "./pull-attribution.mjs";
 import { DATE, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
 const NAME = "cell-readout";
@@ -169,7 +173,7 @@ export function readout({ features, members }) {
 /**
  * One entry per cell named in `added` (cell → the `YYYY-MM-DD` its definition
  * was most recently added) other than the policy cell, sorted by cell:
- * `{ cell, since, verdicts, failures, stop }`. `verdicts` is
+ * `{ cell, since, generation, verdicts, failures, stop, older }`. `verdicts` is
  * `[{ ticket, pr, run_date, closed_own_ticket, minted_false_claim, failed }]`
  * sorted by ticket, `run_date` the ruling's; `stop` is whether the stopping
  * rule withdraws the cell. `verdicts` are parsed tier-outcomes.tsv rows.
@@ -178,6 +182,12 @@ export function readout({ features, members }) {
  * before the ruling, and only when that Pull is
  * countable: admissible, at a cell named in `added` other than the policy
  * cell, and dated on or after the day that cell's definition was added.
+ * A ruling is charged to its carrier's generation too, the carrier's
+ * `dispatch_model`, and `generation`, `verdicts`, `failures` and `stop` are the
+ * cell's newest generation's alone (pull-attribution.mjs's `generations`, over
+ * the cell's admissible Pulls; null when it has none). `older` holds each other
+ * generation's `{ generation, verdicts, failures }`, newest first, and never
+ * a stop.
  * Throws on a non-blank ruling row of a ticket with a countable Pull whose
  * `closed_own_ticket` or `minted_false_claim` is not `yes` or `no` or whose
  * `run_date` is not `YYYY-MM-DD`,
@@ -189,17 +199,20 @@ export function readout({ features, members }) {
 export function stoppingRule({ features, members, verdicts, added }) {
   const byKey = indexMembers(members);
   const rulings = rulingsByTicket(verdicts);
-  const charged = new Map(Object.keys(added).filter((c) => c !== POLICY_CELL).map((c) => [c, []]));
+  const charged = new Map(Object.keys(added).filter((c) => c !== POLICY_CELL).map((c) => [c, new Map()]));
   const dated = (p) => {
     if (!DATE.test(p.run_date)) throw new Error(`ticket #${p.ticket} (Pull ${p.agent} at ${p.chosen_cell}): run_date is '${p.run_date}', expected YYYY-MM-DD`);
     return p.run_date;
   };
-  const countable = new Set();
+  const countable = new Map(); // Pull -> its generation
+  const admitted = []; // every admissible Pull at a judged cell, as generations() reads one
   const pullsByTicket = new Map();
   for (const p of features) {
     (pullsByTicket.get(p.ticket) ?? pullsByTicket.set(p.ticket, []).get(p.ticket)).push(p);
-    if (!charged.has(p.chosen_cell) || !admissibleMember(p, byKey)) continue;
-    if (dated(p) >= added[p.chosen_cell]) countable.add(p);
+    const m = charged.has(p.chosen_cell) ? admissibleMember(p, byKey) : null;
+    if (!m) continue;
+    admitted.push({ cell: p.chosen_cell, generation: m.dispatchModel, pull: p });
+    if (dated(p) >= added[p.chosen_cell]) countable.set(p, m.dispatchModel);
   }
   for (const [ticket, pulls] of pullsByTicket) {
     if (!pulls.some((p) => countable.has(p))) continue;
@@ -210,17 +223,25 @@ export function stoppingRule({ features, members, verdicts, added }) {
     let carrier = null;
     for (const p of pulls) if (dated(p) <= v.run_date) carrier = p;
     if (!carrier || !countable.has(carrier)) continue;
-    charged.get(carrier.chosen_cell).push({
+    const byGeneration = charged.get(carrier.chosen_cell);
+    const g = countable.get(carrier);
+    (byGeneration.get(g) ?? byGeneration.set(g, []).get(g)).push({
       ticket: carrier.ticket, pr: v.pr, run_date: v.run_date,
       closed_own_ticket: v.closed_own_ticket, minted_false_claim: v.minted_false_claim,
       failed: v.minted_false_claim === "yes" || v.closed_own_ticket === "no",
     });
   }
-  return [...charged].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([cell, list]) => {
+  const order = generations(admitted);
+  const tallied = (list = []) => {
     list.sort((a, b) => Number(a.ticket) - Number(b.ticket));
-    const failures = list.filter((v) => v.failed).length;
+    return { verdicts: list, failures: list.filter((v) => v.failed).length };
+  };
+  return [...charged].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([cell, byGeneration]) => {
+    const [generation = null, ...rest] = order.get(cell) ?? [];
+    const { verdicts: list, failures } = tallied(byGeneration.get(generation));
     const stop = list.length >= STOP.verdicts && failures / list.length >= STOP.failRate;
-    return { cell, since: added[cell], verdicts: list, failures, stop };
+    const older = rest.filter((g) => byGeneration.has(g)).map((g) => ({ generation: g, ...tallied(byGeneration.get(g)) }));
+    return { cell, since: added[cell], generation, verdicts: list, failures, stop, older };
   });
 }
 

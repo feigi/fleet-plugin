@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync, readFileSync, utimesSync, existsSync, rmSync 
 import { tempDir } from "./support/temp-dir.mjs";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
-import { normalizeModel, parseMemberName, rowsForSession, COLUMNS, mergeRows, formatTsv, parseTsv } from "../plugin/scripts/member-outcomes.mjs";
+import { normalizeModel, parseMemberName, rowsForSession, COLUMNS, mergeRows, formatTsv, parseTsv, dispatchModel } from "../plugin/scripts/member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, TIER_SWITCH_DATE } from "../plugin/scripts/tier-outcomes.mjs";
 
 const TIER_CLI = new URL("../plugin/scripts/tier-outcomes.mjs", import.meta.url).pathname;
@@ -301,6 +301,34 @@ test("`subagent_type` is what the DISPATCH named, and blank when it named nothin
   );
 });
 
+test("`dispatch_model` is session_init's model with its provider and level stripped, and blank when the transcript carries none", () => {
+  // The model fixed at dispatch, not the last turn's: impl-583 fell back to
+  // another provider mid-run, so its `model` reads the fallback while its
+  // dispatch model stays the one it was dispatched on.
+  const init = (o) => evt({ type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-08T15:11:49.495Z", task: "t", agent: "fleet-implementer-smol-high", ...o });
+  const dir = fixture([
+    ["impl-580", [sessionEvt("/x"), thinkingEvt("high"), init({ resolvedModel: "anthropic/claude-haiku-5-5:high" }), assistantEvt("claude-haiku-5-5")]],
+    ["impl-581", [sessionEvt("/x"), thinkingEvt("high"), init({ resolvedModelIdentity: "anthropic/claude-haiku-4-5" }), assistantEvt("claude-haiku-4-5")]],
+    ["impl-582", [sessionEvt("/x"), thinkingEvt("high"), init({}), assistantEvt("claude-opus-5")]],
+    ["impl-583", [sessionEvt("/x"), thinkingEvt("high"), init({ resolvedModel: "anthropic/claude-haiku-5-5:high" }), assistantEvt("ollama")]],
+    ["impl-584", [sessionEvt("/x"), thinkingEvt("high"), assistantEvt("claude-opus-5")]],
+  ]);
+  assert.deepEqual(
+    Object.fromEntries(rowsForSession(dir).map((r) => [r.member, [r.dispatchModel, r.model]])),
+    {
+      "impl-580": ["claude-haiku-5-5", "claude-haiku-5-5"],
+      "impl-581": ["claude-haiku-4-5", "claude-haiku-4-5"],
+      "impl-582": ["", "claude-opus-5"],
+      "impl-583": ["claude-haiku-5-5", "ollama"],
+      "impl-584": ["", "claude-opus-5"],
+    },
+  );
+  assert.equal(dispatchModel("anthropic/claude-opus-5-5:xhigh"), "claude-opus-5-5");
+  assert.equal(dispatchModel("claude-opus-5-5"), "claude-opus-5-5", "a bare model has no prefix to strip");
+  assert.equal(dispatchModel(null), "");
+  assert.equal(dispatchModel(""), "");
+});
+
 test("a row whose cell count is wrong is REFUSED, never padded", () => {
   // Padding put "" in the trailing columns — `agent` was the LAST one when
   // this was written, a key rowsForSession can never produce, so mergeRows
@@ -318,28 +346,30 @@ test("a row whose cell count is wrong is REFUSED, never padded", () => {
   //
   // Mutation this must survive: restoring `cells[i] ?? ""`.
   const short = ["s1", "2026-08-25", "memory"].join("\t");
-  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 21/);
+  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 22/);
   assert.throws(() => parseTsv("<<<<<<< HEAD"), /malformed row/);
   const full = formatTsv([row()]).replace(/\n$/, "").split("\t");
-  assert.equal(full.length, 21);
+  assert.equal(full.length, 22);
   // The 19-field spelling is the schema from before `report`: refused rather
   // than padded with a blank, which would read as "no scratch root to look
   // in". Re-scraping is the migration. The 15- and 14-field ones before it are
   // refused the same way.
-  // The 20-field spelling is the schema from before `ending`: refused rather
-  // than padded, for the same reason. The 19-, 15- and 14-field ones before it
-  // are refused the same way.
-  assert.throws(() => parseTsv(full.slice(0, 20).join("\t")), /20 fields, expected 21/);
-  assert.throws(() => parseTsv(full.slice(0, 19).join("\t")), /19 fields, expected 21/);
-  assert.throws(() => parseTsv(full.slice(0, 15).join("\t")), /15 fields, expected 21/);
-  assert.throws(() => parseTsv(full.slice(0, 14).join("\t")), /14 fields, expected 21/);
+  // The 20-field spelling is the schema from before `ending`, and the
+  // 21-field one the schema from before `dispatch_model`: each refused rather
+  // than padded, for the same reason. The 19-, 15- and 14-field ones before
+  // them are refused the same way.
+  assert.throws(() => parseTsv(full.slice(0, 21).join("\t")), /21 fields, expected 22/);
+  assert.throws(() => parseTsv(full.slice(0, 20).join("\t")), /20 fields, expected 22/);
+  assert.throws(() => parseTsv(full.slice(0, 19).join("\t")), /19 fields, expected 22/);
+  assert.throws(() => parseTsv(full.slice(0, 15).join("\t")), /15 fields, expected 22/);
+  assert.throws(() => parseTsv(full.slice(0, 14).join("\t")), /14 fields, expected 22/);
   // A long row is refused too — that is the schema-drift direction.
-  assert.throws(() => parseTsv(full.join("\t") + "\textra"), /22 fields/);
+  assert.throws(() => parseTsv(full.join("\t") + "\textra"), /23 fields/);
 });
 
 test("`report` follows subagent_type and the four priced columns follow it, and a scraped member fills them", () => {
   assert.deepEqual(COLUMNS.slice(COLUMNS.indexOf("subagent_type")),
-    ["subagent_type", "report", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost", "ending"]);
+    ["subagent_type", "report", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost", "ending", "dispatch_model"]);
   const [parsed] = parseTsv(formatTsv([row({ tokensIn: 12, tokensCacheRead: 3400, tokensCacheWrite1h: 900, cost: 0.123457 })]));
   assert.deepEqual([parsed.tokensIn, parsed.tokensCacheRead, parsed.tokensCacheWrite1h, parsed.cost], ["12", "3400", "900", "0.123457"]);
 });

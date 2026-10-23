@@ -52,7 +52,7 @@ const pull = (o) => ({
 const member = (o) => ({
   session: SESSION, run_date: DAY, role: "implementer", member: o.agent, model: "claude-opus-5", effort: "high",
   ticket: "", pr: "", tokensCacheCreate: 0, tokensOut: 0, wallS: 0, turns: 1, harness: "omp", subagentType: "",
-  tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: 0, cost: 0, ...o,
+  tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: 0, cost: 0, dispatchModel: o.model ?? "claude-opus-5", ...o,
 });
 const tier = (o) => ({
   run_date: DAY, class: "", tier: "", closed_own_ticket: "yes", minted_false_claim: "no", note: "n",
@@ -250,6 +250,19 @@ test("stopping rule --dry-run: a cell at ten verdicts and eight floor failures w
   assert.equal(lists.length, 1, "only the stopping cell is looked up");
   assert.deepEqual(lists[0].slice(2), ["--state", "open", "--search", `"Withdraw exploration cell smol-high:" in:title`, "--json", "number,title", "--limit", "100"]);
   assert.deepEqual(writes(f), [], "a dry run writes nothing");
+});
+
+test("stopping rule: an older generation's tally is printed and never files, and the cell's newest generation is judged alone", () => {
+  const rows = floorFailing();
+  for (const m of rows.members) if (m.subagentType === "fleet-implementer-smol-high") m.dispatchModel = "model-a";
+  // One clean Pull after them on the cell's role model: its newest generation.
+  ruled(rows, { ticket: 300, cell: "smol-high" });
+  const f = fixture({ rows });
+  const r = f.run(["--dry-run"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /stopping rule: smol-high older generation model-a 8\/10 floor failures since 2026-09-01 — not judged$/m);
+  assert.match(r.stdout, /stopping rule: smol-high 0\/1 floor failures since 2026-09-01 — continues$/m);
+  assert.deepEqual(calls(f, "issue list"), [], "no withdrawal issue is looked up for the cell");
 });
 
 test("stopping rule: an open withdrawal issue with the same title is left as it is, even beside one of the cell's older tallies", () => {

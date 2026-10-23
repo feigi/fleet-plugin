@@ -47,7 +47,7 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { CELL, POLICY_CELL, drawCell, parseMember } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { AttributionError, FEATURE_COLUMNS, attribute, parseFeatures, tally } from "./pull-attribution.mjs";
+import { AttributionError, FEATURE_COLUMNS, attribute, generations, parseFeatures, tally } from "./pull-attribution.mjs";
 import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
 
 const NAME = "ticket-router";
@@ -333,36 +333,47 @@ const round4 = (x) => Math.round(x * 1e4) / 1e4;
  * the A/B's test set, not the fit's. The fit sees no PR state, so a Pull with
  * a Ruling is merged. A fit reads everything in the commit it is given: no row
  * is cut by date, because `--check` re-reads that same commit rather than
- * re-cutting the working tree's files.
+ * re-cutting the working tree's files. `order` ranks each cell's generations
+ * over every Pull in the window, the restriction aside, so the fit names the
+ * same newest generation the guard does.
  */
 function fitPulls({ features, members, verdicts, window }) {
-  return attribute({ features, members, tiers: verdicts, windowStart: window || null, stratum: ruleStratum })
-    .filter((u) => u.pull.exploration_draw !== "" || u.pull.sizing_src === "rule");
+  const all = attribute({ features, members, tiers: verdicts, windowStart: window || null, stratum: ruleStratum });
+  return { units: all.filter((u) => u.pull.exploration_draw !== "" || u.pull.sizing_src === "rule"), order: generations(all) };
 }
 
-// Per stratum and `*`, per cell: `n` counted Pulls, `merged`, $ per merged PR,
-// false claims over claims, fix rounds per merged PR, and the cell's excluded,
-// left-out and unpriced Pull counts.
-function estimate(units) {
+// Per stratum and `*`, per cell, its newest generation's figures: `n` counted
+// Pulls, `merged`, $ per merged PR, false claims over claims, fix rounds per
+// merged PR, and its left-out and unpriced Pull counts. Beside them the cell's
+// excluded Pull count, `generation` naming the newest generation's model, and
+// `older`, each older generation's model to its figures, newest first.
+function estimate(units, order) {
   const out = {};
   for (const s of units.length ? [...new Set([...units.map((u) => u.stratum), "*"])].sort() : []) {
     const mine = s === "*" ? units : units.filter((u) => u.stratum === s);
     out[s] = {};
-    for (const t of tally(mine)) {
-      const fix = mine.filter((u) => u.cell === t.cell && u.status === "counted" && u.merged)
-        .reduce((n, u) => n + u.rows.filter((r) => parseMember(r.member)?.family === "fix-pr").length, 0);
+    for (const t of tally(mine, order)) {
+      const figures = (g) => {
+        const fix = mine.filter((u) => u.cell === t.cell && u.generation === g.generation && u.status === "counted" && u.merged)
+          .reduce((n, u) => n + u.rows.filter((r) => parseMember(r.member)?.family === "fix-pr").length, 0);
+        return {
+          n: g.n,
+          merged: g.merged,
+          claims: g.claims,
+          failed: g.failed,
+          usd_per_merged: g.merged ? round4(g.spend / g.merged) : null,
+          fail_rate: g.claims ? round4(g.failed / g.claims) : null,
+          fix_rounds: g.merged ? round4(fix / g.merged) : null,
+          review_findings: null,
+          left_out: g.left_out,
+          unpriced: g.unpriced,
+        };
+      };
       out[s][t.cell] = {
-        n: t.n,
-        merged: t.merged,
-        claims: t.claims,
-        failed: t.failed,
-        usd_per_merged: t.merged ? round4(t.spend / t.merged) : null,
-        fail_rate: t.claims ? round4(t.failed / t.claims) : null,
-        fix_rounds: t.merged ? round4(fix / t.merged) : null,
-        review_findings: null,
+        generation: t.generation,
+        ...figures(t),
         excluded: t.excluded,
-        left_out: t.left_out,
-        unpriced: t.unpriced,
+        older: Object.fromEntries(t.older.map((o) => [o.generation, figures(o)])),
       };
     }
   }
@@ -371,8 +382,9 @@ function estimate(units) {
 
 // Among cells with n >= MIN_N in a stratum and not tripped, the one with the
 // lowest $ per merged PR — adopted only at or under ADOPT_RATIO of the
-// default cell's. The quality floor is the guard's to enforce, never the
-// fit's. null when the stratum cannot decide (no default cell at n, or no
+// default cell's. Every figure read is the cell's newest generation's, the
+// default cell's included. The quality floor is the guard's to enforce, never
+// the fit's. null when the stratum cannot decide (no default cell at n, or no
 // candidate at n).
 function adopt(est, cells, tripped) {
   const base = est?.[POLICY_CELL];
@@ -393,8 +405,8 @@ function adopt(est, cells, tripped) {
  */
 export function fitTable({ prior, features, members, verdicts, guard, commit = null }) {
   const window = guard.window_start ?? prior.window_start ?? null;
-  const units = fitPulls({ features, members, verdicts, window });
-  const estimates = estimate(units);
+  const { units, order } = fitPulls({ features, members, verdicts, window });
+  const estimates = estimate(units, order);
   const tripped = new Set(guard.tripped);
 
   let { stage, cells } = prior;
@@ -437,10 +449,16 @@ export function mergedSince({ table, features, members, verdicts, fitted }) {
     .filter((u) => u.status === "counted" && u.merged && !read.has(`${u.pull.session}\0${u.pull.agent}`)).length;
 }
 
-// Each cell's Pull counts over every stratum, as the fit prints them.
+// Each cell's Pull counts over every stratum, as the fit prints them: its
+// newest generation, then each older one.
 function cellCounts(estimates) {
+  const usd = (x) => (x === null ? "-" : x.toFixed(2));
+  const counts = (e) => `n=${e.n} merged=${e.merged} failed=${e.failed} usd_per_merged=${usd(e.usd_per_merged)}`;
   return Object.entries(estimates["*"] ?? {})
-    .map(([c, e]) => `${c} n=${e.n} merged=${e.merged} failed=${e.failed} excluded=${e.excluded} left_out=${e.left_out} unpriced=${e.unpriced}`)
+    .map(([c, e]) => [
+      `${c} ${e.generation ?? "-"} ${counts(e)} excluded=${e.excluded} left_out=${e.left_out} unpriced=${e.unpriced}`,
+      ...Object.entries(e.older).map(([g, o]) => `${c} ${g} (older) ${counts(o)}`),
+    ].join(", "))
     .join(", ") || "none";
 }
 

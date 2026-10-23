@@ -648,7 +648,7 @@ const tsv = (cols, rows, header = false) => (header ? `${cols.join("\t")}\n` : "
 // The Admissible implementer row of features row `f`, costing $1.
 const implementer = (f, over = {}) => ({
   session: f.session, run_date: f.run_date, agent: f.agent, member: f.agent, ticket: f.ticket, role: "implementer",
-  subagent_type: `fleet-implementer-${f.chosen_cell}`, effort: f.chosen_cell.split("-")[1], model: "m", cost: "1", ending: "hollow", ...over,
+  subagent_type: `fleet-implementer-${f.chosen_cell}`, effort: f.chosen_cell.split("-")[1], model: "m", dispatch_model: "m", cost: "1", ending: "hollow", ...over,
 });
 // `members`, plus an implementer for every features row none of them is: one that opened the PR a verdict names for its ticket.
 const withImplementers = (features, verdicts, members) => [
@@ -709,7 +709,7 @@ test("fit: a day-one three-TSV fixture writes an estimates-only table, and --che
   const r = fitCli(p);
   assert.equal(r.status, 0, r.stderr);
   const sha = p.git("rev-parse", "HEAD");
-  assert.match(r.stdout, new RegExp(`fitted 3 Pulls at ${sha.slice(0, 8)};.*; cells slow-high n=1 merged=1 failed=1 excluded=0 left_out=0 unpriced=0, `));
+  assert.match(r.stdout, new RegExp(`fitted 3 Pulls at ${sha.slice(0, 8)};.*; cells slow-high m n=1 merged=1 failed=1 usd_per_merged=1.00 excluded=0 left_out=0 unpriced=0, `));
   const table = JSON.parse(readFileSync(p.table, "utf8"));
   assert.deepEqual(table.rows, { "*": "slow-high" }, "no cell has n>=20 yet, so no row is adopted");
   assert.equal(table.burn_in, true);
@@ -718,7 +718,7 @@ test("fit: a day-one three-TSV fixture writes an estimates-only table, and --che
   assert.equal(table.fitted_commit, sha, "the table records the commit the fit read, in full");
   assert.equal("fitted_through" in table, false, "no date field stays beside the commit");
   assert.equal(table.window_start, "2026-09-01", "the window comes from the guard; the fit never moves it");
-  const est = (o) => ({ claims: o.merged, failed: 0, fix_rounds: 0, review_findings: null, excluded: 0, left_out: 0, unpriced: 0, ...o });
+  const est = (o) => ({ generation: "m", claims: o.merged, failed: 0, fix_rounds: 0, review_findings: null, excluded: 0, left_out: 0, unpriced: 0, older: {}, ...o });
   assert.deepEqual(table.estimates["*"]["task-high"], est({ n: 1, merged: 1, usd_per_merged: 3, fail_rate: 0, fix_rounds: 1 }));
   assert.deepEqual(table.estimates.heavy["slow-high"], est({ n: 1, merged: 1, failed: 1, usd_per_merged: 1, fail_rate: 1 }));
   assert.deepEqual(table.estimates.light["smol-high"], est({ n: 1, merged: 0, usd_per_merged: null, fail_rate: null, fix_rounds: null }));

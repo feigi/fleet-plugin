@@ -14,10 +14,11 @@ import { readout, stoppingRule, GATE, STOP } from "../plugin/scripts/cell-readou
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/cell-readout.mjs", import.meta.url));
 
+// `dispatchModel` defaults to the row's `model`: a member that ran on the model it was dispatched on.
 const member = (o) => ({
   run_date: "2026-10-01", role: "implementer", member: o.agent, model: "claude-opus-5", effort: "high",
   ticket: "", pr: "", tokensCacheCreate: 0, tokensOut: 0, wallS: 0, turns: 1, harness: "omp", report: "-",
-  tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: 0, cost: 0, ending: "hollow", ...o,
+  tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: 0, cost: 0, ending: "hollow", dispatchModel: o.model ?? "claude-opus-5", ...o,
 });
 const pull = (o) => ({
   run_date: "2026-10-01", policy_cell: "slow-high", exploration_draw: "", sizing_src: "rule", sizing_pre: "",
@@ -147,7 +148,7 @@ test("only admissible rows count: dispatched as the drawn cell's definition, at 
   // the slow-high side has no member row at all: no join, inadmissible
   addRow(w, { session: s(4), date: "2026-10-01", cell: "task-high" });
   addRow(w, { session: s(4), date: "2026-10-01", cell: "slow-high", member: false });
-  // blank model: the resolved model is unknown, so nothing can differ from it
+  // blank model on record, at dispatch and on its last turn: unknown, so nothing can differ from it
   addRow(w, { session: s(5), date: "2026-10-01", cell: "task-high", model: "" });
   addRow(w, { session: s(5), date: "2026-10-01", cell: "slow-high" });
   // the control: admissible on both sides
@@ -789,6 +790,27 @@ test("stopping rule: a member-outcomes session+agent repeated with different fie
     assert.throws(() => judged({ ...w, members }, added, "smol-high"),
       (e) => e.message.includes(`session ${first.session}`) && e.message.includes(`agent ${first.agent}`));
   }
+});
+
+test("stopping rule: a cell is judged on its newest generation's rulings alone, and an older generation's never withdraw it", () => {
+  const added = { "smol-high": "2026-09-01" };
+  const OLD = "2026-10-02T00-00-00-000Z_old", NEW = "2026-10-04T00-00-00-000Z_new";
+  // Ten rulings on model-a, every one failing the floor, then one clean ruling on model-b:
+  // pooled, 10 of 11 fail and the cell would stop.
+  const w = world();
+  addVerdicts(w, "smol-high", 10, 10, { session: OLD, model: "model-a" });
+  addVerdicts(w, "smol-high", 1, 0, { session: NEW, model: "model-b" });
+  const at = judged(w, added, "smol-high");
+  assert.deepEqual([at.generation, at.verdicts.length, at.failures, at.stop], ["model-b", 1, 0, false]);
+  assert.deepEqual(at.older.map((o) => [o.generation, o.verdicts.length, o.failures]), [["model-a", 10, 10]]);
+  assert.equal("stop" in at.older[0], false, "an older generation is a tally, never a stop");
+
+  // The other way round: the newest generation's own ten failures stop the cell, a clean older one aside.
+  const flipped = world();
+  addVerdicts(flipped, "smol-high", 10, 0, { session: OLD, model: "model-a" });
+  addVerdicts(flipped, "smol-high", 10, 10, { session: NEW, model: "model-b" });
+  const now = judged(flipped, added, "smol-high");
+  assert.deepEqual([now.generation, now.failures, now.stop], ["model-b", 10, true]);
 });
 
 // A counted Pull whose date cannot be placed against the cell's definition

@@ -128,7 +128,7 @@ function driftNotice(repo, agentsDir, F) {
 function withdrawalBody(c) {
   const rows = c.verdicts.map((v) => `| #${v.ticket} | #${v.pr} | ${v.run_date} | ${v.closed_own_ticket} | ${v.minted_false_claim} | ${v.failed ? "fail" : "pass"} |`);
   return [
-    `\`fleet-implementer-${c.cell}\` verdicts since its definition was last added (${c.since}): ${c.failures} of ${c.verdicts.length} fail the quality floor (\`minted_false_claim=yes\` or \`closed_own_ticket=no\`).`,
+    `\`fleet-implementer-${c.cell}\` verdicts on its newest generation, \`${c.generation}\`, since its definition was last added (${c.since}): ${c.failures} of ${c.verdicts.length} fail the quality floor (\`minted_false_claim=yes\` or \`closed_own_ticket=no\`).`,
     "",
     "| ticket | PR | ruled | closed_own_ticket | minted_false_claim | floor |",
     "|---|---|---|---|---|---|",
@@ -154,6 +154,8 @@ function stopping(repo, agentsDir, dryRun) {
   }
   for (const c of stoppingRule({ features, members, verdicts, added })) {
     const tally = `${c.cell} ${c.failures}/${c.verdicts.length} floor failures since ${c.since}`;
+    // An older generation's verdicts are reported, never judged.
+    for (const o of c.older) say(`stopping rule: ${c.cell} older generation ${o.generation} ${o.failures}/${o.verdicts.length} floor failures since ${c.since} — not judged`);
     if (!c.stop) {
       say(`stopping rule: ${tally} — continues`);
       continue;

@@ -37,10 +37,12 @@ In this order:
    never acted on — rows pool across resolved models (spec § 2).
    `tier-roles.mjs` only supplies the target and stays blind to the metrics.
 2. **Per-cell stopping rule** (`cell-readout.mjs`'s `stoppingRule`): a cell
-   with at least 10 verdicts since its definition was last added, and floor
+   whose newest generation (its latest admissible Pull's `dispatch_model`) has
+   at least 10 verdicts since its definition was last added, and floor
    failures on at least 80% of them, gets one `ready-for-human` issue titled
    `Withdraw exploration cell <cell>: <failures>/<verdicts> floor failures`,
-   its body the verdict table. One open issue per cell: an open issue whose
+   its body the verdict table. An older generation's tally is printed on its
+   own line and never withdraws the cell. One open issue per cell: an open issue whose
    title starts with `Withdraw exploration cell <cell>:` (case aside) is that
    cell's — left as it is when its title is the new one, otherwise commented
    with the new verdict table and retitled to the new tally. Where several are
