@@ -521,16 +521,17 @@ mid-implementation, a released claim, a provider error or fallback model, an
 exhausted request budget, an abort, a crash, or a Hollow yield. Recorded per
 implementer row in the `ending` column of `docs/metrics/member-outcomes.tsv`
 as `pr`, `bail:<cause>`, `bail:fixed`, `bail:fixed-refuted`, `provider`,
-`budget`, `abort`, `crash`, `hollow`, or `unknown` (the transcript cannot
-say); blank on a row that is not an implementer. A PR is the Cell's fault
-when it merged and was ruled failed; one closed unmerged counts as spend
-only. Of the other Endings, a Hollow yield, an exhausted budget, a `fixed`
-bail that origin/main refutes and an `unknown` are the Cell's fault, so an
-unreadable transcript never flatters a Cell; any other bail, a block
-mid-implementation and a released claim are the ticket's; a provider error
-or fallback model, an abort and a crash are neither's, as is a dispatch
-that left no transcript. The ledger's settle token (`=killed`, `=bailed`)
-is not an Ending.
+`budget`, `abort`, `crash`, `hollow`, or `unknown` (the scrape cannot say,
+such as for a malformed transcript or a `fixed` bail with no sha origin/main
+can answer for); blank on a row that is not an implementer. A PR is the
+Cell's fault when it merged and was ruled failed; one closed unmerged counts
+as spend only. Of the other Endings, a Hollow yield, an exhausted budget, a
+`fixed` bail that origin/main refutes and an `unknown` are the Cell's fault,
+so an Ending the scrape cannot name never flatters a Cell; any other bail,
+a block mid-implementation and a released claim are the ticket's; a provider
+error or fallback model, an abort and a crash are neither's, as is a
+dispatch that left no transcript. The ledger's settle token (`=killed`,
+`=bailed`) is not an Ending.
 _Avoid_: give-up, outcome (bare, it collides with Release outcome), verdict,
 result
 
