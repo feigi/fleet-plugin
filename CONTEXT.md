@@ -591,6 +591,23 @@ agent definition exists; sizing a ticket for the table is one `judge()`
 call in the controller's own eval.
 _Avoid_: fleet-router, sizer
 
+**Stratum**:
+The class of ticket the Router keys on: `light`, `heavy` or `unknown`, set by
+the Router's classifier — today a rule on the brief's length and its count of
+acceptance criteria, `unknown` when either is missing. `light` means a short
+ticket, not an easy one. The table's `*` row covers every ticket together and
+is not a stratum.
+_Avoid_: size, difficulty, bucket
+
+**Quality floor**:
+How far a Cell's fail rate (false claims over claims) may rise above
+`slow-high`'s before the Cell is refused: under 15 points. The cost guard
+holds it over every ticket together and trips the Cell. Once #3753 lands, the
+Router's fit also holds it within each stratum and on the `*` row, afresh at
+every fit, and refuses the Cell only that row; the Cell still takes
+Exploration Pulls. Until then the fit leaves the floor to the guard.
+_Avoid_: veto, quality gate
+
 **As-routed**:
 How a Pull is booked: as one unit, to the Cell it drew (`chosen_cell`) — its merge,
 its Ruling and its Spend, every implementer dispatched under it at any Cell
