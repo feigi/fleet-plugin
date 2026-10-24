@@ -458,7 +458,10 @@ token, row}]}`:
   a read-only `release-ticket.sh <N> impl-<N>[-x] implementer` dry run (for
   example `1 commit(s) ahead of origin/main`), then the two ways out: push
   the branch and open a PR, or release the claim by hand. A dry run or an
-  issue read that does not answer still lists the claim, naming why.
+  issue read that does not answer still lists the claim, naming why. Under
+  `prior: ancestor` such an issue read names neither way out: no
+  `in-progress` list was read, so the claim may be the earlier run's live
+  member, and its `why` says to check it against `carried`.
   Phase 0 reads the disk and the issue again at every run start, so the
   claim is named until it is pushed or released, whatever any ledger holds.
   A closed issue's claim is not listed.

@@ -41,7 +41,10 @@
 // made it is gone. Its `why` is the blockers of a read-only `release-ticket.sh
 // <N> impl-<N>[-x] implementer` dry run, then the two ways out: push the
 // branch and open a PR, or release the claim by hand. A dry run or an issue
-// read that does not answer still lists the claim, naming why. The disk and
+// read that does not answer still lists the claim, naming why. Under
+// `ancestor` an issue read that does not answer names neither way out: no
+// in-progress list was read, so the claim may be the earlier run's live
+// member — its `why` says to check it against `carried`. The disk and
 // the issue are read at every run, so the claim is listed until it is pushed
 // or released, whatever any ledger holds. A closed issue's claim is not listed.
 //
@@ -302,7 +305,7 @@ function main() {
   const open = () => {
     if (openPrs === null) {
       const prs = ghList("list of open PRs", ["pr", "list", "--state", "open", "--json", "number,headRefName,url"]);
-      openPrs = { prs, byUrl: new Map(prs.map((p) => [p.url, p])) };
+      openPrs = { prs, openByUrl: new Map(prs.map((p) => [p.url, p])) };
     }
     return openPrs;
   };
@@ -313,7 +316,7 @@ function main() {
   // ticket's own: `<type>/<n>-<slug>` is claim-ticket.sh's shape, so
   // `implementer/1799-bump-node-20` names issue 1799 and merely ends in 20.
   const prsFor = (issue, seg) => {
-    const { prs, byUrl: openByUrl } = open();
+    const { prs, openByUrl } = open();
     const here = repoOf(issue.url);
     const linked = (issue.closedByPullRequestsReferences ?? []).flatMap((ref) => {
       if (openByUrl.has(ref.url)) return [`open PR #${openByUrl.get(ref.url).number}`];
@@ -328,6 +331,10 @@ function main() {
       mentioned: named.filter((p) => !own.test(p.headRefName)).map(describe),
     };
   };
+  const heldLog = (n, held) => log(`    #${n} has ${held.join(", ")} — the fold-in owns it`);
+  const mentionedNote = (mentioned) => mentioned.length > 0
+    ? `; ${mentioned.join(", ")} carries the number outside the ticket position, so check whether it is this claim's`
+    : "";
 
   const home = real(join(checkout, ".worktrees"));
   const all = worktrees(checkout);
@@ -336,7 +343,7 @@ function main() {
     const seg = segment(issue.number);
     const { held, mentioned } = prsFor(issue, seg);
     if (held.length > 0) {
-      log(`    #${issue.number} has ${held.join(", ")} — the fold-in owns it`);
+      heldLog(issue.number, held);
       continue;
     }
     const mine = all.filter((w) => !w.prunable && seg.test(basename(w.path)) && present(w.path));
@@ -359,7 +366,7 @@ function main() {
     else why = "no worktree for it in this checkout";
     const action = prior === "dead" && one?.branch && mentioned.length === 0 && !head?.failed && !head?.closed ? "resume" : "report";
     // Not taken for its PR — but never resumed past one that might be.
-    if (mentioned.length > 0) why += `; ${mentioned.join(", ")} carries the number outside the ticket position, so check whether it is this claim's`;
+    why += mentionedNote(mentioned);
     claims.push({ n: issue.number, t: issue.title, action, worktree: one?.path ?? null, branch: one?.branch ?? null, why });
     log(`    #${issue.number} ${action} — ${why}`);
   }
@@ -375,18 +382,19 @@ function main() {
     if (live.has(c.n)) continue;
     if (!views.has(c.n)) views.set(c.n, viewIssue(c.n));
     const { issue, failed } = views.get(c.n);
-    let title = null;
     let why;
     let mentioned = [];
     if (failed) {
       why = `gh issue view ${c.n} did not answer (${failed}) — whether ${c.slug}'s ticket is open, unlabelled and without a PR is unknown`;
+      // No in-progress list is read under ancestor, so nothing has ruled out
+      // that this is the earlier run's live member: never point at a release.
+      if (ancestor) why += `, and so is whether ${c.slug} is the earlier run's live member — check it against carried`;
     } else {
-      title = issue.title ?? null;
       if (issue.state !== "OPEN") continue;
       if (issue.labels.some((l) => l.name === LABEL)) continue;
       const found = prsFor(issue, segment(c.n));
       if (found.held.length > 0) {
-        log(`    #${c.n} has ${found.held.join(", ")} — the fold-in owns it`);
+        heldLog(c.n, found.held);
         continue;
       }
       mentioned = found.mentioned;
@@ -395,9 +403,9 @@ function main() {
       else if (probe.blockers) why = probe.blockers;
       else why = "release-ticket.sh finds nothing in the way of releasing the claim";
     }
-    why += ` — ${WAYS_OUT}`;
-    if (mentioned.length > 0) why += `; ${mentioned.join(", ")} carries the number outside the ticket position, so check whether it is this claim's`;
-    claims.push({ n: c.n, t: title, action: "report", worktree: c.worktree, branch: c.branch, why });
+    if (!(failed && ancestor)) why += ` — ${WAYS_OUT}`;
+    why += mentionedNote(mentioned);
+    claims.push({ n: c.n, t: issue?.title ?? null, action: "report", worktree: c.worktree, branch: c.branch, why });
     log(`    #${c.n} report — ${why}`);
   }
   console.log(JSON.stringify({ prior, claims, carried: ancestor ? carriedTokens(join(fleetDir, "ledger.md")) : [] }));

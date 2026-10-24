@@ -346,6 +346,14 @@ test("a list that did not answer, or came back at its cap, is a refusal — exit
   assert.match(prsAtCap.stderr, /cap/);
 });
 
+test("prior dead with no claim at all: an open PR list that does not answer is still a refusal — exit 2", (t) => {
+  const f = fixture(t, { controller: RECORD("dead") });
+  const r = f.run({ env: { GH_PR_FAIL: "1" } });
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /pr list boom/);
+});
+
 test("prior dead + a claim whose branch's PR closed unmerged, none open → report naming the PR, in place of the resume", (t) => {
   const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12", "13-impl-13", "14-impl-14"] });
   const r = f.run({
@@ -610,6 +618,37 @@ test("a branch with no worktree is a claim too; each member of one ticket is lis
   assert.deepEqual(r.gh.filter((l) => l.startsWith("issue view")), [`issue view 12 ${VIEW_ARGV}`]);
 });
 
+test("unlabelled claims are listed in issue-number order, not in the order git names their worktrees", (t) => {
+  // git lists `12-impl-12` before `9-impl-9`; the report puts #9 first.
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12", "9-impl-9"] });
+  const r = f.run({ views: { 9: view(9), 12: view(12) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => c.n), [9, 12]);
+});
+
+test("a retry member's worktree `.worktrees/<N>-impl-<N>-<x>` is the claim's worktree", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12-b"] });
+  const r = f.run({ views: { 12: view(12) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.worktree, c.branch]), [[12, wt(f, "12-impl-12-b"), "implementer/12-impl-12-b"]]);
+});
+
+test("a claim-named worktree outside this checkout's .worktrees/ is not the claim's worktree — its branch still lists the claim", (t) => {
+  const f = fixture(t, { controller: RECORD("dead") });
+  git(f.repo, "worktree", "add", "-q", "-b", "implementer/14-impl-14", join(f.dir, "elsewhere", "14-impl-14"));
+  const r = f.run({ views: { 14: view(14) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.worktree, c.branch]), [[14, null, "implementer/14-impl-14"]]);
+});
+
+test("a claim worktree checked out on another branch reports that branch, not the claim's local branch", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  git(wt(f, "12-impl-12"), "switch", "-q", "-c", "other/12-x");
+  const r = f.run({ views: { 12: view(12) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.worktree, c.branch]), [[12, wt(f, "12-impl-12"), "other/12-x"]]);
+});
+
 test("a dry run that does not answer still lists the claim, naming why", (t) => {
   const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
   const scripts = join(f.dir, "scripts");
@@ -622,6 +661,23 @@ test("a dry run that does not answer still lists the claim, naming why", (t) => 
   ]);
 });
 
+test("a dry-run receipt is nothing in the way only at exit 0 with released true: either alone did not answer", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  const scripts = join(f.dir, "scripts");
+  cpSync(dirname(SCRIPT), scripts, { recursive: true });
+  for (const [stub, failed] of [
+    [`echo '{"released":false,"blockers":[]}'\nexit 0`, "exit 0"],
+    [`echo '{"released":true,"blockers":[]}'\necho nope >&2\nexit 1`, "exit 1: nope"],
+  ]) {
+    writeFileSync(join(scripts, "release-ticket.sh"), `#!/bin/sh\n${stub}\n`);
+    const r = f.run({ script: join(scripts, "stranded.mjs"), views: { 12: view(12) } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.why]), [
+      [12, "report", `release-ticket.sh 12 impl-12 implementer did not answer (${failed}) — what stands in the way of releasing the claim is unknown — ${WAYS_OUT}`],
+    ], stub);
+  }
+});
+
 test("an issue read that does not answer lists the claim, naming why — and the others are still classified", (t) => {
   const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12", "13-impl-13"] });
   const r = f.run({ issues: [issue(13)], env: { GH_VIEW_FAIL: "1" } });
@@ -631,6 +687,16 @@ test("an issue read that does not answer lists the claim, naming why — and the
   const stranded = r.out.claims[1];
   assert.equal(stranded.t, null);
   assert.equal(stranded.why, `gh issue view 12 did not answer (exit 1: view boom) — whether impl-12's ticket is open, unlabelled and without a PR is unknown — ${WAYS_OUT}`);
+});
+
+test("prior ancestor + an issue read that does not answer → listed, naming neither way out: the claim may be the earlier run's live member", (t) => {
+  const f = fixture(t, { controller: RECORD("ancestor"), worktrees: ["12-impl-12"] });
+  // The issue does hold in-progress: only the failed read hides it.
+  const r = f.run({ views: { 12: view(12, { labels: ["in-progress"] }) }, env: { GH_VIEW_FAIL: "1" } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.why]), [
+    [12, "report", "gh issue view 12 did not answer (exit 1: view boom) — whether impl-12's ticket is open, unlabelled and without a PR is unknown, and so is whether impl-12 is the earlier run's live member — check it against carried"],
+  ]);
 });
 
 test("an unlabelled claim whose number a PR branch carries outside the ticket position is reported with that PR named", (t) => {
