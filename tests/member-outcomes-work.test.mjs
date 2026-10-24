@@ -84,6 +84,12 @@ test("a member that never exited works from its first entry to its last", () => 
   assert.equal(workOf(dir, "impl-4"), 250);
 });
 
+test("a fractional-second part rounds to the nearest whole second", () => {
+  const dir = session({ "impl-26": writes(0, 1.5), "impl-27": writes(0, 1.499) }, controllerAt(0, 1.5));
+  assert.equal(workOf(dir, "impl-26"), 2);
+  assert.equal(workOf(dir, "impl-27"), 1);
+});
+
 // ---------------------------------------------------------------------------
 // Halts: more than 60 minutes in which no transcript of the run writes
 // ---------------------------------------------------------------------------
@@ -127,6 +133,13 @@ test("of two halts, the one inside a part is subtracted and the one in the wait 
   assert.equal(workOf(dir, "impl-12"), 400);
 });
 
+test("a halt between the run's two earliest entries is subtracted", () => {
+  // The member's first entry is the run's first; nothing else writes until
+  // 3700, so the very first gap of the run is the halt.
+  const dir = session({ "impl-28": writes(0, 3700, 3760) }, controllerAt(3700, 3760));
+  assert.equal(workOf(dir, "impl-28"), 60);
+});
+
 // ---------------------------------------------------------------------------
 // Blank: unknown, never zero
 // ---------------------------------------------------------------------------
@@ -161,6 +174,57 @@ test("a transcript that yields no row still counts as the run writing", () => {
   const rows = rowsOf(dir);
   assert.equal(rows.Probe, undefined);
   assert.equal(rows["impl-17"].workS, 5400);
+});
+
+test("a controller line without a usable timestamp, or a torn last line, is skipped and finds the same halts", () => {
+  // Clean: the run is silent from 0 to 3700, a halt inside impl-29's part.
+  const members = { "impl-29": writes(0, 3700, 3760) };
+  const clean = session(members, controllerAt(0, 3700, 3760));
+  const noisy = session(members, null);
+  writeFileSync(join(dirname(noisy), `${SESSION}.jsonl`), [
+    evt({ type: "message", message: { role: "user", content: [] } }),
+    evt({ type: "message", timestamp: 1800, message: { role: "user", content: [] } }),
+    evt({ type: "message", timestamp: "not a time", message: { role: "user", content: [] } }),
+    ...controllerAt(0, 3700, 3760),
+    '{"type":"message","timestamp":"', // torn mid-write: no newline after it
+  ].join("\n"));
+  assert.equal(workOf(clean, "impl-29"), 60);
+  assert.equal(workOf(noisy, "impl-29"), 60);
+});
+
+test("a controller line torn before its last leaves every row's work_s unknown", () => {
+  // The torn line may have been the entry that broke the stretch from 2000 to
+  // 5700, so that stretch cannot be read as a halt or as the run writing.
+  const dir = session({ "impl-30": writes(0, 5700) }, null);
+  writeFileSync(join(dirname(dir), `${SESSION}.jsonl`),
+    [...controllerAt(0, 2000), '{"type":"message","timestamp":"', ...controllerAt(5700)].join("\n") + "\n");
+  const stats = {};
+  const [row] = rowsForSession(dir, stats, { verifyMain: () => 0 });
+  assert.equal(row.workS, null);
+  assert.equal(stats.workSUnknown, "an unparseable controller transcript line");
+});
+
+test("a controller transcript that is there but cannot be read leaves work_s unknown and is named as unreadable, not as missing", () => {
+  const dir = session({ "impl-34": writes(0, 60) }, null);
+  mkdirSync(join(dirname(dir), `${SESSION}.jsonl`));
+  const stats = {};
+  const [row] = rowsForSession(dir, stats, { verifyMain: () => 0 });
+  assert.equal(row.workS, null);
+  assert.equal(stats.workSUnknown, "unreadable controller transcript: EISDIR");
+});
+
+test("a transcript of the run that cannot be read leaves every row's work_s unknown", () => {
+  // impl-31 writes from 0 to 8000 while impl-32 writes every 10 minutes
+  // through it. A `.jsonl` entry that cannot be read (here a directory) hides
+  // impl-32's entries, so 0 to 8000 would otherwise read as one halt.
+  const dir = session({ "impl-31": writes(0, 8000), "impl-32": writes(...every(0, 7800, 600)) }, controllerAt(0, 8000));
+  assert.equal(workOf(dir, "impl-31"), 8000);
+  rmSync(join(dir, "impl-32.jsonl"));
+  mkdirSync(join(dir, "impl-32.jsonl"));
+  const stats = {};
+  const rows = rowsForSession(dir, stats, { verifyMain: () => 0 });
+  assert.deepEqual(rows.map((r) => [r.member, r.workS]), [["impl-31", null]]);
+  assert.equal(stats.workSUnknown, "1 unreadable transcript");
 });
 
 // ---------------------------------------------------------------------------
@@ -218,14 +282,22 @@ test("re-scraping once the controller transcript is gone keeps each recorded wor
   const r = scrape(dir, out);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(workByMember(out), { "impl-23": "300", "review-pr-24": "" });
-  assert.match(r.stderr, /1 read no controller transcript and kept the work_s already recorded/);
+  assert.match(r.stderr, /rows; work_s unknown \(no controller transcript\), 1 kept the work_s already recorded\n$/);
 });
 
-test("a session scraped with no controller transcript at all writes blank work_s and says nothing was kept", () => {
+test("a session scraped with no controller transcript at all writes blank work_s, names why, and says nothing was kept", () => {
   const dir = session({ "impl-25": writes(0, 60) }, null);
   const out = join(tempDir("mow-out-"), "member-outcomes.tsv");
   const r = scrape(dir, out);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(workByMember(out), { "impl-25": "" });
+  assert.match(r.stderr, /work_s unknown \(no controller transcript\)/);
   assert.doesNotMatch(r.stderr, /kept the work_s/);
+});
+
+test("a scrape with the controller transcript and every transcript read names no work_s cause", () => {
+  const dir = session({ "impl-33": writes(0, 60) }, controllerAt(0, 60));
+  const r = scrape(dir, join(tempDir("mow-out-"), "member-outcomes.tsv"));
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /work_s/);
 });

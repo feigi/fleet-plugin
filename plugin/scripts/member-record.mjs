@@ -390,16 +390,16 @@ export function foldOmpTranscript(jsonlText, filePath) {
     try { d = JSON.parse(raw); }
     catch { if (i !== lines.length - 1) malformedNonLastLines++; continue; }
     assertOmpShaped(d, filePath);
-    if (typeof d.timestamp === "string") { firstTs ??= d.timestamp; lastTs = d.timestamp; }
-    const ms = typeof d.timestamp === "string" ? Date.parse(d.timestamp) : NaN;
+    let ms = NaN;
+    if (typeof d.timestamp === "string") { firstTs ??= d.timestamp; lastTs = d.timestamp; ms = Date.parse(d.timestamp); }
     if (Number.isFinite(ms)) stamps.push(ms);
     if (d.type === "custom" && d.customType === "session_exit") {
+      sessionExit = true;
       if (partFirst !== null) workParts.push([partFirst, partLast]);
       partFirst = partLast = null;
     } else if (Number.isFinite(ms)) { partFirst ??= ms; partLast = ms; }
     if (d.type === "thinking_level_change" && typeof d.thinkingLevel === "string") thinking = d.thinkingLevel;
     if (d.type === "model_change" && d.resolvedModelIsFallback === true) providerFallback = true;
-    if (d.type === "custom" && d.customType === "session_exit") sessionExit = true;
     if (d.type === "session_init") {
       if (typeof d.task === "string") task = d.task;
       if (typeof d.resolvedModelIdentity === "string") resolvedModelIdentity = d.resolvedModelIdentity;
@@ -883,9 +883,11 @@ export function ompSessionTranscripts(sessionDir) {
 // propagate all the way out of readMembers, uncaught. Only the directory
 // listing and the raw file read are given the ordinary per-member tolerance.
 //
-// `activity`, when given, is an array that collects the entry instants of
-// EVERY transcript read here, including one that yields no record: the
-// session-wide view member-outcomes.mjs reads halts off.
+// `activity`, when given, is `{ stamps: [], unread: 0 }`: `stamps` collects the
+// entry instants of EVERY transcript read here, including one that yields no
+// record, and `unread` counts the transcripts that could not be read at all,
+// whose instants are missing from `stamps`. It is the session-wide view
+// member-outcomes.mjs reads halts off.
 export function readOmpSession(sessionDir, activity = null) {
   let transcripts;
   try { transcripts = ompSessionTranscripts(sessionDir); }
@@ -895,9 +897,9 @@ export function readOmpSession(sessionDir, activity = null) {
   for (const { file, agent, spawnDepth } of transcripts) {
     let text;
     try { text = readFileSync(file, "utf8"); }
-    catch { continue; }
+    catch { if (activity) activity.unread++; continue; }
     const folded = foldOmpTranscript(text, file); // may throw — see comment above
-    if (activity) for (const ms of folded.stamps) activity.push(ms);
+    if (activity) for (const ms of folded.stamps) activity.stamps.push(ms);
     const rec = ompMemberRecord(folded, agent, spawnDepth);
     if (!rec) continue;
     // How the transcript ENDED, for the `ending` column (member-outcomes.mjs):

@@ -113,9 +113,11 @@
 # session directory and nested members' transcripts included. Blank
 # means unknown, never zero: every `harness=claude` row, an omp row whose
 # transcript has no timestamped entry, and a row first scraped while its
-# session's controller transcript was gone.
-# A re-scrape without the controller transcript keeps the `work_s` the row
-# already recorded.
+# session's controller transcript was gone, unreadable or had a line torn
+# before its last, or a transcript of its run could not be read: each leaves
+# the halts unknown.
+# A re-scrape that cannot find the halts keeps the `work_s` the row already
+# recorded.
 #
 # SUPERSEDED GENERATIONS ARE A SEPARATE POPULATION. Rows carrying an older
 # generation (claude-opus-4-7, claude-opus-4-8) must never be pooled with the
