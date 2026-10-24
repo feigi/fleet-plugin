@@ -602,10 +602,9 @@ _Avoid_: size, difficulty, bucket
 **Quality floor**:
 How far a Cell's fail rate (false claims over claims) may rise above
 `slow-high`'s before the Cell is refused: under 15 points. The cost guard
-holds it over every ticket together and trips the Cell. Once #3753 lands, the
-Router's fit also holds it within each stratum and on the `*` row, afresh at
-every fit, and refuses the Cell only that row; the Cell still takes
-Exploration Pulls. Until then the fit leaves the floor to the guard.
+holds it over every ticket together and trips the Cell. The Router's fit also
+holds it within each stratum and on the `*` row, afresh at every fit, and
+refuses the Cell only for that row; the Cell still takes Exploration Pulls.
 _Avoid_: veto, quality gate
 
 **As-routed**:
