@@ -187,7 +187,7 @@ export function mergeBotVerdicts(report) {
 // `bailCause`, since a block is no bail, gives its reason in `bailDetail`,
 // text that is not only whitespace, and names no `pr` or `head`, since a block
 // reports no PR; a `bailed` outcome names no `pr` or `head` either, since a
-// bail is the pre-code outcome — a PR either opened is outcome `pr`, which
+// bail is the pre-code outcome — a PR the member opened is outcome `pr`, which
 // settle checks. For a merge-bot report: each PR gets one verdict — merged,
 // held, conflict-held or refused — the last it reached in the pass, so a PR
 // named twice, in one list or in two, is a violation at its second entry.

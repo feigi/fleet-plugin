@@ -301,6 +301,7 @@ test("validate refuses a bailed impl report that names a pr or a head, and accep
   for (const [changes, said] of [
     [{ pr: 12 }, '$.pr: 12 is not null, with outcome "bailed" — a bail reports no PR'],
     [{ head: "a".repeat(40) }, `$.head: "${"a".repeat(40)}" is not null, with outcome "bailed" — a bail reports no PR`],
+    [{ bailCause: "covered", bailDetail: "PR#9 — its diff meets the acceptance", pr: 9 }, '$.pr: 9 is not null, with outcome "bailed" — a bail reports no PR'],
   ]) {
     const report = bailed(changes);
     assert.equal(validate(SCHEMAS.impl, report), null, said);
