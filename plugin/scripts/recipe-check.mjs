@@ -209,20 +209,26 @@ async function cli() {
   }
   // A SIGTERM, SIGINT or SIGHUP this script itself receives is forwarded to
   // the running command and marks the run killed: no further command starts
-  // and nothing is recorded. The handlers stay until the record is decided,
-  // so a signal during the commands never takes the default action and cuts
-  // off the output still queued. After that only queued output is left, and
-  // release() hands the signals their default action back, so a reader that
-  // stalls on that output cannot leave a process no signal stops.
-  const run = { killed: null, child: null, ranMs: 0 };
+  // and nothing is recorded. That holds until the record is decided, so a
+  // signal during the commands never takes the default action and cuts off
+  // the output still queued. After that only queued output is left, and a
+  // signal takes its default action: the handler removes every handler and
+  // re-raises it, so a reader that stalls on that output cannot leave a
+  // process no signal stops. The handlers are never removed eagerly at the
+  // decision: removing them drops a signal caught but not yet dispatched —
+  // one landing between the record's rename and that removal — which would
+  // leave the process running with nothing left to stop it.
+  const run = { killed: null, child: null, ranMs: 0, decided: false };
   const handlers = KILL_SIGNALS.map((sig) => [sig, () => {
+    if (run.decided) {
+      for (const [s, h] of handlers) process.off(s, h);
+      process.kill(process.pid, sig);
+      return;
+    }
     run.killed ??= sig;
     run.child?.kill(sig);
   }]);
   for (const [sig, handler] of handlers) process.on(sig, handler);
-  const release = () => {
-    for (const [sig, handler] of handlers) process.off(sig, handler);
-  };
   const check = checkCmd.trim() === "true"
     ? { command: checkCmd, ran: false, exitCode: 0, pass: null, fail: null }
     : await runCommand(run, checkCmd, top, env);
@@ -236,13 +242,13 @@ async function cli() {
   // fd, so it lands last and a reader that stalls delays it without losing it.
   const say = (line) => process.stderr.write(`\n${NAME}: ${line}\n`);
   if (run.killed !== null) {
-    release();
+    run.decided = true;
     say(`${run.killed} received during the ${test.ran ? "Test entrypoint" : "Check step"}, which ran ${Math.round(run.ranMs / 1000)} s; there is no test result and nothing was recorded — run the same command again with \`timeout: 0\` on the call`);
     process.exitCode = 128 + osConstants.signals[run.killed];
     return;
   }
   if (test.exitCode === NO_SLOT) {
-    release();
+    run.decided = true;
     say(`the Test entrypoint exited ${NO_SLOT}: no suite slot was free and nothing was launched — run the same command again; no record written`);
     process.exitCode = NO_SLOT;
     return;
@@ -257,7 +263,7 @@ async function cli() {
     rmSync(tmp, { force: true });
     die(`could not write ${path}: ${e.code ?? e.message}`);
   }
-  release();
+  run.decided = true;
 
   if (check.exitCode !== 0) {
     say(`the Check step exited ${check.exitCode}; red record written to ${path}, so settle refuses it — fix the cause and run again`);
