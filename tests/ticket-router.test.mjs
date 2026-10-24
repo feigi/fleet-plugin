@@ -729,6 +729,30 @@ test("fit: a day-one three-TSV fixture writes an estimates-only table, and --che
   assert.match(check.stdout, new RegExp(`matches a re-fit of 3 Pulls at ${sha.slice(0, 8)}\n`));
 });
 
+test("fit: an older generation prints on its own `(older)` segment with its own fix rounds, and a cell with only excluded Pulls names no generation", (t) => {
+  // task-high: two merged Pulls on model-a, each with a $2 fix round, then one on model-b with none.
+  const a1 = featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "1/3" });
+  const a2 = featureRow({ ticket: "4", chosen_cell: "task-high", exploration_draw: "1/3" });
+  const b = featureRow({ ticket: "2", chosen_cell: "task-high", exploration_draw: "1/3", session: SESSION2 });
+  // smol-high: its only implementer has no dispatch model, so its one Pull is excluded.
+  const x = featureRow({ ticket: "3", chosen_cell: "smol-high", exploration_draw: "1/3" });
+  const members = [
+    implementer(a1, { pr: "11", ending: "pr", dispatch_model: "model-a" }),
+    implementer(a2, { pr: "14", ending: "pr", dispatch_model: "model-a" }),
+    implementer(b, { pr: "12", ending: "pr", dispatch_model: "model-b" }),
+    implementer(x, { dispatch_model: "" }),
+    { member: "fix-pr-11", agent: "fix-pr-11", pr: "11", role: "fix-applier", cost: "2" },
+    { member: "fix-pr-14", agent: "fix-pr-14", pr: "14", role: "fix-applier", cost: "2" },
+  ];
+  const verdicts = [{ pr: "11", ticket: "1" }, { pr: "14", ticket: "4" }, { pr: "12", ticket: "2" }];
+  const p = fitWorld(t, { features: [a1, a2, b, x], members, verdicts });
+  const r = fitCli(p);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /; cells smol-high - n=0 merged=0 failed=0 usd_per_merged=- excluded=1 left_out=0 unpriced=0, task-high model-b n=1 merged=1 failed=0 usd_per_merged=1\.00 excluded=0 left_out=0 unpriced=0, task-high model-a \(older\) n=2 merged=2 failed=0 usd_per_merged=3\.00\n$/);
+  const task = JSON.parse(readFileSync(p.table, "utf8")).estimates["*"]["task-high"];
+  assert.deepEqual([task.generation, task.fix_rounds, task.older["model-a"].fix_rounds], ["model-b", 0, 1]);
+});
+
 test("--check fails when the checked-in table is not a re-fit of its rows", (t) => {
   const features = [featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3" })];
   const p = fitWorld(t, { features, members: [], verdicts: [{ pr: "11", ticket: "1" }] });

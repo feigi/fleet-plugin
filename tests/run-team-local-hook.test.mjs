@@ -236,7 +236,7 @@ function floorFailing() {
   for (let i = 0; i < 3; i++) ruled(rows, { ticket: 200 + i, cell: "task-high", fail: true });
   return rows;
 }
-const TITLE = "Withdraw exploration cell smol-high: 8/10 floor failures";
+const TITLE = "Withdraw exploration cell smol-high: 8/10 floor failures on claude-haiku-4-5";
 const STALE = { number: 78, title: "Withdraw exploration cell smol-high: 7/9 floor failures" };
 const writes = (f) => ["issue create", "issue edit", "issue comment"].flatMap((cmd) => calls(f, cmd));
 
@@ -272,6 +272,19 @@ test("stopping rule: an open withdrawal issue with the same title is left as it 
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue already open, #${open.number}$`, "m"));
   assert.deepEqual(writes(f), []);
+});
+
+test("stopping rule: an open withdrawal issue at the same tally that names no generation, or another one, gets the newest generation's verdict table and title", () => {
+  for (const prior of ["Withdraw exploration cell smol-high: 8/10 floor failures", "Withdraw exploration cell smol-high: 8/10 floor failures on model-a"]) {
+    const f = fixture({ rows: floorFailing(), gh: { issues: [{ number: 77, title: prior }] } });
+    const r = f.run();
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue #77 retitled from "${escape(prior)}", verdict table commented$`, "m"));
+    assert.deepEqual(calls(f, "issue create"), []);
+    const [comment] = calls(f, "issue comment");
+    assert.match(comment[4], /newest generation, `claude-haiku-4-5`/);
+    assert.deepEqual(calls(f, "issue edit"), [["issue", "edit", "77", "--title", TITLE]]);
+  }
 });
 
 test("stopping rule: the cell's open withdrawal issue at another tally gets the verdict table as a comment, then the new title; no second issue is filed", () => {

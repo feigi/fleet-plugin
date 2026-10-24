@@ -139,6 +139,52 @@ const dispatchOrder = (rows) => [...rows].sort((a, b) => {
   const [x, y] = [retryOf(a), retryOf(b)];
   return cmp(a.session, b.session) || x.length - y.length || cmp(x, y);
 });
+const key = (session, agent) => `${session}\0${agent}`;
+// The omp rows a Pull can book: every member but the merge bot, memory and the advisor.
+const ompRows = (members) => members.filter((r) => r.harness === "omp" && !EXCLUDED_MEMBER.test(lastSegment(r.member)));
+
+/**
+ * Each implementer row of `omp` to its Pull among `pulls`: the same session's
+ * Pull of the row's ticket and agent, else that session's last Pull of the
+ * ticket, else the ticket's last Pull started before the row (a retry in a
+ * later session). `impls` maps every Pull to its rows, `implPull` each booked
+ * row's session+agent to its Pull. A row with no ticket, or no such Pull, is
+ * booked to none.
+ */
+function bookImplementers(pulls, omp) {
+  const bySessionTicket = new Map(), byTicket = new Map();
+  for (const p of pulls) {
+    const k = key(p.session, p.ticket);
+    (bySessionTicket.get(k) ?? bySessionTicket.set(k, []).get(k)).push(p);
+    (byTicket.get(p.ticket) ?? byTicket.set(p.ticket, []).get(p.ticket)).push(p);
+  }
+  const implPull = new Map();
+  const impls = new Map(pulls.map((p) => [p, []]));
+  for (const r of omp) {
+    if (!isImplementer(r.member) || !r.ticket) continue;
+    const own = bySessionTicket.get(key(r.session, r.ticket));
+    const pull = own ? (own.find((p) => p.agent === r.agent) ?? own.at(-1)) : byTicket.get(r.ticket)?.findLast((p) => startedBefore(p, r));
+    if (!pull) continue;
+    implPull.set(key(r.session, r.agent), pull);
+    impls.get(pull).push(r);
+  }
+  return { impls, implPull };
+}
+
+// A Pull's generation from its implementer rows: its first Admissible row's dispatch model, else null.
+const generationOf = (own, cell) => dispatchOrder(own).find((m) => admissibleRow(m, cell))?.dispatchModel ?? null;
+
+/**
+ * Each of `pulls` (ticket-features rows) to its generation, `attribute`'s
+ * rule over `members`: the dispatch model of the Pull's first Admissible
+ * implementer row in dispatch order, or null when it has none. Every caller
+ * that names a Pull's generation reads it here, so the guard, the fit and the
+ * stopping rule never derive two generations for one Pull.
+ */
+export function pullGenerations(pulls, members) {
+  const { impls } = bookImplementers(pulls, ompRows(members));
+  return new Map(pulls.map((p) => [p, generationOf(impls.get(p), p.chosen_cell)]));
+}
 
 function costOf(row) {
   const c = String(row.cost ?? "");
@@ -159,31 +205,15 @@ function costOf(row) {
  * `rulingFor` does.
  */
 export function attribute({ features, members, tiers, prs = null, windowStart = null, stratum = () => null }) {
-  const key = (session, agent) => `${session}\0${agent}`;
   const pulls = datedRows(features);
-  const bySessionTicket = new Map(), byTicket = new Map();
-  for (const p of pulls) {
-    const k = key(p.session, p.ticket);
-    (bySessionTicket.get(k) ?? bySessionTicket.set(k, []).get(k)).push(p);
-    (byTicket.get(p.ticket) ?? byTicket.set(p.ticket, []).get(p.ticket)).push(p);
-  }
-
-  const omp = members.filter((r) => r.harness === "omp" && !EXCLUDED_MEMBER.test(lastSegment(r.member)));
+  const omp = ompRows(members);
   // Implementer rows to their Pull, and a PR-named member's key to its PR.
-  const implPull = new Map(), prOfKey = new Map();
-  const impls = new Map(pulls.map((p) => [p, []]));
+  const { impls, implPull } = bookImplementers(pulls, omp);
+  const prOfKey = new Map();
   for (const r of omp) {
-    if (isImplementer(r.member)) {
-      if (!r.ticket) continue;
-      const own = bySessionTicket.get(key(r.session, r.ticket));
-      const pull = own ? (own.find((p) => p.agent === r.agent) ?? own.at(-1)) : byTicket.get(r.ticket)?.findLast((p) => startedBefore(p, r));
-      if (!pull) continue;
-      implPull.set(key(r.session, r.agent), pull);
-      impls.get(pull).push(r);
-    } else {
-      const { pr } = parseMemberName(r.member);
-      if (pr) prOfKey.set(key(r.session, r.agent), pr);
-    }
+    if (isImplementer(r.member)) continue;
+    const { pr } = parseMemberName(r.member);
+    if (pr) prOfKey.set(key(r.session, r.agent), pr);
   }
   // Each PR to the last Pull, in file order, whose implementer rows carry it.
   const carrier = new Map();
@@ -246,8 +276,7 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
       if (c === null) blank = true;
       else spend += c;
     }
-    const first = dispatchOrder(own).find((m) => admissibleRow(m, pull.chosen_cell));
-    const generation = first ? first.dispatchModel : null;
+    const generation = generationOf(own, pull.chosen_cell);
     let status = "counted";
     if (generation === null) status = "excluded";
     else if (pendingPr !== null) status = "pending";
@@ -285,11 +314,11 @@ export function generations(units) {
  * are that generation's alone: `n`, `merged`, `claims`, `failed` and `spend`
  * over its counted Pulls, then its left-out, unpriced and pending Pull counts.
  * `excluded` counts the cell's excluded Pulls, which have no generation.
- * `older` holds every other generation's figures in the same shape, keyed by
- * `generation`, newest first. `order` is `generations()` of the units that
- * place each cell's generations; by default these same units, but a caller
- * tallying a subset passes the whole set's, so a subset never moves a cell's
- * newest generation.
+ * `older` is an array, newest first, of every other generation's figures in
+ * the same shape, each carrying its `generation`. `order` is `generations()`
+ * of the units that place each cell's generations; by default these same
+ * units, but a caller tallying a subset passes the whole set's, so a subset
+ * never moves a cell's newest generation.
  */
 export function tally(units, order = generations(units)) {
   const figures = (generation) => ({ generation, n: 0, merged: 0, claims: 0, failed: 0, spend: 0, left_out: 0, unpriced: 0, pending: 0 });

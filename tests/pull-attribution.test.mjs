@@ -523,6 +523,78 @@ test("the newest generation is the latest Pull's by session id, then file order,
   assert.equal(tally(units(same))[0].generation, "model-a");
 });
 
+test("within one session the later Pull places its generation even when an earlier Pull shares it: A, B, A reads A newest", () => {
+  const w = world();
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 1 });
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 1 });
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 1 });
+  const [t] = tally(units(w));
+  assert.deepEqual([t.generation, t.n, t.older.map((o) => o.generation)], ["model-a", 2, ["model-b"]]);
+});
+
+test("a cell's older generations are listed newest first: A, then B, then C reads C newest, then B, then A", () => {
+  const w = world();
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 1 });
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 1, session: SESSION2 });
+  addPulls(w, { cell: "smol-high", model: "model-c", count: 1, session: SESSION3 });
+  const [t] = tally(units(w));
+  assert.deepEqual([t.generation, t.older.map((o) => o.generation)], ["model-c", ["model-b", "model-a"]]);
+});
+
+test("dispatch order is the session, then the bare name, then a shorter retry suffix before a longer, then by letter, a member's path prefix aside", () => {
+  // Each Pull's Admissible rows, written in the file in the order given; the first dispatched names its generation.
+  const pullOf = (ticket, rows) => {
+    const w = world();
+    w.features.push(pull(ticket, "smol-high"));
+    w.members.push(...rows.map(([agent, dispatchModel, o = {}]) => impl(ticket, "smol-high", { agent, dispatchModel, ...o })));
+    return units(w)[0].generation;
+  };
+  assert.equal(pullOf(60, [["impl-60", "model-later", { session: SESSION2 }], ["impl-60-b", "model-b"]]), "model-b", "an earlier session's retry before a later session's bare name");
+  assert.equal(pullOf(61, [["impl-61-aa", "model-aa"], ["impl-61-z", "model-z"]]), "model-z", "`-z` before `-aa`");
+  assert.equal(pullOf(62, [["impl-62-c", "model-c"], ["impl-62-b", "model-b"]]), "model-b", "`-b` before `-c`");
+  assert.equal(pullOf(63, [["impl-63-b", "model-b", { member: "team/impl-63-b" }], ["impl-63", "model-a", { member: "team/impl-63" }]]), "model-a", "the bare name before its retry under a path prefix");
+});
+
+test("the fit names each cell's newest generation as the guard does: ranked over every windowed Pull, whatever the fit's restriction or the stratum", () => {
+  const w = world();
+  baseline(w);
+  // task-high: 21 on A the fit reads, then one on C that a live B classifier
+  // routed — outside the fit's rows, yet C is task-high's newest generation.
+  addPulls(w, { cell: "task-high", model: "model-a", count: 21, usd: 1 });
+  addPulls(w, { cell: "task-high", model: "model-c", count: 1, session: SESSION2 });
+  Object.assign(w.features.at(-1), { exploration_draw: "", sizing_src: "llm" });
+  // smol-high: 25 light on A, 22 light on B, then one heavy on A, so A is newest in the light stratum too.
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 25, usd: 2 });
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 22, usd: 2, session: SESSION2 });
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 1, usd: 2, session: SESSION3 });
+  w.features.at(-1).criteria = "9";
+  const { report, table } = guarded(w);
+  const newest = Object.fromEntries(report.cells.map((c) => [c.cell, c.generation]));
+  assert.deepEqual([newest["task-high"], newest["smol-high"]], ["model-c", "model-a"]);
+  for (const [s, cells] of Object.entries(table.estimates)) {
+    for (const [cell, e] of Object.entries(cells)) assert.equal(e.generation, newest[cell], `${s} ${cell}`);
+  }
+  const task = table.estimates["*"]["task-high"];
+  assert.deepEqual([task.n, task.older["model-a"].n], [0, 21]);
+  assert.deepEqual([table.estimates.light["smol-high"].n, table.estimates.light["smol-high"].older["model-b"].n], [25, 22]);
+  assert.ok(Object.values(table.rows).every((c) => c !== "task-high"), "A's 21 at $1 clear MIN_N, but A is not task-high's newest generation");
+});
+
+test("the guard's median, router $ and interval read each generation's own Pulls, the interval against the baseline's newest generation alone", () => {
+  const w = world();
+  baseline(w, { model: "model-s0", usd: 40 });
+  baseline(w, { session: SESSION2 });
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 3, usd: 20 });
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 3, usd: 2, session: SESSION2 });
+  for (const f of w.features) if (f.chosen_cell === "smol-high") f.router_usd = f.session === SESSION2 ? "0.5" : "0.25";
+  const { report } = guarded(w);
+  const smol = report.cells.find((c) => c.cell === "smol-high");
+  assert.deepEqual([smol.generation, smol.median_usd, smol.router_usd], ["model-b", 2, 1.5]);
+  assert.deepEqual(smol.older.map((o) => [o.generation, o.median_usd, o.router_usd, o.usd_diff_ci95]), [["model-a", 20, 0.75, null]]);
+  // Every Pull of a generation costs the same, so every resample's difference is B's $2 less the baseline newest's $10.
+  assert.deepEqual(smol.usd_diff_ci95, [-8, -8]);
+});
+
 test("on the committed corpus, smol-high's newest generation is claude-haiku-5-5, and the fit and the guard print the same per-generation figures", () => {
   const read = (f) => readFileSync(new URL(`../docs/metrics/${f}`, import.meta.url), "utf8");
   const members = parseMemberTsv(read("member-outcomes.tsv"));

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { Pin } from "./support/prose-pin.mjs";
 import { COLUMNS, formatTsv } from "../plugin/scripts/member-outcomes.mjs";
-import { FEATURE_COLUMNS } from "../plugin/scripts/pull-attribution.mjs";
+import { attribute, FEATURE_COLUMNS } from "../plugin/scripts/pull-attribution.mjs";
 import { readout, stoppingRule, GATE, STOP } from "../plugin/scripts/cell-readout.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/cell-readout.mjs", import.meta.url));
@@ -171,6 +171,26 @@ test("a comparison needs a resolved (model, effort) that differs from slow-high'
   assert.equal(rows.find((x) => x.cell === "task-high").comparisons, 0);
   assert.equal(rows.find((x) => x.cell === "slow-medium").comparisons, 1);
   assert.equal(rows.find((x) => x.cell === "slow-high"), undefined, "slow-high is the baseline, never a readout line");
+});
+
+test("a comparison and the models column read the dispatch model, never the last turn's model", () => {
+  const w = world();
+  const dispatched = (session, cell, dispatchModel, model) => {
+    addRow(w, { session, date: "2026-10-01", cell, model });
+    w.members.at(-1).dispatchModel = dispatchModel;
+  };
+  // task-high dispatched on slow-high's own model at the same level: empty
+  // comparisons, whether its last turn left no model or fell back to another provider
+  dispatched("sBlank", "task-high", "claude-opus-5", "");
+  addRow(w, { session: "sBlank", date: "2026-10-01", cell: "slow-high" });
+  dispatched("sFallback", "task-high", "claude-opus-5", "ollama");
+  addRow(w, { session: "sFallback", date: "2026-10-01", cell: "slow-high" });
+  // dispatched on another model, though its last turn names slow-high's: a real comparison
+  dispatched("sOther", "task-high", "claude-sonnet-5", "claude-opus-5");
+  addRow(w, { session: "sOther", date: "2026-10-01", cell: "slow-high" });
+  const task = readout(parsed(w)).cells.find((x) => x.cell === "task-high");
+  assert.equal(task.comparisons, 1);
+  assert.deepEqual([...task.models], [["claude-opus-5", 2], ["claude-sonnet-5", 1]]);
 });
 
 test("a run_date is the comparison session's member-outcomes run_date, not the ticket-features one", () => {
@@ -811,6 +831,45 @@ test("stopping rule: a cell is judged on its newest generation's rulings alone, 
   addVerdicts(flipped, "smol-high", 10, 10, { session: NEW, model: "model-b" });
   const now = judged(flipped, added, "smol-high");
   assert.deepEqual([now.generation, now.failures, now.stop], ["model-b", 10, true]);
+});
+
+test("stopping rule: older generations are those with a verdict, newest first, ranked with every admissible Pull, one dated before the definition included", () => {
+  const added = { "smol-high": "2026-09-15" };
+  const at = (n) => `2026-10-0${n}T00-00-00-000Z_gen`;
+  const w = world();
+  addVerdicts(w, "smol-high", 2, 2, { session: at(1), model: "model-a" });
+  addVerdicts(w, "smol-high", 1, 0, { session: at(2), model: "model-b" });
+  // An admissible Pull with no ruling: a generation with no verdict.
+  addRow(w, { session: at(3), date: "2026-10-03", cell: "smol-high", model: "model-c" });
+  // The latest Pull, dated before the definition was added: never countable,
+  // yet it places the cell's newest generation.
+  addRow(w, { session: at(4), date: "2026-09-01", cell: "smol-high", model: "model-d" });
+  w.features.at(-1).run_date = "2026-09-01";
+  const cell = judged(w, added, "smol-high");
+  assert.deepEqual([cell.generation, cell.verdicts, cell.failures, cell.stop], ["model-d", [], 0, false]);
+  assert.deepEqual(cell.older.map((o) => [o.generation, o.verdicts.length, o.failures]), [["model-b", 1, 0], ["model-a", 2, 2]]);
+});
+
+test("stopping rule: a Pull's generation is the guard's — its first Admissible implementer row in dispatch order, over the drawn row and its retries", () => {
+  const added = { "smol-high": "2026-09-01" };
+  const retry = (m, dispatchModel) => ({ ...m, agent: `${m.agent}-b`, member: `${m.member}-b`, dispatchModel });
+  const guard = (w) => attribute({ ...parsed(w), tiers: w.verdicts }).map((u) => u.generation);
+  // The drawn row has no dispatch model, so its retry's places the Pull.
+  const blank = world();
+  addVerdicts(blank, "smol-high", 1, 1);
+  blank.members.push(retry(blank.members[0], "model-b"));
+  blank.members[0].dispatchModel = "";
+  const b = judged(blank, added, "smol-high");
+  assert.deepEqual([b.generation, b.verdicts.length], ["model-b", 1]);
+  assert.deepEqual(guard(blank), ["model-b"]);
+  // The features row names the retry, yet the bare `impl-<N>` row is first in dispatch order.
+  const named = world();
+  addVerdicts(named, "smol-high", 1, 1, { model: "model-a" });
+  named.members.push(retry(named.members[0], "model-b"));
+  named.features[0].agent += "-b";
+  const n = judged(named, added, "smol-high");
+  assert.deepEqual([n.generation, n.verdicts.length], ["model-a", 1]);
+  assert.deepEqual(guard(named), ["model-a"]);
 });
 
 // A counted Pull whose date cannot be placed against the cell's definition

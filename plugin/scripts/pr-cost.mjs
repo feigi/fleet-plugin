@@ -142,26 +142,29 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   const counted = units.filter((u) => u.status === "counted");
   const tallies = new Map(tally(units).map((t) => [t.cell, t]));
   const countedIn = (cell, generation) => counted.filter((u) => u.cell === cell && u.generation === generation);
-  const bootUnits = (cell, generation) => countedIn(cell, generation).map((u) => ({ usd: u.spend, merged: u.merged ? 1 : 0 }));
+  const bootUnits = (us) => us.map((u) => ({ usd: u.spend, merged: u.merged ? 1 : 0 }));
   const meanUsd = (t) => (t.merged ? t.spend / t.merged : null);
   const base = tallies.get(BASELINE_CELL) ?? null;
   // One generation's figures. The interval is the newest generation's against
   // the baseline's newest; an older generation is printed, never compared.
-  const figuresOf = (cell, g, newest) => ({
-    cell,
-    generation: g.generation,
-    n_pulls: g.n,
-    n_merged: g.merged,
-    n_claims: g.claims,
-    n_failed: g.failed,
-    fail_rate: g.claims ? round(g.failed / g.claims) : null,
-    mean_usd: round(meanUsd(g), 2),
-    median_usd: round(median(countedIn(cell, g.generation).filter((u) => u.merged).map((u) => u.spend)), 2),
-    router_usd: round(countedIn(cell, g.generation).reduce((s, u) => s + routerUsd(u.pull), 0), 4),
-    usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(cell, g.generation), bootUnits(BASELINE_CELL, base.generation)),
-    left_out: g.left_out,
-    unpriced: g.unpriced,
-  });
+  const figuresOf = (cell, g, newest) => {
+    const mine = countedIn(cell, g.generation);
+    return {
+      cell,
+      generation: g.generation,
+      n_pulls: g.n,
+      n_merged: g.merged,
+      n_claims: g.claims,
+      n_failed: g.failed,
+      fail_rate: g.claims ? round(g.failed / g.claims) : null,
+      mean_usd: round(meanUsd(g), 2),
+      median_usd: round(median(mine.filter((u) => u.merged).map((u) => u.spend)), 2),
+      router_usd: round(mine.reduce((s, u) => s + routerUsd(u.pull), 0), 4),
+      usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(mine), bootUnits(countedIn(BASELINE_CELL, base.generation))),
+      left_out: g.left_out,
+      unpriced: g.unpriced,
+    };
+  };
   const figures = [...tallies.values()].map((t) => ({
     ...figuresOf(t.cell, t, true),
     excluded: t.excluded,

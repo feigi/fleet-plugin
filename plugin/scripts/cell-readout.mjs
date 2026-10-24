@@ -22,7 +22,7 @@
 //
 // COMPARISON. For a cell X other than slow-high, a comparison is one session
 // holding at least one admissible X row and at least one admissible slow-high
-// row whose resolved (`model`, `effort`) differ from that X row's. A session
+// row whose (`dispatch_model`, `effort`) differ from that X row's. A session
 // counts once however many rows it holds, and its date is its member-outcomes
 // `run_date`; a blank `run_date` means unknown, so that session is still a
 // comparison but adds no date to the distinct-date count.
@@ -33,12 +33,13 @@
 //
 //   <cell> <comparisons> <run_dates> <resolved models>
 //
-// `<resolved models>` is the model of every admissible row at the cell — one
-// model by name, or `mixed (<model-a> n=…, <model-b> n=…)` when they span more
-// than one, because a role's target is operator config that can move under a
-// cell's history. A cell below the gate prints nothing on stdout and one
-// `below the gate` count on stderr. Neither the gate line nor that count names
-// a session, ticket or member: the gate forbids reading a comparison early.
+// `<resolved models>` is the `dispatch_model` of every admissible row at the
+// cell — one model by name, or `mixed (<model-a> n=…, <model-b> n=…)` when
+// they span more than one, because a role's target is operator config that
+// can move under a cell's history. A cell below the gate prints nothing on
+// stdout and one `below the gate` count on stderr. Neither the gate line nor
+// that count names a session, ticket or member: the gate forbids reading a
+// comparison early.
 // Only the refusal of conflicting ticket-features rows names a session and an
 // agent, and it prints nothing on stdout.
 //
@@ -49,7 +50,11 @@
 // the ticket's last Pull in file order, at any cell, slow-high included,
 // dated on or before the ruling. Dates only set that floor: a ruling counts
 // for a Pull only when dated on or after it, and neither pick is the
-// latest-dated row. A Pull at X is
+// latest-dated row. A Pull's GENERATION is pull-attribution.mjs's
+// (`pullGenerations`): the `dispatch_model` of its first Admissible
+// implementer row in dispatch order, over every implementer row booked to
+// the Pull, its retries included, so the guard and this rule never name two
+// generations for one Pull. A Pull is admissible here when it has one. A Pull at X is
 // COUNTABLE when X is a cell other than slow-high whose definition is live
 // and the Pull is admissible and dated on or after the day X's
 // `fleet-implementer-<cell>` definition was most recently added. The ruling
@@ -69,10 +74,10 @@
 // the day X's definition was added, and dropping it would uncount its ruling.
 // X is to be withdrawn once its newest generation has at least STOP.verdicts
 // verdicts and floor failures ÷ verdicts is at least STOP.failRate. A ruling
-// counts for its carrier's generation, the carrier's `dispatch_model`; a
-// cell's newest generation is that of its latest admissible Pull, by session
-// id, then file order. An older generation's verdicts are returned beside the
-// newest's and never withdraw the cell.
+// counts for its carrier's generation; a cell's newest generation is that of
+// its latest admissible Pull, by session id, then file order. An older
+// generation's verdicts are returned beside the newest's and never withdraw
+// the cell.
 //
 // Exit 0 whatever the counts; 2 on a usage error or an unreadable or
 // malformed input, with nothing on stdout.
@@ -82,7 +87,7 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { POLICY_CELL } from "./ledger-grammar.mjs";
 import { formatTsv as formatMemberTsv, parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { admissibleRow, generations, parseFeatures } from "./pull-attribution.mjs";
+import { admissibleRow, generations, parseFeatures, pullGenerations } from "./pull-attribution.mjs";
 import { DATE, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
 const NAME = "cell-readout";
@@ -132,7 +137,7 @@ function indexMembers(members) {
  * `cells`: one entry per cell other than the policy cell that has a
  * ticket-features row, `{ cell, comparisons, runDates, dates, models, gated }`,
  * sorted by cell. `dates` is the comparisons' distinct run_dates, sorted;
- * `models` maps each resolved model of the cell's admissible rows to its row
+ * `models` maps each `dispatch_model` of the cell's admissible rows to its row
  * count, largest first. `unjoined` counts Pulls with no member row. Throws on
  * two ticket-features rows of one session+agent naming different cells, and on
  * a member-outcomes session+agent repeated with different fields.
@@ -148,9 +153,9 @@ export function readout({ features, members }) {
     if (!byKey.has(key(p.session, p.agent))) unjoined++;
     const m = admissibleMember(p, byKey);
     if (!m) continue;
-    if (p.chosen_cell !== POLICY_CELL) cells.get(p.chosen_cell).set(m.model, (cells.get(p.chosen_cell).get(m.model) ?? 0) + 1);
+    if (p.chosen_cell !== POLICY_CELL) cells.get(p.chosen_cell).set(m.dispatchModel, (cells.get(p.chosen_cell).get(m.dispatchModel) ?? 0) + 1);
     if (!sessions.has(p.session)) sessions.set(p.session, { runDate: m.run_date, rows: [] });
-    sessions.get(p.session).rows.push({ cell: p.chosen_cell, model: m.model, effort: m.effort });
+    sessions.get(p.session).rows.push({ cell: p.chosen_cell, model: m.dispatchModel, effort: m.effort });
   }
 
   const out = [...cells].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([cell, modelCounts]) => {
@@ -180,14 +185,15 @@ export function readout({ features, members }) {
  * A ticket's ruling is its last ruling row in file order, charged to the cell
  * of its carrier, the ticket's last Pull in file order at any cell dated on or
  * before the ruling, and only when that Pull is
- * countable: admissible, at a cell named in `added` other than the policy
+ * countable: admissible (it has a generation, pull-attribution.mjs's
+ * `pullGenerations`), at a cell named in `added` other than the policy
  * cell, and dated on or after the day that cell's definition was added.
- * A ruling is charged to its carrier's generation too, the carrier's
- * `dispatch_model`, and `generation`, `verdicts`, `failures` and `stop` are the
- * cell's newest generation's alone (pull-attribution.mjs's `generations`, over
- * the cell's admissible Pulls; null when it has none). `older` holds each other
- * generation's `{ generation, verdicts, failures }`, newest first, and never
- * a stop.
+ * A ruling is charged to its carrier's generation too, and `generation`,
+ * `verdicts`, `failures` and `stop` are the cell's newest generation's alone
+ * (pull-attribution.mjs's `generations`, over the cell's admissible Pulls;
+ * null when it has none). `older` holds `{ generation, verdicts, failures }`
+ * for each other generation with at least one verdict, newest first, and
+ * never a stop.
  * Throws on a non-blank ruling row of a ticket with a countable Pull whose
  * `closed_own_ticket` or `minted_false_claim` is not `yes` or `no` or whose
  * `run_date` is not `YYYY-MM-DD`,
@@ -197,22 +203,25 @@ export function readout({ features, members }) {
  * repeated with different fields.
  */
 export function stoppingRule({ features, members, verdicts, added }) {
-  const byKey = indexMembers(members);
+  indexMembers(members); // refuses a session+agent repeated with different fields
   const rulings = rulingsByTicket(verdicts);
   const charged = new Map(Object.keys(added).filter((c) => c !== POLICY_CELL).map((c) => [c, new Map()]));
   const dated = (p) => {
     if (!DATE.test(p.run_date)) throw new Error(`ticket #${p.ticket} (Pull ${p.agent} at ${p.chosen_cell}): run_date is '${p.run_date}', expected YYYY-MM-DD`);
     return p.run_date;
   };
+  // A Pull's generation is pull-attribution's, read over all of its implementer
+  // rows; a Pull with none is not admitted.
+  const generationOf = pullGenerations(features, members);
   const countable = new Map(); // Pull -> its generation
-  const admitted = []; // every admissible Pull at a judged cell, as generations() reads one
+  const admitted = []; // every Pull with a generation at a judged cell, as generations() reads one
   const pullsByTicket = new Map();
   for (const p of features) {
     (pullsByTicket.get(p.ticket) ?? pullsByTicket.set(p.ticket, []).get(p.ticket)).push(p);
-    const m = charged.has(p.chosen_cell) ? admissibleMember(p, byKey) : null;
-    if (!m) continue;
-    admitted.push({ cell: p.chosen_cell, generation: m.dispatchModel, pull: p });
-    if (dated(p) >= added[p.chosen_cell]) countable.set(p, m.dispatchModel);
+    const g = charged.has(p.chosen_cell) ? generationOf.get(p) : null;
+    if (!g) continue;
+    admitted.push({ cell: p.chosen_cell, generation: g, pull: p });
+    if (dated(p) >= added[p.chosen_cell]) countable.set(p, g);
   }
   for (const [ticket, pulls] of pullsByTicket) {
     if (!pulls.some((p) => countable.has(p))) continue;
