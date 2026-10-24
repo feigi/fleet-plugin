@@ -45,7 +45,8 @@ green: `git fetch origin && git rebase origin/main`, take the commit back with
 that stages such a path again on the rebased base → push nothing and report
 that cause. Equal trees need no re-run. The controller refuses a report whose
 head's tree has no green record, and exit 75 from it is no test result — run it
-again.
+again. So is exit 143, 130 or 129: it received a SIGTERM, SIGINT or SIGHUP and
+recorded nothing — run it again with `timeout: 0` on the call.
 
 Your report is a file, `<scratch>/reports/<your name>.json`, `<your name>` the
 `impl-<N>[-x]` you were dispatched as, in the shape
