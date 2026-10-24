@@ -11,7 +11,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -280,6 +280,75 @@ test("a Test entrypoint killed by a signal records 128 plus the signal number", 
   const r = f.record("impl-5", { testCmd: "kill -TERM $$" });
   assert.equal(r.status, 1, r.stderr);
   assert.equal(f.readRecord("impl-5").test.exitCode, 143);
+});
+
+// recipe-check, started asynchronously, sent `signal` once `marker` exists: its
+// exit status, the signal it died of (null when it exited), and its stderr.
+async function killedRun(f, { testCmd, marker, signal }) {
+  const child = spawn(process.execPath, [RECIPE_CHECK, "--member", "impl-5", "--testCmd", testCmd, "--reports", f.reports], { cwd: f.work, env: f.env, stdio: ["ignore", "pipe", "pipe"] });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (d) => (stderr += d));
+  child.stdout.resume();
+  const exited = new Promise((resolve) => child.on("close", (status, sig) => resolve({ status, sig })));
+  const deadline = Date.now() + 30_000;
+  while (!existsSync(marker) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(existsSync(marker), `the command never started\n${stderr}`);
+  child.kill(signal);
+  const result = await exited;
+  return { ...result, stderr };
+}
+
+test("a SIGTERM to recipe-check during the Test entrypoint records nothing, exits 143 and says it was killed", async () => {
+  const f = fixture();
+  f.stage();
+  assert.equal(f.record("impl-5").status, 0);
+  const before = readFileSync(f.recordFile("impl-5"), "utf8");
+  const marker = join(f.root, "test-started");
+  const r = await killedRun(f, { testCmd: `: > '${marker}'; exec sleep 600`, marker, signal: "SIGTERM" });
+  assert.equal(r.status, 143, r.stderr);
+  assert.equal(r.sig, null, "the exit status is set, the signal never re-raised");
+  assert.equal(readFileSync(f.recordFile("impl-5"), "utf8"), before, "an older record is left byte-identical");
+  const last = r.stderr.trimEnd().split("\n").pop();
+  assert.match(last, /^recipe-check: SIGTERM received during the Test entrypoint, which ran \d+ s;/);
+  assert.match(last, /no test result/);
+  assert.match(last, /nothing was recorded/);
+  assert.match(last, /timeout: 0/);
+});
+
+test("a SIGINT to recipe-check writes no record and exits 130, a SIGHUP 129", async () => {
+  for (const [signal, status] of [["SIGINT", 130], ["SIGHUP", 129]]) {
+    const f = fixture();
+    f.stage();
+    const marker = join(f.root, "test-started");
+    const r = await killedRun(f, { testCmd: `: > '${marker}'; exec sleep 600`, marker, signal });
+    assert.equal(r.status, status, r.stderr);
+    assert.equal(existsSync(f.recordFile("impl-5")), false);
+    assert.match(r.stderr.trimEnd().split("\n").pop(), new RegExp(`^recipe-check: ${signal} `));
+  }
+});
+
+test("a SIGTERM to recipe-check during the Check step records nothing and never starts the Test entrypoint", async () => {
+  const f = fixture({ check: ": > ../check-started; exec sleep 600" });
+  f.stage();
+  const marker = join(f.root, "check-started");
+  const testMarker = join(f.root, "test-started");
+  const r = await killedRun(f, { testCmd: `: > '${testMarker}'`, marker, signal: "SIGTERM" });
+  assert.equal(r.status, 143, r.stderr);
+  assert.equal(existsSync(f.recordFile("impl-5")), false);
+  assert.equal(existsSync(testMarker), false, "the Test entrypoint never started");
+  assert.match(r.stderr.trimEnd().split("\n").pop(), /^recipe-check: SIGTERM received during the Check step, which ran \d+ s;/);
+});
+
+test("a command that ignores the forwarded signal and exits 0 still leaves the run killed, the Test entrypoint unstarted", async () => {
+  const f = fixture({ check: "trap 'exit 0' TERM; : > ../check-started; while :; do sleep 0.1; done" });
+  f.stage();
+  const marker = join(f.root, "check-started");
+  const testMarker = join(f.root, "test-started");
+  const r = await killedRun(f, { testCmd: `: > '${testMarker}'`, marker, signal: "SIGTERM" });
+  assert.equal(r.status, 143, r.stderr);
+  assert.equal(existsSync(f.recordFile("impl-5")), false);
+  assert.equal(existsSync(testMarker), false);
 });
 
 test("a reader that closes the output early stops only the passthrough: the record is still written", () => {

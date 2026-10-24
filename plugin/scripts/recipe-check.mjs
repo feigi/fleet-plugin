@@ -58,8 +58,14 @@
 //
 // A record is written whenever a command ran and failed, so a red run
 // replaces an older record rather than leaving it standing; it records the
-// failure, and settle refuses on it. A record is a claim, no attestation: the
-// member produces it, and nothing here stops a forged one.
+// failure, and settle refuses on it. A run that is killed is the exception: a
+// SIGTERM, SIGINT or SIGHUP this script itself receives is forwarded to the
+// running command, no further command starts, and nothing is written, so an
+// older record stays where it is — settle compares the record's tree with the
+// reported head's tree, so a stale one cannot pass for this run. A command that
+// dies of a signal this script did not receive is a failure like any other,
+// recorded red as the signal's number plus 128. A record is a claim, no
+// attestation: the member produces it, and nothing here stops a forged one.
 //
 // Exit status: 0 both commands passed and the record is written; 1 a command
 // failed — the record says which, and the script's stderr names it; 2 a
@@ -67,7 +73,13 @@
 // could not be read, a working tree that is not the staged tree, a reports
 // directory that could not be created); 75 the Test entrypoint printed exit
 // 75 — the suite wrapper found no slot and launched nothing, which is no test
-// result — so no record is written, and the same command is to be run again.
+// result — so no record is written, and the same command is to be run again;
+// 143, 130 or 129 the script itself received a SIGTERM, a SIGINT or a
+// SIGHUP, 128 plus the signal's number, set as the exit status and never
+// re-raised, so the queued output and the last stderr line — which names the
+// signal, the step and the seconds it ran — still arrive. That is no test
+// result either: nothing is written, and the same command is to be run again
+// with `timeout: 0` on the call.
 
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -87,6 +99,8 @@ const DERIVE = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh"
 const GIT_TIMEOUT_MS = 30_000;
 // What the suite wrapper exits with when it found no slot and launched nothing.
 const NO_SLOT = 75;
+// The signals this script forwards to the running command, and treats as a kill.
+const KILL_SIGNALS = ["SIGTERM", "SIGINT", "SIGHUP"];
 // The tail of a command's output kept for the counts: a runner prints its
 // summary last.
 const TAIL_BYTES = 256 * 1024;
@@ -185,16 +199,32 @@ async function cli() {
       if (e.code !== "EPIPE") throw e;
     });
   }
+  // A SIGTERM, SIGINT or SIGHUP this script itself receives is forwarded to
+  // the running command and marks the run killed: no further command starts
+  // and nothing is recorded. The handlers stay for the whole run, so a signal
+  // never takes the default action and cuts off the output still queued.
+  const run = { killed: null, child: null, step: null, startedAt: 0, ranMs: 0 };
+  for (const sig of KILL_SIGNALS) {
+    process.on(sig, () => {
+      run.killed ??= sig;
+      run.child?.kill(sig);
+    });
+  }
   const check = checkCmd.trim() === "true"
     ? { command: checkCmd, ran: false, exitCode: 0, pass: null, fail: null }
-    : await runCommand(checkCmd, top, env);
-  const test = check.exitCode === 0
-    ? await runCommand(testCmd, top, env)
+    : await runCommand(run, "Check step", checkCmd, top, env);
+  const test = check.exitCode === 0 && run.killed === null
+    ? await runCommand(run, "Test entrypoint", testCmd, top, env)
     : { command: testCmd, ran: false, exitCode: null, pass: null, fail: null };
 
   // process.exitCode, never process.exit(): the command's own output is still
   // draining through async pipe writes, and exit discards what is queued.
   const say = (line) => writeAll(2, `\n${NAME}: ${line}\n`);
+  if (run.killed !== null) {
+    say(`${run.killed} received during the ${run.step}, which ran ${Math.round(run.ranMs / 1000)} s; there is no test result and nothing was recorded — run the same command again with \`timeout: 0\` on the call`);
+    process.exitCode = 128 + osConstants.signals[run.killed];
+    return;
+  }
   if (test.exitCode === NO_SLOT) {
     say(`the Test entrypoint exited ${NO_SLOT}: no suite slot was free and nothing was launched — run the same command again; no record written`);
     process.exitCode = NO_SLOT;
@@ -225,16 +255,19 @@ async function cli() {
 if (isCLI(import.meta.url)) await cli();
 
 // One command, `sh -c` from `cwd`, its output passed through and its tail kept
-// for the counts. A signal that stops it is its number plus 128.
-function runCommand(command, cwd, env) {
+// for the counts. A signal that stops it is its number plus 128. `run` carries
+// the child to the signal handlers, and the step's name and duration to the
+// kill message.
+function runCommand(run, step, command, cwd, env) {
   return new Promise((resolve) => {
     let tail = "";
     const keep = (chunk) => {
       tail = (tail + chunk).slice(-TAIL_BYTES);
     };
     const child = spawn("sh", ["-c", command], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
-    const handlers = ["SIGTERM", "SIGINT", "SIGHUP"].map((sig) => [sig, () => child.kill(sig)]);
-    for (const [sig, h] of handlers) process.on(sig, h);
+    run.child = child;
+    run.step = step;
+    run.startedAt = Date.now();
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (d) => {
@@ -246,7 +279,8 @@ function runCommand(command, cwd, env) {
       process.stderr.write(d);
     });
     const done = (exitCode) => {
-      for (const [sig, h] of handlers) process.off(sig, h);
+      run.child = null;
+      run.ranMs = Date.now() - run.startedAt;
       const { pass, fail } = parseCounts(tail);
       resolve({ command, ran: true, exitCode, pass, fail });
     };
