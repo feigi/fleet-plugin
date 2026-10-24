@@ -250,6 +250,16 @@ test("impl-N=bailed: a null bailCause is exit 3", () => {
   f.refused("impl-5", 3, /failed: bailCause: null/);
 });
 
+test("impl-N=bailed: a bail that names a PR or a head is not a report — exit 2, nothing settled bailed", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  const bailed = (over) => implReport(f, { outcome: "bailed", pr: null, head: null, bailCause: "hands", bailDetail: "needs a token", ...over });
+  f.report("impl-5", bailed({ pr: 6 }));
+  f.refused("impl-5", 2, /is not a impl report — \$\.pr: 6 is not null, with outcome "bailed" — a bail reports no PR/);
+  f.report("impl-5", bailed({ head: f.head }));
+  f.refused("impl-5", 2, /\$\.head: "[0-9a-f]{40}" is not null, with outcome "bailed" — a bail reports no PR/);
+});
+
 // -- impl-N=blocked -----------------------------------------------------------
 
 const blockedReport = (f, over = {}) => implReport(f, {

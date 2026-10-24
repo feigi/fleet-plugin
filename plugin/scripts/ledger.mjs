@@ -2507,7 +2507,9 @@ function recordFiled(id, subject) {
 //                             reads OPEN and its closingIssuesReferences in its
 //                             own repository name N;
 //                             the Check-step record (below) holds for <head>
-//   impl-N=bailed             bailCause is not null; the receipt names it
+//   impl-N=bailed             bailCause is not null; the receipt names it.
+//                             report-schema.mjs already refuses a bail that
+//                             names a pr or a head
 //   impl-N=blocked            nothing to check: report-schema.mjs already
 //                             refuses a block that names a bailCause, a pr or
 //                             a head, or gives no reason in bailDetail
