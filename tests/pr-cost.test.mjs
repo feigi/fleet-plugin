@@ -173,7 +173,7 @@ test("--guard: an unreadable input is exit 2 and writes no guard file", () => {
   addCell(w, "slow-high", MIN_N, 0, 10);
   const bad = runCli(w, ["--guard"], { features: `${FEATURE_COLUMNS.join("\t")}\n${DAY}\tshort-row\n` });
   assert.equal(bad.status, 2);
-  assert.match(bad.stderr, /ticket-features\.tsv row 1: 2 fields, expected 18/);
+  assert.match(bad.stderr, new RegExp(`ticket-features\\.tsv row 1: 2 fields, expected ${FEATURE_COLUMNS.length}`));
   assert.equal(bad.guard, null);
   const noCell = runCli(w, ["--guard"], { features: featuresText(w).replace("\tslow-high\t\t", "\tfast-high\t\t") });
   assert.equal(noCell.status, 2);
@@ -332,8 +332,11 @@ test("the retire condition holds once every non-default stage-1 cell has tripped
   const both = computeReport(parsed(w));
   assert.deepEqual([both.tripped, both.retire], [["smol-high", "task-high"], true]);
   assert.equal(guardFile(both, "t").retire, true);
-  // A stratum that already adopted a non-default cell keeps the router.
-  assert.equal(computeReport({ ...parsed(w), routerTable: { rows: { "*": "slow-high", light: "task-high" } } }).retire, false);
+  // A row of either objective's set that already adopted a non-default cell keeps the router.
+  const sets = (cost, speed = cost) => ({ rows: { cost, speed } });
+  assert.equal(computeReport({ ...parsed(w), routerTable: sets({ "*": "slow-high", light: "task-high" }) }).retire, false);
+  assert.equal(computeReport({ ...parsed(w), routerTable: sets({ "*": "slow-high" }, { "*": "slow-high", light: "task-high" }) }).retire, false, "a speed row alone adopting a cell keeps it too");
+  assert.equal(computeReport({ ...parsed(w), routerTable: sets({ "*": "slow-high" }) }).retire, true, "every row of both sets at the default is no adoption");
 });
 
 test("trips() takes the 15-point margin in counts, so 3 of 20 is exactly the margin", () => {

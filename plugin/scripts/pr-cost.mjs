@@ -102,7 +102,7 @@ export function trips(cell, base) {
 export function computeReport({ members, tiers, features, prs, routerTable = null, pricing = null, windowStart = WINDOW_START }) {
   const units = attribute({ features, members, tiers, prs, windowStart });
   const tallies = new Map(tally(units).map((t) => [t.cell, t]));
-  const bootUnits = (g) => g.pulls.map(bootUnit);
+  const bootUnits = (g) => g.pulls.map((u) => bootUnit(u));
   const meanUsd = (t) => (t.merged ? t.spend / t.merged : null);
   const base = tallies.get(BASELINE_CELL) ?? null;
   // One generation's figures. The interval is the newest generation's against
@@ -143,8 +143,9 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
     }
   }
   const verdict = baseline.n < MIN_N ? "none" : tripped.length ? "tripped" : "ok";
-  // Retire: every non-default stage-1 cell tripped before any stratum adopted one.
-  const adopted = Object.values(routerTable?.rows ?? {}).some((c) => c !== BASELINE_CELL);
+  // Retire: every non-default stage-1 cell tripped before any row of either
+  // objective's set adopted one.
+  const adopted = Object.values(routerTable?.rows ?? {}).some((set) => Object.values(set).some((c) => c !== BASELINE_CELL));
   const retire = !adopted && STAGE_1.filter((c) => c !== BASELINE_CELL).every((c) => tripped.includes(c));
 
   return {

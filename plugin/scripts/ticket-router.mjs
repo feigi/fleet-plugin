@@ -3,26 +3,28 @@
 // for dispatch and for the offline fit, because the stratum rule is the one
 // function that must never read differently between the two.
 //
-//   route [--session <dir|id>] --ticket <N> --arm A|B --impl-row <k>
-//         --issue <issue.json> --guard <cost-guard.json>
+//   route [--session <dir|id>] [--objective cost|speed] --ticket <N> --arm A|B
+//         --impl-row <k> --issue <issue.json> --guard <cost-guard.json>
 //         [--sizing <sizing.json>] [--table <router-table.json>]
 //         [--chain-head] [--pending <tsv>]
 //     Prints one line, `POLICY=<cell> CELL=<cell> DRAW=<k/K|->
-//     STRATUM=<light|heavy|unknown> REASON=<reason>`, and appends the Pull's
+//     STRATUM=<light|heavy|unknown> OBJECTIVE=<cost|speed> REASON=<reason>`,
+//     routing by the objective's row set, and appends the Pull's
 //     ticket-features row to the pending TSV (by default
 //     `ticket-features.pending.tsv` beside `--guard`, in the run's `.fleet/`). Exit 0 on
 //     every data degradation — a missing or unreadable issue, sizing or guard
 //     file degrades the line, never the exit. Exit 2 only on a usage error or
 //     an unreadable/invalid table: the caller does not dispatch then. With no
 //     `--session`, the session is the one the phase-0 receipt
-//     `.fleet/phase0.json` records; a receipt that records none is exit 2.
+//     `.fleet/phase0.json` records, and with no `--objective` the objective
+//     is; a receipt that records none is exit 2.
 //   fit --table <json> --features <tsv> --members <tsv> --verdicts <tsv>
 //       --guard <cost-guard.json> --commit <rev> [--due]
 //     Re-fits the table from the three TSVs as committed at `--commit` (read
 //     with `git show`, never from the working tree) and the guard, and
 //     rewrites `--table`, recording the commit's sha as `fitted_commit`, then
-//     prints the fit and one line per row: its cell and the reason, then each
-//     candidate's verdict and range. The TSV flags name paths inside the
+//     prints the fit and one line per row of each objective's set: its cell
+//     and the reason, then each candidate's verdict and range. The TSV flags name paths inside the
 //     repository that holds them. With
 //     `--due`, writes nothing and prints `DUE=yes|no MERGED=<n>/<N>`: whether
 //     N merged PRs have landed since `fitted_commit`, counting the features
@@ -47,7 +49,7 @@ import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { CELL, POLICY_CELL, drawCell, parseMember } from "./ledger-grammar.mjs";
-import { sessionFromReceipt } from "./phase0-receipt.mjs";
+import { OBJECTIVES, objectiveFromReceipt, sessionFromReceipt } from "./phase0-receipt.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import {
   AttributionError, FEATURE_COLUMNS, TRIP_POINTS, attribute, bootUnit, bootstrapDiffCI, generations, parseFeatures, tally, underFloor,
@@ -181,15 +183,29 @@ export function ruleStratum({ brief_chars, criteria }) {
 /** A parsed table, or an Error saying why it is not one. */
 export function validateTable(t) {
   const bad = (why) => new Error(`router table: ${why}`);
-  if (t === null || typeof t !== "object" || Array.isArray(t)) return bad("not a JSON object");
+  const isObject = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
+  if (!isObject(t)) return bad("not a JSON object");
   if (!Array.isArray(t.cells) || t.cells.length === 0) return bad("`cells` is not a non-empty array");
   for (const c of t.cells) if (typeof c !== "string" || !CELL.test(c)) return bad(`\`cells\` holds ${JSON.stringify(c)}, not a cell token`);
   if (new Set(t.cells).size !== t.cells.length) return bad("`cells` repeats a cell");
-  if (t.rows === null || typeof t.rows !== "object" || Array.isArray(t.rows)) return bad("`rows` is not an object");
-  if (!Object.hasOwn(t.rows, "*")) return bad("`rows` has no `*` row");
-  for (const [k, v] of Object.entries(t.rows)) {
-    if (k !== "*" && !STRATA.includes(k)) return bad(`\`rows\` key ${JSON.stringify(k)} is not \`*\` or a stratum`);
-    if (typeof v !== "string" || !CELL.test(v)) return bad(`\`rows.${k}\` is ${JSON.stringify(v)}, not a cell token`);
+  // `rows` and `reasons` are each keyed by objective, then by `*` or a stratum.
+  for (const field of ["rows", "reasons"]) {
+    if (!isObject(t[field])) return bad(`\`${field}\` is not an object`);
+    const stray = Object.keys(t[field]).find((o) => !OBJECTIVES.includes(o));
+    if (stray !== undefined) return bad(`\`${field}\` key ${JSON.stringify(stray)} is not an objective (${OBJECTIVES.join(", ")})`);
+    for (const o of OBJECTIVES) {
+      const set = t[field][o];
+      if (!isObject(set)) return bad(`\`${field}.${o}\` is not an object`);
+      for (const k of Object.keys(set)) {
+        if (k !== "*" && !STRATA.includes(k)) return bad(`\`${field}.${o}\` key ${JSON.stringify(k)} is not \`*\` or a stratum`);
+      }
+    }
+  }
+  for (const o of OBJECTIVES) {
+    if (!Object.hasOwn(t.rows[o], "*")) return bad(`\`rows.${o}\` has no \`*\` row`);
+    for (const [k, v] of Object.entries(t.rows[o])) {
+      if (typeof v !== "string" || !CELL.test(v)) return bad(`\`rows.${o}.${k}\` is ${JSON.stringify(v)}, not a cell token`);
+    }
   }
   if (typeof t.burn_in !== "boolean") return bad("`burn_in` is not a boolean");
   if (!Number.isInteger(t.stage) || t.stage < 1) return bad("`stage` is not a positive integer");
@@ -204,9 +220,13 @@ export function validateTable(t) {
   return t;
 }
 
-/** Arm B runs only once a classifier has passed its gate and some row is not the default. */
-export function bArmLive(table) {
-  return table.classifier.b !== null && Object.values(table.rows).some((c) => c !== POLICY_CELL);
+/**
+ * Arm B runs only once a classifier has passed its gate and some row of the
+ * run's own objective's set is not the default: it decides a paid classifier
+ * call for one Pull, which the other set's rows never route.
+ */
+export function bArmLive(table, objective) {
+  return table.classifier.b !== null && Object.values(table.rows[objective]).some((c) => c !== POLICY_CELL);
 }
 
 const rowFor = (rows, stratum) => rows[stratum] ?? rows["*"];
@@ -253,10 +273,14 @@ export function sessionDate(session) {
 }
 
 /**
- * One Pull's routing. Pure: every input is already read.
+ * One Pull's routing, by `objective`'s row set. Pure: every input is already
+ * read. The exploration draw ignores the objective: it leaves out the cell
+ * the `cost` set routes the Pull to — by the sizing when arm B is live for
+ * the `cost` set, whichever set routes the Pull — so a Pull draws the same
+ * cell under both.
  * @returns {{ line: string, row: Record<string,string> }}
  */
-export function route({ session, ticket, arm, implRow, chainHead = false, issue, sizing = null, guard, table, now = Date.now() }) {
+export function route({ session, ticket, arm, implRow, chainHead = false, issue, sizing = null, guard, table, objective, now = Date.now() }) {
   let reason = null;
   const degrade = (r) => { reason ??= r; };
 
@@ -270,9 +294,10 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
   let sizingSrc = "rule";
   let sizingPre = "";
   let routerUsd = "";
-  const b = arm === "B" && bArmLive(table);
+  const sized = arm === "B" ? readSizing(sizing, table.classifier) : null;
+  const b = arm === "B" && bArmLive(table, objective);
   if (b) {
-    const s = readSizing(sizing, table.classifier);
+    const s = sized;
     if (s === null) {
       degrade("no-sizing");
       stratum = "unknown";
@@ -282,8 +307,11 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
     }
   }
 
-  let policy = rowFor(table.rows, ruleS);
-  let base = b ? rowFor(table.rows, stratum) : policy;
+  const rows = table.rows[objective];
+  let policy = rowFor(rows, ruleS);
+  let base = b ? rowFor(rows, stratum) : policy;
+  const costB = arm === "B" && bArmLive(table, "cost");
+  let drawBase = rowFor(table.rows.cost, costB ? sized?.stratum ?? "unknown" : ruleS);
   let cell;
   let draw = "-";
   if (guard === null) {
@@ -298,10 +326,11 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
       if (tripped.has(policy)) policy = POLICY_CELL;
       if (tripped.has(base)) base = POLICY_CELL;
     }
+    if (tripped.has(drawBase)) drawBase = POLICY_CELL;
     cell = base;
     const exploring = table.burn_in || (implRow % EXPLORE_EVERY === 0 && !chainHead);
     if (exploring) {
-      const policyCell = table.burn_in ? null : base;
+      const policyCell = table.burn_in ? null : drawBase;
       if (table.cells.some((c) => c !== policyCell && tripped.has(c))) degrade("guard-tripped");
       const d = drawCell({ session, ticket, policyCell, cells: table.cells.filter((c) => !tripped.has(c)) });
       if (d.K > 0) {
@@ -315,9 +344,9 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
   const row = {
     run_date: sessionDate(session), session, agent: `impl-${ticket}`, ticket: String(ticket),
     policy_cell: policy, chosen_cell: cell, exploration_draw: draw === "-" ? "" : draw,
-    sizing_src: sizingSrc, sizing_pre: sizingPre, router_usd: routerUsd, ...m,
+    sizing_src: sizingSrc, sizing_pre: sizingPre, router_usd: routerUsd, ...m, objective,
   };
-  return { line: `POLICY=${policy} CELL=${cell} DRAW=${draw} STRATUM=${stratum} REASON=${reason}`, row };
+  return { line: `POLICY=${policy} CELL=${cell} DRAW=${draw} STRATUM=${stratum} OBJECTIVE=${objective} REASON=${reason}`, row };
 }
 
 export function formatFeatureRow(row) {
@@ -393,95 +422,140 @@ function estimate(units, order) {
   return { estimates, pulls };
 }
 
+// What each objective's judge reads and says: the figure per merged PR it
+// minimises (`estimate()`'s name and its bootstrap metric), its verdict for a
+// candidate past the margin and for one with no reliable difference, the key
+// a pair names its better side by, and its reasons for a winner every other
+// qualifier was reliably worse than and for one ahead on the figure.
+const JUDGE = Object.freeze({
+  cost: {
+    figure: "usd_per_merged", metric: "usd", over: "too-dear", unreliable: "not-reliably-cheaper",
+    better: "cheaper", reliably: "reliably-cheaper", ahead: "lower-usd",
+  },
+  speed: {
+    figure: "minutes_per_merged", metric: "minutes", over: "too-slow", unreliable: "not-reliably-faster",
+    better: "faster", reliably: "reliably-faster", ahead: "fewer-minutes",
+  },
+});
+
+// A row's record with no cell: a fresh object each time, since judge() fills
+// in `cells` and `pairs`.
+const unjudged = () => ({ cell: null, reason: "unjudged", cells: {}, pairs: [] });
+
 /**
- * One row's cell — the `*` row's or a stratum's — and why. The quality floor
- * is held twice: pooled by the guard, whose trip takes a cell out of every row
- * and out of the exploration draw, and per row by the fit, which refuses a
- * cell under the floor that row alone. Every figure read is the cell's newest
- * generation's, the default cell's included. `est` and `pulls` are the row's
- * `estimate()` figures and counted Pulls.
+ * One row's cell under one objective — the `*` row's or a stratum's — and
+ * why. The quality floor is held twice: pooled by the guard, whose trip takes
+ * a cell out of every row and out of the exploration draw, and per row by the
+ * fit, which refuses a cell under the floor that row alone. The floor is
+ * measured against the default cell under both objectives. Every figure read
+ * is the cell's newest generation's, the default cell's included. `est` and
+ * `pulls` are the row's `estimate()` figures and counted Pulls; `baseCell` is
+ * the cell the row holds unless a candidate qualifies: the default cell under
+ * `cost`, the `cost` row's cell under `speed`. The figure is $ per merged PR
+ * under `cost` and minutes of work time per merged PR under `speed`.
  *
- * A candidate is a cell of `cells` other than the default cell. Its `verdict`,
- * the first that applies: `tripped` by the guard; `too-few`, under MIN_N
- * merged PRs in the row; `under-floor` against the default cell there;
- * `too-dear`, above ADOPT_RATIO of the default cell's $ per merged PR;
- * `not-reliably-cheaper`, its `range` does not lie wholly below zero (its
- * upper end, as `bootstrapDiffCI` returns it, is not below zero) or there is
- * none; else it `qualifies`. A candidate past `too-few` records whether it is
- * `under_floor`, the floor's `bar` (the default cell's fail rate plus
- * TRIP_POINTS, rounded as a fail rate is, for reading only: the floor compares
- * counts) and its `range`, the bootstrap 95% range of (candidate − default
- * cell) $ per merged PR over those Pulls; the others record null for each.
+ * A candidate is a cell of `cells` other than the base. Its `verdict`, the
+ * first that applies: `tripped` by the guard; `too-few`, under MIN_N merged
+ * PRs in the row; `under-floor` against the default cell there; `too-dear`
+ * (`cost`) or `too-slow` (`speed`), above ADOPT_RATIO of the base's figure;
+ * `not-reliably-cheaper` or `not-reliably-faster`, its `range` does not lie
+ * wholly below zero (its upper end, as `bootstrapDiffCI` returns it, is not
+ * below zero) or there is none; else it `qualifies`. A candidate past
+ * `too-few` records whether it is `under_floor`, the floor's `bar` (the
+ * default cell's fail rate plus TRIP_POINTS, rounded as a fail rate is, for
+ * reading only: the floor compares counts) and its `range`, the bootstrap 95%
+ * range of (candidate − base) figure over those Pulls; the others record null
+ * for each.
  *
- * Several qualifiers: each pair records the range of (the cheaper by $ per
- * merged PR, else by name − the other) in `pairs`, and a qualifier another
- * is reliably cheaper than is dropped. Among the rest the lower fail rate,
- * compared in counts, wins, then the lower $ per merged PR, then the name.
+ * Several qualifiers: each pair records the range of (the better by the
+ * figure, else by name − the other) in `pairs`, naming the better side
+ * `cheaper` or `faster`, and a qualifier another is reliably better than is
+ * dropped. Among the rest the lower fail rate, compared in counts, wins, then
+ * the lower figure, then the name.
  *
- * `reason`, why the row holds `cell`: `unjudged` (the default cell, or every
- * untripped candidate, is under MIN_N merged PRs; `cell` is null and a
- * stratum follows `*`), `no-qualifier` (the default cell), or, for the
- * winner, `sole-qualifier`, `reliably-cheaper` (every other qualifier was
+ * `reason`, why the row holds `cell`: `unjudged` (the default cell or the
+ * base, or every untripped candidate, is under MIN_N merged PRs; `cell` is
+ * null), `no-qualifier` (the base), or, for the winner, `sole-qualifier`,
+ * `reliably-cheaper` or `reliably-faster` (every other qualifier was
  * dropped), or what put it ahead of the next of the rest: `lower-fail-rate`,
- * `lower-usd` or `name`.
+ * `lower-usd` or `fewer-minutes`, or `name`.
  */
-function judgeRow(est = {}, pulls, cells, tripped) {
-  const record = { cell: null, reason: "unjudged", cells: {}, pairs: [] };
-  const base = est[POLICY_CELL];
-  if (!base || base.merged < MIN_N) return record;
+function judge(objective, est = {}, pulls, cells, tripped, baseCell) {
+  const { figure, metric, over, unreliable, better, reliably, ahead } = JUDGE[objective];
+  const record = unjudged();
+  const floor = est[POLICY_CELL];
+  const base = est[baseCell];
+  if (!floor || floor.merged < MIN_N || !base || base.merged < MIN_N) return record;
   // JSON writes −0 as 0, so a recorded end is 0 either way; `--check` compares the two.
-  const range = (a, b) => bootstrapDiffCI(pulls[a].map(bootUnit), pulls[b].map(bootUnit))?.map((x) => x + 0) ?? null;
+  const units = (c) => pulls[c].map((u) => bootUnit(u, metric));
+  const range = (a, b) => bootstrapDiffCI(units(a), units(b))?.map((x) => x + 0) ?? null;
   const reliablyBelow = (r) => r !== null && r[1] < 0;
-  const bar = round4(base.failed / base.claims + TRIP_POINTS / 100);
+  const bar = round4(floor.failed / floor.claims + TRIP_POINTS / 100);
   const qualifiers = [];
   let judged = false;
   for (const c of cells) {
-    if (c === POLICY_CELL) continue;
+    if (c === baseCell) continue;
     const e = est[c];
     if (tripped.has(c) || !e || e.merged < MIN_N) {
       record.cells[c] = { verdict: tripped.has(c) ? "tripped" : "too-few", under_floor: null, bar: null, range: null };
       continue;
     }
     judged = true;
-    const under = underFloor(e, base);
-    const r = range(c, POLICY_CELL);
+    const under = underFloor(e, floor);
+    const r = range(c, baseCell);
     const verdict = under ? "under-floor"
-      : e.usd_per_merged > ADOPT_RATIO * base.usd_per_merged ? "too-dear"
-        : reliablyBelow(r) ? "qualifies" : "not-reliably-cheaper";
+      : e[figure] > ADOPT_RATIO * base[figure] ? over
+        : reliablyBelow(r) ? "qualifies" : unreliable;
     record.cells[c] = { verdict, under_floor: under, bar, range: r };
     if (verdict === "qualifies") qualifiers.push(c);
   }
   if (!judged) return record;
-  if (qualifiers.length === 0) return { ...record, cell: POLICY_CELL, reason: "no-qualifier" };
+  if (qualifiers.length === 0) return { ...record, cell: baseCell, reason: "no-qualifier" };
 
-  const usd = (c) => est[c].usd_per_merged;
+  const of = (c) => est[c][figure];
   const byName = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
   const failCmp = (a, b) => est[a].failed * est[b].claims - est[b].failed * est[a].claims;
   const named = [...qualifiers].sort(byName);
   const dropped = new Set();
   for (let i = 0; i < named.length; i++) {
     for (let j = i + 1; j < named.length; j++) {
-      const [cheaper, other] = usd(named[j]) < usd(named[i]) ? [named[j], named[i]] : [named[i], named[j]];
-      const r = range(cheaper, other);
-      record.pairs.push({ cheaper, other, range: r });
+      const [win, other] = of(named[j]) < of(named[i]) ? [named[j], named[i]] : [named[i], named[j]];
+      const r = range(win, other);
+      record.pairs.push({ [better]: win, other, range: r });
       if (reliablyBelow(r)) dropped.add(other);
     }
   }
-  // The cheapest qualifier, by $ then name, is never dropped, so the rest is never empty.
-  const [win, next] = named.filter((c) => !dropped.has(c)).sort((a, b) => failCmp(a, b) || usd(a) - usd(b) || byName(a, b));
+  // The best qualifier, by the figure then name, is never dropped, so the rest is never empty.
+  const [win, next] = named.filter((c) => !dropped.has(c)).sort((a, b) => failCmp(a, b) || of(a) - of(b) || byName(a, b));
   const reason = qualifiers.length === 1 ? "sole-qualifier"
-    : next === undefined ? "reliably-cheaper"
+    : next === undefined ? reliably
       : failCmp(win, next) !== 0 ? "lower-fail-rate"
-        : usd(win) !== usd(next) ? "lower-usd" : "name";
+        : of(win) !== of(next) ? ahead : "name";
   return { ...record, cell: win, reason };
+}
+
+/** A `cost` row: `judge()` from the default cell, by $ per merged PR. */
+function judgeRow(est, pulls, cells, tripped) {
+  return judge("cost", est, pulls, cells, tripped, POLICY_CELL);
+}
+
+/** A `speed` row: `judge()` from the `cost` row's cell, by minutes of work time per merged PR. */
+function judgeSpeedRow(est, pulls, cells, tripped, costCell) {
+  return judge("speed", est, pulls, cells, tripped, costCell);
 }
 
 /**
  * The re-fit table. `guard` is `{ tripped, n, window_start }` (readGuard's
  * shape); `commit` is the sha of the commit the inputs were read from, or null
- * for the empty corpus before any fit. `reasons` holds `judgeRow()`'s record
- * for `*` and for each stratum with Pulls; a stratum whose record has no cell
- * gets no row and follows `*`, and an unjudged `*` is the default cell.
+ * for the empty corpus before any fit. `rows` and `reasons` hold one set per
+ * objective. `reasons.cost` holds `judgeRow()`'s record for `*` and for each
+ * stratum with Pulls; a stratum whose record has no cell gets no `cost` row
+ * and follows `*`, and an unjudged `*` is the default cell. `reasons.speed`
+ * holds `judgeSpeedRow()`'s record for each row with a `cost` row, from that
+ * row's cell, and an `unjudged` record with no cell for each stratum with no
+ * `cost` row: a row with a `cost` row holds a `speed` row, the base when the
+ * record has no cell, and a stratum with no `cost` row has no `speed` row
+ * and follows `*`.
  */
 export function fitTable({ prior, features, members, verdicts, guard, commit = null }) {
   const window = guard.window_start ?? prior.window_start ?? null;
@@ -492,15 +566,26 @@ export function fitTable({ prior, features, members, verdicts, guard, commit = n
   let { stage, cells } = prior;
   cells = [...cells];
   const star = judgeRow(estimates["*"], pulls["*"], cells, tripped);
-  const rows = { "*": star.cell ?? POLICY_CELL };
-  const reasons = { "*": { ...star, cell: rows["*"] } };
+  const rows = { cost: { "*": star.cell ?? POLICY_CELL }, speed: {} };
+  const reasons = { cost: { "*": { ...star, cell: rows.cost["*"] } }, speed: {} };
   for (const s of STRATA) {
     if (!estimates[s]) continue;
-    reasons[s] = judgeRow(estimates[s], pulls[s], cells, tripped);
-    if (reasons[s].cell !== null) rows[s] = reasons[s].cell;
+    reasons.cost[s] = judgeRow(estimates[s], pulls[s], cells, tripped);
+    if (reasons.cost[s].cell !== null) rows.cost[s] = reasons.cost[s].cell;
+  }
+  for (const s of Object.keys(reasons.cost)) {
+    const costCell = rows.cost[s];
+    if (costCell === undefined) {
+      reasons.speed[s] = unjudged();
+      continue;
+    }
+    const record = judgeSpeedRow(estimates[s], pulls[s], cells, tripped, costCell);
+    rows.speed[s] = record.cell ?? costCell;
+    reasons.speed[s] = { ...record, cell: rows.speed[s] };
   }
   const atN = (c) => (guard.n[c] ?? 0) >= MIN_N;
-  if (stage === 1 && cells.every(atN) && (rows["*"] !== POLICY_CELL || cells.some((c) => tripped.has(c)))) {
+  const adopted = Object.values(rows).some((set) => set["*"] !== POLICY_CELL);
+  if (stage === 1 && cells.every(atN) && (adopted || cells.some((c) => tripped.has(c)))) {
     stage = 2;
     for (const { cell, survives } of STAGE2) {
       if (!cells.includes(cell) && cells.includes(survives) && !tripped.has(survives)) cells.push(cell);
@@ -546,14 +631,15 @@ function cellCounts(estimates) {
     .join(", ") || "none";
 }
 
-// One line per row the fit judged or skipped: its cell (`-` for a stratum
-// that follows `*`) and its reason, then each candidate's verdict and range.
+// One line per row the fit judged or skipped, per objective: its cell (`-`
+// for a stratum that follows `*`) and its reason, then each candidate's
+// verdict and range.
 function rowLines(reasons) {
   const range = (r) => (r === null ? "" : ` [${r.map((x) => x.toFixed(2)).join(", ")}]`);
-  return Object.entries(reasons).map(([s, r]) => {
+  return Object.entries(reasons).flatMap(([o, set]) => Object.entries(set).map(([s, r]) => {
     const cells = Object.entries(r.cells).map(([c, x]) => `${c} ${x.verdict}${range(x.range)}`).join(", ");
-    return `${NAME}: row ${s} ${r.cell ?? "-"} ${r.reason}${cells ? ` (${cells})` : ""}\n`;
-  }).join("");
+    return `${NAME}: row ${o} ${s} ${r.cell ?? "-"} ${r.reason}${cells ? ` (${cells})` : ""}\n`;
+  })).join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -598,7 +684,7 @@ function main() {
   const die = makeDie(NAME);
   const F = defineFlags(die, {
     flags: {
-      session: "value", ticket: "value", arm: "value", "impl-row": "value", issue: "value",
+      session: "value", objective: "value", ticket: "value", arm: "value", "impl-row": "value", issue: "value",
       sizing: "value", guard: "value", table: "value", pending: "value", "chain-head": "bool",
       features: "value", members: "value", verdicts: "value", commit: "value", check: "bool", due: "bool",
     },
@@ -612,7 +698,7 @@ function main() {
     die("usage: ticket-router.mjs route … | fit … | --check … — exactly one mode");
   }
   const allowed = {
-    route: ["session", "ticket", "arm", "impl-row", "issue", "sizing", "guard", "table", "pending", "chain-head"],
+    route: ["session", "objective", "ticket", "arm", "impl-row", "issue", "sizing", "guard", "table", "pending", "chain-head"],
     fit: ["table", "features", "members", "verdicts", "guard", "commit", "due"],
     check: ["check", "table", "features", "members", "verdicts"],
   }[mode];
@@ -643,9 +729,16 @@ function main() {
       try { sessionArg = sessionFromReceipt(); } catch (e) { die(e.message); }
     }
     const session = basename(sessionArg.replace(/\/+$/, ""));
+    // `--objective` omitted is the one the receipt records, likewise.
+    let objective = F.arg("objective");
+    if (objective === null) {
+      try { objective = objectiveFromReceipt(); } catch (e) { die(e.message); }
+    } else if (!OBJECTIVES.includes(objective)) {
+      die(`--objective ${objective} is not ${OBJECTIVES.join(" or ")}`);
+    }
     const { line, row } = route({
       session, ticket: Number(ticket), arm, implRow: Number(implRowArg), chainHead: F.has("chain-head"),
-      issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard: readGuard(readJson(guardPath)), table,
+      issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard: readGuard(readJson(guardPath)), table, objective,
     });
     const pending = F.arg("pending") ?? join(dirname(guardPath), "ticket-features.pending.tsv");
     // The header decision and the append are not atomic and take no lock. That is

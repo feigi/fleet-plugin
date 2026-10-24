@@ -78,12 +78,14 @@ import { parseMemberName } from "./member-record.mjs";
 import { isImplementer } from "./member-outcomes.mjs";
 import { DATE, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
-// The ticket-features row, one per Pull, in this order.
+// The ticket-features row, one per Pull, in this order. `objective` came last
+// and is optional on read: a file whose header lacks it reads it blank.
 export const FEATURE_COLUMNS = Object.freeze([
   "run_date", "session", "agent", "ticket", "policy_cell", "chosen_cell", "exploration_draw",
   "sizing_src", "sizing_pre", "router_usd", "brief_chars", "criteria", "comments", "age_days",
-  "paths", "test_paths", "xrefs", "kind",
+  "paths", "test_paths", "xrefs", "kind", "objective",
 ]);
+const OPTIONAL_COLUMNS = new Set(["objective"]);
 
 // The quality floor's margin, in points of fail rate.
 export const TRIP_POINTS = 15;
@@ -108,10 +110,12 @@ function mulberry32(seed) {
   };
 }
 
-// The bootstrap 95% range of (cell − base) $ per merged PR, its ends rounded
-// to cents. Each unit is one counted Pull: `{ usd, merged }`, merged 0 or 1.
-// $ per merged PR is Σusd / Σmerged. null when either side has no unit, or
-// when under half the resamples have a merged PR on both sides.
+// The bootstrap 95% range of (cell − base) per merged PR, its ends rounded to
+// two places. Each unit is one counted Pull, `bootUnit`'s shape:
+// `{ value, merged }`, `value` the measure `bootUnit` was asked for and
+// merged 0 or 1. The figure per merged PR is Σvalue / Σmerged. null when
+// either side has no unit, or when under half the resamples have a merged PR
+// on both sides.
 export function bootstrapDiffCI(cellUnits, baseUnits, { iterations = 2000, seed = 1 } = {}) {
   if (!cellUnits.length || !baseUnits.length) return null;
   const rand = mulberry32(seed);
@@ -119,7 +123,7 @@ export function bootstrapDiffCI(cellUnits, baseUnits, { iterations = 2000, seed 
     let u = 0, m = 0;
     for (let i = 0; i < units.length; i++) {
       const x = units[Math.floor(rand() * units.length)];
-      u += x.usd; m += x.merged;
+      u += x.value; m += x.merged;
     }
     return m ? u / m : null;
   };
@@ -133,8 +137,11 @@ export function bootstrapDiffCI(cellUnits, baseUnits, { iterations = 2000, seed 
   return [round2(diffs[Math.floor(0.025 * (diffs.length - 1))]), round2(diffs[Math.ceil(0.975 * (diffs.length - 1))])];
 }
 
-// A counted Pull as a bootstrap unit.
-export const bootUnit = (u) => ({ usd: u.spend, merged: u.merged ? 1 : 0 });
+// What a bootstrap unit measures: `usd`, its spend, or `minutes`, its work time.
+const METRIC = Object.freeze({ usd: (u) => u.spend, minutes: (u) => u.workS / 60 });
+
+// A counted Pull as a bootstrap unit, its `value` the Pull's `metric`.
+export const bootUnit = (u, metric = "usd") => ({ value: METRIC[metric](u), merged: u.merged ? 1 : 0 });
 
 // ticket-features.tsv: one bare header line naming the columns, then rows.
 // Read by header name; a row whose width differs from the header's is refused.
@@ -142,7 +149,7 @@ export function parseFeatures(text) {
   const lines = String(text ?? "").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
   if (lines.length === 0) throw new Error("ticket-features.tsv has no header line");
   const header = lines[0].split("\t");
-  const missing = FEATURE_COLUMNS.filter((c) => !header.includes(c));
+  const missing = FEATURE_COLUMNS.filter((c) => !header.includes(c) && !OPTIONAL_COLUMNS.has(c));
   if (missing.length) throw new Error(`ticket-features.tsv header lacks ${missing.join(", ")}`);
   return lines.slice(1).map((l, i) => {
     const cells = l.split("\t");
@@ -150,6 +157,7 @@ export function parseFeatures(text) {
       throw new Error(`ticket-features.tsv row ${i + 1}: ${cells.length} fields, expected ${header.length} — ${l.slice(0, 60)}`);
     }
     const row = Object.fromEntries(header.map((c, j) => [c, cells[j]]));
+    for (const c of OPTIONAL_COLUMNS) row[c] ??= "";
     if (!isDigits(row.ticket)) throw new Error(`ticket-features.tsv row ${i + 1}: ticket ${JSON.stringify(row.ticket)} is not a number`);
     if (!CELL.test(row.chosen_cell)) throw new Error(`ticket-features.tsv row ${i + 1}: chosen_cell ${JSON.stringify(row.chosen_cell)} is not a cell`);
     return row;

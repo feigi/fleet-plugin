@@ -56,9 +56,9 @@ test("the tick block names the script and only the flags it still takes", () => 
 
 // The frontmatter is what a user sees when invoking the skill: its hint is the
 // invocation shape and its description must not state the retired sizing.
-test("the run-team frontmatter hints the one in-flight argument and states no retired default", () => {
+test("the run-team frontmatter hints the in-flight and objective arguments and states no retired default", () => {
   const front = RUN_TEAM.text.split("\n---\n")[0];
-  assert.match(front, /^argument-hint: "\[in-flight\]"$/m);
+  assert.match(front, /^argument-hint: "\[in-flight\] \[cost\|speed\]"$/m);
   assert.doesNotMatch(front, /default 2 and 6/);
 });
 

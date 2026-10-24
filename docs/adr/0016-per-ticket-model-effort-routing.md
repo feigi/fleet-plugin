@@ -15,9 +15,8 @@ merged PR, then the cell name. The guard itself is unchanged: pooled, and its
 verdict still reads point estimates.
 Amended by #3680 (ruled 2026-10-24 by the maintainer, from a grilling session):
 Decision 3's single objective, $ per merged PR, becomes the run's Objective —
-`cost`, the default, or `speed` — but it still describes the fit until #3785
-implements the ruling. Once it does, the table holds one row set per
-objective. The `cost` rows are fitted as above; a `speed` row starts from the
+`cost`, the default, or `speed` — implemented by #3785: the table holds one
+row set per objective. The `cost` rows are fitted as above; a `speed` row starts from the
 `cost` row's cell and adopts another only at or under 0.75 of that cell's
 minutes of Work time per merged PR **and** with the bootstrap 95% CI of the
 difference wholly below zero. Quality stays a floor under both, and the guard

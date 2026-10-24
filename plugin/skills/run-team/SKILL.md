@@ -1,15 +1,15 @@
 ---
 name: run-team
 description: Run an agent fleet — implementers, reviewers, one merge bot — over the ready-for-agent queue. Invoke-only; the fleet writes to a live repo and must never start unasked.
-argument-hint: "[in-flight]"
+argument-hint: "[in-flight] [cost|speed]"
 disable-model-invocation: true
 ---
 
 Run `next-ticket`, `review-and-fix`, `run-merge-bot` as one fleet. You are the
 **controller**, in the main thread, never a member.
 
-`$ARGUMENTS` = `[in-flight]`, optional, one positive integer, default 5: the
-In-flight bound, the most tickets between Claim and merge at once.
+`$ARGUMENTS` = `[in-flight] [cost|speed]`, both optional: the In-flight bound,
+a positive integer, default 5, and the Objective, default `cost`.
 Merge bot is at most one, not configurable.
 
 The war story behind a rule ending `See references/<file>` lives in that file; load
@@ -40,10 +40,10 @@ Nothing in this phase, or in any later one, asks the maintainer which tickets to
 0. **Once per run, before anything else.** Run phase 0 from a Python eval
    cell in this main checkout, without `--session`:
    `subprocess.run([os.path.expanduser("~/.fleet/bin/fleet-run"),
-   "phase0.mjs", …], stderr=subprocess.STDOUT)`. Add `--in-flight <n>` when
-   `$ARGUMENTS` gave one, `--plugin-checkout <dir>` when this workspace tracks
-   no `plugin/…` of its own, `--spend-dir <dir>` to name the directory the
-   cockpit's spend panel reads, and `--workflow <name>` or `--declare-no-ci`
+   "phase0.mjs", …], stderr=subprocess.STDOUT)`. Add `--in-flight <n>` and
+   `--objective <o>` as `$ARGUMENTS` gave them, `--plugin-checkout <dir>` when
+   this workspace tracks no `plugin/…` of its own, `--spend-dir <dir>` for the
+   spend panel, and `--workflow <name>` or `--declare-no-ci`
    when the repository has no workflow named CI. Its steps and receipt: See
    references/phase-0.md. Dispatch nothing before it exits 0. Exit 4 is a
    step that needs you: act on each `NEED` line below, then run it again. Once

@@ -104,7 +104,8 @@
 //                 `behind-issue:#M`, or `paths <p>…`, which scans again and
 //                 asks again. An exclusion is a ledger row.
 //   6  claim      `claim-ticket.sh <N> impl-<N> implementer --apply`.
-//   7  route      `ticket-router.mjs route …`; a router that refuses releases
+//   7  route      `ticket-router.mjs route …`, which routes by the Objective
+//                 the phase-0 receipt records; a router that refuses releases
 //                 the claim, and a release that fails is exit 2 with the claim
 //                 still standing. `--chain-head` is given when a ledger row reads
 //                 `excluded · behind-issue:#<N>`: another open ticket
@@ -957,7 +958,7 @@ class Pull {
       "--impl-row", String(k), ...(head ? ["--chain-head"] : []), "--issue", this.p.issue, "--guard", this.p.guard,
     ];
     const r = this.script("route", "ticket-router.mjs", args);
-    const m = r.status === 0 ? /^POLICY=(\S+) CELL=(\S+) DRAW=(\S+) STRATUM=(\S+) REASON=(\S+)$/m.exec(r.stdout) : null;
+    const m = r.status === 0 ? /^POLICY=(\S+) CELL=(\S+) DRAW=(\S+) STRATUM=(\S+) OBJECTIVE=(\S+) REASON=(\S+)$/m.exec(r.stdout) : null;
     if (m === null) {
       const said = r.status === 0 ? `printed no routing line: ${r.stdout}` : withText(`refused (${r.how})`, r);
       const rel = this.script("release", "release-ticket.sh", [String(st.ticket), st.member, "implementer", "--apply"]);
@@ -969,7 +970,7 @@ class Pull {
       st.outcome = { exit: 2, reason: `router ${said}`, at: now() };
       return this.stop(`ticket-router.mjs ${said}\nits claim is released`);
     }
-    st.route = { line: m[0], cell: m[2], draw: m[3], reason: m[5], implRow: k, chainHead: head };
+    st.route = { line: m[0], cell: m[2], draw: m[3], reason: m[6], implRow: k, chainHead: head };
     st.stage = "row";
     return null;
   }

@@ -125,7 +125,7 @@ const ISSUE = {
   labels: [{ name: "ready-for-agent" }, { name: "enhancement" }],
   createdAt: "2026-10-01T00:00:00Z",
 };
-const ROUTE_OK = "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light REASON=ok";
+const ROUTE_OK = "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light OBJECTIVE=cost REASON=ok";
 const NOW = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;
 
 // A main checkout cloned from a bare origin, a home directory of its own (the
@@ -1687,22 +1687,25 @@ test("router exit 2 whose claim cannot be released says the claim is STILL stand
 });
 
 test("a router that prints no routing line is a refusal and releases the claim", () => {
-  const f = fixture();
-  toCollision(f);
-  f.control("ticket-router", { out: "something else" });
-  const r = f.answer(12, "collision", "clear");
-  assert.equal(r.status, 2);
-  assert.match(r.err, /ticket-router\.mjs printed no routing line: something else/);
-  assert.equal(f.calls("release-ticket").length, 1);
-  assert.equal(f.ledgerRows().length, 0);
+  // A line without OBJECTIVE is not a routing line either.
+  for (const out of ["something else", "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light REASON=ok"]) {
+    const f = fixture();
+    toCollision(f);
+    f.control("ticket-router", { out });
+    const r = f.answer(12, "collision", "clear");
+    assert.equal(r.status, 2);
+    assert.match(r.err, new RegExp(`ticket-router\\.mjs printed no routing line: ${out}`));
+    assert.equal(f.calls("release-ticket").length, 1);
+    assert.equal(f.ledgerRows().length, 0);
+  }
 });
 
 test("the row carries tier=<CELL> exactly when DRAW is not `-`, and route=<REASON> exactly when REASON is not ok", () => {
   const cases = [
     [ROUTE_OK, ["#12 impl-12", "fleet-implementer-slow-high"]],
-    ["POLICY=slow-high CELL=task-high DRAW=2/5 STRATUM=heavy REASON=ok", ["#12 impl-12 · tier=task-high", "fleet-implementer-task-high"]],
-    ["POLICY=slow-high CELL=slow-high DRAW=- STRATUM=unknown REASON=guard-missing", ["#12 impl-12 · route=guard-missing", "fleet-implementer-slow-high"]],
-    ["POLICY=slow-high CELL=smol-high DRAW=1/3 STRATUM=light REASON=table-cell-tripped", ["#12 impl-12 · tier=smol-high · route=table-cell-tripped", "fleet-implementer-smol-high"]],
+    ["POLICY=slow-high CELL=task-high DRAW=2/5 STRATUM=heavy OBJECTIVE=cost REASON=ok", ["#12 impl-12 · tier=task-high", "fleet-implementer-task-high"]],
+    ["POLICY=slow-high CELL=slow-high DRAW=- STRATUM=unknown OBJECTIVE=cost REASON=guard-missing", ["#12 impl-12 · route=guard-missing", "fleet-implementer-slow-high"]],
+    ["POLICY=slow-high CELL=smol-high DRAW=1/3 STRATUM=light OBJECTIVE=speed REASON=table-cell-tripped", ["#12 impl-12 · tier=smol-high · route=table-cell-tripped", "fleet-implementer-smol-high"]],
   ];
   for (const [line, [row, agent]] of cases) {
     const f = fixture();

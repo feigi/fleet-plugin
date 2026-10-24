@@ -27,12 +27,12 @@
 //       definition never declared, and every row the definition ran would
 //       be inadmissible. The one exception is an implementer definition
 //       whose cell the router never selects (not in the router table's
-//       `cells`, in none of its `rows` values, and not the policy cell): a
-//       cell can be defined before the router may pick it, so its mismatch
-//       is a notice. The router table is `router-table.json` beside this
-//       script, or the file `--table <path>` names; one that cannot be read,
-//       or that lacks a `cells` array or a `rows` object of cell names,
-//       refuses. A target the catalog does not list cannot be checked, so it
+//       `cells`, in no row of either objective's `rows` set, and not the
+//       policy cell): a cell can be defined before the router may pick it,
+//       so its mismatch is a notice. The router table is `router-table.json`
+//       beside this script, or the file `--table <path>` names; one that
+//       cannot be read, or that lacks a `cells` array or a `rows` object of
+//       row sets of cell names, refuses. A target the catalog does not list cannot be checked, so it
 //       fails too;
 //   (e) `modelRoles.slow`/`modelRoles.task` resolving to the same model is
 //       flagged as a notice — legal, but every `slow-*` cell then measures
@@ -139,17 +139,20 @@ export function implementerCell(file) {
 }
 
 // The cells the router can select from a parsed router table: the pool it
-// explores (`cells`), the cell each stratum's row names (`rows` values) and the
-// policy cell, which every Pull falls back to whatever the table says. An
-// Error saying why when the table lacks a `cells` array of names or a `rows`
-// object of names — a table that cannot be read must refuse, never quietly
-// make every cell non-routable.
+// explores (`cells`), the cell each row of each objective's set names (`rows`
+// values) and the policy cell, which every Pull falls back to whatever the
+// table says. An Error saying why when the table lacks a `cells` array of
+// names or a `rows` object of row sets of names — a table that cannot be read
+// must refuse, never quietly make every cell non-routable.
 export function routableCells(table) {
   const bad = (why) => new Error(`router table: ${why}`);
   if (!isJsonObject(table)) return bad("not a JSON object");
   if (!Array.isArray(table.cells) || !table.cells.every((c) => typeof c === "string")) return bad("`cells` is not an array of cell names");
-  if (!isJsonObject(table.rows) || !Object.values(table.rows).every((c) => typeof c === "string")) return bad("`rows` is not an object of cell names");
-  return new Set([POLICY_CELL, ...table.cells, ...Object.values(table.rows)]);
+  const sets = isJsonObject(table.rows) ? Object.values(table.rows) : null;
+  if (sets === null || !sets.every((set) => isJsonObject(set) && Object.values(set).every((c) => typeof c === "string"))) {
+    return bad("`rows` is not an object of row sets of cell names");
+  }
+  return new Set([POLICY_CELL, ...table.cells, ...sets.flatMap((set) => Object.values(set))]);
 }
 
 // Tolerates a role value written without its provider prefix — omp's
