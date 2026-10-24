@@ -142,6 +142,12 @@ test("readOmpMember: cost is null when any token-reporting turn carries no numer
   assert.equal(recOmp(priced(0), priced(0.25, t2)).cost, 0.25, "a turn priced at 0 among priced turns adds 0 and keeps the sum");
   assert.equal(recOmp(priced(0.25), priced(0, t2)).cost, 0.25, "a priced-at-0 turn after a priced one keeps the sum too");
 
+  // A zero-token turn priced at exactly 0 — the aborted/errored-turn shape — is a real figure too.
+  const zeroTokenPricedZero = (ts) => turn({ cost: { total: 0 } }, ts);
+  assert.equal(recOmp(zeroTokenPricedZero()).cost, 0, "a member whose only turn reports no tokens and a figure of 0 reads 0, never null");
+  assert.equal(recOmp(zeroTokenPricedZero(), zeroTokenPricedZero(t2), zeroTokenPricedZero(t3)).cost, 0,
+    "a member made only of zero-token turns priced at 0, the retry-exhaustion shape, reads 0, never null");
+
   // A zero-token turn with no figure prices nothing and blanks nothing, wherever it falls — including first.
   const leadingZeroToken = recOmp(turn({}), priced(0.25, t2));
   assert.equal(leadingZeroToken.cost, 0.25, "a leading zero-token turn with no figure leaves the sum unchanged");
