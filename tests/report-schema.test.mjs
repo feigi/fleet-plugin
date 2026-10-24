@@ -292,6 +292,29 @@ test("validate refuses a blocked impl report that names a bailCause, a pr or a h
     "a bail's shape is not a block's");
 });
 
+// A bail is the pre-code outcome, so it names no PR and no head — a PR the
+// member opened is outcome `pr`, which settle checks. validate() alone passes
+// a bail that names one; `validate` and reportViolation() refuse it. A bail
+// with both null stays valid, a `covered` one naming its PR in bailDetail too.
+test("validate refuses a bailed impl report that names a pr or a head, and accepts one with both null", () => {
+  const bailed = (changes) => variant("impl", { outcome: "bailed", pr: null, head: null, bailCause: "hands", bailDetail: "needs a token", ...changes });
+  for (const [changes, said] of [
+    [{ pr: 12 }, '$.pr: 12 is not null, with outcome "bailed" — a bail reports no PR'],
+    [{ head: "a".repeat(40) }, `$.head: "${"a".repeat(40)}" is not null, with outcome "bailed" — a bail reports no PR`],
+    [{ bailCause: "covered", bailDetail: "PR#9 — its diff meets the acceptance", pr: 9 }, '$.pr: 9 is not null, with outcome "bailed" — a bail reports no PR'],
+  ]) {
+    const report = bailed(changes);
+    assert.equal(validate(SCHEMAS.impl, report), null, said);
+    assert.equal(reportViolation("impl", report), said);
+    assertInvalid(check("impl", report), said);
+  }
+  assert.equal(reportViolation("impl", bailed({})), null);
+  assert.equal(check("impl", bailed({})).status, 0, "a bail naming no PR and no head is valid");
+  const covered = bailed({ bailCause: "covered", bailDetail: "PR#9 — its diff meets the acceptance" });
+  assert.equal(reportViolation("impl", covered), null);
+  assert.equal(check("impl", covered).status, 0, "a covered bail names its PR in bailDetail, not in pr");
+});
+
 // Exit 2: the invocation or the file, never the report.
 for (const [why, args, said] of [
   ["no subcommand", [], "usage:"],
