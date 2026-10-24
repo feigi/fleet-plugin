@@ -25,11 +25,28 @@
 //             maintainer's to rule on — and a list that does not answer, or a
 //             detached worktree whose branch cannot be asked about, is
 //             `report` too, never `resume`.
-//   ancestor  this session's earlier run: no claim listed — its members may
-//             still be live, and rotate carried their tokens forward;
-//             `carried` lists them instead, for the controller to reconcile
-//             against the session's job list
-//   none      nothing proves the previous run dead: every claim `report`
+//   ancestor  this session's earlier run: no in-progress claim listed — its
+//             members may still be live, and rotate carried their tokens
+//             forward; `carried` lists them instead, for the controller to
+//             reconcile against the session's job list
+//   none      nothing proves the previous run dead: every in-progress claim
+//             `report`
+//
+// A claim with no `in-progress` label is listed whatever `prior` says, for no
+// member of it is live without one. Each implementer claim on the disk — a
+// worktree `.worktrees/<N>-impl-<N>[-x]` or a local branch
+// `implementer/<N>-impl-<N>[-x]` — whose issue is open, has no `in-progress`
+// label and no open PR is `report`, never `resume`: a bail that left commits
+// behind cannot release its claim, and nothing else names it once the run that
+// made it is gone. Its `why` is the blockers of a read-only `release-ticket.sh
+// <N> impl-<N>[-x] implementer` dry run, then the two ways out: push the
+// branch and open a PR, or release the claim by hand. A dry run or an issue
+// read that does not answer still lists the claim, naming why. Under
+// `ancestor` an issue read that does not answer names neither way out: no
+// in-progress list was read, so the claim may be the earlier run's live
+// member — its `why` says to check it against `carried`. The disk and
+// the issue are read at every run, so the claim is listed until it is pushed
+// or released, whatever any ledger holds. A closed issue's claim is not listed.
 //
 // "An open PR about the issue" is the in-flight check's reading, its branch rule
 // narrowed: a PR linked to the issue that is still open, a linked PR in another
@@ -70,6 +87,7 @@ const LIMIT = 1000;
 const GH_TIMEOUT_MS = 20_000;
 const GIT_TIMEOUT_MS = 20_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
+const RELEASE_TIMEOUT_MS = 120_000;
 
 const log = (line) => writeAll(2, `${line}\n`);
 const segment = (n) => new RegExp(`(^|[/-])${n}([-/]|$)`);
@@ -174,6 +192,92 @@ const real = (p) => {
   }
 };
 
+// A claim's names, off claim-ticket.sh's shapes for an implementer:
+// `.worktrees/<N>-impl-<N>[-x]` and `implementer/<N>-impl-<N>[-x]`, `-x` a
+// replacement's single retry letter. Each captures the number and the member
+// name `impl-<N>[-x]`, the slug release-ticket.sh takes.
+const CLAIM_WORKTREE = /^([1-9][0-9]*)-(impl-\1(?:-[a-z])?)$/;
+const CLAIM_BRANCH = /^implementer\/([1-9][0-9]*)-(impl-\1(?:-[a-z])?)$/;
+const WAYS_OUT = "push the branch and open a PR, or release the claim by hand";
+
+// Every local branch under `implementer/`.
+function implementerBranches(cwd) {
+  const r = spawnSync("git", ["for-each-ref", "--format=%(refname:short)", "refs/heads/implementer/"], {
+    cwd, encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GIT_TIMEOUT_MS, env: gitEnv(),
+  });
+  if (r.error || r.status !== 0) die(`git for-each-ref failed (${how(r)}) — which claims have a branch is unknown`);
+  return r.stdout.split("\n").filter(Boolean);
+}
+
+// The implementer claims the disk holds, one per member name: its worktree
+// under this checkout's `.worktrees/` and its local branch, each null when
+// the disk holds none.
+function diskClaims(all, home, branches) {
+  const claims = new Map();
+  const slot = (m) => {
+    if (!claims.has(m[2])) claims.set(m[2], { n: Number(m[1]), slug: m[2], worktree: null, branch: null });
+    return claims.get(m[2]);
+  };
+  for (const w of all) {
+    const m = w.prunable ? null : CLAIM_WORKTREE.exec(basename(w.path));
+    if (!m || !present(w.path) || real(dirname(w.path)) !== home) continue;
+    const c = slot(m);
+    c.worktree = w.path;
+    c.branch = w.branch;
+  }
+  for (const b of branches) {
+    const m = CLAIM_BRANCH.exec(b);
+    if (!m) continue;
+    const c = slot(m);
+    c.branch ??= b;
+  }
+  return [...claims.values()].sort((a, b) => a.n - b.n || a.slug.localeCompare(b.slug));
+}
+
+// One issue, as `gh issue view` shows it: `{issue}`, or `{failed}` — why it
+// did not answer. Per claim, like closedHeadPr: an unanswered view leaves this
+// claim reported with the reason, and the others classify.
+function viewIssue(n) {
+  const r = spawnSync("gh", ["issue", "view", String(n), "--json", "number,title,url,state,labels,closedByPullRequestsReferences"], {
+    encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }),
+  });
+  if (r.error || r.status !== 0) return { failed: how(r) };
+  let v;
+  try {
+    v = JSON.parse(r.stdout);
+  } catch (e) {
+    return { failed: `unparsable: ${e.message}` };
+  }
+  const named = Array.isArray(v?.labels) && v.labels.every((l) => typeof l?.name === "string");
+  if (v?.number !== n || typeof v.state !== "string" || typeof v.url !== "string" || !named) {
+    return { failed: "not an issue with {number, state, url, labels}" };
+  }
+  return { issue: v };
+}
+
+// release-ticket.sh's dry run for a claim — it reads and changes nothing
+// without `--apply`: `{blockers}`, what stands in the way of releasing it
+// joined, empty when nothing does; or `{failed}`, why the dry run did not
+// answer.
+function releaseDryRun(cwd, n, slug) {
+  const script = join(dirname(fileURLToPath(import.meta.url)), "release-ticket.sh");
+  const r = spawnSync("sh", [script, String(n), slug, "implementer"], {
+    cwd, encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: RELEASE_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }),
+  });
+  let receipt = null;
+  try {
+    receipt = JSON.parse(r.stdout);
+  } catch {
+    // Not a receipt: a refusal before it could write one, in prose.
+  }
+  const blockers = receipt?.blockers;
+  if (Array.isArray(blockers) && blockers.length > 0 && blockers.every((b) => typeof b === "string")) {
+    return { blockers: blockers.join("; ") };
+  }
+  if (r.status === 0 && receipt?.released === true && Array.isArray(blockers)) return { blockers: "" };
+  return { failed: how(r) };
+}
+
 function main() {
   if (process.argv.length > 2) die(`takes no arguments, got ${process.argv.slice(2).join(" ")}`);
   let fleetDir;
@@ -189,23 +293,30 @@ function main() {
   // record, which is `none`: unknown, so nothing is resumed.
   const { controller } = readState(stateFileIn(fleetDir), NAME);
   const prior = controller?.prior ?? "none";
-  if (prior === "ancestor") {
-    log(`${NAME}: the previous run is this session's own earlier run — its claims are left alone, and the live tokens rotate carried are listed`);
-    console.log(JSON.stringify({ prior, claims: [], carried: carriedTokens(join(fleetDir, "ledger.md")) }));
-    return;
-  }
+  const ancestor = prior === "ancestor";
+  if (ancestor) log(`${NAME}: the previous run is this session's own earlier run — its in-progress claims are left alone, and the live tokens rotate carried are listed`);
 
-  const issues = ghList(`list of open ${LABEL} issues`, [
+  // An ancestor's in-progress claims are not listed, so neither list is asked
+  // for them: the open PR list waits for the first claim that needs it.
+  const issues = ancestor ? [] : ghList(`list of open ${LABEL} issues`, [
     "issue", "list", "--label", LABEL, "--state", "open", "--json", "number,title,url,closedByPullRequestsReferences",
   ]);
-  const prs = ghList("list of open PRs", ["pr", "list", "--state", "open", "--json", "number,headRefName,url"]);
-  const openByUrl = new Map(prs.map((p) => [p.url, p]));
+  let openPrs = null;
+  const open = () => {
+    if (openPrs === null) {
+      const prs = ghList("list of open PRs", ["pr", "list", "--state", "open", "--json", "number,headRefName,url"]);
+      openPrs = { prs, openByUrl: new Map(prs.map((p) => [p.url, p])) };
+    }
+    return openPrs;
+  };
+  if (!ancestor) open();
 
   // The PRs that make an issue someone else's business, or none — and, apart,
   // the open PRs whose branch carries the number somewhere other than as the
   // ticket's own: `<type>/<n>-<slug>` is claim-ticket.sh's shape, so
   // `implementer/1799-bump-node-20` names issue 1799 and merely ends in 20.
   const prsFor = (issue, seg) => {
+    const { prs, openByUrl } = open();
     const here = repoOf(issue.url);
     const linked = (issue.closedByPullRequestsReferences ?? []).flatMap((ref) => {
       if (openByUrl.has(ref.url)) return [`open PR #${openByUrl.get(ref.url).number}`];
@@ -220,6 +331,10 @@ function main() {
       mentioned: named.filter((p) => !own.test(p.headRefName)).map(describe),
     };
   };
+  const heldLog = (n, held) => log(`    #${n} has ${held.join(", ")} — the fold-in owns it`);
+  const mentionedNote = (mentioned) => mentioned.length > 0
+    ? `; ${mentioned.join(", ")} carries the number outside the ticket position, so check whether it is this claim's`
+    : "";
 
   const home = real(join(checkout, ".worktrees"));
   const all = worktrees(checkout);
@@ -228,7 +343,7 @@ function main() {
     const seg = segment(issue.number);
     const { held, mentioned } = prsFor(issue, seg);
     if (held.length > 0) {
-      log(`    #${issue.number} has ${held.join(", ")} — the fold-in owns it`);
+      heldLog(issue.number, held);
       continue;
     }
     const mine = all.filter((w) => !w.prunable && seg.test(basename(w.path)) && present(w.path));
@@ -251,11 +366,49 @@ function main() {
     else why = "no worktree for it in this checkout";
     const action = prior === "dead" && one?.branch && mentioned.length === 0 && !head?.failed && !head?.closed ? "resume" : "report";
     // Not taken for its PR — but never resumed past one that might be.
-    if (mentioned.length > 0) why += `; ${mentioned.join(", ")} carries the number outside the ticket position, so check whether it is this claim's`;
+    why += mentionedNote(mentioned);
     claims.push({ n: issue.number, t: issue.title, action, worktree: one?.path ?? null, branch: one?.branch ?? null, why });
     log(`    #${issue.number} ${action} — ${why}`);
   }
-  console.log(JSON.stringify({ prior, claims, carried: [] }));
+
+  // A claim no `in-progress` label holds live: its member is not running, so
+  // `prior` has nothing to say of it. A bail that left commits behind strands
+  // its claim this way, for release-ticket.sh refuses a branch ahead of
+  // origin/main. Reported, never resumed — and read off the disk and the
+  // issue at every run, so it is named until it is pushed or released.
+  const views = new Map();
+  const live = new Set(issues.map((i) => i.number));
+  for (const c of diskClaims(all, home, implementerBranches(checkout))) {
+    if (live.has(c.n)) continue;
+    if (!views.has(c.n)) views.set(c.n, viewIssue(c.n));
+    const { issue, failed } = views.get(c.n);
+    let why;
+    let mentioned = [];
+    if (failed) {
+      why = `gh issue view ${c.n} did not answer (${failed}) — whether ${c.slug}'s ticket is open, unlabelled and without a PR is unknown`;
+      // No in-progress list is read under ancestor, so nothing has ruled out
+      // that this is the earlier run's live member: never point at a release.
+      if (ancestor) why += `, and so is whether ${c.slug} is the earlier run's live member — check it against carried`;
+    } else {
+      if (issue.state !== "OPEN") continue;
+      if (issue.labels.some((l) => l.name === LABEL)) continue;
+      const found = prsFor(issue, segment(c.n));
+      if (found.held.length > 0) {
+        heldLog(c.n, found.held);
+        continue;
+      }
+      mentioned = found.mentioned;
+      const probe = releaseDryRun(checkout, c.n, c.slug);
+      if (probe.failed) why = `release-ticket.sh ${c.n} ${c.slug} implementer did not answer (${probe.failed}) — what stands in the way of releasing the claim is unknown`;
+      else if (probe.blockers) why = probe.blockers;
+      else why = "release-ticket.sh finds nothing in the way of releasing the claim";
+    }
+    if (!(failed && ancestor)) why += ` — ${WAYS_OUT}`;
+    why += mentionedNote(mentioned);
+    claims.push({ n: c.n, t: issue?.title ?? null, action: "report", worktree: c.worktree, branch: c.branch, why });
+    log(`    #${c.n} report — ${why}`);
+  }
+  console.log(JSON.stringify({ prior, claims, carried: ancestor ? carriedTokens(join(fleetDir, "ledger.md")) : [] }));
 }
 
 // Every live token on the ledger, read through `ledger.mjs read` so the

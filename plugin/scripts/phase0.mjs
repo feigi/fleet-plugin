@@ -67,8 +67,12 @@
 //                 review PR#<pr> (closes no issue)`.
 //   stranded      `stranded.mjs`. A `resume` entry whose ticket has no ledger row
 //                 yet is pending: `NEED resume #<n> <worktree> <branch>`. A
-//                 `report` entry is printed. Resuming a claim writes its row, so
-//                 a re-run after the dispatch finds the need met.
+//                 `report` entry is printed as `report #<n> — <why>`, and the step
+//                 stays ok: it covers the claims a dead run left under
+//                 `in-progress`, and every implementer claim on the disk whose
+//                 open issue holds no `in-progress` label and no open PR, whatever
+//                 `prior` says and whatever the ledger holds. Resuming a claim
+//                 writes its row, so a re-run after the dispatch finds the need met.
 //   shortlist     `shortlist.mjs`. A non-zero exit fails the step.
 //
 // THE RECEIPT is `.fleet/phase0.json` (resolved through fleet-dir.mjs, so a

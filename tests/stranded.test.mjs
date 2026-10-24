@@ -1,7 +1,9 @@
 // `stranded.mjs`: phase 0's stranded-claim step. It lists the open issues
 // labelled in-progress with no open PR and classifies each off the `prior`
 // verdict `ledger.mjs rotate` recorded — resume, report, or no claim listed —
-// and acts on none of them.
+// and, whatever `prior` says, reports each implementer claim on the disk whose
+// open issue holds no in-progress label and no open PR. It acts on none of
+// them.
 //
 // Every case runs the real script against a throwaway repository with real
 // worktrees and a `gh` stub that logs every call. The process tree is a
@@ -42,6 +44,14 @@ case "$1 $2" in
       jq -c --arg b "$head" '.[$b] // []' "$FIXTURE_HEADS"; exit 0
     fi
     [ -z "$GH_PR_FAIL" ] || { echo "pr list boom" >&2; exit 1; }; cat "$FIXTURE_PRS" ;;
+  "issue view")
+    # An issue the fixture names no view for is a closed one. release-ticket.sh
+    # asks the same stub for the labels alone, \`--jq\` and all.
+    [ -z "$GH_VIEW_FAIL" ] || { echo "view boom" >&2; exit 1; }
+    json=$(jq -c --arg n "$3" '.[$n] // {number: ($n | tonumber), title: "closed", url: ("${REPO_URL}/issues/" + $n), state: "CLOSED", labels: [], closedByPullRequestsReferences: []}' "$FIXTURE_VIEWS")
+    filter=""; prev=""
+    for a in "$@"; do [ "$prev" = "--jq" ] && filter="$a"; prev="$a"; done
+    if [ -n "$filter" ]; then printf '%s' "$json" | jq -r "$filter"; else printf '%s\\n' "$json"; fi ;;
   *) echo "unexpected gh $*" >&2; exit 3 ;;
 esac
 `;
@@ -60,6 +70,10 @@ const issue = (n, prs = []) => ({
   closedByPullRequestsReferences: prs.map((url) => ({ number: Number(url.split("/").at(-1)), url })),
 });
 const pr = (number, headRefName) => ({ number, headRefName, url: `${REPO_URL}/pull/${number}` });
+// An open issue as `gh issue view` shows it, `labels` its label names.
+const view = (n, { labels = [], prs = [] } = {}) => ({ ...issue(n, prs), state: "OPEN", labels: labels.map((name) => ({ name })) });
+// Work on a claim's worktree: one commit ahead of origin/main.
+const commitIn = (f, name) => git(wt(f, name), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "work");
 
 // A main checkout with one commit, a worktree per claim it names under
 // `.worktrees/`, and the heartbeat file holding `controller` (omitted when
@@ -71,6 +85,11 @@ function fixture(t, { controller = null, heartbeat, worktrees = [] } = {}) {
   mkdirSync(repo);
   git(repo, "init", "-q", "-b", "main");
   git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "root");
+  // release-ticket.sh's dry run measures a claim against origin/main.
+  const origin = join(dir, "origin.git");
+  git(dir, "init", "-q", "--bare", "-b", "main", origin);
+  git(repo, "remote", "add", "origin", origin);
+  git(repo, "push", "-q", "origin", "main");
   for (const name of worktrees) git(repo, "worktree", "add", "-q", "-b", `implementer/${name}`, join(repo, ".worktrees", name));
   mkdirSync(join(repo, ".fleet"), { recursive: true });
   const beatFile = join(repo, ".fleet", "heartbeat.json");
@@ -84,16 +103,18 @@ function fixture(t, { controller = null, heartbeat, worktrees = [] } = {}) {
   const ghLog = join(dir, "gh.log");
   writeFileSync(ghLog, "");
   // `heads` maps a branch to what `gh pr list --state all --head <branch>`
-  // answers for it: `[{number, state}]`, none for a branch not named.
-  const run = ({ issues = [], prs = [], heads = {}, env = {}, cwd = repo, script = SCRIPT } = {}) => {
+  // answers for it: `[{number, state}]`, none for a branch not named. `views`
+  // maps an issue number to what `gh issue view` answers for it.
+  const run = ({ issues = [], prs = [], heads = {}, views = {}, env = {}, cwd = repo, script = SCRIPT } = {}) => {
     writeFileSync(join(dir, "issues.json"), JSON.stringify(issues));
     writeFileSync(join(dir, "prs.json"), JSON.stringify(prs));
     writeFileSync(join(dir, "heads.json"), JSON.stringify(heads));
+    writeFileSync(join(dir, "views.json"), JSON.stringify(views));
     const r = spawnSync(process.execPath, [script], {
       cwd, encoding: "utf8",
       env: {
         ...process.env, PATH: `${bin}:${process.env.PATH}`, FLEET_PROC_TABLE: tableFile, GH_LOG: ghLog,
-        FIXTURE_ISSUES: join(dir, "issues.json"), FIXTURE_PRS: join(dir, "prs.json"), FIXTURE_HEADS: join(dir, "heads.json"), ...env,
+        FIXTURE_ISSUES: join(dir, "issues.json"), FIXTURE_PRS: join(dir, "prs.json"), FIXTURE_HEADS: join(dir, "heads.json"), FIXTURE_VIEWS: join(dir, "views.json"), ...env,
       },
     });
     r.gh = readFileSync(ghLog, "utf8").split("\n").filter(Boolean);
@@ -148,12 +169,14 @@ test("prior dead + no worktree for the claim in this checkout → report; nothin
   assert.equal(by[16].action, "report");
   assert.match(by[16].why, /several worktrees/);
   assert.ok(r.out.claims.every((c) => c.action === "report"));
-  // Listing is all it does: two reads, no write — and the whole argv is the
+  // Listing is all it does: reads, no write — and the whole argv is the
   // query, so a widened --state, another --label, a trimmed --json field list
-  // or a smaller --limit each changes which claims are classified.
+  // or a smaller --limit each changes which claims are classified. #129 holds
+  // a worktree no in-progress issue names, so its issue is read, and is closed.
   assert.deepEqual(r.gh, [
     "issue list --label in-progress --state open --json number,title,url,closedByPullRequestsReferences --limit 1000",
     "pr list --state open --json number,headRefName,url --limit 1000",
+    "issue view 129 --json number,title,url,state,labels,closedByPullRequestsReferences",
   ]);
 });
 
@@ -209,8 +232,16 @@ test("a locked worktree whose path cannot be stat'd is a refusal — exit 2 — 
   assert.match(r.stderr, /cannot tell whether .*12-impl-12 exists \(EACCES\)/);
 });
 
-test("prior ancestor → nothing listed, nothing asked of gh", (t) => {
+test("prior ancestor → an in-progress claim is not listed, and nothing is asked of gh but its issue", (t) => {
   const f = fixture(t, { controller: RECORD("ancestor"), worktrees: ["12-impl-12"] });
+  const r = f.run({ issues: [issue(12)], views: { 12: view(12, { labels: ["in-progress"] }) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out, { prior: "ancestor", claims: [], carried: [] });
+  assert.deepEqual(r.gh, ["issue view 12 --json number,title,url,state,labels,closedByPullRequestsReferences"]);
+});
+
+test("prior ancestor, no claim on the disk → nothing is asked of gh", (t) => {
+  const f = fixture(t, { controller: RECORD("ancestor") });
   const r = f.run({ issues: [issue(12)] });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.out, { prior: "ancestor", claims: [], carried: [] });
@@ -315,6 +346,14 @@ test("a list that did not answer, or came back at its cap, is a refusal — exit
   assert.match(prsAtCap.stderr, /cap/);
 });
 
+test("prior dead with no claim at all: an open PR list that does not answer is still a refusal — exit 2", (t) => {
+  const f = fixture(t, { controller: RECORD("dead") });
+  const r = f.run({ env: { GH_PR_FAIL: "1" } });
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /pr list boom/);
+});
+
 test("prior dead + a claim whose branch's PR closed unmerged, none open → report naming the PR, in place of the resume", (t) => {
   const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12", "13-impl-13", "14-impl-14"] });
   const r = f.run({
@@ -412,22 +451,31 @@ test("stranded.mjs takes no stray argument", (t) => {
 test("an ambient GIT_DIR naming another repository does not change the answer", (t) => {
   // The worktree listing is what this pins: with GIT_DIR reaching it, git
   // lists the other repository's worktrees, which hold none of this claim's.
+  // So is the branch listing, which alone names #14's claim, a branch with no
+  // worktree.
   const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  const tip = git(f.repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit-tree", "-m", "work", "-p", "HEAD", "HEAD^{tree}").trim();
+  git(f.repo, "branch", "implementer/14-impl-14", tip);
   const other = join(f.dir, "other");
   mkdirSync(other);
   git(other, "init", "-q");
-  const r = f.run({ issues: [issue(12)], env: { GIT_DIR: join(other, ".git"), GIT_WORK_TREE: other } });
+  const r = f.run({ issues: [issue(12)], views: { 14: view(14) }, env: { GIT_DIR: join(other, ".git"), GIT_WORK_TREE: other } });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.worktree]), [[12, "resume", wt(f, "12-impl-12")]]);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.worktree, c.branch]), [
+    [12, "resume", wt(f, "12-impl-12"), "implementer/12-impl-12"],
+    [14, "report", null, "implementer/14-impl-14"],
+  ]);
+  assert.match(r.out.claims[1].why, /^1 commit\(s\) ahead of origin\/main; /, "the dry run measured the claim in this repository");
 });
 
 test("gh is run with no ambient GIT_DIR or GH_REPO, which would answer for another repository's tracker", (t) => {
-  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12", "13-impl-13"] });
+  commitIn(f, "13-impl-13");
   const envLog = join(f.dir, "gh-env.log");
-  const r = f.run({ issues: [issue(12)], env: { GIT_DIR: join(f.dir, "nowhere", ".git"), GH_REPO: "other/repo", GH_ENV_LOG: envLog } });
+  const r = f.run({ issues: [issue(12)], views: { 13: view(13) }, env: { GIT_DIR: join(f.dir, "nowhere", ".git"), GH_REPO: "other/repo", GH_ENV_LOG: envLog } });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(readFileSync(envLog, "utf8").trim().split("\n"), ["GIT_DIR= GH_REPO=", "GIT_DIR= GH_REPO=", "GIT_DIR= GH_REPO="],
-    "the issue list, the open-PR list and the claim's branch probe");
+  assert.deepEqual(readFileSync(envLog, "utf8").trim().split("\n"), Array(4).fill("GIT_DIR= GH_REPO="),
+    "the issue list, the open-PR list, the claim's branch probe and the unlabelled claim's issue");
 });
 
 // `ledger.mjs read` is the ledger's own parser, so its stdout is only wrong
@@ -452,3 +500,221 @@ for (const [name, stdout] of [
     assert.equal(r.stdout, "");
   });
 }
+
+// ── a claim no in-progress label holds live ──────────────────────────────────
+
+const WAYS_OUT = "push the branch and open a PR, or release the claim by hand";
+// release-ticket.sh's two blockers for a branch carrying one commit of its own.
+const AHEAD = (branch) => `1 commit(s) ahead of origin/main; 1 commit(s) unique to ${branch} (git cherry)`;
+const VIEW_ARGV = "--json number,title,url,state,labels,closedByPullRequestsReferences";
+
+for (const prior of ["dead", "ancestor", "none"]) {
+  test(`prior ${prior}: an open issue with no in-progress label whose claim holds a commit ahead → one report carrying the dry run's blocker`, (t) => {
+    const f = fixture(t, { controller: RECORD(prior), worktrees: ["12-impl-12"] });
+    commitIn(f, "12-impl-12");
+    const r = f.run({ views: { 12: view(12, { labels: ["ready-for-agent"] }) } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.out, {
+      prior,
+      claims: [{
+        n: 12, t: "ticket 12", action: "report", worktree: wt(f, "12-impl-12"), branch: "implementer/12-impl-12",
+        why: `${AHEAD("implementer/12-impl-12")} — ${WAYS_OUT}`,
+      }],
+      carried: [],
+    });
+    assert.match(r.stderr, /#12 report — 1 commit\(s\) ahead of origin\/main/);
+  });
+}
+
+test("the claim is reported again at the next run, off the disk and the issue — and a push of the branch with an open PR ends it", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  commitIn(f, "12-impl-12");
+  const views = { 12: view(12) };
+  for (let i = 0; i < 2; i += 1) assert.deepEqual(f.run({ views }).out.claims.map((c) => c.n), [12]);
+  const withPr = f.run({ views: { 12: view(12, { prs: [`${REPO_URL}/pull/90`] }) }, prs: [pr(90, "implementer/12-impl-12")] });
+  assert.equal(withPr.status, 0, withPr.stderr);
+  assert.deepEqual(withPr.out.claims, []);
+});
+
+for (const prior of ["dead", "ancestor", "none"]) {
+  test(`prior ${prior}: the same claim with an open PR on its ticket is not listed — linked, or named by its branch`, (t) => {
+    const f = fixture(t, { controller: RECORD(prior), worktrees: ["12-impl-12", "13-impl-13"] });
+    commitIn(f, "12-impl-12");
+    commitIn(f, "13-impl-13");
+    const r = f.run({
+      views: { 12: view(12, { prs: [`${REPO_URL}/pull/90`] }), 13: view(13) },
+      prs: [pr(90, "fix/other"), pr(91, "implementer/13-impl-13")],
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.out.claims, []);
+    assert.match(r.stderr, /#12 has open PR #90/);
+    assert.match(r.stderr, /#13 has open PR #91/);
+    // A claim with an open PR is not dry-run: nothing else asked of gh or git.
+    assert.ok(r.gh.every((l) => !l.startsWith("pr list --state all")), r.gh.join("\n"));
+  });
+}
+
+test("an in-progress claim is classified as today: the list owns it, and its issue is never read", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  commitIn(f, "12-impl-12");
+  const r = f.run({ issues: [issue(12)], views: { 12: view(12, { labels: ["in-progress"] }) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims, [
+    { n: 12, t: "ticket 12", action: "resume", worktree: wt(f, "12-impl-12"), branch: "implementer/12-impl-12", why: "its worktree is in this checkout" },
+  ]);
+  assert.ok(r.gh.every((l) => !l.startsWith("issue view")), r.gh.join("\n"));
+  // The same claim under `none`: reported for the previous run, once, not twice.
+  const none = fixture(t, { controller: RECORD("none"), worktrees: ["12-impl-12"] });
+  commitIn(none, "12-impl-12");
+  const again = none.run({ issues: [issue(12)] });
+  assert.deepEqual(again.out.claims.map((c) => [c.n, c.action, c.why]), [[12, "report", "no record proves the previous run dead, so nothing is resumed"]]);
+});
+
+test("a claim whose issue still carries in-progress is not listed here, whichever list named it", (t) => {
+  const f = fixture(t, { controller: RECORD("ancestor"), worktrees: ["12-impl-12"] });
+  commitIn(f, "12-impl-12");
+  const r = f.run({ views: { 12: view(12, { labels: ["ready-for-agent", "in-progress"] }) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims, []);
+});
+
+test("what is not an open, unlabelled implementer claim is never listed: a closed issue, and names that are not claim-ticket.sh's shape", (t) => {
+  const f = fixture(t, {
+    controller: RECORD("dead"),
+    worktrees: ["12-impl-12", "13-impl-14", "15-impl-15-bb", "016-impl-016", "17-retry", "18-impl-18-"],
+  });
+  git(f.repo, "branch", "implementer/12-bump-node-20");
+  git(f.repo, "branch", "feature/19-impl-19");
+  for (const name of ["12-impl-12", "13-impl-14", "15-impl-15-bb", "016-impl-016", "17-retry", "18-impl-18-"]) commitIn(f, name);
+  // #12 is closed; every other number names an open issue that would be listed
+  // if its claim's name were one.
+  const open = Object.fromEntries([13, 15, 16, 17, 18, 19].map((n) => [n, view(n)]));
+  const r = f.run({ views: { ...open, 12: { ...view(12), state: "CLOSED" } } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims, []);
+  assert.deepEqual(r.gh.filter((l) => l.startsWith("issue view")), [`issue view 12 ${VIEW_ARGV}`]);
+});
+
+test("a claim with nothing ahead of origin/main is still listed — its dry run finds nothing in the way, and both ways out are named", (t) => {
+  const f = fixture(t, { controller: RECORD("none"), worktrees: ["12-impl-12"] });
+  const r = f.run({ views: { 12: view(12) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.why]), [
+    [12, "report", `release-ticket.sh finds nothing in the way of releasing the claim — ${WAYS_OUT}`],
+  ]);
+});
+
+test("a branch with no worktree is a claim too; each member of one ticket is listed, and its issue is read once", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  commitIn(f, "12-impl-12");
+  const tip = git(f.repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit-tree", "-m", "work", "-p", "HEAD", "HEAD^{tree}").trim();
+  git(f.repo, "branch", "implementer/12-impl-12-b", tip);
+  const r = f.run({ views: { 12: view(12) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.worktree, c.branch, c.why]), [
+    [12, wt(f, "12-impl-12"), "implementer/12-impl-12", `${AHEAD("implementer/12-impl-12")} — ${WAYS_OUT}`],
+    [12, null, "implementer/12-impl-12-b", `${AHEAD("implementer/12-impl-12-b")} — ${WAYS_OUT}`],
+  ]);
+  assert.deepEqual(r.gh.filter((l) => l.startsWith("issue view")), [`issue view 12 ${VIEW_ARGV}`]);
+});
+
+test("unlabelled claims are listed in issue-number order, not in the order git names their worktrees", (t) => {
+  // git lists `12-impl-12` before `9-impl-9`; the report puts #9 first.
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12", "9-impl-9"] });
+  const r = f.run({ views: { 9: view(9), 12: view(12) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => c.n), [9, 12]);
+});
+
+test("a retry member's worktree `.worktrees/<N>-impl-<N>-<x>` is the claim's worktree", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12-b"] });
+  const r = f.run({ views: { 12: view(12) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.worktree, c.branch]), [[12, wt(f, "12-impl-12-b"), "implementer/12-impl-12-b"]]);
+});
+
+test("a claim-named worktree outside this checkout's .worktrees/ is not the claim's worktree — its branch still lists the claim", (t) => {
+  const f = fixture(t, { controller: RECORD("dead") });
+  git(f.repo, "worktree", "add", "-q", "-b", "implementer/14-impl-14", join(f.dir, "elsewhere", "14-impl-14"));
+  const r = f.run({ views: { 14: view(14) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.worktree, c.branch]), [[14, null, "implementer/14-impl-14"]]);
+});
+
+test("a claim worktree checked out on another branch reports that branch, not the claim's local branch", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  git(wt(f, "12-impl-12"), "switch", "-q", "-c", "other/12-x");
+  const r = f.run({ views: { 12: view(12) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.worktree, c.branch]), [[12, wt(f, "12-impl-12"), "other/12-x"]]);
+});
+
+test("a dry run that does not answer still lists the claim, naming why", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  const scripts = join(f.dir, "scripts");
+  cpSync(dirname(SCRIPT), scripts, { recursive: true });
+  writeFileSync(join(scripts, "release-ticket.sh"), "#!/bin/sh\necho boom >&2\nexit 2\n");
+  const r = f.run({ script: join(scripts, "stranded.mjs"), views: { 12: view(12) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.why]), [
+    [12, "report", `release-ticket.sh 12 impl-12 implementer did not answer (exit 2: boom) — what stands in the way of releasing the claim is unknown — ${WAYS_OUT}`],
+  ]);
+});
+
+test("a dry-run receipt is nothing in the way only at exit 0 with released true: either alone did not answer", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  const scripts = join(f.dir, "scripts");
+  cpSync(dirname(SCRIPT), scripts, { recursive: true });
+  for (const [stub, failed] of [
+    [`echo '{"released":false,"blockers":[]}'\nexit 0`, "exit 0"],
+    [`echo '{"released":true,"blockers":[]}'\necho nope >&2\nexit 1`, "exit 1: nope"],
+  ]) {
+    writeFileSync(join(scripts, "release-ticket.sh"), `#!/bin/sh\n${stub}\n`);
+    const r = f.run({ script: join(scripts, "stranded.mjs"), views: { 12: view(12) } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.why]), [
+      [12, "report", `release-ticket.sh 12 impl-12 implementer did not answer (${failed}) — what stands in the way of releasing the claim is unknown — ${WAYS_OUT}`],
+    ], stub);
+  }
+});
+
+test("an issue read that does not answer lists the claim, naming why — and the others are still classified", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12", "13-impl-13"] });
+  const r = f.run({ issues: [issue(13)], env: { GH_VIEW_FAIL: "1" } });
+  assert.equal(r.status, 0, r.stderr);
+  // The in-progress claim classifies first; the unlabelled one follows it.
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.action]), [[13, "resume"], [12, "report"]]);
+  const stranded = r.out.claims[1];
+  assert.equal(stranded.t, null);
+  assert.equal(stranded.why, `gh issue view 12 did not answer (exit 1: view boom) — whether impl-12's ticket is open, unlabelled and without a PR is unknown — ${WAYS_OUT}`);
+});
+
+test("prior ancestor + an issue read that does not answer → listed, naming neither way out: the claim may be the earlier run's live member", (t) => {
+  const f = fixture(t, { controller: RECORD("ancestor"), worktrees: ["12-impl-12"] });
+  // The issue does hold in-progress: only the failed read hides it.
+  const r = f.run({ views: { 12: view(12, { labels: ["in-progress"] }) }, env: { GH_VIEW_FAIL: "1" } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.claims.map((c) => [c.n, c.action, c.why]), [
+    [12, "report", "gh issue view 12 did not answer (exit 1: view boom) — whether impl-12's ticket is open, unlabelled and without a PR is unknown, and so is whether impl-12 is the earlier run's live member — check it against carried"],
+  ]);
+});
+
+test("an unlabelled claim whose number a PR branch carries outside the ticket position is reported with that PR named", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["20-impl-20"] });
+  commitIn(f, "20-impl-20");
+  const r = f.run({ views: { 20: view(20) }, prs: [pr(901, "implementer/1799-bump-node-20")] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.claims.length, 1);
+  assert.match(r.out.claims[0].why, /^1 commit\(s\) ahead of origin\/main; .* — .*; open PR #901 \(branch implementer\/1799-bump-node-20\) carries the number outside the ticket position/);
+});
+
+test("an unlabelled claim acts on nothing: no write reaches gh, and the claim's worktree and branch stand", (t) => {
+  const f = fixture(t, { controller: RECORD("dead"), worktrees: ["12-impl-12"] });
+  commitIn(f, "12-impl-12");
+  const before = git(f.repo, "worktree", "list", "--porcelain");
+  const r = f.run({ views: { 12: view(12) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.gh.every((l) => /^(issue (list|view)|pr list) /.test(l)), r.gh.join("\n"));
+  assert.equal(git(f.repo, "worktree", "list", "--porcelain"), before);
+  assert.match(git(f.repo, "branch", "--list", "implementer/12-impl-12"), /implementer\/12-impl-12/);
+});

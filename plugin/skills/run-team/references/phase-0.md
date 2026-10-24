@@ -424,7 +424,7 @@ token, row}]}`:
   `report` with `why` `PR #<M> closed unmerged`, and so does a list that
   does not answer, or a detached worktree whose branch cannot be asked
   about, never `resume`.
-- `prior: ancestor` — this session's own earlier run: no claim is listed.
+- `prior: ancestor` — this session's own earlier run: no `in-progress` claim is listed.
   `carried` lists every live token rotate carried — its member or runner
   `name` (a `review=wf:` launch's runId), the `token` as the ledger holds
   it, and the `row` carrying it, null for a member only `## Dispatched`
@@ -446,8 +446,25 @@ token, row}]}`:
   (`wf:` launches alike), after which the tick owes the PR
   a review again under the next free reviewer name.
 - `prior: none` — no record proves the previous run dead (no record yet, or
-  no `omp` process found above the rotation): every claim is `report`, and
-  nothing is resumed.
+  no `omp` process found above the rotation): every `in-progress` claim is
+  `report`, and nothing is resumed.
+- Whatever `prior` says — every implementer claim on the disk, a worktree
+  `.worktrees/<N>-impl-<N>[-x]` or a local branch
+  `implementer/<N>-impl-<N>[-x]`, whose issue is open and carries no
+  `in-progress` label and no open PR: `report`, never `resume`. Without
+  the label no member of the claim is live. A bail that left commits behind
+  cannot release its claim — `release-ticket.sh` refuses a branch ahead of
+  origin/main — so nothing else names it. Its `why` is the blocker list of
+  a read-only `release-ticket.sh <N> impl-<N>[-x] implementer` dry run (for
+  example `1 commit(s) ahead of origin/main`), then the two ways out: push
+  the branch and open a PR, or release the claim by hand. A dry run or an
+  issue read that does not answer still lists the claim, naming why. Under
+  `prior: ancestor` such an issue read names neither way out: no
+  `in-progress` list was read, so the claim may be the earlier run's live
+  member, and its `why` says to check it against `carried`.
+  Phase 0 reads the disk and the issue again at every run start, so the
+  claim is named until it is pushed or released, whatever any ledger holds.
+  A closed issue's claim is not listed.
 
 A `resume` follows the Member-killed row across the run boundary: a new
 member under a new name — `impl-<N>-b`, or one letter past the highest

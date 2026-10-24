@@ -618,6 +618,26 @@ test("stranded: a resume entry is a pending NEED with exit 4, a report entry is 
   assert.ok(!again.out.some((l) => l.startsWith("NEED")), again.stdout);
 });
 
+test("stranded: an unlabelled claim's report prints as `report #<n> — <why>` whatever the ledger holds, and the step stays ok", () => {
+  const why = "1 commit(s) ahead of origin/main; 1 commit(s) unique to implementer/12-impl-12 (git cherry) — push the branch and open a PR, or release the claim by hand";
+  const f = fixture();
+  f.ledgerRow(12, "impl-12");
+  f.control("stranded", {
+    out: JSON.stringify({
+      prior: "ancestor",
+      claims: [{ n: 12, t: "twelve", action: "report", worktree: "/w/12-impl-12", branch: "implementer/12-impl-12", why }],
+      carried: [],
+    }),
+  });
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.ok(r.out.some((l) => l.trim() === `report #12 — ${why}`), r.stdout);
+  assert.ok(!r.out.some((l) => l.startsWith("NEED")), r.stdout);
+  const receipt = f.receipt();
+  assert.equal(receipt.steps.stranded.status, "ok");
+  assert.equal(f.calls("shortlist").length, 1, "phase 0 does not wait on a report");
+});
+
 test("stranded: the live tokens a rotation carried are listed and are no NEED", () => {
   const f = fixture();
   f.control("stranded", {

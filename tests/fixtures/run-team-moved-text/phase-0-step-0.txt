@@ -328,7 +328,7 @@
    - `prior: dead` — every open `in-progress` issue with no open PR (one with
      an open PR is the fold-in's): `resume` when exactly one worktree for it
      sits under this checkout's `.worktrees/`, `report` otherwise.
-   - `prior: ancestor` — this session's own earlier run: no claim is listed.
+   - `prior: ancestor` — this session's own earlier run: no `in-progress` claim is listed.
      `carried` lists every live token rotate carried — its member or runner
      `name` (a `review=wf:` launch's runId), the `token` as the ledger holds
      it, and the `row` carrying it, null for a member only `## Dispatched`
@@ -350,7 +350,7 @@
      (`wf:` launches alike), after which the tick owes the PR
      a review again under the next free reviewer name.
    - `prior: none` — no record proves the previous run dead (no record yet, or
-     no `omp` process found above the rotation): every claim is `report`, and
+     no `omp` process found above the rotation): every `in-progress` claim is `report`, and
      nothing is resumed.
 
    A `resume` follows the Member-killed row across the run boundary: a new
