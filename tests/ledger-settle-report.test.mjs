@@ -277,6 +277,15 @@ test("impl-N=blocked: a block with no bailDetail, or with a bailCause, is not a 
   f.refused("impl-5", 2, /\$\.bailCause: "fork" is not null, with outcome "blocked" — a block is no bail/);
 });
 
+test("impl-N=blocked: a block that names a PR or a head is not a report — exit 2, nothing settled unchecked", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", blockedReport(f, { pr: 6 }));
+  f.refused("impl-5", 2, /\$\.pr: 6 is not null, with outcome "blocked" — a block reports no PR/);
+  f.report("impl-5", blockedReport(f, { head: f.head }));
+  f.refused("impl-5", 2, /\$\.head: "[0-9a-f]{40}" is not null, with outcome "blocked" — a block reports no PR/);
+});
+
 // -- fix-pr-M=applied:<head> --------------------------------------------------
 
 test("fix-pr-M=applied:<head>: origin's branch at the reported head settles", () => {

@@ -238,7 +238,7 @@ that field is the only thing that does, and an unreported ordering costs the
 covariate. A bail is `outcome` `bailed`, its cause in `bailCause`: the
 pre-code outcome, before you touch code. A block or ambiguity you find after
 implementation began — the work cannot finish without a ruling or human hands
-you do not have — is `outcome` `blocked` instead, with `bailCause` `null` and
+you do not have — is `outcome` `blocked` instead, with `pr`, `head` and `bailCause` `null` and
 the reason in `bailDetail`; report it rather than ending with no report. Then send
 the one line your brief gives, `<your name>: <outcome> <path>`, and exit. Never
 apply `ready-to-merge`, never merge.

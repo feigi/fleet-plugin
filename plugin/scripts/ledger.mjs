@@ -2509,8 +2509,8 @@ function recordFiled(id, subject) {
 //                             the Check-step record (below) holds for <head>
 //   impl-N=bailed             bailCause is not null; the receipt names it
 //   impl-N=blocked            nothing to check: report-schema.mjs already
-//                             refuses a block that names a bailCause or
-//                             gives no reason in bailDetail
+//                             refuses a block that names a bailCause, a pr or
+//                             a head, or gives no reason in bailDetail
 //   fix-pr-M=applied:<head>   origin's refs/heads/<branch> is <head>, fetched
 //                             by verify-sha.sh; the Check-step record (below)
 //                             holds for <head>

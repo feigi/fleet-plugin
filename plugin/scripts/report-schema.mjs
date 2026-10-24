@@ -23,7 +23,9 @@
 //      `$.refused[0].pr: PR #<pr> already has a verdict at $.merged[0].pr`,
 //      and an impl report whose `blocked` outcome names a `bailCause`, as
 //      `$.bailCause: "<cause>" is not null, with outcome "blocked" — a block
-//      is no bail`, or gives no reason in `bailDetail`
+//      is no bail`, gives no reason in `bailDetail`, or names a `pr` or a
+//      `head`, as `$.pr: <pr> is not null, with outcome "blocked" — a block
+//      reports no PR`
 //   2  usage: no or unknown subcommand, a wrong argument count, an unknown
 //      family, any flag; or <file> could not be read; or print could not
 //      write the schema to stdout. Refused on stderr, nothing on stdout
@@ -181,17 +183,21 @@ export function mergeBotVerdicts(report) {
 
 // The first violation of `family`'s schema by `value`, or null; then the rules
 // no schema keyword states. For an impl report: a `blocked` outcome names no
-// `bailCause`, since a block is no bail, and gives its reason in `bailDetail`,
-// text that is not only whitespace. For a merge-bot report: each PR gets one
-// verdict — merged, held, conflict-held or refused — the last it reached in
-// the pass, so a PR named twice, in one list or in two, is a violation at its
-// second entry.
+// `bailCause`, since a block is no bail, gives its reason in `bailDetail`,
+// text that is not only whitespace, and names no `pr` or `head`, since a block
+// reports no PR — a PR it opened is outcome `pr`, which settle checks. For a
+// merge-bot report: each PR gets one verdict — merged, held, conflict-held or
+// refused — the last it reached in the pass, so a PR named twice, in one list
+// or in two, is a violation at its second entry.
 export function reportViolation(family, value) {
   const found = validate(SCHEMAS[family], value);
   if (found !== null) return found;
   if (family === "impl" && value.outcome === "blocked") {
     if (value.bailCause !== null) return `$.bailCause: ${show(value.bailCause)} is not null, with outcome "blocked" — a block is no bail`;
     if (!/\S/.test(value.bailDetail ?? "")) return `$.bailDetail: ${show(value.bailDetail)} is not a reason, with outcome "blocked"`;
+    for (const field of ["pr", "head"]) {
+      if (value[field] !== null) return `$.${field}: ${show(value[field])} is not null, with outcome "blocked" — a block reports no PR`;
+    }
   }
   if (family !== "merge-bot") return null;
   const first = new Map();

@@ -268,16 +268,18 @@ test("validate refuses a merge-bot report giving one PR two verdicts, in two lis
   assert.equal(reportViolation("impl", VALID.impl), null);
 });
 
-// A block names no cause and gives its reason: rules no schema keyword states,
-// so validate() alone passes a block that breaks them; `validate` and
-// reportViolation() refuse it. A bail keeps its own shape.
-test("validate refuses a blocked impl report that names a bailCause or gives no bailDetail, and accepts one with its reason", () => {
+// A block names no cause and no PR, and gives its reason: rules no schema
+// keyword states, so validate() alone passes a block that breaks them;
+// `validate` and reportViolation() refuse it. A bail keeps its own shape.
+test("validate refuses a blocked impl report that names a bailCause, a pr or a head, or gives no bailDetail, and accepts one with its reason", () => {
   const blocked = (changes) => variant("impl", { outcome: "blocked", pr: null, head: null, bailCause: null, bailDetail: "needs a ruling", ...changes });
   for (const [changes, said] of [
     [{ bailCause: "fork" }, '$.bailCause: "fork" is not null, with outcome "blocked" — a block is no bail'],
     [{ bailDetail: null }, '$.bailDetail: null is not a reason, with outcome "blocked"'],
     [{ bailDetail: "" }, '$.bailDetail: "" is not a reason, with outcome "blocked"'],
     [{ bailDetail: " \t\n" }, '$.bailDetail: " \\t\\n" is not a reason, with outcome "blocked"'],
+    [{ pr: 6 }, '$.pr: 6 is not null, with outcome "blocked" — a block reports no PR'],
+    [{ head: "a".repeat(40) }, `$.head: "${"a".repeat(40)}" is not null, with outcome "blocked" — a block reports no PR`],
   ]) {
     const report = blocked(changes);
     assert.equal(validate(SCHEMAS.impl, report), null, said);

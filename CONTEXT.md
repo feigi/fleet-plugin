@@ -538,10 +538,10 @@ _Avoid_: give-up, outcome (bare, it collides with Release outcome), verdict,
 result
 
 **Hollow yield**:
-An implementer that ends its own turn with no PR, no valid bail report and
-no block mid-implementation, whatever its last message claims. The Cell's
-fault, unlike a bail, which names its cause, or a block, which is the
-ticket's.
+An implementer that ends its own turn with no PR and no valid bail or
+`blocked` report, whatever its last message claims; a block it never reported
+is one. The Cell's fault, unlike a bail, which names its cause, or a reported
+block, which is the ticket's.
 _Avoid_: silent bail, give-up
 
 ### Tier
