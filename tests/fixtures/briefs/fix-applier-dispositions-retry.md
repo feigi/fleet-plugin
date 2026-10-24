@@ -72,7 +72,9 @@ green: `git fetch origin && git rebase origin/main`, take the commit back with
 `recipe-check.mjs`, then `git commit -C ORIG_HEAD` and compare again. A hook
 that stages such a path again on the rebased base → push nothing and report
 that cause. Equal trees need no re-run. Exit 1 is red; exit 75 is no test
-result — no slot was free and nothing ran — so run it again.
+result — no slot was free and nothing ran — so run it again. Exit 143, 130 or
+129 is no test result either — it received a SIGTERM, SIGINT or SIGHUP and
+recorded nothing — so run it again with `timeout: 0` on the call.
 
 Your report is a file, `/abs/scratch-retry/reports/<your name>.json`, `<your name>` the
 `fix-pr-` name you were dispatched as, in the shape
