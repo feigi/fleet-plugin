@@ -261,10 +261,10 @@ export function endingOf({ member, pr, signals = null, earlierPrs = new Set(), v
 // its PR in `bailDetail` with `pr: null`, and stays a bail.
 // A transcript written before that rule existed is read under the current
 // rule, so a re-scrape can turn a recorded `bail:<cause>` into a non-bail
-// ending. The one recorded case is `impl-3655`, `bail:hands` with
-// `pr: null` and a `head`, which reads `hollow` on its next re-scrape. That
-// flip is accepted: it matches the glossary's "valid bail", and `mergeRows()`
-// keeps no earlier `bail:*` row against it.
+// ending. When this was written the one recorded case was `impl-3655`,
+// `bail:hands` with `pr: null` and a `head`, which reads `hollow` once
+// re-scraped. That flip is accepted: it matches the glossary's "valid bail",
+// and `mergeRows()` keeps no earlier `bail:*` row against it.
 function lastReport(reportWrites, leaf) {
   const last = reportWrites.filter((r) => r.file === `${leaf}.json`).at(-1);
   if (!last) return null;

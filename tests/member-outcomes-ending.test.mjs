@@ -219,15 +219,9 @@ test("a report naming another member is no report of this one", () => {
   assert.equal(endingOfMember(dir, "impl-38"), "hollow");
 });
 
-// A last report that fails an impl rule is no report, so a `bailed` report
-// that names a `pr` or a `head` (a bail is the pre-code outcome) reads the stop
-// the transcript actually had, not bail:<cause>. The rule is read at scrape
-// time, so a transcript written before it existed is read under it too: a
-// re-scrape turns a recorded bail:<cause> into a non-bail ending. The one
-// recorded case is impl-3655, bail:hands with `pr: null` and a `head`, which
-// reads hollow on its next re-scrape. That flip is intended, not a defect: it
-// matches the glossary's "valid bail", and mergeRows() keeps no earlier bail:*
-// row against it.
+// A bailed report that names a `pr` or a `head` fails an impl rule, so it is no
+// report and reads the stop the transcript had (rationale: lastReport in
+// plugin/scripts/member-outcomes.mjs).
 const HEAD = "251310fc3a3340796635e572d2f873b31b131670";
 
 test("a bailed report that names a pr or a head is no bail, and reads hollow after a clean exit", () => {
@@ -253,16 +247,17 @@ test("a covered bail that names its PR in pr is no bail, but one naming it only 
   assert.equal(endingOfMember(inDetail, "impl-71"), "bail:covered");
 });
 
+// A transcript per stop that can follow a report write, keyed by that stop.
+const stopsAfter = (report) => ({
+  provider: [modelChange(), report, turn({ stopReason: "error" }), exitEvt()],
+  budget: [modelChange(), report, userMsg("[budget notice] 90% of the request budget is spent"), exitEvt()],
+  abort: [modelChange(), report, turn({ stopReason: "aborted" }), exitEvt()],
+  crash: [modelChange(), report],
+});
+
 test("a bailed report that names a pr or a head falls through to the stop the transcript had", () => {
-  const report = reportWrite("impl-72", { pr: 4321 });
-  const cases = {
-    provider: { lines: [modelChange(), report, turn({ stopReason: "error" }), exitEvt()], ending: "provider" },
-    budget: { lines: [modelChange(), report, userMsg("[budget notice] 90% of the request budget is spent"), exitEvt()], ending: "budget" },
-    abort: { lines: [modelChange(), report, turn({ stopReason: "aborted" }), exitEvt()], ending: "abort" },
-    crash: { lines: [modelChange(), report], ending: "crash" },
-  };
-  for (const [shape, { lines, ending }] of Object.entries(cases)) {
-    assert.equal(endingOfMember(session({ "impl-72": lines }), "impl-72"), ending, shape);
+  for (const [shape, lines] of Object.entries(stopsAfter(reportWrite("impl-72", { pr: 4321 })))) {
+    assert.equal(endingOfMember(session({ "impl-72": lines }), "impl-72"), shape, shape);
   }
 });
 
@@ -301,14 +296,7 @@ test("a blocked report from an implementer that also opened its own PR reads pr"
 });
 
 test("a blocked report reads blocked ahead of a provider error, a budget notice, an abort or a crash", () => {
-  const report = reportWrite("impl-63", blockedReport);
-  const cases = {
-    provider: [modelChange(), report, turn({ stopReason: "error" }), exitEvt()],
-    budget: [modelChange(), report, userMsg("[budget notice] 90% of the request budget is spent"), exitEvt()],
-    abort: [modelChange(), report, turn({ stopReason: "aborted" }), exitEvt()],
-    crash: [modelChange(), report],
-  };
-  for (const [shape, lines] of Object.entries(cases)) {
+  for (const [shape, lines] of Object.entries(stopsAfter(reportWrite("impl-63", blockedReport)))) {
     assert.equal(endingOfMember(session({ "impl-63": lines }), "impl-63"), "blocked", shape);
   }
 });
@@ -319,7 +307,7 @@ test("a blocked report that names a bailCause, no bailDetail, a pr or a head is 
     nullDetail: { ...blockedReport, bailDetail: null },
     blankDetail: { ...blockedReport, bailDetail: "  " },
     withPr: { ...blockedReport, pr: 4321 },
-    withHead: { ...blockedReport, head: "251310fc3a3340796635e572d2f873b31b131670" },
+    withHead: { ...blockedReport, head: HEAD },
   };
   for (const [shape, o] of Object.entries(cases)) {
     const dir = session({ "impl-64": [modelChange(), reportWrite("impl-64", o), exitEvt()] });
