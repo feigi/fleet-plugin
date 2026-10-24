@@ -220,6 +220,70 @@ test("a report naming another member is no report of this one", () => {
 });
 
 // ---------------------------------------------------------------------------
+// blocked, from the member's report in the transcript
+// ---------------------------------------------------------------------------
+
+const blockedReport = { outcome: "blocked", bailCause: null, bailDetail: "the migration needs a schema ruling" };
+
+test("a last report that blocks mid-implementation reads blocked, never hollow", () => {
+  const dir = session({ "impl-60": [modelChange(), reportWrite("impl-60", blockedReport), exitEvt()] });
+  assert.equal(endingOfMember(dir, "impl-60"), "blocked");
+});
+
+test("a blocked report written with a bash heredoc reads blocked the same way", () => {
+  const dir = session({ "impl-61": [modelChange(), heredocWrite("impl-61", blockedReport), exitEvt()] });
+  assert.equal(endingOfMember(dir, "impl-61"), "blocked");
+});
+
+test("a blocked report from an implementer that also opened its own PR reads pr", () => {
+  const dir = session({
+    "impl-62": finished([
+      turn({ stopReason: "toolUse", blocks: [call("g1", "bash", { command: "gh pr create --title x" })] }),
+      result("g1", "https://github.com/chris/fleet-plugin/pull/4262"),
+      reportWrite("impl-62", blockedReport),
+    ]),
+  });
+  assert.equal(endingOfMember(dir, "impl-62"), "pr");
+});
+
+test("a blocked report reads blocked ahead of a provider error, a budget notice, an abort or a crash", () => {
+  const report = reportWrite("impl-63", blockedReport);
+  const cases = {
+    provider: [modelChange(), report, turn({ stopReason: "error" }), exitEvt()],
+    budget: [modelChange(), report, userMsg("[budget notice] 90% of the request budget is spent"), exitEvt()],
+    abort: [modelChange(), report, turn({ stopReason: "aborted" }), exitEvt()],
+    crash: [modelChange(), report],
+  };
+  for (const [shape, lines] of Object.entries(cases)) {
+    assert.equal(endingOfMember(session({ "impl-63": lines }), "impl-63"), "blocked", shape);
+  }
+});
+
+test("a blocked report that names a bailCause, or no bailDetail, is no report, and reads hollow", () => {
+  const cases = {
+    withCause: { ...blockedReport, bailCause: "fork" },
+    nullDetail: { ...blockedReport, bailDetail: null },
+    blankDetail: { ...blockedReport, bailDetail: "  " },
+  };
+  for (const [shape, o] of Object.entries(cases)) {
+    const dir = session({ "impl-64": [modelChange(), reportWrite("impl-64", o), exitEvt()] });
+    assert.equal(endingOfMember(dir, "impl-64"), "hollow", shape);
+  }
+});
+
+test("a later blocked report supersedes an earlier bail, and a later bail an earlier block", () => {
+  const blockedLast = session({ "impl-65": [modelChange(), reportWrite("impl-65"), reportWrite("impl-65", blockedReport), exitEvt()] });
+  assert.equal(endingOfMember(blockedLast, "impl-65"), "blocked");
+  const bailLast = session({ "impl-65": [modelChange(), reportWrite("impl-65", blockedReport), reportWrite("impl-65"), exitEvt()] });
+  assert.equal(endingOfMember(bailLast, "impl-65"), "bail:undecided");
+});
+
+test("an implementer that stops on its own with no report still reads hollow", () => {
+  const dir = session({ "impl-66": finished() });
+  assert.equal(endingOfMember(dir, "impl-66"), "hollow");
+});
+
+// ---------------------------------------------------------------------------
 // provider, budget, abort, crash, hollow — and the readings that must NOT fire
 // ---------------------------------------------------------------------------
 

@@ -6,7 +6,7 @@
 // (flat: no per-run directory), `<member>` being its ledger name (`impl-412`,
 // `impl-412-b`, `fix-pr-88`, `finisher-pr-88`, `merge-bot-3`). The file is
 // checked against the schema of the member's family, report-schema.mjs's
-// SCHEMAS, and the rule reportViolation() adds to it. The review runner and
+// SCHEMAS, and the rules reportViolation() adds to them. The review runner and
 // every member outside those four families have no schema, so no file to
 // look up.
 //

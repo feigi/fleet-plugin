@@ -250,6 +250,42 @@ test("impl-N=bailed: a null bailCause is exit 3", () => {
   f.refused("impl-5", 3, /failed: bailCause: null/);
 });
 
+// -- impl-N=blocked -----------------------------------------------------------
+
+const blockedReport = (f, over = {}) => implReport(f, {
+  outcome: "blocked", pr: null, head: null, bailCause: null, bailDetail: "the migration needs a schema ruling", ...over,
+});
+
+test("impl-N=blocked: a block with its reason settles blocked, unchecked", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", blockedReport(f));
+  const receipt = f.settled("impl-5");
+  assert.equal(receipt.outcome, "blocked");
+  assert.deepEqual(receipt.checks, []);
+  assert.equal(dispatched(f, "impl-5"), "impl-5=blocked");
+});
+
+test("impl-N=blocked: a block with no bailDetail, or with a bailCause, is not a report — exit 2 naming why", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", blockedReport(f, { bailDetail: null }));
+  f.refused("impl-5", 2, /is not a impl report — \$\.bailDetail: null is not a reason, with outcome "blocked"/);
+  f.report("impl-5", blockedReport(f, { bailDetail: " \n" }));
+  f.refused("impl-5", 2, /\$\.bailDetail: " \\n" is not a reason, with outcome "blocked"/);
+  f.report("impl-5", blockedReport(f, { bailCause: "fork" }));
+  f.refused("impl-5", 2, /\$\.bailCause: "fork" is not null, with outcome "blocked" — a block is no bail/);
+});
+
+test("impl-N=blocked: a block that names a PR or a head is not a report — exit 2, nothing settled unchecked", () => {
+  const f = fixture();
+  f.ok("dispatch", "5", "impl-5");
+  f.report("impl-5", blockedReport(f, { pr: 6 }));
+  f.refused("impl-5", 2, /\$\.pr: 6 is not null, with outcome "blocked" — a block reports no PR/);
+  f.report("impl-5", blockedReport(f, { head: f.head }));
+  f.refused("impl-5", 2, /\$\.head: "[0-9a-f]{40}" is not null, with outcome "blocked" — a block reports no PR/);
+});
+
 // -- fix-pr-M=applied:<head> --------------------------------------------------
 
 test("fix-pr-M=applied:<head>: origin's branch at the reported head settles", () => {

@@ -146,7 +146,7 @@ test("validate fails an Object.prototype-named top-level key, naming it", () => 
 });
 
 test("validate fails a bad enum value in each family that has an enum, naming it", () => {
-  assertInvalid(check("impl", variant("impl", { outcome: "merged" })), '$.outcome: "merged" is not one of "pr", "bailed"');
+  assertInvalid(check("impl", variant("impl", { outcome: "merged" })), '$.outcome: "merged" is not one of "pr", "bailed", "blocked"');
   assertInvalid(check("fix-pr", variant("fix-pr", { outcome: "done" })), '$.outcome: "done" is not one of "applied", "no-op", "failed"');
   assertInvalid(
     check("finisher", variant("finisher", { cause: "flaky" })),
@@ -229,6 +229,7 @@ test("validate passes the null and empty shapes each family allows", () => {
   ok("impl", { outcome: "bailed", pr: null, head: null, sizing: null, bailCause: "hands", bailDetail: "needs a maintainer's credentials" });
   ok("impl", { outcome: "bailed", pr: null, head: null, sizing: null, bailCause: "fixed", bailDetail: "abc1234 — origin/main's guard already refuses the input" });
   ok("impl", { outcome: "bailed", pr: null, head: null, sizing: null, bailCause: "covered", bailDetail: "PR#77 — its diff adds the same guard" });
+  ok("impl", { outcome: "blocked", pr: null, head: null, sizing: null, bailCause: null, bailDetail: "the ticket's two criteria contradict once the parser exists" });
   ok("impl", { sizing: { verdict: "light", signal: "one file", ranBeforePr: false }, confirmation: [] });
   ok("fix-pr", { outcome: "no-op", applied: [], deferred: [], filed: [] });
   ok("finisher", { outcome: "halted", cause: "live-editor", evidence: "a member still edits the worktree", kill: null, labelsReadBack: [] });
@@ -243,7 +244,7 @@ test("validate fails a file that is not JSON", () => {
 
 test("validate() answers null for a valid report and the violation text otherwise", () => {
   assert.equal(validate(SCHEMAS.impl, VALID.impl), null);
-  assert.equal(validate(SCHEMAS.impl, variant("impl", { outcome: "x" })), '$.outcome: "x" is not one of "pr", "bailed"');
+  assert.equal(validate(SCHEMAS.impl, variant("impl", { outcome: "x" })), '$.outcome: "x" is not one of "pr", "bailed", "blocked"');
 });
 
 // One verdict per PR is a rule no schema keyword states, so validate() alone
@@ -265,6 +266,30 @@ test("validate refuses a merge-bot report giving one PR two verdicts, in two lis
   assert.equal(reportViolation("merge-bot", VALID["merge-bot"]), null);
   assert.equal(check("merge-bot", VALID["merge-bot"]).status, 0, "one verdict each, a merged PR's branchKept entry beside it, is valid");
   assert.equal(reportViolation("impl", VALID.impl), null);
+});
+
+// A block names no cause and no PR, and gives its reason: rules no schema
+// keyword states, so validate() alone passes a block that breaks them;
+// `validate` and reportViolation() refuse it. A bail keeps its own shape.
+test("validate refuses a blocked impl report that names a bailCause, a pr or a head, or gives no bailDetail, and accepts one with its reason", () => {
+  const blocked = (changes) => variant("impl", { outcome: "blocked", pr: null, head: null, bailCause: null, bailDetail: "needs a ruling", ...changes });
+  for (const [changes, said] of [
+    [{ bailCause: "fork" }, '$.bailCause: "fork" is not null, with outcome "blocked" — a block is no bail'],
+    [{ bailDetail: null }, '$.bailDetail: null is not a reason, with outcome "blocked"'],
+    [{ bailDetail: "" }, '$.bailDetail: "" is not a reason, with outcome "blocked"'],
+    [{ bailDetail: " \t\n" }, '$.bailDetail: " \\t\\n" is not a reason, with outcome "blocked"'],
+    [{ pr: 6 }, '$.pr: 6 is not null, with outcome "blocked" — a block reports no PR'],
+    [{ head: "a".repeat(40) }, `$.head: "${"a".repeat(40)}" is not null, with outcome "blocked" — a block reports no PR`],
+  ]) {
+    const report = blocked(changes);
+    assert.equal(validate(SCHEMAS.impl, report), null, said);
+    assert.equal(reportViolation("impl", report), said);
+    assertInvalid(check("impl", report), said);
+  }
+  assert.equal(reportViolation("impl", blocked({})), null);
+  assert.equal(check("impl", blocked({})).status, 0, "a block with its reason is valid");
+  assert.equal(reportViolation("impl", variant("impl", { outcome: "bailed", pr: null, head: null, bailCause: null, bailDetail: null })), null,
+    "a bail's shape is not a block's");
 });
 
 // Exit 2: the invocation or the file, never the report.

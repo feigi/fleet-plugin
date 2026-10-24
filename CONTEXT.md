@@ -520,26 +520,28 @@ reports it wrote, never from a verdict: a PR, a bail and its cause, a block
 mid-implementation, a released claim, a provider error or fallback model, an
 exhausted request budget, an abort, a crash, or a Hollow yield. Recorded per
 implementer row in the `ending` column of `docs/metrics/member-outcomes.tsv`
-as `pr`, `bail:<cause>`, `bail:fixed`, `bail:fixed-refuted`, `provider`,
-`budget`, `abort`, `crash`, `hollow`, or `unknown` (the scrape cannot say,
-such as for a malformed transcript or a `fixed` bail with no sha origin/main
-can answer for); blank on a row that is not an implementer. A PR is the
-Cell's fault when it merged and was ruled failed; one closed unmerged counts
-as spend only. Of the other Endings, a Hollow yield, an exhausted budget, a
-`fixed` bail that origin/main refutes and an `unknown` are the Cell's fault,
+as `pr`, `blocked`, `bail:<cause>`, `bail:fixed`, `bail:fixed-refuted`,
+`provider`, `budget`, `abort`, `crash`, `hollow`, or `unknown` (the scrape
+cannot say, such as for a malformed transcript or a `fixed` bail with no sha
+origin/main can answer for); blank on a row that is not an implementer. A
+block mid-implementation is recorded as `blocked` from a `blocked` outcome in
+the implementer's own report. A PR is the Cell's fault when it merged and was
+ruled failed; one closed unmerged counts as spend only. Of the other Endings,
+a Hollow yield, an exhausted budget, a `fixed` bail that origin/main refutes
+and an `unknown` are the Cell's fault,
 so an Ending the scrape cannot name never flatters a Cell; any other bail,
 a block mid-implementation and a released claim are the ticket's; a provider
 error or fallback model, an abort and a crash are neither's, as is a
 dispatch that left no transcript. The ledger's settle token (`=killed`,
-`=bailed`) is not an Ending.
+`=bailed`, `=blocked`) is not an Ending.
 _Avoid_: give-up, outcome (bare, it collides with Release outcome), verdict,
 result
 
 **Hollow yield**:
-An implementer that ends its own turn with no PR, no valid bail report and
-no block mid-implementation, whatever its last message claims. The Cell's
-fault, unlike a bail, which names its cause, or a block, which is the
-ticket's.
+An implementer that ends its own turn with no PR and no valid bail or
+`blocked` report, whatever its last message claims; a block it never reported
+is one. The Cell's fault, unlike a bail, which names its cause, or a reported
+block, which is the ticket's.
 _Avoid_: silent bail, give-up
 
 ### Tier

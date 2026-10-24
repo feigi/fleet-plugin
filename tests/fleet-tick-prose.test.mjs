@@ -109,7 +109,8 @@ test("phase 0 runs tier-roles.mjs --check --in-flight <B> and says its notice ne
 
 test("the failure-handling row names blocked", () => {
   const row = RUN_TEAM.between("| Implementer blocked or ambiguous *mid-implementation* |", "\n| `review-pr` workflow throws or returns no tree", "failure-handling blocked row").text;
-  assert.match(row, Pin.phrase("`ledger.mjs settle impl-<N> blocked`"));
+  assert.match(row, Pin.phrase("A `blocked` report settles on the **Implementer report** wake, no label moved"));
+  assert.match(row, Pin.phrase("with no report, `ledger.mjs settle impl-<N> blocked`, its Ending still `hollow`"));
   assert.match(row, Pin.phrase("the ticket is not In flight"));
 });
 
