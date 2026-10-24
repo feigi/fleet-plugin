@@ -1551,6 +1551,9 @@ test("fit: at the bar — 8 of 20 failed against slow-high's 5 of 20 is exactly 
   const over = at(7);
   assert.deepEqual(over.reasons.light.cells["task-high"], { verdict: "qualifies", under_floor: false, bar: 0.4, range: [-5, -5] });
   assert.deepEqual([over.rows.light, over.reasons.light.reason], ["task-high", "sole-qualifier"]);
+  // The floor is checked before the price: at $9 against $10 task-high is too dear as well, and reads under the floor.
+  const both = fitRows([{ cell: "slow-high", failed: 5 }, { cell: "task-high", failed: 8, usd: 9 }]);
+  assert.deepEqual(both.reasons.light.cells["task-high"], { verdict: "under-floor", under_floor: true, bar: 0.4, range: [-1, -1] });
 });
 
 test("fit: the floor is per row — a cell under it in light alone is refused light, which keeps a slow-high row of its own while heavy and `*` adopt the cell", () => {
@@ -1616,8 +1619,9 @@ test("fit: two qualifiers — the reliably cheaper wins whatever the fail rates;
   const usd = two({ usd: [2, 9], failed: 2 }, { usd: [3, 7], merged: 30, failed: 3 });
   assert.ok(usd.pairs[0].range[1] >= 0, `not reliably cheaper: ${usd.pairs[0].range}`);
   assert.deepEqual([usd.cell, usd.reason], ["smol-high", "lower-usd"]);
+  // On equal $ the cheaper of the pair is the first by name.
   const name = two({ usd: 2 }, { usd: 2 });
-  assert.deepEqual([name.cell, name.reason, name.pairs[0].range], ["smol-high", "name", [0, 0]]);
+  assert.deepEqual([name.cell, name.reason, name.pairs], ["smol-high", "name", [{ cheaper: "smol-high", other: "task-high", range: [0, 0] }]]);
 });
 
 test("fit: three qualifiers — a cell another qualifier is reliably cheaper than never wins, whatever its fail rate", () => {

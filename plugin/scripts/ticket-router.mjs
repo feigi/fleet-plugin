@@ -21,8 +21,9 @@
 //     Re-fits the table from the three TSVs as committed at `--commit` (read
 //     with `git show`, never from the working tree) and the guard, and
 //     rewrites `--table`, recording the commit's sha as `fitted_commit`, then
-//     prints the fit and one line per row: its cell and the reason. The
-//     TSV flags name paths inside the repository that holds them. With
+//     prints the fit and one line per row: its cell and the reason, then each
+//     candidate's verdict and range. The TSV flags name paths inside the
+//     repository that holds them. With
 //     `--due`, writes nothing and prints `DUE=yes|no MERGED=<n>/<N>`: whether
 //     N merged PRs have landed since `fitted_commit`, counting the features
 //     rows at `--commit` that the fitted commit's features file does not hold.
@@ -420,7 +421,7 @@ function estimate(units, order) {
  * dropped), or what put it ahead of the next of the rest: `lower-fail-rate`,
  * `lower-usd` or `name`.
  */
-function judgeRow(est = {}, pulls = {}, cells, tripped) {
+function judgeRow(est = {}, pulls, cells, tripped) {
   const record = { cell: null, reason: "unjudged", cells: {}, pairs: [] };
   const base = est[POLICY_CELL];
   if (!base || base.merged < MIN_N) return record;

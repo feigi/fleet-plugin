@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { formatTsv, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { formatRow, parseTierOutcomes } from "../plugin/scripts/tier-outcomes.mjs";
-import { AttributionError, FEATURE_COLUMNS, TRIP_POINTS, admissibleRow, attribute, parseFeatures, tally, underFloor } from "../plugin/scripts/pull-attribution.mjs";
+import { AttributionError, FEATURE_COLUMNS, TRIP_POINTS, admissibleRow, attribute, bootUnit, bootstrapDiffCI, parseFeatures, tally, underFloor } from "../plugin/scripts/pull-attribution.mjs";
 import { WINDOW_START, computeReport, guardFile } from "../plugin/scripts/pr-cost.mjs";
 import { fitTable, readGuard } from "../plugin/scripts/ticket-router.mjs";
 
@@ -396,15 +396,16 @@ test("admissibleRow: the cell's own definition at its level with a dispatch mode
 
 const SESSION3 = "2026-10-07T10-00-00-000Z_01a00000-0000-7000-8000-000000000002";
 let nextTicket = 1000;
-// `count` merged Pulls at `cell`, each its own ticket, dispatched on `model` in
-// `session` at `usd` apiece; the first `fails` of them ruled a false claim.
-function addPulls(w, { cell, model, count, session = SESSION, usd = 1, fails = 0 }) {
+// `count` Pulls at `cell`, each its own ticket, dispatched on `model` in
+// `session` at `usd` apiece, their PRs in `state` (merged unless told); the
+// first `fails` of them ruled a false claim.
+function addPulls(w, { cell, model, count, session = SESSION, usd = 1, fails = 0, state = "MERGED" }) {
   for (let i = 0; i < count; i++) {
     const t = nextTicket++;
     w.features.push(pull(t, cell, { session }));
     w.members.push(impl(t, cell, { session, model, dispatchModel: model, ending: "pr", pr: String(t + 10000), cost: usd }));
     w.tiers.push(ruling(t, t + 10000, { minted_false_claim: i < fails ? "yes" : "no" }));
-    merged(w, t + 10000);
+    merged(w, t + 10000, state);
   }
 }
 // The guard's report on `w`, and the fit over it, fed the guard file as the fit reads one.
@@ -454,6 +455,21 @@ test("the fit's range against slow-high is the guard's usd_diff_ci95: the same n
   assert.ok(ci[1] < 0, `a range wholly below zero: ${ci}`);
   assert.deepEqual(table.reasons["*"].cells["task-high"].range, ci);
   assert.equal(table.rows["*"], "task-high");
+});
+
+test("an unmerged counted Pull is a bootstrap unit with its spend and no merged PR: 20 merged and 10 closed at $3 against $10 span -5.5, not a flat -7", () => {
+  // Both ranges build their units with bootUnit; the guard reads PR state, so a closed PR is an unmerged counted Pull there.
+  assert.deepEqual([bootUnit({ spend: 3, merged: false }), bootUnit({ spend: 3, merged: true })], [{ usd: 3, merged: 0 }, { usd: 3, merged: 1 }]);
+  const w = world();
+  baseline(w);
+  addPulls(w, { cell: "task-high", model: "model-t", count: 20, usd: 3 });
+  addPulls(w, { cell: "task-high", model: "model-t", count: 10, usd: 3, state: "CLOSED" });
+  const th = computeReport({ ...parsed(w), prs: w.prs }).cells.find((c) => c.cell === "task-high");
+  assert.deepEqual([th.n_pulls, th.n_merged, th.mean_usd], [30, 20, 4.5]);
+  // Booked as merged, every resample of task-high would read $3 a PR, and the range would be [-7, -7].
+  const ci = th.usd_diff_ci95;
+  assert.ok(ci[0] < -5.5 && -5.5 < ci[1], `a range around $4.50 − $10: ${ci}`);
+  assert.deepEqual(bootstrapDiffCI(Array(30).fill({ usd: 3, merged: 1 }), Array(20).fill({ usd: 10, merged: 1 })), [-7, -7]);
 });
 
 test("the floor and the bootstrap range are one rule each: both scripts import them from pull-attribution.mjs, and neither imports the other", () => {

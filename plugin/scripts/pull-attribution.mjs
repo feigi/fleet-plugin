@@ -87,7 +87,7 @@ export function underFloor(cell, base) {
   return (cell.failed * base.claims - base.failed * cell.claims) * 100 >= TRIP_POINTS * cell.claims * base.claims;
 }
 
-const round2 = (x) => (x === null || !Number.isFinite(x) ? null : Number(x.toFixed(2)));
+const round2 = (x) => (Number.isFinite(x) ? Number(x.toFixed(2)) : null);
 
 // Deterministic, so a re-run reads the same range.
 function mulberry32(seed) {
@@ -378,7 +378,10 @@ export function generations(units) {
  * never moves a cell's newest generation.
  */
 export function tally(units, order = generations(units)) {
-  const figures = (generation) => ({ generation, n: 0, merged: 0, claims: 0, failed: 0, spend: 0, pulls: [], left_out: 0, unpriced: 0, pending: 0 });
+  // `n` is read off `pulls`, so the count and the list cannot drift apart.
+  const figures = (generation) => ({
+    generation, get n() { return this.pulls.length; }, merged: 0, claims: 0, failed: 0, spend: 0, pulls: [], left_out: 0, unpriced: 0, pending: 0,
+  });
   const cells = new Map();
   for (const u of units) {
     const c = cells.get(u.cell) ?? cells.set(u.cell, { excluded: 0, gens: new Map() }).get(u.cell);
@@ -389,7 +392,6 @@ export function tally(units, order = generations(units)) {
     const g = u.generation ?? null;
     const f = c.gens.get(g) ?? c.gens.set(g, figures(g)).get(g);
     if (u.status === "counted") {
-      f.n++;
       if (u.merged) f.merged++;
       f.claims += u.claims;
       f.failed += u.falseClaims;

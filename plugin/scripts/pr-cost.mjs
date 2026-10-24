@@ -92,11 +92,10 @@ function median(xs) {
 }
 
 // The trip rule: the quality floor (pull-attribution.mjs's `underFloor`, in
-// integer counts), or a mean $ at least the baseline's. `n` is a cell's claims
-// and `n_pass` the claims among them that held.
+// integer counts), or a mean $ at least the baseline's. Each side is
+// `{ claims, failed, mean_usd }`.
 export function trips(cell, base) {
-  const counts = (x) => ({ claims: x.n, failed: x.n - x.n_pass });
-  return underFloor(counts(cell), counts(base)) || cell.mean_usd >= base.mean_usd;
+  return underFloor(cell, base) || cell.mean_usd >= base.mean_usd;
 }
 
 export function computeReport({ members, tiers, features, prs, routerTable = null, pricing = null, windowStart = WINDOW_START }) {
@@ -107,24 +106,21 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   const base = tallies.get(BASELINE_CELL) ?? null;
   // One generation's figures. The interval is the newest generation's against
   // the baseline's newest; an older generation is printed, never compared.
-  const figuresOf = (cell, g, newest) => {
-    const mine = g.pulls;
-    return {
-      cell,
-      generation: g.generation,
-      n_pulls: g.n,
-      n_merged: g.merged,
-      n_claims: g.claims,
-      n_failed: g.failed,
-      fail_rate: g.claims ? round(g.failed / g.claims) : null,
-      mean_usd: round(meanUsd(g), 2),
-      median_usd: round(median(mine.filter((u) => u.merged).map((u) => u.spend)), 2),
-      router_usd: round(mine.reduce((s, u) => s + routerUsd(u.pull), 0), 4),
-      usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(g), bootUnits(base)),
-      left_out: g.left_out,
-      unpriced: g.unpriced,
-    };
-  };
+  const figuresOf = (cell, g, newest) => ({
+    cell,
+    generation: g.generation,
+    n_pulls: g.n,
+    n_merged: g.merged,
+    n_claims: g.claims,
+    n_failed: g.failed,
+    fail_rate: g.claims ? round(g.failed / g.claims) : null,
+    mean_usd: round(meanUsd(g), 2),
+    median_usd: round(median(g.pulls.filter((u) => u.merged).map((u) => u.spend)), 2),
+    router_usd: round(g.pulls.reduce((s, u) => s + routerUsd(u.pull), 0), 4),
+    usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(g), bootUnits(base)),
+    left_out: g.left_out,
+    unpriced: g.unpriced,
+  });
   const figures = [...tallies.values()].map((t) => ({
     ...figuresOf(t.cell, t, true),
     excluded: t.excluded,
@@ -137,7 +133,7 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   // The $ leg takes the unrounded means: the cent-rounded figures are for
   // display, and a trip is sticky, so a cell cheaper by under half a cent
   // must not trip on rounding alone. The fail leg reads the claims.
-  const quality = (t) => ({ n: t.claims, n_pass: t.claims - t.failed, mean_usd: meanUsd(t) });
+  const quality = (t) => ({ claims: t.claims, failed: t.failed, mean_usd: meanUsd(t) });
   const tripped = [];
   if (baseline.n >= MIN_N) {
     for (const t of tallies.values()) {

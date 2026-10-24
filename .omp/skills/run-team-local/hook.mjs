@@ -220,7 +220,8 @@ function routerFit(repo, dryRun) {
     const open = ghJson(repo, ["pr", "list", "--state", "open", "--json", "number,headRefName", "--limit", "1000"])
       .find((p) => String(p.headRefName).startsWith(FIT_BRANCH));
     if (open) return say(`router fit: ${due} — re-fit PR #${open.number} (${open.headRefName}) is still open`);
-    // The fit prints its summary line, then one line per row: its cell and the reason.
+    // The fit prints its summary line, then one line per row: its cell and the
+    // reason, then each candidate's verdict and range.
     const out = script("ticket-router.mjs", ["fit", ...args], tmp).trim();
     const [fitted, ...rows] = out.split("\n");
     const sayRows = () => { for (const r of rows) say(`router fit: ${r}`); };
@@ -230,14 +231,22 @@ function routerFit(repo, dryRun) {
       return sayRows();
     }
     const subject = `chore: re-fit router-table.json at ${JSON.parse(readFileSync(table, "utf8")).fitted_commit.slice(0, 8)}`;
-    git(tmp, ["commit", "--quiet", "-m", subject, "--", TABLE]);
-    // Pushed from the detached checkout, so the repository the hook runs in
-    // keeps no local branch and no upstream config of this PR's.
-    git(tmp, ["push", "--quiet", "origin", `HEAD:refs/heads/${branch}`]);
-    // Labelled by `create` itself: a separate edit that failed would leave an
-    // open unlabelled PR that every later run takes for the earlier re-fit.
-    const url = gh(tmp, ["pr", "create", "--base", "main", "--head", branch, "--label", "patch", "--title", subject,
-      "--body", `Opened by the run-team-local hook (${due}).\n\n${out}\n`]).trim();
+    let url;
+    try {
+      git(tmp, ["commit", "--quiet", "-m", subject, "--", TABLE]);
+      // Pushed from the detached checkout, so the repository the hook runs in
+      // keeps no local branch and no upstream config of this PR's.
+      git(tmp, ["push", "--quiet", "origin", `HEAD:refs/heads/${branch}`]);
+      // Labelled by `create` itself: a separate edit that failed would leave an
+      // open unlabelled PR that every later run takes for the earlier re-fit.
+      url = gh(tmp, ["pr", "create", "--base", "main", "--head", branch, "--label", "patch", "--title", subject,
+        "--body", `Opened by the run-team-local hook (${due}).\n\n${out}\n`]).trim();
+    } catch (e) {
+      // A re-fit that never became a PR still leaves its summary and its rows in the log.
+      say(`router fit: ${due} — ${fitted}; no PR opened from ${branch}`);
+      sayRows();
+      throw e;
+    }
     say(`router fit: ${due} — ${fitted}; opened ${url} from ${branch}`);
     sayRows();
   } finally {
