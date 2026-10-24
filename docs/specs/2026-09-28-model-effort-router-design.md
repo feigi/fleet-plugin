@@ -411,11 +411,17 @@ Pulls (merged or not) ÷ merged — the guard figure, so an abandon-happy cell
 carries its abandoned spend — `median_usd` over merged Pulls only
 (descriptive), `router_usd`, `usd_diff_ci95` (a bootstrap 95% interval on
 `mean_usd` minus the baseline's, printed to be read and never judged on; blank
-for the baseline and for an older generation), then the `excluded`,
+for the baseline, for an older generation, when the window has no baseline
+cell, and when fewer than half the resamples hold a merged Pull on both sides —
+so always when either side has no merged Pull), then the `excluded`,
 `left_out`, `unpriced` and `untimed` Pull counts, and `guard`, the verdict on
-the cell's newest generation. A Pull is `untimed` when a booked row whose
-`agent` names no parent has a blank `work_s`: it has no **Work time**
-(`CONTEXT.md`), so it is out of the minutes figure and counted here instead.
+the cell's newest generation. A Pull's status is the first that applies, in
+the order `excluded`, pending, left-out, `unpriced`, `untimed`
+(`pull-attribution.mjs`, STATUS), so a Pull is `untimed` when a booked row
+whose `agent` names no parent has a blank `work_s` and no earlier status
+applies: it has no **Work time** (`CONTEXT.md`), so, like a left-out or
+unpriced Pull, it never reaches the cell's figures and is counted here
+instead.
 *Amended (#3763): `untimed` joins the Pull counts; refreshed to
 `TSV_COLUMNS` in #3792.*
 
@@ -428,7 +434,10 @@ optional); `.fleet/cost-guard.json` (gitignored — `computed_at`,
 `window_start`, `baseline{cell,generation,n,mean_usd,fail_rate}`, `cells[]`
 (each with `cell`, `generation`, `n`, `mean_usd`, `fail_rate`, `untimed` — the
 router reads per-cell `n` to end
-burn-in), `tripped[]`, `verdict: ok|tripped|none`). Runs at **phase 0 and
+burn-in), `tripped[]`, `verdict: ok|tripped|none`, `retire` (true when every
+non-default stage-1 cell tripped before any row of either Objective's set
+adopted one) and `min_n`, the n the baseline and every judged cell need).
+Runs at **phase 0 and
 close-out** through the repo-local hook (§ 5). No committed report
 snapshot; the numbers a ruling turns on go into the ADR that rules, not
 into a tracked file.
