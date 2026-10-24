@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { formatTsv, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { formatRow, parseTierOutcomes } from "../plugin/scripts/tier-outcomes.mjs";
-import { AttributionError, FEATURE_COLUMNS, admissibleRow, attribute, parseFeatures, tally } from "../plugin/scripts/pull-attribution.mjs";
+import { AttributionError, FEATURE_COLUMNS, TRIP_POINTS, admissibleRow, attribute, parseFeatures, tally, underFloor } from "../plugin/scripts/pull-attribution.mjs";
 import { WINDOW_START, computeReport, guardFile } from "../plugin/scripts/pr-cost.mjs";
 import { fitTable, readGuard } from "../plugin/scripts/ticket-router.mjs";
 
@@ -367,14 +367,15 @@ test("router_usd and merge-bot, memory and advisor rows are no cell's $, while t
   assert.deepEqual([ab.A.mean_usd, ab.B.mean_usd], [2.5, 2.25]);
 });
 
-test("tally counts each status per cell, and only counted Pulls enter n, merged, claims and spend", () => {
+test("tally counts each status per cell, and only counted Pulls enter n, merged, claims, spend and pulls", () => {
   const u = (cell, status, o = {}) => ({ cell, status, merged: false, claims: 0, falseClaims: 0, spend: 1, generation: null, ...o });
+  const counted = u("task-high", "counted", { merged: true, claims: 1, spend: 3 });
   assert.deepEqual(tally([
-    u("task-high", "counted", { merged: true, claims: 1, spend: 3 }), u("slow-high", "excluded"), u("task-high", "left-out"),
+    counted, u("slow-high", "excluded"), u("task-high", "left-out"),
     u("task-high", "unpriced", { spend: null }), u("task-high", "pending"),
   ]), [
-    { cell: "slow-high", generation: null, n: 0, merged: 0, claims: 0, failed: 0, spend: 0, excluded: 1, left_out: 0, unpriced: 0, pending: 0, older: [] },
-    { cell: "task-high", generation: null, n: 1, merged: 1, claims: 1, failed: 0, spend: 3, excluded: 0, left_out: 1, unpriced: 1, pending: 1, older: [] },
+    { cell: "slow-high", generation: null, n: 0, merged: 0, claims: 0, failed: 0, spend: 0, pulls: [], excluded: 1, left_out: 0, unpriced: 0, pending: 0, older: [] },
+    { cell: "task-high", generation: null, n: 1, merged: 1, claims: 1, failed: 0, spend: 3, pulls: [counted], excluded: 0, left_out: 1, unpriced: 1, pending: 1, older: [] },
   ]);
 });
 
@@ -439,6 +440,40 @@ test("a cell's newest generation is judged alone: 25 merged on A then 22 on B re
   assert.deepEqual([est.older["model-a"].n, est.older["model-a"].usd_per_merged, est.older["model-a"].fail_rate], [25, 20, 0.4]);
   // Pooled, smol-high's $ per merged PR is (25×20 + 22×2) / 47 ≈ $11.57, over the 0.75 × $10 adoption bar; B's $2 is under it.
   assert.equal(table.rows["*"], "smol-high", "the fit adopts on B's figures alone");
+});
+
+test("the fit's range against slow-high is the guard's usd_diff_ci95: the same newest-generation Pulls, the same bootstrap", () => {
+  const w = world();
+  baseline(w);
+  // task-high's older generation is dear; its newest one alternates $3 and $9 a PR.
+  addPulls(w, { cell: "task-high", model: "model-a", count: 20, usd: 20 });
+  for (let i = 0; i < 20; i++) addPulls(w, { cell: "task-high", model: "model-t", count: 1, usd: i % 2 ? 9 : 3, session: SESSION2 });
+  const { report, table } = guarded(w);
+  const ci = report.cells.find((c) => c.cell === "task-high").usd_diff_ci95;
+  assert.equal(report.cells.find((c) => c.cell === "task-high").generation, "model-t");
+  assert.ok(ci[1] < 0, `a range wholly below zero: ${ci}`);
+  assert.deepEqual(table.reasons["*"].cells["task-high"].range, ci);
+  assert.equal(table.rows["*"], "task-high");
+});
+
+test("the floor and the bootstrap range are one rule each: both scripts import them from pull-attribution.mjs, and neither imports the other", () => {
+  const src = (f) => readFileSync(new URL(`../plugin/scripts/${f}`, import.meta.url), "utf8");
+  const guard = src("pr-cost.mjs"), fit = src("ticket-router.mjs");
+  for (const s of [guard, fit]) {
+    assert.match(s, /import \{[^}]*\bunderFloor\b[^}]*\} from "\.\/pull-attribution\.mjs"/);
+    assert.match(s, /import \{[^}]*\bbootstrapDiffCI\b[^}]*\} from "\.\/pull-attribution\.mjs"/);
+    assert.doesNotMatch(s, /function (?:bootstrapDiffCI|mulberry32|underFloor)\b|const TRIP_POINTS\b/);
+  }
+  assert.doesNotMatch(guard, /from "\.\/ticket-router\.mjs"/);
+  assert.doesNotMatch(fit, /from "\.\/pr-cost\.mjs"/);
+});
+
+test("underFloor compares counts: 3 of 20 over the baseline is exactly 15 points, 2 of 20 against 3 of 30 is equal", () => {
+  assert.equal(TRIP_POINTS, 15);
+  assert.equal(underFloor({ claims: 20, failed: 7 }, { claims: 20, failed: 4 }), true);
+  assert.equal(underFloor({ claims: 20, failed: 6 }, { claims: 20, failed: 4 }), false);
+  assert.equal(underFloor({ claims: 20, failed: 8 }, { claims: 20, failed: 5 }), true, "40% against 25%");
+  assert.equal(underFloor({ claims: 20, failed: 2 }, { claims: 30, failed: 3 }), false);
 });
 
 test("a model change re-enters burn-in: 3 merged on B after 30 on A is the guard's n, neither adopted nor tripped", () => {

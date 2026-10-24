@@ -426,6 +426,7 @@ test("router fit --dry-run: fifty merged PRs not in fitted_commit run ticket-rou
   const a = at.run(["--dry-run"]);
   assert.equal(a.status, 0, a.stderr);
   assert.match(a.stdout, /^run-team-local: router fit: DUE=yes MERGED=50\/50 — ticket-router: fitted \d+ Pulls at [0-9a-f]{8}; .*; would open a chore PR from chore\/router-fit-\d{4}-\d{2}-\d{2}$/m);
+  assert.match(a.stdout, /^run-team-local: router fit: ticket-router: row \* slow-high unjudged /m, "each row's line follows the fit's summary, one line each");
   assert.equal(readFileSync(join(at.repo, TABLE), "utf8"), before, "the checkout's own table is untouched");
   assert.equal(worktrees(at.repo), 1, "the throwaway checkout is gone");
   assert.equal(git(at.origin, ["branch", "--list", "chore/*"]), "", "a dry run pushes nothing");

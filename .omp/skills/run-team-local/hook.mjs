@@ -220,9 +220,15 @@ function routerFit(repo, dryRun) {
     const open = ghJson(repo, ["pr", "list", "--state", "open", "--json", "number,headRefName", "--limit", "1000"])
       .find((p) => String(p.headRefName).startsWith(FIT_BRANCH));
     if (open) return say(`router fit: ${due} — re-fit PR #${open.number} (${open.headRefName}) is still open`);
-    const fitted = script("ticket-router.mjs", ["fit", ...args], tmp).trim();
+    // The fit prints its summary line, then one line per row: its cell and the reason.
+    const out = script("ticket-router.mjs", ["fit", ...args], tmp).trim();
+    const [fitted, ...rows] = out.split("\n");
+    const sayRows = () => { for (const r of rows) say(`router fit: ${r}`); };
     const branch = freeBranch(repo);
-    if (dryRun) return say(`router fit: ${due} — ${fitted}; would open a chore PR from ${branch}`);
+    if (dryRun) {
+      say(`router fit: ${due} — ${fitted}; would open a chore PR from ${branch}`);
+      return sayRows();
+    }
     const subject = `chore: re-fit router-table.json at ${JSON.parse(readFileSync(table, "utf8")).fitted_commit.slice(0, 8)}`;
     git(tmp, ["commit", "--quiet", "-m", subject, "--", TABLE]);
     // Pushed from the detached checkout, so the repository the hook runs in
@@ -231,8 +237,9 @@ function routerFit(repo, dryRun) {
     // Labelled by `create` itself: a separate edit that failed would leave an
     // open unlabelled PR that every later run takes for the earlier re-fit.
     const url = gh(tmp, ["pr", "create", "--base", "main", "--head", branch, "--label", "patch", "--title", subject,
-      "--body", `Opened by the run-team-local hook (${due}).\n\n${fitted}\n`]).trim();
+      "--body", `Opened by the run-team-local hook (${due}).\n\n${out}\n`]).trim();
     say(`router fit: ${due} — ${fitted}; opened ${url} from ${branch}`);
+    sayRows();
   } finally {
     spawnSync("git", ["-C", repo, "worktree", "remove", "--force", tmp], { env: gitEnv() });
     rmSync(tmp, { recursive: true, force: true });

@@ -20,7 +20,8 @@
 //       --guard <cost-guard.json> --commit <rev> [--due]
 //     Re-fits the table from the three TSVs as committed at `--commit` (read
 //     with `git show`, never from the working tree) and the guard, and
-//     rewrites `--table`, recording the commit's sha as `fitted_commit`. The
+//     rewrites `--table`, recording the commit's sha as `fitted_commit`, then
+//     prints the fit and one line per row: its cell and the reason. The
 //     TSV flags name paths inside the repository that holds them. With
 //     `--due`, writes nothing and prints `DUE=yes|no MERGED=<n>/<N>`: whether
 //     N merged PRs have landed since `fitted_commit`, counting the features
@@ -47,7 +48,9 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { CELL, POLICY_CELL, drawCell, parseMember } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { AttributionError, FEATURE_COLUMNS, attribute, generations, parseFeatures, tally } from "./pull-attribution.mjs";
+import {
+  AttributionError, FEATURE_COLUMNS, TRIP_POINTS, attribute, bootUnit, bootstrapDiffCI, generations, parseFeatures, tally, underFloor,
+} from "./pull-attribution.mjs";
 import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
 
 const NAME = "ticket-router";
@@ -61,7 +64,7 @@ const HEAVY_BRIEF_CHARS = 3483;
 const HEAVY_CRITERIA = 5;
 // Exploration cadence after burn-in: the Pull that creates `impl-` row 5k.
 const EXPLORE_EVERY = 5;
-// The fit's adoption floor (n per side), margin, and cadence.
+// The fit's adoption floor (merged PRs per side), margin, and cadence.
 const MIN_N = 20;
 const ADOPT_RATIO = 0.75;
 export const FIT_EVERY_MERGED = 50;
@@ -346,15 +349,19 @@ function fitPulls({ features, members, verdicts, window }) {
 // Pulls, `merged`, $ per merged PR, false claims over claims, fix rounds per
 // merged PR, and its left-out and unpriced Pull counts. Beside them the cell's
 // excluded Pull count, `generation` naming the newest generation's model, and
-// `older`, each older generation's model to its figures, newest first.
+// `older`, each older generation's model to its figures, newest first. Beside
+// `estimates`, `pulls`: per stratum and `*`, per cell, the newest generation's
+// counted Pulls those figures are over.
 function estimate(units, order) {
-  const out = {};
+  const estimates = {};
+  const pulls = {};
   for (const s of units.length ? [...new Set([...units.map((u) => u.stratum), "*"])].sort() : []) {
     const mine = s === "*" ? units : units.filter((u) => u.stratum === s);
-    out[s] = {};
+    estimates[s] = {};
+    pulls[s] = {};
     for (const t of tally(mine, order)) {
       const figures = (g) => {
-        const fix = mine.filter((u) => u.cell === t.cell && u.generation === g.generation && u.status === "counted" && u.merged)
+        const fix = g.pulls.filter((u) => u.merged)
           .reduce((n, u) => n + u.rows.filter((r) => parseMember(r.member)?.family === "fix-pr").length, 0);
         return {
           n: g.n,
@@ -369,52 +376,123 @@ function estimate(units, order) {
           unpriced: g.unpriced,
         };
       };
-      out[s][t.cell] = {
+      estimates[s][t.cell] = {
         generation: t.generation,
         ...figures(t),
         excluded: t.excluded,
         older: Object.fromEntries(t.older.map((o) => [o.generation, figures(o)])),
       };
+      pulls[s][t.cell] = t.pulls;
     }
   }
-  return out;
+  return { estimates, pulls };
 }
 
-// Among cells with n >= MIN_N in a stratum and not tripped, the one with the
-// lowest $ per merged PR — adopted only at or under ADOPT_RATIO of the
-// default cell's. Every figure read is the cell's newest generation's, the
-// default cell's included. The quality floor is the guard's to enforce, never
-// the fit's. null when the stratum cannot decide (no default cell at n, or no
-// candidate at n).
-function adopt(est, cells, tripped) {
-  const base = est?.[POLICY_CELL];
-  if (!base || base.n < MIN_N || base.usd_per_merged === null) return null;
-  const candidates = cells
-    .filter((c) => c !== POLICY_CELL && !tripped.has(c))
-    .map((c) => ({ c, e: est[c] }))
-    .filter(({ e }) => e && e.n >= MIN_N && e.usd_per_merged !== null)
-    .sort((a, b) => a.e.usd_per_merged - b.e.usd_per_merged || (a.c < b.c ? -1 : 1));
-  if (candidates.length === 0) return null;
-  return candidates[0].e.usd_per_merged <= ADOPT_RATIO * base.usd_per_merged ? candidates[0].c : POLICY_CELL;
+/**
+ * One row's cell — the `*` row's or a stratum's — and why. The quality floor
+ * is held twice: pooled by the guard, whose trip takes a cell out of every row
+ * and out of the exploration draw, and per row by the fit, which refuses a
+ * cell under the floor that row alone. Every figure read is the cell's newest
+ * generation's, the default cell's included. `est` and `pulls` are the row's
+ * `estimate()` figures and counted Pulls.
+ *
+ * A candidate is a cell of `cells` other than the default cell. Its `verdict`,
+ * the first that applies: `tripped` by the guard; `too-few`, under MIN_N
+ * merged PRs in the row; `under-floor` against the default cell there;
+ * `too-dear`, above ADOPT_RATIO of the default cell's $ per merged PR;
+ * `not-reliably-cheaper`, its `range` does not lie wholly below zero (its
+ * upper end, as `bootstrapDiffCI` returns it, is not below zero) or there is
+ * none; else it `qualifies`. A candidate past `too-few` records whether it is
+ * `under_floor`, the floor's `bar` (the default cell's fail rate plus
+ * TRIP_POINTS, rounded as a fail rate is, for reading only: the floor compares
+ * counts) and its `range`, the bootstrap 95% range of (candidate − default
+ * cell) $ per merged PR over those Pulls; the others record null for each.
+ *
+ * Several qualifiers: each pair records the range of (the cheaper by $ per
+ * merged PR, else by name − the other) in `pairs`, and a qualifier another
+ * is reliably cheaper than is dropped. Among the rest the lower fail rate,
+ * compared in counts, wins, then the lower $ per merged PR, then the name.
+ *
+ * `reason`, why the row holds `cell`: `unjudged` (the default cell, or every
+ * untripped candidate, is under MIN_N merged PRs; `cell` is null and a
+ * stratum follows `*`), `no-qualifier` (the default cell), or, for the
+ * winner, `sole-qualifier`, `reliably-cheaper` (every other qualifier was
+ * dropped), or what put it ahead of the next of the rest: `lower-fail-rate`,
+ * `lower-usd` or `name`.
+ */
+function judgeRow(est = {}, pulls = {}, cells, tripped) {
+  const record = { cell: null, reason: "unjudged", cells: {}, pairs: [] };
+  const base = est[POLICY_CELL];
+  if (!base || base.merged < MIN_N) return record;
+  // JSON writes −0 as 0, so a recorded end is 0 either way; `--check` compares the two.
+  const range = (a, b) => bootstrapDiffCI(pulls[a].map(bootUnit), pulls[b].map(bootUnit))?.map((x) => x + 0) ?? null;
+  const reliablyBelow = (r) => r !== null && r[1] < 0;
+  const bar = round4(base.failed / base.claims + TRIP_POINTS / 100);
+  const qualifiers = [];
+  let judged = false;
+  for (const c of cells) {
+    if (c === POLICY_CELL) continue;
+    const e = est[c];
+    if (tripped.has(c) || !e || e.merged < MIN_N) {
+      record.cells[c] = { verdict: tripped.has(c) ? "tripped" : "too-few", under_floor: null, bar: null, range: null };
+      continue;
+    }
+    judged = true;
+    const under = underFloor(e, base);
+    const r = range(c, POLICY_CELL);
+    const verdict = under ? "under-floor"
+      : e.usd_per_merged > ADOPT_RATIO * base.usd_per_merged ? "too-dear"
+        : reliablyBelow(r) ? "qualifies" : "not-reliably-cheaper";
+    record.cells[c] = { verdict, under_floor: under, bar, range: r };
+    if (verdict === "qualifies") qualifiers.push(c);
+  }
+  if (!judged) return record;
+  if (qualifiers.length === 0) return { ...record, cell: POLICY_CELL, reason: "no-qualifier" };
+
+  const usd = (c) => est[c].usd_per_merged;
+  const byName = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const failCmp = (a, b) => est[a].failed * est[b].claims - est[b].failed * est[a].claims;
+  const named = [...qualifiers].sort(byName);
+  const dropped = new Set();
+  for (let i = 0; i < named.length; i++) {
+    for (let j = i + 1; j < named.length; j++) {
+      const [cheaper, other] = usd(named[j]) < usd(named[i]) ? [named[j], named[i]] : [named[i], named[j]];
+      const r = range(cheaper, other);
+      record.pairs.push({ cheaper, other, range: r });
+      if (reliablyBelow(r)) dropped.add(other);
+    }
+  }
+  // The cheapest qualifier, by $ then name, is never dropped, so the rest is never empty.
+  const [win, next] = named.filter((c) => !dropped.has(c)).sort((a, b) => failCmp(a, b) || usd(a) - usd(b) || byName(a, b));
+  const reason = qualifiers.length === 1 ? "sole-qualifier"
+    : next === undefined ? "reliably-cheaper"
+      : failCmp(win, next) !== 0 ? "lower-fail-rate"
+        : usd(win) !== usd(next) ? "lower-usd" : "name";
+  return { ...record, cell: win, reason };
 }
 
 /**
  * The re-fit table. `guard` is `{ tripped, n, window_start }` (readGuard's
  * shape); `commit` is the sha of the commit the inputs were read from, or null
- * for the empty corpus before any fit.
+ * for the empty corpus before any fit. `reasons` holds `judgeRow()`'s record
+ * for `*` and for each stratum with Pulls; a stratum whose record has no cell
+ * gets no row and follows `*`, and an unjudged `*` is the default cell.
  */
 export function fitTable({ prior, features, members, verdicts, guard, commit = null }) {
   const window = guard.window_start ?? prior.window_start ?? null;
   const { units, order } = fitPulls({ features, members, verdicts, window });
-  const estimates = estimate(units, order);
+  const { estimates, pulls } = estimate(units, order);
   const tripped = new Set(guard.tripped);
 
   let { stage, cells } = prior;
   cells = [...cells];
-  const rows = { "*": adopt(estimates["*"], cells, tripped) ?? POLICY_CELL };
+  const star = judgeRow(estimates["*"], pulls["*"], cells, tripped);
+  const rows = { "*": star.cell ?? POLICY_CELL };
+  const reasons = { "*": { ...star, cell: rows["*"] } };
   for (const s of STRATA) {
-    const a = adopt(estimates[s], cells, tripped);
-    if (a !== null) rows[s] = a;
+    if (!estimates[s]) continue;
+    reasons[s] = judgeRow(estimates[s], pulls[s], cells, tripped);
+    if (reasons[s].cell !== null) rows[s] = reasons[s].cell;
   }
   const atN = (c) => (guard.n[c] ?? 0) >= MIN_N;
   if (stage === 1 && cells.every(atN) && (rows["*"] !== POLICY_CELL || cells.some((c) => tripped.has(c)))) {
@@ -433,6 +511,7 @@ export function fitTable({ prior, features, members, verdicts, guard, commit = n
     rows,
     classifier: prior.classifier,
     estimates,
+    reasons,
     guard: { tripped: [...tripped].sort(), n: Object.fromEntries(Object.keys(guard.n).sort().map((c) => [c, guard.n[c]])) },
   };
 }
@@ -460,6 +539,16 @@ function cellCounts(estimates) {
       ...Object.entries(e.older).map(([g, o]) => `${c} ${g} (older) ${counts(o)}`),
     ].join(", "))
     .join(", ") || "none";
+}
+
+// One line per row the fit judged or skipped: its cell (`-` for a stratum
+// that follows `*`) and its reason, then each candidate's verdict and range.
+function rowLines(reasons) {
+  const range = (r) => (r === null ? "" : ` [${r.map((x) => x.toFixed(2)).join(", ")}]`);
+  return Object.entries(reasons).map(([s, r]) => {
+    const cells = Object.entries(r.cells).map(([c, x]) => `${c} ${x.verdict}${range(x.range)}`).join(", ");
+    return `${NAME}: row ${s} ${r.cell ?? "-"} ${r.reason}${cells ? ` (${cells})` : ""}\n`;
+  }).join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -638,7 +727,7 @@ function main() {
   const next = joined(() => fitTable({ prior: table, features, members, verdicts, guard, commit: sha }));
   writeFileSync(`${tablePath}.tmp`, `${JSON.stringify(next, null, 2)}\n`);
   renameSync(`${tablePath}.tmp`, tablePath);
-  process.stdout.write(`${NAME}: fitted ${next.n_rows} Pulls at ${short(sha)}; rows ${JSON.stringify(next.rows)}; burn_in ${next.burn_in}; stage ${next.stage}; cells ${cellCounts(next.estimates)}\n`);
+  process.stdout.write(`${NAME}: fitted ${next.n_rows} Pulls at ${short(sha)}; rows ${JSON.stringify(next.rows)}; burn_in ${next.burn_in}; stage ${next.stage}; cells ${cellCounts(next.estimates)}\n${rowLines(next.reasons)}`);
 }
 
 if (isCLI(import.meta.url)) main();

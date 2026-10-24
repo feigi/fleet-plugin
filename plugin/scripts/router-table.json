@@ -17,6 +17,14 @@
     "tau": null
   },
   "estimates": {},
+  "reasons": {
+    "*": {
+      "cell": "slow-high",
+      "reason": "unjudged",
+      "cells": {},
+      "pairs": []
+    }
+  },
   "guard": {
     "tripped": [],
     "n": {}
