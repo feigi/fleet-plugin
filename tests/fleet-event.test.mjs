@@ -335,6 +335,23 @@ test("impl-report on a bail writes no upstream for the claim branch", () => {
   assert.equal(configOf(f, "merge"), null);
 });
 
+test("impl-report on a block settles blocked and takes no relabel, comment, release or upstream action", () => {
+  const f = fixture({ rows: ["#412 impl-412"] });
+  git(f.repo, "branch", CLAIM);
+  const issue = { labels: ["ready-for-agent", "in-progress"], comments: [] };
+  f.setGh({ issue: { 412: issue }, pr: {} });
+  f.report(implReport("impl-412", { outcome: "blocked", pr: null, head: null, sizing: null, bailCause: null, bailDetail: "needs a schema ruling" }));
+  f.control("settle", { "impl-412": { outcome: "blocked" } });
+  const r = f.run(["impl-report", "impl-412"]);
+  assert.equal(r.status, 0, r.err + r.stdout);
+  assert.deepEqual(writes(r.order), [`settle impl-412 --from-report --reports ${join(f.scratch, "reports")}`]);
+  assert.match(eventLine(r), /^event: impl-report: settled impl-412=blocked$/);
+  assert.ok(!r.stdout.includes("NEED"), r.stdout);
+  assert.deepEqual(f.gh().issue[412], issue, "the issue keeps its labels and gets no comment");
+  assert.deepEqual(f.rows(), ["#412 impl-412=blocked"]);
+  assert.equal(configOf(f, "remote"), null);
+});
+
 test("impl-report for a member already settled to an outcome that is neither a PR nor a bail writes no upstream", () => {
   const f = fixture({ rows: ["#412 impl-412=released"] });
   git(f.repo, "branch", CLAIM);

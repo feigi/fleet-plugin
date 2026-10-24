@@ -38,8 +38,8 @@
 //   counted   every other Pull: the only ones in a cell's figures.
 //
 // ENDINGS come from member-outcomes' `ending` column. The cell's: `hollow`,
-// `budget`, `bail:fixed-refuted`, `unknown`. The ticket's: every other
-// `bail:<cause>`. Neither's: `provider`, `crash`, `abort`.
+// `budget`, `bail:fixed-refuted`, `unknown`. The ticket's: `blocked` and every
+// other `bail:<cause>`. Neither's: `provider`, `crash`, `abort`.
 //
 // CLAIMS. A merged Pull is one claim, false when its Ruling fails the floor
 // (`minted_false_claim=yes` or `closed_own_ticket=no`). Each `bail:fixed` or
@@ -125,7 +125,7 @@ function datedRows(features) {
 
 const CELL_ENDINGS = new Set(["hollow", "budget", "bail:fixed-refuted", "unknown"]);
 const NEITHER_ENDINGS = new Set(["provider", "crash", "abort"]);
-const ticketsEnding = (e) => e.startsWith("bail:") && !CELL_ENDINGS.has(e);
+const ticketsEnding = (e) => e === "blocked" || (e.startsWith("bail:") && !CELL_ENDINGS.has(e));
 const failsFloor = (ruling) => ruling.minted_false_claim === "yes" || ruling.closed_own_ticket === "no";
 // An omp session id opens with its ISO start time, so two of them sort in time order.
 const STARTED = /^\d{4}-\d{2}-\d{2}T/;

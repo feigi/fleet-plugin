@@ -66,6 +66,13 @@ escalate if it repeats. Never read exit 2 as `not reachable`, and never record i
 as a stray commit — the flag and the maintainer's ruling above are what exit 1
 earns, and spending them on a probe that never answered costs a member its
 ticket over a failure a re-run would have cleared.
+
+## Never `--delete-branch`
+
+**Never `--delete-branch` — the merge bot deletes the head branch itself.**
+`gh pr merge <n> --merge` alone: the flag's local cleanup errors on a `main`
+held by another worktree, or strands the feature worktree on `main`.
+
 ## Never force a rebase to start
 
 **Never force a rebase to start.** No `git clean`, `git checkout .`,

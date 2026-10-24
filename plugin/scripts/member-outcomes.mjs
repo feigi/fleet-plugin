@@ -146,6 +146,7 @@ export function withReports(rows, scratch) {
 //                 opened one (more than one leaves the pr column blank), or
 //                 the last report claims a PR an earlier same-ticket
 //                 implementer opened in this session;
+//   blocked       the last report blocks mid-implementation;
 //   bail:<cause>  the last report bails (`fixed` is checked against main);
 //   provider      a model fell back, or the last turn errored;
 //   budget        a budget notice reached the member;
@@ -162,6 +163,7 @@ export function endingOf({ member, pr, signals = null, earlierPrs = new Set(), v
   if (signals.openedPrs.length > 0) return "pr";
   const last = lastReport(signals.reportWrites, member.split("/").pop());
   if (last?.outcome === "pr" && earlierPrs.has(String(last.pr))) return "pr";
+  if (last?.outcome === "blocked") return "blocked";
   // lastReport passed the impl schema, whose bailCause is a BAILS key or null.
   if (last?.bailCause) return bailEnding(last, verifyMain);
   if (signals.providerFallback || signals.lastStopReason === "error") return "provider";

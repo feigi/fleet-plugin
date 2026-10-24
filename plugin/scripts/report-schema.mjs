@@ -18,9 +18,12 @@
 //   0  print: the schema is on stdout. validate: `valid` on stdout
 //   1  validate: `invalid: <violation>` on stdout, naming the FIRST violation;
 //      a file that is not JSON is invalid too, as `$: not JSON (...)`, and so
-//      is one that repeats a key, as `$.merged: duplicate key "merged"`, and
-//      a merge-bot report giving one PR two verdicts, as
-//      `$.refused[0].pr: PR #<pr> already has a verdict at $.merged[0].pr`
+//      is one that repeats a key, as `$.merged: duplicate key "merged"`, a
+//      merge-bot report giving one PR two verdicts, as
+//      `$.refused[0].pr: PR #<pr> already has a verdict at $.merged[0].pr`,
+//      and an impl report whose `blocked` outcome names a `bailCause`, as
+//      `$.bailCause: "<cause>" is not null, with outcome "blocked" — a block
+//      is no bail`, or gives no reason in `bailDetail`
 //   2  usage: no or unknown subcommand, a wrong argument count, an unknown
 //      family, any flag; or <file> could not be read; or print could not
 //      write the schema to stdout. Refused on stderr, nothing on stdout
@@ -112,7 +115,9 @@ const issues = listOf({ issue: id, subject: str });
 export const SCHEMAS = {
   impl: report({
     member: str,
-    outcome: { type: "string", enum: ["pr", "bailed"] },
+    // `bailed` is the pre-code outcome; `blocked` a block or ambiguity found
+    // after implementation began, its reason in `bailDetail`.
+    outcome: { type: "string", enum: ["pr", "bailed", "blocked"] },
     pr: { ...id, type: ["integer", "null"] },
     head: { type: ["string", "null"], pattern: HEX },
     branch: str,
@@ -174,14 +179,21 @@ export function mergeBotVerdicts(report) {
   ];
 }
 
-// The first violation of `family`'s schema by `value`, or null; for a
-// merge-bot report then the rule no schema keyword states: each PR gets one
+// The first violation of `family`'s schema by `value`, or null; then the rules
+// no schema keyword states. For an impl report: a `blocked` outcome names no
+// `bailCause`, since a block is no bail, and gives its reason in `bailDetail`,
+// text that is not only whitespace. For a merge-bot report: each PR gets one
 // verdict — merged, held, conflict-held or refused — the last it reached in
-// the pass, so a PR named twice, in one list or in two, is a violation at
-// its second entry.
+// the pass, so a PR named twice, in one list or in two, is a violation at its
+// second entry.
 export function reportViolation(family, value) {
   const found = validate(SCHEMAS[family], value);
-  if (found !== null || family !== "merge-bot") return found;
+  if (found !== null) return found;
+  if (family === "impl" && value.outcome === "blocked") {
+    if (value.bailCause !== null) return `$.bailCause: ${show(value.bailCause)} is not null, with outcome "blocked" — a block is no bail`;
+    if (!/\S/.test(value.bailDetail ?? "")) return `$.bailDetail: ${show(value.bailDetail)} is not a reason, with outcome "blocked"`;
+  }
+  if (family !== "merge-bot") return null;
   const first = new Map();
   for (const { pr, path } of mergeBotVerdicts(value)) {
     if (first.has(pr)) return `${path}: PR #${pr} already has a verdict at ${first.get(pr)}`;

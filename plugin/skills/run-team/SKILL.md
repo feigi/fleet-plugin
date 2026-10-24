@@ -792,7 +792,7 @@ Match the failure to its row in the table below and run that response; where the
 |---|---|
 | SHA not on expected branch | Flag, do not enqueue, report |
 | Implementer bails before implementing | Act by the report's `bailCause` as the **Relabel causes** table says, then refill (**What a wake owes beyond its call**) |
-| Implementer blocked or ambiguous *mid-implementation* | Free the slot, `ledger.mjs settle impl-<N> blocked`, leave `in-progress`, report — the ticket is not In flight and waits for a human; the row above is the pre-code bail, not this one |
+| Implementer blocked or ambiguous *mid-implementation* | Free the slot. A `blocked` report settles on the **Implementer report** wake, no label moved; with no report, `ledger.mjs settle impl-<N> blocked`, its Ending still `hollow`. Leave `in-progress`, report — the ticket is not In flight and waits for a human; the row above is the pre-code bail |
 | `review-pr` workflow throws or returns no tree | Retry once under the next letter (`review-pr-<pr#>-b`); still failing, report and leave the PR at review-due. Never enqueue the PR as reviewed — the workflow is not a member, so no other row here covers it |
 | Reviewer, fix-applier or red-check fixer cannot reach green | Report, leave the PR unlabeled, free the slot — a fix-applier or red-check fixer settles `failed` |
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
@@ -841,9 +841,7 @@ enqueue, do not return the ticket to the shortlist until the maintainer rules.
 escalate if it repeats, and never read it as `not reachable` or record it as a
 stray commit. See references/failure-handling.md.
 
-**Never `--delete-branch` — the merge bot deletes the head branch itself.**
-`gh pr merge <n> --merge` alone: the flag's local cleanup errors on a `main`
-held by another worktree, or strands the feature worktree on `main`.
+**Never `--delete-branch` — the merge bot deletes the head branch itself.** See references/failure-handling.md.
 
 **Never force a rebase to start.** No `git clean`, `git checkout .`,
 `git reset --hard`, `git stash`. Non-empty `git status --porcelain -unormal` →

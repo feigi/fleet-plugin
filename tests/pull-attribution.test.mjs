@@ -126,6 +126,20 @@ test("never merged with only the ticket's or neither's endings is left out; a ho
   assert.deepEqual(fit, guard);
 });
 
+test("never merged with only a blocked implementer is left out in both figures; a blocked and a hollow implementer keep it counted", () => {
+  const w = world();
+  w.features.push(pull(19, "task-high"), pull(20, "task-high"));
+  w.members.push(
+    impl(19, "task-high", { ending: "blocked", cost: 7 }),
+    impl(20, "task-high", { ending: "blocked", cost: 2 }),
+    impl(20, "task-high", { agent: "impl-20-b", ending: "hollow", cost: 3 }),
+  );
+  assert.deepEqual(units(w).map((u) => u.status), ["left-out", "counted"]);
+  const { guard, fit } = figures(w);
+  assert.deepEqual(guard, { "task-high": cell({ n: 1, left_out: 1 }) }, "the blocked Pull's $7 is booked to neither figure");
+  assert.deepEqual(fit, guard);
+});
+
 test("a refuted `fixed` bail is one false claim in the fail rate; an unrefuted one is one claim, not failed, and keeps its never-merged Pull counted", () => {
   const w = world();
   w.features.push(pull(16, "slow-high"), pull(17, "slow-high"), pull(18, "slow-high"));

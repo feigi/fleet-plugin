@@ -61,7 +61,8 @@
 # the reports it wrote, never off a verdict. Values: `pr` (the row's `pr` is
 # filled, its own `gh pr create` opened one — more than one leaves `pr` blank —
 # or its last report names a PR an earlier same-ticket implementer
-# opened); `bail:<cause>` (its last report bails: undecided, fork, hands, or
+# opened); `blocked` (its last report blocks mid-implementation, the reason in
+# `bailDetail`); `bail:<cause>` (its last report bails: undecided, fork, hands, or
 # covered); `bail:fixed` or `bail:fixed-refuted` (its bail says the work already
 # reached main, and origin/main does or does not reach the sha it names);
 # `provider` (a model fell back, or the last turn errored); `budget` (a budget

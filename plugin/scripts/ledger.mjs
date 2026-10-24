@@ -2508,6 +2508,9 @@ function recordFiled(id, subject) {
 //                             own repository name N;
 //                             the Check-step record (below) holds for <head>
 //   impl-N=bailed             bailCause is not null; the receipt names it
+//   impl-N=blocked            nothing to check: report-schema.mjs already
+//                             refuses a block that names a bailCause or
+//                             gives no reason in bailDetail
 //   fix-pr-M=applied:<head>   origin's refs/heads/<branch> is <head>, fetched
 //                             by verify-sha.sh; the Check-step record (below)
 //                             holds for <head>
@@ -2670,6 +2673,8 @@ async function runSettleFromReport() {
       const { view: pr, numbers } = prViewClosing(report.pr, "state,closingIssuesReferences,url");
       check(`PR #${report.pr} reads OPEN`, pr.state === "OPEN");
       check(`PR #${report.pr} closes #${live.number}`, numbers.includes(live.number));
+    } else if (report.outcome === "blocked") {
+      outcome = "blocked";
     } else {
       outcome = "bailed";
       check(`bailCause: ${report.bailCause}`, report.bailCause !== null);
