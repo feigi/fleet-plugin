@@ -402,12 +402,28 @@ Merged state is read from one `gh pr list --state all --limit 1000 --json
 number,state,mergedAt` per run (`tier-outcomes.tsv` has no `merged`
 column).
 
-**Per-cell figures:** `n_pulls`, `n_merged`, `n_claims`, `n_failed`,
+**Per-cell figures,** in the order `pr-cost.mjs` prints them (`TSV_COLUMNS`):
+`cell`, `generation` (the dispatch model; a cell's figures are over one
+generation, its older generations each printing on a line of their own),
+`n_pulls`, `n_merged`, `n_claims`, `n_failed`,
 `fail_rate = failed ÷ claims`, `mean_usd` = the spend of the cell's counted
 Pulls (merged or not) ÷ merged — the guard figure, so an abandon-happy cell
 carries its abandoned spend — `median_usd` over merged Pulls only
-(descriptive), `router_usd`, then the `excluded`, `left_out` and `unpriced`
-Pull counts.
+(descriptive), `router_usd`, `usd_diff_ci95` (a bootstrap 95% interval on
+`mean_usd` minus the baseline's, printed to be read and never judged on; blank
+for the baseline, for an older generation, when the window has no baseline
+cell, and when fewer than half the resamples hold a merged Pull on both sides —
+so always when either side has no merged Pull), then the `excluded`,
+`left_out`, `unpriced` and `untimed` Pull counts, and `guard`, the verdict on
+the cell's newest generation. A Pull's status is the first that applies, in
+the order `excluded`, pending, left-out, `unpriced`, `untimed`
+(`pull-attribution.mjs`, STATUS), so a Pull is `untimed` when a booked row
+whose `agent` names no parent has a blank `work_s` and no earlier status
+applies: it has no **Work time** (`CONTEXT.md`), so, like a left-out or
+unpriced Pull, it never reaches the cell's figures and is counted here
+instead.
+*Amended (#3763): `untimed` joins the Pull counts; refreshed to
+`TSV_COLUMNS` in #3792.*
 
 **Guard.** See `docs/adr/0016-per-ticket-model-effort-routing.md` § Guard
 for the full, amended rule (baseline, trip margin, retire condition). New
@@ -415,9 +431,13 @@ for the full, amended rule (baseline, trip margin, retire condition). New
 pure per-role library with no PR concept and stays untouched. Inputs: the
 three TSVs + the one `gh pr list`. Output: stdout TSV per cell (`--json`
 optional); `.fleet/cost-guard.json` (gitignored — `computed_at`,
-`window_start`, `baseline{cell,n,mean_usd,fail_rate}`, `cells[]` (each with
-`n`, `mean_usd`, `fail_rate` — the router reads per-cell `n` to end
-burn-in), `tripped[]`, `verdict: ok|tripped|none`). Runs at **phase 0 and
+`window_start`, `baseline{cell,generation,n,mean_usd,fail_rate}`, `cells[]`
+(each with `cell`, `generation`, `n`, `mean_usd`, `fail_rate`, `untimed` — the
+router reads per-cell `n` to end
+burn-in), `tripped[]`, `verdict: ok|tripped|none`, `retire` (true when every
+non-default stage-1 cell tripped before any row of either Objective's set
+adopted one) and `min_n`, the n the baseline and every judged cell need).
+Runs at **phase 0 and
 close-out** through the repo-local hook (§ 5). No committed report
 snapshot; the numbers a ruling turns on go into the ADR that rules, not
 into a tracked file.
@@ -447,7 +467,8 @@ exists — see ADR 0016 § Decision point 5.
 
 **Amendment from `#2038` (folded in above):**
 1. Trip rule margin (15 pts) — in the ADR's Guard section.
-2. `cost-guard.json` per-cell shape (`n`, `mean_usd`, `fail_rate`) — above.
+2. `cost-guard.json` per-cell shape (`cell`, `generation`, `n`, `mean_usd`,
+   `fail_rate`, `untimed`) — above.
 3. `router_usd` from `status().cost`, not a member-outcomes join — above.
 4. **Fit objective is $ per merged PR only.** *Amended (#3753): the fit
    also holds the quality floor, per row; the guard holds it pooled and alone
@@ -519,7 +540,7 @@ classifier could change.*
   "burn_in": true,
   "rows": { "cost": { "*": "slow-high" }, "speed": { "*": "slow-high" } },
   "classifier": { "b": null, "tau": null },
-  "estimates": { "<stratum>": { "<cell>": { "n": 0, "merged": 0, "usd_per_merged": null, "fail_rate": null, "fix_rounds": null, "review_findings": null } } }
+  "estimates": { "<stratum>": { "<cell>": { "generation": "<model>", "n": 0, "merged": 0, "claims": 0, "failed": 0, "usd_per_merged": null, "minutes_per_merged": null, "fail_rate": null, "fix_rounds": null, "review_findings": null, "left_out": 0, "unpriced": 0, "untimed": 0, "excluded": 0, "older": { "<model>": { "n": 0, "merged": 0, "claims": 0, "failed": 0, "usd_per_merged": null, "minutes_per_merged": null, "fail_rate": null, "fix_rounds": null, "review_findings": null, "left_out": 0, "unpriced": 0, "untimed": 0 } } } } }
 }
 ```
 
@@ -531,6 +552,14 @@ in it, and a judged stratum always gets a row of its own; a stratum it
 cannot judge has none and follows `*` (§ R5). `estimates` and `reasons`
 exist so a re-fit PR diff explains itself; `fix_rounds` and
 `review_findings` are report-only quality proxies — no rule reads them.
+Each cell's figures are its newest generation's (`generation` names the
+model); `older` keys each older generation's model to the same figures, less
+`generation` and `excluded`, which no generation owns. `usd_per_merged` and
+`minutes_per_merged` — minutes of **Work time** (`CONTEXT.md`) per merged
+PR — are each over every counted Pull, merged or not, divided by the merged
+ones. `left_out`, `unpriced` and `untimed` count the cell's Pulls that never
+reached its figures, `untimed` being the Pulls with no Work time, and
+`excluded` those with no Admissible row.
 *Amended (#3680, implemented by #3785): `rows` and `reasons` hold one set
 per Objective, `cost` and `speed`, as the sample shows; the route script
 reads the set of the run's Objective, `rows[objective][stratum]` when
