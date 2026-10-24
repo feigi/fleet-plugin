@@ -249,8 +249,8 @@ export function pullGenerations(pulls, members) {
   return new Map(pulls.map((p) => [p, generationOf(impls.get(p), p.chosen_cell)]));
 }
 
-// A booked row's recorded number in `column` (`field` on the parsed row): null when blank; refused, naming the row, when neither blank nor a number.
-function numberOf(row, field, column) {
+// A booked row's recorded number in `column` (`field` on the parsed row; `column` defaults to `field` where the two names agree): null when blank; refused, naming the row, when neither blank nor a number.
+function numberOf(row, field, column = field) {
   const c = String(row[field] ?? "");
   if (c === "") return null;
   const n = Number(c);
@@ -338,7 +338,7 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
     }
     let spend = 0, blank = false, workS = 0, untimed = false;
     for (const m of booked) {
-      const c = numberOf(m, "cost", "cost");
+      const c = numberOf(m, "cost");
       if (c === null) blank = true;
       else spend += c;
       const w = numberOf(m, "workS", "work_s");

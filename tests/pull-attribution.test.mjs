@@ -448,13 +448,30 @@ test("a blank work_s on a booked nested member alone leaves the Pull counted", (
   assert.deepEqual(figures(w).guard, { "slow-high": cell({ n: 1, merged: 1, usd: 3 }) });
 });
 
-test("a work_s that is neither blank nor a number is refused by both scripts, naming the row, and a whitespace-only one is never read as 0", () => {
+test("a work_s that is neither blank nor a number is refused by both scripts, naming the row, on a nested row too, and a whitespace-only one is never read as 0", () => {
   for (const bad of ["1.2.3", "  "]) {
     const w = world();
     w.features.push(pull(59, "slow-high"));
     w.members.push(impl(59, "slow-high", { workS: bad }));
     const p = parsed(w);
     const named = (e) => e instanceof AttributionError && e.message.endsWith(`agent impl-59: work_s '${bad}' is not a number`);
+    assert.throws(() => computeReport({ ...p, prs: [] }), named);
+    assert.throws(() => fitTable({ prior, features: p.features, members: p.members, verdicts: p.tiers, guard: { tripped: [], n: {}, window_start: DAY } }), named);
+  }
+  // A nested row's time is never summed, but its work_s is still read and refused.
+  {
+    const w = world();
+    const nested = "fix-pr-161/fix-pr-161.RefuteU1";
+    w.features.push(pull(61, "slow-high"));
+    w.members.push(
+      impl(61, "slow-high", { ending: "pr", pr: "161", workS: 600 }),
+      member({ agent: "fix-pr-161", role: "fix-applier", pr: "161", workS: 300 }),
+      member({ agent: nested, member: nested, role: "specialist", workS: "bad" }),
+    );
+    w.tiers.push(ruling(61, 161));
+    merged(w, 161);
+    const p = parsed(w);
+    const named = (e) => e instanceof AttributionError && e.message.endsWith(`agent ${nested}: work_s 'bad' is not a number`);
     assert.throws(() => computeReport({ ...p, prs: [] }), named);
     assert.throws(() => fitTable({ prior, features: p.features, members: p.members, verdicts: p.tiers, guard: { tripped: [], n: {}, window_start: DAY } }), named);
   }
