@@ -89,11 +89,12 @@ function drain(repo) {
   const target = join(repo, FEATURES);
   let text = existsSync(target) ? readFileSync(target, "utf8") : `${FEATURE_COLUMNS.join("\t")}\n`;
   const seen = new Set(parseFeatures(text).map(pullKey));
-  const newer = headerOf(pendingText).filter((c) => !headerOf(text).includes(c));
+  const had = headerOf(text);
+  const newer = headerOf(pendingText).filter((c) => !had.includes(c));
   const unknown = newer.filter((c) => !FEATURE_COLUMNS.includes(c));
   if (unknown.length) throw new Error(`${PENDING} carries ${unknown.join(", ")}, which ${FEATURES} has no column for`);
   if (newer.length) text = widen(text, newer);
-  const header = headerOf(text);
+  const header = [...had, ...newer];
   const added = [];
   for (const r of incoming) {
     if (seen.has(pullKey(r))) continue;

@@ -275,8 +275,9 @@ export function sessionDate(session) {
 /**
  * One Pull's routing, by `objective`'s row set. Pure: every input is already
  * read. The exploration draw ignores the objective: it leaves out the cell
- * the `cost` set routes the Pull to under either objective, so a Pull draws
- * the same cell under both.
+ * the `cost` set routes the Pull to — by the sizing when arm B is live for
+ * the `cost` set, whichever set routes the Pull — so a Pull draws the same
+ * cell under both.
  * @returns {{ line: string, row: Record<string,string> }}
  */
 export function route({ session, ticket, arm, implRow, chainHead = false, issue, sizing = null, guard, table, objective, now = Date.now() }) {
@@ -293,9 +294,10 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
   let sizingSrc = "rule";
   let sizingPre = "";
   let routerUsd = "";
+  const sized = arm === "B" ? readSizing(sizing, table.classifier) : null;
   const b = arm === "B" && bArmLive(table, objective);
   if (b) {
-    const s = readSizing(sizing, table.classifier);
+    const s = sized;
     if (s === null) {
       degrade("no-sizing");
       stratum = "unknown";
@@ -308,7 +310,8 @@ export function route({ session, ticket, arm, implRow, chainHead = false, issue,
   const rows = table.rows[objective];
   let policy = rowFor(rows, ruleS);
   let base = b ? rowFor(rows, stratum) : policy;
-  let drawBase = rowFor(table.rows.cost, b ? stratum : ruleS);
+  const costB = arm === "B" && bArmLive(table, "cost");
+  let drawBase = rowFor(table.rows.cost, costB ? sized?.stratum ?? "unknown" : ruleS);
   let cell;
   let draw = "-";
   if (guard === null) {
@@ -435,6 +438,10 @@ const JUDGE = Object.freeze({
   },
 });
 
+// A row's record with no cell: a fresh object each time, since judge() fills
+// in `cells` and `pairs`.
+const unjudged = () => ({ cell: null, reason: "unjudged", cells: {}, pairs: [] });
+
 /**
  * One row's cell under one objective — the `*` row's or a stratum's — and
  * why. The quality floor is held twice: pooled by the guard, whose trip takes
@@ -475,13 +482,13 @@ const JUDGE = Object.freeze({
  */
 function judge(objective, est = {}, pulls, cells, tripped, baseCell) {
   const { figure, metric, over, unreliable, better, reliably, ahead } = JUDGE[objective];
-  const record = { cell: null, reason: "unjudged", cells: {}, pairs: [] };
+  const record = unjudged();
   const floor = est[POLICY_CELL];
   const base = est[baseCell];
   if (!floor || floor.merged < MIN_N || !base || base.merged < MIN_N) return record;
   // JSON writes −0 as 0, so a recorded end is 0 either way; `--check` compares the two.
   const units = (c) => pulls[c].map((u) => bootUnit(u, metric));
-  const range = (a, b) => bootstrapDiffCI(units(a), units(b), { metric })?.map((x) => x + 0) ?? null;
+  const range = (a, b) => bootstrapDiffCI(units(a), units(b))?.map((x) => x + 0) ?? null;
   const reliablyBelow = (r) => r !== null && r[1] < 0;
   const bar = round4(floor.failed / floor.claims + TRIP_POINTS / 100);
   const qualifiers = [];
@@ -544,8 +551,9 @@ function judgeSpeedRow(est, pulls, cells, tripped, costCell) {
  * objective. `reasons.cost` holds `judgeRow()`'s record for `*` and for each
  * stratum with Pulls; a stratum whose record has no cell gets no `cost` row
  * and follows `*`, and an unjudged `*` is the default cell. `reasons.speed`
- * holds `judgeSpeedRow()`'s record for the same rows, each from its `cost`
- * row's cell: a row with a `cost` row holds a `speed` row, the base when the
+ * holds `judgeSpeedRow()`'s record for each row with a `cost` row, from that
+ * row's cell, and an `unjudged` record with no cell for each stratum with no
+ * `cost` row: a row with a `cost` row holds a `speed` row, the base when the
  * record has no cell, and a stratum with no `cost` row has no `speed` row
  * and follows `*`.
  */
@@ -568,7 +576,7 @@ export function fitTable({ prior, features, members, verdicts, guard, commit = n
   for (const s of Object.keys(reasons.cost)) {
     const costCell = rows.cost[s];
     if (costCell === undefined) {
-      reasons.speed[s] = { cell: null, reason: "unjudged", cells: {}, pairs: [] };
+      reasons.speed[s] = unjudged();
       continue;
     }
     const record = judgeSpeedRow(estimates[s], pulls[s], cells, tripped, costCell);

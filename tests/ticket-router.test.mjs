@@ -1851,6 +1851,22 @@ test("route: a speed run routes by the speed rows and a cost run by the cost row
   assert.deepEqual(draws("speed", { burn_in: true }), draws("cost", { burn_in: true }));
 });
 
+test("route: on arm B the exploration draw is the same under both, even when arm B is live for one set only", () => {
+  const table = baseTable({ classifier: { b: "haiku", tau: null }, rows: both({ "*": "slow-high", heavy: "task-high" }, { "*": "slow-high", heavy: "slow-high" }) });
+  assert.equal(bArmLive(table, "cost"), true);
+  assert.equal(bArmLive(table, "speed"), false);
+  const draws = (objective, sizing) => Array.from({ length: 30 }, (_, i) => {
+    const { line } = routeIn({ arm: "B", ticket: i + 1, implRow: 5, table, objective, sizing });
+    return /CELL=\S+ DRAW=\S+/.exec(line)[0];
+  });
+  for (const sizing of [haikuSizing, null]) {
+    const cost = draws("cost", sizing);
+    assert.ok(cost.every((d) => /DRAW=\d+\/\d+$/.test(d)), "every Pull draws");
+    assert.deepEqual(draws("speed", sizing), cost, `sizing ${sizing === null ? "missing" : "heavy"}`);
+  }
+  assert.ok(draws("cost", haikuSizing).every((d) => !d.startsWith("CELL=task-high")), "the draw leaves out the cost set's sized row's cell");
+});
+
 test("route: arm B reads the run's own row set — not live when that set is all slow-high, whatever the other set holds", () => {
   const table = baseTable({ classifier: { b: "haiku", tau: null }, rows: both({ "*": "slow-high" }, { "*": "slow-high", heavy: "task-high" }) });
   assert.equal(bArmLive(table, "cost"), false);
@@ -1876,4 +1892,11 @@ test("route: --objective names cost or speed, else exit 2 and nothing is recorde
   assert.equal(bogus.status, 2);
   assert.match(bogus.stderr, /--objective fast is not cost or speed/);
   assert.equal(existsSync(p.pending), false, "nothing is recorded");
+});
+
+test("fit: a speed row with no judged candidate holds the cost row's cell", () => {
+  const next = fitRows([{ cell: "slow-high", usd: 10, work: 100 }, { cell: "task-high", usd: 5, work: 100 }], { tripped: ["slow-high"] });
+  assert.equal(next.rows.cost["*"], "task-high");
+  assert.equal(next.reasons.speed["*"].reason, "unjudged");
+  assert.equal(next.rows.speed["*"], "task-high");
 });

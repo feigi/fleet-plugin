@@ -618,7 +618,7 @@ test("the fit's range against slow-high is the guard's usd_diff_ci95: the same n
 
 test("an unmerged counted Pull is a bootstrap unit with its spend and no merged PR: 20 merged and 10 closed at $3 against $10 span -5.5, not a flat -7", () => {
   // Both ranges build their units with bootUnit; the guard reads PR state, so a closed PR is an unmerged counted Pull there.
-  assert.deepEqual([bootUnit({ spend: 3, merged: false }), bootUnit({ spend: 3, merged: true })], [{ usd: 3, merged: 0 }, { usd: 3, merged: 1 }]);
+  assert.deepEqual([bootUnit({ spend: 3, merged: false }), bootUnit({ spend: 3, merged: true })], [{ value: 3, merged: 0 }, { value: 3, merged: 1 }]);
   const w = world();
   baseline(w);
   addPulls(w, { cell: "task-high", model: "model-t", count: 20, usd: 3 });
@@ -628,13 +628,13 @@ test("an unmerged counted Pull is a bootstrap unit with its spend and no merged 
   // Booked as merged, every resample of task-high would read $3 a PR, and the range would be [-7, -7].
   const ci = th.usd_diff_ci95;
   assert.ok(ci[0] < -5.5 && -5.5 < ci[1], `a range around $4.50 − $10: ${ci}`);
-  assert.deepEqual(bootstrapDiffCI(Array(30).fill({ usd: 3, merged: 1 }), Array(20).fill({ usd: 10, merged: 1 })), [-7, -7]);
+  assert.deepEqual(bootstrapDiffCI(Array(30).fill({ value: 3, merged: 1 }), Array(20).fill({ value: 10, merged: 1 })), [-7, -7]);
 });
 
-test("bootUnit and bootstrapDiffCI take a metric: `minutes` is a Pull's work time over 60, `usd` its spend and the default", () => {
+test("bootUnit takes a metric: `minutes` is a Pull's work time over 60, `usd` its spend and the default; bootstrapDiffCI reads the unit's value", () => {
   const u = { spend: 3, workS: 90, merged: true };
-  assert.deepEqual([bootUnit(u), bootUnit(u, "usd"), bootUnit(u, "minutes")], [{ usd: 3, merged: 1 }, { usd: 3, merged: 1 }, { minutes: 1.5, merged: 1 }]);
-  assert.deepEqual(bootstrapDiffCI(Array(20).fill({ minutes: 1, merged: 1 }), Array(20).fill({ minutes: 2.5, merged: 1 }), { metric: "minutes" }), [-1.5, -1.5]);
+  assert.deepEqual([bootUnit(u), bootUnit(u, "usd"), bootUnit(u, "minutes")], [{ value: 3, merged: 1 }, { value: 3, merged: 1 }, { value: 1.5, merged: 1 }]);
+  assert.deepEqual(bootstrapDiffCI(Array(20).fill(bootUnit({ ...u, workS: 60 }, "minutes")), Array(20).fill(bootUnit({ ...u, workS: 150 }, "minutes"))), [-1.5, -1.5]);
 });
 
 test("the floor and the bootstrap range are one rule each: both scripts import them from pull-attribution.mjs, and neither imports the other", () => {

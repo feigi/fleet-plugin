@@ -110,19 +110,20 @@ function mulberry32(seed) {
   };
 }
 
-// The bootstrap 95% range of (cell − base) per merged PR of `metric`, its ends
-// rounded to two places. Each unit is one counted Pull, `bootUnit`'s shape:
-// `{ [metric], merged }`, merged 0 or 1. The figure per merged PR is
-// Σmetric / Σmerged. null when either side has no unit, or when under half the
-// resamples have a merged PR on both sides.
-export function bootstrapDiffCI(cellUnits, baseUnits, { metric = "usd", iterations = 2000, seed = 1 } = {}) {
+// The bootstrap 95% range of (cell − base) per merged PR, its ends rounded to
+// two places. Each unit is one counted Pull, `bootUnit`'s shape:
+// `{ value, merged }`, `value` the measure `bootUnit` was asked for and
+// merged 0 or 1. The figure per merged PR is Σvalue / Σmerged. null when
+// either side has no unit, or when under half the resamples have a merged PR
+// on both sides.
+export function bootstrapDiffCI(cellUnits, baseUnits, { iterations = 2000, seed = 1 } = {}) {
   if (!cellUnits.length || !baseUnits.length) return null;
   const rand = mulberry32(seed);
   const resample = (units) => {
     let u = 0, m = 0;
     for (let i = 0; i < units.length; i++) {
       const x = units[Math.floor(rand() * units.length)];
-      u += x[metric]; m += x.merged;
+      u += x.value; m += x.merged;
     }
     return m ? u / m : null;
   };
@@ -139,8 +140,8 @@ export function bootstrapDiffCI(cellUnits, baseUnits, { metric = "usd", iteratio
 // What a bootstrap unit measures: `usd`, its spend, or `minutes`, its work time.
 const METRIC = Object.freeze({ usd: (u) => u.spend, minutes: (u) => u.workS / 60 });
 
-// A counted Pull as a bootstrap unit of `metric`.
-export const bootUnit = (u, metric = "usd") => ({ [metric]: METRIC[metric](u), merged: u.merged ? 1 : 0 });
+// A counted Pull as a bootstrap unit, its `value` the Pull's `metric`.
+export const bootUnit = (u, metric = "usd") => ({ value: METRIC[metric](u), merged: u.merged ? 1 : 0 });
 
 // ticket-features.tsv: one bare header line naming the columns, then rows.
 // Read by header name; a row whose width differs from the header's is refused.

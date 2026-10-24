@@ -88,7 +88,10 @@ would anchor and contaminate the label.
    comments age_days paths test_paths xrefs kind` (18). `agent_router` is
    dropped (no member exists); `sizing_src` ∈ `rule|haiku|jev:<model>` — the
    resolved model, so a silent haiku fallback is visible in the data;
-   `router_usd` from `status().cost`, blank on arm A.
+   `router_usd` from `status().cost`, blank on arm A. *Amended (#3680,
+   implemented by #3785): `objective` is appended after `kind` (19) — the
+   Objective the Pull was routed by, `cost` or `speed`; it is optional on
+   read, so a row written before the column reads it blank.*
 2. **No `fleet-router` member.** `sizing_pre` on B Pulls comes from one
    `judge()` call in the controller's eval cell (measured: resolves to
    `anthropic/claude-haiku-4-5`, $0.0002, 0.6 s, one-hot probabilities ⇒
@@ -514,7 +517,7 @@ classifier could change.*
   "stage": 1,
   "cells": ["slow-high", "task-high", "smol-high"],
   "burn_in": true,
-  "rows": { "*": "slow-high" },
+  "rows": { "cost": { "*": "slow-high" }, "speed": { "*": "slow-high" } },
   "classifier": { "b": null, "tau": null },
   "estimates": { "<stratum>": { "<cell>": { "n": 0, "merged": 0, "usd_per_merged": null, "fail_rate": null, "fix_rounds": null, "review_findings": null } } }
 }
@@ -528,6 +531,11 @@ in it, and a judged stratum always gets a row of its own; a stratum it
 cannot judge has none and follows `*` (§ R5). `estimates` and `reasons`
 exist so a re-fit PR diff explains itself; `fix_rounds` and
 `review_findings` are report-only quality proxies — no rule reads them.
+*Amended (#3680, implemented by #3785): `rows` and `reasons` hold one set
+per Objective, `cost` and `speed`, as the sample shows; the route script
+reads the set of the run's Objective, `rows[objective][stratum]` when
+present, else `rows[objective]["*"]`, and a `speed` set has a row only
+where its `cost` set has one.*
 
 **Amended (#2573, 2026-10-13): the table records the commit its fit read,
 not a date.** `fitted_through` is replaced by `fitted_commit`: the sha of the
@@ -599,7 +607,11 @@ floor per row and the guard holds it pooled: a cell refused a row keeps
 its exploration draws, and only the guard's trip removes it from the draw.
 `router-table.json`'s `reasons` records, per row, its cell and why, and
 per candidate its verdict, whether it is under the floor, the floor's bar
-and its range, plus the range of each pair of qualifiers.
+and its range, plus the range of each pair of qualifiers. *Amended (#3680,
+implemented by #3785): `reasons` holds one set per Objective, like `rows`:
+`reasons.cost` the records above, `reasons.speed` the same shape judged
+by minutes of work time per merged PR from the `cost` row's cell, and an
+`unjudged` record with no cell for a stratum with no `cost` row.*
 
 **Cadence and operator:** every **N = 50** merged PRs since
 `fitted_through`, **run by the repo-local skill (§ 5) after a run** (the
@@ -630,14 +642,14 @@ fitted commit's features file, matched by `session` + `agent`, replacing
 ### R6. Route — `ticket-router.mjs route`
 
 ```
-node plugin/scripts/ticket-router.mjs route --session <id> --ticket <N> --arm <A|B> --impl-row <k> \
+node plugin/scripts/ticket-router.mjs route --session <id> [--objective cost|speed] --ticket <N> --arm <A|B> --impl-row <k> \
   --issue <scratch>/impl-<N>/issue.json [--sizing <scratch>/impl-<N>/sizing.json] \
   --guard .fleet/cost-guard.json --table plugin/scripts/router-table.json
-→ POLICY=<cell> CELL=<cell> DRAW=<k/K|-> STRATUM=<light|heavy|unknown> REASON=<ok|no-issue-json|no-sizing|guard-missing|guard-tripped|table-cell-tripped>
+→ POLICY=<cell> CELL=<cell> DRAW=<k/K|-> STRATUM=<light|heavy|unknown> OBJECTIVE=<cost|speed> REASON=<ok|no-issue-json|no-sizing|guard-missing|guard-tripped|table-cell-tripped>
 ```
 
 Order: metrics → stratum (`rule`; `sizing.json` on B) → `policy_cell =
-rows[stratum] ?? rows["*"]` → if that cell ∈ `tripped[]`, substitute
+rows[objective][stratum] ?? rows[objective]["*"]` → if that cell ∈ `tripped[]`, substitute
 `slow-high` (`table-cell-tripped`; auto-revert, the next fit drops the
 row) → guard eligibility (`tripped[]` leave E; missing/unparseable guard
 ⇒ default only, `guard-missing`) → draw (burn-in or 5k) → `chosen_cell`.

@@ -803,6 +803,23 @@ test("a resume keeps the receipt's objective, takes a receipt that records none 
   assert.equal(f.receipt().objective, "cost");
 });
 
+test("a resumed receipt recording a value that is not an objective exits 3 naming it, and is never read as cost", () => {
+  for (const objective of ["Speed", "fast", 7, null]) {
+    for (const args of [[], ["--objective", "speed"], ["--objective", "cost"]]) {
+      const f = fixture();
+      f.setRecord(RUN_AT);
+      f.setReceipt(stale(f, { objective }));
+      const before = readFileSync(f.receiptPath, "utf8");
+      const r = f.run(["--session", f.session, ...args]);
+      const label = `${JSON.stringify(objective)} ${args.join(" ")}`;
+      assert.equal(r.status, 3, `${label}: ${r.stdout}${r.err}`);
+      assert.ok(r.err.includes(`records the objective ${JSON.stringify(objective)}, which is not cost or speed`), `${label}: ${r.err}`);
+      assert.equal(readFileSync(f.receiptPath, "utf8"), before, `${label}: the receipt is left as it was`);
+      assert.equal(f.calls("rotate").length, 0, label);
+    }
+  }
+});
+
 test("a same-session run after `closeout.mjs finish` starts at alarm and rotates again, and skips nothing as done earlier", () => {
   const f = fixture({ spec: true });
   assert.equal(f.run().status, 0);

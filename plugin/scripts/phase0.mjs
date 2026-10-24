@@ -89,7 +89,8 @@
 // `--objective`, or its default (OBJECTIVE_DEFAULT in phase0-receipt.mjs).
 // It is fixed for the run: a resumed receipt keeps the one it records — the
 // default when it records none — and a resume whose `--objective` names the
-// other one exits 2 naming both, leaving the receipt as it was.
+// other one exits 2 naming both, leaving the receipt as it was. A resumed
+// receipt recording a value that is not an Objective exits 3 naming it.
 //
 // RESUMABLE. A re-run reads the receipt. It continues it — skipping every `ok`
 // step but `alarm` and re-running the rest — only when its `run` equals the
@@ -624,8 +625,15 @@ function main() {
   // the `at` it names and the session is the same.
   const rotated = previous !== null && (previous.run !== null || previous.steps.rotate?.status === "ok");
   const resumed = rotated && previous.run === (record?.at ?? null) && previous.session === session;
-  // The Objective is fixed for the run: a resumed receipt's stands.
-  const kept = resumed ? (OBJECTIVES.includes(previous.objective) ? previous.objective : OBJECTIVE_DEFAULT) : null;
+  // The Objective is fixed for the run: a resumed receipt's stands, and one
+  // written before receipts recorded it resumes as the default. A receipt
+  // recording anything else is refused, never read as an Objective.
+  if (resumed && previous.objective !== undefined && !OBJECTIVES.includes(previous.objective)) {
+    process.stderr.write(`${NAME}: this run's receipt ${receiptPath} records the objective ${JSON.stringify(previous.objective)}, which is not ${OBJECTIVES.join(" or ")} — set it to the objective this run began with and re-run\n`);
+    process.exitCode = 3;
+    return;
+  }
+  const kept = resumed ? previous.objective ?? OBJECTIVE_DEFAULT : null;
   if (kept !== null && named !== null && named !== kept) {
     die(`--objective ${named}: this run's receipt ${receiptPath} records the objective ${kept}, fixed for the run — run phase 0 again without --objective, or with --objective ${kept}`);
   }
