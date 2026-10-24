@@ -21,7 +21,11 @@
 // RULING. One PR's merge counts once, to one Pull. First, carrier binding: a
 // Pull takes the Ruling of a PR it is the carrier of (the last Pull in file
 // order whose implementer rows carry the PR) when a ruling row names that PR,
-// the latest such row in file order, whatever its ticket or date.
+// the latest such row in file order, whatever its ticket or date. A Pull that
+// carries several ruled PRs takes the one whose ruling row is latest in file
+// order and leaves the others to the date floor. Every ruling row of the bound
+// row's tickets is checked as `rulingFor` checks the Pull's own ticket's, so a
+// Pull can be refused for a bad row of a ticket that is not its own.
 // Then the date-floor fallback: each other Pull's candidate Ruling is
 // `rulingFor` of its ticket and date, unless a carrier took that PR. Among the
 // Pulls whose candidate names a PR, the last in file order takes it, with the
@@ -317,7 +321,7 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
   const ruleRows = new Set([...rulings.values()].flat());
   const rulingOfPr = new Map(tiers.filter((t) => ruleRows.has(t)).map((t) => [t.pr, t]));
   const ruled = new Map(); // pull -> { pr, ruling, carried }
-  const floored = []; // [{ pull, ruling }], the Pulls no carrier binding ruled
+  const candidates = new Map(); // pr -> [{ pull, ruling }], the Pulls no carrier binding ruled
   for (const p of inWindow) {
     // Called for every Pull, bound or not, so a bad ruling row of its ticket is refused either way.
     const candidate = rulingFor(rulings, p.ticket, p.run_date);
@@ -328,16 +332,13 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
     }
     if (bound) {
       // A bound row of another ticket is refused on the same terms as one of the Pull's own.
-      for (const t of String(bound.ticket).split("+").filter(Boolean)) rulingFor(rulings, t, "");
+      for (const t of String(bound.ticket).split("+")) rulingFor(rulings, t, "");
       ruled.set(p, { pr: bound.pr, ruling: bound, carried: true });
-    } else if (candidate) floored.push({ pull: p, ruling: candidate });
+    } else if (candidate) (candidates.get(candidate.pr) ?? candidates.set(candidate.pr, []).get(candidate.pr)).push({ pull: p, ruling: candidate });
   }
   const taken = new Set([...ruled.values()].map((r) => r.pr));
-  const candidates = new Map(); // pr -> [{ pull, ruling }]
-  for (const c of floored) {
-    if (!taken.has(c.ruling.pr)) (candidates.get(c.ruling.pr) ?? candidates.set(c.ruling.pr, []).get(c.ruling.pr)).push(c);
-  }
   for (const [pr, cands] of candidates) {
+    if (taken.has(pr)) continue;
     const ruling = cands.reduce((a, c) => (fileOrder.get(c.ruling) > fileOrder.get(a) ? c.ruling : a), cands[0].ruling);
     ruled.set(cands.at(-1).pull, { pr, ruling, carried: false });
   }

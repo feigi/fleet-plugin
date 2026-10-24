@@ -328,6 +328,74 @@ test("a carrier takes the latest row in file order naming its PR, whatever its t
     (e) => e instanceof RulingError && e.message === "ticket #65 (PR #164): closed_own_ticket is 'maybe', expected yes or no");
 });
 
+test("a carrier bound to another ticket's row still has its own ticket's ruling rows refused", () => {
+  const w = world();
+  w.features.push(pull(68, "slow-high"));
+  w.members.push(impl(68, "slow-high", { ending: "pr", pr: "168", cost: 2 }));
+  w.tiers.push(ruling(69, 168), ruling(68, 1680));
+  merged(w, 168);
+  assert.deepEqual(units(w)[0].ruling?.ticket, "69");
+  const p = parsed(w);
+  const bad = { ...p.tiers[1], closed_own_ticket: "maybe" };
+  assert.throws(() => attribute({ ...p, tiers: [p.tiers[0], bad], prs: w.prs, windowStart: DAY }),
+    (e) => e instanceof RulingError && e.message === "ticket #68 (PR #1680): closed_own_ticket is 'maybe', expected yes or no");
+});
+
+test("a Pull carrying two ruled PRs binds the PR whose ruling row is later in file order, whatever its implementer rows' order", () => {
+  const w = world();
+  w.features.push(pull(66, "slow-high"));
+  w.members.push(
+    impl(66, "slow-high", { ending: "budget", pr: "166", cost: 2 }),
+    impl(66, "slow-high", { agent: "impl-66-b", ending: "pr", pr: "167", cost: 3 }),
+  );
+  w.tiers.push(ruling(66, 167), ruling(66, 166, { minted_false_claim: "yes" }));
+  merged(w, 166);
+  merged(w, 167);
+  const [u] = units(w);
+  assert.deepEqual([u.status, u.merged, u.pr, u.ruling?.pr, u.falseClaims], ["counted", true, "166", "166", 1]);
+});
+
+test("a carrier before the window takes no PR: an in-window Pull whose date-floor candidate names that PR takes it, unpriced", () => {
+  const w = world();
+  const EARLY = "2026-10-01T10-00-00-000Z_01a00000-0000-7000-8000-000000000003";
+  w.features.push(pull(70, "slow-high", { session: EARLY, run_date: "2026-10-01" }), pull(70, "task-high"));
+  w.members.push(
+    impl(70, "slow-high", { session: EARLY, run_date: "2026-10-01", ending: "pr", pr: "700", cost: 2 }),
+    impl(70, "task-high", { ending: "hollow", cost: 3 }),
+  );
+  w.tiers.push(ruling(70, 700));
+  merged(w, 700);
+  const us = units(w);
+  assert.deepEqual(us.map((u) => [u.status, u.merged, u.pr]), [["unpriced", true, "700"]]);
+});
+
+test("two Pulls carrying the same PR with its ruling dated between them: the later Pull, its carrier, takes it though the row predates it", () => {
+  const w = world();
+  w.features.push(pull(71, "slow-high"), pull(71, "task-high", { session: SESSION2, run_date: "2026-10-05" }));
+  w.members.push(
+    impl(71, "slow-high", { ending: "budget", pr: "171", cost: 2 }),
+    impl(71, "task-high", { session: SESSION2, run_date: "2026-10-05", ending: "pr", pr: "171", cost: 3 }),
+  );
+  w.tiers.push(ruling(71, 171, { run_date: "2026-10-04" }));
+  merged(w, 171);
+  const [first, second] = units(w);
+  assert.deepEqual([first.status, first.merged, first.pr], ["counted", false, null]);
+  assert.deepEqual([second.status, second.merged, second.pr], ["counted", true, "171"]);
+});
+
+test("a carrier bound to a `+`-joined row has every one of its tickets' ruling rows refused, not just the first", () => {
+  const w = world();
+  w.features.push(pull(72, "slow-high"));
+  w.members.push(impl(72, "slow-high", { ending: "pr", pr: "172", cost: 2 }));
+  w.tiers.push(ruling(73, 1730, { run_date: "2026-10-02" }), ruling("72+73", 172));
+  merged(w, 172);
+  assert.deepEqual(units(w)[0].ruling?.ticket, "72+73");
+  const p = parsed(w);
+  const bad = { ...p.tiers[0], closed_own_ticket: "maybe" };
+  assert.throws(() => attribute({ ...p, tiers: [bad, p.tiers[1]], prs: w.prs, windowStart: DAY }),
+    (e) => e instanceof RulingError && e.message === "ticket #73 (PR #1730): closed_own_ticket is 'maybe', expected yes or no");
+});
+
 test("two Pulls carrying the same PR: its merge counts once, for the later in file order, and the earlier stays unruled", () => {
   const w = world();
   w.features.push(pull(62, "slow-high"), pull(62, "task-high", { session: SESSION2, run_date: "2026-10-05" }));
