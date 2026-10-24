@@ -143,3 +143,15 @@ test("the header documents the `report` column: its four values, what it is read
   assert.match(paragraph, /WHEN THE ROW WAS LAST SCRAPED/);
   assert.match(paragraph, /never that the member failed to write one/);
 });
+
+test("the header documents `work_s` as the time to read and `wall_s` as the raw span, teardown included", () => {
+  // `wall_s` keeps its old meaning beside the new column, so a reader who
+  // never saw this paragraph would keep reading teardown and halts as work.
+  const paragraph = flat(HEADER.split("\n#\n").find((p) => p.startsWith("# `work_s`")) ?? "");
+  assert.ok(paragraph, "the header has no paragraph that opens on `work_s`");
+  assert.match(paragraph, /`work_s` IS THE TIME TO READ/);
+  assert.match(paragraph, /`wall_s` is the raw span, .*teardown included/);
+  assert.match(paragraph, /stretch over 60 minutes in which no transcript of the run records an entry/);
+  assert.match(paragraph, /Blank means unknown, never zero: every `harness=claude` row/);
+  assert.match(paragraph, /keeps the `work_s` the row already recorded/);
+});

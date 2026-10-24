@@ -346,30 +346,31 @@ test("a row whose cell count is wrong is REFUSED, never padded", () => {
   //
   // Mutation this must survive: restoring `cells[i] ?? ""`.
   const short = ["s1", "2026-08-25", "memory"].join("\t");
-  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 22/);
+  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 23/);
   assert.throws(() => parseTsv("<<<<<<< HEAD"), /malformed row/);
   const full = formatTsv([row()]).replace(/\n$/, "").split("\t");
-  assert.equal(full.length, 22);
+  assert.equal(full.length, 23);
   // The 19-field spelling is the schema from before `report`: refused rather
   // than padded with a blank, which would read as "no scratch root to look
   // in". Re-scraping is the migration. The 15- and 14-field ones before it are
   // refused the same way.
-  // The 20-field spelling is the schema from before `ending`, and the
-  // 21-field one the schema from before `dispatch_model`: each refused rather
-  // than padded, for the same reason. The 19-, 15- and 14-field ones before
-  // them are refused the same way.
-  assert.throws(() => parseTsv(full.slice(0, 21).join("\t")), /21 fields, expected 22/);
-  assert.throws(() => parseTsv(full.slice(0, 20).join("\t")), /20 fields, expected 22/);
-  assert.throws(() => parseTsv(full.slice(0, 19).join("\t")), /19 fields, expected 22/);
-  assert.throws(() => parseTsv(full.slice(0, 15).join("\t")), /15 fields, expected 22/);
-  assert.throws(() => parseTsv(full.slice(0, 14).join("\t")), /14 fields, expected 22/);
+  // The 20-field spelling is the schema from before `ending`, the 21-field one
+  // the schema from before `dispatch_model`, and the 22-field one the schema
+  // from before `work_s`: each refused rather than padded, for the same
+  // reason. The 19-, 15- and 14-field ones before them are refused the same way.
+  assert.throws(() => parseTsv(full.slice(0, 22).join("\t")), /22 fields, expected 23/);
+  assert.throws(() => parseTsv(full.slice(0, 21).join("\t")), /21 fields, expected 23/);
+  assert.throws(() => parseTsv(full.slice(0, 20).join("\t")), /20 fields, expected 23/);
+  assert.throws(() => parseTsv(full.slice(0, 19).join("\t")), /19 fields, expected 23/);
+  assert.throws(() => parseTsv(full.slice(0, 15).join("\t")), /15 fields, expected 23/);
+  assert.throws(() => parseTsv(full.slice(0, 14).join("\t")), /14 fields, expected 23/);
   // A long row is refused too — that is the schema-drift direction.
-  assert.throws(() => parseTsv(full.join("\t") + "\textra"), /23 fields/);
+  assert.throws(() => parseTsv(full.join("\t") + "\textra"), /24 fields/);
 });
 
 test("`report` follows subagent_type and the four priced columns follow it, and a scraped member fills them", () => {
   assert.deepEqual(COLUMNS.slice(COLUMNS.indexOf("subagent_type")),
-    ["subagent_type", "report", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost", "ending", "dispatch_model"]);
+    ["subagent_type", "report", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost", "ending", "dispatch_model", "work_s"]);
   const [parsed] = parseTsv(formatTsv([row({ tokensIn: 12, tokensCacheRead: 3400, tokensCacheWrite1h: 900, cost: 0.123457 })]));
   assert.deepEqual([parsed.tokensIn, parsed.tokensCacheRead, parsed.tokensCacheWrite1h, parsed.cost], ["12", "3400", "900", "0.123457"]);
 });

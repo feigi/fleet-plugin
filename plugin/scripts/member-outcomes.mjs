@@ -10,7 +10,7 @@
 // them from this file needs to change.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
 
 import { readOmpSession, normalizeModel, parseMemberName, isOmpSessionDirName } from "./member-record.mjs";
 import { stripLevel } from "./tier-roles.mjs";
@@ -75,7 +75,10 @@ export function rowsForSession(sessionDir, stats = {}, { verifyMain = verifyMain
   for (const f of jsonlNames) {
     try { newest = Math.max(newest, statSync(join(sessionDir, f)).mtimeMs); } catch { /* raced away */ }
   }
-  const recs = readOmpSession(sessionDir); // may throw — a wrong-root refusal, not a per-file fault
+  const activity = [];
+  const recs = readOmpSession(sessionDir, activity); // may throw — a wrong-root refusal, not a per-file fault
+  const controller = controllerStamps(sessionDir);
+  const halts = controller ? haltsOf(activity.concat(controller)) : [];
   stats.seen = jsonlNames.length;
   stats.dropped = jsonlNames.length - recs.length;
   stats.torn = 0;
@@ -93,7 +96,68 @@ export function rowsForSession(sessionDir, stats = {}, { verifyMain = verifyMain
     tokensCacheWrite1h: r.tokens_cache_write_1h ?? "", cost: r.cost == null ? "" : Number(r.cost.toFixed(6)),
     ending: endings[i],
     dispatchModel: dispatchModel(r.resolvedModelIdentity),
+    workS: controller === null ? null : r.transcript.timed ? workSeconds(r.transcript.workParts, halts) : "",
   }));
+}
+
+// The `work_s` column: a member's working time in whole seconds. Its parts
+// are the fold's (member-record.mjs): each run of entries between two
+// `session_exit` entries, from its first entry to its last, so omp's idle
+// wait before each exit and the wait until a wake are in no part. Every halt
+// is then subtracted where it falls inside a part. `wall_s` stays the raw
+// span, teardown included.
+//
+// A halt is a stretch over HALT_MS in which no transcript of the run records
+// an entry: every transcript in the session directory, nested ones and those
+// that book no row included, and the controller's own `<session>.jsonl` beside
+// the directory, the one that keeps writing while no member runs. Halts are
+// the gaps between consecutive instants of that one sorted list, so no two
+// overlap, and a part never shares time with another part of the same member:
+// no overlap is subtracted twice.
+//
+// Without the controller transcript no halt can be told from a member's own
+// quiet stretch, so every row's `work_s` is `null`: unknown, written blank,
+// and never written over a recorded value (mergeRows). A transcript with no
+// timestamped entry reads `""`, blank because there is nothing to time.
+export const HALT_MS = 60 * 60 * 1000;
+
+// The controller transcript's entry instants, in epoch ms; null when it
+// cannot be read. It is not a member transcript, so a line is read for its
+// timestamp alone and an unparseable one is skipped.
+function controllerStamps(sessionDir) {
+  let text;
+  try { text = readFileSync(join(dirname(sessionDir), `${basename(sessionDir)}.jsonl`), "utf8"); }
+  catch { return null; }
+  const stamps = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let d;
+    try { d = JSON.parse(line); } catch { continue; }
+    const ms = typeof d?.timestamp === "string" ? Date.parse(d.timestamp) : NaN;
+    if (Number.isFinite(ms)) stamps.push(ms);
+  }
+  return stamps;
+}
+
+// Every gap over HALT_MS between consecutive instants, as [from, to].
+export function haltsOf(stamps) {
+  const sorted = [...stamps].sort((a, b) => a - b);
+  const halts = [];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] - sorted[i - 1] > HALT_MS) halts.push([sorted[i - 1], sorted[i]]);
+  }
+  return halts;
+}
+
+// The parts' summed length less each halt's share inside them, in whole seconds.
+export function workSeconds(parts, halts) {
+  let ms = 0;
+  for (const [from, to] of parts) {
+    if (!(to > from)) continue;
+    ms += to - from;
+    for (const [h0, h1] of halts) ms -= Math.max(0, Math.min(to, h1) - Math.max(from, h0));
+  }
+  return Math.round(ms / 1000);
 }
 
 // The `dispatch_model` column: the model fixed at dispatch, `session_init`'s
@@ -120,7 +184,7 @@ export const COLUMNS = [
   "session", "run_date", "role", "member", "model", "effort", "ticket", "pr",
   "tokens_cache_create", "tokens_out", "wall_s", "turns", "agent", "harness",
   "subagent_type", "report", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost",
-  "ending", "dispatch_model",
+  "ending", "dispatch_model", "work_s",
 ];
 
 // `report`: what reportStatus() says of the row's member under `scratch` — a
@@ -235,7 +299,7 @@ function verifyMainWithGit(sha) {
 const FIELD = {
   tokens_cache_create: "tokensCacheCreate", tokens_out: "tokensOut", wall_s: "wallS",
   subagent_type: "subagentType", tokens_in: "tokensIn", tokens_cache_read: "tokensCacheRead",
-  tokens_cache_write_1h: "tokensCacheWrite1h", dispatch_model: "dispatchModel",
+  tokens_cache_write_1h: "tokensCacheWrite1h", dispatch_model: "dispatchModel", work_s: "workS",
 };
 const field = (c) => FIELD[c] ?? c;
 // Keyed on the transcript's path-relative stem, not the member name: `member`
@@ -249,20 +313,30 @@ const key = (r) => `${r.session}\0${r.agent}`;
 // regeneration both safe, and it is the reason no backfill-only code path is
 // needed: the idempotency backfill wants is the idempotency a re-run wants.
 //
-// One cell is the exception: an incoming `unknown` ending keeps the ending the
-// replaced row recorded. `unknown` is this scrape failing to say (a verifier
-// that is offline, a transcript gone unreadable), not a reading, so it never
+// Two cells are the exception, each keeping what the replaced row recorded
+// where this scrape could not say. An incoming `unknown` ending keeps the
+// recorded ending: `unknown` is this scrape failing to say (a verifier that is
+// offline, a transcript gone unreadable), not a reading, so it never
 // overwrites one: a recorded `bail:fixed` would otherwise flip to `unknown`
-// on any re-scrape run without network. `stats.endingsKept` counts them.
+// on any re-scrape run without network. `stats.endingsKept` counts them. An
+// incoming `null` work_s (no controller transcript to find halts in) keeps a
+// recorded `work_s` the same way; `stats.workSKept` counts those.
 export function mergeRows(existing, incoming, stats = {}) {
   const by = new Map((existing ?? []).map((r) => [key(r), r]));
   stats.endingsKept = 0;
+  stats.workSKept = 0;
   for (const r of incoming ?? []) {
     const old = by.get(key(r));
+    let row = r;
     if (r.ending === "unknown" && old?.ending && old.ending !== "unknown") {
-      by.set(key(r), { ...r, ending: old.ending });
+      row = { ...row, ending: old.ending };
       stats.endingsKept++;
-    } else by.set(key(r), r);
+    }
+    if (r.workS === null && (old?.workS ?? "") !== "") {
+      row = { ...row, workS: old.workS };
+      stats.workSKept++;
+    }
+    by.set(key(r), row);
   }
   return [...by.values()].sort((a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0);
 }
@@ -406,8 +480,9 @@ if (isCLI(import.meta.url)) {
   // a healthy one — 0-of-2 was indistinguishable from full success.
   const torn = stats.torn ? `, ${stats.torn} torn mid-write` : "";
   const kept = stats.endingsKept ? `, ${stats.endingsKept} read unknown and kept the ending already recorded` : "";
+  const workKept = stats.workSKept ? `, ${stats.workSKept} read no controller transcript and kept the work_s already recorded` : "";
   process.stderr.write(
     `${NAME}: scraped ${stats.seen - stats.dropped} of ${stats.seen} members ` +
-    `(${stats.dropped} dropped${torn}${kept}); ${file} now holds ${merged.length} rows\n`,
+    `(${stats.dropped} dropped${torn}${kept}${workKept}); ${file} now holds ${merged.length} rows\n`,
   );
 }

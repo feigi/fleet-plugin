@@ -358,6 +358,13 @@ function createdPrNumbers(text) {
 export function foldOmpTranscript(jsonlText, filePath) {
   let model = null, thinking = null, task = null, resolvedModelIdentity = null, agent = null;
   let firstTs = null, lastTs = null;
+  // For the `work_s` column (member-outcomes.mjs): every timestamped entry's
+  // instant, and the member's working parts — each run of timestamped entries
+  // between two `session_exit` entries, as [first, last] in epoch ms. The
+  // `session_exit` entry itself closes a part and never extends one, so the
+  // idle wait before it and the wait until the next entry are in no part.
+  const stamps = [], workParts = [];
+  let partFirst = null, partLast = null;
   let input = 0, cacheWrite = 0, cacheWrite1h = 0, cacheRead = 0, output = 0, cost = 0, turns = 0;
   let sawCost = false, unsplit = false, unpriced = false;
   let malformedNonLastLines = 0;
@@ -384,6 +391,12 @@ export function foldOmpTranscript(jsonlText, filePath) {
     catch { if (i !== lines.length - 1) malformedNonLastLines++; continue; }
     assertOmpShaped(d, filePath);
     if (typeof d.timestamp === "string") { firstTs ??= d.timestamp; lastTs = d.timestamp; }
+    const ms = typeof d.timestamp === "string" ? Date.parse(d.timestamp) : NaN;
+    if (Number.isFinite(ms)) stamps.push(ms);
+    if (d.type === "custom" && d.customType === "session_exit") {
+      if (partFirst !== null) workParts.push([partFirst, partLast]);
+      partFirst = partLast = null;
+    } else if (Number.isFinite(ms)) { partFirst ??= ms; partLast = ms; }
     if (d.type === "thinking_level_change" && typeof d.thinkingLevel === "string") thinking = d.thinkingLevel;
     if (d.type === "model_change" && d.resolvedModelIsFallback === true) providerFallback = true;
     if (d.type === "custom" && d.customType === "session_exit") sessionExit = true;
@@ -433,6 +446,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
     }
     if (d.type === "message" && m?.role === "user" && messageText(m).trimStart().startsWith("[budget notice]")) budgetNotice = true;
   }
+  if (partFirst !== null) workParts.push([partFirst, partLast]);
   const span = firstTs && lastTs ? (Date.parse(lastTs) - Date.parse(firstTs)) / 1000 : 0;
   return {
     model, thinking, task, resolvedModelIdentity, agent,
@@ -453,6 +467,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
     malformedNonLastLines,
     openedPrs: [...openedPrs],
     startedAt: firstTs,
+    stamps, workParts,
     reportWrites,
     lastStopReason, providerFallback, sessionExit, budgetNotice,
   };
@@ -867,7 +882,11 @@ export function ompSessionTranscripts(sessionDir) {
 // wrong-shape refusal (assertOmpShaped, inside foldOmpTranscript) must
 // propagate all the way out of readMembers, uncaught. Only the directory
 // listing and the raw file read are given the ordinary per-member tolerance.
-export function readOmpSession(sessionDir) {
+//
+// `activity`, when given, is an array that collects the entry instants of
+// EVERY transcript read here, including one that yields no record: the
+// session-wide view member-outcomes.mjs reads halts off.
+export function readOmpSession(sessionDir, activity = null) {
   let transcripts;
   try { transcripts = ompSessionTranscripts(sessionDir); }
   catch { return []; }
@@ -878,17 +897,19 @@ export function readOmpSession(sessionDir) {
     try { text = readFileSync(file, "utf8"); }
     catch { continue; }
     const folded = foldOmpTranscript(text, file); // may throw — see comment above
+    if (activity) for (const ms of folded.stamps) activity.push(ms);
     const rec = ompMemberRecord(folded, agent, spawnDepth);
     if (!rec) continue;
     // How the transcript ENDED, for the `ending` column (member-outcomes.mjs):
     // the fold's end-of-transcript signals, and whether the member wrote its
-    // yield sidecar beside the transcript.
+    // yield sidecar beside the transcript; and its working parts, for `work_s`.
     rows.push({ ...rec, session, agent, transcript: {
       startedAt: folded.startedAt, reportWrites: folded.reportWrites, openedPrs: folded.openedPrs,
       lastStopReason: folded.lastStopReason, providerFallback: folded.providerFallback,
       sessionExit: folded.sessionExit, budgetNotice: folded.budgetNotice,
       malformedNonLastLines: folded.malformedNonLastLines,
       hasYield: existsSync(file.replace(/\.jsonl$/, ".md")),
+      timed: folded.stamps.length > 0, workParts: folded.workParts,
     } });
   }
   return rows;

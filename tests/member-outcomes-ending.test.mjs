@@ -63,7 +63,7 @@ const endingOfMember = (dir, member, verifyMain = () => 0) => {
 // ---------------------------------------------------------------------------
 
 test("`ending` follows the four priced columns, and `dispatch_model` follows it", () => {
-  assert.deepEqual(COLUMNS.slice(-3), ["cost", "ending", "dispatch_model"]);
+  assert.deepEqual(COLUMNS.slice(COLUMNS.indexOf("cost"), COLUMNS.indexOf("cost") + 3), ["cost", "ending", "dispatch_model"]);
 });
 
 test("only implementer rows carry an ending: review, fix, finisher and merge-bot rows are blank", () => {
