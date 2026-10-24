@@ -448,7 +448,11 @@ exists — see ADR 0016 § Decision point 5.
 3. `router_usd` from `status().cost`, not a member-outcomes join — above.
 4. **Fit objective is $ per merged PR only.** *Amended (#3753): the fit
    also holds the quality floor, per row; the guard holds it pooled and alone
-   takes a cell out of the draw (§ 4).*
+   takes a cell out of the draw (§ 4).* *Amended (#3680): once #3785 lands,
+   this is the `cost` objective, the default; a run may choose `speed`
+   instead, whose rows start from the `cost` rows' cells and move only to a
+   cell reliably faster in Work time per merged PR (ADR 0016's #3680
+   amendment).*
 
 ## 4. G4 — Router
 
