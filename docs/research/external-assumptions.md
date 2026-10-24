@@ -105,7 +105,7 @@ What a ticket must look like to be admitted, claimed, and worked.
 | `--json files` caps at 100 entries silently; `changedFiles` is the true count. | tracker#19, harness#43 |
 | Fork PRs: `isCrossRepository` decides whether to read `refs/heads/<branch>` or `refs/pull/<n>/head`. | harness#41 |
 | `gh pr update-branch --rebase` is the only rebase (server-side); never retried with `--force`. | prose#44, prose#76 |
-| First push is `git push -u origin HEAD`; `--force-with-lease` only on a re-push. Only `dependabot[bot]`/`renovate[bot]` PRs (matched on `user.login`) get `patch` auto-applied. | prose#74, shell#4 |
+| First push is `git push -u origin HEAD`; `--force-with-lease` only on a re-push. Only `dependabot[bot]`/`renovate[bot]` PRs (matched on `user.login`) get `patch` auto-applied, and only when they carry none of `patch`/`minor`/`major`. | prose#74, shell#3, shell#4 |
 | Release version is the newest `vMAJOR.MINOR.PATCH` tag, else `v0.1.0`; non-semver tags ignored. | shell#21 |
 
 ## 4. `gh` and GitHub API surface actually consumed
