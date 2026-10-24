@@ -61,11 +61,10 @@ import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
+import { LABEL_LIST_ARGS, LABEL_LIST_LIMIT, releaseLabelsDefined, releaseLabelsIn } from "./release-labels.mjs";
 
 const NAME = "finisher-label";
 const LABEL = "ready-to-merge";
-const RELEASE = ["patch", "minor", "major"];
-const LIST_LIMIT = 1000;
 
 const die = makeDie(NAME);
 const { arg, numArg, sweep, stray } = defineFlags(die, {
@@ -156,17 +155,16 @@ const first = ghJson("read-labels", ["pr", "view", String(pr), "--json", "labels
   isObject(v) && namedList(v.labels) && Array.isArray(v.comments) && v.comments.every((c) => isObject(c) && typeof c.body === "string" && typeof c.createdAt === "string"));
 const firstLabels = labelNames(first);
 receipt.firstRead = firstLabels;
-const found = RELEASE.filter((r) => firstLabels.includes(r));
+const found = releaseLabelsIn(firstLabels);
 
 if (found.length === 0) {
-  const defined = ghJson("list-labels", ["label", "list", "--json", "name", "--limit", String(LIST_LIMIT)], namedList).map((l) => l.name);
-  if (RELEASE.some((r) => defined.includes(r))) {
+  const defined = ghJson("list-labels", [...LABEL_LIST_ARGS], namedList).map((l) => l.name);
+  const state = releaseLabelsDefined(defined);
+  if (state === "defined") {
     finish(3, { releaseLabels: found }, "the PR carries no release label (patch, minor or major); nothing was written");
   }
-  // A list that fills the limit may be cut off before the release labels, so
-  // their absence from it proves nothing.
-  if (defined.length >= LIST_LIMIT) {
-    fail("list-labels", `the repository has ${LIST_LIMIT} or more labels, so the list may be cut off before patch, minor or major`);
+  if (state === "cut-off") {
+    fail("list-labels", `the repository has ${LABEL_LIST_LIMIT} or more labels, so the list may be cut off before patch, minor or major`);
   }
   receipt.releaseLabels = "undefined-in-repo";
 } else if (found.length > 1) {

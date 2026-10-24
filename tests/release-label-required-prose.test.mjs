@@ -3,10 +3,11 @@
 // them does not gate on one" — true before this repo had any release
 // pipeline to gate. #1347 ports `release-label.yml`/`release.yml`
 // (agent-brain's shape): `release-label.yml`'s `auto-label-bots` job adds
-// `patch` when no release label is present and `validate-release-label`
-// hard-fails on more than one, so every PR on this repo now carries exactly
-// one release label by the time it reaches step 6 — the conditional clause
-// is stale and this ticket flips it to state the gate as required.
+// `patch` to a dependabot or renovate PR with no release label, and
+// `validate-release-label` hard-fails any PR with none or more than one, so
+// the gate is required on every PR — the conditional clause is stale and
+// this ticket flips it to state the gate as required. Step 6 once said the
+// job auto-adds `patch` to every PR with none; it does so for bot PRs only.
 //
 // Cited by step NAME, not by line — this repo's own convention
 // (ci.yml: "a refactor that shifts that file silently re-points a line
@@ -52,7 +53,12 @@ test("review-and-fix.md step 6 states the release-label gate as required, not co
   const slice = step6ReleaseLabelClause();
   assert.match(slice, Pin.phrase("required on every PR"));
   assert.match(slice, Pin.phrase("release-label.yml"));
-  assert.match(slice, Pin.phrase("auto-adds `patch` when none is present and hard-fails on more than one"));
+  assert.match(slice, Pin.phrase("auto-adds `patch` only to a dependabot or renovate PR that has none, and hard-fails any PR with none or more than one"));
+});
+
+test("review-and-fix.md step 6 no longer says release-label.yml labels every PR with none", () => {
+  const slice = step6ReleaseLabelClause();
+  assert.doesNotMatch(slice, Pin.phrase("auto-adds `patch` when none is present"));
 });
 
 test("review-and-fix.md step 6 no longer states the old conditional wording", () => {
