@@ -2029,7 +2029,7 @@ function checkReaders(where) {
     const what = `gh ${args.join(" ")}`;
     const lead = `could not read ${whose} labels`;
     const { r, v } = lookJson(what, args, lead);
-    const labels = v === null ? null : list(v);
+    const labels = list(v);
     if (!Array.isArray(labels) || !labels.every((l) => l !== null && typeof l === "object" && typeof l.name === "string")) {
       die(`${where}: ${lead} — ${what} printed no list of named labels: ${cause(r.stdout)}; nothing written`);
     }
@@ -2037,7 +2037,7 @@ function checkReaders(where) {
   };
   // PR `pr`'s label names, and the names of the labels its repository defines.
   const prLabels = (pr) => labelNames(`PR #${pr}'s`, ["pr", "view", String(pr), "--json", "labels"], (v) => v?.labels);
-  const repoLabels = () => labelNames("the repository's", [...LABEL_LIST_ARGS], (v) => v);
+  const repoLabels = () => labelNames("the repository's", LABEL_LIST_ARGS, (v) => v);
   return { repoDir, look, verifyShaOf, prView, prViewClosing, issueTitle, prLabels, repoLabels };
 }
 
@@ -2051,8 +2051,10 @@ function checkReaders(where) {
 // ruling is no. Check 2, for every PR: no reference may be the
 // suggestion-band record of this PR's review — an issue whose title, trimmed,
 // is recordTitle(), as dispositions-check.mjs finds the record. Returns
-// `{refs, failures}`: the issue numbers the PR closes, and one line per
-// failure. A read the checks need dies, naming the read, and writes nothing.
+// `{refs, failures}`: the issue numbers the PR closes, its own
+// suggestion-band record aside — that one is a failure here, not a ticket —
+// and one line per failure. A read the checks need dies, naming the read,
+// and writes nothing.
 async function closingRefusals(member, { tickets, ruling, tsv }) {
   const pr = member.number;
   const where = `dispatch ${member.name}`;
@@ -2075,17 +2077,20 @@ async function closingRefusals(member, { tickets, ruling, tsv }) {
     }
   }
   const own = recordTitle(pr);
+  const closed = [];
   for (const n of refs) {
     if (issueTitle(n).trim() === own) failures.push(`PR #${pr} closes #${n}, its own suggestion-band record — rephrase the mention as "Refs #${n}" or "issue #${n}"`);
+    else closed.push(n);
   }
-  return { refs, failures };
+  return { refs: closed, failures };
 }
 
 // The finisher gate's release-label check for the PR `member` finishes: the
 // PR carries exactly one release label, or its repository defines none, as
 // finisher-label.mjs counts them before it labels. `tickets` are the tickets
 // rulingOf() found settled implementer tokens naming the PR for, and `refs`
-// the issues closingRefusals() read it closing. Returns the refusal, or null.
+// the issues closingRefusals() read it closing, its own suggestion-band
+// record aside. Returns the refusal, or null.
 // A PR with none is repaired with `patch` only when it closes no ticket and
 // no such token names it; any other PR's bump is not picked here, and
 // neither is which of several labels stays. A read the check needs dies,

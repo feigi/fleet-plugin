@@ -158,7 +158,7 @@ receipt.firstRead = firstLabels;
 const found = releaseLabelsIn(firstLabels);
 
 if (found.length === 0) {
-  const defined = ghJson("list-labels", [...LABEL_LIST_ARGS], namedList).map((l) => l.name);
+  const defined = ghJson("list-labels", LABEL_LIST_ARGS, namedList).map((l) => l.name);
   const state = releaseLabelsDefined(defined);
   if (state === "defined") {
     finish(3, { releaseLabels: found }, "the PR carries no release label (patch, minor or major); nothing was written");

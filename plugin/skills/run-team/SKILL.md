@@ -559,7 +559,7 @@ Dispatch a finisher only when every test here passes at once — the review retu
   whole route to a finisher**: a `no-op` report satisfies the gate above by
   itself, so nothing further is owed and no further event is coming. Edit either bullet without the other and what strands is exactly the PR that needed no fixes.
 - **The PR's closing references match its ruling and exclude its own suggestion-band record** → `ledger.mjs dispatch` refuses the finisher otherwise, naming the PR and the ticket: repair the body with `gh pr edit <M> --body-file <file>`, then dispatch again.
-- **The PR carries exactly one release label** → `ledger.mjs dispatch` refuses the finisher otherwise, naming the PR and its labels, and `patch` as the repair only when the PR closes no ticket and no settled `impl-<N>=PR#<M>` token names it. Fix the labels, then dispatch again. In full: references/finisher.md.
+- **The PR carries exactly one release label, or its repo defines none** → `ledger.mjs dispatch` refuses the finisher otherwise, naming `patch` as the repair only when the PR closes no ticket and no settled `impl-<N>=PR#<M>` token names it. Fix the labels, then dispatch again. In full: references/finisher.md.
 - **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`** → the CI edge never
   fires: dispatch the finisher off the reviewer's final verdict the moment it
   lands, never while you still owe it a reply. Its gate is then the

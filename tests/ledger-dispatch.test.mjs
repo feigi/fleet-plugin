@@ -1648,14 +1648,27 @@ test("a PR with no release label that closes no ticket is refused, naming patch 
   assert.equal(f.ok("dispatch", "3631", "finisher-pr-3631").agent, "fleet-finisher");
 });
 
-test("a PR with no release label that closes a ticket is refused, naming the tickets and picking no bump", (t) => {
+test("a PR with no release label whose only closing reference is its own suggestion-band record is refused naming patch, the record being no ticket", (t) => {
   const f = fixture(t);
-  f.put("3545", RULED_ROW);
-  f.rule(3606, "3545", "yes", [3545, 3600]);
-  labelled(f.bin, 3606, []);
-  f.refused(["dispatch", "3606", "finisher-pr-3606"],
-    /finisher-pr-3606: PR #3606 carries no release label \(patch, minor, major\) and closes #3545, #3600 — add exactly one, the bump its change calls for: gh pr edit 3606 --add-label <patch\|minor\|major> — not dispatching finisher-pr-3606/);
+  f.put("3631", UNTICKETED_ROW);
+  closes(f.bin, 3631, [3637]);
+  titled(f.bin, 3637, "PR #3631 review: the suggestion band, checked");
+  labelled(f.bin, 3631, []);
+  f.refused(["dispatch", "3631", "finisher-pr-3631"],
+    /finisher-pr-3631: PR #3631 closes #3637, its own suggestion-band record — rephrase the mention as "Refs #3637" or "issue #3637"; PR #3631 carries no release label \(patch, minor, major\) and closes no ticket — add one: gh pr edit 3631 --add-label patch — not dispatching finisher-pr-3631/);
   assert.deepEqual(f.read().dispatched, []);
+});
+
+test("a PR with no release label that closes a ticket is refused, naming the tickets and picking no bump", (t) => {
+  for (const [refs, named] of [[[3545], "#3545"], [[3545, 3600], "#3545, #3600"]]) {
+    const f = fixture(t);
+    f.put("3545", RULED_ROW);
+    f.rule(3606, "3545", "yes", refs);
+    labelled(f.bin, 3606, []);
+    f.refused(["dispatch", "3606", "finisher-pr-3606"],
+      new RegExp(`finisher-pr-3606: PR #3606 carries no release label \\(patch, minor, major\\) and closes ${named} — add exactly one, the bump its change calls for: gh pr edit 3606 --add-label <patch\\|minor\\|major> — not dispatching finisher-pr-3606`));
+    assert.deepEqual(f.read().dispatched, []);
+  }
 });
 
 test("a PR with no release label that closes nothing but is an implementer's is refused, picking no bump", (t) => {
