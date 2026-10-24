@@ -18,7 +18,7 @@ const SCRIPT = fileURLToPath(new URL("../plugin/scripts/cell-readout.mjs", impor
 const member = (o) => ({
   run_date: "2026-10-01", role: "implementer", member: o.agent, model: "claude-opus-5", effort: "high",
   ticket: "", pr: "", tokensCacheCreate: 0, tokensOut: 0, wallS: 0, turns: 1, harness: "omp", report: "-",
-  tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: 0, cost: 0, ending: "hollow", dispatchModel: o.model ?? "claude-opus-5", ...o,
+  tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: 0, cost: 0, ending: "hollow", dispatchModel: o.model ?? "claude-opus-5", workS: 0, ...o,
 });
 const pull = (o) => ({
   run_date: "2026-10-01", policy_cell: "slow-high", exploration_draw: "", sizing_src: "rule", sizing_pre: "",
