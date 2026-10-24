@@ -643,7 +643,8 @@ const featureRow = (over) => ({
   exploration_draw: "", sizing_src: "rule", sizing_pre: "", router_usd: "", brief_chars: "100", criteria: "1", comments: "0",
   age_days: "1", paths: "0", test_paths: "0", xrefs: "0", kind: "bug", ...over,
 });
-const memberRow = (over) => Object.fromEntries(MEMBER_COLUMNS.map((c) => [c, ""]).concat(Object.entries({ session: SESSION, harness: "omp", ...over })));
+// Every column blank but `work_s`, a minute unless `over` names it: a blank one would leave the Pull untimed.
+const memberRow = (over) => Object.fromEntries(MEMBER_COLUMNS.map((c) => [c, ""]).concat(Object.entries({ session: SESSION, harness: "omp", work_s: "60", ...over })));
 const verdictRow = (over) => ({ run_date: "2026-10-01", class: "", tier: "", note: "n", sizing: "", profile: "", loc: "", files: "", closed_own_ticket: "yes", minted_false_claim: "no", ...over });
 const tsv = (cols, rows, header = false) => (header ? `${cols.join("\t")}\n` : "") + rows.map((r) => cols.map((c) => r[c] ?? "").join("\t")).join("\n") + (rows.length ? "\n" : "");
 // The Admissible implementer row of features row `f`, costing $1.
@@ -700,7 +701,7 @@ test("fit: a day-one three-TSV fixture writes an estimates-only table, and --che
     featureRow({ ticket: "2", chosen_cell: "slow-high", exploration_draw: "1/3", brief_chars: "5000" }),
     featureRow({ ticket: "3", chosen_cell: "smol-high", exploration_draw: "3/3", run_date: "2026-10-02" }),
   ];
-  // Every Pull's implementer is admissible and costs $1; ticket 1's PR took a $2 fix round, and the merge bot is no cell's.
+  // Every Pull's implementer is admissible, costs $1 and worked a minute; ticket 1's PR took a $2 fix round of a minute, and the merge bot is no cell's.
   const members = [
     { member: "fix-pr-11", agent: "fix-pr-11", pr: "11", role: "fix-applier", cost: "2" },
     { member: "merge-bot-1", agent: "merge-bot-1", pr: "11", role: "merge-bot", cost: "100" },
@@ -710,7 +711,7 @@ test("fit: a day-one three-TSV fixture writes an estimates-only table, and --che
   const r = fitCli(p);
   assert.equal(r.status, 0, r.stderr);
   const sha = p.git("rev-parse", "HEAD");
-  assert.match(r.stdout, new RegExp(`fitted 3 Pulls at ${sha.slice(0, 8)};.*; cells slow-high m n=1 merged=1 failed=1 usd_per_merged=1.00 excluded=0 left_out=0 unpriced=0, `));
+  assert.match(r.stdout, new RegExp(`fitted 3 Pulls at ${sha.slice(0, 8)};.*; cells slow-high m n=1 merged=1 failed=1 usd_per_merged=1.00 minutes_per_merged=1.00 excluded=0 left_out=0 unpriced=0 untimed=0, `));
   const table = JSON.parse(readFileSync(p.table, "utf8"));
   assert.deepEqual(table.rows, { "*": "slow-high" }, "no cell has n>=20 yet, so no row is adopted");
   assert.equal(table.burn_in, true);
@@ -719,10 +720,10 @@ test("fit: a day-one three-TSV fixture writes an estimates-only table, and --che
   assert.equal(table.fitted_commit, sha, "the table records the commit the fit read, in full");
   assert.equal("fitted_through" in table, false, "no date field stays beside the commit");
   assert.equal(table.window_start, "2026-09-01", "the window comes from the guard; the fit never moves it");
-  const est = (o) => ({ generation: "m", claims: o.merged, failed: 0, fix_rounds: 0, review_findings: null, excluded: 0, left_out: 0, unpriced: 0, older: {}, ...o });
-  assert.deepEqual(table.estimates["*"]["task-high"], est({ n: 1, merged: 1, usd_per_merged: 3, fail_rate: 0, fix_rounds: 1 }));
-  assert.deepEqual(table.estimates.heavy["slow-high"], est({ n: 1, merged: 1, failed: 1, usd_per_merged: 1, fail_rate: 1 }));
-  assert.deepEqual(table.estimates.light["smol-high"], est({ n: 1, merged: 0, usd_per_merged: null, fail_rate: null, fix_rounds: null }));
+  const est = (o) => ({ generation: "m", claims: o.merged, failed: 0, fix_rounds: 0, review_findings: null, excluded: 0, left_out: 0, unpriced: 0, untimed: 0, older: {}, ...o });
+  assert.deepEqual(table.estimates["*"]["task-high"], est({ n: 1, merged: 1, usd_per_merged: 3, minutes_per_merged: 2, fail_rate: 0, fix_rounds: 1 }));
+  assert.deepEqual(table.estimates.heavy["slow-high"], est({ n: 1, merged: 1, failed: 1, usd_per_merged: 1, minutes_per_merged: 1, fail_rate: 1 }));
+  assert.deepEqual(table.estimates.light["smol-high"], est({ n: 1, merged: 0, usd_per_merged: null, minutes_per_merged: null, fail_rate: null, fix_rounds: null }));
   assert.deepEqual(table.guard, { tripped: [], n: { "slow-high": 5, "smol-high": 5, "task-high": 5 } });
 
   const check = cli(["--check", ...p.fitArgs]);
@@ -749,9 +750,25 @@ test("fit: an older generation prints on its own `(older)` segment with its own 
   const p = fitWorld(t, { features: [a1, a2, b, x], members, verdicts });
   const r = fitCli(p);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /; cells smol-high - n=0 merged=0 failed=0 usd_per_merged=- excluded=1 left_out=0 unpriced=0, task-high model-b n=1 merged=1 failed=0 usd_per_merged=1\.00 excluded=0 left_out=0 unpriced=0, task-high model-a \(older\) n=2 merged=2 failed=0 usd_per_merged=3\.00\nticket-router: row \* slow-high unjudged\n/);
+  assert.match(r.stdout, /; cells smol-high - n=0 merged=0 failed=0 usd_per_merged=- minutes_per_merged=- excluded=1 left_out=0 unpriced=0 untimed=0, task-high model-b n=1 merged=1 failed=0 usd_per_merged=1\.00 minutes_per_merged=1\.00 excluded=0 left_out=0 unpriced=0 untimed=0, task-high model-a \(older\) n=2 merged=2 failed=0 usd_per_merged=3\.00 minutes_per_merged=2\.00\nticket-router: row \* slow-high unjudged\n/);
   const task = JSON.parse(readFileSync(p.table, "utf8")).estimates["*"]["task-high"];
   assert.deepEqual([task.generation, task.fix_rounds, task.older["model-a"].fix_rounds], ["model-b", 0, 1]);
+});
+
+test("fit: a Pull with a blank work_s on a top-level booked row prints as untimed and leaves the cell's figures, and --check re-derives it", (t) => {
+  const timed = featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "1/3" });
+  const untimed = featureRow({ ticket: "2", chosen_cell: "task-high", exploration_draw: "1/3" });
+  const members = [
+    implementer(timed, { pr: "11", ending: "pr", work_s: "5400" }),
+    implementer(untimed, { pr: "12", ending: "pr", cost: "7" }),
+    { member: "fix-pr-12", agent: "fix-pr-12", pr: "12", role: "fix-applier", cost: "2", work_s: "" },
+  ];
+  const p = fitWorld(t, { features: [timed, untimed], members, verdicts: [{ pr: "11", ticket: "1" }, { pr: "12", ticket: "2" }] });
+  const r = fitCli(p);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /; cells task-high m n=1 merged=1 failed=0 usd_per_merged=1\.00 minutes_per_merged=90\.00 excluded=0 left_out=0 unpriced=0 untimed=1\n/);
+  const check = cli(["--check", ...p.fitArgs]);
+  assert.equal(check.status, 0, check.stderr);
 });
 
 test("--check fails when the checked-in table is not a re-fit of its rows", (t) => {
@@ -763,6 +780,9 @@ test("--check fails when the checked-in table is not a re-fit of its rows", (t) 
     ["a hand-adopted row", (x) => { x.rows["*"] = "task-high"; }],
     ["burn-in switched off by hand", (x) => { x.burn_in = false; }],
     ["an edited estimate", (x) => { x.estimates["*"]["task-high"].n = 30; }],
+    ["an edited minutes per merged PR", (x) => { x.estimates["*"]["task-high"].minutes_per_merged = 2; }],
+    ["an edited untimed count", (x) => { x.estimates["*"]["task-high"].untimed = 1; }],
+    ["a table fitted before work time, lacking both", (x) => { for (const row of Object.values(x.estimates)) for (const e of Object.values(row)) { delete e.minutes_per_merged; delete e.untimed; } }],
     ["a fitted_commit reset to null", (x) => { x.fitted_commit = null; }],
   ]) {
     const bad = structuredClone(good);
@@ -942,6 +962,20 @@ test("--check passes on a day-one table over a header-only features file", (t) =
   const p = fitWorld(t, { features: [], members: [], verdicts: [], table: JSON.parse(readFileSync(DEFAULT_TABLE, "utf8")) });
   const r = cli(["--check", ...p.fitArgs]);
   assert.equal(r.status, 0, r.stderr);
+});
+
+test("a table fitted before work time, its estimates lacking minutes_per_merged and untimed, is valid and is the next fit's prior", (t) => {
+  const features = [featureRow({ ticket: "1", chosen_cell: "task-high", exploration_draw: "2/3" })];
+  const p = fitWorld(t, { features, members: [], verdicts: [{ pr: "11", ticket: "1" }] });
+  assert.equal(fitCli(p).status, 0);
+  const before = JSON.parse(readFileSync(p.table, "utf8"));
+  for (const row of Object.values(before.estimates)) for (const e of Object.values(row)) { delete e.minutes_per_merged; delete e.untimed; }
+  assert.equal(validateTable(before), before);
+  writeFileSync(p.table, JSON.stringify(before));
+  const r = fitCli(p);
+  assert.equal(r.status, 0, r.stderr);
+  const after = JSON.parse(readFileSync(p.table, "utf8")).estimates["*"]["task-high"];
+  assert.deepEqual([after.minutes_per_merged, after.untimed], [1, 0]);
 });
 
 // The CI step's own shell, run against stubs: `git` only logs, and the step's `node` is the real one.

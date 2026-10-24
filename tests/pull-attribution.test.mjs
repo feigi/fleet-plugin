@@ -19,7 +19,7 @@ const world = () => ({ members: [], tiers: [], features: [], prs: [] });
 const member = (o) => ({
   session: SESSION, run_date: DAY, role: "implementer", member: o.agent, model: "claude-opus-5", effort: "high",
   ticket: "", pr: "", tokensCacheCreate: 0, tokensOut: 0, wallS: 0, turns: 1, harness: "omp", subagentType: "",
-  tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: "", cost: 1, ending: "", dispatchModel: o.model ?? "claude-opus-5", ...o,
+  tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: "", cost: 1, ending: "", dispatchModel: o.model ?? "claude-opus-5", workS: 60, ...o,
 });
 // An implementer row of `ticket` dispatched as `cell`'s definition at its level.
 const impl = (ticket, cell, o = {}) => member({
@@ -50,16 +50,16 @@ const prior = {
 function figures(w) {
   const p = parsed(w);
   const guard = Object.fromEntries(computeReport({ ...p, prs: w.prs }).cells.map((c) => [c.cell, {
-    n: c.n_pulls, merged: c.n_merged, failed: c.n_failed, excluded: c.excluded, left_out: c.left_out, unpriced: c.unpriced, usd: c.mean_usd,
+    n: c.n_pulls, merged: c.n_merged, failed: c.n_failed, excluded: c.excluded, left_out: c.left_out, unpriced: c.unpriced, untimed: c.untimed, usd: c.mean_usd,
   }]));
   const est = fitTable({ prior, features: p.features, members: p.members, verdicts: p.tiers, guard: { tripped: [], n: {}, window_start: DAY } }).estimates["*"] ?? {};
   const fit = Object.fromEntries(Object.entries(est).map(([c, e]) => [c, {
-    n: e.n, merged: e.merged, failed: e.failed, excluded: e.excluded, left_out: e.left_out, unpriced: e.unpriced, usd: e.usd_per_merged,
+    n: e.n, merged: e.merged, failed: e.failed, excluded: e.excluded, left_out: e.left_out, unpriced: e.unpriced, untimed: e.untimed, usd: e.usd_per_merged,
   }]));
   return { guard, fit };
 }
 const units = (w, prs = w.prs) => attribute({ ...parsed(w), prs, windowStart: DAY });
-const cell = (o) => ({ n: 0, merged: 0, failed: 0, excluded: 0, left_out: 0, unpriced: 0, usd: null, ...o });
+const cell = (o) => ({ n: 0, merged: 0, failed: 0, excluded: 0, left_out: 0, unpriced: 0, untimed: 0, usd: null, ...o });
 
 test("rescue: three budget-exhausted implementers at the cell and a fourth elsewhere that merges count once, for the drawn cell, with every implementer's and the PR's spend", () => {
   const w = world();
@@ -346,6 +346,125 @@ test("a whitespace-only cost is refused by both scripts, never read as $0", () =
   assert.throws(() => fitTable({ prior, features: p.features, members: p.members, verdicts: p.tiers, guard: { tripped: [], n: {}, window_start: DAY } }), named);
 });
 
+// ---------------------------------------------------------------------------
+// Work time: the summed work_s of a Pull's booked members that name no parent
+// ---------------------------------------------------------------------------
+
+// The fit's `*` row for `cell`, fitted as `figures` fits it.
+const fitted = (w, c) => {
+  const p = parsed(w);
+  return fitTable({ prior, features: p.features, members: p.members, verdicts: p.tiers, guard: { tripped: [], n: {}, window_start: DAY } }).estimates["*"][c];
+};
+
+test("work time sums the implementer, review runner, both fix rounds and finisher; the review runner's nested members add nothing, timed or blank", () => {
+  const w = world();
+  w.features.push(pull(50, "slow-high"));
+  w.members.push(
+    impl(50, "slow-high", { ending: "pr", pr: "150", workS: 3000 }),
+    member({ agent: "review-pr-150", role: "reviewer", pr: "150", workS: 1200 }),
+    member({ agent: "review-pr-150/review-pr-150.Spec1", member: "review-pr-150/review-pr-150.Spec1", role: "specialist", workS: 900 }),
+    member({ agent: "review-pr-150/review-pr-150.Spec2", member: "review-pr-150/review-pr-150.Spec2", role: "specialist", workS: "" }),
+    member({ agent: "fix-pr-150", role: "fix-applier", pr: "150", workS: 600 }),
+    member({ agent: "fix-pr-150-b", role: "fix-applier", pr: "150", workS: 600 }),
+    member({ agent: "finisher-pr-150", role: "finisher", pr: "150", workS: 300 }),
+  );
+  w.tiers.push(ruling(50, 150));
+  merged(w, 150);
+  const [u] = units(w);
+  assert.deepEqual([u.status, u.workS, u.rows.length], ["counted", 5700, 7], "every row is booked; only the top-level ones are timed");
+  assert.equal(fitted(w, "slow-high").minutes_per_merged, 95);
+});
+
+test("a rescued Pull's work time includes the rescue implementer's, at whatever cell it ran", () => {
+  const w = world();
+  w.features.push(pull(51, "smol-high"));
+  w.members.push(
+    impl(51, "smol-high", { ending: "budget", workS: 1000 }),
+    impl(51, "slow-high", { agent: "impl-51-b", ending: "pr", pr: "151", workS: 2000 }),
+  );
+  w.tiers.push(ruling(51, 151));
+  merged(w, 151);
+  const [u] = units(w);
+  assert.deepEqual([u.cell, u.status, u.workS], ["smol-high", "counted", 3000]);
+  assert.equal(fitted(w, "smol-high").minutes_per_merged, 50);
+});
+
+test("a cell's minutes per merged PR is every counted Pull's work time, merged or not, over its merged PRs; null with none merged", () => {
+  const w = world();
+  w.features.push(pull(52, "task-high"), pull(53, "task-high"), pull(54, "task-high"), pull(55, "smol-high"));
+  w.members.push(
+    impl(52, "task-high", { ending: "pr", pr: "152", workS: 3600 }),
+    impl(53, "task-high", { ending: "pr", pr: "153", workS: 5400 }),
+    impl(54, "task-high", { ending: "hollow", workS: 1800 }),
+    impl(55, "smol-high", { ending: "hollow", workS: 1800 }),
+  );
+  w.tiers.push(ruling(52, 152), ruling(53, 153));
+  merged(w, 152);
+  merged(w, 153);
+  const task = fitted(w, "task-high");
+  assert.deepEqual([task.n, task.merged, task.minutes_per_merged], [3, 2, 90], "(60 + 90 + 30) minutes over 2 merged PRs");
+  const smol = fitted(w, "smol-high");
+  assert.deepEqual([smol.n, smol.merged, smol.minutes_per_merged], [1, 0, null]);
+});
+
+test("a blank work_s on a top-level booked row makes its Pull untimed: out of n, merged, claims, $ and time, counted by both scripts; a blank cost as well reads unpriced", () => {
+  const w = world();
+  w.features.push(pull(56, "slow-high"), pull(57, "slow-high"));
+  w.members.push(
+    impl(56, "slow-high", { ending: "pr", pr: "156", cost: 2, workS: 600 }),
+    member({ agent: "review-pr-156", role: "reviewer", pr: "156", cost: 4, workS: "" }),
+    impl(57, "slow-high", { ending: "pr", pr: "157", cost: 3, workS: 1200 }),
+  );
+  w.tiers.push(ruling(56, 156, { minted_false_claim: "yes" }), ruling(57, 157));
+  merged(w, 156);
+  merged(w, 157);
+  const [untimed] = units(w);
+  assert.deepEqual([untimed.status, untimed.workS, untimed.spend], ["untimed", null, 6]);
+  const { guard, fit } = figures(w);
+  assert.deepEqual(guard, { "slow-high": cell({ n: 1, merged: 1, untimed: 1, usd: 3 }) });
+  assert.deepEqual(fit, guard);
+  const est = fitted(w, "slow-high");
+  assert.deepEqual([est.claims, est.fail_rate, est.minutes_per_merged], [1, 0, 20], "its claim and its time are out with it");
+
+  w.members[1].cost = "";
+  assert.equal(units(w)[0].status, "unpriced");
+  const both = figures(w);
+  assert.deepEqual(both.guard, { "slow-high": cell({ n: 1, merged: 1, unpriced: 1, usd: 3 }) });
+  assert.deepEqual(both.fit, both.guard);
+});
+
+test("a blank work_s on a booked nested member alone leaves the Pull counted", () => {
+  const w = world();
+  w.features.push(pull(58, "slow-high"));
+  w.members.push(
+    impl(58, "slow-high", { ending: "pr", pr: "158", workS: 600 }),
+    member({ agent: "fix-pr-158", role: "fix-applier", pr: "158", workS: 300 }),
+    member({ agent: "fix-pr-158/fix-pr-158.RefuteU1", member: "fix-pr-158/fix-pr-158.RefuteU1", role: "specialist", workS: "" }),
+  );
+  w.tiers.push(ruling(58, 158));
+  merged(w, 158);
+  const [u] = units(w);
+  assert.deepEqual([u.status, u.workS], ["counted", 900]);
+  assert.deepEqual(figures(w).guard, { "slow-high": cell({ n: 1, merged: 1, usd: 3 }) });
+});
+
+test("a work_s that is neither blank nor a number is refused by both scripts, naming the row, and a whitespace-only one is never read as 0", () => {
+  for (const bad of ["1.2.3", "  "]) {
+    const w = world();
+    w.features.push(pull(59, "slow-high"));
+    w.members.push(impl(59, "slow-high", { workS: bad }));
+    const p = parsed(w);
+    const named = (e) => e instanceof AttributionError && e.message.endsWith(`agent impl-59: work_s '${bad}' is not a number`);
+    assert.throws(() => computeReport({ ...p, prs: [] }), named);
+    assert.throws(() => fitTable({ prior, features: p.features, members: p.members, verdicts: p.tiers, guard: { tripped: [], n: {}, window_start: DAY } }), named);
+  }
+  // A recorded zero is a number, not a blank.
+  const w = world();
+  w.features.push(pull(60, "slow-high"));
+  w.members.push(impl(60, "slow-high", { workS: 0 }));
+  assert.deepEqual(units(w).map((u) => [u.status, u.workS]), [["counted", 0]]);
+});
+
 test("router_usd and merge-bot, memory and advisor rows are no cell's $, while the A/B arms include router_usd", () => {
   const w = world();
   // Ticket 31 is arm B, and its sizing_pre is what lets the A/B report run.
@@ -367,15 +486,15 @@ test("router_usd and merge-bot, memory and advisor rows are no cell's $, while t
   assert.deepEqual([ab.A.mean_usd, ab.B.mean_usd], [2.5, 2.25]);
 });
 
-test("tally counts each status per cell, and only counted Pulls enter n, merged, claims, spend and pulls", () => {
-  const u = (cell, status, o = {}) => ({ cell, status, merged: false, claims: 0, falseClaims: 0, spend: 1, generation: null, ...o });
-  const counted = u("task-high", "counted", { merged: true, claims: 1, spend: 3 });
+test("tally counts each status per cell, and only counted Pulls enter n, merged, claims, spend, work time and pulls", () => {
+  const u = (cell, status, o = {}) => ({ cell, status, merged: false, claims: 0, falseClaims: 0, spend: 1, workS: 60, generation: null, ...o });
+  const counted = u("task-high", "counted", { merged: true, claims: 1, spend: 3, workS: 600 });
   assert.deepEqual(tally([
     counted, u("slow-high", "excluded"), u("task-high", "left-out"),
-    u("task-high", "unpriced", { spend: null }), u("task-high", "pending"),
+    u("task-high", "unpriced", { spend: null }), u("task-high", "untimed", { workS: null }), u("task-high", "pending"),
   ]), [
-    { cell: "slow-high", generation: null, n: 0, merged: 0, claims: 0, failed: 0, spend: 0, pulls: [], excluded: 1, left_out: 0, unpriced: 0, pending: 0, older: [] },
-    { cell: "task-high", generation: null, n: 1, merged: 1, claims: 1, failed: 0, spend: 3, pulls: [counted], excluded: 0, left_out: 1, unpriced: 1, pending: 1, older: [] },
+    { cell: "slow-high", generation: null, n: 0, merged: 0, claims: 0, failed: 0, spend: 0, workS: 0, pulls: [], excluded: 1, left_out: 0, unpriced: 0, untimed: 0, pending: 0, older: [] },
+    { cell: "task-high", generation: null, n: 1, merged: 1, claims: 1, failed: 0, spend: 3, workS: 600, pulls: [counted], excluded: 0, left_out: 1, unpriced: 1, untimed: 1, pending: 1, older: [] },
   ]);
 });
 
@@ -397,13 +516,13 @@ test("admissibleRow: the cell's own definition at its level with a dispatch mode
 const SESSION3 = "2026-10-07T10-00-00-000Z_01a00000-0000-7000-8000-000000000002";
 let nextTicket = 1000;
 // `count` Pulls at `cell`, each its own ticket, dispatched on `model` in
-// `session` at `usd` apiece, their PRs in `state` (merged unless told); the
-// first `fails` of them ruled a false claim.
-function addPulls(w, { cell, model, count, session = SESSION, usd = 1, fails = 0, state = "MERGED" }) {
+// `session` at `usd` and `work` seconds apiece, their PRs in `state` (merged
+// unless told); the first `fails` of them ruled a false claim.
+function addPulls(w, { cell, model, count, session = SESSION, usd = 1, work = 60, fails = 0, state = "MERGED" }) {
   for (let i = 0; i < count; i++) {
     const t = nextTicket++;
     w.features.push(pull(t, cell, { session }));
-    w.members.push(impl(t, cell, { session, model, dispatchModel: model, ending: "pr", pr: String(t + 10000), cost: usd }));
+    w.members.push(impl(t, cell, { session, model, dispatchModel: model, ending: "pr", pr: String(t + 10000), cost: usd, workS: work }));
     w.tiers.push(ruling(t, t + 10000, { minted_false_claim: i < fails ? "yes" : "no" }));
     merged(w, t + 10000, state);
   }
@@ -423,8 +542,8 @@ test("a cell's newest generation is judged alone: 25 merged on A then 22 on B re
   baseline(w);
   addPulls(w, { cell: "task-high", model: "model-t", count: 20, usd: 9 });
   // A alone trips on both legs ($20 against the baseline's $10, 40% false claims); B alone trips on neither.
-  addPulls(w, { cell: "smol-high", model: "model-a", count: 25, usd: 20, fails: 10 });
-  addPulls(w, { cell: "smol-high", model: "model-b", count: 22, usd: 2, session: SESSION2 });
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 25, usd: 20, work: 1800, fails: 10 });
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 22, usd: 2, work: 600, session: SESSION2 });
   const { report, guard, table } = guarded(w);
 
   const smol = report.cells.find((c) => c.cell === "smol-high");
@@ -432,15 +551,36 @@ test("a cell's newest generation is judged alone: 25 merged on A then 22 on B re
   assert.deepEqual(smol.older.map((o) => [o.generation, o.n_merged, o.mean_usd, o.fail_rate]), [["model-a", 25, 20, 0.4]]);
   assert.deepEqual(report.tripped, [], "the guard judges B alone, and B does not trip");
   assert.equal(report.verdict, "ok");
-  assert.deepEqual(guardFile(report, "t").cells.find((c) => c.cell === "smol-high"), { cell: "smol-high", generation: "model-b", n: 22, mean_usd: 2, fail_rate: 0 });
+  assert.deepEqual(guardFile(report, "t").cells.find((c) => c.cell === "smol-high"), { cell: "smol-high", generation: "model-b", n: 22, mean_usd: 2, fail_rate: 0, untimed: 0 });
   assert.equal(guard.n["smol-high"], 22);
 
   const est = table.estimates["*"]["smol-high"];
-  assert.deepEqual([est.generation, est.n, est.merged, est.usd_per_merged, est.fail_rate], ["model-b", 22, 22, 2, 0]);
+  assert.deepEqual([est.generation, est.n, est.merged, est.usd_per_merged, est.minutes_per_merged, est.fail_rate], ["model-b", 22, 22, 2, 10, 0]);
   assert.deepEqual(Object.keys(est.older), ["model-a"]);
-  assert.deepEqual([est.older["model-a"].n, est.older["model-a"].usd_per_merged, est.older["model-a"].fail_rate], [25, 20, 0.4]);
+  const older = est.older["model-a"];
+  assert.deepEqual([older.n, older.usd_per_merged, older.minutes_per_merged, older.fail_rate, older.untimed], [25, 20, 30, 0.4, 0]);
+  assert.equal(table.estimates.light["smol-high"].older["model-a"].minutes_per_merged, 30, "a stratum row keeps each older generation's time too");
   // Pooled, smol-high's $ per merged PR is (25×20 + 22×2) / 47 ≈ $11.57, over the 0.75 × $10 adoption bar; B's $2 is under it.
   assert.equal(table.rows["*"], "smol-high", "the fit adopts on B's figures alone");
+});
+
+test("with every work_s doubled, adoption, the quality floor and the guard's trips give the same verdicts", () => {
+  const w = world();
+  baseline(w, { work: 3000 });
+  addPulls(w, { cell: "task-high", model: "model-t", count: 20, usd: 5, work: 6000 });
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 20, usd: 3, work: 600, fails: 10 });
+  const twice = { ...w, members: w.members.map((m) => ({ ...m, workS: m.workS * 2 })) };
+  // The guard's own verdicts, and the fit's with the guard's trips fed in and with none, so the fit's own floor judges smol-high.
+  const verdicts = (x) => {
+    const { report, table } = guarded(x);
+    const p = parsed(x);
+    const floor = fitTable({ prior, features: p.features, members: p.members, verdicts: p.tiers, guard: { tripped: [], n: table.guard.n, window_start: DAY } });
+    return { tripped: report.tripped, verdict: report.verdict, retire: report.retire, rows: table.rows, reasons: table.reasons, floor: [floor.rows, floor.reasons] };
+  };
+  const once = verdicts(w);
+  assert.deepEqual([once.tripped, once.rows["*"], once.floor[1]["*"].cells["smol-high"].verdict], [["smol-high"], "task-high", "under-floor"]);
+  assert.deepEqual(verdicts(twice), once);
+  assert.deepEqual([guarded(w), guarded(twice)].map(({ table }) => table.estimates["*"]["task-high"].minutes_per_merged), [100, 200], "the time itself was read");
 });
 
 test("the fit's range against slow-high is the guard's usd_diff_ci95: the same newest-generation Pulls, the same bootstrap", () => {

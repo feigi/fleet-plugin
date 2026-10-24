@@ -36,6 +36,7 @@
 //             implementer ending is the ticket's or neither's;
 //   unpriced  a booked row's `cost` is blank, or the Pull took its Ruling
 //             without carrying its PR;
+//   untimed   a booked row whose `agent` names no parent has a blank `work_s`;
 //   counted   every other Pull: the only ones in a cell's figures.
 //
 // ENDINGS come from member-outcomes' `ending` column. The cell's: `hollow`,
@@ -49,6 +50,12 @@
 //
 // SPEND is the recorded `cost` of every row booked to the Pull. A `cost` that
 // is neither blank nor a number is refused, naming the row.
+//
+// WORK TIME is the summed `work_s` of the rows booked to the Pull whose
+// `agent` names no parent: every implementer, rescues included, and the PR's
+// review, fix and finisher members. A nested member adds nothing, since its
+// time lies inside its parent's. A `work_s` that is neither blank nor a number
+// is refused, naming the row.
 //
 // GENERATION. A cell's figures are per Cell generation: the cell on one
 // dispatch model, member-outcomes' `dispatch_model`. A Pull's generation is
@@ -242,23 +249,26 @@ export function pullGenerations(pulls, members) {
   return new Map(pulls.map((p) => [p, generationOf(impls.get(p), p.chosen_cell)]));
 }
 
-function costOf(row) {
-  const c = String(row.cost ?? "");
+// A booked row's recorded number in `column` (`field` on the parsed row): null when blank; refused, naming the row, when neither blank nor a number.
+function numberOf(row, field, column) {
+  const c = String(row[field] ?? "");
   if (c === "") return null;
   const n = Number(c);
-  if (c.trim() === "" || !Number.isFinite(n)) throw new AttributionError(`member-outcomes row session ${row.session} agent ${row.agent}: cost '${c}' is not a number`);
+  if (c.trim() === "" || !Number.isFinite(n)) throw new AttributionError(`member-outcomes row session ${row.session} agent ${row.agent}: ${column} '${c}' is not a number`);
   return n;
 }
 
 /**
  * One unit per ticket-features row dated on or after `windowStart` (every dated
  * row when null), in file order: `{ pull, cell, stratum, generation, status,
- * merged, pr, ruling, pendingPr, claims, falseClaims, rows, spend }`,
- * `generation` null exactly when the Pull is excluded. `prs` is `gh pr list`'s
+ * merged, pr, ruling, pendingPr, claims, falseClaims, rows, spend, workS }`,
+ * `generation` null exactly when the Pull is excluded. `spend` is null when a
+ * booked `cost` is blank, and `workS`, its work time in seconds, when a booked
+ * `work_s` of a row naming no parent is. `prs` is `gh pr list`'s
  * `{ number, state }` rows, or null when PR state is unknown (the fit). `stratum`
  * maps a features row to its stratum. Throws `AttributionError` on a features
- * row it cannot date or a booked `cost` it cannot read, and `RulingError` as
- * `rulingFor` does.
+ * row it cannot date or a booked `cost` or `work_s` it cannot read, and
+ * `RulingError` as `rulingFor` does.
  */
 export function attribute({ features, members, tiers, prs = null, windowStart = null, stratum = () => null }) {
   const pulls = datedRows(features);
@@ -326,11 +336,15 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
       if (m.ending === "bail:fixed" || m.ending === "bail:fixed-refuted") claims++;
       if (m.ending === "bail:fixed-refuted") falseClaims++;
     }
-    let spend = 0, blank = false;
+    let spend = 0, blank = false, workS = 0, untimed = false;
     for (const m of booked) {
-      const c = costOf(m);
+      const c = numberOf(m, "cost", "cost");
       if (c === null) blank = true;
       else spend += c;
+      const w = numberOf(m, "workS", "work_s");
+      if (String(m.agent).includes("/")) continue;
+      if (w === null) untimed = true;
+      else workS += w;
     }
     const generation = generationOf(own, pull.chosen_cell);
     let status = "counted";
@@ -338,9 +352,10 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
     else if (pendingPr !== null) status = "pending";
     else if (claims === 0 && own.every((m) => ticketsEnding(m.ending) || NEITHER_ENDINGS.has(m.ending))) status = "left-out";
     else if (blank || (r && !r.carried)) status = "unpriced";
+    else if (untimed) status = "untimed";
     return {
       pull, cell: pull.chosen_cell, stratum: stratum(pull), generation, status, merged, pr: r?.pr ?? null, ruling: r?.ruling ?? null,
-      pendingPr, claims, falseClaims, rows: booked, spend: blank ? null : spend,
+      pendingPr, claims, falseClaims, rows: booked, spend: blank ? null : spend, workS: untimed ? null : workS,
     };
   });
 }
@@ -365,11 +380,12 @@ export function generations(units) {
 
 /**
  * Per cell, in cell-name order: `{ cell, generation, n, merged, claims, failed,
- * spend, pulls, excluded, left_out, unpriced, pending, older }`. `generation`
- * is the cell's newest (null when no Pull of it has one), and the figures
- * beside it are that generation's alone: `n`, `merged`, `claims`, `failed` and
- * `spend` over its counted Pulls, `pulls` those counted units themselves in
- * the order of `units`, then its left-out, unpriced and pending Pull counts.
+ * spend, workS, pulls, excluded, left_out, unpriced, untimed, pending, older }`.
+ * `generation` is the cell's newest (null when no Pull of it has one), and the
+ * figures beside it are that generation's alone: `n`, `merged`, `claims`,
+ * `failed`, `spend` and `workS` (work time, in seconds) over its counted
+ * Pulls, `pulls` those counted units themselves in the order of `units`, then
+ * its left-out, unpriced, untimed and pending Pull counts.
  * `excluded` counts the cell's excluded Pulls, which have no generation.
  * `older` is an array, newest first, of every other generation's figures in
  * the same shape, each carrying its `generation`. `order` is `generations()`
@@ -380,7 +396,8 @@ export function generations(units) {
 export function tally(units, order = generations(units)) {
   // `n` is read off `pulls`, so the count and the list cannot drift apart.
   const figures = (generation) => ({
-    generation, get n() { return this.pulls.length; }, merged: 0, claims: 0, failed: 0, spend: 0, pulls: [], left_out: 0, unpriced: 0, pending: 0,
+    generation, get n() { return this.pulls.length; }, merged: 0, claims: 0, failed: 0, spend: 0, workS: 0, pulls: [],
+    left_out: 0, unpriced: 0, untimed: 0, pending: 0,
   });
   const cells = new Map();
   for (const u of units) {
@@ -396,6 +413,7 @@ export function tally(units, order = generations(units)) {
       f.claims += u.claims;
       f.failed += u.falseClaims;
       f.spend += u.spend;
+      f.workS += u.workS;
       f.pulls.push(u);
     } else f[u.status.replace("-", "_")]++;
   }
