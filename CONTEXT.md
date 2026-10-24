@@ -585,10 +585,10 @@ _Avoid_: model (bare), cell version, tier generation
 
 **Router**:
 The checked-in table (`router-table.json`) plus the script that reads and
-fits it (`ticket-router.mjs`), mapping a ticket's stratum and the run's
-Objective to a Cell. Not a dispatched member — no `fleet-router`
-agent definition exists; sizing a ticket for the table is one `judge()`
-call in the controller's own eval.
+fits it (`ticket-router.mjs`), mapping a ticket's stratum to a Cell — and,
+once #3785 lands, the run's Objective too, with one row set per Objective.
+Not a dispatched member — no `fleet-router` agent definition exists; sizing a
+ticket for the table is one `judge()` call in the controller's own eval.
 _Avoid_: fleet-router, sizer
 
 **Stratum**:
@@ -638,12 +638,14 @@ unrecorded is untimed.
 _Avoid_: wall time, duration, latency, elapsed time, ticket time
 
 **Objective**:
-What a run asks the Router to minimise, chosen when the run starts and fixed
-for it: `cost`, the default, or `speed`. Under `cost` the Router's fit chooses
-each row's Cell for Spend per merged PR; under `speed` it starts from that Cell
-and moves only to one reliably faster in Work time per merged PR — less working
-time, not a shorter wait for review or merge. The Quality floor binds both;
-exploration and the cost guard ignore the objective.
+What a run asks the Router to minimise: `cost`, the default, or `speed`. Once
+#3785 lands, the run chooses it when it starts, and it is fixed for the run.
+Under `cost` the Router's fit chooses each row's Cell for Spend per merged PR;
+under `speed` it starts from that Cell and moves only to one reliably faster
+in Work time per merged PR — less working time, not a shorter wait for review
+or merge. The Quality floor binds both; Exploration Pulls and the cost guard
+ignore the objective. Until then every run is routed as under `cost`: the
+table holds one row set.
 _Avoid_: mode, profile, priority, goal
 
 **Admissible row**:
