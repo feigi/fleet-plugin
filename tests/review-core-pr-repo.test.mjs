@@ -138,9 +138,11 @@ const render = (block, worktree, pr) => new Function("worktree", "pr", "return `
 // `gh repo view` answers from the cwd's own origin, as the real one resolves a
 // checkout's remotes, behind a `resolved:` prefix so a value that never went
 // through it — the raw remote URL — cannot pass for one that did; with no
-// remote it fails the way the real one does. Every call is logged, one line of
-// args per call, so "no gh ran" is a count.
-function ghStub(t) {
+// remote it fails the way the real one does. `bodyFails` makes the body read
+// fail the way a rate-limited one does: an error on stderr, nothing on stdout,
+// exit 1. Every call is logged, one line of args per call, so "no gh ran" is a
+// count.
+function ghStub(t, { bodyFails = false } = {}) {
   const dir = scratch(t, "pr-repo-bin-");
   const log = join(dir, "gh.log");
   const body = `#!/bin/sh
@@ -158,7 +160,7 @@ case "$*" in
     echo "resolved:$url" ;;
   "pr diff"*) printf 'diff --git a/%s.txt b/%s.txt\\n' "$who" "$who" ;;
   *isCrossRepository*) echo false ;;
-  *body,commits*) n=$(cat ${JSON.stringify(log)}.n 2>/dev/null || echo 0); n=$((n+1)); echo $n > ${JSON.stringify(log)}.n; printf 'body-%s-v%s\\n' "$who" "$n" ;;
+  *body,commits*) ${bodyFails ? "echo 'rate limited' >&2; exit 1" : `printf 'body-%s\\n' "$who"`} ;;
   *headRefName*) echo "branch-$who" ;;
   *headRefOid*) echo "oid-$who" ;;
   *) exit 9 ;;
@@ -231,8 +233,7 @@ test("capture block: with no origin remote nothing runs against the cwd's reposi
 
 // The bodies are read ONCE, in the block that writes `pr.diff`, so an edit made
 // after the review began cannot reach what the review read: the file is the
-// only copy, and the block neither re-reads nor rewrites it. The stub answers
-// "v<n>" on its n-th body read, so a second read would show as v2.
+// only copy, and the block neither re-reads nor rewrites it.
 test("capture block: the PR body and commit messages are saved once, beside the diff, from the right PR", (t) => {
   const f = fixture(t);
   const gh = ghStub(t);
@@ -240,11 +241,25 @@ test("capture block: the PR body and commit messages are saved once, beside the 
   assert.equal(r.status, 0, r.err);
   const reads = () => gh.calls().filter((c) => c.includes("--json body,commits"));
   assert.equal(reads().length, 1, `the bodies were read more than once: ${reads().join(" | ")}`);
-  assert.equal(readFileSync(join(f.run, "pr-messages.md"), "utf8"), "body-RIGHT-v1\n");
-  // The author edits the PR after the review began: the next read answers v2,
-  // and the file this review holds is still the first.
-  spawnSync(join(gh.dir, "gh"), ["pr", "view", String(PR), "-R", "x", "--json", "body,commits"], { env: { ...ENV, PATH: `${gh.dir}:${process.env.PATH}` } });
-  assert.equal(readFileSync(join(f.run, "pr-messages.md"), "utf8"), "body-RIGHT-v1\n");
+  assert.equal(readFileSync(join(f.run, "pr-messages.md"), "utf8"), "body-RIGHT\n");
+});
+
+// A redirect creates its file before the command runs, so a failed body read
+// would leave an empty pr-messages.md — a clean body to the comments dimension —
+// and the block's own output and exit status are the same as a success's. The
+// block removes the file and prints a marker instead, so the failure shows.
+test("capture block: a failed body read leaves no messages file and prints SNAPSHOT_MESSAGES_FAILED", (t) => {
+  const f = fixture(t);
+  const gh = ghStub(t, { bodyFails: true });
+  const r = runBlock(CAPTURE, { ...f, bin: gh.dir });
+  assert.equal(r.status, 0, r.err);
+  assert.deepEqual(r.out, ["SNAPSHOT_MESSAGES_FAILED", f.sha, "oid-RIGHT", "1"], r.err);
+  assert.equal(existsSync(join(f.run, "pr-messages.md")), false, "a failed body read left a messages file behind");
+  assert.match(readFileSync(join(f.run, "pr.diff"), "utf8"), /RIGHT\.txt/, "the diff read was lost with the body read");
+});
+
+test("snapshot prompt: SNAPSHOT_MESSAGES_FAILED tells the agent to omit messagesPath", () => {
+  assert.match(SNAPSHOT, /Report\s+\\?`messagesPath\\?`\s+=\s+the\s+SNAPSHOT_RUN_ROOT\s+value\s+with\s+'\/pr-messages\.md'\s+appended,\s+ONLY\s+if\s+the\s+block\s+printed\s+no\s+SNAPSHOT_MESSAGES_FAILED\s+line/);
 });
 
 test("capture block: the jq expression renders the PR body, then each commit's sha, headline and body", (t) => {
