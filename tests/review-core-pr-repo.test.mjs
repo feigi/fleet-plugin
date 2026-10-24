@@ -6,13 +6,13 @@
 // lookup described another PR, and nothing in the payload said so. `refHead`
 // went empty, which `snapshotMissing` reads as "head check SKIPPED".
 //
-// Five call sites read the PR: `gh pr diff`, the three `gh pr view` field reads,
-// and `diff-stats.mjs --pr`. Each has to name the worktree's own repository, so
+// Six call sites read the PR: `gh pr diff`, the four `gh pr view` reads (three
+// fields, then the body and commits), and `diff-stats.mjs --pr`. Each has to name the worktree's own repository, so
 // each is pinned on its own below — a pin on the first `gh pr diff` line alone
-// would stay green while any of the other four reverted.
+// would stay green while any of the other five reverted.
 //
 // Two halves, for the reason snapshot-repo.test.mjs gives: the source-text pins
-// name the five sites; the executed cases run the block's own lines, lifted from
+// name the six sites; the executed cases run the block's own lines, lifted from
 // review-core.mjs, from a working directory that is a DIFFERENT repository from
 // the worktree's, against a `gh` that answers for the cwd's repository whenever
 // it is not told otherwise. The lagging-`prHead` admission (#1513) is not touched
@@ -67,6 +67,7 @@ for (const [name, re] of [
   ["gh pr view isCrossRepository", /gh pr view \$\{pr\}.*--json isCrossRepository/],
   ["gh pr view headRefName", /gh pr view \$\{pr\}.*--json headRefName/],
   ["gh pr view headRefOid", /gh pr view \$\{pr\}.*--json headRefOid/],
+  ["gh pr view body,commits", /gh pr view \$\{pr\}.*--json body,commits/],
 ]) {
   test(`snapshot prompt: \`${name}\` names the worktree's repository, not the cwd's`, () => {
     assert.match(lineOf(re), NAMED, `\`${name}\` carries no -R "$REPO" — it reads the PR from the controller's cwd repository (#3494)`);
@@ -81,9 +82,9 @@ test("snapshot prompt: the sizing script is told the worktree's repository", () 
   );
 });
 
-test("snapshot prompt: every line of the snapshot prompt that opens a `gh` call is one of the four PR reads pinned above", () => {
+test("snapshot prompt: every line of the snapshot prompt that opens a `gh` call is one of the five PR reads pinned above", () => {
   const ghLines = SNAPSHOT.split("\n").filter((l) => /^\s*(?:\w+=\$\()?gh /.test(l));
-  assert.equal(ghLines.length, 4, `a new unpinned \`gh\` read joined the snapshot block:\n${ghLines.join("\n")}`);
+  assert.equal(ghLines.length, 5, `a new unpinned \`gh\` read joined the snapshot block:\n${ghLines.join("\n")}`);
   for (const l of ghLines) assert.match(l, NAMED, `an unanchored gh read: ${l}`);
 });
 
@@ -111,7 +112,7 @@ test("snapshot prompt: SNAPSHOT_REPO_UNRESOLVED tells the agent to omit every fi
   const f = (name) => `${B}${name}${B}`;
   assert.match(
     SNAPSHOT,
-    new RegExp(`If\\s+the\\s+block\\s+printed\\s+SNAPSHOT_REPO_UNRESOLVED[^]*?Omit\\s+${f("diffPath")},\\s+${f("diffLines")},\\s+${f("refHead")}\\s+and\\s+${f("prHead")}`),
+    new RegExp(`If\\s+the\\s+block\\s+printed\\s+SNAPSHOT_REPO_UNRESOLVED[^]*?Omit\\s+${f("diffPath")},\\s+${f("diffLines")},\\s+${f("messagesPath")},\\s+${f("refHead")}\\s+and\\s+${f("prHead")}`),
     "the capture block's marker no longer tells the agent to omit the diff fields",
   );
   assert.match(SNAPSHOT, new RegExp(`If\\s+that\\s+printed\\s+SNAPSHOT_REPO_UNRESOLVED,\\s+omit\\s+${f("diffStats")}`), "the sizing block's marker no longer tells the agent to omit diffStats");
@@ -137,9 +138,11 @@ const render = (block, worktree, pr) => new Function("worktree", "pr", "return `
 // `gh repo view` answers from the cwd's own origin, as the real one resolves a
 // checkout's remotes, behind a `resolved:` prefix so a value that never went
 // through it — the raw remote URL — cannot pass for one that did; with no
-// remote it fails the way the real one does. Every call is logged, one line of
-// args per call, so "no gh ran" is a count.
-function ghStub(t) {
+// remote it fails the way the real one does. `bodyFails` makes the body read
+// fail the way a rate-limited one does: an error on stderr, nothing on stdout,
+// exit 1. Every call is logged, one line of args per call, so "no gh ran" is a
+// count.
+function ghStub(t, { bodyFails = false } = {}) {
   const dir = scratch(t, "pr-repo-bin-");
   const log = join(dir, "gh.log");
   const body = `#!/bin/sh
@@ -157,6 +160,7 @@ case "$*" in
     echo "resolved:$url" ;;
   "pr diff"*) printf 'diff --git a/%s.txt b/%s.txt\\n' "$who" "$who" ;;
   *isCrossRepository*) echo false ;;
+  *body,commits*) ${bodyFails ? "echo 'rate limited' >&2; exit 1" : `printf 'body-%s\\n' "$who"`} ;;
   *headRefName*) echo "branch-$who" ;;
   *headRefOid*) echo "oid-$who" ;;
   *) exit 9 ;;
@@ -213,7 +217,7 @@ test("capture block: dispatched from an unrelated repository, every PR read name
   assert.deepEqual(r.out, [f.sha, "oid-RIGHT", "1"], r.err);
   assert.match(readFileSync(join(f.run, "pr.diff"), "utf8"), /RIGHT\.txt/);
   const calls = prCalls(gh);
-  assert.equal(calls.length, 4, `diff + three field reads: ${calls.join(" | ")}`);
+  assert.equal(calls.length, 5, `diff + body/commits + three field reads: ${calls.join(" | ")}`);
   for (const c of calls) assert.ok(c.includes(`-R resolved:${f.origin}`), `a gh call did not name the repository gh resolved inside the worktree: ${c}`);
 });
 
@@ -224,6 +228,63 @@ test("capture block: with no origin remote nothing runs against the cwd's reposi
   assert.deepEqual(r.out, ["SNAPSHOT_REPO_UNRESOLVED", "no git remotes found"], r.err);
   assert.deepEqual(prCalls(gh), [], "a gh pr read ran with no repository to name — it read the cwd's");
   assert.equal(existsSync(join(f.run, "pr.diff")), false, "a diff file exists for a capture that never ran");
+  assert.equal(existsSync(join(f.run, "pr-messages.md")), false, "a messages file exists for a capture that never ran");
+});
+
+// The bodies are read ONCE, in the block that writes `pr.diff`, so an edit made
+// after the review began cannot reach what the review read: the file is the
+// only copy, and the block neither re-reads nor rewrites it.
+test("capture block: the PR body and commit messages are saved once, beside the diff, from the right PR", (t) => {
+  const f = fixture(t);
+  const gh = ghStub(t);
+  const r = runBlock(CAPTURE, { ...f, bin: gh.dir });
+  assert.equal(r.status, 0, r.err);
+  const reads = () => gh.calls().filter((c) => c.includes("--json body,commits"));
+  assert.equal(reads().length, 1, `the bodies were read more than once: ${reads().join(" | ")}`);
+  assert.equal(readFileSync(join(f.run, "pr-messages.md"), "utf8"), "body-RIGHT\n");
+});
+
+// A redirect creates its file before the command runs, so a failed body read
+// would leave an empty pr-messages.md — a clean body to the comments dimension —
+// and the block's own output and exit status are the same as a success's. The
+// block removes the file and prints a marker instead, so the failure shows.
+test("capture block: a failed body read leaves no messages file and prints SNAPSHOT_MESSAGES_FAILED", (t) => {
+  const f = fixture(t);
+  const gh = ghStub(t, { bodyFails: true });
+  const r = runBlock(CAPTURE, { ...f, bin: gh.dir });
+  assert.equal(r.status, 0, r.err);
+  assert.deepEqual(r.out, ["SNAPSHOT_MESSAGES_FAILED", f.sha, "oid-RIGHT", "1"], r.err);
+  assert.equal(existsSync(join(f.run, "pr-messages.md")), false, "a failed body read left a messages file behind");
+  assert.match(readFileSync(join(f.run, "pr.diff"), "utf8"), /RIGHT\.txt/, "the diff read was lost with the body read");
+});
+
+test("snapshot prompt: SNAPSHOT_MESSAGES_FAILED tells the agent to omit messagesPath", () => {
+  assert.match(SNAPSHOT, /Report\s+\\?`messagesPath\\?`\s+=\s+the\s+SNAPSHOT_RUN_ROOT\s+value\s+with\s+'\/pr-messages\.md'\s+appended,\s+ONLY\s+if\s+the\s+block\s+printed\s+no\s+SNAPSHOT_MESSAGES_FAILED\s+line/);
+});
+
+test("capture block: the jq expression renders the PR body, then each commit's sha, headline and body", (t) => {
+  const f = fixture(t);
+  const rendered = render(CAPTURE, f.worktree, PR);
+  const expr = /--json body,commits -q '([^']*)' > "\$RUN"\/pr-messages\.md/.exec(rendered)?.[1];
+  assert.ok(expr, "the body read's -q expression is gone or no longer single-quoted on one line");
+  assert.ok(!expr.includes("\n"), "a real newline inside the expression: the shell would hand jq a broken program");
+  const input = {
+    body: "line one\nline two",
+    commits: [
+      { oid: "a".repeat(40), messageHeadline: "feat: first", messageBody: "first body" },
+      { oid: "b".repeat(40), messageHeadline: "fix: second", messageBody: "" },
+    ],
+  };
+  const r = spawnSync("jq", ["-r", expr], { input: JSON.stringify(input), encoding: "utf8" });
+  if (r.error?.code === "ENOENT") return t.skip("jq is not installed");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(
+    r.stdout,
+    ["=== PR body ===", "line one", "line two", `=== commit ${"a".repeat(40)} ===`, "feat: first", "first body", `=== commit ${"b".repeat(40)} ===`, "fix: second", "", "", ""].join("\n"),
+  );
+  // A PR with no body and no commit body must not turn `null` into text.
+  const empty = spawnSync("jq", ["-r", expr], { input: JSON.stringify({ body: null, commits: [] }), encoding: "utf8" });
+  assert.equal(empty.stdout, "=== PR body ===\n\n\n");
 });
 
 test("sizing block: dispatched from an unrelated repository, diff-stats is handed the worktree's repository", (t) => {

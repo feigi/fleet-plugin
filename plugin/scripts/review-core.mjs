@@ -1,7 +1,7 @@
 // review-core.mjs — the review body for PR review.
 //
 // This file holds every host-independent declaration PR review needs: the
-// JSON schemas, `usableDiff`, `readRules`, `resolveTestCmd`,
+// JSON schemas, `usableDiff`, `usableMessages`, `messagesNote`, `refuterMessagesNote`, `readRules`, `resolveTestCmd`,
 // `decodeArgs`, `selectDimensions`, `resolveDimensions`, `snapshotMissing`,
 // `installReason`/`installFinding`, `suiteVerdictOf`/`unrunCrashed`,
 // `sharedRunNote`, `copyRule`,
@@ -123,6 +123,11 @@ export const SNAPSHOT_SCHEMA = {
     diffStats: { type: "string" },
     diffPath: { type: "string" },
     diffLines: { type: "integer" },
+    // Present only when the capture block's `gh pr view … --json body,commits`
+    // exited 0, the way `diffPath` stands for `gh pr diff`: it says the file
+    // of PR and commit messages was written. `usableMessages` rebuilds the
+    // path from the run root, so this field decides only whether it exists.
+    messagesPath: { type: "string" },
     refHead: { type: "string" },
     prHead: { type: "string" },
     testCmd: { type: "string" },
@@ -224,7 +229,7 @@ An inconclusive result is no evidence either way: file no finding above \`sugges
     key: "comments",
     agentType: "fleet-review-comments",
     prompt:
-      "every added factual assertion checked against the tree, INCLUDING comments in files this diff does not touch but whose claims it falsifies (test-name references, 'N of 3' counts, tracking-issue pointers)",
+      "every added factual assertion checked against the tree, INCLUDING comments in files this diff does not touch but whose claims it falsifies (test-name references, 'N of 3' counts, tracking-issue pointers), and every factual assertion the PR body and the commit messages make about this change",
   },
   {
     key: "types",
@@ -292,6 +297,63 @@ export function usableDiff(snap) {
   if (!snap.diffLines) return null;
   // No head check here: the snap must already be admitted by `snapshotMissing`, which owns it.
   return `${snap.runRoot}/pr.diff`;
+}
+
+// The PR body and the commit messages, saved beside `pr.diff` once when the
+// snapshot is cut, so a body edited later changes nothing this review read.
+// Rebuilt from the checked run root for the reason `usableDiff` is: the path
+// is the caller's to derive, the reported field only says the capture ran.
+export function usableMessages(snap) {
+  if (!snap.messagesPath) return null;
+  return `${snap.runRoot}/pr-messages.md`;
+}
+
+// Where the saved bodies are and how the file reads: the reviewer that files a
+// finding on a body and every refuter that checks one both need it, so it is
+// written once here.
+function messagesFile(messagesPath) {
+  return `The PR body and the PR's commit messages are at ${messagesPath}, saved when this
+review began — a later edit changes nothing you read. The file opens with a
+\`=== PR body ===\` line and then one \`=== commit <sha> ===\` line per commit,
+each followed by that commit's headline and body (GitHub splits a headline over
+72 characters with a \`…\` ending the headline and starting the body). gh lists
+at most a PR's first 100 commits, so a file with 100 \`=== commit\` lines may
+lack the later ones, those nearest the head: a commit it does not hold was not
+read, never checked clean. Read it bounded, like the diff.`;
+}
+
+// The paragraph only the comments dimension's dispatch carries: the other
+// dimensions read the diff and the tree, never the words the implementer
+// submitted beside them. With no capture it says so, so the dimension never
+// reads an absent file as a clean body.
+export function messagesNote(messagesPath) {
+  if (!messagesPath)
+    return `The PR body and commit messages were NOT captured for this review: check none of them, and say so in \`scope_searched\`.`;
+  return `${messagesFile(messagesPath)}
+
+Check every factual assertion the PR body or a commit message makes about THIS
+change — a count, a file or function named, what the change does or does not
+touch, a test said to cover it — against the snapshot and the diff, exactly as
+you check a comment's. A claim about code the change does not touch is not a
+finding: the test is whether reading the change itself would falsify the
+claim. A finding on a body names its surface at the start of its \`claim\` — "PR
+body:", or "commit <sha>:" with the sha from its \`===\` line — and carries no
+\`file\` and no \`line\`.`;
+}
+
+// The same file, named to the refuters of a comments finding. A finding on a
+// body carries no file and no line, and the snapshot holds neither body, so
+// without this a refuter has nothing to check the claim against but a live
+// `gh pr view` — the body as edited since, not the one the review read.
+export function refuterMessagesNote(messagesPath) {
+  if (!messagesPath)
+    return `The PR body and commit messages were NOT captured for this review, so a claim on "PR body:" or "commit <sha>:" has no saved copy to be checked against.`;
+  return `${messagesFile(messagesPath)}
+
+A claim that starts "PR body:" or "commit <sha>:" is about that file, which is
+why it names no \`file\` and no \`line\`: check the quoted assertion there, against
+the snapshot and the diff — never against a live \`gh pr view\`, which reads the
+body as it stands now rather than as this review read it.`;
 }
 
 export function readRules(diffPath, stats, snap) {
@@ -1091,6 +1153,7 @@ would pick for any command run in that checkout — 'origin', unless an
     REPO=$( { cd ${worktree} && gh repo view --json url -q .url; } 2>"$RUN"/repo.err )
     if [ -n "$REPO" ]; then
       gh pr diff ${pr} -R "$REPO" > "$RUN"/pr.diff
+      gh pr view ${pr} -R "$REPO" --json body,commits -q '"=== PR body ===\\n" + .body + "\\n" + ([.commits[] | "=== commit " + .oid + " ===\\n" + .messageHeadline + "\\n" + .messageBody + "\\n"] | join(""))' > "$RUN"/pr-messages.md || { rm -f "$RUN"/pr-messages.md; echo SNAPSHOT_MESSAGES_FAILED; }
       crossRepo=$(gh pr view ${pr} -R "$REPO" --json isCrossRepository -q .isCrossRepository)
       branch=$(gh pr view ${pr} -R "$REPO" --json headRefName -q .headRefName)
       ref=""
@@ -1109,11 +1172,19 @@ name the worktree's repository, and the controller's own repository is never a
 substitute. Report \`repoUnresolved\` = every line the block printed after
 SNAPSHOT_REPO_UNRESOLVED, verbatim — gh's own reason, such as no remote, or no
 remote on a GitHub host it is logged in to — or 'no error output' if it printed
-none. Omit \`diffPath\`, \`diffLines\`, \`refHead\` and \`prHead\`, and run
+none. Omit \`diffPath\`, \`diffLines\`, \`messagesPath\`, \`refHead\` and \`prHead\`, and run
 nothing else against the PR yourself.
 
 Report \`diffPath\` = the SNAPSHOT_RUN_ROOT value with '/pr.diff' appended, ONLY
-if 'gh pr diff' exited 0. Report \`refHead\` = the sha the 'echo "$ref"' line
+if 'gh pr diff' exited 0. Report \`messagesPath\` = the SNAPSHOT_RUN_ROOT value
+with '/pr-messages.md' appended, ONLY if the block printed no
+SNAPSHOT_MESSAGES_FAILED line: the block prints it, and removes the file, when
+the 'gh pr view' that writes it fails — a failed read would otherwise leave an
+empty file that reads as a clean body, and nothing else the block prints shows
+that read's exit status. The file holds the PR body and the message of each
+commit gh lists — at most the first 100 — as they stand now, and the block
+writes it once — never re-read or rewrite it.
+Report \`refHead\` = the sha the 'echo "$ref"' line
 printed, \`prHead\` = the headRefOid and \`diffLines\` = the wc -l count. Which
 read answers is chosen by \`isCrossRepository\`, not by whether the first read
 comes back empty. A same-repo PR's branch cannot collide with anything else on
@@ -1168,7 +1239,7 @@ they disagree, so a reconstructed path costs the run rather than sending six
 specialists into another run's tree. Report the HEAD sha, and — in
 \`diffStats\` — the SINGLE-LINE JSON object diff-stats.mjs prints to
 STDOUT, copied verbatim. Only runRoot, path, head, pathVerified and repoVerified
-are ever required — diffStats, diffPath, diffLines, refHead and prHead are each
+are ever required — diffStats, diffPath, diffLines, messagesPath, refHead and prHead are each
 omitted independently when their command failed, repoError only accompanies
 a false repoVerified, repoUnresolved only accompanies SNAPSHOT_REPO_UNRESOLVED,
 installError only replaces installCmd and installExit, and uncoveredError only
@@ -1340,7 +1411,7 @@ chains its own \`cd\` into the snapshot or into your scratch dir, both named
 in this prompt as absolute paths.
 
 ${readRules(usableDiff(snap), stats, snap)}
-
+${d.key === "comments" ? `\n${messagesNote(usableMessages(snap))}\n` : ""}
 ${sharedRunNote(sharedRun, failureOwner, d.key)}
 
 ${environmentNote(snap)}
@@ -1459,7 +1530,7 @@ is set to a corrupted value, while zsh behaves exactly as with the bare
 \`$cfg\` — \`BADJ\` never set, exit 0.
 
 ${readRules(usableDiff(snap), stats, snap)}
-
+${d.key === "comments" ? `\n${refuterMessagesNote(usableMessages(snap))}\n` : ""}
 ${environmentNote(snap)}
 
 Lens ${i + 1}: ${i === 0 ? "is the claim true of the code as merged?" : "is it already handled elsewhere, or does the evidence prove something weaker than the claim?"}
