@@ -1,7 +1,8 @@
 // The one booking of member rows, merges and claims to Pulls, read by both the
 // cost guard (pr-cost.mjs) and the router's fit (ticket-router.mjs), so the two
 // print the same figures for a cell. Neither CLI imports the other; both import
-// this.
+// this, and with it the two judgements they share: the quality floor (the
+// guard's fail leg) and the bootstrap range of a $ per merged PR difference.
 //
 // THE UNIT is the Pull, a ticket-features.tsv row, booked AS ROUTED to its
 // `chosen_cell`: its merge, its Ruling and all its spend. A ticket Pulled twice
@@ -59,6 +60,10 @@
 // Generations are told apart by model alone, so a cell that returns to an
 // earlier model rejoins that generation's Pulls. Only the newest generation's
 // figures are judged; older ones are reported beside them, never pooled.
+//
+// THE FLOOR. A cell is under the floor against a baseline when its fail rate
+// is TRIP_POINTS or more points above the baseline's, compared in integer
+// counts. The guard holds it pooled; the fit holds it per row.
 
 import { isDigits } from "./arg.mjs";
 import { CELL } from "./ledger-grammar.mjs";
@@ -72,6 +77,57 @@ export const FEATURE_COLUMNS = Object.freeze([
   "sizing_src", "sizing_pre", "router_usd", "brief_chars", "criteria", "comments", "age_days",
   "paths", "test_paths", "xrefs", "kind",
 ]);
+
+// The quality floor's margin, in points of fail rate.
+export const TRIP_POINTS = 15;
+
+// The floor, in integer counts so a 3-of-20 difference is exactly 15 points
+// rather than 14.999… in floating point. Each side is `{ claims, failed }`.
+export function underFloor(cell, base) {
+  return (cell.failed * base.claims - base.failed * cell.claims) * 100 >= TRIP_POINTS * cell.claims * base.claims;
+}
+
+const round2 = (x) => (Number.isFinite(x) ? Number(x.toFixed(2)) : null);
+
+// Deterministic, so a re-run reads the same range.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// The bootstrap 95% range of (cell − base) $ per merged PR, its ends rounded
+// to cents. Each unit is one counted Pull: `{ usd, merged }`, merged 0 or 1.
+// $ per merged PR is Σusd / Σmerged. null when either side has no unit, or
+// when under half the resamples have a merged PR on both sides.
+export function bootstrapDiffCI(cellUnits, baseUnits, { iterations = 2000, seed = 1 } = {}) {
+  if (!cellUnits.length || !baseUnits.length) return null;
+  const rand = mulberry32(seed);
+  const resample = (units) => {
+    let u = 0, m = 0;
+    for (let i = 0; i < units.length; i++) {
+      const x = units[Math.floor(rand() * units.length)];
+      u += x.usd; m += x.merged;
+    }
+    return m ? u / m : null;
+  };
+  const diffs = [];
+  for (let i = 0; i < iterations; i++) {
+    const a = resample(cellUnits), b = resample(baseUnits);
+    if (a !== null && b !== null) diffs.push(a - b);
+  }
+  if (diffs.length < iterations / 2) return null;
+  diffs.sort((x, y) => x - y);
+  return [round2(diffs[Math.floor(0.025 * (diffs.length - 1))]), round2(diffs[Math.ceil(0.975 * (diffs.length - 1))])];
+}
+
+// A counted Pull as a bootstrap unit.
+export const bootUnit = (u) => ({ usd: u.spend, merged: u.merged ? 1 : 0 });
 
 // ticket-features.tsv: one bare header line naming the columns, then rows.
 // Read by header name; a row whose width differs from the header's is refused.
@@ -309,10 +365,11 @@ export function generations(units) {
 
 /**
  * Per cell, in cell-name order: `{ cell, generation, n, merged, claims, failed,
- * spend, excluded, left_out, unpriced, pending, older }`. `generation` is the
- * cell's newest (null when no Pull of it has one), and the figures beside it
- * are that generation's alone: `n`, `merged`, `claims`, `failed` and `spend`
- * over its counted Pulls, then its left-out, unpriced and pending Pull counts.
+ * spend, pulls, excluded, left_out, unpriced, pending, older }`. `generation`
+ * is the cell's newest (null when no Pull of it has one), and the figures
+ * beside it are that generation's alone: `n`, `merged`, `claims`, `failed` and
+ * `spend` over its counted Pulls, `pulls` those counted units themselves in
+ * the order of `units`, then its left-out, unpriced and pending Pull counts.
  * `excluded` counts the cell's excluded Pulls, which have no generation.
  * `older` is an array, newest first, of every other generation's figures in
  * the same shape, each carrying its `generation`. `order` is `generations()`
@@ -321,7 +378,10 @@ export function generations(units) {
  * never moves a cell's newest generation.
  */
 export function tally(units, order = generations(units)) {
-  const figures = (generation) => ({ generation, n: 0, merged: 0, claims: 0, failed: 0, spend: 0, left_out: 0, unpriced: 0, pending: 0 });
+  // `n` is read off `pulls`, so the count and the list cannot drift apart.
+  const figures = (generation) => ({
+    generation, get n() { return this.pulls.length; }, merged: 0, claims: 0, failed: 0, spend: 0, pulls: [], left_out: 0, unpriced: 0, pending: 0,
+  });
   const cells = new Map();
   for (const u of units) {
     const c = cells.get(u.cell) ?? cells.set(u.cell, { excluded: 0, gens: new Map() }).get(u.cell);
@@ -332,11 +392,11 @@ export function tally(units, order = generations(units)) {
     const g = u.generation ?? null;
     const f = c.gens.get(g) ?? c.gens.set(g, figures(g)).get(g);
     if (u.status === "counted") {
-      f.n++;
       if (u.merged) f.merged++;
       f.claims += u.claims;
       f.failed += u.falseClaims;
       f.spend += u.spend;
+      f.pulls.push(u);
     } else f[u.status.replace("-", "_")]++;
   }
   return [...cells].sort(([a], [b]) => cmp(a, b)).map(([cell, c]) => {

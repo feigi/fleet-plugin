@@ -65,7 +65,7 @@ import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { AttributionError, attribute, parseFeatures, tally } from "./pull-attribution.mjs";
+import { AttributionError, attribute, bootUnit, bootstrapDiffCI, parseFeatures, tally, underFloor } from "./pull-attribution.mjs";
 import { RulingError, parseTierOutcomes } from "./tier-outcomes.mjs";
 
 const NAME = "pr-cost";
@@ -78,9 +78,6 @@ export const BASELINE_CELL = "slow-high";
 // Stage 1 is the model axis at fixed `high`.
 export const STAGE_1 = ["slow-high", "task-high", "smol-high"];
 export const MIN_N = 20;
-// A cell trips when its fail rate is at least this many points above the
-// baseline's, or its mean $ is at least the baseline's.
-export const TRIP_POINTS = 15;
 export const EXIT = { ok: 0, tripped: 3, none: 4 };
 export const GH_PR_LIMIT = 1000;
 
@@ -94,77 +91,36 @@ function median(xs) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-// Deterministic, so a re-run prints the same interval.
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-// Each unit is one booked group: `{ usd, merged }`. mean_usd is Σusd / Σmerged.
-export function bootstrapDiffCI(cellUnits, baseUnits, { iterations = 2000, seed = 1 } = {}) {
-  if (!cellUnits.length || !baseUnits.length) return null;
-  const rand = mulberry32(seed);
-  const resample = (units) => {
-    let u = 0, m = 0;
-    for (let i = 0; i < units.length; i++) {
-      const x = units[Math.floor(rand() * units.length)];
-      u += x.usd; m += x.merged;
-    }
-    return m ? u / m : null;
-  };
-  const diffs = [];
-  for (let i = 0; i < iterations; i++) {
-    const a = resample(cellUnits), b = resample(baseUnits);
-    if (a !== null && b !== null) diffs.push(a - b);
-  }
-  if (diffs.length < iterations / 2) return null;
-  diffs.sort((x, y) => x - y);
-  return [round(diffs[Math.floor(0.025 * (diffs.length - 1))], 2), round(diffs[Math.ceil(0.975 * (diffs.length - 1))], 2)];
-}
-
-// The trip rule, in integer counts so a 3-of-20 difference is exactly 15
-// points rather than 14.999… in floating point. `n` is a cell's claims and
-// `n_pass` the claims among them that held.
+// The trip rule: the quality floor (pull-attribution.mjs's `underFloor`, in
+// integer counts), or a mean $ at least the baseline's. Each side is
+// `{ claims, failed, mean_usd }`.
 export function trips(cell, base) {
-  const failC = cell.n - cell.n_pass, failB = base.n - base.n_pass;
-  const failRise = (failC * base.n - failB * cell.n) * 100 >= TRIP_POINTS * cell.n * base.n;
-  return failRise || cell.mean_usd >= base.mean_usd;
+  return underFloor(cell, base) || cell.mean_usd >= base.mean_usd;
 }
 
 export function computeReport({ members, tiers, features, prs, routerTable = null, pricing = null, windowStart = WINDOW_START }) {
   const units = attribute({ features, members, tiers, prs, windowStart });
-  const counted = units.filter((u) => u.status === "counted");
   const tallies = new Map(tally(units).map((t) => [t.cell, t]));
-  const countedIn = (cell, generation) => counted.filter((u) => u.cell === cell && u.generation === generation);
-  const bootUnits = (us) => us.map((u) => ({ usd: u.spend, merged: u.merged ? 1 : 0 }));
+  const bootUnits = (g) => g.pulls.map(bootUnit);
   const meanUsd = (t) => (t.merged ? t.spend / t.merged : null);
   const base = tallies.get(BASELINE_CELL) ?? null;
   // One generation's figures. The interval is the newest generation's against
   // the baseline's newest; an older generation is printed, never compared.
-  const figuresOf = (cell, g, newest) => {
-    const mine = countedIn(cell, g.generation);
-    return {
-      cell,
-      generation: g.generation,
-      n_pulls: g.n,
-      n_merged: g.merged,
-      n_claims: g.claims,
-      n_failed: g.failed,
-      fail_rate: g.claims ? round(g.failed / g.claims) : null,
-      mean_usd: round(meanUsd(g), 2),
-      median_usd: round(median(mine.filter((u) => u.merged).map((u) => u.spend)), 2),
-      router_usd: round(mine.reduce((s, u) => s + routerUsd(u.pull), 0), 4),
-      usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(mine), bootUnits(countedIn(BASELINE_CELL, base.generation))),
-      left_out: g.left_out,
-      unpriced: g.unpriced,
-    };
-  };
+  const figuresOf = (cell, g, newest) => ({
+    cell,
+    generation: g.generation,
+    n_pulls: g.n,
+    n_merged: g.merged,
+    n_claims: g.claims,
+    n_failed: g.failed,
+    fail_rate: g.claims ? round(g.failed / g.claims) : null,
+    mean_usd: round(meanUsd(g), 2),
+    median_usd: round(median(g.pulls.filter((u) => u.merged).map((u) => u.spend)), 2),
+    router_usd: round(g.pulls.reduce((s, u) => s + routerUsd(u.pull), 0), 4),
+    usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(g), bootUnits(base)),
+    left_out: g.left_out,
+    unpriced: g.unpriced,
+  });
   const figures = [...tallies.values()].map((t) => ({
     ...figuresOf(t.cell, t, true),
     excluded: t.excluded,
@@ -177,7 +133,7 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   // The $ leg takes the unrounded means: the cent-rounded figures are for
   // display, and a trip is sticky, so a cell cheaper by under half a cent
   // must not trip on rounding alone. The fail leg reads the claims.
-  const quality = (t) => ({ n: t.claims, n_pass: t.claims - t.failed, mean_usd: meanUsd(t) });
+  const quality = (t) => ({ claims: t.claims, failed: t.failed, mean_usd: meanUsd(t) });
   const tripped = [];
   if (baseline.n >= MIN_N) {
     for (const t of tallies.values()) {

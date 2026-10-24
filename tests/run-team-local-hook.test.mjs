@@ -84,7 +84,8 @@ const agentMd = (cell) => {
 
 // Answers `pr list` (pr-cost's merged-state read, or the open re-fit PR read),
 // `issue list` (raw text instead of JSON when the fixture has `issuesRaw`),
-// and the writes, from GH_FIXTURE; logs each argv to GH_LOG.
+// and the writes, from GH_FIXTURE; `pr create` fails when it has
+// `createFails`. Logs each argv to GH_LOG.
 const GH_STUB = `#!/usr/bin/env node
 const fs = require("node:fs");
 const args = process.argv.slice(2);
@@ -98,7 +99,7 @@ else if (cmd === "issue list") { if (fx.issuesRaw !== undefined) process.stdout.
 else if (cmd === "issue create") console.log("https://github.com/o/r/issues/901");
 else if (cmd === "issue edit") console.log("https://github.com/o/r/issues/" + args[2]);
 else if (cmd === "issue comment") console.log("https://github.com/o/r/issues/" + args[2] + "#issuecomment-1");
-else if (cmd === "pr create") console.log("https://github.com/o/r/pull/902");
+else if (cmd === "pr create") { if (fx.createFails) { process.stderr.write("gh stub: create refused"); process.exit(1); } console.log("https://github.com/o/r/pull/902"); }
 else { process.stderr.write("gh stub: unexpected " + args.join(" ")); process.exit(9); }
 `;
 
@@ -426,6 +427,7 @@ test("router fit --dry-run: fifty merged PRs not in fitted_commit run ticket-rou
   const a = at.run(["--dry-run"]);
   assert.equal(a.status, 0, a.stderr);
   assert.match(a.stdout, /^run-team-local: router fit: DUE=yes MERGED=50\/50 — ticket-router: fitted \d+ Pulls at [0-9a-f]{8}; .*; would open a chore PR from chore\/router-fit-\d{4}-\d{2}-\d{2}$/m);
+  assert.match(a.stdout, /^run-team-local: router fit: ticket-router: row \* slow-high unjudged /m, "each row's line follows the fit's summary, one line each");
   assert.equal(readFileSync(join(at.repo, TABLE), "utf8"), before, "the checkout's own table is untouched");
   assert.equal(worktrees(at.repo), 1, "the throwaway checkout is gone");
   assert.equal(git(at.origin, ["branch", "--list", "chore/*"]), "", "a dry run pushes nothing");
@@ -479,6 +481,8 @@ test("router fit: a due re-fit is pushed to its own chore branch and opened as a
   assert.equal(create[create.indexOf("--base") + 1], "main");
   assert.equal(create[create.indexOf("--head") + 1], branch);
   assert.equal(create[create.indexOf("--label") + 1], "patch", "labelled by the create itself, not by an edit that can fail after it");
+  assert.match(create[create.indexOf("--body") + 1], /\n\nticket-router: fitted \d+ Pulls .*\nticket-router: row \* slow-high unjudged /, "the body carries the fit's whole output: its summary, then each row's line");
+  assert.match(r.stdout, /; opened \S+ from chore\/router-fit-\S+\nrun-team-local: router fit: ticket-router: row \* slow-high unjudged /, "each row's line follows the opened line");
   assert.deepEqual(calls(f, "pr edit"), []);
   assert.equal(git(f.repo, ["branch", "--list", "chore/*"]), "", "the checkout's repository keeps no local branch of the PR's");
   assert.doesNotMatch(git(f.repo, ["config", "--local", "--list"]), /^branch\.chore/m, "and no upstream config for it");
@@ -491,6 +495,15 @@ test("router fit: a due re-fit is pushed to its own chore branch and opened as a
   assert.match(h.stdout, new RegExp(`router fit: DUE=yes MERGED=50/50 — re-fit PR #${earlier.number} \\(${escape(earlier.headRefName)}\\) is still open$`, "m"));
   assert.deepEqual(calls(held, "pr create"), []);
   assert.equal(git(held.origin, ["branch", "--list", "chore/*"]), "");
+});
+
+test("router fit: a re-fit whose `pr create` fails still prints the fit's summary and each row's line, then fails the duty", () => {
+  const f = fixture({ rows: merged(FIT_EVERY_MERGED), gh: { createFails: true } });
+  const r = f.run();
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /run-team-local: router fit failed: .*create refused/);
+  assert.match(r.stdout, /^run-team-local: router fit: DUE=yes MERGED=50\/50 — ticket-router: fitted \d+ Pulls .*; no PR opened from chore\/router-fit-\S+\nrun-team-local: router fit: ticket-router: row \* slow-high unjudged /m);
+  assert.doesNotMatch(r.stdout, /; opened /);
 });
 
 test("router fit: reads origin/main, not the checkout's own HEAD, when the two differ", () => {

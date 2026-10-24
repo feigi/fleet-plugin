@@ -337,12 +337,12 @@ test("the retire condition holds once every non-default stage-1 cell has tripped
 });
 
 test("trips() takes the 15-point margin in counts, so 3 of 20 is exactly the margin", () => {
-  const base = { n: 20, n_pass: 16, mean_usd: 10 };
-  assert.equal(trips({ n: 20, n_pass: 13, mean_usd: 1 }, base), true, "7 of 20 failing vs 4 of 20 is +15 points");
-  assert.equal(trips({ n: 20, n_pass: 14, mean_usd: 1 }, base), false, "6 of 20 vs 4 of 20 is +10 points");
-  assert.equal(trips({ n: 40, n_pass: 26, mean_usd: 1 }, base), true, "35% vs 20% across different n");
-  assert.equal(trips({ n: 20, n_pass: 20, mean_usd: 10 }, base), true, "equal $ trips");
-  assert.equal(trips({ n: 20, n_pass: 20, mean_usd: 9.99 }, base), false);
+  const base = { claims: 20, failed: 4, mean_usd: 10 };
+  assert.equal(trips({ claims: 20, failed: 7, mean_usd: 1 }, base), true, "7 of 20 failing vs 4 of 20 is +15 points");
+  assert.equal(trips({ claims: 20, failed: 6, mean_usd: 1 }, base), false, "6 of 20 vs 4 of 20 is +10 points");
+  assert.equal(trips({ claims: 40, failed: 14, mean_usd: 1 }, base), true, "35% vs 20% across different n");
+  assert.equal(trips({ claims: 20, failed: 0, mean_usd: 10 }, base), true, "equal $ trips");
+  assert.equal(trips({ claims: 20, failed: 0, mean_usd: 9.99 }, base), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -468,9 +468,9 @@ test("the A/B report is underpowered until B disagrees with the policy on MIN_N 
 });
 
 test("trips() draws the 15-point line at counts that are not multiples of 5", () => {
-  const base = { n: 20, n_pass: 20, mean_usd: 10 };
-  assert.equal(trips({ n: 50, n_pass: 43, mean_usd: 1 }, base), false, "7 of 50 failing is +14 points");
-  assert.equal(trips({ n: 100, n_pass: 85, mean_usd: 1 }, base), true, "15 of 100 failing is +15 points");
+  const base = { claims: 20, failed: 0, mean_usd: 10 };
+  assert.equal(trips({ claims: 50, failed: 7, mean_usd: 1 }, base), false, "7 of 50 failing is +14 points");
+  assert.equal(trips({ claims: 100, failed: 15, mean_usd: 1 }, base), true, "15 of 100 failing is +15 points");
 });
 
 test("the table labels a non-baseline cell under MIN_N as n<MIN_N rather than ok", () => {

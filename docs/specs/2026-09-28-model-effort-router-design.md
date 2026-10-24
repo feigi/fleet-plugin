@@ -446,8 +446,9 @@ exists — see ADR 0016 § Decision point 5.
 1. Trip rule margin (15 pts) — in the ADR's Guard section.
 2. `cost-guard.json` per-cell shape (`n`, `mean_usd`, `fail_rate`) — above.
 3. `router_usd` from `status().cost`, not a member-outcomes join — above.
-4. **Fit objective is $ per merged PR only; the fit does not re-test the
-   quality floor** — the guard is the only quality gate (§ 4).
+4. **Fit objective is $ per merged PR only.** *Amended (#3753): the fit
+   also holds the quality floor, per row; the guard holds it pooled and alone
+   takes a cell out of the draw (§ 4).*
 
 ## 4. G4 — Router
 
@@ -517,11 +518,12 @@ classifier could change.*
 
 Lives under `plugin/` because the route script runs from the installed
 plugin. **Hierarchical rows:** the script uses `rows[stratum]` when
-present, else `rows["*"]`. The fit writes a stratum row only when
-candidate and baseline both have n≥20 in that stratum; `*` adopts on
-pooled n. `estimates` exists so a re-fit PR diff explains itself;
-`fix_rounds` and `review_findings` are report-only quality proxies — no
-rule reads them.
+present, else `rows["*"]`. The fit judges a row (a stratum, or `*`) when
+`slow-high` and at least one untripped candidate each have n≥20 merged PRs
+in it, and a judged stratum always gets a row of its own; a stratum it
+cannot judge has none and follows `*` (§ R5). `estimates` and `reasons`
+exist so a re-fit PR diff explains itself; `fix_rounds` and
+`review_findings` are report-only quality proxies — no rule reads them.
 
 **Amended (#2573, 2026-10-13): the table records the commit its fit read,
 not a date.** `fitted_through` is replaced by `fitted_commit`: the sha of the
@@ -573,13 +575,27 @@ inverse-propensity weighting: within a stratum every `chosen_cell` is
 either the policy row or a uniform draw, so per-(stratum, cell) means are
 unbiased; `exploration_draw` is an audit column.
 
-**Adoption rule, per stratum s (and `*`):** among cells with n≥20 in s, not
-in `cost-guard.json.tripped`, adopt the cell minimising **$ per merged PR**
-= Σ`cost` of every row booked to the cell's PRs (failures, fix rounds,
-re-dispatches, router $ included) ÷ merged rows, **iff** `usd_per_merged ≤
-0.75 × baseline_s` (baseline = `slow-high` rows in s, n≥20). Else
-`slow-high`. The fit does **not** re-test the quality floor — that is the
-guard's job.
+**Adoption rule, per stratum s (and `*`)** — amended (#3753, 2026-10-24).
+A candidate is a cell other than `slow-high` not in
+`cost-guard.json.tripped`; with fewer than 20 merged PRs in s it has too
+few. Otherwise, checked in this order, it is **under the floor** (its fail
+rate in s 15 or more points above `slow-high`'s in s, compared in counts —
+the guard's fail leg, read per row), **too dear** (`usd_per_merged >
+0.75 × baseline_s`), or **not reliably cheaper** (the bootstrap 95% range
+of (candidate − `slow-high`) $ per merged PR in s, over the same counted
+Pulls, does not lie wholly below zero); a candidate past all three
+qualifies. **$ per merged PR** = Σ`cost` of every row booked to the cell's
+PRs (failures, fix rounds, re-dispatches, router $ included) ÷ merged rows;
+baseline = `slow-high` rows in s, at least 20 merged. Several qualifiers:
+one that another is reliably cheaper than (the range of the pair's cheaper
+by $, else by name, minus the other wholly below zero) is dropped; among
+the rest the lower fail rate, in counts, wins, then the lower $ per merged
+PR, then the name. No qualifier: `slow-high`. The fit holds the quality
+floor per row and the guard holds it pooled: a cell refused a row keeps
+its exploration draws, and only the guard's trip removes it from the draw.
+`router-table.json`'s `reasons` records, per row, its cell and why, and
+per candidate its verdict, whether it is under the floor, the floor's bar
+and its range, plus the range of each pair of qualifiers.
 
 **Cadence and operator:** every **N = 50** merged PRs since
 `fitted_through`, **run by the repo-local skill (§ 5) after a run** (the
