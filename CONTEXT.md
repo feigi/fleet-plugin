@@ -515,18 +515,25 @@ and ticket number, no RNG, no seed.
 _Avoid_: random draw, coin flip
 
 **Ending**:
-How one implementer dispatch finished, read from its own transcript: a PR,
-a bail and its cause, a block mid-implementation, a released claim, a
-provider error or fallback model, an exhausted request budget, an abort, a
-crash, or a Hollow yield. A PR is the Cell's fault when it merged and was
-ruled failed; one closed unmerged counts as spend only. Of the other
-Endings, a Hollow yield, an exhausted budget and a `fixed` bail that
-origin/main refutes are the Cell's fault; any other bail, a block
-mid-implementation and a released claim are the ticket's; a provider error
-or fallback model, an abort and a crash are neither's, as is a dispatch
-that left no transcript. The ledger's settle token (`=killed`, `=bailed`)
-is not an Ending.
-_Avoid_: give-up
+How one implementer dispatch finished, read from its own transcript and the
+reports it wrote, never from a verdict: a PR, a bail and its cause, a block
+mid-implementation, a released claim, a provider error or fallback model, an
+exhausted request budget, an abort, a crash, or a Hollow yield. Recorded per
+implementer row in the `ending` column of `docs/metrics/member-outcomes.tsv`
+as `pr`, `bail:<cause>`, `bail:fixed`, `bail:fixed-refuted`, `provider`,
+`budget`, `abort`, `crash`, `hollow`, or `unknown` (the scrape cannot say,
+such as for a malformed transcript or a `fixed` bail with no sha origin/main
+can answer for); blank on a row that is not an implementer. A PR is the
+Cell's fault when it merged and was ruled failed; one closed unmerged counts
+as spend only. Of the other Endings, a Hollow yield, an exhausted budget, a
+`fixed` bail that origin/main refutes and an `unknown` are the Cell's fault,
+so an Ending the scrape cannot name never flatters a Cell; any other bail,
+a block mid-implementation and a released claim are the ticket's; a provider
+error or fallback model, an abort and a crash are neither's, as is a
+dispatch that left no transcript. The ledger's settle token (`=killed`,
+`=bailed`) is not an Ending.
+_Avoid_: give-up, outcome (bare, it collides with Release outcome), verdict,
+result
 
 **Hollow yield**:
 An implementer that ends its own turn with no PR, no valid bail report and
@@ -561,8 +568,18 @@ _Avoid_: mapping, override, translation
 An implementer routing target, `<role>-<level>` — a Declared tier scoped
 to the exploration grid and the Router below. One definition per cell
 (`plugin/agents/fleet-implementer-<cell>.agent.md`); never a vendor model
-name in any cell token, definition, or prose.
+name in any cell token, definition, or prose. Which model a Cell ran on is
+data, kept per Cell generation.
 _Avoid_: tier (bare), alt-tier, model
+
+**Cell generation**:
+One Cell on one model: the Pulls whose first Admissible row's Resolved tier
+names that model. The model is fixed at dispatch, so a fallback later in the
+run does not move it. A Cell is judged on its newest generation; an older one
+is reported beside it and never pooled with it, because each model generation
+prices and fails differently. A role that returns to an earlier model rejoins
+that generation.
+_Avoid_: model (bare), cell version, tier generation
 
 **Router**:
 The checked-in table (`router-table.json`) plus the script that reads and
@@ -606,11 +623,3 @@ whether it minted a false claim. The Router counts a ticket as merged only
 through its Ruling; a decision on an issue, or a reply owed to a member, is
 not one.
 _Avoid_: verdict row, tier outcome
-
-**Ending**:
-How an implementer's run stopped, read from its own transcript and the reports it
-wrote, never from a verdict: `pr`, `bail:<cause>`, `bail:fixed`,
-`bail:fixed-refuted`, `provider`, `budget`, `abort`, `crash`, `hollow`, or
-`unknown` (the transcript cannot say). Recorded per row in the `ending` column of
-`docs/metrics/member-outcomes.tsv`; blank on a row that is not an implementer.
-_Avoid_: outcome (bare, it collides with Release outcome), verdict, result
