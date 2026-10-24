@@ -32,6 +32,16 @@ Check each added or modified comment for:
 - **Comments that add no value** — pure restatement of the code, flaggable
   for removal but not a defect.
 
+Your dispatch may also name a file holding the PR body and the PR's commit
+messages, as they stood when the review began. Check their factual assertions
+about the change the way you check a comment's: a count, a file or function
+named, what the change touches or leaves alone, a test said to cover it. A
+claim about code the change does not touch is not a finding — ask whether
+reading the change itself would falsify the claim, and file only if it would.
+A finding on a body names its surface at the start of its `claim` ("PR body:"
+or "commit <sha>:") and carries no `file` and no `line`, because there is none
+to give.
+
 Verify by reading the actual referenced code, not by assuming the comment is
 accurate because it reads plausibly. A claim you did not check against the
 tree belongs at severity `suggestion`, never `critical` or `important`.

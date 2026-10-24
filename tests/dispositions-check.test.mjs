@@ -281,6 +281,22 @@ test("a finding with no line is in scope, so its deferral needs an allowed reaso
   mismatch(f.check(), /survived\[1\]: .* it has no line, so it is in scope/);
 });
 
+// A finding on a PR body or a commit body has no file and no line: it names its
+// surface in its `claim`. It must be judged in scope, so a deferral needs an
+// allowed reason, rather than being taken at the scope the entry declares.
+test("a finding with neither file nor line, such as one on a PR body, is in scope", (t) => {
+  const f = fixture(t);
+  f.writeReview({ ...f.review, survived: [f.review.survived[0], { severity: "important", claim: "PR body: says 3 files, the diff touches 2", evidence: "git diff --stat" }] });
+  const entries = f.baseEntries();
+  entries[1] = f.entry("survived", 1, { scope: "out", disposition: "defer" });
+  f.writeRecord(entries);
+  mismatch(f.check(), /survived\[1\]: .* it has no (line|file), so it is in scope/);
+  // Applied, it passes: the in-scope ruling is not a refusal.
+  entries[1] = f.entry("survived", 1, { scope: "in", disposition: "apply" });
+  f.writeRecord(entries);
+  okVerdict(f.check());
+});
+
 test("a fix-applier commit that shifts line numbers after the review head does not change the verdict", (t) => {
   const f = fixture(t);
   // survived[1], line 12, is untouched at the review head: declared out, deferred.
