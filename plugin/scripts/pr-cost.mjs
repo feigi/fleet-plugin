@@ -39,16 +39,22 @@
 // of a windowed Pull's ticket whose run_date is not YYYY-MM-DD or whose verdict
 // is not yes or no.
 //
-// PER CELL, over its counted Pulls: `n_pulls`; `n_merged`; `n_claims` (merged
-// PRs plus every `bail:fixed` or `bail:fixed-refuted` ending); `n_failed`
-// (merged PRs ruled `minted_false_claim=yes` or `closed_own_ticket=no`, plus
-// every `bail:fixed-refuted`); `fail_rate` = failed / claims; `mean_usd` = the
-// Pulls' spend — merged or not — / merged, so a cell that abandons work carries
-// that spend; `median_usd` over the merged Pulls alone, descriptive;
-// `router_usd`, the Pulls' own routing cost, summed and never in their spend.
-// `usd_diff_ci95` is a bootstrap 95% interval on `mean_usd` minus the
-// baseline's — printed to be read, never judged on. Then the cell's
-// `excluded`, `left_out` and `unpriced` Pull counts.
+// PER CELL GENERATION (pull-attribution.mjs's GENERATION), over its counted
+// Pulls: `generation`, the dispatch model; `n_pulls`; `n_merged`; `n_claims`
+// (merged PRs plus every `bail:fixed` or `bail:fixed-refuted` ending);
+// `n_failed` (merged PRs ruled `minted_false_claim=yes` or
+// `closed_own_ticket=no`, plus every `bail:fixed-refuted`); `fail_rate` =
+// failed / claims; `mean_usd` = the Pulls' spend — merged or not — / merged,
+// so a cell that abandons work carries that spend; `median_usd` over the
+// merged Pulls alone, descriptive; `router_usd`, the Pulls' own routing cost,
+// summed and never in their spend. `usd_diff_ci95` is a bootstrap 95% interval
+// on `mean_usd` minus the baseline's — printed to be read, never judged on.
+// Then the `left_out` and `unpriced` Pull counts, and the cell's `excluded`
+// count, which no generation owns. The baseline, the guard file's cells and
+// every trip are each cell's newest generation alone, so a cell whose model
+// changed is judged afresh once its new generation reaches MIN_N merged PRs.
+// Each older generation prints on its own line beside the newest, with no
+// verdict and no interval.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -135,29 +141,39 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   const units = attribute({ features, members, tiers, prs, windowStart });
   const counted = units.filter((u) => u.status === "counted");
   const tallies = new Map(tally(units).map((t) => [t.cell, t]));
-  const countedIn = (cell) => counted.filter((u) => u.cell === cell);
-  const bootUnits = (cell) => countedIn(cell).map((u) => ({ usd: u.spend, merged: u.merged ? 1 : 0 }));
+  const countedIn = (cell, generation) => counted.filter((u) => u.cell === cell && u.generation === generation);
+  const bootUnits = (us) => us.map((u) => ({ usd: u.spend, merged: u.merged ? 1 : 0 }));
   const meanUsd = (t) => (t.merged ? t.spend / t.merged : null);
   const base = tallies.get(BASELINE_CELL) ?? null;
+  // One generation's figures. The interval is the newest generation's against
+  // the baseline's newest; an older generation is printed, never compared.
+  const figuresOf = (cell, g, newest) => {
+    const mine = countedIn(cell, g.generation);
+    return {
+      cell,
+      generation: g.generation,
+      n_pulls: g.n,
+      n_merged: g.merged,
+      n_claims: g.claims,
+      n_failed: g.failed,
+      fail_rate: g.claims ? round(g.failed / g.claims) : null,
+      mean_usd: round(meanUsd(g), 2),
+      median_usd: round(median(mine.filter((u) => u.merged).map((u) => u.spend)), 2),
+      router_usd: round(mine.reduce((s, u) => s + routerUsd(u.pull), 0), 4),
+      usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(mine), bootUnits(countedIn(BASELINE_CELL, base.generation))),
+      left_out: g.left_out,
+      unpriced: g.unpriced,
+    };
+  };
   const figures = [...tallies.values()].map((t) => ({
-    cell: t.cell,
-    n_pulls: t.n,
-    n_merged: t.merged,
-    n_claims: t.claims,
-    n_failed: t.failed,
-    fail_rate: t.claims ? round(t.failed / t.claims) : null,
-    mean_usd: round(meanUsd(t), 2),
-    median_usd: round(median(countedIn(t.cell).filter((u) => u.merged).map((u) => u.spend)), 2),
-    router_usd: round(countedIn(t.cell).reduce((s, u) => s + routerUsd(u.pull), 0), 4),
-    usd_diff_ci95: t.cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(t.cell), bootUnits(BASELINE_CELL)),
+    ...figuresOf(t.cell, t, true),
     excluded: t.excluded,
-    left_out: t.left_out,
-    unpriced: t.unpriced,
+    older: t.older.map((o) => figuresOf(t.cell, o, false)),
   }));
 
-  // The guard.
-  const b = figures.find((f) => f.cell === BASELINE_CELL) ?? { n_merged: 0, mean_usd: null, fail_rate: null };
-  const baseline = { cell: BASELINE_CELL, n: b.n_merged, mean_usd: b.mean_usd, fail_rate: b.fail_rate };
+  // The guard, over each cell's newest generation alone.
+  const b = figures.find((f) => f.cell === BASELINE_CELL) ?? { generation: null, n_merged: 0, mean_usd: null, fail_rate: null };
+  const baseline = { cell: BASELINE_CELL, generation: b.generation, n: b.n_merged, mean_usd: b.mean_usd, fail_rate: b.fail_rate };
   // The $ leg takes the unrounded means: the cent-rounded figures are for
   // display, and a trip is sticky, so a cell cheaper by under half a cent
   // must not trip on rounding alone. The fail leg reads the claims.
@@ -239,10 +255,12 @@ export function crossCheck(rows, pricing) {
 }
 
 const TSV_COLUMNS = [
-  "cell", "n_pulls", "n_merged", "n_claims", "n_failed", "fail_rate", "mean_usd", "median_usd", "router_usd", "usd_diff_ci95",
+  "cell", "generation", "n_pulls", "n_merged", "n_claims", "n_failed", "fail_rate", "mean_usd", "median_usd", "router_usd", "usd_diff_ci95",
   "excluded", "left_out", "unpriced", "guard",
 ];
 
+// One line per cell's newest generation, carrying the guard's verdict on it,
+// then one per older generation of that cell, which carries none.
 export function formatReport(report) {
   const guardOf = (f) => {
     if (f.cell === BASELINE_CELL) return "baseline";
@@ -250,8 +268,12 @@ export function formatReport(report) {
     return f.n_merged >= MIN_N && report.verdict !== "none" ? "ok" : `n<${MIN_N}`;
   };
   const cell = (v) => (v === null || v === undefined ? "" : Array.isArray(v) ? `[${v.join(", ")}]` : String(v));
+  const line = (f, guard) => TSV_COLUMNS.map((c) => (c === "guard" ? guard : cell(f[c]))).join("\t");
   const lines = [TSV_COLUMNS.join("\t")];
-  for (const f of report.cells) lines.push(TSV_COLUMNS.map((c) => (c === "guard" ? guardOf(f) : cell(f[c]))).join("\t"));
+  for (const f of report.cells) {
+    lines.push(line(f, guardOf(f)));
+    for (const o of f.older) lines.push(line(o, "older"));
+  }
   const b = report.baseline;
   lines.push(`# verdict: ${report.verdict} (baseline ${b.cell} n=${b.n}/${MIN_N}${report.tripped.length ? `; tripped ${report.tripped.join(" ")}` : ""})${report.retire ? " — retire: every non-default stage-1 cell tripped" : ""}`);
   lines.push(`# window_start ${report.window_start}; pending PRs: ${report.pending.length ? report.pending.join(" ") : "none"}`);
@@ -269,7 +291,7 @@ export function guardFile(report, computedAt) {
     computed_at: computedAt,
     window_start: report.window_start,
     baseline: report.baseline,
-    cells: report.cells.map((f) => ({ cell: f.cell, n: f.n_merged, mean_usd: f.mean_usd, fail_rate: f.fail_rate })),
+    cells: report.cells.map((f) => ({ cell: f.cell, generation: f.generation, n: f.n_merged, mean_usd: f.mean_usd, fail_rate: f.fail_rate })),
     tripped: report.tripped,
     verdict: report.verdict,
     retire: report.retire,

@@ -48,6 +48,17 @@
 //
 // SPEND is the recorded `cost` of every row booked to the Pull. A `cost` that
 // is neither blank nor a number is refused, naming the row.
+//
+// GENERATION. A cell's figures are per Cell generation: the cell on one
+// dispatch model, member-outcomes' `dispatch_model`. A Pull's generation is
+// the dispatch model of its first Admissible implementer row in dispatch
+// order: the session, then `impl-<N>` before its retries `-b`, `-c`, ….
+// A row at another cell (a rescue) is booked to the Pull and never changes
+// its generation; an excluded Pull has none. A cell's NEWEST generation is
+// that of its latest Pull that has one, by session id, then file order.
+// Generations are told apart by model alone, so a cell that returns to an
+// earlier model rejoins that generation's Pulls. Only the newest generation's
+// figures are judged; older ones are reported beside them, never pooled.
 
 import { isDigits } from "./arg.mjs";
 import { CELL } from "./ledger-grammar.mjs";
@@ -87,10 +98,11 @@ export const EXCLUDED_MEMBER = /^(?:merge-?bot|memory$|__advisor$)/i;
 export const lastSegment = (agent) => String(agent).split(/[/.]/).at(-1);
 
 // An Admissible row for `cell`: dispatched as the cell's own definition, run at
-// the cell's level, with a resolved model on record.
+// the cell's level, with its dispatch model on record. The last turn's `model`
+// is not read: a member that fell back to another provider is still admitted.
 export function admissibleRow(row, cell) {
   const level = CELL.exec(cell)?.[2] ?? null;
-  return level !== null && row.subagentType === `fleet-implementer-${cell}` && row.effort === level && !!row.model;
+  return level !== null && row.subagentType === `fleet-implementer-${cell}` && row.effort === level && !!row.dispatchModel;
 }
 
 // A bad input row, as opposed to a bug: a caller that reports bad input catches this class alone.
@@ -118,6 +130,61 @@ const failsFloor = (ruling) => ruling.minted_false_claim === "yes" || ruling.clo
 // An omp session id opens with its ISO start time, so two of them sort in time order.
 const STARTED = /^\d{4}-\d{2}-\d{2}T/;
 const startedBefore = (pull, row) => (STARTED.test(pull.session) && STARTED.test(row.session) ? pull.session < row.session : pull.run_date <= row.run_date);
+// An implementer leaf's retry suffix: "" for `impl-<N>`, "b" for `impl-<N>-b`.
+const retryOf = (row) => /^impl-\d+(?:-([a-z0-9]+))?$/.exec(String(row.member).split("/").pop())?.[1] ?? "";
+const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+// Implementer rows in dispatch order: by session, then the bare name before
+// its retries, a shorter suffix before a longer one (`-z` before `-aa`).
+const dispatchOrder = (rows) => [...rows].sort((a, b) => {
+  const [x, y] = [retryOf(a), retryOf(b)];
+  return cmp(a.session, b.session) || x.length - y.length || cmp(x, y);
+});
+const key = (session, agent) => `${session}\0${agent}`;
+// The omp rows a Pull can book: every member but the merge bot, memory and the advisor.
+const ompRows = (members) => members.filter((r) => r.harness === "omp" && !EXCLUDED_MEMBER.test(lastSegment(r.member)));
+
+/**
+ * Each implementer row of `omp` to its Pull among `pulls`: the same session's
+ * Pull of the row's ticket and agent, else that session's last Pull of the
+ * ticket, else the ticket's last Pull started before the row (a retry in a
+ * later session). `impls` maps every Pull to its rows, `implPull` each booked
+ * row's session+agent to its Pull. A row with no ticket, or no such Pull, is
+ * booked to none.
+ */
+function bookImplementers(pulls, omp) {
+  const bySessionTicket = new Map(), byTicket = new Map();
+  for (const p of pulls) {
+    const k = key(p.session, p.ticket);
+    (bySessionTicket.get(k) ?? bySessionTicket.set(k, []).get(k)).push(p);
+    (byTicket.get(p.ticket) ?? byTicket.set(p.ticket, []).get(p.ticket)).push(p);
+  }
+  const implPull = new Map();
+  const impls = new Map(pulls.map((p) => [p, []]));
+  for (const r of omp) {
+    if (!isImplementer(r.member) || !r.ticket) continue;
+    const own = bySessionTicket.get(key(r.session, r.ticket));
+    const pull = own ? (own.find((p) => p.agent === r.agent) ?? own.at(-1)) : byTicket.get(r.ticket)?.findLast((p) => startedBefore(p, r));
+    if (!pull) continue;
+    implPull.set(key(r.session, r.agent), pull);
+    impls.get(pull).push(r);
+  }
+  return { impls, implPull };
+}
+
+// A Pull's generation from its implementer rows: its first Admissible row's dispatch model, else null.
+const generationOf = (own, cell) => dispatchOrder(own).find((m) => admissibleRow(m, cell))?.dispatchModel ?? null;
+
+/**
+ * Each of `pulls` (ticket-features rows) to its generation, `attribute`'s
+ * rule over `members`: the dispatch model of the Pull's first Admissible
+ * implementer row in dispatch order, or null when it has none. Every caller
+ * that names a Pull's generation reads it here, so the guard, the fit and the
+ * stopping rule never derive two generations for one Pull.
+ */
+export function pullGenerations(pulls, members) {
+  const { impls } = bookImplementers(pulls, ompRows(members));
+  return new Map(pulls.map((p) => [p, generationOf(impls.get(p), p.chosen_cell)]));
+}
 
 function costOf(row) {
   const c = String(row.cost ?? "");
@@ -129,39 +196,24 @@ function costOf(row) {
 
 /**
  * One unit per ticket-features row dated on or after `windowStart` (every dated
- * row when null), in file order: `{ pull, cell, stratum, status, merged, pr,
- * ruling, pendingPr, claims, falseClaims, rows, spend }`. `prs` is `gh pr list`'s
+ * row when null), in file order: `{ pull, cell, stratum, generation, status,
+ * merged, pr, ruling, pendingPr, claims, falseClaims, rows, spend }`,
+ * `generation` null exactly when the Pull is excluded. `prs` is `gh pr list`'s
  * `{ number, state }` rows, or null when PR state is unknown (the fit). `stratum`
  * maps a features row to its stratum. Throws `AttributionError` on a features
  * row it cannot date or a booked `cost` it cannot read, and `RulingError` as
  * `rulingFor` does.
  */
 export function attribute({ features, members, tiers, prs = null, windowStart = null, stratum = () => null }) {
-  const key = (session, agent) => `${session}\0${agent}`;
   const pulls = datedRows(features);
-  const bySessionTicket = new Map(), byTicket = new Map();
-  for (const p of pulls) {
-    const k = key(p.session, p.ticket);
-    (bySessionTicket.get(k) ?? bySessionTicket.set(k, []).get(k)).push(p);
-    (byTicket.get(p.ticket) ?? byTicket.set(p.ticket, []).get(p.ticket)).push(p);
-  }
-
-  const omp = members.filter((r) => r.harness === "omp" && !EXCLUDED_MEMBER.test(lastSegment(r.member)));
+  const omp = ompRows(members);
   // Implementer rows to their Pull, and a PR-named member's key to its PR.
-  const implPull = new Map(), prOfKey = new Map();
-  const impls = new Map(pulls.map((p) => [p, []]));
+  const { impls, implPull } = bookImplementers(pulls, omp);
+  const prOfKey = new Map();
   for (const r of omp) {
-    if (isImplementer(r.member)) {
-      if (!r.ticket) continue;
-      const own = bySessionTicket.get(key(r.session, r.ticket));
-      const pull = own ? (own.find((p) => p.agent === r.agent) ?? own.at(-1)) : byTicket.get(r.ticket)?.findLast((p) => startedBefore(p, r));
-      if (!pull) continue;
-      implPull.set(key(r.session, r.agent), pull);
-      impls.get(pull).push(r);
-    } else {
-      const { pr } = parseMemberName(r.member);
-      if (pr) prOfKey.set(key(r.session, r.agent), pr);
-    }
+    if (isImplementer(r.member)) continue;
+    const { pr } = parseMemberName(r.member);
+    if (pr) prOfKey.set(key(r.session, r.agent), pr);
   }
   // Each PR to the last Pull, in file order, whose implementer rows carry it.
   const carrier = new Map();
@@ -224,37 +276,74 @@ export function attribute({ features, members, tiers, prs = null, windowStart = 
       if (c === null) blank = true;
       else spend += c;
     }
+    const generation = generationOf(own, pull.chosen_cell);
     let status = "counted";
-    if (!own.some((m) => admissibleRow(m, pull.chosen_cell))) status = "excluded";
+    if (generation === null) status = "excluded";
     else if (pendingPr !== null) status = "pending";
     else if (claims === 0 && own.every((m) => ticketsEnding(m.ending) || NEITHER_ENDINGS.has(m.ending))) status = "left-out";
     else if (blank || (r && !r.carried)) status = "unpriced";
     return {
-      pull, cell: pull.chosen_cell, stratum: stratum(pull), status, merged, pr: r?.pr ?? null, ruling: r?.ruling ?? null,
+      pull, cell: pull.chosen_cell, stratum: stratum(pull), generation, status, merged, pr: r?.pr ?? null, ruling: r?.ruling ?? null,
       pendingPr, claims, falseClaims, rows: booked, spend: blank ? null : spend,
     };
   });
 }
 
 /**
- * Per cell, in cell-name order: `{ cell, n, merged, claims, failed, spend,
- * excluded, left_out, unpriced, pending }`. `n`, `merged`, `claims`, `failed`
- * and `spend` are over counted Pulls alone; the last four count the Pulls of
- * each other status.
+ * Each cell's generations, newest first: cell -> [model, …]. A generation's
+ * place is that of its latest Pull, by session id (an omp session id opens
+ * with its start time), then by file order, the order of `units`.
  */
-export function tally(units) {
+export function generations(units) {
+  const latest = new Map(); // cell -> Map(generation -> { session, at })
+  units.forEach((u, at) => {
+    if (!u.generation) return;
+    const gens = latest.get(u.cell) ?? latest.set(u.cell, new Map()).get(u.cell);
+    const held = gens.get(u.generation);
+    if (!held || u.pull.session >= held.session) gens.set(u.generation, { session: u.pull.session, at });
+  });
+  return new Map([...latest].map(([cell, gens]) => [cell, [...gens]
+    .sort(([, a], [, b]) => cmp(b.session, a.session) || b.at - a.at)
+    .map(([g]) => g)]));
+}
+
+/**
+ * Per cell, in cell-name order: `{ cell, generation, n, merged, claims, failed,
+ * spend, excluded, left_out, unpriced, pending, older }`. `generation` is the
+ * cell's newest (null when no Pull of it has one), and the figures beside it
+ * are that generation's alone: `n`, `merged`, `claims`, `failed` and `spend`
+ * over its counted Pulls, then its left-out, unpriced and pending Pull counts.
+ * `excluded` counts the cell's excluded Pulls, which have no generation.
+ * `older` is an array, newest first, of every other generation's figures in
+ * the same shape, each carrying its `generation`. `order` is `generations()`
+ * of the units that place each cell's generations; by default these same
+ * units, but a caller tallying a subset passes the whole set's, so a subset
+ * never moves a cell's newest generation.
+ */
+export function tally(units, order = generations(units)) {
+  const figures = (generation) => ({ generation, n: 0, merged: 0, claims: 0, failed: 0, spend: 0, left_out: 0, unpriced: 0, pending: 0 });
   const cells = new Map();
   for (const u of units) {
-    const c = cells.get(u.cell) ?? cells.set(u.cell, {
-      cell: u.cell, n: 0, merged: 0, claims: 0, failed: 0, spend: 0, excluded: 0, left_out: 0, unpriced: 0, pending: 0,
-    }).get(u.cell);
+    const c = cells.get(u.cell) ?? cells.set(u.cell, { excluded: 0, gens: new Map() }).get(u.cell);
+    if (u.status === "excluded") {
+      c.excluded++;
+      continue;
+    }
+    const g = u.generation ?? null;
+    const f = c.gens.get(g) ?? c.gens.set(g, figures(g)).get(g);
     if (u.status === "counted") {
-      c.n++;
-      if (u.merged) c.merged++;
-      c.claims += u.claims;
-      c.failed += u.falseClaims;
-      c.spend += u.spend;
-    } else c[u.status.replace("-", "_")]++;
+      f.n++;
+      if (u.merged) f.merged++;
+      f.claims += u.claims;
+      f.failed += u.falseClaims;
+      f.spend += u.spend;
+    } else f[u.status.replace("-", "_")]++;
   }
-  return [...cells.values()].sort((a, b) => (a.cell < b.cell ? -1 : a.cell > b.cell ? 1 : 0));
+  return [...cells].sort(([a], [b]) => cmp(a, b)).map(([cell, c]) => {
+    const ranked = order.get(cell) ?? [];
+    const newest = ranked[0] ?? null;
+    const rank = (g) => (ranked.includes(g) ? ranked.indexOf(g) : ranked.length);
+    const older = [...c.gens.values()].filter((f) => f.generation !== newest).sort((a, b) => rank(a.generation) - rank(b.generation));
+    return { cell, ...(c.gens.get(newest) ?? figures(newest)), excluded: c.excluded, older };
+  });
 }

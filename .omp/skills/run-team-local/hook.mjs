@@ -128,7 +128,7 @@ function driftNotice(repo, agentsDir, F) {
 function withdrawalBody(c) {
   const rows = c.verdicts.map((v) => `| #${v.ticket} | #${v.pr} | ${v.run_date} | ${v.closed_own_ticket} | ${v.minted_false_claim} | ${v.failed ? "fail" : "pass"} |`);
   return [
-    `\`fleet-implementer-${c.cell}\` verdicts since its definition was last added (${c.since}): ${c.failures} of ${c.verdicts.length} fail the quality floor (\`minted_false_claim=yes\` or \`closed_own_ticket=no\`).`,
+    `\`fleet-implementer-${c.cell}\` verdicts on its newest generation, \`${c.generation}\`, since its definition was last added (${c.since}): ${c.failures} of ${c.verdicts.length} fail the quality floor (\`minted_false_claim=yes\` or \`closed_own_ticket=no\`).`,
     "",
     "| ticket | PR | ruled | closed_own_ticket | minted_false_claim | floor |",
     "|---|---|---|---|---|---|",
@@ -154,17 +154,20 @@ function stopping(repo, agentsDir, dryRun) {
   }
   for (const c of stoppingRule({ features, members, verdicts, added })) {
     const tally = `${c.cell} ${c.failures}/${c.verdicts.length} floor failures since ${c.since}`;
+    // An older generation's verdicts are reported, never judged.
+    for (const o of c.older) say(`stopping rule: ${c.cell} older generation ${o.generation} ${o.failures}/${o.verdicts.length} floor failures since ${c.since} — not judged`);
     if (!c.stop) {
       say(`stopping rule: ${tally} — continues`);
       continue;
     }
-    // One open issue per cell: the tally in its title moves at every close-out,
-    // so the match is on the cell's prefix — case aside, which GitHub's own
-    // title search ignores and a maintainer's retitle may change — and the
-    // title is the idempotency key, written last, after the comment carrying
-    // the new verdict table.
+    // One open issue per cell: the tally and generation in its title move at
+    // every close-out, so the match is on the cell's prefix — case aside, which
+    // GitHub's own title search ignores and a maintainer's retitle may change —
+    // and the title is the idempotency key, written last, after the comment
+    // carrying the new verdict table. It names the generation, so a newer
+    // generation stopping at an older one's tally still comments its own table.
     const prefix = `Withdraw exploration cell ${c.cell}:`;
-    const title = `${prefix} ${c.failures}/${c.verdicts.length} floor failures`;
+    const title = `${prefix} ${c.failures}/${c.verdicts.length} floor failures on ${c.generation}`;
     const open = ghJson(repo, ["issue", "list", "--state", "open", "--search", `"${prefix}" in:title`, "--json", "number,title", "--limit", "100"])
       .filter((i) => i.title.toLowerCase().startsWith(prefix.toLowerCase()))
       .sort((a, b) => a.number - b.number);

@@ -52,7 +52,7 @@ const pull = (o) => ({
 const member = (o) => ({
   session: SESSION, run_date: DAY, role: "implementer", member: o.agent, model: "claude-opus-5", effort: "high",
   ticket: "", pr: "", tokensCacheCreate: 0, tokensOut: 0, wallS: 0, turns: 1, harness: "omp", subagentType: "",
-  tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: 0, cost: 0, ...o,
+  tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: 0, cost: 0, dispatchModel: o.model ?? "claude-opus-5", ...o,
 });
 const tier = (o) => ({
   run_date: DAY, class: "", tier: "", closed_own_ticket: "yes", minted_false_claim: "no", note: "n",
@@ -236,7 +236,7 @@ function floorFailing() {
   for (let i = 0; i < 3; i++) ruled(rows, { ticket: 200 + i, cell: "task-high", fail: true });
   return rows;
 }
-const TITLE = "Withdraw exploration cell smol-high: 8/10 floor failures";
+const TITLE = "Withdraw exploration cell smol-high: 8/10 floor failures on claude-haiku-4-5";
 const STALE = { number: 78, title: "Withdraw exploration cell smol-high: 7/9 floor failures" };
 const writes = (f) => ["issue create", "issue edit", "issue comment"].flatMap((cmd) => calls(f, cmd));
 
@@ -252,6 +252,19 @@ test("stopping rule --dry-run: a cell at ten verdicts and eight floor failures w
   assert.deepEqual(writes(f), [], "a dry run writes nothing");
 });
 
+test("stopping rule: an older generation's tally is printed and never files, and the cell's newest generation is judged alone", () => {
+  const rows = floorFailing();
+  for (const m of rows.members) if (m.subagentType === "fleet-implementer-smol-high") m.dispatchModel = "model-a";
+  // One clean Pull after them on the cell's role model: its newest generation.
+  ruled(rows, { ticket: 300, cell: "smol-high" });
+  const f = fixture({ rows });
+  const r = f.run(["--dry-run"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /stopping rule: smol-high older generation model-a 8\/10 floor failures since 2026-09-01 — not judged$/m);
+  assert.match(r.stdout, /stopping rule: smol-high 0\/1 floor failures since 2026-09-01 — continues$/m);
+  assert.deepEqual(calls(f, "issue list"), [], "no withdrawal issue is looked up for the cell");
+});
+
 test("stopping rule: an open withdrawal issue with the same title is left as it is, even beside one of the cell's older tallies", () => {
   const open = { number: 77, title: TITLE };
   const f = fixture({ rows: floorFailing(), gh: { issues: [STALE, open] } });
@@ -259,6 +272,19 @@ test("stopping rule: an open withdrawal issue with the same title is left as it 
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue already open, #${open.number}$`, "m"));
   assert.deepEqual(writes(f), []);
+});
+
+test("stopping rule: an open withdrawal issue at the same tally that names no generation, or another one, gets the newest generation's verdict table and title", () => {
+  for (const prior of ["Withdraw exploration cell smol-high: 8/10 floor failures", "Withdraw exploration cell smol-high: 8/10 floor failures on model-a"]) {
+    const f = fixture({ rows: floorFailing(), gh: { issues: [{ number: 77, title: prior }] } });
+    const r = f.run();
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue #77 retitled from "${escape(prior)}", verdict table commented$`, "m"));
+    assert.deepEqual(calls(f, "issue create"), []);
+    const [comment] = calls(f, "issue comment");
+    assert.match(comment[4], /newest generation, `claude-haiku-4-5`/);
+    assert.deepEqual(calls(f, "issue edit"), [["issue", "edit", "77", "--title", TITLE]]);
+  }
 });
 
 test("stopping rule: the cell's open withdrawal issue at another tally gets the verdict table as a comment, then the new title; no second issue is filed", () => {

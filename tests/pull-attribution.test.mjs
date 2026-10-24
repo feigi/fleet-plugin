@@ -8,8 +8,8 @@ import { readFileSync } from "node:fs";
 import { formatTsv, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { formatRow, parseTierOutcomes } from "../plugin/scripts/tier-outcomes.mjs";
 import { AttributionError, FEATURE_COLUMNS, admissibleRow, attribute, parseFeatures, tally } from "../plugin/scripts/pull-attribution.mjs";
-import { WINDOW_START, computeReport } from "../plugin/scripts/pr-cost.mjs";
-import { fitTable } from "../plugin/scripts/ticket-router.mjs";
+import { WINDOW_START, computeReport, guardFile } from "../plugin/scripts/pr-cost.mjs";
+import { fitTable, readGuard } from "../plugin/scripts/ticket-router.mjs";
 
 const DAY = WINDOW_START;
 const SESSION = "2026-10-03T10-00-00-000Z_01a00000-0000-7000-8000-000000000000";
@@ -19,7 +19,7 @@ const world = () => ({ members: [], tiers: [], features: [], prs: [] });
 const member = (o) => ({
   session: SESSION, run_date: DAY, role: "implementer", member: o.agent, model: "claude-opus-5", effort: "high",
   ticket: "", pr: "", tokensCacheCreate: 0, tokensOut: 0, wallS: 0, turns: 1, harness: "omp", subagentType: "",
-  tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: "", cost: 1, ending: "", ...o,
+  tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: "", cost: 1, ending: "", dispatchModel: o.model ?? "claude-opus-5", ...o,
 });
 // An implementer row of `ticket` dispatched as `cell`'s definition at its level.
 const impl = (ticket, cell, o = {}) => member({
@@ -354,34 +354,259 @@ test("router_usd and merge-bot, memory and advisor rows are no cell's $, while t
 });
 
 test("tally counts each status per cell, and only counted Pulls enter n, merged, claims and spend", () => {
-  const u = (cell, status, o = {}) => ({ cell, status, merged: false, claims: 0, falseClaims: 0, spend: 1, ...o });
+  const u = (cell, status, o = {}) => ({ cell, status, merged: false, claims: 0, falseClaims: 0, spend: 1, generation: null, ...o });
   assert.deepEqual(tally([
     u("task-high", "counted", { merged: true, claims: 1, spend: 3 }), u("slow-high", "excluded"), u("task-high", "left-out"),
     u("task-high", "unpriced", { spend: null }), u("task-high", "pending"),
   ]), [
-    { cell: "slow-high", n: 0, merged: 0, claims: 0, failed: 0, spend: 0, excluded: 1, left_out: 0, unpriced: 0, pending: 0 },
-    { cell: "task-high", n: 1, merged: 1, claims: 1, failed: 0, spend: 3, excluded: 0, left_out: 1, unpriced: 1, pending: 1 },
+    { cell: "slow-high", generation: null, n: 0, merged: 0, claims: 0, failed: 0, spend: 0, excluded: 1, left_out: 0, unpriced: 0, pending: 0, older: [] },
+    { cell: "task-high", generation: null, n: 1, merged: 1, claims: 1, failed: 0, spend: 3, excluded: 0, left_out: 1, unpriced: 1, pending: 1, older: [] },
   ]);
 });
 
-test("admissibleRow: the cell's own definition at its level with a resolved model, and nothing short of all three", () => {
-  const row = { subagentType: "fleet-implementer-task-high", effort: "high", model: "m" };
+test("admissibleRow: the cell's own definition at its level with a dispatch model on record, and nothing short of all three", () => {
+  const row = { subagentType: "fleet-implementer-task-high", effort: "high", model: "m", dispatchModel: "m" };
   assert.equal(admissibleRow(row, "task-high"), true);
   assert.equal(admissibleRow({ ...row, effort: "medium" }, "task-high"), false);
-  assert.equal(admissibleRow({ ...row, model: "" }, "task-high"), false);
+  assert.equal(admissibleRow({ ...row, dispatchModel: "" }, "task-high"), false, "a blank dispatch model is unknown");
+  assert.equal(admissibleRow({ ...row, model: "" }, "task-high"), true, "the last turn's model is not what admits a row");
+  assert.equal(admissibleRow({ ...row, model: "ollama" }, "task-high"), true, "nor is a fallback's");
   assert.equal(admissibleRow({ ...row, subagentType: "fleet-implementer" }, "task-high"), false);
   assert.equal(admissibleRow(row, "smol-high"), false);
 });
 
-test("on the committed corpus, the fit and the guard print the same per-cell n, merged and failed counts", () => {
+// ---------------------------------------------------------------------------
+// Cell generations: one cell on one dispatch model
+// ---------------------------------------------------------------------------
+
+const SESSION3 = "2026-10-07T10-00-00-000Z_01a00000-0000-7000-8000-000000000002";
+let nextTicket = 1000;
+// `count` merged Pulls at `cell`, each its own ticket, dispatched on `model` in
+// `session` at `usd` apiece; the first `fails` of them ruled a false claim.
+function addPulls(w, { cell, model, count, session = SESSION, usd = 1, fails = 0 }) {
+  for (let i = 0; i < count; i++) {
+    const t = nextTicket++;
+    w.features.push(pull(t, cell, { session }));
+    w.members.push(impl(t, cell, { session, model, dispatchModel: model, ending: "pr", pr: String(t + 10000), cost: usd }));
+    w.tiers.push(ruling(t, t + 10000, { minted_false_claim: i < fails ? "yes" : "no" }));
+    merged(w, t + 10000);
+  }
+}
+// The guard's report on `w`, and the fit over it, fed the guard file as the fit reads one.
+function guarded(w) {
+  const p = parsed(w);
+  const report = computeReport({ ...p, prs: w.prs });
+  const guard = readGuard(guardFile(report, "t"));
+  const table = fitTable({ prior, features: p.features, members: p.members, verdicts: p.tiers, guard });
+  return { report, guard, table };
+}
+const baseline = (w, o = {}) => addPulls(w, { cell: "slow-high", model: "model-s", count: 20, usd: 10, ...o });
+
+test("a cell's newest generation is judged alone: 25 merged on A then 22 on B reads B, with A's figures beside it, and A's trip never trips B", () => {
+  const w = world();
+  baseline(w);
+  addPulls(w, { cell: "task-high", model: "model-t", count: 20, usd: 9 });
+  // A alone trips on both legs ($20 against the baseline's $10, 40% false claims); B alone trips on neither.
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 25, usd: 20, fails: 10 });
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 22, usd: 2, session: SESSION2 });
+  const { report, guard, table } = guarded(w);
+
+  const smol = report.cells.find((c) => c.cell === "smol-high");
+  assert.deepEqual([smol.generation, smol.n_merged, smol.mean_usd, smol.fail_rate], ["model-b", 22, 2, 0]);
+  assert.deepEqual(smol.older.map((o) => [o.generation, o.n_merged, o.mean_usd, o.fail_rate]), [["model-a", 25, 20, 0.4]]);
+  assert.deepEqual(report.tripped, [], "the guard judges B alone, and B does not trip");
+  assert.equal(report.verdict, "ok");
+  assert.deepEqual(guardFile(report, "t").cells.find((c) => c.cell === "smol-high"), { cell: "smol-high", generation: "model-b", n: 22, mean_usd: 2, fail_rate: 0 });
+  assert.equal(guard.n["smol-high"], 22);
+
+  const est = table.estimates["*"]["smol-high"];
+  assert.deepEqual([est.generation, est.n, est.merged, est.usd_per_merged, est.fail_rate], ["model-b", 22, 22, 2, 0]);
+  assert.deepEqual(Object.keys(est.older), ["model-a"]);
+  assert.deepEqual([est.older["model-a"].n, est.older["model-a"].usd_per_merged, est.older["model-a"].fail_rate], [25, 20, 0.4]);
+  // Pooled, smol-high's $ per merged PR is (25×20 + 22×2) / 47 ≈ $11.57, over the 0.75 × $10 adoption bar; B's $2 is under it.
+  assert.equal(table.rows["*"], "smol-high", "the fit adopts on B's figures alone");
+});
+
+test("a model change re-enters burn-in: 3 merged on B after 30 on A is the guard's n, neither adopted nor tripped", () => {
+  const w = world();
+  baseline(w);
+  addPulls(w, { cell: "task-high", model: "model-t", count: 20, usd: 9 });
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 30, usd: 2, fails: 30 });
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 3, usd: 2, session: SESSION2 });
+  const { report, guard, table } = guarded(w);
+  assert.equal(guardFile(report, "t").cells.find((c) => c.cell === "smol-high").n, 3);
+  assert.equal(guard.n["smol-high"], 3);
+  assert.deepEqual(report.tripped, [], "A's failures do not trip B, and B is short of MIN_N");
+  assert.equal(table.rows["*"], "slow-high", "B is short of MIN_N, so nothing adopts it");
+  assert.equal(table.burn_in, true);
+  assert.equal(table.stage, 1);
+});
+
+test("a baseline model change below MIN_N leaves the guard without a verdict and every fitted row the policy cell", () => {
+  const w = world();
+  baseline(w, { count: 25 });
+  addPulls(w, { cell: "slow-high", model: "model-s2", count: 3, usd: 10, session: SESSION2 });
+  addPulls(w, { cell: "task-high", model: "model-t", count: 20, usd: 2 });
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 20, usd: 2 });
+  const { report, table } = guarded(w);
+  assert.deepEqual([report.baseline.generation, report.baseline.n], ["model-s2", 3]);
+  assert.equal(report.verdict, "none");
+  assert.deepEqual(Object.values(table.rows), ["slow-high"]);
+  assert.equal(table.estimates["*"]["slow-high"].older["model-s"].n, 25, "the old baseline is reported beside the new one");
+});
+
+test("a fallback member counts under the model it was dispatched on, not its last turn's", () => {
+  const w = world();
+  w.features.push(pull(40, "smol-high"));
+  w.members.push(impl(40, "smol-high", { dispatchModel: "model-a", model: "ollama", ending: "provider" }));
+  const [u] = units(w);
+  assert.equal(u.generation, "model-a");
+  assert.equal(u.status, "left-out", "a provider ending is neither's, as before");
+  assert.equal(tally([u])[0].generation, "model-a");
+});
+
+test("a rescue at another cell neither changes the Pull's generation nor leaves its spend", () => {
+  const w = world();
+  w.features.push(pull(41, "smol-high"));
+  w.members.push(
+    impl(41, "smol-high", { dispatchModel: "model-a", ending: "budget", cost: 1 }),
+    impl(41, "slow-high", { agent: "impl-41-b", dispatchModel: "model-c", ending: "pr", pr: "141", cost: 4 }),
+  );
+  w.tiers.push(ruling(41, 141));
+  merged(w, 141);
+  const [u] = units(w);
+  assert.deepEqual([u.cell, u.generation, u.status, u.spend], ["smol-high", "model-a", "counted", 5]);
+});
+
+test("of two Admissible rows on different dispatch models, the first dispatched names the Pull's generation, whatever the file order", () => {
+  const w = world();
+  w.features.push(pull(42, "smol-high"));
+  w.members.push(
+    impl(42, "smol-high", { agent: "impl-42-b", dispatchModel: "model-b", ending: "pr", pr: "142" }),
+    impl(42, "smol-high", { dispatchModel: "model-a", ending: "abort" }),
+  );
+  assert.equal(units(w)[0].generation, "model-a");
+});
+
+test("an implementer row with a blank dispatch model is not Admissible, and a Pull with no other is excluded per cell", () => {
+  const w = world();
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 1 });
+  w.features.push(pull(43, "smol-high"));
+  w.members.push(impl(43, "smol-high", { dispatchModel: "", model: "model-a", ending: "pr", pr: "143" }));
+  w.tiers.push(ruling(43, 143));
+  merged(w, 143);
+  const [, blank] = units(w);
+  assert.deepEqual([blank.status, blank.generation], ["excluded", null]);
+  const [t] = tally(units(w));
+  assert.deepEqual([t.generation, t.n, t.excluded, t.older], ["model-a", 1, 1, []]);
+});
+
+test("a cell that returns to an earlier model rejoins that generation's Pulls: A → B → A reads A newest, with the first span's Pulls", () => {
+  const w = world();
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 2 });
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 3, session: SESSION2 });
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 1, session: SESSION3 });
+  const [t] = tally(units(w));
+  assert.deepEqual([t.generation, t.n, t.older.map((o) => [o.generation, o.n])], ["model-a", 3, [["model-b", 3]]]);
+});
+
+test("the newest generation is the latest Pull's by session id, then file order, never by file order alone", () => {
+  // The later session's Pull is written to the file first.
+  const w = world();
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 1, session: SESSION2 });
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 1 });
+  assert.equal(tally(units(w))[0].generation, "model-b");
+  // Within one session, the later row in the file is the later Pull.
+  const same = world();
+  addPulls(same, { cell: "smol-high", model: "model-b", count: 1 });
+  addPulls(same, { cell: "smol-high", model: "model-a", count: 1 });
+  assert.equal(tally(units(same))[0].generation, "model-a");
+});
+
+test("within one session the later Pull places its generation even when an earlier Pull shares it: A, B, A reads A newest", () => {
+  const w = world();
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 1 });
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 1 });
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 1 });
+  const [t] = tally(units(w));
+  assert.deepEqual([t.generation, t.n, t.older.map((o) => o.generation)], ["model-a", 2, ["model-b"]]);
+});
+
+test("a cell's older generations are listed newest first: A, then B, then C reads C newest, then B, then A", () => {
+  const w = world();
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 1 });
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 1, session: SESSION2 });
+  addPulls(w, { cell: "smol-high", model: "model-c", count: 1, session: SESSION3 });
+  const [t] = tally(units(w));
+  assert.deepEqual([t.generation, t.older.map((o) => o.generation)], ["model-c", ["model-b", "model-a"]]);
+});
+
+test("dispatch order is the session, then the bare name, then a shorter retry suffix before a longer, then by letter, a member's path prefix aside", () => {
+  // Each Pull's Admissible rows, written in the file in the order given; the first dispatched names its generation.
+  const pullOf = (ticket, rows) => {
+    const w = world();
+    w.features.push(pull(ticket, "smol-high"));
+    w.members.push(...rows.map(([agent, dispatchModel, o = {}]) => impl(ticket, "smol-high", { agent, dispatchModel, ...o })));
+    return units(w)[0].generation;
+  };
+  assert.equal(pullOf(60, [["impl-60", "model-later", { session: SESSION2 }], ["impl-60-b", "model-b"]]), "model-b", "an earlier session's retry before a later session's bare name");
+  assert.equal(pullOf(61, [["impl-61-aa", "model-aa"], ["impl-61-z", "model-z"]]), "model-z", "`-z` before `-aa`");
+  assert.equal(pullOf(62, [["impl-62-c", "model-c"], ["impl-62-b", "model-b"]]), "model-b", "`-b` before `-c`");
+  assert.equal(pullOf(63, [["impl-63-b", "model-b", { member: "team/impl-63-b" }], ["impl-63", "model-a", { member: "team/impl-63" }]]), "model-a", "the bare name before its retry under a path prefix");
+});
+
+test("the fit names each cell's newest generation as the guard does: ranked over every windowed Pull, whatever the fit's restriction or the stratum", () => {
+  const w = world();
+  baseline(w);
+  // task-high: 21 on A the fit reads, then one on C that a live B classifier
+  // routed — outside the fit's rows, yet C is task-high's newest generation.
+  addPulls(w, { cell: "task-high", model: "model-a", count: 21, usd: 1 });
+  addPulls(w, { cell: "task-high", model: "model-c", count: 1, session: SESSION2 });
+  Object.assign(w.features.at(-1), { exploration_draw: "", sizing_src: "llm" });
+  // smol-high: 25 light on A, 22 light on B, then one heavy on A, so A is newest in the light stratum too.
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 25, usd: 2 });
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 22, usd: 2, session: SESSION2 });
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 1, usd: 2, session: SESSION3 });
+  w.features.at(-1).criteria = "9";
+  const { report, table } = guarded(w);
+  const newest = Object.fromEntries(report.cells.map((c) => [c.cell, c.generation]));
+  assert.deepEqual([newest["task-high"], newest["smol-high"]], ["model-c", "model-a"]);
+  for (const [s, cells] of Object.entries(table.estimates)) {
+    for (const [cell, e] of Object.entries(cells)) assert.equal(e.generation, newest[cell], `${s} ${cell}`);
+  }
+  const task = table.estimates["*"]["task-high"];
+  assert.deepEqual([task.n, task.older["model-a"].n], [0, 21]);
+  assert.deepEqual([table.estimates.light["smol-high"].n, table.estimates.light["smol-high"].older["model-b"].n], [25, 22]);
+  assert.ok(Object.values(table.rows).every((c) => c !== "task-high"), "A's 21 at $1 clear MIN_N, but A is not task-high's newest generation");
+});
+
+test("the guard's median, router $ and interval read each generation's own Pulls, the interval against the baseline's newest generation alone", () => {
+  const w = world();
+  baseline(w, { model: "model-s0", usd: 40 });
+  baseline(w, { session: SESSION2 });
+  addPulls(w, { cell: "smol-high", model: "model-a", count: 3, usd: 20 });
+  addPulls(w, { cell: "smol-high", model: "model-b", count: 3, usd: 2, session: SESSION2 });
+  for (const f of w.features) if (f.chosen_cell === "smol-high") f.router_usd = f.session === SESSION2 ? "0.5" : "0.25";
+  const { report } = guarded(w);
+  const smol = report.cells.find((c) => c.cell === "smol-high");
+  assert.deepEqual([smol.generation, smol.median_usd, smol.router_usd], ["model-b", 2, 1.5]);
+  assert.deepEqual(smol.older.map((o) => [o.generation, o.median_usd, o.router_usd, o.usd_diff_ci95]), [["model-a", 20, 0.75, null]]);
+  // Every Pull of a generation costs the same, so every resample's difference is B's $2 less the baseline newest's $10.
+  assert.deepEqual(smol.usd_diff_ci95, [-8, -8]);
+});
+
+test("on the committed corpus, smol-high's newest generation is claude-haiku-5-5, and the fit and the guard print the same per-generation figures", () => {
   const read = (f) => readFileSync(new URL(`../docs/metrics/${f}`, import.meta.url), "utf8");
   const members = parseMemberTsv(read("member-outcomes.tsv"));
   const tiers = parseTierOutcomes(read("tier-outcomes.tsv"));
   const features = parseFeatures(read("ticket-features.tsv"));
   // Every ruled PR read as merged: the guard's one view the fit, which sees no PR state, shares.
   const prs = [...new Set(tiers.map((t) => t.pr))].map((number) => ({ number: Number(number), state: "MERGED" }));
-  const guard = computeReport({ members, tiers, features, prs }).cells.map((c) => [c.cell, c.n_pulls, c.n_merged, c.n_failed]);
+  const g = (f) => [f.generation, f.n_pulls, f.n_merged, f.n_failed, f.mean_usd];
+  const guard = computeReport({ members, tiers, features, prs }).cells.map((c) => [c.cell, g(c), c.older.map(g)]);
+  const e = ([generation, f]) => [generation, f.n, f.merged, f.failed, f.usd_per_merged === null ? null : Number(f.usd_per_merged.toFixed(2))];
   const fit = Object.entries(fitTable({ prior, features, members, verdicts: tiers, guard: { tripped: [], n: {}, window_start: WINDOW_START } }).estimates["*"] ?? {})
-    .map(([c, e]) => [c, e.n, e.merged, e.failed]);
+    .map(([c, f]) => [c, e([f.generation, f]), Object.entries(f.older).map(e)]);
   assert.deepEqual(fit, guard);
+  assert.equal(guard.find(([c]) => c === "smol-high")[1][0], "claude-haiku-5-5");
 });
