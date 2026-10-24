@@ -630,10 +630,11 @@ How long a Pull's members worked on it: for each implementer dispatched under
 it, at any cell, and each review, fix and finisher member of its PR, the time
 from its first transcript entry to its last, without the idle wait each time
 omp closes it (until it is woken, if it is) and without any stretch of over an
-hour in which nothing in its run recorded an entry; summed. A member nested
-under one of those adds nothing: its time lies inside its parent's. Merge-bot,
-memory and advisor members and the controller's own turns are no Pull's. A
-Pull with one of those members' time unrecorded is untimed.
+hour in which no transcript of the run, the controller's included, recorded an
+entry; summed. A member nested under one of those adds nothing: its time lies
+inside its parent's. Merge-bot, memory and advisor members and the
+controller's own turns are no Pull's. A Pull with one of those members' time
+unrecorded is untimed.
 _Avoid_: wall time, duration, latency, elapsed time, ticket time
 
 **Admissible row**:
