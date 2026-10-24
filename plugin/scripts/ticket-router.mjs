@@ -347,8 +347,10 @@ function fitPulls({ features, members, verdicts, window }) {
 }
 
 // Per stratum and `*`, per cell, its newest generation's figures: `n` counted
-// Pulls, `merged`, $ per merged PR, false claims over claims, fix rounds per
-// merged PR, and its left-out and unpriced Pull counts. Beside them the cell's
+// Pulls, `merged`, $ per merged PR, minutes of work time per merged PR, false
+// claims over claims, fix rounds per merged PR, and its left-out, unpriced and
+// untimed Pull counts. Both per merged PR figures take every counted Pull,
+// merged or not, over the merged ones. Beside them the cell's
 // excluded Pull count, `generation` naming the newest generation's model, and
 // `older`, each older generation's model to its figures, newest first. Beside
 // `estimates`, `pulls`: per stratum and `*`, per cell, the newest generation's
@@ -370,11 +372,13 @@ function estimate(units, order) {
           claims: g.claims,
           failed: g.failed,
           usd_per_merged: g.merged ? round4(g.spend / g.merged) : null,
+          minutes_per_merged: g.merged ? round4(g.workS / 60 / g.merged) : null,
           fail_rate: g.claims ? round4(g.failed / g.claims) : null,
           fix_rounds: g.merged ? round4(fix / g.merged) : null,
           review_findings: null,
           left_out: g.left_out,
           unpriced: g.unpriced,
+          untimed: g.untimed,
         };
       };
       estimates[s][t.cell] = {
@@ -532,11 +536,11 @@ export function mergedSince({ table, features, members, verdicts, fitted }) {
 // Each cell's Pull counts over every stratum, as the fit prints them: its
 // newest generation, then each older one.
 function cellCounts(estimates) {
-  const usd = (x) => (x === null ? "-" : x.toFixed(2));
-  const counts = (e) => `n=${e.n} merged=${e.merged} failed=${e.failed} usd_per_merged=${usd(e.usd_per_merged)}`;
+  const two = (x) => (x === null ? "-" : x.toFixed(2));
+  const counts = (e) => `n=${e.n} merged=${e.merged} failed=${e.failed} usd_per_merged=${two(e.usd_per_merged)} minutes_per_merged=${two(e.minutes_per_merged)}`;
   return Object.entries(estimates["*"] ?? {})
     .map(([c, e]) => [
-      `${c} ${e.generation ?? "-"} ${counts(e)} excluded=${e.excluded} left_out=${e.left_out} unpriced=${e.unpriced}`,
+      `${c} ${e.generation ?? "-"} ${counts(e)} excluded=${e.excluded} left_out=${e.left_out} unpriced=${e.unpriced} untimed=${e.untimed}`,
       ...Object.entries(e.older).map(([g, o]) => `${c} ${g} (older) ${counts(o)}`),
     ].join(", "))
     .join(", ") || "none";
@@ -684,7 +688,7 @@ function main() {
     }
     return sha;
   };
-  // The join throws on a features row it cannot date, a booked member row whose `cost` is not a number, and a
+  // The join throws on a features row it cannot date, a booked member row whose `cost` or `work_s` is not a number, and a
   // ruling of a windowed Pull's ticket it cannot place — for `fit` and `--check` too on a Pull the fit then skips
   // as a live B classifier's, since every windowed Pull is booked before that skip. Anything else it throws is a
   // bug, never bad input, so it surfaces with its stack.

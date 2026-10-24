@@ -31,13 +31,14 @@
 // their nested members, and its merge through its Ruling — merged when that
 // PR's state is MERGED. A Pull is counted, or excluded (no Admissible row),
 // pending (its PR still open, or not in the list), left out (never merged, no
-// `fixed` bail, and every ending the ticket's or neither's) or unpriced (a
+// `fixed` bail, and every ending the ticket's or neither's), unpriced (a
 // booked row with a blank `cost`, or a Ruling whose PR none of its
-// implementers carries); only counted Pulls enter a cell's figures. A `cost`
-// that is neither blank nor a number is an input error (exit 2), as is a
-// ticket-features `run_date` that is neither blank nor YYYY-MM-DD, or a ruling
-// of a windowed Pull's ticket whose run_date is not YYYY-MM-DD or whose verdict
-// is not yes or no.
+// implementers carries) or untimed (a booked row whose `agent` names no
+// parent with a blank `work_s`); only counted Pulls enter a cell's figures. A
+// `cost` or `work_s` that is neither blank nor a number is an input error
+// (exit 2), as is a ticket-features `run_date` that is neither blank nor
+// YYYY-MM-DD, or a ruling of a windowed Pull's ticket whose run_date is not
+// YYYY-MM-DD or whose verdict is not yes or no.
 //
 // PER CELL GENERATION (pull-attribution.mjs's GENERATION), over its counted
 // Pulls: `generation`, the dispatch model; `n_pulls`; `n_merged`; `n_claims`
@@ -49,12 +50,12 @@
 // merged Pulls alone, descriptive; `router_usd`, the Pulls' own routing cost,
 // summed and never in their spend. `usd_diff_ci95` is a bootstrap 95% interval
 // on `mean_usd` minus the baseline's — printed to be read, never judged on.
-// Then the `left_out` and `unpriced` Pull counts, and the cell's `excluded`
-// count, which no generation owns. The baseline, the guard file's cells and
-// every trip are each cell's newest generation alone, so a cell whose model
-// changed is judged afresh once its new generation reaches MIN_N merged PRs.
-// Each older generation prints on its own line beside the newest, with no
-// verdict and no interval.
+// Then the `left_out`, `unpriced` and `untimed` Pull counts, and the cell's
+// `excluded` count, which no generation owns. The baseline, the guard file's
+// cells and every trip are each cell's newest generation alone, so a cell
+// whose model changed is judged afresh once its new generation reaches MIN_N
+// merged PRs. Each older generation prints on its own line beside the newest,
+// with no verdict and no interval.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -120,6 +121,7 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
     usd_diff_ci95: !newest || cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(bootUnits(g), bootUnits(base)),
     left_out: g.left_out,
     unpriced: g.unpriced,
+    untimed: g.untimed,
   });
   const figures = [...tallies.values()].map((t) => ({
     ...figuresOf(t.cell, t, true),
@@ -212,7 +214,7 @@ export function crossCheck(rows, pricing) {
 
 const TSV_COLUMNS = [
   "cell", "generation", "n_pulls", "n_merged", "n_claims", "n_failed", "fail_rate", "mean_usd", "median_usd", "router_usd", "usd_diff_ci95",
-  "excluded", "left_out", "unpriced", "guard",
+  "excluded", "left_out", "unpriced", "untimed", "guard",
 ];
 
 // One line per cell's newest generation, carrying the guard's verdict on it,
@@ -247,7 +249,7 @@ export function guardFile(report, computedAt) {
     computed_at: computedAt,
     window_start: report.window_start,
     baseline: report.baseline,
-    cells: report.cells.map((f) => ({ cell: f.cell, generation: f.generation, n: f.n_merged, mean_usd: f.mean_usd, fail_rate: f.fail_rate })),
+    cells: report.cells.map((f) => ({ cell: f.cell, generation: f.generation, n: f.n_merged, mean_usd: f.mean_usd, fail_rate: f.fail_rate, untimed: f.untimed })),
     tripped: report.tripped,
     verdict: report.verdict,
     retire: report.retire,
