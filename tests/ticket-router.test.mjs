@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import {
-  DEFAULT_TABLE, issueMetrics, ruleStratum, route, fitTable, readGuard, validateTable, formatFeatureRow, mergedSince, resolveCommit,
+  DEFAULT_TABLE, bArmLive, issueMetrics, ruleStratum, route, fitTable, readGuard, validateTable, formatFeatureRow, mergedSince, resolveCommit,
 } from "../plugin/scripts/ticket-router.mjs";
 import { FEATURE_COLUMNS as COLUMNS, parseFeatures } from "../plugin/scripts/pull-attribution.mjs";
 import { drawCell, CELL } from "../plugin/scripts/ledger-grammar.mjs";
@@ -22,10 +22,13 @@ const SESSION = "2026-10-01T10-00-00-000Z_01a0b344-33f6-7640-96a8-05f45bf847a9";
 const SESSION2 = "2026-10-01T11-00-00-000Z_01a0b344-33f6-7640-96a8-05f45bf847b0";
 const STAGE1 = ["slow-high", "task-high", "smol-high"];
 
+// A table's `rows` or `reasons`: one set per objective, the speed set the cost set's unless named.
+const both = (cost, speed = cost) => ({ cost, speed });
+const UNJUDGED = { cell: "slow-high", reason: "unjudged", cells: {}, pairs: [] };
 const baseTable = (over = {}) => ({
   window_start: null, fitted_commit: null, n_rows: 0, stage: 1, cells: [...STAGE1], burn_in: false,
-  rows: { "*": "slow-high" }, classifier: { b: null, tau: null }, estimates: {},
-  reasons: { "*": { cell: "slow-high", reason: "unjudged", cells: {}, pairs: [] } }, guard: { tripped: [], n: {} }, ...over,
+  rows: both({ "*": "slow-high" }), classifier: { b: null, tau: null }, estimates: {},
+  reasons: both({ "*": UNJUDGED }), guard: { tripped: [], n: {} }, ...over,
 });
 const guardFile = (over = {}) => ({
   computed_at: "2026-10-01T00:00:00Z", window_start: "2026-09-01",
@@ -51,8 +54,9 @@ function world(t, { table = baseTable(), guard = guardFile(), issueJson = issue(
   return paths;
 }
 const cli = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
-function routeCli(p, { ticket = 42, arm = "A", implRow = 3, extra = [] } = {}) {
+function routeCli(p, { ticket = 42, arm = "A", implRow = 3, objective = "cost", extra = [] } = {}) {
   return cli(["route", "--session", SESSION, "--ticket", String(ticket), "--arm", arm, "--impl-row", String(implRow),
+    ...(objective === null ? [] : ["--objective", objective]),
     "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending, ...extra]);
 }
 const parseLine = (stdout) => Object.fromEntries(stdout.trim().split(" ").map((kv) => kv.split("=")));
@@ -65,7 +69,7 @@ test("route: a clean non-exploration Pull prints the full line, REASON=ok, and r
   const p = world(t);
   const r = routeCli(p);
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light REASON=ok\n");
+  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light OBJECTIVE=cost REASON=ok\n");
   const lines = readFileSync(p.pending, "utf8").trim().split("\n");
   assert.equal(lines[0], COLUMNS.join("\t"), "a new pending file starts with the header");
   const [row] = parseFeatures(lines.join("\n"));
@@ -101,7 +105,7 @@ test("route: a 0-byte pending file gets the header before its first row", (t) =>
 
 test("route: with no --pending the features row lands beside the guard, in the run's .fleet/", (t) => {
   const p = world(t);
-  const r = cli(["route", "--session", SESSION, "--ticket", "42", "--arm", "A", "--impl-row", "3",
+  const r = cli(["route", "--session", SESSION, "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3",
     "--issue", p.issue, "--guard", p.guard, "--table", p.table]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(parseFeatures(readFileSync(join(p.dir, "ticket-features.pending.tsv"), "utf8")).length, 1);
@@ -145,7 +149,7 @@ test("a scripted Pull dispatches the router's cell: tier=<cell> on an Exploratio
 
 test("route: a session given as its directory path records the session id, not the path", (t) => {
   const p = world(t);
-  const r = cli(["route", "--session", `/x/sessions/proj/${SESSION}/`, "--ticket", "42", "--arm", "A", "--impl-row", "3",
+  const r = cli(["route", "--session", `/x/sessions/proj/${SESSION}/`, "--objective", "cost", "--ticket", "42", "--arm", "A", "--impl-row", "3",
     "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].session, SESSION);
@@ -156,27 +160,27 @@ test("route: no-issue-json — a missing or unparseable issue file blanks the me
     const p = world(t, { issueJson });
     const r = routeCli(p);
     assert.equal(r.status, 0, r.stderr);
-    assert.deepEqual(parseLine(r.stdout), { POLICY: "slow-high", CELL: "slow-high", DRAW: "-", STRATUM: "unknown", REASON: "no-issue-json" });
+    assert.deepEqual(parseLine(r.stdout), { POLICY: "slow-high", CELL: "slow-high", DRAW: "-", STRATUM: "unknown", OBJECTIVE: "cost", REASON: "no-issue-json" });
     const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
     for (const c of ["brief_chars", "criteria", "comments", "age_days", "paths", "test_paths", "xrefs", "kind"]) assert.equal(row[c], "", c);
   }
 });
 
 test("route: no-sizing — a live B Pull without a usable sizing file routes `unknown`, exits 0", (t) => {
-  const table = baseTable({ classifier: { b: "haiku", tau: null }, rows: { "*": "slow-high", heavy: "task-high" } });
+  const table = baseTable({ classifier: { b: "haiku", tau: null }, rows: both({ "*": "slow-high", heavy: "task-high" }) });
   const p = world(t, { table });
   const r = routeCli(p, { arm: "B" });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(parseLine(r.stdout), { POLICY: "slow-high", CELL: "slow-high", DRAW: "-", STRATUM: "unknown", REASON: "no-sizing" });
+  assert.deepEqual(parseLine(r.stdout), { POLICY: "slow-high", CELL: "slow-high", DRAW: "-", STRATUM: "unknown", OBJECTIVE: "cost", REASON: "no-sizing" });
 });
 
 test("route: a live B Pull WITH a sizing verdict routes by it — the must-accept half of no-sizing", (t) => {
-  const table = baseTable({ classifier: { b: "haiku", tau: null }, rows: { "*": "slow-high", heavy: "task-high" } });
+  const table = baseTable({ classifier: { b: "haiku", tau: null }, rows: both({ "*": "slow-high", heavy: "task-high" }) });
   const p = world(t, { table, sizing: { source: "haiku", model: "m", label: "heavy", confidence: 1, usd: 0.0002 } });
   const r = routeCli(p, { arm: "B", extra: ["--sizing", p.sizing] });
   assert.equal(r.status, 0, r.stderr);
   // The table row for the classifier's stratum is dispatched; POLICY stays the free rule's.
-  assert.deepEqual(parseLine(r.stdout), { POLICY: "slow-high", CELL: "task-high", DRAW: "-", STRATUM: "heavy", REASON: "ok" });
+  assert.deepEqual(parseLine(r.stdout), { POLICY: "slow-high", CELL: "task-high", DRAW: "-", STRATUM: "heavy", OBJECTIVE: "cost", REASON: "ok" });
   const [row] = parseFeatures(readFileSync(p.pending, "utf8"));
   assert.equal(row.sizing_src, "haiku");
   assert.equal(row.sizing_pre, "heavy");
@@ -187,16 +191,16 @@ test("route: arm B on a table whose B gate is closed routes exactly as arm A and
   const p = world(t);
   const r = routeCli(p, { arm: "B" });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light REASON=ok\n");
+  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light OBJECTIVE=cost REASON=ok\n");
   assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].sizing_src, "rule");
 });
 
 test("route: guard-missing — no guard (or an unparseable one) dispatches the default cell only, even in burn-in", (t) => {
   for (const guard of [null, "{nope", JSON.stringify({ tripped: "x" })]) {
-    const p = world(t, { table: baseTable({ burn_in: true, rows: { "*": "task-high" } }), guard });
+    const p = world(t, { table: baseTable({ burn_in: true, rows: both({ "*": "task-high" }) }), guard });
     const r = routeCli(p, { implRow: 5 });
     assert.equal(r.status, 0, r.stderr);
-    assert.deepEqual(parseLine(r.stdout), { POLICY: "slow-high", CELL: "slow-high", DRAW: "-", STRATUM: "light", REASON: "guard-missing" });
+    assert.deepEqual(parseLine(r.stdout), { POLICY: "slow-high", CELL: "slow-high", DRAW: "-", STRATUM: "light", OBJECTIVE: "cost", REASON: "guard-missing" });
   }
 });
 
@@ -212,16 +216,16 @@ test("route: guard-tripped — a tripped cell leaves the draw's pool, and the li
 });
 
 test("route: table-cell-tripped — a table row naming a tripped cell is replaced by the default without waiting for a re-fit", (t) => {
-  const p = world(t, { table: baseTable({ rows: { "*": "task-high" } }), guard: guardFile({ tripped: ["task-high"] }) });
+  const p = world(t, { table: baseTable({ rows: both({ "*": "task-high" }) }), guard: guardFile({ tripped: ["task-high"] }) });
   const r = routeCli(p);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(parseLine(r.stdout), { POLICY: "slow-high", CELL: "slow-high", DRAW: "-", STRATUM: "light", REASON: "table-cell-tripped" });
+  assert.deepEqual(parseLine(r.stdout), { POLICY: "slow-high", CELL: "slow-high", DRAW: "-", STRATUM: "light", OBJECTIVE: "cost", REASON: "table-cell-tripped" });
 });
 
 test("route: a non-default table row is dispatched when its cell is not tripped", (t) => {
-  const p = world(t, { table: baseTable({ rows: { "*": "slow-high", light: "task-high" } }) });
+  const p = world(t, { table: baseTable({ rows: both({ "*": "slow-high", light: "task-high" }) }) });
   const r = routeCli(p);
-  assert.equal(r.stdout, "POLICY=task-high CELL=task-high DRAW=- STRATUM=light REASON=ok\n");
+  assert.equal(r.stdout, "POLICY=task-high CELL=task-high DRAW=- STRATUM=light OBJECTIVE=cost REASON=ok\n");
 });
 
 test("route: burn-in draws on EVERY Pull, uniformly over all cells including the default", (t) => {
@@ -267,7 +271,7 @@ test("route: a chain head on row 5k does not draw — the assignment rolls to th
 test("route: with every non-default cell withdrawn (K=0) an exploration Pull runs the policy cell and records no draw", (t) => {
   const p = world(t, { table: baseTable({ cells: ["slow-high"] }) });
   const r = routeCli(p, { implRow: 5 });
-  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light REASON=ok\n");
+  assert.equal(r.stdout, "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light OBJECTIVE=cost REASON=ok\n");
   assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].exploration_draw, "");
 });
 
@@ -293,7 +297,7 @@ test("route: exit 2 only on usage errors and an unreadable or invalid table — 
     assert.match(r.stderr, why);
     assert.equal(r.stdout, "");
   }
-  for (const bad of [{ ...baseTable(), cells: ["slow-high", "alt"] }, { ...baseTable(), rows: {} }, { ...baseTable(), burn_in: "yes" }]) {
+  for (const bad of [{ ...baseTable(), cells: ["slow-high", "alt"] }, { ...baseTable(), rows: both({}) }, { ...baseTable(), burn_in: "yes" }]) {
     const q = world(t, { table: bad });
     const r = routeCli(q);
     assert.equal(r.status, 2, r.stderr);
@@ -303,18 +307,21 @@ test("route: exit 2 only on usage errors and an unreadable or invalid table — 
 });
 
 // With no --session the router takes the session directory the phase-0
-// receipt `.fleet/phase0.json` records, in the git workspace it runs from.
+// receipt `.fleet/phase0.json` records, in the git workspace it runs from, and
+// with no --objective the objective it records. `run` gives `--objective cost`
+// unless told `objective: null`.
 function receiptWorld(t, receipt) {
   const p = world(t);
   assert.equal(spawnSync("git", ["init", "-q", p.dir], { encoding: "utf8", env: gitEnv() }).status, 0);
   mkdirSync(join(p.dir, ".fleet"), { recursive: true });
   if (receipt !== undefined) writeFileSync(join(p.dir, ".fleet", "phase0.json"), typeof receipt === "string" ? receipt : JSON.stringify(receipt));
-  const run = (session) => spawnSync(process.execPath, [SCRIPT, "route", ...(session === undefined ? [] : ["--session", session]),
+  const run = (session, { objective = "cost" } = {}) => spawnSync(process.execPath, [SCRIPT, "route", ...(session === undefined ? [] : ["--session", session]),
+    ...(objective === null ? [] : ["--objective", objective]),
     "--ticket", "42", "--arm", "A", "--impl-row", "3", "--issue", p.issue, "--guard", p.guard, "--table", p.table, "--pending", p.pending],
   { encoding: "utf8", cwd: p.dir, env: gitEnv() });
   return { ...p, run };
 }
-const receiptFor = (session) => ({ run: null, session, scratch: "/scratch", steps: {} });
+const receiptFor = (session, objective) => ({ run: null, session, scratch: "/scratch", objective, steps: {} });
 
 test("route: with no --session the session is the one the phase-0 receipt records", (t) => {
   const p = receiptWorld(t, receiptFor(`/home/u/.omp/agent/sessions/-w/${SESSION2}`));
@@ -345,13 +352,30 @@ test("route: no --session and no session in the receipt is exit 2 naming the rec
   }
 });
 
+test("route: no --objective is the one the phase-0 receipt records; a receipt that records none is exit 2 naming it, and nothing is recorded", (t) => {
+  const p = receiptWorld(t, receiptFor(`/s/${SESSION2}`, "speed"));
+  const r = p.run(SESSION, { objective: null });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(parseLine(r.stdout).OBJECTIVE, "speed");
+  assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].objective, "speed");
+  assert.equal(parseLine(p.run(SESSION, { objective: "cost" }).stdout).OBJECTIVE, "cost", "a given --objective wins over the receipt's");
+  for (const [receipt, why] of [[undefined, "no receipt"], [receiptFor(`/s/${SESSION2}`), "it records no objective"], ["{", "unreadable: not JSON"]]) {
+    const q = receiptWorld(t, receipt);
+    const refused = q.run(SESSION, { objective: null });
+    assert.equal(refused.status, 2, refused.stderr);
+    assert.match(refused.stderr, new RegExp(`no objective given and none in the phase-0 receipt \\S+/\\.fleet/phase0\\.json \\(${why}`));
+    assert.equal(refused.stdout, "");
+    assert.equal(existsSync(q.pending), false, `${why}: a refused route wrote a features row`);
+  }
+});
+
 test("route: the checked-in table is valid and is the day-one table", () => {
   const table = JSON.parse(readFileSync(DEFAULT_TABLE, "utf8"));
   assert.equal(validateTable(table), table);
   assert.equal(table.burn_in, true);
   assert.equal(table.stage, 1);
   assert.deepEqual(table.cells, STAGE1);
-  assert.deepEqual(table.rows, { "*": "slow-high" });
+  assert.deepEqual(table.rows.cost, { "*": "slow-high" });
   for (const c of table.cells) {
     assert.ok(CELL.test(c));
     assert.ok(existsSync(fileURLToPath(new URL(`../plugin/agents/fleet-implementer-${c}.agent.md`, import.meta.url))), `${c} has no definition`);
@@ -359,22 +383,22 @@ test("route: the checked-in table is valid and is the day-one table", () => {
 });
 
 test("route: pure — the same inputs give the same line, and the line names every field", () => {
-  const args = { session: SESSION, ticket: 9, arm: "A", implRow: 10, issue: issue(), guard: readGuard(guardFile()), table: baseTable() };
+  const args = { session: SESSION, ticket: 9, arm: "A", implRow: 10, issue: issue(), guard: readGuard(guardFile()), table: baseTable(), objective: "cost" };
   const a = route(args);
   assert.deepEqual(route(args), a);
-  assert.match(a.line, /^POLICY=\S+ CELL=\S+ DRAW=\S+ STRATUM=(light|heavy|unknown) REASON=\S+$/);
+  assert.match(a.line, /^POLICY=\S+ CELL=\S+ DRAW=\S+ STRATUM=(light|heavy|unknown) OBJECTIVE=cost REASON=\S+$/);
   assert.equal(formatFeatureRow(a.row).split("\t").length, COLUMNS.length);
 });
 
 // route() called directly, so the gate and sizing matrices need no process per case.
-const routeIn = (over) => route({ session: SESSION, ticket: 42, arm: "B", implRow: 3, issue: issue(), guard: readGuard(guardFile()), table: baseTable(), ...over });
-const liveB = (over = {}) => baseTable({ classifier: { b: "haiku", tau: null }, rows: { "*": "slow-high", heavy: "task-high" }, ...over });
+const routeIn = (over) => route({ session: SESSION, ticket: 42, arm: "B", implRow: 3, issue: issue(), guard: readGuard(guardFile()), table: baseTable(), objective: "cost", ...over });
+const liveB = (over = {}) => baseTable({ classifier: { b: "haiku", tau: null }, rows: both({ "*": "slow-high", heavy: "task-high" }), ...over });
 const haikuSizing = { source: "haiku", model: "m", label: "heavy", confidence: 1, usd: 0.5 };
 
 test("route: arm B is live only on arm B, with a classifier set and some row not the default", () => {
-  const ruleLine = "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light REASON=ok";
+  const ruleLine = "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light OBJECTIVE=cost REASON=ok";
   const cases = [
-    ["a classifier but every row the default", liveB({ rows: { "*": "slow-high", heavy: "slow-high" } }), "B"],
+    ["a classifier but every row the default", liveB({ rows: both({ "*": "slow-high", heavy: "slow-high" }) }), "B"],
     ["a non-default row but no classifier", liveB({ classifier: { b: null, tau: null } }), "B"],
     ["an open gate on arm A", liveB(), "A"],
   ];
@@ -385,13 +409,13 @@ test("route: arm B is live only on arm B, with a classifier set and some row not
     assert.equal(row.sizing_pre, "", what);
     assert.equal(row.router_usd, "", what);
   }
-  assert.equal(routeIn({ table: liveB(), arm: "B", sizing: haikuSizing }).line, "POLICY=slow-high CELL=task-high DRAW=- STRATUM=heavy REASON=ok", "the same inputs with the gate open and arm B do route by the sizing");
+  assert.equal(routeIn({ table: liveB(), arm: "B", sizing: haikuSizing }).line, "POLICY=slow-high CELL=task-high DRAW=- STRATUM=heavy OBJECTIVE=cost REASON=ok", "the same inputs with the gate open and arm B do route by the sizing");
 });
 
 test("route: a live B sizing is used only when its source is the table's classifier and its label is light or heavy", () => {
   const refused = (table, sizing, what) => {
     const { line, row } = routeIn({ table, sizing });
-    assert.equal(line, "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=unknown REASON=no-sizing", what);
+    assert.equal(line, "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=unknown OBJECTIVE=cost REASON=no-sizing", what);
     assert.equal(row.sizing_src, "", what);
     assert.equal(row.sizing_pre, "", what);
   };
@@ -401,8 +425,8 @@ test("route: a live B sizing is used only when its source is the table's classif
   refused(liveB(), null, "no verdict at all");
   for (const label of ["medium", "Heavy", "", null, undefined, 1, ["heavy"]]) refused(liveB(), { ...haikuSizing, label }, `label ${JSON.stringify(label)}`);
   // A light verdict on a heavy-by-rule brief: the table row of the classifier's stratum, not the rule's.
-  const light = routeIn({ table: liveB({ rows: { "*": "slow-high", light: "smol-high" } }), issue: issue({ body: "x".repeat(4000) }), sizing: { ...haikuSizing, label: "light" } });
-  assert.equal(light.line, "POLICY=slow-high CELL=smol-high DRAW=- STRATUM=light REASON=ok");
+  const light = routeIn({ table: liveB({ rows: both({ "*": "slow-high", light: "smol-high" }) }), issue: issue({ body: "x".repeat(4000) }), sizing: { ...haikuSizing, label: "light" } });
+  assert.equal(light.line, "POLICY=slow-high CELL=smol-high DRAW=- STRATUM=light OBJECTIVE=cost REASON=ok");
   assert.equal(light.row.sizing_pre, "light");
 });
 
@@ -410,14 +434,14 @@ test("route: a jev sizing below tau abstains to `unknown` but records its label,
   const table = liveB({ classifier: { b: "jev", tau: 0.8 } });
   const jev = (over) => ({ source: "jev", model: "jev-1", label: "heavy", confidence: 0.9, usd: 0.25, ...over });
   const confident = routeIn({ table, sizing: jev() });
-  assert.equal(confident.line, "POLICY=slow-high CELL=task-high DRAW=- STRATUM=heavy REASON=ok");
+  assert.equal(confident.line, "POLICY=slow-high CELL=task-high DRAW=- STRATUM=heavy OBJECTIVE=cost REASON=ok");
   assert.equal(confident.row.sizing_src, "jev:jev-1");
   assert.equal(confident.row.sizing_pre, "heavy");
   assert.equal(confident.row.router_usd, "0.25");
-  assert.equal(routeIn({ table, sizing: jev({ confidence: 0.8 }) }).line, "POLICY=slow-high CELL=task-high DRAW=- STRATUM=heavy REASON=ok", "confidence exactly at tau does not abstain");
+  assert.equal(routeIn({ table, sizing: jev({ confidence: 0.8 }) }).line, "POLICY=slow-high CELL=task-high DRAW=- STRATUM=heavy OBJECTIVE=cost REASON=ok", "confidence exactly at tau does not abstain");
   for (const confidence of [0.79, 0, undefined, "high", null]) {
     const r = routeIn({ table, sizing: jev({ confidence }) });
-    assert.equal(r.line, "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=unknown REASON=ok", `confidence ${JSON.stringify(confidence)}`);
+    assert.equal(r.line, "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=unknown OBJECTIVE=cost REASON=ok", `confidence ${JSON.stringify(confidence)}`);
     assert.equal(r.row.sizing_src, "jev:jev-1");
     assert.equal(r.row.sizing_pre, "heavy", "the abstained label is still recorded");
     assert.equal(r.row.router_usd, "0.25", "the abstained verdict's spend is still recorded");
@@ -427,9 +451,9 @@ test("route: a jev sizing below tau abstains to `unknown` but records its label,
   assert.equal(routeIn({ table, sizing: jev({ usd: "0.25" }) }).row.router_usd, "", "a usd that is not a number: blank");
   // Without a tau the confidence is not consulted; and tau binds only a jev verdict.
   const noTau = routeIn({ table: liveB({ classifier: { b: "jev", tau: null } }), sizing: jev({ confidence: undefined }) });
-  assert.equal(noTau.line, "POLICY=slow-high CELL=task-high DRAW=- STRATUM=heavy REASON=ok");
+  assert.equal(noTau.line, "POLICY=slow-high CELL=task-high DRAW=- STRATUM=heavy OBJECTIVE=cost REASON=ok");
   const haiku = routeIn({ table: liveB({ classifier: { b: "haiku", tau: 0.8 } }), sizing: { ...haikuSizing, confidence: 0.1 } });
-  assert.equal(haiku.line, "POLICY=slow-high CELL=task-high DRAW=- STRATUM=heavy REASON=ok");
+  assert.equal(haiku.line, "POLICY=slow-high CELL=task-high DRAW=- STRATUM=heavy OBJECTIVE=cost REASON=ok");
   assert.equal(haiku.row.sizing_src, "haiku");
 });
 
@@ -439,7 +463,7 @@ test("route: a tripped token that is not a cell makes the guard unreadable — d
     const p = world(t, { table, guard: guardFile({ tripped, verdict: "tripped" }) });
     const r = routeCli(p, { implRow: 5 });
     assert.equal(r.status, 0, r.stderr);
-    assert.deepEqual(parseLine(r.stdout), { POLICY: "slow-high", CELL: "slow-high", DRAW: "-", STRATUM: "light", REASON: "guard-missing" }, JSON.stringify(tripped));
+    assert.deepEqual(parseLine(r.stdout), { POLICY: "slow-high", CELL: "slow-high", DRAW: "-", STRATUM: "light", OBJECTIVE: "cost", REASON: "guard-missing" }, JSON.stringify(tripped));
   }
   const real = world(t, { table, guard: guardFile({ tripped: [{ cell: "smol-high" }], verdict: "tripped" }) });
   const out = parseLine(routeCli(real, { implRow: 5 }).stdout);
@@ -506,14 +530,22 @@ test("validateTable: each malformed router table is refused for its own reason, 
     [/`rows` is not an object/, bad({ rows: null })],
     [/`rows` is not an object/, bad({ rows: [] })],
     [/`rows` is not an object/, bad({ rows: "x" })],
-    [/`rows` has no `\*` row/, bad({ rows: {} })],
-    [/`rows` has no `\*` row/, bad({ rows: { heavy: "task-high" } })],
-    [/`rows` key "medium" is not/, bad({ rows: { "*": "slow-high", medium: "task-high" } })],
-    [/`rows` key "" is not/, bad({ rows: { "*": "slow-high", "": "task-high" } })],
-    [/`rows\.heavy` is "alt"/, bad({ rows: { "*": "slow-high", heavy: "alt" } })],
-    [/`rows\.heavy` is 5/, bad({ rows: { "*": "slow-high", heavy: 5 } })],
-    [/`rows\.heavy` is null/, bad({ rows: { "*": "slow-high", heavy: null } })],
-    [/`rows\.\*` is \["slow-high"\]/, bad({ rows: { "*": ["slow-high"] } })],
+    [/`rows` key "\*" is not an objective/, bad({ rows: { "*": "slow-high" } })],
+    [/`rows` key "fast" is not an objective/, bad({ rows: { ...both({ "*": "slow-high" }), fast: { "*": "slow-high" } } })],
+    [/`rows\.speed` is not an object/, bad({ rows: { cost: { "*": "slow-high" } } })],
+    [/`rows\.cost` is not an object/, bad({ rows: { cost: "slow-high", speed: { "*": "slow-high" } } })],
+    [/`rows\.cost` has no `\*` row/, bad({ rows: both({}) })],
+    [/`rows\.speed` has no `\*` row/, bad({ rows: both({ "*": "slow-high" }, { heavy: "task-high" }) })],
+    [/`rows\.cost` key "medium" is not/, bad({ rows: both({ "*": "slow-high", medium: "task-high" }) })],
+    [/`rows\.speed` key "" is not/, bad({ rows: both({ "*": "slow-high" }, { "*": "slow-high", "": "task-high" }) })],
+    [/`rows\.cost\.heavy` is "alt"/, bad({ rows: both({ "*": "slow-high", heavy: "alt" }) })],
+    [/`rows\.speed\.heavy` is 5/, bad({ rows: both({ "*": "slow-high" }, { "*": "slow-high", heavy: 5 }) })],
+    [/`rows\.cost\.heavy` is null/, bad({ rows: both({ "*": "slow-high", heavy: null }) })],
+    [/`rows\.cost\.\*` is \["slow-high"\]/, bad({ rows: both({ "*": ["slow-high"] }) })],
+    [/`reasons` is not an object/, bad({ reasons: undefined })],
+    [/`reasons` key "\*" is not an objective/, bad({ reasons: { "*": UNJUDGED } })],
+    [/`reasons\.speed` is not an object/, bad({ reasons: { cost: { "*": UNJUDGED } } })],
+    [/`reasons\.speed` key "medium" is not/, bad({ reasons: both({ "*": UNJUDGED }, { medium: UNJUDGED }) })],
     [/`burn_in` is not a boolean/, bad({ burn_in: "yes" })],
     [/`burn_in` is not a boolean/, bad({ burn_in: 1 })],
     [/`burn_in` is not a boolean/, bad({ burn_in: undefined })],
@@ -548,7 +580,7 @@ test("validateTable: each malformed router table is refused for its own reason, 
   const valid = [
     baseTable(),
     bad({ burn_in: true, stage: 2, cells: [...STAGE1, "slow-medium", "task-max"] }),
-    bad({ rows: { "*": "slow-high", light: "smol-high", heavy: "task-high", unknown: "slow-high" } }),
+    bad({ rows: both({ "*": "slow-high", light: "smol-high", heavy: "task-high", unknown: "slow-high" }) }),
     bad({ classifier: { b: "haiku", tau: null } }),
     bad({ classifier: { b: "jev", tau: 0.8 } }),
     bad({ classifier: { b: null, tau: 0 } }),
@@ -713,7 +745,7 @@ test("fit: a day-one three-TSV fixture writes an estimates-only table, and --che
   const sha = p.git("rev-parse", "HEAD");
   assert.match(r.stdout, new RegExp(`fitted 3 Pulls at ${sha.slice(0, 8)};.*; cells slow-high m n=1 merged=1 failed=1 usd_per_merged=1.00 minutes_per_merged=1.00 excluded=0 left_out=0 unpriced=0 untimed=0, `));
   const table = JSON.parse(readFileSync(p.table, "utf8"));
-  assert.deepEqual(table.rows, { "*": "slow-high" }, "no cell has n>=20 yet, so no row is adopted");
+  assert.deepEqual(table.rows.cost, { "*": "slow-high" }, "no cell has n>=20 yet, so no row is adopted");
   assert.equal(table.burn_in, true);
   assert.equal(table.stage, 1);
   assert.equal(table.n_rows, 3);
@@ -750,7 +782,8 @@ test("fit: an older generation prints on its own `(older)` segment with its own 
   const p = fitWorld(t, { features: [a1, a2, b, x], members, verdicts });
   const r = fitCli(p);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /; cells smol-high - n=0 merged=0 failed=0 usd_per_merged=- minutes_per_merged=- excluded=1 left_out=0 unpriced=0 untimed=0, task-high model-b n=1 merged=1 failed=0 usd_per_merged=1\.00 minutes_per_merged=1\.00 excluded=0 left_out=0 unpriced=0 untimed=0, task-high model-a \(older\) n=2 merged=2 failed=0 usd_per_merged=3\.00 minutes_per_merged=2\.00\nticket-router: row \* slow-high unjudged\n/);
+  assert.match(r.stdout, /; cells smol-high - n=0 merged=0 failed=0 usd_per_merged=- minutes_per_merged=- excluded=1 left_out=0 unpriced=0 untimed=0, task-high model-b n=1 merged=1 failed=0 usd_per_merged=1\.00 minutes_per_merged=1\.00 excluded=0 left_out=0 unpriced=0 untimed=0, task-high model-a \(older\) n=2 merged=2 failed=0 usd_per_merged=3\.00 minutes_per_merged=2\.00\nticket-router: row cost \* slow-high unjudged\n/);
+  assert.match(r.stdout, /\nticket-router: row speed \* slow-high unjudged\n/, "the fit prints the speed set too");
   const task = JSON.parse(readFileSync(p.table, "utf8")).estimates["*"]["task-high"];
   assert.deepEqual([task.generation, task.fix_rounds, task.older["model-a"].fix_rounds], ["model-b", 0, 1]);
 });
@@ -777,7 +810,8 @@ test("--check fails when the checked-in table is not a re-fit of its rows", (t) 
   assert.equal(fitCli(p).status, 0);
   const good = JSON.parse(readFileSync(p.table, "utf8"));
   for (const [what, edit] of [
-    ["a hand-adopted row", (x) => { x.rows["*"] = "task-high"; }],
+    ["a hand-adopted row", (x) => { x.rows.cost["*"] = "task-high"; }],
+    ["a hand-adopted speed row", (x) => { x.rows.speed["*"] = "smol-high"; }],
     ["burn-in switched off by hand", (x) => { x.burn_in = false; }],
     ["an edited estimate", (x) => { x.estimates["*"]["task-high"].n = 30; }],
     ["an edited minutes per merged PR", (x) => { x.estimates["*"]["task-high"].minutes_per_merged = 2; }],
@@ -1044,8 +1078,8 @@ const atN = { tripped: [], n: { "slow-high": 20, "task-high": 20, "smol-high": 2
 
 test("fit: adopts the cheapest cell at n>=20 under 0.75x the default's $/merged PR, reliably cheaper and above the quality floor", () => {
   const next = fitTable({ prior: baseTable({ burn_in: true }), ...direct(adoptionInput({ cheapFails: false })), guard: atN });
-  assert.equal(next.rows["*"], "smol-high");
-  assert.equal(next.rows.light, "smol-high", "a stratum with both sides at n>=20 gets its own row");
+  assert.equal(next.rows.cost["*"], "smol-high");
+  assert.equal(next.rows.cost.light, "smol-high", "a stratum with both sides at n>=20 gets its own row");
   assert.equal(next.stage, 2, "an adoption with every stage-1 cell at n advances the stage");
   assert.deepEqual(next.cells, [...STAGE1, "slow-medium", "task-max"]);
   // Burn-in ends only when EVERY cell in `cells` has n>=20, and the stage-2
@@ -1057,30 +1091,30 @@ test("fit: re-tests the quality floor per row — a cell under it is refused the
   // Every smol-high PR fails the floor, and the guard has tripped nothing.
   const next = fitTable({ prior: baseTable({ burn_in: true }), ...direct(adoptionInput({ cheapFails: true })), guard: atN });
   assert.equal(next.estimates["*"]["smol-high"].fail_rate, 1);
-  assert.deepEqual(next.rows, { "*": "slow-high", light: "slow-high" });
-  assert.deepEqual(next.reasons["*"].cells["smol-high"], { verdict: "under-floor", under_floor: true, bar: 0.15, range: [-8, -8] });
-  assert.equal(next.reasons["*"].reason, "no-qualifier");
+  assert.deepEqual(next.rows.cost, { "*": "slow-high", light: "slow-high" });
+  assert.deepEqual(next.reasons.cost["*"].cells["smol-high"], { verdict: "under-floor", under_floor: true, bar: 0.15, range: [-8, -8] });
+  assert.equal(next.reasons.cost["*"].reason, "no-qualifier");
   assert.equal(next.stage, 1, "a refusal by the floor is neither an adoption nor a trip: the stage holds");
 });
 
 test("fit: no adoption above the 0.75x margin, for a tripped cell, or below n=20 — the default stays", () => {
   const above = fitTable({ prior: baseTable({ burn_in: true }), ...direct(adoptionInput({ cheapFails: false, cheapUsd: 8 })), guard: atN });
-  assert.deepEqual(above.rows, { "*": "slow-high", light: "slow-high" });
+  assert.deepEqual(above.rows.cost, { "*": "slow-high", light: "slow-high" });
   assert.equal(above.burn_in, false, "every stage-1 cell has pooled n>=20 in the guard");
   assert.equal(above.stage, 1, "no adoption and no eviction: the stage holds");
   const tripped = fitTable({ prior: baseTable(), ...direct(adoptionInput({ cheapFails: false })), guard: { ...atN, tripped: ["smol-high"] } });
-  assert.deepEqual(tripped.rows, { "*": "slow-high" });
+  assert.deepEqual(tripped.rows.cost, { "*": "slow-high" });
   assert.equal(tripped.stage, 2, "an eviction with every stage-1 cell at n advances the stage too");
   assert.deepEqual(tripped.cells, [...STAGE1, "slow-medium", "task-max"]);
   const small = fitTable({ prior: baseTable(), ...direct(adoptionInput({ cheapFails: false, n: 19 })), guard: atN });
-  assert.deepEqual(small.rows, { "*": "slow-high" });
+  assert.deepEqual(small.rows.cost, { "*": "slow-high" });
   // A booked row with no cost on record makes its Pull unpriced: out of the cell's n, so the cell falls under n=20.
   const input = adoptionInput({ cheapFails: false });
   input.members[30].cost = "";
   const unpriced = fitTable({ prior: baseTable(), ...direct(input), guard: atN });
   const smol = unpriced.estimates["*"]["smol-high"];
   assert.deepEqual([smol.n, smol.unpriced, smol.usd_per_merged], [19, 1, 2]);
-  assert.deepEqual(unpriced.rows, { "*": "slow-high" });
+  assert.deepEqual(unpriced.rows.cost, { "*": "slow-high" });
 });
 
 test("fit: a non-exploration row a live B classifier routed is the A/B's test set, not fit input", () => {
@@ -1478,36 +1512,36 @@ test("fit: a cell at exactly 0.75x the default's $ per merged PR is adopted", ()
   const next = fitDirect(cellInput([["slow-high", 10], ["smol-high", 7.5]]));
   assert.equal(next.estimates["*"]["smol-high"].usd_per_merged, 7.5);
   assert.equal(next.estimates["*"]["slow-high"].usd_per_merged, 10);
-  assert.equal(next.rows["*"], "smol-high");
+  assert.equal(next.rows.cost["*"], "smol-high");
 });
 
 test("fit: a cell just above 0.75x the default's $ per merged PR is not adopted", () => {
   const next = fitDirect(cellInput([["slow-high", 10], ["smol-high", 7.6]]));
   assert.equal(next.estimates["*"]["smol-high"].usd_per_merged, 7.6);
-  assert.equal(next.rows["*"], "slow-high");
+  assert.equal(next.rows.cost["*"], "slow-high");
 });
 
 test("fit: equally cheap candidates break the tie by cell name, whatever their order in `cells`", () => {
   // `cells` lists task-high before smol-high; the name order is the reverse.
   const next = fitDirect(cellInput([["slow-high", 10], ["task-high", 2], ["smol-high", 2]]));
-  assert.equal(next.rows["*"], "smol-high");
+  assert.equal(next.rows.cost["*"], "smol-high");
 });
 
 test("fit: the cheapest candidate is the one adopted, wherever it sits in `cells`", () => {
   const lastCheapest = fitDirect(cellInput([["slow-high", 10], ["task-high", 5], ["smol-high", 3]]));
-  assert.equal(lastCheapest.rows["*"], "smol-high");
+  assert.equal(lastCheapest.rows.cost["*"], "smol-high");
   const firstCheapest = fitDirect(cellInput([["slow-high", 10], ["task-high", 3], ["smol-high", 5]]));
-  assert.equal(firstCheapest.rows["*"], "task-high");
+  assert.equal(firstCheapest.rows.cost["*"], "task-high");
 });
 
 test("fit: a stratum with no default cell on record adopts nothing", () => {
   const next = fitDirect(cellInput([["smol-high", 2]]));
-  assert.deepEqual(next.rows, { "*": "slow-high" });
+  assert.deepEqual(next.rows.cost, { "*": "slow-high" });
 });
 
 test("fit: a stratum whose default cell is below n=20 adopts nothing", () => {
   const next = fitDirect(cellInput([["slow-high", 10, 19], ["smol-high", 2]]));
-  assert.deepEqual(next.rows, { "*": "slow-high" });
+  assert.deepEqual(next.rows.cost, { "*": "slow-high" });
 });
 
 test("fit: an unpriced default-cell Pull leaves the stratum below n=20, so it adopts nothing, even from a cell that cost nothing", () => {
@@ -1516,12 +1550,12 @@ test("fit: an unpriced default-cell Pull leaves the stratum below n=20, so it ad
   const next = fitDirect(input);
   assert.deepEqual([next.estimates["*"]["slow-high"].n, next.estimates["*"]["slow-high"].unpriced], [19, 1]);
   assert.equal(next.estimates["*"]["smol-high"].usd_per_merged, 0);
-  assert.deepEqual(next.rows, { "*": "slow-high" });
+  assert.deepEqual(next.rows.cost, { "*": "slow-high" });
 });
 
 test("fit: stage 2 waits until every stage-1 cell is at n>=20, even with an adoption in hand", () => {
   const next = fitDirect(cellInput([["slow-high", 10], ["smol-high", 2]]), { n: { ...stage1AtN, "task-high": 19 } });
-  assert.equal(next.rows["*"], "smol-high");
+  assert.equal(next.rows.cost["*"], "smol-high");
   assert.equal(next.stage, 1);
   assert.deepEqual(next.cells, STAGE1);
 });
@@ -1554,22 +1588,25 @@ test("fit: stage 2 adds no effort cell on a role the table holds no stage-1 cell
 
 // Pulls by spec entry, each its own ticket: `merged` Pulls ruled a pass, the first `failed` of them minting a
 // false claim, then `hollow` Pulls that never merged. Each implementer is booked at the next of `usd`, a number
-// or a list taken in turn. `heavy` puts the entry's Pulls in the heavy stratum, else they are light.
+// or a list taken in turn, and worked the next of `work` seconds, likewise. `heavy` puts the entry's Pulls in
+// the heavy stratum, else they are light.
 function rowInput(spec) {
   const features = [];
   const members = [];
   const verdicts = [];
   let ticket = 100;
-  for (const { cell, heavy = false, merged = 20, failed = 0, usd = 10, hollow = 0 } of spec) {
+  for (const { cell, heavy = false, merged = 20, failed = 0, usd = 10, work = 60, hollow = 0 } of spec) {
     const costs = [usd].flat();
+    const works = [work].flat();
     for (let i = 0; i < merged + hollow; i++, ticket++) {
       const f = exploring({ ticket: String(ticket), chosen_cell: cell, brief_chars: heavy ? "5000" : "100" });
       features.push(f);
       const cost = String(costs[i % costs.length]);
+      const work_s = String(works[i % works.length]);
       if (i < merged) {
-        members.push(implementer(f, { pr: String(ticket + 1000), ending: "pr", cost }));
+        members.push(implementer(f, { pr: String(ticket + 1000), ending: "pr", cost, work_s }));
         verdicts.push(ruled(ticket, ticket + 1000, { minted_false_claim: i < failed ? "yes" : "no" }));
-      } else members.push(implementer(f, { ending: "hollow", cost }));
+      } else members.push(implementer(f, { ending: "hollow", cost, work_s }));
     }
   }
   return { features, members, verdicts };
@@ -1580,14 +1617,14 @@ const tooFew = { verdict: "too-few", under_floor: null, bar: null, range: null }
 test("fit: at the bar — 8 of 20 failed against slow-high's 5 of 20 is exactly 15 points, under the floor; 7 of 20 is adopted", () => {
   const at = (failed) => fitRows([{ cell: "slow-high", failed: 5 }, { cell: "task-high", failed, usd: 5 }]);
   const under = at(8);
-  assert.deepEqual(under.reasons.light.cells["task-high"], { verdict: "under-floor", under_floor: true, bar: 0.4, range: [-5, -5] });
-  assert.deepEqual([under.rows.light, under.reasons.light.reason], ["slow-high", "no-qualifier"]);
+  assert.deepEqual(under.reasons.cost.light.cells["task-high"], { verdict: "under-floor", under_floor: true, bar: 0.4, range: [-5, -5] });
+  assert.deepEqual([under.rows.cost.light, under.reasons.cost.light.reason], ["slow-high", "no-qualifier"]);
   const over = at(7);
-  assert.deepEqual(over.reasons.light.cells["task-high"], { verdict: "qualifies", under_floor: false, bar: 0.4, range: [-5, -5] });
-  assert.deepEqual([over.rows.light, over.reasons.light.reason], ["task-high", "sole-qualifier"]);
+  assert.deepEqual(over.reasons.cost.light.cells["task-high"], { verdict: "qualifies", under_floor: false, bar: 0.4, range: [-5, -5] });
+  assert.deepEqual([over.rows.cost.light, over.reasons.cost.light.reason], ["task-high", "sole-qualifier"]);
   // The floor is checked before the price: at $9 against $10 task-high is too dear as well, and reads under the floor.
   const both = fitRows([{ cell: "slow-high", failed: 5 }, { cell: "task-high", failed: 8, usd: 9 }]);
-  assert.deepEqual(both.reasons.light.cells["task-high"], { verdict: "under-floor", under_floor: true, bar: 0.4, range: [-1, -1] });
+  assert.deepEqual(both.reasons.cost.light.cells["task-high"], { verdict: "under-floor", under_floor: true, bar: 0.4, range: [-1, -1] });
 });
 
 test("fit: the floor is per row — a cell under it in light alone is refused light, which keeps a slow-high row of its own while heavy and `*` adopt the cell", () => {
@@ -1595,8 +1632,8 @@ test("fit: the floor is per row — a cell under it in light alone is refused li
     { cell: "slow-high" }, { cell: "task-high", failed: 3, usd: 5 },
     { cell: "slow-high", heavy: true }, { cell: "task-high", heavy: true, usd: 5 },
   ]);
-  assert.deepEqual(next.rows, { "*": "task-high", light: "slow-high", heavy: "task-high" });
-  assert.deepEqual(Object.fromEntries(Object.entries(next.reasons).map(([s, r]) => [s, [r.cell, r.reason, r.cells["task-high"].verdict]])), {
+  assert.deepEqual(next.rows.cost, { "*": "task-high", light: "slow-high", heavy: "task-high" });
+  assert.deepEqual(Object.fromEntries(Object.entries(next.reasons.cost).map(([s, r]) => [s, [r.cell, r.reason, r.cells["task-high"].verdict]])), {
     "*": ["task-high", "sole-qualifier", "qualifies"],
     light: ["slow-high", "no-qualifier", "under-floor"],
     heavy: ["task-high", "sole-qualifier", "qualifies"],
@@ -1607,12 +1644,12 @@ test("fit: a stratum with no untripped candidate at 20 merged PRs gets no row an
   const heavy = [{ cell: "slow-high", heavy: true }, { cell: "task-high", heavy: true, usd: 5 }];
   const few = fitRows([{ cell: "slow-high" }, { cell: "task-high", merged: 19, hollow: 1, usd: 5 }, ...heavy]);
   assert.deepEqual(few.estimates.light["task-high"].n, 20, "20 counted Pulls, 19 of them merged");
-  assert.deepEqual(few.rows, { "*": "task-high", heavy: "task-high" });
-  assert.deepEqual(few.reasons.light, { cell: null, reason: "unjudged", cells: { "task-high": tooFew, "smol-high": tooFew }, pairs: [] });
+  assert.deepEqual(few.rows.cost, { "*": "task-high", heavy: "task-high" });
+  assert.deepEqual(few.reasons.cost.light, { cell: null, reason: "unjudged", cells: { "task-high": tooFew, "smol-high": tooFew }, pairs: [] });
   const tripped = fitRows([{ cell: "slow-high" }, { cell: "task-high", usd: 5 }, ...heavy], { tripped: ["task-high"] });
-  assert.deepEqual(tripped.rows, { "*": "slow-high" });
-  assert.deepEqual(tripped.reasons.light.cells["task-high"], { ...tooFew, verdict: "tripped" });
-  assert.equal(tripped.reasons["*"].reason, "unjudged");
+  assert.deepEqual(tripped.rows.cost, { "*": "slow-high" });
+  assert.deepEqual(tripped.reasons.cost.light.cells["task-high"], { ...tooFew, verdict: "tripped" });
+  assert.equal(tripped.reasons.cost["*"].reason, "unjudged");
 });
 
 test("fit: MIN_N counts merged PRs — slow-high with 20 counted Pulls but 19 merged leaves light without a row; at 20 merged light is judged", () => {
@@ -1622,27 +1659,27 @@ test("fit: MIN_N counts merged PRs — slow-high with 20 counted Pulls but 19 me
   ];
   const short = fitRows(spec({ merged: 19, hollow: 1 }));
   assert.deepEqual([short.estimates.light["slow-high"].n, short.estimates.light["slow-high"].merged], [20, 19]);
-  assert.equal("light" in short.rows, false);
-  assert.deepEqual(short.reasons.light, { cell: null, reason: "unjudged", cells: {}, pairs: [] });
+  assert.equal("light" in short.rows.cost, false);
+  assert.deepEqual(short.reasons.cost.light, { cell: null, reason: "unjudged", cells: {}, pairs: [] });
   const judged = fitRows(spec({ merged: 20, hollow: 1 }));
-  assert.deepEqual([judged.rows.light, judged.reasons.light.reason], ["task-high", "sole-qualifier"]);
+  assert.deepEqual([judged.rows.cost.light, judged.reasons.cost.light.reason], ["task-high", "sole-qualifier"]);
 });
 
 test("fit: a candidate at or under 0.75x whose range spans zero, or whose upper end reads 0 or −0, is not adopted — the row is slow-high", () => {
   for (const [usd, range] of [[[0, 14], null], [[1, 13], [-5.4, 0]], [[0, 13.33], [-6, 0]]]) {
     const next = fitRows([{ cell: "slow-high" }, { cell: "task-high", usd }]);
-    const c = next.reasons["*"].cells["task-high"];
+    const c = next.reasons.cost["*"].cells["task-high"];
     assert.ok(next.estimates["*"]["task-high"].usd_per_merged <= 7.5, `${usd} is at or under the ratio`);
     assert.equal(c.verdict, "not-reliably-cheaper", `${usd}: ${c.range}`);
     if (range === null) assert.ok(c.range[0] < 0 && c.range[1] > 0, `${usd} spans zero: ${c.range}`);
     else assert.ok(Object.is(c.range[1], 0) && c.range[0] === range[0], `${usd} ends at 0: ${c.range}`);
-    assert.deepEqual(next.rows, { "*": "slow-high", light: "slow-high" });
-    assert.equal(next.reasons["*"].reason, "no-qualifier");
+    assert.deepEqual(next.rows.cost, { "*": "slow-high", light: "slow-high" });
+    assert.equal(next.reasons.cost["*"].reason, "no-qualifier");
   }
 });
 
 test("fit: two qualifiers — the reliably cheaper wins whatever the fail rates; else the lower fail rate, then the lower $, then the name", () => {
-  const two = (task, smol) => fitRows([{ cell: "slow-high" }, { cell: "task-high", ...task }, { cell: "smol-high", ...smol }]).reasons["*"];
+  const two = (task, smol) => fitRows([{ cell: "slow-high" }, { cell: "task-high", ...task }, { cell: "smol-high", ...smol }]).reasons.cost["*"];
   const reliably = two({ usd: 4, failed: 2 }, { usd: 6 });
   assert.deepEqual([reliably.cell, reliably.reason], ["task-high", "reliably-cheaper"]);
   assert.deepEqual(reliably.pairs, [{ cheaper: "task-high", other: "smol-high", range: [-2, -2] }]);
@@ -1662,7 +1699,7 @@ test("fit: three qualifiers — a cell another qualifier is reliably cheaper tha
   const prior = baseTable({ cells: [...STAGE1, "task-max"] });
   const r = fitRows([
     { cell: "slow-high" }, { cell: "smol-high", usd: 3, failed: 2 }, { cell: "task-max", usd: [1, 7], failed: 1 }, { cell: "task-high", usd: 6 },
-  ], {}, prior).reasons["*"];
+  ], {}, prior).reasons.cost["*"];
   assert.deepEqual(Object.values(r.cells).map((c) => c.verdict), ["qualifies", "qualifies", "qualifies"]);
   assert.equal(r.pairs.length, 3);
   assert.deepEqual(r.pairs.find((x) => x.other === "task-high"), { cheaper: "smol-high", other: "task-high", range: [-3, -3] });
@@ -1671,15 +1708,15 @@ test("fit: three qualifiers — a cell another qualifier is reliably cheaper tha
 
 test("fit: a prior table that records a cell under the floor has no effect on a fit whose figures put the cell above it", () => {
   const refused = { cell: "slow-high", reason: "no-qualifier", cells: { "task-high": { verdict: "under-floor", under_floor: true, bar: 0.15, range: [-5, -5] } }, pairs: [] };
-  const prior = baseTable({ rows: { "*": "slow-high", light: "slow-high" }, reasons: { "*": refused, light: refused } });
+  const prior = baseTable({ rows: both({ "*": "slow-high", light: "slow-high" }), reasons: both({ "*": refused, light: refused }) });
   const next = fitRows([{ cell: "slow-high" }, { cell: "task-high", usd: 5 }], {}, prior);
-  assert.deepEqual(next.rows, { "*": "task-high", light: "task-high" });
-  assert.equal(next.reasons.light.cells["task-high"].under_floor, false);
+  assert.deepEqual(next.rows.cost, { "*": "task-high", light: "task-high" });
+  assert.equal(next.reasons.cost.light.cells["task-high"].under_floor, false);
 });
 
 test("route: an exploration Pull on a light ticket can draw a cell under the floor in light; a tripped cell is never drawn", () => {
   const refused = { cell: "slow-high", reason: "no-qualifier", cells: { "task-high": { verdict: "under-floor", under_floor: true, bar: 0.4, range: [-5, -5] } }, pairs: [] };
-  const table = baseTable({ rows: { "*": "task-high", light: "slow-high" }, reasons: { "*": { ...refused, cell: "task-high", reason: "sole-qualifier" }, light: refused } });
+  const table = baseTable({ rows: both({ "*": "task-high", light: "slow-high" }), reasons: both({ "*": { ...refused, cell: "task-high", reason: "sole-qualifier" }, light: refused }) });
   const drawn = (guard) => new Set(Array.from({ length: 40 }, (_, i) => /CELL=(\S+)/.exec(routeIn({ arm: "A", ticket: i + 1, implRow: 5, table, guard }).line)[1]));
   assert.ok(drawn(readGuard(guardFile())).has("task-high"), "the floor never takes a cell out of the draw");
   const tripped = drawn(readGuard(guardFile({ tripped: ["task-high"] })));
@@ -1691,18 +1728,22 @@ test("fit prints one line per row, its cell and reason, and --check exits 1 on a
   const p = fitWorld(t, rowInput([{ cell: "slow-high" }, { cell: "task-high", usd: 4 }, { cell: "smol-high", usd: 6 }]));
   const r = fitCli(p);
   assert.equal(r.status, 0, r.stderr);
-  const row = (s) => `ticket-router: row ${s} task-high reliably-cheaper \\(task-high qualifies \\[-6\\.00, -6\\.00\\], smol-high qualifies \\[-4\\.00, -4\\.00\\]\\)\n`;
-  assert.match(r.stdout, new RegExp(`\n${row("\\*")}${row("light")}$`));
+  const row = (s) => `ticket-router: row cost ${s} task-high reliably-cheaper \\(task-high qualifies \\[-6\\.00, -6\\.00\\], smol-high qualifies \\[-4\\.00, -4\\.00\\]\\)\n`;
+  const speed = (s) => `ticket-router: row speed ${s} task-high no-qualifier \\(slow-high too-slow \\[0\\.00, 0\\.00\\], smol-high too-slow \\[0\\.00, 0\\.00\\]\\)\n`;
+  assert.match(r.stdout, new RegExp(`\n${row("\\*")}${row("light")}${speed("\\*")}${speed("light")}$`));
   const good = JSON.parse(readFileSync(p.table, "utf8"));
   for (const [what, edit] of [
-    ["a row's reason", (x) => { x.reasons["*"].reason = "lower-usd"; }],
-    ["a row's recorded cell", (x) => { x.reasons.light.cell = "smol-high"; }],
-    ["a cell's verdict", (x) => { x.reasons["*"].cells["smol-high"].verdict = "too-dear"; }],
-    ["a cell's under_floor", (x) => { x.reasons["*"].cells["smol-high"].under_floor = true; }],
-    ["a cell's bar", (x) => { x.reasons["*"].cells["smol-high"].bar = 0.2; }],
-    ["a cell's range", (x) => { x.reasons["*"].cells["task-high"].range[1] = -5.99; }],
-    ["a pair's range", (x) => { x.reasons["*"].pairs[0].range[0] = -2.01; }],
-    ["a row's record dropped", (x) => { delete x.reasons.light; }],
+    ["a row's reason", (x) => { x.reasons.cost["*"].reason = "lower-usd"; }],
+    ["a row's recorded cell", (x) => { x.reasons.cost.light.cell = "smol-high"; }],
+    ["a cell's verdict", (x) => { x.reasons.cost["*"].cells["smol-high"].verdict = "too-dear"; }],
+    ["a cell's under_floor", (x) => { x.reasons.cost["*"].cells["smol-high"].under_floor = true; }],
+    ["a cell's bar", (x) => { x.reasons.cost["*"].cells["smol-high"].bar = 0.2; }],
+    ["a cell's range", (x) => { x.reasons.cost["*"].cells["task-high"].range[1] = -5.99; }],
+    ["a pair's range", (x) => { x.reasons.cost["*"].pairs[0].range[0] = -2.01; }],
+    ["a row's record dropped", (x) => { delete x.reasons.cost.light; }],
+    ["a speed row's reason", (x) => { x.reasons.speed["*"].reason = "fewer-minutes"; }],
+    ["a speed cell's verdict", (x) => { x.reasons.speed["*"].cells["smol-high"].verdict = "qualifies"; }],
+    ["a speed row's record dropped", (x) => { delete x.reasons.speed.light; }],
   ]) {
     const bad = structuredClone(good);
     edit(bad);
@@ -1718,7 +1759,121 @@ test("fit prints one line per row, its cell and reason, and --check exits 1 on a
 test("--check holds on a fit whose range ends at −0: the table records it as 0, as JSON reads it back", (t) => {
   const p = fitWorld(t, rowInput([{ cell: "slow-high" }, { cell: "task-high", usd: [0, 13.33] }]));
   assert.equal(fitCli(p).status, 0);
-  assert.deepEqual(JSON.parse(readFileSync(p.table, "utf8")).reasons["*"].cells["task-high"].range, [-6, 0]);
+  assert.deepEqual(JSON.parse(readFileSync(p.table, "utf8")).reasons.cost["*"].cells["task-high"].range, [-6, 0]);
   const check = cli(["--check", ...p.fitArgs]);
   assert.equal(check.status, 0, check.stderr);
+});
+
+// ---------------------------------------------------------------------------
+// the objective: a `speed` row set beside the `cost` one
+// ---------------------------------------------------------------------------
+
+// Work time is in seconds per implementer: 100 s a Pull is 1.67 minutes per merged PR, 70 s is 0.7 of it.
+test("fit: where task-high is the cost row's cell and slow-high takes 0.7 of its minutes, reliably, the speed row is slow-high and the cost row stays task-high", () => {
+  const next = fitRows([{ cell: "slow-high", usd: 10, work: 70 }, { cell: "task-high", usd: 5, work: 100 }]);
+  assert.equal(next.rows.cost["*"], "task-high");
+  assert.equal(next.rows.speed["*"], "slow-high");
+  assert.deepEqual(next.reasons.speed["*"].cells["slow-high"], { verdict: "qualifies", under_floor: false, bar: 0.15, range: [-0.5, -0.5] });
+  assert.deepEqual([next.reasons.speed["*"].cell, next.reasons.speed["*"].reason], ["slow-high", "sole-qualifier"]);
+  assert.deepEqual(next.reasons.speed["*"].cells["smol-high"], tooFew, "a candidate is every other cell of `cells`");
+  assert.equal(next.rows.speed.light, "slow-high", "each row with a cost row is judged");
+});
+
+test("fit: a speed row holds the cost row's cell when no candidate qualifies — 0.8 of its minutes, a range across zero, or under the floor", () => {
+  // smol-high is too dear to move the cost row in each case, so task-high is the base.
+  const base = [{ cell: "slow-high", usd: 10, work: 100, failed: 5 }, { cell: "task-high", usd: 5, work: 100, failed: 5 }];
+  const holds = (smol, verdict) => {
+    const next = fitRows([...base, { cell: "smol-high", usd: 9, failed: 5, ...smol }]);
+    assert.equal(next.rows.cost["*"], "task-high");
+    assert.equal(next.rows.speed["*"], "task-high", verdict);
+    assert.equal(next.reasons.speed["*"].reason, "no-qualifier", verdict);
+    const c = next.reasons.speed["*"].cells["smol-high"];
+    assert.equal(c.verdict, verdict);
+    return c;
+  };
+  assert.ok(holds({ work: 80 }, "too-slow").range[1] < 0, "its range lies wholly below zero, and 0.8 still does not qualify");
+  const crossing = holds({ work: [0, 0, 0, 280] }, "not-reliably-faster");
+  assert.ok(crossing.range[0] < 0 && crossing.range[1] > 0, `0.7 of the base's minutes, a range across zero: ${crossing.range}`);
+  const under = holds({ work: 70, failed: 8 }, "under-floor");
+  assert.deepEqual([under.under_floor, under.bar], [true, 0.4], "the floor is slow-high's, not the base's");
+  assert.equal(holds({ work: 100 }, "too-slow").range[1], 0, "the same minutes are no faster");
+});
+
+test("fit: between two speed qualifiers with no reliable difference the lower fail rate wins, then fewer minutes, then the name", () => {
+  // slow-high is the cost row's cell in every case: neither candidate is cheaper.
+  const pick = (task, smol) => fitRows([{ cell: "slow-high", work: 100 }, { cell: "task-high", ...task }, { cell: "smol-high", ...smol }]).reasons.speed["*"];
+  const fails = pick({ work: [40, 60], failed: 2 }, { work: [40, 60], failed: 1 });
+  assert.deepEqual([fails.cell, fails.reason], ["smol-high", "lower-fail-rate"]);
+  assert.ok(fails.pairs.every((p) => p.range[1] >= 0), "no qualifier is reliably faster than the other");
+  const minutes = pick({ work: [40, 60] }, { work: [44, 60] });
+  assert.deepEqual([minutes.cell, minutes.reason], ["task-high", "fewer-minutes"]);
+  assert.deepEqual(minutes.pairs.map((p) => [p.faster, p.other]), [["task-high", "smol-high"]]);
+  const name = pick({ work: 50 }, { work: 50 });
+  assert.deepEqual([name.cell, name.reason], ["smol-high", "name"]);
+  const reliably = pick({ work: 30 }, { work: 50 });
+  assert.deepEqual([reliably.cell, reliably.reason], ["task-high", "reliably-faster"]);
+});
+
+test("fit: a stratum with no cost row has no speed row and follows `*`", () => {
+  // light's slow-high is short of MIN_N, so light has no cost row; heavy and `*` do.
+  const next = fitRows([
+    { cell: "slow-high", merged: 5 }, { cell: "task-high", usd: 5, work: 30, merged: 5 },
+    { cell: "slow-high", heavy: true }, { cell: "task-high", heavy: true, usd: 5, work: 30 },
+  ]);
+  assert.equal("light" in next.rows.cost, false);
+  assert.equal("light" in next.rows.speed, false);
+  assert.deepEqual(next.reasons.speed.light, { cell: null, reason: "unjudged", cells: {}, pairs: [] });
+  assert.deepEqual([next.rows.cost.heavy, next.rows.speed.heavy], ["task-high", "task-high"]);
+});
+
+test("fit: with every stage-1 cell at MIN_N, stage 2 opens when only the speed `*` row has left slow-high", () => {
+  const input = rowInput([{ cell: "slow-high", work: 100 }, { cell: "task-high", work: 30 }, { cell: "smol-high", work: 100 }]);
+  const next = fitTable({ prior: baseTable({ burn_in: true }), ...direct(input), guard: atN });
+  assert.deepEqual([next.rows.cost["*"], next.rows.speed["*"]], ["slow-high", "task-high"]);
+  assert.equal(next.stage, 2);
+  assert.deepEqual(next.cells, [...STAGE1, "slow-medium", "task-max"]);
+  const neither = fitTable({ prior: baseTable({ burn_in: true }), ...direct(rowInput([{ cell: "slow-high" }, { cell: "task-high" }, { cell: "smol-high" }])), guard: atN });
+  assert.deepEqual([neither.rows.cost["*"], neither.rows.speed["*"], neither.stage], ["slow-high", "slow-high", 1]);
+});
+
+test("route: a speed run routes by the speed rows and a cost run by the cost rows; the exploration draw is the same under both", () => {
+  const table = baseTable({ rows: both({ "*": "task-high" }, { "*": "smol-high" }) });
+  assert.equal(routeIn({ arm: "A", table, objective: "cost" }).line, "POLICY=task-high CELL=task-high DRAW=- STRATUM=light OBJECTIVE=cost REASON=ok");
+  const speed = routeIn({ arm: "A", table, objective: "speed" });
+  assert.equal(speed.line, "POLICY=smol-high CELL=smol-high DRAW=- STRATUM=light OBJECTIVE=speed REASON=ok");
+  assert.equal(speed.row.objective, "speed");
+  const draws = (objective, over = {}) => Array.from({ length: 30 }, (_, i) => {
+    const { line } = routeIn({ arm: "A", ticket: i + 1, implRow: 5, table: { ...table, ...over }, objective });
+    return /CELL=\S+ DRAW=\S+/.exec(line)[0];
+  });
+  assert.deepEqual(draws("speed"), draws("cost"));
+  assert.ok(draws("cost").every((d) => !d.startsWith("CELL=task-high")), "the draw leaves out the cost row's cell");
+  assert.deepEqual(draws("speed", { burn_in: true }), draws("cost", { burn_in: true }));
+});
+
+test("route: arm B reads the run's own row set — not live when that set is all slow-high, whatever the other set holds", () => {
+  const table = baseTable({ classifier: { b: "haiku", tau: null }, rows: both({ "*": "slow-high" }, { "*": "slow-high", heavy: "task-high" }) });
+  assert.equal(bArmLive(table, "cost"), false);
+  assert.equal(bArmLive(table, "speed"), true);
+  assert.equal(routeIn({ table, objective: "cost", sizing: haikuSizing }).row.sizing_src, "rule");
+  assert.equal(routeIn({ table, objective: "speed", sizing: haikuSizing }).line, "POLICY=slow-high CELL=task-high DRAW=- STRATUM=heavy OBJECTIVE=speed REASON=ok");
+});
+
+test("route: the features row and the line carry the objective, and a features file written before the column reads it blank", (t) => {
+  const p = world(t);
+  const r = routeCli(p, { objective: "speed" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(parseLine(r.stdout).OBJECTIVE, "speed");
+  assert.equal(parseFeatures(readFileSync(p.pending, "utf8"))[0].objective, "speed");
+  const older = COLUMNS.filter((c) => c !== "objective");
+  const [row] = parseFeatures(`${older.join("\t")}\n${formatFeatureRow({ ticket: "7", chosen_cell: "slow-high" }).split("\t").slice(0, -1).join("\t")}\n`);
+  assert.deepEqual([row.ticket, row.objective], ["7", ""]);
+});
+
+test("route: --objective names cost or speed, else exit 2 and nothing is recorded", (t) => {
+  const p = world(t);
+  const bogus = routeCli(p, { objective: "fast" });
+  assert.equal(bogus.status, 2);
+  assert.match(bogus.stderr, /--objective fast is not cost or speed/);
+  assert.equal(existsSync(p.pending), false, "nothing is recorded");
 });

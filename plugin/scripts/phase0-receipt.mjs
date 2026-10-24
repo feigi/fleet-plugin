@@ -1,7 +1,8 @@
 // The phase-0 receipt, read. `.fleet/phase0.json` is written by phase0.mjs
 // after every step (its header gives the shape); this module is its readers'
 // half: the tick's dispatch gate, the session directory tier-check.mjs
-// and ticket-router.mjs take when their own flag is omitted, and the In-flight
+// and ticket-router.mjs take when their own flag is omitted, the Objective
+// ticket-router.mjs takes likewise, with its default, and the In-flight
 // bound the drivers hand the tick, with its default. One reading of the file,
 // so the gate and the session readers cannot disagree about what a receipt is.
 //
@@ -143,6 +144,25 @@ export function sessionFromReceipt(opts) {
     : read.state === "unreadable" ? `unreadable: ${read.why}`
     : "it records no session";
   throw new Error(`no session given and none in the phase-0 receipt ${path} (${why}) — give one, or run ${phase0Command(null)} first`);
+}
+
+// What a run asks the router to minimise, and the one it asks when nobody
+// names one. phase0.mjs records the run's in its receipt; a receipt written
+// before it recorded one is read as the default when phase 0 resumes it.
+export const OBJECTIVES = Object.freeze(["cost", "speed"]);
+export const OBJECTIVE_DEFAULT = "cost";
+
+/**
+ * The Objective the receipt records, for a reader whose own flag was omitted.
+ * Throws an Error naming the receipt when it has none to give.
+ */
+export function objectiveFromReceipt(opts) {
+  const { path, read } = readRunReceipt(opts);
+  if (read.state === "ok" && OBJECTIVES.includes(read.receipt.objective)) return read.receipt.objective;
+  const why = read.state === "missing" ? "no receipt"
+    : read.state === "unreadable" ? `unreadable: ${read.why}`
+    : "it records no objective";
+  throw new Error(`no objective given and none in the phase-0 receipt ${path} (${why}) — give one (${OBJECTIVES.join(" or ")}), or run ${phase0Command(null)} first`);
 }
 
 // The In-flight bound a run takes when nobody gives one: the most tickets

@@ -360,7 +360,9 @@ test("checkRoutes: every real plugin/agents definition routes cleanly, and the i
 // the role's target does not run is a notice there, a violation anywhere else.
 const MAX_WITHOUT = (id) => ({ models: CATALOG.models.map((m) => (m.id === id ? { ...m, thinking: ADAPTIVE.filter((l) => l !== "max") } : m)) });
 const NO_TASK_MAX = MAX_WITHOUT("claude-sonnet-5");
-const TABLE = { cells: [POLICY_CELL, "task-high", "smol-high"], rows: { "*": POLICY_CELL } };
+// A router table's `rows`: one row set per objective, the speed set the cost set's unless named.
+const sets = (cost, speed = cost) => ({ cost, speed });
+const TABLE = { cells: [POLICY_CELL, "task-high", "smol-high"], rows: sets({ "*": POLICY_CELL }) };
 const TASK_MAX_DEFS = { "fleet-implementer-task-high": "@task:high", "fleet-implementer-task-max": "@task:max" };
 const TASK_MAX_MISMATCH = "fleet-implementer-task-max.agent.md: level max is not one modelRoles.task's target anthropic/claude-sonnet-5 runs at (thinking: low, medium, high, xhigh)";
 const routableOf = (table) => {
@@ -382,14 +384,14 @@ test("checkRoutes: the same level on a cell in the router table's `cells` is a v
 });
 
 test("checkRoutes: a cell a `rows` value names, absent from `cells`, is selected and so a violation", () => {
-  const table = { ...TABLE, rows: { "*": POLICY_CELL, heavy: "task-max" } };
+  const table = { ...TABLE, rows: sets({ "*": POLICY_CELL, heavy: "task-max" }) };
   const { violations, notices } = routes(TASK_MAX_DEFS, MODEL_ROLES, {}, routableOf(table), NO_TASK_MAX);
   assert.deepEqual(violations, [`${TASK_MAX_MISMATCH} — omp would clamp it silently`]);
   assert.deepEqual(notices, []);
 });
 
 test("checkRoutes: the policy cell is selected whatever the table lists, so its mismatch is a violation", () => {
-  const table = { cells: ["task-high"], rows: { "*": "task-high" } };
+  const table = { cells: ["task-high"], rows: sets({ "*": "task-high" }) };
   const { violations, notices } = routes({ [`fleet-implementer-${POLICY_CELL}`]: "@slow:max" }, MODEL_ROLES, {}, routableOf(table), MAX_WITHOUT("claude-opus-5"));
   assert.equal(violations.length, 1);
   assert.match(violations[0], new RegExp(`^fleet-implementer-${POLICY_CELL}\\.agent\\.md: level max is not one modelRoles\\.slow's target .* — omp would clamp it silently$`));
@@ -426,10 +428,16 @@ test("implementerCell: any other definition, or an implementer whose name is not
   }
 });
 
-test("routableCells: the policy cell, every `cells` entry and every `rows` value, and nothing else", () => {
-  const table = { cells: ["task-high", "smol-high"], rows: { "*": "task-high", heavy: "task-max" } };
+test("routableCells: the policy cell, every `cells` entry and every `rows` value of either objective's set, and nothing else", () => {
+  const table = { cells: ["task-high", "smol-high"], rows: sets({ "*": "task-high", heavy: "task-max" }) };
   assert.deepEqual([...routableOf(table)].sort(), [POLICY_CELL, "smol-high", "task-high", "task-max"].sort());
   assert.deepEqual([...routableOf({ cells: [], rows: {} })], [POLICY_CELL]);
+});
+
+test("routableCells: a cell only a speed row names is routable", () => {
+  const table = { cells: [POLICY_CELL, "task-high"], rows: sets({ "*": POLICY_CELL }, { "*": POLICY_CELL, light: "smol-high" }) };
+  assert.equal(routableOf(table).has("smol-high"), true);
+  assert.equal(routableOf({ ...table, rows: sets({ "*": POLICY_CELL }) }).has("smol-high"), false, "named by no row, it is not");
 });
 
 for (const [label, table, why] of [
@@ -441,9 +449,10 @@ for (const [label, table, why] of [
   ["a number `cells`", { cells: 5, rows: {} }, /`cells` is not an array of cell names/],
   ["an object `cells`", { cells: { a: 1 }, rows: {} }, /`cells` is not an array of cell names/],
   ["a `cells` array holding a non-string", { cells: ["task-high", 1], rows: {} }, /`cells` is not an array of cell names/],
-  ["an object without `rows`", { cells: [] }, /`rows` is not an object of cell names/],
-  ["an array `rows`", { cells: [], rows: ["task-high"] }, /`rows` is not an object of cell names/],
-  ["a `rows` value that is not a string", { cells: [], rows: { "*": 5 } }, /`rows` is not an object of cell names/],
+  ["an object without `rows`", { cells: [] }, /`rows` is not an object of row sets of cell names/],
+  ["an array `rows`", { cells: [], rows: ["task-high"] }, /`rows` is not an object of row sets of cell names/],
+  ["a row set that is a cell name, not an object", { cells: [], rows: { cost: "task-high" } }, /`rows` is not an object of row sets of cell names/],
+  ["a `rows` value that is not a string", { cells: [], rows: sets({ "*": 5 }) }, /`rows` is not an object of row sets of cell names/],
 ]) {
   test(`routableCells: ${label} is an Error naming the missing shape, never an empty set`, () => {
     const r = routableCells(table);

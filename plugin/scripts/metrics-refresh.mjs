@@ -14,6 +14,8 @@
 // `docs/metrics/ticket-features.tsv`, deduped on `session` + `agent`, and
 // deletes the pending file. A crash between the write and the delete leaves
 // rows the next drain finds already there, so a second run changes nothing.
+// A corpus written before a column the pending file carries — one the row
+// grammar names — gains that column, blank on every row it already holds.
 // A pending file that is empty, or blank lines only, is removed with its own
 // line: an append created it and never wrote.
 // The drain takes no lock by design: it assumes only the run's controller
@@ -59,6 +61,17 @@ const say = (line) => process.stdout.write(`${NAME}: ${line}\n`);
 const headerOf = (text) => String(text).split("\n").find((l) => l.trim() && !l.startsWith("#")).split("\t");
 const pullKey = (r) => `${r.session}\0${r.agent}`;
 
+// `text`, a features TSV, with `columns` appended: named on its header line, blank on each row.
+function widen(text, columns) {
+  let header = true;
+  return text.split("\n").map((l) => {
+    if (!l.trim() || l.startsWith("#")) return l;
+    const added = header ? columns : columns.map(() => "");
+    header = false;
+    return [l, ...added].join("\t");
+  }).join("\n");
+}
+
 function drain(repo) {
   const pending = join(repo, PENDING);
   if (!existsSync(pending)) return say(`drain: nothing pending in ${PENDING}`);
@@ -76,19 +89,21 @@ function drain(repo) {
   const target = join(repo, FEATURES);
   let text = existsSync(target) ? readFileSync(target, "utf8") : `${FEATURE_COLUMNS.join("\t")}\n`;
   const seen = new Set(parseFeatures(text).map(pullKey));
-  const header = headerOf(text);
-  const unknown = headerOf(pendingText).filter((c) => !header.includes(c));
+  const newer = headerOf(pendingText).filter((c) => !headerOf(text).includes(c));
+  const unknown = newer.filter((c) => !FEATURE_COLUMNS.includes(c));
   if (unknown.length) throw new Error(`${PENDING} carries ${unknown.join(", ")}, which ${FEATURES} has no column for`);
+  if (newer.length) text = widen(text, newer);
+  const header = headerOf(text);
   const added = [];
   for (const r of incoming) {
     if (seen.has(pullKey(r))) continue;
     seen.add(pullKey(r));
     added.push(header.map((c) => r[c] ?? "").join("\t"));
   }
-  if (added.length) {
+  if (added.length || newer.length) {
     if (!text.endsWith("\n")) text += "\n";
     mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(`${target}.tmp`, `${text}${added.join("\n")}\n`);
+    writeFileSync(`${target}.tmp`, `${text}${added.map((l) => `${l}\n`).join("")}`);
     renameSync(`${target}.tmp`, target);
   }
   unlinkSync(pending);

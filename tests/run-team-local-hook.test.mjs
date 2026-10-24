@@ -73,9 +73,11 @@ function ruled(rows, { ticket, cell = "slow-high", fail = false, date = DAY }) {
 const featuresTsv = (rows) => [FEATURE_COLUMNS.join("\t"), ...rows.map((r) => FEATURE_COLUMNS.map((c) => r[c] ?? "").join("\t"))].join("\n") + "\n";
 const membersTsv = (rows) => `# ${MEMBER_COLUMNS.join("\t")}\n${rows.length ? formatTsv(rows) : ""}`;
 const tiersTsv = (rows) => `# ${TIER_COLUMNS.join("\t")}\n${rows.map((r) => `${formatRow(r)}\n`).join("")}`;
+const unjudged = { cell: "slow-high", reason: "unjudged", cells: {}, pairs: [] };
 const routerTable = (over = {}) => ({
   window_start: null, fitted_commit: null, n_rows: 0, stage: 1, cells: [...STAGE1], burn_in: true,
-  rows: { "*": "slow-high" }, classifier: { b: null, tau: null }, estimates: {}, guard: { tripped: [], n: {} }, ...over,
+  rows: { cost: { "*": "slow-high" }, speed: { "*": "slow-high" } }, classifier: { b: null, tau: null }, estimates: {},
+  reasons: { cost: { "*": unjudged }, speed: { "*": unjudged } }, guard: { tripped: [], n: {} }, ...over,
 });
 const agentMd = (cell) => {
   const [role, level] = cell.split("-");
@@ -427,7 +429,8 @@ test("router fit --dry-run: fifty merged PRs not in fitted_commit run ticket-rou
   const a = at.run(["--dry-run"]);
   assert.equal(a.status, 0, a.stderr);
   assert.match(a.stdout, /^run-team-local: router fit: DUE=yes MERGED=50\/50 — ticket-router: fitted \d+ Pulls at [0-9a-f]{8}; .*; would open a chore PR from chore\/router-fit-\d{4}-\d{2}-\d{2}$/m);
-  assert.match(a.stdout, /^run-team-local: router fit: ticket-router: row \* slow-high unjudged /m, "each row's line follows the fit's summary, one line each");
+  assert.match(a.stdout, /^run-team-local: router fit: ticket-router: row cost \* slow-high unjudged /m, "each row's line follows the fit's summary, one line each");
+  assert.match(a.stdout, /^run-team-local: router fit: ticket-router: row speed \* slow-high unjudged /m, "the speed set's rows too");
   assert.equal(readFileSync(join(at.repo, TABLE), "utf8"), before, "the checkout's own table is untouched");
   assert.equal(worktrees(at.repo), 1, "the throwaway checkout is gone");
   assert.equal(git(at.origin, ["branch", "--list", "chore/*"]), "", "a dry run pushes nothing");
@@ -481,8 +484,8 @@ test("router fit: a due re-fit is pushed to its own chore branch and opened as a
   assert.equal(create[create.indexOf("--base") + 1], "main");
   assert.equal(create[create.indexOf("--head") + 1], branch);
   assert.equal(create[create.indexOf("--label") + 1], "patch", "labelled by the create itself, not by an edit that can fail after it");
-  assert.match(create[create.indexOf("--body") + 1], /\n\nticket-router: fitted \d+ Pulls .*\nticket-router: row \* slow-high unjudged /, "the body carries the fit's whole output: its summary, then each row's line");
-  assert.match(r.stdout, /; opened \S+ from chore\/router-fit-\S+\nrun-team-local: router fit: ticket-router: row \* slow-high unjudged /, "each row's line follows the opened line");
+  assert.match(create[create.indexOf("--body") + 1], /\n\nticket-router: fitted \d+ Pulls .*\nticket-router: row cost \* slow-high unjudged /, "the body carries the fit's whole output: its summary, then each row's line");
+  assert.match(r.stdout, /; opened \S+ from chore\/router-fit-\S+\nrun-team-local: router fit: ticket-router: row cost \* slow-high unjudged /, "each row's line follows the opened line");
   assert.deepEqual(calls(f, "pr edit"), []);
   assert.equal(git(f.repo, ["branch", "--list", "chore/*"]), "", "the checkout's repository keeps no local branch of the PR's");
   assert.doesNotMatch(git(f.repo, ["config", "--local", "--list"]), /^branch\.chore/m, "and no upstream config for it");
@@ -502,7 +505,7 @@ test("router fit: a re-fit whose `pr create` fails still prints the fit's summar
   const r = f.run();
   assert.equal(r.status, 1, r.stdout);
   assert.match(r.stderr, /run-team-local: router fit failed: .*create refused/);
-  assert.match(r.stdout, /^run-team-local: router fit: DUE=yes MERGED=50\/50 — ticket-router: fitted \d+ Pulls .*; no PR opened from chore\/router-fit-\S+\nrun-team-local: router fit: ticket-router: row \* slow-high unjudged /m);
+  assert.match(r.stdout, /^run-team-local: router fit: DUE=yes MERGED=50\/50 — ticket-router: fitted \d+ Pulls .*; no PR opened from chore\/router-fit-\S+\nrun-team-local: router fit: ticket-router: row cost \* slow-high unjudged /m);
   assert.doesNotMatch(r.stdout, /; opened /);
 });
 

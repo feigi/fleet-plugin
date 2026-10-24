@@ -578,7 +578,7 @@ test("a cell's newest generation is judged alone: 25 merged on A then 22 on B re
   assert.deepEqual([older.n, older.usd_per_merged, older.minutes_per_merged, older.fail_rate, older.untimed], [25, 20, 30, 0.4, 0]);
   assert.equal(table.estimates.light["smol-high"].older["model-a"].minutes_per_merged, 30, "a stratum row keeps each older generation's time too");
   // Pooled, smol-high's $ per merged PR is (25×20 + 22×2) / 47 ≈ $11.57, over the 0.75 × $10 adoption bar; B's $2 is under it.
-  assert.equal(table.rows["*"], "smol-high", "the fit adopts on B's figures alone");
+  assert.equal(table.rows.cost["*"], "smol-high", "the fit adopts on B's figures alone");
 });
 
 test("with every work_s doubled, adoption, the quality floor and the guard's trips give the same verdicts", () => {
@@ -592,10 +592,12 @@ test("with every work_s doubled, adoption, the quality floor and the guard's tri
     const { report, table } = guarded(x);
     const p = parsed(x);
     const floor = fitTable({ prior, features: p.features, members: p.members, verdicts: p.tiers, guard: { tripped: [], n: table.guard.n, window_start: DAY } });
-    return { tripped: report.tripped, verdict: report.verdict, retire: report.retire, rows: table.rows, reasons: table.reasons, floor: [floor.rows, floor.reasons] };
+    // The speed set's ranges are in minutes, so they double with the time; its verdicts do not.
+    const speed = Object.fromEntries(Object.entries(table.reasons.speed).map(([s, r]) => [s, [r.cell, r.reason, Object.fromEntries(Object.entries(r.cells).map(([c, x]) => [c, x.verdict]))]]));
+    return { tripped: report.tripped, verdict: report.verdict, retire: report.retire, rows: table.rows, reasons: table.reasons.cost, speed, floor: [floor.rows, floor.reasons.cost] };
   };
   const once = verdicts(w);
-  assert.deepEqual([once.tripped, once.rows["*"], once.floor[1]["*"].cells["smol-high"].verdict], [["smol-high"], "task-high", "under-floor"]);
+  assert.deepEqual([once.tripped, once.rows.cost["*"], once.floor[1]["*"].cells["smol-high"].verdict], [["smol-high"], "task-high", "under-floor"]);
   assert.deepEqual(verdicts(twice), once);
   assert.deepEqual([guarded(w), guarded(twice)].map(({ table }) => table.estimates["*"]["task-high"].minutes_per_merged), [100, 200], "the time itself was read");
 });
@@ -610,8 +612,8 @@ test("the fit's range against slow-high is the guard's usd_diff_ci95: the same n
   const ci = report.cells.find((c) => c.cell === "task-high").usd_diff_ci95;
   assert.equal(report.cells.find((c) => c.cell === "task-high").generation, "model-t");
   assert.ok(ci[1] < 0, `a range wholly below zero: ${ci}`);
-  assert.deepEqual(table.reasons["*"].cells["task-high"].range, ci);
-  assert.equal(table.rows["*"], "task-high");
+  assert.deepEqual(table.reasons.cost["*"].cells["task-high"].range, ci);
+  assert.equal(table.rows.cost["*"], "task-high");
 });
 
 test("an unmerged counted Pull is a bootstrap unit with its spend and no merged PR: 20 merged and 10 closed at $3 against $10 span -5.5, not a flat -7", () => {
@@ -627,6 +629,12 @@ test("an unmerged counted Pull is a bootstrap unit with its spend and no merged 
   const ci = th.usd_diff_ci95;
   assert.ok(ci[0] < -5.5 && -5.5 < ci[1], `a range around $4.50 − $10: ${ci}`);
   assert.deepEqual(bootstrapDiffCI(Array(30).fill({ usd: 3, merged: 1 }), Array(20).fill({ usd: 10, merged: 1 })), [-7, -7]);
+});
+
+test("bootUnit and bootstrapDiffCI take a metric: `minutes` is a Pull's work time over 60, `usd` its spend and the default", () => {
+  const u = { spend: 3, workS: 90, merged: true };
+  assert.deepEqual([bootUnit(u), bootUnit(u, "usd"), bootUnit(u, "minutes")], [{ usd: 3, merged: 1 }, { usd: 3, merged: 1 }, { minutes: 1.5, merged: 1 }]);
+  assert.deepEqual(bootstrapDiffCI(Array(20).fill({ minutes: 1, merged: 1 }), Array(20).fill({ minutes: 2.5, merged: 1 }), { metric: "minutes" }), [-1.5, -1.5]);
 });
 
 test("the floor and the bootstrap range are one rule each: both scripts import them from pull-attribution.mjs, and neither imports the other", () => {
@@ -659,7 +667,7 @@ test("a model change re-enters burn-in: 3 merged on B after 30 on A is the guard
   assert.equal(guardFile(report, "t").cells.find((c) => c.cell === "smol-high").n, 3);
   assert.equal(guard.n["smol-high"], 3);
   assert.deepEqual(report.tripped, [], "A's failures do not trip B, and B is short of MIN_N");
-  assert.equal(table.rows["*"], "slow-high", "B is short of MIN_N, so nothing adopts it");
+  assert.equal(table.rows.cost["*"], "slow-high", "B is short of MIN_N, so nothing adopts it");
   assert.equal(table.burn_in, true);
   assert.equal(table.stage, 1);
 });
@@ -673,7 +681,7 @@ test("a baseline model change below MIN_N leaves the guard without a verdict and
   const { report, table } = guarded(w);
   assert.deepEqual([report.baseline.generation, report.baseline.n], ["model-s2", 3]);
   assert.equal(report.verdict, "none");
-  assert.deepEqual(Object.values(table.rows), ["slow-high"]);
+  assert.deepEqual(table.rows, { cost: { "*": "slow-high" }, speed: { "*": "slow-high" } });
   assert.equal(table.estimates["*"]["slow-high"].older["model-s"].n, 25, "the old baseline is reported beside the new one");
 });
 
@@ -799,7 +807,7 @@ test("the fit names each cell's newest generation as the guard does: ranked over
   const task = table.estimates["*"]["task-high"];
   assert.deepEqual([task.n, task.older["model-a"].n], [0, 21]);
   assert.deepEqual([table.estimates.light["smol-high"].n, table.estimates.light["smol-high"].older["model-b"].n], [25, 22]);
-  assert.ok(Object.values(table.rows).every((c) => c !== "task-high"), "A's 21 at $1 clear MIN_N, but A is not task-high's newest generation");
+  assert.ok(Object.values(table.rows).every((set) => Object.values(set).every((c) => c !== "task-high")), "A's 21 at $1 clear MIN_N, but A is not task-high's newest generation");
 });
 
 test("the guard's median, router $ and interval read each generation's own Pulls, the interval against the baseline's newest generation alone", () => {

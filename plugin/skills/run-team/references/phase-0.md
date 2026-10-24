@@ -14,6 +14,12 @@ it — `~/.omp/agent/sessions/<encoded-cwd>`, which holds every session of the
 checkout — names no session: phase 0 exits 2 naming the path and where it
 came from, and writes no receipt.
 
+`--objective cost|speed` is the run's Objective, which phase 0 records in its
+receipt, `cost` when it is not given; the router routes every Pull of the run
+by it. It is fixed for the run: a resumed receipt keeps the one it records —
+`cost` when it records none — and a resume whose `--objective` names the
+other exits 2 naming both, leaving the receipt as it was.
+
 Exit 3 is a step that failed: its line carries the refusal, so fix the cause
 and run it again.
 

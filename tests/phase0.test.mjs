@@ -762,6 +762,47 @@ test("a receipt whose run and session both match resumes: its ok steps are skipp
   assert.equal(f.receipt().steps.pin.output, "from the previous run", "a skipped step keeps what it recorded");
 });
 
+test("the objective: --objective is recorded in the receipt, and with none the receipt records cost", () => {
+  const f = fixture();
+  assert.equal(f.run(["--session", f.session, "--objective", "speed"]).status, 0);
+  assert.equal(f.receipt().objective, "speed");
+  const g = fixture();
+  assert.equal(g.run().status, 0);
+  assert.equal(g.receipt().objective, "cost");
+});
+
+test("a resume keeps the receipt's objective, takes a receipt that records none as cost, and refuses an --objective naming the other one, naming both", () => {
+  const resumed = (objective, args = []) => {
+    const f = fixture();
+    f.setRecord(RUN_AT);
+    f.setReceipt(stale(f, objective === undefined ? {} : { objective }));
+    return { f, r: f.run(["--session", f.session, ...args]) };
+  };
+  for (const [objective, args, kept] of [
+    ["speed", [], "speed"], ["speed", ["--objective", "speed"], "speed"],
+    [undefined, [], "cost"], [undefined, ["--objective", "cost"], "cost"],
+  ]) {
+    const { f, r } = resumed(objective, args);
+    assert.equal(r.status, 0, `${objective} ${args.join(" ")}: ${r.stdout}${r.err}`);
+    assert.equal(f.receipt().objective, kept, `${objective} ${args.join(" ")}`);
+    assert.equal(f.calls("rotate").length, 0, "it resumed");
+  }
+  for (const [objective, other, recorded] of [["speed", "cost", "speed"], [undefined, "speed", "cost"]]) {
+    const { f, r } = resumed(objective, ["--objective", other]);
+    const before = JSON.stringify(stale(f, objective === undefined ? {} : { objective }));
+    assert.equal(r.status, 2, r.stdout + r.err);
+    assert.match(r.err, new RegExp(`--objective ${other}: this run's receipt \\S+ records the objective ${recorded}, fixed for the run`));
+    assert.equal(readFileSync(f.receiptPath, "utf8"), before, "the receipt is left as it was");
+    assert.equal(f.calls("rotate").length, 0);
+  }
+  // A receipt that does not resume is the previous run's: its objective binds nothing.
+  const f = fixture();
+  f.setRecord(RUN_AT);
+  f.setReceipt(stale(f, { run: RUN_AT - 5, objective: "speed" }));
+  assert.equal(f.run(["--session", f.session, "--objective", "cost"]).status, 0);
+  assert.equal(f.receipt().objective, "cost");
+});
+
 test("a same-session run after `closeout.mjs finish` starts at alarm and rotates again, and skips nothing as done earlier", () => {
   const f = fixture({ spec: true });
   assert.equal(f.run().status, 0);
@@ -1105,6 +1146,7 @@ test("usage: every malformed command line exits 2 before a step runs", () => {
   refuses(f, [...s, "--workflow", "CI", "--declare-no-ci"], /alternatives/);
   refuses(f, [...s, "--declare-no-ci=1"], /boolean flag/);
   refuses(f, [...s, "stray"], /unexpected argument 'stray'/);
+  refuses(f, [...s, "--objective", "fast"], /--objective needs cost or speed, got fast/);
 });
 
 // The session directory: --session, else the PI_ARTIFACTS_DIR omp's Python

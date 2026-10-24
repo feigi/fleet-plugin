@@ -249,7 +249,7 @@ terminating in exactly one dispatch or an empty shortlist:
 7. **Route, row, then dispatch** — `~/.fleet/bin/fleet-run ticket-router.mjs route
    --session <session> --ticket <N> --arm <A|B> --impl-row <k>[ --chain-head] --issue
    <scratch>/impl-<N>/issue.json --guard .fleet/cost-guard.json` prints
-   `POLICY=… CELL=… DRAW=… STRATUM=… REASON=…` (the router's arguments paragraph below the list
+   `POLICY=… CELL=… DRAW=… STRATUM=… OBJECTIVE=… REASON=…` (the router's arguments paragraph below the list
    says what each argument is); then `ledger.mjs row <N> "impl-<N>[ · tier=<CELL>][ · route=<REASON>]"`,
    `tier=<CELL>` exactly when `DRAW` is not `-`; then the dispatch at once: claim
    what you are about to dispatch; dispatch what you have just claimed. Router
@@ -263,7 +263,9 @@ row 5k and every row after it carry no `tier=`), that row's number;
 `--chain-head` marks a ticket another open ticket sequences after, which is
 what rolls it. `--arm` is `A` for an even ticket number and `B` for an odd
 one; a B Pull routes exactly as an A one until the table opens arm B.
-`--session` is this run's own session directory. The printed line is the
+`--session` is this run's own session directory. The router routes by the
+row set of the run's Objective, `OBJECTIVE`, which it reads off the phase-0
+receipt. The printed line is the
 whole routing decision — never re-derive `CELL` from the table, the guard or
 this paragraph. A missing or unreadable `.fleet/cost-guard.json` routes the
 default cell only (`REASON=guard-missing`), burn-in included, and `REASON`
@@ -429,7 +431,8 @@ controller's probe could not look.
 rows in `.fleet/ledger.md` at Pull time; the Pull that creates row 5, 10, 15 …
 is an Exploration Pull, and the router draws its cell: `k = 1 +
 (sha256("<session>\t<ticket>")[0:8] mod K)` over `router-table.json`'s
-`cells` minus the policy cell, in token order. While the table's `burn_in` is
+`cells` minus the policy cell, in token order. Under either Objective that
+policy cell is the `cost` row set's, so the draw is the same under both. While the table's `burn_in` is
 true every Pull draws, over every cell, the policy cell included. An
 Exploration Pull records `tier=<cell>` in the row, and a replacement inherits the row's tier —
 written at the Pull's row step, ahead of `ledger.mjs dispatch`, which reads it

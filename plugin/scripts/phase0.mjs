@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Phase 0 as one command: the run's start sequence, in order, with a receipt.
 //
-//   phase0.mjs [--session <dir>] [--in-flight n] [--plugin-checkout <dir>]
-//              [--spend-dir <dir>]
+//   phase0.mjs [--session <dir>] [--in-flight n] [--objective cost|speed]
+//              [--plugin-checkout <dir>] [--spend-dir <dir>]
 //              [--workflow <name> | --declare-no-ci]
 //
 // The session directory is `--session`, else `PI_ARTIFACTS_DIR`, which omp
@@ -74,7 +74,7 @@
 // THE RECEIPT is `.fleet/phase0.json` (resolved through fleet-dir.mjs, so a
 // worktree and the main checkout name one file):
 //
-//   { run, session, scratch, inFlight,
+//   { run, session, scratch, inFlight, objective,
 //     steps: { <name>: { status, at, output } } }
 //
 // `status` is ok, pending, failed, drift or unanswered; `at` an ISO time;
@@ -85,6 +85,11 @@
 // run. `session` is the session directory, from `--session` or
 // `PI_ARTIFACTS_DIR`. `scratch` is what `scratch-root.mjs` prints. `inFlight`
 // is the In-flight bound this run used — `--in-flight`, or its default.
+// `objective` is the Objective the router routes this run's Pulls by:
+// `--objective`, or its default (OBJECTIVE_DEFAULT in phase0-receipt.mjs).
+// It is fixed for the run: a resumed receipt keeps the one it records — the
+// default when it records none — and a resume whose `--objective` names the
+// other one exits 2 naming both, leaving the receipt as it was.
 //
 // RESUMABLE. A re-run reads the receipt. It continues it — skipping every `ok`
 // step but `alarm` and re-running the rest — only when its `run` equals the
@@ -148,7 +153,7 @@ import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
 import { ancestry, controllerOf, processSource, ProcUnreadable } from "./proc.mjs";
-import { IN_FLIGHT_DEFAULT } from "./phase0-receipt.mjs";
+import { IN_FLIGHT_DEFAULT, OBJECTIVES, OBJECTIVE_DEFAULT } from "./phase0-receipt.mjs";
 
 const NAME = "phase0";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -525,7 +530,7 @@ function main() {
   const die = makeDie(NAME);
   const F = defineFlags(die, {
     flags: {
-      session: "value", "in-flight": "value", "plugin-checkout": "value",
+      session: "value", "in-flight": "value", objective: "value", "plugin-checkout": "value",
       "spend-dir": "value", workflow: "value", "declare-no-ci": "bool",
     },
   });
@@ -563,6 +568,8 @@ function main() {
     return n;
   };
   const inFlight = positive("in-flight") ?? IN_FLIGHT_DEFAULT;
+  const named = F.arg("objective");
+  if (named !== null && !OBJECTIVES.includes(named)) die(`--objective needs ${OBJECTIVES.join(" or ")}, got ${named}`);
   if (F.has("declare-no-ci") && !absent("workflow")) die("--workflow and --declare-no-ci are alternatives, not a pair");
   const ci = F.has("declare-no-ci") ? "CI: declared absent (--declare-no-ci)" : absent("workflow") ? null : `CI: workflow ${F.arg("workflow")} (--workflow)`;
   const pathOf = (name) => (absent(name) ? null : resolve(F.arg(name)));
@@ -617,6 +624,12 @@ function main() {
   // the `at` it names and the session is the same.
   const rotated = previous !== null && (previous.run !== null || previous.steps.rotate?.status === "ok");
   const resumed = rotated && previous.run === (record?.at ?? null) && previous.session === session;
+  // The Objective is fixed for the run: a resumed receipt's stands.
+  const kept = resumed ? (OBJECTIVES.includes(previous.objective) ? previous.objective : OBJECTIVE_DEFAULT) : null;
+  if (kept !== null && named !== null && named !== kept) {
+    die(`--objective ${named}: this run's receipt ${receiptPath} records the objective ${kept}, fixed for the run — run phase 0 again without --objective, or with --objective ${kept}`);
+  }
+  const objective = kept ?? named ?? OBJECTIVE_DEFAULT;
   if (rotated && !resumed) {
     if (existsSync(held)) {
       process.stderr.write(`${NAME}: cannot hold the previous run's receipt for the rotation: ${held} already holds another\n`);
@@ -626,7 +639,7 @@ function main() {
     renameSync(receiptPath, held);
   }
 
-  const receipt = { run: resumed ? previous.run : null, session, scratch, inFlight, steps: {} };
+  const receipt = { run: resumed ? previous.run : null, session, scratch, inFlight, objective, steps: {} };
   for (const name of STEP_NAMES) {
     // `alarm` checks the omp running this invocation, so its `ok` is never carried.
     const was = resumed && name !== "alarm" ? previous.steps[name] : undefined;

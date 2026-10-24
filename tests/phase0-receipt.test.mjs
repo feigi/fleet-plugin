@@ -4,13 +4,13 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readReceipt, phase0Gate, sessionFromReceipt, STEP_NAMES } from "../plugin/scripts/phase0-receipt.mjs";
+import { OBJECTIVE_DEFAULT, OBJECTIVES, objectiveFromReceipt, readReceipt, phase0Gate, sessionFromReceipt, STEP_NAMES } from "../plugin/scripts/phase0-receipt.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 
 const STEPS = ["alarm", "branch", "fast-forward", "pin", "baseline", "preflight", "ruleset", "tier-roles", "metrics",
   "cockpit", "rotate", "reclaim", "recipe", "fold-in", "stranded", "shortlist"];
-const receipt = ({ run = 5, session = "/s/run", steps = {} } = {}) => ({
-  run, session, scratch: "/scratch",
+const receipt = ({ run = 5, session = "/s/run", steps = {}, ...rest } = {}) => ({
+  run, session, scratch: "/scratch", ...rest,
   steps: Object.fromEntries(STEPS.map((n) => [n, { status: "ok", at: "t", output: "", ...steps[n] }])),
 });
 const ok = (r) => ({ state: "ok", receipt: r });
@@ -133,4 +133,23 @@ test("sessionFromReceipt: the receipt's session, or a refusal naming the receipt
   assert.throws(() => sessionFromReceipt({ cwd: d }), /\(unreadable: not JSON/);
   writeFileSync(file, JSON.stringify(receipt({ session: "/sessions/run-1" })));
   assert.equal(sessionFromReceipt({ cwd: d }), "/sessions/run-1");
+});
+
+test("objectiveFromReceipt: the receipt's objective, or a refusal naming the receipt; the default is cost", (t) => {
+  assert.deepEqual([OBJECTIVE_DEFAULT, OBJECTIVES], ["cost", ["cost", "speed"]]);
+  const d = dir(t);
+  assert.equal(spawnSync("git", ["init", "-q", d], { env: gitEnv() }).status, 0);
+  mkdirSync(join(d, ".fleet"));
+  const file = join(d, ".fleet", "phase0.json");
+  assert.throws(() => objectiveFromReceipt({ cwd: d }), (e) => e.message.includes(`no objective given and none in the phase-0 receipt ${file} (no receipt)`));
+  writeFileSync(file, JSON.stringify(receipt({ session: "/sessions/run-1" })));
+  assert.throws(() => objectiveFromReceipt({ cwd: d }), /\(it records no objective\)/);
+  writeFileSync(file, JSON.stringify(receipt({ session: "/sessions/run-1", objective: "fast" })));
+  assert.throws(() => objectiveFromReceipt({ cwd: d }), /\(it records no objective\)/, "a value that is no objective is none");
+  writeFileSync(file, "{");
+  assert.throws(() => objectiveFromReceipt({ cwd: d }), /\(unreadable: not JSON/);
+  for (const objective of OBJECTIVES) {
+    writeFileSync(file, JSON.stringify(receipt({ session: "/sessions/run-1", objective })));
+    assert.equal(objectiveFromReceipt({ cwd: d }), objective);
+  }
 });
