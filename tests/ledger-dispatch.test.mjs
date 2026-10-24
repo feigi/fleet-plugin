@@ -18,7 +18,7 @@ import { computeBoard } from "../plugin/scripts/compute-board.mjs";
 import { deriveRun, LedgerError } from "../plugin/scripts/fleet-tick.mjs";
 import { rowPr } from "../plugin/scripts/ledger-grammar.mjs";
 import { rendering, renderBrief } from "./support/rendered-brief.mjs";
-import { writeQueueGh, closes, titled, failsOn, ghCalls, ref, prUrl } from "./support/queue-gh.mjs";
+import { writeQueueGh, closes, titled, failsOn, ghCalls, ref, prUrl, labelled, defines } from "./support/queue-gh.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
@@ -1624,6 +1624,150 @@ test("a PR url that is not PR M's own refuses the finisher, naming the read, and
     f.refused(["dispatch", "3606", "finisher-pr-3606"], /dispatch finisher-pr-3606: could not look — gh pr view 3606 --json closingIssuesReferences,url answered (without a usable url|url \S+\/pull\/(3607|36060|3606\/files), not PR #3606's)/);
     assert.deepEqual(f.read().dispatched, []);
   }
+});
+
+// The release-label gate, beside the closing-reference gate. A finisher's PR
+// carries exactly one of patch, minor and major, or its repository defines
+// none of them; anything else would run the finisher's duties only for it to
+// halt at its label count. A PR with none is repaired with `patch` only when
+// it closes no ticket and no settled implementer token names it. A read that
+// cannot answer refuses, naming the labels it could not read.
+const UNTICKETED_ROW = `review=member:review-pr-3631 · reviewed=${GATE_HEAD}:0/0/0:${GATE_RUN}`;
+const labelListCalls = (bin) => ghCalls(bin).filter((c) => c.startsWith("label list"));
+
+test("a PR with no release label that closes no ticket is refused, naming patch as the repair, and recorded once it carries one", (t) => {
+  const f = fixture(t);
+  f.put("3631", UNTICKETED_ROW);
+  for (const labels of [[], ["ready-to-merge", "bug"]]) {
+    labelled(f.bin, 3631, labels);
+    f.refused(["dispatch", "3631", "finisher-pr-3631"],
+      /finisher-pr-3631: PR #3631 carries no release label \(patch, minor, major\) and closes no ticket — add one: gh pr edit 3631 --add-label patch — not dispatching finisher-pr-3631/);
+    assert.deepEqual(f.read().dispatched, []);
+  }
+  labelled(f.bin, 3631, ["patch"]);
+  assert.equal(f.ok("dispatch", "3631", "finisher-pr-3631").agent, "fleet-finisher");
+});
+
+test("a PR with no release label whose only closing reference is its own suggestion-band record is refused naming patch, the record being no ticket", (t) => {
+  const f = fixture(t);
+  f.put("3631", UNTICKETED_ROW);
+  closes(f.bin, 3631, [3637]);
+  titled(f.bin, 3637, "PR #3631 review: the suggestion band, checked");
+  labelled(f.bin, 3631, []);
+  f.refused(["dispatch", "3631", "finisher-pr-3631"],
+    /finisher-pr-3631: PR #3631 closes #3637, its own suggestion-band record — rephrase the mention as "Refs #3637" or "issue #3637"; PR #3631 carries no release label \(patch, minor, major\) and closes no ticket — add one: gh pr edit 3631 --add-label patch — not dispatching finisher-pr-3631/);
+  assert.deepEqual(f.read().dispatched, []);
+});
+
+test("a PR with no release label that closes a ticket is refused, naming the tickets and picking no bump", (t) => {
+  for (const [refs, named] of [[[3545], "#3545"], [[3545, 3600], "#3545, #3600"]]) {
+    const f = fixture(t);
+    f.put("3545", RULED_ROW);
+    f.rule(3606, "3545", "yes", refs);
+    labelled(f.bin, 3606, []);
+    f.refused(["dispatch", "3606", "finisher-pr-3606"],
+      new RegExp(`finisher-pr-3606: PR #3606 carries no release label \\(patch, minor, major\\) and closes ${named} — add exactly one, the bump its change calls for: gh pr edit 3606 --add-label <patch\\|minor\\|major> — not dispatching finisher-pr-3606`));
+    assert.deepEqual(f.read().dispatched, []);
+  }
+});
+
+test("a PR with no release label that closes nothing but is an implementer's is refused, picking no bump", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545", "no");
+  labelled(f.bin, 3606, []);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"],
+    /finisher-pr-3606: PR #3606 carries no release label \(patch, minor, major\) and closes no ticket, and is the implementer PR of #3545 — add exactly one, the bump its change calls for: gh pr edit 3606 --add-label <patch\|minor\|major> — not dispatching finisher-pr-3606/);
+  assert.deepEqual(f.read().dispatched, []);
+});
+
+test("a PR with more than one release label is refused, naming each, and picking none", (t) => {
+  for (const [labels, named] of [[["minor", "patch"], "patch, minor"], [["major", "ready-to-merge", "minor", "patch"], "patch, minor, major"]]) {
+    const f = fixture(t);
+    f.put("3631", UNTICKETED_ROW);
+    labelled(f.bin, 3631, labels);
+    f.refused(["dispatch", "3631", "finisher-pr-3631"],
+      new RegExp(`finisher-pr-3631: PR #3631 carries more than one release label \\(${named}\\) — exactly one may stay, and which is not picked here — not dispatching finisher-pr-3631`));
+    assert.deepEqual(f.read().dispatched, []);
+    // A label on the PR proves the repository defines it.
+    assert.deepEqual(labelListCalls(f.bin), []);
+  }
+});
+
+test("a PR with exactly one release label is recorded, whatever other labels it carries", (t) => {
+  for (const labels of [["major"], ["bug", "minor", "ready-to-merge"]]) {
+    const f = fixture(t);
+    f.put("3545", RULED_ROW);
+    f.rule(3606, "3545", "yes", [3545]);
+    labelled(f.bin, 3606, labels);
+    assert.equal(f.ok("dispatch", "3606", "finisher-pr-3606").agent, "fleet-finisher");
+    assert.deepEqual(f.read().dispatched, ["finisher-pr-3606"]);
+    assert.deepEqual(labelListCalls(f.bin), []);
+  }
+});
+
+test("a PR with no release label in a repository that defines none is recorded", (t) => {
+  const f = fixture(t);
+  f.put("3631", UNTICKETED_ROW);
+  labelled(f.bin, 3631, ["bug"]);
+  defines(f.bin, ["bug", "ready-to-merge"]);
+  assert.equal(f.ok("dispatch", "3631", "finisher-pr-3631").agent, "fleet-finisher");
+  assert.deepEqual(labelListCalls(f.bin), ["label list --json name --limit 1000"]);
+});
+
+test("a label list that fills its limit with no release label refuses, since it may be cut off", (t) => {
+  const f = fixture(t);
+  f.put("3631", UNTICKETED_ROW);
+  labelled(f.bin, 3631, []);
+  defines(f.bin, Array.from({ length: 1000 }, (_, i) => `label-${i}`));
+  f.refused(["dispatch", "3631", "finisher-pr-3631"],
+    /dispatch finisher-pr-3631: could not read the repository's labels — gh label list --json name --limit 1000 answered 1000 or more, so the list may be cut off before patch, minor, major; nothing written/);
+  assert.deepEqual(f.read().dispatched, []);
+});
+
+test("a PR label read that fails or answers malformed refuses, saying the labels could not be read, and writes nothing", (t) => {
+  const failing = fixture(t);
+  failing.put("3631", UNTICKETED_ROW);
+  failsOn(failing.bin, "labels", 3631);
+  failing.refused(["dispatch", "3631", "finisher-pr-3631"],
+    /dispatch finisher-pr-3631: could not read PR #3631's labels — gh pr view 3631 --json labels exited 1: gh stub: pr view 3631 labels failed; nothing written/);
+  assert.deepEqual(failing.read().dispatched, []);
+  for (const answer of ["not json", "{}", '{"labels":"patch"}', '{"labels":[{"title":"patch"}]}', '{"labels":[null]}', "null"]) {
+    const f = fixture(t);
+    f.put("3631", UNTICKETED_ROW);
+    labelled(f.bin, 3631, answer);
+    f.refused(["dispatch", "3631", "finisher-pr-3631"],
+      /dispatch finisher-pr-3631: could not read PR #3631's labels — gh pr view 3631 --json labels printed no list of named labels: .*; nothing written/);
+    assert.deepEqual(f.read().dispatched, []);
+  }
+});
+
+test("a repository label read that fails or answers malformed refuses, saying the labels could not be read, and writes nothing", (t) => {
+  const failing = fixture(t);
+  failing.put("3631", UNTICKETED_ROW);
+  labelled(failing.bin, 3631, []);
+  failsOn(failing.bin, "label", "list");
+  failing.refused(["dispatch", "3631", "finisher-pr-3631"],
+    /dispatch finisher-pr-3631: could not read the repository's labels — gh label list --json name --limit 1000 exited 1: gh stub: label list failed; nothing written/);
+  assert.deepEqual(failing.read().dispatched, []);
+  for (const answer of ["not json", "{}", '[{"title":"patch"}]', "[null]"]) {
+    const f = fixture(t);
+    f.put("3631", UNTICKETED_ROW);
+    labelled(f.bin, 3631, []);
+    defines(f.bin, answer);
+    f.refused(["dispatch", "3631", "finisher-pr-3631"],
+      /dispatch finisher-pr-3631: could not read the repository's labels — gh label list --json name --limit 1000 printed no list of named labels: .*; nothing written/);
+    assert.deepEqual(f.read().dispatched, []);
+  }
+});
+
+test("a closing-reference failure and a release-label failure are named in one refusal", (t) => {
+  const f = fixture(t);
+  f.put("3545", RULED_ROW);
+  f.rule(3606, "3545");
+  labelled(f.bin, 3606, []);
+  f.refused(["dispatch", "3606", "finisher-pr-3606"],
+    /finisher-pr-3606: PR #3606 does not close #3545, ruled closed_own_ticket=yes .*; PR #3606 carries no release label \(patch, minor, major\) and closes no ticket, and is the implementer PR of #3545 — .* — not dispatching finisher-pr-3606/);
 });
 
 // ── the rendered brief ───────────────────────────────────────────────────────

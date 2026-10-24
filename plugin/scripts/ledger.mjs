@@ -64,6 +64,7 @@ import { attemptLock, releaseLockFile, reapPathOf } from "./pid-lock.mjs";
 import { readCheckRecordIn, readReportIn, reportsDir, reportFamily, defaultScratch, reportPath } from "./report-files.mjs";
 import { mergeBotVerdicts } from "./report-schema.mjs";
 import { ownClosingIssues } from "./closing-refs.mjs";
+import { RELEASE_LABELS, LABEL_LIST_ARGS, LABEL_LIST_LIMIT, releaseLabelsIn, releaseLabelsDefined } from "./release-labels.mjs";
 
 const NAME = "ledger";
 // The plugin's own agent definitions — the directory tier-check.mjs reads
@@ -1962,20 +1963,21 @@ function checkReaders(where) {
     return repo;
   };
   // A child that must answer with one of `answers`; anything else — another
-  // status, a spawn failure, a timeout — could not look.
-  const look = (what, cmd, args, answers = [0]) => {
+  // status, a spawn failure, a timeout — could not look, or whatever `lead`
+  // names instead.
+  const look = (what, cmd, args, answers = [0], lead = "could not look") => {
     const r = spawnSync(cmd, args, { encoding: "utf8", cwd: repoDir(), env, timeout: checkTimeoutMs, stdio: ["ignore", "pipe", "pipe"] });
     if (r.status === null || !answers.includes(r.status)) {
       const why = cause(r.error && r.error.message, r.stderr);
-      die(`${where}: could not look — ${what}${r.status === null ? "" : ` exited ${r.status}`}${why ? `: ${why}` : ""}; nothing written`);
+      die(`${where}: ${lead} — ${what}${r.status === null ? "" : ` exited ${r.status}`}${why ? `: ${why}` : ""}; nothing written`);
     }
     return r;
   };
   const verifyShaOf = (branch, sha) => look(`verify-sha.sh ${branch} ${sha}`, "sh", [verifySha, branch, sha], [0, 1]);
   // A gh answer, parsed: `v` the JSON it printed, or null when it printed
   // none, beside the answer `r` itself for the caller's refusal.
-  const lookJson = (what, args) => {
-    const r = look(what, "gh", args);
+  const lookJson = (what, args, lead = "could not look") => {
+    const r = look(what, "gh", args, [0], lead);
     try {
       return { r, v: JSON.parse(r.stdout) };
     } catch {
@@ -2020,7 +2022,23 @@ function checkReaders(where) {
     }
     return v.title;
   };
-  return { repoDir, look, verifyShaOf, prView, prViewClosing, issueTitle };
+  // The label names gh answers `args` with, `list` taking the label list off
+  // the parsed answer. A read that fails, or answers anything but a list of
+  // named labels, could not read `whose` labels.
+  const labelNames = (whose, args, list) => {
+    const what = `gh ${args.join(" ")}`;
+    const lead = `could not read ${whose} labels`;
+    const { r, v } = lookJson(what, args, lead);
+    const labels = list(v);
+    if (!Array.isArray(labels) || !labels.every((l) => l !== null && typeof l === "object" && typeof l.name === "string")) {
+      die(`${where}: ${lead} — ${what} printed no list of named labels: ${cause(r.stdout)}; nothing written`);
+    }
+    return labels.map((l) => l.name);
+  };
+  // PR `pr`'s label names, and the names of the labels its repository defines.
+  const prLabels = (pr) => labelNames(`PR #${pr}'s`, ["pr", "view", String(pr), "--json", "labels"], (v) => v?.labels);
+  const repoLabels = () => labelNames("the repository's", LABEL_LIST_ARGS, (v) => v);
+  return { repoDir, look, verifyShaOf, prView, prViewClosing, issueTitle, prLabels, repoLabels };
 }
 
 // The finisher gate's closing-reference checks for the PR `member` finishes,
@@ -2032,9 +2050,11 @@ function checkReaders(where) {
 // body when the PR's ruling is closed_own_ticket=yes, and is not when the
 // ruling is no. Check 2, for every PR: no reference may be the
 // suggestion-band record of this PR's review — an issue whose title, trimmed,
-// is recordTitle(), as dispositions-check.mjs finds the record. Returns one
-// line per failure. A read the checks need dies, naming the read, and writes
-// nothing.
+// is recordTitle(), as dispositions-check.mjs finds the record. Returns
+// `{refs, failures}`: the issue numbers the PR closes, its own
+// suggestion-band record aside — that one is a failure here, not a ticket —
+// and one line per failure. A read the checks need dies, naming the read,
+// and writes nothing.
 async function closingRefusals(member, { tickets, ruling, tsv }) {
   const pr = member.number;
   const where = `dispatch ${member.name}`;
@@ -2057,10 +2077,42 @@ async function closingRefusals(member, { tickets, ruling, tsv }) {
     }
   }
   const own = recordTitle(pr);
+  const closed = [];
   for (const n of refs) {
     if (issueTitle(n).trim() === own) failures.push(`PR #${pr} closes #${n}, its own suggestion-band record — rephrase the mention as "Refs #${n}" or "issue #${n}"`);
+    else closed.push(n);
   }
-  return failures;
+  return { refs: closed, failures };
+}
+
+// The finisher gate's release-label check for the PR `member` finishes: the
+// PR carries exactly one release label, or its repository defines none, as
+// finisher-label.mjs counts them before it labels. `tickets` are the tickets
+// rulingOf() found settled implementer tokens naming the PR for, and `refs`
+// the issues closingRefusals() read it closing, its own suggestion-band
+// record aside. Returns the refusal, or null.
+// A PR with none is repaired with `patch` only when it closes no ticket and
+// no such token names it; any other PR's bump is not picked here, and
+// neither is which of several labels stays. A read the check needs dies,
+// naming the labels it could not read, and writes nothing.
+function releaseLabelRefusal(member, tickets, refs) {
+  const pr = member.number;
+  const where = `dispatch ${member.name}`;
+  const { prLabels, repoLabels } = checkReaders(where);
+  const found = releaseLabelsIn(prLabels(pr));
+  if (found.length === 1) return null;
+  if (found.length > 1) return `PR #${pr} carries more than one release label (${found.join(", ")}) — exactly one may stay, and which is not picked here`;
+  const defined = releaseLabelsDefined(repoLabels());
+  if (defined === "undefined") return null;
+  if (defined === "cut-off") {
+    die(`${where}: could not read the repository's labels — gh ${LABEL_LIST_ARGS.join(" ")} answered ${LABEL_LIST_LIMIT} or more, so the list may be cut off before ${RELEASE_LABELS.join(", ")}; nothing written`);
+  }
+  const missing = `PR #${pr} carries no release label (${RELEASE_LABELS.join(", ")})`;
+  if (refs.length === 0 && tickets.length === 0) return `${missing} and closes no ticket — add one: gh pr edit ${pr} --add-label patch`;
+  const closes = refs.length > 0
+    ? `closes ${refs.map((n) => `#${n}`).join(", ")}`
+    : `closes no ticket, and is the implementer PR of ${tickets.map((n) => `#${n}`).join(", ")}`;
+  return `${missing} and ${closes} — add exactly one, the bump its change calls for: gh pr edit ${pr} --add-label <${RELEASE_LABELS.join("|")}>`;
 }
 
 // The open `ready-to-merge` PRs, ascending, as gh answers from the ledger's
@@ -2220,9 +2272,10 @@ async function runDispatch() {
   // waits on its ruling, its tier-outcomes row, written while the PR is open
   // and its review evidence still in scratch; see rulingOf(). Last, the
   // PR's closing references must match that ruling and exclude its own
-  // suggestion-band record, read off gh from the ledger's repository; see
-  // closingRefusals(). Refused here, before anything is written, so no check
-  // can be skipped by forgetting to run it.
+  // suggestion-band record, and the PR must carry exactly one release label,
+  // both read off gh from the ledger's repository; see closingRefusals() and
+  // releaseLabelRefusal(). Refused here, before anything is written, so no
+  // check can be skipped by forgetting to run it.
   if (member.family === "finisher-pr") {
     const fold = tickFold("conflict hold and dispositions verdict");
     if (fold.conflictHeld.includes(member.number)) {
@@ -2235,7 +2288,9 @@ async function runDispatch() {
     const ruled = await rulingOf(member.number);
     if (ruled.refusal !== null) die(`${member.name}: ${ruled.refusal} — not dispatching ${member.name}`);
     const closing = await closingRefusals(member, ruled);
-    if (closing.length > 0) die(`${member.name}: ${closing.join("; ")} — not dispatching ${member.name}`);
+    const labelled = releaseLabelRefusal(member, ruled.tickets, closing.refs);
+    const failures = labelled === null ? closing.failures : [...closing.failures, labelled];
+    if (failures.length > 0) die(`${member.name}: ${failures.join("; ")} — not dispatching ${member.name}`);
   }
   // Every error caught here carries its own cause and remedy — a row's `tier=`
   // (fix it with `ledger.mjs row`) for an implementer, a family

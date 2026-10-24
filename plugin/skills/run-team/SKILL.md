@@ -558,7 +558,8 @@ Dispatch a finisher only when every test here passes at once — the review retu
   bullet and the one above are a pair, and on a clean PR this one carries the
   whole route to a finisher**: a `no-op` report satisfies the gate above by
   itself, so nothing further is owed and no further event is coming. Edit either bullet without the other and what strands is exactly the PR that needed no fixes.
-- **The PR's closing references match its ruling and exclude its own suggestion-band record** → `ledger.mjs dispatch` reads the PR's closing references from `gh pr view <M>` before it dispatches any finisher. When the ruled row says `closed_own_ticket=yes`, each ticket a settled `impl-<N>=PR#<M>` token names must be closed by the body; when it says `no`, none may be, and no reference may be the PR's own suggestion-band record. A refusal names the PR and the ticket; repair the body yourself with `gh pr edit <M> --body-file <file>`, then dispatch the finisher again.
+- **The PR's closing references match its ruling and exclude its own suggestion-band record** → `ledger.mjs dispatch` refuses the finisher otherwise, naming the PR and the ticket: repair the body with `gh pr edit <M> --body-file <file>`, then dispatch again.
+- **The PR carries exactly one release label, or its repo defines none** → `ledger.mjs dispatch` refuses the finisher otherwise, naming `patch` as the repair only when the PR closes no ticket and no settled `impl-<N>=PR#<M>` token names it. Fix the labels, then dispatch again. In full: references/finisher.md.
 - **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`** → the CI edge never
   fires: dispatch the finisher off the reviewer's final verdict the moment it
   lands, never while you still owe it a reply. Its gate is then the
