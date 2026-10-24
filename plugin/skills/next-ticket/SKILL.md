@@ -126,7 +126,9 @@ green: `git fetch origin && git rebase origin/main`, take the commit back with
 `recipe-check.mjs`, then `git commit -C ORIG_HEAD` and compare again. A hook
 that stages such a path again on the rebased base → bail with that cause.
 Equal trees need no re-run. A non-zero exit is not a pass, and exit 75
-is no test result — no slot was free and nothing ran, so run it again. A solo
+is no test result — no slot was free and nothing ran, so run it again. Exit 143,
+130 or 129 is no test result either — it received a SIGTERM, SIGINT or SIGHUP
+and recorded nothing — so run it again with `timeout: 0` on the call. A solo
 session has no report to settle against: it runs the Check step and the Test
 entrypoint themselves.
 
