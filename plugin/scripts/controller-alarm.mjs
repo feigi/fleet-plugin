@@ -121,7 +121,7 @@ function arm(pi, ctx) {
       pi.sendUserMessage(ALARM_LINE);
       firedFor = { at: beat.at, firedAt: now };
     } catch {
-      // Cannot read or judge: not due.
+      // Cannot read, judge or send: not fired, so the next poll tries again.
     }
   };
   ctx.setInterval(poll, POLL_MS);
