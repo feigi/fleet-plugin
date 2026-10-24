@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { formatTsv, parseTsv as parseMemberTsv } from "../plugin/scripts/member-outcomes.mjs";
-import { formatRow, parseTierOutcomes } from "../plugin/scripts/tier-outcomes.mjs";
+import { RulingError, formatRow, parseTierOutcomes } from "../plugin/scripts/tier-outcomes.mjs";
 import { AttributionError, FEATURE_COLUMNS, TRIP_POINTS, admissibleRow, attribute, bootUnit, bootstrapDiffCI, parseFeatures, tally, underFloor } from "../plugin/scripts/pull-attribution.mjs";
 import { WINDOW_START, computeReport, guardFile } from "../plugin/scripts/pr-cost.mjs";
 import { fitTable, readGuard } from "../plugin/scripts/ticket-router.mjs";
@@ -262,6 +262,170 @@ test("a Ruling no candidate Pull carries goes to the last of them in features fi
   const [first, second] = units(w);
   assert.deepEqual([first.status, first.merged, first.pr], ["counted", false, null]);
   assert.deepEqual([second.status, second.merged, second.pr], ["unpriced", true, "143"]);
+});
+
+test("one ticket Pulled twice, each Pull carrying its own ruled PR: each Pull takes its own Ruling, though the later row is both Pulls' date-floor candidate", () => {
+  const w = world();
+  w.features.push(pull(60, "slow-high"), pull(60, "task-high", { session: SESSION2, run_date: "2026-10-05" }));
+  w.members.push(
+    impl(60, "slow-high", { ending: "pr", pr: "160", cost: 2 }),
+    impl(60, "task-high", { session: SESSION2, run_date: "2026-10-05", ending: "pr", pr: "161", cost: 3 }),
+  );
+  w.tiers.push(ruling(60, 160, { minted_false_claim: "yes" }), ruling(60, 161, { run_date: "2026-10-05" }));
+  merged(w, 160);
+  merged(w, 161);
+  const [first, second] = units(w);
+  assert.deepEqual([first.status, first.merged, first.pr, first.ruling?.minted_false_claim, first.falseClaims], ["counted", true, "160", "yes", 1]);
+  assert.deepEqual([second.status, second.merged, second.pr, second.ruling?.minted_false_claim, second.falseClaims], ["counted", true, "161", "no", 0]);
+  const { guard, fit } = figures(w);
+  assert.deepEqual(guard, { "slow-high": cell({ n: 1, merged: 1, failed: 1, usd: 2 }), "task-high": cell({ n: 1, merged: 1, usd: 3 }) });
+  assert.deepEqual(fit, guard);
+});
+
+test("an excluded earlier Pull keeps its own PR's Ruling when a later-appended row rules the counted later Pull's PR", () => {
+  const w = world();
+  w.features.push(pull(3545, "task-high"), pull(3545, "slow-high", { session: SESSION2, run_date: "2026-10-05" }));
+  w.members.push(
+    impl(3545, "slow-high", { ending: "pr", pr: "3606", cost: 2 }),
+    impl(3545, "slow-high", { session: SESSION2, run_date: "2026-10-05", ending: "pr", pr: "3696", cost: 3 }),
+  );
+  w.tiers.push(ruling(3545, 3606, { minted_false_claim: "yes" }), ruling(3545, 3696, { run_date: "2026-10-07" }));
+  merged(w, 3606);
+  merged(w, 3696);
+  const [earlier, later] = units(w);
+  assert.deepEqual([earlier.status, earlier.merged, earlier.pr, earlier.ruling?.pr, earlier.claims, earlier.falseClaims], ["excluded", true, "3606", "3606", 1, 1]);
+  assert.deepEqual([later.status, later.merged, later.pr, later.ruling?.pr, later.claims, later.falseClaims], ["counted", true, "3696", "3696", 1, 0]);
+  const { guard, fit } = figures(w);
+  assert.deepEqual(guard, { "slow-high": cell({ n: 1, merged: 1, usd: 3 }), "task-high": cell({ excluded: 1 }) });
+  assert.deepEqual(fit, guard);
+});
+
+test("a Pull takes its carried PR's Ruling even when that row is dated before the Pull; a Pull that does not carry it does not", () => {
+  const w = world();
+  w.features.push(pull(61, "slow-high", { session: SESSION2, run_date: "2026-10-05" }));
+  w.members.push(impl(61, "slow-high", { session: SESSION2, run_date: "2026-10-05", ending: "pr", pr: "1610", cost: 2 }));
+  w.tiers.push(ruling(61, 1610));
+  merged(w, 1610);
+  const [u] = units(w);
+  assert.deepEqual([u.status, u.merged, u.pr], ["counted", true, "1610"]);
+  assert.deepEqual(figures(w).guard, { "slow-high": cell({ n: 1, merged: 1, usd: 2 }) });
+  w.members[0].pr = "";
+  const [floored] = units(w);
+  assert.deepEqual([floored.merged, floored.pr], [false, null], "the date floor still holds for a Pull that does not carry the PR");
+});
+
+test("a carrier takes the latest row in file order naming its PR, whatever its ticket, and that row's ticket is refused on the same terms as its own", () => {
+  const w = world();
+  w.features.push(pull(64, "slow-high"));
+  w.members.push(impl(64, "slow-high", { ending: "pr", pr: "164", cost: 2 }));
+  w.tiers.push(ruling(64, 164), ruling(65, 164, { run_date: "2026-10-02", minted_false_claim: "yes" }));
+  merged(w, 164);
+  const [u] = units(w);
+  assert.deepEqual([u.status, u.merged, u.ruling?.ticket, u.falseClaims], ["counted", true, "65", 1]);
+  const p = parsed(w);
+  const bad = { ...p.tiers[1], closed_own_ticket: "maybe" };
+  assert.throws(() => attribute({ ...p, tiers: [p.tiers[0], bad], prs: w.prs, windowStart: DAY }),
+    (e) => e instanceof RulingError && e.message === "ticket #65 (PR #164): closed_own_ticket is 'maybe', expected yes or no");
+});
+
+test("a carrier bound to another ticket's row still has its own ticket's ruling rows refused", () => {
+  const w = world();
+  w.features.push(pull(68, "slow-high"));
+  w.members.push(impl(68, "slow-high", { ending: "pr", pr: "168", cost: 2 }));
+  w.tiers.push(ruling(69, 168), ruling(68, 1680));
+  merged(w, 168);
+  assert.deepEqual(units(w)[0].ruling?.ticket, "69");
+  const p = parsed(w);
+  const bad = { ...p.tiers[1], closed_own_ticket: "maybe" };
+  assert.throws(() => attribute({ ...p, tiers: [p.tiers[0], bad], prs: w.prs, windowStart: DAY }),
+    (e) => e instanceof RulingError && e.message === "ticket #68 (PR #1680): closed_own_ticket is 'maybe', expected yes or no");
+});
+
+test("a Pull carrying two ruled PRs binds the PR whose ruling row is later in file order, whatever its implementer rows' order", () => {
+  const w = world();
+  w.features.push(pull(66, "slow-high"));
+  w.members.push(
+    impl(66, "slow-high", { ending: "budget", pr: "166", cost: 2 }),
+    impl(66, "slow-high", { agent: "impl-66-b", ending: "pr", pr: "167", cost: 3 }),
+  );
+  w.tiers.push(ruling(66, 167), ruling(66, 166, { minted_false_claim: "yes" }));
+  merged(w, 166);
+  merged(w, 167);
+  const [u] = units(w);
+  assert.deepEqual([u.status, u.merged, u.pr, u.ruling?.pr, u.falseClaims], ["counted", true, "166", "166", 1]);
+});
+
+test("a carrier before the window takes no PR: an in-window Pull whose date-floor candidate names that PR takes it, unpriced", () => {
+  const w = world();
+  const EARLY = "2026-10-01T10-00-00-000Z_01a00000-0000-7000-8000-000000000003";
+  w.features.push(pull(70, "slow-high", { session: EARLY, run_date: "2026-10-01" }), pull(70, "task-high"));
+  w.members.push(
+    impl(70, "slow-high", { session: EARLY, run_date: "2026-10-01", ending: "pr", pr: "700", cost: 2 }),
+    impl(70, "task-high", { ending: "hollow", cost: 3 }),
+  );
+  w.tiers.push(ruling(70, 700));
+  merged(w, 700);
+  const us = units(w);
+  assert.deepEqual(us.map((u) => [u.status, u.merged, u.pr]), [["unpriced", true, "700"]]);
+});
+
+test("two Pulls carrying the same PR with its ruling dated between them: the later Pull, its carrier, takes it though the row predates it", () => {
+  const w = world();
+  w.features.push(pull(71, "slow-high"), pull(71, "task-high", { session: SESSION2, run_date: "2026-10-05" }));
+  w.members.push(
+    impl(71, "slow-high", { ending: "budget", pr: "171", cost: 2 }),
+    impl(71, "task-high", { session: SESSION2, run_date: "2026-10-05", ending: "pr", pr: "171", cost: 3 }),
+  );
+  w.tiers.push(ruling(71, 171, { run_date: "2026-10-04" }));
+  merged(w, 171);
+  const [first, second] = units(w);
+  assert.deepEqual([first.status, first.merged, first.pr], ["counted", false, null]);
+  assert.deepEqual([second.status, second.merged, second.pr], ["counted", true, "171"]);
+});
+
+test("a carrier bound to a `+`-joined row has every one of its tickets' ruling rows refused, not just the first", () => {
+  const w = world();
+  w.features.push(pull(72, "slow-high"));
+  w.members.push(impl(72, "slow-high", { ending: "pr", pr: "172", cost: 2 }));
+  w.tiers.push(ruling(73, 1730, { run_date: "2026-10-02" }), ruling("72+73", 172));
+  merged(w, 172);
+  assert.deepEqual(units(w)[0].ruling?.ticket, "72+73");
+  const p = parsed(w);
+  const bad = { ...p.tiers[0], closed_own_ticket: "maybe" };
+  assert.throws(() => attribute({ ...p, tiers: [bad, p.tiers[1]], prs: w.prs, windowStart: DAY }),
+    (e) => e instanceof RulingError && e.message === "ticket #73 (PR #1730): closed_own_ticket is 'maybe', expected yes or no");
+});
+
+test("two Pulls carrying the same PR: its merge counts once, for the later in file order, and the earlier stays unruled", () => {
+  const w = world();
+  w.features.push(pull(62, "slow-high"), pull(62, "task-high", { session: SESSION2, run_date: "2026-10-05" }));
+  w.members.push(
+    impl(62, "slow-high", { ending: "budget", pr: "162", cost: 2 }),
+    impl(62, "task-high", { session: SESSION2, run_date: "2026-10-05", ending: "pr", pr: "162", cost: 3 }),
+  );
+  w.tiers.push(ruling(62, 162, { run_date: "2026-10-05" }));
+  merged(w, 162);
+  const [first, second] = units(w);
+  assert.deepEqual([first.merged, first.pr, first.claims], [false, null, 0]);
+  assert.deepEqual([second.status, second.merged, second.pr], ["counted", true, "162"]);
+  const { guard, fit } = figures(w);
+  assert.deepEqual(guard, { "slow-high": cell({ n: 1 }), "task-high": cell({ n: 1, merged: 1, usd: 3 }) });
+  assert.deepEqual(fit, guard);
+});
+
+test("a Pull carrying no ruled PR still takes its date-floor Ruling, unpriced, beside a carrier-bound Pull of the same ticket", () => {
+  const w = world();
+  w.features.push(pull(63, "slow-high"), pull(63, "task-high", { session: SESSION2, run_date: "2026-10-05" }));
+  w.members.push(
+    impl(63, "slow-high", { ending: "pr", pr: "163", cost: 2 }),
+    impl(63, "task-high", { session: SESSION2, run_date: "2026-10-05", ending: "hollow", cost: 3 }),
+  );
+  w.tiers.push(ruling(63, 163), ruling(63, 1630, { run_date: "2026-10-05" }));
+  merged(w, 163);
+  merged(w, 1630);
+  const [first, second] = units(w);
+  assert.deepEqual([first.status, first.merged, first.pr], ["counted", true, "163"]);
+  assert.deepEqual([second.status, second.merged, second.pr], ["unpriced", true, "1630"]);
 });
 
 test("the guard holds a ruled Pull pending when its PR is missing from the PR states", () => {

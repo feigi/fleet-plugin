@@ -1176,10 +1176,10 @@ test("mergedSince: counts the rows the fitted commit's features file does not ho
     "a Pull with no verdict is not a merged PR");
 });
 
-test("mergedSince: a Pull is merged only on a ruling dated on or after it, a row with both verdict columns blank skipped", () => {
+test("mergedSince: the Pull whose implementer opened the ruled PR is merged on a ruling of any date; a row with both verdict columns blank skipped", () => {
   const features = [featureRow({ ticket: "1", run_date: "2026-10-03" })];
   const count = (verdicts) => since({ features, verdicts });
-  assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-02" })]), 0, "a ruling dated before the Pull predates it");
+  assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-02" })]), 1, "a ruling dated before its PR's carrier still rules it");
   assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-03", closed_own_ticket: "", minted_false_claim: "" })]), 0, "a both-blank row was never ruled");
   assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-03" })]), 1, "a ruling dated the day of the Pull rules it");
 });
@@ -1201,8 +1201,8 @@ test("mergedSince: a features row whose run_date is blank is no Pull, with neith
   const features = [featureRow({ ticket: "2", run_date: "2026-10-03" }), featureRow({ ticket: "2", run_date: "", session: SESSION2 })];
   const count = (verdicts, over = {}) => since({ table: baseTable(over), features, verdicts });
   const early = verdictRow({ ticket: "2", pr: "22", run_date: "2026-01-01", minted_false_claim: "yes" });
-  assert.equal(count([early]), 0, "a ruling dated before the dated row predates that Pull");
-  assert.equal(count([early], { window_start: "2026-01-01" }), 0, "the same with window_start set");
+  assert.equal(count([early]), 1, "the dated row's Pull, whose implementer opened the PR, takes a ruling of any date");
+  assert.equal(count([early], { window_start: "2026-01-01" }), 1, "the same with window_start set");
   assert.equal(count([verdictRow({ ticket: "2", pr: "22", run_date: "2026-10-03" })]), 1, "a ruling on or after the dated row still rules it");
   assert.equal(since({ features: [featureRow({ ticket: "3", run_date: "" })], verdicts: [verdictRow({ ticket: "3", pr: "33" })] }), 0,
     "a ticket whose only row is blank-dated has no Pull to rule");
@@ -1238,7 +1238,7 @@ test("fit refuses an unreadable guard or input file at exit 2 and leaves the tab
   assert.equal(readFileSync(p.table, "utf8"), JSON.stringify(baseTable({ burn_in: true, fitted_commit: bad })));
 });
 
-test("fit: a Pull's verdict is its ticket's last ruling dated on or after it, a row with both verdict columns blank skipped", () => {
+test("fit: a Pull's verdict is the last ruling in file order of the PR its implementer opened, whatever its date, a row with both verdict columns blank skipped", () => {
   // Ticket 2, in another cell, has a later row than ticket 1's Pull; it moves nothing for ticket 1.
   const features = [exploring({ ticket: "1", run_date: "2026-10-03" }), exploring({ ticket: "2", run_date: "2026-10-05", chosen_cell: "task-high" })];
   const fit = (verdicts) => fitDirect({ features, members: [], verdicts }).estimates["*"]["slow-high"];
@@ -1246,7 +1246,7 @@ test("fit: a Pull's verdict is its ticket's last ruling dated on or after it, a 
   const blank = ruled(1, 11, { run_date: "2026-10-04", closed_own_ticket: "", minted_false_claim: "" });
   assert.equal(fit([failed, blank]).fail_rate, 1, "a both-blank row after a real ruling was never ruled, so the ruling stands");
   assert.equal(fit([blank]).merged, 0, "a Pull whose only row is both-blank has no verdict");
-  assert.equal(fit([ruled(1, 11, { run_date: "2026-10-02", minted_false_claim: "yes" })]).merged, 0, "a ruling dated before the Pull predates it");
+  assert.equal(fit([ruled(1, 11, { run_date: "2026-10-02", minted_false_claim: "yes" })]).merged, 1, "a ruling dated before the Pull still rules the Pull whose implementer opened its PR");
   const pass = ruled(1, 11, { run_date: "2026-10-03" });
   assert.deepEqual(fit([pass]), { ...fit([pass]), merged: 1, fail_rate: 0 }, "a ruling dated the day of the Pull rules it");
   assert.equal(fit([pass, ruled(1, 11, { run_date: "2026-10-05", minted_false_claim: "yes" })]).fail_rate, 1, "the last such ruling wins");
@@ -1276,7 +1276,7 @@ test("fit: a features row whose run_date is blank is no input row", () => {
   const t = fit([early, ruled(9, 99)]);
   assert.deepEqual(Object.keys(t.estimates["*"]), ["slow-high"], "neither blank row sets a cell or adds a Pull");
   assert.equal(t.n_rows, 1);
-  assert.equal(t.estimates["*"]["slow-high"].merged, 0, "a ruling dated before the dated row predates that Pull");
+  assert.equal(t.estimates["*"]["slow-high"].merged, 1, "the dated row's Pull, whose implementer opened the PR, takes a ruling of any date");
   assert.equal(fit([ruled(2, 22, { run_date: "2026-10-03" })]).estimates["*"]["slow-high"].merged, 1, "a ruling on or after the dated row rules it");
 });
 
