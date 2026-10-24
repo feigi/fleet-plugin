@@ -279,17 +279,20 @@ const COVERED_MJS = {
   // another repository does not change what any step reads or runs". Its other
   // git call is `fleetFile()`'s, counted under fleet-dir.mjs.
   "closeout.mjs": 1,
-  // THREE scrubbed envs. `worktrees()`'s `worktree list` names which claims have
-  // a worktree in this checkout; an ambient GIT_DIR would list another
-  // repository's, and a claim to resume would read as one to report. Measured
-  // in stranded.test.mjs, "an ambient GIT_DIR naming another repository does
-  // not change the answer". `ghList()` is the ONE primitive behind both
-  // `gh … list` children, and `closedHeadPr()` is the claim branch's
-  // `gh pr list --head` probe; both scrub GH_REPO too: either ambient would
-  // list another repository's tracker. Measured in stranded.test.mjs, "gh is
-  // run with no ambient GIT_DIR or GH_REPO…". Its other git call is
+  // SIX scrubbed envs. `worktrees()`'s `worktree list` and
+  // `implementerBranches()`'s `for-each-ref` name which claims the disk holds;
+  // an ambient GIT_DIR would list another repository's, and a claim to resume
+  // would read as one to report. Measured in stranded.test.mjs, "an ambient
+  // GIT_DIR naming another repository does not change the answer", whose
+  // branch-only claim only the branch listing names. `ghList()` is the ONE
+  // primitive behind both `gh … list` children, `closedHeadPr()` is the claim
+  // branch's `gh pr list --head` probe and `viewIssue()` an unlabelled
+  // claim's `gh issue view`; each scrubs GH_REPO too: either ambient would
+  // read another repository's tracker. `releaseDryRun()` runs
+  // `release-ticket.sh` with the same env. Measured in stranded.test.mjs, "gh
+  // is run with no ambient GIT_DIR or GH_REPO…". Its other git call is
   // `fleetFile()`'s, counted under fleet-dir.mjs.
-  "stranded.mjs": 3,
+  "stranded.mjs": 6,
   // ONE scrubbed env, for `worktreeListing()`'s `worktree list`, which decides
   // whether an OPEN ticket's impl-<N>/ is kept; an ambient GIT_DIR would list
   // another repository's worktrees. Measured in reclaim-scratch.test.mjs, "an

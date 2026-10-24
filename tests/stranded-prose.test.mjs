@@ -31,7 +31,15 @@ test("a resume dispatches a new member under a new name on the same ticket and w
 test("a report goes to the maintainer and nothing else, and ancestor and none resume nothing", () => {
   const s = step();
   assert.match(s, Pin.phrase("A `report` goes to the maintainer as `#<N> — <why>` and nothing else: no dispatch, no label change, no release."));
-  assert.match(s, Pin.phrase("`prior: ancestor` — this session's own earlier run: no claim is listed."));
-  assert.match(s, Pin.phrase("every claim is `report`, and nothing is resumed."));
+  assert.match(s, Pin.phrase("`prior: ancestor` — this session's own earlier run: no `in-progress` claim is listed."));
+  assert.match(s, Pin.phrase("every `in-progress` claim is `report`, and nothing is resumed."));
   assert.match(s, Pin.phrase("Exit 2 is a list that did not answer — a `gh` or `git` failure, a list at its cap, a worktree whose presence cannot be told, or, after `ancestor`, a ledger that cannot be read — and is never nothing stranded."));
+});
+
+test("a claim no in-progress label holds live is a report whatever prior says, with the dry run's blockers and both ways out", () => {
+  const s = step();
+  assert.match(s, Pin.phrase("Whatever `prior` says — every implementer claim on the disk, a worktree `.worktrees/<N>-impl-<N>[-x]` or a local branch `implementer/<N>-impl-<N>[-x]`, whose issue is open and carries no `in-progress` label and no open PR: `report`, never `resume`."));
+  assert.match(s, Pin.phrase("Its `why` is the blocker list of a read-only `release-ticket.sh <N> impl-<N>[-x] implementer` dry run"));
+  assert.match(s, Pin.phrase("then the two ways out: push the branch and open a PR, or release the claim by hand."));
+  assert.match(s, Pin.phrase("A dry run or an issue read that does not answer still lists the claim, naming why."));
 });
