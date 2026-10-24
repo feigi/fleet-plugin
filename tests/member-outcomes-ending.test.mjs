@@ -219,6 +219,55 @@ test("a report naming another member is no report of this one", () => {
   assert.equal(endingOfMember(dir, "impl-38"), "hollow");
 });
 
+// A bailed report that names a `pr` or a `head` fails an impl rule, so it is no
+// report and reads the stop the transcript had (rationale: lastReport in
+// plugin/scripts/member-outcomes.mjs).
+const HEAD = "251310fc3a3340796635e572d2f873b31b131670";
+
+test("a bailed report that names a pr or a head is no bail, and reads hollow after a clean exit", () => {
+  const cases = {
+    pr: { pr: 4321 },
+    head: { head: HEAD },
+    // impl-3655's report, which was recorded as bail:hands
+    hands: { bailCause: "hands", bailDetail: "needs a key", head: HEAD },
+  };
+  for (const [shape, o] of Object.entries(cases)) {
+    const dir = session({ "impl-70": [modelChange(), reportWrite("impl-70", o), exitEvt()] });
+    assert.equal(endingOfMember(dir, "impl-70"), "hollow", shape);
+    const viaHeredoc = session({ "impl-70": [modelChange(), heredocWrite("impl-70", o), exitEvt()] });
+    assert.equal(endingOfMember(viaHeredoc, "impl-70"), "hollow", `${shape} by heredoc`);
+  }
+});
+
+test("a covered bail that names its PR in pr is no bail, but one naming it only in bailDetail still reads bail:covered", () => {
+  const covered = { bailCause: "covered", bailDetail: "PR#4321 — its diff meets the acceptance" };
+  const named = session({ "impl-71": [modelChange(), reportWrite("impl-71", { ...covered, pr: 4321 }), exitEvt()] });
+  assert.equal(endingOfMember(named, "impl-71"), "hollow");
+  const inDetail = session({ "impl-71": [modelChange(), reportWrite("impl-71", { ...covered, pr: null }), exitEvt()] });
+  assert.equal(endingOfMember(inDetail, "impl-71"), "bail:covered");
+});
+
+// A transcript per stop that can follow a report write, keyed by that stop.
+const stopsAfter = (report) => ({
+  provider: [modelChange(), report, turn({ stopReason: "error" }), exitEvt()],
+  budget: [modelChange(), report, userMsg("[budget notice] 90% of the request budget is spent"), exitEvt()],
+  abort: [modelChange(), report, turn({ stopReason: "aborted" }), exitEvt()],
+  crash: [modelChange(), report],
+});
+
+test("a bailed report that names a pr or a head falls through to the stop the transcript had", () => {
+  for (const [shape, lines] of Object.entries(stopsAfter(reportWrite("impl-72", { pr: 4321 })))) {
+    assert.equal(endingOfMember(session({ "impl-72": lines }), "impl-72"), shape, shape);
+  }
+});
+
+test("a bail naming a pr is superseded by a later valid bail, and supersedes an earlier one", () => {
+  const later = session({ "impl-73": [modelChange(), reportWrite("impl-73", { pr: 4321 }), reportWrite("impl-73"), exitEvt()] });
+  assert.equal(endingOfMember(later, "impl-73"), "bail:undecided");
+  const earlier = session({ "impl-73": [modelChange(), reportWrite("impl-73"), reportWrite("impl-73", { pr: 4321 }), exitEvt()] });
+  assert.equal(endingOfMember(earlier, "impl-73"), "hollow");
+});
+
 // ---------------------------------------------------------------------------
 // blocked, from the member's report in the transcript
 // ---------------------------------------------------------------------------
@@ -247,23 +296,18 @@ test("a blocked report from an implementer that also opened its own PR reads pr"
 });
 
 test("a blocked report reads blocked ahead of a provider error, a budget notice, an abort or a crash", () => {
-  const report = reportWrite("impl-63", blockedReport);
-  const cases = {
-    provider: [modelChange(), report, turn({ stopReason: "error" }), exitEvt()],
-    budget: [modelChange(), report, userMsg("[budget notice] 90% of the request budget is spent"), exitEvt()],
-    abort: [modelChange(), report, turn({ stopReason: "aborted" }), exitEvt()],
-    crash: [modelChange(), report],
-  };
-  for (const [shape, lines] of Object.entries(cases)) {
+  for (const [shape, lines] of Object.entries(stopsAfter(reportWrite("impl-63", blockedReport)))) {
     assert.equal(endingOfMember(session({ "impl-63": lines }), "impl-63"), "blocked", shape);
   }
 });
 
-test("a blocked report that names a bailCause, or no bailDetail, is no report, and reads hollow", () => {
+test("a blocked report that names a bailCause, no bailDetail, a pr or a head is no report, and reads hollow", () => {
   const cases = {
     withCause: { ...blockedReport, bailCause: "fork" },
     nullDetail: { ...blockedReport, bailDetail: null },
     blankDetail: { ...blockedReport, bailDetail: "  " },
+    withPr: { ...blockedReport, pr: 4321 },
+    withHead: { ...blockedReport, head: HEAD },
   };
   for (const [shape, o] of Object.entries(cases)) {
     const dir = session({ "impl-64": [modelChange(), reportWrite("impl-64", o), exitEvt()] });

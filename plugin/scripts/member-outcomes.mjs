@@ -252,6 +252,19 @@ export function endingOf({ member, pr, signals = null, earlierPrs = new Set(), v
 
 // The member's last report, when the last one it wrote is a valid impl report
 // naming this member; null when it wrote none, or the last one is malformed.
+// "Valid" is `reportViolation("impl", …)` as it stands now, so a last report
+// that fails an impl rule is no report and the member reads the stop its
+// transcript actually had (`provider`, `budget`, `abort`, `crash`, `hollow`).
+// That includes a `bailed` report that names a `pr` or a `head`, and a
+// `blocked` one that does: a bail is the pre-code outcome and a block reports
+// no PR, so neither reads `bail:<cause>` or `blocked`. A `covered` bail names
+// its PR in `bailDetail` with `pr: null`, and stays a bail.
+// A transcript written before that rule existed is read under the current
+// rule, so a re-scrape can turn a recorded `bail:<cause>` into a non-bail
+// ending. When this was written the one recorded case was `impl-3655`,
+// `bail:hands` with `pr: null` and a `head`, which reads `hollow` once
+// re-scraped. That flip is accepted: it matches the glossary's "valid bail",
+// and `mergeRows()` keeps no earlier `bail:*` row against it.
 function lastReport(reportWrites, leaf) {
   const last = reportWrites.filter((r) => r.file === `${leaf}.json`).at(-1);
   if (!last) return null;
