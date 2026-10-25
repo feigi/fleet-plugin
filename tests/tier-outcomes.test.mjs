@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { COLUMNS, LEGACY_WIDTH, RulingError, TIER_SWITCH_DATE, lastPullByTicket, parseTierOutcomes, rulingFor, rulingsByTicket } from "../plugin/scripts/tier-outcomes.mjs";
+import { COLUMNS, LEGACY_WIDTH, RulingError, TIER_SWITCH_DATE, deriveRuling, lastPullByTicket, parseTierOutcomes, rulingFor, rulingsByTicket } from "../plugin/scripts/tier-outcomes.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
 import { sessionDate } from "../plugin/scripts/ticket-router.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
@@ -1221,6 +1221,7 @@ test("append: a survived finding charged false-claim is ruled minted_false_claim
     note: `review ${RUN_1} at 1111111, record dispositions-fix-pr-20.json: survived[0] false-claim "the claim"`,
   });
   assert.equal(f.dataRows()[0].length, COLUMNS.length);
+  assert.ok(r.stderr.includes(`from the Charges on review ${RUN_1}\n`), r.stderr);
 });
 
 test("append: a refuted finding the fix-applier reversed and charged unmet rules closed_own_ticket=no", (t) => {
@@ -1574,6 +1575,108 @@ test("append: with no --scratch and no repository to key a scratch root on, the 
   assert.equal(r.code, 2, r.stderr);
   assert.match(r.stderr, /no scratch root to look in/);
   assert.equal(f.dataRows().length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// deriveRuling: the same Ruling over in-memory values, no scratch and no process
+// ---------------------------------------------------------------------------
+
+const RECORD_FILE = "dispositions-fix-pr-20.json";
+const RECORD_PATH = join("/nowhere", RECORD_FILE);
+// A record lookup that answers with `entries`, counting how often it is asked.
+function lookup(entries) {
+  const fn = () => {
+    fn.calls += 1;
+    return { file: RECORD_FILE, path: RECORD_PATH, value: { head: HEAD_1, run: RUN_1, entries } };
+  };
+  fn.calls = 0;
+  return fn;
+}
+const derive = ({ survived = [finding("the claim")], refuted = [], unverified = [], dimensionsUnrun = [], record }) =>
+  deriveRuling({ run: RUN_1, head: HEAD_1, review: { survived, refuted, unverified, dimensionsUnrun }, record });
+
+test("deriveRuling: a survived finding charged false-claim rules minted_false_claim=yes, and the note carries no --note", () => {
+  assert.deepEqual(derive({ record: lookup([charged("survived", 0, "false-claim")]) }), {
+    closed_own_ticket: "yes", minted_false_claim: "yes",
+    note: `review ${RUN_1} at 1111111, record ${RECORD_FILE}: survived[0] false-claim "the claim"`,
+  });
+});
+
+test("deriveRuling: a refuted finding charged unmet rules closed_own_ticket=no", () => {
+  const record = lookup([chargedNone("survived", 0, "defect-outside-acceptance"), charged("refuted", 0, "unmet", { reason: "the build does break" })]);
+  assert.deepEqual(derive({ survived: [finding("another")], refuted: [finding("it breaks the build")], record }), {
+    closed_own_ticket: "no", minted_false_claim: "no",
+    note: `review ${RUN_1} at 1111111, record ${RECORD_FILE}: refuted[0] unmet "it breaks the build"; none: survived[0] defect-outside-acceptance`,
+  });
+});
+
+test("deriveRuling: a survived finding charged both fails both columns", () => {
+  assert.deepEqual(derive({ record: lookup([charged("survived", 0, "both")]) }), {
+    closed_own_ticket: "no", minted_false_claim: "yes",
+    note: `review ${RUN_1} at 1111111, record ${RECORD_FILE}: survived[0] both "the claim"`,
+  });
+});
+
+test("deriveRuling: a standing finding charged none rules a pass, and the note names its reason", () => {
+  assert.deepEqual(derive({ record: lookup([chargedNone("survived", 0, "claim-about-untouched-code")]) }), {
+    closed_own_ticket: "yes", minted_false_claim: "no",
+    note: `review ${RUN_1} at 1111111, record ${RECORD_FILE}: none: survived[0] claim-about-untouched-code`,
+  });
+});
+
+test("deriveRuling: a survived finding deferred false-rationale is cleared and fails nothing", () => {
+  const record = lookup([entry("survived", 0, { disposition: "defer", reason: "false-rationale", issue: 5 })]);
+  assert.deepEqual(derive({ record }), {
+    closed_own_ticket: "yes", minted_false_claim: "no",
+    note: `review ${RUN_1} at 1111111, record ${RECORD_FILE}: cleared: survived[0] false-rationale`,
+  });
+});
+
+test("deriveRuling: a dimension that never ran does not stop the Ruling, and the note names it", () => {
+  const r = derive({
+    dimensionsUnrun: [{ dimension: "tests", reason: "crashed" }, "docs"],
+    record: lookup([chargedNone("survived", 0, "defect-outside-acceptance")]),
+  });
+  assert.equal(r.note, `review ${RUN_1} at 1111111, record ${RECORD_FILE}: none: survived[0] defect-outside-acceptance; unrun: tests, docs`);
+});
+
+test("deriveRuling: a record that cannot be read is {missing} with the lookup's own wording", () => {
+  const problem = `${join("/nowhere", "dispositions-fix-pr-20-b.json")} is not valid JSON: Unexpected token`;
+  assert.deepEqual(derive({ record: () => ({ missing: problem }) }), { missing: problem });
+});
+
+test("deriveRuling: a record entry the Ruling cannot read is {missing}, naming the record's path", () => {
+  const record = lookup([chargedNone("survived", 0, "defect-outside-acceptance"), null]);
+  assert.deepEqual(derive({ record }), { missing: `${RECORD_PATH} has an entry a Ruling cannot read: entries[1] is not an object` });
+});
+
+test("deriveRuling: a survived finding added to the review after it ran is ruled like any other", () => {
+  const survived = [finding("the claim"), finding("added later")];
+  assert.deepEqual(derive({ survived, record: lookup([chargedNone("survived", 0, "defect-outside-acceptance"), charged("survived", 1, "unmet")]) }), {
+    closed_own_ticket: "no", minted_false_claim: "no",
+    note: `review ${RUN_1} at 1111111, record ${RECORD_FILE}: survived[1] unmet "added later"; none: survived[0] defect-outside-acceptance`,
+  });
+  assert.deepEqual(derive({ survived, record: lookup([chargedNone("survived", 0, "defect-outside-acceptance")]) }), {
+    missing: `${RECORD_PATH} carries no Charge on this standing finding: survived[1] "added later"`,
+  });
+});
+
+test("deriveRuling: a review with no survived and no unverified finding passes and never consults the record", () => {
+  const record = lookup([charged("refuted", 0, "both")]);
+  assert.deepEqual(derive({ survived: [], refuted: [finding("x")], record }), {
+    closed_own_ticket: "yes", minted_false_claim: "no",
+    note: `review ${RUN_1} at 1111111, no record: counted no survived and no unverified finding`,
+  });
+  assert.equal(record.calls, 0);
+});
+
+test("deriveRuling: a review whose only finding is unverified consults the record, and nothing stands", () => {
+  const record = lookup([entry("unverified", 0, { disposition: "defer" })]);
+  assert.deepEqual(derive({ survived: [], unverified: [finding("suggestion")], record }), {
+    closed_own_ticket: "yes", minted_false_claim: "no",
+    note: `review ${RUN_1} at 1111111, record ${RECORD_FILE}: no finding stands`,
+  });
+  assert.equal(record.calls, 1);
 });
 
 // ---------------------------------------------------------------------------
