@@ -64,14 +64,17 @@
 // forwarded to the running command, no further command starts, and nothing
 // is written, so an older record stays where it is — settle compares the
 // record's tree with the reported head's tree, so a stale one cannot pass for
-// this run. The forwarded signal reaches the `sh -c` running the command, and
-// stops the command's own run only if that shell execs it or relays the
-// signal: a compound command that does neither runs on, and this script exits
-// only once that run closes its output. A signal received before step 3 takes
-// its default action: the script dies of it, printing nothing. A command that
-// dies of a signal this script did not receive is a failure like any other,
-// recorded red as the signal's number plus 128. A record is a claim, no
-// attestation: the member produces it, and nothing here stops a forged one.
+// this run. Each command runs in a process group of its own, and the forwarded
+// signal is delivered to that whole group — the `sh -c`, the commands it
+// started and everything they started — so a compound command stops with it,
+// unless a member of the group ignores the signal, and this script exits once
+// the run closes its output. A SIGKILL aimed at this script's own pid cannot
+// be forwarded and leaves the command running. A signal received before step
+// 3 takes its default action: the script dies of it, printing nothing. A
+// command that dies of a signal this script did not receive is a failure like
+// any other, recorded red as the signal's number plus 128. A record is a
+// claim, no attestation: the member produces it, and nothing here stops a
+// forged one.
 //
 // Exit status: 0 both commands passed and the record is written; 1 a command
 // failed — the record says which, and the script's stderr names it; 2 a
@@ -208,8 +211,8 @@ async function cli() {
     });
   }
   // A SIGTERM, SIGINT or SIGHUP this script itself receives is forwarded to
-  // the running command and marks the run killed: no further command starts
-  // and nothing is recorded. That holds until the record is decided, so a
+  // the running command's process group and marks the run killed: no further
+  // command starts and nothing is recorded. That holds until the record is decided, so a
   // signal during the commands never takes the default action and cuts off
   // the output still queued. After that only queued output is left, and a
   // signal takes its default action: the handler removes every handler and
@@ -226,7 +229,7 @@ async function cli() {
       return;
     }
     run.killed ??= sig;
-    run.child?.kill(sig);
+    signalGroup(run.child, sig);
   }]);
   for (const [sig, handler] of handlers) process.on(sig, handler);
   const check = checkCmd.trim() === "true"
@@ -278,17 +281,29 @@ async function cli() {
 
 if (isCLI(import.meta.url)) await cli();
 
-// One command, `sh -c` from `cwd`, its output passed through and its tail kept
-// for the counts. A signal that stops it is its number plus 128. `run` carries
-// the child to the signal handlers, and the command's duration to the kill
-// message.
+// The signal goes to the command's whole process group. A group that is
+// already gone has nothing to receive it, so ESRCH is not an error; any other
+// failure still surfaces. A spawn that never produced a pid has no group.
+function signalGroup(child, sig) {
+  if (child?.pid === undefined) return;
+  try {
+    process.kill(-child.pid, sig);
+  } catch (e) {
+    if (e.code !== "ESRCH") throw e;
+  }
+}
+
+// One command, `sh -c` from `cwd`, in a process group of its own, its output
+// passed through and its tail kept for the counts. A signal that stops it is
+// its number plus 128. `run` carries the child to the signal handlers, and the
+// command's duration to the kill message.
 function runCommand(run, command, cwd, env) {
   return new Promise((resolve) => {
     let tail = "";
     const keep = (chunk) => {
       tail = (tail + chunk).slice(-TAIL_BYTES);
     };
-    const child = spawn("sh", ["-c", command], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("sh", ["-c", command], { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
     run.child = child;
     const startedAt = Date.now();
     child.stdout.setEncoding("utf8");
