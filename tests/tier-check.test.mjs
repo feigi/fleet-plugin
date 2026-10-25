@@ -756,6 +756,111 @@ test("tick: a settled, unchecked implementer holds; a later tier-check writes ti
   assert.deepEqual([w.tick().tierMismatch, w.tick().tierUnchecked], [[], []]);
 });
 
+// A dispatched implementer's world: `ledger.mjs dispatch` wrote its
+// `agent=` onto the `## Dispatched` entry, off the row's `tier=` of the time.
+// `smol-high` is the cell it was dispatched at, `slow-high` the policy cell a
+// later `tier=` replaces it with; the transcript ran as `agent`.
+const SMOL_SLOW = { "fleet-implementer-slow-high": "@slow:high", "fleet-implementer-smol-high": "@task:high" };
+function dispatchedWorld({ agent = "fleet-implementer-smol-high", settle = "bailed" } = {}) {
+  const w = implWorld({ row: "impl-7 · tier=smol-high", definitions: SMOL_SLOW, agent, model: "anthropic/claude-sonnet-5" });
+  ledgerCli(w.ledger, "dispatch", "7", "impl-7");
+  if (settle) ledgerCli(w.ledger, "settle", "impl-7", settle);
+  return { ...w, bytes: () => readFileSync(w.ledger, "utf8") };
+}
+
+test("dispatch: the entry records the definition it printed, which `read` prints under agents", () => {
+  const w = dispatchedWorld({ settle: null });
+  assert.deepEqual(w.read().agents, { "impl-7": "fleet-implementer-smol-high" });
+  assert.match(w.bytes(), /^- impl-7 brief=[0-9a-f]{8} agent=fleet-implementer-smol-high$/m);
+});
+
+test("implementer: a cell replaced after the member settled does not change what it is judged against — token and row alike", () => {
+  for (const change of [
+    (w) => ledgerCli(w.ledger, "token", "7", "tier=slow-high"),
+    (w) => ledgerCli(w.ledger, "row", "7", "impl-7=bailed · tier=slow-high"),
+  ]) {
+    const w = dispatchedWorld();
+    change(w);
+    assert.match(w.row(), /tier=slow-high/);
+    assert.doesNotMatch(w.row(), /tier=smol-high/);
+    const r = w.check();
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.ok(w.row().endsWith(" · tier-ok=impl-7:fleet-implementer-smol-high"), w.row());
+    assert.deepEqual([w.tick().tierMismatch, w.tick().tierUnchecked], [[], []]);
+  }
+});
+
+test("implementer: a re-run after the cell changed appends nothing", () => {
+  const w = dispatchedWorld();
+  assert.equal(w.check().status, 0);
+  ledgerCli(w.ledger, "token", "7", "tier=slow-high");
+  const before = w.bytes();
+  const r = w.check();
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(w.bytes(), before, "a re-run wrote to the ledger");
+  assert.deepEqual(w.tick().tierMismatch, []);
+});
+
+test("implementer: a slip is still caught against the recorded definition, whatever the row's tier=", () => {
+  for (const tier of ["smol-high", "slow-high"]) {
+    const w = dispatchedWorld({ agent: "fleet-implementer-slow-high" });
+    if (tier !== "smol-high") ledgerCli(w.ledger, "token", "7", `tier=${tier}`);
+    const r = w.check();
+    assert.equal(r.status, 1, `${tier}: ${r.stdout}${r.stderr}`);
+    assert.match(w.row(), /tier-mismatch=impl-7:fleet-implementer-smol-high/, tier);
+    assert.match(r.stderr, /impl-7: dispatched fleet-implementer-slow-high, expected fleet-implementer-smol-high/);
+    assert.deepEqual(w.tick().tierMismatch, ["impl-7"]);
+  }
+});
+
+test("implementer: an entry without agent= is judged against the row's tier= as before", () => {
+  const w = dispatchedWorld();
+  writeFileSync(w.ledger, w.bytes().replace(/ agent=\S+/, ""));
+  assert.deepEqual(w.read().agents, {});
+  ledgerCli(w.ledger, "token", "7", "tier=slow-high");
+  const r = w.check();
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(w.row(), /tier-mismatch=impl-7:fleet-implementer-slow-high/);
+});
+
+// A retry member records its own definition: `impl-7` dispatched at
+// `smol-high`, `impl-7-b` at the `slow-high` that replaced it, and the row's
+// `tier=` then set back to `smol-high`. Only `impl-7-b`'s own entry names
+// what it ran under, so it passes having run as `slow-high` (`@slow` routes to
+// opus) and is caught having run as `smol-high` (`@task` routes to sonnet).
+test("implementer: a retry member is judged against its own entry's agent=, never its base member's or the row's", () => {
+  for (const [ran, model, status] of [
+    ["fleet-implementer-slow-high", "anthropic/claude-opus-5", 0],
+    ["fleet-implementer-smol-high", "anthropic/claude-sonnet-5", 1],
+  ]) {
+    const w = implWorld({ member: "impl-7-b", row: "impl-7 · tier=smol-high", definitions: SMOL_SLOW, agent: ran, model });
+    ledgerCli(w.ledger, "dispatch", "7", "impl-7");
+    ledgerCli(w.ledger, "settle", "impl-7", "bailed");
+    ledgerCli(w.ledger, "token", "7", "tier=slow-high");
+    ledgerCli(w.ledger, "dispatch", "7", "impl-7-b");
+    ledgerCli(w.ledger, "settle", "impl-7-b", "bailed");
+    ledgerCli(w.ledger, "token", "7", "tier=smol-high");
+    assert.deepEqual(w.read().agents, { "impl-7": "fleet-implementer-smol-high", "impl-7-b": "fleet-implementer-slow-high" });
+    const r = w.check();
+    assert.equal(r.status, status, `${ran}: ${r.stdout}${r.stderr}`);
+    const verdict = status === 0 ? "tier-ok" : "tier-mismatch";
+    assert.match(w.row(), new RegExp(`${verdict}=impl-7-b:fleet-implementer-slow-high`), ran);
+  }
+});
+
+test("implementer: an entry whose agent= the grammar cannot read refuses — exit 2, nothing written — live or settled", () => {
+  for (const settle of [null, "bailed"]) {
+    const w = dispatchedWorld({ settle });
+    if (settle) ledgerCli(w.ledger, "token", "7", "tier=slow-high");
+    writeFileSync(w.ledger, w.bytes().replace(/ agent=\S+/, " agent=Fleet-Implementer-Smol-High"));
+    const before = w.bytes();
+    const r = w.check();
+    assert.equal(r.status, 2, `${settle}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /impl-7: ## Dispatched entry 'impl-7\S* brief=[0-9a-f]{8} agent=Fleet-Implementer-Smol-High' is malformed/);
+    assert.equal(w.bytes(), before, `${settle}: the ledger changed`);
+  }
+});
+
 // A dispatch whose `task` call failed before any transcript was written: the
 // member is on the ledger — `dispatch` runs before the call — and the session
 // directory exists, but `<session>/<member>.jsonl` does not.

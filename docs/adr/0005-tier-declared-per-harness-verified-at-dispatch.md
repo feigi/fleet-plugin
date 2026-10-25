@@ -1,6 +1,6 @@
 # 0005 — Tier is declared per harness in the definition and verified at dispatch
 
-**Status:** Accepted. Ruled 2026-09-09 on #1298, #1302, #1303, #1314, against the measurements below. Amended by ADR 0011: on omp the bare alias is a fleet tier name routed through a role, not a vendor model selector. Amended by ADR 0012: the `tier-outcomes.tsv` floor runs at every alternate-tier Pull, not on "Pool empty → phase 0"; floor and query unchanged. Amended by ADR 0014: one declaration, `model: "@<role>:<level>"`; layer 1 and layer 2 keep their shape for omp alone.
+**Status:** Accepted. Ruled 2026-09-09 on #1298, #1302, #1303, #1314, against the measurements below. Amended by ADR 0011: on omp the bare alias is a fleet tier name routed through a role, not a vendor model selector. Amended by ADR 0012: the `tier-outcomes.tsv` floor runs at every alternate-tier Pull, not on "Pool empty → phase 0"; floor and query unchanged. Amended by ADR 0014: one declaration, `model: "@<role>:<level>"`; layer 1 and layer 2 keep their shape for omp alone. Amended by #3725: dispatch records an implementer's definition on its `## Dispatched` entry (`agent=`), and tier-check judges the implementer against that record, falling back to the row's `tier=` for an entry without one. A row's `tier=` can be replaced once its implementer settles, so it no longer names the definition a settled implementer was dispatched under; the rejected alternative "recording intent at dispatch time into the ledger" is taken for implementers.
 
 ## Context
 
