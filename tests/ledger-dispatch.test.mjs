@@ -108,7 +108,61 @@ test("dispatch appends a live member row and records the dispatch in ## Dispatch
   const l = read();
   assert.deepEqual(l.rows, ["#412 impl-412"]);
   assert.deepEqual(l.dispatched, ["impl-412"]);
-  assert.match(bytes(), new RegExp(`^## Dispatched\\n\\n- impl-412 brief=${out.brief.sha256.slice(0, 8)}$`, "m"));
+  assert.match(bytes(), new RegExp(`^## Dispatched\\n\\n- impl-412 brief=${out.brief.sha256.slice(0, 8)} agent=fleet-implementer-slow-high$`, "m"));
+});
+
+// The definition `dispatch` prints is the one an implementer's entry records,
+// for a row with a `tier=` or none, and no other family's entry gains a word.
+test("dispatch records the definition it prints on an implementer's entry only, which read prints under agents", (t) => {
+  const { ok, read, bytes, rule } = fixture(t);
+  rule(70, "1", "yes", [7]);
+  ok("row", "8", "impl-8 · class=routine · tier=task-high");
+  assert.equal(ok("dispatch", "7", "impl-7").agent, "fleet-implementer-slow-high");
+  assert.equal(ok("dispatch", "8", "impl-8").agent, "fleet-implementer-task-high");
+  ok("settle", "impl-7", "PR#70");
+  ok("dispatch", "70", "finisher-pr-70");
+  ok("dispatch", "70", "fix-pr-70");
+  ok("dispatch", "merge-bot");
+  const entries = bytes().split("\n").filter((l) => /^- (impl|fix-pr|finisher-pr|merge-bot)-/.test(l) && l.includes(" brief="));
+  assert.deepEqual(entries.map((l) => l.replace(/ brief=[0-9a-f]{8}/, " brief=H")), [
+    "- impl-7=PR#70 brief=H agent=fleet-implementer-slow-high",
+    "- impl-8 brief=H agent=fleet-implementer-task-high",
+    "- finisher-pr-70 brief=H",
+    "- fix-pr-70 brief=H",
+    "- merge-bot-1 brief=H queued=none",
+  ]);
+  assert.deepEqual(read().agents, { "impl-7": "fleet-implementer-slow-high", "impl-8": "fleet-implementer-task-high" });
+});
+
+test("an implementer's recorded definition survives its settle and every later write to another row", (t) => {
+  const { ok, read } = fixture(t);
+  ok("row", "8", "impl-8 · tier=task-high");
+  ok("dispatch", "8", "impl-8");
+  ok("dispatch", "9", "impl-9");
+  const agents = { "impl-8": "fleet-implementer-task-high", "impl-9": "fleet-implementer-slow-high" };
+  assert.deepEqual(read().agents, agents);
+  ok("settle", "impl-8", "bailed");
+  assert.deepEqual(read().agents, agents);
+  ok("row", "9", "impl-9 · class=routine");
+  ok("token", "8", "tier=slow-high");
+  ok("filed", "501", "some finding");
+  ok("row", "12", "claimed");
+  ok("drain", "stop for the test");
+  assert.deepEqual(read().agents, agents);
+  assert.ok(read().dispatched.includes("impl-8=bailed"));
+});
+
+// A malformed `agent=` is an entry this grammar cannot parse: ledger.mjs
+// refuses to settle or dispatch on it, and the tick refuses the ledger.
+test("an entry whose agent= is not [a-z0-9] words joined by - is refused by ledger.mjs and by the tick", (t) => {
+  const { file, read, refused, ok } = fixture(t);
+  ok("dispatch", "7", "impl-7");
+  writeFileSync(file, readFileSync(file, "utf8").replace(/ agent=\S+/, " agent=../../etc"));
+  refused(["settle", "impl-7", "killed"], /## Dispatched has an entry 'impl-7 brief=[0-9a-f]{8} agent=\.\.\/\.\.\/etc' this grammar cannot parse/);
+  refused(["dispatch", "8", "impl-8"], /this grammar cannot parse/);
+  const l = read();
+  assert.deepEqual(l.agents, {});
+  assert.throws(() => deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null }, []), LedgerError);
 });
 
 // SKILL.md's phase 2 writes `row <N> "impl-<N> · class=routine"` at dispatch
@@ -984,9 +1038,9 @@ test("drain needs a reason", (t) => {
 test("a ledger written before ## Dispatched existed reads as none dispatched, none retired and not draining, and survives a dispatch", (t) => {
   const { ok, read, briefOf } = fixture(t, "# Fleet run ledger\n\n## Rows\n\n- #7 impl-7 · class=routine\n\n## Filed\n\n- #8 a filed subject\n\n## Ruled\n\n- #9 MERGE · green\n");
   const legacy = { rows: ["#7 impl-7 · class=routine"], filed: ["#8 a filed subject"], ruled: ["#9 MERGE · green"] };
-  assert.deepEqual(read(), { ...legacy, dispatched: [], briefs: {}, queued: {}, drain: null, retired: [] });
+  assert.deepEqual(read(), { ...legacy, dispatched: [], briefs: {}, queued: {}, agents: {}, drain: null, retired: [] });
   assert.equal(ok("dispatch", "merge-bot").member, "merge-bot-1");
-  assert.deepEqual(read(), { ...legacy, dispatched: ["merge-bot-1"], briefs: { "merge-bot-1": briefOf("merge-bot-1").sha256.slice(0, 8) }, queued: { "merge-bot-1": [] }, drain: null, retired: [] });
+  assert.deepEqual(read(), { ...legacy, dispatched: ["merge-bot-1"], briefs: { "merge-bot-1": briefOf("merge-bot-1").sha256.slice(0, 8) }, queued: { "merge-bot-1": [] }, agents: {}, drain: null, retired: [] });
 });
 
 // #1799 fix-applier follow-up: a `## Dispatched` entry this grammar cannot
@@ -1863,12 +1917,12 @@ test("a rendered brief is recorded as brief=<first 8 hex> on the ## Dispatched e
   assert.deepEqual(out.json.brief, { path: rendered.path, sha256: rendered.sha256 });
   assert.equal(readFileSync(out.json.brief.path, "utf8"), text, "the path printed is the brief the task call is handed");
   const hash = rendered.sha256.slice(0, 8);
-  assert.match(f.bytes(), new RegExp(`\\n## Dispatched\\n\\n- impl-412 brief=${hash}\\n`));
+  assert.match(f.bytes(), new RegExp(`\\n## Dispatched\\n\\n- impl-412 brief=${hash} agent=fleet-implementer-slow-high\\n`));
   assert.deepEqual(f.read().dispatched, ["impl-412"], "read's dispatched stays the member tokens every reader parses");
   assert.deepEqual(f.read().briefs, { "impl-412": hash });
 
   f.ok("settle", "impl-412", "PR#500");
-  assert.match(f.bytes(), new RegExp(`\\n- impl-412=PR#500 brief=${hash}\\n`), "settle rewrites the token and keeps its brief");
+  assert.match(f.bytes(), new RegExp(`\\n- impl-412=PR#500 brief=${hash} agent=fleet-implementer-slow-high\\n`), "settle rewrites the token and keeps its brief");
   // A fix-applier's brief carries a kind; the gate reads only role and sha256.
   const fix = renderBrief(f.dir, "fix-pr-500", { sidecar: { kind: "conflict", args: { pr: "500" } } });
   assert.deepEqual(f.bare("dispatch", "500", "fix-pr-500").json.brief, { path: fix.path, sha256: fix.sha256 });

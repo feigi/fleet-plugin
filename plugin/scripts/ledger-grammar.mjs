@@ -120,34 +120,42 @@ export function memberRole(family) {
 // the first 8 hex of the sha256 the brief's sidecar carries. A merge bot's
 // entry then carries `queued=<pr>,<pr>…` — `queued=none` for an empty queue —
 // the open `ready-to-merge` PRs `dispatch` read when it dispatched the bot,
-// which its report is judged against at `settle --from-report`. `settle`
-// rewrites the token and keeps the words beside it.
-const DISPATCHED_ENTRY = /^([^ ]*) brief=([0-9a-f]{8})(?: queued=(none|[1-9][0-9]*(?:,[1-9][0-9]*)*))?$/;
+// which its report is judged against at `settle --from-report`. An
+// implementer's entry ends with `agent=<definition>`, the definition
+// `dispatch` printed for it, which tier-check judges it against. The value
+// becomes a file name under `agents/`, so it is held to `[a-z0-9]` words
+// joined by `-`, the shape of a `tier=` value. `settle` rewrites the token
+// and keeps the words beside it.
+const DISPATCHED_ENTRY = /^([^ ]*) brief=([0-9a-f]{8})(?: queued=(none|[1-9][0-9]*(?:,[1-9][0-9]*)*))?(?: agent=([a-z0-9]+(?:-[a-z0-9]+)*))?$/;
 
 /**
- * `{token, brief, queued}` for one `## Dispatched` entry: the member token,
- * the brief's hash or null, and the PR numbers of its `queued=` word or null
- * for an entry without one. An entry that is not a member token plus a
+ * `{token, brief, queued, agent}` for one `## Dispatched` entry: the member
+ * token, the brief's hash or null, the PR numbers of its `queued=` word or
+ * null for an entry without one, and the definition of its `agent=` word or
+ * null for an entry without one. An entry that is not a member token plus a
  * well-formed `brief=` word, optionally followed by a well-formed `queued=`
- * word, is returned whole as `token`, so a reader parsing it with
- * parseToken() refuses it exactly as it refuses any other entry this grammar
- * cannot parse.
+ * word and a well-formed `agent=` word, is returned whole as `token`, so a
+ * reader parsing it with parseToken() refuses it exactly as it refuses any
+ * other entry this grammar cannot parse.
  */
 export function parseDispatchedEntry(entry) {
   const m = DISPATCHED_ENTRY.exec(entry);
-  if (m === null || parseToken(m[1]) === null) return { token: entry, brief: null, queued: null };
+  if (m === null || parseToken(m[1]) === null) return { token: entry, brief: null, queued: null, agent: null };
   const queued = m[3] === undefined ? null : m[3] === "none" ? [] : m[3].split(",").map(Number);
-  return { token: m[1], brief: m[2], queued };
+  return { token: m[1], brief: m[2], queued, agent: m[4] ?? null };
 }
 
 /**
  * The `## Dispatched` entry for `token`, with `brief=<brief>` unless brief is
- * null and, after it, `queued=…` unless queued is null.
+ * null and, after it, `queued=…` unless queued is null and `agent=<agent>`
+ * unless agent is null.
  */
-export function dispatchedEntry(token, brief, queued = null) {
+export function dispatchedEntry(token, brief, queued = null, agent = null) {
   if (brief === null) return token;
-  const entry = `${token} brief=${brief}`;
-  return queued === null ? entry : `${entry} queued=${queued.join(",") || "none"}`;
+  let entry = `${token} brief=${brief}`;
+  if (queued !== null) entry += ` queued=${queued.join(",") || "none"}`;
+  if (agent !== null) entry += ` agent=${agent}`;
+  return entry;
 }
 
 // `PR#<n>` as a word of a row's text, `PR #<n>` too.
@@ -794,7 +802,7 @@ export function drawCell({ session, ticket, policyCell, cells }) {
   return { cell: E[k - 1], k, K };
 }
 
-// The definition an implementer should run under, off its ticket
+// The definition an implementer is dispatched under, off its ticket
 // row's `tier=` token — none means `fleet-implementer-<POLICY_CELL>`,
 // `tier=<x>` means `fleet-implementer-<x>`. The value becomes a file
 // name under `agents/`, so it is held to `[a-z0-9]` words joined by `-`
@@ -804,10 +812,11 @@ export function drawCell({ session, ticket, policyCell, cells }) {
 // `ledger.mjs dispatch`'s to refuse: it checks the file exists.
 //
 // Here, not in tier-check.mjs, because two readers must agree on it:
-// `ledger.mjs dispatch` prints the definition before the call, and
-// tier-check.mjs judges the member against it after. Two copies could name
-// different definitions for one row and fail a dispatch made exactly as
-// printed.
+// `ledger.mjs dispatch` prints the definition before the call and records
+// it on the member's `## Dispatched` entry, and tier-check.mjs judges the
+// member against that record — against this function's answer for the row
+// only for an entry that holds none. Two copies could name different
+// definitions for one row and fail a dispatch made exactly as printed.
 const TIER_SUFFIX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** Every `tier=` value a row's text carries, in order, duplicates kept. */

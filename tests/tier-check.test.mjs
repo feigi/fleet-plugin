@@ -756,6 +756,73 @@ test("tick: a settled, unchecked implementer holds; a later tier-check writes ti
   assert.deepEqual([w.tick().tierMismatch, w.tick().tierUnchecked], [[], []]);
 });
 
+// A dispatched implementer's world: `ledger.mjs dispatch` wrote its
+// `agent=` onto the `## Dispatched` entry, off the row's `tier=` of the time.
+// `smol-high` is the cell it was dispatched at, `slow-high` the policy cell a
+// later `tier=` replaces it with; the transcript ran as `agent`.
+const SMOL_SLOW = { "fleet-implementer-slow-high": "@slow:high", "fleet-implementer-smol-high": "@task:high" };
+function dispatchedWorld({ agent = "fleet-implementer-smol-high", settle = "bailed" } = {}) {
+  const w = implWorld({ row: "impl-7 · tier=smol-high", definitions: SMOL_SLOW, agent, model: "anthropic/claude-sonnet-5" });
+  ledgerCli(w.ledger, "dispatch", "7", "impl-7");
+  if (settle) ledgerCli(w.ledger, "settle", "impl-7", settle);
+  return { ...w, bytes: () => readFileSync(w.ledger, "utf8") };
+}
+
+test("dispatch: the entry records the definition it printed, which `read` prints under agents", () => {
+  const w = dispatchedWorld({ settle: null });
+  assert.deepEqual(w.read().agents, { "impl-7": "fleet-implementer-smol-high" });
+  assert.match(w.bytes(), /^- impl-7 brief=[0-9a-f]{8} agent=fleet-implementer-smol-high$/m);
+});
+
+test("implementer: a cell replaced after the member settled does not change what it is judged against — token and row alike", () => {
+  for (const change of [
+    (w) => ledgerCli(w.ledger, "token", "7", "tier=slow-high"),
+    (w) => ledgerCli(w.ledger, "row", "7", "impl-7=bailed · tier=slow-high"),
+  ]) {
+    const w = dispatchedWorld();
+    change(w);
+    assert.match(w.row(), /tier=slow-high/);
+    assert.doesNotMatch(w.row(), /tier=smol-high/);
+    const r = w.check();
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.ok(w.row().endsWith(" · tier-ok=impl-7:fleet-implementer-smol-high"), w.row());
+    assert.deepEqual([w.tick().tierMismatch, w.tick().tierUnchecked], [[], []]);
+  }
+});
+
+test("implementer: a re-run after the cell changed appends nothing", () => {
+  const w = dispatchedWorld();
+  assert.equal(w.check().status, 0);
+  ledgerCli(w.ledger, "token", "7", "tier=slow-high");
+  const before = w.bytes();
+  const r = w.check();
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(w.bytes(), before, "a re-run wrote to the ledger");
+  assert.deepEqual(w.tick().tierMismatch, []);
+});
+
+test("implementer: a slip is still caught against the recorded definition, whatever the row's tier=", () => {
+  for (const tier of ["smol-high", "slow-high"]) {
+    const w = dispatchedWorld({ agent: "fleet-implementer-slow-high" });
+    if (tier !== "smol-high") ledgerCli(w.ledger, "token", "7", `tier=${tier}`);
+    const r = w.check();
+    assert.equal(r.status, 1, `${tier}: ${r.stdout}${r.stderr}`);
+    assert.match(w.row(), /tier-mismatch=impl-7:fleet-implementer-smol-high/, tier);
+    assert.match(r.stderr, /impl-7: dispatched fleet-implementer-slow-high, expected fleet-implementer-smol-high/);
+    assert.deepEqual(w.tick().tierMismatch, ["impl-7"]);
+  }
+});
+
+test("implementer: an entry without agent= is judged against the row's tier= as before", () => {
+  const w = dispatchedWorld();
+  writeFileSync(w.ledger, w.bytes().replace(/ agent=\S+/, ""));
+  assert.deepEqual(w.read().agents, {});
+  ledgerCli(w.ledger, "token", "7", "tier=slow-high");
+  const r = w.check();
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(w.row(), /tier-mismatch=impl-7:fleet-implementer-slow-high/);
+});
+
 // A dispatch whose `task` call failed before any transcript was written: the
 // member is on the ledger — `dispatch` runs before the call — and the session
 // directory exists, but `<session>/<member>.jsonl` does not.

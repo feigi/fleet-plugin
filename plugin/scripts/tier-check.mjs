@@ -56,9 +56,11 @@
 //
 // An implementer (`impl-<N>`, ledger-grammar.mjs's name) is judged on the
 // ledger's terms, not the caller's: the definition it should have
-// run under is derived from its ticket row's `tier=` token
-// (ledger-grammar.mjs's `expectedDefinition` — the same function
-// `ledger.mjs dispatch` prints the definition from), the agent type
+// run under is the one its `## Dispatched` entry recorded at dispatch
+// (`agent=`, read through `ledger.mjs read`), falling back for an entry
+// without one to its ticket row's `tier=` token (ledger-grammar.mjs's
+// `expectedDefinition` — the same function `ledger.mjs dispatch` prints the
+// definition from), the agent type
 // it was actually dispatched as is
 // read off its own transcript and must BE that definition — a generic `task`
 // dispatch fails even when its model happens to match — and the verdict
@@ -468,8 +470,8 @@ function main() {
   }
 
   // The ledger is read at most once for evaluation: every implementer's
-  // expected definition comes off its row, and nothing this loop does
-  // writes a `tier=` token.
+  // expected definition comes off its `## Dispatched` entry or its row, and
+  // nothing this loop does writes either.
   let ledgerData = null;
   let receiptSession;
   const results = entries.map((raw) => {
@@ -479,7 +481,7 @@ function main() {
       die(`batch entry missing member/agentFile: ${JSON.stringify(raw)}`);
     }
     if (impl && raw.agentFile) {
-      die(`${raw.member}: an impl- entry carries no agentFile — its definition is derived from the ledger row's tier= token`);
+      die(`${raw.member}: an impl- entry carries no agentFile — its definition is the one its ## Dispatched entry recorded at dispatch, else the one its ledger row's tier= token names`);
     }
     const hasJobRecord = raw.resolvedModel && raw.resolvedThinkingLevel;
     let frontmatter = null, transcriptText = null, ticket = null, definition = null;
@@ -487,7 +489,7 @@ function main() {
       if (impl) {
         ticket = parsed.number;
         ledgerData ??= readLedger(ledgerFile);
-        definition = expectedDefinition(rowText(ledgerData, ticket));
+        definition = ledgerData.agents?.[raw.member] ?? expectedDefinition(rowText(ledgerData, ticket));
         const definitionFile = join(repoRoot, "agents", `${definition}.agent.md`);
         if (existsSync(definitionFile)) frontmatter = parseFrontmatter(readFileSync(definitionFile, "utf8"));
       } else {

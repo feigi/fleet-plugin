@@ -78,6 +78,8 @@ A member that dies between spawn and write is invisible — and members die in b
 
 `dispatch merge-bot` also records the queue the bot is dispatched against: its `## Dispatched` entry carries `queued=<pr>,<pr>…` (`queued=none` for an empty queue), the open `ready-to-merge` PRs gh lists at that moment. A gh that cannot answer refuses the dispatch, nothing written. `settle merge-bot-<n> --from-report` judges the bot's report against that queue, not against anything the report names: a PR from it that is still open and carries the label, with no verdict in `merged`, `held`, `conflictHold` or `refused`, fails the settle at exit 3, naming the PR, and an entry without `queued=` cannot be judged (exit 2) — settle that bot by hand.
 
+`dispatch impl-<N>` also records the definition it prints: the implementer's `## Dispatched` entry ends with `agent=<definition>` (`agent=fleet-implementer-<cell>`), and `ledger.mjs read` prints it under `agents`, by member name. tier-check judges the implementer against that record, falling back to the row's `tier=` for an entry without one, so a `tier=` replaced after the implementer settled does not change what it is judged against. `settle` and `rotate` keep the word with its entry. A value that is not `[a-z0-9]` words joined by `-` makes the entry malformed, and the ledger is refused.
+
 ## filed and ruled
 
 `filed` is checked with `ledger.mjs check <subject>` before every `gh issue create`, so a finding already recorded this run is not filed twice. That is not a guarantee against duplicates at large; the tracker query, described under `check`'s exits and its `verdict` above, is what covers those.

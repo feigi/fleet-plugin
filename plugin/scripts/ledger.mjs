@@ -14,9 +14,11 @@
 // every liveness count from this file alone, rather than from row text a
 // controller typed by hand: `dispatch` writes a member's live token onto its
 // row and appends it to `## Dispatched` with `brief=<hash>`, the brief it
-// refuses to dispatch without — and, for a merge bot, `queued=<pr>,…`, the
+// refuses to dispatch without — for a merge bot, `queued=<pr>,…`, the
 // open `ready-to-merge` PRs gh lists at dispatch, which its report must give
-// a verdict each; when that brief's sidecar names an absolute
+// a verdict each, and for an implementer, `agent=<definition>`, the
+// definition it prints, which tier-check judges the implementer against —
+// when that brief's sidecar names an absolute
 // scratch, it also clears the member's report file there, so a prior run's
 // report is not read as this run's; `settle` rewrites that token to
 // `<member>=<outcome>` in both places (an implementer's settle to `PR#M` also
@@ -487,7 +489,7 @@ function refuseStrayInId(value, what) {
 let ledgerParsed = false;
 
 function load() {
-  if (!existsSync(file)) return { rows: [], filed: [], ruled: [], dispatched: [], briefs: {}, queued: {}, drain: null, retired: [] };
+  if (!existsSync(file)) return { rows: [], filed: [], ruled: [], dispatched: [], briefs: {}, queued: {}, agents: {}, drain: null, retired: [] };
   let text;
   try {
     text = readFileSync(file, "utf8");
@@ -519,14 +521,15 @@ function load() {
 }
 
 // `## Dispatched` held as its tokens, which is what every reader of `read`
-// parses, `briefs`, each member's `brief=` hash by name, and `queued`, each
-// merge bot's `queued=` PR numbers by name: one token per member name for
-// the session, so a settle that rewrites the token keeps the name its brief
-// and its queue are filed under. save() joins them back.
+// parses, `briefs`, each member's `brief=` hash by name, `queued`, each
+// merge bot's `queued=` PR numbers by name, and `agents`, each implementer's
+// `agent=` definition by name: one token per member name for
+// the session, so a settle that rewrites the token keeps the name its brief,
+// its queue and its definition are filed under. save() joins them back.
 function dispatchedOf(entries) {
   const parsed = entries.map(parseDispatchedEntry);
   const byName = (field) => Object.fromEntries(parsed.filter((p) => p[field] !== null).map((p) => [parseToken(p.token).name, p[field]]));
-  return { dispatched: parsed.map((p) => p.token), briefs: byName("brief"), queued: byName("queued") };
+  return { dispatched: parsed.map((p) => p.token), briefs: byName("brief"), queued: byName("queued"), agents: byName("agent") };
 }
 
 // `## Drain` is written only once there is a marker to hold: an empty section
@@ -541,7 +544,7 @@ function save(d) {
     `# Fleet run ledger\n\n${ROWS}\n\n` + list(d.rows) +
     `\n\n${DISPATCHED}\n\n` + list(d.dispatched.map((t) => {
       const name = parseToken(t)?.name;
-      return dispatchedEntry(t, d.briefs[name] ?? null, d.queued[name] ?? null);
+      return dispatchedEntry(t, d.briefs[name] ?? null, d.queued[name] ?? null, d.agents[name] ?? null);
     })) +
     `\n\n${FILED}\n\n` + list(d.filed) +
     `\n\n${RULED}\n\n` + list(d.ruled) +
@@ -1632,7 +1635,7 @@ function runRotate() {
   }
   // Read before anything moves: a ledger whose live tokens cannot be read is
   // refused with nothing moved, never archived with those tokens dropped.
-  let carry = { rows: [], dispatched: [], briefs: {}, queued: {}, retired: [], skipped: [] };
+  let carry = { rows: [], dispatched: [], briefs: {}, queued: {}, agents: {}, retired: [], skipped: [] };
   if (prior === "ancestor" && exists) {
     let text;
     try {
@@ -1753,11 +1756,12 @@ function carryOf(text) {
       return false;
     }
   });
-  // An entry's `brief=` and `queued=` travel with it: save() writes them only
-  // beside the token it writes, so a carried member's record still names the
-  // brief it was dispatched with — and a carried merge bot the queue it is
-  // judged against — and a dropped member's does not.
-  const { dispatched: allDispatched, briefs: allBriefs, queued: allQueued } = dispatchedOf(ledgerSection(text, DISPATCHED));
+  // An entry's `brief=`, `queued=` and `agent=` travel with it: save() writes
+  // them only beside the token it writes, so a carried member's record still
+  // names the brief it was dispatched with — a carried merge bot the queue it
+  // is judged against, a carried implementer the definition it is judged
+  // against — and a dropped member's does not.
+  const { dispatched: allDispatched, briefs: allBriefs, queued: allQueued, agents: allAgents } = dispatchedOf(ledgerSection(text, DISPATCHED));
   const dispatched = allDispatched.filter((e) => {
     const t = parseToken(e);
     if (t !== null && t.error === null) return true;
@@ -1780,7 +1784,7 @@ function carryOf(text) {
   const live = liveOnLedger(rows, dispatched);
   const carried = { rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched };
   const retired = retiredOnLedger([...rows, ...skippedRows], allDispatched, archivedRetired, carried);
-  return { ...carried, briefs: allBriefs, queued: allQueued, retired, skipped };
+  return { ...carried, briefs: allBriefs, queued: allQueued, agents: allAgents, retired, skipped };
 }
 
 // ── dispatch / settle ────────────────────────────────────────────────────────
@@ -2220,11 +2224,13 @@ async function runDispatch() {
   // The definition the `task` call names, printed so the controller reads it
   // off this output rather than recalling it from prose a compaction drops.
   // An implementer's comes off its row's `tier=`, the same function
-  // tier-check.mjs judges it by — so a row that names no single definition,
-  // or names one with no file under `agents/` (a well-formed `tier=` whose
-  // definition has not shipped: a `task` call naming it cannot resolve), is
-  // refused here, before the member is live, not discovered by the check
-  // after the call.
+  // tier-check.mjs falls back to for an entry with no record, and `dispatch`
+  // records what it prints on the member's `## Dispatched` entry, which
+  // tier-check judges the member against — so a row that names no single
+  // definition, or names one with no file under `agents/` (a well-formed
+  // `tier=` whose definition has not shipped: a `task` call naming it cannot
+  // resolve), is refused here, before the member is live, not discovered by
+  // the check after the call.
   //
   // A fix-applier is `fleet-fix-applier` for every kind of work — review,
   // conflict hold, dispositions retry — so its definition reads nothing off
@@ -2319,6 +2325,10 @@ async function runDispatch() {
   // A merge bot's queue is recorded here, beside its brief, where nothing in
   // its report can reach: `settle --from-report` judges the report against it.
   if (QUEUED !== null) data.queued[member.name] = QUEUED;
+  // An implementer's definition is recorded here too: tier-check judges the
+  // member against it, and a `tier=` replaced after the member settled does
+  // not change what it was dispatched under.
+  if (member.family === "impl") data.agents[member.name] = agent;
   save(data);
   console.error(`    dispatched ${member.name}`);
   console.log(JSON.stringify({
