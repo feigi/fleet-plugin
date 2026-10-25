@@ -1221,6 +1221,7 @@ test("append: a survived finding charged false-claim is ruled minted_false_claim
     note: `review ${RUN_1} at 1111111, record dispositions-fix-pr-20.json: survived[0] false-claim "the claim"`,
   });
   assert.equal(f.dataRows()[0].length, COLUMNS.length);
+  assert.ok(r.stderr.includes(`from the Charges on review ${RUN_1}\n`), r.stderr);
 });
 
 test("append: a refuted finding the fix-applier reversed and charged unmet rules closed_own_ticket=no", (t) => {
@@ -1606,6 +1607,13 @@ test("deriveRuling: a refuted finding charged unmet rules closed_own_ticket=no",
   assert.deepEqual(derive({ survived: [finding("another")], refuted: [finding("it breaks the build")], record }), {
     closed_own_ticket: "no", minted_false_claim: "no",
     note: `review ${RUN_1} at 1111111, record ${RECORD_FILE}: refuted[0] unmet "it breaks the build"; none: survived[0] defect-outside-acceptance`,
+  });
+});
+
+test("deriveRuling: a survived finding charged both fails both columns", () => {
+  assert.deepEqual(derive({ record: lookup([charged("survived", 0, "both")]) }), {
+    closed_own_ticket: "no", minted_false_claim: "yes",
+    note: `review ${RUN_1} at 1111111, record ${RECORD_FILE}: survived[0] both "the claim"`,
   });
 });
 

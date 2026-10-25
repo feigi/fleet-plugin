@@ -769,8 +769,7 @@ function scratchRuling(pr, ledger, scratch) {
   if (file.survived.length !== review.survived || file.unverified.length !== review.unverified) {
     return { missing: `${reviewPath} holds ${file.survived.length} survived and ${file.unverified.length} unverified, not the ${review.survived} and ${review.unverified} the ledger's review ${review.run} counted` };
   }
-  const ruling = deriveRuling({ run: review.run, head: review.head, review: file, record: () => recordFor(scratch.root, pr, review.run) });
-  return ruling.missing !== undefined ? ruling : { ...ruling, review: review.run };
+  return { ...deriveRuling({ run: review.run, head: review.head, review: file, record: () => recordFor(scratch.root, pr, review.run) }), review: review.run };
 }
 
 // The step a refusal hands the controller. A merged PR's evidence is
