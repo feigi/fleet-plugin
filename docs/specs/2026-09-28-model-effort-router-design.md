@@ -533,14 +533,16 @@ classifier could change.*
 ```json
 {
   "window_start": "<WINDOW_START from pr-cost.mjs>",
-  "fitted_through": "<last run_date used>",
+  "fitted_commit": "<sha of the commit the fit read, or null before any fit>",
   "n_rows": 0,
   "stage": 1,
   "cells": ["slow-high", "task-high", "smol-high"],
   "burn_in": true,
   "rows": { "cost": { "*": "slow-high" }, "speed": { "*": "slow-high" } },
   "classifier": { "b": null, "tau": null },
-  "estimates": { "<stratum>": { "<cell>": { "generation": "<model>", "n": 0, "merged": 0, "claims": 0, "failed": 0, "usd_per_merged": null, "minutes_per_merged": null, "fail_rate": null, "fix_rounds": null, "review_findings": null, "left_out": 0, "unpriced": 0, "untimed": 0, "excluded": 0, "older": { "<model>": { "n": 0, "merged": 0, "claims": 0, "failed": 0, "usd_per_merged": null, "minutes_per_merged": null, "fail_rate": null, "fix_rounds": null, "review_findings": null, "left_out": 0, "unpriced": 0, "untimed": 0 } } } } }
+  "estimates": { "<stratum>": { "<cell>": { "generation": "<model>", "n": 0, "merged": 0, "claims": 0, "failed": 0, "usd_per_merged": null, "minutes_per_merged": null, "fail_rate": null, "fix_rounds": null, "review_findings": null, "left_out": 0, "unpriced": 0, "untimed": 0, "excluded": 0, "older": { "<model>": { "n": 0, "merged": 0, "claims": 0, "failed": 0, "usd_per_merged": null, "minutes_per_merged": null, "fail_rate": null, "fix_rounds": null, "review_findings": null, "left_out": 0, "unpriced": 0, "untimed": 0 } } } } },
+  "reasons": { "cost": { "*": { "cell": "slow-high", "reason": "unjudged", "cells": {}, "pairs": [] } }, "speed": { "*": { "cell": "slow-high", "reason": "unjudged", "cells": {}, "pairs": [] } } },
+  "guard": { "tripped": [], "n": {} }
 }
 ```
 
@@ -565,6 +567,8 @@ per Objective, `cost` and `speed`, as the sample shows; the route script
 reads the set of the run's Objective, `rows[objective][stratum]` when
 present, else `rows[objective]["*"]`, and a `speed` set has a row only
 where its `cost` set has one.*
+*Amended (#3809): `guard` is the snapshot of the guard's `tripped[]` and
+per-cell `n` that the fit read; `--check` re-fits against it.*
 
 **Amended (#2573, 2026-10-13): the table records the commit its fit read,
 not a date.** `fitted_through` is replaced by `fitted_commit`: the sha of the
