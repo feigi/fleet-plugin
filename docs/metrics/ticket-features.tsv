@@ -190,3 +190,7 @@ run_date	session	agent	ticket	policy_cell	chosen_cell	exploration_draw	sizing_sr
 2026-10-23	2026-10-23T22-31-59-743Z_01a16ae4-75ff-7699-a744-ab7d277aeda5	impl-3815	3815	slow-high	task-high	2/2	rule			3130	0	0	0	10	2	1	enhancement	
 2026-10-23	2026-10-23T22-31-59-743Z_01a16ae4-75ff-7699-a744-ab7d277aeda5	impl-3804	3804	slow-high	slow-high	1/2	rule			7248	11	1	0	15	0	0	enhancement	
 2026-10-23	2026-10-23T22-31-59-743Z_01a16ae4-75ff-7699-a744-ab7d277aeda5	impl-3805	3805	slow-high	task-high	2/2	rule			6849	14	1	0	15	0	0	bug	
+2026-10-25	2026-10-25T09-45-34-559Z_01a17273-805f-737f-804b-93c9d4a9287f	impl-3809	3809	slow-high	task-high	3/3	rule			3778	6	1	0	9	1	5		cost
+2026-10-25	2026-10-25T09-45-34-559Z_01a17273-805f-737f-804b-93c9d4a9287f	impl-3823	3823	slow-high	task-high	3/3	rule			6909	7	1	0	6	1	1		cost
+2026-10-25	2026-10-25T09-45-34-559Z_01a17273-805f-737f-804b-93c9d4a9287f	impl-3830	3830	slow-high	slow-high	1/3	rule			5595	6	1	0	12	2	2	enhancement	cost
+2026-10-25	2026-10-25T09-45-34-559Z_01a17273-805f-737f-804b-93c9d4a9287f	impl-3725	3725	slow-high	task-high	3/3	rule			8981	10	2	3	19	5	3	bug	cost
