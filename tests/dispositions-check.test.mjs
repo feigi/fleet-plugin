@@ -1703,6 +1703,13 @@ test("a survived entry deferred false-rationale, and an unverified entry, need n
   }), []);
 });
 
+test("a survived entry applied, though its reason says false-rationale, still stands and needs a Charge", () => {
+  assert.deepEqual(charged([{ ...applied, reason: "false-rationale" }, outOfScope(NONE)]), [
+    "survived[0]: a finding that stands on the PR's first review carries a Charge, and this entry carries none — charge it false-claim, unmet, both, or none with a chargeReason",
+  ]);
+  assert.deepEqual(charged([{ ...applied, ...NONE, reason: "false-rationale" }, outOfScope(NONE)]), []);
+});
+
 test("a refuted entry, a reversal, with no Charge is refused; charged, it passes", () => {
   assert.deepEqual(core([{ ...applied, ...NONE }, REVERSED], { charges: true }), [
     "refuted[0]: a finding that stands on the PR's first review carries a Charge, and this entry carries none — charge it false-claim, unmet, both, or none with a chargeReason",
@@ -1721,7 +1728,7 @@ test("an entry scoped out is charged none: false-claim, unmet or both is refused
   assert.deepEqual(charged([{ ...applied, scope: "out", charge: "false-claim" }, outOfScope(NONE)]), []);
 });
 
-test("a Charge of none with no reason, a reason outside the three, or an unknown Charge is refused", () => {
+test("a Charge of none with no reason, a reason outside the three, an unknown Charge, or a chargeReason with no Charge is refused", () => {
   assert.deepEqual(charged([{ ...applied, charge: "none" }, outOfScope(NONE)]), [
     "survived[0]: a Charge of none names its chargeReason, one of defect-outside-acceptance, not-the-implementers-text, claim-about-untouched-code, and this one names none",
   ]);
@@ -1734,12 +1741,18 @@ test("a Charge of none with no reason, a reason outside the three, or an unknown
   assert.deepEqual(charged([{ ...applied, charge: "unmet", chargeReason: "defect-outside-acceptance" }, outOfScope(NONE)]), [
     "survived[0]: chargeReason gives the reason for a Charge of none, and this entry is charged unmet",
   ]);
+  assert.deepEqual(charged([{ ...applied, chargeReason: "defect-outside-acceptance" }, outOfScope(NONE)]), [
+    "survived[0]: chargeReason gives the reason for a Charge of none, and this entry carries no charge",
+  ]);
 });
 
 test("off the first review's record no Charge is required, and one that is carried is still judged", () => {
   assert.deepEqual(charged([applied, outOfScope({})], { charges: false }), []);
   assert.deepEqual(charged([{ ...applied, charge: "none" }, outOfScope({})], { charges: false }), [
     "survived[0]: a Charge of none names its chargeReason, one of defect-outside-acceptance, not-the-implementers-text, claim-about-untouched-code, and this one names none",
+  ]);
+  assert.deepEqual(charged([{ ...applied, chargeReason: "defect-outside-acceptance" }, outOfScope({})], { charges: false }), [
+    "survived[0]: chargeReason gives the reason for a Charge of none, and this entry carries no charge",
   ]);
 });
 

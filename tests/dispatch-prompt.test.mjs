@@ -514,3 +514,87 @@ test("a PR no settled impl token names renders a line saying no ticket is on han
   assert.equal(conflict.status, 0, conflict.err);
   assert.ok(!conflict.out.includes("The ticket:"));
 });
+
+test("only a settled, well-formed impl token naming the PR finds a ticket, and a ticket two rows name prints once", () => {
+  const c = fixCase("review");
+  const title = `Title: ${ISSUE.title}`;
+  const count = (out) => out.split(title).length - 1;
+  // Two rows naming one ticket for the PR: the ticket prints once.
+  const twice = ticketRun(ISSUE, { rows: ["#4120 impl-4120=PR#3293 → PR#3293", "#4120 impl-4120-b=PR#3293 → PR#3293"] });
+  const once = render(argvOf({ ...c, args: { ...c.args, pr: "3293", scratch: twice.scratch } }), { cwd: twice.repo });
+  assert.equal(once.status, 0, once.err);
+  assert.equal(count(once.out), 1, once.out);
+  // A member of another family, and an impl token whose outcome is outside its
+  // family's vocabulary, name no ticket, though each spells PR#<pr>.
+  for (const [label, row, pr] of [["another family", "#3293 fix-pr-3293=PR#3293", "3293"], ["malformed", "#4120 impl-4120=PR#03293", "03293"]]) {
+    const { repo, scratch } = ticketRun(ISSUE, { rows: [row] });
+    const r = render(argvOf({ ...c, args: { ...c.args, pr, scratch } }), { cwd: repo });
+    assert.equal(r.status, 0, `${label}: ${r.err}`);
+    assert.equal(count(r.out), 0, `${label}: ${r.out}`);
+    assert.ok(r.out.includes(`no ticket is on hand for PR #${pr}.`), `${label}: ${r.out}`);
+  }
+});
+
+test("a ledger that is absent names no ticket; one that cannot be read is refused", () => {
+  const c = fixCase("review");
+  const absent = ticketRun(ISSUE);
+  rmSync(join(absent.repo, ".fleet", "ledger.md"));
+  const none = render(argvOf({ ...c, args: { ...c.args, pr: "3293", scratch: absent.scratch } }), { cwd: absent.repo });
+  assert.equal(none.status, 0, none.err);
+  assert.ok(none.out.includes("no ticket is on hand for PR #3293."), none.out);
+  const unreadable = ticketRun(ISSUE);
+  rmSync(join(unreadable.repo, ".fleet", "ledger.md"));
+  mkdirSync(join(unreadable.repo, ".fleet", "ledger.md"));
+  const r = render(argvOf({ ...c, args: { ...c.args, pr: "3293", scratch: unreadable.scratch } }), { cwd: unreadable.repo });
+  assert.equal(r.status, 2, r.err);
+  assert.equal(r.out, "");
+  assert.ok(r.err.includes(`cannot read the ledger ${join(unreadable.repo, ".fleet", "ledger.md")} for PR #3293's ticket`), r.err);
+});
+
+// A renderer whose fix-applier template is `edit`ed — a template defect a test
+// renders without touching the shipped template.
+const fixApplierEdited = (label, edit) => install(label, {
+  edit: (briefs) => {
+    const p = join(briefs, "fix-applier.md");
+    writeFileSync(p, edit(readFileSync(p, "utf8")));
+  },
+});
+
+test("a template's ticket directive is refused when declared twice, as an argument or a literal, uncarried, or with no --pr or --scratch to find it by", () => {
+  const c = fixCase("conflict");
+  const defects = [
+    ["twice", (t) => t.replace("ticket ticket\n", "ticket ticket\nticket other\n"), "declares a ticket placeholder twice: <ticket> and <other>"],
+    ["also a literal", (t) => t.replace("ticket ticket\n", "ticket your name\n"), "declares <your name> as the ticket and as an argument or a literal"],
+    ["also an argument", (t) => t.replace("ticket ticket\n", "ticket pr\n"), "declares <pr> as the ticket and as an argument or a literal"],
+    ["never carried", (t) => t.replace("<ticket>", "the ticket"), "declares <ticket> but never carries it"],
+    ["no --pr", (t) => t.replace("arg pr pr\n", "").replaceAll("<pr>", "the PR"), "declares the ticket <ticket> but no --pr to find it by"],
+    ["no --scratch", (t) => t.replace("arg scratch scratch\n", "").replace("path scratch\n", "").replaceAll("<scratch>", "the scratch root"), "declares the ticket <ticket> but no --scratch to find it by"],
+  ];
+  for (const [label, edit, refusal] of defects) {
+    const r = render(argvOf(c), { inst: fixApplierEdited(`ticket-${label.replaceAll(" ", "-")}`, edit) });
+    assert.equal(r.status, 2, `${label}: ${r.err}`);
+    assert.equal(r.out, "", label);
+    assert.ok(r.err.includes(`template fix-applier.md ${refusal}`), `${label}: ${r.err}`);
+  }
+});
+
+test("a kind carrying the ticket without --pr or --scratch in its own text is refused at render, naming the kind", () => {
+  const c = fixCase("conflict");
+  const inst = fixApplierEdited("ticket-in-conflict", (t) => t.replace("## kind: conflict\n", "## kind: conflict\n<ticket>\n"));
+  const r = render(argvOf(c), { inst });
+  assert.equal(r.status, 2, r.err);
+  assert.equal(r.out, "");
+  assert.ok(r.err.includes("template fix-applier.md carries the ticket <ticket> in kind conflict without --pr and --scratch to find it by"), r.err);
+});
+
+test("an argument value spelling the ticket placeholder is refused after the render, not filled", () => {
+  const { repo, scratch } = ticketRun(ISSUE);
+  const c = fixCase("review");
+  const r = render(argvOf({ ...c, args: { ...c.args, pr: "3293", scratch, testCmd: "run <ticket>" } }), { cwd: repo });
+  assert.equal(r.status, 2, r.err);
+  assert.equal(r.out, "");
+  assert.ok(r.err.includes("the rendered brief still carries <ticket> — an argument value spells it"), r.err);
+  // The control: the same value without the placeholder renders.
+  const ok = render(argvOf({ ...c, args: { ...c.args, pr: "3293", scratch, testCmd: "run ticket" } }), { cwd: repo });
+  assert.equal(ok.status, 0, ok.err);
+});

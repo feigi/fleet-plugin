@@ -157,11 +157,8 @@ function parseTemplate(role, text) {
   const kinds = [...new Set(sections.flatMap((s) => s.kinds ?? []))];
 
   const whole = sections.flatMap((s) => s.lines).join("\n");
-  for (const a of args) if (!whole.includes(`<${a.placeholder}>`)) refuse(`declares <${a.placeholder}> but never carries it`);
-  if (ticket !== null) {
-    if (!whole.includes(`<${ticket}>`)) refuse(`declares <${ticket}> but never carries it`);
-    for (const flag of TICKET_FLAGS) if (!args.some((a) => a.flag === flag)) refuse(`declares the ticket <${ticket}> but no --${flag} to find it by`);
-  }
+  for (const p of [...args.map((a) => a.placeholder), ...(ticket === null ? [] : [ticket])]) if (!whole.includes(`<${p}>`)) refuse(`declares <${p}> but never carries it`);
+  if (ticket !== null) for (const flag of TICKET_FLAGS) if (!args.some((a) => a.flag === flag)) refuse(`declares the ticket <${ticket}> but no --${flag} to find it by`);
   return { args, paths, literals, ticket, sections, kinds };
 }
 
@@ -214,7 +211,7 @@ function ticketFor(pr, scratch, names) {
     } catch (err) {
       return die(`cannot read ticket #${n}, the ticket PR #${pr}'s implementer was dispatched with, from ${path}: ${err.message}`);
     }
-    if (issue === null || typeof issue !== "object" || typeof issue.title !== "string") {
+    if (typeof issue?.title !== "string") {
       return die(`cannot read ticket #${n}, the ticket PR #${pr}'s implementer was dispatched with, from ${path}: it holds no issue with a title`);
     }
     return defang(ticketText(issue), names);
@@ -309,15 +306,15 @@ if (carriesTicket) {
     die(`template ${role}.md carries the ticket <${template.ticket}> in kind ${kind} without ${TICKET_FLAGS.map((f) => `--${f}`).join(" and ")} to find it by`);
   }
   const [pr, scratch] = by.map((a) => values.get(a.placeholder));
-  const names = [...new Set([...loadTemplate("implementer").args, ...template.args].map((a) => a.placeholder).concat(template.ticket))];
+  const names = [...loadTemplate("implementer").args, ...template.args].map((a) => a.placeholder).concat(template.ticket);
   values.set(template.ticket, ticketFor(pr, scratch, names));
 }
 
 const brief = `${body.replace(PLACEHOLDER, (whole, inner) => (values.has(inner) ? values.get(inner) : whole))}\n`;
-for (const a of required) {
-  if (brief.includes(`<${a.placeholder}>`)) die(`the rendered brief still carries <${a.placeholder}> — an argument value spells it`);
+const filled = [...required.map((a) => a.placeholder), ...(carriesTicket ? [template.ticket] : [])];
+for (const p of filled) {
+  if (brief.includes(`<${p}>`)) die(`the rendered brief still carries <${p}> — an argument value spells it`);
 }
-if (carriesTicket && brief.includes(`<${template.ticket}>`)) die(`the rendered brief still carries <${template.ticket}> — an argument value spells it`);
 
 const payload = {
   role,

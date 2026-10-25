@@ -429,12 +429,13 @@ const stands = (bucket, e) => bucket === "refuted"
   || (bucket === "survived" && !(e.disposition === "defer" && e.reason === "false-rationale"));
 
 // Why an entry's Charge breaks a rule, or null when it holds. `required`: the
-// record answers the PR's first review, where every standing entry carries a
-// Charge. Anywhere else a Charge is optional, and judged only when present.
-function chargeProblem(e, { standing, inScope, required }) {
+// record answers the PR's first review and the entry's finding stands, so the
+// entry carries a Charge. Anywhere else a Charge is optional, and judged only
+// when present.
+function chargeProblem(e, { inScope, required }) {
   if (e.charge === undefined) {
     if (e.chargeReason !== undefined) return "chargeReason gives the reason for a Charge of none, and this entry carries no charge";
-    if (required && standing) {
+    if (required) {
       return `a finding that stands on the PR's first review carries a Charge, and this entry carries none — charge it ${CHARGES.filter((c) => c !== "none").join(", ")}, or none with a chargeReason`;
     }
     return null;
@@ -528,14 +529,14 @@ export function checkDispositions({ review, record, recordProblem = null, run = 
     const finding = review[bucket][index];
     const presumed = presumedInScope(finding, touched, roots);
     const inScope = presumed !== null || e.scope === "in";
-    const why = presumed === null ? "its entry declares scope in" : `${presumed}, so it is in scope whatever its entry declares`;
-    const charge = chargeProblem(e, { standing: stands(bucket, e), inScope, required: charges });
+    const charge = chargeProblem(e, { inScope, required: charges && stands(bucket, e) });
     if (charge !== null) at(bucket, index, charge);
     if (bucket === "refuted" && !e.reason?.trim()) {
       at(bucket, index, "a reversed refutation names its evidence in reason, and this one names none");
       return;
     }
     if (bucket !== "unverified" && e.disposition !== "defer") return;
+    const why = presumed === null ? "its entry declares scope in" : `${presumed}, so it is in scope whatever its entry declares`;
     const crashed = bucket === "unverified" && finding.refutersDispatched > 0;
     const shape = e.claimKind === "shape";
     // A suggestion's refuter verdict is the evidence a refuter ran: every
