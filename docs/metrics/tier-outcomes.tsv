@@ -40,6 +40,20 @@
 # tier arm. The audit script is not committed; `check` covers every row from
 # the switch on.
 #
+# 2026-10-25 (#3805): `closed_own_ticket`, `minted_false_claim` AND `note` ARE
+# SCRIPT-WRITTEN FROM THE CHARGES. From this date `tier-outcomes.mjs append <pr>`
+# works both verdicts out from the Charges the fix-applier recorded on the
+# standing findings of the PR's first review, and composes the note, so a row
+# explains itself after the evidence is reclaimed. `closed_own_ticket=no` when a
+# standing finding is charged `unmet` or `both`; `minted_false_claim=yes` when
+# one is charged `false-claim` or `both`. A review that counted no survived and
+# no unverified finding is a pass and needs no record. The two definitions
+# below are the ones the Charges are made by. A row whose verdicts were given by
+# hand (`--closed-own-ticket` and `--minted-false-claim`, with `--note` naming
+# the evidence) is a merged PR's: a backfill, a re-rule, a PR merged without its
+# finisher. `append` refuses them on any other PR. Rows dated before this day
+# hold verdicts given by hand and are unchanged by it.
+#
 # 2026-09-10: EVERY member dispatched this session — implementers declared
 # opus AND sonnet alike, plus every fix-applier/finisher/merge-bot dispatched
 # with no model declared at all — ran on claude-sonnet-5. Verified directly

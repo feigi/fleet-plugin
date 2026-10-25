@@ -1917,8 +1917,8 @@ async function rulingOf(pr) {
     if (ruling !== undefined) return { tickets, ruling, tsv, refusal: null };
   }
   return { tickets, ruling: null, refusal: `PR #${pr}, the implementer PR of ${tickets.length === 1 ? "ticket" : "tickets"} ${tickets.map((n) => `#${n}`).join(", ")}, has no ruling — `
-    + `${tsv} has no row for it; rule its review with \`~/.fleet/bin/fleet-run tier-outcomes.mjs append ${pr} --closed-own-ticket yes|no `
-    + `--minted-false-claim yes|no --note "<text>"\`, then dispatch the finisher again` };
+    + `${tsv} has no row for it; rule its review with \`~/.fleet/bin/fleet-run tier-outcomes.mjs append ${pr}\`, `
+    + "then dispatch the finisher again" };
 }
 
 // The reads a check makes of GitHub and git, shared by settle --from-report

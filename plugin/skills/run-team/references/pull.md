@@ -477,6 +477,12 @@ member-outcomes row (a `tier-unverifiable=` member has no ledger verdict, so
 its one member-outcomes row decides), and BLANK with a WARNING naming why
 when neither settles
 it; never type a tier in over that.
+It also works `closed_own_ticket` and `minted_false_claim` out from the Charges on
+the PR's first review and composes `note` from them, so you type no verdict. A PR whose
+record has no Charge on a standing finding, or whose review file or record is missing,
+is refused, naming what is missing: check the record again, or dispatch the fix-applier
+again as a dispositions retry. Verdicts given by hand, with `--note`, are for a merged
+PR whose evidence is reclaimed, and `append` refuses them on any other.
 
 **Why not decide inside one run.** A run holds 2-3 implementer PRs, and ticket
 difficulty swamps the tier effect — a gojq parity harness and a two-statement

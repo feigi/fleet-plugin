@@ -41,15 +41,16 @@ function ledgerText(rows = [], dispatched = []) {
 
 // `gh pr view <pr> --json closingIssuesReferences,url` as the stub answers it:
 // PR <pr>'s url in the fixture's own repository and the references GH_REFS
-// holds.
-const PR_VIEW_ANSWER = "printf '{\"closingIssuesReferences\":%s,\"url\":\"%s%s\"}\\n' \"$GH_REFS\" \"$GH_PULL\" \"$3\"\n";
+// holds. `gh pr view <pr> --json state` answers GH_STATE.
+const PR_VIEW_ANSWER = "if [ \"$5\" = state ]; then printf '{\"state\":\"%s\"}\\n' \"$GH_STATE\"; exit 0; fi\n"
+  + "printf '{\"closingIssuesReferences\":%s,\"url\":\"%s%s\"}\\n' \"$GH_REFS\" \"$GH_PULL\" \"$3\"\n";
 
 // `clock` pins the child's `new Date()` to that instant and `tz` its TZ, so a
 // date `append` stamps is independent of the host's clock and zone. `env` is
 // laid over the child's environment. `closes` is the PR's closing references:
 // each an issue number in its own repository, or a reference object as it
 // stands — `ref(n, "other/repo")` for another repository's issue.
-function fixture(t, { members = [], tierRows = [], ledger = null, closes = [10], clock = null, tz = null, env = {} } = {}) {
+function fixture(t, { members = [], tierRows = [], ledger = null, closes = [10], clock = null, tz = null, env = {}, state = "MERGED" } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "tier-outcomes-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const bin = join(dir, "bin");
@@ -89,6 +90,7 @@ globalThis.Date = class extends Real {
         GH_LOG: f.ghLog,
         GH_REFS: JSON.stringify(closes.map((r) => (typeof r === "number" ? ref(r) : r))),
         GH_PULL: prUrl(""),
+        GH_STATE: state,
       },
     });
     return { code: r.status, stdout: r.stdout, stderr: r.stderr };
@@ -131,7 +133,7 @@ test("append: the ledger's tier-ok token wins over member-outcomes.tsv", (t) => 
   assert.ok([before, after].includes(rows[0][col("run_date")]), `run_date ${rows[0][col("run_date")]} is not the day append ran`);
   assert.equal(rows[0][col("note")], "a note with spaces");
   assert.match(r.stderr, /tier-ok=impl-10:fleet-implementer-alt/);
-  assert.deepEqual(f.ghCalls(), ["pr view 20 --json closingIssuesReferences,url"]);
+  assert.deepEqual(f.ghCalls(), ["pr view 20 --json state", "pr view 20 --json closingIssuesReferences,url"]);
 });
 
 // A Pull's `run_date` in ticket-features.tsv is the UTC date of its session
@@ -291,7 +293,7 @@ test("append: running it twice is a no-op that names the existing row and never 
   assert.equal(readFileSync(f.tier, "utf8"), before);
   assert.match(again.stdout, /PR #20 already has a row/);
   assert.ok(again.stdout.includes(before.trim().split("\n").at(-1)), "the existing row is printed");
-  assert.equal(f.ghCalls().length, 1, "the second run asked gh again");
+  assert.equal(f.ghCalls().length, 2, "the second run asked gh again");
 });
 
 test("append: a leading zero in the PR argument is normalized, not treated as a different PR", (t) => {
@@ -941,7 +943,7 @@ test("append and check --live read closing references with an ambient GH_REPO bl
   writeExecStub(join(appended.bin, "gh"), logRepo);
   const a = appended.append();
   assert.equal(a.code, 0, a.stderr);
-  assert.deepEqual(appended.ghCalls(), ["pr view 20 --json closingIssuesReferences,url GH_REPO=[]"]);
+  assert.deepEqual(appended.ghCalls(), ["pr view 20 --json state GH_REPO=[]", "pr view 20 --json closingIssuesReferences,url GH_REPO=[]"]);
 });
 
 test("check --live: a run ledger that does not exist is refused, not read as empty", (t) => {
@@ -1148,4 +1150,503 @@ test("check: --scratch is an append flag and is refused by name", (t) => {
   const r = f.run("check", "--scratch", f.scratch);
   assert.equal(r.code, 2);
   assert.match(r.stderr, /--scratch is an append flag/);
+});
+
+// ---------------------------------------------------------------------------
+// append: the verdict columns and the note worked out from the Charges
+// ---------------------------------------------------------------------------
+
+const RUN_1 = "run-aaaaaaa1";
+const RUN_2 = "run-bbbbbbb2";
+const HEAD_1 = "1111111aaaa";
+const HEAD_2 = "2222222bbbb";
+const reviewedToken = (head, survived, refuted, unverified, run) => `reviewed=${head}:${survived}/${refuted}/${unverified}:${run}`;
+const answeredToken = (run, member = "fix-pr-20", verdict = "ok") => `dispositions-${verdict}=${member}:${run}`;
+
+const finding = (claim) => ({ severity: "important", claim, evidence: "ran it", file: "a.mjs", line: 1 });
+const entry = (bucket, index, extra = {}) => ({ bucket, index, scope: "in", claimKind: "behavior", disposition: "apply", ...extra });
+const charged = (bucket, index, charge, extra = {}) => entry(bucket, index, { charge, ...extra });
+const chargedNone = (bucket, index, chargeReason) => entry(bucket, index, { charge: "none", chargeReason });
+
+// The review result file the ledger's `reviewed=` token names, under the scratch root.
+function writeReview(f, { run, head, survived = [], refuted = [], unverified = [], dimensionsUnrun = [] }) {
+  const dir = join(f.scratch, "pr20", run);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "review.json"), JSON.stringify({
+    pr: 20, head, dimensionsRun: ["correctness", "tests"], dimensionsUnrun,
+    counts: { survived: survived.length, refuted: refuted.length, unverified: unverified.length, crashed: 0 },
+    survived, refuted, unverified,
+  }));
+}
+
+// A fix-applier's record, `letter` its retry suffix (none for the first attempt).
+function writeRecord(f, { letter = "", run, entries }) {
+  mkdirSync(f.scratch, { recursive: true });
+  writeFileSync(join(f.scratch, `dispositions-fix-pr-20${letter ? `-${letter}` : ""}.json`), JSON.stringify({ head: HEAD_1, run, entries }));
+}
+
+// PR 20's run on the ledger, its review files and records in scratch.
+function ruled(t, { tokens, reviews = [], records = [], ...options }) {
+  const f = fixture(t, {
+    ledger: { rows: [`#10 impl-10=PR#20 · tier-ok=impl-10:fleet-implementer · ${tokens.join(" · ")}`], dispatched: ["impl-10=PR#20"] },
+    ...options,
+  });
+  for (const r of reviews) writeReview(f, r);
+  for (const r of records) writeRecord(f, r);
+  f.derive = (...extra) => f.run("append", "20", "--scratch", f.scratch, ...extra);
+  return f;
+}
+
+// One survived finding on review 1, answered by the record `entries`.
+function oneReview(t, { survived = [finding("the claim")], refuted = [], unverified = [], entries, review = {}, ...options }) {
+  return ruled(t, {
+    tokens: [reviewedToken(HEAD_1, survived.length, refuted.length, unverified.length, RUN_1), answeredToken(RUN_1)],
+    reviews: [{ run: RUN_1, head: HEAD_1, survived, refuted, unverified, ...review }],
+    records: [{ run: RUN_1, entries }],
+    ...options,
+  });
+}
+
+const verdicts = (f) => {
+  const [row] = f.dataRows();
+  return { closed: row[col("closed_own_ticket")], minted: row[col("minted_false_claim")], note: row[col("note")] };
+};
+
+test("append: a survived finding charged false-claim is ruled minted_false_claim=yes although the fix pass applied it", (t) => {
+  const f = oneReview(t, { entries: [charged("survived", 0, "false-claim", { disposition: "apply" })] });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(verdicts(f), {
+    closed: "yes", minted: "yes",
+    note: `review ${RUN_1} at 1111111, record dispositions-fix-pr-20.json: survived[0] false-claim "the claim"`,
+  });
+  assert.equal(f.dataRows()[0].length, COLUMNS.length);
+});
+
+test("append: a refuted finding the fix-applier reversed and charged unmet rules closed_own_ticket=no", (t) => {
+  const f = oneReview(t, {
+    survived: [finding("another")], refuted: [finding("it breaks the build")],
+    entries: [chargedNone("survived", 0, "defect-outside-acceptance"), charged("refuted", 0, "unmet", { reason: "the build does break" })],
+  });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(verdicts(f), {
+    closed: "no", minted: "no",
+    note: `review ${RUN_1} at 1111111, record dispositions-fix-pr-20.json: refuted[0] unmet "it breaks the build"; none: survived[0] defect-outside-acceptance`,
+  });
+});
+
+test("append: a Charge of both fails both columns", (t) => {
+  const f = oneReview(t, { entries: [charged("survived", 0, "both")] });
+  assert.equal(f.derive().code, 0);
+  const v = verdicts(f);
+  assert.equal(v.closed, "no");
+  assert.equal(v.minted, "yes");
+  assert.match(v.note, /survived\[0\] both "the claim"/);
+});
+
+test("append: a survived finding deferred false-rationale fails nothing, and the note lists it as cleared", (t) => {
+  const f = oneReview(t, { entries: [entry("survived", 0, { disposition: "defer", reason: "false-rationale", issue: 5 })] });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(verdicts(f), {
+    closed: "yes", minted: "no",
+    note: `review ${RUN_1} at 1111111, record dispositions-fix-pr-20.json: cleared: survived[0] false-rationale`,
+  });
+});
+
+test("append: standing findings all charged none rule a pass, and the note names each reason", (t) => {
+  const f = oneReview(t, {
+    survived: [finding("one"), finding("two")], refuted: [finding("three")],
+    entries: [
+      chargedNone("survived", 0, "defect-outside-acceptance"),
+      chargedNone("survived", 1, "claim-about-untouched-code"),
+      { ...chargedNone("refuted", 0, "not-the-implementers-text"), reason: "reversed on evidence" },
+    ],
+  });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(verdicts(f), {
+    closed: "yes", minted: "no",
+    note: `review ${RUN_1} at 1111111, record dispositions-fix-pr-20.json: none: survived[0] defect-outside-acceptance, survived[1] claim-about-untouched-code, refuted[0] not-the-implementers-text`,
+  });
+});
+
+test("append: the note lists charged entries, then none, cleared and unrun, in that order", (t) => {
+  const f = oneReview(t, {
+    survived: [finding("a"), finding("b"), finding("c")],
+    entries: [
+      charged("survived", 0, "unmet"),
+      chargedNone("survived", 1, "defect-outside-acceptance"),
+      entry("survived", 2, { disposition: "defer", reason: "false-rationale" }),
+    ],
+    review: { dimensionsUnrun: [{ dimension: "docs", reason: "crashed" }, { dimension: "tests", reason: "crashed" }] },
+  });
+  assert.equal(f.derive().code, 0);
+  assert.equal(
+    verdicts(f).note,
+    `review ${RUN_1} at 1111111, record dispositions-fix-pr-20.json: survived[0] unmet "a"; none: survived[1] defect-outside-acceptance; cleared: survived[2] false-rationale; unrun: docs, tests`,
+  );
+});
+
+test("append: a dimension that never ran does not stop the Ruling, and the note names it", (t) => {
+  const f = oneReview(t, {
+    entries: [chargedNone("survived", 0, "defect-outside-acceptance")],
+    review: { dimensionsUnrun: [{ dimension: "tests", reason: "the reviewer returned nothing" }] },
+  });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(verdicts(f).note, /; unrun: tests$/);
+  assert.equal(verdicts(f).closed, "yes");
+});
+
+test("append: --note follows the composed note after an em dash", (t) => {
+  const f = oneReview(t, { entries: [chargedNone("survived", 0, "defect-outside-acceptance")] });
+  assert.equal(f.derive("--note", "also seen by hand").code, 0);
+  assert.match(verdicts(f).note, /^review run-aaaaaaa1 at 1111111, record dispositions-fix-pr-20\.json: none: survived\[0\] defect-outside-acceptance — also seen by hand$/);
+});
+
+test("append: tabs and newlines in a claim become spaces, so the row keeps its width", (t) => {
+  const f = oneReview(t, { survived: [finding("PR body:\tsays\nit works\r\nfine")], entries: [charged("survived", 0, "false-claim")] });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(f.dataRows().length, 1);
+  assert.equal(f.dataRows()[0].length, COLUMNS.length);
+  assert.match(verdicts(f).note, /survived\[0\] false-claim "PR body: says it works  fine"$/);
+});
+
+test("append: a first review that counted no survived and no unverified finding is a pass with no record, even when a later review found more", (t) => {
+  const f = ruled(t, {
+    tokens: [reviewedToken(HEAD_1, 0, 2, 0, RUN_1), reviewedToken(HEAD_2, 3, 0, 1, RUN_2)],
+    reviews: [
+      { run: RUN_1, head: HEAD_1, refuted: [finding("x"), finding("y")] },
+      { run: RUN_2, head: HEAD_2, survived: [finding("p"), finding("q"), finding("r")], unverified: [finding("s")] },
+    ],
+  });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(verdicts(f), {
+    closed: "yes", minted: "no",
+    note: `review ${RUN_1} at 1111111, no record: counted no survived and no unverified finding`,
+  });
+});
+
+test("append: a review superseded before any fix-applier answered it is skipped, and the next review is used", (t) => {
+  const f = ruled(t, {
+    tokens: [reviewedToken(HEAD_1, 1, 0, 0, RUN_1), reviewedToken(HEAD_2, 1, 0, 0, RUN_2), answeredToken(RUN_2)],
+    reviews: [
+      { run: RUN_1, head: HEAD_1, survived: [finding("first")] },
+      { run: RUN_2, head: HEAD_2, survived: [finding("second")] },
+    ],
+    records: [{ run: RUN_2, entries: [charged("survived", 0, "false-claim")] }],
+  });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(verdicts(f).minted, "yes");
+  assert.match(verdicts(f).note, /^review run-bbbbbbb2 at 2222222, record dispositions-fix-pr-20\.json: survived\[0\] false-claim "second"$/);
+});
+
+test("append: a retry's record replaces the first attempt's on the same run, and a record from a later review changes nothing", (t) => {
+  const f = ruled(t, {
+    tokens: [
+      reviewedToken(HEAD_1, 1, 0, 0, RUN_1), answeredToken(RUN_1, "fix-pr-20-b", "mismatch"), answeredToken(RUN_1, "fix-pr-20", "mismatch"),
+      reviewedToken(HEAD_2, 1, 0, 0, RUN_2), answeredToken(RUN_2, "fix-pr-20-c"),
+    ],
+    reviews: [
+      { run: RUN_1, head: HEAD_1, survived: [finding("same run")] },
+      { run: RUN_2, head: HEAD_2, survived: [finding("later run")] },
+    ],
+    records: [
+      { run: RUN_1, entries: [chargedNone("survived", 0, "defect-outside-acceptance")] },
+      { letter: "b", run: RUN_1, entries: [charged("survived", 0, "false-claim")] },
+      { letter: "c", run: RUN_2, entries: [charged("survived", 0, "unmet")] },
+    ],
+  });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(verdicts(f), {
+    closed: "yes", minted: "yes",
+    note: `review ${RUN_1} at 1111111, record dispositions-fix-pr-20-b.json: survived[0] false-claim "same run"`,
+  });
+});
+
+test("append: a record whose dispositions-check verdict was escalate still yields a row", (t) => {
+  const f = ruled(t, {
+    tokens: [reviewedToken(HEAD_1, 1, 0, 0, RUN_1), answeredToken(RUN_1, "fix-pr-20", "escalate")],
+    reviews: [{ run: RUN_1, head: HEAD_1, survived: [finding("deferred outside the diff")] }],
+    records: [{ run: RUN_1, entries: [charged("survived", 0, "unmet", { disposition: "defer", reason: "remedy-outside-diff" })] }],
+  });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(verdicts(f).closed, "no");
+});
+
+test("append: a unverified finding never stands, so a record answering only it needs no Charge", (t) => {
+  const f = oneReview(t, { survived: [], unverified: [finding("suggestion")], entries: [entry("unverified", 0, { disposition: "defer" })] });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(verdicts(f), {
+    closed: "yes", minted: "no",
+    note: `review ${RUN_1} at 1111111, record dispositions-fix-pr-20.json: no finding stands`,
+  });
+});
+
+test("append: a derivation on an open PR is written, and asks gh nothing about its state", (t) => {
+  const f = oneReview(t, { state: "OPEN", entries: [charged("survived", 0, "false-claim")] });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(verdicts(f).minted, "yes");
+  assert.deepEqual(f.ghCalls(), ["pr view 20 --json closingIssuesReferences,url"]);
+});
+
+// A standing finding with no Charge writes no row, and the refusal names it.
+for (const [what, entries] of [
+  ["no entry answers it", [charged("survived", 0, "unmet")]],
+  ["its entry carries no charge", [charged("survived", 0, "unmet"), entry("survived", 1)]],
+  ["its charge is none with no reason", [charged("survived", 0, "unmet"), entry("survived", 1, { charge: "none" })]],
+  ["its charge is not one of the Charges", [charged("survived", 0, "unmet"), entry("survived", 1, { charge: "guilty" })]],
+]) {
+  test(`append: a standing finding with no Charge is refused, naming it, and writes no row — ${what}`, (t) => {
+    const f = oneReview(t, { state: "OPEN", survived: [finding("charged one"), finding("the uncharged one")], entries });
+    const before = readFileSync(f.tier, "utf8");
+    const r = f.derive();
+    assert.notEqual(r.code, 0);
+    assert.match(r.stderr, /survived\[1\] "the uncharged one"/);
+    assert.doesNotMatch(r.stderr, /survived\[0\]/);
+    assert.match(r.stderr, /check the record again/);
+    assert.match(r.stderr, /dispatch the fix-applier again as a dispositions retry/);
+    assert.equal(readFileSync(f.tier, "utf8"), before);
+  });
+}
+
+// A record entry the Ruling cannot read writes no row, and the refusal names it.
+for (const [what, entries, message] of [
+  ["a second entry for a finding carries a harsher Charge", [chargedNone("survived", 0, "defect-outside-acceptance"), charged("survived", 0, "both")], /entries\[1\] is a second entry for survived\[0\], which entries\[0\] already answers/],
+  ["an entry names an index past its bucket", [chargedNone("survived", 0, "defect-outside-acceptance"), charged("survived", 5, "unmet")], /entries\[1\] names survived\[5\], and survived holds 1/],
+  ["an entry names a bucket the review has not got", [chargedNone("survived", 0, "defect-outside-acceptance"), charged("standing", 0, "unmet")], /entries\[1\] names bucket "standing", not survived, refuted or unverified/],
+  ["an entry is not an object", [chargedNone("survived", 0, "defect-outside-acceptance"), null], /entries\[1\] is not an object/],
+]) {
+  test(`append: a record entry a Ruling cannot read is refused, naming it, and writes no row — ${what}`, (t) => {
+    const f = oneReview(t, { state: "OPEN", entries });
+    const before = readFileSync(f.tier, "utf8");
+    const r = f.derive();
+    assert.equal(r.code, 2, r.stderr);
+    assert.match(r.stderr, message);
+    assert.match(r.stderr, /check the record again/);
+    assert.equal(readFileSync(f.tier, "utf8"), before);
+  });
+}
+
+// The ledger's head and review.json's are one commit when either is a prefix
+// of the other, whatever case review.json spells it in.
+for (const [what, tokenHead, fileHead] of [
+  ["review.json spells it longer and in upper case", "abcdef1", "ABCDEF1AAAA"],
+  ["the ledger spells it longer, review.json in upper case", "abcdef1aaaa", "ABCDEF1"],
+]) {
+  test(`append: a review file whose head is the ledger's in another spelling derives a row — ${what}`, (t) => {
+    const f = ruled(t, { tokens: [reviewedToken(tokenHead, 0, 0, 0, RUN_1)], reviews: [{ run: RUN_1, head: fileHead }] });
+    const r = f.derive();
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(verdicts(f).note, /^review run-aaaaaaa1 at abcdef1, no record: /);
+  });
+}
+
+test("append: a record from a member lettered a answers the run, ahead of the first attempt's", (t) => {
+  const f = oneReview(t, { entries: [chargedNone("survived", 0, "defect-outside-acceptance")] });
+  writeRecord(f, { letter: "a", run: RUN_1, entries: [charged("survived", 0, "unmet")] });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(verdicts(f).closed, "no");
+  assert.match(verdicts(f).note, /, record dispositions-fix-pr-20-a\.json: survived\[0\] unmet "the claim"$/);
+});
+
+for (const [what, at] of [
+  ["review.json", (f) => join(f.scratch, "pr20", RUN_1, "review.json")],
+  ["the record", (f) => join(f.scratch, "dispositions-fix-pr-20.json")],
+]) {
+  test(`append: ${what} that cannot be read is refused by its error code, not as bad JSON`, (t) => {
+    const f = oneReview(t, { entries: [chargedNone("survived", 0, "defect-outside-acceptance")] });
+    const path = at(f);
+    rmSync(path);
+    mkdirSync(path);
+    const r = f.derive();
+    assert.equal(r.code, 2, r.stderr);
+    assert.ok(r.stderr.includes(`${path} cannot be read: EISDIR`), r.stderr);
+    assert.doesNotMatch(r.stderr, /JSON/);
+    assert.equal(f.dataRows().length, 0);
+  });
+}
+
+test("append: an unrun dimension that names no dimension is written as its JSON, never as a blank", (t) => {
+  const f = oneReview(t, {
+    entries: [chargedNone("survived", 0, "defect-outside-acceptance")],
+    review: { dimensionsUnrun: [{ reason: "crashed" }, 5, null, "docs"] },
+  });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(verdicts(f).note, /; unrun: \{"reason":"crashed"\}, 5, null, docs$/);
+});
+
+test("append: a reversed refutation with no Charge is refused, naming it", (t) => {
+  const f = oneReview(t, { survived: [finding("kept")], refuted: [finding("reversed")], entries: [chargedNone("survived", 0, "defect-outside-acceptance"), entry("refuted", 0, { reason: "evidence" })] });
+  const r = f.derive();
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /refuted\[0\] "reversed"/);
+  assert.equal(f.dataRows().length, 0);
+});
+
+// Every refusal below leaves the file untouched and names the controller's next step.
+const REFUSALS = [
+  ["the ledger carries no first review", { tokens: ["review=member:review-pr-20"] }, /PR #20 has no first review on the ledger/],
+  ["the review's result file is missing", {
+    tokens: [reviewedToken(HEAD_1, 1, 0, 0, RUN_1), answeredToken(RUN_1)],
+    records: [{ run: RUN_1, entries: [charged("survived", 0, "unmet")] }],
+  }, /review run-aaaaaaa1's result file \S+review\.json is missing/],
+  ["no record answers the review", {
+    tokens: [reviewedToken(HEAD_1, 1, 0, 0, RUN_1), answeredToken(RUN_1)],
+    reviews: [{ run: RUN_1, head: HEAD_1, survived: [finding("x")] }],
+  }, /no \S+dispositions-fix-pr-20\[-x\]\.json names review run-aaaaaaa1/],
+  ["the only record answers another run", {
+    tokens: [reviewedToken(HEAD_1, 1, 0, 0, RUN_1), answeredToken(RUN_1)],
+    reviews: [{ run: RUN_1, head: HEAD_1, survived: [finding("x")] }],
+    records: [{ run: RUN_2, entries: [charged("survived", 0, "unmet")] }],
+  }, /names review run-aaaaaaa1 as the run it answers/],
+  ["the review file is another head's", {
+    tokens: [reviewedToken(HEAD_1, 0, 0, 0, RUN_1)],
+    reviews: [{ run: RUN_1, head: HEAD_2 }],
+  }, /is the review of head 2222222bbbb, not the ledger's review run-aaaaaaa1 at 1111111aaaa/],
+  ["the review file holds a finding the ledger's review did not count", {
+    tokens: [reviewedToken(HEAD_1, 0, 0, 0, RUN_1)],
+    reviews: [{ run: RUN_1, head: HEAD_1, survived: [finding("x")] }],
+  }, /review\.json holds 1 survived and 0 unverified, not the 0 and 0 the ledger's review run-aaaaaaa1 counted/],
+  ["the review file holds fewer findings than the ledger's review counted", {
+    tokens: [reviewedToken(HEAD_1, 1, 0, 1, RUN_1), answeredToken(RUN_1)],
+    reviews: [{ run: RUN_1, head: HEAD_1, unverified: [finding("x")] }],
+    records: [{ run: RUN_1, entries: [entry("unverified", 0, { disposition: "defer" })] }],
+  }, /review\.json holds 0 survived and 1 unverified, not the 1 and 1 the ledger's review run-aaaaaaa1 counted/],
+];
+for (const [what, setup, message] of REFUSALS) {
+  for (const state of ["OPEN", "CLOSED"]) {
+    test(`append: ${state === "OPEN" ? "an open" : "a closed"} PR is refused when ${what}, the next step being the record, never typed verdicts`, (t) => {
+      const f = ruled(t, { reviews: [], records: [], ...setup, state });
+      const before = readFileSync(f.tier, "utf8");
+      const r = f.derive();
+      assert.equal(r.code, 2, r.stderr);
+      assert.match(r.stderr, message);
+      assert.match(r.stderr, /check the record again/);
+      assert.match(r.stderr, /dispatch the fix-applier again as a dispositions retry/);
+      assert.doesNotMatch(r.stderr, /--closed-own-ticket|--minted-false-claim|yes\|no/);
+      assert.equal(readFileSync(f.tier, "utf8"), before);
+    });
+  }
+  test(`append: a merged PR is refused when ${what}, and the refusal names the flags to give`, (t) => {
+    const f = ruled(t, { reviews: [], records: [], ...setup });
+    const before = readFileSync(f.tier, "utf8");
+    const r = f.derive();
+    assert.equal(r.code, 2, r.stderr);
+    assert.match(r.stderr, message);
+    assert.match(r.stderr, /append 20 --closed-own-ticket yes\|no --minted-false-claim yes\|no --note "<the evidence>"/);
+    assert.equal(readFileSync(f.tier, "utf8"), before);
+  });
+}
+
+test("append: a record that is not JSON refuses rather than letting an older record stand in for a retry's", (t) => {
+  const f = oneReview(t, { entries: [chargedNone("survived", 0, "defect-outside-acceptance")] });
+  writeFileSync(join(f.scratch, "dispositions-fix-pr-20-b.json"), "{ not json");
+  const r = f.derive();
+  assert.equal(r.code, 2, r.stderr);
+  assert.match(r.stderr, /dispositions-fix-pr-20-b\.json is not valid JSON/);
+  assert.equal(f.dataRows().length, 0);
+});
+
+test("append: a refusal says so when the PR's state cannot be read, and still gives no verdict flags", (t) => {
+  const f = ruled(t, { tokens: ["review=member:review-pr-20"] });
+  writeExecStub(join(f.bin, "gh"), "#!/bin/sh\nif [ \"$5\" = state ]; then echo 'HTTP 401' >&2; exit 1; fi\n" + PR_VIEW_ANSWER);
+  const r = f.derive();
+  assert.equal(r.code, 2, r.stderr);
+  assert.match(r.stderr, /the PR's state could not be read: gh pr view 20 failed: HTTP 401/);
+  assert.doesNotMatch(r.stderr, /yes\|no/);
+});
+
+test("append: with no --scratch and no repository to key a scratch root on, the derivation refuses and says why", (t) => {
+  const f = oneReview(t, { state: "OPEN", entries: [charged("survived", 0, "false-claim")] });
+  const r = f.run("append", "20");
+  assert.equal(r.code, 2, r.stderr);
+  assert.match(r.stderr, /no scratch root to look in/);
+  assert.equal(f.dataRows().length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// append: verdicts given by hand, for a merged PR only
+// ---------------------------------------------------------------------------
+
+const BY_HAND = ["--closed-own-ticket", "no", "--minted-false-claim", "yes", "--note", "backfill: ruled from the merged PR's review"];
+
+test("append: verdicts given by hand are written as given for a merged PR, with --note as the whole note", (t) => {
+  const f = fixture(t);
+  const r = f.run("append", "20", ...BY_HAND, "--scratch", f.scratch);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(verdicts(f), { closed: "no", minted: "yes", note: "backfill: ruled from the merged PR's review" });
+  assert.deepEqual(f.ghCalls(), ["pr view 20 --json state", "pr view 20 --json closingIssuesReferences,url"]);
+});
+
+test("append: --minted-false-claim yes is refused on an open PR, naming the record as the next step", (t) => {
+  const f = fixture(t, { state: "OPEN" });
+  const before = readFileSync(f.tier, "utf8");
+  const r = f.run("append", "20", ...BY_HAND, "--scratch", f.scratch);
+  assert.equal(r.code, 2, r.stderr);
+  assert.match(r.stderr, /PR #20 is open, and verdicts are given by hand only for a merged PR/);
+  assert.match(r.stderr, /check the record again/);
+  assert.match(r.stderr, /dispatch the fix-applier again as a dispositions retry/);
+  assert.doesNotMatch(r.stderr, /append 20 --closed-own-ticket/);
+  assert.equal(readFileSync(f.tier, "utf8"), before);
+});
+
+test("append: --minted-false-claim yes is refused on a PR closed without merging", (t) => {
+  const f = fixture(t, { state: "CLOSED" });
+  const before = readFileSync(f.tier, "utf8");
+  const r = f.run("append", "20", ...BY_HAND, "--scratch", f.scratch);
+  assert.equal(r.code, 2, r.stderr);
+  assert.match(r.stderr, /PR #20 is closed without merging, and verdicts are given by hand only for a merged PR/);
+  assert.equal(readFileSync(f.tier, "utf8"), before);
+});
+
+test("append: a hand-given pass is refused on an open PR too — the refusal is for the verdicts, not for yes", (t) => {
+  const f = fixture(t, { state: "OPEN" });
+  const r = f.run("append", "20", "--closed-own-ticket", "yes", "--minted-false-claim", "no", "--note", "n", "--scratch", f.scratch);
+  assert.equal(r.code, 2, r.stderr);
+  assert.equal(f.dataRows().length, 0);
+});
+
+test("append: hand-given verdicts need a --note, and both verdict flags together", (t) => {
+  const f = fixture(t);
+  const bare = f.run("append", "20", "--closed-own-ticket", "yes", "--minted-false-claim", "no", "--scratch", f.scratch);
+  assert.equal(bare.code, 2, bare.stderr);
+  assert.match(bare.stderr, /verdicts given by hand need --note/);
+  const one = f.run("append", "20", "--minted-false-claim", "yes", "--note", "n", "--scratch", f.scratch);
+  assert.equal(one.code, 2, one.stderr);
+  assert.match(one.stderr, /--minted-false-claim comes with --closed-own-ticket or not at all/);
+  assert.equal(f.dataRows().length, 0);
+  assert.deepEqual(f.ghCalls(), [], "refused before gh was asked");
+});
+
+test("append: hand-given verdicts are refused when gh cannot say whether the PR merged", (t) => {
+  const f = fixture(t);
+  writeExecStub(join(f.bin, "gh"), "#!/bin/sh\necho 'HTTP 502' >&2\nexit 1\n");
+  const r = f.run("append", "20", ...BY_HAND, "--scratch", f.scratch);
+  assert.equal(r.code, 2, r.stderr);
+  assert.match(r.stderr, /could not read PR #20's state/);
+  assert.equal(f.dataRows().length, 0);
+});
+
+test("append: a PR that already has a row gets nothing written and nothing asked, by either mode", (t) => {
+  const f = fixture(t, { state: "OPEN", tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" })] });
+  const before = readFileSync(f.tier, "utf8");
+  for (const args of [[], BY_HAND]) {
+    const r = f.run("append", "20", ...args, "--scratch", f.scratch);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /PR #20 already has a row/);
+  }
+  assert.equal(readFileSync(f.tier, "utf8"), before);
+  assert.deepEqual(f.ghCalls(), []);
 });

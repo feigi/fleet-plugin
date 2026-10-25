@@ -192,7 +192,9 @@ const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
 
 // Two spellings of one commit: either head a prefix of the other, the way a
 // record's head (7-40 hex) is matched against its review's full head.
-const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
+// Exported: tier-outcomes.mjs matches a review file's head to its ledger
+// token's the same way.
+export const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
 
 // ---------------------------------------------------------------------------
 // pure core — no filesystem or process access until main()
@@ -425,7 +427,9 @@ function shapeErrors(e) {
 // Whether an entry's finding stands: a survived finding not deferred
 // false-rationale, or a refuted one — an entry in that bucket exists only for
 // a refutation the fix-applier reversed. An unverified finding never stands.
-const stands = (bucket, e) => bucket === "refuted"
+// Exported: tier-outcomes.mjs works a Ruling out from the Charges on exactly
+// these findings.
+export const stands = (bucket, e) => bucket === "refuted"
   || (bucket === "survived" && !(e.disposition === "defer" && e.reason === "false-rationale"));
 
 // Why an entry's Charge breaks a rule, or null when it holds. `required`: the

@@ -657,11 +657,12 @@ never makes it.
 _Avoid_: verified row, valid row
 
 **Ruling**:
-The controller's verdict on one implementer PR, kept as that PR's row in
+The verdict on one implementer PR, kept as that PR's row in
 `docs/metrics/tier-outcomes.tsv`: whether the work closed its own ticket and
-whether it minted a false claim. The Router counts a ticket as merged only
-through its Ruling; a decision on an issue, or a reply owed to a member, is
-not one.
+whether it minted a false claim. `tier-outcomes.mjs append` works it out from the
+Charges on the PR's first review, before the finisher runs; only a merged PR's
+Ruling is given by hand. The Router counts a ticket as merged only through its
+Ruling; a decision on an issue, or a reply owed to a member, is not one.
 _Avoid_: verdict row, tier outcome
 
 **Charge**:
