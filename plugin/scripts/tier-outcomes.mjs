@@ -98,6 +98,10 @@
 //     that is missing, refuses. So does a record entry that names no finding
 //     of the review, or a second entry for a finding an earlier entry
 //     answers. A dimension that never ran does not: the note names it.
+//   - the Ruling itself is deriveRuling's, exported and pure: it takes the
+//     review's run and head, its findings and a record lookup, and reads no
+//     file. `append` reads the review and the record and ties them to the
+//     ledger, then calls it once.
 // The note reads `review <run> at <head7>, record <file>: <bucket>[<index>]
 // <charge> "<claim>"; …; none: <bucket>[<index>] <reason>, …; cleared:
 // survived[<index>] false-rationale, …; unrun: <dimension>, …`, and ` — <--note>`
@@ -130,7 +134,8 @@ const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
 // ---------------------------------------------------------------------------
 // pure core — exercised through the CLI by its tests; only
 // COLUMNS, LEGACY_WIDTH, TIER_SWITCH_DATE, parseTierOutcomes, rulingsByTicket,
-// rulingFor and lastPullByTicket are imported directly, the rest through argv
+// rulingFor, lastPullByTicket and deriveRuling are imported directly, the rest
+// through argv
 // ---------------------------------------------------------------------------
 
 // APPENDED TO, never inserted into: every awk read-out in the file's header
@@ -632,7 +637,7 @@ function recordFiles(scratch, pr) {
     .sort((a, b) => (a.letter < b.letter ? 1 : a.letter > b.letter ? -1 : 0));
 }
 
-// The last record answering review run `run`: `{file, record}`, `{missing}`
+// The last record answering review run `run`: `{file, path, value}`, `{missing}`
 // naming why there is none, a retry's record replacing the first attempt's on
 // the same run and a record answering any other run changing nothing. A file
 // met before the answering one that cannot be read, or is not valid JSON,
@@ -649,7 +654,7 @@ function recordFor(scratch, pr, run) {
     const path = join(scratch, file);
     const read = readJson(path);
     if (read.problem !== undefined) return { missing: read.problem };
-    if (read.value?.run === run) return { file, path, record: read.value };
+    if (read.value?.run === run) return { file, path, value: read.value };
   }
   return { missing: `no ${join(scratch, `dispositions-fix-pr-${pr}[-x].json`)} names review ${run} as the run it answers` };
 }
@@ -704,10 +709,48 @@ function chargesOf(review, record) {
 const FAILS_CLOSED = ["unmet", "both"];
 const MINTS = ["false-claim", "both"];
 
-// PR `pr`'s verdict columns and note off its first review's Charges:
-// `{closed_own_ticket, minted_false_claim, note}`, or `{missing}` saying what
-// is not there to read. `scratch` is `{root}` or `{unresolvable}`.
-function derivedRuling(pr, ledger, scratch) {
+// The Ruling of a first review, pure: `{closed_own_ticket, minted_false_claim,
+// note}`, or `{missing}` saying what is not there to read. `run` and `head` are
+// the ledger token's; `review` is the findings as `review.json` holds them
+// (`survived`, `refuted`, `unverified`, `dimensionsUnrun`), assumed well-formed
+// as reviewProblem guarantees. `record` is called, at most once, only when a
+// survived or unverified finding needs a record: it returns `{file, path,
+// value}` or `{missing}`. Reads no file and runs no command.
+export function deriveRuling({ run, head, review, record }) {
+  // An entry that is neither a dimension's name nor {dimension} is named as
+  // the JSON it is, so the note never reads as a blank dimension.
+  const unrun = (Array.isArray(review.dimensionsUnrun) ? review.dimensionsUnrun : []).map((d) => oneLine(
+    typeof d === "string" ? d : typeof d?.dimension === "string" ? d.dimension : JSON.stringify(d ?? null),
+  ));
+  const opening = `review ${run} at ${head.slice(0, 7)}`;
+  const noted = (parts) => (unrun.length === 0 ? parts : [...parts, `unrun: ${unrun.join(", ")}`]).join("; ");
+
+  if (review.survived.length === 0 && review.unverified.length === 0) {
+    return { closed_own_ticket: "yes", minted_false_claim: "no", note: `${opening}, no record: ${noted(["counted no survived and no unverified finding"])}` };
+  }
+  const found = record();
+  if (found.missing !== undefined) return { missing: found.missing };
+  const charges = chargesOf(review, found.value);
+  if (charges.broken.length > 0) {
+    return { missing: `${found.path} has ${charges.broken.length === 1 ? "an entry" : "entries"} a Ruling cannot read: ${charges.broken.join("; ")}` };
+  }
+  if (charges.missing.length > 0) {
+    return { missing: `${found.path} carries no Charge on ${charges.missing.length === 1 ? "this standing finding" : "these standing findings"}: ${charges.missing.join("; ")}` };
+  }
+  const parts = charges.charged.map((c) => c.text);
+  if (charges.none.length > 0) parts.push(`none: ${charges.none.join(", ")}`);
+  if (charges.cleared.length > 0) parts.push(`cleared: ${charges.cleared.join(", ")}`);
+  return {
+    closed_own_ticket: charges.charged.some((c) => FAILS_CLOSED.includes(c.charge)) ? "no" : "yes",
+    minted_false_claim: charges.charged.some((c) => MINTS.includes(c.charge)) ? "yes" : "no",
+    note: `${opening}, record ${found.file}: ${noted(parts.length === 0 ? ["no finding stands"] : parts)}`,
+  };
+}
+
+// PR `pr`'s first review read from scratch and tied to the ledger, then ruled
+// by deriveRuling: its Ruling plus `review`, the review's run, or `{missing}`
+// saying what is not there to read. `scratch` is `{root}` or `{unresolvable}`.
+function scratchRuling(pr, ledger, scratch) {
   const review = firstReview(prTokens(ledger?.rows ?? [], Number(pr)));
   if (review === null) {
     return { missing: `PR #${pr} has no first review on the ledger: no \`reviewed=\` token of its rows counted no survived and no unverified finding, or was answered by a fix-applier` };
@@ -726,35 +769,8 @@ function derivedRuling(pr, ledger, scratch) {
   if (file.survived.length !== review.survived || file.unverified.length !== review.unverified) {
     return { missing: `${reviewPath} holds ${file.survived.length} survived and ${file.unverified.length} unverified, not the ${review.survived} and ${review.unverified} the ledger's review ${review.run} counted` };
   }
-  // An entry that is neither a dimension's name nor {dimension} is named as
-  // the JSON it is, so the note never reads as a blank dimension.
-  const unrun = (Array.isArray(file.dimensionsUnrun) ? file.dimensionsUnrun : []).map((d) => oneLine(
-    typeof d === "string" ? d : typeof d?.dimension === "string" ? d.dimension : JSON.stringify(d ?? null),
-  ));
-  const opening = `review ${review.run} at ${review.head.slice(0, 7)}`;
-  const noted = (parts) => (unrun.length === 0 ? parts : [...parts, `unrun: ${unrun.join(", ")}`]).join("; ");
-
-  if (review.survived === 0 && review.unverified === 0) {
-    return { review: review.run, closed_own_ticket: "yes", minted_false_claim: "no", note: `${opening}, no record: ${noted(["counted no survived and no unverified finding"])}` };
-  }
-  const found = recordFor(scratch.root, pr, review.run);
-  if (found.missing !== undefined) return { missing: found.missing };
-  const charges = chargesOf(file, found.record);
-  if (charges.broken.length > 0) {
-    return { missing: `${found.path} has ${charges.broken.length === 1 ? "an entry" : "entries"} a Ruling cannot read: ${charges.broken.join("; ")}` };
-  }
-  if (charges.missing.length > 0) {
-    return { missing: `${found.path} carries no Charge on ${charges.missing.length === 1 ? "this standing finding" : "these standing findings"}: ${charges.missing.join("; ")}` };
-  }
-  const parts = charges.charged.map((c) => c.text);
-  if (charges.none.length > 0) parts.push(`none: ${charges.none.join(", ")}`);
-  if (charges.cleared.length > 0) parts.push(`cleared: ${charges.cleared.join(", ")}`);
-  return {
-    closed_own_ticket: charges.charged.some((c) => FAILS_CLOSED.includes(c.charge)) ? "no" : "yes",
-    minted_false_claim: charges.charged.some((c) => MINTS.includes(c.charge)) ? "yes" : "no",
-    note: `${opening}, record ${found.file}: ${noted(parts.length === 0 ? ["no finding stands"] : parts)}`,
-    review: review.run,
-  };
+  const ruling = deriveRuling({ run: review.run, head: review.head, review: file, record: () => recordFor(scratch.root, pr, review.run) });
+  return ruling.missing !== undefined ? ruling : { ...ruling, review: review.run };
 }
 
 // The step a refusal hands the controller. A merged PR's evidence is
@@ -831,7 +847,7 @@ function append(pr, paths) {
       die(`PR #${pr} is ${state === "OPEN" ? "open" : "closed without merging"}, and verdicts are given by hand only for a merged PR — leave out --closed-own-ticket and --minted-false-claim, and \`append\` works them out from the record: ${nextStep(pr, state)}`);
     }
   } else {
-    const ruled = derivedRuling(pr, ledger, scratch);
+    const ruled = scratchRuling(pr, ledger, scratch);
     if (ruled.missing !== undefined) {
       let state = null;
       let unread = "";
