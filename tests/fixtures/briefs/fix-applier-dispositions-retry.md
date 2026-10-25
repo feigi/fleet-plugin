@@ -32,6 +32,16 @@ claim, never your patch.
 `<your name>` the `fix-pr-3294[-x]` you were dispatched as — the record the controller checks with
 `dispositions-check.mjs` before it dispatches any finisher.
 
+**Charge every standing entry of that record:** which entries stand, and the
+`charge` and `chargeReason` fields, are in `review-and-fix.md`'s step 2. Read
+the definitions of `closed_own_ticket` and `minted_false_claim` in the header
+of `docs/metrics/tier-outcomes.tsv`, and charge each standing entry by them,
+against the ticket below as its implementer was dispatched with it.
+
+The ticket:
+
+No settled impl-<N>=PR#3294 token is on this run's ledger, so no ticket is on hand for PR #3294.
+
 **A red `CHECKCMD-3` is yours to judge.** Read what it reports and fix every
 finding in a file the PR changes, including lines you did not edit — CI checks
 whole files. Never edit a file the PR does not otherwise change: a finding there

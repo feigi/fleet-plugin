@@ -18,8 +18,9 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { renderBrief } from "./support/render-brief.mjs";
-import { briefPaths, briefText, issueMetrics, outOfScope, strandedRuling } from "../plugin/scripts/ticket-router.mjs";
-import { chainHead, defang, diffHunks, headings, implRow, parseAnswer, pathHits, relabel, sectionsOf } from "../plugin/scripts/pull.mjs";
+import { issueMetrics } from "../plugin/scripts/ticket-router.mjs";
+import { briefPaths, briefText, defang, outOfScope, strandedRuling } from "../plugin/scripts/ticket-text.mjs";
+import { chainHead, diffHunks, headings, implRow, parseAnswer, pathHits, relabel, sectionsOf } from "../plugin/scripts/pull.mjs";
 import { pullOf } from "../plugin/scripts/fleet-tick.mjs";
 
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));

@@ -137,7 +137,7 @@ import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { EXCLUDED_REASON, memberTokens, premisesOf, pullEnded, tierValues } from "./ledger-grammar.mjs";
 import { sessionFromReceipt } from "./phase0-receipt.mjs";
-import { briefPaths, briefText, outOfScope, strandedRuling } from "./ticket-router.mjs";
+import { briefPaths, briefText, defang, outOfScope, strandedRuling, ticketText } from "./ticket-text.mjs";
 
 const NAME = "pull";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
@@ -397,11 +397,6 @@ function declaredPlaceholders() {
     if (m !== null) names.push(m[1]);
   }
   return names;
-}
-
-/** `text` with each declared placeholder's spelling `<name>` written `‹name›`, which the renderer does not read. */
-export function defang(text, names) {
-  return names.reduce((t, n) => t.split(`<${n}>`).join(`‹${n}›`), text);
 }
 
 // ── children ─────────────────────────────────────────────────────────────────
@@ -684,15 +679,6 @@ class Pull {
       ...(found === null ? ["(no Out of scope section found)"] : found.split("\n")),
       `PATHS: ${paths.length === 0 ? "(none)" : paths.join(" ")}`,
     ];
-  }
-
-  // What the dispatched member is told the ticket is: its title, its brief,
-  // and the Out of scope section when that sits outside the brief.
-  dispatchBrief() {
-    const issue = this.issue();
-    const text = briefText(issue).trim();
-    const outside = outOfScope(text) === null ? outOfScope(String(issue.body ?? "")) : null;
-    return [`Title: ${issue.title}`, text, ...(outside === null ? [] : [outside])].join("\n\n");
   }
 
   // ── the question standing, printed in full: what a Pull picked up again re-reads ──
@@ -998,7 +984,7 @@ class Pull {
     const r = this.script("render", "dispatch-prompt.mjs", [
       "render", "implementer", "--member", st.member, "--ticket", String(st.ticket), "--worktree", worktree,
       "--branch", `implementer/${st.ticket}-${st.member}`, "--scratch", this.p.scratch,
-      "--brief", defang(this.dispatchBrief(), names), "--staleness", defang(staleness, names),
+      "--brief", defang(ticketText(this.issue()), names), "--staleness", defang(staleness, names),
     ]);
     if (r.status !== 0) return this.stop(withText(`dispatch-prompt.mjs render refused (${r.how}) — the claim stands`, r));
     st.stage = "dispatch";

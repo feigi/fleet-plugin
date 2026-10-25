@@ -22,7 +22,8 @@
 // EXIT. 0 rendered. 2 refused, with the reason on stderr and nothing on
 // stdout: a missing, unknown or relative argument, a template that carries a
 // placeholder it never declared or no text at all for the kind, a leftover
-// declared placeholder in the output, or instruments.sh answering anything
+// declared placeholder in the output, a ticket the ledger names whose saved
+// issue file is missing or unreadable, or instruments.sh answering anything
 // but 0.
 //
 // INSTRUMENTS. After the command line has parsed and before anything is
@@ -40,12 +41,15 @@
 //     arg <flag> <placeholder>   the argument `--<flag>` fills `<placeholder>`
 //     path <flag>                that argument must be an absolute path
 //     literal <text>             `<text>` is carried to the member as written
+//     ticket <placeholder>       the renderer fills `<placeholder>` with the
+//                                ticket of the PR `--pr` names (THE TICKET)
 //   A placeholder is `<` + a letter + anything but `<`, `>` and a newline +
 //   `>`, matched by its inner text exactly; it may hold spaces. No flag and
 //   no placeholder is declared twice, and --member, --json and --kind are
 //   reserved.
-// - Every placeholder the selected text carries must be declared by `arg` or
-//   `literal`; an undeclared one is a template defect and refuses, naming it.
+// - Every placeholder the selected text carries must be declared by `arg`,
+//   `literal` or `ticket`; an undeclared one is a template defect and
+//   refuses, naming it.
 // - An argument is required exactly when its placeholder occurs in the text
 //   selected for the kind. A flag the selected text never uses is refused.
 // - The body is plain text. Lines `## kind: <k>[, <k>…]` open a section that
@@ -59,6 +63,20 @@
 //   only a caller passing a value like `<branch>` can cause — refuses, naming
 //   it.
 //
+// THE TICKET. A `ticket` placeholder in the selected text is filled with the
+// ticket the PR's implementer was dispatched with, which the renderer finds
+// itself: the ledger's settled `impl-<N>=PR#<pr>` token names ticket N, `<pr>`
+// the `--pr` value, and the Pull's `<scratch>/impl-<N>/issue.json` holds it,
+// `<scratch>` the `--scratch` value — so a template declaring `ticket`
+// declares `--pr` and `--scratch` too, and a kind carrying the placeholder
+// carries theirs. It is composed by ticket-text.mjs's ticketText(), as the
+// implementer's was, and defanged as the implementer's was, by the
+// implementer template's argument placeholders and this template's own. Two
+// tickets naming one PR are each rendered, in row order. An issue file that
+// is missing or unreadable refuses, naming its path; nothing asks the tracker
+// in its place. No ledger, or no settled token naming the PR, fills it with a
+// line saying no ticket is on hand.
+//
 // The text every member of a role shares lives in that role's agent body; a
 // template carries only what varies between dispatches of the role.
 
@@ -70,7 +88,9 @@ import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
+import { ROWS, ledgerSection, memberTokens } from "./ledger-grammar.mjs";
 import { runnerScratchRefusal } from "./review-core.mjs";
+import { defang, ticketText } from "./ticket-text.mjs";
 
 const NAME = "dispatch-prompt";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -96,13 +116,17 @@ function parseTemplate(role, text) {
   const args = [];
   const paths = new Set();
   const literals = new Set();
+  let ticket = null;
   for (const line of lines.slice(1, close)) {
-    const m = /^(arg|path|literal) (.+)$/.exec(line);
+    const m = /^(arg|path|literal|ticket) (.+)$/.exec(line);
     if (m === null) refuse(`has a frontmatter line that is no directive: ${line}`);
     if (m[1] === "literal") {
       literals.add(m[2]);
     } else if (m[1] === "path") {
       paths.add(m[2]);
+    } else if (m[1] === "ticket") {
+      if (ticket !== null) refuse(`declares a ticket placeholder twice: <${ticket}> and <${m[2]}>`);
+      ticket = m[2];
     } else {
       const split = /^(\S+) (.+)$/.exec(m[2]);
       if (split === null) refuse(`has an arg line without a placeholder: ${line}`);
@@ -114,6 +138,9 @@ function parseTemplate(role, text) {
   }
   for (const flag of paths) if (!args.some((a) => a.flag === flag)) refuse(`marks --${flag} as a path but never declares it`);
   for (const a of args) if (literals.has(a.placeholder)) refuse(`declares <${a.placeholder}> as both an argument and a literal`);
+  if (ticket !== null && (literals.has(ticket) || args.some((a) => a.placeholder === ticket))) {
+    refuse(`declares <${ticket}> as the ticket and as an argument or a literal`);
+  }
 
   const sections = [];
   let current = { kinds: null, lines: [] };
@@ -130,8 +157,9 @@ function parseTemplate(role, text) {
   const kinds = [...new Set(sections.flatMap((s) => s.kinds ?? []))];
 
   const whole = sections.flatMap((s) => s.lines).join("\n");
-  for (const a of args) if (!whole.includes(`<${a.placeholder}>`)) refuse(`declares <${a.placeholder}> but never carries it`);
-  return { args, paths, literals, sections, kinds };
+  for (const p of [...args.map((a) => a.placeholder), ...(ticket === null ? [] : [ticket])]) if (!whole.includes(`<${p}>`)) refuse(`declares <${p}> but never carries it`);
+  if (ticket !== null) for (const flag of TICKET_FLAGS) if (!args.some((a) => a.flag === flag)) refuse(`declares the ticket <${ticket}> but no --${flag} to find it by`);
+  return { args, paths, literals, ticket, sections, kinds };
 }
 
 function loadTemplate(role) {
@@ -142,6 +170,52 @@ function loadTemplate(role) {
     return die(`cannot read the template for ${role}: ${err.message}`);
   }
   return parseTemplate(role, text);
+}
+
+// --- the ticket --------------------------------------------------------------
+
+// The arguments THE TICKET is found by: the PR, and the scratch root the Pull
+// saved the ticket under.
+const TICKET_FLAGS = ["pr", "scratch"];
+
+// The text a `ticket` placeholder is filled with, for PR `pr` under scratch
+// root `scratch` (THE TICKET above): each ticket a settled `impl-<N>=PR#<pr>`
+// token on the ledger's rows names, once, in row order, composed by
+// ticketText() and defanged by `names`.
+function ticketFor(pr, scratch, names) {
+  let ledger;
+  try {
+    ledger = fleetFile("ledger.md");
+  } catch (err) {
+    if (err instanceof FleetDirUnresolvable) die(`cannot find the ledger naming PR #${pr}'s ticket: ${err.message}`);
+    throw err;
+  }
+  let text = "";
+  try {
+    text = readFileSync(ledger, "utf8");
+  } catch (err) {
+    if (err.code !== "ENOENT") die(`cannot read the ledger ${ledger} for PR #${pr}'s ticket: ${err.message}`);
+  }
+  const tickets = [];
+  for (const row of ledgerSection(text, ROWS)) {
+    for (const t of memberTokens(row)) {
+      if (t.family === "impl" && t.error === null && t.outcome === `PR#${pr}` && !tickets.includes(t.number)) tickets.push(t.number);
+    }
+  }
+  if (tickets.length === 0) return `No settled impl-<N>=PR#${pr} token is on this run's ledger, so no ticket is on hand for PR #${pr}.`;
+  return tickets.map((n) => {
+    const path = join(scratch, `impl-${n}`, "issue.json");
+    let issue;
+    try {
+      issue = JSON.parse(readFileSync(path, "utf8"));
+    } catch (err) {
+      return die(`cannot read ticket #${n}, the ticket PR #${pr}'s implementer was dispatched with, from ${path}: ${err.message}`);
+    }
+    if (typeof issue?.title !== "string") {
+      return die(`cannot read ticket #${n}, the ticket PR #${pr}'s implementer was dispatched with, from ${path}: it holds no issue with a title`);
+    }
+    return defang(ticketText(issue), names);
+  }).join("\n\n");
 }
 
 // --- the instrument check ---------------------------------------------------
@@ -199,7 +273,7 @@ const selected = template.sections.filter((s) => s.kinds === null || s.kinds.inc
 const body = selected.join("\n");
 if (body.trim() === "") die(`template ${role}.md carries no text for ${kind === null ? "the role" : `kind ${kind}`}`);
 
-const declared = new Set(template.args.map((a) => a.placeholder));
+const declared = new Set([...template.args.map((a) => a.placeholder), ...(template.ticket === null ? [] : [template.ticket])]);
 for (const [, inner] of body.matchAll(PLACEHOLDER)) {
   if (!declared.has(inner) && !template.literals.has(inner)) die(`template ${role}.md carries the undeclared placeholder <${inner}>`);
 }
@@ -223,9 +297,23 @@ for (const a of required) {
   values.set(a.placeholder, value);
 }
 
+// THE TICKET, once every argument has passed: only for a kind whose text
+// carries the placeholder, found by that kind's own --pr and --scratch.
+const carriesTicket = template.ticket !== null && body.includes(`<${template.ticket}>`);
+if (carriesTicket) {
+  const by = TICKET_FLAGS.map((flag) => required.find((a) => a.flag === flag));
+  if (by.includes(undefined)) {
+    die(`template ${role}.md carries the ticket <${template.ticket}> in kind ${kind} without ${TICKET_FLAGS.map((f) => `--${f}`).join(" and ")} to find it by`);
+  }
+  const [pr, scratch] = by.map((a) => values.get(a.placeholder));
+  const names = [...loadTemplate("implementer").args, ...template.args].map((a) => a.placeholder).concat(template.ticket);
+  values.set(template.ticket, ticketFor(pr, scratch, names));
+}
+
 const brief = `${body.replace(PLACEHOLDER, (whole, inner) => (values.has(inner) ? values.get(inner) : whole))}\n`;
-for (const a of required) {
-  if (brief.includes(`<${a.placeholder}>`)) die(`the rendered brief still carries <${a.placeholder}> — an argument value spells it`);
+const filled = [...required.map((a) => a.placeholder), ...(carriesTicket ? [template.ticket] : [])];
+for (const p of filled) {
+  if (brief.includes(`<${p}>`)) die(`the rendered brief still carries <${p}> — an argument value spells it`);
 }
 
 const payload = {

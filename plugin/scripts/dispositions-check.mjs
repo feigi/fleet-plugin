@@ -35,7 +35,12 @@
 //                    "reason": "<string>",          required, non-empty, on a `refuted` entry; else optional
 //                    "issue": <number>,             optional: filed or commented to
 //                    "verdictPath": "<path>",       optional: a suggestion's refuter verdict
-//                    "remedyFiles": ["<path>", …]   optional: files the remedy names
+//                    "remedyFiles": ["<path>", …],  optional: files the remedy names
+//                    "charge": "false-claim" | "unmet" | "both" | "none",
+//                                                   the Charge, on an entry whose finding stands
+//                    "chargeReason": "defect-outside-acceptance" | "not-the-implementers-text"
+//                                  | "claim-about-untouched-code"
+//                                                   required with charge none, and only with it
 //                  }, … ] }
 //
 // One entry per `survived` finding and per `unverified` finding, plus one per
@@ -63,6 +68,18 @@
 //     here. A finding whose `file` and `line` sit on a touched line is in
 //     scope whatever the entry declares, and a finding with no `line` (or no
 //     `file`) is in scope. Otherwise the declared `scope` stands.
+//   - Charge: a finding stands when it is `survived` and not deferred with
+//     `reason` `false-rationale`, or `refuted` — an entry there is a reversal.
+//     An `unverified` finding never stands. On the record answering the PR's
+//     first review — firstReview() in ledger-grammar.mjs, this record's run
+//     counted as answered — every entry whose finding stands carries a
+//     `charge`; a record answering a later review, or one checked with no
+//     ledger, needs none. A `charge` or `chargeReason` an entry carries is
+//     judged wherever it appears: a value outside the ones above, a `charge`
+//     of `none` with no `chargeReason`, a `chargeReason` with any other
+//     `charge` or with no `charge`, and an entry declared `out` that the
+//     presumption above leaves out of scope charged anything but `none` are
+//     each a mismatch.
 //   - An in-scope `survived` finding deferred passes only with `reason` one
 //     of ALLOWED_DEFER. Any other reason, or none, is a mismatch.
 //     `disposition` has no `dismiss`: an in-scope `survived` finding verified
@@ -165,8 +182,8 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, memberTokens, rowNums } from "./ledger-grammar.mjs";
-import { deriveRun, dispositionsToken, LedgerError } from "./fleet-tick.mjs";
+import { parseMember, memberTokens, rowNums, dispositionsToken, firstReview, prTokens } from "./ledger-grammar.mjs";
+import { deriveRun, LedgerError } from "./fleet-tick.mjs";
 import { VERDICT_SCHEMA } from "./review-core.mjs";
 
 const NAME = "dispositions-check";
@@ -186,6 +203,11 @@ export const ALLOWED_DEFER = Object.freeze(["false-rationale", "mutual-exclusion
 const COVERED = ["survived", "unverified"];
 const BUCKETS = [...COVERED, "refuted"];
 const ENUMS = { scope: ["in", "out"], claimKind: ["behavior", "shape"], disposition: ["apply", "defer"] };
+
+// A Charge: what a finding that stands on a PR's first review says about the
+// work as submitted. `none` names one of CHARGE_REASONS; no other Charge does.
+export const CHARGES = Object.freeze(["false-claim", "unmet", "both", "none"]);
+export const CHARGE_REASONS = Object.freeze(["defect-outside-acceptance", "not-the-implementers-text", "claim-about-untouched-code"]);
 
 // The filing table: a deferral's home by its finding's state. `record` is the
 // suggestion-band record; `open` the weakest triage label an open home may carry.
@@ -393,7 +415,37 @@ function shapeErrors(e) {
   if (e.remedyFiles !== undefined && !(Array.isArray(e.remedyFiles) && e.remedyFiles.every((f) => typeof f === "string"))) {
     errors.push("remedyFiles is not an array of paths");
   }
+  if (e.charge !== undefined && !CHARGES.includes(e.charge)) errors.push(`charge ${JSON.stringify(e.charge)} is not one of ${CHARGES.join("|")}`);
+  if (e.chargeReason !== undefined && !CHARGE_REASONS.includes(e.chargeReason)) {
+    errors.push(`chargeReason ${JSON.stringify(e.chargeReason)} is not one of ${CHARGE_REASONS.join("|")}`);
+  }
   return errors;
+}
+
+// Whether an entry's finding stands: a survived finding not deferred
+// false-rationale, or a refuted one — an entry in that bucket exists only for
+// a refutation the fix-applier reversed. An unverified finding never stands.
+const stands = (bucket, e) => bucket === "refuted"
+  || (bucket === "survived" && !(e.disposition === "defer" && e.reason === "false-rationale"));
+
+// Why an entry's Charge breaks a rule, or null when it holds. `required`: the
+// record answers the PR's first review and the entry's finding stands, so the
+// entry carries a Charge. Anywhere else a Charge is optional, and judged only
+// when present.
+function chargeProblem(e, { inScope, required }) {
+  if (e.charge === undefined) {
+    if (e.chargeReason !== undefined) return "chargeReason gives the reason for a Charge of none, and this entry carries no charge";
+    if (required) {
+      return `a finding that stands on the PR's first review carries a Charge, and this entry carries none — charge it ${CHARGES.filter((c) => c !== "none").join(", ")}, or none with a chargeReason`;
+    }
+    return null;
+  }
+  if (e.charge === "none") {
+    return e.chargeReason === undefined ? `a Charge of none names its chargeReason, one of ${CHARGE_REASONS.join(", ")}, and this one names none` : null;
+  }
+  if (e.chargeReason !== undefined) return `chargeReason gives the reason for a Charge of none, and this entry is charged ${e.charge}`;
+  if (!inScope) return `an out-of-scope finding counts for nothing, so it is charged none, and this one is charged ${e.charge}`;
+  return null;
 }
 
 /**
@@ -415,10 +467,13 @@ function shapeErrors(e) {
  * `{problem}` when the tracker cannot say; `verdict` answers `{refuted}` for
  * a refuter verdict path or `{problem}` when it is no usable evidence, with
  * `undecided: true` when the path is a refuter's own location holding no decision.
+ * `charges` is whether the record answers the PR's first review (firstReview()
+ * in ledger-grammar.mjs), where every entry whose finding stands carries a
+ * Charge; a Charge an entry carries anywhere is judged all the same.
  * `review` must pass reviewProblem() — a bucket missing or holding a
  * non-object is a TypeError here, not a violation.
  */
-export function checkDispositions({ review, record, recordProblem = null, run = null, touched, diffFiles = null, roots = [], filing = null }) {
+export function checkDispositions({ review, record, recordProblem = null, run = null, touched, diffFiles = null, roots = [], filing = null, charges = false }) {
   const violations = [];
   const escalations = [];
   const unchecked = [];
@@ -471,14 +526,16 @@ export function checkDispositions({ review, record, recordProblem = null, run = 
       at(bucket, index, `malformed entry — ${errors.join("; ")}`);
       return;
     }
+    const finding = review[bucket][index];
+    const presumed = presumedInScope(finding, touched, roots);
+    const inScope = presumed !== null || e.scope === "in";
+    const charge = chargeProblem(e, { inScope, required: charges && stands(bucket, e) });
+    if (charge !== null) at(bucket, index, charge);
     if (bucket === "refuted" && !e.reason?.trim()) {
       at(bucket, index, "a reversed refutation names its evidence in reason, and this one names none");
       return;
     }
     if (bucket !== "unverified" && e.disposition !== "defer") return;
-    const finding = review[bucket][index];
-    const presumed = presumedInScope(finding, touched, roots);
-    const inScope = presumed !== null || e.scope === "in";
     const why = presumed === null ? "its entry declares scope in" : `${presumed}, so it is in scope whatever its entry declares`;
     const crashed = bucket === "unverified" && finding.refutersDispatched > 0;
     const shape = e.claimKind === "shape";
@@ -776,7 +833,7 @@ function main() {
   // same per-PR fold `ledger.mjs dispatch` gates the finisher by, so the check
   // and the gate never judge two different reviews. Without one nothing names
   // it, so `--review` must.
-  let data = null, row = null, run = null, reviewPath;
+  let data = null, row = null, run = null, charges = false, reviewPath;
   if (ledgerFile === null) {
     reviewPath = arg("review");
     if (reviewPath === null) die(`no ledger names PR #${pr}'s review — pass --review <path> for the review file ${member.name}'s record answers`);
@@ -797,6 +854,9 @@ function main() {
     }
     if (latest === undefined) die(`PR #${pr} has no reviewed= on the ledger — no review for ${member.name}'s record to answer`);
     run = latest.run;
+    // Charges are required only on the record answering the PR's first
+    // review; this record answers `run`, so `run` counts as answered.
+    charges = firstReview(prTokens(data.rows, pr), [run])?.run === run;
     reviewPath = join(scratch, `pr${pr}`, run, "review.json");
   }
   let review;
@@ -843,7 +903,7 @@ function main() {
     `list the files of ${base}..${head}`).split("\0").filter(Boolean);
 
   const { violations, escalations, unchecked } = checkDispositions({
-    review, record, recordProblem, run, touched: touchedLines(diff), diffFiles, roots: [review.snapshot, top],
+    review, record, recordProblem, run, touched: touchedLines(diff), diffFiles, roots: [review.snapshot, top], charges,
     filing: { pr, issue: issueReader(repo), verdict: verdictReader(scratch, pr) },
   });
   // No ledger, no row: the exit status below is the verdict, and with no

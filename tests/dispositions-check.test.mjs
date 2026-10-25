@@ -145,7 +145,13 @@ function fixture(t) {
   mkdirSync(join(scratch, "pr40", run), { recursive: true });
   const writeReview = (r = review) => writeFileSync(reviewPath, JSON.stringify(r));
   writeReview();
-  const entry = (bucket, index, more = {}) => ({ bucket, index, scope: "in", claimKind: "behavior", disposition: "apply", ...more });
+  // The review above is PR 40's first review, so its record carries a Charge
+  // on every standing entry: a survived or refuted one is charged none, for a
+  // reason, unless a case says otherwise. An unverified one carries none.
+  const CHARGED = { charge: "none", chargeReason: "defect-outside-acceptance" };
+  const entry = (bucket, index, more = {}) => ({
+    bucket, index, scope: "in", claimKind: "behavior", disposition: "apply", ...(bucket === "unverified" ? {} : CHARGED), ...more,
+  });
   // Every finding answered, every in-scope survivor applied, the out-of-scope
   // suggestion checked by its refuter, which let it survive, and filed open
   // `needs-triage` (row 6b): an ok record.
@@ -905,7 +911,7 @@ const H40 = "abc1234abc1234abc1234abc1234abc1234abcde";
 // `ready-for-agent` one — and `verdicts` the refuter verdicts by path.
 const coreRun = (entries, {
   head = H40, reviewHead = H40, survived = [{ file: "src/a.js", line: 5 }], unverified = [], record, diffFiles = ["src/a.js"],
-  issues = {}, verdicts = {},
+  issues = {}, verdicts = {}, charges = false,
 } = {}) => checkDispositions({
   review: { head: reviewHead, survived, unverified, refuted: [{ file: "src/b.js", line: 1 }] },
   record: record === undefined ? { head, entries } : record,
@@ -917,6 +923,7 @@ const coreRun = (entries, {
     issue: (n) => issues[n] ?? { state: "OPEN", title: "a deferred finding", labels: ["ready-for-agent"] },
     verdict: (p) => verdicts[p] ?? { problem: "names no file that exists" },
   },
+  charges,
 });
 const core = (entries, opts) => coreRun(entries, opts).violations.map(formatViolation);
 const applied = { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "apply" };
@@ -1661,4 +1668,130 @@ test("an out-of-scope suggestion below the claim bar names no verdictPath and fi
   entries[2] = { ...entries[2], issue: 77 };
   f.writeRecord(entries);
   mismatch(f.check(), /^fix-pr-40: unverified\[0\]: filing row 7 \(/m);
+});
+
+// ---------------------------------------------------------------------------
+// Charges: on the record answering a PR's first review, every entry whose
+// finding stands carries one.
+// ---------------------------------------------------------------------------
+
+const uncharged = ({ charge: _c, chargeReason: _r, ...rest }) => rest;
+const BAND = { state: "CLOSED", title: recordTitle(40), labels: ["wontfix"] };
+const TRIAGE = { state: "OPEN", title: "a deferred finding", labels: ["needs-triage"] };
+const REVERSED = { bucket: "refuted", index: 0, scope: "in", claimKind: "behavior", disposition: "apply", reason: "re-ran the probe; it reproduces" };
+const NONE = { charge: "none", chargeReason: "defect-outside-acceptance" };
+// survived[0] on touched src/a.js:5; survived[1] on untouched src/a.js:12.
+const TWO = [{ file: "src/a.js", line: 5 }, { file: "src/a.js", line: 12 }];
+const outOfScope = (more) => ({ bucket: "survived", index: 1, scope: "out", claimKind: "behavior", disposition: "defer", issue: 81, ...more });
+const charged = (entries, opts = {}) => core(entries, { survived: TWO, issues: { 81: TRIAGE }, charges: true, ...opts });
+
+test("on the first review's record a survived entry with no Charge is a mismatch naming it; each Charge passes it", () => {
+  assert.deepEqual(charged([applied, outOfScope(NONE)]), [
+    "survived[0]: a finding that stands on the PR's first review carries a Charge, and this entry carries none — charge it false-claim, unmet, both, or none with a chargeReason",
+  ]);
+  for (const charge of ["false-claim", "unmet", "both"]) assert.deepEqual(charged([{ ...applied, charge }, outOfScope(NONE)]), [], charge);
+  for (const chargeReason of ["defect-outside-acceptance", "not-the-implementers-text", "claim-about-untouched-code"]) {
+    assert.deepEqual(charged([{ ...applied, charge: "none", chargeReason }, outOfScope(NONE)]), [], chargeReason);
+  }
+});
+
+test("a survived entry deferred false-rationale, and an unverified entry, need no Charge", () => {
+  const rationale = { ...applied, disposition: "defer", reason: "false-rationale", issue: 13 };
+  const crashed = { bucket: "unverified", index: 0, scope: "in", claimKind: "behavior", disposition: "defer", issue: 81 };
+  assert.deepEqual(core([rationale, crashed], {
+    unverified: [{ file: "src/a.js", line: 5, refutersDispatched: 2 }], issues: { 13: BAND, 81: TRIAGE }, charges: true,
+  }), []);
+});
+
+test("a survived entry applied, though its reason says false-rationale, still stands and needs a Charge", () => {
+  assert.deepEqual(charged([{ ...applied, reason: "false-rationale" }, outOfScope(NONE)]), [
+    "survived[0]: a finding that stands on the PR's first review carries a Charge, and this entry carries none — charge it false-claim, unmet, both, or none with a chargeReason",
+  ]);
+  assert.deepEqual(charged([{ ...applied, ...NONE, reason: "false-rationale" }, outOfScope(NONE)]), []);
+});
+
+test("a refuted entry, a reversal, with no Charge is refused; charged, it passes", () => {
+  assert.deepEqual(core([{ ...applied, ...NONE }, REVERSED], { charges: true }), [
+    "refuted[0]: a finding that stands on the PR's first review carries a Charge, and this entry carries none — charge it false-claim, unmet, both, or none with a chargeReason",
+  ]);
+  assert.deepEqual(core([{ ...applied, ...NONE }, { ...REVERSED, charge: "false-claim" }], { charges: true }), []);
+});
+
+test("an entry scoped out is charged none: false-claim, unmet or both is refused, none with a reason passes", () => {
+  for (const charge of ["false-claim", "unmet", "both"]) {
+    assert.deepEqual(charged([{ ...applied, ...NONE }, outOfScope({ charge })]), [
+      `survived[1]: an out-of-scope finding counts for nothing, so it is charged none, and this one is charged ${charge}`,
+    ], charge);
+  }
+  assert.deepEqual(charged([{ ...applied, ...NONE }, outOfScope({ charge: "none", chargeReason: "claim-about-untouched-code" })]), []);
+  // Declared out on a line the diff touched, it is in scope, so a Charge of its own is no refusal.
+  assert.deepEqual(charged([{ ...applied, scope: "out", charge: "false-claim" }, outOfScope(NONE)]), []);
+});
+
+test("a Charge of none with no reason, a reason outside the three, an unknown Charge, or a chargeReason with no Charge is refused", () => {
+  assert.deepEqual(charged([{ ...applied, charge: "none" }, outOfScope(NONE)]), [
+    "survived[0]: a Charge of none names its chargeReason, one of defect-outside-acceptance, not-the-implementers-text, claim-about-untouched-code, and this one names none",
+  ]);
+  assert.deepEqual(charged([{ ...applied, charge: "none", chargeReason: "fixed" }, outOfScope(NONE)]), [
+    'survived[0]: malformed entry — chargeReason "fixed" is not one of defect-outside-acceptance|not-the-implementers-text|claim-about-untouched-code',
+  ]);
+  assert.deepEqual(charged([{ ...applied, charge: "answered" }, outOfScope(NONE)]), [
+    'survived[0]: malformed entry — charge "answered" is not one of false-claim|unmet|both|none',
+  ]);
+  assert.deepEqual(charged([{ ...applied, charge: "unmet", chargeReason: "defect-outside-acceptance" }, outOfScope(NONE)]), [
+    "survived[0]: chargeReason gives the reason for a Charge of none, and this entry is charged unmet",
+  ]);
+  assert.deepEqual(charged([{ ...applied, chargeReason: "defect-outside-acceptance" }, outOfScope(NONE)]), [
+    "survived[0]: chargeReason gives the reason for a Charge of none, and this entry carries no charge",
+  ]);
+});
+
+test("off the first review's record no Charge is required, and one that is carried is still judged", () => {
+  assert.deepEqual(charged([applied, outOfScope({})], { charges: false }), []);
+  assert.deepEqual(charged([{ ...applied, charge: "none" }, outOfScope({})], { charges: false }), [
+    "survived[0]: a Charge of none names its chargeReason, one of defect-outside-acceptance, not-the-implementers-text, claim-about-untouched-code, and this one names none",
+  ]);
+  assert.deepEqual(charged([{ ...applied, chargeReason: "defect-outside-acceptance" }, outOfScope({})], { charges: false }), [
+    "survived[0]: chargeReason gives the reason for a Charge of none, and this entry carries no charge",
+  ]);
+});
+
+test("the CLI requires Charges on the record answering the PR's first review, and on no later one", (t) => {
+  const f = fixture(t);
+  const entries = f.baseEntries();
+  entries[0] = uncharged(entries[0]);
+  f.writeRecord(entries);
+  mismatch(f.check(), /^fix-pr-40: survived\[0\]: a finding that stands on the PR's first review carries a Charge/m);
+  f.writeRecord(f.baseEntries());
+  okVerdict(f.check());
+
+  // A second review, answered by fix-pr-40-b: the first review stays the
+  // one fix-pr-40 answered, so this record needs no Charge.
+  const later = "run-Rv40Bb02";
+  f.okLedger("review", "40", "review=member:review-pr-40-b", `reviewed=${f.head}:2/1/1:${later}`);
+  f.okLedger("dispatch", "40", "fix-pr-40-b");
+  mkdirSync(join(f.scratch, "pr40", later), { recursive: true });
+  writeFileSync(join(f.scratch, "pr40", later, "review.json"), JSON.stringify(f.review));
+  f.writeRecord(f.baseEntries().map(uncharged), f.head, "fix-pr-40-b", later);
+  const r = f.check("fix-pr-40-b");
+  okVerdict(r);
+  assert.equal(r.json.token, `dispositions-ok=fix-pr-40-b:${later}`);
+});
+
+test("the CLI reads a review no fix-applier answered as superseded: the next answered one is the first review", (t) => {
+  const f = fixture(t);
+  // PR 40's review `f.run` drew no fix-applier's record before a second review returned.
+  const later = "run-Rv40Bb02";
+  f.okLedger("review", "40", "review=member:review-pr-40-b", `reviewed=${f.head}:2/1/1:${later}`);
+  f.okLedger("dispatch", "40", "fix-pr-40-b");
+  mkdirSync(join(f.scratch, "pr40", later), { recursive: true });
+  writeFileSync(join(f.scratch, "pr40", later, "review.json"), JSON.stringify(f.review));
+  f.writeRecord(f.baseEntries().map(uncharged), f.head, "fix-pr-40-b", later);
+  mismatch(f.check("fix-pr-40-b"), /^fix-pr-40-b: survived\[0\]: a finding that stands on the PR's first review carries a Charge/m);
+});
+
+test("a record checked with no ledger needs no Charge", (t) => {
+  const f = fixture(t);
+  f.writeRecord(f.baseEntries().map(uncharged));
+  okVerdict(standalone(f, "--no-ledger", "--review", f.reviewPath));
 });

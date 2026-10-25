@@ -11,6 +11,7 @@ arg violations violations
 path worktree
 path scratch
 path mismatched-record
+ticket ticket
 literal your name
 literal outcome
 literal that path
@@ -64,6 +65,16 @@ claim, never your patch.
 **Before you report, write every ruling to `<scratch>/dispositions-<your name>.json`**,
 `<your name>` the `fix-pr-<pr>[-x]` you were dispatched as — the record the controller checks with
 `dispositions-check.mjs` before it dispatches any finisher.
+
+**Charge every standing entry of that record:** which entries stand, and the
+`charge` and `chargeReason` fields, are in `review-and-fix.md`'s step 2. Read
+the definitions of `closed_own_ticket` and `minted_false_claim` in the header
+of `docs/metrics/tier-outcomes.tsv`, and charge each standing entry by them,
+against the ticket below as its implementer was dispatched with it.
+
+The ticket:
+
+<ticket>
 ## kind: conflict
 Bring `<branch>` current with `origin/main`, resolving every conflict by the
 **No-undo audit** in `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md`.

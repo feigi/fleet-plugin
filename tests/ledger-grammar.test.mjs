@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole, firstReview, prTokens, ledgerSection } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -519,4 +519,47 @@ test("each ledger family renders from its own dispatch-prompt.mjs role", () => {
   assert.deepEqual(Object.fromEntries(MEMBER_FAMILIES.map((f) => [f, memberRole(f)])), {
     impl: "implementer", "fix-pr": "fix-applier", "finisher-pr": "finisher", "merge-bot": "merge-bot",
   });
+});
+
+// A PR's first review, read off its token stream.
+const RV = (counts, run) => `reviewed=abc1234:${counts}:${run}`;
+
+test("firstReview prefers a first review that counted no survived and no unverified finding over a later answered one", () => {
+  const tokens = ["review=member:review-pr-40", RV("0/2/0", "run-AAAA0001"), "review=member:review-pr-40-b", RV("1/0/0", "run-BBBB0002"),
+    "fix-pr-40=applied:abc1234", "dispositions-ok=fix-pr-40:run-BBBB0002"];
+  assert.deepEqual(firstReview(tokens), { head: "abc1234", survived: 0, refuted: 2, unverified: 0, run: "run-AAAA0001" });
+});
+
+test("firstReview prefers an answered review over an earlier one no fix-applier answered, which was superseded", () => {
+  const tokens = [RV("2/0/1", "run-AAAA0001"), RV("1/0/0", "run-BBBB0002"), "dispositions-mismatch=fix-pr-40:run-BBBB0002"];
+  assert.equal(firstReview(tokens).run, "run-BBBB0002");
+  // An unverified finding alone is a finding: unanswered, that review is superseded too.
+  assert.equal(firstReview([RV("0/0/1", "run-AAAA0001"), RV("1/0/0", "run-BBBB0002"), "dispositions-ok=fix-pr-40:run-BBBB0002"]).run, "run-BBBB0002");
+});
+
+test("firstReview counts the runs it is handed as answered, and is null when no review qualifies", () => {
+  const tokens = [RV("2/0/1", "run-AAAA0001"), RV("1/0/0", "run-BBBB0002")];
+  assert.equal(firstReview(tokens), null);
+  assert.equal(firstReview(tokens, ["run-BBBB0002"]).run, "run-BBBB0002");
+  assert.equal(firstReview(tokens, ["run-AAAA0001", "run-BBBB0002"]).run, "run-AAAA0001");
+  assert.equal(firstReview([]), null);
+  // A verdict that is no dispositions token answers nothing.
+  assert.equal(firstReview([...tokens, "dispositions-ok=finisher-pr-40:run-AAAA0001"]), null);
+});
+
+test("prTokens is a PR's stream in row order, across every row resolving to it, and no other PR's", () => {
+  const rows = [
+    `#10 impl-10=PR#40 review=member:review-pr-40 ${RV("2/0/0", "run-AAAA0001")}`,
+    `#11 impl-11=PR#41 ${RV("0/0/0", "run-CCCC0003")}`,
+    "#40 fix-pr-40 dispositions-ok=fix-pr-40:run-AAAA0001",
+  ];
+  assert.deepEqual(prTokens(rows, 40), ["#10", "impl-10=PR#40", "review=member:review-pr-40", RV("2/0/0", "run-AAAA0001"), "#40", "fix-pr-40", "dispositions-ok=fix-pr-40:run-AAAA0001"]);
+  assert.equal(firstReview(prTokens(rows, 40)).run, "run-AAAA0001");
+  assert.deepEqual(prTokens(rows, 99), []);
+});
+
+test("ledgerSection reads a section's entries unescaped, and none for a section that is absent", () => {
+  const text = "# Fleet run ledger\n\n## Rows\n\n- #10 impl-10=PR#40\n- #11 a\\nb\n\n## Dispatched\n\n- impl-10=PR#40 brief=0123abcd\n";
+  assert.deepEqual(ledgerSection(text, "## Rows"), ["#10 impl-10=PR#40", "#11 a\nb"]);
+  assert.deepEqual(ledgerSection(text, "## Filed"), []);
 });

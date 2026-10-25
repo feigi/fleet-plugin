@@ -146,7 +146,7 @@
 // the ledger; main() does the I/O. Split so the guard table and the reading are
 // both unit-testable without a network.
 
-import { parseMember, parseToken, premisesOf, rowNums, nextRetry, readRetired, pullEnded, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, premisesOf, rowNums, nextRetry, readRetired, pullEnded, dispositionsToken, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
 
 // The implementer and reviewer rows' TARGET is the In-flight bound; the merge
 // bot's is 1. Availability of work belongs in the ACTION, not the target: a
@@ -616,26 +616,6 @@ function parkedReason(encoded) {
 // or `tier-mismatch=<member>:<def>` — or `tier-unverifiable=<member>:no-transcript`
 // for a settled member whose transcript was never written.
 const TIER_VERDICT = /^tier-(ok|mismatch|unverifiable)=([^:\s]+):\S+$/;
-// dispositions-check.mjs's verdict on a review fix-applier's disposition
-// record: `dispositions-ok=fix-pr-<M>[-x]:<run>`,
-// `dispositions-mismatch=…`, `dispositions-escalate=…` (a critical or
-// important deferral, or a second mismatch on one review, that a human rules
-// on) or `dispositions-unchecked=…` (no rule broke, but where a deferral was
-// filed could not be read), `<run>` the run of the review the record
-// answers, as its `reviewed=` names it. `ledger.mjs dispatch` refuses a
-// finisher on anything but an ok. A
-// mismatch returns the PR to fixDue for one retry; an escalate is a hold only
-// a human answers, so the tick never re-offers the PR for it; an unchecked is
-// answered by running the check again, so the tick never offers a
-// fix-applier for it either. A token outside this shape is no verdict at all,
-// which the gate reads as unchecked: fail closed.
-export function dispositionsToken(tok) {
-  const m = /^dispositions-(ok|mismatch|escalate|unchecked)=([^:\s]+):(run-[A-Za-z0-9]{8})$/i.exec(tok);
-  if (!m) return null;
-  const member = parseMember(m[2]);
-  if (member === null || member.family !== "fix-pr") return null;
-  return { verdict: m[1].toLowerCase(), member, run: m[3] };
-}
 
 // Which verdict outranks which when one fix-applier carries more than one for
 // a review: the stricter reading wins.
