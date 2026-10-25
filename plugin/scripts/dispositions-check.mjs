@@ -192,7 +192,9 @@ const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
 
 // Two spellings of one commit: either head a prefix of the other, the way a
 // record's head (7-40 hex) is matched against its review's full head.
-const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
+// Exported: tier-outcomes.mjs matches a review file's head to its ledger
+// token's the same way.
+export const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
 
 // ---------------------------------------------------------------------------
 // pure core — no filesystem or process access until main()

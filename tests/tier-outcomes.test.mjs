@@ -1198,12 +1198,12 @@ function ruled(t, { tokens, reviews = [], records = [], ...options }) {
 }
 
 // One survived finding on review 1, answered by the record `entries`.
-function oneReview(t, { survived = [finding("the claim")], refuted = [], unverified = [], entries, ...options }) {
+function oneReview(t, { survived = [finding("the claim")], refuted = [], unverified = [], entries, review = {}, ...options }) {
   return ruled(t, {
     tokens: [reviewedToken(HEAD_1, survived.length, refuted.length, unverified.length, RUN_1), answeredToken(RUN_1)],
-    reviews: [{ run: RUN_1, head: HEAD_1, survived, refuted, unverified, ...(options.review ?? {}) }],
+    reviews: [{ run: RUN_1, head: HEAD_1, survived, refuted, unverified, ...review }],
     records: [{ run: RUN_1, entries }],
-    ...Object.fromEntries(Object.entries(options).filter(([k]) => k !== "review")),
+    ...options,
   });
 }
 
@@ -1419,6 +1419,74 @@ for (const [what, entries] of [
   });
 }
 
+// A record entry the Ruling cannot read writes no row, and the refusal names it.
+for (const [what, entries, message] of [
+  ["a second entry for a finding carries a harsher Charge", [chargedNone("survived", 0, "defect-outside-acceptance"), charged("survived", 0, "both")], /entries\[1\] is a second entry for survived\[0\], which entries\[0\] already answers/],
+  ["an entry names an index past its bucket", [chargedNone("survived", 0, "defect-outside-acceptance"), charged("survived", 5, "unmet")], /entries\[1\] names survived\[5\], and survived holds 1/],
+  ["an entry names a bucket the review has not got", [chargedNone("survived", 0, "defect-outside-acceptance"), charged("standing", 0, "unmet")], /entries\[1\] names bucket "standing", not survived, refuted or unverified/],
+  ["an entry is not an object", [chargedNone("survived", 0, "defect-outside-acceptance"), null], /entries\[1\] is not an object/],
+]) {
+  test(`append: a record entry a Ruling cannot read is refused, naming it, and writes no row — ${what}`, (t) => {
+    const f = oneReview(t, { state: "OPEN", entries });
+    const before = readFileSync(f.tier, "utf8");
+    const r = f.derive();
+    assert.equal(r.code, 2, r.stderr);
+    assert.match(r.stderr, message);
+    assert.match(r.stderr, /check the record again/);
+    assert.equal(readFileSync(f.tier, "utf8"), before);
+  });
+}
+
+// The ledger's head and review.json's are one commit when either is a prefix
+// of the other, whatever case review.json spells it in.
+for (const [what, tokenHead, fileHead] of [
+  ["review.json spells it longer and in upper case", "abcdef1", "ABCDEF1AAAA"],
+  ["the ledger spells it longer, review.json in upper case", "abcdef1aaaa", "ABCDEF1"],
+]) {
+  test(`append: a review file whose head is the ledger's in another spelling derives a row — ${what}`, (t) => {
+    const f = ruled(t, { tokens: [reviewedToken(tokenHead, 0, 0, 0, RUN_1)], reviews: [{ run: RUN_1, head: fileHead }] });
+    const r = f.derive();
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(verdicts(f).note, /^review run-aaaaaaa1 at abcdef1, no record: /);
+  });
+}
+
+test("append: a record from a member lettered a answers the run, ahead of the first attempt's", (t) => {
+  const f = oneReview(t, { entries: [chargedNone("survived", 0, "defect-outside-acceptance")] });
+  writeRecord(f, { letter: "a", run: RUN_1, entries: [charged("survived", 0, "unmet")] });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(verdicts(f).closed, "no");
+  assert.match(verdicts(f).note, /, record dispositions-fix-pr-20-a\.json: survived\[0\] unmet "the claim"$/);
+});
+
+for (const [what, at] of [
+  ["review.json", (f) => join(f.scratch, "pr20", RUN_1, "review.json")],
+  ["the record", (f) => join(f.scratch, "dispositions-fix-pr-20.json")],
+]) {
+  test(`append: ${what} that cannot be read is refused by its error code, not as bad JSON`, (t) => {
+    const f = oneReview(t, { entries: [chargedNone("survived", 0, "defect-outside-acceptance")] });
+    const path = at(f);
+    rmSync(path);
+    mkdirSync(path);
+    const r = f.derive();
+    assert.equal(r.code, 2, r.stderr);
+    assert.ok(r.stderr.includes(`${path} cannot be read: EISDIR`), r.stderr);
+    assert.doesNotMatch(r.stderr, /JSON/);
+    assert.equal(f.dataRows().length, 0);
+  });
+}
+
+test("append: an unrun dimension that names no dimension is written as its JSON, never as a blank", (t) => {
+  const f = oneReview(t, {
+    entries: [chargedNone("survived", 0, "defect-outside-acceptance")],
+    review: { dimensionsUnrun: [{ reason: "crashed" }, 5, null, "docs"] },
+  });
+  const r = f.derive();
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(verdicts(f).note, /; unrun: \{"reason":"crashed"\}, 5, null, docs$/);
+});
+
 test("append: a reversed refutation with no Charge is refused, naming it", (t) => {
   const f = oneReview(t, { survived: [finding("kept")], refuted: [finding("reversed")], entries: [chargedNone("survived", 0, "defect-outside-acceptance"), entry("refuted", 0, { reason: "evidence" })] });
   const r = f.derive();
@@ -1447,6 +1515,15 @@ const REFUSALS = [
     tokens: [reviewedToken(HEAD_1, 0, 0, 0, RUN_1)],
     reviews: [{ run: RUN_1, head: HEAD_2 }],
   }, /is the review of head 2222222bbbb, not the ledger's review run-aaaaaaa1 at 1111111aaaa/],
+  ["the review file holds a finding the ledger's review did not count", {
+    tokens: [reviewedToken(HEAD_1, 0, 0, 0, RUN_1)],
+    reviews: [{ run: RUN_1, head: HEAD_1, survived: [finding("x")] }],
+  }, /review\.json holds 1 survived and 0 unverified, not the 0 and 0 the ledger's review run-aaaaaaa1 counted/],
+  ["the review file holds fewer findings than the ledger's review counted", {
+    tokens: [reviewedToken(HEAD_1, 1, 0, 1, RUN_1), answeredToken(RUN_1)],
+    reviews: [{ run: RUN_1, head: HEAD_1, unverified: [finding("x")] }],
+    records: [{ run: RUN_1, entries: [entry("unverified", 0, { disposition: "defer" })] }],
+  }, /review\.json holds 0 survived and 1 unverified, not the 1 and 1 the ledger's review run-aaaaaaa1 counted/],
 ];
 for (const [what, setup, message] of REFUSALS) {
   for (const state of ["OPEN", "CLOSED"]) {
@@ -1478,7 +1555,7 @@ test("append: a record that is not JSON refuses rather than letting an older rec
   writeFileSync(join(f.scratch, "dispositions-fix-pr-20-b.json"), "{ not json");
   const r = f.derive();
   assert.equal(r.code, 2, r.stderr);
-  assert.match(r.stderr, /dispositions-fix-pr-20-b\.json cannot be read as JSON/);
+  assert.match(r.stderr, /dispositions-fix-pr-20-b\.json is not valid JSON/);
   assert.equal(f.dataRows().length, 0);
 });
 

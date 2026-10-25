@@ -82,9 +82,10 @@
 // is composed from them, so the row explains itself once the evidence is
 // reclaimed:
 //   - the review is ledger-grammar.mjs's firstReview() over the PR's ledger
-//     tokens: the first `reviewed=` that counted no survived and no unverified
-//     finding, else the first a fix-applier answered. Its `review.json` is
-//     `<scratch>/pr<pr>/<run>/review.json`;
+//     tokens: the first `reviewed=` that either counted no survived and no
+//     unverified finding or that a fix-applier answered. Its `review.json` is
+//     `<scratch>/pr<pr>/<run>/review.json`, and its head and its survived and
+//     unverified counts are the ledger token's, or it refuses;
 //   - the record is the last answering that review's run:
 //     `<scratch>/dispositions-fix-pr-<pr>[-x].json` with the highest retry
 //     letter whose `run` is the review's run. It is read whatever
@@ -94,8 +95,9 @@
 //     `minted_false_claim` yes. A review that counted no survived and no
 //     unverified finding is a pass and needs no record;
 //   - a standing finding with no Charge, or a review, `review.json` or record
-//     that is missing, refuses. A dimension that never ran does not: the note
-//     names it.
+//     that is missing, refuses. So does a record entry that names no finding
+//     of the review, or a second entry for a finding an earlier entry
+//     answers. A dimension that never ran does not: the note names it.
 // The note reads `review <run> at <head7>, record <file>: <bucket>[<index>]
 // <charge> "<claim>"; …; none: <bucket>[<index>] <reason>, …; cleared:
 // survived[<index>] false-rationale, …; unrun: <dimension>, …`, and ` — <--note>`
@@ -115,7 +117,7 @@ import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags, isDigits } from "./arg.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { parseMember, parseToken, memberTokens, rowPr, prTokens, firstReview } from "./ledger-grammar.mjs";
-import { CHARGES, CHARGE_REASONS, reviewProblem, stands } from "./dispositions-check.mjs";
+import { CHARGES, CHARGE_REASONS, reviewProblem, sameHead, stands } from "./dispositions-check.mjs";
 import { rowText } from "./tier-check.mjs";
 import { latestImplReport, readReport, reportsDir, defaultScratch } from "./report-files.mjs";
 import { FleetDirUnresolvable } from "./fleet-dir.mjs";
@@ -584,8 +586,22 @@ function today() {
 
 const oneLine = (s) => String(s ?? "").replace(/[\t\r\n]/g, " ");
 
-// Two spellings of one commit: either a prefix of the other.
-const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
+// `path` parsed as JSON: `{value}`, or `{problem}` naming the failure — with
+// `code` the error code when the file could not be read at all, and no `code`
+// when it was read and is not valid JSON.
+function readJson(path) {
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (e) {
+    return { code: e.code, problem: `${path} cannot be read: ${e.code ?? e.message}` };
+  }
+  try {
+    return { value: JSON.parse(text) };
+  } catch (e) {
+    return { problem: `${path} is not valid JSON: ${e.message}` };
+  }
+}
 
 // The Charge an entry carries, `{charge, reason}`, or null when it carries
 // none a Ruling can read: a value outside CHARGES, or `none` with no reason
@@ -607,7 +623,7 @@ function recordFiles(scratch, pr) {
     if (e.code === "ENOENT") return [];
     throw new Error(`cannot list ${scratch}: ${e.code ?? e.message}`);
   }
-  const answering = new RegExp(`^dispositions-fix-pr-${pr}(?:-([b-z]))?\\.json$`);
+  const answering = new RegExp(`^dispositions-fix-pr-${pr}(?:-([a-z]))?\\.json$`);
   return names
     .flatMap((file) => {
       const m = answering.exec(file);
@@ -619,8 +635,9 @@ function recordFiles(scratch, pr) {
 // The last record answering review run `run`: `{file, record}`, `{missing}`
 // naming why there is none, a retry's record replacing the first attempt's on
 // the same run and a record answering any other run changing nothing. A file
-// met before the answering one that cannot be read as JSON names no run, so it
-// could be the retry's: it refuses rather than letting an older record stand in.
+// met before the answering one that cannot be read, or is not valid JSON,
+// names no run, so it could be the retry's: it refuses rather than letting an
+// older record stand in.
 function recordFor(scratch, pr, run) {
   let files;
   try {
@@ -630,30 +647,41 @@ function recordFor(scratch, pr, run) {
   }
   for (const { file } of files) {
     const path = join(scratch, file);
-    let record;
-    try {
-      record = JSON.parse(readFileSync(path, "utf8"));
-    } catch (e) {
-      return { missing: `${path} cannot be read as JSON: ${e.message}` };
-    }
-    if (record?.run === run) return { file, path, record };
+    const read = readJson(path);
+    if (read.problem !== undefined) return { missing: read.problem };
+    if (read.value?.run === run) return { file, path, record: read.value };
   }
   return { missing: `no ${join(scratch, `dispositions-fix-pr-${pr}[-x].json`)} names review ${run} as the run it answers` };
 }
 
 // The Charges `record` carries on the findings of `review` that stand, as the
 // pieces of the note and the findings with none. A survived finding no entry
-// answers stands, with no Charge.
+// answers stands, with no Charge. `broken` names each entry the Ruling cannot
+// read — not an object, a bucket the review has not got, an index naming no
+// finding, or a second entry for a finding an earlier one answers — since
+// skipping one could hide the Charge that decides a column.
 function chargesOf(review, record) {
   const entries = new Map();
-  for (const e of Array.isArray(record.entries) ? record.entries : []) {
-    if (e === null || typeof e !== "object" || Array.isArray(e)) continue;
-    if (e.bucket !== "survived" && e.bucket !== "refuted") continue;
-    if (!Number.isInteger(e.index) || e.index < 0 || e.index >= review[e.bucket].length) continue;
+  const broken = [];
+  for (const [n, e] of (Array.isArray(record.entries) ? record.entries : []).entries()) {
+    if (e === null || typeof e !== "object" || Array.isArray(e)) {
+      broken.push(`entries[${n}] is not an object`);
+      continue;
+    }
+    if (!["survived", "refuted", "unverified"].includes(e.bucket)) {
+      broken.push(`entries[${n}] names bucket ${JSON.stringify(e.bucket ?? null)}, not survived, refuted or unverified`);
+      continue;
+    }
+    if (!Number.isInteger(e.index) || e.index < 0 || e.index >= review[e.bucket].length) {
+      broken.push(`entries[${n}] names ${e.bucket}[${JSON.stringify(e.index ?? null)}], and ${e.bucket} holds ${review[e.bucket].length}`);
+      continue;
+    }
     const key = `${e.bucket}[${e.index}]`;
-    if (!entries.has(key)) entries.set(key, e);
+    if (entries.has(key)) broken.push(`entries[${n}] is a second entry for ${key}, which entries[${entries.get(key).n}] already answers`);
+    else entries.set(key, { e, n });
   }
-  const out = { charged: [], none: [], cleared: [], missing: [] };
+  const entryFor = (key) => entries.get(key)?.e;
+  const out = { charged: [], none: [], cleared: [], missing: [], broken };
   const take = (bucket, index, e) => {
     const key = `${bucket}[${index}]`;
     const c = e === undefined ? null : chargeOf(e);
@@ -662,12 +690,12 @@ function chargesOf(review, record) {
     else out.charged.push({ charge: c.charge, text: `${key} ${c.charge} "${oneLine(review[bucket][index].claim)}"` });
   };
   review.survived.forEach((_, index) => {
-    const e = entries.get(`survived[${index}]`);
+    const e = entryFor(`survived[${index}]`);
     if (e !== undefined && !stands("survived", e)) out.cleared.push(`survived[${index}] ${e.reason}`);
     else take("survived", index, e);
   });
   review.refuted.forEach((_, index) => {
-    const e = entries.get(`refuted[${index}]`);
+    const e = entryFor(`refuted[${index}]`);
     if (e !== undefined) take("refuted", index, e);
   });
   return out;
@@ -686,18 +714,23 @@ function derivedRuling(pr, ledger, scratch) {
   }
   if (scratch.unresolvable !== undefined) return { missing: `no scratch root to look in: ${scratch.unresolvable}` };
   const reviewPath = join(scratch.root, `pr${pr}`, review.run, "review.json");
-  let file;
-  try {
-    file = JSON.parse(readFileSync(reviewPath, "utf8"));
-  } catch (e) {
-    return { missing: e.code === "ENOENT" ? `review ${review.run}'s result file ${reviewPath} is missing` : `${reviewPath} cannot be read as JSON: ${e.message}` };
-  }
+  const read = readJson(reviewPath);
+  if (read.code === "ENOENT") return { missing: `review ${review.run}'s result file ${reviewPath} is missing` };
+  if (read.problem !== undefined) return { missing: read.problem };
+  const file = read.value;
   const problem = reviewProblem(file);
   if (problem !== null) return { missing: `${reviewPath} ${problem}` };
   if (!sameHead(String(file.head).toLowerCase(), review.head)) {
     return { missing: `${reviewPath} is the review of head ${file.head}, not the ledger's review ${review.run} at ${review.head}` };
   }
-  const unrun = (Array.isArray(file.dimensionsUnrun) ? file.dimensionsUnrun : []).map((d) => oneLine(typeof d === "string" ? d : d?.dimension));
+  if (file.survived.length !== review.survived || file.unverified.length !== review.unverified) {
+    return { missing: `${reviewPath} holds ${file.survived.length} survived and ${file.unverified.length} unverified, not the ${review.survived} and ${review.unverified} the ledger's review ${review.run} counted` };
+  }
+  // An entry that is neither a dimension's name nor {dimension} is named as
+  // the JSON it is, so the note never reads as a blank dimension.
+  const unrun = (Array.isArray(file.dimensionsUnrun) ? file.dimensionsUnrun : []).map((d) => oneLine(
+    typeof d === "string" ? d : typeof d?.dimension === "string" ? d.dimension : JSON.stringify(d ?? null),
+  ));
   const opening = `review ${review.run} at ${review.head.slice(0, 7)}`;
   const noted = (parts) => (unrun.length === 0 ? parts : [...parts, `unrun: ${unrun.join(", ")}`]).join("; ");
 
@@ -707,6 +740,9 @@ function derivedRuling(pr, ledger, scratch) {
   const found = recordFor(scratch.root, pr, review.run);
   if (found.missing !== undefined) return { missing: found.missing };
   const charges = chargesOf(file, found.record);
+  if (charges.broken.length > 0) {
+    return { missing: `${found.path} has ${charges.broken.length === 1 ? "an entry" : "entries"} a Ruling cannot read: ${charges.broken.join("; ")}` };
+  }
   if (charges.missing.length > 0) {
     return { missing: `${found.path} carries no Charge on ${charges.missing.length === 1 ? "this standing finding" : "these standing findings"}: ${charges.missing.join("; ")}` };
   }
