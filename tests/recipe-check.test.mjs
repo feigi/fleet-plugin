@@ -34,12 +34,16 @@ const GIT_ENV = {
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
 
+// Inherited variables that would aim a fixture's git or gh at a repository,
+// work tree or index other than its own.
+const INHERITED = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GH_REPO"];
+
 const TEST_CMD = "sh ./t.sh";
 
 function fixture({ check = "sh ./check.sh" } = {}) {
   const root = tempDir("recipe-check-");
   const env = { ...process.env, ...GIT_ENV };
-  for (const k of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GH_REPO"]) delete env[k];
+  for (const k of INHERITED) delete env[k];
   const git = (cwd, ...args) => execFileSync("git", args, { cwd, env, encoding: "utf8" }).trim();
   const origin = join(root, "origin.git");
   const work = join(root, "work");
@@ -288,11 +292,14 @@ test("a Test entrypoint killed by a signal records 128 plus the signal number", 
 // before: its exit status, the signal it died of (null when it exited), its
 // stderr, and that stderr's last line. A command runs in a process group of
 // its own, which is its `sh -c`'s pid, so the command writes `$$` to
-// `groupFile` (the marker itself, by default). A run still going `guardMs`
-// after the marker, or with no marker by then, has recipe-check's own group
-// and that command group SIGKILLed, and fails here instead of hanging or
-// leaving the command behind.
-async function killedRun(f, { testCmd, marker, signals, delayMs = 0, groupFile = marker, guardMs = 30_000, env = f.env }) {
+// `groupFile` (the marker itself, by default). A run with no marker `startMs`
+// after it was started, or still going `guardMs` after the marker, has
+// recipe-check's own group and that command group SIGKILLed — with no marker,
+// the command's group once `groupFile` names it, up to 5 s after recipe-check
+// died — and fails here instead of hanging or leaving the command behind.
+// `startMs` and `guardMs` are apart so a short guard never also cuts short the
+// wait for a slow start.
+async function killedRun(f, { testCmd, marker, signals, delayMs = 0, groupFile = marker, startMs = 30_000, guardMs = 30_000, env = f.env }) {
   const child = spawn(process.execPath, [RECIPE_CHECK, "--member", "impl-5", "--testCmd", testCmd, "--reports", f.reports], { cwd: f.work, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
   let stderr = "";
   child.stderr.setEncoding("utf8");
@@ -307,17 +314,30 @@ async function killedRun(f, { testCmd, marker, signals, delayMs = 0, groupFile =
       if (e.code !== "ESRCH") throw e;
     }
   };
+  // pgid 1 and below would name every process the user owns, not a group.
+  const groupId = () => {
+    const pgid = existsSync(groupFile) ? Number.parseInt(readFileSync(groupFile, "utf8"), 10) : NaN;
+    return Number.isInteger(pgid) && pgid > 1 ? pgid : null;
+  };
   const killGroups = () => {
     killGroup(child.pid);
-    // pgid 1 and below would name every process the user owns, not a group.
-    const pgid = existsSync(groupFile) ? Number.parseInt(readFileSync(groupFile, "utf8"), 10) : NaN;
-    if (Number.isInteger(pgid) && pgid > 1) killGroup(pgid);
+    const pgid = groupId();
+    if (pgid !== null) killGroup(pgid);
   };
-  const deadline = Date.now() + guardMs;
+  const deadline = Date.now() + startMs;
   while (!existsSync(marker) && Date.now() < deadline) await pause(20);
   if (!existsSync(marker)) {
-    killGroups();
+    killGroup(child.pid);
     await exited;
+    // A command recipe-check spawned before it died is in a session of its
+    // own, which that kill never reached, and may write its group only now.
+    const grace = Date.now() + 5000;
+    let pgid = groupId();
+    while (pgid === null && Date.now() < grace) {
+      await pause(20);
+      pgid = groupId();
+    }
+    if (pgid !== null) killGroup(pgid);
     assert.fail(`the command never started\n${stderr}`);
   }
   const late = setTimeout(killGroups, guardMs);
@@ -332,22 +352,23 @@ async function killedRun(f, { testCmd, marker, signals, delayMs = 0, groupFile =
   return { ...result, stderr, last: stderr.trimEnd().split("\n").pop() };
 }
 
-// Whether `pidFile`'s process is gone, given a moment for the kernel to reap
-// it. A process still there is killed, so a failing assertion leaks nothing.
-async function goneAfter(pidFile) {
+// Asserts `pidFile`'s process is gone, given a moment for the kernel to reap
+// it. A process still there is killed before the assertion fails with
+// `message`, so a failure leaks nothing.
+async function assertGone(pidFile, message) {
   const pid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
   assert.ok(Number.isInteger(pid) && pid > 1, `${pidFile} holds no pid`);
   for (let i = 0; i < 100; i++) {
     try {
       process.kill(pid, 0);
     } catch (e) {
-      if (e.code === "ESRCH") return true;
+      if (e.code === "ESRCH") return;
       throw e;
     }
     await new Promise((r) => setTimeout(r, 20));
   }
   process.kill(pid, "SIGKILL");
-  return false;
+  assert.fail(message);
 }
 
 // A command that is not exec'd: its shell stays, waiting on a `sleep` it
@@ -418,7 +439,7 @@ test("a SIGTERM during a Check step that is not exec'd stops its whole group, ne
   assert.equal(existsSync(f.recordFile("impl-5")), false);
   assert.equal(existsSync(testMarker), false, "the Test entrypoint never started");
   assert.equal(existsSync(paths.after), false, "the Check step ran on past the signal");
-  assert.equal(await goneAfter(paths.sleepPid), true, "the sleep the Check step started outlived the signal");
+  await assertGone(paths.sleepPid, "the sleep the Check step started outlived the signal");
   assert.match(r.last, /^recipe-check: SIGTERM received during the Check step, which ran \d+ s;/);
 });
 
@@ -432,7 +453,7 @@ test("a SIGTERM during a Test entrypoint that is not exec'd stops its whole grou
   assert.equal(r.sig, null);
   assert.equal(existsSync(f.recordFile("impl-5")), false);
   assert.equal(existsSync(paths.after), false, "the Test entrypoint ran on past the signal");
-  assert.equal(await goneAfter(paths.sleepPid), true, "the sleep the Test entrypoint started outlived the signal");
+  await assertGone(paths.sleepPid, "the sleep the Test entrypoint started outlived the signal");
   assert.match(r.last, /^recipe-check: SIGTERM received during the Test entrypoint, which ran \d+ s;/);
 });
 
@@ -441,7 +462,7 @@ test("a SIGTERM stops the suite-slot chain: no entrypoint or sleep survives, the
   f.stage();
   const host = slotHome();
   const env = host.env({ PATH: f.env.PATH, ...GIT_ENV });
-  for (const k of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GH_REPO"]) delete env[k];
+  for (const k of INHERITED) delete env[k];
   const marker = join(f.root, "entry-started");
   const paths = { marker, sleepPid: join(f.root, "sleep-pid"), after: join(f.root, "after") };
   const group = join(f.root, "group");
@@ -450,8 +471,8 @@ test("a SIGTERM stops the suite-slot chain: no entrypoint or sleep survives, the
   assert.equal(r.status, 143, r.stderr);
   assert.equal(existsSync(f.recordFile("impl-5")), false);
   assert.equal(existsSync(paths.after), false, "the entrypoint ran on past the signal");
-  assert.equal(await goneAfter(paths.sleepPid), true, "the sleep the entrypoint started outlived the signal");
-  assert.equal(await goneAfter(marker), true, "the entrypoint's shell outlived the signal");
+  await assertGone(paths.sleepPid, "the sleep the entrypoint started outlived the signal");
+  await assertGone(marker, "the entrypoint's shell outlived the signal");
   assert.deepEqual(readdirSync(host.slots), [], "the slot was not released");
 });
 
@@ -461,7 +482,7 @@ test("the safety net of the signal helper stops the command's own group, so a ru
   const marker = join(f.root, "test-started");
   const paths = { marker, sleepPid: join(f.root, "sleep-pid"), after: join(f.root, "after") };
   await assert.rejects(killedRun(f, { testCmd: nonExec(paths), marker, signals: [], guardMs: 1000 }), /still running/);
-  assert.equal(await goneAfter(paths.sleepPid), true, "the helper left the sleep running");
+  await assertGone(paths.sleepPid, "the helper left the sleep running");
 });
 
 test("the safety net of the signal helper stops the command's group when the marker never appears", async () => {
@@ -470,8 +491,31 @@ test("the safety net of the signal helper stops the command's group when the mar
   const group = join(f.root, "group");
   const sleepPid = join(f.root, "sleep-pid");
   const testCmd = `echo $$ > '${group}'; sleep 600 & echo $! > '${sleepPid}'; wait $!`;
-  await assert.rejects(killedRun(f, { testCmd, marker: join(f.root, "never"), groupFile: group, signals: [], guardMs: 1000 }), /never started/);
-  assert.equal(await goneAfter(sleepPid), true, "the helper left the sleep running");
+  await assert.rejects(killedRun(f, { testCmd, marker: join(f.root, "never"), groupFile: group, signals: [], startMs: 5000 }), /never started/);
+  await assertGone(sleepPid, "the helper left the sleep running");
+});
+
+test("the safety net of the signal helper stops a command that names its group only after the marker deadline", async () => {
+  const f = fixture();
+  f.stage();
+  const group = join(f.root, "group");
+  const sleepPid = join(f.root, "sleep-pid");
+  const testCmd = `sleep 600 & echo $! > '${sleepPid}'; sleep 6; echo $$ > '${group}'; wait $!`;
+  await assert.rejects(killedRun(f, { testCmd, marker: join(f.root, "never"), groupFile: group, signals: [], startMs: 5000 }), /never started/);
+  await assertGone(sleepPid, "the helper left the sleep running");
+});
+
+test("a group kill refused with EPERM still stops the command through its own shell, and the run ends killed", async () => {
+  const f = fixture();
+  f.stage();
+  const marker = join(f.root, "test-started");
+  // macOS refuses a group whose members have all exited but are not yet
+  // reaped with EPERM; this preload makes every group kill answer so.
+  const preload = `const kill = process.kill; process.kill = (pid, sig) => { if (pid < 0) throw Object.assign(new Error("kill EPERM"), { code: "EPERM" }); return kill.call(process, pid, sig); };`;
+  const env = { ...f.env, NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(preload)}` };
+  const r = await killedRun(f, { testCmd: `echo $$ > '${marker}'; exec sleep 600`, marker, signals: ["SIGTERM"], env });
+  assert.equal(r.status, 143, r.stderr);
+  assert.match(r.last, /^recipe-check: SIGTERM received during the Test entrypoint, which ran \d+ s;/);
 });
 
 test("a command that ignores the forwarded signal and exits 0 still leaves the run killed, the Test entrypoint unstarted", async () => {
