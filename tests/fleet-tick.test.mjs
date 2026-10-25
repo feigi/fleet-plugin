@@ -8,7 +8,8 @@
 // settled member live, has to go red here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reconcile, formatLines, actionable, deriveRun, LedgerError, parseShortlist, unclaimed, refreshWhy, dispositionsToken, currentDispositions, reapDue, reapedAfter, reapSummary, reclaimSummary, parkedToken, bodyDigest, PARKED } from "../plugin/scripts/fleet-tick.mjs";
+import { reconcile, formatLines, actionable, deriveRun, LedgerError, parseShortlist, unclaimed, refreshWhy, currentDispositions, reapDue, reapedAfter, reapSummary, reclaimSummary, parkedToken, bodyDigest, PARKED } from "../plugin/scripts/fleet-tick.mjs";
+import { dispositionsToken } from "../plugin/scripts/ledger-grammar.mjs";
 import { ref, prUrl } from "./support/queue-gh.mjs";
 
 // Every field named, so a test that cares about one number still states the

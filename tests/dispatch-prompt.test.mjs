@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { CASES, GOLDEN_DIR, PLUGIN, argvOf, briefFixtureName, cleanEnv, flagsOf, installRenderer, label } from "./support/render-brief.mjs";
+import { defang, ticketText } from "../plugin/scripts/ticket-text.mjs";
 
 const TMP = realpathSync(mkdtempSync(join(tmpdir(), "dispatch-prompt-")));
 after(() => rmSync(TMP, { recursive: true, force: true }));
@@ -438,4 +439,78 @@ test("the real instruments.sh pin covers the renderer and the templates", () => 
 test("dispatch-prompt.mjs binds its flag refusal to arg.mjs's defineFlags, so the roster probes reach it", () => {
   const src = readFileSync(join(PLUGIN, "scripts", "dispatch-prompt.mjs"), "utf8");
   assert.match(src, /^import \{[^}]*\bmakeDie\b[^}]*\bdefineFlags\b[^}]*\} from "\.\/arg\.mjs";$/m);
+});
+
+// --- the ticket a review fix-applier is handed ---------------------------------
+
+// A repository whose run ledger names PR 3293's implementer, and a scratch
+// root holding that implementer's saved ticket — the Pull's `issue.json`.
+function ticketRun(issue, { rows = ["#4120 impl-4120=PR#3293 → PR#3293"] } = {}) {
+  const repo = fresh("repo-ticket");
+  git(repo, "init", "-q");
+  mkdirSync(join(repo, ".fleet"));
+  writeFileSync(join(repo, ".fleet", "ledger.md"), `# Fleet run ledger\n\n## Rows\n\n${rows.map((r) => `- ${r}`).join("\n")}\n\n## Dispatched\n\n## Filed\n\n## Ruled\n`);
+  const scratch = fresh("scratch-ticket");
+  if (issue !== undefined) {
+    mkdirSync(join(scratch, "impl-4120"));
+    writeFileSync(join(scratch, "impl-4120", "issue.json"), typeof issue === "string" ? issue : JSON.stringify(issue));
+  }
+  return { repo, scratch };
+}
+const fixCase = (kind) => CASES.find((c) => c.role === "fix-applier" && c.kind === kind);
+const declaredIn = (role) => readFileSync(join(PLUGIN, "skills", "run-team", "briefs", `${role}.md`), "utf8")
+  .split("\n---\n")[0].split("\n").map((l) => /^arg \S+ (.+)$/.exec(l)?.[1]).filter(Boolean);
+const ISSUE = {
+  title: "The thing is wrong",
+  body: "## Problem\n\nrun <N> twice\n\n### Out of scope\n\n- the other thing",
+  comments: [{ body: "## Agent Brief\n\n**Summary:** fix the thing for <N>.\n\n**Acceptance criteria:**\n- [ ] it works" }],
+};
+
+test("fix-applier review prints the ticket text the implementer's dispatch for that PR's ticket carried", () => {
+  const { repo, scratch } = ticketRun(ISSUE);
+  // What pull.mjs hands the implementer: ticketText(), defanged by the implementer template's placeholders.
+  const carried = defang(ticketText(ISSUE), declaredIn("implementer"));
+  assert.ok(carried.includes("‹N›") && carried.includes("### Out of scope"), "the control ticket exercises the defang and the body's Out of scope");
+  const impl = render(argvOf({ ...CASES[0], args: { ...CASES[0].args, brief: carried } }), { cwd: repo });
+  assert.equal(impl.status, 0, impl.err);
+  assert.ok(impl.out.includes(carried));
+  for (const kind of ["review", "dispositions-retry"]) {
+    const c = fixCase(kind);
+    const r = render(argvOf({ ...c, args: { ...c.args, pr: "3293", scratch } }), { cwd: repo });
+    assert.equal(r.status, 0, r.err);
+    assert.ok(r.out.includes(`The ticket:\n\n${carried}\n`), `${kind} did not carry the implementer's ticket text:\n${r.out}`);
+  }
+});
+
+test("a ticket spelling one of the fix-applier's own placeholders is defanged, not refused", () => {
+  const issue = { ...ISSUE, comments: [{ body: "## Agent Brief\n\nthe token names `fix-pr-<M>:<run>` on <pr>" }] };
+  const { repo, scratch } = ticketRun(issue);
+  const c = fixCase("review");
+  const r = render(argvOf({ ...c, args: { ...c.args, pr: "3293", scratch } }), { cwd: repo });
+  assert.equal(r.status, 0, r.err);
+  assert.ok(r.out.includes("the token names `fix-pr-<M>:‹run›` on ‹pr›"), r.out);
+});
+
+test("with the ticket's issue.json missing or unreadable, the render refuses naming the path, and prints nothing", () => {
+  const c = fixCase("review");
+  for (const [label, issue] of [["missing", undefined], ["not JSON", "{not json"], ["no issue", "[]"]]) {
+    const { repo, scratch } = ticketRun(issue);
+    const r = render(argvOf({ ...c, args: { ...c.args, pr: "3293", scratch } }), { cwd: repo });
+    assert.equal(r.status, 2, `${label}: ${r.err}`);
+    assert.equal(r.out, "", label);
+    assert.ok(r.err.includes(join(scratch, "impl-4120", "issue.json")), `${label}: the refusal did not name the path: ${r.err}`);
+  }
+});
+
+test("a PR no settled impl token names renders a line saying no ticket is on hand; the kinds without a review never read one", () => {
+  const { repo, scratch } = ticketRun(undefined, { rows: ["#4120 impl-4120 · working", "#4121 impl-4121=PR#3294 → PR#3294"] });
+  const c = fixCase("review");
+  const r = render(argvOf({ ...c, args: { ...c.args, pr: "3293", scratch } }), { cwd: repo });
+  assert.equal(r.status, 0, r.err);
+  assert.ok(r.out.includes("No settled impl-<N>=PR#3293 token is on this run's ledger, so no ticket is on hand for PR #3293."), r.out);
+  // The conflict kind carries no ticket, so a ledger naming the PR with no issue.json beside it changes nothing.
+  const named = ticketRun(undefined);
+  const conflict = render(argvOf(fixCase("conflict")), { cwd: named.repo });
+  assert.equal(conflict.status, 0, conflict.err);
+  assert.ok(!conflict.out.includes("The ticket:"));
 });

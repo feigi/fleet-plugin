@@ -56,7 +56,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, unescapeText, nextReviewerName } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, ledgerSection, nextReviewerName } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD, PARKED } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -486,20 +486,6 @@ function refuseStrayInId(value, what) {
 // report what the parse saw rather than what a later stat() guesses.
 let ledgerParsed = false;
 
-// A section's entries, unescaped, in file order — none when the header is
-// absent. Lenient by design: it refuses nothing, so rotate reads a ledger
-// load() refuses through the same slicing.
-function sectionOf(text, name) {
-  const m = headerRe(name).exec(text);
-  if (!m) return [];
-  const start = m.index + m[1].length + name.length;
-  const after = text.slice(start);
-  const end = after.search(/\n## /);
-  return (end === -1 ? after : after.slice(0, end))
-    .split("\n").map((l) => l.trim()).filter((l) => l.startsWith("- "))
-    .map((l) => unescapeText(l.slice(2)));
-}
-
 function load() {
   if (!existsSync(file)) return { rows: [], filed: [], ruled: [], dispatched: [], briefs: {}, queued: {}, drain: null, retired: [] };
   let text;
@@ -508,7 +494,7 @@ function load() {
   } catch (e) {
     die(`cannot read ${file}: ${e.message}`);
   }
-  const section = (name) => sectionOf(text, name);
+  const section = (name) => ledgerSection(text, name);
   // Set here, past the read and the early return, so it can only be true of a
   // file this function actually opened and recognised as a ledger.
   ledgerParsed = headerRe(FILED).test(text);
@@ -1756,7 +1742,7 @@ function runRotate() {
 function carryOf(text) {
   const skipped = [];
   const skippedRows = [];
-  const rows = sectionOf(text, ROWS).filter((r) => {
+  const rows = ledgerSection(text, ROWS).filter((r) => {
     try {
       deriveRun({ rows: [r], dispatched: [], drain: null }, []);
       return true;
@@ -1771,7 +1757,7 @@ function carryOf(text) {
   // beside the token it writes, so a carried member's record still names the
   // brief it was dispatched with — and a carried merge bot the queue it is
   // judged against — and a dropped member's does not.
-  const { dispatched: allDispatched, briefs: allBriefs, queued: allQueued } = dispatchedOf(sectionOf(text, DISPATCHED));
+  const { dispatched: allDispatched, briefs: allBriefs, queued: allQueued } = dispatchedOf(ledgerSection(text, DISPATCHED));
   const dispatched = allDispatched.filter((e) => {
     const t = parseToken(e);
     if (t !== null && t.error === null) return true;
@@ -1783,7 +1769,7 @@ function carryOf(text) {
   // bare — but its name retires, and one naming no member or reviewer is
   // skipped and retires nothing.
   const archivedRetired = [];
-  for (const line of sectionOf(text, RETIRED)) {
+  for (const line of ledgerSection(text, RETIRED)) {
     const name = retiredName(line);
     if (name === null) skipped.push({ line, why: "names no member or reviewer" });
     else {

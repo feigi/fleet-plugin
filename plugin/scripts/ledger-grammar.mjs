@@ -221,6 +221,56 @@ function streams(rows) {
   return out;
 }
 
+/** Every token of PR `pr`'s stream, in ledger row order: the tokens firstReview() reads. */
+export const prTokens = (rows, pr) => streams(rows).get(pr) ?? [];
+
+// dispositions-check.mjs's verdict on a review fix-applier's disposition
+// record: `dispositions-ok=fix-pr-<M>[-x]:<run>`,
+// `dispositions-mismatch=…`, `dispositions-escalate=…` (a critical or
+// important deferral, or a second mismatch on one review, that a human rules
+// on) or `dispositions-unchecked=…` (no rule broke, but where a deferral was
+// filed could not be read), `<run>` the run of the review the record
+// answers, as its `reviewed=` names it. `ledger.mjs dispatch` refuses a
+// finisher on anything but an ok. A
+// mismatch returns the PR to fixDue for one retry; an escalate is a hold only
+// a human answers, so the tick never re-offers the PR for it; an unchecked is
+// answered by running the check again, so the tick never offers a
+// fix-applier for it either. A token outside this shape is no verdict at all,
+// which the gate reads as unchecked: fail closed.
+export function dispositionsToken(tok) {
+  const m = /^dispositions-(ok|mismatch|escalate|unchecked)=([^:\s]+):(run-[A-Za-z0-9]{8})$/i.exec(tok);
+  if (!m) return null;
+  const member = parseMember(m[2]);
+  if (member === null || member.family !== "fix-pr") return null;
+  return { verdict: m[1].toLowerCase(), member, run: m[3] };
+}
+
+/**
+ * A PR's first review, read off its `tokens` (prTokens()): walking its
+ * `reviewed=` tokens in ledger order, the first that counted no survived and
+ * no unverified finding, or that a fix-applier answered — a `dispositions-*`
+ * verdict anywhere on the stream names its run. A review with findings no
+ * fix-applier answered was superseded, and is skipped; a failed review wrote
+ * no `reviewed=`, and is no review. `answered` names runs answered on top of
+ * the ledger's: dispositions-check.mjs passes the run of the record it is
+ * checking, whose verdict is not written yet. `{head, survived, refuted,
+ * unverified, run}`, or null when no review qualifies.
+ */
+export function firstReview(tokens, answered = []) {
+  const runs = new Set(answered);
+  for (const tok of tokens) {
+    const d = dispositionsToken(tok);
+    if (d !== null) runs.add(d.run);
+  }
+  for (const tok of tokens) {
+    const m = REVIEWED.exec(tok);
+    if (m === null) continue;
+    const review = { head: m[1].toLowerCase(), survived: Number(m[2]), refuted: Number(m[3]), unverified: Number(m[4]), run: m[5] };
+    if ((review.survived === 0 && review.unverified === 0) || runs.has(review.run)) return review;
+  }
+  return null;
+}
+
 const isOpen = (launch) => !launch.failed && !launch.answered;
 
 // One stream's review record, read in order. A `reviewed=` answers the
@@ -670,6 +720,21 @@ export function escapeText(s) {
 }
 export function unescapeText(s) {
   return s.replace(/\\(\\|n)/g, (_, c) => (c === "n" ? "\n" : "\\"));
+}
+
+// A section's entries, unescaped, in file order — none when the header is
+// absent. Lenient by design: it refuses nothing, so ledger.mjs's rotate reads
+// a ledger its load() refuses through the same slicing, and
+// dispatch-prompt.mjs reads `## Rows` without loading the ledger whole.
+export function ledgerSection(text, name) {
+  const m = headerRe(name).exec(text);
+  if (!m) return [];
+  const start = m.index + m[1].length + name.length;
+  const after = text.slice(start);
+  const end = after.search(/\n## /);
+  return (end === -1 ? after : after.slice(0, end))
+    .split("\n").map((l) => l.trim()).filter((l) => l.startsWith("- "))
+    .map((l) => unescapeText(l.slice(2)));
 }
 
 /** The name the next merge bot takes: 1 + the highest `merge-bot-<n>` in

@@ -29,7 +29,7 @@ export const PLUGIN = fileURLToPath(new URL("../../plugin/", import.meta.url));
 /** Where the tests' golden fixtures live: a rendered brief per role and kind, and an agent body per agent. */
 export const GOLDEN_DIR = fileURLToPath(new URL("../fixtures/briefs/", import.meta.url));
 
-const MODULES = ["dispatch-prompt.mjs", "arg.mjs", "git-env.mjs", "fleet-dir.mjs", "review-core.mjs"];
+const MODULES = ["dispatch-prompt.mjs", "arg.mjs", "git-env.mjs", "fleet-dir.mjs", "ledger-grammar.mjs", "review-core.mjs", "ticket-text.mjs"];
 
 const INSTRUMENTS_STUB = `#!/bin/sh
 printf '%s\\n' "$*" >> "$CALL_LOG"

@@ -663,3 +663,11 @@ whether it minted a false claim. The Router counts a ticket as merged only
 through its Ruling; a decision on an issue, or a reply owed to a member, is
 not one.
 _Avoid_: verdict row, tier outcome
+
+**Charge**:
+The fix-applier's reading of one finding that stands on a PR's first review: a
+finding that survived its verifiers and was not deferred `false-rationale`, or
+a refuted finding that was then reversed. A Charge is `false-claim`, `unmet`,
+both, or none with one of three reasons. A Ruling is worked out from the
+Charges.
+_Avoid_: classification, finding verdict
