@@ -662,3 +662,24 @@
 2026-10-22	3739	3691		slow-high	yes	no	impl-3691 PR closes own ticket; review 7 survived 21 unverified answered by fix-pr-3739; check job cancelled once earlier	heavy			
 2026-10-22	3736	3727		slow-high	yes	no	impl-3727 PR closes own ticket; review 1 survived 15 unverified answered by fix-pr-3736	heavy			
 2026-10-22	3745	3716		task-high	yes	no	impl-3716 PR closes own ticket; review 3 survived 13 unverified answered by fix-pr-3745	light			
+2026-10-23	3755	3740		task-high	yes	no	review 0/0/2; fix-applier no-op, dispositions ok	light			
+2026-10-24	3756	3750		slow-high	yes	no	review 7/2/17; fix-applier applied, dispositions ok	heavy			
+2026-10-24	3766	3752		slow-high	yes	no	review 1/1/11; fix-applier applied, dispositions ok	heavy			
+2026-10-24	3769	3753		slow-high	yes	no	review 3/2/14; fix-applier applied, dispositions ok; CI check cancelled once, rerun green	heavy			
+2026-10-24	3773	3757		slow-high	yes	no	review 0/0/3; fix-applier no-op	light			
+2026-10-24	3775	3768		slow-high	yes	no	review 0/0/11; fix-applier applied, dispositions ok; PR body lacked Closes #3768 (controller added)	heavy			
+2026-10-24	3776	3762		slow-high	yes	no	review 3/0/14; fix-applier applied, dispositions ok	heavy			
+2026-10-24	3784	3777		task-high	yes	no	review 0/0/10; fix-applier applied, dispositions ok	light			
+2026-10-24	3787	3763		slow-high	yes	no	review 0/1/11; fix-applier applied, dispositions ok	heavy			
+2026-10-24	3790	3772		slow-high	yes	no	review 0/0/15; fix-applier applied, dispositions ok; check cancelled twice, rerun green	heavy			
+2026-10-24	3799	3793		slow-high	yes	no	review 0/0/4; fix-applier applied, dispositions ok	light			
+2026-10-24	3801	3785		slow-high	yes	no	review 4/0/18; fix-applier applied, dispositions ok	heavy			
+2026-10-24	3806	3792		task-high	yes	no	review 0/0/7; fix-applier applied, dispositions ok	light			
+2026-10-24	3807	3795		slow-high	yes	no	review 0/0/5; fix-applier applied, dispositions ok	light			
+2026-10-24	3808	3796		slow-high	yes	no	review 4/1/16; fix-applier applied, dispositions ok	heavy			
+2026-10-24	3813	3803		task-high	yes	no	review 2/0/14 (first runner failed on snapshot, -b ok); fix-applier applied; smoke-review criterion not run by implementer	heavy			
+2026-10-24	3816	3655		smol-high	yes	no	review 0/0/8 (suite skipped in review); fix-applier applied				
+2026-10-24	3820	3815		task-high	yes	no	review 1/0/20; fix-applier applied, dispositions ok	heavy			
+2026-10-24	3818	3814		task-high	yes	no	review 1/0/16; fix-applier applied; red-check fixer pushed a fix for a failing check; dispositions ok	heavy			
+2026-10-25	3824	3804		slow-high	yes	no	review 3/0/18; fix-applier applied, dispositions ok; check cancelled once, rerun green	heavy			
+2026-10-25	3826	3805		task-high	yes	no	review 4/1/11 (two runners failed on snapshot, -c ok); fix-applier applied, dispositions ok; check cancelled once, rerun green	heavy			
