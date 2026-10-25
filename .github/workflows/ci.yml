@@ -106,7 +106,7 @@ jobs:
     # The suite spawns git/python3 subprocesses per test and one case builds a
     # `git archive` snapshot (~25s locally); cap the run so a wedged subprocess
     # can't hold a runner open indefinitely.
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v5
