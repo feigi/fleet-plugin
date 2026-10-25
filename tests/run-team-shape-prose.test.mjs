@@ -392,11 +392,11 @@ const CHANGED = [
   // is only that row, and the answer owed to a fix-applier is a reply.
   [
     "**Append one row to `docs/metrics/tier-outcomes.tsv` when you rule each PR's review, with `~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note \"<text>\"`, never by hand** (that file's header carries the column meanings).",
-    "**Append one row to `docs/metrics/tier-outcomes.tsv` when you rule each PR's review, before its finisher, with `~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note \"<text>\"`, never by hand** (that file's header carries the column meanings).",
+    "**Append one row to `docs/metrics/tier-outcomes.tsv` when you rule each PR's review, before its finisher, with `~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr>`, never by hand** (that file's header carries the column meanings).",
   ],
   [
     "A `NEED tier-outcomes append <pr>` is a PR the ledger marks reviewed with no verdict row: append it with the verdict you rule (**Guard: accumulate per PR**) and run `finish` again.",
-    "A `NEED tier-outcomes append <pr>` is a reviewed PR with no verdict row — for an implementer's, one that never reached its finisher: append it with the verdict you rule (**Guard: accumulate per PR**) and run `finish` again.",
+    "A `NEED tier-outcomes append <pr>` is a reviewed PR with no verdict row — for an implementer's, one that never reached its finisher: run `append <pr>` (**Guard: accumulate per PR**) and run `finish` again.",
   ],
   [
     "**The outbox is the last test, not the only one, and it stands wherever a fix-applier exists** — that is exactly where a ruling you still owe it is outstanding, so never dispatch off it while you do.",

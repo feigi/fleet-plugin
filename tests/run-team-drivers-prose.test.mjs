@@ -154,7 +154,7 @@ test("End of run runs closeout.mjs begin, the ordinary loop, then closeout.mjs f
   const loop = s.indexOf("until the tick prints `ACTION: run over");
   const finish = s.indexOf("closeout.mjs finish --reason");
   assert.ok(begin !== -1 && begin < loop && loop < finish, `begin at ${begin}, the tick's last line at ${loop}, finish at ${finish}`);
-  assert.match(endOfRun(), Pin.phrase("A `NEED tier-outcomes append <pr>` is a reviewed PR with no verdict row — for an implementer's, one that never reached its finisher: append it with the verdict you rule (**Guard: accumulate per PR**) and run `finish` again."));
+  assert.match(endOfRun(), Pin.phrase("A `NEED tier-outcomes append <pr>` is a reviewed PR with no verdict row — for an implementer's, one that never reached its finisher: run `append <pr>` (**Guard: accumulate per PR**) and run `finish` again."));
   assert.match(endOfRun(), Pin.phrase("A claim it refuses prints `NEED hand-release #<N> <blocker>`"));
   assert.match(endOfRun(), Pin.phrase("so a claim you keep leaves `begin` at exit 4 on every run"));
 });
@@ -176,7 +176,8 @@ test("End of run and references/close-out.md: a PR closing none or several is a 
 
 test("the verdict rules stay in the guard, where the controller rules each PR; the BLANK rule's paragraph is in references/reviewers.md", () => {
   const guard = SKILL.between("**Guard: accumulate per PR", "### Nothing to do: mark the beat and end your turn", "run-team guard").text;
-  assert.match(guard, Pin.phrase("--closed-own-ticket yes|no --minted-false-claim yes|no"));
+  assert.match(guard, Pin.phrase("`~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr>`, never by hand** (that file's header carries the column meanings)."));
+  assert.doesNotMatch(guard, /--closed-own-ticket|--minted-false-claim|yes\|no/, "the guard tells the controller to type a verdict");
   assert.match(guard, Pin.phrase("**A verdict is a measurement only if it post-dates the run that produced it.** See references/reviewers.md."));
   const moved = Pin.file(join(REFERENCES, "reviewers.md")).section("## A sizing verdict is a measurement only if it post-dates the run that produced it", "references/reviewers.md").text;
   assert.match(moved, Pin.phrase("**A value not in hand is left BLANK, never estimated**"));

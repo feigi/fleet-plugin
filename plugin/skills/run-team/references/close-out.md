@@ -25,8 +25,7 @@
      stop as the end of the run. A `NEED tier-outcomes append <pr>` is a
      reviewed PR with no verdict row — for an implementer's PR, one that never
      reached its finisher, since `ledger.mjs dispatch` refuses that finisher
-     until the row exists: append it with the verdict
-     you rule (**Guard: accumulate per PR**) and run `finish` again. A reviewed
+     until the row exists: run `append <pr>` (**Guard: accumulate per PR**) and run `finish` again. A reviewed
      PR that closes no issue, or several, with no settled `impl-<N>=PR#<pr>`
      token naming it takes no row: the check names it in a `note` line and
      never asks for one. With such a token it is a NEED: `append` takes the

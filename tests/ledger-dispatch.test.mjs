@@ -1296,7 +1296,7 @@ test("a finisher is refused while a fix-applier on the PR is live, even with an 
 // is still in scratch. The ruling reads the ledger and that file alone, so a
 // refusal here makes no gh call, which `ghCalls` shows.
 const RULED_ROW = `impl-3545=PR#3606 · tier-ok=impl-3545:fleet-implementer-slow-high · reviewed=${GATE_HEAD}:0/0/0:${GATE_RUN}`;
-const UNRULED = /finisher-pr-3606: PR #3606, the implementer PR of ticket #3545, has no ruling — \S+\/docs\/metrics\/tier-outcomes\.tsv has no row for it; rule its review with `~\/\.fleet\/bin\/fleet-run tier-outcomes\.mjs append 3606 --closed-own-ticket yes\|no --minted-false-claim yes\|no --note "<text>"`, then dispatch the finisher again — not dispatching finisher-pr-3606/;
+const UNRULED = /finisher-pr-3606: PR #3606, the implementer PR of ticket #3545, has no ruling — \S+\/docs\/metrics\/tier-outcomes\.tsv has no row for it; rule its review with `~\/\.fleet\/bin\/fleet-run tier-outcomes\.mjs append 3606`, then dispatch the finisher again — not dispatching finisher-pr-3606/;
 
 test("a finisher for an implementer's PR is refused until the PR has a tier-outcomes row, then recorded, and so is its replacement", (t) => {
   const f = fixture(t);

@@ -5,15 +5,18 @@
 // `opus` for implementers dispatched as a generic `task` that ran
 // sonnet/high, which is neither tier arm.
 //
-//   append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no
-//          --note <text> [--sizing light|heavy] [--profile <p>] [--loc <n>] [--files <n>]
-//          [--scratch <dir>]
+//   append <pr> [--note <text>] [--sizing light|heavy] [--profile <p>] [--loc <n>]
+//          [--files <n>] [--scratch <dir>]
+//   append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note <text>
+//          [--sizing light|heavy] [--profile <p>] [--loc <n>] [--files <n>] [--scratch <dir>]
 //     Fills `run_date` (today's UTC date, the ruling date), `pr`, `ticket` (the
 //     PR's one `gh pr view --json closingIssuesReferences,url` issue in its own
 //     repository; when the PR closes zero or several there, the N of its one
-//     settled `impl-<N>=PR#<pr>` token in the run ledger), `tier` and, unless
+//     settled `impl-<N>=PR#<pr>` token in the run ledger), `tier`, the two
+//     verdict columns and the `note` (see "The verdicts" below) and, unless
 //     `--sizing` names it, `sizing` (see below). Idempotent by
 //     PR: a row already present is named and nothing is written, exit 0.
+//     Every refusal writes no row and exits 2.
 //   check [--live]
 //     Post-switch rows only: a filled `tier` must equal the short name of the
 //     ticket's single implementer row in member-outcomes.tsv, and that row
@@ -71,16 +74,48 @@
 // is appended. Readers pick a ticket's ruling by file order, not by `run_date`.
 //
 // Exit codes: 0 ok, 1 `check` found a mismatch or checked nothing from the latest
-// run_date (see `check`), 2 usage or unreadable input.
+// run_date (see `check`), 2 usage, unreadable input or a refused `append`.
 
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+// The verdicts. With no verdict flag, `closed_own_ticket` and
+// `minted_false_claim` are worked out from the Charges the fix-applier
+// recorded on the standing findings of the PR's first review, and the `note`
+// is composed from them, so the row explains itself once the evidence is
+// reclaimed:
+//   - the review is ledger-grammar.mjs's firstReview() over the PR's ledger
+//     tokens: the first `reviewed=` that counted no survived and no unverified
+//     finding, else the first a fix-applier answered. Its `review.json` is
+//     `<scratch>/pr<pr>/<run>/review.json`;
+//   - the record is the last answering that review's run:
+//     `<scratch>/dispositions-fix-pr-<pr>[-x].json` with the highest retry
+//     letter whose `run` is the review's run. It is read whatever
+//     dispositions-check.mjs concluded about its remedies;
+//   - a finding stands as dispositions-check.mjs's `stands` says. `unmet` or
+//     `both` on one fails `closed_own_ticket`, `false-claim` or `both` makes
+//     `minted_false_claim` yes. A review that counted no survived and no
+//     unverified finding is a pass and needs no record;
+//   - a standing finding with no Charge, or a review, `review.json` or record
+//     that is missing, refuses. A dimension that never ran does not: the note
+//     names it.
+// The note reads `review <run> at <head7>, record <file>: <bucket>[<index>]
+// <charge> "<claim>"; …; none: <bucket>[<index>] <reason>, …; cleared:
+// survived[<index>] false-rationale, …; unrun: <dimension>, …`, and ` — <--note>`
+// when `--note` is given. Tabs and newlines in a claim become spaces.
+//
+// Verdicts given by hand — `--closed-own-ticket` and `--minted-false-claim`
+// together, with `--note` naming the evidence — are written as given for a PR
+// GitHub reports MERGED, and refused for any other. A merged PR given no
+// verdict flags is derived when its evidence is still in scratch, and
+// otherwise refused with the flags to give.
+
+import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags, isDigits } from "./arg.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { parseMember, parseToken, memberTokens, rowPr } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, prTokens, firstReview } from "./ledger-grammar.mjs";
+import { CHARGES, CHARGE_REASONS, reviewProblem, stands } from "./dispositions-check.mjs";
 import { rowText } from "./tier-check.mjs";
 import { latestImplReport, readReport, reportsDir, defaultScratch } from "./report-files.mjs";
 import { FleetDirUnresolvable } from "./fleet-dir.mjs";
@@ -382,8 +417,9 @@ export function unrecordedReviewedPrs(ledger, rows) {
 // CLI
 // ---------------------------------------------------------------------------
 
-const USAGE = "usage: tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note <text> "
+const USAGE = "usage: tier-outcomes.mjs append <pr> [--note <text>] "
   + "[--sizing light|heavy] [--profile <p>] [--loc <n>] [--files <n>] [--scratch <dir>] [--file <tsv>] [--member-outcomes <tsv>] [--ledger <path>]\n"
+  + "       tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note <text> (a merged PR only) [the same options]\n"
   + "       tier-outcomes.mjs check [--live] [--file <tsv>] [--member-outcomes <tsv>] [--ledger <path>]";
 
 const die = makeDie(NAME);
@@ -456,29 +492,33 @@ function readLedger(ledgerFile, requireFile) {
   }
 }
 
-// The unique issue numbers of a PR's closingIssuesReferences in its own
-// repository, by ownClosingIssues()'s rule, in GitHub's order — another
-// repository's reference is none of them — or an Error naming why they could
-// not be read, a reference that rule cannot read among the reasons. GH_REPO is
-// blanked so an ambient one naming another repository never decides which PR
-// is read; the timeout keeps a hung `gh` from stalling `append` or a
-// close-out's `check --live`.
+// `gh pr view <pr> --json <fields>` parsed, or an Error naming why it could
+// not be read. GH_REPO is blanked so an ambient one naming another repository
+// never decides which PR is read; the timeout keeps a hung `gh` from stalling
+// `append` or a close-out's `check --live`.
 const GH_TIMEOUT_MS = 60_000;
-function closingIssueNumbers(pr) {
+function ghPrView(pr, fields) {
   let raw;
   try {
-    raw = execFileSync("gh", ["pr", "view", String(pr), "--json", "closingIssuesReferences,url"], {
+    raw = execFileSync("gh", ["pr", "view", String(pr), "--json", fields], {
       encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GH_REPO: "" }, timeout: GH_TIMEOUT_MS,
     });
   } catch (e) {
     throw new Error(`gh pr view ${pr} failed: ${e.stderr?.trim() || e.message}`);
   }
-  let view;
   try {
-    view = JSON.parse(raw);
+    return JSON.parse(raw);
   } catch (e) {
     throw new Error(`gh pr view ${pr} returned unreadable JSON: ${e.message}`);
   }
+}
+
+// The unique issue numbers of a PR's closingIssuesReferences in its own
+// repository, by ownClosingIssues()'s rule, in GitHub's order — another
+// repository's reference is none of them — or an Error naming why they could
+// not be read, a reference that rule cannot read among the reasons.
+function closingIssueNumbers(pr) {
+  const view = ghPrView(pr, "closingIssuesReferences,url");
   if (!Array.isArray(view?.closingIssuesReferences)) throw new Error(`gh pr view ${pr} returned no closingIssuesReferences array`);
   try {
     return ownClosingIssues(pr, view.url, view.closingIssuesReferences);
@@ -538,6 +578,168 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// ---------------------------------------------------------------------------
+// the Ruling worked out from the Charges
+// ---------------------------------------------------------------------------
+
+const oneLine = (s) => String(s ?? "").replace(/[\t\r\n]/g, " ");
+
+// Two spellings of one commit: either a prefix of the other.
+const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
+
+// The Charge an entry carries, `{charge, reason}`, or null when it carries
+// none a Ruling can read: a value outside CHARGES, or `none` with no reason
+// from CHARGE_REASONS.
+function chargeOf(e) {
+  if (!CHARGES.includes(e.charge)) return null;
+  if (e.charge !== "none") return { charge: e.charge, reason: null };
+  return CHARGE_REASONS.includes(e.chargeReason) ? { charge: "none", reason: e.chargeReason } : null;
+}
+
+// The record file names under `scratch` that answer PR `pr`, as `{file,
+// letter}`, highest retry letter first — the first attempt, which carries no
+// letter, last. Empty when the directory is not there.
+function recordFiles(scratch, pr) {
+  let names;
+  try {
+    names = readdirSync(scratch);
+  } catch (e) {
+    if (e.code === "ENOENT") return [];
+    throw new Error(`cannot list ${scratch}: ${e.code ?? e.message}`);
+  }
+  const answering = new RegExp(`^dispositions-fix-pr-${pr}(?:-([b-z]))?\\.json$`);
+  return names
+    .flatMap((file) => {
+      const m = answering.exec(file);
+      return m === null ? [] : [{ file, letter: m[1] ?? "" }];
+    })
+    .sort((a, b) => (a.letter < b.letter ? 1 : a.letter > b.letter ? -1 : 0));
+}
+
+// The last record answering review run `run`: `{file, record}`, `{missing}`
+// naming why there is none, a retry's record replacing the first attempt's on
+// the same run and a record answering any other run changing nothing. A file
+// met before the answering one that cannot be read as JSON names no run, so it
+// could be the retry's: it refuses rather than letting an older record stand in.
+function recordFor(scratch, pr, run) {
+  let files;
+  try {
+    files = recordFiles(scratch, pr);
+  } catch (e) {
+    return { missing: e.message };
+  }
+  for (const { file } of files) {
+    const path = join(scratch, file);
+    let record;
+    try {
+      record = JSON.parse(readFileSync(path, "utf8"));
+    } catch (e) {
+      return { missing: `${path} cannot be read as JSON: ${e.message}` };
+    }
+    if (record?.run === run) return { file, path, record };
+  }
+  return { missing: `no ${join(scratch, `dispositions-fix-pr-${pr}[-x].json`)} names review ${run} as the run it answers` };
+}
+
+// The Charges `record` carries on the findings of `review` that stand, as the
+// pieces of the note and the findings with none. A survived finding no entry
+// answers stands, with no Charge.
+function chargesOf(review, record) {
+  const entries = new Map();
+  for (const e of Array.isArray(record.entries) ? record.entries : []) {
+    if (e === null || typeof e !== "object" || Array.isArray(e)) continue;
+    if (e.bucket !== "survived" && e.bucket !== "refuted") continue;
+    if (!Number.isInteger(e.index) || e.index < 0 || e.index >= review[e.bucket].length) continue;
+    const key = `${e.bucket}[${e.index}]`;
+    if (!entries.has(key)) entries.set(key, e);
+  }
+  const out = { charged: [], none: [], cleared: [], missing: [] };
+  const take = (bucket, index, e) => {
+    const key = `${bucket}[${index}]`;
+    const c = e === undefined ? null : chargeOf(e);
+    if (c === null) out.missing.push(`${key} "${oneLine(review[bucket][index].claim)}"`);
+    else if (c.charge === "none") out.none.push(`${key} ${c.reason}`);
+    else out.charged.push({ charge: c.charge, text: `${key} ${c.charge} "${oneLine(review[bucket][index].claim)}"` });
+  };
+  review.survived.forEach((_, index) => {
+    const e = entries.get(`survived[${index}]`);
+    if (e !== undefined && !stands("survived", e)) out.cleared.push(`survived[${index}] ${e.reason}`);
+    else take("survived", index, e);
+  });
+  review.refuted.forEach((_, index) => {
+    const e = entries.get(`refuted[${index}]`);
+    if (e !== undefined) take("refuted", index, e);
+  });
+  return out;
+}
+
+const FAILS_CLOSED = ["unmet", "both"];
+const MINTS = ["false-claim", "both"];
+
+// PR `pr`'s verdict columns and note off its first review's Charges:
+// `{closed_own_ticket, minted_false_claim, note}`, or `{missing}` saying what
+// is not there to read. `scratch` is `{root}` or `{unresolvable}`.
+function derivedRuling(pr, ledger, scratch) {
+  const review = firstReview(prTokens(ledger?.rows ?? [], Number(pr)));
+  if (review === null) {
+    return { missing: `PR #${pr} has no first review on the ledger: no \`reviewed=\` token of its rows counted no survived and no unverified finding, or was answered by a fix-applier` };
+  }
+  if (scratch.unresolvable !== undefined) return { missing: `no scratch root to look in: ${scratch.unresolvable}` };
+  const reviewPath = join(scratch.root, `pr${pr}`, review.run, "review.json");
+  let file;
+  try {
+    file = JSON.parse(readFileSync(reviewPath, "utf8"));
+  } catch (e) {
+    return { missing: e.code === "ENOENT" ? `review ${review.run}'s result file ${reviewPath} is missing` : `${reviewPath} cannot be read as JSON: ${e.message}` };
+  }
+  const problem = reviewProblem(file);
+  if (problem !== null) return { missing: `${reviewPath} ${problem}` };
+  if (!sameHead(String(file.head).toLowerCase(), review.head)) {
+    return { missing: `${reviewPath} is the review of head ${file.head}, not the ledger's review ${review.run} at ${review.head}` };
+  }
+  const unrun = (Array.isArray(file.dimensionsUnrun) ? file.dimensionsUnrun : []).map((d) => oneLine(typeof d === "string" ? d : d?.dimension));
+  const opening = `review ${review.run} at ${review.head.slice(0, 7)}`;
+  const noted = (parts) => (unrun.length === 0 ? parts : [...parts, `unrun: ${unrun.join(", ")}`]).join("; ");
+
+  if (review.survived === 0 && review.unverified === 0) {
+    return { review: review.run, closed_own_ticket: "yes", minted_false_claim: "no", note: `${opening}, no record: ${noted(["counted no survived and no unverified finding"])}` };
+  }
+  const found = recordFor(scratch.root, pr, review.run);
+  if (found.missing !== undefined) return { missing: found.missing };
+  const charges = chargesOf(file, found.record);
+  if (charges.missing.length > 0) {
+    return { missing: `${found.path} carries no Charge on ${charges.missing.length === 1 ? "this standing finding" : "these standing findings"}: ${charges.missing.join("; ")}` };
+  }
+  const parts = charges.charged.map((c) => c.text);
+  if (charges.none.length > 0) parts.push(`none: ${charges.none.join(", ")}`);
+  if (charges.cleared.length > 0) parts.push(`cleared: ${charges.cleared.join(", ")}`);
+  return {
+    closed_own_ticket: charges.charged.some((c) => FAILS_CLOSED.includes(c.charge)) ? "no" : "yes",
+    minted_false_claim: charges.charged.some((c) => MINTS.includes(c.charge)) ? "yes" : "no",
+    note: `${opening}, record ${found.file}: ${noted(parts.length === 0 ? ["no finding stands"] : parts)}`,
+    review: review.run,
+  };
+}
+
+// The step a refusal hands the controller. A merged PR's evidence is
+// reclaimed with its scratch, so the verdicts are given by hand; any other
+// PR's is still wanted, and a ruling is never typed for it.
+function nextStep(pr, state) {
+  if (state === "MERGED") {
+    return `the PR is merged and its evidence is not there to read — give the verdicts by hand: append ${pr} --closed-own-ticket yes|no --minted-false-claim yes|no --note "<the evidence>"`;
+  }
+  return `check the record again (\`dispositions-check.mjs --member fix-pr-${pr} --scratch <scratch>\`), or dispatch the fix-applier again as a dispositions retry (\`--kind dispositions-retry\`), then run append ${pr} again`;
+}
+
+// The PR's state as GitHub gives it: OPEN, CLOSED (never merged) or MERGED.
+function prState(pr) {
+  const view = ghPrView(pr, "state");
+  if (!["OPEN", "CLOSED", "MERGED"].includes(view?.state)) {
+    throw new Error(`gh pr view ${pr} returned state ${JSON.stringify(view?.state ?? null)}, not OPEN, CLOSED or MERGED`);
+  }
+  return view.state;
+}
+
 function append(pr, paths) {
   if (!isDigits(pr) || Number(pr) === 0) die(`append needs a PR number, got '${pr}'`);
   pr = String(Number(pr));
@@ -547,14 +749,17 @@ function append(pr, paths) {
     closed_own_ticket: arg("closed-own-ticket"), minted_false_claim: arg("minted-false-claim"),
     note: arg("note"), sizing: sizingFlag ?? "", profile: arg("profile") ?? "", loc: arg("loc") ?? "", files: arg("files") ?? "",
   };
-  for (const col of ["closed_own_ticket", "minted_false_claim", "note"]) {
-    if (fields[col] === null) die(`append needs --${col.replaceAll("_", "-")}\n${USAGE}`);
-  }
+  const given = VERDICT_COLUMNS.filter((col) => fields[col] !== null);
+  if (given.length === 1) die(`--${given[0].replaceAll("_", "-")} comes with ${VERDICT_COLUMNS.filter((c) => c !== given[0]).map((c) => `--${c.replaceAll("_", "-")}`)} or not at all\n${USAGE}`);
+  const byHand = given.length > 0;
+  if (byHand && fields.note === null) die(`verdicts given by hand need --note, naming the evidence for them\n${USAGE}`);
   for (const [col, value] of Object.entries(fields)) {
-    if (/[\t\r\n]/.test(value)) die(`--${col.replaceAll("_", "-")} holds a tab or newline — it would shift every field after it`);
+    if (value !== null && /[\t\r\n]/.test(value)) die(`--${col.replaceAll("_", "-")} holds a tab or newline — it would shift every field after it`);
   }
-  for (const col of VERDICT_COLUMNS) {
-    if (!VERDICT.includes(fields[col])) die(`--${col.replaceAll("_", "-")} must be yes or no, got '${fields[col]}'`);
+  if (byHand) {
+    for (const col of VERDICT_COLUMNS) {
+      if (!VERDICT.includes(fields[col])) die(`--${col.replaceAll("_", "-")} must be yes or no, got '${fields[col]}'`);
+    }
   }
   if (fields.sizing && !["light", "heavy"].includes(fields.sizing)) die(`--sizing must be light or heavy, got '${fields.sizing}'`);
   for (const col of ["loc", "files"]) {
@@ -568,7 +773,45 @@ function append(pr, paths) {
     return;
   }
 
+  let scratch = { root: paths.scratch };
+  if (scratch.root === null) {
+    try {
+      scratch = { root: defaultScratch() };
+    } catch (e) {
+      if (!(e instanceof FleetDirUnresolvable)) throw e;
+      scratch = { unresolvable: e.message };
+    }
+  }
+
   const ledger = readLedger(paths.ledger, false);
+  if (byHand) {
+    let state;
+    try {
+      state = prState(pr);
+    } catch (e) {
+      die(`could not read PR #${pr}'s state, which decides whether verdicts may be given by hand: ${e.message}`);
+    }
+    if (state !== "MERGED") {
+      die(`PR #${pr} is ${state === "OPEN" ? "open" : "closed without merging"}, and verdicts are given by hand only for a merged PR — leave out --closed-own-ticket and --minted-false-claim, and \`append\` works them out from the record: ${nextStep(pr, state)}`);
+    }
+  } else {
+    const ruled = derivedRuling(pr, ledger, scratch);
+    if (ruled.missing !== undefined) {
+      let state = null;
+      let unread = "";
+      try {
+        state = prState(pr);
+      } catch (e) {
+        unread = ` (the PR's state could not be read: ${e.message})`;
+      }
+      die(`cannot rule PR #${pr} from its record — ${ruled.missing}${unread}; ${nextStep(pr, state)}`);
+    }
+    fields.closed_own_ticket = ruled.closed_own_ticket;
+    fields.minted_false_claim = ruled.minted_false_claim;
+    fields.note = fields.note === null ? ruled.note : `${ruled.note} — ${fields.note}`;
+    console.error(`${NAME}: closed_own_ticket=${fields.closed_own_ticket} minted_false_claim=${fields.minted_false_claim} from the Charges on review ${ruled.review}`);
+  }
+
   const { ticket, refusal } = ticketFor(pr, closingNumbers(pr), ledger);
   if (refusal) die(refusal);
   const memberRows = readMemberRows(paths.members);
@@ -579,17 +822,7 @@ function append(pr, paths) {
   if (sizingFlag !== null) {
     console.error(`${NAME}: sizing=${fields.sizing} from --sizing`);
   } else {
-    let scratch = paths.scratch;
-    let unresolvable = null;
-    if (scratch === null) {
-      try {
-        scratch = defaultScratch();
-      } catch (e) {
-        if (!(e instanceof FleetDirUnresolvable)) throw e;
-        unresolvable = e.message;
-      }
-    }
-    const sized = unresolvable === null ? sizingFromReport(scratch, ticket) : { sizing: "", source: null, warning: `no scratch root to look in: ${unresolvable}` };
+    const sized = scratch.unresolvable === undefined ? sizingFromReport(scratch.root, ticket) : { sizing: "", source: null, warning: `no scratch root to look in: ${scratch.unresolvable}` };
     fields.sizing = sized.sizing;
     if (sized.warning) console.error(`${NAME}: WARNING sizing left blank for PR #${pr} (ticket #${ticket}): ${sized.warning}`);
     else console.error(`${NAME}: sizing=${sized.sizing} from ${sized.source}`);

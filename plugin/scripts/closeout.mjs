@@ -35,8 +35,8 @@
 //                   step. At exit 0 each `WARNING PR #<n> carries reviewed=` on
 //                   its stderr is a PR the ledger marks reviewed with no row:
 //                   `NEED tier-outcomes append <n>`, and the step is pending.
-//                   The verdicts are the controller's; this script never
-//                   writes one.
+//                   The verdicts come from `tier-outcomes.mjs append`, which
+//                   works them out from the Charges; this script never writes one.
 //   metrics         `metrics-refresh.mjs`. Any non-zero exit is a failed step.
 //   commit-and-pr   `git switch -c <branch>` (`--branch`, default
 //                   `chore/run-artifacts-<UTC date>`, suffixed `b`, `c`… while

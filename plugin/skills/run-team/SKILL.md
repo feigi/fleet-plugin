@@ -197,7 +197,7 @@ owes beyond its call:
      then records `fleet-heartbeat.mjs --stop` last, because every reader takes
      a recorded stop as the end of the run. A `NEED tier-outcomes append <pr>`
      is a reviewed PR with no verdict row — for an implementer's, one that never
-     reached its finisher: append it with the verdict you rule (**Guard: accumulate per PR**) and run `finish` again.
+     reached its finisher: run `append <pr>` (**Guard: accumulate per PR**) and run `finish` again.
      A PR closing none or several: a NEED if a settled `impl-<N>=PR#<pr>` token
      names it, else a note. A step it fails is explained in
      references/close-out.md. Exit 0 is the run closed.
@@ -281,8 +281,8 @@ digest asks of you:
 
 **Guard: accumulate per PR, never conclude inside one run.** **Append one row to
 `docs/metrics/tier-outcomes.tsv` when you rule each PR's review, before its finisher, with
-`~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note "<text>"`,
-never by hand** (that file's header carries the column meanings). The script
+`~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr>`, never by hand** (that file's header carries the column meanings).
+The script works both verdicts out from the Charges on the PR's first review. The script
 fills `tier` itself; never type one in. `ledger.mjs dispatch` refuses the finisher until the row exists. That append is the whole duty. See references/pull.md.
 
 **A verdict is a measurement only if it post-dates the run that produced it.** See references/reviewers.md.
