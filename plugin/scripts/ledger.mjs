@@ -489,7 +489,7 @@ function refuseStrayInId(value, what) {
 let ledgerParsed = false;
 
 function load() {
-  if (!existsSync(file)) return { rows: [], filed: [], ruled: [], dispatched: [], briefs: {}, queued: {}, agents: {}, drain: null, retired: [] };
+  if (!existsSync(file)) return { rows: [], filed: [], ruled: [], ...dispatchedOf([]), drain: null, retired: [] };
   let text;
   try {
     text = readFileSync(file, "utf8");
@@ -1635,7 +1635,7 @@ function runRotate() {
   }
   // Read before anything moves: a ledger whose live tokens cannot be read is
   // refused with nothing moved, never archived with those tokens dropped.
-  let carry = { rows: [], dispatched: [], briefs: {}, queued: {}, agents: {}, retired: [], skipped: [] };
+  let carry = { rows: [], dispatched: [], retired: [], skipped: [] };
   if (prior === "ancestor" && exists) {
     let text;
     try {

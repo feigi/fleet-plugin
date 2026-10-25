@@ -823,6 +823,44 @@ test("implementer: an entry without agent= is judged against the row's tier= as 
   assert.match(w.row(), /tier-mismatch=impl-7:fleet-implementer-slow-high/);
 });
 
+// A retry member records its own definition: `impl-7` dispatched at
+// `smol-high`, `impl-7-b` at the `slow-high` that replaced it, and the row's
+// `tier=` then set back to `smol-high`. Only `impl-7-b`'s own entry names
+// what it ran under, so it passes having run as `slow-high` (`@slow` routes to
+// opus) and is caught having run as `smol-high` (`@task` routes to sonnet).
+test("implementer: a retry member is judged against its own entry's agent=, never its base member's or the row's", () => {
+  for (const [ran, model, status] of [
+    ["fleet-implementer-slow-high", "anthropic/claude-opus-5", 0],
+    ["fleet-implementer-smol-high", "anthropic/claude-sonnet-5", 1],
+  ]) {
+    const w = implWorld({ member: "impl-7-b", row: "impl-7 · tier=smol-high", definitions: SMOL_SLOW, agent: ran, model });
+    ledgerCli(w.ledger, "dispatch", "7", "impl-7");
+    ledgerCli(w.ledger, "settle", "impl-7", "bailed");
+    ledgerCli(w.ledger, "token", "7", "tier=slow-high");
+    ledgerCli(w.ledger, "dispatch", "7", "impl-7-b");
+    ledgerCli(w.ledger, "settle", "impl-7-b", "bailed");
+    ledgerCli(w.ledger, "token", "7", "tier=smol-high");
+    assert.deepEqual(w.read().agents, { "impl-7": "fleet-implementer-smol-high", "impl-7-b": "fleet-implementer-slow-high" });
+    const r = w.check();
+    assert.equal(r.status, status, `${ran}: ${r.stdout}${r.stderr}`);
+    const verdict = status === 0 ? "tier-ok" : "tier-mismatch";
+    assert.match(w.row(), new RegExp(`${verdict}=impl-7-b:fleet-implementer-slow-high`), ran);
+  }
+});
+
+test("implementer: an entry whose agent= the grammar cannot read refuses — exit 2, nothing written — live or settled", () => {
+  for (const settle of [null, "bailed"]) {
+    const w = dispatchedWorld({ settle });
+    if (settle) ledgerCli(w.ledger, "token", "7", "tier=slow-high");
+    writeFileSync(w.ledger, w.bytes().replace(/ agent=\S+/, " agent=Fleet-Implementer-Smol-High"));
+    const before = w.bytes();
+    const r = w.check();
+    assert.equal(r.status, 2, `${settle}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /impl-7: ## Dispatched entry 'impl-7\S* brief=[0-9a-f]{8} agent=Fleet-Implementer-Smol-High' is malformed/);
+    assert.equal(w.bytes(), before, `${settle}: the ledger changed`);
+  }
+});
+
 // A dispatch whose `task` call failed before any transcript was written: the
 // member is on the ledger — `dispatch` runs before the call — and the session
 // directory exists, but `<session>/<member>.jsonl` does not.

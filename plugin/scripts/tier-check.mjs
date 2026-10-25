@@ -489,6 +489,12 @@ function main() {
       if (impl) {
         ticket = parsed.number;
         ledgerData ??= readLedger(ledgerFile);
+        // A `## Dispatched` entry for this member that the grammar cannot
+        // read, a malformed `agent=` among them, refuses: the definition it
+        // recorded is unreadable, and the row's `tier=` may have been
+        // replaced since.
+        const malformed = (ledgerData.dispatched ?? []).find((t) => t.split(/[\s=]/)[0] === raw.member && parseToken(t)?.error !== null);
+        if (malformed !== undefined) throw new Error(`## Dispatched entry '${malformed}' is malformed, so the definition it recorded cannot be read`);
         definition = ledgerData.agents?.[raw.member] ?? expectedDefinition(rowText(ledgerData, ticket));
         const definitionFile = join(repoRoot, "agents", `${definition}.agent.md`);
         if (existsSync(definitionFile)) frontmatter = parseFrontmatter(readFileSync(definitionFile, "utf8"));
