@@ -155,7 +155,7 @@ import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { GH_LOGIN_ARGS, isOwnedPr, loginOf } from "./owned-pr.mjs";
+import { GH_LOGIN_ARGS, isOwnedPr, loginOf, ownershipReadable } from "./owned-pr.mjs";
 import { RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
 import { ancestry, controllerOf, processSource, ProcUnreadable } from "./proc.mjs";
 import { IN_FLIGHT_DEFAULT, OBJECTIVES, OBJECTIVE_DEFAULT } from "./phase0-receipt.mjs";
@@ -385,7 +385,7 @@ function foldIn({ cwd }) {
   // A null author is a PR whose account GitHub no longer has: no login of the
   // run's, so not owned. A row with no `author` key, or no draft flag, is not
   // what was asked for, and whether it is owned is unknown.
-  const unreadable = prs.find((pr) => !isRecord(pr) || !Object.hasOwn(pr, "author") || !(pr.author === null || (isRecord(pr.author) && typeof pr.author.login === "string")) || typeof pr.isDraft !== "boolean");
+  const unreadable = prs.find((pr) => !ownershipReadable(pr));
   if (unreadable !== undefined) {
     return failed(`gh pr list answered PR #${unreadable?.number} without an author and a draft flag — whether it is owned is unknown, so none is folded in`);
   }
@@ -397,9 +397,9 @@ function foldIn({ cwd }) {
   const closing = new Map();
   for (const pr of owned) {
     try {
-      closing.set(pr, ownClosingIssues(pr?.number, pr?.url, pr?.closingIssuesReferences ?? []));
+      closing.set(pr, ownClosingIssues(pr.number, pr.url, pr.closingIssuesReferences ?? []));
     } catch (e) {
-      return failed(`gh pr list answered PR #${pr?.number} with ${e.message} — which issues it closes is unknown, so none is folded in`);
+      return failed(`gh pr list answered PR #${pr.number} with ${e.message} — which issues it closes is unknown, so none is folded in`);
     }
   }
   const ledger = ledgerRows(cwd);

@@ -17,6 +17,16 @@ export function loginOf(stdout) {
   return login === "" ? null : login;
 }
 
+const isRecord = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
+
+// Whether `pr`, a row of `gh pr list --json author,isDraft,…`, carries what
+// isOwnedPr() reads: an author that is null (an account GitHub no longer has)
+// or has a string login, and a boolean draft flag. A reader refuses a row that
+// does not, since whether it is owned is unknown.
+export function ownershipReadable(pr) {
+  return isRecord(pr) && (pr.author === null || (isRecord(pr.author) && typeof pr.author.login === "string")) && typeof pr.isDraft === "boolean";
+}
+
 // Whether `pr`, a row of `gh pr list --json author,isDraft,…`, is an Owned PR
 // of `login`. An absent or malformed author or draft flag is not owned.
 export function isOwnedPr(pr, login) {

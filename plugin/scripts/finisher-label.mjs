@@ -187,19 +187,18 @@ const found = releaseLabelsIn(firstLabels);
 if (found.length === 0) {
   const defined = ghJson("list-labels", LABEL_LIST_ARGS, namedList).map((l) => l.name);
   const state = releaseLabelsDefined(defined);
-  if (state === "defined" && !ticketless) {
-    finish(3, { releaseLabels: found }, "the PR carries no release label (patch, minor or major); nothing was written");
-  }
   if (state === "cut-off") {
     fail("list-labels", `the repository has ${LABEL_LIST_LIMIT} or more labels, so the list may be cut off before patch, minor or major`);
   }
-  if (state === "defined") {
+  if (state === "undefined") {
+    receipt.releaseLabels = "undefined-in-repo";
+  } else if (!ticketless) {
+    finish(3, { releaseLabels: found }, "the PR carries no release label (patch, minor or major); nothing was written");
+  } else {
     // No ticket picks the bump of a Ticketless PR, so it gets the smallest.
     gh("add-patch", ["pr", "edit", String(pr), "--add-label", "patch"]);
     receipt.patchAdded = true;
     receipt.releaseLabels = ["patch"];
-  } else {
-    receipt.releaseLabels = "undefined-in-repo";
   }
 } else if (found.length > 1) {
   finish(3, { releaseLabels: found }, `the PR carries more than one release label (${found.join(", ")}); nothing was written`);
@@ -211,12 +210,7 @@ if (found.length === 0) {
 // No ticket gives a Ticketless PR its ruling or its acceptance mutation, so it
 // merges unattended only when its whole diff is inert; otherwise the head is
 // recorded and the maintainer's label is the merge.
-let inert = true;
-if (ticketless) {
-  const verdict = inertVerdict({ worktree: resolve(repo ?? "."), pin });
-  receipt.inert = verdict;
-  inert = verdict.exit === 0;
-}
+if (ticketless) receipt.inert = inertVerdict({ worktree: resolve(repo ?? "."), pin });
 
 // --- 2: the head record ----------------------------------------------------
 // The newest record wins, the way the merge bot reads it: a matching record
@@ -234,7 +228,7 @@ if (!recorded) {
   receipt.commented = true;
 }
 
-if (!inert) {
+if (ticketless && receipt.inert.exit !== 0) {
   const why = receipt.inert.verdict === "unknown" ? `its diff could not be read (${receipt.inert.reason})` : "its diff is not inert";
   finish(5, {}, `the PR is a Ticketless PR and ${why}: the head is recorded and ${LABEL} is left to the maintainer`);
 }

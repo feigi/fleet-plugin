@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isTicketless } from "../plugin/scripts/ticketless.mjs";
@@ -44,8 +44,8 @@ function rig({ closes = [], rows = [], view = null, fail = null } = {}) {
   if (fail !== null) writeFileSync(join(bin, "pr.fail"), fail);
   const ledger = join(dir, "ledger.md");
   writeFileSync(ledger, ledgerText(rows));
-  const run = (args = ["--pr", "42", "--ledger", ledger]) => {
-    const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  const run = (args = ["--pr", "42", "--ledger", ledger], env = {}) => {
+    const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env } });
     let out = null;
     try {
       out = JSON.parse(r.stdout);
@@ -125,6 +125,31 @@ test("exit 2: a ledger that cannot be read could not look — never read as no t
   assert.equal(r.status, 2, r.stderr);
   assert.equal(r.out.verdict, "unknown");
   assert.match(r.out.reason, /^could not read the ledger/);
+});
+
+// With no --ledger, the run ledger is resolved from --repo against the git
+// common dir. Where there is none to resolve, `ledger.mjs read`'s own
+// cwd-relative fallback would read an empty ledger as no token at all.
+test("exit 2: a run ledger that cannot be resolved could not look — never read off a cwd-relative ledger", () => {
+  const t = rig();
+  // Not a repository, and the ceiling keeps git from finding one above it.
+  const bare = join(t.dir, "not-a-repo");
+  mkdirSync(join(bare, ".fleet"), { recursive: true });
+  writeFileSync(join(bare, ".fleet", "ledger.md"), ledgerText([]));
+  const ceiling = { GIT_CEILING_DIRECTORIES: `${t.dir}:${realpathSync(t.dir)}` };
+  const r = t.run(["--pr", "42", "--repo", bare], ceiling);
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.verdict, "unknown");
+  assert.match(r.out.reason, /^could not resolve the run ledger: could not resolve --git-common-dir/);
+
+  // In a repository, the run ledger is the one under its .fleet/, and read.
+  const repo = join(t.dir, "repo");
+  mkdirSync(join(repo, ".fleet"), { recursive: true });
+  assert.equal(spawnSync("git", ["init", "-q", repo]).status, 0);
+  writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText(["#12 impl-12=PR#42 → PR#42"]));
+  const named = t.run(["--pr", "42", "--repo", repo], ceiling);
+  assert.equal(named.status, 1, named.stderr);
+  assert.deepEqual(named.out.tickets, [12]);
 });
 
 test("a usage error is a refusal on stderr with no verdict, exit 2", () => {

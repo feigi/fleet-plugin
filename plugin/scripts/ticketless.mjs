@@ -11,10 +11,12 @@
 // through `ledger.mjs read`, as tier-check.mjs reads the ledger, and
 // tier-outcomes.mjs's implementerClaims() decides which tokens name the PR.
 //
-// `--repo` is the directory `gh` and `ledger.mjs` run in (the cwd when
-// omitted); `--ledger` names the ledger file instead of the one `ledger.mjs`
-// resolves from there. Reached through the Resolver: `~/.fleet/bin/fleet-run
-// ticketless.mjs ...`.
+// `--repo` is the directory `gh` runs in and the run ledger is resolved from
+// (the cwd when omitted), against the git common dir as `ledger.mjs` resolves
+// it; `--ledger` names the ledger file instead. A ledger that cannot be
+// resolved is exit 2: `ledger.mjs`'s own cwd-relative fallback is never taken,
+// since an empty cwd-local ledger would answer Ticketless. Reached through the
+// Resolver: `~/.fleet/bin/fleet-run ticketless.mjs ...`.
 //
 // Stdout is one JSON line:
 //
@@ -32,8 +34,8 @@
 //      token names it
 //   1  not Ticketless: it closes an own-repository issue, or a settled impl
 //      token names it
-//   2  could not look: a `gh` or ledger read failed, or the invocation was
-//      refused — never read as either answer
+//   2  could not look: a `gh` or ledger read failed, the run ledger could not
+//      be resolved, or the invocation was refused — never read as either answer
 //
 // The test is also exported as ticketlessVerdict(), which never exits the
 // process, and as isTicketless(), the predicate over what was read, for a
@@ -45,6 +47,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 import { ownClosingIssues } from "./closing-refs.mjs";
+import { fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 
@@ -66,8 +69,8 @@ export function isTicketless(closing, tickets) {
 const why = (e) => String(e.stderr ?? "").trim().split("\n").at(-1) || e.code || e.message;
 
 // The verdict for PR `pr`. Never exits the process: a caller in-process gets
-// the same object the command prints. `repo` and `ledgerFile` absent or null
-// are the cwd and the ledger `ledger.mjs` resolves from it.
+// the same object the command prints. `repo` absent or null is the cwd, and
+// `ledgerFile` absent or null is the run ledger resolved from `repo`.
 export async function ticketlessVerdict({ pr, repo = null, ledgerFile = null }) {
   const result = (verdict, fields) => ({ verdict, exit: EXIT[verdict], pr, closing: null, tickets: null, reason: null, ...fields });
   const fail = (reason) => result("unknown", { reason });
@@ -87,9 +90,20 @@ export async function ticketlessVerdict({ pr, repo = null, ledgerFile = null }) 
     return fail(`gh pr view ${pr} --json closingIssuesReferences,url answered ${e.message}`);
   }
 
+  // The ledger path is resolved here, not left to `ledger.mjs read`: unable to
+  // resolve it, that falls back to a cwd-relative `.fleet/ledger.md` with only
+  // a warning on stderr, and reads its absence as no token at all.
+  let ledgerPath = ledgerFile;
+  if (ledgerPath === null) {
+    try {
+      ledgerPath = fleetFile("ledger.md", { cwd: repo ?? process.cwd(), timeoutMs: READ_TIMEOUT_MS });
+    } catch (e) {
+      return fail(`could not resolve the run ledger: ${e.message}`);
+    }
+  }
   let ledger;
   try {
-    const out = execFileSync(process.execPath, [LEDGER_SCRIPT, ...(ledgerFile === null ? [] : ["--file", ledgerFile]), "read"], opts);
+    const out = execFileSync(process.execPath, [LEDGER_SCRIPT, "--file", ledgerPath, "read"], opts);
     ledger = JSON.parse(out);
   } catch (e) {
     return fail(`could not read the ledger: ${why(e)}`);

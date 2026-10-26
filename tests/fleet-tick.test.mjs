@@ -3110,6 +3110,24 @@ test("CLI: a gh row missing body refuses rather than reading every park as unmat
   assert.match(readFileSync(log, "utf8"), /--json \S*\bbody\b/);
 });
 
+test("CLI: a gh row with no author, a malformed one, or no boolean isDraft refuses rather than reading the PR as not owned", () => {
+  const { author: _a, ...authorless } = pr(1);
+  const { isDraft: _d, ...draftless } = pr(1);
+  const rows = [authorless, { ...pr(1), author: "x" }, { ...pr(1), author: {} }, draftless, { ...pr(1), isDraft: "false" }, { ...pr(1), isDraft: null }];
+  for (const row of rows) {
+    const r = runCli([], { prs: [row], shortlist: shortlistText([]) });
+    assert.equal(r.status, 2, JSON.stringify(row));
+    assert.equal(r.stdout.trim(), "", JSON.stringify(row));
+    assert.match(r.stderr, ROW_SHAPE, JSON.stringify(row));
+  }
+  // A null author, an account GitHub no longer has, is read: not owned, so no review is due.
+  const ghost = runCli([], { prs: [{ ...pr(1), author: null }], shortlist: shortlistText([]) });
+  assert.equal(ghost.status, 0, ghost.stderr);
+  assert.doesNotMatch(ghost.stdout, /DISPATCH review PR#1\b/);
+  const owned = runCli([], { prs: [pr(1)], shortlist: shortlistText([]) });
+  assert.match(owned.stdout, /DISPATCH review PR#1\b/, "the same row, authored by the run's login, is due");
+});
+
 test("CLI: a gh row with no mergeable, or one outside GitHub's enum, refuses rather than reading every conflict as absent", () => {
   const { mergeable, ...unknown } = pr(1);
   const r = runCli([], { prs: [unknown], shortlist: shortlistText([]) });

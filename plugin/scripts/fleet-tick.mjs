@@ -49,10 +49,11 @@
 //             nothing. Missing or unparsable is depth 0 and a
 //             refresh, never a refusal: the depth only ever bounds PULLs
 //             downward. A file with no `dropped` names no drops.
-//   gh        The open PRs, by label, by whether they close an issue, by
-//             GitHub's `mergeable`, and by head and body — the merge queue,
-//             which PRs are owed a review, which conflict, which queued PR
-//             still matches the head and body it was parked at, and the PR
+//   gh        The open PRs, by label, by owner (author and draft flag), by
+//             whether they close an issue, by GitHub's `mergeable`, and by
+//             head and body — the merge queue, which PRs are owed a review,
+//             which conflict, which queued PR still matches the head and body
+//             it was parked at, and the PR
 //             half of the In-flight count:
 //             every open PR that closes an issue, whoever opened it and
 //             whatever its state. Also, for each in-flight `review=` token
@@ -1547,7 +1548,7 @@ import { readRunReceipt, phase0Gate, IN_FLIGHT_DEFAULT } from "./phase0-receipt.
 import { judgeRecord, ProcUnreadable } from "./proc.mjs";
 import { reportFamily, readReport, reportPath, reportsDir } from "./report-files.mjs";
 import { ownClosingIssues } from "./closing-refs.mjs";
-import { GH_LOGIN_ARGS, isOwnedPr, loginOf } from "./owned-pr.mjs";
+import { GH_LOGIN_ARGS, isOwnedPr, loginOf, ownershipReadable } from "./owned-pr.mjs";
 
 const NAME = "fleet-tick";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -1583,6 +1584,10 @@ export function ghBudget(defaultSeconds, override) {
 }
 const GH_TIMEOUT_MS = ghBudget(20, process.env.FLEET_TICK_GH_TIMEOUT);
 const TIMED_OUT = `timed out after ${GH_TIMEOUT_MS / 1000}s`;
+// Why a `gh` execFileSync threw. Never interpolates e.stderr or e.message:
+// execFileSync already forwarded the child's stderr to ours, and Node builds
+// e.message out of it, so either one emits every byte a second time.
+const execFailure = (e) => (e.code === "ETIMEDOUT" ? TIMED_OUT : e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`));
 
 // die() shared with the other fleet scripts (writeSync-based, pipe-safe —
 // see arg.mjs for the rationale). This file parses its own
@@ -1678,8 +1683,7 @@ function runLogin() {
   try {
     out = execFileSync("gh", GH_LOGIN_ARGS, { encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS });
   } catch (e) {
-    // Never interpolates e.stderr or e.message, for the reason openPrs() gives.
-    die(`gh ${GH_LOGIN_ARGS.join(" ")} failed: ${e.code === "ETIMEDOUT" ? TIMED_OUT : e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)} — a failed read is not a login that owns nothing`);
+    die(`gh ${GH_LOGIN_ARGS.join(" ")} failed: ${execFailure(e)} — a failed read is not a login that owns nothing`);
   }
   const login = loginOf(out);
   if (login === null) die(`gh ${GH_LOGIN_ARGS.join(" ")} printed no login — a read that answered nothing is not a login that owns nothing`);
@@ -1691,10 +1695,7 @@ function openPrs() {
     out = execFileSync("gh", ["pr", "list", "--state", "open", "--limit", String(PR_LIMIT),
       "--json", "number,labels,closingIssuesReferences,headRefOid,mergeable,body,url,author,isDraft"], { encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS });
   } catch (e) {
-    // Never interpolates e.stderr or e.message: execFileSync already forwarded
-    // the child's stderr to ours, and Node builds e.message out of it, so
-    // either one emits every byte a second time.
-    die(`gh pr list failed: ${e.code === "ETIMEDOUT" ? TIMED_OUT : e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)} — a failed read is not an empty queue`);
+    die(`gh pr list failed: ${execFailure(e)} — a failed read is not an empty queue`);
   }
   let prs;
   try {
@@ -1717,7 +1718,7 @@ function openPrs() {
   if (!Array.isArray(prs) || prs.some((p) => !p || typeof p.number !== "number"
     || !Array.isArray(p.labels) || !Array.isArray(p.closingIssuesReferences) || typeof p.url !== "string"
     || typeof p.headRefOid !== "string" || !MERGEABLE_STATES.includes(p.mergeable) || typeof p.body !== "string"
-    || !Object.hasOwn(p, "author") || !(p.author === null || (typeof p.author === "object" && typeof p.author.login === "string")) || typeof p.isDraft !== "boolean")) {
+    || !ownershipReadable(p))) {
     die(`gh pr list did not return ${PR_ROW_SHAPE}`);
   }
   if (prs.length === PR_LIMIT) {

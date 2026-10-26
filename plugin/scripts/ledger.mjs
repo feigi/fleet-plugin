@@ -2083,9 +2083,11 @@ async function closingRefusals(member, { tickets, ruling, tsv }) {
 // the issues closingRefusals() read it closing, its own suggestion-band
 // record aside. Returns the refusal, or null.
 // A Ticketless PR (ticketless.mjs's isTicketless) with none is not refused:
-// finisher-label.mjs adds `patch` to it. Any other PR's bump is not picked
-// here, and neither is which of several labels stays. A read the check needs
-// dies, naming the labels it could not read, and writes nothing.
+// finisher-label.mjs adds `patch` to it. A repository label list that may be
+// cut off still refuses it, as finisher-label.mjs refuses it then too. Any
+// other PR's bump is not picked here, and neither is which of several labels
+// stays. A read the check needs dies, naming the labels it could not read,
+// and writes nothing.
 function releaseLabelRefusal(member, tickets, refs) {
   const pr = member.number;
   const where = `dispatch ${member.name}`;
@@ -2093,12 +2095,12 @@ function releaseLabelRefusal(member, tickets, refs) {
   const found = releaseLabelsIn(prLabels(pr));
   if (found.length === 1) return null;
   if (found.length > 1) return `PR #${pr} carries more than one release label (${found.join(", ")}) — exactly one may stay, and which is not picked here`;
-  if (isTicketless(refs, tickets)) return null;
   const defined = releaseLabelsDefined(repoLabels());
   if (defined === "undefined") return null;
   if (defined === "cut-off") {
     die(`${where}: could not read the repository's labels — gh ${LABEL_LIST_ARGS.join(" ")} answered ${LABEL_LIST_LIMIT} or more, so the list may be cut off before ${RELEASE_LABELS.join(", ")}; nothing written`);
   }
+  if (isTicketless(refs, tickets)) return null;
   const missing = `PR #${pr} carries no release label (${RELEASE_LABELS.join(", ")})`;
   const closes = refs.length > 0
     ? `closes ${refs.map((n) => `#${n}`).join(", ")}`

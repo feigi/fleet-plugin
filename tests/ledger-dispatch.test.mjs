@@ -1801,14 +1801,18 @@ test("a ticket PR with no release label in a repository that defines none is rec
   assert.deepEqual(labelListCalls(f.bin), ["label list --json name --limit 1000"]);
 });
 
-test("a label list that fills its limit with no release label refuses a ticket PR, since it may be cut off", (t) => {
-  const f = fixture(t);
-  ticketPr(f);
-  labelled(f.bin, 3606, []);
-  defines(f.bin, Array.from({ length: 1000 }, (_, i) => `label-${i}`));
-  f.refused(["dispatch", "3606", "finisher-pr-3606"],
-    /dispatch finisher-pr-3606: could not read the repository's labels — gh label list --json name --limit 1000 answered 1000 or more, so the list may be cut off before patch, minor, major; nothing written/);
-  assert.deepEqual(f.read().dispatched, []);
+test("a label list that fills its limit with no release label refuses a ticket PR and a Ticketless PR alike, since it may be cut off", (t) => {
+  const ticket = fixture(t);
+  ticketPr(ticket);
+  const ticketless = fixture(t);
+  ticketless.put("3631", UNTICKETED_ROW);
+  for (const [f, pr] of [[ticket, 3606], [ticketless, 3631]]) {
+    labelled(f.bin, pr, []);
+    defines(f.bin, Array.from({ length: 1000 }, (_, i) => `label-${i}`));
+    f.refused(["dispatch", String(pr), `finisher-pr-${pr}`],
+      new RegExp(`dispatch finisher-pr-${pr}: could not read the repository's labels — gh label list --json name --limit 1000 answered 1000 or more, so the list may be cut off before patch, minor, major; nothing written`));
+    assert.deepEqual(f.read().dispatched, [], String(pr));
+  }
 });
 
 test("a PR label read that fails or answers malformed refuses, saying the labels could not be read, and writes nothing", (t) => {

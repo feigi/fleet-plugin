@@ -110,11 +110,12 @@ function rig({ outs = {}, fails = {}, closes = [5], rows = [] } = {}) {
     return git(repo, "rev-parse", "HEAD");
   };
   // Without its own `--repo` a run is in the rig's repository, so no case reads a real run's ledger.
-  const run = (args = ["--pr", "42", "--pin", PIN], { env = {} } = {}) => {
+  const run = (args = ["--pr", "42", "--pin", PIN], { env = {}, cwd } = {}) => {
     const full = args.includes("--repo") ? args : [...args, "--repo", repo];
     const r = spawnSync(process.execPath, [SCRIPT, ...full], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env },
+      ...(cwd === undefined ? {} : { cwd }),
     });
     let out = null;
     try {
@@ -617,4 +618,15 @@ test("positive control: with createdAt present the newer record for another head
   const r = t.run();
   assert.equal(r.status, 0, r.stderr);
   assert.ok(t.calls().includes(COMMENT), t.calls().join("\n"));
+});
+
+// The Inert diff verdict takes only an absolute worktree, so a relative --repo
+// is resolved against the cwd before it is handed over.
+test("a relative --repo, run from another cwd, is the repository the Inert diff verdict reads", () => {
+  const t = ticketless({ outs: { "pr-view-1": view(["bug"]), "pr-view-2": view(["bug", "patch", "ready-to-merge"]) } });
+  const pin = t.commit(INERT);
+  const r = t.run(["--pr", "42", "--pin", pin, "--repo", "repo"], { cwd: t.dir });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.ticketless, true);
+  assert.equal(r.out.inert.verdict, "inert");
 });
