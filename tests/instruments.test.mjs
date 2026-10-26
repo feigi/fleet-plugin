@@ -461,12 +461,8 @@ test("--pin writes digest, root and commit in that order, and a re-pin rewrites 
 });
 
 test("--pin on an unborn HEAD writes no commit line, and the check still passes", (t) => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "instruments-unborn-")));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  git(root, "init", "-q", "-b", "main");
-  mkdirSync(join(root, SET, "scripts"), { recursive: true });
-  copyFileSync(SCRIPT, join(root, SET, "scripts", "instruments.sh"));
-  git(root, "add", "-A");
+  const root = repo(t);
+  git(root, "update-ref", "-d", "refs/heads/main");
   const digest = pin(root);
   assert.deepEqual(baselineLines(root), [digest, `root=${root}`, ""]);
   assert.equal(run(root).status, 0);
@@ -511,6 +507,24 @@ test("a refusal with HEAD on a diverged branch says diverged", (t) => {
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stderr, /HEAD diverged/);
   assert.doesNotMatch(r.stderr, /HEAD (advanced|rewound|unmoved)/);
+});
+
+test("a history git cannot read between the pin and HEAD says the relation is unknown, never diverged", (t) => {
+  const root = repo(t);
+  const pinned = git(root, "rev-parse", "HEAD");
+  pin(root);
+  editSet(root, "# one\n", "first move");
+  const middle = git(root, "rev-parse", "HEAD");
+  editSet(root, "# two\n", "second move");
+  // The true relation is advanced; with the middle commit's object gone, git
+  // cannot walk from HEAD back to the pin and `--is-ancestor` exits 128.
+  rmSync(join(root, ".git", "objects", middle.slice(0, 2), middle.slice(2)));
+  const r = run(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, new RegExp(`pin commit ${pinned}`));
+  assert.match(r.stderr, new RegExp(middle), "git's own error, naming the object it could not read, comes through");
+  assert.match(r.stderr, /HEAD relation unknown/);
+  assert.doesNotMatch(r.stderr, RELATION);
 });
 
 test("a refusal with HEAD on the pin commit says unmoved, and the porcelain line names the edit", (t) => {
@@ -582,6 +596,43 @@ test("a commit= line that is not a hex id is treated as absent, never handed to 
   assert.match(r.stderr, /is not in the repository/);
   assert.doesNotMatch(r.stderr, RELATION);
   assert.equal(existsSync(join(root, "pwned")), false);
+});
+
+test("an abbreviated commit= id is treated as absent, never read as a relation", (t) => {
+  const root = repo(t);
+  const digest = pin(root);
+  const short = git(root, "rev-parse", "--short", "HEAD");
+  writeFileSync(join(root, ".fleet", "instruments.sha"), `${digest}\nroot=${root}\ncommit=${short}\n`);
+  writeFileSync(join(root, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
+  const r = run(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, new RegExp(`pin commit ${short} is not in the repository`));
+  assert.doesNotMatch(r.stderr, RELATION);
+});
+
+test("a commit= line naming a tree object is treated as absent", (t) => {
+  const root = repo(t);
+  const digest = pin(root);
+  const tree = git(root, "rev-parse", "HEAD^{tree}");
+  writeFileSync(join(root, ".fleet", "instruments.sha"), `${digest}\nroot=${root}\ncommit=${tree}\n`);
+  writeFileSync(join(root, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
+  const r = run(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, new RegExp(`pin commit ${tree} is not in the repository`));
+  assert.doesNotMatch(r.stderr, RELATION);
+});
+
+test("a refusal with HEAD unreadable names the pin commit, says HEAD cannot be read, and prints no relation", (t) => {
+  const root = repo(t);
+  pin(root);
+  const pinned = git(root, "rev-parse", "HEAD");
+  git(root, "checkout", "-q", "--orphan", "fresh");
+  writeFileSync(join(root, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
+  const r = run(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /HEAD \?$/m);
+  assert.match(r.stderr, new RegExp(`pin commit ${pinned}; HEAD cannot be read`));
+  assert.doesNotMatch(r.stderr, RELATION);
 });
 
 test("stdout is the digest alone on exit 0 and on exit 1, whatever the refusal prints", (t) => {

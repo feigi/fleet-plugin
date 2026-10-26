@@ -73,9 +73,12 @@ hold the old text — re-brief only if it changes what they do *now*.
 the digest and `root=`, and an exit-1 refusal prints that pin commit and how
 HEAD relates to it: `advanced` (the pin commit is an ancestor of HEAD, with the
 commits between, at most 20 and then `… N more`), `rewound`, `diverged`, or
-`unmoved` (HEAD is the pin commit, so the porcelain lines name the edits). A
-baseline with no `commit=` line, or one whose commit is gone from the
-repository, prints one line saying so and no relation.
+`unmoved` (HEAD is the pin commit, so the porcelain lines name the edits). When
+git cannot compare the two — an unreadable object, a corrupt history — it says
+the relation is `unknown`, with git's own error, rather than guess one; HEAD is
+not the pin commit there either, so never re-pin over it. A baseline with no
+`commit=` line, or one whose commit is gone from the repository, prints one
+line saying so and no relation.
 
 **The measured case.** Another session fast-forwarded the main checkout to
 `origin/main` mid-run. The commits that brought in were only this run's own

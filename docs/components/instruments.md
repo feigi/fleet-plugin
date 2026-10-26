@@ -17,7 +17,7 @@ member can write to that same checkout.
 2. **Pin and compare.** `--pin` writes the digest to the STATE HOME's
    `.fleet/instruments.sha` (the cwd checkout, or `--repo`'s) beside a
    `root=` line naming the audited tree and a `commit=` line holding
-   that tree's HEAD (absent when HEAD is unborn); a bare run reads the baseline
+   that tree's HEAD (absent when HEAD is unborn or unreadable); a bare run reads the baseline
    first, audits the recorded tree — re-verifying it is still that
    checkout and refusing (2) if it moved — then compares. On a
    workspace that does not track `plugin/…`,
@@ -30,7 +30,8 @@ member can write to that same checkout.
 3. **Exit.** 0 = unchanged; 1 = the tree changed under the pin (finding
    named on stderr, with `git status` for the uncommitted half, then the
    pin commit and whether HEAD `advanced` past it, `rewound` behind it,
-   `diverged` from it or is `unmoved`); 2 =
+   `diverged` from it or is `unmoved` — or, when git cannot compare
+   the two, that the relation is `unknown`); 2 =
    the question couldn't be answered (no baseline, or an unreadable
    baseline/tree). Only 0 lets a gate proceed.
 4. **When.** The controller pins once at run start and re-checks before

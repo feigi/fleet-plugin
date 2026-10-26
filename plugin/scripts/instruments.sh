@@ -130,6 +130,9 @@ NAME=instruments
 # operand, and the messages below carry paths that git will happily hand us with
 # a backslash in them.
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
+# The value of the baseline's first `<key>=` line, the one match every reader
+# of the file takes.
+baseline_field() { sed -n "/^$1=/{s/^$1=//;p;q;}" "$base"; }
 
 pin=false
 repo=""
@@ -238,7 +241,7 @@ elif [ "$pin" = true ] && [ -z "$home" ]; then
   { [ -e "$base" ] || [ -L "$base" ]; } && [ ! -r "$base" ] \
     && die "$base exists but is unreadable — fix its permissions; do NOT --pin over it, --pin overwrites rather than compares"
   if [ -r "$base" ]; then
-    prior=$(sed -n '/^root=/{s/^root=//;p;q;}' "$base") || die "cannot read $base"
+    prior=$(baseline_field root) || die "cannot read $base"
     [ -n "$prior" ] && target=$prior
   fi
 fi
@@ -297,7 +300,7 @@ if [ "$pin" != true ]; then
   # moved or copied `.fleet/`, a clone that arrived carrying another
   # workspace's baseline) or a forgery. Both refuse; re-pin here fixes the
   # first and the second is the finding.
-  rec=$(sed -n '/^root=/{s/^root=//;p;q;}' "$base")
+  rec=$(baseline_field root)
   if [ -n "$home" ] && [ -n "$rec" ] && [ "$rec" != "$root" ]; then
     die "baseline in $base certifies a foreign audited tree ($rec) while $root tracks its own instrument set — the baseline does not belong to this checkout, or was tampered with; refuse, do not re-read"
   fi
@@ -395,8 +398,8 @@ fi
 # is about — not the state home the baseline was found in.
 printf '%s: instrument set CHANGED under this run — expected %s\n' "$NAME" "$want" >&2
 printf '%s: refuse the gate and report. Do NOT re-read the instrument.\n' "$NAME" >&2
-headc=$(git -C "$target" rev-parse --verify --quiet HEAD 2>/dev/null || printf '?')
-printf '%s: HEAD %s\n' "$NAME" "$headc" >&2
+headc=$(git -C "$target" rev-parse --verify --quiet HEAD 2>/dev/null) || headc=
+printf '%s: HEAD %s\n' "$NAME" "${headc:-?}" >&2
 # shellcheck disable=SC2086 # $set is a deliberate list of pathspecs, not one path
 git -C "$target" status --porcelain -- $set >&2 || true
 
@@ -405,34 +408,51 @@ git -C "$target" status --porcelain -- $set >&2 || true
 # decides what to do about each, so this names the relation and stops: the
 # verdict above is already refusal. Anything but a full hex id is treated as
 # absent from the repository, so a baseline line cannot reach git as an option.
-pinc=$(sed -n '/^commit=/{s/^commit=//;p;q;}' "$base")
+pinc=$(baseline_field commit)
+present=false
+case $pinc in
+  *[!0-9a-f]*) ;;
+  *) if { [ "${#pinc}" -eq 40 ] || [ "${#pinc}" -eq 64 ]; } \
+       && git -C "$target" cat-file -e "$pinc^{commit}" 2>/dev/null; then
+       present=true
+     fi ;;
+esac
 if [ -z "$pinc" ]; then
   printf '%s: pin commit not recorded — the baseline has no commit= line\n' "$NAME" >&2
+elif [ "$present" != true ]; then
+  printf '%s: pin commit %s is not in the repository\n' "$NAME" "$pinc" >&2
+elif [ -z "$headc" ]; then
+  printf '%s: pin commit %s; HEAD cannot be read\n' "$NAME" "$pinc" >&2
 else
-  present=false
-  case $pinc in
-    *[!0-9a-f]*) ;;
-    *) if git -C "$target" cat-file -e "$pinc^{commit}" 2>/dev/null; then present=true; fi ;;
-  esac
-  if [ "$present" != true ]; then
-    printf '%s: pin commit %s is not in the repository\n' "$NAME" "$pinc" >&2
-  elif [ "$headc" = '?' ]; then
-    printf '%s: pin commit %s; HEAD cannot be read\n' "$NAME" "$pinc" >&2
+  printf '%s: pin commit %s\n' "$NAME" "$pinc" >&2
+  if [ "$headc" = "$pinc" ]; then
+    printf '%s: HEAD unmoved — HEAD is the pin commit\n' "$NAME" >&2
   else
-    printf '%s: pin commit %s\n' "$NAME" "$pinc" >&2
-    if [ "$headc" = "$pinc" ]; then
-      printf '%s: HEAD unmoved — HEAD is the pin commit\n' "$NAME" >&2
-    elif git -C "$target" merge-base --is-ancestor "$pinc" "$headc" 2>/dev/null; then
+    # `--is-ancestor` answers with its exit code: 0 is yes and 1 is no. Any
+    # other code is git failing to compare — an unreadable object, a corrupt
+    # history — and a relation read off that failure would hand the
+    # maintainer a false fact to rule on, so it says unknown and lets git's
+    # own error through.
+    fwd=0
+    git -C "$target" merge-base --is-ancestor "$pinc" "$headc" || fwd=$?
+    back=1
+    if [ "$fwd" -eq 1 ]; then
+      back=0
+      git -C "$target" merge-base --is-ancestor "$headc" "$pinc" || back=$?
+    fi
+    if [ "$fwd" -eq 0 ]; then
       printf '%s: HEAD advanced — the pin commit is an ancestor of HEAD\n' "$NAME" >&2
-      git -C "$target" log --oneline -n 20 "$pinc..$headc" >&2 || true
+      git --no-pager -C "$target" log --no-decorate --no-color --oneline -n 20 "$pinc..$headc" >&2 || true
       between=$(git -C "$target" rev-list --count "$pinc..$headc" 2>/dev/null || printf 0)
       if [ "$between" -gt 20 ]; then
         printf '… %s more\n' "$((between - 20))" >&2
       fi
-    elif git -C "$target" merge-base --is-ancestor "$headc" "$pinc" 2>/dev/null; then
+    elif [ "$fwd" -eq 1 ] && [ "$back" -eq 0 ]; then
       printf '%s: HEAD rewound — HEAD is an ancestor of the pin commit\n' "$NAME" >&2
-    else
+    elif [ "$fwd" -eq 1 ] && [ "$back" -eq 1 ]; then
       printf '%s: HEAD diverged — neither is an ancestor of the other\n' "$NAME" >&2
+    else
+      printf '%s: HEAD relation unknown — git could not compare the pin commit with HEAD\n' "$NAME" >&2
     fi
   fi
 fi
