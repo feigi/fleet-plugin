@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, mkdirSync, openSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -91,7 +91,8 @@ function pr(f, edit) {
 }
 
 // Run the script as the finisher does: from the main checkout, against the
-// worktree. `extra` appends flags; `env` overrides the scrubbed baseline.
+// worktree. `args` replaces the whole argv; `cwd` is where it runs (default:
+// the clone).
 function scope(f, pin, { args, cwd = f.w } = {}) {
   const argv = args ?? ["--worktree", f.wt, "--pin", pin];
   const r = spawnSync(process.execPath, [SCRIPT, ...argv], { cwd, env: ENV, encoding: "utf8" });
@@ -110,6 +111,9 @@ const verdictFor = (f, edit) => scope(f, pr(f, edit));
 // path -> class, for every path the verdict names. A path it names with
 // `class: null` is one it could not place.
 const classes = (out) => Object.fromEntries(out.paths.map((p) => [p.path, p.class]));
+
+// path -> why, the reason the verdict gives for each path.
+const whys = (out) => Object.fromEntries(out.paths.map((p) => [p.path, p.why]));
 
 // --- exit 0: the inert rows --------------------------------------------------
 
@@ -217,12 +221,31 @@ test("exit 1: a markdown file under a skills, agents, commands or plugin directo
   }
 });
 
-test("exit 1: AGENTS.md and CLAUDE.md are the prompt surface at the root and nested", () => {
-  for (const rel of ["AGENTS.md", "CLAUDE.md", "docs/nested/AGENTS.md", "docs/CLAUDE.md"]) {
+test("exit 1: AGENTS.md, CLAUDE.md and GEMINI.md are the prompt surface at the root and nested", () => {
+  for (const rel of ["AGENTS.md", "CLAUDE.md", "GEMINI.md", "docs/nested/AGENTS.md", "docs/CLAUDE.md", "docs/GEMINI.md"]) {
     const f = fixture();
     const r = verdictFor(f, (wt) => write(wt, rel, "# edited\n"));
     assert.equal(r.status, 1, `${rel}: ${r.stderr}`);
     assert.equal(classes(r.out)[rel], null, rel);
+  }
+});
+
+test("exit 1: a markdown file under any dot-directory is the prompt surface", () => {
+  for (const rel of [
+    ".omp/rules/r.md",
+    ".omp/RULES.md",
+    ".omp/SYSTEM.md",
+    ".omp/APPEND_SYSTEM.md",
+    ".claude/CLAUDE.local.md",
+    ".cursor/rules/x.md",
+    ".github/copilot-instructions.md",
+    "docs/.notes/x.md",
+  ]) {
+    const f = fixture();
+    const r = verdictFor(f, (wt) => write(wt, rel, "# edited\n"));
+    assert.equal(r.status, 1, `${rel}: ${r.stderr}`);
+    const dir = rel.split("/").find((s) => s.startsWith("."));
+    assert.deepEqual(r.out.paths.map((p) => [p.path, p.class, p.why]), [[rel, null, `prompt surface: directory ${dir}`]], rel);
   }
 });
 
@@ -264,6 +287,7 @@ test("exit 1: a markdown path turned into a symlink is not inert", () => {
   const r = verdictFor(f, (wt) => symlinkSync("../src/code.mjs", join(wt, "docs/link.md")));
   assert.equal(r.status, 1, r.stderr);
   assert.equal(classes(r.out)["docs/link.md"], null);
+  assert.equal(whys(r.out)["docs/link.md"], "symlink");
 });
 
 test("exit 1: a metrics file turned into a symlink is not inert", () => {
@@ -280,6 +304,17 @@ test("exit 1: a markdown file whose executable bit changes is not inert", () => 
   const r = verdictFor(f, (wt) => chmodSync(join(wt, "docs/mode.md"), 0o755));
   assert.equal(r.status, 1, r.stderr);
   assert.equal(classes(r.out)["docs/mode.md"], null);
+  assert.equal(whys(r.out)["docs/mode.md"], "executable bit");
+});
+
+test("exit 1: a markdown file replaced in place by a symlink is a type change, not inert", () => {
+  const f = fixture();
+  const r = verdictFor(f, (wt) => {
+    rmSync(join(wt, "docs/mode.md"));
+    symlinkSync("../src/code.mjs", join(wt, "docs/mode.md"));
+  });
+  assert.equal(r.status, 1, r.stderr);
+  assert.deepEqual(r.out.paths.map((p) => [p.path, p.status, p.class, p.why]), [["docs/mode.md", "T", null, "type change"]]);
 });
 
 test("exit 0: an uppercase .MD file is still prose", () => {
@@ -304,6 +339,7 @@ test("exit 1: a submodule entry sitting at a markdown path is not inert", () => 
   const r = scope(f, git(f.wt, "rev-parse", "HEAD"));
   assert.equal(r.status, 1, r.stderr);
   assert.equal(classes(r.out)["docs/sub.md"], null);
+  assert.equal(whys(r.out)["docs/sub.md"], "submodule");
 });
 
 test("exit 1: an empty diff is not inert", () => {
@@ -346,6 +382,7 @@ test("exit 2: a full-length pin that names no commit cannot be read", () => {
   const r = scope(f, "0123456789abcdef0123456789abcdef01234567");
   assert.equal(r.status, 2, r.stderr);
   assert.equal(r.out.verdict, "unknown");
+  assert.equal(r.out.reason, "pin names no commit");
 });
 
 test("exit 2: a pin that is not a full 40-hex SHA is refused as usage", () => {
@@ -362,6 +399,28 @@ test("exit 2: no origin/main to take the merge base against", () => {
   const r = scope(f, pin);
   assert.equal(r.status, 2, r.stderr);
   assert.equal(r.out.verdict, "unknown");
+  assert.equal(r.out.reason, "no origin/main to take the merge base against");
+});
+
+// A worktree git cannot read at all is not a missing origin/main: git's own
+// reason is the one reported, still on the could-not-look exit.
+test("exit 2: a worktree that is no repository reports git's reason, not a missing origin/main", () => {
+  const f = fixture();
+  const plain = join(f.root, "plain");
+  mkdirSync(plain);
+  const r = scope(f, "0".repeat(40), { args: ["--worktree", plain, "--pin", "0".repeat(40)], cwd: plain });
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.verdict, "unknown");
+  assert.match(r.out.reason, /^could not read origin\/main: git rev-parse exited 128: /);
+});
+
+test("exit 0: an uppercase-hex pin is accepted and reported lowercased", () => {
+  const f = fixture();
+  const pin = pr(f, (wt) => write(wt, "docs/glossary.md", "edited\n"));
+  const r = scope(f, pin.toUpperCase());
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.verdict, "inert");
+  assert.equal(r.out.pin, pin);
 });
 
 test("exit 2: an ambiguous merge base — two criss-cross merge bases — cannot be read", () => {
@@ -429,6 +488,42 @@ test("a usage error is a refusal on stderr with no verdict, exit 2", () => {
   assert.match(r.stderr, /^\nfinisher-scope: /);
 });
 
+test("an --worktree that cannot be stat'ed is a refusal with no verdict, exit 2", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads past a directory it has no permission on");
+  const f = fixture();
+  const locked = join(f.root, "locked");
+  mkdirSync(join(locked, "wt"), { recursive: true });
+  chmodSync(locked, 0o000);
+  t.after(() => chmodSync(locked, 0o755));
+  const r = scope(f, "", { args: ["--worktree", join(locked, "wt"), "--pin", "0".repeat(40)] });
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /^\nfinisher-scope: cannot stat .*: EACCES/);
+});
+
+// An inert diff is the case that matters: its exit 0 skips the mutation, so a
+// verdict stdout refused must not leave that 0 standing.
+test("a verdict that cannot be written to stdout is exit 2, never the verdict's own exit", () => {
+  const f = fixture();
+  const pin = pr(f, (wt) => write(wt, "docs/glossary.md", "edited\n"));
+  const run = (stdout) =>
+    spawnSync(process.execPath, [SCRIPT, "--worktree", f.wt, "--pin", pin], {
+      cwd: f.w,
+      env: ENV,
+      encoding: "utf8",
+      stdio: ["ignore", stdout, "pipe"],
+    });
+  assert.equal(run("pipe").status, 0, "control: the same diff writes and exits 0");
+  const readOnly = openSync("/dev/null", "r");
+  try {
+    const r = run(readOnly);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /the verdict could not be written to stdout/);
+  } finally {
+    closeSync(readOnly);
+  }
+});
+
 test("the module exports inertVerdict, callable in-process without exiting", async () => {
   const f = fixture();
   const pin = pr(f, (wt) => write(wt, "docs/glossary.md", "edited\n"));
@@ -437,6 +532,11 @@ test("the module exports inertVerdict, callable in-process without exiting", asy
   const v = mod.inertVerdict({ worktree: f.wt, pin });
   assert.equal(v.exit, 0);
   assert.equal(v.verdict, "inert");
+  const upper = mod.inertVerdict({ worktree: f.wt, pin: pin.toUpperCase(), repo: null });
+  assert.deepEqual([upper.verdict, upper.exit, upper.pin], ["inert", 0, pin]);
+  // A pin that is not a SHA is never echoed back as one.
+  const bad = mod.inertVerdict({ worktree: f.wt, pin: "NOTASHA" });
+  assert.deepEqual([bad.verdict, bad.exit, bad.pin], ["unknown", 2, null]);
 });
 
 // The behavioural fixture for the one gitEnv() call site: an ambient GIT_DIR

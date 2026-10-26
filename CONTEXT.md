@@ -281,7 +281,7 @@ A PR diff the finisher may skip the acceptance mutation for: every entry a regul
 _Avoid_: docs-only, prose-only, safe diff
 
 **Prompt surface**:
-The files the harness reads as instructions: any `skills`, `agents`, `commands` or `plugin` directory segment, and any `AGENTS.md` or `CLAUDE.md`, at any depth. Markdown there changes behavior, so it is never prose.
+The files the harness reads as instructions: any `skills`, `agents`, `commands` or `plugin` directory segment, any directory segment that starts with a dot (`.omp`, `.claude`, `.github` and the rest of where a harness keeps its rules and prompts), and any `AGENTS.md`, `CLAUDE.md` or `GEMINI.md`, at any depth. Markdown there changes behavior, so it is never prose.
 _Avoid_: docs
 
 ### Triage

@@ -223,11 +223,12 @@ that by reading the diff: the script reads it, and only its exit 0 skips the
 mutation. An exit 1 is not overridden, and an exit 2 is never read as a 0.
 
 The prompt surface stays out of prose. A `.md` under a `skills`, `agents`,
-`commands` or `plugin` directory, and any `AGENTS.md` or `CLAUDE.md`, is read by
-the harness, so it can change behavior. A symlink, submodule, mode change or
-other non-regular entry is a code change whatever its name, so it is not prose
-either. The verdict is read at the dispatch pin: the worktree's own head is not
-part of it, and duty 1 audits that head separately.
+`commands` or `plugin` directory or under any dot-directory (`.omp/rules`,
+`.omp/RULES.md`, `.claude`), and any `AGENTS.md`, `CLAUDE.md` or `GEMINI.md`, is
+read by the harness, so it can change behavior. A symlink, submodule, mode
+change or other non-regular entry is a code change whatever its name, so it is
+not prose either. The verdict is read at the dispatch pin: the worktree's own
+head is not part of it, and duty 1 audits that head separately.
 
 ## Whatever you verify by running, run in a tree nobody else owns
 
