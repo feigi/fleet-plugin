@@ -274,6 +274,16 @@ main checkout and accepts the head with the label kept, naming both SHAs in
 `rebaseCarry`; any head it cannot prove is `head-moved-after-label` (ADR 0024).
 _Avoid_: clean rebase, patch-equivalent, same patch
 
+### Finisher scope
+
+**Inert diff**:
+A PR diff the finisher may skip the acceptance mutation for: every entry a regular-file add, modify or delete, and every path, old side and new, either prose — a plain `.md` or `.markdown` file outside the prompt surface — or data, one of the run-metrics files. `finisher-scope.mjs` reads it from the merge base to the dispatch pin, and its exit 0 is the only verdict that skips the mutation.
+_Avoid_: docs-only, prose-only, safe diff
+
+**Prompt surface**:
+The files the harness reads as instructions: any `skills`, `agents`, `commands` or `plugin` directory segment, and any `AGENTS.md` or `CLAUDE.md`, at any depth. Markdown there changes behavior, so it is never prose.
+_Avoid_: docs
+
 ### Triage
 
 **Review deferral**:

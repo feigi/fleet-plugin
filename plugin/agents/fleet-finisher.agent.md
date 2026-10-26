@@ -109,6 +109,16 @@ had correctly edited — the PR's whole point — and a finisher reading that
 literally halts a correct PR. It caught the error instead, and said so; do
 not rely on that.
 
+**Run the Inert diff verdict before the acceptance mutation.** Run
+`~/.fleet/bin/fleet-run finisher-scope.mjs --worktree <abs-path> --pin <your dispatch pin>`
+(the path you were dispatched with, and the full SHA). It reads the PR's diff
+from the merge base with `origin/main` to your pin and classifies every path.
+Exit 0 means every path is prose (plain `.md` or `.markdown` outside the
+prompt surface) or data (a run-metrics file): an **Inert diff**. Only exit 0
+skips the acceptance mutation below. Exit 1 (not inert) and exit 2 (could not
+look) both run the mutation exactly as it is described below. When you skip,
+the verdict's one JSON line goes in your report in place of the `red:` line.
+
 **Whatever you verify by RUNNING, run in a tree nobody else owns.**
 Independently re-running the ticket's acceptance mutation — loosen the
 regex, delete the guard clause, flip the per-entry reset, run `<testCmd>`,

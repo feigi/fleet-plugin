@@ -105,7 +105,7 @@ const NAME = "closeout";
 const SCRIPTS = dirname(fileURLToPath(import.meta.url));
 const MAX_BUFFER = 64 * 1024 * 1024;
 const NETWORK_TIMEOUT_MS = 120_000;
-const METRICS = ["docs/metrics/member-outcomes.tsv", "docs/metrics/ticket-features.tsv", "docs/metrics/tier-outcomes.tsv"];
+export const METRICS = ["docs/metrics/member-outcomes.tsv", "docs/metrics/ticket-features.tsv", "docs/metrics/tier-outcomes.tsv"];
 const TICK_OVER = "ACTION: run over";
 
 const script = (name) => join(SCRIPTS, name);

@@ -320,6 +320,12 @@ const COVERED_MJS = {
   // repository's head against the pin. Measured in finisher-audit.test.mjs,
   // "an inherited GIT_DIR cannot retarget the head read".
   "finisher-audit.mjs": 1,
+  // ONE scrubbed env, handed to the single `git()` helper that every diff,
+  // rev-parse and merge-base read goes through. An ambient GIT_DIR would
+  // answer those reads for another repository, so the verdict would describe
+  // that repository's diff. Behavioural fixture: finisher-scope.test.mjs,
+  // "an ambient GIT_DIR cannot retarget the verdict".
+  "finisher-scope.mjs": 1,
   // TWO scrubbed envs. `run()` is the one spawn primitive for the `gh` reads
   // and the `git` upstream reads and writes; an ambient GIT_DIR would answer
   // those reads for another repository and write the upstream into its config.

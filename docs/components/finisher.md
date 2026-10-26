@@ -36,6 +36,10 @@ durable, and applies the label the merge bot waits on.
    filing what isn't found), and every "applied" claim is re-verified
    against `git diff origin/main...HEAD`, plus the acceptance mutation
    re-run in the finisher's own detached worktree (never the owned one).
+   The re-run is skipped only on an **Inert diff**, which
+   [`finisher-scope.mjs`](../../plugin/scripts/finisher-scope.mjs) reads at
+   the dispatch pin: every path plain Markdown outside the prompt surface, or
+   a run-metrics file. Any other exit runs the mutation.
 4. **Add `ready-to-merge`** — only after finding *exactly one* release
    label among `patch`/`minor`/`major` on the PR (zero or more than one
    halts, naming what was found).
