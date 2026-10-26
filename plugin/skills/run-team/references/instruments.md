@@ -43,6 +43,11 @@ You just changed the instrument set under your own check, and this is the
 only edit that legitimately does; skip it and the next gate refuses on your own
 fix, which teaches you to ignore the refusal.
 
+## Triggers and shape of a mid-run tooling fix
+
+Fix on an identical failure twice, or on a member doing the wrong thing while
+following the text; prefer moving text to adding it, and cut before you append.
+
 ## Landing a mid-run tooling fix from the main checkout
 
 **Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh
@@ -61,4 +66,48 @@ before the commit, because the switch back would then read your own paths
 dirty again. Any other path on that line is a stray write — leave the hold for
 the maintainer, because `--record` would certify it with yours. Live members
 hold the old text — re-brief only if it changes what they do *now*.
+
+## A pinned tree whose HEAD moved is the maintainer's to settle
+
+`instruments.sh --pin` records the pinned tree's HEAD as `commit=<sha>` after
+the digest and `root=`, and an exit-1 refusal prints that pin commit and how
+HEAD relates to it: `advanced` (the pin commit is an ancestor of HEAD, with the
+commits between, at most 20 and then `… N more`), `rewound`, `diverged`, or
+`unmoved` (HEAD is the pin commit, so the porcelain lines name the edits). When
+git cannot compare the two — an unreadable object, a corrupt history — it says
+the relation is `unknown`, with git's own error, rather than guess one; HEAD is
+not the pin commit there either, so never re-pin over it. A baseline with no
+`commit=` line, or one whose commit is gone from the repository, prints one
+line saying so and no relation.
+
+**The measured case.** Another session fast-forwarded the main checkout to
+`origin/main` mid-run. The commits that brought in were only this run's own
+merged PRs, the controller counted them as its own, re-pinned without asking and
+dispatched the next finishers. The tick could not see the move: its
+main-checkout guard reads a fast-forward to `origin/main` as clean, and the tick
+never runs the instrument check. Only the gate re-checks saw it — a finisher
+halting with cause `other`, the merge gate refusing with
+`instrument-set-changed`. A refusal cannot tell a move the maintainer would
+adopt from one they would not, because only they know whether a session of
+theirs is working in that checkout, so the pin stays frozen and the move stays
+a refusal even when the commits between are only the run's own.
+
+**Why the reset is the controller's only on a clean tick.** A clean
+main-checkout reading means HEAD is still on `main` and every commit since the
+baseline is on `origin/main`. So `git reset --keep <pin commit>` moves no other
+branch and drops nothing that exists only locally, and `--keep` refuses rather
+than overwrite an uncommitted edit that conflicts with the move. On a switched
+branch the guard prints `MAIN-CHECKOUT-DIRTY HEAD …`, and a reset there would
+move that other branch, so the maintainer restores such a tree by hand.
+
+Measured in a temp clone with the real `main-checkout.mjs` and
+`instruments.sh`, the pin 3 commits behind `origin/main` and 4 set paths
+different:
+
+| Checkout state | Main-checkout guard | Instrument check |
+|---|---|---|
+| at the pin commit | clean | 0 |
+| fast-forwarded to `origin/main` | clean | 1 |
+| after `git reset --keep <pin commit>` | clean | 0 |
+| on another branch | `MAIN-CHECKOUT-DIRTY HEAD refs/heads/main@… → refs/heads/other@…` | 1 |
 
