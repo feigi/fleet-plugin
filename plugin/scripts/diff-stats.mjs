@@ -69,6 +69,7 @@ export const isTestName = (p) => testSubject(p) !== null;
 // that keeps `vite.config.ts` config without a list of JS extensions, and it also
 // claims a non-JS module named like `app.config.py`.
 export const isDocs = (p) => /\.(md|mdx|markdown|txt|rst|adoc)$/i.test(p) || /(^|\/)(README|CHANGELOG|LICENSE|CONTRIBUTING)(\.|$)/i.test(p);
+export const isMarkdown = (p) => /\.(md|markdown)$/i.test(p);
 export const isConfig = (p) =>
   /\.(ya?ml|toml|ini|cfg|conf|json|json5|lock|env)$/i.test(p) ||
   /\.config\.[^/.]+$/i.test(p) ||

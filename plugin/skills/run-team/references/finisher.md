@@ -213,6 +213,23 @@ had correctly edited — the PR's whole point — and a finisher reading that
 literally halts a correct PR. It caught the error instead, and said so; do
 not rely on that.
 
+## The Inert diff verdict decides whether the acceptance mutation runs
+
+**The acceptance mutation runs unless `finisher-scope.mjs` says the diff is inert.**
+A mutation that loosens a regex, deletes a guard or flips a reset has nothing to
+kill in a diff made only of Markdown prose (`.md` or `.markdown` outside the
+prompt surface) or only of the run-metrics files. The finisher does not decide
+that by reading the diff: the script reads it, and only its exit 0 skips the
+mutation. An exit 1 is not overridden, and an exit 2 is never read as a 0.
+
+The prompt surface stays out of prose. A `.md` under a `skills`, `agents`,
+`commands` or `plugin` directory or under any dot-directory (`.omp/rules`,
+`.omp/RULES.md`, `.claude`), and any `AGENTS.md`, `CLAUDE.md` or `GEMINI.md`, is
+read by the harness, so it can change behavior. A symlink, submodule, mode
+change or other non-regular entry is a code change whatever its name, so it is
+not prose either. The verdict is read at the dispatch pin: the worktree's own
+head is not part of it, and duty 1 audits that head separately.
+
 ## Whatever you verify by running, run in a tree nobody else owns
 
 **Whatever you verify by RUNNING, run in a tree nobody else owns.**
