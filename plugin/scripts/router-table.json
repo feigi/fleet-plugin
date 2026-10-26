@@ -1,47 +1,397 @@
 {
-  "window_start": null,
-  "fitted_commit": null,
-  "n_rows": 0,
-  "stage": 1,
+  "window_start": "2026-10-03",
+  "fitted_commit": "2943966e925e3cd06b0c70503a5a84ca973e0eb9",
+  "n_rows": 195,
+  "stage": 2,
   "cells": [
     "slow-high",
     "task-high",
-    "smol-high"
+    "smol-high",
+    "slow-medium",
+    "task-max"
   ],
   "burn_in": true,
   "rows": {
     "cost": {
-      "*": "slow-high"
+      "*": "task-high",
+      "light": "task-high",
+      "heavy": "task-high"
     },
     "speed": {
-      "*": "slow-high"
+      "*": "task-high",
+      "light": "task-high",
+      "heavy": "task-high"
     }
   },
   "classifier": {
     "b": null,
     "tau": null
   },
-  "estimates": {},
+  "estimates": {
+    "*": {
+      "slow-high": {
+        "generation": "claude-opus-5-5",
+        "n": 69,
+        "merged": 69,
+        "claims": 69,
+        "failed": 8,
+        "usd_per_merged": 14.9163,
+        "minutes_per_merged": 100.2324,
+        "fail_rate": 0.1159,
+        "fix_rounds": 1.2464,
+        "review_findings": null,
+        "left_out": 0,
+        "unpriced": 0,
+        "untimed": 0,
+        "excluded": 0,
+        "older": {}
+      },
+      "smol-high": {
+        "generation": "claude-haiku-5-5",
+        "n": 31,
+        "merged": 31,
+        "claims": 31,
+        "failed": 8,
+        "usd_per_merged": 10.6916,
+        "minutes_per_merged": 96.1548,
+        "fail_rate": 0.2581,
+        "fix_rounds": 1.4194,
+        "review_findings": null,
+        "left_out": 0,
+        "unpriced": 1,
+        "untimed": 0,
+        "excluded": 5,
+        "older": {
+          "claude-haiku-4-5": {
+            "n": 21,
+            "merged": 21,
+            "claims": 21,
+            "failed": 11,
+            "usd_per_merged": 11.2477,
+            "minutes_per_merged": 100.4714,
+            "fail_rate": 0.5238,
+            "fix_rounds": 1.5238,
+            "review_findings": null,
+            "left_out": 0,
+            "unpriced": 0,
+            "untimed": 0
+          }
+        }
+      },
+      "task-high": {
+        "generation": "claude-sonnet-5-5",
+        "n": 67,
+        "merged": 67,
+        "claims": 67,
+        "failed": 14,
+        "usd_per_merged": 9.9576,
+        "minutes_per_merged": 81.0443,
+        "fail_rate": 0.209,
+        "fix_rounds": 1.194,
+        "review_findings": null,
+        "left_out": 0,
+        "unpriced": 0,
+        "untimed": 0,
+        "excluded": 1,
+        "older": {}
+      }
+    },
+    "heavy": {
+      "slow-high": {
+        "generation": "claude-opus-5-5",
+        "n": 47,
+        "merged": 47,
+        "claims": 47,
+        "failed": 3,
+        "usd_per_merged": 16.023,
+        "minutes_per_merged": 103.2798,
+        "fail_rate": 0.0638,
+        "fix_rounds": 1.3191,
+        "review_findings": null,
+        "left_out": 0,
+        "unpriced": 0,
+        "untimed": 0,
+        "excluded": 0,
+        "older": {}
+      },
+      "smol-high": {
+        "generation": "claude-haiku-5-5",
+        "n": 18,
+        "merged": 18,
+        "claims": 18,
+        "failed": 5,
+        "usd_per_merged": 11.8773,
+        "minutes_per_merged": 100.6731,
+        "fail_rate": 0.2778,
+        "fix_rounds": 1.6667,
+        "review_findings": null,
+        "left_out": 0,
+        "unpriced": 0,
+        "untimed": 0,
+        "excluded": 2,
+        "older": {
+          "claude-haiku-4-5": {
+            "n": 8,
+            "merged": 8,
+            "claims": 8,
+            "failed": 6,
+            "usd_per_merged": 11.9017,
+            "minutes_per_merged": 118.9875,
+            "fail_rate": 0.75,
+            "fix_rounds": 1.75,
+            "review_findings": null,
+            "left_out": 0,
+            "unpriced": 0,
+            "untimed": 0
+          }
+        }
+      },
+      "task-high": {
+        "generation": "claude-sonnet-5-5",
+        "n": 45,
+        "merged": 45,
+        "claims": 45,
+        "failed": 6,
+        "usd_per_merged": 11.0211,
+        "minutes_per_merged": 90.187,
+        "fail_rate": 0.1333,
+        "fix_rounds": 1.2889,
+        "review_findings": null,
+        "left_out": 0,
+        "unpriced": 0,
+        "untimed": 0,
+        "excluded": 0,
+        "older": {}
+      }
+    },
+    "light": {
+      "slow-high": {
+        "generation": "claude-opus-5-5",
+        "n": 22,
+        "merged": 22,
+        "claims": 22,
+        "failed": 5,
+        "usd_per_merged": 12.552,
+        "minutes_per_merged": 93.722,
+        "fail_rate": 0.2273,
+        "fix_rounds": 1.0909,
+        "review_findings": null,
+        "left_out": 0,
+        "unpriced": 0,
+        "untimed": 0,
+        "excluded": 0,
+        "older": {}
+      },
+      "smol-high": {
+        "generation": "claude-haiku-5-5",
+        "n": 13,
+        "merged": 13,
+        "claims": 13,
+        "failed": 3,
+        "usd_per_merged": 9.05,
+        "minutes_per_merged": 89.8987,
+        "fail_rate": 0.2308,
+        "fix_rounds": 1.0769,
+        "review_findings": null,
+        "left_out": 0,
+        "unpriced": 1,
+        "untimed": 0,
+        "excluded": 3,
+        "older": {
+          "claude-haiku-4-5": {
+            "n": 13,
+            "merged": 13,
+            "claims": 13,
+            "failed": 5,
+            "usd_per_merged": 10.8453,
+            "minutes_per_merged": 89.0769,
+            "fail_rate": 0.3846,
+            "fix_rounds": 1.3846,
+            "review_findings": null,
+            "left_out": 0,
+            "unpriced": 0,
+            "untimed": 0
+          }
+        }
+      },
+      "task-high": {
+        "generation": "claude-sonnet-5-5",
+        "n": 22,
+        "merged": 22,
+        "claims": 22,
+        "failed": 8,
+        "usd_per_merged": 7.7824,
+        "minutes_per_merged": 62.3432,
+        "fail_rate": 0.3636,
+        "fix_rounds": 1,
+        "review_findings": null,
+        "left_out": 0,
+        "unpriced": 0,
+        "untimed": 0,
+        "excluded": 1,
+        "older": {}
+      }
+    }
+  },
   "reasons": {
     "cost": {
       "*": {
-        "cell": "slow-high",
-        "reason": "unjudged",
-        "cells": {},
+        "cell": "task-high",
+        "reason": "lower-fail-rate",
+        "cells": {
+          "task-high": {
+            "verdict": "qualifies",
+            "under_floor": false,
+            "bar": 0.2659,
+            "range": [
+              -7.94,
+              -2.15
+            ]
+          },
+          "smol-high": {
+            "verdict": "qualifies",
+            "under_floor": false,
+            "bar": 0.2659,
+            "range": [
+              -7.75,
+              -0.83
+            ]
+          }
+        },
+        "pairs": [
+          {
+            "cheaper": "task-high",
+            "other": "smol-high",
+            "range": [
+              -3.52,
+              2.09
+            ]
+          }
+        ]
+      },
+      "light": {
+        "cell": "task-high",
+        "reason": "sole-qualifier",
+        "cells": {
+          "task-high": {
+            "verdict": "qualifies",
+            "under_floor": false,
+            "bar": 0.3773,
+            "range": [
+              -9.7,
+              -0.2
+            ]
+          },
+          "smol-high": {
+            "verdict": "too-few",
+            "under_floor": null,
+            "bar": null,
+            "range": null
+          }
+        },
+        "pairs": []
+      },
+      "heavy": {
+        "cell": "task-high",
+        "reason": "sole-qualifier",
+        "cells": {
+          "task-high": {
+            "verdict": "qualifies",
+            "under_floor": false,
+            "bar": 0.2138,
+            "range": [
+              -8.6,
+              -1.62
+            ]
+          },
+          "smol-high": {
+            "verdict": "too-few",
+            "under_floor": null,
+            "bar": null,
+            "range": null
+          }
+        },
         "pairs": []
       }
     },
     "speed": {
       "*": {
-        "cell": "slow-high",
-        "reason": "unjudged",
-        "cells": {},
+        "cell": "task-high",
+        "reason": "no-qualifier",
+        "cells": {
+          "slow-high": {
+            "verdict": "too-slow",
+            "under_floor": false,
+            "bar": 0.2659,
+            "range": [
+              1.63,
+              38.44
+            ]
+          },
+          "smol-high": {
+            "verdict": "too-slow",
+            "under_floor": false,
+            "bar": 0.2659,
+            "range": [
+              -5.01,
+              35.53
+            ]
+          }
+        },
+        "pairs": []
+      },
+      "light": {
+        "cell": "task-high",
+        "reason": "no-qualifier",
+        "cells": {
+          "slow-high": {
+            "verdict": "too-slow",
+            "under_floor": false,
+            "bar": 0.3773,
+            "range": [
+              8.24,
+              52.74
+            ]
+          },
+          "smol-high": {
+            "verdict": "too-few",
+            "under_floor": null,
+            "bar": null,
+            "range": null
+          }
+        },
+        "pairs": []
+      },
+      "heavy": {
+        "cell": "task-high",
+        "reason": "no-qualifier",
+        "cells": {
+          "slow-high": {
+            "verdict": "too-slow",
+            "under_floor": false,
+            "bar": 0.2138,
+            "range": [
+              -9.14,
+              38.82
+            ]
+          },
+          "smol-high": {
+            "verdict": "too-few",
+            "under_floor": null,
+            "bar": null,
+            "range": null
+          }
+        },
         "pairs": []
       }
     }
   },
   "guard": {
     "tripped": [],
-    "n": {}
+    "n": {
+      "slow-high": 69,
+      "smol-high": 32,
+      "task-high": 69
+    }
   }
 }
