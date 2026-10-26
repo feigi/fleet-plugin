@@ -23,6 +23,8 @@ import { IN_FLIGHT_DEFAULT, STEP_NAMES } from "../plugin/scripts/phase0-receipt.
 const PLUGIN = fileURLToPath(new URL("../plugin/", import.meta.url));
 const REAL_SCRIPTS = join(PLUGIN, "scripts");
 const RUN_AT = 1_700_000_000_000;
+// The login the stub `gh api user` answers to: the run's own.
+const RUN_LOGIN = "fleet-maintainer";
 
 const GIT_ENV = { ...process.env };
 delete GIT_ENV.GIT_DIR;
@@ -121,9 +123,17 @@ writeFileSync(join(SCRIPTS, "ledger.mjs"), `if (process.argv[2] === "rotate" && 
 `);
 const SCRIPT = join(SCRIPTS, "phase0.mjs");
 
+// `gh api user -q .login` answers the file `gh.login` (the run's login), or
+// fails when `gh.login.fail` exists; it is not a step of its own, so it is
+// not in the order log. Every other call answers `gh.json`.
 const GH_STUB = `#!/bin/sh
-printf 'gh\\n' >> "$PH0_STUBS/order.log"
 printf '%s GH_REPO=[%s] GIT_DIR=[%s]\\n' "$*" "\${GH_REPO-}" "\${GIT_DIR-}" >> "$PH0_STUBS/gh.calls"
+if [ "$1 $2" = "api user" ]; then
+  if [ -f "$PH0_STUBS/gh.login.fail" ]; then echo "gh login boom" >&2; exit 1; fi
+  cat "$PH0_STUBS/gh.login"
+  exit 0
+fi
+printf 'gh\\n' >> "$PH0_STUBS/order.log"
 if [ -f "$PH0_STUBS/gh.fail" ]; then echo "gh boom" >&2; exit 1; fi
 cat "$PH0_STUBS/gh.json"
 `;
@@ -168,6 +178,7 @@ function fixture({ spec = false } = {}) {
   git(repo, "push", "-q", "-u", "origin", "main");
   writeExecStub(join(bin, "gh"), GH_STUB);
   writeFileSync(join(stubs, "gh.json"), "[]");
+  writeFileSync(join(stubs, "gh.login"), `${RUN_LOGIN}\n`);
   writeFileSync(join(stubs, "stranded.json"), JSON.stringify({ out: JSON.stringify({ prior: "dead", claims: [], carried: [] }) }));
   if (spec) {
     mkdirSync(join(repo, ".github", "rulesets"), { recursive: true });
@@ -649,13 +660,17 @@ test("stranded: the live tokens a rotation carried are listed and are no NEED", 
   assert.ok(r.out.some((l) => l.includes("carried review-pr-9 review=member:review-pr-9 (row none)")), r.stdout);
 });
 
-// One `gh pr list --json number,closingIssuesReferences,url` row in gh's own
-// shape: each of `closes` an issue number in the PR's own repository, or a
-// reference object as it stands — `ref(n, "other/repo")` for another
-// repository's issue.
-const listed = (number, closes) => ({ number, closingIssuesReferences: closes.map((r) => (typeof r === "number" ? ref(r) : r)), url: prUrl(number) });
+// One `gh pr list --json number,closingIssuesReferences,url,author,isDraft`
+// row in gh's own shape: each of `closes` an issue number in the PR's own
+// repository, or a reference object as it stands — `ref(n, "other/repo")` for
+// another repository's issue. Authored by the run's login, not a draft, unless
+// `over` says otherwise.
+const listed = (number, closes, over = {}) => ({
+  number, closingIssuesReferences: closes.map((r) => (typeof r === "number" ? ref(r) : r)), url: prUrl(number),
+  author: { login: RUN_LOGIN }, isDraft: false, ...over,
+});
 
-test("fold-in: rows only for PRs that close an issue, a PR a carried row already names is skipped, the rest are NEED lines", () => {
+test("fold-in: an Owned PR a carried row does not name gets a row, closing an issue or not; a carried PR is skipped; no NEED is printed", () => {
   const f = fixture();
   f.ledgerRow(12, "PR#12 · inherited, held by hand");
   f.ledgerRow(7, "impl-7=PR#13 → PR#13");
@@ -664,22 +679,80 @@ test("fold-in: rows only for PRs that close an issue, a PR a carried row already
     listed(11, []),
     listed(12, [4]),
     listed(13, [5]),
-    { number: 14, url: prUrl(14) },
+    listed(14, []),
   ]));
   const r = f.run();
   assert.equal(r.status, 0, r.stdout + r.err);
   const rows = f.ledgerRows();
-  assert.deepEqual(rows.sort(), ["#10 PR#10 · inherited (closes #3)", "#12 PR#12 · inherited, held by hand", "#7 impl-7=PR#13 → PR#13"].sort(), "no row for a PR closing no issue, none rewritten for a PR a carried row names");
-  assert.deepEqual(r.out.filter((l) => l.startsWith("NEED")), ["NEED review PR#11 (closes no issue)", "NEED review PR#14 (closes no issue)"]);
-  assert.equal(r.out.at(-1), "NEED review PR#14 (closes no issue)", "the NEED lines come last");
-  assert.equal(f.receipt().steps["fold-in"].status, "ok", "a NEED the fold-in prints is advice");
-  assert.match(readFileSync(join(f.stubs, "gh.calls"), "utf8"), /^pr list --state open --json number,closingIssuesReferences,url --limit \d+ GH_REPO=\[\]/);
+  assert.deepEqual(rows.sort(), [
+    "#10 PR#10 · inherited (closes #3)", "#11 PR#11 · inherited (closes no issue)", "#12 PR#12 · inherited, held by hand",
+    "#14 PR#14 · inherited (closes no issue)", "#7 impl-7=PR#13 → PR#13",
+  ].sort(), "a row for every owned PR no carried row names, none rewritten for a PR a carried row names");
+  assert.deepEqual(r.out.filter((l) => l.startsWith("NEED")), [], "no NEED line is printed at all");
+  assert.ok(r.out.some((l) => l.includes("3 PR(s) queued, 2 already on a carried row")), r.stdout);
+  assert.ok(r.out.some((l) => l.includes("queued PR#11 for review (closes no issue)")), r.stdout);
+  assert.equal(f.receipt().steps["fold-in"].status, "ok");
+  assert.match(readFileSync(join(f.stubs, "gh.calls"), "utf8"), /^pr list --state open --json number,closingIssuesReferences,url,author,isDraft --limit \d+ GH_REPO=\[\] GIT_DIR=\[\]\napi user -q \.login GH_REPO=\[\] GIT_DIR=\[\]\n/);
 
-  // A re-run in the same run does not queue anything twice, and still prints the advice.
+  // A re-run in the same run does not queue anything twice.
   const again = f.run();
   assert.equal(again.status, 0);
-  assert.equal(f.ledgerRows().length, 3);
-  assert.deepEqual(again.out.filter((l) => l.startsWith("NEED")).length, 2);
+  assert.equal(f.ledgerRows().length, 5);
+});
+
+test("fold-in: of five open PRs only the two the run's login owns and did not draft get a row, and the other three get no row and no line", () => {
+  const f = fixture();
+  writeFileSync(join(f.stubs, "gh.json"), JSON.stringify([
+    listed(20, [3]),
+    listed(21, []),
+    listed(22, [4], { author: { login: "someone-else" } }),
+    listed(23, [], { author: { login: "app/renovate", is_bot: true } }),
+    listed(24, [5], { isDraft: true }),
+  ]));
+  const r = f.run();
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.deepEqual(f.ledgerRows().sort(), ["#20 PR#20 · inherited (closes #3)", "#21 PR#21 · inherited (closes no issue)"]);
+  assert.deepEqual(r.out.filter((l) => l.startsWith("NEED")), []);
+  assert.equal(f.receipt().steps["fold-in"].status, "ok");
+  const foldIn = r.out.filter((l) => /PR#(22|23|24)\b/.test(l));
+  assert.deepEqual(foldIn, [], "a PR that is not owned is named nowhere in the step's output");
+  assert.doesNotMatch(f.receipt().steps["fold-in"].output, /PR#(22|23|24)\b/);
+});
+
+test("fold-in: a login read that fails, or answers nothing, fails the step and writes no row — it is never read as owning nothing", () => {
+  for (const [how, set] of [
+    ["fails", (f) => writeFileSync(join(f.stubs, "gh.login.fail"), "")],
+    ["prints no login", (f) => writeFileSync(join(f.stubs, "gh.login"), "\n")],
+  ]) {
+    const f = fixture();
+    writeFileSync(join(f.stubs, "gh.json"), JSON.stringify([listed(10, [3]), listed(11, [])]));
+    set(f);
+    const r = f.run();
+    assert.equal(r.status, 3, `${how}: ${r.stdout}${r.err}`);
+    assert.equal(f.receipt().steps["fold-in"].status, "failed", how);
+    assert.match(r.stdout, /fold-in: failed — gh api user -q \.login /, how);
+    assert.deepEqual(f.ledgerRows(), [], `${how}: no row is written`);
+    assert.equal(f.calls("shortlist").length, 0, how);
+  }
+});
+
+test("fold-in: a PR row with no author key or no draft flag fails the step before any row is written; a null author is a PR not owned", () => {
+  for (const [row, why] of [
+    [{ ...listed(11, [3]), author: undefined }, /PR #11 without an author and a draft flag/],
+    [{ ...listed(11, [3]), isDraft: undefined }, /PR #11 without an author and a draft flag/],
+  ]) {
+    const f = fixture();
+    writeFileSync(join(f.stubs, "gh.json"), JSON.stringify([listed(10, [2]), row]));
+    const r = f.run();
+    assert.equal(r.status, 3, r.stdout + r.err);
+    assert.match(r.stdout, why);
+    assert.deepEqual(f.ledgerRows(), [], "no row is written");
+  }
+  const g = fixture();
+  writeFileSync(join(g.stubs, "gh.json"), JSON.stringify([listed(10, [2]), { ...listed(11, [3]), author: null }]));
+  const ok = g.run();
+  assert.equal(ok.status, 0, ok.stdout + ok.err);
+  assert.deepEqual(g.ledgerRows(), ["#10 PR#10 · inherited (closes #2)"]);
 });
 
 // Another repository's reference closes none of this repository's issues,
@@ -692,12 +765,12 @@ test("fold-in: a PR whose only closing reference is another repository's closes 
   ]));
   const r = f.run();
   assert.equal(r.status, 0, r.stdout + r.err);
-  assert.deepEqual(f.ledgerRows(), ["#11 PR#11 · inherited (closes #5)"]);
-  assert.deepEqual(r.out.filter((l) => l.startsWith("NEED")), ["NEED review PR#10 (closes no issue)"]);
+  assert.deepEqual(f.ledgerRows().sort(), ["#10 PR#10 · inherited (closes no issue)", "#11 PR#11 · inherited (closes #5)"]);
+  assert.deepEqual(r.out.filter((l) => l.startsWith("NEED")), []);
   assert.ok(r.out.some((l) => l.includes("queued PR#11 for review (closes #5)")), r.stdout);
 });
 
-test("fold-in: a closing reference that cannot be read, or a PR url not its own, fails the step before any row is written", () => {
+test("fold-in: a closing reference that cannot be read, or a PR url not its own, fails the step before any row is written; a PR that is not owned is not read", () => {
   const { url: _url, repository: _repository, ...unplaced } = ref(3);
   const { number: _number, ...unnumbered } = ref(3);
   for (const [row, why] of [
@@ -714,6 +787,13 @@ test("fold-in: a closing reference that cannot be read, or a PR url not its own,
     assert.match(r.stdout, why);
     assert.deepEqual(f.ledgerRows(), [], "no row is written");
     assert.equal(f.calls("shortlist").length, 0);
+
+    // The same unreadable reference on a stranger's PR is no concern of the fleet's.
+    const g = fixture();
+    writeFileSync(join(g.stubs, "gh.json"), JSON.stringify([listed(10, [2]), { ...row, author: { login: "someone-else" } }]));
+    const ok = g.run();
+    assert.equal(ok.status, 0, ok.stdout + ok.err);
+    assert.deepEqual(g.ledgerRows(), ["#10 PR#10 · inherited (closes #2)"]);
   }
 });
 

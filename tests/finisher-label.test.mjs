@@ -14,25 +14,39 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { prUrl, ref } from "./support/queue-gh.mjs";
 import { tempDir } from "./support/temp-dir.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/finisher-label.mjs", import.meta.url));
 const PIN = "a".repeat(40);
 const OTHER = "b".repeat(40);
 
+// The Ticketless test's read, `gh pr view <n> --json closingIssuesReferences,url`,
+// is kept out of calls.log, which holds the calls the labelling steps make, and
+// answered from `pr-closing.out`: a PR in the own repository closing issue #5
+// unless a case says otherwise, so the baseline is a ticket PR.
 const STUB = `#!/bin/sh
 d="\${0%/*}"
+if [ "$1 $2 $4 $5" = "pr view --json closingIssuesReferences,url" ]; then
+  printf '%s\\n' "$*" >> "$d/closing.log"
+  pwd >> "$d/closing-cwd.log"
+  env | grep -E '^(GIT_DIR|GIT_WORK_TREE)=' >> "$d/env.log"
+  if [ -f "$d/pr-closing.fail" ]; then cat "$d/pr-closing.fail" >&2; exit 1; fi
+  cat "$d/pr-closing.out"
+  exit 0
+fi
 printf '%s\\n' "$*" >> "$d/calls.log"
 pwd >> "$d/cwd.log"
 env | grep -E '^(GIT_DIR|GIT_WORK_TREE)=' >> "$d/env.log"
 case "$1 $2" in
 "pr view") key="pr-view-$(grep -c '^pr view' "$d/calls.log")" ;;
 "pr comment") key=pr-comment ;;
-"pr edit") key=pr-edit ;;
+"pr edit") if [ "$5" = patch ]; then key=pr-edit-patch; else key=pr-edit; fi ;;
 "label list") key=label-list ;;
 *) echo "stub gh: unexpected $*" >&2; exit 99 ;;
 esac
@@ -45,15 +59,36 @@ const names = (...n) => n.map((name) => ({ name }));
 const view = (labels, comments = []) => JSON.stringify({ labels: names(...labels), comments });
 const record = (sha, createdAt) => ({ body: `ready-to-merge-head: ${sha}`, createdAt });
 
-// A rig for one case: a fresh stub directory. `outs` and `fails` are keyed by
-// the stub's call keys. The baseline is a PR with one release label and a
-// read-back that carries the label.
-function rig({ outs = {}, fails = {} } = {}) {
+const ledgerText = (rows) => `# Fleet run ledger\n\n## Rows\n\n${rows.map((r) => `- ${r}`).join("\n")}\n\n## Dispatched\n\n\n\n## Filed\n\n\n\n## Ruled\n\n`;
+
+function git(cwd, ...args) {
+  const r = spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, encoding: "utf8", env: gitEnv() });
+  assert.equal(r.status, 0, `git ${args.join(" ")}: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+// A rig for one case: a fresh stub directory and a repository the script runs
+// in (`repo`), holding the run ledger (`rows` are its rows) and an
+// `origin/main` to take a pin's merge base against. `outs` and `fails` are
+// keyed by the stub's call keys. The baseline is a ticket PR with one release
+// label and a read-back that carries the label. `commit(files)` makes a commit
+// holding `files` (path → text) on top of origin/main and answers its SHA,
+// the pin of a case about the diff.
+function rig({ outs = {}, fails = {}, closes = [5], rows = [] } = {}) {
   const dir = tempDir("finisher-label-");
   const bin = join(dir, "bin");
   mkdirSync(bin);
   writeExecStub(join(bin, "gh"), STUB);
+  const repo = join(dir, "repo");
+  mkdirSync(join(repo, ".fleet"), { recursive: true });
+  git(repo, "init", "-q");
+  writeFileSync(join(repo, "README.md"), "base\n");
+  git(repo, "add", "README.md");
+  git(repo, "commit", "-q", "-m", "base");
+  git(repo, "update-ref", "refs/remotes/origin/main", "HEAD");
+  writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText(rows));
   const all = {
+    "pr-closing": JSON.stringify({ closingIssuesReferences: closes.map((n) => ref(n)), url: prUrl(42) }),
     "pr-view-1": view(["patch", "bug"]),
     "pr-view-2": view(["patch", "bug", "ready-to-merge"]),
     "label-list": JSON.stringify(names("patch", "minor", "major", "bug")),
@@ -62,11 +97,25 @@ function rig({ outs = {}, fails = {} } = {}) {
   for (const [k, v] of Object.entries(all)) writeFileSync(join(bin, `${k}.out`), v);
   for (const [k, v] of Object.entries(fails)) writeFileSync(join(bin, `${k}.fail`), v);
   const log = (name) => (existsSync(join(bin, name)) ? readFileSync(join(bin, name), "utf8") : "");
-  const calls = () => log("calls.log").trim().split("\n").filter(Boolean);
-  const run = (args = ["--pr", "42", "--pin", PIN], { env = {} } = {}) => {
-    const r = spawnSync(process.execPath, [SCRIPT, ...args], {
+  const lines = (name) => log(name).trim().split("\n").filter(Boolean);
+  const calls = () => lines("calls.log");
+  const closing = () => lines("closing.log");
+  const commit = (files) => {
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(dirname(join(repo, path)), { recursive: true });
+      writeFileSync(join(repo, path), text);
+      git(repo, "add", path);
+    }
+    git(repo, "commit", "-q", "-m", "the PR");
+    return git(repo, "rev-parse", "HEAD");
+  };
+  // Without its own `--repo` a run is in the rig's repository, so no case reads a real run's ledger.
+  const run = (args = ["--pr", "42", "--pin", PIN], { env = {}, cwd } = {}) => {
+    const full = args.includes("--repo") ? args : [...args, "--repo", repo];
+    const r = spawnSync(process.execPath, [SCRIPT, ...full], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env },
+      ...(cwd === undefined ? {} : { cwd }),
     });
     let out = null;
     try {
@@ -76,7 +125,7 @@ function rig({ outs = {}, fails = {} } = {}) {
     }
     return { status: r.status, stderr: r.stderr, out };
   };
-  return { dir, calls, log, run };
+  return { dir, repo, calls, closing, commit, log, run };
 }
 
 const VIEW = "pr view 42 --json labels,comments";
@@ -84,6 +133,8 @@ const BACK = "pr view 42 --json labels";
 const COMMENT = `pr comment 42 --body ready-to-merge-head: ${PIN}`;
 const EDIT = "pr edit 42 --add-label ready-to-merge";
 const LIST = "label list --json name --limit 1000";
+const PATCH = "pr edit 42 --add-label patch";
+const CLOSING = "pr view 42 --json closingIssuesReferences,url";
 
 test("exit 0: one release label, the head recorded, the label added and read back", () => {
   const t = rig();
@@ -91,16 +142,169 @@ test("exit 0: one release label, the head recorded, the label added and read bac
   assert.equal(r.status, 0, r.stderr);
   // The order is the contract: record before label, read-back last.
   assert.deepEqual(t.calls(), [VIEW, COMMENT, EDIT, BACK]);
+  assert.deepEqual(t.closing(), [CLOSING], "the Ticketless test read comes first, and once");
   assert.deepEqual(r.out, {
     pr: 42,
     pin: PIN,
+    ticketless: false,
     releaseLabels: ["patch"],
+    patchAdded: false,
+    inert: null,
     commented: true,
     added: true,
     readBack: ["patch", "bug", "ready-to-merge"],
     exit: 0,
     firstRead: ["patch", "bug"],
   });
+});
+
+// --- a Ticketless PR ---------------------------------------------------------
+
+const INERT = { "docs/note.md": "a note\n" };
+const NOT_INERT = { "plugin/scripts/x.mjs": "export {};\n" };
+const ticketless = (over = {}) => rig({ closes: [], ...over });
+const headRecord = (pin) => `pr comment 42 --body ready-to-merge-head: ${pin}`;
+
+test("Ticketless PR with no release label in a repo that defines them: patch is added before the count, an inert diff is labelled ready-to-merge, exit 0", () => {
+  const t = ticketless({ outs: { "pr-view-1": view(["bug"]), "pr-view-2": view(["bug", "patch", "ready-to-merge"]) } });
+  const pin = t.commit(INERT);
+  const r = t.run(["--pr", "42", "--pin", pin]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(t.calls(), [VIEW, LIST, PATCH, headRecord(pin), EDIT, BACK]);
+  assert.equal(r.out.ticketless, true);
+  assert.equal(r.out.patchAdded, true);
+  assert.deepEqual(r.out.releaseLabels, ["patch"]);
+  assert.equal(r.out.inert.verdict, "inert");
+  assert.equal(r.out.added, true);
+  assert.equal(r.out.exit, 0);
+});
+
+test("Ticketless PR that already carries a release label gets no patch, and its inert diff is labelled", () => {
+  const t = ticketless({ outs: { "pr-view-1": view(["minor"]), "pr-view-2": view(["minor", "ready-to-merge"]) } });
+  const pin = t.commit(INERT);
+  const r = t.run(["--pr", "42", "--pin", pin]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(t.calls(), [VIEW, headRecord(pin), EDIT, BACK]);
+  assert.equal(r.out.patchAdded, false);
+  assert.deepEqual(r.out.releaseLabels, ["minor"]);
+});
+
+test("Ticketless PR in a repo that defines no release label: no patch is added and the count is skipped", () => {
+  const t = ticketless({
+    outs: { "pr-view-1": view(["bug"]), "pr-view-2": view(["bug", "ready-to-merge"]), "label-list": JSON.stringify(names("bug", "ready-to-merge")) },
+  });
+  const pin = t.commit(INERT);
+  const r = t.run(["--pr", "42", "--pin", pin]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.releaseLabels, "undefined-in-repo");
+  assert.equal(r.out.patchAdded, false);
+  assert.ok(!t.calls().includes(PATCH));
+});
+
+test("exit 5: a Ticketless PR whose diff is not inert gets the head record and no ready-to-merge", () => {
+  const t = ticketless({ outs: { "pr-view-1": view(["bug"]) } });
+  const pin = t.commit(NOT_INERT);
+  const r = t.run(["--pr", "42", "--pin", pin]);
+  assert.equal(r.status, 5, r.stderr);
+  assert.deepEqual(t.calls(), [VIEW, LIST, PATCH, headRecord(pin)]);
+  assert.equal(r.out.exit, 5);
+  assert.equal(r.out.inert.verdict, "not-inert");
+  assert.equal(r.out.commented, true);
+  assert.equal(r.out.added, false);
+  assert.equal(r.out.readBack, null);
+  assert.match(r.stderr, /Ticketless PR and its diff is not inert/);
+});
+
+test("exit 5: a Ticketless PR whose inert verdict could not look is held for the maintainer the same way", () => {
+  const t = ticketless();
+  // The pin names no commit in the repository: the verdict is `unknown`.
+  const r = t.run(["--pr", "42", "--pin", OTHER]);
+  assert.equal(r.status, 5, r.stderr);
+  assert.equal(r.out.inert.verdict, "unknown");
+  assert.equal(r.out.inert.exit, 2);
+  assert.equal(r.out.added, false);
+  assert.ok(!t.calls().includes(EDIT), t.calls().join("\n"));
+  assert.match(r.stderr, /its diff could not be read/);
+});
+
+test("exit 5: the head record is posted unless the newest one already names the pin", () => {
+  const other = ticketless({ outs: { "pr-view-1": view(["patch"], [record(OTHER, "2026-01-02T00:00:00Z")]) } });
+  const a = other.run(["--pr", "42", "--pin", other.commit(NOT_INERT)]);
+  assert.equal(a.status, 5, a.stderr);
+  assert.equal(a.out.commented, true, "a record for another head is not a record for this one");
+
+  const same = ticketless({ outs: { "pr-view-1": view(["patch"]) } });
+  const pin = same.commit(NOT_INERT);
+  writeFileSync(join(same.dir, "bin", "pr-view-1.out"), view(["patch"], [record(pin, "2026-01-02T00:00:00Z")]));
+  const b = same.run(["--pr", "42", "--pin", pin]);
+  assert.equal(b.status, 5, b.stderr);
+  assert.equal(b.out.commented, false);
+  assert.deepEqual(same.calls(), [VIEW]);
+});
+
+test("exit 3: a Ticketless PR with several release labels is refused and nothing is written", () => {
+  const t = ticketless({ outs: { "pr-view-1": view(["patch", "major"]) } });
+  const r = t.run(["--pr", "42", "--pin", t.commit(INERT)]);
+  assert.equal(r.status, 3, r.stderr);
+  assert.deepEqual(t.calls(), [VIEW]);
+  assert.deepEqual(r.out.releaseLabels, ["patch", "major"]);
+  assert.equal(r.out.patchAdded, false);
+  assert.equal(r.out.commented, false);
+});
+
+test("exit 2: a label list that fills the limit stops a Ticketless PR before any write", () => {
+  const t = ticketless({ outs: { "pr-view-1": view(["bug"]), "label-list": JSON.stringify(names(...Array.from({ length: 1000 }, (_, i) => `label-${i}`))) } });
+  const r = t.run(["--pr", "42", "--pin", t.commit(INERT)]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.step, "list-labels");
+  assert.deepEqual(t.calls(), [VIEW, LIST]);
+});
+
+test("exit 2: a failed patch write is reported at its own step and nothing later runs", () => {
+  const t = ticketless({ outs: { "pr-view-1": view(["bug"]) }, fails: { "pr-edit-patch": "no rights\n" } });
+  const r = t.run(["--pr", "42", "--pin", t.commit(INERT)]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.step, "add-patch");
+  assert.equal(r.out.error, "no rights");
+  assert.deepEqual(t.calls(), [VIEW, LIST, PATCH]);
+});
+
+test("exit 2: a Ticketless test that could not look stops the script before any labelling call", () => {
+  const t = rig({ fails: { "pr-closing": "gh: HTTP 502\n" } });
+  const r = t.run();
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.out.step, "ticketless");
+  assert.match(r.out.error, /gh: HTTP 502/);
+  assert.equal(r.out.ticketless, null);
+  assert.deepEqual(t.calls(), []);
+
+  // A ledger that cannot be read is the same: never "no token". A ledger path
+  // that is a directory is one `ledger.mjs read` cannot answer for.
+  const noLedger = rig();
+  rmSync(join(noLedger.repo, ".fleet", "ledger.md"));
+  mkdirSync(join(noLedger.repo, ".fleet", "ledger.md"));
+  const b = noLedger.run();
+  assert.equal(b.status, 2, b.stderr);
+  assert.equal(b.out.step, "ticketless");
+  assert.match(b.out.error, /could not read the ledger/);
+  assert.deepEqual(noLedger.calls(), []);
+});
+
+test("a PR that closes nothing but that a settled impl token names is a ticket PR: zero release labels is still exit 3", () => {
+  const t = rig({ closes: [], rows: ["#12 impl-12=PR#42 → PR#42"], outs: { "pr-view-1": view(["bug"]) } });
+  const r = t.run(["--pr", "42", "--pin", t.commit(INERT)]);
+  assert.equal(r.status, 3, r.stderr);
+  assert.equal(r.out.ticketless, false);
+  assert.deepEqual(t.calls(), [VIEW, LIST]);
+});
+
+test("a ticket PR is never held on its diff: a non-inert diff is labelled as ever, and its verdict never runs", () => {
+  const t = rig();
+  const r = t.run(["--pr", "42", "--pin", t.commit(NOT_INERT)]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.ticketless, false);
+  assert.equal(r.out.inert, null);
+  assert.equal(r.out.added, true);
 });
 
 test("exit 0: a pin in capitals is recorded in the lowercase the merge bot reads", () => {
@@ -365,15 +569,13 @@ test("an already-labelled PR with no release label is still refused", () => {
   assert.deepEqual(t.calls(), [VIEW, LIST]);
 });
 
-test("--repo is the directory gh runs in", () => {
+test("--repo is the directory gh runs in, for the Ticketless test's read and every labelling call", () => {
   const t = rig();
-  const repo = join(t.dir, "checkout");
-  mkdirSync(repo);
-  const r = t.run(["--pr", "42", "--pin", PIN, "--repo", repo]);
+  const r = t.run(["--pr", "42", "--pin", PIN, "--repo", t.repo]);
   assert.equal(r.status, 0, r.stderr);
-  const cwds = t.log("cwd.log").trim().split("\n");
-  assert.equal(cwds.length, 4);
-  for (const c of cwds) assert.equal(realpathSync(c), realpathSync(repo));
+  const cwds = [...t.log("closing-cwd.log").trim().split("\n"), ...t.log("cwd.log").trim().split("\n")];
+  assert.equal(cwds.length, 5);
+  for (const c of cwds) assert.equal(realpathSync(c), realpathSync(t.repo));
 });
 
 test("exit 2: a --repo that is not a directory is named as such, not blamed on gh, and no gh call is made", () => {
@@ -416,4 +618,15 @@ test("positive control: with createdAt present the newer record for another head
   const r = t.run();
   assert.equal(r.status, 0, r.stderr);
   assert.ok(t.calls().includes(COMMENT), t.calls().join("\n"));
+});
+
+// The Inert diff verdict takes only an absolute worktree, so a relative --repo
+// is resolved against the cwd before it is handed over.
+test("a relative --repo, run from another cwd, is the repository the Inert diff verdict reads", () => {
+  const t = ticketless({ outs: { "pr-view-1": view(["bug"]), "pr-view-2": view(["bug", "patch", "ready-to-merge"]) } });
+  const pin = t.commit(INERT);
+  const r = t.run(["--pr", "42", "--pin", pin, "--repo", "repo"], { cwd: t.dir });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.ticketless, true);
+  assert.equal(r.out.inert.verdict, "inert");
 });

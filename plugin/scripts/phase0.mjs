@@ -61,10 +61,12 @@
 //                 Either exiting 1 is a cache with nothing valid in it: pending,
 //                 `NEED derive-recipe`. Exit 3 (a tool the reader could not run)
 //                 fails the step — deriving would not help.
-//   fold-in       every open PR no carried ledger row names: one that closes an
-//                 issue gets a `#<pr>` row from `ledger.mjs row` (the tick queues
-//                 its review off it); one that closes none is listed as `NEED
-//                 review PR#<pr> (closes no issue)`.
+//   fold-in       every Owned PR (owned-pr.mjs: open, not a draft, authored by
+//                 the login `gh api user` answers to) that no carried ledger
+//                 row names gets a `#<pr>` row from `ledger.mjs row`, closing an
+//                 issue or not (the tick queues its review off it). A PR that
+//                 is not owned gets no row and no line, whatever it closes. A
+//                 login read that fails fails the step.
 //   stranded      `stranded.mjs`. A `resume` entry whose ticket has no ledger row
 //                 yet is pending: `NEED resume #<n> <worktree> <branch>`. A
 //                 `report` entry is printed as `report #<n> — <why>`, and the step
@@ -138,10 +140,7 @@
 // Exit 0 every step ok, or `drift`/`unanswered` — advice the run goes on past;
 // 2 a usage error; 3 a step failed, or the run could not start or record itself
 // (the scratch root, the controller record, the receipt); 4 a step needs the
-// controller — dispatch what the NEED line names, then run this again. A NEED
-// the fold-in prints is advice too and changes no exit status: a PR with no
-// issue behind it is the controller's to queue or leave, and nothing a re-run
-// could meet.
+// controller — dispatch what the NEED line names, then run this again.
 //
 // Zero deps: node builtins and sibling scripts only.
 
@@ -156,6 +155,7 @@ import { FleetDirUnresolvable, fleetFile } from "./fleet-dir.mjs";
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
+import { GH_LOGIN_ARGS, isOwnedPr, loginOf, ownershipReadable } from "./owned-pr.mjs";
 import { RECEIPT, RECEIPT_HELD, archiveStamp, receiptArchiveName, rowNums } from "./ledger-grammar.mjs";
 import { ancestry, controllerOf, processSource, ProcUnreadable } from "./proc.mjs";
 import { IN_FLIGHT_DEFAULT, OBJECTIVES, OBJECTIVE_DEFAULT } from "./phase0-receipt.mjs";
@@ -363,7 +363,7 @@ function ledgerRows(cwd) {
 const rowKey = (row) => row.split(/\s/)[0];
 
 function foldIn({ cwd }) {
-  const list = run("gh", ["pr", "list", "--state", "open", "--json", "number,closingIssuesReferences,url", "--limit", String(PR_LIMIT)], {
+  const list = run("gh", ["pr", "list", "--state", "open", "--json", "number,closingIssuesReferences,url,author,isDraft", "--limit", String(PR_LIMIT)], {
     cwd, env: { GH_REPO: "" }, timeoutMs: NETWORK_TIMEOUT_MS,
   });
   if (list.status !== 0) return refusal("gh pr list failed:", list);
@@ -375,16 +375,31 @@ function foldIn({ cwd }) {
   }
   if (!Array.isArray(prs)) return failed("gh pr list did not print a JSON array");
   if (prs.length >= PR_LIMIT) return failed(`gh pr list came back at its cap of ${PR_LIMIT} — it may hold more PRs than it showed, so none is folded in`);
-  // The issues each PR closes in its own repository, by ownClosingIssues()'s
-  // rule — another repository's reference closes none of this one's — read
-  // for every PR before any row is written, so one that cannot be read folds
-  // nothing in.
+  // Which PRs are the fleet's to fold in is decided by the login the `gh`
+  // credentials answer to. A read that failed or printed none is a refusal,
+  // never "owns nothing": that would fold nothing in and say ok.
+  const who = run("gh", GH_LOGIN_ARGS, { cwd, env: { GH_REPO: "" }, timeoutMs: NETWORK_TIMEOUT_MS });
+  if (who.status !== 0) return refusal(`gh ${GH_LOGIN_ARGS.join(" ")} failed:`, who);
+  const login = loginOf(who.stdout);
+  if (login === null) return failed(`gh ${GH_LOGIN_ARGS.join(" ")} printed no login — which PRs are owned is unknown, so none is folded in`);
+  // A null author is a PR whose account GitHub no longer has: no login of the
+  // run's, so not owned. A row with no `author` key, or no draft flag, is not
+  // what was asked for, and whether it is owned is unknown.
+  const unreadable = prs.find((pr) => !ownershipReadable(pr));
+  if (unreadable !== undefined) {
+    return failed(`gh pr list answered PR #${unreadable?.number} without an author and a draft flag — whether it is owned is unknown, so none is folded in`);
+  }
+  const owned = prs.filter((pr) => isOwnedPr(pr, login));
+  // The issues each owned PR closes in its own repository, by
+  // ownClosingIssues()'s rule — another repository's reference closes none of
+  // this one's — read for every one before any row is written, so one that
+  // cannot be read folds nothing in.
   const closing = new Map();
-  for (const pr of prs) {
+  for (const pr of owned) {
     try {
-      closing.set(pr, ownClosingIssues(pr?.number, pr?.url, pr?.closingIssuesReferences ?? []));
+      closing.set(pr, ownClosingIssues(pr.number, pr.url, pr.closingIssuesReferences ?? []));
     } catch (e) {
-      return failed(`gh pr list answered PR #${pr?.number} with ${e.message} — which issues it closes is unknown, so none is folded in`);
+      return failed(`gh pr list answered PR #${pr.number} with ${e.message} — which issues it closes is unknown, so none is folded in`);
     }
   }
   const ledger = ledgerRows(cwd);
@@ -399,25 +414,20 @@ function foldIn({ cwd }) {
     if (pr !== null) named.add(pr);
   }
   const queued = [];
-  const advice = [];
   let carried = 0;
-  for (const pr of [...prs].sort((a, b) => a.number - b.number)) {
+  for (const pr of [...owned].sort((a, b) => a.number - b.number)) {
     if (named.has(pr.number)) {
       carried += 1;
       continue;
     }
     const issues = closing.get(pr);
-    if (issues.length === 0) {
-      advice.push(`NEED review PR#${pr.number} (closes no issue)`);
-      continue;
-    }
-    const closes = `closes ${issues.map((n) => `#${n}`).join(", ")}`;
+    const closes = issues.length === 0 ? "closes no issue" : `closes ${issues.map((n) => `#${n}`).join(", ")}`;
     const w = node("ledger.mjs", ["row", String(pr.number), `PR#${pr.number} · inherited (${closes})`], { cwd });
     if (w.status !== 0) return refusal(`ledger.mjs row ${pr.number} failed:`, w);
     queued.push(`queued PR#${pr.number} for review (${closes})`);
   }
-  const head = `${queued.length} PR(s) queued, ${carried} already on a carried row, ${advice.length} closing no issue`;
-  return ok([head, ...queued, ...advice].join("\n"));
+  const head = `${queued.length} PR(s) queued, ${carried} already on a carried row`;
+  return ok([head, ...queued].join("\n"));
 }
 
 function stranded({ cwd }) {

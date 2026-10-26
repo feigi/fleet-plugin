@@ -222,9 +222,9 @@ test("the SUGGEST /triage row says suggest, never run, and asks nobody to tick",
 // inherited PRs are in scope at all.
 const PHASE0 = Pin.file(join(REPO, "skills", "run-team", "references", "phase-0.md"));
 const foldInBlock = () =>
-  PHASE0.section("## Fold in every PR a prior run left open", "phase-0 fold-in block").text;
+  PHASE0.section("## Fold in every Owned PR a prior run left open", "phase-0 fold-in block").text;
 
-test("the fold-in block says inherited PRs are queued before shortlisting, as ordinary review work", () => {
+test("the fold-in block says inherited Owned PRs are queued before shortlisting, as ordinary review work", () => {
   // #1237's own review found this bullet unpinned while its sibling addition in
   // the same PR was pinned. Unpinned, a reword silently reverts phase 0 to
   // scanning ISSUES only and inherited PRs go unreviewed again — the #1222
@@ -236,9 +236,15 @@ test("the fold-in block says inherited PRs are queued before shortlisting, as or
   for (const role of ["review workflow", "fix-applier", "finisher"]) {
     assert.ok(s.includes(role), `fold-in block does not name the ${role}`);
   }
-  // The #590 tie-back is the reason the rule survives a narrowing pass: a PR
-  // that is both unreviewable and uncounted is what strands the gate.
-  assert.match(s, /unreviewable AND uncounted/);
+});
+
+test("the fold-in block states the ownership rule, the Ticketless row, and that a PR not owned gets no row and no advice", () => {
+  const s = foldInBlock();
+  assert.match(s, Pin.phrase("An Owned PR is an open PR, not a draft, whose author is the login `gh api user` answers to"));
+  assert.match(s, Pin.phrase("A PR that is not owned — another author's, a bot's, a fork's, a draft — gets no row and no advice, whatever it closes."));
+  assert.match(s, Pin.phrase("A login read that fails fails the step."));
+  assert.match(s, Pin.phrase("`PR#<pr> · inherited (closes no issue)` for a Ticketless PR"));
+  assert.doesNotMatch(s, /NEED review/, "the fold-in no longer prints a NEED review line");
 });
 
 // --------------------------------------------------------------------------

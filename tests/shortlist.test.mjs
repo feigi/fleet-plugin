@@ -49,6 +49,8 @@ const COPIED = ["shortlist.mjs", "candidates.mjs", "ledger.mjs", "ledger-grammar
   "closing-refs.mjs",
   // ledger.mjs counts a finisher's PR's release labels by their shared vocabulary.
   "release-labels.mjs",
+  // fleet-tick.mjs reads a PR's owner by one rule, and ledger.mjs asks the Ticketless test of a finisher's PR.
+  "owned-pr.mjs", "ticketless.mjs",
   // ledger.mjs reads a member's report for `settle --from-report`.
   "report-files.mjs", "report-schema.mjs"];
 

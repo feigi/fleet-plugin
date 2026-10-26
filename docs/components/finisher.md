@@ -36,13 +36,22 @@ durable, and applies the label the merge bot waits on.
    filing what isn't found), and every "applied" claim is re-verified
    against `git diff origin/main...HEAD`, plus the acceptance mutation
    re-run in the finisher's own detached worktree (never the owned one).
-   The re-run is skipped only on an **Inert diff**, which
+   The re-run is skipped on an **Inert diff**, which
    [`finisher-scope.mjs`](../../plugin/scripts/finisher-scope.mjs) reads at
    the dispatch pin: every path plain Markdown outside the prompt surface, or
-   a run-metrics file. Any other exit runs the mutation.
+   a run-metrics file. Any other exit runs the mutation. It is skipped too
+   for a **Ticketless PR** — one that closes no issue in its own repository
+   and that no settled `impl-<N>=PR#<M>` token names, as
+   [`ticketless.mjs`](../../plugin/scripts/ticketless.mjs) reads it — because
+   no ticket supplies a mutation to re-run; the report says so where a kill's
+   evidence line would go.
 4. **Add `ready-to-merge`** — only after finding *exactly one* release
-   label among `patch`/`minor`/`major` on the PR (zero or more than one
-   halts, naming what was found).
+   label among `patch`/`minor`/`major` on the PR (more than one halts,
+   naming what was found, and so does none on a ticket PR; a Ticketless PR
+   with none gets `patch` added first). A Ticketless PR is then labelled
+   only when its diff is an Inert diff: otherwise the script posts the
+   `ready-to-merge-head:` record, adds no label and exits 5, the finisher
+   halts `human`, and the maintainer's `ready-to-merge` is the merge.
 5. **Report** the label, every filed deferral's issue number, and any
    halt cause. Re-checks [Instruments](instruments.md) before acting on
    either read and again before adding the label.

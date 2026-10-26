@@ -653,6 +653,8 @@ test("#2083: a later finisher attempt decides — a live or labelled `-b` clears
     // A bare copy beside the settled token is what a whole-line rewrite
     // leaves; the member is still settled halted.
     ["#941 impl-941=PR#931 · finisher-pr-931 · finisher-pr-931=halted:other", ["halted:other"]],
+    // A Ticketless PR's non-inert diff: the maintainer's label is the merge.
+    ["#941 impl-941=PR#931 · finisher-pr-931=halted:human", ["halted:human"]],
     // Another PR's finisher is not this PR's latest attempt.
     ["#941 impl-941=PR#931 · finisher-pr-931=halted:missing · finisher-pr-950-b=labelled", ["halted:missing"]],
     ["#941 impl-941=PR#931 · finisher-pr-950=halted:missing", []],
@@ -1102,13 +1104,13 @@ test("#1820: a bare `review-pr-<n>` token (no `review=` prefix) names nobody —
 // fleet-tick.mjs's `reviewedAny` reads the token.
 
 // fleet-tick.mjs's review-due for the same rows, observed through deriveRun
-// rather than restated: every PR open, unlabelled and closing an issue.
+// rather than restated: every PR open, unlabelled, owned and closing an issue.
 // `headRefOid` defaults to a fixed placeholder, never absent — (#2083) a
 // genuinely missing head reads as "moved past reviewed=" in deriveRun, so
 // an omitted-by-accident fixture would silently exercise past-pin's
 // redispatch path instead of refusing the way production's openPrs() does.
 const tickReviewDue = (rows, prs, headRefOid = "abc1234abc1234abc1234abc1234abc1234abcd") => deriveRun({ rows, dispatched: [], drain: null },
-  prs.map((number) => ({ number, labels: [], closingIssuesReferences: [{ number }], headRefOid }))).reviewDue;
+  prs.map((number) => ({ number, labels: [], closingIssuesReferences: [{ number }], headRefOid, owned: true }))).reviewDue;
 
 test("#1820 amendment 5a: a settled `review=...=failed` with no redispatch is owed a review — reviewBacklog agrees with fleet-tick.mjs's reviewDue", () => {
   const row = "#961 impl-961=PR#961 · review=member:review-pr-961=failed";

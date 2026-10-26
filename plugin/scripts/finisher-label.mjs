@@ -12,14 +12,22 @@
 //
 // Steps, in this order, each one only if every earlier one held:
 //
+//   0  ask ticketless.mjs whether the PR is a Ticketless PR: one that closes no
+//      issue in its own repository and that no settled implementer token
+//      names. A test that could not look is exit 2.
 //   1  read the PR's labels and comments and count the release labels,
-//      `patch`/`minor`/`major`. Exactly one passes. Zero or several is exit 3
-//      and nothing is written. A repo whose label list defines none of the
-//      three has nothing to count: the count is skipped and the receipt says
-//      `releaseLabels: "undefined-in-repo"`. That list is read only when the
-//      PR carries none of them — one on the PR proves it is defined — and a
-//      list that fills the limit it was read with proves nothing, so it is
-//      exit 2 rather than a skipped count.
+//      `patch`/`minor`/`major`. Exactly one passes. Several is exit 3 and
+//      nothing is written. Zero is exit 3 and nothing is written, except on a
+//      Ticketless PR, which gets `patch` added and passes. A repo whose label
+//      list defines none of the three has nothing to count: the count is
+//      skipped and the receipt says `releaseLabels: "undefined-in-repo"`. That
+//      list is read only when the PR carries none of them — one on the PR
+//      proves it is defined — and a list that fills the limit it was read with
+//      proves nothing, so it is exit 2 rather than a skipped count.
+//   1b on a Ticketless PR, finisher-scope.mjs's Inert diff verdict at `--pin`,
+//      run in-process. A diff that is not inert, or a verdict that could not
+//      look, stops after step 2: the head record is posted, the label is not
+//      added, and the exit is 5.
 //   2  comment `ready-to-merge-head: <pin>`, the record the merge bot reads as
 //      the head the label was applied to — skipped when the newest such
 //      comment already names this pin.
@@ -33,11 +41,15 @@
 //
 // Stdout is always one JSON line, the receipt:
 //
-//   {pr, pin, releaseLabels, commented, added, readBack, exit, firstRead
-//    [, step, error]}
+//   {pr, pin, ticketless, releaseLabels, patchAdded, inert, commented, added,
+//    readBack, exit, firstRead [, step, error]}
 //
-//   releaseLabels  the release labels the PR carried, or "undefined-in-repo",
-//                  or null when step 1 never got an answer
+//   ticketless     the Ticketless test's answer, null when it never got one
+//   releaseLabels  the release labels the PR carried (`patch` once added to a
+//                  Ticketless PR), or "undefined-in-repo", or null when step 1
+//                  never got an answer
+//   patchAdded     this run added `patch`
+//   inert          the Inert diff verdict object, null when it never ran
 //   commented      this run posted the head record
 //   added          this run wrote the label
 //   readBack       every label name the step 4 read carried, null if it never ran
@@ -52,16 +64,22 @@
 // Exit vocabulary:
 //
 //   0  the read-back carries `ready-to-merge`
-//   2  the invocation or a `gh` call failed — its stderr is in the receipt and
-//      on stderr, and no later step ran
+//   2  the invocation or a `gh` call failed, or the Ticketless test could not
+//      look — its stderr is in the receipt and on stderr, and no later step ran
 //   3  the PR does not carry exactly one release label — nothing was written
 //   4  every write returned 0 and the read-back does not carry the label
+//   5  a Ticketless PR whose diff is not inert, or whose verdict could not
+//      look: the head record is posted and the label is not added, so the
+//      maintainer's `ready-to-merge` is the merge
 
 import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
+import { resolve } from "node:path";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
+import { inertVerdict } from "./finisher-scope.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { LABEL_LIST_ARGS, LABEL_LIST_LIMIT, releaseLabelsDefined, releaseLabelsIn } from "./release-labels.mjs";
+import { ticketlessVerdict } from "./ticketless.mjs";
 
 const NAME = "finisher-label";
 const LABEL = "ready-to-merge";
@@ -85,7 +103,10 @@ if (pr === null || pinArg === null) die(USAGE);
 const receipt = {
   pr,
   pin: pinArg,
+  ticketless: null,
   releaseLabels: null,
+  patchAdded: false,
+  inert: null,
   commented: false,
   added: false,
   readBack: null,
@@ -150,6 +171,12 @@ const namedList = (v) => Array.isArray(v) && v.every((l) => isObject(l) && typeo
 
 const labelNames = (v) => v.labels.map((l) => l.name);
 
+// --- 0: the Ticketless test ------------------------------------------------
+const test = await ticketlessVerdict({ pr, repo: repo === null ? null : resolve(repo) });
+if (test.exit === 2) fail("ticketless", test.reason);
+const ticketless = test.exit === 0;
+receipt.ticketless = ticketless;
+
 // --- 1: the release-label count -------------------------------------------
 const first = ghJson("read-labels", ["pr", "view", String(pr), "--json", "labels,comments"], (v) =>
   isObject(v) && namedList(v.labels) && Array.isArray(v.comments) && v.comments.every((c) => isObject(c) && typeof c.body === "string" && typeof c.createdAt === "string"));
@@ -160,18 +187,30 @@ const found = releaseLabelsIn(firstLabels);
 if (found.length === 0) {
   const defined = ghJson("list-labels", LABEL_LIST_ARGS, namedList).map((l) => l.name);
   const state = releaseLabelsDefined(defined);
-  if (state === "defined") {
-    finish(3, { releaseLabels: found }, "the PR carries no release label (patch, minor or major); nothing was written");
-  }
   if (state === "cut-off") {
     fail("list-labels", `the repository has ${LABEL_LIST_LIMIT} or more labels, so the list may be cut off before patch, minor or major`);
   }
-  receipt.releaseLabels = "undefined-in-repo";
+  if (state === "undefined") {
+    receipt.releaseLabels = "undefined-in-repo";
+  } else if (!ticketless) {
+    finish(3, { releaseLabels: found }, "the PR carries no release label (patch, minor or major); nothing was written");
+  } else {
+    // No ticket picks the bump of a Ticketless PR, so it gets the smallest.
+    gh("add-patch", ["pr", "edit", String(pr), "--add-label", "patch"]);
+    receipt.patchAdded = true;
+    receipt.releaseLabels = ["patch"];
+  }
 } else if (found.length > 1) {
   finish(3, { releaseLabels: found }, `the PR carries more than one release label (${found.join(", ")}); nothing was written`);
 } else {
   receipt.releaseLabels = found;
 }
+
+// --- 1b: the Inert diff verdict, on a Ticketless PR ------------------------
+// No ticket gives a Ticketless PR its ruling or its acceptance mutation, so it
+// merges unattended only when its whole diff is inert; otherwise the head is
+// recorded and the maintainer's label is the merge.
+if (ticketless) receipt.inert = inertVerdict({ worktree: resolve(repo ?? "."), pin });
 
 // --- 2: the head record ----------------------------------------------------
 // The newest record wins, the way the merge bot reads it: a matching record
@@ -187,6 +226,11 @@ const labelled = firstLabels.includes(LABEL);
 if (!recorded) {
   gh("comment", ["pr", "comment", String(pr), "--body", `ready-to-merge-head: ${pin}`]);
   receipt.commented = true;
+}
+
+if (ticketless && receipt.inert.exit !== 0) {
+  const why = receipt.inert.verdict === "unknown" ? `its diff could not be read (${receipt.inert.reason})` : "its diff is not inert";
+  finish(5, {}, `the PR is a Ticketless PR and ${why}: the head is recorded and ${LABEL} is left to the maintainer`);
 }
 
 // --- 3: the label ----------------------------------------------------------

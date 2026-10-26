@@ -94,9 +94,8 @@ const phase0Command = (session) => `~/.fleet/bin/fleet-run phase0.mjs --session 
  * run's, else null.
  *
  * A step `failed` or `pending`, in a status this reader does not know, or
- * absent from the receipt, holds. `drift` and `unanswered`, and a `NEED` line
- * in a `fold-in` step's output, are advice: named on the line, holding
- * nothing.
+ * absent from the receipt, holds. `drift` and `unanswered` are advice: named
+ * on the line, holding nothing.
  */
 export function phase0Gate(read, { path, controllerAt = null, controller = "none" }) {
   const held = (why, session = null) => ({
@@ -120,11 +119,7 @@ export function phase0Gate(read, { path, controllerAt = null, controller = "none
     ...steps.filter(([, step]) => !DONE.has(step.status)).map(([name]) => name),
     ...absent,
   ];
-  const advice = [
-    ...steps.filter(([, step]) => ADVICE.has(step.status)).map(([name, step]) => `${name} ${step.status}`),
-    ...String(receipt.steps["fold-in"]?.output ?? "").split("\n").map((l) => l.trim())
-      .filter((l) => l.startsWith("NEED ")).map((l) => `fold-in ${l}`),
-  ];
+  const advice = steps.filter(([, step]) => ADVICE.has(step.status)).map(([name, step]) => `${name} ${step.status}`);
   const session = receipt.session === "" ? null : receipt.session;
   if (incomplete.length) {
     const said = held(incomplete.join(", "), session);

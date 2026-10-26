@@ -22,12 +22,12 @@ const phase0 = () => PHASE0.text;
 // The step ends at the next rule's opener, not at a blank line: its dispatch is
 // rendered by dispatch-prompt.mjs, so the step carries no quoted prompt.
 const step = () => Pin.of(phase0(), "phase0()").between("**Derive the Recipe — the Recipe derivation step — before the fold-in below", "**Mid-run, a cache that stops running", "the phase-0 Recipe derivation step").text;
-const stall = () => Pin.of(phase0(), "phase0()").paragraph("**Mid-run, a cache that stops running is re-derived once", "the re-derive-once and stall rule", "## Fold in every PR a prior").text;
+const stall = () => Pin.of(phase0(), "phase0()").paragraph("**Mid-run, a cache that stops running is re-derived once", "the re-derive-once and stall rule", "## Fold in every Owned PR a prior").text;
 
 test("phase 0 derives the Recipe before the fold-in and before the first claim", () => {
   const p0 = phase0();
   const at = p0.indexOf("**Derive the Recipe");
-  assert.ok(at !== -1 && at < p0.indexOf("**Fold in every PR a prior run left open"),
+  assert.ok(at !== -1 && at < p0.indexOf("**Fold in every Owned PR a prior run left open"),
     "the Recipe derivation step must come before the fold-in: folded-in PRs are reviewed, and a review reads the Test entrypoint from the cache");
   assert.match(step(), Pin.phrase("before the first claim."));
 });

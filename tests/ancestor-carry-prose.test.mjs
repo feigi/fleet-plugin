@@ -15,7 +15,7 @@ const RUN_TEAM = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "r
 // The phase-0 step paragraphs live in the reference file, one heading per moved step paragraph.
 const PHASE0 = Pin.file(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "references", "phase-0.md"));
 const rotateStep = () => PHASE0.between("**Rotate the ledger before the fold-in below", "**The guard is the", "phase-0 rotate step").text;
-const foldIn = () => PHASE0.between("**Fold in every PR a prior run left open", "**Resume the claims a dead run left", "phase-0 fold-in step").text;
+const foldIn = () => PHASE0.between("**Fold in every Owned PR a prior run left open", "**Resume the claims a dead run left", "phase-0 fold-in step").text;
 const ancestor = () => PHASE0.bullet("- `prior: ancestor` — this session's own earlier run", "- `prior: none`", "phase-0 stranded-claim ancestor branch").text;
 // The after-/resume hold's full text moved to references/member-lifecycle.md
 // (#3545); SKILL.md's tier-check bullet keeps the rule and points there.

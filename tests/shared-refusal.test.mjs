@@ -382,9 +382,9 @@ test("#878: every numArg() consumer tests absence with === null, never a bare fa
   // assertion in the loop is skipped and this test passes for the wrong
   // reason. Pinned against the known set (#878's routed three, plus
   // merge-gate.mjs's `--pr` (#1800), finisher-label.mjs's `--pr` (#3186),
-  // tier-roles.mjs's `--in-flight` (#3228), phase0.mjs's `--in-flight` and
-  // finisher-audit.mjs's `--sample-seconds` (#3187)), not just a non-empty check, so the scan
+  // tier-roles.mjs's `--in-flight` (#3228), phase0.mjs's `--in-flight`,
+  // finisher-audit.mjs's `--sample-seconds` (#3187) and ticketless.mjs's `--pr`), not just a non-empty check, so the scan
   // itself breaking (a reformat of the import line, say) reds here instead of
   // silently stopping coverage.
-  assert.deepEqual(consumers.sort(), ["ci-state.mjs", "diff-stats.mjs", "finisher-audit.mjs", "finisher-label.mjs", "merge-gate.mjs", "phase0.mjs", "pr-overlap.mjs", "tier-roles.mjs"], "the numArg() consumer sweep found a different set than #878 routed — update this list deliberately for a new caller");
+  assert.deepEqual(consumers.sort(), ["ci-state.mjs", "diff-stats.mjs", "finisher-audit.mjs", "finisher-label.mjs", "merge-gate.mjs", "phase0.mjs", "pr-overlap.mjs", "ticketless.mjs", "tier-roles.mjs"], "the numArg() consumer sweep found a different set than #878 routed — update this list deliberately for a new caller");
 });

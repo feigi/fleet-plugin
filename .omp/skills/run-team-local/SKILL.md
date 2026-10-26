@@ -64,8 +64,9 @@ In this order:
    missing (a fresh checkout), run `node plugin/scripts/metrics-refresh.mjs`
    first. **Never add `ready-to-merge` to the re-fit PR and never merge it
    yourself:** it is not the run's data-only metrics PR, and it closes no
-   issue, so it waits for the next run's phase 0 to fold it into that run's
-   review queue.
+   issue, so it waits for the next run's phase 0, which folds it in as a
+   Ticketless PR, reviews it, and stops it for a human, because
+   `router-table.json` is not an Inert diff.
 
 ## Reading it
 

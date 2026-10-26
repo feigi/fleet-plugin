@@ -149,6 +149,14 @@ const DIGEST_PROJECTION_RETIRED = [
 // to it "as above" pointed at nothing in the brief: the sentence now points
 // at the agent definition instead.
 const DUTY3_POINTER_RETIRED = ["Duty 3's script decides whether the label is on, as above."];
+// Duty 3's script gained a Ticketless PR's path: `patch` added, exit 5 and its
+// halt cause, so the three sentences that described the old exits are replaced,
+// not lost.
+const DUTY3_TICKETLESS_RETIRED = [
+  "It confirms exactly one of `patch`/`minor`/`major` is on the PR, records the head you audited, adds `ready-to-merge`, and reads the labels back.",
+  "Exit 3 means the PR carries zero or more than one release label: you are halted before the label, and the receipt names which it found.",
+  "Every non-zero exit halts you with cause `other`, with the receipt as evidence, and you do not run any of its steps by hand to get past it.",
+];
 // Every detached push goes through push-sync.mjs, which also moves the
 // worktree holding the branch, so the conflict kind's bare refspec push is
 // replaced, not lost.
@@ -184,10 +192,10 @@ const PAIRS = [
   { role: "fix-applier", kind: "dispositions-retry", fixture: "fix-applier-dispositions-retry.md", retired: [...REPORT_FILE_RETIRED, ...DIGEST_PROJECTION_RETIRED, ...RECIPE_CHECK_RETIRED, ...CLOSED_RECORD_RETIRED],
     args: { worktree: "/abs/wt-retry", branch: "retry-branch", testCmd: "TESTCMD-3", scratch: "/abs/scratch-retry", pr: "3294", run: "run-ZyXw9876", "mismatched-record": "/abs/scratch-retry/dispositions-fix-pr-3294.json", violations: "VIOLATION-LIST-1" },
     fills: { "abs-path": "worktree", branch: "branch", testCmd: "testCmd", scratch: "scratch", pr: "pr", run: "run", "mismatched record": "mismatched-record", violations: "violations" } },
-  { role: "finisher", kind: "fresh", fixture: "finisher-fresh.md",
+  { role: "finisher", kind: "fresh", fixture: "finisher-fresh.md", retired: DUTY3_TICKETLESS_RETIRED,
     args: { worktree: "/abs/wt-fin", pin: PIN, pr: "3295", testCmd: "TESTCMD-4", scratch: "/abs/scratch-fin" },
     fills: { "abs-path": "worktree", "your dispatch pin": "pin", M: "pr", testCmd: "testCmd", scratch: "scratch" } },
-  { role: "finisher", kind: "repair", fixture: "finisher-repair.md", retired: DUTY3_POINTER_RETIRED,
+  { role: "finisher", kind: "repair", fixture: "finisher-repair.md", retired: [...DUTY3_POINTER_RETIRED, ...DUTY3_TICKETLESS_RETIRED],
     args: { worktree: "/abs/wt-fin-r", pin: PIN, pr: "3296", testCmd: "TESTCMD-5", scratch: "/abs/scratch-fin-r" },
     fills: { "abs-path": "worktree", "your dispatch pin": "pin", M: "pr", testCmd: "testCmd", scratch: "scratch" } },
   { role: "merge-bot", kind: null, fixture: "merge-bot.md", retired: PHASE_3_POINTERS_RETIRED,

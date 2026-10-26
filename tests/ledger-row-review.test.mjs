@@ -434,7 +434,7 @@ test("rows with no review tokens, and rows of other PRs, are accepted as before"
 
 const HEAD_REVIEWED = "abc1234";
 const HEAD_FIXED = "def5678";
-const PR = (head) => [{ number: 724, labels: [], closingIssuesReferences: [{ number: 658 }], headRefOid: `${head}${"0".repeat(33)}`, mergeable: "MERGEABLE" }];
+const PR = (head) => [{ number: 724, labels: [], closingIssuesReferences: [{ number: 658 }], headRefOid: `${head}${"0".repeat(33)}`, mergeable: "MERGEABLE", owned: true }];
 const tick = (read, head = HEAD_FIXED) => {
   const l = read();
   return deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null }, PR(head));

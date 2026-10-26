@@ -624,14 +624,20 @@ test("phase 0: a gate that gave no answer holds, never reads as finished", () =>
 
 const HEAD_A = "abc1234" + "0".repeat(33);
 const HEAD_B = "def5678" + "0".repeat(33);
+// The login the stub `gh api user` answers to: the run's own.
+const RUN_LOGIN = "fleet-maintainer";
 // A PR in gh's own shape: each of `closes` an issue number in its own
 // repository, or a reference object as it stands — `ref(n, "other/repo")`
 // for another repository's issue. deriveRun() reads only each reference's
 // number, so the cases that call it directly read the same.
-const pr = (number, labels = [], closes = [number + 1000], headRefOid = HEAD_B, mergeable = "MERGEABLE", body = "") => ({
+// `over` replaces any field: `{ owned: false }` for the pure cases that read
+// deriveRun's `owned`, `{ isDraft: true }` or `{ author: { login: "x" } }` for
+// the CLI, whose openPrs() derives `owned` from the login itself.
+const pr = (number, labels = [], closes = [number + 1000], headRefOid = HEAD_B, mergeable = "MERGEABLE", body = "", over = {}) => ({
   number, labels: labels.map((name) => ({ name })),
   closingIssuesReferences: closes.map((r) => (typeof r === "number" ? ref(r) : r)),
   headRefOid, mergeable, body, url: prUrl(number),
+  author: { login: RUN_LOGIN }, isDraft: false, owned: true, ...over,
 });
 const run = (ledger, prs = [], closed, prStates) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs, closed, prStates);
 
@@ -873,9 +879,11 @@ test("deriveRun: review is due on open PRs that close an issue and carry no revi
   }, [
     pr(33), pr(31), pr(30), pr(32),
     pr(34, ["ready-to-merge"]), // signed off — not review work
-    pr(35, [], []), // closes no issue — not review work (#590)
+    pr(35, [], []), // owned and closes no issue — review work like any other
+    pr(36, [], [], HEAD_B, "MERGEABLE", "", { owned: false }), // not owned, closing nothing
+    pr(37, [], [10], HEAD_B, "MERGEABLE", "", { owned: false }), // not owned, closing an issue: still not the fleet's
   ]);
-  assert.deepEqual(r.reviewDue, [31, 32, 33]);
+  assert.deepEqual(r.reviewDue, [31, 32, 33, 35]);
 });
 
 test("deriveRun: a PR row keyed by the PR's own number is read as that PR's", () => {
@@ -937,8 +945,8 @@ test("deriveRun: a past-pin halt is answered once the head is the reviewed one, 
   not(`${halted} review=wf:b reviewed=def5678:0/0/0:run-def5678r`, HEAD_B); // and returned
   // A fix-applier's push after that re-review is duty 2's again, not a second re-review.
   not(`${halted} review=wf:b reviewed=def5678:1/0/0:run-def5678r · fix-pr-40=applied:0123456`, "0123456" + "0".repeat(33));
-  // Signed off, or closing no issue, is no review work whatever the halt says.
-  assert.deepEqual(run({ rows: [halted] }, [pr(40, ["ready-to-merge"], [10], HEAD_B), pr(41, [], [], HEAD_B)]).reviewDue, []);
+  // Signed off, or not owned, is no review work whatever the halt says.
+  assert.deepEqual(run({ rows: [halted] }, [pr(40, ["ready-to-merge"], [10], HEAD_B), pr(41, [], [], HEAD_B, "MERGEABLE", "", { owned: false })]).reviewDue, []);
 });
 
 test("deriveRun: a ticket row settled =PR#M shares PR M's state with M's own row, in either order (#2283)", () => {
@@ -1930,7 +1938,7 @@ const SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-tick.mjs", import.
 // or transitive — and ledger.mjs with its own, because the tick reads the
 // ledger through `ledger.mjs read`. An unlisted sibling is a module-not-found
 // at startup: exit 1, a shape no case below expects.
-const SIBLING_MODULES = ["arg.mjs", "closing-refs.mjs", "fleet-dir.mjs", "fleet-state.mjs", "gh-aliased-read.mjs", "git-env.mjs", "is-cli.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs", "release-labels.mjs", "report-files.mjs", "report-schema.mjs"].map(
+const SIBLING_MODULES = ["arg.mjs", "closing-refs.mjs", "fleet-dir.mjs", "fleet-state.mjs", "gh-aliased-read.mjs", "git-env.mjs", "is-cli.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs", "owned-pr.mjs", "phase0-receipt.mjs", "pid-lock.mjs", "proc.mjs", "release-labels.mjs", "report-files.mjs", "report-schema.mjs", "ticketless.mjs"].map(
   (m) => [m, fileURLToPath(new URL(`../plugin/scripts/${m}`, import.meta.url))],
 );
 
@@ -1991,6 +1999,11 @@ case "$1 $2" in
     # Real gh returns only the fields --json names: a list that omits url gets rows without it.
     case ",$*," in *,url,*|*,url\\ *) ;; *) echo "gh: --json must request url" >&2; exit 1 ;; esac
     [ -n "$PR_LIST_LOG" ] && echo "$*" >> "$PR_LIST_LOG"; [ -n "$PR_FAIL" ] && { echo "boom" >&2; exit 1; }; cat "$FIXTURE_PRS" ;;
+  "api user")
+    # The login the credentials answer to: GH_LOGIN, else the run's own. LOGIN_FAIL fails the read, LOGIN_EMPTY answers nothing.
+    [ -n "$LOGIN_FAIL" ] && { echo "boom" >&2; exit 1; }
+    [ -n "$LOGIN_EMPTY" ] && exit 0
+    printf '%s\\n' "\${GH_LOGIN-${RUN_LOGIN}}" ;;
   "issue view")
     echo "$3" >> "$ISSUE_VIEW_LOG"
     [ -n "$ISSUE_VIEW_FAIL" ] && { echo "gh: issue view failed" >&2; exit 1; }
@@ -2987,7 +3000,7 @@ test("CLI: a PR list at the limit refuses rather than serving a truncated one", 
   assert.match(r.stderr, /truncated|capped/i);
 });
 
-const ROW_SHAPE = /gh pr list did not return \{number,labels,closingIssuesReferences\[\{number,url\|repository\{name,owner\{login\}\}\}\],headRefOid,mergeable,body,url\} rows, url ending \/pull\/<number>/;
+const ROW_SHAPE = /gh pr list did not return \{number,labels,closingIssuesReferences\[\{number,url\|repository\{name,owner\{login\}\}\}\],headRefOid,mergeable,body,url,author\{login\},isDraft\} rows, url ending \/pull\/<number>/;
 
 test("CLI: an issue-closing reference with no integer number refuses the tick rather than miscounting it", () => {
   const { number: _n, ...unnumbered } = ref(7);
@@ -3032,8 +3045,8 @@ test("CLI: a PR whose url does not end /pull/<number>, or that has none, refuses
 
 // Another repository's reference closes none of this repository's tickets,
 // whatever its number: an open PR whose only reference is one is in nobody's
-// slot, owes no review, and absorbs no owed replacement.
-test("CLI: an open PR whose only closing reference is another repository's #N is not in flight, not due review, and absorbs no ticket N", () => {
+// slot and absorbs no owed replacement. An owned PR owes a review all the same.
+test("CLI: an open PR whose only closing reference is another repository's #N is not in flight and absorbs no ticket N", () => {
   const foreign = (n) => [pr(60, [], [ref(n, "other-org/other-repo")])];
   const base = { shortlist: shortlistText([1, 2, 3]), issueStates: { 7: "OPEN" } };
   const killed = { rows: ["#7 impl-7=killed · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7=killed"] };
@@ -3041,7 +3054,7 @@ test("CLI: an open PR whose only closing reference is another repository's #N is
   assert.equal(owed.status, 0, owed.stderr);
   assert.match(owed.stdout, /\(implementers=1 prs=0 /m, "the killed impl-7 still owes its replacement, and the PR holds no slot");
   assert.deepEqual(owed.issueViews, ["7"], "the owed ticket is probed: no PR closes it");
-  assert.doesNotMatch(owed.stdout, /review PR#60/);
+  assert.match(owed.stdout, /DISPATCH review PR#60/, "an owned PR closing nothing here is review work");
   // The same PR closing this repository's #7 absorbs it.
   const absorbed = runCli([], { ...base, ledger: killed, prs: [pr(60, [], [7])] });
   assert.match(absorbed.stdout, /\(implementers=0 prs=1 /m);
@@ -3051,7 +3064,7 @@ test("CLI: an open PR whose only closing reference is another repository's #N is
   const live = runCli([], { ...base, ledger: { rows: ["#7 impl-7 · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7"] }, prs: foreign(7) });
   assert.equal(live.status, 0, live.stderr);
   assert.match(live.stdout, /\(implementers=1 prs=0 /m);
-  assert.doesNotMatch(live.stdout, /review PR#60/);
+  assert.match(live.stdout, /DISPATCH review PR#60/);
   const mixed = runCli([], { ...base, prs: [pr(60, [], [ref(8, "other-org/other-repo"), 9])] });
   assert.match(mixed.stdout, /\(implementers=0 prs=1 /m, "beside its own reference, another repository's changes nothing");
 });
@@ -3088,13 +3101,31 @@ test("CLI: a gh row missing body refuses rather than reading every park as unmat
   const r = runCli([], { prs: [bodiless], shortlist: shortlistText([]) });
   assert.equal(r.status, 2);
   assert.equal(r.stdout.trim(), "");
-  assert.match(r.stderr, /mergeable,body,url\}/);
+  assert.match(r.stderr, /mergeable,body,url,author\{login\},isDraft\}/);
   const logDir = mkdtempSync(join(tmpdir(), "fleet-tick-prlist-"));
   t.after(() => rmSync(logDir, { recursive: true, force: true }));
   const log = join(logDir, "pr-list.log");
   const ok = runCli([], { prs: [pr(1)], shortlist: shortlistText([]), env: { PR_LIST_LOG: log } });
   assert.equal(ok.status, 0, ok.stderr);
   assert.match(readFileSync(log, "utf8"), /--json \S*\bbody\b/);
+});
+
+test("CLI: a gh row with no author, a malformed one, or no boolean isDraft refuses rather than reading the PR as not owned", () => {
+  const { author: _a, ...authorless } = pr(1);
+  const { isDraft: _d, ...draftless } = pr(1);
+  const rows = [authorless, { ...pr(1), author: "x" }, { ...pr(1), author: {} }, draftless, { ...pr(1), isDraft: "false" }, { ...pr(1), isDraft: null }];
+  for (const row of rows) {
+    const r = runCli([], { prs: [row], shortlist: shortlistText([]) });
+    assert.equal(r.status, 2, JSON.stringify(row));
+    assert.equal(r.stdout.trim(), "", JSON.stringify(row));
+    assert.match(r.stderr, ROW_SHAPE, JSON.stringify(row));
+  }
+  // A null author, an account GitHub no longer has, is read: not owned, so no review is due.
+  const ghost = runCli([], { prs: [{ ...pr(1), author: null }], shortlist: shortlistText([]) });
+  assert.equal(ghost.status, 0, ghost.stderr);
+  assert.doesNotMatch(ghost.stdout, /DISPATCH review PR#1\b/);
+  const owned = runCli([], { prs: [pr(1)], shortlist: shortlistText([]) });
+  assert.match(owned.stdout, /DISPATCH review PR#1\b/, "the same row, authored by the run's login, is due");
 });
 
 test("CLI: a gh row with no mergeable, or one outside GitHub's enum, refuses rather than reading every conflict as absent", () => {
@@ -3128,7 +3159,7 @@ test("CLI: a tracked PR GitHub reads CONFLICTING prints CONFLICT on the reviewer
   });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^reviewers {4}0\/2 → CONFLICT PR#40 +\(.* — .*ledger\.mjs row <key> "<text> · conflict-hold:#40 \(conflict: mergeable=CONFLICTING\)".*\)$/m);
-  assert.doesNotMatch(r.stdout, /PR#41/);
+  assert.doesNotMatch(r.stdout, /CONFLICT PR#41/);
   const calls = readFileSync(log, "utf8").trim().split("\n");
   assert.equal(calls.length, 1, "no extra gh call");
   assert.match(calls[0], /--json \S*\bmergeable\b/);
@@ -3657,16 +3688,68 @@ test("CLI: a finished receipt whose run's controller has exited holds every disp
   assert.match(alive.stdout, /^implementers 2\/3 → PULL #420 /m);
 });
 
-test("CLI: ruleset drift and a fold-in NEED print as advice on a PHASE0-ADVICE line and hold nothing", () => {
+test("CLI: ruleset drift prints as advice on a PHASE0-ADVICE line and holds nothing; a fold-in NEED line is not advice", () => {
   const r = runCli([], {
     ...PHASE0_LIVE,
-    phase0: (x) => withStep("fold-in", { output: "queued 0 PR(s), 0 already on a carried row, 1 closing no issue\nNEED review PR#77 (closes no issue)" })(
+    phase0: (x) => withStep("fold-in", { output: "queued 0 PR(s), 0 already on a carried row\nNEED review PR#77 (closes no issue)" })(
       withStep("ruleset", { status: "drift", output: "- required_approving_review_count" })(x)),
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.split("\n")[0], "PHASE0-ADVICE ruleset drift, fold-in NEED review PR#77 (closes no issue)");
+  assert.equal(r.stdout.split("\n")[0], "PHASE0-ADVICE ruleset drift");
   assert.doesNotMatch(r.stdout, /phase 0 incomplete|PHASE0-INCOMPLETE/);
   assert.match(r.stdout, /^implementers 2\/3 → PULL #420 /m);
+});
+
+// An owned PR closing no issue is review work like any other; a draft and
+// another author's PR are not, whatever they close.
+test("CLI: an owned PR closing no issue with no review on record is dispatched a review; a draft, a stranger's and a bot's PR are not", () => {
+  const owned = runCli([], { ...IDLE, prs: [pr(80, [], [])] });
+  assert.equal(owned.status, 0, owned.stderr);
+  assert.match(owned.stdout, /^reviewers +\+?\d+\/\d+ → DISPATCH review PR#80 /m);
+  const others = [
+    ["a draft closing nothing", pr(81, [], [], HEAD_B, "MERGEABLE", "", { isDraft: true })],
+    ["a draft closing an issue", pr(82, [], [10], HEAD_B, "MERGEABLE", "", { isDraft: true })],
+    ["another author's PR closing an issue", pr(83, [], [11], HEAD_B, "MERGEABLE", "", { author: { login: "stranger" } })],
+    ["a bot's PR closing nothing", pr(84, [], [], HEAD_B, "MERGEABLE", "", { author: { login: "app/renovate", is_bot: true } })],
+  ];
+  for (const [what, p] of others) {
+    const r = runCli([], { ...IDLE, prs: [p] });
+    assert.equal(r.status, 0, `${what}: ${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /DISPATCH review/, what);
+  }
+  // The login the credentials answer to decides: the same PR is owned under another login.
+  const other = runCli([], { ...IDLE, prs: [pr(83, [], [11], HEAD_B, "MERGEABLE", "", { author: { login: "stranger" } })], env: { GH_LOGIN: "stranger" } });
+  assert.match(other.stdout, /DISPATCH review PR#83 /);
+});
+
+test("CLI: a login read that fails or answers nothing refuses the tick naming the read, rather than owning nothing", () => {
+  for (const [what, env] of [["fails", { LOGIN_FAIL: "1" }], ["answers nothing", { LOGIN_EMPTY: "1" }]]) {
+    const r = runCli([], { ...IDLE, prs: [pr(80, [], [])], env });
+    assert.equal(r.status, 2, `${what}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /gh api user -q \.login /, what);
+    assert.doesNotMatch(r.stdout, /DISPATCH/, what);
+  }
+});
+
+test("CLI: the open-PR read asks for each PR's author and draft flag", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-login-")));
+  try {
+    const log = join(dir, "pr-list.log");
+    const r = runCli([], { ...IDLE, prs: [pr(80, [], [])], env: { PR_LIST_LOG: log } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(readFileSync(log, "utf8"), /--json \S*\bauthor\b\S*\bisDraft\b/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("deriveRun: an owned PR closing no issue is never In flight, and a PR closing an issue still is, owned or not", () => {
+  const none = run({}, [pr(50, [], [])]);
+  assert.deepEqual([none.inFlight, none.inFlightPrs, none.reviewDue], [0, 0, [50]]);
+  const closing = run({}, [pr(51, [], [7])]);
+  assert.deepEqual([closing.inFlight, closing.inFlightPrs], [1, 1]);
+  const stranger = run({}, [pr(52, [], [8], HEAD_B, "MERGEABLE", "", { owned: false })]);
+  assert.deepEqual([stranger.inFlightPrs, stranger.reviewDue], [1, []], "the In-flight count still reads every open PR that closes an issue");
 });
 
 test("CLI: --fold-unchanged under an unfinished phase 0 folds to one line naming the hold, quiet rising every tick", () => {
@@ -4068,7 +4151,7 @@ test("CLI: --fold-unchanged does not fold when the rows change, even with nothin
   // A queued candidate, held behind a lower PR: still nothing to act on.
   const held = {
     ...IDLE, ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · held-behind:#38 · tier-ok=impl-10:fleet-implementer"] },
-    prs: [pr(38, [], []), pr(40, ["ready-to-merge"])],
+    prs: [pr(38, [], [], HEAD_B, "MERGEABLE", "", { author: { login: "stranger" } }), pr(40, ["ready-to-merge"])],
   };
   const second = runCli(["--fold-unchanged", "--state", path], held);
   assert.match(second.stdout, /^merge-bot {4}0\/1 → HOLD\b/m);
@@ -4344,6 +4427,7 @@ test("CLI: a tick refused by the gh or the ledger read still records `ticked`, a
   const path = join(dir, "heartbeat.json");
   const refusals = {
     "gh pr list": { ...IDLE, env: { PR_FAIL: "1" } },
+    "gh api user": { ...IDLE, env: { LOGIN_FAIL: "1" } },
     "ledger.mjs read": {
       ...IDLE,
       beforeRun: (repo) => writeFileSync(join(repo, ".fleet", "ledger.md"), `${ledgerText({ drain: "budget" })}- a second marker\n`),
@@ -4415,6 +4499,9 @@ test("CLI: a draining run with no open PR and no live implementer ends on the ru
   // An open PR, a live implementer, or no drain marker: the run is not over.
   const notOver = {
     "an open PR": { ...IDLE, ledger: { ...settled, drain: "budget" }, prs: [pr(9)] },
+    "an open PR the run does not own": { ...IDLE, ledger: { ...settled, drain: "budget" }, prs: [pr(9, [], [], HEAD_B, "MERGEABLE", "", { author: { login: "stranger" } })] },
+    "an open draft PR": { ...IDLE, ledger: { ...settled, drain: "budget" }, prs: [pr(9, [], [], HEAD_B, "MERGEABLE", "", { isDraft: true })] },
+    "an owned open PR closing no issue": { ...IDLE, ledger: { ...settled, drain: "budget" }, prs: [pr(9, [], [])] },
     "a live implementer": { ...IDLE, ledger: { rows: ["#5 impl-5 · tier-ok=impl-5:fleet-implementer"], dispatched: ["impl-5"], drain: "budget" } },
     "no drain marker": { ...IDLE, ledger: settled },
   };

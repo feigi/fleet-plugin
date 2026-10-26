@@ -74,9 +74,6 @@ Nothing in this phase, or in any later one, asks the maintainer which tickets to
      row is written. A `report #<n> — <why>` line is the maintainer's and
      nothing else, and a `carried` line is a live token to reconcile first.
      A closed-PR `report` takes `replace`/`release #<n>`.
-   - `NEED review PR#<pr> (closes no issue)` — an open PR a prior run left
-     that no row can queue. Advice, never an exit status: hand-dispatch its
-     review exactly as ticket work, or leave it.
 
    A `drift` or `unanswered` ruleset step is advice too: surface the diff and
    go on. See references/phase-0.md.
@@ -558,7 +555,7 @@ Dispatch a finisher only when every test here passes at once — the review retu
   whole route to a finisher**: a `no-op` report satisfies the gate above by
   itself, so nothing further is owed and no further event is coming.
 - **The PR's closing references match its ruling and exclude its own suggestion-band record** → `ledger.mjs dispatch` refuses the finisher otherwise, naming the PR and the ticket: repair the body with `gh pr edit <M> --body-file <file>`, then dispatch again.
-- **The PR carries exactly one release label, or its repo defines none** → `ledger.mjs dispatch` refuses the finisher otherwise, naming `patch` as the repair only when the PR closes no ticket and no settled `impl-<N>=PR#<M>` token names it. Fix the labels, then dispatch again. In full: references/finisher.md.
+- **The PR carries exactly one release label, or its repo defines none** → `ledger.mjs dispatch` refuses the finisher otherwise, except a Ticketless PR with none, which `finisher-label.mjs` labels `patch`. Fix them, then dispatch again. In full: references/finisher.md.
 - **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`** → the CI edge never
   fires: dispatch the finisher off the reviewer's final verdict the moment it
   lands, never while you still owe it a reply. Its gate is then the
@@ -755,6 +752,7 @@ decides the rest — two resolve automatically, every other one escalates:
 | `past-pin` | **Automatic, through the tick: re-review.** The head carries commits no reviewer read. The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's tokens as any review's, with `ledger.mjs review <M>` onto the PR's row, its runner under the next letter the PR's rows do not carry yet (`review-pr-<M>-b`, or `-c` where a retry already took `-b`) — `review` refuses a second `review-pr-<M>` and names the free one — and its result reaches a fresh finisher through the same gate. |
 | `rebase` | **Escalate** — comment and flag, nothing more. The report's `evidence.replay` reads `pure` only when `git range-diff origin/main <pin> HEAD` pairs every pinned commit with an unchanged one; `changed` (a commit dropped, edited or added, or a stale `origin/main`) or `unknown` means read `evidence.rangeDiff` before acting, and `evidence.remote.state` says whether that head is on the PR. No automatic rule until a live halt shows the case recurring. |
 | `unreadable`, `missing`, `absent`, `other` | **Escalate** — comment and flag, no automatic retry. |
+| `human` | **Escalate** — no retry. A Ticketless PR whose diff is not inert: the maintainer adds `ready-to-merge` at the pinned head, which the merge bot merges off the finisher's `ready-to-merge-head:` comment; a moved head is merged by hand. |
 
 ### Resolving a finisher that died
 
