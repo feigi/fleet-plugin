@@ -434,6 +434,179 @@ test("--pin re-baselines after a deliberate edit — the controller's own toolin
 });
 
 // ---------------------------------------------------------------------------
+// THE PIN COMMIT (#3780). `--pin` records the audited tree's HEAD as a third
+// line, so a refusal can say WHAT moved: advanced, rewound, diverged or
+// unmoved. The commit decides no verdict — the digest still does.
+// ---------------------------------------------------------------------------
+
+const baselineLines = (root) =>
+  readFileSync(join(root, ".fleet", "instruments.sha"), "utf8").split("\n");
+const RELATION = /HEAD (advanced|rewound|diverged|unmoved)/;
+const editSet = (root, text, message) => {
+  writeFileSync(join(root, SET, "skills", "run-team", "SKILL.md"), text);
+  git(root, "commit", "-qam", message);
+};
+
+test("--pin writes digest, root and commit in that order, and a re-pin rewrites all three", (t) => {
+  const root = repo(t);
+  const digest = pin(root);
+  const first = git(root, "rev-parse", "HEAD");
+  assert.deepEqual(baselineLines(root), [digest, `root=${root}`, `commit=${first}`, ""]);
+
+  editSet(root, "# fixed mid-run\n", "a deliberate tooling fix");
+  const second = git(root, "rev-parse", "HEAD");
+  const redigest = pin(root);
+  assert.notEqual(redigest, digest);
+  assert.deepEqual(baselineLines(root), [redigest, `root=${root}`, `commit=${second}`, ""]);
+});
+
+test("--pin on an unborn HEAD writes no commit line, and the check still passes", (t) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "instruments-unborn-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  git(root, "init", "-q", "-b", "main");
+  mkdirSync(join(root, SET, "scripts"), { recursive: true });
+  copyFileSync(SCRIPT, join(root, SET, "scripts", "instruments.sh"));
+  git(root, "add", "-A");
+  const digest = pin(root);
+  assert.deepEqual(baselineLines(root), [digest, `root=${root}`, ""]);
+  assert.equal(run(root).status, 0);
+});
+
+test("a refusal after HEAD advanced names the pin commit, says advanced, and lists the commits between", (t) => {
+  const root = repo(t);
+  const digest = pin(root);
+  const pinned = git(root, "rev-parse", "HEAD");
+  editSet(root, "# one\n", "first move");
+  editSet(root, "# two\n", "second move");
+  const r = run(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.notEqual(r.stdout.trim(), digest);
+  assert.match(r.stderr, /instrument set CHANGED/);
+  assert.match(r.stderr, new RegExp(`pin commit ${pinned}`));
+  assert.match(r.stderr, /HEAD advanced/);
+  assert.match(r.stderr, /^[0-9a-f]{7,} second move$/m);
+  assert.match(r.stderr, /^[0-9a-f]{7,} first move$/m);
+  assert.doesNotMatch(r.stderr, /rewound|diverged|unmoved/);
+  assert.doesNotMatch(r.stderr, /more$/m, "two commits is under the cap");
+});
+
+test("a refusal after HEAD rewound behind the pin commit says rewound", (t) => {
+  const root = repo(t);
+  editSet(root, "# pinned state\n", "the state the run pinned");
+  pin(root);
+  git(root, "reset", "-q", "--hard", "HEAD~1");
+  const r = run(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /HEAD rewound/);
+  assert.doesNotMatch(r.stderr, /HEAD (advanced|diverged|unmoved)/);
+});
+
+test("a refusal with HEAD on a diverged branch says diverged", (t) => {
+  const root = repo(t);
+  editSet(root, "# pinned state\n", "the state the run pinned");
+  pin(root);
+  git(root, "checkout", "-q", "-b", "other", "HEAD~1");
+  editSet(root, "# another session's edit\n", "elsewhere");
+  const r = run(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /HEAD diverged/);
+  assert.doesNotMatch(r.stderr, /HEAD (advanced|rewound|unmoved)/);
+});
+
+test("a refusal with HEAD on the pin commit says unmoved, and the porcelain line names the edit", (t) => {
+  const root = repo(t);
+  pin(root);
+  writeFileSync(join(root, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
+  const r = run(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /HEAD unmoved/);
+  assert.match(r.stderr, new RegExp(` M ${SET}/scripts/ci-state\\.mjs`));
+  assert.doesNotMatch(r.stderr, /HEAD (advanced|rewound|diverged)/);
+});
+
+test("more than twenty commits between the pin and HEAD print twenty log lines, then how many more", (t) => {
+  const root = repo(t);
+  pin(root);
+  for (let i = 1; i <= 25; i++) editSet(root, `# move ${i}\n`, `move ${i}`);
+  const r = run(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /HEAD advanced/);
+  assert.equal(r.stderr.match(/^[0-9a-f]{7,} move \d+$/gm).length, 20);
+  assert.match(r.stderr, /^… 5 more$/m);
+  assert.match(r.stderr, /^[0-9a-f]{7,} move 25$/m, "the newest commits are the ones listed");
+  assert.doesNotMatch(r.stderr, / move 5$/m);
+});
+
+test("exactly twenty commits between print twenty log lines and no more-line", (t) => {
+  const root = repo(t);
+  pin(root);
+  for (let i = 1; i <= 20; i++) editSet(root, `# move ${i}\n`, `move ${i}`);
+  const r = run(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(r.stderr.match(/^[0-9a-f]{7,} move \d+$/gm).length, 20);
+  assert.doesNotMatch(r.stderr, /… \d+ more/);
+});
+
+test("a two-line baseline still refuses a changed set, says it has no pin commit, and prints no relation", (t) => {
+  const root = repo(t);
+  const digest = pin(root);
+  writeFileSync(join(root, ".fleet", "instruments.sha"), `${digest}\nroot=${root}\n`);
+  assert.equal(run(root).status, 0, "an unchanged set under a legacy baseline still passes");
+  writeFileSync(join(root, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
+  const r = run(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /pin commit not recorded/);
+  assert.doesNotMatch(r.stderr, RELATION);
+  assert.match(r.stderr, new RegExp(` M ${SET}/scripts/ci-state\\.mjs`));
+});
+
+test("a pin commit absent from the repository says so, prints no relation, and still refuses", (t) => {
+  const root = repo(t);
+  const digest = pin(root);
+  const missing = "0".repeat(40);
+  writeFileSync(join(root, ".fleet", "instruments.sha"), `${digest}\nroot=${root}\ncommit=${missing}\n`);
+  writeFileSync(join(root, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
+  const r = run(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, new RegExp(`pin commit ${missing} is not in the repository`));
+  assert.doesNotMatch(r.stderr, RELATION);
+});
+
+test("a commit= line that is not a hex id is treated as absent, never handed to git as an option", (t) => {
+  const root = repo(t);
+  const digest = pin(root);
+  writeFileSync(join(root, ".fleet", "instruments.sha"), `${digest}\nroot=${root}\ncommit=--output=${join(root, "pwned")}\n`);
+  writeFileSync(join(root, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
+  const r = run(root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /is not in the repository/);
+  assert.doesNotMatch(r.stderr, RELATION);
+  assert.equal(existsSync(join(root, "pwned")), false);
+});
+
+test("stdout is the digest alone on exit 0 and on exit 1, whatever the refusal prints", (t) => {
+  const root = repo(t);
+  const digest = pin(root);
+  const ok = run(root);
+  assert.equal(ok.stdout, `${digest}\n`);
+  editSet(root, "# moved\n", "a move");
+  const hit = run(root);
+  assert.equal(hit.status, 1);
+  assert.match(hit.stdout, /^[0-9a-f]{64}\n$/);
+  assert.notEqual(hit.stdout, `${digest}\n`);
+});
+
+test("a commit that changes no byte in the set still exits 0 and prints nothing on stderr under a three-line baseline", (t) => {
+  const root = repo(t);
+  pin(root);
+  writeFileSync(join(root, "unrelated.md"), "rewritten\n");
+  git(root, "commit", "-qam", "an ordinary commit outside the set");
+  const r = run(root);
+  assert.equal(r.status, 0);
+  assert.equal(r.stderr, "");
+});
+
+// ---------------------------------------------------------------------------
 // CWD CONTRACT (#1337). The audited repository comes from $PWD (or --repo),
 // never from where the invoked copy of instruments.sh happens to live. Every
 // test below places the SCRIPT somewhere other than the repo it must audit,
@@ -636,11 +809,16 @@ test("--pin --audit certifies another checkout, records its root beside the dige
   assert.match(r.stderr, new RegExp(`pinned ${digest} over`));
 
   // The STATE lives in the workspace — every later reader finds it without
-  // configuration — and it is two lines: the digest first (a reader that knows
-  // only the old shape still gets it), the audited root second.
+  // configuration — and it is three lines: the digest first (a reader that
+  // knows only the old shape still gets it), the audited root second, the
+  // audited tree's HEAD third — the plugin's, not the workspace's.
   const lines = readFileSync(join(ws, ".fleet", "instruments.sha"), "utf8").split("\n");
   assert.equal(lines[0], digest);
   assert.equal(lines[1], `root=${plugin}`);
+  assert.equal(lines[2], `commit=${git(plugin, "rev-parse", "HEAD")}`);
+  assert.notEqual(lines[2], `commit=${git(ws, "rev-parse", "HEAD")}`);
+  assert.equal(lines[3], "");
+  assert.equal(lines.length, 4, "three lines and the trailing newline, nothing else");
   // The audited tree gains no state of its own; a `--pin` is not allowed to
   // write into the tree it merely reads.
   assert.deepEqual(findFleetDirs(plugin), []);

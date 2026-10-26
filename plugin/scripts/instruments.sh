@@ -357,17 +357,25 @@ digest=$(printf '%s\n' "$per_file" | shasum -a 256 | cut -d' ' -f1) \
 
 if [ "$pin" = true ]; then
   mkdir -p "$root/.fleet" || die "cannot create $root/.fleet"
-  # Two lines, order fixed: the digest first, the audited tree's toplevel
-  # second. A reader that only knows the old one-line shape — merge-gate.mjs's
-  # `readInstruments`, which takes the FIRST stdout line as the digest — keeps
-  # working, and a check from this script reads both. The root rides in the
-  # same write as the digest because it is not a suggestion: a pointer an
-  # attacker with a writable `.fleet/` could repoint at will would move the
-  # gate to a tree they control, so the check trusts nothing else, re-verifies
-  # the tree at check time, and refuses if it moved.
+  # Three lines, order fixed: the digest first, the audited tree's toplevel
+  # second, the audited tree's HEAD commit third. A reader that only knows the
+  # old one-line shape — merge-gate.mjs's `readInstruments`, which takes the
+  # FIRST stdout line as the digest — keeps working, and a check from this
+  # script reads the rest. The root rides in the same write as the digest
+  # because it is not a suggestion: a pointer an attacker with a writable
+  # `.fleet/` could repoint at will would move the gate to a tree they control,
+  # so the check trusts nothing else, re-verifies the tree at check time, and
+  # refuses if it moved.
+  #
+  # The commit is not trusted for any verdict: it exists only so a refusal can
+  # say what moved. HEAD unborn or unreadable writes no `commit=` line, and
+  # the refusal says so; a baseline from before this line existed reads the
+  # same way.
+  commit=$(git -C "$target" rev-parse --verify --quiet HEAD 2>/dev/null) || commit=
   {
     printf '%s\n' "$digest"
     printf 'root=%s\n' "$target"
+    [ -z "$commit" ] || printf 'commit=%s\n' "$commit"
   } > "$base" || die "cannot write $base"
   printf '%s\n' "$digest"
   printf '%s: pinned %s over %s\n' "$NAME" "$digest" "$target ($set)" >&2
@@ -387,7 +395,45 @@ fi
 # is about — not the state home the baseline was found in.
 printf '%s: instrument set CHANGED under this run — expected %s\n' "$NAME" "$want" >&2
 printf '%s: refuse the gate and report. Do NOT re-read the instrument.\n' "$NAME" >&2
-printf '%s: HEAD %s\n' "$NAME" "$(git -C "$target" rev-parse HEAD 2>/dev/null || printf '?')" >&2
+headc=$(git -C "$target" rev-parse --verify --quiet HEAD 2>/dev/null || printf '?')
+printf '%s: HEAD %s\n' "$NAME" "$headc" >&2
 # shellcheck disable=SC2086 # $set is a deliberate list of pathspecs, not one path
 git -C "$target" status --porcelain -- $set >&2 || true
+
+# Then what moved, relative to the commit the pin recorded. Only the commit
+# graph can say whether HEAD advanced, rewound or diverged, and the maintainer
+# decides what to do about each, so this names the relation and stops: the
+# verdict above is already refusal. Anything but a full hex id is treated as
+# absent from the repository, so a baseline line cannot reach git as an option.
+pinc=$(sed -n '/^commit=/{s/^commit=//;p;q;}' "$base")
+if [ -z "$pinc" ]; then
+  printf '%s: pin commit not recorded — the baseline has no commit= line\n' "$NAME" >&2
+else
+  present=false
+  case $pinc in
+    *[!0-9a-f]*) ;;
+    *) if git -C "$target" cat-file -e "$pinc^{commit}" 2>/dev/null; then present=true; fi ;;
+  esac
+  if [ "$present" != true ]; then
+    printf '%s: pin commit %s is not in the repository\n' "$NAME" "$pinc" >&2
+  elif [ "$headc" = '?' ]; then
+    printf '%s: pin commit %s; HEAD cannot be read\n' "$NAME" "$pinc" >&2
+  else
+    printf '%s: pin commit %s\n' "$NAME" "$pinc" >&2
+    if [ "$headc" = "$pinc" ]; then
+      printf '%s: HEAD unmoved — HEAD is the pin commit\n' "$NAME" >&2
+    elif git -C "$target" merge-base --is-ancestor "$pinc" "$headc" 2>/dev/null; then
+      printf '%s: HEAD advanced — the pin commit is an ancestor of HEAD\n' "$NAME" >&2
+      git -C "$target" log --oneline -n 20 "$pinc..$headc" >&2 || true
+      between=$(git -C "$target" rev-list --count "$pinc..$headc" 2>/dev/null || printf 0)
+      if [ "$between" -gt 20 ]; then
+        printf '… %s more\n' "$((between - 20))" >&2
+      fi
+    elif git -C "$target" merge-base --is-ancestor "$headc" "$pinc" 2>/dev/null; then
+      printf '%s: HEAD rewound — HEAD is an ancestor of the pin commit\n' "$NAME" >&2
+    else
+      printf '%s: HEAD diverged — neither is an ancestor of the other\n' "$NAME" >&2
+    fi
+  fi
+fi
 exit 1

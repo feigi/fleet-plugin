@@ -111,6 +111,19 @@ test("the rule limits re-pinning to a change the controller made deliberately", 
   assert.match(rule, Pin.phrase("Re-pinning to clear a refusal you cannot explain discards the check"));
 });
 
+test("the rule escalates a pinned tree whose HEAD moved and gives the maintainer restore or adopt", () => {
+  // A refusal cannot tell a move the maintainer would adopt from one they
+  // would not, so the controller's own reading of "only this run's merged PRs"
+  // is exactly what must not decide. Lose the first clause and a fast-forward
+  // is re-pinned over again; lose the second and the reset runs on a switched
+  // branch, where it moves a branch that is not `main`.
+  const rule = RULE();
+  assert.match(rule, Pin.phrase("A pinned tree whose HEAD moved is the maintainer's to settle, whoever moved it"));
+  assert.match(rule, Pin.phrase("never re-pin over it: not for a fast-forward to `origin/main`, and not when the commits between are only this run's own merged PRs"));
+  assert.match(rule, Pin.phrase("On their **restore**, run `git reset --keep <pin commit>` — only when the pinned tree is the main checkout and the tick prints no `MAIN-CHECKOUT` line"));
+  assert.match(rule, Pin.phrase("On their **adopt**, re-pin"));
+});
+
 test("the rule records that refs are out of the digest, and why", () => {
   // Not decoration: the ticket's corroborating evidence is a stray branch, so
   // the next reader will ask. Without the reason, "add refs to the digest" is

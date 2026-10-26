@@ -286,6 +286,10 @@ a minute apart showed *different* mutants, so a member's report and any single
 otherwise you send "your red is staleness, do not rebase" once per member per
 merge. `review-and-fix.md` states them; the body says they apply.
 
+## A re-review at the same head answers on its own run
+
+A re-review at the same head is a run of its own, so the earlier round's verdict never answers it; once the check has run for the fix-applier answering the new round, its verdict is the current one.
+
 ## A halt's cause comes from one script
 
 A halt at duty 1 reads identical from a bare SHA mismatch whatever caused it,

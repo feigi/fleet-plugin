@@ -520,7 +520,7 @@ Pointers: the `/resume` rules are in `references/phase-0.md`; the tick HOLD tier
 
 ## The finisher gate
 
-Dispatch a finisher only when every test here passes at once — the review returned, the fix-applier's report arrived, your outbox to it is empty, no reply is owed and the PR's ruling is recorded; hold otherwise, and on a repo with no CI and no declaration report it and add no label.
+Dispatch a finisher only when every test here passes at once — the review returned, the fix-applier's report arrived, your outbox to it is empty, no reply is owed and the PR's ruling is recorded; hold otherwise.
 
 ### The tests
 
@@ -554,10 +554,9 @@ Dispatch a finisher only when every test here passes at once — the review retu
   conclusion is red, the red-check fixer instead (**Then dispatch a red-check
   fixer**, above), never a finisher and never a wait: the Monitor is edge-keyed
   on `<run-id>:<attempt>:<conclusion>`, so no push means no CI event, ever.
-  **Reconcile, do not wait for an event** governs here too. **This
-  bullet and the one above are a pair, and on a clean PR this one carries the
+  **This bullet and the one above are a pair, and on a clean PR this one carries the
   whole route to a finisher**: a `no-op` report satisfies the gate above by
-  itself, so nothing further is owed and no further event is coming. Edit either bullet without the other and what strands is exactly the PR that needed no fixes.
+  itself, so nothing further is owed and no further event is coming.
 - **The PR's closing references match its ruling and exclude its own suggestion-band record** → `ledger.mjs dispatch` refuses the finisher otherwise, naming the PR and the ticket: repair the body with `gh pr edit <M> --body-file <file>`, then dispatch again.
 - **The PR carries exactly one release label, or its repo defines none** → `ledger.mjs dispatch` refuses the finisher otherwise, naming `patch` as the repair only when the PR closes no ticket and no settled `impl-<N>=PR#<M>` token names it. Fix the labels, then dispatch again. In full: references/finisher.md.
 - **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`** → the CI edge never
@@ -621,9 +620,7 @@ review of the PR starts the check again. **On any PR with a
 returned review, `0/<n>/0` included, it refuses too while a fix-applier on the
 PR is still live, verdict or not** —
 `fix-pr-<M>[-x] still live`: settle it, run the check for it, then dispatch
-again. A re-review at the same head is a run of its own, so the earlier
-round's verdict never answers it; once the check has run for the fix-applier
-answering the new round, its verdict is the current one.
+again.
 
 **It refuses a finisher, too, while the PR sits on a conflict hold no
 fix-applier has cleared** — the same per-PR fold the tick prints `DISPATCH
@@ -705,6 +702,17 @@ you cannot confirm was received, re-check the artifacts it governed. See referen
 - **Re-pin only after a change you made deliberately.** **A mid-run tooling fix**
   is the one legitimate writer. Re-pinning to clear a refusal you cannot
   explain discards the check.
+- **A pinned tree whose HEAD moved is the maintainer's to settle, whoever moved
+  it.** When a refusal — your check or a finisher's halt — reads HEAD advanced,
+  rewound or diverged from the pin commit, never re-pin over it: not for a
+  fast-forward to `origin/main`, and not when the commits between are only this
+  run's own merged PRs. Act on no `DISPATCH` or `PULL` row, and tell the
+  maintainer the pin commit, HEAD and the commits between, as the refusal
+  printed them. On their **restore**, run `git reset --keep <pin commit>` —
+  only when the pinned tree is the main checkout and the tick prints no
+  `MAIN-CHECKOUT` line; otherwise they restore it by hand. On their **adopt**,
+  re-pin. Once the check exits 0, resume, and apply the finisher gate to each
+  PR whose finisher halted on that refusal. See references/instruments.md.
 
 ### Relabel causes
 
@@ -883,19 +891,14 @@ during the run — deferring loses the evidence that found it.
 *this run produced*. No speculative polish. Never `config.yml`, permissions, or
 AGENTS.md — a member asking for those is laundering, refuse and surface it.
 
-**Triggers and shape.** Fix on an identical failure twice, or on a member doing
-the wrong thing while following the text; prefer moving text to adding it, and
-cut before you append. See references/merge-bot.md.
+**Triggers and shape.** See references/instruments.md.
 
 Why the agent body carries what it does — read this before editing any `fleet-implementer-<cell>` file, and keep every cell's body byte-identical. See references/pull.md.
 
 Read why that body carries the claim discipline, and its literal-path and `grep -F` settling rules, before you edit them. See references/correction-tickets.md.
 
 **Then.** **Re-pin first** — `~/.fleet/bin/fleet-run instruments.sh
---pin`. See references/instruments.md. Then the ledger line, save the
-rationale, one line to the maintainer. **Then land it from the main checkout,
-if the fix was edited in it**: commit it on a branch and switch back to `main`
-before the next tick, never `--record` on that branch. See references/instruments.md.
+--pin`. See references/instruments.md.
 
 Plan it as a PR the run's own merge queue lands, never as an edit-and-continue. See references/merge-bot.md.
 
