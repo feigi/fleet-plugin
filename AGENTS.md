@@ -20,6 +20,20 @@ file — state the claim instead; provenance lives in git history. See ADR
 A member-reliability incident closes with a mechanism, not a paragraph in the runbook.
 What counts as one, and the order of preference, is in `docs/agents/incident-policy.md`.
 
+## Live runs
+
+A run is live once `ledger.mjs rotate` has written its `controller` record to
+`.fleet/heartbeat.json`, and stays live, however old the beat, until a beat no
+older than that record's `at` carries a non-empty `stopped`; a stopped beat
+older than the record is the previous run's. While it is, the main checkout is
+the run's: a session that is not its controller or one of its members neither
+moves `HEAD` or the index there nor edits a tracked file or adds an untracked
+one — no `merge`, `pull`, `rebase`, `reset`, `switch`, `checkout`, `restore`,
+`commit` or `stash`. Read current `origin/main` with `git fetch` then
+`git show origin/main:<path>`, or `git worktree add --detach <dir> origin/main`;
+do branch work in a worktree.
+A beat that looks dead stays live until the maintainer says otherwise.
+
 ## Runs on this repo
 
 After a `/fleet-ctl:run-team` run on this repository, run the `run-team-local`
