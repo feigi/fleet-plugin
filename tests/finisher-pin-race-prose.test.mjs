@@ -62,6 +62,8 @@ const LEAD_ANCHOR = "A halt at duty 1 reads identical from a bare SHA mismatch";
 const leadIn = () => FINISHER_REF.paragraph(LEAD_ANCHOR, "run-team halt-cause lead-in", "## Why a `past-pin` halt needs the tick").text;
 
 const list = (words) => `${words.slice(0, -1).map((w) => `\`${w}\``).join(", ")} or \`${words.at(-1)}\``;
+// `human` is duty 3's exit 5 and no verdict of duty 1's audit, so the audit block does not name it.
+const AUDIT_CAUSES = HALT_CAUSES.filter((c) => c !== "human");
 
 test("the cause evidence reaches the finisher through its agent body, and SKILL.md carries no copy of it", () => {
   const block = causeBlock();
@@ -99,7 +101,7 @@ test("the exit vocabulary: 0 alone is clean, 1 names a cause from the ledger's v
   );
   assert.match(
     text,
-    Pin.phrase(`Exit 1 means \`cause\` is non-null: you are halted, and \`cause\` is the word you name — ${list(HALT_CAUSES)}, and \`other\` is a cause too, not a gap.`),
+    Pin.phrase(`Exit 1 means \`cause\` is non-null: you are halted, and \`cause\` is the word you name — ${list(AUDIT_CAUSES)}, and \`other\` is a cause too, not a gap.`),
     "the block's causes are no longer the ledger's `halted:<cause>` vocabulary, or it no longer says a non-null cause halts — the ledger refuses a word it does not know, and a cause the block does not name reads as impossible",
   );
   assert.match(

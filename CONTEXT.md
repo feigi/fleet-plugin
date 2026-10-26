@@ -284,6 +284,14 @@ _Avoid_: docs-only, prose-only, safe diff
 The files the harness reads as instructions: any `skills`, `agents`, `commands` or `plugin` directory segment, any directory segment that starts with a dot (`.omp`, `.claude`, `.github` and the rest of where a harness keeps its rules and prompts), and any `AGENTS.md`, `CLAUDE.md` or `GEMINI.md`, at any depth. Markdown there changes behavior, so it is never prose.
 _Avoid_: docs
 
+**Ticketless PR**:
+An open PR that closes no issue in its own repository (`ownClosingIssues`, `closing-refs.mjs`) and that no settled `impl-<N>=PR#<pr>` token names. No ticket supplies its acceptance mutation or its ruling, so the finisher skips the mutation and the PR merges unattended only on an **Inert diff**; any other diff halts the finisher `human`, and the maintainer's `ready-to-merge` is the merge. `ticketless.mjs` is the one test for it; ADR 0034.
+_Avoid_: chore PR, orphan PR, issue-less PR
+
+**Owned PR**:
+An open, non-draft PR whose `author.login` is the login the fleet's `gh` credentials answer to (`gh api user`). Only an Owned PR is folded in at phase 0 or queued for review by the tick; opening a PR as a draft keeps the fleet off it, and another author's, a bot's or a fork's is never owned. `owned-pr.mjs` is the one rule, and each reader reads the login itself; ADR 0034.
+_Avoid_: own PR, fleet PR, our PR
+
 ### Triage
 
 **Review deferral**:

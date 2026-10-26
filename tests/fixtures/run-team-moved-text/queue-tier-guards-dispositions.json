@@ -39,6 +39,10 @@
     [
       "The same incident: the controller's warning DID reach the member, which re-ran, found nothing changed, and said nothing — correctly reading \"send once, never re-send\" as covering it.",
       "The same `pkill -f` incident: the controller's warning DID reach the member, which re-ran, found nothing changed, and said nothing — correctly reading \"send once, never re-send\" as covering it."
+    ],
+    [
+      "A `drift` or `unanswered` step and a `fold-in` `NEED` are advice, named after `; advice:` on the line, or alone on a `PHASE0-ADVICE …` line when nothing is incomplete; advice holds nothing.",
+      "A `drift` or `unanswered` step is advice, named after `; advice:` on the line, or alone on a `PHASE0-ADVICE …` line when nothing is incomplete; advice holds nothing."
     ]
   ],
   "deleted": [
@@ -116,15 +120,15 @@
     ],
     [
       "**That exemption is for a PR THIS run authors, never one a PRIOR run left open** — step 0 folds those into this run's review queue, so count one when you reason about backlog BY HAND.",
-      "phase 0 step 0's `NEED review PR#<pr> (closes no issue)` row in SKILL.md, which hand-dispatches that review"
+      "phase 0 step 0 no longer prints a NEED line for a PR closing no issue: the fold-in writes every Owned PR a `#<pr>` row, references/phase-0.md's Fold in every Owned PR a prior run left open, and the tick queues its review off it (fleet-tick.mjs's reviewDue; tests/fleet-tick.test.mjs)"
     ],
     [
       "**The `fleet-tick.mjs` number still excludes it**: nothing in its filter distinguishes an inherited PR from this run's own, since a PR closing no issue fails the closing-issue test either way — folding one in cannot reach the count.",
-      "phase 0 step 0's `NEED review PR#<pr> (closes no issue)` row in SKILL.md, which hand-dispatches that review"
+      "phase 0 step 0 no longer prints a NEED line for a PR closing no issue: the fold-in writes every Owned PR a `#<pr>` row, references/phase-0.md's Fold in every Owned PR a prior run left open, and the tick queues its review off it (fleet-tick.mjs's reviewDue; tests/fleet-tick.test.mjs)"
     ],
     [
       "So the by-hand judgement and the script's output differ here, and such a PR's review is dispatched by hand.",
-      "phase 0 step 0's `NEED review PR#<pr> (closes no issue)` row in SKILL.md, which hand-dispatches that review"
+      "phase 0 step 0 no longer prints a NEED line for a PR closing no issue: the fold-in writes every Owned PR a `#<pr>` row, references/phase-0.md's Fold in every Owned PR a prior run left open, and the tick queues its review off it (fleet-tick.mjs's reviewDue; tests/fleet-tick.test.mjs)"
     ],
     [
       "What follows stays here as the explanation of what the script decides — never as a second, hand-run copy of it.",
@@ -237,6 +241,14 @@
     [
       "One invocation prints per-role `actual/target` and an explicit ACTION with the backlog gate above and every row of the table below already applied; every wake in Phase 3 ends in it.",
       "fleet-tick.mjs; tests/fleet-tick.test.mjs"
+    ],
+    [
+      "`NEED review PR#<pr> (closes no issue)` — an open PR a prior run left that no row can queue.",
+      "phase 0 step 0 no longer prints a NEED line for a PR closing no issue: the fold-in writes every Owned PR a `#<pr>` row, references/phase-0.md's Fold in every Owned PR a prior run left open, and the tick queues its review off it (fleet-tick.mjs's reviewDue; tests/fleet-tick.test.mjs)"
+    ],
+    [
+      "Advice, never an exit status: hand-dispatch its review exactly as ticket work, or leave it.",
+      "phase 0 step 0 no longer prints a NEED line for a PR closing no issue: the fold-in writes every Owned PR a `#<pr>` row, references/phase-0.md's Fold in every Owned PR a prior run left open, and the tick queues its review off it (fleet-tick.mjs's reviewDue; tests/fleet-tick.test.mjs)"
     ]
   ]
 }

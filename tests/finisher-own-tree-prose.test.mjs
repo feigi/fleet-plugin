@@ -233,7 +233,9 @@ test("duty 1's exit codes: 0 alone is clean, 1 names a cause from the ledger's v
     said(/Exit 0, with `cause` null, is the only code that means the worktree is clean at your pin/),
     "duty 1 no longer says exit 0 with a null cause is the only clean result",
   );
-  const causes = `${HALT_CAUSES.slice(0, -1).map((c) => `\`${c}\``).join(", ")} or \`${HALT_CAUSES.at(-1)}\``;
+  // `human` is duty 3's exit 5 and no verdict of duty 1's audit, so duty 1 does not name it.
+  const audit = HALT_CAUSES.filter((c) => c !== "human");
+  const causes = `${audit.slice(0, -1).map((c) => `\`${c}\``).join(", ")} or \`${audit.at(-1)}\``;
   assert.ok(
     said(new RegExp(`\`cause\` is the word you name — ${causes.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)),
     "duty 1's exit 1 causes are no longer the ledger's `halted:<cause>` vocabulary — the ledger refuses a word it does not know",

@@ -109,10 +109,19 @@ not rely on that.
 (the path you were dispatched with, and the full SHA). It reads the PR's diff
 from the merge base with `origin/main` to your pin and classifies every path.
 Exit 0 means every path is prose (plain `.md` or `.markdown` outside the
-prompt surface) or data (a run-metrics file): an **Inert diff**. Only exit 0
+prompt surface) or data (a run-metrics file): an **Inert diff**, and it
 skips the acceptance mutation below. Exit 1 (not inert) and exit 2 (could not
 look) both run the mutation exactly as it is described below. When you skip,
 the verdict's one JSON line goes in your report in place of the `red:` line.
+
+**A Ticketless PR has no acceptance mutation to re-run.** Run
+`~/.fleet/bin/fleet-run ticketless.mjs --pr <M>`. It reads whether the PR
+closes an issue in its own repository and whether a settled
+`impl-<N>=PR#<M>` token names it. Only its exit 0 skips the acceptance
+mutation below, whatever the diff, and the rest of duty 2 runs. Where a kill's
+evidence line would go, your report says that no mutation ran because the PR is
+ticketless. Exit 1 and exit 2 (could not look) run duty 2 as it is described
+for a ticket PR.
 
 **Whatever you verify by RUNNING, run in a tree nobody else owns.**
 Independently re-running the ticket's acceptance mutation — loosen the
@@ -224,13 +233,18 @@ evidence; label nothing. A kill's evidence line goes in your report.
 **Duty 3 is one script, and its exit code is your verdict.**
 `~/.fleet/bin/fleet-run finisher-label.mjs --pr <M> --pin <your dispatch pin>`
 (the full SHA). It confirms exactly one of `patch`/`minor`/`major` is on the
-PR, records the head you audited, adds `ready-to-merge`, and reads the labels
+PR — a Ticketless PR with none gets `patch` added first — records the head you
+audited, adds `ready-to-merge`, and reads the labels
 back. Exit 0 is the only code that means the label is on. Exit 3 means the PR
-carries zero or more than one release label: you are halted before the label,
-and the receipt names which it found. Exit 4 means the read-back does not carry
-the label, written or not. Exit 2 means a `gh` call or the invocation
-itself failed: report the stderr it printed. Every non-zero exit halts you
-with cause `other`, with the receipt as evidence, and you do not run any of
+carries zero or more than one release label (a Ticketless PR with none is
+labelled `patch` instead): you are halted
+before the label, and the receipt names which it found. Exit 4 means the
+read-back does not carry the label, written or not. Exit 5 means the PR is a
+Ticketless PR whose diff is not inert, or whose Inert diff verdict could not
+look: the script posted the head record and added no label, and you are halted
+with cause `human`. Exit 2 means a `gh` call or the invocation itself failed:
+report the stderr it printed. Every non-zero exit halts you, with cause `other`
+unless it is exit 5, with the receipt as evidence, and you do not run any of
 its steps by hand to get past it. A repo whose label list defines none of the
 three does not gate on one, and the script says so in its receipt. Put the
 receipt, the JSON line it printed, in your report as printed: it is what tells
@@ -245,7 +259,7 @@ controller's settle records — and, for anything it halted on, `cause` and
 `evidence`, below, never a bare "head moved". The
 cause is one word of the ledger's `halted:<cause>` vocabulary:
 `live-editor`, `rebase`, `past-pin`, `unreadable`, `missing` or `absent` as
-duty 1's verdict names it, and `other` for every other halt — that
+duty 1's verdict names it, `human` for duty 3's exit 5, and `other` for every other halt — that
 verdict's own `other`, and a halt at duty 2, duty 3 or the instrument
 re-check. A duty 1 halt's `evidence` carries the verdict as
 printed, the JSON line, so a `rebase` halt's carries `replay`,

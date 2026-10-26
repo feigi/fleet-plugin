@@ -106,19 +106,21 @@ test("phase0Gate: a finished receipt whose controller has exited or cannot be ju
   }
 });
 
-test("phase0Gate: drift, unanswered and a fold-in NEED are advice — on the ADVICE line alone, after the steps when one holds", () => {
+test("phase0Gate: drift and unanswered are advice — on the ADVICE line alone, after the steps when one holds; a fold-in line is none", () => {
   const steps = {
     ruleset: { status: "unanswered" }, preflight: { status: "drift" },
-    "fold-in": { status: "ok", output: "queued 1 PR(s)\nNEED review PR#7 (closes no issue)\nNEED review PR#8 (closes no issue)" },
+    "fold-in": { status: "ok", output: "queued 1 PR(s)\nNEED review PR#7 (closes no issue)" },
   };
   assert.deepEqual(phase0Gate(ok(receipt({ steps })), { path: PATH, controllerAt: 5 }), {
     held: false,
-    line: "PHASE0-ADVICE preflight drift, ruleset unanswered, fold-in NEED review PR#7 (closes no issue), fold-in NEED review PR#8 (closes no issue)",
+    line: "PHASE0-ADVICE preflight drift, ruleset unanswered",
     session: "/s/run",
   });
   const held = phase0Gate(ok(receipt({ steps: { ...steps, shortlist: { status: "pending" } } })), { path: PATH, controllerAt: 5 });
   assert.equal(held.held, true);
-  assert.match(held.line, /^PHASE0-INCOMPLETE shortlist — dispatch held: .*; advice: preflight drift, ruleset unanswered, fold-in NEED review PR#7/);
+  assert.match(held.line, /^PHASE0-INCOMPLETE shortlist — dispatch held: .*; advice: preflight drift, ruleset unanswered$/);
+  const quiet = phase0Gate(ok(receipt({ steps: { "fold-in": { status: "ok", output: "NEED review PR#7 (closes no issue)" } } })), { path: PATH, controllerAt: 5 });
+  assert.deepEqual(quiet, { held: false, line: null, session: "/s/run" }, "a NEED in the fold-in's output is not advice");
 });
 
 test("sessionFromReceipt: the receipt's session, or a refusal naming the receipt", (t) => {

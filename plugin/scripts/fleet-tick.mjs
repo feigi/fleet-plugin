@@ -77,9 +77,9 @@
 //             or cannot be judged, or a step `failed`, `pending` or absent
 //             prints one PHASE0-INCOMPLETE line naming what is not done and
 //             holds every dispatching row, ahead of the main-checkout reason;
-//             it never refuses the tick. A step's `drift` or `unanswered`
-//             and a `fold-in` NEED are advice, named on the line and holding
-//             nothing. The receipt's `session` fills the tier hold's step.
+//             it never refuses the tick. A step's `drift` or `unanswered` is
+//             advice, named on the line and holding nothing. The receipt's
+//             `session` fills the tier hold's step.
 //   guard     `.fleet/cost-guard.json` beside the shortlist, pr-cost.mjs
 //             --guard's verdict on the implementer cells. Printed as the
 //             `router` row and never acted on here: a missing or unreadable
@@ -1167,16 +1167,16 @@ export function deriveRun({ rows, dispatched, drain, retired = [] }, prs, closed
         && (((st.survived > 0 || st.unverified > 0) && !st.reviewFixed) || conflictHeld(st) || mismatchDue(st))
         && !fixRunning(st) && !st.inFlight)
       .map(([n]) => n).sort(asc),
-    // Open, not signed off, closing an issue (GitHub's own linked set — a
-    // PR closing nothing is review work nobody in the run will ever be
-    // dispatched against), with no live or returned review on record —
+    // Open, not signed off, owned (openPrs() reads that off the PR's author
+    // and draft flag; a PR closing no issue is as due as one closing one),
+    // with no live or returned review on record —
     // or a returned review its finisher halted `past-pin` against: the
     // head carries commits no reviewer read, so it is owed a review again
     // until one is running or has returned. A head that moved past
     // `reviewed=` with no such halt — a fix-applier's push — stays not due:
     // finisher duty 2 verifies what it applied.
     reviewDue: prs
-      .filter((p) => !isQueued(p) && p.closingIssuesReferences.length > 0
+      .filter((p) => !isQueued(p) && p.owned
         && (!state(p.number)?.reviewedAny || pastPinDue(state(p.number), p.headRefOid)))
       .map((p) => p.number).sort(asc),
     mergeQueue: queued.length,
@@ -1547,6 +1547,7 @@ import { readRunReceipt, phase0Gate, IN_FLIGHT_DEFAULT } from "./phase0-receipt.
 import { judgeRecord, ProcUnreadable } from "./proc.mjs";
 import { reportFamily, readReport, reportPath, reportsDir } from "./report-files.mjs";
 import { ownClosingIssues } from "./closing-refs.mjs";
+import { GH_LOGIN_ARGS, isOwnedPr, loginOf } from "./owned-pr.mjs";
 
 const NAME = "fleet-tick";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -1665,15 +1666,30 @@ function options() {
 // The open PRs, validated, each with its closingIssuesReferences reduced to
 // `{number}` for every issue it closes in its own repository, by
 // ownClosingIssues()'s rule: another repository's reference, whatever its
-// number, closes none of this repository's tickets. A failed read is not an
-// empty pipeline: backlog 0 + merge-queue 0 is a plausible tick, so printing
-// it off a failed query is the silent stall this script exists to end.
-const PR_ROW_SHAPE = "{number,labels,closingIssuesReferences[{number,url|repository{name,owner{login}}}],headRefOid,mergeable,body,url} rows, url ending /pull/<number>, mergeable one of MERGEABLE, CONFLICTING, UNKNOWN";
+// number, closes none of this repository's tickets. Each also carries `owned`,
+// owned-pr.mjs's rule applied to the login the `gh` credentials answer to,
+// read once here: a read that failed or printed no login refuses the tick,
+// because "owns nothing" would drop every PR from review work. A failed read
+// is not an empty pipeline: backlog 0 + merge-queue 0 is a plausible tick, so
+// printing it off a failed query is the silent stall this script exists to end.
+const PR_ROW_SHAPE = "{number,labels,closingIssuesReferences[{number,url|repository{name,owner{login}}}],headRefOid,mergeable,body,url,author{login},isDraft} rows, url ending /pull/<number>, mergeable one of MERGEABLE, CONFLICTING, UNKNOWN";
+function runLogin() {
+  let out;
+  try {
+    out = execFileSync("gh", GH_LOGIN_ARGS, { encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS });
+  } catch (e) {
+    // Never interpolates e.stderr or e.message, for the reason openPrs() gives.
+    die(`gh ${GH_LOGIN_ARGS.join(" ")} failed: ${e.code === "ETIMEDOUT" ? TIMED_OUT : e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)} — a failed read is not a login that owns nothing`);
+  }
+  const login = loginOf(out);
+  if (login === null) die(`gh ${GH_LOGIN_ARGS.join(" ")} printed no login — a read that answered nothing is not a login that owns nothing`);
+  return login;
+}
 function openPrs() {
   let out;
   try {
     out = execFileSync("gh", ["pr", "list", "--state", "open", "--limit", String(PR_LIMIT),
-      "--json", "number,labels,closingIssuesReferences,headRefOid,mergeable,body,url"], { encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS });
+      "--json", "number,labels,closingIssuesReferences,headRefOid,mergeable,body,url,author,isDraft"], { encoding: "utf8", maxBuffer: MAX_BUFFER, timeout: GH_TIMEOUT_MS });
   } catch (e) {
     // Never interpolates e.stderr or e.message: execFileSync already forwarded
     // the child's stderr to ours, and Node builds e.message out of it, so
@@ -1700,15 +1716,17 @@ function openPrs() {
   // matched or lifted.
   if (!Array.isArray(prs) || prs.some((p) => !p || typeof p.number !== "number"
     || !Array.isArray(p.labels) || !Array.isArray(p.closingIssuesReferences) || typeof p.url !== "string"
-    || typeof p.headRefOid !== "string" || !MERGEABLE_STATES.includes(p.mergeable) || typeof p.body !== "string")) {
+    || typeof p.headRefOid !== "string" || !MERGEABLE_STATES.includes(p.mergeable) || typeof p.body !== "string"
+    || !Object.hasOwn(p, "author") || !(p.author === null || (typeof p.author === "object" && typeof p.author.login === "string")) || typeof p.isDraft !== "boolean")) {
     die(`gh pr list did not return ${PR_ROW_SHAPE}`);
   }
   if (prs.length === PR_LIMIT) {
     die(`exactly ${PR_LIMIT} open PRs — the list is capped and may be truncated. Raise PR_LIMIT; a backlog that silently drops PRs is not a reconcile.`);
   }
+  const login = runLogin();
   return prs.map((p) => {
     try {
-      return { ...p, closingIssuesReferences: ownClosingIssues(p.number, p.url, p.closingIssuesReferences).map((number) => ({ number })) };
+      return { ...p, owned: isOwnedPr(p, login), closingIssuesReferences: ownClosingIssues(p.number, p.url, p.closingIssuesReferences).map((number) => ({ number })) };
     } catch (e) {
       die(`gh pr list did not return ${PR_ROW_SHAPE}: PR #${p.number} answered ${e.message}`);
     }

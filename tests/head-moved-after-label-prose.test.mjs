@@ -415,7 +415,8 @@ test("every writer of ready-to-merge records the audited head before the label",
     assert.match(slice, Pin.phrase("--pin <your dispatch pin>"), `${where} hands the script something other than the audited head`);
   }
   const record = FINISHER_LABEL.indexOf('"pr", "comment"');
-  const label = FINISHER_LABEL.indexOf('"pr", "edit"');
+  // The `patch` a Ticketless PR is given is a release label, not a writer of ready-to-merge: the write that is, is the one that adds LABEL.
+  const label = FINISHER_LABEL.indexOf('"--add-label", LABEL');
   assert.ok(record !== -1, "finisher-label.mjs posts no record");
   assert.ok(label !== -1, "finisher-label.mjs no longer adds the label");
   assert.ok(record < label, "finisher-label.mjs labels before it records the head");

@@ -182,10 +182,9 @@ The full text of each row `fleet-tick.mjs` prints and what it asks of the contro
   print; a `baseline` step not `ok` is one of the steps it names.
   `CONFLICT` rows and the stall report still print. Run the
   `phase0.mjs` command the line names and act on what it prints: a re-run
-  resumes at the step that stopped. A `drift` or `unanswered` step and a
-  `fold-in` `NEED` are advice, named after `; advice:` on the line, or alone
-  on a `PHASE0-ADVICE …` line when nothing is incomplete; advice holds
-  nothing.
+  resumes at the step that stopped. A `drift` or `unanswered` step is advice,
+  named after `; advice:` on the line, or alone on a `PHASE0-ADVICE …` line
+  when nothing is incomplete; advice holds nothing.
 - `CHECK-LIVENESS <member> (<family> > p99 <t>m)`, printed above the rows — a
   live ledger token has stayed live past its family's p99 run time, counted
   from the first tick that saw it (`> 2×p99 …` from the second multiple of the

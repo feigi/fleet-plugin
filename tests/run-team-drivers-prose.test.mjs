@@ -190,7 +190,7 @@ const needKinds = (script) =>
 
 test("every NEED kind phase0.mjs prints has its paragraph in phase 0 step 0", () => {
   const kinds = needKinds("phase0.mjs");
-  assert.deepEqual(kinds, ["derive-recipe", "resume", "review"], "phase0.mjs prints a NEED kind this test does not list — give it a paragraph");
+  assert.deepEqual(kinds, ["derive-recipe", "resume"], "phase0.mjs prints a NEED kind this test does not list — give it a paragraph");
   const s = step0();
   for (const kind of kinds) assert.ok(s.includes(`\`NEED ${kind}`), `step 0 has no paragraph for \`NEED ${kind}\``);
 });
@@ -208,11 +208,11 @@ test("the derive-recipe paragraph dispatches the deriver with its rendered brief
   assert.match(s, Pin.phrase("`RECIPE NOT PROVEN` → stall: report `STALL — Recipe not proven: <cause>` to the maintainer with the deriver's reason verbatim"));
 });
 
-test("the stranded and fold-in paragraphs name their remedies: a stranded impl-<n>-b the ordinary way, a hand-dispatched review", () => {
+test("the stranded paragraph names its remedy, a stranded impl-<n>-b the ordinary way, and the fold-in prints no NEED for the controller to dispatch", () => {
   const s = step0();
   assert.match(s, Pin.phrase("Dispatch a stranded `impl-<n>-b` the ordinary way"));
   assert.match(s, Pin.phrase("and never with `claim-ticket.sh`: the claim stands."));
-  assert.match(s, Pin.phrase("hand-dispatch its review exactly as ticket work, or leave it."));
+  assert.doesNotMatch(s, /NEED review/, "phase0.mjs prints no NEED review line any more");
 });
 
 test("step 0 says to run phase0.mjs again until it exits 0 and to dispatch nothing before then", () => {
@@ -242,7 +242,7 @@ test("phase-0.md has one heading per moved step, in the order phase0.mjs runs th
     "## Rotate the ledger",
     "## Reclaim scratch",
     "## Derive the Recipe",
-    "## Fold in every PR a prior run left open",
+    "## Fold in every Owned PR a prior run left open",
     "## Resume the claims a dead run left without a PR",
     "## Build the Shortlist",
   ]);

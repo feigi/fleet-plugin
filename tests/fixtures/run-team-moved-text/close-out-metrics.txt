@@ -77,7 +77,7 @@ discarded by the next `git checkout` with nothing to show it ever ran.
 **Commit the metrics files and open a PR — at end of run.** The branch name is
 the repository's choice. Make the commit on a branch in the main checkout,
 switch back to `main` before the next tick, and never `--record` while on that
-branch; the round trip reads clean. A PR still open when the run ends is one phase 0's
+branch; the round trip reads clean. An Owned PR still open when the run ends is one phase 0's
 fold-in queues for review next run, however it is named, so the files reach
 `main` through the same review as ticket work rather than being lost. Stranding
 a data row loses it: `member-outcomes.tsv` is regenerated from harness

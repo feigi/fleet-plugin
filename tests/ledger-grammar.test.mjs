@@ -20,7 +20,7 @@ const VOCABULARY = [
   ["fix-pr-346", ["applied:73b356de", "applied:73b356de0123456789abcdef0123456789abcdef", "no-op", "failed", "killed"]],
   ["finisher-pr-346", [
     "labelled", "failed", "killed",
-    "halted:live-editor", "halted:rebase", "halted:past-pin", "halted:unreadable", "halted:missing", "halted:absent", "halted:other",
+    "halted:live-editor", "halted:rebase", "halted:past-pin", "halted:unreadable", "halted:missing", "halted:absent", "halted:other", "halted:human",
   ]],
   ["merge-bot-2", ["done", "killed"]],
 ];

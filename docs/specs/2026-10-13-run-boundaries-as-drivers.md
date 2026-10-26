@@ -83,7 +83,7 @@ named entry in the receipt:
 | `rotate` | `ledger.mjs rotate` | exit 2 → exit 3 with the refusal |
 | `reclaim` | `reclaim-scratch.mjs --root <scratch> --after-rotate --apply` | recorded, continue |
 | `recipe` | `derive-testcmd.sh . install` and `. test --at origin/main` | either exit 1 → `NEED derive-recipe` exit 4; exit 3 → exit 3 |
-| `fold-in` | open PRs with no row rotate carried; writes `#M` rows for those closing an issue; lists the rest | `NEED review PR#M (closes no issue)` recorded, continue |
+| `fold-in` | Owned PRs (open, not a draft, authored by the login `gh api user` answers to) with no row rotate carried; writes a `#M` row for each, closing an issue or not | a failed login read or PR read → exit 3 |
 | `stranded` | `stranded.mjs` | `resume` entries → `NEED resume #N <worktree> <branch>` exit 4; `report` entries printed |
 | `shortlist` | `shortlist.mjs` | exit 2 → exit 3 |
 

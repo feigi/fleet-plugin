@@ -296,22 +296,27 @@
    timed out. It is never a loop: no third derivation, and never a cache
    written by hand.
 
-   **Fold in every PR a prior run left open, before shortlisting.** However it
-   is named and whatever it carries — ticket work whose review was deferred, or
-   that run's own metrics — it is reviewable work no member otherwise picks up,
-   because the Shortlist holds ISSUES and nothing looks at inherited PRs. Queue
-   each for review exactly as ticket work: same review workflow, same
-   fix-applier, same finisher. **Skip a PR a row rotate carried already
-   holds** — its `#<pr>` key, or the PR of its `impl-<N>=PR#<pr>` token: that
-   row already queues it, and a `ledger.mjs row` write replaces the whole
-   line, wiping the live tokens carried on it. Measured 2026-09-03 — a prior
-   run's ticket PR arrived this way and its review found a defect its own PR
-   body called
-   unreviewed, and a metrics PR's review then caught two metrics rows the
-   controller had missed in its own close-out, so no PR is exempt from being
-   wrong. Reviewing them next run is also what stops one pinning
-   `fleet-tick`'s backlog forever: unreviewable AND uncounted is the state
-   that strands it.
+   **Fold in every Owned PR a prior run left open, before shortlisting.** An Owned
+   PR is an open PR, not a draft, whose author is the login `gh api user` answers
+   to: every member acts through the maintainer's `gh` credentials, so every PR
+   the fleet opens carries it. A PR that is not owned — another author's, a
+   bot's, a fork's, a draft — gets no row and no advice, whatever it closes. A
+   login read that fails fails the step. However an Owned PR is named and
+   whatever it carries — ticket work whose review was deferred, that run's own
+   metrics, a Ticketless PR that closes no issue — it is reviewable work no
+   member otherwise picks up, because the Shortlist holds ISSUES and nothing
+   looks at inherited PRs. Queue each for review exactly as ticket work: same
+   review workflow, same fix-applier, same finisher. The fold-in writes it a
+   `#<pr>` row, `PR#<pr> · inherited (closes #…)`, or `PR#<pr> · inherited
+   (closes no issue)` for a Ticketless PR, and the tick queues its review off
+   that row. **Skip a PR a row rotate carried already holds** — its `#<pr>` key,
+   or the PR of its `impl-<N>=PR#<pr>` token: that row already queues it, and a
+   `ledger.mjs row` write replaces the whole line, wiping the live tokens
+   carried on it. Measured 2026-09-03 — a prior run's ticket PR arrived this way
+   and its review found a defect its own PR body called unreviewed, and a
+   metrics PR's review then caught two metrics rows the controller had missed in
+   its own close-out, so no PR is exempt from being wrong. Reviewing them next
+   run is also what stops one pinning `fleet-tick`'s backlog forever.
 
    **Resume the claims a dead run left without a PR — after the fold-in,
    before shortlisting.** A claim's label and worktree exist before its first
