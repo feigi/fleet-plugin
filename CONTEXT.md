@@ -609,6 +609,34 @@ Not a dispatched member — no `fleet-router` agent definition exists; sizing a
 ticket for the table is one `judge()` call in the controller's own eval.
 _Avoid_: fleet-router, sizer
 
+**Routing**:
+The Router's decision for one Pull at its route step: the policy Cell and the
+Pull's Cell, the draw and what made it (burn-in or every 5th Pull), the Stratum
+and the numbers that set it, the Objective, the Cells the guard had tripped,
+and the reason. `ticket-router.mjs route` prints it. Once #3893 lands, the
+Pull's row step keeps it in the run ledger's `## Routed` section; once #3898
+lands, the Pull's board card shows it.
+_Avoid_: route (bare: the Tier route is the `modelRoles` mapping), routing
+line, verdict (that word belongs to a Ruling)
+
+**Preview fit**:
+The Router's fit over the workspace's own records, written beside the cost
+guard at phase 0 and close-out (`.fleet/router-preview.json`) with the
+installed table as its prior; never routed, never committed. It is what the
+evidence favours, shown beside what routes now. In a consumer it fits the
+consumer's records alone, while the table that routes is fitted on this
+repository's runs. Written once #3896 lands.
+_Avoid_: re-fit (that changes the table), shadow table, readout
+
+**Cell evidence**:
+What the cockpit's Cell evidence tab shows about why each implementer Cell is
+used: per Objective × Stratum row, the Cell routes now gives and the Cell the
+Preview fit favours, with each candidate's verdict and interval; per Cell,
+what the cost guard holds it to; and, through each board card, every live
+Pull's Routing. Every figure is read from a record, never recomputed by the
+cockpit, and shown beside its trust status.
+_Avoid_: tier outcomes, router stats, readout
+
 **Stratum**:
 The class of ticket the Router keys on: `light`, `heavy` or `unknown`, set by
 the Router's classifier — today a rule on the brief's length and its count of
@@ -626,9 +654,11 @@ refuses the Cell only for that row; the Cell still takes Exploration Pulls.
 _Avoid_: veto, quality gate
 
 **As-routed**:
-How a Pull is booked: as one unit, to the Cell it drew (`chosen_cell`) — its merge,
-its Ruling and its Spend, every implementer dispatched under it at any Cell
-included, so a rescue at another Cell still books to the drawn one. A ticket Pulled
+How a Pull is booked: as one unit, to the Pull's Cell (`chosen_cell`), the Cell
+the Router gave it — drawn on an Exploration Pull, else its policy row's. Its
+merge, its Ruling and its Spend are booked there, every implementer dispatched
+under it at any Cell included, so a rescue at another Cell still books to the
+Pull's Cell. A ticket Pulled
 twice is two units, and nothing splits across Cells. Both the cost guard and the
 Router's fit read Pulls this way, through `pull-attribution.mjs`.
 _Avoid_: as-run, rescuer's cell
@@ -666,7 +696,8 @@ _Avoid_: mode, profile, priority, goal
 
 **Admissible row**:
 A member-outcomes row whose `subagent_type` is `fleet-implementer-<cell>` for
-the cell its Pull drew (`chosen_cell`), whose recorded effort equals that
+the Pull's Cell (`chosen_cell`: the Cell the Router gave it, drawn on an
+Exploration Pull, else its policy row's), whose recorded effort equals that
 cell's level, and which has a resolved model on record — the only rows the
 readout script (`cell-readout.mjs`) and the per-cell stopping rule (its
 exported `stoppingRule`, run by the repo-local hook) count. Whether the
