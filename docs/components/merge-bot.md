@@ -33,8 +33,9 @@ lifetime is one **Pass**.
    progress, then runs again immediately before `gh pr merge` — merging
    only on that **second** exit 0.
 6. **Grace, then exit.** Once nothing is left to merge, hold a
-   15-minute grace polling labels every 60s; a label landing after exit
-   dispatches a fresh `merge-bot-<n+1>` immediately.
+   15-minute grace polling labels every 60s; the grace ends once no PR
+   is open. A label landing after exit dispatches a fresh
+   `merge-bot-<n+1>` immediately.
 7. **Delete the head branch, then reap.** After every merge the bot
    runs [`delete-merged-branch.sh`](../../plugin/scripts/delete-merged-branch.sh),
    which removes the head branch from `origin` (so it reads `[gone]`) and
@@ -64,6 +65,7 @@ flowchart TD
     SKIP --> DRAIN
     DRAIN -->|"queue empty"| GRACE["15-minute grace,<br/>poll labels every 60s"]
     GRACE -->|"new label seen"| DRAIN
+    GRACE -->|"no PR open"| REPORT
     GRACE -->|"grace elapsed"| REPORT(["one report, exit —<br/>a Pass ends"])
     REPORT -.->|"controller, on the report"| REAP["reap.sh"]
 ```

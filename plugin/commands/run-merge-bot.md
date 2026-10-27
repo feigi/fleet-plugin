@@ -319,6 +319,7 @@ Three dots, never two: a two-dot diff on a stale branch renders `main`'s gains a
 
 - Grace starts once no labelled PR is actionable — every one merged, skipped or held. Seed the labelled set then, the way **Then stay armed** seeds its Monitor, so a PR you already handled does not re-fire.
 - Every 60s, poll `gh pr list --state open --label ready-to-merge --limit 200 --json number`. A number not in the seed → **re-run selection from the top**, hold rule included, drain what it makes actionable, and restart the grace after that drain. A failed poll is no reading: keep the seed and poll again. A poll that returns 200 numbers is not a whole reading either — gh stops at `--limit` with exit 0 and no warning, so a label past it is unseen: act on the numbers it did return, and name `poll-capped-at-200` in the report, so the controller knows the grace's silence covered only the first 200.
+- At grace start and on every 60s poll after it, also read `gh pr list --state open --limit 1 --json number`. An empty list (no PR open at all, any author, labelled or not) ends the grace: report and exit now. A failed read is no reading: keep waiting. It applies draining or not, and again after a late-label drain restarts the grace.
 - 15 minutes with no new label → report and exit.
 
 The wait:
