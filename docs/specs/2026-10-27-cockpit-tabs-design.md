@@ -545,7 +545,8 @@ Links are hash routes, a pure function of the hash:
 | an attention-strip ticket | `#board/<issue>` |
 
 - The target scrolls into view and flashes once. The browser's Back returns
-  to where you were. Nothing opens a new window.
+  to where you were. No hash link opens a new window; the card's PR link,
+  which leaves the cockpit for GitHub, still opens in a new tab.
 - A link with no target lands on the tab's top. Every link the page draws has
   a target in every state, which is why all five Cells are always drawn and a
   generation with no figures still gets an entry.

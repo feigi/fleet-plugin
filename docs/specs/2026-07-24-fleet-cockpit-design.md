@@ -216,6 +216,11 @@ source, and it can never move a ticket.
 
 ## board.json — the model (shape)
 
+(amended by #3882: the model gains `cellEvidence`, a `cellLine` on each
+implementer card, and the carried `modelRoles` and `mainMetrics` reads — see
+`docs/specs/2026-10-27-cockpit-tabs-design.md` § 10.5. The tickets that add
+them update the shape below.)
+
 ```jsonc
 {
   "generatedAt": 1690000000000,      // epoch ms, for the page's staleness banner
