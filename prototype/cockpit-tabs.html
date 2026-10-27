@@ -1,0 +1,703 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>fleet cockpit — prototype: tabs</title>
+<!--
+  THROWAWAY PROTOTYPE for the "Tab layout on today's numbers" ticket of the
+  "Cockpit tabs that explain why each Cell is used" map. Not shipped, never
+  merged. One self-contained file, no build, like board.html. Data is baked in:
+  origin/main ac26799a's records, the 2026-10-26 19:17Z guard on disk, a scratch
+  Preview fit of ac26799a (198 Pulls), modelRoles as read 2026-10-27, and the
+  2026-10-26 run's token panel. States marked "illustrative" are invented
+  values for a state no workspace shows today.
+-->
+<style>
+  :root { color-scheme: dark; --bg:#0d1117; --panel:#161b22; --line:#30363d;
+    --fg:#e6edf3; --dim:#8b949e; --red:#f85149; --amber:#d29922; --green:#3fb950; --blue:#58a6ff; --violet:#bc8cff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font:14px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+    height:100vh; display:flex; flex-direction:column; }
+  body > * { flex:none; }
+  a { color:var(--blue); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  header { display:flex; align-items:center; gap:18px; padding:8px 16px 0; border-bottom:1px solid var(--line); }
+  header h1 { font-size:15px; margin:0 0 8px; font-weight:600; }
+  #age { color:var(--dim); font-size:12px; margin-left:auto; margin-bottom:8px; }
+  nav#tabs { display:flex; gap:2px; align-self:flex-end; }
+  nav#tabs a { padding:6px 14px; border:1px solid transparent; border-bottom:none; border-radius:6px 6px 0 0; color:var(--dim); cursor:pointer; }
+  nav#tabs a.on { color:var(--fg); border-color:var(--line); background:var(--bg); margin-bottom:-1px; }
+  nav#tabs a .tmark { color:var(--amber); margin-left:6px; }
+  #proto { background:#1c1530; color:var(--violet); padding:5px 16px; font-size:12px; border-bottom:1px solid var(--line); display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
+  #proto select { background:var(--panel); color:var(--fg); border:1px solid var(--line); font:inherit; font-size:12px; }
+  #proto .desc { color:var(--dim); }
+  #stale-banner { display:none; background:var(--amber); color:#000; padding:6px 16px; font-weight:600; }
+  #stale-banner.dead { background:var(--red); color:#fff; }
+  .attention { padding:8px 16px; border-bottom:1px solid var(--line); background:#2d1618; }
+  .attention:empty { display:none; }
+  .att { display:inline-block; margin:2px 10px 2px 0; }
+  .att .n { color:var(--blue); font-weight:600; }
+  .flag { color:var(--red); font-weight:600; }
+  main { flex:1 1 0; min-height:200px; display:flex; flex-direction:column; }
+  main > section { display:none; flex:1 1 0; min-height:0; flex-direction:column; }
+  main > section.on { display:flex; }
+  #board { display:grid; grid-template-columns:repeat(5,1fr); grid-template-rows:minmax(0,1fr); gap:10px; padding:14px; align-items:start; flex:1 1 0; min-height:200px; }
+  .col { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px; min-height:80px; max-height:100%; overflow-y:auto; }
+  .col h2 { font-size:11px; letter-spacing:.06em; color:var(--dim); margin:-8px -8px 0; padding:10px 12px 8px; text-transform:uppercase; position:sticky; top:-8px; z-index:1; background:var(--panel); }
+  .col h2 span { color:var(--fg); }
+  .card { background:#0d1117; border:1px solid var(--line); border-radius:6px; padding:7px 8px; margin-bottom:7px; }
+  .card .top { display:flex; gap:6px; align-items:baseline; }
+  .card .n { color:var(--blue); font-weight:600; }
+  .card .title { color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .card .meta { color:var(--dim); font-size:12px; margin-top:3px; display:flex; gap:8px; flex-wrap:wrap; }
+  /* the Cell line */
+  .cellline { font-size:12px; margin-top:5px; padding-top:5px; border-top:1px dashed var(--line); color:var(--dim); }
+  .cellline .c1 { display:flex; gap:6px; flex-wrap:wrap; align-items:baseline; }
+  .cellline .cell { color:var(--fg); font-weight:600; }
+  .cellline .why { color:var(--fg); }
+  .cellline .mark { color:var(--amber); margin-top:2px; }
+  .cellline .mark.bad { color:var(--red); }
+  .nr { color:var(--dim); font-style:italic; }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; vertical-align:middle; }
+  .dot.green{background:var(--green)} .dot.red{background:var(--red)} .dot.unknown{background:var(--dim)}
+  .badge { border:1px solid var(--line); border-radius:10px; padding:0 6px; }
+  .badge.flag { border-color:var(--red); color:var(--red); }
+  footer { color:var(--dim); padding:8px 16px; border-top:1px solid var(--line); font-size:12px; }
+  /* tokens tab */
+  #spend { padding:14px; overflow-y:auto; }
+  .spend-wrap { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .spend-hd { display:flex; align-items:baseline; gap:10px; margin-bottom:8px; }
+  .spend-hd h2 { font-size:11px; letter-spacing:.06em; color:var(--dim); margin:0; text-transform:uppercase; }
+  .spend-hd .lede { color:var(--fg); }
+  .spend-hd .note { color:var(--dim); font-size:11px; margin-left:auto; }
+  .spend-cols { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  .spend-cols h3 { font-size:11px; color:var(--dim); margin:0 0 6px; font-weight:600; letter-spacing:.04em; }
+  .srow { display:grid; grid-template-columns:8.5em 3.4em 1fr 3em; gap:8px; align-items:center; margin-bottom:3px; font-size:12px; }
+  .srow .lbl { color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .srow .num, .srow .pct { color:var(--dim); text-align:right; }
+  .bar { background:#0d1117; border-radius:3px; height:9px; overflow:hidden; }
+  .bar i { display:block; height:100%; background:var(--blue); }
+  .bar i.rev { background:var(--amber); }
+  /* Cell evidence tab */
+  #cells { overflow-y:auto; padding:14px 18px 40px; }
+  #cells .toc { color:var(--dim); font-size:12px; margin-bottom:10px; }
+  .alert { background:#3a2a0a; border:1px solid var(--amber); color:var(--fg); border-radius:6px; padding:7px 10px; margin-bottom:8px; }
+  .alert b { color:var(--amber); }
+  .alert .sub { color:var(--dim); font-size:12px; }
+  .sec { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:14px; }
+  .sec > h2 { font-size:11px; letter-spacing:.06em; color:var(--dim); margin:0 0 8px; text-transform:uppercase; }
+  .sides { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:8px; }
+  .side { border-left:3px solid var(--line); padding-left:8px; }
+  .side h3 { margin:0 0 2px; font-size:13px; }
+  .side .src { color:var(--dim); font-size:12px; }
+  .side .head { color:var(--fg); font-size:12px; margin-top:3px; }
+  .lab { color:var(--amber); font-size:12px; }
+  .lab.nc { color:var(--dim); font-style:italic; }
+  sup.fn { color:var(--amber); }
+  table.ev { width:100%; border-collapse:collapse; font-size:12px; }
+  table.ev th { text-align:left; color:var(--dim); font-weight:600; padding:4px 6px; border-bottom:1px solid var(--line); vertical-align:bottom; }
+  table.ev th.grp { text-align:center; border-bottom:1px solid var(--line); }
+  table.ev td { padding:5px 6px; border-bottom:1px solid #21262d; vertical-align:top; }
+  table.ev td.split { border-left:2px solid var(--line); }
+  table.ev tr.live td:first-child { box-shadow: inset 3px 0 0 var(--green); }
+  table.ev .cellv { color:var(--fg); font-weight:600; }
+  table.ev .diff { color:var(--amber); font-weight:700; }
+  table.ev .cand { color:var(--dim); }
+  table.ev .cand b { color:var(--fg); font-weight:500; }
+  table.ev .follows { color:var(--dim); font-style:italic; }
+  .foot { color:var(--dim); font-size:12px; margin-top:6px; }
+  .foot div { margin-top:2px; }
+  .g-entry { border:1px solid var(--line); border-radius:6px; padding:7px 9px; margin-bottom:8px; background:#0d1117; }
+  .g-entry .gh { display:flex; gap:12px; align-items:baseline; flex-wrap:wrap; }
+  .g-entry .gh .cell { font-weight:700; font-size:13px; }
+  .g-entry .gh .gen { color:var(--dim); }
+  .g-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin-top:5px; font-size:12px; }
+  .g-grid .k { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  .g-grid .v { color:var(--fg); }
+  .g-entry .older { margin-top:6px; padding-top:5px; border-top:1px dashed var(--line); font-size:12px; color:var(--dim); }
+  .g-entry .pulls { margin-top:6px; font-size:12px; color:var(--dim); }
+  .g-entry .pulls a { margin-right:8px; }
+  .ok { color:var(--green); } .warn { color:var(--amber); } .bad { color:var(--red); }
+  .flash { animation: flash 1.6s ease-out; }
+  @keyframes flash { 0% { box-shadow:0 0 0 3px var(--violet); } 100% { box-shadow:0 0 0 0 transparent; } }
+  table.decl td, table.decl th { padding:3px 8px; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="heading">🛰 fleet cockpit</h1>
+  <nav id="tabs">
+    <a data-tab="board">Board</a>
+    <a data-tab="cells">Cell evidence<span class="tmark" id="cells-mark"></span></a>
+    <a data-tab="tokens">Tokens</a>
+  </nav>
+  <span id="age">updated 0m ago</span>
+</header>
+<div id="proto">
+  <b>PROTOTYPE</b>
+  <label>state <select id="scn"></select></label>
+  <label>attention strip <select id="attpos"><option value="global">global, above the tabs</option><option value="board">Board tab only</option></select></label>
+  <label>card Cell line <select id="cardform"><option value="full">full (3 lines)</option><option value="compact">compact (1 line, Stratum numbers on hover)</option></select></label>
+  <span class="desc" id="scn-desc"></span>
+</div>
+<div id="stale-banner"></div>
+<div id="attention-global" class="attention"></div>
+<main>
+  <section id="tab-board"><div id="attention-board" class="attention"></div><div id="board"></div></section>
+  <section id="tab-cells"><div id="cells"></div></section>
+  <section id="tab-tokens"><div id="spend"></div></section>
+</main>
+<footer id="footer"></footer>
+<script>
+// ---------------------------------------------------------------- helpers
+const el = (t, cls, txt) => { const e = document.createElement(t); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+const h = (t, cls, ...kids) => { const e = el(t, cls); for (const c of kids) if (c != null) e.append(typeof c === "string" ? document.createTextNode(c) : c); return e; };
+const link = (txt, href, cls) => { const a = el("a", cls, txt); a.href = href; return a; };
+const k = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1000 ? (n / 1000).toFixed(0) + "k" : String(Math.round(n)));
+const pct = (x) => (x * 100).toFixed(1) + "%";
+const pts = (x) => (x >= 0 ? "+" : "−") + Math.abs(x * 100).toFixed(1) + " pts";
+const sgnPct = (x) => (x >= 0 ? "+" : "−") + Math.abs(x * 100).toFixed(1) + "%";
+const lab = (txt, nc) => el("span", nc ? "lab nc" : "lab", txt);
+const fn = (n) => el("sup", "fn", String(n));
+const clone = (o) => JSON.parse(JSON.stringify(o));
+
+// ---------------------------------------------------------------- records (baked in)
+const MIN_N = 20, TRIP = 0.15;
+const ROUTE_MODEL = { slow: "claude-opus-5-5", task: "claude-sonnet-5-5", smol: "claude-haiku-5-5" }; // omp config get modelRoles, 2026-10-27
+const CELLS5 = ["slow-high", "task-high", "smol-high", "slow-medium", "task-max"];
+const roleOf = (c) => c.split("-")[0];
+const levelOf = (c) => c.split("-")[1];
+
+// The guard on disk: 2026-10-26 19:17Z close-out, read tier-outcomes.tsv 9df10b12.
+const GUARD_TODAY = {
+  source: "this repository's runs", computed_at: "2026-10-26 19:17Z", window_start: "2026-10-03", verdict: "ok", tripped: [], baseline: "slow-high",
+  entries: {
+    "slow-high": { gen: "claude-opus-5-5", n: 69, fail: 0.1159, usd: 14.92, hand: [56, 69] },
+    "task-high": { gen: "claude-sonnet-5-5", n: 69, fail: 0.2174, usd: 10.20, hand: [60, 69], excluded: 1 },
+    "smol-high": { gen: "claude-haiku-5-5", n: 32, fail: 0.25, usd: 10.68, hand: [26, 32], excluded: 5, unpriced: 1 },
+  },
+};
+
+// Scratch Preview fit of origin/main ac26799a against the 19:17Z guard: 198 Pulls, stage 2, burn-in.
+const V = (cell, verdict, n, ci) => ({ cell, verdict, n, ci });
+const FIT_ROWS = {
+  cost: {
+    "*": { cell: "task-high", why: "lower fail rate: two qualify, neither reliably cheaper ($ −3.46 to +2.23)", cands: [V("task-high", "qualifies", 69, "$ −7.75 to −1.98 per merged PR vs slow-high"), V("smol-high", "qualifies", 32, "$ −7.70 to −0.84")] },
+    light: { cell: "task-high", why: "sole qualifier", cands: [V("task-high", "qualifies", 22, "$ −9.70 to −0.20"), V("smol-high", "too few", 13, "13 of 20")] },
+    heavy: { cell: "task-high", why: "sole qualifier", cands: [V("task-high", "qualifies", 47, "$ −8.40 to −1.40"), V("smol-high", "too few", 19, "19 of 20")] },
+  },
+  speed: {
+    "*": { cell: "task-high", why: "no qualifier: keeps the cost row's task-high", cands: [V("slow-high", "too slow", 69, "+0.78 to +37.32 min per merged PR vs task-high"), V("smol-high", "too slow", 32, "−6.12 to +33.14 min")] },
+    light: { cell: "task-high", why: "no qualifier", cands: [V("slow-high", "too slow", 22, "+8.24 to +52.74 min"), V("smol-high", "too few", 13, "13 of 20")] },
+    heavy: { cell: "task-high", why: "no qualifier", cands: [V("slow-high", "too slow", 47, "−11.05 to +35.31 min"), V("smol-high", "too few", 19, "19 of 20")] },
+  },
+};
+const UNFITTED_ROWS = { cost: { "*": { cell: "slow-high", why: "unjudged: never fitted", cands: [] } }, speed: { "*": { cell: "slow-high", why: "unjudged: never fitted", cands: [] } } };
+const unjudgedRows = (why) => ({ cost: { "*": { cell: "slow-high", why, cands: [] } }, speed: { "*": { cell: "slow-high", why, cands: [] } } });
+
+// Declared, not measured: plugin/agents/*.agent.md minus the five implementer Cells.
+const DECLARED = [
+  ["fleet-fix-applier", "@slow:high"], ["fleet-review-correctness", "@slow:high"], ["fleet-review-simplify", "@slow:high"],
+  ["fleet-review-silent-failure", "@task:high"], ["fleet-recipe-deriver", "@task:medium"], ["fleet-review-comments", "@task:medium"],
+  ["fleet-review-tests", "@task:medium"], ["fleet-review-types", "@task:medium"], ["fleet-review-verifier", "@task:low"],
+  ["fleet-finisher", "@smol:low"], ["fleet-merge-bot", "@smol:low"], ["fleet-review-runner", "@smol:low"],
+  ["fleet-review-snapshot", "@smol:low"], ["fleet-review-test-run", "@smol:low"],
+];
+
+// The 2026-10-26 run's token panel, gatherSpend over its session since 13:04Z.
+const SPEND = {
+  ok: true, totals: { agents: 131, cacheWrite: 5702199, output: 1250230, cacheRead: 162813222 }, reviewPct: 67.2, attributedPct: 67.9, skipped: 0, damaged: 0,
+  roles: [["specialist", 105, 3091427, 54.2], ["implementer", 3, 949338, 16.6], ["reviewer", 9, 741906, 13.0], ["other", 3, 341922, 6.0], ["merge-bot", 4, 278567, 4.9], ["finisher", 4, 191191, 3.4], ["memory", 2, 65410, 1.1], ["-", 1, 42438, 0.7]].map(([role, agents, cacheWrite, pct]) => ({ role, agents, cacheWrite, pct })),
+  tools: [["bash", 1318, 1891159, 48.8], ["read", 392, 1036282, 26.8], ["grep", 130, 330335, 8.5], ["edit", 188, 238220, 6.2], ["eval", 52, 150163, 3.9], ["write", 31, 84392, 2.2], ["wait", 69, 65355, 1.7], ["yield", 63, 18452, 0.5]].map(([tool, calls, cacheWrite, pct]) => ({ tool, calls, cacheWrite, pct })),
+};
+
+const POOL_TODAY = [[3875, "The cockpit outlives its run: exit once the run's controller is gone"], [3874, "Label map documents: the ADR, requirements 2.4, the component doc, the glossary, and the retired out-of-scope note"], [3873, "claim-ticket.sh, release-ticket.sh and drop-merged-label.sh read the in-progress string from the Label map"], [3856, "merge-bot: end the grace once no PR is open"], [3853, "member-write-guard protects the main checkout, not the Install root a package install executes"], [3845, "instrument pin certifies the checkout's plugin/ while fleet-run executes the installed package"]];
+const HEAVY = (chars, crit) => `heavy: ${chars} chars (past 3,483), ${crit} criteria (past 5)`;
+const MERGED_TODAY = [
+  { issue: 3747, title: "finisher: the acceptance mutation cannot go red on a prose-only PR, so every docs-only PR halts at the maintainer", pr: 3849,
+    cl: { cell: "smol-high", gen: "claude-haiku-5-5", why: "drawn 2 of 3: burn-in", stratum: HEAVY("9,658", 8), model: "claude-haiku-5-5 · high" } },
+  { issue: 3780, title: "instrument pin: record the pin commit, say what moved, escalate a moved pinned tree", pr: 3848,
+    cl: { cell: "task-high", gen: "claude-sonnet-5-5", why: "drawn 3 of 3: burn-in", stratum: HEAVY("9,705", 8), model: "claude-sonnet-5-5 · high" } },
+  { issue: 3748, title: "run-team: the tick never queues an open PR that closes no issue, so controller-authored chore and docs PRs need a hand-dispatched review and a manual label", pr: 3852,
+    cl: { cell: "task-high", gen: "claude-sonnet-5-5", why: "drawn 3 of 3: burn-in", stratum: HEAVY("13,638", 11), model: "claude-sonnet-5-5 · high" } },
+];
+const STALLED = "⚠ heartbeat STALLED, controller gone: last beat 2026-10-26T19:17:14.588Z — stopped deliberately — recorded reason: maintainer requested drain; 0 ticket(s) claimed and in flight, pool supply 27";
+
+// ---------------------------------------------------------------- the states
+// Each state is a full view: what the page would be handed. Built from TODAY by edits.
+function today() {
+  return {
+    repo: "feigi/fleet-plugin", banner: STALLED, attention: [],
+    queue: { pool: 27, supply: 27, reviewBacklog: 0 },
+    tickets: [...clone(MERGED_TODAY).map((t) => ({ ...t, column: "MERGED", ci: "unknown" })), ...POOL_TODAY.map(([issue, title]) => ({ issue, title, column: "POOL" }))],
+    spend: SPEND,
+    alerts: [{ b: "main's records changed after 2026-10-26 19:17Z; the next phase 0 recomputes", sub: "the guard read tier-outcomes.tsv blob 9df10b12; main holds 84123e74 (21 re-rules and the run's metrics PR merged since)" }],
+    liveObjective: null,
+    routes: {
+      title: "Routes now", src: "this repository's runs · never fitted · @feigi/fleet-ctl 3.104.0", srcFn: null,
+      head: "never fitted: every Pull drawn over 3 Cells", labels: [], rows: UNFITTED_ROWS, dispatch: "drawn over 3 Cells: slow-high, task-high, smol-high",
+    },
+    evidence: {
+      title: "Evidence favours", src: "Preview fit · this repository's runs · computed 2026-10-26 19:17Z · 198 Pulls",
+      head: "stage 2: slow-medium and task-max have 0 of the 20 merged PRs each needs", labels: [], rows: FIT_ROWS, dispatch: "drawn over 5 Cells: + slow-medium, task-max",
+    },
+    guard: { ...clone(GUARD_TODAY), heading: null, checks: [] },
+    modelRoles: { ...ROUTE_MODEL }, modelRolesFail: null,
+    footnotes: {},
+  };
+}
+
+const STATES = [
+  { id: "today", label: "this repo · today, as a phase 0 with the new fields would write it",
+    desc: "origin/main ac26799a; guard 19:17Z; scratch Preview fit; cards as a Routing would hold them",
+    make: () => today() },
+  { id: "shipped", label: "this repo · today, as shipped before the next phase 0",
+    desc: "guard predates the new fields; no Preview fit yet; card rows predate the Routing",
+    make: () => {
+      const v = today();
+      v.alerts = [];
+      v.guard.checks.push("records against main: not checked — this guard predates the blob ids it needs (written 2026-10-26 19:17Z by 3.104.0)");
+      for (const e of Object.values(v.guard.entries)) { e.hand = "nc"; e.excluded = "nc"; e.unpriced = "nc"; }
+      v.evidence = { ...v.evidence, src: "Preview fit · none on disk", head: "no Preview fit yet: the next phase 0 writes one [wording invented for this state]", rows: null };
+      for (const t of v.tickets) if (t.cl) { t.cl.why = null; t.cl.stratum = null; }
+      return v;
+    } },
+  { id: "c-skipped", label: "consumer · no cost guard: refresh skipped",
+    desc: "fresh consumer, runs 1–2 (illustrative cards)", make: () => consumerNoGuard("skipped at 2026-10-27 08:12Z: docs/metrics/member-outcomes.tsv not found — no corpus to guard yet") },
+  { id: "c-failed", label: "consumer · no cost guard: refresh failed",
+    desc: "diagram-docs on v3.104.0 (20-column member-outcomes.tsv)", make: () => consumerNoGuard("failed at 2026-10-27 08:12Z: … malformed row: 20 fields, expected 23") },
+  { id: "c-noreceipt", label: "consumer · no cost guard: no receipt",
+    desc: "cockpit launched by hand before any run", make: () => consumerNoGuard("no phase 0 or close-out receipt here") },
+  { id: "c-older", label: "consumer · newest refresh failed, older guard on disk",
+    desc: "illustrative", make: () => {
+      const v = consumerHoldsNothing();
+      v.guard.heading = "the newest refresh failed at 2026-10-27 08:12Z: … malformed row: 20 fields, expected 23; these figures are from 2026-10-24 17:40Z";
+      return v;
+    } },
+  { id: "c-none", label: "consumer · the guard holds nothing back",
+    desc: "verdict none: slow-high has 7 of 20 (illustrative counts)", make: () => consumerHoldsNothing() },
+  { id: "c-fitted", label: "consumer · a fitted release",
+    desc: "3.105.0 ships main's fit (task-high every row, 198 Pulls); the consumer's own Preview fit is stage 2 with few Pulls (illustrative)", make: () => consumerFitted() },
+  { id: "c-update", label: "consumer · after a plugin update; models differ; role unset; GHE host",
+    desc: "illustrative", make: () => consumerUpdated() },
+  { id: "gallery", label: "this repo · rare labels and card marks, once each",
+    desc: "illustrative values on today's page", make: () => gallery() },
+];
+
+function consumerBase() {
+  const v = today();
+  v.repo = "acme/diagram-docs"; v.banner = null; v.alerts = []; v.spend = SPEND;
+  v.queue = { pool: 4, supply: 4, reviewBacklog: 0 };
+  v.routes.src = "feigi/fleet-plugin's runs · never fitted · @feigi/fleet-ctl 3.104.0";
+  v.routes.srcFn = "this repository's runs reach routing only through its cost guard, which can hold a Cell back but never picks one";
+  v.tickets = [
+    { issue: 41, title: "render sequence diagrams from the trace export", column: "IMPLEMENTING", agent: "impl-41",
+      cl: { cell: "slow-high", gen: "claude-opus-5-5", why: "no cost guard yet: default Cell only", stratum: "light: 1,904 chars, 3 criteria", model: "claude-opus-5-5 · high" } },
+    { issue: 38, title: "the legend overlaps the title on narrow pages", column: "REVIEW", pr: 44, ci: "green",
+      cl: { cell: "slow-high", gen: "claude-opus-5-5", why: "no cost guard yet: default Cell only", stratum: "unknown: no brief read", model: "claude-opus-5-5 · high" } },
+    { issue: 50, title: "export to SVG", column: "POOL" }, { issue: 51, title: "dark theme", column: "POOL" },
+  ];
+  return v;
+}
+function consumerNoGuard(heading) {
+  const v = consumerBase();
+  v.routes.head = "no cost guard: every Pull runs at slow-high, the default Cell";
+  v.routes.dispatch = "slow-high only";
+  v.evidence = { ...v.evidence, src: "Preview fit · none", head: "no Preview fit: it is written only beside a cost guard", rows: null };
+  v.guard = { source: "this repository's runs", heading, entries: {}, checks: [], noGuard: true, baseline: "slow-high" };
+  return v;
+}
+function consumerHoldsNothing() {
+  const v = consumerBase();
+  for (const t of v.tickets) if (t.cl) t.cl.why = "drawn 1 of 3: burn-in";
+  v.evidence = { ...v.evidence, src: "Preview fit · this repository's runs · computed 2026-10-27 08:12Z · 12 Pulls",
+    head: "stage 1: slow-high has 7, task-high 3 and smol-high 2 of the 20 merged PRs each needs", rows: unjudgedRows("unjudged: slow-high has 7 of 20"), dispatch: "drawn over 3 Cells" };
+  v.guard = { source: "this repository's runs", computed_at: "2026-10-27 08:12Z", window_start: null, verdict: "none", tripped: [], baseline: "slow-high", checks: [],
+    heading: "holds no Cell back until slow-high has 20 merged PRs: it has 7", nOnly: true,
+    entries: { "slow-high": { gen: "claude-opus-5-5", n: 7 }, "task-high": { gen: "claude-sonnet-5-5", n: 3 }, "smol-high": { gen: "claude-haiku-5-5", n: 2 } } };
+  return v;
+}
+function consumerFitted() {
+  const v = consumerBase();
+  v.routes.src = "feigi/fleet-plugin's runs · fitted at 7c98045 on 198 Pulls · @feigi/fleet-ctl 3.105.0";
+  v.routes.head = "stage 2 at its fit on feigi/fleet-plugin's runs: slow-medium and task-max had 0 of the 20 merged PRs each needs; every Pull drawn over 5 Cells";
+  v.routes.labels = ["a later fit, reaching this install with a plugin release"];
+  v.routes.rows = FIT_ROWS; v.routes.dispatch = "drawn over 5 Cells";
+  for (const t of v.tickets) if (t.cl) t.cl.why = "drawn 4 of 5: burn-in";
+  v.evidence = { ...v.evidence, src: "Preview fit · this repository's runs · computed 2026-10-27 08:12Z · 31 Pulls",
+    head: "stage 2: slow-high has 24, task-high 4, smol-high 3, slow-medium and task-max 0 of the 20 merged PRs each needs", rows: unjudgedRows("unjudged: task-high has 4 of 20"), dispatch: "drawn over 5 Cells" };
+  v.guard = { source: "this repository's runs", computed_at: "2026-10-27 08:12Z", window_start: "2026-10-01", verdict: "ok", tripped: [], baseline: "slow-high", checks: [],
+    entries: { "slow-high": { gen: "claude-opus-5-5", n: 24, fail: 0.125, usd: 9.10, hand: [0, 24] }, "task-high": { gen: "claude-sonnet-5-5", n: 4, fail: 0.25, usd: 6.40, hand: [0, 4] }, "smol-high": { gen: "claude-haiku-5-5", n: 3, fail: 0.333, usd: 5.90, hand: [1, 3] } } };
+  return v;
+}
+function consumerUpdated() {
+  const v = consumerFitted();
+  v.evidence.labels = ["fitted against 3.104.0, never fitted; the next phase 0 refits"];
+  v.modelRoles = { slow: "claude-opus-5-5", task: "claude-sonnet-5-6", smol: null };
+  v.guard.entries["task-high"].gen = "claude-sonnet-5-6";
+  v.guard.entries["smol-high"].gen = "claude-haiku-5-5";
+  v.guard.checks.push("records against main: main holds no metrics yet (github.acme.internal)");
+  return v;
+}
+function gallery() {
+  const v = today();
+  v.liveObjective = "cost";
+  v.banner = null;
+  v.attention = [{ issue: 3777, flags: ["=tier-mismatch"] }, { issue: 3905, flags: ["=stalled"] }];
+  v.alerts = [
+    { b: "merged with no Ruling: task-high 2, smol-high 1", sub: "they count as not merged, so those Cells' n read low and $ per merged PR high, in the guard and the Preview fit alike" },
+    { b: "counts the rows of open PR #3857, not on main yet", sub: "the guard was computed 2026-10-26 19:17Z, at or before the close-out's commit step (19:17:14Z)" },
+    { b: "the tick accepts this guard and the Router refuses it: tripped[0] is not a Cell", sub: "the Router routes as with no cost guard; this section shows the tick's reading" },
+  ];
+  v.routes.labels = ["main's table is fitted at 7c98045 on 198 Pulls; this install routes by an unfitted table until the plugin is updated"];
+  v.evidence.labels = ["read the guard of 2026-10-25 22:34Z, not the one on disk (2026-10-26 19:17Z)"];
+  v.footnotes.fitN = { cell: "smol-high", text: "the guard counts merges by GitHub's state, the fit by Rulings, and the fit admits only drawn or rule-sized Pulls (guard 33, fit 32)" };
+  v.guard.entries["task-high"].leftOut = 2; v.guard.entries["task-high"].pending = 1;
+  v.guard.entries["smol-high"].older = [{ gen: "claude-haiku-4-5", n: 21, fail: 0.5238, usd: 11.25 }];
+  v.modelRolesFail = "as read at 2026-10-27 08:02Z; reading fails: omp config exited 1";
+  v.tickets.unshift(
+    { issue: 3777, title: "member-outcomes reads a bailed impl report that names a pr as ending hollow", column: "REVIEW", pr: 3790, ci: "green", flags: ["=tier-mismatch"],
+      cl: { cell: "task-high", gen: "claude-sonnet-5-5", why: "drawn 2 of 3: burn-in", stratum: HEAVY("6,112", 7), model: "claude-sonnet-5-5 · high", mark: "first ran as fleet-implementer-slow-high" } },
+    { issue: 3901, title: "illustrative: a policy-row reason", column: "IMPLEMENTING", agent: "impl-3901",
+      cl: { cell: "task-high", gen: "claude-sonnet-5-5", why: "cost row, heavy", whyRow: "cost/heavy", stratum: HEAVY("5,020", 6), model: "claude-sonnet-5-5 · high" } },
+    { issue: 3902, title: "illustrative: a rescue", column: "IMPLEMENTING", agent: "impl-3902-b",
+      cl: { cell: "task-high", gen: "claude-sonnet-5-5", rescue: "slow-high", rescueModel: "claude-opus-5-5 · high", why: "drawn 1 of 3: burn-in", stratum: "light: 2,210 chars, 4 criteria", model: "claude-sonnet-5-5 · high" } },
+    { issue: 3903, title: "illustrative: a tripped Cell left out", column: "REVIEW", pr: 3911, ci: "red",
+      cl: { cell: "slow-high", gen: "claude-opus-5-5", why: "drawn 1 of 2: burn-in; left out as tripped: smol-high", stratum: "light: 3,001 chars, 5 criteria", model: "claude-opus-5-5 · high" } },
+    { issue: 3904, title: "illustrative: a fallback model", column: "READY", pr: 3912, ci: "green",
+      cl: { cell: "smol-high", gen: "claude-haiku-5-5", why: "drawn 3 of 3: burn-in", stratum: "unknown: no brief read", model: "claude-haiku-5-5 · high · fell back to claude-sonnet-5-5" } },
+    { issue: 3905, title: "illustrative: no Admissible row", column: "IMPLEMENTING", agent: "impl-3905",
+      cl: { cell: "smol-high", gen: "claude-haiku-5-5", why: "drawn 2 of 3: burn-in", stratum: HEAVY("4,400", 6), model: "claude-opus-5-5 · high", mark: "ran as fleet-implementer-slow-high: no Admissible row, so it counts in no Cell's figures", markBad: true } },
+    { issue: 3906, title: "illustrative: a Cell with no figures", column: "IMPLEMENTING", agent: "impl-3906",
+      cl: { cell: "slow-medium", gen: "claude-opus-5-5", why: "drawn 4 of 5: burn-in", stratum: "light: 1,200 chars, 2 criteria", model: "claude-opus-5-5 · medium" } },
+    { issue: 3907, title: "illustrative: an old route= value, no transcript", column: "READY", pr: 3913, ci: "unknown",
+      cl: { cell: "slow-high", gen: "claude-opus-5-5", why: "recorded as guard-tripped", stratum: null, model: null, mark: "Admissible row: not checked — no transcript readable" } },
+  );
+  return v;
+}
+
+// ---------------------------------------------------------------- tab strip + links
+// Hash routes: #board, #cells, #tokens, #cells/<cell>[@<gen>], #cells/row/<objective>/<stratum>, #board/<issue>.
+let state = null;
+function go() {
+  const hash = location.hash.slice(1) || "board";
+  const [tab, ...rest] = hash.split("/");
+  const tabName = ["board", "cells", "tokens"].includes(tab) ? tab : "board";
+  for (const a of document.querySelectorAll("nav#tabs a")) a.classList.toggle("on", a.dataset.tab === tabName);
+  for (const s of document.querySelectorAll("main > section")) s.classList.toggle("on", s.id === "tab-" + tabName);
+  placeAttention(tabName);
+  if (!rest.length) return;
+  const id = tabName === "board" ? "card-" + rest[0] : "anchor-" + rest.join("/");
+  const target = document.getElementById(id);
+  if (target) { target.scrollIntoView({ block: "center" }); target.classList.remove("flash"); void target.offsetWidth; target.classList.add("flash"); }
+}
+for (const a of document.querySelectorAll("nav#tabs a")) a.onclick = () => { location.hash = a.dataset.tab; };
+window.addEventListener("hashchange", go);
+
+function placeAttention(tabName) {
+  const pos = document.getElementById("attpos").value;
+  const g = document.getElementById("attention-global"), b = document.getElementById("attention-board");
+  const fill = (host) => {
+    host.innerHTML = "";
+    for (const t of state.attention) {
+      const span = el("span", "att");
+      span.append(link("#" + t.issue, "#board/" + t.issue, "n"), document.createTextNode(" "), el("span", "flag", t.flags.join(" ")));
+      host.append(span);
+    }
+  };
+  g.innerHTML = ""; b.innerHTML = "";
+  if (pos === "global") fill(g); else fill(b);
+}
+
+// ---------------------------------------------------------------- board tab
+const COLUMNS = ["POOL", "IMPLEMENTING", "REVIEW", "READY", "MERGED"];
+const cellHref = (cell, gen) => `#cells/${cell}@${gen}`;
+function cellLine(cl) {
+  const form = document.getElementById("cardform").value;
+  const box = el("div", "cellline");
+  const c1 = el("div", "c1");
+  c1.append(link(cl.cell, cellHref(cl.cell, cl.gen), "cell"));
+  if (cl.rescue) { c1.append(el("span", null, "· rescue at")); c1.append(link(cl.rescue, cellHref(cl.rescue, ROUTE_MODEL[roleOf(cl.rescue)]), "cell")); c1.append(el("span", null, cl.rescueModel)); }
+  c1.append(el("span", null, "·"));
+  if (cl.why == null) c1.append(el("span", "nr", "why: not on record"));
+  else if (cl.whyRow) c1.append(link(cl.why, "#cells/row/" + cl.whyRow, "why"));
+  else c1.append(el("span", "why", cl.why));
+  const stratum = cl.stratum == null ? el("span", "nr", "Stratum not on record") : el("span", null, cl.stratum);
+  const model = cl.model == null ? el("span", "nr", "model not on record") : el("span", null, cl.model);
+  if (form === "compact") {
+    const word = cl.stratum == null ? el("span", "nr", "stratum ?") : el("span", null, cl.stratum.split(":")[0]);
+    word.title = cl.stratum ?? "not on record";
+    c1.append(el("span", null, "·"), word, el("span", null, "·"), model);
+    box.append(c1);
+  } else {
+    box.append(c1, h("div", null, stratum), h("div", null, model));
+  }
+  if (cl.mark) box.append(el("div", cl.markBad ? "mark bad" : "mark", "⚑ " + cl.mark));
+  return box;
+}
+function card(t) {
+  const c = el("div", "card"); c.id = "card-" + t.issue;
+  const top = el("div", "top");
+  top.append(el("span", "n", "#" + t.issue), el("span", "title", t.title || ""));
+  top.lastChild.title = t.title || "";
+  c.append(top);
+  const meta = el("div", "meta");
+  if (t.agent) meta.append(el("span", null, t.agent));
+  if (t.pr != null) meta.append(link("PR#" + t.pr, "#"));
+  if (t.ci) meta.append(el("span", "dot " + t.ci));
+  for (const f of t.flags || []) meta.append(el("span", "badge flag", f));
+  if (meta.childNodes.length) c.append(meta);
+  if (t.cl) c.append(cellLine(t.cl));
+  return c;
+}
+function renderBoard(v) {
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+  for (const name of COLUMNS) {
+    const col = el("div", "col");
+    const inCol = v.tickets.filter((t) => t.column === name);
+    const hd = el("h2", null, name + " ");
+    hd.append(el("span", null, String(name === "POOL" ? v.queue.pool : inCol.length)));
+    col.append(hd, ...inCol.map(card));
+    board.append(col);
+  }
+}
+
+// ---------------------------------------------------------------- tokens tab (content unchanged; only the name)
+function spendRows(host, items, { label, value, pct, highlight }) {
+  for (const it of items) {
+    const row = el("div", "srow");
+    const l = el("span", "lbl", label(it)); l.title = label(it);
+    row.append(l, el("span", "num", value(it)));
+    const bar = el("div", "bar"); const fill = el("i", highlight?.(it) ? "rev" : null);
+    fill.style.width = Math.max(1, Math.round(pct(it))) + "%"; bar.append(fill);
+    row.append(bar, el("span", "pct", pct(it).toFixed(0) + "%"));
+    host.append(row);
+  }
+}
+function renderTokens(sp) {
+  const host = document.getElementById("spend"); host.innerHTML = "";
+  const wrap = el("div", "spend-wrap"), hd = el("div", "spend-hd");
+  hd.append(el("h2", null, "tokens"), el("span", "lede", `${k(sp.totals.cacheWrite)} cache-write · ${k(sp.totals.cacheRead)} cache-read · ${k(sp.totals.output)} output · ${sp.totals.agents} agents · review ${sp.reviewPct.toFixed(0)}%`),
+    el("span", "note", "ranked on cache-creation; tool split is attributed, not billed"));
+  wrap.append(hd);
+  const cols = el("div", "spend-cols"), byRole = el("div"), byTool = el("div");
+  byRole.append(el("h3", null, "by member role"));
+  spendRows(byRole, sp.roles, { label: (r) => `${r.role} ×${r.agents}`, value: (r) => k(r.cacheWrite), pct: (r) => r.pct, highlight: (r) => r.role === "reviewer" || r.role === "specialist" });
+  byTool.append(el("h3", null, `by tool — ${sp.attributedPct.toFixed(0)}% of cache-write attributed`));
+  spendRows(byTool, sp.tools, { label: (t) => `${t.tool} ×${t.calls}`, value: (t) => k(t.cacheWrite), pct: (t) => t.pct });
+  cols.append(byRole, byTool); wrap.append(cols); host.append(wrap);
+}
+
+// ---------------------------------------------------------------- Cell evidence tab
+function routeModel(v, cell) {
+  const m = v.modelRoles[roleOf(cell)];
+  return m == null ? null : m;
+}
+function candidate(v, side, c) {
+  const span = el("div", "cand");
+  span.append(el("b", null, c.cell), document.createTextNode(` n ${c.n}`));
+  if (side === "evidence" && v.footnotes.fitN && v.footnotes.fitN.cell === c.cell) span.append(fn(1));
+  span.append(document.createTextNode(` · ${c.verdict} · ${c.ci}`));
+  // model-name comparison: judged generation against the Cell's Tier route model
+  const judged = GUARD_TODAY.entries[c.cell]?.gen;
+  const rm = routeModel(v, c.cell);
+  if (rm === null) span.append(document.createTextNode(" "), lab(`modelRoles.${roleOf(c.cell)} unset: omp picks the model; comparison not checked`, true));
+  else if (judged && rm !== judged) span.append(document.createTextNode(" "), lab(`judged on ${judged}; ${c.cell} runs ${rm} here`));
+  return span;
+}
+function rowCellTd(v, side, rows, o, s, other) {
+  const td = el("td", side === "routes" ? "split" : null);
+  const own = rows?.[o]?.[s];
+  if (!rows) { td.append(el("span", "nr", "—")); return td; }
+  const r = own ?? rows[o]["*"];
+  const top = el("div");
+  const cellSpan = el("span", "cellv", r.cell);
+  top.append(cellSpan);
+  const otherCell = other ? (other[o]?.[s] ?? other[o]["*"]).cell : null;
+  if (side === "evidence" && otherCell && otherCell !== r.cell) top.append(el("span", "diff", "  ≠ routes now"));
+  td.append(top);
+  if (!own) { td.append(el("div", "follows", "no row of its own: follows *")); return td; }
+  td.append(el("div", null, r.why));
+  for (const c of r.cands) td.append(candidate(v, side, c));
+  return td;
+}
+function sideHead(side, s) {
+  const d = el("div", "side");
+  d.append(el("h3", null, s.title), el("div", "src", s.src));
+  if (s.srcFn) d.lastChild.append(fn("†"));
+  d.append(el("div", "head", s.head));
+  for (const l of s.labels || []) d.append(h("div", null, lab(l)));
+  return d;
+}
+function renderCells(v) {
+  const host = document.getElementById("cells"); host.innerHTML = "";
+  host.append(h("div", "toc", "on this tab: ", link("policy rows", "#cells/sec/rows"), " · ", link("the guard", "#cells/sec/guard"), " · ", link("declared, not measured", "#cells/sec/declared")));
+  for (const a of v.alerts) host.append(h("div", "alert", el("b", null, "⚠ " + a.b), a.sub ? h("div", "sub", a.sub) : null));
+
+  // -- policy rows
+  const rowsSec = el("div", "sec"); rowsSec.id = "anchor-sec/rows";
+  rowsSec.append(el("h2", null, "Policy rows — Objective × Stratum"));
+  const sides = el("div", "sides");
+  sides.append(sideHead("routes", v.routes), sideHead("evidence", v.evidence));
+  rowsSec.append(sides);
+  const tbl = el("table", "ev");
+  const th1 = el("tr");
+  th1.append(el("th", null, ""), el("th", "grp", "routes now"), el("th", "grp", ""), el("th", "grp", "evidence favours"), el("th", "grp", ""));
+  const th2 = el("tr");
+  th2.append(el("th", null, "row"), el("th", "split", "Cell · why · candidates"), el("th", null, "dispatch"), el("th", "split", "Cell · why · candidates (n, verdict, 95% interval)"), el("th", null, "dispatch"));
+  tbl.append(th1, th2);
+  for (const o of ["cost", "speed"]) {
+    for (const s of ["*", "light", "heavy", "unknown"]) {
+      const tr = el("tr"); tr.id = `anchor-row/${o}/${s === "*" ? "star" : s}`;
+      if (s === "*") tr.id = `anchor-row/${o}/*`;
+      if (v.liveObjective === o) tr.className = "live";
+      const label = el("td", null, `${o} · ${s}`);
+      if (v.liveObjective === o && s === "*") label.append(h("div", "lab", "◀ this run's Objective"));
+      tr.append(label);
+      tr.append(rowCellTd(v, "routes", v.routes.rows, o, s, null));
+      tr.append(el("td", null, v.routes.dispatch));
+      const evTd = rowCellTd(v, "evidence", v.evidence.rows, o, s, v.routes.rows);
+      evTd.classList.add("split");
+      tr.append(evTd);
+      tr.append(el("td", null, v.evidence.rows ? v.evidence.dispatch : "—"));
+      tbl.append(tr);
+    }
+  }
+  rowsSec.append(tbl);
+  const rf = el("div", "foot");
+  if (v.routes.srcFn) rf.append(el("div", null, "† " + v.routes.srcFn));
+  if (v.footnotes.fitN) rf.append(el("div", null, "1 " + v.footnotes.fitN.text));
+  if (rf.childNodes.length) rowsSec.append(rf);
+  host.append(rowsSec);
+
+  // -- the guard
+  const g = v.guard;
+  const gs = el("div", "sec"); gs.id = "anchor-sec/guard";
+  gs.append(el("h2", null, "The guard — what it holds each Cell to"));
+  const ghd = el("div", "side");
+  if (g.noGuard) {
+    ghd.append(el("h3", null, "no cost guard"), el("div", "src", g.source), el("div", "head", g.heading));
+  } else {
+    ghd.append(el("h3", null, g.verdict === "none" ? "holds nothing back" : g.tripped.length ? "trips " + g.tripped.join(", ") : "trips nothing"),
+      el("div", "src", `${g.source} · computed ${g.computed_at}${g.window_start ? " · window from " + g.window_start : ""} · min ${MIN_N} merged PRs · floor ${TRIP * 100} pts over ${g.baseline}`));
+    if (g.heading) ghd.append(el("div", "head", g.heading));
+  }
+  for (const c of g.checks) ghd.append(h("div", null, lab(c, c.includes("not checked"))));
+  if (v.modelRolesFail) ghd.append(h("div", null, lab("Tier route models " + v.modelRolesFail)));
+  gs.append(ghd);
+  const notes = [];
+  const note = (text) => { notes.push(text); return fn(notes.length); };
+  const run = v.tickets.filter((t) => t.cl);
+  const base = g.entries?.[g.baseline];
+  for (const cell of CELLS5) {
+    const e = g.entries?.[cell];
+    const rm = routeModel(v, cell);
+    const gen = e?.gen ?? rm ?? "?";
+    const box = el("div", "g-entry"); box.id = `anchor-${cell}@${gen}`;
+    // also answer a link to the Cell with any generation
+    const alias = el("span"); alias.id = `anchor-${cell}`; box.append(alias);
+    const gh = el("div", "gh");
+    gh.append(el("span", "cell", cell), el("span", "gen", e ? `judged on ${e.gen}` : ""));
+    const rmSpan = el("span", "gen");
+    if (rm === null) rmSpan.append(lab(`modelRoles.${roleOf(cell)} unset: omp picks the model`, true));
+    else {
+      rmSpan.append(document.createTextNode(`Tier route: ${rm} · ${levelOf(cell)}`));
+      if (e && rm !== e.gen) rmSpan.append(document.createTextNode(" "), lab("⚑ differs from the judged generation"));
+    }
+    gh.append(rmSpan);
+    if (cell === g.baseline && !g.noGuard) gh.append(lab("baseline"));
+    box.append(gh);
+    if (!e) {
+      box.append(el("div", "nr", `no figures yet for ${rm ?? "an unset model role"}`));
+    } else if (g.nOnly) {
+      const grid = el("div", "g-grid");
+      grid.append(h("div", null, el("div", "k", "merged PRs"), el("div", "v", `${e.n} of ${MIN_N}`)));
+      box.append(grid);
+    } else {
+      const grid = el("div", "g-grid");
+      const nV = h("div", "v", `${e.n} `, el("span", e.n >= MIN_N ? "ok" : "warn", e.n >= MIN_N ? `≥ ${MIN_N} ✓` : `of ${MIN_N}: not judged`));
+      if (e.leftOut) nV.append(" ", lab(`${e.leftOut} left out`));
+      if (e.pending) nV.append(" ", lab(`${e.pending} pending`));
+      if (e.excluded === "nc" || e.unpriced === "nc") nV.append(" ", lab("no Admissible row / unpriced: not checked", true));
+      else {
+        if (e.excluded) nV.append(note(`${e.excluded} drawn here ${e.excluded === 1 ? "has" : "have"} no Admissible row: ${e.excluded === 1 ? "it" : "they"} ran under another Cell, at another effort, or with no model on record, so ${e.excluded === 1 ? "it counts" : "they count"} in no Cell's figures`));
+        if (e.unpriced) { if (e.excluded) nV.append(el("sup", "fn", ",")); nV.append(note(`${e.unpriced} unpriced: part of ${e.unpriced === 1 ? "its" : "their"} Spend can't be booked`)); }
+      }
+      grid.append(h("div", null, el("div", "k", "merged PRs (n)"), nV));
+      const fV = el("div", "v");
+      if (cell === g.baseline) fV.append(`${pct(e.fail)} · the floor is ${pct(e.fail + TRIP)}`);
+      else {
+        const gap = e.fail - base.fail, margin = TRIP - gap;
+        fV.append(`${pct(e.fail)} · ${pts(gap)} on ${g.baseline} · `, el("span", margin > 0 ? "ok" : "bad", margin > 0 ? `${(margin * 100).toFixed(1)} pts inside the floor` : `${(-margin * 100).toFixed(1)} pts past the floor`));
+      }
+      if (e.hand === "nc") fV.append(" ", lab("Rulings given by hand: not checked", true));
+      else if (e.hand && e.hand[0] > 0) fV.append(" ", lab(`${e.hand[0]} of ${e.hand[1]} Rulings given by hand`));
+      grid.append(h("div", null, el("div", "k", "fail rate"), fV));
+      const uV = el("div", "v", `$${e.usd.toFixed(2)}`);
+      if (cell !== g.baseline) uV.append(` · ${sgnPct(e.usd / base.usd - 1)} on ${g.baseline}`);
+      grid.append(h("div", null, el("div", "k", "$ per merged PR"), uV));
+      box.append(grid);
+      for (const o of e.older || []) {
+        const od = el("div", "older"); od.id = `anchor-${cell}@${o.gen}`;
+        od.append(`older generation ${o.gen}: n ${o.n} · fail rate ${pct(o.fail)} · $${o.usd.toFixed(2)} per merged PR — not judged (only the newest generation is)`);
+        box.append(od);
+      }
+    }
+    const mine = run.filter((t) => t.cl.cell === cell);
+    const pulls = el("div", "pulls");
+    pulls.append(document.createTextNode(mine.length ? "this run's Pulls: " : "this run's Pulls: none"));
+    for (const t of mine) {
+      pulls.append(link(`#${t.issue}`, `#board/${t.issue}`));
+      if (t.cl.mark) pulls.lastChild.after(lab(`(${t.cl.markBad ? "no Admissible row" : "marked"}) `));
+    }
+    box.append(pulls);
+    gs.append(box);
+  }
+  if (notes.length) { const f = el("div", "foot"); notes.forEach((t, i) => f.append(el("div", null, `${i + 1} ${t}`))); gs.append(f); }
+  host.append(gs);
+
+  // -- declared, not measured
+  const ds = el("div", "sec"); ds.id = "anchor-sec/declared";
+  ds.append(el("h2", null, `Declared, not measured — ${DECLARED.length} other members`));
+  ds.append(el("div", "foot", "Their Declared tier is the definition's; no record judges them. The model is the Tier route the cockpit reads now."));
+  const dt = el("table", "ev decl");
+  dt.append(h("tr", null, el("th", null, "member"), el("th", null, "Declared tier"), el("th", null, "Tier route model")));
+  for (const [name, tier] of DECLARED) {
+    const [role, level] = tier.slice(1).split(":");
+    const rm = v.modelRoles[role];
+    dt.append(h("tr", null, el("td", null, name), el("td", null, tier), h("td", null, rm == null ? lab(`modelRoles.${role} unset: omp picks the model`, true) : `${rm} · ${level}`)));
+  }
+  ds.append(dt);
+  host.append(ds);
+
+  document.getElementById("cells-mark").textContent = v.alerts.length ? `⚠${v.alerts.length}` : "";
+}
+
+// ---------------------------------------------------------------- render
+function render() {
+  const s = STATES.find((x) => x.id === document.getElementById("scn").value);
+  state = s.make();
+  document.getElementById("scn-desc").textContent = s.desc;
+  const name = `fleet cockpit — ${state.repo}`;
+  document.title = name + " (prototype)";
+  document.getElementById("heading").textContent = "🛰 " + name;
+  const banner = document.getElementById("stale-banner");
+  if (state.banner) { banner.style.display = "block"; banner.className = "dead"; banner.textContent = state.banner; } else banner.style.display = "none";
+  renderBoard(state); renderCells(state); renderTokens(state.spend);
+  const q = state.queue;
+  const foot = document.getElementById("footer");
+  foot.textContent = `pool ${q.pool} · supply ${q.supply} · review-backlog ${q.reviewBacklog}`;
+  go();
+}
+const sel = document.getElementById("scn");
+for (const s of STATES) { const o = el("option", null, s.label); o.value = s.id; sel.append(o); }
+sel.onchange = render;
+document.getElementById("attpos").onchange = render;
+document.getElementById("cardform").onchange = render;
+render();
+</script>
+</body>
+</html>
