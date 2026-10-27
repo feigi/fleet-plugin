@@ -44,6 +44,12 @@ Non-goals (v1): a standing repo-wide board independent of runs; a shareable
 hosted artifact; multi-run history. `build --once` yields a static end-of-run
 snapshot as a free byproduct, which covers the "post-run report" want without
 being designed for.
+(amended by #3882: the **Cell evidence** tab shows figures over every run in
+the metrics window — the cost guard's, the Preview fit's and the installed
+router table's — so multi-run figures are in scope, read from those records
+and never recomputed by the cockpit; see
+`docs/specs/2026-10-27-cockpit-tabs-design.md`. A run-by-run history, and
+trends of Cell figures across fits, stay non-goals.)
 
 ## Rejected alternatives
 
@@ -291,6 +297,13 @@ source, and it can never move a ticket.
 - Tab title and header name the repo (`fleet cockpit — <owner>/<repo>`), so two
   cockpits open side by side are tellable apart from the tab strip alone
   (#1584). A payload with no `repo` falls back to the bare `fleet cockpit`.
+- (amended by #3882, `docs/specs/2026-10-27-cockpit-tabs-design.md` § 3:) the
+  page has three tabs, **Board · Cell evidence · Tokens**, Board by default,
+  the tab and any target kept in the URL hash. The header, the banner and the
+  attention strip stay above the tabs and the footer below every tab; the
+  kanban columns are Board's, and the spend panel moves to Tokens with its
+  headings reading "tokens" and "by member role". Each implementer card gains
+  a two-line Cell line (that spec's § 7).
 - Polls `/board.json` on its own interval; renders `generatedAt` age. If that age
   exceeds ~2× `interval`, shows a banner "data stale — server/controller
   stopped?" so a dead feed is visible, never a silently frozen board.
@@ -339,7 +352,10 @@ source, and it can never move a ticket.
   assert the model shape.
 - **The page**: manual (vanilla, no build). The spend panel's branch decision
   is extracted as a pure `spendView` and unit-tested by `spend-view.test.mjs`
-  (#371); the DOM rendering around it is not.
+  (#371); the DOM rendering around it is not. (amended by #3882: the hash
+  router's decision, `routeHash`, is lifted out of the page the same way; the
+  Cell evidence tab's model and each card's Cell line are built by pure
+  functions in the compute layer and tested there — that spec's § 11.)
 
 ## Open questions
 
