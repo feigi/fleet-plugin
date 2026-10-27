@@ -613,9 +613,9 @@ _Avoid_: fleet-router, sizer
 The Router's decision for one Pull at its route step: the policy Cell and the
 Pull's Cell, the draw and what made it (burn-in or every 5th Pull), the Stratum
 and the numbers that set it, the Objective, the Cells the guard had tripped,
-and the reason. `ticket-router.mjs route` prints it. Once T7 of the cockpit
-tabs spec lands, the Pull's row step keeps it in the run ledger's `## Routed`
-section, and the Pull's board card shows it.
+and the reason. `ticket-router.mjs route` prints it. Once #3893 lands, the
+Pull's row step keeps it in the run ledger's `## Routed` section; once #3898
+lands, the Pull's board card shows it.
 _Avoid_: route (bare: the Tier route is the `modelRoles` mapping), routing
 line, verdict (that word belongs to a Ruling)
 
@@ -625,7 +625,7 @@ guard at phase 0 and close-out (`.fleet/router-preview.json`) with the
 installed table as its prior; never routed, never committed. It is what the
 evidence favours, shown beside what routes now. In a consumer it fits the
 consumer's records alone, while the table that routes is fitted on this
-repository's runs. Written once T5 of the cockpit tabs spec lands.
+repository's runs. Written once #3896 lands.
 _Avoid_: re-fit (that changes the table), shadow table, readout
 
 **Cell evidence**:

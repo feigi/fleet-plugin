@@ -1,7 +1,7 @@
 # Cockpit tabs: Cell evidence and Tokens
 
 Date: 2026-10-27
-Status: decided on map #3876 ("Cockpit tabs that explain why each Cell is used"), 2026-10-26 to 2026-10-27; handed to `/to-tickets` (§ 13).
+Status: decided on map #3876 ("Cockpit tabs that explain why each Cell is used"), 2026-10-26 to 2026-10-27; handed to `/to-tickets` and filed as #3891–#3898 (§ 13).
 Map: feigi/fleet-plugin#3876. Decision tickets: #3877 (research), #3878, #3879, #3880, #3883 (grilling), #3881 (prototype); this spec is #3882.
 Prototype: `prototype/cockpit-tabs.html` on the throwaway branch `prototype/cockpit-tabs`, never merged.
 Research: `docs/research/cockpit-evidence-records.md` on the branch `research/cockpit-evidence-records`.
@@ -741,13 +741,16 @@ row; the guard entry's "this run's Pulls").
 
 ## 13. Tickets (input to `/to-tickets`)
 
-| # | Title | Blocked by | Delivers | Spec § |
-|---|---|---|---|---|
-| T1 | Cockpit tabs: Board and Tokens, kept in the URL hash | — | the tab strip, hash routes, the token panel on Tokens with its headings renamed; banner, attention strip and footer global | 3, 8, 9 |
-| T2 | The cost guard keeps every per-Cell figure it judged | — | `cost-guard.json` with whole entries, `older`, `by_hand`, `no_ruling`, `pending`, `trip_points`, `tsv_blobs`; both readers accept it | 10.3 |
-| T3 | Cell evidence tab: what the guard holds each Cell to | T1, T2 | the tab with the guard section (all five Cells, three figures, labels, older generations, no-guard and holds-nothing-back headings) and Declared, not measured | 5.1, 5.3, 5.4, 6 |
-| T4 | Cell evidence tab: what routes now, row by row | T3 | routes now side: whose runs, burn-in words, dispatch, collapsed Strata, model-name labels, installed table from `rowDispatch` | 4.3, 5.2 |
-| T5 | The Preview fit, and what the evidence favours | T4 | `router-preview.json` at phase 0 and close-out; evidence favours side with `≠ routes now` and its heading labels | 5.2, 6.2, 10.4 |
-| T6 | Cell evidence alerts: records not on main, guard readers | T5 | the three alerts, `⚠n` on the tab label, installed table behind main's | 6.2, 6.3 |
-| T7 | Each Pull's Routing on the ledger | — | `route` prints the whole Routing; `## Routed` written with the row; `route=` retired; rotate carries entries | 10.1, 10.2 |
-| T8 | A card says which Cell its Pull ran on, and why | T3, T7 | the card's Cell line, mark and links both ways | 7, 8 |
+Filed 2026-10-27, `ready-for-agent` + `enhancement`, blockers first, each
+with a `## Blocked by` section and GitHub's native blocking edges.
+
+| # | Issue | Title | Blocked by | Delivers | Spec § |
+|---|---|---|---|---|---|
+| T1 | #3891 | Cockpit tabs: Board and Tokens, kept in the URL hash | — | the tab strip, hash routes, the token panel on Tokens with its headings renamed; banner, attention strip and footer global | 3, 8, 9 |
+| T2 | #3892 | The cost guard keeps every per-Cell figure it judged | — | `cost-guard.json` with whole entries, `older`, `by_hand`, `no_ruling`, `pending`, `trip_points`, `tsv_blobs`; both readers accept it | 10.3 |
+| T3 | #3894 | Cell evidence tab: what the guard holds each Cell to | T1, T2 | the tab with the guard section (all five Cells, three figures, labels, older generations, no-guard and holds-nothing-back headings) and Declared, not measured | 5.1, 5.3, 5.4, 6 |
+| T4 | #3895 | Cell evidence tab: what routes now, row by row | T3 | routes now side: whose runs, burn-in words, dispatch, collapsed Strata, model-name labels, installed table from `rowDispatch` | 4.3, 5.2 |
+| T5 | #3896 | The Preview fit, and what the evidence favours | T4 | `router-preview.json` at phase 0 and close-out; evidence favours side with `≠ routes now` and its heading labels | 5.2, 6.2, 10.4 |
+| T6 | #3897 | Cell evidence alerts: records not on main, guard readers | T5 | the three alerts, `⚠n` on the tab label, installed table behind main's | 6.2, 6.3 |
+| T7 | #3893 | Each Pull's Routing on the ledger | — | `route` prints the whole Routing; `## Routed` written with the row; `route=` retired; rotate carries entries | 10.1, 10.2 |
+| T8 | #3898 | A card says which Cell its Pull ran on, and why | T3, T7 | the card's Cell line, mark and links both ways | 7, 8 |
