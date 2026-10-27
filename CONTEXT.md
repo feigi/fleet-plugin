@@ -634,7 +634,7 @@ used: per Objective × Stratum row, the Cell routes now gives and the Cell the
 Preview fit favours, with each candidate's verdict and interval; per Cell,
 what the cost guard holds it to; and, through each board card, every live
 Pull's Routing. Every figure is read from a record, never recomputed by the
-cockpit, and shown beside its trust status.
+cockpit, and shown beside its trust status. The tab opens once #3894 lands.
 _Avoid_: tier outcomes, router stats, readout
 
 **Stratum**:
@@ -658,9 +658,9 @@ How a Pull is booked: as one unit, to the Pull's Cell (`chosen_cell`), the Cell
 the Router gave it — drawn on an Exploration Pull, else its policy row's. Its
 merge, its Ruling and its Spend are booked there, every implementer dispatched
 under it at any Cell included, so a rescue at another Cell still books to the
-Pull's Cell. A ticket Pulled
-twice is two units, and nothing splits across Cells. Both the cost guard and the
-Router's fit read Pulls this way, through `pull-attribution.mjs`.
+Pull's Cell. A ticket Pulled twice is two units, and nothing splits across
+Cells. Both the cost guard and the Router's fit read Pulls this way, through
+`pull-attribution.mjs`.
 _Avoid_: as-run, rescuer's cell
 
 **Spend**:
