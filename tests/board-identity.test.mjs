@@ -295,10 +295,11 @@ function fakeDocument() {
   };
 }
 
-// `poll()`'s call at the bottom is the one line this lift must never run —
-// it fetches immediately, which a test document has nothing to answer.
+// `boot()`'s call at the bottom is the one line this lift must never run —
+// it registers window listeners and fetches immediately, which a test
+// document has nothing to answer.
 const SCRIPT_SRC = HTML.match(/<script>([\s\S]*)<\/script>/)?.[1]
-  ?.replace(/\bpoll\(\);\s*$/, "");
+  ?.replace(/\bboot\(\);\s*$/, "");
 
 test("board.html's <script> still declares render in the shape this file lifts", () => {
   assert.ok(SCRIPT_SRC, "board.html no longer has a lift-able <script> body — update this test");
