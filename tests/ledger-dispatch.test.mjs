@@ -1061,12 +1061,12 @@ test("drain needs a reason", (t) => {
   refused(["drain", "   "], /usage: ledger\.mjs drain "<reason>"/);
 });
 
-test("a ledger written before ## Dispatched existed reads as none dispatched, none retired and not draining, and survives a dispatch", (t) => {
+test("a ledger written before ## Dispatched existed reads as none dispatched, none routed, none retired and not draining, and survives a dispatch", (t) => {
   const { ok, read, briefOf } = fixture(t, "# Fleet run ledger\n\n## Rows\n\n- #7 impl-7 · class=routine\n\n## Filed\n\n- #8 a filed subject\n\n## Ruled\n\n- #9 MERGE · green\n");
   const legacy = { rows: ["#7 impl-7 · class=routine"], filed: ["#8 a filed subject"], ruled: ["#9 MERGE · green"] };
-  assert.deepEqual(read(), { ...legacy, dispatched: [], briefs: {}, queued: {}, agents: {}, drain: null, retired: [] });
+  assert.deepEqual(read(), { ...legacy, dispatched: [], briefs: {}, queued: {}, agents: {}, routed: [], drain: null, retired: [] });
   assert.equal(ok("dispatch", "merge-bot").member, "merge-bot-1");
-  assert.deepEqual(read(), { ...legacy, dispatched: ["merge-bot-1"], briefs: { "merge-bot-1": briefOf("merge-bot-1").sha256.slice(0, 8) }, queued: { "merge-bot-1": [] }, agents: {}, drain: null, retired: [] });
+  assert.deepEqual(read(), { ...legacy, dispatched: ["merge-bot-1"], briefs: { "merge-bot-1": briefOf("merge-bot-1").sha256.slice(0, 8) }, queued: { "merge-bot-1": [] }, agents: {}, routed: [], drain: null, retired: [] });
 });
 
 // #1799 fix-applier follow-up: a `## Dispatched` entry this grammar cannot

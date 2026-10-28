@@ -8,7 +8,11 @@
 // and `token` appends tokens to one, or replaces its `tier=`, which it refuses
 // while the row's implementer has not settled. `filed` and `ruled` are
 // append-only, because their whole purpose is to outlive the reasoning that
-// produced them; `filed` appends at most one row per issue.
+// produced them; `filed` appends at most one row per issue. `## Routed` is
+// append-only too: `row --routing <line>` files a Pull's Routing under its
+// first implementer in the same write as the row, at most once per member,
+// and a rotate carries an entry exactly when it carries a row naming that
+// member.
 //
 // `dispatch`, `settle`, `review` and `drain` exist so a reader can derive
 // every liveness count from this file alone, rather than from row text a
@@ -58,7 +62,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits, writeAll } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, cellValues, decidingCell, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, headerRe, escapeText, ledgerSection, nextReviewerName } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, retiredName, readRetired, agentDefinition, expectedDefinition, CELL, POLICY_CELL, tierValues, cellValues, decidingCell, rowPr, rowWriteRefusal, isReviewToken, addedReviewToken, newSplitRow, splitRowClause, added, premisesOf, MEMBER_FAMILIES, HALT_CAUSES, ROWS, DISPATCHED, ROUTED, FILED, RULED, DRAIN, RETIRED, RECEIPT, archiveStamp, receiptArchiveName, CLOSEOUT_RECEIPT, closeoutArchiveName, BRIEFS, briefsArchiveName, memberRole, parseDispatchedEntry, dispatchedEntry, parseRouting, parseRoutedEntry, routedEntry, headerRe, escapeText, ledgerSection, nextReviewerName } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember, HELD, CONFLICT_HOLD, PARKED } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -490,7 +494,7 @@ function refuseStrayInId(value, what) {
 let ledgerParsed = false;
 
 function load() {
-  if (!existsSync(file)) return { rows: [], filed: [], ruled: [], ...dispatchedOf([]), drain: null, retired: [] };
+  if (!existsSync(file)) return { rows: [], filed: [], ruled: [], ...dispatchedOf([]), routed: [], drain: null, retired: [] };
   let text;
   try {
     text = readFileSync(file, "utf8");
@@ -516,7 +520,7 @@ function load() {
   }
   return {
     rows: section(ROWS), filed: section(FILED), ruled: section(RULED),
-    ...dispatchedOf(section(DISPATCHED)), drain: drainEntries[0] ?? null,
+    ...dispatchedOf(section(DISPATCHED)), routed: section(ROUTED), drain: drainEntries[0] ?? null,
     retired: section(RETIRED),
   };
 }
@@ -538,7 +542,9 @@ function dispatchedOf(entries) {
 // that is draining. `## Retired` likewise: only an `ancestor` rotate writes
 // it (runRotate()), as the bare names of the members this omp session has
 // already run and the new ledger does not carry, so a ledger without it is
-// a session's first run.
+// a session's first run. `## Routed` likewise, once a Pull's row step has
+// recorded a Routing (`row --routing`), so a ledger holding none is written
+// exactly as before that section existed.
 function save(d) {
   const list = (entries) => entries.map((r) => `- ${escapeText(r)}`).join("\n");
   const out =
@@ -547,6 +553,7 @@ function save(d) {
       const name = parseToken(t)?.name;
       return dispatchedEntry(t, d.briefs[name] ?? null, d.queued[name] ?? null, d.agents[name] ?? null);
     })) +
+    (d.routed.length === 0 ? "" : `\n\n${ROUTED}\n\n` + list(d.routed)) +
     `\n\n${FILED}\n\n` + list(d.filed) +
     `\n\n${RULED}\n\n` + list(d.ruled) +
     (d.drain === null ? "" : `\n\n${DRAIN}\n\n` + list([d.drain])) +
@@ -733,8 +740,15 @@ let data = cmd === "rotate" ? null : load();
 if (cmd === "read") {
   console.log(JSON.stringify(data));
 } else if (cmd === "row") {
-  const [ticket, ...textParts] = rest;
-  if (!ticket || textParts.length === 0) die("usage: ledger.mjs row <ticket> <text>");
+  // `--routing <line>` records the Pull's Routing in `## Routed` in this same
+  // write, so the row and the Routing the router printed for it land together
+  // or not at all.
+  if (hasEqualsForm("routing", rest)) die("--routing needs a space-separated value, not --routing=");
+  const routingIdx = rest.indexOf("--routing");
+  const routing = routingIdx === -1 ? null : rest[routingIdx + 1];
+  if (routingIdx !== -1 && isFlagLike(routing)) die("--routing needs the line `ticket-router.mjs route` printed");
+  const [ticket, ...textParts] = routingIdx === -1 ? rest : rest.toSpliced(routingIdx, 2);
+  if (!ticket || textParts.length === 0) die("usage: ledger.mjs row <ticket> <text> [--routing <line>]");
   // A stray flag here becomes the row KEY, which is what the rewrite-in-place
   // lookup below matches on — so the real ticket's next `row` call finds no
   // match and appends a second row instead of rewriting the first.
@@ -793,6 +807,30 @@ if (cmd === "read") {
   // re-judged. Local only.
   const refusal = rowWriteRefusal(data.rows, after, oldRow, line);
   if (refusal !== null) die(`row ${key}: ${refusal}`);
+  // The Routing is filed under the Pull's first implementer, the one live
+  // `impl-` member the row names, and written once: a second, different entry
+  // for that member would give the cockpit two answers to why the Pull ran on
+  // its Cell. The same entry again is the row step re-run after its write
+  // landed — a `pull.mjs` stopped before it recorded the step done — so it is
+  // left as it was and the row is still rewritten.
+  let routed = null;
+  let routedAlready = false;
+  if (routing !== null) {
+    if (parseRouting(routing) === null) die(`row ${key}: --routing '${routing}' is not a Routing line — the one \`ticket-router.mjs route\` prints`);
+    const impls = memberTokens(line).filter((t) => t.family === "impl" && t.outcome === null);
+    if (impls.length !== 1) {
+      die(`row ${key}: --routing is filed under the Pull's implementer, so the row must name exactly one live impl- member — it names ${impls.length === 0 ? "none" : impls.map((t) => t.name).join(", ")}`);
+    }
+    routed = routedEntry(impls[0].name, routing);
+    const prior = data.routed.find((e) => e.split(" ")[0] === impls[0].name);
+    if (prior === undefined) {
+      data.routed = [...data.routed, routed];
+    } else if (prior === routed) {
+      routedAlready = true;
+    } else {
+      die(`row ${key}: ${impls[0].name} already has its Routing in ${ROUTED} ('${prior}') — a Pull's Routing is written once`);
+    }
+  }
   data.rows = after;
   // Logged only after save() returns — a failed write must not claim a row
   // was recorded when it never made it to disk.
@@ -806,7 +844,8 @@ if (cmd === "read") {
     const dropped = droppedTokens(oldRow, line);
     console.error(`    rewrote row ${key}${dropped.length === 0 ? "" : `; dropped: ${dropped.join(" ")}`}`);
   }
-  console.log(JSON.stringify({ ticket: key, line, created }));
+  if (routed !== null) console.error(`    routed ${routed}${routedAlready ? " (already filed; left as it was)" : ""}`);
+  console.log(JSON.stringify({ ticket: key, line, created, ...(routed === null ? {} : { routed }) }));
 } else if (cmd === "filed") {
   const [issue, ...subjectParts] = rest;
   if (!issue || subjectParts.length === 0) die("usage: ledger.mjs filed <issue> <subject>");
@@ -1639,7 +1678,7 @@ function runRotate() {
   }
   // Read before anything moves: a ledger whose live tokens cannot be read is
   // refused with nothing moved, never archived with those tokens dropped.
-  let carry = { rows: [], dispatched: [], retired: [], skipped: [] };
+  let carry = { rows: [], dispatched: [], routed: [], retired: [], skipped: [] };
   if (prior === "ancestor" && exists) {
     let text;
     try {
@@ -1708,6 +1747,7 @@ function runRotate() {
   }
   if (carrying) {
     console.error(`    carried ${carry.rows.length} row(s) and ${carry.dispatched.length} ## Dispatched entr${carry.dispatched.length === 1 ? "y" : "ies"} from ${archive}`);
+    if (carry.routed.length > 0) console.error(`    carried ${carry.routed.length} ${ROUTED} entr${carry.routed.length === 1 ? "y" : "ies"} from ${archive}`);
     console.error(`    retired ${carry.retired.length} name(s) from ${archive}`);
   }
   // Re-read rather than reuse the read above: the heartbeat file has other
@@ -1720,7 +1760,7 @@ function runRotate() {
   }
   console.log(JSON.stringify({
     rotated: archive !== null, archive,
-    carried: { rows: carry.rows, dispatched: carry.dispatched },
+    carried: { rows: carry.rows, dispatched: carry.dispatched, routed: carry.routed },
     retired: carry.retired,
     skipped: carry.skipped.map((s) => s.line),
   }));
@@ -1788,7 +1828,16 @@ function carryOf(text) {
   const live = liveOnLedger(rows, dispatched);
   const carried = { rows: live.rows.map((i) => rows[i]), dispatched: live.dispatched };
   const retired = retiredOnLedger([...rows, ...skippedRows], allDispatched, archivedRetired, carried);
-  return { ...carried, briefs: allBriefs, queued: allQueued, agents: allAgents, retired, skipped };
+  // A Pull's Routing travels with its row, as a `## Dispatched` entry does:
+  // each entry whose member a carried row names, and no other.
+  const named = new Set(carried.rows.flatMap(memberTokens).map((t) => t.name));
+  const routed = [];
+  for (const entry of ledgerSection(text, ROUTED)) {
+    const parsed = parseRoutedEntry(entry);
+    if (parsed === null) skipped.push({ line: entry, why: "not an implementer's name and a Routing line" });
+    else if (named.has(parsed.member)) routed.push(entry);
+  }
+  return { ...carried, routed, briefs: allBriefs, queued: allQueued, agents: allAgents, retired, skipped };
 }
 
 // ── dispatch / settle ────────────────────────────────────────────────────────

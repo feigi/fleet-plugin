@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole, firstReview, prTokens, ledgerSection } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, nextRetry, liveOnLedger, settledOnLedger, retiredOnLedger, isRetirable, readRetired, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell, REVIEW, isReviewToken, parseDispatchedEntry, dispatchedEntry, memberRole, firstReview, prTokens, ledgerSection, ROUTED, ROUTING_REASONS, parseRouting, formatRouting, routedEntry, parseRoutedEntry } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -592,4 +592,95 @@ test("ledgerSection reads a section's entries unescaped, and none for a section 
   const text = "# Fleet run ledger\n\n## Rows\n\n- #10 impl-10=PR#40\n- #11 a\\nb\n\n## Dispatched\n\n- impl-10=PR#40 brief=0123abcd\n";
   assert.deepEqual(ledgerSection(text, "## Rows"), ["#10 impl-10=PR#40", "#11 a\nb"]);
   assert.deepEqual(ledgerSection(text, "## Filed"), []);
+});
+
+// The Routing: one line `ticket-router.mjs route` prints, `pull.mjs` reads,
+// `ledger.mjs` validates and files in `## Routed`, and, once #3898 lands, the cockpit reads.
+const SPEC_ROUTING = "POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=heavy BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok";
+const routingWith = (over) => SPEC_ROUTING.split(" ").map((w) => {
+  const key = w.slice(0, w.indexOf("="));
+  return key in over ? `${key}=${over[key]}` : w;
+}).join(" ");
+
+test("parseRouting reads every part of a Routing line, and formatRouting writes the same line back", () => {
+  assert.deepEqual(parseRouting(SPEC_ROUTING), {
+    policy: "slow-high", cell: "smol-high", draw: { k: 2, K: 3 }, by: "burn-in", stratum: "heavy", brief: 9658, criteria: 8,
+    sized: null, objective: "cost", tripped: [], reason: "ok",
+  });
+  const valid = [
+    SPEC_ROUTING,
+    routingWith({ DRAW: "1/1", BY: "every-5th", TRIPPED: "smol-high", REASON: "guard-tripped" }),
+    routingWith({ DRAW: "-", BY: "-", CELL: "slow-high", TRIPPED: "smol-high,task-high", REASON: "table-cell-tripped" }),
+    routingWith({ DRAW: "-", BY: "-", STRATUM: "unknown", BRIEF: "-", CRITERIA: "-", REASON: "no-issue-json" }),
+    routingWith({ DRAW: "-", BY: "-", STRATUM: "unknown", SIZED: "-", REASON: "no-sizing" }),
+    routingWith({ DRAW: "-", BY: "-", STRATUM: "light", SIZED: "light", OBJECTIVE: "speed" }),
+    routingWith({ DRAW: "-", BY: "-", BRIEF: "0", CRITERIA: "0", REASON: "guard-missing" }),
+    ...ROUTING_REASONS.map((r) => routingWith({ REASON: r })),
+  ];
+  for (const line of valid) {
+    const parsed = parseRouting(line);
+    assert.notEqual(parsed, null, line);
+    assert.equal(formatRouting(parsed), line, line);
+    assert.deepEqual(parseRouting(formatRouting(parsed)), parsed, line);
+  }
+});
+
+test("parseRouting refuses a line that is not a Routing, and formatRouting refuses to write one", () => {
+  const refused = [
+    "",
+    "POLICY=slow-high CELL=slow-high DRAW=- STRATUM=light OBJECTIVE=cost REASON=ok",
+    `${SPEC_ROUTING} EXTRA=1`,
+    `${SPEC_ROUTING} `,
+    SPEC_ROUTING.replace("POLICY=slow-high CELL=smol-high", "CELL=smol-high POLICY=slow-high"),
+    SPEC_ROUTING.replace(" ", "  "),
+    // A misnamed key of the right length, and two same-length keys swapped:
+    // every value still reads, so only the key check refuses them.
+    SPEC_ROUTING.replace("POLICY=", "POLICZ="),
+    SPEC_ROUTING.replace("BRIEF=9658", "SIZED=9658").replace("SIZED=-", "BRIEF=-"),
+    routingWith({ POLICY: "alt" }),
+    routingWith({ CELL: "slow-ultra" }),
+    routingWith({ DRAW: "3/2" }),
+    routingWith({ DRAW: "0/3" }),
+    routingWith({ DRAW: "2" }),
+    routingWith({ BY: "-" }),
+    routingWith({ DRAW: "-" }),
+    routingWith({ BY: "exploration" }),
+    routingWith({ STRATUM: "medium" }),
+    routingWith({ BRIEF: "-" }),
+    routingWith({ CRITERIA: "-" }),
+    routingWith({ BRIEF: "09658" }),
+    routingWith({ CRITERIA: "8.5" }),
+    routingWith({ SIZED: "unknown" }),
+    routingWith({ OBJECTIVE: "quality" }),
+    routingWith({ TRIPPED: "" }),
+    routingWith({ TRIPPED: "smol-high," }),
+    routingWith({ TRIPPED: "smol-high,alt" }),
+    routingWith({ REASON: "explore" }),
+    routingWith({ REASON: "" }),
+  ];
+  for (const line of refused) assert.equal(parseRouting(line), null, JSON.stringify(line));
+  for (const x of [null, undefined, 42, ["POLICY=slow-high"]]) assert.equal(parseRouting(x), null, String(x));
+  const parts = parseRouting(SPEC_ROUTING);
+  for (const over of [{ cell: "alt" }, { draw: null }, { brief: 1.5 }, { tripped: ["a b"] }, { reason: "explore" }, { objective: undefined }]) {
+    assert.throws(() => formatRouting({ ...parts, ...over }), /not a Routing/, JSON.stringify(over));
+  }
+});
+
+test("a ## Routed entry is an implementer's name then its Routing line, and nothing else reads as one", () => {
+  assert.equal(ROUTED, "## Routed");
+  const entry = routedEntry("impl-3747", SPEC_ROUTING);
+  assert.equal(entry, `impl-3747 ${SPEC_ROUTING}`);
+  assert.deepEqual(parseRoutedEntry(entry), { member: "impl-3747", routing: parseRouting(SPEC_ROUTING) });
+  assert.deepEqual(parseRoutedEntry(`impl-3747-b ${SPEC_ROUTING}`)?.member, "impl-3747-b");
+  for (const bad of [SPEC_ROUTING, "impl-3747", `fix-pr-3747 ${SPEC_ROUTING}`, `impl-3747=PR#3800 ${SPEC_ROUTING}`, `impl-3747 ${SPEC_ROUTING.replace("REASON=ok", "REASON=explore")}`, null]) {
+    assert.equal(parseRoutedEntry(bad), null, String(bad));
+  }
+});
+
+test("an old row carrying route= still reads its members and cell, and is no Routing", () => {
+  const old = "#12 impl-12 · cell=task-high · route=table-cell-tripped";
+  assert.deepEqual(memberTokens(old).map((t) => t.name), ["impl-12"]);
+  assert.equal(expectedDefinition(old), "fleet-implementer-task-high");
+  assert.equal(parseRouting(old), null);
+  assert.equal(parseRoutedEntry(old), null);
 });

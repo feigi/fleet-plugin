@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { RECEIPT } from "./ledger-grammar.mjs";
+import { OBJECTIVES, RECEIPT } from "./ledger-grammar.mjs";
 
 const isRecord = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
 
@@ -141,10 +141,10 @@ export function sessionFromReceipt(opts) {
   throw new Error(`no session given and none in the phase-0 receipt ${path} (${why}) — give one, or run ${phase0Command(null)} first`);
 }
 
-// What a run asks the router to minimise, and the one it asks when nobody
-// names one. phase0.mjs records the run's in its receipt; a receipt written
-// before it recorded one is read as the default when phase 0 resumes it.
-export const OBJECTIVES = Object.freeze(["cost", "speed"]);
+// The Objective a run asks the router to minimise when nobody names one;
+// OBJECTIVES, the ones it can ask, is ledger-grammar.mjs's. phase0.mjs records
+// the run's in its receipt; a receipt written before it recorded one is read
+// as the default when phase 0 resumes it.
 export const OBJECTIVE_DEFAULT = "cost";
 
 /**

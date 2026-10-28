@@ -4,7 +4,8 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { OBJECTIVE_DEFAULT, OBJECTIVES, objectiveFromReceipt, readReceipt, phase0Gate, sessionFromReceipt, STEP_NAMES } from "../plugin/scripts/phase0-receipt.mjs";
+import { OBJECTIVE_DEFAULT, objectiveFromReceipt, readReceipt, phase0Gate, sessionFromReceipt, STEP_NAMES } from "../plugin/scripts/phase0-receipt.mjs";
+import { OBJECTIVES } from "../plugin/scripts/ledger-grammar.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 
 const STEPS = ["alarm", "branch", "fast-forward", "pin", "baseline", "preflight", "ruleset", "tier-roles", "metrics",

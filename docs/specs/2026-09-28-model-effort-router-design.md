@@ -691,7 +691,7 @@ fitted commit's features file, matched by `session` + `agent`, replacing
 node plugin/scripts/ticket-router.mjs route --session <id> [--objective cost|speed] --ticket <N> --arm <A|B> --impl-row <k> \
   --issue <scratch>/impl-<N>/issue.json [--sizing <scratch>/impl-<N>/sizing.json] \
   --guard .fleet/cost-guard.json --table plugin/scripts/router-table.json
-→ POLICY=<cell> CELL=<cell> DRAW=<k/K|-> STRATUM=<light|heavy|unknown> OBJECTIVE=<cost|speed> REASON=<ok|no-issue-json|no-sizing|guard-missing|guard-tripped|table-cell-tripped>
+→ POLICY=<cell> CELL=<cell> DRAW=<k/K|-> BY=<burn-in|every-5th|-> STRATUM=<light|heavy|unknown> BRIEF=<chars|-> CRITERIA=<n|-> SIZED=<light|heavy|-> OBJECTIVE=<cost|speed> TRIPPED=<cell,…|-> REASON=<ok|no-issue-json|no-sizing|guard-missing|guard-tripped|table-cell-tripped>
 ```
 
 Order: metrics → stratum (`rule`; `sizing.json` on B) → `policy_cell =
@@ -703,8 +703,17 @@ row) → guard eligibility (`tripped[]` leave E; missing/unparseable guard
 only for usage errors** (bad args, unreadable/invalid `router-table.json`)
 — a repo bug; the controller does not dispatch and emits an event per
 SKILL.md's "a probe that could not look emits an event". `REASON` goes to
-the ledger line only; the fit distinguishes fallback rows by blank
-metrics. The controller holds no copy of the defaulting logic.
+the ledger only, inside the Pull's Routing; the fit distinguishes fallback
+rows by blank metrics. The controller holds no copy of the defaulting logic.
+
+**Amended (#3893, 2026-10-28): the line is the Pull's whole Routing.** `BY`
+says what made the draw, `BRIEF` and `CRITERIA` are the numbers the `rule`
+Stratum read (`-` with no issue read), `SIZED` is arm B's sizing label and
+`TRIPPED` the guard's tripped Cells at route time. `pull.mjs`'s row step files
+it verbatim in the ledger's `## Routed` section, after the Pull's first
+implementer's member token, in the same `ledger.mjs row … --routing <line>`
+write as the row; `ledger-grammar.mjs` owns the grammar (`parseRouting`,
+`formatRouting`). The row's `route=<REASON>` token is retired.
 
 Guard/table asymmetry, stated on purpose: the guard is pooled, the table
 per-stratum; a cell evicted pooled cannot win a stratum. Conservative by
