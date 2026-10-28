@@ -42,7 +42,7 @@
 
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -403,6 +403,80 @@ test("--repo with an empty path or a non-repo directory refuses, and writes noth
   // path either.
   assert.deepEqual(findFleetDirs(root), []);
   assert.deepEqual(findFleetDirs(notARepo), []);
+});
+
+// A signal mid-check is "could not answer", never "changed": merge-gate reads
+// exit 1 as instrument-set-changed and any other failure as
+// instruments-unanswerable, so INT, HUP and TERM must leave at exit 2 (#3914).
+// A stub `shasum` first on PATH writes a marker, then sleeps in the script's
+// foreground, so the signal lands mid-hash. sh defers a trap until its
+// foreground child returns, so the signal goes to the script's whole process
+// group — spawned `detached`, the group is its own — and the sleep dies with
+// it. A run with no marker 10 s after it started, or still going 10 s after
+// the signal, has its group SIGKILLed and fails here rather than hanging or
+// leaving the sleep behind.
+test("INT, HUP and TERM mid-check exit 2, never 1 — a signalled check could not answer", async (t) => {
+  const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    await t.test(signal, async (st) => {
+      const root = repo(st);
+      pin(root);
+      const scratch = realpathSync(mkdtempSync(join(tmpdir(), "instruments-signal-")));
+      st.after(() => rmSync(scratch, { recursive: true, force: true }));
+      const bin = join(scratch, "bin");
+      const tmp = join(scratch, "tmp");
+      const marker = join(scratch, "hashing");
+      mkdirSync(bin);
+      mkdirSync(tmp);
+      writeFileSync(join(bin, "shasum"), `#!/bin/sh\n: > '${marker}'\nexec sleep 600\n`);
+      chmodSync(join(bin, "shasum"), 0o755);
+
+      const child = spawn(join(root, SET, "scripts", "instruments.sh"), [], {
+        cwd: root,
+        env: { ...ENV, HOME: HOMES.get(root), PATH: `${bin}:${process.env.PATH}`, TMPDIR: tmp },
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true,
+      });
+      let output = "";
+      for (const stream of [child.stdout, child.stderr]) {
+        stream.setEncoding("utf8");
+        stream.on("data", (d) => (output += d));
+      }
+      let done = false;
+      const exited = new Promise((resolve) =>
+        child.on("close", (status, sig) => {
+          done = true;
+          resolve({ status, sig });
+        }),
+      );
+      const killGroup = () => {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch (e) {
+          if (e.code !== "ESRCH") throw e;
+        }
+      };
+      let guard;
+      try {
+        const deadline = Date.now() + 10_000;
+        while (!existsSync(marker) && !done && Date.now() < deadline) await pause(20);
+        assert.ok(existsSync(marker), `the stub shasum never started\n${output}`);
+        guard = setTimeout(killGroup, 10_000);
+        process.kill(-child.pid, signal);
+        const r = await exited;
+        assert.notEqual(r.sig, "SIGKILL", `instruments.sh was still running 10 s after ${signal}\n${output}`);
+        assert.equal(r.sig, null, `${signal} killed instruments.sh instead of its trap exiting\n${output}`);
+        assert.equal(r.status, 2, `${signal}: ${output}`);
+        assert.deepEqual(readdirSync(tmp), [], "the trap removed its temp file");
+      } finally {
+        clearTimeout(guard);
+        if (!done) {
+          killGroup();
+          await exited;
+        }
+      }
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------
