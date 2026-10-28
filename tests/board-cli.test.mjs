@@ -24,7 +24,7 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeProjectDir } from "../plugin/scripts/member-record.mjs";
-import { writeReceipt } from "./support/board-rig.mjs";
+import { writeReceipt, offlineBoardBin } from "./support/board-rig.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
 const BOARD = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
@@ -40,10 +40,11 @@ const ompTurn = (cacheWrite) => [
       usage: { input: 1, output: 1, cacheRead: 0, cacheWrite, totalTokens: 0, cost: { total: 0 } } } },
 ].map((l) => JSON.stringify(l)).join("\n") + "\n";
 
-// The stub `gh` fails on every call: each gh read goes through tryRun, which
-// catches and degrades, so the board still builds and nothing here touches the
-// network or this repo's live issue list. Prepended to PATH rather than
-// replacing it, because gather() also shells out to `node`.
+// The stubs `gh` and `omp` fail on every call and the reads degrade: each gh
+// read goes through tryRun, which catches it, and the modelRoles read takes the
+// omp stub's failure, so the board still builds and nothing here touches the
+// network, this repo's live issue list or the host's omp config. Prepended to
+// PATH rather than replacing it, because gather() also shells out to `node`.
 // `ledgerFile` overrides the missing-ledger default the --spend-since and
 // --interval cases want: those die before the read matters, while the #807
 // case below needs a real one the read has to carry back whole. `seed` lays
@@ -56,8 +57,7 @@ function runBoard(sinceArgs, ledgerFile, seed = seedDefault) {
   // RESOLVED form. Encoding the unresolved one puts the fixture at a path
   // omp would never write for this cwd.
   const cwd = realpathSync(tempDir("since-cwd-"));
-  const bin = tempDir("since-bin-");
-  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  const bin = offlineBoardBin("since-bin-");
   seed(home, cwd);
   return spawnSync(process.execPath, [BOARD, "build", "--ledger", ledgerFile ?? join(cwd, "nope.md"), ...sinceArgs], {
     cwd, encoding: "utf8",
@@ -419,8 +419,7 @@ test("build: a ledger read past node's default stdout cap arrives whole, not as 
 // fixture through python3's saturated-pipe rig instead of spawnSync.
 function boardFaultFixture() {
   const cwd = realpathSync(tempDir("board-fault-cwd-"));
-  const bin = tempDir("board-fault-bin-");
-  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  const bin = offlineBoardBin("board-fault-bin-");
   // Valid JSON, wrong shape: `rows` is an object where every consumer wants an
   // array. Answers any argv, which is all gather()'s single `node` read needs.
   writeExecStub(join(bin, "node"), `#!/bin/sh\necho '{"rows":{},"filed":[],"ruled":[]}'\n`);

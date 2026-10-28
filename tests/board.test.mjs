@@ -13,8 +13,7 @@ import { fileURLToPath } from "node:url";
 import { faultText } from "../plugin/scripts/board.mjs";
 import { encodeProjectDir } from "../plugin/scripts/member-record.mjs";
 import { stripComments } from "./support/strip-comments.mjs";
-import { writeExecStub } from "./support/exec-stub.mjs";
-import { TURN, serveArgs, serveOpts, writeReceipt } from "./support/board-rig.mjs";
+import { TURN, serveArgs, serveOpts, writeReceipt, offlineBoardBin } from "./support/board-rig.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
 
@@ -31,11 +30,10 @@ test("CLI: a live serve reads the receipt's session on every tick — never the 
   // form — encoding the unresolved one puts the fixture where nothing looks.
   const cwd = realpathSync(tempDir("spend-receipt-cwd-"));
   const home = tempDir("spend-receipt-home-");
-  const bin = tempDir("spend-receipt-bin-");
-  // gh fails on every call and the reads degrade, so this stays offline and off
-  // this repo's live issue list. Prepended rather than replacing PATH: gather()
-  // shells out to `node` for the ledger read.
-  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  // gh and omp fail on every call and the reads degrade, so this stays offline,
+  // off this repo's live issue list and off the host's omp config. Prepended
+  // rather than replacing PATH: gather() shells out to `node` for the ledger read.
+  const bin = offlineBoardBin("spend-receipt-bin-");
   const proj = join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home }));
   const mine = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   const theirs = join(proj, "2026-09-09T02-00-00-000Z_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");

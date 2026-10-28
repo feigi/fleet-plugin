@@ -19,7 +19,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
-import { writeExecStub } from "./support/exec-stub.mjs";
+import { offlineBoardBin } from "./support/board-rig.mjs";
 import { cockpitLifetime, controllerVerdict } from "../plugin/scripts/cockpit-lifetime.mjs";
 import { processSource } from "../plugin/scripts/proc.mjs";
 
@@ -102,12 +102,11 @@ async function reap(child) {
 const readJson = (path) => { try { return JSON.parse(readFileSync(path, "utf8")); } catch { return null; } };
 
 // One cockpit on its own state directory (the cwd is no git checkout, so that
-// is the cwd's `.fleet`), ticking every second, offline: gh fails on every call
-// and the reads degrade.
+// is the cwd's `.fleet`), ticking every second, offline: gh and omp fail on
+// every call and the reads degrade.
 function cockpit() {
   const cwd = realpathSync(tempDir("cockpit-lifetime-cwd-"));
-  const bin = tempDir("cockpit-lifetime-bin-");
-  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  const bin = offlineBoardBin("cockpit-lifetime-bin-");
   const stateDir = join(cwd, ".fleet");
   mkdirSync(stateDir, { recursive: true });
   const procs = join(tempDir("cockpit-lifetime-procs-"), "procs.json");

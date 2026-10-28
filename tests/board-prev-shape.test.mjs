@@ -32,6 +32,7 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { offlineBoardBin } from "./support/board-rig.mjs";
 
 const BOARD = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
 const GATHER = fileURLToPath(new URL("../plugin/scripts/board-gather.mjs", import.meta.url));
@@ -188,14 +189,14 @@ for (const body of ACCEPTED) {
 //
 // Only observable out here: `gather()`'s return says nothing about the exit
 // code, and the diagnostic's CHANNEL is the thing a cockpit consuming
-// `board build` stdout depends on. The stub `gh` fails every call — each gh
-// read degrades through tryRun — so the board still builds with no network and
-// no read of this repo's live issue list.
+// `board build` stdout depends on. The stubs `gh` and `omp` fail every call —
+// each gh read degrades through tryRun, and the modelRoles read takes the omp
+// stub's failure — so the board still builds with no network, no read of this
+// repo's live issue list and no read of the host's omp config.
 function runBuild(prevArgs) {
   const cwd = tempDir("board-prevshape-cli-");
   const home = tempDir("board-prevshape-home-");
-  const bin = tempDir("board-prevshape-cli-bin-");
-  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  const bin = offlineBoardBin("board-prevshape-cli-bin-");
   return spawnSync(process.execPath, [BOARD, "build", "--ledger", join(cwd, "nope.md"), ...prevArgs], {
     cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },

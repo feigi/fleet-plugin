@@ -1,13 +1,15 @@
 // The rig the board test files share: a one-assistant-turn omp transcript and
 // the fixture directory that holds it, a phase-0 receipt recording a session,
 // stderr capture for the in-process callers that report through console.error,
-// the offline `serve` spawn arguments, and a deadline for an awaited process.
+// the offline `serve` spawn arguments, the offline rig `bin` for a spawn that
+// keeps the inherited PATH, and a deadline for an awaited process.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RECEIPT } from "../../plugin/scripts/ledger-grammar.mjs";
 import { tempDir } from "./temp-dir.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../plugin/scripts/board.mjs", import.meta.url));
 
@@ -62,3 +64,21 @@ export const withTimeout = (pr, ms, what) => Promise.race([
   pr,
   new Promise((_, rej) => setTimeout(() => rej(new Error(`timed out waiting for ${what}`)), ms).unref()),
 ]);
+
+// A rig `bin` for a spawn of `board.mjs build`/`serve` that keeps the inherited
+// PATH behind it (the run needs the real git and node): a `gh` and an `omp`
+// that both fail at once. gather() reads the Cell evidence tab's modelRoles by
+// spawning `omp config get modelRoles --json` whenever it resolves a state
+// directory, so a bin without an `omp` lets that read reach the host's own omp
+// and config — a board whose modelRoles the host decided, and seconds of its
+// startup. With the stub every such board carries a null modelRoles value and
+// a read error naming this failure ("omp config get modelRoles --json failed
+// (exit 1)"). The directory is returned for the caller to add its own stubs
+// (a `node`, a launcher) beside these two, and to put ahead of the inherited
+// PATH: `${bin}:${process.env.PATH}`.
+export function offlineBoardBin(prefix) {
+  const bin = tempDir(prefix);
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  writeExecStub(join(bin, "omp"), "#!/bin/sh\nexit 1\n");
+  return bin;
+}
