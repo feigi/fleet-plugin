@@ -449,7 +449,7 @@ export function deriveLabelMap({ table, live, cache, answers = new Map() }) {
       for (const other of LABEL_ROLES) {
         const row = rowsOf(other).find((text) => lc(text) === key);
         if (row !== undefined) {
-          claimedBy = { role: other, string: row, by: answers.has(other) ? "answer" : "table" };
+          claimedBy = { role: other, string: row, by: "table" };
           break;
         }
       }
@@ -661,22 +661,24 @@ export function setLabelMap({ answers = new Map(), acceptSuggestions = false, cr
   // The live label a string names, in the tracker's own spelling.
   const liveSpelling = (names) => {
     const byKey = new Map();
-    for (const name of names) if (!byKey.has(name.toLowerCase())) byKey.set(name.toLowerCase(), name);
-    return (text) => byKey.get(text.toLowerCase());
+    for (const name of names) if (!byKey.has(lc(name))) byKey.set(lc(name), name);
+    return (text) => byKey.get(lc(text));
   };
   let spelling = liveSpelling(live);
   const missing = LABEL_ROLES.filter((role) => spelling(roles[role]) === undefined);
-  if (missing.length && !create) {
-    return refuse(...missing.map((role) => `  ${role}: ${JSON.stringify(roles[role])} does not exist in the tracker; pass --create to create it`));
-  }
+  // The labels this run created, named by every failure that follows one.
+  const made = [];
+  const named = (lead) => (made.length ? `; ${lead}: ${made.map((s) => JSON.stringify(s)).join(", ")}` : "");
   if (missing.length) {
-    const made = [];
+    if (!create) {
+      return refuse(...missing.map((role) => `  ${role}: ${JSON.stringify(roles[role])} does not exist in the tracker; pass --create to create it`));
+    }
     for (const role of missing) {
       // A string that starts with `-` would be read as a flag.
       const string = roles[role];
       const r = spawnGh(["label", "create", ...(string.startsWith("-") ? ["--"] : []), string], top);
       const said = `${r.stdout ?? ""}${r.stderr ?? ""}`;
-      const where = `${made.length ? `; created before it: ${made.map((s) => JSON.stringify(s)).join(", ")}` : ""}; nothing written`;
+      const where = `${named("created before it")}; nothing written`;
       if (r.error?.code === "ETIMEDOUT") throw new LabelMapUnavailable(`gh label create ${JSON.stringify(string)} timed out after ${GH_TIMEOUT_MS / 1000}s${where}`);
       if (r.error) throw new LabelMapUnavailable(`could not run gh: ${r.error.message}${where}`);
       if (r.signal) throw new LabelMapUnavailable(`gh was killed by ${r.signal} creating ${JSON.stringify(string)}${where}`);
@@ -685,19 +687,24 @@ export function setLabelMap({ answers = new Map(), acceptSuggestions = false, cr
         throw new LabelMapUnavailable(`gh label create ${JSON.stringify(string)} failed: ${said.trim().split("\n")[0] || `exit ${r.status}`}${where}`);
       }
     }
-    spelling = liveSpelling(readLiveLabels({ cwd: top }));
+    try {
+      spelling = liveSpelling(readLiveLabels({ cwd: top }));
+    } catch (e) {
+      if (!(e instanceof LabelMapUnavailable)) throw e;
+      throw new LabelMapUnavailable(`${e.message}${named("created")}; nothing written`);
+    }
   }
   for (const role of LABEL_ROLES) {
     const name = spelling(roles[role]);
     if (name === undefined) {
-      throw new LabelMapUnavailable(`${role}: ${JSON.stringify(roles[role])} is not in the tracker's label list${missing.length ? " after gh label create" : ""}; nothing written`);
+      throw new LabelMapUnavailable(`${role}: ${JSON.stringify(roles[role])} is not in the tracker's label list after gh label create${named("created")}; nothing written`);
     }
     roles[role] = name;
   }
   try {
     writeLabelMap({ derivedAt: new Date().toISOString(), table, roles: inRoleOrder(roles), origin: inRoleOrder(origin) }, { cwd });
   } catch (e) {
-    throw new LabelMapUnavailable(`cannot write the Label map: ${e.message}`);
+    throw new LabelMapUnavailable(`cannot write the Label map: ${e.message}${named("created")}`);
   }
   return { code: 0, stdout: mapOf(roles) };
 }
@@ -717,7 +724,7 @@ function report(run) {
 
 function ensure(rest) {
   if (rest.length) die(`ensure takes no arguments, got: ${rest.join(" ")}; ${USAGE}`);
-  report(() => ensureLabelMap());
+  report(ensureLabelMap);
 }
 
 function set(rest) {

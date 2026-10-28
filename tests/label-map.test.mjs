@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
@@ -841,15 +841,18 @@ test("ensure: an ambient GIT_DIR or GH_REPO naming another repository does not c
 // ---------------------------------------------------------------------------
 
 // `create` is a function of the list file's path returning the shell the stub
-// runs for `label create`; by default it appends the created string.
-function setRig(live, { create } = {}) {
+// runs for `label create`; by default it appends the created string. `list`,
+// a function of that path and the default listing shell, replaces the shell
+// the stub runs for `label list`.
+function setRig(live, { create, list } = {}) {
   const dir = realpathSync(tempDir("label-map-set-"));
   const names = join(dir, "names");
   writeFileSync(names, live.map((name) => `${name}\n`).join(""));
   const onCreate = create?.(names) ?? `shift 2; [ "$1" = -- ] && shift; printf '%s\\n' "$1" >> "${names}"`;
+  const listing = `printf '['; sep=''; while IFS= read -r n; do printf '%s{"name":"%s"}' "$sep" "$n"; sep=,; done < "${names}"; printf ']\\n'`;
   const answer = [
     `case "$1 $2" in`,
-    `"label list") printf '['; sep=''; while IFS= read -r n; do printf '%s{"name":"%s"}' "$sep" "$n"; sep=,; done < "${names}"; printf ']\\n' ;;`,
+    `"label list") ${list?.(names, listing) ?? listing} ;;`,
     `"label create") ${onCreate} ;;`,
     `*) exit 1 ;;`,
     `esac`,
@@ -910,13 +913,13 @@ test("set without --create refuses every missing string by name and role: exit 1
 
 test("set refuses a string D8 rejects, exit 1 naming the role and the rule, with --create too: nothing created, nothing written", () => {
   const cases = [
-    [["onhold=on\"hold"], /onhold: its answer names "on\\"hold".*contains `"`/],
+    [["onhold=on\"hold"], /onhold: its answer names "on\\"hold".*contains `"`\)\. Fix: change the onhold=<label> pair\n/],
     [["onhold=on\\hold"], /onhold: its answer names .*contains `\\`/],
     [[`onhold=${long}`], /onhold: its answer names .*longer than 50 characters \(51\)/],
     [["onhold="], /onhold: its answer names "".*empty after trimming/],
     [["onhold=   "], /onhold: its answer names "   ".*empty after trimming/],
-    [["onhold=WONTFIX"], /onhold: its answer names "WONTFIX".*wontfix resolves to as its default/],
-    [["needs-info=Same", "onhold=same"], /onhold: its answer names "same", the same string as the needs-info=<label> pair \(compared ignoring case\)/],
+    [["onhold=WONTFIX"], /onhold: its answer names "WONTFIX".*wontfix resolves to as its default.*\. Fix: change the onhold=<label> pair, or run `label-map\.mjs set wontfix=<label>`/],
+    [["needs-info=Same", "onhold=same"], /onhold: its answer names "same", the same string as the needs-info=<label> pair \(compared ignoring case\)\. Fix: change the onhold=<label> pair or the needs-info=<label> pair\n/],
   ];
   for (const [args, expected] of cases) {
     const ws = repo();
@@ -1025,6 +1028,17 @@ test("set case rule: a label create answered 'already exists' for a case variant
   assert.deepEqual(ensureThenReads(ws, g), { ...identity(), "ready-for-agent": "Agent-Ready" });
 });
 
+test("set case rule: an 'Already exists' answer in capitals on stdout counts as existing too", () => {
+  const ws = repo();
+  const g = setRig(without(LABEL_ROLES, "ready-for-agent"), {
+    create: (names) => `echo 'Label "agent-ready" Already Exists'; printf '%s\\n' Agent-Ready >> "${names}"; exit 1`,
+  });
+  const r = setRun(ws, g, "--create", "ready-for-agent=agent-ready");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(g.calls(), [LIST, ...created("agent-ready"), LIST]);
+  assert.equal(cacheOf(ws).roles["ready-for-agent"], "Agent-Ready");
+});
+
 test("set: a label create that fails for another reason is exit 2 naming the labels created before it; nothing is written", () => {
   const ws = repo();
   const g = setRig(without(LABEL_ROLES, "needs-info", "onhold"), {
@@ -1037,13 +1051,92 @@ test("set: a label create that fails for another reason is exit 2 naming the lab
   noCache(ws);
 });
 
+test("set: a gh killed by a signal while creating is exit 2 naming the labels created before it; nothing is written", () => {
+  const ws = repo();
+  const g = setRig(without(LABEL_ROLES, "needs-info", "onhold"), {
+    create: (names) => `shift 2; if [ "$1" = onhold ]; then kill -TERM $$; fi; printf '%s\\n' "$1" >> "${names}"`,
+  });
+  const r = setRun(ws, g, "--accept-suggestions", "--create");
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /gh was killed by SIGTERM creating "onhold"; created before it: "needs-info"; nothing written/);
+  assert.deepEqual(g.calls(), [LIST, ...created("needs-info", "onhold")]);
+  noCache(ws);
+});
+
+test("set: a gh that cannot be run for a create is exit 2 naming the labels created before it; nothing is written", () => {
+  const ws = repo();
+  // The stub removes itself after the first create, and PATH holds only its
+  // directory, so the next create finds no gh at all.
+  const g = setRig(without(LABEL_ROLES, "needs-info", "onhold"), {
+    create: (names) => `shift 2; printf '%s\\n' "$1" >> "${names}"; rm -f "$0"`,
+  });
+  const bin = g.env.PATH.split(":")[0];
+  for (const tool of ["git", "rm"]) {
+    symlinkSync(spawnSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).stdout.trim(), join(bin, tool));
+  }
+  const r = spawnSync(process.execPath, [SCRIPT, "set", "--accept-suggestions", "--create"], { cwd: ws, env: { ...g.env, PATH: bin }, encoding: "utf8" });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /could not run gh: .*ENOENT; created before it: "needs-info"; nothing written/);
+  assert.deepEqual(g.calls(), [LIST, ...created("needs-info")]);
+  noCache(ws);
+});
+
 test("set: a label create that answers success but leaves the label out of the list read again is exit 2, nothing written", () => {
   const ws = repo();
   const g = setRig(without(LABEL_ROLES, "onhold"), { create: () => "exit 0" });
   const r = setRun(ws, g, "--accept-suggestions", "--create");
   assert.equal(r.status, 2, r.stdout + r.stderr);
-  assert.match(r.stderr, /onhold: "onhold" is not in the tracker's label list after gh label create; nothing written/);
+  assert.match(r.stderr, /onhold: "onhold" is not in the tracker's label list after gh label create; created: "onhold"; nothing written/);
   noCache(ws);
+});
+
+test("set: the label list read again failing after a create is exit 2 naming the labels created; nothing written", () => {
+  const ws = repo();
+  const g = setRig(without(LABEL_ROLES, "onhold"), {
+    create: (names) => `shift 2; printf '%s\\n' "$1" >> "${names}"; : > "${names}.made"`,
+    list: (names, listing) => `if [ -e "${names}.made" ]; then echo "gh: HTTP 502" >&2; exit 1; fi; ${listing}`,
+  });
+  const r = setRun(ws, g, "--accept-suggestions", "--create");
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /gh label list failed: gh: HTTP 502; created: "onhold"; nothing written/);
+  assert.deepEqual(g.calls(), [LIST, ...created("onhold"), LIST]);
+  noCache(ws);
+});
+
+test("set: a Label map that cannot be written is exit 2 naming the labels created, the cache untouched", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root writes every directory");
+  const ws = repo();
+  const fleet = join(ws, ".fleet");
+  mkdirSync(fleet);
+  chmodSync(fleet, 0o555);
+  const g = setRig(without(LABEL_ROLES, "onhold"));
+  let r;
+  try {
+    r = setRun(ws, g, "--accept-suggestions", "--create");
+  } finally {
+    chmodSync(fleet, 0o755);
+  }
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /cannot write the Label map: EACCES\b.*; created: "onhold"\n/);
+  assert.deepEqual(readdirSync(fleet), []);
+});
+
+test("set run from a subdirectory creates the labels at the repository's top", () => {
+  const ws = repo();
+  const sub = join(ws, "sub", "dir");
+  mkdirSync(sub, { recursive: true });
+  let where;
+  const g = setRig(without(LABEL_ROLES, "onhold"), {
+    create: (names) => {
+      where = `${names}.pwd`;
+      return `pwd -P >> "${where}"; shift 2; printf '%s\\n' "$1" >> "${names}"`;
+    },
+  });
+  const r = setRun(sub, g, "--accept-suggestions", "--create");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(g.calls(), [LIST, ...created("onhold"), LIST]);
+  assert.equal(readFileSync(where, "utf8"), `${ws}\n`);
+  assert.deepEqual(cacheOf(ws).roles, identity());
 });
 
 test("set needs-triage=triage clears the break a ready-for-human row naming needs-triage causes: the map is written and ensure then exits 0; a break left standing is exit 1", () => {
