@@ -51,8 +51,8 @@ Nothing in this phase, or in any later one, asks the maintainer which tickets to
 
    The `tier-roles` step runs `~/.fleet/bin/fleet-run tier-roles.mjs --check
    --in-flight <B>`, `<B>` being the `--in-flight` given, else the default.
-   **Default: In-flight bound 5, fixed for the run.** See references/pull.md. What it checks is in the header of `scripts/tier-roles.mjs`, under
-   the tier routes. A line it prints on a pass about omp's `task.maxConcurrency`
+   **Default: In-flight bound 5, fixed for the run.** See references/pull.md.
+   A line it prints on a pass about omp's `task.maxConcurrency`
    is a notice in the step's output and never holds: read it, report it, and
    go on — the fleet never writes that setting.
 
@@ -65,17 +65,20 @@ Nothing in this phase, or in any later one, asks the maintainer which tickets to
      run `phase0.mjs` again. `RECIPE NOT PROVEN` → stall: report `STALL —
      Recipe not proven: <cause>` to the maintainer with the deriver's reason
      verbatim, and claim, Pull and review nothing.
+   - `NEED answer-label-map` — the `labels` line is the Label map question:
+     ask it as references/phase-0.md words it, and wait; run
+     `label-map.mjs set --create` with the answer (`--accept-suggestions`
+     for `defaults`), say how to make it permanent, and run phase 0 again.
+     A `failed` `labels` step is no question: show it, stop.
    - `NEED resume #<n> <worktree> <branch>` — a dead run's claim: no PR, or not only `CLOSED` ones.
      Dispatch a stranded `impl-<n>-b` the ordinary way (record it with
      `ledger.mjs row`, render its brief, `ledger.mjs dispatch`, the `task`
      call, the tier check), in that worktree and branch, and never with
-     `claim-ticket.sh`: the claim stands. A re-run finds the need met once its
-     row is written. A `report #<n> — <why>` line is the maintainer's and
-     nothing else, and a `carried` line is a live token to reconcile first.
-     A closed-PR `report` takes `replace`/`release #<n>`.
+     `claim-ticket.sh`: the claim stands. A `report #<n> — <why>` line is the
+     maintainer's and nothing else, and a `carried` line is a live token to
+     reconcile first.
 
-   A `drift` or `unanswered` ruleset step is advice too: surface the diff and
-   go on. See references/phase-0.md.
+   See references/phase-0.md.
 
 1. **Build the Shortlist** — `~/.fleet/bin/fleet-run shortlist.mjs`, then read
    `.fleet/shortlist.json` — `{scanned, shortlist: [{n, t}], dropped: [{n, reason}]}`:

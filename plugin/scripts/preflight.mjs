@@ -52,8 +52,6 @@ const PROBE_TIMEOUT_MS = 60_000;
 const NAME = "preflight";
 const die = makeDie(NAME);
 
-const label = (l) => ({ name: `label:${l}`, argv: ["gh", "label", "list", "--search", l, "--json", "name", "--jq", ".[].name"], want: l });
-
 // A workflow file whose top-level `name:` is CI, matched the way ci-state.mjs
 // reads a workflow's name: either quote style, and a trailing ` # comment` is
 // not part of the name. A plain `^name: *CI *$` would WARN for a repo
@@ -74,9 +72,6 @@ export const CHECKS = [
   { name: "origin-main", argv: ["git", "rev-parse", "--verify", "-q", "origin/main"] },
   { name: "worktrees-ignored", argv: ["git", "check-ignore", "-q", ".worktrees/probe"] },
   { name: "fleet-ignored", argv: ["git", "check-ignore", "-q", ".fleet/probe"] },
-  label("ready-for-agent"),
-  label("in-progress"),
-  label("ready-to-merge"),
   { name: "allow-merge-commit", argv: ["gh", "api", "repos/{owner}/{repo}", "--jq", ".allow_merge_commit"], want: "true" },
   { name: "ruleset", argv: ["gh", "api", "repos/{owner}/{repo}/rulesets", "--jq", ".[].name"], want: NONEMPTY },
   { name: "ci-workflow", argv: ["sh", "-c", CI_NAMED], warn: true },

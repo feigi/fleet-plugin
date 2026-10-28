@@ -8,7 +8,7 @@ import { OBJECTIVE_DEFAULT, objectiveFromReceipt, readReceipt, phase0Gate, sessi
 import { OBJECTIVES } from "../plugin/scripts/ledger-grammar.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 
-const STEPS = ["alarm", "branch", "fast-forward", "pin", "baseline", "preflight", "ruleset", "tier-roles", "metrics",
+const STEPS = ["alarm", "branch", "fast-forward", "pin", "baseline", "labels", "preflight", "ruleset", "tier-roles", "metrics",
   "cockpit", "rotate", "reclaim", "recipe", "fold-in", "stranded", "shortlist"];
 const receipt = ({ run = 5, session = "/s/run", steps = {}, ...rest } = {}) => ({
   run, session, scratch: "/scratch", ...rest,

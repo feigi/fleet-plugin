@@ -25,6 +25,10 @@ const REAL_SCRIPTS = join(PLUGIN, "scripts");
 const RUN_AT = 1_700_000_000_000;
 // The login the stub `gh api user` answers to: the run's own.
 const RUN_LOGIN = "fleet-maintainer";
+// What `label-map.mjs ensure` prints on exit 0: the map, one JSON line.
+const IDENTITY_MAP = JSON.stringify(Object.fromEntries(
+  ["needs-triage", "needs-info", "ready-for-agent", "ready-for-human", "wontfix", "in-progress", "onhold", "ready-to-merge"].map((r) => [r, r]),
+));
 
 const GIT_ENV = { ...process.env };
 delete GIT_ENV.GIT_DIR;
@@ -87,7 +91,7 @@ export function rotate() {
 if (process.argv[1].endsWith("stub-driver.mjs")) drive(process.argv[2], process.argv.slice(3));
 `;
 
-const MJS_STUBS = ["main-checkout", "preflight", "tier-roles", "metrics-refresh", "board", "reclaim-scratch", "stranded", "shortlist", "fleet-heartbeat"];
+const MJS_STUBS = ["main-checkout", "label-map", "preflight", "tier-roles", "metrics-refresh", "board", "reclaim-scratch", "stranded", "shortlist", "fleet-heartbeat"];
 const SH_STUBS = ["instruments", "derive-testcmd"];
 
 // The plugin's scripts directory, copied once, with the external steps
@@ -148,7 +152,7 @@ const REAL_TABLE = { [process.pid]: { ppid: OMP, argv: [process.execPath, "--tes
 // step: the stub names its work shows up under in `order.log`.
 const STEPS = [
   ["alarm", []],
-  ["branch", []], ["fast-forward", []], ["pin", ["instruments"]], ["baseline", ["main-checkout"]],
+  ["branch", []], ["fast-forward", []], ["pin", ["instruments"]], ["baseline", ["main-checkout"]], ["labels", ["label-map"]],
   ["preflight", ["preflight"]], ["ruleset", ["ruleset"]], ["tier-roles", ["tier-roles"]],
   ["metrics", ["metrics-refresh"]], ["cockpit", ["board"]], ["rotate", ["rotate"]],
   ["reclaim", ["reclaim-scratch"]], ["recipe", ["derive-testcmd"]], ["fold-in", ["gh"]],
@@ -180,6 +184,7 @@ function fixture({ spec = false } = {}) {
   writeFileSync(join(stubs, "gh.json"), "[]");
   writeFileSync(join(stubs, "gh.login"), `${RUN_LOGIN}\n`);
   writeFileSync(join(stubs, "stranded.json"), JSON.stringify({ out: JSON.stringify({ prior: "dead", claims: [], carried: [] }) }));
+  writeFileSync(join(stubs, "label-map.json"), JSON.stringify({ out: `${IDENTITY_MAP}\n` }));
   if (spec) {
     mkdirSync(join(repo, ".github", "rulesets"), { recursive: true });
     mkdirSync(join(repo, ".github", "scripts"), { recursive: true });
@@ -261,9 +266,11 @@ test("a clean run passes every step in order, writes one receipt and exits 0", (
   // The scripts ran in the runbook's order. The cockpit is detached, so its
   // own line in the log lands whenever it starts.
   const order = f.order().filter((n) => n !== "board");
-  assert.deepEqual(order, ["instruments", "main-checkout", "preflight", "ruleset", "tier-roles", "metrics-refresh", "rotate", "reclaim-scratch", "reclaim-scratch", "derive-testcmd", "derive-testcmd", "gh", "stranded", "shortlist"]);
+  assert.deepEqual(order, ["instruments", "main-checkout", "label-map", "preflight", "ruleset", "tier-roles", "metrics-refresh", "rotate", "reclaim-scratch", "reclaim-scratch", "derive-testcmd", "derive-testcmd", "gh", "stranded", "shortlist"]);
   assert.deepEqual(f.calls("instruments")[0].args, ["--pin"]);
   assert.deepEqual(f.calls("main-checkout")[0].args, ["--record"]);
+  assert.deepEqual(f.calls("label-map")[0].args, ["ensure"]);
+  assert.equal(receipt.steps.labels.output, `label-map.mjs ensure: ${IDENTITY_MAP}`, "the ok line carries the map ensure printed");
   assert.deepEqual(f.calls("preflight")[0].args, []);
   assert.deepEqual(f.calls("ruleset")[0].args, ["--check"]);
   assert.deepEqual(f.calls("tier-roles")[0].args, ["--check", "--in-flight", "5"]);
@@ -407,7 +414,16 @@ const REFUSALS = [
   ["fast-forward", (f) => git(f.repo, "remote", "set-url", "origin", join(f.dir, "no-such-origin.git")), /git fetch origin failed/],
   ["pin", (f) => f.control("instruments", { exit: 1, err: "instruments: nothing to certify" }), /instruments: nothing to certify/],
   ["baseline", (f) => f.control("main-checkout", { exit: 1, err: "MAIN-CHECKOUT-DIRTY: README" }), /MAIN-CHECKOUT-DIRTY: README/],
-  ["preflight", (f) => f.control("preflight", { exit: 1, out: "ok gh-auth\nFAIL label:in-progress: missing\nFAIL ruleset: none\nPREFLIGHT FAILED: label:in-progress, ruleset" }), /FAIL label:in-progress: missing\nFAIL ruleset: none/],
+  ["labels", (f) => f.control("label-map", { exit: 1, err: "\nlabel-map: docs/agents/triage-labels.md gives a Label map that breaks the string rules; nothing written, nothing created:\n  in-progress: longer than 50 characters" }), /mjs ensure exit 1\n[^]*breaks the string rules[^]*in-progress: longer than 50 characters/],
+  ["labels", (f) => f.control("label-map", { exit: 2, err: "label-map: gh label list could not answer" }), /mjs ensure exit 2\nlabel-map: gh label list could not answer/],
+  ["labels", (f) => f.control("label-map", { exit: 7, err: "label-map: something else" }), /mjs ensure exit 7\nlabel-map: something else/],
+  ["labels", (f) => f.control("label-map", { exit: 3, out: "not a payload" }), /mjs ensure exit 3 printed no question payload\nnot a payload/],
+  ["labels", (f) => f.control("label-map", { exit: 3, out: '{"certain":{}}' }), /payload\n\{"certain":\{\}\}/],
+  ["labels", (f) => f.control("label-map", { exit: 3, out: '{"certain":{},"uncertain":"x"}' }), /payload\n\{"certain":\{\},"uncertain":"x"\}/],
+  ["labels", (f) => f.control("label-map", { exit: 3, out: '{"uncertain":[],"certain":{}}' }), /payload\n\{"uncertain":\[\],"certain":\{\}\}/],
+  ["labels", (f) => f.control("label-map", { exit: 3, out: '{"uncertain":[{}],"certain":{}}' }), /payload\n\{"uncertain":\[\{\}\],"certain":\{\}\}/],
+  ["labels", (f) => f.control("label-map", { exit: 3, out: '{"certain":5,"uncertain":[{"role":"in-progress"}]}' }), /payload\n\{"certain":5,"uncertain":\[\{"role":"in-progress"\}\]\}/],
+  ["preflight", (f) => f.control("preflight", { exit: 1, out: "ok gh-auth\nFAIL allow-merge-commit: false\nFAIL ruleset: none\nPREFLIGHT FAILED: allow-merge-commit, ruleset" }), /FAIL allow-merge-commit: false\nFAIL ruleset: none/],
   ["preflight", (f) => f.control("preflight", { exit: 2, err: "preflight: cannot write the marker" }), /preflight: cannot write the marker/],
   ["tier-roles", (f) => f.control("tier-roles", { exit: 1, err: "tier-roles: no modelRoles.slow" }), /tier-roles: no modelRoles\.slow/],
   ["metrics", (f) => f.control("metrics-refresh", { exit: 1, err: "metrics-refresh: drain failed" }), /metrics-refresh: drain failed/],
@@ -476,10 +492,10 @@ test("alarm: a resumed run re-checks the alarm, an ok one included, and refuses 
 
 test("a failed preflight prints every FAIL line on stdout and none of the passing ones", () => {
   const f = fixture();
-  f.control("preflight", { exit: 1, out: "ok gh-auth\nFAIL label:in-progress: missing\nFAIL ruleset: none\nPREFLIGHT FAILED: label:in-progress, ruleset" });
+  f.control("preflight", { exit: 1, out: "ok gh-auth\nFAIL allow-merge-commit: false\nFAIL ruleset: none\nPREFLIGHT FAILED: allow-merge-commit, ruleset" });
   const r = f.run();
   assert.equal(r.status, 3);
-  assert.ok(r.out.some((l) => l.includes("FAIL label:in-progress: missing")), r.stdout);
+  assert.ok(r.out.some((l) => l.includes("FAIL allow-merge-commit: false")), r.stdout);
   assert.ok(r.out.some((l) => l.includes("FAIL ruleset: none")), r.stdout);
   assert.ok(!r.stdout.includes("ok gh-auth"), "a passing check line is not part of the report");
 });
@@ -613,6 +629,55 @@ test("recipe: both reads exit 1 at once is one NEED, not two", () => {
   const r = f.run();
   assert.equal(r.status, 4);
   assert.equal(r.out.filter((l) => l === "NEED derive-recipe").length, 1);
+});
+
+// The question payload `label-map.mjs ensure` prints on exit 3 (D6's shape),
+// pretty-printed here so the step's own compaction to one line is visible.
+const PAYLOAD = {
+  certain: { "needs-triage": "needs-triage", "ready-for-agent": "ready-for-agent" },
+  uncertain: [{ role: "in-progress", suggestion: "wip", origin: "near-match", candidates: ["wip"], exists: true }],
+};
+
+test("labels: a map ensure cannot settle is a pending NEED with exit 4, its payload one line, and no pre-flight runs; answered, the re-run goes on", () => {
+  const f = fixture();
+  f.control("label-map", { exit: 3, out: `${JSON.stringify(PAYLOAD, null, 2)}\n` });
+  const r = f.run();
+  assert.equal(r.status, 4, r.stdout + r.err);
+  assert.equal(r.out.at(-1), "NEED answer-label-map", "the NEED lines come last");
+  assert.ok(r.out.includes(`phase0: labels: pending — ${JSON.stringify(PAYLOAD)}`), r.stdout);
+  const receipt = f.receipt();
+  assert.deepEqual(statuses(receipt), Object.fromEntries(NAMES.map((n, i) => [n, i < NAMES.indexOf("labels") ? "ok" : "pending"])));
+  assert.equal(receipt.steps.labels.output, `${JSON.stringify(PAYLOAD)}\nNEED answer-label-map`);
+  assert.deepEqual(f.calls("preflight"), [], "the pre-flight waits for the Label map");
+  assert.deepEqual(f.order().filter((n) => n !== "board"), ["instruments", "main-checkout", "label-map"], "nothing after the step ran");
+
+  f.control("label-map", { out: `${IDENTITY_MAP}\n` });
+  const again = f.run();
+  assert.equal(again.status, 0, again.stdout + again.err);
+  assert.deepEqual(statuses(f.receipt()), allOk);
+  assert.equal(f.calls("label-map").length, 2, "before the rotation a re-run runs the step again");
+  assert.equal(f.calls("preflight").length, 1);
+});
+
+test("labels: a resumed run whose labels step is ok does not run ensure again", () => {
+  const f = fixture();
+  f.control("derive-testcmd", { by: { ". install": { exit: 1, err: "no Recipe cache" }, ". test --at origin/main": {} } });
+  assert.equal(f.run().status, 4);
+  assert.equal(f.receipt().steps.labels.status, "ok");
+  f.control("derive-testcmd", { by: { ". install": { out: "npm ci" }, ". test --at origin/main": { out: "./agent-test" } } });
+  const again = f.run();
+  assert.equal(again.status, 0, again.stdout + again.err);
+  assert.equal(f.calls("label-map").length, 1, "ensure ran once in this run");
+  assert.match(again.stdout, /^phase0: labels: ok \(done earlier in this run\)$/m);
+});
+
+test("labels: started from a subdirectory of the main checkout, ensure runs at its top, not where phase 0 started", () => {
+  const f = fixture();
+  const sub = join(f.repo, "sub");
+  mkdirSync(sub);
+  const r = f.run(null, { cwd: sub });
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(f.calls("label-map")[0].cwd, f.repo, "ensure runs in the main checkout");
 });
 
 test("stranded: a resume entry is a pending NEED with exit 4, a report entry is printed, and a re-run once the row is written continues", () => {
@@ -1377,7 +1442,7 @@ test("an ambient GIT_DIR or GH_REPO naming another repository does not change wh
   const r = f.run(null, { env: { GIT_DIR: join(elsewhere.repo, ".git"), GH_REPO: "someone/else" } });
   assert.equal(r.status, 0, r.stdout + r.err);
   assert.deepEqual(statuses(f.receipt()), allOk);
-  for (const call of ["instruments", "main-checkout", "preflight", "tier-roles", "metrics-refresh", "derive-testcmd", "stranded", "shortlist"]) {
+  for (const call of ["instruments", "main-checkout", "label-map", "preflight", "tier-roles", "metrics-refresh", "derive-testcmd", "stranded", "shortlist"]) {
     assert.equal(f.calls(call)[0].GIT_DIR, null, `${call} inherited GIT_DIR`);
   }
   assert.match(readFileSync(join(f.stubs, "gh.calls"), "utf8"), /GH_REPO=\[\] GIT_DIR=\[\]/);

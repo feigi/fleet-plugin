@@ -190,7 +190,7 @@ const needKinds = (script) =>
 
 test("every NEED kind phase0.mjs prints has its paragraph in phase 0 step 0", () => {
   const kinds = needKinds("phase0.mjs");
-  assert.deepEqual(kinds, ["derive-recipe", "resume"], "phase0.mjs prints a NEED kind this test does not list — give it a paragraph");
+  assert.deepEqual(kinds, ["answer-label-map", "derive-recipe", "resume"], "phase0.mjs prints a NEED kind this test does not list — give it a paragraph");
   const s = step0();
   for (const kind of kinds) assert.ok(s.includes(`\`NEED ${kind}`), `step 0 has no paragraph for \`NEED ${kind}\``);
 });
@@ -206,6 +206,48 @@ test("the derive-recipe paragraph dispatches the deriver with its rendered brief
   const s = step0();
   assert.match(s, Pin.phrase("Dispatch a `task` member named `derive-recipe`, agent `fleet-recipe-deriver`, its prompt the brief `~/.fleet/bin/fleet-run dispatch-prompt.mjs render recipe-deriver --member derive-recipe --repo <repo> --scratch <scratch>` prints"));
   assert.match(s, Pin.phrase("`RECIPE NOT PROVEN` → stall: report `STALL — Recipe not proven: <cause>` to the maintainer with the deriver's reason verbatim"));
+});
+
+test("the answer-label-map paragraph asks the Label map question, waits, writes the answer with set --create, and stops on a failed labels step", () => {
+  const s = step0();
+  assert.match(s, Pin.phrase("`NEED answer-label-map` — the `labels` line is the Label map question: ask it as references/phase-0.md words it, and wait"));
+  assert.match(s, Pin.phrase("run `label-map.mjs set --create` with the answer (`--accept-suggestions` for `defaults`), say how to make it permanent, and run phase 0 again."));
+  assert.match(s, Pin.phrase("A `failed` `labels` step is no question: show it, stop."));
+});
+
+test("phase-0.md derives the Label map after the baseline and before the pre-flight, in its order list and its sections", () => {
+  assert.match(PHASE0, Pin.phrase("its fixed order — alarm, branch, fast-forward, pin, baseline, labels, preflight, ruleset,"));
+  const headings = PHASE0.split("\n").filter((l) => l.startsWith("## "));
+  const at = (h) => headings.indexOf(h);
+  assert.ok(at("## Derive the Label map") !== -1, "phase-0.md has no Label map section");
+  assert.equal(at("## Derive the Label map"), at("## Record the main-checkout baseline") + 1, "the Label map section does not follow the baseline");
+  assert.equal(at("## Run the pre-flight"), at("## Derive the Label map") + 1, "the pre-flight does not follow the Label map section");
+  const preflight = Pin.of(PHASE0, "phase-0.md").section("## Run the pre-flight", "phase-0 pre-flight section").text;
+  assert.doesNotMatch(preflight, /label/i, "the pre-flight section still names a label check");
+});
+
+test("the Label map section words the question as the derivation step's payload asks, and says how to keep the answer", () => {
+  const s = Pin.of(PHASE0, "phase-0.md").section("## Derive the Label map", "phase-0 Label map section").text;
+  assert.match(s, Pin.phrase("`~/.fleet/bin/fleet-run label-map.mjs ensure` in this main checkout"));
+  assert.match(s, Pin.phrase("Nothing after it runs — no pre-flight, no Shortlist, no claim — until the map is written."));
+  assert.match(s, Pin.phrase("show the maintainer what the step printed and stop. Neither is a question."));
+  assert.match(s, Pin.phrase("Put it to the maintainer as one question listing each uncertain role, its suggestion, why, and the alternatives"));
+  for (const why of [
+    "`declared in the triage-label table but not in the tracker`",
+    "`near match in the tracker`",
+    "`the default and a near match are both in the tracker`",
+    "`nothing found — the default, to be created`",
+    "`was <was> when cached; gone from the tracker (renamed or deleted?) — name the label to use`",
+    "`was <was> when cached, now gone from the tracker; `",
+    "`your earlier answer <string> is now <role>'s in the triage-label table; `",
+    "`your earlier answer <string> is now <role>'s label (its default); `",
+  ]) assert.match(s, Pin.phrase(why));
+  assert.match(s, Pin.phrase("reply `defaults` to accept every suggestion, or name `<role>=<label>` for any you want otherwise — a role with no suggestion must be named; labels that do not exist are created on your confirmation."));
+  assert.match(s, Pin.phrase("`~/.fleet/bin/fleet-run label-map.mjs set --create` with the reply: `--accept-suggestions` for `defaults`, and each `<role>=<label>` the maintainer named."));
+  assert.match(s, Pin.phrase("In the same reply, tell the maintainer how to make the answer permanent: add or edit the role's row in the repository's triage-label table, the role in the first cell and the string in the second."));
+  assert.match(s, Pin.phrase("The plugin never writes that table, so neither do you."));
+  assert.match(s, Pin.phrase("Exit 2 of `set` is no question"));
+  assert.match(s, Pin.phrase("Show the maintainer what it printed and stop, as for a failed `labels` step."));
 });
 
 test("the stranded paragraph names its remedy, a stranded impl-<n>-b the ordinary way, and the fold-in prints no NEED for the controller to dispatch", () => {
@@ -235,6 +277,7 @@ test("phase-0.md has one heading per moved step, in the order phase0.mjs runs th
     "## Fast-forward the checkout",
     "## Pin the instruments",
     "## Record the main-checkout baseline",
+    "## Derive the Label map",
     "## Run the pre-flight",
     "## Check the merge gate against its spec",
     "## Drain the pending ticket-features rows and refresh the cost guard",

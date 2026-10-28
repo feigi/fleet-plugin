@@ -6,7 +6,7 @@
     ],
     [
       "It runs the start sequence in its fixed order — branch, fast-forward, pin, baseline, preflight, ruleset, tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded, shortlist — prints one `phase0: <step>: <status>` line per step with the `NEED` lines last, and records each step in `.fleet/phase0.json`, which the tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row until the receipt is whole.",
-      "`phase0.mjs` runs the start sequence in its fixed order — alarm, branch, fast-forward, pin, baseline, preflight, ruleset, tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded, shortlist — prints one `phase0: <step>: <status>` line per step with the `NEED` lines last, and records each step in `.fleet/phase0.json`, which the tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row until the receipt is whole."
+      "`phase0.mjs` runs the start sequence in its fixed order — alarm, branch, fast-forward, pin, baseline, labels, preflight, ruleset, tier-roles, metrics, cockpit, rotate, reclaim, recipe, fold-in, stranded, shortlist — prints one `phase0: <step>: <status>` line per step with the `NEED` lines last, and records each step in `.fleet/phase0.json`, which the tick reads: it prints `PHASE0-INCOMPLETE` and holds every dispatching row until the receipt is whole."
     ],
     [
       "Arm the heartbeat below.",
