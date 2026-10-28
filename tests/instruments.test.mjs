@@ -1,11 +1,11 @@
 // Regression gate for instruments.sh, the check that says whether the
-// controller's instrument set changed under a run (#436), re-contracted to
-// audit the WORKING DIRECTORY's checkout rather than the checkout the script
-// itself lives in (#1337). The install-only dev loop (ADR 0003) means this
-// script normally runs out of a plugin cache; resolving from its own
-// location measured whatever git checkout happens to CONTAIN that cache
-// path, which was the operator's unrelated personal repo, not the plugin's
-// own tree.
+// controller's instrument set changed under a run (#436). It certifies the
+// live Install root under $HOME (#3845); the WORKING DIRECTORY's checkout,
+// never the checkout the script itself lives in (#1337), only locates the
+// baseline. The install-only dev loop (ADR 0003) means this script normally
+// runs out of a plugin cache; resolving from its own location measured
+// whatever git checkout happens to CONTAIN that cache path, which was the
+// operator's unrelated personal repo, not the plugin's own tree.
 //
 // The defect it guards is not observable from inside the fleet: a member that
 // edits a script in the MAIN checkout — where the controller runs every gate
@@ -721,11 +721,13 @@ test("a commit that changes no byte in the set still exits 0 and prints nothing 
 });
 
 // ---------------------------------------------------------------------------
-// CWD CONTRACT (#1337). The audited repository comes from $PWD (or --repo),
-// never from where the invoked copy of instruments.sh happens to live. Every
-// test below places the SCRIPT somewhere other than the repo it must audit,
-// which the tests above never do — proving the resolution is cwd-driven, not
-// merely untested against $0.
+// CWD CONTRACT (#1337). The state home — the checkout whose `.fleet/` holds
+// the baseline — comes from $PWD (or --repo), never from where the invoked
+// copy of instruments.sh happens to live; the tree it certifies is the
+// Install root under $HOME. Every test below places the SCRIPT somewhere
+// other than the repo whose baseline it must use, which the tests above never
+// do — proving the state-home resolution is cwd-driven, not merely untested
+// against $0.
 // ---------------------------------------------------------------------------
 
 // A plugin-cache-shaped fixture: instruments.sh nested several directories
@@ -1095,6 +1097,31 @@ test("a linked checkout's pin is a checkout's pin byte for byte: the tracked set
   assert.equal(r.stdout, `${digest}\n`);
   assert.equal(baselineOf(root), `${digest}\nroot=${root}\ncommit=${head}\n`);
   assert.equal(r.stderr, `instruments: pinned ${digest} over linked-checkout ${root} (commit ${head})\n`);
+});
+
+test("a package's pin is its files-mode digest byte for byte: every file under the five directories, in byte order, then the digest of those lines", (t) => {
+  const { home, pkg } = npmHome(t, "3.102.7");
+  // `B.mjs` sorts before `a.mjs` in byte order and after it in a locale
+  // collation, and the list as a whole reads differently backwards, so only
+  // the byte-order sort the digest is defined over reproduces it.
+  writeFileSync(join(pkg, "scripts", "B.mjs"), "upper\n");
+  writeFileSync(join(pkg, "scripts", "a.mjs"), "lower\n");
+  const r = runAt(wsRepo(t), home, ["--pin"]);
+  assert.equal(r.status, 0, r.stderr);
+  // The digest recomputed from its definition: `shasum -a 256` over every
+  // file under the component directories, paths relative to the realpath,
+  // in byte order, then the digest of those lines.
+  const listed = [
+    "agents/fleet-finisher.agent.md",
+    "commands/run-team.md",
+    "scripts/B.mjs",
+    "scripts/a.mjs",
+    "scripts/ci-state.mjs",
+    "skills/run-team/SKILL.md",
+  ];
+  const lines = listed.map((p) => `${sha256(readFileSync(join(pkg, p)))}  ${p}`);
+  const digest = sha256(Buffer.from(`${lines.join("\n")}\n`));
+  assert.equal(r.stdout, `${digest}\n`);
 });
 
 test("a link that is not a checkout's plugin/ refuses exit 2 at pin and at check — the checkout's root, a nested copy, a directory outside any checkout", (t) => {

@@ -589,8 +589,7 @@ function main() {
   if (named !== null && !OBJECTIVES.includes(named)) die(`--objective needs ${OBJECTIVES.join(" or ")}, got ${named}`);
   if (F.has("declare-no-ci") && !absent("workflow")) die("--workflow and --declare-no-ci are alternatives, not a pair");
   const ci = F.has("declare-no-ci") ? "CI: declared absent (--declare-no-ci)" : absent("workflow") ? null : `CI: workflow ${F.arg("workflow")} (--workflow)`;
-  const pathOf = (name) => (absent(name) ? null : resolve(F.arg(name)));
-  const spendDir = pathOf("spend-dir");
+  const spendDir = absent("spend-dir") ? null : resolve(F.arg("spend-dir"));
 
   let fleetDir;
   try {

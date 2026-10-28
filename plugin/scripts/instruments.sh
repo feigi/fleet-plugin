@@ -112,10 +112,13 @@
 # gate that is noise, and noise is the one failure this check cannot afford.
 # Sweeping for unexpected refs is a drain-cadence question, not a gate one.
 #
-# COST: one listing of the set (`git ls-files` in git mode, `find` in files
-# mode), one `git rev-parse` to find a linked checkout, and one pass of
-# `shasum` over those files. No network, no `gh`, no fetch, no
-# subprocess per file. It is meant to be run
+# COST: one `git rev-parse` to locate the state home, one listing of the set
+# (`git ls-files` in git mode, `find` in files mode), a second `git rev-parse`
+# in git mode to find the linked checkout, and one pass of `shasum` over those
+# files; a pin in git mode also reads HEAD, a git-mode check that finds a
+# change runs git again to report it, and a files-mode pin or changed check
+# runs `awk` once to read the package's version. No network, no `gh`, no
+# fetch, no subprocess per file. It is meant to be run
 # before every gate decision and it has to be cheap enough that nobody is
 # tempted to skip it.
 set -eu
@@ -272,8 +275,9 @@ fi
 # exactly. A link to the checkout's root, to a nested copy of `plugin/`, or to
 # a directory outside any checkout names a tree whose tracked set is not the
 # one the fleet executes, so it refuses rather than guess which it meant.
-set='plugin/commands plugin/scripts plugin/skills plugin/agents plugin/workflows'
 dirs='commands scripts skills agents workflows'
+set=
+for d in $dirs; do set="${set:+$set }plugin/$d"; done
 if [ "$kind" = linked-checkout ]; then
   mode=git
   badlink="Install root $live is not the plugin/ directory of a git checkout — a linked install must point at <checkout>/plugin"
@@ -321,7 +325,7 @@ pkg_version() {
       }
     }' "$target/package.json" 2>/dev/null) || v=
   case $v in
-    ''|*[!0-9A-Za-z.+-]*) v= ;;
+    *[!0-9A-Za-z.+-]*) v= ;;
   esac
   printf '%s' "$v"
 }
@@ -416,24 +420,19 @@ if [ "$pin" = true ]; then
   # line, a package with no readable version writes no `version=` line, and
   # the refusal says so.
   if [ "$mode" = git ]; then
-    commit=$(git -C "$target" rev-parse --verify --quiet HEAD 2>/dev/null) || commit=
-    {
-      printf '%s\n' "$digest"
-      printf 'root=%s\n' "$target"
-      [ -z "$commit" ] || printf 'commit=%s\n' "$commit"
-    } > "$base" || die "cannot write $base"
-    printf '%s\n' "$digest"
-    printf '%s: pinned %s over %s %s (commit %s)\n' "$NAME" "$digest" "$kind" "$target" "${commit:-?}" >&2
+    key=commit
+    val=$(git -C "$target" rev-parse --verify --quiet HEAD 2>/dev/null) || val=
   else
-    version=$(pkg_version)
-    {
-      printf '%s\n' "$digest"
-      printf 'root=%s\n' "$target"
-      [ -z "$version" ] || printf 'version=%s\n' "$version"
-    } > "$base" || die "cannot write $base"
-    printf '%s\n' "$digest"
-    printf '%s: pinned %s over %s %s (version %s)\n' "$NAME" "$digest" "$kind" "$target" "${version:-?}" >&2
+    key=version
+    val=$(pkg_version)
   fi
+  {
+    printf '%s\n' "$digest"
+    printf 'root=%s\n' "$target"
+    [ -z "$val" ] || printf '%s=%s\n' "$key" "$val"
+  } > "$base" || die "cannot write $base"
+  printf '%s\n' "$digest"
+  printf '%s: pinned %s over %s %s (%s %s)\n' "$NAME" "$digest" "$kind" "$target" "$key" "${val:-?}" >&2
   exit 0
 fi
 
