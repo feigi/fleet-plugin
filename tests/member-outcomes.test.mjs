@@ -526,6 +526,24 @@ test("two separate sessions scraped in two runs merge into one TSV", () => {
   assert.equal(rows.find((r) => r.member === "Solo").subagentType, "fleet-implementer-alt");
 });
 
+test("a scrape in a cwd with no docs/metrics/ creates it and writes the default file", () => {
+  const dir = fixture([["impl-580", [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")]]]);
+  const cwd = tempDir("mo-fresh-");
+  const r = spawnSync(process.execPath, [CLI, dir], { cwd, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const rows = parseTsv(readFileSync(join(cwd, "docs", "metrics", "member-outcomes.tsv"), "utf8"));
+  assert.deepEqual(rows.map((row) => row.member), ["impl-580"]);
+  assert.equal(existsSync(join(cwd, "docs", "metrics", "member-outcomes.tsv.tmp")), false);
+});
+
+test("a scrape into a --file whose directory is several levels missing creates every level", () => {
+  const dir = fixture([["impl-580", [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")]]]);
+  const out = join(tempDir("mo-out-"), "a", "b", "member-outcomes.tsv");
+  const r = spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(parseTsv(readFileSync(out, "utf8")).length, 1);
+});
+
 test("a scrape writes the priced columns off the transcript's usage, the 1h share off its cttl", () => {
   const dir = fixture([["impl-580", [sessionEvt("/x"), thinkingEvt("high"),
     assistantEvt("claude-opus-5", { input: 7, cacheRead: 500, cacheWrite: 300, cttl: { ephemeral1h: 300 }, cost: { total: 0.25 } }),
