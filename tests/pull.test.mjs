@@ -1716,6 +1716,7 @@ test("the row carries tier=<CELL> exactly when DRAW is not `-`, cell=<CELL> when
     [ROUTE_OK, ["#12 impl-12", "fleet-implementer-slow-high"]],
     ["POLICY=slow-high CELL=task-high DRAW=2/5 BY=every-5th STRATUM=heavy BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok", ["#12 impl-12 · tier=task-high", "fleet-implementer-task-high"]],
     ["POLICY=slow-high CELL=smol-high DRAW=2/3 BY=burn-in STRATUM=light BRIEF=120 CRITERIA=0 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok", ["#12 impl-12 · tier=smol-high", "fleet-implementer-smol-high"]],
+    ["POLICY=slow-high CELL=slow-high DRAW=1/3 BY=burn-in STRATUM=light BRIEF=120 CRITERIA=0 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok", ["#12 impl-12 · tier=slow-high", "fleet-implementer-slow-high"]],
     ["POLICY=task-high CELL=task-high DRAW=- BY=- STRATUM=heavy BRIEF=9658 CRITERIA=8 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=ok", ["#12 impl-12 · cell=task-high", "fleet-implementer-task-high"]],
     ["POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=light BRIEF=120 CRITERIA=0 SIZED=- OBJECTIVE=cost TRIPPED=- REASON=guard-missing", ["#12 impl-12", "fleet-implementer-slow-high"]],
     ["POLICY=slow-high CELL=slow-high DRAW=- BY=- STRATUM=unknown BRIEF=- CRITERIA=- SIZED=- OBJECTIVE=cost TRIPPED=- REASON=no-issue-json", ["#12 impl-12", "fleet-implementer-slow-high"]],
