@@ -270,7 +270,6 @@ test("a clean run passes every step in order, writes one receipt and exits 0", (
   assert.deepEqual(f.calls("instruments")[0].args, ["--pin"]);
   assert.deepEqual(f.calls("main-checkout")[0].args, ["--record"]);
   assert.deepEqual(f.calls("label-map")[0].args, ["ensure"]);
-  assert.equal(f.calls("label-map")[0].cwd, f.repo, "ensure runs in the main checkout");
   assert.equal(receipt.steps.labels.output, `label-map.mjs ensure: ${IDENTITY_MAP}`, "the ok line carries the map ensure printed");
   assert.deepEqual(f.calls("preflight")[0].args, []);
   assert.deepEqual(f.calls("ruleset")[0].args, ["--check"]);
@@ -419,6 +418,11 @@ const REFUSALS = [
   ["labels", (f) => f.control("label-map", { exit: 2, err: "label-map: gh label list could not answer" }), /mjs ensure exit 2\nlabel-map: gh label list could not answer/],
   ["labels", (f) => f.control("label-map", { exit: 7, err: "label-map: something else" }), /mjs ensure exit 7\nlabel-map: something else/],
   ["labels", (f) => f.control("label-map", { exit: 3, out: "not a payload" }), /mjs ensure exit 3 printed no question payload\nnot a payload/],
+  ["labels", (f) => f.control("label-map", { exit: 3, out: '{"certain":{}}' }), /payload\n\{"certain":\{\}\}/],
+  ["labels", (f) => f.control("label-map", { exit: 3, out: '{"certain":{},"uncertain":"x"}' }), /payload\n\{"certain":\{\},"uncertain":"x"\}/],
+  ["labels", (f) => f.control("label-map", { exit: 3, out: '{"uncertain":[],"certain":{}}' }), /payload\n\{"uncertain":\[\],"certain":\{\}\}/],
+  ["labels", (f) => f.control("label-map", { exit: 3, out: '{"uncertain":[{}],"certain":{}}' }), /payload\n\{"uncertain":\[\{\}\],"certain":\{\}\}/],
+  ["labels", (f) => f.control("label-map", { exit: 3, out: '{"certain":5,"uncertain":[{"role":"in-progress"}]}' }), /payload\n\{"certain":5,"uncertain":\[\{"role":"in-progress"\}\]\}/],
   ["preflight", (f) => f.control("preflight", { exit: 1, out: "ok gh-auth\nFAIL allow-merge-commit: false\nFAIL ruleset: none\nPREFLIGHT FAILED: allow-merge-commit, ruleset" }), /FAIL allow-merge-commit: false\nFAIL ruleset: none/],
   ["preflight", (f) => f.control("preflight", { exit: 2, err: "preflight: cannot write the marker" }), /preflight: cannot write the marker/],
   ["tier-roles", (f) => f.control("tier-roles", { exit: 1, err: "tier-roles: no modelRoles.slow" }), /tier-roles: no modelRoles\.slow/],
@@ -665,6 +669,15 @@ test("labels: a resumed run whose labels step is ok does not run ensure again", 
   assert.equal(again.status, 0, again.stdout + again.err);
   assert.equal(f.calls("label-map").length, 1, "ensure ran once in this run");
   assert.match(again.stdout, /^phase0: labels: ok \(done earlier in this run\)$/m);
+});
+
+test("labels: started from a subdirectory of the main checkout, ensure runs at its top, not where phase 0 started", () => {
+  const f = fixture();
+  const sub = join(f.repo, "sub");
+  mkdirSync(sub);
+  const r = f.run(null, { cwd: sub });
+  assert.equal(r.status, 0, r.stdout + r.err);
+  assert.equal(f.calls("label-map")[0].cwd, f.repo, "ensure runs in the main checkout");
 });
 
 test("stranded: a resume entry is a pending NEED with exit 4, a report entry is printed, and a re-run once the row is written continues", () => {

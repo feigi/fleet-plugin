@@ -246,6 +246,8 @@ test("the Label map section words the question as the derivation step's payload 
   assert.match(s, Pin.phrase("`~/.fleet/bin/fleet-run label-map.mjs set --create` with the reply: `--accept-suggestions` for `defaults`, and each `<role>=<label>` the maintainer named."));
   assert.match(s, Pin.phrase("In the same reply, tell the maintainer how to make the answer permanent: add or edit the role's row in the repository's triage-label table, the role in the first cell and the string in the second."));
   assert.match(s, Pin.phrase("The plugin never writes that table, so neither do you."));
+  assert.match(s, Pin.phrase("Exit 2 of `set` is no question"));
+  assert.match(s, Pin.phrase("Show the maintainer what it printed and stop, as for a failed `labels` step."));
 });
 
 test("the stranded paragraph names its remedy, a stranded impl-<n>-b the ordinary way, and the fold-in prints no NEED for the controller to dispatch", () => {

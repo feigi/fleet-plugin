@@ -125,8 +125,9 @@ never asks.
   role, the rule and the fix. **Exit 2** — it could not derive at all: no
   repository, or `gh` could not answer, among the causes its message names.
   Either fails the step, as does any other exit and an exit 3 that printed no
-  payload: show the maintainer what the step printed and stop. Neither is a
-  question. Once the cause is fixed, run phase 0 again.
+  question to ask (no `certain` record, an empty `uncertain` list, or an
+  entry naming no `role`): show the maintainer what the step printed and
+  stop. Neither is a question. Once the cause is fixed, run phase 0 again.
 
 **Ask once, as one question, and wait.** The payload holds `certain`, the
 roles already settled (role → string), and `uncertain`, one entry per role to
@@ -159,7 +160,11 @@ maintainer and ask again. In the same reply, tell the maintainer how to make
 the answer permanent: add or edit the role's row in the repository's
 triage-label table, the role in the first cell and the string in the
 second. The plugin never writes that table, so neither do you. Then run
-phase 0 again; `ensure` now exits 0.
+phase 0 again; `ensure` now exits 0. Exit 2 of `set` is no question: a pair
+it could not read (an unknown role, a malformed pair, a role answered twice),
+no repository, `gh` could not create or list a label — what it printed names
+any label it created before it — or the cache not readable or writable. Show
+the maintainer what it printed and stop, as for a failed `labels` step.
 
 ## Run the pre-flight
 

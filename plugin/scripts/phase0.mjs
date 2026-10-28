@@ -43,8 +43,9 @@
 //                 pre-flight included, until the map is written. Exit 1 (the
 //                 triage-label table breaks the string rules), exit 2 (no
 //                 repository, or `gh` could not answer), any other exit, and
-//                 an exit 3 that printed no payload fail the step with
-//                 ensure's own words.
+//                 an exit 3 that printed no question payload — a `certain`
+//                 record and at least one `uncertain` entry, each a record
+//                 naming its `role` — fail the step with ensure's own words.
 //   preflight     `preflight.mjs`. A non-zero exit fails the step; the FAIL, WARN
 //                 and PREFLIGHT lines of an exit 1 are printed.
 //   ruleset       `.github/scripts/apply-ruleset.sh --check`, when the workspace
@@ -261,9 +262,9 @@ function labels({ cwd }) {
   } catch {
     payload = null;
   }
-  if (!isRecord(payload) || !Array.isArray(payload.uncertain)) {
-    return failed(withText(`label-map.mjs ensure ${r.how} printed no question payload`, r));
-  }
+  const question = isRecord(payload) && isRecord(payload.certain) && Array.isArray(payload.uncertain) &&
+    payload.uncertain.length > 0 && payload.uncertain.every((entry) => isRecord(entry) && typeof entry.role === "string");
+  if (!question) return failed(withText(`label-map.mjs ensure ${r.how} printed no question payload`, r));
   return { status: "pending", output: [JSON.stringify(payload), "NEED answer-label-map"].join("\n") };
 }
 
