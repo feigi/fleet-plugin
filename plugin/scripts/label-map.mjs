@@ -74,9 +74,13 @@
 //   label-map.mjs show [<role>]   the mapped string for <role>, or the whole
 //                                 `roles` object as JSON with no role.
 //                                 `show` exits 0 printed; 1 no cache or an
-//                                 invalid one, the message naming `ensure`;
-//                                 2 an unknown role or no repository. Any
-//                                 other verb is a usage refusal, exit 2.
+//                                 invalid one, the message naming `ensure`,
+//                                 or a cache that exists and cannot be read,
+//                                 the message naming the errno as a
+//                                 filesystem fault and its repair before
+//                                 `ensure`; 2 an unknown role or no
+//                                 repository. Any other verb is a usage
+//                                 refusal, exit 2.
 //
 // Zero deps: node builtins and sibling scripts only.
 
@@ -175,8 +179,10 @@ export function writeLabelMap(map, { cwd = process.cwd() } = {}) {
 }
 
 // The parsed cache of the repository `cwd` belongs to, with its path. Throws
-// LabelMapUnreadable, its message naming `ensure`, when the file is absent,
-// cannot be read or does not parse; FleetDirUnresolvable outside a repository.
+// LabelMapUnreadable, its message naming `ensure`, when the file is absent or
+// does not parse; when it exists and cannot be read, the message names the
+// errno as a filesystem fault and its repair before `ensure`.
+// FleetDirUnresolvable outside a repository.
 function loadCache(cwd) {
   const file = fleetFile(LABEL_MAP_FILE, { cwd });
   let text;
@@ -184,7 +190,11 @@ function loadCache(cwd) {
     text = readFileSync(file, "utf8");
   } catch (e) {
     if (e.code === "ENOENT") throw new LabelMapUnreadable(`no Label map at ${file}: ${DERIVE}`);
-    throw new LabelMapUnreadable(`cannot read the Label map at ${file} (${e.code ?? e.message}): ${DERIVE}`, { cause: e });
+    throw new LabelMapUnreadable(
+      `cannot read the Label map at ${file} (${e.code ?? e.message}): a filesystem fault, not a map fault — `
+        + `make that path a readable file (check its and .fleet/'s permissions) or remove what is there, then ${DERIVE}`,
+      { cause: e },
+    );
   }
   try {
     return { file, cache: JSON.parse(text) };
@@ -203,7 +213,10 @@ const inRoleOrder = (roles) => Object.fromEntries(LABEL_ROLES.map((role) => [rol
  * The `roles` object (every Label role -> its string) of the cache of the
  * repository `cwd` belongs to. Throws LabelMapUnreadable, its message naming
  * `ensure`, when the cache is absent, does not parse, lacks a role or breaks
- * the string rules; throws FleetDirUnresolvable outside a repository.
+ * the string rules; when the cache exists and cannot be read (EACCES, EISDIR),
+ * its message names the errno as a filesystem fault, not a map fault, and the
+ * repair, then `ensure` as the following step. Throws FleetDirUnresolvable
+ * outside a repository.
  */
 export function readLabelMap({ cwd = process.cwd() } = {}) {
   const { file, cache } = loadCache(cwd);
