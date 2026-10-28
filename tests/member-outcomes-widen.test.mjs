@@ -141,6 +141,48 @@ for (const [why, body, named] of [
   });
 }
 
+// #3923: a tab inside a cell on EVERY row (or the only one) passes the
+// one-width check, and the file looks one column wider than it is. The widen
+// checks each row against the grammar of the columns at that width, and the
+// cells a tab shifts break it: `agent` lands in `harness`, `cost` in `ending`.
+const tabbed = (r) => ({ ...r, model: "claude\topus-5" });
+for (const [why, text, column] of [
+  ["case A: a 20-column file whose every row has a tab inside `model`", tsvAt(20, ROWS.slice(0, 2).map(tabbed)), "harness"],
+  ["case B: one 20-column reviewer row with a blank `cost` and a tab inside `model`", tsvAt(20, [tabbed({ ...ROWS[1], cost: "" })]), "harness"],
+  ["case C: a 21-column file whose every row has a tab inside `model`", tsvAt(21, ROWS.slice(0, 2).map(tabbed)), "harness"],
+  ["a 20-column row whose last cell, `cost`, has a tab inside it", tsvAt(20, [{ ...ROWS[0], cost: "0.5\tx" }]), "ending"],
+]) {
+  test(`${why} fails the widen, naming ${column}, and leaves the file as it was`, () => {
+    const w = workspace(text);
+    const r = refresh(w.repo);
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /metrics-refresh: member-outcomes failed: docs\/metrics\/member-outcomes\.tsv: /);
+    assert.match(r.stderr, new RegExp(`\`${column}\``));
+    assert.match(r.stderr, /tab inside a cell/);
+    assert.doesNotMatch(r.stdout, /widened/);
+    assert.equal(w.text(), text);
+    assert.equal(existsSync(`${w.file}.tmp`), false);
+  });
+}
+
+// What the check must ACCEPT: every column it reads, at each width, filled
+// the ways a real file fills it, in a CRLF file, whose last cell ends in `\r`.
+for (const width of [20, 21, 22]) {
+  test(`a ${width}-column CRLF file whose rows fit the grammar still widens, its last cell's CR not refused`, () => {
+    const rows = [
+      ...ROWS,
+      full({ member: "fix-pr-6", role: "fix-applier", agent: "fix-pr-6", harness: "claude", report: "ok", tokens_cache_create: "12", tokens_out: "3400", wall_s: "61.5", turns: "9", tokens_in: "100", tokens_cache_read: "2000", tokens_cache_write_1h: "0", cost: "0.012345", work_s: "45" }),
+      full({ member: "merge-bot-7", role: "merge-bot", agent: "merge-bot-7", report: "absent", cost: "" }),
+      full({ member: "Explore", role: "other", agent: "explore-1", report: "-" }),
+      full({ member: "impl-12", ticket: "12", agent: "impl-12", report: "invalid", ending: "bail:fixed-refuted" }),
+    ];
+    const w = workspace(tsvAt(width, rows).replace(/\n/g, "\r\n"));
+    const r = refresh(w.repo);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, new RegExp(`widened ${rows.length} rows from ${width} to ${COLUMNS.length} columns`));
+  });
+}
+
 test("the widen runs before the cost guard, so a corpus it cannot read stops the run there", () => {
   const w = workspace("short\trow\n");
   writeFileSync(join(w.repo, "docs", "metrics", "tier-outcomes.tsv"), "");

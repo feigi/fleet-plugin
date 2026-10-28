@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, utimesSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, utimesSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join, dirname } from "node:path";
-import { rowsForSession, endingOf, mergeRows, COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
+import { rowsForSession, endingOf, mergeRows, COLUMNS, ENDINGS } from "../plugin/scripts/member-outcomes.mjs";
+import { SCHEMAS } from "../plugin/scripts/report-schema.mjs";
 
 // ---------------------------------------------------------------------------
 // Fixtures shaped like real omp transcripts: the lines the ending reads.
@@ -64,6 +65,21 @@ const endingOfMember = (dir, member, verifyMain = () => 0) => {
 
 test("`ending` follows the four priced columns, and `dispatch_model` follows it", () => {
   assert.deepEqual(COLUMNS.slice(COLUMNS.indexOf("cost"), COLUMNS.indexOf("cost") + 3), ["cost", "ending", "dispatch_model"]);
+});
+
+// metrics-refresh.mjs's widen refuses an implementer row whose `ending` is not
+// in ENDINGS (#3923), so the set must be exactly what endingOf() can return:
+// each literal its body and bailEnding()'s return, and `bail:<cause>` for
+// every cause the impl schema admits. A return added or dropped there without
+// ENDINGS following fails here.
+test("ENDINGS is every value endingOf() returns on an implementer's row, and nothing else", () => {
+  const src = readFileSync(new URL("../plugin/scripts/member-outcomes.mjs", import.meta.url), "utf8");
+  const body = src.slice(src.indexOf("export function endingOf("), src.indexOf("function endingsOf("));
+  assert.ok(body.includes("return `bail:${report.bailCause}`"), "bailEnding() returns `bail:<cause>` for an impl report's bailCause");
+  const literals = [...body.matchAll(/return "([^"]*)"/g)].map((m) => m[1]).filter((v) => v !== "");
+  assert.ok(literals.includes("hollow"), "the scan reads endingOf()'s own returns");
+  const causes = SCHEMAS.impl.properties.bailCause.enum.filter((c) => c !== null).map((c) => `bail:${c}`);
+  assert.deepEqual([...ENDINGS].sort(), [...new Set([...literals, ...causes])].sort());
 });
 
 test("only implementer rows carry an ending: review, fix, finisher and merge-bot rows are blank", () => {
